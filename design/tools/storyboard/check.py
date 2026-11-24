@@ -11,6 +11,7 @@ Reports design gaps in the storyboard inventory:
   4. list surfaces without an empty-state scenario
   5. transient surfaces with an exit that has a key but no click, or a click but no key,
      unless the exit sets keyboard_only with a reason
+  6. board references that do not resolve to a file in design/boards/
 
 Mouse paths are designed in a sweep after the keyboard design (see storyboard.md).
 While scenarios.toml sets phase = "keyboard", missing click paths (2, by clicks,
@@ -29,7 +30,9 @@ import tomllib
 from collections import deque
 from pathlib import Path
 
-DEFAULT = Path(__file__).resolve().parents[3] / "docs" / "design" / "scenarios.toml"
+ROOT = Path(__file__).resolve().parents[3]
+DEFAULT = ROOT / "docs" / "design" / "scenarios.toml"
+BOARDS = ROOT / "design" / "boards"
 BACK_KEYS = {"esc", "q"}
 
 
@@ -57,10 +60,15 @@ def reach(starts, edges):
     return seen
 
 
-def check(scenarios):
+def board_files(scenario):
+    for value in scenario.get("boards", {}).values():
+        yield from ([value] if isinstance(value, str) else value)
+
+
+def check(scenarios, boards_dir=BOARDS):
     by_id = {s["id"]: s for s in scenarios}
     live = [s for s in scenarios if s.get("status") != "removed"]
-    problems = {k: [] for k in ("unknown_target", "unreachable_by_key", "unreachable_by_click", "dead_end", "no_empty_state", "parity", "no_click")}
+    problems = {k: [] for k in ("unknown_target", "unreachable_by_key", "unreachable_by_click", "dead_end", "no_empty_state", "parity", "no_click", "missing_board")}
 
     for s in live:
         for e in s.get("exits", []):
@@ -131,6 +139,10 @@ def check(scenarios):
                 problems["no_click"].append(f"{s['id']}: '{key}' has no click")
             elif click and not key:
                 problems["parity"].append(f"{s['id']}: '{click}' has no key")
+    for s in live:
+        for name in board_files(s):
+            if not (boards_dir / name).is_file():
+                problems["missing_board"].append(f"{s['id']}: {name}")
     return problems
 
 
@@ -155,6 +167,7 @@ def main(argv):
         "no_empty_state": "Lists without an empty state",
         "parity": "Transient exits with a click but no key",
         "no_click": "Transient exits with a key but no click",
+        "missing_board": "Board references with no file in design/boards",
     }
     mouse = {"unreachable_by_click", "no_click"}
     total, pending = 0, 0

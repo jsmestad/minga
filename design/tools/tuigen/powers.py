@@ -1,3 +1,8 @@
+import os as _os
+TOOLS = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+BOARDS = _os.environ.get("BOARDS_DIR", _os.path.join(TOOLS, "..", "boards"))  # committed boards, read only
+OUT_DIR = _os.environ.get("OUT_DIR", _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "out"))
+_os.makedirs(OUT_DIR, exist_ok=True)
 import sys; sys.path.insert(0,'.')
 from grid import *
 W=78
@@ -109,4 +114,4 @@ annot="""<h4>Terminal powers</h4>
 <div class="it"><span class="k">3</span> <code>tea.FocusMsg</code> and <code>tea.BlurMsg</code>: dim borders and a hollow cursor when the terminal loses focus.</div>
 <div class="it"><span class="k">4</span> every colour role is a <code>lipgloss.LightDark</code> pair; <code>tea.BackgroundColorMsg</code> picks the side.</div>
 <div class="it"><span class="k">5</span> a normal buffer built with <code>lipgloss/table</code>. A missing feature is a fallback, never an error.</div>"""
-open(os.path.join(OUT_DIR,"V41TuiTerminalPowers.dc.html"),"w").write(page("TUI: terminal powers",body,annot))
+open(OUT_DIR+"/V41TuiTerminalPowers.dc.html","w").write(page("TUI: terminal powers",body,annot))

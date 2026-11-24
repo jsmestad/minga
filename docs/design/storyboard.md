@@ -10,7 +10,7 @@ Two frontends drift apart one reasonable local decision at a time. Prose specs a
 - **existing-only**: the screen exists in the app but has not been redesigned;
 - **missing**: no design and no implementation.
 
-Designed scenarios get a design-time flow map: every exit by key and by click. Missing scenarios get design boards, in batches, for both frontends. The canvas shows the inventory as a grid, so gaps are visible as empty cells.
+Designed scenarios get a design-time flow map: every exit by key and by click. Missing scenarios get design boards, in batches, for both frontends. The boards are committed in [`design/boards/`](../../design/boards/README.md), and the inventory board shows every scenario as a grid, so gaps are visible as empty cells.
 
 **2. The storyboard factory (after design tokens).** The same scenario ids become fixtures that build editor state through the BEAM. Each scenario produces the semantic render model once; the macOS harness renders it offscreen, and the Go TUI renders it to ANSI and then to an image. A generated page lays out every scenario in columns (macOS, macOS narrow, TUI, TUI at 16 colours), and CI publishes it on every UI pull request with a visual diff against `main`.
 
@@ -72,7 +72,9 @@ python3 design/tools/storyboard/check.py --final   # everything, including mouse
 
 Scenarios that happen to you rather than places you go (errors, notifications, Minga asking a question) set `reached_by` and count as reachable. A list reaches its empty state the same way it is reached.
 
-`inventory.py` draws every scenario as a tile, grouped by journey and coloured by status. `flowmap.py` draws the designed scenarios as a graph: each edge carries its keys, each node lists the keys that return to editing (⤺), and dead ends, scenarios without a mouse path and scenarios without a key path are marked. Both write `.dc.html` boards for the design canvas.
+`inventory.py` draws every scenario as a tile, grouped by journey and coloured by status. `flowmap.py` draws the designed scenarios as a graph: each edge carries its keys, each node lists the keys that return to editing (⤺), and dead ends, scenarios without a mouse path and scenarios without a key path are marked. Both write `.dc.html` boards; `sh design/tools/rebuild_boards.sh` publishes them to `design/boards/` with the rest.
+
+`check.py` also fails when a scenario's `boards` names a file that is not in `design/boards/`, so every designed scenario has an acceptance target an agent can open.
 
 The checker is the design-time version of the flow-graph invariants above. When the storyboard factory exists, the same rules run against the real editor.
 

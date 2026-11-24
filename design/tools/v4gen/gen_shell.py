@@ -1,9 +1,13 @@
+import os as _os
+TOOLS = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+BOARDS = _os.environ.get("BOARDS_DIR", _os.path.join(TOOLS, "..", "boards"))  # committed boards, read only
+OUT_DIR = _os.environ.get("OUT_DIR", _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "out"))
+_os.makedirs(OUT_DIR, exist_ok=True)
 #!/usr/bin/env python3
 """Generate the V4.1 built-in terminal boards."""
 import os
 
-OUT = os.environ.get("OUT_DIR", "./out")
-os.makedirs(OUT, exist_ok=True)
+OUT = OUT_DIR
 
 BG = "#1e1f24"
 DRAWER_BG = "#1a1b20"
@@ -20,7 +24,7 @@ def orbit(state, size=13):
     }[state]
     return f'<svg width="{size}" height="{size}" viewBox="0 0 16 16" aria-label="{state}" style="flex:none;display:block">{body}</svg>'
 
-H = 22  # terminal line height
+H = 18  # terminal line height
 
 def strand(kind, part, bg=DRAWER_BG):
     """kind: you | minga ; part: head | body | last | single"""
@@ -32,9 +36,9 @@ def strand(kind, part, bg=DRAWER_BG):
     if part in ("head", "single"):
         end = H - 5 if part == "single" else H
         return (f'<svg width="10" height="{H}" viewBox="0 0 10 {H}" aria-label="Minga ran this" style="display:block;overflow:visible">'
-                f'<path d="M7 4 C7 9, 3 9, 3 14 L3 {end}" fill="none" stroke="{PS}" stroke-width="2.6" stroke-linecap="round"/>'
-                f'<path d="M3 4 C3 9, 7 9, 7 14 L7 {end}" fill="none" stroke="{bg}" stroke-width="5" stroke-linecap="round"/>'
-                f'<path d="M3 4 C3 9, 7 9, 7 14 L7 {end}" fill="none" stroke="{P}" stroke-width="2.6" stroke-linecap="round"/></svg>')
+                f'<path d="M7 3 C7 7.5, 3 7.5, 3 12 L3 {end}" fill="none" stroke="{PS}" stroke-width="2.6" stroke-linecap="round"/>'
+                f'<path d="M3 3 C3 7.5, 7 7.5, 7 12 L7 {end}" fill="none" stroke="{bg}" stroke-width="5" stroke-linecap="round"/>'
+                f'<path d="M3 3 C3 7.5, 7 7.5, 7 12 L7 {end}" fill="none" stroke="{P}" stroke-width="2.6" stroke-linecap="round"/></svg>')
     end = H - 5 if part == "last" else H
     cap = ' stroke-linecap="round"' if part == "last" else ""
     return (f'<svg width="10" height="{H}" viewBox="0 0 10 {H}" aria-hidden="true" style="display:block">'
@@ -82,7 +86,7 @@ def titlebar(title, sub):
 
 def code_line(n, text, cur=False):
     bg = "background:rgba(255,255,255,0.035);" if cur else ""
-    return f'<div style="display:flex;align-items:center;height:24px;{bg}"><span style="width:56px;text-align:right;padding-right:22px;color:{"#c9c7c2" if cur else "#7a7c85"};flex:none">{n}</span><span style="white-space:pre">{text}</span></div>'
+    return f'<div style="display:flex;align-items:center;height:18px;{bg}"><span style="width:56px;text-align:right;padding-right:22px;color:{"#c9c7c2" if cur else "#7a7c85"};flex:none">{n}</span><span style="white-space:pre">{text}</span></div>'
 
 K = lambda s: f'<span style="color:#ff7ab2">{s}</span>'
 T = lambda s: f'<span style="color:#dabaff">{s}</span>'
@@ -171,7 +175,7 @@ def drawer_board():
     body = f'''<div style="{WIN}">
 {titlebar("usage_limit_test.exs", "test/minga_agent")}
 <div style="flex:1;display:flex;flex-direction:column;min-height:0">
-  <div style="flex:1;padding-top:14px;font-family:{MONO};font-size:13.5px;color:#c9c7c2;min-height:0;overflow:hidden">{"".join(code)}</div>
+  <div style="flex:1;padding-top:14px;font-family:{MONO};font-size:13px;color:#c9c7c2;min-height:0;overflow:hidden">{"".join(code)}</div>
   {editor_ml}
   <div style="height:5px;flex:none;background:{BG};border-top:1px solid rgba(255,255,255,0.10)"></div>
   <div style="height:410px;flex:none;background:{DRAWER_BG};display:flex;flex-direction:column">
@@ -229,7 +233,7 @@ def minga_board():
   <div style="display:flex;padding:5px 10px;border-radius:5px"><span>Copy Output</span><span class="mono" style="margin-left:auto;color:#8f8d88">yic</span></div>
   <div style="display:flex;padding:5px 10px;border-radius:5px"><span>Rerun</span><span class="mono" style="margin-left:auto;color:#8f8d88">r</span></div>
   <div style="height:1px;background:rgba(255,255,255,0.08);margin:4px 6px"></div>
-  <div style="display:flex;padding:5px 10px;border-radius:5px"><span>Send to Quickfix</span><span class="mono" style="margin-left:auto;color:#8f8d88">q</span></div>
+  <div style="display:flex;padding:5px 10px;border-radius:5px"><span>Send to Quickfix</span><span class="mono" style="margin-left:auto;color:#8f8d88">Q</span></div>
 </div>'''
 
     right_ml = modeline([pill("NORMAL", "NORMAL"),
@@ -247,7 +251,7 @@ def minga_board():
 {titlebar("retry.ex", "lib/minga_agent")}
 <div style="flex:1;display:flex;min-height:0">
   <div style="width:640px;flex:none;display:flex;flex-direction:column;border-right:1px solid rgba(255,255,255,0.08)">
-    <div style="flex:1;padding-top:14px;font-family:{MONO};font-size:13.5px;color:#c9c7c2;overflow:hidden">{"".join(code)}</div>
+    <div style="flex:1;padding-top:14px;font-family:{MONO};font-size:13px;color:#c9c7c2;overflow:hidden">{"".join(code)}</div>
     {left_ml}
   </div>
   <div style="flex:1;display:flex;flex-direction:column;position:relative;min-width:0">
@@ -381,7 +385,7 @@ def tui_board():
             " " * 8 + c(border, "│ ") + bgspan("#2e3f55", c("#ecebe8", "Ask Minga to fix       f ")) + c(border, "│") + "\n" +
             " " * 8 + c(border, "│ ") + c("#c9c7c2", "Copy output          yic ") + c(border, "│") + "\n" +
             " " * 8 + c(border, "│ ") + c("#c9c7c2", "Rerun                  r ") + c(border, "│") + "\n" +
-            " " * 8 + c(border, "│ ") + c("#c9c7c2", "Send to quickfix       q ") + c(border, "│") + "\n" +
+            " " * 8 + c(border, "│ ") + c("#c9c7c2", "Send to quickfix       Q ") + c(border, "│") + "\n" +
             " " * 8 + c(border, "╰──────────────────────────╯"))
     f2html = "\n".join(f2) + "\n" + bgspan("#25262c", ml2 + " ") + "\n" + mini
 

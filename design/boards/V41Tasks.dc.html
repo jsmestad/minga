@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>V4.1: Minga tasks drawer</title>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#ecebe8;text-decoration:none}a:hover{color:#ffffff}
+.ln{display:flex;align-items:center;height:18px}
+.num{width:56px;text-align:right;padding-right:8px;flex:none}
+.sign{width:8px;flex:none;display:flex;align-items:center}
+.bar{width:10px;height:18px;flex:none;margin:0 4px 0 2px;position:relative}
+.code{padding-left:10px;white-space:pre}
+.wk{display:flex;align-items:baseline;gap:10px;height:25px;font-size:13px}
+.wk .k{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:13px;width:22px;text-align:right;flex:none}
+.wk .l{color:#dcdce2}
+.wk .g{color:#b98cf0}
+.wk .n{color:#8f8d88;font-size:12px}
+.act{display:inline-flex;align-items:baseline;gap:6px;margin-right:22px}
+.act .k{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-weight:700}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;box-sizing:border-box;background:#1e1f24;color:#ecebe8;font-family:-apple-system,'SF Pro Text',system-ui,sans-serif;display:flex;flex-direction:column;font-size:13px;border-radius:12px;overflow:hidden;position:relative">
+<div style="height:30px;flex:none;display:flex;align-items:center;gap:12px;padding:0 14px;background:#222329;border-bottom:1px solid rgba(255,255,255,0.06);position:relative">
+  <div style="display:flex;gap:8px"><span style="width:12px;height:12px;border-radius:6px;background:#ff5f57"></span><span style="width:12px;height:12px;border-radius:6px;background:#febc2e"></span><span style="width:12px;height:12px;border-radius:6px;background:#28c840"></span></div>
+  <span style="font-family:'Instrument Serif',serif;font-style:italic;font-size:15px;color:#8f8d88">minga</span>
+  <div style="position:absolute;left:0;right:0;text-align:center;pointer-events:none;font-size:12.5px"><span style="font-weight:600">chrome_state.ex</span>  <span style="color:#8f8d88">lib/minga_editor/session</span></div>
+</div>
+<div style="flex:1;padding-top:16px;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:13px;color:#c9c7c2;position:relative;overflow:hidden;opacity:0.7">
+<div class="ln" style=""><span class="num" style="color:#7a7c85">229</span><span class="sign"></span><span class="bar"></span><span class="code"><span style="color:#ff7ab2">defp</span> chrome_state(ws) <span style="color:#ff7ab2">do</span></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">230</span><span class="sign"></span><span class="bar"></span><span class="code">  %{status: workspace_agent_status(ws), limit: usage_limit(ws)}</span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">231</span><span class="sign"></span><span class="bar"></span><span class="code"><span style="color:#ff7ab2">end</span></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">232</span><span class="sign"></span><span class="bar"></span><span class="code"></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">233</span><span class="sign"></span><span class="bar"></span><span class="code"><span style="color:#7f8c98"># Status comes from one owner: the session's presence.</span></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">234</span><span class="sign"></span><span class="bar"><svg width="10" height="18" viewBox="0 0 10 18" aria-label="Minga changed these lines" style="display:block;overflow:visible"><path d="M7 3 C7 7.5, 3 7.5, 3 12 L3 18" fill="none" stroke="#6b3fa3" stroke-width="2.6" stroke-linecap="round"/><path d="M3 3 C3 7.5, 7 7.5, 7 12 L7 18" fill="none" stroke="#1e1f24" stroke-width="5" stroke-linecap="round"/><path d="M3 3 C3 7.5, 7 7.5, 7 12 L7 18" fill="none" stroke="#a463e6" stroke-width="2.6" stroke-linecap="round"/></svg></span><span class="code"><span style="color:#ff7ab2">@spec</span> workspace_agent_status(<span style="color:#dabaff">Workspace</span>.t()) :: <span style="color:#dabaff">AgentPresence</span>.state()</span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">235</span><span class="sign"></span><span class="bar"><svg width="10" height="18" viewBox="0 0 10 18" aria-hidden="true" style="display:block"><path d="M3 0 L3 18" stroke="#6b3fa3" stroke-width="2.6"/><path d="M7 0 L7 18" stroke="#a463e6" stroke-width="2.6"/></svg></span><span class="code"><span style="color:#ff7ab2">defp</span> workspace_agent_status(ws) <span style="color:#ff7ab2">do</span></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">236</span><span class="sign"></span><span class="bar"><svg width="10" height="18" viewBox="0 0 10 18" aria-hidden="true" style="display:block"><path d="M3 0 L3 18" stroke="#6b3fa3" stroke-width="2.6"/><path d="M7 0 L7 18" stroke="#a463e6" stroke-width="2.6"/></svg></span><span class="code">  ws |&gt; payload() |&gt; <span style="color:#dabaff">AgentPresence</span>.of()<span style="display:inline-block;width:2px;height:16px;background:#a463e6;vertical-align:-3px;margin-left:1px"></span><span style="margin-left:6px;padding:0 6px;border-radius:4px;background:#a463e6;color:#fff;font-family:-apple-system,sans-serif;font-size:10.5px;line-height:16px;vertical-align:1px">Minga</span></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">237</span><span class="sign"></span><span class="bar"><svg width="10" height="18" viewBox="0 0 10 18" aria-hidden="true" style="display:block"><path d="M3 0 L3 13" stroke="#6b3fa3" stroke-width="2.6" stroke-linecap="round"/><path d="M7 0 L7 13" stroke="#a463e6" stroke-width="2.6" stroke-linecap="round"/></svg></span><span class="code"><span style="color:#ff7ab2">end</span></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">238</span><span class="sign"></span><span class="bar"></span><span class="code"></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">239</span><span class="sign"></span><span class="bar"><svg width="10" height="18" viewBox="0 0 10 18" aria-label="Your uncommitted change" style="display:block"><path d="M5 0 L5 18" stroke="#4f9fe0" stroke-width="1.5"/></svg></span><span class="code"><span style="color:#ff7ab2">defp</span> usage_limit(ws) <span style="color:#ff7ab2">do</span></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">240</span><span class="sign"><span style="display:block;width:3px;height:12px;border-radius:1.5px;background:#e5707a;margin:0 auto"></span></span><span class="bar"><svg width="10" height="18" viewBox="0 0 10 18" aria-label="Your uncommitted change" style="display:block"><path d="M5 0 L5 18" stroke="#4f9fe0" stroke-width="1.5"/></svg></span><span class="code">  ws |&gt; payload() |&gt; <span style="text-decoration: underline wavy #e5707a; text-decoration-skip-ink:none; text-underline-offset:3px">limit_label</span>()</span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">241</span><span class="sign"></span><span class="bar"><svg width="10" height="18" viewBox="0 0 10 18" aria-label="Your uncommitted change" style="display:block"><path d="M5 0 L5 18" stroke="#4f9fe0" stroke-width="1.5"/></svg></span><span class="code"><span style="color:#ff7ab2">end</span></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">242</span><span class="sign"></span><span class="bar"></span><span class="code"></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">243</span><span class="sign"></span><span class="bar"></span><span class="code"><span style="color:#ff7ab2">def</span> agent_label(%{state: :working, action: a}), <span style="color:#ff7ab2">do</span>: a</span></div>
+</div>
+
+<div style="height:356px;flex:none;background:#222329;border-top:1px solid rgba(255,255,255,0.14);display:flex;flex-direction:column;font-size:13px">
+  <div style="display:flex;align-items:center;gap:12px;height:36px;padding:0 24px;border-bottom:1px solid rgba(255,255,255,0.06)">
+    <span style="font-weight:700">Minga Tasks</span>
+    <span style="display:inline-flex;align-items:center;gap:5px;color:#f2b544"><svg width="12" height="12" viewBox="0 0 16 16" aria-label="Needs you" style="flex:none"><circle cx="8" cy="8" r="6" fill="#f2b544" fill-opacity="0.25"/><circle cx="8" cy="8" r="3.4" fill="#f2b544"/></svg>1</span>
+    <span style="display:inline-flex;align-items:center;gap:5px;color:#b98cf0"><svg width="12" height="12" viewBox="0 0 16 16" aria-label="Working" style="flex:none"><circle cx="8" cy="8" r="5.5" fill="none" stroke="#a463e6" stroke-opacity="0.28" stroke-width="1.5"/><path d="M8 2.5 A5.5 5.5 0 0 1 13.5 8" fill="none" stroke="#a463e6" stroke-width="1.5" stroke-linecap="round"/><circle cx="13.5" cy="8" r="2.1" fill="#a463e6"/></svg>1</span>
+    <span style="display:inline-flex;align-items:center;gap:5px;color:#a5a39e"><svg width="12" height="12" viewBox="0 0 16 16" aria-label="Waiting" style="flex:none"><circle cx="8" cy="8" r="3" fill="none" stroke="#a5a39e" stroke-width="1.6"/></svg>1</span>
+    <span style="display:inline-flex;align-items:center;gap:5px;color:#e5707a"><svg width="12" height="12" viewBox="0 0 16 16" aria-label="Failed" style="flex:none"><rect x="4.6" y="4.6" width="6.8" height="6.8" rx="1.2" fill="#e5707a" transform="rotate(45 8 8)"/></svg>1</span>
+    <span style="display:inline-flex;align-items:center;gap:5px;color:#7fbf7a"><svg width="12" height="12" viewBox="0 0 16 16" aria-label="Done" style="flex:none"><circle cx="8" cy="8" r="3.4" fill="#7fbf7a"/></svg>1</span>
+    <span style="flex:1"></span>
+    <span style="display:flex;gap:14px;color:#8f8d88;font-size:11.5px"><span><span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#c9c7c2">j k</span> move</span><span><span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#c9c7c2">/</span> filter</span><span><span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#c9c7c2">↩</span> open</span><span><span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#c9c7c2">x</span> stop task</span><span><span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#c9c7c2">q</span> close</span></span>
+  </div>
+  <div style="padding:6px 0;flex:1">
+    <div style="background:rgba(26,149,242,0.12);box-shadow:inset 2px 0 0 #1a95f2;padding:2px 0 12px">
+      <div style="display:flex;align-items:center;gap:12px;height:30px;padding:0 24px">
+        <svg width="14" height="14" viewBox="0 0 16 16" aria-label="Needs you" style="flex:none"><circle cx="8" cy="8" r="6" fill="#f2b544" fill-opacity="0.25"/><circle cx="8" cy="8" r="3.4" fill="#f2b544"/></svg><span style="color:#ecebe8;font-weight:600;min-width:400px">Add tests for the usage-limit classifier</span>
+        <span style="color:#f2b544;min-width:300px">Needs you · wants to create a file</span><span style="flex:1"></span><span style="color:#8f8d88;width:44px;text-align:right">2m</span>
+      </div>
+      <div style="margin-left:50px;color:#c9c7c2;line-height:20px">Create <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12.5px;color:#ecebe8">test/minga_agent/usage_limit_test.exs</span> <span style="color:#7fbf7a">+86</span></div>
+      <div style="margin-left:50px;color:#8f8d88;line-height:20px;font-style:italic">"Table tests for the classifier, including the recorded Pro response."</div>
+      <div style="margin:10px 0 0 50px"><span class="act"><span class="k" style="color:#6cb8f5">y</span><span style="color:#ecebe8">Approve once</span></span><span class="act"><span class="k" style="color:#ecebe8">a</span><span style="color:#c9c7c2">Always for this session</span></span><span class="act"><span class="k" style="color:#ecebe8">t</span><span style="color:#c9c7c2">This turn</span></span><span class="act"><span class="k" style="color:#e5707a">n</span><span style="color:#c9c7c2">Deny</span></span><span class="act"><span class="k" style="color:#ecebe8">=</span><span style="color:#c9c7c2">Show diff</span></span><span class="act"><span class="k" style="color:#ecebe8">↩</span><span style="color:#c9c7c2">Open conversation</span></span></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;height:30px;padding:0 24px">
+  <svg width="14" height="14" viewBox="0 0 16 16" aria-label="Working" style="flex:none"><circle cx="8" cy="8" r="5.5" fill="none" stroke="#a463e6" stroke-opacity="0.28" stroke-width="1.5"/><path d="M8 2.5 A5.5 5.5 0 0 1 13.5 8" fill="none" stroke="#a463e6" stroke-width="1.5" stroke-linecap="round"/><circle cx="13.5" cy="8" r="2.1" fill="#a463e6"/></svg><span style="color:#ecebe8;font-weight:600;min-width:400px">Show the plan limit instead of “rate limited”</span>
+  <span style="color:#b98cf0;min-width:300px">Editing chrome_state.ex · step 2 of 3</span>
+  <span style="flex:1"></span><span class="act"><span class="k" style="color:#ecebe8">i</span><span style="color:#8f8d88">Inspect</span></span><span class="act"><span class="k" style="color:#ecebe8">↩</span><span style="color:#8f8d88">Open</span></span><span style="color:#8f8d88;width:44px;text-align:right">4m</span></div>
+    <div style="display:flex;align-items:center;gap:12px;height:30px;padding:0 24px">
+  <svg width="14" height="14" viewBox="0 0 16 16" aria-label="Waiting" style="flex:none"><circle cx="8" cy="8" r="3" fill="none" stroke="#a5a39e" stroke-width="1.6"/></svg><span style="color:#ecebe8;font-weight:600;min-width:400px">Refactor the picker sources</span>
+  <span style="color:#a5a39e;min-width:300px">Waiting · rate limited, retry in 40 s</span>
+  <span style="flex:1"></span><span class="act"><span class="k" style="color:#ecebe8">r</span><span style="color:#8f8d88">Retry now</span></span><span style="color:#8f8d88;width:44px;text-align:right">9m</span></div>
+    <div style="display:flex;align-items:center;gap:12px;height:30px;padding:0 24px">
+  <svg width="14" height="14" viewBox="0 0 16 16" aria-label="Failed" style="flex:none"><rect x="4.6" y="4.6" width="6.8" height="6.8" rx="1.2" fill="#e5707a" transform="rotate(45 8 8)"/></svg><span style="color:#ecebe8;font-weight:600;min-width:400px">Run the session test suite</span>
+  <span style="color:#e5707a;min-width:300px">Failed · test run crashed</span>
+  <span style="flex:1"></span><span class="act"><span class="k" style="color:#ecebe8">o</span><span style="color:#8f8d88">Output</span></span><span class="act"><span class="k" style="color:#ecebe8">r</span><span style="color:#8f8d88">Retry</span></span><span style="color:#8f8d88;width:44px;text-align:right">11m</span></div>
+    <div style="display:flex;align-items:center;gap:12px;height:30px;padding:0 24px">
+  <svg width="14" height="14" viewBox="0 0 16 16" aria-label="Done" style="flex:none"><circle cx="8" cy="8" r="3.4" fill="#7fbf7a"/></svg><span style="color:#ecebe8;font-weight:600;min-width:400px">Update the agent docs for the Spine</span>
+  <span style="color:#7fbf7a;min-width:300px">Done · 2 files to review</span>
+  <span style="flex:1"></span><span class="act"><span class="k" style="color:#ecebe8">↩</span><span style="color:#8f8d88">Review</span></span><span style="color:#8f8d88;width:44px;text-align:right">12m</span></div>
+  </div>
+</div>
+<div style="height:28px;flex:none;display:flex;align-items:center;background:#25262c;border-top:1px solid rgba(255,255,255,0.07);font-size:12px;color:#a5a39e;overflow:hidden"><span style="margin-left:8px;display:flex;align-items:center;padding:1px 9px;border-radius:9px;background:rgba(26,149,242,0.22);color:#6cb8f5;font-weight:700;font-size:10.5px;letter-spacing:0.04em">NORMAL</span><span style="display:flex;align-items:center;gap:6px;padding:0 10px;height:100%;"><a href="V41Tasks.dc.html" style="display:flex;align-items:center;gap:6px;color:#f2b544"><svg width="13" height="13" viewBox="0 0 16 16" aria-label="Needs you" style="flex:none"><circle cx="8" cy="8" r="6" fill="#f2b544" fill-opacity="0.25"/><circle cx="8" cy="8" r="3.4" fill="#f2b544"/></svg><span>Needs you</span></a></span><span style="display:flex;align-items:center;gap:6px;padding:0 10px;height:100%;"><span style="color:#ecebe8;font-weight:600">*minga-tasks*</span></span><span style="width:1px;height:14px;background:rgba(255,255,255,0.09)"></span><span style="display:flex;align-items:center;gap:6px;padding:0 10px;height:100%;"><svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true"><circle cx="4" cy="3.5" r="2" fill="none" stroke="#8f8d88" stroke-width="1.5"/><circle cx="4" cy="12.5" r="2" fill="none" stroke="#8f8d88" stroke-width="1.5"/><circle cx="12" cy="5.5" r="2" fill="none" stroke="#8f8d88" stroke-width="1.5"/><path d="M4 5.5 L4 10.5 M12 7.5 C12 10 4 9 4 10.5" fill="none" stroke="#8f8d88" stroke-width="1.5"/></svg><span>main</span><span style="color:#8f8d88">+11</span></span><span style="width:1px;height:14px;background:rgba(255,255,255,0.09)"></span><span style="display:flex;align-items:center;gap:6px;padding:0 10px;height:100%;"><svg width="13" height="13" viewBox="0 0 16 16" aria-label="Working" style="flex:none"><circle cx="8" cy="8" r="5.5" fill="none" stroke="#a463e6" stroke-opacity="0.28" stroke-width="1.5"/><path d="M8 2.5 A5.5 5.5 0 0 1 13.5 8" fill="none" stroke="#a463e6" stroke-width="1.5" stroke-linecap="round"/><circle cx="13.5" cy="8" r="2.1" fill="#a463e6"/></svg><span style="color:#b98cf0">Minga</span><span style="color:#c9c7c2">editing chrome_state.ex</span><span style="color:#8f8d88">2/3</span></span><span style="width:1px;height:14px;background:rgba(255,255,255,0.09)"></span><span style="display:flex;align-items:center;gap:6px;padding:0 10px;height:100%;"><span style="display:inline-block;width:3px;height:11px;border-radius:1.5px;background:#e5707a"></span><span style="color:#e5707a">1</span><span style="width:6px"></span><span style="display:inline-block;width:3px;height:11px;border-radius:1.5px;box-shadow:inset 0 0 0 1.2px #d8c08a;box-sizing:border-box"></span><span style="color:#c9c7c2">1</span></span><span style="flex:1"></span><span style="display:flex;align-items:center;gap:6px;padding:0 10px;height:100%;"><span>Elixir</span></span><span style="width:1px;height:14px;background:rgba(255,255,255,0.09)"></span><span style="display:flex;align-items:center;gap:6px;padding:0 10px;height:100%;padding-right:14px"><span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11.5px">235:3</span></span></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

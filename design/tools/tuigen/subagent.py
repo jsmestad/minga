@@ -1,3 +1,8 @@
+import os as _os
+TOOLS = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+BOARDS = _os.environ.get("BOARDS_DIR", _os.path.join(TOOLS, "..", "boards"))  # committed boards, read only
+OUT_DIR = _os.environ.get("OUT_DIR", _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "out"))
+_os.makedirs(OUT_DIR, exist_ok=True)
 import sys; sys.path.insert(0,'.')
 from grid import *
 W,H=150,38
@@ -27,7 +32,7 @@ RX=LW+1; RW=W-RX
 g.box(0,RX,36,RW,FOCUS,SURF,
       title=[("Review the marketing site",DIM),(" › ",FAINT),("● ",GREEN),("Editorial and Jargon Roaster",TXT,"b")],
       right=[("◐ ◐ ",PURPLED),("●",GREEN),(" ◐",PURPLED),("  3 of 4",SUB)],
-      bottom=[("]t",BLUE),(" next  ",DIM),("[t",BLUE),(" prev  ",DIM),("za",BLUE),(" fold  ",DIM),("↩",BLUE),(" open  ",DIM),("q",BLUE),(" close",DIM)])
+      bottom=[("]]",BLUE),(" next  ",DIM),("[[",BLUE),(" prev  ",DIM),("za",BLUE),(" fold  ",DIM),("↩",BLUE),(" open  ",DIM),("q",BLUE),(" close",DIM)])
 # selection mark under the selected sibling glyph in the strip
 strip_len=len("◐ ◐ ●  ◐  3 of 4")
 sx=RX+RW-2-(len("◐ ◐ ● ◐  3 of 4")+2)+1
@@ -75,10 +80,10 @@ body=term(main,"SPC a i: peeking at a subagent","parent conversation on the left
 body=body[:-6]+f'<div style="margin-top:12px;font-size:12px;color:#e6e4df;font-weight:600">The same task in the tasks drawer <span style="font-weight:400;color:#a5a39e">SPC a a, a lipgloss/tree under the task</span></div><div style="margin-top:6px;border-radius:6px;overflow:hidden;display:inline-block">{inset}</div></div>'
 annot="""<h4>What renders what</h4>
 <div class="it"><span class="k">Peek split</span> a <code>lipgloss.RoundedBorder()</code> panel in the focus colour. Breadcrumb in the top border (parent dim, subagent bold with its state glyph); the sibling glyph strip and "3 of 4" right-aligned in the same border, a <code>▔</code> under the one you are on.</div>
-<div class="it"><span class="k">Siblings</span> <code>]t</code> and <code>[t</code> step through them in place; the full list is one key away in the tasks drawer. No permanent third column.</div>
+<div class="it"><span class="k">Siblings</span> <code>]]</code> and <code>[[</code> step through them in place; the full list is one key away in the tasks drawer. No permanent third column.</div>
 <div class="it"><span class="k">Sections</span> dim headers with <code>▸</code> / <code>▾</code>; Brief is folded by default (<code>za</code>) and shows one faint line. Body is a <code>bubbles/viewport</code>.</div>
 <div class="it"><span class="k">Result</span> the hand-back to the parent on a faint green surface tint, so it reads as the outcome without a rail or a card.</div>
 <div class="it"><span class="k">Composer</span> <code>bubbles/textarea</code> that messages this subagent only; its border turns the focus colour while you type.</div>
 <div class="it"><span class="k">Help</span> in the bottom border only while the split has focus (principle 10). The parent conversation on the left shows no keys.</div>
 <div class="it"><span class="k">Tasks drawer</span> <code>lipgloss/tree</code>: the task, then its subagents with <code>├─</code> <code>└─</code> and their state glyphs.</div>"""
-open(os.path.join(OUT_DIR,"V41SubagentTui.dc.html"),"w").write(page("TUI: peeking at a subagent",body,annot))
+open(OUT_DIR+"/V41SubagentTui.dc.html","w").write(page("TUI: peeking at a subagent",body,annot))

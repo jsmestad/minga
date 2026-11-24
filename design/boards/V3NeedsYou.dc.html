@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>V3: Minga needs you</title>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}
+.btn{padding:3px 12px;border-radius:6px;background:rgba(255,255,255,0.10);font-size:12.5px;color:#ecebe8;white-space:nowrap}
+.btn.def{background:#1a95f2;color:#fff;font-weight:600}
+.k{opacity:0.6;font-weight:400;margin-left:4px}
+.row{padding:9px 10px;border-radius:8px;display:flex;gap:10px;align-items:flex-start}
+.t{font-weight:600;font-size:13.5px}
+.s{color:#a5a39e;font-size:12.5px;margin-top:2px}
+.peek{color:#8f8d88;font-size:12px}
+.cl{height:26px;display:flex;align-items:center}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;box-sizing:border-box;background:#1e1f24;color:#ecebe8;font-family:-apple-system,'SF Pro Text',system-ui,sans-serif;display:flex;flex-direction:column;font-size:13px;border-radius:12px;overflow:hidden;position:relative">
+
+  <div style="height:38px;display:flex;align-items:center;gap:12px;padding:0 14px;border-bottom:1px solid rgba(255,255,255,0.07);position:relative;background:#24252b">
+    <div style="display:flex;gap:8px"><span style="width:12px;height:12px;border-radius:6px;background:#ff5f57"></span><span style="width:12px;height:12px;border-radius:6px;background:#febc2e"></span><span style="width:12px;height:12px;border-radius:6px;background:#28c840"></span></div>
+    <span style="font-family:'Instrument Serif',serif;font-style:italic;font-size:16px;color:#8f8d88;margin-left:6px">minga</span>
+    <span style="font-weight:600;margin-left:10px">chrome_state.ex</span><span style="color:#8f8d88">lib/minga_editor/session</span>
+    <a href="V3Edit.dc.html" style="position:absolute;left:50%;top:6px;transform:translateX(-50%);height:26px;display:flex;align-items:center;gap:8px;padding:0 6px 0 10px;border-radius:7px;background:rgba(255,255,255,0.13);box-shadow:inset 0 0 0 1px rgba(26,149,242,0.6)">
+      <svg width="14" height="14" viewBox="0 0 16 16" aria-label="Working"><circle cx="8" cy="8" r="5.5" fill="none" stroke="#a463e6" stroke-opacity="0.28" stroke-width="1.5"/><path d="M8 2.5 A5.5 5.5 0 0 1 13.5 8" fill="none" stroke="#a463e6" stroke-width="1.5" stroke-linecap="round"/><circle cx="13.5" cy="8" r="2.1" fill="#a463e6"/></svg>
+      <span>Minga · editing chrome_state.ex</span>
+      <span style="width:1px;height:14px;background:rgba(255,255,255,0.15)"></span>
+      <span style="min-width:18px;height:18px;border-radius:9px;background:#f2b544;color:#1e1f24;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center">1</span>
+      <span style="min-width:18px;height:18px;border-radius:9px;background:#e5707a;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center">1</span>
+    </a>
+  </div>
+
+  <div style="flex:1;padding-top:18px;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:13.5px;line-height:24px;color:#6b6d75">
+    <div style="display:flex"><span style="width:64px;text-align:right;padding-right:20px;color:#5f616a">238</span><span>def agent_label(%{state: :working, action: a}), do: a</span></div>
+    <div style="display:flex"><span style="width:64px;text-align:right;padding-right:20px;color:#5f616a">239</span><span>def agent_label(%{state: :needs_you}), do: "needs you"</span></div>
+    <div style="display:flex"><span style="width:64px;text-align:right;padding-right:20px;color:#5f616a">240</span><span>def agent_label(%{state: :done}), do: "Done"</span></div>
+  </div>
+
+  <div style="position:absolute;left:50%;top:46px;transform:translateX(-50%);width:580px;background:rgba(43,44,51,0.98);border:1px solid rgba(255,255,255,0.10);border-radius:12px;box-shadow:0 24px 60px rgba(0,0,0,0.6);padding:6px">
+    <div style="position:absolute;left:50%;top:-8px;margin-left:-7px;width:14px;height:14px;background:rgba(43,44,51,0.98);border-left:1px solid rgba(255,255,255,0.10);border-top:1px solid rgba(255,255,255,0.10);transform:rotate(45deg)"></div>
+    <div style="padding:8px 10px 6px;color:#a5a39e;font-size:12px;font-weight:600">Tasks</div>
+
+    <div class="row" style="background:rgba(242,181,68,0.08)">
+      <span class="cl"><svg width="15" height="15" viewBox="0 0 16 16" aria-label="Needs you"><circle cx="8" cy="8" r="6" fill="#f2b544" fill-opacity="0.25"/><circle cx="8" cy="8" r="3.4" fill="#f2b544"/></svg></span>
+      <div style="flex:1">
+        <div class="cl" style="justify-content:space-between"><span class="t">Add tests for the usage-limit classifier</span><span class="peek">Peek</span></div>
+        <div class="s" style="color:#f2b544">Needs you · wants to create test/minga_agent/usage_limit_test.exs</div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <span class="btn def">Approve Once</span>
+          <span class="btn">Always for This Session</span>
+          <span class="btn">Deny</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <span class="cl"><svg width="15" height="15" viewBox="0 0 16 16" aria-label="Working"><circle cx="8" cy="8" r="5.5" fill="none" stroke="#a463e6" stroke-opacity="0.28" stroke-width="1.5"/><path d="M8 2.5 A5.5 5.5 0 0 1 13.5 8" fill="none" stroke="#a463e6" stroke-width="1.5" stroke-linecap="round"/><circle cx="13.5" cy="8" r="2.1" fill="#a463e6"/></svg></span>
+      <div style="flex:1">
+        <div class="cl" style="justify-content:space-between"><span class="t">Show the plan limit instead of “rate limited”</span><a class="peek" href="V3Narrow.dc.html">Peek</a></div>
+        <div class="s">Working · editing chrome_state.ex · 4 min</div>
+      </div>
+    </div>
+
+    <div class="row">
+      <span class="cl"><svg width="15" height="15" viewBox="0 0 16 16" aria-label="Waiting"><circle cx="8" cy="8" r="3" fill="none" stroke="#a5a39e" stroke-width="1.6"/></svg></span>
+      <div style="flex:1">
+        <div class="cl" style="justify-content:space-between"><span class="t">Refactor the picker sources</span><span class="peek">Peek</span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between"><span class="s">Waiting · retry in 40 s</span><span class="btn">Retry Now</span></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <span class="cl"><svg width="15" height="15" viewBox="0 0 16 16" aria-label="Failed"><rect x="4.6" y="4.6" width="6.8" height="6.8" rx="1.2" fill="#e5707a" transform="rotate(45 8 8)"/></svg></span>
+      <div style="flex:1">
+        <div class="cl" style="justify-content:space-between"><span class="t">Run the session test suite</span><span class="peek">Peek</span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between"><span class="s" style="color:#e5707a">Failed · test run crashed</span><span class="btn">Show Log</span></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <span class="cl"><svg width="15" height="15" viewBox="0 0 16 16" aria-label="Done"><circle cx="8" cy="8" r="3.4" fill="#7fbf7a"/></svg></span>
+      <div style="flex:1">
+        <div class="cl" style="justify-content:space-between"><span class="t">Update the agent docs for the Spine</span><span class="peek">Peek</span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between"><span class="s">Done · 2 files to review</span><a class="btn" href="V3Review.dc.html">Review</a></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="position:absolute;left:24px;bottom:44px;width:330px;padding:12px;border-radius:10px;background:rgba(43,44,51,0.98);border:1px solid rgba(255,255,255,0.10);box-shadow:0 12px 30px rgba(0,0,0,0.5)">
+    <div style="color:#8f8d88;font-size:11.5px;margin-bottom:8px">Holding ⌘ reveals shortcuts</div>
+    <div style="display:flex;gap:6px">
+      <span class="btn def">Approve Once<span class="k">y</span></span>
+      <span class="btn">Always<span class="k">a</span></span>
+      <span class="btn">Deny<span class="k">n</span></span>
+    </div>
+  </div>
+
+  <div style="position:absolute;right:16px;top:50px;width:370px;display:flex;flex-direction:column;gap:10px">
+    <div style="padding:12px 12px 12px 14px;border-radius:14px;background:rgba(58,59,66,0.96);border:1px solid rgba(255,255,255,0.10);box-shadow:0 12px 30px rgba(0,0,0,0.5);display:flex;gap:12px;align-items:center">
+      <img src="/_blob/2777ef766d513a04de7de69d4629e0b7" alt="Minga" style="width:34px;height:34px;border-radius:8px;flex:none">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:13px">Minga needs you</div>
+        <div style="color:#d6d5d1;font-size:12.5px;line-height:17px;margin-top:2px">Add tests for the usage-limit classifier wants to create usage_limit_test.exs</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;flex:none">
+        <span class="btn" style="text-align:center;background:rgba(255,255,255,0.16)">Approve</span>
+        <span class="btn" style="text-align:center">Options ▾</span>
+      </div>
+    </div>
+    <div style="padding:10px 12px 10px 14px;border-radius:14px;background:rgba(58,59,66,0.6);border:1px solid rgba(255,255,255,0.06);display:flex;gap:12px;align-items:center;opacity:0.65">
+      <img src="/_blob/2777ef766d513a04de7de69d4629e0b7" alt="" style="width:28px;height:28px;border-radius:7px;flex:none">
+      <div style="flex:1"><div style="font-weight:700;font-size:12.5px">Minga</div><div style="color:#d6d5d1;font-size:12px">Already answered in Minga</div></div>
+    </div>
+    <div style="color:#8f8d88;font-size:11.5px;text-align:right">Shown only when Minga is in the background.</div>
+  </div>
+
+  <div style="height:28px;display:flex;align-items:center;gap:18px;padding:0 14px;background:#24252b;border-top:1px solid rgba(255,255,255,0.07);font-size:12px;color:#a5a39e">
+    <span style="padding:1px 8px;border-radius:9px;background:rgba(26,149,242,0.22);color:#6cb8f5;font-weight:600;font-size:11px">NORMAL</span>
+    <span style="color:#ecebe8">chrome_state.ex</span>
+    <span style="flex:1"></span>
+    <span>Elixir</span><span>Ln 238, Col 4</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

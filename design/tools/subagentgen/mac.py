@@ -1,6 +1,8 @@
-import os
-OUT_DIR = os.environ.get("OUT_DIR", "./out")
-os.makedirs(OUT_DIR, exist_ok=True)
+import os as _os
+TOOLS = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+BOARDS = _os.environ.get("BOARDS_DIR", _os.path.join(TOOLS, "..", "boards"))  # committed boards, read only
+OUT_DIR = _os.environ.get("OUT_DIR", _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "out"))
+_os.makedirs(OUT_DIR, exist_ok=True)
 W='<svg width="13" height="13" viewBox="0 0 16 16" aria-label="Working" style="flex:none;vertical-align:-2px"><circle cx="8" cy="8" r="5.5" fill="none" stroke="#a463e6" stroke-opacity="0.28" stroke-width="1.5"/><path d="M8 2.5 A5.5 5.5 0 0 1 13.5 8" fill="none" stroke="#a463e6" stroke-width="1.5" stroke-linecap="round"/><circle cx="13.5" cy="8" r="2.1" fill="#a463e6"/></svg>'
 D='<svg width="13" height="13" viewBox="0 0 16 16" aria-label="Done" style="flex:none;vertical-align:-2px"><circle cx="8" cy="8" r="3.4" fill="#7fbf7a"/></svg>'
 def g(s,size):
@@ -12,7 +14,7 @@ def started(glyph,name,cur=False):
     return f'<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:#a5a39e;height:22px;{bg}"><span style="width:52px">Started</span>{glyph}<span style="color:#dcdce2">{name}</span></div>'
 left=f'''<div style="flex:1;min-width:0;display:flex;flex-direction:column;background:#1e1f24">
   <div class="mono" style="height:28px;flex:none;display:flex;align-items:center;gap:8px;padding:0 22px;border-bottom:1px solid rgba(255,255,255,0.06);font-size:12px;color:#a5a39e">{g(W,12)}<span style="color:#ecebe8;font-family:-apple-system,sans-serif">Review the marketing site for unfair claims</span><span style="flex:1"></span><span>8 min · GPT-6.2 Sol</span></div>
-  <div style="flex:1;padding:18px 28px 0;display:flex;flex-direction:column;gap:16px;font-size:14px;line-height:21px;max-width:720px">
+  <div style="flex:1;padding:18px 28px 0;display:flex;flex-direction:column;gap:16px;font-size:14px;line-height:17px;max-width:720px">
     <div><div style="color:#6cb8f5;font-size:11.5px;font-weight:600;margin-bottom:2px">You</div><div>Read the five site pages as a skeptical senior engineer coming from Hacker News. Any unfair claims about other editors? Any jargon that does not land?</div></div>
     <div><div style="color:#b98cf0;font-size:11.5px;font-weight:600;margin-bottom:2px">Minga</div><div style="color:#dcdce2">I will split this four ways: facts, fairness, jargon, and how skeptics react to change. Then I will put the hardest hits in one list.</div></div>
     <div style="display:flex;flex-direction:column;gap:2px">
@@ -26,7 +28,7 @@ left=f'''<div style="flex:1;min-width:0;display:flex;flex-direction:column;backg
   </div>
   <div style="margin:0 22px 12px;border:1px dashed rgba(255,255,255,0.16);border-radius:8px;padding:10px 12px 10px">
     <div style="font-size:11px;color:#8f8d88;margin-bottom:6px">Board note: <span class="mono" style="color:#b98cf0">SPC a a</span> shows the same task as a tree in the tasks drawer</div>
-    <div class="mono" style="font-size:12px;line-height:21px;color:#c9c7c2">
+    <div class="mono" style="font-size:12px;line-height:17px;color:#c9c7c2">
       <div style="display:flex;align-items:center;gap:8px">{W}<span style="color:#ecebe8;font-weight:600;font-family:-apple-system,sans-serif">Review the marketing site for unfair claims</span><span style="flex:1"></span><span style="color:#a5a39e">1 of 4 reports in</span><span style="color:#7a7c85;width:30px;text-align:right">8m</span></div>
       <div style="display:flex;align-items:center;gap:8px"><span style="color:#62656f">├─</span>{W}<span style="width:270px">Fact-Check Auditor</span><span style="color:#a5a39e">reading compare.html</span><span style="flex:1"></span><span style="color:#7a7c85;width:30px;text-align:right">3m</span></div>
       <div style="display:flex;align-items:center;gap:8px"><span style="color:#62656f">├─</span>{W}<span style="width:270px">Competitive Fairness Critic</span><span style="color:#a5a39e">checking 9 claims</span><span style="flex:1"></span><span style="color:#7a7c85;width:30px;text-align:right">3m</span></div>
@@ -47,9 +49,9 @@ right=f'''<div style="width:620px;flex:none;display:flex;flex-direction:column;b
   <div style="flex:none;padding:8px 20px 8px;border-bottom:1px solid rgba(255,255,255,0.06)">
     <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#a5a39e"><span style="color:#8f8d88">Review the marketing site</span><span style="color:#62656f">›</span>{g(D,12)}<span style="color:#ecebe8;font-weight:600;font-size:13px">Editorial and Jargon Roaster</span><span style="flex:1"></span><span style="display:inline-flex;align-items:center;gap:2px">{strip()}</span><span class="mono" style="margin-left:6px;color:#a5a39e">3 of 4</span></div>
     <div style="display:flex;align-items:center;gap:14px;margin-top:4px;font-size:12px;color:#a5a39e"><span style="color:#7fbf7a">Done</span><span>worked 3m</span><span>GPT-6.2 Sol</span><span style="flex:1"></span>
-      <span class="mono"><span class="k" style="color:#6cb8f5">]t</span>next</span><span class="mono"><span class="k" style="color:#6cb8f5">[t</span>prev</span><span class="mono"><span class="k" style="color:#6cb8f5">za</span>fold</span><span class="mono"><span class="k" style="color:#6cb8f5">q</span>close</span></div>
+      <span class="mono"><span class="k" style="color:#6cb8f5">]]</span>next</span><span class="mono"><span class="k" style="color:#6cb8f5">[[</span>prev</span><span class="mono"><span class="k" style="color:#6cb8f5">za</span>fold</span><span class="mono"><span class="k" style="color:#6cb8f5">q</span>close</span></div>
   </div>
-  <div style="flex:1;overflow:hidden;padding:14px 22px 0;display:flex;flex-direction:column;gap:16px;font-size:13.5px;line-height:21px">
+  <div style="flex:1;overflow:hidden;padding:14px 22px 0;display:flex;flex-direction:column;gap:16px;font-size:13px;line-height:17px">
     <div>
       <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#a5a39e"><span style="color:#7a7c85">▸</span><span style="color:#dcdce2;font-weight:600">Brief</span><span>from Minga, the parent task</span></div>
       <div style="margin:3px 0 0 16px;color:#7a7c85;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">You are a ruthless editorial and jargon roaster. Read all five site pages as a skeptical senior engineer who writes Go or Rust…</div>
@@ -75,7 +77,7 @@ right=f'''<div style="width:620px;flex:none;display:flex;flex-direction:column;b
   </div>
   <div class="mono" style="margin:10px 16px 14px;padding:10px 12px;border-radius:8px;background:#2b2c33;border:1px solid rgba(255,255,255,0.09);min-height:44px;box-sizing:border-box;font-size:13px;color:#7a7c85">Message this subagent</div>
 </div>'''
-head=open(os.path.join(OUT_DIR,'V41Talk.dc.html')).read()
+head=open(BOARDS+'/V41Talk.dc.html').read()
 pre=head[:head.index('</div><div style="flex:1;display:flex;min-height:0">')]
 pre=pre.replace("<title>V4.1: talking to Minga</title>","<title>V4.1: peeking at a subagent</title>")
 pre=pre.replace('<span style="font-weight:600">Show the plan limit instead of “rate limited”</span>  <span style="color:#8f8d88">with chrome_state.ex · main</span>','<span style="font-weight:600">Review the marketing site for unfair claims</span>  <span style="color:#8f8d88">with Editorial and Jargon Roaster · main</span>')
@@ -99,4 +101,4 @@ class Component extends DCLogic {
 </body>
 </html>'''
 out=pre+'</div><div style="flex:1;display:flex;min-height:0">'+left+right+'</div>'+mode+tail
-open(os.path.join(OUT_DIR,'V41SubagentMac.dc.html'),'w').write(out)
+open(OUT_DIR+"/V41SubagentMac.dc.html","w").write(out)

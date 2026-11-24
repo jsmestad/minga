@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>V4.1: SPC a, which-key</title>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#ecebe8;text-decoration:none}a:hover{color:#ffffff}
+.ln{display:flex;align-items:center;height:18px}
+.num{width:56px;text-align:right;padding-right:8px;flex:none}
+.sign{width:8px;flex:none;display:flex;align-items:center}
+.bar{width:10px;height:18px;flex:none;margin:0 4px 0 2px;position:relative}
+.code{padding-left:10px;white-space:pre}
+.wk{display:flex;align-items:baseline;gap:10px;height:25px;font-size:13px}
+.wk .k{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:13px;width:22px;text-align:right;flex:none}
+.wk .l{color:#dcdce2}
+.wk .g{color:#b98cf0}
+.wk .n{color:#8f8d88;font-size:12px}
+.act{display:inline-flex;align-items:baseline;gap:6px;margin-right:22px}
+.act .k{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-weight:700}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;box-sizing:border-box;background:#1e1f24;color:#ecebe8;font-family:-apple-system,'SF Pro Text',system-ui,sans-serif;display:flex;flex-direction:column;font-size:13px;border-radius:12px;overflow:hidden;position:relative">
+<div style="height:30px;flex:none;display:flex;align-items:center;gap:12px;padding:0 14px;background:#222329;border-bottom:1px solid rgba(255,255,255,0.06);position:relative">
+  <div style="display:flex;gap:8px"><span style="width:12px;height:12px;border-radius:6px;background:#ff5f57"></span><span style="width:12px;height:12px;border-radius:6px;background:#febc2e"></span><span style="width:12px;height:12px;border-radius:6px;background:#28c840"></span></div>
+  <span style="font-family:'Instrument Serif',serif;font-style:italic;font-size:15px;color:#8f8d88">minga</span>
+  <div style="position:absolute;left:0;right:0;text-align:center;pointer-events:none;font-size:12.5px"><span style="font-weight:600">chrome_state.ex</span>  <span style="color:#8f8d88">lib/minga_editor/session</span></div>
+</div>
+<div style="flex:1;padding-top:16px;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:13px;color:#c9c7c2;position:relative;opacity:0.55">
+<div class="ln" style=""><span class="num" style="color:#7a7c85">229</span><span class="sign"></span><span class="bar"></span><span class="code"><span style="color:#ff7ab2">defp</span> chrome_state(ws) <span style="color:#ff7ab2">do</span></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">230</span><span class="sign"></span><span class="bar"></span><span class="code">  %{status: workspace_agent_status(ws), limit: usage_limit(ws)}</span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">231</span><span class="sign"></span><span class="bar"></span><span class="code"><span style="color:#ff7ab2">end</span></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">232</span><span class="sign"></span><span class="bar"></span><span class="code"></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">233</span><span class="sign"></span><span class="bar"></span><span class="code"><span style="color:#7f8c98"># Status comes from one owner: the session's presence.</span></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">234</span><span class="sign"></span><span class="bar"><svg width="10" height="18" viewBox="0 0 10 18" aria-label="Minga changed these lines" style="display:block;overflow:visible"><path d="M7 3 C7 7.5, 3 7.5, 3 12 L3 18" fill="none" stroke="#6b3fa3" stroke-width="2.6" stroke-linecap="round"/><path d="M3 3 C3 7.5, 7 7.5, 7 12 L7 18" fill="none" stroke="#1e1f24" stroke-width="5" stroke-linecap="round"/><path d="M3 3 C3 7.5, 7 7.5, 7 12 L7 18" fill="none" stroke="#a463e6" stroke-width="2.6" stroke-linecap="round"/></svg></span><span class="code"><span style="color:#ff7ab2">@spec</span> workspace_agent_status(<span style="color:#dabaff">Workspace</span>.t()) :: <span style="color:#dabaff">AgentPresence</span>.state()</span></div>
+<div class="ln" style="background:rgba(255,255,255,0.035);"><span class="num" style="color:#c9c7c2">235</span><span class="sign"></span><span class="bar"><svg width="10" height="18" viewBox="0 0 10 18" aria-hidden="true" style="display:block"><path d="M3 0 L3 18" stroke="#6b3fa3" stroke-width="2.6"/><path d="M7 0 L7 18" stroke="#a463e6" stroke-width="2.6"/></svg></span><span class="code"><span style="color:#ff7ab2">defp</span> workspace_agent_status(ws) <span style="color:#ff7ab2">do</span><span style="display:inline-block;width:8px;height:17px;background:#6cb8f5;opacity:0.85;vertical-align:-4px;margin-left:1px"></span></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">236</span><span class="sign"></span><span class="bar"><svg width="10" height="18" viewBox="0 0 10 18" aria-hidden="true" style="display:block"><path d="M3 0 L3 18" stroke="#6b3fa3" stroke-width="2.6"/><path d="M7 0 L7 18" stroke="#a463e6" stroke-width="2.6"/></svg></span><span class="code">  ws |&gt; payload() |&gt; <span style="color:#dabaff">AgentPresence</span>.of()<span style="display:inline-block;width:2px;height:16px;background:#a463e6;vertical-align:-3px;margin-left:1px"></span><span style="margin-left:6px;padding:0 6px;border-radius:4px;background:#a463e6;color:#fff;font-family:-apple-system,sans-serif;font-size:10.5px;line-height:16px;vertical-align:1px">Minga</span></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">237</span><span class="sign"></span><span class="bar"><svg width="10" height="18" viewBox="0 0 10 18" aria-hidden="true" style="display:block"><path d="M3 0 L3 13" stroke="#6b3fa3" stroke-width="2.6" stroke-linecap="round"/><path d="M7 0 L7 13" stroke="#a463e6" stroke-width="2.6" stroke-linecap="round"/></svg></span><span class="code"><span style="color:#ff7ab2">end</span></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">238</span><span class="sign"></span><span class="bar"></span><span class="code"></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">239</span><span class="sign"></span><span class="bar"><svg width="10" height="18" viewBox="0 0 10 18" aria-label="Your uncommitted change" style="display:block"><path d="M5 0 L5 18" stroke="#4f9fe0" stroke-width="1.5"/></svg></span><span class="code"><span style="color:#ff7ab2">defp</span> usage_limit(ws) <span style="color:#ff7ab2">do</span></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">240</span><span class="sign"><span style="display:block;width:3px;height:12px;border-radius:1.5px;background:#e5707a;margin:0 auto"></span></span><span class="bar"><svg width="10" height="18" viewBox="0 0 10 18" aria-label="Your uncommitted change" style="display:block"><path d="M5 0 L5 18" stroke="#4f9fe0" stroke-width="1.5"/></svg></span><span class="code">  ws |&gt; payload() |&gt; <span style="text-decoration: underline wavy #e5707a; text-decoration-skip-ink:none; text-underline-offset:3px">limit_label</span>()</span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">241</span><span class="sign"></span><span class="bar"><svg width="10" height="18" viewBox="0 0 10 18" aria-label="Your uncommitted change" style="display:block"><path d="M5 0 L5 18" stroke="#4f9fe0" stroke-width="1.5"/></svg></span><span class="code"><span style="color:#ff7ab2">end</span></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">242</span><span class="sign"></span><span class="bar"></span><span class="code"></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">243</span><span class="sign"></span><span class="bar"></span><span class="code"><span style="color:#ff7ab2">def</span> agent_label(%{state: :working, action: a}), <span style="color:#ff7ab2">do</span>: a</span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">244</span><span class="sign"></span><span class="bar"></span><span class="code"><span style="color:#ff7ab2">def</span> agent_label(%{state: :needs_you}), <span style="color:#ff7ab2">do</span>: <span style="color:#a6d189">"Needs you"</span></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">245</span><span class="sign"></span><span class="bar"></span><span class="code"><span style="color:#ff7ab2">def</span> agent_label(%{state: :done}), <span style="color:#ff7ab2">do</span>: <span style="color:#a6d189">"Done"</span></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">246</span><span class="sign"></span><span class="bar"></span><span class="code"><span style="color:#ff7ab2">def</span> agent_label(_), <span style="color:#ff7ab2">do</span>: <span style="color:#a6d189">""</span></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">247</span><span class="sign"></span><span class="bar"></span><span class="code"></span></div>
+<div class="ln" style=""><span class="num" style="color:#7a7c85">248</span><span class="sign"></span><span class="bar"></span><span class="code"><span style="color:#ff7ab2">defp</span> payload(%<span style="color:#dabaff">Workspace</span>{payload: p}), <span style="color:#ff7ab2">do</span>: p</span></div>
+</div>
+
+<div style="position:absolute;left:0;right:0;bottom:28px;background:rgba(37,38,44,0.98);border-top:1px solid rgba(255,255,255,0.10);box-shadow:0 -18px 40px rgba(0,0,0,0.35);padding:14px 28px 16px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;font-size:12.5px">
+    <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#8f8d88">SPC</span><span style="color:#55575f">›</span>
+    <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#b98cf0">a</span><span style="font-weight:700;font-size:13px">Minga</span>
+    <span style="color:#55575f">·</span><span style="display:inline-flex;align-items:center;gap:5px;color:#b98cf0"><svg width="12" height="12" viewBox="0 0 16 16" aria-label="Working" style="flex:none"><circle cx="8" cy="8" r="5.5" fill="none" stroke="#a463e6" stroke-opacity="0.28" stroke-width="1.5"/><path d="M8 2.5 A5.5 5.5 0 0 1 13.5 8" fill="none" stroke="#a463e6" stroke-width="1.5" stroke-linecap="round"/><circle cx="13.5" cy="8" r="2.1" fill="#a463e6"/></svg>2/3</span><span style="color:#55575f">·</span><span style="display:inline-flex;align-items:center;gap:5px;color:#f2b544"><svg width="12" height="12" viewBox="0 0 16 16" aria-label="Needs you" style="flex:none"><circle cx="8" cy="8" r="6" fill="#f2b544" fill-opacity="0.25"/><circle cx="8" cy="8" r="3.4" fill="#f2b544"/></svg>1 needs you</span>
+    <span style="flex:1"></span><span style="color:#8f8d88;font-size:11.5px"><span style="font-family:ui-monospace,'SF Mono',Menlo,monospace">⌫</span> back   <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace">esc</span> cancel</span>
+  </div>
+  <div style="display:flex;gap:40px">
+    <div style="min-width:230px"><div style="color:#8f8d88;font-size:11px;font-weight:600;margin:0 0 6px 32px">Tasks</div><div class="wk"><span class="k" style="color:#ecebe8">a</span><span class="l">Tasks</span><span class="n"><span style="color:#f2b544">· 1 needs you</span></span></div><div class="wk"><span class="k" style="color:#ecebe8">n</span><span class="l">New task…</span></div><div class="wk"><span class="k" style="color:#ecebe8">i</span><span class="l">Inspect a task</span></div><div class="wk"><span class="k" style="color:#ecebe8">w</span><span class="l">Watch Minga</span></div><div class="wk"><span class="k" style="color:#ecebe8">s</span><span class="l">Stop</span><span class="n"><span style="color:#6f7078;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11.5px">⌘.</span></span></div></div>
+    <div style="min-width:230px"><div style="color:#8f8d88;font-size:11px;font-weight:600;margin:0 0 6px 32px">Conversation</div><div class="wk"><span class="k" style="color:#ecebe8">v</span><span class="l">Conversation</span></div><div class="wk"><span class="k" style="color:#ecebe8">?</span><span class="l">Ask about this</span></div><div class="wk"><span class="k" style="color:#ecebe8">e</span><span class="l">Rewrite selection</span></div><div class="wk"><span class="k" style="color:#a9b1f0">q</span><span class="l" style="color:#a9b1f0">Queue ›</span><span class="n"><span style="color:#6f7078;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11.5px">2</span></span></div></div>
+    <div style="min-width:230px"><div style="color:#8f8d88;font-size:11px;font-weight:600;margin:0 0 6px 32px">Changes</div><div class="wk"><span class="k" style="color:#ecebe8">r</span><span class="l">Review</span><span class="n"><span style="color:#b98cf0">· 3</span></span></div><div class="wk"><span class="k" style="color:#ecebe8">y</span><span class="l">Keep change</span></div><div class="wk"><span class="k" style="color:#ecebe8">d</span><span class="l">Reject change</span></div><div class="wk"><span class="k" style="color:#ecebe8">u</span><span class="l">Reject all…</span></div><div class="wk"><span class="k" style="color:#ecebe8">p</span><span class="l">Publish edits…</span></div></div>
+    <div style="min-width:230px"><div style="color:#8f8d88;font-size:11px;font-weight:600;margin:0 0 6px 32px">More</div><div class="wk"><span class="k" style="color:#a9b1f0">x</span><span class="l" style="color:#a9b1f0">Context ›</span><span class="n"><span style="color:#6f7078;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11.5px">4</span></span></div><div class="wk"><span class="k" style="color:#a9b1f0">S</span><span class="l" style="color:#a9b1f0">Session ›</span><span class="n"><span style="color:#6f7078;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11.5px">7</span></span></div></div>
+  </div>
+</div>
+
+<div style="position:absolute;right:28px;top:48px;width:440px">
+  <div style="color:#8f8d88;font-size:11.5px;font-style:italic;margin:0 0 6px 2px">Board note: the step before, after SPC alone</div>
+  <div style="border:1px dashed rgba(255,255,255,0.22);border-radius:10px;background:rgba(20,21,26,0.92);padding:12px 18px 14px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px"><span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#8f8d88">SPC</span><span style="font-weight:700">Leader</span></div>
+    <div style="display:flex;gap:26px">
+      <div style="min-width:230px"><div class="wk"><span class="k" style="color:#ecebe8">SPC</span><span class="l">Find file</span></div><div class="wk"><span class="k" style="color:#ecebe8">,</span><span class="l">Switch buffer</span></div><div class="wk"><span class="k" style="color:#a9b1f0">f</span><span class="l" style="color:#a9b1f0">Files ›</span></div><div class="wk"><span class="k" style="color:#a9b1f0">b</span><span class="l" style="color:#a9b1f0">Buffers ›</span></div><div class="wk"><span class="k" style="color:#a9b1f0">a</span><span class="l" style="color:#a9b1f0">Minga ›</span><span class="n"><span style="color:#f2b544">· 1 needs you</span></span></div></div>
+      <div style="min-width:230px"><div class="wk"><span class="k" style="color:#a9b1f0">g</span><span class="l" style="color:#a9b1f0">Git ›</span><span class="n"><span style="color:#6f7078;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11.5px">11 changed</span></span></div><div class="wk"><span class="k" style="color:#a9b1f0">c</span><span class="l" style="color:#a9b1f0">Code ›</span><span class="n"><span style="color:#e5707a">· 1 error</span></span></div><div class="wk"><span class="k" style="color:#a9b1f0">s</span><span class="l" style="color:#a9b1f0">Search ›</span></div><div class="wk"><span class="k" style="color:#a9b1f0">w</span><span class="l" style="color:#a9b1f0">Windows ›</span></div></div>
+    </div>
+  </div>
+</div>
+<div style="height:28px;flex:none;display:flex;align-items:center;background:#25262c;border-top:1px solid rgba(255,255,255,0.07);font-size:12px;color:#a5a39e"><span style="margin-left:8px;display:flex;align-items:center;padding:1px 9px;border-radius:9px;background:rgba(26,149,242,0.22);color:#6cb8f5;font-weight:700;font-size:10.5px;letter-spacing:0.04em">NORMAL</span><span style="display:flex;align-items:center;gap:6px;padding:0 10px;height:100%;"><span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#ecebe8">SPC a</span><span style="color:#8f8d88">waiting for a key</span></span><span style="flex:1"></span><span style="display:flex;align-items:center;gap:6px;padding:0 10px;height:100%;"><span>Elixir</span></span><span style="width:1px;height:14px;background:rgba(255,255,255,0.09)"></span><span style="display:flex;align-items:center;gap:6px;padding:0 10px;height:100%;padding-right:14px"><span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11.5px">235:3</span></span></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

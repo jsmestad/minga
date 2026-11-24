@@ -1,0 +1,732 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Storyboard inventory</title>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#C6D0F5;text-decoration:none}a:hover{color:#C6D0F5}
+
+</style>
+</helmet>
+<div style="width:1440px;min-height:4754px;box-sizing:border-box;background:#232634;color:#C6D0F5;font-family:-apple-system,'SF Pro Text',system-ui,sans-serif;font-size:13px;border-radius:12px;overflow:hidden;padding:28px 32px">
+<div style="font-size:22px;font-weight:700">Storyboard inventory</div>
+<div style="color:#838BA7;margin:6px 0 14px">Every screen and state on macOS and in the TUI, from docs/design/scenarios.toml. 136 scenarios.</div>
+<div style="margin-bottom:18px"><span style="display:inline-flex;align-items:center;gap:6px;margin-right:18px"><span style="width:10px;height:10px;border-radius:2px;background:#A6D189"></span>Designed <span style="color:#838BA7">70</span></span> <span style="display:inline-flex;align-items:center;gap:6px;margin-right:18px"><span style="width:10px;height:10px;border-radius:2px;background:#838BA7"></span>Existing only <span style="color:#838BA7">57</span></span> <span style="display:inline-flex;align-items:center;gap:6px;margin-right:18px"><span style="width:10px;height:10px;border-radius:2px;background:#EF9F76"></span>Missing <span style="color:#838BA7">0</span></span> <span style="display:inline-flex;align-items:center;gap:6px;margin-right:18px"><span style="width:10px;height:10px;border-radius:2px;background:#8CAAEE"></span>Deferred <span style="color:#838BA7">1</span></span> <span style="display:inline-flex;align-items:center;gap:6px;margin-right:18px"><span style="width:10px;height:10px;border-radius:2px;background:#626880"></span>Removed <span style="color:#838BA7">8</span></span></div>
+<div style="display:flex;align-items:baseline;gap:12px;margin:18px 0 8px"><span style="font-size:15px;font-weight:700">Start and open</span><span style="color:#838BA7;font-size:12px">8 designed · 2 existing only · 1 deferred</span></div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px"><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">minga outside any project: home with recent projects</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">start.empty</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch6_start_empty · TUI: Batch6_start_empty</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">minga . in a project opened for the first time: project home</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">start.open_dir.home</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch6_start_open_dir_home · TUI: Batch6_start_open_dir_home</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">minga . in a project with a saved session: picks up where you left off</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">start.open_dir.restored</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch6_start_open_dir_restored · TUI: Batch6_start_open_dir_restored</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">minga lib/minga_agent inside a project: root found above, switcher filtered</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">start.open_dir.subdir</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch6_start_open_dir_subdir · TUI: Batch6_start_open_dir_subdir</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">minga . in a directory with no project markers</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">start.open_dir.not_project</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch6_start_open_dir_not_project · TUI: Batch6_start_open_dir_not_project</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #8CAAEE;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#8CAAEE;text-transform:none">Deferred</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">First run: onboarding (deferred)</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">start.first_run</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch2_start_first_run · TUI: Batch2_start_first_run</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC p p: switch project</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">start.project_switcher</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Project switcher with no known projects</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">start.project_switcher.empty</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch4_files_empty · TUI: Batch4_files_empty</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC p r: recent files in project</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">start.recent_files</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Quit with unsaved files or Minga working: confirm</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">start.quit.confirm</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch2_start_quit_confirm · TUI: Batch2_start_quit_confirm · Mouse: Mouse_Video_ActMenu_Chips</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Ciao: the app closes</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">start.quit.farewell</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch2_start_quit_farewell · TUI: Batch2_start_quit_farewell</div>
+</div></div>
+<div style="display:flex;align-items:baseline;gap:12px;margin:18px 0 8px"><span style="font-size:15px;font-weight:700">Edit and navigate</span><span style="color:#838BA7;font-size:12px">5 designed · 3 existing only</span></div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px"><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Editing while Minga works in the same file</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">edit.working</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: V41Edit · TUI: V41TuiEdit</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Editing a file, nothing else happening</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">edit.plain</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: V41Edit · TUI: V41TuiEdit · Mouse: Mouse_ModelineChips</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC and a pause: top-level which-key</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">edit.whichkey.leader</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: V41WhichKey · TUI: V41TuiEdit · Mouse: Mouse_Video_ModePill · Mouse (TUI): Mouse_Video_TUI</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Visual selection</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">edit.visual</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch7_act_selection · TUI: Batch7_act_selection</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">: command line in the minibuffer</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">edit.command_line</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Minibuffer prompt or y/n confirmation</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">edit.prompt</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Edit timeline</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">edit.timeline</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Tooltip on a modeline segment or state glyph: meaning and key, e.g. 1 task needs you · SPC a a</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">chrome.tooltip</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch7_hover_minga_and_chrome · TUI: Batch7_hover_minga_and_chrome</div>
+</div></div>
+<div style="display:flex;align-items:baseline;gap:12px;margin:18px 0 8px"><span style="font-size:15px;font-weight:700">Search</span><span style="color:#838BA7;font-size:12px">3 designed · 6 existing only</span></div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px"><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">/ search in buffer</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">search.buffer</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Buffer search with no match</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">search.buffer.no_results</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch4_search_empty · TUI: Batch4_search_empty</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC s p: search project</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">search.project</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Project search with no results</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">search.project.no_results</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch4_search_empty · TUI: Batch4_search_empty</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Quickfix list</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">search.quickfix</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch4_search_quickfix · TUI: Batch4_search_quickfix</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC s r: search and replace</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">search.replace</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC s t: TODOs</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">search.todos</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC s j: document symbols</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">search.symbols.document</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC s w: workspace symbols</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">search.symbols.workspace</div>
+
+</div></div>
+<div style="display:flex;align-items:baseline;gap:12px;margin:18px 0 8px"><span style="font-size:15px;font-weight:700">Code intelligence</span><span style="color:#838BA7;font-size:12px">7 designed · 10 existing only</span></div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px"><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Errors and warnings in a file, cursor on the error</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">code.diagnostics.in_file</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: V3Diagnostics · TUI: V41TuiEdit</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Completion popup while typing</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">code.completion</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Signature help while typing arguments</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">code.signature_help</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">K on a symbol: compact hover (diagnostic, signature, first doc paragraph)</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">code.hover</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch7_hover_code · TUI: Batch7_hover_code</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Hover on a diagnostic with Fix and Ask Minga</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">code.diagnostics.hover</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: V3Diagnostics</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC c x: diagnostics list</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">code.diagnostics.list</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Diagnostics list with nothing to report</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">code.diagnostics.none</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch4_code_empty · TUI: Batch4_code_empty</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC c a: code actions</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">code.actions</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">No code actions here</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">code.actions.none</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch4_code_empty · TUI: Batch4_code_empty</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC c r: rename symbol</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">code.rename</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC c D: references</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">code.references</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">No references found</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">code.references.none</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch4_code_empty · TUI: Batch4_code_empty</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC c h: call hierarchy</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">code.call_hierarchy</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC c l i: LSP info</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">code.lsp_info</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC c l I: manage tools</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">code.lsp_tools</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC m t o: test output</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">code.test_output</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">K again: the hover is focused, full docs scroll in place</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">code.hover.focused</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch7_hover_code · TUI: Batch7_hover_code</div>
+</div></div>
+<div style="display:flex;align-items:baseline;gap:12px;margin:18px 0 8px"><span style="font-size:15px;font-weight:700">Git</span><span style="color:#838BA7;font-size:12px">2 designed · 7 existing only</span></div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px"><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Git status</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">git.status</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Git status with a clean tree</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">git.status.clean</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch4_git_ext_queue_empty · TUI: Batch4_git_ext_queue_empty</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC g w: why is this line like this?</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">git.why_line</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC g a: code autobiography</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">git.autobiography</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC g c: commit</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">git.commit</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC g x: resolving a conflict</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">git.conflict</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC g z: stash</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">git.stash</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Blame for the current line or file</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">git.blame</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch4_git_blame · TUI: Batch4_git_blame</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Git log for the project or a commit</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">git.log</div>
+
+</div></div>
+<div style="display:flex;align-items:baseline;gap:12px;margin:18px 0 8px"><span style="font-size:15px;font-weight:700">Minga</span><span style="color:#838BA7;font-size:12px">25 designed · 11 existing only · 2 removed</span></div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px"><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC a and a pause: which-key for Minga</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.whichkey</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: V41WhichKey · TUI: V41TuiEdit · Mouse: Mouse_Video_ModePill</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Tasks drawer with one task that needs you</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.tasks.needs_you</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: V41Tasks · TUI: V41TuiTasks · Mouse: Mouse_Video_ModePill · Mouse (TUI): Mouse_Video_TUI</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">*minga-review* beside the file, change 1 of 2</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.review.buffer</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: V41Review · TUI: V41TuiReview · Mouse: Mouse_Video_Modeline_MenuBar</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Cursor inside one of Minga's changes in a file</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.review.in_file</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: V41Review · TUI: V41TuiReview</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Conversation split beside code, Minga working</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.conversation</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: V41Talk · TUI: V41TuiTalkOpen</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">*minga-queue* with two queued messages</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.queue</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: V41Talk · TUI: V41TuiTalkOpen</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Peeking at a done subagent beside the parent conversation</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.subagent.peek</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: V41SubagentMac · TUI: V41SubagentTui</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Tasks drawer with nothing waiting on you</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.tasks.list</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: V41Tasks · TUI: V41TuiTasks</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Tasks drawer with a working task focused (after answering an approval, or right after starting a task)</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.tasks.working</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: V41Tasks · TUI: V41TuiTasks · new_task: Batch1_minga_task_new_started</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Tasks drawer with no tasks</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.tasks.empty</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch1_minga_tasks_empty · TUI: Batch1_minga_tasks_empty</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">New task ›: the minibuffer prompt for a new task (n in the tasks drawer, or SPC a n)</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.task.new</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch1_minga_task_new · TUI: Batch1_minga_task_new</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Show diff of what an approval would change</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.approval.diff</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch2_minga_approval_diff · TUI: Batch2_minga_approval_diff</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">A task's output or log</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.task.output</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch2_minga_task_output · TUI: Batch2_minga_task_output</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Keep all 3 changes? y/n</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.review.keep_all.confirm</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch1_minga_review_confirms · TUI: Batch1_minga_review_confirms</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Review after the last change is decided</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.review.all_decided</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch1_minga_review_all_decided · TUI: Batch1_minga_review_all_decided</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Nothing to review</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.review.empty</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch1_minga_review_empty · TUI: Batch1_minga_review_empty</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Reject all 3 changes? y/n</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.reject_all.confirm</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch1_minga_review_confirms · TUI: Batch1_minga_review_confirms</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Conversation after Stop</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.conversation.stopped</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch1_minga_conversation_stopped · TUI: Batch1_minga_conversation_stopped</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Queue with nothing queued</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.queue.empty</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch4_git_ext_queue_empty · TUI: Batch4_git_ext_queue_empty</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Minga asks you a question (SPC a Q)</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.question</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC a m: pick model</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.model_picker</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC a T: thinking level</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.thinking_picker</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC a h: resume a session</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.session_resume</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC a k: Minga's checklist</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.checklist</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC a j: draft attachments</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.attachments</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC a H: retained messages</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.retained_history</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC a ?: ask about the line or selection</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.inline_ask</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC a e: rewrite selection inline</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.inline_edit</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Minga could not start: cause and one action</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.start_failed</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC a p / P: publish or discard unpublished edits</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.publish</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Background notification when Minga needs you</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.notification</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: V3NeedsYou · TUI: V41TuiTerminalPowers</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #626880;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#626880;text-transform:none">Removed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#626880;text-decoration:line-through;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Agent context bar</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.context_bar</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #626880;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#626880;text-transform:none">Removed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#626880;text-decoration:line-through;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Agent activity strip and chat header status</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">removed.agent_activity_strip</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Hover on a line Minga wrote: who, which task, change 1 of 2, unreviewed, age</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.hover.attribution</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch7_hover_minga_and_chrome · TUI: Batch7_hover_minga_and_chrome</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">g. on a Minga change: the act menu, Keep preselected</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.act_menu</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch7_act_change · TUI: Batch7_act_change · Mouse: Mouse_Video_ActMenu_Chips · Reference: ActMenu_DirectionA</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Act menu after typing: only matching actions, the top one highlighted</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.act_menu.filtered</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch7_act_change · TUI: Batch7_act_change · Reference: ActMenu_DirectionA</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Act menu on a selection spanning two Minga changes and your code</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.act_menu.selection</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch7_act_selection · TUI: Batch7_act_selection · Reference: ActMenu_DirectionA</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Inline diff of Minga's change in the file (= from the act menu or the review buffer)</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">minga.review.diff_inline</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch7_act_change · TUI: Batch7_act_change</div>
+</div></div>
+<div style="display:flex;align-items:baseline;gap:12px;margin:18px 0 8px"><span style="font-size:15px;font-weight:700">Terminal</span><span style="color:#838BA7;font-size:12px">9 designed</span></div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px"><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC o t terminal drawer with a passed and a failed run</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">terminal.drawer</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: V41ShellDrawer · TUI: V41ShellTui</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">*minga-shell* with Minga's commands and a pending approval</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">terminal.minga_shell</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: V41ShellMinga · TUI: V41ShellTui</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">:checkhealth terminal capability report</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">terminal.capabilities</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">TUI: V41TuiTerminalPowers</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Terminal drawer in Normal mode, scrolled back</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">terminal.drawer.normal</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch3_terminal_drawer_normal · TUI: Batch3_terminal_drawer_normal</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Menu on a failed command block</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">terminal.failed_block.menu</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: V41ShellMinga · TUI: V41ShellTui</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Run mix ecto.reset? y once · a always · t this turn · n deny</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">terminal.minga_shell.approval</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: V41ShellMinga · TUI: V41ShellTui</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC o T: a terminal in the current window</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">terminal.window</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch3_terminal_window · TUI: Batch3_terminal_window</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Shell exited: what is left of the terminal</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">terminal.exited</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch3_terminal_exited · TUI: Batch3_terminal_exited</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Terminal without shell integration</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">terminal.plain</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch3_terminal_plain · TUI: Batch3_terminal_plain</div>
+</div></div>
+<div style="display:flex;align-items:baseline;gap:12px;margin:18px 0 8px"><span style="font-size:15px;font-weight:700">Files and buffers</span><span style="color:#838BA7;font-size:12px">4 designed · 4 existing only · 1 removed</span></div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px"><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC , find file with pinned, changed and recent</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">files.switcher</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: V41Open · TUI: V41TuiTalkOpen</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Switcher with no match</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">files.switcher.no_match</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch4_files_empty · TUI: Batch4_files_empty</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC SPC: find file in project</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">files.project_find</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">File tree</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">files.tree</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">File tree for an empty folder</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">files.tree.empty</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch4_files_empty · TUI: Batch4_files_empty</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC b m: *Messages*</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">files.messages</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC b W: warnings</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">files.warnings</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #626880;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#626880;text-transform:none">Removed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#626880;text-decoration:line-through;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC b b: switch buffer</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">files.buffers</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">*file-list*: picker results exported to a buffer, Vim selection picks a subset</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">files.file_list</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch7_act_picker · TUI: Batch7_act_picker</div>
+</div></div>
+<div style="display:flex;align-items:baseline;gap:12px;margin:18px 0 8px"><span style="font-size:15px;font-weight:700">Windows and drawers</span><span style="color:#838BA7;font-size:12px">3 designed · 1 existing only · 5 removed</span></div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px"><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Two splits side by side</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">windows.split</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">A narrow window: modeline and panes collapse</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">windows.narrow</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch4_windows_narrow · TUI: Batch4_windows_narrow</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Opening a drawer while another is open (terminal, then tasks)</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">windows.drawer_stack</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch5_windows_drawer_stack · TUI: Batch5_windows_drawer_stack</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">The app or terminal lost focus</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">windows.focus_lost</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">TUI: V41TuiTerminalPowers</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #626880;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#626880;text-transform:none">Removed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#626880;text-decoration:line-through;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Workspaces and the workspace capsule (SPC TAB)</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">removed.workspaces</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #626880;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#626880;text-transform:none">Removed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#626880;text-decoration:line-through;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Tab bar</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">removed.tab_bar</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #626880;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#626880;text-transform:none">Removed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#626880;text-decoration:line-through;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Activity bar and permanent sidebar</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">removed.activity_bar</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #626880;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#626880;text-transform:none">Removed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#626880;text-decoration:line-through;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Bottom panel toggle (SPC t p)</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">removed.bottom_panel</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #626880;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#626880;text-transform:none">Removed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#626880;text-decoration:line-through;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Breadcrumb bar</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">removed.breadcrumb</div>
+
+</div></div>
+<div style="display:flex;align-items:baseline;gap:12px;margin:18px 0 8px"><span style="font-size:15px;font-weight:700">Settings and help</span><span style="color:#838BA7;font-size:12px">1 designed · 9 existing only</span></div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px"><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Settings window</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">settings.panel</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC h t: pick theme</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">settings.theme_picker</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC h b/c/f/k/v: describe bindings, command, key, option</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">settings.describe</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC h a: search command help</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">settings.command_help</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC h T: interactive tutorial</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">settings.tutorial</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC h e l: extensions</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">settings.extensions</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">No extensions installed</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">settings.extensions.none</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch4_git_ext_queue_empty · TUI: Batch4_git_ext_queue_empty</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">An extension's own overlay</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">settings.extension_overlay</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC h l: keystroke history</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">settings.keystroke_history</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">SPC o b: BEAM observatory</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">settings.observatory</div>
+
+</div></div>
+<div style="display:flex;align-items:baseline;gap:12px;margin:18px 0 8px"><span style="font-size:15px;font-weight:700">Errors, notices and lifecycle</span><span style="color:#838BA7;font-size:12px">3 designed · 4 existing only</span></div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px"><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">A notice in the notification center</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">errors.notice</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Protocol error overlay</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">errors.protocol_error</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Resyncing with the editor core</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">errors.resync</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #838BA7;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#838BA7;text-transform:none">Existing only</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Latency HUD (developer)</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">errors.latency_hud</div>
+
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">The core restarted: reconnecting, then a notice</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">errors.crash_reconnect</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch3_errors_crash_reconnect · TUI: Batch3_errors_crash_reconnect</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">A language server failed to start</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">errors.lsp_failed</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch3_errors_lsp_failed · TUI: Batch3_errors_lsp_failed</div>
+</div><div style="height:92px;box-sizing:border-box;background:#292C3C;border-radius:8px;border-left:3px solid #A6D189;padding:9px 12px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:#A6D189;text-transform:none">Designed</span><span style="flex:1"></span><span style="font-size:10.5px;color:#626880">macOS · TUI</span></div>
+<div style="color:#C6D0F5;font-weight:600;font-size:12.5px;line-height:16px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Config failed to load</div>
+<div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:10.5px;color:#626880;margin-top:2px">errors.config_error</div>
+<div style="color:#A6D189;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">macOS: Batch3_errors_config_error · TUI: Batch3_errors_config_error</div>
+</div></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":4754}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

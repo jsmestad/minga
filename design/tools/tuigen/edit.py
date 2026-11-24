@@ -1,3 +1,8 @@
+import os as _os
+TOOLS = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+BOARDS = _os.environ.get("BOARDS_DIR", _os.path.join(TOOLS, "..", "boards"))  # committed boards, read only
+OUT_DIR = _os.environ.get("OUT_DIR", _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "out"))
+_os.makedirs(OUT_DIR, exist_ok=True)
 import sys; sys.path.insert(0,'.')
 from grid import *
 W,H=150,38
@@ -51,10 +56,11 @@ for i,(n,parts,sign,auth) in enumerate(L):
         g.put(r,x," ",BG,BLUE)
         g.put(r,x+4,"elixir: undefined function limit_label/1",DIM,None,"i")
 # which-key panel: compact, single-spaced, columns sized to content
+GRP="#a9b1f0"  # which-key group role (astrodark source; re-themes to Frappé lavender)
 cols=[("Tasks",[("a","Tasks",("· 1 needs you",AMBER)),("n","New task…",None),("i","Inspect a task",None),("w","Watch Minga",None),("s","Stop",None)]),
-      ("Conversation",[("v","Conversation",None),("f","Queue follow-up",None),("J","Queued inputs",("· 2",SUB)),("m","Model…",("GPT-6.2 Sol",FAINT)),("h","Resume a session…",None)]),
-      ("Changes",[("r","Review",("· 3",PURPLE)),("u","Reject all…",None),("p","Publish edits",None),("e","Rewrite selection",None),("?","Ask about this line",None)]),
-      ("Context",[("b","Attach this buffer",None),("F","Attach a file…",None),("D","Attach diagnostics",("· 1 error",RED)),("j","Draft attachments",None)])]
+      ("Conversation",[("v","Conversation",None),("?","Ask about this",None),("e","Rewrite selection",None),("q","Queue ›",("2",DIM))]),
+      ("Changes",[("r","Review",("· 3",PURPLE)),("y","Keep change",None),("d","Reject change",None),("u","Reject all…",None),("p","Publish edits…",None)]),
+      ("More",[("x","Context ›",("4",DIM)),("S","Session ›",("7",DIM))])]
 h=8; top=35-h; PX=8; PW=W-18
 wk=Grid(PW,h,bg=SURF)
 wk.box(0,0,h,PW,BORDER,SURF,title=[("SPC",DIM),(" › ",FAINT),("a",PURPLE,"b"),("  Minga",TXT,"b")],
@@ -67,7 +73,7 @@ for head,items in cols:
     for k,(key,lab,extra) in enumerate(items):
         r=2+k
         x=wk.put(r,c,key,PURPLE,None,"b")
-        x=wk.put(r,x+2,lab,TXT)
+        x=wk.put(r,x+2,lab,GRP if lab.endswith("›") else TXT)
         if extra: wk.put(r,x+1,extra[0],extra[1])
     c+=wcol+6
 g.blit(wk,top,PX); g.shadow(top,PX,h,PW)
@@ -101,4 +107,4 @@ annot="""<h4>What renders what</h4>
 <div class="it"><span class="k">Working spinner</span> the ◐ in the modeline and which-key header is a <code>bubbles/spinner</code> with <code>Frames: ◐ ◓ ◑ ◒</code> at 8 fps; static ◐ when motion is reduced.</div>
 <div class="it"><span class="k">Modeline</span> segments are styled blocks joined with one-cell gaps: mode pill (<code>ModeNormal</code>), needs-you chip, file, change, git, Minga, E/W chips, filetype, position. No powerline arrows.</div>
 <div class="it"><span class="k">Degradation</span> <code>colorprofile</code> maps tints to 256 and ANSI 16; shapes and words carry meaning when colour collapses.</div>"""
-open(os.path.join(OUT_DIR,"V41TuiEdit.dc.html"),"w").write(page("TUI: editing and which-key",body,annot))
+open(OUT_DIR+"/V41TuiEdit.dc.html","w").write(page("TUI: editing and which-key",body,annot))

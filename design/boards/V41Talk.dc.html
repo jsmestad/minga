@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>V4.1: talking to Minga</title>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#ecebe8;text-decoration:none}a:hover{color:#ffffff}
+.k{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-weight:600;margin-right:6px}
+.mono{font-family:ui-monospace,'SF Mono',Menlo,monospace}
+.ln{display:flex;align-items:center;height:18px;white-space:pre}
+.num{width:44px;text-align:right;padding-right:10px;flex:none;color:#7a7c85}
+.sgn{width:8px;flex:none}
+.gut{width:10px;height:18px;flex:none;margin-right:12px}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; background: #1e1f24; color: #ecebe8; font-family: -apple-system, 'SF Pro Text', system-ui, sans-serif; display: flex; flex-direction: column; font-size: 13px; border-radius: 12px; overflow: hidden; position: relative">
+<div style="height:30px;flex:none;display:flex;align-items:center;gap:12px;padding:0 12px;border-bottom:1px solid rgba(255,255,255,0.06);position:relative">
+  <div style="display:flex;gap:8px"><span style="width:12px;height:12px;border-radius:6px;background:#ff5f57"></span><span style="width:12px;height:12px;border-radius:6px;background:#febc2e"></span><span style="width:12px;height:12px;border-radius:6px;background:#28c840"></span></div>
+  <span style="font-family:'Instrument Serif',serif;font-style:italic;font-size:16px;color:#8f8d88">minga</span>
+  <div style="position:absolute;left:0;right:0;text-align:center;pointer-events:none"><span style="font-weight:600">Show the plan limit instead of “rate limited”</span>  <span style="color:#8f8d88">with chrome_state.ex · main</span></div>
+</div><div style="flex:1;display:flex;min-height:0"><div style="flex:1;padding-top:16px;font-size:13px;color:#c9c7c2;min-width:0"><div class="ln mono" style=""><span class="num" style="color:#7a7c85">231</span><span class="sgn"></span><span class="gut"></span><span><span style="color:#7f8c98"># Status comes from one owner.</span></span></div><div class="ln mono" style="background:rgba(164,99,230,0.07)"><span class="num" style="color:#b98cf0">232</span><span class="sgn"></span><span class="gut"><svg width="10" height="18" viewBox="0 0 10 24" preserveAspectRatio="none" aria-label="Minga changed these lines" style="display:block;overflow:visible"><path d="M7 5 C7 11, 3 11, 3 17 L3 24" fill="none" stroke="#6b3fa3" stroke-width="2.6" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 24" fill="none" stroke="#1e1f24" stroke-width="5" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 24" fill="none" stroke="#a463e6" stroke-width="2.6" stroke-linecap="round"/></svg></span><span><span style="color:#ff7ab2">@spec</span> workspace_agent_status(...)</span></div><div class="ln mono" style="background:rgba(164,99,230,0.07)"><span class="num" style="color:#b98cf0">233</span><span class="sgn"></span><span class="gut"><svg width="10" height="18" viewBox="0 0 10 24" preserveAspectRatio="none" aria-hidden="true" style="display:block"><path d="M3 0 L3 24" stroke="#6b3fa3" stroke-width="2.6"/><path d="M7 0 L7 24" stroke="#a463e6" stroke-width="2.6"/></svg></span><span><span style="color:#ff7ab2">defp</span> workspace_agent_status(ws) <span style="color:#ff7ab2">do</span></span></div><div class="ln mono" style="background:rgba(164,99,230,0.12)"><span class="num" style="color:#b98cf0">234</span><span class="sgn"></span><span class="gut"><svg width="10" height="18" viewBox="0 0 10 24" preserveAspectRatio="none" aria-hidden="true" style="display:block"><path d="M3 0 L3 24" stroke="#6b3fa3" stroke-width="2.6"/><path d="M7 0 L7 24" stroke="#a463e6" stroke-width="2.6"/></svg></span><span>  ws |&gt; payload() |&gt; <span style="color:#dabaff">AgentPresence</span>.of()<span style="display:inline-block;width:2px;height:16px;background:#a463e6;margin-left:2px;vertical-align:-3px"></span><span style="margin-left:8px;padding:0 7px;border-radius:8px;background:#a463e6;color:#fff;font-family:-apple-system,sans-serif;font-size:10.5px;line-height:16px">Minga</span></span></div><div class="ln mono" style="background:rgba(164,99,230,0.07)"><span class="num" style="color:#b98cf0">235</span><span class="sgn"></span><span class="gut"><svg width="10" height="18" viewBox="0 0 10 24" preserveAspectRatio="none" aria-hidden="true" style="display:block"><path d="M3 0 L3 17" stroke="#6b3fa3" stroke-width="2.6" stroke-linecap="round"/><path d="M7 0 L7 17" stroke="#a463e6" stroke-width="2.6" stroke-linecap="round"/></svg></span><span>  |&gt; <span style="color:#dabaff">AgentPresence</span>.state()</span></div><div class="ln mono" style=""><span class="num" style="color:#7a7c85">236</span><span class="sgn"></span><span class="gut"></span><span><span style="color:#ff7ab2">end</span></span></div></div><div style="width:500px;flex:none;display:flex;flex-direction:column;background:#222329;border-left:1px solid rgba(255,255,255,0.07)">
+  <div class="mono" style="height:28px;flex:none;display:flex;align-items:center;gap:8px;padding:0 18px;border-bottom:1px solid rgba(255,255,255,0.06);font-size:12px;color:#a5a39e"><svg width="12" height="12" viewBox="0 0 16 16" aria-label="Working" style="flex:none;vertical-align:-2px"><circle cx="8" cy="8" r="5.5" fill="none" stroke="#a463e6" stroke-opacity="0.28" stroke-width="1.5"/><path d="M8 2.5 A5.5 5.5 0 0 1 13.5 8" fill="none" stroke="#a463e6" stroke-width="1.5" stroke-linecap="round"/><circle cx="13.5" cy="8" r="2.1" fill="#a463e6"/></svg><span style="color:#ecebe8;font-family:-apple-system,sans-serif">Show the plan limit instead of “rate limited”</span><span style="flex:1"></span><span>4 min · GPT-6.2 Sol</span></div>
+  <div style="flex:1;padding:18px 22px 0;display:flex;flex-direction:column;gap:16px;font-size:14px;line-height:21px">
+    <div><div style="color:#6cb8f5;font-size:11.5px;font-weight:600;margin-bottom:2px">You</div><div>Show the plan limit and when it resets instead of "rate limited".</div></div>
+    <div><div style="color:#b98cf0;font-size:11.5px;font-weight:600;margin-bottom:2px">Minga</div><div style="color:#dcdce2">A 429 with <span class="mono" style="font-size:12.5px">usage_limit_reached</span> is its own case. I'll carry the plan, window and reset time on the error and say it once.</div></div>
+    <div style="display:flex;flex-direction:column;gap:7px">
+      <div style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:#a5a39e"><svg width="13" height="13" viewBox="0 0 16 16" aria-label="Done" style="flex:none;vertical-align:-2px"><circle cx="8" cy="8" r="3.4" fill="#7fbf7a"/></svg><span>Read native.ex and found where 429s are classified</span><span style="flex:1"></span><span></span></div>
+      <div style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:#a5a39e"><svg width="13" height="13" viewBox="0 0 16 16" aria-label="Done" style="flex:none;vertical-align:-2px"><circle cx="8" cy="8" r="3.4" fill="#7fbf7a"/></svg><span>Edited retry.ex so a usage limit is not retried</span><span style="flex:1"></span><span><span style="color:#7fbf7a">+12</span> <span style="color:#e5707a">−3</span></span></div>
+      <div style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:#a5a39e"><svg width="13" height="13" viewBox="0 0 16 16" aria-label="Failed" style="flex:none;vertical-align:-2px"><rect x="4.6" y="4.6" width="6.8" height="6.8" rx="1.2" fill="#e5707a" transform="rotate(45 8 8)"/></svg><span><span style="color:#e5707a">Test run failed · 1 failure</span></span><span style="flex:1"></span><span><span style="color:#dcdce2">o</span> output</span></div>
+      <div style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:#a5a39e"><svg width="13" height="13" viewBox="0 0 16 16" aria-label="Working" style="flex:none;vertical-align:-2px"><circle cx="8" cy="8" r="5.5" fill="none" stroke="#a463e6" stroke-opacity="0.28" stroke-width="1.5"/><path d="M8 2.5 A5.5 5.5 0 0 1 13.5 8" fill="none" stroke="#a463e6" stroke-width="1.5" stroke-linecap="round"/><circle cx="13.5" cy="8" r="2.1" fill="#a463e6"/></svg><span><span style="color:#b98cf0">Editing chrome_state.ex</span></span><span style="flex:1"></span><span></span></div>
+    </div>
+    <div style="font-size:12.5px;color:#8f8d88">2 files changed · <span class="mono" style="color:#b98cf0">SPC a r</span> review</div>
+  </div>
+  <div style="margin:12px 16px 0;border-radius:8px;background:#23242a;border:1px solid rgba(255,255,255,0.07);font-size:12.5px">
+    <div class="mono" style="display:flex;gap:12px;align-items:center;padding:6px 10px;border-bottom:1px solid rgba(255,255,255,0.06);font-size:11.5px;color:#a5a39e"><span style="color:#ecebe8;font-weight:600">*minga-queue*</span><span>2 queued</span><span style="flex:1"></span><span><span class="k" style="color:#e5707a">dd</span>remove</span><span><span class="k" style="color:#6cb8f5">p</span>paste</span><span><span class="k" style="color:#6cb8f5">↩</span>edit</span></div>
+    <div class="mono" style="padding:6px 10px;line-height:20px;color:#c9c7c2"><div><span style="color:#7a7c85">1 </span>Then run the session tests and fix what fails.</div><div><span style="color:#7a7c85">2 </span>Update docs/CONFIGURATION.md with the new limit message.</div></div>
+  </div>
+  <div class="mono" style="margin:10px 16px 0;padding:10px 12px;border-radius:8px;background:#2b2c33;border:1px solid rgba(26,149,242,0.45);min-height:56px;box-sizing:border-box;font-size:13px;line-height:20px;color:#ecebe8"><div>Also show the reset time in the modeline,</div><div>next to the needs-you segment<span style="display:inline-block;width:8px;height:16px;background:rgba(108,184,245,0.85);vertical-align:-3px"></span></div></div>
+  <div class="mono" style="margin:6px 18px 14px;display:flex;gap:18px;font-size:12px;color:#a5a39e">
+    <span><span class="k" style="color:#6cb8f5">↩</span>send</span><span><span class="k" style="color:#6cb8f5">⌥↩</span>queue</span><span><span class="k" style="color:#e5707a">⌘.</span>stop</span><span><span class="k" style="color:#6cb8f5">i</span>insert</span>
+  </div>
+</div></div><div style="height:28px;flex:none;display:flex;align-items:center;gap:16px;padding:0 12px;background:#24252b;border-top:1px solid rgba(255,255,255,0.06);font-size:12px;color:#a5a39e">
+  <span style="padding:1px 8px;border-radius:5px;background:rgba(108,184,245,0.22);color:#6cb8f5;font-weight:700;font-size:11px" class="mono">NORMAL</span>
+  <span style="display:flex;align-items:center;gap:6px;color:#f2b544"><svg width="13" height="13" viewBox="0 0 16 16" aria-label="Needs you" style="flex:none;vertical-align:-2px"><circle cx="8" cy="8" r="6" fill="#f2b544" fill-opacity="0.25"/><circle cx="8" cy="8" r="3.4" fill="#f2b544"/></svg>Needs you</span>
+  <span style="color:#ecebe8">*minga-composer*</span>
+  <span>main +11</span>
+  <span style="display:flex;align-items:center;gap:6px;color:#b98cf0"><svg width="13" height="13" viewBox="0 0 16 16" aria-label="Working" style="flex:none;vertical-align:-2px"><circle cx="8" cy="8" r="5.5" fill="none" stroke="#a463e6" stroke-opacity="0.28" stroke-width="1.5"/><path d="M8 2.5 A5.5 5.5 0 0 1 13.5 8" fill="none" stroke="#a463e6" stroke-width="1.5" stroke-linecap="round"/><circle cx="13.5" cy="8" r="2.1" fill="#a463e6"/></svg>Minga editing chrome_state.ex 2/3</span>
+  <span style="flex:1"></span>
+  <span>Markdown</span><span class="mono">2:29</span>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

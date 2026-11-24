@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>V4.1: reviewing as a buffer</title>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#ecebe8;text-decoration:none}a:hover{color:#ffffff}
+.k{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-weight:600;margin-right:6px}
+.mono{font-family:ui-monospace,'SF Mono',Menlo,monospace}
+.ln{display:flex;align-items:center;height:18px;white-space:pre}
+.num{width:44px;text-align:right;padding-right:10px;flex:none;color:#7a7c85}
+.sgn{width:8px;flex:none}
+.gut{width:10px;height:18px;flex:none;margin-right:12px}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; background: #1e1f24; color: #ecebe8; font-family: -apple-system, 'SF Pro Text', system-ui, sans-serif; display: flex; flex-direction: column; font-size: 13px; border-radius: 12px; overflow: hidden; position: relative">
+<div style="height:30px;flex:none;display:flex;align-items:center;gap:12px;padding:0 12px;border-bottom:1px solid rgba(255,255,255,0.06);position:relative">
+  <div style="display:flex;gap:8px"><span style="width:12px;height:12px;border-radius:6px;background:#ff5f57"></span><span style="width:12px;height:12px;border-radius:6px;background:#febc2e"></span><span style="width:12px;height:12px;border-radius:6px;background:#28c840"></span></div>
+  <span style="font-family:'Instrument Serif',serif;font-style:italic;font-size:16px;color:#8f8d88">minga</span>
+  <div style="position:absolute;left:0;right:0;text-align:center;pointer-events:none"><span style="font-weight:600">chrome_state.ex</span>  <span style="color:#8f8d88">review · lib/minga_editor/session</span></div>
+</div><div style="flex:1;display:flex;min-height:0"><div style="width:460px;flex:none;background:#23242a;border-right:1px solid rgba(255,255,255,0.07);display:flex;flex-direction:column;font-size:13px">
+  <div class="mono" style="padding:12px 18px 8px;border-bottom:1px solid rgba(255,255,255,0.07);background:#26272e"><div style="color:#ecebe8;font-size:12px;font-weight:600">*minga-review* <span style="color:#8f8d88;font-weight:400">· SPC a r</span></div><div style="margin-top:6px;font-size:11.5px;color:#a5a39e;display:flex;flex-wrap:nowrap;gap:4px 10px;white-space:nowrap"><span><span class="k" style="color:#7fbf7a">y</span>keep</span><span><span class="k" style="color:#e5707a">n</span>reject</span><span><span class="k" style="color:#b98cf0">=</span>diff</span><span><span class="k" style="color:#7fbf7a">Y</span>keep all</span><span><span class="k" style="color:#b98cf0">]h</span>next</span><span><span class="k" style="color:#b98cf0">↩</span>go to</span><span><span class="k" style="color:#a5a39e">q</span>close</span></div></div>
+  <div style="padding:6px 18px 12px">
+    <div style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px"><svg width="14" height="14" viewBox="0 0 16 16" aria-label="Done" style="flex:none;vertical-align:-2px"><circle cx="8" cy="8" r="3.4" fill="#7fbf7a"/></svg>Show the plan limit instead of “rate limited”</div>
+    <div style="color:#a5a39e;font-size:12px;margin:4px 0 0 22px">Done 3 min ago · 3 files · <span style="color:#7fbf7a">+40</span> <span style="color:#e5707a">−12</span> · 2 of 4 changes kept</div>
+  </div>
+  <div class="mono" style="padding:0 10px;display:flex;flex-direction:column;gap:1px;font-size:12.5px">
+    <div style="padding:8px 8px 4px;color:#a5a39e;font-family:-apple-system,sans-serif;font-size:12px;font-weight:600">Unreviewed (2 changes in 2 files)</div>
+    <div style="display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:5px;background:rgba(164,99,230,0.16)"><span style="color:#8f8d88">▾</span><span style="flex:1">lib/minga_editor/session/chrome_state.ex</span><span style="color:#8f8d88">1</span></div>
+    <div style="display:flex;align-items:center;gap:8px;padding:3px 8px 3px 44px;color:#dcdce2"><span style="color:#b98cf0">›</span><span style="flex:1">@@ 231 replaced 1 line with 3</span><span style="color:#b98cf0;font-family:-apple-system,sans-serif;font-size:11px">current</span></div>
+    
+    <div style="display:flex;align-items:center;gap:8px;padding:4px 8px"><span style="color:#8f8d88">▸</span><span style="flex:1">lib/minga_agent/usage_limit.ex</span><span style="color:#7fbf7a">new · 1</span></div>
+    <div style="padding:12px 8px 4px;color:#a5a39e;font-family:-apple-system,sans-serif;font-size:12px;font-weight:600">Kept (2 changes)</div>
+    <div style="display:flex;align-items:center;gap:8px;padding:4px 8px;color:#a5a39e"><span style="color:#8f8d88">▸</span><span style="flex:1">lib/minga_agent/retry.ex</span><span>+6 −9</span></div><div style="display:flex;align-items:center;gap:8px;padding:4px 8px;color:#a5a39e"><span style="color:#8f8d88">▸</span><span style="flex:1">lib/minga_editor/session/chrome_state.ex</span><span>@@ 239</span></div>
+  </div>
+  <div style="flex:1"></div>
+  
+</div><div style="flex:1;display:flex;flex-direction:column;min-width:0">
+  <div class="mono" style="height:28px;flex:none;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid rgba(255,255,255,0.06);font-size:12px;color:#a5a39e"><span style="color:#ecebe8">chrome_state.ex</span><span>change 1 of 2</span></div>
+  <div style="flex:1;padding-top:14px;font-size:13px;color:#c9c7c2;position:relative"><div style="position:absolute;right:24px;bottom:20px;width:470px;background:#26272e;border:1px solid rgba(255,255,255,0.09);border-radius:10px;padding:12px 14px;font-size:12px;color:#a5a39e">
+  <div style="color:#ecebe8;font-weight:600;font-size:12px;margin-bottom:8px">In the file itself</div>
+  <div class="mono" style="font-size:12.5px;line-height:22px;color:#c9c7c2">
+    <div style="display:flex;align-items:center"><span style="width:30px;color:#7a7c85;text-align:right;padding-right:8px">232</span><span style="width:10px;margin-right:8px"><svg width="10" height="18" viewBox="0 0 10 22" preserveAspectRatio="none" aria-hidden="true" style="display:block"><path d="M3 0 L3 22" stroke="#6b3fa3" stroke-width="2.6"/><path d="M7 0 L7 22" stroke="#a463e6" stroke-width="2.6"/></svg></span><span style="background:rgba(108,184,245,0.28)">ws |&gt; payload() |&gt; AgentPresence.of()</span></div>
+    <div style="display:flex;align-items:center"><span style="width:30px;color:#7a7c85;text-align:right;padding-right:8px">233</span><span style="width:10px;margin-right:8px"><svg width="10" height="18" viewBox="0 0 10 22" preserveAspectRatio="none" aria-hidden="true" style="display:block"><path d="M3 0 L3 16" stroke="#6b3fa3" stroke-width="2.6" stroke-linecap="round"/><path d="M7 0 L7 16" stroke="#a463e6" stroke-width="2.6" stroke-linecap="round"/></svg></span><span style="background:rgba(108,184,245,0.28)">|&gt; AgentPresence.state()</span></div>
+    <div style="margin-top:6px;padding:3px 8px;border-radius:4px;background:#1e1f24;color:#ecebe8"><span style="color:#8f8d88">vah</span>  then  :'&lt;,'&gt;Minga keep<span style="display:inline-block;width:7px;height:14px;background:#6cb8f5;vertical-align:-2px;margin-left:2px"></span></div>
+  </div>
+  <div style="margin-top:8px"><span class="k" style="color:#7fbf7a">SPC a y</span>keep · <span class="k" style="color:#e5707a">SPC a d</span>reject · <span class="k" style="color:#b98cf0">]h</span>next · <span class="k" style="color:#b98cf0">.</span>repeat</div>
+  <div style="margin-top:4px;color:#8f8d88">y, n, = and q stay Vim in a file.</div>
+</div><div class="ln mono" style=""><span class="num" style="color:#7a7c85">229</span><span class="sgn"></span><span class="gut"></span><span><span style="color:#ff7ab2">defp</span> workspace_payload(%Workspace{payload: p}), <span style="color:#ff7ab2">do</span>: p</span></div><div class="ln mono" style=""><span class="num" style="color:#7a7c85">230</span><span class="sgn"></span><span class="gut"></span><span></span></div><div class="ln mono" style=""><span class="num" style="color:#7a7c85">231</span><span class="sgn"></span><span class="gut"></span><span><span style="color:#7f8c98"># Status comes from one owner.</span></span></div><div class="ln mono" style="background:rgba(229,112,122,0.10)"><span class="num" style="color:#e5707a">−</span><span class="sgn"></span><span class="gut"><svg width="10" height="18" viewBox="0 0 10 24" preserveAspectRatio="none" aria-label="Current change" style="display:block;overflow:visible"><circle cx="5" cy="11" r="7" fill="rgba(164,99,230,0.18)"/><path d="M7 5 C7 11, 3 11, 3 17 L3 24" fill="none" stroke="#6b3fa3" stroke-width="2.6" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 24" fill="none" stroke="#1e1f24" stroke-width="5" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 24" fill="none" stroke="#a463e6" stroke-width="2.6" stroke-linecap="round"/></svg></span><span><span style="color:#d9a5a2">ws.payload.agent_status |&gt; status_label()</span></span></div><div class="ln mono" style="background:rgba(48,209,88,0.10)"><span class="num" style="color:#7fbf7a">232</span><span class="sgn"></span><span class="gut"><svg width="10" height="18" viewBox="0 0 10 24" preserveAspectRatio="none" aria-hidden="true" style="display:block"><path d="M3 0 L3 24" stroke="#6b3fa3" stroke-width="2.6"/><path d="M7 0 L7 24" stroke="#a463e6" stroke-width="2.6"/></svg></span><span>ws |&gt; payload() |&gt; <span style="color:#dabaff">AgentPresence</span>.of()<span style="display:inline-block;width:8px;height:16px;background:rgba(108,184,245,0.85);vertical-align:-3px"></span></span></div><div class="ln mono" style="background:rgba(48,209,88,0.10)"><span class="num" style="color:#7fbf7a">233</span><span class="sgn"></span><span class="gut"><svg width="10" height="18" viewBox="0 0 10 24" preserveAspectRatio="none" aria-hidden="true" style="display:block"><path d="M3 0 L3 24" stroke="#6b3fa3" stroke-width="2.6"/><path d="M7 0 L7 24" stroke="#a463e6" stroke-width="2.6"/></svg></span><span>|&gt; <span style="color:#dabaff">AgentPresence</span>.state()</span></div><div class="ln mono" style="background:rgba(48,209,88,0.10)"><span class="num" style="color:#7fbf7a">234</span><span class="sgn"></span><span class="gut"><svg width="10" height="18" viewBox="0 0 10 24" preserveAspectRatio="none" aria-hidden="true" style="display:block"><path d="M3 0 L3 17" stroke="#6b3fa3" stroke-width="2.6" stroke-linecap="round"/><path d="M7 0 L7 17" stroke="#a463e6" stroke-width="2.6" stroke-linecap="round"/></svg></span><span><span style="color:#7f8c98"># one owner, see AgentPresence</span></span></div><div class="ln mono" style=""><span class="num" style="color:#7a7c85">235</span><span class="sgn"></span><span class="gut"></span><span><span style="color:#ff7ab2">end</span></span></div><div class="ln mono" style=""><span class="num" style="color:#7a7c85">236</span><span class="sgn"></span><span class="gut"></span><span></span></div><div class="ln mono" style=""><span class="num" style="color:#7a7c85">237</span><span class="sgn"></span><span class="gut"></span><span><span style="color:#ff7ab2">def</span> agent_label(%{state: :working, action: a}), <span style="color:#ff7ab2">do</span>: a</span></div><div class="ln mono" style=""><span class="num" style="color:#7a7c85">238</span><span class="sgn"></span><span class="gut"></span><span><span style="color:#ff7ab2">def</span> agent_label(%{state: :needs_you}), <span style="color:#ff7ab2">do</span>: <span style="color:#a6d189">"Needs you"</span></span></div><div class="ln mono" style=""><span class="num" style="color:#7a7c85">239</span><span class="sgn"></span><span class="gut"><svg width="10" height="18" viewBox="0 0 10 24" preserveAspectRatio="none" aria-hidden="true" style="display:block"><path d="M5 0 L5 24" stroke="rgba(164,99,230,0.4)" stroke-width="1.5"/></svg></span><span><span style="color:#ff7ab2">def</span> agent_label(%{state: :done}), <span style="color:#ff7ab2">do</span>: <span style="color:#a6d189">"Done"</span></span></div><div class="ln mono" style=""><span class="num" style="color:#7a7c85">240</span><span class="sgn"></span><span class="gut"><svg width="10" height="18" viewBox="0 0 10 24" preserveAspectRatio="none" aria-hidden="true" style="display:block"><path d="M5 0 L5 24" stroke="rgba(164,99,230,0.4)" stroke-width="1.5"/></svg></span><span><span style="color:#ff7ab2">def</span> agent_label(_), <span style="color:#ff7ab2">do</span>: <span style="color:#a6d189">""</span></span></div><div class="ln mono" style=""><span class="num" style="color:#7a7c85">241</span><span class="sgn"></span><span class="gut"></span><span></span></div></div>
+</div></div><div style="height:28px;flex:none;display:flex;align-items:center;gap:16px;padding:0 12px;background:#24252b;border-top:1px solid rgba(255,255,255,0.06);font-size:12px;color:#a5a39e">
+  <span style="padding:1px 8px;border-radius:5px;background:rgba(108,184,245,0.22);color:#6cb8f5;font-weight:700;font-size:11px" class="mono">NORMAL</span>
+  <span style="display:flex;align-items:center;gap:6px;color:#f2b544"><svg width="13" height="13" viewBox="0 0 16 16" aria-label="Needs you" style="flex:none;vertical-align:-2px"><circle cx="8" cy="8" r="6" fill="#f2b544" fill-opacity="0.25"/><circle cx="8" cy="8" r="3.4" fill="#f2b544"/></svg>Needs you</span>
+  <span style="color:#ecebe8">chrome_state.ex</span>
+  <span style="color:#b98cf0">change 1/2</span>
+  <span>main +11</span>
+  <span style="display:flex;align-items:center;gap:6px;color:#7fbf7a"><svg width="13" height="13" viewBox="0 0 16 16" aria-label="Done" style="flex:none;vertical-align:-2px"><circle cx="8" cy="8" r="3.4" fill="#7fbf7a"/></svg>Minga done 2 to review</span>
+  <span style="flex:1"></span>
+  <span>Elixir</span><span class="mono">233:4</span>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

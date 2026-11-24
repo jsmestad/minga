@@ -1,6 +1,10 @@
+import os as _os
+TOOLS = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+BOARDS = _os.environ.get("BOARDS_DIR", _os.path.join(TOOLS, "..", "boards"))  # committed boards, read only
+OUT_DIR = _os.environ.get("OUT_DIR", _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "out"))
+_os.makedirs(OUT_DIR, exist_ok=True)
 import os
-OUT=os.path.join(os.environ.get("OUT_DIR","./out"),"")
-os.makedirs(OUT,exist_ok=True)
+OUT=OUT_DIR+'/'
 P="#a463e6";A="#f2b544";G="#a5a39e";R="#e5707a";D="#7fbf7a";BG="#1e1f24"
 def st(lab,size=14):
     body={

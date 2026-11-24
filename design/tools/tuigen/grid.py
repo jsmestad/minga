@@ -1,6 +1,4 @@
-import html, os
-OUT_DIR = os.environ.get("OUT_DIR", "./out")
-os.makedirs(OUT_DIR, exist_ok=True)
+import html
 # palette (theme roles in go/tui/internal/ui/theme.go)
 BG="#1e1f24"; SURF="#23242a"; SURF2="#2a2b32"; DIMBG="#1a1b1f"
 TXT="#e6e4df"; SUB="#a5a39e"; DIM="#7a7c85"; FAINT="#55575f"; GHOST="#4a4c53"
@@ -134,10 +132,10 @@ CORN={"╭":("left:50%;top:50%;right:0;bottom:0",("left","top"),"top-left"),
       "╰":("left:50%;top:0;right:0;bottom:50%",("left","bottom"),"bottom-left"),
       "╯":("left:0;top:0;right:50%;bottom:50%",("right","bottom"),"bottom-right")}
 
-CSS=""".tg{font-family:'SF Mono',Menlo,ui-monospace,monospace;font-size:12px;line-height:17px;}
-.tg .r{height:17px;white-space:pre;display:flex}
-.tg .r span{display:inline-block;height:17px;line-height:17px;overflow:visible;text-align:left;flex:none}
-.tg.small{font-size:10.5px;line-height:15px}.tg.small .r,.tg.small .r span{height:15px;line-height:15px}"""
+CSS=""".tg{font-family:'SF Mono',Menlo,ui-monospace,monospace;font-size:12px;line-height:15px;}
+.tg .r{height:15px;white-space:pre;display:flex}
+.tg .r span{display:inline-block;height:15px;line-height:15px;overflow:visible;text-align:left;flex:none}
+.tg.small{font-size:10.5px;line-height:13px}.tg.small .r,.tg.small .r span{height:13px;line-height:13px}"""
 
 def page(title,body,annot):
     return f"""<!doctype html>

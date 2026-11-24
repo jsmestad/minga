@@ -60,7 +60,7 @@ ladder = f'''
   </div>
 </div>'''
 edit = HEAD.format(title="V4.1: editing, the modeline carries state") + titlebar() + f'''
-<div style="flex:1;padding-top:16px;font-family:{MONO};font-size:13.5px;color:#c9c7c2;position:relative">
+<div style="flex:1;padding-top:16px;font-family:{MONO};font-size:13px;color:#c9c7c2;position:relative">
 {code41()}
 </div>
 {ladder}
@@ -69,12 +69,18 @@ open(OUT+"V41Edit.dc.html","w").write(edit)
 
 # ---------- V41WhichKey
 def col(title, items):
+    # Groups (key opens more keys) read "Label ›" in the group colour, with an optional dim count; leaves are plain.
     rows=[]
-    for k,l,kc,note in items:
+    for it in items:
+        k,l,kc,note=it[:4]; grp=len(it)>4 and it[4]
         n=f'<span class="n">{note}</span>' if note else ''
-        rows.append(f'<div class="wk"><span class="k" style="color:{kc}">{k}</span><span class="l">{l}</span>{n}</div>')
+        if grp:
+            rows.append(f'<div class="wk"><span class="k" style="color:{GRP}">{k}</span><span class="l" style="color:{GRP}">{l} ›</span>{n}</div>')
+        else:
+            rows.append(f'<div class="wk"><span class="k" style="color:{kc}">{k}</span><span class="l">{l}</span>{n}</div>')
     head=f'<div style="color:#8f8d88;font-size:11px;font-weight:600;margin:0 0 6px 32px">{title}</div>' if title else ''
     return f'<div style="min-width:230px">{head}{"".join(rows)}</div>'
+GRP="#a9b1f0"  # which-key group role (astrodark source; re-themes to Frappé lavender #babbf1)
 W="#ecebe8"; GO="#b98cf0"
 needs_badge=f'<span style="display:inline-flex;align-items:center;gap:5px;color:{A}">{st("Needs you",12)}1 needs you</span>'
 work_badge=f'<span style="display:inline-flex;align-items:center;gap:5px;color:#b98cf0">{st("Working",12)}2/3</span>'
@@ -83,15 +89,15 @@ panel=f'''
 <div style="position:absolute;left:0;right:0;bottom:28px;background:rgba(37,38,44,0.98);border-top:1px solid rgba(255,255,255,0.10);box-shadow:0 -18px 40px rgba(0,0,0,0.35);padding:14px 28px 16px">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;font-size:12.5px">
     <span style="font-family:{MONO};color:#8f8d88">SPC</span><span style="color:#55575f">›</span>
-    <span style="font-family:{MONO};color:{GO}">a</span><span style="font-weight:700;font-size:13.5px">Minga</span>
+    <span style="font-family:{MONO};color:{GO}">a</span><span style="font-weight:700;font-size:13px">Minga</span>
     <span style="color:#55575f">·</span>{work_badge}<span style="color:#55575f">·</span>{needs_badge}
     <span style="flex:1"></span><span style="color:#8f8d88;font-size:11.5px"><span style="font-family:{MONO}">⌫</span> back   <span style="font-family:{MONO}">esc</span> cancel</span>
   </div>
   <div style="display:flex;gap:40px">
-    {col("Tasks",[("a","Tasks",W,f'<span style="color:{A}">· 1 needs you</span>'),("n","New task…",W,""),("i","Inspect a task",W,""),("w","Watch Minga",W,""),("s","Stop",R,dim("⌘."))])}
-    {col("Conversation",[("v","Conversation",W,""),("f","Queue follow-up",W,""),("J","Queued inputs",W,""),("m","Model…",W,'<span>GPT-6.2 Sol</span>'),("h","Resume a session…",W,"")])}
-    {col("Changes",[("r","Review",W,'<span style="color:#b98cf0">· 3</span>'),("u","Reject all…",W,""),("p","Publish edits",W,""),("e","Rewrite selection",W,""),("?","Ask about this line",W,"")])}
-    {col("Context",[("b","Attach this buffer",W,""),("F","Attach a file…",W,""),("D","Attach diagnostics",W,f'<span style="color:{R}">· 1 error</span>'),("j","Draft attachments",W,"")])}
+    {col("Tasks",[("a","Tasks",W,f'<span style="color:{A}">· 1 needs you</span>'),("n","New task…",W,""),("i","Inspect a task",W,""),("w","Watch Minga",W,""),("s","Stop",W,dim("⌘."))])}
+    {col("Conversation",[("v","Conversation",W,""),("?","Ask about this",W,""),("e","Rewrite selection",W,""),("q","Queue",W,dim("2"),True)])}
+    {col("Changes",[("r","Review",W,'<span style="color:#b98cf0">· 3</span>'),("y","Keep change",W,""),("d","Reject change",W,""),("u","Reject all…",W,""),("p","Publish edits…",W,"")])}
+    {col("More",[("x","Context",W,dim("4"),True),("S","Session",W,dim("7"),True)])}
   </div>
 </div>'''
 inset=f'''
@@ -100,13 +106,13 @@ inset=f'''
   <div style="{NOTE};padding:12px 18px 14px">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px"><span style="font-family:{MONO};color:#8f8d88">SPC</span><span style="font-weight:700">Leader</span></div>
     <div style="display:flex;gap:26px">
-      {col("",[("SPC","Find file",W,""),(",","Switch buffer",W,""),("f","Files",GO,""),("b","Buffers",GO,""),("a","Minga",GO,f'<span style="color:{A}">· 1</span>')])}
-      {col("",[("g","Git",GO,'<span>+11</span>'),("c","Code",GO,f'<span style="color:{R}">· 1</span>'),("s","Search",GO,""),("w","Windows",GO,"")])}
+      {col("",[("SPC","Find file",W,""),(",","Switch buffer",W,""),("f","Files",W,"",True),("b","Buffers",W,"",True),("a","Minga",W,f'<span style="color:{A}">· 1 needs you</span>',True)])}
+      {col("",[("g","Git",W,dim("11 changed"),True),("c","Code",W,f'<span style="color:{R}">· 1 error</span>',True),("s","Search",W,"",True),("w","Windows",W,"",True)])}
     </div>
   </div>
 </div>'''
 wk = HEAD.format(title="V4.1: SPC a, which-key") + titlebar() + f'''
-<div style="flex:1;padding-top:16px;font-family:{MONO};font-size:13.5px;color:#c9c7c2;position:relative;opacity:0.55">
+<div style="flex:1;padding-top:16px;font-family:{MONO};font-size:13px;color:#c9c7c2;position:relative;opacity:0.55">
 {code41()}
 </div>
 {panel}
@@ -152,7 +158,7 @@ drawer=f'''
   </div>
 </div>'''
 tasks = HEAD.format(title="V4.1: Minga tasks drawer") + titlebar() + f'''
-<div style="flex:1;padding-top:16px;font-family:{MONO};font-size:13.5px;color:#c9c7c2;position:relative;overflow:hidden;opacity:0.7">
+<div style="flex:1;padding-top:16px;font-family:{MONO};font-size:13px;color:#c9c7c2;position:relative;overflow:hidden;opacity:0.7">
 {code41(n=15, you_line=None, minga_line=236)}
 </div>
 {drawer}
@@ -171,11 +177,11 @@ def table(title, rows, sub=""):
         trs.append(f'<div style="display:flex;align-items:center;gap:10px;height:22px"><span style="font-family:{MONO};color:#ecebe8;width:122px;flex:none;font-size:12px;white-space:nowrap">{k}</span><span style="color:#c9c7c2;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{a}</span>{tg}{lnh}</div>')
     s=f'<div style="color:#8f8d88;font-size:11px;margin:-4px 0 6px">{sub}</div>' if sub else ''
     return f'<div style="background:#24252b;border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:12px 14px"><div style="font-weight:700;font-size:13px;margin-bottom:8px">{title}</div>{s}{"".join(trs)}</div>'
-leader=table("Leader SPC",[("SPC SPC","Find file in project","kept",122),(":","Commands, ⌘K","kept",39),("SPC ,","Switch buffer, file switcher","new",""),("SPC g k","Keep change at cursor","new",""),("SPC g r","Reject change at cursor","new",""),("SPC c x","Diagnostics list","new","")])
-leadera=table("Leader SPC a  (Minga)",[("SPC a a","Tasks drawer","changed",138),("SPC a v","Conversation split","kept",140),("SPC a r","Review buffer","kept",158),("SPC a s","Stop, ⌘.","kept",141),("SPC a i","Inspect a task in a split","new",""),("SPC a w","Watch Minga in a split","new",""),("SPC a p","Publish agent edits","kept",159),("SPC a f","Queue follow-up","kept",165),("SPC a u","Reject all, asks first","changed",166),("SPC a J","Queued inputs buffer","kept","")])
-infile=table("In a file",[("]h  [h","Next / previous Minga change","new",""),("ih  ah","Text object: one Minga change","new",""),("vah SPC g k","Keep every change in the selection","new",""),(".","Repeat keep or reject","new",""),(":'<,'>Minga keep","Keep a range (or reject)","new",""),("]d  [d","Next / previous diagnostic","",""),("K","Hover: diagnostic or docs","","")],"y n = Y q stay Vim here")
+leader=table("Leader SPC",[("SPC SPC","Find file in project","kept",122),(":","Commands, ⌘K","kept",39),("SPC ,","Switch buffer, file switcher","new",""),("SPC g g","Git status","new",""),("SPC g B","Blame","new",""),("SPC s u","Edit timeline (undo history)","new",""),("SPC c x","Diagnostics list","changed",""),("SPC c d","Go to definition","changed","")])
+leadera=table("Leader SPC a  (Minga)",[("SPC a a","Tasks drawer","changed",138),("SPC a v","Conversation split","kept",140),("SPC a r","Review buffer","kept",158),("SPC a y  d","Keep / reject change at cursor","new",""),("SPC a s","Stop, ⌘.","kept",141),("SPC a i  w","Inspect / watch Minga in a split","new",""),("SPC a p","Publish edits… (publish or discard)","changed",159),("SPC a u","Reject all, asks first","changed",166),("SPC a q","Queue ›  (q open, f follow-up)","changed",""),("SPC a x","Context ›  (b, f, d, l)","new",""),("SPC a S","Session ›  (h, R, m, t, l, H, k)","new","")])
+infile=table("In a file",[("]h  [h","Next / previous Minga change","new",""),("ih  ah","Text object: one Minga change","new",""),("vah SPC a y","Keep every change in the selection","new",""),(".","Repeat keep or reject","new",""),(":'<,'>Minga keep","Keep a range (or reject)","new",""),("]e  [e","Next / previous diagnostic","changed",""),("]d  [d","Next / previous git hunk","",""),("g.","Act on this (⌃. in prompts)","changed",""),("⌃O  ⌃I","Back / forward","",""),("K","Hover: diagnostic or docs","","")],"y n = Y q stay Vim here")
 review=table("*minga-review*",[("y  n","Keep / reject change","",""),("=","Toggle inline diff","",""),("Y","Keep all, asks y/n first","",""),("]h  [h","Next / previous change","",""),("↩","Jump to the change in its file","",""),("q","Close","","")])
-tasksk=table("*minga-tasks*",[("y a t n","Approve once, always, turn, deny","",""),("r","Retry (waiting and failed rows)","",""),("o","Output","",""),("i","Inspect","",""),("x","Stop task, asks first","",""),("↩","Open conversation or review","",""),("j k  /  q","Move, filter, close","","")])
+tasksk=table("*minga-tasks*",[("y a t n","Approve once, always, turn, deny","",""),("c","New task","",""),("r","Retry (waiting and failed rows)","",""),("o","Output","",""),("i","Inspect","",""),("x","Stop task, asks first","",""),("↩","Open conversation or review","",""),("j k  /  q","Move, filter, close","","")])
 switch=table("File switcher  SPC ,",[("↩","Open","",""),("⌃V","Open in split","",""),("⌃T","Pin or unpin","",""),("⌃J  ⌃K","Move","",""),("esc","Close","","")],"you type into the prompt, so actions use ⌃")
 comp=table("Composer",[("↩","Newline (Insert)","",""),("↩  ⌘↩","Send or steer (Normal / any mode)","",""),("⌥↩","Queue next message","",""),("⌘.","Stop","","")])
 rules=f'''<div style="display:flex;flex-direction:column;gap:10px">
