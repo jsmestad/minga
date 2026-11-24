@@ -493,10 +493,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$CHECKSUM_ID" > checksum-artifact.json
+          # The artifacts API can return 404 for an artifact uploaded under a second ago; the helper retries only that.
+          scripts/fetch-run-artifact "$CHECKSUM_ID" checksum-artifact.json "downloads/$CHECKSUM_ID.zip"
           jq --slurpfile artifact checksum-artifact.json '. + $artifact' artifacts.json > artifacts.next.json
           mv artifacts.next.json artifacts.json
-          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$CHECKSUM_ID/zip" > "downloads/$CHECKSUM_ID.zip"
           python3 scripts/release_candidate.py create --context context.json --artifacts artifacts.json --downloads downloads --source-tool-versions source.tool-versions --output manifest.json
       - name: Upload immutable manifest (external handle; never self-hashed)
         id: manifest
@@ -515,10 +515,10 @@ jobs:
         run: |
           set -euo pipefail
           manifest_sha=$(sha256sum manifest.json | cut -d ' ' -f 1)
-          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$MANIFEST_ID" > manifest-artifact.json
+          # The artifacts API can return 404 for an artifact uploaded under a second ago; the helper retries only that.
+          scripts/fetch-run-artifact "$MANIFEST_ID" manifest-artifact.json "downloads/$MANIFEST_ID.zip"
           jq --slurpfile artifact manifest-artifact.json '. + $artifact' artifacts.json > artifacts.next.json
           mv artifacts.next.json artifacts.json
-          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$MANIFEST_ID/zip" > "downloads/$MANIFEST_ID.zip"
           python3 scripts/release_candidate.py verify --context context.json --artifacts artifacts.json --downloads downloads --source-tool-versions source.tool-versions --manifest-artifact-id "$MANIFEST_ID" --manifest-sha256 "$manifest_sha" --receipt preparation-receipt.json
           printf 'manifest_sha=%s\n' "$manifest_sha" >> "$GITHUB_OUTPUT"
           {

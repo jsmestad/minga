@@ -4,11 +4,13 @@
 from datetime import datetime, timedelta, timezone
 import importlib.machinery
 import importlib.util
+import io
 import json
 from pathlib import Path
 import tempfile
 import unittest
 from unittest import mock
+import urllib.error
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts/upload-package-repos"
 LOADER = importlib.machinery.SourceFileLoader("upload_package_repos", str(SCRIPT))
@@ -106,6 +108,53 @@ class UploadPackageReposTest(unittest.TestCase):
             (previous_deb, old), (older_deb, old), (racing_deb, recent), ("apt/dists/stable/InRelease", old))]
         self.assertTrue(self.publish({"version": "0.1.0-dev.7", "files": [previous_deb]}))
         self.assertEqual(self.deletes, [older_deb])
+
+
+    def test_a_refused_manifest_read_fails_the_upload_before_any_upload(self):
+        refused = OSError("GET https://packages.mingacode.dev/repo.json returned HTTP 403 Forbidden")
+        with mock.patch.object(uploader, "published_manifest", side_effect=refused), \
+                mock.patch.object(uploader, "aws") as aws, \
+                mock.patch.object(uploader.sys, "argv", ["upload-package-repos", str(self.tree)]), \
+                mock.patch.object(uploader.sys, "stderr", new_callable=io.StringIO) as stderr:
+            self.assertEqual(uploader.main(), 1)
+        aws.assert_not_called()
+        self.assertIn("HTTP 403", stderr.getvalue())
+
+
+class PublishedManifestTest(unittest.TestCase):
+    """repo.json is read with an explicit agent; only 404 means nothing is published."""
+
+    def fetch(self, outcome):
+        requests = []
+
+        def fake_urlopen(request, timeout):
+            requests.append(request)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return io.BytesIO(json.dumps(outcome).encode())
+
+        with mock.patch.object(uploader.urllib.request, "urlopen", side_effect=fake_urlopen):
+            result = uploader.published_manifest()
+        return result, requests
+
+    def http_error(self, code, reason):
+        return urllib.error.HTTPError(f"{uploader.PUBLIC_URL}/repo.json", code, reason, {}, None)
+
+    def test_sends_the_release_uploader_agent_instead_of_the_python_default(self):
+        manifest, requests = self.fetch({"version": "0.1.0-dev.8"})
+        self.assertEqual(manifest, {"version": "0.1.0-dev.8"})
+        self.assertEqual([request.full_url for request in requests], [f"{uploader.PUBLIC_URL}/repo.json"])
+        self.assertEqual(requests[0].get_header("User-agent"), "minga-release-uploader/1")
+
+    def test_missing_manifest_means_first_publication(self):
+        self.assertIsNone(self.fetch(self.http_error(404, "Not Found"))[0])
+
+    def test_refused_or_failed_requests_fail_with_the_url_and_status(self):
+        for code, reason in ((403, "Forbidden"), (500, "Internal Server Error")):
+            with self.subTest(code=code), self.assertRaises(OSError) as raised:
+                self.fetch(self.http_error(code, reason))
+            self.assertIn(f"{uploader.PUBLIC_URL}/repo.json", str(raised.exception))
+            self.assertIn(f"HTTP {code}", str(raised.exception))
 
 
 if __name__ == "__main__":
