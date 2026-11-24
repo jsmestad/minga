@@ -10,6 +10,7 @@ defmodule Minga.Tool.Installer.GoInstall do
 
   @behaviour Minga.Tool.Installer
 
+  alias Minga.Tool.Installer
   alias Minga.Tool.Recipe
 
   @impl true
@@ -56,7 +57,9 @@ defmodule Minga.Tool.Installer.GoInstall do
     pkg = String.downcase(package)
     url = "https://proxy.golang.org/#{pkg}/@latest"
 
-    case System.cmd("curl", ["-fsSL", url], stderr_to_stdout: true) do
+    case System.cmd("curl", ["-fsSL" | Installer.curl_timeout_args()] ++ [url],
+           stderr_to_stdout: true
+         ) do
       {body, 0} ->
         case JSON.decode(body) do
           {:ok, %{"Version" => version}} ->

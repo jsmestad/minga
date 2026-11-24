@@ -81,6 +81,15 @@ defmodule MingaEditor.Handlers.ToolHandler do
      ]}
   end
 
+  def handle(state, {:minga_event, :tool_update_check_complete, %{updates: updates}}) do
+    {state,
+     [
+       {:log, :editor, :debug, "Tool update check complete: #{length(updates)} update(s)"},
+       {:refresh_tool_picker},
+       :render
+     ]}
+  end
+
   # ── Tool missing prompt ──────────────────────────────────────────────────
 
   def handle(

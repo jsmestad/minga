@@ -10,6 +10,7 @@ defmodule Minga.Tool.Installer.Cargo do
 
   @behaviour Minga.Tool.Installer
 
+  alias Minga.Tool.Installer
   alias Minga.Tool.Recipe
 
   @impl true
@@ -52,9 +53,9 @@ defmodule Minga.Tool.Installer.Cargo do
   def latest_version(%Recipe{package: package}) do
     url = "https://crates.io/api/v1/crates/#{package}"
 
-    case System.cmd("curl", ["-fsSL", "-H", "User-Agent: minga-tool-manager", url],
-           stderr_to_stdout: true
-         ) do
+    args = ["-fsSL", "-H", "User-Agent: minga-tool-manager" | Installer.curl_timeout_args()]
+
+    case System.cmd("curl", args ++ [url], stderr_to_stdout: true) do
       {body, 0} ->
         case JSON.decode(body) do
           {:ok, %{"crate" => %{"max_version" => version}}} -> {:ok, version}

@@ -357,6 +357,7 @@ defmodule MingaEditor do
     EventBus.subscribe(:tool_install_complete, events_registry)
     EventBus.subscribe(:tool_install_failed, events_registry)
     EventBus.subscribe(:tool_uninstall_complete, events_registry)
+    EventBus.subscribe(:tool_update_check_complete, events_registry)
     EventBus.subscribe(:tool_missing, events_registry)
     EventBus.subscribe(:log_message, events_registry)
 

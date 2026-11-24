@@ -35,8 +35,23 @@ defmodule Minga.Tool.Installer do
   @callback installed_version(Recipe.t(), dest_dir :: String.t()) ::
               {:ok, String.t()} | nil
 
+  @doc """
+  Returns the latest published version of the recipe's package.
+
+  The call must give up within `latest_version_timeout_seconds/0`. `Minga.Tool.Manager` kills a lookup that runs longer, but killing the lookup process does not stop a subprocess it started, so each backend bounds its own subprocess or network request.
+  """
   @callback latest_version(Recipe.t()) ::
               {:ok, String.t()} | {:error, term()}
+
+  @latest_version_timeout_seconds 10
+
+  @doc "Seconds a latest-version lookup may spend in its subprocess or network request."
+  @spec latest_version_timeout_seconds() :: pos_integer()
+  def latest_version_timeout_seconds, do: @latest_version_timeout_seconds
+
+  @doc "curl arguments that bound a latest-version request to `latest_version_timeout_seconds/0`."
+  @spec curl_timeout_args() :: [String.t()]
+  def curl_timeout_args, do: ["--max-time", Integer.to_string(@latest_version_timeout_seconds)]
 
   @doc "Returns the installer module for a given method atom."
   @spec for_method(atom()) :: module()

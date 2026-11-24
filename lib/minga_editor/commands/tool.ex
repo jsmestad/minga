@@ -82,9 +82,7 @@ defmodule MingaEditor.Commands.Tool do
 
   @doc "Executes a tool management command."
   @spec execute(state(), atom()) :: state()
-  def execute(state, :tool_install) do
-    PickerUI.open(state, PickerSource)
-  end
+  def execute(state, :tool_install), do: open_manage_picker(state)
 
   def execute(state, :tool_uninstall) do
     if ToolManager.all_installed() == [] do
@@ -120,7 +118,13 @@ defmodule MingaEditor.Commands.Tool do
     end
   end
 
-  def execute(state, :tool_manage) do
+  def execute(state, :tool_manage), do: open_manage_picker(state)
+
+  # Opening the tool picker starts a fresh update check. The Manager replies at once and runs the lookups
+  # outside its mailbox; the picker refreshes when `:tool_update_check_complete` arrives.
+  @spec open_manage_picker(state()) :: state()
+  defp open_manage_picker(state) do
+    :ok = ToolManager.check_updates()
     PickerUI.open(state, PickerSource)
   end
 end

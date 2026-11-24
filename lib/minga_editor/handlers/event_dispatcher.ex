@@ -54,6 +54,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     :tool_install_complete,
     :tool_install_failed,
     :tool_uninstall_complete,
+    :tool_update_check_complete,
     :tool_missing
   ]
 

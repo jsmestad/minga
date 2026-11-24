@@ -11,6 +11,7 @@ defmodule Minga.Tool.Installer.Pip do
 
   @behaviour Minga.Tool.Installer
 
+  alias Minga.Tool.Installer
   alias Minga.Tool.Recipe
 
   @impl true
@@ -60,7 +61,9 @@ defmodule Minga.Tool.Installer.Pip do
   def latest_version(%Recipe{package: package}) do
     url = "https://pypi.org/pypi/#{package}/json"
 
-    case System.cmd("curl", ["-fsSL", url], stderr_to_stdout: true) do
+    case System.cmd("curl", ["-fsSL" | Installer.curl_timeout_args()] ++ [url],
+           stderr_to_stdout: true
+         ) do
       {body, 0} ->
         case JSON.decode(body) do
           {:ok, %{"info" => %{"version" => version}}} -> {:ok, version}
