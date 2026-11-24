@@ -1,6 +1,6 @@
 defmodule Minga.API do
   @moduledoc """
-  Public API for interacting with the editor from eval (`M-:`).
+  Public API for interacting with the editor from eval (`SPC ;`).
 
   Provides user-friendly functions for common editor operations. All
   functions default to the running `MingaEditor` GenServer and the
@@ -9,10 +9,10 @@ defmodule Minga.API do
 
   ## Usage from eval
 
-      # M-: Minga.API.insert("hello")
-      # M-: Minga.API.save()
-      # M-: Minga.API.cursor()
-      # M-: Minga.API.open("lib/minga.ex")
+      # SPC ; Minga.API.insert("hello")
+      # SPC ; Minga.API.save()
+      # SPC ; Minga.API.cursor()
+      # SPC ; Minga.API.open("lib/minga.ex")
 
   ## Error handling
 

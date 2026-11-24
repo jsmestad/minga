@@ -430,10 +430,10 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
 
   @spec render_position(context()) :: [render_segment()]
   defp render_position(%{data: %{selection_info: {:chars, count}}} = ctx),
-    do: [{" #{count} chars ", ctx.info_fg, ctx.info_bg, [], nil}]
+    do: [{" #{count} #{plural(count, "char", "chars")} ", ctx.info_fg, ctx.info_bg, [], nil}]
 
   defp render_position(%{data: %{selection_info: {:lines, count}}} = ctx),
-    do: [{" #{count} lines ", ctx.info_fg, ctx.info_bg, [], nil}]
+    do: [{" #{count} #{plural(count, "line", "lines")} ", ctx.info_fg, ctx.info_bg, [], nil}]
 
   defp render_position(ctx),
     do: [
@@ -475,6 +475,10 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
 
   defp render_indent(_ctx), do: []
 
+  @spec plural(non_neg_integer(), String.t(), String.t()) :: String.t()
+  defp plural(1, one, _many), do: one
+  defp plural(_count, _one, many), do: many
+
   @spec render_percent(context()) :: [render_segment()]
   defp render_percent(ctx) do
     percent = percent_label(ctx.data.cursor_line, ctx.data.line_count)
@@ -485,7 +489,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   defp percent_label(_cursor_line, line_count) when line_count <= 1, do: "Top"
 
   defp percent_label(cursor_line, line_count),
-    do: "#{div(cursor_line * 100, max(line_count - 1, 1))}%%"
+    do: "#{div(cursor_line * 100, max(line_count - 1, 1))}%"
 
   @spec build_git_segments(modeline_data(), non_neg_integer(), Theme.t()) :: [render_segment()]
   defp build_git_segments(data, bar_bg, theme) do

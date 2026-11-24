@@ -317,7 +317,8 @@ final class EditorFocusPolicy: EditorFocusControlling {
 
         if modifiers == .command {
             switch event.charactersIgnoringModifiers {
-            case "q", "h", "m", "n", "o", "s", "w", "z", "x", "c", "v", "a", "f", "b", ",", "=", "+", "-", "0":
+            // "[" and "]" are the Go menu's Back and Forward, the macOS aliases of ⌃O and ⌃I.
+            case "q", "h", "m", "n", "o", "s", "w", "z", "x", "c", "v", "a", "f", "b", ",", "=", "+", "-", "0", "[", "]":
                 return true
             default:
                 return false

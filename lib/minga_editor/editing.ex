@@ -155,13 +155,74 @@ defmodule MingaEditor.Editing do
     )
   end
 
-  @doc "Saves the jump position when the cursor crosses a line boundary."
+  @doc """
+  Records a jump that started at `pos` in the active buffer.
+
+  Sets the `''` position and adds the place to the jump list. Without an active buffer only the `''` position is set.
+  """
   @spec save_jump_pos(EditorState.t(), {non_neg_integer(), non_neg_integer()}) ::
           EditorState.t()
+  def save_jump_pos(%EditorState{workspace: %{buffers: %{active: buf}}} = state, pos)
+      when is_pid(buf) do
+    record_jump(state, buf, pos)
+  end
+
   def save_jump_pos(%EditorState{} = state, pos) do
     install_editing(
       state,
       MingaEditor.VimState.set_last_jump_pos(state.workspace.editing, pos)
+    )
+  end
+
+  @doc """
+  Records a jump from the active buffer's cursor, before a location jump moves it.
+
+  A picker preview only shows a location, so nothing is recorded while one runs; the confirmed pick records the jump.
+  """
+  @spec record_jump_here(EditorState.t()) :: EditorState.t()
+  def record_jump_here(%EditorState{buffer_lifecycle: %{buffer_add_context: :preview}} = state),
+    do: state
+
+  def record_jump_here(%EditorState{workspace: %{buffers: %{active: buf}}} = state)
+      when is_pid(buf),
+      do: record_jump(state, buf, Minga.Buffer.cursor(buf))
+
+  def record_jump_here(%EditorState{} = state), do: state
+
+  @doc "Records a jump that started at `pos` in `buffer`, which may not be the active buffer."
+  @spec record_jump(EditorState.t(), pid(), {non_neg_integer(), non_neg_integer()}) ::
+          EditorState.t()
+  def record_jump(%EditorState{} = state, buffer, pos) when is_pid(buffer) do
+    install_editing(state, VimState.record_jump(state.workspace.editing, buffer, pos))
+  end
+
+  @doc """
+  Records leaving `old_buffer` as a jump when the active buffer changed to another buffer.
+
+  Vim counts editing another file as a jump, so `⌃O` returns to the place you left. Nothing is recorded when the active buffer did not change or `old_buffer` is no longer open.
+  """
+  @spec record_buffer_leave(EditorState.t(), pid() | nil) :: EditorState.t()
+  def record_buffer_leave(
+        %EditorState{workspace: %{buffers: %{active: active, list: list}}} = state,
+        old_buffer
+      )
+      when is_pid(old_buffer) and old_buffer != active do
+    if old_buffer in list,
+      do: record_jump(state, old_buffer, Minga.Buffer.cursor(old_buffer)),
+      else: state
+  catch
+    # The buffer can exit before its :DOWN reaches the editor; a missed jump entry is harmless.
+    :exit, _ -> state
+  end
+
+  def record_buffer_leave(%EditorState{} = state, _old_buffer), do: state
+
+  @doc "Installs the jump list after a walk through it."
+  @spec walk_jump_list(EditorState.t(), MingaEditor.JumpList.t()) :: EditorState.t()
+  def walk_jump_list(%EditorState{} = state, jump_list) do
+    install_editing(
+      state,
+      VimState.walk_jump_list(state.workspace.editing, jump_list)
     )
   end
 end

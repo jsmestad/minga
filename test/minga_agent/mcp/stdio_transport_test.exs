@@ -117,7 +117,7 @@ defmodule MingaAgent.MCP.StdioTransportTest do
       assert String.length(value) == 200
       assert byte_size(json_line) > line_buffer
 
-      Port.close(port)
+      close_port(port)
     catch
       :exit, _ -> :ok
     end
@@ -157,9 +157,16 @@ defmodule MingaAgent.MCP.StdioTransportTest do
 
       assert exceeded > 100
 
-      Port.close(port)
+      close_port(port)
     catch
       :exit, _ -> :ok
     end
+  end
+
+  # The shell exits as soon as it has printed, so the port may already be closed when the test is done with it.
+  defp close_port(port) do
+    Port.close(port)
+  rescue
+    ArgumentError -> :ok
   end
 end

@@ -53,7 +53,7 @@ defmodule Minga.Test.Storyboard.KeyWalk do
     skipped = Explorer.skipped_commands()
     known = KnownViolations.commands()
 
-    for {key, _label} <- Bindings.children(node),
+    for {key, _label, _kind} <- Bindings.children(node),
         target = Bindings.lookup(node, key),
         not left_out?(target, skipped, known) do
       notation = Keys.format([{:key, elem(key, 0), elem(key, 1)}])

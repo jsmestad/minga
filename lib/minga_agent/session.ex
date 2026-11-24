@@ -62,6 +62,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Session.ConnectionTarget
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.Dispatch
+  alias MingaAgent.Session.ModelSwitch
   alias MingaAgent.Session.FileChange
   alias MingaAgent.Session.Outcome
   alias MingaAgent.Session.Prefix
@@ -6720,20 +6721,11 @@ defmodule MingaAgent.Session do
     end
   end
 
-  defp set_model_workflow(state, model, _caller) when is_binary(model) do
-    {candidate, result} =
-      state
-      |> update_model_configuration(model)
-      |> remember_pending_model_change(model)
-      |> refresh_credentials_state_result()
-
-    case result do
-      :ok ->
-        {:reply, :ok, candidate |> commit_connection_selection(state) |> publish_connection()}
-
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
-    end
+  defp set_model_workflow(state, _model, _caller) do
+    {:reply,
+     {:error,
+      "Model switching requires the Native provider and a resolved model selection. Use the model picker or /model command."},
+     state}
   end
 
   @spec stage_apple_model_selection(state(), ModelResolver.intent(), pid(), keyword()) ::
@@ -6786,9 +6778,28 @@ defmodule MingaAgent.Session do
   @spec apply_model_choice(state(), ModelSelection.t()) ::
           {:reply, :ok | {:error, term()}, state()}
   defp apply_model_choice(state, selection) do
-    case apply_resolved_model_selection(state, selection) do
-      {:ok, state} -> {:reply, :ok, state}
-      {:error, _reason} = error -> {:reply, error, state}
+    case ModelSwitch.validate(state.model_selection, selection, state.continuation) do
+      {:ok, _compatibility} ->
+        case apply_resolved_model_selection(state, selection) do
+          {:ok, state} -> {:reply, :ok, state}
+          {:error, _reason} = error -> {:reply, error, state}
+        end
+
+      {:error, :busy} ->
+        {:reply, {:error, :request_active}, state}
+
+      {:error, :budget_exceeded} ->
+        detail = ModelSwitch.budget_detail(selection, state.continuation)
+
+        message =
+          if detail,
+            do: ModelSwitch.budget_exceeded_message(detail),
+            else: "Conversation history exceeds the destination model's context window."
+
+        {:reply, {:error, message}, state}
+
+      {:error, {:capability_gap, gaps}} ->
+        {:reply, {:error, ModelSwitch.capability_gap_message(gaps)}, state}
     end
   end
 
@@ -7781,15 +7792,6 @@ defmodule MingaAgent.Session do
     broadcast(state, {:credentials_status, state.credential_readiness})
   end
 
-  @spec remember_pending_model_change(state(), String.t()) :: state()
-  defp remember_pending_model_change(state, model) do
-    if is_pid(ProviderLifecycle.pid(state.provider)) do
-      %{state | pending_model_change: model}
-    else
-      %{state | pending_model_change: nil}
-    end
-  end
-
   @spec apply_pending_model_change(state()) :: {state(), :ok | {:error, term()}}
   defp apply_pending_model_change(%{pending_model_change: nil} = state), do: {state, :ok}
 
@@ -7987,6 +7989,9 @@ defmodule MingaAgent.Session do
   defp model_change_allowed(%{continuation: %{tool_checkpoint: %{}}}),
     do: {:error, :effect_reconciliation_required}
 
+  defp model_change_allowed(%{continuation: %{dispatch: {_owner, _dispatch}}}),
+    do: {:error, :dispatch_active}
+
   defp model_change_allowed(_state), do: :ok
 
   @spec apply_resolved_model_selection(state(), ModelSelection.t()) ::
@@ -8090,35 +8095,6 @@ defmodule MingaAgent.Session do
     case Enum.find_index(candidates, & &1.current) do
       nil -> first
       index -> Enum.at(candidates, index + 1, first)
-    end
-  end
-
-  @spec update_model_configuration(state(), String.t()) :: state()
-  defp update_model_configuration(state, model) do
-    {provider_name, provider_opts} =
-      session_provider_configuration(
-        state.provider.module,
-        model,
-        state.provider.opts
-      )
-
-    lifecycle =
-      ProviderLifecycle.replace(
-        state.provider,
-        model,
-        provider_name,
-        provider_opts
-      )
-
-    state = %{state | provider: lifecycle, unresolved_route: nil}
-
-    case TurnExecution.recover(state.turn_execution) do
-      {:changed, execution} ->
-        state = announce_display_status(state, execution)
-        %{state | turn_execution: execution}
-
-      :unchanged ->
-        state
     end
   end
 

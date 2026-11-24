@@ -1,0 +1,7 @@
+{
+  "about": "The editor grid the macOS frontend reports at each storyboard window size, with its default chrome. The macOS storyboard renderer checks its own row fit (GridFit) against these numbers and fails with the measured grid when they differ. See docs/design/storyboard.md, \"Renders and baselines\".",
+  "windows": [
+    {"width": 1440, "height": 900, "cols": 177, "rows": 43},
+    {"width": 1280, "height": 800, "cols": 156, "rows": 38}
+  ]
+}

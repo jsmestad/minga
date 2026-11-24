@@ -202,14 +202,32 @@ defmodule MingaAgent.Session.ConnectionAuthorityTest do
   end
 
   test "committed replacement invalidates setup including A to B to A model changes", context do
-    session = start_session(context)
+    model_a = "openai:model-a"
+    model_b = "openai:model-b"
+    opts_a = ModelSelectionFixture.resolver_opts(model_id: "model-a")
+    opts_b = ModelSelectionFixture.resolver_opts(model_id: "model-b")
+    merged_models = Keyword.get(opts_a, :models) ++ Keyword.get(opts_b, :models)
+    multi_model_opts = Keyword.put(opts_a, :models, merged_models)
+
+    assert :ok = Credentials.store("openai", "synthetic-configured", context.credential_opts)
+
+    session =
+      start_session(context,
+        provider: MingaAgent.Providers.Native,
+        provider_opts: [
+          model: model_a,
+          credential_opts: context.credential_opts,
+          config: %MingaAgent.Config{},
+          model_resolver_opts: Keyword.delete(multi_model_opts, :credential_snapshot)
+        ]
+      )
+
     original = target(session)
     {:ok, ref} = Session.begin_connection(session, original, {:api_key, "openai"}, self())
-    model = Session.metadata(session).model_name
-    assert :ok = Session.set_model(session, "test:replacement")
+    assert :ok = Session.set_model(session, model_b)
     second = target(session)
     assert second.epoch != original.epoch
-    assert :ok = Session.set_model(session, model)
+    assert :ok = Session.set_model(session, model_a)
     returned = target(session)
     assert returned.epoch != original.epoch
     assert returned.epoch != second.epoch
@@ -227,8 +245,6 @@ defmodule MingaAgent.Session.ConnectionAuthorityTest do
 
     assert {:error, :stale_target} =
              Session.begin_connection(session, original, {:api_key, "openai"}, self())
-
-    assert {:error, :enoent} = File.read(context.credential_path)
   end
 
   test "failed load preserves the live target, committed same-record loads always invalidate",

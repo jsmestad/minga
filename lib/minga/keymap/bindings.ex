@@ -262,7 +262,7 @@ defmodule Minga.Keymap.Bindings do
 
   @doc """
   Sets a human-readable description on an intermediate (prefix) node without
-  binding a command. Useful for labelling leader-key groups like `f → "+file"`.
+  binding a command. Useful for labelling leader-key groups like `f → "Files"`.
 
   Creates intermediate nodes as needed.
   """
@@ -521,9 +521,7 @@ defmodule Minga.Keymap.Bindings do
   @doc """
   Returns the direct children of a trie node for which-key display.
 
-  Each entry is a `{key, label}` tuple where `label` is either the
-  description string (for a terminal binding) or the command atom (for a
-  prefix or unnamed node).
+  Each entry is a `{key, label, kind}` tuple. `label` is the description string, or the command atom (or `:prefix`) for an unnamed node. `kind` is `:group` for a node that only leads to more keys and `:command` for a node that runs a command. Which-key tells groups from leaves by `kind`, never by the label's text.
 
   A group label with no command bound beneath it is omitted. For example, `SPC g c` does not appear until an extension contributes a commit binding to the group.
 
@@ -532,9 +530,9 @@ defmodule Minga.Keymap.Bindings do
       iex> trie = Minga.Keymap.Bindings.new()
       iex> trie = Minga.Keymap.Bindings.bind(trie, [{?j, 0}], :move_down, "Move cursor down")
       iex> Minga.Keymap.Bindings.children(trie)
-      [{{106, 0}, "Move cursor down"}]
+      [{{106, 0}, "Move cursor down", :command}]
   """
-  @spec children(node_t()) :: [{key(), String.t() | atom()}]
+  @spec children(node_t()) :: [{key(), String.t() | atom(), :command | :group}]
   def children(%Node{children: children}) do
     children
     |> Enum.filter(fn {_key, node} -> reachable?(node) end)
@@ -547,7 +545,8 @@ defmodule Minga.Keymap.Bindings do
           true -> :unknown
         end
 
-      {key, label}
+      kind = if command == nil and map_size(sub) > 0, do: :group, else: :command
+      {key, label, kind}
     end)
   end
 

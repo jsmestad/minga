@@ -70,6 +70,7 @@ defmodule Minga.Mode.Normal do
 
   # Special codepoints
   @escape 27
+  @tab 9
   @space 32
 
   # Modifier flags (mirrors MingaEditor.Frontend.Protocol)
@@ -407,12 +408,13 @@ defmodule Minga.Mode.Normal do
     {:execute, :move_right, state}
   end
 
+  # ⌥h ⌥j ⌥k ⌥l are aliases (docs/design/keys.md): ⌥h is SPC c v, ⌥l is SPC c V, ⌥j is ]n and ⌥k is [n.
   def handle_key({?h, mods}, state) when band(mods, @alt) != 0 do
-    {:execute, :nav_parent, state}
+    {:execute, :selection_expand, state}
   end
 
   def handle_key({?l, mods}, state) when band(mods, @alt) != 0 do
-    {:execute, :nav_first_child, state}
+    {:execute, :selection_shrink, state}
   end
 
   def handle_key({?j, mods}, state) when band(mods, @alt) != 0 do
@@ -744,6 +746,22 @@ defmodule Minga.Mode.Normal do
     {:execute, :redo, state}
   end
 
+  # ── Jump list ─────────────────────────────────────────────────────────────
+
+  # Ctrl+O → back in the jump list.
+  def handle_key({?o, mods}, state) when band(mods, @ctrl) != 0 do
+    {:execute, :jump_back, state}
+  end
+
+  # Ctrl+I → forward in the jump list. Terminals send Ctrl+I as Tab, so Tab does the same, as in Vim.
+  def handle_key({?i, mods}, state) when band(mods, @ctrl) != 0 do
+    {:execute, :jump_forward, state}
+  end
+
+  def handle_key({@tab, 0}, state) do
+    {:execute, :jump_forward, state}
+  end
+
   # ── Register prefix ───────────────────────────────────────────────────────
 
   # " → start register-selection sequence (completion is in the pending block above)
@@ -814,13 +832,6 @@ defmodule Minga.Mode.Normal do
   # # → search word under cursor backward
   def handle_key({?#, 0}, state) do
     {:execute, :search_word_under_cursor_backward, state}
-  end
-
-  # ── Eval mode entry ────────────────────────────────────────────────────────
-
-  # `Alt+:` (M-:) → enter eval mode.
-  def handle_key({?:, mods}, state) when band(mods, @alt) != 0 do
-    {:transition, :eval, state}
   end
 
   # ── Command mode entry ────────────────────────────────────────────────────

@@ -90,6 +90,8 @@ mix test --only storyboard test/storyboard
 
 **The cold start.** Until the home buffer lands (#4056), the factory starts every scenario from a headless editor with one Elixir file open in Normal mode, which is `edit.plain`.
 
+**The parser.** Every session runs the real tree-sitter parser, so structural motions, text objects, folds and highlighting behave as they do in the app, and a key that needs the syntax tree is never reported as doing nothing. `test/test_helper.exs` starts one shared `Minga.Parser.Manager` before any test runs (its Port is an OS process, which async tests must not spawn concurrently); each session registers its buffer with it and returns only once the highlights are applied. Build the parser with `mix native.build.support` before running the suite. Each session's buffer edits reach the shared parser through `Minga.Test.Storyboard.ParserRelay`, because every session keeps its own private events registry.
+
 **Design checks.** `Minga.Test.Storyboard.Assertions` asserts against the semantic model by structure and token name, never by pixel: modeline segment order, which-key groups and counts, state words and colour roles from `Minga.Design.Tokens`, keys shown on transient surfaces, the open and focused surface, and the empty-state anatomy. A check that waits on a ticket is written with `Check.pending/3`; the suite runs it anyway and fails when it starts to pass, so the ticket that lands the surface turns it on.
 
 **The flow explorer.** `Minga.Test.Storyboard.Explorer` presses every key the active trie offers from every built scenario (the Vim normal keys and every leader binding from `edit.plain`, every which-key child from a which-key scenario), plus the scenario's designed exits, each from a fresh editor. Keys come from the keymap, so they follow key moves. It classifies where each key lands, checks the way out within three presses of `esc` or `q`, and prints the screens it cannot classify. A random key walk (`key_walk_property_test.exs`) checks the way out and a defined state after every step. Violations that exist today are listed with their issue in `test/fixtures/storyboard/known_violations.tsv`; the list only shrinks.
@@ -103,6 +105,55 @@ model = Minga.Test.Storyboard.Session.model(session)
 ```
 
 `Session.model/1` returns a `Minga.Test.Storyboard.Model` (the `Minga.RenderModel.UI` plus derived facts); `Journeys.run/2` returns the frames it saw, one per step, as far as the first pending surface.
+
+## Renders and baselines
+
+The factory's semantic checks prove what a frame says. Renders prove what each frontend draws: every built scenario is drawn by the real renderers on both frontends, and those drawings, not the boards, are the baselines a pull request is compared against.
+
+**What renders.** Each built scenario renders in three themes (Catppuccin Frappé, astrodark and Catppuccin Latte), in the terminal at 80x24, 120x40 and 150x38, and on macOS in windows 1440 and 1280 points wide. `Minga.Test.Storyboard.Render` drives the scenario once per frontend, theme and size, tells the editor the capabilities that frontend reports, and records every packet the editor sends. The frontends replay those packets through their production decoders:
+
+- the Go TUI in `go/tui/internal/ui/storyboard_render_test.go` writes a text grid with its style runs (every cell's colours and attributes);
+- macOS, in PreviewHost's storyboard mode, hosts the production `ContentView` and Metal editor in a real window and writes a PNG plus an export of every anatomy part the chrome tags with `View.anatomyPart(_:)`: its frame, text and baseline in window points.
+
+The text-grid snapshots of the existing snapshot system (`test/storyboard/render_test.exs`, `docs/SNAPSHOT_TESTING.md`) run in the same suite. Images are for people; the text grids and part exports are the baselines.
+
+**The editor grid on macOS.** The BEAM lays out in the rows and columns the frontend reports (ADR-0001), so each macOS window size has its grid in `test/storyboard/macos_geometry.json`. The macOS renderer measures its own row fit and fails with the measured grid when the file disagrees, for example after a chrome change moves the editor's edges.
+
+**Baselines.** `test/storyboard/baselines/<scenario>/` holds one file per frontend, theme and size, and `promotion.json` records the commit that produced them. CI fails when:
+
+- a render does not match its committed baseline (a stale baseline);
+- a built scenario has no baseline, or a baseline has no render (a size, theme or scenario went away);
+- a scenario changed against the base branch on one frontend but not the other, unless the scenario's promotion is tagged platform-specific with a reason.
+
+A scenario's first renders become its baseline once they pass the layout audit and visual review. `promote` refuses a render with an open layout-audit finding; visual review is recorded on the pull request. Pending scenarios are listed, never rendered and never failures.
+
+**The layout audit.** `design/tools/storyboard/audit.py` measures every rendered frame against [anatomy.md](anatomy.md): token gaps and row pitch, leading edges and baselines, clipping and truncation, macOS hit targets, contrast from pixels and cells (syntax colours included), and the same part measuring the same in every scenario. It reads its numbers from the token scales, never its own. The **Storyboard renders** job runs it and fails on a finding without an exception; see [The layout audit](anatomy.md#the-layout-audit) for the rules and the exceptions file.
+
+**Running it.** From the repository root, with the pinned Elixir and Go toolchains:
+
+```bash
+python3 design/tools/storyboard/renders.py render        # transcripts and TUI frames in _build/storyboard
+python3 design/tools/storyboard/renders.py render-macos  # macOS frames (macOS with Xcode only)
+python3 design/tools/storyboard/renders.py diff          # against the committed baselines and main
+python3 design/tools/storyboard/renders.py page          # _build/storyboard/page/index.html
+```
+
+**Accepting a change.** One command updates the baselines:
+
+```bash
+gh run download <run-id> -n storyboard-macos -D /tmp/storyboard-macos   # macOS frames from the PR's CI run
+python3 design/tools/storyboard/renders.py promote --macos /tmp/storyboard-macos
+```
+
+`promote` renders the TUI locally, copies both frontends' renders into the baseline store and records the commit. macOS baselines always come from CI, because the runner's fonts and SDK decide the exact frames; without `--macos` only the TUI baselines move. When a change is meant for one frontend only, add `--platform-specific 'macos:the reason'` (or `tui:`) so the parity check accepts it. `promote` also accepts the scenarios' text-grid snapshots, so one command updates every baseline.
+
+**In CI.** The **Storyboard (Elixir)** job records the transcripts and draws the TUI frames. **Storyboard renders (macOS)** draws the macOS frames on `macos-15` whenever native sources changed, a macOS-only input changed (the renderer's tools, the window grid, the baselines), or the packets for a macOS frame differ from the ones its baseline was promoted from (each promotion records a digest of them). When it is skipped, its frames equal their baselines by construction, so the parity check still applies. **Storyboard renders** compares both with the baselines, checks parity, writes the changed scenarios to the job summary and publishes the generated storyboard page as the `storyboard-page` artifact: scenarios in rows, frontends and sizes in columns, a theme switch, and the journeys below as frame strips. It is part of the CI gate.
+
+## Visual review
+
+Hard gates decide whether a pull request merges: the semantic checks, the conformance transcripts, the snapshots, the render baselines and the layout audit. Visual review catches what they cannot, and never blocks. Every pull request that changes a scenario's renders, or promotes a scenario's first baselines, gets one before it is marked ready: two independent reviewer agents check structure against the scenario's board and polish against [anatomy.md](anatomy.md), using the fixed [rubric](visual_rubric.md); a polish critic then runs at most three rounds. Their verdicts are posted on the pull request as one "Visual review" comment with the number of changed scenarios reviewed, and every concern, disagreement and open critic item is appended to the visual follow-ups issue ([#4071](https://github.com/jsmestad/minga/issues/4071)).
+
+CI does not run agents, so the Minga ticket runner runs the review after CI has rendered the storyboard. The procedure, the inputs script and the record format are in [Run the visual review](../recipes/visual-review.md).
 
 ## Journey strips
 

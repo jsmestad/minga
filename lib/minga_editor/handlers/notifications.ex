@@ -86,7 +86,7 @@ defmodule MingaEditor.Handlers.Notifications do
         level: :warning,
         title: agent_edits_title(file_count),
         body:
-          "#{workspace_label}: approved edits are staged. Publish writes them to disk and open buffers; Discard drops them. Keys: SPC a p publish, SPC a P discard.",
+          "#{workspace_label}: approved edits are staged. Publish writes them to disk and open buffers; Discard drops them. Key: SPC a p publishes or discards.",
         source: "Agent",
         actions: [
           %{

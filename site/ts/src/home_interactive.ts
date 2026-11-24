@@ -71,7 +71,7 @@ export const HERO_PEEK_WORKERS: readonly PeekWorkerSpec[] = [
     brief: "Check whether public return tuples changed in docs/ and update examples if needed.",
     lines: [
       { glyph: "●", cls: "ml-done", text: "Confirmed {:rate_limited, ms} and {:overloaded, ms} match spec" },
-      { glyph: "◐", cls: "ml-minga", text: "Scanning docs/agent.md for retry table mentions" },
+      { glyph: "◐", cls: "ml-minga", text: "Scanning docs/AGENT-MODEL-SELECTION.md for retry table mentions" },
     ],
   },
 ];
@@ -99,7 +99,7 @@ export const SEMANTIC_MARK_THEMES: Record<MarksThemeId, SemanticThemeRoles> = {
     border: "#414559",
     text: "#c6d0f5",
     minga: "#ca9ee6",
-    mingaDim: "#74628d",
+    mingaDim: "#75648e",
     you: "#8caaee",
     needsYou: "#ef9f76",
     waiting: "#838ba7",
@@ -115,24 +115,24 @@ export const SEMANTIC_MARK_THEMES: Record<MarksThemeId, SemanticThemeRoles> = {
     minga: "#8839ef",
     mingaDim: "#b896e8",
     you: "#1e66f5",
-    needsYou: "#fe640b",
+    needsYou: "#d35400",
     waiting: "#7c7f93",
     failure: "#d20f39",
-    done: "#40a02b",
+    done: "#388e25",
   },
   astrodark: {
     label: "AstroDark",
     isLight: false,
     bg: "#1a1d23",
     border: "#2a2f3a",
-    text: "#d8dee9",
-    minga: "#c678dd",
-    mingaDim: "#6f497c",
-    you: "#61afef",
-    needsYou: "#d19a66",
-    waiting: "#7b8496",
-    failure: "#e06c75",
-    done: "#98c379",
+    text: "#adb0bb",
+    minga: "#dd97f1",
+    mingaDim: "#7c5888",
+    you: "#50a4e9",
+    needsYou: "#f5983a",
+    waiting: "#696c76",
+    failure: "#f8747e",
+    done: "#75ad47",
   },
   doom_one: {
     label: "Doom One",
@@ -440,7 +440,7 @@ export function mountHeroTour(root: HTMLElement): void {
       state.twistStatus === "unreviewed"
         ? '<span class="ml-minga">change 1/2</span>'
         : state.twistStatus === "kept"
-          ? '<span class="ml-done">● kept</span>'
+          ? '<span class="ml-done">● Done</span>'
           : '<span class="ml-dim">rejected</span>';
 
     specimen.innerHTML = `
@@ -631,7 +631,7 @@ export function mountHeroTour(root: HTMLElement): void {
       <div class="spine-modeline">
         <div class="ml-left">
           <span class="ml-pill">NORMAL</span>
-          ${needsOpen ? '<span class="ml-needs">◉ 1 needs you</span>' : '<span class="ml-done">● Queue ready</span>'}
+          ${needsOpen ? '<span class="ml-needs">◉ 1 needs you</span>' : '<span class="ml-done">● Done</span>'}
           <span class="ml-file">*minga-tasks*</span>
         </div>
         <div class="ml-right">
@@ -797,12 +797,29 @@ export function mountHeroTour(root: HTMLElement): void {
     }
   });
 
-  root.addEventListener("keydown", (event) => {
-    const target = event.target as HTMLElement | null;
-    if (!target) return;
-    if (target.matches("input, textarea, select")) return;
+  window.addEventListener("keydown", (event) => {
+    const activeEl = document.activeElement as HTMLElement | null;
+    if (activeEl?.matches("input, textarea, select, [contenteditable]")) return;
     if (event.metaKey || event.ctrlKey || event.altKey) return;
-    if (target.closest(".showcase-nav")) return;
+
+    // Only capture page-level keys while the Feature Tour is visible in the viewport.
+    const rect = root.getBoundingClientRect();
+    const visible = rect.bottom > 80 && rect.top < window.innerHeight - 80;
+    const focusedInside = activeEl ? root.contains(activeEl) : false;
+    if (!visible && !focusedInside) return;
+
+    // Let arrow/home/end/tab/enter keys work normally on showcase tabs and buttons.
+    if (
+      activeEl?.closest(".showcase-nav") &&
+      (event.key === "ArrowLeft" ||
+        event.key === "ArrowRight" ||
+        event.key === "Home" ||
+        event.key === "End" ||
+        event.key === "Enter" ||
+        event.key === "Tab")
+    ) {
+      return;
+    }
 
     const tabId = activeTabId();
     const res = handleHeroTourKey(state, tabId, pendingChord, event.key);
@@ -815,9 +832,6 @@ export function mountHeroTour(root: HTMLElement): void {
     else if (tabId === "panel-spec-peek") renderPeek();
     else if (tabId === "panel-spec-tasks") renderTasks();
     else renderParity();
-
-    const activePanel = root.querySelector<HTMLElement>(`#${tabId}`);
-    activePanel?.querySelector<HTMLElement>(".spine-specimen")?.focus();
   });
 
   renderAll();

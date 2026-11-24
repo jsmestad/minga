@@ -366,8 +366,8 @@ defmodule MingaAgent.SessionRecoveryTest do
     assert Session.subagent_context(session).provider_name == "anthropic"
   end
 
-  test "set_model/2 returns startup errors when refresh triggers a failing provider" do
-    {checker, credentials_configured_fn} = start_credential_checker(false)
+  test "set_model/2 rejects non-Native providers before attempting provider start" do
+    {_checker, credentials_configured_fn} = start_credential_checker(false)
 
     {:ok, session} =
       Session.start_link(
@@ -376,13 +376,8 @@ defmodule MingaAgent.SessionRecoveryTest do
         credentials_configured_fn: credentials_configured_fn
       )
 
-    Agent.update(checker, fn _ -> true end)
-
     assert {:error, message} = Session.set_model(session, "anthropic:claude-sonnet-4-20250514")
-    assert message =~ "Failed to start agent: boom"
-    assert message =~ "Press Ctrl-C to retry now"
-
-    assert Session.get_provider(session) == nil
+    assert message =~ "Native provider"
   end
 
   test "provider start failures retry with backoff and recover" do
@@ -410,7 +405,7 @@ defmodule MingaAgent.SessionRecoveryTest do
     assert Session.status(session) == :idle
   end
 
-  test "starting early cancels the installed provider retry timer" do
+  test "restarting early cancels the installed provider retry timer" do
     {:ok, tracker} = Agent.start_link(fn -> %{attempts: 0, failures_remaining: :always} end)
 
     {:ok, session} =
@@ -432,8 +427,7 @@ defmodule MingaAgent.SessionRecoveryTest do
     assert {timer_ref, _token} = ProviderLifecycle.retry_timer(state.provider)
     assert is_integer(Process.read_timer(timer_ref))
 
-    assert {:error, _reason} =
-             Session.set_model(session, "anthropic:test", @startup_timeout)
+    assert {:error, _reason} = Session.restart_provider(session)
 
     assert_receive {:flaky_start_attempt, 2}, 1_000
     assert Process.read_timer(timer_ref) == false

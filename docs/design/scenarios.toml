@@ -683,7 +683,7 @@ surfaces = ["hover_popup"]
 states = []
 frontends = ["macos", "tui"]
 status = "designed"
-boards = { macos = "V3Diagnostics.dc.html" }
+boards = { macos = "V3Diagnostics.dc.html", tui = "Batch8_code_diagnostics_hover.dc.html" }
 transient = true
 exits = [
   { key = "g.", click = "g. actions", to = "minga.act_menu" },
@@ -691,7 +691,7 @@ exits = [
   { key = "y", click = "Copy", to = "code.diagnostics.hover", keyboard_only = "copies the message" },
   { key = "esc", click = "click outside", to = "edit.plain" },
 ]
-notes = "macOS board predates V4.1; TUI board missing."
+notes = "The macOS board predates V4.1; Batch8_code_diagnostics_hover shows both frontends in today's style."
 
 [[scenario]]
 id = "code.diagnostics.list"
@@ -1871,9 +1871,9 @@ surfaces = ["editor", "modeline"]
 states = []
 frontends = ["macos", "tui"]
 status = "designed"
-boards = { tui = "V41TuiTerminalPowers.dc.html" }
+boards = { macos = "Batch8_windows_focus_lost.dc.html", tui = "V41TuiTerminalPowers.dc.html" }
 exits = []
-notes = "A state, not a place. macOS board missing."
+notes = "A state, not a place."
 
 [[scenario]]
 id = "removed.workspaces"

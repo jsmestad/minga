@@ -1675,7 +1675,18 @@ fn structuralNavTarget(node: c.TSNode, action: protocol.StructuralNavAction) ?c.
         .first_child => nullIfNull(c.ts_node_named_child(node, 0)),
         .next_sibling => nullIfNull(c.ts_node_next_named_sibling(node)),
         .prev_sibling => nullIfNull(c.ts_node_prev_named_sibling(node)),
+        _ => namedAncestor(node, action.ancestorDepth() orelse return null),
     };
+}
+
+/// Returns `node` for depth 0, or its `depth`-th meaningful named parent; null past the last one below the root.
+fn namedAncestor(node: c.TSNode, depth: u8) ?c.TSNode {
+    var current = node;
+    var remaining = depth;
+    while (remaining > 0) : (remaining -= 1) {
+        current = firstMeaningfulNamedParent(current) orelse return null;
+    }
+    return current;
 }
 
 fn firstMeaningfulNamedParent(node: c.TSNode) ?c.TSNode {
@@ -2692,6 +2703,28 @@ test "highlighter: structural nav next and previous siblings move between argume
     try std.testing.expectEqual(@as(u32, 0), prev.start_row);
     try std.testing.expectEqual(@as(u32, 5), prev.start_col);
     try std.testing.expectEqualStrings("identifier", prev.type_name);
+}
+
+test "highlighter: structural nav ancestors walk outward from the node at the point" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("javascript"));
+    try hl.parse("f(a, b, c);");
+
+    const base = protocol.StructuralNavAction.ancestor_base;
+    const self_node = hl.structuralNav(0, 2, @enumFromInt(base)) orelse return error.NoMatch;
+    try std.testing.expectEqualStrings("identifier", self_node.type_name);
+    try std.testing.expectEqual(@as(u32, 2), self_node.start_col);
+    try std.testing.expectEqual(@as(u32, 3), self_node.end_col);
+
+    const args = hl.structuralNav(0, 2, @enumFromInt(base + 1)) orelse return error.NoMatch;
+    try std.testing.expectEqualStrings("arguments", args.type_name);
+
+    const call = hl.structuralNav(0, 2, @enumFromInt(base + 2)) orelse return error.NoMatch;
+    try std.testing.expectEqualStrings("call_expression", call.type_name);
+
+    try std.testing.expect(hl.structuralNav(0, 2, @enumFromInt(base + 10)) == null);
 }
 
 test "highlighter: structural nav returns null when no target exists" {

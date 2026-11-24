@@ -99,6 +99,8 @@ defmodule Minga.Test.EditorCase do
     - `:file_path` — optional file path for the buffer
     - `:name` — optional Editor registration name (defaults to a unique test name)
     - `:child_id` — optional supervisor child id, so a caller can `stop_supervised/1` the editor before the test ends
+    - `:record_packets` — keep every packet the editor sends, for `Minga.Test.HeadlessPort.packets/1` (default false)
+    - `:parser_manager` — a running `Minga.Parser.Manager` for real tree-sitter highlighting (default: none in tests)
   """
   @spec start_editor(String.t(), keyword()) :: editor_ctx()
   def start_editor(content, opts \\ []) do
@@ -116,7 +118,11 @@ defmodule Minga.Test.EditorCase do
     sidebar_registry =
       Keyword.get_lazy(opts, :sidebar_registry, fn -> start_sidebar_registry(id) end)
 
-    port_opts = [width: width, height: height]
+    port_opts = [
+      width: width,
+      height: height,
+      record_packets: Keyword.get(opts, :record_packets, false)
+    ]
 
     port_opts =
       if Keyword.has_key?(opts, :capabilities),
@@ -196,6 +202,11 @@ defmodule Minga.Test.EditorCase do
 
     editor_opts =
       if shell, do: [{:shell, shell}, {:skip_persistence, true} | editor_opts], else: editor_opts
+
+    editor_opts =
+      if Keyword.has_key?(opts, :parser_manager),
+        do: [{:parser_manager, Keyword.fetch!(opts, :parser_manager)} | editor_opts],
+        else: editor_opts
 
     # Thread project_root for file tree isolation in tests
     project_root = Keyword.get(opts, :project_root)
