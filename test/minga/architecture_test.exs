@@ -67,6 +67,10 @@ defmodule Minga.ArchitectureTest do
            } = MingaEditor.Shell.Registry.default()
 
     assert generation > 0
+
+    # The restarted keymap reseeds its leader index with its trie, so the modeline still resolves its keys.
+    assert Minga.Keymap.leader_command_at([{?f, 0}, {?f, 0}]) == :find_file
+    assert Minga.Keymap.leader_keys_for(:buffer_list) == [{?,, 0}]
   end
 
   test "extension lifecycle infrastructure is direct under Services in dependency order" do
