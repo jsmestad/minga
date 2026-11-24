@@ -1070,6 +1070,11 @@ kbd {
   gap: 1.5rem;
 }
 
+/* A full-width card after a two-column grid keeps the grid's spacing. */
+.grid-2 + .code-card {
+  margin-top: 1.5rem;
+}
+
 .split-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr);

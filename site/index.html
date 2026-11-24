@@ -79,9 +79,10 @@
           <div class="hero-install">
             <div class="code-tabs" data-code-tabs>
               <div class="code-tabs-header">
-                <div class="code-tab-list" role="tablist" aria-label="Quick Homebrew install">
+                <div class="code-tab-list" role="tablist" aria-label="Quick install">
                   <button type="button" class="code-tab" role="tab" id="tab-hero-mac" aria-selected="true" aria-controls="panel-hero-mac">macOS App</button>
-                  <button type="button" class="code-tab" role="tab" id="tab-hero-cli" aria-selected="false" aria-controls="panel-hero-cli" tabindex="-1">Terminal CLI</button>
+                  <button type="button" class="code-tab" role="tab" id="tab-hero-cli" aria-selected="false" aria-controls="panel-hero-cli" tabindex="-1">macOS Terminal</button>
+                  <button type="button" class="code-tab" role="tab" id="tab-hero-linux" aria-selected="false" aria-controls="panel-hero-linux" tabindex="-1">Linux</button>
                 </div>
                 <div class="code-tabs-actions">
                   <button type="button" class="copy-btn" data-copy-target="hero-cmd-mac">Copy</button>
@@ -95,8 +96,15 @@
                 <div class="code-tab-noscript">Terminal CLI · Homebrew</div>
                 <pre><code id="hero-cmd-cli">brew install jsmestad/minga/minga &amp;&amp; minga .</code></pre>
               </div>
+              <div class="code-tab-panel" role="tabpanel" id="panel-hero-linux" aria-labelledby="tab-hero-linux" data-copy-id="hero-cmd-linux">
+                <div class="code-tab-noscript">Linux · Arch and Omarchy (apt and dnf in Getting Started)</div>
+                <pre><code id="hero-cmd-linux">curl -fsSL https://packages.mingacode.dev/minga.asc | sudo pacman-key --add -
+sudo pacman-key --lsign-key 2C5D2396B82C1278D4596A0965711C0C3853857B
+curl -fsSL https://packages.mingacode.dev/arch/minga.conf | sudo tee -a /etc/pacman.conf &gt; /dev/null
+sudo pacman -Syu minga</code></pre>
+              </div>
             </div>
-            <p class="hero-install-note">Signed Apple Silicon prereleases · Zero files written to your repo · Auto-detects API keys &amp; LSPs on $PATH · MIT</p>
+            <p class="hero-install-note">Signed prereleases for Apple Silicon macOS and Linux (Arch, Omarchy, Ubuntu, Debian, Fedora) · Zero files written to your repo · Auto-detects API keys &amp; LSPs on $PATH · MIT</p>
           </div>
         </div>
 
@@ -663,7 +671,7 @@ extension <span class="tok-atom">:minga_git_extended</span>, hex: <span class="t
         <div class="section-header">
           <p class="section-index"><span>06</span> Install</p>
           <h2>Try Minga side by side with zero lock-in.</h2>
-          <p>Apple Silicon macOS builds ship via Homebrew as signed, notarized prereleases. Minga never writes proprietary files into your repository, so you can test it on real code alongside your current editor. See <a href="/getting-started">Getting Started</a> for Linux and Intel Mac source builds.</p>
+          <p>Apple Silicon macOS builds ship via Homebrew as signed, notarized prereleases. On Linux, the terminal client installs from Minga's signed package repository for Arch and Omarchy, Ubuntu 24.04+, Debian 13+ and Fedora, and updates with the rest of your system. Minga never writes proprietary files into your repository, so you can test it on real code alongside your current editor. See <a href="/getting-started#install">Getting Started</a> for every platform and for Intel Mac source builds.</p>
         </div>
 
         <div class="grid-2">
@@ -684,6 +692,28 @@ open -a Minga</code></pre>
             <pre><code id="cmd-brew-cli">brew install jsmestad/minga/minga
 minga path/to/project</code></pre>
           </div>
+        </div>
+
+        <div class="code-card">
+          <div class="code-header">
+            <span>Linux Terminal Client · signed package repository (x86_64 and ARM64)</span>
+            <button type="button" class="copy-btn" data-copy-target="cmd-linux">Copy</button>
+          </div>
+          <pre><code id="cmd-linux"># Arch and Omarchy
+curl -fsSL https://packages.mingacode.dev/minga.asc | sudo pacman-key --add -
+sudo pacman-key --lsign-key 2C5D2396B82C1278D4596A0965711C0C3853857B
+curl -fsSL https://packages.mingacode.dev/arch/minga.conf | sudo tee -a /etc/pacman.conf &gt; /dev/null
+sudo pacman -Syu minga
+
+# Ubuntu and Debian
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://packages.mingacode.dev/minga.asc | sudo tee /etc/apt/keyrings/minga.asc &gt; /dev/null
+curl -fsSL https://packages.mingacode.dev/apt/minga.sources | sudo tee /etc/apt/sources.list.d/minga.sources &gt; /dev/null
+sudo apt update &amp;&amp; sudo apt install minga
+
+# Fedora
+sudo curl -fsSLo /etc/yum.repos.d/minga.repo https://packages.mingacode.dev/rpm/minga.repo
+sudo dnf install minga</code></pre>
         </div>
 
         <div class="follow-strip">

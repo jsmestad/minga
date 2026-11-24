@@ -4,6 +4,8 @@ Technical manuals, architecture specs, wire protocols, and public Elixir module 
 
 Looking for installation, guided tours, or interactive exercises instead? Start with [Get Started](https://mingacode.dev/getting-started), walk through the [Interactive Learn Labs](https://mingacode.dev/learn/), or read [Why Minga](https://mingacode.dev/why-minga).
 
+Minga installs from Homebrew on Apple Silicon macOS (the desktop app and the terminal client) and from signed apt, dnf and pacman repositories at `packages.mingacode.dev` on Linux (the terminal client on Arch and Omarchy, Ubuntu 24.04+, Debian 13+ and Fedora). [Get Started](https://mingacode.dev/getting-started#install) has the commands for each.
+
 ## Configuration & Agents
 
 - [Configuration](CONFIGURATION.md): Declarative `config.exs` options, keybindings, themes, language servers, and live reload (`SPC h r`).

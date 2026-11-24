@@ -29,22 +29,33 @@ Minga is a native macOS and terminal code editor built on Elixir and the Erlang 
 brew install --cask jsmestad/minga/minga-mac && open -a Minga
 ```
 
-**Terminal Client (Go / Bubble Tea):**
+**macOS Terminal Client (Go / Bubble Tea):**
 
 ```bash
 brew install jsmestad/minga/minga && minga .
 ```
 
-**Linux Terminal Client (x86_64 and ARM64, glibc 2.39 or newer):** add the signed package repository once, then your system updates keep Minga current. On Arch and Omarchy:
+**Linux Terminal Client (x86_64 and ARM64):** add Minga's signed package repository once, and your normal system updates keep Minga current. Works on Arch and Omarchy, Ubuntu 24.04+, Debian 13+, and Fedora (glibc 2.39 or newer).
 
 ```bash
+# Arch and Omarchy
 curl -fsSL https://packages.mingacode.dev/minga.asc | sudo pacman-key --add -
 sudo pacman-key --lsign-key 2C5D2396B82C1278D4596A0965711C0C3853857B
 curl -fsSL https://packages.mingacode.dev/arch/minga.conf | sudo tee -a /etc/pacman.conf > /dev/null
 sudo pacman -Syu minga
+
+# Ubuntu and Debian
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://packages.mingacode.dev/minga.asc | sudo tee /etc/apt/keyrings/minga.asc > /dev/null
+curl -fsSL https://packages.mingacode.dev/apt/minga.sources | sudo tee /etc/apt/sources.list.d/minga.sources > /dev/null
+sudo apt update && sudo apt install minga
+
+# Fedora
+sudo curl -fsSLo /etc/yum.repos.d/minga.repo https://packages.mingacode.dev/rpm/minga.repo
+sudo dnf install minga
 ```
 
-Ubuntu, Debian, and Fedora steps are in [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md#linux-packages).
+The repository key is `Minga Packages <packages@mingacode.dev>`, fingerprint `2C5D 2396 B82C 1278 D459  6A09 6571 1C0C 3853 857B`. More detail, including one-off `.deb` and `.rpm` downloads, is in [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md#linux-packages).
 
 **Build from source (older Linux or Intel Mac):**
 
