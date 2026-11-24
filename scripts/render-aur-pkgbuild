@@ -7,10 +7,20 @@ SHA-256 digests, so makepkg verifies the exact bytes the release published.
 """
 
 import argparse
+import hashlib
+from pathlib import Path
 import re
+import shutil
 import sys
 
 REPOSITORY = "jsmestad/minga"
+CHECKOUT = Path(__file__).resolve().parents[1]
+# Files the PKGBUILD downloads from the source commit: checkout path -> makepkg source name format.
+SOURCE_FILES = {
+    "LICENSE": "LICENSE-{release}",
+    "packaging/linux/minga.desktop": "minga-{release}.desktop",
+    "packaging/linux/minga.png": "minga-{release}.png",
+}
 
 PKGBUILD = """\
 # Maintainer: Minga contributors <16150+jsmestad@users.noreply.github.com>
@@ -28,10 +38,12 @@ url='https://github.com/{repository}'
 license=('MIT')
 depends=('glibc>=2.39' 'bash' 'coreutils')
 {relations}options=('!strip' '!debug')
-source=("LICENSE-$_release::https://raw.githubusercontent.com/{repository}/{source_sha}/LICENSE")
+source=("LICENSE-$_release::https://raw.githubusercontent.com/{repository}/{source_sha}/LICENSE"
+        "minga-$_release.desktop::https://raw.githubusercontent.com/{repository}/{source_sha}/packaging/linux/minga.desktop"
+        "minga-$_release.png::https://raw.githubusercontent.com/{repository}/{source_sha}/packaging/linux/minga.png")
 source_x86_64=("https://github.com/{repository}/releases/download/v$_release/minga_${{_release}}_linux_x86_64.tar.gz")
 source_aarch64=("https://github.com/{repository}/releases/download/v$_release/minga_${{_release}}_linux_aarch64.tar.gz")
-sha256sums=('{license_sha256}')
+sha256sums=('{license_sha256}' '{desktop_sha256}' '{icon_sha256}')
 sha256sums_x86_64=('{x86_64_sha256}')
 sha256sums_aarch64=('{aarch64_sha256}')
 
@@ -47,6 +59,8 @@ package() {{
   cp -a minga "$pkgdir/usr/lib/"
   ln -s ../lib/minga/launchers/minga "$pkgdir/usr/bin/minga"
   install -Dm644 "LICENSE-$_release" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "minga-$_release.desktop" "$pkgdir/usr/share/applications/minga.desktop"
+  install -Dm644 "minga-$_release.png" "$pkgdir/usr/share/icons/hicolor/512x512/apps/minga.png"
 }}
 """
 
@@ -72,10 +86,12 @@ RELATIONS = {
 }
 
 
-def render(release, source_sha, x86_64_sha256, aarch64_sha256, license_sha256, pkgname="minga-bin"):
+def render(release, source_sha, x86_64_sha256, aarch64_sha256, license_sha256, desktop_sha256, icon_sha256,
+           pkgname="minga-bin"):
     if not re.fullmatch(r"[0-9a-f]{40}", source_sha):
         raise ValueError("source SHA must be a full lowercase 40-character commit SHA")
-    for name, digest in (("x86_64", x86_64_sha256), ("aarch64", aarch64_sha256), ("LICENSE", license_sha256)):
+    for name, digest in (("x86_64", x86_64_sha256), ("aarch64", aarch64_sha256), ("LICENSE", license_sha256),
+                         ("desktop entry", desktop_sha256), ("icon", icon_sha256)):
         if not re.fullmatch(r"[0-9a-f]{64}", digest):
             raise ValueError(f"{name} SHA-256 must be 64 lowercase hexadecimal characters")
     if pkgname not in RELATIONS:
@@ -83,6 +99,7 @@ def render(release, source_sha, x86_64_sha256, aarch64_sha256, license_sha256, p
     return PKGBUILD.format(
         repository=REPOSITORY, pkgname=pkgname, relations=RELATIONS[pkgname], release=release, pkgver=pacman_version(release), source_sha=source_sha,
         x86_64_sha256=x86_64_sha256, aarch64_sha256=aarch64_sha256, license_sha256=license_sha256,
+        desktop_sha256=desktop_sha256, icon_sha256=icon_sha256,
     )
 
 
@@ -92,14 +109,23 @@ def main():
     parser.add_argument("--source-sha", required=True, help="commit the release was built from")
     parser.add_argument("--x86-64-sha256", required=True)
     parser.add_argument("--aarch64-sha256", required=True)
-    parser.add_argument("--license-sha256", required=True)
+    parser.add_argument("--sources", type=Path, metavar="DIR",
+                        help="also copy LICENSE, the desktop entry and the icon into DIR under their makepkg source "
+                             "names, so makepkg can build without downloading them")
     parser.add_argument("--pkgname", default="minga-bin", choices=RELATIONS,
                         help="minga-bin for the AUR (default) or minga for Minga's pacman repository")
     args = parser.parse_args()
     try:
-        sys.stdout.write(render(args.version, args.source_sha, args.x86_64_sha256,
-                                args.aarch64_sha256, args.license_sha256, args.pkgname))
-    except ValueError as error:
+        # The checkout must be at SOURCE_SHA: the PKGBUILD downloads these files from that commit.
+        digests = [hashlib.sha256((CHECKOUT / path).read_bytes()).hexdigest() for path in SOURCE_FILES]
+        pkgbuild = render(args.version, args.source_sha, args.x86_64_sha256, args.aarch64_sha256, *digests,
+                          args.pkgname)
+        if args.sources:
+            args.sources.mkdir(parents=True, exist_ok=True)
+            for path, name in SOURCE_FILES.items():
+                shutil.copyfile(CHECKOUT / path, args.sources / name.format(release=args.version))
+        sys.stdout.write(pkgbuild)
+    except (OSError, ValueError) as error:
         parser.exit(1, f"{parser.prog}: {error}\n")
     return 0
 

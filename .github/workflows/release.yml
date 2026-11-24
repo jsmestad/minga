@@ -616,12 +616,10 @@ jobs:
           mkdir "$smoke"
           cp "linux/packages/minga_${VERSION}_amd64.deb" "linux/packages/minga-$VERSION.x86_64.rpm" \
             "bundle/minga_${VERSION}_linux_x86_64.tar.gz" "$smoke/"
-          cp LICENSE "$smoke/LICENSE-$VERSION"
           sha() { sha256sum "$1" | cut -d ' ' -f 1; }
-          scripts/render-aur-pkgbuild --version "$VERSION" --source-sha "$SOURCE_SHA" \
+          scripts/render-aur-pkgbuild --version "$VERSION" --source-sha "$SOURCE_SHA" --sources "$smoke" \
             --x86-64-sha256 "$(sha "bundle/minga_${VERSION}_linux_x86_64.tar.gz")" \
-            --aarch64-sha256 "$(sha "bundle/minga_${VERSION}_linux_aarch64.tar.gz")" \
-            --license-sha256 "$(sha LICENSE)" > "$smoke/PKGBUILD"
+            --aarch64-sha256 "$(sha "bundle/minga_${VERSION}_linux_aarch64.tar.gz")" > "$smoke/PKGBUILD"
           scripts/smoke-linux-packages "$smoke" "$VERSION"
       - name: Retain the tested packages and the toolchain that built them
         id: upload
@@ -815,8 +813,7 @@ jobs:
           mkdir aur
           scripts/render-aur-pkgbuild --version "$VERSION" --source-sha "$SOURCE_SHA" \
             --x86-64-sha256 "$(digest "minga_${VERSION}_linux_x86_64.tar.gz")" \
-            --aarch64-sha256 "$(digest "minga_${VERSION}_linux_aarch64.tar.gz")" \
-            --license-sha256 "$(sha256sum LICENSE | cut -d ' ' -f 1)" > aur/PKGBUILD
+            --aarch64-sha256 "$(digest "minga_${VERSION}_linux_aarch64.tar.gz")" > aur/PKGBUILD
       - name: Build and install the PKGBUILD from public downloads, then write .SRCINFO
         if: steps.key.outputs.configured == 'true'
         run: |

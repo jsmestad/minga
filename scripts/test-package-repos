@@ -30,7 +30,8 @@ docker network create "$network" >/dev/null
 docker run -d --name "$server" --network "$network" --network-alias packages.test \
   -v "$tree:/srv:ro" python:3.13-alpine python -m http.server 8000 --directory /srv >/dev/null
 
-check='out=$(cd / && minga --version) && [ "$out" = "minga $VERSION" ] || { echo "unexpected minga --version output: ${out:-}" >&2; exit 1; }'
+check='out=$(cd / && minga --version) && [ "$out" = "minga $VERSION" ] || { echo "unexpected minga --version output: ${out:-}" >&2; exit 1; }
+[ -f /usr/share/applications/minga.desktop ] && [ -f /usr/share/icons/hicolor/512x512/apps/minga.png ] || { echo "missing desktop entry or icon" >&2; exit 1; }'
 fetch='fetch() { for attempt in 1 2 3 4 5; do curl -fsSL "$1" && return; sleep 1; done; return 1; }; localize() { sed "s#$PRODUCTION_URL#$TEST_URL#g"; }'
 
 run() {

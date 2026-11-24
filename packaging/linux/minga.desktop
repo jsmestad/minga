@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Minga
+GenericName=Text Editor
+Comment=Modal code editor with built-in AI agents
+Exec=minga %f
+Icon=minga
+Terminal=true
+Categories=Development;TextEditor;Utility;
+Keywords=editor;vim;modal;code;agent;
+MimeType=text/plain;
+StartupNotify=false

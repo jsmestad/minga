@@ -172,19 +172,17 @@ scripts/build-tui-packages "$assets/minga_linux_aarch64.tar.gz" --version 0.1.0 
 scripts/render-tui-formula --version 0.1.0 --arm64 "$assets/minga_macos_aarch64.tar.gz" > "$assets/minga.rb"
 ```
 
-Each `build-tui-packages` call writes a `.deb` and an `.rpm`, such as `minga_0.1.0_amd64.deb` and `minga-0.1.0.x86_64.rpm`. Both install `minga` on `PATH` and keep the bundled runtime together under `/usr/lib/minga`. On macOS, the Homebrew formula installs the same runtime under Homebrew's private package directory and links `minga` into Homebrew's `bin`.
+Each `build-tui-packages` call writes a `.deb` and an `.rpm`, such as `minga_0.1.0_amd64.deb` and `minga-0.1.0.x86_64.rpm`. Both install `minga` on `PATH` and keep the bundled runtime together under `/usr/lib/minga`. Every Linux package, including the pacman ones, also installs `packaging/linux/minga.desktop` and its icon, so desktop launchers such as Omarchy's list Minga and open it in a terminal. On macOS, the Homebrew formula installs the same runtime under Homebrew's private package directory and links `minga` into Homebrew's `bin`.
 
-To install-test the x86_64 packages on Ubuntu 24.04, Debian 13, Fedora and Arch with Docker, render the AUR PKGBUILD and run the smoke script. The directory must also hold the x86_64 archive under its release name and the checkout's `LICENSE` as `LICENSE-<version>`:
+To install-test the x86_64 packages on Ubuntu 24.04, Debian 13, Fedora and Arch with Docker, render the AUR PKGBUILD and run the smoke script. Render from a checkout at `$SOURCE_SHA`: the PKGBUILD pins the digests of that commit's `LICENSE`, desktop entry and icon, and `--sources` copies them beside it. The directory must also hold the x86_64 archive under its release name:
 
 ```bash
 smoke=$(mktemp -d)
 cp "$assets/minga_0.1.0_amd64.deb" "$assets/minga-0.1.0.x86_64.rpm" "$smoke/"
 cp "$assets/minga_linux_x86_64.tar.gz" "$smoke/minga_0.1.0_linux_x86_64.tar.gz"
-cp LICENSE "$smoke/LICENSE-0.1.0"
-scripts/render-aur-pkgbuild --version 0.1.0 --source-sha "$SOURCE_SHA" \
+scripts/render-aur-pkgbuild --version 0.1.0 --source-sha "$SOURCE_SHA" --sources "$smoke" \
   --x86-64-sha256 "$(sha256sum "$assets/minga_linux_x86_64.tar.gz" | cut -d ' ' -f 1)" \
-  --aarch64-sha256 "$(sha256sum "$assets/minga_linux_aarch64.tar.gz" | cut -d ' ' -f 1)" \
-  --license-sha256 "$(sha256sum LICENSE | cut -d ' ' -f 1)" > "$smoke/PKGBUILD"
+  --aarch64-sha256 "$(sha256sum "$assets/minga_linux_aarch64.tar.gz" | cut -d ' ' -f 1)" > "$smoke/PKGBUILD"
 scripts/smoke-linux-packages "$smoke" 0.1.0
 ```
 
