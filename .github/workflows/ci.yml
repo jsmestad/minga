@@ -62,6 +62,7 @@ jobs:
               "test/macos/**",
               "test/minga_editor/integration/gui_protocol_test.exs",
               "test/scripts/macos_unit_results_test.py",
+              "test/scripts/macos_document_types_test.py",
               "scripts/install_xcodegen",
               "scripts/check_macos_release_optimization",
               "scripts/test_macos_unit",
@@ -106,6 +107,7 @@ jobs:
               "scripts/build-tui-packages",
               "test/scripts/build_tui_packages_test.py",
               "scripts/render-aur-pkgbuild",
+              "packaging/linux/**",
               "test/scripts/render_aur_pkgbuild_test.py",
               "scripts/smoke-linux-packages",
               "scripts/linux-packaging-toolchain",
@@ -617,8 +619,10 @@ jobs:
             test/macos/native_ipc_helper_integration_test.exs \
             --include macos_ipc_helper
 
-      - name: Test native result classification
-        run: python3 -m unittest discover -s test/scripts -p macos_unit_results_test.py
+      - name: Test native result classification and document types
+        run: |
+          python3 -m unittest discover -s test/scripts -p macos_unit_results_test.py
+          python3 -m unittest discover -s test/scripts -p macos_document_types_test.py
 
       # Timing, inverse mutations, and a second warm run live in swift-evidence.yml.
       # The canonical unit runner still executes all Metal and production-view regressions here.
@@ -901,7 +905,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
-          sudo apt-get install -y --no-install-recommends rpm rpm2cpio cpio
+          sudo apt-get install -y --no-install-recommends rpm rpm2cpio cpio desktop-file-utils
           python3 -B test/scripts/build_tui_packages_test.py
       - name: Build signed package repositories and install from them
         if: runner.os == 'Linux' && runner.arch == 'X64'

@@ -15,6 +15,8 @@ brew install jsmestad/minga/minga            # Installs the minga terminal comma
 
 Open the GUI from Applications or run `open -a Minga`. Run `minga` for the terminal client. Update rolling prereleases with `brew upgrade minga` or `brew upgrade --cask minga-mac`.
 
+Minga appears under **Open With** in Finder for any file, including dotfiles and scripts without an extension. To make it the default editor for a kind of file, select one in Finder, choose **File → Get Info**, pick Minga under **Open with**, and click **Change All…**.
+
 ### Linux (packages)
 
 The terminal client ships for x86_64 and ARM64 Linux with glibc 2.39 or newer: Ubuntu 24.04 and later, Debian 13 and later, current Fedora, and Arch, including Omarchy. Each package carries its own Erlang runtime under `/usr/lib/minga` and puts `minga` on your `PATH`.
