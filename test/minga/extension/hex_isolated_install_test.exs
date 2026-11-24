@@ -60,7 +60,7 @@ defmodule Minga.Extension.HexIsolatedInstallTest do
     assert :code.which(Minga.Extension) == host_extension_beam
 
     admission = start_admission()
-    entry = %Entry{source_type: :hex, hex: %{package: "#{app}", version: nil, app: app}}
+    entry = %Entry{source: {:hex, %{package: "#{app}", version: nil, app: app}}}
 
     assert {:ok, artifact} = Source.prepare(app, entry, artifact_admission: admission)
     assert artifact.module == module

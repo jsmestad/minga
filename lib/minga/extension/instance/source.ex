@@ -22,7 +22,7 @@ defmodule Minga.Extension.Instance.Source do
 
     with {:ok, module, owned_modules} <- resolve(name, declaration, source, admission, opts),
          :ok <- validate_behaviour(module, name),
-         {:ok, manifest} <- manifest(module, declaration.source_type) do
+         {:ok, manifest} <- manifest(module, Entry.source_type(declaration)) do
       Artifact.build(name, module, manifest, owned_modules, declaration.config)
     end
   end
@@ -45,14 +45,17 @@ defmodule Minga.Extension.Instance.Source do
 
   @doc "Reports a staged path/Git source change without loading new code."
   @spec pending_restart?(atom(), Entry.t(), keyword()) :: boolean()
-  def pending_restart?(name, %{source_type: source_type, path: path}, opts)
-      when source_type in [:path, :git] and is_binary(path) do
-    expanded = Path.expand(path)
-    files = source_files(expanded)
-    report_staged_source_change(name, expanded, files, {:extension, name}, opts)
-  end
+  def pending_restart?(name, %Entry{} = declaration, opts) do
+    case Entry.source_path(declaration) do
+      path when is_binary(path) ->
+        expanded = Path.expand(path)
+        files = source_files(expanded)
+        report_staged_source_change(name, expanded, files, {:extension, name}, opts)
 
-  def pending_restart?(_name, _declaration, _opts), do: false
+      nil ->
+        false
+    end
+  end
 
   @spec resolve(atom(), Entry.t(), term(), GenServer.server(), keyword()) ::
           {:ok, module(), [module()]} | {:error, term()}
@@ -77,7 +80,7 @@ defmodule Minga.Extension.Instance.Source do
 
   @spec admit_initial(atom(), Entry.t(), term(), GenServer.server(), keyword()) ::
           {:ok, module(), [module()]} | {:error, term()}
-  defp admit_initial(name, %{source_type: :module, module: module}, source, admission, opts) do
+  defp admit_initial(name, %Entry{source: {:module, module}}, source, admission, opts) do
     with {:module, ^module} <- Code.ensure_loaded(module),
          {:ok, application} <- runtime_application(module, opts),
          {:ok, modules} <- declared_runtime_modules(module, application, opts),
@@ -90,7 +93,7 @@ defmodule Minga.Extension.Instance.Source do
     end
   end
 
-  defp admit_initial(_name, %{source_type: :hex, hex: %{app: app}}, source, admission, _opts) do
+  defp admit_initial(_name, %Entry{source: {:hex, %{app: app}}}, source, admission, _opts) do
     with :ok <- ensure_hex_application_started(app),
          {:ok, modules} <- application_modules(app),
          :ok <- ensure_modules_loaded(modules),
@@ -100,11 +103,21 @@ defmodule Minga.Extension.Instance.Source do
     end
   end
 
-  defp admit_initial(_name, %{source_type: :git, path: nil}, _source, _admission, _opts),
+  defp admit_initial(_name, %Entry{source: {:git, %{path: nil}}}, _source, _admission, _opts),
     do: {:error, :clone_failed}
 
-  defp admit_initial(name, %{source_type: source_type, path: path}, source, admission, opts)
-       when source_type in [:path, :git] and is_binary(path) do
+  defp admit_initial(name, %Entry{source: {:path, path}}, source, admission, opts) do
+    admit_path_or_checkout(name, path, source, admission, opts)
+  end
+
+  defp admit_initial(name, %Entry{source: {:git, %{path: path}}}, source, admission, opts)
+       when is_binary(path) do
+    admit_path_or_checkout(name, path, source, admission, opts)
+  end
+
+  @spec admit_path_or_checkout(atom(), String.t(), term(), GenServer.server(), keyword()) ::
+          {:ok, module(), [module()]} | {:error, term()}
+  defp admit_path_or_checkout(name, path, source, admission, opts) do
     expanded = Path.expand(path)
 
     if File.dir?(expanded) do

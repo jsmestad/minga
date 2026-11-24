@@ -836,7 +836,7 @@ defmodule Minga.Extension.LazyTest do
   describe "effective_load_policy/1" do
     test "returns explicit non-eager policy from entry" do
       entry = %Minga.Extension.Entry{
-        source_type: :path,
+        source: {:path, "/tmp/ext"},
         load_policy: {:on_command, [:some_cmd]}
       }
 
@@ -844,17 +844,17 @@ defmodule Minga.Extension.LazyTest do
     end
 
     test "returns :eager for entry with no config override (nil)" do
-      entry = %Minga.Extension.Entry{source_type: :path, load_policy: nil}
+      entry = %Minga.Extension.Entry{source: {:path, "/tmp/ext"}, load_policy: nil}
       assert :eager = Lazy.effective_load_policy(entry)
     end
 
     test "returns :eager when explicitly set in config" do
-      entry = %Minga.Extension.Entry{source_type: :path, load_policy: :eager}
+      entry = %Minga.Extension.Entry{source: {:path, "/tmp/ext"}, load_policy: :eager}
       assert :eager = Lazy.effective_load_policy(entry)
     end
 
     test "returns :deferred when set" do
-      entry = %Minga.Extension.Entry{source_type: :path, load_policy: :deferred}
+      entry = %Minga.Extension.Entry{source: {:path, "/tmp/ext"}, load_policy: :deferred}
       assert :deferred = Lazy.effective_load_policy(entry)
     end
   end

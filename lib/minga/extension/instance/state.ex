@@ -185,11 +185,9 @@ defmodule Minga.Extension.Instance.State do
   @doc "Removes projection fields from a registry snapshot."
   @spec declaration_only(Entry.t()) :: Entry.t()
   def declaration_only(%Entry{} = entry) do
-    declared_module = if entry.source_type == :module, do: entry.module, else: nil
-
     %{
       entry
-      | module: declared_module,
+      | module: Entry.source_module(entry),
         pid: nil,
         manifest: nil,
         last_error: nil,

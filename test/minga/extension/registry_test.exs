@@ -15,14 +15,11 @@ defmodule Minga.Extension.RegistryTest do
       :ok = Registry.register(r, :my_ext, "/tmp/my_ext", greeting: "hello")
 
       assert {:ok, %Entry{} = entry} = Registry.get(r, :my_ext)
-      assert entry.source_type == :path
-      assert entry.path == "/tmp/my_ext"
+      assert entry.source == {:path, "/tmp/my_ext"}
       assert entry.config == [greeting: "hello"]
       assert entry.status == :stopped
       assert entry.pid == nil
       assert entry.module == nil
-      assert entry.git == nil
-      assert entry.hex == nil
     end
 
     test "returns :error for unregistered extension", %{registry: r} do
@@ -34,7 +31,7 @@ defmodule Minga.Extension.RegistryTest do
       :ok = Registry.register(r, :my_ext, "/tmp/v2", [])
 
       assert {:ok, entry} = Registry.get(r, :my_ext)
-      assert entry.path == "/tmp/v2"
+      assert entry.source == {:path, "/tmp/v2"}
     end
   end
 
@@ -43,12 +40,9 @@ defmodule Minga.Extension.RegistryTest do
       :ok = Registry.register_module(r, :minga_mcp, Minga.Extensions.MCP, [])
 
       assert {:ok, %Entry{} = entry} = Registry.get(r, :minga_mcp)
-      assert entry.source_type == :module
+      assert entry.source == {:module, Minga.Extensions.MCP}
       assert entry.module == Minga.Extensions.MCP
       assert entry.config == []
-      assert entry.path == nil
-      assert entry.git == nil
-      assert entry.hex == nil
     end
   end
 
@@ -57,10 +51,9 @@ defmodule Minga.Extension.RegistryTest do
       :ok = Registry.register_git(r, :my_ext, "https://github.com/user/repo", [])
 
       assert {:ok, %Entry{} = entry} = Registry.get(r, :my_ext)
-      assert entry.source_type == :git
-      assert entry.git == %{url: "https://github.com/user/repo", branch: nil, ref: nil}
-      assert entry.path == nil
-      assert entry.hex == nil
+      assert {:git, git_opts} = entry.source
+      assert git_opts == %{url: "https://github.com/user/repo", branch: nil, ref: nil, path: nil}
+      assert entry.module == nil
       assert entry.config == []
     end
 
@@ -68,17 +61,19 @@ defmodule Minga.Extension.RegistryTest do
       :ok = Registry.register_git(r, :my_ext, "https://github.com/user/repo", branch: "develop")
 
       assert {:ok, entry} = Registry.get(r, :my_ext)
-      assert entry.git.branch == "develop"
-      assert entry.git.ref == nil
+      assert {:git, git_opts} = entry.source
+      assert git_opts.branch == "develop"
+      assert git_opts.ref == nil
     end
 
     test "registers a git extension with ref", %{registry: r} do
       :ok = Registry.register_git(r, :my_ext, "git@github.com:user/repo.git", ref: "v1.0.0")
 
       assert {:ok, entry} = Registry.get(r, :my_ext)
-      assert entry.git.url == "git@github.com:user/repo.git"
-      assert entry.git.ref == "v1.0.0"
-      assert entry.git.branch == nil
+      assert {:git, git_opts} = entry.source
+      assert git_opts.url == "git@github.com:user/repo.git"
+      assert git_opts.ref == "v1.0.0"
+      assert git_opts.branch == nil
     end
 
     test "passes extra options as config", %{registry: r} do
@@ -98,10 +93,9 @@ defmodule Minga.Extension.RegistryTest do
       :ok = Registry.register_hex(r, :minga_snippets, "minga_snippets", version: "~> 0.3")
 
       assert {:ok, %Entry{} = entry} = Registry.get(r, :minga_snippets)
-      assert entry.source_type == :hex
-      assert entry.hex == %{package: "minga_snippets", version: "~> 0.3", app: :minga_snippets}
-      assert entry.path == nil
-      assert entry.git == nil
+      assert {:hex, hex_opts} = entry.source
+      assert hex_opts == %{package: "minga_snippets", version: "~> 0.3", app: :minga_snippets}
+      assert entry.module == nil
       assert entry.config == []
     end
 
@@ -109,7 +103,8 @@ defmodule Minga.Extension.RegistryTest do
       :ok = Registry.register_hex(r, :minga_snippets, "minga_snippets", [])
 
       assert {:ok, entry} = Registry.get(r, :minga_snippets)
-      assert entry.hex.version == nil
+      assert {:hex, hex_opts} = entry.source
+      assert hex_opts.version == nil
     end
 
     test "passes extra options as config", %{registry: r} do
@@ -146,8 +141,9 @@ defmodule Minga.Extension.RegistryTest do
         )
 
       assert {:ok, entry} = Registry.get(r, :my_ext)
-      assert entry.hex.app == :minga_snippets
-      assert entry.hex.package == "minga_snippets"
+      assert {:hex, hex_opts} = entry.source
+      assert hex_opts.app == :minga_snippets
+      assert hex_opts.package == "minga_snippets"
       assert entry.config == [greeting: "hello"]
     end
   end
@@ -159,7 +155,10 @@ defmodule Minga.Extension.RegistryTest do
       :ok = Registry.register_hex(r, :minga_tools, "minga_tools", version: "~> 1.0")
 
       entries = Registry.all(r)
-      types = entries |> Enum.map(fn {_name, entry} -> entry.source_type end) |> Enum.sort()
+
+      types =
+        entries |> Enum.map(fn {_name, entry} -> Entry.source_type(entry) end) |> Enum.sort()
+
       assert types == [:git, :hex, :path]
     end
   end
@@ -200,7 +199,7 @@ defmodule Minga.Extension.RegistryTest do
       assert {:ok, %Entry{} = entry} = Registry.get(r, :my_ext)
       assert entry.status == :running
       assert entry.pid == self()
-      assert entry.path == "/tmp/ext"
+      assert entry.source == {:path, "/tmp/ext"}
     end
 
     test "reports a missing declaration", %{registry: r} do
@@ -208,6 +207,23 @@ defmodule Minga.Extension.RegistryTest do
                Registry.update(r, :nonexistent, status: :running)
 
       assert :error = Registry.get(r, :nonexistent)
+    end
+  end
+
+  describe "update_entry/3" do
+    test "transforms an entry through a function", %{registry: r} do
+      :ok = Registry.register_git(r, :my_ext, "https://example.com/repo", [])
+
+      :ok =
+        Registry.update_entry(r, :my_ext, &Entry.resolve_git_path(&1, "/tmp/checkout"))
+
+      assert {:ok, entry} = Registry.get(r, :my_ext)
+      assert {:git, %{path: "/tmp/checkout"}} = entry.source
+    end
+
+    test "reports a missing declaration", %{registry: r} do
+      assert {:error, {:extension_not_declared, :nonexistent}} =
+               Registry.update_entry(r, :nonexistent, &Function.identity/1)
     end
   end
 

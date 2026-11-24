@@ -47,22 +47,22 @@ defmodule Minga.Extension.UpdaterTest do
     test "path extensions have no update mechanism", %{registry: r} do
       ExtRegistry.register(r, :path_ext, "/tmp/ext", [])
       {:ok, entry} = ExtRegistry.get(r, :path_ext)
-      assert entry.source_type == :path
+      assert Minga.Extension.Entry.source_type(entry) == :path
     end
 
     test "hex extensions track package and version", %{registry: r} do
       ExtRegistry.register_hex(r, :minga_tools, "minga_tools", version: "~> 1.0")
       {:ok, entry} = ExtRegistry.get(r, :minga_tools)
-      assert entry.source_type == :hex
-      assert entry.hex.package == "minga_tools"
+      assert {:hex, hex_opts} = entry.source
+      assert hex_opts.package == "minga_tools"
     end
 
     test "git extensions track url and branch", %{registry: r} do
       ExtRegistry.register_git(r, :git_ext, "https://github.com/user/repo", branch: "develop")
       {:ok, entry} = ExtRegistry.get(r, :git_ext)
-      assert entry.source_type == :git
-      assert entry.git.url == "https://github.com/user/repo"
-      assert entry.git.branch == "develop"
+      assert {:git, git_opts} = entry.source
+      assert git_opts.url == "https://github.com/user/repo"
+      assert git_opts.branch == "develop"
     end
   end
 end

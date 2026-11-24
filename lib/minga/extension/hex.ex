@@ -37,7 +37,7 @@ defmodule Minga.Extension.Hex do
   @doc """
   Installs all hex-sourced extensions from the registry via Mix.install/2.
 
-  Collects every extension with `source_type: :hex`, builds a dep list,
+  Collects every extension with a `{:hex, _}` source, builds a dep list,
   and calls `Mix.install/2` once. Returns `:ok` if successful or if
   there are no hex extensions. Returns `{:error, reason}` if Mix.install
   fails (network error, resolution failure, compile error).
@@ -93,8 +93,8 @@ defmodule Minga.Extension.Hex do
   def collect_hex_deps(registry) do
     registry
     |> ExtRegistry.all()
-    |> Enum.filter(fn {_name, entry} -> entry.source_type == :hex end)
-    |> Enum.map(fn {name, %Entry{hex: hex}} -> to_mix_dep(name, hex) end)
+    |> Enum.filter(fn {_name, entry} -> match?(%Entry{source: {:hex, _}}, entry) end)
+    |> Enum.map(fn {name, entry} -> to_mix_dep(name, Entry.hex_opts(entry)) end)
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
