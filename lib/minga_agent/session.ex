@@ -2132,36 +2132,6 @@ defmodule MingaAgent.Session do
     end
   end
 
-  # Installs compacted messages from maintenance compaction triggered by the
-  # provider loop between tool rounds. The loop already performed compaction;
-  # this call durably installs the result so the next begin_native_dispatch
-  # returns the compacted context.
-  def handle_call(
-        {:install_maintenance_compact, _request_id, messages, summary},
-        _from,
-        state
-      )
-      when is_list(messages) do
-    case Continuation.replace_messages(state.continuation, messages) do
-      {:ok, continuation} ->
-        candidate = %{state | continuation: continuation}
-        {persisted, save_result} = persist_completed_boundary(candidate)
-
-        case save_result do
-          :ok ->
-            state = append_system_message(persisted, "Context compacted: #{summary}", :info)
-            {:reply, :ok, state}
-
-          {:error, reason} ->
-            {:reply, {:error, {:persistence_failed, reason}},
-             %{persisted | continuation: state.continuation}}
-        end
-
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
-    end
-  end
-
   def handle_call(:continue, _from, %{provider: provider} = state)
       when ProviderLifecycle.is_detached(provider) do
     {:reply, {:error, "No active provider"}, state}

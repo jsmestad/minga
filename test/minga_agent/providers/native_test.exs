@@ -830,6 +830,40 @@ defmodule MingaAgent.Providers.NativeTest do
       assert_receive :summary_called, 1_000
     end
 
+    test "native-policy route compaction keeps the system prompt and summarizes through the route client",
+         %{tmp_dir: dir} do
+      parent = self()
+
+      client = fn _model, messages, _opts ->
+        send(parent, {:client_called, messages})
+        build_stream_response([ReqLLM.StreamChunk.text("summary")])
+      end
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: client,
+          config: agent_config(compaction_threshold: 0.0, compaction_keep_recent: 1)
+        )
+
+      assert :native = :sys.get_state(pid).selection.policy.compaction
+      assert {:ok, _prefix} = admitted_prefix(pid)
+
+      messages = [
+        Context.system("You are the project agent."),
+        Context.user(String.duplicate("user ", 200)),
+        Context.assistant(String.duplicate("assistant ", 200)),
+        Context.user("latest request")
+      ]
+
+      assert {:ok, [first | _] = compacted, _summary} = Native.compact(pid, messages, [])
+      assert first.role == :system
+      assert text_content(first) == "You are the project agent."
+      assert compacted != messages
+      assert_received {:client_called, summary_messages}
+      assert Enum.any?(summary_messages, &(text_content(&1) =~ "Summarize this conversation"))
+    end
+
     test "thinking level accepts known values, rejects unknown values, and cycles in order", %{
       tmp_dir: dir
     } do
