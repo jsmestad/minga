@@ -19,21 +19,22 @@ defmodule MingaEditor.Commands.StructuralNavigationTest do
     :ok
   end
 
-  test "Alt+h moves to parent AST node and reports the node type" do
+  # In Normal mode ⌥h and ⌥l alias SPC c v / SPC c V (docs/design/keys.md); parent and child stay commands.
+  test "nav_parent moves to parent AST node and reports the node type" do
     {editor, buffer} = start_editor("function add(a, b) {\n  return a + b;\n}\n")
     BufferProcess.move_to(buffer, {0, 20})
 
-    state = send_key(editor, ?h, @alt)
+    state = run_command(editor, "nav_parent")
 
     assert BufferProcess.cursor(buffer) == {0, 0}
     assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == "→ function_declaration"
   end
 
-  test "Alt+l moves to the first child AST node" do
+  test "nav_first_child moves to the first child AST node" do
     {editor, buffer} = start_editor("function add(a, b) { return a + b; }\n")
     BufferProcess.move_to(buffer, {0, 0})
 
-    state = send_key(editor, ?l, @alt)
+    state = run_command(editor, "nav_first_child")
 
     assert BufferProcess.cursor(buffer) == {0, 9}
     assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == "→ identifier"
@@ -115,6 +116,11 @@ defmodule MingaEditor.Commands.StructuralNavigationTest do
 
   defp send_key(editor, codepoint, mods \\ 0) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
+    :sys.get_state(editor, @sync_timeout)
+  end
+
+  defp run_command(editor, name) do
+    send(editor, {:minga_input, {:gui_action, {:execute_command, name}}})
     :sys.get_state(editor, @sync_timeout)
   end
 
