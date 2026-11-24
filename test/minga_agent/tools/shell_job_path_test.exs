@@ -4,10 +4,11 @@ defmodule MingaAgent.Tools.ShellJobPathTest do
 
   alias MingaAgent.ArtifactQuota
   alias MingaAgent.ArtifactStore
+  alias MingaAgent.Session
+  alias MingaAgent.Session.JobLedger.Record
+  alias MingaAgent.Test.JobSessionStub
   alias MingaAgent.Tool.Context
   alias MingaAgent.Tools
-  alias MingaAgent.Tools.Job
-  alias MingaAgent.Tools.JobOwner
 
   @moduletag :tmp_dir
 
@@ -45,41 +46,54 @@ defmodule MingaAgent.Tools.ShellJobPathTest do
         )
       )
 
-    owner =
-      start_supervised!(
-        Supervisor.child_spec({JobOwner, session_id: "job-path", notify: self()}, id: make_ref())
-      )
+    session = start_supervised!({JobSessionStub, []}, id: make_ref())
 
-    %{root: root, store: store, owner: owner}
+    %{root: root, store: store, session: session}
   end
 
-  test "a foreground shell call runs as a job and records its exit code", ctx do
-    shell = shell_callback(ctx, ctx.owner)
+  test "a foreground shell call runs as a job the session records with its exit code", ctx do
+    shell = shell_callback(ctx, JobSessionStub.metadata(ctx.session))
 
     assert {:ok, _output} = shell.(%{"command" => "make test"})
     assert backend_runs(ctx) == ["make test"]
 
-    assert [%Job{background?: false, status: {:terminal, :failed}, exit_code: 7}] =
-             JobOwner.list_jobs(ctx.owner)
+    assert [%Record{background?: false, status: {:terminal, :failed, 7}, notice: :none}] =
+             Session.jobs(ctx.session)
   end
 
-  test "a background shell call returns the same job owner's handle", ctx do
-    shell = shell_callback(ctx, ctx.owner)
+  test "a background shell call returns the handle the session admitted", ctx do
+    shell = shell_callback(ctx, JobSessionStub.metadata(ctx.session))
 
     assert {:ok, message} = shell.(%{"command" => "make serve", "background" => true})
-    assert [%Job{background?: true, id: id}] = JobOwner.list_jobs(ctx.owner)
+    assert [%Record{background?: true, id: id}] = Session.jobs(ctx.session)
     assert message =~ id
   end
 
-  test "without a job owner the shell refuses instead of running the command", ctx do
-    shell = shell_callback(ctx, nil)
+  test "job_status and job_output read the session's record", ctx do
+    metadata = JobSessionStub.metadata(ctx.session)
+    assert {:ok, _output} = shell_callback(ctx, metadata).(%{"command" => "make test"})
+    [%Record{id: id}] = Session.jobs(ctx.session)
 
-    for background? <- [false, true] do
+    assert {:ok, status} = tool_callback(ctx, "job_status", metadata).(%{"job_id" => id})
+    assert status =~ "Status: failed"
+    assert status =~ "Exit code: 7"
+
+    assert {:ok, output} = tool_callback(ctx, "job_output", metadata).(%{"job_id" => id})
+    assert output =~ "probe output"
+    assert output =~ "not retained"
+  end
+
+  test "without an owning session the shell refuses instead of running the command", ctx do
+    no_session = %{parent_session: self()}
+
+    for metadata <- [%{}, no_session], background? <- [false, true] do
+      shell = shell_callback(ctx, metadata)
       assert {:error, message} = shell.(%{"command" => "make test", "background" => background?})
-      assert message =~ "no job owner"
+      assert message =~ "no owning agent session"
     end
 
     assert backend_runs(ctx) == []
+    refute_received {:"$gen_call", _from, _request}
   end
 
   defp backend_runs(ctx) do
@@ -89,16 +103,18 @@ defmodule MingaAgent.Tools.ShellJobPathTest do
     end
   end
 
-  defp shell_callback(ctx, owner) do
+  defp shell_callback(ctx, metadata), do: tool_callback(ctx, "shell", metadata)
+
+  defp tool_callback(ctx, name, metadata) do
     context =
       Context.new(
         project_root: ctx.root,
         artifact_store: ctx.store,
         capture_key: {:delivery, "checkpoint", "call-#{System.unique_integer([:positive])}"},
-        metadata: %{process_backend: ProbeBackend, job_owner: owner}
+        metadata: Map.put(metadata, :process_backend, ProbeBackend)
       )
 
-    shell = Enum.find(Tools.all(), &(&1.name == "shell"))
-    MingaAgent.Tool.Spec.build_callback(shell, context)
+    spec = Enum.find(Tools.all(), &(&1.name == name))
+    MingaAgent.Tool.Spec.build_callback(spec, context)
   end
 end

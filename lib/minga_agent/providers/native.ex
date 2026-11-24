@@ -64,7 +64,6 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Providers.Native.ExecutionState
   alias MingaAgent.Providers.Native.HostedAdmission
   alias MingaAgent.Providers.Native.LoopCtx
-  alias MingaAgent.Tools.JobOwner
   alias MingaAgent.Providers.Native.OutputHydration
   alias MingaAgent.Providers.Native.ReqLLMAdapter
   alias MingaAgent.Providers.Native.SystemPrompt
@@ -309,7 +308,7 @@ defmodule MingaAgent.Providers.Native do
       shell_output_callback: Keyword.get(opts, :shell_output_callback),
       process_backend: Keyword.get(opts, :process_backend, SystemProcessBackend),
       tool_registry: Keyword.get(opts, :tool_registry, ToolRegistry),
-      job_owner: Keyword.get_lazy(opts, :job_owner, &start_owned_job_owner/0)
+      session_jobs?: Keyword.get(opts, :session_jobs?, false)
     }
 
     custom_tools = Keyword.get(opts, :tools)
@@ -1956,19 +1955,6 @@ defmodule MingaAgent.Providers.Native do
   end
 
   defp noop_admission(_messages), do: :ok
-
-  # A Session always passes its own JobOwner; Native running on its own owns one so every
-  # shell command still runs as a job.
-  @spec start_owned_job_owner() :: pid()
-  defp start_owned_job_owner do
-    {:ok, pid} =
-      JobOwner.start_link(
-        session_id: "native-#{System.unique_integer([:positive])}",
-        notify: self()
-      )
-
-    pid
-  end
 
   @spec session_id(pid()) :: String.t() | nil
   defp session_id(session) when is_pid(session) do

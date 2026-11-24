@@ -4,8 +4,10 @@ defmodule MingaAgent.Tools.RetainedShellCaptureTest do
 
   alias MingaAgent.ArtifactQuota
   alias MingaAgent.ArtifactStore
+  alias MingaAgent.Session.JobLedger.Record
   alias MingaAgent.Tool.Context
   alias MingaAgent.Tool.Output
+  alias MingaAgent.Tool.Output.Reference
   alias MingaAgent.Tool.Spec
   alias MingaAgent.Tools
   alias MingaAgent.Tools.FetchOutput
@@ -35,19 +37,13 @@ defmodule MingaAgent.Tools.RetainedShellCaptureTest do
         project_root: root,
         artifact_store: store,
         capture_key: {:delivery, "checkpoint", "large-output"},
-        metadata: %{
-          job_owner:
-            start_supervised!(
-              Supervisor.child_spec(
-                {MingaAgent.Tools.JobOwner, session_id: "test", notify: self()},
-                id: make_ref()
-              )
-            ),
-          shell_output_callback: fn chunk ->
-            send(parent, {:chunk, chunk})
-            :ok
-          end
-        }
+        metadata:
+          MingaAgent.Test.JobSessionStub.metadata(start_job_session(), %{
+            shell_output_callback: fn chunk ->
+              send(parent, {:chunk, chunk})
+              :ok
+            end
+          })
       )
 
     shell = Enum.find(Tools.all(), &(&1.name == "shell"))
@@ -512,6 +508,77 @@ defmodule MingaAgent.Tools.RetainedShellCaptureTest do
              binary_part(bytes, 0, output.reference.bytes)
   end
 
+  test "job_output hands back the job's retained reference in the shape fetch_output accepts", %{
+    tmp_dir: root
+  } do
+    store = start_store(root)
+    session = start_job_session()
+    bytes = String.duplicate("job output line\n", 5_000)
+    File.write!(Path.join(root, "job-output"), bytes)
+
+    foreground = job_context(root, store, session, "foreground-job")
+
+    assert {:ok, %Output{} = output} =
+             tool(foreground, "shell").(%{"command" => "cat job-output"})
+
+    assert [%Record{id: fg_id, output_ref: fg_ref}] = MingaAgent.Session.jobs(session)
+    assert fg_ref == output.reference
+    assert fetch_all(foreground, job_output_reference(foreground, fg_id)) == bytes
+
+    background = job_context(root, store, session, "background-job")
+
+    assert {:ok, _handle} =
+             tool(background, "shell").(%{"command" => "cat job-output", "background" => true})
+
+    bg_record = await_job_end(session, "job-2")
+    assert %Record{status: {:terminal, :completed, 0}, output_ref: %Reference{}} = bg_record
+    assert fetch_all(background, job_output_reference(background, "job-2")) == bytes
+  end
+
+  defp job_context(root, store, session, id) do
+    Context.new(
+      project_root: root,
+      artifact_store: store,
+      capture_key: {:delivery, "checkpoint", id},
+      metadata: MingaAgent.Test.JobSessionStub.metadata(session)
+    )
+  end
+
+  defp tool(context, name),
+    do: Spec.build_callback(Enum.find(Tools.all(), &(&1.name == name)), context)
+
+  # Reads the reference the model would copy out of job_output, as fetch_output decodes it.
+  defp job_output_reference(context, job_id) do
+    assert {:ok, text} = tool(context, "job_output").(%{"job_id" => job_id})
+
+    [_before, rest] = String.split(text, "Full output reference for fetch_output: ", parts: 2)
+    [json | _preview] = String.split(rest, "\n", parts: 2)
+    encoded = JSON.decode!(json)
+
+    {:ok, reference} =
+      Reference.new(
+        token: encoded["token"],
+        media_type: encoded["media_type"],
+        bytes: encoded["bytes"],
+        items: encoded["items"],
+        sha256: encoded["sha256"]
+      )
+
+    reference
+  end
+
+  # A background job ends after its start call returned, so poll the session's public query.
+  defp await_job_end(session, job_id, attempts \\ 200) do
+    case MingaAgent.Session.job(session, job_id) do
+      {:ok, %Record{status: :running}} when attempts > 0 ->
+        Process.sleep(25)
+        await_job_end(session, job_id, attempts - 1)
+
+      {:ok, record} ->
+        record
+    end
+  end
+
   defp start_store(root, opts \\ []) do
     limits = Keyword.get(opts, :limits, [])
 
@@ -537,16 +604,12 @@ defmodule MingaAgent.Tools.RetainedShellCaptureTest do
       project_root: root,
       artifact_store: store,
       capture_key: {:delivery, "checkpoint", id},
-      metadata: %{
-        job_owner:
-          start_supervised!(
-            Supervisor.child_spec({MingaAgent.Tools.JobOwner, session_id: "test", notify: self()},
-              id: make_ref()
-            )
-          )
-      }
+      metadata: MingaAgent.Test.JobSessionStub.metadata(start_job_session())
     )
   end
+
+  defp start_job_session,
+    do: start_supervised!({MingaAgent.Test.JobSessionStub, []}, id: make_ref())
 
   defp capture_opts(ctx), do: [artifact_store: ctx.artifact_store, capture_key: ctx.capture_key]
 

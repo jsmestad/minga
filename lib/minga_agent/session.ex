@@ -92,6 +92,8 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Tool.Invocation
   alias MingaAgent.Tool.Registry, as: ToolRegistry
   alias MingaAgent.Tool.Spec, as: ToolSpec
+  alias MingaAgent.Session.JobLedger
+  alias MingaAgent.Session.JobLedger.Record, as: JobRecord
   alias MingaAgent.Tools.JobOwner
   alias MingaAgent.Providers.Native.ReqLLMAdapter
   alias ReqLLM.Context
@@ -172,7 +174,9 @@ defmodule MingaAgent.Session do
           credentials_configured: boolean(),
           job_owner: pid() | nil,
           job_owner_ref: reference() | nil,
-          job_completions: [JobOwner.completion()]
+          job_epoch: non_neg_integer(),
+          job_ledger: JobLedger.t(),
+          job_admissions: %{reference() => JobRecord.id()}
         }
 
   @provider_stop_timeout_ms 1_000
@@ -732,6 +736,43 @@ defmodule MingaAgent.Session do
   @spec session_id(GenServer.server()) :: String.t()
   def session_id(session) do
     GenServer.call(session, :session_id)
+  end
+
+  @typedoc "Why the Session refused to admit a shell job."
+  @type job_admission_error :: :no_job_owner | JobLedger.limit_error()
+
+  @doc """
+  Admits a shell job in this session's job ledger.
+
+  Allocates the job id, records the job as running under the current JobOwner epoch, and returns the record with the JobOwner that must run it. The caller then passes the record to `JobOwner.start_foreground/3` or `JobOwner.start_background/3`. If the caller exits before a background job starts, or before a foreground job ends, the Session cancels the job so it cannot hold a running slot.
+  """
+  @spec admit_job(GenServer.server(), JobRecord.spec()) ::
+          {:ok, JobRecord.t(), pid()} | {:error, job_admission_error()}
+  def admit_job(
+        session,
+        %{command: command, cwd: cwd, background?: background?, timeout_secs: timeout_secs} =
+          spec
+      )
+      when is_binary(command) and is_binary(cwd) and is_boolean(background?) and
+             is_integer(timeout_secs) and timeout_secs > 0 do
+    GenServer.call(session, {:admit_job, spec}, 30_000)
+  end
+
+  @doc "Returns one job record from this session's ledger."
+  @spec job(GenServer.server(), JobRecord.id()) :: {:ok, JobRecord.t()} | {:error, :job_not_found}
+  def job(session, job_id) when is_binary(job_id) do
+    GenServer.call(session, {:job, job_id})
+  end
+
+  @doc "Returns every retained job record, oldest admission first."
+  @spec jobs(GenServer.server()) :: [JobRecord.t()]
+  def jobs(session), do: GenServer.call(session, :jobs)
+
+  @doc "Cancels a running job through this session's JobOwner."
+  @spec cancel_job(GenServer.server(), JobRecord.id()) ::
+          :ok | {:error, :job_not_found | :already_terminal}
+  def cancel_job(session, job_id) when is_binary(job_id) do
+    GenServer.call(session, {:cancel_job, job_id})
   end
 
   @doc """
@@ -1496,7 +1537,9 @@ defmodule MingaAgent.Session do
       credentials_configured: credentials_configured?,
       job_owner: nil,
       job_owner_ref: nil,
-      job_completions: []
+      job_epoch: 0,
+      job_ledger: JobLedger.new(),
+      job_admissions: %{}
     }
 
     state = maybe_start_job_owner(state, Keyword.get(opts, :start_job_owner?, true))
@@ -1775,6 +1818,36 @@ defmodule MingaAgent.Session do
 
   def handle_call(:session_id, _from, state) do
     {:reply, state.session_id, state}
+  end
+
+  def handle_call({:admit_job, _spec}, _from, %{job_owner: nil} = state),
+    do: {:reply, {:error, :no_job_owner}, state}
+
+  def handle_call({:admit_job, spec}, {caller, _tag}, state) do
+    case JobLedger.admit(state.job_ledger, spec, state.job_epoch, DateTime.utc_now()) do
+      {:ok, record, ledger} ->
+        # The caller's exit cancels the job until a background job starts or a foreground job ends.
+        admissions = Map.put(state.job_admissions, Process.monitor(caller), record.id)
+
+        {:reply, {:ok, record, state.job_owner},
+         %{state | job_ledger: ledger, job_admissions: admissions}}
+
+      {:error, _limit} = error ->
+        {:reply, error, state}
+    end
+  end
+
+  def handle_call({:job, job_id}, _from, state),
+    do: {:reply, JobLedger.fetch(state.job_ledger, job_id), state}
+
+  def handle_call(:jobs, _from, state), do: {:reply, JobLedger.list(state.job_ledger), state}
+
+  def handle_call({:cancel_job, job_id}, _from, state) do
+    case JobLedger.fetch(state.job_ledger, job_id) do
+      {:ok, %JobRecord{status: :running}} -> {:reply, cancel_owned_job(state, job_id), state}
+      {:ok, %JobRecord{}} -> {:reply, {:error, :already_terminal}, state}
+      {:error, :job_not_found} = error -> {:reply, error, state}
+    end
   end
 
   def handle_call(:enter_plan, _from, state) do
@@ -3938,8 +4011,27 @@ defmodule MingaAgent.Session do
     {:noreply, state}
   end
 
-  def handle_info({:job_completion, completion}, state) do
-    {:noreply, %{state | job_completions: [completion | state.job_completions]}}
+  def handle_info({:job_started, job_id, _epoch}, state) do
+    case JobLedger.fetch(state.job_ledger, job_id) do
+      # A foreground job ends with its caller, so its caller stays monitored until the job settles.
+      {:ok, %JobRecord{status: :running, background?: false}} -> {:noreply, state}
+      _background_or_ended -> {:noreply, release_job_admission(state, job_id)}
+    end
+  end
+
+  def handle_info({:job_settled, job_id, epoch, outcome, exit_code, output}, state) do
+    ledger =
+      JobLedger.settle(
+        state.job_ledger,
+        job_id,
+        epoch,
+        outcome,
+        exit_code,
+        output,
+        DateTime.utc_now()
+      )
+
+    {:noreply, release_job_admission(%{state | job_ledger: ledger}, job_id)}
   end
 
   def handle_info(
@@ -3947,8 +4039,17 @@ defmodule MingaAgent.Session do
         %{job_owner_ref: ref} = state
       )
       when is_reference(ref) do
-    Process.demonitor(ref, [:flush])
-    {:noreply, %{state | job_owner: nil, job_owner_ref: nil}}
+    {:noreply, replace_job_owner(state)}
+  end
+
+  def handle_info({:job_unstarted, job_id}, state) do
+    {:noreply, settle_unstarted_job(state, job_id)}
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{job_admissions: admissions} = state)
+      when is_map_key(admissions, ref) do
+    {job_id, admissions} = Map.pop!(admissions, ref)
+    {:noreply, abandon_job(%{state | job_admissions: admissions}, job_id)}
   end
 
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
@@ -4650,7 +4751,7 @@ defmodule MingaAgent.Session do
       {:idle, execution} ->
         state =
           state
-          |> drain_job_completions()
+          |> drain_job_notices()
           |> notify(:complete, completion_notification(state))
           |> dispatch_stop()
           |> announce_turn_status(execution)
@@ -5962,11 +6063,101 @@ defmodule MingaAgent.Session do
 
   @spec maybe_start_job_owner(state(), boolean()) :: state()
   defp maybe_start_job_owner(state, false), do: state
+  defp maybe_start_job_owner(state, true), do: start_job_owner(state)
 
-  defp maybe_start_job_owner(state, true) do
-    {:ok, pid} = JobOwner.start_link(session_id: state.session_id, notify: self())
+  # Each JobOwner runs under a new epoch, so a report from an earlier owner can never settle a newer job.
+  @spec start_job_owner(state()) :: state()
+  defp start_job_owner(state) do
+    epoch = state.job_epoch + 1
+    {:ok, pid} = JobOwner.start_link(session: self(), epoch: epoch)
     ref = Process.monitor(pid)
-    %{state | job_owner: pid, job_owner_ref: ref}
+    %{state | job_owner: pid, job_owner_ref: ref, job_epoch: epoch}
+  end
+
+  # The dead owner's tasks died with it, so its running jobs have no observed end.
+  @spec replace_job_owner(state()) :: state()
+  defp replace_job_owner(state) do
+    Enum.each(Map.keys(state.job_admissions), &Process.demonitor(&1, [:flush]))
+    ledger = JobLedger.interrupt_running(state.job_ledger, :owner_down, DateTime.utc_now())
+
+    start_job_owner(%{
+      state
+      | job_owner: nil,
+        job_owner_ref: nil,
+        job_ledger: ledger,
+        job_admissions: %{}
+    })
+  end
+
+  @spec release_job_admission(state(), JobRecord.id()) :: state()
+  defp release_job_admission(state, job_id) do
+    case Enum.find(state.job_admissions, fn {_ref, id} -> id == job_id end) do
+      {ref, _id} ->
+        Process.demonitor(ref, [:flush])
+        %{state | job_admissions: Map.delete(state.job_admissions, ref)}
+
+      nil ->
+        state
+    end
+  end
+
+  # The caller exited before a background job started or before a foreground job ended. A start
+  # it sent before exiting is already queued at the owner ahead of this cancel, so the owner
+  # cancels the job and reports the end.
+  @spec abandon_job(state(), JobRecord.id()) :: state()
+  defp abandon_job(state, job_id) do
+    case JobLedger.fetch(state.job_ledger, job_id) do
+      {:ok, %JobRecord{status: :running}} ->
+        case cancel_owned_job(state, job_id) do
+          :ok ->
+            state
+
+          {:error, :already_terminal} ->
+            # Anything the owner reported about this job is already queued ahead of this check.
+            send(self(), {:job_unstarted, job_id})
+            state
+        end
+
+      _ended_or_evicted ->
+        state
+    end
+  end
+
+  # Runs after every earlier owner report, so a job still running here never reached the owner.
+  @spec settle_unstarted_job(state(), JobRecord.id()) :: state()
+  defp settle_unstarted_job(state, job_id) do
+    case JobLedger.fetch(state.job_ledger, job_id) do
+      {:ok, %JobRecord{status: :running, epoch: epoch}} ->
+        ledger =
+          JobLedger.settle(
+            state.job_ledger,
+            job_id,
+            epoch,
+            :cancelled,
+            nil,
+            %{reference: nil, preview: nil},
+            DateTime.utc_now()
+          )
+
+        %{state | job_ledger: ledger}
+
+      _ended_or_evicted ->
+        state
+    end
+  end
+
+  # A not-found owner reply means the job already ended and its settled report is queued here.
+  @spec cancel_owned_job(state(), JobRecord.id()) :: :ok | {:error, :already_terminal}
+  defp cancel_owned_job(%{job_owner: nil}, _job_id), do: {:error, :already_terminal}
+
+  defp cancel_owned_job(%{job_owner: owner}, job_id) do
+    case JobOwner.cancel(owner, job_id) do
+      :ok -> :ok
+      {:error, :job_not_found} -> {:error, :already_terminal}
+    end
+  catch
+    # The owner died; its DOWN message interrupts the job.
+    :exit, _reason -> {:error, :already_terminal}
   end
 
   @spec reap_job_owner(pid() | nil) :: :ok
@@ -5981,18 +6172,29 @@ defmodule MingaAgent.Session do
     :ok
   end
 
-  @spec drain_job_completions(state()) :: state()
-  defp drain_job_completions(%{job_completions: []} = state), do: state
+  # Displays pending job notices at the turn boundary. Delivery to the model comes later.
+  @spec drain_job_notices(state()) :: state()
+  defp drain_job_notices(state) do
+    case JobLedger.pending_notices(state.job_ledger) do
+      [] ->
+        state
 
-  defp drain_job_completions(state) do
-    lines =
-      state.job_completions
-      |> Enum.reverse()
-      |> Enum.map_join("\n", fn {job_id, _generation, outcome, _exit_code} ->
-        "Background job #{job_id}: #{outcome}"
-      end)
+      records ->
+        lines = Enum.map_join(records, "\n", &job_notice_line/1)
+        ledger = JobLedger.mark_notices_delivered(state.job_ledger, Enum.map(records, & &1.id))
+        append_system_message(%{state | job_ledger: ledger}, lines, :info)
+    end
+  end
 
-    append_system_message(%{state | job_completions: []}, lines, :info)
+  @spec job_notice_line(JobRecord.t()) :: String.t()
+  defp job_notice_line(%JobRecord{} = record) do
+    exit_text =
+      case JobRecord.exit_code(record) do
+        nil -> ""
+        code -> " (exit #{code})"
+      end
+
+    "Background job #{record.id}: #{JobRecord.status_name(record)}#{exit_text}"
   end
 
   # ── Subscriber lifecycle ──────────────────────────────────────────────────
@@ -7578,7 +7780,7 @@ defmodule MingaAgent.Session do
         {MingaAgent.Providers.Native, manager} ->
           state.provider.opts
           |> Keyword.put(:session_checklist?, true)
-          |> Keyword.put(:job_owner, state.job_owner)
+          |> Keyword.put(:session_jobs?, true)
           |> maybe_put_session_manager(manager)
 
         _provider ->

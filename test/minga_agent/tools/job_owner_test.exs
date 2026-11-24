@@ -2,141 +2,142 @@ defmodule MingaAgent.Tools.JobOwnerTest do
   # Spawns shell OS processes via Shell.execute, which must not run async.
   use ExUnit.Case, async: false
 
-  alias MingaAgent.Tools.Job
+  alias MingaAgent.Session.JobLedger.Record
   alias MingaAgent.Tools.JobOwner
 
   # Real OS commands with wall-clock timeouts make these inherently slow.
   # Excluded from test.llm; runs in test.heavy and full suite.
   @moduletag :heavy
 
-  setup do
-    {:ok, owner} =
-      start_supervised({JobOwner, session_id: "test-session", notify: self()})
+  @epoch 3
 
+  defmodule CrashBackend do
+    @moduledoc false
+    @behaviour MingaAgent.Tools.ProcessBackend
+
+    @impl true
+    def find(_pattern, _path, _opts, _exec_opts), do: {:error, "unsupported"}
+
+    @impl true
+    def grep(_pattern, _path, _opts, _exec_opts), do: {:error, "unsupported"}
+
+    @impl true
+    def shell(_command, _cwd, _timeout_secs, _opts), do: exit(:backend_crashed)
+  end
+
+  setup do
+    # The test process stands in for the Session and receives the owner's reports.
+    owner = start_supervised!({JobOwner, session: self(), epoch: @epoch})
     %{owner: owner}
   end
 
-  describe "start_foreground/5" do
-    test "runs a command and returns the output", %{owner: owner} do
-      assert {:ok, output} = JobOwner.start_foreground(owner, "echo hello", "/tmp", 10)
+  describe "start_foreground/3" do
+    test "runs the job, returns the shell result, and reports start and end", %{owner: owner} do
+      record = record("job-1", "echo hello")
+
+      assert {:ok, output} = JobOwner.start_foreground(owner, record)
       assert output =~ "hello"
+
+      assert_received {:job_started, "job-1", @epoch}
+      assert_received {:job_settled, "job-1", @epoch, :completed, 0, %{preview: preview}}
+      assert preview =~ "hello"
     end
 
-    test "returns output with exit code for command failure", %{owner: owner} do
-      assert {:ok, output} = JobOwner.start_foreground(owner, "echo fail; exit 1", "/tmp", 10)
-      assert output =~ "fail"
-      assert output =~ "exit code: 1"
+    test "a nonzero exit settles as failed with the observed exit code", %{owner: owner} do
+      record = record("job-1", "echo PASS; exit 42")
+
+      assert {:ok, output} = JobOwner.start_foreground(owner, record)
+      assert output =~ "PASS"
+      assert_received {:job_settled, "job-1", @epoch, :failed, 42, _output}
     end
 
-    test "returns timeout error when command exceeds timeout", %{owner: owner} do
-      assert {:error, {:incomplete, :timeout, _output}} =
-               JobOwner.start_foreground(owner, "sleep 30", "/tmp", 1)
-    end
-  end
+    test "a timeout settles as timeout without an exit code", %{owner: owner} do
+      record = record("job-1", "sleep 30", timeout_secs: 1)
 
-  describe "start_background/5" do
-    test "returns a job id immediately", %{owner: owner} do
-      assert {:ok, job_id} = JobOwner.start_background(owner, "echo hello", "/tmp", 10)
-      assert is_binary(job_id)
-      assert byte_size(job_id) > 0
+      assert {:error, {:incomplete, :timeout, _output}} = JobOwner.start_foreground(owner, record)
+      assert_received {:job_settled, "job-1", @epoch, :timeout, nil, _output}
     end
 
-    test "sends a completion notification with exit code 0 to the notify pid", %{owner: owner} do
-      {:ok, job_id} = JobOwner.start_background(owner, "echo hello", "/tmp", 10)
+    test "a crashed job task settles as crashed and errors the caller", %{owner: owner} do
+      record = record("job-1", "ignored")
 
-      assert_receive {:job_completion, {^job_id, _gen, :completed, 0}}, 5_000
-    end
+      assert {:error, message} =
+               JobOwner.start_foreground(owner, record, process_backend: CrashBackend)
 
-    test "a nonzero exit fails the job and records the real exit code", %{owner: owner} do
-      {:ok, job_id} = JobOwner.start_background(owner, "echo PASS; exit 42", "/tmp", 10)
-
-      assert_receive {:job_completion, {^job_id, _gen, :failed, 42}}, 5_000
-    end
-
-    test "rejects when too many concurrent jobs", %{owner: owner} do
-      # Start 8 long-running jobs that block for a while
-      for _i <- 1..8 do
-        assert {:ok, _id} = JobOwner.start_background(owner, "sleep 60", "/tmp", 60)
-      end
-
-      # Give processes a moment to start (they should block on sleep 60)
-      :sys.get_state(owner)
-
-      assert {:error, :too_many_jobs} =
-               JobOwner.start_background(owner, "echo overflow", "/tmp", 10)
+      assert message =~ "backend_crashed"
+      assert_received {:job_settled, "job-1", @epoch, :crashed, nil, _output}
     end
   end
 
-  describe "job_status/2" do
-    test "returns status for a live background job", %{owner: owner} do
-      {:ok, job_id} = JobOwner.start_background(owner, "sleep 30", "/tmp", 60)
+  describe "start_background/3" do
+    test "returns once the task runs and reports its end later", %{owner: owner} do
+      assert :ok =
+               JobOwner.start_background(owner, record("job-1", "echo hello", background?: true))
 
-      # Synchronize: the GenServer has processed the start
-      :sys.get_state(owner)
-
-      assert {:ok, %Job{} = job} = JobOwner.job_status(owner, job_id)
-      assert job.id == job_id
-      assert Job.live?(job)
+      assert_received {:job_started, "job-1", @epoch}
+      assert_receive {:job_settled, "job-1", @epoch, :completed, 0, _output}, 5_000
     end
 
-    test "returns status for a completed background job", %{owner: owner} do
-      {:ok, job_id} = JobOwner.start_background(owner, "echo done", "/tmp", 10)
-      assert_receive {:job_completion, {^job_id, _gen, :completed, _code}}, 5_000
+    test "a nonzero exit fails the job and reports the real exit code", %{owner: owner} do
+      record = record("job-1", "echo PASS; exit 42", background?: true)
+      assert :ok = JobOwner.start_background(owner, record)
 
-      assert {:ok, %Job{} = job} = JobOwner.job_status(owner, job_id)
-      assert Job.finished?(job)
-    end
-
-    test "returns error for unknown job id", %{owner: owner} do
-      assert {:error, :job_not_found} = JobOwner.job_status(owner, "nonexistent")
+      assert_receive {:job_settled, "job-1", @epoch, :failed, 42, %{preview: preview}}, 5_000
+      assert preview =~ "PASS"
     end
   end
 
-  describe "job_output/2" do
-    test "returns output for a completed job", %{owner: owner} do
-      {:ok, job_id} = JobOwner.start_background(owner, "echo hello_world", "/tmp", 10)
-      assert_receive {:job_completion, {^job_id, _gen, :completed, _code}}, 5_000
+  describe "start checks" do
+    test "refuses a record admitted under another epoch", %{owner: owner} do
+      stale = record("job-1", "echo never", epoch: @epoch - 1)
 
-      assert {:ok, output} = JobOwner.job_output(owner, job_id)
-      assert output =~ "hello_world"
+      assert {:error, :stale_epoch} = JobOwner.start_foreground(owner, stale)
+      refute_received {:job_started, _id, _epoch}
     end
 
-    test "returns error for a still-running job", %{owner: owner} do
-      {:ok, job_id} = JobOwner.start_background(owner, "sleep 30", "/tmp", 60)
+    test "refuses to run the same job id twice", %{owner: owner} do
+      record = record("job-1", "sleep 60", background?: true, timeout_secs: 60)
 
-      # Synchronize
-      :sys.get_state(owner)
-
-      assert {:error, :job_still_running} = JobOwner.job_output(owner, job_id)
-    end
-
-    test "returns error for unknown job id", %{owner: owner} do
-      assert {:error, :job_not_found} = JobOwner.job_output(owner, "nonexistent")
+      assert :ok = JobOwner.start_background(owner, record)
+      assert {:error, :already_running} = JobOwner.start_background(owner, record)
     end
   end
 
   describe "cancel/2" do
-    test "cancels a running background job", %{owner: owner} do
-      {:ok, job_id} = JobOwner.start_background(owner, "sleep 60", "/tmp", 60)
+    test "kills a running job and reports it cancelled", %{owner: owner} do
+      record = record("job-1", "sleep 60", background?: true, timeout_secs: 60)
+      assert :ok = JobOwner.start_background(owner, record)
 
-      # Synchronize
-      :sys.get_state(owner)
-
-      assert :ok = JobOwner.cancel(owner, job_id)
-
-      assert {:ok, %Job{} = job} = JobOwner.job_status(owner, job_id)
-      assert job.status == {:terminal, :cancelled}
+      assert :ok = JobOwner.cancel(owner, "job-1")
+      assert_received {:job_settled, "job-1", @epoch, :cancelled, nil, _output}
     end
 
-    test "returns error for already-terminal job", %{owner: owner} do
-      {:ok, job_id} = JobOwner.start_background(owner, "echo fast", "/tmp", 10)
-      assert_receive {:job_completion, {^job_id, _gen, _outcome, _code}}, 5_000
+    test "errors a waiting foreground caller when its job is cancelled", %{owner: owner} do
+      record = record("job-1", "sleep 60", timeout_secs: 60)
+      caller = Task.async(fn -> JobOwner.start_foreground(owner, record) end)
+      assert_receive {:job_started, "job-1", @epoch}, 5_000
 
-      assert {:error, :already_terminal} = JobOwner.cancel(owner, job_id)
+      assert :ok = JobOwner.cancel(owner, "job-1")
+      assert {:error, "job cancelled"} = Task.await(caller)
     end
 
-    test "returns error for unknown job id", %{owner: owner} do
+    test "returns not found for an ended or unknown job", %{owner: owner} do
+      assert :ok =
+               JobOwner.start_background(owner, record("job-1", "echo fast", background?: true))
+
+      assert_receive {:job_settled, "job-1", @epoch, _outcome, _code, _output}, 5_000
+
+      assert {:error, :job_not_found} = JobOwner.cancel(owner, "job-1")
       assert {:error, :job_not_found} = JobOwner.cancel(owner, "nonexistent")
+    end
+
+    test "a start that arrives after its cancel is refused and never runs", %{owner: owner} do
+      assert {:error, :job_not_found} = JobOwner.cancel(owner, "job-1")
+
+      assert {:error, :cancelled} =
+               JobOwner.start_background(owner, record("job-1", "echo late", background?: true))
+
+      refute_received {:job_started, "job-1", @epoch}
     end
   end
 
@@ -149,8 +150,14 @@ defmodule MingaAgent.Tools.JobOwnerTest do
       dir = Path.expand(dir)
       pid_file = Path.join(dir, "job.pid")
 
-      {:ok, _job_id} =
-        JobOwner.start_background(owner, "echo $$ > job.pid; exec sleep 60", dir, 60)
+      record =
+        record("job-1", "echo $$ > job.pid; exec sleep 60",
+          background?: true,
+          cwd: dir,
+          timeout_secs: 60
+        )
+
+      assert :ok = JobOwner.start_background(owner, record)
 
       os_pid = await(fn -> File.read(pid_file) end) |> String.trim()
       assert os_alive?(os_pid)
@@ -161,6 +168,41 @@ defmodule MingaAgent.Tools.JobOwnerTest do
 
       assert await(fn -> if os_alive?(os_pid), do: :error, else: {:ok, :gone} end) == :gone
     end
+  end
+
+  describe "reap_all/1" do
+    test "kills running jobs without reporting ends and errors foreground callers", %{
+      owner: owner
+    } do
+      assert :ok =
+               JobOwner.start_background(
+                 owner,
+                 record("job-1", "sleep 60", background?: true, timeout_secs: 60)
+               )
+
+      foreground = record("job-2", "sleep 60", timeout_secs: 60)
+      caller = Task.async(fn -> JobOwner.start_foreground(owner, foreground) end)
+      assert_receive {:job_started, "job-2", @epoch}, 5_000
+
+      assert :ok = JobOwner.reap_all(owner)
+      assert {:error, :session_terminated} = Task.await(caller)
+      refute_received {:job_settled, _id, _epoch, _outcome, _code, _output}
+
+      # Reaped ids no longer occupy the owner.
+      assert :ok =
+               JobOwner.start_background(owner, record("job-1", "echo y", background?: true))
+    end
+  end
+
+  defp record(id, command, opts \\ []) do
+    spec = %{
+      command: command,
+      cwd: Keyword.get(opts, :cwd, "/tmp"),
+      background?: Keyword.get(opts, :background?, false),
+      timeout_secs: Keyword.get(opts, :timeout_secs, 10)
+    }
+
+    Record.admit(id, Keyword.get(opts, :epoch, @epoch), spec, DateTime.utc_now())
   end
 
   # The OS process ends asynchronously after its port closes, so poll its observable state.
@@ -182,34 +224,4 @@ defmodule MingaAgent.Tools.JobOwnerTest do
   @spec os_alive?(String.t()) :: boolean()
   defp os_alive?(os_pid),
     do: match?({_, 0}, System.cmd("kill", ["-0", os_pid], stderr_to_stdout: true))
-
-  describe "reap_all/1" do
-    test "interrupts all running jobs", %{owner: owner} do
-      {:ok, id1} = JobOwner.start_background(owner, "sleep 60", "/tmp", 60)
-      {:ok, id2} = JobOwner.start_background(owner, "sleep 60", "/tmp", 60)
-
-      # Synchronize
-      :sys.get_state(owner)
-
-      assert :ok = JobOwner.reap_all(owner)
-
-      assert {:ok, %Job{status: :interrupted}} = JobOwner.job_status(owner, id1)
-      assert {:ok, %Job{status: :interrupted}} = JobOwner.job_status(owner, id2)
-    end
-
-    test "allows new jobs after reaping", %{owner: owner} do
-      for _i <- 1..8 do
-        JobOwner.start_background(owner, "sleep 60", "/tmp", 60)
-      end
-
-      :sys.get_state(owner)
-
-      assert {:error, :too_many_jobs} =
-               JobOwner.start_background(owner, "echo x", "/tmp", 10)
-
-      assert :ok = JobOwner.reap_all(owner)
-
-      assert {:ok, _id} = JobOwner.start_background(owner, "echo y", "/tmp", 10)
-    end
-  end
 end
