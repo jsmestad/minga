@@ -59,14 +59,14 @@ defmodule MingaEditor.Agent.SessionFollowUp do
   @doc """
   Sends `work` to `session`, bound to the agent workspace `workspace_id`, and returns at once.
 
-  A Restore first checks the draft of a workspace in front. A picker reopen arrives already checked.
+  A Restore first checks the draft of a workspace in front. A picker reopen arrives already checked. A session on another node, such as a remote Agent tab's, cannot load this node's saved conversations, so the work is refused with a notice.
   """
   @spec run(EditorState.t(), non_neg_integer(), pid(), SessionStart.follow_up() | reopen()) ::
           EditorState.t()
   def run(state, _workspace_id, _session, nil), do: state
 
   def run(state, workspace_id, session, {:restore, saved_id, _tool_call, _origin, _return} = work)
-      when is_pid(session) do
+      when is_pid(session) and node(session) == node() do
     case admit_restore(state, workspace_id, saved_id) do
       :ok ->
         track(state, workspace_id, session, work, Session.request_load_session(session, saved_id))
@@ -76,18 +76,25 @@ defmodule MingaEditor.Agent.SessionFollowUp do
     end
   end
 
-  def run(state, workspace_id, session, {:seed, messages} = work) when is_pid(session),
-    do:
-      track(state, workspace_id, session, work, Session.request_seed_messages(session, messages))
+  def run(state, workspace_id, session, {:seed, messages} = work)
+      when is_pid(session) and node(session) == node(),
+      do:
+        track(
+          state,
+          workspace_id,
+          session,
+          work,
+          Session.request_seed_messages(session, messages)
+        )
 
   def run(state, workspace_id, session, {:reopen, saved_id, origin_id, :legacy_import} = work)
-      when is_pid(session) do
+      when is_pid(session) and node(session) == node() do
     request = Session.request_import_legacy_session(session, saved_id, origin_id)
     track(state, workspace_id, session, work, request)
   end
 
   def run(state, workspace_id, session, {:reopen, saved_id, origin_id, _kind} = work)
-      when is_pid(session),
+      when is_pid(session) and node(session) == node(),
       do:
         track(
           state,
@@ -96,6 +103,9 @@ defmodule MingaEditor.Agent.SessionFollowUp do
           work,
           Session.request_load_session(session, saved_id, origin_id)
         )
+
+  def run(state, _workspace_id, session, work) when is_pid(session),
+    do: NoticeWorkflow.publish(state, remote_message(work))
 
   @doc "Handles a follow-up reply or request monitor without intercepting unrelated messages."
   @spec response(EditorState.t(), term()) :: {:handled, EditorState.t()} | :unrelated
@@ -276,6 +286,13 @@ defmodule MingaEditor.Agent.SessionFollowUp do
 
   defp overdue_message({:seed, _messages}),
     do: "Inline Ask history has not been added to the agent session after 15 seconds."
+
+  @spec remote_message(work() | reopen()) :: String.t()
+  defp remote_message({:seed, _messages}),
+    do: "Inline Ask history can be added only to a local Agent session."
+
+  defp remote_message(_restore_or_reopen),
+    do: "Saved sessions open only in a local Agent workspace."
 
   @spec exited_message(work() | {:restored, restore()}) :: String.t()
   defp exited_message({:restore, _id, _tool_call, _origin, _return}),

@@ -152,10 +152,10 @@ defmodule MingaEditor.Commands.Agent do
   @spec open_ready_session(state(), String.t(), String.t() | nil, ProvenanceJump.origin() | nil) ::
           state()
   defp open_ready_session(state, session_id, tool_call_id, origin) do
-    state = ensure_agent_state(state)
+    state = ensure_agent_tab(state, &find_local_agent_tab/1)
     return_target = build_return_target(state)
 
-    case find_agent_tab(state) do
+    case find_local_agent_tab(state) do
       %Tab{id: agent_id} ->
         state = MingaEditor.TabWorkflow.switch(state, agent_id)
 
@@ -348,9 +348,9 @@ defmodule MingaEditor.Commands.Agent do
   @spec ensure_agent_state(state()) :: state()
   defp ensure_agent_state(state), do: ensure_agent_tab(state)
 
-  @spec ensure_agent_tab(state()) :: state()
-  defp ensure_agent_tab(state) do
-    case find_agent_tab(state) do
+  @spec ensure_agent_tab(state(), (state() -> Tab.t() | nil)) :: state()
+  defp ensure_agent_tab(state, find \\ &find_agent_tab/1) do
+    case find.(state) do
       nil ->
         tab_bar = state.shell_runtime.state.tab_bar || TabBar.new(Tab.new_file(1, "File"))
 
@@ -392,6 +392,17 @@ defmodule MingaEditor.Commands.Agent do
 
   defp find_agent_tab(%{shell_runtime: %{state: %{tab_bar: tb}}}),
     do: TabBar.find_by_kind(tb, :agent)
+
+  # A saved conversation loads only into a session on this node, so a restore never picks a remote Agent tab.
+  @spec find_local_agent_tab(state()) :: Tab.t() | nil
+  defp find_local_agent_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{tabs: tabs}}}}),
+    do:
+      Enum.find(
+        tabs,
+        &match?(%Tab{kind: :agent, payload: %Tab.Agent{remote_session_id: nil}}, &1)
+      )
+
+  defp find_local_agent_tab(_state), do: nil
 
   # Starts an agent session after switching into the agent tab.
   # Called only after the tab switch so Shell.Runtime.active_session/1 sees the tab's pid.

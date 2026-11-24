@@ -157,6 +157,51 @@ defmodule MingaEditor.Agent.SessionFollowUpTest do
     end
   end
 
+  describe "a remote Agent tab" do
+    test "a Sessions picker reopen whose tab shows a session on another node is refused", %{
+      state: state,
+      dir: dir
+    } do
+      saved = save_record(dir, "never sent to the remote node")
+      {remote_state, remote_workspace, remote} = with_remote_agent_tab(state, :active)
+      assert Runtime.active_session(remote_state.shell_runtime) == remote
+
+      choice = %Item{
+        id: {saved, {:disk, {remote_workspace, remote, "remote-session"}}},
+        label: "saved"
+      }
+
+      refused = AgentSessionSource.on_select(choice, remote_state)
+
+      assert refused.shell_runtime.state.notice.message ==
+               "Saved sessions open only in a local Agent workspace."
+
+      assert refused.agent_connection.session_follow_ups == %{}
+    end
+
+    test "a Restore opens in a local Agent tab, never in the remote one", %{
+      state: state,
+      dir: dir
+    } do
+      saved = save_record(dir, "restored beside a remote tab")
+      {remote_state, remote_workspace, _remote} = with_remote_agent_tab(state, :inactive)
+
+      opened = AgentCommands.open_session(remote_state, saved)
+      provider = assert_provider_held()
+      tabs = opened.shell_runtime.state.tab_bar
+
+      assert %Tab{kind: :agent, payload: %{remote_session_id: nil}} = TabBar.active(tabs)
+      refute TabBar.active_workspace_id(tabs) == remote_workspace
+
+      bound = AgentSessionStart.settle(opened)
+      session = Runtime.active_session(bound.shell_runtime)
+      HeldStartProvider.release(provider)
+      _restored = settle_through_editor(bound)
+
+      assert inspect(Session.messages(session)) =~ "restored beside a remote tab"
+    end
+  end
+
   describe "a follow-up that does not succeed" do
     test "a failed Restore in front is reported in a notice", %{state: state} do
       opened = AgentCommands.open_session(state, "no-such-saved-session")
@@ -330,6 +375,29 @@ defmodule MingaEditor.Agent.SessionFollowUpTest do
                    2_000
 
     session_id
+  end
+
+  # A connected remote Agent workspace whose session pid lives on another node.
+  @spec with_remote_agent_tab(MingaEditor.State.t(), :active | :inactive) ::
+          {MingaEditor.State.t(), non_neg_integer(), pid()}
+  defp with_remote_agent_tab(state, placement) do
+    remote = remote_pid()
+
+    workspace =
+      Workspace.new_agent(5, "Remote", remote)
+      |> Workspace.put_remote_session("build host", "remote-session", :connected)
+
+    tabs = TabBar.restore_workspaces(state.shell_runtime.state.tab_bar, [workspace], nil)
+    [%Tab{id: remote_tab}] = TabBar.tabs_in_workspace(tabs, workspace.id)
+    tabs = if placement == :active, do: %{tabs | active_id: remote_tab}, else: tabs
+    {MingaEditor.WorkspaceWorkflow.install_tab_bar(state, tabs), workspace.id, remote}
+  end
+
+  # A pid on a node this test never connects to.
+  @spec remote_pid() :: pid()
+  defp remote_pid do
+    node = "remote@nowhere"
+    :erlang.binary_to_term(<<131, 88, 119, byte_size(node), node::binary, 1::32, 0::32, 1::32>>)
   end
 
   @spec agent_workspaces(MingaEditor.State.t()) :: [Workspace.t()]
