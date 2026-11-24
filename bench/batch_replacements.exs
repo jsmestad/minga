@@ -1,8 +1,9 @@
 defmodule Minga.Bench.BatchReplacements do
   @moduledoc """
-  Batch range replacement cost, baseline against candidate (#3500).
+  Batch range replacement cost, baseline against candidate (#3500), and the cost of undoing and
+  redoing a batch (#3941).
 
-  Two measurements:
+  Three measurements:
 
     * `stage`: the pure batch operation. Each sample runs the sequential control (the pre-#3500
       algorithm, copied below so this script runs unchanged on any commit) and
@@ -16,12 +17,18 @@ defmodule Minga.Bench.BatchReplacements do
       on the candidate commit. It measures the middle placements and two boundary cases. Every
       sample checks content, cursor, version, undo, and redo against the commit's own pure
       operation, which stage mode checks against the sequential control. Undo and redo are
-      timed for batches of up to 1,000 edits.
+      timed for every batch size.
+    * `history`: undo and redo of a recorded batch. Each sample runs the per-patch control (the
+      pre-#3941 history replay, copied below: one `UndoPatch.apply/2` and `UndoPatch.invert/2`
+      per patch) and `Minga.Buffer.UndoHistory.undo/3` or `redo/3` (whatever the checked-out
+      commit ships), in alternating order, each in a fresh process. Every sample checks that both
+      return the same content, cursor, and line index, and that undo restores the original.
 
   Run with:
 
       MIX_ENV=test mix run bench/batch_replacements.exs stage OUT_DIR
       MIX_ENV=test mix run bench/batch_replacements.exs consumer OUT_DIR
+      MIX_ENV=test mix run bench/batch_replacements.exs history OUT_DIR
 
   Add `--quick` to skip the 16 MiB, 10,000-edit cells, whose sequential samples take minutes, and
   `--only TEXT` to run only workloads whose name contains TEXT.
@@ -33,6 +40,7 @@ defmodule Minga.Bench.BatchReplacements do
   alias Minga.Buffer.Lines
   alias Minga.Buffer.Operation
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Buffer.UndoHistory
   alias Minga.Buffer.UndoPatch
 
   @mib 1_048_576
@@ -55,6 +63,17 @@ defmodule Minga.Bench.BatchReplacements do
     |> Enum.reduce({doc, []}, fn {from_pos, to_pos, replacement}, {acc_doc, patches} ->
       {:edited, new_doc, delta} = Operation.replace_range(acc_doc, from_pos, to_pos, replacement)
       {new_doc, [UndoPatch.from_delta(delta, acc_doc) | patches]}
+    end)
+  end
+
+  @doc """
+  The pre-#3941 history replay: one `UndoPatch.apply/2` per patch, each inverted against the document it applied to.
+  """
+  @spec sequential_replay([UndoPatch.t()], Document.t()) :: {Document.t(), [UndoPatch.t()]}
+  def sequential_replay(patches, %Document{} = doc) do
+    Enum.reduce(patches, {doc, []}, fn patch, {acc_doc, inverses} ->
+      {:ok, new_doc} = UndoPatch.apply(patch, acc_doc)
+      {new_doc, [UndoPatch.invert(patch, acc_doc) | inverses]}
     end)
   end
 
@@ -273,7 +292,6 @@ defmodule Minga.Bench.BatchReplacements do
 
     expected = Document.content(expected_doc)
     expected_cursor = Document.cursor(expected_doc)
-    undo? = Enum.count_until(edits, 1_001) <= 1_000
 
     sample_until_budget(
       fn index ->
@@ -289,8 +307,7 @@ defmodule Minga.Bench.BatchReplacements do
                  BufferProcess.version(pid) == version + 1,
                do: raise("#{workload.name}: apply_edits differs from the sequential control")
 
-        {undo_us, redo_us} =
-          if undo?, do: undo_redo(pid, text, expected, workload.name), else: {nil, nil}
+        {undo_us, redo_us} = undo_redo(pid, text, expected, workload.name)
 
         GenServer.stop(pid)
 
@@ -317,10 +334,58 @@ defmodule Minga.Bench.BatchReplacements do
             reductions: nil
           }
         ]
-        |> Enum.reject(&is_nil(&1.wall_us))
       end,
       @consumer_max_samples
     )
+  end
+
+  defp history(workload) do
+    {text, doc, edits} = build(workload)
+    original = Document.move_to(doc, {3, 2})
+    {edited, patches} = production(original, edits)
+
+    IO.puts(
+      :stderr,
+      "history #{workload.name}: #{byte_size(text)} bytes, #{length(patches)} patches"
+    )
+
+    recorded = UndoHistory.record_edit_batch(UndoHistory.new(), 0, patches, :lsp, 1)
+    {:ok, undo_restore, after_undo} = UndoHistory.undo(recorded, 1, edited)
+    {_undone, redo_patches} = sequential_replay(patches, edited)
+
+    unless Document.content(undo_restore.document) == text and
+             Document.cursor(undo_restore.document) == {3, 2},
+           do: raise("#{workload.name}: undo did not restore the original")
+
+    steps = [
+      {"undo", fn -> sequential_replay(patches, edited) end,
+       fn -> UndoHistory.undo(recorded, 1, edited) end},
+      {"redo", fn -> sequential_replay(redo_patches, undo_restore.document) end,
+       fn -> UndoHistory.redo(after_undo, 0, undo_restore.document) end}
+    ]
+
+    sample_until_budget(fn index ->
+      Enum.flat_map(steps, &history_step(workload.name, index, &1))
+    end)
+  end
+
+  # Runs one undo or redo step through the control and the candidate, in alternating order.
+  defp history_step(name, index, {step, control, candidate}) do
+    runs = [{"#{step} per-patch", control}, {"#{step} one-pass", candidate}]
+    ordered = if rem(index, 2) == 0, do: runs, else: Enum.reverse(runs)
+    results = Map.new(ordered, fn {impl, fun} -> {impl, isolated(fun)} end)
+
+    {{control_doc, _inverses}, _, _} = results["#{step} per-patch"]
+    {{:ok, %{document: candidate_doc}, _history}, _, _} = results["#{step} one-pass"]
+
+    unless Document.content(candidate_doc) == Document.content(control_doc) and
+             Document.cursor(candidate_doc) == Document.cursor(control_doc) and
+             Lines.snapshot(candidate_doc) == Lines.snapshot(control_doc),
+           do: raise("#{name}: #{step} differs from the per-patch control")
+
+    for {impl, {_result, wall_us, reductions}} <- results do
+      %{workload: name, impl: impl, index: index, wall_us: wall_us, reductions: reductions}
+    end
   end
 
   defp undo_redo(pid, text, expected, name) do
@@ -355,6 +420,7 @@ defmodule Minga.Bench.BatchReplacements do
 
   # The consumer path differs from the stage only by the Buffer process work around it, so it
   # measures the middle placement and the two boundary cases most likely to show a regression.
+  # History mode measures the same cells.
   defp consumer_workload?(name),
     do: String.ends_with?(name, "/middle") or name in ["boundary/overlapping", "boundary/unicode"]
 
@@ -421,6 +487,7 @@ defmodule Minga.Bench.BatchReplacements do
       case mode do
         "stage" -> &stage/1
         "consumer" -> &consumer/1
+        "history" -> &history/1
       end
 
     only = Keyword.get(opts, :only, "")
