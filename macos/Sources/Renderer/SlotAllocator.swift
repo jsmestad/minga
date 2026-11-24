@@ -57,6 +57,8 @@ struct AtlasSlot: Equatable {
     var contentHash: Int = 0
     var pixelWidth: Int = 0
     var lastWrittenFrame: UInt64 = 0
+    /// The cache key that currently owns this slot, or nil if the slot is free.
+    var ownerKey: AtlasKey? = nil
 }
 
 /// Reason an atlas key needs rasterization and upload.
@@ -136,6 +138,7 @@ struct SlotAllocator: Equatable {
         if let free = freeSlots.popLast() {
             keyToSlot[key] = free
             slots[free].lastWrittenFrame = frameCounter
+            slots[free].ownerKey = key
             return .reserved(slotIndex: free, reason: .newKey)
         }
 
@@ -144,6 +147,7 @@ struct SlotAllocator: Equatable {
         }
         keyToSlot[key] = evictIndex
         slots[evictIndex].lastWrittenFrame = frameCounter
+        slots[evictIndex].ownerKey = key
         return .reserved(slotIndex: evictIndex, reason: .evicted(oldKey: evictedKey))
     }
 
@@ -189,6 +193,7 @@ struct SlotAllocator: Equatable {
         for i in 0..<slots.count {
             slots[i].contentHash = 0
             slots[i].pixelWidth = 0
+            slots[i].ownerKey = nil
         }
         keyToSlot.removeAll(keepingCapacity: true)
         freeSlots = Array((0..<capacity).reversed())
@@ -202,6 +207,7 @@ struct SlotAllocator: Equatable {
         for (_key, slotIndex) in removed {
             slots[slotIndex].contentHash = 0
             slots[slotIndex].pixelWidth = 0
+            slots[slotIndex].ownerKey = nil
             freeSlots.append(slotIndex)
         }
 
@@ -216,19 +222,20 @@ struct SlotAllocator: Equatable {
         guard !slots.isEmpty else { return nil }
 
         var oldestFrame: UInt64 = .max
-        var oldestIndex = 0
+        var oldestIndex = -1
 
         for (i, slot) in slots.enumerated() {
-            if keyToSlot.values.contains(i), slot.lastWrittenFrame < oldestFrame {
+            if slot.ownerKey != nil, slot.lastWrittenFrame < oldestFrame {
                 oldestFrame = slot.lastWrittenFrame
                 oldestIndex = i
             }
         }
 
-        guard let oldKey = keyToSlot.first(where: { $0.value == oldestIndex })?.key else {
+        guard oldestIndex >= 0, let oldKey = slots[oldestIndex].ownerKey else {
             return nil
         }
         keyToSlot.removeValue(forKey: oldKey)
+        slots[oldestIndex].ownerKey = nil
         return (oldestIndex, oldKey)
     }
 }

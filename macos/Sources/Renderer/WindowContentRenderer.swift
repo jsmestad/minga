@@ -16,21 +16,6 @@ import CoreGraphics
 import Metal
 import AppKit
 
-/// Renders `GUIWindowContent` rows into cached Metal line textures.
-/// Stable semantic/cache state used by renderer transaction tests.
-struct WindowContentCacheSnapshot: Equatable {
-    struct Entry: Equatable {
-        let texture: ObjectIdentifier
-        let contentHash: Int
-        let lastUsedFrame: UInt64
-        let pixelWidth: Int
-        let pixelHeight: Int
-    }
-    let entries: [UInt64: Entry]
-    let frameCounter: UInt64
-    let maxLinePixelWidth: Int
-}
-
 ///
 /// Each row's text + spans produce an `NSAttributedString` → `CTLine` →
 /// bitmap → `MTLTexture`, cached by stable row identity plus content hash.
@@ -51,8 +36,6 @@ final class WindowContentRenderer {
     /// whole candidate generation rather than treating a missing row as success.
     private(set) var nativePresentationFailure: NativePresentationFailure?
 
-    /// Per-row texture cache keyed by BEAM-authored row identity.
-    private var lineCache: [UInt64: CachedLineTexture] = [:]
     private struct CachedLayout {
         let contentHash: Int
         let line: CTLine
@@ -151,7 +134,6 @@ final class WindowContentRenderer {
             device: device, fontManager: fontManager, rasterizer: rasterizer,
             resourcePolicy: resourcePolicy, makeTexture: makeTexture
         )
-        candidate.lineCache = lineCache
         candidate.lineLayoutCache = lineLayoutCache
         candidate.frameCounter = frameCounter
         candidate.maxLinePixelWidth = maxLinePixelWidth
@@ -160,23 +142,11 @@ final class WindowContentRenderer {
         return candidate
     }
 
-    func cacheSnapshot() -> WindowContentCacheSnapshot {
-        WindowContentCacheSnapshot(
-            entries: lineCache.mapValues {
-                .init(texture: ObjectIdentifier($0.texture), contentHash: $0.contentHash,
-                      lastUsedFrame: $0.lastUsedFrame, pixelWidth: $0.pixelWidth,
-                      pixelHeight: $0.pixelHeight)
-            },
-            frameCounter: frameCounter, maxLinePixelWidth: maxLinePixelWidth
-        )
-    }
-
     /// Update max line width on viewport resize.
     func updateViewportWidth(cols: UInt16) {
         let newWidth = Int(ceil(CGFloat(cols) * cellWidth * scale))
         if newWidth != maxLinePixelWidth {
             maxLinePixelWidth = newWidth
-            lineCache.removeAll(keepingCapacity: true)
         }
     }
 
@@ -185,92 +155,12 @@ final class WindowContentRenderer {
         nativePresentationFailure = nil
         frameCounter += 1
         let threshold = frameCounter > evictionThreshold ? frameCounter - evictionThreshold : 0
-        lineCache = lineCache.filter { $0.value.lastUsedFrame >= threshold }
         lineLayoutCache = lineLayoutCache.filter { $0.value.lastUsedFrame >= threshold }
     }
 
     /// Clear all cached textures.
     func invalidateAll() {
         lineLayoutCache.removeAll(keepingCapacity: true)
-        lineCache.removeAll(keepingCapacity: true)
-    }
-
-    /// Render a single visual row into a cached Metal texture.
-    ///
-    /// Returns the cached texture if the content hash matches, or
-    /// rasterizes a new texture from the row's text + spans.
-    func renderRow(displayRow _: UInt16, row: GUIVisualRow, contentEpoch: UInt32 = 0) -> CachedLineTexture? {
-        let hash = epochContentHash(row.contentHash, contentEpoch)
-        let key = row.rowId
-
-        // Cache hit check.
-        if var cached = lineCache[key], cached.contentHash == hash {
-            cached.lastUsedFrame = frameCounter
-            lineCache[key] = cached
-            return cached
-        }
-
-        guard !row.text.isEmpty else { return nil }
-
-        // Build NSAttributedString from spans.
-        let attributedString = buildAttributedString(text: row.text, spans: row.spans)
-
-        // Create CTLine and measure.
-        let ctLine = CTLineCreateWithAttributedString(attributedString)
-        var lineAscent: CGFloat = 0
-        var lineDescent: CGFloat = 0
-        var lineLeading: CGFloat = 0
-        let lineWidth = CTLineGetTypographicBounds(ctLine, &lineAscent, &lineDescent, &lineLeading)
-
-        let pixelWidth = min(Int(ceil(lineWidth * scale)), maxLinePixelWidth)
-        let pixelHeight = linePixelHeight
-        guard pixelWidth > 0, pixelHeight > 0 else { return nil }
-
-        // Rasterize into the pooled BGRA bitmap.
-        let result: RasterizeResult
-        do {
-            result = try rasterizer.rasterize(ctLine, width: pixelWidth, height: pixelHeight,
-                                              scale: scale, descent: descent)
-        } catch let failure as NativePresentationFailure {
-            nativePresentationFailure = nativePresentationFailure ?? failure
-            return nil
-        } catch {
-            nativePresentationFailure = nativePresentationFailure ?? NativePresentationFailure(
-                phase: .raster, dimension: .rasterContext, reason: .unavailable)
-            return nil
-        }
-
-        // Create texture.
-        let texDesc = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .bgra8Unorm_srgb,
-            width: pixelWidth,
-            height: pixelHeight,
-            mipmapped: false
-        )
-        texDesc.usage = [.shaderRead]
-        texDesc.storageMode = .managed
-
-        guard let texture = makeTexture(device, texDesc) else {
-            nativePresentationFailure = nativePresentationFailure ?? NativePresentationFailure(
-                phase: .raster, dimension: .texture, reason: .allocation)
-            return nil
-        }
-
-        // Upload bitmap data. Pooled pointer valid until next rasterize() call.
-        let region = MTLRegion(origin: MTLOrigin(x: 0, y: 0, z: 0),
-                               size: MTLSize(width: pixelWidth, height: pixelHeight, depth: 1))
-        texture.replace(region: region, mipmapLevel: 0,
-                       withBytes: result.pointer, bytesPerRow: result.bytesPerRow)
-
-        let cached = CachedLineTexture(
-            texture: texture,
-            contentHash: hash,
-            lastUsedFrame: frameCounter,
-            pixelWidth: pixelWidth,
-            pixelHeight: pixelHeight
-        )
-        lineCache[key] = cached
-        return cached
     }
 
     /// The text layout is retained beside the raster cache so input never reshapes a displayed line.
