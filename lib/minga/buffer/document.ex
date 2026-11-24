@@ -240,6 +240,35 @@ defmodule Minga.Buffer.Document do
   end
 
   @doc """
+  Appends `text` at the end of the document without moving the gap.
+
+  A cursor before the end keeps its position. A cursor at the end follows the appended text, as `insert_text/2` would place it, so a log reader at the bottom keeps seeing new entries. Either way the existing content is not copied into the other gap half.
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.Document.new("first\\n")
+      iex> buf = Minga.Buffer.Document.append_text(buf, "second\\n")
+      iex> Minga.Buffer.Document.content(buf)
+      "first\\nsecond\\n"
+      iex> Minga.Buffer.Document.cursor(buf)
+      {0, 0}
+  """
+  @spec append_text(t(), String.t()) :: t()
+  def append_text(%__MODULE__{} = doc, ""), do: doc
+  def append_text(%__MODULE__{after: ""} = doc, text), do: insert_text(doc, text)
+
+  def append_text(%__MODULE__{after: after_, line_count: lc, line_offsets: ls} = doc, text) do
+    end_byte = content_byte_size(doc)
+
+    %{
+      doc
+      | after: after_ <> text,
+        line_count: lc + Lines.break_count(text),
+        line_offsets: Lines.update_after_insert(ls, lc - 1, end_byte, text)
+    }
+  end
+
+  @doc """
   Deletes the character before the cursor (backspace).
   Returns the buffer unchanged if the cursor is at the beginning.
 

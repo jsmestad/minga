@@ -168,6 +168,39 @@ defmodule Minga.Log.MessagesBufferTest do
       assert content == "hello\nworld\n"
     end
 
+    test "appends at the end and trims the oldest entry when the cursor is at the top", %{
+      buf: buf
+    } do
+      for i <- 1..5, do: Buffer.bounded_append(buf, "entry-#{i}\n", 6, 100_000)
+      Buffer.move_to(buf, {0, 0})
+
+      Buffer.bounded_append(buf, "entry-6\n", 6, 100_000)
+
+      assert Buffer.content(buf) == "entry-2\nentry-3\nentry-4\nentry-5\nentry-6\n"
+      assert Buffer.cursor(buf) == {0, 0}
+    end
+
+    test "a cursor inside the log stays on its entry while entries arrive and old ones drop", %{
+      buf: buf
+    } do
+      for i <- 1..4, do: Buffer.bounded_append(buf, "entry-#{i}\n", 6, 100_000)
+      Buffer.move_to(buf, {2, 3})
+
+      Buffer.bounded_append(buf, "entry-5\n", 6, 100_000)
+      assert Buffer.cursor(buf) == {2, 3}
+
+      Buffer.bounded_append(buf, "entry-6\n", 6, 100_000)
+      assert Buffer.content(buf) == "entry-2\nentry-3\nentry-4\nentry-5\nentry-6\n"
+      assert Buffer.cursor(buf) == {1, 3}
+    end
+
+    test "a cursor at the end of the log follows new entries", %{buf: buf} do
+      for i <- 1..7, do: Buffer.bounded_append(buf, "entry-#{i}\n", 6, 100_000)
+
+      assert Buffer.content(buf) == "entry-3\nentry-4\nentry-5\nentry-6\nentry-7\n"
+      assert Buffer.cursor(buf) == {5, 0}
+    end
+
     test "line_count stays within max_lines after many appends", %{buf: buf} do
       for i <- 1..500 do
         Buffer.bounded_append(buf, "msg-#{i}\n", 50, 100_000)
