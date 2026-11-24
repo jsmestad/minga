@@ -18,7 +18,6 @@ defmodule MingaEditor.Session.ChromeState do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Agent, as: TabAgent
   alias MingaEditor.State.Tab.Context, as: TabContext
-  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.TabBar
   alias Minga.Language.Devicon
   alias MingaEditor.Session.ChromeState.TabSummary
@@ -221,26 +220,11 @@ defmodule MingaEditor.Session.ChromeState do
     tb.workspaces
     |> Enum.filter(&(&1.kind == :agent))
     |> Enum.map(fn workspace ->
-      status =
-        WorkspaceStatus.resolve(
-          workspace,
-          workspace_live_agent(workspace, live_agent, active_workspace_id),
-          workspace_ui(workspace, live_ui, active_workspace_id)
-        )
+      status = WorkspaceStatus.resolve_in(workspace, active_workspace_id, live_agent, live_ui)
 
       agent_workspace_summary(tb, workspace, status)
     end)
   end
-
-  @spec workspace_live_agent(Workspace.t(), AgentState.t() | nil, non_neg_integer()) ::
-          AgentState.t() | nil
-  defp workspace_live_agent(%Workspace{id: id}, live_agent, id), do: live_agent
-  defp workspace_live_agent(%Workspace{}, _live_agent, _active_workspace_id), do: nil
-
-  @spec workspace_ui(Workspace.t(), UIState.t() | nil, non_neg_integer()) :: UIState.t() | nil
-  defp workspace_ui(%Workspace{id: id}, live_ui, id), do: live_ui
-  defp workspace_ui(%Workspace{payload: %WorkspaceAgent{agent_ui: ui}}, _live_ui, _active), do: ui
-  defp workspace_ui(%Workspace{}, _live_ui, _active), do: nil
 
   @spec agent_workspace_summary(TabBar.t(), Workspace.t(), WorkspaceStatus.t()) ::
           WorkspaceSummary.t()
