@@ -47,6 +47,7 @@ defmodule MingaEditor.PickerUI do
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.PublicSource
   alias MingaEditor.UI.Picker.Source
+  alias MingaEditor.UI.Picker.WorkspaceSymbolSource
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -544,6 +545,15 @@ defmodule MingaEditor.PickerUI do
 
   defp replace_current_query(
          state,
+         %PickerState{source: WorkspaceSymbolSource} = picker_state,
+         query,
+         edit_seq
+       ) do
+    requery_server_filtered(state, picker_state, query, edit_seq)
+  end
+
+  defp replace_current_query(
+         state,
          %PickerState{
            picker: %Picker{} = picker,
            source_switch: {:switched, _original_source, mode_prefix}
@@ -574,6 +584,32 @@ defmodule MingaEditor.PickerUI do
       nil ->
         install_query_edit(state, picker, query, edit_seq)
     end
+  end
+
+  # The language server filters workspace symbols, so every query edit starts a new fetch for that query.
+  # The local match query stays empty so the picker never hides a row the server returned.
+  # Starting the fetch stops the superseded one, and the query tags the fetch so a late result is stale.
+  @spec requery_server_filtered(state(), PickerState.t(), String.t(), non_neg_integer()) ::
+          state()
+  defp requery_server_filtered(
+         state,
+         %PickerState{picker: picker, source: source, callback_source: callback_source} =
+           picker_state,
+         query,
+         edit_seq
+       ) do
+    state = cancel_current_fetch(state)
+    picker = Picker.filter_with_match_query(picker, query, "")
+
+    {loading_picker_state, revision} =
+      picker_state
+      |> PickerState.accept_query_edit(picker, edit_seq)
+      |> PickerState.begin_fetch(query)
+
+    loading_state = update_picker(state, fn _current -> loading_picker_state end)
+    context = Context.from_editor_state(loading_state)
+    request = FetchEffect.request(source, callback_source, context, revision)
+    schedule_fetch(loading_state, request, source, revision)
   end
 
   @spec replace_project_query(state(), PickerState.t(), String.t(), non_neg_integer()) :: state()
@@ -1011,15 +1047,17 @@ defmodule MingaEditor.PickerUI do
   end
 
   # Backspace returns to the original source when it empties a switched picker.
+  # Sources whose query drives a fetch take the edit through replace_current_query.
   @spec delete_backward(state(), PickerState.t()) :: state()
   defp delete_backward(
          state,
          %PickerState{
            picker: %Picker{} = picker,
-           source: DirectorySource,
+           source: source,
            acknowledged_query_edit_seq: edit_seq
          } = picker_state
-       ) do
+       )
+       when source in [DirectorySource, WorkspaceSymbolSource] do
     next_query = String.slice(picker.query, 0, max(String.length(picker.query) - 1, 0))
     replace_current_query(state, picker_state, next_query, edit_seq + 1)
   end
@@ -1168,7 +1206,7 @@ defmodule MingaEditor.PickerUI do
          } = picker_state,
          char
        )
-       when source in [DirectorySource, FileSource] do
+       when source in [DirectorySource, FileSource, WorkspaceSymbolSource] do
     query = PickerState.mode_prefix(picker_state) <> picker.query <> char
     replace_current_query(state, picker_state, query, edit_seq + 1)
   end
@@ -2068,6 +2106,9 @@ defmodule MingaEditor.PickerUI do
     do: MingaEditor.UI.Picker.FileAttachmentSource.fetch_identity(context)
 
   defp fetch_identity(FileSource, %Context{} = context), do: FileSource.fetch_identity(context)
+
+  defp fetch_identity(WorkspaceSymbolSource, %Context{} = context),
+    do: WorkspaceSymbolSource.fetch_identity(context)
 
   defp fetch_identity(_source, %Context{}), do: nil
 end
