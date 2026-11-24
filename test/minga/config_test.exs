@@ -327,8 +327,7 @@ defmodule Minga.ConfigTest do
       Minga.Config.extension(:my_tool, path: dir)
 
       assert {:ok, %Entry{} = entry} = ExtRegistry.get(:my_tool)
-      assert entry.source_type == :path
-      assert entry.path == dir
+      assert entry.source == {:path, dir}
     end
 
     test "passes extra options as config for path source" do
@@ -343,17 +342,17 @@ defmodule Minga.ConfigTest do
       Minga.Config.extension(:my_tool, path: "~/code/my_tool")
 
       assert {:ok, entry} = ExtRegistry.get(:my_tool)
-      assert entry.path == Path.expand("~/code/my_tool")
+      assert entry.source == {:path, Path.expand("~/code/my_tool")}
     end
 
     test "registers a git-sourced extension" do
       Minga.Config.extension(:snippets, git: "https://github.com/user/snippets")
 
       assert {:ok, %Entry{} = entry} = ExtRegistry.get(:snippets)
-      assert entry.source_type == :git
-      assert entry.git.url == "https://github.com/user/snippets"
-      assert entry.git.branch == nil
-      assert entry.git.ref == nil
+      assert {:git, git_opts} = entry.source
+      assert git_opts.url == "https://github.com/user/snippets"
+      assert git_opts.branch == nil
+      assert git_opts.ref == nil
     end
 
     test "registers a git extension with branch" do
@@ -363,7 +362,8 @@ defmodule Minga.ConfigTest do
       )
 
       assert {:ok, entry} = ExtRegistry.get(:snippets)
-      assert entry.git.branch == "develop"
+      assert {:git, git_opts} = entry.source
+      assert git_opts.branch == "develop"
     end
 
     test "registers a git extension with ref" do
@@ -373,14 +373,16 @@ defmodule Minga.ConfigTest do
       )
 
       assert {:ok, entry} = ExtRegistry.get(:snippets)
-      assert entry.git.ref == "v1.0.0"
+      assert {:git, git_opts} = entry.source
+      assert git_opts.ref == "v1.0.0"
     end
 
     test "registers a git extension with SSH URL" do
       Minga.Config.extension(:private, git: "git@github.com:user/private.git")
 
       assert {:ok, entry} = ExtRegistry.get(:private)
-      assert entry.git.url == "git@github.com:user/private.git"
+      assert {:git, git_opts} = entry.source
+      assert git_opts.url == "git@github.com:user/private.git"
     end
 
     test "passes extra options as config for git source" do
@@ -402,17 +404,18 @@ defmodule Minga.ConfigTest do
       )
 
       assert {:ok, %Entry{} = entry} = ExtRegistry.get(:snippets)
-      assert entry.source_type == :hex
-      assert entry.hex.package == "minga_snippets"
-      assert entry.hex.version == "~> 0.3"
-      assert entry.hex.app == :minga_snippets
+      assert {:hex, hex_opts} = entry.source
+      assert hex_opts.package == "minga_snippets"
+      assert hex_opts.version == "~> 0.3"
+      assert hex_opts.app == :minga_snippets
     end
 
     test "registers a hex extension without version" do
       Minga.Config.extension(:minga_snippets, hex: "minga_snippets")
 
       assert {:ok, entry} = ExtRegistry.get(:minga_snippets)
-      assert entry.hex.version == nil
+      assert {:hex, hex_opts} = entry.source
+      assert hex_opts.version == nil
     end
 
     test "passes extra options as config for hex source" do

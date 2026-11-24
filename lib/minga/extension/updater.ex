@@ -158,8 +158,8 @@ defmodule Minga.Extension.Updater do
 
   @spec check_entry({atom(), Minga.Extension.Entry.t()}) ::
           ExtensionConfirmState.update_entry() | nil
-  defp check_entry({name, %{source_type: :git} = entry}) do
-    case ExtGit.fetch_updates(name, entry.git) do
+  defp check_entry({name, %{source: {:git, git_opts}}}) do
+    case ExtGit.fetch_updates(name, git_opts) do
       {:ok, info} ->
         %{
           name: name,
@@ -168,7 +168,7 @@ defmodule Minga.Extension.Updater do
           new_ref: info.new_ref,
           commit_count: info.commit_count,
           branch: info.branch,
-          pinned: entry.git.ref != nil
+          pinned: git_opts.ref != nil
         }
 
       :up_to_date ->
@@ -180,7 +180,7 @@ defmodule Minga.Extension.Updater do
     end
   end
 
-  defp check_entry({_name, %{source_type: :hex}}) do
+  defp check_entry({_name, %{source: {:hex, _}}}) do
     # Hex updates are handled via Mix.install force reinstall.
     # We can't easily diff versions without querying the Hex API,
     # which is out of scope for v1. Users run :ExtUpdateAll to
@@ -188,7 +188,7 @@ defmodule Minga.Extension.Updater do
     nil
   end
 
-  defp check_entry({_name, %{source_type: :path}}) do
+  defp check_entry({_name, %{source: {:path, _}}}) do
     # Path extensions are user-managed
     nil
   end

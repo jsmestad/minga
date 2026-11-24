@@ -148,6 +148,23 @@ defmodule Minga.Extension.Registry do
     Agent.get_and_update(server, &apply_updates(&1, name, updates))
   end
 
+  @doc "Transforms an existing entry through a function, returning the entry owner's result."
+  @spec update_entry(atom(), (Entry.t() -> Entry.t())) ::
+          :ok | {:error, {:extension_not_declared, atom()}}
+  @spec update_entry(GenServer.server(), atom(), (Entry.t() -> Entry.t())) ::
+          :ok | {:error, {:extension_not_declared, atom()}}
+  def update_entry(name, fun) when is_atom(name) and is_function(fun, 1),
+    do: update_entry(__MODULE__, name, fun)
+
+  def update_entry(server, name, fun) when is_atom(name) and is_function(fun, 1) do
+    Agent.get_and_update(server, fn state ->
+      case Map.fetch(state, name) do
+        {:ok, entry} -> {:ok, Map.put(state, name, fun.(entry))}
+        :error -> {{:error, {:extension_not_declared, name}}, state}
+      end
+    end)
+  end
+
   @spec apply_updates(state(), atom(), keyword()) ::
           {:ok | {:error, {:extension_not_declared, atom()}}, state()}
   defp apply_updates(state, name, updates) do

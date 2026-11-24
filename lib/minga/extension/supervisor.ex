@@ -569,7 +569,7 @@ defmodule Minga.Extension.Supervisor do
 
   @spec prerequisite_reason(atom(), ExtRegistry.entry(), map(), start_failure() | nil) ::
           term() | nil
-  defp prerequisite_reason(_name, %{source_type: :hex}, _failed, %{reason: reason}), do: reason
+  defp prerequisite_reason(_name, %{source: {:hex, _}}, _failed, %{reason: reason}), do: reason
   defp prerequisite_reason(name, _entry, failed, _hex_failure), do: Map.get(failed, name)
 
   @spec install_hex(GenServer.server()) :: start_failure() | nil
@@ -597,9 +597,9 @@ defmodule Minga.Extension.Supervisor do
           {atom(), ExtRegistry.entry()},
           [start_failure()]
         ) :: [start_failure()]
-  defp resolve_git_extension(registry, {name, %{source_type: :git} = entry}, failures) do
+  defp resolve_git_extension(registry, {name, %{source: {:git, git_opts}}}, failures) do
     name
-    |> ExtGit.ensure_cloned(entry.git)
+    |> ExtGit.ensure_cloned(git_opts)
     |> update_resolved_git(registry, name, failures)
   end
 
@@ -612,7 +612,9 @@ defmodule Minga.Extension.Supervisor do
           [start_failure()]
         ) :: [start_failure()]
   defp update_resolved_git({:ok, path}, registry, name, failures) do
-    case ExtRegistry.update(registry, name, path: path) do
+    alias Minga.Extension.Entry
+
+    case ExtRegistry.update_entry(registry, name, &Entry.resolve_git_path(&1, path)) do
       :ok -> failures
       {:error, reason} -> [%{extension: name, reason: reason} | failures]
     end
@@ -625,8 +627,8 @@ defmodule Minga.Extension.Supervisor do
 
   @spec failed_prerequisite?(atom(), ExtRegistry.entry(), MapSet.t(atom()), start_failure() | nil) ::
           boolean()
-  defp failed_prerequisite?(_name, %{source_type: :hex}, _failed, nil), do: false
-  defp failed_prerequisite?(_name, %{source_type: :hex}, _failed, _hex_failure), do: true
+  defp failed_prerequisite?(_name, %{source: {:hex, _}}, _failed, nil), do: false
+  defp failed_prerequisite?(_name, %{source: {:hex, _}}, _failed, _hex_failure), do: true
   defp failed_prerequisite?(name, _entry, failed, _hex_failure), do: MapSet.member?(failed, name)
 
   @spec call_declared_instance(

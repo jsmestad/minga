@@ -11,8 +11,7 @@ defmodule Minga.Extension.InstanceTest do
 
   test "state strips lifecycle projection from declaration identity" do
     declaration = %Entry{
-      source_type: :path,
-      path: "/tmp/example",
+      source: {:path, "/tmp/example"},
       module: Some.Projected.Module,
       pid: self(),
       status: :running,
@@ -49,14 +48,21 @@ defmodule Minga.Extension.InstanceTest do
     registry = :"missing_projection_#{System.unique_integer([:positive])}"
     start_supervised!({Registry, name: registry})
 
-    declaration = %Entry{source_type: :module, module: __MODULE__.RestartFixture}
+    declaration = %Entry{
+      source: {:module, __MODULE__.RestartFixture},
+      module: __MODULE__.RestartFixture
+    }
+
     state = State.new(:missing_projection, declaration, registry, :instances, [])
 
     assert {:error, {:extension_not_declared, :missing_projection}} = Projection.publish(state)
   end
 
   test "declaration replaces request overrides and preserves stable collaborators" do
-    declaration = %Entry{source_type: :module, module: __MODULE__.RestartFixture}
+    declaration = %Entry{
+      source: {:module, __MODULE__.RestartFixture},
+      module: __MODULE__.RestartFixture
+    }
 
     state =
       State.new(:collaborators, declaration, :registry, :instances,

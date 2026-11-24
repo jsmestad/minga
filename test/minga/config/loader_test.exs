@@ -125,7 +125,7 @@ defmodule Minga.Config.LoaderTest do
 
       assert Loader.load_error(pid) == nil
       assert {:ok, entry} = ExtRegistry.get(:minga_mcp)
-      assert entry.source_type == :module
+      assert entry.source == {:module, Minga.Extensions.MCP}
       assert entry.module == Minga.Extensions.MCP
 
       assert [server] = Options.get(test_options_server(), :agent_mcp_servers)
@@ -1402,7 +1402,7 @@ defmodule Minga.Config.LoaderTest do
       assert message == "Extension declarations changed; restart Minga before config reload"
 
       assert {:ok, unchanged} = ExtRegistry.get(extension_name)
-      assert unchanged.path == Path.expand(original_dir)
+      assert Minga.Extension.Entry.source_path(unchanged) == Path.expand(original_dir)
       assert unchanged.pid == runtime_pid
 
       runtime_supervisor = InstanceRegistry.via(InstanceRegistry, :runtime, extension_name)

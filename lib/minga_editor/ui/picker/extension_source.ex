@@ -49,9 +49,9 @@ defmodule MingaEditor.UI.Picker.ExtensionSource do
   @spec source_description(atom(), [{atom(), Minga.Extension.Entry.t()}]) :: String.t()
   defp source_description(name, all_entries) do
     case List.keyfind(all_entries, name, 0) do
-      {_, %{source_type: :path}} -> "path"
-      {_, %{source_type: :git, git: %{url: url}}} -> "git: #{url}"
-      {_, %{source_type: :hex, hex: %{package: pkg}}} -> "hex: #{pkg}"
+      {_, %{source: {:path, _}}} -> "path"
+      {_, %{source: {:git, %{url: url}}}} -> "git: #{url}"
+      {_, %{source: {:hex, %{package: pkg}}}} -> "hex: #{pkg}"
       _ -> "unknown"
     end
   end

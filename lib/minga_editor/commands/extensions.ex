@@ -82,9 +82,9 @@ defmodule MingaEditor.Commands.Extensions do
   @spec format_source_label(atom(), [{atom(), Minga.Extension.Entry.t()}]) :: String.t()
   defp format_source_label(name, all_entries) do
     case List.keyfind(all_entries, name, 0) do
-      {_, %{source_type: :path, path: path}} -> "path: #{path}"
-      {_, %{source_type: :git, git: %{url: url}}} -> "git: #{url}"
-      {_, %{source_type: :hex, hex: %{package: pkg}}} -> "hex: #{pkg}"
+      {_, %{source: {:path, path}}} -> "path: #{path}"
+      {_, %{source: {:git, %{url: url}}}} -> "git: #{url}"
+      {_, %{source: {:hex, %{package: pkg}}}} -> "hex: #{pkg}"
       _ -> "unknown"
     end
   end

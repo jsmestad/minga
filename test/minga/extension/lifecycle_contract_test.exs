@@ -605,7 +605,14 @@ defmodule Minga.Extension.LifecycleContractTest do
     """)
 
     :ok = ExtRegistry.register_git(ctx.registry, git_name, "https://example.invalid/repo", [])
-    :ok = ExtRegistry.update(ctx.registry, git_name, path: git_dir)
+
+    :ok =
+      ExtRegistry.update_entry(
+        ctx.registry,
+        git_name,
+        &Minga.Extension.Entry.resolve_git_path(&1, git_dir)
+      )
+
     {:ok, git_entry} = ExtRegistry.get(ctx.registry, git_name)
     assert {:ok, git_pid} = start_extension(ctx, git_name, git_entry)
     assert InstanceRegistry.whereis(instance_registry(ctx), :instance, git_name)
