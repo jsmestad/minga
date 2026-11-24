@@ -1,6 +1,6 @@
 # The built-in terminal
 
-A terminal is a buffer. It uses the same modes, marks, drawers and yes/no grammar as everything else, and it is where Minga runs its commands, so you can watch them. This is the interaction contract for #19 and #122. The emulator engine (libvterm, a Go or Swift VT implementation, libghostty) is still an open decision; see [ADR-0006](../adr/0006-the-spine.md#open-questions).
+A terminal is a buffer. It uses the same modes, marks, drawers and yes/no grammar as everything else, and it is where Minga runs its commands, so you can watch them. This is the interaction contract for #19 and #122. The emulator engine is libghostty-vt in a helper process, with the BEAM owning the terminal buffer; see [ADR-0008](../adr/0008-terminal-engine.md).
 
 ## Opening and closing
 
@@ -48,6 +48,3 @@ Mode pill (TERM or NORMAL), needs-you when non-zero, buffer name, cwd, the runni
 
 Click focuses and enters TERMINAL, the wheel scrolls back, a drag selects and copies, and ⌘-click on `file:line` opens the file. macOS renders terminals with the editor's font and theme, ligatures off, in true colour. The TUI passes true colour through when the host terminal supports it and falls back to 256 colours.
 
-## Still open
-
-- The emulator engine.
