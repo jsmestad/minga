@@ -76,6 +76,14 @@ defmodule MingaEditor.Handlers.FileEventHandler do
     handle_project_rebuilt(state, root)
   end
 
+  def handle(
+        state,
+        {:minga_event, :project_rebuild_failed,
+         %Minga.Events.ProjectRebuildFailedEvent{root: root}}
+      ) do
+    handle_project_rebuild_failed(state, root)
+  end
+
   def handle(state, {:file_changed_on_disk, path}) when is_binary(path) do
     handle_file_changed(state, path)
   end
@@ -211,7 +219,15 @@ defmodule MingaEditor.Handlers.FileEventHandler do
     {state, [{:render, 16}]}
   end
 
-  @spec maybe_refresh_file_picker(EditorState.t(), String.t()) :: EditorState.t()
+  # A failed rebuild publishes no new files, so the file tree keeps its current content.
+  # An open file picker refetches so it leaves its loading state and shows the failure.
+  @spec handle_project_rebuild_failed(EditorState.t(), String.t() | nil) ::
+          {EditorState.t(), [file_effect()]}
+  defp handle_project_rebuild_failed(state, root) do
+    {maybe_refresh_file_picker(state, root), [{:render, 16}]}
+  end
+
+  @spec maybe_refresh_file_picker(EditorState.t(), String.t() | nil) :: EditorState.t()
   defp maybe_refresh_file_picker(
          %{
            shell_runtime: %{

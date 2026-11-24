@@ -136,6 +136,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
 
   # The picker reads only the Project-owned cache.
   # A managed `:project_rebuilt` event refreshes an open picker after an empty cache fills.
+  # A `:project_rebuild_failed` event refreshes it too, so the picker shows the inventory failure.
   # Picker tasks never start recursive inventory.
   @spec admit_inventory(Root.t(), WorkspaceSnapshot.activation_id(), WorkspaceSnapshot.t() | nil) ::
           {:ok, inventory()} | {:error, String.t()}
