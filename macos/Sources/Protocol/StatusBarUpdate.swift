@@ -17,13 +17,19 @@ public struct StatusBarUpdate: Sendable {
         public let path: String
         public let freshness: Freshness
         public let conflictIndex: UInt32?
+        /// BEAM-authored key hints for the two conflict decisions in the active
+        /// editing model (`x`/`y` in Vim, chords in CUA). Empty when not offered.
+        public let keepMineKey: String
+        public let useAgentKey: String
         public let generation: UInt32
         public let itemID: String
 
-        public init(path: String, freshness: Freshness, generation: UInt32, itemID: String, conflictIndex: UInt32? = nil) {
+        public init(path: String, freshness: Freshness, generation: UInt32, itemID: String, conflictIndex: UInt32? = nil, keepMineKey: String = "", useAgentKey: String = "") {
             self.path = path
             self.freshness = freshness
             self.conflictIndex = conflictIndex
+            self.keepMineKey = keepMineKey
+            self.useAgentKey = useAgentKey
             self.generation = generation
             self.itemID = itemID
         }

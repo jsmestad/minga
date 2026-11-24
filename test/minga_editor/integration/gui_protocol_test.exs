@@ -635,6 +635,8 @@ defmodule Minga.Integration.GUIProtocolTest do
         path: "/project/é/shared.ex",
         freshness: :stale,
         conflict_index: 2,
+        keep_mine_key: "Cmd+Backspace",
+        use_agent_key: "Cmd+Enter",
         generation: 43,
         item_id: "review:hunk-é/2"
       }
@@ -646,6 +648,8 @@ defmodule Minga.Integration.GUIProtocolTest do
                "path" => "/project/é/shared.ex",
                "freshness" => 1,
                "conflict_index" => 2,
+               "keep_mine_key" => "Cmd+Backspace",
+               "use_agent_key" => "Cmd+Enter",
                "generation" => 43,
                "item_id" => "review:hunk-é/2"
              }

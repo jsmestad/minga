@@ -22,6 +22,19 @@ func decodeStatusReview(section []byte) (StatusReview, error) {
 	return StatusReview{Path: path, Freshness: freshness, Generation: generation, ItemID: itemID}, nil
 }
 
+// decodeStatusReviewConflictKeys reads section 0x12: the keep-mine and use-Agent key hints.
+func decodeStatusReviewConflictKeys(section []byte) ([2]string, error) {
+	keepMine, offset, ok := readString16(section, 0)
+	if !ok || !utf8.ValidString(keepMine) {
+		return [2]string{}, fmt.Errorf("malformed gui_status_bar review conflict keys")
+	}
+	useAgent, end, ok := readString16(section, offset)
+	if !ok || end != len(section) || !utf8.ValidString(useAgent) {
+		return [2]string{}, fmt.Errorf("malformed gui_status_bar review conflict keys")
+	}
+	return [2]string{keepMine, useAgent}, nil
+}
+
 func decodeAgentHelp(payload []byte) (AgentHelp, int, error) {
 	invalid := func() (AgentHelp, int, error) {
 		return AgentHelp{}, 0, fmt.Errorf("malformed gui_agent_help")

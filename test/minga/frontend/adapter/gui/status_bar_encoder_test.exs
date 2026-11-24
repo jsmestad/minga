@@ -403,6 +403,36 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
       {ordinary, _caches} = StatusBarEncoder.encode(%{model | review: nil}, caches)
       refute Map.has_key?(decode_sections(ordinary), 0x10)
     end
+
+    test "a fork conflict carries the key hints for its two decisions after the conflict index" do
+      model = %StatusBar{
+        content_kind: :agent,
+        data: status_data(),
+        review: %Review{
+          path: "note.txt",
+          freshness: :current,
+          generation: 7,
+          item_id: "r1.conflict",
+          conflict_index: 2,
+          keep_mine_key: "Ctrl+Backspace",
+          use_agent_key: "Ctrl+Enter"
+        }
+      }
+
+      {command, _caches} = StatusBarEncoder.encode(model, Caches.new())
+      sections = decode_sections(command)
+
+      assert sections[0x11] == <<2::32>>
+      assert sections[0x12] == <<14::16, "Ctrl+Backspace", 10::16, "Ctrl+Enter">>
+
+      {read_only, _caches} =
+        StatusBarEncoder.encode(
+          %{model | review: %{model.review | conflict_index: nil}},
+          Caches.new()
+        )
+
+      refute Map.has_key?(decode_sections(read_only), 0x12)
+    end
   end
 
   @spec operation_payload(Operation.t()) :: binary()

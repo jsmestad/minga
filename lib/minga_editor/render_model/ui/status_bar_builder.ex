@@ -1,6 +1,7 @@
 defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
   @moduledoc false
 
+  alias Minga.Keymap.Scope.Agent, as: AgentScope
   alias Minga.Language.Devicon
   alias Minga.RenderModel.UI.StatusBar
   alias Minga.RenderModel.UI.StatusBar.Agent, as: SemanticStatusAgent
@@ -11,6 +12,7 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
   alias Minga.RenderModel.UI.StatusBar.Workspace, as: StatusWorkspace
   alias MingaEditor.Agent.ReviewTarget
   alias MingaEditor.Agent.WorkspaceStatus
+  alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.Session.ChromeState.WorkspaceSummary
@@ -41,10 +43,14 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
   defp review_model(ctx) when is_struct(ctx, Context) or is_struct(ctx, EditorState) do
     case ReviewTarget.capture(ctx) do
       %ReviewTarget{} = offer ->
+        keys = review_keys(ctx)
+
         %StatusReview{
           path: offer.path,
           freshness: offer.freshness,
           conflict_index: offer.conflict_index,
+          keep_mine_key: AgentScope.diff_review_key_hint(:reject_hunk, keys),
+          use_agent_key: AgentScope.diff_review_key_hint(:accept_hunk, keys),
           generation: offer.generation,
           item_id: offer.item_id
         }
@@ -55,6 +61,18 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
   end
 
   defp review_model(_chrome_context), do: nil
+
+  # Conflict buttons name the keys of the active editing model, spelled for this frontend.
+  @spec review_keys(Context.t() | EditorState.t()) :: AgentScope.diff_review_key_set()
+  defp review_keys(%Context{intent: %{frame: frame}}),
+    do: AgentScope.diff_review_key_set(frame.editing_model, Capabilities.gui?(frame.capabilities))
+
+  defp review_keys(%EditorState{} = state) do
+    AgentScope.diff_review_key_set(
+      state.interaction.editing_model,
+      Capabilities.gui?(state.frontend.capabilities)
+    )
+  end
 
   @spec content_kind(EditorStatusBuffer.t() | EditorStatusAgent.t()) :: StatusBar.content_kind()
   defp content_kind(%EditorStatusBuffer{}), do: :buffer

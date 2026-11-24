@@ -347,6 +347,7 @@ func decodeStatus(payload []byte) (StatusBar, string, int, error) {
 
 	status := StatusBar{}
 	var conflictIndex uint32
+	var conflictKeys *[2]string
 	var agentSection []byte
 	parts := make([]string, 0, 4)
 	offset := 2
@@ -408,6 +409,12 @@ func decodeStatus(payload []byte) (StatusBar, string, int, error) {
 				return StatusBar{}, "", 0, fmt.Errorf("malformed gui_status_bar conflict index")
 			}
 			conflictIndex = u32(section, 0)
+		case 0x12:
+			keys, err := decodeStatusReviewConflictKeys(section)
+			if err != nil {
+				return StatusBar{}, "", 0, err
+			}
+			conflictKeys = &keys
 		}
 	}
 
@@ -420,6 +427,9 @@ func decodeStatus(payload []byte) (StatusBar, string, int, error) {
 			return StatusBar{}, "", 0, fmt.Errorf("gui_status_bar conflict without a valid review offer")
 		}
 		status.Review.ConflictIndex = conflictIndex
+		if conflictKeys != nil {
+			status.Review.KeepMineKey, status.Review.UseAgentKey = conflictKeys[0], conflictKeys[1]
+		}
 	}
 
 	return status, stringsJoin(parts, "  "), size, nil

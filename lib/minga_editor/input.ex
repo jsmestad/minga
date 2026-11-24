@@ -20,7 +20,6 @@ defmodule MingaEditor.Input do
   alias MingaEditor.Input.BottomPanel
   alias MingaEditor.Input.Completion
   alias MingaEditor.Input.ConflictPrompt
-  alias MingaEditor.Input.DiffReview
   alias MingaEditor.Input.EmptyState
   alias MingaEditor.Input.GitStatus
   alias MingaEditor.Input.GlobalBindings
@@ -54,7 +53,6 @@ defmodule MingaEditor.Input do
   @builtin_surface_handlers [
     {MentionCompletion, 10},
     {ToolApproval, 20},
-    {DiffReview, 30},
     {AgentPanel, 40},
     {Sidebar, 45},
     {EmptyState, 50},

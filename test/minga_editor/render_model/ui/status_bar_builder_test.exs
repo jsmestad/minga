@@ -15,7 +15,24 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilderTest do
   alias Minga.RenderModel.UI.StatusBar.Operation, as: StatusOperation
   alias Minga.RenderModel.UI.StatusBar.Selection
   alias Minga.RenderModel.UI.StatusBar.Workspace
+  alias Minga.RenderModel.UI.StatusBar.Review
+  alias MingaEditor.Agent.DiffReview
+  alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.View.Preview
+  alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderModel.UI.StatusBarBuilder
+  alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.State, as: ShellState
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Frontend, as: FrontendState
+  alias MingaEditor.State.Interaction
+  alias MingaEditor.State.Tab
+  alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Windows
+  alias MingaEditor.Window
+  alias MingaEditor.WindowTree
   alias MingaEditor.State.Operation
   alias MingaEditor.State.OperationProgress
   alias MingaEditor.State.OperationQueue
@@ -292,5 +309,60 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilderTest do
       assert <<0x09, 17::16, 5, "Codex", 3::32, 1, 0, 0::16, 0::16, 0>> =
                :binary.part(agent_cmd, byte_size(agent_cmd) - 20, 20)
     end
+  end
+
+  describe "conflict decision keys" do
+    test "name the keys of the active editing model, spelled for the frontend" do
+      for {model, frontend_type, keep, use} <- [
+            {:vim, :native_gui, "x", "y"},
+            {:vim, :tui, "x", "y"},
+            {:cua, :native_gui, "Cmd+Backspace", "Cmd+Enter"},
+            {:cua, :tui, "Ctrl+Backspace", "Ctrl+Enter"}
+          ] do
+        ctx = Context.from_editor_state(conflict_state(model, frontend_type))
+
+        assert %StatusBar{review: %Review{conflict_index: 1} = review} =
+                 StatusBarBuilder.build(minimal_agent_data(), minimal_theme(), ctx)
+
+        assert {review.keep_mine_key, review.use_agent_key} == {keep, use},
+               "#{model} on #{frontend_type}"
+      end
+    end
+  end
+
+  # An Agent tab whose body shows a fork-conflict review with focus on it.
+  defp conflict_state(editing_model, frontend_type) do
+    {tab_bar, group} =
+      Tab.new_agent(1, "Agent") |> TabBar.new(__DIR__) |> TabBar.add_workspace("Agent")
+
+    tab_bar = TabBar.move_tab_to_workspace(tab_bar, 1, group.id)
+
+    review =
+      DiffReview.from_fork_snapshot("note.txt", {self(), 2, 1}, [
+        {:conflict, ["Agent A"], ["Human A"], []}
+      ])
+
+    ui =
+      UIState.new()
+      |> UIState.replace_preview(Preview.set_diff(Preview.new(), review))
+      |> UIState.set_focus(:file_viewer)
+
+    workspace = %SessionState{
+      keymap_scope: :agent,
+      windows: %Windows{
+        tree: WindowTree.new(1),
+        map: %{1 => Window.new_agent_chat(1, 24, 80)},
+        active: 1,
+        next_id: 2
+      }
+    }
+
+    %EditorState{
+      frontend: %FrontendState{capabilities: %Capabilities{frontend_type: frontend_type}},
+      interaction: Interaction.new(editing_model: editing_model),
+      workspace: SessionState.set_agent_ui(workspace, ui),
+      shell_runtime:
+        Runtime.new(Runtime.default_entry(), ShellState.install_tab_bar(%ShellState{}, tab_bar))
+    }
   end
 end

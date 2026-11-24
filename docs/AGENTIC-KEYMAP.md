@@ -89,7 +89,20 @@ While the current review is selected, these keys apply:
 
 When all hunks are resolved (accepted or rejected), the viewer returns to normal file view.
 
-If a staged agent edit overlaps your own changes, Review shows both versions. Choose **Keep mine** (`x`) or **Use Agent version** (`y`) for the selected conflict. Minga applies the combined result only after every conflict has a choice and the source revisions still match. If either source changes, **Review latest** reloads the conflict before you can choose again.
+In CUA mode (`set :editing_model, :cua`) the review uses chords instead of letters, so nothing you press while reviewing can be mistaken for typing. They apply only while the review has focus; with the composer focused, the same chords keep their composer meaning. In the macOS app, use Cmd; in the terminal, which cannot send Cmd, use Ctrl. Both work in the macOS app.
+
+| Key (macOS app) | Key (terminal) | Diff Review action |
+|-----------------|----------------|--------------------|
+| `Alt+Down` / `F7` | `Alt+Down` | Next hunk or conflict |
+| `Alt+Up` / `Shift+F7` | `Alt+Up` | Previous hunk or conflict |
+| `Cmd+Enter` | `Ctrl+Enter` | Accept current hunk (**Use Agent version**) |
+| `Cmd+Backspace` | `Ctrl+Backspace` | Reject current hunk (**Keep mine**) |
+| `Cmd+Shift+Enter` | `Ctrl+Shift+Enter` | Accept all remaining hunks |
+| `Cmd+Shift+Backspace` | `Ctrl+Shift+Backspace` | Reject all remaining hunks |
+
+`Ctrl+Enter` and `Ctrl+Backspace` need a terminal that reports modified Enter and Backspace (the Kitty keyboard protocol, as in Ghostty, kitty and WezTerm). Elsewhere they arrive as plain Enter and Backspace, which never decide a hunk. The Help overlay (`?`) and the **Keep mine** and **Use Agent version** buttons always show the keys of your editing model.
+
+If a staged agent edit overlaps your own changes, Review shows both versions. Choose **Keep mine** (`x` in Vim) or **Use Agent version** (`y` in Vim) for the selected conflict. Minga applies the combined result only after every conflict has a choice and the source revisions still match. If either source changes, **Review latest** reloads the conflict before you can choose again.
 
 ### Publishing Approved Edits
 

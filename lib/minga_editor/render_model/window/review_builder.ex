@@ -2,6 +2,7 @@ defmodule MingaEditor.RenderModel.Window.ReviewBuilder do
   @moduledoc "Builds read-only reviews through the ordinary resident window model."
 
   alias Minga.Editing.Scroll
+  alias Minga.Keymap.Scope.Agent, as: AgentScope
   alias Minga.RenderModel.Window, as: WindowModel
   alias Minga.RenderModel.Window.GutterMetrics
   alias Minga.RenderModel.Window.HitRegion
@@ -20,23 +21,29 @@ defmodule MingaEditor.RenderModel.Window.ReviewBuilder do
           | :not_visible
           | {:error, :review_unavailable | :row_slot_capacity}
 
-  @doc "Projects the entire navigable review while preserving frontend-provided body fit."
+  @doc """
+  Projects the entire navigable review while preserving frontend-provided body fit.
+
+  The key set names the keys the review's accessibility label tells the user to press: Vim keys in Vim mode, CUA chords in CUA mode.
+  """
   @spec build(
           RenderWindow.t(),
           Preview.t(),
           Layout.window_layout(),
           ReviewLayout.t(),
-          Runtime.review_scope() | nil
+          Runtime.review_scope() | nil,
+          AgentScope.diff_review_key_set()
         ) :: result()
-  def build(_window, _preview, %{content: {_row, _col, 0, _height}}, _layout, _scope),
+  def build(_window, _preview, %{content: {_row, _col, 0, _height}}, _layout, _scope, _keys),
     do: :not_visible
 
-  def build(_window, _preview, %{content: {_row, _col, _width, 0}}, _layout, _scope),
+  def build(_window, _preview, %{content: {_row, _col, _width, 0}}, _layout, _scope, _keys),
     do: :not_visible
 
-  def build(_window, _preview, _window_layout, _layout, nil), do: {:error, :review_unavailable}
+  def build(_window, _preview, _window_layout, _layout, nil, _keys),
+    do: {:error, :review_unavailable}
 
-  def build(window, preview, window_layout, layout, scope) do
+  def build(window, preview, window_layout, layout, scope, keys) do
     with {:ok, projection, delta, window} <-
            RenderWindow.project_review(window, preview, scope, layout) do
       {_row, _col, _width, height} = window_layout.content
@@ -58,7 +65,7 @@ defmodule MingaEditor.RenderModel.Window.ReviewBuilder do
         cursor_col: 0,
         cursor_shape: :block,
         cursor_visible: false,
-        accessibility_label: review_label(preview),
+        accessibility_label: review_label(preview, keys),
         accessibility_generation: window.accessibility_generation,
         geometry: geometry,
         content_epoch: epoch,
@@ -74,20 +81,27 @@ defmodule MingaEditor.RenderModel.Window.ReviewBuilder do
     end
   end
 
-  @spec review_label(Preview.t()) :: String.t()
-  defp review_label(%Preview{content: {:diff, %{fork_revision: nil, path: path}}}),
+  @spec review_label(Preview.t(), AgentScope.diff_review_key_set()) :: String.t()
+  defp review_label(%Preview{content: {:diff, %{fork_revision: nil, path: path}}}, _keys),
     do: "Read-only review: #{path}"
 
-  defp review_label(%Preview{
-         content: {:diff, %{path: path, current_hunk_index: index}},
-         freshness: :stale
-       }),
+  defp review_label(
+         %Preview{
+           content: {:diff, %{path: path, current_hunk_index: index}},
+           freshness: :stale
+         },
+         _keys
+       ),
        do:
          "Fork conflict review: #{path}. Conflict #{index + 1} is stale. Review latest before choosing."
 
-  defp review_label(%Preview{content: {:diff, %{path: path, current_hunk_index: index}}}),
-    do:
-      "Fork conflict review: #{path}. Conflict #{index + 1} selected. y accepts; x keeps your version."
+  defp review_label(%Preview{content: {:diff, %{path: path, current_hunk_index: index}}}, keys) do
+    accept = AgentScope.diff_review_key_hint(:accept_hunk, keys)
+    reject = AgentScope.diff_review_key_hint(:reject_hunk, keys)
+
+    "Fork conflict review: #{path}. Conflict #{index + 1} selected. " <>
+      "#{accept} uses the Agent version; #{reject} keeps your version."
+  end
 
   @spec geometry(RenderWindow.id(), Layout.window_layout(), Viewport.t(), ReviewProjection.t()) ::
           PaneGeometry.t()

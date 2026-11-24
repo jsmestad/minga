@@ -27,12 +27,21 @@ defmodule Minga.Keymap.Scope.Agent do
   import Minga.Keymap.Sigil
 
   # Modifier bitmasks
+  @shift 0x01
   @ctrl 0x02
   @alt 0x04
   @cmd 0x08
 
   # Special codepoints
   @enter 13
+  @backspace 127
+  # Arrow keys: Kitty protocol (both frontends) and legacy macOS NSEvent codes.
+  @arrow_up 57_352
+  @arrow_down 57_353
+  @ns_arrow_up 0xF700
+  @ns_arrow_down 0xF701
+  # F7 (Kitty protocol). The macOS GUI sends it; the terminal frontend does not.
+  @f7 57_370
 
   # Group specs for each vim state.
   @insert_groups [:ctrl_agent_common, :newline_variants]
@@ -44,12 +53,21 @@ defmodule Minga.Keymap.Scope.Agent do
   @impl true
   @spec keymap(Minga.Keymap.Scope.vim_state(), Minga.Keymap.Scope.context()) ::
           Bindings.node_t()
-  def keymap(:normal, context),
-    do: merge_trie(normal_trie(), start_remedy_keymap(:chat, context))
+  def keymap(:normal, context) do
+    normal_trie()
+    |> merge_trie(start_remedy_keymap(:chat, context))
+    |> bind_diff_review_keys(:vim, context)
+  end
 
   def keymap(:insert, _context), do: insert_trie()
   def keymap(:input_normal, _context), do: input_normal_trie()
-  def keymap(:cua, context), do: merge_trie(cua_trie(), start_remedy_keymap(:cua, context))
+
+  def keymap(:cua, context) do
+    cua_trie()
+    |> merge_trie(start_remedy_keymap(:cua, context))
+    |> bind_diff_review_keys(:cua, context)
+  end
+
   def keymap(_state, _context), do: Bindings.new()
 
   @typedoc "The remedy a failed Agent start offers, passed as the `:agent_start_remedy` context."
@@ -104,6 +122,102 @@ defmodule Minga.Keymap.Scope.Agent do
         Bindings.new()
     end
   end
+
+  @typedoc "An action a staged Diff Review offers from the keyboard in both editing models."
+  @type diff_review_action ::
+          :next_hunk | :previous_hunk | :accept_hunk | :reject_hunk | :accept_all | :reject_all
+
+  @typedoc """
+  Which keys a Diff Review hint names: Vim keys, or CUA chords spelled with Cmd (native GUI) or Ctrl (terminal).
+
+  CUA binds the Cmd and the Ctrl chord in every frontend; only the hint follows the frontend, because a terminal cannot send Cmd.
+  """
+  @type diff_review_key_set :: :vim | :cua_cmd | :cua_ctrl
+
+  # One table names, for each Diff Review action, the command it runs, its help
+  # text, the Vim keys and hint, and the CUA chords with their Cmd and Ctrl
+  # hints. The bindings and every hint come from these rows, so a hint always
+  # names a bound key. On a fork conflict, accept means "Use Agent version" and
+  # reject means "Keep mine".
+  #
+  # CUA choices: Alt+Down/Alt+Up step through hunks in both frontends (F7 and
+  # Shift+F7, the JetBrains and VS Code accessible-diff keys, also work where the
+  # frontend sends F-keys). Cmd/Ctrl+Enter accepts and Cmd/Ctrl+Backspace rejects,
+  # the keep/undo pair Cursor and VS Code agent edits use; Shift widens either to
+  # every hunk. None of these chords types text or has another meaning in the
+  # Agent scope, and Cmd+N (New Buffer) stays free.
+  @diff_review_keys [
+    {:next_hunk, :agent_next_code_block, "Next hunk", {[[{?], 0}, {?c, 0}]], "]c"},
+     {[[{@arrow_down, @alt}], [{@ns_arrow_down, @alt}], [{@f7, 0}]], "Alt+Down", "Alt+Down"}},
+    {:previous_hunk, :agent_prev_code_block, "Previous hunk", {[[{?[, 0}, {?c, 0}]], "[c"},
+     {[[{@arrow_up, @alt}], [{@ns_arrow_up, @alt}], [{@f7, @shift}]], "Alt+Up", "Alt+Up"}},
+    {:accept_hunk, :agent_accept_hunk, "Accept hunk (Use Agent version)", {[[{?y, 0}]], "y"},
+     {[[{@enter, @cmd}], [{@enter, @ctrl}]], "Cmd+Enter", "Ctrl+Enter"}},
+    {:reject_hunk, :agent_reject_hunk, "Reject hunk (Keep mine)", {[[{?x, 0}]], "x"},
+     {[[{@backspace, @cmd}], [{@backspace, @ctrl}]], "Cmd+Backspace", "Ctrl+Backspace"}},
+    {:accept_all, :agent_accept_all_hunks, "Accept all hunks", {[[{?Y, 0}]], "Y"},
+     {[[{@enter, @cmd + @shift}], [{@enter, @ctrl + @shift}]], "Cmd+Shift+Enter",
+      "Ctrl+Shift+Enter"}},
+    {:reject_all, :agent_reject_all_hunks, "Reject all hunks", {[[{?X, 0}]], "X"},
+     {[[{@backspace, @cmd + @shift}], [{@backspace, @ctrl + @shift}]], "Cmd+Shift+Backspace",
+      "Ctrl+Shift+Backspace"}}
+  ]
+
+  @doc """
+  The key set a Diff Review hint uses for an editing model and frontend: Vim keys, or CUA chords spelled with Cmd in a native GUI and Ctrl in a terminal.
+  """
+  @spec diff_review_key_set(:vim | :cua, boolean()) :: diff_review_key_set()
+  def diff_review_key_set(:vim, _native_gui?), do: :vim
+  def diff_review_key_set(:cua, true), do: :cua_cmd
+  def diff_review_key_set(:cua, false), do: :cua_ctrl
+
+  @doc """
+  The key hint for a Diff Review action in the given key set.
+
+  The hint comes from the same table as the bindings, so it names a key that runs the action while the review has focus.
+  """
+  @spec diff_review_key_hint(diff_review_action(), diff_review_key_set()) :: String.t()
+  def diff_review_key_hint(action, key_set) do
+    {^action, _command, _description, {_vim_keys, vim_hint}, {_cua_keys, cmd_hint, ctrl_hint}} =
+      List.keyfind!(@diff_review_keys, action, 0)
+
+    case key_set do
+      :vim -> vim_hint
+      :cua_cmd -> cmd_hint
+      :cua_ctrl -> ctrl_hint
+    end
+  end
+
+  @doc "The help overlay group listing every Diff Review action with its key in the given key set."
+  @spec diff_review_help_group(diff_review_key_set()) :: Minga.Keymap.Scope.help_group()
+  def diff_review_help_group(key_set) do
+    {"Diff Review",
+     for {action, _command, description, _vim, _cua} <- @diff_review_keys do
+       {diff_review_key_hint(action, key_set), description}
+     end}
+  end
+
+  # Binds the editing model's Diff Review keys over the trie while the context
+  # says a staged Diff Review has focus. Vim's `]c`/`[c` are bound anyway, so
+  # rebinding them is a no-op; `y`, `x`, `Y` and `X` replace copy while reviewing.
+  @spec bind_diff_review_keys(Bindings.node_t(), :vim | :cua, Minga.Keymap.Scope.context()) ::
+          Bindings.node_t()
+  defp bind_diff_review_keys(trie, model, context) do
+    if Keyword.get(context, :agent_diff_review, false) do
+      for {_action, command, description, vim, cua} <- @diff_review_keys,
+          sequence <- diff_review_sequences(model, vim, cua),
+          reduce: trie do
+        acc -> Bindings.bind(acc, sequence, command, description)
+      end
+    else
+      trie
+    end
+  end
+
+  @spec diff_review_sequences(:vim | :cua, {[[Bindings.key()]], String.t()}, tuple()) ::
+          [[Bindings.key()]]
+  defp diff_review_sequences(:vim, {sequences, _hint}, _cua), do: sequences
+  defp diff_review_sequences(:cua, _vim, {sequences, _cmd_hint, _ctrl_hint}), do: sequences
 
   @doc """
   The leader sequence that starts a new local Agent session, read from the given leader trie, or nil when the editing model cannot reach it.

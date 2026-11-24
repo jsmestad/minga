@@ -132,6 +132,13 @@ defmodule MingaEditor.Agent.UIState do
 
   def start_remedy(%__MODULE__{}), do: nil
 
+  @doc """
+  True while a staged Diff Review has key focus: the Agent body shows the review and the composer is not focused. Keymap context for the Diff Review keys.
+  """
+  @spec diff_review_focused?(t()) :: boolean()
+  def diff_review_focused?(%__MODULE__{panel: %Panel{input_focused: true}}), do: false
+  def diff_review_focused?(%__MODULE__{view: view}), do: View.agent_body(view) == :review
+
   @doc "Caches canonical connection facts without changing draft, focus, history or scroll."
   @spec project_connection(t(), ConnectionSnapshot.t()) :: t()
   def project_connection(%__MODULE__{panel: panel} = state, %ConnectionSnapshot{} = connection) do

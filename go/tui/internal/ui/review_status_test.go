@@ -31,6 +31,15 @@ func reviewStatusCommand(t *testing.T, review *protocol.StatusReview) protocol.C
 			packet[1]++
 			packet = binary.BigEndian.AppendUint32(append(packet, 0x11, 0, 4), review.ConflictIndex)
 		}
+		if review.ConflictIndex != 0 && (review.KeepMineKey != "" || review.UseAgentKey != "") {
+			keys := binary.BigEndian.AppendUint16(nil, uint16(len(review.KeepMineKey)))
+			keys = append(keys, []byte(review.KeepMineKey)...)
+			keys = binary.BigEndian.AppendUint16(keys, uint16(len(review.UseAgentKey)))
+			keys = append(keys, []byte(review.UseAgentKey)...)
+			packet[1]++
+			packet = binary.BigEndian.AppendUint16(append(packet, 0x12), uint16(len(keys)))
+			packet = append(packet, keys...)
+		}
 	}
 	command, err := protocol.DecodeCommand(packet)
 	if err != nil {
@@ -170,6 +179,40 @@ func TestConflictFooterKeepsBothChoicesReachableAndRejectsStaleClicks(t *testing
 				model = next.(Model)
 				if packets := drainOutboundPackets(out); len(packets) != 0 {
 					t.Fatalf("stale conflict activated a choice: %x", packets)
+				}
+			}
+		})
+	}
+}
+
+func TestConflictFooterNamesTheKeysOfTheActiveEditingModel(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		keep, use   string
+		width       uint16
+		mine, agent string
+	}{
+		{"vim wide", "x", "y", 100, "[Keep mine (x)]", "[Use Agent version (y)]"},
+		{"vim medium", "x", "y", 60, "[Mine x]", "[Agent y]"},
+		{"vim narrow", "x", "y", 30, "[x]", "[y]"},
+		{"cua wide", "Ctrl+Backspace", "Ctrl+Enter", 120, "[Keep mine (Ctrl+Backspace)]", "[Use Agent version (Ctrl+Enter)]"},
+		{"cua medium", "Ctrl+Backspace", "Ctrl+Enter", 80, "[Mine Ctrl+Backspace]", "[Agent Ctrl+Enter]"},
+		{"cua narrow", "Ctrl+Backspace", "Ctrl+Enter", 30, "[Mine]", "[Agent]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model, review := reviewFooterModel(t, tc.width, protocol.ReviewCurrent)
+			review.ConflictIndex = 1
+			review.KeepMineKey, review.UseAgentKey = tc.keep, tc.use
+			applyProductionFrame(&model, 2, 1, 1, reviewStatusCommand(t, &review))
+			_ = model.View()
+			footer := ansi.Strip(strings.Join(model.footerLines(), "\n"))
+			if !strings.Contains(footer, tc.mine) || !strings.Contains(footer, tc.agent) {
+				t.Fatalf("footer %q does not name %s and %s", footer, tc.mine, tc.agent)
+			}
+			for _, intent := range [...]byte{3, 4} {
+				zone := waitForZone(t, model, zoneIDReviewControl(review, intent))
+				if zone.StartX < 0 || zone.EndX >= int(tc.width) {
+					t.Fatalf("conflict control clipped at width %d: %+v", tc.width, zone)
 				}
 			}
 		})

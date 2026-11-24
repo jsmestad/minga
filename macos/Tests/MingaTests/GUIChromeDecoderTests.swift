@@ -971,6 +971,38 @@ struct GUIStatusBarDecoderTests {
         }
     }
 
+    @Test("Fork conflict status carries the BEAM-authored decision keys")
+    func conflictCarriesDecisionKeys() throws {
+        var review = Data()
+        appendString16(&review, "note.txt")
+        review.append(0)
+        appendU32(&review, 9)
+        appendString16(&review, "hunk-B")
+        var conflict = Data()
+        appendU32(&conflict, 2)
+        var keys = Data()
+        appendString16(&keys, "Cmd+Backspace")
+        appendString16(&keys, "Cmd+Enter")
+        let packet = Data([OP_GUI_STATUS_BAR, 3]) + buildSection(0x10, review) + buildSection(0x11, conflict) + buildSection(0x12, keys)
+
+        let (command, _) = try decodeCommand(data: packet, offset: 0)
+        guard case .guiStatusBar(let update) = command else {
+            Issue.record("Expected the decoded Review status")
+            return
+        }
+        #expect(update.review?.conflictIndex == 2)
+        #expect(update.review?.keepMineKey == "Cmd+Backspace")
+        #expect(update.review?.useAgentKey == "Cmd+Enter")
+
+        var truncated = Data()
+        appendString16(&truncated, "Cmd+Backspace")
+        let malformed = Data([OP_GUI_STATUS_BAR, 3]) + buildSection(0x10, review) + buildSection(0x11, conflict) + buildSection(0x12, truncated)
+        do {
+            _ = try decodeCommand(data: malformed, offset: 0)
+            Issue.record("Accepted truncated conflict keys")
+        } catch ProtocolDecodeError.malformed {}
+    }
+
     @Test("Invalid UTF-8 modeline segment text throws malformed")
     func invalidUTF8ModelineSegmentTextThrows() throws {
         var identity = Data()

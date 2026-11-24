@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"net/url"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -55,13 +56,7 @@ func (m Model) renderReviewStatus(review protocol.StatusReview) string {
 		if m.width < 57 {
 			labels = [3]string{"<", "R", "?"}
 		}
-		mine, agent = "[Keep mine (x)]", "[Use Agent version (y)]"
-		if m.width < 80 {
-			mine, agent = "[Mine x]", "[Agent y]"
-		}
-		if m.width < 40 {
-			mine, agent = "[x]", "[y]"
-		}
+		mine, agent = conflictChoiceLabels(review, m.width)
 		if m.width < 25 {
 			state = fmt.Sprintf("C%d", review.ConflictIndex)
 			if review.Freshness == protocol.ReviewStale {
@@ -102,6 +97,32 @@ func (m Model) renderReviewStatus(review protocol.StatusReview) string {
 		content += style.Render("  " + fit(review.Path, remaining))
 	}
 	return content
+}
+
+// conflictChoiceLabels names each conflict decision with the BEAM-authored key
+// hint for the active editing model. Width tiers assume one-character keys (Vim
+// x and y); longer CUA chords move each tier up by their extra width, and the
+// narrowest tier names the choice instead of a chord that cannot fit.
+func conflictChoiceLabels(review protocol.StatusReview, width int) (string, string) {
+	keep, use := review.KeepMineKey, review.UseAgentKey
+	extra := max(utf8.RuneCountInString(keep)+utf8.RuneCountInString(use)-2, 0)
+	switch {
+	case width >= 80+extra:
+		return "[Keep mine" + keyHintSuffix(keep, " (", ")") + "]", "[Use Agent version" + keyHintSuffix(use, " (", ")") + "]"
+	case width >= 40+extra:
+		return "[Mine" + keyHintSuffix(keep, " ", "") + "]", "[Agent" + keyHintSuffix(use, " ", "") + "]"
+	case utf8.RuneCountInString(keep) == 1 && utf8.RuneCountInString(use) == 1:
+		return "[" + keep + "]", "[" + use + "]"
+	default:
+		return "[Mine]", "[Agent]"
+	}
+}
+
+func keyHintSuffix(key, open, close string) string {
+	if key == "" {
+		return ""
+	}
+	return open + key + close
 }
 
 // Conflict decisions use the button cells and target of the View the terminal flushed.
