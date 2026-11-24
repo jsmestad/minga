@@ -1,0 +1,19 @@
+# Keys the site must never teach. One entry per line: KEY<TAB>CONTEXT<TAB>REASON.
+# KEY uses the canonical form from site_check.py (SPC sequences, ]x pairs, C-/M-/S-/D- chords). A trailing " *" matches every key that starts with the prefix.
+# CONTEXT is "*" to fail everywhere, or a case-insensitive regex that must appear in the same block of text; use it when the key keeps another meaning (]t is still "next class/module").
+# Source: docs/design/keys.md. Remove an entry only when the design gives the key a new meaning the site needs to teach.
+SPC a t	*	duplicated the agent split toggle; SPC a a is the tasks drawer and SPC a v the conversation
+SPC a P	*	folded into SPC a p, one Publish edits… prompt that offers publish or discard
+SPC g k	*	keep moved to SPC a y
+SPC g r	*	reject moved to SPC a d
+SPC g s	status	git status is SPC g g; SPC g s is reserved for stage hunk
+SPC g b	blame	blame is SPC g B; SPC g b is reserved for switch branch
+SPC t e	*	the edit timeline is SPC s u
+SPC c g	*	go to definition is SPC c d
+SPC c d	diagnostic	the diagnostics list is SPC c x; SPC c d is go to definition
+SPC .	action|act menu	the act menu is g. (⌃. while typing); SPC . is find file in this directory
+]t	sibling|subagent|peek	siblings in the subagent peek are ]] / [[; ]t keeps next class/module
+[t	sibling|subagent|peek	siblings in the subagent peek are ]] / [[; [t keeps previous class/module
+gt	*	tabs are gone
+gT	*	tabs are gone
+SPC TAB *	*	tabs and workspaces are gone

@@ -72,7 +72,7 @@
         <section class="essay-section" id="why-quiet-chrome">
           <h2>1. Editors fail when chrome competes with your code</h2>
           <p>Most AI editors default to IDE chrome: activity rails, permanent file trees, tab bars, chat drawers, and workspace pills. You can hide those panels in VS Code, Cursor, or Zed via Zen Mode, but the surrounding workflow still assumes permanent docks and desktop-only panels. We learned the same lesson the hard way in Minga's early builds: once we added separate "Editor" and "Agent" workspaces, icon rails, and status strips, people could not tell which workspace they were in, status indicators disagreed across bars, and the macOS app and terminal client drifted apart.</p>
-          <p>Minga's interface model (<a href="https://github.com/jsmestad/minga/blob/main/docs/adr/0006-the-spine.md">ADR-0006</a>) makes text-first the default constraint rather than an optional mode. Ordinary window splits and on-demand file switchers remain first-class, while permanent rails, tab strips, and workspace containers disappear. That is a deliberate tradeoff: if you prefer a permanent wide-screen file tree and fixed tabs on a 5K monitor, Cursor or Zed is built for that. If you want the exact same quiet muscle memory on your MacBook and over SSH in a terminal, one shared layout is the point.</p>
+          <p>Minga's interface model (<a href="https://github.com/jsmestad/minga/blob/main/docs/adr/0006-the-spine.md">ADR-0006</a>) makes text-first the default constraint rather than an optional mode. <span data-status="planned" data-since="v0.1.0">Ordinary window splits and on-demand file switchers remain first-class, while permanent rails, tab strips, and workspace containers disappear.</span> That is a deliberate tradeoff: if you prefer a permanent wide-screen file tree and fixed tabs on a 5K monitor, Cursor or Zed is built for that. If you want the exact same quiet muscle memory on your MacBook and over SSH in a terminal, one shared layout is the point.</p>
         </section>
 
         <section class="essay-section" id="the-bottleneck">
@@ -81,7 +81,7 @@
           <p>The ceiling shows up when you want editing, review, remote daemons, and agent execution inside one programmable environment:</p>
           <ul>
             <li><strong>Two disconnected worlds for editing and review.</strong> CLI agents operate on disk, so coordinating parallel edits with open editor buffers requires Git worktrees, file-watcher reloads, or per-editor bridge plugins.</li>
-            <li><strong>Linear undo across two authors.</strong> When an agent edits a file you are working in, ordinary editor undo treats both authors as one timeline. Minga separates authorship so <kbd>u</kbd> / <kbd>⌘Z</kbd> undoes only your edits while agent changes stay tracked per step and leave cleanly through Reject.</li>
+            <li><strong>Linear undo across two authors.</strong> When an agent edits a file you are working in, ordinary editor undo treats both authors as one timeline. <span data-status="planned" data-since="v0.1.0">Minga separates authorship so <kbd>u</kbd> / <kbd>⌘Z</kbd> undoes only your edits while agent changes stay tracked per step and leave cleanly through Reject.</span></li>
             <li><strong>Customization stops at the terminal edge.</strong> Multiplexers script panes, status bars, hooks, and prompt files around external CLIs, whereas Minga lets you reshape the editor, review buffers, hooks, and agent workflows in one Elixir runtime.</li>
           </ul>
 
@@ -111,7 +111,7 @@
                   <td>Electron desktop IDE (optional Zen Mode); no terminal client; polished inline Tab prediction.</td>
                   <td>Native Rust GPU desktop app (macOS, Linux, Windows); fast multibuffer diffs and Edit Prediction; optional panel hiding; no terminal TUI.</td>
                   <td>Runs in any terminal or persistent daemon (Herdr adds desktop and mobile clients); pairs with your editor of choice.</td>
-                  <td>Quiet text-first layout (text + one modeline, buffers in drawers) shared by macOS and the Go TUI; no Windows or Linux desktop GUI yet.</td>
+                  <td><span data-status="planned" data-since="v0.1.0">Quiet text-first layout (text + one modeline, buffers in drawers)</span> shared by macOS and the Go TUI; no Windows or Linux desktop GUI yet.</td>
                 </tr>
                 <tr>
                   <td>Agent harness &amp; providers</td>
@@ -124,8 +124,8 @@
                   <td>Edits, review &amp; undo</td>
                   <td>Direct workspace edits with inline editable diffs, live LSP diagnostics, and shared undo.</td>
                   <td>Editable multibuffer inline diffs with live LSP diagnostics, syntax highlighting, and CRDT collaboration.</td>
-                  <td>Disk writes (with checkpoints like <code>/rewind</code>, IDE diff bridges, or isolated Git worktrees).</td>
-                  <td>Revision-checked staged overlays, three-way merge, crash-safe drafts, and read-only hunk review today; inline Twist authorship, per-author undo, and <code>*minga-review*</code> landing for v0.1.0.</td>
+                  <td>Disk writes (with checkpoints like <code data-check="off">/rewind</code>, IDE diff bridges, or isolated Git worktrees).</td>
+                  <td>Revision-checked staged overlays, three-way merge, crash-safe drafts, and read-only hunk review today; <span data-status="planned" data-since="v0.1.0" data-pill="off">inline Twist authorship, per-author undo, and <code>*minga-review*</code> landing for v0.1.0.</span></td>
                 </tr>
                 <tr>
                   <td>Remote &amp; programmability</td>
@@ -150,13 +150,13 @@
           </div>
 
           <h3>Coming from Neovim</h3>
-          <p>Core Vim motions, text objects (<code>iw</code>, <code>i"</code>, <code>a{</code>), registers, macros, marks, dot repeat, counts, language servers, and a first-class terminal client carry over directly. Inside code buffers, <kbd>y</kbd>, <kbd>n</kbd>, <kbd>=</kbd>, and <kbd>q</kbd> stay strictly Vim, while bare single-letter review keys live only in special buffers like <code>*minga-review*</code> and <code>*minga-tasks*</code> (the same boundary fugitive and gitsigns follow). If your workflow already thrives on Neovim + <code>gitsigns</code> + <code>fugitive</code> + <code>oil.nvim</code> + <code>telescope</code> with 15ms LuaJIT startup on every Linux box, Minga's plugin catalog is still young; the reason to look at Minga is Erlang VM fault isolation, Elixir programmability, native macOS rendering with TUI parity, and integrated multi-agent review primitives without gluing a dozen Lua plugins together.</p>
+          <p>Core Vim motions, text objects (<code>iw</code>, <code>i"</code>, <code>a{</code>), registers, macros, marks, dot repeat, counts, language servers, and a first-class terminal client carry over directly. Inside code buffers, <kbd>y</kbd>, <kbd>n</kbd>, <kbd>=</kbd>, and <kbd>q</kbd> stay strictly Vim. <span data-status="planned" data-since="v0.1.0">Bare single-letter review keys live only in special buffers like <code>*minga-review*</code> and <code>*minga-tasks*</code> (the same boundary fugitive and gitsigns follow).</span> If your workflow already thrives on Neovim + <code>gitsigns</code> + <code>fugitive</code> + <code>oil.nvim</code> + <code>telescope</code> with 15ms LuaJIT startup on every Linux box, Minga's plugin catalog is still young; the reason to look at Minga is Erlang VM fault isolation, Elixir programmability, native macOS rendering with TUI parity, and integrated multi-agent review primitives without gluing a dozen Lua plugins together.</p>
 
           <h3>Coming from Emacs or Doom Emacs</h3>
-          <p>Emacs and Doom directly inspired Minga's Spacebar leader menus (with live counts in which-key), magit-style special buffers, hooks, command advice (<code>:before</code>, <code>:after</code>, <code>:around</code>, <code>:override</code>), and writing configuration in the editor's own language. While Emacs runs I/O and LSP asynchronously via subprocesses, CPU-bound Elisp still shares one Lisp thread; Minga isolates every open buffer, hook, extension, MCP server, and agent session in its own Erlang VM process and heap. The tradeoff today: config options, hooks, and advice reload live, whereas compiled extension packages activate on restart to avoid split-version bugs (<a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a>), trading away Emacs's live <code>eval-defun</code> patching of loaded packages and mature tools like <code>magit</code> and <code>TRAMP</code>. Personality stays quiet and only shows up at the edges: Minga is Bavarian for Munich ("Servus." on welcome, "Passt." once when a task finishes, and "Ciao." on quit).</p>
+          <p>Emacs and Doom directly inspired Minga's Spacebar leader menus (<span data-status="planned" data-since="v0.1.0">with live counts in which-key</span>), magit-style special buffers, hooks, command advice (<code>:before</code>, <code>:after</code>, <code>:around</code>, <code>:override</code>), and writing configuration in the editor's own language. While Emacs runs I/O and LSP asynchronously via subprocesses, CPU-bound Elisp still shares one Lisp thread; Minga isolates every open buffer, hook, extension, MCP server, and agent session in its own Erlang VM process and heap. The tradeoff today: config options, hooks, and advice reload live, whereas compiled extension packages activate on restart to avoid split-version bugs (<a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a>), trading away Emacs's live <code>eval-defun</code> patching of loaded packages and mature tools like <code>magit</code> and <code>TRAMP</code>. <span data-status="planned" data-since="v0.1.0">Personality stays quiet and only shows up at the edges: Minga is Bavarian for Munich ("Servus." on welcome, "Passt." once when a task finishes, and "Ciao." on quit).</span></p>
 
           <h3>Coming from VS Code, Cursor, or Zed</h3>
-          <p>Minga is a Vim-first keyboard workbench by design, with an optional standard-desktop shortcut mode (<code>set :editing_model, :cua</code>) and first-class mouse support where every visible action has a click. Even in desktop-shortcut mode, Minga intentionally omits permanent tab strips and sidebars in favor of a fast file switcher, pinned files, and on-demand drawers. If you want standard IDE tabs, a permanent sidebar, and inline Tab prediction, Cursor or Zed will feel more immediately familiar.</p>
+          <p>Minga is a Vim-first keyboard workbench by design, with an optional standard-desktop shortcut mode (<code>set :editing_model, :cua</code>) and first-class mouse support where every visible action has a click. <span data-status="planned" data-since="v0.1.0">Even in desktop-shortcut mode, Minga intentionally omits permanent tab strips and sidebars in favor of a fast file switcher, pinned files, and on-demand drawers.</span> If you want standard IDE tabs, a permanent sidebar, and inline Tab prediction, Cursor or Zed will feel more immediately familiar.</p>
         </section>
 
         <section class="essay-section" id="programmable-workbench">
@@ -187,7 +187,7 @@
               <tbody>
                 <tr>
                   <td>Quiet chrome, marks &amp; parity (ADR-0006)</td>
-                  <td>Proposed design, scenario inventory, theme-role rules, and default Catppuccin Frappé theme have landed on <code>main</code> (<a href="https://github.com/jsmestad/minga/tree/main/docs/design"><code>docs/design/</code></a>). Surface-by-surface implementation (Twist gutter, Orbit states, per-author undo, Subagent Peek, prioritized modeline, Storyboard CI) lands toward v0.1.0; today's rolling Homebrew build still runs the earlier shell and read-only diff viewer.</td>
+                  <td>Proposed design, scenario inventory, theme-role rules, and default Catppuccin Frappé theme have landed on <code>main</code> (<a href="https://github.com/jsmestad/minga/tree/main/docs/design"><code>docs/design/</code></a>). <span data-status="planned" data-since="v0.1.0" data-pill="off">Surface-by-surface implementation (Twist gutter, Orbit states, per-author undo, Subagent Peek, prioritized modeline, Storyboard CI) lands toward v0.1.0;</span> today's rolling Homebrew build still runs the earlier shell and read-only diff viewer.</td>
                 </tr>
                 <tr>
                   <td>Disposable &amp; reusable workflows (ADR-0004)</td>
