@@ -9,12 +9,6 @@ defmodule MingaAgent.Tools.LspRenameTest do
   alias MingaAgent.Tool.Context, as: ToolContext
   alias MingaAgent.Tools.LspRename
 
-  setup do
-    SyncServer.clear_registry()
-    on_exit(&SyncServer.clear_registry/0)
-    :ok
-  end
-
   describe "execute/4 without LSP client" do
     test "returns error when no buffer exists" do
       {:error, result} =
@@ -53,7 +47,7 @@ defmodule MingaAgent.Tools.LspRenameTest do
       }
 
       client = start_fake_client(responses)
-      SyncServer.put_clients(buffer, [client])
+      attach_clients(buffer, [client])
 
       assert {:error, result} =
                LspRename.execute(direct_context(tmp_dir), path, 0, 0, "new_name")
@@ -98,7 +92,7 @@ defmodule MingaAgent.Tools.LspRenameTest do
       }
 
       client = start_fake_client(responses)
-      SyncServer.put_clients(source, [client])
+      attach_clients(source, [client])
 
       assert {:error, result} = LspRename.execute(context(project), source_path, 0, 0, "new_name")
       assert result =~ "#{linked_path}: outside the project root"
@@ -126,7 +120,7 @@ defmodule MingaAgent.Tools.LspRenameTest do
       }
 
       client = start_fake_client(responses)
-      SyncServer.put_clients(source, [client])
+      attach_clients(source, [client])
 
       assert {:error, result} = LspRename.execute(context(tmp_dir), source_path, 0, 0, "new_name")
       assert result =~ "cannot verify document version"
@@ -153,7 +147,7 @@ defmodule MingaAgent.Tools.LspRenameTest do
       }
 
       client = start_fake_client(responses)
-      SyncServer.put_clients(source, [client])
+      attach_clients(source, [client])
 
       assert {:error, "Rename returned no edits to apply"} =
                LspRename.execute(context(tmp_dir), source_path, 0, 0, "new_name")
@@ -184,7 +178,7 @@ defmodule MingaAgent.Tools.LspRenameTest do
       }
 
       client = start_fake_client(responses)
-      SyncServer.put_clients(buffer, [client])
+      attach_clients(buffer, [client])
 
       assert {:error, result} = LspRename.execute(context(tmp_dir), path, 0, 0, "new_name")
       assert result =~ "version_mismatch"
@@ -216,7 +210,7 @@ defmodule MingaAgent.Tools.LspRenameTest do
       }
 
       client = start_fake_client(responses)
-      SyncServer.put_clients(source, [client])
+      attach_clients(source, [client])
 
       assert {:error, result} = LspRename.execute(context(tmp_dir), source_path, 0, 0, "new_name")
       assert result =~ "cannot verify document version"
@@ -244,7 +238,7 @@ defmodule MingaAgent.Tools.LspRenameTest do
       }
 
       client = start_fake_client(responses)
-      SyncServer.put_clients(source, [client])
+      attach_clients(source, [client])
 
       context = context(tmp_dir)
 
@@ -364,5 +358,11 @@ defmodule MingaAgent.Tools.LspRenameTest do
         send(caller, {:lsp_response, ref, Map.fetch!(responses, method)})
         fake_client_loop(responses)
     end
+  end
+
+  # Registers fake clients in the shared SyncServer registry and removes only this buffer's entry.
+  defp attach_clients(buffer, clients) do
+    SyncServer.put_clients(buffer, clients)
+    on_exit(fn -> SyncServer.remove_buffer(buffer) end)
   end
 end

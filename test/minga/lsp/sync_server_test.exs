@@ -1,6 +1,5 @@
 defmodule Minga.LSP.SyncServerTest do
-  # async: false because this test isolates the shared SyncServer singleton and ETS registry.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.EditSource
@@ -12,71 +11,86 @@ defmodule Minga.LSP.SyncServerTest do
 
   @moduletag :tmp_dir
 
+  # Each test runs its own SyncServer with a private ETS table, event bus, buffer registry and
+  # options, so restarting it never touches the application's singleton or another test.
   setup do
-    reset_sync_server()
-    :ok
-  end
+    id = System.unique_integer([:positive])
+    events = :"sync_server_test_events_#{id}"
+    buffers = :"sync_server_test_buffers_#{id}"
+    start_supervised!(Events.child_spec(name: events))
+    start_supervised!({Registry, keys: :unique, name: buffers}, id: :buffer_registry)
+    options = start_supervised!({Options, name: nil, events_registry: events}, id: :options)
 
-  describe "clients_for_buffer/1" do
-  end
+    sync = %{
+      name: :"sync_server_test_#{id}",
+      table: :"sync_server_test_registry_#{id}",
+      events: events,
+      buffers: buffers,
+      options: options
+    }
 
-  describe "resync_buffers/1" do
+    start_sync_server(sync)
+    %{sync: sync}
   end
 
   describe "event bus integration" do
-    test "opening a file with no configured server does not read its content", %{tmp_dir: dir} do
+    test "opening a file with no configured server does not read its content", %{
+      tmp_dir: dir,
+      sync: sync
+    } do
       path = Path.join(dir, "no-server.txt")
       File.write!(path, "hello")
-      buf = start_buffer(file_path: path, filetype: :text)
+      buf = start_buffer(sync, file_path: path, filetype: :text)
       assert ServerRegistry.servers_for(BufferProcess.filetype(buf)) == []
-      previous = Options.get(:lsp_auto_start)
-
       :ok = :sys.install(buf, {:open_reads, &observe_buffer_call/3, self()})
+      assert {:ok, true} = Options.set(sync.options, :lsp_auto_start, true)
 
-      try do
-        assert {:ok, true} = Options.set(:lsp_auto_start, true)
+      send(
+        sync.name,
+        {:minga_event, :buffer_opened, %Events.BufferEvent{buffer: buf, path: path}}
+      )
 
-        send(
-          SyncServer,
-          {:minga_event, :buffer_opened, %Events.BufferEvent{buffer: buf, path: path}}
-        )
-
-        sync_server()
-      after
-        Options.set(:lsp_auto_start, previous)
-        :sys.remove(buf, :open_reads)
-      end
+      sync_server(sync)
+      :sys.remove(buf, :open_reads)
 
       assert_received {:observed_buffer_call, :filetype}
       assert_received {:observed_buffer_call, :file_path}
       refute_received {:observed_buffer_call, :content_with_version}
     end
 
-    test "buffer_closed removes clients from the registry", %{tmp_dir: dir} do
+    test "buffer_closed removes clients from the registry", %{tmp_dir: dir, sync: sync} do
       path = Path.join(dir, "cleanup.txt")
-      buf = start_buffer(content: "hello", file_path: path)
+      buf = start_buffer(sync, content: "hello", file_path: path)
       client = start_client()
-      SyncServer.put_clients(buf, [client])
-      assert SyncServer.clients_for_buffer(buf) == [client]
+      SyncServer.put_clients(buf, [client], sync.table)
+      assert SyncServer.clients_for_buffer(buf, sync.table) == [client]
 
-      Events.broadcast(:buffer_closed, %Events.BufferClosedEvent{buffer: buf, path: path})
-      sync_server()
+      Events.broadcast(
+        :buffer_closed,
+        %Events.BufferClosedEvent{buffer: buf, path: path},
+        sync.events
+      )
 
-      assert SyncServer.clients_for_buffer(buf) == []
+      sync_server(sync)
+
+      assert SyncServer.clients_for_buffer(buf, sync.table) == []
     end
   end
 
   describe "buffer_changed event" do
-    test "sends ordered incremental deltas and ignores stale bulk events", %{tmp_dir: dir} do
+    test "sends ordered incremental deltas and ignores stale bulk events", %{
+      tmp_dir: dir,
+      sync: sync
+    } do
       path = Path.join(dir, "incremental.txt")
       File.write!(path, "hello")
-      buf = start_buffer(file_path: path)
+      buf = start_buffer(sync, file_path: path)
       client = start_client(:incremental)
       first = EditDelta.insertion(0, {0, 0}, "x", {0, 1})
       second = EditDelta.insertion(1, {0, 1}, "y", {0, 2})
-      SyncServer.put_clients(buf, [client])
+      SyncServer.put_clients(buf, [client], sync.table)
 
-      flush_batch(buf, [
+      flush_batch(sync, buf, [
         changed_event(buf, first, EditSource.user(), 2),
         changed_event(buf, nil, EditSource.unknown(), 2),
         changed_event(buf, nil, EditSource.unknown(), 1),
@@ -91,16 +105,22 @@ defmodule Minga.LSP.SyncServerTest do
     end
 
     test "request admission flushes the latest revision before registering the request", %{
-      tmp_dir: dir
+      tmp_dir: dir,
+      sync: sync
     } do
       path = Path.join(dir, "admission.txt")
       File.write!(path, "hello")
-      buf = start_buffer(file_path: path)
+      buf = start_buffer(sync, file_path: path)
       client = start_client(:full)
-      SyncServer.put_clients(buf, [client])
+      SyncServer.put_clients(buf, [client], sync.table)
 
       delta = EditDelta.insertion(0, {0, 0}, "x", {0, 1})
-      Events.broadcast(:buffer_changed, changed_event(buf, delta, EditSource.user(), 4))
+
+      Events.broadcast(
+        :buffer_changed,
+        changed_event(buf, delta, EditSource.user(), 4),
+        sync.events
+      )
 
       assert {:ok, ref, context} =
                SyncServer.request_document(
@@ -108,7 +128,8 @@ defmodule Minga.LSP.SyncServerTest do
                  client,
                  BufferProcess.version(buf),
                  "textDocument/hover",
-                 %{"textDocument" => %{"uri" => SyncServer.path_to_uri(path)}}
+                 %{"textDocument" => %{"uri" => SyncServer.path_to_uri(path)}},
+                 sync.name
                )
 
       assert_receive {:client_cast, ^client, {:did_change, _uri, "hello", ^buf, 0}}
@@ -118,18 +139,21 @@ defmodule Minga.LSP.SyncServerTest do
       assert context.buffer_revision == 0
     end
 
-    test "request through a replaced client still flushes the attached client", %{tmp_dir: dir} do
+    test "request through a replaced client still flushes the attached client", %{
+      tmp_dir: dir,
+      sync: sync
+    } do
       path = Path.join(dir, "replaced.txt")
       File.write!(path, "hello")
-      buf = start_buffer(file_path: path)
+      buf = start_buffer(sync, file_path: path)
       replaced = start_client(:full)
       attached = start_client(:full)
-      SyncServer.put_clients(buf, [attached])
+      SyncServer.put_clients(buf, [attached], sync.table)
 
       revision = BufferProcess.version(buf)
 
       # Seed a pending full sync without a debounce timer that could flush independently.
-      :sys.replace_state(SyncServer, fn state ->
+      :sys.replace_state(sync.name, fn state ->
         %{state | pending_changes: Map.put(state.pending_changes, buf, {revision, :full_sync})}
       end)
 
@@ -139,21 +163,25 @@ defmodule Minga.LSP.SyncServerTest do
                  replaced,
                  revision,
                  "textDocument/hover",
-                 %{}
+                 %{},
+                 sync.name
                )
 
       assert_receive {:client_cast, ^attached, {:did_change, _uri, "hello", ^buf, ^revision}}
     end
 
-    test "a bulk event keeps a batch in full sync after a later incremental edit", %{tmp_dir: dir} do
+    test "a bulk event keeps a batch in full sync after a later incremental edit", %{
+      tmp_dir: dir,
+      sync: sync
+    } do
       path = Path.join(dir, "bulk.txt")
       File.write!(path, "hello")
-      buf = start_buffer(file_path: path)
+      buf = start_buffer(sync, file_path: path)
       client = start_client(:incremental)
       delta = EditDelta.insertion(0, {0, 0}, "x", {0, 1})
-      SyncServer.put_clients(buf, [client])
+      SyncServer.put_clients(buf, [client], sync.table)
 
-      flush_batch(buf, [
+      flush_batch(sync, buf, [
         changed_event(buf, delta, EditSource.user(), 1),
         changed_event(buf, nil, EditSource.unknown(), 2),
         changed_event(buf, delta, EditSource.user(), 3)
@@ -164,14 +192,15 @@ defmodule Minga.LSP.SyncServerTest do
     end
 
     test "UTF-16 and UTF-32 clients receive exact full content before request admission", %{
-      tmp_dir: dir
+      tmp_dir: dir,
+      sync: sync
     } do
       for encoding <- [:utf16, :utf32] do
         path = Path.join(dir, "#{encoding}-non-bmp.txt")
         File.write!(path, "😀a")
-        buf = start_buffer(file_path: path)
+        buf = start_buffer(sync, file_path: path)
         client = start_client(:incremental, encoding)
-        SyncServer.put_clients(buf, [client])
+        SyncServer.put_clients(buf, [client], sync.table)
 
         :ok = BufferProcess.move_to(buf, {0, 4})
         :ok = BufferProcess.insert_text(buf, "x")
@@ -183,7 +212,8 @@ defmodule Minga.LSP.SyncServerTest do
                    client,
                    revision,
                    "textDocument/hover",
-                   %{"textDocument" => %{"uri" => SyncServer.path_to_uri(path)}}
+                   %{"textDocument" => %{"uri" => SyncServer.path_to_uri(path)}},
+                   sync.name
                  )
 
         assert_receive {:client_cast, ^client, {:did_change, _uri, "😀xa", ^buf, ^revision}}
@@ -195,16 +225,16 @@ defmodule Minga.LSP.SyncServerTest do
       end
     end
 
-    test "mixed clients receive one exact Unicode revision per flush", %{tmp_dir: dir} do
+    test "mixed clients receive one exact Unicode revision per flush", %{tmp_dir: dir, sync: sync} do
       path = Path.join(dir, "mixed.txt")
       File.write!(path, "😀é!\nz")
-      buf = start_buffer(file_path: path)
+      buf = start_buffer(sync, file_path: path)
       full = start_client(:full)
       utf16 = start_client(:incremental, :utf16)
       utf8 = start_client(:incremental, :utf8)
       utf32 = start_client(:incremental, :utf32)
       full_sync_clients = [full, utf16, utf32]
-      SyncServer.put_clients(buf, [full, utf16, utf8, utf32])
+      SyncServer.put_clients(buf, [full, utf16, utf8, utf32], sync.table)
 
       :ok = BufferProcess.move_to(buf, {0, 6})
       :ok = BufferProcess.insert_text(buf, "ß")
@@ -245,17 +275,18 @@ defmodule Minga.LSP.SyncServerTest do
     end
 
     test "dead clients do not prevent live mixed clients from receiving changes", %{
-      tmp_dir: dir
+      tmp_dir: dir,
+      sync: sync
     } do
       path = Path.join(dir, "dead-clients.txt")
       File.write!(path, "naïve 😀")
-      buf = start_buffer(file_path: path)
+      buf = start_buffer(sync, file_path: path)
       dead_full = start_client(:full)
       dead_incremental = start_client(:incremental)
       incremental = start_client(:incremental)
       utf16 = start_client(:incremental, :utf16)
       Enum.each([dead_full, dead_incremental], &kill_client/1)
-      SyncServer.put_clients(buf, [dead_full, dead_incremental, incremental, utf16])
+      SyncServer.put_clients(buf, [dead_full, dead_incremental, incremental, utf16], sync.table)
 
       :ok = BufferProcess.insert_text(buf, "¡")
       edit_revision = BufferProcess.version(buf)
@@ -280,70 +311,78 @@ defmodule Minga.LSP.SyncServerTest do
       refute_receive {:client_cast, _client, {:did_change_incremental, _, _, _, _}}, 50
     end
 
-    test "a buffer closed before its flush notifies no client", %{tmp_dir: dir} do
+    test "a buffer closed before its flush notifies no client", %{tmp_dir: dir, sync: sync} do
       path = Path.join(dir, "closed.txt")
       File.write!(path, "hello")
       buf = start_supervised!({BufferProcess, file_path: path}, id: :closing_buffer)
       full = start_client(:full)
       incremental = start_client(:incremental)
-      SyncServer.put_clients(buf, [full, incremental])
+      SyncServer.put_clients(buf, [full, incremental], sync.table)
       delta = EditDelta.insertion(0, {0, 0}, "x", {0, 1})
 
-      Events.broadcast(:buffer_changed, changed_event(buf, delta, EditSource.user(), 1))
-      sync_server()
+      Events.broadcast(
+        :buffer_changed,
+        changed_event(buf, delta, EditSource.user(), 1),
+        sync.events
+      )
+
+      sync_server(sync)
       :ok = stop_supervised!(:closing_buffer)
 
       refute_receive {:client_cast, _client, _message}, 400
-      refute Map.has_key?(:sys.get_state(SyncServer).pending_changes, buf)
+      refute Map.has_key?(:sys.get_state(sync.name).pending_changes, buf)
     end
   end
 
   describe "restart reconstruction" do
-    test "stale ETS entries do not survive SyncServer restart", %{tmp_dir: dir} do
+    test "stale ETS entries do not survive SyncServer restart", %{tmp_dir: dir, sync: sync} do
       path = Path.join(dir, "stale.txt")
-      buf = start_buffer(content: "hello", file_path: path)
+      buf = start_buffer(sync, content: "hello", file_path: path)
       stale_client = start_client()
-      SyncServer.put_clients(buf, [stale_client])
-      assert SyncServer.clients_for_buffer(buf) == [stale_client]
+      SyncServer.put_clients(buf, [stale_client], sync.table)
+      assert SyncServer.clients_for_buffer(buf, sync.table) == [stale_client]
 
-      restart_sync_server()
+      restart_sync_server(sync)
 
-      assert SyncServer.clients_for_buffer(buf) == []
+      assert SyncServer.clients_for_buffer(buf, sync.table) == []
     end
 
-    test "stale pending_changes and monitors do not survive restart", %{tmp_dir: dir} do
+    test "stale pending_changes and monitors do not survive restart", %{tmp_dir: dir, sync: sync} do
       path = Path.join(dir, "pending.txt")
-      buf = start_buffer(content: "hello", file_path: path)
+      buf = start_buffer(sync, content: "hello", file_path: path)
       client = start_client()
-      SyncServer.put_clients(buf, [client])
-      _ref = monitor_client_in_sync_server(buf, client)
+      SyncServer.put_clients(buf, [client], sync.table)
+      _ref = monitor_client_in_sync_server(sync, buf, client)
 
-      :sys.replace_state(SyncServer, fn state ->
+      :sys.replace_state(sync.name, fn state ->
         %{state | pending_changes: Map.put(state.pending_changes, buf, {1, :full_sync})}
       end)
 
-      restart_sync_server()
+      restart_sync_server(sync)
 
-      state = :sys.get_state(SyncServer)
+      state = :sys.get_state(sync.name)
       assert state.pending_changes == %{}
       assert state.client_monitors == %{}
       assert state.debounce_timers == %{}
     end
 
-    test "edit synchronization works after restart with reattached clients", %{tmp_dir: dir} do
+    test "edit synchronization works after restart with reattached clients", %{
+      tmp_dir: dir,
+      sync: sync
+    } do
       path = Path.join(dir, "sync-after-restart.txt")
       File.write!(path, "hello")
-      buf = start_buffer(file_path: path)
+      buf = start_buffer(sync, file_path: path)
       client = start_client(:incremental)
 
-      restart_sync_server()
+      restart_sync_server(sync)
 
       # Reattach the client (simulates what reconstruction does when servers are available)
-      SyncServer.put_clients(buf, [client])
+      SyncServer.put_clients(buf, [client], sync.table)
 
       delta = EditDelta.insertion(0, {0, 0}, "x", {0, 1})
 
-      flush_batch(buf, [
+      flush_batch(sync, buf, [
         changed_event(buf, delta, EditSource.user(), 1)
       ])
 
@@ -352,14 +391,17 @@ defmodule Minga.LSP.SyncServerTest do
                      1_000
     end
 
-    test "request_document rejects stale client identity after restart", %{tmp_dir: dir} do
+    test "request_document rejects stale client identity after restart", %{
+      tmp_dir: dir,
+      sync: sync
+    } do
       path = Path.join(dir, "stale-request.txt")
       File.write!(path, "hello")
-      buf = start_buffer(file_path: path)
+      buf = start_buffer(sync, file_path: path)
       stale_client = start_client(:full)
-      SyncServer.put_clients(buf, [stale_client])
+      SyncServer.put_clients(buf, [stale_client], sync.table)
 
-      restart_sync_server()
+      restart_sync_server(sync)
 
       # The stale client is no longer in the reconstructed ETS
       revision = BufferProcess.version(buf)
@@ -370,30 +412,33 @@ defmodule Minga.LSP.SyncServerTest do
                  stale_client,
                  revision,
                  "textDocument/hover",
-                 %{}
+                 %{},
+                 sync.name
                )
     end
   end
 
   describe "client monitoring" do
-    test "client DOWN removes it while survivors remain", %{tmp_dir: dir} do
+    test "client DOWN removes it while survivors remain", %{tmp_dir: dir, sync: sync} do
       path = Path.join(dir, "monitor.txt")
       File.write!(path, "hello")
-      buf = start_buffer(file_path: path)
+      buf = start_buffer(sync, file_path: path)
       doomed = start_client()
       survivor = start_client()
-      SyncServer.put_clients(buf, [doomed, survivor])
-      monitor_ref = monitor_client_in_sync_server(buf, doomed)
+      SyncServer.put_clients(buf, [doomed, survivor], sync.table)
+      monitor_ref = monitor_client_in_sync_server(sync, buf, doomed)
 
-      send(SyncServer, {:DOWN, monitor_ref, :process, doomed, :killed})
-      sync_server()
+      send(sync.name, {:DOWN, monitor_ref, :process, doomed, :killed})
+      sync_server(sync)
 
-      assert SyncServer.clients_for_buffer(buf) == [survivor]
+      assert SyncServer.clients_for_buffer(buf, sync.table) == [survivor]
     end
   end
 
-  defp start_buffer(opts) do
-    start_supervised!({BufferProcess, opts}, id: {:buffer, make_ref()})
+  defp start_buffer(sync, opts) do
+    start_supervised!({BufferProcess, [events_registry: sync.events] ++ opts},
+      id: {:buffer, make_ref()}
+    )
   end
 
   defp changed_event(buf, delta, source, version) do
@@ -406,14 +451,14 @@ defmodule Minga.LSP.SyncServerTest do
     }
   end
 
-  defp flush_batch(buf, events) do
-    :ok = :sys.suspend(SyncServer)
+  defp flush_batch(sync, buf, events) do
+    :ok = :sys.suspend(sync.name)
 
     try do
-      Enum.each(events, &send(SyncServer, {:minga_event, :buffer_changed, &1}))
-      send(SyncServer, {:flush_did_change, buf})
+      Enum.each(events, &send(sync.name, {:minga_event, :buffer_changed, &1}))
+      send(sync.name, {:flush_did_change, buf})
     after
-      :sys.resume(SyncServer)
+      :sys.resume(sync.name)
     end
   end
 
@@ -471,10 +516,10 @@ defmodule Minga.LSP.SyncServerTest do
     end
   end
 
-  defp monitor_client_in_sync_server(buf, client) do
+  defp monitor_client_in_sync_server(sync, buf, client) do
     parent = self()
 
-    :sys.replace_state(SyncServer, fn state ->
+    :sys.replace_state(sync.name, fn state ->
       ref = Process.monitor(client)
       send(parent, {:sync_server_monitor, ref})
       %{state | client_monitors: Map.put(state.client_monitors, ref, {buf, client})}
@@ -484,47 +529,28 @@ defmodule Minga.LSP.SyncServerTest do
     ref
   end
 
-  defp sync_server do
-    :sys.get_state(SyncServer)
+  defp start_sync_server(sync) do
+    start_supervised!(
+      {SyncServer,
+       name: sync.name,
+       table: sync.table,
+       events_registry: sync.events,
+       buffer_registry: sync.buffers,
+       options_server: sync.options},
+      id: :sync_server
+    )
+  end
+
+  defp sync_server(sync) do
+    :sys.get_state(sync.name)
     :ok
   end
 
-  defp restart_sync_server do
-    old_pid = Process.whereis(SyncServer)
-    ref = Process.monitor(old_pid)
-    Process.exit(old_pid, :kill)
-    assert_receive {:DOWN, ^ref, :process, ^old_pid, :killed}
-
-    # Wait for the supervisor to restart SyncServer with a new pid.
-    poll_until(fn -> Process.whereis(SyncServer) not in [nil, old_pid] end)
-    sync_server()
-  end
-
-  defp poll_until(fun, attempts \\ 50)
-  defp poll_until(_fun, 0), do: flunk("SyncServer did not restart in time")
-
-  defp poll_until(fun, attempts) do
-    if fun.() do
-      :ok
-    else
-      Process.sleep(10)
-      poll_until(fun, attempts - 1)
-    end
-  end
-
-  defp reset_sync_server do
-    SyncServer.clear_registry()
-
-    :sys.replace_state(SyncServer, fn state ->
-      Enum.each(Map.values(state.debounce_timers), &Process.cancel_timer/1)
-
-      %{
-        state
-        | debounce_timers: %{},
-          client_monitors: %{},
-          pending_changes: %{},
-          pending_tool_buffers: %{}
-      }
-    end)
+  # Stops this test's SyncServer, which deletes its ETS table, and starts a fresh one that
+  # reconstructs its attachments in init/1.
+  defp restart_sync_server(sync) do
+    :ok = stop_supervised!(:sync_server)
+    start_sync_server(sync)
+    sync_server(sync)
   end
 end

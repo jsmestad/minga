@@ -18,16 +18,6 @@ defmodule MingaEditor.LspWorkspaceTranscriptTest do
 
   @ready_timeout 10_000
 
-  setup do
-    SyncServer.clear_registry()
-
-    on_exit(fn ->
-      SyncServer.clear_registry()
-    end)
-
-    :ok
-  end
-
   for {wire_encoding, encoding, expected_character} <- [
         {"utf-8", :utf8, 4},
         {"utf-16", :utf16, 2},
@@ -80,7 +70,7 @@ defmodule MingaEditor.LspWorkspaceTranscriptTest do
       uri = SyncServer.path_to_uri(path)
       Client.did_open(client, uri, "elixir", original, buffer, BufferProcess.version(buffer))
       assert Client.status(client) == :ready
-      SyncServer.put_clients(buffer, [client])
+      attach_clients(buffer, [client])
 
       :ok = BufferProcess.move_to(buffer, {0, 8})
       :ok = BufferProcess.insert_text(buffer, "?")
@@ -146,5 +136,11 @@ defmodule MingaEditor.LspWorkspaceTranscriptTest do
                         %Minga.Events.LspStatusEvent{name: :mock_lsp, status: :ready}},
                        @ready_timeout
     end
+  end
+
+  # Registers fake clients in the shared SyncServer registry and removes only this buffer's entry.
+  defp attach_clients(buffer, clients) do
+    SyncServer.put_clients(buffer, clients)
+    on_exit(fn -> SyncServer.remove_buffer(buffer) end)
   end
 end

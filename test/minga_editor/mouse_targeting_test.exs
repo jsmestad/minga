@@ -22,12 +22,6 @@ defmodule MingaEditor.MouseTargetingTest do
   @super 0x08
   @ctrl 0x02
 
-  setup do
-    Minga.LSP.SyncServer.clear_registry()
-    on_exit(&Minga.LSP.SyncServer.clear_registry/0)
-    :ok
-  end
-
   test "middle-click pastes once into a scrolled right split while the left split stays unchanged" do
     {state, left, right} = split_state(:vertical, 1)
     state = set_viewport(state, 2, %{top: 2, left: 3})
@@ -262,7 +256,7 @@ defmodule MingaEditor.MouseTargetingTest do
   end
 
   defp register_lsp_client(buffer, client) do
-    Minga.LSP.SyncServer.put_clients(buffer, [client])
+    attach_clients(buffer, [client])
     :ok
   end
 
@@ -370,4 +364,10 @@ defmodule MingaEditor.MouseTargetingTest do
 
   defp left_content, do: Enum.map_join(0..5, "\n", &"left #{&1}")
   defp right_content, do: Enum.map_join(0..5, "\n", &"right #{&1}")
+
+  # Registers fake clients in the shared SyncServer registry and removes only this buffer's entry.
+  defp attach_clients(buffer, clients) do
+    Minga.LSP.SyncServer.put_clients(buffer, clients)
+    on_exit(fn -> Minga.LSP.SyncServer.remove_buffer(buffer) end)
+  end
 end
