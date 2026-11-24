@@ -23,9 +23,12 @@ defmodule MingaAgent.MCP.FakeTransport do
   end
 
   @impl MingaAgent.MCP.Transport
-  @spec request(pid(), map(), timeout()) :: {:ok, map()} | {:error, term()}
+  @spec request(pid(), map(), timeout()) :: MingaAgent.MCP.Transport.request_result()
   def request(pid, message, timeout) when is_pid(pid) do
-    GenServer.call(pid, {:request, message}, timeout)
+    case GenServer.call(pid, {:request, message}, timeout) do
+      {:ok, result} -> {:ok, result, pid}
+      {:error, reason} -> {:error, reason, pid}
+    end
   end
 
   @impl MingaAgent.MCP.Transport
@@ -44,9 +47,9 @@ defmodule MingaAgent.MCP.FakeTransport do
   end
 
   @impl MingaAgent.MCP.Transport
-  @spec handle_transport_info(term(), pid()) :: :ignore | {:down, term()}
+  @spec handle_transport_info(term(), pid()) :: {:ok, pid()} | {:down, term()}
   def handle_transport_info({:mcp_fake_transport_exit, pid, reason}, pid), do: {:down, reason}
-  def handle_transport_info(_message, _pid), do: :ignore
+  def handle_transport_info(_message, pid), do: {:ok, pid}
 
   @spec crash(pid()) :: :ok
   def crash(pid), do: GenServer.call(pid, :crash)

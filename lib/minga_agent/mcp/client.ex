@@ -126,11 +126,11 @@ defmodule MingaAgent.MCP.Client do
 
     {reply, state} =
       case state.transport_mod.request(state.transport, request, state.request_timeout) do
-        {:ok, result} ->
-          {tool_call_reply(result), state}
+        {:ok, result, transport} ->
+          {tool_call_reply(result), %{state | transport: transport}}
 
-        {:error, reason} ->
-          {{:error, reason}, maybe_mark_transport_down(state, reason)}
+        {:error, reason, transport} ->
+          {{:error, reason}, maybe_mark_transport_down(%{state | transport: transport}, reason)}
       end
 
     {:reply, reply, state}
@@ -139,14 +139,14 @@ defmodule MingaAgent.MCP.Client do
   @impl GenServer
   def handle_info(message, state) do
     case state.transport_mod.handle_transport_info(message, state.transport) do
+      {:ok, transport} ->
+        {:noreply, %{state | transport: transport}}
+
       {:down, reason} when state.alive ->
         notify_down(state, reason)
         {:noreply, %{state | alive: false}}
 
       {:down, _reason} ->
-        {:noreply, state}
-
-      :ignore ->
         {:noreply, state}
     end
   end
@@ -163,7 +163,7 @@ defmodule MingaAgent.MCP.Client do
           {:ok, state()} | {:stop, term()}
   defp init_started_transport(opts, config, transport_mod, transport, request_timeout) do
     case initialize_and_list(transport_mod, transport, config, request_timeout) do
-      {:ok, tools, next_id} ->
+      {:ok, tools, next_id, transport} ->
         state = %__MODULE__{
           config: config,
           transport_mod: transport_mod,
@@ -177,7 +177,7 @@ defmodule MingaAgent.MCP.Client do
 
         {:ok, state}
 
-      {:error, reason} ->
+      {:error, reason, transport} ->
         stop_transport(transport_mod, transport)
         {:stop, reason}
     end
@@ -199,28 +199,40 @@ defmodule MingaAgent.MCP.Client do
     end
   end
 
+  # Each step returns the transport value the next step must use, including on failure, so cleanup stops the latest one.
   @spec initialize_and_list(module(), term(), ServerConfig.t(), timeout()) ::
-          {:ok, [MCPTool.t()], pos_integer()} | {:error, term()}
+          {:ok, [MCPTool.t()], pos_integer(), term()} | {:error, term(), term()}
   defp initialize_and_list(transport_mod, transport, config, timeout) do
     initialize = request(1, "initialize", initialize_params())
 
-    with {:ok, _initialize_result} <- transport_mod.request(transport, initialize, timeout),
-         :ok <- transport_mod.notify(transport, notification("notifications/initialized", %{})),
-         {:ok, list_result} <-
+    with {:ok, _initialize_result, transport} <-
+           transport_mod.request(transport, initialize, timeout),
+         :ok <- notify_initialized(transport_mod, transport),
+         {:ok, list_result, transport} <-
            transport_mod.request(transport, request(2, "tools/list", %{}), timeout),
-         {:ok, tools} <- listed_tools(config.name, list_result) do
-      {:ok, tools, 3}
+         {:ok, tools} <- listed_tools(config.name, list_result, transport) do
+      {:ok, tools, 3, transport}
     end
   end
 
-  @spec listed_tools(String.t(), map()) :: {:ok, [MCPTool.t()]} | {:error, String.t()}
-  defp listed_tools(server_name, list_result) do
+  @spec notify_initialized(module(), term()) :: :ok | {:error, term(), term()}
+  defp notify_initialized(transport_mod, transport) do
+    case transport_mod.notify(transport, notification("notifications/initialized", %{})) do
+      :ok -> :ok
+      {:error, reason} -> {:error, reason, transport}
+    end
+  end
+
+  @spec listed_tools(String.t(), map(), term()) ::
+          {:ok, [MCPTool.t()]} | {:error, String.t(), term()}
+  defp listed_tools(server_name, list_result, transport) do
     case Map.get(list_result, "tools", []) do
       tools when is_list(tools) ->
         {:ok, MCPTool.from_list(server_name, tools)}
 
       other ->
-        {:error, "MCP tools/list response must contain a tools list, got: #{inspect(other)}"}
+        {:error, "MCP tools/list response must contain a tools list, got: #{inspect(other)}",
+         transport}
     end
   end
 

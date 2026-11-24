@@ -38,9 +38,13 @@ defmodule MingaAgent.MCP.LineDecoder do
   def finish(%__MODULE__{} = decoder, tail) when is_binary(tail) do
     with {:ok, _bytes} <- admit(decoder, tail) do
       frame = IO.iodata_to_binary(:lists.reverse([tail | decoder.pieces]))
-      {:ok, frame, new(decoder.max_bytes)}
+      {:ok, frame, reset(decoder)}
     end
   end
+
+  @doc "Discards the frame that is being received and keeps the byte limit."
+  @spec reset(t()) :: t()
+  def reset(%__MODULE__{max_bytes: max_bytes}), do: new(max_bytes)
 
   @doc "Returns the number of bytes retained for the frame that is being received."
   @spec buffered_bytes(t()) :: non_neg_integer()
