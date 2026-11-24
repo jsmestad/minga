@@ -124,7 +124,7 @@ func TestWhichKeyNarrowTerminalTruncatesLabelsWithEllipsisAndKeepsRowsInside(t *
 	}
 }
 
-func TestWhichKeyGroupsUseTheGroupColourRoleAndKeysTheAccent(t *testing.T) {
+func TestWhichKeyGroupsUseTheGroupColourRoleAndKeysOneColour(t *testing.T) {
 	model := whichKeyModel(120, 24)
 	model.activePalette = paletteFromTheme(protocol.Theme{Colors: map[byte]uint32{byte(generated.ColorRoleGroup): 0xCA9EE6}})
 	columns := whichKeyColumnsFor(whichKeySections(whichKeyFixture().Entries), 4)

@@ -320,10 +320,11 @@ func (m Model) renderStatusSegments(status protocol.StatusBar) string {
 		}
 	}
 	// showcmd: echo the pending key sequence as a dim segment at the head of the right cluster so every keypress is acknowledged instantly (issue #2666).
-	// The BEAM clears it (empty string) when the sequence resolves, aborts, or which-key opens, so no timer lives here.
+	// The BEAM clears it (empty string) when the sequence resolves or aborts, and keeps it while which-key is open, so
+	// the modeline names the prefix the panel waits on; no timer lives here. In the modeline text colour: muted and faint are too light to read.
 	pending := ""
 	if status.PendingKeys != "" {
-		pending = lipgloss.NewStyle().Faint(true).Foreground(m.palette().Muted()).Background(m.palette().ChromeSurface()).Render(status.PendingKeys) + surface.Render(gap(modelineSegmentGap))
+		pending = lipgloss.NewStyle().Foreground(m.palette().ChromeText()).Background(m.palette().ChromeSurface()).Render(status.PendingKeys) + surface.Render(gap(modelineSegmentGap))
 	}
 	inset := modelineInset.cols()
 	budget := max(m.width-2*inset-lipgloss.Width(pending), 0)

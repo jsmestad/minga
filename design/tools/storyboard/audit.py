@@ -245,6 +245,23 @@ def heading_between(headings, key, next_key):
     return any(top < h["frame"][1] < bottom and h["frame"][0] <= left + key["frame"][2] for h in headings)
 
 
+def cluster_columns(keys, labels, mac):
+    entries = []
+    for key in keys:
+        same_row = [l for l in labels if abs(l["frame"][1] - key["frame"][1]) <= (2 if mac else 0) and l["frame"][0] > key["frame"][0]]
+        if same_row:
+            entries.append((key, min(same_row, key=lambda l: l["frame"][0])))
+    entries.sort(key=lambda e: e[1]["frame"][0])
+    groups = []
+    for entry in entries:
+        # A new column starts where a label's leading edge is past the previous column's widest label.
+        if groups and entry[0]["frame"][0] < max(l["frame"][0] + l["frame"][2] for _, l in groups[-1]):
+            groups[-1].append(entry)
+        else:
+            groups.append([entry])
+    return [sorted(group, key=lambda e: e[0]["frame"][1]) for group in groups]
+
+
 def modeline(audit, frame, parts, mac):
     bar = by_part(parts, "modeline")
     segments = sorted(by_part(parts, "modeline.segment"), key=lambda p: p["frame"][0])

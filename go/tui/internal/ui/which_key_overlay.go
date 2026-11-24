@@ -229,7 +229,7 @@ func (m Model) renderFloatingWhichKey(which protocol.WhichKey) string {
 		if titled {
 			cells := make([]string, len(columns))
 			for i, column := range columns {
-				cells[i] = textCaption.style(p).Background(p.PopupSurface()).Render(fit(ansi.TruncateWc(column.title, column.outerWidth(), "…"), column.outerWidth()))
+				cells[i] = lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(p.PopupSurface()).Render(fit(ansi.TruncateWc(column.title, column.outerWidth(), "…"), column.outerWidth()))
 			}
 			body = append(body, m.whichKeyRow(cells, inner))
 		}
@@ -269,7 +269,8 @@ func (m Model) whichKeyRow(cells []string, width int) string {
 
 // renderWhichKeyEntry draws `key  Label count`: the key in the accent colour in the column's fixed key column, the
 // label in the group colour role for a group (its trailing › comes from the BEAM) and plain text for a command, and
-// the live count faint after it.
+// the live count in the secondary colour after it. Captions use the secondary colour, not faint text, which is too
+// light on the popup surface to read.
 func (m Model) renderWhichKeyEntry(entry generated.WhichKeyEntry, column whichKeyColumn) string {
 	p := m.palette()
 	surface := lipgloss.NewStyle().Background(p.PopupSurface())
@@ -280,7 +281,7 @@ func (m Model) renderWhichKeyEntry(entry generated.WhichKeyEntry, column whichKe
 	if entry.Kind == whichKeyKindGroup {
 		labelStyle = labelStyle.Foreground(p.Role(generated.ColorRoleGroup))
 	}
-	countStyle := whichKeyGroupText.style(p).Background(p.PopupSurface())
+	countStyle := lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(p.PopupSurface())
 
 	label, count := entry.Label, entry.Count
 	countWidth := 0
@@ -311,7 +312,7 @@ func (m Model) whichKeyTopBorder(which protocol.WhichKey, width int) string {
 	border := lipgloss.NewStyle().Foreground(p.PopupBorder()).Background(p.PopupSurface())
 	keyStyle := lipgloss.NewStyle().Foreground(p.Accent()).Background(p.PopupSurface())
 	labelStyle := lipgloss.NewStyle().Foreground(p.PopupText()).Background(p.PopupSurface())
-	faint := textCaption.style(p).Background(p.PopupSurface())
+	faint := lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(p.PopupSurface())
 	surface := lipgloss.NewStyle().Background(p.PopupSurface())
 
 	var crumbs strings.Builder

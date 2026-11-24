@@ -9,31 +9,7 @@
 # ---- TUI -----------------------------------------------------------------------------------------------------
 
 [[exception]]
-scenario = ["edit.whichkey.leader", "minga.whichkey"]
-frontend = "tui"
-part = "whichKey.column"
-rule = "column gap"
-reason = "The TUI which-key keeps its 2 │ 2 column separator and fixed-width cells; anatomy wants a panel gap after the widest entry and no rule."
-issue = 4044
-
-[[exception]]
-scenario = "minga.whichkey"
-frontend = "tui"
-part = "whichKey.entry"
-rule = "key to label"
-reason = "Single-letter keys are centred in a three-cell key column, so the label starts two cells late; the which-key rebuild sizes the column to the widest key."
-issue = 4044
-
-[[exception]]
-scenario = ["edit.whichkey.leader", "minga.whichkey"]
-frontend = "tui"
-part = "whichKey.entry"
-rule = "same metrics everywhere (key to label)"
-reason = "Follows from the centred key column above: the gap depends on the widest key in each panel."
-issue = 4044
-
-[[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
 frontend = "tui"
 part = "glyph"
 rule = "contrast"
@@ -47,7 +23,7 @@ reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in
 issue = 4137
 
 [[exception]]
-scenario = ["edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
+scenario = ["edit.visual", "edit.whichkey.leader", "minga.whichkey"]
 frontend = "tui"
 part = "glyph"
 rule = "contrast"
@@ -59,26 +35,21 @@ reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
 frontend = "tui"
 part = "glyph"
 rule = "contrast"
 theme = "catppuccin_latte"
 pairs = [
-  "#51afef on #ccd0da",
-  "#61afef on #ccd0da",
   "#7c7f93 on #ccd0da",
   "#8c8fa1 on #ccd0da",
   "#8c8fa1 on #eff1f5",
-  "#98c379 on #ccd0da",
-  "#c678dd on #ccd0da",
-  "#e5c07b on #ccd0da",
 ]
 reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -91,13 +62,12 @@ reason = "Syntax colours, muted comment and gutter text, separators and chips mi
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
 theme = "catppuccin_frappe"
 pairs = [
-  "#81c8be on #626880",
   "#838ba7 on #303446",
   "#ca9ee6 on #626880",
 ]
@@ -105,15 +75,13 @@ reason = "Syntax colours, muted comment and gutter text, separators and chips mi
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
 theme = "catppuccin_latte"
 pairs = [
   "#04a5e5 on #eff1f5",
-  "#179299 on #acb0be",
-  "#1e66f5 on #e6e9ef",
   "#1e66f5 on #eff1f5",
   "#40a02b on #eff1f5",
   "#7287fd on #ccd0da",
@@ -127,81 +95,45 @@ reason = "Syntax colours, muted comment and gutter text, separators and chips mi
 issue = 4137
 
 [[exception]]
-scenario = "start.project_switcher.empty"
-frontend = "tui"
-part = "glyph"
-rule = "contrast"
-theme = "catppuccin_frappe"
-pairs = ["#8caaee on #626880"]
-reason = "The picker's selected-row marker misses 3:1 on the popup selection colour in this theme."
-issue = 4137
-
-[[exception]]
-scenario = "start.project_switcher.empty"
+scenario = ["edit.whichkey.leader"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
 theme = "catppuccin_frappe"
-pairs = ["#c6d0f5 on #626880"]
-reason = "The picker's selected-row text misses 4.5:1 on the popup selection colour in this theme."
+pairs = [
+  "#8caaee on #414559",
+]
+reason = "Which-key keys use the accent colour (anatomy.md), which misses 4.5:1 on the popup surface in this theme."
 issue = 4137
 
 [[exception]]
-scenario = "start.project_switcher.empty"
-frontend = "tui"
-part = "glyph"
-rule = "contrast"
-theme = "catppuccin_latte"
-pairs = ["#1e66f5 on #acb0be"]
-reason = "The picker's selected-row marker misses 3:1 on the popup selection colour in this theme."
-issue = 4137
-
-[[exception]]
-scenario = "start.project_switcher.empty"
+scenario = ["edit.whichkey.leader"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
 theme = "catppuccin_latte"
-pairs = ["#4c4f69 on #acb0be"]
-reason = "The picker's selected-row text misses 4.5:1 on the popup selection colour in this theme."
+pairs = [
+  "#1e66f5 on #ccd0da",
+]
+reason = "Which-key keys use the accent colour (anatomy.md), which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.whichkey"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#d35400 on #e6e9ef",
+]
+reason = "The needs-you state colour on the modeline misses 4.5:1 in this theme."
 issue = 4137
 
 # ---- macOS ---------------------------------------------------------------------------------------------------
 
 [[exception]]
-scenario = ["edit.whichkey.leader", "minga.whichkey"]
-frontend = "macos"
-part = "whichKey.entry"
-rule = "entry pitch"
-reason = "WhichKeyOverlay rows are 22 pt; anatomy wants every clickable row at the 24 pt row pitch."
-issue = 4044
-
-[[exception]]
-scenario = ["edit.whichkey.leader", "minga.whichkey"]
-frontend = "macos"
-part = "whichKey.entry"
-rule = "key to label"
-reason = "WhichKeyOverlay puts Spacing.sm between key and label in a fixed key slot; anatomy wants the key-to-label token."
-issue = 4044
-
-[[exception]]
-scenario = ["edit.whichkey.leader", "minga.whichkey"]
-frontend = "macos"
-part = "whichKey.column"
-rule = "column gap"
-reason = "WhichKeyOverlay lays entries in fixed 220 pt columns, so the gap after the widest entry varies; anatomy wants the column-gap token."
-issue = 4044
-
-[[exception]]
-scenario = ["edit.whichkey.leader", "minga.whichkey"]
-frontend = "macos"
-part = "whichKey.panel"
-rule = "inset"
-reason = "The entry block is centred in the panel, so its inset is not the panel inset token."
-issue = 4044
-
-[[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "start.project_switcher.empty"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader"]
 frontend = "macos"
 part = "breadcrumb.segment"
 rule = "contrast"
@@ -213,7 +145,7 @@ reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "start.project_switcher.empty"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader"]
 frontend = "macos"
 part = "breadcrumb.segment"
 rule = "contrast"
@@ -225,7 +157,7 @@ reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "start.project_switcher.empty"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader"]
 frontend = "macos"
 part = "breadcrumb.segment"
 rule = "contrast"
@@ -268,7 +200,7 @@ reason = "Syntax colours, comments and line numbers in the editor miss 4.5:1 in 
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
 frontend = "macos"
 part = "modeline.modePill"
 rule = "contrast"
@@ -280,7 +212,7 @@ reason = "The modeline.modePill text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
 frontend = "macos"
 part = "modeline.modeText"
 rule = "contrast"
@@ -292,7 +224,7 @@ reason = "The modeline.modeText text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
 frontend = "macos"
 part = "modeline.segment"
 rule = "contrast"
@@ -476,7 +408,6 @@ rule = "contrast"
 theme = "catppuccin_frappe"
 pairs = [
   "#8caaee on #414559",
-  "#c6d0f5 on #626880",
 ]
 reason = "The Agent activity card's title and task, shown while Minga works, miss 4.5:1 in this theme."
 issue = 4137
@@ -489,92 +420,6 @@ rule = "contrast"
 theme = "catppuccin_latte"
 pairs = [
   "#1e66f5 on #ccd0da",
-  "#4c4f69 on #acb0be",
-  "#8839ef on #e6e9ef",
 ]
 reason = "The Agent activity card's title and task, and Minga's words in the minga role on the modeline bar (4.45:1), miss 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
-scenario = ["start.project_switcher.empty"]
-frontend = "macos"
-part = "breadcrumb.segment"
-rule = "contrast"
-theme = "catppuccin_frappe"
-pairs = [
-  "#262938 on #414559",
-]
-reason = "The breadcrumb's segments use this theme's chrome text colours, which miss the contrast floor."
-issue = 4137
-
-[[exception]]
-scenario = ["start.project_switcher.empty"]
-frontend = "macos"
-part = "breadcrumb.segment"
-rule = "contrast"
-theme = "catppuccin_latte"
-pairs = [
-  "#e6e9ef on #ccd0da",
-]
-reason = "The breadcrumb's segments use this theme's chrome text colours, which miss the contrast floor."
-issue = 4137
-
-[[exception]]
-scenario = ["start.project_switcher.empty"]
-frontend = "macos"
-part = "editor.code"
-rule = "contrast"
-theme = "astrodark"
-pairs = [
-  "#29333c on #1a1d23",
-]
-reason = "Code colours in this theme miss the contrast floor on the editor surface behind the picker."
-issue = 4137
-
-[[exception]]
-scenario = ["start.project_switcher.empty"]
-frontend = "macos"
-part = "editor.code"
-rule = "contrast"
-theme = "catppuccin_frappe"
-pairs = [
-  "#5f647c on #303446",
-]
-reason = "Code colours in this theme miss the contrast floor on the editor surface behind the picker."
-issue = 4137
-
-[[exception]]
-scenario = ["start.project_switcher.empty"]
-frontend = "macos"
-part = "editor.code"
-rule = "contrast"
-theme = "catppuccin_latte"
-pairs = [
-  "#acb0be on #eff1f5",
-]
-reason = "Code colours in this theme miss the contrast floor on the editor surface behind the picker."
-issue = 4137
-
-[[exception]]
-scenario = ["start.project_switcher.empty"]
-frontend = "macos"
-part = "emptyState.why"
-rule = "contrast"
-theme = "catppuccin_latte"
-pairs = [
-  "#686b82 on #ccd0da",
-]
-reason = "This theme's secondary popup text misses 4.5:1 on the popup surface."
-issue = 4137
-
-[[exception]]
-scenario = ["start.project_switcher.empty"]
-frontend = "macos"
-part = "picker.hints"
-rule = "contrast"
-theme = "catppuccin_latte"
-pairs = [
-  "#686b82 on #ccd0da",
-]
-reason = "This theme's secondary popup text misses 4.5:1 on the popup surface."
 issue = 4137
