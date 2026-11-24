@@ -62,7 +62,7 @@ defmodule Minga.Session.StagedDrafts do
   @typedoc """
   The stored drafts of one staging view.
 
-  A retired view (`retired: true`) was published or discarded, and its deletion has not finished. It has no entries and must never be offered again; its directory is removed with `retire_view_dir/1`.
+  A retired view (`retired: true`) was published or discarded, or holds only drafts whose deletion is pending, and its deletion has not finished. It has no entries and must never be offered again; its directory is removed with `retire_view_dir/1`.
   """
   @type stored_view :: %{
           dir: String.t(),
@@ -557,7 +557,7 @@ defmodule Minga.Session.StagedDrafts do
   @doc """
   Loads every stored draft of a project, grouped by staging view.
 
-  A draft that can never be restored is returned as `{:lost, file, name, reason}`; one that cannot be read now is `{:retained, file, name, reason}`. A view with a retirement tombstone is returned with `retired: true` and no entries; its drafts are not read. A draft recorded as pending deletion is skipped; if that record cannot be read, every draft of its view is retained. `name` is the draft's path when the file still names it. Temporary files are skipped and left alone: one may belong to a write that is still in progress (`prune/4` removes leftovers for the view's owner). Returns `{:error, reason}` without reading anything when a store directory fails the privacy check.
+  A draft that can never be restored is returned as `{:lost, file, name, reason}`; one that cannot be read now is `{:retained, file, name, reason}`. A view with a retirement tombstone is returned with `retired: true` and no entries; its drafts are not read. A draft recorded as pending deletion is skipped, and a view left with only such drafts is returned as retired; if that record cannot be read, every draft of its view is retained. `name` is the draft's path when the file still names it. Temporary files are skipped and left alone: one may belong to a write that is still in progress (`prune/4` removes leftovers for the view's owner). Returns `{:error, reason}` without reading anything when a store directory fails the privacy check.
   """
   @spec load(String.t(), keyword()) :: {:ok, [stored_view()]} | {:error, term()}
   def load(project_root, opts \\ []) when is_binary(project_root) do
@@ -629,15 +629,9 @@ defmodule Minga.Session.StagedDrafts do
 
   @spec load_view(String.t(), String.t(), keyword()) :: stored_view() | nil
   defp load_view(dir, project_root, opts) do
-    entries =
-      case File.ls(dir) do
-        {:ok, names} -> load_entries(dir, Enum.sort(names), project_root, opts)
-        {:error, _reason} -> []
-      end
-
-    case entries do
-      [] -> nil
-      entries -> stored_view(dir, entries)
+    case File.ls(dir) do
+      {:ok, names} -> load_names(dir, Enum.sort(names), project_root, opts)
+      {:error, _reason} -> nil
     end
   end
 
@@ -658,23 +652,30 @@ defmodule Minga.Session.StagedDrafts do
     }
   end
 
-  # A draft whose deletion is pending is never loaded. When the record of
-  # pending deletions cannot be read, every draft of the view is retained, so
-  # the view waits for a later start instead of offering a deleted draft.
-  @spec load_entries(String.t(), [String.t()], String.t(), keyword()) :: [
-          {entry(), String.t() | nil, non_neg_integer() | nil}
-        ]
-  defp load_entries(dir, names, project_root, opts) do
+  # A draft whose deletion is pending is never loaded. A view that holds only
+  # such drafts is reported as retired, so its deletion is finished. When the
+  # record of pending deletions cannot be read, every draft of the view is
+  # retained, so the view waits for a later start instead of offering a
+  # deleted draft.
+  @spec load_names(String.t(), [String.t()], String.t(), keyword()) :: stored_view() | nil
+  defp load_names(dir, names, project_root, opts) do
     case read_pending(dir) do
       {:ok, pending} ->
-        names
-        |> Enum.reject(&MapSet.member?(pending, &1))
-        |> Enum.flat_map(&load_entry(Path.join(dir, &1), project_root, opts))
+        {skipped, kept} = Enum.split_with(names, &MapSet.member?(pending, &1))
+
+        case {Enum.flat_map(kept, &load_entry(Path.join(dir, &1), project_root, opts)), skipped} do
+          {[], []} -> nil
+          {[], _pending_only} -> retired_view(dir)
+          {entries, _skipped} -> stored_view(dir, entries)
+        end
 
       {:error, reason} ->
-        for name <- names, String.ends_with?(name, @extension) do
-          {{:retained, Path.join(dir, name), name, {:read_failed, reason}}, nil, nil}
-        end
+        retained =
+          for name <- names, String.ends_with?(name, @extension) do
+            {{:retained, Path.join(dir, name), name, {:read_failed, reason}}, nil, nil}
+          end
+
+        if retained == [], do: nil, else: stored_view(dir, retained)
     end
   end
 

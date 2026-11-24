@@ -559,6 +559,32 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       assert Map.keys(stored(root, store)) == [{1, "lib/b.ex"}]
     end
 
+    test "a view left with only drafts whose deletion failed is removed at the next start",
+         %{root: root, store: store, keeper: keeper} do
+      {:ok, view} = ProjectView.overlay(root)
+      StagedDraftKeeper.persist(keeper, view, 1)
+      :ok = ProjectView.write_file(view, "lib/a.ex", "ONE\ntwo\nthree\n")
+      eventually(keeper, fn -> map_size(stored(root, store)) == 1 end)
+      dir = block_cleanup(root, view, store)
+
+      # The view stays open with nothing staged, and deleting its drafts fails.
+      capture_log(fn ->
+        :ok = ProjectView.discard_file(view, "lib/a.ex")
+        eventually(keeper, fn -> :sys.get_state(keeper).tracked[view.id].retry_pending end)
+      end)
+
+      full_shutdown(view)
+      File.chmod!(dir, 0o700)
+
+      fresh = start_keeper(store, :second)
+      :ok = StagedDraftKeeper.recover(fresh, root, self())
+      :sys.get_state(fresh)
+
+      refute_received {:staged_drafts_recovered, _, _}
+      refute File.exists?(dir)
+      assert File.ls!(Path.dirname(dir)) == []
+    end
+
     test "a draft staged again for a path whose deletion is pending is offered at the next start",
          %{root: root, store: store, keeper: keeper} do
       {:ok, view} = ProjectView.overlay(root)

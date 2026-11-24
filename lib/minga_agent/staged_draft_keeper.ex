@@ -666,15 +666,21 @@ defmodule MingaAgent.StagedDraftKeeper do
   end
 
   # A view that is still tracked is never rebuilt from disk; its files are
-  # the snapshot of that running view. A retired view, or one whose deletion
-  # is pending, is never offered; the deletion of a retired view left by an
-  # earlier run is finished here.
+  # the snapshot of that running view, and its own snapshots finish its
+  # pending deletions. A retired view, or one whose deletion is pending, is
+  # never offered; the deletion of a retired view left by an earlier run is
+  # finished here.
   @spec disk_recoveries(state(), String.t()) :: {[Recovery.t()], state()}
   defp disk_recoveries(state, root) do
     case StagedDrafts.load(root, state.store_opts) do
       {:ok, stored} ->
         {retired, stored} = Enum.split_with(stored, & &1.retired)
-        state = Enum.reduce(retired, state, &finish_retirement(&2, &1.dir))
+        tracked = tracked_dirs(state)
+
+        state =
+          retired
+          |> Enum.reject(&MapSet.member?(tracked, &1.dir))
+          |> Enum.reduce(state, &finish_retirement(&2, &1.dir))
 
         stored
         |> Enum.reject(
@@ -690,6 +696,13 @@ defmodule MingaAgent.StagedDraftKeeper do
 
         {[], state}
     end
+  end
+
+  @spec tracked_dirs(state()) :: MapSet.t(String.t())
+  defp tracked_dirs(state) do
+    MapSet.new(state.tracked, fn {view_id, %{view: %ProjectView{project_root: root}}} ->
+      StagedDrafts.view_dir(root, view_id, state.store_opts)
+    end)
   end
 
   # A deletion that is already pending waits for its retry timer.

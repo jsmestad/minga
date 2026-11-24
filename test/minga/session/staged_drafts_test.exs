@@ -158,17 +158,21 @@ defmodule Minga.Session.StagedDraftsTest do
       assert File.ls!(Path.dirname(dir)) == [Path.basename(dir)]
     end
 
-    test "a view whose deletion fails loads none of its drafts", %{opts: opts, root: root} do
+    test "a view whose deletion fails loads as retired, with none of its drafts", %{
+      opts: opts,
+      root: root
+    } do
       :ok = StagedDrafts.write(root, "v", 1, StagedDraft.new("a", "", "x"), opts)
       dir = StagedDrafts.view_dir(root, "v", opts)
       File.chmod!(dir, 0o500)
       on_exit(fn -> File.chmod(dir, 0o700) end)
 
       assert {:error, _reason} = StagedDrafts.delete_view(root, "v", opts)
-      assert load!(root, opts) == []
+      assert [%{dir: ^dir, retired: true, entries: []}] = load!(root, opts)
 
       File.chmod!(dir, 0o700)
-      assert StagedDrafts.delete_view(root, "v", opts) == :ok
+      assert StagedDrafts.retire_view_dir(dir) == :ok
+      assert load!(root, opts) == []
       assert File.ls!(Path.dirname(dir)) == []
     end
 
