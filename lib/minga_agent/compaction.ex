@@ -11,14 +11,11 @@ defmodule MingaAgent.Compaction do
   - A tool exchange: an assistant message with `tool_calls` plus all matching
     tool-result messages.
 
-  Two compaction strategies are available based on route policy:
-
-  - **Native** (`:native` policy): delegates to `ReqLLM.compact_context/3`.
-    The provider endpoint's output is authoritative; the returned messages
-    replace the conversation verbatim.
-  - **Portable summary** (`:unsupported` policy or native fallback): generates
-    a summary via LLM that preserves tool arguments, results, decisions, and
-    obligations.
+  Every route compacts with a portable summary: an LLM call, made through the
+  route's bound credentials, that preserves tool arguments, results, decisions,
+  and obligations while keeping the system messages. Provider-native compaction
+  endpoints are not used until they can bind route credentials and retain the
+  system prompt.
 
   Compaction is a version-checked durable Session transition. The provider's
   `compact/2` callback returns new messages; Session installs them via
