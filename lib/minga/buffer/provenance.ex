@@ -377,6 +377,49 @@ defmodule Minga.Buffer.Provenance do
   defp overlap_name(%Group{author: :you}), do: :you
   defp overlap_name(%Group{key: key}), do: key
 
+  @doc "Returns the keys of the Minga groups whose text group `id` deleted, each once."
+  @spec deleted_writers(t(), group_id()) :: [group_key()]
+  def deleted_writers(%__MODULE__{groups: groups, tree: tree}, id) do
+    groups
+    |> Map.fetch!(id)
+    |> Map.fetch!(:runs)
+    |> :gb_sets.to_list()
+    |> Enum.flat_map(fn run_id ->
+      {:ok, run, _offset} = RunTree.fetch(tree, run_id)
+      deleted_writer_key(groups, run, id)
+    end)
+    |> Enum.uniq()
+  end
+
+  @spec deleted_writer_key(%{group_id() => Group.t()}, Run.t(), group_id()) :: [group_key()]
+  defp deleted_writer_key(groups, %Run{group: writer} = run, id)
+       when writer != nil and writer != id do
+    if id in run.deletions, do: List.wrap(Map.fetch!(groups, writer).key), else: []
+  end
+
+  defp deleted_writer_key(_groups, _base_or_own, _id), do: []
+
+  @doc """
+  Returns whether reverting the groups in `reverted` (which hold `id`) would bring back text `id` deleted: a tombstone `id` made that no other applied group outside them deletes and whose writer stays applied.
+  """
+  @spec revives_deleted?(t(), group_id(), [group_id()]) :: boolean()
+  def revives_deleted?(%__MODULE__{groups: groups, tree: tree}, id, reverted)
+      when is_list(reverted) do
+    reverted = MapSet.new(reverted)
+    applied? = &(Map.fetch!(groups, &1).applied and not MapSet.member?(reverted, &1))
+
+    groups
+    |> Map.fetch!(id)
+    |> Map.fetch!(:runs)
+    |> :gb_sets.to_list()
+    |> Enum.any?(fn run_id ->
+      {:ok, run, _offset} = RunTree.fetch(tree, run_id)
+
+      run.group != id and id in run.deletions and (run.group == nil or applied?.(run.group)) and
+        not Enum.any?(run.deletions, applied?)
+    end)
+  end
+
   @doc "Returns how many bytes of the group's own text are live."
   @spec live_bytes_of(t(), group_id()) :: non_neg_integer()
   def live_bytes_of(%__MODULE__{groups: groups, tree: tree}, id) do
@@ -436,14 +479,15 @@ defmodule Minga.Buffer.Provenance do
     else
       {old, draft_id} = :gb_sets.smallest(prov.drafts)
       {:ok, draft, _offset} = RunTree.fetch(prov.tree, draft_id)
-      author = Map.fetch!(prov.groups, old).author
+      new = draft_partner(draft, prov.groups)
 
-      new =
-        draft.deletions
-        |> Enum.filter(&(&1 > old and newer_step?(Map.fetch!(prov.groups, &1), author)))
-        |> Enum.min()
+      {first, last} =
+        RunTree.stretch(
+          prov.tree,
+          draft_id,
+          &(names?(&1, old, new) and merge_safe?(&1, old, new))
+        )
 
-      {first, last} = RunTree.stretch(prov.tree, draft_id, &names?(&1, old, new))
       {prov, examined} = absorb_stretch(prov, old, new, first, last)
       {:ok, prov, old, examined}
     end
@@ -487,19 +531,19 @@ defmodule Minga.Buffer.Provenance do
         |> Enum.reduce(groups, &remove_run(&2, &1, run.id))
       end)
 
-    # A stretch is small next to its groups, so their run sets change one locator at a time, O(m log k).
     groups =
       groups
-      |> Map.update!(old, fn group ->
-        %{group | runs: Enum.reduce(named_old, group.runs, &:gb_sets.delete_any/2)}
-      end)
+      |> Map.update!(old, &%{&1 | runs: remove_all(&1.runs, named_old)})
       |> Map.update!(new, fn group ->
-        runs = Enum.reduce(dropped, group.runs, &:gb_sets.delete_any(&1.id, &2))
-        %{group | runs: Enum.reduce(named_new, runs, &:gb_sets.add/2)}
+        runs = remove_all(group.runs, Enum.map(dropped, & &1.id))
+        %{group | runs: add_all(runs, named_new)}
       end)
 
-    drafts = Enum.reduce(before, prov.drafts, &:gb_sets.delete_any({&1.group, &1.id}, &2))
-    drafts = Enum.reduce(kept, drafts, &add_draft(&2, draft_key(&1, groups)))
+    drafts =
+      prov.drafts
+      |> remove_all(Enum.map(before, &{&1.group, &1.id}))
+      |> add_all(for run <- kept, key = draft_key(run, groups), do: key)
+
     marked = for run <- kept, Enum.any?(run.overlaps, &match?({_owner, ^new}, &1)), do: run.id
 
     prov = %{
@@ -513,10 +557,21 @@ defmodule Minga.Buffer.Provenance do
     {remove_when_empty(prov, old, new), length(before)}
   end
 
-  @spec add_draft(:gb_sets.set({group_id(), Locator.t()}), {group_id(), Locator.t()} | nil) ::
-          :gb_sets.set({group_id(), Locator.t()})
-  defp add_draft(drafts, nil), do: drafts
-  defp add_draft(drafts, key), do: :gb_sets.add(key, drafts)
+  # A small change to a large set goes one element at a time, O(m log k); a change about the size of the set rebuilds
+  # it, O(m + k). Either way a stretch costs what it touches.
+  @spec remove_all(:gb_sets.set(term()), [term()]) :: :gb_sets.set(term())
+  defp remove_all(set, items) do
+    if length(items) * 8 > :gb_sets.size(set),
+      do: :gb_sets.subtract(set, :gb_sets.from_list(items)),
+      else: Enum.reduce(items, set, &:gb_sets.delete_any/2)
+  end
+
+  @spec add_all(:gb_sets.set(term()), [term()]) :: :gb_sets.set(term())
+  defp add_all(set, items) do
+    if length(items) * 8 > :gb_sets.size(set),
+      do: :gb_sets.union(set, :gb_sets.from_list(items)),
+      else: Enum.reduce(items, set, &:gb_sets.add/2)
+  end
 
   @spec names?(Run.t(), group_id(), group_id()) :: boolean()
   defp names?(run, old, new),
@@ -1771,20 +1826,42 @@ defmodule Minga.Buffer.Provenance do
   # Agent edits without a task are bounded by their own cap and are never drafts.
   @spec draft_key(Run.t(), %{group_id() => Group.t()}) :: {group_id(), Locator.t()} | nil
   defp draft_key(%Run{live: false, group: owner} = run, groups) when owner != nil do
+    case draft_partner(run, groups) do
+      nil -> nil
+      new -> if merge_safe?(run, owner, new), do: {owner, run.id}
+    end
+  end
+
+  defp draft_key(_run, _groups), do: nil
+
+  # The step a draft would merge into: the oldest newer applied step of the same task that deleted it, or `nil`.
+  @spec draft_partner(Run.t(), %{group_id() => Group.t()}) :: group_id() | nil
+  defp draft_partner(%Run{live: false, group: owner} = run, groups) when owner != nil do
     case Map.fetch!(groups, owner) do
       %Group{applied: true, author: {:minga, task} = author} when task != :untasked ->
-        if Enum.any?(
-             run.deletions,
-             &(&1 > owner and newer_step?(Map.fetch!(groups, &1), author))
-           ),
-           do: {owner, run.id}
+        run.deletions
+        |> Enum.filter(&(&1 > owner and newer_step?(Map.fetch!(groups, &1), author)))
+        |> Enum.min(fn -> nil end)
 
       _other ->
         nil
     end
   end
 
-  defp draft_key(_run, _groups), do: nil
+  defp draft_partner(_run, _groups), do: nil
+
+  # Merging `old` into `new` keeps every blocker only where no other group touched the run between them: in the order
+  # its writer and deleters came, `old` and `new` are next to each other, or not both there.
+  @spec merge_safe?(Run.t(), group_id(), group_id()) :: boolean()
+  defp merge_safe?(run, old, new) do
+    order = [run.group | Enum.reverse(run.deletions)]
+
+    case {Enum.find_index(order, &(&1 == old)), Enum.find_index(order, &(&1 == new))} do
+      {nil, _new} -> true
+      {_old, nil} -> true
+      {old_at, new_at} -> abs(old_at - new_at) == 1
+    end
+  end
 
   @spec newer_step?(Group.t(), author()) :: boolean()
   defp newer_step?(%Group{applied: true, author: author}, author), do: true

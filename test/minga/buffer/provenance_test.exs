@@ -304,7 +304,7 @@ defmodule Minga.Buffer.ProvenanceTest do
         initial = {Provenance.new(byte_size(original)), ProvenanceModel.new(original), original}
 
         {prov, model, text} =
-          Enum.reduce(commands, initial, fn {kind, ca, cb, cc, ins} = command, state ->
+          Enum.reduce(commands, initial, fn {kind, ca, cb, cc, ins}, state ->
             next =
               if rem(kind, 3) == 0,
                 do: batch_edit(state, ca, cb, cc, ins),
@@ -725,15 +725,35 @@ defmodule Minga.Buffer.ProvenanceTest do
     assert balanced?(prov, length(runs))
   end
 
+  # A draft: a dead run of an applied Minga step that an applied newer step of its task deleted, where merging the two
+  # skips no other group in the run's history.
   defp draft?(run, groups) do
     owner = run.group && groups[run.group]
 
-    owner != nil and not run.live and owner.applied and
-      match?({:minga, task} when task != :untasked, owner.author) and
-      Enum.any?(
-        run.deletions,
-        &(&1 > run.group and groups[&1].applied and groups[&1].author == owner.author)
-      )
+    partners =
+      if owner != nil and not run.live and owner.applied and
+           match?({:minga, task} when task != :untasked, owner.author),
+         do:
+           for(
+             d <- run.deletions,
+             d > run.group,
+             groups[d].applied,
+             groups[d].author == owner.author,
+             do: d
+           ),
+         else: []
+
+    case partners do
+      [] ->
+        false
+
+      _some ->
+        order = [run.group | Enum.reverse(run.deletions)]
+        new = Enum.min(partners)
+
+        abs(Enum.find_index(order, &(&1 == run.group)) - Enum.find_index(order, &(&1 == new))) ==
+          1
+    end
   end
 
   defp ids_sorted?(ids), do: ids == Enum.sort(ids) and ids == Enum.uniq(ids)

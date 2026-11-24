@@ -36,6 +36,14 @@ defmodule Minga.Buffer.HistoryPerfTest do
     {micros / 1000, value}
   end
 
+  # Compaction runs in slices between messages; wait until the buffer has no slice left to run.
+  defp settled(buffer) do
+    case :sys.get_state(buffer) do
+      %{compaction_scheduled: true} -> settled(buffer)
+      _idle -> buffer
+    end
+  end
+
   defp runs(buffer) do
     %{undo_history: history} = :sys.get_state(buffer)
     history |> UndoHistory.provenance() |> Provenance.run_count()
@@ -54,7 +62,7 @@ defmodule Minga.Buffer.HistoryPerfTest do
         time
       end
 
-    :sys.get_state(buffer)
+    settled(buffer)
     assert runs(buffer) <= 25_000
 
     :ok = BufferProcess.move_to(buffer, {6000, 10})
@@ -88,7 +96,8 @@ defmodule Minga.Buffer.HistoryPerfTest do
             EditSource.minga("t", "s#{round}")
           )
 
-    :sys.get_state(buffer)
+    settled(buffer)
+    :erlang.garbage_collect(buffer)
     :ok = BufferProcess.move_to(buffer, {6000, 10})
     {first_key, :ok} = ms(fn -> BufferProcess.insert_text(buffer, "h") end)
     IO.puts("\n[perf10] first_key_ms=#{first_key}")

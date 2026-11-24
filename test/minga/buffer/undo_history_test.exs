@@ -466,6 +466,74 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert UndoHistory.next_reject(world.history) == nil
     end
 
+    # Review findings on round 4, as regressions.
+    test "compaction never lets through a reject a third group's deletion between the merged steps blocks" do
+      commands = [
+        {:user, 0, 3, "a", 0},
+        {:minga, 305, 2, "\naca", 0},
+        {:minga, 822, 2, "cb", 1},
+        {:minga, 643, 1, "\nc", 2},
+        {:minga, 995, 3, "", 2},
+        {:user, 990, 3, "abbc", 2},
+        {:minga, 651, 2, "a", 2},
+        {:minga, 74, 1, "", 1},
+        {:minga, 475, 1, "", 0},
+        {:agent, 618, 1, "ac", 2}
+      ]
+
+      plain = Enum.reduce(commands, world("abc\ndef\n", run_budget: 20), &run/2)
+      compacted = plain |> want_compaction() |> compact_fully(19)
+      assert reject_text(compacted, {:minga, "task-0"}) == reject_text(plain, {:minga, "task-0"})
+    end
+
+    test "a permanent mark holds the task it marks without crashing SPC a u" do
+      world = world("foo bar\n", recording: :coarse) |> edit(@step_one, 0, 7, "FOO BAR")
+      world = edit(world, :agent, 0, 2, "q")
+
+      world =
+        Enum.reduce(1..1000, world, fn n, world ->
+          edit(world, :agent, byte_size(text(world)), 0, "x", at: @t0 + n)
+        end)
+
+      assert {:ok, _restore, _history, _count, [{:minga, :untasked}], []} =
+               UndoHistory.undo_agent_session(world.history, world.version, world.doc)
+
+      world = reject_newest_task(world)
+
+      assert {:blocked, {:overlaps, :you}, {:minga, "task-1"}, _offset} =
+               UndoHistory.undo_agent_session(world.history, world.version, world.doc)
+    end
+
+    test "SPC a u never brings back text you deleted outside the task's change" do
+      world = world("aaa bbb\nccc\n") |> edit(@step_one, 0, 3, "XYZ")
+
+      patches = [
+        UndoPatch.replacement(8, "ccc", "", {0, 0}),
+        UndoPatch.replacement(1, "Y", "Q", {0, 0})
+      ]
+
+      history = UndoHistory.record_edit_batch(world.history, world.version, patches, :lsp, @t0)
+      {:ok, doc} = Document.splice_byte_range(world.doc, 1, 1, "Q", {0, 0})
+      {:ok, doc} = Document.splice_byte_range(doc, 8, 3, "", {0, 0})
+      world = %{world | history: history, doc: doc, version: world.version + 1}
+      world = edit(world, @step_two, 1, 1, "W")
+      assert text(world) == "XWZ bbb\n\n"
+
+      assert {:blocked, {:overlaps, :you}, {:minga, "task-1"}, _offset} =
+               UndoHistory.undo_agent_session(world.history, world.version, world.doc)
+    end
+
+    test "a held task names the line of the permanent edit that holds it" do
+      world = world("l1\nl2\nfoo bar\n", recording: :coarse) |> edit(@step_one, 6, 7, "FOO BAR")
+      world = edit(world, :user, 7, 2, "")
+      history = UndoHistory.reload(world.history, world.doc, world.doc)
+
+      assert {:blocked, {:overlaps, :you}, {:minga, "task-1"}, offset} =
+               UndoHistory.undo_agent_session(history, world.version, world.doc)
+
+      assert offset >= 6
+    end
+
     test "undo_agent_session is :empty without Minga steps" do
       assert UndoHistory.undo_agent_session(UndoHistory.new(), 0, Document.new("")) == :empty
     end
@@ -885,7 +953,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
     %{world | history: %{history | compaction_wanted: true}}
   end
 
-  # Outcomes as far as compaction promises: a block names the same task, though maybe the step that absorbed another.
+  # Outcomes as far as compaction promises: the same text, or a refusal.
   defp outcome({:ok, world, _restore}), do: {:ok, text(world)}
   defp outcome(other), do: blocked_task(other)
 
@@ -896,12 +964,9 @@ defmodule Minga.Buffer.UndoHistoryTest do
     end
   end
 
-  defp blocked_task({:blocked, {:overlaps, :you}}), do: {:blocked, :you}
-  defp blocked_task({:blocked, {:overlaps, key}}), do: {:blocked, task_of(key)}
+  # A refusal stays a refusal; compaction may change which step or group it names first.
+  defp blocked_task({:blocked, {:overlaps, _key}}), do: :blocked
   defp blocked_task(other), do: other
-
-  defp task_of({:untasked, _n}), do: {:minga, :untasked}
-  defp task_of({:minga, task, _step}), do: {:minga, task}
 
   # Runs compaction slices until the history says it is done, checking P6 at the end.
   defp compact_fully(world, slice) do

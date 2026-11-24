@@ -150,11 +150,34 @@ defmodule Minga.Test.ProvenanceModel do
   end
 
   defp draft?(model, entry) do
+    case partner(model, entry) do
+      nil -> false
+      new -> merge_safe?(entry, entry.group, new)
+    end
+  end
+
+  # The oldest newer applied step of the same task that deleted a dead byte of an applied Minga step.
+  defp partner(model, entry) do
     owner = entry.group && Map.fetch!(model.groups, entry.group)
 
-    owner != nil and owner.applied and match?({:minga, task} when task != :untasked, owner.author) and
-      not live?(model, entry) and
-      Enum.any?(entry.deletions, &(&1 > entry.group and newer?(model, &1, owner.author)))
+    if owner != nil and owner.applied and
+         match?({:minga, task} when task != :untasked, owner.author) and
+         not live?(model, entry) do
+      entry.deletions
+      |> Enum.filter(&(&1 > entry.group and newer?(model, &1, owner.author)))
+      |> Enum.min(fn -> nil end)
+    end
+  end
+
+  # Old and new are next to each other in the order the byte's writer and deleters came, or not both there.
+  defp merge_safe?(entry, old, new) do
+    order = [entry.group | Enum.reverse(entry.deletions)]
+
+    case {Enum.find_index(order, &(&1 == old)), Enum.find_index(order, &(&1 == new))} do
+      {nil, _new} -> true
+      {_old, nil} -> true
+      {old_at, new_at} -> abs(old_at - new_at) == 1
+    end
   end
 
   defp newer?(model, id, author) do
@@ -173,12 +196,12 @@ defmodule Minga.Test.ProvenanceModel do
 
       {old, index} ->
         draft = Enum.at(model.entries, index)
-        author = Map.fetch!(model.groups, old).author
+        new = partner(model, draft)
 
-        new =
-          draft.deletions |> Enum.filter(&(&1 > old and newer?(model, &1, author))) |> Enum.min()
+        names? =
+          &((&1.group in [old, new] or old in &1.deletions or new in &1.deletions) and
+              merge_safe?(&1, old, new))
 
-        names? = &(&1.group in [old, new] or old in &1.deletions or new in &1.deletions)
         indexed = Enum.with_index(model.entries)
 
         before =

@@ -2,7 +2,7 @@ defmodule Minga.Test.UndoUnitModel do
   @moduledoc """
   A brute-force reference for which Minga tasks `SPC a u` may revert together.
 
-  It enumerates sets of tasks and of your groups and keeps the minimal sets whose combined revert is exact, straight from the definition, without the dependency graph or Tarjan's algorithm that `Minga.Buffer.UndoHistory` uses. A set is exact when it holds a task and, for every task in it, every newer task that rewrote that task's text and every group that partly deleted one of its replacements is in the set too, and no permanent edit of yours did. A group of yours may join only when a task in the set rewrote its text after it, which blocks your undo of it, and none of its own text is still visible. The facts it reads (deleters, overlap marks, liveness) come from the runs directly.
+  It enumerates sets of tasks and of your groups and keeps the minimal sets whose combined revert is exact, straight from the definition, without the dependency graph or Tarjan's algorithm that `Minga.Buffer.UndoHistory` uses. A set is exact when it holds a task and, for every task in it, every newer task that rewrote that task's text and every group that partly deleted one of its replacements is in the set too, and no permanent edit of yours did. A group of yours may join only when a task in the set rewrote its text after it, which blocks your undo of it, none of its own text is still visible, the tasks whose text it deleted are in the set too, and its revert brings back no other text it deleted. The facts it reads (deleters, overlap marks, liveness) come from the runs directly.
   """
 
   alias Minga.Buffer.Author
@@ -106,8 +106,9 @@ defmodule Minga.Test.UndoUnitModel do
         {:you, group} ->
           rewriters = rewriter_tasks(facts, group, fn _task -> true end)
 
-          own_live_bytes(facts, group) == 0 and Enum.any?(rewriters, &(&1 in set)) and
-            Enum.all?(rewriters, &(&1 in set))
+          own_live_bytes(facts, group) == 0 and not revives?(facts, group, reverted) and
+            Enum.any?(rewriters, &(&1 in set)) and Enum.all?(rewriters, &(&1 in set)) and
+            Enum.all?(deleted_writer_tasks(facts, group), &(&1 in set))
 
         task ->
           start = Map.fetch!(facts.starts, task)
@@ -151,8 +152,8 @@ defmodule Minga.Test.UndoUnitModel do
         do: node
   end
 
-  defp overlap_node(_facts, {:permanent, :you}, _reverted), do: :permanent_you
-  defp overlap_node(_facts, {:permanent, key}, _reverted), do: task_of(key)
+  # A permanent mark holds for good, whoever made it.
+  defp overlap_node(_facts, {:permanent, _key}, _reverted), do: :permanent_you
 
   defp overlap_node(facts, id, reverted) do
     group = Map.fetch!(facts.groups, id)
@@ -163,6 +164,26 @@ defmodule Minga.Test.UndoUnitModel do
       group.author == :you -> {:you, id}
       true -> task_of(group.key)
     end
+  end
+
+  # The tasks whose text this group deleted: reverting the group brings that text back unless they revert too.
+  defp deleted_writer_tasks(facts, group) do
+    for run <- facts.runs,
+        run.group != nil and run.group != group,
+        group in run.deletions,
+        key = Map.fetch!(facts.groups, run.group).key,
+        uniq: true,
+        do: task_of(key)
+  end
+
+  # Reverting the set would make live a tombstone this group made that nothing outside the set keeps deleted.
+  defp revives?(facts, group, reverted) do
+    applied? = &(Map.fetch!(facts.groups, &1).applied and not MapSet.member?(reverted, &1))
+
+    Enum.any?(facts.runs, fn run ->
+      run.group != group and group in run.deletions and (run.group == nil or applied?.(run.group)) and
+        not Enum.any?(run.deletions, applied?)
+    end)
   end
 
   defp own_live_bytes(facts, group) do

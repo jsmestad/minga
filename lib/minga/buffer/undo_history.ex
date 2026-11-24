@@ -284,6 +284,13 @@ defmodule Minga.Buffer.UndoHistory do
       Provenance.dead_bytes(history.provenance) > @dead_text_budget
   end
 
+  # Compaction stops at three quarters of both budgets, so the next steps do not ask for it again at once.
+  @spec under_target?(t()) :: boolean()
+  defp under_target?(history) do
+    Provenance.run_count(history.provenance) <= div(history.run_budget * 3, 4) and
+      Provenance.dead_bytes(history.provenance) <= div(@dead_text_budget * 3, 4)
+  end
+
   @doc "Returns whether a Minga step left the history over its run budget, so the owner should run `compact_slice/2`."
   @spec compaction_wanted?(t()) :: boolean()
   def compaction_wanted?(%__MODULE__{compaction_wanted: wanted}), do: wanted
@@ -298,8 +305,7 @@ defmodule Minga.Buffer.UndoHistory do
   @spec compact_slice(t(), pos_integer()) :: {:more | :done | :over_budget, t(), slice()}
   def compact_slice(%__MODULE__{} = history, max_runs)
       when is_integer(max_runs) and max_runs > 0 do
-    target = div(history.run_budget * 3, 4)
-    {history, examined, merged} = compact_until(history, target, max_runs, 0, 0)
+    {history, examined, merged} = compact_until(history, max_runs, 0, 0)
     provenance = history.provenance
 
     slice = %{
@@ -310,7 +316,7 @@ defmodule Minga.Buffer.UndoHistory do
     }
 
     cond do
-      Provenance.run_count(provenance) > target and slice.drafts > 0 ->
+      not under_target?(history) and slice.drafts > 0 ->
         {:more, history, slice}
 
       over_budget?(history) and not history.over_budget_reported ->
@@ -321,10 +327,10 @@ defmodule Minga.Buffer.UndoHistory do
     end
   end
 
-  @spec compact_until(t(), non_neg_integer(), pos_integer(), non_neg_integer(), non_neg_integer()) ::
+  @spec compact_until(t(), pos_integer(), non_neg_integer(), non_neg_integer()) ::
           {t(), non_neg_integer(), non_neg_integer()}
-  defp compact_until(history, target, max_runs, examined, merged) do
-    if examined >= max_runs or Provenance.run_count(history.provenance) <= target do
+  defp compact_until(history, max_runs, examined, merged) do
+    if examined >= max_runs or under_target?(history) do
       {history, examined, merged}
     else
       case Provenance.compact_oldest(history.provenance) do
@@ -333,7 +339,7 @@ defmodule Minga.Buffer.UndoHistory do
 
         {:ok, provenance, old, runs} ->
           history = forget_empty_step(history, old, provenance)
-          compact_until(history, target, max_runs, examined + runs, merged + 1)
+          compact_until(history, max_runs, examined + runs, merged + 1)
       end
     end
   end
@@ -478,34 +484,44 @@ defmodule Minga.Buffer.UndoHistory do
     |> Enum.reduce_while(nil, fn {task, _tick}, held ->
       unit = sink_component(task, edges)
 
-      case held_by(history, steps, unit) do
+      case held_by(history, steps, unit, task) do
         nil -> {:halt, {:unit, unit}}
         offset -> {:cont, held || {:held, task, offset}}
       end
     end)
   end
 
-  # Where your edit holds a sink: the sink has no task, or holds a permanent edit of yours or one with visible text.
-  @spec held_by(t(), %{task() => [Provenance.group_id()]}, [node_id(), ...]) ::
+  # Where an edit holds a sink: the sink has no task, holds a permanent edit, or holds a group of yours with visible
+  # text or whose revert would bring back text it deleted that the unit does not remove anyway.
+  @spec held_by(t(), %{task() => [Provenance.group_id()]}, [node_id(), ...], task()) ::
           non_neg_integer() | nil
-  defp held_by(history, steps, unit) do
+  defp held_by(history, steps, unit, root) do
     yours = for {:you, group} <- unit, do: group
+    provenance = history.provenance
 
     cond do
       :permanent in yours ->
-        permanent_offset(
-          history.provenance,
-          Enum.flat_map(unit_tasks(unit), &Map.fetch!(steps, &1))
-        )
+        permanent_offset(provenance, Map.fetch!(steps, root))
 
       unit_tasks(unit) == [] ->
-        group_offset(history.provenance, hd(yours))
+        group_offset(provenance, hd(yours))
 
       true ->
+        reverted = Enum.flat_map(unit_tasks(unit), &Map.fetch!(steps, &1)) ++ yours
+
         yours
-        |> Enum.find(&(Provenance.live_bytes_of(history.provenance, &1) > 0))
-        |> visible_offset(history.provenance)
+        |> Enum.find(&holds?(provenance, &1, reverted))
+        |> visible_offset(provenance)
     end
+  end
+
+  # A group of yours joins a revert only when Minga rewrote all of its text, so you cannot undo it yourself, and
+  # reverting it brings back nothing else it deleted.
+  @spec holds?(Provenance.t(), Provenance.group_id(), [Provenance.group_id()]) :: boolean()
+  defp holds?(provenance, group, reverted) do
+    Provenance.live_bytes_of(provenance, group) > 0 or
+      rewriters(provenance, group, fn _key -> true end, []) == [] or
+      Provenance.revives_deleted?(provenance, group, reverted)
   end
 
   @spec visible_offset(Provenance.group_id() | nil, Provenance.t()) :: non_neg_integer() | nil
@@ -517,7 +533,7 @@ defmodule Minga.Buffer.UndoHistory do
     provenance
     |> Provenance.overlapping_groups(groups)
     |> Enum.find_value(0, fn
-      {{:permanent, :you}, offset} -> offset
+      {{:permanent, _key}, offset} -> offset
       _other -> nil
     end)
   end
@@ -537,7 +553,8 @@ defmodule Minga.Buffer.UndoHistory do
   end
 
   # A task depends on newer tasks that rewrote its text and on whatever partly deleted its replacements. Your group
-  # depends on the tasks that rewrote its text after it. A permanent edit of yours depends on nothing.
+  # depends on the tasks that rewrote its text after it and on the tasks whose text it deleted. A permanent edit
+  # depends on nothing.
   @spec dependencies(
           t(),
           %{task() => Provenance.group_id()},
@@ -546,8 +563,14 @@ defmodule Minga.Buffer.UndoHistory do
         ) :: [node_id()]
   defp dependencies(_history, _starts, _steps, {:you, :permanent}), do: []
 
-  defp dependencies(history, _starts, _steps, {:you, group}),
-    do: history.provenance |> rewriters(group, fn _key -> true end, []) |> Enum.sort()
+  defp dependencies(history, _starts, _steps, {:you, group}) do
+    # Reverting your group brings back Minga text it deleted, so that text's task reverts with it.
+    writers = for key <- Provenance.deleted_writers(history.provenance, group), do: task_of(key)
+
+    (rewriters(history.provenance, group, fn _key -> true end, []) ++ writers)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
 
   defp dependencies(history, starts, steps, task) do
     groups = Map.fetch!(steps, task)
@@ -563,8 +586,8 @@ defmodule Minga.Buffer.UndoHistory do
   end
 
   @spec overlap_node(Provenance.t(), Provenance.group_id() | {:permanent, term()}) :: node_id()
-  defp overlap_node(_provenance, {:permanent, :you}), do: {:you, :permanent}
-  defp overlap_node(_provenance, {:permanent, key}), do: task_of(key)
+  # A permanent mark holds for good, whoever made it: the group behind it is gone and can never be reverted.
+  defp overlap_node(_provenance, {:permanent, _key}), do: {:you, :permanent}
 
   defp overlap_node(provenance, group) do
     case Provenance.group_key(provenance, group) do
