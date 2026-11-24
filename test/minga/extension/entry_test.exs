@@ -157,6 +157,36 @@ defmodule Minga.Extension.EntryTest do
     end
   end
 
+  describe "root/1" do
+    # A compiled path or Git extension runs a module whose BEAM file lives in the compile cache.
+    # The root must still be the source directory, because manifest paths are relative to it.
+    @compiled_module Minga.Extension.Entry
+
+    test "every source variant resolves its own root, not the loaded module's BEAM directory" do
+      checkout = Path.join(System.tmp_dir!(), "minga_root_checkout")
+
+      module_app_dir =
+        @compiled_module |> :code.which() |> to_string() |> Path.dirname() |> Path.dirname()
+
+      cases = [
+        {"path", Entry.from_path("~/code/my_ext", []), Path.expand("~/code/my_ext")},
+        {"relative path", Entry.from_path("exts/my_ext", []), Path.expand("exts/my_ext")},
+        {"resolved git",
+         Entry.from_git("https://example.com/repo", []) |> Entry.resolve_git_path(checkout),
+         checkout},
+        {"unresolved git", Entry.from_git("https://example.com/repo", []), nil},
+        {"hex", Entry.from_hex("elixir", :elixir, []), to_string(:code.lib_dir(:elixir))},
+        {"unknown hex app", Entry.from_hex("pkg", :minga_entry_root_missing_app, []), nil},
+        {"module", Entry.from_module(@compiled_module, []), module_app_dir}
+      ]
+
+      for {label, entry, expected} <- cases do
+        loaded = %{entry | module: @compiled_module}
+        assert Entry.root(loaded) == expected, "#{label} root"
+      end
+    end
+  end
+
   describe "git_opts/1" do
     test "returns git options for git entries" do
       entry = Entry.from_git("https://example.com/repo", branch: "main")

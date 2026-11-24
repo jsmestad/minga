@@ -8,6 +8,7 @@ defmodule MingaAgent.Skills.Registry do
   use GenServer
 
   alias Minga.Extension.ContributionCleanup
+  alias Minga.Extension.Entry
   alias Minga.Extension.Manifest
 
   @typedoc "Source that contributed skill paths."
@@ -128,7 +129,7 @@ defmodule MingaAgent.Skills.Registry do
         replace_source(
           acc,
           source,
-          normalize_paths(source, entry.manifest.skills, extension_root(entry))
+          normalize_paths(source, entry.manifest.skills, Entry.root(entry))
         )
       end)
     else
@@ -167,23 +168,4 @@ defmodule MingaAgent.Skills.Registry do
     |> Enum.reject(&(&1.source == source))
     |> Kernel.++(entries)
   end
-
-  @spec extension_root(map()) :: String.t() | nil
-  defp extension_root(%{path: path}) when is_binary(path), do: path
-
-  defp extension_root(%{hex: %{app: app}}) when is_atom(app) do
-    case :code.lib_dir(app) do
-      path when is_list(path) -> List.to_string(path)
-      _ -> nil
-    end
-  end
-
-  defp extension_root(%{module: mod}) when is_atom(mod) and not is_nil(mod) do
-    case :code.which(mod) do
-      path when is_list(path) -> path |> List.to_string() |> Path.dirname() |> Path.dirname()
-      _ -> nil
-    end
-  end
-
-  defp extension_root(_entry), do: nil
 end
