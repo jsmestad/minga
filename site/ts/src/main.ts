@@ -10,7 +10,6 @@ import { mountLearnHub } from "./hub_view.ts";
 import { mountRemoteLab } from "./remote_lab.ts";
 import { mountRunbookFilter } from "./runbook_view.ts";
 import { mountSandbox } from "./sandbox_view.ts";
-import { mountCompareLens, mountLayoutComparator } from "./why_interactive.ts";
 
 function init(): void {
   const hub = document.querySelector<HTMLElement>("[data-learn-hub]");
@@ -39,12 +38,6 @@ function init(): void {
 
   const marksTheme = document.querySelector<HTMLElement>("[data-marks-theme-switcher]");
   if (marksTheme) mountMarksThemeSwitcher(marksTheme);
-
-  const layoutComp = document.querySelector<HTMLElement>("[data-layout-comparator]");
-  if (layoutComp) mountLayoutComparator(layoutComp);
-
-  const compareLens = document.querySelector<HTMLElement>("[data-compare-lens]");
-  if (compareLens) mountCompareLens(compareLens);
 
   const archFault = document.querySelector<HTMLElement>("[data-arch-fault-map]");
   if (archFault) mountArchFaultMap(archFault);
