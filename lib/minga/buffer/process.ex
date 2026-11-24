@@ -3614,11 +3614,7 @@ defmodule Minga.Buffer.Process do
       |> Document.new()
       |> Document.move_to(Document.cursor(state.document))
 
-    patches =
-      case UndoPatch.changes(state.document, new_document) do
-        [] -> [UndoPatch.from_documents(state.document, new_document)]
-        changes -> changes
-      end
+    patches = region_patches(state.document, new_document)
 
     apply_operation(
       state,
@@ -3759,13 +3755,11 @@ defmodule Minga.Buffer.Process do
 
   @spec push_undo_full(state(), Document.t(), BufState.edit_source()) :: state()
   defp push_undo_full(state, new_buf, source) do
-    patch = UndoPatch.from_documents(state.document, new_buf)
-
     undo_history =
       UndoHistory.record_edit(
         state.undo_history,
         BufState.version(state),
-        patch,
+        region_patches(state.document, new_buf),
         source,
         now_ms()
       )
@@ -3805,18 +3799,27 @@ defmodule Minga.Buffer.Process do
 
   @spec push_undo_force_full(state(), Document.t(), BufState.edit_source()) :: state()
   defp push_undo_force_full(state, new_buf, source) do
-    patch = UndoPatch.from_documents(state.document, new_buf)
-
     undo_history =
-      UndoHistory.record_edit_force(
+      UndoHistory.record_edit_batch(
         state.undo_history,
         BufState.version(state),
-        patch,
+        region_patches(state.document, new_buf),
         source,
         now_ms()
       )
 
     %{state | document: new_buf, undo_history: undo_history}
+  end
+
+  # A whole-content replacement records one patch per changed region, so the lines it left alone
+  # keep their authors and nobody's text between two changes counts as rewritten. An unchanged
+  # replacement still records one empty patch.
+  @spec region_patches(Document.t(), Document.t()) :: nonempty_list(UndoPatch.t())
+  defp region_patches(old_document, new_document) do
+    case UndoPatch.changes(old_document, new_document) do
+      [] -> [UndoPatch.from_documents(old_document, new_document)]
+      changes -> changes
+    end
   end
 
   @spec line_authors_in(state(), non_neg_integer(), non_neg_integer()) :: [[Provenance.author()]]

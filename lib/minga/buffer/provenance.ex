@@ -139,7 +139,9 @@ defmodule Minga.Buffer.Provenance do
     do: set_applied(prov, id, true, document)
 
   @doc """
-  Returns the key of an applied group that is not yours and later deleted text this group wrote or removed, or `nil`.
+  Returns the key of an applied group that is not yours and deleted text this group wrote or removed after this group did, or `nil`.
+
+  A step that deleted the same text earlier does not block: flipping this group leaves that text deleted by the earlier step either way.
 
   When it returns a key, flipping this group would change text that the other group rewrote, so your undo or redo must not happen.
   """
@@ -149,7 +151,7 @@ defmodule Minga.Buffer.Provenance do
     |> :gb_sets.to_list()
     |> Enum.find_value(fn run_id ->
       {:ok, run, _offset} = RunTree.fetch(tree, run_id)
-      Enum.find_value(run.deletions, &foreign_key(groups, &1, id))
+      run |> later_deleters(id) |> Enum.find_value(&foreign_key(groups, &1, id))
     end)
   end
 
@@ -436,6 +438,12 @@ defmodule Minga.Buffer.Provenance do
   @spec inserted?(%{group_id() => Group.t()}, group_id() | nil) :: boolean()
   defp inserted?(_groups, nil), do: true
   defp inserted?(groups, id), do: Map.fetch!(groups, id).applied
+
+  # Deleters are prepended, so the groups that deleted a run after this group did come before it
+  # in the list. Text this group inserted can only have been deleted later.
+  @spec later_deleters(Run.t(), group_id()) :: [group_id()]
+  defp later_deleters(%Run{group: id, deletions: deletions}, id), do: deletions
+  defp later_deleters(%Run{deletions: deletions}, id), do: Enum.take_while(deletions, &(&1 != id))
 
   @spec foreign_key(%{group_id() => Group.t()}, group_id(), group_id()) :: group_key() | nil
   defp foreign_key(_groups, id, id), do: nil

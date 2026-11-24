@@ -101,18 +101,21 @@ defmodule Minga.Test.ProvenanceModel do
   @spec authors(t()) :: [Provenance.author()]
   def authors(model), do: Enum.map(live_entries(model), & &1.author)
 
-  @doc "Returns the keys of every applied group not authored by you that deleted text this group wrote or removed."
+  @doc "Returns the keys of every applied group not authored by you that deleted text this group wrote or removed, after this group did."
   @spec blockers(t(), pos_integer()) :: MapSet.t()
   def blockers(model, id) do
     for entry <- model.entries,
         entry.group == id or id in entry.deletions,
-        deleter <- entry.deletions,
-        deleter != id,
+        deleter <- later_deleters(entry, id),
         group = Map.fetch!(model.groups, deleter),
         group.applied and group.author != :you,
         into: MapSet.new(),
         do: group.key
   end
+
+  # Deletions are prepended, so the groups that deleted an entry after `id` did come before it.
+  defp later_deleters(%{group: id, deletions: deletions}, id), do: deletions
+  defp later_deleters(entry, id), do: Enum.take_while(entry.deletions, &(&1 != id))
 
   @spec mark(entry(), pos_integer() | :untracked) :: [entry()]
   defp mark(_entry, :untracked), do: []

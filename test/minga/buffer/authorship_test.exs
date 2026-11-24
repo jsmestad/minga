@@ -80,6 +80,26 @@ defmodule Minga.Buffer.AuthorshipTest do
     assert BufferProcess.content(buffer) == "and you "
   end
 
+  test "rejecting Minga's edit on a clean buffer leaves it clean" do
+    buffer = start("saved\n")
+    minga_replace(buffer, "saved\nminga\n")
+    assert BufferProcess.dirty?(buffer)
+
+    assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+    assert BufferProcess.content(buffer) == "saved\n"
+    refute BufferProcess.dirty?(buffer)
+  end
+
+  test "your whole-buffer replacement keeps the authors of lines it left alone" do
+    buffer = start("foo\nline\nfoo\n")
+    minga_replace(buffer, "foo\nAGENT\nfoo\n")
+    assert :ok = BufferProcess.replace_content(buffer, "bar\nAGENT\nbar\n")
+
+    assert BufferProcess.line_authors(buffer, 0, 3) == [[:you], [@task], [:you]]
+    assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+    assert BufferProcess.content(buffer) == "bar\nline\nbar\n"
+  end
+
   test "a blocked undo changes neither the document nor either history" do
     buffer = start("")
     assert :ok = BufferProcess.insert_text(buffer, "hello world")

@@ -48,6 +48,17 @@ defmodule Minga.Buffer.UndoHistory do
   @typedoc "A Minga step and the byte ranges it touched, as `Minga.Buffer.Provenance.regions/2` reports them."
   @type minga_change :: {Author.key(), [Provenance.byte_range()]}
 
+  # The newest stretch of history made only by one task's steps: the version and tick before it,
+  # the tick after it, and whether the task had no remaining steps when it began. Reverting that
+  # task while the history is still at `tick_after` returns exactly to `version`.
+  @typep task_run :: %{
+           task: Author.t() | :agent,
+           version: version(),
+           tick_before: Entry.tick(),
+           tick_after: Entry.tick(),
+           fresh: boolean()
+         }
+
   @typep flip_group ::
            (Provenance.t(), Provenance.group_id(), Document.t() ->
               {:ok, Document.t(), non_neg_integer() | nil, Provenance.t()}
@@ -59,6 +70,7 @@ defmodule Minga.Buffer.UndoHistory do
             redo_entries: [],
             minga: [],
             steps: %{},
+            task_run: nil,
             tick: 0,
             next_tick: 1,
             last_recorded_at: 0
@@ -70,6 +82,7 @@ defmodule Minga.Buffer.UndoHistory do
             redo_entries: [Entry.t()],
             minga: [{Provenance.group_id(), minga_group()}],
             steps: %{Author.key() => Provenance.group_id()},
+            task_run: task_run() | nil,
             tick: Entry.tick(),
             next_tick: Entry.tick(),
             last_recorded_at: integer()
@@ -93,17 +106,20 @@ defmodule Minga.Buffer.UndoHistory do
   def provenance(%__MODULE__{provenance: provenance}), do: provenance
 
   @doc """
-  Records an edit's patch at monotonic time `at`.
+  Records an edit's patch, or the patches of one edit in undo order, at monotonic time `at`.
 
   Your edit joins your newest group when it has the same source, follows it within the coalescing window, and nothing else changed the document since. A Minga step joins its own group.
   """
-  @spec record_edit(t(), version(), UndoPatch.t(), edit_source(), at()) :: t()
-  def record_edit(%__MODULE__{} = history, version, patch, source, at)
+  @spec record_edit(t(), version(), UndoPatch.t() | patches(), edit_source(), at()) :: t()
+  def record_edit(%__MODULE__{} = history, version, [_ | _] = patches, source, at)
       when is_undo_source(source) and is_integer(at) do
     if coalesces?(history, source, at),
-      do: coalesce(history, [patch], at),
-      else: record_edit_batch(history, version, [patch], source, at)
+      do: coalesce(history, patches, at),
+      else: record_edit_batch(history, version, patches, source, at)
   end
+
+  def record_edit(%__MODULE__{} = history, version, patch, source, at),
+    do: record_edit(history, version, [patch], source, at)
 
   @doc """
   Records one group containing all patches of a batch, stamped at monotonic time `at`.
@@ -136,11 +152,18 @@ defmodule Minga.Buffer.UndoHistory do
     })
   end
 
-  def record_edit_batch(%__MODULE__{} = history, _version, [_ | _] = patches, source, at)
+  def record_edit_batch(%__MODULE__{} = history, version, [_ | _] = patches, source, at)
       when is_undo_source(source) and is_integer(at) do
+    task_run = extend_task_run(history, task_of(source), version)
     {group, history} = minga_group(history, source)
     {tick, history} = advance(history)
-    %{history | provenance: replay(history.provenance, group, patches), tick: tick}
+
+    %{
+      history
+      | provenance: replay(history.provenance, group, patches),
+        tick: tick,
+        task_run: %{task_run | tick_after: tick}
+    }
   end
 
   @doc "Records an edit's patch as a group of its own, stamped at monotonic time `at`. Later edits may still coalesce into it."
@@ -211,7 +234,7 @@ defmodule Minga.Buffer.UndoHistory do
   @doc """
   Reverts every remaining step of the task that edited most recently, and forgets those steps.
 
-  Agent edits without a task count as one task. Your text survives, including text you typed inside Minga's. Returns `{:ok, restore, history, reverted_steps}`, or `:empty` when Minga has no remaining steps in this buffer. When the steps' text does not fit `current_document`, returns `{:error, reason}` and the caller keeps its history and document unchanged.
+  Agent edits without a task count as one task. Your text survives, including text you typed inside Minga's. When the task's steps are the newest changes and nothing else changed the document since they began, the restore returns the version from before them, so a buffer that was clean is clean again. Returns `{:ok, restore, history, reverted_steps}`, or `:empty` when Minga has no remaining steps in this buffer. When the steps' text does not fit `current_document`, returns `{:error, reason}` and the caller keeps its history and document unchanged.
   """
   @spec undo_agent_session(t(), version(), Document.t()) ::
           {:ok, Restore.t(), t(), pos_integer()} | :empty | {:error, UndoPatch.apply_error()}
@@ -226,18 +249,19 @@ defmodule Minga.Buffer.UndoHistory do
       provenance =
         Enum.reduce(steps, provenance, fn {group, _key}, acc -> Provenance.discard(acc, group) end)
 
-      {tick, history} = advance(history)
+      {version, tick, history} = settle_task(history, task)
 
       history = %{
         history
         | provenance: provenance,
           minga: others,
           steps: Map.drop(history.steps, Enum.map(steps, &elem(&1, 1))),
-          tick: tick
+          tick: tick,
+          task_run: nil
       }
 
       document = place_cursor(reverted, first, Document.cursor(document))
-      {:ok, Restore.new(:advance, document, :agent), history, length(steps)}
+      {:ok, Restore.new(version, document, :agent), history, length(steps)}
     end
   end
 
@@ -296,6 +320,41 @@ defmodule Minga.Buffer.UndoHistory do
         tick: tick,
         last_recorded_at: at
     }
+  end
+
+  # A task's step continues the newest stretch of its steps when nothing else changed the
+  # document since; otherwise it starts a new stretch at the current version and tick.
+  @spec extend_task_run(t(), Author.t() | :agent, version()) :: task_run()
+  defp extend_task_run(
+         %__MODULE__{task_run: %{task: task, tick_after: tick} = run, tick: tick},
+         task,
+         _version
+       ),
+       do: run
+
+  defp extend_task_run(history, task, version) do
+    %{
+      task: task,
+      version: version,
+      tick_before: history.tick,
+      tick_after: history.tick,
+      fresh: not Enum.any?(history.minga, fn {_group, key} -> task_of(key) == task end)
+    }
+  end
+
+  # A task reverted right after its only stretch of steps returns the document to the version and
+  # tick before that stretch, so a buffer that was clean is clean again.
+  @spec settle_task(t(), Author.t() | :agent) :: {version() | :advance, Entry.tick(), t()}
+  defp settle_task(
+         %__MODULE__{task_run: %{task: task, tick_after: tick, fresh: true} = run, tick: tick} =
+           history,
+         task
+       ),
+       do: {run.version, run.tick_before, history}
+
+  defp settle_task(history, _task) do
+    {tick, history} = advance(history)
+    {:advance, tick, history}
   end
 
   # A Minga step reuses its group; an agent edit without a task always opens one.

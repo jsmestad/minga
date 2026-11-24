@@ -182,6 +182,16 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert text(undo!(world)) == ""
     end
 
+    test "an earlier Minga step inside text you later deleted does not block your undo" do
+      world =
+        world("aaa bbb ccc\nzzz\n")
+        |> edit(@step_one, 4, 3, "BBB")
+        |> edit(:user, 0, 12, "")
+
+      assert text(world) == "zzz\n"
+      assert text(undo!(world)) == "aaa BBB ccc\nzzz\n"
+    end
+
     test "redo that would cross text Minga rewrote since the undo is blocked" do
       world = world("abc") |> edit(:user, 1, 1, "") |> undo!() |> edit(@step_one, 0, 3, "xyz")
 
@@ -230,6 +240,25 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert Document.content(restore.document) == "other mine base\n"
       assert UndoHistory.minga_changes(history, "task-1") == []
       assert UndoHistory.undo_count(history) == 1
+    end
+
+    test "rejecting a task right after its steps returns to the version before them" do
+      world = world("one\n") |> edit(:user, 0, 0, "x") |> edit(@step_one, 4, 0, "two\n")
+      world = edit(world, @step_two, 0, 0, "zero\n")
+
+      rejected = reject_newest_task(world)
+      assert {text(rejected), rejected.version} == {"xone\n", 1}
+      assert {:ok, undone, %{version: 0}} = step(rejected, :undo)
+      assert text(undone) == "one\n"
+    end
+
+    test "rejecting a task after other changes takes a new version" do
+      world = world("one\n") |> edit(@step_one, 4, 0, "two\n") |> edit(:user, 0, 0, "x")
+
+      {:ok, restore, _history, 1} =
+        UndoHistory.undo_agent_session(world.history, world.version, world.doc)
+
+      assert restore.version == :advance
     end
 
     test "agent edits without a task are unattributed, not yours, and revert together" do

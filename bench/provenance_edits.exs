@@ -38,7 +38,12 @@ defmodule Minga.Bench.ProvenanceEdits do
       edit = median_us(fn -> random_edit(prov, you, text) end)
       author = median_us(fn -> Provenance.author_at(prov, :rand.uniform(@document_bytes) - 1) end)
       spans = median_us(fn -> window(prov) end)
-      revert = median_us(fn -> {:ok, _doc, _first, _prov} = Provenance.revert(prov, you, document) end, 5)
+
+      revert =
+        median_us(
+          fn -> {:ok, _doc, _first, _prov} = Provenance.revert(prov, you, document) end,
+          5
+        )
 
       IO.puts(
         String.pad_trailing(Integer.to_string(runs), 9) <>
@@ -55,7 +60,10 @@ defmodule Minga.Bench.ProvenanceEdits do
   @spec build(pos_integer()) :: {Provenance.t(), binary(), Provenance.group_id()}
   defp build(target) do
     text =
-      :binary.copy("abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmn\n", div(@document_bytes, 51))
+      :binary.copy(
+        "abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmn\n",
+        div(@document_bytes, 51)
+      )
 
     authors = [{:you, nil}, {{:minga, "t1"}, :step}, {{:minga, "t2"}, :step}]
     steps = max(div(target, 2), 3)
@@ -66,12 +74,16 @@ defmodule Minga.Bench.ProvenanceEdits do
       |> Enum.take(steps)
       |> Enum.with_index()
       |> Enum.reduce({Provenance.new(byte_size(text)), text, nil}, fn {{author, key}, n},
-                                                                        {prov, text, you} ->
+                                                                      {prov, text, you} ->
         key = if key == :step, do: {elem(author, 0), elem(author, 1), "call-#{n}"}, else: nil
         {group, prov} = Provenance.open_group(prov, author, key)
         offset = rem(n * 7919, byte_size(text))
         prov = Provenance.edit(prov, group, offset, "", "Z")
-        text = binary_part(text, 0, offset) <> "Z" <> binary_part(text, offset, byte_size(text) - offset)
+
+        text =
+          binary_part(text, 0, offset) <>
+            "Z" <> binary_part(text, offset, byte_size(text) - offset)
+
         {prov, text, if(author == :you, do: group, else: you)}
       end)
 
@@ -94,15 +106,23 @@ defmodule Minga.Bench.ProvenanceEdits do
   end
 
   # Times `reps` calls per sample, so the clock's microsecond resolution does not hide the cost.
+  # Each measurement runs in a fresh process, so garbage from the previous one is not collected
+  # inside its samples.
   @spec median_us((-> term()), pos_integer()) :: float()
   defp median_us(fun, reps \\ 50) do
-    times =
-      for _ <- 1..@samples do
-        {microseconds, _result} = :timer.tc(fn -> Enum.each(1..reps, fn _ -> fun.() end) end)
-        microseconds / reps
-      end
+    fn ->
+      times =
+        for _ <- 1..@samples do
+          # Collect between samples, so one sample does not pay for the garbage of the ones before.
+          :erlang.garbage_collect()
+          {microseconds, _result} = :timer.tc(fn -> Enum.each(1..reps, fn _ -> fun.() end) end)
+          microseconds / reps
+        end
 
-    times |> Enum.sort() |> Enum.at(div(@samples, 2))
+      times |> Enum.sort() |> Enum.at(div(@samples, 2))
+    end
+    |> Task.async()
+    |> Task.await(:infinity)
   end
 
   @spec format(float(), pos_integer()) :: String.t()
