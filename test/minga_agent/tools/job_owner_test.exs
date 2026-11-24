@@ -150,7 +150,7 @@ defmodule MingaAgent.Tools.JobOwnerTest do
       assert_receive {:job_completion, {^job_id, _gen, :completed, _code}}, 5_000
 
       completions = JobOwner.drain_completions(owner)
-      assert length(completions) >= 1
+      assert [_ | _] = completions
       assert Enum.any?(completions, fn {id, _gen, _outcome, _code} -> id == job_id end)
 
       # Second drain should be empty
