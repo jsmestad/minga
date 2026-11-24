@@ -276,4 +276,53 @@ defmodule Minga.LSP.JsonRpcTest do
       assert decoded["method"] == "test"
     end
   end
+
+  describe "decode/1 framing limits" do
+    test "rejects buffer exceeding max buffer size" do
+      # 52 MiB + 1 byte exceeds the 52 MiB buffer limit
+      oversized = :binary.copy(<<0>>, 52_000_001)
+
+      assert {:error, :buffer_overflow} = JsonRpc.decode(oversized)
+    end
+
+    test "rejects Content-Length exceeding max body size" do
+      # Claim a 50 MiB + 1 body. Only the header needs to be present for the check.
+      content_length = 50_000_001
+      buffer = "Content-Length: #{content_length}\r\n\r\n"
+
+      assert {:error, {:body_too_large, ^content_length}} = JsonRpc.decode(buffer)
+    end
+
+    test "rejects headers exceeding max header size" do
+      # Build a headers section larger than 8 KiB
+      padding = :binary.copy("X-Pad: " <> :binary.copy("a", 200) <> "\r\n", 50)
+      buffer = padding <> "Content-Length: 2\r\n\r\n{}"
+
+      header_size = byte_size(padding <> "Content-Length: 2")
+      assert header_size > 8_192
+
+      assert {:error, {:headers_too_large, _}} = JsonRpc.decode(buffer)
+    end
+
+    test "accepts normal messages within all limits" do
+      encoded = IO.iodata_to_binary(JsonRpc.encode_notification("test", %{"ok" => true}))
+
+      assert {[%{"method" => "test"}], ""} = JsonRpc.decode(encoded)
+    end
+
+    test "accepts partial frames within buffer limit" do
+      # A partial frame within limits should still return :incomplete, not error
+      partial = "Content-Length: 100\r\n\r\n{\"partial\":"
+
+      assert {[], ^partial} = JsonRpc.decode(partial)
+    end
+
+    test "returns error mid-stream when second frame has oversized body" do
+      valid = IO.iodata_to_binary(JsonRpc.encode_notification("first", %{}))
+      oversized_header = "Content-Length: 50000001\r\n\r\n"
+      buffer = valid <> oversized_header
+
+      assert {:error, {:body_too_large, 50_000_001}} = JsonRpc.decode(buffer)
+    end
+  end
 end
