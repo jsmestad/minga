@@ -85,12 +85,16 @@ One menu answers "what can I do with this?" for whatever is under the cursor or 
 
 - **Entry:** `g.` in Normal mode and special buffers, `⌃.` wherever you type (Insert, the composer, the terminal, pickers), and right-click. The precedent is Embark's `embark-act`.
 - **The BEAM decides what is on offer;** frontends only draw it. Target-specific actions come first, generic ones after ("Copy file:line link", "Ask Minga about this").
-- **The header names the target in words** ("Minga's change 1 of 2 · chrome_state.ex 232 to 235"), never with a mark.
+- **It leads with the decision.** When the target asks a yes or no question (Minga's change, an approval, a pending shell command), the top of the menu is a decision bar split into two equal halves: `y` Keep and `n` Reject, or the decision's own words, each with its consequence underneath ("accept 4 lines" / "removes 4 lines, restores 1"). Keep is preselected; the no half never is. A target without a decision puts its single most likely action there instead (`f` Fix on a diagnostic, `↩` Open on a file). Everything else follows as a quieter list grouped by what it acts on ("This change", "This file", "Anywhere"). The yes/no grammar is Minga's signature, so the same bar appears wherever Minga asks you something.
+- **The header names the target in words with its state glyph** ("○ Minga's change 1 of 2 · 4 lines · unreviewed"), never with a twist. The filter lives in the header as a dim "› filter" and becomes an input only once you type.
+- **The edge carries the target's role colour:** minga for Minga's change, failure for a diagnostic, neutral for a file. The selection tint follows the same role.
 - **The most likely action is preselected,** so `↩` does the obvious thing. Typing filters.
 - **Two keys per row:** the letter that runs it inside the menu on the left, and on the right the key that runs it without the menu, so the menu teaches you to skip it. The native macOS right-click menu shows only the right-hand key.
 - **Consequences are written out** for actions that change things ("Reject · removes 4 lines, restores 1"). Destructive actions sit last and are never preselected. They are not drawn in red, because red means failure; the consequence text carries the warning.
 - **Selections and many items:** on a visual selection the actions apply to everything in it, with the count ("Keep 2 changes"). In a picker, the menu offers "Open all 12 matches" (act on all) and "Export 12 to a buffer", where Vim selection picks a subset and `g.` acts on it.
 - **Pickers do not mark.** `Tab` only completes; there is no Helm-style marking mode.
+
+On macOS the menu is a compact panel at the target with the decision bar on top, grouped rows below, keys in a fixed monospace column and the direct key dimmed at the right. In the TUI it is a Lip Gloss rounded panel whose border takes the target's role colour: the header and "› filter" sit in the top border and the help in the bottom border; the decision bar is two equal halves of two rows each, the label centred and the consequence dim below, with the selected half in reverse video in the target's role; section headers are dim labels with a thin rule to the border; the panel covers the gutter beside it, the editor behind it dims, and the panel is exactly as tall as its content. The reference boards are `ActMenu_DirectionA` and `ActMenu_Compare` on the design canvas; the lighter strand-anchored alternative (direction B) was not chosen because its branding only exists on Minga's own changes.
 
 ## Mouse
 

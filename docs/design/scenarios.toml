@@ -19,7 +19,8 @@
 #              deferred:      needs a rethink before it is designed; the board, if any, is a placeholder.
 #              removed:       exists today; the Spine takes it away (notes say where its job goes).
 #   boards     design canvas board files when designed: { macos = "...", tui = "..." }, plus
-#              optional mouse / mouse_tui boards that show the screen's mouse path playing.
+#              optional mouse / mouse_tui boards that show the screen's mouse path playing, and an
+#              optional reference board for the surface's chosen visual design.
 #   exits      every way out, by key and by click:
 #              [{ key = "SPC a a", click = "modeline needs-you segment", to = "minga.tasks.needs_you" }]
 #              Use click = "" for keyboard-only exits and say why in a note.
@@ -2236,7 +2237,7 @@ surfaces = ["act_menu"]
 states = ["unreviewed"]
 frontends = ["macos", "tui"]
 status = "designed"
-boards = { macos = "Batch7_act_change.dc.html", tui = "Batch7_act_change.dc.html", mouse = "Mouse_Video_ActMenu_Chips.dc.html" }
+boards = { macos = "Batch7_act_change.dc.html", tui = "Batch7_act_change.dc.html", mouse = "Mouse_Video_ActMenu_Chips.dc.html", reference = "ActMenu_DirectionA.dc.html" }
 transient = true
 exits = [
   { key = "y", click = "Keep", to = "minga.review.in_file" },
@@ -2259,7 +2260,7 @@ surfaces = ["act_menu"]
 states = []
 frontends = ["macos", "tui"]
 status = "designed"
-boards = { macos = "Batch7_act_change.dc.html", tui = "Batch7_act_change.dc.html" }
+boards = { macos = "Batch7_act_change.dc.html", tui = "Batch7_act_change.dc.html", reference = "ActMenu_DirectionA.dc.html" }
 transient = true
 exits = [
   { key = "↩", click = "a row", to = "minga.conversation", note = "runs the highlighted action" },
@@ -2274,7 +2275,7 @@ surfaces = ["act_menu"]
 states = ["unreviewed"]
 frontends = ["macos", "tui"]
 status = "designed"
-boards = { macos = "Batch7_act_selection.dc.html", tui = "Batch7_act_selection.dc.html" }
+boards = { macos = "Batch7_act_selection.dc.html", tui = "Batch7_act_selection.dc.html", reference = "ActMenu_DirectionA.dc.html" }
 transient = true
 exits = [
   { key = "y", click = "Keep 2 changes", to = "minga.review.in_file" },
