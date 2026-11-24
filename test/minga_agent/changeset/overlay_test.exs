@@ -104,6 +104,168 @@ defmodule MingaAgent.Changeset.OverlayTest do
       Overlay.cleanup(overlay)
     end
 
+    test "skips a Rust target directory that sits next to Cargo.toml", %{project: project} do
+      File.write!(Path.join(project, "Cargo.toml"), "[package]\nname = \"demo\"\n")
+      File.mkdir_p!(Path.join(project, "target/debug"))
+      File.write!(Path.join(project, "target/debug/demo"), "binary")
+      File.mkdir_p!(Path.join(project, "crates/cli/target/debug"))
+      File.write!(Path.join(project, "crates/cli/Cargo.toml"), "[package]\nname = \"cli\"\n")
+      File.write!(Path.join(project, "crates/cli/target/debug/cli"), "binary")
+
+      {:ok, overlay} = Overlay.create(project)
+      on_exit(fn -> Overlay.cleanup(overlay) end)
+
+      assert {:ok, _stats} = Overlay.materialize_project(overlay)
+
+      assert File.exists?(Path.join(overlay.overlay_dir, "Cargo.toml"))
+      refute File.exists?(Path.join(overlay.overlay_dir, "target"))
+      assert File.exists?(Path.join(overlay.overlay_dir, "crates/cli/Cargo.toml"))
+      refute File.exists?(Path.join(overlay.overlay_dir, "crates/cli/target"))
+    end
+
+    test "copies a target directory that is not a Cargo build directory", %{project: project} do
+      File.mkdir_p!(Path.join(project, "lib/target"))
+      File.write!(Path.join(project, "lib/target/spec.ex"), "defmodule Target do\nend")
+
+      {:ok, overlay} = Overlay.create(project)
+      on_exit(fn -> Overlay.cleanup(overlay) end)
+
+      assert {:ok, _stats} = Overlay.materialize_project(overlay)
+
+      assert File.read!(Path.join(overlay.overlay_dir, "lib/target/spec.ex")) ==
+               "defmodule Target do\nend"
+    end
+
+    test "links installed JavaScript packages so they resolve from the overlay", %{
+      project: project
+    } do
+      File.write!(Path.join(project, "package.json"), ~s({"name": "app"}))
+      write_package(project, "node_modules/left-pad")
+      write_package(project, "node_modules/@scope/util")
+      File.write!(Path.join(project, "node_modules/left-pad/cli.js"), "#!/usr/bin/env node\n")
+      File.mkdir_p!(Path.join(project, "node_modules/.bin"))
+      File.ln_s!("../left-pad/cli.js", Path.join(project, "node_modules/.bin/left-pad"))
+      write_package(project, "packages/web/node_modules/react")
+
+      {:ok, overlay} = Overlay.create(project)
+      on_exit(fn -> Overlay.cleanup(overlay) end)
+
+      assert {:ok, %{copied_files: 3, linked_entries: 4}} = Overlay.materialize_project(overlay)
+
+      for package <- ["left-pad", "@scope/util", ".bin/left-pad"] do
+        overlay_path = Path.join([overlay.overlay_dir, "node_modules", package])
+        project_path = Path.join([project, "node_modules", package])
+        assert File.read_link!(overlay_path) == Path.expand(project_path)
+      end
+
+      assert resolved_from_project?(overlay, project, "node_modules/left-pad/package.json")
+      assert resolved_from_project?(overlay, project, "node_modules/@scope/util/package.json")
+      assert resolved_from_project?(overlay, project, "node_modules/.bin/left-pad")
+
+      assert resolved_from_project?(
+               overlay,
+               project,
+               "packages/web/node_modules/react/package.json"
+             )
+
+      # The overlay owns node_modules, each scope directory, and .bin, so new
+      # packages, bin shims, and tool caches are created in the overlay.
+      for dir <- ["node_modules", "node_modules/@scope", "node_modules/.bin"] do
+        assert File.lstat!(Path.join(overlay.overlay_dir, dir)).type == :directory
+      end
+    end
+
+    test "owns pnpm and bin directories so package-manager writes stay in the overlay", %{
+      project: project
+    } do
+      store = "node_modules/.pnpm/left-pad@1.3.0/node_modules/left-pad"
+      write_package(project, store)
+
+      File.ln_s!(
+        ".pnpm/left-pad@1.3.0/node_modules/left-pad",
+        Path.join(project, "node_modules/left-pad")
+      )
+
+      File.mkdir_p!(Path.join(project, "node_modules/.pnpm/node_modules"))
+
+      File.ln_s!(
+        "../left-pad@1.3.0/node_modules/left-pad",
+        Path.join(project, "node_modules/.pnpm/node_modules/left-pad")
+      )
+
+      File.write!(Path.join(project, "node_modules/.pnpm/lock.yaml"), "lockfileVersion: '9.0'\n")
+      File.write!(Path.join(project, "node_modules/.modules.yaml"), "layoutVersion: 5\n")
+      File.mkdir_p!(Path.join(project, "node_modules/.bin"))
+      File.write!(Path.join(project, "node_modules/.bin/left-pad"), "#!/bin/sh\n")
+
+      before = project_listing(project, "node_modules")
+
+      {:ok, overlay} = Overlay.create(project)
+      on_exit(fn -> Overlay.cleanup(overlay) end)
+
+      assert {:ok, _stats} = Overlay.materialize_project(overlay)
+
+      for dir <- ["node_modules/.bin", "node_modules/.pnpm", "node_modules/.pnpm/node_modules"] do
+        assert File.lstat!(Path.join(overlay.overlay_dir, dir)).type == :directory
+      end
+
+      refute File.exists?(Path.join(overlay.overlay_dir, "node_modules/.modules.yaml"))
+      assert resolved_from_project?(overlay, project, "node_modules/left-pad/package.json")
+      assert resolved_from_project?(overlay, project, Path.join(store, "package.json"))
+
+      assert resolved_from_project?(
+               overlay,
+               project,
+               "node_modules/.pnpm/node_modules/left-pad/package.json"
+             )
+
+      # Small regular files such as pnpm bin shims and store metadata are copies.
+      assert File.read!(Path.join(overlay.overlay_dir, "node_modules/.bin/left-pad")) ==
+               "#!/bin/sh\n"
+
+      refute resolved_from_project?(overlay, project, "node_modules/.bin/left-pad")
+      refute resolved_from_project?(overlay, project, "node_modules/.pnpm/lock.yaml")
+
+      File.write!(Path.join(overlay.overlay_dir, "node_modules/.bin/new-tool"), "#!/bin/sh\n")
+      File.write!(Path.join(overlay.overlay_dir, "node_modules/.bin/left-pad"), "changed")
+      File.mkdir_p!(Path.join(overlay.overlay_dir, "node_modules/.pnpm/new-dep@1.0.0"))
+      File.mkdir_p!(Path.join(overlay.overlay_dir, "node_modules/.pnpm/node_modules/new-dep"))
+      File.write!(Path.join(overlay.overlay_dir, "node_modules/.pnpm/lock.yaml"), "changed")
+
+      assert project_listing(project, "node_modules") == before
+      assert File.read!(Path.join(project, "node_modules/.bin/left-pad")) == "#!/bin/sh\n"
+
+      assert File.read!(Path.join(project, "node_modules/.pnpm/lock.yaml")) ==
+               "lockfileVersion: '9.0'\n"
+    end
+
+    test "keeps tool caches and new installs in the overlay without touching the project", %{
+      project: project
+    } do
+      write_package(project, "node_modules/left-pad")
+      File.mkdir_p!(Path.join(project, "node_modules/.vite"))
+      File.write!(Path.join(project, "node_modules/.vite/deps.json"), "{}")
+      File.write!(Path.join(project, "node_modules/.package-lock.json"), "{}")
+
+      {:ok, overlay} = Overlay.create(project)
+
+      assert {:ok, _stats} = Overlay.materialize_project(overlay)
+      refute File.exists?(Path.join(overlay.overlay_dir, "node_modules/.vite"))
+      refute File.exists?(Path.join(overlay.overlay_dir, "node_modules/.package-lock.json"))
+
+      write_package(overlay.overlay_dir, "node_modules/new-dep")
+      File.mkdir_p!(Path.join(overlay.overlay_dir, "node_modules/.cache"))
+
+      assert {:ok, %{linked_entries: 0}} = Overlay.materialize_project(overlay)
+
+      Overlay.cleanup(overlay)
+
+      assert Enum.sort(File.ls!(Path.join(project, "node_modules"))) ==
+               [".package-lock.json", ".vite", "left-pad"]
+
+      assert File.read!(Path.join(project, "node_modules/left-pad/package.json")) =~ "left-pad"
+    end
+
     test "keeps materialized edits and tombstones over project files", %{project: project} do
       {:ok, overlay} = Overlay.create(project)
 
@@ -401,6 +563,8 @@ defmodule MingaAgent.Changeset.OverlayTest do
 
       assert env_map["MIX_BUILD_PATH"] == overlay.build_dir
       assert env_map["MIX_DEPS_PATH"] == Path.join(project, "deps")
+      assert env_map["CARGO_TARGET_DIR"] == Path.join(overlay.build_dir, "cargo")
+      assert String.starts_with?(env_map["CARGO_TARGET_DIR"], overlay.overlay_dir <> "/")
 
       Overlay.cleanup(overlay)
     end
@@ -414,5 +578,41 @@ defmodule MingaAgent.Changeset.OverlayTest do
       Overlay.cleanup(overlay)
       refute File.dir?(overlay.overlay_dir)
     end
+  end
+
+  # Every path under `relative_dir` without following symlinks, with each
+  # regular file's content, so any write into the project is visible.
+  defp project_listing(root, relative_dir) do
+    dir = Path.join(root, relative_dir)
+
+    dir
+    |> File.ls!()
+    |> Enum.sort()
+    |> Enum.flat_map(fn entry ->
+      path = Path.join(dir, entry)
+      relative = Path.join(relative_dir, entry)
+
+      case File.lstat!(path).type do
+        :directory -> [relative | project_listing(root, relative)]
+        :regular -> [{relative, File.read!(path)}]
+        :symlink -> [{relative, File.read_link!(path)}]
+      end
+    end)
+  end
+
+  defp write_package(root, relative_dir) do
+    dir = Path.join(root, relative_dir)
+    File.mkdir_p!(dir)
+    File.write!(Path.join(dir, "package.json"), ~s({"name": "#{Path.basename(dir)}"}))
+  end
+
+  # Node resolves a package by walking up to the nearest node_modules and
+  # following links, so the overlay path must reach the project's own file.
+  defp resolved_from_project?(overlay, project, relative_path) do
+    overlay_stat = File.stat!(Path.join(overlay.overlay_dir, relative_path))
+    project_stat = File.stat!(Path.join(project, relative_path))
+
+    {overlay_stat.major_device, overlay_stat.inode} ==
+      {project_stat.major_device, project_stat.inode}
   end
 end

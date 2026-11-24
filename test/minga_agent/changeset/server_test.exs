@@ -174,6 +174,76 @@ defmodule MingaAgent.Changeset.ServerTest do
     end
   end
 
+  describe "tracked changes under a re-linked dependency" do
+    setup %{project: project} do
+      package_dir = Path.join(project, "node_modules/pkg")
+      File.mkdir_p!(package_dir)
+      File.write!(Path.join(package_dir, "index.js"), "module.exports = 1;\n")
+      %{source_file: Path.join(package_dir, "index.js")}
+    end
+
+    # The agent stages a change, a shell command removes the overlay's
+    # node_modules, and the next materialization links the package back to
+    # the project. Cleanup must not follow that link.
+    defp relink_tracked_dependency(server) do
+      assert {:ok, _stats} = GenServer.call(server, :materialize_for_command)
+      overlay = GenServer.call(server, :overlay_path)
+      File.rm_rf!(Path.join(overlay, "node_modules"))
+      assert {:ok, _stats} = GenServer.call(server, :materialize_for_command)
+      assert File.lstat!(Path.join(overlay, "node_modules/pkg")).type == :symlink
+    end
+
+    defp source_fingerprint(project, source_file) do
+      stat = File.stat!(source_file)
+      {File.ls!(Path.join(project, "node_modules/pkg")), File.read!(source_file), stat.inode}
+    end
+
+    test "discard leaves the project file untouched", %{project: project, source_file: source} do
+      server = start_server(project)
+      before = source_fingerprint(project, source)
+
+      assert :ok = GenServer.call(server, {:write_file, "node_modules/pkg/index.js", "draft"})
+      relink_tracked_dependency(server)
+
+      assert :ok = GenServer.call(server, {:discard_file, "node_modules/pkg/index.js"})
+      assert source_fingerprint(project, source) == before
+      assert GenServer.call(server, :summary) == []
+    end
+
+    test "undo to the original leaves the project file untouched", %{
+      project: project,
+      source_file: source
+    } do
+      server = start_server(project)
+      before = source_fingerprint(project, source)
+
+      assert :ok = GenServer.call(server, {:write_file, "node_modules/pkg/index.js", "draft"})
+      relink_tracked_dependency(server)
+
+      assert :ok = GenServer.call(server, {:undo, "node_modules/pkg/index.js"})
+      assert source_fingerprint(project, source) == before
+      assert GenServer.call(server, :summary) == []
+    end
+
+    test "undo to a deletion leaves the project file untouched", %{
+      project: project,
+      source_file: source
+    } do
+      server = start_server(project)
+      before = source_fingerprint(project, source)
+
+      assert :ok = GenServer.call(server, {:delete_file, "node_modules/pkg/index.js"})
+      assert :ok = GenServer.call(server, {:write_file, "node_modules/pkg/index.js", "draft"})
+      relink_tracked_dependency(server)
+
+      assert :ok = GenServer.call(server, {:undo, "node_modules/pkg/index.js"})
+      assert source_fingerprint(project, source) == before
+
+      assert [%{path: "node_modules/pkg/index.js", kind: :deleted}] =
+               GenServer.call(server, :summary)
+    end
+  end
+
   describe "edit_file" do
     test "replaces text in an existing file", %{project: project} do
       server = start_server(project)
