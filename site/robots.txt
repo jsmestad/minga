@@ -1,3 +1,4 @@
-# Pre-launch staging: replace with Allow: / at v0.1.0 launch cutover to mingacode.dev.
+# Pre-launch staging: replace with Allow: / and uncomment Sitemap at v0.1.0 launch cutover to mingacode.dev.
 User-agent: *
 Disallow: /
+# Sitemap: https://mingacode.dev/sitemap.xml

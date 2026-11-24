@@ -148,7 +148,7 @@ export function mountCoAuthorSim(root: HTMLElement): void {
             </div>
             <div class="specimen-row"><span class="ml-dim">Unsent draft stays untouched while you inspect siblings:</span></div>
             <label class="sr-only" for="ca-draft-input">Parent composer draft</label>
-            <input id="ca-draft-input" class="ca-draft-input" type="text" data-ca-draft value="${esc(state.parentDraft)}">
+            <input id="ca-draft-input" class="ca-draft-input" type="text" data-ca-draft>
           </div>
           <div class="ca-peek-worker">
             <div class="specimen-pane-head">
@@ -242,7 +242,7 @@ export function mountCoAuthorSim(root: HTMLElement): void {
             <button type="button" class="lab-cmd lab-cmd-muted" data-ca-action="reset">Reset</button>
           </div>
 
-          <div class="spine-specimen lab-specimen">
+          <div class="spine-specimen lab-specimen" tabindex="0" data-ca-stage aria-label="Interactive co-authoring viewport. Focus and type u, i, ]h, g., SPC a y, SPC a d, SPC a a, SPC a i, [[, ]], za, y/a/t/n, or q.">
             <div class="spine-titlebar">
               <span class="spine-wordmark">minga</span>
               <span class="spine-title-file">retry.ex <span>lib/minga_agent</span></span>
@@ -289,6 +289,8 @@ export function mountCoAuthorSim(root: HTMLElement): void {
           <ul class="mission-list">${missionsHtml}</ul>
         </aside>
       </div>`;
+    const draftInput = root.querySelector<HTMLInputElement>("[data-ca-draft]");
+    if (draftInput) draftInput.value = state.parentDraft;
   }
 
   root.addEventListener("click", (event) => {
@@ -340,11 +342,92 @@ export function mountCoAuthorSim(root: HTMLElement): void {
     }
   });
 
+  let pending = "";
+
   root.addEventListener("input", (event) => {
     const target = event.target as HTMLInputElement | null;
     if (target?.matches("[data-ca-draft]")) {
       state = { ...state, parentDraft: target.value };
     }
+  });
+
+  root.addEventListener("keydown", (event) => {
+    const target = event.target as HTMLElement | null;
+    if (!target || target.matches("input, textarea, select")) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const key = event.key;
+
+    const finish = (next: CoAuthorState): void => {
+      event.preventDefault();
+      pending = "";
+      update(next);
+      root.querySelector<HTMLElement>("[data-ca-stage]")?.focus();
+    };
+
+    if (key === "Escape" || key === "q") {
+      if (pending) {
+        event.preventDefault();
+        pending = "";
+        return;
+      }
+      if (state.activeDrawer !== "none" || state.actMenuOpen) {
+        finish(closeCoAuthorDrawer(state));
+      }
+      return;
+    }
+
+    if (state.activeDrawer === "tasks" && (key === "y" || key === "a" || key === "t" || key === "n")) {
+      finish(answerApproval(state, key, Date.now()));
+      return;
+    }
+
+    if (pending === "SPC") {
+      event.preventDefault();
+      pending = key === "a" ? "SPC a" : "";
+      return;
+    }
+    if (pending === "SPC a") {
+      if (key === "y") return finish(reviewCurrentChange(state, "kept"));
+      if (key === "d") return finish(reviewCurrentChange(state, "rejected"));
+      if (key === "a") return finish(openTasksDrawer(state));
+      if (key === "i") return finish(openSubagentPeek(state));
+      pending = "";
+      return;
+    }
+    if (pending === "g") {
+      if (key === ".") return finish(toggleCoAuthorActMenu(state));
+      pending = "";
+      return;
+    }
+    if (pending === "]") {
+      if (key === "h") return finish(jumpNextChange(state));
+      if (key === "]" && state.activeDrawer === "peek") return finish(stepPeekSibling(state, 1));
+      pending = "";
+      return;
+    }
+    if (pending === "[") {
+      if (key === "[" && state.activeDrawer === "peek") return finish(stepPeekSibling(state, -1));
+      pending = "";
+      return;
+    }
+    if (pending === "z") {
+      if (key === "a" && state.activeDrawer === "peek") return finish(toggleBriefFold(state));
+      pending = "";
+      return;
+    }
+
+    if (key === " ") {
+      event.preventDefault();
+      pending = "SPC";
+      return;
+    }
+    if (key === "g" || key === "]" || key === "[" || key === "z") {
+      event.preventDefault();
+      pending = key;
+      return;
+    }
+    if (key === "u") return finish(undoUserEdit(state));
+    if (key === "i") return finish(editInsideTwist(state));
   });
 
   render();

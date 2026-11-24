@@ -6,12 +6,25 @@
   <meta name="robots" content="noindex, nofollow">
   <title>Extending Minga: Three Layers of Programmability</title>
   <meta name="description" content="Customize Minga across three layers: live-reloaded config.exs, supervised Hex/Git extensions, PreToolUse hooks, crash-isolated MCP, corporate LLM gateways, and task-shaped v0.1.0 workflows.">
+  <link rel="canonical" href="https://mingacode.dev/extending">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#303446" media="(prefers-color-scheme: dark)">
+  <meta property="og:site_name" content="Minga">
+  <meta property="og:locale" content="en_US">
   <meta property="og:type" content="article">
+  <meta property="og:url" content="https://mingacode.dev/extending">
   <meta property="og:title" content="Extending Minga: Three Layers of Programmability">
   <meta property="og:description" content="Customize Minga across three layers: live-reloaded config.exs, supervised Hex/Git extensions, PreToolUse hooks, crash-isolated MCP, corporate LLM gateways, and task-shaped workflows.">
-  <meta property="og:image" content="/assets/og-minga.png">
+  <meta property="og:image" content="https://mingacode.dev/assets/og-minga.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:image" content="/assets/og-minga.png">
+  <meta name="twitter:title" content="Extending Minga: Three Layers of Programmability">
+  <meta name="twitter:description" content="Customize Minga across three layers: live-reloaded config.exs, supervised Hex/Git extensions, PreToolUse hooks, crash-isolated MCP, corporate LLM gateways, and task-shaped workflows.">
+  <meta name="twitter:image" content="https://mingacode.dev/assets/og-minga.png">
+  <meta name="twitter:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Extending Minga: Three Layers of Programmability","description":"Customize Minga across three layers: live-reloaded config.exs, supervised Hex/Git extensions, PreToolUse hooks, crash-isolated MCP, corporate LLM gateways, and task-shaped v0.1.0 workflows.","url":"https://mingacode.dev/extending","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Extending Minga","item":"https://mingacode.dev/extending"}]}]}</script>
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
@@ -76,17 +89,19 @@
           <ul class="spec-ledger">
             <li class="spec-row">
               <span class="spec-key spec-key-strong">Layer 1 · config.exs</span>
-              <span class="spec-detail"><strong>Ships today, reloads live (<kbd>SPC h r</kbd>).</strong> Typed options, themes, per-filetype rules, keybindings, custom commands, background save hooks, <code>PreToolUse</code> shell veto hooks, crash-isolated stdio MCP servers, and command wrappers (<code>advise</code>: run code before, after, around, or instead of any built-in command).</span>
+              <span class="spec-detail"><strong>Reloads live (<kbd>SPC h r</kbd>).</strong> Typed options, themes, per-filetype rules, keybindings, custom commands, background save hooks, <code>PreToolUse</code> shell veto hooks, crash-isolated stdio MCP servers, and command wrappers (<code>advise</code>: run code before, after, around, or instead of any built-in command).</span>
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong">Layer 2 · Extensions</span>
-              <span class="spec-detail"><strong>Ships today.</strong> Installable packages from Elixir's package registry (Hex), Git repos, or local paths using <code>minga_sdk</code>: declarative commands, keymap scopes, lazy <code>load_policy</code> overrides, custom buffer/drawer surfaces, corporate LLM gateways, and runtime-compiled syntax grammars.</span>
+              <span class="spec-detail"><strong>Supervised packages.</strong> Installable packages from Elixir's package registry (Hex), Git repos, or local paths using <code>minga_sdk</code>: declarative commands, keymap scopes, lazy <code>load_policy</code> overrides, custom buffer/drawer surfaces, corporate LLM gateways, and runtime-compiled syntax grammars.</span>
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong">Layer 3 · Task workflows</span>
               <span class="spec-detail"><strong>v0.1.0 roadmap.</strong> Write or ask Minga to author readable source over existing buffer, drawer, agent, and permission primitives; inspect the diff and save to activate; discard when a one-off task ends or reuse across projects.</span>
             </li>
           </ul>
+
+          <div data-layer-explorer></div>
         </section>
 
         <section class="essay-section" id="layer-config">
@@ -160,7 +175,7 @@ extension <span class="tok-atom">:minga_git_extended</span>, hex: <span class="t
 <span class="tok-kw">end</span></code></pre>
           </div>
 
-          <h3>Four integration seams that ship today</h3>
+          <h3>Four integration seams</h3>
           <ul>
             <li><strong>Custom corporate LLM gateways (<code>MingaAgent.InferenceRoute</code>).</strong> Connect an internal company proxy, private endpoint, or custom subscription route to <code>/model</code>. Your route only streams model replies; Minga keeps running tool approvals, staged overlays, retries, context compaction, and session history (<a href="/docs/extension_api.html#model-routes">Model Routes Reference</a>).</li>
             <li><strong>Deterministic <code>PreToolUse</code> veto hooks (<code>:agent_hooks</code>).</strong> Run a local shell script before any matching tool (<code>"shell"</code>, <code>"*_file"</code>, or <code>"*"</code>) with JSON call arguments on stdin and POSIX process-group timeout cleanup; any non-zero exit blocks the tool and surfaces stderr in chat (<a href="/docs/hooks.html">Hooks Reference</a>).</li>
@@ -220,5 +235,6 @@ extension <span class="tok-atom">:minga_git_extended</span>, hex: <span class="t
   </footer>
 
   <script defer src="/site.js"></script>
+  <script type="module" src="/assets/learn-labs.js"></script>
 </body>
 </html>

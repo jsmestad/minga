@@ -6,14 +6,25 @@
   <meta name="robots" content="noindex, nofollow">
   <title>Minga: A programmable workbench where text is the interface</title>
   <meta name="description" content="Code editing, parallel agents, and Elixir workflows in one quiet, keyboard-first workbench shared identically by macOS and the terminal.">
+  <link rel="canonical" href="https://mingacode.dev/">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#303446" media="(prefers-color-scheme: dark)">
+  <meta property="og:site_name" content="Minga">
+  <meta property="og:locale" content="en_US">
   <meta property="og:type" content="website">
+  <meta property="og:url" content="https://mingacode.dev/">
   <meta property="og:title" content="Minga: A programmable workbench where text is the interface">
   <meta property="og:description" content="Code editing, parallel agents, and Elixir workflows in one quiet, keyboard-first workbench shared identically by macOS and the terminal.">
-  <meta property="og:image" content="/assets/og-minga.png">
+  <meta property="og:image" content="https://mingacode.dev/assets/og-minga.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Minga: A programmable workbench where text is the interface">
   <meta name="twitter:description" content="Code editing, parallel agents, and Elixir workflows in one quiet, keyboard-first workbench shared identically by macOS and the terminal.">
-  <meta name="twitter:image" content="/assets/og-minga.png">
+  <meta name="twitter:image" content="https://mingacode.dev/assets/og-minga.png">
+  <meta name="twitter:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","name":"Minga","url":"https://mingacode.dev/","description":"Code editing, parallel agents, and Elixir workflows in one quiet, keyboard-first workbench shared identically by macOS and the terminal."},{"@type":"SoftwareApplication","name":"Minga","url":"https://mingacode.dev/","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","license":"https://opensource.org/licenses/MIT","softwareVersion":"0.1.0-pre","codeRepository":"https://github.com/jsmestad/minga","programmingLanguage":["Elixir","Swift","Go","Zig"],"description":"Code editing, parallel agents, and Elixir workflows in one quiet, keyboard-first workbench shared identically by macOS and the terminal.","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}]}</script>
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
@@ -89,7 +100,7 @@
           </div>
         </div>
 
-        <figure class="spine-figure" data-code-tabs data-status="planned" data-since="v0.1.0" data-pill="off">
+        <figure class="spine-figure" data-code-tabs data-hero-tour data-status="planned" data-since="v0.1.0" data-pill="off">
           <div class="showcase-header">
             <span data-status="planned" data-since="v0.1.0">Interface tour · Select a feature to preview</span>
             <span>Catppuccin Frappé default<span class="desktop-only"> · ← / → keys</span></span>
@@ -359,6 +370,8 @@
           <p>Resting screens carry no icon rail, no permanent sidebar, no tab bar, and no separate agent workspace. Every color is a semantic theme role (<code>minga</code>, <code>you</code>, <code>needs_you</code>, <code>failure</code>, <code>done</code>) mapped by your chosen theme, defaulting to Catppuccin Frappé.</p>
         </div>
 
+        <div data-marks-theme-switcher></div>
+
         <div class="marks-grid">
           <div class="mark-block">
             <h3>The Twist: who wrote this line?</h3>
@@ -507,7 +520,7 @@
 
             <div class="callout">
               <span class="callout-title">Release status</span>
-              <p><strong>Shipping on main today:</strong> live config, hook, and command-wrapper reload, Hex/Git/path extensions, custom LLM gateways, runtime grammars, and staged overlays. <span data-status="planned" data-since="v0.1.0" data-pill="off"><strong>Landing for v0.1.0:</strong> the minimal UI model, Twist/Orbit marks, per-author undo, and save-to-activate reusable workflows (<a href="/extending">see Extending Minga</a>).</span></p>
+              <p>Live config, hooks, command advice, Hex/Git/path extensions, custom LLM gateways, runtime grammars, and staged overlays are available now. <span data-status="planned" data-since="v0.1.0" data-pill="off"><strong>Coming in v0.1.0:</strong> the minimal UI model, Twist/Orbit marks, per-author undo, and save-to-activate reusable workflows (<a href="/extending">see Extending Minga</a>).</span></p>
             </div>
           </div>
 
@@ -750,5 +763,6 @@ minga path/to/project</code></pre>
   </footer>
 
   <script defer src="/site.js"></script>
+  <script type="module" src="/assets/learn-labs.js"></script>
 </body>
 </html>

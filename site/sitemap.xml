@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://mingacode.dev/</loc><priority>1.0</priority></url>
+  <url><loc>https://mingacode.dev/why-minga</loc><priority>0.9</priority></url>
+  <url><loc>https://mingacode.dev/getting-started</loc><priority>0.9</priority></url>
+  <url><loc>https://mingacode.dev/architecture</loc><priority>0.8</priority></url>
+  <url><loc>https://mingacode.dev/extending</loc><priority>0.8</priority></url>
+  <url><loc>https://mingacode.dev/learn/</loc><priority>0.9</priority></url>
+  <url><loc>https://mingacode.dev/learn/editing</loc><priority>0.8</priority></url>
+  <url><loc>https://mingacode.dev/learn/agents</loc><priority>0.8</priority></url>
+  <url><loc>https://mingacode.dev/learn/elixir</loc><priority>0.8</priority></url>
+  <url><loc>https://mingacode.dev/learn/remote</loc><priority>0.8</priority></url>
+  <url><loc>https://mingacode.dev/docs/</loc><priority>0.8</priority></url>
+</urlset>

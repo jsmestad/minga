@@ -6,12 +6,25 @@
   <meta name="robots" content="noindex, nofollow">
   <title>Getting Started: Minga</title>
   <meta name="description" content="Install Minga on macOS or build from source, configure Vim or desktop shortcuts, connect a model provider, run your first staged edit, and copy starter recipes for hooks, MCP, and remote agents.">
+  <link rel="canonical" href="https://mingacode.dev/getting-started">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#303446" media="(prefers-color-scheme: dark)">
+  <meta property="og:site_name" content="Minga">
+  <meta property="og:locale" content="en_US">
   <meta property="og:type" content="article">
+  <meta property="og:url" content="https://mingacode.dev/getting-started">
   <meta property="og:title" content="Getting Started: Minga">
   <meta property="og:description" content="Install Minga on macOS or build from source, connect a model provider, run your first staged edit, and try starter recipes for hooks, MCP, and remote devboxes.">
-  <meta property="og:image" content="/assets/og-minga.png">
+  <meta property="og:image" content="https://mingacode.dev/assets/og-minga.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:image" content="/assets/og-minga.png">
+  <meta name="twitter:title" content="Getting Started: Minga">
+  <meta name="twitter:description" content="Install Minga on macOS or build from source, connect a model provider, run your first staged edit, and try starter recipes for hooks, MCP, and remote devboxes.">
+  <meta name="twitter:image" content="https://mingacode.dev/assets/og-minga.png">
+  <meta name="twitter:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Getting Started: Minga","description":"Install Minga on macOS or build from source, configure Vim or desktop shortcuts, connect a model provider, run your first staged edit, and copy starter recipes for hooks, MCP, and remote agents.","url":"https://mingacode.dev/getting-started","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Getting Started","item":"https://mingacode.dev/getting-started"}]}]}</script>
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
@@ -247,7 +260,7 @@ set <span class="tok-atom">:tab_width</span>, <span class="tok-num">2</span></co
         </section>
 
         <section class="essay-section" id="recipes">
-          <h2>5. Four starter recipes that ship today</h2>
+          <h2>5. Four starter recipes</h2>
           <p>Drop any of these directly into <code>~/.config/minga/config.exs</code> (reload live with <kbd>SPC h r</kbd>) or run remote agents over SSH:</p>
 
           <div class="code-tabs" data-code-tabs>

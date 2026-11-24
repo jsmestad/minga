@@ -148,23 +148,23 @@ export function mountRemoteLab(root: HTMLElement): void {
             </div>
             <div class="veto-input-row">
               <label class="sr-only" for="rm-cmd-input">Shell command to test against PreToolUse hook</label>
-              <input id="rm-cmd-input" class="veto-input" type="text" value="${esc(commandInput)}" data-rm-input>
+              <input id="rm-cmd-input" class="veto-input" type="text" data-rm-input>
               <button type="button" class="btn" data-rm-action="run-hook">Run hook</button>
             </div>
             <div class="veto-io">
               <div>
                 <span class="veto-io-label">stdin -&gt; check-shell-command.sh</span>
-                <pre><code>${esc(lastHook.stdinJson)}</code></pre>
+                <pre><code data-rm-stdin></code></pre>
               </div>
               <div>
                 <span class="veto-io-label">result (exit ${lastHook.exitCode})</span>
-                <p class="veto-result ${lastHook.allowed ? "is-ok" : "is-fail"}">${esc(lastHook.stderr || lastHook.summary)}</p>
-                ${lastHook.stderr ? `<p class="veto-sub">${esc(lastHook.summary)}</p>` : ""}
+                <p class="veto-result ${lastHook.allowed ? "is-ok" : "is-fail"}" data-rm-result></p>
+                ${lastHook.stderr ? '<p class="veto-sub" data-rm-sub></p>' : ""}
               </div>
             </div>
           </div>
 
-          <div class="lab-note" aria-live="polite">${esc(lastEvent)}</div>
+          <div class="lab-note" aria-live="polite" data-rm-event></div>
         </div>
 
         <aside class="workbench-missions" aria-label="Remote & safety missions">
@@ -176,6 +176,17 @@ export function mountRemoteLab(root: HTMLElement): void {
           <ul class="mission-list">${missionsHtml}</ul>
         </aside>
       </div>`;
+
+    const rmInput = root.querySelector<HTMLInputElement>("[data-rm-input]");
+    if (rmInput) rmInput.value = commandInput;
+    const rmStdin = root.querySelector<HTMLElement>("[data-rm-stdin]");
+    if (rmStdin) rmStdin.textContent = lastHook.stdinJson;
+    const rmResult = root.querySelector<HTMLElement>("[data-rm-result]");
+    if (rmResult) rmResult.textContent = lastHook.stderr || lastHook.summary;
+    const rmSub = root.querySelector<HTMLElement>("[data-rm-sub]");
+    if (rmSub) rmSub.textContent = lastHook.summary;
+    const rmEvent = root.querySelector<HTMLElement>("[data-rm-event]");
+    if (rmEvent) rmEvent.textContent = lastEvent;
   }
 
   root.addEventListener("click", (event) => {

@@ -6,12 +6,25 @@
   <meta name="robots" content="noindex, nofollow">
   <title>Why Minga: A programmable workbench where text is the interface</title>
   <meta name="description" content="Why Minga makes a minimal, text-first UI the default across macOS and the terminal, how it compares honestly to Cursor, Zed, Herdr, Neovim, and Emacs, and what comes after v0.1.0.">
+  <link rel="canonical" href="https://mingacode.dev/why-minga">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#303446" media="(prefers-color-scheme: dark)">
+  <meta property="og:site_name" content="Minga">
+  <meta property="og:locale" content="en_US">
   <meta property="og:type" content="article">
+  <meta property="og:url" content="https://mingacode.dev/why-minga">
   <meta property="og:title" content="Why Minga: A programmable workbench where text is the interface">
   <meta property="og:description" content="Why Minga makes a minimal, text-first UI the default across macOS and the terminal, how it compares to Cursor, Zed, Herdr, Neovim, and Emacs, and what comes after v0.1.0.">
-  <meta property="og:image" content="/assets/og-minga.png">
+  <meta property="og:image" content="https://mingacode.dev/assets/og-minga.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:image" content="/assets/og-minga.png">
+  <meta name="twitter:title" content="Why Minga: A programmable workbench where text is the interface">
+  <meta name="twitter:description" content="Why Minga makes a minimal, text-first UI the default across macOS and the terminal, how it compares to Cursor, Zed, Herdr, Neovim, and Emacs, and what comes after v0.1.0.">
+  <meta name="twitter:image" content="https://mingacode.dev/assets/og-minga.png">
+  <meta name="twitter:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Why Minga: A programmable workbench where text is the interface","description":"Why Minga makes a minimal, text-first UI the default across macOS and the terminal, how it compares honestly to Cursor, Zed, Herdr, Neovim, and Emacs, and what comes after v0.1.0.","url":"https://mingacode.dev/why-minga","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Why Minga","item":"https://mingacode.dev/why-minga"}]}]}</script>
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
@@ -73,6 +86,7 @@
           <h2>1. Editors fail when panels compete with your code</h2>
           <p>Most AI editors default to crowded IDE panels: activity rails, permanent file trees, tab bars, chat drawers, and workspace pills. You can hide those panels in VS Code, Cursor, or Zed via Zen Mode, but the surrounding workflow still assumes permanent docks and desktop-only panels. We learned the same lesson the hard way in Minga's early builds: once we added separate "Editor" and "Agent" workspaces, icon rails, and status strips, people could not tell which workspace they were in, status indicators disagreed across bars, and the macOS app and terminal client drifted apart.</p>
           <p>Minga's interface model (<a href="/docs/0006-the-spine.html">ADR-0006</a>) makes text-first the default constraint rather than an optional mode. <span data-status="planned" data-since="v0.1.0">Ordinary window splits and on-demand file switchers remain first-class, while permanent rails, tab strips, and workspace containers disappear.</span> That is a deliberate tradeoff: if you prefer a permanent wide-screen file tree and fixed tabs on a 5K monitor, Cursor or Zed is built for that. If you want the exact same quiet muscle memory on your MacBook and over SSH in a terminal, one shared layout is the point.</p>
+          <div data-layout-comparator data-status="planned" data-since="v0.1.0" data-pill="off"></div>
         </section>
 
         <section class="essay-section" id="the-bottleneck">
@@ -92,6 +106,8 @@
         <section class="essay-section" id="comparison">
           <h2>3. How Minga compares (and where others win today)</h2>
           <p>Every tool in this space makes real architectural tradeoffs. Here is where Minga sits against the options engineers actually use:</p>
+
+          <div data-compare-lens></div>
 
           <div class="table-wrap">
             <div class="scroll-hint" aria-hidden="true">Scroll table horizontally -&gt;</div>
@@ -191,7 +207,7 @@
                 </tr>
                 <tr>
                   <td>Disposable &amp; reusable workflows (ADR-0004)</td>
-                  <td>Active v0.1.0 target. Live config, hooks, command advice, Hex/Git extensions, <code>PreToolUse</code> hooks, MCP servers, and corporate LLM gateways ship today; save-to-activate task workflows and cross-repo reuse land in v0.1.0.</td>
+                  <td>Active v0.1.0 target. Live config, hooks, command advice, Hex/Git extensions, <code>PreToolUse</code> hooks, MCP servers, and corporate LLM gateways are available now; save-to-activate task workflows and cross-repo reuse land in v0.1.0.</td>
                 </tr>
                 <tr>
                   <td>Built-in terminal buffers</td>
@@ -238,5 +254,6 @@
   </footer>
 
   <script defer src="/site.js"></script>
+  <script type="module" src="/assets/learn-labs.js"></script>
 </body>
 </html>

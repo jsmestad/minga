@@ -6,12 +6,25 @@
   <meta name="robots" content="noindex, nofollow">
   <title>Learn Minga: Interactive Curriculum &amp; Labs</title>
   <meta name="description" content="Hands-on interactive lessons for learning Minga: adaptive install runbook, playable v0.1.0 Mini-Minga key sandbox, live parallel-agent Twist simulator, Lua/Elisp/VS Code to Elixir translator, and remote fault-injection topology.">
+  <link rel="canonical" href="https://mingacode.dev/learn/">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#303446" media="(prefers-color-scheme: dark)">
+  <meta property="og:site_name" content="Minga">
+  <meta property="og:locale" content="en_US">
   <meta property="og:type" content="website">
+  <meta property="og:url" content="https://mingacode.dev/learn/">
   <meta property="og:title" content="Learn Minga: Interactive Curriculum &amp; Labs">
   <meta property="og:description" content="Five distinct, playable lessons covering Minga's v0.1.0 interface model, parallel agent co-authoring, Elixir customization, and remote devboxes.">
-  <meta property="og:image" content="/assets/og-minga.png">
+  <meta property="og:image" content="https://mingacode.dev/assets/og-minga.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:image" content="/assets/og-minga.png">
+  <meta name="twitter:title" content="Learn Minga: Interactive Curriculum &amp; Labs">
+  <meta name="twitter:description" content="Five distinct, playable lessons covering Minga's v0.1.0 interface model, parallel agent co-authoring, Elixir customization, and remote devboxes.">
+  <meta name="twitter:image" content="https://mingacode.dev/assets/og-minga.png">
+  <meta name="twitter:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Course","name":"Learn Minga: Interactive Curriculum","url":"https://mingacode.dev/learn/","description":"Hands-on interactive lessons for learning Minga: adaptive install runbook, playable v0.1.0 Mini-Minga key sandbox, live parallel-agent Twist simulator, Lua/Elisp/VS Code to Elixir translator, and remote fault-injection topology.","provider":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"},"hasCourseInstance":{"@type":"CourseInstance","courseMode":"online","isAccessibleForFree":true},"hasPart":[{"@type":"LearningResource","name":"Lesson 01: Install & Your First Staged Edit","url":"https://mingacode.dev/getting-started"},{"@type":"LearningResource","name":"Lesson 02: Editing, Keys & Minimal UI","url":"https://mingacode.dev/learn/editing"},{"@type":"LearningResource","name":"Lesson 03: Co-Authoring & Parallel Agents","url":"https://mingacode.dev/learn/agents"},{"@type":"LearningResource","name":"Lesson 04: Elixir for Minga","url":"https://mingacode.dev/learn/elixir"},{"@type":"LearningResource","name":"Lesson 05: Remote Devboxes, MCP & Safety","url":"https://mingacode.dev/learn/remote"}]}</script>
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
@@ -63,7 +76,7 @@
           <div class="hub-progress-box">
             <span class="hub-progress-k">CURRICULUM STATUS</span>
             <p class="hub-progress-stat" data-hub-overall>16 hands-on browser missions across 5 lessons · Zero accounts</p>
-            <p class="hub-progress-note">Lesson 01, 04, and 05 teach what ships on <code>main</code> today. Lessons 02 and 03 teach the v0.1.0 Spine design directly (marked <strong>Coming · v0.1.0</strong>).</p>
+            <p class="hub-progress-note">Lessons 02 and 03 preview the upcoming v0.1.0 interface design (marked <strong>Coming · v0.1.0</strong>). Everything else works in current builds.</p>
           </div>
         </div>
       </div>
@@ -78,7 +91,6 @@
               <div class="bento-top">
                 <span class="lesson-num">LESSON 01 · QUICKSTART RUNBOOK</span>
                 <span class="bento-badges">
-                  <span class="lesson-tag-shipped">Ships today</span>
                   <span class="bento-prog" data-lesson-progress="getting-started">1 step</span>
                 </span>
               </div>
@@ -90,6 +102,7 @@
                 <span>Staged diff review</span>
                 <span>4 starter recipes</span>
               </div>
+              <span class="bento-cta">Open quickstart runbook <span class="bento-arrow" aria-hidden="true">-&gt;</span></span>
             </div>
             <div class="bento-motif motif-cli" aria-hidden="true">
               <div class="motif-bar"><span>zsh · quickstart</span><span>macOS / Linux</span></div>
@@ -120,6 +133,7 @@
               </div>
               <h2>Editing, Keys &amp; Minimal UI</h2>
               <p>Play a live keyboard-driven Mini-Minga viewport: trigger which-key, pin files in the Switcher, open the Direction A Act Menu, toggle macOS vs Go TUI parity, and explore ADR-0007 CUA.</p>
+              <span class="bento-cta">Launch playable sandbox <span class="bento-arrow" aria-hidden="true">-&gt;</span></span>
             </div>
           </a>
 
@@ -142,6 +156,7 @@
               </div>
               <h2>Co-Authoring &amp; Parallel Agents</h2>
               <p>Test per-author undo inside a braided Twist block, feel the 300 ms anti-misfire lockout guard, inspect siblings in Subagent Peek, and keep or reject via the Direction A Act Menu.</p>
+              <span class="bento-cta">Open co-authoring simulator <span class="bento-arrow" aria-hidden="true">-&gt;</span></span>
             </div>
           </a>
 
@@ -158,12 +173,12 @@
               <div class="bento-top">
                 <span class="lesson-num">LESSON 04 · TRANSLATOR + PLAYGROUND</span>
                 <span class="bento-badges">
-                  <span class="lesson-tag-shipped">Ships today</span>
                   <span class="bento-prog" data-lesson-progress="elixir">3 missions</span>
                 </span>
               </div>
               <h2>Elixir for Minga</h2>
               <p>Pick your current editor (Neovim, Emacs, or VS Code) for an interactive side-by-side translator, then customize presets and watch a live mini-editor preview update in real time.</p>
+              <span class="bento-cta">Open translator &amp; playground <span class="bento-arrow" aria-hidden="true">-&gt;</span></span>
             </div>
           </a>
 
@@ -184,12 +199,12 @@
               <div class="bento-top">
                 <span class="lesson-num">LESSON 05 · FAULT-INJECTION LAB</span>
                 <span class="bento-badges">
-                  <span class="lesson-tag-shipped">Ships today</span>
                   <span class="bento-prog" data-lesson-progress="remote">3 missions</span>
                 </span>
               </div>
               <h2>Remote Devboxes, MCP &amp; Safety</h2>
               <p>Close the laptop lid and reattach to a headless devbox, crash an isolated MCP server without losing buffers, and test real shell commands against a live <code>PreToolUse</code> veto hook.</p>
+              <span class="bento-cta">Launch fault-injection lab <span class="bento-arrow" aria-hidden="true">-&gt;</span></span>
             </div>
           </a>
         </div>
