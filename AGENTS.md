@@ -814,7 +814,7 @@ Every planned block shows the reader a label. `data-status` stays `"planned"`; t
 The check also reads two places a reader sees that are not page text:
 
 - **Page metadata.** The `description`, `og:description` and `twitter:description` meta tags and every JSON-LD `description` follow the key and claim rules. They are claims about today's build unless `<head>` carries `data-status="planned"`. Mark the head only on a page that is wholly about an unreleased version.
-- **Lab copy in TypeScript.** Lab captions, legends and step text live in the page HTML, where the check reads them. A string in `site/ts/src/**/*.ts` that names a leader sequence (`SPC` plus a key) or a phrase from `site_claims.toml` fails unless `design/tools/site_ts_copy_baseline.tsv` lists it. **Never add baseline rows or raise a count;** move the copy into the page instead. When you move copy out of TypeScript, run `python3 design/tools/site_check.py --prune-ts-baseline`: the check fails on stale rows.
+- **Lab copy in TypeScript.** Lab captions, legends and step text live in the page HTML, where the check reads them. The check counts every leader sequence (`SPC` plus a key) and every phrase from `site_claims.toml` across `site/ts/src/**/*.ts`, comments included, and fails when a count is above the one in `design/tools/site_ts_copy_baseline.tsv`. A row is kind, value and one total count, so moving or renaming a lab file needs no baseline edit. **Never add baseline rows or raise a count;** move the copy into the page instead. When you move copy out of TypeScript, run `python3 design/tools/site_check.py --prune-ts-baseline`: the check fails on stale rows. This check runs only on a full run, with no page arguments.
 
 ### Documentation voice and style
 

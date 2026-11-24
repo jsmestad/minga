@@ -52,18 +52,32 @@ The staged site describes v0.1.0 before v0.1.0 exists, so a reader needs to see 
 
 **Page metadata.** Search results and link previews show copy that is not in the page body. The check reads the `description`, `og:description` and `twitter:description` meta tags and every `description` in a JSON-LD block, and applies the same key and claim rules. Metadata is a claim about today's build unless `<head>` carries `data-status="planned"`. A JSON-LD block that does not parse fails.
 
-**Lab copy in TypeScript.** The check does not read what a lab renders from TypeScript, so lab captions, legends and step text live in the page HTML. To stop new copy from hiding in the labs, the check scans every string literal in `site/ts/src/**/*.ts` for two things:
+**Lab copy in TypeScript.** The check does not read what a lab renders from TypeScript, so lab captions, legends and step text live in the page HTML. To stop new copy from hiding in the labs, the check counts two things across `site/ts/src/**/*.ts`:
 
 - a leader sequence: `SPC` plus at least one key, such as `SPC a y` or the range legend `SPC 1-4`. A bare `SPC` is not counted; it is a shipped key and a common state value.
-- a phrase from `site_claims.toml`, matched as whole words, so a class name that contains it does not count.
+- a phrase from `site_claims.toml`, matched as whole words. A one-word phrase matches only as written, so `Twist` in a sentence counts and a `"twist"` state tag does not. A phrase of several words ignores case.
 
-`site_ts_copy_baseline.tsv` lists what was there when the check landed: one row per file, kind and value, with a count. The baseline only shrinks. A new value, or one more occurrence than the row allows, fails. A row whose count is higher than the sources fails too, so a lab that moves its copy into the page prunes its rows in the same pull request:
+The scan reads each file as plain text. It does not know what a string literal is, so **a comment counts too**. Before it counts, it turns escapes such as `\"` and `\n` into a space, drops HTML tags (keeping `aria-label`, `title`, `alt` and `placeholder` text), decodes entities and collapses spaces. `<kbd>SPC</kbd> <kbd>a</kbd>` and `SPC&nbsp;a` both read `SPC a`.
+
+`site_ts_copy_baseline.tsv` lists what was there when the check landed. A row is kind, value and one count for the whole of `site/ts/src`:
+
+```
+key	SPC a y	9
+claim	Twist	9
+```
+
+The count has no file name, so renaming, moving or splitting a lab needs no baseline edit, and deleting a lab only lowers counts. The baseline only shrinks:
+
+- A value that is not listed fails. So does one more occurrence than the row allows. Move the copy into the page HTML.
+- A row whose count is above the sources fails as stale. Prune it in the same pull request:
 
 ```bash
 python3 design/tools/site_check.py --prune-ts-baseline
 ```
 
-The writer keeps only rows that are already listed and never raises a count, so it cannot add debt.
+The writer keeps only rows that are already listed and never raises a count, so it cannot add debt. It takes no other argument.
+
+This check runs only on a full run. `python3 design/tools/site_check.py site/index.html` checks that page and skips the lab sources.
 
 The checker's own tests are in `test/scripts/site_check_test.py`:
 
