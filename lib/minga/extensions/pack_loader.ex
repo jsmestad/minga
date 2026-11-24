@@ -5,12 +5,29 @@ defmodule Minga.Extensions.PackLoader do
   Each pack module (language, theme, recipe) delegates its startup, source tagging, and disabled-pack filtering to this module. The pack module itself keeps only its type-specific registration and collection logic.
 
   Registration runs synchronously during supervision startup and returns `:ignore`, so no idle registrar process remains after the catalog is loaded.
+
+  Each loader is placed after its destination registry under a `rest_for_one` supervisor. When the registry restarts with an empty table, the supervisor runs the loader again and the bundled catalog returns.
   """
 
   @type pack_module :: module()
   @type state :: %{loaded: [atom()], failed: [{atom(), term()}]}
   @type register_fn :: (pack_module() -> :ok | {:error, term()})
   @type unregister_fn :: (pack_module() -> :ok)
+
+  @doc """
+  Returns the supervision child spec for a bundled pack loader module.
+
+  The spec is `:transient`, not `:temporary`. A supervisor keeps a non-temporary child that returned `:ignore` and starts it again when a `rest_for_one` restart reaches it. A temporary child is dropped, so its catalog would never be loaded again after its registry restarts.
+  """
+  @spec child_spec(module(), keyword()) :: Supervisor.child_spec()
+  def child_spec(loader, opts) when is_atom(loader) and is_list(opts) do
+    %{
+      id: loader,
+      start: {loader, :start_link, [opts]},
+      type: :worker,
+      restart: :transient
+    }
+  end
 
   @doc "Returns the contribution source used for a pack."
   @spec source_for(pack_module()) :: {:extension, atom()}
