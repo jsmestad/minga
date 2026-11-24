@@ -13,7 +13,6 @@ defmodule MingaAgent.TokenEstimatorTest do
     test "single system message includes system overhead" do
       messages = [%{role: "system", content: "You are helpful."}]
       result = TokenEstimator.estimate(messages)
-      # ~16 chars / 3.5 ≈ 5 + 4 (msg overhead) + 8 (system overhead) = 17
       assert result > 10
       assert result < 25
     end
@@ -26,7 +25,6 @@ defmodule MingaAgent.TokenEstimatorTest do
       ]
 
       result = TokenEstimator.estimate(messages)
-      # Should be > single message
       assert result > 20
     end
 
@@ -52,8 +50,110 @@ defmodule MingaAgent.TokenEstimatorTest do
     test "handles messages without content" do
       messages = [%{role: "assistant"}]
       result = TokenEstimator.estimate(messages)
-      # Just the overhead
       assert result == 4
+    end
+  end
+
+  describe "tool call accounting" do
+    test "assistant with tool_calls includes function name and arguments" do
+      small_args = ~s({"x": 1})
+      large_args = String.duplicate("x", 20_000)
+
+      small = [
+        %{
+          role: :assistant,
+          content: [],
+          tool_calls: [
+            %{function: %{name: "read_file", arguments: small_args}}
+          ]
+        }
+      ]
+
+      large = [
+        %{
+          role: :assistant,
+          content: [],
+          tool_calls: [
+            %{function: %{name: "read_file", arguments: large_args}}
+          ]
+        }
+      ]
+
+      small_est = TokenEstimator.estimate(small)
+      large_est = TokenEstimator.estimate(large)
+
+      assert large_est > small_est * 100,
+             "20k-char argument (#{large_est}) should be >100x a tiny argument (#{small_est})"
+    end
+
+    test "multiple tool calls accumulate" do
+      messages = [
+        %{
+          role: :assistant,
+          content: [],
+          tool_calls: [
+            %{function: %{name: "read_file", arguments: ~s({"path": "/a.txt"})}},
+            %{
+              function: %{
+                name: "write_file",
+                arguments: ~s({"path": "/b.txt", "content": "hello"})
+              }
+            }
+          ]
+        }
+      ]
+
+      one_call = [
+        %{
+          role: :assistant,
+          content: [],
+          tool_calls: [
+            %{function: %{name: "read_file", arguments: ~s({"path": "/a.txt"})}}
+          ]
+        }
+      ]
+
+      assert TokenEstimator.estimate(messages) > TokenEstimator.estimate(one_call)
+    end
+
+    test "tool result message includes tool_call_id" do
+      with_id = [%{role: :tool, content: "result", tool_call_id: "call_abc123def456"}]
+      without_id = [%{role: :tool, content: "result"}]
+
+      assert TokenEstimator.estimate(with_id) > TokenEstimator.estimate(without_id)
+    end
+
+    test "nil or empty tool_calls do not add tokens" do
+      base = [%{role: :assistant, content: "Hello"}]
+      with_nil = [%{role: :assistant, content: "Hello", tool_calls: nil}]
+      with_empty = [%{role: :assistant, content: "Hello", tool_calls: []}]
+
+      base_est = TokenEstimator.estimate(base)
+      assert TokenEstimator.estimate(with_nil) == base_est
+      assert TokenEstimator.estimate(with_empty) == base_est
+    end
+  end
+
+  describe "reasoning details" do
+    test "reasoning text is included in the estimate" do
+      without = [%{role: :assistant, content: "Answer"}]
+
+      with_reasoning = [
+        %{
+          role: :assistant,
+          content: "Answer",
+          reasoning_details: [%{text: String.duplicate("thinking ", 500)}]
+        }
+      ]
+
+      assert TokenEstimator.estimate(with_reasoning) > TokenEstimator.estimate(without) * 5
+    end
+
+    test "nil reasoning_details does not add tokens" do
+      base = [%{role: :assistant, content: "Hello"}]
+      with_nil = [%{role: :assistant, content: "Hello", reasoning_details: nil}]
+
+      assert TokenEstimator.estimate(with_nil) == TokenEstimator.estimate(base)
     end
   end
 
