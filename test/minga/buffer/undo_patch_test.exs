@@ -81,7 +81,8 @@ defmodule Minga.Buffer.UndoPatchTest do
       assert Document.content(undone) == Document.content(old)
     end
 
-    # A permutation holds the same lines on both sides, so only the edit distance itself, not a line count, shows that a precise diff would be too expensive.
+    # A permutation holds the same lines on both sides.
+    # Only the edit distance itself, not a line count, shows that a precise diff costs too much.
     test "reordering the lines of a large file records the reordered span as one region" do
       lines = for n <- 1..2_000, do: "line #{n}\n"
       swapped = lines |> Enum.chunk_every(2) |> Enum.flat_map(&Enum.reverse/1)
@@ -117,7 +118,8 @@ defmodule Minga.Buffer.UndoPatchTest do
                Enum.map(patches, &{&1.start_byte, &1.old_text, &1.new_text})
     end
 
-    # Shuffles this large hold the same lines on both sides and far more differing lines than the budget allows, so each one takes the capped fallback.
+    # Shuffles this large hold the same lines on both sides.
+    # They differ in far more lines than the budget allows, so each takes the capped fallback.
     property "a shuffled large file becomes one region that undoes and redoes exactly" do
       check all(
               count <- integer(800..1_500),
