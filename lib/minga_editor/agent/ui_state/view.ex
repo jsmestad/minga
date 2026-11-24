@@ -291,6 +291,12 @@ defmodule MingaEditor.Agent.UIState.View do
     %{view | review_highlights: highlights}
   end
 
+  @doc "Prepares review highlight results for a stashed background tab."
+  @spec suspend_review_highlights(t()) :: t()
+  def suspend_review_highlights(%__MODULE__{review_highlights: highlights} = view) do
+    %{view | review_highlights: ReviewHighlights.suspend(highlights)}
+  end
+
   @doc "Drops Editor-only planning state from a renderer snapshot."
   @spec render_snapshot(t()) :: t()
   def render_snapshot(%__MODULE__{review_highlights: highlights} = view) do

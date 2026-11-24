@@ -240,8 +240,9 @@ defmodule MingaEditor.TabWorkflow do
       %TabBar{} = tab_bar ->
         case TabBar.active_workspace(tab_bar) do
           %Workspace{id: workspace_id, payload: %WorkspaceAgent{}} ->
-            tab_bar =
-              TabBar.set_workspace_agent_ui(tab_bar, workspace_id, state.workspace.agent_ui)
+            # Parse results for a stashed tab are discarded, so its pending parses restart on return.
+            agent_ui = UIState.suspend_review_highlights(state.workspace.agent_ui)
+            tab_bar = TabBar.set_workspace_agent_ui(tab_bar, workspace_id, agent_ui)
 
             shell_state = TraditionalState.install_tab_bar(shell_state, tab_bar)
 

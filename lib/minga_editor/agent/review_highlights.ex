@@ -75,6 +75,20 @@ defmodule MingaEditor.Agent.ReviewHighlights do
     end
   end
 
+  @doc """
+  Prepares the value for a background tab whose Editor messages will not reach it.
+
+  Drops pending parses, whose results would arrive while the value is stashed and be discarded, and clears the planning identity so the next plan after the tab returns requests them again. Ready and unavailable results stay.
+  """
+  @spec suspend(t()) :: t()
+  def suspend(%__MODULE__{entries: entries} = store) do
+    %{
+      store
+      | source: nil,
+        entries: Map.reject(entries, fn {_key, entry} -> entry == :pending end)
+    }
+  end
+
   @doc "Returns the ready result for each side of the review, or `nil` for a side that is pending or has no grammar."
   @spec sides(t()) :: %{side() => ready() | nil}
   def sides(%__MODULE__{wanted: wanted, entries: entries}) do
@@ -121,7 +135,12 @@ defmodule MingaEditor.Agent.ReviewHighlights do
         }
 
         wanted = Map.new(texts, fn {side, text} -> {side, key(language, text)} end)
-        retained = Map.take(store.entries, Map.values(wanted))
+
+        # A pending entry is re-requested: its result may have been discarded, and a duplicate result is stale.
+        retained =
+          store.entries
+          |> Map.take(Map.values(wanted))
+          |> Map.reject(fn {_key, entry} -> entry == :pending end)
 
         requests =
           texts

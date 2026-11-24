@@ -99,6 +99,55 @@ defmodule MingaEditor.Agent.ReviewHighlightWorkflowTest do
     refute_received {:agent_review_highlight, _key, _result}
   end
 
+  test "a parse finishing while its tab is stashed is not applied elsewhere and restarts on return",
+       %{supervisor: supervisor} do
+    test = self()
+
+    highlighter = fn _language, source, _opts ->
+      send(test, {:parse_started, self(), source})
+      receive do: (:release -> {:ok, ["keyword"], [Span.new(0, 3, 0)]})
+    end
+
+    opts = [highlighter: highlighter, supervisor: supervisor]
+
+    state =
+      ReviewHighlightWorkflow.request(
+        review_state(DiffReview.new("lib/a.ex", "def old", "def new")),
+        opts
+      )
+
+    assert_receive {:parse_started, parser, "def old"}
+    assert_receive {:parse_started, _new_parser, "def new"}
+
+    # Stash this Agent tab the way TabWorkflow does, then show another workspace's review.
+    stashed = UIState.suspend_review_highlights(state.workspace.agent_ui)
+    other = replace_review(state, DiffReview.new("lib/b.ex", "x = 1", "x = 2"))
+
+    other =
+      install_ui(
+        other,
+        UIState.replace_review_highlights(other.workspace.agent_ui, ReviewHighlights.new())
+      )
+
+    other = ReviewHighlightWorkflow.request(other, opts)
+    assert_receive {:parse_started, _, "x = 1"}
+    assert_receive {:parse_started, _, "x = 2"}
+
+    send(parser, :release)
+    assert_receive {:agent_review_highlight, key, result}
+    assert ReviewHighlightWorkflow.complete(other, key, result) == :stale
+
+    # Returning to the stashed tab with the same review starts both parses again.
+    returned = ReviewHighlightWorkflow.request(install_ui(other, stashed), opts)
+    assert_receive {:parse_started, _, "def old"}
+    assert_receive {:parse_started, _, "def new"}
+    assert {:accepted, returned} = ReviewHighlightWorkflow.complete(returned, key, result)
+    assert %{old: {^key, ["keyword"], _spans}} = sides(returned)
+  end
+
+  defp install_ui(state, ui),
+    do: MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
+
   defp review_state(review) do
     state = %EditorState{
       frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: nil},

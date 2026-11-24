@@ -640,6 +640,12 @@ defmodule MingaEditor.Agent.UIState do
     %{state | view: View.replace_review_highlights(view, highlights)}
   end
 
+  @doc "Prepares review highlight results for stashing in a background tab."
+  @spec suspend_review_highlights(t()) :: t()
+  def suspend_review_highlights(%__MODULE__{view: view} = state) do
+    %{state | view: View.suspend_review_highlights(view)}
+  end
+
   @doc "Sets the pending prefix for multi-key sequences."
   @spec set_prefix(t(), View.prefix()) :: t()
   def set_prefix(%__MODULE__{view: view} = state, prefix) do

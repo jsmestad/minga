@@ -60,6 +60,36 @@ defmodule MingaEditor.Agent.ReviewHighlightsTest do
     end
   end
 
+  describe "suspend/1" do
+    test "a pending parse stashed with its tab is requested again when the same review returns" do
+      review = DiffReview.new("lib/a.ex", @before, @after_content)
+      {:planned, store, [{old_key, _, _} = old_request, {new_key, _, _}]} = plan_sorted(review)
+      store = complete_all(store, [old_request])
+
+      suspended = ReviewHighlights.suspend(store)
+
+      assert {:planned, restored, [{^new_key, "elixir", @after_content}]} =
+               ReviewHighlights.plan(suspended, review)
+
+      assert %{old: {^old_key, _names, _spans}, new: nil} = ReviewHighlights.sides(restored)
+      refute old_key == new_key
+    end
+  end
+
+  test "a new revision re-requests a parse that is still pending" do
+    review = DiffReview.new("lib/a.ex", @before, @after_content)
+    {:planned, store, [{old_key, _, _}, _new]} = plan_sorted(review)
+
+    edited = DiffReview.new("lib/a.ex", @before, @after_content <> "\n# more")
+    {:planned, store, requests} = ReviewHighlights.plan(store, edited)
+    assert Enum.any?(requests, &match?({^old_key, "elixir", @before}, &1))
+
+    # Both answers may arrive; the first installs and the duplicate is stale.
+    result = {:ready, [], ReviewHighlights.pack_spans([])}
+    assert {:accepted, store} = ReviewHighlights.complete(store, old_key, result)
+    assert ReviewHighlights.complete(store, old_key, result) == :stale
+  end
+
   describe "complete/3" do
     test "installs a pending result and rejects results nobody waits for" do
       review = DiffReview.new("lib/a.ex", @before, @after_content)
@@ -92,6 +122,12 @@ defmodule MingaEditor.Agent.ReviewHighlightsTest do
     snapshot = ReviewHighlights.render_snapshot(store)
     assert snapshot.source == nil
     assert ReviewHighlights.sides(snapshot) == ReviewHighlights.sides(store)
+  end
+
+  # Orders requests as [old, new] by their source text.
+  defp plan_sorted(review) do
+    {:planned, store, requests} = ReviewHighlights.plan(ReviewHighlights.new(), review)
+    {:planned, store, Enum.sort_by(requests, fn {_key, _lang, source} -> source != @before end)}
   end
 
   defp complete_all(store, requests) do
