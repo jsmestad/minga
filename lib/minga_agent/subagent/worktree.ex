@@ -67,22 +67,34 @@ defmodule MingaAgent.Subagent.Worktree do
     "\n\nWorktree: #{worktree.path}\nBranch: #{worktree.branch}"
   end
 
-  @doc "Collects structured file changes from a worktree relative to its base SHA."
+  @typedoc "A change prepared for integration: path, content at the base SHA, and the child's content."
+  @type integration_entry :: {String.t(), binary() | :missing, binary() | :deleted}
+
+  @doc """
+  Collects structured file changes from a worktree relative to its base SHA.
+
+  Compares the base SHA with the working tree, so committed, staged, unstaged and untracked (but not ignored) changes all count, each path once.
+  """
   @spec collect_changes(t()) :: {:ok, [change()]} | {:error, String.t()}
   def collect_changes(%__MODULE__{} = worktree) do
-    with {:ok, committed} <- committed_changes(worktree),
-         {:ok, uncommitted} <- uncommitted_changes(worktree) do
-      {:ok, merge_changes(committed, uncommitted)}
-    end
+    collect(&output(worktree, worktree.path, &1), worktree.base_sha)
   end
 
   @doc "Collects changes from a worktree path and base SHA using the system backend."
   @spec collect_changes_from(String.t(), String.t()) :: {:ok, [change()]} | {:error, String.t()}
   def collect_changes_from(worktree_path, base_sha)
       when is_binary(worktree_path) and is_binary(base_sha) do
-    with {:ok, committed} <- git_diff(worktree_path, base_sha, "HEAD"),
-         {:ok, uncommitted} <- git_diff(worktree_path, "HEAD", nil) do
-      {:ok, merge_changes(committed, uncommitted)}
+    collect(&System.stdout(worktree_path, &1), base_sha)
+  end
+
+  @doc "Reads the base and child content for each collected change in the calling process."
+  @spec integration_entries(String.t(), String.t(), [change()]) ::
+          {:ok, [integration_entry()]} | {:error, {String.t(), term()}}
+  def integration_entries(worktree_path, base_sha, changes)
+      when is_binary(worktree_path) and is_binary(base_sha) and is_list(changes) do
+    with {:ok, reversed} <-
+           Enum.reduce_while(changes, {:ok, []}, &add_entry(worktree_path, base_sha, &1, &2)) do
+      {:ok, Enum.reverse(reversed)}
     end
   end
 
@@ -106,69 +118,57 @@ defmodule MingaAgent.Subagent.Worktree do
     end
   end
 
-  @spec git_diff(String.t(), String.t(), String.t() | nil) ::
+  @spec collect(([String.t()] -> {:ok, String.t()} | {:error, String.t()}), String.t()) ::
           {:ok, [change()]} | {:error, String.t()}
-  defp git_diff(cwd, from, nil) do
-    case System.run(cwd, ["diff", "--name-status", from], []) do
-      {:ok, ""} -> {:ok, []}
-      {:ok, output} -> {:ok, parse_name_status(output)}
-      {:error, reason} -> {:error, reason}
+  defp collect(git, base_sha) do
+    with {:ok, tracked} <- git.(["diff", "--name-status", "--no-renames", "-z", base_sha]),
+         {:ok, untracked} <- git.(["ls-files", "--others", "--exclude-standard", "-z"]) do
+      {:ok,
+       parse_name_status(split_nul(tracked)) ++ Enum.map(split_nul(untracked), &{:added, &1})}
     end
   end
 
-  defp git_diff(cwd, from, to) do
-    case System.run(cwd, ["diff", "--name-status", from, to], []) do
-      {:ok, ""} -> {:ok, []}
-      {:ok, output} -> {:ok, parse_name_status(output)}
-      {:error, reason} -> {:error, reason}
+  @spec split_nul(String.t()) :: [String.t()]
+  defp split_nul(output), do: String.split(output, <<0>>, trim: true)
+
+  # `-z` output alternates status and path fields; renames are disabled, so every entry has one path.
+  @spec parse_name_status([String.t()]) :: [change()]
+  defp parse_name_status([status, path | rest]),
+    do: [{status_action(status), path} | parse_name_status(rest)]
+
+  defp parse_name_status(_fields), do: []
+
+  @spec status_action(String.t()) :: :added | :modified | :deleted
+  defp status_action("A"), do: :added
+  defp status_action("D"), do: :deleted
+  defp status_action(_status), do: :modified
+
+  @spec add_entry(String.t(), String.t(), change(), {:ok, [integration_entry()]}) ::
+          {:cont, {:ok, [integration_entry()]}} | {:halt, {:error, {String.t(), term()}}}
+  defp add_entry(worktree_path, base_sha, {action, path}, {:ok, entries}) do
+    case integration_entry(worktree_path, base_sha, action, path) do
+      {:ok, entry} -> {:cont, {:ok, [entry | entries]}}
+      {:error, reason} -> {:halt, {:error, {path, reason}}}
     end
   end
 
-  @spec committed_changes(t()) :: {:ok, [change()]} | {:error, String.t()}
-  defp committed_changes(%__MODULE__{} = worktree) do
-    case output(worktree, worktree.path, [
-           "diff",
-           "--name-status",
-           worktree.base_sha,
-           "HEAD"
-         ]) do
-      {:ok, ""} -> {:ok, []}
-      {:ok, diff_output} -> {:ok, parse_name_status(diff_output)}
-      {:error, reason} -> {:error, reason}
+  @spec integration_entry(String.t(), String.t(), :added | :modified | :deleted, String.t()) ::
+          {:ok, integration_entry()} | {:error, term()}
+  defp integration_entry(worktree_path, _base_sha, :added, path) do
+    with {:ok, child} <- File.read(Path.join(worktree_path, path)),
+         do: {:ok, {path, :missing, child}}
+  end
+
+  defp integration_entry(worktree_path, base_sha, :modified, path) do
+    with {:ok, ancestor} <- System.stdout(worktree_path, ["show", "#{base_sha}:#{path}"]),
+         {:ok, child} <- File.read(Path.join(worktree_path, path)) do
+      {:ok, {path, ancestor, child}}
     end
   end
 
-  @spec uncommitted_changes(t()) :: {:ok, [change()]} | {:error, String.t()}
-  defp uncommitted_changes(%__MODULE__{} = worktree) do
-    case output(worktree, worktree.path, ["diff", "--name-status", "HEAD"]) do
-      {:ok, ""} -> {:ok, []}
-      {:ok, diff_output} -> {:ok, parse_name_status(diff_output)}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  @spec parse_name_status(String.t()) :: [change()]
-  defp parse_name_status(output) do
-    output
-    |> String.split("\n", trim: true)
-    |> Enum.map(fn line ->
-      case String.split(line, "\t", parts: 2) do
-        ["A", path] -> {:added, path}
-        ["M", path] -> {:modified, path}
-        ["D", path] -> {:deleted, path}
-        [status, path] when byte_size(status) > 0 -> {:modified, path}
-        _ -> nil
-      end
-    end)
-    |> Enum.reject(&is_nil/1)
-  end
-
-  @spec merge_changes([change()], [change()]) :: [change()]
-  defp merge_changes(committed, uncommitted) do
-    committed_map = Map.new(committed, fn {action, path} -> {path, action} end)
-    uncommitted_map = Map.new(uncommitted, fn {action, path} -> {path, action} end)
-    merged = Map.merge(committed_map, uncommitted_map)
-    Enum.map(merged, fn {path, action} -> {action, path} end)
+  defp integration_entry(worktree_path, base_sha, :deleted, path) do
+    with {:ok, ancestor} <- System.stdout(worktree_path, ["show", "#{base_sha}:#{path}"]),
+         do: {:ok, {path, ancestor, :deleted}}
   end
 
   @spec git_root(String.t(), module(), keyword()) :: {:ok, String.t()} | {:error, String.t()}

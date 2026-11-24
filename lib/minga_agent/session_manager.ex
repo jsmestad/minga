@@ -13,10 +13,12 @@ defmodule MingaAgent.SessionManager do
 
   use GenServer
 
+  alias MingaAgent.Changeset
   alias MingaAgent.Session
   alias MingaAgent.SessionListing
   alias MingaAgent.SessionStore
   alias MingaAgent.Subagent.Handle
+  alias MingaAgent.Subagent.Worktree
 
   # ── Types ──────────────────────────────────────────────────────────────────
 
@@ -237,61 +239,24 @@ defmodule MingaAgent.SessionManager do
   @doc """
   Integrates a completed child's worktree changes into a parent changeset.
 
-  Reads each changed file from the child worktree, applies it to `changeset_pid`
-  through `MingaAgent.Changeset.write_file/3` or `MingaAgent.Changeset.delete_file/2`,
-  then runs `MingaAgent.Changeset.preflight_merge/1` to check for conflicts before
-  committing the merge.
-
-  Returns `{:ok, results}` for a clean integration, `{:conflict, details}` when the
-  parent workspace diverged, or `{:error, reason}` for missing handles or no changes.
+  Reads each change's base and child content in the calling process, then three-way merges them onto the changeset's current content through `MingaAgent.Changeset.integrate_isolated_changes/2`. A conflict writes nothing and leaves both the changeset and the child worktree intact.
   """
-  @spec integrate_child_changes(GenServer.server(), String.t(), pid()) ::
-          {:ok, [tuple()]} | {:conflict, map()} | {:error, term()}
+  @spec integrate_child_changes(GenServer.server(), String.t(), Changeset.changeset()) ::
+          Changeset.integration_result()
+          | {:error, :no_changes | :not_found | {String.t(), term()}}
   def integrate_child_changes(manager, child_session_id, changeset_pid)
       when is_binary(child_session_id) and is_pid(changeset_pid) do
     case get_child_result(manager, child_session_id) do
-      {:ok, %Handle{changes: nil}} ->
+      {:ok, %Handle{changes: changes}} when changes in [nil, []] ->
         {:error, :no_changes}
 
-      {:ok, %Handle{changes: []}} ->
-        {:error, :no_changes}
-
-      {:ok, %Handle{} = handle} ->
-        apply_child_changes(handle, changeset_pid)
+      {:ok, %Handle{worktree_path: path, worktree_base_sha: base_sha, changes: changes}} ->
+        with {:ok, entries} <- Worktree.integration_entries(path, base_sha, changes) do
+          Changeset.integrate_isolated_changes(changeset_pid, entries)
+        end
 
       {:error, reason} ->
         {:error, reason}
-    end
-  end
-
-  @spec apply_child_changes(Handle.t(), pid()) ::
-          {:ok, [tuple()]} | {:conflict, map()} | {:error, term()}
-  defp apply_child_changes(%Handle{changes: changes, worktree_path: wt_path}, changeset_pid) do
-    alias MingaAgent.Changeset
-
-    results =
-      Enum.map(changes, fn
-        {:deleted, path} ->
-          case Changeset.delete_file(changeset_pid, path) do
-            :ok -> {:ok, path, :deleted}
-            {:error, reason} -> {:error, path, reason}
-          end
-
-        {_action, path} ->
-          with {:ok, content} <- File.read(Path.join(wt_path, path)),
-               :ok <- Changeset.write_file(changeset_pid, path, content) do
-            {:ok, path, :written}
-          else
-            {:error, reason} -> {:error, path, reason}
-          end
-      end)
-
-    errors = Enum.filter(results, &match?({:error, _, _}, &1))
-
-    if errors == [] do
-      Changeset.preflight_merge(changeset_pid)
-    else
-      {:error, {:apply_failed, errors}}
     end
   end
 
@@ -1301,7 +1266,7 @@ defmodule MingaAgent.SessionManager do
 
   defp collect_worktree_changes(%Handle{worktree_path: path, worktree_base_sha: sha} = handle)
        when is_binary(path) and is_binary(sha) do
-    case MingaAgent.Subagent.Worktree.collect_changes_from(path, sha) do
+    case Worktree.collect_changes_from(path, sha) do
       {:ok, changes} -> Handle.with_changes(handle, changes)
       {:error, _reason} -> handle
     end

@@ -1,13 +1,11 @@
 defmodule MingaAgent.ChildWorkflowIntegrationTest do
   @moduledoc """
-  End-to-end two-child workflow test (AC8).
+  Parent and child agent workflow over a real Git worktree.
 
-  Proves: parent spawns two children, both complete, changes are collected
-  on the writer child's Handle, and integration applies through Changeset
-  with conflict detection when the parent workspace diverges.
+  A reader child and a writer child both complete. The writer's committed and untracked changes are collected on its handle, then three-way merged into the parent's changeset while the parent has its own edits to the same file.
   """
 
-  # Spawns OS processes for git and uses global Changeset supervisor
+  # Real Git commands spawn OS processes, and Changeset.create/1 uses the global agent supervisor.
   use ExUnit.Case, async: false
 
   alias MingaAgent.Changeset
@@ -16,9 +14,13 @@ defmodule MingaAgent.ChildWorkflowIntegrationTest do
 
   @moduletag timeout: 30_000
 
+  @base_app "defmodule App do\n  def hello, do: :world\n  def bye, do: :later\nend\n"
+  @child_app "defmodule App do\n  def hello, do: :updated\n  def bye, do: :later\nend\n"
+  @helper "defmodule Helper do\n  def assist, do: :ok\nend\n"
+
   setup do
     tmp = Path.join(System.tmp_dir!(), "minga-e2e-#{System.unique_integer([:positive])}")
-    File.mkdir_p!(tmp)
+    File.mkdir_p!(Path.join(tmp, "lib"))
 
     git!(tmp, ["init"])
     # Disable inherited hooks and signing so the fixture does not depend on the host's git setup.
@@ -29,39 +31,24 @@ defmodule MingaAgent.ChildWorkflowIntegrationTest do
     git!(tmp, ["config", "user.email", "test@example.com"])
     git!(tmp, ["config", "commit.gpgsign", "false"])
 
-    File.mkdir_p!(Path.join(tmp, "lib"))
-    File.write!(Path.join(tmp, "lib/app.ex"), "defmodule App do\n  def hello, do: :world\nend\n")
+    File.write!(Path.join(tmp, "lib/app.ex"), @base_app)
     git!(tmp, ["add", "."])
     git!(tmp, ["commit", "-m", "initial"])
+    base_sha = tmp |> git!(["rev-parse", "HEAD"]) |> String.trim()
 
-    {base_sha, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: tmp)
-    base_sha = String.trim(base_sha)
-
-    # Create a child worktree that simulates a writer child's work
     wt_path = tmp <> "-child-writer"
     git!(tmp, ["worktree", "add", "-b", "child-writer", wt_path, base_sha])
 
-    # Make changes in the child worktree
-    File.write!(
-      Path.join(wt_path, "lib/app.ex"),
-      "defmodule App do\n  def hello, do: :updated\nend\n"
-    )
+    # The child commits one edit and leaves its new file untracked.
+    File.write!(Path.join(wt_path, "lib/app.ex"), @child_app)
+    git!(wt_path, ["commit", "-am", "child edit"])
+    File.write!(Path.join(wt_path, "lib/helper.ex"), @helper)
 
-    File.write!(
-      Path.join(wt_path, "lib/helper.ex"),
-      "defmodule Helper do\n  def assist, do: :ok\nend\n"
-    )
-
-    git!(wt_path, ["add", "."])
-    git!(wt_path, ["commit", "-m", "child changes"])
-
-    # Start a SessionManager
     session_supervisor = start_supervised!({DynamicSupervisor, strategy: :one_for_one})
-    sm_name = :"e2e_manager_#{System.unique_integer([:positive])}"
 
     {:ok, manager} =
       SessionManager.start_link(
-        name: sm_name,
+        name: :"e2e_manager_#{System.unique_integer([:positive])}",
         session_supervisor: session_supervisor,
         child_limit: 5
       )
@@ -75,210 +62,122 @@ defmodule MingaAgent.ChildWorkflowIntegrationTest do
       File.rm_rf!(tmp)
     end)
 
-    %{
-      tmp: tmp,
-      base_sha: base_sha,
-      wt_path: wt_path,
-      manager: manager
-    }
+    {:ok, changeset} = Changeset.create(tmp)
+    on_exit(fn -> if Process.alive?(changeset), do: Changeset.discard(changeset) end)
+
+    %{tmp: tmp, base_sha: base_sha, wt_path: wt_path, manager: manager, changeset: changeset}
   end
 
-  describe "two-child workflow (AC8)" do
-    test "parent spawns reader and writer, collects both results, integrates writer changes", %{
-      tmp: tmp,
-      base_sha: base_sha,
-      wt_path: wt_path,
-      manager: manager
-    } do
-      # Start a parent session
-      {:ok, _parent_id, parent_pid} =
-        SessionManager.start_session(manager,
-          provider: Minga.Test.StubProvider,
-          provider_opts: [],
-          persist?: false
-        )
+  describe "two-child workflow" do
+    test "the parent collects both results and merges the writer's work around its own edit",
+         ctx do
+      parent_pid = start_parent(ctx.manager)
+      reader = start_child(ctx.manager, parent_pid, "review the code")
+      writer = start_child(ctx.manager, parent_pid, "implement", writer_opts(ctx))
 
-      # Start a "reader" child (no worktree)
-      {:ok, reader_handle} =
-        SessionManager.start_background_subagent(
-          manager,
-          parent_pid,
-          "review the code",
-          session_opts: [
-            provider: Minga.Test.StubProvider,
-            provider_opts: [],
-            persist?: false
-          ]
-        )
-
-      # Start a "writer" child (with worktree metadata)
-      {:ok, writer_handle} =
-        SessionManager.start_background_subagent(
-          manager,
-          parent_pid,
-          "implement the feature",
-          session_opts: [
-            provider: Minga.Test.StubProvider,
-            provider_opts: [],
-            persist?: false
-          ],
-          worktree_path: wt_path,
-          worktree_base_sha: base_sha
-        )
-
-      assert writer_handle.worktree_path == wt_path
-      assert writer_handle.worktree_base_sha == base_sha
-      assert reader_handle.worktree_path == nil
-
-      # Both children are running
-      assert reader_handle.status == :running
-      assert writer_handle.status == :running
-
-      # Stop the reader child (simulates normal completion)
-      reader_ref = Process.monitor(reader_handle.pid)
-      SessionManager.stop_session(manager, reader_handle.session_id)
-      assert_receive {:DOWN, ^reader_ref, :process, _, _}, 2_000
-      :sys.get_state(manager)
-
-      # Stop the writer child (simulates normal completion)
-      writer_ref = Process.monitor(writer_handle.pid)
-      SessionManager.stop_session(manager, writer_handle.session_id)
-      assert_receive {:DOWN, ^writer_ref, :process, _, _}, 2_000
-      :sys.get_state(manager)
-
-      # Parent retrieves both results
-      assert {:ok, %Handle{status: :completed} = reader_result} =
-               SessionManager.get_child_result(manager, reader_handle.session_id)
-
-      assert {:ok, %Handle{status: :completed} = writer_result} =
-               SessionManager.get_child_result(manager, writer_handle.session_id)
-
-      # Reader has no changes (no worktree)
-      assert reader_result.changes == nil
-
-      # Writer has collected changes from the worktree
-      assert [_ | _] = writer_result.changes
-
-      change_paths = Enum.map(writer_result.changes, fn {_action, path} -> path end)
-      assert "lib/app.ex" in change_paths
-      assert "lib/helper.ex" in change_paths
-
-      # Integrate writer changes into a parent Changeset
-      {:ok, changeset} = Changeset.create(tmp)
-
-      assert {:ok, _results} =
-               SessionManager.integrate_child_changes(
-                 manager,
-                 writer_handle.session_id,
-                 changeset
-               )
-
-      assert {:ok, content} = Changeset.read_file(changeset, "lib/app.ex")
-      assert content =~ ":updated"
-
-      assert {:ok, helper_content} = Changeset.read_file(changeset, "lib/helper.ex")
-      assert helper_content =~ "Helper"
-
-      Changeset.discard(changeset)
-    end
-
-    test "integration detects conflicts when parent content diverged", %{
-      tmp: tmp,
-      base_sha: base_sha,
-      wt_path: wt_path,
-      manager: manager
-    } do
-      {:ok, _parent_id, parent_pid} =
-        SessionManager.start_session(manager,
-          provider: Minga.Test.StubProvider,
-          provider_opts: [],
-          persist?: false
-        )
-
-      {:ok, writer_handle} =
-        SessionManager.start_background_subagent(
-          manager,
-          parent_pid,
-          "implement the feature",
-          session_opts: [
-            provider: Minga.Test.StubProvider,
-            provider_opts: [],
-            persist?: false
-          ],
-          worktree_path: wt_path,
-          worktree_base_sha: base_sha
-        )
-
-      writer_ref = Process.monitor(writer_handle.pid)
-      SessionManager.stop_session(manager, writer_handle.session_id)
-      assert_receive {:DOWN, ^writer_ref, :process, _, _}, 2_000
-      :sys.get_state(manager)
-
-      # Create a changeset and modify the SAME file the child changed
-      {:ok, changeset} = Changeset.create(tmp)
+      assert writer.worktree_path == ctx.wt_path
+      assert reader.worktree_path == nil
 
       :ok =
         Changeset.write_file(
-          changeset,
+          ctx.changeset,
           "lib/app.ex",
-          "defmodule App do\n  def hello, do: :diverged\nend\n"
+          String.replace(@base_app, ":later", ":soon")
         )
 
-      # Integration should still apply through the changeset (the changeset
-      # handles three-way merge internally). The child's write_file replaces
-      # the changeset content, and preflight_merge checks against disk.
-      result =
-        SessionManager.integrate_child_changes(
-          manager,
-          writer_handle.session_id,
-          changeset
-        )
+      finish(ctx.manager, reader)
+      finish(ctx.manager, writer)
 
-      # The result depends on whether disk content matches the changeset base.
-      # With a fresh changeset from the same project root, the child's content
-      # overwrites the changeset's staged content, and preflight detects the
-      # disk hasn't changed, so it should be a clean integration.
-      assert match?({:ok, _}, result) or match?({:conflict, _}, result)
+      assert {:ok, %Handle{status: :completed, changes: nil}} =
+               SessionManager.get_child_result(ctx.manager, reader.session_id)
 
-      Changeset.discard(changeset)
+      assert {:ok, %Handle{status: :completed, changes: changes}} =
+               SessionManager.get_child_result(ctx.manager, writer.session_id)
+
+      assert Enum.sort(changes) == [{:added, "lib/helper.ex"}, {:modified, "lib/app.ex"}]
+
+      assert {:ok, applied} =
+               SessionManager.integrate_child_changes(
+                 ctx.manager,
+                 writer.session_id,
+                 ctx.changeset
+               )
+
+      assert Enum.sort(applied) == ["lib/app.ex", "lib/helper.ex"]
+
+      assert {:ok, "defmodule App do\n  def hello, do: :updated\n  def bye, do: :soon\nend\n"} =
+               Changeset.read_file(ctx.changeset, "lib/app.ex")
+
+      assert {:ok, @helper} = Changeset.read_file(ctx.changeset, "lib/helper.ex")
     end
 
-    test "integration returns :no_changes for a read-only child", %{manager: manager} do
-      {:ok, _parent_id, parent_pid} =
-        SessionManager.start_session(manager,
-          provider: Minga.Test.StubProvider,
-          provider_opts: [],
-          persist?: false
-        )
+    test "an edit to the same line conflicts, writes nothing and keeps both sides", ctx do
+      parent_pid = start_parent(ctx.manager)
+      writer = start_child(ctx.manager, parent_pid, "implement", writer_opts(ctx))
+      parent_edit = String.replace(@base_app, ":world", ":diverged")
+      :ok = Changeset.write_file(ctx.changeset, "lib/app.ex", parent_edit)
+      finish(ctx.manager, writer)
 
-      {:ok, reader_handle} =
-        SessionManager.start_background_subagent(
-          manager,
-          parent_pid,
-          "just reading",
-          session_opts: [
-            provider: Minga.Test.StubProvider,
-            provider_opts: [],
-            persist?: false
-          ]
-        )
+      assert {:conflict,
+              %{conflicts: [{"lib/app.ex", {:merge_conflict, _hunks}}], clean: ["lib/helper.ex"]}} =
+               SessionManager.integrate_child_changes(
+                 ctx.manager,
+                 writer.session_id,
+                 ctx.changeset
+               )
 
-      reader_ref = Process.monitor(reader_handle.pid)
-      SessionManager.stop_session(manager, reader_handle.session_id)
-      assert_receive {:DOWN, ^reader_ref, :process, _, _}, 2_000
-      :sys.get_state(manager)
+      assert {:ok, ^parent_edit} = Changeset.read_file(ctx.changeset, "lib/app.ex")
+      assert {:error, _} = Changeset.read_file(ctx.changeset, "lib/helper.ex")
+      assert File.read!(Path.join(ctx.wt_path, "lib/app.ex")) == @child_app
+      assert File.read!(Path.join(ctx.wt_path, "lib/helper.ex")) == @helper
+    end
 
-      {:ok, changeset} = Changeset.create(System.tmp_dir!())
+    test "a read-only child has nothing to integrate", ctx do
+      parent_pid = start_parent(ctx.manager)
+      reader = start_child(ctx.manager, parent_pid, "just reading")
+      finish(ctx.manager, reader)
 
       assert {:error, :no_changes} =
                SessionManager.integrate_child_changes(
-                 manager,
-                 reader_handle.session_id,
-                 changeset
+                 ctx.manager,
+                 reader.session_id,
+                 ctx.changeset
                )
-
-      Changeset.discard(changeset)
     end
+  end
+
+  @spec session_opts() :: keyword()
+  defp session_opts, do: [provider: Minga.Test.StubProvider, provider_opts: [], persist?: false]
+
+  @spec writer_opts(map()) :: keyword()
+  defp writer_opts(ctx), do: [worktree_path: ctx.wt_path, worktree_base_sha: ctx.base_sha]
+
+  @spec start_parent(GenServer.server()) :: pid()
+  defp start_parent(manager) do
+    {:ok, _id, pid} = SessionManager.start_session(manager, session_opts())
+    pid
+  end
+
+  @spec start_child(GenServer.server(), pid(), String.t(), keyword()) :: Handle.t()
+  defp start_child(manager, parent_pid, task, opts \\ []) do
+    {:ok, handle} =
+      SessionManager.start_background_subagent(
+        manager,
+        parent_pid,
+        task,
+        [session_opts: session_opts()] ++ opts
+      )
+
+    handle
+  end
+
+  @spec finish(GenServer.server(), Handle.t()) :: :ok
+  defp finish(manager, %Handle{} = handle) do
+    ref = Process.monitor(handle.pid)
+    SessionManager.stop_session(manager, handle.session_id)
+    assert_receive {:DOWN, ^ref, :process, _, _}, 2_000
+    :sys.get_state(manager)
+    :ok
   end
 
   @spec git!(String.t(), [String.t()]) :: String.t()

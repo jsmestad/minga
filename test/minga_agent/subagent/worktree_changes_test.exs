@@ -96,6 +96,40 @@ defmodule MingaAgent.Subagent.WorktreeChangesTest do
       assert Enum.count(paths, &(&1 == "new_file.ex")) == 1
     end
 
+    test "reports an untracked new file as :added", %{tmp: tmp, base_sha: base_sha} do
+      File.write!(Path.join(tmp, "untracked.ex"), "never added")
+
+      assert {:ok, [{:added, "untracked.ex"}]} = Worktree.collect_changes_from(tmp, base_sha)
+    end
+
+    test "ignores files the repository ignores", %{tmp: tmp, base_sha: base_sha} do
+      File.mkdir_p!(Path.join(tmp, ".git/info"))
+      File.write!(Path.join(tmp, ".git/info/exclude"), "*.log\n")
+      File.write!(Path.join(tmp, "debug.log"), "noise")
+
+      assert {:ok, []} = Worktree.collect_changes_from(tmp, base_sha)
+    end
+
+    test "a file committed then edited again is still :added relative to base", %{
+      tmp: tmp,
+      base_sha: base_sha
+    } do
+      File.write!(Path.join(tmp, "new_file.ex"), "first")
+      git!(tmp, ["add", "new_file.ex"])
+      git!(tmp, ["commit", "-m", "add"])
+      File.write!(Path.join(tmp, "new_file.ex"), "second")
+
+      assert {:ok, [{:added, "new_file.ex"}]} = Worktree.collect_changes_from(tmp, base_sha)
+    end
+
+    test "a rename is a deletion plus an addition", %{tmp: tmp, base_sha: base_sha} do
+      git!(tmp, ["mv", "existing.ex", "renamed.ex"])
+      git!(tmp, ["commit", "-m", "rename"])
+
+      assert {:ok, changes} = Worktree.collect_changes_from(tmp, base_sha)
+      assert Enum.sort(changes) == [{:added, "renamed.ex"}, {:deleted, "existing.ex"}]
+    end
+
     test "detects multiple changes across files", %{tmp: tmp, base_sha: base_sha} do
       File.write!(Path.join(tmp, "added.ex"), "new")
       File.write!(Path.join(tmp, "existing.ex"), "changed")
@@ -176,6 +210,36 @@ defmodule MingaAgent.Subagent.WorktreeChangesTest do
       }
 
       assert {:error, _} = Worktree.read_base_file(worktree, "brand_new.ex")
+    end
+  end
+
+  describe "integration_entries/3" do
+    test "pairs each change with its base content and the child's content", %{
+      tmp: tmp,
+      base_sha: base_sha
+    } do
+      File.write!(Path.join(tmp, "existing.ex"), "child version")
+      File.write!(Path.join(tmp, "added.ex"), "brand new")
+
+      changes = [{:modified, "existing.ex"}, {:added, "added.ex"}]
+
+      assert {:ok,
+              [
+                {"existing.ex", "original content", "child version"},
+                {"added.ex", :missing, "brand new"}
+              ]} = Worktree.integration_entries(tmp, base_sha, changes)
+    end
+
+    test "a deletion carries the base content", %{tmp: tmp, base_sha: base_sha} do
+      File.rm!(Path.join(tmp, "existing.ex"))
+
+      assert {:ok, [{"existing.ex", "original content", :deleted}]} =
+               Worktree.integration_entries(tmp, base_sha, [{:deleted, "existing.ex"}])
+    end
+
+    test "a missing child file names the path that failed", %{tmp: tmp, base_sha: base_sha} do
+      assert {:error, {"gone.ex", :enoent}} =
+               Worktree.integration_entries(tmp, base_sha, [{:added, "gone.ex"}])
     end
   end
 
