@@ -93,8 +93,8 @@ In CUA mode (`set :editing_model, :cua`) the review uses chords instead of lette
 
 | Key (macOS app) | Key (terminal) | Diff Review action |
 |-----------------|----------------|--------------------|
-| `Alt+Down` / `F7` | `Alt+Down` | Next hunk or conflict |
-| `Alt+Up` / `Shift+F7` | `Alt+Up` | Previous hunk or conflict |
+| `Alt+Down` | `Alt+Down` | Next hunk or conflict |
+| `Alt+Up` | `Alt+Up` | Previous hunk or conflict |
 | `Cmd+Enter` | `Ctrl+Enter` | Accept current hunk (**Use Agent version**) |
 | `Cmd+Backspace` | `Ctrl+Backspace` | Reject current hunk (**Keep mine**) |
 | `Cmd+Shift+Enter` | `Ctrl+Shift+Enter` | Accept all remaining hunks |

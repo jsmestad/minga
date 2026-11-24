@@ -46,9 +46,9 @@ defmodule MingaEditor.Shell.Traditional.InputState do
     do: %{input | click_regions: ClickRegions.reset(input.click_regions)}
 
   @doc "Begins a new space-leader timeout generation."
-  @spec begin_space_leader(t()) :: {SpaceLeader.generation(), t()}
-  def begin_space_leader(%__MODULE__{} = input) do
-    {generation, leader} = SpaceLeader.begin(input.space_leader)
+  @spec begin_space_leader(t(), pid() | nil) :: {SpaceLeader.generation(), t()}
+  def begin_space_leader(%__MODULE__{} = input, space_buffer) do
+    {generation, leader} = SpaceLeader.begin(input.space_leader, space_buffer)
     {generation, %{input | space_leader: leader}}
   end
 
@@ -70,6 +70,10 @@ defmodule MingaEditor.Shell.Traditional.InputState do
   @spec space_leader_pending?(t()) :: boolean()
   def space_leader_pending?(%__MODULE__{space_leader: leader}), do: SpaceLeader.pending?(leader)
 
+  @doc "Returns the buffer that holds the pending window's typed space, or nil."
+  @spec space_leader_buffer(t()) :: pid() | nil
+  def space_leader_buffer(%__MODULE__{space_leader: leader}), do: SpaceLeader.space_buffer(leader)
+
   @doc "Returns the current space-leader timer handle."
   @spec space_leader_timer(t()) :: reference() | nil
   def space_leader_timer(%__MODULE__{space_leader: leader}), do: SpaceLeader.timer(leader)
@@ -78,4 +82,13 @@ defmodule MingaEditor.Shell.Traditional.InputState do
   @spec reset_space_leader(t()) :: t()
   def reset_space_leader(%__MODULE__{} = input),
     do: %{input | space_leader: SpaceLeader.reset(input.space_leader)}
+
+  @doc "Records where a frontend-sent space went, or nil when the last key was not a space."
+  @spec hold_space(t(), MingaEditor.Input.CUA.SpaceTarget.t() | nil) :: t()
+  def hold_space(%__MODULE__{} = input, target),
+    do: %{input | space_leader: SpaceLeader.hold_space(input.space_leader, target)}
+
+  @doc "Returns where the last frontend-sent space went, or nil."
+  @spec held_space(t()) :: MingaEditor.Input.CUA.SpaceTarget.t() | nil
+  def held_space(%__MODULE__{space_leader: leader}), do: SpaceLeader.held_space(leader)
 end

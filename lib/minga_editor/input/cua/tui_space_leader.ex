@@ -6,7 +6,8 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
   so the GUI's Swift-side chord detection doesn't work. This handler
   uses a timer-based approach instead:
 
-  1. SPC keyDown: insert space immediately, set pending, start timer.
+  1. SPC keyDown: type the space into the focused file buffer immediately,
+     set pending, start timer.
   2. Next key while pending: check leader trie. If match, retract
      the space and enter leader/which-key mode. If no match, clear
      pending and let the key pass through normally.
@@ -15,6 +16,8 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
   This adds ~200ms of "retract window" after each space, but no
   latency to the space itself (it appears instantly). The visual
   flash of the space being retracted is one frame at most.
+
+  The focused surface decides where the space goes. A focused file window takes it as described above. A focused Agent composer owns its text in a lower handler, so SPC passes through as a plain space. Agent chat navigation and a focused bottom panel take no text, so the window opens without a space and the file buffer behind them never changes: a leader key still starts the leader there, and any other key drops the space. The window records the buffer that took the space, so a retraction deletes it from that buffer and nowhere else.
 
   Only active when:
   - `editing_model: :cua`
@@ -29,6 +32,7 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
 
   alias Minga.Buffer
   alias MingaEditor.Commands
+  alias MingaEditor.Input.CUA.SpaceTarget
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
@@ -42,22 +46,10 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
 
-  # SPC with no modifiers: insert space and start pending timer
+  # SPC with no modifiers: the focused surface decides what the space is.
   def handle_key(state, @space, 0) do
     if active?(state) and not pending?(state) do
-      buf = state.workspace.buffers.active
-
-      if is_pid(buf) do
-        try do
-          Buffer.insert_char(buf, " ")
-        catch
-          :exit, _ -> :ok
-        end
-      end
-
-      {generation, state} = begin_window(state)
-      timer = Process.send_after(self(), {:space_leader_timeout, generation}, @timeout_ms)
-      {:handled, install_timer(state, generation, timer)}
+      handle_space(state, SpaceTarget.resolve(state))
     else
       {:passthrough, state}
     end
@@ -69,6 +61,19 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
     handle_non_space_key(state, cp, mods, pending?(state), active_leader_node(state))
   end
 
+  # A focused composer or overlay owns its text in another handler; SPC is a plain
+  # space there. Otherwise type the space into the focused file buffer, if any,
+  # and open the retract window.
+  @spec handle_space(EditorState.t(), SpaceTarget.t()) :: MingaEditor.Input.Handler.result()
+  defp handle_space(state, {:composer, _prompt}), do: {:passthrough, state}
+  defp handle_space(state, :overlay), do: {:passthrough, state}
+
+  defp handle_space(state, target) do
+    {generation, state} = begin_window(state, type_space(target))
+    timer = Process.send_after(self(), {:space_leader_timeout, generation}, @timeout_ms)
+    {:handled, install_timer(state, generation, timer)}
+  end
+
   @spec handle_non_space_key(
           EditorState.t(),
           non_neg_integer(),
@@ -78,6 +83,7 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
         ) ::
           MingaEditor.Input.Handler.result()
   defp handle_non_space_key(state, cp, mods, true, _node) do
+    space_buffer = space_buffer(state)
     state = cancel(state)
 
     trie = leader_trie(state)
@@ -88,7 +94,7 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
         {:passthrough, state}
 
       node ->
-        state = retract_space(state)
+        retract_space(space_buffer)
         state = enter_leader(state, node)
         {:handled, state}
     end
@@ -152,15 +158,31 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
 
   defp pending?(_state), do: false
 
+  @spec space_buffer(EditorState.t()) :: pid() | nil
+  defp space_buffer(%{shell_runtime: %{state: %TraditionalState{} = shell_state}}),
+    do: TraditionalState.space_leader_buffer(shell_state)
+
+  defp space_buffer(_state), do: nil
+
+  @spec type_space({:buffer, pid()} | :no_text) :: pid() | nil
+  defp type_space(:no_text), do: nil
+
+  defp type_space({:buffer, buf}) do
+    Buffer.insert_char(buf, " ")
+    buf
+  catch
+    :exit, _ -> nil
+  end
+
   @spec active_leader_node(EditorState.t()) :: Bindings.node_t() | nil
   defp active_leader_node(state) do
     if active?(state), do: state.shell_runtime.state.whichkey.node, else: nil
   end
 
-  @spec begin_window(EditorState.t()) :: {non_neg_integer(), EditorState.t()}
-  defp begin_window(%EditorState{} = state) do
+  @spec begin_window(EditorState.t(), pid() | nil) :: {non_neg_integer(), EditorState.t()}
+  defp begin_window(%EditorState{} = state, space_buffer) do
     %TraditionalState{} = shell_state = Runtime.state(state.shell_runtime)
-    {generation, shell_state} = TraditionalState.begin_space_leader(shell_state)
+    {generation, shell_state} = TraditionalState.begin_space_leader(shell_state, space_buffer)
     {generation, install_shell_state(state, shell_state)}
   end
 
@@ -191,19 +213,16 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
     :ok
   end
 
-  @spec retract_space(EditorState.t()) :: EditorState.t()
-  defp retract_space(state) do
-    buf = state.workspace.buffers.active
+  @spec retract_space(pid() | nil) :: :ok
+  defp retract_space(nil), do: :ok
 
-    if is_pid(buf) do
-      Buffer.break_undo_coalescing(buf)
-      Buffer.delete_before(buf)
-      Buffer.break_undo_coalescing(buf)
-    end
-
-    state
+  defp retract_space(buf) do
+    Buffer.break_undo_coalescing(buf)
+    Buffer.delete_before(buf)
+    Buffer.break_undo_coalescing(buf)
+    :ok
   catch
-    :exit, _ -> state
+    :exit, _ -> :ok
   end
 
   @spec enter_leader(EditorState.t(), Bindings.node_t()) :: EditorState.t()

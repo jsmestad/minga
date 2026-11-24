@@ -85,6 +85,19 @@ defmodule Minga.Keymap.GrammarTest do
     assert unmatched == @pending_conventions
   end
 
+  test "no keymap context binds a forbidden chord, including a focused staged Diff Review" do
+    forbidden =
+      KeyGrammar.overlay_inventory()
+      |> KeyGrammar.violations([])
+      |> Enum.filter(&(&1.rule == :forbidden_chord))
+
+    assert forbidden == [], """
+    Rule 6 has no exceptions: no function keys, three-modifier chords, or two of ⌃ ⌥ ⌘ together.
+
+    #{format(forbidden)}
+    """
+  end
+
   test "rows marked matches use the Doom key itself", %{doom: doom} do
     mismatched = for %{status: :matches} = row <- doom, row.minga_key != row.doom_key, do: row
     assert mismatched == []

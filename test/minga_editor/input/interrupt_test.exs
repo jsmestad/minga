@@ -338,7 +338,7 @@ defmodule MingaEditor.Input.InterruptTest do
 
       state = base_state()
       shell_state = Runtime.state(state.shell_runtime)
-      {generation, shell_state} = TraditionalState.begin_space_leader(shell_state)
+      {generation, shell_state} = TraditionalState.begin_space_leader(shell_state, nil)
       shell_state = TraditionalState.install_space_leader_timer(shell_state, generation, timer)
       state = install_shell_state(state, shell_state)
 

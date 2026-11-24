@@ -17,10 +17,8 @@ defmodule Minga.Keymap.Scope.AgentDiffReviewKeysTest do
   @cua_chords [
     {{57_353, @alt}, :next_hunk, :agent_next_code_block},
     {{0xF701, @alt}, nil, :agent_next_code_block},
-    {{57_370, 0}, nil, :agent_next_code_block},
     {{57_352, @alt}, :previous_hunk, :agent_prev_code_block},
     {{0xF700, @alt}, nil, :agent_prev_code_block},
-    {{57_370, @shift}, nil, :agent_prev_code_block},
     {{13, @cmd}, :accept_hunk, :agent_accept_hunk},
     {{13, @ctrl}, :accept_hunk, :agent_accept_hunk},
     {{127, @cmd}, :reject_hunk, :agent_reject_hunk},

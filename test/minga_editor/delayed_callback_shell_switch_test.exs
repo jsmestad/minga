@@ -99,7 +99,7 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
     {generation, shell_state} =
       state.shell_runtime
       |> Runtime.state()
-      |> TraditionalShellState.begin_space_leader()
+      |> TraditionalShellState.begin_space_leader(nil)
 
     timer = Process.send_after(self(), {:space_leader_timeout, generation}, 60_000)
 
