@@ -80,6 +80,12 @@ final class BEAMProcessManager {
     private(set) var exitIntent: ExitIntent = .running
     var isShuttingDown: Bool { exitIntent == .appShutdown }
 
+    /// Cancellable watchdog that fires when a stopping process does not exit within the retry timeout.
+    private var shutdownWatchdogTask: Task<Void, Never>?
+
+    /// Cancellable delayed restart scheduled after a crash within the restart budget.
+    private var restartDelayTask: Task<Void, Never>?
+
     /// URLs for files passed via Finder "Open With" before the BEAM is ready.
     /// Flushed to the BEAM once the protocol signals ready.
     private(set) var pendingFileURLs: [URL] = []
@@ -133,6 +139,7 @@ final class BEAMProcessManager {
     /// Spawns a child from complete launch inputs and observes its termination.
     func start(configuration: BEAMLaunchConfiguration, onStartupFailure: ((StartupFailure) -> Void)? = nil) {
         guard exitIntent != .appShutdown, process == nil else { return }
+        cancelPendingTasks()
         exitIntent = .running
         let safeMode = configuration.environment["MINGA_SAFE_MODE"]
         isSafeMode = safeMode == "1" || safeMode == "true"
@@ -266,12 +273,19 @@ final class BEAMProcessManager {
         let deadline = DispatchTime.now() + stopTimeout
         pendingStartupRetry = StartupRetry(deadline: deadline, inSafeMode: inSafeMode, onFailure: onFailure)
         if stopping.isRunning { stopping.terminate() }
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: deadline) { [weak self] in
-            MainRunLoopAction {
-                guard let self, self.process === stopping, let retry = self.pendingStartupRetry else { return }
-                self.pendingStartupRetry = nil
-                retry.onFailure(.previousCoreStopTimedOut)
-            }.enqueue()
+        shutdownWatchdogTask?.cancel()
+        shutdownWatchdogTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(stopTimeout))
+            } catch {
+                return
+            }
+            guard let self,
+                  self.process === stopping,
+                  stopping.isRunning,
+                  let retry = self.pendingStartupRetry else { return }
+            self.pendingStartupRetry = nil
+            retry.onFailure(.previousCoreStopTimedOut)
         }
     }
 
@@ -283,6 +297,7 @@ final class BEAMProcessManager {
     func beginAppShutdown() {
         exitIntent = .appShutdown
         pendingStartupRetry = nil
+        cancelPendingTasks()
     }
 
     /// Hands the launch pipes to a successfully constructed ProtocolConnection without closing them.
@@ -406,6 +421,13 @@ final class BEAMProcessManager {
 
     // MARK: - Private
 
+    private func cancelPendingTasks() {
+        shutdownWatchdogTask?.cancel()
+        shutdownWatchdogTask = nil
+        restartDelayTask?.cancel()
+        restartDelayTask = nil
+    }
+
     /// Acquires current inputs for one start or restart, then applies launch policy in one pure build.
     private func launchConfiguration(environment: [String: String]) -> BEAMLaunchConfiguration? {
         guard let inputs = BEAMLaunchInputAcquirer.current(
@@ -420,6 +442,7 @@ final class BEAMProcessManager {
     /// Handles BEAM exit. Kept non-`private` so the termination path can be
     /// exercised directly in tests that assert the main actor is not blocked.
     func handleTermination(status: Int32, reason: Process.TerminationReason) {
+        cancelPendingTasks()
         self.process = nil
         closeLaunchPipes()
         endBackgroundActivity()
@@ -471,11 +494,15 @@ final class BEAMProcessManager {
             restartTimestamps.append(now)
             exitIntent = .restartScheduled
             PortLogger.report(.warning, "Restarting BEAM in \(delay)s", to: beamLog)
-            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + delay) { [weak self] in
-                MainRunLoopAction {
-                    guard let self, self.exitIntent == .restartScheduled else { return }
-                    self.start()
-                }.enqueue()
+            restartDelayTask?.cancel()
+            restartDelayTask = Task { [weak self] in
+                do {
+                    try await Task.sleep(for: .seconds(delay))
+                } catch {
+                    return
+                }
+                guard let self, self.exitIntent == .restartScheduled else { return }
+                self.start()
             }
         }
     }
