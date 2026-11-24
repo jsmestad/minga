@@ -556,7 +556,7 @@ kbd {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   border-top: 2px solid var(--border-strong);
   border-left: 1px solid var(--border);
-  margin-bottom: 1rem;
+  margin-bottom: 0;
   background: var(--bg-elevated);
 }
 
@@ -615,6 +615,11 @@ kbd {
   line-height: 1.38;
 }
 
+.showcase-panel {
+  display: flex;
+  flex-direction: column;
+}
+
 .showcase-panel[hidden] {
   display: none;
 }
@@ -627,17 +632,24 @@ kbd {
   margin-top: 0;
 }
 
+.js-enabled .showcase-panel .spine-specimen {
+  border-top: 0;
+}
+
 .showcase-explain {
-  margin: 0 0 0.85rem;
-  padding: 0.7rem 0.95rem;
-  background: var(--bg-subtle);
-  border-left: 2px solid var(--accent);
-  font-size: 0.9rem;
-  color: var(--text-secondary);
+  order: 2;
+  margin: 0.7rem 0 0;
+  padding: 0;
+  background: transparent;
+  border-left: 0;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: var(--text-muted);
 }
 
 .showcase-explain strong {
-  color: var(--text);
+  color: var(--text-secondary);
+  font-weight: 600;
 }
 
 .spine-specimen {
@@ -2126,8 +2138,8 @@ td:first-child {
     display: none;
   }
   .showcase-explain {
-    font-size: 0.87rem;
-    padding: 0.65rem 0.85rem;
+    font-size: 0.82rem;
+    padding: 0;
   }
   .spine-caption {
     font-size: 0.73rem;
