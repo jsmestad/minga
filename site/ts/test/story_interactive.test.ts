@@ -8,7 +8,6 @@ import {
   tickIsolationSim,
   triggerIsolationFault,
 } from "../src/arch_interactive.ts";
-import { EXTENDING_SCENARIOS } from "../src/extending_interactive.ts";
 import { highlightElixirLine } from "../src/highlight.ts";
 import { createHeroTourState, handleHeroTourKey, reduceHeroTour } from "../src/home_interactive.ts";
 
@@ -102,6 +101,5 @@ describe("Architecture live typing fault simulator & staged overlay pipeline", (
     assert.match(highlighted, /class="ckw">def<\/span>/);
     assert.match(highlighted, /class="cat">:ok<\/span>/);
     assert.match(highlighted, /class="ccm"># hi<\/span>/);
-    assert.ok(EXTENDING_SCENARIOS.migration.layers[3].code.includes("tuesday_migration_audit"));
   });
 });

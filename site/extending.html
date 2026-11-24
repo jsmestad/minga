@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Extending Minga: Three Layers of Programmability</title>
-  <meta name="description" content="Customize Minga across three layers: live-reloaded config.exs, supervised Hex/Git extensions, PreToolUse hooks, crash-isolated MCP, corporate LLM gateways, and task-shaped v0.1.0 workflows.">
+  <title>Extending Minga: One Line of Config, Then a Package</title>
+  <meta name="description" content="Change how Minga works with one line of Elixir in config.exs, such as formatting Go files when you save. Write a package only when your change has to be installed somewhere else or keep running on its own.">
   <link rel="canonical" href="https://mingacode.dev/extending">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#303446" media="(prefers-color-scheme: dark)">
@@ -13,18 +13,18 @@
   <meta property="og:locale" content="en_US">
   <meta property="og:type" content="article">
   <meta property="og:url" content="https://mingacode.dev/extending">
-  <meta property="og:title" content="Extending Minga: Three Layers of Programmability">
-  <meta property="og:description" content="Customize Minga across three layers: live-reloaded config.exs, supervised Hex/Git extensions, PreToolUse hooks, crash-isolated MCP, corporate LLM gateways, and task-shaped workflows.">
+  <meta property="og:title" content="Extending Minga: One Line of Config, Then a Package">
+  <meta property="og:description" content="Change how Minga works with one line of Elixir in config.exs, such as formatting Go files when you save. Write a package only when your change has to be installed somewhere else or keep running on its own.">
   <meta property="og:image" content="https://mingacode.dev/assets/og-minga.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Extending Minga: Three Layers of Programmability">
-  <meta name="twitter:description" content="Customize Minga across three layers: live-reloaded config.exs, supervised Hex/Git extensions, PreToolUse hooks, crash-isolated MCP, corporate LLM gateways, and task-shaped workflows.">
+  <meta name="twitter:title" content="Extending Minga: One Line of Config, Then a Package">
+  <meta name="twitter:description" content="Change how Minga works with one line of Elixir in config.exs, such as formatting Go files when you save. Write a package only when your change has to be installed somewhere else or keep running on its own.">
   <meta name="twitter:image" content="https://mingacode.dev/assets/og-minga.png">
   <meta name="twitter:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
-  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Extending Minga: Three Layers of Programmability","description":"Customize Minga across three layers: live-reloaded config.exs, supervised Hex/Git extensions, PreToolUse hooks, crash-isolated MCP, corporate LLM gateways, and task-shaped v0.1.0 workflows.","url":"https://mingacode.dev/extending","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Extending Minga","item":"https://mingacode.dev/extending"}]}]}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Extending Minga: One Line of Config, Then a Package","description":"Change how Minga works with one line of Elixir in config.exs, such as formatting Go files when you save. Write a package only when your change has to be installed somewhere else or keep running on its own.","url":"https://mingacode.dev/extending","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Extending Minga","item":"https://mingacode.dev/extending"}]}]}</script>
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
@@ -67,46 +67,32 @@
   <main id="main">
     <header class="essay-hero">
       <div class="container">
-        <p class="section-index"><span>EXTENDING</span> Three Layers</p>
-        <h1>Extending Minga</h1>
-        <p class="essay-subtitle">Elixir configures every layer of Minga, from five lines in <code>config.exs</code> to supervised packages and corporate LLM gateways.</p>
-        <nav class="essay-toc" aria-label="Sections">
-          <a href="#three-layers">1. Three layers</a>
-          <a href="#layer-config">2. config.exs</a>
-          <a href="#layer-extensions">3. Extensions, hooks &amp; gateways</a>
-          <a href="#layer-workflows">4. Task workflows (v0.1.0)</a>
-          <a href="#security-and-reloads">5. Security &amp; reloads</a>
-        </nav>
+        <p class="section-index"><span>EXTENDING</span> Config first, a package later</p>
+        <h1>You want gofmt to run every time you save. That is one line of config, not a plugin project.</h1>
+        <p class="essay-subtitle">Minga reads one Elixir file, <code>~/.config/minga/config.exs</code>. Add the line below and press <kbd>SPC h r</kbd> to reload it. Go files you open from then on are formatted when you save them. You write a package only when what you built has to be installed somewhere else or keep running on its own.</p>
+
+        <div class="code-card is-frappe hero-code">
+          <div class="code-header">
+            <span>~/.config/minga/config.exs</span>
+            <span>Elixir</span>
+          </div>
+          <pre><code><span class="tok-kw">use</span> <span class="tok-mod">Minga.Config</span>
+
+for_filetype <span class="tok-atom">:go</span>, format_on_save: <span class="tok-atom">true</span></code></pre>
+        </div>
+
+        <div class="actions">
+          <a class="btn btn-primary" href="/docs/configuration.html">Read the configuration guide</a>
+        </div>
+        <p class="section-foot-link"><span data-status="planned" data-since="v0.1.0">Here from the home page demo? <a href="#layer-workflows">What that board is, and how you keep it</a>.</span></p>
       </div>
     </header>
 
     <article class="essay-body">
       <div class="container">
-        <section class="essay-section" id="three-layers">
-          <h2>1. One language across three layers</h2>
-          <p>Every layer shares one Elixir runtime over Minga's buffers, drawers, and key scopes, trading OS-level plugin sandboxing and hot-patching of compiled packages (<a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a>) for unified programmability:</p>
-
-          <ul class="spec-ledger">
-            <li class="spec-row">
-              <span class="spec-key spec-key-strong">Layer 1 · config.exs</span>
-              <span class="spec-detail"><strong>Reloads live (<kbd>SPC h r</kbd>).</strong> Typed options, keybindings, custom commands, save hooks, and <code>advise</code> command wrappers.</span>
-            </li>
-            <li class="spec-row">
-              <span class="spec-key spec-key-strong">Layer 2 · Extensions</span>
-              <span class="spec-detail"><strong>Supervised packages (<code>minga_sdk</code>).</strong> Hex, Git, or local packages for supervisors, custom buffers, corporate LLM routes, and runtime grammars.</span>
-            </li>
-            <li class="spec-row">
-              <span class="spec-key spec-key-strong">Layer 3 · Task workflows</span>
-              <span class="spec-detail"><strong>v0.1.0 roadmap.</strong> Author readable Elixir workflows over buffers and agents, activate under a revocable grant, then discard or reuse.</span>
-            </li>
-          </ul>
-
-          <div data-layer-explorer></div>
-        </section>
-
         <section class="essay-section" id="layer-config">
-          <h2>2. Layer 1: Everyday customization in config.exs</h2>
-          <p><code>~/.config/minga/config.exs</code> is plain Elixir with typed validation. Hooks run in background processes; command wrappers catch exceptions.</p>
+          <h2>Start in one file</h2>
+          <p><code>config.exs</code> is ordinary Elixir. Minga reads it when it starts and again when you press <kbd>SPC h r</kbd>. You do not need to know the language to use it: <code>set</code> changes an option everywhere, <code>for_filetype</code> changes it for one language, and <code>on</code> runs your function after an event such as a save.</p>
 
           <div class="code-card is-frappe">
             <div class="code-header">
@@ -115,94 +101,137 @@
             </div>
             <pre><code><span class="tok-kw">use</span> <span class="tok-mod">Minga.Config</span>
 
-set <span class="tok-atom">:theme</span>, <span class="tok-atom">:catppuccin_frappe</span>
-set <span class="tok-atom">:line_numbers</span>, <span class="tok-atom">:hybrid</span>
-set <span class="tok-atom">:scroll_margin</span>, <span class="tok-num">6</span>
+set <span class="tok-atom">:theme</span>, <span class="tok-atom">:catppuccin_mocha</span>
 
-<span class="tok-comment"># Per-filetype option overrides take a plain keyword list.</span>
-for_filetype <span class="tok-atom">:go</span>, tab_width: <span class="tok-num">4</span>, indent_with: <span class="tok-atom">:tabs</span>
+for_filetype <span class="tok-atom">:go</span>, format_on_save: <span class="tok-atom">true</span>, indent_with: <span class="tok-atom">:tabs</span>, tab_width: <span class="tok-num">8</span>
 
-<span class="tok-comment"># Background save hooks run in separate processes and never stall typing.</span>
-on <span class="tok-atom">:after_save</span>, <span class="tok-kw">fn</span> _buf, path <span class="tok-kw">-&gt;</span>
-  <span class="tok-kw">if</span> <span class="tok-mod">String</span>.ends_with?(path, <span class="tok-str">".go"</span>) <span class="tok-kw">do</span>
-    <span class="tok-mod">System</span>.cmd(<span class="tok-str">"gofmt"</span>, [<span class="tok-str">"-w"</span>, path])
-  <span class="tok-kw">end</span>
-<span class="tok-kw">end</span>
-
-<span class="tok-comment"># Wrap any built-in command with :before, :after, :around, or :override advice.</span>
-advise <span class="tok-atom">:after</span>, <span class="tok-atom">:save</span>, <span class="tok-kw">fn</span> state <span class="tok-kw">-&gt;</span>
-  <span class="tok-mod">Minga.API</span>.message(<span class="tok-str">"Saved"</span>)
-  state
-<span class="tok-kw">end</span>
-
-<span class="tok-comment"># Install supervised extensions from Hex, Git, or local paths (with optional lazy loading).</span>
-extension <span class="tok-atom">:minga_git_extended</span>, hex: <span class="tok-str">"minga_git_extended"</span>, version: <span class="tok-str">"~&gt; 0.1"</span></code></pre>
+<span class="tok-comment"># After every save, stage the file in Git.</span>
+on <span class="tok-atom">:after_save</span>, <span class="tok-kw">fn</span> _buffer, path <span class="tok-kw">-&gt;</span>
+  <span class="tok-mod">System</span>.cmd(<span class="tok-str">"git"</span>, [<span class="tok-str">"add"</span>, path], stderr_to_stdout: <span class="tok-atom">true</span>)
+<span class="tok-kw">end</span></code></pre>
           </div>
 
-          <p>See the <a href="/docs/configuration.html">Configuration Reference</a> for every typed option, theme token, formatter override, hook, and MCP server setting.</p>
+          <p>The save hook runs in its own process, so a slow command does not hold up your typing, and a crash in it is logged while the editor keeps running. A theme you set here shows after a restart. The <a href="/docs/configuration.html">configuration guide</a> lists every option, and covers key bindings, your own commands, and advice, which wraps a command Minga already has.</p>
         </section>
 
         <section class="essay-section" id="layer-extensions">
-          <h2>3. Layer 2: Supervised extensions and integration seams</h2>
-          <p>Build a <code>minga_sdk</code> package when a customization needs its own supervision tree, custom buffer surface, or Git/Hex distribution. Disabling an extension tears down all registrations cleanly, and users can override <code>load_policy</code> (<code>:eager</code>, <code>:deferred</code>, <code>{:on_command, [...]}</code>) in <code>config.exs</code> without forking.</p>
+          <h2>When config is no longer enough</h2>
+          <p>Config stops being enough when what you built has to leave your config file: you want to install it on another machine with one line and a version, or it needs a process of its own that keeps state while you work. Then you write a package, which Minga calls an extension. Both levels ship today.</p>
 
-          <div class="code-card is-frappe">
-            <div class="code-header">
-              <span>lib/my_extension.ex · minga_sdk</span>
-              <span>Elixir</span>
+          <ul class="spec-ledger">
+            <li class="spec-row">
+              <span class="spec-key spec-key-strong">Config</span>
+              <span class="spec-detail"><strong>One file, reloaded with <kbd>SPC h r</kbd>.</strong> Options, per-language settings, key bindings, your own commands, save hooks and advice.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key spec-key-strong">Package</span>
+              <span class="spec-detail"><strong>A directory of Elixir files, loaded when Minga starts.</strong> It comes from a local path, a Git repository or Hex (Elixir's package registry), and runs under its own supervisor, the process that watches it and restarts it, so a crash in it does not reach the editor or another package.</span>
+            </li>
+          </ul>
+        </section>
+
+        <section class="essay-section" id="same-task">
+          <h2>One task, written both ways</h2>
+          <p>Format on save is a built-in option, so it never needs a package. For a fair comparison, take something Minga has no option for: your own command on your own key. Both cards below add a command named <code>hello_greet</code>, bind it to the same key, and write the same line to <code>*Messages*</code>, Minga's message log.</p>
+
+          <div class="grid-2 code-pair">
+            <div class="code-card is-frappe">
+              <div class="code-header">
+                <span>Config · ~/.config/minga/config.exs</span>
+                <span>Elixir</span>
+              </div>
+              <pre><code><span class="tok-kw">use</span> <span class="tok-mod">Minga.Config</span>
+
+command <span class="tok-atom">:hello_greet</span>, <span class="tok-str">"Say hello in *Messages*"</span> <span class="tok-kw">do</span>
+  <span class="tok-mod">Minga.API</span>.message(<span class="tok-str">"Hello from MingaHello"</span>)
+<span class="tok-kw">end</span>
+
+bind <span class="tok-atom">:normal</span>, <span class="tok-str">"SPC o h"</span>, <span class="tok-atom">:hello_greet</span>, <span class="tok-str">"Say hello"</span></code></pre>
             </div>
-            <pre><code><span class="tok-kw">defmodule</span> <span class="tok-mod">MyExtension</span> <span class="tok-kw">do</span>
+            <div class="code-card is-frappe">
+              <div class="code-header">
+                <span>Package · ~/code/minga_hello/extension.ex</span>
+                <span>Elixir</span>
+              </div>
+              <pre><code><span class="tok-kw">defmodule</span> <span class="tok-mod">MingaHello</span> <span class="tok-kw">do</span>
   <span class="tok-kw">use</span> <span class="tok-mod">Minga.Extension.Editor</span>
 
-  option <span class="tok-atom">:enabled</span>, <span class="tok-atom">:boolean</span>, default: <span class="tok-atom">true</span>, description: <span class="tok-str">"Enable extension"</span>
+  command <span class="tok-atom">:hello_greet</span>, <span class="tok-str">"Say hello in *Messages*"</span>,
+    execute: {__MODULE__, <span class="tok-atom">:greet</span>}
 
-  command <span class="tok-atom">:run_check</span>, <span class="tok-str">"Run custom project check"</span>,
-    execute: {<span class="tok-mod">MyExtension.Commands</span>, <span class="tok-atom">:run</span>}
-
-  keybind <span class="tok-atom">:normal</span>, <span class="tok-str">"SPC m c"</span>, <span class="tok-atom">:run_check</span>, <span class="tok-str">"Run custom check"</span>, filetype: <span class="tok-atom">:go</span>
+  keybind <span class="tok-atom">:normal</span>, <span class="tok-str">"SPC o h"</span>, <span class="tok-atom">:hello_greet</span>, <span class="tok-str">"Say hello"</span>
 
   @impl <span class="tok-atom">true</span>
-  <span class="tok-kw">def</span> name, <span class="tok-kw">do:</span> <span class="tok-atom">:my_extension</span>
+  <span class="tok-kw">def</span> name, <span class="tok-kw">do:</span> <span class="tok-atom">:minga_hello</span>
 
   @impl <span class="tok-atom">true</span>
-  <span class="tok-kw">def</span> description, <span class="tok-kw">do:</span> <span class="tok-str">"Project-specific check runner"</span>
+  <span class="tok-kw">def</span> description, <span class="tok-kw">do:</span> <span class="tok-str">"Says hello from a key"</span>
 
   @impl <span class="tok-atom">true</span>
   <span class="tok-kw">def</span> version, <span class="tok-kw">do:</span> <span class="tok-str">"0.1.0"</span>
 
   @impl <span class="tok-atom">true</span>
   <span class="tok-kw">def</span> init(_config), <span class="tok-kw">do:</span> {<span class="tok-atom">:ok</span>, %{}}
+
+  <span class="tok-kw">def</span> greet(state) <span class="tok-kw">do</span>
+    <span class="tok-mod">Minga.API</span>.message(<span class="tok-str">"Hello from MingaHello"</span>)
+    state
+  <span class="tok-kw">end</span>
 <span class="tok-kw">end</span></code></pre>
+            </div>
           </div>
 
-          <h3>Four runtime integration seams</h3>
+          <p>For this task the config card is all you need. The package is the same idea with a name, a version and four short functions that identify it and run its setup. You load it with one more line of config, then restart Minga:</p>
+
+          <div class="code-card is-frappe">
+            <div class="code-header">
+              <span>~/.config/minga/config.exs</span>
+              <span>Elixir</span>
+            </div>
+            <pre><code>extension <span class="tok-atom">:minga_hello</span>, path: <span class="tok-str">"~/code/minga_hello"</span></code></pre>
+          </div>
+
+          <p>Two things change when you move from the left card to the right one:</p>
           <ul>
-            <li><strong>Corporate LLM gateways (<code>MingaAgent.InferenceRoute</code>).</strong> Stream through an internal proxy in <code>/model</code> while Minga owns approvals, staged overlays, compaction, and history (<a href="/docs/extension_api.html#model-routes">Model Routes</a>).</li>
-            <li><strong>Deterministic <code>PreToolUse</code> hooks (<code>:agent_hooks</code>).</strong> Pipe JSON arguments on stdin with process-group timeouts; non-zero exit blocks the tool and surfaces stderr in chat (<a href="/docs/hooks.html">Hooks</a>).</li>
-            <li><strong>Crash-isolated MCP (<code>:agent_mcp_servers</code>).</strong> Attach stdio MCP servers with prefixed tools (<code>mcp_&lt;server&gt;__&lt;tool&gt;</code>); if one exits mid-turn, only its tools drop out (<a href="/docs/mcp.html">MCP</a>).</li>
-            <li><strong>Runtime syntax grammars (<code>Minga.Language.register</code>).</strong> Compile and cache tree-sitter grammars under <code>~/.local/share/minga/grammars/</code> without rebuilding Minga (<a href="/docs/extension_api.html#tree-sitter-grammars">Grammars</a>).</li>
+            <li><strong>Where the command runs.</strong> A config command runs in its own task, outside the editor process: if it raises an error, the status bar shows it and you keep typing. A package command runs inside the editor process and receives the editor state. Minga catches a crash there and reports it, but a command that never returns blocks your input until it does, so keep slow work in the package's own process.</li>
+            <li><strong>When a change takes effect.</strong> You reload config in place with <kbd>SPC h r</kbd>. Changed package code loads only when Minga starts again.</li>
+          </ul>
+          <p>The package is the same file that opens the <a href="/docs/extension_api.html">Extension API guide</a>, which continues from here: Git and Hex sources, options your users can set, and a process of your own.</p>
+        </section>
+
+        <section class="essay-section" id="extension-points">
+          <h2>Four more places to plug in</h2>
+          <p>The first two are options you set in <code>config.exs</code>. The last two need a package.</p>
+          <ul>
+            <li><strong>Agent hooks.</strong> A shell command that Minga runs at a point in an agent's work, such as before a tool call, where a non-zero exit stops the call. <a href="/docs/hooks.html">Hooks guide</a></li>
+            <li><strong>MCP servers.</strong> External tool servers the agent can call over the Model Context Protocol (MCP); if one exits, only its tools drop out. <a href="/docs/mcp.html">MCP guide</a></li>
+            <li><strong>Model routes.</strong> Send the agent's model requests to your company's gateway or to a subscription you already pay for, while Minga keeps running the tools and asking for your approval. <a href="/docs/extension_api.html#model-routes">Model routes</a></li>
+            <li><strong>Language grammars.</strong> Add syntax highlighting for a language Minga does not ship, using a tree-sitter grammar (tree-sitter is the parser Minga highlights with) that Minga compiles and caches. <a href="/docs/extension_api.html#tree-sitter-grammars">Tree-sitter grammars</a></li>
           </ul>
         </section>
 
-        <section class="essay-section" id="layer-workflows">
-          <h2>4. Layer 3: Task workflows (v0.1.0 roadmap)</h2>
-          <p>Between <code>config.exs</code> and a packaged extension, Layer 3 lets you or Minga author a task-specific review surface or check board in readable Elixir over real buffer, drawer, and agent primitives. Inspect the diff, activate under a revocable grant (with rollback on failure), then discard it when the PR lands or reuse it across repos. Pre-v1.0 config or <code>minga_sdk</code> breaking changes are tracked in the <a href="/docs/changelog.html">Changelog</a>.</p>
+        <section class="essay-section planned-block" id="layer-workflows" data-status="planned" data-since="v0.1.0">
+          <h2>Task workflows: the board from the home page demo</h2>
+          <p>The demo on the home page ends with a task board that Minga wrote from a spec. Minga does not ship a board. A task workflow is a view and its actions, written for one job, and it is what "quiet by default" means in practice: Minga shows nothing until something needs you, and then builds the one view your task needs.</p>
+          <p>That view comes from a definition: a short file of ordinary Elixir source that says what the view shows and what its actions do. It sits between config and a package, and you can open it and read it like any other file. The loop has five steps:</p>
+          <ol>
+            <li><strong>Ask, or write it yourself.</strong> Minga writes the definition from what your task needs, using capabilities that are already installed.</li>
+            <li><strong>Save.</strong> Saving the file attempts to activate it in the running editor. The save and the activation are reported separately, so a definition that fails to activate is still saved and still readable. Activation first needs a grant from you, and you can revoke it.</li>
+            <li><strong>Inspect.</strong> The source is in a normal buffer. Read it, change it, and save again.</li>
+            <li><strong>Keep.</strong> Keep makes the definition available in later sessions, tabs and workspaces. It does not copy the task's data, and it does not make anything start by itself.</li>
+            <li><strong>Reuse.</strong> Open the kept definition on your next spec. Minga does not have to write it again.</li>
+          </ol>
+          <p>This page shows no definition code, because the source format is not settled yet. The design record, <a href="/docs/0004-products-are-root-applets-over-a-fixed-engine.html">ADR-0004</a>, has the details. Like config and packages, a definition is trusted code that runs with your user's permissions.</p>
         </section>
 
         <section class="essay-section" id="security-and-reloads">
-          <h2>5. Security, privacy, and reload boundaries</h2>
+          <h2>Trust, reloads and where your data goes</h2>
           <ul>
-            <li><strong>Trust model.</strong> Extensions run with your OS-user privileges (like Neovim Lua and Emacs Lisp); BEAM isolation contains crashes, not malicious code.</li>
-            <li><strong>Approvals &amp; updates.</strong> Destructive agent tools (edits, deletes, shell, git writes, MCP tools by default) require approval; <kbd>SPC h e u</kbd> shows git history before updating extensions; v0.1.0 live authoring requires a revocable grant.</li>
-            <li><strong>Data, keys &amp; proxies.</strong> Zero telemetry. Keys resolve from env vars first or save locally in <code>~/.config/minga/credentials.json</code> (<code>0600</code>), never logged or exported. Route exclusively through an internal proxy via <code>MingaAgent.InferenceRoute</code>; macOS builds are Apple Developer ID signed and notarized.</li>
-            <li><strong>Reloads (<a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a>).</strong> <kbd>SPC h r</kbd> reloads options, bindings, hooks, and advice in place; disabling an extension takes effect immediately; compiled extension updates activate cleanly on restart.</li>
+            <li><strong>Trust.</strong> Config and packages run inside the editor with your user's permissions and are not sandboxed, the same model as Emacs and Vim, so read a package before you install it. <a href="/docs/extension_api.html#trust-model">Trust model</a></li>
+            <li><strong>Reloads.</strong> <kbd>SPC h r</kbd> reloads options, key bindings, hooks and advice in place; changed package code loads only when Minga restarts, and the reload tells you when a restart is needed. <a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">Why a restart (ADR-0003)</a></li>
+            <li><strong>Where your data goes.</strong> A model route receives the conversation text and never runs a tool on your machine, and its token belongs in <code>~/.config/minga/credentials.json</code>, not in <code>config.exs</code>. <a href="/docs/extension_api.html#model-routes">Model routes</a></li>
           </ul>
-
-          <div class="actions">
-            <a class="btn btn-primary" href="/docs/extension_api.html">Full Extension API Reference</a>
-            <a class="btn" href="/docs/configuration.html">Configuration Reference</a>
-            <a class="btn" href="https://hexdocs.pm/minga_sdk">minga_sdk on HexDocs</a>
-          </div>
+          <p class="section-foot-link">Next: <a href="/docs/configuration.html">the configuration guide</a> for every option, or <a href="/docs/extension_api.html#your-first-extension">Your first extension</a> to build the package above.</p>
         </section>
       </div>
     </article>
