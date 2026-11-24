@@ -21,7 +21,7 @@ REQUIRED_FILES = (
     "_redirects",
     "robots.txt",
     "docs/index.html",
-    "docs/readme.html",
+    "docs/reference.html",
 )
 
 
@@ -257,14 +257,14 @@ def check_site_html(
 
 
 def check_exdoc_home_link(site_root: Path, cache: dict[Path, SiteHTMLInspector]) -> list[str]:
-    readme_html = site_root / "docs" / "readme.html"
-    inspector = parse_html(readme_html, cache)
+    reference_html = site_root / "docs" / "reference.html"
+    inspector = parse_html(reference_html, cache)
     has_root_link = any(
         attr_name == "href" and raw_ref == "/"
         for attr_name, raw_ref, _ in inspector.refs
     )
     if not has_root_link:
-        return ["docs/readme.html: missing ExDoc home link back to '/' (check MINGA_SITE_URL=\"/\")"]
+        return ["docs/reference.html: missing ExDoc home link back to '/' (check MINGA_SITE_URL=\"/\")"]
     return []
 
 

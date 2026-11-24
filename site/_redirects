@@ -1,5 +1,8 @@
 # Legacy root ExDoc guide paths redirected to /docs/
-/readme.html /docs/readme.html 301
+/readme.html /docs/reference.html 301
+/docs/readme.html /docs/reference.html 301
+/getting-started.html /getting-started 301
+/docs/getting-started.html /getting-started 301
 /configuration.html /docs/configuration.html 301
 /agent-model-selection.html /docs/agent-model-selection.html 301
 /projects.html /docs/projects.html 301
@@ -23,7 +26,10 @@
 /remote_agents.html /docs/remote_agents.html 301
 /hooks.html /docs/hooks.html 301
 /mcp.html /docs/mcp.html 301
-/automation-ipc.html /docs/automation-ipc.html 301
-/contributing.html /docs/contributing.html 301
-/releasing.html /docs/releasing.html 301
+/automation-ipc.html https://github.com/jsmestad/minga/blob/main/docs/AUTOMATION-IPC.md 301
+/docs/automation-ipc.html https://github.com/jsmestad/minga/blob/main/docs/AUTOMATION-IPC.md 301
+/contributing.html https://github.com/jsmestad/minga/blob/main/CONTRIBUTING.md 301
+/docs/contributing.html https://github.com/jsmestad/minga/blob/main/CONTRIBUTING.md 301
+/releasing.html https://github.com/jsmestad/minga/blob/main/docs/RELEASING.md 301
+/docs/releasing.html https://github.com/jsmestad/minga/blob/main/docs/RELEASING.md 301
 /changelog.html /docs/changelog.html 301
