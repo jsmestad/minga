@@ -154,6 +154,19 @@ defmodule Minga.Buffer.ProvenanceTest do
     end
   end
 
+  describe "blocked_groups/2" do
+    test "lists the groups whose text a group deleted after them, the reverse of blocker/2" do
+      {you, prov} = Provenance.open_group(Provenance.new(6), :you, nil)
+      prov = Provenance.edit(prov, you, 0, "ab", "AB")
+      {step, prov} = Provenance.open_group(prov, @task, @step_one)
+      prov = Provenance.edit(prov, step, 0, "ABcd", "")
+
+      assert Provenance.blocked_groups(prov, step) == [you]
+      assert Provenance.blocker(prov, you) == @step_one
+      assert Provenance.blocked_groups(prov, you) == []
+    end
+  end
+
   describe "discard/2" do
     test "an applied group's text becomes permanent and merges with its neighbours" do
       {you, prov} = Provenance.open_group(Provenance.new(0), :you, nil)

@@ -5,7 +5,7 @@ defmodule Minga.Buffer.UndoHistory do
   Every change to the document is recorded in a `Minga.Buffer.Provenance` value, which knows the author of every byte and keeps deleted text as tombstones. This module decides which history group each change belongs to:
 
   * **Yours.** Edits from you (`:user`), from a language server or formatter you invoked (`:lsp`), and from swap recovery (`:recovery`) form your undo stack. Rapid edits from the same source coalesce into one group within `coalesce_ms/0`. The stack keeps your last 1000 groups; an older group becomes permanent text that keeps its author.
-  * **Minga's.** Each step of a Minga task (an author key, `Minga.Buffer.Author.key/0`) is its own group, never coalesced with another step or task and never evicted. An agent edit without a task (`:agent`) is a group of its own whose text is unattributed; the last 1000 such groups stay revertable, and an older one becomes permanent unattributed text, as your evicted groups do. Minga's groups never enter your stacks.
+  * **Minga's.** Each step of a Minga task (an author key, `Minga.Buffer.Author.key/0`) is its own group, never coalesced with another step or task and never evicted. An agent edit without a task (`:agent`) is a group of its own whose text is unattributed; the last 1000 such groups stay revertable, and an older one becomes permanent unattributed text. Before it does, any undo or redo step of yours it blocks leaves your stacks, with everything below it, so no flip can rebuild text that never existed. Minga's groups never enter your stacks.
 
   `undo/3` and `redo/3` move only your groups. They find a group's text by its runs, not by byte offsets, so they stay exact when Minga edited above, below, or inside your text since. When flipping your group would change text that a later Minga step rewrote, they change nothing and return `{:blocked, {:overlaps, minga_group}}`. Minga's edits never clear your redo stack.
 
@@ -391,6 +391,7 @@ defmodule Minga.Buffer.UndoHistory do
 
   defp cap_untasked(history) do
     {{:value, oldest}, untasked} = :queue.out(history.untasked)
+    history = release_blocked(history, oldest)
 
     task_run =
       case history.task_run do
@@ -406,6 +407,40 @@ defmodule Minga.Buffer.UndoHistory do
         task_run: task_run
     }
   end
+
+  # Before an untasked group becomes permanent, your groups it blocks leave your stacks.
+  # Its tombstones are about to be dropped, and flipping such a group would then rebuild text that never existed.
+  # Undo or redo would have stopped at that group anyway, so the stack ends there.
+  @spec release_blocked(t(), Provenance.group_id()) :: t()
+  defp release_blocked(history, group) do
+    case Provenance.blocked_groups(history.provenance, group) do
+      [] ->
+        history
+
+      blocked ->
+        blocked = MapSet.new(blocked)
+        {undo_entries, dropped_undo} = cut_at_blocked(history.undo_entries, blocked)
+        {redo_entries, dropped_redo} = cut_at_blocked(history.redo_entries, blocked)
+
+        provenance =
+          Enum.reduce(dropped_undo ++ dropped_redo, history.provenance, fn entry, acc ->
+            Provenance.discard(acc, entry.group)
+          end)
+
+        %{
+          history
+          | provenance: provenance,
+            undo_entries: undo_entries,
+            undo_size: length(undo_entries),
+            redo_entries: redo_entries
+        }
+    end
+  end
+
+  # Keeps the entries above the newest blocked one and returns the rest, newest first.
+  @spec cut_at_blocked([Entry.t()], MapSet.t(Provenance.group_id())) :: {[Entry.t()], [Entry.t()]}
+  defp cut_at_blocked(entries, blocked),
+    do: Enum.split_while(entries, &(not MapSet.member?(blocked, &1.group)))
 
   # A task reverted right after its only stretch of steps returns to the version and tick before that stretch.
   # A buffer that was clean is then clean again.

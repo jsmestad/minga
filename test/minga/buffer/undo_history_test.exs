@@ -294,6 +294,38 @@ defmodule Minga.Buffer.UndoHistoryTest do
                UndoHistory.undo_agent_session(history, world.version + 1, restore.document)
     end
 
+    test "evicting an agent edit that rewrote your text removes your blocked steps instead of unblocking them" do
+      world =
+        world("foo\n") |> edit(:user, 0, 3, "bar") |> edit(:user, 3, 0, "!", at: @t0 + @window)
+
+      world = world |> undo!() |> edit(:agent, 0, 3, "baz")
+      assert step(world, :undo) == {:blocked, {:overlaps, :agent}}
+
+      world =
+        Enum.reduce(1..1000, world, fn n, world ->
+          edit(world, :agent, byte_size(text(world)), 0, "x", at: @t0 + n)
+        end)
+
+      assert text(world) == "baz\n" <> String.duplicate("x", 1000)
+      assert step(world, :undo) == :empty
+
+      # Your undone "!" was not blocked, so it stays redoable.
+      assert text(redo!(world)) == "baz!\n" <> String.duplicate("x", 1000)
+    end
+
+    test "evicting an agent edit that rewrote your undone text removes your blocked redo" do
+      world = world("foo\n") |> edit(:user, 0, 3, "bar") |> undo!() |> edit(:agent, 0, 3, "qux")
+      assert step(world, :redo) == {:blocked, {:overlaps, :agent}}
+
+      world =
+        Enum.reduce(1..1000, world, fn n, world ->
+          edit(world, :agent, byte_size(text(world)), 0, "x", at: @t0 + n)
+        end)
+
+      assert step(world, :redo) == :empty
+      assert text(world) == "qux\n" <> String.duplicate("x", 1000)
+    end
+
     test "undo_agent_session is :empty without Minga steps" do
       assert UndoHistory.undo_agent_session(UndoHistory.new(), 0, Document.new("")) == :empty
     end

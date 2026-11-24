@@ -156,6 +156,22 @@ defmodule Minga.Buffer.Provenance do
   end
 
   @doc """
+  Returns the groups whose text this group deleted after them, so this group blocks flipping them.
+
+  It is the reverse of `blocker/2`: a group in the list whose flip `blocker/2` checks finds this group among its later deleters.
+  """
+  @spec blocked_groups(t(), group_id()) :: [group_id()]
+  def blocked_groups(%__MODULE__{groups: groups, tree: tree}, id) do
+    Map.fetch!(groups, id).runs
+    |> :gb_sets.to_list()
+    |> Enum.flat_map(fn run_id ->
+      {:ok, run, _offset} = RunTree.fetch(tree, run_id)
+      earlier_groups(run, id)
+    end)
+    |> Enum.uniq()
+  end
+
+  @doc """
   Forgets a group whose state is final, keeping the document as it is.
 
   An applied group's text becomes permanent and keeps its author; the text it deleted is dropped. An unapplied group's text is dropped and it no longer counts as a deletion of anyone's text. Use it when a group leaves every history: your oldest undo step falls off the stack, your redo steps are replaced by a new edit, or a Minga step is reverted for good.
@@ -445,6 +461,15 @@ defmodule Minga.Buffer.Provenance do
   @spec later_deleters(Run.t(), group_id()) :: [group_id()]
   defp later_deleters(%Run{group: id, deletions: deletions}, id), do: deletions
   defp later_deleters(%Run{deletions: deletions}, id), do: Enum.take_while(deletions, &(&1 != id))
+
+  # The groups that touched a run before `id` deleted it: its inserting group and the earlier deleters.
+  @spec earlier_groups(Run.t(), group_id()) :: [group_id()]
+  defp earlier_groups(%Run{deletions: deletions} = run, id) do
+    case Enum.split_while(deletions, &(&1 != id)) do
+      {_later, [^id | earlier]} -> Enum.reject([run.group | earlier], &is_nil/1)
+      {_all, []} -> []
+    end
+  end
 
   @spec foreign_key(%{group_id() => Group.t()}, group_id(), group_id()) :: group_key() | nil
   defp foreign_key(_groups, id, id), do: nil
