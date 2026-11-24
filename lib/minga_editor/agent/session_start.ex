@@ -11,7 +11,7 @@ defmodule MingaEditor.Agent.SessionStart do
 
   alias MingaAgent.ProjectView
   alias MingaAgent.SessionManager
-  alias MingaEditor.Agent.ProvenanceJump
+  alias MingaEditor.Agent.SessionFollowUp
   alias MingaEditor.Agent.StartFailure
   alias MingaEditor.Agent.StartRequest
   alias MingaEditor.Agent.UIState
@@ -27,11 +27,7 @@ defmodule MingaEditor.Agent.SessionStart do
   @timeout_ms 15_000
 
   @typedoc "Work that needs the started session, run once it is bound to its workspace."
-  @type follow_up ::
-          nil
-          | {:restore, String.t(), String.t() | nil, ProvenanceJump.origin() | nil,
-             UIState.View.return_target()}
-          | {:seed, [{:user | :assistant, String.t()}]}
+  @type follow_up :: nil | SessionFollowUp.work()
 
   @typedoc """
   `{:awaiting, timer}` until the session binds or fails; `{:bound, pid}` after the attach event bound it ahead of the reply; `:abandoned` after the deadline marked the tab failed.
@@ -215,37 +211,12 @@ defmodule MingaEditor.Agent.SessionStart do
   end
 
   @spec run_follow_up(EditorState.t(), t(), pid()) :: EditorState.t()
-  defp run_follow_up(state, %__MODULE__{start_request: %StartRequest{follow_up: nil}}, _session),
-    do: state
-
   defp run_follow_up(
          state,
-         %__MODULE__{
-           start_request: %StartRequest{
-             follow_up: {:restore, id, tool_call, origin, return_target}
-           }
-         } = start,
-         session
-       ) do
-    if active_workspace?(state, start.workspace),
-      do:
-        MingaEditor.Commands.Agent.restore_into_started_session(
-          state,
-          session,
-          id,
-          tool_call,
-          origin,
-          return_target
-        ),
-      else: state
-  end
-
-  defp run_follow_up(
-         state,
-         %__MODULE__{start_request: %StartRequest{follow_up: {:seed, messages}}},
+         %__MODULE__{start_request: %StartRequest{follow_up: follow_up}} = start,
          session
        ),
-       do: MingaEditor.Commands.InlineAsk.seed_started_session(state, session, messages)
+       do: SessionFollowUp.run(state, start.workspace, session, follow_up)
 
   # The raw reason is logged here; the tab shows only the failure's plain sentence.
   @spec session_error(EditorState.t(), t(), term()) :: EditorState.t()

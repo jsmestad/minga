@@ -14,6 +14,7 @@ defmodule MingaEditor do
   use GenServer
 
   alias MingaEditor.Agent.Arrival
+  alias MingaEditor.Agent.SessionFollowUp
   alias MingaEditor.Agent.SessionStart
   alias MingaEditor.Agent.Events
   alias MingaEditor.Agent.UIState
@@ -1380,6 +1381,10 @@ defmodule MingaEditor do
     {:noreply, state |> SessionStart.timeout(token) |> schedule_render(16)}
   end
 
+  def handle_info({:agent_session_follow_up_timeout, token}, state) do
+    {:noreply, state |> SessionFollowUp.timeout(token) |> schedule_render(16)}
+  end
+
   def handle_info({:volatile_queue_recalled, session, conversation, workspace, queued}, state) do
     {:noreply,
      MingaEditor.Agent.DraftWorkflow.apply_volatile_recall(
@@ -1533,17 +1538,16 @@ defmodule MingaEditor do
     end
   end
 
-  @spec render_session_start({:handled, state()} | :unrelated) ::
-          {:handled, state()} | :unrelated
-  defp render_session_start({:handled, state}), do: {:handled, schedule_render(state, 16)}
-  defp render_session_start(:unrelated), do: :unrelated
+  @spec render_handled({:handled, state()} | :unrelated) :: {:handled, state()} | :unrelated
+  defp render_handled({:handled, state}), do: {:handled, schedule_render(state, 16)}
+  defp render_handled(:unrelated), do: :unrelated
 
   # Replies and request monitors for the Editor's outstanding local Session requests.
   @spec agent_request_response(state(), term()) :: {:handled, state()} | :unrelated
   defp agent_request_response(state, message) do
-    case Arrival.response(state, message) do
-      {:handled, _updated} = handled -> handled
-      :unrelated -> SessionStart.response(state, message) |> render_session_start()
+    with :unrelated <- Arrival.response(state, message),
+         :unrelated <- SessionStart.response(state, message) |> render_handled() do
+      SessionFollowUp.response(state, message) |> render_handled()
     end
   end
 

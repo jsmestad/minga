@@ -125,28 +125,21 @@ defmodule MingaEditor.Commands.InlineAsk do
   defp create_agent_tab(state), do: state
 
   @doc """
-  Seeds a promoted Inline Ask's history into the session that started for it.
+  Shows a promoted Inline Ask's history once the session that started for it has seeded it.
 
-  `MingaEditor.Agent.SessionStart` runs this once the session is bound. The seed waits only for the new session's mailbox, a one-time cost of an explicit promote.
+  `MingaEditor.Agent.SessionFollowUp` sends the seed without waiting and runs this when the session answers.
   """
-  @spec seed_started_session(state(), pid(), [{:user | :assistant, String.t()}]) :: state()
-  def seed_started_session(state, session, messages) when is_pid(session) do
-    # minga:allow-blocking — Editor, one-shot seed of a promoted Inline Ask into its new session
-    case MingaAgent.Session.seed_messages(session, messages) do
-      :ok ->
-        if MingaEditor.Shell.Runtime.active_session(state.shell_runtime) == session,
-          do: AgentLifecycle.sync_transcript(state, :messages_changed),
-          else: state
-
-      {:error, reason} ->
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-          state,
-          "Inline Ask history could not be added to the agent session: #{inspect(reason)}"
-        )
-    end
-  catch
-    :exit, _ -> state
+  @spec show_seeded_session(state(), pid()) :: state()
+  def show_seeded_session(state, session) when is_pid(session) do
+    if MingaEditor.Shell.Runtime.active_session(state.shell_runtime) == session,
+      do: AgentLifecycle.sync_transcript(state, :messages_changed),
+      else: state
   end
+
+  @doc "The sentence that tells the user a promoted Inline Ask's history was not added."
+  @spec seed_failure_message(term()) :: String.t()
+  def seed_failure_message(reason),
+    do: "Inline Ask history could not be added to the agent session: #{inspect(reason)}"
 
   @spec add_file_to_active_workspace(state(), FileRef.t()) :: state()
   defp add_file_to_active_workspace(

@@ -175,11 +175,11 @@ defmodule MingaEditor.Commands.Agent do
   end
 
   @doc """
-  Loads a saved conversation into a session that started for it.
+  Shows a saved conversation that `session` has loaded in the Agent workspace in front.
 
-  `MingaEditor.Agent.SessionStart` runs this once the new session is bound to the active Agent workspace.
+  `MingaEditor.Agent.SessionFollowUp` runs this when a session that started for a Restore answers its load.
   """
-  @spec restore_into_started_session(
+  @spec show_restored_session(
           state(),
           pid(),
           String.t(),
@@ -187,17 +187,16 @@ defmodule MingaEditor.Commands.Agent do
           ProvenanceJump.origin() | nil,
           UIState.View.return_target()
         ) :: state()
-  def restore_into_started_session(
-        state,
-        session,
-        session_id,
-        tool_call_id,
-        origin,
-        return_target
-      )
-      when is_pid(session),
-      do:
-        resume_persisted_session(state, session, session_id, tool_call_id, origin, return_target)
+  def show_restored_session(state, session, session_id, tool_call_id, origin, return_target)
+      when is_pid(session) do
+    state
+    |> MingaEditor.Agent.Arrival.retire(session)
+    |> update_agent_ui(&UIState.reset_edit_timeline/1)
+    |> DraftWorkflow.after_reopen(session, session_id)
+    |> sync_restored_model_selection(session)
+    |> arm_provenance_jump(tool_call_id, origin)
+    |> activate_agent_view(return_target)
+  end
 
   @spec open_session_in_tab(
           state(),
@@ -241,54 +240,33 @@ defmodule MingaEditor.Commands.Agent do
        ) do
     with :ok <- DraftWorkflow.before_reopen(state, session_id),
          :ok <- load_persisted_session(session_pid, session_id) do
-      state
-      |> MingaEditor.Agent.Arrival.retire(session_pid)
-      |> update_agent_ui(&UIState.reset_edit_timeline/1)
-      |> DraftWorkflow.after_reopen(session_pid, session_id)
-      |> sync_restored_model_selection(session_pid)
-      |> arm_provenance_jump(tool_call_id, origin)
-      |> activate_agent_view(return_target)
+      show_restored_session(state, session_pid, session_id, tool_call_id, origin, return_target)
     else
-      {:error, %EditorState{} = preserved} ->
-        preserved
-
-      {:error, :legacy_import_required} ->
-        NoticeWorkflow.publish(
-          state,
-          "This saved session uses a legacy format. Import it before opening."
-        )
-
-      {:error, :session_unavailable} ->
-        NoticeWorkflow.publish(
-          state,
-          "The agent session stopped while loading. The current conversation was not replaced."
-        )
-
-      {:error, reason} ->
-        NoticeWorkflow.publish(state, restore_failure_message(reason))
+      {:error, %EditorState{} = preserved} -> preserved
+      {:error, reason} -> NoticeWorkflow.publish(state, restore_failure_message(reason))
     end
   end
 
   @spec load_persisted_session(pid(), String.t()) :: :ok | {:error, atom()}
   defp load_persisted_session(session_pid, session_id) do
     # minga:allow-blocking — Editor, user-initiated resume of a persisted session; one-shot restore (#2450 inventory)
-    case Session.load_session(session_pid, session_id) do
-      :ok ->
-        :ok
-
-      {:error, :legacy_import_required} ->
-        {:error, :legacy_import_required}
-
-      {:error, reason} ->
-        Minga.Log.warning(
-          :agent,
-          "[Agent.Commands] session #{session_id} restore failed: #{inspect(reason)}"
-        )
-
-        {:error, safe_restore_error(reason)}
-    end
+    session_pid |> Session.load_session(session_id) |> restore_outcome(session_id)
   catch
     :exit, _reason -> {:error, :session_unavailable}
+  end
+
+  @doc "Turns a session's answer to a saved-session load into a reason the user may see; raw reasons are logged."
+  @spec restore_outcome(:ok | {:error, term()}, String.t()) :: :ok | {:error, atom()}
+  def restore_outcome(:ok, _session_id), do: :ok
+  def restore_outcome({:error, :legacy_import_required} = error, _session_id), do: error
+
+  def restore_outcome({:error, reason}, session_id) do
+    Minga.Log.warning(
+      :agent,
+      "[Agent.Commands] session #{session_id} restore failed: #{inspect(reason)}"
+    )
+
+    {:error, safe_restore_error(reason)}
   end
 
   @spec safe_restore_error(term()) :: atom()
@@ -321,38 +299,45 @@ defmodule MingaEditor.Commands.Agent do
   defp safe_restore_error({:invalid_continuation, _reason}), do: :invalid_saved_session
   defp safe_restore_error(_reason), do: :restore_failed
 
+  @doc "The sentence that tells the user why a saved session did not open, for a reason from `restore_outcome/2`."
   @spec restore_failure_message(atom()) :: String.t()
-  defp restore_failure_message(:invalid_saved_session),
+  def restore_failure_message(:legacy_import_required),
+    do: "This saved session uses a legacy format. Import it before opening."
+
+  def restore_failure_message(:session_unavailable),
+    do: "The agent session stopped while loading. The current conversation was not replaced."
+
+  def restore_failure_message(:invalid_saved_session),
     do: "The saved session record is invalid. The current conversation was not replaced."
 
-  defp restore_failure_message(:effect_reconciliation_failed),
+  def restore_failure_message(:effect_reconciliation_failed),
     do:
       "Interrupted tool work could not be reconciled safely. The current conversation was not replaced."
 
-  defp restore_failure_message(:event_log_unavailable),
+  def restore_failure_message(:event_log_unavailable),
     do:
       "The session effect log could not be read during recovery. The current conversation was not replaced."
 
-  defp restore_failure_message(:memory_restore_failed),
+  def restore_failure_message(:memory_restore_failed),
     do: "Session memory could not be restored. The current conversation was not replaced."
 
-  defp restore_failure_message(:model_restore_failed),
+  def restore_failure_message(:model_restore_failed),
     do: "The saved model could not be restored. The current conversation was not replaced."
 
-  defp restore_failure_message(:restore_rollback_failed),
+  def restore_failure_message(:restore_rollback_failed),
     do:
       "Session restore failed and provider rollback also failed. Restart the session before continuing."
 
-  defp restore_failure_message(:session_persistence_disabled),
+  def restore_failure_message(:session_persistence_disabled),
     do: "Interrupted work needs durable storage before restore can continue."
 
-  defp restore_failure_message(:unsupported_session_version),
+  def restore_failure_message(:unsupported_session_version),
     do: "This session was saved by a newer format. The current conversation was not replaced."
 
-  defp restore_failure_message(:current_session_save_failed),
+  def restore_failure_message(:current_session_save_failed),
     do: "The current conversation could not be saved before restore. It was not replaced."
 
-  defp restore_failure_message(:restore_failed),
+  def restore_failure_message(:restore_failed),
     do: "Could not restore the saved session. The current conversation was not replaced."
 
   # Source file + cursor line the user jumped from, for the return trip.
