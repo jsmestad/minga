@@ -1186,13 +1186,10 @@ defmodule Minga.Buffer.Process do
   @doc """
   Reverts every remaining step of the Minga task that edited this buffer most recently, keeping your edits. Returns how many steps it reverted.
 
-  Returns `{:blocked, {:overlaps, minga_group}}`, with content and history unchanged, when a task that started later rewrote this task's text; see `Minga.Buffer.UndoHistory.reject_task/4`.
+  When a task that started later rewrote that task's text, it reverts the newer task first, so every call makes progress; *Messages* names the task it reverted. See `Minga.Buffer.UndoHistory.next_reject/1`.
   """
   @spec undo_agent_session(GenServer.server()) ::
-          {:ok, non_neg_integer()}
-          | :empty
-          | UndoHistory.blocked()
-          | {:error, UndoPatch.apply_error()}
+          {:ok, non_neg_integer()} | :empty | {:error, UndoPatch.apply_error()}
   def undo_agent_session(server) do
     GenServer.call(server, :undo_agent_session)
   end
@@ -2632,15 +2629,17 @@ defmodule Minga.Buffer.Process do
       :empty ->
         {:reply, :empty, state}
 
-      {:blocked, _overlap} = blocked ->
-        {:reply, blocked, state}
-
       {:error, reason} = error ->
         log_history_failure(:undo_agent_session, reason)
         {:reply, error, state}
 
-      {:ok, restore, undo_history, count} ->
-        Minga.Log.debug(:editor, "Undo agent session: reverted #{count} agent steps")
+      {:ok, restore, undo_history, count, task} ->
+        log_to_messages(
+          state,
+          "Reverted #{task_label(task)} in this buffer (#{count} step(s))",
+          :info
+        )
+
         {:reply, {:ok, count}, install_restore(state, restore, undo_history)}
     end
   end
@@ -3839,6 +3838,10 @@ defmodule Minga.Buffer.Process do
 
     %{state | document: document, undo_history: history}
   end
+
+  @spec task_label(UndoHistory.task()) :: String.t()
+  defp task_label({:minga, :untasked}), do: "Minga's edits without a task"
+  defp task_label({:minga, task_id}), do: "Minga task #{task_id}"
 
   # Content read from disk keeps Minga's unreviewed steps; see `UndoHistory.reload/3`.
   @spec reload_history(state(), Document.t()) :: UndoHistory.t()

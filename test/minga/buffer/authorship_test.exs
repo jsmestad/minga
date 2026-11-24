@@ -180,16 +180,79 @@ defmodule Minga.Buffer.AuthorshipTest do
       assert BufferProcess.content(buffer) == "z = 1\ny = 2\n"
     end
 
-    test "a task whose text a newer task rewrote is blocked until the newer one is reverted" do
-      buffer = start("axb\nq")
+    test "SPC a u never gets stuck: a blocked task waits while the newer task that blocks it reverts" do
+      registry = Module.concat(__MODULE__, "Events#{System.unique_integer([:positive])}")
+      start_supervised!({Registry, keys: :duplicate, name: registry})
+      :ok = Minga.Events.subscribe(:log_message, registry)
+
+      buffer =
+        start_supervised!({BufferProcess, content: "axb\nq", events_registry: registry},
+          id: make_ref()
+        )
+
       replace_at(buffer, {0, 1}, 1, "y", step("t1", "s1"))
       replace_at(buffer, {0, 1}, 1, "w", step("t2", "s1"))
       replace_at(buffer, {1, 0}, 1, "Q", step("t1", "s2"))
 
-      assert BufferProcess.undo_agent_session(buffer) ==
-               {:blocked, {:overlaps, {:minga, "t2", "s1"}}}
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "ayb\nQ"
 
-      assert BufferProcess.content(buffer) == "awb\nQ"
+      assert_receive {:minga_event, :log_message,
+                      %{text: "Reverted Minga task t2 in this buffer" <> _}}
+
+      assert {:ok, 2} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "axb\nq"
+
+      assert_receive {:minga_event, :log_message,
+                      %{text: "Reverted Minga task t1 in this buffer" <> _}}
+
+      assert BufferProcess.undo_agent_session(buffer) == :empty
+    end
+
+    test "retyping one of two words a Minga step changed on a line rejects to the other word's original" do
+      buffer = start("call(foo, bar, baz)\nnext\n")
+      content = BufferProcess.content(buffer)
+      identity = {:buffer, "/words"}
+
+      expected =
+        Minga.Buffer.FileMutation.revision(content, BufferProcess.version(buffer), identity)
+
+      assert {:ok, _receipt} =
+               BufferProcess.conditional_mutate(
+                 buffer,
+                 expected,
+                 {:edit, [{"foo", "FOO"}, {"baz", "BAZ"}]},
+                 identity,
+                 step("t", "call-1")
+               )
+
+      replace_at(buffer, {0, 15}, 3, "qux")
+      assert BufferProcess.content(buffer) == "call(FOO, bar, qux)\nnext\n"
+      assert BufferProcess.author_at(buffer, {0, 9}) == :unattributed
+
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "call(foo, bar, qux)\nnext\n"
+    end
+
+    test "adjacent replacements reject the same whether one step or two made them" do
+      for {position, length, text} <- [
+            {{0, 1}, 1, ""},
+            {{0, 1}, 1, "z"},
+            {{0, 0}, 1, ""},
+            {{0, 0}, 1, "z"}
+          ] do
+        results =
+          for steps <- [["s", "s"], ["s1", "s2"]] do
+            buffer = start("ab")
+            replace_at(buffer, {0, 0}, 1, "A", step("t", Enum.at(steps, 0)))
+            replace_at(buffer, {0, 1}, 1, "B", step("t", Enum.at(steps, 1)))
+            replace_at(buffer, position, length, text)
+            assert {:ok, _steps} = BufferProcess.undo_agent_session(buffer)
+            BufferProcess.content(buffer)
+          end
+
+        assert [same, same] = results
+      end
     end
 
     test "deleting all of Minga's insertion leaves nothing for the reject to bring back" do
@@ -244,6 +307,36 @@ defmodule Minga.Buffer.AuthorshipTest do
 
       assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
       assert BufferProcess.content(buffer) == "  a\n  b\n  c\n"
+    end
+
+    test "reindenting more lines than any cap, by :s or by shift_lines, leaves Minga's text Minga's" do
+      lines = 4_200
+      base = Enum.map_join(1..lines, fn i -> "x#{i} = #{i}\n" end)
+
+      for reindent <- [:replace_content, :shift_lines] do
+        buffer = start(base)
+        replace_at(buffer, {2_100, 0}, 1, "M", step("t", "s"))
+
+        case reindent do
+          :replace_content ->
+            indented =
+              buffer
+              |> BufferProcess.content()
+              |> String.split("\n", trim: true)
+              |> Enum.map_join(&("  " <> &1 <> "\n"))
+
+            assert :ok = BufferProcess.replace_content(buffer, indented)
+
+          :shift_lines ->
+            assert :ok = BufferProcess.shift_lines(buffer, 0, lines - 1, {:indent, "  "})
+        end
+
+        assert BufferProcess.author_at(buffer, {2_100, 2}) == {:minga, "t"}
+        assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+
+        assert buffer |> BufferProcess.content() |> String.split("\n") |> Enum.at(2_100) ==
+                 "  x2101 = 2101"
+      end
     end
 
     test "a large :%s past the line diff budget leaves Minga's line Minga's" do

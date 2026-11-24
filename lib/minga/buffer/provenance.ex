@@ -114,6 +114,12 @@ defmodule Minga.Buffer.Provenance do
       removed_bytes == 0 and inside_own_run?(prov, group_id, author, start) ->
         grow_run_at(prov, start, inserted_bytes)
 
+      replacing_inside_run?(prov, group_id, start, removed_bytes) ->
+        prov
+        |> replace_inside_run(group_id, author, start, removed, inserted_bytes)
+        |> renumber_when_deep()
+        |> remember_fresh()
+
       true ->
         prov = prov |> split_at(start) |> split_at(start + removed_bytes)
         following = run_starting_at(prov.tree, start)
@@ -122,7 +128,7 @@ defmodule Minga.Buffer.Provenance do
         {prov, last} = delete_from(prov, group_id, following, removed, 0, nil)
 
         prov
-        |> cover_replaced(group_id, last, left)
+        |> cover_replaced(group_id, last, left, following)
         |> insert_between(group_id, author, preceding, following, inserted_bytes)
         |> renumber_when_deep()
         |> remember_fresh()
@@ -181,6 +187,37 @@ defmodule Minga.Buffer.Provenance do
   end
 
   @doc """
+  Returns a key that `blocker/3` would return for one of the groups in `ids`, or `nil` when none is blocked.
+
+  When the groups hold a large share of the runs, one pass over every run answers in O(n) instead of looking each run up.
+  """
+  @spec blocker_among(t(), [group_id()], (author(), group_key() -> boolean())) ::
+          group_key() | nil
+  def blocker_among(%__MODULE__{} = prov, ids, blocks?)
+      when is_list(ids) and is_function(blocks?, 2) do
+    touched = Enum.reduce(ids, 0, &(:gb_sets.size(Map.fetch!(prov.groups, &1).runs) + &2))
+
+    if touched * 8 > RunTree.count(prov.tree),
+      do: blocker_in_one_pass(prov, MapSet.new(ids), blocks?),
+      else: Enum.find_value(ids, &blocker(prov, &1, blocks?))
+  end
+
+  @spec blocker_in_one_pass(t(), MapSet.t(group_id()), (author(), group_key() -> boolean())) ::
+          group_key() | nil
+  defp blocker_in_one_pass(prov, ids, blocks?) do
+    prov.tree
+    |> RunTree.to_list()
+    |> Enum.find_value(fn run ->
+      run
+      |> run_groups()
+      |> Enum.filter(&MapSet.member?(ids, &1))
+      |> Enum.find_value(fn id ->
+        run |> later_deleters(id) |> Enum.find_value(&blocking_key(prov.groups, &1, id, blocks?))
+      end)
+    end)
+  end
+
+  @doc """
   Returns the groups whose text this group deleted after them, so this group blocks flipping them.
 
   It is the reverse of `blocker/2`: a group in the list whose flip `blocker/2` checks finds this group among its later deleters.
@@ -209,6 +246,20 @@ defmodule Minga.Buffer.Provenance do
     group.runs
     |> :gb_sets.to_list()
     |> Enum.reduce(prov, fn run_id, prov -> settle_run(prov, run_id, id, group.applied) end)
+  end
+
+  @doc """
+  Forgets several groups whose state is final; see `discard/2`.
+
+  When the groups hold a large share of the runs, as when a long task is rejected, one pass over every run settles them all and rebuilds the tree and every group's run set, in O(n), instead of looking each run up.
+  """
+  @spec discard_all(t(), [group_id()]) :: t()
+  def discard_all(%__MODULE__{} = prov, ids) when is_list(ids) do
+    touched = Enum.reduce(ids, 0, &(:gb_sets.size(Map.fetch!(prov.groups, &1).runs) + &2))
+
+    if touched * 8 > RunTree.count(prov.tree),
+      do: discard_in_one_pass(prov, ids),
+      else: Enum.reduce(ids, prov, &discard(&2, &1))
   end
 
   @doc "Returns the author of the byte at `offset`, or `nil` when `offset` is at or past the end of the document."
@@ -292,6 +343,62 @@ defmodule Minga.Buffer.Provenance do
     end
   end
 
+  # Replacing bytes strictly inside another group's live run is the most common edit: every line of a whole-file rewrite
+  # makes one. It gives the same runs as the general path (left piece, inserted text, tombstone, right piece) with one
+  # lookup instead of several. The deletion starts inside the run, so it never covers a replacement.
+  @spec replacing_inside_run?(t(), group_id() | nil, non_neg_integer(), non_neg_integer()) ::
+          boolean()
+  defp replacing_inside_run?(_prov, nil, _start, _removed_bytes), do: false
+  defp replacing_inside_run?(_prov, _group_id, _start, 0), do: false
+
+  defp replacing_inside_run?(prov, group_id, start, removed_bytes) do
+    case RunTree.at_offset(prov.tree, start) do
+      {%Run{group: group} = run, run_start} when group != group_id ->
+        run_start < start and start + removed_bytes <= run_start + run.bytes
+
+      _other ->
+        false
+    end
+  end
+
+  @spec replace_inside_run(
+          t(),
+          group_id(),
+          author(),
+          non_neg_integer(),
+          binary(),
+          non_neg_integer()
+        ) ::
+          t()
+  defp replace_inside_run(prov, group_id, author, start, removed, inserted_bytes) do
+    {run, run_start} = RunTree.at_offset(prov.tree, start)
+    removed_bytes = byte_size(removed)
+    rest = run_start + run.bytes - start - removed_bytes
+    following = RunTree.next(prov.tree, run.id)
+    {dead_id, prov} = allocate(prov, run, following)
+    dead = %{run | id: dead_id, bytes: removed_bytes}
+
+    {right, prov} =
+      if rest > 0 do
+        {right_id, prov} = allocate(prov, dead, following)
+        {%{run | id: right_id, bytes: rest}, prov}
+      else
+        {nil, prov}
+      end
+
+    left = %{run | bytes: start - run_start}
+    tree = RunTree.update(prov.tree, left)
+    tree = if right, do: RunTree.insert(tree, right), else: tree
+    groups = Enum.reduce(run_groups(run), prov.groups, &add_run(&2, &1, dead_id))
+
+    groups =
+      if right, do: Enum.reduce(run_groups(run), groups, &add_run(&2, &1, right.id)), else: groups
+
+    %{prov | tree: RunTree.insert(tree, dead), groups: groups}
+    |> kill_run(group_id, dead, removed)
+    |> insert_between(group_id, author, left, dead, inserted_bytes)
+  end
+
   @spec grow_run_at(t(), non_neg_integer(), pos_integer()) :: t()
   defp grow_run_at(prov, start, bytes) do
     {run, _run_start} = RunTree.at_offset(prov.tree, start)
@@ -367,25 +474,48 @@ defmodule Minga.Buffer.Provenance do
   end
 
   # A deletion that consumes another group's replacement also deletes the text that replacement replaced.
-  # A replacement's tombstones follow its inserted text.
-  # So when the deletion ends with that group's text and does not start inside it, it also marks the tombstones of that
-  # group right after it.
-  @spec cover_replaced(t(), group_id() | nil, Run.t() | nil, Run.t() | nil) :: t()
-  defp cover_replaced(prov, _group_id, nil, _left), do: prov
-  defp cover_replaced(prov, _group_id, %Run{group: nil}, _left), do: prov
-  defp cover_replaced(prov, _group_id, %Run{group: owner}, %Run{group: owner}), do: prov
+  # A replacement is one edit's inserted text followed by the tombstones it made, so the deletion consumes one when it
+  # ends with that group's text and does not start inside the same replacement. It then marks that replacement's
+  # tombstones, which are the dead runs right after it that the group deleted.
+  @spec cover_replaced(t(), group_id() | nil, Run.t() | nil, Run.t() | nil, Run.t() | nil) :: t()
+  defp cover_replaced(prov, _group_id, nil, _left, _first), do: prov
+  defp cover_replaced(prov, _group_id, %Run{group: nil}, _left, _first), do: prov
 
-  defp cover_replaced(prov, group_id, %Run{group: owner} = last, _left),
-    do: cover_tombstones(prov, group_id, owner, RunTree.next(prov.tree, last.id))
+  defp cover_replaced(prov, group_id, %Run{group: owner} = last, left, first) do
+    if inside_replacement?(prov.tree, left, first, owner),
+      do: prov,
+      else: cover_tombstones(prov, group_id, owner, RunTree.next(prov.tree, last.id))
+  end
 
-  # The walk ends at the next live run, or at text the same group inserted, which starts its next replacement.
+  # The deletion starts inside the replacement when the live text before it belongs to the same group and no tombstone
+  # of that group separates them; such a tombstone ends one replacement before the next begins.
+  @spec inside_replacement?(RunTree.t(), Run.t() | nil, Run.t(), group_id()) :: boolean()
+  defp inside_replacement?(tree, %Run{group: owner} = left, first, owner),
+    do: not separated?(tree, RunTree.next(tree, left.id), first.id, owner)
+
+  defp inside_replacement?(_tree, _left, _first, _owner), do: false
+
+  @spec separated?(RunTree.t(), Run.t() | nil, Locator.t(), group_id()) :: boolean()
+  defp separated?(tree, %Run{id: id} = run, first_id, owner) when id < first_id,
+    do: owner in run.deletions or separated?(tree, RunTree.next(tree, id), first_id, owner)
+
+  defp separated?(_tree, _run_or_first, _first_id, _owner), do: false
+
+  # The replacement's tombstones are contiguous, so the walk ends at the first run that is live, inserted by the same
+  # group, or not deleted by it. The cost is the size of that replacement, however many tombstones lie beyond it.
   @spec cover_tombstones(t(), group_id() | nil, group_id(), Run.t() | nil) :: t()
   defp cover_tombstones(prov, _group_id, owner, %Run{group: owner}), do: prov
 
   defp cover_tombstones(prov, group_id, owner, %Run{live: false} = run) do
-    following = RunTree.next(prov.tree, run.id)
-    prov = if owner in run.deletions, do: mark_deleted(prov, group_id, run, run.text), else: prov
-    cover_tombstones(prov, group_id, owner, following)
+    if owner in run.deletions do
+      following = RunTree.next(prov.tree, run.id)
+
+      prov
+      |> mark_deleted(group_id, run, run.text)
+      |> cover_tombstones(group_id, owner, following)
+    else
+      prov
+    end
   end
 
   defp cover_tombstones(prov, _group_id, _owner, _live_or_end), do: prov
@@ -519,23 +649,59 @@ defmodule Minga.Buffer.Provenance do
 
       content = Document.content(document)
 
-      # Visit runs from the end of the document to its start.
-      # A run's offset never depends on the runs after it, so every change is located in the original document.
-      # Prepending each change then leaves the list in document order.
+      sets = Enum.map(flipping, &Map.fetch!(prov.groups, &1).runs)
+      touched = Enum.reduce(sets, 0, &(:gb_sets.size(&1) + &2))
+      prov = %{prov | groups: groups}
+
       {changes, flipped} =
-        flipping
-        |> Enum.map(&Map.fetch!(prov.groups, &1).runs)
-        |> Enum.reduce(&:gb_sets.union/2)
-        |> :gb_sets.to_list()
-        |> Enum.reverse()
-        |> Enum.reduce({[], %{prov | groups: groups}}, fn run_id, acc ->
-          flip_run(acc, run_id, content)
-        end)
+        if touched * 8 > RunTree.count(prov.tree),
+          do: flip_every_run(prov, content),
+          else: flip_runs(prov, Enum.reduce(sets, &:gb_sets.union/2), content)
 
       with {:ok, new_document} <- apply_changes(changes, content, document) do
         {:ok, new_document, first_offset(changes), flipped}
       end
     end
+  end
+
+  # Visits the groups' runs from the end of the document to its start.
+  # A run's offset never depends on the runs after it, so every change is located in the original document.
+  # Prepending each change then leaves the list in document order.
+  @spec flip_runs(t(), :gb_sets.set(Locator.t()), binary()) :: {[change()], t()}
+  defp flip_runs(prov, touched, content) do
+    touched
+    |> :gb_sets.to_list()
+    |> Enum.reverse()
+    |> Enum.reduce({[], prov}, fn run_id, acc -> flip_run(acc, run_id, content) end)
+  end
+
+  # When the groups touch a large share of the runs, one pass over every run and a rebuilt tree costs O(n), less than
+  # looking each run up. Offsets advance by each run's bytes in the original document.
+  @spec flip_every_run(t(), binary()) :: {[change()], t()}
+  defp flip_every_run(prov, content) do
+    {runs, changes, _offset} =
+      prov.tree
+      |> RunTree.to_list()
+      |> Enum.reduce({[], [], 0}, fn run, {runs, changes, offset} ->
+        next_offset = offset + Run.live_bytes(run)
+
+        case {run.live, live?(run, prov.groups)} do
+          {same, same} ->
+            {[run | runs], changes, next_offset}
+
+          {false, true} ->
+            {[%{run | live: true, text: nil} | runs], [{offset, 0, run.text} | changes],
+             next_offset}
+
+          {true, false} ->
+            text = :binary.copy(binary_part(content, offset, run.bytes))
+
+            {[%{run | live: false, text: text} | runs], [{offset, run.bytes, ""} | changes],
+             next_offset}
+        end
+      end)
+
+    {Enum.reverse(changes), %{prov | tree: runs |> Enum.reverse() |> RunTree.from_list()}}
   end
 
   # A change is `{offset, removed_bytes, inserted_text}` in the original document.
@@ -633,6 +799,61 @@ defmodule Minga.Buffer.Provenance do
       true -> put_run(prov, %{run | deletions: List.delete(run.deletions, id)})
     end
   end
+
+  # Applies `settle_run/4`'s rules for every discarded group to every run in order, merging permanent neighbours, then
+  # rebuilds the tree and the remaining groups' run sets from the result.
+  @spec discard_in_one_pass(t(), [group_id()]) :: t()
+  defp discard_in_one_pass(prov, ids) do
+    {discarded, groups} = Map.split(prov.groups, ids)
+    applied = for {id, %Group{applied: true}} <- discarded, into: MapSet.new(), do: id
+
+    runs =
+      prov.tree
+      |> RunTree.to_list()
+      |> Enum.reduce([], fn run, acc -> settle_in_pass(run, discarded, applied, acc) end)
+      |> Enum.reverse()
+
+    members =
+      runs
+      |> Enum.reverse()
+      |> Enum.reduce(%{}, fn run, acc ->
+        Enum.reduce(run_groups(run), acc, fn id, inner ->
+          Map.update(inner, id, [run.id], &[run.id | &1])
+        end)
+      end)
+
+    groups =
+      Map.new(groups, fn {id, group} ->
+        {id, %{group | runs: :gb_sets.from_ordset(Map.get(members, id, []))}}
+      end)
+
+    %{prov | tree: RunTree.from_list(runs), groups: groups}
+  end
+
+  @spec settle_in_pass(Run.t(), %{group_id() => Group.t()}, MapSet.t(group_id()), [Run.t()]) ::
+          [Run.t()]
+  defp settle_in_pass(run, discarded, applied, acc) do
+    cond do
+      Map.has_key?(discarded, run.group) and not MapSet.member?(applied, run.group) -> acc
+      Enum.any?(run.deletions, &MapSet.member?(applied, &1)) -> acc
+      true -> merge_permanent(settled_run(run, discarded), acc)
+    end
+  end
+
+  @spec settled_run(Run.t(), %{group_id() => Group.t()}) :: Run.t()
+  defp settled_run(run, discarded) do
+    group = if Map.has_key?(discarded, run.group), do: nil, else: run.group
+    %{run | group: group, deletions: Enum.reject(run.deletions, &Map.has_key?(discarded, &1))}
+  end
+
+  @spec merge_permanent(Run.t(), [Run.t()]) :: [Run.t()]
+  defp merge_permanent(run, [previous | rest] = acc) do
+    if permanent?(run) and permanent?(previous) and previous.author == run.author,
+      do: [%{previous | bytes: previous.bytes + run.bytes} | rest],
+      else: [run | acc]
+  end
+
+  defp merge_permanent(run, []), do: [run]
 
   # Merges a permanent run with permanent neighbours by the same author.
   # Settled history then leaves no more runs than authorship needs.

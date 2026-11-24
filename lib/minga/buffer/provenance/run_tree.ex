@@ -10,8 +10,8 @@ defmodule Minga.Buffer.Provenance.RunTree do
   alias Minga.Buffer.Provenance.Locator
   alias Minga.Buffer.Provenance.Run
 
-  @typedoc "A subtree: empty, or left, run, right, height, and the live bytes of the whole subtree."
-  @opaque t :: nil | {t(), Run.t(), t(), pos_integer(), non_neg_integer()}
+  @typedoc "A subtree: empty, or left, run, right, height, the live bytes of the whole subtree, and its run count."
+  @opaque t :: nil | {t(), Run.t(), t(), pos_integer(), non_neg_integer(), pos_integer()}
 
   @doc "Returns an empty tree."
   @spec new() :: t()
@@ -20,7 +20,7 @@ defmodule Minga.Buffer.Provenance.RunTree do
   @doc "Returns the live byte length of the whole tree, which equals the document's size."
   @spec size(t()) :: non_neg_integer()
   def size(nil), do: 0
-  def size({_left, _run, _right, _height, bytes}), do: bytes
+  def size({_left, _run, _right, _height, bytes, _count}), do: bytes
 
   @doc "Builds a balanced tree from runs already in locator order, in O(n)."
   @spec from_list([Run.t()]) :: t()
@@ -39,11 +39,16 @@ defmodule Minga.Buffer.Provenance.RunTree do
     {branch(left, run, right), rest}
   end
 
+  @doc "Returns how many runs the tree holds, tombstones included, in O(1)."
+  @spec count(t()) :: non_neg_integer()
+  def count(nil), do: 0
+  def count({_left, _run, _right, _height, _bytes, count}), do: count
+
   @doc "Inserts a run whose locator is not in the tree."
   @spec insert(t(), Run.t()) :: t()
   def insert(nil, %Run{} = run), do: branch(nil, run, nil)
 
-  def insert({left, current, right, _height, _bytes}, %Run{} = run) do
+  def insert({left, current, right, _height, _bytes, _count}, %Run{} = run) do
     cond do
       run.id < current.id -> rebalance(insert(left, run), current, right)
       run.id > current.id -> rebalance(left, current, insert(right, run))
@@ -56,7 +61,7 @@ defmodule Minga.Buffer.Provenance.RunTree do
   def update(nil, %Run{id: id}),
     do: raise(ArgumentError, "run locator #{inspect(id)} is not in the tree")
 
-  def update({left, current, right, _height, _bytes}, %Run{} = run) do
+  def update({left, current, right, _height, _bytes, _count}, %Run{} = run) do
     cond do
       run.id < current.id -> branch(update(left, run), current, right)
       run.id > current.id -> branch(left, current, update(right, run))
@@ -68,7 +73,7 @@ defmodule Minga.Buffer.Provenance.RunTree do
   @spec delete(t(), Locator.t()) :: t()
   def delete(nil, id), do: raise(ArgumentError, "run locator #{inspect(id)} is not in the tree")
 
-  def delete({left, current, right, _height, _bytes}, id) do
+  def delete({left, current, right, _height, _bytes, _count}, id) do
     cond do
       id < current.id -> rebalance(delete(left, id), current, right)
       id > current.id -> rebalance(left, current, delete(right, id))
@@ -86,7 +91,7 @@ defmodule Minga.Buffer.Provenance.RunTree do
           {:ok, Run.t(), non_neg_integer()} | :error
   defp fetch(nil, _id, _base), do: :error
 
-  defp fetch({left, run, right, _height, _bytes}, id, base) do
+  defp fetch({left, run, right, _height, _bytes, _count}, id, base) do
     cond do
       id < run.id -> fetch(left, id, base)
       id > run.id -> fetch(right, id, base + size(left) + Run.live_bytes(run))
@@ -106,7 +111,7 @@ defmodule Minga.Buffer.Provenance.RunTree do
           {Run.t(), non_neg_integer()} | nil
   defp at_offset(nil, _offset, _base), do: nil
 
-  defp at_offset({left, run, right, _height, _bytes}, offset, base) do
+  defp at_offset({left, run, right, _height, _bytes, _count}, offset, base) do
     left_bytes = size(left)
     run_bytes = Run.live_bytes(run)
 
@@ -124,7 +129,7 @@ defmodule Minga.Buffer.Provenance.RunTree do
   @spec previous(t(), Locator.t(), Run.t() | nil) :: Run.t() | nil
   defp previous(nil, _id, best), do: best
 
-  defp previous({left, run, right, _height, _bytes}, id, best) do
+  defp previous({left, run, right, _height, _bytes, _count}, id, best) do
     if run.id < id, do: previous(right, id, run), else: previous(left, id, best)
   end
 
@@ -135,15 +140,15 @@ defmodule Minga.Buffer.Provenance.RunTree do
   @spec next(t(), Locator.t(), Run.t() | nil) :: Run.t() | nil
   defp next(nil, _id, best), do: best
 
-  defp next({left, run, right, _height, _bytes}, id, best) do
+  defp next({left, run, right, _height, _bytes, _count}, id, best) do
     if run.id > id, do: next(left, id, run), else: next(right, id, best)
   end
 
   @doc "Returns the last run in document order, or `nil` for an empty tree."
   @spec last(t()) :: Run.t() | nil
   def last(nil), do: nil
-  def last({_left, run, nil, _height, _bytes}), do: run
-  def last({_left, _run, right, _height, _bytes}), do: last(right)
+  def last({_left, run, nil, _height, _bytes, _count}), do: run
+  def last({_left, _run, right, _height, _bytes, _count}), do: last(right)
 
   @doc """
   Returns the live runs that overlap the byte range `from` up to `to`, in document order, each with its start offset.
@@ -161,9 +166,9 @@ defmodule Minga.Buffer.Provenance.RunTree do
           {Run.t(), non_neg_integer()}
         ]) :: [{Run.t(), non_neg_integer()}]
   defp collect(nil, _from, _to, _base, acc), do: acc
-  defp collect({_left, _run, _right, _height, 0}, _from, _to, _base, acc), do: acc
+  defp collect({_left, _run, _right, _height, 0, _count}, _from, _to, _base, acc), do: acc
 
-  defp collect({left, run, right, _height, _bytes}, from, to, base, acc) do
+  defp collect({left, run, right, _height, _bytes, _count}, from, to, base, acc) do
     run_start = base + size(left)
     run_end = run_start + Run.live_bytes(run)
     acc = if from < run_start, do: collect(left, from, to, base, acc), else: acc
@@ -181,20 +186,20 @@ defmodule Minga.Buffer.Provenance.RunTree do
   @spec runs_desc(t(), [Run.t()]) :: [Run.t()]
   defp runs_desc(nil, acc), do: acc
 
-  defp runs_desc({left, run, right, _height, _bytes}, acc),
+  defp runs_desc({left, run, right, _height, _bytes, _count}, acc),
     do: runs_desc(right, [run | runs_desc(left, acc)])
 
   @doc "Returns the tree's height, for balance checks in tests."
   @spec height(t()) :: non_neg_integer()
   def height(nil), do: 0
-  def height({_left, _run, _right, height, _bytes}), do: height
+  def height({_left, _run, _right, height, _bytes, _count}), do: height
 
   # ── Balancing ───────────────────────────────────────────────────────
 
   @spec branch(t(), Run.t(), t()) :: t()
   defp branch(left, run, right) do
     {left, run, right, max(height(left), height(right)) + 1,
-     size(left) + Run.live_bytes(run) + size(right)}
+     size(left) + Run.live_bytes(run) + size(right), count(left) + 1 + count(right)}
   end
 
   @spec rebalance(t(), Run.t(), t()) :: t()
@@ -210,21 +215,21 @@ defmodule Minga.Buffer.Provenance.RunTree do
   end
 
   @spec rotate_right(t(), Run.t(), t()) :: t()
-  defp rotate_right({ll, lrun, lr, _height, _bytes}, run, right) do
+  defp rotate_right({ll, lrun, lr, _height, _bytes, _count}, run, right) do
     if height(ll) >= height(lr) do
       branch(ll, lrun, branch(lr, run, right))
     else
-      {lrl, lrrun, lrr, _lr_height, _lr_bytes} = lr
+      {lrl, lrrun, lrr, _lr_height, _lr_bytes, _lr_count} = lr
       branch(branch(ll, lrun, lrl), lrrun, branch(lrr, run, right))
     end
   end
 
   @spec rotate_left(t(), Run.t(), t()) :: t()
-  defp rotate_left(left, run, {rl, rrun, rr, _height, _bytes}) do
+  defp rotate_left(left, run, {rl, rrun, rr, _height, _bytes, _count}) do
     if height(rr) >= height(rl) do
       branch(branch(left, run, rl), rrun, rr)
     else
-      {rll, rlrun, rlr, _rl_height, _rl_bytes} = rl
+      {rll, rlrun, rlr, _rl_height, _rl_bytes, _rl_count} = rl
       branch(branch(left, run, rll), rlrun, branch(rlr, rrun, rr))
     end
   end
@@ -236,9 +241,9 @@ defmodule Minga.Buffer.Provenance.RunTree do
   end
 
   @spec pop_min(t()) :: {Run.t(), t()}
-  defp pop_min({nil, run, right, _height, _bytes}), do: {run, right}
+  defp pop_min({nil, run, right, _height, _bytes, _count}), do: {run, right}
 
-  defp pop_min({left, run, right, _height, _bytes}) do
+  defp pop_min({left, run, right, _height, _bytes, _count}) do
     {min_run, rest} = pop_min(left)
     {min_run, rebalance(rest, run, right)}
   end

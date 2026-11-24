@@ -25,6 +25,11 @@ defmodule Minga.Buffer.UndoPatchTest do
       assert UndoPatch.precise_changes(patch) == [{0, "", "  "}, {2, "", "  "}, {4, "", "  "}]
     end
 
+    test "two changed words on one line are two changes" do
+      patch = UndoPatch.replacement(0, "call(foo, bar, baz)\n", "call(FOO, bar, BAZ)\n", {0, 0})
+      assert UndoPatch.precise_changes(patch) == [{5, "foo", "FOO"}, {15, "baz", "BAZ"}]
+    end
+
     test "trimming keeps whole code points" do
       patch = UndoPatch.replacement(0, "é", "è", {0, 0})
       assert UndoPatch.precise_changes(patch) == [{0, "é", "è"}]

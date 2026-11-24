@@ -233,7 +233,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
         |> edit(@other_task, 0, 0, "other ")
         |> edit(@step_two, 20, 0, "two\n")
 
-      assert {:ok, restore, history, 2} =
+      assert {:ok, restore, history, 2, _task} =
                UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
       assert restore.version == :advance
@@ -255,7 +255,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
     test "rejecting a task after other changes takes a new version" do
       world = world("one\n") |> edit(@step_one, 4, 0, "two\n") |> edit(:user, 0, 0, "x")
 
-      {:ok, restore, _history, 1} =
+      {:ok, restore, _history, 1, _task} =
         UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
       assert restore.version == :advance
@@ -281,7 +281,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert provenance |> Provenance.runs() |> Enum.count() <= 1002
       assert Provenance.author_at(provenance, 5) == {:minga, :untasked}
 
-      {:ok, restore, history, 1000} =
+      {:ok, restore, history, 1000, {:minga, :untasked}} =
         UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
       assert restore.version == :advance
@@ -292,7 +292,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
                {:minga, :untasked}
 
       # The tasked step is never evicted and still reverts on its own.
-      assert {:ok, _restore, _history, 1} =
+      assert {:ok, _restore, _history, 1, {:minga, "task-1"}} =
                UndoHistory.undo_agent_session(history, world.version + 1, restore.document)
     end
 
@@ -341,22 +341,52 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert text(reject_newest_task(world)) == "base\n" <> String.duplicate("x", 1100)
     end
 
-    test "a task is blocked by a newer task that rewrote its text, and reverts after it" do
+    test "a task is blocked by a newer task that rewrote its text, so the newer one reverts first" do
       world =
         world("axb\nq")
         |> edit(@step_one, 1, 1, "y")
         |> edit(@other_task, 1, 1, "w")
         |> edit(@step_two, 4, 1, "Q")
 
-      assert UndoHistory.undo_agent_session(world.history, world.version, world.doc) ==
+      assert UndoHistory.reject_task(world.history, {:minga, "task-1"}, world.version, world.doc) ==
                {:blocked, {:overlaps, @other_task}}
 
-      {:ok, restore, history, 1} =
-        UndoHistory.reject_task(world.history, {:minga, "task-2"}, world.version, world.doc)
-
-      world = install(world, restore, history)
+      # task-1 edited last, but task-2 blocks it, so the next revert is task-2's.
+      assert UndoHistory.next_reject(world.history) == {:minga, "task-2"}
+      world = reject_newest_task(world)
       assert text(world) == "ayb\nQ"
-      assert text(reject_newest_task(world)) == "axb\nq"
+      assert UndoHistory.next_reject(world.history) == {:minga, "task-1"}
+      world = reject_newest_task(world)
+      assert text(world) == "axb\nq"
+      assert UndoHistory.next_reject(world.history) == nil
+    end
+
+    test "8000 Minga steps rewriting one word stay fast though their tombstones pile up there" do
+      {micros, world} =
+        :timer.tc(fn ->
+          Enum.reduce(1..8_000, world("let x = foo;\n"), fn n, world ->
+            old = if n == 1, do: 3, else: byte_size("w#{n - 1}")
+            edit(world, {:minga, "task-1", "s#{n}"}, 8, old, "w#{n}")
+          end)
+        end)
+
+      assert text(world) == "let x = w8000;\n"
+      assert micros < 5_000_000
+    end
+
+    test "8000 of your retypes over a word Minga replaced stay fast" do
+      world = edit(world("let x = foo;\n"), @step_one, 8, 3, "bar")
+
+      {micros, world} =
+        :timer.tc(fn ->
+          Enum.reduce(1..8_000, world, fn n, world ->
+            old = if n == 1, do: 3, else: byte_size("v#{n - 1}")
+            edit(world, :user, 8, old, "v#{n}", at: @t0 + n * @window)
+          end)
+        end)
+
+      assert text(world) == "let x = v8000;\n"
+      assert micros < 5_000_000
     end
 
     test "reload keeps Minga's steps and records the disk change as unattributed" do
@@ -462,7 +492,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
   defp redo!(world), do: world |> step(:redo) |> elem(1)
 
   defp reject_newest_task(world) do
-    {:ok, restore, history, _count} =
+    {:ok, restore, history, _count, _task} =
       UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
     install(world, restore, history)
@@ -528,8 +558,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
   defp reject_all(world) do
     case UndoHistory.undo_agent_session(world.history, world.version, world.doc) do
       :empty -> world
-      {:ok, restore, history, _count} -> reject_all(install(world, restore, history))
-      {:blocked, {:overlaps, key}} -> world |> reject!(task_of(key)) |> reject_all()
+      {:ok, restore, history, _count, _task} -> reject_all(install(world, restore, history))
     end
   end
 

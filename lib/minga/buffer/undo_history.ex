@@ -281,17 +281,35 @@ defmodule Minga.Buffer.UndoHistory do
   end
 
   @doc """
-  Reverts every remaining step of the task that edited this buffer most recently, and forgets those steps. See `reject_task/4`.
+  Reverts every remaining step of the task `next_reject/1` names, and forgets those steps. See `reject_task/4`.
+
+  It never comes back blocked: when the task that edited most recently is blocked, `next_reject/1` names the newer task that blocks it, so every call makes progress until Minga has no steps left in the buffer.
   """
   @spec undo_agent_session(t(), version(), Document.t()) ::
-          {:ok, Restore.t(), t(), pos_integer()}
+          {:ok, Restore.t(), t(), pos_integer(), task()}
           | :empty
-          | blocked()
           | {:error, UndoPatch.apply_error()}
-  def undo_agent_session(%__MODULE__{} = history, version, %Document{} = document) do
-    case newest_task(history) do
+  def undo_agent_session(%__MODULE__{} = history, _version, %Document{} = document) do
+    with task when task != nil <- next_reject(history),
+         {steps, rest} = take_task(history, task),
+         {:ok, restore, rest, count} <- revert_steps_of(history, rest, task, steps, document) do
+      {:ok, restore, rest, count, task}
+    else
       nil -> :empty
-      task -> reject_task(history, task, version, document)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @doc """
+  Returns the task `undo_agent_session/3` reverts next, or `nil` when Minga has no steps left in the buffer.
+
+  That is the task that edited most recently, unless a task that started after it rewrote its text; then it is that newer task, followed the same way until a task nothing blocks. Each hop goes to a task that started later, so the chain ends.
+  """
+  @spec next_reject(t()) :: task() | nil
+  def next_reject(%__MODULE__{} = history) do
+    case newest_task(history) do
+      nil -> nil
+      task -> unblocked_from(history, task)
     end
   end
 
@@ -355,10 +373,18 @@ defmodule Minga.Buffer.UndoHistory do
   @spec revert_task(t(), t(), task(), [{Provenance.group_id(), minga_group()}], Document.t()) ::
           {:ok, Restore.t(), t(), pos_integer()} | blocked() | {:error, UndoPatch.apply_error()}
   defp revert_task(history, rest, task, steps, document) do
-    with :ok <- unblocked_task(history, task, steps),
-         {:ok, reverted, first, provenance} <-
+    with :ok <- unblocked_task(history, task, steps) do
+      revert_steps_of(history, rest, task, steps, document)
+    end
+  end
+
+  # Reverts a task already known not to be blocked.
+  @spec revert_steps_of(t(), t(), task(), [{Provenance.group_id(), minga_group()}], Document.t()) ::
+          {:ok, Restore.t(), t(), pos_integer()} | {:error, UndoPatch.apply_error()}
+  defp revert_steps_of(history, rest, task, steps, document) do
+    with {:ok, reverted, first, provenance} <-
            revert_steps(steps, history.provenance, document) do
-      provenance = Enum.reduce(steps, provenance, &Provenance.discard(&2, elem(&1, 0)))
+      provenance = Provenance.discard_all(provenance, Enum.map(steps, &elem(&1, 0)))
       {version, tick, rest} = settle_task(rest, task)
 
       rest = %{
@@ -374,6 +400,16 @@ defmodule Minga.Buffer.UndoHistory do
     end
   end
 
+  @spec unblocked_from(t(), task()) :: task()
+  defp unblocked_from(history, task) do
+    {steps, _rest} = take_task(history, task)
+
+    case unblocked_task(history, task, steps) do
+      :ok -> task
+      {:blocked, {:overlaps, key}} -> unblocked_from(history, task_of(key))
+    end
+  end
+
   # A task that started after this one and rewrote its text blocks the revert, as Minga's later steps block your undo.
   # Only newer tasks count, so tasks that rewrote each other can always be reverted newest first.
   @spec unblocked_task(t(), task(), [{Provenance.group_id(), minga_group()}]) :: :ok | blocked()
@@ -386,12 +422,10 @@ defmodule Minga.Buffer.UndoHistory do
       _author, key -> task_of(key) != task and Map.get(starts, task_of(key), 0) > start
     end
 
-    Enum.find_value(steps, :ok, fn {group, _key} ->
-      case Provenance.blocker(history.provenance, group, blocks?) do
-        nil -> nil
-        minga_group -> {:blocked, {:overlaps, minga_group}}
-      end
-    end)
+    case Provenance.blocker_among(history.provenance, Enum.map(steps, &elem(&1, 0)), blocks?) do
+      nil -> :ok
+      minga_group -> {:blocked, {:overlaps, minga_group}}
+    end
   end
 
   # The oldest remaining group of each task, which orders tasks by when they started.

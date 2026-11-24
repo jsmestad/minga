@@ -174,7 +174,7 @@ defmodule Minga.Buffer.ConditionalMutationTest do
 
     assert :ok = mutate(ctx, revision(ctx), {:edit, [{"one", "1"}, {"three", "3"}]})
     assert Buffer.content(server) == "1 two 3"
-    assert [{@source, [_one_line]}] = Minga.Buffer.Process.minga_changes(server, "task-1")
+    assert [{@source, [_one, _three]}] = Minga.Buffer.Process.minga_changes(server, "task-1")
 
     assert {:error, {:edit_failed, 2, :not_found}} =
              mutate(ctx, revision(ctx), {:edit, [{"1", "ONE"}, {"missing", "X"}]})

@@ -109,20 +109,21 @@ defmodule Minga.Bench.ProvenanceEdits do
   # Each measurement runs in a fresh process, so garbage from the previous one is not collected inside its samples.
   @spec median_us((-> term()), pos_integer()) :: float()
   defp median_us(fun, reps \\ 50) do
-    fn ->
-      times =
-        for _ <- 1..@samples do
-          # Collect between samples, so one sample does not pay for the garbage of the ones before.
-          :erlang.garbage_collect()
-          {microseconds, _result} = :timer.tc(fn -> Enum.each(1..reps, fn _ -> fun.() end) end)
-          microseconds / reps
-        end
-
-      times |> Enum.sort() |> Enum.at(div(@samples, 2))
-    end
+    fn -> median(for _ <- 1..@samples, do: sample_us(fun, reps)) end
     |> Task.async()
     |> Task.await(:infinity)
   end
+
+  # Collects garbage first, so one sample does not pay for the garbage of the ones before.
+  @spec sample_us((-> term()), pos_integer()) :: float()
+  defp sample_us(fun, reps) do
+    :erlang.garbage_collect()
+    {microseconds, _result} = :timer.tc(fn -> Enum.each(1..reps, fn _ -> fun.() end) end)
+    microseconds / reps
+  end
+
+  @spec median([float()]) :: float()
+  defp median(times), do: times |> Enum.sort() |> Enum.drop(div(length(times), 2)) |> hd()
 
   @spec format(float(), pos_integer()) :: String.t()
   defp format(value, width),

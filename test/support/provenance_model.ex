@@ -46,8 +46,8 @@ defmodule Minga.Test.ProvenanceModel do
       if removed_bytes > 0 do
         first = Enum.at(live, start)
         last = Enum.at(live, start + removed_bytes - 1)
-        left = if start > 0, do: Enum.at(model.entries, Enum.at(live, start - 1))
-        marked = MapSet.union(MapSet.new(first..last//1), covered(model, live, last, left))
+        left = if start > 0, do: Enum.at(live, start - 1)
+        marked = MapSet.union(MapSet.new(first..last//1), covered(model, live, first, last, left))
 
         model.entries
         |> Enum.with_index()
@@ -119,12 +119,14 @@ defmodule Minga.Test.ProvenanceModel do
   defp later_deleters(%{group: id, deletions: deletions}, id), do: deletions
   defp later_deleters(entry, id), do: Enum.take_while(entry.deletions, &(&1 != id))
 
-  # A deletion that ends with a group's text, and does not start inside it, also covers the dead bytes right after it
-  # that the same group deleted: the text that group's replacement replaced.
-  defp covered(model, live, last, left) do
+  # A deletion that consumes a replacement also covers the text it replaced. A replacement is one edit's inserted text
+  # followed by the tombstones its group made, so the deletion consumes one when it ends with the group's text and does
+  # not start inside the same replacement. It then marks the dead bytes right after it that the group deleted, up to the
+  # first byte that is live, inserted by the group, or not deleted by it.
+  defp covered(model, live, first, last, left_index) do
     owner = Enum.at(model.entries, last).group
 
-    if owner == nil or (left != nil and left.group == owner) do
+    if owner == nil or inside?(model, left_index, first, owner) do
       MapSet.new()
     else
       live = MapSet.new(live)
@@ -133,11 +135,19 @@ defmodule Minga.Test.ProvenanceModel do
       |> Enum.with_index()
       |> Enum.drop(last + 1)
       |> Enum.take_while(fn {entry, index} ->
-        not MapSet.member?(live, index) and entry.group != owner
+        not MapSet.member?(live, index) and entry.group != owner and owner in entry.deletions
       end)
-      |> Enum.filter(fn {entry, _index} -> owner in entry.deletions end)
       |> MapSet.new(fn {_entry, index} -> index end)
     end
+  end
+
+  defp inside?(_model, nil, _first, _owner), do: false
+
+  defp inside?(model, left_index, first, owner) do
+    Enum.at(model.entries, left_index).group == owner and
+      not (model.entries
+           |> Enum.slice((left_index + 1)..(first - 1)//1)
+           |> Enum.any?(&(owner in &1.deletions)))
   end
 
   @spec mark(entry(), pos_integer() | :untracked) :: [entry()]

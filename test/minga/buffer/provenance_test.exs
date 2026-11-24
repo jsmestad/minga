@@ -367,8 +367,12 @@ defmodule Minga.Buffer.ProvenanceTest do
       kind < 85 ->
         pick(unapplied_ids(prov, model), a, state, &reapply(state, &1))
 
-      kind < 93 and mode == :discard_groups ->
+      kind < 89 and mode == :discard_groups ->
         pick(Map.keys(model.groups), a, state, &discard(state, &1))
+
+      # Several groups at once, which often takes the one-pass path.
+      kind < 93 and mode == :discard_groups ->
+        discard_many(state, model.groups |> Map.keys() |> Enum.take_every(rem(a, 3) + 1))
 
       kind < 93 ->
         edit_command(state, a, b, c, inserted)
@@ -441,6 +445,11 @@ defmodule Minga.Buffer.ProvenanceTest do
 
   defp discard({prov, model, text}, id),
     do: {Provenance.discard(prov, id), ProvenanceModel.discard(model, id), text}
+
+  defp discard_many({prov, model, text}, ids),
+    do:
+      {Provenance.discard_all(prov, ids),
+       Enum.reduce(ids, model, &ProvenanceModel.discard(&2, &1)), text}
 
   defp pick([], _a, state, _fun), do: state
   defp pick(ids, a, _state, fun), do: fun.(Enum.at(ids, rem(a, length(ids))))

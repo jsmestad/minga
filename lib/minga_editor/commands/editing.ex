@@ -319,24 +319,12 @@ defmodule MingaEditor.Commands.Editing do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :undo_agent_session) do
     case Buffer.undo_agent_session(buf) do
-      {:ok, count} ->
-        Log.info(
-          :editor,
-          "Reverted the newest Minga task in this buffer (#{count} step(s))"
-        )
-
+      # The buffer names the task it reverted in *Messages*.
+      {:ok, _count} ->
         state
 
       :empty ->
         Log.info(:editor, "No Minga task edits to revert in this buffer")
-        state
-
-      {:blocked, {:overlaps, minga_group}} ->
-        Log.info(
-          :editor,
-          "Revert blocked: a newer Minga task rewrote this task's text (#{inspect(minga_group)})"
-        )
-
         state
 
       # The buffer logs the refused undo; nothing changed.

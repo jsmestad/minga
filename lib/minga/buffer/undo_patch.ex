@@ -15,9 +15,6 @@ defmodule Minga.Buffer.UndoPatch do
 
   @affix_chunk_bytes 4096
 
-  # One region pairs its lines for precise changes only up to this many changed lines.
-  @max_line_changes 4096
-
   @typedoc "A byte fragment captured from a document diff. It may not be valid standalone UTF-8."
   @type byte_fragment :: binary()
 
@@ -250,7 +247,7 @@ defmodule Minga.Buffer.UndoPatch do
   @doc """
   Returns the smallest byte changes a forward patch makes, in document order, as `{start, removed, inserted}`.
 
-  Each changed region loses the bytes its old and new text share at the start and the end, on code point boundaries. When the old and new text have the same number of lines, each pair of lines is compared on its own, so a region that changes the start of one line and the end of another leaves the bytes between them out. A rewrite that changes more than 4096 lines of one region at once is one change, which bounds the cost of recording it. Offsets are in the document the patch applies to, so applying the changes from the last to the first gives the patch's result.
+  When the old and new text have the same number of lines, each pair of lines is compared on its own; otherwise the whole text is one pair. Each pair loses the bytes both sides share at the start and the end, on code point boundaries, and what remains is compared word by word, so a line that changes two words records two changes and the text between them stays out. The word comparison runs only while its cost stays within a fixed budget; past it, the trimmed pair is one change. Everything else is linear in the patch's bytes. Offsets are in the document the patch applies to, so applying the changes from the last to the first gives the patch's result.
 
   `Minga.Buffer.UndoHistory` records changes this precise, so an edit that rewrites whole lines only takes authorship of the bytes it changed.
   """
@@ -259,18 +256,103 @@ defmodule Minga.Buffer.UndoPatch do
     removed_lines = lines_with_newlines(removed)
     inserted_lines = lines_with_newlines(inserted)
 
-    pairs = line_pairs(removed_lines, inserted_lines)
+    case line_pairs(removed_lines, inserted_lines) do
+      [] ->
+        precise_pair(start, removed, inserted)
 
-    if pairs != [] and Enum.count(pairs, fn {old, new} -> old != new end) <= @max_line_changes do
-      pairs
-      |> Enum.flat_map_reduce(start, fn {old_line, new_line}, offset ->
-        {trimmed_change(offset, old_line, new_line), offset + byte_size(old_line)}
-      end)
-      |> elem(0)
-    else
-      trimmed_change(start, removed, inserted)
+      pairs ->
+        pairs
+        |> Enum.flat_map_reduce(start, fn {old_line, new_line}, offset ->
+          {precise_pair(offset, old_line, new_line), offset + byte_size(old_line)}
+        end)
+        |> elem(0)
     end
   end
+
+  # Trims a pair, then splits what remains into its changed words.
+  @spec precise_pair(non_neg_integer(), binary(), binary()) :: [
+          {non_neg_integer(), byte_fragment(), byte_fragment()}
+        ]
+  defp precise_pair(start, old, new) do
+    case trimmed_change(start, old, new) do
+      [{at, old_middle, new_middle}] -> word_changes(at, old_middle, new_middle)
+      [] -> []
+    end
+  end
+
+  # Upper bound on (words on both sides) x (words one side holds and the other lacks) for one word diff.
+  @word_budget 20_000
+
+  @spec word_changes(non_neg_integer(), binary(), binary()) :: [
+          {non_neg_integer(), byte_fragment(), byte_fragment()}
+        ]
+  defp word_changes(at, old, new) do
+    if String.valid?(old) and String.valid?(new),
+      do: diff_words(at, old, new, words(old), words(new)),
+      else: [{at, old, new}]
+  end
+
+  @spec diff_words(non_neg_integer(), String.t(), String.t(), [String.t()], [String.t()]) :: [
+          {non_neg_integer(), byte_fragment(), byte_fragment()}
+        ]
+  defp diff_words(at, old, new, old_words, new_words) do
+    if within_word_budget?(old_words, new_words) do
+      old_words
+      |> List.myers_difference(new_words)
+      |> script_changes(at)
+      |> Enum.flat_map(fn {change_at, removed, inserted} ->
+        trimmed_change(change_at, removed, inserted)
+      end)
+    else
+      [{at, old, new}]
+    end
+  end
+
+  @spec words(String.t()) :: [String.t()]
+  defp words(text), do: ~r/\w+|\s+|[^\w\s]/u |> Regex.scan(text) |> List.flatten()
+
+  @spec within_word_budget?([String.t()], [String.t()]) :: boolean()
+  defp within_word_budget?(old_words, new_words) do
+    counts =
+      Enum.reduce(new_words, Enum.frequencies(old_words), fn word, acc ->
+        Map.update(acc, word, -1, &(&1 - 1))
+      end)
+
+    unmatched = Enum.reduce(counts, 0, fn {_word, count}, sum -> sum + abs(count) end)
+    (length(old_words) + length(new_words)) * unmatched <= @word_budget
+  end
+
+  # Turns an edit script over words into changes located in the old text, in document order.
+  @spec script_changes([{:eq | :del | :ins, [String.t()]}], non_neg_integer()) :: [
+          {non_neg_integer(), binary(), binary()}
+        ]
+  defp script_changes(script, at) do
+    {changes, _offset, pending} =
+      Enum.reduce(script, {[], at, nil}, fn
+        {:eq, words}, {changes, offset, pending} ->
+          {flush(changes, pending), offset + :erlang.iolist_size(words), nil}
+
+        {:del, words}, {changes, offset, pending} ->
+          {start, removed, inserted} = pending || {offset, [], []}
+          {changes, offset + :erlang.iolist_size(words), {start, [removed, words], inserted}}
+
+        {:ins, words}, {changes, offset, pending} ->
+          {start, removed, inserted} = pending || {offset, [], []}
+          {changes, offset, {start, removed, [inserted, words]}}
+      end)
+
+    changes |> flush(pending) |> Enum.reverse()
+  end
+
+  @spec flush(
+          [{non_neg_integer(), binary(), binary()}],
+          {non_neg_integer(), iodata(), iodata()} | nil
+        ) ::
+          [{non_neg_integer(), binary(), binary()}]
+  defp flush(changes, nil), do: changes
+
+  defp flush(changes, {start, removed, inserted}),
+    do: [{start, :erlang.iolist_to_binary(removed), :erlang.iolist_to_binary(inserted)} | changes]
 
   # Lines pair one to one only when both sides have the same number of lines, more than one.
   @spec line_pairs([binary()], [binary()]) :: [{binary(), binary()}]
