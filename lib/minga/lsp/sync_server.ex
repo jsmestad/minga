@@ -174,30 +174,19 @@ defmodule Minga.LSP.SyncServer do
   # SyncServer reconnects LSP features without the user reopening files.
   @spec reconstruct_attachments(state()) :: state()
   defp reconstruct_attachments(state) do
-    buffer_pids =
-      Registry.select(Minga.Buffer.Registry, [{{:_, :"$1", :_}, [], [:"$1"]}])
+    state =
+      Minga.Buffer.Registry
+      |> Registry.select([{{:_, :"$1", :_}, [], [:"$1"]}])
+      |> Enum.filter(&Process.alive?/1)
+      |> Enum.reduce(state, &do_buffer_open(&2, &1))
 
-    case buffer_pids do
-      [] ->
-        state
+    count = :ets.info(@registry_table, :size)
 
-      pids ->
-        state =
-          Enum.reduce(pids, state, fn pid, acc ->
-            if Process.alive?(pid), do: do_buffer_open(acc, pid), else: acc
-          end)
-
-        count = :ets.info(@registry_table, :size)
-
-        if count > 0 do
-          Minga.Log.info(
-            :lsp,
-            "SyncServer reconstructed #{count} buffer attachment(s) after restart"
-          )
-        end
-
-        state
+    if count > 0 do
+      Minga.Log.info(:lsp, "SyncServer reconstructed #{count} buffer attachment(s) after restart")
     end
+
+    state
   end
 
   @impl true
