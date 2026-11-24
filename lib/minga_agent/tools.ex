@@ -938,26 +938,18 @@ defmodule MingaAgent.Tools do
         do: job.finished_at - job.started_at,
         else: System.monotonic_time(:millisecond) - job.started_at
 
-    lines = [
-      "Job: #{job.id}",
-      "Status: #{status}",
-      "Command: #{job.command}",
-      "Elapsed: #{elapsed}ms"
-    ]
+    mode = if job.background?, do: "background", else: "foreground"
 
     lines =
-      if job.exit_code != nil do
-        lines ++ ["Exit code: #{job.exit_code}"]
-      else
-        lines
-      end
-
-    lines =
-      if job.background? do
-        lines ++ ["Mode: background"]
-      else
-        lines ++ ["Mode: foreground"]
-      end
+      [
+        "Job: #{job.id}",
+        "Status: #{status}",
+        "Command: #{job.command}",
+        "Elapsed: #{elapsed}ms",
+        if(job.exit_code != nil, do: "Exit code: #{job.exit_code}"),
+        "Mode: #{mode}"
+      ]
+      |> Enum.reject(&is_nil/1)
 
     Enum.join(lines, "\n")
   end

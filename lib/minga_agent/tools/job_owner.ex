@@ -390,6 +390,7 @@ defmodule MingaAgent.Tools.JobOwner do
     %{
       state
       | retained: Map.put(state.retained, job.id, job),
+        # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
         retained_order: state.retained_order ++ [job.id]
     }
   end
