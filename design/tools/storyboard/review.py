@@ -13,9 +13,9 @@ the storyboard; see docs/recipes/visual-review.md. This script does the mechanic
   python3 design/tools/storyboard/review.py followups --pr N --record FILE --comment URL [--issue 4071] [--dry-run]
       Appends every concern, reviewer disagreement and open critic item to the visual follow-ups issue.
 
-A review record is JSON:
+A review record is JSON ("note" is optional and heads the follow-up section, for example items fixed before filing):
 
-  {"scenarios": ["edit.plain", ...],
+  {"scenarios": ["edit.plain", ...], "note": "...",
    "verdicts": [{"scenario": ..., "reviewer": ..., "verdict": "pass" | "concern", "notes": ...}, ...],
    "critic": [{"round": 1, "items": [{"scenario", "part", "issue", "suggested", "status": "fixed" | "declined" | "open",
                                      "reason": ...}]}]}
@@ -219,7 +219,10 @@ def cmd_followups(args):
     if not entries:
         print("nothing to append")
         return 0
-    section = [f"## From #{args.pr} (visual review)", f"Reasoning: {args.comment}"] + entries
+    section = [f"## From #{args.pr} (visual review)", f"Reasoning: {args.comment}"]
+    if record.get("note"):
+        section.append(record["note"])
+    section += entries
     if args.dry_run:
         print("\n".join(section))
         return 0
