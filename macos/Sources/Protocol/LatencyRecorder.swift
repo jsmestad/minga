@@ -41,6 +41,44 @@ public final class LatencyRecorder: Sendable {
         case connectionReplaced = "connection_replaced"
     }
 
+    /// Fixed-capacity circular buffer that overwrites the oldest entry on append.
+    /// All mutations are O(1). `sorted()` is O(n log n) but only called on the
+    /// snapshot path, never on the recording hot path.
+    private struct RingBuffer: Equatable {
+        private var storage: [Double]
+        private var writeIndex: Int = 0
+        private(set) var count: Int = 0
+        let capacity: Int
+
+        init(capacity: Int) {
+            self.capacity = capacity
+            self.storage = Array(repeating: 0, count: capacity)
+        }
+
+        /// Appends a sample, overwriting the oldest when at capacity. O(1).
+        mutating func append(_ value: Double) {
+            storage[writeIndex] = value
+            writeIndex = (writeIndex + 1) % capacity
+            if count < capacity { count += 1 }
+        }
+
+        var isEmpty: Bool { count == 0 }
+
+        /// Returns all retained samples in chronological order, then sorted ascending.
+        /// O(n log n), called only on the snapshot path.
+        func sorted() -> [Double] {
+            if count < capacity {
+                return Array(storage[0..<count]).sorted()
+            }
+            return (Array(storage[writeIndex..<capacity]) + Array(storage[0..<writeIndex])).sorted()
+        }
+
+        static func == (lhs: RingBuffer, rhs: RingBuffer) -> Bool {
+            lhs.count == rhs.count && lhs.writeIndex == rhs.writeIndex
+                && lhs.capacity == rhs.capacity && lhs.storage == rhs.storage
+        }
+    }
+
     /// Percentile summary for one latency milestone.
     public struct StageStats: Equatable, Sendable {
         /// Number of retained samples.
@@ -91,21 +129,19 @@ public final class LatencyRecorder: Sendable {
     private struct State {
         var nextSeq: UInt32 = 0
         var pending: [UInt32: Pending] = [:]
-        var pendingOrder: [UInt32] = []
-        var applySamples: [Double] = []
-        var presentSamples: [Double] = []
+        /// Monotonic cursor for oldest-first eviction. Advances forward through
+        /// sequence numbers; each number is visited at most once across the
+        /// recorder's lifetime, giving amortized O(1) eviction.
+        var evictionCursor: UInt32 = 1
+        var applySamples: RingBuffer = RingBuffer(capacity: LatencyRecorder.ringSize)
+        var presentSamples: RingBuffer = RingBuffer(capacity: LatencyRecorder.ringSize)
         var submittedCount: UInt64 = 0
         var discardCounts: [DiscardReason: UInt64] = [:]
 
+        /// Removes a pending entry by sequence number. O(1) dictionary removal
+        /// with no auxiliary array maintenance.
         mutating func removePending(_ seq: UInt32) -> Pending? {
-            guard let entry = pending.removeValue(forKey: seq) else { return nil }
-            if let index = pendingOrder.firstIndex(of: seq) { pendingOrder.remove(at: index) }
-            return entry
-        }
-
-        static func append(_ sample: Double, to samples: inout [Double]) {
-            if samples.count == LatencyRecorder.ringSize { samples.removeFirst() }
-            samples.append(sample)
+            pending.removeValue(forKey: seq)
         }
     }
 
@@ -121,12 +157,11 @@ public final class LatencyRecorder: Sendable {
             if state.nextSeq == 0 { state.nextSeq = 1 }
             let seq = state.nextSeq
             state.pending[seq] = Pending(received: now())
-            state.pendingOrder.append(seq)
-            while state.pendingOrder.count > Self.ringSize {
-                let oldest = state.pendingOrder.removeFirst()
-                if state.pending.removeValue(forKey: oldest) != nil {
+            while state.pending.count > Self.ringSize {
+                if state.pending.removeValue(forKey: state.evictionCursor) != nil {
                     state.discardCounts[.dropped, default: 0] &+= 1
                 }
+                state.evictionCursor &+= 1
             }
             return seq
         }
@@ -141,8 +176,8 @@ public final class LatencyRecorder: Sendable {
             let applied = now()
             entry.applied = applied
             state.pending[seq] = entry
-            State.append(Double(applied.uptimeNanoseconds &- entry.received.uptimeNanoseconds),
-                         to: &state.applySamples)
+            state.applySamples.append(
+                Double(applied.uptimeNanoseconds &- entry.received.uptimeNanoseconds))
         }
     }
 
@@ -164,8 +199,8 @@ public final class LatencyRecorder: Sendable {
         state.withLock { state in
             guard let entry = state.pending[seq], entry.submitted != nil else { return }
             _ = state.removePending(seq)
-            State.append(Double(now().uptimeNanoseconds &- entry.received.uptimeNanoseconds),
-                         to: &state.presentSamples)
+            state.presentSamples.append(
+                Double(now().uptimeNanoseconds &- entry.received.uptimeNanoseconds))
         }
     }
 
@@ -183,7 +218,7 @@ public final class LatencyRecorder: Sendable {
         state.withLock { state in
             let count = state.pending.count
             state.pending.removeAll(keepingCapacity: true)
-            state.pendingOrder.removeAll(keepingCapacity: true)
+            state.evictionCursor = state.nextSeq &+ 1
             if count > 0 {
                 state.discardCounts[.connectionReplaced, default: 0] &+= UInt64(count)
             }
@@ -203,9 +238,9 @@ public final class LatencyRecorder: Sendable {
         )
     }
 
-    private func stageStats(_ samples: [Double]) -> StageStats {
-        guard !samples.isEmpty else { return StageStats() }
-        let sorted = samples.sorted()
+    private func stageStats(_ ring: RingBuffer) -> StageStats {
+        guard !ring.isEmpty else { return StageStats() }
+        let sorted = ring.sorted()
         return StageStats(
             count: sorted.count,
             p50Micros: percentile(sorted, 0.50) / 1000.0,
