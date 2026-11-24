@@ -1,6 +1,6 @@
 {
   "macos": {
-    "commit": "41bd29e34410aa6dfacd7214568b946c45a7e4fa",
+    "commit": "826c8a5930c4d571cfd5f50808639105523b8f02",
     "files": {
       "macos-astrodark-1280.json": "bf5656a60873314571054308941d307b30d3049421b28bb55d456fb10b3b69d8",
       "macos-astrodark-1440.json": "588a6277d8a19bde517d4ba8f8aa2de0dbb129964a743546d44266b1b7fa7544",
@@ -10,13 +10,17 @@
       "macos-catppuccin_latte-1440.json": "c0fd93c1681af907d1e9441c2c11ae8e8acde5be63cadf84cdcf048b144ba850"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "e0c2077c55ce35936294dc29dcef898fd39234ad589d0ee669ab6793683bbea9",
-      "macos-astrodark-1440.json": "57b9f5e0a05e137f625256e1be62a4cb01e93509ccc9b5e5a21791ec4cffe563",
-      "macos-catppuccin_frappe-1280.json": "f21da79aab486e378c75c565783725a0cd90273c74a06c10bab72cfa8b2001a1",
-      "macos-catppuccin_frappe-1440.json": "2c589e64b2419ac03b482c31107d85fd2544e9cebbf1247730b03f2805fdc73f",
-      "macos-catppuccin_latte-1280.json": "2d8ef80459cccea45786d5903d1f1cade9b1038428bf4f920b6f2998b3b43f3f",
-      "macos-catppuccin_latte-1440.json": "cc171e63298b2c13022a3d2d4eaebebb7910d3e432024382cf22e0da5aa41d0d"
+      "macos-astrodark-1280.json": "8d30857d0a2a89ac7562618d0d94ebfa6a7b92809ceff44dd81c3611d3dd7907",
+      "macos-astrodark-1440.json": "f7f5eee34851273b9323230dce38614d2514736f4a2a25694a9369d004797726",
+      "macos-catppuccin_frappe-1280.json": "f13b389f2e9a538538ee9bc8dc8358d02198add70275cff3382f3e331e3007d7",
+      "macos-catppuccin_frappe-1440.json": "19197b8fc20504d9588b3c6b953ea7de880deea0aa9026a3e2c8e8b6814110e3",
+      "macos-catppuccin_latte-1280.json": "1ebe32cbdef25c2e2b49bef5898ec90cfad126c25d2f60493c77221c094d0c7c",
+      "macos-catppuccin_latte-1440.json": "d51b6451b9802adc0b14500af836470f6e85481b0501e6e1b7ba3fea4ff5960b"
     }
+  },
+  "platform_specific": {
+    "frontend": "macos",
+    "reason": "the modeline's leading controls are now measured as anatomy parts for the layout audit; the TUI modeline has no controls"
   },
   "scenario": "edit.plain",
   "tui": {

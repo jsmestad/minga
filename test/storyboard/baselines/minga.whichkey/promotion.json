@@ -1,6 +1,6 @@
 {
   "macos": {
-    "commit": "41bd29e34410aa6dfacd7214568b946c45a7e4fa",
+    "commit": "826c8a5930c4d571cfd5f50808639105523b8f02",
     "files": {
       "macos-astrodark-1280.json": "906f246367621bf83f3dbeed4ba16eb68277359738c8479cdc2cfca67426aee5",
       "macos-astrodark-1440.json": "507c5131d97e7bfb2572616d6a8c7616441fdaf110ce28be9ef6d6f21b27461b",
@@ -10,13 +10,17 @@
       "macos-catppuccin_latte-1440.json": "3ab653055fcf1e78b039f9512ef40b140005b123de93e63a1ee97b24b576542c"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "08da8da97d8b041bc04ed2d623eb1a6b2dc6d05cb5104bbb9dab69f6f92eff57",
-      "macos-astrodark-1440.json": "fe80a0dc9fc10ccc2340e3635e1479e2e02313e6ccb2f79c9b5fc6c284af9cb3",
-      "macos-catppuccin_frappe-1280.json": "550740646511bca299c8c087cd0aaea9e3d14a99218b30853af362967eab5848",
-      "macos-catppuccin_frappe-1440.json": "a0747aceebe7452d17b2d560402ffb80684fc23b0e0b49d1b014fc0fd8ac93ed",
-      "macos-catppuccin_latte-1280.json": "474383bbb1869018dfcd2e8508bd611616708233b1e1652afe9a87b712cf8c1f",
-      "macos-catppuccin_latte-1440.json": "c8da7244e82735536b5f9ab69366f98ed1dccdd0715637696a87dd1ad598e3d7"
+      "macos-astrodark-1280.json": "2c5d8c992952e4e9dc99854b67e63cbc17a1597f1ddba59e615a2d6134548a6b",
+      "macos-astrodark-1440.json": "bf8ae777a5039d0effdb6f9167787c694161c7cafeff535c02ee45d2dec2ece0",
+      "macos-catppuccin_frappe-1280.json": "a6eb6321c324acd6c5652ec78015d37a69a6f72ec2f29a85a20c597d6a9e114d",
+      "macos-catppuccin_frappe-1440.json": "c19c7099accbd0c4197d281e2d932f6b8c4d641df94afb97edb88c94dc628a61",
+      "macos-catppuccin_latte-1280.json": "2954028bb7de00dba1e3a799e96e4638438a15b60eaf50cb8be0b8aba726ff3d",
+      "macos-catppuccin_latte-1440.json": "2e44e04f1565b780e161f202f9a257ada47a4c656af431b172916b3df2dea3bc"
     }
+  },
+  "platform_specific": {
+    "frontend": "macos",
+    "reason": "the modeline's leading controls are now measured as anatomy parts for the layout audit; the TUI modeline has no controls"
   },
   "scenario": "minga.whichkey",
   "tui": {

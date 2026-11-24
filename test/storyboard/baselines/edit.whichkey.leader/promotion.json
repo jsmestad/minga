@@ -1,6 +1,6 @@
 {
   "macos": {
-    "commit": "41bd29e34410aa6dfacd7214568b946c45a7e4fa",
+    "commit": "826c8a5930c4d571cfd5f50808639105523b8f02",
     "files": {
       "macos-astrodark-1280.json": "bcec7d859f213a6657f87364137385a6c0c95eb25b1313f881ba828d920e45dd",
       "macos-astrodark-1440.json": "cd8cddbb0a61156b4cd39160230ce4436e8d79178506144e195a6aa6f69b06d8",
@@ -10,13 +10,17 @@
       "macos-catppuccin_latte-1440.json": "460f0440a36984d58f735bcae89f2053113dc7b51a09a7d5627b5f32878965af"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "e0cee4fba9a911bf1b6e58322199bd220a8aea4d71ac1c37f498d4979b9549b2",
-      "macos-astrodark-1440.json": "9845b326a320314d1e8cd6965380a08d4ef3b250ab00b45c1fc699f859b40791",
-      "macos-catppuccin_frappe-1280.json": "2cd8b2d86ec9dfbb255c31b49ce75a5e4bc20bc5617696ed49975a9b847ac346",
-      "macos-catppuccin_frappe-1440.json": "7f5e1c05e1237cb8afaa06857e507fc8e9ae8c28b8dc576f1e5daf71ca3c92ab",
-      "macos-catppuccin_latte-1280.json": "bee9e77ea169bb1d1287ba00b61125ac0a74373514fe211616ca0809ff0404c7",
-      "macos-catppuccin_latte-1440.json": "ccbc3d652dbb4c69702fde589e149144fc585e0a995fcf037f7e5cba941db931"
+      "macos-astrodark-1280.json": "7969a44851b3b9719c10daa566d0517c8e0e8d0d07b5ca6c3b414291eb70ef67",
+      "macos-astrodark-1440.json": "885f63a3663bdd4857615866e8b6dc6e2200116604548da37ee6a28de8f33bf9",
+      "macos-catppuccin_frappe-1280.json": "8fdf6f3ee1e5165bfce3e00135c1d4b5a3b3a5f363fbd86000538395c02f7ed6",
+      "macos-catppuccin_frappe-1440.json": "603dfba57727fad30947283cb852aeb8d412f6eea9403d77c4d87e93f2dfa63d",
+      "macos-catppuccin_latte-1280.json": "12215c803e57c08284a50a1e6ccf451ff6580c627f9cc3def3820c94554a031c",
+      "macos-catppuccin_latte-1440.json": "82afc2ec9212deb965fbb87a813344200bf56c51226b30a0c708399da2fc7cad"
     }
+  },
+  "platform_specific": {
+    "frontend": "macos",
+    "reason": "the modeline's leading controls are now measured as anatomy parts for the layout audit; the TUI modeline has no controls"
   },
   "scenario": "edit.whichkey.leader",
   "tui": {
