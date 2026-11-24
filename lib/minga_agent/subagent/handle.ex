@@ -5,6 +5,8 @@ defmodule MingaAgent.Subagent.Handle do
   The handle is owned by `MingaAgent.SessionManager` and projected by editor shells for status and navigation. The public, stable identifier is `session_id`; `pid` is kept for in-process routing only.
   """
 
+  @type status :: :running | :completed | :failed | :cancelled
+
   @enforce_keys [:session_id, :pid, :task, :started_at]
   defstruct [
     :session_id,
@@ -13,7 +15,10 @@ defmodule MingaAgent.Subagent.Handle do
     :parent_pid,
     :task,
     :model,
-    :started_at
+    :started_at,
+    status: :running,
+    result: nil,
+    completed_at: nil
   ]
 
   @type t :: %__MODULE__{
@@ -23,7 +28,10 @@ defmodule MingaAgent.Subagent.Handle do
           parent_pid: pid() | nil,
           task: String.t(),
           model: String.t() | nil,
-          started_at: DateTime.t()
+          started_at: DateTime.t(),
+          status: status(),
+          result: String.t() | nil,
+          completed_at: DateTime.t() | nil
         }
 
   @doc "Creates a background sub-agent handle."
@@ -54,6 +62,18 @@ defmodule MingaAgent.Subagent.Handle do
     else
       "#{session_id}: #{truncate(trimmed, 40)}"
     end
+  end
+
+  @doc "Transitions the handle to completed status with a result."
+  @spec complete(t(), String.t()) :: t()
+  def complete(%__MODULE__{status: :running} = handle, result) when is_binary(result) do
+    %{handle | status: :completed, result: result, completed_at: DateTime.utc_now()}
+  end
+
+  @doc "Transitions the handle to failed status with an inspected reason."
+  @spec fail(t(), term()) :: t()
+  def fail(%__MODULE__{status: :running} = handle, reason) do
+    %{handle | status: :failed, result: inspect(reason), completed_at: DateTime.utc_now()}
   end
 
   @doc "Returns a copy of the handle with a different pid."

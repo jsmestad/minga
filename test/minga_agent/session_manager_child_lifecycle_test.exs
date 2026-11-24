@@ -1,0 +1,291 @@
+defmodule MingaAgent.SessionManagerChildLifecycleTest do
+  use ExUnit.Case, async: true
+
+  alias MingaAgent.SessionManager
+  alias MingaAgent.Subagent.Handle
+
+  setup do
+    session_supervisor = start_supervised!({DynamicSupervisor, strategy: :one_for_one})
+    name = :"child_lifecycle_manager_#{System.unique_integer([:positive])}"
+
+    {:ok, manager} =
+      SessionManager.start_link(
+        name: name,
+        session_supervisor: session_supervisor,
+        child_limit: 3
+      )
+
+    Process.unlink(manager)
+
+    on_exit(fn ->
+      if Process.alive?(manager), do: GenServer.stop(manager)
+    end)
+
+    %{manager: manager}
+  end
+
+  @spec start_parent(GenServer.server()) :: {String.t(), pid()}
+  defp start_parent(manager) do
+    {:ok, session_id, pid} =
+      SessionManager.start_session(manager,
+        provider: Minga.Test.StubProvider,
+        provider_opts: [],
+        persist?: false
+      )
+
+    {session_id, pid}
+  end
+
+  @spec start_child(GenServer.server(), pid()) :: Handle.t()
+  defp start_child(manager, parent_pid) do
+    {:ok, handle} =
+      SessionManager.start_background_subagent(
+        manager,
+        parent_pid,
+        "child task",
+        session_opts: [
+          provider: Minga.Test.StubProvider,
+          provider_opts: [],
+          persist?: false
+        ]
+      )
+
+    handle
+  end
+
+  describe "no-grandchild policy" do
+    test "rejects a grandchild request from a session that is itself a background subagent", %{
+      manager: manager
+    } do
+      {_parent_id, parent_pid} = start_parent(manager)
+      child_handle = start_child(manager, parent_pid)
+
+      assert {:error, :grandchild_not_allowed} =
+               SessionManager.start_background_subagent(
+                 manager,
+                 child_handle.pid,
+                 "grandchild task",
+                 session_opts: [
+                   provider: Minga.Test.StubProvider,
+                   provider_opts: [],
+                   persist?: false
+                 ]
+               )
+    end
+
+    test "allows a child from a session that is not itself a background subagent", %{
+      manager: manager
+    } do
+      {_parent_id, parent_pid} = start_parent(manager)
+
+      assert {:ok, %Handle{}} =
+               SessionManager.start_background_subagent(
+                 manager,
+                 parent_pid,
+                 "child task",
+                 session_opts: [
+                   provider: Minga.Test.StubProvider,
+                   provider_opts: [],
+                   persist?: false
+                 ]
+               )
+    end
+  end
+
+  describe "per-parent child limit" do
+    test "rejects a child when the running child count reaches the limit", %{manager: manager} do
+      {_parent_id, parent_pid} = start_parent(manager)
+
+      # Start children up to the limit (3 in this test setup).
+      for _ <- 1..3 do
+        start_child(manager, parent_pid)
+      end
+
+      assert {:error, :child_limit_reached} =
+               SessionManager.start_background_subagent(
+                 manager,
+                 parent_pid,
+                 "one too many",
+                 session_opts: [
+                   provider: Minga.Test.StubProvider,
+                   provider_opts: [],
+                   persist?: false
+                 ]
+               )
+    end
+
+    test "does not count completed children toward the limit", %{manager: manager} do
+      {_parent_id, parent_pid} = start_parent(manager)
+
+      handles =
+        for _ <- 1..3 do
+          start_child(manager, parent_pid)
+        end
+
+      # Stop the first child so it transitions to completed.
+      first_child = hd(handles)
+      ref = Process.monitor(first_child.pid)
+      SessionManager.stop_session(manager, first_child.session_id)
+      assert_receive {:DOWN, ^ref, :process, _, _}, 1_000
+      :sys.get_state(manager)
+
+      # Now a new child should be allowed since only 2 are running.
+      assert {:ok, %Handle{}} =
+               SessionManager.start_background_subagent(
+                 manager,
+                 parent_pid,
+                 "replacement child",
+                 session_opts: [
+                   provider: Minga.Test.StubProvider,
+                   provider_opts: [],
+                   persist?: false
+                 ]
+               )
+    end
+
+    test "allows children from different parents independently", %{manager: manager} do
+      {_parent_id1, parent_pid1} = start_parent(manager)
+      {_parent_id2, parent_pid2} = start_parent(manager)
+
+      for _ <- 1..3 do
+        start_child(manager, parent_pid1)
+      end
+
+      # Second parent should still be able to start children.
+      assert {:ok, %Handle{}} =
+               SessionManager.start_background_subagent(
+                 manager,
+                 parent_pid2,
+                 "second parent child",
+                 session_opts: [
+                   provider: Minga.Test.StubProvider,
+                   provider_opts: [],
+                   persist?: false
+                 ]
+               )
+    end
+  end
+
+  describe "child completion notification" do
+    test "sends {:child_agent_completed, handle} to parent when child stops normally", %{
+      manager: manager
+    } do
+      # Use self() as the parent so we can receive the notification.
+      # We need a real session though, so start one and then start a child of it.
+      {_parent_id, parent_pid} = start_parent(manager)
+      child_handle = start_child(manager, parent_pid)
+
+      child_ref = Process.monitor(child_handle.pid)
+      SessionManager.stop_session(manager, child_handle.session_id)
+      assert_receive {:DOWN, ^child_ref, :process, _, _}, 1_000
+
+      # The parent session pid receives the message, not us.
+      # We need to verify through state instead. Let's check the handle status.
+      :sys.get_state(manager)
+
+      assert {:ok, %Handle{status: :completed, result: "completed"} = completed_handle} =
+               SessionManager.get_child_result(manager, child_handle.session_id)
+
+      assert completed_handle.completed_at != nil
+    end
+
+    test "parent session receives {:child_agent_completed, handle} message on child stop", %{
+      manager: manager
+    } do
+      {_parent_id, parent_pid} = start_parent(manager)
+      child_handle = start_child(manager, parent_pid)
+      test_pid = self()
+
+      # Replace the child's parent_pid to our test process so we receive the message directly.
+      :sys.replace_state(manager, fn state ->
+        Map.update!(state, :background_subagents, fn subs ->
+          Map.update!(subs, child_handle.session_id, fn handle ->
+            %{handle | parent_pid: test_pid}
+          end)
+        end)
+      end)
+
+      child_ref = Process.monitor(child_handle.pid)
+      SessionManager.stop_session(manager, child_handle.session_id)
+      assert_receive {:DOWN, ^child_ref, :process, _, _}, 1_000
+      # Synchronize with the manager to ensure it has processed the DOWN.
+      :sys.get_state(manager)
+
+      assert_receive {:child_agent_completed, %Handle{status: :completed} = handle}, 1_000
+      assert handle.session_id == child_handle.session_id
+      assert handle.result == "completed"
+      assert handle.completed_at != nil
+    end
+
+    test "child crash sends failure notification with :failed status", %{manager: manager} do
+      {_parent_id, parent_pid} = start_parent(manager)
+
+      {:ok, child_handle} =
+        SessionManager.start_background_subagent(
+          manager,
+          parent_pid,
+          "crash me",
+          session_opts: [
+            provider: Minga.Test.StubProvider,
+            provider_opts: [],
+            persist?: false,
+            restart_max_attempts: 0,
+            restart_window_ms: 0
+          ]
+        )
+
+      test_pid = self()
+
+      # Replace the child's parent_pid to our test process so we receive the notification.
+      :sys.replace_state(manager, fn state ->
+        Map.update!(state, :background_subagents, fn subs ->
+          Map.update!(subs, child_handle.session_id, fn handle ->
+            %{handle | parent_pid: test_pid}
+          end)
+        end)
+      end)
+
+      child_ref = Process.monitor(child_handle.pid)
+      Process.exit(child_handle.pid, :kill)
+      assert_receive {:DOWN, ^child_ref, :process, _, :killed}, 1_000
+      # Synchronize with the manager to ensure it has processed the DOWN.
+      :sys.get_state(manager)
+
+      assert_receive {:child_agent_completed, %Handle{status: :failed} = handle}, 5_000
+      assert handle.session_id == child_handle.session_id
+      assert handle.result =~ "restart_exhausted"
+      assert handle.completed_at != nil
+    end
+  end
+
+  describe "get_child_result/2" do
+    test "returns {:ok, handle} for a known background subagent", %{manager: manager} do
+      {_parent_id, parent_pid} = start_parent(manager)
+      child_handle = start_child(manager, parent_pid)
+
+      assert {:ok, %Handle{session_id: session_id}} =
+               SessionManager.get_child_result(manager, child_handle.session_id)
+
+      assert session_id == child_handle.session_id
+    end
+
+    test "returns {:error, :not_found} for an unknown session ID", %{manager: manager} do
+      assert {:error, :not_found} = SessionManager.get_child_result(manager, "nonexistent")
+    end
+
+    test "returns the completed handle after child stops", %{manager: manager} do
+      {_parent_id, parent_pid} = start_parent(manager)
+      child_handle = start_child(manager, parent_pid)
+
+      child_ref = Process.monitor(child_handle.pid)
+      SessionManager.stop_session(manager, child_handle.session_id)
+      assert_receive {:DOWN, ^child_ref, :process, _, _}, 1_000
+      :sys.get_state(manager)
+
+      assert {:ok, %Handle{status: :completed, result: "completed"} = handle} =
+               SessionManager.get_child_result(manager, child_handle.session_id)
+
+      assert handle.completed_at != nil
+    end
+  end
+end

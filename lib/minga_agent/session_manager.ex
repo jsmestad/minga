@@ -20,6 +20,8 @@ defmodule MingaAgent.SessionManager do
 
   # ── Types ──────────────────────────────────────────────────────────────────
 
+  @default_child_limit 5
+
   @typedoc "Internal state of the SessionManager."
   @type state :: %{
           sessions: %{String.t() => session_entry()},
@@ -28,7 +30,8 @@ defmodule MingaAgent.SessionManager do
           identity_reservations_by_owner: %{pid() => String.t()},
           next_id: pos_integer(),
           session_supervisor: GenServer.server(),
-          startup_task_supervisor: GenServer.server()
+          startup_task_supervisor: GenServer.server(),
+          child_limit: pos_integer()
         }
   @type identity_reservation :: {String.t(), reference()}
   @typep identity_reservation_entry :: %{
@@ -224,6 +227,13 @@ defmodule MingaAgent.SessionManager do
     GenServer.call(manager, {:list_background_subagents, parent_session_pid})
   end
 
+  @doc "Returns the Handle for a background sub-agent by session ID."
+  @spec get_child_result(GenServer.server(), String.t()) ::
+          {:ok, Handle.t()} | {:error, :not_found}
+  def get_child_result(manager, session_id) when is_binary(session_id) do
+    GenServer.call(manager, {:get_child_result, session_id})
+  end
+
   @doc "Stops a session by its human-readable ID."
   @spec stop_session(String.t()) :: :ok | {:error, :not_found}
   def stop_session(session_id) when is_binary(session_id) do
@@ -353,7 +363,8 @@ defmodule MingaAgent.SessionManager do
        next_id: 1,
        session_supervisor: Keyword.get(opts, :session_supervisor, MingaAgent.Supervisor),
        startup_task_supervisor:
-         Keyword.get(opts, :startup_task_supervisor, Minga.Eval.TaskSupervisor)
+         Keyword.get(opts, :startup_task_supervisor, Minga.Eval.TaskSupervisor),
+       child_limit: Keyword.get(opts, :child_limit, @default_child_limit)
      }}
   end
 
@@ -437,12 +448,17 @@ defmodule MingaAgent.SessionManager do
   end
 
   def handle_call({:start_background_subagent, parent_session_pid, task, opts}, _from, state) do
-    case Keyword.fetch(opts, :session_opts) do
-      {:ok, session_opts} ->
-        start_background_subagent_session(state, parent_session_pid, task, opts, session_opts)
+    with :ok <- validate_no_grandchild(state, parent_session_pid),
+         :ok <- validate_child_limit(state, parent_session_pid) do
+      case Keyword.fetch(opts, :session_opts) do
+        {:ok, session_opts} ->
+          start_background_subagent_session(state, parent_session_pid, task, opts, session_opts)
 
-      :error ->
-        {:reply, {:error, :missing_session_opts}, state}
+        :error ->
+          {:reply, {:error, :missing_session_opts}, state}
+      end
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
@@ -454,6 +470,13 @@ defmodule MingaAgent.SessionManager do
       |> Enum.sort_by(& &1.started_at, {:asc, DateTime})
 
     {:reply, handles, state}
+  end
+
+  def handle_call({:get_child_result, session_id}, _from, state) do
+    case Map.fetch(state.background_subagents, session_id) do
+      {:ok, handle} -> {:reply, {:ok, handle}, state}
+      :error -> {:reply, {:error, :not_found}, state}
+    end
   end
 
   def handle_call({:stop_session, session_id}, _from, state) do
@@ -681,6 +704,7 @@ defmodule MingaAgent.SessionManager do
         # holders such as the Editor's tab bar learn about it only through this
         # event, so it fires here too.
         broadcast_session_stopped(session_id, pid, reason)
+        state = finalize_background_subagent(state, session_id, reason)
         entry = reset_startup_delivery_after_down(entry, ref)
         entry = %{entry | pid: nil, monitor_ref: nil}
         {:noreply, finish_pending_stop(state, session_id, entry)}
@@ -713,6 +737,7 @@ defmodule MingaAgent.SessionManager do
       )
 
       broadcast_session_stopped(session_id, pid, reason)
+      state = finalize_background_subagent(state, session_id, reason)
 
       entry = %{
         entry
@@ -1152,6 +1177,66 @@ defmodule MingaAgent.SessionManager do
     end)
   end
 
+  @spec validate_no_grandchild(state(), pid() | nil) :: :ok | {:error, :grandchild_not_allowed}
+  defp validate_no_grandchild(_state, nil), do: :ok
+
+  defp validate_no_grandchild(state, parent_session_pid) when is_pid(parent_session_pid) do
+    is_child? =
+      Enum.any?(state.background_subagents, fn {_id, handle} ->
+        handle.pid == parent_session_pid
+      end)
+
+    if is_child?, do: {:error, :grandchild_not_allowed}, else: :ok
+  end
+
+  @spec validate_child_limit(state(), pid() | nil) :: :ok | {:error, :child_limit_reached}
+  defp validate_child_limit(_state, nil), do: :ok
+
+  defp validate_child_limit(state, parent_session_pid) when is_pid(parent_session_pid) do
+    count =
+      Enum.count(state.background_subagents, fn {_id, handle} ->
+        handle.parent_pid == parent_session_pid and handle.status == :running
+      end)
+
+    if count >= state.child_limit, do: {:error, :child_limit_reached}, else: :ok
+  end
+
+  @spec finalize_background_subagent(state(), String.t(), term()) :: state()
+  defp finalize_background_subagent(state, session_id, reason) do
+    case Map.fetch(state.background_subagents, session_id) do
+      {:ok, %Handle{status: :running} = handle} ->
+        updated_handle =
+          case reason do
+            :normal -> Handle.complete(handle, "completed")
+            :shutdown -> Handle.complete(handle, "completed")
+            {:shutdown, _} -> Handle.complete(handle, "completed")
+            other -> Handle.fail(handle, other)
+          end
+
+        notify_parent_of_child_completion(updated_handle)
+
+        %{
+          state
+          | background_subagents: Map.put(state.background_subagents, session_id, updated_handle)
+        }
+
+      _ ->
+        state
+    end
+  end
+
+  @spec notify_parent_of_child_completion(Handle.t()) :: :ok
+  defp notify_parent_of_child_completion(%Handle{parent_pid: nil}), do: :ok
+
+  defp notify_parent_of_child_completion(%Handle{parent_pid: parent_pid} = handle)
+       when is_pid(parent_pid) do
+    if Process.alive?(parent_pid) do
+      send(parent_pid, {:child_agent_completed, handle})
+    end
+
+    :ok
+  end
+
   @spec active_session_entry?(session_entry()) :: boolean()
   defp active_session_entry?(%{monitor_ref: ref}) when is_reference(ref), do: true
   defp active_session_entry?(_entry), do: false
@@ -1177,6 +1262,7 @@ defmodule MingaAgent.SessionManager do
         )
 
         broadcast_session_stopped(session_id, old_pid, {:restart_exhausted, reason})
+        state = finalize_background_subagent(state, session_id, {:restart_exhausted, reason})
         entry = %{entry | pid: nil, monitor_ref: nil, restart_state: nil, stop_pending?: true}
         {:noreply, finish_pending_stop(state, session_id, entry)}
     end
@@ -1427,7 +1513,15 @@ defmodule MingaAgent.SessionManager do
     end
 
     sessions = Map.delete(state.sessions, session_id)
-    background_subagents = Map.delete(state.background_subagents, session_id)
+
+    # Keep finalized (completed/failed) handles so results can be retrieved later.
+    background_subagents =
+      case Map.fetch(state.background_subagents, session_id) do
+        {:ok, %Handle{status: :running}} -> Map.delete(state.background_subagents, session_id)
+        {:ok, _finalized} -> state.background_subagents
+        :error -> state.background_subagents
+      end
+
     %{state | sessions: sessions, background_subagents: background_subagents}
   end
 
