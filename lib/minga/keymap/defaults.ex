@@ -61,6 +61,7 @@ defmodule Minga.Keymap.Defaults do
     {~k(f p), :open_config, "Open config file"},
 
     # ── Buffer ────────────────────────────────────────────────────────────────
+    {~k(,), :buffer_list, "Switch buffer"},
     {~k(b b), :buffer_list, "Switch buffer"},
     {~k(b B), :buffer_list_all, "Switch buffer (all)"},
     {~k(b n), :buffer_next, "Next buffer"},

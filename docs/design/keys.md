@@ -37,7 +37,7 @@ Keys are chords and mnemonics, not shortcuts. This is [principle 11](principles.
 |---|---|---|
 | `SPC SPC` | Find file in project | kept (122) |
 | `:` | Commands; ⌘K is the macOS alias | kept (39) |
-| `SPC ,` | Switch buffer and file switcher | new |
+| `SPC ,` | Switch buffer and file switcher | shipped as the buffer switcher (an alias of `SPC b b`); files join it with the switcher work |
 | `SPC b b` | Same switcher as `SPC ,` | kept (57) |
 | `SPC 1` to `SPC 4` | Jump to pinned file 1 to 4 (⌘1 to ⌘4 on macOS). Diverges from Doom's workspaces on `SPC 1` to `SPC 9`; which-key labels them "Pinned" | changed (186 to 189, were tabs; tabs are gone) |
 | `SPC ;` | Eval | shipped; replaces ⌥: (331), which is gone |

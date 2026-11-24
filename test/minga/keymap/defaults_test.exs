@@ -22,6 +22,7 @@ defmodule Minga.Keymap.DefaultsTest do
     {~k(f s), :save},
     {~k(f p), :open_config},
     {~k(b b), :buffer_list},
+    {~k(,), :buffer_list},
     {~k(b d), :kill_buffer},
     {~k(b X), :force_kill_buffer},
     {~k(b D), :kill_other_buffers},

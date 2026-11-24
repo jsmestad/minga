@@ -9,7 +9,7 @@
 # doom_key	doom_meaning	minga_key	minga_command	status	reason
 SPC SPC	Find file in project	SPC SPC	project_find_file	matches	Doom's top-level project file finder
 SPC .	Find file	SPC f f	find_file	diverges	SPC . is unbound; find_file lives on SPC f f, which Doom also binds
-SPC ,	Switch workspace buffer	-	-	diverges	Unbound today; docs/design/keys.md plans SPC , as the buffer and file switcher
+SPC ,	Switch workspace buffer	SPC ,	buffer_list	matches	Declared alias of SPC b b; docs/design/keys.md grows it into the buffer and file switcher
 SPC :	M-x (execute command)	SPC :	command_palette	matches	The command palette is Minga's M-x
 SPC ;	Eval expression	SPC ;	enter_eval	matches	Same key, same meaning; it replaces ⌥: in Normal mode
 SPC /	Search project	SPC /	search_project	matches	Declared alias of SPC s p

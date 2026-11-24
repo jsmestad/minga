@@ -197,7 +197,8 @@ defmodule Minga.Test.KeyGrammar do
   # is declared here as an alias of the other.
   @leader_aliases [
     {"SPC /", "SPC s p", "Doom binds both SPC / and SPC s p to project search"},
-    {"SPC SPC", "SPC p f", "Doom binds both SPC SPC and SPC p f to find file in project"}
+    {"SPC SPC", "SPC p f", "Doom binds both SPC SPC and SPC p f to find file in project"},
+    {"SPC ,", "SPC b b", "Doom binds both SPC , and SPC b b to switch buffer"}
   ]
 
   # ── Normal mode aliases ─────────────────────────────────────────────────────
