@@ -108,17 +108,17 @@
   {
    "frame": [
     488,
-    661,
+    727,
     464,
-    259
+    193
    ],
    "part": "whichKey.panel"
   },
   {
-   "baseline": 677.5,
+   "baseline": 743.5,
    "frame": [
     500,
-    667,
+    733,
     34,
     14
    ],
@@ -126,59 +126,48 @@
    "text": "SPC a"
   },
   {
-   "baseline": 677,
-   "frame": [
-    925,
-    667.5,
-    15,
-    13
-   ],
-   "part": "whichKey.count",
-   "text": "1/2"
-  },
-  {
    "frame": [
     498,
-    694,
+    760,
     220,
-    220
+    154
    ],
    "part": "whichKey.column"
   },
   {
    "frame": [
     498,
-    694,
+    760,
     220,
     22
    ],
    "part": "whichKey.entry",
-   "text": "? Ask about line or selection"
+   "text": "? Ask about this"
   },
   {
    "frame": [
     722,
-    694,
+    760,
     220,
-    220
+    154
    ],
    "part": "whichKey.column"
   },
   {
    "frame": [
     722,
-    694,
+    760,
     220,
     22
    ],
    "part": "whichKey.entry",
-   "text": "T Pick thinking level"
+   "text": "p Publish edits\u2026"
   },
   {
-   "baseline": 708.5,
+   "baseline": 774.5,
    "frame": [
     515,
-    698,
+    764,
     7,
     14
    ],
@@ -186,207 +175,15 @@
    "text": "?"
   },
   {
-   "baseline": 708.5,
-   "frame": [
-    528,
-    698,
-    139,
-    14
-   ],
-   "part": "whichKey.entryLabel",
-   "text": "Ask about line or selection"
-  },
-  {
-   "baseline": 708.5,
-   "frame": [
-    739,
-    698,
-    7,
-    14
-   ],
-   "part": "whichKey.entryKey",
-   "text": "T"
-  },
-  {
-   "baseline": 708.5,
-   "frame": [
-    752,
-    698,
-    95,
-    14
-   ],
-   "part": "whichKey.entryLabel",
-   "text": "Pick thinking level"
-  },
-  {
-   "frame": [
-    498,
-    716,
-    220,
-    22
-   ],
-   "part": "whichKey.entry",
-   "text": "D Attach file diagnostics to Agent"
-  },
-  {
-   "frame": [
-    722,
-    716,
-    220,
-    22
-   ],
-   "part": "whichKey.entry",
-   "text": "a Toggle agent split"
-  },
-  {
-   "baseline": 730.5,
-   "frame": [
-    515,
-    720,
-    7,
-    14
-   ],
-   "part": "whichKey.entryKey",
-   "text": "D"
-  },
-  {
-   "baseline": 730.5,
-   "frame": [
-    528,
-    720,
-    165,
-    14
-   ],
-   "part": "whichKey.entryLabel",
-   "text": "Attach file diagnostics to Agent"
-  },
-  {
-   "baseline": 730.5,
-   "frame": [
-    739,
-    720,
-    7,
-    14
-   ],
-   "part": "whichKey.entryKey",
-   "text": "a"
-  },
-  {
-   "baseline": 730.5,
-   "frame": [
-    752,
-    720,
-    94,
-    14
-   ],
-   "part": "whichKey.entryLabel",
-   "text": "Toggle agent split"
-  },
-  {
-   "frame": [
-    498,
-    738,
-    220,
-    22
-   ],
-   "part": "whichKey.entry",
-   "text": "F Attach project file to Agent"
-  },
-  {
-   "frame": [
-    722,
-    738,
-    220,
-    22
-   ],
-   "part": "whichKey.entry",
-   "text": "b Attach current buffer to Agent"
-  },
-  {
-   "baseline": 752.5,
-   "frame": [
-    515,
-    742,
-    7,
-    14
-   ],
-   "part": "whichKey.entryKey",
-   "text": "F"
-  },
-  {
-   "baseline": 752.5,
-   "frame": [
-    528,
-    742,
-    142,
-    14
-   ],
-   "part": "whichKey.entryLabel",
-   "text": "Attach project file to Agent"
-  },
-  {
-   "baseline": 752.5,
-   "frame": [
-    739,
-    742,
-    7,
-    14
-   ],
-   "part": "whichKey.entryKey",
-   "text": "b"
-  },
-  {
-   "baseline": 752.5,
-   "frame": [
-    752,
-    742,
-    159,
-    14
-   ],
-   "part": "whichKey.entryLabel",
-   "text": "Attach current buffer to Agent"
-  },
-  {
-   "frame": [
-    498,
-    760,
-    220,
-    22
-   ],
-   "part": "whichKey.entry",
-   "text": "H Read retained Agent messages"
-  },
-  {
-   "frame": [
-    722,
-    760,
-    220,
-    22
-   ],
-   "part": "whichKey.entry",
-   "text": "c Copy file to workspace\u2026"
-  },
-  {
-   "baseline": 774.5,
-   "frame": [
-    515,
-    764,
-    7,
-    14
-   ],
-   "part": "whichKey.entryKey",
-   "text": "H"
-  },
-  {
    "baseline": 774.5,
    "frame": [
     528,
     764,
-    163,
+    75,
     14
    ],
    "part": "whichKey.entryLabel",
-   "text": "Read retained Agent messages"
+   "text": "Ask about this"
   },
   {
    "baseline": 774.5,
@@ -397,18 +194,18 @@
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "c"
+   "text": "p"
   },
   {
    "baseline": 774.5,
    "frame": [
     752,
     764,
-    129,
+    77,
     14
    ],
    "part": "whichKey.entryLabel",
-   "text": "Copy file to workspace\u2026"
+   "text": "Publish edits\u2026"
   },
   {
    "frame": [
@@ -418,7 +215,7 @@
     22
    ],
    "part": "whichKey.entry",
-   "text": "J Inspect queued Agent inputs"
+   "text": "A Code autobiography"
   },
   {
    "frame": [
@@ -428,7 +225,7 @@
     22
    ],
    "part": "whichKey.entry",
-   "text": "e Rewrite selection inline"
+   "text": "q Queue \u203a"
   },
   {
    "baseline": 796.5,
@@ -439,18 +236,18 @@
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "J"
+   "text": "A"
   },
   {
    "baseline": 796.5,
    "frame": [
     528,
     786,
-    151,
+    107,
     14
    ],
    "part": "whichKey.entryLabel",
-   "text": "Inspect queued Agent inputs"
+   "text": "Code autobiography"
   },
   {
    "baseline": 796.5,
@@ -461,18 +258,18 @@
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "e"
+   "text": "q"
   },
   {
    "baseline": 796.5,
    "frame": [
     752,
     786,
-    122,
+    43,
     14
    ],
    "part": "whichKey.entryLabel",
-   "text": "Rewrite selection inline"
+   "text": "Queue \u203a"
   },
   {
    "frame": [
@@ -482,7 +279,7 @@
     22
    ],
    "part": "whichKey.entry",
-   "text": "N Pick agent session location"
+   "text": "S Session \u203a"
   },
   {
    "frame": [
@@ -492,269 +289,13 @@
     22
    ],
    "part": "whichKey.entry",
-   "text": "f Queue current input as follow-up"
+   "text": "r Pending reviews"
   },
   {
    "baseline": 818.5,
    "frame": [
     515,
     808,
-    7,
-    14
-   ],
-   "part": "whichKey.entryKey",
-   "text": "N"
-  },
-  {
-   "baseline": 818.5,
-   "frame": [
-    528,
-    808,
-    143,
-    14
-   ],
-   "part": "whichKey.entryLabel",
-   "text": "Pick agent session location"
-  },
-  {
-   "baseline": 818.5,
-   "frame": [
-    739,
-    808,
-    7,
-    14
-   ],
-   "part": "whichKey.entryKey",
-   "text": "f"
-  },
-  {
-   "baseline": 818.5,
-   "frame": [
-    752,
-    808,
-    173,
-    14
-   ],
-   "part": "whichKey.entryLabel",
-   "text": "Queue current input as follow-up"
-  },
-  {
-   "frame": [
-    498,
-    826,
-    220,
-    22
-   ],
-   "part": "whichKey.entry",
-   "text": "P Discard unpublished agent edits"
-  },
-  {
-   "frame": [
-    722,
-    826,
-    220,
-    22
-   ],
-   "part": "whichKey.entry",
-   "text": "h Resume session"
-  },
-  {
-   "baseline": 840.5,
-   "frame": [
-    515,
-    830,
-    7,
-    14
-   ],
-   "part": "whichKey.entryKey",
-   "text": "P"
-  },
-  {
-   "baseline": 840.5,
-   "frame": [
-    528,
-    830,
-    170,
-    14
-   ],
-   "part": "whichKey.entryLabel",
-   "text": "Discard unpublished agent edits"
-  },
-  {
-   "baseline": 840.5,
-   "frame": [
-    739,
-    830,
-    7,
-    14
-   ],
-   "part": "whichKey.entryKey",
-   "text": "h"
-  },
-  {
-   "baseline": 840.5,
-   "frame": [
-    752,
-    830,
-    85,
-    14
-   ],
-   "part": "whichKey.entryLabel",
-   "text": "Resume session"
-  },
-  {
-   "frame": [
-    498,
-    848,
-    220,
-    22
-   ],
-   "part": "whichKey.entry",
-   "text": "Q Answer Agent question"
-  },
-  {
-   "frame": [
-    722,
-    848,
-    220,
-    22
-   ],
-   "part": "whichKey.entry",
-   "text": "j Inspect draft attachments"
-  },
-  {
-   "baseline": 862.5,
-   "frame": [
-    515,
-    852,
-    7,
-    14
-   ],
-   "part": "whichKey.entryKey",
-   "text": "Q"
-  },
-  {
-   "baseline": 862.5,
-   "frame": [
-    528,
-    852,
-    121,
-    14
-   ],
-   "part": "whichKey.entryLabel",
-   "text": "Answer Agent question"
-  },
-  {
-   "baseline": 862.5,
-   "frame": [
-    739,
-    852,
-    7,
-    14
-   ],
-   "part": "whichKey.entryKey",
-   "text": "j"
-  },
-  {
-   "baseline": 862.5,
-   "frame": [
-    752,
-    852,
-    136,
-    14
-   ],
-   "part": "whichKey.entryLabel",
-   "text": "Inspect draft attachments"
-  },
-  {
-   "frame": [
-    498,
-    870,
-    220,
-    22
-   ],
-   "part": "whichKey.entry",
-   "text": "R Rename Agent session"
-  },
-  {
-   "frame": [
-    722,
-    870,
-    220,
-    22
-   ],
-   "part": "whichKey.entry",
-   "text": "k Inspect Agent checklist"
-  },
-  {
-   "baseline": 884.5,
-   "frame": [
-    515,
-    874,
-    7,
-    14
-   ],
-   "part": "whichKey.entryKey",
-   "text": "R"
-  },
-  {
-   "baseline": 884.5,
-   "frame": [
-    528,
-    874,
-    119,
-    14
-   ],
-   "part": "whichKey.entryLabel",
-   "text": "Rename Agent session"
-  },
-  {
-   "baseline": 884.5,
-   "frame": [
-    739,
-    874,
-    7,
-    14
-   ],
-   "part": "whichKey.entryKey",
-   "text": "k"
-  },
-  {
-   "baseline": 884.5,
-   "frame": [
-    752,
-    874,
-    123,
-    14
-   ],
-   "part": "whichKey.entryLabel",
-   "text": "Inspect Agent checklist"
-  },
-  {
-   "frame": [
-    498,
-    892,
-    220,
-    22
-   ],
-   "part": "whichKey.entry",
-   "text": "S Stop agent session"
-  },
-  {
-   "frame": [
-    722,
-    892,
-    220,
-    22
-   ],
-   "part": "whichKey.entry",
-   "text": "m Pick agent model"
-  },
-  {
-   "baseline": 906.5,
-   "frame": [
-    515,
-    896,
     7,
     14
    ],
@@ -762,15 +303,271 @@
    "text": "S"
   },
   {
+   "baseline": 818.5,
+   "frame": [
+    528,
+    808,
+    49,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Session \u203a"
+  },
+  {
+   "baseline": 818.5,
+   "frame": [
+    739,
+    808,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "r"
+  },
+  {
+   "baseline": 818.5,
+   "frame": [
+    752,
+    808,
+    86,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Pending reviews"
+  },
+  {
+   "frame": [
+    498,
+    826,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "W Why this line"
+  },
+  {
+   "frame": [
+    722,
+    826,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "s Stop"
+  },
+  {
+   "baseline": 840.5,
+   "frame": [
+    515,
+    830,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "W"
+  },
+  {
+   "baseline": 840.5,
+   "frame": [
+    528,
+    830,
+    68,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Why this line"
+  },
+  {
+   "baseline": 840.5,
+   "frame": [
+    739,
+    830,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "s"
+  },
+  {
+   "baseline": 840.5,
+   "frame": [
+    752,
+    830,
+    25,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Stop"
+  },
+  {
+   "frame": [
+    498,
+    848,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "a Agent view"
+  },
+  {
+   "frame": [
+    722,
+    848,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "u Undo all agent edits"
+  },
+  {
+   "baseline": 862.5,
+   "frame": [
+    515,
+    852,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "a"
+  },
+  {
+   "baseline": 862.5,
+   "frame": [
+    528,
+    852,
+    58,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Agent view"
+  },
+  {
+   "baseline": 862.5,
+   "frame": [
+    739,
+    852,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "u"
+  },
+  {
+   "baseline": 862.5,
+   "frame": [
+    752,
+    852,
+    105,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Undo all agent edits"
+  },
+  {
+   "frame": [
+    498,
+    870,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "e Rewrite selection"
+  },
+  {
+   "frame": [
+    722,
+    870,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "v Conversation split"
+  },
+  {
+   "baseline": 884.5,
+   "frame": [
+    515,
+    874,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "e"
+  },
+  {
+   "baseline": 884.5,
+   "frame": [
+    528,
+    874,
+    91,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Rewrite selection"
+  },
+  {
+   "baseline": 884.5,
+   "frame": [
+    739,
+    874,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "v"
+  },
+  {
+   "baseline": 884.5,
+   "frame": [
+    752,
+    874,
+    95,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Conversation split"
+  },
+  {
+   "frame": [
+    498,
+    892,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "n New session"
+  },
+  {
+   "frame": [
+    722,
+    892,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "x Context \u203a"
+  },
+  {
+   "baseline": 906.5,
+   "frame": [
+    515,
+    896,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "n"
+  },
+  {
    "baseline": 906.5,
    "frame": [
     528,
     896,
-    101,
+    66,
     14
    ],
    "part": "whichKey.entryLabel",
-   "text": "Stop agent session"
+   "text": "New session"
   },
   {
    "baseline": 906.5,
@@ -781,18 +578,18 @@
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "m"
+   "text": "x"
   },
   {
    "baseline": 906.5,
    "frame": [
     752,
     896,
-    91,
+    50,
     14
    ],
    "part": "whichKey.entryLabel",
-   "text": "Pick agent model"
+   "text": "Context \u203a"
   },
   {
    "frame": [
