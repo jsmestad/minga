@@ -488,7 +488,7 @@ defmodule MingaEditor.Input.Router do
           String.t()
         ) :: MingaEditor.Input.Handler.result()
   defp invoke_paste_handler({handler, source}, state, text) do
-    Code.ensure_loaded(handler)
+    Code.ensure_loaded!(handler)
 
     InvocationContext.with_source(source, fn ->
       call_paste_handler(handler, state, text)
@@ -496,7 +496,7 @@ defmodule MingaEditor.Input.Router do
   end
 
   defp invoke_paste_handler(handler, state, text) when is_atom(handler) do
-    Code.ensure_loaded(handler)
+    Code.ensure_loaded!(handler)
     call_paste_handler(handler, state, text)
   end
 
@@ -517,7 +517,7 @@ defmodule MingaEditor.Input.Router do
           non_neg_integer()
         ) :: MingaEditor.Input.Handler.result()
   defp invoke_key_handler({handler, source}, state, codepoint, modifiers) do
-    Code.ensure_loaded(handler)
+    Code.ensure_loaded!(handler)
 
     InvocationContext.with_source(source, fn ->
       call_key_handler(handler, state, codepoint, modifiers)
@@ -525,7 +525,7 @@ defmodule MingaEditor.Input.Router do
   end
 
   defp invoke_key_handler(handler, state, codepoint, modifiers) when is_atom(handler) do
-    Code.ensure_loaded(handler)
+    Code.ensure_loaded!(handler)
     call_key_handler(handler, state, codepoint, modifiers)
   end
 

@@ -132,7 +132,8 @@ defmodule Minga.Application do
 
     base_children =
       [
-        # First: Shell.Registry, HandlerRegistry, Foundation registries, and bundled packs register cleanup callbacks while they start.
+        # Shell.Registry, HandlerRegistry, Foundation registries, and bundled
+        # packs register cleanup callbacks while they start.
         Minga.Extension.ContributionCleanup,
         MingaEditor.Shell.Registry,
         MingaEditor.Input.HandlerRegistry,
