@@ -1478,6 +1478,13 @@ defmodule MingaAgent.SessionManager do
               {:restart_exhausted, restart_reason}
             )
 
+            new_state =
+              finalize_background_subagent(
+                new_state,
+                session_id,
+                {:restart_exhausted, restart_reason}
+              )
+
             terminal_entry = %{
               entry
               | pid: nil,
@@ -1616,6 +1623,7 @@ defmodule MingaAgent.SessionManager do
     background_subagents =
       state.background_subagents
       |> update_background_subagent_pid(session_id, new_pid)
+      |> bump_background_subagent_generation(session_id)
       |> update_background_subagent_parent_pid(restart_state.old_pid, new_pid)
 
     state = %{state | background_subagents: background_subagents}
@@ -2033,6 +2041,15 @@ defmodule MingaAgent.SessionManager do
   defp update_background_subagent_pid(background_subagents, session_id, pid) do
     case Map.fetch(background_subagents, session_id) do
       {:ok, handle} -> Map.put(background_subagents, session_id, Handle.with_pid(handle, pid))
+      :error -> background_subagents
+    end
+  end
+
+  @spec bump_background_subagent_generation(%{String.t() => Handle.t()}, String.t()) ::
+          %{String.t() => Handle.t()}
+  defp bump_background_subagent_generation(background_subagents, session_id) do
+    case Map.fetch(background_subagents, session_id) do
+      {:ok, handle} -> Map.put(background_subagents, session_id, Handle.next_generation(handle))
       :error -> background_subagents
     end
   end

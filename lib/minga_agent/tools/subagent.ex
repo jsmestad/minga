@@ -298,17 +298,13 @@ defmodule MingaAgent.Tools.Subagent do
   end
 
   @spec put_tool_approval_policy(keyword(), opts()) :: keyword()
-  defp put_tool_approval_policy(session_opts, opts) do
-    if worktree_isolation?(opts) do
-      Keyword.put(session_opts, :tool_approval_policy, {:auto_approve, :session})
-    else
-      Keyword.put(session_opts, :tool_approval_policy, {:reject, @approval_unavailable_message})
-    end
+  defp put_tool_approval_policy(session_opts, _opts) do
+    Keyword.put(session_opts, :tool_approval_policy, {:reject, @approval_unavailable_message})
   end
 
   @spec background_result(Handle.t()) :: String.t()
   defp background_result(%Handle{} = handle) do
-    "Background subagent started. Handle: #{Handle.id(handle)}. Use the agent session picker to inspect its chat."
+    "Background subagent started. Handle: #{Handle.id(handle)}. You will receive a completion notification when the child finishes."
   end
 
   # ── Context inheritance ────────────────────────────────────────────────────

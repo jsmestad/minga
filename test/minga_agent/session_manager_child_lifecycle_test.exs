@@ -288,4 +288,80 @@ defmodule MingaAgent.SessionManagerChildLifecycleTest do
       assert handle.completed_at != nil
     end
   end
+
+  describe "generation tracking" do
+    test "new handles start at generation 1", %{manager: manager} do
+      {_parent_id, parent_pid} = start_parent(manager)
+      child_handle = start_child(manager, parent_pid)
+
+      assert {:ok, %Handle{generation: 1}} =
+               SessionManager.get_child_result(manager, child_handle.session_id)
+    end
+  end
+
+  describe "Handle transitions" do
+    test "interrupt/2 marks a running handle as interrupted" do
+      handle =
+        Handle.new(
+          session_id: "test-1",
+          pid: self(),
+          task: "test task",
+          started_at: DateTime.utc_now()
+        )
+
+      interrupted = Handle.interrupt(handle, :lost_during_restart)
+      assert interrupted.status == :interrupted
+      assert interrupted.result =~ "lost_during_restart"
+      assert %DateTime{} = interrupted.completed_at
+    end
+
+    test "next_generation/1 increments the generation counter" do
+      handle =
+        Handle.new(
+          session_id: "test-1",
+          pid: self(),
+          task: "test task",
+          started_at: DateTime.utc_now()
+        )
+
+      assert handle.generation == 1
+      bumped = Handle.next_generation(handle)
+      assert bumped.generation == 2
+      assert Handle.next_generation(bumped).generation == 3
+    end
+
+    test "complete/2 only transitions from :running" do
+      handle =
+        Handle.new(
+          session_id: "test-1",
+          pid: self(),
+          task: "test task",
+          started_at: DateTime.utc_now()
+        )
+
+      completed = Handle.complete(handle, "done")
+      assert completed.status == :completed
+
+      assert_raise FunctionClauseError, fn ->
+        apply(Handle, :complete, [completed, "again"])
+      end
+    end
+
+    test "fail/2 only transitions from :running" do
+      handle =
+        Handle.new(
+          session_id: "test-1",
+          pid: self(),
+          task: "test task",
+          started_at: DateTime.utc_now()
+        )
+
+      failed = Handle.fail(handle, :crash)
+      assert failed.status == :failed
+
+      assert_raise FunctionClauseError, fn ->
+        apply(Handle, :fail, [failed, :crash_again])
+      end
+    end
+  end
 end

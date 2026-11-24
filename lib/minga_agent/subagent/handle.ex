@@ -5,7 +5,7 @@ defmodule MingaAgent.Subagent.Handle do
   The handle is owned by `MingaAgent.SessionManager` and projected by editor shells for status and navigation. The public, stable identifier is `session_id`; `pid` is kept for in-process routing only.
   """
 
-  @type status :: :running | :completed | :failed | :cancelled
+  @type status :: :running | :completed | :failed | :cancelled | :interrupted
 
   @enforce_keys [:session_id, :pid, :task, :started_at]
   defstruct [
@@ -18,7 +18,8 @@ defmodule MingaAgent.Subagent.Handle do
     :started_at,
     status: :running,
     result: nil,
-    completed_at: nil
+    completed_at: nil,
+    generation: 1
   ]
 
   @type t :: %__MODULE__{
@@ -31,7 +32,8 @@ defmodule MingaAgent.Subagent.Handle do
           started_at: DateTime.t(),
           status: status(),
           result: String.t() | nil,
-          completed_at: DateTime.t() | nil
+          completed_at: DateTime.t() | nil,
+          generation: pos_integer()
         }
 
   @doc "Creates a background sub-agent handle."
@@ -74,6 +76,18 @@ defmodule MingaAgent.Subagent.Handle do
   @spec fail(t(), term()) :: t()
   def fail(%__MODULE__{status: :running} = handle, reason) do
     %{handle | status: :failed, result: inspect(reason), completed_at: DateTime.utc_now()}
+  end
+
+  @doc "Marks a running handle as interrupted (lost during restart)."
+  @spec interrupt(t(), term()) :: t()
+  def interrupt(%__MODULE__{status: :running} = handle, reason) do
+    %{handle | status: :interrupted, result: inspect(reason), completed_at: DateTime.utc_now()}
+  end
+
+  @doc "Increments the generation counter after a session restart."
+  @spec next_generation(t()) :: t()
+  def next_generation(%__MODULE__{generation: gen} = handle) do
+    %{handle | generation: gen + 1}
   end
 
   @doc "Returns a copy of the handle with a different pid."
