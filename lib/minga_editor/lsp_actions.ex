@@ -2272,7 +2272,7 @@ defmodule MingaEditor.LspActions do
     current_path = Buffer.file_path(state.workspace.buffers.active)
 
     # Set jump mark before navigating
-    state = set_jump_mark(state)
+    state = MingaEditor.Editing.record_jump_here(state)
 
     # This is the seam where an async LSP goto actually lands (#2652): marking
     # here (not at command dispatch) means a request that errors or returns no
@@ -2370,13 +2370,6 @@ defmodule MingaEditor.LspActions do
         MingaEditor.BufferActivation.activate(state, i)
     end
   end
-
-  @spec set_jump_mark(state()) :: state()
-  defp set_jump_mark(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
-    MingaEditor.Editing.record_jump(state, buf, Buffer.cursor(buf))
-  end
-
-  defp set_jump_mark(state), do: state
 
   # Computes the cursor's screen position for anchoring the hover popup.
   # Uses the last rendered cursor position from the compose stage.

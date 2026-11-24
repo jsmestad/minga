@@ -174,6 +174,21 @@ defmodule MingaEditor.Editing do
     )
   end
 
+  @doc """
+  Records a jump from the active buffer's cursor, before a location jump moves it.
+
+  A picker preview only shows a location, so nothing is recorded while one runs; the confirmed pick records the jump.
+  """
+  @spec record_jump_here(EditorState.t()) :: EditorState.t()
+  def record_jump_here(%EditorState{buffer_lifecycle: %{buffer_add_context: :preview}} = state),
+    do: state
+
+  def record_jump_here(%EditorState{workspace: %{buffers: %{active: buf}}} = state)
+      when is_pid(buf),
+      do: record_jump(state, buf, Minga.Buffer.cursor(buf))
+
+  def record_jump_here(%EditorState{} = state), do: state
+
   @doc "Records a jump that started at `pos` in `buffer`, which may not be the active buffer."
   @spec record_jump(EditorState.t(), pid(), {non_neg_integer(), non_neg_integer()}) ::
           EditorState.t()
