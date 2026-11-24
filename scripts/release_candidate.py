@@ -16,13 +16,21 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-MANIFEST_VERSION = 2
+# Stable manifests: version 2 also carried an Intel macOS tarball; version 5 does not.
+INTEL_MANIFEST_VERSION = 2
+MANIFEST_VERSION = 5
 PAYLOADS = {
     "Minga.dmg": {"os": "macos", "arch": "aarch64"},
     "minga_macos_aarch64.tar.gz": {"os": "macos", "arch": "aarch64"},
-    "minga_macos_x86_64.tar.gz": {"os": "macos", "arch": "x86_64"},
     "minga_linux_x86_64.tar.gz": {"os": "linux", "arch": "x86_64"},
     "minga_linux_aarch64.tar.gz": {"os": "linux", "arch": "aarch64"},
+}
+INTEL_PAYLOADS = {
+    "Minga.dmg": PAYLOADS["Minga.dmg"],
+    "minga_macos_aarch64.tar.gz": PAYLOADS["minga_macos_aarch64.tar.gz"],
+    "minga_macos_x86_64.tar.gz": {"os": "macos", "arch": "x86_64"},
+    "minga_linux_x86_64.tar.gz": PAYLOADS["minga_linux_x86_64.tar.gz"],
+    "minga_linux_aarch64.tar.gz": PAYLOADS["minga_linux_aarch64.tar.gz"],
 }
 # The former wrapper inventory is accepted by verification, never by creation.
 LEGACY_PAYLOADS = {
@@ -33,10 +41,16 @@ LEGACY_PAYLOADS = {
     "minga_linux_aarch64": {"os": "linux", "arch": "aarch64"},
 }
 TOOLCHAIN_KEYS = {"elixir": "elixir", "erlang": "otp", "golang": "go", "zig": "native_zig"}
-MANIFEST_PAYLOADS = {1: LEGACY_PAYLOADS, MANIFEST_VERSION: PAYLOADS}
+MANIFEST_PAYLOADS = {1: LEGACY_PAYLOADS, INTEL_MANIFEST_VERSION: INTEL_PAYLOADS, MANIFEST_VERSION: PAYLOADS}
+# Rolling manifests: version 3 carried only Apple Silicon; version 4 adds both Linux tarballs.
 HOMEBREW_MANIFEST_VERSION = 3
+ROLLING_MANIFEST_VERSION = 4
 MANIFEST_PAYLOADS[HOMEBREW_MANIFEST_VERSION] = {
     name: target for name, target in PAYLOADS.items() if target == {"os": "macos", "arch": "aarch64"}
+}
+MANIFEST_PAYLOADS[ROLLING_MANIFEST_VERSION] = {
+    name: target for name, target in PAYLOADS.items()
+    if target == {"os": "macos", "arch": "aarch64"} or target["os"] == "linux"
 }
 LEGACY_PINS = {"elixir": "1.20.5-otp-29", "otp": "29.1.2", "go": "1.26.4", "native_zig": "0.16.0"}
 CONTEXT_KEYS = {"repository", "source_sha", "version", "workflow_path", "workflow_sha", "run_id", "run_attempt", "run_started_at"}
@@ -157,7 +171,7 @@ def validate_artifacts(artifacts, context, labels):
 
 def verification_artifacts(artifacts, context):
     """Select one complete supported generation inventory, never mixed formats."""
-    schemas = (HOMEBREW_MANIFEST_VERSION,) if "channel" in context else (1, MANIFEST_VERSION)
+    schemas = (HOMEBREW_MANIFEST_VERSION, ROLLING_MANIFEST_VERSION) if "channel" in context else (1, INTEL_MANIFEST_VERSION, MANIFEST_VERSION)
     require(isinstance(artifacts, list) and any(len(artifacts) == len(MANIFEST_PAYLOADS[schema]) + 2 for schema in schemas),
             "missing, duplicate or unexpected artifacts")
     by_name = artifact_inventory(artifacts, context)
@@ -359,7 +373,7 @@ def main(argv=None):
             write_json(args.receipt, receipt)
             print(json.dumps(receipt, sort_keys=True))
         else:
-            schema = HOMEBREW_MANIFEST_VERSION if "channel" in context else MANIFEST_VERSION
+            schema = ROLLING_MANIFEST_VERSION if "channel" in context else MANIFEST_VERSION
             labels = list(MANIFEST_PAYLOADS[schema]) + (["checksums"] if args.command == "create" else [])
             artifacts = validate_artifacts(metadata, context, labels)
             if args.command == "create":

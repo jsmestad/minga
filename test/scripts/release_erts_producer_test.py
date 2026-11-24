@@ -274,7 +274,9 @@ class ProducerTest(unittest.TestCase):
             with self.subTest(arch=arch):
                 elf = (f"[Requesting program interpreter: {interpreter}]\n"
                        " (NEEDED) Shared library: [libc.so.6]\n")
-                trace = ("linux-vdso.so.1 (0x7000)\n"
+                # Ubuntu 24.04's ARM64 loader prints an unnamed map first.
+                trace = ("\t (0x0000ff6bf86a0000)\n"
+                         "linux-vdso.so.1 (0x7000)\n"
                          f"libc.so.6 => /lib/{arch}-linux-gnu/libc.so.6 (0x8000)\n"
                          f"{interpreter} (0x9000)\n")
                 commands = mock.Mock()
@@ -325,6 +327,8 @@ class ProducerTest(unittest.TestCase):
             (libc + "libcrypto.so.3 => /usr/lib/x86_64-linux-gnu/libcrypto.so.3 (0x2000)\n",
              "resolved an unqualified library"),
             ("linux-vdso.so.1 (0x3000)\n", "did not resolve all direct libraries"),
+            ("\t (0x3000)\n", "did not resolve all direct libraries"),
+            (libc + "\t => /opt/toolchain/libextra.so (0x2000)\n", "resolved an unqualified library"),
         ):
             with self.subTest(trace=trace):
                 commands = mock.Mock()

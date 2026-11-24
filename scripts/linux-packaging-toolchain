@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Print the installed versions of every tool that shapes Linux package bytes:
+# dpkg and tar for the .deb, rpm and libmagic (file classes) for the .rpm, and
+# both compressors. The publisher compares this record with the one from the
+# packaging job before it rebuilds and compares packages, so a tool update
+# reports as toolchain drift instead of an unexplained byte difference.
+set -euo pipefail
+
+. /etc/os-release
+printf 'os %s %s\n' "$ID" "$VERSION_ID"
+dpkg-query -W -f='${db:Status-Abbrev} ${Package} ${Version}\n' \
+  dpkg tar rpm 'librpm*' 'liblzma*' 'libzstd*' 'libmagic1*' |
+  awk '$1 == "ii" { print $2, $3 }' | sort

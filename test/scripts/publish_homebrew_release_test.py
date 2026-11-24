@@ -22,7 +22,13 @@ WRONG_SHA = "f" * 40
 RELEASE_ID = 47
 TUI = f"minga_{VERSION}_macos_aarch64.tar.gz"
 DMG = f"Minga_{VERSION}.dmg"
-PAYLOADS = {TUI: b"test TUI archive", DMG: b"test signed disk image"}
+LINUX = (f"minga_{VERSION}_linux_x86_64.tar.gz", f"minga_{VERSION}_linux_aarch64.tar.gz",
+         f"minga_{VERSION}_amd64.deb", f"minga_{VERSION}_arm64.deb",
+         f"minga-{VERSION}.x86_64.rpm", f"minga-{VERSION}.aarch64.rpm")
+PAYLOADS = {TUI: b"test TUI archive", DMG: b"test signed disk image",
+            **{name: f"test Linux package {name}".encode() for name in LINUX}}
+ALL = list(PAYLOADS)
+UPLOADS = [f"upload:{name}" for name in ALL]
 
 
 def release(draft=True, **fields):
@@ -96,9 +102,9 @@ def fixture_gh(args):
     if (method, endpoint) == ("GET", f"{RELEASES}/{RELEASE_ID}"):
         event("read-release-by-id")
         reply(200, current)
-    if (method, endpoint) == ("GET", f"{RELEASES}/{RELEASE_ID}/assets?per_page=3"):
+    if (method, endpoint) == ("GET", f"{RELEASES}/{RELEASE_ID}/assets?per_page={len(PAYLOADS) + 1}"):
         event(f"read-assets:{'draft' if current['draft'] else 'public'}:{len(assets)}")
-        reply(200, assets[:3])
+        reply(200, assets[:len(PAYLOADS) + 1])
     if (method, endpoint) == ("DELETE", f"{RELEASES}/assets/7"):
         event("delete-starter")
         assert current["draft"]
@@ -172,27 +178,28 @@ class PublishHomebrewReleaseTest(unittest.TestCase):
         result = self.run_publisher()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(f"https://github.com/{REPO}/releases/tag/{TAG}", result.stdout)
-        self.assertEqual(self.mutations(), ["create-draft", f"upload:{TUI}", f"upload:{DMG}", "publish"])
+        self.assertEqual(self.mutations(), ["create-draft", *UPLOADS, "publish"])
         state = self.state()
-        self.assertEqual(state["assets"], [asset(TUI), asset(DMG)])
+        self.assertEqual(state["assets"], [asset(name) for name in ALL])
         self.assertEqual(state["tag"], tag())
         events = state["events"]
-        start, confirm, publish = (events.index(item) for item in (f"upload:{DMG}", "read-assets:draft:2", "publish"))
+        start, confirm, publish = (events.index(item) for item in (UPLOADS[-1], f"read-assets:draft:{len(ALL)}", "publish"))
         self.assertLess(start, confirm)
         self.assertLess(confirm, publish)
         self.assertIn("read-tag", events[publish + 1:])
-        self.assertIn("read-assets:public:2", events[publish + 1:])
+        self.assertIn(f"read-assets:public:{len(ALL)}", events[publish + 1:])
 
         repeated = self.run_publisher()
         self.assertEqual(repeated.returncode, 0, repeated.stderr)
-        self.assertEqual(self.mutations(), ["create-draft", f"upload:{TUI}", f"upload:{DMG}", "publish"])
+        self.assertEqual(self.mutations(), ["create-draft", *UPLOADS, "publish"])
 
     def test_resumes_pinned_draft_and_uploads_only_the_missing_asset(self):
-        self.seed(release=release(), tag=tag(), assets=[asset(DMG)])
+        present = [asset(name) for name in ALL if name != TUI]
+        self.seed(release=release(), tag=tag(), assets=present)
         result = self.run_publisher()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.mutations(), [f"upload:{TUI}", "publish"])
-        self.assertEqual(self.state()["assets"], [asset(DMG), asset(TUI)])
+        self.assertEqual(self.state()["assets"], [*present, asset(TUI)])
 
     def test_rejects_wrong_or_annotated_tag_without_creating_a_release(self):
         for ref, message in ((tag(WRONG_SHA), "does not point to"), (tag(kind="tag"), "not a lightweight")):
@@ -212,7 +219,7 @@ class PublishHomebrewReleaseTest(unittest.TestCase):
             (release(), [asset(TUI, state="starter", digest=None)], "does not match"),
             (release(), [asset(TUI, digest=None)], "does not match"),
             (release(), [asset(TUI), asset(TUI)], "unexpected or duplicate"),
-            (release(), [asset(TUI), asset(DMG), asset("extra.txt", b"extra")], "unexpected or duplicate"),
+            (release(), [*map(asset, ALL), asset("extra.txt", b"extra")], "unexpected or duplicate"),
         ]
         for metadata, assets, message in cases:
             with self.subTest(metadata=metadata, assets=assets):
@@ -222,7 +229,8 @@ class PublishHomebrewReleaseTest(unittest.TestCase):
 
     def test_rejects_incomplete_or_conflicting_public_releases_without_writes(self):
         for assets, message in (([asset(TUI)], "missing required assets"),
-                                ([asset(TUI), asset(DMG, size=1)], "does not match")):
+                                ([asset(TUI), asset(DMG, size=1)], "does not match"),
+                                ([asset(name) for name in ALL if name != LINUX[0]], "missing required assets")):
             with self.subTest(assets=assets):
                 self.seed(release=release(draft=False), tag=tag(), assets=assets)
                 self.assert_failure(self.run_publisher(), message)
@@ -234,6 +242,7 @@ class PublishHomebrewReleaseTest(unittest.TestCase):
         state = self.state()
         self.assertTrue(state["release"]["draft"])
         self.assertEqual(state["assets"], [asset(TUI), asset(DMG, b"", state="starter", id=7, digest=None)])
+        remaining = [f"upload:{name}" for name in ALL[1:]]
         self.assertNotIn("publish", state["events"])
 
         state.pop("fail")
@@ -241,7 +250,7 @@ class PublishHomebrewReleaseTest(unittest.TestCase):
         self.seed(**state)
         recovered = self.run_publisher()
         self.assertEqual(recovered.returncode, 0, recovered.stderr)
-        self.assertEqual(self.mutations(), ["delete-starter", f"upload:{DMG}", "publish"])
+        self.assertEqual(self.mutations(), ["delete-starter", *remaining, "publish"])
 
     def test_successful_upload_request_does_not_prove_correct_remote_bytes(self):
         self.seed(upload_override={DMG: {"digest": "sha256:" + "0" * 64}})
@@ -254,7 +263,7 @@ class PublishHomebrewReleaseTest(unittest.TestCase):
         self.assert_failure(self.run_publisher(), "HTTP 403")
         state = self.state()
         self.assertTrue(state["release"]["draft"])
-        self.assertEqual(state["assets"], [asset(TUI), asset(DMG)])
+        self.assertEqual(state["assets"], [asset(name) for name in ALL])
 
     def test_successful_publish_request_does_not_prove_the_tag_sha(self):
         for ref, message in ((None, "HTTP 404"), (tag(WRONG_SHA), "does not point to")):
@@ -273,7 +282,7 @@ class PublishHomebrewReleaseTest(unittest.TestCase):
         self.assert_failure(self.run_publisher(sha=SHA[:12]), "SOURCE_SHA must be")
         self.assert_failure(self.run_publisher(GITHUB_REPOSITORY="elsewhere/minga"), "GITHUB_REPOSITORY must be")
         self.assert_failure(self.run_publisher(GH_TOKEN=""), "GH_TOKEN is required")
-        (self.bundle / DMG).unlink()
+        (self.bundle / LINUX[-1]).unlink()
         self.assert_failure(self.run_publisher(), "missing bundle asset")
         self.assertEqual(self.state()["events"], [])
 

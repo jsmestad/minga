@@ -51,7 +51,8 @@ class ReleaseCandidateTest(unittest.TestCase):
         self.metadata = []
         self.entries = {}
         self.builds = {}
-        for filename, target in candidate.PAYLOADS.items():
+        # Build facts cover the historical Intel payload too; only current payloads are uploaded.
+        for filename, target in candidate.INTEL_PAYLOADS.items():
             tools = {"elixir": "1.20.5-otp-29", "otp": "29.1.2", "go": go_version, "native_zig": "0.16.0"}
             ids = ["package-contents", "native-architecture", "package-boot"]
             if filename == "Minga.dmg":
@@ -68,7 +69,11 @@ class ReleaseCandidateTest(unittest.TestCase):
                 "evidence": [{"id": identity, "result": "passed"} for identity in ids],
             }
             self.builds[filename] = build
-            self.add_artifact(filename, [(filename, ("fixture final bytes: " + filename).encode()), (filename + ".build.json", json.dumps(build).encode())])
+            entries = [(filename, ("fixture final bytes: " + filename).encode()), (filename + ".build.json", json.dumps(build).encode())]
+            if filename in candidate.PAYLOADS:
+                self.add_artifact(filename, entries)
+            else:
+                self.entries[filename] = entries
         self.call("checksums", "--output", str(self.root / "SHA256SUMS.txt"), success=True)
         self.add_artifact("checksums", [("SHA256SUMS.txt", (self.root / "SHA256SUMS.txt").read_bytes())])
         self.call("create", "--output", str(self.root / "manifest.json"), success=True)
@@ -145,10 +150,10 @@ class ReleaseCandidateTest(unittest.TestCase):
         self.verify(success=True)
         receipt = json.loads((self.root / "receipt.json").read_text())
         self.assertEqual(receipt["handle"], {"manifest_artifact_id": self.handle_id, "manifest_sha256": self.handle_sha})
-        self.assertEqual(len(receipt["payloads"]), 5)
-        self.assertEqual(self.manifest["schema_version"], 2)
+        self.assertEqual(len(receipt["payloads"]), 4)
+        self.assertEqual(self.manifest["schema_version"], 5)
         self.assertEqual([item["filename"] for item in receipt["payloads"]], [
-            "Minga.dmg", "minga_macos_aarch64.tar.gz", "minga_macos_x86_64.tar.gz",
+            "Minga.dmg", "minga_macos_aarch64.tar.gz",
             "minga_linux_x86_64.tar.gz", "minga_linux_aarch64.tar.gz",
         ])
         for payload in receipt["payloads"]:
@@ -158,22 +163,45 @@ class ReleaseCandidateTest(unittest.TestCase):
         self.assertNotIn("handle", self.manifest)
         self.assertLess((self.root / "receipt.json").stat().st_size, 8192)
 
-    def test_rolling_homebrew_round_trip_cannot_substitute_a_stable_inventory(self):
+    def prepare_rolling(self, names, schema):
+        """Upload rolling payloads and the checksums a producer of that schema writes."""
         self.context.update(channel="homebrew", version="0.1.0-dev.10", source_sha=self.context["workflow_sha"])
         self.metadata.clear()
-        names = ("Minga.dmg", "minga_macos_aarch64.tar.gz")
         for name in names:
             self.builds[name]["context"] = dict(self.context)
             self.add_artifact(name, [self.entries[name][0], (name + ".build.json", json.dumps(self.builds[name]).encode())])
-        self.call("checksums", "--output", str(self.root / "SHA256SUMS.txt"), success=True)
-        self.add_artifact("checksums", [("SHA256SUMS.txt", (self.root / "SHA256SUMS.txt").read_bytes())])
+        artifacts = dict(zip(names, self.metadata))
+        pins = candidate.read_toolchains(self.source_tool_versions)
+        checksums = candidate.checksum_bytes(candidate.payload_descriptors(self.context, artifacts, self.downloads, schema, pins))
+        self.add_artifact("checksums", [("SHA256SUMS.txt", checksums)])
+        artifacts["checksums"] = self.metadata[-1]
+        return candidate.candidate_manifest(self.context, artifacts, self.downloads, schema, pins)
+
+    def test_rolling_round_trip_carries_linux_and_cannot_substitute_a_stable_inventory(self):
+        names = ("Minga.dmg", "minga_macos_aarch64.tar.gz", "minga_linux_x86_64.tar.gz", "minga_linux_aarch64.tar.gz")
+        self.prepare_rolling(names, candidate.ROLLING_MANIFEST_VERSION)
         self.call("create", "--output", str(self.root / "manifest.json"), success=True)
         self.install_manifest((self.root / "manifest.json").read_bytes())
         self.verify(success=True)
-        self.assertEqual(self.manifest["schema_version"], 3)
+        self.assertEqual(self.manifest["schema_version"], 4)
         self.assertEqual([item["filename"] for item in self.manifest["payloads"]], list(names))
+        # Rolling and stable inventories share file names; each build's facts bind the rolling context.
         del self.context["channel"]
-        self.reject("missing, duplicate or unexpected artifacts")
+        self.reject("wrong build provenance")
+
+    def test_rolling_creation_requires_the_linux_payloads(self):
+        self.prepare_rolling(("Minga.dmg", "minga_macos_aarch64.tar.gz"), candidate.HOMEBREW_MANIFEST_VERSION)
+        for command in ("checksums", "create"):
+            with self.subTest(command=command):
+                result = self.call(command, "--output", str(self.root / f"{command}.out"))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("missing, duplicate or unexpected artifacts", result.stderr)
+
+    def test_apple_silicon_only_rolling_manifests_still_verify(self):
+        manifest = self.prepare_rolling(("Minga.dmg", "minga_macos_aarch64.tar.gz"), candidate.HOMEBREW_MANIFEST_VERSION)
+        self.install_manifest(json.dumps(manifest).encode())
+        self.verify(success=True)
+        self.assertEqual(self.manifest["schema_version"], 3)
 
     def test_unexpired_candidates_use_their_source_generation_pins(self):
         self.verify(success=True)
@@ -192,6 +220,27 @@ class ReleaseCandidateTest(unittest.TestCase):
         self.reject("missing source toolchain pins")
         self.source_tool_versions.write_text(original + "golang 1.26.4\n")
         self.reject("invalid or duplicate source toolchain pin")
+
+    def test_verifies_historical_intel_inventory_without_creating_one(self):
+        self.metadata.clear()
+        names = list(candidate.INTEL_PAYLOADS)
+        for name in names:
+            self.add_artifact(name, self.entries[name])
+        artifacts = dict(zip(names, self.metadata))
+        pins = candidate.read_toolchains(self.source_tool_versions)
+        schema = candidate.INTEL_MANIFEST_VERSION
+        checksums = candidate.checksum_bytes(candidate.payload_descriptors(self.context, artifacts, self.downloads, schema, pins))
+        self.add_artifact("checksums", [("SHA256SUMS.txt", checksums)])
+        artifacts["checksums"] = self.metadata[-1]
+        self.install_manifest(json.dumps(candidate.candidate_manifest(self.context, artifacts, self.downloads, schema, pins)).encode())
+        self.verify(success=True)
+        self.assertEqual(self.manifest["schema_version"], 2)
+        self.assertIn("minga_macos_x86_64.tar.gz", [item["filename"] for item in self.manifest["payloads"]])
+        for command in ("checksums", "create"):
+            with self.subTest(command=command):
+                result = self.call(command, "--output", str(self.root / f"{command}.out"))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("missing, duplicate or unexpected artifacts", result.stderr)
 
     def test_verifies_historical_wrapper_manifest_without_creating_one(self):
         # Reproduce the previous on-wire manifest and checksum order independently
@@ -223,7 +272,7 @@ class ReleaseCandidateTest(unittest.TestCase):
         self.add_artifact("checksums", [("SHA256SUMS.txt", checksums)])
         result = self.call("create", "--output", str(self.root / "legacy.json"))
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("artifact inventory", result.stderr)
+        self.assertIn("missing, duplicate or unexpected artifacts", result.stderr)
         manifest = {
             "schema_version": 1, "context": self.context, "payloads": descriptors,
             "checksums": {"filename": "SHA256SUMS.txt", "size": len(checksums),
@@ -304,7 +353,8 @@ class ReleaseCandidateTest(unittest.TestCase):
 
     def test_unexpected_artifact_fails(self):
         self.add_artifact("surprise", [("surprise", b"not a candidate")])
-        self.reject("unexpected artifacts")
+        # The extra artifact gives the historical Intel inventory's count, so names decide.
+        self.reject("wrong generation or artifact inventory")
 
     def test_mixed_attempt_name_fails(self):
         self.metadata[0]["name"] = self.metadata[0]["name"].replace("-123-2-", "-123-1-")

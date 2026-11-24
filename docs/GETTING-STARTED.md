@@ -15,6 +15,25 @@ brew install jsmestad/minga/minga            # Installs the minga terminal comma
 
 Open the GUI from Applications or run `open -a Minga`. Run `minga` for the terminal client. Update rolling prereleases with `brew upgrade minga` or `brew upgrade --cask minga-mac`.
 
+### Linux (packages)
+
+The terminal client ships for x86_64 and ARM64 Linux with glibc 2.39 or newer: Ubuntu 24.04 and later, Debian 13 and later, current Fedora, and Arch. Each package carries its own Erlang runtime under `/usr/lib/minga` and puts `minga` on your `PATH`.
+
+On Arch, install `minga-bin` from the AUR with your helper of choice. It downloads the release tarball and checks its SHA-256 before installing:
+
+```bash
+yay -S minga-bin
+```
+
+On Ubuntu, Debian, or Fedora, download the `.deb` or `.rpm` for your architecture from the newest [release](https://github.com/jsmestad/minga/releases) and install it with your package manager:
+
+```bash
+sudo apt install ./minga_<version>_amd64.deb     # Ubuntu and Debian
+sudo dnf install ./minga-<version>.x86_64.rpm    # Fedora
+```
+
+Every push to `main` publishes a new rolling build. The AUR package updates with it; for the `.deb` and `.rpm`, install a newer download the same way to upgrade.
+
 ### From source
 
 You need Erlang, Elixir, Go, and Zig. A version manager such as [asdf](https://asdf-vm.com/) or [mise](https://mise.jdx.dev/) installs the exact versions pinned in `.tool-versions`:
@@ -37,7 +56,7 @@ make native.support   # Builds the Zig tree-sitter parser and helper binaries
 
 The first build takes a few minutes while Zig compiles 50 tree-sitter grammars. Rebuilds after that are incremental.
 
-Use the source build on Linux, on Intel Macs, or when developing Minga itself.
+Use the source build on Linux distributions older than the packages support, on Intel Macs, or when developing Minga itself.
 
 ## Launch
 

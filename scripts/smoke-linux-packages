@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Install the x86_64 Linux packages on clean distribution containers, run
+# `minga --version` from PATH, and remove them again.
+#
+# Usage: scripts/smoke-linux-packages DIR VERSION
+#
+# DIR must hold, for release VERSION:
+#   minga_VERSION_amd64.deb, minga-VERSION.x86_64.rpm,
+#   minga_VERSION_linux_x86_64.tar.gz, LICENSE-VERSION and the rendered PKGBUILD.
+# The Arch case builds the PKGBUILD with makepkg, which uses the local tarball
+# and LICENSE instead of downloading them and still checks their SHA-256.
+set -euo pipefail
+
+if [[ $# -ne 2 ]]; then
+  echo "usage: $0 DIR VERSION" >&2
+  exit 2
+fi
+dir=$(cd "$1" && pwd)
+version=$2
+
+check='out=$(cd / && minga --version) && [ "$out" = "minga $VERSION" ] || { echo "unexpected minga --version output: ${out:-}" >&2; exit 1; }'
+removed='if [ -e /usr/lib/minga ] || [ -e /usr/bin/minga ]; then echo "package removal left files behind" >&2; exit 1; fi'
+
+run() {
+  local image=$1 script=$2
+  echo "::group::$image"
+  docker run --rm --platform linux/amd64 -v "$dir:/packages:ro" -e VERSION="$version" "$image" \
+    bash -euo pipefail -c "$script"
+  echo "::endgroup::"
+  echo "passed: $image"
+}
+
+for image in ubuntu:24.04 debian:13; do
+  run "$image" "
+    apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /packages/minga_\${VERSION}_amd64.deb
+    $check
+    apt-get remove -y -qq minga
+    $removed"
+done
+
+run fedora:latest "
+  dnf install -y -q /packages/minga-\${VERSION}.x86_64.rpm
+  $check
+  dnf remove -y -q minga
+  $removed"
+
+run archlinux:base-devel "
+  useradd -m builder
+  install -d -o builder /home/builder/build
+  cp /packages/PKGBUILD /packages/LICENSE-\$VERSION /packages/minga_\${VERSION}_linux_x86_64.tar.gz /home/builder/build/
+  chown -R builder /home/builder/build
+  cd /home/builder/build
+  runuser -u builder -- makepkg --noconfirm
+  pacman -U --noconfirm minga-bin-*-x86_64.pkg.tar.zst
+  $check
+  pacman -R --noconfirm minga-bin
+  $removed"

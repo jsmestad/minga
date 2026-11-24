@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish the two verified Apple Silicon Homebrew assets as a rolling prerelease."""
+"""Publish the verified rolling macOS and Linux assets as a prerelease."""
 
 import argparse
 import hashlib
@@ -85,9 +85,19 @@ def check_tag(tag, sha, *, missing_ok=False):
     require(ref["object"]["sha"] == sha, f"tag {tag} does not point to {sha}")
 
 
+def release_assets(version):
+    """Every asset a rolling release carries; a release with any other asset is rejected."""
+    return (
+        f"minga_{version}_macos_aarch64.tar.gz", f"Minga_{version}.dmg",
+        f"minga_{version}_linux_x86_64.tar.gz", f"minga_{version}_linux_aarch64.tar.gz",
+        f"minga_{version}_amd64.deb", f"minga_{version}_arm64.deb",
+        f"minga-{version}.x86_64.rpm", f"minga-{version}.aarch64.rpm",
+    )
+
+
 def local_assets(bundle, version):
     assets = {}
-    for name in (f"minga_{version}_macos_aarch64.tar.gz", f"Minga_{version}.dmg"):
+    for name in release_assets(version):
         path = bundle / name
         require(path.is_file(), f"missing bundle asset: {path}")
         with path.open("rb") as file:
@@ -98,8 +108,8 @@ def local_assets(bundle, version):
 
 
 def missing_assets(release_id, expected, *, draft_tag=None, sha=None):
-    # Three results are sufficient to detect extras; only two assets are allowed.
-    assets = api(f"{RELEASES}/{release_id}/assets?per_page=3")
+    # One result more than the expected inventory is sufficient to detect extras.
+    assets = api(f"{RELEASES}/{release_id}/assets?per_page={len(expected) + 1}")
     require(isinstance(assets, list), f"invalid asset inventory for release {release_id}")
     seen = set()
     starters = []
@@ -140,7 +150,7 @@ def publish(bundle, version, sha):
         check_tag(tag, sha, missing_ok=True)
         gh(
             "release", "create", tag, "--repo", f"github.com/{REPO}", "--target", sha,
-            "--title", f"Minga {version}", "--notes", f"Rolling Homebrew build from `{sha}`.",
+            "--title", f"Minga {version}", "--notes", f"Rolling build from `{sha}`.",
             "--draft", "--prerelease", "--latest=false",
         )
         release = draft_release(tag)

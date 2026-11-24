@@ -103,8 +103,12 @@ jobs:
               "test/scripts/release_candidate_test.py",
               "scripts/render-tui-formula",
               "test/scripts/render_tui_formula_test.py",
-              "scripts/build-tui-deb",
-              "test/scripts/build_tui_deb_test.py",
+              "scripts/build-tui-packages",
+              "test/scripts/build_tui_packages_test.py",
+              "scripts/render-aur-pkgbuild",
+              "test/scripts/render_aur_pkgbuild_test.py",
+              "scripts/smoke-linux-packages",
+              "scripts/linux-packaging-toolchain",
           ]
 
           def changed_paths(revision_range):
@@ -811,7 +815,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-15, macos-15-intel, ubuntu-24.04, ubuntu-24.04-arm]
+        runner: [macos-15, ubuntu-24.04, ubuntu-24.04-arm]
     steps:
       - uses: actions/checkout@v4
       - name: Read pinned release Python
@@ -844,10 +848,16 @@ jobs:
           python3 test/scripts/release_contents_test.py
           python3 test/scripts/release_candidate_test.py
           python3 -B test/scripts/render_tui_formula_test.py
+          python3 -B test/scripts/render_aur_pkgbuild_test.py
           bash -n scripts/qualify-homebrew-upgrade
-      - name: Verify Debian package assembly
+          bash -n scripts/smoke-linux-packages
+          bash -n scripts/linux-packaging-toolchain
+      - name: Verify Debian and RPM package assembly
         if: runner.os == 'Linux'
-        run: python3 -B test/scripts/build_tui_deb_test.py
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends rpm rpm2cpio cpio
+          python3 -B test/scripts/build_tui_packages_test.py
       - name: Verify Homebrew promotion without publication credentials
         if: runner.os == 'Linux'
         run: python3 -B -m unittest discover -s test/scripts -p '*homebrew*test.py'
