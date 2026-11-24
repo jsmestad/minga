@@ -1061,6 +1061,21 @@ defmodule MingaAgent.Providers.Native do
     {:reply, {:error, "Cannot compact while streaming"}, state}
   end
 
+  # Internal maintenance compaction called by the loop Task between tool rounds.
+  # Bypasses the streaming guard because the Task itself is the streamer and needs
+  # proactive compaction to keep the next request within the context budget.
+  def handle_call({:maintenance_compact, messages}, _from, state) when is_list(messages) do
+    context = Context.new(messages)
+
+    result =
+      case dispatch_pre_compact(context, state.config) do
+        :ok -> dispatch_compact(context, state)
+        {:error, _result} -> {:error, "compaction blocked by hook"}
+      end
+
+    {:reply, result, state}
+  end
+
   def handle_call({:compact, messages, opts}, _from, state)
       when is_list(messages) and is_list(opts) do
     threshold = Keyword.get(opts, :threshold, state.config.compaction_threshold)
@@ -2165,6 +2180,7 @@ defmodule MingaAgent.Providers.Native do
     updated_context = Context.append(context, assistant_message)
     normalized = normalize_usage(usage, lctx.selection)
     report_turn_cost(lctx, normalized)
+    emit_reported_context_usage(lctx, normalized)
     outcome = Outcome.new(lctx.request, updated_context.messages)
     emit(lctx, %Event.AgentEnd{usage: normalized, outcome: outcome})
     :ok
@@ -2183,6 +2199,7 @@ defmodule MingaAgent.Providers.Native do
     normalized = normalize_usage(usage, lctx.selection)
     turn_cost = turn_cost_from_usage(normalized)
     report_turn_cost(lctx, normalized)
+    emit_reported_context_usage(lctx, normalized)
 
     with {:ok, checkpoint_id} <-
            checkpoint_tool_group(lctx, updated_context.messages, tool_calls),
@@ -2194,7 +2211,23 @@ defmodule MingaAgent.Providers.Native do
           session_cost: lctx.session_cost + turn_cost
       }
 
-      run_agent_loop(lctx, {:checkpoint, checkpoint_id})
+      # AC3: Check if maintenance compaction is needed before the next turn.
+      # One check per tool round; completed effects are already persisted.
+      # Pass the pre-tool context so the check can skip the Session call when
+      # the conversation is well under budget.
+      case check_maintenance_budget(lctx, context) do
+        :continue ->
+          run_agent_loop(lctx, {:checkpoint, checkpoint_id})
+
+        {:compacted, summary} ->
+          emit(lctx, %Event.SystemMessage{message: summary, level: :info})
+          run_agent_loop(lctx, {:checkpoint, checkpoint_id})
+
+        {:overflow, message} ->
+          emit(lctx, %Event.TextDelta{delta: "\n\n" <> message})
+          emit(lctx, %Event.AgentEnd{usage: nil})
+          {:error, {:reported, :context_overflow}}
+      end
     else
       {:error, reason} ->
         reported_error(lctx, "Durable tool execution failed: #{inspect(reason)}", reason)
@@ -3023,6 +3056,96 @@ defmodule MingaAgent.Providers.Native do
       {:error, HookResult.dispatch_error(inspect(reason))}
   end
 
+  # ── Maintenance compaction (between tool rounds) ────────────────────────────
+
+  # Fraction of context budget that triggers proactive compaction between tool
+  # rounds. Using the same 80% threshold as the UI compaction warning.
+  @maintenance_threshold 0.80
+
+  @spec check_maintenance_budget(loop_ctx(), Context.t()) ::
+          :continue | {:compacted, String.t()} | {:overflow, String.t()}
+  defp check_maintenance_budget(lctx, pre_tool_context) do
+    limit = lctx.selection.policy.limits.context
+
+    if is_nil(limit) or limit <= 0,
+      do: :continue,
+      else: do_maintenance_check(lctx, limit, pre_tool_context)
+  end
+
+  @spec do_maintenance_check(loop_ctx(), pos_integer(), Context.t()) ::
+          :continue | {:compacted, String.t()} | {:overflow, String.t()}
+  defp do_maintenance_check(lctx, limit, pre_tool_context) do
+    # Quick heuristic: if the pre-tool estimate is under half the threshold,
+    # tool results cannot push the conversation over 80%. Skip the Session call.
+    pre_estimate = TokenEstimator.estimate(pre_tool_context.messages)
+    half_threshold = limit * @maintenance_threshold * 0.5
+
+    if pre_estimate < half_threshold do
+      :continue
+    else
+      messages = GenServer.call(lctx.session_pid, :messages, 5_000)
+      estimated = TokenEstimator.estimate(messages)
+
+      if estimated > limit * @maintenance_threshold do
+        try_maintenance_compact(lctx, messages, estimated, limit)
+      else
+        :continue
+      end
+    end
+  catch
+    :exit, _reason -> :continue
+  end
+
+  @spec try_maintenance_compact(
+          loop_ctx(),
+          [ReqLLM.Message.t()],
+          non_neg_integer(),
+          pos_integer()
+        ) ::
+          :continue | {:compacted, String.t()} | {:overflow, String.t()}
+  defp try_maintenance_compact(lctx, messages, estimated, limit) do
+    case GenServer.call(lctx.provider_pid, {:maintenance_compact, messages}, 60_000) do
+      {:ok, compacted_messages, summary} ->
+        case install_maintenance_compact(lctx, compacted_messages, summary) do
+          :ok -> {:compacted, summary}
+          {:error, _reason} -> maintenance_overflow_check(estimated, limit)
+        end
+
+      {:error, _reason} ->
+        maintenance_overflow_check(estimated, limit)
+    end
+  catch
+    :exit, _reason -> maintenance_overflow_check(estimated, limit)
+  end
+
+  @spec install_maintenance_compact(loop_ctx(), [ReqLLM.Message.t()], String.t()) ::
+          :ok | {:error, term()}
+  defp install_maintenance_compact(lctx, messages, summary) do
+    GenServer.call(
+      lctx.session_pid,
+      {:install_maintenance_compact, lctx.request.request_id, messages, summary},
+      30_000
+    )
+  catch
+    :exit, _reason -> {:error, :session_unavailable}
+  end
+
+  @spec maintenance_overflow_check(non_neg_integer(), pos_integer()) ::
+          :continue | {:overflow, String.t()}
+  defp maintenance_overflow_check(estimated, limit) do
+    if estimated > limit do
+      {:overflow, context_overflow_message(estimated, limit)}
+    else
+      :continue
+    end
+  end
+
+  @spec context_overflow_message(non_neg_integer(), pos_integer()) :: String.t()
+  defp context_overflow_message(estimated, limit) do
+    "Context exceeds the model's input budget (estimated #{format_tokens(estimated)} tokens vs #{format_tokens(limit)} limit). " <>
+      "The conversation is too large to compact further. Start a new session or remove large tool outputs."
+  end
+
   # ── Compaction dispatch ─────────────────────────────────────────────────────
 
   @spec dispatch_compact(Context.t(), state()) ::
@@ -3667,9 +3790,27 @@ defmodule MingaAgent.Providers.Native do
 
     emit(lctx, %Event.ContextUsage{
       estimated_tokens: estimated,
-      context_limit: lctx.selection.policy.limits.context
+      context_limit: lctx.selection.policy.limits.context,
+      reported_tokens: nil,
+      estimation_method: :estimated
     })
   end
+
+  # Emits a context usage event with provider-reported input tokens from the turn response.
+  @spec emit_reported_context_usage(loop_ctx(), Event.token_usage() | nil) :: :ok
+  defp emit_reported_context_usage(_lctx, nil), do: :ok
+
+  defp emit_reported_context_usage(lctx, %MingaAgent.TurnUsage{input: input})
+       when is_integer(input) and input > 0 do
+    emit(lctx, %Event.ContextUsage{
+      estimated_tokens: input,
+      context_limit: lctx.selection.policy.limits.context,
+      reported_tokens: input,
+      estimation_method: :reported
+    })
+  end
+
+  defp emit_reported_context_usage(_lctx, _usage), do: :ok
 
   @spec emit_error_and_end(loop_ctx(), Event.Error.t()) :: :ok
   defp emit_error_and_end(lctx, %Event.Error{} = event) do

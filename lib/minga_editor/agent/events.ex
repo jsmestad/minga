@@ -141,6 +141,14 @@ defmodule MingaEditor.Agent.Events do
   def dispatch(
         %EditorState{} = state,
         _session_pid,
+        {:context_usage, estimated_tokens, context_limit, _reported_tokens, _estimation_method}
+      ),
+      do: StatusEventWorkflow.context_usage(state, estimated_tokens, context_limit)
+
+  # Backward compatibility for persisted event records that use the 3-element tuple.
+  def dispatch(
+        %EditorState{} = state,
+        _session_pid,
         {:context_usage, estimated_tokens, context_limit}
       ),
       do: StatusEventWorkflow.context_usage(state, estimated_tokens, context_limit)

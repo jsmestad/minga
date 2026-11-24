@@ -96,7 +96,8 @@ defmodule MingaEditor.Remote.EventReplay do
 
   def to_agent_event(%EventRecord{event_type: :context_usage, payload: payload}) do
     {:context_usage, integer_payload(payload, "estimated_tokens"),
-     integer_payload(payload, "context_limit")}
+     integer_payload(payload, "context_limit"),
+     optional_integer_payload(payload, "reported_tokens"), estimation_method_payload(payload)}
   end
 
   def to_agent_event(%EventRecord{event_type: :turn_limit_reached, payload: payload}) do
@@ -244,6 +245,34 @@ defmodule MingaEditor.Remote.EventReplay do
     case Integer.parse(value) do
       {int, ""} -> int
       _ -> 0
+    end
+  end
+
+  @spec optional_integer_payload(map(), String.t()) :: non_neg_integer() | nil
+  defp optional_integer_payload(payload, key) do
+    case payload_value(payload, key) do
+      value when is_integer(value) -> value
+      value when is_binary(value) -> parse_optional_integer(value)
+      _ -> nil
+    end
+  end
+
+  @spec parse_optional_integer(String.t()) :: non_neg_integer() | nil
+  defp parse_optional_integer(value) do
+    case Integer.parse(value) do
+      {int, ""} -> int
+      _ -> nil
+    end
+  end
+
+  @spec estimation_method_payload(map()) :: :estimated | :reported | :unknown
+  defp estimation_method_payload(payload) do
+    case payload_value(payload, "estimation_method") do
+      "estimated" -> :estimated
+      "reported" -> :reported
+      :estimated -> :estimated
+      :reported -> :reported
+      _ -> :unknown
     end
   end
 end

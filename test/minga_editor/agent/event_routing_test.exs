@@ -517,7 +517,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
           )
       }
 
-      state = Events.dispatch(state, session, {:context_usage, 95, 100})
+      state = Events.dispatch(state, session, {:context_usage, 95, 100, nil, :estimated})
       assert state.workspace.agent_ui.view.compaction.execution == {:deferred, 95}
       assert state.workspace.agent_ui.view.compaction.threshold == :fresh
     end
