@@ -446,19 +446,28 @@ defmodule Minga.Buffer do
   @spec acknowledge_disk_change(t()) :: :ok
   defdelegate acknowledge_disk_change(server), to: BufferProcess
 
-  @doc "Find and replace the first occurrence of `old_text` with `new_text`."
-  @spec find_and_replace(t(), String.t(), String.t(), boundary()) ::
+  @doc "Find and replace the first occurrence of `old_text` with `new_text`, attributed to `source`."
+  @spec find_and_replace(
+          t(),
+          String.t(),
+          String.t(),
+          Minga.Buffer.State.edit_source(),
+          boundary()
+        ) ::
           {:ok, String.t()} | {:error, String.t()}
-  defdelegate find_and_replace(server, old_text, new_text, boundary \\ nil), to: BufferProcess
+  defdelegate find_and_replace(server, old_text, new_text, source, boundary \\ nil),
+    to: BufferProcess
 
-  @doc "Validates the full source revision and commits an entire file mutation as one undo entry."
+  @doc "Validates the full source revision and commits an entire file mutation as one undo entry attributed to `source`."
   @spec conditional_mutate(
           t(),
           FileMutation.expectation(),
           FileMutation.operation(),
-          FileMutation.identity()
+          FileMutation.identity(),
+          Minga.Buffer.State.edit_source()
         ) :: {:ok, FileMutation.Receipt.t()} | {:error, term()}
-  defdelegate conditional_mutate(server, expected, operation, identity), to: BufferProcess
+  defdelegate conditional_mutate(server, expected, operation, identity, source),
+    to: BufferProcess
 
   @doc "Publishes a fork deletion only while its original parent content is current, retaining the open buffer."
   @spec publish_fork_deletion(

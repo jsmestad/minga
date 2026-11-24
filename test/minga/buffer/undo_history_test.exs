@@ -235,6 +235,26 @@ defmodule Minga.Buffer.UndoHistoryTest do
                {:error, :patch_mismatch}
     end
 
+    test "treats Minga-attributed entries as agent entries, across tasks and steps" do
+      step_one = {:minga, "task-1", "call-1"}
+      other_task = {:minga, "task-2", "call-9"}
+
+      history =
+        UndoHistory.new()
+        |> force(0, "", "user typed", :user)
+        |> force(1, "user typed", "user typed\none", step_one)
+        |> force(2, "user typed\none", "user typed\none\ntwo", other_task)
+
+      assert UndoHistory.last_undo_source(history) == other_task
+
+      assert {:ok, restore, new_history, 2} =
+               UndoHistory.undo_agent_session(history, 3, doc("user typed\none\ntwo"))
+
+      assert Document.content(restore.document) == "user typed"
+      assert UndoHistory.last_undo_source(new_history) == :user
+      assert UndoHistory.last_redo_source(new_history) == step_one
+    end
+
     test "undoes single agent entry" do
       history = force(UndoHistory.new(), 0, "original", "agent modified", :agent)
 

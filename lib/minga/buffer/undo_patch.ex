@@ -7,6 +7,7 @@ defmodule Minga.Buffer.UndoPatch do
 
   alias Minga.Buffer.Document
   alias Minga.Buffer.EditDelta
+  alias Minga.Core.Diff
   alias Minga.Core.Unicode
 
   @enforce_keys [:start_byte, :old_text, :new_text, :cursor]
@@ -76,6 +77,119 @@ defmodule Minga.Buffer.UndoPatch do
       new_text: changed_fragment(new_document, start_byte, new_size - start_byte - suffix_size),
       cursor: Document.cursor(old_document)
     }
+  end
+
+  @doc """
+  Builds one patch per changed region between two document versions, ordered for one batch history entry.
+
+  Regions come from `Minga.Core.Diff.diff_lines/2` over lines that keep their newline, so every patch covers whole lines, the unchanged lines between two regions stay out of every patch, and the patches rebuild the content of `new_document` exactly. Each patch restores the cursor of `old_document`, as `from_documents/2` does.
+
+  The region nearest the start of the document comes first, the order `Minga.Buffer.UndoHistory.record_edit_batch/5` expects for a batch whose regions were applied from the end of the document to its start. Returns `[]` when both documents hold the same content.
+
+  The cost stays bounded. Leading and trailing lines the documents share are skipped before diffing. The line diff costs time proportional to the remaining line count times the number of differing lines, so when a lower bound of that product (the remaining line count times the lines one side holds and the other lacks) exceeds a fixed budget, as in a rewrite or reindent of a large file, the remaining span becomes one region instead. A few distant edits in a large file stay separate regions.
+  """
+  @spec changes(Document.t(), Document.t()) :: [t()]
+  def changes(%Document{} = old_document, %Document{} = new_document) do
+    old_content = Document.content(old_document)
+    new_content = Document.content(new_document)
+    {old_lines, old_offsets} = line_index(old_content)
+    {new_lines, new_offsets} = line_index(new_content)
+    cursor = Document.cursor(old_document)
+
+    {prefix, old_middle, new_middle} = trim_shared_lines(old_lines, new_lines)
+
+    old_middle
+    |> middle_regions(new_middle)
+    |> Enum.map(fn {old_start, old_count, new_start, new_count} ->
+      replacement(
+        elem(old_offsets, prefix + old_start),
+        line_range(old_content, old_offsets, prefix + old_start, old_count),
+        line_range(new_content, new_offsets, prefix + new_start, new_count),
+        cursor
+      )
+    end)
+  end
+
+  # Upper bound on (remaining lines) x (differing lines) for one line diff, about a tenth of a
+  # second of `List.myers_difference/2` work.
+  @diff_budget 1_000_000
+
+  # Regions as `{old_start, old_count, new_start, new_count}` line ranges within the middles.
+  @spec middle_regions([binary()], [binary()]) :: [
+          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
+        ]
+  defp middle_regions([], []), do: []
+
+  defp middle_regions(old_middle, new_middle) do
+    old_count = length(old_middle)
+    new_count = length(new_middle)
+
+    if (old_count + new_count) * unmatched_lines(old_middle, new_middle) > @diff_budget do
+      [{0, old_count, 0, new_count}]
+    else
+      old_middle
+      |> Diff.diff_lines(new_middle)
+      |> Enum.map(&{&1.old_start, &1.old_count, &1.start_line, &1.count})
+    end
+  end
+
+  # Drops the leading and trailing lines both sides share, returning how many leading lines were
+  # dropped and the two remaining middles.
+  @spec trim_shared_lines([binary()], [binary()]) :: {non_neg_integer(), [binary()], [binary()]}
+  defp trim_shared_lines(old_lines, new_lines) do
+    {prefix, old_rest, new_rest} = drop_shared(old_lines, new_lines, 0)
+
+    {_suffix, old_middle, new_middle} =
+      drop_shared(Enum.reverse(old_rest), Enum.reverse(new_rest), 0)
+
+    {prefix, Enum.reverse(old_middle), Enum.reverse(new_middle)}
+  end
+
+  @spec drop_shared([binary()], [binary()], non_neg_integer()) ::
+          {non_neg_integer(), [binary()], [binary()]}
+  defp drop_shared([line | old_rest], [line | new_rest], count),
+    do: drop_shared(old_rest, new_rest, count + 1)
+
+  defp drop_shared(old_lines, new_lines, count), do: {count, old_lines, new_lines}
+
+  # Lines one side holds more often than the other. Every such line is deleted or inserted by any
+  # line diff, so the count is a lower bound on the number of differing lines.
+  @spec unmatched_lines([binary()], [binary()]) :: non_neg_integer()
+  defp unmatched_lines(old_middle, new_middle) do
+    counts = Enum.frequencies(old_middle)
+
+    counts =
+      Enum.reduce(new_middle, counts, fn line, acc -> Map.update(acc, line, -1, &(&1 - 1)) end)
+
+    Enum.reduce(counts, 0, fn {_line, count}, sum -> sum + abs(count) end)
+  end
+
+  # Splits content into lines that keep their newline, as sub-binaries of `content`, and returns
+  # the byte offset of every line start followed by the content size, so line `i` spans
+  # `elem(offsets, i)` up to `elem(offsets, i + 1)`.
+  @spec line_index(binary()) :: {[binary()], tuple()}
+  defp line_index(content) do
+    size = byte_size(content)
+    line_ends = for {position, 1} <- :binary.matches(content, "\n"), do: position + 1
+
+    boundaries =
+      case List.last(line_ends, 0) do
+        ^size -> [0 | line_ends]
+        _last -> [0 | line_ends] ++ [size]
+      end
+
+    lines =
+      boundaries
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.map(fn [from, to] -> binary_part(content, from, to - from) end)
+
+    {lines, List.to_tuple(boundaries)}
+  end
+
+  @spec line_range(binary(), tuple(), non_neg_integer(), non_neg_integer()) :: binary()
+  defp line_range(content, offsets, first_line, line_count) do
+    from = elem(offsets, first_line)
+    binary_part(content, from, elem(offsets, first_line + line_count) - from)
   end
 
   @spec changed_fragment(Document.t(), non_neg_integer(), non_neg_integer()) :: byte_fragment()

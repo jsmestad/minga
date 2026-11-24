@@ -41,6 +41,10 @@ defmodule Minga.Session.EventRecorder.EventRecord do
     "agent:#{inspect(session_pid)}:#{tool_call_id}"
   end
 
+  def encode_source({:minga, task_id, step}) do
+    "minga:#{task_id}:#{step}"
+  end
+
   def encode_source({:lsp, server_name}) do
     "lsp:#{server_name}"
   end

@@ -134,7 +134,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
         {:ok, spec, _registration, _declaration} =
           GenServer.call(Process.get(:native_provider), {:resolve_local_tool, invocation.name})
 
-        GenServer.reply(from, {:ok, spec, store})
+        GenServer.reply(from, {:ok, spec, store, "test-task"})
         provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from,

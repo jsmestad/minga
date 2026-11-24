@@ -34,7 +34,8 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
            project_view: ProjectView.t() | nil,
            open_buffer_route: open_buffer_route(),
            relative_path: String.t(),
-           real_path: String.t()
+           real_path: String.t(),
+           edit_source: Minga.Buffer.EditSource.undo_source()
          }
   # The content the language server computed the edit positions against.
   @typep baseline :: {:disk, String.t()} | {:live_buffer, binary()}
@@ -67,7 +68,7 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
   def apply(documents, client, encoding, %ToolContext{} = context) do
     case contain(documents, context.project_root) do
       {:ok, contained} ->
-        apply_contained(contained, client, encoding, context.router_context.project_view)
+        apply_contained(contained, client, encoding, context.router_context)
 
       {:error, refusals} ->
         {0, 0, [refusal_summary() | refusals]}
@@ -78,9 +79,10 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
           [contained()],
           pid(),
           Minga.LSP.PositionEncoding.encoding(),
-          ProjectView.t() | nil
+          MingaAgent.ToolRouter.Context.t()
         ) :: result()
-  defp apply_contained(contained, client, encoding, project_view) do
+  defp apply_contained(contained, client, encoding, router_context) do
+    project_view = router_context.project_view
     open_buffer_route = open_buffer_route(project_view)
 
     planned =
@@ -89,7 +91,8 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
           project_view: project_view,
           open_buffer_route: open_buffer_route,
           relative_path: relative_path,
-          real_path: real_path
+          real_path: real_path,
+          edit_source: router_context.edit_source
         }
 
         {document, target, plan_file(document, target, client, encoding)}
@@ -403,7 +406,8 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
         {_content, revision} = snapshot = Buffer.content_with_version(pid)
 
         with :ok <- validate_version(document, client, pid, revision),
-             {:ok, _revision} <- BufferEdit.apply(pid, snapshot, document.edits, encoding, :agent) do
+             {:ok, _revision} <-
+               BufferEdit.apply(pid, snapshot, document.edits, encoding, target.edit_source) do
           :ok
         else
           {:error, :read_only} -> {:error, "buffer is read-only"}

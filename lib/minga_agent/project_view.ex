@@ -3,7 +3,11 @@ defmodule MingaAgent.ProjectView do
   Facade for workspace-local project file access.
 
   A project view gives agent code one stable API for direct project files and isolated overlay-backed files. Paths are logical paths relative to `project_root`; callers never use frontend labels, tab labels, or backend worktree paths.
+
+  A view handle also names who its conditional mutations belong to (`edit_source`). A tool call attributes its copy of the handle with `attribute/2`; the backend passes that source to the buffer fork it edits, so the fork publishes under it. An unattributed handle carries the legacy `:agent` source.
   """
+
+  alias Minga.Buffer.EditSource
 
   alias MingaAgent.ProjectView
   alias MingaAgent.ProjectView.Direct
@@ -17,11 +21,16 @@ defmodule MingaAgent.ProjectView do
           project_root: String.t(),
           backend: module(),
           ref: ProjectView.Backend.ref(),
-          workspace_id: non_neg_integer() | nil
+          workspace_id: non_neg_integer() | nil,
+          edit_source: EditSource.undo_source()
         }
 
   @enforce_keys [:id, :project_root, :backend, :ref]
-  defstruct [:id, :project_root, :backend, :ref, workspace_id: nil]
+  defstruct [:id, :project_root, :backend, :ref, workspace_id: nil, edit_source: :agent]
+
+  @doc "Returns this handle with its conditional mutations attributed to `source`."
+  @spec attribute(t(), EditSource.undo_source()) :: t()
+  def attribute(%__MODULE__{} = view, source), do: %{view | edit_source: source}
 
   @doc "Creates a direct project view rooted at `project_root`."
   @spec direct(String.t(), keyword()) :: {:ok, t()} | {:error, term()}

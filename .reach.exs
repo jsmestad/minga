@@ -6,6 +6,7 @@
 # Global prefixes mirror Credo's layer_0_prefixes/0. Transcript is an explicit
 # Agent-internal Level 0 contract, not a global Layer 0 foundation.
 pure_prefixes = [
+  "Minga.Buffer.Author",
   "Minga.Buffer.ChangeLog",
   "Minga.Buffer.ConflictIndex",
   "Minga.Buffer.Cursor",

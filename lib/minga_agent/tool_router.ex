@@ -129,7 +129,13 @@ defmodule MingaAgent.ToolRouter do
       when is_pid(store) do
     case claim_owner(context, path) do
       {:ok, {:fork, fork}} ->
-        Minga.Buffer.Fork.conditional_mutate(fork, expected, operation, {:fork, path})
+        Minga.Buffer.Fork.conditional_mutate(
+          fork,
+          expected,
+          operation,
+          {:fork, path},
+          context.edit_source
+        )
 
       {:ok, {:changeset, changeset}} ->
         conditional_mutate_changeset(changeset, path, expected, operation)
@@ -158,10 +164,16 @@ defmodule MingaAgent.ToolRouter do
     conditional_mutate_changeset(changeset, path, expected, operation)
   end
 
-  defp conditional_mutate_without_fork(%Context{}, path, expected, operation) do
+  defp conditional_mutate_without_fork(%Context{} = context, path, expected, operation) do
     case Minga.Buffer.pid_for_file(path) do
       {:ok, buffer} ->
-        Minga.Buffer.conditional_mutate(buffer, expected, operation, {:buffer, path})
+        Minga.Buffer.conditional_mutate(
+          buffer,
+          expected,
+          operation,
+          {:buffer, path},
+          context.edit_source
+        )
 
       :not_found ->
         {:error, :editable_view_unavailable}

@@ -63,6 +63,13 @@ defmodule Minga.Buffer.EditSourceTest do
     test "maps :unknown to :user" do
       assert EditSource.to_undo_source(EditSource.unknown()) == :user
     end
+
+    test "keeps a Minga author key, so its task and step reach the undo history" do
+      key = EditSource.minga("task-1", "call-1")
+
+      assert key == {:minga, "task-1", "call-1"}
+      assert EditSource.to_undo_source(key) == key
+    end
   end
 
   describe "from_undo_source/1" do
@@ -82,6 +89,11 @@ defmodule Minga.Buffer.EditSourceTest do
 
     test "maps :recovery to :unknown" do
       assert EditSource.from_undo_source(:recovery) == EditSource.unknown()
+    end
+
+    test "keeps a Minga author key" do
+      key = EditSource.minga("task-1", "call-1")
+      assert EditSource.from_undo_source(key) == key
     end
   end
 

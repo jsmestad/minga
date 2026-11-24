@@ -12,9 +12,8 @@ defmodule Minga.Buffer.Fork do
   automatically. Overlapping changes are returned as conflicts for resolution.
 
   The fork exposes the same GenServer call messages as Buffer.Process for the
-  editing subset (content, find_and_replace, replace_content, etc.), so agent
-  tools can call it without knowing whether they're talking to a fork or a
-  real buffer.
+  reading subset and `conditional_mutate`, so agent tools can call it without
+  knowing whether they're talking to a fork or a real buffer.
 
   ## Lifecycle
 
@@ -23,16 +22,25 @@ defmodule Minga.Buffer.Fork do
                                   agent edits ◀─────┘
                                                     │
                                 Fork.merge(fork_pid) ──→ {:ok, merged} | {:conflict, hunks}
+
+  ## Authorship
+
+  Each conditional mutation names its source. The fork remembers the Minga author key (`Minga.Buffer.Author.key/0`) of the latest mutation that carried one, and publication installs the merge in the parent under that key: one Minga step with one change per changed region. A fork that no Minga-attributed mutation edited publishes under the legacy unattributed `:agent` source.
   """
 
   use GenServer
 
+  alias Minga.Buffer.Author
   alias Minga.Buffer.Document
+  alias Minga.Buffer.EditSource
   alias Minga.Buffer.FileMutation
   alias Minga.Buffer.Lines
   alias Minga.Buffer.Replace
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Core.Diff
+
+  require Author
+  import EditSource, only: [is_undo_source: 1]
 
   @typedoc "Fork creation options."
   @type create_opt :: {:parent, pid()} | {:content, String.t()}
@@ -48,7 +56,8 @@ defmodule Minga.Buffer.Fork do
           parent_monitor: reference(),
           parent_alive: boolean(),
           version: non_neg_integer(),
-          dirty: boolean()
+          dirty: boolean(),
+          author: Author.key() | nil
         }
 
   # ── Public API ──────────────────────────────────────────────────────────────
@@ -171,15 +180,25 @@ defmodule Minga.Buffer.Fork do
     GenServer.call(server, {:publish_deletion, publication}, :infinity)
   end
 
-  @doc "Validates the full fork revision and commits an entire file mutation in one transition."
+  @doc """
+  Validates the full fork revision and commits an entire file mutation in one transition.
+
+  `source` names who made the mutation. A Minga author key becomes the key the fork publishes under; any other source, such as the user's review edits, leaves it unchanged.
+  """
   @spec conditional_mutate(
           GenServer.server(),
           FileMutation.expectation(),
           FileMutation.operation(),
-          FileMutation.identity()
+          FileMutation.identity(),
+          EditSource.undo_source()
         ) :: {:ok, FileMutation.Receipt.t()} | {:error, term()}
-  def conditional_mutate(server, expected, operation, identity) do
-    GenServer.call(server, {:conditional_mutate, expected, operation, identity}, :infinity)
+  def conditional_mutate(server, expected, operation, identity, source)
+      when is_undo_source(source) do
+    GenServer.call(
+      server,
+      {:conditional_mutate, expected, operation, identity, source},
+      :infinity
+    )
   end
 
   @doc """
@@ -240,7 +259,8 @@ defmodule Minga.Buffer.Fork do
       parent_monitor: ref,
       parent_alive: true,
       version: 0,
-      dirty: false
+      dirty: false,
+      author: nil
     }
 
     {:ok, state}
@@ -366,7 +386,7 @@ defmodule Minga.Buffer.Fork do
     {:reply, :ok, commit_fork(state, new_doc, false)}
   end
 
-  def handle_call({:conditional_mutate, expected, operation, identity}, _from, state) do
+  def handle_call({:conditional_mutate, expected, operation, identity, author}, _from, state) do
     generation = mutation_generation(identity, state)
 
     source = file_source(state)
@@ -375,11 +395,11 @@ defmodule Minga.Buffer.Fork do
       {:ok, new_content} when is_binary(new_content) ->
         new_doc = Document.new(new_content)
         receipt = FileMutation.Receipt.committed(source, new_content)
-        {:reply, {:ok, receipt}, commit_fork(state, new_doc, false)}
+        {:reply, {:ok, receipt}, state |> commit_fork(new_doc, false) |> attribute(author)}
 
       {:ok, :deleted} ->
         receipt = FileMutation.Receipt.committed(source, :deleted)
-        {:reply, {:ok, receipt}, commit_fork(state, state.document, true)}
+        {:reply, {:ok, receipt}, state |> commit_fork(state.document, true) |> attribute(author)}
 
       {:error, _} = error ->
         {:reply, error, state}
@@ -433,6 +453,7 @@ defmodule Minga.Buffer.Fork do
         state.parent,
         Document.content(state.ancestor),
         Document.content(state.document),
+        publication_source(state),
         staging
       )
 
@@ -475,7 +496,8 @@ defmodule Minga.Buffer.Fork do
              parent_version,
              Enum.join(merged, "\n"),
              Enum.join(selected, "\n"),
-             fn selected_content -> staging.(ancestor, selected_content) end
+             fn selected_content -> staging.(ancestor, selected_content) end,
+             publication_source(state)
            ) do
       {:reply, result, %{state | phase: :published}}
     else
@@ -554,6 +576,15 @@ defmodule Minga.Buffer.Fork do
         version: state.version + 1
     }
   end
+
+  # The fork's author is the latest Minga key that edited it; other sources leave it as it was.
+  @spec attribute(state(), EditSource.undo_source()) :: state()
+  defp attribute(state, key) when Author.is_key(key), do: %{state | author: key}
+  defp attribute(state, _source), do: state
+
+  @spec publication_source(state()) :: EditSource.undo_source()
+  defp publication_source(%{author: nil}), do: :agent
+  defp publication_source(%{author: key}), do: key
 
   @spec mutation_generation(FileMutation.identity(), state()) :: non_neg_integer() | nil
   defp mutation_generation({:project_view, _source_id}, _state), do: nil

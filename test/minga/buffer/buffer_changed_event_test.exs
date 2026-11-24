@@ -3,6 +3,8 @@ defmodule Minga.Buffer.BufferChangedEventTest do
 
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.EditSource
+
+  @minga EditSource.minga("task-1", "call-1")
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Core.Decorations
   alias Minga.Core.Face
@@ -301,15 +303,15 @@ defmodule Minga.Buffer.BufferChangedEventTest do
     end
   end
 
-  describe "find_and_replace broadcasts with agent source" do
+  describe "find_and_replace broadcasts with its author key" do
     test "sends nil delta (bulk op)" do
       buf = start_supervised!({BufferProcess, content: "hello world"})
-      {:ok, _msg} = BufferProcess.find_and_replace(buf, "hello", "goodbye")
+      {:ok, _msg} = BufferProcess.find_and_replace(buf, "hello", "goodbye", @minga)
 
       assert_receive {:minga_event, :buffer_changed,
                       %BufferChangedEvent{
                         buffer: ^buf,
-                        source: {:agent, _, _},
+                        source: @minga,
                         delta: nil
                       }}
 
