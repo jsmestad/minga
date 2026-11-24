@@ -62,7 +62,7 @@ Each reviewer returns one line per changed scenario:
 {"scenario": "edit.whichkey.leader", "part": "whichKey.entry", "issue": "...", "suggested": "row pitch 24 pt (anatomy: which-key entry pitch)"}
 ```
 
-The implementer fixes the items it accepts and records a reason for each it declines. The loop stops after a round with no items, or after three rounds.
+The implementer fixes the items it accepts and records a reason for each it declines. The loop stops after a round with no items, after a round in which every item was declined (nothing changed, so there is nothing new to critique), or after three rounds.
 
 ## What happens to a concern
 

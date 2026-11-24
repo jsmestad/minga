@@ -30,7 +30,7 @@ The reviewers check structure against the board and polish against anatomy, and 
 
 Then start a critic agent, also fresh, without the reviewers' verdicts. Give it the same frames, anatomy.md, the rubric's quality bar (the surfaces and Human Interface Guidelines sections it names), and ask for `{"scenario", "part", "issue", "suggested"}` items.
 
-For each item, the implementer either fixes it, re-renders and re-runs the hard gates, or declines it with a reason. Run the critic again on the new renders. Stop after a round with no items, or after round three, whichever comes first.
+For each item, the implementer either fixes it, re-renders and re-runs the hard gates, or declines it with a reason. Run the critic again on the new renders. Stop after a round with no items, after a round in which every item was declined (there are no new renders to critique), or after round three, whichever comes first. A rerun after a later push that leaves nothing open replaces the pull request's follow-up section with "Nothing open".
 
 ## 4. Record the verdicts
 

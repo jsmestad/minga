@@ -306,18 +306,18 @@ def replace_section(body, heading, section):
 def cmd_followups(args):
     record = load_record(args)
     entries = followup_entries(record, args.pr, args.comment)
-    if not entries:
-        print("nothing to append")
-        return 0
     heading = f"## From #{args.pr} (visual review)"
     section = [heading, f"Reasoning: {args.comment}"]
     if record.get("note"):
         section.append(flat(record["note"]))
-    section += entries
+    section += entries or ["Nothing open from this review."]
     if args.dry_run:
         print("\n".join(section))
         return 0
     body = run(["gh", "issue", "view", str(args.issue), "--json", "body", "-q", ".body"])
+    if not entries and heading not in body.split("\n"):
+        print("nothing to file")
+        return 0
     updated = replace_section(body, heading, section)
     if len(updated) > BODY_LIMIT:
         raise Failure(f"#{args.issue} would be {len(updated)} characters, over GitHub's {BODY_LIMIT}; "
