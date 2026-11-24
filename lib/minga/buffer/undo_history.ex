@@ -48,9 +48,9 @@ defmodule Minga.Buffer.UndoHistory do
   @typedoc "A Minga step and the byte ranges it touched, as `Minga.Buffer.Provenance.regions/2` reports them."
   @type minga_change :: {Author.key(), [Provenance.byte_range()]}
 
-  # The newest stretch of history made only by one task's steps: the version and tick before it,
-  # the tick after it, and whether the task had no remaining steps when it began. Reverting that
-  # task while the history is still at `tick_after` returns exactly to `version`.
+  # The newest stretch of history made only by one task's steps.
+  # It keeps the version and tick before it, the tick after it, and whether the task had no steps when it began.
+  # Reverting that task while the history is still at `tick_after` returns exactly to `version`.
   @typep task_run :: %{
            task: Author.t() | :agent,
            version: version(),
@@ -322,8 +322,8 @@ defmodule Minga.Buffer.UndoHistory do
     }
   end
 
-  # A task's step continues the newest stretch of its steps when nothing else changed the
-  # document since; otherwise it starts a new stretch at the current version and tick.
+  # A task's step continues the newest stretch of its steps when nothing else changed the document since.
+  # Otherwise it starts a new stretch at the current version and tick.
   @spec extend_task_run(t(), Author.t() | :agent, version()) :: task_run()
   defp extend_task_run(
          %__MODULE__{task_run: %{task: task, tick_after: tick} = run, tick: tick},
@@ -342,8 +342,8 @@ defmodule Minga.Buffer.UndoHistory do
     }
   end
 
-  # A task reverted right after its only stretch of steps returns the document to the version and
-  # tick before that stretch, so a buffer that was clean is clean again.
+  # A task reverted right after its only stretch of steps returns to the version and tick before that stretch.
+  # A buffer that was clean is then clean again.
   @spec settle_task(t(), Author.t() | :agent) :: {version() | :advance, Entry.tick(), t()}
   defp settle_task(
          %__MODULE__{task_run: %{task: task, tick_after: tick, fresh: true} = run, tick: tick} =
@@ -451,8 +451,8 @@ defmodule Minga.Buffer.UndoHistory do
     end
   end
 
-  # When nothing changed the document since the entry's state, the flip returns exactly to that
-  # state, so its version, cursor and tick come back. Otherwise the document is new.
+  # When nothing changed the document since the entry's state, the flip returns exactly to that state.
+  # Its version, cursor and tick then come back. Otherwise the document is new.
   @spec settle(t(), Entry.t(), Document.t(), non_neg_integer() | nil) ::
           {version() | :advance, Document.t(), Entry.tick(), t()}
   defp settle(

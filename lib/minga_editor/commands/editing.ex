@@ -1246,8 +1246,7 @@ defmodule MingaEditor.Commands.Editing do
     execute: fn state -> execute(state, {:delete_chars_before, 1}) end
   )
 
-  # Your undo or redo never changes text a later Minga step rewrote; the buffer refused it and
-  # nothing changed.
+  # Your undo or redo never changes text a later Minga step rewrote; the buffer refused it and nothing changed.
   @spec log_blocked_history(term(), :undo | :redo) :: :ok
   defp log_blocked_history({:blocked, {:overlaps, minga_group}}, action) do
     Minga.Log.info(

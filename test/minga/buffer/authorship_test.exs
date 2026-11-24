@@ -123,7 +123,7 @@ defmodule Minga.Buffer.AuthorshipTest do
     assert BufferProcess.line_authors(buffer, 0, 2) == [[:unattributed], [:unattributed]]
   end
 
-  property "authorship stays in step with the document through every public edit path" do
+  property "authorship stays in step with the document through the public edit paths" do
     check all(commands <- StreamData.list_of(command(), max_length: 30), max_runs: 40) do
       buffer =
         start_supervised!({BufferProcess, content: "abc\ndef\n"},
@@ -148,7 +148,12 @@ defmodule Minga.Buffer.AuthorshipTest do
         :append,
         :lines,
         :reject,
-        :replace
+        :replace,
+        :bounded_append,
+        :shift,
+        :lsp_edits,
+        :find_replace,
+        :snapshot
       ]),
       StreamData.integer(0..100),
       StreamData.string([?a..?c, ?\n], max_length: 4)
@@ -185,13 +190,38 @@ defmodule Minga.Buffer.AuthorshipTest do
 
   defp run(buffer, {:replace, _n, text}), do: BufferProcess.replace_content(buffer, text)
 
+  defp run(buffer, {:bounded_append, n, text}),
+    do: BufferProcess.bounded_append(buffer, text, 3 + rem(n, 4), 40)
+
+  defp run(buffer, {:shift, n, _text}) do
+    line = rem(n, BufferProcess.line_count(buffer))
+    shift = if rem(n, 2) == 0, do: {:indent, "  "}, else: {:dedent, 2}
+    BufferProcess.shift_lines(buffer, line, line, shift)
+  end
+
+  defp run(buffer, {:lsp_edits, n, text}) do
+    line = rem(n, BufferProcess.line_count(buffer))
+    BufferProcess.apply_edits(buffer, [{{line, 0}, {line, rem(n, 3)}, text}])
+  end
+
+  defp run(buffer, {:find_replace, n, text}) do
+    needle = Enum.at(["a", "b", "c\n"], rem(n, 3))
+    source = if rem(n, 2) == 0, do: :user, else: @minga
+    BufferProcess.find_and_replace(buffer, needle, text, source)
+  end
+
+  defp run(buffer, {:snapshot, _n, text}) do
+    snapshot = BufferProcess.snapshot(buffer)
+    BufferProcess.commit_snapshot(buffer, Minga.Buffer.Document.insert_text(snapshot, text))
+  end
+
   defp move_somewhere(buffer, n) do
     line = rem(n, BufferProcess.line_count(buffer))
     BufferProcess.move_to(buffer, {line, rem(n, 3)})
   end
 
-  # A byte past the end has no author, every byte before it has one, and every line that holds
-  # bytes reports at least one author.
+  # A byte past the end has no author, and every byte before it has one.
+  # Every line that holds bytes reports at least one author.
   defp assert_in_step(buffer) do
     content = BufferProcess.content(buffer)
     lines = String.split(content, "\n")

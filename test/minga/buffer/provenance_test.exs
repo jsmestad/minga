@@ -237,8 +237,7 @@ defmodule Minga.Buffer.ProvenanceTest do
               else: {prov, model, text}
           end)
 
-        # Your edits alone: every byte you or the original file wrote that none of your applied
-        # groups deleted.
+        # Your edits alone: every byte you or the original file wrote that none of your applied groups deleted.
         yours =
           for entry <- model.entries,
               entry.author in [:you, :unattributed],

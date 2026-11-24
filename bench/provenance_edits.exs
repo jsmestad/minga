@@ -54,9 +54,9 @@ defmodule Minga.Bench.ProvenanceEdits do
     :ok
   end
 
-  # Inserts one byte per step at spread offsets, rotating between you and two Minga tasks. Each
-  # insertion into a run splits it, so every step adds about two runs. Returns the provenance, its
-  # text, and your last group.
+  # Inserts one byte per step at spread offsets, rotating between you and two Minga tasks.
+  # Each insertion into a run splits it, so every step adds about two runs.
+  # Returns the provenance, its text, and your last group.
   @spec build(pos_integer()) :: {Provenance.t(), binary(), Provenance.group_id()}
   defp build(target) do
     text =
@@ -106,8 +106,7 @@ defmodule Minga.Bench.ProvenanceEdits do
   end
 
   # Times `reps` calls per sample, so the clock's microsecond resolution does not hide the cost.
-  # Each measurement runs in a fresh process, so garbage from the previous one is not collected
-  # inside its samples.
+  # Each measurement runs in a fresh process, so garbage from the previous one is not collected inside its samples.
   @spec median_us((-> term()), pos_integer()) :: float()
   defp median_us(fun, reps \\ 50) do
     fn ->

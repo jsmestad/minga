@@ -3811,9 +3811,9 @@ defmodule Minga.Buffer.Process do
     %{state | document: new_buf, undo_history: undo_history}
   end
 
-  # A whole-content replacement records one patch per changed region, so the lines it left alone
-  # keep their authors and nobody's text between two changes counts as rewritten. An unchanged
-  # replacement still records one empty patch.
+  # A whole-content replacement records one patch per changed region.
+  # The lines it left alone keep their authors, and nobody's text between two changes counts as rewritten.
+  # An unchanged replacement still records one empty patch.
   @spec region_patches(Document.t(), Document.t()) :: nonempty_list(UndoPatch.t())
   defp region_patches(old_document, new_document) do
     case UndoPatch.changes(old_document, new_document) do
@@ -3879,8 +3879,8 @@ defmodule Minga.Buffer.Process do
     [authors | authors_by_line(lines, spans)]
   end
 
-  # Installs the document an undo, redo or agent revert produced. It takes back its earlier version
-  # only when the history returned exactly to that state; otherwise it is a new version.
+  # Installs the document an undo, redo or agent revert produced.
+  # It takes back its earlier version only when the history returned exactly to that state; otherwise it is new.
   @spec install_restore(state(), Restore.t(), UndoHistory.t()) :: state()
   defp install_restore(state, %Restore{version: :advance} = restore, undo_history) do
     %{state | document: restore.document, undo_history: undo_history}

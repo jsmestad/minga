@@ -315,8 +315,8 @@ defmodule Minga.Buffer.Provenance do
     |> delete_from(group_id, following, removed, consumed)
   end
 
-  # An untracked deletion forgets the text. A group deleting its own text leaves a run that can
-  # never be live again, so it is dropped too.
+  # An untracked deletion forgets the text.
+  # A group deleting its own text leaves a run that can never be live again, so it is dropped too.
   @spec mark_deleted(t(), group_id() | nil, Run.t(), binary()) :: t()
   defp mark_deleted(prov, nil, run, _text), do: drop_run(prov, run)
   defp mark_deleted(prov, group_id, %Run{group: group_id} = run, _text), do: drop_run(prov, run)
@@ -372,8 +372,9 @@ defmodule Minga.Buffer.Provenance do
       prov = %{prov | groups: Map.put(prov.groups, id, %{group | applied: applied})}
       content = Document.content(document)
 
-      # From the end of the document to its start: a run's offset never depends on the runs after
-      # it, so every change is located in the original document, and the list ends up in order.
+      # Visit runs from the end of the document to its start.
+      # A run's offset never depends on the runs after it, so every change is located in the original document.
+      # Prepending each change then leaves the list in document order.
       {changes, flipped} =
         group.runs
         |> :gb_sets.to_list()
@@ -404,8 +405,8 @@ defmodule Minga.Buffer.Provenance do
     end
   end
 
-  # Applies every change at once and checks only the result. A group's runs can split a code
-  # point when its edit did, so the pieces of one change are not valid UTF-8 on their own.
+  # Applies every change at once and checks only the result.
+  # A group's runs split a code point when its edit did, so the pieces of one change need not be valid UTF-8 alone.
   @spec apply_changes([change()], binary(), Document.t()) ::
           {:ok, Document.t()} | {:error, :invalid_utf8}
   defp apply_changes([], _content, document), do: {:ok, document}
@@ -439,8 +440,8 @@ defmodule Minga.Buffer.Provenance do
   defp inserted?(_groups, nil), do: true
   defp inserted?(groups, id), do: Map.fetch!(groups, id).applied
 
-  # Deleters are prepended, so the groups that deleted a run after this group did come before it
-  # in the list. Text this group inserted can only have been deleted later.
+  # Deleters are prepended, so the groups that deleted a run after this group did come before it in the list.
+  # Text this group inserted can only have been deleted later.
   @spec later_deleters(Run.t(), group_id()) :: [group_id()]
   defp later_deleters(%Run{group: id, deletions: deletions}, id), do: deletions
   defp later_deleters(%Run{deletions: deletions}, id), do: Enum.take_while(deletions, &(&1 != id))
@@ -468,8 +469,8 @@ defmodule Minga.Buffer.Provenance do
     end
   end
 
-  # Merges a permanent run with permanent neighbours by the same author, so settled history does
-  # not leave more runs than authorship needs.
+  # Merges a permanent run with permanent neighbours by the same author.
+  # Settled history then leaves no more runs than authorship needs.
   @spec coalesce(t(), Locator.t()) :: t()
   defp coalesce(prov, run_id) do
     {:ok, run, _offset} = RunTree.fetch(prov.tree, run_id)
