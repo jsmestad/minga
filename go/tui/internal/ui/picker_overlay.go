@@ -56,7 +56,7 @@ func (m Model) renderFloatingPicker(picker protocol.Picker, preview protocol.Pic
 	}
 	content := strings.Join(lines, "\n")
 	// The outer width includes both padding and border. Pass it intact to avoid wrapping fitted rows.
-	return lipgloss.NewStyle().Width(popupWidth).Padding(0, 1).Border(lipgloss.RoundedBorder()).BorderForeground(m.palette().PopupBorder()).BorderBackground(m.palette().PopupSurface()).Background(m.palette().PopupSurface()).ColorWhitespace(true).Render(content)
+	return lipgloss.NewStyle().Width(popupWidth).Padding(padding(popoverVerticalPadding, popoverRowInset)).Border(lipgloss.RoundedBorder()).BorderForeground(m.palette().PopupBorder()).BorderBackground(m.palette().PopupSurface()).Background(m.palette().PopupSurface()).ColorWhitespace(true).Render(content)
 }
 
 func (m Model) floatingPickerWidth() int {

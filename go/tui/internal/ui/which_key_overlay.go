@@ -54,7 +54,7 @@ func (m Model) renderFloatingWhichKey(which protocol.WhichKey) string {
 	lines = append(lines, m.renderWhichKeyFooter(which, inner))
 
 	content := strings.Join(lines, "\n")
-	return lipgloss.NewStyle().Width(contentWidth).Padding(0, 1).Border(lipgloss.RoundedBorder()).BorderForeground(m.palette().PopupBorder()).BorderBackground(m.palette().PopupSurface()).Background(m.palette().PopupSurface()).ColorWhitespace(true).Render(content)
+	return lipgloss.NewStyle().Width(contentWidth).Padding(padding(whichKeyInsetV, whichKeyInsetH)).Border(lipgloss.RoundedBorder()).BorderForeground(m.palette().PopupBorder()).BorderBackground(m.palette().PopupSurface()).Background(m.palette().PopupSurface()).ColorWhitespace(true).Render(content)
 }
 
 func (m Model) renderWhichKeyHeader(which protocol.WhichKey, width int) string {
@@ -79,11 +79,11 @@ func (m Model) renderWhichKeyFooter(which protocol.WhichKey, width int) string {
 	left := fmt.Sprintf(" %d bindings", len(which.Bindings))
 	right := "Esc close"
 	if which.PageCount > 1 {
-		wideRight := "Tab next  •  Esc close"
+		wideRight := strings.Join([]string{"Tab next", "•", "Esc close"}, gap(spaceXL))
 		if lipgloss.Width(left)+lipgloss.Width(wideRight)+4 <= width {
 			right = wideRight
 		} else {
-			right = "Tab next  Esc"
+			right = strings.Join([]string{"Tab next", "Esc"}, gap(spaceXL))
 		}
 	}
 	if lipgloss.Width(left)+lipgloss.Width(right)+2 > width {
@@ -139,7 +139,7 @@ func whichKeyKeyWidth(bindings []protocol.WhichKeyBinding) int {
 }
 
 func (m Model) whichKeyColumnGutter() string {
-	return lipgloss.NewStyle().Foreground(m.palette().PopupBorder()).Background(m.palette().PopupSurface()).Render("  │  ")
+	return lipgloss.NewStyle().Foreground(m.palette().PopupBorder()).Background(m.palette().PopupSurface()).Render(gap(spaceXL) + "│" + gap(spaceXL))
 }
 
 func (m Model) whichKeyColumns(width int, count int) int {

@@ -617,7 +617,7 @@ func (m Model) renderAgentCodeCardRows(block protocol.AgentMarkdownBlock, width 
 	p := m.palette()
 	surface := p.AgentCodeSurface()
 	codeBorder := p.AgentCodeBorder()
-	rail := lipgloss.NewStyle().Foreground(codeBorder).Background(surface).Render("  │ ")
+	rail := lipgloss.NewStyle().Foreground(codeBorder).Background(surface).Render(agentProseRail)
 	bodyWidth := max(width-lipgloss.Width(rail)-2, 8)
 	label := nonEmpty(block.Label, "Code")
 	if block.TargetPath != "" {
@@ -655,7 +655,7 @@ func sliceRows(rows []string, start int, count int) []string {
 
 func (m Model) renderAgentAssistantHeader(width int) string {
 	p := m.palette()
-	headerMarker := lipgloss.NewStyle().Bold(true).Foreground(p.AgentAssistantBorder()).Background(p.AgentPanel()).Render("  ◇")
+	headerMarker := lipgloss.NewStyle().Bold(true).Foreground(p.AgentAssistantBorder()).Background(p.AgentPanel()).Render(gap(agentTranscriptInset) + "◇")
 	headerLabel := lipgloss.NewStyle().Bold(true).Foreground(p.AgentAssistantLabel()).Background(p.AgentPanel()).Render(" Minga")
 	header := headerMarker + headerLabel
 	return lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(header, width))

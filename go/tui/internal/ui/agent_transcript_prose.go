@@ -10,8 +10,16 @@ import (
 	"github.com/rivo/uniseg"
 )
 
-const agentProseRail = "  │ "
-const agentProseRailWidth = 4
+// agentProseRail is the transcript rail before assistant prose and code: the transcript inset, the rail glyph, then one column.
+var agentProseRail = gap(agentTranscriptInset) + "│" + gap(spaceXS)
+var agentProseRailWidth = ansi.StringWidth(agentProseRail)
+
+// agentToolBranch opens a tool card: the transcript inset, then a branch.
+var agentToolBranch = gap(agentTranscriptInset) + "├─"
+
+// agentToolRail continues a tool card under its branch.
+var agentToolRail = gap(agentTranscriptInset) + "│"
+
 const agentProseTabWidth = 4
 
 // Source offsets for wrapped blocks only. Text and style stay in the resident message.

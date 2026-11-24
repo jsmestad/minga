@@ -15,14 +15,17 @@ import (
 const (
 	// pickerActiveGlyph marks the current value, such as the current model.
 	pickerActiveGlyph = "●"
-	// pickerActiveSlotWidth is the glyph plus one space. Inactive siblings pad by the same width.
-	pickerActiveSlotWidth = 2
-	// pickerStatusGap separates the label, annotation, description, and chip.
-	pickerStatusGap = 2
 	// pickerMinDescription is the narrowest description worth showing; anything shorter is dropped.
 	pickerMinDescription = 8
 	// pickerMinLabel is the narrowest a label is truncated to before the chip gives way.
 	pickerMinLabel = 12
+)
+
+var (
+	// pickerActiveSlotWidth is the active glyph plus a list row's glyph-to-title gap. Inactive siblings pad by the same width.
+	pickerActiveSlotWidth = ansi.StringWidth(pickerActiveGlyph) + listRowGlyphToTitle.cols()
+	// pickerStatusGap separates the label, annotation, description, and chip: a list row's title-to-meta gap.
+	pickerStatusGap = listRowTitleToMeta.cols()
 )
 
 // pickerStatusRowLayout is the visible content of one status-chip row at a given width.

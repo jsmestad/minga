@@ -1,0 +1,31 @@
+{
+  "baseline": "origin/main da6e3b2f4 source line numbers in go/tui/internal/ui, before token migration",
+  "scale": "go/tui/internal/ui/chrome_tokens.go, twin of macos/Sources/Views/Shared/ChromeTokens.swift; rules in docs/design/anatomy.md",
+  "recount": {
+    "lipglossStyleCalls": 14,
+    "lipglossStyleCallLines": 13,
+    "spaceRunStringLiterals": 91,
+    "literalCountSpaceRepeats": 3,
+    "note": "The ticket counted about 18, 52 and 58 when it was written. The guard in chrome_token_guardrail_test.go found these 108 sites on the baseline; all are migrated and the allowlist is empty."
+  },
+  "changedFiles": [
+    "agent_chat_panel.go", "agent_controls.go", "agent_help.go", "agent_prompt.go", "agent_transcript_prose.go", "agent_transcript_renderer.go",
+    "components.go", "empty_state_panel.go", "picker_overlay.go", "picker_sections.go", "picker_status_row.go",
+    "render_chrome.go", "render_content.go", "render_surfaces.go", "review_status.go", "which_key_overlay.go"
+  ],
+  "evidence": {
+    "modelFrames": "MINGA_TUI_FRAME_DIR=<dir> go test ./internal/ui/ -run TestChromeTokenFrames renders 24 chrome surfaces at 80x24 and 120x40 as plain text grids. Baseline and candidate grids are identical except the rows listed under snaps.",
+    "productionCapture": "scripts/go_tui_capture.py with test/fixtures/go_tui_capture/agent_workspace.json against renderers built from the baseline and the candidate: all 15 grids (60x24, 80x24 and 140x40; workspace, row-base, row-delta, unknown-opcode and replacement) are identical."
+  },
+  "snaps": [
+    {"file":"render_chrome.go","lines":[270,272,279,282,291],"from":"2 columns between modeline segments (file, position, message, search, extension, resync)","to":"modelineSegmentGap = spaceMD (1 column)","reason":"anatomy.md Modeline segments: the gap between segments is md, one column in the TUI.","scenario":"TestChromeTokenFrames footer_fallback_80x24 and footer_fallback_120x40"},
+    {"file":"render_chrome.go","lines":[329],"from":"2 columns after the pending-keys segment","to":"modelineSegmentGap = spaceMD (1 column)","reason":"The showcmd echo is a modeline segment, so it takes the same md gap as every other segment.","scenario":"TestChromeTokenFrames footer_segments_80x24 and footer_segments_120x40"},
+    {"file":"render_chrome.go","lines":[720],"from":"2 columns between the picker title and its query","to":"promptLabelToQuery = spaceMD (1 column)","reason":"anatomy.md Prompt and minibuffer covers the query row of a picker: prompt label to query is md, one column in the TUI. The groups after the query (marked count, loading, error) stay xl apart.","scenario":"TestChromeTokenFrames picker_80x24 and picker_120x40; TestPickerAdoptsQueryReplacedByTheBEAM"}
+  ],
+  "keptPendingAnatomy": [
+    {"file":"which_key_overlay.go","lines":[142],"cells":"2 + │ + 2 between columns","anatomyPart":"Which-key panel column gap: panel (3 columns), no rule","reason":"Removing the column rule reshapes the panel, which belongs to the which-key surface ticket. Kept as gap(spaceXL) on each side of the rule."},
+    {"file":"empty_state_panel.go","lines":[354,404,442,523,529],"cells":"2 columns from key chip to label; 2 + · + 2 between footer hints","anatomyPart":"Empty state action key column (widest key plus lg) and Notice gaps (md around ·)","reason":"The launchpad is not yet the anatomy empty state (glyph, title, why line, action list); its surface ticket reshapes it. Kept as gap(spaceXL)."},
+    {"file":"agent_controls.go","lines":[143],"cells":"2 columns between approval actions","anatomyPart":"Decision bar: gap between halves xs, two-row halves","reason":"The approval actions are not yet a decision bar; the agent surface ticket builds it. Kept as gap(spaceXL)."},
+    {"file":"agent_chat_panel.go, agent_transcript_prose.go, agent_transcript_renderer.go","lines":"every transcript marker, rail and body indent","cells":"2-column transcript inset, 4-column body indent","anatomyPart":"none yet (the agent transcript has no anatomy part)","reason":"Kept as the interim metrics agentTranscriptInset (xl) and agentTranscriptBodyIndent (section) in chrome_tokens.go until the transcript gets an anatomy part."}
+  ]
+}

@@ -250,7 +250,7 @@ func (m Model) renderSignature(sig protocol.SignatureHelp) []string {
 		if byte(i) == sig.ActiveParameter {
 			label = "> " + label
 		}
-		lines = append(lines, style.Render(fit(label+"  "+param.Doc, m.width)))
+		lines = append(lines, style.Render(fit(label+gap(spaceXL)+param.Doc, m.width)))
 	}
 	return takeLines(lines, m.maxOverlayHeight())
 }
@@ -310,7 +310,7 @@ func (m Model) renderBottomPanel(panel protocol.BottomPanel) []string {
 	headerLeft := fmt.Sprintf(" %s", title)
 	headerRight := fmt.Sprintf("%d messages", len(panel.Messages))
 	if m.bottomPanelScrollback > 0 {
-		headerRight += fmt.Sprintf("  ↑%d", m.bottomPanelScrollback)
+		headerRight += gap(spaceXL) + fmt.Sprintf("↑%d", m.bottomPanelScrollback)
 	}
 	leftText := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(p.PopupChrome()).Render(headerLeft)
 	rightText := lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(p.PopupChrome()).Render(headerRight)
@@ -333,7 +333,7 @@ func (m Model) renderBottomPanelMessage(msg protocol.PanelMessage, pathWidth int
 	p := m.palette()
 	badge := bottomPanelLevelBadge(msg.Level)
 	badgeColor := bottomPanelLevelColor(p, msg.Level)
-	badgeText := lipgloss.NewStyle().Bold(true).Foreground(p.EditorSurface()).Background(badgeColor).Width(5).Align(lipgloss.Center).Render(badge)
+	badgeText := lipgloss.NewStyle().Bold(true).Foreground(p.EditorSurface()).Background(badgeColor).Padding(padding(spaceHairline, spaceSM)).Render(badge)
 	path := msg.Path
 	if strings.TrimSpace(path) == "" {
 		path = "messages"
@@ -462,7 +462,7 @@ func (m Model) renderObservatory(obs protocol.Observatory) []string {
 	for _, node := range obs.Nodes {
 		row := tableDataRow(theme, m.width, false, []tableCell{
 			{text: node.PID, width: pidWidth},
-			{text: strings.Repeat("  ", int(node.Depth)) + node.Name, width: nameWidth},
+			{text: strings.Repeat(gap(spaceXL), int(node.Depth)) + node.Name, width: nameWidth},
 			{text: fmt.Sprintf("%d", node.MessageQueueLen), width: qWidth},
 		})
 		lines = append(lines, m.zones.Mark(zoneIDObservatoryNode(node.PID), row))
@@ -499,7 +499,7 @@ func (m Model) renderEditTimeline(timeline protocol.EditTimeline) []string {
 		toolWidth := max(width-idxWidth-ageWidth, 1)
 		lines = append(lines, tableHeaderRow(theme, width, []tableCell{
 			{text: "󰋚 #", width: idxWidth},
-			{text: "Tool  " + m.timelineBrowseLabel(timeline.Generation), width: toolWidth},
+			{text: "Tool" + gap(spaceXL) + m.timelineBrowseLabel(timeline.Generation), width: toolWidth},
 			{text: "Age", width: ageWidth},
 		}))
 		for _, entry := range timeline.Entries[:min(len(timeline.Entries), m.timelineFileRows())] {
@@ -545,7 +545,7 @@ func (m Model) timelineBrowseLabel(generation uint32) string {
 func (m Model) renderEditTimelineFiles(timeline protocol.EditTimeline, theme palette, width int) []string {
 	browse := m.timelineBrowseLabel(timeline.Generation)
 	header := tableHeaderRow(theme, width, []tableCell{
-		{text: fmt.Sprintf("Review files (%d)  %s  ]F  wheel", len(timeline.Files), browse), width: width},
+		{text: strings.Join([]string{fmt.Sprintf("Review files (%d)", len(timeline.Files)), browse, "]F", "wheel"}, gap(spaceXL)), width: width},
 	})
 	rows := m.timelineFileRows()
 	start := m.timelineFileStart(timeline)
@@ -692,7 +692,7 @@ func (m Model) renderNotifications(notes protocol.Notifications) []string {
 	content := strings.Join(lines, "\n")
 	bordered := lipgloss.NewStyle().
 		Width(width).
-		Padding(0, 1).
+		Padding(padding(popoverVerticalPadding, popoverRowInset)).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(theme.PopupBorder()).
 		BorderBackground(theme.PopupSurface()).
@@ -736,7 +736,7 @@ func (m Model) renderNotificationBodyRow(note protocol.Notification, width int) 
 	rowStyle := lipgloss.NewStyle().Background(theme.PopupSurface()).Width(width).ColorWhitespace(true)
 	bodyStyle := lipgloss.NewStyle().Foreground(theme.PopupMutedText()).Background(theme.PopupSurface()).ColorWhitespace(true)
 	summary := strings.TrimSpace(note.Source + " " + note.Body)
-	return renderPadded(rowStyle, bodyStyle.Render("   "+summary), width)
+	return renderPadded(rowStyle, bodyStyle.Render(gap(spacePanel)+summary), width)
 }
 
 // renderNotificationActionsRow draws each inline action as a bracketed,
@@ -749,10 +749,10 @@ func (m Model) renderNotificationActionsRow(note protocol.Notification, width in
 	rowStyle := lipgloss.NewStyle().Background(theme.PopupSurface()).Width(width).ColorWhitespace(true)
 	actionStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupSurface()).ColorWhitespace(true)
 	gapStyle := lipgloss.NewStyle().Background(theme.PopupSurface()).ColorWhitespace(true)
-	rendered := gapStyle.Render("   ")
+	rendered := gapStyle.Render(gap(spacePanel))
 	for index, action := range note.Actions {
 		if index > 0 {
-			rendered += gapStyle.Render("  ")
+			rendered += gapStyle.Render(gap(promptChipToChip))
 		}
 		label := actionStyle.Render("[" + action.Label + "]")
 		rendered += m.zones.Mark(zoneIDNotificationAction(note.ID, action.ID), label)

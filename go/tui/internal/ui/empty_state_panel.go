@@ -238,9 +238,9 @@ func (m Model) emptyWordmark(version string, colWidth int) string {
 	diamond := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(bg).Render("◆")
 	name := lipgloss.NewStyle().Bold(true).Foreground(p.Text()).Background(bg).Render("m i n g a")
 	space := lipgloss.NewStyle().Background(bg)
-	mark := diamond + space.Render("  ") + name
+	mark := diamond + space.Render(gap(spaceXL)) + name
 	if v := strings.TrimSpace(version); v != "" {
-		mark += space.Render("   ") + lipgloss.NewStyle().Foreground(p.TextFaint()).Background(bg).Render(v)
+		mark += space.Render(gap(spacePanel)) + lipgloss.NewStyle().Foreground(p.TextFaint()).Background(bg).Render(v)
 	}
 	return m.emptyCenterInCol(mark, colWidth)
 }
@@ -253,7 +253,7 @@ func (m Model) emptyRule(title string, colWidth int, borderColor color.Color) st
 	bg := m.editorBackground()
 	dash := lipgloss.NewStyle().Foreground(borderColor).Background(bg)
 	label := lipgloss.NewStyle().Foreground(p.Muted()).Background(bg).Render(strings.ToUpper(title))
-	content := dash.Render("  ─── ") + label + dash.Render(" ")
+	content := dash.Render(gap(spaceXL)+"─── ") + label + dash.Render(" ")
 	fill := max(colWidth-lipgloss.Width(content), 0)
 	content += dash.Render(strings.Repeat("─", fill))
 	return m.emptyPadExact(content, colWidth)
@@ -271,7 +271,7 @@ func (m Model) emptyKeycap(text string, jump bool) string {
 		text = "↵"
 	}
 
-	style := lipgloss.NewStyle().Padding(0, 1)
+	style := lipgloss.NewStyle().Padding(padding(spaceHairline, spaceSM))
 	if jump {
 		style = style.Bold(true).Foreground(p.Accent()).Background(p.AccentWash())
 	} else {
@@ -345,13 +345,13 @@ func (m Model) emptyCardInner(item protocol.EmptyStateItem, inner int, focused b
 	}
 	base := lipgloss.NewStyle().Foreground(p.Text()).Background(rowBg)
 
-	marker := base.Render("  ")
+	marker := base.Render(gap(spaceXL))
 	if focused {
 		marker = lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(rowBg).Render("▸") + base.Render(" ")
 	}
 	chip := m.emptyKeycap(item.JumpKey, true)
 	label := base.Bold(focused).Render(item.Label)
-	left := base.Render(" ") + marker + chip + base.Render("  ") + label
+	left := base.Render(" ") + marker + chip + base.Render(gap(spaceXL)) + label
 
 	right := ""
 	if item.Detail != "" {
@@ -394,14 +394,14 @@ func (m Model) emptyRecentRow(item protocol.EmptyStateItem, colWidth int, focuse
 	}
 	base := lipgloss.NewStyle().Foreground(p.Text()).Background(rowBg)
 
-	marker := base.Render("  ")
+	marker := base.Render(gap(spaceXL))
 	if focused {
 		marker = lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(rowBg).Render("▸") + base.Render(" ")
 	}
 	chip := m.emptyKeycap(item.JumpKey, true)
 	icon := m.emptyIcon(item, rowBg, p.Text(), focused)
 	label := base.Bold(focused).Render(item.Label)
-	left := base.Render(" ") + marker + chip + base.Render("  ") + icon + base.Render(" ") + label
+	left := base.Render(" ") + marker + chip + base.Render(gap(spaceXL)) + icon + base.Render(" ") + label
 
 	right := ""
 	if !dropDir && item.Detail != "" {
@@ -433,13 +433,13 @@ func (m Model) emptyStartRow(item protocol.EmptyStateItem, colWidth int, focused
 	}
 	base := lipgloss.NewStyle().Foreground(p.Text()).Background(rowBg)
 
-	marker := base.Render("  ")
+	marker := base.Render(gap(spaceXL))
 	if focused {
 		marker = lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(rowBg).Render("▸") + base.Render(" ")
 	}
 	icon := m.emptyIcon(item, rowBg, p.Text(), focused)
 	label := base.Bold(focused).Render(item.Label)
-	left := base.Render(" ") + marker + base.Render("  ") + icon + base.Render("  ") + label
+	left := base.Render(" ") + marker + base.Render(gap(spaceXL)) + icon + base.Render(gap(spaceXL)) + label
 
 	right := m.emptyStartAffordance(item, rowBg, base)
 
@@ -474,7 +474,7 @@ func (m Model) emptyStartAffordance(item protocol.EmptyStateItem, rowBg color.Co
 func (m Model) emptyIcon(item protocol.EmptyStateItem, rowBg color.Color, textColor color.Color, _ bool) string {
 	// Fixed two-cell slot: glyph widths vary (missing, single-cell PUA,
 	// double-cell symbols), and the label column must not shift with them.
-	style := lipgloss.NewStyle().Background(rowBg).Width(2).MaxWidth(2)
+	style := lipgloss.NewStyle().Background(rowBg).Width(wideGlyphCols).MaxWidth(wideGlyphCols)
 	glyph := strings.TrimSpace(item.Icon)
 	if glyph == "" {
 		return style.Render(" ")
@@ -520,11 +520,11 @@ func (m Model) footerFragment(items []protocol.EmptyStateItem) string {
 		}
 		fragment := keyStyle.Render(key)
 		if item.Label != "" {
-			fragment += space.Render("  ") + verbStyle.Render(item.Label)
+			fragment += space.Render(gap(spaceXL)) + verbStyle.Render(item.Label)
 		}
 		parts = append(parts, fragment)
 	}
 
 	dotStyle := lipgloss.NewStyle().Foreground(p.TextFaint()).Background(bg)
-	return strings.Join(parts, dotStyle.Render("  ·  "))
+	return strings.Join(parts, dotStyle.Render(gap(spaceXL)+"·"+gap(spaceXL)))
 }

@@ -54,7 +54,7 @@ func (m Model) agentHelpContent(help protocol.AgentHelp, width int) []string {
 		}
 		appendWrapped(group.Title, true)
 		for _, binding := range group.Bindings {
-			appendWrapped(binding.Key+"  "+binding.Description, false)
+			appendWrapped(binding.Key+gap(spaceXL)+binding.Description, false)
 		}
 	}
 	return lines

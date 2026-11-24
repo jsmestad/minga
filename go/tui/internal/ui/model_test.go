@@ -183,10 +183,10 @@ func TestPickerAdoptsQueryReplacedByTheBEAM(t *testing.T) {
 	applyProductionFrame(&model, 2, 1, 1, pickerFrame("~/projects/", "minga"))
 
 	view := ansi.Strip(model.View().Content)
-	if !strings.Contains(view, "Find file  ~/projects/") || !strings.Contains(view, "minga") {
+	if !strings.Contains(view, "Find file"+gap(promptLabelToQuery)+"~/projects/") || !strings.Contains(view, "minga") {
 		t.Fatalf("picker should render the BEAM-replaced query and its entries: %q", view)
 	}
-	if strings.Contains(view, "Find file  ~/pro ") {
+	if strings.Contains(view, "Find file"+gap(promptLabelToQuery)+"~/pro ") {
 		t.Fatalf("picker kept the superseded query: %q", view)
 	}
 }
