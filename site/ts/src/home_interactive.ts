@@ -797,12 +797,29 @@ export function mountHeroTour(root: HTMLElement): void {
     }
   });
 
-  root.addEventListener("keydown", (event) => {
-    const target = event.target as HTMLElement | null;
-    if (!target) return;
-    if (target.matches("input, textarea, select")) return;
+  window.addEventListener("keydown", (event) => {
+    const activeEl = document.activeElement as HTMLElement | null;
+    if (activeEl?.matches("input, textarea, select, [contenteditable]")) return;
     if (event.metaKey || event.ctrlKey || event.altKey) return;
-    if (target.closest(".showcase-nav")) return;
+
+    // Only capture page-level keys while the Feature Tour is visible in the viewport.
+    const rect = root.getBoundingClientRect();
+    const visible = rect.bottom > 80 && rect.top < window.innerHeight - 80;
+    const focusedInside = activeEl ? root.contains(activeEl) : false;
+    if (!visible && !focusedInside) return;
+
+    // Let arrow/home/end/tab/enter keys work normally on showcase tabs and buttons.
+    if (
+      activeEl?.closest(".showcase-nav") &&
+      (event.key === "ArrowLeft" ||
+        event.key === "ArrowRight" ||
+        event.key === "Home" ||
+        event.key === "End" ||
+        event.key === "Enter" ||
+        event.key === "Tab")
+    ) {
+      return;
+    }
 
     const tabId = activeTabId();
     const res = handleHeroTourKey(state, tabId, pendingChord, event.key);
@@ -815,9 +832,6 @@ export function mountHeroTour(root: HTMLElement): void {
     else if (tabId === "panel-spec-peek") renderPeek();
     else if (tabId === "panel-spec-tasks") renderTasks();
     else renderParity();
-
-    const activePanel = root.querySelector<HTMLElement>(`#${tabId}`);
-    activePanel?.querySelector<HTMLElement>(".spine-specimen")?.focus();
   });
 
   renderAll();

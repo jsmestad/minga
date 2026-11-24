@@ -5345,71 +5345,136 @@ h2[data-status="planned"]:not([data-pill="off"])::before {
 }
 
 .section-closing {
-  background: #232634;
-  color: #c6d0f5;
-  border-top: 1px solid #414559;
-  border-bottom: 1px solid #414559;
+  background: var(--bg);
+  border-top: 2px solid var(--border-strong);
+  padding: 4rem 0;
 }
 
-.section-closing .section-index {
-  color: #a5adce;
+.closing-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.85fr);
+  gap: 2.5rem;
+  align-items: start;
 }
 
-.section-closing .section-index span {
-  color: #ca9ee6;
+.closing-copy h2 {
+  margin: 0.35rem 0 0.75rem;
+  font-size: clamp(1.75rem, 3vw, 2.35rem);
+  line-height: 1.12;
+  letter-spacing: -0.028em;
+  color: var(--text);
+  text-wrap: balance;
 }
 
-.section-closing h2 {
-  color: #f2f4f8;
+.closing-copy p {
+  margin: 0 0 1.4rem;
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: 38rem;
 }
 
-.section-closing p {
-  color: #b5bfe2;
+.closing-meta {
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  padding: 1.35rem 1.45rem;
 }
 
-.section-closing a:not(.btn) {
-  color: #ca9ee6;
-  text-decoration-color: rgba(202, 158, 230, 0.45);
-}
-
-.section-closing a:not(.btn):hover {
-  color: #dcb8f2;
-  text-decoration-color: #dcb8f2;
-}
-
-.section-closing .btn {
-  background: transparent;
-  color: #c6d0f5;
-  border-color: #51576d;
-}
-
-.section-closing .btn:hover {
-  border-color: #ca9ee6;
-  color: #f2f4f8;
-}
-
-.section-closing .btn-primary {
-  background: #ca9ee6;
-  color: #181a24;
-  border-color: #ca9ee6;
+.closing-meta-k {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
   font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 0.5rem;
 }
 
-.section-closing .btn-primary:hover {
-  background: #dcb8f2;
-  border-color: #dcb8f2;
-  color: #181a24;
+.closing-meta p {
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
 }
 
-.section-closing .follow-strip {
-  background: #292c3c;
+.closing-meta-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.1rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+
+/* Catppuccin Frappé styling for all .code-tabs (install & recipe tabs) */
+
+.code-tabs {
+  background: #303446;
   border-color: #414559;
 }
 
-.section-closing .follow-strip p,
-.section-closing .follow-strip strong {
+.code-tabs-header {
+  background: #292c3c;
+  border-bottom-color: #414559;
+}
+
+.code-tab {
+  color: #a5adce;
+  border-right-color: #414559;
+}
+
+.code-tab:hover {
+  color: #c6d0f5;
+  background: rgba(202, 158, 230, 0.06);
+}
+
+.code-tab[aria-selected="true"] {
+  color: #f2f4f8;
+  background: #303446;
+  border-bottom-color: #ca9ee6;
+}
+
+.code-tabs .copy-btn,
+.code-card.is-frappe .copy-btn {
+  color: #c6d0f5;
+  border-color: #51576d;
+  background: #232634;
+}
+
+.code-tabs .copy-btn:hover,
+.code-card.is-frappe .copy-btn:hover {
+  color: #f2f4f8;
+  border-color: #ca9ee6;
+}
+
+.code-tabs pre,
+.code-tabs pre code,
+.code-card.is-frappe pre,
+.code-card.is-frappe pre code {
+  background: #303446;
   color: #c6d0f5;
 }
+
+.code-tabs .ckw,
+.code-card.is-frappe .ckw { color: #ca9ee6; }
+.code-tabs .cat,
+.code-card.is-frappe .cat { color: #8caaee; }
+.code-tabs .cst,
+.code-card.is-frappe .cst { color: #a6d189; }
+.code-tabs .cmod,
+.code-card.is-frappe .cmod { color: #e5c890; }
+.code-tabs .ccm,
+.code-card.is-frappe .ccm { color: #838ba7; font-style: italic; }
+.code-tabs .cnum,
+.code-card.is-frappe .cnum { color: #ef9f76; }
+.code-tabs .cop,
+.code-card.is-frappe .cop { color: #99d1db; }
+.code-tabs .tok-kw { color: #ca9ee6; }
+.code-tabs .tok-atom { color: #8caaee; }
+.code-tabs .tok-str { color: #a6d189; }
+.code-tabs .tok-mod { color: #e5c890; }
+.code-tabs .tok-comment { color: #838ba7; font-style: italic; }
+.code-tabs .tok-num { color: #ef9f76; }
 
 /* Open 2-column rules without repetitive card boxes */
 
@@ -5684,7 +5749,8 @@ h2[data-status="planned"]:not([data-pill="off"])::before {
   .iso-pillar-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .lab-launchpad {
+  .lab-launchpad,
+  .closing-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -1,5 +1,6 @@
 /* Lesson 04: Interactive "Coming From..." Translator + Live-Themed config.exs Playground. */
 
+import { renderElixirBlockDom } from "./highlight.ts";
 import { completeMission } from "./progress.ts";
 
 export type EditorBackground = "lua" | "elisp" | "vscode";
@@ -306,7 +307,7 @@ export function mountElixirPlayground(root: HTMLElement): void {
     const codeEl = root.querySelector<HTMLElement>("#cfg-preview-code");
     const previewEl = root.querySelector<HTMLElement>("[data-theme-preview]");
     if (codeEl) {
-      codeEl.textContent = generateConfigExs(cfg);
+      renderElixirBlockDom(codeEl, generateConfigExs(cfg));
     }
     if (previewEl) {
       const p = THEME_PALETTES[cfg.theme];
