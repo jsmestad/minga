@@ -198,7 +198,7 @@ public struct AgentContextBar: View {
         case 1:
             return "Now: \(todo.description)"
         case 2:
-            return "Done: \(todo.description)"
+            return "\(SpineState.done.word): \(todo.description)"
         case 3:
             return "Blocked: \(todo.description)"
         default:
