@@ -2233,10 +2233,49 @@ defmodule MingaAgent.Providers.Native do
     initial_mode = approval_mode(lctx.config)
     indexed_calls = Enum.with_index(tool_calls)
 
-    # Group calls into runs: consecutive read-only calls form a concurrent
-    # batch; each sequential (mutating/approval) call is its own run.
-    runs = group_by_effect(indexed_calls, lctx, initial_mode)
-    execute_effect_runs(lctx, checkpoint_id, runs, [])
+    # Approval-gated calls need user interaction and are sequential relative
+    # to each other. Everything else uses effect-aware grouping (consecutive
+    # reads concurrent, mutating calls sequential). Both pipelines run in
+    # parallel so allowed tools start while approval is pending.
+    {approval_calls, effect_calls} =
+      Enum.split_with(indexed_calls, fn {tool_call, _index} ->
+        tool_call.name == "ask_user" or
+          tool_requires_approval?(tool_call, lctx, initial_mode)
+      end)
+
+    runs = group_by_effect(effect_calls, lctx, initial_mode)
+
+    effect_task =
+      if runs != [] do
+        Task.async(fn -> execute_effect_runs(lctx, checkpoint_id, runs, []) end)
+      end
+
+    try do
+      approval_result = execute_approval_calls(lctx, checkpoint_id, approval_calls)
+
+      with {:ok, _} <- approval_result do
+        if effect_task do
+          Task.await(effect_task, :infinity)
+        else
+          :ok
+        end
+      end
+    after
+      if effect_task, do: Task.shutdown(effect_task, :brutal_kill)
+    end
+  end
+
+  @spec execute_approval_calls(loop_ctx(), String.t(), [indexed_tool_call()]) ::
+          {:ok, [{non_neg_integer(), tool_execution_result()}]} | {:error, term()}
+  defp execute_approval_calls(_lctx, _checkpoint_id, []), do: {:ok, []}
+
+  defp execute_approval_calls(lctx, checkpoint_id, calls) do
+    Enum.reduce_while(calls, {:ok, []}, fn call, {:ok, results} ->
+      case execute_sequential_tool_task(lctx, checkpoint_id, call) do
+        {_index, %{persistence_error: reason}} -> {:halt, {:error, reason}}
+        result -> {:cont, {:ok, [result | results]}}
+      end
+    end)
   end
 
   @typep effect_run ::
