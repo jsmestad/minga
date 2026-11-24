@@ -76,62 +76,61 @@ defmodule MingaEditor.Input.HandlerRegistry do
   @spec snapshot_on(GenServer.server()) :: [sourced_handler()]
   def snapshot_on(server), do: GenServer.call(server, :snapshot)
 
+  @typep state :: {[handler_entry()], boolean()}
+
   @impl true
-  @spec init(keyword()) :: {:ok, [handler_entry()]}
+  @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
+    name = Keyword.get(opts, :name, __MODULE__)
     builtins = Keyword.get(opts, :builtins, MingaEditor.Input.builtin_handler_entries())
-    state = builtins
-    publish(state)
-    {:ok, state}
+    global? = name == __MODULE__
+    if global?, do: publish(builtins)
+    {:ok, {builtins, global?}}
   end
 
   @impl true
-  @spec handle_call(term(), GenServer.from(), [handler_entry()]) ::
-          {:reply, term(), [handler_entry()]}
-  def handle_call(:snapshot, _from, entries) do
-    sorted =
-      entries
-      |> Enum.sort_by(fn {module, _source, priority} ->
-        {priority, Atom.to_string(module)}
-      end)
-      |> Enum.map(fn {module, source, _priority} -> {module, source} end)
-
-    {:reply, sorted, entries}
+  @spec handle_call(term(), GenServer.from(), state()) ::
+          {:reply, term(), state()}
+  def handle_call(:snapshot, _from, {entries, global?}) do
+    sorted = sort_snapshot(entries)
+    {:reply, sorted, {entries, global?}}
   end
 
-  def handle_call({:register, source, module, priority}, _from, entries) do
+  def handle_call({:register, source, module, priority}, _from, {entries, global?}) do
     entry = {module, source, priority}
 
     updated =
       Enum.reject(entries, fn {m, s, _p} -> m == module and s == source end)
 
     updated = [entry | updated]
-    publish(updated)
-    {:reply, :ok, updated}
+    if global?, do: publish(updated)
+    {:reply, :ok, {updated, global?}}
   end
 
-  def handle_call({:unregister_source, source}, _from, entries) do
+  def handle_call({:unregister_source, source}, _from, {entries, global?}) do
     updated = Enum.reject(entries, fn {_m, s, _p} -> s == source end)
-    publish(updated)
-    {:reply, :ok, updated}
+    if global?, do: publish(updated)
+    {:reply, :ok, {updated, global?}}
   end
 
-  def handle_call(:reset, _from, _entries) do
+  def handle_call(:reset, _from, {_entries, global?}) do
     builtins = MingaEditor.Input.builtin_handler_entries()
-    publish(builtins)
-    {:reply, :ok, builtins}
+    if global?, do: publish(builtins)
+    {:reply, :ok, {builtins, global?}}
+  end
+
+  @spec sort_snapshot([handler_entry()]) :: [sourced_handler()]
+  defp sort_snapshot(entries) do
+    entries
+    |> Enum.sort_by(fn {module, _source, priority} ->
+      {priority, Atom.to_string(module)}
+    end)
+    |> Enum.map(fn {module, source, _priority} -> {module, source} end)
   end
 
   @spec publish([handler_entry()]) :: :ok
   defp publish(entries) do
-    sorted =
-      entries
-      |> Enum.sort_by(fn {module, _source, priority} ->
-        {priority, Atom.to_string(module)}
-      end)
-      |> Enum.map(fn {module, source, _priority} -> {module, source} end)
-
-    :persistent_term.put(@snapshot_key, sorted)
+    :persistent_term.put(@snapshot_key, sort_snapshot(entries))
     :ok
   end
 end
