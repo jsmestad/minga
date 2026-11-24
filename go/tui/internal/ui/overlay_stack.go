@@ -8,9 +8,11 @@ import (
 
 // Which-key and the picker are what the user just asked for, so they paint above every BEAM-placed footer band (whose layer z is its placement z, 150 to 301, plus 2; see overlayLayer).
 // An Agent activity card left open while Minga works must not cover them (#4157).
+// The picker's action menu opens from the picker, so it paints above it.
 const (
-	whichKeyLayerZ = 1000
-	pickerLayerZ   = 1001
+	whichKeyLayerZ         = 1000
+	pickerLayerZ           = 1001
+	pickerActionMenuLayerZ = 1002
 )
 
 // floatingOverlayLayers returns the lipgloss layers for all active floating

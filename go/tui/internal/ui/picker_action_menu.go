@@ -39,7 +39,7 @@ func (m Model) floatingPickerActionMenuLayer() *lipgloss.Layer {
 	x := max((m.width-width)/2, 0)
 	y := max((m.height-height)/2, 0)
 	m.zones.picker.actionBox = uiRect{X: x, Y: y, Width: width, Height: height}
-	return lipgloss.NewLayer(m.zones.ScanInto(menu, x, y)).X(x).Y(y).Z(20)
+	return lipgloss.NewLayer(m.zones.ScanInto(menu, x, y)).X(x).Y(y).Z(pickerActionMenuLayerZ)
 }
 
 // pickerActionMenuWidth is the popover's outer width: the widest row inside the anatomy.md popover bounds, never wider than the terminal.
