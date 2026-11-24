@@ -25,14 +25,7 @@ defmodule Minga.Extensions.RecipePacks do
 
   @doc false
   @spec child_spec(keyword()) :: Supervisor.child_spec()
-  def child_spec(opts) do
-    %{
-      id: __MODULE__,
-      start: {__MODULE__, :start_link, [opts]},
-      type: :worker,
-      restart: :temporary
-    }
-  end
+  def child_spec(opts), do: PackLoader.child_spec(__MODULE__, opts)
 
   @doc "Loads bundled recipe packs synchronously and returns `:ignore` (no process remains)."
   @spec start_link(keyword()) :: :ignore
