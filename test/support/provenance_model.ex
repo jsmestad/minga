@@ -199,7 +199,7 @@ defmodule Minga.Test.ProvenanceModel do
               group = if entry.group == old, do: new, else: entry.group
               deletions = substitute(entry.deletions, old, new)
 
-              if group == new and deletions == [new],
+              if group == new and deletions == [new] and entry.overlaps == [],
                 do: [],
                 else: [
                   %{
@@ -282,8 +282,10 @@ defmodule Minga.Test.ProvenanceModel do
         true -> nil
       end
 
-    # Bytes this group wrote and now deletes are gone, so the walk passes straight over them.
-    dropped = MapSet.filter(marked, &(Enum.at(model.entries, &1).group == group))
+    # Bytes this group wrote inside the deleted range are gone before the walk, so it passes straight over them. The
+    # cover rule runs after the walk, so the tombstones it consumes are still there.
+    dropped =
+      MapSet.filter(MapSet.new(first..last//1), &(Enum.at(model.entries, &1).group == group))
 
     if owner,
       do: {owner, overlap_block(model, author, owner, live_after, dropped, first)},
@@ -302,7 +304,7 @@ defmodule Minga.Test.ProvenanceModel do
       owner_group.author != author and
       not (model.entries
            |> Enum.slice((before + 1)..(later - 1)//1)
-           |> Enum.any?(&(owner in &1.deletions)))
+           |> Enum.any?(&separates?(&1, owner)))
   end
 
   defp overlap_block(model, author, owner, live_after, dropped, first) do
@@ -310,7 +312,7 @@ defmodule Minga.Test.ProvenanceModel do
       model.entries
       |> Enum.with_index()
       |> Enum.drop(first)
-      |> Enum.reject(fn {_entry, index} -> MapSet.member?(dropped, index) end)
+      |> Enum.reject(fn {entry, index} -> MapSet.member?(dropped, index) or inert?(entry) end)
 
     walked =
       Enum.drop_while(rest, fn {entry, index} ->
@@ -355,6 +357,7 @@ defmodule Minga.Test.ProvenanceModel do
       model.entries
       |> Enum.with_index()
       |> Enum.drop(last + 1)
+      |> Enum.reject(fn {entry, _index} -> inert?(entry) end)
       |> Enum.take_while(fn {entry, index} ->
         not MapSet.member?(live, index) and entry.group != owner and owner in entry.deletions
       end)
@@ -362,13 +365,18 @@ defmodule Minga.Test.ProvenanceModel do
     end
   end
 
+  # Text a step both wrote and deleted, kept only by compaction for another group's blocker; walks pass over it.
+  defp inert?(entry), do: entry.group != nil and entry.group in entry.deletions
+
+  defp separates?(entry, owner), do: owner in entry.deletions and not inert?(entry)
+
   defp inside?(_model, nil, _first, _owner), do: false
 
   defp inside?(model, left_index, first, owner) do
     Enum.at(model.entries, left_index).group == owner and
       not (model.entries
            |> Enum.slice((left_index + 1)..(first - 1)//1)
-           |> Enum.any?(&(owner in &1.deletions)))
+           |> Enum.any?(&separates?(&1, owner)))
   end
 
   @spec mark(entry(), pos_integer() | :untracked) :: [entry()]

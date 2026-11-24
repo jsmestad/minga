@@ -254,7 +254,7 @@ defmodule Minga.Buffer.ProvenanceTest do
       check all(
               original <- StreamData.string([?a..?e, ?\n], max_length: 20),
               commands <- StreamData.list_of(command(), max_length: 60),
-              max_runs: 300
+              max_runs: runs(300)
             ) do
         initial = {Provenance.new(byte_size(original)), ProvenanceModel.new(original), original}
 
@@ -273,7 +273,7 @@ defmodule Minga.Buffer.ProvenanceTest do
               {a, b, c, d} <-
                 StreamData.tuple({integer(0..20), integer(0..4), integer(0..20), integer(0..6)}),
               mine <- StreamData.string([?x..?z], max_length: 3),
-              max_runs: 2_000
+              max_runs: runs(2_000)
             ) do
         state = {Provenance.new(byte_size(original)), ProvenanceModel.new(original), original}
         {prov, model, text} = state
@@ -292,12 +292,41 @@ defmodule Minga.Buffer.ProvenanceTest do
       end
     end
 
+    property "edit_all in one pass equals edit/5 one change at a time, on multi-byte text" do
+      check all(
+              original <- StreamData.string([?a, ?\n, 0xE9, 0x1F600], max_length: 12),
+              commands <- StreamData.list_of(command(), max_length: 40),
+              {a, b, c} <-
+                StreamData.tuple({integer(0..1_000), integer(0..1_000), integer(0..12)}),
+              inserted <- StreamData.string([?x, 0xE9, 0x1F600], max_length: 3),
+              max_runs: runs(300)
+            ) do
+        initial = {Provenance.new(byte_size(original)), ProvenanceModel.new(original), original}
+
+        {prov, model, text} =
+          Enum.reduce(commands, initial, fn {kind, ca, cb, cc, ins} = command, state ->
+            next =
+              if rem(kind, 3) == 0,
+                do: batch_edit(state, ca, cb, cc, ins),
+                else: edit_command(state, ca, cb, cc, ins)
+
+            assert_matches(next)
+
+            next
+          end)
+
+        assert_matches({prov, model, text})
+        {_prov, _model, _text} = state = batch_edit({prov, model, text}, a, b, c, inserted)
+        assert_matches(state)
+      end
+    end
+
     property "compaction changes no document for any revert where each task's steps move together" do
       check all(
               original <- StreamData.string([?a..?e, ?\n], max_length: 20),
               commands <- StreamData.list_of(command(), max_length: 60),
               picks <- StreamData.list_of(StreamData.boolean(), length: 40),
-              max_runs: 300
+              max_runs: runs(300)
             ) do
         initial = {Provenance.new(byte_size(original)), ProvenanceModel.new(original), original}
         {prov, model, text} = Enum.reduce(commands, initial, &run(&1, &2, :keep_groups))
@@ -336,7 +365,7 @@ defmodule Minga.Buffer.ProvenanceTest do
       check all(
               original <- StreamData.string([?a..?e, ?\n], max_length: 20),
               commands <- StreamData.list_of(command(), max_length: 60),
-              max_runs: 300
+              max_runs: runs(300)
             ) do
         initial = {Provenance.new(byte_size(original)), ProvenanceModel.new(original), original}
         # A discarded Minga step is final, like a kept one, so this property never discards.
@@ -427,6 +456,9 @@ defmodule Minga.Buffer.ProvenanceTest do
       kind < 97 ->
         compact(state)
 
+      kind < 99 ->
+        batch_edit(state, a, b, c, inserted)
+
       true ->
         untracked_edit(state, a, b, inserted)
     end
@@ -481,6 +513,111 @@ defmodule Minga.Buffer.ProvenanceTest do
 
     {start, removed} = range(text, a, b, c)
     replace({prov, model, text}, id, start, removed, inserted)
+  end
+
+  # Several disjoint changes by one group through the one-pass path, against the model applying them one at a time from
+  # the last to the first.
+  defp batch_edit({prov, model, text}, a, b, c, inserted) do
+    applied = applied_ids(prov, model)
+    choice = rem(c, length(applied) + 3)
+
+    {id, prov, model} =
+      cond do
+        choice == length(applied) ->
+          open(prov, model, :you, nil)
+
+        choice == length(applied) + 1 ->
+          {:untracked, prov, model}
+
+        choice == length(applied) + 2 ->
+          open(
+            prov,
+            model,
+            {:minga, "task-#{rem(a, 2)}"},
+            {:minga, "task-#{rem(a, 2)}", "call-#{map_size(model.groups)}"}
+          )
+
+        true ->
+          {Enum.at(applied, choice), prov, model}
+      end
+
+    changes = disjoint_changes(text, a, b, inserted)
+    batch = Provenance.edit_all(prov, id, changes, :batch)
+
+    assert same_record?(
+             batch,
+             Provenance.edit_all(prov, id, changes, :each),
+             Map.keys(model.groups)
+           )
+
+    prov = batch
+
+    model =
+      changes
+      |> Enum.reverse()
+      |> Enum.reduce(model, fn {start, removed, new}, acc ->
+        ProvenanceModel.edit(acc, id, start, byte_size(removed), new)
+      end)
+
+    {prov, model, apply_changes(text, changes)}
+  end
+
+  # The same record as far as any caller can tell: authors, size, blockers, overlap marks, drafts, and tombstones.
+  defp same_record?(one, other, ids) do
+    spans =
+      &(Provenance.spans(&1, 0, Provenance.size(&1))
+        |> Enum.flat_map(fn {from, to, author, _key} -> List.duplicate(author, to - from) end))
+
+    Provenance.size(one) == Provenance.size(other) and spans.(one) == spans.(other) and
+      Enum.all?(ids, fn id ->
+        Provenance.blocker(one, id) == Provenance.blocker(other, id) and
+          MapSet.new(Provenance.overlaps_among(one, [id]), &elem(&1, 0)) ==
+            MapSet.new(Provenance.overlaps_among(other, [id]), &elem(&1, 0))
+      end) and Provenance.draft_count(one) == Provenance.draft_count(other) and
+      dead_text(one) == dead_text(other)
+  end
+
+  # The deleted text each group set of a tombstone keeps, in document order.
+  defp dead_text(prov) do
+    for run <- Provenance.runs(prov), not run.live, reduce: [] do
+      [{key, text} | rest] when key == {run.group, run.deletions} ->
+        [{key, text <> run.text} | rest]
+
+      acc ->
+        [{{run.group, run.deletions}, run.text} | acc]
+    end
+  end
+
+  # Up to five disjoint changes in document order, cut from the seeds.
+  defp disjoint_changes(text, a, b, inserted) do
+    size = byte_size(text)
+    count = rem(b, 5) + 1
+
+    points =
+      for n <- 1..(count * 2), into: MapSet.new(), do: rem(a * n + b * n * n, size + 1)
+
+    points
+    |> Enum.sort()
+    |> Enum.chunk_every(2)
+    |> Enum.with_index()
+    |> Enum.map(fn
+      {[from, to], n} ->
+        {from, binary_part(text, from, to - from), String.slice(inserted, 0, rem(n + a, 4))}
+
+      {[from], n} ->
+        {from, "", String.slice(inserted, 0, rem(n + b, 4))}
+    end)
+    |> Enum.reject(fn {_start, removed, new} -> removed == "" and new == "" end)
+  end
+
+  defp apply_changes(text, changes) do
+    changes
+    |> Enum.reverse()
+    |> Enum.reduce(text, fn {start, removed, new}, acc ->
+      binary_part(acc, 0, start) <>
+        new <>
+        binary_part(acc, start + byte_size(removed), byte_size(acc) - start - byte_size(removed))
+    end)
   end
 
   defp untracked_edit({prov, model, text}, a, b, inserted) do
@@ -565,6 +702,7 @@ defmodule Minga.Buffer.ProvenanceTest do
 
     for id <- Map.keys(model.groups) do
       keys = prov |> Provenance.overlaps_among([id]) |> MapSet.new(&elem(&1, 0))
+
       assert keys == ProvenanceModel.overlaps_among(model, [id])
     end
 
@@ -614,4 +752,7 @@ defmodule Minga.Buffer.ProvenanceTest do
 
     {document, prov}
   end
+
+  # PROPERTY_RUNS scales every property here, for the high-count runs a review asks for.
+  defp runs(count), do: count * String.to_integer(System.get_env("PROPERTY_RUNS", "1"))
 end

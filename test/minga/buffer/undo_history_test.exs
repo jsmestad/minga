@@ -495,7 +495,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
 
   describe "interleaved histories" do
     property "your u never changes text Minga wrote, and redo only removes Minga text you deleted" do
-      check all(commands <- StreamData.list_of(command(), max_length: 40), max_runs: 200) do
+      check all(commands <- StreamData.list_of(command(), max_length: 40), max_runs: runs(200)) do
         Enum.reduce(commands, world("abc\ndef\n"), fn command, world ->
           before = live_minga_runs(world)
           world = run(command, world)
@@ -514,7 +514,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
     end
 
     property "SPC a u reverts what the model accepts, keeps your visible text, and with undo restores the original" do
-      check all(commands <- StreamData.list_of(command(), max_length: 40), max_runs: 200) do
+      check all(commands <- StreamData.list_of(command(), max_length: 40), max_runs: runs(200)) do
         world = Enum.reduce(commands, world("abc\ndef\n"), &run/2)
 
         case unwind(world) do
@@ -529,7 +529,10 @@ defmodule Minga.Buffer.UndoHistoryTest do
     end
 
     property "with coarse recording, rejecting any task is exact or refused, and SPC a u matches the model" do
-      check all(commands <- StreamData.list_of(coarse_command(), max_length: 30), max_runs: 300) do
+      check all(
+              commands <- StreamData.list_of(coarse_command(), max_length: 30),
+              max_runs: runs(300)
+            ) do
         world = Enum.reduce(commands, world("ab cd ef\ngh ij\n", recording: :coarse), &run/2)
         assert_rejects_exact_or_refused(world)
         {_done_or_stuck, world} = reject_all(world)
@@ -547,7 +550,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
               your_word <- StreamData.integer(0..599),
               your_text <- StreamData.string(?x..?z, min_length: 1, max_length: 3),
               partial <- StreamData.boolean(),
-              max_runs: 25
+              max_runs: runs(25)
             ) do
         line = Enum.join(words, " ") <> "\n"
 
@@ -565,26 +568,37 @@ defmodule Minga.Buffer.UndoHistoryTest do
       end
     end
 
-    property "compaction slices bring the runs under 75% of the budget or leave no drafts, and change no outcome" do
+    # Compaction changes no outcome reachable at the moment it runs: the document, your undo, and every task's reject.
+    # Later edits may resolve differently, because the merged step's replacement now spans the absorbed one; the
+    # compacted world then keeps every invariant on its own (the model checks in `unwind/1`).
+    property "compaction slices reach 75% of the budget or leave no drafts, and change no outcome at that moment" do
       check all(
               commands <- StreamData.list_of(command(), max_length: 40),
+              cut <- StreamData.integer(0..40),
               budget <- StreamData.integer(4..30),
               slice <- StreamData.integer(1..20),
-              max_runs: 300
+              max_runs: runs(300)
             ) do
-        plain = Enum.reduce(commands, world("abc\ndef\n"), &run/2)
+        {before, rest} = Enum.split(commands, cut)
+        plain = Enum.reduce(before, world("abc\ndef\n", run_budget: budget), &run/2)
+        compacted = plain |> want_compaction() |> compact_fully(slice)
+
+        assert text(compacted) == text(plain)
+        assert outcome(step(compacted, :undo)) == outcome(step(plain, :undo))
+        %{task_ticks: ticks} = plain.history
+
+        for {task, _tick} <- ticks do
+          assert reject_text(compacted, task) == reject_text(plain, task)
+        end
 
         compacted =
-          Enum.reduce(commands, world("abc\ndef\n", run_budget: budget), fn command, world ->
+          Enum.reduce(rest, compacted, fn command, world ->
             command |> run(world) |> compact_fully(slice)
           end)
 
-        assert text(compacted) == text(plain)
-
-        case {unwind(plain), unwind(compacted)} do
-          {{:done, a}, {:done, b}} -> assert text(a) == text(b)
-          {_plain, {:stuck, b}} -> assert UnitModel.revertable_units(b.history) == MapSet.new()
-          {{:stuck, _a}, {:done, b}} -> assert text(b) == "abc\ndef\n"
+        case unwind(compacted) do
+          {:done, world} -> assert text(world) == "abc\ndef\n"
+          {:stuck, world} -> assert UnitModel.revertable_units(world.history) == MapSet.new()
         end
       end
 
@@ -604,7 +618,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
     end
 
     property "repeated SPC a u leaves only tasks your visible edits hold" do
-      check all(commands <- StreamData.list_of(command(), max_length: 40), max_runs: 200) do
+      check all(commands <- StreamData.list_of(command(), max_length: 40), max_runs: runs(200)) do
         world = Enum.reduce(commands, world("abc\ndef\n"), &run/2)
         {_done_or_stuck, world} = reject_all(world)
         assert UnitModel.revertable_units(world.history) == MapSet.new()
@@ -786,6 +800,30 @@ defmodule Minga.Buffer.UndoHistoryTest do
     })
   end
 
+  # Asks for compaction whatever the budget says, as a Minga step over budget would.
+  defp want_compaction(world) do
+    %{history: history} = world
+    %{world | history: %{history | compaction_wanted: true}}
+  end
+
+  # Outcomes as far as compaction promises: a block names the same task, though maybe the step that absorbed another.
+  defp outcome({:ok, world, _restore}), do: {:ok, text(world)}
+  defp outcome(other), do: blocked_task(other)
+
+  defp reject_text(world, task) do
+    case UndoHistory.reject_task(world.history, task, world.version, world.doc) do
+      {:ok, restore, _history, _count} -> {:ok, Document.content(restore.document)}
+      other -> blocked_task(other)
+    end
+  end
+
+  defp blocked_task({:blocked, {:overlaps, :you}}), do: {:blocked, :you}
+  defp blocked_task({:blocked, {:overlaps, key}}), do: {:blocked, task_of(key)}
+  defp blocked_task(other), do: other
+
+  defp task_of({:untasked, _n}), do: {:minga, :untasked}
+  defp task_of({:minga, task, _step}), do: {:minga, task}
+
   # Runs compaction slices until the history says it is done, checking P6 at the end.
   defp compact_fully(world, slice) do
     if UndoHistory.compaction_wanted?(world.history) do
@@ -835,4 +873,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
         into: MapSet.new(),
         do: {run.id, run.bytes}
   end
+
+  # PROPERTY_RUNS scales every property here, for the high-count runs a review asks for.
+  defp runs(count), do: count * String.to_integer(System.get_env("PROPERTY_RUNS", "1"))
 end

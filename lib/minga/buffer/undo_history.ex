@@ -1016,12 +1016,7 @@ defmodule Minga.Buffer.UndoHistory do
     patches
     |> Enum.reverse()
     |> Enum.reduce(provenance, fn patch, acc ->
-      acc
-      |> anchored_changes(writer, patch)
-      |> Enum.reverse()
-      |> Enum.reduce(acc, fn {start, removed, inserted}, inner ->
-        Provenance.edit(inner, group, start, removed, inserted)
-      end)
+      Provenance.edit_all(acc, group, anchored_changes(acc, writer, patch))
     end)
   end
 
