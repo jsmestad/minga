@@ -104,7 +104,7 @@ By default it reads, left to right: the mode, needs-you (only when a task needs 
 | Segment | Shows |
 |---------|-------|
 | `:mode` | Current editing mode, such as `NORMAL`, `INSERT`, or `VISUAL` |
-| `:needs_you` | How many of Minga's tasks need you, only when one does. Click or `SPC a a` opens them |
+| `:needs_you` | How many of Minga's tasks need you, only when one does. Click or `SPC a a` opens them. It is the only segment that says "needs you": the `:minga` segment then shows just its mark and "Minga", so without `:needs_you` only that mark says it |
 | `:filename` | Buffer name, with a dot when unsaved. Click or `SPC ,` opens the switcher |
 | `:change` | Your position among Minga's changes in this file ("change 1/2"), while the cursor is inside one |
 | `:git` | Git branch and changed-line count ("main +11"). Click runs whatever `SPC g g` runs |
