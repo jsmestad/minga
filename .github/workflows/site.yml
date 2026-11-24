@@ -14,6 +14,7 @@ on:
       - "scripts/build_site.sh"
       - "scripts/check_site_links.py"
       - "test/scripts/check_site_links_test.py"
+      - "test/scripts/site_check_test.py"
       - "design/**"
       - "lib/minga/keymap/**"
       - "lib/minga/command/parser.ex"
@@ -33,6 +34,7 @@ on:
       - "scripts/build_site.sh"
       - "scripts/check_site_links.py"
       - "test/scripts/check_site_links_test.py"
+      - "test/scripts/site_check_test.py"
       - "design/**"
       - "lib/minga/keymap/**"
       - "lib/minga/command/parser.ex"
@@ -61,6 +63,9 @@ jobs:
       # ci.yml's lint job runs the same check on every change, because code outside this path filter feeds it.
       - name: Check site copy against the keymap and design docs
         run: python3 design/tools/site_check.py
+
+      - name: Test site copy check
+        run: python3 -m unittest discover -s test/scripts -p 'site_check_test.py' -v
 
       - name: Check storyboard flow invariants
         run: python3 design/tools/storyboard/check.py --final

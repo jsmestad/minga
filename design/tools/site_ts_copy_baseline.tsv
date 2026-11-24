@@ -1,0 +1,34 @@
+# Lab copy baseline: key legends and claim phrases that sat in the lab TypeScript when the guard landed.
+#
+# Rows may only be removed or lowered, never added or raised. The lab tickets under #4205 move this copy into the page HTML.
+# New lab copy goes in the page HTML, where design/tools/site_check.py reads it; see AGENTS.md, "Site and design docs stay in sync".
+#
+# A count is the total across site/ts/src, comments included, so moving or renaming a file needs no edit here.
+#
+# Prune rows the sources no longer reach:
+#   python3 design/tools/site_check.py --prune-ts-baseline
+# The writer keeps only rows that are already in this file and never raises a count, so it cannot add one.
+#
+# kind	value	count
+claim	*minga-queue*	2
+claim	*minga-review*	4
+claim	*minga-tasks*	6
+claim	300 ms	5
+claim	Already answered	3
+claim	Orbit	1
+claim	Subagent Peek	4
+claim	Twist	9
+claim	reveals shortcuts	1
+key	SPC ,	11
+key	SPC 1	2
+key	SPC 1-4	2
+key	SPC a	9
+key	SPC a a	3
+key	SPC a d	9
+key	SPC a i	4
+key	SPC a p	2
+key	SPC a y	9
+key	SPC b b	1
+key	SPC h r	5
+key	SPC m f	1
+key	SPC m r	1

@@ -11,6 +11,10 @@ The site makes two kinds of claims. Text inside an element with data-status="pla
 - Twist glyphs appear only inside an element with data-surface="gutter".
 - A claim about the default theme names Catppuccin Frappé.
 - Each phrase in design/tools/site_claims.toml that appears outside a planned block needs its code pattern to exist.
+- Page metadata follows the same rules as visible text: the `description`, `og:description` and `twitter:description` meta tags and every JSON-LD `description`. Metadata has no planned blocks of its own, so it is a claim about today's build unless `<head>` carries data-status="planned".
+- Lab copy belongs in the page HTML, where the rules above can read it. The check counts every leader sequence (`SPC` plus at least one key) and every phrase from site_claims.toml in site/ts/src/**/*.ts, and fails when a count is above the one design/tools/site_ts_copy_baseline.tsv allows. It reads each file as plain text, so comments count too. The baseline only shrinks: a row whose count is above the sources fails as well. This check runs only on a full run, with no page arguments.
+
+The visible label is CSS only (site/styles.css). A planned block draws an "In development" pill, or "In development · v0.1.0" when it names its release in data-since. A page that is wholly about an unreleased version shows one `.status-banner` under the site header instead, and its container carries data-pill="off".
 
 Run it from the repository root with Python 3.11 or newer. It needs no packages:
 
@@ -33,6 +37,8 @@ Ex commands are only recognised inside <code> or <kbd> when the name is a shippe
 
 from __future__ import annotations
 
+import html
+import json
 import re
 import sys
 import tomllib
@@ -46,6 +52,8 @@ KEYS_MD = ROOT / "docs" / "design" / "keys.md"
 DESIGN_DIR = ROOT / "docs" / "design"
 RETIRED = Path(__file__).with_name("site_retired_keys.txt")
 CLAIMS = Path(__file__).with_name("site_claims.toml")
+TS_SRC = SITE / "ts" / "src"
+TS_BASELINE = Path(__file__).with_name("site_ts_copy_baseline.tsv")
 
 KEYMAP_DIR = ROOT / "lib" / "minga" / "keymap"
 KEYMAP_FILES = [
@@ -60,6 +68,7 @@ SLASH_REGISTRY = ROOT / "lib" / "minga_editor" / "agent" / "slash_command.ex"
 MACOS_SOURCES = ROOT / "macos" / "Sources"
 
 SKIP_TAGS = {"script", "style", "svg", "template"}
+META_DESCRIPTIONS = {"description", "og:description", "twitter:description"}
 VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
 BLOCK_TAGS = {
     "p", "li", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6", "dd", "dt", "figcaption", "pre",
@@ -294,18 +303,38 @@ class SiteParser(HTMLParser):
         self.inline_elements: list[Element] = []
         self._block_counter = 0
         self._chunk_key = None
+        self._json_ld: tuple[int, Flags, list[str]] | None = None
 
     def _flags(self) -> Flags:
         return self.stack[-1].flags if self.stack else Flags()
 
+    def _metadata(self, line: int, flags: Flags, text: str) -> None:
+        """Add one metadata value as its own chunk, so the rules for visible text apply to it."""
+        self.chunks.append(Chunk(line, flags, text))
+        self._chunk_key = None
+
+    def _json_ld_descriptions(self, node, described: bool = False) -> list[str]:
+        """Every description in a JSON-LD value: a string, a list of them, or a `{"@value": ...}` object, at any depth."""
+        if isinstance(node, str):
+            return [node] if described else []
+        if isinstance(node, list):
+            return [d for v in node for d in self._json_ld_descriptions(v, described)]
+        if isinstance(node, dict):
+            return [d for k, v in node.items() for d in self._json_ld_descriptions(v, k == "description" or (described and k == "@value"))]
+        return []
+
     def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
         if self.skip_depth or tag in SKIP_TAGS:
+            if tag == "script" and not self.skip_depth and (a.get("type") or "").split(";")[0].strip().lower() == "application/ld+json":
+                self._json_ld = (self.getpos()[0], self._flags(), [])
             if tag not in VOID_TAGS:
                 self.skip_depth += 1
             return
+        if tag == "meta" and {(a.get("name") or "").lower(), (a.get("property") or "").lower()} & META_DESCRIPTIONS:
+            self._metadata(self.getpos()[0], self._flags(), a.get("content") or "")
         if tag in VOID_TAGS:
             return
-        a = dict(attrs)
         parent = self._flags()
         status = a.get("data-status")
         line = self.getpos()[0]
@@ -330,15 +359,26 @@ class SiteParser(HTMLParser):
         self.stack.append(Element(tag, flags, line, block_id))
 
     def handle_startendtag(self, tag, attrs):
-        if tag in VOID_TAGS or self.skip_depth:
+        if self.skip_depth:
             return
         self.handle_starttag(tag, attrs)
-        self.handle_endtag(tag)
+        if tag not in VOID_TAGS:
+            self.handle_endtag(tag)
 
     def handle_endtag(self, tag):
         if self.skip_depth:
             if tag not in VOID_TAGS:
                 self.skip_depth -= 1
+            if tag == "script" and not self.skip_depth and self._json_ld is not None:
+                line, flags, parts = self._json_ld
+                self._json_ld = None
+                try:
+                    descriptions = self._json_ld_descriptions(json.loads("".join(parts)))
+                except json.JSONDecodeError as error:
+                    self.report(self.page, line, "markup", "application/ld+json", f"JSON-LD does not parse, so its descriptions are unchecked: {error.msg}")
+                    return
+                for text in descriptions:
+                    self._metadata(line, flags, text)
             return
         if tag in VOID_TAGS:
             return
@@ -352,6 +392,8 @@ class SiteParser(HTMLParser):
                 return
 
     def handle_data(self, data):
+        if self._json_ld is not None:
+            self._json_ld[2].append(data)
         if self.skip_depth or not self.stack:
             return
         for el in self.stack:
@@ -542,18 +584,157 @@ def check_page(path: Path, keys: KeySets, retired: list[Retired], claims: list[C
                 report(page, el.line, "slash", text, "not a shipped slash command" + ("" if flags.planned else " (or designed, inside a planned block)"))
 
 
-def main() -> int:
+# ---------------------------------------------------------------------------
+# Lab copy in TypeScript
+# ---------------------------------------------------------------------------
+
+TS_ESCAPE_RE = re.compile(r"""\\["'`ntr]""")
+TS_TAG_RE = re.compile(r"</?[A-Za-z][^<>]*>")
+TS_COPY_ATTR_RE = re.compile(r"""\b(?:aria-label|title|alt|placeholder)=(["'])(.*?)\1""", re.S)
+TS_KEY = r"(?:TAB|RET|ESC|(?![\"'`])[!-~])"  # a quote ends the sequence: `"SPC " + key` is a bare SPC
+TS_LEADER_RE = re.compile(r"(?<![\w-])SPC((?: " + TS_KEY + r"(?=[\s,;:)<\"'`]|$|[.?!](?:[\s\"'`]|$)))*)")
+TS_RANGE_RE = re.compile(r" ([!-~])[-–]([!-~])(?![\w-])")
+
+TsCopy = dict[tuple[str, str], list[tuple[str, int]]]  # (kind, value) -> [(file, line)]
+
+
+def ts_text(source: str) -> str:
+    """Reduce a TypeScript source to the prose a reader could see, keeping its line breaks.
+
+    The scan does not know what a string literal is, so comments and code count too. Escapes that end a word (`\\"`, `\\n`) become a space, HTML tags go, entities are decoded and runs of spaces collapse, so `<kbd>SPC</kbd> <kbd>a</kbd>` and `SPC&nbsp;a` both read `SPC a`. A tag keeps the attributes a reader meets (aria-label, title, alt, placeholder).
+    """
+
+    def tag_copy(m: re.Match) -> str:
+        copy = " ".join(value for _, value in TS_COPY_ATTR_RE.findall(m.group(0)))
+        return f" {copy} " + "\n" * m.group(0).count("\n")
+
+    text = TS_ESCAPE_RE.sub(" ", source)
+    text = TS_TAG_RE.sub(tag_copy, text)
+    text = html.unescape(text)
+    return re.sub(r"[^\S\n]+", " ", text)
+
+
+def ts_claim_pattern(phrase: str) -> re.Pattern:
+    """Whole words only. A one-word phrase matches as written, so `Twist` in prose counts and a `"twist"` state tag does not."""
+    words = phrase.split()
+    body = r"\s+".join(re.escape(word) for word in words)
+    return re.compile(r"(?<![\w-])" + body + r"(?![\w-])", 0 if len(words) == 1 else re.I)
+
+
+def ts_copy(source: str, claims: list[Claim]) -> list[tuple[int, str, str]]:
+    """Return (line, kind, value) for each leader sequence and claim phrase in one source.
+
+    A leader sequence is `SPC` plus at least one key. A bare `SPC` is a shipped key and a common state value, so it is not counted. A range legend such as `SPC 1-4` is one sequence.
+    """
+    text = ts_text(source)
+    found: list[tuple[int, str, str]] = []
+    for number, line in enumerate(text.split("\n"), start=1):
+        for m in TS_LEADER_RE.finditer(line):
+            tokens = m.group(1).split()
+            while len(tokens) > 1 and tokens[-1] in ("/", ".", ",", ";", ":", "?", ")"):
+                tokens.pop()
+            legend = TS_RANGE_RE.match(line, m.end())
+            if legend:
+                tokens.append(f"{legend.group(1)}-{legend.group(2)}")
+            if tokens:
+                found.append((number, "key", " ".join(["SPC", *tokens])))
+    for claim in claims:
+        for m in ts_claim_pattern(claim.phrase).finditer(text):
+            found.append((text.count("\n", 0, m.start()) + 1, "claim", claim.phrase))
+    return found
+
+
+def scan_ts_copy(src: Path, claims: list[Claim]) -> TsCopy:
+    seen: TsCopy = {}
+    for path in sorted(src.rglob("*.ts")):
+        try:
+            source = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line, kind, value in ts_copy(source, claims):
+            seen.setdefault((kind, value), []).append((path.relative_to(src).as_posix(), line))
+    return seen
+
+
+def read_ts_baseline(path: Path, report) -> dict[tuple[str, str], tuple[int, int]]:
+    """Read the baseline as {(kind, value): (count, row line)}."""
+    rows: dict[tuple[str, str], tuple[int, int]] = {}
+    if not path.exists():
+        return rows
+    for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not raw.strip() or raw.startswith("#"):
+            continue
+        parts = raw.split("\t")
+        if len(parts) != 3 or not (parts[2].isascii() and parts[2].isdigit()) or int(parts[2]) < 1 or (parts[0], parts[1]) in rows:
+            report(display_path(path), number, "ts-baseline", raw, "a row is kind, value and a count of 1 or more, tab separated, once per value")
+            continue
+        rows[(parts[0], parts[1])] = (int(parts[2]), number)
+    return rows
+
+
+def display_path(path: Path) -> str:
+    return path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else str(path)
+
+
+def check_ts_copy(src: Path, baseline: Path, claims: list[Claim], findings: list[str]) -> None:
+    """Fail on lab copy in the TypeScript sources that the baseline does not allow, and on baseline rows the sources no longer reach."""
+
+    def report(page, line, kind, phrase, reason):
+        findings.append(f"{page}:{line} {kind} {phrase!r} {reason}")
+
+    allowed = read_ts_baseline(baseline, report)
+    seen = scan_ts_copy(src, claims)
+    for (kind, value), places in seen.items():
+        count = allowed.get((kind, value), (0, 0))[0]
+        if len(places) > count:
+            files = sorted({name for name, _ in places})
+            name, line = places[-1]
+            what = "key legend" if kind == "key" else "claim phrase"
+            reason = (
+                f"{what} in the lab TypeScript: {len(places)} in {', '.join(files)}, the baseline allows {count}. "
+                f"Move the copy into the page HTML; never add or raise rows in {display_path(baseline)}"
+            )
+            report(display_path(src / name), line, "ts-copy", value, reason)
+    for (kind, value), (count, number) in allowed.items():
+        actual = len(seen.get((kind, value), []))
+        if actual < count:
+            reason = f"stale row: the sources have {actual} of this {kind}, the row says {count}; run python3 design/tools/site_check.py --prune-ts-baseline"
+            report(display_path(baseline), number, "ts-baseline", value, reason)
+
+
+def write_ts_baseline(src: Path, baseline: Path, claims: list[Claim]) -> None:
+    """Rewrite the baseline from the sources. It keeps only rows that are already listed and never raises a count, so it cannot add debt. It lists everything only when the file does not exist."""
+    current = {key: len(places) for key, places in scan_ts_copy(src, claims).items()}
+    header: list[str] = []
+    if baseline.exists():
+        header = [line for line in baseline.read_text(encoding="utf-8").splitlines() if line.startswith("#")]
+        old = read_ts_baseline(baseline, lambda *_: None)
+        current = {key: min(count, old[key][0]) for key, count in current.items() if key in old}
+    rows = ["\t".join([*key, str(count)]) for key, count in sorted(current.items())]
+    baseline.write_text("\n".join([*header, *rows]) + "\n", encoding="utf-8")
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    options = [arg for arg in args if arg.startswith("--")]
+    if options and args != ["--prune-ts-baseline"]:
+        print("usage: site_check.py [page.html ...] | site_check.py --prune-ts-baseline (the prune takes no other argument)", file=sys.stderr)
+        return 2
+    if options:
+        write_ts_baseline(TS_SRC, TS_BASELINE, load_claims())
+        print(f"site check: pruned {display_path(TS_BASELINE)}")
+        return 0
+    pages = [Path(arg).resolve() for arg in args] or sorted(p for p in SITE.rglob("*.html") if "ts" not in p.relative_to(SITE).parts)
     keys = KeySets()
     shipped_keys(keys)
     designed_keys(keys)
     retired = load_retired()
     claims = load_claims()
     findings: list[str] = []
-    pages = [Path(arg).resolve() for arg in sys.argv[1:]] or sorted(
-        p for p in SITE.rglob("*.html") if "ts" not in p.relative_to(SITE).parts
-    )
     for page in pages:
         check_page(page, keys, retired, claims, findings)
+    if not args:
+        check_ts_copy(TS_SRC, TS_BASELINE, claims, findings)
     def order(entry: str) -> tuple[str, int]:
         location = entry.split(" ", 1)[0]
         page, _, line = location.rpartition(":")

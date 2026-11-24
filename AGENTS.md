@@ -803,7 +803,18 @@ When implementing features, completing planned work, or changing architecture:
 
 ### Site and design docs stay in sync
 
-The marketing site (`site/*.html`, served at mingacode.dev) teaches keys, state words, voice and the chrome model, so it drifts the moment those change elsewhere. A PR that changes keys, state words, voice or the chrome model updates `site/` in the same PR. Copy about a feature that has not shipped goes inside an element with `data-status="planned"` (optionally `data-since="v0.1.0"`), which draws a "Coming" pill; everything outside it is a claim about today's build. `python3 design/tools/site_check.py` enforces this in the site workflow: keys outside planned blocks must be in the shipped keymap, keys inside them must be in `docs/design/keys.md`, and feature phrases listed in `design/tools/site_claims.toml` need their code to exist. When a feature ships, move its copy out of the planned block in the same PR.
+The marketing site (`site/*.html`, served at mingacode.dev) teaches keys, state words, voice and the chrome model, so it drifts the moment those change elsewhere. A PR that changes keys, state words, voice or the chrome model updates `site/` in the same PR. Copy about a feature that has not shipped goes inside an element with `data-status="planned"` (optionally `data-since="v0.1.0"`); everything outside it is a claim about today's build. `python3 design/tools/site_check.py` enforces this in the site workflow: keys outside planned blocks must be in the shipped keymap, keys inside them must be in `docs/design/keys.md`, and feature phrases listed in `design/tools/site_claims.toml` need their code to exist. When a feature ships, move its copy out of the planned block in the same PR.
+
+Every planned block shows the reader a label. `data-status` stays `"planned"`; the visible wording lives in `site/styles.css` only.
+
+- **Pill.** A planned block draws an "In development" pill, or "In development · v0.1.0" when it carries `data-since`. A page that mixes shipped and unbuilt content uses a pill on each unbuilt item.
+- **Banner.** A page that is wholly about an unreleased version (`learn/editing`, `learn/agents`) shows one `.status-banner` as the first child of `<main>` instead of a pill on every item. Its `<main>` carries `data-status="planned"` and `data-pill="off"`.
+- **No silent blocks.** `data-pill="off"` hides the pill, so use it only on a block that sits under a banner or that holds its own pill, such as the Learn hub cards.
+
+The check also reads two places a reader sees that are not page text:
+
+- **Page metadata.** The `description`, `og:description` and `twitter:description` meta tags and every JSON-LD `description` follow the key and claim rules. They are claims about today's build unless `<head>` carries `data-status="planned"`. Mark the head only on a page that is wholly about an unreleased version.
+- **Lab copy in TypeScript.** Lab captions, legends and step text live in the page HTML, where the check reads them. The check counts every leader sequence (`SPC` plus a key) and every phrase from `site_claims.toml` across `site/ts/src/**/*.ts`, comments included, and fails when a count is above the one in `design/tools/site_ts_copy_baseline.tsv`. A row is kind, value and one total count, so moving or renaming a lab file needs no baseline edit. **Never add baseline rows or raise a count;** move the copy into the page instead. When you move copy out of TypeScript, run `python3 design/tools/site_check.py --prune-ts-baseline`: the check fails on stale rows. This check runs only on a full run, with no page arguments.
 
 ### Documentation voice and style
 

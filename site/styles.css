@@ -2382,9 +2382,9 @@ td:first-child {
   }
 }
 
-/* Planned features. Copy inside [data-status="planned"] describes something that has not shipped yet; design/tools/site_check.py treats everything outside it as a claim about today's build. data-pill="off" keeps the marking for the check without drawing a badge, for containers whose layout a badge would break or copy that already states its release target. */
+/* Planned features. Copy inside [data-status="planned"] describes something that has not shipped yet; design/tools/site_check.py treats everything outside it as a claim about today's build. The pill reads "In development", or "In development · v0.1.0" when the block names its release in data-since. data-pill="off" keeps the marking for the check without drawing a pill; use it only on a block that sits under a .status-banner or that holds its own pill (the Learn hub cards). */
 [data-status="planned"]:not([data-pill="off"])::before {
-  content: "Coming";
+  content: "In development";
   display: inline-block;
   margin-right: 0.45em;
   padding: 0.14em 0.45em 0.12em;
@@ -2404,7 +2404,7 @@ td:first-child {
 }
 
 [data-status="planned"][data-since]:not([data-pill="off"])::before {
-  content: "Coming · " attr(data-since);
+  content: "In development · " attr(data-since);
 }
 
 h1[data-status="planned"]:not([data-pill="off"])::before,
@@ -2416,6 +2416,27 @@ h2[data-status="planned"]:not([data-pill="off"])::before {
 
 .pillar-list li[data-status="planned"]:not([data-pill="off"])::before {
   margin-bottom: 0.35rem;
+}
+
+/* A table column can be narrower than the pill, so the pill wraps there instead of widening the table. */
+td [data-status="planned"]:not([data-pill="off"])::before {
+  white-space: normal;
+}
+
+/* Status banner. A page that is wholly about an unreleased version shows one line under the site header instead of a pill on every item. The label is the planned pill of the paragraph inside, so the wording stays in the rule above. */
+.status-banner {
+  border-bottom: 1px solid var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.status-banner p {
+  margin-top: 0;
+  margin-bottom: 0;
+  padding-top: 0.6rem;
+  padding-bottom: 0.6rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.5;
 }
 
 /* Learn curriculum, lesson pager, and interactive browser labs */
