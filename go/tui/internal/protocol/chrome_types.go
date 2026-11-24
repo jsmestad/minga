@@ -547,12 +547,21 @@ type AgentStartRemedy struct {
 	KeyHint string
 }
 
+// AgentLifecycleNotice is the BEAM's copy for a non-conversation chat: what
+// happened to the tab and the draft note under it. The frontend renders both
+// verbatim; an empty Note means no note line.
+type AgentLifecycleNotice struct {
+	Headline string
+	Note     string
+}
+
 type AgentChat struct {
 	Visible           bool
 	Status            byte
 	Lifecycle         AgentChatLifecycle
 	LifecycleReason   string
 	LifecycleRemedy   AgentStartRemedy
+	LifecycleNotice   AgentLifecycleNotice
 	ModelName         string
 	Prompt            string
 	PromptLineCount   byte

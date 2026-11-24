@@ -7,7 +7,6 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   alias MingaEditor.Agent.Activity
   alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.Agent.PendingQuestion
-  alias MingaEditor.Agent.StartFailure
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.WorkspaceStatus
   alias MingaEditor.Frontend.Emit.Context
@@ -111,14 +110,9 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
          _status,
          _action
        ),
-       do: start_failure_headline(failure)
+       do: failure.headline
 
   defp card_task(_ctx, activity, status, action), do: task(activity, status, action)
-
-  @spec start_failure_headline(StartFailure.t()) :: String.t()
-  defp start_failure_headline(%StartFailure{remedy: :set_up_provider}), do: "Agent needs setup"
-  defp start_failure_headline(%StartFailure{remedy: nil}), do: "Agent unavailable"
-  defp start_failure_headline(%StartFailure{}), do: "Agent could not start"
 
   @spec visible?(Activity.t(), AgentContext.status()) :: boolean()
   defp visible?(%Activity{}, status) when status in [:needs_you, :working, :iterating, :errored],

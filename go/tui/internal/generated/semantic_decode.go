@@ -968,12 +968,22 @@ func DecodeGuiAgentChatLifecycle(data []byte, offset int, windowEnd int) (GuiAge
 	if err != nil {
 		return GuiAgentChatLifecycle{}, offset, err
 	}
+	headline, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiAgentChatLifecycle{}, offset, err
+	}
+	note, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiAgentChatLifecycle{}, offset, err
+	}
 	return GuiAgentChatLifecycle{
 		Kind:        kind,
 		Reason:      reason,
 		Remedy:      remedy,
 		ActionLabel: actionLabel,
 		KeyHint:     keyHint,
+		Headline:    headline,
+		Note:        note,
 	}, pos, nil
 }
 

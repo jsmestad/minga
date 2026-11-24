@@ -1505,8 +1505,16 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       assert :ok = EffectScheduler.claim(scheduler, outcome)
 
-      failure = Outcome.failed(outcome.request, :model_catalog_unavailable)
-      {failed, ^failure} = CatalogStartup.apply(departed, failure)
+      failure = Outcome.failed(outcome.request, {:catalog_probe, :disk_full})
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          send(self(), {:applied, CatalogStartup.apply(departed, failure)})
+        end)
+
+      assert_received {:applied, {failed, ^failure}}
+      # The tab shows a plain sentence; the raw reason stays in the log.
+      assert log =~ "Model catalog load failed: {:catalog_probe, :disk_full}"
       assert Runtime.active_tab(failed.shell_runtime).id == source_id
 
       failed = MingaEditor.TabWorkflow.switch(failed, tab.id)

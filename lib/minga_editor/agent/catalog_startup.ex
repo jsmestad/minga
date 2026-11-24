@@ -82,15 +82,29 @@ defmodule MingaEditor.Agent.CatalogStartup do
 
   @impl true
   @spec apply(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
+  def apply(state, %Outcome{} = outcome) do
+    log_load_failure(outcome.value)
+    settle(state, outcome)
+  end
+
+  # The tab shows only a plain sentence, so the raw reason a load failed is
+  # kept in the log whether or not a tab still waits for the result.
+  @spec log_load_failure(Outcome.value()) :: :ok
+  defp log_load_failure({:failed, reason}),
+    do: Minga.Log.error(:agent, fn -> "[Agent] Model catalog load failed: #{inspect(reason)}" end)
+
+  defp log_load_failure(_value), do: :ok
+
   # A start carries the workspace it was requested for, so its outcome is
   # judged by that workspace, not by which tab is active now.
-  def apply(
-        state,
-        %Outcome{request: %{effect: %__MODULE__{action: {:start, _, _, _, _}}}} = outcome
-      ),
-      do: complete_start(state, outcome)
+  @spec settle(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
+  defp settle(
+         state,
+         %Outcome{request: %{effect: %__MODULE__{action: {:start, _, _, _, _}}}} = outcome
+       ),
+       do: complete_start(state, outcome)
 
-  def apply(state, %Outcome{request: %{effect: effect}, value: value} = outcome) do
+  defp settle(state, %Outcome{request: %{effect: effect}, value: value} = outcome) do
     current? = origin(state) == effect.origin and destination_current?(state, effect.action)
 
     case {current?, value} do

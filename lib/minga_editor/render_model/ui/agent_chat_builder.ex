@@ -58,6 +58,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     %AgentChat{
       visible?: true,
       lifecycle: {:failed, @composer_unavailable, nil},
+      lifecycle_headline: "Agent unavailable",
       prompt_visible_rows: 0,
       resident_messages: messages,
       resident_truncated?: truncated?,
@@ -84,6 +85,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     %AgentChat{
       visible?: true,
       lifecycle: presentation,
+      lifecycle_headline: lifecycle_headline(lifecycle),
+      draft_note: draft_note(lifecycle, visible_rows, ctx.intent.frame.editing_model),
       status: chat_status(ctx.intent.frame.shell_state, agent_ui, presentation),
       model_name: UIState.model_label(agent_ui),
       thinking_level: panel.thinking_level,
@@ -214,6 +217,43 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   defp chat_presentation(lifecycle, _focus) when lifecycle in [:starting, :unavailable],
     do: {lifecycle, nil}
+
+  # The notice headline says what happened to the tab. A failed lifecycle's
+  # headline is its StartFailure's own, the one the context card also shows.
+  @spec lifecycle_headline(UIState.chat_lifecycle()) :: String.t()
+  defp lifecycle_headline({:conversation, _session}), do: ""
+  defp lifecycle_headline(:starting), do: "Starting Agent"
+  defp lifecycle_headline({:failed, %StartFailure{headline: headline}}), do: headline
+  defp lifecycle_headline(:unavailable), do: "No active Agent session"
+
+  # The draft survives a failed or missing session; say so only where a
+  # composer is shown, and name the new-session key only when one is bound for
+  # this editing model.
+  @spec draft_note(UIState.chat_lifecycle(), non_neg_integer(), atom()) :: String.t()
+  defp draft_note({:failed, _failure}, visible_rows, editing_model) when visible_rows > 0,
+    do: saved_draft_note(editing_model)
+
+  defp draft_note(:unavailable, visible_rows, editing_model) when visible_rows > 0,
+    do: saved_draft_note(editing_model)
+
+  defp draft_note(_lifecycle, _visible_rows, _editing_model), do: ""
+
+  @spec saved_draft_note(atom()) :: String.t()
+  defp saved_draft_note(editing_model) do
+    case new_session_key_hint(editing_model) do
+      nil -> "Your draft is saved."
+      key -> "Your draft is saved. #{key} starts a new session."
+    end
+  end
+
+  @spec new_session_key_hint(atom()) :: String.t() | nil
+  defp new_session_key_hint(editing_model) do
+    AgentScope.new_session_key_hint(
+      Minga.Keymap.leader_trie(),
+      editing_model,
+      Minga.Config.get(:space_leader)
+    )
+  end
 
   # Key dispatch resolves CUA keys through one trie, a focused Vim composer's
   # keys through the prompt (Enter runs the remedy), and other Vim keys through

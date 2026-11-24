@@ -64,6 +64,7 @@ defmodule MingaEditor.Agent.UIStateTest do
     assert failed.chat_lifecycle ==
              {:failed,
               %StartFailure{
+                headline: "Agent could not start",
                 message: "The Agent provider could not start.",
                 remedy: {:retry, :provider}
               }}
