@@ -139,9 +139,9 @@ defmodule Minga.Mode.NormalTest do
 
     test "escape and unknown keys clear or preserve the right state" do
       {:continue, counted} = handle({?5, 0})
-      {:continue, cleared} = handle({27, 0}, counted)
+      {:execute, {:select_register, "\""}, cleared} = handle({27, 0}, counted)
       assert cleared.count == nil
-      assert {:continue, _} = handle({27, 0})
+      assert {:execute, {:select_register, "\""}, _} = handle({27, 0})
 
       assert {:continue, state} = handle({?z, 0})
       assert state.count == nil
