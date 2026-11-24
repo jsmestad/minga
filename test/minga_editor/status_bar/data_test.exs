@@ -573,8 +573,12 @@ defmodule MingaEditor.StatusBar.DataTest do
       assert common.needs_you_count == 1
       assert common.status.agent.agent_status == :needs_you
 
+      # A private segment table: another async module registers custom segments in the default one.
+      table = :"status_bar_data_needs_you_#{System.unique_integer([:positive])}"
+      start_supervised!({ModelineSegments, name: table})
+
       %Data{common: %Common{status: %SemanticStatusData{modeline_segments: segments}}} =
-        Data.with_modeline_segments(data, state.appearance.theme)
+        Data.with_modeline_segments(data, state.appearance.theme, table)
 
       ids = Enum.map(segments.left, & &1.id)
       assert :needs_you in ids

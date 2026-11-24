@@ -64,6 +64,19 @@ defmodule Minga.Storyboard.AssertionsTest do
     }
 
   describe "modeline" do
+    test "a state's word is said by one segment only" do
+      fg = Theme.state_color(@theme, :needs_you)
+      chip = %Segment{id: :needs_you, text: "Needs you", fg: fg, bg: 0, state: :needs_you}
+      minga = %Segment{id: :minga, text: "Minga", fg: fg, bg: 0, state: :needs_you}
+      assert_spoken_once(model(colored: [chip, minga]), :modeline, :needs_you)
+
+      twice = model(colored: [chip, %{minga | text: "Minga needs you"}])
+
+      assert_raise ExUnit.AssertionError, ~r/2 times/, fn ->
+        assert_spoken_once(twice, :modeline, :needs_you)
+      end
+    end
+
     test "segments in design order pass, an extra segment fails" do
       assert_modeline_order(model(), [:mode, :file, :filetype])
 

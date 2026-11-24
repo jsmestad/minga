@@ -245,6 +245,26 @@ defmodule Minga.Test.Storyboard.Assertions do
     model
   end
 
+  @doc """
+  Asserts the modeline says a state's word once: exactly one segment's words contain it (`Minga.Design.Tokens.state_word/1`, in any case).
+
+  Other segments may carry the state, so frontends draw its mark in its colour, but they do not repeat the word.
+  """
+  @spec assert_spoken_once(Model.t(), :modeline, Tokens.state_id()) :: Model.t()
+  def assert_spoken_once(%Model{} = model, :modeline, state) do
+    unless state in Tokens.state_ids(),
+      do: raise(ArgumentError, "unknown state token #{inspect(state)}")
+
+    word = String.downcase(Tokens.state_word(state))
+    segments = Model.modeline_segments(model)
+    speaking = Enum.filter(segments, &String.contains?(String.downcase(&1.text), word))
+
+    assert length(speaking) == 1,
+           "the modeline says #{inspect(word)} #{length(speaking)} times, expected once: #{summary(segments)}"
+
+    model
+  end
+
   @doc "Asserts a modeline segment is drawn in a design-token colour role."
   @spec assert_role(Model.t(), atom(), Tokens.color_role()) :: Model.t()
   def assert_role(%Model{} = model, segment_id, role) do

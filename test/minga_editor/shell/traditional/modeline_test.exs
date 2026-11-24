@@ -146,9 +146,15 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
           state ->
             minga = segment(data, :minga)
             assert minga.state == state
-            assert minga.text == "Minga " <> String.downcase(Tokens.state_word(state))
             assert minga.fg == Theme.state_color(@theme, state)
-            assert minga.label == Tokens.state(state).accessibility_label
+
+            # Needs-you is said by its own segment, so Minga's shows only its mark and name.
+            if state == :needs_you do
+              assert {minga.text, minga.label} == {"Minga", "Minga is waiting for you"}
+            else
+              assert minga.text == "Minga " <> String.downcase(Tokens.state_word(state))
+              assert minga.label == Tokens.state(state).accessibility_label
+            end
         end
       end
     end
@@ -163,9 +169,21 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       assert segment(elsewhere, :minga).text == "Minga editing retry.ex 2/3"
       assert segment(elsewhere, :minga).label == "Minga is working, editing retry.ex, step 2 of 3"
 
-      # Only the working state says where; a state that waits on you says the state.
-      waiting = Map.merge(elsewhere, %{agent_status: :approval_waiting})
-      assert segment(waiting, :minga).text == "Minga needs you 2/3"
+      # Only the working state says where; needs-you is said once, by its own segment, so Minga's says only "Minga".
+      waiting = Map.merge(elsewhere, %{agent_status: :approval_waiting, needs_you_count: 1})
+      minga = segment(waiting, :minga)
+      assert {minga.text, minga.state, minga.compact} == {"Minga 2/3", :needs_you, "2/3"}
+      assert minga.label == "Minga is waiting for you, step 2 of 3"
+      assert minga.key == "SPC a v"
+      assert segment(waiting, :needs_you).text == "Needs you"
+
+      spoken =
+        waiting
+        |> Modeline.gui_segments(@theme)
+        |> then(&(&1.left ++ &1.right))
+        |> Enum.filter(&(&1.text =~ ~r/needs you/i))
+
+      assert Enum.map(spoken, & &1.id) == [:needs_you]
     end
 
     test "the step through Minga's plan follows the words and the label" do

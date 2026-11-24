@@ -613,6 +613,8 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     {"editing #{name}", "editing #{name}"}
   end
 
+  # Needs-you is spoken once, by its own segment: Minga's shows only its mark, in the needs-you role, and "Minga".
+  defp minga_where(:needs_you, _data), do: {nil, nil}
   defp minga_where(state, _data), do: {String.downcase(Tokens.state_word(state)), nil}
 
   @spec custom_status_text(String.t() | nil) :: String.t() | nil
@@ -635,10 +637,15 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           {non_neg_integer(), pos_integer()} | nil
         ) :: String.t()
   defp minga_label(state, where, progress) do
-    [Tokens.state(state).accessibility_label, where, step_label(progress)]
+    [minga_state_label(state), where, step_label(progress)]
     |> Enum.reject(&is_nil/1)
     |> Enum.join(", ")
   end
+
+  # The needs-you segment says "1 task needs you"; Minga's own label says the same fact from Minga's side.
+  @spec minga_state_label(Tokens.state_id()) :: String.t()
+  defp minga_state_label(:needs_you), do: "Minga is waiting for you"
+  defp minga_state_label(state), do: Tokens.state(state).accessibility_label
 
   @spec step_label({non_neg_integer(), pos_integer()} | nil) :: String.t() | nil
   defp step_label({step, steps}), do: "step #{step} of #{steps}"

@@ -7,6 +7,7 @@ defmodule Minga.Storyboard.MingaStateTest do
 
   import Minga.Test.Storyboard.Assertions
 
+  alias Minga.Test.Storyboard.Model
   alias Minga.Test.Storyboard.Session
 
   @moduletag :storyboard
@@ -28,6 +29,10 @@ defmodule Minga.Storyboard.MingaStateTest do
 
     model
     |> assert_state(:modeline, :needs_you)
+    |> assert_spoken_once(:modeline, :needs_you)
     |> assert_modeline_order([:mode, :needs_you, :file, :minga, :filetype, :position])
+
+    minga = model |> Model.modeline_segments() |> Enum.find(&(&1.id == :minga))
+    assert {minga.text, minga.state} == {"Minga", :needs_you}
   end
 end
