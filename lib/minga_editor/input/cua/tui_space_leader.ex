@@ -56,9 +56,9 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
   end
 
   # Any other key while SPC is pending checks the leader root. Once a prefix is active,
-  # continue resolving keys inside the which-key node before normal CUA dispatch sees them.
+  # `Input.WhichKey` resolves the following keys inside the which-key node.
   def handle_key(state, cp, mods) do
-    handle_non_space_key(state, cp, mods, pending?(state), active_leader_node(state))
+    if pending?(state), do: retract_into_leader(state, cp, mods), else: {:passthrough, state}
   end
 
   # A focused composer or overlay owns its text in another handler; SPC is a plain
@@ -74,15 +74,9 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
     {:handled, install_timer(state, generation, timer)}
   end
 
-  @spec handle_non_space_key(
-          EditorState.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          boolean(),
-          Bindings.node_t() | nil
-        ) ::
+  @spec retract_into_leader(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
-  defp handle_non_space_key(state, cp, mods, true, _node) do
+  defp retract_into_leader(state, cp, mods) do
     space_buffer = space_buffer(state)
     state = cancel(state)
 
@@ -98,14 +92,6 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
         state = enter_leader(state, node)
         {:handled, state}
     end
-  end
-
-  defp handle_non_space_key(state, cp, mods, false, node) when is_map(node) do
-    continue_leader(state, node, {cp, mods})
-  end
-
-  defp handle_non_space_key(state, _cp, _mods, false, _node) do
-    {:passthrough, state}
   end
 
   @doc "Expires a matching timeout generation and ignores stale deliveries."
@@ -174,11 +160,6 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
     :exit, _ -> nil
   end
 
-  @spec active_leader_node(EditorState.t()) :: Bindings.node_t() | nil
-  defp active_leader_node(state) do
-    if active?(state), do: state.shell_runtime.state.whichkey.node, else: nil
-  end
-
   @spec begin_window(EditorState.t(), pid() | nil) :: {non_neg_integer(), EditorState.t()}
   defp begin_window(%EditorState{} = state, space_buffer) do
     %TraditionalState{} = shell_state = Runtime.state(state.shell_runtime)
@@ -232,32 +213,6 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
     else
       Commands.execute(state, {:leader_start, node})
     end
-  end
-
-  @spec continue_leader(EditorState.t(), Bindings.node_t(), Bindings.key()) ::
-          MingaEditor.Input.Handler.result()
-  defp continue_leader(state, node, key) do
-    case Bindings.lookup(node, key) do
-      {:command, command} ->
-        state = cancel_leader(state)
-        {:handled, execute_command(state, command)}
-
-      {:prefix, sub_node} ->
-        {:handled, advance_leader(state, sub_node)}
-
-      :not_found ->
-        {:passthrough, cancel_leader(state)}
-    end
-  end
-
-  @spec advance_leader(EditorState.t(), Bindings.node_t()) :: EditorState.t()
-  defp advance_leader(state, node) do
-    Commands.execute(state, {:leader_progress, node})
-  end
-
-  @spec cancel_leader(EditorState.t()) :: EditorState.t()
-  defp cancel_leader(state) do
-    Commands.execute(state, :leader_cancel)
   end
 
   @spec execute_command(EditorState.t(), atom() | tuple()) :: EditorState.t()
