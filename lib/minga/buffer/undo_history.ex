@@ -34,7 +34,7 @@ defmodule Minga.Buffer.UndoHistory do
 
   @max_entries 1000
   # Runs, tombstones included, past which a Minga step asks for draft compaction; measured, see the PR for #4048.
-  @run_budget 50_000
+  @run_budget 25_000
   # Deleted text kept as tombstones past which compaction is asked for even under the run budget.
   @dead_text_budget 64 * 1024 * 1024
   @coalesce_ms 300

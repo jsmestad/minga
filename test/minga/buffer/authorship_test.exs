@@ -273,6 +273,79 @@ defmodule Minga.Buffer.AuthorshipTest do
                       %{text: "Dropped your edit near line 2 of " <> _}}
     end
 
+    # Check 5: a large file where Minga rewrites scattered lines and adds one at the top around a word you typed.
+    test "on a 12000-line file, scattered Minga rewrites and a new top line keep your word and its undo" do
+      lines = for n <- 1..12_000, do: "    value_#{n} = compute(alpha_#{n}, beta, gamma)\n"
+      buffer = start(Enum.join(lines))
+      replace_at(buffer, {6000, 4}, 0, "mine ")
+      content = BufferProcess.content(buffer)
+
+      rewritten =
+        content
+        |> String.split("\n")
+        |> Enum.with_index()
+        |> Enum.map_join("\n", fn {line, n} ->
+          if rem(n, 120) == 7, do: String.replace(line, "beta", "BETA"), else: line
+        end)
+
+      minga_replace(buffer, "# header\n" <> rewritten, step("t", "s1"))
+
+      assert BufferProcess.author_at(buffer, {6001, 5}) == :you
+      assert BufferProcess.author_at(buffer, {6001, 12}) == :unattributed
+      assert BufferProcess.author_at(buffer, {8, 40}) == :unattributed
+      assert BufferProcess.author_at(buffer, {8, 33}) == {:minga, "t"}
+      assert :ok = BufferProcess.undo(buffer)
+      refute BufferProcess.content(buffer) =~ "mine "
+    end
+
+    # Check 5, reversed: your formatter changes the line count over Minga's unreviewed text.
+    test "your formatter over unreviewed Minga text keeps Minga's unchanged words" do
+      buffer = start("a = 1\nb = 2\n")
+      minga_replace(buffer, "a = 1\nalpha beta gamma delta\nb = 2\n", step("t", "s1"))
+
+      assert :ok =
+               BufferProcess.replace_content(
+                 buffer,
+                 "a = 1\nalpha beta\ngamma delta\nb = 2\n",
+                 :lsp
+               )
+
+      assert BufferProcess.author_at(buffer, {1, 0}) == {:minga, "t"}
+      assert BufferProcess.author_at(buffer, {2, 0}) == {:minga, "t"}
+      assert :ok = BufferProcess.undo(buffer)
+      assert BufferProcess.content(buffer) == "a = 1\nalpha beta gamma delta\nb = 2\n"
+    end
+
+    # Round 3's L1: a long prose line where Minga edits the first and last words around a word of yours.
+    test "your word in a long line keeps its author and its undo when Minga edits the line's ends" do
+      for count <- [100, 140, 700] do
+        words = Enum.map_join(1..count, " ", &"word#{&1}")
+        buffer = start("# Title\n" <> words <> "\n")
+        middle = byte_size(Enum.map_join(1..div(count, 2), " ", &"word#{&1}"))
+        replace_at(buffer, {1, middle}, 0, " MINE")
+        content = BufferProcess.content(buffer)
+        identity = {:buffer, "/long"}
+
+        expected =
+          Minga.Buffer.FileMutation.revision(content, BufferProcess.version(buffer), identity)
+
+        pairs = [{"word1 ", "WORD1 "}, {"word#{count}\n", "WORD#{count}\n"}]
+
+        assert {:ok, _receipt} =
+                 BufferProcess.conditional_mutate(
+                   buffer,
+                   expected,
+                   {:edit, pairs},
+                   identity,
+                   step("t", "c1")
+                 )
+
+        assert BufferProcess.author_at(buffer, {1, middle + 2}) == :you
+        assert :ok = BufferProcess.undo(buffer)
+        refute BufferProcess.content(buffer) =~ "MINE"
+      end
+    end
+
     test "retyping one of two words a Minga step changed on a line rejects to the other word's original" do
       buffer = start("call(foo, bar, baz)\nnext\n")
       content = BufferProcess.content(buffer)

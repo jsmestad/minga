@@ -15,6 +15,47 @@ defmodule Minga.Buffer.UndoPatchTest do
   end
 
   describe "precise_changes/1" do
+    # Round 3's boundary cases around the 512-word cap: under it each changed word is its own change, past it the
+    # trimmed span is one change; either way the changes rebuild the new text.
+    test "changed words at both ends of a line are separate changes up to the word cap" do
+      for count <- [126, 127, 128, 129, 130, 255, 256, 257] do
+        old = Enum.map_join(1..count, " ", &"w#{&1}")
+        new = old |> String.replace("w1 ", "W1 ") |> String.replace(" w#{count}", " W#{count}")
+        changes = UndoPatch.precise_changes(UndoPatch.replacement(0, old, new, {0, 0}))
+        assert rebuild(old, changes) == new
+        # The cap counts the tokens (words, spaces, punctuation) of both sides together.
+        expected = if 2 * (2 * count - 1) <= 512, do: 2, else: 1
+        assert Enum.count(changes) == expected, "#{count} words"
+      end
+    end
+
+    test "a reversed 20000-word line and 12000 paired lines stay within budget" do
+      old = Enum.map_join(1..20_000, " ", &"w#{&1}")
+      new = Enum.map_join(20_000..1//-1, " ", &"w#{&1}")
+
+      {micros, changes} =
+        :timer.tc(fn -> UndoPatch.precise_changes(UndoPatch.replacement(0, old, new, {0, 0})) end)
+
+      assert rebuild(old, changes) == new
+      assert micros < 1_000_000
+
+      lines =
+        Enum.map_join(1..12_000, fn n ->
+          "    value_#{n} = compute(alpha_#{n}, beta, gamma) # note #{n}\n"
+        end)
+
+      renamed = String.replace(lines, "beta", "beta2")
+
+      {micros, changes} =
+        :timer.tc(fn ->
+          UndoPatch.precise_changes(UndoPatch.replacement(0, lines, renamed, {0, 0}))
+        end)
+
+      assert rebuild(lines, changes) == renamed
+      assert Enum.count(changes) == 12_000
+      assert micros < 1_000_000
+    end
+
     test "a changed region keeps only the bytes that changed" do
       patch = UndoPatch.replacement(10, "def run(x), do: x\n", "def run(y), do: x\n", {0, 0})
       assert UndoPatch.precise_changes(patch) == [{18, "x", "y"}]
@@ -916,5 +957,15 @@ defmodule Minga.Buffer.UndoPatchTest do
     stops = [0 | text |> String.codepoints() |> Enum.scan(0, &(byte_size(&1) + &2))]
     index = rem(pick, length(stops))
     {Enum.at(stops, index), Enum.at(stops, min(index + width, length(stops) - 1))}
+  end
+
+  defp rebuild(text, changes) do
+    changes
+    |> Enum.reverse()
+    |> Enum.reduce(text, fn {start, removed, inserted}, acc ->
+      binary_part(acc, 0, start) <>
+        inserted <>
+        binary_part(acc, start + byte_size(removed), byte_size(acc) - start - byte_size(removed))
+    end)
   end
 end
