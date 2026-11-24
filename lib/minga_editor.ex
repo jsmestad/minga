@@ -92,6 +92,7 @@ defmodule MingaEditor do
           | {:swap_dir, String.t()}
           | {:session_dir, String.t()}
           | {:suppress_tool_prompts, boolean()}
+          | {:agent_arrival_budget_ms, non_neg_integer()}
           | {:pane_generation_allocator, (-> pos_integer())}
 
   alias MingaEditor.State, as: EditorState

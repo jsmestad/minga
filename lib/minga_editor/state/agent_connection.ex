@@ -2,10 +2,9 @@ defmodule MingaEditor.State.AgentConnection do
   @moduledoc """
   Agent provider configuration and live editor ingest connection.
 
-  Provider configuration and the session manager that starts local sessions are
-  immutable after startup; the ingest process may be replaced as the editor's
-  supervised agent integration restarts. `route_usage`
-  holds the plan usage contributed model routes last reported.
+  Provider configuration, the local arrival budget and the session manager that starts local sessions are immutable after startup; the ingest process may be replaced as the editor's supervised agent integration restarts. `route_usage` holds the plan usage contributed model routes last reported.
+
+  `arrival_budget_ms` is the time a local Agent tab arrival waits for its Session before it shows the tab as unavailable (`MingaEditor.Agent.Arrival`).
   """
 
   alias MingaAgent.InferenceRoute.StatusChangedEvent
@@ -13,10 +12,13 @@ defmodule MingaEditor.State.AgentConnection do
   alias MingaEditor.Agent.SessionStart
   alias MingaEditor.State.RouteUsage
 
+  @default_arrival_budget_ms 250
+
   @type t :: %__MODULE__{
           agent_ingest: pid() | nil,
           agent_provider_module: module() | nil,
           agent_provider_opts: keyword(),
+          arrival_budget_ms: non_neg_integer(),
           question_receipts: %{pid() => binary()},
           arrival: Arrival.t() | nil,
           session_manager: GenServer.server(),
@@ -28,18 +30,29 @@ defmodule MingaEditor.State.AgentConnection do
   defstruct agent_ingest: nil,
             agent_provider_module: nil,
             agent_provider_opts: [],
+            arrival_budget_ms: @default_arrival_budget_ms,
             question_receipts: %{},
             arrival: nil,
             session_manager: MingaAgent.SessionManager,
             session_starts: %{},
             route_usage: %RouteUsage{}
 
-  @doc "Creates agent connection state from startup provider configuration."
-  @spec new(module() | nil, keyword()) :: t()
-  def new(provider_module \\ nil, provider_opts \\ []) when is_list(provider_opts) do
+  @doc "The production local arrival budget in milliseconds."
+  @spec default_arrival_budget_ms() :: non_neg_integer()
+  def default_arrival_budget_ms, do: @default_arrival_budget_ms
+
+  @doc "Creates agent connection state from startup provider and arrival configuration."
+  @spec new(module() | nil, keyword(), non_neg_integer()) :: t()
+  def new(
+        provider_module \\ nil,
+        provider_opts \\ [],
+        arrival_budget_ms \\ @default_arrival_budget_ms
+      )
+      when is_list(provider_opts) and is_integer(arrival_budget_ms) and arrival_budget_ms >= 0 do
     %__MODULE__{
       agent_provider_module: provider_module,
-      agent_provider_opts: provider_opts
+      agent_provider_opts: provider_opts,
+      arrival_budget_ms: arrival_budget_ms
     }
   end
 

@@ -204,7 +204,12 @@ defmodule MingaEditor.Startup do
       agent_connection:
         AgentConnection.new(
           Keyword.get(opts, :agent_provider_module),
-          Keyword.get(opts, :agent_provider_opts, [])
+          Keyword.get(opts, :agent_provider_opts, []),
+          Keyword.get(
+            opts,
+            :agent_arrival_budget_ms,
+            AgentConnection.default_arrival_budget_ms()
+          )
         ),
       interaction:
         Interaction.new(
