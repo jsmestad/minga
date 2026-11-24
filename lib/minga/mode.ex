@@ -118,6 +118,9 @@ defmodule Minga.Mode do
   The next `SPC` then starts a new sequence instead of continuing the old one. A state without a pending leader is returned unchanged.
   """
   @spec cancel_leader(state()) :: state()
+  def cancel_leader(%Minga.Mode.State{leader_node: node} = state) when node != nil,
+    do: %{state | leader_node: nil, leader_keys: [], leader_stack: []}
+
   def cancel_leader(%{leader_node: node, leader_keys: _keys} = state) when node != nil,
     do: %{state | leader_node: nil, leader_keys: []}
 

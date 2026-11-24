@@ -392,7 +392,7 @@ boards = { macos = "V41WhichKey.dc.html", tui = "V41TuiEdit.dc.html", mouse = "M
 transient = true
 exits = [
   { key = "a", click = "Minga row", to = "minga.whichkey" },
-  { key = "f", click = "Files row", to = "files.project_find" },
+  { key = "f f", click = "Files › Find file row", to = "files.project_find" },
   { key = ",", click = "Switch buffer row", to = "files.switcher" },
   { key = "SPC", click = "Find file row", to = "files.project_find" },
   { key = "esc", click = "click outside", to = "edit.plain" },
