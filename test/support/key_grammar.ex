@@ -4,7 +4,9 @@ defmodule Minga.Test.KeyGrammar do
 
   `inventory/0` enumerates every built-in binding without starting the Editor: the leader list and `SPC m` filetype bindings from `Minga.Keymap.Defaults`, the Vim normal table and `Minga.Keymap.NormalPrefixes`, and every vim state of every built-in scope in `Minga.Keymap.Scope.Registry.builtin_modules/0`. `violations/2` classifies that inventory against the six grammar rules and returns one named violation per offending binding.
 
-  `test/minga/keymap/grammar_test.exs` compares the violations with `test/fixtures/keymap/grammar_baseline.tsv`. The allow-lists below are the only sanctioned modifier conventions (rule 4) and platform keys (rule 5). Add to them only when the owner adopts a new convention, never to make a drifting binding pass.
+  `test/minga/keymap/grammar_test.exs` compares the violations with `test/fixtures/keymap/grammar_baseline.tsv`. The allow-lists below are the only sanctioned modifier conventions (rule 4), platform keys (rule 5) and CUA profile conventions (ADR-0007). Add to them only when the owner adopts a new convention, never to make a drifting binding pass.
+
+  The CUA profile list exempts its desktop conventions from rules 4 and 5 only in a CUA vim state, and only for the command the convention names. Rule 6, one meaning per key, and the prompt rules still apply there.
 
   ## Rule ids
 
@@ -77,7 +79,7 @@ defmodule Minga.Test.KeyGrammar do
 
   @typedoc "How the grammar treats keys in a scope and vim state."
   @type context ::
-          :leader | :vim_source | :vim_text | :special | :special_cua | :typing
+          :leader | :vim_source | :vim_text | :special | :special_cua | :typing | :picker
 
   # ── Contexts ────────────────────────────────────────────────────────────────
   #
@@ -93,6 +95,7 @@ defmodule Minga.Test.KeyGrammar do
   # * :special_cua The CUA model of a special buffer: letters act, and Vim's
   #                control keys carry no meaning.
   # * :typing      Letters type text (Agent composer insert, CUA surfaces).
+  # * :picker      A live prompt (pickers, the minibuffer): typing edits the query. Prompts resolve keys in input handlers, not tries, so no built-in scope maps here yet. The prompt rules apply when one does; the CUA profile never does.
   @contexts %{
     {:leader, :normal} => :leader,
     {:editor, :normal} => :vim_source,
@@ -152,6 +155,41 @@ defmodule Minga.Test.KeyGrammar do
   # command: ⌘S save, ⌘Z undo, ⌘W close, ⌘Q quit, ⌘. stop, ⌘1-⌘4 pinned files,
   # ⌘[ ⌘] back and forward.
   @platform_keys MapSet.new(~c"szwq.1234[]", &{&1, @cmd})
+
+  # ── CUA profile (ADR-0007) ──────────────────────────────────────────────────
+  #
+  # {key, allowed commands, why}. In a CUA vim state these desktop conventions are exempt from rules 4 and 5 and may be the only binding for their action.
+  # The exemption covers only the listed commands: ⌘C that opens a commit is not the copy convention. It never applies to live prompts (:picker), and rule 6 is checked first, so it cannot admit a forbidden chord.
+  @cua_contexts [:typing, :special_cua]
+
+  @cua_copy [:yank_visual_selection, :copy_or_interrupt, :agent_copy_code_block]
+  @cua_cut [:delete_visual_selection]
+  @cua_paste [:paste_after]
+  @cua_undo [:undo]
+  @cua_redo [:redo]
+  @cua_select_all [:select_all]
+  @cua_palette [:command_palette]
+  @cua_newline [:agent_insert_newline]
+
+  @cua_conventions [
+    {{?c, @cmd}, @cua_copy, "⌘C copies (macOS)"},
+    {{?v, @cmd}, @cua_paste, "⌘V pastes (macOS)"},
+    {{?x, @cmd}, @cua_cut, "⌘X cuts (macOS)"},
+    {{?z, @cmd}, @cua_undo, "⌘Z undoes (macOS)"},
+    {{?z, @cmd ||| @shift}, @cua_redo, "⇧⌘Z redoes (macOS)"},
+    {{?a, @cmd}, @cua_select_all, "⌘A selects all (macOS)"},
+    {{?c, @ctrl}, @cua_copy, "⌃C copies (Linux, terminal)"},
+    {{?v, @ctrl}, @cua_paste, "⌃V pastes (Linux, terminal)"},
+    {{?x, @ctrl}, @cua_cut, "⌃X cuts (Linux, terminal)"},
+    {{?z, @ctrl}, @cua_undo, "⌃Z undoes (Linux, terminal)"},
+    {{?y, @ctrl}, @cua_redo, "⌃Y redoes (Linux, terminal)"},
+    {{?a, @ctrl}, @cua_select_all, "⌃A selects all (Linux, terminal)"},
+    {{?p, @ctrl}, @cua_palette, "⌃P opens the command palette"},
+    {{?p, @ctrl ||| @shift}, @cua_palette, "⌃⇧P opens the command palette"},
+    {{?P, @ctrl ||| @shift}, @cua_palette, "⌃⇧P opens the command palette"},
+    {{?j, @ctrl}, @cua_newline, "⌃J adds a new line in the composer without sending"},
+    {{@enter, @alt}, @cua_newline, "⌥↩ adds a new line in the composer without sending"}
+  ]
 
   # ── Leader aliases ──────────────────────────────────────────────────────────
   #
@@ -331,14 +369,18 @@ defmodule Minga.Test.KeyGrammar do
 
   # ── Classification ──────────────────────────────────────────────────────────
 
-  @doc "Classifies an inventory against the grammar rules and the Doom conventions."
-  @spec violations([binding()], [doom_row()]) :: [violation()]
-  def violations(inventory, doom_rows) do
+  @doc """
+  Classifies an inventory against the grammar rules and the Doom conventions.
+
+  `contexts` maps each `{scope, vim state}` to its grammar context and defaults to the built-in classification. Tests pass their own map to classify synthetic bindings, for example a live prompt that no built-in scope declares yet.
+  """
+  @spec violations([binding()], [doom_row()], %{{scope(), atom()} => context()}) :: [violation()]
+  def violations(inventory, doom_rows, contexts \\ @contexts) do
     effective = Enum.filter(inventory, &(&1.origin == :effective))
     leader = Enum.filter(effective, &(&1.scope == :leader))
 
     (duplicate_keys(inventory) ++
-       Enum.flat_map(effective, &binding_violations/1) ++
+       Enum.flat_map(effective, &binding_violations(&1, contexts)) ++
        ungrouped_leaders(leader, doom_rows) ++
        duplicate_leader_commands(leader) ++
        doom_conflicts(leader, doom_rows))
@@ -398,11 +440,11 @@ defmodule Minga.Test.KeyGrammar do
   defp strict_prefix?(short, long),
     do: length(long) > length(short) and List.starts_with?(long, short)
 
-  @spec binding_violations(binding()) :: [violation()]
-  defp binding_violations(%{scope: scope, state: state, keys: keys, command: command}) do
-    context = Map.get(@contexts, {scope, state})
+  @spec binding_violations(binding(), %{{scope(), atom()} => context()}) :: [violation()]
+  defp binding_violations(%{scope: scope, state: state, keys: keys, command: command}, contexts) do
+    context = Map.get(contexts, {scope, state})
 
-    case context && key_violation(keys, context, command) do
+    case context && key_violation(keys, context, state, command) do
       nil ->
         []
 
@@ -412,14 +454,14 @@ defmodule Minga.Test.KeyGrammar do
   end
 
   # First failing key in the sequence wins, so each binding yields one row.
-  @spec key_violation([key()], context(), term()) :: {atom(), String.t()} | nil
-  defp key_violation(keys, context, command) do
-    Enum.find_value(keys, fn key -> chord_violation(key, context, command) end) ||
+  @spec key_violation([key()], context(), atom(), term()) :: {atom(), String.t()} | nil
+  defp key_violation(keys, context, state, command) do
+    Enum.find_value(keys, fn key -> chord_violation(key, context, state, command) end) ||
       plain_key_violation(keys, context)
   end
 
-  @spec chord_violation(key(), context(), term()) :: {atom(), String.t()} | nil
-  defp chord_violation({codepoint, mods} = key, context, command) do
+  @spec chord_violation(key(), context(), atom(), term()) :: {atom(), String.t()} | nil
+  defp chord_violation({codepoint, mods} = key, context, state, command) do
     cond do
       function_key?(codepoint) ->
         {:forbidden_chord, "function keys are never bound"}
@@ -429,6 +471,9 @@ defmodule Minga.Test.KeyGrammar do
 
       popcount(band(mods, @chord_mods)) >= 2 ->
         {:forbidden_chord, "combines two of ⌃ ⌥ ⌘"}
+
+      cua_convention?(key, context, state, command) ->
+        nil
 
       band(mods, @cmd) != 0 ->
         platform_violation(key, command)
@@ -474,10 +519,10 @@ defmodule Minga.Test.KeyGrammar do
       context in [:vim_source, :vim_text, :special] and MapSet.member?(@vim_ctrl_keys, key) ->
         nil
 
-      context == :typing and MapSet.member?(@editing_collisions, key) ->
+      context in [:typing, :picker] and MapSet.member?(@editing_collisions, key) ->
         {:editing_collision, "text-editing control key where you type"}
 
-      context == :typing ->
+      context in [:typing, :picker] ->
         {:unconventional_modifier, "modifier where you type is not an established convention"}
 
       true ->
@@ -491,6 +536,15 @@ defmodule Minga.Test.KeyGrammar do
       conv_key == key and context in contexts and (commands == :any or command in commands)
     end)
   end
+
+  @spec cua_convention?(key(), context(), atom(), term()) :: boolean()
+  defp cua_convention?(key, context, :cua, command) when context in @cua_contexts do
+    Enum.any?(@cua_conventions, fn {conv_key, commands, _why} ->
+      conv_key == key and command in commands
+    end)
+  end
+
+  defp cua_convention?(_key, _context, _state, _command), do: false
 
   @spec plain_key_violation([key()], context()) :: {atom(), String.t()} | nil
   defp plain_key_violation([{codepoint, mods} | _], :typing)

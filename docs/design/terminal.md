@@ -47,4 +47,3 @@ Mode pill (TERM or NORMAL), needs-you when non-zero, buffer name, cwd, the runni
 ## Mouse and rendering
 
 Click focuses and enters TERMINAL, the wheel scrolls back, a drag selects and copies, and ⌘-click on `file:line` opens the file. macOS renders terminals with the editor's font and theme, ligatures off, in true colour. The TUI passes true colour through when the host terminal supports it and falls back to 256 colours.
-
