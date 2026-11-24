@@ -554,6 +554,17 @@ defmodule MingaAgent.Providers.NativeTest do
           terminal_replies
         )
 
+      {:"$gen_call", from, {:assess_native_dispatch, _attempt, _digest, evidence}} ->
+        GenServer.reply(from, evidence.decision)
+
+        effect_barrier_subscriber_loop(
+          owner,
+          owner_ref,
+          checkpoint_reply,
+          admission_reply,
+          terminal_replies
+        )
+
       {:"$gen_call", from, {:begin_native_dispatch, request_id, source}} ->
         GenServer.reply(from, begin_test_dispatch(request_id, source))
 
