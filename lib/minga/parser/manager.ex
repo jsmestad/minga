@@ -214,7 +214,7 @@ defmodule Minga.Parser.Manager do
   @doc """
   Requests structural AST navigation synchronously.
 
-  Action values are `0` for parent, `1` for first child, `2` for next sibling, and `3` for previous sibling.
+  Action values are `0` for parent, `1` for first child, `2` for next sibling, and `3` for previous sibling. `16 + n` names the n-th meaningful named ancestor of the deepest named node at the point; see `request_syntax_ancestor/5`.
 
   Returns `%Minga.Parser.StructuralNavResult{}` for the target node, or `nil` if no target exists or the parser is unavailable.
   """
@@ -222,12 +222,12 @@ defmodule Minga.Parser.Manager do
           pid(),
           non_neg_integer(),
           non_neg_integer(),
-          0..3,
+          Protocol.structural_nav_action(),
           GenServer.server()
         ) :: structural_nav_result() | nil
   def request_structural_nav(buffer_pid, row, col, action, server \\ __MODULE__)
       when is_pid(buffer_pid) and is_integer(row) and is_integer(col) and is_integer(action) and
-             action >= 0 and action <= 3 do
+             (action in 0..3 or action in 16..255) do
     GenServer.call(
       server,
       {:request_structural_nav, buffer_pid, row, col, action,
@@ -237,6 +237,22 @@ defmodule Minga.Parser.Manager do
   catch
     :exit, _ -> nil
   end
+
+  @doc """
+  Returns the syntax node `depth` levels out from the deepest named node at a point.
+
+  Depth `0` is the node itself and depth `n` its n-th meaningful named parent. Returns `nil` past the outermost node below the root, or when the parser is unavailable. Smart selection walks the depths outward when no language server serves the buffer.
+  """
+  @spec request_syntax_ancestor(
+          pid(),
+          non_neg_integer(),
+          non_neg_integer(),
+          0..239,
+          GenServer.server()
+        ) :: structural_nav_result() | nil
+  def request_syntax_ancestor(buffer_pid, row, col, depth, server \\ __MODULE__)
+      when is_integer(depth) and depth >= 0 and depth <= 239,
+      do: request_structural_nav(buffer_pid, row, col, Protocol.ancestor_action(depth), server)
 
   @doc "Configures the parser's default dynamic-grammar language and queries."
   @spec configure_dynamic_grammar(

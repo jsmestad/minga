@@ -1398,6 +1398,24 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
     end
   end
 
+  describe "smart selection source" do
+    test "SPC c v asks the language server when one serves the buffer, not the syntax tree" do
+      state = file_buffer_state("hello\n")
+      client = start_fake_lsp_client()
+      buffer = state.workspace.buffers.active
+      register_lsp_client(buffer, client)
+
+      state = MingaEditor.LspActions.selection_expand(state)
+
+      assert_receive {:lsp_request, "textDocument/selectionRange", _params, _caller, ref}
+
+      assert {:ok, {:response, :selection_range, ^client, ^buffer, _, _, _}} =
+               LSPState.fetch_pending_request(state.lsp, ref)
+
+      assert Minga.Editing.mode(state) == :normal
+    end
+  end
+
   describe "formatting response" do
     for {encoding, start_col, end_col} <- [utf8: {5, 6}, utf16: {3, 4}, utf32: {2, 3}] do
       test "applies emoji-adjacent edits using negotiated #{encoding}" do

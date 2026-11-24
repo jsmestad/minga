@@ -145,7 +145,7 @@ SPC a  Minga
 | `]e` / `[e` | Next / previous diagnostic (Doom next-error) | shipped; was `]d` / `[d` |
 | `]d` / `[d` | Next / previous git hunk (Doom diff-hl) | shipped; git hunks were on `]c` / `[c` |
 | `]c` / `[c` | Next / previous change in a diff view | kept for diff buffers |
-| `]n` / `[n` | Next / previous syntax node (sibling); `SPC c v` / `SPC c V` expand and shrink | shipped; ⌥j / ⌥k alias `]n` / `[n` and ⌥h / ⌥l alias `SPC c v` / `SPC c V` |
+| `]n` / `[n` | Next / previous syntax node (sibling); `SPC c v` / `SPC c V` expand and shrink | shipped; ⌥j / ⌥k alias `]n` / `[n` and ⌥h / ⌥l alias `SPC c v` / `SPC c V`, which use the language server's selection ranges and fall back to the syntax tree without one |
 | `g.` | Act menu on whatever is under the cursor | changed (`normal_prefixes.ex:27`, was "Code actions"); code actions are part of the act menu |
 | `K` | Hover; `K` again focuses it | kept |
 | `⌃O` / `⌃I` | Back / forward in the jump list (⌘[ / ⌘] on macOS; Tab is ⌃I, as in Vim) | shipped; replaces the proposed ⌃⌘← / ⌃⌘→ |

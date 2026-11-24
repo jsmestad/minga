@@ -37,6 +37,7 @@ defmodule MingaEditor.LspActions do
   alias MingaEditor.State.Operation
   alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.Mouse
+  alias MingaEditor.SyntaxSelection
   alias MingaEditor.VimState
   alias Minga.Log
   alias Minga.LSP.BufferEdit
@@ -539,41 +540,40 @@ defmodule MingaEditor.LspActions do
   @doc """
   Expands or initiates smart selection.
 
-  If a selection range chain is already stored (from a previous expand),
-  moves to the next wider range. Otherwise, sends a new selectionRange
-  request to the LSP server.
+  If the selection is still the step a stored chain left it on, moves to the next wider range. Otherwise it starts a new chain: from the language server's `selectionRange` when one serves the buffer, or from the syntax tree when none does (`MingaEditor.SyntaxSelection`), so `SPC c v` and `⌥h` work in every buffer with a grammar.
   """
   @spec selection_expand(state()) :: state()
   def selection_expand(%{lsp: %{selection_ranges: ranges, selection_range_index: idx}} = state)
       when is_list(ranges) do
-    if idx + 1 < Enum.count(ranges) do
-      new_idx = idx + 1
-      range = Enum.at(ranges, new_idx)
-      state = %{state | lsp: (&LSPState.expand_selection/1).(state.lsp)}
-      apply_selection_range(state, range)
-    else
-      selection_range(state)
+    cond do
+      not on_selection_step?(state, Enum.at(ranges, idx)) ->
+        start_selection_chain(%{state | lsp: LSPState.clear_selection_ranges(state.lsp)})
+
+      idx + 1 < Enum.count(ranges) ->
+        state = %{state | lsp: LSPState.expand_selection(state.lsp)}
+        apply_selection_range(state, Enum.at(ranges, idx + 1))
+
+      true ->
+        start_selection_chain(state)
     end
   end
 
-  def selection_expand(state) do
-    # No stored ranges or at the widest range; send a new LSP request
-    selection_range(state)
-  end
+  def selection_expand(state), do: start_selection_chain(state)
 
   @doc """
   Shrinks the smart selection to the previous (narrower) range.
 
-  Walks back down the stored selection range chain. If already at the
-  innermost range, exits visual mode.
+  Walks back down the stored selection range chain. If already at the innermost range, exits visual mode. With no chain to walk and no language server, it selects the first named child of the syntax node at the cursor.
   """
   @spec selection_shrink(state()) :: state()
   def selection_shrink(%{lsp: %{selection_ranges: ranges, selection_range_index: idx}} = state)
       when is_list(ranges) and idx > 0 do
-    new_idx = idx - 1
-    range = Enum.at(ranges, new_idx)
-    state = %{state | lsp: (&LSPState.shrink_selection/1).(state.lsp)}
-    apply_selection_range(state, range)
+    if on_selection_step?(state, Enum.at(ranges, idx)) do
+      state = %{state | lsp: LSPState.shrink_selection(state.lsp)}
+      apply_selection_range(state, Enum.at(ranges, idx - 1))
+    else
+      selection_shrink(%{state | lsp: LSPState.clear_selection_ranges(state.lsp)})
+    end
   end
 
   def selection_shrink(%{lsp: %{selection_ranges: [_ | _]}} = state) do
@@ -586,9 +586,62 @@ defmodule MingaEditor.LspActions do
     }
   end
 
+  def selection_shrink(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
+    with nil <- lsp_client_for(state, buf),
+         %{} = child <-
+           SyntaxSelection.first_child(buf, Buffer.cursor(buf), state.parser.parser_manager) do
+      apply_selection_range(state, child)
+    else
+      _no_step -> NoticeWorkflow.publish(state, "No selection ranges to shrink")
+    end
+  end
+
   def selection_shrink(state) do
     NoticeWorkflow.publish(state, "No selection ranges to shrink")
   end
+
+  # Starts a smart-selection chain.
+  # The language server answers when one serves the buffer; otherwise the syntax tree does.
+  @spec start_selection_chain(state()) :: state()
+  defp start_selection_chain(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
+    case lsp_client_for(state, buf) do
+      nil -> start_syntax_selection(state, buf)
+      _client -> selection_range(state)
+    end
+  end
+
+  defp start_selection_chain(state), do: selection_range(state)
+
+  @spec start_syntax_selection(state(), pid()) :: state()
+  defp start_syntax_selection(state, buf) do
+    case SyntaxSelection.ranges(buf, current_selection(state, buf), state.parser.parser_manager) do
+      [] ->
+        NoticeWorkflow.publish(state, "No larger syntax node to select")
+
+      [first | _] = ranges ->
+        state = %{state | lsp: LSPState.set_selection_ranges(state.lsp, ranges)}
+        apply_selection_range(state, first)
+    end
+  end
+
+  # The Visual selection as inclusive, ordered positions, or the cursor when nothing is selected.
+  @spec current_selection(state(), pid()) :: SyntaxSelection.selection()
+  defp current_selection(state, buf) do
+    cursor = Buffer.cursor(buf)
+
+    case MingaEditor.Editing.visual_anchor(state) do
+      {_, _} = anchor -> {min(anchor, cursor), max(anchor, cursor)}
+      nil -> {cursor, cursor}
+    end
+  end
+
+  # A stored chain only continues while Visual still starts where its step did; leaving Visual starts over.
+  # The cursor end is not compared: the buffer may clamp a server's exclusive end.
+  @spec on_selection_step?(state(), map() | nil) :: boolean()
+  defp on_selection_step?(state, %{} = range),
+    do: MingaEditor.Editing.visual_anchor(state) == {range.start_line, range.start_col}
+
+  defp on_selection_step?(_state, _range), do: false
 
   # ── Call hierarchy ────────────────────────────────────────────────────────
 

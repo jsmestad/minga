@@ -67,6 +67,44 @@ defmodule MingaEditor.Commands.StructuralNavigationTest do
     assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == "→ identifier"
   end
 
+  describe "smart selection without a language server" do
+    # No LSP client serves these buffers, so SPC c v / SPC c V (and ⌥h / ⌥l) fall back to the syntax tree.
+    test "expand selects the next larger syntax node each time and shrink steps back" do
+      {editor, buffer} = start_editor("f(a, b, c);")
+      BufferProcess.move_to(buffer, {0, 2})
+
+      state = run_command(editor, "selection_expand")
+      assert Minga.Editing.mode(state) == :visual
+      assert selection(state, buffer) == {{0, 1}, {0, 9}}
+
+      state = run_command(editor, "selection_expand")
+      assert selection(state, buffer) == {{0, 0}, {0, 9}}
+
+      state = run_command(editor, "selection_shrink")
+      assert selection(state, buffer) == {{0, 1}, {0, 9}}
+    end
+
+    test "⌥h expands like SPC c v, starting from the node under the cursor" do
+      {editor, buffer} = start_editor("function add(a, b) { return a + b; }\n")
+      BufferProcess.move_to(buffer, {0, 9})
+
+      state = send_key(editor, ?h, @alt)
+      assert selection(state, buffer) == {{0, 9}, {0, 11}}
+    end
+
+    test "shrink with nothing to step back to selects the first child of the node at the cursor" do
+      {editor, buffer} = start_editor("function add(a, b) { return a + b; }\n")
+      BufferProcess.move_to(buffer, {0, 0})
+
+      state = send_key(editor, ?l, @alt)
+      assert Minga.Editing.mode(state) == :visual
+      assert selection(state, buffer) == {{0, 9}, {0, 11}}
+    end
+  end
+
+  defp selection(state, buffer),
+    do: {MingaEditor.Editing.visual_anchor(state), BufferProcess.cursor(buffer)}
+
   defp start_editor(content) do
     id = :erlang.unique_integer([:positive])
     events_registry = :"structural_nav_events_#{id}"
