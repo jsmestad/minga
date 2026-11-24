@@ -3,6 +3,7 @@ defmodule MingaAgent.MCP.ClientTest do
 
   alias MingaAgent.MCP.Client
   alias MingaAgent.MCP.FakeTransport
+  alias MingaAgent.MCP.GenerationTransport
   alias MingaAgent.MCP.ServerConfig
 
   defp server_config do
@@ -172,6 +173,25 @@ defmodule MingaAgent.MCP.ClientTest do
 
     assert {:ok, _result} = Client.call_tool(healthy, "echo-text", %{"text" => "hi"})
     refute_received {:mcp_client_down, ^healthy, _name, _reason}
+  end
+
+  test "the client passes each call the transport value that the previous call returned" do
+    {:ok, client} =
+      Client.start_link(
+        server_config: server_config(),
+        transport: GenerationTransport,
+        transport_opts: [test_pid: self()]
+      )
+
+    assert_received {:generation_transport_request, "initialize", 0}
+    assert_received {:generation_transport_request, "tools/list", 1}
+
+    send(client, :generation_transport_data)
+    assert {:error, :timeout} = Client.call_tool(client, "echo-text", %{})
+    assert_received {:generation_transport_request, "tools/call", 3}
+
+    assert {:error, :timeout} = Client.call_tool(client, "echo-text", %{})
+    assert_received {:generation_transport_request, "tools/call", 4}
   end
 
   test "call_tool returns an error when the client process is gone" do
