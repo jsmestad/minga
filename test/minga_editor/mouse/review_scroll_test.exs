@@ -75,7 +75,8 @@ defmodule MingaEditor.Mouse.ReviewScrollTest do
                  scrolled.workspace.agent_ui.view.preview,
                  rects(),
                  layout(),
-                 Runtime.review_scope(scrolled.shell_runtime)
+                 Runtime.review_scope(scrolled.shell_runtime),
+                 :vim
                )
 
       assert next.geometry.viewport.top > first.geometry.viewport.top
@@ -117,7 +118,8 @@ defmodule MingaEditor.Mouse.ReviewScrollTest do
         preview,
         rects(),
         layout(),
-        Runtime.review_scope(state.shell_runtime)
+        Runtime.review_scope(state.shell_runtime),
+        :vim
       )
 
     {:ok, preview} =
