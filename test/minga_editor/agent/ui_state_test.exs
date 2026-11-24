@@ -205,6 +205,18 @@ defmodule MingaEditor.Agent.UIStateTest do
                Panel.model_label(Panel.project_model_selection(projected, nil))
     end
 
+    test "a model problem that contains a colon never reads as a provider" do
+      problem = ~s(Model "anthropic:claude-x" is not in the catalog)
+      panel = Panel.project_model_problem(Panel.new(), problem)
+
+      assert Panel.model_label(panel) == problem
+      assert Panel.chat_model_label(panel) == ":" <> problem
+      assert Panel.chat_model_label(Panel.new()) == "Resolving model…"
+
+      assert panel |> Panel.set_model_name("openai:gpt") |> Panel.chat_model_label() ==
+               "openai:gpt"
+    end
+
     test "activation preserves an existing qualified or exact route selection" do
       options = start_supervised!({Minga.Config.Options, name: nil})
       assert {:ok, _} = Minga.Config.Options.set(options, :agent_model, "openai:replacement")

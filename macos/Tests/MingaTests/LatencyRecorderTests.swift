@@ -1,4 +1,4 @@
-import MingaProtocol
+@testable import MingaProtocol
 import Foundation
 import Testing
 
@@ -195,5 +195,112 @@ struct LatencyRecorderTests {
         // The 5 already-resolved entries were not in pending, so the eviction
         // cursor skips past them. The 5 unresolved entries (seqs 6..10) get dropped.
         #expect(stats.discardCounts[.dropped] == 5)
+    }
+
+    // MARK: - Constant per-recording cost
+
+    private static let capacity = 4096
+
+    private func resolve(_ recorder: LatencyRecorder, _ seq: UInt32) {
+        recorder.markApplied(seq: seq)
+        recorder.markSubmitted(seq: seq)
+        recorder.markPresented(seq: seq)
+    }
+
+    /// Stamps once and returns the sequence with the pending entries that stamp inspected.
+    private func measuredStamp(_ recorder: LatencyRecorder) -> (seq: UInt32, probes: UInt64) {
+        let before = recorder.evictionProbeCountForTesting
+        let seq = recorder.stamp()
+        return (seq, recorder.evictionProbeCountForTesting - before)
+    }
+
+    @Test("each stamp inspects at most one pending entry before and after capacity, even after a long resolved run")
+    func stampEvictionWorkIsConstant() {
+        let recorder = LatencyRecorder()
+
+        // A long healthy session: every sample resolves, so the pending set never fills.
+        var healthy: [UInt64] = []
+        for _ in 0..<20_000 {
+            let stamped = measuredStamp(recorder)
+            healthy.append(stamped.probes)
+            resolve(recorder, stamped.seq)
+        }
+        #expect(Set(healthy) == [0])
+
+        // Presentation stalls: unresolved stamps fill the pending set, then overflow it twice over.
+        var stalled: [UInt64] = []
+        for _ in 0..<(Self.capacity * 3) {
+            stalled.append(measuredStamp(recorder).probes)
+        }
+        #expect(Set(stalled.prefix(Self.capacity)) == [0])
+        #expect(Set(stalled.dropFirst(Self.capacity)) == [1])
+        #expect(recorder.snapshot().discardCounts[.dropped] == UInt64(Self.capacity * 2))
+    }
+
+    @Test("capacity eviction drops the oldest still-pending entry after out-of-order resolution and discard")
+    func evictionFollowsPendingOrder() {
+        let recorder = LatencyRecorder()
+        let seqs = (0..<Self.capacity).map { _ in recorder.stamp() }
+        // Resolve the oldest entry, discard one from the middle, and resolve the newest.
+        resolve(recorder, seqs[0])
+        recorder.discard(seq: seqs[2], reason: .hidden)
+        resolve(recorder, seqs[Self.capacity - 1])
+
+        // Three stamps refill the pending set; the fourth must evict seqs[1], then seqs[3].
+        var probes: [UInt64] = []
+        for _ in 0..<5 { probes.append(measuredStamp(recorder).probes) }
+        #expect(probes == [0, 0, 0, 1, 1])
+        let discards = recorder.snapshot().discardCounts
+        #expect(discards[.dropped] == 2)
+        #expect(discards[.hidden] == 1)
+
+        let before = recorder.snapshot().apply.count
+        recorder.markApplied(seq: seqs[1])
+        recorder.markApplied(seq: seqs[3])
+        #expect(recorder.snapshot().apply.count == before)
+        recorder.markApplied(seq: seqs[4])
+        #expect(recorder.snapshot().apply.count == before + 1)
+    }
+
+    @Test("capacity eviction after a connection replacement starts with the first new stamp")
+    func evictionAfterConnectionReplacement() {
+        let recorder = LatencyRecorder()
+        for _ in 0..<10 { _ = recorder.stamp() }
+        recorder.replaceConnection()
+        let seqs = (0...Self.capacity).map { _ in recorder.stamp() }
+        let discards = recorder.snapshot().discardCounts
+        #expect(discards[.connectionReplaced] == 10)
+        #expect(discards[.dropped] == 1)
+        recorder.markApplied(seq: seqs[0])
+        #expect(recorder.snapshot().apply.count == 0)
+        recorder.markApplied(seq: seqs[1])
+        #expect(recorder.snapshot().apply.count == 1)
+    }
+
+    @Test("apply and presentation histories keep exactly the newest samples in nearest-rank order",
+          arguments: [0, 1, 4_095, 4_096, 4_097, 4_096 * 3 + 17])
+    func historiesKeepNewestSamples(total: Int) {
+        let clock = Clock()
+        let recorder = LatencyRecorder(now: clock.now)
+        for value in stride(from: 1, through: total, by: 1) {
+            let seq = recorder.stamp()
+            clock.advance(UInt64(value) * 1_000)
+            resolve(recorder, seq)
+        }
+
+        let retained = min(total, Self.capacity)
+        let oldest = total - retained + 1
+        func rank(_ percent: Int) -> Double {
+            Double(oldest + max((retained * percent + 99) / 100, 1) - 1)
+        }
+        let expected = retained == 0
+            ? LatencyRecorder.StageStats()
+            : LatencyRecorder.StageStats(
+                count: retained, p50Micros: rank(50), p95Micros: rank(95),
+                p99Micros: rank(99), maxMicros: Double(total)
+            )
+        let stats = recorder.snapshot()
+        #expect(stats.apply == expected)
+        #expect(stats.present == expected)
     }
 }

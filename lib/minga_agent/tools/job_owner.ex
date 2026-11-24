@@ -216,27 +216,31 @@ defmodule MingaAgent.Tools.JobOwner do
     owner = self()
     %Record{id: job_id, command: command, cwd: cwd, timeout_secs: timeout_secs} = record
 
-    task_pid =
-      spawn_link(fn ->
-        task = self()
+    # Link and monitor atomically: a task that crashes at once must report its own reason, not `:noproc`.
+    {task_pid, monitor_ref} =
+      Process.spawn(
+        fn ->
+          task = self()
 
-        report_exit = fn code ->
-          send(task, {:job_exit_status, code})
-          :ok
-        end
+          report_exit = fn code ->
+            send(task, {:job_exit_status, code})
+            :ok
+          end
 
-        result =
-          command
-          |> run_shell(cwd, timeout_secs, Keyword.put(opts, :on_exit_status, report_exit))
-          |> retain_text_result(opts)
+          result =
+            command
+            |> run_shell(cwd, timeout_secs, Keyword.put(opts, :on_exit_status, report_exit))
+            |> retain_text_result(opts)
 
-        send(owner, {:job_result, job_id, result, received_exit_status()})
-      end)
+          send(owner, {:job_result, job_id, result, received_exit_status()})
+        end,
+        [:link, :monitor]
+      )
 
     entry = %{
       record: record,
       task_pid: task_pid,
-      monitor_ref: Process.monitor(task_pid),
+      monitor_ref: monitor_ref,
       from: from
     }
 

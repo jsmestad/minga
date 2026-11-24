@@ -162,6 +162,12 @@ final class CommandDispatcher {
     /// The newest complete committed editor snapshot available for Metal submission.
     private(set) var committedEditorSnapshot: CommittedEditorSnapshot?
 
+    /// Whether the last committed editor reserves gutter padding, an input to the
+    /// frontend-owned grid fit (ADR-0001). Like `frameState.lineSpacing`, it survives
+    /// a BEAM reconnect, so `ready` reports the grid an unchanged normal resize reports
+    /// (#2816). The replacement BEAM's first committed frame replaces it.
+    private(set) var gridFitReservesGutter = false
+
     /// The exact editor presentation associated with the last successful Metal presentation.
     private(set) var visibleEditorPresentation: VisibleEditorPresentation?
     let textPresentationLeases = TextPresentationLeases()
@@ -383,11 +389,14 @@ final class CommandDispatcher {
         guiState.presentationMetrics.replaceConnection()
         self.connectionID = connectionID
 
-        let cols = frameState.cols
-        let rows = frameState.rows
-        frameState = FrameState(cols: cols, rows: rows)
+        // The grid and its configured line spacing are presentation inputs to the row
+        // fit, not connection authority. Keeping them makes reconnect report the rows a
+        // normal resize reports; a replacement BEAM that sends another spacing still
+        // emits `lineSpacingChanged` and an ordinary resize (#2816).
+        var replacementFrameState = FrameState(cols: frameState.cols, rows: frameState.rows)
+        replacementFrameState.lineSpacing = frameState.lineSpacing
+        frameState = replacementFrameState
         lastMode = .normal
-        lastLineSpacing = 1.0
         lastDocumentEdited = false
         pendingPresentationInputSeq = 0
         textPresentationLeases.replaceConnection()
@@ -713,6 +722,7 @@ final class CommandDispatcher {
         if let snapshot = transaction.editorSnapshot {
             frameState = snapshot.frameState
             committedEditorSnapshot = snapshot
+            gridFitReservesGutter = snapshot.gutterCol > 0
             textPresentationLeases.commit(snapshot)
             operationReadiness.observeCommitted(snapshot)
             if finalImpact.contains(.editor) {

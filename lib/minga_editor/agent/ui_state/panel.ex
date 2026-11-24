@@ -170,7 +170,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
   @doc """
   Projects the agent chat model identity as `provider:model` when the selected route names its provider, otherwise as `model_label/1`.
 
-  Frontends split this value at its first `:`, so a provider label that contains `:` is omitted rather than split in the wrong place.
+  Frontends split this value at its first `:`, so a provider label that contains `:` is omitted rather than split in the wrong place. Status text shown in place of a model, such as a resolver error that quotes a `provider:model` spec, gets an empty provider (`:text`) when it contains `:`, so no part of it reads as a provider. A configured model spec such as `openai:gpt` keeps its own split.
   """
   @spec chat_model_label(t()) :: String.t()
   def chat_model_label(%__MODULE__{provider_label: label} = panel) when is_binary(label) do
@@ -179,7 +179,13 @@ defmodule MingaEditor.Agent.UIState.Panel do
       else: label <> ":" <> model_label(panel)
   end
 
-  def chat_model_label(%__MODULE__{} = panel), do: model_label(panel)
+  def chat_model_label(%__MODULE__{} = panel) do
+    label = model_label(panel)
+
+    if configured_model?(panel) or not String.contains?(label, ":"),
+      do: label,
+      else: ":" <> label
+  end
 
   @doc "Projects authoritative model display facts without discovering models or changing readiness."
   @spec project_model_selection(t(), ModelSelection.t() | nil) :: t()
