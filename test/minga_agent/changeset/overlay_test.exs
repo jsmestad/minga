@@ -322,6 +322,30 @@ defmodule MingaAgent.Changeset.OverlayTest do
       Overlay.cleanup(overlay)
       File.rm!(outside)
     end
+
+    test "re-materialization keeps an existing regular file in a package-manager directory", %{
+      project: project
+    } do
+      # Set up a node_modules package with a .bin entry (a regular file copied
+      # during materialization because .bin is an owned directory).
+      write_package(project, "node_modules/left-pad")
+      File.mkdir_p!(Path.join(project, "node_modules/.bin"))
+      File.write!(Path.join(project, "node_modules/.bin/left-pad"), "#!/bin/sh\n")
+
+      {:ok, overlay} = Overlay.create(project)
+      on_exit(fn -> Overlay.cleanup(overlay) end)
+
+      # First materialization copies the .bin entry as a regular file.
+      assert {:ok, _stats} = Overlay.materialize_project(overlay)
+
+      bin_path = Path.join(overlay.overlay_dir, "node_modules/.bin/left-pad")
+      assert {:ok, %{type: :regular}} = File.lstat(bin_path)
+
+      # A second materialization must succeed: the existing regular file is
+      # kept, not rejected by the symlink traversal check.
+      assert {:ok, _stats} = Overlay.materialize_project(overlay)
+      assert {:ok, %{type: :regular}} = File.lstat(bin_path)
+    end
   end
 
   describe "commit_file/3" do

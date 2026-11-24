@@ -739,13 +739,22 @@ defmodule MingaAgent.Changeset.Overlay do
   @spec materialize_regular_file(t(), String.t(), String.t(), materialization_stats()) ::
           {:ok, materialization_stats()} | {:error, term()}
   defp materialize_regular_file(overlay, source_path, target_path, stats) do
-    with :ok <- reject_materialization_symlink(overlay, target_path) do
-      if File.exists?(target_path) or File.exists?(tombstone_path(target_path)) do
-        {:ok, stats}
-      else
+    if regular_target_or_tombstoned?(target_path) do
+      {:ok, stats}
+    else
+      with :ok <- reject_materialization_symlink(overlay, target_path) do
         copy_regular_file(source_path, target_path, stats)
       end
     end
+  end
+
+  # A regular file or tombstone at the target means a previous materialization
+  # already placed this entry. Symlinks are not treated as existing so the
+  # symlink traversal check still catches malicious overlay links.
+  @spec regular_target_or_tombstoned?(String.t()) :: boolean()
+  defp regular_target_or_tombstoned?(target_path) do
+    match?({:ok, %{type: :regular}}, File.lstat(target_path)) or
+      match?({:ok, _}, File.lstat(tombstone_path(target_path)))
   end
 
   @spec copy_regular_file(String.t(), String.t(), materialization_stats()) ::
