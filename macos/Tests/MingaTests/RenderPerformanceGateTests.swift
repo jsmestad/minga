@@ -430,7 +430,7 @@ struct NativeRenderPerformanceGateTests {
 
         #expect(NativeRenderPerformanceGate.absoluteFailures(measurements: recorded)
             .contains { $0.contains("handoff_to_copy_completion p95 8.61ms") })
-        #expect(NativeRenderPerformanceGate.hostedFailures(measurements: recorded).isEmpty)
+        #expect(NativeRenderPerformanceGate.hostedVerdict(measurements: recorded) == .passed)
         #expect(NativeRenderPerformanceGate.quietestRun(recorded) == recorded[2])
     }
 
@@ -439,21 +439,23 @@ struct NativeRenderPerformanceGateTests {
         let slowed = (0..<runCount).map { run in
             measurement(gpuP95: 8.5 + Double(run), completionWallP95: 9.4 + Double(run))
         }
-        let failures = NativeRenderPerformanceGate.hostedFailures(measurements: slowed.reversed())
+        let verdict = NativeRenderPerformanceGate.hostedVerdict(measurements: slowed.reversed())
 
-        #expect(failures.contains { $0.contains("gpu_active_time p95 8.50ms exceeds 8.33ms") })
-        #expect(failures.contains { $0.contains("handoff_to_copy_completion p95 9.40ms exceeds 8.33ms") })
+        #expect(verdict == .wallClockBreach([
+            "gpu_active_time p95 8.50ms exceeds 8.33ms",
+            "handoff_to_copy_completion p95 9.40ms exceeds 8.33ms"
+        ]))
     }
 
     @Test("hosted verdict needs one whole run within both wall-clock budgets")
     func hostedVerdictRejectsPerMetricMinima() {
         let gpuBreach = measurement(gpuP95: 8.34, completionWallP95: 8.0)
         let completionBreach = measurement(gpuP95: 4.0, completionWallP95: 8.34)
-        let failures = NativeRenderPerformanceGate.hostedFailures(
+        let verdict = NativeRenderPerformanceGate.hostedVerdict(
             measurements: [gpuBreach, completionBreach, completionBreach]
         )
 
-        #expect(failures == ["gpu_active_time p95 8.34ms exceeds 8.33ms"])
+        #expect(verdict == .wallClockBreach(["gpu_active_time p95 8.34ms exceeds 8.33ms"]))
     }
 
     @Test("hosted verdict keeps CPU budgets on the median")
@@ -461,38 +463,63 @@ struct NativeRenderPerformanceGateTests {
         let passing = measurement()
         let cpuOutlier = measurement(freezeP95: 5, drawP95: 20, drawP99: 20)
 
-        #expect(NativeRenderPerformanceGate.hostedFailures(
+        #expect(NativeRenderPerformanceGate.hostedVerdict(
             measurements: [passing, passing, cpuOutlier]
-        ).isEmpty)
-        let failures = NativeRenderPerformanceGate.hostedFailures(
+        ) == .passed)
+        let verdict = NativeRenderPerformanceGate.hostedVerdict(
             measurements: [passing, cpuOutlier, cpuOutlier]
         )
-        #expect(failures.contains { $0.contains("freeze_publication p95") })
-        #expect(failures.contains { $0.contains("draw_cpu p95") })
-        #expect(failures.contains { $0.contains("draw_cpu p99") })
+        #expect(verdict.failures.contains { $0.contains("freeze_publication p95") })
+        #expect(verdict.failures.contains { $0.contains("draw_cpu p95") })
+        #expect(verdict.failures.contains { $0.contains("draw_cpu p99") })
+    }
+
+    @Test("only a breach confined to the wall-clock budgets is open to confirmation runs")
+    func hostedVerdictSeparatesConfirmableBreachesFromFinalFailures() {
+        let slow = measurement(gpuP95: 9, completionWallP95: 10)
+        let slowWithCPUBreach = measurement(drawP95: 20, gpuP95: 9, completionWallP95: 10)
+        let slowWithAllocation = measurement(gpuP95: 9, completionWallP95: 10, allocations: 1)
+
+        guard case .wallClockBreach = NativeRenderPerformanceGate.hostedVerdict(
+            measurements: [slow, slow, slow]
+        ) else {
+            Issue.record("a breach in every run with nothing else wrong must be confirmable")
+            return
+        }
+        for sample in [slowWithCPUBreach, slowWithAllocation] {
+            guard case .failed(let failures) = NativeRenderPerformanceGate.hostedVerdict(
+                measurements: [sample, sample, sample]
+            ) else {
+                Issue.record("a CPU or counter failure must be final")
+                continue
+            }
+            #expect(failures.contains { $0.contains("handoff_to_copy_completion p95") })
+        }
     }
 
     @Test("hosted verdict keeps counters and sample validation fail-closed")
     func hostedVerdictKeepsCountersAndValidationFailClosed() {
         let passing = measurement()
         let resourceFailure = measurement(allocatedBytes: 1, allocations: 1, dropped: 1, generations: 4)
-        let failures = NativeRenderPerformanceGate.hostedFailures(
+        let verdict = NativeRenderPerformanceGate.hostedVerdict(
             measurements: [passing, passing, resourceFailure]
         )
+        let failures = verdict.failures
 
+        #expect(verdict == .failed(failures))
         #expect(failures.contains { $0.contains("allocated up to 1 bytes") })
         #expect(failures.contains { $0.contains("1 native allocations") })
         #expect(failures.contains { $0.contains("failed or discarded 1 frames") })
         #expect(failures.contains { $0.contains("retained 4 generations") })
-        #expect(NativeRenderPerformanceGate.hostedFailures(
+        #expect(NativeRenderPerformanceGate.hostedVerdict(
             measurements: [passing, passing]
-        ).contains { $0.contains("odd count") })
-        #expect(NativeRenderPerformanceGate.hostedFailures(
+        ) == .failed(["native absolute comparison requires an odd count of at least three"]))
+        #expect(NativeRenderPerformanceGate.hostedVerdict(
             measurements: [passing, passing, measurement(attempted: 999)]
-        ).contains { $0.contains("invalid native measurement") })
-        #expect(NativeRenderPerformanceGate.hostedFailures(
+        ) == .failed(["invalid native measurement"]))
+        #expect(NativeRenderPerformanceGate.hostedVerdict(
             measurements: [passing, passing, measurement(capacityRecovery: [capacityMeasurement(refreshRateHz: 60)])]
-        ).contains { $0.contains("exactly 60 Hz and 120 Hz") })
+        ) == .failed(["native capacity recovery must measure exactly 60 Hz and 120 Hz"]))
     }
 
     @Test("absolute comparison keeps resource failures fail-closed")

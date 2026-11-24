@@ -553,6 +553,24 @@ public struct NativeRenderPerformanceMeasurement: Codable, Equatable, Sendable {
     }
 }
 
+/// Outcome of judging HEAD-only runs from a shared runner that adds scheduling delay.
+public enum NativeHostedVerdict: Equatable, Sendable {
+    /// Every budget and counter held.
+    case passed
+    /// Every run breached a wall-clock p95 budget and nothing else failed, so further runs can confirm or clear the breach.
+    case wallClockBreach([String])
+    /// A CPU-time budget, a counter, or sample validation failed; further runs cannot change that.
+    case failed([String])
+
+    /// The failure messages of the verdict; empty when it passed.
+    public var failures: [String] {
+        switch self {
+        case .passed: return []
+        case .wallClockBreach(let failures), .failed(let failures): return failures
+        }
+    }
+}
+
 /// Fail-closed budgets for the complete native editor presentation path.
 public enum NativeRenderPerformanceGate {
     /// Ordinary snapshot freeze and publication p95 budget.
@@ -606,17 +624,21 @@ public enum NativeRenderPerformanceGate {
         return absoluteFailures(aggregate(measurements))
     }
 
-    /// Returns absolute failures for an odd set of at least three runs on a host that adds scheduling delay.
+    /// Judges an odd set of at least three runs taken on a host that adds scheduling delay.
     ///
     /// A shared runner with a virtual GPU can preempt a run and delay its GPU and completion times, but it cannot make the measured path faster.
-    /// The two wall-clock p95 budgets therefore pass when at least one whole run meets both of them, and fail when every run breaches.
+    /// The two wall-clock p95 budgets therefore pass when at least one whole run meets both of them, and breach when every run breaches.
     /// CPU-time budgets, resource counters, transcript accounting, and capacity recovery are judged exactly as in `absoluteFailures(measurements:)`.
-    public static func hostedFailures(
+    public static func hostedVerdict(
         measurements: [NativeRenderPerformanceMeasurement]
-    ) -> [String] {
+    ) -> NativeHostedVerdict {
         let rejected = sampleSetFailures(measurements)
-        guard rejected.isEmpty else { return rejected }
-        return absoluteFailures(aggregate(measurements, wallClockRun: quietestRun(measurements)))
+        guard rejected.isEmpty else { return .failed(rejected) }
+        let quietest = quietestRun(measurements)
+        let failures = absoluteFailures(aggregate(measurements, wallClockRun: quietest))
+        guard !failures.isEmpty else { return .passed }
+        let wallClock = quietest.map(wallClockFailures) ?? []
+        return failures == wallClock ? .wallClockBreach(failures) : .failed(failures)
     }
 
     /// Returns the run that decides the hosted wall-clock budgets, or nil for an empty set.

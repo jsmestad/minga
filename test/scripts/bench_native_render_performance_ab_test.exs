@@ -87,8 +87,8 @@ defmodule Minga.BenchNativeRenderPerformanceAbTest do
     assert head_count(compare) == 3
   end
 
-  test "a breach in all three runs is judged again over seven runs", context do
-    assert {output, 0, calls} = run_head_only(context, compare_statuses: "1 0")
+  test "a wall-clock breach in all three runs is judged again over seven runs", context do
+    assert {output, 0, calls} = run_head_only(context, compare_statuses: "3 0")
 
     assert output =~ "collecting four confirmation runs"
     assert Enum.count(calls, &(&1 == "measure")) == 7
@@ -98,24 +98,34 @@ defmodule Minga.BenchNativeRenderPerformanceAbTest do
     assert head_count(second) == 7
   end
 
-  test "a breach that the confirmation runs repeat fails the gate", context do
-    assert {_output, 1, calls} = run_head_only(context, compare_statuses: "1 1")
+  test "a wall-clock breach that the confirmation runs repeat fails the gate", context do
+    assert {_output, 3, calls} = run_head_only(context, compare_statuses: "3 3")
 
     assert Enum.count(calls, &(&1 == "measure")) == 7
     assert [_first, _second] = compares(calls)
   end
 
-  test "a broken comparison tool fails without confirmation runs", context do
-    assert {output, 2, calls} = run_head_only(context, compare_statuses: "2")
+  test "a failure found by the confirmation verdict fails the gate", context do
+    assert {_output, 1, calls} = run_head_only(context, compare_statuses: "3 1")
 
-    refute output =~ "confirmation"
-    assert Enum.count(calls, &(&1 == "measure")) == 3
-    assert [_only] = compares(calls)
+    assert Enum.count(calls, &(&1 == "measure")) == 7
+    assert [_first, _second] = compares(calls)
+  end
+
+  test "a CPU, counter, or tool failure is final after three runs", context do
+    for status <- [1, 2] do
+      assert {output, ^status, calls} =
+               run_head_only(context, compare_statuses: Integer.to_string(status))
+
+      refute output =~ "confirmation"
+      assert Enum.count(calls, &(&1 == "measure")) == 3
+      assert [_only] = compares(calls)
+    end
   end
 
   test "a failed confirmation measurement fails the gate without a second verdict", context do
     assert {_output, 1, calls} =
-             run_head_only(context, compare_statuses: "1", fail_measure_at: 5)
+             run_head_only(context, compare_statuses: "3", fail_measure_at: 5)
 
     assert Enum.count(calls, &(&1 == "measure")) == 5
     assert [_only] = compares(calls)

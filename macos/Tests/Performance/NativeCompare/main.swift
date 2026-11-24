@@ -1,7 +1,7 @@
 import Foundation
 
 private func usage() -> Never {
-    let message = "usage: native-render-compare [--base BASE.json...] --head HEAD.json... | --hosted --head HEAD.json...\n"
+    let message = "usage: native-render-compare [--base BASE.json...] --head HEAD.json... | --hosted --head HEAD.json...\nexit status: 0 passed, 1 failed, 2 usage, 3 hosted wall-clock breach only\n"
     FileHandle.standardError.write(Data(message.utf8))
     exit(2)
 }
@@ -38,8 +38,12 @@ if hosted, !baseURLs.isEmpty { usage() }
 let baseMeasurements = try decode(baseURLs)
 let headMeasurements = try decode(headURLs)
 let failures: [String]
+// Exit status 3 tells the driver that only wall-clock budgets breached, which confirmation runs may clear.
+var failureStatus: Int32 = 1
 if hosted {
-    failures = NativeRenderPerformanceGate.hostedFailures(measurements: headMeasurements)
+    let verdict = NativeRenderPerformanceGate.hostedVerdict(measurements: headMeasurements)
+    failures = verdict.failures
+    if case .wallClockBreach = verdict { failureStatus = 3 }
     for (run, measurement) in headMeasurements.enumerated() {
         print(String(
             format: "hosted run %d: gpu_active_time p95 %.2fms, handoff_to_copy_completion p95 %.2fms",
@@ -70,4 +74,4 @@ if !pairedRatios.isEmpty {
 for failure in failures {
     FileHandle.standardError.write(Data("error: \(failure)\n".utf8))
 }
-if !failures.isEmpty { exit(1) }
+if !failures.isEmpty { exit(failureStatus) }
