@@ -19,7 +19,7 @@ The modeline is the spine. It is the one place state is always visible.
 3. File, with a dot when unsaved.
 4. Change position, only when the cursor is inside one of Minga's changes: "change 1/2".
 5. Git branch and change count: "main +11".
-6. Minga: the state glyph and words. "Minga here 2/3" when Minga is working in this file, otherwise "Minga editing retry.ex 2/3". When Minga needs you, this segment shows only the needs-you glyph and "Minga" (with "2/3" if there is a plan), because segment 2 already says it; its tooltip says "Minga is waiting for you".
+6. Minga: the state glyph and words, in regular weight in the state's colour role. "Minga here 2/3" when Minga is working in this file, "Minga editing retry.ex 2/3" when it is working in another, and the state's word when it is not editing a file ("Minga working", "Minga stopped"). When Minga needs you, this segment shows only the needs-you glyph and "Minga" (with "2/3" if there is a plan), because segment 2 already says it; its tooltip says "Minga is waiting for you".
 7. Diagnostics: error and warning marks with counts, the error count in the failure role. While a checker is broken, a persistent problem segment takes this slot instead ("elixir-ls failed", "config: defaults"), so a clean count is never shown when nothing is checking.
 8. Filetype.
 9. Position, always as `240:31`.
