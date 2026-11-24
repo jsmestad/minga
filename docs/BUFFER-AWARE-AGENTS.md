@@ -77,7 +77,7 @@ This causes real problems:
 
 What if agents edited the buffer, not the filesystem?
 
-The simplest version: agent tools call `Minga.Buffer.apply_edits/3` instead of `File.read/write`. Edits happen in-memory, appear instantly in the editor, go on the undo stack, and trigger incremental tree-sitter updates.
+The simplest version: agent tools call `Minga.Buffer.apply_edits/3` instead of `File.read/write`. Edits happen in-memory, appear instantly in the editor, enter the buffer's history as Minga's own steps (your `u` never undoes them; `SPC a u` reverts a task), and trigger incremental tree-sitter updates.
 
 The more ambitious version: each agent session gets its own fork of the buffer. Multiple agents edit concurrently without conflicts. When they're done, their changes merge back. The editor becomes a collaboration server, not just a viewing layer.
 

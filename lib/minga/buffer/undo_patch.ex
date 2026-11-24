@@ -248,15 +248,6 @@ defmodule Minga.Buffer.UndoPatch do
   end
 
   @doc """
-  Returns the change a forward patch records: where it starts, the bytes it removed, and the bytes it inserted.
-
-  Every patch built from an edit (`from_delta/2`, `from_documents/2`, `changes/2`, or a `replacement/4` recorded for an edit) stores the removed bytes as its old text and the inserted bytes as its new text.
-  """
-  @spec change(t()) :: {non_neg_integer(), byte_fragment(), byte_fragment()}
-  def change(%__MODULE__{start_byte: start_byte, old_text: removed, new_text: inserted}),
-    do: {start_byte, removed, inserted}
-
-  @doc """
   Returns the smallest byte changes a forward patch makes, in document order, as `{start, removed, inserted}`.
 
   Each changed region loses the bytes its old and new text share at the start and the end, on code point boundaries. When the old and new text have the same number of lines, each pair of lines is compared on its own, so a region that changes the start of one line and the end of another leaves the bytes between them out. A rewrite that changes more than 4096 lines of one region at once is one change, which bounds the cost of recording it. Offsets are in the document the patch applies to, so applying the changes from the last to the first gives the patch's result.

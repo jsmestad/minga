@@ -5,9 +5,13 @@ defmodule Minga.Buffer.UndoHistory do
   Every change to the document is recorded in a `Minga.Buffer.Provenance` value, which knows the author of every byte and keeps deleted text as tombstones. This module decides which history group each change belongs to:
 
   * **Yours.** Edits from you (`:user`), from a language server or formatter you invoked (`:lsp`), and from swap recovery (`:recovery`) form your undo stack. Rapid edits from the same source coalesce into one group within `coalesce_ms/0`. The stack keeps your last 1000 groups; an older group becomes permanent text that keeps its author.
-  * **Minga's.** Each step of a Minga task (an author key, `Minga.Buffer.Author.key/0`) is its own group, never coalesced with another step or task and never evicted. An agent edit without a task (`:agent`) is a group of its own, written by `{:minga, :untasked}` and named `{:untasked, n}`; the last 1000 such groups stay revertable, and an older one becomes permanent unattributed text. Before it does, any undo or redo step of yours it blocks leaves your stacks, with everything below it, so no flip can rebuild text that never existed. Minga's groups never enter your stacks.
+  * **Minga's.** Each step of a Minga task (an author key, `Minga.Buffer.Author.key/0`) is its own group, never coalesced with another step or task and never evicted. An agent edit without a task (`:agent`) is a group of its own, written by `{:minga, :untasked}` and named `{:untasked, n}`; the last 1000 such groups stay revertable, and an older one becomes permanent text that keeps that author. Before it does, any undo or redo step of yours it blocks leaves your stacks, with everything below it, so no flip can rebuild text that never existed. Minga's groups never enter your stacks.
 
   `undo/3` and `redo/3` move only your groups. They find a group's text by its runs, not by byte offsets, so they stay exact when Minga edited above, below, or inside your text since. When flipping your group would change text that a later Minga step rewrote, they change nothing and return `{:blocked, {:overlaps, minga_group}}`. Minga's edits never clear your redo stack.
+
+  `reject_task/4` and `undo_agent_session/3` revert all of a task's steps together. Your edits never block them; a task that started later and rewrote the task's text does, until it is reverted first.
+
+  `reload/3` takes in content changed on disk without losing Minga's unreviewed steps.
 
   Undo and redo restore the buffer version and cursor of the state they return to only when nothing else changed the document since that state; otherwise the restore asks for a new version (`:advance`), because the document is one no earlier version named, and the cursor goes to the first change.
 
