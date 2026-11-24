@@ -79,10 +79,11 @@
           <div class="hero-install">
             <div class="code-tabs" data-code-tabs>
               <div class="code-tabs-header">
-                <div class="code-tab-list" role="tablist" aria-label="Quick install">
+                <div class="code-tab-list" role="tablist" aria-label="Quick install by platform">
                   <button type="button" class="code-tab" role="tab" id="tab-hero-mac" aria-selected="true" aria-controls="panel-hero-mac">macOS App</button>
-                  <button type="button" class="code-tab" role="tab" id="tab-hero-cli" aria-selected="false" aria-controls="panel-hero-cli" tabindex="-1">macOS Terminal</button>
-                  <button type="button" class="code-tab" role="tab" id="tab-hero-linux" aria-selected="false" aria-controls="panel-hero-linux" tabindex="-1">Linux</button>
+                  <button type="button" class="code-tab" role="tab" id="tab-hero-cli" aria-selected="false" aria-controls="panel-hero-cli" tabindex="-1">macOS CLI</button>
+                  <button type="button" class="code-tab" role="tab" id="tab-hero-arch" aria-selected="false" aria-controls="panel-hero-arch" tabindex="-1">Arch / Omarchy</button>
+                  <button type="button" class="code-tab" role="tab" id="tab-hero-linux" aria-selected="false" aria-controls="panel-hero-linux" tabindex="-1">Ubuntu / Fedora</button>
                 </div>
                 <div class="code-tabs-actions">
                   <button type="button" class="copy-btn" data-copy-target="hero-cmd-mac">Copy</button>
@@ -93,18 +94,30 @@
                 <pre><code id="hero-cmd-mac">brew install --cask jsmestad/minga/minga-mac &amp;&amp; open -a Minga</code></pre>
               </div>
               <div class="code-tab-panel" role="tabpanel" id="panel-hero-cli" aria-labelledby="tab-hero-cli" data-copy-id="hero-cmd-cli">
-                <div class="code-tab-noscript">Terminal CLI · Homebrew</div>
+                <div class="code-tab-noscript">macOS CLI · Homebrew</div>
                 <pre><code id="hero-cmd-cli">brew install jsmestad/minga/minga &amp;&amp; minga .</code></pre>
               </div>
-              <div class="code-tab-panel" role="tabpanel" id="panel-hero-linux" aria-labelledby="tab-hero-linux" data-copy-id="hero-cmd-linux">
-                <div class="code-tab-noscript">Linux · Arch and Omarchy (apt and dnf in Getting Started)</div>
-                <pre><code id="hero-cmd-linux">curl -fsSL https://packages.mingacode.dev/minga.asc | sudo pacman-key --add -
+              <div class="code-tab-panel" role="tabpanel" id="panel-hero-arch" aria-labelledby="tab-hero-arch" data-copy-id="hero-cmd-arch">
+                <div class="code-tab-noscript">Arch Linux &amp; Omarchy · Signed pacman repo</div>
+                <pre><code id="hero-cmd-arch">curl -fsSL https://packages.mingacode.dev/minga.asc | sudo pacman-key --add -
 sudo pacman-key --lsign-key 2C5D2396B82C1278D4596A0965711C0C3853857B
 curl -fsSL https://packages.mingacode.dev/arch/minga.conf | sudo tee -a /etc/pacman.conf &gt; /dev/null
 sudo pacman -Syu minga</code></pre>
               </div>
+              <div class="code-tab-panel" role="tabpanel" id="panel-hero-linux" aria-labelledby="tab-hero-linux" data-copy-id="hero-cmd-linux">
+                <div class="code-tab-noscript">Ubuntu 24.04+, Debian 13+, Fedora · Signed repos</div>
+                <pre><code id="hero-cmd-linux"># Ubuntu &amp; Debian
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://packages.mingacode.dev/minga.asc | sudo tee /etc/apt/keyrings/minga.asc &gt; /dev/null
+curl -fsSL https://packages.mingacode.dev/apt/minga.sources | sudo tee /etc/apt/sources.list.d/minga.sources &gt; /dev/null
+sudo apt update &amp;&amp; sudo apt install minga
+
+# Fedora
+sudo curl -fsSLo /etc/yum.repos.d/minga.repo https://packages.mingacode.dev/rpm/minga.repo
+sudo dnf install minga</code></pre>
+              </div>
             </div>
-            <p class="hero-install-note">Signed prereleases for Apple Silicon macOS and Linux (Arch, Omarchy, Ubuntu, Debian, Fedora) · Zero files written to your repo · Auto-detects API keys &amp; LSPs on $PATH · MIT</p>
+            <p class="hero-install-note">Signed macOS (Homebrew) &amp; Linux (Arch/Omarchy, Ubuntu, Debian, Fedora) packages · Zero repo files · Auto-detects API keys &amp; LSPs · MIT</p>
           </div>
         </div>
 
@@ -139,8 +152,8 @@ sudo pacman -Syu minga</code></pre>
 
           <!-- FEATURE 1: CO-AUTHORING (THE TWIST) -->
           <div class="showcase-panel" role="tabpanel" id="panel-spec-twist" aria-labelledby="tab-spec-twist">
-            <p class="showcase-explain"><strong>Feature 01: Co-authoring &amp; per-author undo.</strong> The resting window is just your code, a plain title bar, and one prioritized modeline. Minga's unreviewed lines show as a braided Twist in the gutter; editing inside them turns one strand blue for shared authorship while <kbd>u</kbd> / <kbd>⌘Z</kbd> undoes only your lines.</p>
-            <div class="spine-specimen" role="img" aria-label="Resting screen in Catppuccin Frappe: plain title bar, code with Twist authorship gutter, and one prioritized modeline">
+            <p class="showcase-explain"><strong>The Twist gutter:</strong> Braided strands mark Minga's unreviewed lines; editing inside turns one strand blue while <kbd>u</kbd> / <kbd>⌘Z</kbd> undoes only yours.</p>
+            <div class="spine-specimen" role="img" aria-label="Resting screen in Catppuccin Frappé: plain title bar, code with Twist authorship gutter, and one prioritized modeline">
               <div class="spine-titlebar">
                 <span class="spine-wordmark">minga</span>
                 <span class="spine-title-file">retry.ex <span>lib/minga_agent/retry.ex</span></span>
@@ -225,7 +238,7 @@ sudo pacman -Syu minga</code></pre>
 
           <!-- FEATURE 2: SUBAGENT PEEK -->
           <div class="showcase-panel" role="tabpanel" id="panel-spec-peek" aria-labelledby="tab-spec-peek">
-            <p class="showcase-explain"><strong>Feature 02: Subagent Peek.</strong> Press <kbd>SPC a i</kbd> (or <kbd>↩</kbd> on a worker line) to inspect a working subagent in a split on the right. Step through siblings in place with <kbd>]]</kbd> / <kbd>[[</kbd> or message a subagent directly while your main thread and unsent draft stay untouched.</p>
+            <p class="showcase-explain"><strong>Subagent Peek:</strong> Press <kbd>SPC a i</kbd> to inspect a parallel worker in a right split, step siblings with <kbd>]]</kbd> / <kbd>[[</kbd>, or message it without losing your main draft.</p>
             <div class="spine-specimen" role="img" aria-label="Subagent peek split: parent conversation on left, subagent split on right with sibling glyph strip and direct composer">
               <div class="spine-titlebar">
                 <span class="spine-wordmark">minga</span>
@@ -272,7 +285,7 @@ sudo pacman -Syu minga</code></pre>
 
           <!-- FEATURE 3: TASKS & EDITABLE QUEUE -->
           <div class="showcase-panel" role="tabpanel" id="panel-spec-tasks" aria-labelledby="tab-spec-tasks">
-            <p class="showcase-explain"><strong>Feature 03: Tasks drawer &amp; editable prompt queue.</strong> Approvals float to the top of <code>*minga-tasks*</code> with uniform <kbd>y</kbd>/<kbd>a</kbd>/<kbd>t</kbd>/<kbd>n</kbd> keys and a 300 ms anti-misfire lockout on auto-open. Queued follow-ups live in <code>*minga-queue*</code>, an ordinary buffer where <kbd>dd</kbd> and <kbd>p</kbd> reorder upcoming prompts.</p>
+            <p class="showcase-explain"><strong>Tasks &amp; Queue:</strong> Approvals float to the top of <code>*minga-tasks*</code> (<kbd>y</kbd>/<kbd>a</kbd>/<kbd>t</kbd>/<kbd>n</kbd>) with a 300 ms lockout; <code>*minga-queue*</code> reorders queued prompts with <kbd>dd</kbd>/<kbd>p</kbd>.</p>
             <div class="spine-specimen" role="img" aria-label="Tasks drawer with subagent tree and expanded Needs you approval row alongside editable prompt queue buffer">
               <div class="spine-titlebar">
                 <span class="spine-wordmark">minga</span>
@@ -318,7 +331,7 @@ sudo pacman -Syu minga</code></pre>
 
           <!-- FEATURE 4: MACOS & TERMINAL PARITY -->
           <div class="showcase-panel" role="tabpanel" id="panel-spec-parity" aria-labelledby="tab-spec-parity">
-            <p class="showcase-explain"><strong>Feature 04: True macOS &amp; Terminal parity.</strong> Both clients render the exact same screens, theme roles, and key bindings from one Erlang VM state model. The Go terminal client uses floating rounded layers and degrades cleanly from vector graphics down to 16-color terminals.</p>
+            <p class="showcase-explain"><strong>macOS &amp; Terminal parity:</strong> Swift + Metal and the Go terminal client render identical layouts, marks, and keys from one Erlang VM state model.</p>
             <div class="spine-specimen" role="img" aria-label="Side by side parity between macOS native client and Go terminal client rendering identical layout, marks, and keys">
               <div class="spine-titlebar">
                 <span class="spine-wordmark">minga</span>
@@ -363,101 +376,97 @@ sudo pacman -Syu minga</code></pre>
           </div>
 
           <figcaption class="spine-caption">
-            <span>Illustrative previews of Minga's v0.1.0 interface model (<a href="/architecture#adrs">ADR-0006</a>), shown in the default Catppuccin Frappé theme.</span>
+            <span>v0.1.0 interface preview in the default Catppuccin Frappé theme (<a href="/architecture#adrs">ADR-0006</a>).</span>
             <span>No tabs · No permanent sidebars · One modeline</span>
           </figcaption>
         </figure>
       </div>
     </section>
 
-    <section class="section" id="marks" data-status="planned" data-since="v0.1.0" data-pill="off">
+    <section class="section section-tinted" id="marks" data-status="planned" data-since="v0.1.0" data-pill="off">
       <div class="container">
         <div class="section-header">
-          <p class="section-index"><span>01</span> Interface</p>
-          <h2 data-status="planned" data-since="v0.1.0">Two visual marks carry the identity. The UI speaks only when state changes.</h2>
-          <p>Resting screens carry no icon rail, no permanent sidebar, no tab bar, and no separate agent workspace. Every color is a semantic theme role (<code>minga</code>, <code>you</code>, <code>needs_you</code>, <code>failure</code>, <code>done</code>) mapped by your chosen theme, defaulting to Catppuccin Frappé.</p>
+          <p class="section-index"><span>01</span> Visual Grammar</p>
+          <h2 data-status="planned" data-since="v0.1.0">Two visual marks. Five semantic roles.</h2>
+          <p>No icon rail, tab strip, or permanent sidebar. Every color maps to a semantic role (<code>minga</code>, <code>you</code>, <code>needs_you</code>, <code>failure</code>, <code>done</code>) in your theme, defaulting to Catppuccin Frappé.</p>
         </div>
 
         <div data-marks-theme-switcher></div>
 
         <div class="marks-grid">
           <div class="mark-block">
-            <h3>The Twist: who wrote this line?</h3>
-            <p>A thin authorship gutter replaces a separate git sign column. The strands cross once on the first line of an agent change and pin to the top as you scroll, so the review handle stays put while Minga writes.</p>
+            <h3>The Twist: authorship in the gutter</h3>
+            <p>Replaces a separate git sign column; the crossing pins to the top as you scroll.</p>
             <ul class="twist-legend">
               <li class="twist-row">
-                <span class="twist-swatch"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="24" viewBox="0 0 10 26" aria-hidden="true"><path d="M7 5 C7 11, 3 11, 3 17 L3 26" fill="none" stroke="#74628d" stroke-width="2.6" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke="#303446" stroke-width="5" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke="#ca9ee6" stroke-width="2.6" stroke-linecap="round"/></svg></span>
+                <span class="twist-swatch"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="24" viewBox="0 0 10 26" aria-hidden="true"><path d="M7 5 C7 11, 3 11, 3 17 L3 26" fill="none" stroke="#75648e" stroke-width="2.6" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke="#303446" stroke-width="5" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke="#ca9ee6" stroke-width="2.6" stroke-linecap="round"/></svg></span>
                 <strong>Minga unreviewed</strong>
-                <span>Braided <code>minga</code> strands (mauve in Frappé); click the crossing or press <kbd>SPC a y</kbd> to keep and <kbd>SPC a d</kbd> to reject</span>
+                <span>Braided <code>minga</code> strands; <kbd>SPC a y</kbd> keep, <kbd>SPC a d</kbd> reject</span>
               </li>
               <li class="twist-row">
                 <span class="twist-swatch"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="24" viewBox="0 0 10 26" aria-hidden="true"><path d="M3 0 L3 26" stroke="#8caaee" stroke-width="2.6"/><path d="M7 0 L7 26" stroke="#ca9ee6" stroke-width="2.6"/></svg></span>
                 <strong>Shared edit</strong>
-                <span>Editing inside Minga's change turns one strand into your <code>you</code> role on the lines you touched</span>
+                <span>One strand turns <code>you</code> on lines you edited inside Minga's change</span>
               </li>
               <li class="twist-row">
                 <span class="twist-swatch"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="24" viewBox="0 0 10 26" aria-hidden="true"><path d="M5 0 L5 26" stroke="#8caaee" stroke-width="1.8"/></svg></span>
                 <strong>Your lines</strong>
-                <span>Thin <code>you</code> strand (blue in Frappé) for uncommitted edits; <kbd>u</kbd> undoes only yours</span>
+                <span>Single <code>you</code> strand; <kbd>u</kbd> undoes only your edits</span>
               </li>
               <li class="twist-row">
                 <span class="twist-swatch"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="24" viewBox="0 0 10 26" aria-hidden="true"><path d="M5 0 L5 26" stroke="#ca9ee6" stroke-opacity="0.48" stroke-width="1.6"/></svg></span>
                 <strong>Accepted</strong>
-                <span>Muted single strand until your next commit; rejected changes vanish cleanly</span>
+                <span>Muted single strand until commit</span>
               </li>
             </ul>
           </div>
 
           <div class="mark-block">
-            <h3>The Orbit: what is Minga doing?</h3>
-            <p>Six state words on five unmistakable shapes, rendered from one canonical state value across the modeline, tasks drawer, subagent peek, and notifications. The <code>needs_you</code> role (peach in Frappé) is never decorative; if you see it, Minga is waiting on you.</p>
+            <h3>The Orbit: live state everywhere</h3>
+            <p>Six state words on five shapes across modeline, drawers, and notifications. Only <code>needs_you</code> escalates.</p>
             <ul class="orbit-list">
               <li class="orbit-row">
                 <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="#ca9ee6" stroke-opacity="0.32" stroke-width="1.5"/><path d="M8 2.5 A5.5 5.5 0 0 1 13.5 8" fill="none" stroke="#ca9ee6" stroke-width="1.5" stroke-linecap="round"/><circle cx="13.5" cy="8" r="2.1" fill="#ca9ee6"/></svg>
                 <strong class="role-minga">Working</strong>
-                <span>Orbit appears only while moving</span>
+                <span>Visible only while running</span>
                 <span class="orbit-tui">TUI: ◐</span>
               </li>
               <li class="orbit-row">
                 <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="#ef9f76" fill-opacity="0.3"/><circle cx="8" cy="8" r="3.4" fill="#ef9f76"/></svg>
                 <strong class="role-needs">Needs you</strong>
-                <span>The only state that escalates; never steals focus</span>
+                <span>Escalates without stealing focus</span>
                 <span class="orbit-tui">TUI: ◉</span>
               </li>
               <li class="orbit-row">
                 <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="none" stroke="#838ba7" stroke-width="1.6"/></svg>
                 <strong>Waiting / Stopped</strong>
-                <span>Hollow dot paired with its word, reason, and retry timer</span>
+                <span>Hollow dot with reason and retry timer</span>
                 <span class="orbit-tui">TUI: ○</span>
               </li>
               <li class="orbit-row">
                 <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><rect x="4.6" y="4.6" width="6.8" height="6.8" rx="1.2" fill="#e78284" transform="rotate(45 8 8)"/></svg>
                 <strong class="role-fail">Failed</strong>
-                <span>Diamond with exact cause and one concrete next step</span>
+                <span>Diamond with cause and next step</span>
                 <span class="orbit-tui">TUI: ◆</span>
               </li>
               <li class="orbit-row">
                 <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.4" fill="#a6d189"/></svg>
                 <strong class="role-done">Done</strong>
-                <span>Ready to review inline or in <code>*minga-review*</code></span>
+                <span>Ready inline or in <code>*minga-review*</code></span>
                 <span class="orbit-tui">TUI: ●</span>
               </li>
             </ul>
           </div>
         </div>
 
-        <div class="spine-rules">
+        <div class="spine-rules is-open-rules">
           <div class="spine-rule">
-            <h3>Vim keys stay Vim inside code.</h3>
-            <p>Inside a file, <kbd>y</kbd> always yanks and <kbd>n</kbd> always steps search. Review changes with leader keys (<kbd>SPC a y</kbd> / <kbd>SPC a d</kbd>), change text objects (<kbd>ih</kbd>/<kbd>ah</kbd>), <kbd>.</kbd> repeat, and line ranges. Bare single-letter actions live only in special buffers like <code>*minga-review*</code>.</p>
+            <h3>Vim stays Vim inside code.</h3>
+            <p><kbd>y</kbd> always yanks and <kbd>n</kbd> steps search. Review via <kbd>SPC a y</kbd>/<kbd>SPC a d</kbd>, <kbd>ih</kbd>/<kbd>ah</kbd>, or <code>*minga-review*</code>.</p>
           </div>
           <div class="spine-rule">
-            <h3>One drawer at a time; code keeps its width.</h3>
-            <p>Tasks, reviews, diagnostics, and the file switcher open as real buffers in a bottom drawer or split and close with <kbd>q</kbd> or <kbd>esc</kbd>. Panels yield before code does so your editor keeps at least 100 columns.</p>
-          </div>
-          <div class="spine-rule">
-            <h3>Safe quit and honest crash notices.</h3>
-            <p>Quitting with unsaved work prompts with explicit keys (<kbd>s</kbd> save all, <kbd>d</kbd> discard only your unsaved edits, <kbd>esc</kbd> cancel) while Minga's unreviewed changes stay saved for next time. If a background process restarts, a clear notice says what recovered.</p>
+            <h3>One drawer at a time.</h3>
+            <p>Drawers close with <kbd>q</kbd>/<kbd>esc</kbd> and yield before code drops below 100 columns; auto-opened approvals lock <kbd>y</kbd> for 300 ms.</p>
           </div>
         </div>
       </div>
@@ -466,76 +475,87 @@ sudo pacman -Syu minga</code></pre>
     <section class="section" id="co-authoring">
       <div class="container">
         <div class="section-header">
-          <p class="section-index"><span>02</span> Co-authoring</p>
-          <h2 data-status="planned" data-since="v0.1.0">Work alongside parallel agents without surrendering your buffer, undo, or focus.</h2>
-          <p>Spawning agents is easy. Steering parallel runs, keeping partial diffs, and fixing edge cases without fighting your own editor is where you save the day.</p>
+          <p class="section-index"><span>02</span> Interactive Labs</p>
+          <h2>Test the model in your browser before installing.</h2>
+          <p>Press real keys, undo inside a shared diff, and crash background services with zero setup.</p>
         </div>
 
-        <div class="feature-grid" data-status="planned" data-since="v0.1.0" data-pill="off">
-          <div class="feature-cell">
-            <span class="feature-k">01 / Authorship &amp; Undo</span>
-            <h3>Per-author undo and shared edits</h3>
-            <p>Pressing <kbd>u</kbd> or <kbd>⌘Z</kbd> undoes only your own edits, never deleting Minga's work out from under you. Agent changes are grouped per step behind revision checks and crash-safe staging, surface cleanly through the Twist gutter and <code>*minga-review*</code>, fill standard quickfix via <code>:Minga review</code>, and prompt before accepting a hunk that still has an LSP error.</p>
-          </div>
+        <div class="lab-launchpad" data-status="planned" data-since="v0.1.0" data-pill="off">
+          <a class="lab-launch-card" href="/learn/editing">
+            <div class="lab-launch-preview" aria-hidden="true">
+              <div class="lab-launch-preview-head"><span>MINI-MINGA SANDBOX</span><span class="ml-minga">SPC · CUA</span></div>
+              <div><span class="ml-minga">SPC</span> &nbsp;a Agent › &nbsp;f File › &nbsp;g Git › &nbsp;, Switcher</div>
+              <div><span class="ml-you">g.</span> &nbsp;&nbsp;y Keep &nbsp;n Reject &nbsp;= Diff &nbsp;q Close</div>
+            </div>
+            <div class="lab-launch-body">
+              <h3>Playable key sandbox</h3>
+              <p>Drive which-key, pin files, toggle macOS vs. Go TUI parity, and test CUA shortcuts.</p>
+            </div>
+            <div class="lab-launch-foot"><span>Open Lesson 02</span><span>-&gt;</span></div>
+          </a>
 
-          <div class="feature-cell">
-            <span class="feature-k">02 / Parallel Agents</span>
-            <h3>Subagent trees and live peek in place</h3>
-            <p>When a task fans out, <code>*minga-tasks*</code> renders the subagent tree with live state shapes. Press <kbd>SPC a i</kbd> to peek at any worker in a right split with a sibling strip (<code>◐ ◐ ● ◐  3 of 4</code>), folded brief, live steps, and a direct composer to message that subagent without retargeting your main thread or discarding an unsent draft.</p>
-          </div>
+          <a class="lab-launch-card" href="/learn/agents">
+            <div class="lab-launch-preview" aria-hidden="true">
+              <div class="lab-launch-preview-head"><span>CO-AUTHORING SIM</span><span class="ml-needs">◉ 1 needs you</span></div>
+              <div><span class="ml-you">u</span> Undo yours &nbsp;<span class="ml-minga">SPC a i</span> Peek ◐ ◐ <span class="ml-done">●</span> ◐</div>
+              <div><span class="ml-needs">300 ms</span> anti-misfire guard · <span class="ml-done">dd/p</span> queue</div>
+            </div>
+            <div class="lab-launch-body">
+              <h3>Parallel agent simulator</h3>
+              <p>Try per-author undo inside a Twist block, subagent peek, and the approval lockout.</p>
+            </div>
+            <div class="lab-launch-foot"><span>Open Lesson 03</span><span>-&gt;</span></div>
+          </a>
 
-          <div class="feature-cell">
-            <span class="feature-k">03 / Buffers All the Way Down</span>
-            <h3>Steer mid-flight or edit your prompt queue like code</h3>
-            <p>Send a message in Normal mode (<kbd>↩</kbd> or <kbd>⌘↩</kbd>) to steer Minga while it works, or press <kbd>⌥↩</kbd> to queue follow-ups in <code>*minga-queue*</code>, an ordinary editable buffer where <kbd>dd</kbd> and <kbd>p</kbd> reorder upcoming prompts. Pause after Spacebar (<kbd>SPC</kbd>) anytime to see live counts right inside which-key.</p>
-          </div>
-
-          <div class="feature-cell">
-            <span class="feature-k">04 / Anti-Misfire Craft</span>
-            <h3>Interrupt by need, never by focus</h3>
-            <p>You are mid-sentence in Insert mode when a background task asks to run a destructive command. Your cursor never jumps. Only <code>needs_you</code> lights up in the modeline and background notifications, an auto-opened drawer locks single-letter approval keys for 300 ms so a keystroke in flight can never hit <kbd>y</kbd>, and answering in one place syncs <em>Already answered</em> everywhere else.</p>
-          </div>
+          <a class="lab-launch-card" href="/learn/remote">
+            <div class="lab-launch-preview" aria-hidden="true">
+              <div class="lab-launch-preview-head"><span>DEVBOX &amp; VETO LAB</span><span class="ml-done">● Isolated</span></div>
+              <div><span class="ml-you">ssh://</span>devbox/work/app &nbsp;·&nbsp; lid closed</div>
+              <div><span class="ml-fail">exit 1</span> PreToolUse veto · MCP crash safe</div>
+            </div>
+            <div class="lab-launch-body">
+              <h3>BEAM fault &amp; hook lab</h3>
+              <p>Close the laptop lid on a remote devbox, crash an MCP server, and test shell vetoes.</p>
+            </div>
+            <div class="lab-launch-foot"><span>Open Lesson 05</span><span>-&gt;</span></div>
+          </a>
         </div>
 
-        <p class="section-foot-link">Evaluating Minga against Cursor, Zed, Neovim, Emacs, or tmux + Claude Code / Codex? <a href="/why-minga#comparison">Read the full comparison and tradeoffs on Why Minga -&gt;</a></p>
+        <p class="section-foot-link">Comparing Minga against Cursor, Zed, Neovim, Emacs, or tmux + Claude Code? <a href="/why-minga#comparison">Read the comparison and tradeoffs on Why Minga -&gt;</a></p>
       </div>
     </section>
 
-    <section class="section" id="programmable">
+    <section class="section section-tinted" id="programmable">
       <div class="container">
         <div class="section-header">
           <p class="section-index"><span>03</span> Programmability</p>
-          <h2>Build a workflow for Tuesday's migration. Discard it Wednesday, or reuse it forever.</h2>
-          <p>Minga edits any language you write with zero config required to start. Just as Lua configures Neovim and Elisp configures Emacs, Elixir is Minga's extension language, scaling cleanly from five lines in <code>config.exs</code> to supervised packages and task-shaped workflows.</p>
+          <h2>From five lines in <code>config.exs</code> to task-shaped Elixir workflows.</h2>
+          <p>Zero config required to start. When you customize Minga, one Elixir runtime scales from live-reloaded options to supervised packages.</p>
         </div>
 
         <div class="split-layout">
           <div>
             <ul class="pillar-list">
               <li>
-                <strong>Start small, reload live (<kbd>SPC h r</kbd>)</strong>
-                <p>Configure typed options, keybindings, custom commands, background save hooks, and command wrappers in <code>~/.config/minga/config.exs</code>, or install supervised extensions from Elixir's package registry (Hex), Git, or local paths.</p>
+                <strong>Live config (<kbd>SPC h r</kbd>)</strong>
+                <p>Typed options, keybindings, async save hooks, and command wrappers in <code>~/.config/minga/config.exs</code>.</p>
               </li>
               <li>
-                <strong>Readable source with explicit grants</strong>
-                <p>Every customization lives in plain Elixir files you diff, test, and version in Git. Tune any installed extension's <code>load_policy</code> (eager, deferred, or on-command) directly from your config without forking it.</p>
+                <strong>Supervised packages (<code>minga_sdk</code>)</strong>
+                <p>Install from Hex, Git, or local paths, override <code>load_policy</code> without forking, or plug in a corporate <code>InferenceRoute</code> proxy.</p>
               </li>
               <li data-status="planned" data-since="v0.1.0">
-                <strong>Disposable for one task, reusable when it sticks</strong>
-                <p>Author or ask Minga to build a task-specific Elixir review surface or check workflow over real buffer and agent owners. Inspect the source diff, save to activate under an explicit revocable grant (with automatic restore if a candidate fails), run it identically on macOS and in the terminal, then discard it when the PR lands or save it to reuse across repos.</p>
+                <strong>Task workflows (v0.1.0)</strong>
+                <p>Author a review or check surface over buffers and agents, activate under a revocable grant, then discard or reuse across repos.</p>
               </li>
             </ul>
-
-            <div class="callout">
-              <span class="callout-title">Release status</span>
-              <p>Live config, hooks, command advice, Hex/Git/path extensions, custom LLM gateways, runtime grammars, and staged overlays are available now. <span data-status="planned" data-since="v0.1.0" data-pill="off"><strong>Coming in v0.1.0:</strong> the minimal UI model, Twist/Orbit marks, per-author undo, and save-to-activate reusable workflows (<a href="/extending">see Extending Minga</a>).</span></p>
-            </div>
+            <p class="section-foot-link" style="margin-top:1.25rem;"><a href="/extending">Explore all three layers and security boundaries on Extending Minga -&gt;</a></p>
           </div>
 
-          <div class="code-card">
+          <div class="code-card is-frappe">
             <div class="code-header">
               <span>~/.config/minga/config.exs</span>
-              <span>Optional config</span>
+              <span>Elixir · Reload via SPC h r</span>
             </div>
             <pre><code><span class="tok-kw">use</span> <span class="tok-mod">Minga.Config</span>
 
@@ -543,19 +563,14 @@ set <span class="tok-atom">:theme</span>, <span class="tok-atom">:catppuccin_fra
 set <span class="tok-atom">:line_numbers</span>, <span class="tok-atom">:relative</span>
 set <span class="tok-atom">:tab_width</span>, <span class="tok-num">2</span>
 
-<span class="tok-comment"># Prefer standard Cmd+C/V desktop shortcuts instead of Vim?</span>
-<span class="tok-comment"># set :editing_model, :cua</span>
-
-<span class="tok-comment"># Define a custom command and bind it in Normal mode (SPC = Spacebar).</span>
 bind <span class="tok-atom">:normal</span>, <span class="tok-str">"SPC m t"</span>, <span class="tok-atom">:run_tests</span>, <span class="tok-str">"Run project tests"</span>
-
-command <span class="tok-atom">:run_tests</span>, <span class="tok-str">"Run project test suite"</span> <span class="tok-kw">do</span>
-  {output, _} = <span class="tok-mod">System</span>.cmd(<span class="tok-str">"mix"</span>, [<span class="tok-str">"test"</span>])
-  <span class="tok-mod">Minga.API</span>.message(output)
+command <span class="tok-atom">:run_tests</span>, <span class="tok-str">"Run test suite"</span> <span class="tok-kw">do</span>
+  {out, _} = <span class="tok-mod">System</span>.cmd(<span class="tok-str">"mix"</span>, [<span class="tok-str">"test"</span>])
+  <span class="tok-mod">Minga.API</span>.message(out)
 <span class="tok-kw">end</span>
 
-<span class="tok-comment"># Install supervised extensions from Hex, Git, or local paths.</span>
-extension <span class="tok-atom">:minga_git_extended</span>, hex: <span class="tok-str">"minga_git_extended"</span>, version: <span class="tok-str">"~&gt; 0.1"</span></code></pre>
+extension <span class="tok-atom">:minga_git_extended</span>,
+  hex: <span class="tok-str">"minga_git_extended"</span>, version: <span class="tok-str">"~&gt; 0.1"</span></code></pre>
           </div>
         </div>
       </div>
@@ -565,75 +580,94 @@ extension <span class="tok-atom">:minga_git_extended</span>, hex: <span class="t
       <div class="container">
         <div class="section-header">
           <p class="section-index"><span>04</span> Runtime</p>
-          <h2>Built on the Erlang VM for isolated work, safe automation, and remote devboxes.</h2>
-          <p>Minga runs its core on the Erlang virtual machine (BEAM) so editing, language servers, extensions, MCP servers, and persistent remote agents share one concurrent runtime without stepping on each other.</p>
+          <h2>Erlang VM isolation behind native code.</h2>
+          <p>Buffers, language servers, extensions, MCP servers, and agents run in separate processes with separate heaps; Swift, Go, and Zig handle pixels and parsing.</p>
         </div>
 
-        <ol class="runtime-ledger">
-          <li class="runtime-row">
-            <div class="runtime-failure">
-              <span class="runtime-index">01</span>
-              <h3>Zero UI freezes behind background work</h3>
+        <div class="iso-pillar-grid">
+          <div class="iso-pillar">
+            <div class="iso-pillar-diagram" aria-hidden="true">
+              <svg viewBox="0 0 220 76" xmlns="http://www.w3.org/2000/svg">
+                <rect x="6" y="10" width="60" height="24" fill="#232634" stroke="#8caaee" stroke-width="1.2"/>
+                <text x="36" y="25" fill="#c6d0f5" font-family="ui-monospace,monospace" font-size="9" text-anchor="middle">Buffer PID</text>
+                <rect x="80" y="10" width="60" height="24" fill="#232634" stroke="#ca9ee6" stroke-width="1.2"/>
+                <text x="110" y="25" fill="#c6d0f5" font-family="ui-monospace,monospace" font-size="9" text-anchor="middle">Hook Task</text>
+                <rect x="154" y="10" width="60" height="24" fill="#232634" stroke="#a6d189" stroke-width="1.2"/>
+                <text x="184" y="25" fill="#c6d0f5" font-family="ui-monospace,monospace" font-size="9" text-anchor="middle">LSP Port</text>
+                <line x1="6" y1="52" x2="214" y2="52" stroke="#51576d" stroke-width="1" stroke-dasharray="3 3"/>
+                <text x="110" y="67" fill="#a6d189" font-family="ui-monospace,monospace" font-size="9" text-anchor="middle">PREEMPTIVE · SEPARATE HEAPS</text>
+              </svg>
             </div>
-            <div class="runtime-answer">
-              <span class="runtime-mechanism">Preemptive scheduling + per-process heaps</span>
-              <p>Every open file, language server, save hook, and agent session runs in its own lightweight process with its own garbage-collected heap, and fast model streams coalesce ahead of editor input.</p>
+            <div class="iso-pillar-body">
+              <h3>No UI freezes</h3>
+              <p>Preemptive scheduling and per-process GC keep typing smooth while agents stream and hooks run.</p>
             </div>
-          </li>
-
-          <li class="runtime-row">
-            <div class="runtime-failure">
-              <span class="runtime-index">02</span>
-              <h3>Crash-isolated extensions and multi-server MCP</h3>
-            </div>
-            <div class="runtime-answer">
-              <span class="runtime-mechanism">Supervision trees + isolated stdio MCP</span>
-              <p>Extensions and Model Context Protocol (MCP) servers share no memory with your open buffers. If an extension raises or a GitHub/Linear/Postgres MCP server crashes mid-turn, only its prefixed tools drop out while your files, undo history, and built-in tools keep running (<a href="/docs/mcp.html">MCP Reference</a>).</p>
-            </div>
-          </li>
-
-          <li class="runtime-row">
-            <div class="runtime-failure">
-              <span class="runtime-index">03</span>
-              <h3>Crash-safe tools, retained logs, and local veto hooks</h3>
-            </div>
-            <div class="runtime-answer">
-              <span class="runtime-mechanism">Revision checks + artifact store + PreToolUse hooks</span>
-              <p>File edits require full-file revision checks and persist drafts outside the editor process. Long shell outputs stay stored in full beyond the 51 KiB model preview across compactions and restarts, each tool call is recorded before execution so crashes never replay side effects, and local <code>PreToolUse</code> shell scripts can deterministically veto risky calls (<a href="/docs/hooks.html">Hooks Reference</a>).</p>
-            </div>
-          </li>
-
-          <li class="runtime-row">
-            <div class="runtime-failure">
-              <span class="runtime-index">04</span>
-              <h3>Close your laptop; agents keep working on your devbox</h3>
-            </div>
-            <div class="runtime-answer">
-              <span class="runtime-mechanism">Headless daemon + remote attach + corporate gateways</span>
-              <p>Run <code>minga --headless</code> under <code>systemd</code> or <code>launchd</code>, attach from macOS or the terminal with <code>minga attach ssh://devbox/work/app</code> without copying source code, route models through internal proxies via <code>MingaAgent.InferenceRoute</code>, and compile extra tree-sitter grammars on demand. See <a href="/docs/remote_agents.html">Remote Agents</a>.</p>
-            </div>
-          </li>
-        </ol>
-
-        <div class="boundary-band">
-          <div class="boundary-col">
-            <h3>What the Erlang VM owns</h3>
-            <p>Open files, supervision trees, agent orchestration, extensions, key scopes, modeline segment priority, and one canonical state value for every client.</p>
           </div>
-          <div class="boundary-col boundary-col-native">
-            <h3>Where native code takes over</h3>
-            <p>The VM never rasterizes pixels or parses syntax trees. Separate native OS processes handle macOS rendering, terminal rendering, and syntax parsing with zero shared memory (<a href="/architecture">see full diagrams</a>).</p>
+
+          <div class="iso-pillar">
+            <div class="iso-pillar-diagram" aria-hidden="true">
+              <svg viewBox="0 0 220 76" xmlns="http://www.w3.org/2000/svg">
+                <rect x="8" y="10" width="90" height="24" fill="#232634" stroke="#e78284" stroke-width="1.2"/>
+                <text x="53" y="25" fill="#e78284" font-family="ui-monospace,monospace" font-size="9" text-anchor="middle">GitHub MCP ×</text>
+                <rect x="116" y="10" width="96" height="24" fill="#232634" stroke="#a6d189" stroke-width="1.2"/>
+                <text x="164" y="25" fill="#a6d189" font-family="ui-monospace,monospace" font-size="9" text-anchor="middle">Files &amp; Undo ✓</text>
+                <text x="110" y="64" fill="#a5adce" font-family="ui-monospace,monospace" font-size="9" text-anchor="middle">ONLY FAILED TOOLS DROP OUT</text>
+              </svg>
+            </div>
+            <div class="iso-pillar-body">
+              <h3>Isolated MCP &amp; plugins</h3>
+              <p>If an extension or stdio MCP server crashes mid-turn, only its tools drop out (<a href="/docs/mcp.html">MCP</a>).</p>
+            </div>
+          </div>
+
+          <div class="iso-pillar">
+            <div class="iso-pillar-diagram" aria-hidden="true">
+              <svg viewBox="0 0 220 76" xmlns="http://www.w3.org/2000/svg">
+                <rect x="6" y="14" width="54" height="24" fill="#232634" stroke="#ef9f76" stroke-width="1.2"/>
+                <text x="33" y="29" fill="#ef9f76" font-family="ui-monospace,monospace" font-size="8.5" text-anchor="middle">Hook Gate</text>
+                <text x="68" y="29" fill="#949cbb" font-family="ui-monospace,monospace" font-size="10">-&gt;</text>
+                <rect x="82" y="14" width="56" height="24" fill="#232634" stroke="#ca9ee6" stroke-width="1.2"/>
+                <text x="110" y="29" fill="#ca9ee6" font-family="ui-monospace,monospace" font-size="8.5" text-anchor="middle">Staged</text>
+                <text x="146" y="29" fill="#949cbb" font-family="ui-monospace,monospace" font-size="10">-&gt;</text>
+                <rect x="160" y="14" width="54" height="24" fill="#232634" stroke="#a6d189" stroke-width="1.2"/>
+                <text x="187" y="29" fill="#a6d189" font-family="ui-monospace,monospace" font-size="8.5" text-anchor="middle">3-Way</text>
+                <text x="110" y="64" fill="#a5adce" font-family="ui-monospace,monospace" font-size="9" text-anchor="middle">ZERO BLIND DISK WRITES</text>
+              </svg>
+            </div>
+            <div class="iso-pillar-body">
+              <h3>Staged &amp; gated tools</h3>
+              <p>Revision-checked overlays, write-ahead logs, and local <code>PreToolUse</code> shell vetoes (<a href="/docs/hooks.html">Hooks</a>).</p>
+            </div>
+          </div>
+
+          <div class="iso-pillar">
+            <div class="iso-pillar-diagram" aria-hidden="true">
+              <svg viewBox="0 0 220 76" xmlns="http://www.w3.org/2000/svg">
+                <rect x="10" y="14" width="68" height="24" fill="#232634" stroke="#8caaee" stroke-width="1.2"/>
+                <text x="44" y="29" fill="#c6d0f5" font-family="ui-monospace,monospace" font-size="8.5" text-anchor="middle">macOS / TUI</text>
+                <line x1="78" y1="26" x2="128" y2="26" stroke="#ca9ee6" stroke-width="1.4" stroke-dasharray="3 2"/>
+                <rect x="128" y="14" width="82" height="24" fill="#232634" stroke="#a6d189" stroke-width="1.2"/>
+                <text x="169" y="29" fill="#a6d189" font-family="ui-monospace,monospace" font-size="8.5" text-anchor="middle">--headless</text>
+                <text x="110" y="64" fill="#a5adce" font-family="ui-monospace,monospace" font-size="9" text-anchor="middle">ssh://devbox/work/app</text>
+              </svg>
+            </div>
+            <div class="iso-pillar-body">
+              <h3>Headless devboxes</h3>
+              <p>Run <code>minga --headless</code> under <code>systemd</code>/<code>launchd</code> and attach over SSH without copying source (<a href="/docs/remote_agents.html">Remote</a>).</p>
+            </div>
           </div>
         </div>
+
+        <p class="section-foot-link">Inspect process diagrams, live fault injection, and all eight ADRs on <a href="/architecture">Architecture -&gt;</a></p>
       </div>
     </section>
 
-    <section class="section" id="frontends">
+    <section class="section section-tinted" id="frontends">
       <div class="container">
         <div class="section-header">
-          <p class="section-index"><span>05</span> Parity</p>
+          <p class="section-index"><span>05</span> Dual Clients</p>
           <h2>macOS and the terminal draw the same picture.</h2>
-          <p>The terminal client is not a simplified fallback. If a screen cannot be drawn in the terminal with the same layout, the design is wrong. Rendering stays platform-native; the interaction model stays identical.</p>
+          <p>Minga trades desktop-only sidebars for one keyboard layout shared by macOS and SSH terminals.</p>
         </div>
 
         <div class="grid-2">
@@ -642,11 +676,21 @@ extension <span class="tok-atom">:minga_git_extended</span>, hex: <span class="t
               <h3>macOS Desktop App</h3>
               <span class="surface-panel-tag">Swift + Metal</span>
             </div>
-            <p>Neovim and Doom Emacs discipline with native Mac polish: smooth trackpad scrolling, crisp CoreText typography, ligatures, system accent selection, and native menu bar and notifications without toolbar or sidebar bloat.</p>
+            <div class="client-wireframe" aria-hidden="true">
+              <div class="client-wf-bar">
+                <span class="client-wf-dots"><i style="background:#e78284"></i><i style="background:#e5c890"></i><i style="background:#a6d189"></i></span>
+                <span>minga · retry.ex</span>
+                <span>CoreText + Metal</span>
+              </div>
+              <div class="client-wf-body">
+                <div class="client-wf-row"><span><span class="ml-minga">┃</span> 238 &nbsp;case status do</span><span class="ml-dim">120 Hz scroll</span></div>
+                <div class="client-wf-row"><span><span class="ml-you">┃</span> 240 &nbsp;529 -&gt; {:overloaded, backoff_ms(2)}</span><span class="ml-needs">◉ 1 needs you</span></div>
+              </div>
+            </div>
             <ul>
-              <li>Signed, notarized Apple Silicon prereleases via Homebrew.</li>
-              <li>Every visible action works by keyboard or click. <span data-status="planned" data-since="v0.1.0">Holding <kbd>⌘</kbd> reveals shortcuts on visible controls.</span></li>
-              <li>Background agent alerts surface as actionable macOS notifications without stealing focus. <span data-status="planned" data-since="v0.1.0">A <code>needs_you</code> Dock badge joins them.</span></li>
+              <li>Signed, notarized Apple Silicon builds via Homebrew with CoreText ligatures and trackpad momentum.</li>
+              <li>Every control works by keyboard or mouse; <span data-status="planned" data-since="v0.1.0">holding <kbd>⌘</kbd> reveals shortcuts on visible controls.</span></li>
+              <li>Background alerts post native macOS notifications that open Minga on click without stealing focus. <span data-status="planned" data-since="v0.1.0">A <code>needs_you</code> Dock badge joins them.</span></li>
             </ul>
           </div>
 
@@ -655,10 +699,19 @@ extension <span class="tok-atom">:minga_git_extended</span>, hex: <span class="t
               <h3>Terminal Client</h3>
               <span class="surface-panel-tag">Go Terminal UI</span>
             </div>
-            <p>Draws the exact same layout, marks, and keys over SSH or tmux with floating drawers, crisp box geometry, and clean degradation all the way down to 16-color terminals.</p>
+            <div class="client-wireframe" aria-hidden="true">
+              <div class="client-wf-bar">
+                <span>ssh://devbox/work/app</span>
+                <span>Ghostty · Kitty · tmux</span>
+              </div>
+              <div class="client-wf-body">
+                <div class="client-wf-row"><span>┌─ retry.ex · staged diff ──────────┐</span><span class="ml-dim">Truecolor / 16</span></div>
+                <div class="client-wf-row"><span>│ ]c next · y accept · x reject · q │</span><span class="ml-done">● OSC 52</span></div>
+              </div>
+            </div>
             <ul>
-              <li>Uses modern terminal capabilities (Ghostty, Kitty, WezTerm, iTerm2): disambiguated shortcuts, clipboard over SSH, and flicker-free frames. <span data-status="planned" data-since="v0.1.0">Crisp vector gutter marks (with two-tone block fallbacks), clickable <code>file:line</code> links, native notifications, and tab progress.</span></li>
-              <li data-status="planned" data-since="v0.1.0">Run <code>:checkhealth terminal</code> anytime to inspect detected features and active fallbacks.</li>
+              <li>Signed rolling packages for <strong>Arch &amp; Omarchy</strong>, <strong>Ubuntu 24.04+</strong>, <strong>Debian 13+</strong>, <strong>Fedora</strong> (x86_64/ARM64), and macOS Homebrew, each bundling its own Erlang runtime.</li>
+              <li>Uses Kitty keyboard, OSC 52 clipboard, and mode 2026 sync down to 16-color terminals; <span data-status="planned" data-since="v0.1.0">vector gutter marks, OSC 8 links, and <code>:checkhealth terminal</code> land for v0.1.0.</span></li>
               <li data-status="planned" data-since="v0.1.0">Layout and keyboard parity with macOS are tested together in CI (<a href="/architecture#executable-parity">see Architecture</a>).</li>
             </ul>
           </div>
@@ -666,109 +719,29 @@ extension <span class="tok-atom">:minga_git_extended</span>, hex: <span class="t
       </div>
     </section>
 
-    <section class="section" id="install">
+    <section class="section section-closing" id="install">
       <div class="container">
         <div class="section-header">
-          <p class="section-index"><span>06</span> Install</p>
+          <p class="section-index"><span>06</span> Start</p>
           <h2>Try Minga side by side with zero lock-in.</h2>
-          <p>Apple Silicon macOS builds ship via Homebrew as signed, notarized prereleases. On Linux, the terminal client installs from Minga's signed package repository for Arch and Omarchy, Ubuntu 24.04+, Debian 13+ and Fedora, and updates with the rest of your system. Minga never writes proprietary files into your repository, so you can test it on real code alongside your current editor. See <a href="/getting-started#install">Getting Started</a> for every platform and for Intel Mac source builds.</p>
+          <p>Zero files written to your repo. Signed packages for Apple Silicon macOS (Homebrew) and Linux x86_64/ARM64 (<strong>Arch &amp; Omarchy</strong>, <strong>Ubuntu</strong>, <strong>Debian</strong>, <strong>Fedora</strong> via <code>packages.mingacode.dev</code>), plus source builds.</p>
         </div>
 
-        <div class="grid-2">
-          <div class="code-card">
-            <div class="code-header">
-              <span>macOS Desktop App · Homebrew</span>
-              <button type="button" class="copy-btn" data-copy-target="cmd-brew-mac">Copy</button>
-            </div>
-            <pre><code id="cmd-brew-mac">brew install --cask jsmestad/minga/minga-mac
-open -a Minga</code></pre>
-          </div>
-
-          <div class="code-card">
-            <div class="code-header">
-              <span>macOS Terminal Client · Homebrew</span>
-              <button type="button" class="copy-btn" data-copy-target="cmd-brew-cli">Copy</button>
-            </div>
-            <pre><code id="cmd-brew-cli">brew install jsmestad/minga/minga
-minga path/to/project</code></pre>
-          </div>
-        </div>
-
-        <div class="code-card">
-          <div class="code-header">
-            <span>Linux Terminal Client · signed package repository (x86_64 and ARM64)</span>
-            <button type="button" class="copy-btn" data-copy-target="cmd-linux">Copy</button>
-          </div>
-          <pre><code id="cmd-linux"># Arch and Omarchy
-curl -fsSL https://packages.mingacode.dev/minga.asc | sudo pacman-key --add -
-sudo pacman-key --lsign-key 2C5D2396B82C1278D4596A0965711C0C3853857B
-curl -fsSL https://packages.mingacode.dev/arch/minga.conf | sudo tee -a /etc/pacman.conf &gt; /dev/null
-sudo pacman -Syu minga
-
-# Ubuntu and Debian
-sudo install -d -m 0755 /etc/apt/keyrings
-curl -fsSL https://packages.mingacode.dev/minga.asc | sudo tee /etc/apt/keyrings/minga.asc &gt; /dev/null
-curl -fsSL https://packages.mingacode.dev/apt/minga.sources | sudo tee /etc/apt/sources.list.d/minga.sources &gt; /dev/null
-sudo apt update &amp;&amp; sudo apt install minga
-
-# Fedora
-sudo curl -fsSLo /etc/yum.repos.d/minga.repo https://packages.mingacode.dev/rpm/minga.repo
-sudo dnf install minga</code></pre>
+        <div class="actions" style="margin-top:1.5rem;">
+          <a class="btn btn-primary" href="/getting-started">Get Started (macOS, Linux &amp; Source)</a>
+          <a class="btn" href="/learn/">Launch Learn Labs</a>
+          <a class="btn" href="/why-minga">Read Why Minga</a>
         </div>
 
         <div class="follow-strip">
-          <p><strong>Following the road to v0.1.0?</strong> Track prereleases, design decisions, and extension updates on GitHub.</p>
+          <p><strong>Following the road to v0.1.0?</strong> Track prereleases, ADRs, and extension updates on GitHub.</p>
           <div class="follow-links">
             <a href="https://github.com/jsmestad/minga/releases">Releases</a>
             <a href="/docs/changelog.html">Changelog</a>
+            <a href="/docs/">Reference</a>
             <a href="https://github.com/jsmestad/minga/discussions">Discussions</a>
             <a href="https://github.com/jsmestad/minga">Star on GitHub</a>
           </div>
-        </div>
-
-        <div class="guide-index" aria-label="Guides and technical reference">
-          <a class="guide-row" href="/why-minga">
-            <span class="guide-row-top">
-              <span class="guide-row-title">Why Minga</span>
-              <span class="guide-row-kind">Thesis</span>
-            </span>
-            <span class="guide-row-desc">Why Minga rejects permanent sidebars and panel sprawl, how it compares to Zed, Cursor, Herdr, Emacs, and Neovim, and what comes after v0.1.0.</span>
-          </a>
-          <a class="guide-row" href="/learn/">
-            <span class="guide-row-top">
-              <span class="guide-row-title">Learn Minga</span>
-              <span class="guide-row-kind">5 Lessons</span>
-            </span>
-            <span class="guide-row-desc">Structured path with interactive browser drills: install and first staged edit, v0.1.0 keys, parallel agent co-authoring, Elixir for Minga, and remote devboxes.</span>
-          </a>
-          <a class="guide-row" href="/architecture">
-            <span class="guide-row-top">
-              <span class="guide-row-title">Architecture &amp; The Spine</span>
-              <span class="guide-row-kind">Diagrams</span>
-            </span>
-            <span class="guide-row-desc">Process boundaries, staged overlays, macOS/TUI parity CI, and all six Architecture Decision Records (including ADR-0006).</span>
-          </a>
-          <a class="guide-row" href="/extending">
-            <span class="guide-row-top">
-              <span class="guide-row-title">Extending Minga</span>
-              <span class="guide-row-kind">Guide</span>
-            </span>
-            <span class="guide-row-desc">Config, supervised extensions, corporate gateways, PreToolUse hooks, MCP servers, and security boundaries.</span>
-          </a>
-          <a class="guide-row" href="/docs/configuration.html">
-            <span class="guide-row-top">
-              <span class="guide-row-title">Configuration &amp; Extension Reference</span>
-              <span class="guide-row-kind">Reference</span>
-            </span>
-            <span class="guide-row-desc">Complete option tables, keymap scopes, hooks, MCP servers, and extension callbacks.</span>
-          </a>
-          <a class="guide-row" href="/docs/">
-            <span class="guide-row-top">
-              <span class="guide-row-title">Full API &amp; Protocol Docs</span>
-              <span class="guide-row-kind">API Docs</span>
-            </span>
-            <span class="guide-row-desc">Elixir module reference, wire protocols, remote agents, session recovery specs, and architecture decision records.</span>
-          </a>
         </div>
       </div>
     </section>

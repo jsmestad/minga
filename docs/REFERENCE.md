@@ -10,7 +10,7 @@ Minga installs from Homebrew on Apple Silicon macOS (the desktop app and the ter
 
 - [Configuration](CONFIGURATION.md): Declarative `config.exs` options, keybindings, themes, language servers, and live reload (`SPC h r`).
 - [Projects](PROJECTS.md): Project root detection, `.minga.exs` per-repo overrides, file finding, and workspace switching.
-- [Hooks](HOOKS.md): Local `PreToolUse` and `PostToolUse` shell scripts that deterministically gate agent tool calls by exit code.
+- [Hooks](HOOKS.md): Local shell or Elixir lifecycle hooks; `PreToolUse` deterministically gates tool calls by exit code, and `PostToolUse` observes completed calls.
 - [Model Context Protocol (MCP)](MCP.md): Configuring supervised stdio MCP servers, prefixed tool discovery, and destructive-call approvals.
 - [Remote Agents](REMOTE_AGENTS.md): Running `minga --headless` under `systemd` or `launchd` and attaching over SSH without copying source code.
 - [Agent Model Selection](AGENT-MODEL-SELECTION.md): Model routing, per-role provider configuration, and local credential storage.
@@ -36,7 +36,8 @@ Only modules intended for user configuration, extension authors, and external ag
 - [Architecture](ARCHITECTURE.md): BEAM supervision tree, three-layer dependency boundaries, and multi-frontend isolation.
 - [Terminal Protocol](PROTOCOL.md) and [GUI Protocol](GUI_PROTOCOL.md): Binary frame and input contracts between the Elixir core and native frontends.
 - [Charm Terminal Frontend](CHARM_TUI.md): Go and Bubble Tea terminal client architecture.
-- **Architecture Decision Records:** [ADR-0001](adr/0001-frontend-owns-row-fit.md) (Frontend Owns Row Fit), [ADR-0002](adr/0002-editor-state-transitions-have-explicit-owners.md) (Explicit State Owners), [ADR-0003](adr/0003-extension-code-updates-require-a-new-vm-generation.md) (VM Generation Extension Updates), [ADR-0004](adr/0004-products-are-root-applets-over-a-fixed-engine.md) (Root Applets Over a Fixed Engine), [ADR-0005](adr/0005-frontend-owns-immediate-ui-feedback.md) (Immediate UI Feedback), [ADR-0006](adr/0006-the-spine.md) (The Spine), [ADR-0007](adr/0007-cua-is-a-key-profile.md) (CUA Key Profile), [ADR-0008](adr/0008-terminal-engine.md) (Terminal Engine).
+- **Core runtime ADRs:** [ADR-0001](adr/0001-frontend-owns-row-fit.md) (Client Viewport Rows) · [ADR-0002](adr/0002-editor-state-transitions-have-explicit-owners.md) (Explicit State Owners) · [ADR-0003](adr/0003-extension-code-updates-require-a-new-vm-generation.md) (Extension Reloads) · [ADR-0004](adr/0004-products-are-root-applets-over-a-fixed-engine.md) (Task Workflows) · [ADR-0005](adr/0005-frontend-owns-immediate-ui-feedback.md) (Immediate UI Feedback)
+- **UI, keys & terminal ADRs:** [ADR-0006](adr/0006-the-spine.md) (The Spine) · [ADR-0007](adr/0007-cua-is-a-key-profile.md) (CUA Key Profile) · [ADR-0008](adr/0008-terminal-engine.md) (Terminal Engine)
 - [Changelog](../CHANGELOG.md): Release history and notable changes.
 
 ## Repository & Contributor Docs
