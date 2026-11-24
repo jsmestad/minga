@@ -4848,6 +4848,11 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   margin: 1.5rem 0;
 }
 
+.essay-hero kbd,
+.essay-section kbd {
+  white-space: nowrap;
+}
+
 .essay-section > .code-pair {
   grid-template-columns: 1fr;
   align-items: start;
