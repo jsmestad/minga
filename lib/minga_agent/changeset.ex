@@ -333,6 +333,14 @@ defmodule MingaAgent.Changeset do
     GenServer.call(cs, {:observe, observer, registration})
   end
 
+  @doc """
+  Tells the observer that a buffer fork draft of this changeset's view changed.
+
+  Fork drafts change without a changeset revision, so the code that edits a fork calls this after each successful edit. The observer receives `{:changeset_revised, changeset}` as it does after a staged change. The changeset's revision does not change.
+  """
+  @spec fork_draft_changed(changeset()) :: :ok
+  def fork_draft_changed(cs), do: GenServer.cast(cs, :fork_draft_changed)
+
   @doc "Returns the staging registration value given to `observe/3`, or `nil`."
   @spec staging(changeset()) :: term() | nil
   def staging(cs), do: GenServer.call(cs, :staging)

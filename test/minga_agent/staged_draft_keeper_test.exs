@@ -3,6 +3,7 @@ defmodule MingaAgent.StagedDraftKeeperTest do
 
   import ExUnit.CaptureLog
 
+  alias Minga.Buffer.FileMutation
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Session.StagedDraft
   alias Minga.Session.StagedDrafts
@@ -183,6 +184,74 @@ defmodule MingaAgent.StagedDraftKeeperTest do
 
       assert Map.keys(stored(root, store)) == [{2, "lib/a.ex"}]
     end
+  end
+
+  describe "fork drafts change without a staged revision" do
+    # Each view is tracked once and never passed to persist/3 again.
+    # The keeper must learn of every later fork change by itself.
+    setup %{root: root} do
+      path = Path.join(root, "lib/c.ex")
+      File.write!(path, "one\ntwo\nthree\nfour\nfive\n")
+      start_supervised!({BufferProcess, content: File.read!(path), file_path: path})
+      {:ok, view} = ProjectView.overlay(root)
+      %{view: view}
+    end
+
+    test "a hunk rejected in review stays rejected after a full restart",
+         %{root: root, store: store, keeper: keeper, view: view} do
+      agent_edit = "ONE\ntwo\nthree\nfour\nFIVE\n"
+      rejected = "ONE\ntwo\nthree\nfour\nfive\n"
+      :ok = ProjectView.write_file(view, "lib/c.ex", agent_edit)
+      StagedDraftKeeper.persist(keeper, view, 1)
+      eventually(keeper, fn -> stored_content(root, store, {1, "lib/c.ex"}) == agent_edit end)
+
+      {:ok, %{owner: {:fork, _}} = source} = ProjectView.resolve_source(view, "lib/c.ex")
+      revision = FileMutation.revision(agent_edit, nil, {:project_view, source.source_id})
+
+      assert {:ok, _receipt} =
+               Overlay.conditional_review_mutate(
+                 view,
+                 "lib/c.ex",
+                 source,
+                 revision,
+                 {:replace, rejected}
+               )
+
+      eventually(keeper, fn -> stored_content(root, store, {1, "lib/c.ex"}) == rejected end)
+      assert recovered_content(view, store, root) == {:ok, rejected}
+    end
+
+    test "an agent edit in a background workspace survives a full restart",
+         %{root: root, store: store, keeper: keeper, view: view} do
+      StagedDraftKeeper.persist(keeper, view, 2)
+      :sys.get_state(keeper)
+
+      {:ok, source} = ProjectView.resolve_source(view, "lib/c.ex")
+      original = "one\ntwo\nthree\nfour\nfive\n"
+      revision = FileMutation.revision(original, nil, {:project_view, source.source_id})
+      agent_edit = "one\nTWO\nthree\nfour\nfive\n"
+
+      assert {:ok, _receipt} =
+               ProjectView.conditional_mutate(view, "lib/c.ex", revision, {:replace, agent_edit})
+
+      eventually(keeper, fn -> stored_content(root, store, {2, "lib/c.ex"}) == agent_edit end)
+      assert recovered_content(view, store, root) == {:ok, agent_edit}
+    end
+  end
+
+  defp stored_content(root, store, key) do
+    case Map.get(stored(root, store), key) do
+      %StagedDraft{content: content} -> content
+      nil -> nil
+    end
+  end
+
+  defp recovered_content(view, store, root) do
+    full_shutdown(view)
+    fresh = start_keeper(store, :second)
+    :ok = StagedDraftKeeper.recover(fresh, root, self())
+    assert_receive {:staged_drafts_recovered, ^root, [%Recovery{source: :disk} = recovery]}, 2_000
+    ProjectView.read_file(recovery.view, "lib/c.ex")
   end
 
   describe "full restart" do
