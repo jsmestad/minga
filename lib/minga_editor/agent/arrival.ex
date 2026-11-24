@@ -1,8 +1,6 @@
 defmodule MingaEditor.Agent.Arrival do
   @moduledoc """
-  A local Agent tab arrival holds one Session request at a time. The time budget
-  is shared by both requests. Only the final capture in the Session's ordinary
-  event order can install live controls.
+  A local Agent tab arrival holds one Session request at a time. Both requests share the Editor's arrival budget (`MingaEditor.State.AgentConnection`). Only the final capture in the Session's ordinary event order can install live controls.
   A timely reply holds the previous committed frame until that ordered capture
   arrives or the same deadline expires.
   """
@@ -17,8 +15,6 @@ defmodule MingaEditor.Agent.Arrival do
   alias MingaEditor.Shell.Traditional.Workflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
-
-  @wait_ms 250
 
   @typep phase ::
            {:snapshot, :gen_server.request_id()}
@@ -36,9 +32,14 @@ defmodule MingaEditor.Agent.Arrival do
 
   @doc "Begins an exact local arrival with one shared deadline for Session I/O."
   @spec start(EditorState.t(), Tab.id(), pid()) :: EditorState.t()
-  def start(%EditorState{agent_connection: %{agent_ingest: subscriber}} = state, tab, session)
+  def start(
+        %EditorState{agent_connection: %{agent_ingest: subscriber, arrival_budget_ms: budget}} =
+          state,
+        tab,
+        session
+      )
       when is_pid(subscriber) and is_pid(session) and node(session) == node() do
-    deadline = System.monotonic_time(:millisecond) + @wait_ms
+    deadline = System.monotonic_time(:millisecond) + budget
     state = state |> cancel() |> Workflow.install_agent_cache_reset() |> unavailable()
     request = Session.request_editor_snapshot(session)
 

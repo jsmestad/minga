@@ -3,6 +3,8 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
   Exercises real key dispatch through the committed semantic Agent chat frame.
 
   The test provider and shared warm model catalog do not exercise the first-open freeze in #3610. The shipping-app journey in #3644 owns that check.
+
+  These journeys assert the first frame a timely Agent tab arrival commits. The production arrival budget (250 ms) is wall-clock time that a loaded CI runner can spend before the destination Session answers; the Editor then correctly commits an Unavailable frame first. `MingaEditor.Agent.ConcurrentSessionsTest` covers that timeout path. The Editors here use a generous budget so "timely" does not depend on runner load.
   """
 
   use Minga.Test.EditorCase, async: true
@@ -18,6 +20,7 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional
+  alias MingaEditor.State.AgentConnection
   alias MingaEditor.State.InlineAsk
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
@@ -26,6 +29,8 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
 
   @moduletag :tmp_dir
   @capabilities %Capabilities{frontend_type: :native_gui, semantic_ui: true}
+
+  @arrival_budget_ms 4_000
 
   setup %{tmp_dir: dir}, do: %{editor_ctx: open_editor(dir)}
 
@@ -41,7 +46,8 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
       shell: :traditional,
       capabilities: @capabilities,
       options_server: options,
-      agent_provider_module: Minga.Test.StubProvider
+      agent_provider_module: Minga.Test.StubProvider,
+      agent_arrival_budget_ms: @arrival_budget_ms
     )
   end
 
@@ -188,6 +194,31 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
 
     assert %{visible?: true, lifecycle: :conversation, prompt: "arrival draft"} =
              await_conversation(ctx, prompt: "arrival draft")
+  end
+
+  test "an Agent tab click waits out a Session slower than the default budget and commits its conversation first",
+       %{editor_ctx: ctx} do
+    manual = Runtime.active_tab(editor_state(ctx).shell_runtime)
+    send_keys_async(ctx, "<SPC>anlate draft<Esc>")
+    assert %{prompt: "late draft"} = await_conversation(ctx, prompt: "late draft")
+    agent = Runtime.active_tab(editor_state(ctx).shell_runtime)
+
+    send_gui_action(ctx, {:select_tab, manual.id})
+    refute match?(%{visible?: true}, agent_chat(ctx))
+
+    # The suspended Session stands in for a loaded runner. The production budget
+    # would commit an Unavailable frame inside this window.
+    :ok = :sys.suspend(agent.payload.session)
+    frame = HeadlessPort.prepare_await(ctx.port)
+    send(ctx.editor, {:minga_input, {:gui_action, {:select_tab, agent.id}}})
+
+    assert {:error, :timeout} =
+             HeadlessPort.collect_frame(frame, 2 * AgentConnection.default_arrival_budget_ms())
+
+    :ok = :sys.resume(agent.payload.session)
+
+    assert {:ok, %{agent_chat: %{visible?: true, lifecycle: :conversation, prompt: "late draft"}}} =
+             HeadlessPort.collect_frame(frame)
   end
 
   test "closing a file tab restores the previous Agent composer", %{

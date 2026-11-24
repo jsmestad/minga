@@ -187,6 +187,13 @@ defmodule Minga.Test.EditorCase do
         else: editor_opts
 
     editor_opts =
+      if Keyword.has_key?(opts, :agent_arrival_budget_ms),
+        do: [
+          {:agent_arrival_budget_ms, Keyword.get(opts, :agent_arrival_budget_ms)} | editor_opts
+        ],
+        else: editor_opts
+
+    editor_opts =
       if shell, do: [{:shell, shell}, {:skip_persistence, true} | editor_opts], else: editor_opts
 
     # Thread project_root for file tree isolation in tests
