@@ -1246,6 +1246,37 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.pickerState.markedCount == 2)
     }
 
+    @Test("picker local preview moves only for the keys the BEAM lists as movement")
+    @MainActor func pickerLocalPreviewFollowsBEAMMovementKeys() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        let items = (0..<5).map {
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "item\($0)", description: "", annotation: "", matchPositions: [], activationID: UInt32($0 + 1))
+        }
+        let keys = [
+            Wire.PickerMovementKey(codepoint: 106, modifiers: 0x02, delta: 1),
+            Wire.PickerMovementKey(codepoint: 107, modifiers: 0x02, delta: -1),
+            Wire.PickerMovementKey(codepoint: 57_353, modifiers: 0, delta: 1)
+        ]
+        dispatcher.applyForTesting(.guiPicker(visible: true, selectedIndex: 2, filteredCount: 5,
+                                        totalCount: 5, markedCount: 0, title: "Find File", query: "",
+                                        hasPreview: false, items: items, actionMenu: nil, modePrefix: "", loadStatus: .ready,
+                                        queryGeneration: 7, acknowledgedQueryEditSeq: 0, activationGeneration: 7, movementKeys: keys))
+
+        // Plain j and k type into the query on the BEAM, so they never move the preview.
+        #expect(dispatcher.previewPickerNavigation(codepoint: 106, modifiers: 0) == false)
+        #expect(dispatcher.previewPickerNavigation(codepoint: 107, modifiers: 0) == false)
+        // ↑ is not in this picker's list, for example after a user unbound it.
+        #expect(dispatcher.previewPickerNavigation(codepoint: 57_352, modifiers: 0) == false)
+        #expect(gui.pickerState.effectiveSelectedIndex == 2)
+
+        #expect(dispatcher.previewPickerNavigation(codepoint: 106, modifiers: 0x02))
+        #expect(gui.pickerState.effectiveSelectedIndex == 3)
+        #expect(dispatcher.previewPickerNavigation(codepoint: 107, modifiers: 0x02))
+        #expect(dispatcher.previewPickerNavigation(codepoint: 57_353, modifiers: 0))
+        #expect(gui.pickerState.effectiveSelectedIndex == 3)
+        #expect(gui.pickerState.selectedIndex == 2)
+    }
+
     @Test("guiPicker hidden clears pickerState")
     @MainActor func guiPickerHidden() throws {
         let (dispatcher, gui) = makeDispatcher()

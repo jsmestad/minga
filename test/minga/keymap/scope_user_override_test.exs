@@ -104,6 +104,53 @@ defmodule Minga.Keymap.Scope.UserOverrideTest do
     end
   end
 
+  describe "keys_for_command/4" do
+    @ctrl 0x02
+    @arrow_down 57_353
+    @arrow_down_mac 0xF701
+
+    defp picker_keys(command),
+      do: Scope.keys_for_command(:picker, :insert, command, keymap_server: test_keymap_server())
+
+    test "lists the default single keys of a command" do
+      assert picker_keys(:picker_next) ==
+               Enum.sort([{?j, @ctrl}, {@arrow_down, 0}, {@arrow_down_mac, 0}])
+
+      assert {?k, @ctrl} in picker_keys(:picker_prev)
+      refute {?j, 0} in picker_keys(:picker_next)
+    end
+
+    test "a user binding adds its key" do
+      KeymapActive.bind(test_keymap_server(), {:picker, :insert}, "C-n", :picker_next, "Next")
+
+      assert {?n, @ctrl} in picker_keys(:picker_next)
+      assert {?j, @ctrl} in picker_keys(:picker_next)
+    end
+
+    test "a user binding that takes a default key removes it from the old command" do
+      KeymapActive.bind(test_keymap_server(), {:picker, :insert}, "C-j", :picker_select, "Open")
+
+      refute {?j, @ctrl} in picker_keys(:picker_next)
+      assert {@arrow_down, 0} in picker_keys(:picker_next)
+      assert {?j, @ctrl} in picker_keys(:picker_select)
+    end
+
+    test "every listed key resolves to the command" do
+      KeymapActive.bind(test_keymap_server(), {:picker, :insert}, "C-j", :picker_prev, "Previous")
+
+      for command <- [:picker_next, :picker_prev], key <- picker_keys(command) do
+        assert {:command, ^command} =
+                 Scope.resolve_key(:picker, :insert, key, keymap_server: test_keymap_server())
+      end
+    end
+
+    test "an unknown scope or an unbound command has no keys" do
+      assert Scope.keys_for_command(:no_such_scope, :insert, :picker_next) == []
+      assert picker_keys(:no_such_command) == []
+      assert Scope.keys_for_command(:picker, :normal, :picker_next) == []
+    end
+  end
+
   describe ":keymap_server context routes to the requested server" do
     # Discriminating tests: bind on server A, resolve against server B, prove
     # the override is consulted. Without this, a regression that ignored the

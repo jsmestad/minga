@@ -165,6 +165,31 @@ func EncodeKeyPress(codepoint rune, modifiers byte, seq uint32) []byte {
 	}
 }
 
+// KeyPressIdentity returns the codepoint and modifiers of an encoded key_press packet, the pair the BEAM resolves in a keymap scope.
+// It reports false for any other packet, such as paste text.
+func KeyPressIdentity(packet []byte) (uint32, byte, bool) {
+	if len(packet) < 6 || packet[0] != generated.OPKeyPress {
+		return 0, 0, false
+	}
+	return binary.BigEndian.Uint32(packet[1:5]), packet[5], true
+}
+
+// PickerFit reports how many result rows the picker list of one picker generation shows.
+type PickerFit struct {
+	Generation uint32
+	Rows       uint16
+}
+
+// EncodeGUIPickerFit encodes a picker_fit gui_action: generation(u32) + rows(u16).
+// The BEAM pages the picker by Rows, so the count must be the rows this frontend draws.
+func EncodeGUIPickerFit(fit PickerFit) []byte {
+	out := make([]byte, 8)
+	out[0], out[1] = generated.OPGuiAction, generated.GUIActionPickerFit
+	binary.BigEndian.PutUint32(out[2:6], fit.Generation)
+	binary.BigEndian.PutUint16(out[6:8], fit.Rows)
+	return out
+}
+
 // EncodeComposerKeyPress keeps the physical key and echoes its displayed composer offer.
 func EncodeComposerKeyPress(codepoint rune, modifiers byte, seq uint32, offer uint64) []byte {
 	var packet [18]byte

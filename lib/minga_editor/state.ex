@@ -341,12 +341,23 @@ defmodule MingaEditor.State do
       |> FrontendState.resize_terminal(viewport)
       |> FrontendState.accept_capabilities(capabilities)
       |> FrontendState.clear_native_presentation()
+      |> FrontendState.clear_picker_rows()
       |> FrontendState.clear_file_dialog()
 
     state = reset_frontend_render_state(%{state | frontend: frontend})
     render = RenderState.invalidate_layout(state.render)
     %{state | render: render}
   end
+
+  @doc "Records how many result rows the frontend's picker list shows."
+  @spec report_picker_rows(t(), pos_integer()) :: t()
+  def report_picker_rows(%__MODULE__{} = state, rows),
+    do: %{state | frontend: FrontendState.report_picker_rows(state.frontend, rows)}
+
+  @doc "Returns how many rows one picker page moves, from the frontend's last report."
+  @spec picker_page_rows(t()) :: pos_integer()
+  def picker_page_rows(%__MODULE__{frontend: frontend}),
+    do: FrontendState.picker_page_rows(frontend)
 
   @doc "Accepts frontend dimensions and invalidates layout observations."
   @spec resize_frontend(t(), MingaEditor.Viewport.t()) :: t()

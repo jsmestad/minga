@@ -1141,7 +1141,11 @@ defmodule Minga.Integration.GUIProtocolTest do
         ],
         action_menu: nil,
         mode_prefix: ">",
-        load_status: :ready
+        load_status: :ready,
+        movement_keys: [
+          %{codepoint: ?j, modifiers: 0x02, movement: :next},
+          %{codepoint: 57_352, modifiers: 0, movement: :previous}
+        ]
       }
 
       cmd = PickerEncoder.encode_command(model)
@@ -1185,6 +1189,12 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert model_row["group"] == "Claude (subscription)"
       refute Map.has_key?(decoded, "empty")
       assert decoded["list_keys"] == false
+
+      # Movement keys reach the frontend as the exact key press identity and a row delta.
+      assert decoded["movement_keys"] == [
+               %{"codepoint" => ?j, "modifiers" => 2, "delta" => 1},
+               %{"codepoint" => 57_352, "modifiers" => 0, "delta" => -1}
+             ]
     end
 
     test "round-trips the empty section of a picker that offers next steps", %{harness: harness} do

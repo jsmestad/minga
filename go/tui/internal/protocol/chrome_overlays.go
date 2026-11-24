@@ -139,6 +139,10 @@ func decodePicker(payload []byte) (Picker, string, int) {
 				picker.Empty = &empty
 				picker.ListKeys = e.ListKeys != 0
 			}
+		case 0x08: // Movement keys
+			if keys, _, err := generated.DecodeGuiPickerMovementKeys(payload, sectionStart, sectionEnd); err == nil {
+				picker.MovementKeys = mapPickerMovementKeys(keys)
+			}
 		}
 	}
 	summary := picker.Title
@@ -146,6 +150,20 @@ func decodePicker(payload []byte) (Picker, string, int) {
 		summary = strings.TrimSpace(summary + " " + picker.Query)
 	}
 	return picker, summary, size
+}
+
+// mapPickerMovementKeys lowers the generated movement keys into row deltas. A key whose movement this frontend does not know moves nothing, so it is dropped.
+func mapPickerMovementKeys(keys []generated.PickerMovementKey) []PickerMovementKey {
+	out := make([]PickerMovementKey, 0, len(keys))
+	for _, key := range keys {
+		switch key.Movement {
+		case generated.PickerMovementNext:
+			out = append(out, PickerMovementKey{Codepoint: key.Codepoint, Modifiers: key.Modifiers, Delta: 1})
+		case generated.PickerMovementPrevious:
+			out = append(out, PickerMovementKey{Codepoint: key.Codepoint, Modifiers: key.Modifiers, Delta: -1})
+		}
+	}
+	return out
 }
 
 // mapPickerItems lowers the generated PickerItem (raw flags only) into the

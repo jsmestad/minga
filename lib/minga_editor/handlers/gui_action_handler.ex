@@ -748,6 +748,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     PickerUI.replace_query(state, generation, edit_seq, query)
   end
 
+  defp dispatch_action(state, {:picker_fit, generation, rows}),
+    do: PickerUI.report_fit(state, generation, rows)
+
   # ── GUI search toolbar actions ──────────────────────────────────────
 
   defp dispatch_action(state, {:search_focus, replace_mode}) do

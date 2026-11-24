@@ -1047,6 +1047,7 @@ func TestFloatingPickerPointerUsesPaintedItems(t *testing.T) {
 			if tc.preview {
 				model.chrome[generated.OPGuiPickerPreview] = protocol.ChromePayload{Preview: protocol.PickerPreview{Visible: true, Lines: []protocol.PreviewLine{{Segments: []protocol.PreviewSegment{{Text: "preview details"}}}}}}
 			}
+			markPickerFitReported(&model)
 			lines := strings.Split(ansi.Strip(model.View().Content), "\n")
 			cell := func(label string) tea.MouseClickMsg {
 				t.Helper()
@@ -1084,6 +1085,7 @@ func TestFloatingPickerPointerUsesPaintedItems(t *testing.T) {
 			picker.Generation++
 			picker.Items[13].ActivationID++
 			model.chrome[generated.OPGuiPicker] = protocol.ChromePayload{Picker: picker}
+			markPickerFitReported(&model)
 			click(target, nil)
 		})
 	}
@@ -4004,38 +4006,52 @@ func pickerChrome(items int, selected uint16) protocol.ChromePayload {
 	if int(selected) < len(pItems) {
 		selectedID = pItems[selected].ActivationID
 	}
-	return protocol.ChromePayload{Opcode: generated.OPGuiPicker, Picker: protocol.Picker{Visible: true, Generation: 7, Selected: selected, SelectedID: selectedID, Items: pItems}}
+	return protocol.ChromePayload{Opcode: generated.OPGuiPicker, Picker: protocol.Picker{Visible: true, Generation: 7, Selected: selected, SelectedID: selectedID, Items: pItems, MovementKeys: defaultPickerMovementKeys()}}
 }
 
-func TestPickerLocalNavigationJAdvancesPreview(t *testing.T) {
-	out := make(chan []byte, 1)
+// defaultPickerMovementKeys is the movement table the BEAM sends for an unmodified picker keymap scope: ⌃J and ↓ move down, ⌃K and ↑ move up.
+func defaultPickerMovementKeys() []protocol.PickerMovementKey {
+	return []protocol.PickerMovementKey{
+		{Codepoint: 'j', Modifiers: protocol.ModCtrl, Delta: 1},
+		{Codepoint: uint32(arrowDown), Modifiers: 0, Delta: 1},
+		{Codepoint: 'k', Modifiers: protocol.ModCtrl, Delta: -1},
+		{Codepoint: uint32(arrowUp), Modifiers: 0, Delta: -1},
+	}
+}
+
+func ctrlKey(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Code: code, Mod: tea.ModCtrl})
+}
+
+func TestPickerLocalNavigationCtrlJAdvancesPreview(t *testing.T) {
+	out := make(chan []byte, 4)
 	model := New(30, 10, out)
 	model.chrome[generated.OPGuiPicker] = pickerChrome(5, 0)
 	model.applyMutation(focusOwnerCommand(1, 8))
 
-	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
+	updated, _ := model.Update(ctrlKey('j'))
 	model = updated.(Model)
 
 	if got := model.effectivePickerIndex(model.chrome[generated.OPGuiPicker].Picker); got != 1 {
-		t.Fatalf("j should preview picker item 1, got index %d", got)
+		t.Fatalf("⌃J should preview picker item 1, got index %d", got)
 	}
 	packets := drainOutboundPackets(out)
-	if len(packets) != 1 {
-		t.Fatalf("j should still forward the key packet, got %d packets", len(packets))
+	if codepoint, modifiers, ok := protocol.KeyPressIdentity(firstPacket(packets)); !ok || codepoint != 'j' || modifiers != protocol.ModCtrl {
+		t.Fatalf("⌃J should still forward its key packet first, got %x", packets)
 	}
 }
 
-func TestPickerLocalNavigationKRetreatsPreview(t *testing.T) {
-	out := make(chan []byte, 1)
+func TestPickerLocalNavigationCtrlKRetreatsPreview(t *testing.T) {
+	out := make(chan []byte, 4)
 	model := New(30, 10, out)
 	model.chrome[generated.OPGuiPicker] = pickerChrome(5, 3)
 	model.applyMutation(focusOwnerCommand(1, 8))
 
-	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'k', Text: "k"}))
+	updated, _ := model.Update(ctrlKey('k'))
 	model = updated.(Model)
 
 	if got := model.effectivePickerIndex(model.chrome[generated.OPGuiPicker].Picker); got != 2 {
-		t.Fatalf("k should preview picker item 2, got index %d", got)
+		t.Fatalf("⌃K should preview picker item 2, got index %d", got)
 	}
 }
 
@@ -4045,11 +4061,11 @@ func TestPickerLocalNavigationClampsAtBoundaries(t *testing.T) {
 		model.chrome[generated.OPGuiPicker] = pickerChrome(3, 2)
 		model.applyMutation(focusOwnerCommand(1, 8))
 
-		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
+		updated, _ := model.Update(ctrlKey('j'))
 		model = updated.(Model)
 
 		if _, ok := model.localPresentation.identityPreview(presentationPicker); ok {
-			t.Fatal("j at last item should not set preview")
+			t.Fatal("⌃J at last item should not set preview")
 		}
 	})
 
@@ -4058,11 +4074,11 @@ func TestPickerLocalNavigationClampsAtBoundaries(t *testing.T) {
 		model.chrome[generated.OPGuiPicker] = pickerChrome(3, 0)
 		model.applyMutation(focusOwnerCommand(1, 8))
 
-		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'k', Text: "k"}))
+		updated, _ := model.Update(ctrlKey('k'))
 		model = updated.(Model)
 
 		if _, ok := model.localPresentation.identityPreview(presentationPicker); ok {
-			t.Fatal("k at first item should not set preview")
+			t.Fatal("⌃K at first item should not set preview")
 		}
 	})
 }
@@ -4072,11 +4088,11 @@ func TestPickerLocalNavigationDoesNotMutateCommittedSelected(t *testing.T) {
 	model.chrome[generated.OPGuiPicker] = pickerChrome(5, 1)
 	model.applyMutation(focusOwnerCommand(1, 8))
 
-	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
+	updated, _ := model.Update(ctrlKey('j'))
 	model = updated.(Model)
 
 	if model.chrome[generated.OPGuiPicker].Picker.Selected != 1 {
-		t.Fatalf("j should not mutate the BEAM-committed Selected, got %d", model.chrome[generated.OPGuiPicker].Picker.Selected)
+		t.Fatalf("⌃J should not mutate the BEAM-committed Selected, got %d", model.chrome[generated.OPGuiPicker].Picker.Selected)
 	}
 }
 
@@ -4085,12 +4101,19 @@ func TestPickerLocalNavigationIgnoredWhenHidden(t *testing.T) {
 	model.chrome[generated.OPGuiPicker] = protocol.ChromePayload{Opcode: generated.OPGuiPicker, Picker: protocol.Picker{Visible: false, Items: []protocol.PickerItem{{Label: "x"}}}}
 	model.applyMutation(focusOwnerCommand(1, 8))
 
-	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
+	updated, _ := model.Update(ctrlKey('j'))
 	model = updated.(Model)
 
 	if _, ok := model.localPresentation.identityPreview(presentationPicker); ok {
-		t.Fatalf("j should be ignored when picker is hidden")
+		t.Fatalf("⌃J should be ignored when picker is hidden")
 	}
+}
+
+func firstPacket(packets [][]byte) []byte {
+	if len(packets) == 0 {
+		return nil
+	}
+	return packets[0]
 }
 
 func TestPickerEffectiveIndexUsesPreviewWhenSet(t *testing.T) {

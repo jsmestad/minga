@@ -114,6 +114,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x62       | search_focus            |
   | 0x63       | file_dialog_result      |
   | 0x64       | focus_window            |
+  | 0x70       | picker_fit              |
 
   """
 
@@ -204,6 +205,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_picker_query_changed Opcodes.gui_action_picker_query_changed()
   @gui_action_picker_item_activate Opcodes.gui_action_picker_item_activate()
   @gui_action_picker_action_activate Opcodes.gui_action_picker_action_activate()
+  @gui_action_picker_fit Opcodes.gui_action_picker_fit()
   @gui_action_focus_window Opcodes.gui_action_focus_window()
   @gui_action_search_query Opcodes.gui_action_search_query()
   @gui_action_search_next Opcodes.gui_action_search_next()
@@ -332,6 +334,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
              activation_id :: non_neg_integer()}
           | {:picker_action_activate, generation :: non_neg_integer(),
              activation_id :: non_neg_integer()}
+          | {:picker_fit, generation :: pos_integer(), rows :: pos_integer()}
           | Target.t()
           | {:search_query, session_id :: non_neg_integer(), edit_seq :: non_neg_integer(),
              query :: String.t(), flags :: non_neg_integer()}
@@ -1052,6 +1055,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         <<generation::32, activation_id::32>>
       ),
       do: {:ok, {:picker_action_activate, generation, activation_id}}
+
+  # The generation names the picker the frontend drew; rows is a measurement of its list, not an item position.
+  def decode_gui_action(@gui_action_picker_fit, <<generation::32, rows::16>>)
+      when generation > 0 and rows > 0,
+      do: {:ok, {:picker_fit, generation, rows}}
 
   def decode_gui_action(
         @gui_action_search_query,

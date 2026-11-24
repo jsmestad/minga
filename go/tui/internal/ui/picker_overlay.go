@@ -51,14 +51,50 @@ func (m Model) floatingPickerLayer() *lipgloss.Layer {
 func (m Model) renderFloatingPicker(picker protocol.Picker, preview protocol.PickerPreview) string {
 	popupWidth := m.floatingPickerWidth()
 	frame := m.popoverFrame()
-	contentWidth := frame.contentWidth(popupWidth)
-	popupModel := m
-	popupModel.width = contentWidth
+	popupModel := m.pickerPopupModel()
 	lines := popupModel.renderPicker(picker, preview)
 	if len(lines) == 0 {
 		return ""
 	}
 	return frame.render(popupWidth, strings.Join(lines, "\n"))
+}
+
+// pickerPopupModel is the model the picker popup draws with: its width is the popup's content width.
+func (m Model) pickerPopupModel() Model {
+	popupModel := m
+	popupModel.width = m.popoverFrame().contentWidth(m.floatingPickerWidth())
+	return popupModel
+}
+
+// pickerShownItems counts the result rows the popup draws for this picker: the items in the drawn window, section headers left out.
+func (m Model) pickerShownItems(picker protocol.Picker, preview protocol.PickerPreview) int {
+	layout := m.pickerPopupModel().pickerLayout(preview)
+	start, end, _ := pickerItemWindow(picker.Items, m.effectivePickerIndex(picker), layout.itemRowBudget())
+	return end - start
+}
+
+// reportPickerFit tells the BEAM how many result rows the open picker shows, once per picker and again when the count changes.
+// The BEAM pages the picker by this count (ADR-0001: row fit is a presentation fact the frontend owns).
+func (m *Model) reportPickerFit() {
+	fit, ok := m.pickerFit()
+	if !ok {
+		m.lastPickerFit = protocol.PickerFit{}
+		return
+	}
+	if fit.Rows > 0 && fit != m.lastPickerFit && m.send(protocol.EncodeGUIPickerFit(fit)) {
+		m.lastPickerFit = fit
+	}
+}
+
+// pickerFit is the row fit of the open picker, or false when no picker is open.
+func (m Model) pickerFit() (protocol.PickerFit, bool) {
+	picker, ok := m.picker()
+	if !ok || picker.Generation == 0 {
+		return protocol.PickerFit{}, false
+	}
+	preview, _ := m.pickerPreview()
+	rows := m.pickerShownItems(picker, preview)
+	return protocol.PickerFit{Generation: picker.Generation, Rows: uint16(min(max(rows, 0), 65535))}, true
 }
 
 func (m Model) floatingPickerWidth() int {

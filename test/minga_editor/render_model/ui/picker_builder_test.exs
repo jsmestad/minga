@@ -368,6 +368,79 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
      }}
   end
 
+  describe "movement keys" do
+    @ctrl 0x02
+
+    defp movement_model(state) do
+      [%Item{id: :one, label: "one"}, %Item{id: :two, label: "two"}]
+      |> PickerState.new(title: "Files")
+      |> picker_modal(RecentFileSource, nil, "", :ready)
+      |> build_context(state)
+      |> PickerBuilder.build()
+    end
+
+    defp state_with_keymap(keymap_server) do
+      state = TestHelpers.base_state(port_manager: nil)
+
+      %{
+        state
+        | interaction: MingaEditor.State.Interaction.new(keymap_server: keymap_server)
+      }
+    end
+
+    test "are the picker scope's one-row movement keys and never a plain letter" do
+      keymap = start_supervised!({Minga.Keymap.Active, name: nil})
+      model = movement_model(state_with_keymap(keymap))
+
+      keys = Map.new(model.movement_keys, &{{&1.codepoint, &1.modifiers}, &1.movement})
+
+      assert keys == %{
+               {?j, @ctrl} => :next,
+               {57_353, 0} => :next,
+               {0xF701, 0} => :next,
+               {?k, @ctrl} => :previous,
+               {57_352, 0} => :previous,
+               {0xF700, 0} => :previous
+             }
+
+      refute Map.has_key?(keys, {?j, 0})
+      refute Map.has_key?(keys, {?k, 0})
+    end
+
+    test "follow a user override of the picker scope" do
+      keymap = start_supervised!({Minga.Keymap.Active, name: nil})
+      Minga.Keymap.Active.bind(keymap, {:picker, :insert}, "C-n", :picker_next, "Next")
+      Minga.Keymap.Active.bind(keymap, {:picker, :insert}, "C-j", :picker_select, "Open")
+
+      keys =
+        state_with_keymap(keymap)
+        |> movement_model()
+        |> Map.fetch!(:movement_keys)
+        |> Map.new(&{{&1.codepoint, &1.modifiers}, &1.movement})
+
+      assert keys[{?n, @ctrl}] == :next
+      refute Map.has_key?(keys, {?j, @ctrl})
+    end
+
+    test "every sent key runs the movement it names when it reaches the picker" do
+      keymap = start_supervised!({Minga.Keymap.Active, name: nil})
+      Minga.Keymap.Active.bind(keymap, {:picker, :insert}, "C-n", :picker_next, "Next")
+      model = movement_model(state_with_keymap(keymap))
+
+      for key <- model.movement_keys do
+        command = Map.fetch!(%{next: :picker_next, previous: :picker_prev}, key.movement)
+
+        assert {:command, ^command} =
+                 Minga.Keymap.resolve_scoped_key(
+                   :picker,
+                   :insert,
+                   {key.codepoint, key.modifiers},
+                   keymap_server: keymap
+                 )
+      end
+    end
+  end
+
   @spec source_switch(String.t(), module()) :: PickerUIState.source_switch()
   defp source_switch("", _source), do: :original
   defp source_switch(prefix, source), do: {:switched, source, prefix}

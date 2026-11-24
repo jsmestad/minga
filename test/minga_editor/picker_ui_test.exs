@@ -653,6 +653,106 @@ defmodule MingaEditor.PickerUITest do
     end
   end
 
+  describe "paging by the rows the frontend shows" do
+    @page_down 57_363
+    @page_up 57_362
+
+    defp paging_state(count \\ 65) do
+      items = for n <- 1..count, do: %Item{id: n, label: "item #{n}"}
+      picker = Picker.new(items, title: "Test", max_visible: 35)
+
+      picker_state =
+        PickerState.begin_query_session(%PickerState{picker: picker, source: NoBulkActionsSource})
+
+      ModalWorkflow.open(
+        TestHelpers.base_state(content: "x"),
+        {:picker, PickerPayload.new(picker_state)}
+      )
+    end
+
+    defp shown_generation(state) do
+      {:picker, %{picker_ui: picker_ui}} = state.shell_runtime.state.modal
+      picker_ui.activation_offer.generation
+    end
+
+    defp selected_index(state) do
+      {:picker, %{picker_ui: %{picker: picker}}} = state.shell_runtime.state.modal
+      picker.selected
+    end
+
+    defp report_rows(state, rows),
+      do: GuiActionHandler.dispatch(state, {:picker_fit, shown_generation(state), rows})
+
+    defp page(state, key), do: PickerUI.handle_key(state, key, 0)
+
+    test "PageDown and PageUp move by the reported rows, not by the picker's own capacity" do
+      state = report_rows(paging_state(), 9)
+
+      down = page(state, @page_down)
+      assert selected_index(down) == 9
+      assert down |> page(@page_down) |> selected_index() == 18
+      assert down |> page(@page_up) |> selected_index() == 0
+    end
+
+    test "paging clamps at both ends of the list" do
+      state = report_rows(paging_state(12), 9)
+
+      last = state |> page(@page_down) |> page(@page_down)
+      assert selected_index(last) == 11
+      assert last |> page(@page_up) |> page(@page_up) |> selected_index() == 0
+    end
+
+    test "a newer report replaces the page size" do
+      state = paging_state() |> report_rows(9) |> report_rows(4)
+
+      assert state |> page(@page_down) |> selected_index() == 4
+    end
+
+    test "a page is one row until a frontend reports its rows" do
+      state = paging_state()
+
+      assert EditorState.picker_page_rows(state) == 1
+      assert state |> page(@page_down) |> selected_index() == 1
+      assert state |> page(@page_down) |> page(@page_up) |> selected_index() == 0
+    end
+
+    test "a report that names another picker is ignored" do
+      state = report_rows(paging_state(), 9)
+      stale = GuiActionHandler.dispatch(state, {:picker_fit, shown_generation(state) + 1, 30})
+
+      assert stale == state
+      assert stale |> page(@page_down) |> selected_index() == 9
+    end
+
+    test "a report with no picker open is ignored" do
+      state = TestHelpers.base_state(content: "x")
+
+      assert GuiActionHandler.dispatch(state, {:picker_fit, 7, 9}) == state
+    end
+
+    test "the next picker pages by the last reported rows until its own report arrives" do
+      first = report_rows(paging_state(), 9)
+      second = %{paging_state() | frontend: first.frontend}
+
+      assert shown_generation(second) != shown_generation(first)
+      assert second |> page(@page_down) |> selected_index() == 9
+      assert second |> report_rows(5) |> page(@page_down) |> selected_index() == 5
+    end
+
+    test "a frontend that attaches starts without a report" do
+      state = report_rows(paging_state(), 9)
+
+      attached =
+        EditorState.accept_frontend_ready(
+          state,
+          state.frontend.terminal_viewport,
+          state.frontend.capabilities
+        )
+
+      assert EditorState.picker_page_rows(attached) == 1
+    end
+  end
+
   describe "⌃V split" do
     test "is bound only for sources that show the selection in the focused window" do
       state = TestHelpers.base_state(content: "x")

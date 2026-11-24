@@ -40,6 +40,7 @@ func TestGUISendersUseOnlyRemainingActions(t *testing.T) {
 		"GUIActionChatScrolledAwayFromBottom": false,
 		"GUIActionChatReturnedToBottom":       false,
 		"GUIActionFoldToggleAtLine":           false,
+		"GUIActionPickerFit":                  false,
 	}
 	file, err := parser.ParseFile(token.NewFileSet(), "events.go", nil, 0)
 	if err != nil {

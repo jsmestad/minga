@@ -5,6 +5,8 @@ defmodule MingaEditor.State.Frontend do
   The value owns frontend identity, rendering policy, connection handles,
   terminal dimensions, capability negotiation, pressure reporting, and input
   correlation. Renderer-owned state lives in `MingaEditor.State.Render`.
+
+  It also keeps the picker row fit the frontend last reported. Row fit is a presentation fact the frontend owns (ADR-0001), so the editor stores the report and never derives a row count itself.
   """
 
   alias MingaEditor.Frontend.Capabilities
@@ -25,6 +27,7 @@ defmodule MingaEditor.State.Frontend do
           rendering: rendering_policy(),
           port_manager: GenServer.server() | nil,
           terminal_viewport: Viewport.t(),
+          picker_rows: pos_integer() | nil,
           capabilities: Capabilities.t(),
           resource_pressure: ResourcePressure.t(),
           native_presentation: NativePresentationObservation.t() | nil,
@@ -39,6 +42,7 @@ defmodule MingaEditor.State.Frontend do
             rendering: :enabled,
             port_manager: nil,
             terminal_viewport: Viewport.new(24, 80),
+            picker_rows: nil,
             capabilities: %Capabilities{},
             resource_pressure: ResourcePressure.new(),
             native_presentation: nil,
@@ -79,6 +83,28 @@ defmodule MingaEditor.State.Frontend do
   @spec resize_terminal(t(), Viewport.t()) :: t()
   def resize_terminal(%__MODULE__{} = frontend, %Viewport{} = viewport),
     do: %{frontend | terminal_viewport: viewport}
+
+  @doc """
+  Records how many result rows the frontend's picker list shows.
+
+  The report outlives the picker that produced it, so a key typed before the next picker is drawn pages by the rows the frontend last showed.
+  """
+  @spec report_picker_rows(t(), pos_integer()) :: t()
+  def report_picker_rows(%__MODULE__{} = frontend, rows) when is_integer(rows) and rows > 0,
+    do: %{frontend | picker_rows: rows}
+
+  @doc "Forgets the picker row report when another frontend attaches."
+  @spec clear_picker_rows(t()) :: t()
+  def clear_picker_rows(%__MODULE__{} = frontend), do: %{frontend | picker_rows: nil}
+
+  @doc """
+  Returns how many rows one picker page moves.
+
+  A frontend that has reported its picker rows pages by that count. Until a report arrives, a page is one row: the editor cannot know what the frontend shows, and a page must never pass a row the user has not seen.
+  """
+  @spec picker_page_rows(t()) :: pos_integer()
+  def picker_page_rows(%__MODULE__{picker_rows: nil}), do: 1
+  def picker_page_rows(%__MODULE__{picker_rows: rows}), do: rows
 
   @doc "Scopes a committed composer offer to one dispatched input."
   @spec composer_input(t(), pos_integer() | nil, boolean()) :: t()

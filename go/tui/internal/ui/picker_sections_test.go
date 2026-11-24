@@ -173,6 +173,7 @@ func TestGroupedPickerClicksActivateItemsAndHeadersActivateNothing(t *testing.T)
 	picker := modelPickerFixture(0)
 	picker.Generation = 51
 	model.chrome[generated.OPGuiPicker] = protocol.ChromePayload{Picker: picker}
+	markPickerFitReported(&model)
 	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
 	cell := func(label string) tea.MouseClickMsg {
 		t.Helper()
@@ -207,16 +208,16 @@ func TestGroupedPickerClicksActivateItemsAndHeadersActivateNothing(t *testing.T)
 }
 
 func TestPickerLocalNavigationMovesFromOneSectionToTheNextItem(t *testing.T) {
-	out := make(chan []byte, 1)
+	out := make(chan []byte, 4)
 	model := New(60, 16, out)
 	items := groupedItems("A", "A", "B")
-	model.chrome[generated.OPGuiPicker] = protocol.ChromePayload{Opcode: generated.OPGuiPicker, Picker: protocol.Picker{Visible: true, Generation: 7, Selected: 1, SelectedID: 2, Items: items}}
+	model.chrome[generated.OPGuiPicker] = protocol.ChromePayload{Opcode: generated.OPGuiPicker, Picker: protocol.Picker{Visible: true, Generation: 7, Selected: 1, SelectedID: 2, Items: items, MovementKeys: defaultPickerMovementKeys()}}
 	model.applyMutation(focusOwnerCommand(1, 8))
 
-	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
+	updated, _ := model.Update(ctrlKey('j'))
 	model = updated.(Model)
 
 	if got := model.effectivePickerIndex(model.chrome[generated.OPGuiPicker].Picker); got != 2 {
-		t.Fatalf("j from the last item of section A should preview the first item of B (index 2), got %d", got)
+		t.Fatalf("⌃J from the last item of section A should preview the first item of B (index 2), got %d", got)
 	}
 }

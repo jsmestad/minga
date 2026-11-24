@@ -795,6 +795,30 @@ func DecodeEmptyList(data []byte, offset int, windowEnd int) (EmptyList, int, er
 	}, pos, nil
 }
 
+func DecodePickerMovementKey(data []byte, offset int, windowEnd int) (PickerMovementKey, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+4, "codepoint"); err != nil {
+		return PickerMovementKey{}, offset, err
+	}
+	codepoint := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+1, "modifiers"); err != nil {
+		return PickerMovementKey{}, offset, err
+	}
+	modifiers := data[pos]
+	pos++
+	if err := decodeRequireWindow(windowEnd, pos+1, "movement"); err != nil {
+		return PickerMovementKey{}, offset, err
+	}
+	movement := PickerMovement(data[pos])
+	pos++
+	return PickerMovementKey{
+		Codepoint: codepoint,
+		Modifiers: modifiers,
+		Movement:  movement,
+	}, pos, nil
+}
+
 func DecodeWhichKeyBinding(data []byte, offset int, windowEnd int) (WhichKeyBinding, int, error) {
 	pos := offset
 	if err := decodeRequireWindow(windowEnd, pos+1, "kind"); err != nil {
@@ -1419,6 +1443,28 @@ func DecodeGuiPickerEmpty(data []byte, offset int, windowEnd int) (GuiPickerEmpt
 		Empty:    empty,
 		ListKeys: listKeys,
 	}, pos, nil
+}
+
+func DecodeGuiPickerMovementKeys(data []byte, offset int, windowEnd int) ([]PickerMovementKey, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+1, "movement_keys count"); err != nil {
+		return nil, offset, err
+	}
+	count := int(data[pos])
+	pos += 1
+	if err := decodeRequireWindow(windowEnd, pos+count*6, "movement_keys"); err != nil {
+		return nil, offset, err
+	}
+	items := make([]PickerMovementKey, 0, count)
+	for i := 0; i < count; i++ {
+		item, nextPos, err := DecodePickerMovementKey(data, pos, windowEnd)
+		if err != nil {
+			return nil, offset, err
+		}
+		pos = nextPos
+		items = append(items, item)
+	}
+	return items, pos, nil
 }
 
 // Section decoders for gui_picker_preview

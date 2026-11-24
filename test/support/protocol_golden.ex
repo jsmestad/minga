@@ -62,6 +62,7 @@ defmodule Minga.Test.ProtocolGolden do
       picker_item_fixtures() ++
       picker_action_menu_fixtures() ++
       picker_load_status_fixtures() ++
+      picker_movement_key_fixtures() ++
       picker_query_fixtures() ++
       breadcrumb_fixtures() ++
       git_status_fixtures() ++
@@ -607,6 +608,39 @@ defmodule Minga.Test.ProtocolGolden do
             0x06
           ),
         expected: %{status: 2, message: "boom"}
+      }
+    ]
+  end
+
+  # ── Fixtures: gui_picker movement keys (GuiPickerMovementKeys) ────────────
+
+  # Decoders surface the movement as its wire byte (next 1, previous 2), so the expectation carries the byte.
+  @spec picker_movement_key_fixtures() :: [fixture()]
+  defp picker_movement_key_fixtures do
+    keys = [
+      %{codepoint: ?j, modifiers: 0x02, movement: :next},
+      %{codepoint: 57_353, modifiers: 0, movement: :next},
+      %{codepoint: ?k, modifiers: 0x02, movement: :previous},
+      %{codepoint: 0xF700, modifiers: 0, movement: :previous}
+    ]
+
+    expected =
+      Enum.map(keys, fn key ->
+        %{key | movement: Map.fetch!(%{next: 1, previous: 2}, key.movement)}
+      end)
+
+    [
+      %{
+        name: "picker_movement_keys_list",
+        decoder: "GuiPickerMovementKeys",
+        payload: section_body(picker_command(%{picker_model([]) | movement_keys: keys}), 0x07),
+        expected: expected
+      },
+      %{
+        name: "picker_movement_keys_empty",
+        decoder: "GuiPickerMovementKeys",
+        payload: section_body(picker_command(picker_model([])), 0x07),
+        expected: []
       }
     ]
   end

@@ -421,6 +421,7 @@ Fuzzy finder / command palette state. Uses sectioned envelope: `opcode(1) + sect
 | 0x05 | ModePrefix | mode prefix string |
 | 0x06 | LoadStatus | ready, loading, or an error message |
 | 0x07 | Empty | the empty-state header (an `empty_list`) and list_keys, present only while the picker offers next steps instead of results |
+| 0x08 | MovementKeys | the keys that move the highlighted row by one |
 
 ```
 When visible:
@@ -465,6 +466,10 @@ empty_list (shared by every surface that shows an empty state):
   + selected(1) + action_count(1) + actions...
   Per action: id_len(1) + id + key_len(2) + key + label_len(2) + label
 
+MovementKeys section 0x08 payload (protocol_version 46):
+  key_count(1) + keys...
+  Per key: codepoint(4) + modifiers(1) + movement(1: 1 next, 2 previous)
+
 icon_color is a 24-bit RGB value for the item's icon.
 flags bits:
   bit 0: reserved, written as 0 (was two_line before protocol_version 41)
@@ -485,6 +490,8 @@ activation_generation and activation IDs form opaque source-owned identities. Re
 mode prefix badges show switched picker sources like command, buffer, or project search.
 The empty section says what happened when nothing matches (docs/design/anatomy.md, "Empty state"): the title (with the state glyph if there is one) and one muted why line, drawn on the row labels' leading edge above the items. Its items are then the source's next steps ("Search ignored files too", annotation "-- -u"), selected, moved, run and clicked like any row; frontends draw no file icon on them. A picker sends an empty_list with no actions because its next steps are items. list_keys is 1 when the picker has nothing to filter: it takes no text, the BEAM moves keyboard focus to the editor view, frontends hide the query field and show "j k move, ↩ run, q close", and plain keys go to the BEAM. With list_keys 0 the field stays live and the hints read "⌃J ⌃K move, ↩ run, esc close".
 An empty_list action's id is the registered command it runs; a surface that draws actions sends a click as the `execute_command` gui_action (0x16) with that id. `selected` is the preselected action.
+
+movement keys are the single keys the `:picker` keymap scope resolves to `picker_next` and `picker_prev`, user overrides included. Each is the `key_press` codepoint and modifiers the BEAM resolves. A frontend may move its local selection preview only for a key press that matches a listed key exactly; every other key edits the query or runs another command on the BEAM. A frontend never keeps its own list of picker keys, and a picker without this section previews no key. Movement values a frontend does not know move nothing.
 
 Native frontends may optimistically edit the query with a platform text control so caret movement, selection, paste, cut, copy, undo, and IME composition remain local and immediate. Query semantics remain BEAM-owned. The frontend sends each complete field value with the current `generation` and a monotonically increasing edit sequence. The BEAM echoes the accepted sequence as `acknowledged_edit_seq`; the frontend must not replace a newer unacknowledged local value with an older echo. A new generation replaces all pending local edits.
 
@@ -1348,6 +1355,7 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x6D | agent_stop_turn | session_id(string16) + request_id(string16) | Stop only the active request identified by the committed Stop control. A stale or repeated action must not recall prompts from, or stop, a replacement turn. |
 | 0x6E | agent_composer_queue | `prompt_generation(8) + attachment_offer(8) + kind(1) + session_id(string16) + request_id(string16) + sequence(8)` | Queue the displayed draft for the exact active turn. Kind `0` steers; kind `1` queues a follow-up. Echo the committed prompt, attachment, and queue identities from the same frame. A stale action does not send, queue, or clear the draft. |
 | 0x6F | agent_start_remedy | `remedy(1)` | Run the remedy the displayed failed start offers: `1` retry, `2` set up provider. The BEAM runs it only while the active Agent tab still offers that remedy, so a click on a stale notice does nothing. |
+| 0x70 | picker_fit | generation(4) + rows(2) | Report how many result rows the frontend's picker list shows. `generation` is the picker's `activation_generation`; `rows` is positive. The BEAM moves a picker page (PageDown, PageUp) by `rows`. |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |
@@ -1370,6 +1378,8 @@ The BEAM decoder constructs `%MingaEditor.Target{surface: surface, intent: inten
 Buffer-picker choices retain the buffer process identity, not its current list position. Removing an earlier buffer cannot redirect a queued selection or Kill action. Named file-tree mutations preserve the current selected path when their asynchronous refresh arrives, including a selection made while the refresh was pending.
 Approval decisions use `1 = approve once`, `2 = trust for session`, `3 = trust for this turn`, and `4 = deny`; `0` and unknown values are rejected. The admitted `Request.request_id`, not a display turn counter, is the request identity. The Session validates all three IDs and caller authority in one serialized resolution. Stale or unauthorized actions leave the current approval and draft intact.
 
+
+Picker row fit follows [ADR-0001](adr/0001-frontend-owns-row-fit.md): how many result rows fit is a presentation fact, so the frontend counts the rows it draws and reports them with `picker_fit`. It sends the action after it draws a picker and again when the count changes (a resize, a preview that takes rows, section headers). The BEAM accepts a report only for the open picker's generation, keeps the last accepted count across pickers so a key typed before the next report still pages by what the frontend last showed, and forgets it when a frontend attaches. Until a frontend reports, a page is one row: a page never passes a row the user has not seen. The BEAM never derives the page size from terminal rows.
 
 Protocol version 28 retires `file_tree_click` (0x03), `file_tree_toggle` (0x04), `completion_select` (0x05), `breadcrumb_click` (0x06), `panel_switch_tab` (0x09), `file_tree_new_file` (0x0D), `file_tree_new_folder` (0x0E), `minibuffer_select` (0x17), `file_tree_delete` (0x30), `file_tree_rename` (0x31), `file_tree_duplicate` (0x32), `file_tree_move` (0x33), `file_tree_open_in_split` (0x3D), and `timeline_navigate` (0x4F). These sub-opcodes reject all payloads. Breadcrumb and panel-tab actions had no behavior and have no replacement.
 

@@ -333,20 +333,17 @@ func (m *Model) localPreviewActivationPacket(msg tea.KeyPressMsg, component stri
 	return nil, false
 }
 
-func (m *Model) previewPickerNavigation(msg tea.KeyPressMsg) bool {
-	key := msg.Key()
-	if key.Mod.Contains(tea.ModCtrl) || key.Mod.Contains(tea.ModShift) || key.Mod.Contains(tea.ModAlt) || key.Mod.Contains(tea.ModSuper) {
-		return false
-	}
-
-	delta, ok := pickerNavigationDelta(key)
-	if !ok {
-		return false
-	}
-
+// previewPickerNavigation moves the local picker highlight for a key press already sent to the BEAM.
+// It moves only for a key the BEAM listed as picker movement, so the preview cannot disagree with the keymap: every other key edits the query or runs another command there.
+func (m *Model) previewPickerNavigation(keyPress []byte) bool {
 	payload, ok := m.chrome[generated.OPGuiPicker]
 	// The open act menu owns the list keys; the picker's highlighted row stays where it is.
 	if !ok || !payload.Picker.Visible || payload.Picker.ActionVisible || len(payload.Picker.Items) == 0 {
+		return false
+	}
+
+	delta, ok := pickerNavigationDelta(payload.Picker.MovementKeys, keyPress)
+	if !ok {
 		return false
 	}
 
@@ -366,15 +363,18 @@ func (m *Model) previewPickerNavigation(msg tea.KeyPressMsg) bool {
 	return true
 }
 
-func pickerNavigationDelta(key tea.Key) (int, bool) {
-	switch key.Code {
-	case 'j', tea.KeyDown:
-		return 1, true
-	case 'k', tea.KeyUp:
-		return -1, true
-	default:
+// pickerNavigationDelta returns the row delta of an encoded key press when the BEAM listed that exact codepoint and modifiers as picker movement.
+func pickerNavigationDelta(keys []protocol.PickerMovementKey, keyPress []byte) (int, bool) {
+	codepoint, modifiers, ok := protocol.KeyPressIdentity(keyPress)
+	if !ok {
 		return 0, false
 	}
+	for _, key := range keys {
+		if key.Codepoint == codepoint && key.Modifiers == modifiers {
+			return key.Delta, true
+		}
+	}
+	return 0, false
 }
 
 // previewEmptyStateNavigation locally echoes launchpad focus movement (#2689):

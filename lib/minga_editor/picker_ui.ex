@@ -454,6 +454,32 @@ defmodule MingaEditor.PickerUI do
   defp clear_whichkey(state),
     do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.dismiss(state)
 
+  @doc """
+  Records how many result rows the frontend's picker list shows.
+
+  The report counts only when it names the open picker. A report from a picker that has closed or been replaced is dropped.
+  """
+  @spec report_fit(state(), non_neg_integer(), pos_integer()) :: state()
+  def report_fit(
+        %{
+          shell_runtime: %{
+            state: %{modal: {:picker, %{picker_ui: %PickerState{} = picker_state}}}
+          }
+        } =
+          state,
+        generation,
+        rows
+      )
+      when is_integer(rows) and rows > 0 do
+    if PickerState.shown_as?(picker_state, generation) do
+      EditorState.report_picker_rows(state, rows)
+    else
+      state
+    end
+  end
+
+  def report_fit(state, _generation, _rows), do: state
+
   @doc "Replaces the native picker's complete query when the correlated edit is current."
   @spec replace_query(state(), non_neg_integer(), non_neg_integer(), String.t()) :: state()
   def replace_query(
@@ -864,12 +890,8 @@ defmodule MingaEditor.PickerUI do
 
   @doc "Returns the keymap context for the open picker: `⌃V` is bound only when its source shows the selection in the focused window."
   @spec picker_keymap_context(state(), PickerState.t()) :: keyword()
-  def picker_keymap_context(state, %PickerState{source: source, callback_source: owner}) do
-    [
-      keymap_server: state.interaction.keymap_server,
-      picker_split: Source.opens_in_window?(source, owner)
-    ]
-  end
+  def picker_keymap_context(state, %PickerState{} = picker_state),
+    do: PickerState.keymap_context(picker_state, state.interaction.keymap_server)
 
   # ── Picker commands ─────────────────────────────────────────────────────────
 
@@ -936,10 +958,10 @@ defmodule MingaEditor.PickerUI do
     do: move_selection(state, Picker.move_up(picker))
 
   defp run_command(state, %PickerState{picker: picker}, :picker_page_down),
-    do: move_selection(state, Picker.page_down(picker))
+    do: move_selection(state, Picker.page_down(picker, page_rows(state)))
 
   defp run_command(state, %PickerState{picker: picker}, :picker_page_up),
-    do: move_selection(state, Picker.page_up(picker))
+    do: move_selection(state, Picker.page_up(picker, page_rows(state)))
 
   # Tab completes the highlighted item when the source completes, marks it when the source
   # confirms marked items, and otherwise does nothing.
@@ -999,6 +1021,10 @@ defmodule MingaEditor.PickerUI do
 
   # A user override may bind a picker key to a command this scope does not run.
   defp run_command(state, %PickerState{}, _command), do: state
+
+  # A page is the rows the frontend reported it shows, never a count derived here.
+  @spec page_rows(state()) :: pos_integer()
+  defp page_rows(state), do: EditorState.picker_page_rows(state)
 
   @spec move_selection(state(), Picker.t()) :: state()
   defp move_selection(state, new_picker) do

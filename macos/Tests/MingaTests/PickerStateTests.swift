@@ -17,6 +17,49 @@ struct PickerStateTests {
         state.update(visible: true, selectedIndex: selected, filteredCount: UInt16(count), totalCount: UInt16(count), markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: makeItems(count), actionMenu: nil, activationGeneration: 7)
     }
 
+    private let defaultMovementKeys = [
+        Wire.PickerMovementKey(codepoint: 106, modifiers: 0x02, delta: 1),
+        Wire.PickerMovementKey(codepoint: 57_353, modifiers: 0, delta: 1),
+        Wire.PickerMovementKey(codepoint: 107, modifiers: 0x02, delta: -1),
+        Wire.PickerMovementKey(codepoint: 57_352, modifiers: 0, delta: -1)
+    ]
+
+    @Test("a key moves the preview only when the BEAM listed that exact key as picker movement")
+    func movementDeltaFollowsTheListedKeys() {
+        let state = PickerState()
+        state.update(visible: true, selectedIndex: 0, filteredCount: 5, totalCount: 5, markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: makeItems(5), actionMenu: nil, activationGeneration: 7, movementKeys: defaultMovementKeys)
+
+        #expect(state.movementDelta(codepoint: 106, modifiers: 0x02) == 1)
+        #expect(state.movementDelta(codepoint: 107, modifiers: 0x02) == -1)
+        #expect(state.movementDelta(codepoint: 57_353, modifiers: 0) == 1)
+        // Plain j and k type into the query on the BEAM.
+        #expect(state.movementDelta(codepoint: 106, modifiers: 0) == nil)
+        #expect(state.movementDelta(codepoint: 107, modifiers: 0) == nil)
+        // The same codepoint with another modifier is another key.
+        #expect(state.movementDelta(codepoint: 57_353, modifiers: 0x01) == nil)
+    }
+
+    @Test("without listed keys nothing moves the preview, and hiding forgets the keys")
+    func movementKeysDefaultToNone() {
+        let state = PickerState()
+        populateState(state)
+        #expect(state.movementDelta(codepoint: 57_353, modifiers: 0) == nil)
+
+        state.update(visible: true, selectedIndex: 0, filteredCount: 5, totalCount: 5, markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: makeItems(5), actionMenu: nil, activationGeneration: 7, movementKeys: defaultMovementKeys)
+        state.hide()
+        #expect(state.movementKeys.isEmpty)
+    }
+
+    @Test("the open act menu owns the list keys, so the picker row preview stays put")
+    func previewNavigationYieldsToTheActionMenu() {
+        let state = PickerState()
+        let menu = Wire.PickerActionMenu(selectedIndex: 0, actions: ["Open", "Kill"], activationIDs: [41, 42])
+        state.update(visible: true, selectedIndex: 1, filteredCount: 5, totalCount: 5, markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: makeItems(5), actionMenu: menu, activationGeneration: 7, movementKeys: defaultMovementKeys)
+
+        #expect(state.previewNavigation(delta: 1) == false)
+        #expect(state.effectiveSelectedIndex == 1)
+    }
+
     @Test("previewNavigation increments without mutating selectedIndex")
     func previewNavigationDown() {
         let state = PickerState()
@@ -169,6 +212,44 @@ struct PickerSectionHeaderTests {
         let grouped = items(["A", "A", "B"])
         let withHeaders: CGFloat = rows + 2 * PickerOverlay.sectionHeaderHeight
         #expect(PickerOverlay.listContentHeight(grouped) == withHeaders)
+    }
+
+    @Test("the reported fit counts the whole rows the list shows")
+    func visibleRowCountForUniformRows() {
+        let rows = items(Array(repeating: "", count: 65))
+        let height = PickerOverlay.itemHeight
+
+        #expect(PickerOverlay.visibleRowCount(rows, listHeight: 13 * height, selectedIndex: 0) == 13)
+        // A partly shown row is not a row the user has seen whole.
+        #expect(PickerOverlay.visibleRowCount(rows, listHeight: 13.6 * height, selectedIndex: 30) == 13)
+        // The count does not depend on where the highlighted row is.
+        #expect(PickerOverlay.visibleRowCount(rows, listHeight: 13 * height, selectedIndex: 64) == 13)
+        #expect(PickerOverlay.visibleRowCount(items(["", "", ""]), listHeight: 13 * height, selectedIndex: 1) == 3)
+    }
+
+    @Test("section headers take list height, so fewer rows fit")
+    func visibleRowCountCountsHeaders() {
+        let grouped = items(["A", "A", "B", "B", "C", "C"])
+        let height = 4 * PickerOverlay.itemHeight
+
+        #expect(PickerOverlay.visibleRowCount(items(Array(repeating: "", count: 6)), listHeight: height, selectedIndex: 0) == 4)
+        #expect(PickerOverlay.visibleRowCount(grouped, listHeight: height, selectedIndex: 0) == 3)
+    }
+
+    @Test("the highlighted row always counts, and an empty list has no fit")
+    func visibleRowCountBounds() {
+        let rows = items(["", ""])
+
+        #expect(PickerOverlay.visibleRowCount(rows, listHeight: 1, selectedIndex: 0) == 1)
+        #expect(PickerOverlay.visibleRowCount([], listHeight: 240, selectedIndex: 0) == 0)
+
+        let state = PickerState()
+        #expect(PickerOverlay.fit(state, listHeight: 240) == nil)
+        state.update(visible: true, selectedIndex: 0, filteredCount: 2, totalCount: 2, markedCount: 0, title: "Grouped", query: "", hasPreview: false, rawItems: [
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "a", description: "", annotation: "", matchPositions: [], activationID: 1),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "b", description: "", annotation: "", matchPositions: [], activationID: 2)
+        ], actionMenu: nil, activationGeneration: 7)
+        #expect(PickerOverlay.fit(state, listHeight: 240) == PickerOverlay.Fit(generation: 7, rows: 2))
     }
 
     @Test("moving the selection crosses a section boundary in one step because headers are not items")

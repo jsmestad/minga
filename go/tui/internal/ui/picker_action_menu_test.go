@@ -31,6 +31,7 @@ func actionMenuPicker() protocol.Picker {
 func actionMenuModel(out chan []byte, picker protocol.Picker) Model {
 	model := New(80, 24, out)
 	model.chrome[generated.OPGuiPicker] = protocol.ChromePayload{Opcode: generated.OPGuiPicker, Picker: picker}
+	markPickerFitReported(&model)
 	return model
 }
 

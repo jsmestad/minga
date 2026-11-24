@@ -255,18 +255,53 @@ defmodule Minga.Keymap.Scope do
   @spec resolve_through_layers(module(), scope_name(), vim_state(), Bindings.key(), context()) ::
           resolve_result()
   defp resolve_through_layers(mod, scope_name, vim_state, key, context) do
-    keymap_server = context_server(context)
+    mod
+    |> layers(scope_name, vim_state, context)
+    |> lookup_in_layers(key)
+  end
 
-    tries = [
+  @doc """
+  Returns the single keys that run `command` in a scope and vim state.
+
+  The keys come from the same layers `resolve_key/4` walks, so a user override that rebinds or shadows a default key changes the result. A key in a lower layer counts only when it still resolves to `command`. Multi-key sequences are left out.
+  """
+  @spec keys_for_command(scope_name(), vim_state(), atom(), context()) :: [Bindings.key()]
+  def keys_for_command(scope_name, vim_state, command, context \\ []) when is_atom(command) do
+    case module_for(scope_name) do
+      nil ->
+        []
+
+      mod ->
+        layers = layers(mod, scope_name, vim_state, context)
+
+        layers
+        |> Enum.flat_map(&Bindings.sequences_for_command(&1, command))
+        |> Enum.flat_map(fn
+          [key] -> [key]
+          _sequence -> []
+        end)
+        |> Enum.uniq()
+        |> Enum.filter(&(lookup_in_layers(layers, &1) == {:command, command}))
+        |> Enum.sort()
+    end
+  end
+
+  # The keybinding layers of a scope in priority order.
+  @spec layers(module(), scope_name(), vim_state(), context()) :: [Bindings.node_t()]
+  defp layers(mod, scope_name, vim_state, context) do
+    [
       # Layer 0: user overrides for this scope + vim state
-      user_scope_trie(scope_name, vim_state, keymap_server),
+      user_scope_trie(scope_name, vim_state, context_server(context)),
       # Layer 1: vim-state-specific bindings from the scope module
       mod.keymap(vim_state, context),
       # Layer 2: shared bindings (cross vim-state)
       mod.shared_keymap()
     ]
+  end
 
-    Enum.find_value(tries, :not_found, fn trie ->
+  @spec lookup_in_layers([Bindings.node_t()], Bindings.key()) :: resolve_result()
+  defp lookup_in_layers(layers, key) do
+    Enum.find_value(layers, :not_found, fn trie ->
       case Bindings.lookup(trie, key) do
         :not_found -> nil
         result -> result

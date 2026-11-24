@@ -187,6 +187,7 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
                :git_syncing,
                :gui_config_state,
                :highlighting,
+               :keymap_server,
                :last_input_seq,
                :layout,
                :line_spacing,

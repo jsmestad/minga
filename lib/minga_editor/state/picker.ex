@@ -181,6 +181,32 @@ defmodule MingaEditor.State.Picker do
     |> refresh_activation_offer()
   end
 
+  @doc """
+  Returns the keymap context of this picker for the `:picker` scope.
+
+  `⌃V` is bound only when the source shows its selection in the focused window. Key dispatch and the movement keys sent to frontends both resolve with this context, so they cannot disagree.
+  """
+  @spec keymap_context(t(), Minga.Keymap.server()) :: keyword()
+  def keymap_context(%__MODULE__{source: source, callback_source: owner}, keymap_server) do
+    [
+      keymap_server: keymap_server,
+      picker_split: MingaEditor.UI.Picker.Source.opens_in_window?(source, owner)
+    ]
+  end
+
+  @doc "Returns whether `generation` names the picker session a frontend was shown, as sent in its activation generation."
+  @spec shown_as?(t(), ActivationOffer.generation()) :: boolean()
+  def shown_as?(
+        %__MODULE__{
+          picker: %Picker{},
+          activation_offer: %ActivationOffer{generation: generation}
+        },
+        generation
+      ),
+      do: true
+
+  def shown_as?(%__MODULE__{}, _generation), do: false
+
   @doc "Returns whether a native query edit belongs to this picker and is newer than its acknowledgement."
   @spec current_query_edit?(t(), query_generation(), query_edit_seq()) :: boolean()
   def current_query_edit?(

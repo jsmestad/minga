@@ -95,6 +95,8 @@ nonisolated public enum OutboundAction: Equatable, Sendable {
     case pickerQueryChanged(generation: UInt32, editSequence: UInt32, text: String)
     case pickerItemActivate(generation: UInt32, activationID: UInt32)
     case pickerActionActivate(generation: UInt32, activationID: UInt32)
+    /// The result rows the picker list of one picker generation shows. The BEAM pages the picker by `rows`.
+    case pickerFit(generation: UInt32, rows: UInt16)
     case fileTreeEditConfirm(token: UInt32, text: String)
     case fileTreeEditCancel
     case fileTreeDrop(sourcePaths: [String], targetIndex: UInt16, targetID: String, targetPathHash: UInt32, targetPath: String, targetIsDirectory: Bool, modifiers: UInt8, generation: UInt32)

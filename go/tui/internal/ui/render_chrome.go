@@ -846,21 +846,56 @@ func (m Model) renderPicker(picker protocol.Picker, preview protocol.PickerPrevi
 		title += gap(spaceXL) + picker.LoadError
 	}
 
-	height := m.maxOverlayHeight()
-	if preview.Visible && len(preview.Lines) > 0 && m.width >= 100 {
-		return m.renderPickerWithSidePreview(title, picker, preview, height)
+	layout := m.pickerLayout(preview)
+	if layout.sidePreview {
+		return m.renderPickerWithSidePreview(title, picker, preview, layout)
 	}
 
-	itemBudget := max(height-2, 1)
-	if preview.Visible && len(preview.Lines) > 0 {
-		itemBudget = max(itemBudget/2, 1)
-	}
-	lines := m.renderPickerList(title, picker, itemBudget+1, m.width)
-	if preview.Visible && len(preview.Lines) > 0 {
-		lines = append(lines, m.renderPickerPreview(preview, max(height-len(lines)-1, 1), m.width)...)
+	lines := m.renderPickerList(title, picker, layout.listHeight, m.width)
+	if layout.hasPreview {
+		lines = append(lines, m.renderPickerPreview(preview, max(layout.height-len(lines)-1, 1), m.width)...)
 	}
 	lines = append(lines, m.renderPickerHelp(picker, m.width))
-	return takeLines(m.fillPopupLines(lines, height, m.width), height)
+	return takeLines(m.fillPopupLines(lines, layout.height, m.width), layout.height)
+}
+
+// pickerLayout is the one row arithmetic of the picker popup. Drawing and the row fit reported to the BEAM both read it, so a page never moves by a row count the popup does not draw.
+type pickerLayout struct {
+	// height is every row of the popup content, the help row included.
+	height int
+	// listHeight is the rows of the result list: its title, its separator, and the rows for items and section headers.
+	listHeight  int
+	hasPreview  bool
+	sidePreview bool
+}
+
+// pickerLayout sizes the popup for a model whose width is the popup's content width.
+func (m Model) pickerLayout(preview protocol.PickerPreview) pickerLayout {
+	layout := pickerLayout{height: m.maxOverlayHeight(), hasPreview: preview.Visible && len(preview.Lines) > 0}
+	if layout.hasPreview && m.width >= 100 {
+		layout.sidePreview = true
+		layout.listHeight = max(layout.height-1, 1)
+		return layout
+	}
+	itemBudget := max(layout.height-2, 1)
+	if layout.hasPreview {
+		itemBudget = max(itemBudget/2, 1)
+	}
+	layout.listHeight = itemBudget + 1
+	return layout
+}
+
+// pickerListHeaderRows is the title row, plus the separator when the list has room for it.
+func pickerListHeaderRows(listHeight int) int {
+	if listHeight > 2 {
+		return 2
+	}
+	return 1
+}
+
+// itemRowBudget is the rows of the list left for items and their section headers.
+func (l pickerLayout) itemRowBudget() int {
+	return max(l.listHeight-pickerListHeaderRows(l.listHeight), 0)
 }
 
 func (m Model) renderPickerList(title string, picker protocol.Picker, height int, width int) []string {
@@ -868,11 +903,10 @@ func (m Model) renderPickerList(title string, picker protocol.Picker, height int
 	panelStyle := m.popupLineStyle(width)
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
 	lines := []string{renderPadded(titleStyle, " "+title, width)}
-	headerRows := 1
-	if height > 2 {
+	headerRows := pickerListHeaderRows(height)
+	if headerRows == 2 {
 		sepStyle := lipgloss.NewStyle().Foreground(theme.PopupBorder()).Background(theme.PopupSurface()).Width(width).ColorWhitespace(true)
 		lines = append(lines, renderPadded(sepStyle, strings.Repeat("─", max(width, 1)), width))
-		headerRows = 2
 	}
 	if picker.Empty != nil {
 		header := emptyListHeader(*picker.Empty, width, m.pickerEmptyColors(), theme)
@@ -961,11 +995,12 @@ func (m Model) renderPickerItemRow(title string, item protocol.PickerItem, selec
 	return renderPadded(rowStyle, " "+text, width)
 }
 
-func (m Model) renderPickerWithSidePreview(title string, picker protocol.Picker, preview protocol.PickerPreview, height int) []string {
+func (m Model) renderPickerWithSidePreview(title string, picker protocol.Picker, preview protocol.PickerPreview, layout pickerLayout) []string {
+	height := layout.height
 	dividerWidth := 1
 	leftWidth := min(max(m.width*42/100, 36), max(m.width-20-dividerWidth, 1))
 	rightWidth := max(m.width-leftWidth-dividerWidth, 1)
-	bodyHeight := max(height-1, 1)
+	bodyHeight := layout.listHeight
 	left := m.renderPickerList(title, picker, bodyHeight, leftWidth)
 	right := m.renderPickerPreview(preview, bodyHeight, rightWidth)
 	left = m.fillPopupLines(left, bodyHeight, leftWidth)

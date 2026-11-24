@@ -13,6 +13,14 @@ public struct PickerOverlay: View {
         case keyPress(codepoint: UInt32, modifiers: UInt8, sequence: UInt32)
         case activateItem(generation: UInt32, activationID: UInt32)
         case activateAction(generation: UInt32, activationID: UInt32)
+        /// The result rows the list shows for one picker generation. The BEAM pages the picker by `rows`.
+        case fitChanged(generation: UInt32, rows: UInt16)
+    }
+
+    /// The row fit of the open picker: how many result rows its list shows.
+    struct Fit: Equatable {
+        let generation: UInt32
+        let rows: UInt16
     }
 
     public init(state: PickerState, sendAction: ViewActionHandler<Action>?) {
@@ -54,6 +62,11 @@ public struct PickerOverlay: View {
                         let maxHeight = geo.size.height * 0.4
                         let listHeight = min(totalItemsHeight, max(maxHeight, 120))
                         resultsList(maxListHeight: listHeight)
+                            // Row fit is a presentation fact this view owns (ADR-0001), so it reports the rows it shows and the BEAM pages by them.
+                            .onChange(of: Self.fit(state, listHeight: listHeight), initial: true) { _, fit in
+                                guard let fit else { return }
+                                sendAction?(.fitChanged(generation: fit.generation, rows: fit.rows))
+                            }
                         if state.hasPreview && !state.previewLines.isEmpty {
                             Divider().overlay(theme.popupBorder.opacity(0.3))
                             previewPanel(maxHeight: geo.size.height * 0.18)
@@ -419,6 +432,60 @@ public struct PickerOverlay: View {
         if group.isEmpty { return nil }
         if index > 0 && items[index - 1].group == group { return nil }
         return group
+    }
+
+    /// The fit to report for the open picker, or nil while it has no result rows to show.
+    static func fit(_ state: PickerState, listHeight: CGFloat) -> Fit? {
+        let rows = visibleRowCount(state.items, listHeight: listHeight, selectedIndex: state.effectiveSelectedIndex)
+        guard state.visible, state.activationGeneration > 0, rows > 0 else { return nil }
+        return Fit(generation: state.activationGeneration, rows: UInt16(clamping: rows))
+    }
+
+    /// The number of result rows that fit whole in a list `listHeight` tall.
+    ///
+    /// The list keeps the highlighted row centered, so the count grows outward from that row, below and above in turn. A row counts only when it fits together with the section header above it. The highlighted row always counts, so a page never moves zero rows.
+    static func visibleRowCount(_ items: [PickerItem], listHeight: CGFloat, selectedIndex: Int) -> Int {
+        guard !items.isEmpty, listHeight > 0 else { return 0 }
+        let selected = min(max(selectedIndex, 0), items.count - 1)
+        // Half a point of slack keeps a list sized to exactly N rows from losing one to rounding.
+        let budget = listHeight + 0.5
+        var used = rowCost(items, at: selected)
+        var count = 1
+        var below = selected + 1
+        var above = selected - 1
+        var growBelow = below < items.count
+        var growAbove = above >= 0
+
+        while growBelow || growAbove {
+            if growBelow {
+                let cost = rowCost(items, at: below)
+                if used + cost <= budget {
+                    used += cost
+                    count += 1
+                    below += 1
+                    growBelow = below < items.count
+                } else {
+                    growBelow = false
+                }
+            }
+            if growAbove {
+                let cost = rowCost(items, at: above)
+                if used + cost <= budget {
+                    used += cost
+                    count += 1
+                    above -= 1
+                    growAbove = above >= 0
+                } else {
+                    growAbove = false
+                }
+            }
+        }
+        return count
+    }
+
+    /// The height one row takes in the list, with the section header drawn above it.
+    private static func rowCost(_ items: [PickerItem], at index: Int) -> CGFloat {
+        rowHeight(items[index]) + (sectionHeader(items, at: index) == nil ? 0 : sectionHeaderHeight)
     }
 
     /// The unclipped height of every row and section header, which bounds the scrolling list.

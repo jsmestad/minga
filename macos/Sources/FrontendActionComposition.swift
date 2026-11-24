@@ -162,6 +162,7 @@ nonisolated public enum FrontendActionComposition {
         case .keyPress(let codepoint, let modifiers, let sequence): .keyPress(codepoint: codepoint, modifiers: modifiers, sequence: sequence)
         case .activateItem(let generation, let activationID): .semanticItemActivate(surface: .picker, intent: 1, generation: generation, itemID: activationID.bigEndianData)
         case .activateAction(let generation, let activationID): .semanticItemActivate(surface: .picker, intent: 2, generation: generation, itemID: activationID.bigEndianData)
+        case .fitChanged(let generation, let rows): .pickerFit(generation: generation, rows: rows)
         }
     }
 

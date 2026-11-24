@@ -9,6 +9,7 @@ defmodule MingaEditor.Frontend.GUIPickerQueryTest do
   @gui_action_picker_query_changed Opcodes.gui_action_picker_query_changed()
   @gui_action_picker_item_activate Opcodes.gui_action_picker_item_activate()
   @gui_action_picker_action_activate Opcodes.gui_action_picker_action_activate()
+  @gui_action_picker_fit Opcodes.gui_action_picker_fit()
 
   test "decodes a correlated native picker query" do
     query = "café"
@@ -44,5 +45,19 @@ defmodule MingaEditor.Frontend.GUIPickerQueryTest do
              ProtocolGUI.decode_gui_action(@gui_action_picker_action_activate, <<13::32, 17::32>>)
 
     assert :error = ProtocolGUI.decode_gui_action(@gui_action_picker_item_activate, <<7::32>>)
+  end
+
+  test "decodes the rows a frontend's picker list shows" do
+    assert {:ok, {:picker_fit, 7, 9}} =
+             ProtocolGUI.decode_gui_action(@gui_action_picker_fit, <<7::32, 9::16>>)
+
+    assert {:ok, {:gui_action, {:picker_fit, 7, 9}}} =
+             Protocol.decode_event(<<@op_gui_action, @gui_action_picker_fit, 7::32, 9::16>>)
+  end
+
+  test "rejects a picker fit without rows, without a picker, or with a wrong size" do
+    for payload <- [<<7::32, 0::16>>, <<0::32, 9::16>>, <<7::32>>, <<7::32, 9::16, 0>>] do
+      assert :error = ProtocolGUI.decode_gui_action(@gui_action_picker_fit, payload)
+    end
   end
 end
