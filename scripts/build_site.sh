@@ -57,7 +57,7 @@ for required in \
   "$OUTPUT_DIR/_redirects" \
   "$OUTPUT_DIR/robots.txt" \
   "$OUTPUT_DIR/docs/index.html" \
-  "$OUTPUT_DIR/docs/readme.html"
+  "$OUTPUT_DIR/docs/reference.html"
 do
   if [[ ! -f "$required" ]]; then
     echo "error: expected built file missing: $required" >&2

@@ -52,7 +52,7 @@ def write_valid_bundle(root: Path) -> None:
         "<!DOCTYPE html><html><body>Redirect</body></html>\n",
         encoding="utf-8",
     )
-    (root / "docs" / "readme.html").write_text(
+    (root / "docs" / "reference.html").write_text(
         '<!DOCTYPE html><html><body><a href="/" class="sidebar-projectName">Minga</a></body></html>\n',
         encoding="utf-8",
     )
@@ -111,8 +111,8 @@ class CheckSiteLinksTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             write_valid_bundle(root)
-            (root / "docs" / "readme.html").write_text(
-                '<html><body><a href="readme.html">Minga</a></body></html>',
+            (root / "docs" / "reference.html").write_text(
+                '<html><body><a href="reference.html">Minga</a></body></html>',
                 encoding="utf-8",
             )
             errors = check_site_links.verify_site_bundle(root, expect_noindex=True)
