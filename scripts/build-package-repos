@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+# Build signed apt, dnf and pacman repositories for one published Linux release.
+#
+# Usage: scripts/build-package-repos ASSETS VERSION SOURCE_SHA KEY OUTPUT
+#
+# ASSETS holds the release's own Linux assets under their release names:
+#   minga_VERSION_{amd64,arm64}.deb, minga-VERSION.{x86_64,aarch64}.rpm and
+#   minga_VERSION_linux_{x86_64,aarch64}.tar.gz.
+# KEY is the armored private signing key. OUTPUT must not exist; it receives
+# the complete tree that scripts/upload-package-repos publishes:
+#
+#   minga.asc, repo.json
+#   apt/minga.sources, apt/pool/main/*.deb, apt/dists/stable/...
+#   rpm/minga.repo, rpm/{x86_64,aarch64}/*.rpm and repodata/
+#   arch/minga.conf, arch/{x86_64,aarch64}/*.pkg.tar.zst, minga.db, minga.files
+#
+# Every step runs in a container, so the host needs only Docker. The .deb files
+# are published unchanged. The .rpm files gain an embedded signature, and the
+# pacman packages are built from the same release tarballs with the repository
+# PKGBUILD, so makepkg checks the tarball SHA-256 digests.
+set -euo pipefail
+
+if [[ $# -ne 5 ]]; then
+  echo "usage: $0 ASSETS VERSION SOURCE_SHA KEY OUTPUT" >&2
+  exit 2
+fi
+assets=$(cd "$1" && pwd)
+version=$2
+source_sha=$3
+key=$(cd "$(dirname "$4")" && pwd)/$(basename "$4")
+output=$5
+scripts=$(cd "$(dirname "$0")" && pwd)
+repo_root=$(dirname "$scripts")
+base_url=https://packages.mingacode.dev
+
+[[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-dev\.[1-9][0-9]*)?$ ]] || { echo "invalid version: $version" >&2; exit 2; }
+[[ $source_sha =~ ^[0-9a-f]{40}$ ]] || { echo "invalid source SHA: $source_sha" >&2; exit 2; }
+[[ -f $key ]] || { echo "missing signing key: $key" >&2; exit 2; }
+if [[ -e $output ]]; then
+  echo "output already exists: $output" >&2
+  exit 2
+fi
+for name in "minga_${version}_amd64.deb" "minga_${version}_arm64.deb" \
+  "minga-$version.x86_64.rpm" "minga-$version.aarch64.rpm" \
+  "minga_${version}_linux_x86_64.tar.gz" "minga_${version}_linux_aarch64.tar.gz"; do
+  [[ -f $assets/$name ]] || { echo "missing release asset: $name" >&2; exit 2; }
+done
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+mkdir "$work/tree"
+
+sha() { shasum -a 256 "$1" | cut -d ' ' -f 1; }
+cp "$repo_root/LICENSE" "$work/LICENSE-$version"
+python3 "$scripts/render-aur-pkgbuild" --pkgname minga --version "$version" --source-sha "$source_sha" \
+  --x86-64-sha256 "$(sha "$assets/minga_${version}_linux_x86_64.tar.gz")" \
+  --aarch64-sha256 "$(sha "$assets/minga_${version}_linux_aarch64.tar.gz")" \
+  --license-sha256 "$(sha "$work/LICENSE-$version")" > "$work/PKGBUILD"
+
+# The client configuration that users install. scripts/test-package-repos uses these same files.
+cat > "$work/minga.sources" <<EOF
+Types: deb
+URIs: $base_url/apt
+Suites: stable
+Components: main
+Signed-By: /etc/apt/keyrings/minga.asc
+EOF
+cat > "$work/minga.repo" <<EOF
+[minga]
+name=Minga
+baseurl=$base_url/rpm/\$basearch
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=$base_url/minga.asc
+EOF
+cat > "$work/minga.conf" <<EOF
+
+[minga]
+Server = $base_url/arch/\$arch
+EOF
+
+# apt and dnf: Ubuntu 24.04, the same image family as the release runners.
+docker run --rm --platform linux/amd64 \
+  -v "$assets:/assets:ro" -v "$key:/key.asc:ro" -v "$work:/work" \
+  -e VERSION="$version" -e SOURCE_SHA="$source_sha" -e OWNER="$(id -u):$(id -g)" ubuntu:24.04 bash -euo pipefail -c '
+    apt-get update -qq >/dev/null
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+      apt-utils createrepo-c rpm gnupg >/dev/null
+    export GNUPGHOME=$(mktemp -d)
+    gpg --batch --quiet --import /key.asc
+    fpr=$(gpg --list-secret-keys --with-colons | awk -F: "/^fpr/ { print \$10; exit }")
+    sign() { gpg --batch --yes --quiet --pinentry-mode loopback --passphrase "" --local-user "$fpr" "$@"; }
+    tree=/work/tree
+    gpg --armor --export "$fpr" > "$tree/minga.asc"
+    printf "{\"version\": \"%s\", \"source_sha\": \"%s\", \"fingerprint\": \"%s\"}\n" "$VERSION" "$SOURCE_SHA" "$fpr" > "$tree/repo.json"
+
+    apt=$tree/apt
+    mkdir -p "$apt/pool/main"
+    cp /assets/minga_${VERSION}_amd64.deb /assets/minga_${VERSION}_arm64.deb "$apt/pool/main/"
+    cp /work/minga.sources "$apt/"
+    cd "$apt"
+    for arch in amd64 arm64; do
+      mkdir -p "dists/stable/main/binary-$arch"
+      apt-ftparchive --arch "$arch" packages pool > "dists/stable/main/binary-$arch/Packages"
+      grep -q "^Architecture: $arch\$" "dists/stable/main/binary-$arch/Packages"
+      gzip -9 -n -k "dists/stable/main/binary-$arch/Packages"
+    done
+    apt-ftparchive \
+      -o APT::FTPArchive::Release::Origin=Minga -o APT::FTPArchive::Release::Label=Minga \
+      -o APT::FTPArchive::Release::Suite=stable -o APT::FTPArchive::Release::Codename=stable \
+      -o APT::FTPArchive::Release::Architectures="amd64 arm64" -o APT::FTPArchive::Release::Components=main \
+      -o APT::FTPArchive::Release::Description="Minga rolling builds" \
+      release dists/stable > /tmp/Release
+    mv /tmp/Release dists/stable/Release
+    sign --clearsign -o dists/stable/InRelease dists/stable/Release
+    sign --armor --detach-sign -o dists/stable/Release.gpg dists/stable/Release
+
+    cp /work/minga.repo "$tree/rpm.repo.tmp"
+    mkdir -p "$tree/rpm"
+    mv "$tree/rpm.repo.tmp" "$tree/rpm/minga.repo"
+    for arch in x86_64 aarch64; do
+      dir=$tree/rpm/$arch
+      mkdir -p "$dir"
+      cp "/assets/minga-$VERSION.$arch.rpm" "$dir/"
+      rpmsign --define "__gpg /usr/bin/gpg" --define "_gpg_name $fpr" --define "_gpg_path $GNUPGHOME" \
+        --define "_gpg_sign_cmd_extra_args --batch --pinentry-mode loopback" \
+        --addsign "$dir/minga-$VERSION.$arch.rpm" >/dev/null
+      createrepo_c --quiet --unique-md-filenames "$dir"
+      sign --armor --detach-sign -o "$dir/repodata/repomd.xml.asc" "$dir/repodata/repomd.xml"
+    done
+    # Hand the files back to the caller; on a Linux host they would otherwise stay owned by root.
+    chown -R "$OWNER" /work
+  '
+
+# pacman: Arch itself builds, signs and indexes the packages.
+docker run --rm --platform linux/amd64 \
+  -v "$assets:/assets:ro" -v "$key:/key.asc:ro" -v "$work:/work" \
+  -e VERSION="$version" -e OWNER="$(id -u):$(id -g)" archlinux:base-devel bash -euo pipefail -c '
+    export GNUPGHOME=$(mktemp -d)
+    gpg --batch --quiet --import /key.asc
+    fpr=$(gpg --list-secret-keys --with-colons | awk -F: "/^fpr/ { print \$10; exit }")
+    useradd -m builder
+    mkdir -p /work/tree/arch
+    cp /work/minga.conf /work/tree/arch/
+    for arch in x86_64 aarch64; do
+      build=/home/builder/$arch
+      install -d -o builder "$build"
+      cp /work/PKGBUILD "/work/LICENSE-$VERSION" "/assets/minga_${VERSION}_linux_$arch.tar.gz" "$build/"
+      chown -R builder "$build"
+      # The payload is prebuilt, so building for another CPU only changes the package label.
+      sed "s/^CARCH=.*/CARCH=\"$arch\"/" /etc/makepkg.conf > "$build/makepkg.conf"
+      (cd "$build" && runuser -u builder -- makepkg --config "$build/makepkg.conf" --nodeps --noconfirm >/dev/null)
+      out=/work/tree/arch/$arch
+      mkdir -p "$out"
+      cp "$build"/minga-*-"$arch".pkg.tar.zst "$out/"
+      for package in "$out"/*.pkg.tar.zst; do
+        gpg --batch --quiet --pinentry-mode loopback --passphrase "" --local-user "$fpr" --detach-sign --no-armor "$package"
+      done
+      (cd "$out" && repo-add --quiet --sign --key "$fpr" minga.db.tar.gz ./*.pkg.tar.zst)
+      # Static hosting serves files, not symlinks; replace them with copies.
+      for link in minga.db minga.db.sig minga.files minga.files.sig; do
+        target=$(readlink "$out/$link")
+        rm "$out/$link"
+        cp "$out/$target" "$out/$link"
+      done
+    done
+    chown -R "$OWNER" /work
+  '
+
+mv "$work/tree" "$output"
+find "$output" -type f | sort | sed "s#^$output/##"

@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Install Minga from a built repository tree the way users do, on clean
+# Ubuntu 24.04, Debian 13, Fedora and Arch containers.
+#
+# Usage: scripts/test-package-repos TREE VERSION
+#
+# The tree is served on a private Docker network. Each client fetches the same
+# key and configuration files users install, with the production URL rewritten
+# to the test server, so signature checks run exactly as they do for users.
+set -euo pipefail
+
+if [[ $# -ne 2 ]]; then
+  echo "usage: $0 TREE VERSION" >&2
+  exit 2
+fi
+tree=$(cd "$1" && pwd)
+version=$2
+fingerprint=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["fingerprint"])' "$tree/repo.json")
+network=minga-repo-test-$$
+server=minga-repo-server-$$
+test_url=http://packages.test:8000
+production_url=https://packages.mingacode.dev
+
+cleanup() {
+  docker rm -f "$server" >/dev/null 2>&1 || true
+  docker network rm "$network" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+docker network create "$network" >/dev/null
+docker run -d --name "$server" --network "$network" --network-alias packages.test \
+  -v "$tree:/srv:ro" python:3.13-alpine python -m http.server 8000 --directory /srv >/dev/null
+
+check='out=$(cd / && minga --version) && [ "$out" = "minga $VERSION" ] || { echo "unexpected minga --version output: ${out:-}" >&2; exit 1; }'
+fetch='fetch() { for attempt in 1 2 3 4 5; do curl -fsSL "$1" && return; sleep 1; done; return 1; }; localize() { sed "s#$PRODUCTION_URL#$TEST_URL#g"; }'
+
+run() {
+  local image=$1 script=$2
+  echo "::group::$image"
+  docker run --rm --platform linux/amd64 --network "$network" \
+    -e VERSION="$version" -e FINGERPRINT="$fingerprint" -e TEST_URL="$test_url" -e PRODUCTION_URL="$production_url" \
+    "$image" bash -euo pipefail -c "$fetch
+$script"
+  echo "::endgroup::"
+  echo "passed: $image"
+}
+
+for image in ubuntu:24.04 debian:13; do
+  run "$image" "
+    apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends curl ca-certificates >/dev/null
+    install -d -m 0755 /etc/apt/keyrings
+    fetch \$TEST_URL/minga.asc > /etc/apt/keyrings/minga.asc
+    fetch \$TEST_URL/apt/minga.sources | localize > /etc/apt/sources.list.d/minga.sources
+    apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq minga >/dev/null
+    [ \"\$(dpkg-query -W -f='\${Version}' minga)\" = \"\${VERSION/-dev./~dev.}\" ]
+    $check"
+done
+
+run fedora:latest "
+  fetch \$TEST_URL/rpm/minga.repo | localize > /etc/yum.repos.d/minga.repo
+  dnf install -y -q minga
+  rpm -q --qf '%{VERSION}\n' minga | grep -Fx \"\${VERSION/-dev./~dev.}\"
+  # gpgcheck=1 made dnf verify it; also confirm the package carries the repository key's signature.
+  rpm -q --qf '%{RSAHEADER:pgpsig}\n' minga | grep -qi \"key id \${FINGERPRINT: -16}\"
+  $check"
+
+run archlinux:base-devel "
+  # pacman's download sandbox cannot apply seccomp inside a container; real hosts keep it.
+  sed -i '/^\[options\]/a DisableSandbox' /etc/pacman.conf
+  pacman-key --init >/dev/null 2>&1
+  pacman-key --populate archlinux >/dev/null 2>&1
+  fetch \$TEST_URL/minga.asc | pacman-key --add - >/dev/null
+  pacman-key --lsign-key \"\$FINGERPRINT\" >/dev/null
+  fetch \$TEST_URL/arch/minga.conf | localize >> /etc/pacman.conf
+  pacman -Sy --noconfirm minga >/dev/null
+  [ \"\$(pacman -Q minga | cut -d ' ' -f 2)\" = \"\${VERSION/-dev./dev.}-1\" ]
+  $check"

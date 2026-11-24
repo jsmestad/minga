@@ -17,22 +17,41 @@ Open the GUI from Applications or run `open -a Minga`. Run `minga` for the termi
 
 ### Linux (packages)
 
-The terminal client ships for x86_64 and ARM64 Linux with glibc 2.39 or newer: Ubuntu 24.04 and later, Debian 13 and later, current Fedora, and Arch. Each package carries its own Erlang runtime under `/usr/lib/minga` and puts `minga` on your `PATH`.
+The terminal client ships for x86_64 and ARM64 Linux with glibc 2.39 or newer: Ubuntu 24.04 and later, Debian 13 and later, current Fedora, and Arch, including Omarchy. Each package carries its own Erlang runtime under `/usr/lib/minga` and puts `minga` on your `PATH`.
 
-On Arch, install `minga-bin` from the AUR with your helper of choice. It downloads the release tarball and checks its SHA-256 before installing:
+Add Minga's package repository once, and your normal system updates keep Minga current. Every push to `main` publishes a new rolling build. The repository and every package in it are signed with this key:
 
-```bash
-yay -S minga-bin
+```
+Minga Packages <packages@mingacode.dev>
+2C5D 2396 B82C 1278 D459  6A09 6571 1C0C 3853 857B
 ```
 
-On Ubuntu, Debian, or Fedora, download the `.deb` or `.rpm` for your architecture from the newest [release](https://github.com/jsmestad/minga/releases) and install it with your package manager:
+On Arch and Omarchy, trust the key, add the `[minga]` repository to `pacman.conf`, and install:
 
 ```bash
-sudo apt install ./minga_<version>_amd64.deb     # Ubuntu and Debian
-sudo dnf install ./minga-<version>.x86_64.rpm    # Fedora
+curl -fsSL https://packages.mingacode.dev/minga.asc | sudo pacman-key --add -
+sudo pacman-key --lsign-key 2C5D2396B82C1278D4596A0965711C0C3853857B
+curl -fsSL https://packages.mingacode.dev/arch/minga.conf | sudo tee -a /etc/pacman.conf > /dev/null
+sudo pacman -Syu minga
 ```
 
-Every push to `main` publishes a new rolling build. The AUR package updates with it; for the `.deb` and `.rpm`, install a newer download the same way to upgrade.
+On Ubuntu and Debian:
+
+```bash
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://packages.mingacode.dev/minga.asc | sudo tee /etc/apt/keyrings/minga.asc > /dev/null
+curl -fsSL https://packages.mingacode.dev/apt/minga.sources | sudo tee /etc/apt/sources.list.d/minga.sources > /dev/null
+sudo apt update && sudo apt install minga
+```
+
+On Fedora, `dnf` asks you to confirm the key on first install. Check that it shows the fingerprint above:
+
+```bash
+sudo curl -fsSLo /etc/yum.repos.d/minga.repo https://packages.mingacode.dev/rpm/minga.repo
+sudo dnf install minga
+```
+
+To try a build without adding the repository, download the `.deb` or `.rpm` for your architecture from the newest [release](https://github.com/jsmestad/minga/releases) and install it with `sudo apt install ./minga_<version>_amd64.deb` or `sudo dnf install ./minga-<version>.x86_64.rpm`. A package installed this way does not update itself.
 
 ### From source
 
