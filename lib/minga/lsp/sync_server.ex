@@ -603,6 +603,9 @@ defmodule Minga.LSP.SyncServer do
         state
 
       path ->
+        # The snapshot already contains queued edits, so they must not reach the replacement again.
+        # Flushing first still delivers them to surviving clients and leaves an empty queue.
+        state = state |> cancel_debounce(buffer_pid) |> flush_did_change(buffer_pid)
         language_id = buffer_pid |> Buffer.filetype() |> to_string()
         {content, revision} = Buffer.content_with_version(buffer_pid)
         uri = path_to_uri(path)
