@@ -264,5 +264,5 @@ Agâ”‚  14 bindings                                                  Esc close â”
 37 2-7 #eff1f5 #1e66f5 bold
 37 8-8 #4c4f69 #1e66f5 -
 37 9-23 #4c4f69 #e6e9ef -
-37 24-38 #8839ef #e6e9ef bold
+37 24-38 #8839ef #e6e9ef -
 37 39-149 #4c4f69 #e6e9ef -

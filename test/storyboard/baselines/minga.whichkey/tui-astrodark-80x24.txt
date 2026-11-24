@@ -209,5 +209,5 @@ Ag│  14 bindings                       Esc close │
 23 2-7 #1a1d23 #50a4e9 bold
 23 8-8 #adb0bb #50a4e9 -
 23 9-23 #adb0bb #111317 -
-23 24-38 #dd97f1 #111317 bold
+23 24-38 #dd97f1 #111317 -
 23 39-79 #adb0bb #111317 -
