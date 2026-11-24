@@ -1,7 +1,8 @@
 defmodule MingaEditor.Commands.BufferManagementKillTest do
   @moduledoc "Direct contracts for ordinary and forced buffer destruction."
 
-  # Starts the globally named Minga.Frontend.WaitRequests, which a quit command in any concurrent test completes or cancels.
+  # Starts the globally named Minga.Frontend.WaitRequests.
+  # A quit command in any concurrent test completes or cancels it.
   use ExUnit.Case, async: false
 
   @moduletag :tmp_dir
