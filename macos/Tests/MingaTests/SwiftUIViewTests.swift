@@ -425,7 +425,16 @@ struct StatusBarViewViewTests {
     ) -> StatusBarState {
         let state = StatusBarState()
         state.announce = { _ in }
-        state.update(from: StatusBarUpdate(
+        state.update(from: statusBarUpdate(message: message, leftSegments: leftSegments, rightSegments: rightSegments))
+        return state
+    }
+
+    private func statusBarUpdate(
+        message: String = "",
+        leftSegments: [Wire.StatusBarSegment] = [],
+        rightSegments: [Wire.StatusBarSegment] = []
+    ) -> StatusBarUpdate {
+        StatusBarUpdate(
             contentKind: 0, mode: 0, cursorLine: 42, cursorCol: 9,
             lineCount: 500, flags: 0, lspStatus: 0, gitBranch: "",
             message: message, filetype: "elixir", errorCount: 0, warningCount: 0,
@@ -435,10 +444,10 @@ struct StatusBarViewViewTests {
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
             backgroundSubagentCount: 0, backgroundSubagentLabel: "",
+            modelineSegmentsPresent: true,
             modelineLeftSegments: leftSegments,
             modelineRightSegments: rightSegments
-        ))
-        return state
+        )
     }
 
     private func width(_ segment: Wire.StatusBarSegment, _ compact: Bool) -> CGFloat {
@@ -449,16 +458,22 @@ struct StatusBarViewViewTests {
     @MainActor func modelineOrder() throws {
         let state = statusBarState(leftSegments: boardLeft, rightSegments: boardRight)
         let sut = StatusBarView(state: state, sendAction: nil)
-        #expect(sut.fittedSegments(width: 2000).kinds == ["mode", "needs_you", "filename", "change", "git", "minga", "errors", "warnings", "filetype", "position"])
+        let fitted = sut.fittedSegments(width: 2000)
+        #expect(fitted.kinds == ["mode", "needs_you", "filename", "change", "git", "minga", "errors", "warnings", "filetype", "position"])
 
-        let strings = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        // ViewInspector does not lay out the GeometryReader, so draw each kept segment as the row does at this width.
+        var strings: [String] = []
+        for kept in fitted.left + fitted.right {
+            let view = ModelineSegmentView(segment: kept.segment, compact: kept.compact, mode: .normal, barHeight: 24, sendAction: nil)
+            strings += try view.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        }
         for words in ["NORMAL", "Needs you", "chrome_state.ex ●", "change 1/2", "main +11", "Minga working 2/3", "Elixir", "240:31"] {
             #expect(strings.contains(words), "missing \(words)")
         }
     }
 
     @Test("Narrowing drops filetype, position and git in order, then shrinks Minga, then warnings")
-    func dropLadder() {
+    @MainActor func dropLadder() {
         let segments = boardLeft + boardRight
         let full = ModelineFit.fit(segments, leftCount: boardLeft.count, width: 10_000, gap: 8, measure: width)
         #expect(full.kinds.count == 10)
@@ -524,7 +539,7 @@ struct StatusBarViewViewTests {
         let two = segment(1, "Needs you 2", kind: "needs_you", state: .needsYou, label: "2 tasks need you")
 
         func send(_ left: [Wire.StatusBarSegment]) {
-            state.update(from: StatusBarUpdate(modelineSegmentsPresent: true, modelineLeftSegments: left))
+            state.update(from: statusBarUpdate(leftSegments: left))
         }
 
         send([mode])
