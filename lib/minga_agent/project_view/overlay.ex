@@ -213,7 +213,7 @@ defmodule MingaAgent.ProjectView.Overlay do
     with :ok <- ensure_changeset_available(view),
          :ok <- fork_store_available(fork_store(view)),
          {:ok, source} <- resolve_source(view, relative_path) do
-      mutate_source(source, expected, operation, view.edit_source)
+      mutate_source(view, source, expected, operation, view.edit_source)
     end
   end
 
@@ -243,7 +243,7 @@ defmodule MingaAgent.ProjectView.Overlay do
         operation
       ) do
     case ProjectView.resolve_source(view, relative_path) do
-      {:ok, ^reviewed} -> mutate_source(reviewed, expected, operation, :user)
+      {:ok, ^reviewed} -> mutate_source(view, reviewed, expected, operation, :user)
       {:ok, %Source{}} -> {:error, :review_source_changed}
       {:error, _reason} = error -> error
     end
@@ -251,12 +251,14 @@ defmodule MingaAgent.ProjectView.Overlay do
 
   # Changeset drafts never reach an open buffer, so only a fork mutation records its source.
   @spec mutate_source(
+          ProjectView.t(),
           Source.t(),
           Minga.Buffer.FileMutation.expectation(),
           Minga.Buffer.FileMutation.operation(),
           Minga.Buffer.EditSource.undo_source()
         ) :: {:ok, Minga.Buffer.FileMutation.Receipt.t()} | {:error, term()}
   defp mutate_source(
+         _view,
          %Source{source_id: id, owner: {:changeset, cs, path}},
          expected,
          operation,
@@ -265,17 +267,46 @@ defmodule MingaAgent.ProjectView.Overlay do
     Changeset.conditional_mutate(cs, path, expected, operation, {:project_view, id})
   end
 
-  defp mutate_source(%Source{source_id: id, owner: {:fork, fork}}, expected, operation, source) do
-    Minga.Buffer.Fork.conditional_mutate(fork, expected, operation, {:project_view, id}, source)
+  defp mutate_source(
+         view,
+         %Source{source_id: id, owner: {:fork, fork}},
+         expected,
+         operation,
+         source
+       ) do
+    case Minga.Buffer.Fork.conditional_mutate(
+           fork,
+           expected,
+           operation,
+           {:project_view, id},
+           source
+         ) do
+      {:ok, _receipt} = committed ->
+        fork_draft_changed(view)
+        committed
+
+      {:error, _reason} = error ->
+        error
+    end
   end
+
+  # A fork edit makes no changeset revision.
+  # Every successful fork edit tells the changeset's observer, which saves staged drafts for crash recovery.
+  @spec fork_draft_changed(ProjectView.t()) :: :ok
+  defp fork_draft_changed(view), do: Changeset.fork_draft_changed(changeset(view))
 
   @impl true
   @spec write_file(ProjectView.t(), String.t(), binary()) :: :ok | {:error, term()}
   def write_file(%ProjectView{} = view, relative_path, content) do
     with {:ok, source} <- resolve_source(view, relative_path) do
       case source.owner do
-        {:fork, fork} -> Minga.Buffer.Fork.replace_content(fork, content)
-        {:changeset, cs, path} -> Changeset.write_file(cs, path, content)
+        {:fork, fork} ->
+          with :ok <- Minga.Buffer.Fork.replace_content(fork, content) do
+            fork_draft_changed(view)
+          end
+
+        {:changeset, cs, path} ->
+          Changeset.write_file(cs, path, content)
       end
     end
   end
@@ -287,7 +318,7 @@ defmodule MingaAgent.ProjectView.Overlay do
       case source.owner do
         {:fork, fork} ->
           case Minga.Buffer.Fork.find_and_replace(fork, old_text, new_text) do
-            {:ok, _message} -> :ok
+            {:ok, _message} -> fork_draft_changed(view)
             {:error, _} = error -> error
           end
 
@@ -377,7 +408,7 @@ defmodule MingaAgent.ProjectView.Overlay do
             expected =
               Minga.Buffer.FileMutation.revision(content, nil, {:project_view, source.source_id})
 
-            mutate_source(source, expected, :delete, view.edit_source)
+            mutate_source(view, source, expected, :delete, view.edit_source)
           end
       end
     end
@@ -803,7 +834,8 @@ defmodule MingaAgent.ProjectView.Overlay do
         :ok
 
       store ->
-        BufferForkStore.discard(store, Path.join(view.project_root, relative_path))
+        :ok = BufferForkStore.discard(store, Path.join(view.project_root, relative_path))
+        fork_draft_changed(view)
     end
   catch
     :exit, reason -> {:error, {:fork_discard_failed, reason}}

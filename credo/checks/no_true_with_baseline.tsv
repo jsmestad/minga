@@ -162,7 +162,6 @@ lib/minga_editor/native_ipc/connection.ex	d57e93b7b115fe1ac14d419e67fd87e28ff637
 lib/minga_editor/native_ipc/navigation.ex	57e7d052fdd4780b2adef3d760747919555a507e7f870d49a1531f0401d07281	"command.target_token == pane_token(identity, tab.id, window)"
 lib/minga_editor/target.ex	abfdf0f5e6dc4b0c549bd4f9fef5247f46bd09cba78ef421e461d6ad40c693ba	"input == state.workspace.editing.mode_state.input"
 lib/minga_editor/ui/picker/agent_draft_attachment_source.ex	4118ab0b197637d20066af4939d7278a65cf18a60065139a88c7e2fdadd875c1	"current_snapshot?(state, origin, identity)"
-lib/minga_editor/ui/picker/agent_session_source.ex	932f04db992cfb95848b325e0666eb3605d6703170dd5b3fa6c54f8f2ecf8a95	"current_tab_session?(origin_id, tab_bar.active_id, session)"
 lib/minga_editor/ui/picker/agent_session_source.ex	9aee072e4c408ed9c6cc480c64189e1b21704f2b1881ffa26cb7c1a5883be642	"current_tab_session?(id, tab_id, session)"
 mix/release_erts.ex	a29e223bee97475a338093dffde5994a44ebd4b94f90d3abfa9325a074e834f6	"byte_size(bytes) <= 1_048_576"
 mix/release_erts.ex	dd6355eea8a7c713ec9a449b276de8c2e9c655e9dc09c75403cee9f12af37fff	"stat.type == :regular and stat.size <= 1_048_576"

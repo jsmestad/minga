@@ -70,6 +70,17 @@ defmodule MingaAgent.InferenceRoute.PlanWindow do
   def busiest([]), do: nil
   def busiest(windows) when is_list(windows), do: Enum.max_by(windows, & &1.utilization)
 
+  @doc """
+  Returns the windows that still apply at `now`, or nil when there is no usage data.
+
+  A window whose reset time has passed no longer limits anything, so it is dropped rather than shown with a past reset. A window without a reset time stays.
+  """
+  @spec in_force([t()] | nil, DateTime.t()) :: [t()] | nil
+  def in_force(nil, %DateTime{}), do: nil
+
+  def in_force(windows, %DateTime{} = now) when is_list(windows),
+    do: Enum.filter(windows, &in_force?(&1, now))
+
   @doc "Returns the window that is refusing requests, preferring the one that resets last."
   @spec rejected([t()] | nil) :: t() | nil
   def rejected(windows) when is_list(windows) do
@@ -116,6 +127,10 @@ defmodule MingaAgent.InferenceRoute.PlanWindow do
   defp weekday(date) do
     Enum.at(~w(Mon Tue Wed Thu Fri Sat Sun), :calendar.day_of_the_week(date) - 1)
   end
+
+  @spec in_force?(t(), DateTime.t()) :: boolean()
+  defp in_force?(%__MODULE__{resets_at: nil}, _now), do: true
+  defp in_force?(%__MODULE__{resets_at: at}, now), do: DateTime.compare(at, now) == :gt
 
   @spec reset_sort_key(t()) :: integer()
   defp reset_sort_key(%__MODULE__{resets_at: nil}), do: 0

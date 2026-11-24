@@ -374,6 +374,50 @@ struct NativeRenderResourcesTests {
         }
     }
 
+    @Test("a full atlas evicts its least recently used row and reuses that slot for the upload")
+    @MainActor func fullAtlasEvictsLeastRecentlyUsedRow() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let atlas = LineTextureAtlas(device: device, slotHeight: 16, policy: policy)
+        guard case .success = atlas.ensureCapacity(maxSlots: 2, width: 64) else { return }
+        let bytes = UnsafeMutableRawPointer.allocate(byteCount: 64 * 16 * 4, alignment: 16)
+        defer { bytes.deallocate() }
+        memset(bytes, 0x7f, 64 * 16 * 4)
+        let first = AtlasKey.bufferRow(windowId: 1, rowId: 1)
+        let second = AtlasKey.bufferRow(windowId: 1, rowId: 2)
+        let third = AtlasKey.bufferRow(windowId: 1, rowId: 3)
+
+        func upload(_ key: AtlasKey) -> Reservation? {
+            guard case .reserved(let reservation)? = atlas.lookupOrReserve(key: key, contentHash: Int(key.row)) else {
+                return nil
+            }
+            #expect(atlas.commitUpload(reservation: reservation, pointer: bytes,
+                                       pixelWidth: 64, bytesPerRow: 256) != nil)
+            return reservation
+        }
+
+        atlas.beginFrame()
+        let firstSlot = try #require(upload(first)).slotIndex
+        atlas.beginFrame()
+        let secondSlot = try #require(upload(second)).slotIndex
+        atlas.beginFrame()
+        let evicting = try #require(upload(third))
+
+        #expect(evicting.reason == .evicted(oldKey: first))
+        #expect(evicting.slotIndex == firstSlot)
+        atlas.beginFrame()
+        guard case .hit(let entry)? = atlas.lookupOrReserve(key: second, contentHash: 2) else {
+            Issue.record("the more recently used row was evicted")
+            return
+        }
+        #expect(entry.slotIndex == secondSlot)
+        atlas.beginFrame()
+        guard case .reserved(let reload)? = atlas.lookupOrReserve(key: first, contentHash: 1) else {
+            Issue.record("the evicted row still reported a cache hit")
+            return
+        }
+        #expect(reload.reason == .evicted(oldKey: third))
+    }
+
     @Test("growth staging refusal rolls back texture and allocator")
     @MainActor func growthStagingRefusalIsAtomic() {
         guard let device = MTLCreateSystemDefaultDevice() else { return }

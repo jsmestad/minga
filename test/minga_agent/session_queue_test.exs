@@ -19,7 +19,7 @@ defmodule MingaAgent.SessionQueueTest do
     alias Minga.Test.SessionSlowMockProvider
 
     defdelegate start_link(opts), to: SessionSlowMockProvider
-    defdelegate abort(pid), to: SessionSlowMockProvider
+    defdelegate abort(pid, request_id), to: SessionSlowMockProvider
     defdelegate new_session(pid), to: SessionSlowMockProvider
     defdelegate get_state(pid), to: SessionSlowMockProvider
     defdelegate set_model(pid, model), to: SessionSlowMockProvider

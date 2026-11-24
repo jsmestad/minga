@@ -256,7 +256,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     def send_prompt(pid, _text), do: GenServer.call(pid, :send_prompt)
 
     @impl MingaAgent.Provider
-    def abort(pid), do: GenServer.cast(pid, :abort)
+    def abort(pid, _request_id), do: GenServer.cast(pid, :abort)
 
     @impl MingaAgent.Provider
     def new_session(pid), do: GenServer.cast(pid, :new_session)
@@ -1065,6 +1065,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         original
         |> with_model_name("Previous Model")
         |> AgentCommands.open_session("saved-session")
+        |> AgentSessionStart.settle_follow_ups()
 
       assert state.workspace.agent_ui.panel.model_name == "Restored Model"
       assert state.workspace.agent_ui.panel.provider_name == "anthropic"

@@ -38,7 +38,7 @@ defmodule Minga.Services.Supervisor do
       ├── Minga.Extension.InstanceRegistry   Unique per-extension process names
       ├── Minga.Extension.RootSupervisor     Dynamic owner of ordered extension roots
       ├── MingaAgent.ProviderRegistry        Source-owned provider declarations
-      ├── MingaAgent.InferenceRouteRegistry  Source-owned contributed model routes
+      ├── MingaAgent.InferenceRouteRegistry  Source-owned contributed model routes, shared route usage limits
       ├── MingaAgent.ProviderPacks.Native    Bundled native provider declaration
       ├── MingaAgent.Hooks.Registry          Source-owned agent hook declarations
       ├── MingaAgent.MCP.ServerRegistry      Source-owned MCP server declarations

@@ -19,7 +19,7 @@ defmodule MingaEditor.Shell.Traditional.SpaceLeader do
           generation: generation(),
           timer: reference() | nil,
           space_buffer: pid() | nil,
-          held_space: SpaceTarget.t() | nil
+          held_space: SpaceTarget.held() | nil
         }
 
   defstruct pending: false, generation: 0, timer: nil, space_buffer: nil, held_space: nil
@@ -70,10 +70,10 @@ defmodule MingaEditor.Shell.Traditional.SpaceLeader do
   def timer(%__MODULE__{timer: timer}), do: timer
 
   @doc "Records where a frontend-sent space went, or nil when the last key was not a space."
-  @spec hold_space(t(), SpaceTarget.t() | nil) :: t()
+  @spec hold_space(t(), SpaceTarget.held() | nil) :: t()
   def hold_space(%__MODULE__{} = leader, target), do: %{leader | held_space: target}
 
   @doc "Returns where the last frontend-sent space went, or nil."
-  @spec held_space(t()) :: SpaceTarget.t() | nil
+  @spec held_space(t()) :: SpaceTarget.held() | nil
   def held_space(%__MODULE__{held_space: target}), do: target
 end

@@ -298,6 +298,7 @@ defmodule MingaAgent.MCP.Client do
   defp transport_down_reason?(:badarg), do: true
   defp transport_down_reason?(:closed), do: true
   defp transport_down_reason?(:noproc), do: true
+  defp transport_down_reason?({:line_too_long, _bytes}), do: true
   defp transport_down_reason?(_reason), do: false
 
   @spec unavailable_message(state()) :: String.t()

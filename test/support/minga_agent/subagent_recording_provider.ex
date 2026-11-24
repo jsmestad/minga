@@ -23,9 +23,9 @@ defmodule Minga.Test.SubagentRecordingProvider do
     GenServer.call(pid, {:send_prompt, request})
   end
 
-  @spec abort(GenServer.server()) :: :ok
+  @spec abort(GenServer.server(), String.t()) :: :ok
   @impl MingaAgent.Provider
-  def abort(pid) do
+  def abort(pid, _request_id) do
     GenServer.cast(pid, :abort)
     :ok
   end

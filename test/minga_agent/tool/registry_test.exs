@@ -350,6 +350,32 @@ defmodule MingaAgent.Tool.RegistryTest do
       assert spec.category == :git
     end
 
+    test "an SDK tool without a built-in declaration is scheduled as an effect, not a read" do
+      req_tool =
+        ReqLLM.Tool.new!(
+          name: "undeclared_sdk_tool",
+          description: "Declares no effect",
+          parameter_schema: %{},
+          callback: fn _args -> {:ok, "ran"} end
+        )
+
+      spec = Registry.from_req_tool(req_tool)
+      assert spec.effect == :mutating
+      assert MingaAgent.Tool.Spec.sequential?(spec)
+    end
+
+    test "an SDK tool named like a built-in keeps the built-in effect" do
+      req_tool =
+        ReqLLM.Tool.new!(
+          name: "read_file",
+          description: "Read a file",
+          parameter_schema: %{"type" => "object"},
+          callback: fn _args -> {:ok, "content"} end
+        )
+
+      assert Registry.from_req_tool(req_tool).effect == :read_only
+    end
+
     test "categorizes LSP tools" do
       req_tool =
         ReqLLM.Tool.new!(

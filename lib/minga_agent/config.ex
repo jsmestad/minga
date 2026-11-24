@@ -77,6 +77,7 @@ defmodule MingaAgent.Config do
 
     # Timeouts
     approval_timeout_ms: 300_000,
+    tool_call_timeout_ms: 300_000,
     subagent_timeout_ms: 300_000,
     shell_debounce_ms: 200,
 
@@ -124,6 +125,7 @@ defmodule MingaAgent.Config do
           compaction_threshold: float() | nil,
           compaction_keep_recent: pos_integer(),
           approval_timeout_ms: pos_integer(),
+          tool_call_timeout_ms: pos_integer(),
           subagent_timeout_ms: pos_integer(),
           shell_debounce_ms: pos_integer(),
           max_file_size: pos_integer(),

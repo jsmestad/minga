@@ -14,6 +14,7 @@ defmodule MingaAgent.Providers.NativeTest do
   alias MingaAgent.TurnUsage
   alias MingaAgent.ProjectView.RecordingBackend
   alias MingaAgent.Providers.Native
+  alias ReqLLM.StreamChunk
   alias MingaAgent.Providers.Native.ReqLLMAdapter
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.Dispatch
@@ -154,7 +155,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
   defp start_provider(opts) do
     store = start_retention_store(opts[:tmp_dir] || System.tmp_dir!())
-    subscriber = start_provider_subscriber(self(), store)
+    subscriber = start_provider_subscriber(self(), store, Keyword.get(opts, :approval_tools, []))
 
     defaults = [
       subscriber: subscriber,
@@ -221,9 +222,11 @@ defmodule MingaAgent.Providers.NativeTest do
     ]
   end
 
-  defp start_provider_subscriber(owner, store) do
+  # `approval_tools` names tools whose live Session policy requires approval, whatever the provider's scheduling hint.
+  defp start_provider_subscriber(owner, store, approval_tools) do
     spawn_link(fn ->
       owner_ref = Process.monitor(owner)
+      Process.put(:approval_tools, approval_tools)
       provider_subscriber_loop(owner, owner_ref, store)
     end)
   end
@@ -259,8 +262,11 @@ defmodule MingaAgent.Providers.NativeTest do
         GenServer.reply(from, result)
         provider_subscriber_loop(owner, owner_ref, store)
 
-      {:"$gen_call", from, {:prepare_tool_invocation, _invocation}} ->
-        GenServer.reply(from, {:ok, :ready})
+      {:"$gen_call", from, {:prepare_tool_invocation, invocation}} ->
+        if invocation.name in Process.get(:approval_tools, []),
+          do: GenServer.reply(from, {:ok, :approval_required}),
+          else: GenServer.reply(from, {:ok, :ready})
+
         provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from, {:checkpoint_tool_group, request_id, messages, calls}} ->
@@ -599,6 +605,73 @@ defmodule MingaAgent.Providers.NativeTest do
 
   defp agent_config(fields) do
     struct!(AgentConfig, fields)
+  end
+
+  # A custom tool whose Spec declares its scheduling effect explicitly.
+  defp declared_tool(name, effect, callback) do
+    Spec.new!(
+      source: :config,
+      name: name,
+      description: "#{name} test tool",
+      parameter_schema: %{},
+      callback: callback,
+      effect: effect
+    )
+  end
+
+  # A tool callback that reports its start and blocks until the test releases it by name.
+  defp gated_callback(test_pid, gate_ref, name) do
+    fn _args ->
+      send(test_pid, {gate_ref, :started, name, self()})
+
+      receive do
+        {^gate_ref, :release} -> {:ok, "#{name} result"}
+      end
+    end
+  end
+
+  defp tool_call_batch_client(tool_names) do
+    call_count = :counters.new(1, [:atomics])
+
+    fn _model, _messages, _opts ->
+      count = :counters.get(call_count, 1)
+      :counters.add(call_count, 1, 1)
+
+      count
+      |> tool_call_batch_chunks(tool_names)
+      |> build_stream_response()
+    end
+  end
+
+  defp tool_call_batch_chunks(0, tool_names) do
+    calls =
+      tool_names
+      |> Enum.with_index()
+      |> Enum.map(fn {name, index} ->
+        StreamChunk.tool_call(name, %{}, %{id: "tc_#{name}", index: index})
+      end)
+
+    calls ++ [StreamChunk.meta(%{finish_reason: :tool_use})]
+  end
+
+  defp tool_call_batch_chunks(_count, _tool_names),
+    do: [StreamChunk.text("done"), StreamChunk.meta(%{finish_reason: :stop})]
+
+  defp assert_tool_started(gate_ref, name) do
+    assert_receive {^gate_ref, :started, ^name, worker}, 2_000
+    worker
+  end
+
+  # Bounded negative wait: proves a tool has not been admitted while an earlier effect is blocked.
+  defp refute_tool_started(gate_ref, name) do
+    refute_receive {^gate_ref, :started, ^name, _worker}, 150
+  end
+
+  defp release_tool(gate_ref, worker), do: send(worker, {gate_ref, :release})
+
+  defp abort_active(pid) do
+    request = Process.get({__MODULE__, pid, :active_request})
+    Native.abort(pid, request.request_id)
   end
 
   defp write_project_skill(dir, name, instructions) do
@@ -1752,7 +1825,7 @@ defmodule MingaAgent.Providers.NativeTest do
           start_provider(
             tmp_dir: root,
             model_selection: selection,
-            subscriber: start_provider_subscriber(self(), delivery_store),
+            subscriber: start_provider_subscriber(self(), delivery_store, []),
             llm_client: client
           )
 
@@ -2182,11 +2255,10 @@ defmodule MingaAgent.Providers.NativeTest do
       call_count = :counters.new(1, [:atomics])
 
       slow_tool =
-        ReqLLM.Tool.new!(
-          name: "slow_tool",
-          description: "Blocks until the test releases it",
-          parameter_schema: [],
-          callback: fn _args ->
+        declared_tool(
+          "slow_tool",
+          :read_only,
+          fn _args ->
             send(test_pid, {:tool_started, "slow_tool", self()})
 
             receive do
@@ -2198,11 +2270,10 @@ defmodule MingaAgent.Providers.NativeTest do
         )
 
       failing_tool =
-        ReqLLM.Tool.new!(
-          name: "failing_tool",
-          description: "Fails immediately",
-          parameter_schema: [],
-          callback: fn _args ->
+        declared_tool(
+          "failing_tool",
+          :read_only,
+          fn _args ->
             send(test_pid, {:tool_started, "failing_tool", self()})
             {:error, "boom"}
           end
@@ -2259,22 +2330,20 @@ defmodule MingaAgent.Providers.NativeTest do
       call_count = :counters.new(1, [:atomics])
 
       crashing_tool =
-        ReqLLM.Tool.new!(
-          name: "crashing_tool",
-          description: "Exits abnormally",
-          parameter_schema: [],
-          callback: fn _args ->
+        declared_tool(
+          "crashing_tool",
+          :read_only,
+          fn _args ->
             send(test_pid, {:tool_started, "crashing_tool"})
             Process.exit(self(), :kill)
           end
         )
 
       sibling_tool =
-        ReqLLM.Tool.new!(
-          name: "sibling_tool",
-          description: "Completes after the crashing sibling exits",
-          parameter_schema: [],
-          callback: fn _args ->
+        declared_tool(
+          "sibling_tool",
+          :read_only,
+          fn _args ->
             send(test_pid, {:tool_started, "sibling_tool", self()})
 
             receive do
@@ -2337,11 +2406,10 @@ defmodule MingaAgent.Providers.NativeTest do
       # This custom tool covers the same provider event path by emitting ToolUpdate from a
       # concurrent tool process without starting a shell.
       streaming_tool =
-        ReqLLM.Tool.new!(
-          name: "streaming_tool",
-          description: "Emits ToolUpdate events without spawning an OS shell",
-          parameter_schema: [],
-          callback: fn _args ->
+        declared_tool(
+          "streaming_tool",
+          :read_only,
+          fn _args ->
             provider_pid = Agent.get(provider_holder, & &1)
             send(test_pid, {:streaming_tool_waiting, self()})
 
@@ -2365,11 +2433,10 @@ defmodule MingaAgent.Providers.NativeTest do
         )
 
       sibling_tool =
-        ReqLLM.Tool.new!(
-          name: "stream_sibling_tool",
-          description: "Completes after the update has streamed",
-          parameter_schema: [],
-          callback: fn _args ->
+        declared_tool(
+          "stream_sibling_tool",
+          :read_only,
+          fn _args ->
             send(test_pid, {:tool_started, "stream_sibling_tool", self()})
 
             receive do
@@ -2452,11 +2519,10 @@ defmodule MingaAgent.Providers.NativeTest do
         marker_two = Path.join(dir, "registration-worker-two-ran.txt")
 
         tool_one =
-          ReqLLM.Tool.new!(
-            name: "registration_cleanup_one",
-            description: "Should never run after registration failure",
-            parameter_schema: [],
-            callback: fn _args ->
+          declared_tool(
+            "registration_cleanup_one",
+            :read_only,
+            fn _args ->
               File.write!(marker_one, "ran")
               send(test_pid, :registration_cleanup_one_ran)
               {:ok, "ran one"}
@@ -2464,11 +2530,10 @@ defmodule MingaAgent.Providers.NativeTest do
           )
 
         tool_two =
-          ReqLLM.Tool.new!(
-            name: "registration_cleanup_two",
-            description: "Should never run after registration failure",
-            parameter_schema: [],
-            callback: fn _args ->
+          declared_tool(
+            "registration_cleanup_two",
+            :read_only,
+            fn _args ->
               File.write!(marker_two, "ran")
               send(test_pid, :registration_cleanup_two_ran)
               {:ok, "ran two"}
@@ -2963,6 +3028,331 @@ defmodule MingaAgent.Providers.NativeTest do
     end
   end
 
+  describe "tool effect scheduling" do
+    test "an approval-gated call holds later mutating and read-only calls until it finishes", %{
+      tmp_dir: dir
+    } do
+      test_pid = self()
+      gate = make_ref()
+
+      tools = [
+        declared_tool(
+          "approval_gate",
+          :read_only,
+          gated_callback(test_pid, gate, "approval_gate")
+        ),
+        declared_tool(
+          "ordered_write",
+          :mutating,
+          gated_callback(test_pid, gate, "ordered_write")
+        ),
+        declared_tool("ordered_read", :read_only, gated_callback(test_pid, gate, "ordered_read"))
+      ]
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: tool_call_batch_client(["approval_gate", "ordered_write", "ordered_read"]),
+          tools: tools,
+          config: agent_config(tool_permissions: %{"approval_gate" => :ask})
+        )
+
+      assert :ok = send_prompt(pid, "Run the gated batch")
+      gate_worker = assert_tool_started(gate, "approval_gate")
+      refute_tool_started(gate, "ordered_write")
+      refute_tool_started(gate, "ordered_read")
+
+      release_tool(gate, gate_worker)
+      write_worker = assert_tool_started(gate, "ordered_write")
+      refute_tool_started(gate, "ordered_read")
+
+      release_tool(gate, write_worker)
+      read_worker = assert_tool_started(gate, "ordered_read")
+      release_tool(gate, read_worker)
+
+      events = collect_run_events()
+
+      for name <- ["approval_gate", "ordered_write", "ordered_read"] do
+        assert Enum.any?(events, &match?(%Event.ToolEnd{name: ^name, is_error: false}, &1))
+      end
+    end
+
+    test "mixed reads and writes overlap only adjacent reads and keep writes in model order", %{
+      tmp_dir: dir
+    } do
+      test_pid = self()
+      gate = make_ref()
+      messages_ref = make_ref()
+      names = ["mixed_read_a", "mixed_read_b", "mixed_write", "mixed_read_c"]
+      effects = [:read_only, :read_only, :mutating, :read_only]
+
+      tools =
+        Enum.zip_with(names, effects, fn name, effect ->
+          declared_tool(name, effect, gated_callback(test_pid, gate, name))
+        end)
+
+      batch_client = tool_call_batch_client(names)
+
+      client = fn model, messages, opts ->
+        send(test_pid, {messages_ref, messages})
+        batch_client.(model, messages, opts)
+      end
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, tools: tools)
+
+      assert :ok = send_prompt(pid, "Run the mixed batch")
+      read_a = assert_tool_started(gate, "mixed_read_a")
+      read_b = assert_tool_started(gate, "mixed_read_b")
+      refute_tool_started(gate, "mixed_write")
+
+      release_tool(gate, read_a)
+      refute_tool_started(gate, "mixed_write")
+      release_tool(gate, read_b)
+
+      write = assert_tool_started(gate, "mixed_write")
+      refute_tool_started(gate, "mixed_read_c")
+      release_tool(gate, write)
+
+      read_c = assert_tool_started(gate, "mixed_read_c")
+      release_tool(gate, read_c)
+      collect_run_events()
+
+      assert_received {^messages_ref, _initial}
+      assert_received {^messages_ref, messages}
+      tool_messages = Enum.filter(messages, fn message -> message.role == :tool end)
+      assert Enum.map(tool_messages, & &1.tool_call_id) == Enum.map(names, &"tc_#{&1}")
+    end
+
+    test "more read-only calls than the concurrency limit wait for a free slot", %{tmp_dir: dir} do
+      test_pid = self()
+      gate = make_ref()
+      names = Enum.map(1..9, &"overload_read_#{&1}")
+
+      tools = Enum.map(names, &declared_tool(&1, :read_only, gated_callback(test_pid, gate, &1)))
+
+      {:ok, pid} =
+        start_provider(tmp_dir: dir, llm_client: tool_call_batch_client(names), tools: tools)
+
+      {admitted, [overflow]} = Enum.split(names, 8)
+
+      assert :ok = send_prompt(pid, "Run more reads than the limit")
+      workers = Enum.map(admitted, &assert_tool_started(gate, &1))
+      refute_tool_started(gate, overflow)
+
+      Enum.each(workers, &release_tool(gate, &1))
+      overflow_worker = assert_tool_started(gate, overflow)
+      release_tool(gate, overflow_worker)
+
+      events = collect_run_events()
+      assert Enum.count(events, &match?(%Event.ToolEnd{is_error: false}, &1)) == 9
+    end
+
+    test "SDK tools without a Minga effect declaration run one at a time", %{tmp_dir: dir} do
+      test_pid = self()
+      gate = make_ref()
+
+      tools =
+        Enum.map(["undeclared_first", "undeclared_second"], fn name ->
+          ReqLLM.Tool.new!(
+            name: name,
+            description: "Declares no effect",
+            parameter_schema: [],
+            callback: gated_callback(test_pid, gate, name)
+          )
+        end)
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: tool_call_batch_client(["undeclared_first", "undeclared_second"]),
+          tools: tools
+        )
+
+      assert :ok = send_prompt(pid, "Run undeclared tools")
+      first = assert_tool_started(gate, "undeclared_first")
+      refute_tool_started(gate, "undeclared_second")
+
+      release_tool(gate, first)
+      second = assert_tool_started(gate, "undeclared_second")
+      release_tool(gate, second)
+      collect_run_events()
+    end
+
+    test "a call to a tool no registry declares is not admitted beside a running read", %{
+      tmp_dir: dir
+    } do
+      test_pid = self()
+      gate = make_ref()
+
+      tools = [
+        declared_tool("known_reader", :read_only, gated_callback(test_pid, gate, "known_reader"))
+      ]
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: tool_call_batch_client(["known_reader", "unregistered_tool"]),
+          tools: tools
+        )
+
+      assert :ok = send_prompt(pid, "Call a known and an unknown tool")
+      reader = assert_tool_started(gate, "known_reader")
+      assert_receive {:effect_admitted, "tc_known_reader"}, 1_000
+      refute_receive {:effect_admitted, "tc_unregistered_tool"}, 150
+
+      release_tool(gate, reader)
+      collect_run_events()
+    end
+
+    test "hung concurrent calls share one batch deadline and are stopped", %{tmp_dir: dir} do
+      test_pid = self()
+      gate = make_ref()
+      timeout_ms = 250
+      names = Enum.map(1..8, &"hung_read_#{&1}")
+
+      tools = Enum.map(names, &declared_tool(&1, :read_only, gated_callback(test_pid, gate, &1)))
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: tool_call_batch_client(names),
+          tools: tools,
+          config: agent_config(tool_call_timeout_ms: timeout_ms)
+        )
+
+      {{events, elapsed, monitors}, log} =
+        with_log(fn ->
+          assert :ok = send_prompt(pid, "Run hung reads")
+
+          monitors =
+            Enum.map(names, fn name ->
+              worker = assert_tool_started(gate, name)
+              {worker, Process.monitor(worker)}
+            end)
+
+          started_at = System.monotonic_time(:millisecond)
+          events = collect_run_events()
+          {events, System.monotonic_time(:millisecond) - started_at, monitors}
+        end)
+
+      # Serial per-call waits would take at least 8 x timeout_ms (2s); one shared deadline ends near timeout_ms.
+      assert elapsed < 6 * timeout_ms
+      assert log =~ "{:tool_task_exit, :timeout}"
+      assert Enum.any?(events, &match?(%Event.Error{}, &1))
+      refute Enum.any?(events, &match?(%Event.ToolEnd{}, &1))
+
+      for {worker, ref} <- monitors do
+        assert_receive {:DOWN, ^ref, :process, ^worker, _reason}, 1_000
+      end
+    end
+  end
+
+  describe "tool-call timeout scope" do
+    test "an expired read is stopped at its deadline even while a sibling waits for approval", %{
+      tmp_dir: dir
+    } do
+      test_pid = self()
+      gate = make_ref()
+
+      tools = [
+        declared_tool("hung_read", :read_only, gated_callback(test_pid, gate, "hung_read")),
+        declared_tool("held_read", :read_only, fn _args -> {:ok, "held"} end)
+      ]
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: tool_call_batch_client(["hung_read", "held_read"]),
+          tools: tools,
+          approval_tools: ["held_read"],
+          config: agent_config(tool_call_timeout_ms: 200, approval_timeout_ms: 10_000)
+        )
+
+      assert :ok = send_prompt(pid, "Run a hung read beside an approval")
+      hung = assert_tool_started(gate, "hung_read")
+      hung_ref = Process.monitor(hung)
+
+      assert_receive {:agent_provider_event,
+                      %Event.ToolApproval{tool_call_id: "tc_held_read", reply_to: held}},
+                     2_000
+
+      # The hung read dies at its deadline, without waiting for the approval to be answered.
+      assert_receive {:DOWN, ^hung_ref, :process, ^hung, :killed}, 2_000
+
+      release_tool(gate, hung)
+      send(held, {:tool_approval_response, "tc_held_read", :approve})
+      events = collect_run_events()
+
+      refute Enum.any?(events, &match?(%Event.ToolEnd{name: "hung_read"}, &1))
+      assert Enum.any?(events, &match?(%Event.Error{}, &1))
+    end
+
+    test "a read held for Session approval does not spend its tool-call timeout waiting", %{
+      tmp_dir: dir
+    } do
+      test_pid = self()
+
+      reader =
+        declared_tool("approved_read", :read_only, fn _args ->
+          send(test_pid, :approved_read_ran)
+          {:ok, "read"}
+        end)
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: tool_call_batch_client(["approved_read"]),
+          tools: [reader],
+          approval_tools: ["approved_read"],
+          config: agent_config(tool_call_timeout_ms: 1_500, approval_timeout_ms: 10_000)
+        )
+
+      assert :ok = send_prompt(pid, "Read with approval")
+
+      assert_receive {:agent_provider_event,
+                      %Event.ToolApproval{tool_call_id: "tc_approved_read", reply_to: worker}},
+                     2_000
+
+      # Wait past the tool-call timeout before answering; the approval wait is not tool execution.
+      refute_receive {:agent_provider_event, %Event.ToolEnd{}}, 1_700
+      send(worker, {:tool_approval_response, "tc_approved_read", :approve})
+
+      events = collect_run_events()
+      assert_received :approved_read_ran
+
+      assert Enum.any?(
+               events,
+               &match?(%Event.ToolEnd{name: "approved_read", is_error: false}, &1)
+             )
+    end
+
+    test "a sequential call runs past the tool-call timeout until it finishes", %{tmp_dir: dir} do
+      test_pid = self()
+      gate = make_ref()
+
+      tool = declared_tool("long_write", :mutating, gated_callback(test_pid, gate, "long_write"))
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: tool_call_batch_client(["long_write"]),
+          tools: [tool],
+          config: agent_config(tool_call_timeout_ms: 50)
+        )
+
+      assert :ok = send_prompt(pid, "Run one long write")
+      worker = assert_tool_started(gate, "long_write")
+      worker_ref = Process.monitor(worker)
+
+      # Sequential effects (writes, approvals, questions) are not killed mid-effect by the read timeout.
+      refute_receive {:DOWN, ^worker_ref, :process, ^worker, _reason}, 150
+      release_tool(gate, worker)
+
+      events = collect_run_events()
+      assert Enum.any?(events, &match?(%Event.ToolEnd{name: "long_write", is_error: false}, &1))
+    end
+  end
+
   describe "abort" do
     test "stops a running prompt", %{tmp_dir: dir} do
       {slow_stream, stream_ref} = blocking_text_stream()
@@ -2972,7 +3362,7 @@ defmodule MingaAgent.Providers.NativeTest do
       :ok = send_prompt(pid, "Tell me a very long story")
       assert_streaming_started(pid, stream_ref)
 
-      assert :ok = Native.abort(pid)
+      assert :ok = abort_active(pid)
       assert {:ok, %{is_streaming: false}} = Native.get_state(pid)
     end
 
@@ -3031,7 +3421,7 @@ defmodule MingaAgent.Providers.NativeTest do
       assert_receive {:abort_blocking_tool_started, worker_pid}, 5_000
       worker_ref = Process.monitor(worker_pid)
 
-      assert :ok = Native.abort(pid)
+      assert :ok = abort_active(pid)
       assert {:ok, %{is_streaming: false}} = Native.get_state(pid)
       assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, _reason}, 5_000
 
@@ -3040,30 +3430,84 @@ defmodule MingaAgent.Providers.NativeTest do
       refute File.exists?(marker_path)
     end
 
-    test "aborting with no active task still stops registered tool workers", %{tmp_dir: dir} do
-      marker_path = Path.join(dir, "abort-nil-task-worker-continued.txt")
-      test_pid = self()
-      release_ref = make_ref()
-
-      worker_pid =
-        spawn(fn ->
-          receive do
-            {^release_ref, :release} ->
-              File.write!(marker_path, "continued")
-              send(test_pid, :abort_nil_task_worker_continued)
-          end
-        end)
-
+    test "a worker registration outside the active generation is refused", %{tmp_dir: dir} do
+      worker_pid = spawn(fn -> receive do: (:never -> :ok) end)
       worker_ref = Process.monitor(worker_pid)
       {:ok, pid} = start_provider(tmp_dir: dir)
-      :ok = GenServer.call(pid, {:register_tool_workers, [worker_pid]})
 
-      assert :ok = Native.abort(pid)
-      assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, _reason}, 1_000
+      assert {:error, :stale_generation} =
+               GenServer.call(pid, {:register_tool_workers, 0, [worker_pid]})
 
-      send(worker_pid, {release_ref, :release})
-      refute_receive :abort_nil_task_worker_continued, 50
-      refute File.exists?(marker_path)
+      # A refused worker is not owned by the provider, so stopping the provider leaves it alone.
+      assert :ok = Native.new_session(pid)
+      refute_receive {:DOWN, ^worker_ref, :process, ^worker_pid, _reason}, 50
+      Process.exit(worker_pid, :kill)
+    end
+
+    test "an abort for a replaced request leaves the replacement's tools running", %{tmp_dir: dir} do
+      test_pid = self()
+      gate = make_ref()
+      call_count = :counters.new(1, [:atomics])
+
+      tool =
+        declared_tool(
+          "replacement_tool",
+          :read_only,
+          gated_callback(test_pid, gate, "replacement_tool")
+        )
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          case count do
+            0 ->
+              [ReqLLM.StreamChunk.text("first"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+
+            1 ->
+              [
+                ReqLLM.StreamChunk.tool_call("replacement_tool", %{}, %{
+                  id: "tc_replacement",
+                  index: 0
+                }),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+              ]
+
+            _ ->
+              [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, tools: [tool])
+
+      assert :ok = send_prompt(pid, "First request")
+      first = Process.get({__MODULE__, pid, :active_request})
+      collect_run_events()
+
+      assert :ok = send_prompt(pid, "Replacement request")
+      worker = assert_tool_started(gate, "replacement_tool")
+      worker_ref = Process.monitor(worker)
+
+      # The delayed cancellation names the finished request, so the replacement keeps running.
+      assert :ok = Native.abort(pid, first.request_id)
+      assert {:ok, %{is_streaming: true}} = Native.get_state(pid)
+      refute_receive {:DOWN, ^worker_ref, :process, ^worker, _reason}, 50
+
+      release_tool(gate, worker)
+      events = collect_run_events()
+
+      assert Enum.any?(
+               events,
+               &match?(%Event.ToolEnd{name: "replacement_tool", is_error: false}, &1)
+             )
+
+      # Repeating the replacement's own cancellation after it finished is a no-op.
+      replacement = Process.get({__MODULE__, pid, :active_request})
+      assert :ok = Native.abort(pid, replacement.request_id)
+      assert {:ok, %{is_streaming: false}} = Native.get_state(pid)
     end
 
     test "new_session stops concurrent tool workers", %{tmp_dir: dir} do
@@ -3406,7 +3850,7 @@ defmodule MingaAgent.Providers.NativeTest do
       request = Process.get({__MODULE__, pid, :active_request})
       assert {:error, "Already streaming"} = Native.continue(pid, request)
 
-      Native.abort(pid)
+      abort_active(pid)
     end
 
     test "small partial text does not trigger recovery", %{tmp_dir: dir} do
@@ -3449,7 +3893,7 @@ defmodule MingaAgent.Providers.NativeTest do
       request = Process.get({__MODULE__, pid, :active_request})
       assert {:error, :already_streaming} = Native.send_prompt(pid, request)
 
-      Native.abort(pid)
+      abort_active(pid)
     end
   end
 

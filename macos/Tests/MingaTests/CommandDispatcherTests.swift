@@ -2947,6 +2947,38 @@ struct CommandDispatcherStagingTests {
         #expect(restoredSnapshot.windowGutters[7]?.entries.entry(rowIndex: 51)?.signType == .gitAdded)
     }
 
+    /// #2816: line spacing is a row-fit input, so it survives the connection reset.
+    @Test("reconnect keeps the configured line spacing and re-fits only for a changed spacing")
+    @MainActor func reconnectKeepsConfiguredLineSpacing() throws {
+        var spacings: [Float] = []
+        let (dispatcher, _) = makeDispatcher { effect in
+            if case .lineSpacingChanged(let spacing) = effect { spacings.append(spacing) }
+        }
+        func commitSpacing(_ spacing: Float, frameSeq: UInt32) {
+            dispatcher.dispatch(.beginFrame(frameSeq: frameSeq, baseFrameSeq: 0, generation: 1))
+            dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+            dispatcher.dispatch(.guiLineSpacing(spacing: spacing))
+            dispatcher.dispatch(.commitFrame(frameSeq: frameSeq, seq: 0))
+        }
+        dispatcher.replaceConnection(with: 1)
+        commitSpacing(1.5, frameSeq: 1)
+        dispatcher.applyViewportResize(newCols: 100, newRows: 33)
+        #expect(spacings == [1.5])
+
+        dispatcher.replaceConnection(with: 2)
+        #expect(dispatcher.frameState.lineSpacing == 1.5)
+        #expect(dispatcher.frameState.cols == 100)
+        #expect(dispatcher.frameState.rows == 33)
+
+        commitSpacing(1.5, frameSeq: 1)
+        #expect(dispatcher.frameState.lineSpacing == 1.5)
+        #expect(spacings == [1.5])
+
+        commitSpacing(2, frameSeq: 2)
+        #expect(dispatcher.frameState.lineSpacing == 2)
+        #expect(spacings == [1.5, 2])
+    }
+
     @Test("late old title and background effects cannot overwrite replacement chrome")
     @MainActor func lateOldChromeEffectsAreRejected() throws {
         var title = ""

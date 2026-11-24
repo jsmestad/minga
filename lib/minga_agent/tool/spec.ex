@@ -23,6 +23,8 @@ defmodule MingaAgent.Tool.Spec do
 
   `:read_only` tools may execute concurrently. `:mutating` and
   `:approval_required` tools execute sequentially in model order.
+
+  Only an explicit `effect: :read_only` declaration makes a tool concurrent. A tool that declares no effect is classified from its approval level alone and is never read-only, because a capability list does not prove the absence of side effects.
   """
   @type effect :: :read_only | :mutating | :approval_required
 
@@ -89,7 +91,7 @@ defmodule MingaAgent.Tool.Spec do
             build: nil,
             category: :custom,
             approval_level: :auto,
-            effect: :read_only,
+            effect: :mutating,
             capabilities: [],
             context_requirements: [],
             metadata: %{}
@@ -111,10 +113,7 @@ defmodule MingaAgent.Tool.Spec do
     context_requirements = Map.get(attrs, :context_requirements, [])
     metadata = Map.get(attrs, :metadata, %{})
 
-    effect =
-      Map.get_lazy(attrs, :effect, fn ->
-        derive_effect(approval_level, capabilities)
-      end)
+    effect = Map.get_lazy(attrs, :effect, fn -> derive_effect(approval_level) end)
 
     with :ok <- validate_source(source),
          :ok <- validate_name(name),
@@ -124,8 +123,8 @@ defmodule MingaAgent.Tool.Spec do
          :ok <- validate_build(build),
          :ok <- validate_category(category),
          :ok <- validate_approval_level(approval_level),
-         :ok <- validate_effect(effect),
          :ok <- validate_atom_list(:capabilities, capabilities),
+         :ok <- validate_effect(effect, capabilities),
          :ok <- validate_atom_list(:context_requirements, context_requirements),
          :ok <- validate_metadata(metadata),
          :ok <- validate_context_requirements(category, capabilities, context_requirements),
@@ -168,16 +167,15 @@ defmodule MingaAgent.Tool.Spec do
   def sequential?(%__MODULE__{effect: :approval_required}), do: true
   def sequential?(%__MODULE__{}), do: false
 
-  @doc "Derives effect from approval level and capabilities when not explicitly provided."
-  @spec derive_effect(approval_level(), [capability()]) :: effect()
-  def derive_effect(:ask, _capabilities), do: :approval_required
-  def derive_effect(:deny, _capabilities), do: :approval_required
+  @doc """
+  Derives the effect of a spec that declares none.
 
-  def derive_effect(:auto, capabilities) do
-    if Enum.any?(capabilities, &(&1 in @mutating_capabilities)),
-      do: :mutating,
-      else: :read_only
-  end
+  Approval-gated tools are `:approval_required`. Every other undeclared tool is `:mutating`: read-only scheduling requires an explicit declaration.
+  """
+  @spec derive_effect(approval_level()) :: effect()
+  def derive_effect(:ask), do: :approval_required
+  def derive_effect(:deny), do: :approval_required
+  def derive_effect(:auto), do: :mutating
 
   @doc "Builds an executable callback for the given runtime context."
   @spec build_callback(t(), term()) :: callback()
@@ -335,9 +333,19 @@ defmodule MingaAgent.Tool.Spec do
   defp validate_approval_level(level) when level in [:auto, :ask, :deny], do: :ok
   defp validate_approval_level(level), do: {:error, {:invalid_approval_level, level}}
 
-  @spec validate_effect(term()) :: :ok | {:error, term()}
-  defp validate_effect(effect) when effect in [:read_only, :mutating, :approval_required], do: :ok
-  defp validate_effect(effect), do: {:error, {:invalid_effect, effect}}
+  # A read-only declaration that also claims a mutating capability contradicts itself.
+  @spec validate_effect(term(), [capability()]) :: :ok | {:error, term()}
+  defp validate_effect(:read_only, capabilities) when is_list(capabilities) do
+    case Enum.filter(capabilities, &(&1 in @mutating_capabilities)) do
+      [] -> :ok
+      mutating -> {:error, {:read_only_with_mutating_capabilities, mutating}}
+    end
+  end
+
+  defp validate_effect(effect, _capabilities) when effect in [:mutating, :approval_required],
+    do: :ok
+
+  defp validate_effect(effect, _capabilities), do: {:error, {:invalid_effect, effect}}
 
   @spec validate_atom_list(atom(), term()) :: :ok | {:error, term()}
   defp validate_atom_list(_field, values) when is_list(values) do

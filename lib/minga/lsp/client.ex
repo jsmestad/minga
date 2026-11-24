@@ -102,7 +102,7 @@ defmodule Minga.LSP.Client do
   @doc """
   Notifies the server that a document was opened.
 
-  Sends `textDocument/didOpen` with the full document content.
+  Sends `textDocument/didOpen` with the full document content, or a full change when the document is already open.
   """
   @spec did_open(GenServer.server(), String.t(), String.t(), String.t()) :: :ok
   def did_open(server, uri, language_id, text)
@@ -110,7 +110,11 @@ defmodule Minga.LSP.Client do
     GenServer.cast(server, {:did_open, uri, language_id, text, nil, nil})
   end
 
-  @doc "Notifies the server that a buffer revision was opened as wire version 1."
+  @doc """
+  Attaches a buffer revision to the server's view of a document.
+
+  A document the server does not hold yet is opened as wire version 1. A document already open for the same buffer is not opened again: a newer revision is sent as a full change at the next wire version, and an equal or older revision is ignored. A document open for a different buffer is closed before the new buffer opens it.
+  """
   @spec did_open(
           GenServer.server(),
           String.t(),
@@ -175,6 +179,8 @@ defmodule Minga.LSP.Client do
   to the calling process. This is the primary API for features like completion,
   go-to-definition, and hover that need request/response semantics without
   blocking the caller.
+
+  If the client stops before the server responds, the caller receives `{:error, {:client_exited, reason}}` instead.
   """
   @spec request(GenServer.server(), String.t(), map()) :: reference()
   def request(server, method, params) when is_binary(method) and is_map(params) do
@@ -568,7 +574,7 @@ defmodule Minga.LSP.Client do
         {:did_open, uri, language_id, text, buffer, buffer_revision},
         %{status: :ready} = state
       ) do
-    {:noreply, send_did_open(state, uri, language_id, text, buffer, buffer_revision)}
+    {:noreply, open_document(state, uri, language_id, text, buffer, buffer_revision)}
   end
 
   def handle_cast({:did_open, uri, language_id, text, buffer, buffer_revision}, state) do
@@ -605,13 +611,7 @@ defmodule Minga.LSP.Client do
 
   def handle_cast({:did_close, uri}, %{status: :ready} = state) do
     if Map.has_key?(state.open_documents, uri) do
-      send_notification(state, "textDocument/didClose", %{
-        "textDocument" => %{"uri" => uri}
-      })
-
-      Diagnostics.clear(state.diagnostics, state.server_config.name, uri)
-      state = %{state | open_documents: Map.delete(state.open_documents, uri)}
-      {:noreply, state}
+      {:noreply, close_document(state, uri)}
     else
       {:noreply, state}
     end
@@ -752,20 +752,41 @@ defmodule Minga.LSP.Client do
     {:noreply, state}
   end
 
+  # Every stop from a callback, including a framing-limit failure, runs terminate/2.
+  # No response can arrive after the client exits, and the request timers die with this process.
+  # Each pending caller therefore receives a terminal failure here.
   @impl true
-  def terminate(_reason, %{port: port} = _state) when is_port(port) do
-    # Best-effort: try to send exit notification
-    try do
-      msg = JsonRpc.encode_notification("exit", %{})
-      Port.command(port, IO.iodata_to_binary(msg))
-    catch
-      _, _ -> :ok
-    end
-
+  def terminate(reason, state) do
+    fail_pending_requests(state, reason)
+    send_exit_notification(state.port)
     :ok
   end
 
-  def terminate(_reason, _state), do: :ok
+  @spec fail_pending_requests(State.t(), term()) :: :ok
+  defp fail_pending_requests(state, reason) do
+    state.requests
+    |> RequestRegistry.pending_entries()
+    |> Enum.each(&reply_terminal(&1, reason))
+  end
+
+  # Shutdown promises `:ok`; the server is gone either way.
+  @spec reply_terminal(State.pending_entry(), term()) :: :ok
+  defp reply_terminal(%{method: "shutdown", from: from}, _reason), do: reply_to_caller(from, :ok)
+
+  defp reply_terminal(%{from: from}, reason),
+    do: reply_to_caller(from, {:error, {:client_exited, reason}})
+
+  # Best-effort exit notification to a server whose port is still open.
+  @spec send_exit_notification(port() | nil) :: :ok
+  defp send_exit_notification(port) when is_port(port) do
+    msg = JsonRpc.encode_notification("exit", %{})
+    Port.command(port, IO.iodata_to_binary(msg))
+    :ok
+  catch
+    _, _ -> :ok
+  end
+
+  defp send_exit_notification(_port), do: :ok
 
   # ── Message Handling ───────────────────────────────────────────────────────
 
@@ -1137,6 +1158,40 @@ defmodule Minga.LSP.Client do
   defp convert_code(code), do: inspect(code)
 
   # ── Document Sync Helpers ─────────────────────────────────────────────────
+
+  # An attachment owner can reopen a document the server already holds, for example after SyncServer restarts.
+  # LSP forbids a second didOpen for an open document.
+  # The same buffer advances to a newer revision with a full change and ignores an equal or older revision.
+  # A different buffer replaces the document, so the server sees didClose before the new didOpen.
+  @spec open_document(
+          State.t(),
+          String.t(),
+          String.t(),
+          String.t(),
+          pid() | nil,
+          non_neg_integer() | nil
+        ) :: State.t()
+  defp open_document(state, uri, language_id, text, buffer, buffer_revision) do
+    case Map.get(state.open_documents, uri) do
+      nil ->
+        send_did_open(state, uri, language_id, text, buffer, buffer_revision)
+
+      %{buffer: ^buffer} ->
+        maybe_send_full_change(state, uri, text, buffer, buffer_revision)
+
+      _replaced ->
+        state
+        |> close_document(uri)
+        |> send_did_open(uri, language_id, text, buffer, buffer_revision)
+    end
+  end
+
+  @spec close_document(State.t(), String.t()) :: State.t()
+  defp close_document(state, uri) do
+    send_notification(state, "textDocument/didClose", %{"textDocument" => %{"uri" => uri}})
+    Diagnostics.clear(state.diagnostics, state.server_config.name, uri)
+    %{state | open_documents: Map.delete(state.open_documents, uri)}
+  end
 
   @spec send_did_open(
           State.t(),

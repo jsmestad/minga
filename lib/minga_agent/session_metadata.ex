@@ -21,7 +21,8 @@ defmodule MingaAgent.SessionMetadata do
           first_prompt: String.t() | nil,
           cost: float(),
           status: MingaAgent.Session.status(),
-          workdir: String.t() | nil
+          workdir: String.t() | nil,
+          active_request_id: String.t() | nil
         }
 
   @enforce_keys [:id, :model_name, :created_at, :last_message_at]
@@ -37,7 +38,9 @@ defmodule MingaAgent.SessionMetadata do
             first_prompt: nil,
             cost: 0.0,
             status: :idle,
-            workdir: nil
+            workdir: nil,
+            # Request of the running turn, if any. An abort that names it cannot stop a later turn.
+            active_request_id: nil
 
   @doc """
   Counts the user turns in a transcript message list.

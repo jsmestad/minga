@@ -15,6 +15,13 @@ defmodule Minga.LSP.SyncServer do
   Monitors all registered LSP client PIDs. If a client crashes outside
   the event bus path, the `:DOWN` handler removes stale ETS entries so
   they don't accumulate.
+  When `Minga.LSP.Supervisor` has already replaced the client for the same server and root, for example after a framing-limit failure, the handler attaches the buffer to the replacement with its current content.
+
+  ## Desired and derived state
+
+  The open buffers in the buffer registry and their filetypes are the desired attachments.
+  The ETS table, client monitors, and debounce timers are derived from them and from the running clients, so a restarted SyncServer rebuilds all three in `init/1`.
+  A client that already holds a document reconciles the reopen itself and does not send a second didOpen.
 
   ## Event subscriptions
 
@@ -45,16 +52,23 @@ defmodule Minga.LSP.SyncServer do
   @type delta_accumulator :: [Minga.Buffer.EditDelta.t()] | :full_sync
   @typep pending_change :: {non_neg_integer(), delta_accumulator()}
 
+  @typedoc "The server name and project root that identify a client across replacements."
+  @type client_key :: {atom(), String.t()}
+
   @typedoc "Internal state."
   @type state :: %{
           debounce_timers: %{pid() => reference()},
-          client_monitors: %{reference() => {buffer_pid :: pid(), client_pid :: pid()}},
+          client_monitors: %{
+            reference() => {buffer_pid :: pid(), client_pid :: pid(), client_key()}
+          },
           pending_tool_buffers: %{String.t() => [pid()]},
           pending_changes: %{pid() => pending_change()},
           events_registry: Events.registry(),
           table: atom(),
           buffer_registry: atom(),
-          options_server: GenServer.server()
+          options_server: GenServer.server(),
+          lsp_supervisor: GenServer.server(),
+          servers_for: (atom() -> [ServerRegistry.server_config()])
         }
 
   # ── Client API ─────────────────────────────────────────────────────────
@@ -163,7 +177,9 @@ defmodule Minga.LSP.SyncServer do
       events_registry: events_registry,
       table: table,
       buffer_registry: Keyword.get(opts, :buffer_registry, Minga.Buffer.Registry),
-      options_server: Keyword.get(opts, :options_server, Options)
+      options_server: Keyword.get(opts, :options_server, Options),
+      lsp_supervisor: Keyword.get(opts, :lsp_supervisor, LSPSupervisor),
+      servers_for: Keyword.get(opts, :servers_for, &ServerRegistry.servers_for/1)
     }
 
     state = reconstruct_attachments(state)
@@ -281,7 +297,7 @@ defmodule Minga.LSP.SyncServer do
          %Events.FileWrittenEvent{path: path, change_type: change_type}},
         state
       ) do
-    notify_file_watchers(path, change_type)
+    notify_file_watchers(state.lsp_supervisor, path, change_type)
     {:noreply, state}
   end
 
@@ -350,7 +366,7 @@ defmodule Minga.LSP.SyncServer do
         state
 
       path ->
-        configs = ServerRegistry.servers_for(filetype)
+        configs = state.servers_for.(filetype)
         open_configured_buffer(state, buffer_pid, path, filetype, configs)
     end
   rescue
@@ -381,16 +397,16 @@ defmodule Minga.LSP.SyncServer do
     results =
       Enum.map(configs, fn config ->
         root = RootDetector.find_root(path, config.root_markers)
-        {config, LSPSupervisor.ensure_client(config, root)}
+        {config, root, LSPSupervisor.ensure_client(state.lsp_supervisor, config, root)}
       end)
 
     state = track_missing_tools(state, results, buffer_pid)
 
     clients =
       Enum.flat_map(results, fn
-        {_config, {:ok, pid}} ->
+        {config, root, {:ok, pid}} ->
           Client.did_open(pid, uri, language_id, content, buffer_pid, revision)
-          [pid]
+          [{pid, {config.name, root}}]
 
         _ ->
           []
@@ -401,8 +417,11 @@ defmodule Minga.LSP.SyncServer do
         state
 
       [_ | _] ->
-        :ets.insert(state.table, {buffer_pid, clients})
-        monitor_clients(state, buffer_pid, clients)
+        :ets.insert(state.table, {buffer_pid, Enum.map(clients, &elem(&1, 0))})
+
+        state
+        |> demonitor_clients_for_buffer(buffer_pid)
+        |> monitor_clients(buffer_pid, clients)
     end
   end
 
@@ -448,11 +467,11 @@ defmodule Minga.LSP.SyncServer do
 
   # Broadcasts :tool_missing for failed configs that have a recipe, and
   # tracks the buffer pid per command so we can retry after install.
-  @spec track_missing_tools(state(), [{map(), term()}], pid()) :: state()
+  @spec track_missing_tools(state(), [{map(), String.t(), term()}], pid()) :: state()
   defp track_missing_tools(state, results, buffer_pid) do
     results
     |> Enum.filter(&failed_with_recipe?/1)
-    |> Enum.reduce(state, fn {config, _}, acc ->
+    |> Enum.reduce(state, fn {config, _root, _result}, acc ->
       Events.broadcast(
         :tool_missing,
         %ToolMissingEvent{command: config.command},
@@ -463,8 +482,8 @@ defmodule Minga.LSP.SyncServer do
     end)
   end
 
-  @spec failed_with_recipe?({map(), term()}) :: boolean()
-  defp failed_with_recipe?({config, {:error, :not_available}}),
+  @spec failed_with_recipe?({map(), String.t(), term()}) :: boolean()
+  defp failed_with_recipe?({config, _root, {:error, :not_available}}),
     do: RecipeRegistry.for_command(config.command) != nil
 
   defp failed_with_recipe?(_), do: false
@@ -507,12 +526,12 @@ defmodule Minga.LSP.SyncServer do
 
   # ── Private: client monitoring ─────────────────────────────────────────
 
-  @spec monitor_clients(state(), pid(), [pid()]) :: state()
+  @spec monitor_clients(state(), pid(), [{pid(), client_key()}]) :: state()
   defp monitor_clients(state, buffer_pid, clients) do
     new_monitors =
-      Enum.reduce(clients, state.client_monitors, fn client_pid, acc ->
+      Enum.reduce(clients, state.client_monitors, fn {client_pid, client_key}, acc ->
         ref = Process.monitor(client_pid)
-        Map.put(acc, ref, {buffer_pid, client_pid})
+        Map.put(acc, ref, {buffer_pid, client_pid, client_key})
       end)
 
     %{state | client_monitors: new_monitors}
@@ -521,7 +540,7 @@ defmodule Minga.LSP.SyncServer do
   @spec demonitor_clients_for_buffer(state(), pid()) :: state()
   defp demonitor_clients_for_buffer(state, buffer_pid) do
     {to_remove, to_keep} =
-      Map.split_with(state.client_monitors, fn {_ref, {buf_pid, _client_pid}} ->
+      Map.split_with(state.client_monitors, fn {_ref, {buf_pid, _client_pid, _client_key}} ->
         buf_pid == buffer_pid
       end)
 
@@ -538,14 +557,58 @@ defmodule Minga.LSP.SyncServer do
       {nil, _monitors} ->
         state
 
-      {{buffer_pid, ^client_pid}, remaining_monitors} ->
+      {{buffer_pid, ^client_pid, client_key}, remaining_monitors} ->
         state = %{state | client_monitors: remaining_monitors}
         remove_client_from_buffer(state.table, buffer_pid, client_pid)
-        state
+        reattach_replacement(state, buffer_pid, client_pid, client_key)
 
       {_other, _monitors} ->
         # ref found but pid mismatch; shouldn't happen, but don't crash
         state
+    end
+  end
+
+  # The client supervisor restarts a client that stopped abnormally, for example on a framing-limit failure.
+  # On one node that restart is normally done before this lookup is served, but Erlang does not guarantee it.
+  # A missed replacement leaves the buffer detached until the next open, resync, or SyncServer restart.
+  # Only an existing replacement is used, because starting a client here would undo a deliberate client stop.
+  @spec reattach_replacement(state(), pid(), pid(), client_key()) :: state()
+  defp reattach_replacement(state, buffer_pid, down_client, client_key) do
+    case LSPSupervisor.find_client(state.lsp_supervisor, client_key) do
+      {:ok, replacement} when replacement != down_client ->
+        attach_replacement(state, buffer_pid, replacement, client_key)
+
+      _not_replaced ->
+        state
+    end
+  catch
+    :exit, _ -> state
+  end
+
+  @spec attach_replacement(state(), pid(), pid(), client_key()) :: state()
+  defp attach_replacement(state, buffer_pid, replacement, client_key) do
+    clients = clients_for_buffer(buffer_pid, state.table)
+
+    if replacement in clients do
+      state
+    else
+      open_for_replacement(state, buffer_pid, clients, replacement, client_key)
+    end
+  end
+
+  @spec open_for_replacement(state(), pid(), [pid()], pid(), client_key()) :: state()
+  defp open_for_replacement(state, buffer_pid, clients, replacement, client_key) do
+    case Buffer.file_path(buffer_pid) do
+      nil ->
+        state
+
+      path ->
+        language_id = buffer_pid |> Buffer.filetype() |> to_string()
+        {content, revision} = Buffer.content_with_version(buffer_pid)
+        uri = path_to_uri(path)
+        Client.did_open(replacement, uri, language_id, content, buffer_pid, revision)
+        :ets.insert(state.table, {buffer_pid, clients ++ [replacement]})
+        monitor_clients(state, buffer_pid, [{replacement, client_key}])
     end
   end
 
@@ -657,11 +720,16 @@ defmodule Minga.LSP.SyncServer do
 
   # ── Private: file watcher notifications ───────────────────────────────
 
-  @spec notify_file_watchers(String.t(), Minga.Events.FileWrittenEvent.change_type()) :: :ok
-  defp notify_file_watchers(path, change_type) do
+  @spec notify_file_watchers(
+          GenServer.server(),
+          String.t(),
+          Minga.Events.FileWrittenEvent.change_type()
+        ) :: :ok
+  defp notify_file_watchers(lsp_supervisor, path, change_type) do
     changes = [{path, change_type}]
 
-    LSPSupervisor.all_clients()
+    lsp_supervisor
+    |> LSPSupervisor.all_clients()
     |> Enum.each(fn client_pid ->
       try do
         Client.notify_file_changes(client_pid, changes)

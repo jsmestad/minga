@@ -96,10 +96,18 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
   @spec note_key(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   def note_key(%EditorState{frontend: %{backend: backend}} = state, ?\s, 0)
       when backend != :tui do
-    if active?(state), do: hold_space(state, SpaceTarget.resolve(state)), else: state
+    if active?(state), do: hold_space(state, held(SpaceTarget.resolve(state))), else: state
   end
 
-  def note_key(%EditorState{} = state, _codepoint, _modifiers), do: hold_space(state, nil)
+  def note_key(%EditorState{} = state, _codepoint, _modifiers), do: clear_held_space(state)
+
+  @doc """
+  Forgets the recorded space, so a later retract deletes nothing.
+
+  Mouse input calls this at ingress: a click can move the cursor between the space and the retract.
+  """
+  @spec clear_held_space(EditorState.t()) :: EditorState.t()
+  def clear_held_space(%EditorState{} = state), do: hold_space(state, nil)
 
   @doc """
   Returns true when the space leader feature is active.
@@ -133,17 +141,28 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
     |> dispatch_key_normally(codepoint, modifiers)
   end
 
+  # The cursor of the buffer that will take the space, read before the key is routed.
+  @spec held(SpaceTarget.t()) :: SpaceTarget.held()
+  defp held({kind, pid} = target) when kind in [:buffer, :composer] and is_pid(pid) do
+    {target, Buffer.cursor(pid)}
+  catch
+    :exit, _ -> {target, nil}
+  end
+
+  defp held(target), do: {target, nil}
+
   # A leader key retracts the space from the surface that took it and starts the
   # leader. With no recorded space, or a space an overlay took as text, the key
   # goes to the focused surface like any other.
   @spec retract_into_leader(
           EditorState.t(),
-          SpaceTarget.t() | nil,
+          SpaceTarget.held() | nil,
           non_neg_integer(),
           non_neg_integer()
         ) :: EditorState.t()
-  defp retract_into_leader(state, held, codepoint, modifiers) when held in [nil, :overlay],
-    do: dispatch_key_normally(state, codepoint, modifiers)
+  defp retract_into_leader(state, held, codepoint, modifiers)
+       when held == nil or elem(held, 0) == :overlay,
+       do: dispatch_key_normally(state, codepoint, modifiers)
 
   defp retract_into_leader(state, held, codepoint, modifiers) do
     case lookup_leader(leader_trie(state), codepoint, modifiers) do
@@ -158,11 +177,16 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
     end
   end
 
-  @spec retract_space(EditorState.t(), SpaceTarget.t()) :: EditorState.t()
-  defp retract_space(state, {:buffer, buf}) do
-    Buffer.break_undo_coalescing(buf)
-    Buffer.delete_before(buf)
-    Buffer.break_undo_coalescing(buf)
+  # A buffer loses the space only while it still sits directly before the cursor,
+  # so a cursor moved since then never costs a real character.
+  @spec retract_space(EditorState.t(), SpaceTarget.held()) :: EditorState.t()
+  defp retract_space(state, {{:buffer, buf}, typed_at}) do
+    if space_before_cursor?(buf, typed_at) do
+      Buffer.break_undo_coalescing(buf)
+      Buffer.delete_before(buf)
+      Buffer.break_undo_coalescing(buf)
+    end
+
     state
   catch
     :exit, _ -> state
@@ -172,14 +196,31 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
   # then is left alone.
   defp retract_space(
          %{workspace: %{agent_ui: %{panel: %{prompt_buffer: prompt}}}} = state,
-         {:composer, prompt}
+         {{:composer, prompt}, typed_at}
        )
-       when is_pid(prompt),
-       do: AgentCommands.input_backspace(state)
+       when is_pid(prompt) do
+    if space_before_cursor?(prompt, typed_at),
+      do: AgentCommands.input_backspace(state),
+      else: state
+  catch
+    :exit, _ -> state
+  end
 
   defp retract_space(state, _no_text_or_stale_composer), do: state
 
-  @spec held_space(EditorState.t()) :: SpaceTarget.t() | nil
+  # True when the cursor sits one byte after where the space was typed and that byte is a space.
+  @spec space_before_cursor?(pid(), Buffer.position() | nil) :: boolean()
+  defp space_before_cursor?(_buf, nil), do: false
+
+  defp space_before_cursor?(buf, {line, col}) do
+    if Buffer.cursor(buf) == {line, col + 1} do
+      match?([<<_before::binary-size(^col), " ", _rest::binary>>], Buffer.lines(buf, line, 1))
+    else
+      false
+    end
+  end
+
+  @spec held_space(EditorState.t()) :: SpaceTarget.held() | nil
   defp held_space(%EditorState{} = state) do
     case Runtime.state(state.shell_runtime) do
       %TraditionalState{} = shell_state -> TraditionalState.held_space(shell_state)
@@ -187,7 +228,7 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
     end
   end
 
-  @spec hold_space(EditorState.t(), SpaceTarget.t() | nil) :: EditorState.t()
+  @spec hold_space(EditorState.t(), SpaceTarget.held() | nil) :: EditorState.t()
   defp hold_space(%EditorState{} = state, target) do
     case Runtime.state(state.shell_runtime) do
       %TraditionalState{} = shell_state ->
