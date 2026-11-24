@@ -843,10 +843,10 @@ public final class AgentChatState {
         case .idle: return "idle"
         case .thinking: return "thinking"
         case .executingTool: return "running tool"
-        case .error: return "error"
+        case .error: return SpineState.failed.word
         case .planning: return "planning"
         case .approvalWaiting: return "Awaiting approval"
-        case .needsYou: return "Needs you"
+        case .needsYou: return SpineState.needsYou.word
         case .unknown: return "unknown"
         }
     }

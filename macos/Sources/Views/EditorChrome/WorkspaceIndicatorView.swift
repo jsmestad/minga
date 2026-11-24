@@ -190,10 +190,10 @@ public struct WorkspaceIndicatorView: View {
         switch workspace.agentStatus {
         case .thinking: "Thinking"
         case .executingTool: "Using tools"
-        case .error: "Error"
+        case .error: SpineState.failed.word
         case .planning: "Planning"
         case .approvalWaiting: "Awaiting approval"
-        case .needsYou: "Needs you"
+        case .needsYou: SpineState.needsYou.word
         case .idle: "Idle"
         case .unknown: "Unknown"
         }

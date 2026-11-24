@@ -17,6 +17,7 @@ Start with [principles](principles.md). They are short, and every other file fol
 | [storyboard.md](storyboard.md) | How we keep macOS and the TUI consistent: scenarios, storyboards and flow-graph checks |
 | [scenarios.toml](scenarios.toml) | The scenario inventory that the storyboard and the flow map are built from |
 | [marks/](marks/) | Standalone SVG files for the marks |
+| [../design_tokens.toml](../design_tokens.toml) | The one source for colour roles, state words and shapes, twist variants and voice lines; `mix codegen` generates the Elixir, Swift and Go tokens from it |
 
 ## How these relate to the code
 
@@ -28,6 +29,7 @@ The accepted design boards live in [`design/boards/`](../../design/boards/README
 
 1. If the change affects how something looks or flows, change its board first: edit the generator, run `sh design/tools/rebuild_boards.sh`, and commit the changed boards.
 2. Update the rule here in the same pull request that changes behavior, and add or update its scenarios in `scenarios.toml`.
-3. If the change contradicts a principle or a decision in ADR-0006, write a new ADR instead of editing these files quietly.
+3. If the change renames or adds a colour role, a state word or shape, a twist variant or a voice line, edit `docs/design_tokens.toml` and run `mix codegen`; never hand-edit the generated token files.
+4. If the change contradicts a principle or a decision in ADR-0006, write a new ADR instead of editing these files quietly.
 
 Keep these files to current rules. History belongs in ADRs and pull requests.

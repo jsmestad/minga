@@ -38,29 +38,29 @@ public enum CardStatus: Equatable, Sendable {
         }
     }
 
-    /// Human-readable label for the status badge.
-    public var label: String {
+    /// The design token state this status shows, or nil when it shows none.
+    public var spineState: SpineState? {
         switch self {
-        case .idle: "Idle"
-        case .working: "Working"
-        case .iterating: "Iterating"
-        case .needsYou: "Needs you"
-        case .done: "Done"
-        case .errored: "Errored"
-        case .unknown: "Unknown"
+        case .working, .iterating: .working
+        case .needsYou: .needsYou
+        case .done: .done
+        case .errored: .failed
+        case .idle, .unknown: nil
         }
     }
 
-    /// Badge color as RGB tuple.
-    public var color: (r: Double, g: Double, b: Double) {
+    /// The colour role the status badge is drawn in. Idle and unknown statuses use the waiting role.
+    public var role: ColorRole {
+        spineState?.role ?? .waiting
+    }
+
+    /// Human-readable label for the status badge. States use their design token word; iterating says what the working state is doing.
+    public var label: String {
         switch self {
-        case .idle: (0.5, 0.5, 0.5)
-        case .working: (0.2, 0.8, 0.4)
-        case .iterating: (0.2, 0.7, 0.3)
-        case .needsYou: (1.0, 0.75, 0.2)
-        case .done: (0.3, 0.6, 1.0)
-        case .errored: (1.0, 0.3, 0.3)
-        case .unknown: (0.5, 0.5, 0.5)
+        case .idle: "Idle"
+        case .iterating: "Iterating"
+        case .unknown: "Unknown"
+        case .working, .needsYou, .done, .errored: spineState?.word ?? "Unknown"
         }
     }
 }

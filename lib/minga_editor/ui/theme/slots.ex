@@ -19,8 +19,14 @@ defmodule MingaEditor.UI.Theme.Slots do
   | 0x50-0x5B | Gutter + Git + Highlights |
   | 0x5C-0x61 | Agent status  |
   | 0x62      | Gutter fold   |
+  | 0x70-0x8F | Design token colour roles (`Minga.Design.Tokens`) |
   | 0xA0-0xAE | Agent chat    |
+
+  Agent status slots carry the colour of the state each status shows, resolved through the state's colour role, so a status and its role never disagree.
   """
+
+  alias Minga.Design.Tokens
+  alias MingaEditor.UI.Theme
 
   # ── Editor + Tree ──
   @editor_bg 0x01
@@ -203,7 +209,7 @@ defmodule MingaEditor.UI.Theme.Slots do
       {@highlight_read_bg, e.highlight_read_bg || 0x3A3F4B},
       {@highlight_write_bg, e.highlight_write_bg || 0x4A3F2B},
       {@selection_bg, e.selection_bg || 0x264F78}
-    ] ++ agent_status_pairs(theme, tb) ++ agent_chat_pairs(theme)
+    ] ++ agent_status_pairs(theme) ++ agent_chat_pairs(theme) ++ role_pairs(theme)
   end
 
   @spec accent_color(MingaEditor.UI.Theme.t()) :: MingaEditor.UI.Theme.color()
@@ -211,18 +217,23 @@ defmodule MingaEditor.UI.Theme.Slots do
     theme.popup.title_fg || theme.modeline.filetype_fg
   end
 
-  @spec agent_status_pairs(MingaEditor.UI.Theme.t(), MingaEditor.UI.Theme.TabBar.t() | nil) :: [
-          color_pair()
-        ]
-  defp agent_status_pairs(theme, tb) do
+  @spec agent_status_pairs(Theme.t()) :: [color_pair()]
+  defp agent_status_pairs(theme) do
     [
-      {@agent_status_idle, theme.gutter.fg},
-      {@agent_status_working, theme.git.added_fg},
-      {@agent_status_iterating, theme.git.added_fg},
-      {@agent_status_needs_you, tb && tb.modified_fg},
-      {@agent_status_done, theme.tree.active_fg},
-      {@agent_status_errored, theme.gutter.error_fg}
+      {@agent_status_idle, Theme.state_color(theme, :waiting)},
+      {@agent_status_working, Theme.state_color(theme, :working)},
+      {@agent_status_iterating, Theme.state_color(theme, :working)},
+      {@agent_status_needs_you, Theme.state_color(theme, :needs_you)},
+      {@agent_status_done, Theme.state_color(theme, :done)},
+      {@agent_status_errored, Theme.state_color(theme, :failed)}
     ]
+  end
+
+  @spec role_pairs(Theme.t()) :: [color_pair()]
+  defp role_pairs(theme) do
+    Enum.map(Tokens.color_roles(), fn role ->
+      {Tokens.color_role_slot(role), Theme.role_color(theme, role)}
+    end)
   end
 
   @spec agent_chat_pairs(MingaEditor.UI.Theme.t()) :: [color_pair()]

@@ -47,7 +47,8 @@ defmodule MingaEditor.UI.Theme.DoomOne do
       editor: %MingaEditor.UI.Theme.Editor{
         bg: @bg,
         fg: @fg,
-        split_border_fg: @base5,
+        # Pane splits reach the 3:1 border target against the editor background.
+        split_border_fg: @base6,
         cursorline_bg: 0x2C323C,
         nav_flash_bg: 0x3E4451,
         yank_flash_bg: 0x4B5263,
@@ -60,7 +61,8 @@ defmodule MingaEditor.UI.Theme.DoomOne do
         link_fg: 0x61AFEF
       },
       gutter: %MingaEditor.UI.Theme.Gutter{
-        fg: @base5,
+        # Line numbers are secondary text and need 4.5:1 against the editor background.
+        fg: 0x9299A0,
         current_fg: @fg,
         error_fg: @red,
         warning_fg: @yellow,
@@ -131,7 +133,7 @@ defmodule MingaEditor.UI.Theme.DoomOne do
         user_border: @blue,
         user_label: @blue,
         assistant_border: @green,
-        assistant_label: @green,
+        assistant_label: @magenta,
         tool_border: @yellow,
         tool_header: @yellow,
         code_bg: 0x1E2127,
@@ -140,10 +142,13 @@ defmodule MingaEditor.UI.Theme.DoomOne do
         input_bg: @bg,
         input_placeholder: @base5,
         thinking_fg: @yellow,
-        status_thinking: @yellow,
+        status_thinking: @magenta,
         status_tool: @cyan,
         status_error: @red,
-        status_idle: @base5,
+        status_idle: @base6,
+        status_done: @green,
+        minga_fg: @magenta,
+        attention_fg: @orange,
         text_fg: @fg,
         context_low: @green,
         context_mid: @yellow,

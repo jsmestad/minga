@@ -52,6 +52,8 @@ targets:
         type: file
       - path: Sources/Protocol/AgentSurfaceTypes.swift
         type: file
+      - path: Sources/Protocol/DesignTokens.generated.swift
+        type: file
       - path: Sources/Protocol/LatencyRecorder.swift
         type: file
       - path: Sources/Protocol/RenderPerformanceGate.swift
@@ -164,6 +166,7 @@ targets:
           - "Renderer/ResidentRowStore.swift"
           - "Renderer/ResidentRenderPreparation.swift"
           - "Protocol/AgentSurfaceTypes.swift"
+          - "Protocol/DesignTokens.generated.swift"
           - "Protocol/LatencyRecorder.swift"
           - "Protocol/RenderPerformanceGate.swift"
           - "Protocol/FrontendExtensionRuntimeMessage.swift"
@@ -345,6 +348,7 @@ targets:
           - "Renderer/ResidentRowStore.swift"
           - "Renderer/ResidentRenderPreparation.swift"
           - "Protocol/AgentSurfaceTypes.swift"
+          - "Protocol/DesignTokens.generated.swift"
           - "Protocol/LatencyRecorder.swift"
           - "Protocol/RenderPerformanceGate.swift"
           - "Protocol/FrontendExtensionRuntimeMessage.swift"
@@ -482,6 +486,7 @@ targets:
           - "Renderer/ResidentRowStore.swift"
           - "Renderer/ResidentRenderPreparation.swift"
           - "Protocol/AgentSurfaceTypes.swift"
+          - "Protocol/DesignTokens.generated.swift"
           - "Protocol/LatencyRecorder.swift"
           - "Protocol/RenderPerformanceGate.swift"
           - "Protocol/FrontendExtensionRuntimeMessage.swift"
@@ -565,6 +570,7 @@ targets:
           - "Renderer/ResidentRowStore.swift"
           - "Renderer/ResidentRenderPreparation.swift"
           - "Protocol/AgentSurfaceTypes.swift"
+          - "Protocol/DesignTokens.generated.swift"
           - "Protocol/LatencyRecorder.swift"
           - "Protocol/RenderPerformanceGate.swift"
           - "Protocol/FrontendExtensionRuntimeMessage.swift"

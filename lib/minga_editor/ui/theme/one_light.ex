@@ -50,6 +50,11 @@ defmodule MingaEditor.UI.Theme.OneLight do
       warning: @syntax_color_modified,
       info: @hue_2,
       success: @hue_4,
+      minga: @hue_3,
+      needs_you: 0xB35900,
+      done: @hue_4,
+      waiting: 0x8A8A8C,
+      group: 0x2F5BC4,
       match: @hue_6,
       link: @hue_1,
       border: @syntax_guide,
@@ -79,9 +84,13 @@ defmodule MingaEditor.UI.Theme.OneLight do
         highlight_write_bg: 0xE8D8B8,
         whitespace_fg: @syntax_gutter,
         indent_guide_fg: @syntax_guide,
-        indent_guide_active_fg: @mono_3
+        indent_guide_active_fg: @mono_3,
+        # Pane splits reach the 3:1 border target against the editor background.
+        split_border_fg: 0x8A8A8C
       },
       gutter: %{
+        # Line numbers are secondary text and need 4.5:1 against the editor background.
+        fg: @mono_2,
         current_fg: @mono_1,
         warning_fg: @hue_6,
         hint_fg: @syntax_gutter,
@@ -102,7 +111,7 @@ defmodule MingaEditor.UI.Theme.OneLight do
           search: {0xFFFFFF, @hue_1}
         }
       },
-      popup: %{bg: @syntax_guide, border_fg: @mono_3, sel_bg: @hue_2, separator_fg: @mono_2},
+      popup: %{bg: @syntax_guide, border_fg: 0x8A8A8C, sel_bg: @hue_2, separator_fg: @mono_2},
       tree: %{
         bg: @ui_bg,
         cursor_bg: @syntax_selection,

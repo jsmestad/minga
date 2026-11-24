@@ -19,7 +19,12 @@ defmodule MingaEditor.UI.Theme.Palette.Semantic do
     :match,
     :link,
     :border,
-    :contrast_fg
+    :contrast_fg,
+    :minga,
+    :needs_you,
+    :done,
+    :waiting,
+    :group
   ]
 
   @type color :: Theme.color()
@@ -35,7 +40,12 @@ defmodule MingaEditor.UI.Theme.Palette.Semantic do
           match: color() | nil,
           link: color() | nil,
           border: color() | nil,
-          contrast_fg: color() | nil
+          contrast_fg: color() | nil,
+          minga: color() | nil,
+          needs_you: color() | nil,
+          done: color() | nil,
+          waiting: color() | nil,
+          group: color() | nil
         }
 
   @doc "Builds the semantic palette from a flat theme map."
@@ -46,6 +56,7 @@ defmodule MingaEditor.UI.Theme.Palette.Semantic do
     highlight = Base.optional_color(attrs, :highlight, accent)
     warning = Base.optional_color(attrs, :warning, default_warning(variant))
     info = Base.optional_color(attrs, :info, accent)
+    success = Base.optional_color(attrs, :success, default_success(variant))
 
     %__MODULE__{
       accent: accent,
@@ -54,11 +65,17 @@ defmodule MingaEditor.UI.Theme.Palette.Semantic do
       error: Base.optional_color(attrs, :error, default_error(variant)),
       warning: warning,
       info: info,
-      success: Base.optional_color(attrs, :success, default_success(variant)),
+      success: success,
       match: Base.optional_color(attrs, :match, warning),
       link: Base.optional_color(attrs, :link, info),
       border: Base.optional_color(attrs, :border, base.subtle),
-      contrast_fg: Base.optional_color(attrs, :contrast_fg, default_contrast_fg(variant, base.bg))
+      contrast_fg:
+        Base.optional_color(attrs, :contrast_fg, default_contrast_fg(variant, base.bg)),
+      minga: Base.optional_color(attrs, :minga, default_minga(variant)),
+      needs_you: Base.optional_color(attrs, :needs_you, default_needs_you(variant)),
+      done: Base.optional_color(attrs, :done, success),
+      waiting: Base.optional_color(attrs, :waiting, base.muted),
+      group: Base.optional_color(attrs, :group, highlight)
     }
   end
 
@@ -77,6 +94,14 @@ defmodule MingaEditor.UI.Theme.Palette.Semantic do
   @spec default_info(:dark | :light) :: color()
   defp default_info(:dark), do: 0x51AFEF
   defp default_info(:light), do: 0x0184BC
+
+  @spec default_minga(:dark | :light) :: color()
+  defp default_minga(:dark), do: 0xC678DD
+  defp default_minga(:light), do: 0xA626A4
+
+  @spec default_needs_you(:dark | :light) :: color()
+  defp default_needs_you(:dark), do: 0xDA8548
+  defp default_needs_you(:light), do: 0xB35900
 
   @spec default_success(:dark | :light) :: color()
   defp default_success(:dark), do: 0x98BE65

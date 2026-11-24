@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
@@ -35,7 +36,7 @@ func (a *agentPanel) tick() {
 }
 
 func (a *agentPanel) spinner() string {
-	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	frames := generated.StateWorking.Token().Frames
 	return frames[int(a.animationFrame)%len(frames)]
 }
 
@@ -222,7 +223,7 @@ func (m Model) renderAgentLifecycleNotice(chat protocol.AgentChat, width, budget
 		return surface.Width(width).Render(fitStyled(content, width))
 	}
 
-	glyph := lipgloss.NewStyle().Bold(true).Foreground(p.AgentStatusNeedsYou()).Background(p.SurfaceAlt()).Render("⚠")
+	glyph := lipgloss.NewStyle().Bold(true).Foreground(p.State(generated.StateNeedsYou)).Background(p.SurfaceAlt()).Render(generated.StateNeedsYou.Token().Glyph)
 	if chat.Lifecycle == protocol.AgentChatStarting {
 		glyph = lipgloss.NewStyle().Foreground(p.AgentStatusWorking()).Background(p.SurfaceAlt()).Render(m.agentSpinner())
 	}
@@ -636,13 +637,13 @@ func agentChatStatusLabel(status byte) string {
 	case 2:
 		return "using tools"
 	case 3:
-		return "error"
+		return generated.StateFailed.Token().Word
 	case 4:
 		return "planning"
 	case 5:
 		return "Awaiting approval"
 	case agentStatusNeedsYou:
-		return "Needs you"
+		return generated.StateNeedsYou.Token().Word
 	case agentStatusQuestionWaiting:
 		return "Waiting for your answer"
 	default:

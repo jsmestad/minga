@@ -171,6 +171,20 @@ public final class ThemeColors {
     // ── Accent ──
     public var accent: Color = color(0xFFFFFF)
 
+    // ── Design token colour roles (docs/design_tokens.toml) ──
+    /// Colours for the design token roles, keyed by role. Filled from the role slots of gui_theme.
+    public private(set) var roleColors: [ColorRole: Color] = [:]
+
+    /// The theme's colour for a design token colour role. Before the first gui_theme arrives, roles draw in the editor foreground.
+    public func roleColor(_ role: ColorRole) -> Color {
+        roleColors[role] ?? editorFg
+    }
+
+    /// The theme's colour for a state, through the state's colour role.
+    public func stateColor(_ state: SpineState) -> Color {
+        roleColor(state.role)
+    }
+
     public private(set) var hasAppliedTheme = false
 
     // ── Shared chrome contrast tokens ──
@@ -219,6 +233,11 @@ public final class ThemeColors {
     }
 
     private func applySlot(_ slot: UInt8, color c: Color, rgb: UInt32) {
+        if let role = ColorRole(rawValue: slot) {
+            roleColors[role] = c
+            return
+        }
+
         switch slot {
         case GUI_COLOR_EDITOR_BG: editorBg = c
         case GUI_COLOR_EDITOR_FG: editorFg = c; editorFgRGB = rgb

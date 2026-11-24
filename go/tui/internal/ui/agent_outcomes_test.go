@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
@@ -77,7 +78,7 @@ func TestCommittedToolOutcomesOverrideCompatibilityError(t *testing.T) {
 
 func TestApprovalWaitingStatusIsStaticAndStoppable(t *testing.T) {
 	model := New(100, 30, nil)
-	labels := []string{"idle", "thinking", "using tools", "error", "planning", "Awaiting approval"}
+	labels := []string{"idle", "thinking", "using tools", generated.StateFailed.Token().Word, "planning", "Awaiting approval"}
 	for status, label := range labels {
 		if got := agentChatStatusLabel(byte(status)); got != label {
 			t.Fatalf("status %d label = %q, want %q", status, got, label)

@@ -50,6 +50,11 @@ defmodule MingaEditor.UI.Theme.OneDark do
       warning: @syntax_color_modified,
       info: @hue_2,
       success: @hue_4,
+      minga: @hue_3,
+      needs_you: @hue_6,
+      done: @hue_4,
+      waiting: @mono_2,
+      group: 0x74BAF2,
       match: @hue_6_2,
       link: @hue_1,
       border: @syntax_guide,
@@ -79,9 +84,13 @@ defmodule MingaEditor.UI.Theme.OneDark do
         highlight_write_bg: 0x4A3F2B,
         whitespace_fg: @syntax_gutter,
         indent_guide_fg: @syntax_guide,
-        indent_guide_active_fg: @mono_3
+        indent_guide_active_fg: @mono_3,
+        # Pane splits reach the 3:1 border target against the editor background.
+        split_border_fg: @mono_2
       },
       gutter: %{
+        # Line numbers are secondary text and need 4.5:1 against the editor background.
+        fg: 0x8A93A6,
         current_fg: @mono_1,
         warning_fg: @hue_6_2,
         hint_fg: @syntax_gutter,

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
@@ -93,7 +94,8 @@ const (
 	themeAgentCodeBorder       byte = 0xAE
 )
 
-var requiredThemeSlots = []byte{
+// requiredThemeSlots lists every slot the BEAM sends, including one slot per design token colour role.
+var requiredThemeSlots = append([]byte{
 	0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A,
 	0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
 	0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
@@ -104,6 +106,14 @@ var requiredThemeSlots = []byte{
 	0x5C, 0x5D, 0x5E, 0x5F, 0x60, 0x61,
 	0x62,
 	0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE,
+}, colorRoleSlots()...)
+
+func colorRoleSlots() []byte {
+	slots := make([]byte, len(generated.ColorRoles))
+	for i, role := range generated.ColorRoles {
+		slots[i] = byte(role)
+	}
+	return slots
 }
 
 type palette struct {
@@ -468,6 +478,16 @@ func (p palette) blendSlots(slotA byte, slotB byte, t float64) color.Color {
 	g := uint32(float64(gA) + float64(gB-gA)*t)
 	bl := uint32(float64(bA) + float64(bB-bA)*t)
 	return lipgloss.Color(fmt.Sprintf("#%06X", (r<<16)|(g<<8)|bl))
+}
+
+// Role returns the theme's colour for a design token colour role.
+func (p palette) Role(role generated.ColorRole) color.Color {
+	return p.slot(byte(role))
+}
+
+// State returns the theme's colour for a state, through the state's colour role.
+func (p palette) State(state generated.SpineState) color.Color {
+	return p.Role(state.Token().Role)
 }
 
 func (p palette) slot(slot byte) color.Color {

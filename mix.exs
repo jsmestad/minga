@@ -526,7 +526,10 @@ defmodule Minga.MixProject do
       "app.assemble": build_task(Mix.Tasks.App.Assemble, ~w(mix/tasks/app.assemble.ex)),
       codegen: [
         "deps.loadpaths",
-        build_task(Mix.Tasks.Codegen, protocol ++ language ++ ~w(mix/tasks/codegen.ex))
+        build_task(
+          Mix.Tasks.Codegen,
+          protocol ++ language ++ ~w(mix/design_token_generator.ex mix/tasks/codegen.ex)
+        )
       ],
       "protocol.gen": [
         "deps.loadpaths",

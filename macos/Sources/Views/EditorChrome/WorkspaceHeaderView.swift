@@ -152,7 +152,7 @@ public struct WorkspaceHeaderView: View {
         } label: {
             HStack(spacing: Spacing.xs) {
                 Circle()
-                    .fill(agentStatusColor(workspace.agentStatus, accent: workspace.color))
+                    .fill(agentStatusColor(workspace.agentStatus))
                     .frame(width: 7, height: 7)
                 Text(agentStatusLabel(workspace.agentStatus))
                     .font(Typography.font(.small))
@@ -272,10 +272,10 @@ public struct WorkspaceHeaderView: View {
         switch status {
         case .thinking: return "Thinking"
         case .executingTool: return "Using tools"
-        case .error: return "Error"
+        case .error: return SpineState.failed.word
         case .planning: return "Planning"
         case .approvalWaiting: return "Awaiting approval"
-        case .needsYou: return "Needs you"
+        case .needsYou: return SpineState.needsYou.word
         case .idle: return "Idle"
         case .unknown: return "Unknown"
         }
@@ -285,12 +285,12 @@ public struct WorkspaceHeaderView: View {
         "Agent status: \(agentStatusLabel(status))"
     }
 
-    private func agentStatusColor(_ status: AgentStatus, accent: Color) -> Color {
+    private func agentStatusColor(_ status: AgentStatus) -> Color {
         switch status {
-        case .thinking, .executingTool: return accent
-        case .error: return .red
-        case .planning, .approvalWaiting, .needsYou: return theme.agentStatusNeedsYou
-        case .idle, .unknown: return theme.tabInactiveFg
+        case .thinking, .executingTool: return theme.stateColor(SpineState.working)
+        case .error: return theme.stateColor(SpineState.failed)
+        case .planning, .approvalWaiting, .needsYou: return theme.stateColor(SpineState.needsYou)
+        case .idle, .unknown: return theme.stateColor(SpineState.waiting)
         }
     }
 }

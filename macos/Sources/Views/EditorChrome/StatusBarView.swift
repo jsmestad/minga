@@ -417,10 +417,10 @@ public struct StatusBarView: View {
         case .idle: return "Idle"
         case .thinking: return "Thinking"
         case .executingTool: return state.activeToolName.isEmpty ? "Running" : "Running \(state.activeToolName)"
-        case .error: return "Error"
+        case .error: return SpineState.failed.word
         case .planning: return "PLAN"
         case .approvalWaiting: return state.activeToolName.isEmpty ? "Awaiting approval" : "Awaiting approval for \(state.activeToolName)"
-        case .needsYou: return "Needs you"
+        case .needsYou: return SpineState.needsYou.word
         case .unknown: return nil
         }
     }

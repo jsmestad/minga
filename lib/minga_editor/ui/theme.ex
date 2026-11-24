@@ -14,6 +14,7 @@ defmodule MingaEditor.UI.Theme do
   """
 
   alias Minga.Core.Face
+  alias Minga.Design.Tokens
   alias MingaEditor.UI.Theme.Fallback
   alias MingaEditor.UI.Theme.Loader.LoadedTheme
 
@@ -299,6 +300,9 @@ defmodule MingaEditor.UI.Theme do
       :status_tool,
       :status_error,
       :status_idle,
+      :status_done,
+      :minga_fg,
+      :attention_fg,
       :text_fg,
       :context_low,
       :context_mid,
@@ -340,6 +344,9 @@ defmodule MingaEditor.UI.Theme do
       :status_tool,
       :status_error,
       :status_idle,
+      :status_done,
+      :minga_fg,
+      :attention_fg,
       :text_fg,
       :context_low,
       :context_mid,
@@ -381,6 +388,9 @@ defmodule MingaEditor.UI.Theme do
             status_tool: MingaEditor.UI.Theme.color(),
             status_error: MingaEditor.UI.Theme.color(),
             status_idle: MingaEditor.UI.Theme.color(),
+            status_done: MingaEditor.UI.Theme.color(),
+            minga_fg: MingaEditor.UI.Theme.color(),
+            attention_fg: MingaEditor.UI.Theme.color(),
             text_fg: MingaEditor.UI.Theme.color(),
             context_low: MingaEditor.UI.Theme.color(),
             context_mid: MingaEditor.UI.Theme.color(),
@@ -616,7 +626,7 @@ defmodule MingaEditor.UI.Theme do
       user_border: 0x51AFEF,
       user_label: 0x51AFEF,
       assistant_border: 0x98BE65,
-      assistant_label: 0x98BE65,
+      assistant_label: 0xC678DD,
       tool_border: 0xECBE7B,
       tool_header: 0xECBE7B,
       code_bg: 0x1E2127,
@@ -625,10 +635,13 @@ defmodule MingaEditor.UI.Theme do
       input_bg: 0x23272E,
       input_placeholder: 0x5B6268,
       thinking_fg: 0xECBE7B,
-      status_thinking: 0xECBE7B,
+      status_thinking: 0xC678DD,
       status_tool: 0x46D9FF,
       status_error: 0xFF6C6B,
-      status_idle: 0x5B6268,
+      status_idle: 0x73797E,
+      status_done: 0x98BE65,
+      minga_fg: 0xC678DD,
+      attention_fg: 0xDA8548,
       text_fg: 0xBBC2CF,
       context_low: 0x98BE65,
       context_mid: 0xECBE7B,
@@ -651,6 +664,48 @@ defmodule MingaEditor.UI.Theme do
   end
 
   def agent_theme(%__MODULE__{agent: agent}), do: agent
+
+  @doc """
+  Returns the colour a theme gives a design-token colour role.
+
+  Roles are named in `docs/design_tokens.toml` (see `Minga.Design.Tokens`). A role reads the first non-nil theme field in its source list, or is derived by mixing one role over another, so a new theme gets derived roles such as `:minga_shade` for free.
+  """
+  @spec role_color(t(), Tokens.color_role()) :: color()
+  def role_color(%__MODULE__{} = theme, role) do
+    case Tokens.color_role(role).source do
+      # A hand-built theme can leave every source field nil.
+      # The role then draws as primary text so the frontend still receives its slot.
+      {:fields, fields} ->
+        Enum.find_value(fields, fn {section, field} ->
+          theme |> role_section(section) |> Map.fetch!(field)
+        end) || theme.editor.fg
+
+      {:mix, top, over, percent} ->
+        mix_color(role_color(theme, top), role_color(theme, over), percent)
+    end
+  end
+
+  @doc "Returns the colour a theme gives a design-token state, through the state's colour role."
+  @spec state_color(t(), Tokens.state_id()) :: color()
+  def state_color(%__MODULE__{} = theme, state) do
+    role_color(theme, Tokens.state_role(state))
+  end
+
+  @spec role_section(t(), atom()) :: struct()
+  defp role_section(theme, :agent), do: agent_theme(theme)
+  defp role_section(theme, section), do: Map.fetch!(theme, section)
+
+  @spec mix_color(color(), color(), 0..100) :: color()
+  defp mix_color(top, over, percent) do
+    [16, 8, 0]
+    |> Enum.map(fn shift ->
+      top_channel = Bitwise.band(Bitwise.bsr(top, shift), 0xFF)
+      over_channel = Bitwise.band(Bitwise.bsr(over, shift), 0xFF)
+      channel = round((top_channel * percent + over_channel * (100 - percent)) / 100)
+      Bitwise.bsl(channel, shift)
+    end)
+    |> Enum.sum()
+  end
 
   @doc """
   Returns a syntax theme map customized for the agent chat buffer.

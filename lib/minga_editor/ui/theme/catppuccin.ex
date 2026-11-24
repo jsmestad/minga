@@ -15,12 +15,12 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
   @doc "Builds a full `MingaEditor.UI.Theme.t()` struct from a Catppuccin palette map."
   @spec build(atom(), map()) :: MingaEditor.UI.Theme.t()
   def build(name, p) do
-    Builder.from_palette(name, palette(name, p), overrides(p))
+    Builder.from_palette(name, palette(name, p), overrides(name, p))
   end
 
   @spec palette(atom(), map()) :: Palette.t()
   defp palette(name, p) do
-    Palette.new(%{
+    %{
       variant: variant(name),
       bg: p.base,
       fg: p.text,
@@ -49,19 +49,52 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
       numbers: p.peach,
       type: p.yellow,
       variables: p.text,
-      comments: p.overlay2
-    })
+      comments: p.overlay2,
+      minga: p.mauve,
+      needs_you: p.peach,
+      done: p.green,
+      waiting: p.overlay1,
+      group: p.lavender
+    }
+    |> Map.merge(contrast_fixes(name))
+    |> Palette.new()
   end
+
+  # Latte is the light flavour, where several Catppuccin hues miss the contrast targets in docs/design/themes.md against `base`. These darker values keep each hue and reach 3:1 for glyphs (needs_you, warning, waiting, done) and 4.5:1 for group labels on popups.
+  @spec contrast_fixes(atom()) :: map()
+  defp contrast_fixes(:catppuccin_latte) do
+    %{
+      needs_you: 0xD35400,
+      warning: 0xA86D10,
+      waiting: 0x7C7F93,
+      done: 0x388E25,
+      group: 0x1650C0
+    }
+  end
+
+  defp contrast_fixes(_name), do: %{}
 
   @spec variant(atom()) :: Palette.variant()
   defp variant(:catppuccin_latte), do: :light
   defp variant(_name), do: :dark
 
-  @spec overrides(map()) :: map()
-  defp overrides(p) do
+  # Line numbers are secondary text, so they need 4.5:1 against `base`.
+  # overlay2 reaches it on the dark flavours and subtext1 on Latte.
+  # Latte's popup and pane borders also move to overlay2 to reach 3:1.
+  @spec overrides(atom(), map()) :: map()
+  defp overrides(:catppuccin_latte, p) do
     %{
       syntax: syntax(p),
-      gutter: %{current_fg: p.lavender}
+      gutter: %{current_fg: p.lavender, fg: p.subtext1},
+      popup: %{border_fg: p.overlay2},
+      editor: %{split_border_fg: p.overlay2}
+    }
+  end
+
+  defp overrides(_name, p) do
+    %{
+      syntax: syntax(p),
+      gutter: %{current_fg: p.lavender, fg: p.overlay2}
     }
   end
 
