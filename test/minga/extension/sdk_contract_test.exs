@@ -12,7 +12,11 @@ defmodule Minga.Extension.SdkContractTest do
     Minga.Events =>
       "Extensions subscribe to documented topics; registry plumbing stays in the host.",
     Minga.Git =>
-      "Extensions operate on explicit repository roots, not the host's tracker or process registry."
+      "Extensions operate on explicit repository roots, not the host's tracker or process registry.",
+    Minga.Language =>
+      "The SDK exposes register/3 for grammar-owning extensions; language lookup and the %Minga.Language{} pack structs stay in the host.",
+    Minga.Language.TreeSitter =>
+      "The SDK exposes only the register option type; grammar compilation and parser loading stay in the host."
   }
 
   # Runtime functions that extensions must not call or never need, by reason.
@@ -280,6 +284,35 @@ defmodule Minga.Extension.SdkContractTest do
 
     assert error_kinds("lib/minga_agent/event.ex", :kind) ==
              error_kinds("sdk/lib/minga_agent/inference_route.ex", :error_kind)
+  end
+
+  test "the Minga.Language stub matches the host register/3 spec and option type" do
+    assert spec_source("lib/minga/language.ex", :register) ==
+             spec_source("sdk/lib/minga/language.ex", :register)
+
+    assert type_source("lib/minga/language/tree_sitter.ex", :register_opt) ==
+             type_source("sdk/lib/minga/language/tree_sitter.ex", :register_opt)
+  end
+
+  @spec spec_source(String.t(), atom()) :: String.t()
+  defp spec_source(path, function_name) do
+    ast = path |> File.read!() |> Code.string_to_quoted!(file: path)
+
+    {_ast, matches} =
+      Macro.prewalk(ast, [], fn
+        {:@, _meta, [{:spec, _spec_meta, [{:"::", _, [{^function_name, _, _}, _result]} = spec]}]} =
+            node,
+        acc ->
+          {node, [Macro.to_string(strip_meta(spec)) | acc]}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    case matches do
+      [source] -> source
+      _ -> flunk("expected one @spec #{function_name} in #{path}")
+    end
   end
 
   @spec type_source(String.t(), atom()) :: String.t()
