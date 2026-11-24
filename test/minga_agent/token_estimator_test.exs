@@ -172,4 +172,15 @@ defmodule MingaAgent.TokenEstimatorTest do
       assert long > short * 50
     end
   end
+
+  describe "media parts" do
+    test "an image counts a fixed per-part cost instead of zero or its encoded bytes" do
+      image = ReqLLM.Message.ContentPart.image(:binary.copy(<<0>>, 600_000), "image/png")
+      text = ReqLLM.Message.ContentPart.text("look")
+      with_image = [%{role: :user, content: [text, image]}]
+      text_only = [%{role: :user, content: [text]}]
+
+      assert TokenEstimator.estimate(with_image) - TokenEstimator.estimate(text_only) == 1_600
+    end
+  end
 end

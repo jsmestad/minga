@@ -9,10 +9,11 @@ defmodule MingaAgent.TokenEstimator do
   details, and provider replay metadata. A large tool argument now
   increases the estimate proportionally instead of being invisible.
 
-  The estimator is intentionally heuristic. Exact token counting
-  requires a provider-specific tokenizer, which adds dependencies and
-  per-provider code. The heuristic is conservative enough for admission
-  gating, compaction triggers, and context bar display.
+  Images, video and files count a fixed per-part cost, because providers
+  bill them by dimensions or pages rather than by encoded bytes.
+
+  The result is an estimate for display, not an upper bound. Exact counts
+  need a provider tokenizer, so admission decisions must not rely on it.
   """
 
   @typedoc "A message-like map with content and role."
@@ -30,6 +31,9 @@ defmodule MingaAgent.TokenEstimator do
 
   # Per tool call: id token, type token, function name token, JSON framing.
   @tool_call_overhead 6
+
+  # Typical provider cost of one image, video frame set or file attachment.
+  @media_part_tokens 1_600
 
   @doc """
   Estimates the total token count for a list of messages.
@@ -58,7 +62,7 @@ defmodule MingaAgent.TokenEstimator do
   ## Examples
 
       iex> MingaAgent.TokenEstimator.estimate_string("Hello, world!")
-      iex> 4
+      4
   """
   @spec estimate_string(String.t()) :: non_neg_integer()
   def estimate_string(text) when is_binary(text) do
@@ -131,6 +135,9 @@ defmodule MingaAgent.TokenEstimator do
   defp part_token_count(%{content: text}) when is_binary(text) do
     String.length(text) / @chars_per_token
   end
+
+  defp part_token_count(%{type: type}) when type in [:image, :image_url, :video_url, :file],
+    do: @media_part_tokens
 
   defp part_token_count(_), do: 0
 
