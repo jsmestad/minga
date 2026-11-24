@@ -14,6 +14,7 @@ defmodule MingaAgent.Providers.NativeTest do
   alias MingaAgent.TurnUsage
   alias MingaAgent.ProjectView.RecordingBackend
   alias MingaAgent.Providers.Native
+  alias ReqLLM.StreamChunk
   alias MingaAgent.Providers.Native.ReqLLMAdapter
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.Dispatch
@@ -636,23 +637,25 @@ defmodule MingaAgent.Providers.NativeTest do
       count = :counters.get(call_count, 1)
       :counters.add(call_count, 1, 1)
 
-      chunks =
-        case count do
-          0 ->
-            tool_names
-            |> Enum.with_index()
-            |> Enum.map(fn {name, index} ->
-              ReqLLM.StreamChunk.tool_call(name, %{}, %{id: "tc_#{name}", index: index})
-            end)
-            |> Kernel.++([ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})])
-
-          _ ->
-            [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
-        end
-
-      build_stream_response(chunks)
+      count
+      |> tool_call_batch_chunks(tool_names)
+      |> build_stream_response()
     end
   end
+
+  defp tool_call_batch_chunks(0, tool_names) do
+    calls =
+      tool_names
+      |> Enum.with_index()
+      |> Enum.map(fn {name, index} ->
+        StreamChunk.tool_call(name, %{}, %{id: "tc_#{name}", index: index})
+      end)
+
+    calls ++ [StreamChunk.meta(%{finish_reason: :tool_use})]
+  end
+
+  defp tool_call_batch_chunks(_count, _tool_names),
+    do: [StreamChunk.text("done"), StreamChunk.meta(%{finish_reason: :stop})]
 
   defp assert_tool_started(gate_ref, name) do
     assert_receive {^gate_ref, :started, ^name, worker}, 2_000
