@@ -82,6 +82,69 @@ defmodule Minga.Core.Diff do
   end
 
   @doc """
+  Returns the hunks of `diff_lines/2` when at most `max_edits` lines must be deleted or inserted to turn `base_lines` into `current_lines`, and `:over_budget` otherwise.
+
+  A line diff costs time proportional to the line count times the number of edited lines, so reordering or rewriting a large file can take seconds. This function first measures that edit count with the same greedy algorithm and stops as soon as it passes `max_edits`, so the refusal costs at most about `(length(base_lines) + length(current_lines)) * max_edits` steps, and an accepted diff costs about the same again. A deleted line and an inserted line are one edit each, so a changed line is two.
+  """
+  @spec diff_lines_within([String.t()], [String.t()], non_neg_integer()) ::
+          {:ok, [hunk()]} | :over_budget
+  def diff_lines_within(base_lines, current_lines, max_edits)
+      when is_list(base_lines) and is_list(current_lines) and is_integer(max_edits) and
+             max_edits >= 0 do
+    if edits_within?(List.to_tuple(base_lines), List.to_tuple(current_lines), max_edits),
+      do: {:ok, diff_lines(base_lines, current_lines)},
+      else: :over_budget
+  end
+
+  # Myers' greedy shortest-edit-script search, measuring only the distance. Round `edits` extends the furthest-reaching path on every diagonal `k = x - y` that `edits` deletions and insertions can reach; `reach` maps each diagonal to the base index its path has consumed.
+  @spec edits_within?(tuple(), tuple(), non_neg_integer()) :: boolean()
+  defp edits_within?(base, current, max_edits) do
+    abs(tuple_size(base) - tuple_size(current)) <= max_edits and
+      edit_rounds(base, current, 0, max_edits, %{1 => 0})
+  end
+
+  @spec edit_rounds(tuple(), tuple(), non_neg_integer(), non_neg_integer(), %{
+          integer() => non_neg_integer()
+        }) :: boolean()
+  defp edit_rounds(_base, _current, edits, max_edits, _reach) when edits > max_edits, do: false
+
+  defp edit_rounds(base, current, edits, max_edits, reach) do
+    case extend_diagonals(base, current, edits, -edits, reach) do
+      :reached_end -> true
+      {:continue, reach} -> edit_rounds(base, current, edits + 1, max_edits, reach)
+    end
+  end
+
+  @spec extend_diagonals(tuple(), tuple(), non_neg_integer(), integer(), %{
+          integer() => non_neg_integer()
+        }) :: :reached_end | {:continue, %{integer() => non_neg_integer()}}
+  defp extend_diagonals(_base, _current, edits, k, reach) when k > edits, do: {:continue, reach}
+
+  defp extend_diagonals(base, current, edits, k, reach) do
+    x =
+      if k == -edits or (k != edits and Map.fetch!(reach, k - 1) < Map.fetch!(reach, k + 1)),
+        do: Map.fetch!(reach, k + 1),
+        else: Map.fetch!(reach, k - 1) + 1
+
+    x = follow_matches(base, current, x, x - k)
+
+    if x >= tuple_size(base) and x - k >= tuple_size(current),
+      do: :reached_end,
+      else: extend_diagonals(base, current, edits, k + 2, Map.put(reach, k, x))
+  end
+
+  # Follows equal lines diagonally from `{x, y}` and returns the base index it stops at.
+  @spec follow_matches(tuple(), tuple(), non_neg_integer(), integer()) :: non_neg_integer()
+  defp follow_matches(base, current, x, y)
+       when x < tuple_size(base) and y >= 0 and y < tuple_size(current) do
+    if elem(base, x) == elem(current, y),
+      do: follow_matches(base, current, x + 1, y + 1),
+      else: x
+  end
+
+  defp follow_matches(_base, _current, x, _y), do: x
+
+  @doc """
   Computes character-level differences between two strings.
 
   Returns a list of tagged segments indicating equal, deleted, and inserted

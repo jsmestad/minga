@@ -81,6 +81,65 @@ defmodule Minga.Buffer.UndoPatchTest do
       assert Document.content(undone) == Document.content(old)
     end
 
+    # A permutation holds the same lines on both sides, so only the edit distance itself, not a line count, shows that a precise diff would be too expensive.
+    test "reordering the lines of a large file records the reordered span as one region" do
+      lines = for n <- 1..2_000, do: "line #{n}\n"
+      swapped = lines |> Enum.chunk_every(2) |> Enum.flat_map(&Enum.reverse/1)
+      shuffled = few_values_shuffle(4_000)
+
+      for {old_lines, new_lines} <- [
+            {lines, Enum.reverse(lines)},
+            {lines, swapped},
+            {Enum.sort(shuffled), shuffled}
+          ] do
+        old = doc("header\n" <> Enum.join(old_lines) <> "footer\n")
+        new = doc("header\n" <> Enum.join(new_lines) <> "footer\n")
+
+        assert [patch] = UndoPatch.changes(old, new)
+        assert patch.start_byte == byte_size("header\n")
+
+        {:ok, undone, [redo]} = UndoPatch.apply_all([patch], new)
+        assert Document.content(undone) == Document.content(old)
+        assert {:ok, redone} = UndoPatch.apply(redo, undone)
+        assert Document.content(redone) == Document.content(new)
+      end
+    end
+
+    test "swapping two lines inside a large file stays precise" do
+      lines = for n <- 1..20_000, do: "line #{n}\n"
+
+      new_lines =
+        lines |> List.replace_at(100, "line 102\n") |> List.replace_at(101, "line 101\n")
+
+      patches = UndoPatch.changes(doc(Enum.join(lines)), doc(Enum.join(new_lines)))
+
+      assert [{792, "line 101\n", ""}, {810, "", "line 101\n"}] ==
+               Enum.map(patches, &{&1.start_byte, &1.old_text, &1.new_text})
+    end
+
+    # Shuffles this large hold the same lines on both sides and far more differing lines than the budget allows, so each one takes the capped fallback.
+    property "a shuffled large file becomes one region that undoes and redoes exactly" do
+      check all(
+              count <- integer(800..1_500),
+              seed <- integer(1..1_000_000),
+              cursor_pick <- integer(0..1_499),
+              max_runs: 10
+            ) do
+        lines = for n <- 1..count, do: "line #{n}\n"
+        old = Document.move_to(doc(Enum.join(lines)), {rem(cursor_pick, count), 2})
+        new = doc(Enum.join(seeded_shuffle(lines, seed)))
+
+        assert [patch] = UndoPatch.changes(old, new)
+
+        {:ok, undone, redo} = UndoPatch.apply_all([patch], new)
+        assert Document.content(undone) == Document.content(old)
+        assert Document.cursor(undone) == Document.cursor(old)
+
+        {:ok, redone, _undo} = UndoPatch.apply_all(redo, undone)
+        assert Document.content(redone) == Document.content(new)
+      end
+    end
+
     # The per-change patches record the same edit as the whole-document patch: undoing either
     # from the new content restores the old content and cursor, and redoing restores the new.
     property "rebuild the new content exactly and undo to the same document as one whole patch" do
@@ -118,6 +177,27 @@ defmodule Minga.Buffer.UndoPatchTest do
         end
       end
     end
+  end
+
+  defp seeded_shuffle(items, seed) do
+    {keyed, _state} =
+      Enum.map_reduce(items, :rand.seed_s(:exsss, seed), fn item, state ->
+        {key, state} = :rand.uniform_s(state)
+        {{key, item}, state}
+      end)
+
+    keyed |> Enum.sort() |> Enum.map(&elem(&1, 1))
+  end
+
+  # `count` lines over ten distinct values in a fixed pseudo-random order.
+  defp few_values_shuffle(count) do
+    {lines, _state} =
+      Enum.map_reduce(1..count, :rand.seed_s(:exsss, {2848, 4047, 7}), fn _n, state ->
+        {value, state} = :rand.uniform_s(10, state)
+        {"value #{value}\n", state}
+      end)
+
+    lines
   end
 
   defp line_gen, do: member_of(["", "a", "b", "é", "keep", "λx", "  end"])
