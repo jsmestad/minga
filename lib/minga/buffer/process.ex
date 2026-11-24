@@ -79,6 +79,7 @@ defmodule Minga.Buffer.Process do
           | {:swap_backend_options, keyword()}
           | {:swap_timer_start, SwapState.timer_start()}
           | {:events_registry, Minga.Events.registry()}
+          | {:history_run_budget, pos_integer()}
 
   @typedoc "Internal state of the buffer server."
   @type state :: BufState.t()
@@ -1186,10 +1187,13 @@ defmodule Minga.Buffer.Process do
   @doc """
   Reverts every remaining step of the Minga task that edited this buffer most recently, keeping your edits. Returns how many steps it reverted.
 
-  When a task that started later rewrote that task's text, it reverts the newer task first, so every call makes progress; *Messages* names the task it reverted. See `Minga.Buffer.UndoHistory.next_reject/1`.
+  When a task that started later rewrote that task's text, it reverts the newer task first; tasks that edited inside each other's changes revert together. *Messages* names the tasks it reverted. When your own edit inside a task's change keeps every such task from being reverted exactly, it changes nothing, returns `{:blocked, {:overlaps, :you}}`, and *Messages* names the file, the task, and the line of your edit. See `Minga.Buffer.UndoHistory.next_reject/1`.
   """
   @spec undo_agent_session(GenServer.server()) ::
-          {:ok, non_neg_integer()} | :empty | {:error, UndoPatch.apply_error()}
+          {:ok, non_neg_integer()}
+          | :empty
+          | UndoHistory.blocked()
+          | {:error, UndoPatch.apply_error()}
   def undo_agent_session(server) do
     GenServer.call(server, :undo_agent_session)
   end
@@ -1389,6 +1393,9 @@ defmodule Minga.Buffer.Process do
 
   # ── Server Callbacks ──
 
+  # Runs one compaction slice examines at most, measured to keep a slice near 10 ms; see `UndoHistory.compact_slice/2`.
+  @compaction_slice_runs 500
+
   @impl true
   @spec init(keyword()) :: {:ok, state(), {:continue, :take_kept_swap}} | {:stop, term()}
   def init(opts) do
@@ -1431,7 +1438,7 @@ defmodule Minga.Buffer.Process do
 
         state = %BufState{
           document: document,
-          undo_history: UndoHistory.new(document),
+          undo_history: UndoHistory.new(document, history_options(opts)),
           file_path: path,
           filetype: filetype,
           options_server: options_server,
@@ -2633,12 +2640,35 @@ defmodule Minga.Buffer.Process do
         log_history_failure(:undo_agent_session, reason)
         {:reply, error, state}
 
-      {:ok, restore, undo_history, count, task} ->
+      {:blocked, overlap, task, offset} ->
+        {line, _column} = Position.from_point(state.document, offset)
+
         log_to_messages(
           state,
-          "Reverted #{task_label(task)} in this buffer (#{count} step(s))",
+          "#{task_label(task)} cannot be reverted exactly in #{display_name_from_state(state)}: " <>
+            "your edit near line #{line + 1} is inside its change; undo that edit first",
+          :warning
+        )
+
+        {:reply, {:blocked, overlap}, state}
+
+      {:ok, restore, undo_history, count, tasks, dropped} ->
+        log_to_messages(
+          state,
+          "Reverted #{tasks_label(tasks)} in this buffer (#{count} step(s))",
           :info
         )
+
+        for offset <- dropped do
+          {line, _column} = Position.from_point(restore.document, offset)
+
+          log_to_messages(
+            state,
+            "Dropped your edit near line #{line + 1} of #{display_name_from_state(state)} from undo: " <>
+              "Minga had rewritten all of it inside the reverted change",
+            :info
+          )
+        end
 
         {:reply, {:ok, count}, install_restore(state, restore, undo_history)}
     end
@@ -3146,6 +3176,48 @@ defmodule Minga.Buffer.Process do
 
   def handle_info({:auto_save, _token}, state) do
     {:noreply, state}
+  end
+
+  # One pure compaction slice per message, so edits and reads run between slices.
+  def handle_info(:compact_history, state) do
+    {status, history, slice} =
+      Minga.Telemetry.span([:minga, :buffer, :compact_slice], %{}, fn ->
+        UndoHistory.compact_slice(state.undo_history, @compaction_slice_runs)
+      end)
+
+    state = %{state | undo_history: history}
+    name = display_name_from_state(state)
+
+    if slice.merged > 0 do
+      log_to_messages(
+        state,
+        "Compacted Minga's history in #{name}: merged #{slice.merged} overwritten step draft(s), " <>
+          "#{slice.runs} runs remain",
+        :info
+      )
+    end
+
+    case status do
+      :more ->
+        send(self(), :compact_history)
+        {:noreply, state}
+
+      :done ->
+        {:noreply, %{state | compaction_scheduled: false}}
+
+      :over_budget ->
+        Minga.Log.warning(
+          :editor,
+          "History of #{name} keeps #{slice.runs} runs with no drafts left to merge; " <>
+            "unreviewed Minga steps and your undo history hold it"
+        )
+
+        Minga.Telemetry.execute([:minga, :buffer, :history_over_budget], %{runs: slice.runs}, %{
+          buffer: name
+        })
+
+        {:noreply, %{state | compaction_scheduled: false}}
+    end
   end
 
   @impl true
@@ -3836,7 +3908,31 @@ defmodule Minga.Buffer.Process do
       |> record_history(state, document, record)
       |> history_in_step(state, document, :after)
 
-    %{state | document: document, undo_history: history}
+    schedule_compaction(%{state | document: document, undo_history: history})
+  end
+
+  # A Minga step left the history over its run budget: compact it in slices between messages, off the edit path.
+  @spec schedule_compaction(state()) :: state()
+  defp schedule_compaction(%{compaction_scheduled: false} = state) do
+    if UndoHistory.compaction_wanted?(state.undo_history) do
+      send(self(), :compact_history)
+      %{state | compaction_scheduled: true}
+    else
+      state
+    end
+  end
+
+  defp schedule_compaction(state), do: state
+
+  # Tasks that depend on each other revert together; see `UndoHistory.next_reject/1`.
+  @spec tasks_label([UndoHistory.task(), ...]) :: String.t()
+  defp tasks_label([task]), do: task_label(task)
+
+  defp tasks_label(tasks) do
+    {last, others} = List.pop_at(Enum.map(tasks, &task_label/1), -1)
+
+    Enum.join(others, ", ") <>
+      " and " <> last <> ", together because they edited inside each other's changes"
   end
 
   @spec task_label(UndoHistory.task()) :: String.t()
@@ -3894,7 +3990,16 @@ defmodule Minga.Buffer.Process do
     message = "Undo history and authorship for #{name} were reset after an internal error."
     log_to_messages(state, message <> " Your text is unchanged.", :error)
 
-    UndoHistory.new(document)
+    UndoHistory.reset(state.undo_history, document)
+  end
+
+  # Tests shrink the run budget to exercise draft compaction on small buffers.
+  @spec history_options(keyword()) :: [{:run_budget, pos_integer()}]
+  defp history_options(opts) do
+    case Keyword.fetch(opts, :history_run_budget) do
+      {:ok, budget} when is_integer(budget) and budget > 0 -> [run_budget: budget]
+      _default -> []
+    end
   end
 
   # A whole-content replacement records one patch per changed region.

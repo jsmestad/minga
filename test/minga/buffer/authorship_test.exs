@@ -6,6 +6,8 @@ defmodule Minga.Buffer.AuthorshipTest do
   use ExUnitProperties
 
   alias Minga.Buffer.EditSource
+  alias Minga.Buffer.Provenance
+  alias Minga.Buffer.UndoHistory
   alias Minga.Buffer.Process, as: BufferProcess
 
   @minga EditSource.minga("task-1", "call-1")
@@ -207,6 +209,68 @@ defmodule Minga.Buffer.AuthorshipTest do
                       %{text: "Reverted Minga task t1 in this buffer" <> _}}
 
       assert BufferProcess.undo_agent_session(buffer) == :empty
+    end
+
+    test "a task rewriting its own text past the run budget is compacted off the edit path, and reverts exactly" do
+      registry = Module.concat(__MODULE__, "Events#{System.unique_integer([:positive])}")
+      start_supervised!({Registry, keys: :duplicate, name: registry})
+      :ok = Minga.Events.subscribe(:log_message, registry)
+      original = Enum.map_join(1..40, fn n -> "value_#{n} = beta\n" end)
+
+      buffer =
+        start_supervised!(
+          {BufferProcess, content: original, events_registry: registry, history_run_budget: 60},
+          id: make_ref()
+        )
+
+      for round <- 1..6 do
+        minga_replace(
+          buffer,
+          String.replace(BufferProcess.content(buffer), ~r/beta\d*/, "beta#{round}"),
+          step("t", "s#{round}")
+        )
+      end
+
+      assert_receive {:minga_event, :log_message, %{text: "Compacted Minga's history in " <> _}}
+      %{undo_history: history} = :sys.get_state(buffer)
+      provenance = UndoHistory.provenance(history)
+      assert Provenance.run_count(provenance) <= 45 or Provenance.draft_count(provenance) == 0
+
+      assert {:ok, _steps} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == original
+    end
+
+    test "SPC a u names your rewritten edit it drops, and the line of a visible one that holds the task" do
+      registry = Module.concat(__MODULE__, "Events#{System.unique_integer([:positive])}")
+      start_supervised!({Registry, keys: :duplicate, name: registry})
+      :ok = Minga.Events.subscribe(:log_message, registry)
+
+      buffer =
+        start_supervised!({BufferProcess, content: "top\nxay\n", events_registry: registry},
+          id: make_ref()
+        )
+
+      replace_at(buffer, {1, 1}, 1, "bcd", step("t", "s1"))
+      replace_at(buffer, {1, 2}, 1, "QR")
+      replace_at(buffer, {1, 3}, 1, "Z", step("t", "s2"))
+
+      assert BufferProcess.undo_agent_session(buffer) == {:blocked, {:overlaps, :you}}
+      assert BufferProcess.content(buffer) == "top\nxbQZdy\n"
+
+      assert_receive {:minga_event, :log_message,
+                      %{text: "Minga task t cannot be reverted exactly in " <> rest}}
+
+      assert rest =~ "your edit near line 2 is inside its change"
+
+      replace_at(buffer, {1, 2}, 1, "P", step("t", "s3"))
+      assert {:ok, 3} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "top\nxay\n"
+
+      assert_receive {:minga_event, :log_message,
+                      %{text: "Reverted Minga task t in this buffer" <> _}}
+
+      assert_receive {:minga_event, :log_message,
+                      %{text: "Dropped your edit near line 2 of " <> _}}
     end
 
     test "retyping one of two words a Minga step changed on a line rejects to the other word's original" do

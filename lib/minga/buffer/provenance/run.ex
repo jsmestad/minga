@@ -12,7 +12,7 @@ defmodule Minga.Buffer.Provenance.Run do
   alias Minga.Buffer.Provenance.Locator
 
   @enforce_keys [:id, :bytes, :author]
-  defstruct [:id, :bytes, :author, group: nil, deletions: [], text: nil, live: true]
+  defstruct [:id, :bytes, :author, group: nil, deletions: [], overlaps: [], text: nil, live: true]
 
   @typedoc """
   Who wrote a run: you, Minga in a task, or nobody we know of.
@@ -20,6 +20,11 @@ defmodule Minga.Buffer.Provenance.Run do
   `:unattributed` is text that predates tracking: the file as it was loaded, text appended to a log buffer, or text changed on disk. `{:minga, :untasked}` is text an agent edit wrote without a task.
   """
   @type author :: :you | :unattributed | Minga.Buffer.Author.t() | {:minga, :untasked}
+
+  @typedoc """
+  An overlap mark on a replacement's tombstone: `{owner, group}`, where `owner` is the Minga group whose replacement this tombstone belongs to and `group` deleted part of that replacement, or is `{:permanent, key}` once that group is final. It never affects whether the run is live; it only makes rejecting `owner` inexact.
+  """
+  @type overlap :: {group_id(), group_id() | {:permanent, term()}}
 
   @typedoc "A history group, as numbered by `Minga.Buffer.Provenance`."
   @type group_id :: pos_integer()
@@ -30,6 +35,7 @@ defmodule Minga.Buffer.Provenance.Run do
           author: author(),
           group: group_id() | nil,
           deletions: [group_id()],
+          overlaps: [overlap()],
           text: binary() | nil,
           live: boolean()
         }

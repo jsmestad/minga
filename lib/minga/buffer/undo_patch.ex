@@ -134,8 +134,142 @@ defmodule Minga.Buffer.UndoPatch do
 
     case diff do
       {:ok, hunks} -> Enum.map(hunks, &{&1.old_start, &1.old_count, &1.start_line, &1.count})
-      :over_budget -> [{0, old_count, 0, new_count}]
+      :over_budget -> unique_line_regions(old_middle, new_middle)
     end
+  end
+
+  # Past the budget, the lines that occur exactly once on each side and in the same order on both still pin the two
+  # sides together (the longest increasing subsequence of their positions, O(n log n)). The gaps between those lines
+  # are diffed again under the same budget, so one inserted line or a scattered rewrite stays a set of small regions.
+  # Only a gap with no such line becomes one region.
+  @spec unique_line_regions([binary()], [binary()]) :: [
+          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
+        ]
+  defp unique_line_regions(old_middle, new_middle) do
+    case unique_anchors(old_middle, new_middle) do
+      [] ->
+        [{0, length(old_middle), 0, length(new_middle)}]
+
+      anchors ->
+        old_tuple = List.to_tuple(old_middle)
+        new_tuple = List.to_tuple(new_middle)
+        ends = [{tuple_size(old_tuple), tuple_size(new_tuple)}]
+
+        {regions, _next} =
+          Enum.flat_map_reduce(
+            anchors ++ ends,
+            {0, 0},
+            &gap_regions(&1, &2, old_tuple, new_tuple)
+          )
+
+        regions
+    end
+  end
+
+  # Diffs the gap before one anchor under the same budget, shifted to the middle's positions.
+  @spec gap_regions(
+          {non_neg_integer(), non_neg_integer()},
+          {non_neg_integer(), non_neg_integer()},
+          tuple(),
+          tuple()
+        ) ::
+          {[{non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}],
+           {non_neg_integer(), non_neg_integer()}}
+  defp gap_regions({old_anchor, new_anchor}, {old_from, new_from}, old_tuple, new_tuple) do
+    gap =
+      middle_regions(
+        tuple_slice(old_tuple, old_from, old_anchor),
+        tuple_slice(new_tuple, new_from, new_anchor)
+      )
+
+    shifted = for {os, oc, ns, nc} <- gap, do: {os + old_from, oc, ns + new_from, nc}
+    {shifted, {old_anchor + 1, new_anchor + 1}}
+  end
+
+  @spec tuple_slice(tuple(), non_neg_integer(), non_neg_integer()) :: [binary()]
+  defp tuple_slice(tuple, from, to), do: for(index <- from..(to - 1)//1, do: elem(tuple, index))
+
+  # Pairs of positions of lines unique on both sides, in increasing order on both.
+  @spec unique_anchors([binary()], [binary()]) :: [{non_neg_integer(), non_neg_integer()}]
+  defp unique_anchors(old_middle, new_middle) do
+    old_unique = unique_positions(old_middle)
+    new_unique = unique_positions(new_middle)
+
+    old_unique
+    |> Enum.flat_map(fn {line, old_at} ->
+      case new_unique do
+        %{^line => new_at} -> [{old_at, new_at}]
+        _missing -> []
+      end
+    end)
+    |> Enum.sort()
+    |> longest_increasing()
+  end
+
+  @spec unique_positions([binary()]) :: %{binary() => non_neg_integer()}
+  defp unique_positions(lines) do
+    {positions, counts} =
+      lines
+      |> Enum.with_index()
+      |> Enum.reduce({%{}, %{}}, fn {line, index}, {positions, counts} ->
+        {Map.put_new(positions, line, index), Map.update(counts, line, 1, &(&1 + 1))}
+      end)
+
+    Map.filter(positions, fn {line, _index} -> Map.fetch!(counts, line) == 1 end)
+  end
+
+  # Longest subsequence of pairs, already sorted by the first position, that increases in the second position too.
+  # Patience sorting over the second positions, O(n log n).
+  @spec longest_increasing([{non_neg_integer(), non_neg_integer()}]) :: [
+          {non_neg_integer(), non_neg_integer()}
+        ]
+  defp longest_increasing([]), do: []
+
+  defp longest_increasing(pairs) do
+    {tops, links} =
+      pairs
+      |> Enum.with_index()
+      |> Enum.reduce({:gb_trees.empty(), %{}}, fn {{_old_at, new_at} = pair, index},
+                                                  {tops, links} ->
+        # `tops` maps a pile number to {new position, index} of its top; piles have increasing tops.
+        pile = first_pile_at_least(tops, new_at)
+        previous = if pile > 0, do: elem(:gb_trees.get(pile - 1, tops), 1)
+        {:gb_trees.enter(pile, {new_at, index}, tops), Map.put(links, index, {pair, previous})}
+      end)
+
+    {_last_new, last_index} = elem(:gb_trees.largest(tops), 1)
+    follow_links(links, last_index, [])
+  end
+
+  @spec first_pile_at_least(:gb_trees.tree(), non_neg_integer()) :: non_neg_integer()
+  defp first_pile_at_least(tops, new_at) do
+    search_piles(tops, new_at, 0, :gb_trees.size(tops))
+  end
+
+  @spec search_piles(:gb_trees.tree(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp search_piles(_tops, _new_at, low, high) when low >= high, do: low
+
+  defp search_piles(tops, new_at, low, high) do
+    middle = div(low + high, 2)
+    {top, _index} = :gb_trees.get(middle, tops)
+
+    if top < new_at,
+      do: search_piles(tops, new_at, middle + 1, high),
+      else: search_piles(tops, new_at, low, middle)
+  end
+
+  @spec follow_links(
+          %{non_neg_integer() => {tuple(), non_neg_integer() | nil}},
+          non_neg_integer() | nil,
+          list()
+        ) ::
+          [{non_neg_integer(), non_neg_integer()}]
+  defp follow_links(_links, nil, acc), do: acc
+
+  defp follow_links(links, index, acc) do
+    {pair, previous} = Map.fetch!(links, index)
+    follow_links(links, previous, [pair | acc])
   end
 
   # Drops the leading and trailing lines both sides share, returning how many leading lines were
@@ -252,33 +386,60 @@ defmodule Minga.Buffer.UndoPatch do
   `Minga.Buffer.UndoHistory` records changes this precise, so an edit that rewrites whole lines only takes authorship of the bytes it changed.
   """
   @spec precise_changes(t()) :: [{non_neg_integer(), byte_fragment(), byte_fragment()}]
-  def precise_changes(%__MODULE__{start_byte: start, old_text: removed, new_text: inserted}) do
-    removed_lines = lines_with_newlines(removed)
-    inserted_lines = lines_with_newlines(inserted)
+  def precise_changes(%__MODULE__{start_byte: start, old_text: removed, new_text: inserted}),
+    do: segment_changes(start, removed, inserted, false)
 
-    case line_pairs(removed_lines, inserted_lines) do
+  @doc """
+  Returns the smallest changes that turn `old`, located at byte `at`, into `new`, like `precise_changes/1`.
+
+  With `words?` true, the text left after trimming each line pair is also compared word by word (up to 512 words per pair), so separately changed words become separate changes. `Minga.Buffer.UndoHistory` asks for words only next to another author's text, where an unchanged word must keep its author.
+  """
+  @spec segment_changes(non_neg_integer(), byte_fragment(), byte_fragment(), boolean()) :: [
+          {non_neg_integer(), byte_fragment(), byte_fragment()}
+        ]
+  def segment_changes(at, old, new, words?)
+      when is_integer(at) and at >= 0 and is_binary(old) and is_binary(new) and is_boolean(words?) do
+    case line_pairs(lines_with_newlines(old), lines_with_newlines(new)) do
       [] ->
-        precise_pair(start, removed, inserted)
+        precise_pair(at, old, new, words?)
 
       pairs ->
         pairs
-        |> Enum.flat_map_reduce(start, fn {old_line, new_line}, offset ->
-          {precise_pair(offset, old_line, new_line), offset + byte_size(old_line)}
+        |> Enum.flat_map_reduce(at, fn {old_line, new_line}, offset ->
+          {precise_pair(offset, old_line, new_line, words?), offset + byte_size(old_line)}
         end)
         |> elem(0)
     end
   end
 
-  # Trims a pair, then splits what remains into its changed words.
-  @spec precise_pair(non_neg_integer(), binary(), binary()) :: [
+  # Trims a pair and, when asked, splits what remains into its changed words.
+  @spec precise_pair(non_neg_integer(), binary(), binary(), boolean()) :: [
           {non_neg_integer(), byte_fragment(), byte_fragment()}
         ]
-  defp precise_pair(start, old, new) do
+  defp precise_pair(start, old, new, words?) do
     case trimmed_change(start, old, new) do
-      [{at, old_middle, new_middle}] -> word_changes(at, old_middle, new_middle)
-      [] -> []
+      [{at, old_middle, new_middle}] = change ->
+        if words? or several_words?(old_middle, new_middle),
+          do: word_changes(at, old_middle, new_middle),
+          else: change
+
+      [] ->
+        []
     end
   end
+
+  # A trimmed pair with no separator on either side is one word on each side, so a word comparison could not split it.
+  # A byte scan of the trimmed text decides, so a whole-file rename of single tokens never tokenizes.
+  @spec several_words?(binary(), binary()) :: boolean()
+  defp several_words?(old_middle, new_middle),
+    do: separator?(old_middle) or separator?(new_middle)
+
+  @separator_bytes ~c" \t\r\n.,;:()[]{}<>=+-*/&|!?'\"`~@#$%^"
+
+  @spec separator?(binary()) :: boolean()
+  defp separator?(<<byte, _rest::binary>>) when byte in @separator_bytes, do: true
+  defp separator?(<<_byte, rest::binary>>), do: separator?(rest)
+  defp separator?(<<>>), do: false
 
   # A word diff costs at most (words on both sides) squared, so this bound caps it at a few milliseconds whatever the
   # words are, including the same words reordered.
@@ -417,6 +578,11 @@ defmodule Minga.Buffer.UndoPatch do
   defp code_point_start?(text, position) do
     position >= byte_size(text) or Bitwise.band(:binary.at(text, position), 0xC0) != 0x80
   end
+
+  @doc "Returns where a forward patch starts, the bytes it removed, and the bytes it inserted."
+  @spec change(t()) :: {non_neg_integer(), byte_fragment(), byte_fragment()}
+  def change(%__MODULE__{start_byte: start_byte, old_text: removed, new_text: inserted}),
+    do: {start_byte, removed, inserted}
 
   @doc "Returns the cursor the patch restores when applied."
   @spec cursor(t()) :: Document.position()

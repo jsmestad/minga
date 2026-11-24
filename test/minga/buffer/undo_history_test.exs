@@ -6,6 +6,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
   alias Minga.Buffer.Provenance
   alias Minga.Buffer.UndoHistory
   alias Minga.Buffer.UndoPatch
+  alias Minga.Test.UndoUnitModel, as: UnitModel
 
   # Recording calls take a monotonic timestamp, so tests drive the coalescing clock instead of sleeping.
   @t0 1_000
@@ -233,7 +234,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
         |> edit(@other_task, 0, 0, "other ")
         |> edit(@step_two, 20, 0, "two\n")
 
-      assert {:ok, restore, history, 2, _task} =
+      assert {:ok, restore, history, 2, _tasks, []} =
                UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
       assert restore.version == :advance
@@ -255,7 +256,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
     test "rejecting a task after other changes takes a new version" do
       world = world("one\n") |> edit(@step_one, 4, 0, "two\n") |> edit(:user, 0, 0, "x")
 
-      {:ok, restore, _history, 1, _task} =
+      {:ok, restore, _history, 1, _tasks, []} =
         UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
       assert restore.version == :advance
@@ -281,7 +282,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert provenance |> Provenance.runs() |> Enum.count() <= 1002
       assert Provenance.author_at(provenance, 5) == {:minga, :untasked}
 
-      {:ok, restore, history, 1000, {:minga, :untasked}} =
+      {:ok, restore, history, 1000, [{:minga, :untasked}], []} =
         UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
       assert restore.version == :advance
@@ -292,7 +293,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
                {:minga, :untasked}
 
       # The tasked step is never evicted and still reverts on its own.
-      assert {:ok, _restore, _history, 1, {:minga, "task-1"}} =
+      assert {:ok, _restore, _history, 1, [{:minga, "task-1"}], []} =
                UndoHistory.undo_agent_session(history, world.version + 1, restore.document)
     end
 
@@ -352,10 +353,10 @@ defmodule Minga.Buffer.UndoHistoryTest do
                {:blocked, {:overlaps, @other_task}}
 
       # task-1 edited last, but task-2 blocks it, so the next revert is task-2's.
-      assert UndoHistory.next_reject(world.history) == {:minga, "task-2"}
+      assert UndoHistory.next_reject(world.history) == [{:minga, "task-2"}]
       world = reject_newest_task(world)
       assert text(world) == "ayb\nQ"
-      assert UndoHistory.next_reject(world.history) == {:minga, "task-1"}
+      assert UndoHistory.next_reject(world.history) == [{:minga, "task-1"}]
       world = reject_newest_task(world)
       assert text(world) == "axb\nq"
       assert UndoHistory.next_reject(world.history) == nil
@@ -400,6 +401,69 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert Provenance.author_at(provenance, 0) == :you
       assert Provenance.author_at(provenance, 7) == {:minga, "task-1"}
       assert Provenance.author_at(provenance, 11) == :unattributed
+    end
+
+    # N6 at both granularities: a word-precise recording keeps the reject exact; a coarse one refuses it.
+    test "retyping one of two words Minga changed rejects exactly when recorded per word" do
+      world =
+        world("foo, bar, baz\n") |> edit(@step_one, 0, 3, "FOO") |> edit(@step_one, 10, 3, "BAZ")
+
+      world = edit(world, :user, 10, 3, "qux")
+
+      assert {:ok, restore, _history, 1} =
+               UndoHistory.reject_task(
+                 world.history,
+                 {:minga, "task-1"},
+                 world.version,
+                 world.doc
+               )
+
+      assert Document.content(restore.document) == "foo, bar, qux\n"
+    end
+
+    test "retyping one of two words inside one coarse Minga change refuses the reject until you undo it" do
+      world =
+        world("foo, bar, baz\n", recording: :coarse) |> edit(@step_one, 0, 13, "FOO, bar, BAZ")
+
+      world = edit(world, :user, 10, 3, "qux")
+
+      assert UndoHistory.reject_task(world.history, {:minga, "task-1"}, world.version, world.doc) ==
+               {:blocked, {:overlaps, :you}}
+
+      assert {:blocked, {:overlaps, :you}, {:minga, "task-1"}, 10} =
+               UndoHistory.undo_agent_session(world.history, world.version, world.doc)
+
+      world = undo!(world)
+
+      assert {:ok, restore, _history, 1, [{:minga, "task-1"}], []} =
+               UndoHistory.undo_agent_session(world.history, world.version, world.doc)
+
+      assert Document.content(restore.document) == "foo, bar, baz\n"
+    end
+
+    test "an edit of yours inside Minga's change that Minga then rewrote whole is dropped with the task" do
+      world = world("xay\n") |> edit(@step_one, 1, 1, "bcd") |> edit(:user, 2, 1, "Q")
+      world = edit(world, @step_two, 2, 1, "Z")
+      assert text(world) == "xbZdy\n"
+      assert {:blocked, {:overlaps, @step_two}} = step(world, :undo)
+
+      assert {:ok, restore, history, 2, [{:minga, "task-1"}], [1]} =
+               UndoHistory.undo_agent_session(world.history, world.version, world.doc)
+
+      assert Document.content(restore.document) == "xay\n"
+      assert UndoHistory.undo_count(history) == 0
+    end
+
+    test "an edit of yours inside Minga's change with text still visible holds the task" do
+      world = world("xay\n") |> edit(@step_one, 1, 1, "bcd") |> edit(:user, 2, 1, "QR")
+      world = edit(world, @step_two, 3, 1, "Z")
+      assert text(world) == "xbQZdy\n"
+      assert {:blocked, {:overlaps, @step_two}} = step(world, :undo)
+
+      assert {:blocked, {:overlaps, :you}, {:minga, "task-1"}, 2} =
+               UndoHistory.undo_agent_session(world.history, world.version, world.doc)
+
+      assert UndoHistory.next_reject(world.history) == nil
     end
 
     test "undo_agent_session is :empty without Minga steps" do
@@ -449,10 +513,101 @@ defmodule Minga.Buffer.UndoHistoryTest do
       end
     end
 
-    property "rejecting Minga's steps and undoing all of yours restores the original" do
+    property "SPC a u reverts what the model accepts, keeps your visible text, and with undo restores the original" do
       check all(commands <- StreamData.list_of(command(), max_length: 40), max_runs: 200) do
         world = Enum.reduce(commands, world("abc\ndef\n"), &run/2)
-        assert text(unwind(world)) == "abc\ndef\n"
+
+        case unwind(world) do
+          {:done, world} -> assert text(world) == "abc\ndef\n"
+          {:stuck, world} -> assert UnitModel.revertable_units(world.history) == MapSet.new()
+        end
+      end
+
+      IO.puts(
+        "\n[units] multi-node units reverted: #{Process.get(:multi_units, 0)}, stuck runs: #{Process.get(:stuck, 0)}"
+      )
+    end
+
+    property "with coarse recording, rejecting any task is exact or refused, and SPC a u matches the model" do
+      check all(commands <- StreamData.list_of(coarse_command(), max_length: 30), max_runs: 300) do
+        world = Enum.reduce(commands, world("ab cd ef\ngh ij\n", recording: :coarse), &run/2)
+        assert_rejects_exact_or_refused(world)
+        {_done_or_stuck, world} = reject_all(world)
+        assert UnitModel.revertable_units(world.history) == MapSet.new()
+      end
+    end
+
+    # Past the 512-word cap a long line is recorded as one change even when precise.
+    property "a Minga rewrite of a line longer than the word cap, edited inside by you, rejects exactly or is refused" do
+      words = for n <- 1..600, do: "w#{n}"
+
+      check all(
+              rewritten <-
+                StreamData.list_of(StreamData.integer(0..599), min_length: 2, max_length: 6),
+              your_word <- StreamData.integer(0..599),
+              your_text <- StreamData.string(?x..?z, min_length: 1, max_length: 3),
+              partial <- StreamData.boolean(),
+              max_runs: 25
+            ) do
+        line = Enum.join(words, " ") <> "\n"
+
+        new_line =
+          words
+          |> Enum.with_index()
+          |> Enum.map_join(" ", fn {w, i} -> if i in rewritten, do: String.upcase(w), else: w end)
+
+        world = world(line) |> edit(@step_one, 0, byte_size(line) - 1, new_line)
+        {before, [target | _rest]} = new_line |> String.split(" ") |> Enum.split(your_word)
+        at = before |> Enum.map(&(byte_size(&1) + 1)) |> Enum.sum()
+        removed = if partial, do: max(byte_size(target) - 1, 1), else: byte_size(target)
+        world = edit(world, :user, at, removed, your_text)
+        assert_rejects_exact_or_refused(world)
+      end
+    end
+
+    property "compaction slices bring the runs under 75% of the budget or leave no drafts, and change no outcome" do
+      check all(
+              commands <- StreamData.list_of(command(), max_length: 40),
+              budget <- StreamData.integer(4..30),
+              slice <- StreamData.integer(1..20),
+              max_runs: 300
+            ) do
+        plain = Enum.reduce(commands, world("abc\ndef\n"), &run/2)
+
+        compacted =
+          Enum.reduce(commands, world("abc\ndef\n", run_budget: budget), fn command, world ->
+            command |> run(world) |> compact_fully(slice)
+          end)
+
+        assert text(compacted) == text(plain)
+
+        case {unwind(plain), unwind(compacted)} do
+          {{:done, a}, {:done, b}} -> assert text(a) == text(b)
+          {_plain, {:stuck, b}} -> assert UnitModel.revertable_units(b.history) == MapSet.new()
+          {{:stuck, _a}, {:done, b}} -> assert text(b) == "abc\ndef\n"
+        end
+      end
+
+      IO.puts("\n[compaction] history slices run: #{Process.get(:slices, 0)}")
+    end
+
+    test "compaction reports a history still over budget once, when no drafts are left" do
+      world =
+        Enum.reduce(1..6, world("a\nb\nc\n", run_budget: 4), fn n, world ->
+          edit(world, {:minga, "task-#{n}", "call"}, 0, 1, "x#{n}")
+        end)
+
+      assert UndoHistory.compaction_wanted?(world.history)
+      assert {:over_budget, history, %{drafts: 0}} = UndoHistory.compact_slice(world.history, 100)
+      refute UndoHistory.compaction_wanted?(history)
+      assert {:done, _history, _slice} = UndoHistory.compact_slice(history, 100)
+    end
+
+    property "repeated SPC a u leaves only tasks your visible edits hold" do
+      check all(commands <- StreamData.list_of(command(), max_length: 40), max_runs: 200) do
+        world = Enum.reduce(commands, world("abc\ndef\n"), &run/2)
+        {_done_or_stuck, world} = reject_all(world)
+        assert UnitModel.revertable_units(world.history) == MapSet.new()
       end
     end
   end
@@ -460,8 +615,8 @@ defmodule Minga.Buffer.UndoHistoryTest do
   # ── Helpers ─────────────────────────────────────────────────────────
 
   # A buffer as the history sees it: history, document and version, edited like the buffer process does.
-  defp world(text),
-    do: %{history: UndoHistory.new(Document.new(text)), doc: Document.new(text), version: 0}
+  defp world(text, opts \\ []),
+    do: %{history: UndoHistory.new(Document.new(text), opts), doc: Document.new(text), version: 0}
 
   defp edit(world, source, start, removed_bytes, inserted, opts \\ []) do
     at = Keyword.get(opts, :at, @t0)
@@ -492,7 +647,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
   defp redo!(world), do: world |> step(:redo) |> elem(1)
 
   defp reject_newest_task(world) do
-    {:ok, restore, history, _count, _task} =
+    {:ok, restore, history, _count, _tasks, _dropped} =
       UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
     install(world, restore, history)
@@ -546,32 +701,122 @@ defmodule Minga.Buffer.UndoHistoryTest do
     end
   end
 
-  # Undoes everything you did, rejecting the task that blocks you whenever one does.
+  # Undoes everything you did; whenever Minga blocks your undo, reverts the next unit instead. Stops when neither can
+  # make progress, which only an edit of yours with visible text inside a change Minga rewrote can cause.
   defp unwind(world) do
     case step(world, :undo) do
-      {:ok, world, _restore} -> unwind(world)
-      {:blocked, {:overlaps, key}} -> world |> reject!(task_of(key)) |> unwind()
-      :empty -> reject_all(world)
+      {:ok, world, _restore} ->
+        unwind(world)
+
+      {:blocked, {:overlaps, _key}} ->
+        case press_reject(world) do
+          {:ok, world} -> unwind(world)
+          :stuck -> {:stuck, world}
+        end
+
+      :empty ->
+        reject_all(world)
     end
   end
 
   defp reject_all(world) do
+    case press_reject(world) do
+      {:ok, world} -> reject_all(world)
+      :empty -> {:done, world}
+      :stuck -> {:stuck, world}
+    end
+  end
+
+  # One press of SPC a u: it reverts a unit the brute-force model accepts, never removes visible text you wrote, or
+  # changes nothing exactly when the model finds no revertable unit.
+  defp press_reject(world) do
+    accepted = UnitModel.revertable_units(world.history)
+
     case UndoHistory.undo_agent_session(world.history, world.version, world.doc) do
-      :empty -> world
-      {:ok, restore, history, _count, _task} -> reject_all(install(world, restore, history))
+      {:ok, restore, history, _count, _tasks, _dropped} ->
+        unit = UndoHistory.next_reject(world.history)
+        assert MapSet.new(unit) in accepted, "#{inspect(unit)} not in #{inspect(accepted)}"
+        after_world = install(world, restore, history)
+        assert text(after_world) == UnitModel.reverted_text(world.history, text(world), unit)
+        assert your_text(world) |> subsequence?(your_text(after_world))
+
+        Process.put(
+          :multi_units,
+          Process.get(:multi_units, 0) + if(match?([_, _ | _], unit), do: 1, else: 0)
+        )
+
+        {:ok, after_world}
+
+      :empty ->
+        :empty
+
+      {:blocked, {:overlaps, :you}, _task, _offset} ->
+        assert accepted == MapSet.new()
+        Process.put(:stuck, Process.get(:stuck, 0) + 1)
+        :stuck
     end
   end
 
-  # Rejects a task, first rejecting any newer task that blocks it.
-  defp reject!(world, task) do
-    case UndoHistory.reject_task(world.history, task, world.version, world.doc) do
-      {:ok, restore, history, _count} -> install(world, restore, history)
-      {:blocked, {:overlaps, key}} -> world |> reject!(task_of(key)) |> reject!(task)
+  # Rejecting any single task either reverts exactly what the model's visibility rule says, for a task the model calls
+  # exact on its own, or is refused while the model says it is not.
+  defp assert_rejects_exact_or_refused(world) do
+    %{task_ticks: ticks} = world.history
+
+    for {task, _tick} <- ticks do
+      case UndoHistory.reject_task(world.history, task, world.version, world.doc) do
+        {:ok, restore, _history, _count} ->
+          assert UnitModel.exact?(world.history, [task])
+
+          assert Document.content(restore.document) ==
+                   UnitModel.reverted_text(world.history, text(world), [task])
+
+        {:blocked, {:overlaps, _key}} ->
+          refute UnitModel.exact?(world.history, [task])
+      end
     end
   end
 
-  defp task_of({:untasked, _n}), do: {:minga, :untasked}
-  defp task_of({:minga, task, _step}), do: {:minga, task}
+  defp coarse_command do
+    StreamData.tuple({
+      StreamData.member_of([:user, :user, :minga, :minga, :agent, :undo, :redo]),
+      StreamData.integer(0..1_000),
+      StreamData.integer(0..8),
+      StreamData.string([?a..?c, ?\s, ?\n], max_length: 8),
+      StreamData.integer(0..2)
+    })
+  end
+
+  # Runs compaction slices until the history says it is done, checking P6 at the end.
+  defp compact_fully(world, slice) do
+    if UndoHistory.compaction_wanted?(world.history) do
+      {status, history, result} = UndoHistory.compact_slice(world.history, slice)
+      Process.put(:slices, Process.get(:slices, 0) + 1)
+      world = %{world | history: history}
+
+      if status == :more do
+        compact_fully(world, slice)
+      else
+        %{run_budget: budget} = history
+        assert result.runs <= div(budget * 3, 4) or result.drafts == 0
+        world
+      end
+    else
+      world
+    end
+  end
+
+  defp your_text(world) do
+    provenance = UndoHistory.provenance(world.history)
+
+    for {from, to, :you, _key} <- Provenance.spans(provenance, 0, byte_size(text(world))),
+        into: <<>>,
+        do: binary_part(text(world), from, to - from)
+  end
+
+  defp subsequence?(<<>>, _text), do: true
+  defp subsequence?(_needle, <<>>), do: false
+  defp subsequence?(<<c, rest::binary>>, <<c, more::binary>>), do: subsequence?(rest, more)
+  defp subsequence?(needle, <<_c, more::binary>>), do: subsequence?(needle, more)
 
   defp deleted_by_you?(world, {id, _bytes}) do
     provenance = UndoHistory.provenance(world.history)

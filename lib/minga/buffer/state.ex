@@ -60,6 +60,7 @@ defmodule Minga.Buffer.State do
             swap: %SwapState{},
             auto_save_timer: nil,
             auto_save_token: nil,
+            compaction_scheduled: false,
             events_registry: Minga.Events.default_registry()
 
   @type options_server :: Minga.Config.Options.server()
@@ -87,6 +88,7 @@ defmodule Minga.Buffer.State do
           swap: SwapState.t(),
           auto_save_timer: reference() | nil,
           auto_save_token: reference() | nil,
+          compaction_scheduled: boolean(),
           events_registry: Minga.Events.registry()
         }
 

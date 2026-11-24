@@ -292,6 +292,46 @@ defmodule Minga.Buffer.ProvenanceTest do
       end
     end
 
+    property "compaction changes no document for any revert where each task's steps move together" do
+      check all(
+              original <- StreamData.string([?a..?e, ?\n], max_length: 20),
+              commands <- StreamData.list_of(command(), max_length: 60),
+              picks <- StreamData.list_of(StreamData.boolean(), length: 40),
+              max_runs: 300
+            ) do
+        initial = {Provenance.new(byte_size(original)), ProvenanceModel.new(original), original}
+        {prov, model, text} = Enum.reduce(commands, initial, &run(&1, &2, :keep_groups))
+        compacted = compact_all(prov)
+
+        # Whole tasks and single groups of yours, chosen at random, reverted on both sides.
+        units =
+          model.groups
+          |> Enum.filter(fn {_id, group} -> group.applied end)
+          |> Enum.group_by(
+            fn {id, group} -> if group.author == :you, do: {:you, id}, else: group.author end,
+            &elem(&1, 0)
+          )
+          |> Enum.sort()
+
+        chosen =
+          units
+          |> Enum.zip(picks)
+          |> Enum.flat_map(fn {{_unit, ids}, pick} -> if pick, do: ids, else: [] end)
+
+        {:ok, plain, _first, _prov} = Provenance.revert_all(prov, chosen, Document.new(text))
+        remaining = Enum.filter(chosen, &Provenance.group?(compacted, &1))
+
+        {:ok, after_compaction, _first, _prov} =
+          Provenance.revert_all(compacted, remaining, Document.new(text))
+
+        assert Document.content(after_compaction) == Document.content(plain)
+      end
+
+      IO.puts(
+        "\n[compaction] steps in the random model property: #{Process.get(:compactions, 0)}"
+      )
+    end
+
     property "rejecting every Minga step leaves exactly your edits replayed alone" do
       check all(
               original <- StreamData.string([?a..?e, ?\n], max_length: 20),
@@ -324,6 +364,13 @@ defmodule Minga.Buffer.ProvenanceTest do
                |> Provenance.spans(0, byte_size(text))
                |> Enum.any?(&match?({:minga, _task}, elem(&1, 2)))
       end
+    end
+  end
+
+  defp compact_all(prov) do
+    case Provenance.compact_oldest(prov) do
+      :none -> prov
+      {:ok, prov, _old, _examined} -> compact_all(prov)
     end
   end
 
@@ -377,9 +424,42 @@ defmodule Minga.Buffer.ProvenanceTest do
       kind < 93 ->
         edit_command(state, a, b, c, inserted)
 
+      kind < 97 ->
+        compact(state)
+
       true ->
         untracked_edit(state, a, b, inserted)
     end
+  end
+
+  # One compaction step on both sides. It never changes the document, any visible author, or whether a group of yours
+  # is blocked, and it never adds runs.
+  defp compact({prov, model, text} = state) do
+    case Provenance.compact_oldest(prov) do
+      :none ->
+        assert ProvenanceModel.drafts(model) == []
+        state
+
+      {:ok, compacted, _old, examined} ->
+        assert examined > 0
+        model = ProvenanceModel.compact_oldest(model)
+        assert Provenance.run_count(compacted) <= Provenance.run_count(prov)
+        assert spans(compacted, text) == spans(prov, text)
+
+        for {id, %{author: :you}} <- model.groups do
+          assert Provenance.blocker(compacted, id) == nil == (Provenance.blocker(prov, id) == nil)
+        end
+
+        Process.put(:compactions, Process.get(:compactions, 0) + 1)
+        {compacted, model, text}
+    end
+  end
+
+  # The author of every byte; compaction may rename the step that wrote it, never the author.
+  defp spans(prov, text) do
+    prov
+    |> Provenance.spans(0, byte_size(text))
+    |> Enum.flat_map(fn {from, to, author, _key} -> List.duplicate(author, to - from) end)
   end
 
   defp edit_command({prov, model, text}, a, b, c, inserted) do
@@ -483,12 +563,39 @@ defmodule Minga.Buffer.ProvenanceTest do
       end
     end
 
+    for id <- Map.keys(model.groups) do
+      keys = prov |> Provenance.overlaps_among([id]) |> MapSet.new(&elem(&1, 0))
+      assert keys == ProvenanceModel.overlaps_among(model, [id])
+    end
+
     runs = Provenance.runs(prov)
+    %{groups: groups} = prov
+
+    # The draft index is exactly the drafts recomputed from the runs, and they are the model's draft bytes.
+    assert Provenance.drafts(prov) ==
+             runs
+             |> Enum.filter(&draft?(&1, groups))
+             |> Enum.map(&{&1.group, &1.id})
+             |> Enum.sort()
+
+    draft_bytes = runs |> Enum.filter(&draft?(&1, groups)) |> Enum.map(& &1.bytes) |> Enum.sum()
+    assert draft_bytes == length(ProvenanceModel.drafts(model))
     assert Enum.all?(runs, &(&1.bytes > 0))
     assert Enum.all?(runs, &match?([_ | _], &1.id))
     refute Enum.any?(runs, &match?([_, _, _, _, _ | _], &1.id))
     assert ids_sorted?(Enum.map(runs, & &1.id))
     assert balanced?(prov, length(runs))
+  end
+
+  defp draft?(run, groups) do
+    owner = run.group && groups[run.group]
+
+    owner != nil and not run.live and owner.applied and
+      match?({:minga, task} when task != :untasked, owner.author) and
+      Enum.any?(
+        run.deletions,
+        &(&1 > run.group and groups[&1].applied and groups[&1].author == owner.author)
+      )
   end
 
   defp ids_sorted?(ids), do: ids == Enum.sort(ids) and ids == Enum.uniq(ids)

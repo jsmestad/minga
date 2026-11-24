@@ -222,6 +222,8 @@ The agent's `edit_file` tool currently does find-and-replace on raw file content
 
 - Agent edits appear instantly in the editor. No reload needed.
 - Per-author history. Each agent tool call is one step in Minga's history for its task, `SPC a u` reverts a task's steps, and `u` undoes only your own edits, even when they interleave with the agent's (see `Minga.Buffer.Provenance`).
+- Reverts are exact or refused, never wrong text. Reverting a task puts back exactly the text it replaced. When you deleted or retyped part of what a task wrote, Minga cannot always tell which part of the replaced text your edit stands for, so `SPC a u` refuses that task, changes nothing, and tells you in `*Messages*` which file, task, and line to undo first. Tasks that edited inside each other's changes revert together in one press, and `*Messages*` names them all. One exception: when Minga later rewrote all of an edit of yours inside its change, reverting the task also drops that already-overwritten edit from your undo history; none of your visible text goes, and `*Messages*` names the edit. Per-change keep and reject (#4049) may refine these rules to single steps.
+- Bounded history. A task that keeps rewriting its own text leaves drafts behind. When the history passes its run budget, Minga merges each draft step into the newer step that overwrote it, in short slices between your keystrokes, and notes each slice in `*Messages*`. Your undo, every reject, and the document stay exactly as they were.
 - Tree-sitter stays in sync. Highlights update incrementally.
 - Dirty tracking works. The modeline shows the file is unsaved.
 - No disk I/O for reads or edits on open buffers.

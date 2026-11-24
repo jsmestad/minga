@@ -154,9 +154,8 @@ defmodule Minga.Buffer.UndoPatchTest do
       assert Document.content(undone) == Document.content(old)
     end
 
-    # A permutation holds the same lines on both sides.
-    # Only the edit distance itself, not a line count, shows that a precise diff costs too much.
-    test "reordering the lines of a large file records the reordered span as one region" do
+    # A permutation holds the same lines on both sides; past the budget, the lines still in order pin the regions.
+    test "reordering the lines of a large file splits only on lines that keep their order, and replays exactly" do
       lines = for n <- 1..2_000, do: "line #{n}\n"
       swapped = lines |> Enum.chunk_every(2) |> Enum.flat_map(&Enum.reverse/1)
       shuffled = few_values_shuffle(4_000)
@@ -169,12 +168,12 @@ defmodule Minga.Buffer.UndoPatchTest do
         old = doc("header\n" <> Enum.join(old_lines) <> "footer\n")
         new = doc("header\n" <> Enum.join(new_lines) <> "footer\n")
 
-        assert [patch] = UndoPatch.changes(old, new)
-        assert patch.start_byte == byte_size("header\n")
+        assert [first | _] = patches = UndoPatch.changes(old, new)
+        assert first.start_byte >= byte_size("header\n")
 
-        {:ok, undone, [redo]} = UndoPatch.apply_all([patch], new)
+        {:ok, undone, redo} = UndoPatch.apply_all(patches, new)
         assert Document.content(undone) == Document.content(old)
-        assert {:ok, redone} = UndoPatch.apply(redo, undone)
+        assert {:ok, redone, _undo} = UndoPatch.apply_all(redo, undone)
         assert Document.content(redone) == Document.content(new)
       end
     end
@@ -191,9 +190,9 @@ defmodule Minga.Buffer.UndoPatchTest do
                Enum.map(patches, &{&1.start_byte, &1.old_text, &1.new_text})
     end
 
-    # Shuffles this large hold the same lines on both sides.
-    # They differ in far more lines than the budget allows, so each takes the capped fallback.
-    property "a shuffled large file becomes one region that undoes and redoes exactly" do
+    # Shuffles this large hold the same lines on both sides and differ in far more lines than the budget allows, so they
+    # split on the lines that keep their order and diff each gap again.
+    property "a shuffled large file undoes and redoes exactly" do
       check all(
               count <- integer(800..1_500),
               seed <- integer(1..1_000_000),
@@ -204,9 +203,9 @@ defmodule Minga.Buffer.UndoPatchTest do
         old = Document.move_to(doc(Enum.join(lines)), {rem(cursor_pick, count), 2})
         new = doc(Enum.join(seeded_shuffle(lines, seed)))
 
-        assert [patch] = UndoPatch.changes(old, new)
+        patches = UndoPatch.changes(old, new)
 
-        {:ok, undone, redo} = UndoPatch.apply_all([patch], new)
+        {:ok, undone, redo} = UndoPatch.apply_all(patches, new)
         assert Document.content(undone) == Document.content(old)
         assert Document.cursor(undone) == Document.cursor(old)
 
