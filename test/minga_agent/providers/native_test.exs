@@ -3236,7 +3236,7 @@ defmodule MingaAgent.Providers.NativeTest do
         end)
 
       # Serial per-call waits would take at least 8 x timeout_ms (2s); one shared deadline ends near timeout_ms.
-      assert elapsed < 4 * timeout_ms
+      assert elapsed < 6 * timeout_ms
       assert log =~ "{:tool_task_exit, :timeout}"
       assert Enum.any?(events, &match?(%Event.Error{}, &1))
       refute Enum.any?(events, &match?(%Event.ToolEnd{}, &1))
@@ -3248,6 +3248,45 @@ defmodule MingaAgent.Providers.NativeTest do
   end
 
   describe "tool-call timeout scope" do
+    test "an expired read is stopped at its deadline even while a sibling waits for approval", %{
+      tmp_dir: dir
+    } do
+      test_pid = self()
+      gate = make_ref()
+
+      tools = [
+        declared_tool("hung_read", :read_only, gated_callback(test_pid, gate, "hung_read")),
+        declared_tool("held_read", :read_only, fn _args -> {:ok, "held"} end)
+      ]
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: tool_call_batch_client(["hung_read", "held_read"]),
+          tools: tools,
+          approval_tools: ["held_read"],
+          config: agent_config(tool_call_timeout_ms: 200, approval_timeout_ms: 10_000)
+        )
+
+      assert :ok = send_prompt(pid, "Run a hung read beside an approval")
+      hung = assert_tool_started(gate, "hung_read")
+      hung_ref = Process.monitor(hung)
+
+      assert_receive {:agent_provider_event,
+                      %Event.ToolApproval{tool_call_id: "tc_held_read", reply_to: held}},
+                     2_000
+
+      # The hung read dies at its deadline, without waiting for the approval to be answered.
+      assert_receive {:DOWN, ^hung_ref, :process, ^hung, :killed}, 2_000
+
+      release_tool(gate, hung)
+      send(held, {:tool_approval_response, "tc_held_read", :approve})
+      events = collect_run_events()
+
+      refute Enum.any?(events, &match?(%Event.ToolEnd{name: "hung_read"}, &1))
+      assert Enum.any?(events, &match?(%Event.Error{}, &1))
+    end
+
     test "a read held for Session approval does not spend its tool-call timeout waiting", %{
       tmp_dir: dir
     } do

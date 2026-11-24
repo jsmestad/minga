@@ -2400,15 +2400,15 @@ defmodule MingaAgent.Providers.Native do
   # Waits for every task and returns results in task order.
   # A task's clock starts when it reports that execution began, so admission and approval time never counts.
   # Tasks that began together share one deadline, so N hung reads cost one timeout rather than N.
-  # Expired tasks are reported as timed out, and the caller's cleanup kills them.
+  # An expired task is stopped at once and reported as timed out, so it cannot finish later beside a slower sibling.
   # With :infinity (sequential effects), only the task's own result or exit ends the wait.
   @spec await_tool_tasks(loop_ctx(), [tool_task()], timeout()) :: [
           {non_neg_integer(), tool_execution_result()}
         ]
   defp await_tool_tasks(lctx, tasks, timeout) do
     waits =
-      Map.new(tasks, fn {_index, tool_call, _pid, monitor_ref, result_ref} ->
-        {result_ref, %{tool_call: tool_call, monitor_ref: monitor_ref, deadline: nil}}
+      Map.new(tasks, fn {_index, tool_call, pid, monitor_ref, result_ref} ->
+        {result_ref, %{tool_call: tool_call, pid: pid, monitor_ref: monitor_ref, deadline: nil}}
       end)
 
     monitors =
@@ -2423,7 +2423,12 @@ defmodule MingaAgent.Providers.Native do
     end)
   end
 
-  @typep tool_wait :: %{tool_call: map(), monitor_ref: reference(), deadline: integer() | nil}
+  @typep tool_wait :: %{
+           tool_call: map(),
+           pid: pid(),
+           monitor_ref: reference(),
+           deadline: integer() | nil
+         }
 
   @spec collect_tool_results(
           loop_ctx(),
@@ -2484,10 +2489,13 @@ defmodule MingaAgent.Providers.Native do
 
     results =
       Map.new(expired, fn {result_ref, wait} ->
+        Process.unlink(wait.pid)
         Process.demonitor(wait.monitor_ref, [:flush])
+        stop_tool_worker(wait.pid)
         {result_ref, tool_task_failed(lctx, wait.tool_call, :timeout)}
       end)
 
+    unregister_tool_workers(lctx.provider_pid, Enum.map(expired, fn {_ref, wait} -> wait.pid end))
     {results, remaining}
   end
 
