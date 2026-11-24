@@ -274,11 +274,14 @@ defmodule MingaEditor.Handlers.EventDispatcher do
         %SessionManager.SessionRestartedEvent{} = event,
         _msg
       ) do
-    state = MingaEditor.Agent.TaskWorkflow.restarted(state, event.old_pid, event.new_pid)
-
     case handle_agent_session_restarted(state, event) do
-      {:ok, state} -> MingaEditor.schedule_render(state, 16)
-      {:stale, state} -> state
+      {:ok, state} ->
+        state
+        |> MingaEditor.Agent.TaskWorkflow.restarted(event.old_pid, event.new_pid)
+        |> MingaEditor.schedule_render(16)
+
+      {:stale, state} ->
+        state
     end
   end
 

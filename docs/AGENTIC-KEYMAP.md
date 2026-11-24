@@ -385,7 +385,7 @@ Use the card's buttons directly, or leave the composer to use the keys. In Inser
 | `a` | Trust this tool for the rest of the session |
 | `t` | Trust this tool for the rest of the turn |
 | `n` | Deny this call |
-| `esc` | Defer: the request stays pending, answerable here and from the tasks drawer |
+| `esc` | Defer: the request stays pending and answerable |
 
 Trust applies to the named tool, not to every tool the agent might use. Turn trust ends before your next message. A key held with a modifier, such as `⌃A`, is never an approval decision.
 

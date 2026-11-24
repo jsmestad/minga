@@ -67,11 +67,6 @@ defmodule MingaEditor.Agent.TaskWorkflow do
   def node_disconnected(%EditorState{} = state, node) when is_atom(node),
     do: EditorState.forget_agent_node_tasks(state, node)
 
-  @doc "A retried request streamed output, so its task is working again."
-  @spec output_streamed(EditorState.t(), pid()) :: EditorState.t()
-  def output_streamed(%EditorState{} = state, session) when is_pid(session),
-    do: observe(state, session, :output_streamed)
-
   @doc """
   Answers the approval task `session` is waiting on.
 
