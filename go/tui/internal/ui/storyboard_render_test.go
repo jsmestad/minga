@@ -5,6 +5,7 @@ package ui
 // The storyboard factory drives every built scenario through the real editor and records the packets the BEAM sends to the frontend (test/storyboard/render_test.exs).
 // This test replays each TUI transcript through the production packet decoder and Model.Update, renders Model.View into a cell buffer, and writes the frame as a text grid with its style runs.
 // It runs only when MINGA_STORYBOARD_TRANSCRIPTS names the exported transcripts; MINGA_STORYBOARD_RENDERS names the output directory.
+// Next to each frame it writes the anatomy parts found in it (storyboard_parts_test.go) for the layout audit.
 // design/tools/storyboard/renders.py compares the frames with the baselines in test/storyboard/baselines and builds the storyboard page (docs/design/storyboard.md, "Renders and baselines").
 
 import (
@@ -56,13 +57,18 @@ func TestStoryboardRenders(t *testing.T) {
 		rel, _ := filepath.Rel(transcripts, path)
 		t.Run(strings.TrimSuffix(rel, ".json"), func(t *testing.T) {
 			transcript := loadStoryboardTranscript(t, path)
-			frame := renderStoryboardTranscript(t, transcript)
+			frame, parts := renderStoryboardTranscript(t, transcript)
 			name := strings.TrimSuffix(filepath.Base(path), ".json") + ".txt"
 			dir := filepath.Join(out, filepath.Dir(rel))
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(dir, name), []byte(frame), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			// The anatomy parts the layout audit measures; not a baseline (design/tools/storyboard/audit.py).
+			partsName := strings.TrimSuffix(name, ".txt") + ".parts.json"
+			if err := os.WriteFile(filepath.Join(dir, partsName), parts, 0o644); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -86,7 +92,7 @@ func loadStoryboardTranscript(t *testing.T, path string) storyboardTranscript {
 }
 
 // renderStoryboardTranscript replays the packets in order, the way the port reader delivers them, and serializes the final frame.
-func renderStoryboardTranscript(t *testing.T, transcript storyboardTranscript) string {
+func renderStoryboardTranscript(t *testing.T, transcript storyboardTranscript) (string, []byte) {
 	t.Helper()
 	model := New(uint16(transcript.Cols), uint16(transcript.Rows), nil)
 	var warnings []string
@@ -115,11 +121,18 @@ func renderStoryboardTranscript(t *testing.T, transcript storyboardTranscript) s
 //
 // Colours are the effective colours a viewer sees: cells without a colour take the view's default foreground or background, and reverse video swaps them.
 // Wide glyphs occupy their cells; the continuation cell adds no text, so a text row can be shorter in runes than the terminal is wide.
-func serializeStoryboardFrame(transcript storyboardTranscript, model Model) string {
+func serializeStoryboardFrame(transcript storyboardTranscript, model Model) (string, []byte) {
 	view := model.View()
 	buffer := uv.NewScreenBuffer(transcript.Cols, transcript.Rows)
 	buffer.Method = ansi.GraphemeWidth
 	uv.NewStyledString(view.Content).Draw(buffer, buffer.Bounds())
+	parts, err := json.MarshalIndent(map[string]any{
+		"version": 1, "scenario": transcript.Scenario, "frontend": "tui", "theme": transcript.Theme,
+		"size": transcript.Size, "parts": storyboardParts(model, newCellGrid(buffer, transcript.Cols, transcript.Rows)),
+	}, "", " ")
+	if err != nil {
+		panic(err)
+	}
 
 	defaultFg, defaultBg := hexColor(view.ForegroundColor, "#000000"), hexColor(view.BackgroundColor, "#000000")
 	var text, styles strings.Builder
@@ -160,7 +173,7 @@ func serializeStoryboardFrame(transcript storyboardTranscript, model Model) stri
 		text.WriteString(strings.TrimRight(row.String(), " "))
 		text.WriteByte('\n')
 	}
-	return text.String() + styles.String()
+	return text.String() + styles.String(), parts
 }
 
 // styleRun is a span of cells in one row with the same effective style.

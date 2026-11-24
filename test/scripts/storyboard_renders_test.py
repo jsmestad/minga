@@ -159,6 +159,14 @@ class RenderGateTest(unittest.TestCase):
         self.assertNotIn("platform_specific", promotion)
         self.assertEqual((self.baselines / "s" / "tui-a-80x24.txt").read_text(), "grid")
 
+    def test_promote_refuses_a_render_with_an_open_audit_finding(self):
+        self.write(self.out / "renders", "tui-a-80x24.txt", "# size: 80x24\n## text\n\n## styles (row start-end fg bg attrs)\n")
+        self.write(self.out / "renders", "tui-a-80x24.parts.json", json.dumps(
+            {"frontend": "tui", "theme": "a", "size": "80x24", "parts": [{"part": "modeline", "text": "NORMAL", "missing": True}]}))
+        args = argparse.Namespace(out=self.out, macos=None, scenario=None, no_render=True, platform_specific=None)
+        with self.assertRaisesRegex(renders.Failure, "fail the layout audit"):
+            renders.cmd_promote(args)
+        self.assertFalse((self.baselines / "s" / "tui-a-80x24.txt").exists())
 
 if __name__ == "__main__":
     unittest.main()

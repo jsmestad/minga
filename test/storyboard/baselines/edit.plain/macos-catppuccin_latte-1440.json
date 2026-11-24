@@ -116,6 +116,33 @@
   },
   {
    "frame": [
+    0,
+    904,
+    26,
+    24
+   ],
+   "part": "modeline.control"
+  },
+  {
+   "frame": [
+    32,
+    904,
+    26,
+    24
+   ],
+   "part": "modeline.control"
+  },
+  {
+   "frame": [
+    1406,
+    904,
+    26,
+    24
+   ],
+   "part": "modeline.control"
+  },
+  {
+   "frame": [
     114,
     907.5,
     61,

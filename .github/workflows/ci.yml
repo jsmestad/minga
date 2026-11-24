@@ -390,8 +390,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Test the render gate
-        run: python3 -m unittest discover -s test/scripts -p 'storyboard_renders_test.py'
+      - name: Test the render gate and the layout audit
+        run: |
+          python3 -m unittest discover -s test/scripts -p 'storyboard_renders_test.py'
+          python3 -m unittest discover -s test/scripts -p 'storyboard_audit_test.py'
 
       - name: Require the renders this change needs
         env:
@@ -433,6 +435,16 @@ jobs:
           cat "$RUNNER_TEMP/storyboard/diff.md" >> "$GITHUB_STEP_SUMMARY"
           echo "status=$status" >> "$GITHUB_OUTPUT"
 
+      # The layout audit (#4036, AC 5) measures every rendered frame against docs/design/anatomy.md.
+      - name: Audit the layout of every rendered scenario
+        id: audit
+        run: |
+          set +e
+          python3 design/tools/storyboard/audit.py --out "$RUNNER_TEMP/storyboard" --frontends "$FRONTENDS" --check
+          status=$?
+          cat "$RUNNER_TEMP/storyboard/audit.md" >> "$GITHUB_STEP_SUMMARY"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
       - name: Build the storyboard page
         run: python3 design/tools/storyboard/renders.py page --out "$RUNNER_TEMP/storyboard"
 
@@ -444,13 +456,16 @@ jobs:
             ${{ runner.temp }}/storyboard/page
             ${{ runner.temp }}/storyboard/diff.json
             ${{ runner.temp }}/storyboard/diff.md
+            ${{ runner.temp }}/storyboard/audit.json
+            ${{ runner.temp }}/storyboard/audit.md
           if-no-files-found: error
           retention-days: 30
 
-      - name: Fail on a stale render, a missing baseline or a parity violation
-        if: steps.diff.outputs.status != '0'
+      - name: Fail on a stale render, a missing baseline, a parity violation or a layout violation
+        if: steps.diff.outputs.status != '0' || steps.audit.outputs.status != '0'
         run: |
           echo "See the job summary. Accept intended changes with design/tools/storyboard/renders.py promote (docs/design/storyboard.md)."
+          echo "Fix layout violations, or list them in test/storyboard/audit_exceptions.toml with a reason and an issue."
           exit 1
 
   test-sdk:

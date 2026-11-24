@@ -180,6 +180,7 @@ enum StoryboardCapture {
 
         let png = try await settledPNG(window: window, host: host)
         let export = exportJSON(transcript: transcript, window: window, host: host, parts: recorder.frames,
+                                pixels: StoryboardPixels(png: png, scale: window.backingScaleFactor),
                                 scale: window.backingScaleFactor, fontManager: fontManager)
         let base = URL(fileURLWithPath: job.output)
         try FileManager.default.createDirectory(at: base.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -264,9 +265,35 @@ enum StoryboardCapture {
             contentFilter: SCContentFilter(desktopIndependentWindow: window), configuration: configuration)
     }
 
+    /// The surface and every ink under each part that shows text. A part can hold an icon and words; each ink is
+    /// judged, so a strong icon cannot pass weak words.
+    private static func samples(_ parts: [AnatomyPartFrame], pixels: StoryboardPixels?) -> [[String: Any]] {
+        guard let pixels else { return [] }
+        return parts.compactMap { part in
+            guard let text = part.text, !text.trimmingCharacters(in: .whitespaces).isEmpty,
+                  let sample = pixels.sample(part.frame) else { return nil }
+            return ["part": part.name, "text": text, "inks": sample.inks, "bg": sample.bg]
+        }
+    }
+
+    /// Every distinct ink colour in the Metal editor's text area, syntax colours included, with its surface.
+    private static func code(_ elements: [[String: Any]], pixels: StoryboardPixels?) -> [String: Any] {
+        guard let pixels,
+              let editor = elements.first(where: { $0["role"] as? String == "AXTextArea" }),
+              let frame = editor["frame"] as? [Double], frame.count == 4,
+              let found = pixels.inks(CGRect(x: frame[0], y: frame[1], width: frame[2], height: frame[3])) else { return [:] }
+        // The block cursor is the system accent colour, a glyph rather than text. The audit leaves out inks near it:
+        // a sampled colour can move by a step through Metal, capture and colour conversion, so not by equality.
+        let accent = NSColor.controlAccentColor.usingColorSpace(.sRGB).map {
+            String(format: "#%02x%02x%02x", Int(($0.redComponent * 255).rounded()),
+                   Int(($0.greenComponent * 255).rounded()), Int(($0.blueComponent * 255).rounded()))
+        } ?? ""
+        return ["bg": found.bg, "inks": found.inks, "cursor": accent]
+    }
+
     /// The accessibility tree as a flat list in document order, frames in window points with a top-left origin, rounded to half a point.
     private static func exportJSON(transcript: Transcript, window: NSWindow, host: NSView, parts: [AnatomyPartFrame],
-                                   scale: CGFloat, fontManager: FontManager) -> Data {
+                                   pixels: StoryboardPixels?, scale: CGFloat, fontManager: FontManager) -> Data {
         var elements: [[String: Any]] = []
         walk(host, depth: 0, window: window, into: &elements)
         let measured: [[String: Any]] = parts.map { part in
@@ -294,6 +321,10 @@ enum StoryboardCapture {
             ],
             "parts": measured,
             "elements": elements,
+            // Colours read from the pixels, for the layout audit's contrast rule. Not part of the baseline: antialiasing
+            // can move a sampled colour by a step between runners.
+            "samples": samples(parts, pixels: pixels),
+            "code": code(elements, pixels: pixels),
         ]
         return (try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])) ?? Data()
     }

@@ -1,22 +1,26 @@
 {
   "macos": {
-    "commit": "41cd80c7c571cdddc67cbca950e53b10bd041bc4",
+    "commit": "826c8a5930c4d571cfd5f50808639105523b8f02",
     "files": {
-      "macos-astrodark-1280.json": "a2e914c4b056e3b2eed754495561786259e7fd8b8840b58988c1ec558f7ab26a",
-      "macos-astrodark-1440.json": "5b69808c5236a71e25ec50ff60482d9d21ed573146fb042a6e5f2717cd53b244",
-      "macos-catppuccin_frappe-1280.json": "ebc01c9319cd41d1e23abb6cbe3b732d6d4b4f683fedea0d0c983588a355107c",
-      "macos-catppuccin_frappe-1440.json": "e9867d8429b1c3ee6796fd483ff41825a35e5fb46b1044f92de636dbc7a9ad25",
-      "macos-catppuccin_latte-1280.json": "3ea0391ae93599d8146ab8a5cb18a4070eb9c96d1c15059491b9e7a7af50ed10",
-      "macos-catppuccin_latte-1440.json": "624c6c2e9e7e0f3e03322314a45c8f266f7fed82b8622a80cc25a9d7a21e2d58"
+      "macos-astrodark-1280.json": "8d9f71bf0a56b1ddd470ff2c3920f17036977b62e9ae0fe92bcd34ffc5c2c746",
+      "macos-astrodark-1440.json": "fb0f1866de0631c90f0500677946eb46a5ad53d5797d701a428fc4d6bfedc55d",
+      "macos-catppuccin_frappe-1280.json": "21ec4aee6bfdbd96eca4fc9c2fe232a18ba5224adb2a4aac7acf3a817204b79d",
+      "macos-catppuccin_frappe-1440.json": "db0b242216ae5ed8732e4f1dc50b4965ec634b248ae0f1dabf14b14b5ad8f7a3",
+      "macos-catppuccin_latte-1280.json": "bf08e62e501027c1c650eb8cef5b62bece55692f129d186ce67dc99ba75a4f67",
+      "macos-catppuccin_latte-1440.json": "37d99b20db7294e7473aa3878160d0cb6caad91c7605deed85e2af3dea19465e"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "ffe94a5588c6f326d0d2991c5b3c7275af6749e04eb3627dcaa015246a054033",
-      "macos-astrodark-1440.json": "2c31754d8a7a9897a4c7a2c94ac10524dc79890ff616bc1710c7b52314ea3c86",
-      "macos-catppuccin_frappe-1280.json": "54c0b108d0f247ff6e6e4c5d86fabdcc1aadac5b8a277f423e55e82abbd2ccc9",
-      "macos-catppuccin_frappe-1440.json": "8fcb80bf023dfe2d7be66337d0514d02a0403d0b514427c879c2f7c20afcb43f",
-      "macos-catppuccin_latte-1280.json": "288297fe4a7007c43dfb97e92ff2b975368864f92f02f41478f75f2f2f244a4e",
-      "macos-catppuccin_latte-1440.json": "d042ce2323547bacc9ecd4c84af43b73500ac868d7a9246766a570bc6c10adaf"
+      "macos-astrodark-1280.json": "5eedd52af88cd1da239286b00c0e76d8ce735029b340ab27c69470517c675699",
+      "macos-astrodark-1440.json": "2e7e935cca0ab738fe2b17570ee98f5c871caa50c53229b9896dcb589ddf5da2",
+      "macos-catppuccin_frappe-1280.json": "2048357a23efda035717e26dfb13eba073ea482b2dd387d0e9f418eb32e90085",
+      "macos-catppuccin_frappe-1440.json": "97f8738a98ee579488362e131a0e7a915be8daa14e1fd63b8567c2ca1fbae368",
+      "macos-catppuccin_latte-1280.json": "ed46ba782467a726dd85ab1f6ecad37157260a6cea89c2a1b610d6afc59ed837",
+      "macos-catppuccin_latte-1440.json": "249b01c64d59da0410511fc1dcf8a68d2bddc4817a15d69ef4052b0ffe8df87d"
     }
+  },
+  "platform_specific": {
+    "frontend": "macos",
+    "reason": "the modeline's leading controls are now measured as anatomy parts for the layout audit; the TUI modeline has no controls"
   },
   "scenario": "edit.visual",
   "tui": {

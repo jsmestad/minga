@@ -1248,6 +1248,7 @@ private struct StatusBarIconButton: View {
                 )
         }
         .buttonStyle(.plain)
+        .anatomyPart("modeline.control")
         .help(tooltip)
         .accessibilityLabel(tooltip)
         .accessibilityHint("Toggles this panel")
