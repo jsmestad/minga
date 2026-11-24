@@ -127,28 +127,39 @@ struct SlotAllocator: Equatable {
     /// - `.reserved(.evicted)`: an old key was evicted to make room. Upload needed.
     /// - `.full`: no capacity.
     mutating func lookupOrReserve(key: AtlasKey, contentHash: Int) -> LookupResult {
+        lookupOrReserveCountingEvictionScan(key: key, contentHash: contentHash).result
+    }
+
+    /// Performs `lookupOrReserve` and also reports how many slots eviction inspected.
+    ///
+    /// The count is 0 when no eviction was needed and the slot count when one was.
+    /// Tests use it to prove that evicting from a full atlas is one linear pass.
+    mutating func lookupOrReserveCountingEvictionScan(
+        key: AtlasKey, contentHash: Int
+    ) -> (result: LookupResult, slotsScanned: Int) {
         if let slotIndex = keyToSlot[key] {
             slots[slotIndex].lastWrittenFrame = frameCounter
             if slots[slotIndex].contentHash == contentHash {
-                return .hit(slotIndex: slotIndex)
+                return (.hit(slotIndex: slotIndex), 0)
             }
-            return .reserved(slotIndex: slotIndex, reason: .hashChanged)
+            return (.reserved(slotIndex: slotIndex, reason: .hashChanged), 0)
         }
 
         if let free = freeSlots.popLast() {
             keyToSlot[key] = free
             slots[free].lastWrittenFrame = frameCounter
             slots[free].ownerKey = key
-            return .reserved(slotIndex: free, reason: .newKey)
+            return (.reserved(slotIndex: free, reason: .newKey), 0)
         }
 
-        guard let (evictIndex, evictedKey) = evictOldest() else {
-            return .full
+        let eviction = evictOldest()
+        guard let (evictIndex, evictedKey) = eviction.victim else {
+            return (.full, eviction.slotsScanned)
         }
         keyToSlot[key] = evictIndex
         slots[evictIndex].lastWrittenFrame = frameCounter
         slots[evictIndex].ownerKey = key
-        return .reserved(slotIndex: evictIndex, reason: .evicted(oldKey: evictedKey))
+        return (.reserved(slotIndex: evictIndex, reason: .evicted(oldKey: evictedKey)), eviction.slotsScanned)
     }
 
     /// Mark a slot as successfully uploaded with the given hash and width.
@@ -218,13 +229,15 @@ struct SlotAllocator: Equatable {
 
     // MARK: - Private
 
-    private mutating func evictOldest() -> (index: Int, key: AtlasKey)? {
-        guard !slots.isEmpty else { return nil }
-
+    /// Frees the least recently written occupied slot in one pass over the slots.
+    /// Ties go to the lowest slot index. `slotsScanned` counts the slots inspected.
+    private mutating func evictOldest() -> (victim: (index: Int, key: AtlasKey)?, slotsScanned: Int) {
         var oldestFrame: UInt64 = .max
         var oldestIndex = -1
+        var slotsScanned = 0
 
         for (i, slot) in slots.enumerated() {
+            slotsScanned += 1
             if slot.ownerKey != nil, slot.lastWrittenFrame < oldestFrame {
                 oldestFrame = slot.lastWrittenFrame
                 oldestIndex = i
@@ -232,10 +245,10 @@ struct SlotAllocator: Equatable {
         }
 
         guard oldestIndex >= 0, let oldKey = slots[oldestIndex].ownerKey else {
-            return nil
+            return (nil, slotsScanned)
         }
         keyToSlot.removeValue(forKey: oldKey)
         slots[oldestIndex].ownerKey = nil
-        return (oldestIndex, oldKey)
+        return ((oldestIndex, oldKey), slotsScanned)
     }
 }
