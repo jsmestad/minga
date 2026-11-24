@@ -40,6 +40,7 @@ Pause after `SPC`, or any prefix, and which-key opens as one panel anchored abov
 - Groups in columns, each column as wide as its longest entry, names dim above each column, rows single-spaced, no rules. The panel is only as tall as its longest group.
 - Each entry is `key  Label`, with live counts where they matter ("Tasks · 1 needs you", "Review · 3", "Attach diagnostics · 1 error"). Counts update while the panel is open.
 - The ⌘ equivalent appears beside an entry when one exists, so the menu bar and the leader teach each other.
+- `⌫` goes back up one group and keeps the panel open (`SPC a` to `SPC`); at `SPC` it closes the panel, like `esc`.
 - Timing: appears after the pause (`timeoutlen`), fades in within 120 ms, no fade with Reduce Motion, and never paints a frame if you type through the sequence.
 - **Groups read like leaves.** A group is written in Title Case like an action ("Session", "Queue"), drawn in the group colour role with a trailing `›`, and may show a dim count of what is inside ("Session › 7"). Leaves are plain text. Colour plus the chevron, never colour alone, so groups still read in 16 colours. Group labels never start with `+`; the which-key builder adds the chevron. The macOS menu bar's submenus use the same `›`.
 

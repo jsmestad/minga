@@ -205,7 +205,7 @@ defmodule Minga.Mode.Normal do
   end
 
   # Backspace below the top of a leader sequence goes up one level and keeps
-  # which-key open on the parent group (docs/design/surfaces.md). At `SPC`
+  # which-key open on the parent group (docs/design/surfaces.md, Which-key). At `SPC`
   # itself the stack is empty, so Backspace falls through and cancels.
   def handle_key(
         {@backspace, 0},
