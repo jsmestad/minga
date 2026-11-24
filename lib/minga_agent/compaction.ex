@@ -244,35 +244,37 @@ defmodule MingaAgent.Compaction do
     formatted =
       groups
       |> Enum.flat_map(& &1.messages)
-      |> Enum.map_join("\n\n", fn msg ->
-        role = msg.role |> Atom.to_string() |> String.capitalize()
-        content = extract_content(msg)
-
-        tool_info =
-          case msg do
-            %{role: :assistant, tool_calls: [_ | _] = calls} ->
-              call_summary =
-                Enum.map_join(calls, "\n", fn call ->
-                  func = Map.get(call, :function, %{})
-                  name = Map.get(func, :name, "unknown")
-                  args = Map.get(func, :arguments, "{}")
-                  "  Tool call: #{name}(#{args})"
-                end)
-
-              "\n#{call_summary}"
-
-            %{role: :tool, tool_call_id: id} when is_binary(id) ->
-              " [tool_call_id: #{id}]"
-
-            _ ->
-              ""
-          end
-
-        "**#{role}:**#{tool_info}\n#{content}"
-      end)
+      |> Enum.map_join("\n\n", &format_message_for_summary/1)
 
     "Summarize this conversation, preserving tool call details and results:\n\n#{formatted}"
   end
+
+  @spec format_message_for_summary(Message.t()) :: String.t()
+  defp format_message_for_summary(msg) do
+    role = msg.role |> Atom.to_string() |> String.capitalize()
+    content = extract_content(msg)
+    tool_info = message_tool_annotation(msg)
+    "**#{role}:**#{tool_info}\n#{content}"
+  end
+
+  @spec message_tool_annotation(Message.t()) :: String.t()
+  defp message_tool_annotation(%{role: :assistant, tool_calls: [_ | _] = calls}) do
+    summary =
+      Enum.map_join(calls, "\n", fn call ->
+        func = Map.get(call, :function, %{})
+        name = Map.get(func, :name, "unknown")
+        args = Map.get(func, :arguments, "{}")
+        "  Tool call: #{name}(#{args})"
+      end)
+
+    "\n#{summary}"
+  end
+
+  defp message_tool_annotation(%{role: :tool, tool_call_id: id}) when is_binary(id) do
+    " [tool_call_id: #{id}]"
+  end
+
+  defp message_tool_annotation(_), do: ""
 
   @spec extract_content(Message.t()) :: String.t()
   defp extract_content(%{content: content}) when is_list(content) do

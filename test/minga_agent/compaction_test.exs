@@ -57,8 +57,7 @@ defmodule MingaAgent.CompactionTest do
       ]
 
       groups = Compaction.group_messages(messages)
-      assert [%Group{kind: :system, messages: sys}, %Group{kind: :user}] = groups
-      assert length(sys) == 2
+      assert [%Group{kind: :system, messages: [_, _]}, %Group{kind: :user}] = groups
     end
 
     test "plain assistant message forms its own group" do
@@ -91,8 +90,7 @@ defmodule MingaAgent.CompactionTest do
                %Group{kind: :assistant}
              ] = groups
 
-      # exchange = assistant + 2 tool results
-      assert length(exchange) == 3
+      assert [_, _, _] = exchange
     end
 
     test "tool result without preceding tool-call assistant is grouped as tool_exchange" do
@@ -153,7 +151,7 @@ defmodule MingaAgent.CompactionTest do
       system_in_keep = Enum.filter(plan.to_keep, &(&1.kind == :system))
       system_in_compact = Enum.filter(plan.to_compact, &(&1.kind == :system))
 
-      assert length(system_in_keep) == 1
+      assert [_] = system_in_keep
       assert system_in_compact == []
     end
 
@@ -187,11 +185,8 @@ defmodule MingaAgent.CompactionTest do
       plan = Compaction.plan(messages, 2)
 
       # The tool exchange should be in to_compact as a single group
-      exchange_groups = Enum.filter(plan.to_compact, &(&1.kind == :tool_exchange))
-      assert length(exchange_groups) == 1
-
-      [exchange] = exchange_groups
-      assert length(exchange.messages) == 2
+      assert [exchange] = Enum.filter(plan.to_compact, &(&1.kind == :tool_exchange))
+      assert [_, _] = exchange.messages
     end
 
     test "returns empty to_compact when conversation is short" do
