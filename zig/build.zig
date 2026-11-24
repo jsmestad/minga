@@ -35,9 +35,14 @@ fn ensureGeneratedZigArtifacts(b: *std.Build) void {
     std.process.exit(1);
 }
 
+/// Configure native helpers, parser tests, and the highlight benchmark.
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    // Zig's x86_64 ELF linker rejects R_X86_64_PC64 relocations in newer glibc .sframe sections.
+    // Use LLVM code generation with bundled LLD for Linux x86_64 final links; leave other targets on Zig's default.
+    // LLD alone crashes when paired with Zig 0.16's default x86_64 code generator.
+    const use_lld: ?bool = if (target.result.os.tag == .linux and target.result.cpu.arch == .x86_64) true else null;
 
     ensureGeneratedZigArtifacts(b);
 
@@ -134,6 +139,8 @@ pub fn build(b: *std.Build) void {
     // The Zig renderer (libvaxis/zigzag) was removed in #2223. This build now
     // produces the parser, POSIX transport helpers, and highlight benchmark.
     const parser_exe = b.addExecutable(.{
+        .use_llvm = use_lld,
+        .use_lld = use_lld,
         .name = "minga-parser",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/parser_main.zig"),
@@ -150,6 +157,8 @@ pub fn build(b: *std.Build) void {
 
     // ── Hook runner executable (one-shot POSIX process-group helper) ─────
     const hook_runner_exe = b.addExecutable(.{
+        .use_llvm = use_lld,
+        .use_lld = use_lld,
         .name = "minga-hook-runner",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/hook_runner_main.zig"),
@@ -162,6 +171,8 @@ pub fn build(b: *std.Build) void {
 
     // ── Shell output reader (one-credit POSIX FIFO transport) ────────────
     const shell_output_reader_exe = b.addExecutable(.{
+        .use_llvm = use_lld,
+        .use_lld = use_lld,
         .name = "minga-shell-output-reader",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/shell_output_reader_main.zig"),
@@ -174,6 +185,8 @@ pub fn build(b: *std.Build) void {
 
     // Parser tests (highlighter, predicates, posix_regex)
     const parser_tests = b.addTest(.{
+        .use_llvm = use_lld,
+        .use_lld = use_lld,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/parser_main.zig"),
             .target = target,
@@ -199,6 +212,8 @@ pub fn build(b: *std.Build) void {
     // `zig build test`; this step lets CI surface it by name.
     const query_check_step = b.step("query-check", "Compile every shipped query against its grammar");
     const query_check_tests = b.addTest(.{
+        .use_llvm = use_lld,
+        .use_lld = use_lld,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/parser_main.zig"),
             .target = target,
@@ -215,6 +230,8 @@ pub fn build(b: *std.Build) void {
     query_check_step.dependOn(&run_query_check.step);
 
     const hook_runner_tests = b.addTest(.{
+        .use_llvm = use_lld,
+        .use_lld = use_lld,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/hook_runner_main.zig"),
             .target = target,
@@ -228,6 +245,8 @@ pub fn build(b: *std.Build) void {
 
     // Tree-sitter highlight benchmark used by autoresearch.
     const highlight_bench = b.addExecutable(.{
+        .use_llvm = use_lld,
+        .use_lld = use_lld,
         .name = "highlight-bench",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/highlight_bench.zig"),
