@@ -1,0 +1,17 @@
+{
+  "name": "minga-site-labs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "check": "npm run typecheck && npm run test",
+    "build": "esbuild src/main.ts --bundle --format=esm --target=es2022 --minify --outfile=../../_site/assets/learn-labs.js"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.2"
+  }
+}

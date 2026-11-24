@@ -4,11 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Learn Minga: Guides, Walkthroughs, and Interactive Drills</title>
-  <meta name="description" content="A structured five-lesson path for learning Minga: install and first session, v0.1.0 Spine keys and quiet chrome, co-authoring with parallel agents, Elixir for Minga, and remote devboxes with MCP and safety hooks.">
+  <title>Learn Minga: Interactive Curriculum &amp; Labs</title>
+  <meta name="description" content="Hands-on interactive lessons for learning Minga: adaptive install runbook, playable v0.1.0 Mini-Minga key sandbox, live parallel-agent Twist simulator, Lua/Elisp/VS Code to Elixir translator, and remote fault-injection topology.">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="Learn Minga: Guides, Walkthroughs, and Interactive Drills">
-  <meta property="og:description" content="Five lessons with interactive browser drills covering Minga's v0.1.0 interface model, parallel agent co-authoring, Elixir customization, and remote devboxes.">
+  <meta property="og:title" content="Learn Minga: Interactive Curriculum &amp; Labs">
+  <meta property="og:description" content="Five distinct, playable lessons covering Minga's v0.1.0 interface model, parallel agent co-authoring, Elixir customization, and remote devboxes.">
   <meta property="og:image" content="/assets/og-minga.png">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="/assets/og-minga.png">
@@ -51,224 +51,205 @@
     </div>
   </header>
 
-  <main id="main">
-    <header class="essay-hero">
+  <main id="main" data-learn-hub>
+    <header class="learn-hub-hero">
       <div class="container">
-        <p class="section-index"><span>LEARN</span> Five-Lesson Curriculum</p>
-        <h1>Learn Minga</h1>
-        <p class="essay-subtitle">Go from zero-config install to keyboard-first editing, parallel agent co-authoring, Elixir customization, and persistent remote devboxes. Each guide includes concrete examples and interactive drills you can try right in the browser.</p>
-        <nav class="essay-toc" aria-label="Sections">
-          <a href="#curriculum">1. Five-lesson path</a>
-          <a href="#interactive-labs">2. Interactive drills</a>
-          <a href="#deep-references">3. Deep references</a>
-        </nav>
+        <div class="hub-hero-grid">
+          <div>
+            <p class="section-index"><span>LEARN</span> Interactive Curriculum</p>
+            <h1>Learn by pressing the keys, not skimming walls of prose.</h1>
+            <p class="hero-lead">Five focused lessons with live browser labs: an adaptive quickstart runbook, a playable Mini-Minga keyboard sandbox, a live co-authoring and parallel-agent simulator, an editor-to-Elixir translator with live theme previews, and a supervision fault-injection lab.</p>
+          </div>
+          <div class="hub-progress-box">
+            <span class="hub-progress-k">CURRICULUM STATUS</span>
+            <p class="hub-progress-stat" data-hub-overall>16 hands-on browser missions across 5 lessons · Zero accounts</p>
+            <p class="hub-progress-note">Lesson 01, 04, and 05 teach what ships on <code>main</code> today. Lessons 02 and 03 teach the v0.1.0 Spine design directly (marked <strong>Coming · v0.1.0</strong>).</p>
+          </div>
+        </div>
       </div>
     </header>
 
-    <article class="essay-body">
+    <section class="section" id="curriculum">
       <div class="container">
-        <section class="essay-section" id="curriculum">
-          <h2>1. The learning path</h2>
-          <p>Lesson 01 teaches today's rolling Homebrew prerelease build so you can install Minga and run your first staged edit right away. Lessons 02 and 03 teach the v0.1.0 Spine design directly (marked <strong>Coming · v0.1.0</strong> until the full surface set lands). Lessons 04 and 05 cover Elixir customization, hooks, MCP, and headless remote sessions that ship on <code>main</code> today.</p>
-
-          <ol class="lesson-list">
-            <li class="lesson-card">
-              <div class="lesson-meta">
-                <span class="lesson-num">LESSON 01</span>
-                <span class="lesson-tag lesson-tag-shipped">Ships today</span>
+        <div class="curriculum-bento">
+          <!-- LESSON 01: Full-width Quickstart Entrypoint -->
+          <a class="bento-card bento-card-wide bento-theme-mono" href="/getting-started">
+            <div class="bento-card-content">
+              <div class="bento-top">
+                <span class="lesson-num">LESSON 01 · QUICKSTART RUNBOOK</span>
+                <span class="bento-badges">
+                  <span class="lesson-tag-shipped">Ships today</span>
+                  <span class="bento-prog" data-lesson-progress="getting-started">1 step</span>
+                </span>
               </div>
-              <div class="lesson-body">
-                <h3><a href="/getting-started">Install &amp; Your First Staged Edit</a></h3>
-                <p>Install signed Apple Silicon macOS desktop or terminal builds via Homebrew (or build from source on Linux and Intel Macs), choose Vim modal or desktop shortcuts, connect a model provider, review your first syntax-highlighted staged diff, and drop four starter recipes into <code>config.exs</code>.</p>
-                <div class="lesson-topics">
-                  <span>Homebrew &amp; source</span>
-                  <span>Model keys &amp; /model</span>
-                  <span>Staged diff review</span>
-                  <span>4 starter recipes</span>
-                </div>
+              <h2>Install &amp; Your First Staged Edit</h2>
+              <p>Tailor the runbook to your OS, client (macOS app or Terminal CLI), and key style (Vim or CUA), connect a model provider, review your first syntax-highlighted staged diff, and copy four working recipes.</p>
+              <div class="lesson-topics">
+                <span>Adaptive OS/client filter</span>
+                <span>/model &amp; 0600 keys</span>
+                <span>Staged diff review</span>
+                <span>4 starter recipes</span>
               </div>
-            </li>
-
-            <li class="lesson-card" data-status="planned" data-since="v0.1.0" data-pill="off">
-              <div class="lesson-meta">
-                <span class="lesson-num">LESSON 02</span>
-                <span class="lesson-tag" data-status="planned" data-since="v0.1.0"></span>
-              </div>
-              <div class="lesson-body">
-                <h3><a href="/learn/editing">Editing, Keys &amp; Quiet Chrome</a></h3>
-                <p>Learn the v0.1.0 resting screen (plain title bar, your text, one prioritized modeline), mnemonic <code>SPC</code> leader sequences, Doom-first navigation, pinned files, bottom drawers, two-level Hover (<kbd>K</kbd>), the decision-first Act Menu (<kbd>g.</kbd> / <kbd>⌃.</kbd>), first-class mouse paths, and the CUA key profile (ADR-0007).</p>
-                <div class="lesson-topics">
-                  <span>SPC grammar</span>
-                  <span>Drawers &amp; switcher</span>
-                  <span>Act Menu &amp; mouse</span>
-                  <span>CUA profile</span>
-                  <span>Interactive drill</span>
-                </div>
-              </div>
-            </li>
-
-            <li class="lesson-card" data-status="planned" data-since="v0.1.0" data-pill="off">
-              <div class="lesson-meta">
-                <span class="lesson-num">LESSON 03</span>
-                <span class="lesson-tag" data-status="planned" data-since="v0.1.0"></span>
-              </div>
-              <div class="lesson-body">
-                <h3><a href="/learn/agents">Co-Authoring &amp; Parallel Agents</a></h3>
-                <p>Read the Twist authorship gutter and the Orbit's six states on five shapes, use per-author undo (<kbd>u</kbd> / <kbd>⌘Z</kbd>), review changes inline or in <code>*minga-review*</code>, approve requests in <code>*minga-tasks*</code> without focus theft, inspect workers in Subagent Peek (<kbd>SPC a i</kbd>), and steer or queue follow-ups in <code>*minga-queue*</code>.</p>
-                <div class="lesson-topics">
-                  <span>The Twist &amp; Orbit</span>
-                  <span>Per-author undo</span>
-                  <span>*minga-review*</span>
-                  <span>Subagent Peek</span>
-                  <span>Interactive lab</span>
-                </div>
-              </div>
-            </li>
-
-            <li class="lesson-card">
-              <div class="lesson-meta">
-                <span class="lesson-num">LESSON 04</span>
-                <span class="lesson-tag lesson-tag-shipped">Ships today</span>
-              </div>
-              <div class="lesson-body">
-                <h3><a href="/learn/elixir">Elixir for Minga (Zero Prior Elixir Needed)</a></h3>
-                <p>A fast, practical translation guide from Lua (Neovim), Elisp (Emacs), and TypeScript/JSON (VS Code) to the tiny subset of Elixir you need for <code>~/.config/minga/config.exs</code>: atoms, keyword lists, anonymous functions, save hooks, command advice, and growing into supervised <code>minga_sdk</code> packages.</p>
-                <div class="lesson-topics">
-                  <span>Lua / Elisp / JS map</span>
-                  <span>config.exs DSL</span>
-                  <span>Hooks &amp; advise</span>
-                  <span>Interactive builder</span>
-                </div>
-              </div>
-            </li>
-
-            <li class="lesson-card">
-              <div class="lesson-meta">
-                <span class="lesson-num">LESSON 05</span>
-                <span class="lesson-tag lesson-tag-shipped">Ships today</span>
-              </div>
-              <div class="lesson-body">
-                <h3><a href="/learn/remote">Remote Devboxes, MCP &amp; Safety Guardrails</a></h3>
-                <p>Keep agents running across laptop sleep with <code>minga --headless</code> and <code>minga attach ssh://</code>, gate shell tools with deterministic <code>PreToolUse</code> veto scripts, attach crash-isolated stdio MCP servers, and route corporate traffic through <code>MingaAgent.InferenceRoute</code>.</p>
-                <div class="lesson-topics">
-                  <span>minga --headless</span>
-                  <span>PreToolUse hooks</span>
-                  <span>Isolated MCP</span>
-                  <span>Corporate gateways</span>
-                </div>
-              </div>
-            </li>
-          </ol>
-        </section>
-
-        <section class="essay-section" id="interactive-labs">
-          <h2>2. Try the interactive browser drills</h2>
-          <p>Each interactive exercise lives inside its lesson, runs completely locally with zero network calls, and works with mouse or keyboard:</p>
-
-          <div class="grid-2">
-            <div class="surface-panel" data-status="planned" data-since="v0.1.0" data-pill="off">
-              <div class="surface-panel-head">
-                <h3>Key-Chord Trainer</h3>
-                <span class="surface-panel-tag">Lesson 02</span>
-              </div>
-              <p>Practice eight core v0.1.0 leader sequences, special-buffer keys, and Act Menu chords with instant explanations of the Doom-first grammar rule behind each binding.</p>
-              <p class="section-foot-link"><a href="/learn/editing#key-drill">Open Key-Chord Trainer -&gt;</a></p>
             </div>
-
-            <div class="surface-panel" data-status="planned" data-since="v0.1.0" data-pill="off">
-              <div class="surface-panel-head">
-                <h3>Twist &amp; Per-Author Undo Lab</h3>
-                <span class="surface-panel-tag">Lesson 03</span>
+            <div class="bento-motif motif-cli" aria-hidden="true">
+              <div class="motif-bar"><span>zsh · quickstart</span><span>macOS / Linux</span></div>
+              <div class="motif-body">
+                <div><span class="motif-dim">$</span> brew install --cask jsmestad/minga/minga-mac</div>
+                <div><span class="motif-dim">$</span> minga .</div>
+                <div class="motif-ok">● Ready · 0 files written to repo</div>
               </div>
-              <p>Step through a live Catppuccin Frappé code buffer with Minga's changes and your own edit: run <kbd>u</kbd>, <kbd>]h</kbd>, <kbd>SPC a y</kbd>, <kbd>SPC a d</kbd>, and the <kbd>g.</kbd> Act Menu to see how authorship and undo stay separate.</p>
-              <p class="section-foot-link"><a href="/learn/agents#review-lab">Open Review Lab -&gt;</a></p>
             </div>
+          </a>
 
-            <div class="surface-panel">
-              <div class="surface-panel-head">
-                <h3>config.exs Builder</h3>
-                <span class="surface-panel-tag">Lesson 04</span>
+          <!-- LESSON 02: Playable Mini-Minga Sandbox -->
+          <a class="bento-card bento-theme-you" href="/learn/editing" data-status="planned" data-since="v0.1.0" data-pill="off">
+            <div class="bento-motif motif-frappe" aria-hidden="true">
+              <div class="motif-bar"><span>minga · retry.ex</span><span>macOS &lt;-&gt; Go TUI</span></div>
+              <div class="motif-body">
+                <div class="motif-wk"><span>SPC ›</span> <span>a Minga ›</span> <span>, Switch</span> <span>g. Act</span></div>
+                <div class="motif-ml"><span class="ml-pill">NORMAL</span> <span>retry.ex</span> <span class="motif-dim">pinned 2</span></div>
               </div>
-              <p>Toggle your editing model, theme, line numbers, save hook, <code>PreToolUse</code> check, MCP server, and Hex extension to generate a valid, copy-ready <code>~/.config/minga/config.exs</code>.</p>
-              <p class="section-foot-link"><a href="/learn/elixir#config-builder">Open config.exs Builder -&gt;</a></p>
             </div>
-
-            <div class="surface-panel">
-              <div class="surface-panel-head">
-                <h3>Starter Recipes</h3>
-                <span class="surface-panel-tag">Lesson 01</span>
+            <div class="bento-card-content">
+              <div class="bento-top">
+                <span class="lesson-num">LESSON 02 · PLAYABLE SANDBOX</span>
+                <span class="bento-badges">
+                  <span class="lesson-tag" data-status="planned" data-since="v0.1.0"></span>
+                  <span class="bento-prog" data-lesson-progress="editing">5 missions</span>
+                </span>
               </div>
-              <p>Copy working configuration blocks for local shell veto hooks, GitHub MCP, lazy Hex extension loading, and remote headless SSH attach.</p>
-              <p class="section-foot-link"><a href="/getting-started#recipes">Jump to Starter Recipes -&gt;</a></p>
+              <h2>Editing, Keys &amp; Quiet Chrome</h2>
+              <p>Play a live keyboard-driven Mini-Minga viewport: trigger which-key, pin files in the Switcher, open the Direction A Act Menu, toggle macOS vs Go TUI parity, and explore ADR-0007 CUA.</p>
             </div>
-          </div>
-        </section>
+          </a>
 
-        <section class="essay-section" id="deep-references">
-          <h2>3. Deep references &amp; architecture specs</h2>
-          <p>Once you are comfortable with the core workflow, use the site essays and ExDoc technical references when you need exact option names, protocol details, or design decisions:</p>
+          <!-- LESSON 03: Live Parallel-Agent & Twist Simulator -->
+          <a class="bento-card bento-theme-minga" href="/learn/agents" data-status="planned" data-since="v0.1.0" data-pill="off">
+            <div class="bento-motif motif-frappe" aria-hidden="true">
+              <div class="motif-bar"><span>*minga-tasks* &amp; Twist</span><span>3 workers</span></div>
+              <div class="motif-body">
+                <div class="motif-orbits"><span class="ml-minga">◐ Working</span> <span class="ml-needs">◉ Needs you</span> <span class="ml-done">● Done</span></div>
+                <div class="motif-act"><span>y Keep · accept 4 lines</span><span>n Reject · restores 1</span></div>
+              </div>
+            </div>
+            <div class="bento-card-content">
+              <div class="bento-top">
+                <span class="lesson-num">LESSON 03 · MISSION CONTROL</span>
+                <span class="bento-badges">
+                  <span class="lesson-tag" data-status="planned" data-since="v0.1.0"></span>
+                  <span class="bento-prog" data-lesson-progress="agents">4 missions</span>
+                </span>
+              </div>
+              <h2>Co-Authoring &amp; Parallel Agents</h2>
+              <p>Test per-author undo inside a braided Twist block, feel the 300 ms anti-misfire lockout guard, inspect siblings in Subagent Peek, and keep or reject via the Direction A Act Menu.</p>
+            </div>
+          </a>
 
-          <div class="guide-index" aria-label="Technical references">
-            <a class="guide-row" href="/why-minga">
-              <span class="guide-row-top">
-                <span class="guide-row-title">Why Minga</span>
-                <span class="guide-row-kind">Thesis</span>
-              </span>
-              <span class="guide-row-desc">Tradeoffs against Cursor, Zed, Neovim, Emacs, and terminal multiplexers, plus roadmap status.</span>
-            </a>
-            <a class="guide-row" href="/architecture">
-              <span class="guide-row-top">
-                <span class="guide-row-title">Architecture &amp; The Spine</span>
-                <span class="guide-row-kind">Diagrams</span>
-              </span>
-              <span class="guide-row-desc">Erlang VM supervision, native Swift/Go/Zig boundaries, staged edit pipeline, and ADRs 0001 to 0006.</span>
-            </a>
-            <a class="guide-row" href="/extending">
-              <span class="guide-row-top">
-                <span class="guide-row-title">Extending Minga</span>
-                <span class="guide-row-kind">Guide</span>
-              </span>
-              <span class="guide-row-desc">Three customization layers, minga_sdk packages, corporate gateways, and security boundaries.</span>
-            </a>
-            <a class="guide-row" href="/docs/0006-the-spine.html">
-              <span class="guide-row-top">
-                <span class="guide-row-title">ADR-0006: The Spine</span>
-                <span class="guide-row-kind">Decision Record</span>
-              </span>
-              <span class="guide-row-desc">The full interface contract shared identically by macOS and the Go terminal client.</span>
-            </a>
-            <a class="guide-row" href="/docs/configuration.html">
-              <span class="guide-row-top">
-                <span class="guide-row-title">Configuration Reference</span>
-                <span class="guide-row-kind">ExDoc</span>
-              </span>
-              <span class="guide-row-desc">Complete typed options, per-filetype rules, keymap scopes, hooks, and MCP settings.</span>
-            </a>
-            <a class="guide-row" href="/docs/extension_api.html">
-              <span class="guide-row-top">
-                <span class="guide-row-title">Extension API Reference</span>
-                <span class="guide-row-kind">ExDoc</span>
-              </span>
-              <span class="guide-row-desc">Extension callbacks, load policies, InferenceRoute gateways, and runtime tree-sitter grammars.</span>
-            </a>
-            <a class="guide-row" href="/docs/hooks.html">
-              <span class="guide-row-top">
-                <span class="guide-row-title">PreToolUse Hooks &amp; MCP</span>
-                <span class="guide-row-kind">ExDoc</span>
-              </span>
-              <span class="guide-row-desc">JSON stdin payloads, exit-code veto semantics, and stdio MCP supervision details.</span>
-            </a>
-            <a class="guide-row" href="/docs/remote_agents.html">
-              <span class="guide-row-top">
-                <span class="guide-row-title">Remote Agents &amp; Headless</span>
-                <span class="guide-row-kind">ExDoc</span>
-              </span>
-              <span class="guide-row-desc">Running minga --headless under systemd/launchd, SSH attach, and token-gated JSON-RPC.</span>
-            </a>
-          </div>
-        </section>
+          <!-- LESSON 04: Elixir Translator & Live Theme Playground -->
+          <a class="bento-card bento-theme-elixir" href="/learn/elixir">
+            <div class="bento-motif motif-code" aria-hidden="true">
+              <div class="motif-bar"><span>Lua / Elisp / JSON -&gt; Elixir</span><span>Live theme preview</span></div>
+              <div class="motif-body">
+                <div><span class="tok-kw">set</span> <span class="tok-atom">:theme</span>, <span class="tok-atom">:catppuccin_frappe</span></div>
+                <div><span class="tok-kw">on</span> <span class="tok-atom">:after_save</span>, <span class="tok-kw">fn</span> _buf, path -&gt; ... <span class="tok-kw">end</span></div>
+              </div>
+            </div>
+            <div class="bento-card-content">
+              <div class="bento-top">
+                <span class="lesson-num">LESSON 04 · TRANSLATOR + PLAYGROUND</span>
+                <span class="bento-badges">
+                  <span class="lesson-tag-shipped">Ships today</span>
+                  <span class="bento-prog" data-lesson-progress="elixir">3 missions</span>
+                </span>
+              </div>
+              <h2>Elixir for Minga</h2>
+              <p>Pick your current editor (Neovim, Emacs, or VS Code) for an interactive side-by-side translator, then customize presets and watch a live mini-editor preview update in real time.</p>
+            </div>
+          </a>
+
+          <!-- LESSON 05: Supervision & Fault-Injection Topology -->
+          <a class="bento-card bento-theme-done" href="/learn/remote">
+            <div class="bento-motif motif-topo" aria-hidden="true">
+              <div class="motif-bar"><span>minga --headless · Fault Lab</span><span>BEAM supervision</span></div>
+              <div class="motif-body">
+                <div class="motif-nodes">
+                  <span class="mn-ok">Buffers ●</span>
+                  <span class="mn-fail">GitHub MCP ◆</span>
+                  <span class="mn-ok">Postgres ●</span>
+                </div>
+                <div class="motif-dim">PreToolUse exit 1 -> vetoed before execution</div>
+              </div>
+            </div>
+            <div class="bento-card-content">
+              <div class="bento-top">
+                <span class="lesson-num">LESSON 05 · FAULT-INJECTION LAB</span>
+                <span class="bento-badges">
+                  <span class="lesson-tag-shipped">Ships today</span>
+                  <span class="bento-prog" data-lesson-progress="remote">3 missions</span>
+                </span>
+              </div>
+              <h2>Remote Devboxes, MCP &amp; Safety</h2>
+              <p>Close the laptop lid and reattach to a headless devbox, crash an isolated MCP server without losing buffers, and test real shell commands against a live <code>PreToolUse</code> veto hook.</p>
+            </div>
+          </a>
+        </div>
       </div>
-    </article>
+    </section>
+
+    <section class="section" id="deep-references">
+      <div class="container">
+        <div class="section-header">
+          <p class="section-index"><span>REFERENCE</span> Go Deeper</p>
+          <h2>Architecture, ADRs, and full technical references.</h2>
+          <p>Use the site essays and ExDoc manuals whenever you need exact option tables, wire opcodes, or contributor contracts.</p>
+        </div>
+
+        <div class="guide-index" aria-label="Technical references">
+          <a class="guide-row" href="/why-minga">
+            <span class="guide-row-top">
+              <span class="guide-row-title">Why Minga</span>
+              <span class="guide-row-kind">Thesis</span>
+            </span>
+            <span class="guide-row-desc">Tradeoffs against Cursor, Zed, Neovim, Emacs, and terminal multiplexers, plus roadmap status.</span>
+          </a>
+          <a class="guide-row" href="/architecture">
+            <span class="guide-row-top">
+              <span class="guide-row-title">Architecture &amp; The Spine</span>
+              <span class="guide-row-kind">Diagrams</span>
+            </span>
+            <span class="guide-row-desc">Erlang VM supervision, native Swift/Go/Zig boundaries, staged edit pipeline, and ADRs 0001 to 0006.</span>
+          </a>
+          <a class="guide-row" href="/extending">
+            <span class="guide-row-top">
+              <span class="guide-row-title">Extending Minga</span>
+              <span class="guide-row-kind">Guide</span>
+            </span>
+            <span class="guide-row-desc">Three customization layers, minga_sdk packages, corporate gateways, and security boundaries.</span>
+          </a>
+          <a class="guide-row" href="/docs/0006-the-spine.html">
+            <span class="guide-row-top">
+              <span class="guide-row-title">ADR-0006: The Spine</span>
+              <span class="guide-row-kind">Decision Record</span>
+            </span>
+            <span class="guide-row-desc">The full interface contract shared identically by macOS and the Go terminal client.</span>
+          </a>
+          <a class="guide-row" href="/docs/configuration.html">
+            <span class="guide-row-top">
+              <span class="guide-row-title">Configuration Reference</span>
+              <span class="guide-row-kind">ExDoc</span>
+            </span>
+            <span class="guide-row-desc">Complete typed options, per-filetype rules, keymap scopes, hooks, and MCP settings.</span>
+          </a>
+          <a class="guide-row" href="/docs/extension_api.html">
+            <span class="guide-row-top">
+              <span class="guide-row-title">Extension API &amp; Hooks</span>
+              <span class="guide-row-kind">ExDoc</span>
+            </span>
+            <span class="guide-row-desc">Extension callbacks, load policies, InferenceRoute gateways, and runtime tree-sitter grammars.</span>
+          </a>
+        </div>
+      </div>
+    </section>
   </main>
 
   <footer class="site-footer">
@@ -290,5 +271,6 @@
   </footer>
 
   <script defer src="/site.js"></script>
+  <script type="module" src="/assets/learn-labs.js"></script>
 </body>
 </html>

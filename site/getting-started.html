@@ -69,6 +69,24 @@
 
     <article class="essay-body">
       <div class="container">
+        <div class="runbook-bar" data-runbook-filter>
+          <div class="runbook-groups">
+            <div class="seg-group" role="group" aria-label="Platform">
+              <button type="button" class="seg-btn is-active" data-rb-platform="apple-silicon">Apple Silicon macOS</button>
+              <button type="button" class="seg-btn" data-rb-platform="source">Linux / Intel Mac</button>
+            </div>
+            <div class="seg-group" role="group" aria-label="Client">
+              <button type="button" class="seg-btn is-active" data-rb-client="mac">macOS App</button>
+              <button type="button" class="seg-btn" data-rb-client="cli">Terminal CLI</button>
+            </div>
+            <div class="seg-group" role="group" aria-label="Key style">
+              <button type="button" class="seg-btn is-active" data-rb-keys="vim">Vim modal</button>
+              <button type="button" class="seg-btn" data-rb-keys="cua">CUA desktop</button>
+            </div>
+          </div>
+          <p class="runbook-summary" data-rb-summary><strong>Tailored path:</strong> <code>brew install --cask jsmestad/minga/minga-mac &amp;&amp; open -a Minga</code> · Vim modal defaults are active out of the box.</p>
+        </div>
+
         <section class="essay-section" id="install">
           <h2>1. Install Minga</h2>
           <p>On <strong>Apple Silicon macOS</strong>, Homebrew installs signed, notarized rolling prereleases. The desktop app (<code>minga-mac</code>) and terminal client (<code>minga</code>) are independent; install whichever you want, or both.</p>
@@ -335,5 +353,6 @@ minga attach ssh://devbox/work/app</code></pre>
   </footer>
 
   <script defer src="/site.js"></script>
+  <script type="module" src="/assets/learn-labs.js"></script>
 </body>
 </html>

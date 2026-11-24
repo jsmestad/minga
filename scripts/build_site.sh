@@ -26,7 +26,25 @@ rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR/docs" "$OUTPUT_DIR/assets"
 
 cp -R "$REPO_ROOT/assets/." "$OUTPUT_DIR/assets/"
-cp -R "$REPO_ROOT/site/." "$OUTPUT_DIR/"
+for item in "$REPO_ROOT/site"/* "$REPO_ROOT/site"/.[!.]*; do
+  [[ -e "$item" ]] || continue
+  base="$(basename "$item")"
+  [[ "$base" == "ts" ]] && continue
+  cp -R "$item" "$OUTPUT_DIR/"
+done
+
+if [[ -f "$REPO_ROOT/site/ts/package.json" ]]; then
+  if [[ ! -d "$REPO_ROOT/site/ts/node_modules" ]]; then
+    npm --prefix "$REPO_ROOT/site/ts" ci
+  fi
+  "$REPO_ROOT/site/ts/node_modules/.bin/esbuild" \
+    "$REPO_ROOT/site/ts/src/main.ts" \
+    --bundle \
+    --format=esm \
+    --target=es2022 \
+    --minify \
+    --outfile="$OUTPUT_DIR/assets/learn-labs.js"
+fi
 
 (
   cd "$REPO_ROOT"
