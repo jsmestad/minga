@@ -1013,9 +1013,7 @@ defmodule Minga.Buffer.Process do
   Appends text at the end of the buffer, then trims the oldest lines
   to stay within `max_lines` and `max_bytes` limits.
 
-  Bypasses read-only. Work is proportional to the appended text and
-  removed prefix, not the full buffer: the gap buffer insert is O(text),
-  and `trim_leading_lines` slices binaries without materializing content.
+  Bypasses read-only. The text lands at the end wherever the cursor is. A cursor at the end follows the new text; any other cursor stays on its line, shifted up by the trimmed lines, or moves to `{0, 0}` when its line is trimmed. Each call at capacity still rebuilds the retained line index, so its cost grows with the retained line count.
 
   Designed for bounded log buffers like `*Messages*`.
   """
@@ -2304,10 +2302,8 @@ defmodule Minga.Buffer.Process do
   def handle_call({:bounded_append, text, max_lines, max_bytes}, _from, state) do
     doc = state.document
 
-    # Insert at the current cursor position. For bounded-append buffers the
-    # cursor stays at the end after each call, so insert_text appends in
-    # O(|text|) without materializing the existing content.
-    doc = Document.insert_text(doc, text)
+    # Append at the end even when the reader moved the cursor up (`gg` in *Messages*), so the front trim below never removes the new entry.
+    doc = Document.append_text(doc, text)
 
     total_lines = Document.line_count(doc)
     total_bytes = Document.content_byte_size(doc)
