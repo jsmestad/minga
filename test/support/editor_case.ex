@@ -98,6 +98,7 @@ defmodule Minga.Test.EditorCase do
     - `:height` — terminal height (default 24)
     - `:file_path` — optional file path for the buffer
     - `:name` — optional Editor registration name (defaults to a unique test name)
+    - `:child_id` — optional supervisor child id, so a caller can `stop_supervised/1` the editor before the test ends
   """
   @spec start_editor(String.t(), keyword()) :: editor_ctx()
   def start_editor(content, opts \\ []) do
@@ -202,8 +203,10 @@ defmodule Minga.Test.EditorCase do
     editor_opts =
       if project_root, do: [{:project_root, project_root} | editor_opts], else: editor_opts
 
+    child_id = Keyword.get_lazy(opts, :child_id, &make_ref/0)
+
     generation =
-      start_supervised!(Supervisor.child_spec({MingaEditor, editor_opts}, id: make_ref()))
+      start_supervised!(Supervisor.child_spec({MingaEditor, editor_opts}, id: child_id))
 
     {:ok, editor} = GenerationSupervisor.editor_owner(generation)
     synchronize_ready(editor, port, width, height, rendering)
