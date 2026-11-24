@@ -73,6 +73,10 @@ defmodule MingaAgent.Changeset.Overlay.SystemCloner do
   @spec cp([String.t()]) :: :ok | {:error, term()}
   defp cp(args), do: run("cp", args)
 
+  # A cp that cannot clone may report every file; the first report names the cause.
+  @spec first_line(String.t()) :: String.t()
+  defp first_line(output), do: output |> String.trim() |> String.split("\n", parts: 2) |> hd()
+
   @spec run(String.t(), [String.t()]) :: :ok | {:error, term()}
   defp run(command, args) do
     case System.find_executable(command) do
@@ -82,7 +86,7 @@ defmodule MingaAgent.Changeset.Overlay.SystemCloner do
       executable ->
         case System.cmd(executable, args, stderr_to_stdout: true) do
           {_output, 0} -> :ok
-          {output, status} -> {:error, {:exit, status, String.trim(output)}}
+          {output, status} -> {:error, {:exit, status, first_line(output)}}
         end
     end
   end
