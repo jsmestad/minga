@@ -35,6 +35,11 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       end
     end
 
+    test "the eval prompt names itself in the mode pill (#4092)" do
+      data = %{@base_data | mode: :eval, mode_state: %Minga.Mode.EvalState{}}
+      assert String.contains?(segments_text(data), "EVAL")
+    end
+
     test "operator_pending mode shows NORMAL badge, not OPERATOR" do
       text = segments_text(Map.put(@base_data, :mode, :operator_pending))
 
