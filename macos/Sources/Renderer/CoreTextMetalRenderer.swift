@@ -231,7 +231,6 @@ struct NativeActiveResourceSnapshot: Equatable {
     let allocator: SlotAllocator?
     let texture: ObjectIdentifier?
     let windowRenderer: ObjectIdentifier?
-    let cache: WindowContentCacheSnapshot?
     let rasterizer: ObjectIdentifier?
     let lineBuffer: ObjectIdentifier?
     let quadBuffers: [ObjectIdentifier]
@@ -2039,7 +2038,6 @@ final class CoreTextMetalRenderer {
             atlas: atlas.map(ObjectIdentifier.init), allocator: atlas?.allocator,
             texture: atlas?.texture.map(ObjectIdentifier.init),
             windowRenderer: windowContentRenderer.map(ObjectIdentifier.init),
-            cache: windowContentRenderer?.cacheSnapshot(),
             rasterizer: bitmapRasterizer.map(ObjectIdentifier.init),
             lineBuffer: instanceBuffer.map(ObjectIdentifier.init),
             quadBuffers: quadBuffers.map(ObjectIdentifier.init),
