@@ -244,6 +244,19 @@ defmodule Minga.Buffer.UndoPatch do
     Document.slice_byte_range(document, end_byte - count, count)
   end
 
+  @doc """
+  Returns the change a forward patch records: where it starts, the bytes it removed, and the bytes it inserted.
+
+  Every patch built from an edit (`from_delta/2`, `from_documents/2`, `changes/2`, or a `replacement/4` recorded for an edit) stores the removed bytes as its old text and the inserted bytes as its new text.
+  """
+  @spec change(t()) :: {non_neg_integer(), byte_fragment(), byte_fragment()}
+  def change(%__MODULE__{start_byte: start_byte, old_text: removed, new_text: inserted}),
+    do: {start_byte, removed, inserted}
+
+  @doc "Returns the cursor the patch restores when applied."
+  @spec cursor(t()) :: Document.position()
+  def cursor(%__MODULE__{cursor: cursor}), do: cursor
+
   @doc "Returns the inverse patch for the current document state."
   @spec invert(t(), Document.t()) :: t()
   def invert(%__MODULE__{} = patch, %Document{} = current_document),

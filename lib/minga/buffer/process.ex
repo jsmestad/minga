@@ -41,8 +41,10 @@ defmodule Minga.Buffer.Process do
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.EditSource
   alias Minga.Buffer.Persistence.SystemFileSystem
+  alias Minga.Buffer.Provenance
   alias Minga.Buffer.State.LocalPersistence
   alias Minga.Buffer.State.Swap, as: SwapState
+  alias Minga.Buffer.UndoHistory.Restore
   alias Minga.Config
   alias Minga.Core.Decorations
   alias Minga.Core.PositionEncoding
@@ -1163,23 +1165,56 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:clear_line, line})
   end
 
-  @doc "Undoes the last mutation, restoring the previous buffer state. Returns an error, with content and history unchanged, when the history entry no longer applies."
-  @spec undo(GenServer.server()) :: :ok | {:error, UndoPatch.apply_error()}
+  @doc """
+  Undoes your most recent edit group. Minga's edits are never undone this way.
+
+  Returns `{:blocked, {:overlaps, minga_group}}`, with content and history unchanged, when a later Minga step rewrote text the group wrote or removed. Returns an error, with content and history unchanged, when the group no longer applies.
+  """
+  @spec undo(GenServer.server()) ::
+          :ok | UndoHistory.blocked() | {:error, UndoPatch.apply_error()}
   def undo(server) do
     GenServer.call(server, :undo)
   end
 
-  @doc "Redoes the last undone mutation. Returns an error, with content and history unchanged, when the history entry no longer applies."
-  @spec redo(GenServer.server()) :: :ok | {:error, UndoPatch.apply_error()}
+  @doc "Redoes your most recently undone edit group. Returns the same outcomes as `undo/1`."
+  @spec redo(GenServer.server()) ::
+          :ok | UndoHistory.blocked() | {:error, UndoPatch.apply_error()}
   def redo(server) do
     GenServer.call(server, :redo)
   end
 
-  @doc "Undoes all consecutive agent-sourced entries from the top of the undo stack."
+  @doc "Reverts every remaining step of the Minga task that edited this buffer most recently, keeping your edits. Returns how many steps it reverted."
   @spec undo_agent_session(GenServer.server()) ::
           {:ok, non_neg_integer()} | :empty | {:error, UndoPatch.apply_error()}
   def undo_agent_session(server) do
     GenServer.call(server, :undo_agent_session)
+  end
+
+  @doc """
+  Returns who wrote the character at `position`: `:you`, Minga in a task (`{:minga, task_id}`), or `:unattributed` for text that predates tracking. Returns `nil` past the end of the buffer.
+  """
+  @spec author_at(GenServer.server(), Document.position()) :: Provenance.author() | nil
+  def author_at(server, {line, column} = position) when line >= 0 and column >= 0 do
+    GenServer.call(server, {:author_at, position})
+  end
+
+  @doc """
+  Returns the authors of each line from `first_line`, at most `count` lines, in line order.
+
+  Each line lists the distinct authors of its bytes, including its newline, in the order they first appear. Costs O(log n + k) for n authorship runs and k runs in the lines.
+  """
+  @spec line_authors(GenServer.server(), non_neg_integer(), non_neg_integer()) ::
+          [[Provenance.author()]]
+  def line_authors(server, first_line, count) when first_line >= 0 and count >= 0 do
+    GenServer.call(server, {:line_authors, first_line, count})
+  end
+
+  @doc "Returns the remaining Minga steps of task `task_id` in this buffer, oldest first, with the ranges each touched as `{start, end}` positions."
+  @spec minga_changes(GenServer.server(), Author.id()) :: [
+          {Author.key(), [{Document.position(), Document.position()}]}
+        ]
+  def minga_changes(server, task_id) when is_binary(task_id) do
+    GenServer.call(server, {:minga_changes, task_id})
   end
 
   @doc "Returns the edit source of the most recent undo entry, or `nil` if the undo stack is empty."
@@ -1390,6 +1425,7 @@ defmodule Minga.Buffer.Process do
 
         state = %BufState{
           document: document,
+          undo_history: UndoHistory.new(document),
           file_path: path,
           filetype: filetype,
           options_server: options_server,
@@ -1433,13 +1469,15 @@ defmodule Minga.Buffer.Process do
 
           {mtime, size} = Persistence.file_metadata(state, file_path)
 
+          document = Document.new(text)
+
           new_state = %{
             BufState.open_saved_content(state, file_path, {mtime, size}, text)
-            | document: Document.new(text),
+            | document: document,
               filetype: filetype,
               options: reseed_options(state, filetype),
               decorations: Decorations.new(),
-              undo_history: UndoHistory.clear(state.undo_history),
+              undo_history: UndoHistory.reset(state.undo_history, document),
               change_log: ChangeLog.clear(state.change_log)
           }
 
@@ -1852,7 +1890,7 @@ defmodule Minga.Buffer.Process do
           | document: new_buf,
             filetype: filetype,
             options: reseed_options(state, filetype),
-            undo_history: UndoHistory.clear(state.undo_history),
+            undo_history: UndoHistory.reset(state.undo_history, new_buf),
             change_log: ChangeLog.clear(state.change_log),
             decorations: Decorations.new()
         }
@@ -1986,7 +2024,7 @@ defmodule Minga.Buffer.Process do
     new_state = %{
       BufState.record_clean_change(state)
       | document: new_buf,
-        undo_history: UndoHistory.clear(state.undo_history),
+        undo_history: UndoHistory.reset(state.undo_history, new_buf),
         change_log: ChangeLog.clear(state.change_log),
         decorations: Decorations.new()
     }
@@ -2005,7 +2043,7 @@ defmodule Minga.Buffer.Process do
     new_state = %{
       BufState.accept_saved_content(state, {mtime, size}, new_content)
       | document: new_buf,
-        undo_history: UndoHistory.clear(state.undo_history),
+        undo_history: UndoHistory.reset(state.undo_history, new_buf),
         change_log: ChangeLog.clear(state.change_log),
         decorations: Decorations.new()
     }
@@ -2392,12 +2430,15 @@ defmodule Minga.Buffer.Process do
       end
 
     new_buf = Cursor.place(new_buf, {last_line, last_col})
-    new_state = rebuild_conflict_index(%{state | document: new_buf})
+    appended = {byte_size(content), "", text}
+    undo_history = UndoHistory.record_untracked(state.undo_history, [appended])
+    new_state = rebuild_conflict_index(%{state | document: new_buf, undo_history: undo_history})
     {:reply, :ok, new_state}
   end
 
   def handle_call({:bounded_append, text, max_lines, max_bytes}, _from, state) do
     doc = state.document
+    appended = {Document.cursor_offset(doc), "", text}
 
     # Append at the end even when the reader moved the cursor up (`gg` in *Messages*).
     # The front trim below then never removes the new entry.
@@ -2415,14 +2456,17 @@ defmodule Minga.Buffer.Process do
         lines_to_drop
       end
 
-    doc =
+    {doc, changes} =
       if lines_to_drop > 0 do
-        Document.trim_leading_lines(doc, lines_to_drop)
+        trimmed = Document.trim_leading_lines(doc, lines_to_drop)
+        dropped = total_bytes - Document.content_byte_size(trimmed)
+        {trimmed, [appended, {0, Document.slice_byte_range(doc, 0, dropped), ""}]}
       else
-        doc
+        {doc, [appended]}
       end
 
-    new_state = rebuild_conflict_index(%{state | document: doc})
+    undo_history = UndoHistory.record_untracked(state.undo_history, changes)
+    new_state = rebuild_conflict_index(%{state | document: doc, undo_history: undo_history})
     {:reply, :ok, new_state}
   end
 
@@ -2526,24 +2570,16 @@ defmodule Minga.Buffer.Process do
       :empty ->
         {:reply, :ok, state}
 
+      {:blocked, _overlap} = blocked ->
+        {:reply, blocked, state}
+
       {:error, reason} = error ->
         log_history_failure(:undo, reason)
         {:reply, error, state}
 
       {:ok, restore, undo_history} ->
-        event_source = EditSource.from_undo_source(restore.source)
-
-        new_state =
-          %{
-            BufState.restore_version(state, restore.version)
-            | document: restore.document,
-              undo_history: undo_history
-          }
-          |> sync_dirty()
-          |> clear_edits(event_source)
-
         log_undo_source(:undo, restore.source)
-        {:reply, :ok, new_state}
+        {:reply, :ok, install_restore(state, restore, undo_history)}
     end
   end
 
@@ -2552,24 +2588,16 @@ defmodule Minga.Buffer.Process do
       :empty ->
         {:reply, :ok, state}
 
+      {:blocked, _overlap} = blocked ->
+        {:reply, blocked, state}
+
       {:error, reason} = error ->
         log_history_failure(:redo, reason)
         {:reply, error, state}
 
       {:ok, restore, undo_history} ->
-        event_source = EditSource.from_undo_source(restore.source)
-
-        new_state =
-          %{
-            BufState.restore_version(state, restore.version)
-            | document: restore.document,
-              undo_history: undo_history
-          }
-          |> sync_dirty()
-          |> clear_edits(event_source)
-
         log_undo_source(:redo, restore.source)
-        {:reply, :ok, new_state}
+        {:reply, :ok, install_restore(state, restore, undo_history)}
     end
   end
 
@@ -2587,20 +2615,30 @@ defmodule Minga.Buffer.Process do
         {:reply, error, state}
 
       {:ok, restore, undo_history, count} ->
-        event_source = EditSource.from_undo_source(:agent)
-
-        new_state =
-          %{
-            BufState.restore_version(state, restore.version)
-            | document: restore.document,
-              undo_history: undo_history
-          }
-          |> sync_dirty()
-          |> clear_edits(event_source)
-
-        Minga.Log.debug(:editor, "Undo agent session: reverted #{count} agent edits")
-        {:reply, {:ok, count}, new_state}
+        Minga.Log.debug(:editor, "Undo agent session: reverted #{count} agent steps")
+        {:reply, {:ok, count}, install_restore(state, restore, undo_history)}
     end
+  end
+
+  def handle_call({:author_at, position}, _from, state) do
+    offset = Position.point_for(state.document, position)
+    {:reply, Provenance.author_at(UndoHistory.provenance(state.undo_history), offset), state}
+  end
+
+  def handle_call({:line_authors, first_line, count}, _from, state) do
+    {:reply, line_authors_in(state, first_line, count), state}
+  end
+
+  def handle_call({:minga_changes, task_id}, _from, state) do
+    changes =
+      for {key, ranges} <- UndoHistory.minga_changes(state.undo_history, task_id) do
+        {key,
+         Enum.map(ranges, fn {from, to} ->
+           {Position.from_point(state.document, from), Position.from_point(state.document, to)}
+         end)}
+      end
+
+    {:reply, changes, state}
   end
 
   def handle_call(:break_undo_coalescing, _from, state) do
@@ -2658,7 +2696,7 @@ defmodule Minga.Buffer.Process do
     new_state = %{
       BufState.record_clean_change(state)
       | document: new_doc,
-        undo_history: UndoHistory.clear(state.undo_history),
+        undo_history: UndoHistory.reset(state.undo_history, new_doc),
         change_log: ChangeLog.clear(state.change_log),
         decorations: new_decs
     }
@@ -3779,6 +3817,82 @@ defmodule Minga.Buffer.Process do
       )
 
     %{state | document: new_buf, undo_history: undo_history}
+  end
+
+  @spec line_authors_in(state(), non_neg_integer(), non_neg_integer()) :: [[Provenance.author()]]
+  defp line_authors_in(state, first_line, count) do
+    line_count = Document.line_count(state.document)
+    last_line = min(first_line + count, line_count) - 1
+
+    if first_line > last_line,
+      do: [],
+      else: authors_in_lines(state, first_line, last_line, line_count)
+  end
+
+  @spec authors_in_lines(state(), non_neg_integer(), non_neg_integer(), pos_integer()) :: [
+          [Provenance.author()]
+        ]
+  defp authors_in_lines(state, first_line, last_line, line_count) do
+    document = state.document
+
+    bounds =
+      Enum.map(first_line..last_line//1, fn line ->
+        {Lines.start_of(document, line), line_end(document, line, line_count)}
+      end)
+
+    spans =
+      state.undo_history
+      |> UndoHistory.provenance()
+      |> Provenance.spans(
+        Lines.start_of(document, first_line),
+        line_end(document, last_line, line_count)
+      )
+
+    authors_by_line(bounds, spans)
+  end
+
+  # A line's bytes run up to the next line's start, so they include its newline.
+  @spec line_end(Document.t(), non_neg_integer(), pos_integer()) :: non_neg_integer()
+  defp line_end(document, line, line_count) when line + 1 < line_count,
+    do: Lines.start_of(document, line + 1)
+
+  defp line_end(document, _line, _line_count), do: Document.content_byte_size(document)
+
+  # Both lists are in document order, so one walk assigns every span to the lines it covers.
+  @spec authors_by_line([{non_neg_integer(), non_neg_integer()}], [Provenance.span()]) :: [
+          [Provenance.author()]
+        ]
+  defp authors_by_line([], _spans), do: []
+
+  defp authors_by_line([{line_start, line_end} | lines], spans) do
+    spans = Enum.drop_while(spans, fn {_from, to, _author, _key} -> to <= line_start end)
+
+    authors =
+      spans
+      |> Enum.take_while(fn {from, _to, _author, _key} -> from < line_end end)
+      |> Enum.map(fn {_from, _to, author, _key} -> author end)
+      |> Enum.uniq()
+
+    [authors | authors_by_line(lines, spans)]
+  end
+
+  # Installs the document an undo, redo or agent revert produced. It takes back its earlier version
+  # only when the history returned exactly to that state; otherwise it is a new version.
+  @spec install_restore(state(), Restore.t(), UndoHistory.t()) :: state()
+  defp install_restore(state, %Restore{version: :advance} = restore, undo_history) do
+    %{state | document: restore.document, undo_history: undo_history}
+    |> mark_dirty()
+    |> clear_edits(EditSource.from_undo_source(restore.source))
+  end
+
+  defp install_restore(state, %Restore{} = restore, undo_history) do
+    %{
+      BufState.restore_version(state, restore.version)
+      | document: restore.document,
+        undo_history: undo_history
+    }
+    |> sync_dirty()
+    |> clear_edits(EditSource.from_undo_source(restore.source))
   end
 
   # UndoHistory is clock-free; the process owns the coalescing clock.

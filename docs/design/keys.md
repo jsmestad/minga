@@ -153,7 +153,7 @@ SPC a  Minga
 | `g.` | Act menu on whatever is under the cursor | changed (`normal_prefixes.ex:27`, was "Code actions"); code actions are part of the act menu |
 | `K` | Hover; `K` again focuses it | kept |
 | `⌃O` / `⌃I` | Back / forward in the jump list (⌘[ / ⌘] on macOS; Tab is ⌃I, as in Vim) | shipped; replaces the proposed ⌃⌘← / ⌃⌘→ |
-| `u`, ⌘Z | Undo your own edits only | changed behavior |
+| `u`, ⌘Z | Undo your own edits only | shipped (#4048); Minga's edits never enter your undo, and an undo that would cross text Minga later rewrote does nothing |
 | `gt` / `gT` | (tabs are gone) | shipped, retired |
 
 `SPC .` stays Doom's "find file in this directory"; the act menu lives on `g.` in Normal mode and `⌃.` wherever you type.

@@ -307,12 +307,12 @@ defmodule MingaEditor.Commands.Editing do
   # ── Undo / redo ───────────────────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :undo) do
-    Buffer.undo(buf)
+    buf |> Buffer.undo() |> log_blocked_history(:undo)
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :redo) do
-    Buffer.redo(buf)
+    buf |> Buffer.redo() |> log_blocked_history(:redo)
     state
   end
 
@@ -1245,4 +1245,16 @@ defmodule MingaEditor.Commands.Editing do
     requires_buffer: true,
     execute: fn state -> execute(state, {:delete_chars_before, 1}) end
   )
+
+  # Your undo or redo never changes text a later Minga step rewrote; the buffer refused it and
+  # nothing changed.
+  @spec log_blocked_history(term(), :undo | :redo) :: :ok
+  defp log_blocked_history({:blocked, {:overlaps, minga_group}}, action) do
+    Minga.Log.info(
+      :editor,
+      "#{action} blocked: a later Minga change rewrote this text (#{inspect(minga_group)})"
+    )
+  end
+
+  defp log_blocked_history(_result, _action), do: :ok
 end

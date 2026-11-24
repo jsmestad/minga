@@ -176,7 +176,7 @@ The strong performance argument lives in buffer forking vs git worktrees. Forkin
 
 ### The actual argument for Phase 1 is correctness and UX, not speed
 
-1. **Undo works.** Agent edits go on the undo stack. `u` rolls them back. Today you need `git checkout`.
+1. **Undo works.** Agent edits enter the buffer's history as Minga's own steps, so `SPC a u` takes a task's edits back while `u` keeps undoing only yours. Today you need `git checkout`.
 2. **Instant visibility.** Edits appear in the editor the same frame they're applied. No reload, no file watcher race.
 3. **Tree-sitter stays in sync.** Incremental reparse via `EditDelta` instead of a full reparse after noticing the file changed on disk.
 4. **No race conditions.** The GenServer mailbox serializes access. Two things editing the same buffer is just two messages in a queue, not two processes fighting over a file descriptor.
@@ -221,7 +221,7 @@ The agent's `edit_file` tool currently does find-and-replace on raw file content
 ### What you get
 
 - Agent edits appear instantly in the editor. No reload needed.
-- Full undo/redo. `u` undoes the agent's last batch of edits.
+- Per-author history. Each agent tool call is one step in Minga's history for its task, `SPC a u` reverts a task's steps, and `u` undoes only your own edits, even when they interleave with the agent's (see `Minga.Buffer.Provenance`).
 - Tree-sitter stays in sync. Highlights update incrementally.
 - Dirty tracking works. The modeline shows the file is unsaved.
 - No disk I/O for reads or edits on open buffers.
