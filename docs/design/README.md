@@ -11,6 +11,7 @@ Start with [principles](principles.md). They are short, and every other file fol
 | [themes.md](themes.md) | Every colour is a theme role: the roles, where they live in the Theme struct, the reference themes and their contrast |
 | [keys.md](keys.md) | Every key by context, and how it compares with today's keymap |
 | [surfaces.md](surfaces.md) | Modeline, which-key, drawers, tasks, review, composer, switcher, diagnostics, subagent peek, background alerts |
+| [anatomy.md](anatomy.md) | The measurements of every surface part in tokens, for macOS and the TUI: insets, gaps, row pitch, text steps. Boards fix structure; this file fixes polish |
 | [terminal.md](terminal.md) | The built-in terminal |
 | [tui.md](tui.md) | How the Go TUI draws all of this with Lip Gloss and Bubble Tea, and what needs a modern terminal |
 | [storyboard.md](storyboard.md) | How we keep macOS and the TUI consistent: scenarios, storyboards and flow-graph checks |
