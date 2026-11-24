@@ -163,6 +163,10 @@ defmodule MingaEditor.Agent.Tasks.Entry do
        when is_integer(delay_ms) and is_binary(reason),
        do: %{entry | waiting: {:retry, now + delay_ms, reason}}
 
+  # A retried request that streams output is working again; a usage limit stays until the next turn.
+  defp apply_event(%__MODULE__{waiting: {:retry, _at, _reason}} = entry, :output_streamed, _now),
+    do: %{entry | waiting: nil}
+
   defp apply_event(entry, _event, _now), do: entry
 
   @doc "Clears the approval this task is waiting on when `target` names it."
@@ -175,6 +179,33 @@ defmodule MingaEditor.Agent.Tasks.Entry do
       do: %{entry | approval: nil}
 
   def resolve_approval(%__MODULE__{} = entry, _target), do: entry
+
+  @doc """
+  Moves the task to the session that replaced its crashed one.
+
+  The new session starts at rest and announces nothing until it works again, so the crashed session's turn, wait, request and running subagents end here.
+  """
+  @spec restart(t(), pid(), integer()) :: t()
+  def restart(%__MODULE__{} = entry, new_pid, now) when is_pid(new_pid) do
+    %{
+      entry
+      | pid: new_pid,
+        status: :idle,
+        approval: nil,
+        question: nil,
+        waiting: nil,
+        activity: Activity.finish_turn(entry.activity),
+        subagents: Subagent.stop_running(entry.subagents, now),
+        changed_at: now
+    }
+  end
+
+  @doc "Follows the parent task to the session that replaced its crashed one."
+  @spec reparent(t(), pid(), pid()) :: t()
+  def reparent(%__MODULE__{parent: old} = entry, old, new) when is_pid(new),
+    do: %{entry | parent: new}
+
+  def reparent(%__MODULE__{} = entry, _old, _new), do: entry
 
   @doc "Marks the task stopped: its session ended or the user stopped it."
   @spec stop(t(), integer()) :: t()
@@ -189,6 +220,19 @@ defmodule MingaEditor.Agent.Tasks.Entry do
         turns: entry.turns + 1,
         activity: Activity.finish_turn(entry.activity),
         waiting: nil
+    }
+  end
+
+  # A new turn starts from rest, so the last turn's failure or wait is over. While a turn runs, the session
+  # re-announces its status (for example on queue changes), and that must not erase a scheduled retry.
+  defp change_status(%__MODULE__{status: old} = entry, status)
+       when status in @working and old not in @working do
+    %{
+      entry
+      | status: status,
+        failure: nil,
+        waiting: nil,
+        activity: Activity.apply_status(entry.activity, status)
     }
   end
 

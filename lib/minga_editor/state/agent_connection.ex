@@ -133,9 +133,14 @@ defmodule MingaEditor.State.AgentConnection do
     do: %{connection | tasks: Tasks.name(connection.tasks, session, title)}
 
   @doc "Carries a task over to the session that replaced its crashed one."
-  @spec replace_task_session(t(), pid(), pid()) :: t()
-  def replace_task_session(%__MODULE__{} = connection, old, new),
-    do: %{connection | tasks: Tasks.replace(connection.tasks, old, new)}
+  @spec replace_task_session(t(), pid(), pid(), integer()) :: t()
+  def replace_task_session(%__MODULE__{} = connection, old, new, now),
+    do: %{connection | tasks: Tasks.replace(connection.tasks, old, new, now)}
+
+  @doc "Stops following every task on a node that disconnected."
+  @spec forget_node_tasks(t(), node()) :: t()
+  def forget_node_tasks(%__MODULE__{} = connection, node),
+    do: %{connection | tasks: Tasks.forget_node(connection.tasks, node)}
 
   @doc "Stops following a session that ended."
   @spec forget_task(t(), pid()) :: t()

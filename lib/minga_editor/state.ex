@@ -231,9 +231,16 @@ defmodule MingaEditor.State do
   end
 
   @doc "Carries a task over to the session that replaced its crashed one."
-  @spec replace_agent_task_session(t(), pid(), pid()) :: t()
-  def replace_agent_task_session(%__MODULE__{} = state, old, new) do
-    connection = AgentConnection.replace_task_session(state.agent_connection, old, new)
+  @spec replace_agent_task_session(t(), pid(), pid(), integer()) :: t()
+  def replace_agent_task_session(%__MODULE__{} = state, old, new, now) do
+    connection = AgentConnection.replace_task_session(state.agent_connection, old, new, now)
+    %{state | agent_connection: connection}
+  end
+
+  @doc "Stops following every task on a node that disconnected."
+  @spec forget_agent_node_tasks(t(), node()) :: t()
+  def forget_agent_node_tasks(%__MODULE__{} = state, node) do
+    connection = AgentConnection.forget_node_tasks(state.agent_connection, node)
     %{state | agent_connection: connection}
   end
 

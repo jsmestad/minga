@@ -138,8 +138,11 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
   end
 
   @spec task_asks(EditorState.t(), pid(), Public.t()) :: EditorState.t()
-  defp task_asks(state, session, approval),
-    do: TaskWorkflow.observe(state, session, {:approval_pending, approval})
+  defp task_asks(state, session, approval) do
+    state
+    |> TaskWorkflow.follow(session)
+    |> TaskWorkflow.observe(session, {:approval_pending, approval})
+  end
 
   @spec session_with_ingest_driver() :: %{session: pid(), ingest: pid()}
   defp session_with_ingest_driver do

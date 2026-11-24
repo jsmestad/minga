@@ -82,6 +82,29 @@ defmodule MingaEditor.Agent.TasksTest do
       assert Tasks.approval(resolved, pid) == nil
     end
 
+    test "a retried request that streams output is working again", %{pid: pid, tasks: tasks} do
+      retrying =
+        tasks
+        |> Tasks.observe(pid, {:status_changed, :thinking}, 1)
+        |> Tasks.observe(pid, {:retry_scheduled, 2_000, "HTTP 429"}, 2)
+        |> Tasks.observe(pid, {:status_changed, :thinking}, 3)
+
+      assert state(retrying, pid) == :waiting
+      assert retrying |> Tasks.observe(pid, :output_streamed, 4) |> state(pid) == :working
+    end
+
+    test "a usage limit waits until the next turn starts", %{pid: pid, tasks: tasks} do
+      limited =
+        tasks
+        |> Tasks.observe(pid, {:status_changed, :error}, 1)
+        |> Tasks.observe(pid, {:model_limit_reached, "Pro limit reached"}, 1)
+
+      assert limited |> Tasks.observe(pid, :output_streamed, 2) |> state(pid) == :waiting
+
+      assert limited |> Tasks.observe(pid, {:status_changed, :thinking}, 3) |> state(pid) ==
+               :working
+    end
+
     test "working again clears a failure; a finished turn clears waiting", %{
       pid: pid,
       tasks: tasks
@@ -146,6 +169,30 @@ defmodule MingaEditor.Agent.TasksTest do
     end
   end
 
+  describe "following sessions" do
+    test "a session is followed from its subscription, and a late event cannot bring a stopped one back" do
+      pid = session()
+
+      assert Tasks.new() |> Tasks.observe(pid, {:status_changed, :thinking}, 1) |> Tasks.empty?()
+
+      followed = Tasks.observe(Tasks.new(), pid, {:credentials_status, true}, 1)
+      assert {:ok, _entry} = Tasks.fetch(followed, pid)
+
+      forgotten = Tasks.forget(followed, pid)
+      assert forgotten |> Tasks.observe(pid, {:status_changed, :idle}, 2) |> Tasks.empty?()
+    end
+
+    test "a disconnected node's tasks are forgotten" do
+      pid = session()
+      tasks = Tasks.follow(Tasks.new(), pid, 0)
+
+      assert tasks |> Tasks.forget_node(:other@host) |> Tasks.fetch(pid) ==
+               Tasks.fetch(tasks, pid)
+
+      assert tasks |> Tasks.forget_node(node()) |> Tasks.empty?()
+    end
+  end
+
   describe "the task tree" do
     test "lists needs-you first, then by state, with subagents beneath their task" do
       [done, working, asks, child] = for _ <- 1..4, do: session()
@@ -181,6 +228,7 @@ defmodule MingaEditor.Agent.TasksTest do
 
       tasks =
         Tasks.new()
+        |> Tasks.follow(pid, 0)
         |> Tasks.observe(pid, {:tool_started, "s1", "subagent", %{"task" => "One"}}, 1)
         |> Tasks.observe(pid, {:tool_started, "s2", "subagent", %{"task" => "Two"}}, 1)
         |> Tasks.observe(
@@ -212,10 +260,13 @@ defmodule MingaEditor.Agent.TasksTest do
         |> Tasks.follow(old, 0, title: "Tests")
         |> Tasks.observe(old, {:approval_pending, approval(1)}, 1)
         |> Tasks.follow(child, 1, title: "Child", parent: old)
-        |> Tasks.replace(old, new)
+        |> Tasks.observe(old, {:status_changed, :thinking}, 1)
+        |> Tasks.observe(old, {:retry_scheduled, 1_000, "HTTP 429"}, 1)
+        |> Tasks.replace(old, new, 2)
 
       assert Entry.title(entry(tasks, new)) == "Tests"
       assert Tasks.approval(tasks, new) == nil
+      assert entry(tasks, new) |> Entry.state() == nil
       assert entry(tasks, child).parent == new
       assert Tasks.fetch(Tasks.forget(tasks, new), new) == :error
     end

@@ -472,8 +472,11 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   end
 
   @spec handle_node_disconnected(EditorState.t(), NodeDisconnectedEvent.t()) :: EditorState.t()
-  defp handle_node_disconnected(state, %{server_name: server_name}) do
-    state = MingaEditor.Shell.Workflow.ensure_available(state)
+  defp handle_node_disconnected(state, %{server_name: server_name, node: node}) do
+    state =
+      state
+      |> MingaEditor.Shell.Workflow.ensure_available()
+      |> MingaEditor.Agent.TaskWorkflow.node_disconnected(node)
 
     state =
       %{

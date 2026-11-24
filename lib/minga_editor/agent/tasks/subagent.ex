@@ -44,6 +44,15 @@ defmodule MingaEditor.Agent.Tasks.Subagent do
   @spec interrupted([t()], String.t(), integer()) :: [t()]
   def interrupted(subagents, id, now), do: settle(subagents, id, :stopped, now)
 
+  @doc "Stops every subagent still running, when the task's session ended under them."
+  @spec stop_running([t()], integer()) :: [t()]
+  def stop_running(subagents, now) do
+    Enum.map(subagents, fn
+      %__MODULE__{state: :working} = subagent -> %{subagent | state: :stopped, changed_at: now}
+      subagent -> subagent
+    end)
+  end
+
   @spec new(String.t(), map(), integer()) :: t()
   defp new(id, args, now) do
     %__MODULE__{

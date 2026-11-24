@@ -55,12 +55,22 @@ defmodule MingaEditor.Agent.TaskWorkflow do
   @doc "Carries a task over to the session that replaced its crashed one."
   @spec restarted(EditorState.t(), pid(), pid()) :: EditorState.t()
   def restarted(%EditorState{} = state, old, new) when is_pid(old) and is_pid(new),
-    do: EditorState.replace_agent_task_session(state, old, new)
+    do: EditorState.replace_agent_task_session(state, old, new, now())
 
   @doc "Stops following a session that ended."
   @spec stopped(EditorState.t(), pid()) :: EditorState.t()
   def stopped(%EditorState{} = state, session) when is_pid(session),
     do: EditorState.forget_agent_task(state, session)
+
+  @doc "Stops following every task on a remote node that disconnected."
+  @spec node_disconnected(EditorState.t(), node()) :: EditorState.t()
+  def node_disconnected(%EditorState{} = state, node) when is_atom(node),
+    do: EditorState.forget_agent_node_tasks(state, node)
+
+  @doc "A retried request streamed output, so its task is working again."
+  @spec output_streamed(EditorState.t(), pid()) :: EditorState.t()
+  def output_streamed(%EditorState{} = state, session) when is_pid(session),
+    do: observe(state, session, :output_streamed)
 
   @doc """
   Answers the approval task `session` is waiting on.

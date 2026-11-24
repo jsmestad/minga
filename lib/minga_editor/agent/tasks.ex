@@ -57,21 +57,37 @@ defmodule MingaEditor.Agent.Tasks do
     put(tasks, entry)
   end
 
-  @doc "Applies one session event. A session not followed yet starts being followed."
+  @doc """
+  Applies one session event.
+
+  A session the editor subscribes to says so first (`{:credentials_status, _}` and `{:connection_changed, _}` are sent to every new subscriber), and that starts following it. Any other event from a session not followed is ignored, so a late event from a session that already stopped, or from a dismissed inline session, cannot bring a task back.
+  """
   @spec observe(t(), pid(), term(), integer()) :: t()
-  def observe(%__MODULE__{} = tasks, pid, event, now) when is_pid(pid) do
+  def observe(%__MODULE__{entries: entries} = tasks, pid, event, now) when is_pid(pid) do
+    case Map.fetch(entries, pid) do
+      {:ok, entry} -> put(tasks, Entry.observe(entry, event, now))
+      :error -> observe_unfollowed(tasks, pid, event, now)
+    end
+  end
+
+  @spec observe_unfollowed(t(), pid(), term(), integer()) :: t()
+  defp observe_unfollowed(tasks, pid, {kind, _detail} = event, now)
+       when kind in [:credentials_status, :connection_changed] do
     {tasks, entry} = ensure(tasks, pid, now)
     put(tasks, Entry.observe(entry, event, now))
   end
+
+  defp observe_unfollowed(tasks, _pid, _event, _now), do: tasks
 
   @doc "Names a followed task by its goal, when it has none yet."
   @spec name(t(), pid(), String.t()) :: t()
   def name(%__MODULE__{} = tasks, pid, title),
     do: update_entry(tasks, pid, &Entry.name(&1, title))
 
-  @doc "Carries a task over to the session that replaced its crashed one."
-  @spec replace(t(), pid(), pid()) :: t()
-  def replace(%__MODULE__{entries: entries} = tasks, old, new) when is_pid(old) and is_pid(new) do
+  @doc "Carries a task over to the session that replaced its crashed one, at wall-clock time `now`."
+  @spec replace(t(), pid(), pid(), integer()) :: t()
+  def replace(%__MODULE__{entries: entries} = tasks, old, new, now)
+      when is_pid(old) and is_pid(new) do
     case Map.pop(entries, old) do
       {nil, _entries} ->
         tasks
@@ -79,8 +95,8 @@ defmodule MingaEditor.Agent.Tasks do
       {entry, entries} ->
         entries =
           entries
-          |> Map.put(new, %{entry | pid: new, approval: nil, question: nil})
-          |> Map.new(fn {pid, child} -> {pid, reparent(child, old, new)} end)
+          |> Map.put(new, Entry.restart(entry, new, now))
+          |> Map.new(fn {pid, child} -> {pid, Entry.reparent(child, old, new)} end)
 
         %{tasks | entries: entries}
     end
@@ -90,6 +106,11 @@ defmodule MingaEditor.Agent.Tasks do
   @spec forget(t(), pid()) :: t()
   def forget(%__MODULE__{entries: entries} = tasks, pid),
     do: %{tasks | entries: Map.delete(entries, pid)}
+
+  @doc "Stops following every session on a node that disconnected; its sessions report nothing more."
+  @spec forget_node(t(), node()) :: t()
+  def forget_node(%__MODULE__{entries: entries} = tasks, node) when is_atom(node),
+    do: %{tasks | entries: Map.reject(entries, fn {pid, _entry} -> node(pid) == node end)}
 
   @doc "Clears a task's approval once its session accepted an answer, or said none is pending."
   @spec resolve_approval(t(), pid(), MingaAgent.ToolApproval.Target.t()) :: t()
@@ -164,10 +185,6 @@ defmodule MingaEditor.Agent.Tasks do
   @spec sort_key(Entry.t()) :: {non_neg_integer(), integer(), integer()}
   defp sort_key(entry),
     do: {Map.fetch!(@state_rank, Entry.state(entry)), -entry.changed_at, -entry.seq}
-
-  @spec reparent(Entry.t(), pid(), pid()) :: Entry.t()
-  defp reparent(%Entry{parent: old} = entry, old, new), do: %{entry | parent: new}
-  defp reparent(entry, _old, _new), do: entry
 
   @spec ensure(t(), pid(), integer()) :: {t(), Entry.t()}
   defp ensure(%__MODULE__{entries: entries, next_seq: seq} = tasks, pid, now) do

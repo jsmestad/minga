@@ -26,6 +26,7 @@ defmodule MingaEditor.Agent.TaskWorkflowTest do
         Preview.new(:diff, "Edit lib/a.ex +2", [])
       )
 
+    send(ctx.editor, {:agent_event, session, {:credentials_status, true}})
     send(ctx.editor, {:agent_event, session, {:status_changed, :tool_executing}})
     send(ctx.editor, {:agent_event, session, {:approval_pending, approval}})
 
@@ -41,7 +42,7 @@ defmodule MingaEditor.Agent.TaskWorkflowTest do
     ctx = start_editor("hello")
     session = spawn(fn -> :ok end)
 
-    send(ctx.editor, {:agent_event, session, {:status_changed, :thinking}})
+    send(ctx.editor, {:agent_event, session, {:credentials_status, true}})
     assert {:ok, _entry} = ctx |> tasks() |> Tasks.fetch(session)
 
     send(
