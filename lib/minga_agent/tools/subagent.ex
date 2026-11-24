@@ -46,7 +46,8 @@ defmodule MingaAgent.Tools.Subagent do
   @subagent_timeout_ms 300_000
   @provider_ready_retry_ms 10
   @provider_ready_max_attempts 100
-  @approval_unavailable_message "Subagent tool approval is unavailable because this child session has no interactive approval driver. Run the subagent with worktree isolation or route approvals through the parent session."
+  @approval_unavailable_message "Subagent tool approval is unavailable because this child session has no interactive approval driver. Use only tools that need no approval, and report what else is needed back to the parent session."
+  @nested_subagent_message "A subagent cannot start its own subagents. Finish the task yourself and report what else is needed back to the parent session."
 
   @doc """
   Runs a sub-agent task.
@@ -55,10 +56,10 @@ defmodule MingaAgent.Tools.Subagent do
   """
   @spec execute(String.t(), opts()) :: {:ok, String.t()} | {:error, String.t()}
   def execute(task, opts \\ []) when is_binary(task) do
-    if Keyword.get(opts, :background, false) do
-      start_background(task, opts)
-    else
-      start_foreground(task, opts)
+    cond do
+      parent_context(opts).child? -> {:error, @nested_subagent_message}
+      Keyword.get(opts, :background, false) -> start_background(task, opts)
+      true -> start_foreground(task, opts)
     end
   end
 
@@ -289,6 +290,7 @@ defmodule MingaAgent.Tools.Subagent do
           |> maybe_put_thinking_level(thinking_level)
           |> maybe_put_notifier(opts)
           |> put_tool_approval_policy(opts)
+          |> Keyword.put(:child?, true)
 
         {:ok, session_opts}
 
@@ -312,7 +314,7 @@ defmodule MingaAgent.Tools.Subagent do
 
   @spec background_result(Handle.t()) :: String.t()
   defp background_result(%Handle{} = handle) do
-    "Background subagent started. Handle: #{Handle.id(handle)}. You will receive a completion notification when the child finishes."
+    "Background subagent started. Handle: #{Handle.id(handle)}. Its result is not sent back to this conversation; the user can open it from the agent session picker."
   end
 
   # ── Context inheritance ────────────────────────────────────────────────────

@@ -1243,8 +1243,8 @@ defmodule MingaAgent.SessionManager do
         updated_handle =
           case reason do
             :normal -> Handle.complete(handle, "completed")
-            :shutdown -> Handle.complete(handle, "completed")
-            {:shutdown, _} -> Handle.complete(handle, "completed")
+            stopped when stopped in [:shutdown, :cancelled] -> Handle.cancel(handle)
+            {:shutdown, _} -> Handle.cancel(handle)
             other -> Handle.fail(handle, other)
           end
 
@@ -1568,15 +1568,10 @@ defmodule MingaAgent.SessionManager do
 
     sessions = Map.delete(state.sessions, session_id)
 
-    # Keep finalized (completed/failed) handles so results can be retrieved later.
-    background_subagents =
-      case Map.fetch(state.background_subagents, session_id) do
-        {:ok, %Handle{status: :running}} -> Map.delete(state.background_subagents, session_id)
-        {:ok, _finalized} -> state.background_subagents
-        :error -> state.background_subagents
-      end
-
-    %{state | sessions: sessions, background_subagents: background_subagents}
+    # A child removed while still running (for example during restart backoff) settles as
+    # cancelled; finalized handles stay so their results can be retrieved later.
+    %{state | sessions: sessions}
+    |> finalize_background_subagent(session_id, :cancelled)
   end
 
   @spec next_restart_attempt(session_entry(), pid(), term()) ::

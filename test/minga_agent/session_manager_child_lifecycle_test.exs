@@ -167,7 +167,7 @@ defmodule MingaAgent.SessionManagerChildLifecycleTest do
   end
 
   describe "child completion notification" do
-    test "sends {:child_agent_completed, handle} to parent when child stops normally", %{
+    test "a stopped child settles as cancelled and keeps its result", %{
       manager: manager
     } do
       # Use self() as the parent so we can receive the notification.
@@ -183,13 +183,13 @@ defmodule MingaAgent.SessionManagerChildLifecycleTest do
       # We need to verify through state instead. Let's check the handle status.
       :sys.get_state(manager)
 
-      assert {:ok, %Handle{status: :completed, result: "completed"} = completed_handle} =
+      assert {:ok, %Handle{status: :cancelled, result: "cancelled"} = completed_handle} =
                SessionManager.get_child_result(manager, child_handle.session_id)
 
       assert completed_handle.completed_at != nil
     end
 
-    test "parent session receives {:child_agent_completed, handle} message on child stop", %{
+    test "the parent receives {:child_agent_completed, handle} when a child is stopped", %{
       manager: manager
     } do
       {_parent_id, parent_pid} = start_parent(manager)
@@ -211,9 +211,9 @@ defmodule MingaAgent.SessionManagerChildLifecycleTest do
       # Synchronize with the manager to ensure it has processed the DOWN.
       :sys.get_state(manager)
 
-      assert_receive {:child_agent_completed, %Handle{status: :completed} = handle}, 1_000
+      assert_receive {:child_agent_completed, %Handle{status: :cancelled} = handle}, 1_000
       assert handle.session_id == child_handle.session_id
-      assert handle.result == "completed"
+      assert handle.result == "cancelled"
       assert handle.completed_at != nil
     end
 
@@ -258,6 +258,46 @@ defmodule MingaAgent.SessionManagerChildLifecycleTest do
     end
   end
 
+  describe "stopping a child during restart backoff" do
+    test "settles the child as cancelled instead of losing it", %{manager: manager} do
+      {_parent_id, parent_pid} = start_parent(manager)
+
+      {:ok, child} =
+        SessionManager.start_background_subagent(manager, parent_pid, "child task",
+          session_opts: [
+            provider: Minga.Test.StubProvider,
+            provider_opts: [],
+            persist?: false,
+            restart_backoff_base_ms: 120_000,
+            restart_backoff_max_ms: 120_000
+          ]
+        )
+
+      ref = Process.monitor(child.pid)
+      Process.exit(child.pid, :kill)
+      assert_receive {:DOWN, ^ref, :process, _, :killed}, 1_000
+      await_restart_backoff(manager, child.session_id)
+
+      assert :ok = SessionManager.stop_session(manager, child.session_id)
+
+      assert {:ok, %Handle{status: :cancelled, completed_at: %DateTime{}}} =
+               SessionManager.get_child_result(manager, child.session_id)
+    end
+  end
+
+  # The manager handles the child's DOWN on its own schedule, so poll until it has no live pid.
+  @spec await_restart_backoff(GenServer.server(), String.t(), non_neg_integer()) :: :ok
+  defp await_restart_backoff(manager, session_id, attempts \\ 100) do
+    case SessionManager.get_session(manager, session_id) do
+      {:error, :not_found} ->
+        :ok
+
+      {:ok, _pid} when attempts > 0 ->
+        Process.sleep(10)
+        await_restart_backoff(manager, session_id, attempts - 1)
+    end
+  end
+
   describe "get_child_result/2" do
     test "returns {:ok, handle} for a known background subagent", %{manager: manager} do
       {_parent_id, parent_pid} = start_parent(manager)
@@ -273,7 +313,7 @@ defmodule MingaAgent.SessionManagerChildLifecycleTest do
       assert {:error, :not_found} = SessionManager.get_child_result(manager, "nonexistent")
     end
 
-    test "returns the completed handle after child stops", %{manager: manager} do
+    test "returns the cancelled handle after a child is stopped", %{manager: manager} do
       {_parent_id, parent_pid} = start_parent(manager)
       child_handle = start_child(manager, parent_pid)
 
@@ -282,7 +322,7 @@ defmodule MingaAgent.SessionManagerChildLifecycleTest do
       assert_receive {:DOWN, ^child_ref, :process, _, _}, 1_000
       :sys.get_state(manager)
 
-      assert {:ok, %Handle{status: :completed, result: "completed"} = handle} =
+      assert {:ok, %Handle{status: :cancelled, result: "cancelled"} = handle} =
                SessionManager.get_child_result(manager, child_handle.session_id)
 
       assert handle.completed_at != nil

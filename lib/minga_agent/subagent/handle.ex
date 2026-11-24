@@ -87,6 +87,12 @@ defmodule MingaAgent.Subagent.Handle do
     %{handle | status: :failed, result: inspect(reason), completed_at: DateTime.utc_now()}
   end
 
+  @doc "Transitions a running handle to cancelled: it was stopped before it finished."
+  @spec cancel(t()) :: t()
+  def cancel(%__MODULE__{status: :running} = handle) do
+    %{handle | status: :cancelled, result: "cancelled", completed_at: DateTime.utc_now()}
+  end
+
   @doc "Marks a running handle as interrupted (lost during restart)."
   @spec interrupt(t(), term()) :: t()
   def interrupt(%__MODULE__{status: :running} = handle, reason) do

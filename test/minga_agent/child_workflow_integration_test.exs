@@ -88,10 +88,10 @@ defmodule MingaAgent.ChildWorkflowIntegrationTest do
       finish(ctx.manager, reader)
       finish(ctx.manager, writer)
 
-      assert {:ok, %Handle{status: :completed, changes: nil}} =
+      assert {:ok, %Handle{status: :cancelled, changes: nil}} =
                SessionManager.get_child_result(ctx.manager, reader.session_id)
 
-      assert {:ok, %Handle{status: :completed, changes: changes}} =
+      assert {:ok, %Handle{status: :cancelled, changes: changes}} =
                SessionManager.get_child_result(ctx.manager, writer.session_id)
 
       assert Enum.sort(changes) == [{:added, "lib/helper.ex"}, {:modified, "lib/app.ex"}]
