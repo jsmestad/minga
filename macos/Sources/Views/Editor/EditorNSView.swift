@@ -2178,6 +2178,12 @@ final class EditorNSView: MTKView {
     /// Pending scroll indicator fade animation.
     private var scrollFadeTask: Task<Void, Never>?
 
+    /// Clock for the scroll indicator idle delay and fade steps. Tests inject a manual clock.
+    var scrollFadeClock: any Clock<Duration> = ContinuousClock()
+
+    /// The current fade animation, so tests can wait for a cancelled fade to finish.
+    var scrollFadeTaskForTesting: Task<Void, Never>? { scrollFadeTask }
+
     /// Whether the system prefers always-visible scrollers.
     private var alwaysShowScrollbar: Bool = false
 
@@ -2194,34 +2200,39 @@ final class EditorNSView: MTKView {
         // Don't fade if system preference is "Always show".
         guard !alwaysShowScrollbar else { return }
 
-        scrollFadeTask = Task { [weak self] in
+        let clock = scrollFadeClock
+        scrollFadeTask = Task { [weak self, clock] in
             // Initial delay before fade begins.
             do {
-                try await Task.sleep(for: .milliseconds(1500))
+                try await clock.sleep(for: .milliseconds(1500))
             } catch {
                 return  // Cancelled during idle delay.
             }
 
-            // 6 fade steps, 50ms apart, total 300ms.
+            // 6 fade steps, 50ms apart, total 300ms. The view is borrowed only for
+            // each synchronous step, never across a sleep, so a released view is freed.
             for step in stride(from: 5, through: 0, by: -1) {
-                guard let self else { return }
-                if Task.isCancelled { return }
-                if self.alwaysShowScrollbar {
-                    self.coreTextRenderer.scrollIndicatorAlpha = 1.0
-                    self.setNeedsDisplay(self.bounds)
-                    return
-                }
-                self.coreTextRenderer.scrollIndicatorAlpha = Float(step) / 6.0
-                self.setNeedsDisplay(self.bounds)
-                if step > 0 {
-                    do {
-                        try await Task.sleep(for: .milliseconds(50))
-                    } catch {
-                        return  // Cancelled during fade step.
-                    }
+                guard !Task.isCancelled, self?.applyScrollFadeStep(step) == true, step > 0 else { return }
+                do {
+                    try await clock.sleep(for: .milliseconds(50))
+                } catch {
+                    return  // Cancelled during fade step.
                 }
             }
         }
+    }
+
+    /// Applies one fade step. Returns false when the fade must stop because the
+    /// scroller became always visible, which restores full opacity instead.
+    private func applyScrollFadeStep(_ step: Int) -> Bool {
+        if alwaysShowScrollbar {
+            coreTextRenderer.scrollIndicatorAlpha = 1.0
+            setNeedsDisplay(bounds)
+            return false
+        }
+        coreTextRenderer.scrollIndicatorAlpha = Float(step) / 6.0
+        setNeedsDisplay(bounds)
+        return true
     }
 
     /// Call once during setup to observe the system scroller style preference.
@@ -2235,16 +2246,22 @@ final class EditorNSView: MTKView {
         scrollerStyleTask = Task { @MainActor [weak self] in
             for await _ in NotificationCenter.default.notifications(named: NSScroller.preferredScrollerStyleDidChangeNotification) {
                 guard let self else { return }
-                self.alwaysShowScrollbar = NSScroller.preferredScrollerStyle == .legacy
-                if self.alwaysShowScrollbar {
-                    self.scrollFadeTask?.cancel()
-                    self.scrollFadeTask = nil
-                    self.coreTextRenderer.scrollIndicatorAlpha = 1.0
-                    self.setNeedsDisplay(self.bounds)
-                } else {
-                    self.flashScrollIndicator()
-                }
+                self.scrollerStyleDidChange(alwaysShowsScrollbar: NSScroller.preferredScrollerStyle == .legacy)
             }
+        }
+    }
+
+    /// Applies a system scroller style change. Always-visible scrollers stop any
+    /// fade at full opacity; overlay scrollers flash and fade again.
+    func scrollerStyleDidChange(alwaysShowsScrollbar: Bool) {
+        alwaysShowScrollbar = alwaysShowsScrollbar
+        if alwaysShowsScrollbar {
+            scrollFadeTask?.cancel()
+            scrollFadeTask = nil
+            coreTextRenderer.scrollIndicatorAlpha = 1.0
+            setNeedsDisplay(bounds)
+        } else {
+            flashScrollIndicator()
         }
     }
 
