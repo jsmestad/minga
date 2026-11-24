@@ -51,7 +51,10 @@ defmodule Minga.LSP.SyncServer do
           client_monitors: %{reference() => {buffer_pid :: pid(), client_pid :: pid()}},
           pending_tool_buffers: %{String.t() => [pid()]},
           pending_changes: %{pid() => pending_change()},
-          events_registry: Events.registry()
+          events_registry: Events.registry(),
+          table: atom(),
+          buffer_registry: atom(),
+          options_server: GenServer.server()
         }
 
   # ── Client API ─────────────────────────────────────────────────────────
@@ -69,9 +72,9 @@ defmodule Minga.LSP.SyncServer do
   Direct ETS read with `:read_concurrency`. Safe to call from any
   process without blocking.
   """
-  @spec clients_for_buffer(pid()) :: [pid()]
-  def clients_for_buffer(buffer_pid) when is_pid(buffer_pid) do
-    case :ets.lookup(@registry_table, buffer_pid) do
+  @spec clients_for_buffer(pid(), atom()) :: [pid()]
+  def clients_for_buffer(buffer_pid, table \\ @registry_table) when is_pid(buffer_pid) do
+    case :ets.lookup(table, buffer_pid) do
       [{^buffer_pid, clients}] -> clients
       [] -> []
     end
@@ -84,21 +87,16 @@ defmodule Minga.LSP.SyncServer do
   def registry_table, do: @registry_table
 
   @doc "Inserts a buffer-to-clients mapping into the sync registry."
-  @spec put_clients(pid(), [pid()]) :: true
-  def put_clients(buffer_pid, clients) when is_pid(buffer_pid) and is_list(clients) do
-    :ets.insert(@registry_table, {buffer_pid, clients})
+  @spec put_clients(pid(), [pid()], atom()) :: true
+  def put_clients(buffer_pid, clients, table \\ @registry_table)
+      when is_pid(buffer_pid) and is_list(clients) do
+    :ets.insert(table, {buffer_pid, clients})
   end
 
   @doc "Removes a buffer entry from the sync registry."
-  @spec remove_buffer(pid()) :: true
-  def remove_buffer(buffer_pid) when is_pid(buffer_pid) do
-    :ets.delete(@registry_table, buffer_pid)
-  end
-
-  @doc "Removes all entries from the sync registry."
-  @spec clear_registry() :: true
-  def clear_registry do
-    :ets.delete_all_objects(@registry_table)
+  @spec remove_buffer(pid(), atom()) :: true
+  def remove_buffer(buffer_pid, table \\ @registry_table) when is_pid(buffer_pid) do
+    :ets.delete(table, buffer_pid)
   end
 
   @doc """
@@ -139,7 +137,9 @@ defmodule Minga.LSP.SyncServer do
   @impl true
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
-    :ets.new(@registry_table, [
+    table = Keyword.get(opts, :table, @registry_table)
+
+    :ets.new(table, [
       :named_table,
       :public,
       :set,
@@ -160,7 +160,10 @@ defmodule Minga.LSP.SyncServer do
       client_monitors: %{},
       pending_tool_buffers: %{},
       pending_changes: %{},
-      events_registry: events_registry
+      events_registry: events_registry,
+      table: table,
+      buffer_registry: Keyword.get(opts, :buffer_registry, Minga.Buffer.Registry),
+      options_server: Keyword.get(opts, :options_server, Options)
     }
 
     state = reconstruct_attachments(state)
@@ -175,12 +178,12 @@ defmodule Minga.LSP.SyncServer do
   @spec reconstruct_attachments(state()) :: state()
   defp reconstruct_attachments(state) do
     state =
-      Minga.Buffer.Registry
+      state.buffer_registry
       |> Registry.select([{{:_, :"$1", :_}, [], [:"$1"]}])
       |> Enum.filter(&Process.alive?/1)
       |> Enum.reduce(state, &do_buffer_open(&2, &1))
 
-    count = :ets.info(@registry_table, :size)
+    count = :ets.info(state.table, :size)
 
     if count > 0 do
       Minga.Log.info(:lsp, "SyncServer reconstructed #{count} buffer attachment(s) after restart")
@@ -199,7 +202,7 @@ defmodule Minga.LSP.SyncServer do
     state = flush_did_change(state, buffer)
 
     reply =
-      with :ok <- require_attached_client(buffer, client),
+      with :ok <- require_attached_client(state, buffer, client),
            path when is_binary(path) <- safe_file_path(buffer),
            uri = path_to_uri(path),
            {content, ^expected_revision} <- safe_content_with_version(buffer) do
@@ -225,9 +228,11 @@ defmodule Minga.LSP.SyncServer do
     :exit, _ -> {:reply, {:error, :client_unavailable}, state}
   end
 
-  @spec require_attached_client(pid(), pid()) :: :ok | {:error, :client_replaced}
-  defp require_attached_client(buffer, client) do
-    if client in clients_for_buffer(buffer), do: :ok, else: {:error, :client_replaced}
+  @spec require_attached_client(state(), pid(), pid()) :: :ok | {:error, :client_replaced}
+  defp require_attached_client(state, buffer, client) do
+    if client in clients_for_buffer(buffer, state.table),
+      do: :ok,
+      else: {:error, :client_replaced}
   end
 
   @impl true
@@ -250,7 +255,7 @@ defmodule Minga.LSP.SyncServer do
          %Events.BufferChangedEvent{buffer: buf, delta: delta, version: version}},
         state
       ) do
-    if clients_for_buffer(buf) == [] do
+    if clients_for_buffer(buf, state.table) == [] do
       {:noreply, state}
     else
       state = accumulate_delta(state, buf, delta, event_revision(buf, version))
@@ -267,7 +272,7 @@ defmodule Minga.LSP.SyncServer do
   end
 
   def handle_info({:minga_event, :buffer_saved, %Events.BufferEvent{buffer: buf}}, state) do
-    do_buffer_save(buf)
+    do_buffer_save(state, buf)
     {:noreply, state}
   end
 
@@ -312,7 +317,7 @@ defmodule Minga.LSP.SyncServer do
     state = demonitor_clients_for_buffer(state, buffer_pid)
     state = cancel_debounce(state, buffer_pid)
     state = %{state | pending_changes: Map.delete(state.pending_changes, buffer_pid)}
-    :ets.delete(@registry_table, buffer_pid)
+    :ets.delete(state.table, buffer_pid)
     do_buffer_open(state, buffer_pid)
   end
 
@@ -328,7 +333,7 @@ defmodule Minga.LSP.SyncServer do
 
   @spec open_local_buffer(state(), pid()) :: state()
   defp open_local_buffer(state, buffer_pid) do
-    if lsp_auto_start?() do
+    if lsp_auto_start?(state.options_server) do
       do_open_local_buffer(state, buffer_pid)
     else
       state
@@ -396,14 +401,14 @@ defmodule Minga.LSP.SyncServer do
         state
 
       [_ | _] ->
-        :ets.insert(@registry_table, {buffer_pid, clients})
+        :ets.insert(state.table, {buffer_pid, clients})
         monitor_clients(state, buffer_pid, clients)
     end
   end
 
-  @spec lsp_auto_start?() :: boolean()
-  defp lsp_auto_start? do
-    Options.get(:lsp_auto_start)
+  @spec lsp_auto_start?(GenServer.server()) :: boolean()
+  defp lsp_auto_start?(options_server) do
+    Options.get(options_server, :lsp_auto_start)
   catch
     :exit, _ -> true
   end
@@ -418,9 +423,9 @@ defmodule Minga.LSP.SyncServer do
     :exit, _ -> false
   end
 
-  @spec do_buffer_save(pid()) :: :ok
-  defp do_buffer_save(buffer_pid) do
-    clients = clients_for_buffer(buffer_pid)
+  @spec do_buffer_save(state(), pid()) :: :ok
+  defp do_buffer_save(state, buffer_pid) do
+    clients = clients_for_buffer(buffer_pid, state.table)
     notify_clients(clients, buffer_pid, &Client.did_save/2)
   catch
     :exit, _ -> :ok
@@ -428,10 +433,10 @@ defmodule Minga.LSP.SyncServer do
 
   @spec do_buffer_close(state(), pid()) :: state()
   defp do_buffer_close(state, buffer_pid) do
-    clients = clients_for_buffer(buffer_pid)
+    clients = clients_for_buffer(buffer_pid, state.table)
     notify_clients(clients, buffer_pid, &Client.did_close/2)
 
-    :ets.delete(@registry_table, buffer_pid)
+    :ets.delete(state.table, buffer_pid)
     state = demonitor_clients_for_buffer(state, buffer_pid)
     state = %{state | pending_changes: Map.delete(state.pending_changes, buffer_pid)}
     cancel_debounce(state, buffer_pid)
@@ -535,7 +540,7 @@ defmodule Minga.LSP.SyncServer do
 
       {{buffer_pid, ^client_pid}, remaining_monitors} ->
         state = %{state | client_monitors: remaining_monitors}
-        remove_client_from_buffer(buffer_pid, client_pid)
+        remove_client_from_buffer(state.table, buffer_pid, client_pid)
         state
 
       {_other, _monitors} ->
@@ -544,15 +549,15 @@ defmodule Minga.LSP.SyncServer do
     end
   end
 
-  @spec remove_client_from_buffer(pid(), pid()) :: :ok
-  defp remove_client_from_buffer(buffer_pid, client_pid) do
-    case :ets.lookup(@registry_table, buffer_pid) do
+  @spec remove_client_from_buffer(atom(), pid(), pid()) :: :ok
+  defp remove_client_from_buffer(table, buffer_pid, client_pid) do
+    case :ets.lookup(table, buffer_pid) do
       [{^buffer_pid, clients}] ->
         remaining = List.delete(clients, client_pid)
 
         case remaining do
-          [] -> :ets.delete(@registry_table, buffer_pid)
-          _ -> :ets.insert(@registry_table, {buffer_pid, remaining})
+          [] -> :ets.delete(table, buffer_pid)
+          _ -> :ets.insert(table, {buffer_pid, remaining})
         end
 
         :ok
@@ -566,7 +571,7 @@ defmodule Minga.LSP.SyncServer do
 
   @spec schedule_did_change(state(), pid()) :: state()
   defp schedule_did_change(state, buffer_pid) do
-    clients = clients_for_buffer(buffer_pid)
+    clients = clients_for_buffer(buffer_pid, state.table)
 
     case clients do
       [] ->
@@ -595,7 +600,7 @@ defmodule Minga.LSP.SyncServer do
         :ok
 
       {revision, deltas} ->
-        clients = clients_for_buffer(buffer_pid)
+        clients = clients_for_buffer(buffer_pid, state.table)
         notify_clients_change(clients, buffer_pid, ordered_deltas(deltas), revision)
     end
 

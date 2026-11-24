@@ -28,12 +28,6 @@ defmodule MingaAgent.Tools.LspSymlinkTest do
   @foo_utf16 %{"line" => 0, "character" => 6}
   @diagnostic_source :lsp_symlink_test
 
-  setup do
-    SyncServer.clear_registry()
-    on_exit(&SyncServer.clear_registry/0)
-    :ok
-  end
-
   for kind <- [:file_link, :directory_link] do
     describe "a buffer opened through a #{kind}" do
       setup %{tmp_dir: tmp_dir} do
@@ -173,7 +167,7 @@ defmodule MingaAgent.Tools.LspSymlinkTest do
     owner = self()
     client = spawn(fn -> fake_client_loop(responses, owner) end)
     on_exit(fn -> Process.exit(client, :kill) end)
-    SyncServer.put_clients(buffer, [client])
+    attach_clients(buffer, [client])
     client
   end
 
@@ -189,5 +183,11 @@ defmodule MingaAgent.Tools.LspSymlinkTest do
         send(caller, {:lsp_response, ref, Map.fetch!(responses, method)})
         fake_client_loop(responses, owner)
     end
+  end
+
+  # Registers fake clients in the shared SyncServer registry and removes only this buffer's entry.
+  defp attach_clients(buffer, clients) do
+    SyncServer.put_clients(buffer, clients)
+    on_exit(fn -> SyncServer.remove_buffer(buffer) end)
   end
 end
