@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Co-Authoring &amp; Parallel Agents: Learn Minga</title>
+  <meta name="description" content="Lesson 03: Test per-author undo inside a braided Twist block, trigger the 300 ms anti-misfire lockout guard, inspect siblings in Subagent Peek, and review via *minga-review* in a live Catppuccin Frappé simulator.">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Co-Authoring &amp; Parallel Agents: Learn Minga">
+  <meta property="og:description" content="Interactive Catppuccin Frappé co-authoring mission control: Twist authorship, Orbit states, per-author undo, 300 ms lockout, and Subagent Peek.">
+  <meta property="og:image" content="/assets/og-minga.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="/assets/og-minga.png">
+  <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
+  <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/styles.css">
+  <script>
+    (() => {
+      try {
+        const saved = window.localStorage.getItem("minga-theme");
+        if (saved === "light" || saved === "dark") {
+          document.documentElement.setAttribute("data-theme", saved);
+        }
+      } catch (_) {}
+    })();
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand-link" href="/">
+        <img src="/assets/minga_dark-transparent.svg" alt="Minga logo" width="24" height="24">
+        <span class="brand-wordmark">minga</span>
+        <span class="brand-version">/ v0.1.0-pre</span>
+      </a>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/why-minga">Why Minga</a>
+        <a href="/learn/" aria-current="page">Learn</a>
+        <a href="/architecture">Architecture</a>
+        <a href="/extending">Extending</a>
+        <a href="/docs/">Reference</a>
+        <a href="https://github.com/jsmestad/minga">GitHub</a>
+      </nav>
+      <div class="header-controls">
+        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Toggle color theme">Light</button>
+        <button type="button" class="nav-toggle" data-nav-toggle aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation menu">Menu</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" class="lesson-page lesson-theme-minga" data-status="planned" data-since="v0.1.0" data-pill="off">
+    <section class="lesson-stage">
+      <div class="container">
+        <p class="learn-breadcrumb"><a href="/learn/">Learn</a> <span>/</span> Lesson 03 of 05 · Parallel Agent Mission Control</p>
+        <div class="stage-head">
+          <div>
+            <h1 data-status="planned" data-since="v0.1.0">Co-Authoring &amp; Parallel Agents</h1>
+            <p class="stage-lead">Press <strong>u Undo yours</strong> below to watch only your own edit revert while Minga's braided Twist holds steady. Then trigger the <strong>300 ms lockout guard</strong>, open <strong>Subagent Peek</strong>, and review changes with the Direction A Act Menu.</p>
+          </div>
+          <nav class="stage-jumps" aria-label="Lesson sections">
+            <a href="#review-lab">Live simulator</a>
+            <a href="#marks-ref">Twist &amp; Orbit</a>
+            <a href="#buffers-ref">Tasks, Peek &amp; Queue</a>
+            <a href="#safe-quit">Safe quit</a>
+          </nav>
+        </div>
+
+        <div id="review-lab" data-coauthor-sim>
+          <div class="lab-noscript">Enable JavaScript to use the interactive Co-Authoring Simulator, or read the Twist, Orbit, and buffer workflows below.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="marks-ref">
+      <div class="container">
+        <div class="section-header">
+          <p class="section-index"><span>01</span> Visual Grammar</p>
+          <h2>Two marks carry authorship and state across both clients.</h2>
+          <p>Every color maps to a semantic theme role (<code>minga</code>, <code>you</code>, <code>needs_you</code>, <code>failure</code>, <code>done</code>), defaulting to Catppuccin Frappé. Today's rolling build already ships staged overlays, three-way merge, and syntax-highlighted read-only diff review (<a href="/getting-started#first-staged-edit">Lesson 01</a>).</p>
+        </div>
+
+        <div class="grid-2">
+          <div class="surface-panel">
+            <div class="surface-panel-head">
+              <h3>The Twist (code gutter only)</h3>
+              <span class="surface-panel-tag">Authorship &amp; Undo</span>
+            </div>
+            <p>Braided strands mark Minga's unreviewed lines and pin the crossing to the top of the viewport as you scroll. Edit inside Minga's block and one strand turns blue (<code>you</code>) on the exact lines you touched. Pressing <kbd>u</kbd> or <kbd>⌘Z</kbd> undoes only your lines; Minga's steps leave cleanly only through Reject (<kbd>SPC a d</kbd>).</p>
+          </div>
+
+          <div class="surface-panel">
+            <div class="surface-panel-head">
+              <h3>The Orbit (six state words, five shapes)</h3>
+              <span class="surface-panel-tag">Zero focus theft</span>
+            </div>
+            <p>One canonical BEAM state renders identically across the modeline, <code>*minga-tasks*</code>, Subagent Peek, and notifications: <strong>◐ Working</strong>, <strong>◉ Needs you</strong>, <strong>○ Waiting / Stopped</strong>, <strong>◆ Failed</strong>, and <strong>● Done</strong>. Only <strong>Needs you</strong> escalates; nothing ever steals cursor focus.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="buffers-ref">
+      <div class="container">
+        <div class="section-header">
+          <p class="section-index"><span>02</span> Workflows</p>
+          <h2>Review inline or in buffers, inspect workers in place, queue prompts like code.</h2>
+          <p>Every agent surface is a real buffer closing with <kbd>q</kbd>, never a permanent sidebar fighting your editor for width.</p>
+        </div>
+
+        <ul class="spec-ledger">
+          <li class="spec-row">
+            <span class="spec-key"><kbd>]h</kbd> / <kbd>[h</kbd><br><kbd>SPC a y</kbd> / <kbd>SPC a d</kbd></span>
+            <span class="spec-detail"><strong>Inline review while coding.</strong> Jump changes with <kbd>]h</kbd>/<kbd>[h</kbd>, select a change with <kbd>ih</kbd>/<kbd>ah</kbd> (e.g. <kbd>vah SPC a y</kbd>), repeat with <kbd>.</kbd>, apply ex ranges (<code>:'&lt;,'&gt;Minga keep</code>), or press <kbd>g.</kbd> for the Act Menu. Keeping a change with an LSP error asks for confirmation first.</span>
+          </li>
+          <li class="spec-row">
+            <span class="spec-key"><kbd>SPC a r</kbd><br><code>*minga-review*</code></span>
+            <span class="spec-detail"><strong>Batch review drawer when Minga finishes.</strong> Bare single letters act directly: <kbd>y</kbd> keep, <kbd>n</kbd> reject, <kbd>=</kbd> toggle inline diff, <kbd>Y</kbd> keep all (with y/n confirm), <kbd>↩</kbd> jump to file, <kbd>q</kbd> close. <code>:Minga review</code> also populates standard quickfix (<kbd>]q</kbd>, <code>:cdo</code>).</span>
+          </li>
+          <li class="spec-row">
+            <span class="spec-key"><kbd>SPC a a</kbd><br><code>*minga-tasks*</code></span>
+            <span class="spec-detail"><strong>Tasks and subagent trees, needs-you first.</strong> Uniform approval keys (<kbd>y</kbd> once, <kbd>a</kbd> session, <kbd>t</kbd> turn, <kbd>n</kbd> deny, <kbd>=</kbd> diff) with a 300 ms anti-misfire lockout on auto-open and <em>Already answered</em> sync across notifications. Press <kbd>c</kbd> new task, <kbd>r</kbd> retry, <kbd>o</kbd> retained output (<kbd>]]</kbd>/<kbd>[[</kbd> failures, <kbd>f</kbd> fix), <kbd>i</kbd> inspect, <kbd>x</kbd> stop.</span>
+          </li>
+          <li class="spec-row">
+            <span class="spec-key"><kbd>SPC a i</kbd><br>Subagent Peek</span>
+            <span class="spec-detail"><strong>Inspect a worker in a right split without leaving your parent thread.</strong> Unfold its Brief with <kbd>za</kbd>, step siblings in place with <kbd>]]</kbd> / <kbd>[[</kbd>, message that worker directly, and keep any unsent draft in your parent composer intact.</span>
+          </li>
+          <li class="spec-row">
+            <span class="spec-key"><kbd>SPC a v</kbd> / <kbd>SPC a q q</kbd><br><code>*minga-queue*</code></span>
+            <span class="spec-detail"><strong>Steer mid-flight or edit your queue.</strong> In the composer, <kbd>↩</kbd> in Insert inserts a newline; Normal <kbd>↩</kbd> or <kbd>⌘↩</kbd> steers while Minga works; <kbd>⌥↩</kbd> queues follow-ups into <code>*minga-queue*</code> (reorder with <kbd>dd</kbd>/<kbd>p</kbd>); <kbd>⌘.</kbd> or <kbd>SPC a s</kbd> stops. Attach context via <kbd>SPC a x b</kbd>, <kbd>SPC a x f</kbd>, and <kbd>SPC a x d</kbd>. Watch live edits with <kbd>SPC a w</kbd> or publish/discard via <kbd>SPC a p</kbd>.</span>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section" id="safe-quit">
+      <div class="container">
+        <div class="boundary-band">
+          <div class="boundary-col">
+            <h3>Safe quit (<kbd>SPC q q</kbd>)</h3>
+            <p>Quitting with unsaved work lists what is open and prompts with explicit keys: <kbd>s</kbd> save all and quit, <kbd>d</kbd> discard only your unsaved edits (Minga's unreviewed changes stay saved for next time), or <kbd>esc</kbd> cancel.</p>
+          </div>
+          <div class="boundary-col boundary-col-native">
+            <h3>Voice strictly at the edges</h3>
+            <p>Minga is Bavarian for Munich, kept quiet and strictly at three moments: <strong>"Servus."</strong> on welcome, <strong>"Passt."</strong> once when a task completes, and <strong>"Ciao."</strong> on quit. Everywhere else, status uses plain operational words.</p>
+          </div>
+        </div>
+
+        <nav class="lesson-pager" aria-label="Lesson navigation">
+          <a class="pager-link" href="/learn/editing">
+            <span class="pager-dir">&lt;- Previous · Lesson 02</span>
+            <span class="pager-title">Editing, Keys &amp; Minimal UI</span>
+          </a>
+          <a class="pager-link pager-next" href="/learn/elixir">
+            <span class="pager-dir">Next · Lesson 04 -&gt;</span>
+            <span class="pager-title">Elixir for Minga</span>
+          </a>
+        </nav>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-note">
+        <p><span class="brand-wordmark" style="font-size:1.15rem;margin-right:0.25rem;">minga</span> is open source under the MIT license. Created by <a href="https://evalcode.com">Justin Smestad</a>.</p>
+      </div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/why-minga">Why Minga</a>
+        <a href="/learn/">Learn</a>
+        <a href="/getting-started">Getting Started</a>
+        <a href="/architecture">Architecture</a>
+        <a href="/extending">Extending</a>
+        <a href="/docs/">API Docs</a>
+        <a href="https://github.com/jsmestad/minga">GitHub</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script defer src="/site.js"></script>
+  <script type="module" src="/assets/learn-labs.js"></script>
+</body>
+</html>

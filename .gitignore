@@ -4,6 +4,7 @@
 /cover/
 /doc/
 /_site/
+/site/ts/node_modules/
 *.ez
 *.beam
 minga-*.tar

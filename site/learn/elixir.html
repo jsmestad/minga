@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Elixir for Minga: Learn Minga</title>
+  <meta name="description" content="Lesson 04: Interactive Neovim/Lua, Emacs/Elisp, and VS Code/JSON translator to Minga Elixir, plus a live-themed ~/.config/minga/config.exs playground with presets.">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Elixir for Minga: Learn Minga">
+  <meta property="og:description" content="Translate Lua, Elisp, or VS Code settings into Minga Elixir and preview themes, line numbers, and hooks live.">
+  <meta property="og:image" content="/assets/og-minga.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="/assets/og-minga.png">
+  <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
+  <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/styles.css">
+  <script>
+    (() => {
+      try {
+        const saved = window.localStorage.getItem("minga-theme");
+        if (saved === "light" || saved === "dark") {
+          document.documentElement.setAttribute("data-theme", saved);
+        }
+      } catch (_) {}
+    })();
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand-link" href="/">
+        <img src="/assets/minga_dark-transparent.svg" alt="Minga logo" width="24" height="24">
+        <span class="brand-wordmark">minga</span>
+        <span class="brand-version">/ v0.1.0-pre</span>
+      </a>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/why-minga">Why Minga</a>
+        <a href="/learn/" aria-current="page">Learn</a>
+        <a href="/architecture">Architecture</a>
+        <a href="/extending">Extending</a>
+        <a href="/docs/">Reference</a>
+        <a href="https://github.com/jsmestad/minga">GitHub</a>
+      </nav>
+      <div class="header-controls">
+        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Toggle color theme">Light</button>
+        <button type="button" class="nav-toggle" data-nav-toggle aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation menu">Menu</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" class="lesson-page lesson-theme-elixir">
+    <section class="lesson-stage">
+      <div class="container">
+        <p class="learn-breadcrumb"><a href="/learn/">Learn</a> <span>/</span> Lesson 04 of 05 · Translator &amp; Live Config Playground</p>
+        <div class="stage-head">
+          <div>
+            <h1>Elixir for Minga</h1>
+            <p class="stage-lead">You do not need to write Elixir at work to configure Minga. Pick your current editor below to translate four everyday patterns into <code>config.exs</code>, then test themes and presets in the live playground.</p>
+          </div>
+          <nav class="stage-jumps" aria-label="Lesson sections">
+            <a href="#translator">Translator</a>
+            <a href="#config-builder">Live Playground</a>
+            <a href="#config-dsl">6 Primitives</a>
+            <a href="#next-layers">Graduating to SDK</a>
+          </nav>
+        </div>
+
+        <div id="translator" class="lab-box" data-elixir-translator>
+          <div class="lab-noscript">Enable JavaScript for the interactive Lua/Elisp/VS Code translator, or review the six config primitives below.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="config-builder">
+      <div class="container">
+        <div class="section-header">
+          <p class="section-index"><span>01</span> Playground</p>
+          <h2>Live-themed <code>config.exs</code> playground.</h2>
+          <p>Start from a preset or tweak any control below. Watch the live mini-editor preview apply your theme, line-number style, and tab indentation immediately, then copy the generated config and reload live with <kbd>SPC h r</kbd>.</p>
+        </div>
+
+        <div class="lab-box" data-elixir-playground>
+          <div class="lab-bar">
+            <span>PLAYGROUND · ~/.CONFIG/MINGA/CONFIG.EXS</span>
+            <span>Ships on main today · Reload live with <span class="nowrap">SPC h r</span></span>
+          </div>
+
+          <div class="preset-bar" role="group" aria-label="Configuration presets">
+            <span class="preset-label">Presets:</span>
+            <button type="button" class="seg-btn is-active" data-cfg-preset="vim">Minimal Vim</button>
+            <button type="button" class="seg-btn" data-cfg-preset="doom">Doom Emacs</button>
+            <button type="button" class="seg-btn" data-cfg-preset="cua">CUA Desktop</button>
+            <button type="button" class="seg-btn" data-cfg-preset="work">Work Laptop Safety</button>
+          </div>
+
+          <div class="builder-grid">
+            <div class="builder-controls">
+              <div class="builder-group">
+                <label class="builder-label" for="cfg-model">Editing model</label>
+                <select id="cfg-model" class="builder-select" data-cfg-field="model">
+                  <option value="vim" selected>Vim modal (default)</option>
+                  <option value="cua">CUA desktop (:cua)</option>
+                </select>
+              </div>
+
+              <div class="builder-group">
+                <label class="builder-label" for="cfg-theme">Theme</label>
+                <select id="cfg-theme" class="builder-select" data-cfg-field="theme">
+                  <option value="catppuccin_frappe" selected>Catppuccin Frappé (default)</option>
+                  <option value="catppuccin_latte">Catppuccin Latte (light)</option>
+                  <option value="astrodark">AstroDark</option>
+                  <option value="doom_one">Doom One</option>
+                  <option value="one_light">One Light</option>
+                </select>
+              </div>
+
+              <div class="builder-group">
+                <label class="builder-label" for="cfg-lines">Line numbers</label>
+                <select id="cfg-lines" class="builder-select" data-cfg-field="lines">
+                  <option value="relative" selected>Relative (:relative)</option>
+                  <option value="hybrid">Hybrid (:hybrid)</option>
+                  <option value="absolute">Absolute (:absolute)</option>
+                </select>
+              </div>
+
+              <div class="builder-group">
+                <label class="builder-label" for="cfg-tab">Tab width</label>
+                <select id="cfg-tab" class="builder-select" data-cfg-field="tab">
+                  <option value="2" selected>2 spaces</option>
+                  <option value="4">4 spaces</option>
+                </select>
+              </div>
+
+              <fieldset class="builder-checks">
+                <legend class="builder-label">Include starter snippets</legend>
+                <label class="builder-check"><input type="checkbox" data-cfg-opt="gofmt" checked><span>Async <code>gofmt</code> save hook + Go tabs</span></label>
+                <label class="builder-check"><input type="checkbox" data-cfg-opt="hook"><span><code>PreToolUse</code> shell veto hook</span></label>
+                <label class="builder-check"><input type="checkbox" data-cfg-opt="mcp"><span>Crash-isolated GitHub MCP server</span></label>
+                <label class="builder-check"><input type="checkbox" data-cfg-opt="ext" checked><span>Lazy Hex extension (<code>minga_git_extended</code>)</span></label>
+              </fieldset>
+            </div>
+
+            <div class="builder-output">
+              <div class="theme-preview-box" data-theme-preview aria-live="polite"></div>
+              <div class="code-card">
+                <div class="code-header">
+                  <span>~/.config/minga/config.exs</span>
+                  <button type="button" class="copy-btn" data-copy-target="cfg-preview-code">Copy</button>
+                </div>
+                <pre><code id="cfg-preview-code">use Minga.Config
+
+set :theme, :catppuccin_frappe
+set :line_numbers, :relative
+set :tab_width, 2
+
+for_filetype :go, tab_width: 4, indent_with: :tabs
+
+on :after_save, fn _buf, path -&gt;
+  if String.ends_with?(path, ".go") do
+    System.cmd("gofmt", ["-w", path])
+  end
+end
+
+extension :minga_git_extended,
+  hex: "minga_git_extended",
+  version: "~&gt; 0.1",
+  load_policy: {:on_command, [:git_log]}</code></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="config-dsl">
+      <div class="container">
+        <div class="section-header">
+          <p class="section-index"><span>02</span> Primitives</p>
+          <h2>Six building blocks cover 95% of everyday customization.</h2>
+          <p>Press <kbd>SPC f p</kbd> to open <code>~/.config/minga/config.exs</code>, edit it, and press <kbd>SPC h r</kbd> to reload options, keybindings, hooks, and command wrappers live. Parentheses on calls are optional and the last expression in a block is its return value.</p>
+        </div>
+
+        <ul class="spec-ledger">
+          <li class="spec-row">
+            <span class="spec-key spec-key-strong"><code>set</code></span>
+            <span class="spec-detail"><strong>Typed editor options.</strong> Minga's default theme is Catppuccin Frappé (<code>:catppuccin_frappe</code>); invalid option names or types report a clear notice instead of failing silently.</span>
+          </li>
+          <li class="spec-row">
+            <span class="spec-key spec-key-strong"><code>for_filetype</code></span>
+            <span class="spec-detail"><strong>Per-language option overrides.</strong> Pass the filetype atom and keyword pairs: <code>for_filetype :go, tab_width: 4, indent_with: :tabs</code>.</span>
+          </li>
+          <li class="spec-row">
+            <span class="spec-key spec-key-strong"><code>bind</code> &amp; <code>command</code></span>
+            <span class="spec-detail"><strong>Custom commands and keybindings.</strong> Define an Elixir block with <code>command :name, "Description" do ... end</code> and bind it in a scope with <code>bind :normal, "SPC m t", :name, "Description"</code>.</span>
+          </li>
+          <li class="spec-row">
+            <span class="spec-key spec-key-strong"><code>on</code> &amp; <code>advise</code></span>
+            <span class="spec-detail"><strong>Isolated hooks and Emacs-style advice.</strong> Lifecycle hooks (<code>on :after_save</code>) run asynchronously in separate Erlang VM processes; <code>advise</code> wraps any built-in command (<code>:before</code>, <code>:after</code>, <code>:around</code>, <code>:override</code>) with contained exceptions.</span>
+          </li>
+          <li class="spec-row">
+            <span class="spec-key spec-key-strong"><code>extension</code></span>
+            <span class="spec-detail"><strong>Supervised packages from Hex, Git, or local paths.</strong> Override any extension's <code>load_policy</code> (<code>:eager</code>, <code>:deferred</code>, or <code>{:on_command, [...]}</code>) without forking it.</span>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section" id="next-layers">
+      <div class="container">
+        <div class="boundary-band">
+          <div class="boundary-col">
+            <h3>Graduating to <code>minga_sdk</code> (ships today)</h3>
+            <p>Move into a packaged extension when you need an OTP supervision tree, custom buffer surfaces, an internal <code>MingaAgent.InferenceRoute</code> proxy, runtime tree-sitter grammars, or Hex/Git distribution. Compiled package updates activate cleanly on restart (<a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a>).</p>
+          </div>
+          <div class="boundary-col boundary-col-native">
+            <h3 data-status="planned" data-since="v0.1.0">Disposable &amp; reusable task workflows</h3>
+            <p data-status="planned" data-since="v0.1.0" data-pill="off">In v0.1.0, author readable Elixir workflows over real buffer and agent owners for a single migration or audit, inspect the diff, save to activate under an explicit revocable grant, and discard when the PR lands or keep across repos. See <a href="/extending">Extending Minga</a>.</p>
+          </div>
+        </div>
+
+        <nav class="lesson-pager" aria-label="Lesson navigation">
+          <a class="pager-link" href="/learn/agents">
+            <span class="pager-dir">&lt;- Previous · Lesson 03</span>
+            <span class="pager-title">Co-Authoring &amp; Parallel Agents</span>
+          </a>
+          <a class="pager-link pager-next" href="/learn/remote">
+            <span class="pager-dir">Next · Lesson 05 -&gt;</span>
+            <span class="pager-title">Remote Devboxes, MCP &amp; Safety</span>
+          </a>
+        </nav>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-note">
+        <p><span class="brand-wordmark" style="font-size:1.15rem;margin-right:0.25rem;">minga</span> is open source under the MIT license. Created by <a href="https://evalcode.com">Justin Smestad</a>.</p>
+      </div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/why-minga">Why Minga</a>
+        <a href="/learn/">Learn</a>
+        <a href="/getting-started">Getting Started</a>
+        <a href="/architecture">Architecture</a>
+        <a href="/extending">Extending</a>
+        <a href="/docs/">API Docs</a>
+        <a href="https://github.com/jsmestad/minga">GitHub</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script defer src="/site.js"></script>
+  <script type="module" src="/assets/learn-labs.js"></script>
+</body>
+</html>

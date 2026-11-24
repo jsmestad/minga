@@ -38,7 +38,7 @@
       </a>
       <nav class="site-nav" id="site-nav" aria-label="Primary">
         <a href="/why-minga">Why Minga</a>
-        <a href="/getting-started" aria-current="page">Getting Started</a>
+        <a href="/learn/" aria-current="page">Learn</a>
         <a href="/architecture">Architecture</a>
         <a href="/extending">Extending</a>
         <a href="/docs/">Reference</a>
@@ -54,7 +54,7 @@
   <main id="main" data-build="today">
     <header class="essay-hero">
       <div class="container">
-        <p class="section-index"><span>GUIDE</span> Quickstart</p>
+        <p class="learn-breadcrumb"><a href="/learn/">Learn</a> <span>/</span> Lesson 01 of 05</p>
         <h1>Getting Started</h1>
         <p class="essay-subtitle">Install Minga alongside your current editor with zero repo lock-in, connect a model provider, review your first staged edit, and drop starter recipes into <code>config.exs</code>.</p>
         <nav class="essay-toc" aria-label="Sections">
@@ -69,6 +69,24 @@
 
     <article class="essay-body">
       <div class="container">
+        <div class="runbook-bar" data-runbook-filter>
+          <div class="runbook-groups">
+            <div class="seg-group" role="group" aria-label="Platform">
+              <button type="button" class="seg-btn is-active" data-rb-platform="apple-silicon">Apple Silicon macOS</button>
+              <button type="button" class="seg-btn" data-rb-platform="source">Linux / Intel Mac</button>
+            </div>
+            <div class="seg-group" role="group" aria-label="Client">
+              <button type="button" class="seg-btn is-active" data-rb-client="mac">macOS App</button>
+              <button type="button" class="seg-btn" data-rb-client="cli">Terminal CLI</button>
+            </div>
+            <div class="seg-group" role="group" aria-label="Key style">
+              <button type="button" class="seg-btn is-active" data-rb-keys="vim">Vim modal</button>
+              <button type="button" class="seg-btn" data-rb-keys="cua">CUA desktop</button>
+            </div>
+          </div>
+          <p class="runbook-summary" data-rb-summary><strong>Tailored path:</strong> <code>brew install --cask jsmestad/minga/minga-mac &amp;&amp; open -a Minga</code> · Vim modal defaults are active out of the box.</p>
+        </div>
+
         <section class="essay-section" id="install">
           <h2>1. Install Minga</h2>
           <p>On <strong>Apple Silicon macOS</strong>, Homebrew installs signed, notarized rolling prereleases. The desktop app (<code>minga-mac</code>) and terminal client (<code>minga</code>) are independent; install whichever you want, or both.</p>
@@ -296,11 +314,22 @@ minga attach ssh://devbox/work/app</code></pre>
           </div>
 
           <div class="actions">
-            <a class="btn btn-primary" href="/architecture">Explore Architecture</a>
-            <a class="btn" href="/extending">Extending Minga</a>
+            <a class="btn btn-primary" href="/learn/editing">Next: Editing, Keys &amp; Minimal UI</a>
+            <a class="btn" href="/learn/">All Learn Lessons</a>
             <a class="btn" href="/docs/configuration.html">Configuration Reference</a>
           </div>
         </section>
+
+        <nav class="lesson-pager" aria-label="Lesson navigation">
+          <a class="pager-link" href="/learn/">
+            <span class="pager-dir">&lt;- Curriculum</span>
+            <span class="pager-title">Learn Hub</span>
+          </a>
+          <a class="pager-link pager-next" href="/learn/editing">
+            <span class="pager-dir">Next · Lesson 02 -&gt;</span>
+            <span class="pager-title">Editing, Keys &amp; Minimal UI</span>
+          </a>
+        </nav>
       </div>
     </article>
   </main>
@@ -313,6 +342,7 @@ minga attach ssh://devbox/work/app</code></pre>
       <nav class="footer-links" aria-label="Footer">
         <a href="/">Home</a>
         <a href="/why-minga">Why Minga</a>
+        <a href="/learn/">Learn</a>
         <a href="/architecture">Architecture</a>
         <a href="/extending">Extending</a>
         <a href="/docs/">API Docs</a>
@@ -323,5 +353,6 @@ minga attach ssh://devbox/work/app</code></pre>
   </footer>
 
   <script defer src="/site.js"></script>
+  <script type="module" src="/assets/learn-labs.js"></script>
 </body>
 </html>

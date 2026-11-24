@@ -64,6 +64,17 @@ jobs:
       - name: Check storyboard flow invariants
         run: python3 design/tools/storyboard/check.py --final
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: "site/ts/package-lock.json"
+
+      - name: Install and check site TypeScript labs
+        run: |
+          npm --prefix site/ts ci
+          npm --prefix site/ts run check
+
       - uses: erlef/setup-beam@v1
         with:
           version-file: .tool-versions

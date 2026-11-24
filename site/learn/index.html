@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Learn Minga: Interactive Curriculum &amp; Labs</title>
+  <meta name="description" content="Hands-on interactive lessons for learning Minga: adaptive install runbook, playable v0.1.0 Mini-Minga key sandbox, live parallel-agent Twist simulator, Lua/Elisp/VS Code to Elixir translator, and remote fault-injection topology.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Learn Minga: Interactive Curriculum &amp; Labs">
+  <meta property="og:description" content="Five distinct, playable lessons covering Minga's v0.1.0 interface model, parallel agent co-authoring, Elixir customization, and remote devboxes.">
+  <meta property="og:image" content="/assets/og-minga.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="/assets/og-minga.png">
+  <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
+  <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/styles.css">
+  <script>
+    (() => {
+      try {
+        const saved = window.localStorage.getItem("minga-theme");
+        if (saved === "light" || saved === "dark") {
+          document.documentElement.setAttribute("data-theme", saved);
+        }
+      } catch (_) {}
+    })();
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand-link" href="/">
+        <img src="/assets/minga_dark-transparent.svg" alt="Minga logo" width="24" height="24">
+        <span class="brand-wordmark">minga</span>
+        <span class="brand-version">/ v0.1.0-pre</span>
+      </a>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/why-minga">Why Minga</a>
+        <a href="/learn/" aria-current="page">Learn</a>
+        <a href="/architecture">Architecture</a>
+        <a href="/extending">Extending</a>
+        <a href="/docs/">Reference</a>
+        <a href="https://github.com/jsmestad/minga">GitHub</a>
+      </nav>
+      <div class="header-controls">
+        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Toggle color theme">Light</button>
+        <button type="button" class="nav-toggle" data-nav-toggle aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation menu">Menu</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" data-learn-hub>
+    <header class="learn-hub-hero">
+      <div class="container">
+        <div class="hub-hero-grid">
+          <div>
+            <p class="section-index"><span>LEARN</span> Interactive Curriculum</p>
+            <h1>Learn by pressing the keys, not skimming walls of prose.</h1>
+            <p class="hero-lead">Five focused lessons with live browser labs: an adaptive quickstart runbook, a playable Mini-Minga keyboard sandbox, a live co-authoring and parallel-agent simulator, an editor-to-Elixir translator with live theme previews, and a supervision fault-injection lab.</p>
+          </div>
+          <div class="hub-progress-box">
+            <span class="hub-progress-k">CURRICULUM STATUS</span>
+            <p class="hub-progress-stat" data-hub-overall>16 hands-on browser missions across 5 lessons · Zero accounts</p>
+            <p class="hub-progress-note">Lesson 01, 04, and 05 teach what ships on <code>main</code> today. Lessons 02 and 03 teach the v0.1.0 Spine design directly (marked <strong>Coming · v0.1.0</strong>).</p>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <section class="section" id="curriculum">
+      <div class="container">
+        <div class="curriculum-bento">
+          <!-- LESSON 01: Full-width Quickstart Entrypoint -->
+          <a class="bento-card bento-card-wide bento-theme-mono" href="/getting-started">
+            <div class="bento-card-content">
+              <div class="bento-top">
+                <span class="lesson-num">LESSON 01 · QUICKSTART RUNBOOK</span>
+                <span class="bento-badges">
+                  <span class="lesson-tag-shipped">Ships today</span>
+                  <span class="bento-prog" data-lesson-progress="getting-started">1 step</span>
+                </span>
+              </div>
+              <h2>Install &amp; Your First Staged Edit</h2>
+              <p>Tailor the runbook to your OS, client (macOS app or Terminal CLI), and key style (Vim or CUA), connect a model provider, review your first syntax-highlighted staged diff, and copy four working recipes.</p>
+              <div class="lesson-topics">
+                <span>Adaptive OS/client filter</span>
+                <span>/model &amp; 0600 keys</span>
+                <span>Staged diff review</span>
+                <span>4 starter recipes</span>
+              </div>
+            </div>
+            <div class="bento-motif motif-cli" aria-hidden="true">
+              <div class="motif-bar"><span>zsh · quickstart</span><span>macOS / Linux</span></div>
+              <div class="motif-body">
+                <div><span class="motif-dim">$</span> brew install --cask jsmestad/minga/minga-mac</div>
+                <div><span class="motif-dim">$</span> minga .</div>
+                <div class="motif-ok">● Ready · 0 files written to repo</div>
+              </div>
+            </div>
+          </a>
+
+          <!-- LESSON 02: Playable Mini-Minga Sandbox -->
+          <a class="bento-card bento-theme-you" href="/learn/editing" data-status="planned" data-since="v0.1.0" data-pill="off">
+            <div class="bento-motif motif-frappe" aria-hidden="true">
+              <div class="motif-bar"><span>minga · retry.ex</span><span>macOS &lt;-&gt; Go TUI</span></div>
+              <div class="motif-body">
+                <div class="motif-wk"><span>SPC ›</span> <span>a Minga ›</span> <span>, Switch</span> <span>g. Act</span></div>
+                <div class="motif-ml"><span class="ml-pill">NORMAL</span> <span>retry.ex</span> <span class="motif-dim">pinned 2</span></div>
+              </div>
+            </div>
+            <div class="bento-card-content">
+              <div class="bento-top">
+                <span class="lesson-num">LESSON 02 · PLAYABLE SANDBOX</span>
+                <span class="bento-badges">
+                  <span class="lesson-tag" data-status="planned" data-since="v0.1.0"></span>
+                  <span class="bento-prog" data-lesson-progress="editing">5 missions</span>
+                </span>
+              </div>
+              <h2>Editing, Keys &amp; Minimal UI</h2>
+              <p>Play a live keyboard-driven Mini-Minga viewport: trigger which-key, pin files in the Switcher, open the Direction A Act Menu, toggle macOS vs Go TUI parity, and explore ADR-0007 CUA.</p>
+            </div>
+          </a>
+
+          <!-- LESSON 03: Live Parallel-Agent & Twist Simulator -->
+          <a class="bento-card bento-theme-minga" href="/learn/agents" data-status="planned" data-since="v0.1.0" data-pill="off">
+            <div class="bento-motif motif-frappe" aria-hidden="true">
+              <div class="motif-bar"><span>*minga-tasks* &amp; Twist</span><span>3 workers</span></div>
+              <div class="motif-body">
+                <div class="motif-orbits"><span class="ml-minga">◐ Working</span> <span class="ml-needs">◉ Needs you</span> <span class="ml-done">● Done</span></div>
+                <div class="motif-act"><span>y Keep · accept 4 lines</span><span>n Reject · restores 1</span></div>
+              </div>
+            </div>
+            <div class="bento-card-content">
+              <div class="bento-top">
+                <span class="lesson-num">LESSON 03 · MISSION CONTROL</span>
+                <span class="bento-badges">
+                  <span class="lesson-tag" data-status="planned" data-since="v0.1.0"></span>
+                  <span class="bento-prog" data-lesson-progress="agents">4 missions</span>
+                </span>
+              </div>
+              <h2>Co-Authoring &amp; Parallel Agents</h2>
+              <p>Test per-author undo inside a braided Twist block, feel the 300 ms anti-misfire lockout guard, inspect siblings in Subagent Peek, and keep or reject via the Direction A Act Menu.</p>
+            </div>
+          </a>
+
+          <!-- LESSON 04: Elixir Translator & Live Theme Playground -->
+          <a class="bento-card bento-theme-elixir" href="/learn/elixir">
+            <div class="bento-motif motif-code" aria-hidden="true">
+              <div class="motif-bar"><span>Lua / Elisp / JSON -&gt; Elixir</span><span>Live theme preview</span></div>
+              <div class="motif-body">
+                <div><span class="tok-kw">set</span> <span class="tok-atom">:theme</span>, <span class="tok-atom">:catppuccin_frappe</span></div>
+                <div><span class="tok-kw">on</span> <span class="tok-atom">:after_save</span>, <span class="tok-kw">fn</span> _buf, path -&gt; ... <span class="tok-kw">end</span></div>
+              </div>
+            </div>
+            <div class="bento-card-content">
+              <div class="bento-top">
+                <span class="lesson-num">LESSON 04 · TRANSLATOR + PLAYGROUND</span>
+                <span class="bento-badges">
+                  <span class="lesson-tag-shipped">Ships today</span>
+                  <span class="bento-prog" data-lesson-progress="elixir">3 missions</span>
+                </span>
+              </div>
+              <h2>Elixir for Minga</h2>
+              <p>Pick your current editor (Neovim, Emacs, or VS Code) for an interactive side-by-side translator, then customize presets and watch a live mini-editor preview update in real time.</p>
+            </div>
+          </a>
+
+          <!-- LESSON 05: Supervision & Fault-Injection Topology -->
+          <a class="bento-card bento-theme-done" href="/learn/remote">
+            <div class="bento-motif motif-topo" aria-hidden="true">
+              <div class="motif-bar"><span>minga --headless · Fault Lab</span><span>BEAM supervision</span></div>
+              <div class="motif-body">
+                <div class="motif-nodes">
+                  <span class="mn-ok">Buffers ●</span>
+                  <span class="mn-fail">GitHub MCP ◆</span>
+                  <span class="mn-ok">Postgres ●</span>
+                </div>
+                <div class="motif-dim">PreToolUse exit 1 -> vetoed before execution</div>
+              </div>
+            </div>
+            <div class="bento-card-content">
+              <div class="bento-top">
+                <span class="lesson-num">LESSON 05 · FAULT-INJECTION LAB</span>
+                <span class="bento-badges">
+                  <span class="lesson-tag-shipped">Ships today</span>
+                  <span class="bento-prog" data-lesson-progress="remote">3 missions</span>
+                </span>
+              </div>
+              <h2>Remote Devboxes, MCP &amp; Safety</h2>
+              <p>Close the laptop lid and reattach to a headless devbox, crash an isolated MCP server without losing buffers, and test real shell commands against a live <code>PreToolUse</code> veto hook.</p>
+            </div>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="deep-references">
+      <div class="container">
+        <div class="section-header">
+          <p class="section-index"><span>REFERENCE</span> Go Deeper</p>
+          <h2>Architecture, ADRs, and full technical references.</h2>
+          <p>Use the site essays and ExDoc manuals whenever you need exact option tables, wire opcodes, or contributor contracts.</p>
+        </div>
+
+        <div class="guide-index" aria-label="Technical references">
+          <a class="guide-row" href="/why-minga">
+            <span class="guide-row-top">
+              <span class="guide-row-title">Why Minga</span>
+              <span class="guide-row-kind">Thesis</span>
+            </span>
+            <span class="guide-row-desc">Tradeoffs against Cursor, Zed, Neovim, Emacs, and terminal multiplexers, plus roadmap status.</span>
+          </a>
+          <a class="guide-row" href="/architecture">
+            <span class="guide-row-top">
+              <span class="guide-row-title">Architecture &amp; The Spine</span>
+              <span class="guide-row-kind">Diagrams</span>
+            </span>
+            <span class="guide-row-desc">Erlang VM supervision, native Swift/Go/Zig boundaries, staged edit pipeline, and ADRs 0001 to 0006.</span>
+          </a>
+          <a class="guide-row" href="/extending">
+            <span class="guide-row-top">
+              <span class="guide-row-title">Extending Minga</span>
+              <span class="guide-row-kind">Guide</span>
+            </span>
+            <span class="guide-row-desc">Three customization layers, minga_sdk packages, corporate gateways, and security boundaries.</span>
+          </a>
+          <a class="guide-row" href="/docs/0006-the-spine.html">
+            <span class="guide-row-top">
+              <span class="guide-row-title">ADR-0006: The Spine</span>
+              <span class="guide-row-kind">Decision Record</span>
+            </span>
+            <span class="guide-row-desc">The full interface contract shared identically by macOS and the Go terminal client.</span>
+          </a>
+          <a class="guide-row" href="/docs/configuration.html">
+            <span class="guide-row-top">
+              <span class="guide-row-title">Configuration Reference</span>
+              <span class="guide-row-kind">ExDoc</span>
+            </span>
+            <span class="guide-row-desc">Complete typed options, per-filetype rules, keymap scopes, hooks, and MCP settings.</span>
+          </a>
+          <a class="guide-row" href="/docs/extension_api.html">
+            <span class="guide-row-top">
+              <span class="guide-row-title">Extension API &amp; Hooks</span>
+              <span class="guide-row-kind">ExDoc</span>
+            </span>
+            <span class="guide-row-desc">Extension callbacks, load policies, InferenceRoute gateways, and runtime tree-sitter grammars.</span>
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-note">
+        <p><span class="brand-wordmark" style="font-size:1.15rem;margin-right:0.25rem;">minga</span> is open source under the MIT license. Created by <a href="https://evalcode.com">Justin Smestad</a>.</p>
+      </div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/why-minga">Why Minga</a>
+        <a href="/getting-started">Getting Started</a>
+        <a href="/architecture">Architecture</a>
+        <a href="/extending">Extending</a>
+        <a href="/docs/">API Docs</a>
+        <a href="/docs/changelog.html">Changelog</a>
+        <a href="https://github.com/jsmestad/minga">GitHub</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script defer src="/site.js"></script>
+  <script type="module" src="/assets/learn-labs.js"></script>
+</body>
+</html>
