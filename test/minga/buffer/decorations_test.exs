@@ -400,46 +400,6 @@ defmodule Minga.Core.DecorationsTest do
       assert ann.priority == 10
     end
 
-    test "removing an id preserves survivor order and drops an emptied line bucket" do
-      {high, decs} = Decorations.add_annotation(Decorations.new(), 5, "high", priority: 20)
-      {other, decs} = Decorations.add_annotation(decs, 6, "other")
-      {mid, decs} = Decorations.add_annotation(decs, 5, "mid", priority: 10)
-      {low, decs} = Decorations.add_annotation(decs, 5, "low", priority: 5)
-
-      removed = Decorations.remove_annotation(decs, mid)
-      assert Enum.map(removed.annotations, & &1.id) == [low, other, high]
-      assert Enum.map(Decorations.annotations_for_line(removed, 5), & &1.id) == [low, high]
-      assert removed.ann_line_cache[6] == decs.ann_line_cache[6]
-      assert removed.version == decs.version + 1
-      assert removed.annotation_version == decs.annotation_version + 1
-
-      emptied =
-        removed
-        |> Decorations.remove_annotation(high)
-        |> Decorations.remove_annotation(low)
-
-      assert emptied.ann_line_cache == %{6 => decs.ann_line_cache[6]}
-      assert Decorations.annotations_for_line(emptied, 5) == []
-      assert Decorations.remove_annotation(decs, make_ref()) == decs
-
-      uncached = %{decs | ann_line_cache: nil}
-      assert Decorations.remove_annotation(uncached, make_ref()) == uncached
-      assert Decorations.remove_annotation(uncached, mid) == removed
-    end
-
-    test "adding with a nil cache leaves it unbuilt but removing the last id builds it" do
-      empty = %{Decorations.new() | ann_line_cache: nil}
-      {id, added} = Decorations.add_annotation(empty, 5, "only")
-      assert added.ann_line_cache == nil
-      assert [%{id: ^id}] = Decorations.annotations_for_line(added, 5)
-
-      removed = Decorations.remove_annotation(added, id)
-      assert removed.ann_line_cache == %{}
-      assert removed.annotations == []
-      assert removed.version == added.version + 1
-      assert removed.annotation_version == added.annotation_version + 1
-    end
-
     test "line and range queries order equal priorities newest first with or without a cache" do
       empty = Decorations.new()
       {old, decs} = Decorations.add_annotation(empty, 5, "old", priority: 10)

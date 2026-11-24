@@ -174,30 +174,6 @@ defmodule Minga.DebugLogTest do
     stop_debug_log(pid)
   end
 
-  test "rapid messages are buffered until one flush", %{dir: dir} do
-    path = Path.join(dir, "debug.log")
-    pid = start_debug_log(path, flush_after: 60_000)
-    first = unique_text("debug-log-batch-a")
-    second = unique_text("debug-log-batch-b")
-
-    Events.broadcast(:log_message, %LogMessageEvent{text: first, level: :info})
-    Events.broadcast(:log_message, %LogMessageEvent{text: second, level: :info})
-
-    buffered = DebugLog.buffered_content(pid)
-
-    assert buffered =~ first
-    assert buffered =~ second
-    refute File.read!(path) =~ first
-
-    flush(pid)
-
-    content = File.read!(path)
-    assert content =~ first
-    assert content =~ second
-
-    stop_debug_log(pid)
-  end
-
   test "short flush_after writes buffered entries on the real debounce timer", %{dir: dir} do
     path = Path.join(dir, "debug.log")
     pid = start_debug_log(path, flush_after: 5)

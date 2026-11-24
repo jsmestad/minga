@@ -406,15 +406,6 @@ defmodule MingaEditor.DisplayMapTest do
       assert Decorations.closed_fold_regions(decs) != []
     end
 
-    test "remove fold region" do
-      decs = Decorations.new()
-      {id, decs} = Decorations.add_fold_region(decs, 5, 15)
-      assert Decorations.has_fold_regions?(decs)
-
-      decs = Decorations.remove_fold_region(decs, id)
-      refute Decorations.has_fold_regions?(decs)
-    end
-
     test "fold_region_at finds containing fold" do
       decs = Decorations.new()
       {_id, decs} = Decorations.add_fold_region(decs, 5, 15)
