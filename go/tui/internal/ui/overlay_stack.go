@@ -24,6 +24,9 @@ func (m Model) floatingOverlayLayers() []*lipgloss.Layer {
 	if picker := m.floatingPickerLayer(); picker != nil {
 		layers = append(layers, popupShadow(picker)...)
 	}
+	if menu := m.floatingPickerActionMenuLayer(); menu != nil {
+		layers = append(layers, popupShadow(menu)...)
+	}
 	return layers
 }
 
