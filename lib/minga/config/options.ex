@@ -263,6 +263,7 @@ defmodule Minga.Config.Options do
        :git,
        :minga,
        :diagnostics,
+       :config,
        :lsp,
        :parser,
        :background_agent,

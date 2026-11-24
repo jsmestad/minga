@@ -582,6 +582,34 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       end
     end
 
+    test "each file Minga's tools change becomes the task's current file, for the modeline" do
+      pid = self()
+
+      connection = %MingaAgent.Session.ConnectionSnapshot{
+        target: MingaAgent.Session.ConnectionTarget.new(pid, "task-7", nil, make_ref()),
+        conversation: make_ref(),
+        credential_readiness: :checking,
+        model_selection: nil,
+        provider_phase: :running,
+        operation: :idle,
+        problem: nil
+      }
+
+      state = background_input_state(keymap_scope: :agent, agentic_active: true)
+      ui = UIState.project_connection(state.workspace.agent_ui, connection)
+
+      state =
+        state
+        |> TraditionalWorkflow.install_agent_ui(ui)
+        |> Events.dispatch(pid, {:file_changed, "/tmp/agent-a.ex", "a0", "a1", "t1", "edit"})
+        |> Events.dispatch(pid, {:file_changed, "/tmp/agent-b.ex", "b0", "b1", "t2", "edit"})
+
+      activity = state.workspace.agent_ui.view.activity
+      assert Activity.current_file(activity) == "/tmp/agent-b.ex"
+      assert activity.task_files.author == Minga.Buffer.Author.minga("task-7")
+      assert MingaEditor.StatusBar.Data.from_state(state).common.minga_file == "/tmp/agent-b.ex"
+    end
+
     test "same-process conversation restore clears the old review and ignores a queued file change" do
       pid = self()
       path = "/tmp/agent-a.ex"

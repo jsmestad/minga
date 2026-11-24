@@ -23,6 +23,7 @@ defmodule MingaEditor.Startup do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentConnection
   alias MingaEditor.State.ExtensionSurfaces
+  alias MingaEditor.State.Feedback
   alias MingaEditor.State.Frontend, as: FrontendState
   alias MingaEditor.State.Interaction
   alias MingaEditor.State.Parser, as: ParserState
@@ -577,7 +578,10 @@ defmodule MingaEditor.Startup do
     theme = MingaEditor.UI.Theme.get!(theme_name)
     state = state |> EditorState.apply_theme(theme) |> AgentLifecycle.restyle_transcript()
 
-    case Config.load_error() do
+    error = Config.load_error()
+    state = %{state | feedback: Feedback.report_config_load(state.feedback, error)}
+
+    case error do
       nil -> state
       error -> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, error)
     end

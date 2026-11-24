@@ -27,7 +27,7 @@ func (m Model) floatingWhichKeyLayer() *lipgloss.Layer {
 	// The panel sits two columns in, or flush left when a narrow terminal leaves no room for the offset.
 	x := max(min(2, m.width-lipgloss.Width(popup)), 0)
 	y := max(m.height-lipgloss.Height(popup)-2, 0)
-	return lipgloss.NewLayer(popup).X(x).Y(y).Z(9)
+	return lipgloss.NewLayer(popup).X(x).Y(y).Z(whichKeyLayerZ)
 }
 
 func (m Model) renderFloatingWhichKey(which protocol.WhichKey) string {

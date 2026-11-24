@@ -461,3 +461,30 @@ pairs = [
 ]
 reason = "The whichKey.entryLabel text misses 4.5:1 in this theme."
 issue = 4137
+
+[[exception]]
+scenario = ["minga.whichkey"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#8caaee on #414559",
+  "#c6d0f5 on #626880",
+]
+reason = "The Agent activity card's title and task, shown while Minga works, miss 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.whichkey"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#1e66f5 on #ccd0da",
+  "#4c4f69 on #acb0be",
+  "#8839ef on #e6e9ef",
+]
+reason = "The Agent activity card's title and task, and Minga's words in the minga role on the modeline bar (4.45:1), miss 4.5:1 in this theme."
+issue = 4137

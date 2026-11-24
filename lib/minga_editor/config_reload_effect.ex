@@ -15,6 +15,7 @@ defmodule MingaEditor.ConfigReloadEffect do
   alias MingaEditor.Effect.Policy
   alias MingaEditor.Effect.Request
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
+  alias MingaEditor.State.Feedback
   alias MingaEditor.State, as: EditorState
 
   @resource {:config_reload, :ordinary_config}
@@ -69,12 +70,19 @@ defmodule MingaEditor.ConfigReloadEffect do
   @spec finish(EditorState.t(), reload_result()) :: EditorState.t()
   def finish(state, :ok) do
     Minga.Log.info(:editor, "Config reloaded")
-    NoticeWorkflow.publish(state, "Config reloaded")
+
+    %{state | feedback: Feedback.report_config_load(state.feedback, nil)}
+    |> NoticeWorkflow.publish("Config reloaded")
   end
 
+  # A reload the loader rejected (a restart is required) leaves the last load in place; only a load
+  # error leaves the editor on its defaults.
   def finish(state, {:error, message}) when is_binary(message) do
     Minga.Log.warning(:config, "Config reload error: #{message}")
-    NoticeWorkflow.publish(state, "Config reload error: #{message}")
+    load_error = Minga.Config.load_error()
+
+    %{state | feedback: Feedback.report_config_load(state.feedback, load_error)}
+    |> NoticeWorkflow.publish("Config reload error: #{message}")
   end
 
   @spec failure_message(term()) :: String.t()

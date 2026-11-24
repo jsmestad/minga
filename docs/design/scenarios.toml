@@ -49,6 +49,9 @@
 #   list            true when the surface lists things. It must name its
 #                   empty_state, a scenario id for the zero case.
 #   terminal_state  true when the scenario ends the session (quit).
+#   state_of        true for a state other scenarios can be in rather than a place you go to (a
+#                   narrow window). It has no exits, no registry entry and no renders of its own; the
+#                   scenarios it applies to and their checks prove it, and notes say where.
 #   exit fields     key, click, to, plus optional keyboard_only (reason), back
 #                   (true for an escape that is not esc or q, such as ⌃\ ⌃N in a
 #                   terminal or ⌘W on a window) and note.
@@ -1844,8 +1847,9 @@ states = []
 frontends = ["macos", "tui"]
 status = "designed"
 boards = { macos = "Batch4_windows_narrow.dc.html", tui = "Batch4_windows_narrow.dc.html" }
+state_of = true
 exits = []
-notes = "A state of other scenarios, not a place: narrowing changes presentation only, every key keeps its meaning. Modeline drops filetype, position, git, then Minga's words (to glyph and 2/3); mode, needs-you, file, change position and errors never drop. Breakpoints are starting values: macOS about 1360, 1180, 1000 pt; TUI 140, 120, 100, 80 columns."
+notes = "A state of other scenarios, not a place: narrowing changes presentation only, every key keeps its meaning. Modeline drops filetype, position, git, then Minga's words (to glyph and 2/3); mode, needs-you, file, change position and errors never drop. Breakpoints are starting values: macOS about 1360, 1180, 1000 pt; TUI 140, 120, 100, 80 columns. Proved by the frontends' fit tests (go/tui/internal/ui/modeline_fit_test.go, macOS StatusBarViewViewTests.dropLadder), by the drop-rank check on edit.plain, and by every scenario rendering at TUI 80x24."
 
 [[scenario]]
 id = "windows.drawer_stack"

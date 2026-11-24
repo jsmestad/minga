@@ -209,7 +209,7 @@ defmodule Minga.Test.Storyboard.Assertions do
   end
 
   @doc """
-  Asserts a state is spoken in the modeline the way the tokens define it: a segment carries the state (so frontends draw its mark), says the state's word (`Minga.Design.Tokens.state_word/1`, in any case, as in "Minga working 2/3"), and is drawn in the state's colour role (`MingaEditor.UI.Theme.state_color/2`).
+  Asserts a state is spoken in the modeline the way the tokens define it: a segment carries the state (so frontends draw its mark), says the state's word (`Minga.Design.Tokens.state_word/1`, in any case, as in "Minga working 2/3") or, when its words say where Minga works ("Minga here"), labels itself with the state's accessibility label, and is drawn in the state's colour role (`MingaEditor.UI.Theme.state_color/2`).
   """
   @spec assert_state(Model.t(), :modeline, Tokens.state_id()) :: Model.t()
   def assert_state(%Model{} = model, :modeline, state) do
@@ -224,8 +224,13 @@ defmodule Minga.Test.Storyboard.Assertions do
         flunk("expected a modeline segment in the #{state} state, segments: #{summary(segments)}")
 
       segment ->
-        assert String.contains?(String.downcase(segment.text), String.downcase(word)),
-               "modeline #{segment.id} is #{state} but says #{inspect(segment.text)}, not #{inspect(word)}"
+        # The words may say where Minga works ("Minga here"); the label always names the state.
+        spoken = Tokens.state(state).accessibility_label
+
+        assert String.contains?(String.downcase(segment.text), String.downcase(word)) or
+                 String.starts_with?(segment.label, spoken),
+               "modeline #{segment.id} is #{state} but says #{inspect(segment.text)} " <>
+                 "(#{inspect(segment.label)}), not #{inspect(word)} or #{inspect(spoken)}"
 
         expected = Theme.state_color(theme!(model), state)
 

@@ -6,6 +6,14 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+// Which-key and the picker are what the user just asked for, so they paint above every BEAM-placed footer band
+// (whose layer z is its placement z, 150 to 301, plus 2; see overlayLayer). An Agent activity card left open while
+// Minga works must not cover them (#4157).
+const (
+	whichKeyLayerZ = 1000
+	pickerLayerZ   = 1001
+)
+
 // floatingOverlayLayers returns the lipgloss layers for all active floating
 // overlays in compositing order (lowest Z first). The BEAM-placed secondary
 // overlay sits below the modal floating layers.

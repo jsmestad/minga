@@ -108,10 +108,11 @@ By default it reads, left to right: the mode, needs-you (only when a task needs 
 | `:filename` | Buffer name, with a dot when unsaved. Click or `SPC ,` opens the switcher |
 | `:change` | Your position among Minga's changes in this file ("change 1/2"), while the cursor is inside one |
 | `:git` | Git branch and changed-line count ("main +11"). Click runs whatever `SPC g g` runs |
-| `:minga` | Minga's state with its mark and word ("Minga working 2/3"). Click or `SPC a v` opens the conversation. `:agent` is its old name and still works |
+| `:minga` | Minga's state with its mark and words: "Minga here 2/3" while it works in the file you are in, "Minga editing retry.ex 2/3" while it works in another, otherwise the state's word ("Minga needs you"). Click or `SPC a v` opens the conversation. `:agent` is its old name and still works |
 | `:background_agent` | Running background subagent count and active background task label |
 | `:plan_limit` | Subscription plan usage for the active agent model, only at 80% or more of a limit window (`Claude 82% · 5h`) or once the limit is reached (`Claude limit · resets 3:40 PM`). Click it to choose another model. Hidden under normal usage and when the route reports no usage. |
 | `:diagnostics` | Error and warning counts. Click or `SPC c x` opens the list |
+| `:config` | A config that did not load, as a persistent problem ("config: defaults") until a reload succeeds. Click or `SPC f p` opens the config file |
 | `:parser` | A failed tree-sitter parser, as a persistent problem, or a restart in progress |
 | `:lsp` | A failed language server, as a persistent problem ("elixir_ls failed"). Nothing while servers are healthy |
 | `:filetype` | Filetype label |
@@ -126,7 +127,7 @@ Use `:modeline_left_segments` and `:modeline_right_segments` to choose which seg
 
 ```elixir
 set :modeline_left_segments, [
-  :mode, :needs_you, :filename, :change, :git, :minga, :diagnostics, :lsp, :parser,
+  :mode, :needs_you, :filename, :change, :git, :minga, :diagnostics, :config, :lsp, :parser,
   :background_agent, :plan_limit, :draft, :conflict, :merge_conflict
 ]
 set :modeline_right_segments, [:filetype, :position]

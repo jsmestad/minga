@@ -13,6 +13,8 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
     [
       Entry.built("minga.whichkey",
         reach: "SPC a (pause)",
+        # Minga is working in the session, so the modeline carries its state while which-key is open.
+        start: [minga: :thinking],
         recognize: &Edit.which_key?(&1, "SPC a"),
         explore: :which_key,
         checks: [
@@ -38,11 +40,8 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
             4044,
             &assert_count(&1, "a", "1 needs you")
           ),
-          # Starting this scenario with `minga: :thinking` passes this check today, but the TUI then draws the
-          # activity card over the modeline and the which-key panel (#4157), so the renders lose both.
-          Check.pending(
+          Check.new(
             "the modeline says Minga is working, in the minga role",
-            4157,
             &assert_state(&1, :modeline, :working)
           )
         ]

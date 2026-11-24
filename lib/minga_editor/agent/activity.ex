@@ -8,6 +8,7 @@ defmodule MingaEditor.Agent.Activity do
   """
 
   alias MingaAgent.TodoItem
+  alias MingaEditor.Agent.TaskFiles
   alias MingaAgent.Session.TurnExecution
 
   @type t :: %__MODULE__{
@@ -17,7 +18,8 @@ defmodule MingaEditor.Agent.Activity do
           tool_count: non_neg_integer(),
           running_tools: %{String.t() => {pos_integer(), String.t()}},
           active_tool_id: String.t() | nil,
-          file_paths: MapSet.t(String.t())
+          file_paths: MapSet.t(String.t()),
+          task_files: TaskFiles.t()
         }
 
   defstruct todos: [],
@@ -26,7 +28,8 @@ defmodule MingaEditor.Agent.Activity do
             tool_count: 0,
             running_tools: %{},
             active_tool_id: nil,
-            file_paths: MapSet.new()
+            file_paths: MapSet.new(),
+            task_files: TaskFiles.new()
 
   @doc "Creates an empty activity projection."
   @spec new() :: t()
@@ -150,11 +153,23 @@ defmodule MingaEditor.Agent.Activity do
     name
   end
 
-  @doc "Records a touched file path for the current turn."
-  @spec record_file(t(), String.t()) :: t()
-  def record_file(%__MODULE__{} = activity, path) when is_binary(path) do
-    %{activity | file_paths: MapSet.put(activity.file_paths, path)}
+  @doc """
+  Records a file the task's tools changed: once for the current turn's file count, and in the task's ordered files.
+
+  `author` names the task (`Minga.Buffer.Author.minga/1`), or nil when it is not known yet. The task's files outlive the turn, so the modeline can say which file Minga is editing between turns.
+  """
+  @spec record_file(t(), Minga.Buffer.Author.t() | nil, String.t()) :: t()
+  def record_file(%__MODULE__{} = activity, author, path) when is_binary(path) do
+    %{
+      activity
+      | file_paths: MapSet.put(activity.file_paths, path),
+        task_files: TaskFiles.record(activity.task_files, author, path)
+    }
   end
+
+  @doc "The file the task edited last, or nil before its first edit."
+  @spec current_file(t()) :: String.t() | nil
+  def current_file(%__MODULE__{task_files: files}), do: TaskFiles.current(files)
 
   @doc """
   How far through its visible plan Minga is, as `{step, steps}`, or nil without a plan.

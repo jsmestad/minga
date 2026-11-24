@@ -583,6 +583,21 @@ defmodule MingaEditor.StatusBar.DataTest do
       assert idle.common.needs_you_count == 0
     end
 
+    test "a config that did not load is carried to the problem segment until a load succeeds" do
+      state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
+      assert Data.from_state(state).common.config_problem == nil
+
+      failed = %{
+        state
+        | feedback: MingaEditor.State.Feedback.report_config_load(state.feedback, "bad config")
+      }
+
+      assert Data.from_state(failed).common.config_problem == "bad config"
+
+      cleared = MingaEditor.ConfigReloadEffect.finish(failed, :ok)
+      assert Data.from_state(cleared).common.config_problem == nil
+    end
+
     test "a crashed language server is named for the problem segment" do
       state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
 

@@ -20,6 +20,7 @@ defmodule Minga.Config.ModelineSegments do
     :git,
     :minga,
     :agent,
+    :config,
     :background_agent,
     :plan_limit,
     :diagnostics,

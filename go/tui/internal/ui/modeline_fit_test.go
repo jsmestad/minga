@@ -162,3 +162,11 @@ func TestModelineNoticeReservesAtMostAThird(t *testing.T) {
 		t.Fatalf("the notice should still show, cut to its room: %q", footer)
 	}
 }
+
+// Which-key and the picker paint above any BEAM-placed footer band, whose layer z is its placement z (at most 301) plus 2 (#4157).
+func TestModalLayersPaintAboveFooterBands(t *testing.T) {
+	const highestBandLayerZ = 301 + 2
+	if whichKeyLayerZ <= highestBandLayerZ || pickerLayerZ <= whichKeyLayerZ {
+		t.Fatalf("which-key (%d) and picker (%d) must paint above footer bands (%d) and in that order", whichKeyLayerZ, pickerLayerZ, highestBandLayerZ)
+	}
+}

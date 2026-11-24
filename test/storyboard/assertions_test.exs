@@ -93,6 +93,9 @@ defmodule Minga.Storyboard.AssertionsTest do
         assert_state(wrong, :modeline, :working)
       end
 
+      here = %{minga | text: "Minga here 2/3", label: "Minga is working, in this file"}
+      assert_state(model(colored: [here]), :modeline, :working)
+
       wordless = model(colored: [%{minga | text: "Minga 2/3"}])
 
       assert_raise ExUnit.AssertionError, ~r/not "Working"/, fn ->

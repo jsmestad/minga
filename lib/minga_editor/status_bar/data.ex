@@ -181,8 +181,11 @@ defmodule MingaEditor.StatusBar.Data do
       plan_limit: plan_limit(state),
       needs_you_count: ChromeState.needs_you_count(chrome_state, agent_status),
       minga_progress: minga_progress(state),
+      minga_file: minga_file(state),
+      minga_here?: file_path != nil and minga_file(state) == file_path,
       failed_language_servers: failed_language_servers(state),
-      leader_trie: leader_trie(state),
+      config_problem: config_problem(state),
+      keymap_server: keymap_server(state),
       key_hints?: key_hints?(state)
     }
   end
@@ -196,6 +199,17 @@ defmodule MingaEditor.StatusBar.Data do
 
   defp minga_progress(_state), do: nil
 
+  # The file Minga's task edited last, from the same projection.
+  @spec minga_file(EditorState.t() | map()) :: String.t() | nil
+  defp minga_file(%{workspace: %{agent_ui: %UIState{view: %{activity: %Activity{} = activity}}}}),
+    do: Activity.current_file(activity)
+
+  defp minga_file(_state), do: nil
+
+  @spec config_problem(EditorState.t() | map()) :: String.t() | nil
+  defp config_problem(%{feedback: %{config_problem: problem}}), do: problem
+  defp config_problem(_state), do: nil
+
   @spec failed_language_servers(EditorState.t() | map()) :: [String.t()]
   defp failed_language_servers(%{lsp: %{server_statuses: statuses}}) do
     for {name, :crashed} <- statuses, do: to_string(name)
@@ -203,12 +217,10 @@ defmodule MingaEditor.StatusBar.Data do
 
   defp failed_language_servers(_state), do: []
 
-  # Clicks resolve through the same leader trie the keys do, so a segment does what its key does.
-  @spec leader_trie(EditorState.t() | map()) :: Minga.Keymap.Bindings.node_t()
-  defp leader_trie(%EditorState{interaction: %{keymap_server: server}}),
-    do: Minga.Keymap.leader_trie(server)
-
-  defp leader_trie(_state), do: Minga.Keymap.default_leader_trie()
+  # Clicks resolve through the same keymap the keys do, so a segment does what its key does.
+  @spec keymap_server(EditorState.t() | map()) :: Minga.Keymap.server()
+  defp keymap_server(%EditorState{interaction: %{keymap_server: server}}), do: server
+  defp keymap_server(_state), do: Minga.Keymap.default_server()
 
   # CUA with the space leader turned off has no key for a leader binding, so segments name none.
   @spec key_hints?(EditorState.t() | map()) :: boolean()
@@ -634,9 +646,12 @@ defmodule MingaEditor.StatusBar.Data do
       plan_limit: common.plan_limit,
       needs_you_count: common.needs_you_count,
       minga_progress: common.minga_progress,
+      minga_file: common.minga_file,
+      minga_here?: common.minga_here?,
       change_position: common.change_position,
       failed_language_servers: common.failed_language_servers,
-      leader_trie: common.leader_trie,
+      config_problem: common.config_problem,
+      keymap_server: common.keymap_server,
       key_hints?: common.key_hints?
     }
   end

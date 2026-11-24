@@ -6,7 +6,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
 
   Each segment carries a drop rank. When a frontend's window is too narrow it applies the ranks in order, lowest first: optional and custom segments, then filetype, position, git, then Minga's words shrink to the state mark and its step count, then warnings. Mode, needs-you, the file name, change position, errors and persistent problems never drop.
 
-  Clicks do what the segment's key does: a designed segment names its leader key, and both the click target and the key hint resolve through the active leader trie, so a rebinding moves them together.
+  Clicks do what the segment's key does: a designed segment names its leader key, and both the click target and the key hint resolve through the active keymap, so a rebinding moves them together. The lookups read the keymap's leader index, not the whole trie, because they run on every frame.
   """
 
   alias Minga.Config.ModelineSegment
@@ -73,9 +73,12 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           optional(:plan_limit) => MingaEditor.StatusBar.PlanLimit.t() | nil,
           optional(:needs_you_count) => non_neg_integer(),
           optional(:minga_progress) => {non_neg_integer(), pos_integer()} | nil,
+          optional(:minga_file) => String.t() | nil,
+          optional(:minga_here?) => boolean(),
           optional(:change_position) => {pos_integer(), pos_integer()} | nil,
           optional(:failed_language_servers) => [String.t()],
-          optional(:leader_trie) => Bindings.node_t(),
+          optional(:config_problem) => String.t() | nil,
+          optional(:keymap_server) => Minga.Keymap.server(),
           optional(:key_hints?) => boolean()
         }
 
@@ -90,7 +93,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           info_fg: non_neg_integer(),
           mode_bg: non_neg_integer(),
           mode_fg: non_neg_integer(),
-          leader_trie: Bindings.node_t(),
+          keymap_server: Minga.Keymap.server(),
           key_hints?: boolean()
         }
 
@@ -172,7 +175,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
       info_fg: ml.info_fg,
       mode_bg: mode_bg,
       mode_fg: mode_fg,
-      leader_trie: Map.get_lazy(data, :leader_trie, &Minga.Keymap.default_leader_trie/0),
+      keymap_server: Map.get(data, :keymap_server, Minga.Keymap.default_server()),
       key_hints?: Map.get(data, :key_hints?, true)
     }
   end
@@ -374,6 +377,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   # `:agent` is the segment's name before it spoke as Minga; configs that list it keep working.
   defp render_segment(:agent, ctx, _table), do: minga_segment(ctx)
   defp render_segment(:diagnostics, ctx, _table), do: diagnostic_segments(ctx)
+  defp render_segment(:config, ctx, _table), do: config_segment(ctx)
   defp render_segment(:lsp, ctx, _table), do: lsp_segment(ctx)
   defp render_segment(:parser, ctx, _table), do: parser_segment(ctx)
   defp render_segment(:filetype, ctx, _table), do: filetype_segment(ctx)
@@ -552,25 +556,21 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     "Branch #{branch}#{lines}#{partial}"
   end
 
-  # Minga's state, said once: the token mark and word, its step through the plan, then the status command text.
+  # Minga's state, said once: the token mark, then words.
+  # While it works in a file it says where ("Minga here", "Minga editing retry.ex"); otherwise the state's word.
+  # Its step through the plan and the status command text follow.
   # In a narrow window it shrinks to the mark and the step count.
   @spec minga_segment(context()) :: [Segment.t()]
   defp minga_segment(ctx) do
     state = Tokens.agent_status_state(Map.get(ctx.data, :agent_status))
-    progress = Map.get(ctx.data, :minga_progress)
     custom = custom_status_text(Map.get(ctx.data, :agent_status_command))
-    minga_segment(ctx, state, progress, custom)
+    minga_segment(ctx, state, custom)
   end
 
-  @spec minga_segment(
-          context(),
-          Tokens.state_id() | nil,
-          {non_neg_integer(), pos_integer()} | nil,
-          String.t() | nil
-        ) :: [Segment.t()]
-  defp minga_segment(_ctx, nil, _progress, nil), do: []
+  @spec minga_segment(context(), Tokens.state_id() | nil, String.t() | nil) :: [Segment.t()]
+  defp minga_segment(_ctx, nil, nil), do: []
 
-  defp minga_segment(ctx, nil, _progress, custom) do
+  defp minga_segment(ctx, nil, custom) do
     [
       %Segment{
         id: :minga,
@@ -583,11 +583,11 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     ]
   end
 
-  defp minga_segment(ctx, state, progress, custom) do
+  defp minga_segment(ctx, state, custom) do
+    progress = Map.get(ctx.data, :minga_progress)
     step = progress_text(progress)
-
-    words =
-      Enum.reject(["Minga", String.downcase(Tokens.state_word(state)), step, custom], &is_nil/1)
+    {where, where_label} = minga_where(state, ctx.data)
+    words = Enum.reject(["Minga", where, step, custom], &is_nil/1)
 
     segment = %Segment{
       id: :minga,
@@ -598,11 +598,22 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
       drop: @drop_minga,
       compact: step || "",
       state: state,
-      label: minga_label(state, progress)
+      label: minga_label(state, where_label, progress)
     }
 
     [with_leader_key(segment, ctx, @minga_keys)]
   end
+
+  # Where Minga is working, when it is working in a file: here, or the file it is editing.
+  @spec minga_where(Tokens.state_id(), modeline_data()) :: {String.t(), String.t() | nil}
+  defp minga_where(:working, %{minga_here?: true}), do: {"here", "in this file"}
+
+  defp minga_where(:working, %{minga_file: path}) when is_binary(path) do
+    name = Path.basename(path)
+    {"editing #{name}", "editing #{name}"}
+  end
+
+  defp minga_where(state, _data), do: {String.downcase(Tokens.state_word(state)), nil}
 
   @spec custom_status_text(String.t() | nil) :: String.t() | nil
   defp custom_status_text(text) when is_binary(text) do
@@ -618,11 +629,20 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   defp progress_text({step, steps}), do: "#{step}/#{steps}"
   defp progress_text(nil), do: nil
 
-  @spec minga_label(Tokens.state_id(), {non_neg_integer(), pos_integer()} | nil) :: String.t()
-  defp minga_label(state, {step, steps}),
-    do: "#{Tokens.state(state).accessibility_label}, step #{step} of #{steps}"
+  @spec minga_label(
+          Tokens.state_id(),
+          String.t() | nil,
+          {non_neg_integer(), pos_integer()} | nil
+        ) :: String.t()
+  defp minga_label(state, where, progress) do
+    [Tokens.state(state).accessibility_label, where, step_label(progress)]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(", ")
+  end
 
-  defp minga_label(state, nil), do: Tokens.state(state).accessibility_label
+  @spec step_label({non_neg_integer(), pos_integer()} | nil) :: String.t() | nil
+  defp step_label({step, steps}), do: "step #{step} of #{steps}"
+  defp step_label(nil), do: nil
 
   # Errors never drop; warnings give way after Minga's words.
   # The count is the text; each frontend draws the severity's mark before it (SF Symbols on macOS, E and W in the TUI).
@@ -674,6 +694,19 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   end
 
   defp lsp_segment(_ctx), do: []
+
+  # A config that did not load leaves the editor on its defaults until a load succeeds: a persistent problem.
+  @spec config_segment(context()) :: [Segment.t()]
+  defp config_segment(ctx) do
+    case Map.get(ctx.data, :config_problem) do
+      error when is_binary(error) ->
+        segment = problem_segment(ctx, "config: defaults", :open_config)
+        [%{segment | label: "Config did not load, using defaults: #{error}"}]
+
+      nil ->
+        []
+    end
+  end
 
   @spec parser_segment(context()) :: [Segment.t()]
   defp parser_segment(%{data: %{parser_status: :unavailable}} = ctx),
@@ -843,8 +876,8 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   # Nothing bound there means no click and no hint.
   @spec with_leader_key(Segment.t(), context(), [Bindings.key()]) :: Segment.t()
   defp with_leader_key(%Segment{} = segment, ctx, keys) do
-    case Bindings.lookup_sequence(ctx.leader_trie, keys) do
-      {:command, command, _description} when is_atom(command) ->
+    case Minga.Keymap.leader_command_at(ctx.keymap_server, keys) do
+      command when is_atom(command) and command != nil ->
         %{segment | target: command, key: key_hint(ctx, keys)}
 
       _unbound ->
@@ -855,9 +888,9 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   # A segment that names its command shows the shortest leader key bound to it, if any.
   @spec with_command_key(Segment.t(), context(), atom()) :: Segment.t()
   defp with_command_key(%Segment{} = segment, ctx, command) do
-    case Bindings.sequences_for_command(ctx.leader_trie, command) do
-      [keys | _longer] -> %{segment | target: command, key: key_hint(ctx, keys)}
-      [] -> %{segment | target: command}
+    case Minga.Keymap.leader_keys_for(ctx.keymap_server, command) do
+      keys when is_list(keys) -> %{segment | target: command, key: key_hint(ctx, keys)}
+      nil -> %{segment | target: command}
     end
   end
 

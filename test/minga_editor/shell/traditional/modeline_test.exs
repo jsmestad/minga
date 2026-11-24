@@ -2,12 +2,10 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
   use ExUnit.Case, async: true
 
   import ExUnit.CaptureLog
-  import Minga.Keymap.Sigil
 
   alias Minga.Config.ModelineSegments
   alias Minga.Config.Options
   alias Minga.Design.Tokens
-  alias Minga.Keymap.Bindings
   alias Minga.Mode
   alias Minga.RenderModel.UI.StatusBar.Segment
   alias MingaEditor.Shell.Traditional.Modeline
@@ -84,10 +82,17 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
     end
 
     test "mode, needs-you, the file name, change position, errors and problems never drop" do
-      data = Map.merge(@full_data, %{lsp_status: :error, parser_status: :unavailable})
+      data =
+        Map.merge(@full_data, %{
+          lsp_status: :error,
+          parser_status: :unavailable,
+          config_problem: "syntax error"
+        })
+
       never = for s <- segments(data), s.drop == 0, do: s.id
 
-      assert never == [:mode, :needs_you, :filename, :change, :errors, :problem, :problem]
+      assert never ==
+               [:mode, :needs_you, :filename, :change, :errors, :problem, :problem, :problem]
     end
 
     test "Minga's words shrink to its state mark and step count instead of dropping" do
@@ -146,6 +151,21 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
             assert minga.label == Tokens.state(state).accessibility_label
         end
       end
+    end
+
+    test "while Minga works in a file it says where: here, or the file it is editing" do
+      here = Map.merge(@full_data, %{minga_file: "/p/lib/retry.ex", minga_here?: true})
+      assert segment(here, :minga).text == "Minga here 2/3"
+      assert segment(here, :minga).label == "Minga is working, in this file, step 2 of 3"
+      assert segment(here, :minga).compact == "2/3"
+
+      elsewhere = Map.merge(@full_data, %{minga_file: "/p/lib/retry.ex", minga_here?: false})
+      assert segment(elsewhere, :minga).text == "Minga editing retry.ex 2/3"
+      assert segment(elsewhere, :minga).label == "Minga is working, editing retry.ex, step 2 of 3"
+
+      # Only the working state says where; a state that waits on you says the state.
+      waiting = Map.merge(elsewhere, %{agent_status: :approval_waiting})
+      assert segment(waiting, :minga).text == "Minga needs you 2/3"
     end
 
     test "the step through Minga's plan follows the words and the label" do
@@ -238,6 +258,13 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
         refute :problem in ids(Map.put(@base_data, :lsp_status, status))
       end
 
+      config = segment(Map.put(@base_data, :config_problem, "unexpected token"), :problem)
+
+      assert %Segment{text: "config: defaults", target: :open_config, key: "SPC f p"} = config
+      assert config.label == "Config did not load, using defaults: unexpected token"
+      assert config.fg == Theme.role_color(@theme, :failure)
+      refute :problem in ids(Map.put(@base_data, :config_problem, nil))
+
       restarting = segment(Map.put(@base_data, :parser_status, :restarting), :parser)
       assert restarting.text == "Parser restarting"
       assert restarting.drop > 0
@@ -272,17 +299,20 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
     end
 
     test "a rebinding moves the click and the hint together" do
-      trie =
-        Bindings.new()
-        |> Bindings.bind(~k(g g), :git_status_test_command, "Git status")
-        |> Bindings.bind(~k(o b), :buffer_list, "Switch buffer")
+      keymap = start_supervised!({Minga.Keymap.Active, name: nil})
 
-      data = Map.put(@full_data, :leader_trie, trie)
+      :ok =
+        Minga.Keymap.bind(keymap, :normal, "SPC g g", :git_status_test_command, "Git status", [])
+
+      :ok = Minga.Keymap.unbind(keymap, :normal, "SPC ,")
+      :ok = Minga.Keymap.unbind(keymap, :normal, "SPC b b")
+
+      data = Map.put(@full_data, :keymap_server, keymap)
 
       assert {segment(data, :git).key, segment(data, :git).target} ==
                {"SPC g g", :git_status_test_command}
 
-      # SPC , is unbound in this trie: no click and no key for the file segment.
+      # SPC , is unbound now: no click and no key for the file segment.
       assert {segment(data, :filename).key, segment(data, :filename).target} == {"", nil}
     end
 

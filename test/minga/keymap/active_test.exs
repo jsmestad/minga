@@ -35,6 +35,40 @@ defmodule Minga.Keymap.ActiveTest do
     end
   end
 
+  describe "leader index" do
+    test "answers what a leader sequence runs and a command's shortest sequence, like the trie",
+         %{
+           store: s
+         } do
+      trie = Active.leader_trie(s)
+
+      for {keys, command} <- Bindings.commands(trie), is_atom(command) do
+        assert Active.leader_command_at(s, keys) == command
+        [shortest | _] = Bindings.sequences_for_command(trie, command)
+        assert length(Active.leader_keys_for(s, command)) == length(shortest)
+      end
+
+      assert Active.leader_command_at(s, [{?f, 0}, {?f, 0}]) == :find_file
+      assert Active.leader_keys_for(s, :buffer_list) == [{?,, 0}]
+      assert Active.leader_command_at(s, [{?z, 0}, {?z, 0}]) == nil
+    end
+
+    test "follows bind, unbind and reset", %{store: s} do
+      :ok = Active.bind(s, :normal, "SPC z z", :zz_test_command, "Test")
+      assert Active.leader_command_at(s, [{?z, 0}, {?z, 0}]) == :zz_test_command
+      assert Active.leader_keys_for(s, :zz_test_command) == [{?z, 0}, {?z, 0}]
+
+      :ok = Active.unbind(s, :normal, "SPC z z")
+      assert Active.leader_command_at(s, [{?z, 0}, {?z, 0}]) == nil
+      assert Active.leader_keys_for(s, :zz_test_command) == nil
+
+      :ok = Active.bind(s, :normal, "SPC z z", :zz_test_command, "Test")
+      :ok = Active.reset(s)
+      assert Active.leader_command_at(s, [{?z, 0}, {?z, 0}]) == nil
+      assert Active.leader_command_at(s, [{?f, 0}, {?f, 0}]) == :find_file
+    end
+  end
+
   describe "normal_bindings/1" do
     test "returns defaults when no overrides", %{store: s} do
       bindings = Active.normal_bindings(s)

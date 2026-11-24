@@ -70,10 +70,16 @@ defmodule Minga.Test.Storyboard.Inventory do
   @spec scenarios() :: [scenario()]
   def scenarios, do: @inventory.scenarios
 
-  @doc "Ids of every scenario with `status = \"designed\"`, in file order."
+  @doc """
+  Ids of every designed place, in file order: scenarios with `status = "designed"` that are not `state_of` another scenario.
+
+  A `state_of` scenario (a narrow window) is a state the designed places can be in. It has no registry entry and no renders; the places it applies to prove it.
+  """
   @spec designed_ids() :: [String.t()]
   def designed_ids do
-    for %{"status" => "designed", "id" => id} <- scenarios(), do: id
+    for %{"status" => "designed", "id" => id} = scenario <- scenarios(),
+        not Map.get(scenario, "state_of", false),
+        do: id
   end
 
   @doc "Looks up one scenario by id."
