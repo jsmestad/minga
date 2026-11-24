@@ -51,7 +51,7 @@ zig/
 
 `build.zig` produces:
 
-- **minga-parser**: `parser_main.zig` → `protocol.zig` + `highlighter.zig` + all grammars. Links ~40 tree-sitter grammar C files and the tree-sitter runtime.
+- **minga-parser**: `parser_main.zig` → `protocol.zig` + `highlighter.zig` + all grammars. Links the 50 vendored tree-sitter grammars and the tree-sitter runtime.
 - **minga-hook-runner**: `hook_runner_main.zig` → a small standalone POSIX helper.
 - **highlight-bench**: the tree-sitter highlight benchmark used by autoresearch.
 

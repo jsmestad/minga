@@ -173,6 +173,15 @@ bin/minga             # builds and starts terminal client</code></pre>
             </div>
           </details>
 
+          <details class="essay-details">
+            <summary>Launch commands, Finder &amp; the Fedora key prompt</summary>
+            <div class="essay-details-body">
+              <p>In a terminal, <code>minga</code> opens an empty buffer, <code>minga path/to/file</code> opens a file, and <code>minga lib/ test/</code> opens several files or directories at once. From a source checkout, run <code>bin/minga</code> with the same arguments, or <code>bin/minga-mac</code> for the macOS app.</p>
+              <p>On macOS, Minga appears under <strong>Open With</strong> in Finder for any file, including dotfiles and scripts without an extension. To make it the default editor for a kind of file, select one in Finder, choose <strong>File → Get Info</strong>, pick Minga under <strong>Open with</strong>, and click <strong>Change All…</strong>.</p>
+              <p>On Fedora, <code>dnf</code> asks you to confirm the signing key on first install. Check that it shows the fingerprint above before you accept.</p>
+            </div>
+          </details>
+
           <p class="section-foot-link" style="margin-top:0.5rem;">Shortcuts below match current prerelease builds; upcoming v0.1.0 bindings are noted inline and interactive in <a href="/learn/editing">Lesson 02</a>.</p>
         </section>
 
@@ -181,6 +190,7 @@ bin/minga             # builds and starts terminal client</code></pre>
           <p>Open any Git repo with zero config: zero files written to your repo, LSP binaries on <code>$PATH</code> attach automatically, shell API keys work immediately, and Catppuccin Frappé is the default theme.</p>
 
           <h3>Vim modal default (with optional CUA shortcuts)</h3>
+          <p>With Vim keys you are in one of two core modes. <strong>Normal mode</strong> moves and runs commands: <kbd>h</kbd> <kbd>j</kbd> <kbd>k</kbd> <kbd>l</kbd> move, <kbd>dd</kbd> deletes a line, <kbd>/</kbd> searches. <strong>Insert mode</strong> types text: press <kbd>i</kbd> to enter it and <kbd>Esc</kbd> to leave.</p>
           <p>Press <strong>Spacebar</strong> (<kbd>SPC</kbd>) in Normal mode for a searchable command menu. These five bindings cover your first session:</p>
 
           <ul class="spec-ledger">
@@ -190,7 +200,7 @@ bin/minga             # builds and starts terminal client</code></pre>
             </li>
             <li class="spec-row">
               <span class="spec-key"><kbd>SPC f f</kbd> / <kbd>SPC s p</kbd></span>
-              <span class="spec-detail"><strong>Find a file or search project.</strong> Save with <kbd>SPC f s</kbd> or <code>:w</code>, quit with <kbd>SPC q q</kbd> or <code>:q</code>.</span>
+              <span class="spec-detail"><strong>Find a file or search project.</strong> Switch between open buffers with <kbd>SPC b b</kbd>, save with <kbd>SPC f s</kbd> or <code>:w</code>, quit with <kbd>SPC q q</kbd> or <code>:q</code>.</span>
             </li>
             <li class="spec-row">
               <span class="spec-key"><kbd>SPC a a</kbd></span>
@@ -248,10 +258,34 @@ set <span class="tok-atom">:tab_width</span>, <span class="tok-num">2</span></co
               <span class="step-badge">03</span>
               <div>
                 <h3>Pick a model and start</h3>
-                <p>Run <code>/model</code> to pick your model. Handy commands: <code>/thinking high</code>, <code>/tasks</code>, <code>/clear</code>, and <code>/help</code> (<a href="/docs/agent-model-selection.html">Model Selection</a>).</p>
+                <p>Run <code>/model</code> to pick your model (<a href="/docs/agent-model-selection.html">Model Selection</a>), then type a prompt and press Enter.</p>
               </div>
             </li>
           </ol>
+
+          <h3>Useful slash commands</h3>
+          <ul class="spec-ledger">
+            <li class="spec-row">
+              <span class="spec-key"><code>/model &lt;name&gt;</code></span>
+              <span class="spec-detail"><strong>Switch models</strong> in the middle of a conversation.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key"><code>/thinking high</code></span>
+              <span class="spec-detail"><strong>Set the thinking level</strong> to high for harder problems.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key"><code>/tasks</code></span>
+              <span class="spec-detail"><strong>Inspect the checklist</strong> for this conversation.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key"><code>/clear</code></span>
+              <span class="spec-detail"><strong>Start a fresh session.</strong></span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key"><code>/help</code></span>
+              <span class="spec-detail"><strong>List every slash command.</strong></span>
+            </li>
+          </ul>
         </section>
 
         <section class="essay-section" id="first-staged-edit">
