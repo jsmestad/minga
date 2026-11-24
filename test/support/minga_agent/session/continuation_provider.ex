@@ -26,8 +26,8 @@ defmodule Minga.Test.SessionContinuationProvider do
   def continue(pid, %Request{} = request), do: GenServer.call(pid, {:send_prompt, request})
 
   @impl MingaAgent.Provider
-  @spec abort(GenServer.server()) :: :ok
-  def abort(pid), do: GenServer.call(pid, :abort)
+  @spec abort(GenServer.server(), String.t()) :: :ok
+  def abort(pid, _request_id), do: GenServer.call(pid, :abort)
 
   @impl MingaAgent.Provider
   @spec new_session(GenServer.server()) :: :ok

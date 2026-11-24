@@ -8,6 +8,7 @@ defmodule MingaAgent.Providers.Native.LoopCtx do
   @enforce_keys [
     :provider_pid,
     :request,
+    :generation,
     :selection,
     :config,
     :tools,
@@ -22,6 +23,7 @@ defmodule MingaAgent.Providers.Native.LoopCtx do
   defstruct [
     :provider_pid,
     :request,
+    :generation,
     :selection,
     :config,
     :tools,
@@ -45,6 +47,7 @@ defmodule MingaAgent.Providers.Native.LoopCtx do
   @type t :: %__MODULE__{
           provider_pid: pid(),
           request: Request.t(),
+          generation: pos_integer(),
           selection: ModelSelection.t(),
           config: MingaAgent.Config.t(),
           tools: [term()],

@@ -30,7 +30,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     def send_prompt(_pid, _text), do: :ok
 
     @impl MingaAgent.Provider
-    def abort(_pid), do: :ok
+    def abort(_pid, _request_id), do: :ok
 
     @impl MingaAgent.Provider
     def new_session(_pid), do: :ok

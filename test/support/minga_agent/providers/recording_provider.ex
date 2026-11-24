@@ -16,8 +16,8 @@ defmodule MingaAgent.Providers.RecordingProvider do
   def send_prompt(_pid, _text), do: :ok
 
   @impl MingaAgent.Provider
-  @spec abort(GenServer.server()) :: :ok
-  def abort(_pid), do: :ok
+  @spec abort(GenServer.server(), String.t()) :: :ok
+  def abort(_pid, _request_id), do: :ok
 
   @impl MingaAgent.Provider
   @spec new_session(GenServer.server()) :: :ok | {:error, term()}

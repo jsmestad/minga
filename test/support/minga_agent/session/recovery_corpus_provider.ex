@@ -65,8 +65,8 @@ defmodule Minga.Test.RecoveryCorpusProvider do
   end
 
   @impl MingaAgent.Provider
-  @spec abort(GenServer.server()) :: :ok
-  def abort(pid) do
+  @spec abort(GenServer.server(), String.t()) :: :ok
+  def abort(pid, _request_id) do
     GenServer.cast(pid, :abort)
     :ok
   end

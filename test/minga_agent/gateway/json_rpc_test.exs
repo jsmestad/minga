@@ -121,6 +121,22 @@ defmodule MingaAgent.Gateway.JsonRpcTest do
       assert response["error"]["code"] == -32_602
     end
 
+    test "session.abort accepts an optional string request_id and rejects any other kind" do
+      abort = fn params ->
+        JSON.encode!(%{jsonrpc: "2.0", method: "session.abort", params: params, id: 12})
+        |> JsonRpc.dispatch()
+        |> then(fn {:error, json} -> JSON.decode!(json)["error"] end)
+      end
+
+      missing = "session-missing-#{System.unique_integer([:positive])}"
+
+      # A string request id reaches the runtime, which reports the unknown session.
+      assert %{"code" => -32_603} = abort.(%{"session_id" => missing, "request_id" => "req-1"})
+      assert %{"code" => -32_603} = abort.(%{"session_id" => missing})
+      assert %{"code" => -32_602} = abort.(%{"session_id" => missing, "request_id" => 7})
+      assert %{"code" => -32_602} = abort.(%{"request_id" => "req-1"})
+    end
+
     test "tool.execute without required params returns invalid params" do
       request =
         JSON.encode!(%{

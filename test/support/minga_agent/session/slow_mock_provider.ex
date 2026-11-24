@@ -13,7 +13,7 @@ defmodule Minga.Test.SessionSlowMockProvider do
   def send_prompt(pid, request), do: GenServer.cast(pid, {:prompt, request})
 
   @impl MingaAgent.Provider
-  def abort(pid), do: GenServer.cast(pid, :abort)
+  def abort(pid, _request_id), do: GenServer.cast(pid, :abort)
 
   @impl MingaAgent.Provider
   def new_session(pid), do: GenServer.cast(pid, :new_session)

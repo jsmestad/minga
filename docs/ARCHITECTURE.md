@@ -1092,6 +1092,12 @@ The gateway starts on-demand via `MingaAgent.Runtime.start_gateway/1` (or automa
 
 Available methods: `runtime.capabilities`, `runtime.describe_tools`, `runtime.describe_sessions`, `session.start`, `session.stop`, `session.prompt`, `session.abort`, `session.list`, `tool.execute`, `tool.list`.
 
+A client that stops a turn should name the turn it means. A Stop pressed for one turn can arrive after that turn ended and a queued prompt started the next one, and an unnamed abort would stop the newer turn. `session.list` reports each session's running turn as `active_request_id`; pass it to `session.abort` as `request_id` and only that turn stops. If the turn already ended, the call returns an error and the newer turn keeps running. Without `request_id`, `session.abort` stops whatever the session is running:
+
+```json
+{"jsonrpc": "2.0", "method": "session.abort", "params": {"session_id": "session-1", "request_id": "kq3...Zf"}, "id": 2}
+```
+
 **Event streaming** pushes domain events as JSON-RPC notifications (no `id` field). When something happens in the runtime (session stopped, buffer saved, log message), connected clients receive it immediately:
 
 ```json

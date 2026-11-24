@@ -265,9 +265,22 @@ defmodule MingaAgent.SessionManager do
 
   @doc "Aborts the current operation on a session by ID through the given manager."
   @spec abort(GenServer.server(), String.t()) :: :ok | {:error, :not_found | :session_id_changed}
-  def abort(manager, session_id) when is_binary(session_id) do
+  def abort(manager, session_id) when is_binary(session_id), do: abort(manager, session_id, nil)
+
+  @doc """
+  Aborts a session's turn through the given manager.
+
+  With a request id, only the turn running that request stops; a late abort returns `{:error, :stale_turn}` and leaves a later turn running. With `nil`, whatever is running stops.
+  """
+  @spec abort(GenServer.server(), String.t(), String.t() | nil) ::
+          :ok | {:error, :not_found | :session_id_changed | :stale_turn}
+  def abort(manager, session_id, request_id)
+      when is_binary(session_id) and (is_binary(request_id) or is_nil(request_id)) do
     with {:ok, pid} <- get_session(manager, session_id) do
-      Session.abort_for_id(pid, session_id)
+      case request_id do
+        nil -> Session.abort_for_id(pid, session_id)
+        request_id -> Session.abort_for_id(pid, session_id, request_id)
+      end
     end
   end
 

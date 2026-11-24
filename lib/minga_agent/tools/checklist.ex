@@ -21,7 +21,8 @@ defmodule MingaAgent.Tools.Checklist do
           "expected_revision" => %{"type" => "integer", "minimum" => 0}
         },
         "additionalProperties" => false
-      }
+      },
+      :read_only
     )
   end
 
@@ -61,14 +62,17 @@ defmodule MingaAgent.Tools.Checklist do
         },
         "required" => ["expected_revision", "tasks"],
         "additionalProperties" => false
-      }
+      },
+      # Replacing the checklist changes Session state, so concurrent writes would race and break model order.
+      :mutating
     )
   end
 
-  @spec spec(String.t(), String.t(), map()) :: Spec.t()
-  defp spec(name, description, schema) do
+  @spec spec(String.t(), String.t(), map(), Spec.effect()) :: Spec.t()
+  defp spec(name, description, schema, effect) do
     Spec.new!(
       name: name,
+      effect: effect,
       description: description,
       parameter_schema: schema,
       source: :builtin,

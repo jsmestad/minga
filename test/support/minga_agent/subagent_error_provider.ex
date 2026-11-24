@@ -19,9 +19,9 @@ defmodule Minga.Test.SubagentErrorProvider do
   @impl MingaAgent.Provider
   def send_prompt(pid, request), do: GenServer.call(pid, {:prompt, request})
 
-  @spec abort(GenServer.server()) :: :ok
+  @spec abort(GenServer.server(), String.t()) :: :ok
   @impl MingaAgent.Provider
-  def abort(pid), do: GenServer.call(pid, :abort)
+  def abort(pid, _request_id), do: GenServer.call(pid, :abort)
 
   @spec new_session(GenServer.server()) :: :ok
   @impl MingaAgent.Provider

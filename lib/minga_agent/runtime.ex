@@ -25,9 +25,15 @@ defmodule MingaAgent.Runtime do
   @spec send_prompt(String.t(), String.t()) :: :ok | {:error, term()}
   defdelegate send_prompt(session_id, prompt), to: MingaAgent.SessionManager
 
-  @doc "Aborts the current operation on a session."
-  @spec abort(String.t()) :: :ok | {:error, :not_found}
-  defdelegate abort(session_id), to: MingaAgent.SessionManager
+  @doc """
+  Aborts a session's turn.
+
+  Pass the `request_id` of the turn to stop (from `describe_sessions/0`) so a late abort cannot stop a later turn; it then returns `{:error, :stale_turn}`. Without a request id, whatever is running stops.
+  """
+  @spec abort(String.t(), String.t() | nil) ::
+          :ok | {:error, :not_found | :session_id_changed | :stale_turn}
+  def abort(session_id, request_id \\ nil),
+    do: MingaAgent.SessionManager.abort(MingaAgent.SessionManager, session_id, request_id)
 
   @doc "Lists active session registrations with explicit metadata availability."
   @spec list_sessions() :: [MingaAgent.SessionListing.t()]
