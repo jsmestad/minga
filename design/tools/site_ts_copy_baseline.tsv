@@ -27,7 +27,8 @@ coauthor_view.ts	key	SPC a d	2
 coauthor_view.ts	key	SPC a i	2
 coauthor_view.ts	key	SPC a y	2
 extending_interactive.ts	key	SPC h r	5
-extending_interactive.ts	key	SPC m	2
+extending_interactive.ts	key	SPC m f	1
+extending_interactive.ts	key	SPC m r	1
 home_interactive.ts	claim	*minga-queue*	2
 home_interactive.ts	claim	*minga-review*	4
 home_interactive.ts	claim	*minga-tasks*	3

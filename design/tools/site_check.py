@@ -356,10 +356,11 @@ class SiteParser(HTMLParser):
         self.stack.append(Element(tag, flags, line, block_id))
 
     def handle_startendtag(self, tag, attrs):
-        if tag in VOID_TAGS or self.skip_depth:
+        if self.skip_depth:
             return
         self.handle_starttag(tag, attrs)
-        self.handle_endtag(tag)
+        if tag not in VOID_TAGS:
+            self.handle_endtag(tag)
 
     def handle_endtag(self, tag):
         if self.skip_depth:
@@ -585,6 +586,7 @@ def check_page(path: Path, keys: KeySets, retired: list[Retired], claims: list[C
 # ---------------------------------------------------------------------------
 
 REGEX_BEFORE = set("(,=:[!&|?{};+-*%<>~^")
+QUOTES_TO_SPACES = str.maketrans({'"': " ", "'": " ", "`": " "})
 LEADER_RANGE_RE = re.compile(r"[  ]([!-~])[-–]([!-~])(?![\w-])")
 
 
@@ -707,11 +709,12 @@ def ts_copy(text: str, claims: list[Claim]) -> list[tuple[str, str]]:
     A bare `SPC` is not copy to move: it is a shipped key and a common state value. A range legend such as `SPC 1-4` counts as one sequence. A phrase counts only as whole words, so a class name or identifier that contains it (`keep_twist`) does not.
     """
     found: list[tuple[str, str]] = []
-    for m in SPC_RE.finditer(text):
+    keys_text = text.translate(QUOTES_TO_SPACES)  # a key can end at a quote here: `bind :normal, "SPC m t"`
+    for m in SPC_RE.finditer(keys_text):
         tokens = m.group(1).replace(" ", " ").split()
         while len(tokens) > 1 and tokens[-1] in ("/", ".", ",", ";", ":", "?", ")"):
             tokens.pop()
-        legend = LEADER_RANGE_RE.match(text, m.end())
+        legend = LEADER_RANGE_RE.match(keys_text, m.end())
         if legend:
             tokens.append(f"{legend.group(1)}-{legend.group(2)}")
         if tokens:

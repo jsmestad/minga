@@ -88,6 +88,12 @@ class MetadataTest(SiteCheckCase):
         self.assertIn("key 'SPC a y' not in the shipped keymap", findings[0])
         self.assertEqual(self.check_page(metadata, head_attrs=' data-status="planned"'), [])
 
+    def test_self_closed_meta_tag_is_checked(self) -> None:
+        findings = self.check_page('<meta name="description" content="Try frobnicating undo in a live lab." />')
+
+        self.assertEqual(len(findings), 1)
+        self.assertIn("claim 'frobnicating undo'", findings[0])
+
     def test_backed_metadata_passes(self) -> None:
         self.assertEqual(self.check_page('<meta name="description" content="Press SPC f f to find a file.">'), [])
 
@@ -155,6 +161,12 @@ class LabCopyTest(SiteCheckCase):
 
         self.assertEqual(len(findings), 1)
         self.assertIn("ts-copy 'SPC 1-4'", findings[0])
+
+    def test_key_quoted_inside_a_template_keeps_its_last_key(self) -> None:
+        findings = self.check_ts('const sample = `bind :normal, "SPC m t", :run_tests`;\n', "")
+
+        self.assertEqual(len(findings), 1)
+        self.assertIn("ts-copy 'SPC m t'", findings[0])
 
     def test_unterminated_string_is_reported_instead_of_skipped(self) -> None:
         findings = self.check_ts('const a = "SPC a y\n', "")
