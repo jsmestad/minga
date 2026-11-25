@@ -29,6 +29,12 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
       )
 
     Process.put(:ui_frontend_recorder, frontend)
+
+    # These tests open the BEAM Observatory, which is a sidebar. It opens in a table of this test's own,
+    # never in the one every hand-built editor state shares (#4271).
+    sidebars = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
+    start_supervised!({MingaEditor.Extension.Sidebar, name: sidebars, notify: false})
+    Process.put(:ui_frontend_sidebars, sidebars)
     :ok
   end
 
@@ -39,6 +45,10 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
         capabilities: caps
       },
       workspace: %SessionState{},
+      extension_surfaces:
+        MingaEditor.State.ExtensionSurfaces.new(
+          sidebar_registry: Process.get(:ui_frontend_sidebars)
+        ),
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
