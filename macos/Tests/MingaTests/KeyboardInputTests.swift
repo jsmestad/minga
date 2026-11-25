@@ -632,6 +632,15 @@ struct KeyboardInputTests {
         try await Task.sleep(for: .milliseconds(150))
     }
 
+    /// Waits until the grace timer has sent the held SPC as a space, so a loaded machine cannot turn a late chord into a clean one.
+    private func waitForGraceSpace(_ spy: SpyEncoder) async throws {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !spaceLeaderTraffic(spy).contains(.space), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(spaceLeaderTraffic(spy) == [.space])
+    }
+
     @Test("a held SPC chord sends one chord and never the space, whichever key is released first")
     @MainActor func spaceLeaderChordInBothReleaseOrders() async throws {
         for spaceReleasedFirst in [true, false] {
@@ -698,7 +707,7 @@ struct KeyboardInputTests {
         let view = try #require(makeRequiredView(spy: spy))
 
         view.keyDown(with: try spaceEvent())
-        try await outlastGraceWindow()
+        try await waitForGraceSpace(spy)
         view.keyDown(with: try letterEvent())
         view.keyUp(with: try spaceEvent(.keyUp))
 

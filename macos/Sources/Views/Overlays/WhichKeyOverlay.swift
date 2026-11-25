@@ -24,6 +24,11 @@ public struct WhichKeyOverlay: View {
     /// The fade-in budget from surfaces.md.
     public static let fadeDuration: Double = 0.12
 
+    /// The panel's fade-in: within 120 ms, and none under Reduce Motion (AC 5).
+    public static func fadeAnimation(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .easeOut(duration: fadeDuration)
+    }
+
     public var body: some View {
         if state.visible && !state.entries.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
@@ -43,7 +48,7 @@ public struct WhichKeyOverlay: View {
             )
             .anatomyPart("whichKey.panel")
             .allowsHitTesting(false)
-            .transition(.opacity.animation(reduceMotion ? nil : .easeOut(duration: Self.fadeDuration)))
+            .transition(.opacity.animation(Self.fadeAnimation(reduceMotion: reduceMotion)))
         }
     }
 

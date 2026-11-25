@@ -324,9 +324,11 @@ struct WhichKeyOverlayViewTests {
         }
     }
 
-    @Test("The fade-in fits the 120 ms budget")
+    @Test("The fade-in fits the 120 ms budget, and Reduce Motion turns it off")
     func fadeBudget() {
         #expect(WhichKeyOverlay.fadeDuration <= 0.12)
+        #expect(WhichKeyOverlay.fadeAnimation(reduceMotion: false) == .easeOut(duration: WhichKeyOverlay.fadeDuration))
+        #expect(WhichKeyOverlay.fadeAnimation(reduceMotion: true) == nil)
     }
 
 }
