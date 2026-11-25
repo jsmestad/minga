@@ -9,7 +9,7 @@ defmodule MingaAgent.StagedDraftKeeper do
     * **Oversized drafts.** A draft above the store's size limit is not saved. Its stored copy is replaced with a content-free "lost: too large" marker, so the next start names it as lost instead of restoring an older version, and the user is told once per path in `*Messages*`.
     * **Persistence.** After each staged change the keeper writes the view's drafts with `Minga.Session.StagedDrafts` (one private, atomic file per draft). Only drafts whose content changed are rewritten; files for paths that are no longer staged (published, discarded, or dropped) are removed. A removal that fails is recorded as pending in the store, so the next start never offers those drafts, and the retried snapshot finishes it. A snapshot that fails to leave disk matching the staged drafts is not recorded as saved and is retried with backoff (`:retry_ms`, doubling up to a minute), without waiting for another staged change.
     * **Deletion.** A changeset stops normally only after a successful publish, a discard, or a close of a clean view, so a `:normal` exit retires that view: its drafts are deleted behind a tombstone (`StagedDrafts.retire_view/3`). A deletion that fails is kept as a pending delete and retried with the same backoff as a failed save until it succeeds or Minga stops; the tombstone keeps the view from being offered again, in this run or after a restart, and the next start finishes the deletion. Any other exit (a crash, an application shutdown) keeps the drafts for the next start.
-    * **Ownership.** Several Minga instances can run on one project and share the store. Before it writes a view's drafts, the keeper claims the view for its instance (`StagedDrafts.claim_view_dir/4`, identity from `MingaAgent.StagedDraftKeeper.Instance`). Recovery claims a stored view before it touches it: a view whose owner is still running belongs to that instance and is neither rebuilt nor offered here; the view of an instance that exited without publishing is taken over and recovered.
+    * **Ownership.** Several Minga instances can run on one project and share the store. Before it writes a view's drafts, the keeper claims the view for its instance (`StagedDrafts.claim_view_dir/4`, identity from `Minga.Session.Instance`). Recovery claims a stored view before it touches it: a view whose owner is still running belongs to that instance and is neither rebuilt nor offered here; the view of an instance that exited without publishing is taken over and recovered.
     * **Recovery.** `recover/3` hands an Editor every staged view of its project: views that are still running (`:live`, after an Editor restart) and views rebuilt from disk (`:disk`, after a full restart). The reply is `{:staged_drafts_recovered, project_root, [Recovery.t()]}`, sent only when there is something to offer. A draft file is deleted only when it can never be restored; a draft that fails for a reason that may pass (I/O, an unavailable process) stays on disk, and its whole view waits for the next start.
 
   All disk I/O and every call into the changeset and forks happen here, never on the Editor process. Callers only cast.
@@ -24,7 +24,7 @@ defmodule MingaAgent.StagedDraftKeeper do
   alias MingaAgent.Changeset.PublicationTarget
   alias MingaAgent.ProjectView
   alias MingaAgent.ProjectView.Overlay
-  alias MingaAgent.StagedDraftKeeper.Instance
+  alias Minga.Session.Instance
   alias MingaAgent.StagedDraftKeeper.Recovery
 
   @scope MingaAgent.StagedDraftKeeper.Scope
@@ -69,7 +69,7 @@ defmodule MingaAgent.StagedDraftKeeper do
          }
 
   @typedoc """
-  Start options. `:staged_drafts_dir` overrides the store directory, `:scope` names the `:pg` scope of live staged views (default `#{inspect(@scope)}`), `:owner_uid` fixes the uid that must own the store, `:max_file_bytes` sets the largest saved draft, `:instance` and `:instance_alive?` replace this instance's identity and the liveness check of other instances (`MingaAgent.StagedDraftKeeper.Instance`), and `:retry_ms` is the first delay before an incomplete save is retried (default #{@retry_ms} ms, doubling up to #{@max_retry_ms} ms).
+  Start options. `:staged_drafts_dir` overrides the store directory, `:scope` names the `:pg` scope of live staged views (default `#{inspect(@scope)}`), `:owner_uid` fixes the uid that must own the store, `:max_file_bytes` sets the largest saved draft, `:instance` and `:instance_alive?` replace this instance's identity and the liveness check of other instances (`Minga.Session.Instance`), and `:retry_ms` is the first delay before an incomplete save is retried (default #{@retry_ms} ms, doubling up to #{@max_retry_ms} ms).
   """
   @type start_opt ::
           {:name, GenServer.name() | nil}

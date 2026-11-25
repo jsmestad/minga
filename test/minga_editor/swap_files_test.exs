@@ -219,7 +219,7 @@ defmodule MingaEditor.SwapFilesTest do
     test "text of an earlier run that had this run's process id is recovered, not taken for its own",
          ctx do
       # After a reboot the editor can get the process id of the run that crashed.
-      before_reboot = [swap_dir: ctx.swap_dir, run_started: Swap.run_started() - 7_200]
+      before_reboot = [swap_dir: ctx.swap_dir, run_started: "Thu Jan  1 00:00:00 1970"]
       {:ok, prepared} = Swap.prepare(ctx.files.a, "unsaved before the reboot\n", before_reboot)
       :ok = Swap.publish(prepared)
       swap_path = Swap.swap_path(ctx.files.a, swap_dir: ctx.swap_dir)
@@ -230,7 +230,7 @@ defmodule MingaEditor.SwapFilesTest do
       assert buffer_text(ctx.files.a) == {"unsaved before the reboot\n", true}
       # The same file name now holds this run's swap of that text.
       assert {:ok, %{run_started: started}, "unsaved before the reboot\n"} = Swap.read(swap_path)
-      assert started == Swap.run_started()
+      assert started == Swap.this_run().started
     end
 
     test "recovered text that the user then discards is not offered again", ctx do

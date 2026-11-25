@@ -93,8 +93,8 @@ defmodule Minga.Application do
   def start(_type, _args) do
     assert_expected_distribution_state!()
 
-    # Fixes this run's identity for its swap files while the VM is young (see `Minga.Session.Swap`).
-    _run_started = Minga.Session.Swap.run_started()
+    # Reads this run's identity for its swap files once, here, so no later caller has to ask the OS.
+    _this_run = Minga.Session.Swap.this_run()
 
     # Info-only flags (--version/--help) must not boot the supervision tree.
     # Booting it spins up the event recorder, extensions, and watchdog just to
