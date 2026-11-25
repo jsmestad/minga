@@ -78,7 +78,7 @@ The rule (`KeyInput` in `go/tui/internal/terminal/key_input.go`) cannot see two 
 - `ESC` and Enter that reach Minga in a single read are `⌥↩`. That is what a script that writes both bytes produces, what a remote link that merges two key presses produces, what a multiplexer produces inside its own escape time, and what happens when Minga is too busy to read between the two keys, so the terminal hands it both at once. In tmux that is the `escape-time` option: 10 ms by default since tmux 3.5 and 500 ms before it, so on an older tmux set `set -sg escape-time 10`.
 - Esc followed within 50 ms by one of `[ O P ] _ ^ X \` reads as it always did, because those bytes continue an escape sequence.
 
-Which `⌘` keys a terminal gets: `⌘.` (stop the agent) and `⌘↩` (send from the composer) in every profile, and `⌘S`, `⌘Z` and the other desktop shortcuts in the CUA profile, when the terminal reports `⌘` and does not keep the key for itself. In the Vim profile `⌘S` and `⌘Z` do nothing in a terminal: the macOS app runs them from its menu, not from the keymap. A terminal emulator keeps `⌘W`, `⌘Q` and `⌘1` to `⌘4` for its own windows and tabs.
+Which `⌘` keys a terminal gets, when it reports `⌘` and does not keep the key for itself: `⌘S` (save, in every mode), `⌘Z` (undo, in Normal mode), `⌘.` (stop the agent) and `⌘↩` (send from the composer), plus the other desktop shortcuts in the CUA profile. The macOS app runs `⌘S` and `⌘Z` from its menu and never sends the key, so one press never runs twice there. `⌘[`, `⌘]`, `⌘W`, `⌘Q` and `⌘1` to `⌘4` are menu commands on macOS, and most terminal emulators keep them for their own windows and tabs.
 
 ## Open question
 

@@ -254,7 +254,7 @@ These work in Normal mode without the leader.
 
 | Keys | Action |
 |------|--------|
-| `⌃S` | Save the file |
+| `⌃S` or `⌘S` | Save the file. `⌘S` needs the macOS app or a terminal that reports `⌘` |
 | `⌃Q` | Close the tab. With desktop shortcuts, quit Minga |
 
 ### While the completion menu is open
@@ -550,6 +550,7 @@ Shift with an arrow key keeps its Vim meaning here and does not start a selectio
 You are here when you run Minga in a terminal instead of the macOS app. Every table above applies. Most terminals cannot send `⌘` and do not report every modified key, so a few keys change:
 
 - **Use `⌃` where the macOS app uses `⌘`.** The desktop shortcut tables above list both columns. In the default Vim keys nothing needs `⌘`.
+- **`⌘S` and `⌘Z` work where the terminal reports `⌘`.** With the Kitty keyboard protocol (Ghostty, kitty, WezTerm), `⌘S` saves in any mode and `⌘Z` undoes in Normal mode, unless the terminal keeps the key for itself. Everywhere else use `⌃S` and `u`.
 - **Modified Enter and Backspace need a modern terminal.** `⌃↩`, `⌃⌫` and their Shift forms reach Minga only from a terminal that reports them (the Kitty keyboard protocol, as in Ghostty, kitty and WezTerm). Elsewhere they arrive as plain Enter and Backspace, which never accept or reject a change.
 - **`⇧↩` depends on the terminal too.** `↩` in Insert mode and `⌃J` start a new line in the composer from any terminal. `⌘↩` and `⌘.` reach Minga only from a terminal that reports `⌘` (the Kitty keyboard protocol) and does not keep the key for itself. Everywhere else, send with `esc` and then `↩`, and stop with `SPC a s`.
 - **`esc` then `↩` sends, also when you type it fast.** Without the Kitty keyboard protocol a terminal sends Esc and Alt as the same byte, so Minga reads an `esc` that arrives on its own as Esc and what follows as a separate key. Inside tmux older than 3.5, set `escape-time` to 10 so tmux does not join the two keys into `⌥↩` itself.
