@@ -93,7 +93,7 @@ defmodule MingaEditor.UI.Picker.UnsavedTextSource do
     %Item{
       id: :empty,
       label: "No unsaved text is waiting",
-      description: "Text kept after a crash is listed here until you recover or discard it."
+      description: "Text kept after a crash shows up here."
     }
   end
 
