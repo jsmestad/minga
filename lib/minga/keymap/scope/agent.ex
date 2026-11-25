@@ -376,7 +376,8 @@ defmodule Minga.Keymap.Scope.Agent do
          {"y / Enter", "Approve the displayed request once"},
          {"a", "Trust this tool for this session"},
          {"t", "Trust this tool for this turn"},
-         {"n / Esc", "Deny the displayed request"}
+         {"n", "Deny the displayed request"},
+         {"Esc", "Defer: the request stays pending"}
        ]},
       {"Navigation",
        [
