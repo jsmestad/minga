@@ -233,7 +233,7 @@ describe("Lesson 05 hook tester: the lab agrees with the real script", () => {
     withScript(broken, (path) => {
       const real = run("sh", [path], hookPayload("npm test"));
       assert.equal(real.status, 1);
-      assert.match(real.stderr, /is not a valid regular expression/);
+      assert.match(real.stderr, /could not check the pattern/);
     });
   });
 });

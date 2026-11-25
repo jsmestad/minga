@@ -179,7 +179,7 @@ block_if() {
   case $? in
     0) echo "<span data-veto-prefix>Blocked by your hook:</span> $2" &gt;&amp;2; exit 1 ;;
     1) ;;
-    *) echo "Blocked: the pattern for '$2' is not a valid regular expression." &gt;&amp;2; exit 1 ;;
+    *) echo "Blocked: the hook could not check the pattern for '$2'." &gt;&amp;2; exit 1 ;;
   esac
 }
 
