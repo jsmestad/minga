@@ -7,6 +7,7 @@ defmodule MingaEditor.LeaderMenuFrontendTest do
 
   use Minga.Test.EditorCase, async: true
 
+  alias Minga.Config.Options
   alias MingaEditor.Frontend.Capabilities
 
   @macos %Capabilities{
@@ -20,7 +21,10 @@ defmodule MingaEditor.LeaderMenuFrontendTest do
   }
 
   test "a GUI frontend gets the leader groups for its menu bar when it connects" do
-    ctx = start_editor("hello", capabilities: @macos)
+    # A GUI frontend applies its defaults (absolute line numbers, line spacing) to the options server, so the editor
+    # gets a private one: the shared server would change other tests' screens.
+    options = start_supervised!(Supervisor.child_spec({Options, name: nil}, id: make_ref()))
+    ctx = start_editor("hello", capabilities: @macos, options_server: options)
 
     %{appearance: %{gui_config_state: config}} = editor_state(ctx)
 

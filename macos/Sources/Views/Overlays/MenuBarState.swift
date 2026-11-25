@@ -15,15 +15,30 @@ public final class MenuBarState {
 
     public private(set) var items: [Wire.MenuBarItem] = []
     public private(set) var menus: [LeaderMenu.Host: [LeaderMenuNode]] = [:]
+    public private(set) var titles: [LeaderMenu.Host: String] = [:]
 
     public func update(_ items: [Wire.MenuBarItem]) {
         guard items != self.items else { return }
         self.items = items
         menus = LeaderMenu.tree(items)
+        titles = Dictionary(uniqueKeysWithValues: LeaderMenu.Host.allCases.compactMap { host in
+            LeaderMenu.title(host, in: items).map { (host, $0) }
+        })
     }
 
     /// The nodes one host menu shows, in leader order.
     public func nodes(_ host: LeaderMenu.Host) -> [LeaderMenuNode] {
         menus[host] ?? []
+    }
+
+    /// Whether a host menu of its own (Search, Code, Git) appears: only when it has items, so a group with nothing
+    /// bound never shows an empty menu.
+    public func showsMenu(_ host: LeaderMenu.Host) -> Bool {
+        !nodes(host).isEmpty
+    }
+
+    /// A host menu's title in the BEAM's words, or `fallback` when no group names it.
+    public func title(_ host: LeaderMenu.Host, fallback: String) -> String {
+        titles[host] ?? fallback
     }
 }

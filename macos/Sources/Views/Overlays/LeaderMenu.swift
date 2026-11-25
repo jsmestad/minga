@@ -69,10 +69,51 @@ public enum LeaderMenu {
         "`",
     ]
 
+    /// The top-level group whose label titles a host menu of its own (`s` titles Search).
+    static func titleKey(_ host: Host) -> String? {
+        switch host {
+        case .search: "s"
+        case .code: "c"
+        case .git: "g"
+        case .app, .file, .view, .window, .help: nil
+        }
+    }
+
+    /// The title of a host menu of its own, in the BEAM's words: the label of the group it is named after.
+    public static func title(_ host: Host, in items: [Wire.MenuBarItem]) -> String? {
+        guard let key = titleKey(host), let group = items.first(where: { $0.path == key && $0.isGroup }) else { return nil }
+        return group.label.replacingOccurrences(of: " ›", with: "")
+    }
+
     /// The nodes each host shows, in leader order: a top-level command, or a group's contents with its nested groups
-    /// as submenus. A group's contents start a new section after what the host already holds.
+    /// as submenus. A group's contents start a new section after what the host already holds. A ⌘ key goes to the first
+    /// item that names it, in menu order, so no key has two items.
     public static func tree(_ items: [Wire.MenuBarItem],
                             reserved: Set<Character> = reservedCommandKeys) -> [Host: [LeaderMenuNode]] {
+        var claimed = reserved
+        var result: [Host: [LeaderMenuNode]] = [:]
+        for (host, nodes) in rawTree(items, reserved: reserved) {
+            result[host] = nodes
+        }
+        for host in Host.allCases {
+            guard let nodes = result[host] else { continue }
+            result[host] = nodes.map { claimShortcuts($0, claimed: &claimed) }
+        }
+        return result
+    }
+
+    /// Clears a ⌘ key an earlier item already took.
+    static func claimShortcuts(_ node: LeaderMenuNode, claimed: inout Set<Character>) -> LeaderMenuNode {
+        var shortcut = node.shortcut
+        if let key = shortcut {
+            if claimed.contains(key) { shortcut = nil } else { claimed.insert(key) }
+        }
+        let children = node.children.map { claimShortcuts($0, claimed: &claimed) }
+        return LeaderMenuNode(id: node.id, title: node.title, sequence: node.sequence, command: node.command,
+                              shortcut: shortcut, startsSection: node.startsSection, children: children)
+    }
+
+    static func rawTree(_ items: [Wire.MenuBarItem], reserved: Set<Character>) -> [Host: [LeaderMenuNode]] {
         var result: [Host: [LeaderMenuNode]] = [:]
         for top in items where top.keys.count == 1 {
             let listed = host(forKey: top.path)

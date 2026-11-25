@@ -43,6 +43,7 @@ struct GUIObservationGuardrailTests {
         "Sources/Views/Overlays/FloatPopupState.swift#FloatPopupState": "protocol presentation owner",
         "Sources/Views/Overlays/HoverPopupState.swift#HoverPopupState": "protocol presentation owner",
         "Sources/Views/Overlays/LatencyHUDState.swift#LatencyHUDState": "local diagnostics observable state",
+        "Sources/Views/Overlays/MenuBarState.swift#MenuBarState": "protocol presentation owner",
         "Sources/Views/Overlays/MessagesContentState.swift#MessagesContentState": "protocol presentation owner",
         "Sources/Views/Overlays/MinibufferState.swift#MinibufferState": "protocol presentation owner",
         "Sources/Views/Overlays/NotificationCenterState.swift#NotificationCenterState": "protocol presentation owner",

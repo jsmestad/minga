@@ -22,9 +22,9 @@ struct LeaderMenuCommands: Commands {
         CommandGroup(after: .toolbar) { items(.view) }
         CommandGroup(after: .windowArrangement) { items(.window) }
         CommandGroup(after: .help) { items(.help) }
-        if !state.nodes(.search).isEmpty { CommandMenu("Search") { items(.search) } }
-        if !state.nodes(.code).isEmpty { CommandMenu("Code") { items(.code) } }
-        if !state.nodes(.git).isEmpty { CommandMenu("Git") { items(.git) } }
+        if state.showsMenu(.search) { CommandMenu(state.title(.search, fallback: "Search")) { items(.search) } }
+        if state.showsMenu(.code) { CommandMenu(state.title(.code, fallback: "Code")) { items(.code) } }
+        if state.showsMenu(.git) { CommandMenu(state.title(.git, fallback: "Git")) { items(.git) } }
     }
 
     private func items(_ host: LeaderMenu.Host) -> LeaderMenuItems {

@@ -67,6 +67,40 @@ struct LeaderMenuTests {
         #expect(extensionGroup?.children.map(\.title) == ["Run extension"])
     }
 
+    @Test("a group with nothing bound shows no menu, and a menu takes its title from the BEAM's group label")
+    func menusAndTitles() {
+        let state = MenuBarState()
+        state.update([
+            .init(path: "g", label: "Git ›", section: "Groups", kind: 1),
+            .init(path: "s", label: "Find ›", section: "Groups", kind: 1),
+            .init(path: "s p", label: "Search project", kind: 0, command: "search_project"),
+        ])
+
+        #expect(!state.showsMenu(.git), "Git has no bound items, so no empty Git menu")
+        #expect(state.showsMenu(.search))
+        #expect(state.title(.search, fallback: "Search") == "Find")
+        #expect(state.title(.code, fallback: "Code") == "Code")
+    }
+
+    @Test("a ⌘ key goes to the first item that names it, never to two items")
+    func shortcutsAreUnique() {
+        let tree = LeaderMenu.tree([
+            .init(path: "a", label: "Minga ›", section: "Groups", kind: 1),
+            .init(path: "a s", label: "Stop", kind: 0, command: "agent_abort", platformKey: "⌘."),
+            .init(path: "c", label: "Code ›", section: "Groups", kind: 1),
+            .init(path: "c s", label: "Also stop", kind: 0, command: "agent_abort", platformKey: "⌘."),
+            .init(path: "c w", label: "Save", kind: 0, command: "save", platformKey: "⌘S"),
+        ])
+
+        func shortcuts(_ nodes: [LeaderMenuNode]) -> [Character] {
+            nodes.flatMap { node in (node.shortcut.map { [$0] } ?? []) + shortcuts(node.children) }
+        }
+        let all = LeaderMenu.Host.allCases.flatMap { shortcuts(tree[$0] ?? []) }
+
+        #expect(all == ["."], "⌘. once, on Stop; ⌘S belongs to File › Save")
+        #expect(Set(all).isDisjoint(with: LeaderMenu.reservedCommandKeys))
+    }
+
     @Test("the menu bar state rebuilds the tree on each new list and ignores a repeat")
     func state() {
         let state = MenuBarState()

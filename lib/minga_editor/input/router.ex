@@ -174,9 +174,9 @@ defmodule MingaEditor.Input.Router do
     was_inserting = Editing.inserting?(state)
     record? = not MingaEditor.PromptUI.sensitive_input?(state)
 
-    # A key the open leader panel takes (a group, a command, Backspace) types nothing, and neither does a key that leaves
-    # a leader panel open (the terminal's space leader starts one), so neither arms completion. A key the panel does not
-    # know passes through and types, and arms completion as usual.
+    # A key the open leader panel takes (a group, a command, Backspace) types nothing, and neither does a key that
+    # leaves a leader panel open (the terminal's space leader starts one), so neither arms completion. A key the panel
+    # does not know passes through and types, and arms completion as usual.
     leader_key? = leader_panel_takes?(state, {codepoint, modifiers})
 
     state
