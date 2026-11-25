@@ -42,9 +42,14 @@ defmodule Minga.Session.Swap.Recovery do
   @typedoc """
   Which recoverable swap files a scan returns.
 
-  `:all` returns every one. `{:project, root}` returns those whose file is inside `root`. `{:file, path}` returns the one for that file, and `{:files, paths}` those for any of the files. A swap outside the scope keeps its unsaved text on disk until its own project or file is opened: no scan drops unsaved text that it does not return.
+  `:all` returns every one. `{:project, root}` returns those whose file is inside `root`. `{:file, path}` returns the one for that file, and `{:files, paths}` those for any of the files. `{:any, scopes}` returns what any of the scopes returns. A swap outside the scope keeps its unsaved text on disk until its own project or file is opened: no scan drops unsaved text that it does not return.
   """
-  @type scope :: :all | {:project, String.t()} | {:file, String.t()} | {:files, [String.t()]}
+  @type scope ::
+          :all
+          | {:project, String.t()}
+          | {:file, String.t()}
+          | {:files, [String.t()]}
+          | {:any, [scope()]}
 
   @typedoc "Options for scan and recovery operations. `:roots` and `:outside` apply to `recoverable_projects/1` only."
   @type option ::
@@ -317,6 +322,7 @@ defmodule Minga.Session.Swap.Recovery do
   end
 
   defp in_scope?(path, {:project, root}), do: inside?(canonical(path), canonical(root))
+  defp in_scope?(path, {:any, scopes}), do: Enum.any?(scopes, &in_scope?(path, &1))
 
   @spec inside?(String.t(), String.t()) :: boolean()
   defp inside?(path, root), do: String.starts_with?(path, String.trim_trailing(root, "/") <> "/")

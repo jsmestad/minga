@@ -282,6 +282,19 @@ defmodule Minga.Session.Swap.RecoveryTest do
       assert Recovery.scan(scan_opts(ctx.swap_dir) ++ [scope: {:files, []}]) == []
     end
 
+    test "an any scope returns what one of its scopes returns", ctx do
+      scope = {:any, [{:project, ctx.alpha.root}, {:files, [ctx.beta.file]}]}
+
+      paths =
+        (scan_opts(ctx.swap_dir) ++ [scope: scope])
+        |> Recovery.scan()
+        |> Enum.map(& &1.path)
+        |> Enum.sort()
+
+      assert paths == Enum.sort([ctx.alpha.file, ctx.beta.file])
+      assert Recovery.scan(scan_opts(ctx.swap_dir) ++ [scope: {:any, []}]) == []
+    end
+
     test "the default scope returns every recoverable swap", ctx do
       paths = ctx.swap_dir |> scan_opts() |> Recovery.scan() |> Enum.map(& &1.path) |> Enum.sort()
 

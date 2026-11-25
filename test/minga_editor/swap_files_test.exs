@@ -181,6 +181,28 @@ defmodule MingaEditor.SwapFilesTest do
       assert {:ok, _meta, "unsaved elsewhere\n"} = Swap.read(swap_elsewhere)
     end
 
+    test "a file of another project that the session reopens gets its unsaved text back too",
+         ctx do
+      # The file was open in this project's window when the editor was killed.
+      save_session(ctx, [ctx.files.a, ctx.files.elsewhere], ctx.files.a)
+      leftover_swap(ctx, ctx.files.elsewhere, "unsaved elsewhere\n")
+
+      editor = open_project(ctx)
+
+      wait_until(
+        editor,
+        fn _state -> buffer_text(ctx.files.elsewhere) == {"unsaved elsewhere\n", true} end,
+        max_attempts: 300,
+        message: "the reopened file did not get its unsaved text back"
+      )
+
+      assert tab_labels(editor) == ["a.ex", "elsewhere.ex"]
+      assert buffer_text(ctx.files.a) == {"saved a\n", false}
+
+      assert notice_message(editor) =~
+               "Restored 2 files from last time · recovered unsaved text in 1 file"
+    end
+
     test "unsaved text of a file that is gone comes back in a buffer for its path", ctx do
       gone = Path.join(ctx.root, "lib/never_saved.ex")
       leftover_swap(ctx, gone, "typed for an hour\n")
