@@ -644,6 +644,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        desktopAgentNotifications?.activation(true)
+    }
+
+    func applicationDidResignActive(_ notification: Notification) {
+        desktopAgentNotifications?.activation(false)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
 #if DEBUG
         if runMenuSnapshotProbeIfRequested() {

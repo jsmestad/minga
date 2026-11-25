@@ -49,7 +49,7 @@ struct AgentAttention: Equatable {
 
 /// Posts the BEAM's "a task needs you" alerts under Minga's bundle identity, and removes them when the BEAM withdraws them.
 ///
-/// The BEAM decides when to alert: only when a task starts needing you while Minga is in the background. This class never checks whether the app is active.
+/// The BEAM decides when to post an alert. AppKit activation only controls the Dock badge and bounce.
 /// A click brings the editor forward and tells the BEAM which alert was clicked, so it opens the tasks drawer on that task.
 @MainActor
 final class DesktopAgentNotifications: NSObject, UNUserNotificationCenterDelegate {
@@ -70,7 +70,6 @@ final class DesktopAgentNotifications: NSObject, UNUserNotificationCenterDelegat
     private let openAlert: @MainActor (UUID) -> Void
     private var alerts: [UUID: Task<Void, Never>] = [:]
     private var attention = AgentAttention()
-    private var activationObservers: [NSObjectProtocol] = []
 
     init(openEditor: @escaping @MainActor () -> Void, openAlert: @escaping @MainActor (UUID) -> Void) {
         self.openEditor = openEditor
@@ -78,12 +77,6 @@ final class DesktopAgentNotifications: NSObject, UNUserNotificationCenterDelegat
         super.init()
         center.delegate = self
         attention.activation(NSApp.isActive)
-        let notifications = NotificationCenter.default
-        for (name, active) in [(NSApplication.didBecomeActiveNotification, true), (NSApplication.didResignActiveNotification, false)] {
-            activationObservers.append(notifications.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.activation(active) }
-            })
-        }
     }
 
     /// Shows how many tasks need you on the Dock badge while Minga is in the background.
@@ -92,7 +85,7 @@ final class DesktopAgentNotifications: NSObject, UNUserNotificationCenterDelegat
         showBadge()
     }
 
-    private func activation(_ active: Bool) {
+    func activation(_ active: Bool) {
         attention.activation(active)
         showBadge()
     }
