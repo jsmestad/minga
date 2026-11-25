@@ -560,14 +560,14 @@ defmodule Minga.Buffer do
   @spec undo(t()) ::
           :ok
           | Minga.Buffer.UndoHistory.blocked()
-          | {:error, Minga.Buffer.UndoPatch.apply_error()}
+          | {:error, BufferProcess.history_error()}
   defdelegate undo(server), to: BufferProcess
 
   @doc "Redo your last undone edit group."
   @spec redo(t()) ::
           :ok
           | Minga.Buffer.UndoHistory.blocked()
-          | {:error, Minga.Buffer.UndoPatch.apply_error()}
+          | {:error, BufferProcess.history_error()}
   defdelegate redo(server), to: BufferProcess
 
   @doc "Revert every remaining step of the Minga task that edited this buffer most recently, or of the newer task that blocks it, keeping your edits."
@@ -575,7 +575,7 @@ defmodule Minga.Buffer do
           {:ok, non_neg_integer()}
           | :empty
           | Minga.Buffer.UndoHistory.blocked()
-          | {:error, Minga.Buffer.UndoPatch.apply_error()}
+          | {:error, BufferProcess.history_error()}
   defdelegate undo_agent_session(server), to: BufferProcess
 
   # ── Authorship ─────────────────────────────────────────────────────

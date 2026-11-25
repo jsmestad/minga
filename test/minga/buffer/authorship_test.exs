@@ -271,7 +271,7 @@ defmodule Minga.Buffer.AuthorshipTest do
       assert_receive {:minga_event, :log_message,
                       %{text: "Reverted 1 of 2 steps of Minga task t in " <> rest}}
 
-      assert rest =~ "undo your edit near line 2 (u), then SPC a u again"
+      assert rest =~ "your edit near line 2 holds the rest; undo it (u), then SPC a u again"
 
       assert :ok = BufferProcess.undo(buffer)
       assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
@@ -426,9 +426,10 @@ defmodule Minga.Buffer.AuthorshipTest do
     # reports the hold and stays on task t1 instead of moving on to t2.
     test "F2: a press stays on the task your edit holds, whether or not compaction merged its steps" do
       for {opts, expected_result, expected_text, expected_message} <- [
-            {[], {:ok, 1}, "afbarb", ~r/^1 of 2 steps of Minga task t1 .*your edit near line 1/},
+            {[], {:ok, 1}, "afbarb",
+             ~r/^1 of 2 steps of Minga task t1 .*your edit near line 1 holds the rest; undo it/},
             {[history_run_budget: 3], {:blocked, {:overlaps, :you}}, "afb",
-             ~r/^0 steps of Minga task t1 .*your edit near line 1 holds them/}
+             ~r/^0 steps of Minga task t1 .*your edit near line 1 holds them; undo it/}
           ] do
         registry = Module.concat(__MODULE__, "Events#{System.unique_integer([:positive])}")
         start_supervised!({Registry, keys: :duplicate, name: registry}, id: make_ref())
@@ -852,6 +853,35 @@ defmodule Minga.Buffer.AuthorshipTest do
       assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
       assert BufferProcess.content(buffer) == "ONE\ntwo\nthree\n"
     end
+
+    # A reload makes your edit permanent, so no undo reaches it: the press must not tell you to press u.
+    test "a task held by an edit a reload made permanent says it cannot be reverted exactly", %{
+      tmp_dir: dir
+    } do
+      registry = Module.concat(__MODULE__, "Events#{System.unique_integer([:positive])}")
+      start_supervised!({Registry, keys: :duplicate, name: registry})
+      path = Path.join(dir, "file.txt")
+      File.write!(path, "l1\nfoo bar\n")
+
+      buffer =
+        start_supervised!({BufferProcess, file_path: path, events_registry: registry},
+          id: make_ref()
+        )
+
+      replace_at(buffer, {1, 0}, 7, "FOO BAR", step("t", "s"))
+      replace_at(buffer, {1, 1}, 2, "")
+      assert :ok = BufferProcess.save(buffer)
+      assert :ok = BufferProcess.reload(buffer)
+      :ok = Minga.Events.subscribe(:log_message, registry)
+
+      assert {:blocked, {:overlaps, :you}} = BufferProcess.undo_agent_session(buffer)
+
+      assert_receive {:minga_event, :log_message,
+                      %{text: "Reverted 0 steps of Minga task t in " <> rest}}
+
+      assert rest =~ "an edit near line 2 that is no longer in your undo history holds them"
+      refute rest =~ "(u)"
+    end
   end
 
   describe "a history out of step with its document" do
@@ -878,6 +908,47 @@ defmodule Minga.Buffer.AuthorshipTest do
 
       assert_receive {:minga_event, :log_message, %{level: :error, text: text}}
       assert text =~ "were reset after an internal error"
+    end
+
+    # The buffer process never crashes on broken history bookkeeping: undo and a compaction slice reset the history
+    # and refuse, and the text stays.
+    test "an undo or a compaction slice that raises resets the history instead of crashing the buffer" do
+      registry = Module.concat(__MODULE__, "Events#{System.unique_integer([:positive])}")
+      start_supervised!({Registry, keys: :duplicate, name: registry})
+      :ok = Minga.Events.subscribe(:log_message, registry)
+
+      buffer =
+        start_supervised!({BufferProcess, content: "hello", events_registry: registry},
+          id: make_ref()
+        )
+
+      replace_at(buffer, {0, 0}, 1, "J")
+
+      :sys.replace_state(
+        buffer,
+        &%{&1 | undo_history: %{&1.undo_history | undo_entries: [:broken]}}
+      )
+
+      assert {:error, :history_reset} = BufferProcess.undo(buffer)
+      assert BufferProcess.content(buffer) == "Jello"
+
+      assert_receive {:minga_event, :log_message,
+                      %{level: :error, text: "Undo history and authorship" <> _}}
+
+      :sys.replace_state(buffer, fn state ->
+        history = state.undo_history
+        broken = %{history.provenance | drafts: :broken}
+        %{state | undo_history: %{history | provenance: broken, compaction_wanted: true}}
+      end)
+
+      send(buffer, :compact_history)
+      assert BufferProcess.content(buffer) == "Jello"
+
+      assert_receive {:minga_event, :log_message,
+                      %{level: :error, text: "Undo history and authorship" <> _}}
+
+      assert :ok = BufferProcess.insert_text(buffer, "x")
+      assert BufferProcess.content(buffer) == "Jxello"
     end
   end
 

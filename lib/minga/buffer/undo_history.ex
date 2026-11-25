@@ -89,6 +89,11 @@ defmodule Minga.Buffer.UndoHistory do
   @typedoc "Why an undo, redo or revert did not happen: a later Minga step rewrote the same text."
   @type blocked :: {:blocked, {:overlaps, minga_group() | :you}}
 
+  @typedoc """
+  What holds a task's step: an edit of yours your `u` can reach, or a permanent edit (one that left your undo history, or a reload) that no undo reaches, with the byte offset of that edit.
+  """
+  @type hold :: {:yours | :permanent, non_neg_integer()}
+
   @typedoc "What one `undo_agent_session/3` call reverted; see there."
   @type reject_summary :: %{
           task: task(),
@@ -97,7 +102,7 @@ defmodule Minga.Buffer.UndoHistory do
           tasks: [task()],
           groups: [Provenance.group_id()],
           dropped: [non_neg_integer()],
-          held: non_neg_integer() | nil
+          held: hold() | nil
         }
 
   @typedoc "A Minga step and the byte ranges it touched, as `Minga.Buffer.Provenance.regions/2` reports them."
@@ -536,7 +541,7 @@ defmodule Minga.Buffer.UndoHistory do
   @spec undo_agent_session(t(), version(), Document.t()) ::
           {:ok, Restore.t(), t(), reject_summary()}
           | :empty
-          | {:blocked, {:overlaps, :you}, task(), non_neg_integer()}
+          | {:blocked, {:overlaps, :you}, task(), hold()}
           | {:error, UndoPatch.apply_error()}
   def undo_agent_session(%__MODULE__{} = history, _version, %Document{} = document) do
     history.task_ticks
@@ -551,11 +556,15 @@ defmodule Minga.Buffer.UndoHistory do
 
   # A press stays on the task it chose while an edit of yours holds it: `u` reaches that edit first. It moves on past a
   # task only a permanent edit holds, which no undo can reach, or when your next undo is itself blocked by a later
-  # Minga step, which a press must revert first. It reports the first hold it met.
+  # Minga step, which a press must revert first. It reports the hold it stopped on, or the first it met when every
+  # task was held.
   @spec held_press(t(), task(), tuple(), :empty | tuple()) :: {:halt | :cont, tuple()}
   defp held_press(history, task, held, first_held) do
-    first_held = if first_held == :empty, do: held, else: first_held
-    if held_by_your_undo?(history, task), do: {:halt, first_held}, else: {:cont, first_held}
+    cond do
+      held_by_your_undo?(history, task) -> {:halt, held}
+      first_held == :empty -> {:cont, held}
+      true -> {:cont, first_held}
+    end
   end
 
   # Whether a group of yours holds one of the task's steps and your next `u` can go: then that `u` is the way forward.
@@ -594,7 +603,7 @@ defmodule Minga.Buffer.UndoHistory do
 
   @spec reject_steps(t(), task(), Document.t()) ::
           {:ok, Restore.t(), t(), reject_summary()}
-          | {:blocked, {:overlaps, :you}, task(), non_neg_integer()}
+          | {:blocked, {:overlaps, :you}, task(), hold()}
           | {:error, UndoPatch.apply_error()}
   defp reject_steps(history, task, document) do
     total = history |> task_groups(task) |> step_count(history)
@@ -616,7 +625,10 @@ defmodule Minga.Buffer.UndoHistory do
   @spec walk_steps(map(), task()) :: {:ok, map()} | {:error, UndoPatch.apply_error()}
   # Every decision reads only which groups are applied, so the walk decides on flags (a closure it takes is marked
   # unapplied for the decisions after it) and then reverts everything it took in one pass and discards it once. Each
-  # step's closure costs its own runs; the whole press costs the task's runs plus one pass over the document.
+  # step's closure costs the runs of the groups in it. When nothing is held, closures taken are skipped later, so the
+  # press costs the task's runs plus one pass over the document. A held closure is walked again by each older step
+  # that reaches it, so a chain of T held steps over the same text costs O(T^2) group visits. Remembering held
+  # closures is not sound here: a larger reverting set can leave out a dependent through which the hold was reached.
   defp walk_steps(walk, task) do
     {_flags, taken} =
       walk.history
@@ -866,9 +878,9 @@ defmodule Minga.Buffer.UndoHistory do
 
   @spec finish_walk(t(), map(), task(), non_neg_integer()) ::
           {:ok, Restore.t(), t(), reject_summary()}
-          | {:blocked, {:overlaps, :you}, task(), non_neg_integer()}
+          | {:blocked, {:overlaps, :you}, task(), hold()}
   defp finish_walk(_history, %{groups: []} = walk, task, _total),
-    do: {:blocked, {:overlaps, :you}, task, held_offset(walk.history, task)}
+    do: {:blocked, {:overlaps, :you}, task, held_at(walk.history, task)}
 
   defp finish_walk(history, walk, task, total) do
     remaining = walk.history |> task_groups(task) |> step_count(walk.history)
@@ -896,27 +908,27 @@ defmodule Minga.Buffer.UndoHistory do
       tasks: others,
       groups: walk.groups,
       dropped: walk.dropped,
-      held: if(every_step?, do: nil, else: held_offset(rest, task))
+      held: if(every_step?, do: nil, else: held_at(rest, task))
     }
 
     {:ok, Restore.new(version, document, :agent), rest, summary}
   end
 
-  # Where the edit that holds the rest is now, after everything this call reverted.
-  @spec held_offset(t(), task()) :: non_neg_integer()
-  defp held_offset(history, task) do
+  # The edit that holds the rest and where it is now, after everything this call reverted.
+  @spec held_at(t(), task()) :: hold()
+  defp held_at(history, task) do
     # Asked of the history after everything this call reverted: an edit that held an early step may have reverted
     # with a later one.
     history
     |> task_groups(task)
     |> Enum.sort(:desc)
-    |> Enum.find_value(0, fn group ->
+    |> Enum.find_value({:yours, 0}, fn group ->
       closure =
         dependents(history.provenance, history.merges, [group], MapSet.new([group]), MapSet.new())
 
       case held_in(history.provenance, closure) do
-        {:group, holding} -> group_offset(history.provenance, holding)
-        {:offset, offset} -> offset
+        {:group, holding} -> {:yours, group_offset(history.provenance, holding)}
+        {:offset, offset} -> {:permanent, offset}
         nil -> nil
       end
     end)
@@ -1050,7 +1062,8 @@ defmodule Minga.Buffer.UndoHistory do
           tick: tick,
           task_run: nil,
           task_ticks: Map.drop(rest.task_ticks, tasks),
-          step_ticks: Map.drop(rest.step_ticks, Enum.map(steps, &elem(&1, 0)))
+          step_ticks: Map.drop(rest.step_ticks, Enum.map(steps, &elem(&1, 0))),
+          merges: Enum.reduce(groups, rest.merges, &unlink(&2, &1))
       }
 
       document = place_cursor(reverted, first, Document.cursor(document))
@@ -1510,7 +1523,7 @@ defmodule Minga.Buffer.UndoHistory do
   # Another author's text survives only where an alignment proves it unchanged: prefix and suffix trims, the word
   # comparison's equal segments, and lines unique on both sides. Next to another author's text the word comparison
   # always runs. Text no alignment proves unchanged is part of the change, which can credit unchanged text inside a
-  # long unpaired span to the writer; exact text and exact rejects come first. See `slide_lone_deletion/4` for a
+  # long unpaired span to the writer; exact text and exact rejects come first. See `slide_deletion/5` for a
   # deletion at the edge of a run of identical bytes.
   @spec anchored_changes(Provenance.t(), Provenance.author(), UndoPatch.t()) :: [change()]
   defp anchored_changes(provenance, writer, patch) do

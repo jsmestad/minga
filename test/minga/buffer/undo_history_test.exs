@@ -432,7 +432,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert UndoHistory.reject_task(world.history, {:minga, "task-1"}, world.version, world.doc) ==
                {:blocked, {:overlaps, :you}}
 
-      assert {:blocked, {:overlaps, :you}, {:minga, "task-1"}, 10} =
+      assert {:blocked, {:overlaps, :you}, {:minga, "task-1"}, {:yours, 10}} =
                UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
       world = undo!(world)
@@ -450,7 +450,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert text(world) == "xbZdy\n"
       assert {:blocked, {:overlaps, @step_two}} = step(world, :undo)
 
-      assert {:ok, restore, history, %{reverted: 1, total: 2, held: 2, dropped: []}} =
+      assert {:ok, restore, history, %{reverted: 1, total: 2, held: {:yours, 2}, dropped: []}} =
                UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
       world = install(world, restore, history)
@@ -481,7 +481,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert {:blocked, {:overlaps, @step_two}} = step(world, :undo)
 
       # Round 5 R3: the newer step reverts, giving back your R; your edit then holds the older step until you undo it.
-      assert {:ok, restore, history, %{reverted: 1, total: 2, held: 2}} =
+      assert {:ok, restore, history, %{reverted: 1, total: 2, held: {:yours, 2}}} =
                UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
       world = install(world, restore, history)
@@ -545,7 +545,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert text(world) == "XWZ bbb\n\n"
 
       # The newer step reverts and gives your Q back; your edit then holds the older step, and "ccc" stays deleted.
-      assert {:ok, restore, _history, %{reverted: 1, held: 1}} =
+      assert {:ok, restore, _history, %{reverted: 1, held: {:yours, 1}}} =
                UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
       assert Document.content(restore.document) == "XQZ bbb\n\n"
@@ -556,7 +556,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
       world = edit(world, :user, 7, 2, "")
       history = UndoHistory.reload(world.history, world.doc, world.doc)
 
-      assert {:blocked, {:overlaps, :you}, {:minga, "task-1"}, offset} =
+      assert {:blocked, {:overlaps, :you}, {:minga, "task-1"}, {:permanent, offset}} =
                UndoHistory.undo_agent_session(history, world.version, world.doc)
 
       assert offset >= 6

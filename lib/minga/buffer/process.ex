@@ -83,6 +83,8 @@ defmodule Minga.Buffer.Process do
 
   @typedoc "Internal state of the buffer server."
   @type state :: BufState.t()
+  @typedoc "Why an undo, redo or `SPC a u` changed nothing: a patch failed, or the history reset after an internal error."
+  @type history_error :: UndoPatch.apply_error() | :history_reset
   @type edit_delta_update :: {:ok, [EditDelta.t()]} | :reset_required
   @type motion_fun :: (Document.t(), Document.position() -> Document.position())
   @type listing_info :: %{
@@ -1172,14 +1174,14 @@ defmodule Minga.Buffer.Process do
   Returns `{:blocked, {:overlaps, minga_group}}`, with content and history unchanged, when a later Minga step rewrote text the group wrote or removed. Returns an error, with content and history unchanged, when the group no longer applies.
   """
   @spec undo(GenServer.server()) ::
-          :ok | UndoHistory.blocked() | {:error, UndoPatch.apply_error()}
+          :ok | UndoHistory.blocked() | {:error, history_error()}
   def undo(server) do
     GenServer.call(server, :undo)
   end
 
   @doc "Redoes your most recently undone edit group. Returns the same outcomes as `undo/1`."
   @spec redo(GenServer.server()) ::
-          :ok | UndoHistory.blocked() | {:error, UndoPatch.apply_error()}
+          :ok | UndoHistory.blocked() | {:error, history_error()}
   def redo(server) do
     GenServer.call(server, :redo)
   end
@@ -1193,7 +1195,7 @@ defmodule Minga.Buffer.Process do
           {:ok, non_neg_integer()}
           | :empty
           | UndoHistory.blocked()
-          | {:error, UndoPatch.apply_error()}
+          | {:error, history_error()}
   def undo_agent_session(server) do
     GenServer.call(server, :undo_agent_session)
   end
@@ -2455,7 +2457,7 @@ defmodule Minga.Buffer.Process do
 
   def handle_call({:bounded_append, text, max_lines, max_bytes}, _from, state) do
     doc = state.document
-    appended = {Document.cursor_offset(doc), "", text}
+    appended = {Document.content_byte_size(doc), "", text}
 
     # Append at the end even when the reader moved the cursor up (`gg` in *Messages*).
     # The front trim below then never removes the new entry.
@@ -2588,7 +2590,10 @@ defmodule Minga.Buffer.Process do
   def handle_call(:undo, _from, state) do
     state = with_history_in_step(state)
 
-    case UndoHistory.undo(state.undo_history, BufState.version(state), state.document) do
+    case guarded(state, &UndoHistory.undo(&1, BufState.version(state), state.document)) do
+      {:history_reset, history} ->
+        {:reply, {:error, :history_reset}, %{state | undo_history: history}}
+
       :empty ->
         {:reply, :ok, state}
 
@@ -2608,7 +2613,10 @@ defmodule Minga.Buffer.Process do
   def handle_call(:redo, _from, state) do
     state = with_history_in_step(state)
 
-    case UndoHistory.redo(state.undo_history, BufState.version(state), state.document) do
+    case guarded(state, &UndoHistory.redo(&1, BufState.version(state), state.document)) do
+      {:history_reset, history} ->
+        {:reply, {:error, :history_reset}, %{state | undo_history: history}}
+
       :empty ->
         {:reply, :ok, state}
 
@@ -2628,11 +2636,13 @@ defmodule Minga.Buffer.Process do
   def handle_call(:undo_agent_session, _from, state) do
     state = with_history_in_step(state)
 
-    case UndoHistory.undo_agent_session(
-           state.undo_history,
-           BufState.version(state),
-           state.document
+    case guarded(
+           state,
+           &UndoHistory.undo_agent_session(&1, BufState.version(state), state.document)
          ) do
+      {:history_reset, history} ->
+        {:reply, {:error, :history_reset}, %{state | undo_history: history}}
+
       :empty ->
         {:reply, :empty, state}
 
@@ -2640,7 +2650,7 @@ defmodule Minga.Buffer.Process do
         log_history_failure(:undo_agent_session, reason)
         {:reply, error, state}
 
-      {:blocked, overlap, task, offset} ->
+      {:blocked, overlap, task, {kind, offset}} ->
         {line, _column} = Position.from_point(state.document, offset)
 
         if Provenance.faulted?(UndoHistory.provenance(state.undo_history)) do
@@ -2653,8 +2663,8 @@ defmodule Minga.Buffer.Process do
 
         log_to_messages(
           state,
-          "Reverted 0 steps of #{task_label(task)} in #{display_name_from_state(state)}: your edit near line " <>
-            "#{line + 1} holds them; undo it (u), then SPC a u again",
+          "Reverted 0 steps of #{task_label(task)} in #{display_name_from_state(state)}: " <>
+            hold_advice(kind, line, "them"),
           :warning
         )
 
@@ -3172,12 +3182,20 @@ defmodule Minga.Buffer.Process do
 
   # One pure compaction slice per message, so edits and reads run between slices.
   def handle_info(:compact_history, state) do
-    {status, history, slice} =
-      Minga.Telemetry.span([:minga, :buffer, :compact_slice], %{}, fn ->
-        UndoHistory.compact_slice(state.undo_history, @compaction_slice_runs)
-      end)
+    case Minga.Telemetry.span([:minga, :buffer, :compact_slice], %{}, fn ->
+           guarded(state, &UndoHistory.compact_slice(&1, @compaction_slice_runs))
+         end) do
+      {:history_reset, history} ->
+        {:noreply, %{state | undo_history: history, compaction_scheduled: false}}
 
-    state = %{state | undo_history: history}
+      {status, history, slice} ->
+        compacted_slice(%{state | undo_history: history}, status, slice)
+    end
+  end
+
+  @spec compacted_slice(state(), :more | :done | :over_budget, UndoHistory.slice()) ::
+          {:noreply, state()}
+  defp compacted_slice(state, status, slice) do
     name = display_name_from_state(state)
 
     if slice.merged != [] do
@@ -3933,13 +3951,13 @@ defmodule Minga.Buffer.Process do
           :info
         )
 
-      offset ->
+      {kind, offset} ->
         {line, _column} = Position.from_point(document, offset)
 
         log_to_messages(
           state,
           "Reverted #{summary.reverted} of #{summary.total} steps of #{task_label(summary.task)}#{with_others} in " <>
-            "#{name}; undo your edit near line #{line + 1} (u), then SPC a u again",
+            "#{name}; " <> hold_advice(kind, line, "the rest"),
           :info
         )
     end
@@ -3957,6 +3975,16 @@ defmodule Minga.Buffer.Process do
 
     :ok
   end
+
+  # What the user can do about the edit that holds a task's steps: undo it, or nothing when it left the undo history.
+  @spec hold_advice(:yours | :permanent, non_neg_integer(), String.t()) :: String.t()
+  defp hold_advice(:yours, line, held),
+    do: "your edit near line #{line + 1} holds #{held}; undo it (u), then SPC a u again"
+
+  defp hold_advice(:permanent, line, held),
+    do:
+      "an edit near line #{line + 1} that is no longer in your undo history holds #{held}, " <>
+        "so they cannot be reverted exactly"
 
   # Names the steps a compaction slice merged, the first few in full.
   @spec merged_steps([{UndoHistory.minga_group(), UndoHistory.minga_group()}]) :: String.t()
@@ -4017,6 +4045,18 @@ defmodule Minga.Buffer.Process do
           "history describes #{UndoHistory.size(history)} bytes #{moment} an edit, " <>
             "the document #{Document.content_byte_size(document)}"
         )
+  end
+
+  # Runs a history operation the buffer process cannot let crash it: on an exception the history starts again, as a
+  # failed recording does, and the caller refuses the operation. The text is never touched.
+  @spec guarded(state(), (UndoHistory.t() -> result)) ::
+          result | {:history_reset, UndoHistory.t()}
+        when result: term()
+  defp guarded(state, operation) do
+    operation.(state.undo_history)
+  rescue
+    exception ->
+      {:history_reset, lost_history(state, state.document, Exception.message(exception))}
   end
 
   # Starts the history again for `document`, logs why, and tells the user in *Messages*.
