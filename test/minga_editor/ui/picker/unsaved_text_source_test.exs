@@ -25,7 +25,7 @@ defmodule MingaEditor.UI.Picker.UnsavedTextSourceTest do
   end
 
   test "a row names the file from its project root, with the project as its section" do
-    assert [%Item{label: "lib/a.ex", group: "/work/alpha", search_text: "/work/alpha/lib/a.ex"}] =
+    assert [%Item{label: "lib/a.ex", group: "alpha · /work", search_text: "/work/alpha/lib/a.ex"}] =
              UnsavedTextSource.items([entry([])], @now)
   end
 
@@ -41,7 +41,7 @@ defmodule MingaEditor.UI.Picker.UnsavedTextSourceTest do
              UnsavedTextSource.items([entry(path: home_file, project: nil)], @now)
   end
 
-  test "the description says how the text stands against the file" do
+  test "the description says how the text stands against the file, and when it was written" do
     descriptions =
       for overrides <- [
             [changed_lines: 3],
@@ -55,21 +55,21 @@ defmodule MingaEditor.UI.Picker.UnsavedTextSourceTest do
       end
 
     assert descriptions == [
-             "3 lines differ",
-             "1 line differs",
-             "12 lines, differs from the file",
-             "1 line, the file is gone",
-             "3 lines differ, the file changed after this text was kept"
+             "3 lines differ · just now",
+             "1 line differs · just now",
+             "12 lines, differs from the file · just now",
+             "1 line, the file is gone · just now",
+             "3 lines differ, the file changed after this text was kept · just now"
            ]
   end
 
-  test "the annotation says when the text was written" do
+  test "the age is given to the coarsest unit that still tells two crashes apart" do
     ages =
       for seconds <- [5, 59, 60, 3_599, 3_600, 86_399, 86_400, 172_800, 950_400] do
-        [%Item{annotation: age}] =
+        [%Item{description: description}] =
           UnsavedTextSource.items([entry(swap_mtime: @now - seconds)], @now)
 
-        age
+        description |> String.split(" · ") |> List.last()
       end
 
     assert ages == [
@@ -94,9 +94,9 @@ defmodule MingaEditor.UI.Picker.UnsavedTextSourceTest do
     ]
 
     assert entries |> UnsavedTextSource.items(@now) |> Enum.map(& &1.group) == [
-             "/work/alpha",
-             "/work/beta",
-             "/work/beta",
+             "alpha · /work",
+             "beta · /work",
+             "beta · /work",
              "Outside a project"
            ]
   end

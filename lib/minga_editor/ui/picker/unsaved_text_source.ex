@@ -81,8 +81,7 @@ defmodule MingaEditor.UI.Picker.UnsavedTextSource do
     %Item{
       id: entry.swap_path,
       label: label(entry),
-      description: difference(entry),
-      annotation: age(now - entry.swap_mtime),
+      description: "#{difference(entry)} · #{age(now - entry.swap_mtime)}",
       group: group(entry),
       search_text: entry.path,
       meta: %{entry: entry}
@@ -105,7 +104,10 @@ defmodule MingaEditor.UI.Picker.UnsavedTextSource do
 
   @spec group(Session.waiting_unsaved_text()) :: String.t()
   defp group(%{project: nil}), do: "Outside a project"
-  defp group(%{project: project}), do: home_relative(project)
+
+  # The project's name comes first, so a narrow list that cuts the section header still tells projects apart.
+  defp group(%{project: project}),
+    do: "#{Path.basename(project)} · #{home_relative(Path.dirname(project))}"
 
   @spec home_relative(String.t()) :: String.t()
   defp home_relative(path) do

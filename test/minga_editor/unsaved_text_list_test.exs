@@ -32,9 +32,10 @@ defmodule MingaEditor.UnsavedTextListTest do
 
     open_list(editor)
 
-    assert [%{label: "lib/notes.ex", description: "1 line differs"} = row] = rows(editor)
-    assert row.group =~ "other_project"
-    assert row.annotation == "just now"
+    assert [%{label: "lib/notes.ex", description: "1 line differs · just now"} = row] =
+             rows(editor)
+
+    assert String.starts_with?(row.group, "other_project · ")
 
     send_keys_sync(editor, "<CR>")
 
@@ -57,7 +58,7 @@ defmodule MingaEditor.UnsavedTextListTest do
     editor = start_editor("scratch", swap_dir: ctx.swap_dir)
 
     open_list(editor)
-    assert [%{description: "2 lines, the file is gone"}] = rows(editor)
+    assert [%{description: "2 lines, the file is gone · just now"}] = rows(editor)
     send_keys_sync(editor, "<CR>")
 
     {:ok, buffer} = Buffer.pid_for_path(ctx.gone)
