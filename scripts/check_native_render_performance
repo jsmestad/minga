@@ -7,7 +7,7 @@ ROOT="$(cd "$ROOT" && pwd)"
 DEFAULT_BUILD_DIR="${ROOT}/_build/native-render-performance"
 
 usage() {
-  echo "usage: $0 [--build BUILD_DIR | --measure BUILD_DIR OUTPUT.json | --investigate BUILD_DIR OUTPUT.json | --compare BUILD_DIR --base BASE.json... --head HEAD.json...]" >&2
+  echo "usage: $0 [--build BUILD_DIR | --measure BUILD_DIR OUTPUT.json | --investigate BUILD_DIR OUTPUT.json | --compare BUILD_DIR [--hosted] [--base BASE.json...] --head HEAD.json...]" >&2
   exit 2
 }
 
