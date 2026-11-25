@@ -753,7 +753,7 @@ Every built-in binding follows six rules (design principle 11):
 5. **macOS platform keys** (⌘S ⌘Z ⌘W ⌘Q ⌘. ⌘1 to ⌘4 ⌘[ ⌘]) only as aliases of a binding without modifiers.
 6. **Never** three-modifier chords, two of ⌃ ⌥ ⌘ together (⌃⌘, ⌥⌘, ⌃⌥), or function keys.
 
-Also: one key has one meaning per scope and vim state, a command sits on two leader keys only when one is a declared alias, and every leader binding lives under a declared which-key group.
+Also: one key has one meaning per scope, vim state and overlay (a focused Diff Review is its own context, see `docs/design/keys.md`), a command sits on two leader keys only when one is a declared alias, and every leader binding lives under a declared which-key group.
 
 `test/minga/keymap/grammar_test.exs` enforces these rules with named rule ids through the pure classifier in `test/support/key_grammar.ex`, which also holds the rule 4 and 5 allow-lists and the leader aliases. Violations that existed when the guard landed are listed in `test/fixtures/keymap/grammar_baseline.tsv`. **Never add baseline rows;** fix the binding instead. When you fix a listed violation, remove its row: the test fails on stale rows.
 

@@ -23,6 +23,8 @@ Keys are chords and mnemonics, not shortcuts. This is [principle 11](principles.
 
 **The CUA profile.** With `:editing_model :cua`, an explicit list of desktop conventions (⌘C, ⌘V, ⌘X, ⌘Z, ⌃Z and the like) is exempt from rules 4 and 5; one meaning per key, the prompt rules and rule 6 still apply. See [ADR-0007](../adr/0007-cua-is-a-key-profile.md).
 
+**Overlays are their own context.** A surface that rebinds keys over its scope while it has focus, such as a focused Diff Review, is a separate grammar context. A key it rebinds is not a second meaning underneath it, and its own chords are allowed only inside it. See [Diff Review](#diff-review).
+
 ## Rules
 
 - **One key, one meaning.** Within a context, a key does one thing on every row and every surface.
@@ -305,6 +307,20 @@ Special buffers (git status, the file tree, blame) follow the same rule as Minga
 | `⌘.` | Stop (`SPC a s` in the terminal) | |
 | ⌥↑ | (dequeue moves into the queue buffer) | retired (`scope/agent.ex:210`, `211`) |
 | `⌃D` / `⌃U` while typing | (`⌃U` deletes to line start; scroll from Normal mode) | retired (`scope/agent.ex:216`, `217`) |
+
+## Diff Review
+
+While a staged Diff Review has focus in the Agent view, its keys replace the Agent keys underneath. The review is its own grammar context: `y` keeps a hunk there and still copies a code block everywhere else, and one meaning per key holds inside the review and underneath it separately.
+
+| Keys (Vim) | Keys (CUA) | Action |
+|---|---|---|
+| `]c` / `[c` | `⌥↓` / `⌥↑` | Next / previous hunk |
+| `y` | `⌘↩`, `⌃↩` | Keep the hunk (on a fork conflict: use the Agent version) |
+| `x` | `⌘⌫`, `⌃⌫` | Reject the hunk (on a fork conflict: keep mine) |
+| `Y` | `⇧⌘↩`, `⌃⇧↩` | Keep every hunk |
+| `X` | `⇧⌘⌫`, `⌃⇧⌫` | Reject every hunk |
+
+The CUA chords are an allow-list for the review only, each tied to its exact command; they are not CUA conventions anywhere else. ⌘↩ keeps and ⌘⌫ undoes a change in Cursor and in VS Code agent edits, so CUA users already know them, and ⇧ widens either to every hunk. A terminal cannot send ⌘, so each ⌘ chord has a ⌃ twin. ⌥↓ and ⌥↑ step through hunks without typing text. Rule 6 still applies, which is why F7 is not bound. The allow-list lives in `test/support/key_grammar.ex` with the guard's other allow-lists; see [ADR-0007](../adr/0007-cua-is-a-key-profile.md#amendment-diff-review-chords-2026-11-24).
 
 ## Built-in terminal
 

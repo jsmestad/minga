@@ -2,11 +2,13 @@ defmodule Minga.Test.KeyGrammar do
   @moduledoc """
   Pure classifier for Minga's key grammar (design principle 11).
 
-  `inventory/0` enumerates every built-in binding without starting the Editor: the leader list and `SPC m` filetype bindings from `Minga.Keymap.Defaults`, the Vim normal table and `Minga.Keymap.NormalPrefixes`, and every vim state of every built-in scope in `Minga.Keymap.Scope.Registry.builtin_modules/0`. `violations/2` classifies that inventory against the six grammar rules and returns one named violation per offending binding.
+  `inventory/0` enumerates every built-in binding without starting the Editor: the leader list and `SPC m` filetype bindings from `Minga.Keymap.Defaults`, the Vim normal table and `Minga.Keymap.NormalPrefixes`, every vim state of every built-in scope in `Minga.Keymap.Scope.Registry.builtin_modules/0`, each overlay that rebinds a scope while it has focus (a focused staged Diff Review), and the composer's start-remedy keymap. `violations/2` classifies that inventory against the six grammar rules and returns one named violation per offending binding.
 
   `test/minga/keymap/grammar_test.exs` compares the violations with `test/fixtures/keymap/grammar_baseline.tsv`. The allow-lists below are the only sanctioned modifier conventions (rule 4), platform keys (rule 5) and CUA profile conventions (ADR-0007). Add to them only when the owner adopts a new convention, never to make a drifting binding pass.
 
   The CUA profile list exempts its desktop conventions from rules 4 and 5 only in a CUA vim state, and only for the command the convention names. Rule 6, one meaning per key, and the prompt rules still apply there.
+
+  An overlay is its own grammar context. Its keymap is the scope's keymap with the overlay's keys bound over it, so a key the overlay rebinds is not a second meaning in the scope and vim state underneath. The overlay allow-list exempts its chords from rules 4 and 5 only inside that overlay and vim state, and only for the command each names. Every other rule applies inside an overlay as it does underneath.
 
   ## Rule ids
 
@@ -17,7 +19,7 @@ defmodule Minga.Test.KeyGrammar do
   * `:unconventional_modifier`: any other ⌃ or ⌥ chord where you type that is not an established convention (rule 4).
   * `:text_key_binding`: a printable key bound where it must type text (rule 3).
   * `:vim_grammar_override`: a printable key rebound in a Vim normal state over a text field, where it must keep its Vim meaning (rule 2).
-  * `:duplicate_key`: one key with two meanings in one scope and vim state, or a key that is both a command and a prefix.
+  * `:duplicate_key`: one key with two meanings in one scope, vim state and overlay, or a key that is both a command and a prefix.
   * `:duplicate_leader_command`: one command on two leader keys without a declared alias.
   * `:ungrouped_leader`: a leader binding outside a declared which-key group, or a top-level leader key that is not a Doom convention (rule 1).
   * `:doom_conflict`: a leader binding on a Doom key whose meaning is not declared in `doom_conventions.tsv`, or a declared row that no longer holds (rule 1).
@@ -27,6 +29,7 @@ defmodule Minga.Test.KeyGrammar do
 
   alias Minga.Keymap.Defaults
   alias Minga.Keymap.NormalPrefixes
+  alias Minga.Keymap.Scope.Agent, as: AgentScope
   alias Minga.Keymap.Scope.Registry, as: ScopeRegistry
   alias Minga.Keymap.SharedGroups
 
@@ -38,6 +41,11 @@ defmodule Minga.Test.KeyGrammar do
 
   @space 32
   @enter 13
+  @backspace 127
+  @ns_arrow_up 0xF700
+  @ns_arrow_down 0xF701
+  @kitty_arrow_up 57_352
+  @kitty_arrow_down 57_353
 
   @typedoc "A key tuple as stored in keymap tries: `{codepoint, modifiers}`."
   @type key :: {non_neg_integer(), non_neg_integer()}
@@ -45,14 +53,21 @@ defmodule Minga.Test.KeyGrammar do
   @typedoc "Where a binding lives: a built-in scope name or `:leader`."
   @type scope :: atom()
 
+  @typedoc "The overlay a binding belongs to: none, or a focused surface that rebinds keys over its scope's keymap."
+  @type overlay :: :none | :diff_review
+
   @typedoc "One declared binding."
   @type binding :: %{
           scope: scope(),
           state: atom(),
+          overlay: overlay(),
           keys: [key()],
           command: term(),
           origin: :effective | {:shadowed_group, atom()}
         }
+
+  @typedoc "An allow-listed convention: `{key, allowed commands, why}`."
+  @type convention :: {key(), [term()], String.t()}
 
   @typedoc "One classified grammar violation."
   @type violation :: %{
@@ -122,16 +137,42 @@ defmodule Minga.Test.KeyGrammar do
 
   @scope_states [:normal, :insert, :input_normal, :cua]
 
+  # Every remedy a failed Agent start can offer, as the context that turns it on.
+  @start_remedy_contexts for remedy <- [:retry, :set_up_provider],
+                             do: [agent_start_remedy: remedy]
+
   # Contexts a scope keymap is evaluated under.
   # The Agent scope adds a remedy binding while a failed start offers one, the picker adds ⌃V for sources whose selection shows in the focused window, and a prompt with a list adds list movement; other scopes ignore the context.
-  @scope_contexts [[], [agent_start_remedy: :retry], [picker_split: true, prompt_list: true]]
+  @scope_contexts [[] | @start_remedy_contexts] ++ [[picker_split: true, prompt_list: true]]
 
-  # Contexts that bind keys the full grammar does not classify yet.
-  # A focused staged Diff Review (`agent_diff_review: true`) rebinds Vim `y` and `Y` over copy.
-  # It also binds CUA chords that ADR-0007 does not list.
-  # Until those get a grammar decision, `overlay_inventory/0` lets the guard hold rule 6 there.
-  # No profile relaxes rule 6.
-  @overlay_contexts [[agent_diff_review: true]]
+  # ── Overlays ────────────────────────────────────────────────────────────────
+  #
+  # {overlay, the scope context that gives it focus}. While an overlay has focus, its keys replace the scope's keys,
+  # so the overlay is its own grammar context: one meaning per key holds inside it and underneath it separately.
+  # A focused staged Diff Review rebinds Vim `y` `x` `Y` `X` over copy in agent/normal and adds chords in agent/cua.
+  @overlays [diff_review: [agent_diff_review: true]]
+
+  # {{overlay, vim state}, conventions}. Inside that overlay and vim state only, each chord is exempt from rules 4 and 5
+  # for the commands it names. Rule 6 is checked first, so no overlay admits a forbidden chord.
+  # Diff Review in CUA (#3980, #4185): ⌘↩ keeps and ⌘⌫ undoes a hunk, the pair Cursor and VS Code use for agent edits;
+  # ⇧ widens either to every hunk. The ⌃ forms exist because a terminal cannot send ⌘. ⌥↓ ⌥↑ step through hunks.
+  @overlay_conventions %{
+    {:diff_review, :cua} => [
+      {{@enter, @cmd}, [:agent_accept_hunk], "⌘↩ keeps the hunk (Cursor, VS Code)"},
+      {{@enter, @ctrl}, [:agent_accept_hunk], "⌃↩ keeps the hunk where a terminal cannot send ⌘"},
+      {{@backspace, @cmd}, [:agent_reject_hunk], "⌘⌫ undoes the hunk (Cursor, VS Code)"},
+      {{@backspace, @ctrl}, [:agent_reject_hunk],
+       "⌃⌫ undoes the hunk where a terminal cannot send ⌘"},
+      {{@enter, @cmd ||| @shift}, [:agent_accept_all_hunks], "⇧⌘↩ keeps every hunk"},
+      {{@enter, @ctrl ||| @shift}, [:agent_accept_all_hunks], "⌃⇧↩ keeps every hunk"},
+      {{@backspace, @cmd ||| @shift}, [:agent_reject_all_hunks], "⇧⌘⌫ undoes every hunk"},
+      {{@backspace, @ctrl ||| @shift}, [:agent_reject_all_hunks], "⌃⇧⌫ undoes every hunk"},
+      {{@ns_arrow_down, @alt}, [:agent_next_code_block], "⌥↓ moves to the next hunk"},
+      {{@kitty_arrow_down, @alt}, [:agent_next_code_block], "⌥↓ moves to the next hunk"},
+      {{@ns_arrow_up, @alt}, [:agent_prev_code_block], "⌥↑ moves to the previous hunk"},
+      {{@kitty_arrow_up, @alt}, [:agent_prev_code_block], "⌥↑ moves to the previous hunk"}
+    ]
+  }
 
   # ── Rule 4: established modifier conventions ───────────────────────────────
   #
@@ -159,6 +200,10 @@ defmodule Minga.Test.KeyGrammar do
   @doc "The rule 4 allow-list: `{key, contexts, allowed commands or :any, why}`."
   @spec modifier_conventions() :: [{key(), [context()], [term()] | :any, String.t()}]
   def modifier_conventions, do: @modifier_conventions
+
+  @doc "The overlay allow-lists, keyed by `{overlay, vim state}`."
+  @spec overlay_conventions() :: %{{overlay(), atom()} => [convention()]}
+  def overlay_conventions, do: @overlay_conventions
 
   @doc "The grammar context of a scope and vim state, or nil when it is unclassified."
   @spec context_for(scope(), atom()) :: context() | nil
@@ -257,21 +302,12 @@ defmodule Minga.Test.KeyGrammar do
 
   # ── Inventory ───────────────────────────────────────────────────────────────
 
-  @doc "Every built-in binding: leader, Vim normal, and every built-in scope and vim state."
+  @doc "Every built-in binding: leader, Vim normal, every built-in scope and vim state, overlays, and consulted keymaps."
   @spec inventory() :: [binding()]
   def inventory do
-    leader_bindings() ++ vim_normal_bindings() ++ scope_bindings()
-  end
-
-  @doc "Every scope binding under the overlay contexts the full inventory does not classify yet, such as a focused staged Diff Review."
-  @spec overlay_inventory() :: [binding()]
-  def overlay_inventory do
-    for module <- ScopeRegistry.builtin_modules(),
-        state <- @scope_states,
-        context <- @overlay_contexts,
-        {keys, command} <- walk(module.keymap(state, context)),
-        uniq: true,
-        do: effective(module.name(), state, keys, command)
+    leader_bindings() ++
+      vim_normal_bindings() ++
+      scope_bindings() ++ overlay_bindings() ++ composer_remedy_bindings()
   end
 
   @doc "Scope and vim state pairs in the inventory that have no grammar context."
@@ -343,18 +379,54 @@ defmodule Minga.Test.KeyGrammar do
           |> Enum.uniq()
           |> Enum.map(fn {keys, command} -> effective(scope, state, keys, command) end)
 
-        effective ++ shadowed_group_bindings(module, scope, state)
+        effective ++ shadowed_group_bindings(module, state, :none, module.keymap(state, []))
       end)
     end)
+  end
+
+  # Each overlay's full keymap, in every scope and vim state where the overlay changes the keymap underneath.
+  # Inherited bindings classify as they do underneath, so their violations share an identity and count once.
+  @spec overlay_bindings() :: [binding()]
+  defp overlay_bindings do
+    for {overlay, context} <- @overlays,
+        module <- ScopeRegistry.builtin_modules(),
+        state <- @scope_states,
+        trie = module.keymap(state, context),
+        trie != module.keymap(state, []),
+        binding <- overlay_keymap_bindings(module, state, overlay, trie),
+        do: binding
+  end
+
+  @spec overlay_keymap_bindings(module(), atom(), overlay(), Minga.Keymap.Bindings.node_t()) ::
+          [binding()]
+  defp overlay_keymap_bindings(module, state, overlay, trie) do
+    effective =
+      for {keys, command} <- walk(trie) ++ walk(module.shared_keymap()),
+          uniq: true,
+          do: effective(module.name(), state, keys, command, overlay)
+
+    effective ++ shadowed_group_bindings(module, state, overlay, trie)
+  end
+
+  # The Vim composer runs a failed start's remedy before Vim editing, outside the Agent scope's `keymap/2`
+  # (`MingaEditor.Input.AgentPanel.dispatch_composer_normal_key/3`), so its keys belong to agent/input_normal.
+  @spec composer_remedy_bindings() :: [binding()]
+  defp composer_remedy_bindings do
+    for context <- @start_remedy_contexts,
+        {keys, command} <- walk(AgentScope.start_remedy_keymap(:composer, context)),
+        uniq: true,
+        do: effective(:agent, :input_normal, keys, command)
   end
 
   # A shared group binding that a scope rebinds to another command is a second
   # meaning for the key, even though the trie only keeps the last one. A group
   # counts as merged into a vim state when at least one of its bindings is
   # present there unchanged.
-  @spec shadowed_group_bindings(module(), scope(), atom()) :: [binding()]
-  defp shadowed_group_bindings(module, scope, state) do
-    trie = Map.new(walk(module.keymap(state, [])))
+  @spec shadowed_group_bindings(module(), atom(), overlay(), Minga.Keymap.Bindings.node_t()) ::
+          [binding()]
+  defp shadowed_group_bindings(module, state, overlay, keymap) do
+    scope = module.name()
+    trie = Map.new(walk(keymap))
 
     module
     |> included_group_names()
@@ -370,6 +442,7 @@ defmodule Minga.Test.KeyGrammar do
           %{
             scope: scope,
             state: state,
+            overlay: overlay,
             keys: keys,
             command: command,
             origin: {:shadowed_group, group}
@@ -397,9 +470,17 @@ defmodule Minga.Test.KeyGrammar do
     end
   end
 
-  @spec effective(scope(), atom(), [key()], term()) :: binding()
-  defp effective(scope, state, keys, command),
-    do: %{scope: scope, state: state, keys: keys, command: command, origin: :effective}
+  @spec effective(scope(), atom(), [key()], term(), overlay()) :: binding()
+  defp effective(scope, state, keys, command, overlay \\ :none) do
+    %{
+      scope: scope,
+      state: state,
+      overlay: overlay,
+      keys: keys,
+      command: command,
+      origin: :effective
+    }
+  end
 
   @doc "Flattens a keymap trie into `{key_sequence, command}` pairs."
   @spec walk(Minga.Keymap.Bindings.node_t()) :: [{[key()], term()}]
@@ -437,9 +518,13 @@ defmodule Minga.Test.KeyGrammar do
 
   @spec duplicate_keys([binding()]) :: [violation()]
   defp duplicate_keys(inventory) do
-    by_context = Enum.group_by(inventory, &{&1.scope, &1.state})
+    # Groups without an overlay come first, so a duplicate an overlay inherits keeps the reason from underneath.
+    by_context =
+      inventory
+      |> Enum.group_by(&{&1.scope, &1.state, &1.overlay})
+      |> Enum.sort_by(fn {{_scope, _state, overlay}, _bindings} -> overlay != :none end)
 
-    Enum.flat_map(by_context, fn {{scope, state}, bindings} ->
+    Enum.flat_map(by_context, fn {{scope, state, overlay}, bindings} ->
       two_meanings =
         bindings
         |> Enum.group_by(& &1.keys, & &1.command)
@@ -458,7 +543,7 @@ defmodule Minga.Test.KeyGrammar do
                   state,
                   format_keys(keys),
                   Enum.join(names, " | "),
-                  "#{length(names)} meanings for one key"
+                  in_overlay("#{length(names)} meanings for one key", overlay)
                 )
               ]
           end
@@ -475,7 +560,7 @@ defmodule Minga.Test.KeyGrammar do
             state,
             format_keys(keys),
             format_command(command),
-            "bound as a command and as a prefix"
+            in_overlay("bound as a command and as a prefix", overlay)
           )
         end
 
@@ -488,27 +573,41 @@ defmodule Minga.Test.KeyGrammar do
     do: length(long) > length(short) and List.starts_with?(long, short)
 
   @spec binding_violations(binding(), %{{scope(), atom()} => context()}) :: [violation()]
-  defp binding_violations(%{scope: scope, state: state, keys: keys, command: command}, contexts) do
+  defp binding_violations(%{scope: scope, state: state, overlay: overlay} = binding, contexts) do
     context = Map.get(contexts, {scope, state})
+    profile = context && profile_conventions(context, state, overlay)
 
-    case context && key_violation(keys, context, state, command) do
+    case context && key_violation(binding.keys, context, profile, binding.command) do
       nil ->
         []
 
       {rule, reason} ->
-        [violation(rule, scope, state, format_keys(keys), format_command(command), reason)]
+        keys = format_keys(binding.keys)
+        command = format_command(binding.command)
+        [violation(rule, scope, state, keys, command, in_overlay(reason, overlay))]
     end
   end
 
+  # The CUA profile applies in a CUA vim state outside live prompts; an overlay adds its own list for its vim state.
+  @spec profile_conventions(context(), atom(), overlay()) :: [convention()]
+  defp profile_conventions(context, state, overlay) do
+    cua = if state == :cua and context in @cua_contexts, do: @cua_conventions, else: []
+    cua ++ Map.get(@overlay_conventions, {overlay, state}, [])
+  end
+
+  @spec in_overlay(String.t(), overlay()) :: String.t()
+  defp in_overlay(reason, :none), do: reason
+  defp in_overlay(reason, overlay), do: "#{reason}, in the #{overlay} overlay"
+
   # First failing key in the sequence wins, so each binding yields one row.
-  @spec key_violation([key()], context(), atom(), term()) :: {atom(), String.t()} | nil
-  defp key_violation(keys, context, state, command) do
-    Enum.find_value(keys, fn key -> chord_violation(key, context, state, command) end) ||
+  @spec key_violation([key()], context(), [convention()], term()) :: {atom(), String.t()} | nil
+  defp key_violation(keys, context, profile, command) do
+    Enum.find_value(keys, fn key -> chord_violation(key, context, profile, command) end) ||
       plain_key_violation(keys, context)
   end
 
-  @spec chord_violation(key(), context(), atom(), term()) :: {atom(), String.t()} | nil
-  defp chord_violation({codepoint, mods} = key, context, state, command) do
+  @spec chord_violation(key(), context(), [convention()], term()) :: {atom(), String.t()} | nil
+  defp chord_violation({codepoint, mods} = key, context, profile, command) do
     cond do
       function_key?(codepoint) ->
         {:forbidden_chord, "function keys are never bound"}
@@ -519,7 +618,7 @@ defmodule Minga.Test.KeyGrammar do
       popcount(band(mods, @chord_mods)) >= 2 ->
         {:forbidden_chord, "combines two of ⌃ ⌥ ⌘"}
 
-      cua_convention?(key, context, state, command) ->
+      listed?(profile, key, command) ->
         nil
 
       band(mods, @cmd) != 0 ->
@@ -607,14 +706,12 @@ defmodule Minga.Test.KeyGrammar do
     end)
   end
 
-  @spec cua_convention?(key(), context(), atom(), term()) :: boolean()
-  defp cua_convention?(key, context, :cua, command) when context in @cua_contexts do
-    Enum.any?(@cua_conventions, fn {conv_key, commands, _why} ->
+  @spec listed?([convention()], key(), term()) :: boolean()
+  defp listed?(conventions, key, command) do
+    Enum.any?(conventions, fn {conv_key, commands, _why} ->
       conv_key == key and command in commands
     end)
   end
-
-  defp cua_convention?(_key, _context, _state, _command), do: false
 
   @spec plain_key_violation([key()], context()) :: {atom(), String.t()} | nil
   defp plain_key_violation([{codepoint, mods} | _], :typing)

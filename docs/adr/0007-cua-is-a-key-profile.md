@@ -21,6 +21,18 @@ Everything else in the grammar still applies inside the profile:
 
 The allow-list lives next to the guard's other allow-lists, in `test/support/key_grammar.ex`, so adding a convention is a reviewed change, not a baseline row.
 
+## Amendment: Diff Review chords (2026-11-24)
+
+A focused staged Diff Review is its own grammar context, not a second meaning in the Agent scope underneath it (#4185). Inside the CUA review only, these chords are exempt from rules 4 and 5, each for the command it names:
+
+- ⌘↩ and ⌃↩: keep the hunk (`agent_accept_hunk`).
+- ⌘⌫ and ⌃⌫: reject the hunk (`agent_reject_hunk`).
+- ⇧⌘↩ and ⌃⇧↩: keep every hunk (`agent_accept_all_hunks`).
+- ⇧⌘⌫ and ⌃⇧⌫: reject every hunk (`agent_reject_all_hunks`).
+- ⌥↓ and ⌥↑: next and previous hunk (`agent_next_code_block`, `agent_prev_code_block`).
+
+⌘↩ and ⌘⌫ are the keep and undo pair Cursor and VS Code use for agent edits. The ⌃ forms exist because a terminal cannot send ⌘. These chords are not CUA conventions outside the review, and rule 6 still applies inside it. The full key table is in [keys.md](../design/keys.md#diff-review).
+
 ## Context
 
 Minga is Vim-first, and the key grammar in principle 11 is written for Vim users: leader sequences first, modifiers only where letters must type text, macOS platform keys only as aliases. That grammar is right for the default profile.
