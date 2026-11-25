@@ -1462,7 +1462,7 @@ defmodule Minga.Buffer.UndoHistory do
 
       candidates =
         for place <- lowest..highest,
-            MapSet.member?(cuts, place) and MapSet.member?(cuts, place + length),
+            is_map_key(cuts, place) and is_map_key(cuts, place + length),
             do: place
 
       best = Enum.max_by([at | candidates], covered)
@@ -1483,7 +1483,7 @@ defmodule Minga.Buffer.UndoHistory do
           {(non_neg_integer() -> byte() | nil), non_neg_integer() | nil},
           non_neg_integer(),
           non_neg_integer()
-        ) :: MapSet.t(non_neg_integer())
+        ) :: %{non_neg_integer() => true}
   defp cluster_boundaries({byte, text_end}, from, to) do
     with {:ok, first} <- window_start(byte, from, from),
          {:ok, last} <- window_end({byte, text_end}, to, to),
@@ -1492,10 +1492,10 @@ defmodule Minga.Buffer.UndoHistory do
       window
       |> String.graphemes()
       |> Enum.scan(first, &(byte_size(&1) + &2))
-      |> MapSet.new()
-      |> MapSet.put(first)
+      |> Map.new(&{&1, true})
+      |> Map.put(first, true)
     else
-      :none -> MapSet.new()
+      :none -> %{}
     end
   end
 
@@ -1533,9 +1533,7 @@ defmodule Minga.Buffer.UndoHistory do
     end
   end
 
-  @spec safe_byte((non_neg_integer() -> byte() | nil), integer()) :: byte() | nil
-  defp safe_byte(_byte, offset) when offset < 0, do: nil
-
+  @spec safe_byte((non_neg_integer() -> byte() | nil), non_neg_integer()) :: byte() | nil
   defp safe_byte(byte, offset) do
     byte.(offset)
   rescue

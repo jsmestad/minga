@@ -496,7 +496,8 @@ defmodule Minga.Buffer.Provenance do
     %{prov | tree: tree, overlap_runs: overlap_runs}
   end
 
-  @spec settled_overlap(group_id(), Group.t()) :: Run.overlap() | nil
+  # What a discarded overlapper becomes in a mark: nothing when it never happened, a permanent name when it always will.
+  @spec settled_overlap(group_id(), Group.t()) :: {:permanent, term()} | nil
   defp settled_overlap(_id, %Group{applied: false}), do: nil
   defp settled_overlap(_id, %Group{author: :you}), do: {:permanent, :you}
   defp settled_overlap(_id, %Group{key: key}), do: {:permanent, key}
