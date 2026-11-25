@@ -87,7 +87,7 @@ defmodule MingaAgent.MCP.StdioTransportTest do
       config = %ServerConfig{
         name: "echo",
         command: "/bin/sh",
-        args: ["-c", "printf '%s\\n' '#{json_line}'"],
+        args: ["-c", "IFS= read -r request || exit 1; printf '%s\\n' '#{json_line}'"],
         env: %{}
       }
 
@@ -103,15 +103,6 @@ defmodule MingaAgent.MCP.StdioTransportTest do
 
       transport = StdioTransport.new(port, StdioTransport.max_line_bytes())
 
-      # We cannot use request/3 because we didn't write a request; we wrote the
-      # response via the shell script. Instead, call the module's internal
-      # await path indirectly by writing a no-op request and relying on the
-      # shell script's output as the response. The simpler path: send a
-      # well-formed request to the port (it will be ignored by /bin/sh) and
-      # read the pre-canned response.
-      #
-      # Actually, we can call request/3 with a matching id. The write will go
-      # to sh's stdin (ignored), and the read will pick up the printf output.
       message = %{"jsonrpc" => "2.0", "id" => id, "method" => "test", "params" => %{}}
 
       assert {:ok, %{"value" => value}, _transport} =
@@ -121,8 +112,6 @@ defmodule MingaAgent.MCP.StdioTransportTest do
       assert byte_size(json_line) > line_buffer
 
       close_port(port)
-    catch
-      :exit, _ -> :ok
     end
 
     test "line_too_long error when accumulated noeol chunks exceed the limit" do
@@ -136,7 +125,7 @@ defmodule MingaAgent.MCP.StdioTransportTest do
           :exit_status,
           :use_stdio,
           {:line, 32},
-          {:args, ["-c", "printf '%s' '#{data}'"]},
+          {:args, ["-c", "IFS= read -r request || exit 1; printf '%s' '#{data}'"]},
           {:env, [{~c"PATH", String.to_charlist(System.get_env("PATH"))}]}
         ])
 
@@ -149,8 +138,6 @@ defmodule MingaAgent.MCP.StdioTransportTest do
       assert exceeded > 100
 
       close_port(port)
-    catch
-      :exit, _ -> :ok
     end
   end
 
