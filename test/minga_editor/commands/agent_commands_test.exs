@@ -1242,12 +1242,14 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       {session, %{state | agent_connection: connection}}
     end
 
+    # The cache as it is once a file is in front: bound to the conversation shown last, with the turn it showed then.
     defp shown_last(state, session, target) do
       shell = state.shell_runtime.state
 
       agent =
         shell
         |> MingaEditor.Shell.Traditional.State.agent()
+        |> AgentState.apply_session_snapshot(session, :thinking, nil, nil, nil)
         |> AgentState.project_stop_target(session, target)
 
       shell = MingaEditor.Shell.Traditional.State.replace_agent(shell, agent)
@@ -1276,6 +1278,16 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       stopped = state |> shown_last(last, {"last", "turn-1"}) |> AgentCommands.abort_agent()
 
       assert asked_to_stop(stopped) == [{last, {"last", "turn-2"}}]
+    end
+
+    test "the conversation shown last is stopped even when its turn started after it left the front" do
+      {_other, state} = working(base_state(session: nil), {"other", "turn"})
+      {last, state} = working(state, {"last", "turn-1"})
+
+      # The editor never showed a turn for it: the turn began with a file in front.
+      stopped = state |> shown_last(last, nil) |> AgentCommands.abort_agent()
+
+      assert asked_to_stop(stopped) == [{last, {"last", "turn-1"}}]
     end
 
     test "with several turns working and none shown last, nothing is stopped and one line says why" do

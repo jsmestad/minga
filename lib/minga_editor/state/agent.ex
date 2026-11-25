@@ -8,6 +8,8 @@ defmodule MingaEditor.State.Agent do
 
   On local tab arrival, `MingaEditor.Agent.Arrival` installs the active Session's ordered snapshot without retaining approval or error per tab.
 
+  `session` records which Session the cache was last built from. Session events reach the cache only while that conversation is in front, so with a file in front the cache is a copy from the moment the conversation left. Readers that need a current fact then use `session/1` to find the conversation shown last and read the fact from its owner (`MingaEditor.Agent.WorkspaceStatus`, `MingaEditor.Agent.Tasks`).
+
   Domain-only state (status, model, provider, session ID) lives in the
   composed `MingaAgent.RuntimeState` struct at `runtime`. Lifecycle
   monitoring (Process.monitor) is handled exclusively by
@@ -37,6 +39,7 @@ defmodule MingaEditor.State.Agent do
 
   @typedoc "Agent rendering cache."
   @type t :: %__MODULE__{
+          session: pid() | nil,
           runtime: RuntimeState.t(),
           error: String.t() | nil,
           spinner_timer: {:ok, :timer.tref()} | nil,
@@ -46,7 +49,8 @@ defmodule MingaEditor.State.Agent do
           stop_target: {pid(), {String.t(), String.t()}} | nil
         }
 
-  defstruct runtime: %RuntimeState{},
+  defstruct session: nil,
+            runtime: %RuntimeState{},
             error: nil,
             spinner_timer: nil,
             pending_approval: nil,
@@ -133,7 +137,8 @@ defmodule MingaEditor.State.Agent do
 
     %{
       agent
-      | runtime: runtime,
+      | session: nil,
+        runtime: runtime,
         error: nil,
         pending_approval: nil,
         pending_question: nil,
@@ -232,7 +237,15 @@ defmodule MingaEditor.State.Agent do
       when is_pid(session_pid),
       do: agent
 
-  @doc "Applies the render-cache fields returned by an agent session snapshot."
+  @doc """
+  The Session this cache presents: the conversation in front, or the one shown last once a file is in front.
+
+  A cache that was reset, or never attached, presents none.
+  """
+  @spec session(t()) :: pid() | nil
+  def session(%__MODULE__{session: session}), do: session
+
+  @doc "Applies the render-cache fields returned by an agent session snapshot, and binds the cache to that Session."
   @spec apply_session_snapshot(
           t(),
           pid(),
@@ -257,7 +270,8 @@ defmodule MingaEditor.State.Agent do
 
     %{
       agent
-      | runtime: runtime,
+      | session: session_pid,
+        runtime: runtime,
         pending_approval: bind_approval(session_pid, pending_approval),
         error: error
     }

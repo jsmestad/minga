@@ -11,7 +11,10 @@ defmodule MingaEditor.Agent.WorkspaceStatusTest do
   alias MingaEditor.Agent.StartRequest
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.WorkspaceStatus
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.Tab
+  alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
 
   describe "resolve/3" do
@@ -50,7 +53,8 @@ defmodule MingaEditor.Agent.WorkspaceStatusTest do
         {"active workspace without a Session keeps its stored status", unattached, working, ui,
          :error},
         {"background workspace keeps its stored status", background, nil, ui, :thinking},
-        {"manual workspace follows the live cache", manual, errored, ui, :error},
+        {"manual workspace follows a live cache that presents no conversation", manual, errored,
+         ui, :error},
         {"no workspace follows the live cache", nil, errored, ui, :error},
         {"no workspace and no live cache is idle", nil, nil, ui, :idle}
       ]
@@ -58,6 +62,82 @@ defmodule MingaEditor.Agent.WorkspaceStatusTest do
       for {name, workspace, live, ui, expected} <- cases do
         assert WorkspaceStatus.resolve(workspace, live, ui) == expected, name
       end
+    end
+  end
+
+  describe "active/2 with a file in front" do
+    # The cache as a conversation leaves it: bound to its Session, with the status it had then.
+    defp left_working(session),
+      do: AgentState.apply_session_snapshot(%AgentState{}, session, :thinking, nil, nil, nil)
+
+    defp shell(tab_bar, %AgentState{} = live) do
+      %TraditionalState{}
+      |> TraditionalState.install_tab_bar(tab_bar)
+      |> TraditionalState.replace_agent(live)
+    end
+
+    defp file_in_front(session) do
+      {tab_bar, workspace} =
+        Tab.new_file(1, "manual.ex") |> TabBar.new() |> TabBar.add_workspace("Agent", session)
+
+      {tab_bar, workspace.id}
+    end
+
+    test "speaks the stored status of the conversation shown last, not the cache's copy of it" do
+      session = self()
+      {tab_bar, id} = file_in_front(session)
+      ui = UIState.new()
+
+      # What the conversation's Session reported after it left the front.
+      for stored <- [:thinking, :tool_executing, :approval_waiting, :stopped, :idle, :error] do
+        tab_bar = TabBar.set_workspace_agent_status(tab_bar, id, stored)
+
+        assert WorkspaceStatus.active(shell(tab_bar, left_working(session)), ui) == stored
+      end
+    end
+
+    test "a turn that starts after the conversation left the front is spoken too" do
+      session = self()
+      {tab_bar, id} = file_in_front(session)
+      left_idle = AgentState.apply_session_snapshot(%AgentState{}, session, :idle, nil, nil, nil)
+      tab_bar = TabBar.set_workspace_agent_status(tab_bar, id, :thinking)
+
+      assert WorkspaceStatus.active(shell(tab_bar, left_idle), UIState.new()) == :thinking
+    end
+
+    test "is idle once the conversation shown last has ended" do
+      session = self()
+      {tab_bar, _id} = file_in_front(session)
+      tab_bar = TabBar.session_ended(tab_bar, session, :idle)
+
+      assert WorkspaceStatus.active(shell(tab_bar, left_working(session)), UIState.new()) == :idle
+    end
+
+    test "agrees with the row the Spaces bar shows for that conversation" do
+      session = self()
+      {tab_bar, id} = file_in_front(session)
+      tab_bar = TabBar.set_workspace_agent_status(tab_bar, id, :stopped)
+      live = left_working(session)
+      workspace = TabBar.get_workspace(tab_bar, id)
+
+      assert WorkspaceStatus.active(shell(tab_bar, live), UIState.new()) ==
+               WorkspaceStatus.resolve_in(workspace, 0, live, UIState.new())
+    end
+
+    test "a cache that presents no conversation is the only source" do
+      {tab_bar, _id} = file_in_front(self())
+      unbound = AgentState.set_status(%AgentState{}, :error)
+
+      assert WorkspaceStatus.active(shell(tab_bar, unbound), UIState.new()) == :error
+      assert WorkspaceStatus.active(shell(nil, left_working(self())), UIState.new()) == :thinking
+      assert WorkspaceStatus.active(:another_shell, UIState.new()) == :idle
+    end
+
+    test "a failed start in the file's own conversation needs the user" do
+      {tab_bar, _id} = file_in_front(self())
+      failed = UIState.fail_start(UIState.new(), StartFailure.timed_out(StartRequest.default()))
+
+      assert WorkspaceStatus.active(shell(tab_bar, left_working(self())), failed) == :needs_you
     end
   end
 

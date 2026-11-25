@@ -69,6 +69,17 @@ defmodule MingaEditor.State.AgentTest do
       assert agent.runtime.status == :idle
       assert agent.runtime.active_tool_name == nil
     end
+
+    test "a snapshot binds the cache to its Session, and a reset presents none" do
+      assert AgentState.session(new_agent()) == nil
+
+      agent = AgentState.apply_session_snapshot(new_agent(), self(), :thinking, nil, nil, nil)
+      assert AgentState.session(agent) == self()
+
+      # Status events keep the binding; only a reset drops it.
+      assert agent |> AgentState.set_status(:idle) |> AgentState.session() == self()
+      assert agent |> AgentState.reset_cache() |> AgentState.session() == nil
+    end
   end
 
   describe "reset_cache" do

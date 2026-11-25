@@ -1500,21 +1500,19 @@ defmodule MingaEditor.Commands.Agent do
 
     case Runtime.active_session(state.shell_runtime) do
       session when is_pid(session) -> List.keyfind(stoppable, session, 0) || agent.stop_target
-      nil -> background_turn_to_stop(stoppable, agent.stop_target)
+      nil -> background_turn_to_stop(stoppable, AgentState.session(agent))
     end
   end
 
-  @spec background_turn_to_stop(
-          [{pid(), {String.t(), String.t()}}],
-          {pid(), {String.t(), String.t()}} | nil
-        ) :: {pid(), {String.t(), String.t()}} | :several | nil
+  # `shown_last` is the conversation the modeline of a file speaks for (`MingaEditor.Agent.WorkspaceStatus`).
+  @spec background_turn_to_stop([{pid(), {String.t(), String.t()}}], pid() | nil) ::
+          {pid(), {String.t(), String.t()}} | :several | nil
   defp background_turn_to_stop([], _shown_last), do: nil
   defp background_turn_to_stop([only], _shown_last), do: only
-
-  defp background_turn_to_stop(stoppable, {session, _stale_target}),
-    do: List.keyfind(stoppable, session, 0) || :several
-
   defp background_turn_to_stop(_stoppable, nil), do: :several
+
+  defp background_turn_to_stop(stoppable, shown_last),
+    do: List.keyfind(stoppable, shown_last, 0) || :several
 
   @spec several_working_status() :: String.t()
   defp several_working_status,
