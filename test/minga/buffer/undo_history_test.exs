@@ -1461,17 +1461,16 @@ defmodule Minga.Buffer.UndoHistoryTest do
         into in taken and (into != group or group in absorbers)
       end)
 
+    from_class? = fn step ->
+      Enum.any?(
+        taken,
+        &(step in class.(&1) or step in finals.(dependents_of(provenance, class.(&1))))
+      )
+    end
+
     takes_class? =
       MapSet.size(missing) == 0 and
-        if MapSet.size(extra) == 0,
-          do: absorbed_left?,
-          else:
-            Enum.all?(extra, fn step ->
-              Enum.any?(taken, fn member ->
-                step in class.(member) or
-                  step in finals.(dependents_of(provenance, class.(member)))
-              end)
-            end)
+        if(MapSet.size(extra) == 0, do: absorbed_left?, else: Enum.all?(extra, from_class?))
 
     held_class? =
       MapSet.size(extra) == 0 and MapSet.size(missing) > 0 and
