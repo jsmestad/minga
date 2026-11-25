@@ -224,18 +224,10 @@ final class EditorNSView: MTKView {
 
     // MARK: - Space leader key-chord state
 
-    /// Phase 1: SPC keyDown received, within the 30ms grace window.
-    /// No space has been sent to the BEAM yet. A chord keyDown in this
-    /// state produces a clean leader entry (no flash). A keyUp produces
-    /// a clean space (no latency beyond the grace period).
-    private var spacePending: Bool = false
+    /// Phase of the current SPC press. `SpaceLeaderChord` decides chord versus space; this view only performs its effects.
+    private var spaceLeader = SpaceLeaderChord()
 
-    /// Phase 2: grace timer fired, space was sent to the BEAM.
-    /// A chord keyDown in this state sends retract_and_enter_leader.
-    /// A keyUp just clears the flag (space stays).
-    private var spaceKeyDown: Bool = false
-
-    /// Timer for the grace period (30ms). If it fires, we send the space.
+    /// Timer for the grace period (30ms). If it fires, the held SPC becomes a typed space.
     private var spaceGraceTimer: DispatchWorkItem?
 
     /// Grace period in milliseconds. 30ms is below perceptual threshold for
@@ -681,9 +673,9 @@ final class EditorNSView: MTKView {
         isDraggingScrollIndicator = false
         scrollIndicatorDragOffset = nil
         hardResetSmoothScroll()
-        cancelSpaceGrace()
-        spacePending = false
-        spaceKeyDown = false
+        spaceGraceTimer?.cancel()
+        spaceGraceTimer = nil
+        spaceLeader = SpaceLeaderChord()
         lastCommandHeld = false
         clearOptimisticTextInputMode()
         cancelResizeFlushTask()
@@ -1736,47 +1728,13 @@ final class EditorNSView: MTKView {
         // Skip when IME is composing or when the current mode treats SPC as typed text.
         if !imeComposition.hasMarkedText && !spaceLeaderShouldTreatSpaceLiterally() {
             if let chars = event.charactersIgnoringModifiers, chars == " ", mods == 0 {
-                // Bare SPC keyDown (no modifiers)
-                if event.isARepeat {
-                    // User holding SPC for repeated spaces. Cancel chord detection.
-                    cancelSpaceGrace()
-                    spaceKeyDown = false
-                    sendKeyPress(codepoint: 0x20, modifiers: 0)
-                    return
-                }
-
-                // Start the grace period. Don't send the space yet.
-                spacePending = true
-                spaceKeyDown = false
-                let timer = DispatchWorkItem { [weak self] in
-                    guard let self, self.spacePending else { return }
-                    // Grace period expired. Send the space now.
-                    self.spacePending = false
-                    self.spaceKeyDown = true
-                    self.sendKeyPress(codepoint: 0x20, modifiers: 0)
-                }
-                spaceGraceTimer?.cancel()
-                spaceGraceTimer = timer
-                DispatchQueue.main.asyncAfter(
-                    deadline: .now() + .milliseconds(leaderGraceMs), execute: timer)
+                applySpaceLeader(spaceLeader.spaceDown(isRepeat: event.isARepeat))
                 return
             }
 
-            // Another key arrived. Check chord state.
-            if spacePending {
-                // Clean chord: SPC was never sent. Enter leader directly.
-                cancelSpaceGrace()
-                spacePending = false
-                spaceKeyDown = false
-                sendSpaceLeaderChord(codepoint: codepoint(from: event, mods: mods), modifiers: mods)
-                return
-            }
-
-            if spaceKeyDown {
-                // Fallback chord: SPC was already sent (grace timer fired).
-                // Tell BEAM to retract the space and enter leader.
-                spaceKeyDown = false
-                sendSpaceLeaderRetract(codepoint: codepoint(from: event, mods: mods), modifiers: mods)
+            let effect = spaceLeader.keyDown(codepoint: codepoint(from: event, mods: mods), modifiers: mods)
+            if effect != .passThrough {
+                applySpaceLeader(effect)
                 return
             }
         }
@@ -1851,14 +1809,7 @@ final class EditorNSView: MTKView {
     override func keyUp(with event: NSEvent) {
         // Space leader key-chord: SPC keyUp clears the chord state.
         if let chars = event.charactersIgnoringModifiers, chars == " " {
-            if spacePending {
-                // SPC released within the grace period. It was a tap.
-                // Send the space now (clean, no flash).
-                cancelSpaceGrace()
-                spacePending = false
-                sendKeyPress(codepoint: 0x20, modifiers: 0)
-            }
-            spaceKeyDown = false
+            applySpaceLeader(spaceLeader.spaceUp())
         }
     }
 
@@ -1899,10 +1850,28 @@ final class EditorNSView: MTKView {
 
     // MARK: - Space leader helpers
 
-    /// Cancel the grace period timer without sending the space.
-    private func cancelSpaceGrace() {
+    /// Performs one space-leader effect. The grace timer runs only while the detector holds a pending SPC.
+    private func applySpaceLeader(_ effect: SpaceLeaderChord.Effect) {
         spaceGraceTimer?.cancel()
         spaceGraceTimer = nil
+
+        switch effect {
+        case .passThrough, .consumed:
+            break
+        case .startGrace:
+            let timer = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.applySpaceLeader(self.spaceLeader.graceExpired())
+            }
+            spaceGraceTimer = timer
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(leaderGraceMs), execute: timer)
+        case .sendSpaces(let count):
+            for _ in 0..<count { sendKeyPress(codepoint: 0x20, modifiers: 0) }
+        case .chord(let codepoint, let modifiers):
+            sendSpaceLeaderChord(codepoint: codepoint, modifiers: modifiers)
+        case .retract(let codepoint, let modifiers):
+            sendSpaceLeaderRetract(codepoint: codepoint, modifiers: modifiers)
+        }
     }
 
     /// Extract a codepoint from an event for the chord gui_action.

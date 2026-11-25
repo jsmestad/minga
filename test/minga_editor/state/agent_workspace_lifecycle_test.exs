@@ -20,6 +20,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.Commands.BufferManagement
+  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.Effect.{Outcome, Policy, Request}
   alias MingaEditor.Handlers.EventDispatcher
   alias MingaEditor.Handlers.GuiActionHandler
@@ -365,7 +366,11 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
         }
       end)
 
-    state = MingaEditor.TabWorkflow.switch(state, agent_tab.id)
+    state =
+      state
+      |> MingaEditor.TabWorkflow.switch(agent_tab.id)
+      |> Minga.Test.TranscriptSyncDriver.settle()
+
     assert Runtime.active_session(state.shell_runtime) == session
 
     drained_workspace =
@@ -387,7 +392,11 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert workspace_payload(persisted).remote_session.last_seen_event_id == 42
 
     state = MingaEditor.TabWorkflow.switch(state, initial_tab_id)
-    state = MingaEditor.TabWorkflow.switch(state, agent_tab.id)
+
+    state =
+      state
+      |> MingaEditor.TabWorkflow.switch(agent_tab.id)
+      |> Minga.Test.TranscriptSyncDriver.settle()
 
     assert Minga.Test.TranscriptFixture.messages(state.workspace.agent_ui.panel.transcript) ==
              first_messages
@@ -506,6 +515,49 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert prompt_text(state.workspace.agent_ui) == "restart draft"
     assert TabBar.active(tab_bar).payload.session == new_session
     assert Enum.count(tab_bar.workspaces, &(&1.kind == :agent)) == 1
+  end
+
+  test "with a file in front, a restarted Session is still the conversation shown last" do
+    old = spawn_link(fn -> Process.sleep(:infinity) end)
+    replacement = spawn_link(fn -> Process.sleep(:infinity) end)
+    {state, workspace_id, _file_ref} = state_with_active_agent_workspace(old)
+
+    # The conversation was working when a file in the manual workspace took the front.
+    shell = state.shell_runtime.state
+    {tab_bar, file_tab} = TabBar.add(shell.tab_bar, :file, "manual.ex")
+
+    tab_bar =
+      tab_bar
+      |> TabBar.set_workspace_agent_status(workspace_id, :thinking)
+      |> TabBar.switch_to(file_tab.id)
+
+    agent =
+      shell
+      |> MingaEditor.Shell.Traditional.State.agent()
+      |> AgentState.apply_session_snapshot(old, :thinking, nil, nil, nil)
+
+    shell =
+      shell
+      |> MingaEditor.Shell.Traditional.State.install_tab_bar(tab_bar)
+      |> MingaEditor.Shell.Traditional.State.replace_agent(agent)
+
+    state = %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell)
+    }
+
+    assert MingaEditor.Shell.Runtime.active_session(state.shell_runtime) == nil
+
+    restarted =
+      BufferManagement.handle_agent_session_restarted(state, "id", old, replacement, :killed)
+
+    shell = restarted.shell_runtime.state
+    assert AgentState.session(MingaEditor.Shell.Traditional.State.agent(shell)) == replacement
+
+    # The file's modeline goes on speaking for that conversation, as the Spaces bar does.
+    assert MingaEditor.Agent.WorkspaceStatus.active(shell, restarted.workspace.agent_ui) ==
+             :thinking
   end
 
   test "restarting from a file tab reuses the active agent workspace" do

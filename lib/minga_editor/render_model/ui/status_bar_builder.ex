@@ -92,6 +92,7 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
       status
       | file: %StatusFile{file | icon: icon, icon_color: icon_color},
         message: projected_message(common),
+        message_actions: message_actions(common),
         agent: agent_model(status.agent, content)
     }
   end
@@ -108,6 +109,15 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
         message_count: content.message_count
     }
   end
+
+  # The next steps a notice names show only while its message is the one the echo line shows.
+  @spec message_actions(EditorStatusCommon.t()) :: [Minga.RenderModel.UI.EmptyList.Action.t()]
+  defp message_actions(%EditorStatusCommon{notice: notice, notice_actions: actions} = common)
+       when is_binary(notice) do
+    if projected_message(common) == notice, do: actions, else: []
+  end
+
+  defp message_actions(%EditorStatusCommon{}), do: []
 
   @spec projected_message(EditorStatusCommon.t()) :: String.t() | nil
   defp projected_message(%EditorStatusCommon{

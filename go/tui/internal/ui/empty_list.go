@@ -31,24 +31,52 @@ func emptyListHeader(empty generated.EmptyList, width int, colors emptyListColor
 		lines = append(lines, blank)
 	}
 
-	title := empty.Title
+	// A narrow panel, such as a sidebar, wraps the copy at word boundaries instead of cutting it off. A wrapped title hangs under its first word, not under the glyph.
+	lead, hang := "", ""
 	if empty.Glyph != "" {
-		title = empty.Glyph + gap(emptyStateGlyphToTitle) + title
+		lead = empty.Glyph + gap(emptyStateGlyphToTitle)
+		hang = strings.Repeat(" ", ansi.StringWidth(lead))
 	}
 	titleStyle := emptyStateTitleText.style(p).Inherit(base).Foreground(colors.text)
-	lines = append(lines, base.Width(width).Render(inset+titleStyle.Render(ansi.Truncate(title, room, "…"))))
+	for index, line := range wrapText(empty.Title, max(room-len(hang), 1)) {
+		prefix := hang
+		if index == 0 {
+			prefix = lead
+		}
+		lines = append(lines, base.Width(width).Render(inset+titleStyle.Render(prefix+line)))
+	}
 	for range emptyStateTitleToWhy.rows() {
 		lines = append(lines, blank)
 	}
 
 	if strings.TrimSpace(empty.Why) != "" {
 		whyStyle := base.Foreground(colors.muted)
-		lines = append(lines, base.Width(width).Render(inset+whyStyle.Render(ansi.Truncate(empty.Why, room, "…"))))
+		for _, line := range wrapText(empty.Why, room) {
+			lines = append(lines, base.Width(width).Render(inset+whyStyle.Render(line)))
+		}
 	}
 	for range emptyStateWhyToActions.rows() {
 		lines = append(lines, blank)
 	}
 	return lines
+}
+
+// wrapText breaks text into lines of at most width cells, at word boundaries where it can and inside a word that is wider than the line.
+func wrapText(text string, width int) []string {
+	return strings.Split(ansi.Wrap(text, width, ""), "\n")
+}
+
+// treeEmptyListColors are the colour roles of an empty list in a sidebar panel: the file tree or Git status.
+func (m Model) treeEmptyListColors() emptyListColors {
+	theme := m.palette()
+	return emptyListColors{
+		surface:       theme.TreeSurface(),
+		text:          theme.TreeText(),
+		muted:         theme.TreeMutedText(),
+		accent:        theme.Accent(),
+		selection:     theme.TreeSelection(),
+		selectionText: theme.TreeSelectionText(),
+	}
 }
 
 // emptyListActions draws the action list: a fixed key column in the accent colour, then the label. The selected row is a full-width selection bar whose key is a reverse-video chip.

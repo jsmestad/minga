@@ -179,7 +179,7 @@ func TestLaunchpadLeaderOwnerPreventsNavigationBehindWhichKey(t *testing.T) {
 	)
 	applyProductionFrame(&model, 2, 1, 1,
 		protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{
-			Opcode: generated.OPGuiWhichKey, Which: protocol.WhichKey{Visible: true, Prefix: "SPC"},
+			Opcode: generated.OPGuiWhichKey, Which: protocol.WhichKey{Visible: true, Path: "SPC"},
 		}},
 		focusOwnerCommand(0, 0),
 	)

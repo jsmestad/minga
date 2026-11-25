@@ -83,10 +83,13 @@ version = "2.0.0"
 # protocol_version 42 appends a section group (string16) to picker_item. Frontends draw a non-selectable header when the group changes between adjacent items.
 # protocol_version 43 appends a failed Agent start's remedy (u8), action label (string16) and key hint (string16) to the gui_agent_chat lifecycle section, adds agent status 6 (needs you) to the chat, status bar and workspace status bytes, and adds the agent_start_remedy gui_action.
 # protocol_version 44 appends the Agent lifecycle notice's headline (string16) and draft note (string16) to the gui_agent_chat lifecycle section, so frontends render the BEAM's copy instead of authoring their own.
+# protocol_version 49 adds the gui_status_bar message_actions section (0x13: the next steps a notice names) and a trailing empty_list on gui_git_status (always; an empty title when the tree is not clean) and on gui_file_tree (when the folder is empty).
 # protocol_version 45 adds the empty_list structure (the empty-state anatomy: glyph, title, why line, selected action and actions) and the gui_picker empty section (0x07) that carries it when a picker offers next steps instead of results. An action's id is the command it runs; a click sends the existing execute_command gui_action with it.
 # protocol_version 46 adds the gui_picker movement_keys section (0x08) (the keys that move the highlighted row, resolved from the picker keymap scope, so frontends preview exactly those keys) and the picker_fit gui_action (the result rows the frontend's picker list shows, which sizes a picker page).
 # protocol_version 47 adds two frontend-to-BEAM events. frontend_foreground (0x13, the slot batch_end left in version 3) says whether the frontend is in the foreground: the terminal reports its focus, macOS its active state. terminal_report (0x62) is the terminal frontend's snapshot of which terminal features it detected, misses or replaces with a fallback, with the enums terminal_feature and terminal_feature_status.
-protocol_version = 47
+# protocol_version 50 adds a third byte, source, to each entry of terminal_report (0x62), with the enum terminal_feature_source: how the terminal frontend settled a feature (the terminal answered, a known terminal, a timeout, or the user).
+# protocol_version 48 reshapes gui_which_key: the panel names its path, breadcrumb, group count and hints, and each entry carries its raw key, section, live count and macOS ⌘ equivalent. Each count carries a tone byte (0 muted, 1 needs you, 2 error) naming its colour role. Paging and icons are retired.
+protocol_version = 50
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -250,7 +253,7 @@ value = 0x60
 direction = "frontend_to_beam"
 
 # The terminal frontend's report of terminal features: count(u8), then count entries of
-# feature(u8, terminal_feature) + status(u8, terminal_feature_status).
+# feature(u8, terminal_feature) + status(u8, terminal_feature_status) + source(u8, terminal_feature_source).
 # Every event is a complete snapshot that replaces the earlier one. The frontend sends it after ready,
 # with the answers it has and "pending" for queries the terminal has not answered, and again when an entry changes.
 # A frontend without a host terminal never sends it.
@@ -659,6 +662,13 @@ direction = "parser_to_beam"
 category = "parser_responses"
 name = "document_symbols"
 value = 0x3E
+direction = "parser_to_beam"
+
+# The last message of every parse: every other result of the parse precedes it.
+[[opcodes]]
+category = "parser_responses"
+name = "parse_complete"
+value = 0x3F
 direction = "parser_to_beam"
 
 # Native GUI chrome and forward-compatible GUI commands.
@@ -1629,6 +1639,22 @@ values = [
   { name = "fallback", value = 4 },
 ]
 
+# How the terminal frontend settled a feature's status, so `:checkhealth terminal` can say why.
+# unsettled: still pending, or the frontend does not detect the feature. answered: the terminal answered a query or
+# showed the feature by using it. known_terminal: the terminal is in the frontend's table of known terminals.
+# timeout: the terminal did not answer in time. user: the user forced it (the `:terminal_features` option).
+[[enums]]
+name = "terminal_feature_source"
+repr = "u8"
+default = "unsettled"
+values = [
+  { name = "unsettled", value = 0 },
+  { name = "answered", value = 1 },
+  { name = "known_terminal", value = 2 },
+  { name = "timeout", value = 3 },
+  { name = "user", value = 4 },
+]
+
 [[enums]]
 name = "agent_approval_decision"
 repr = "u8"
@@ -2060,12 +2086,32 @@ fields = [
 ]
 
 [[structures]]
-name = "which_key_binding"
+name = "which_key_crumb"
+fields = [
+  { name = "key", type = "string8" },
+  { name = "label", type = "string16" },
+  { name = "path", type = "string16" },
+]
+
+[[structures]]
+name = "which_key_hint"
+fields = [
+  { name = "key", type = "string8" },
+  { name = "label", type = "string16" },
+]
+
+[[structures]]
+name = "which_key_entry"
 fields = [
   { name = "kind", type = "u8" },
   { name = "key", type = "string8" },
-  { name = "desc", type = "string16" },
-  { name = "icon", type = "string8" },
+  { name = "codepoint", type = "u32" },
+  { name = "modifiers", type = "u8" },
+  { name = "label", type = "string16" },
+  { name = "section", type = "string16" },
+  { name = "count", type = "string16" },
+  { name = "count_tone", type = "u8" },
+  { name = "platform_key", type = "string8" },
 ]
 
 
@@ -2433,6 +2479,15 @@ fields = [
   { name = "generation", type = "u32" },
   { name = "item_id", type = "string16" },
 ]
+
+# Present only while the echo line shows a notice that names next steps ("No code actions at 3:7" then "SPC a ? ask Minga"). Each action's id is the command a click runs through execute_command; key and label are drawn after the message (docs/design/anatomy.md, "Notice").
+[[sections]]
+opcode = "gui_status_bar"
+id = 0x13
+name = "message_actions"
+layout = "counted_array"
+count_type = "u8"
+element = "empty_list_action"
 
 # gui_gutter (0x7B) sections
 
@@ -2855,6 +2910,8 @@ fields = [
   { name = "terminal_collapsed", type = "u8" },
   { name = "panel_id", type = "u64" }, # 0 means no installed panel
   { name = "commit_target_id", type = "u64" }, # stable across status refreshes of the same commit target
+  # A clean tree's empty-state anatomy: what happened and the next steps. An empty title means there is none.
+  { name = "empty", type = "struct", element = "empty_list" },
 ]
 
 [[command_fields]]

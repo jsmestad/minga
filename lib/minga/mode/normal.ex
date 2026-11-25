@@ -194,16 +194,6 @@ defmodule Minga.Mode.Normal do
     end
   end
 
-  # Ctrl+D / Ctrl+U while in leader mode → paginate which-key popup.
-  # These are intercepted before the trie walk so they don't cancel the leader sequence.
-  def handle_key({?d, 0x02}, %ModeState{leader_node: node} = state) when is_map(node) do
-    execute_discarding_count(:whichkey_next_page, state)
-  end
-
-  def handle_key({?u, 0x02}, %ModeState{leader_node: node} = state) when is_map(node) do
-    execute_discarding_count(:whichkey_prev_page, state)
-  end
-
   # Backspace below the top of a leader sequence goes up one level and keeps
   # which-key open on the parent group (docs/design/surfaces.md, Which-key). At `SPC`
   # itself the stack is empty, so Backspace falls through and cancels.

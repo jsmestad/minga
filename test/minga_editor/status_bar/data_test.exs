@@ -172,7 +172,7 @@ defmodule MingaEditor.StatusBar.DataTest do
       assert status.pending_keys == "\"a2d"
     end
 
-    test "clears when the which-key popup is showing" do
+    test "keeps echoing while the which-key popup is showing" do
       state =
         state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
         |> then(fn state ->
@@ -197,7 +197,7 @@ defmodule MingaEditor.StatusBar.DataTest do
 
       state = WhichKeyWorkflow.reveal(state, state.shell_runtime.state.whichkey.generation)
       %Data{common: %Common{status: status}, content: %StatusBuffer{}} = Data.from_state(state)
-      assert status.pending_keys == ""
+      assert status.pending_keys == "2"
     end
   end
 

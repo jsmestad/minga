@@ -28,8 +28,9 @@ func (m Model) floatingOverlayLayers() []*lipgloss.Layer {
 			layers = append(layers, popupShadow(overlay)...)
 		}
 	}
+	// Which-key sits directly on the modeline, so it casts no shadow (a shadow would paint over the modeline).
 	if which := m.floatingWhichKeyLayer(); which != nil {
-		layers = append(layers, popupShadow(which)...)
+		layers = append(layers, which)
 	}
 	if picker := m.floatingPickerLayer(); picker != nil {
 		layers = append(layers, popupShadow(picker)...)

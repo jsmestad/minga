@@ -108,19 +108,24 @@ type CompletionItem struct {
 	MatchRanges []generated.CompletionMatchRange
 }
 
-type WhichKey struct {
-	Visible   bool
-	Prefix    string
-	Page      byte
-	PageCount byte
-	Bindings  []WhichKeyBinding
-}
+// Count tones for WhichKey.CountTone and WhichKeyEntry.CountTone: the colour role a count draws in.
+const (
+	WhichKeyCountMuted    uint8 = 0
+	WhichKeyCountNeedsYou uint8 = 1
+	WhichKeyCountError    uint8 = 2
+)
 
-type WhichKeyBinding struct {
-	Kind        byte
-	Key         string
-	Description string
-	Icon        string
+// WhichKey is the which-key panel (docs/GUI_PROTOCOL.md, gui_which_key). Entries arrive in display order; consecutive
+// entries with the same Section form one section. A count's tone names its colour role: WhichKeyCountMuted,
+// WhichKeyCountNeedsYou or WhichKeyCountError.
+type WhichKey struct {
+	Visible    bool
+	Path       string
+	Breadcrumb []generated.WhichKeyCrumb
+	Count      string
+	CountTone  uint8
+	Hints      []generated.WhichKeyHint
+	Entries    []generated.WhichKeyEntry
 }
 
 type Picker struct {
@@ -207,6 +212,8 @@ type FileTree struct {
 	Width      uint16
 	Error      string
 	Rows       []FileTreeRow
+	// Empty is the empty-folder anatomy (status 2): what happened and the next steps, which run their command on click.
+	Empty *generated.EmptyList
 }
 
 type FileTreeRow struct {
@@ -238,9 +245,11 @@ type StatusBar struct {
 	Filename    string
 	Filetype    string
 	Message     string
-	PendingKeys string
-	Operation   *generated.GuiStatusBarOperation
-	Review      *StatusReview
+	// MessageActions are the next steps the echo-line notice names, drawn after Message; a click runs the action's command.
+	MessageActions []generated.EmptyListAction
+	PendingKeys    string
+	Operation      *generated.GuiStatusBarOperation
+	Review         *StatusReview
 	// Agent is set only for agent-content status bars (content kind 1). It carries
 	// the BEAM-owned conversation total, not the resident transcript count.
 	Agent *StatusAgent
@@ -294,6 +303,8 @@ type GitStatus struct {
 	StashCount        uint16
 	TerminalCursor    uint32
 	TerminalCollapsed byte
+	// Empty is a clean tree's empty-state anatomy: what happened and the next steps, which run their command on click.
+	Empty *generated.EmptyList
 }
 
 type GitStatusEntry struct {

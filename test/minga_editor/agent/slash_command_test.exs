@@ -73,6 +73,22 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     end
   end
 
+  # Stands in for a session whose conversation can only be read here.
+  defmodule ReadOnlySession do
+    use GenServer
+
+    @line "This conversation can only be read here. Start a new conversation, or restore it in ~/code/api."
+
+    def start_link(_opts), do: GenServer.start_link(__MODULE__, nil)
+
+    @impl GenServer
+    def init(nil), do: {:ok, nil}
+
+    @impl GenServer
+    def handle_call(request, _from, state) when request in [:compact, :continue],
+      do: {:reply, {:error, {:conversation_read_only, @line}}, state}
+  end
+
   defp start_session(dir, opts \\ []) do
     event_log =
       start_supervised!(
@@ -633,6 +649,15 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       dynamic = SlashCommand.dynamic_commands()
       # Should return empty (no extensions with slash commands)
       refute Enum.any?(dynamic, &(&1.name == "greet"))
+    end
+  end
+
+  describe "a conversation that can only be read" do
+    test "/compact and /continue change nothing and report no error: the conversation has said why" do
+      state = mock_state(session: start_supervised!(ReadOnlySession))
+
+      assert {:ok, ^state} = SlashCommand.execute(state, "/compact")
+      assert {:ok, ^state} = SlashCommand.execute(state, "/continue")
     end
   end
 end

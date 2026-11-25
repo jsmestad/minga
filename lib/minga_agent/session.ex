@@ -135,6 +135,14 @@ defmodule MingaAgent.Session do
           archived?: boolean(),
           artifact_runtime: ArtifactRuntime.t() | nil,
           workdir: String.t() | nil,
+          # `place` is where this session's provider works.
+          # `working_folder` is where the conversation it shows works.
+          # They differ only for a restored conversation that belongs somewhere else.
+          place: MingaAgent.WorkingFolder.t() | nil,
+          # What the conversation's record says about its folder. `:here` for one that began in this session.
+          recorded_folder: MingaAgent.WorkingFolder.t() | :undecided | :here,
+          working_folder: MingaAgent.WorkingFolder.t() | nil,
+          stored_working_folder: term(),
           event_log_server: GenServer.server(),
           event_log_failure: event_log_failure() | nil,
           provider: ProviderLifecycle.t(),
@@ -143,6 +151,7 @@ defmodule MingaAgent.Session do
           credential_readiness: Credentials.readiness(),
           connection: Connection.t(),
           turn_execution: TurnExecution.t(),
+          admission: admission() | nil,
           transcript: Transcript.t(),
           continuation: Continuation.t(),
           checklist: Checklist.t(),
@@ -278,6 +287,20 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:send_attached_prompt, record_id, shown, content})
   end
 
+  @doc """
+  Starts a composer send without blocking the caller.
+
+  `send` names the send: `{:idle, record_id}` sends only while no turn is active, `:prompt` sends or steers, `:follow_up` queues, and `{:attached, record_id, shown}` sends a draft with attachments. The reply is the answer of the matching synchronous send, except that a prompt that started a turn answers `{:sent, queue_target}` instead of `:ok`, so the caller knows the turn's queue target without waiting for its event.
+
+  The Session never waits for the provider's prefix on this path. A send whose prefix is still being counted is admitted when the count ends, and the reply arrives then; meanwhile the Session reports the turn as working, and Stop ends the admission. The request monitors the Session, so a Session that exits answers with its exit.
+  """
+  @spec request_composer_send(pid(), composer_send(), TurnExecution.content()) ::
+          :gen_server.request_id()
+  def request_composer_send(session, send, content)
+      when is_pid(session) and node(session) == node() and
+             (is_binary(content) or is_list(content)),
+      do: :gen_server.send_request(session, {:composer_send, send, content})
+
   @doc "Aborts only when the Session still has the expected identity."
   @spec abort_for_id(GenServer.server(), String.t()) :: :ok | {:error, :session_id_changed}
   def abort_for_id(session, expected_session_id) when is_binary(expected_session_id) do
@@ -303,6 +326,12 @@ defmodule MingaAgent.Session do
   """
   @spec stop_turn(GenServer.server(), {String.t(), String.t()}) :: :ok | {:error, :stale_turn}
   def stop_turn(session, target), do: GenServer.call(session, {:stop_turn, target})
+
+  @doc "Starts `stop_turn/2` without blocking the caller; the reply is its answer, or the Session's exit."
+  @spec request_stop_turn(pid(), {String.t(), String.t()}) :: :gen_server.request_id()
+  def request_stop_turn(session, {_, _} = target)
+      when is_pid(session) and node(session) == node(),
+      do: :gen_server.send_request(session, {:stop_turn, target})
 
   @doc "Aborts the current agent operation."
   @spec abort(GenServer.server()) :: :ok
@@ -429,6 +458,16 @@ defmodule MingaAgent.Session do
   def request_editor_snapshot(session) when is_pid(session) and node(session) == node() do
     :gen_server.send_request(session, :editor_snapshot)
   end
+
+  @doc """
+  Starts a read of the transcript changes since `cursor` without blocking the caller.
+
+  The reply has the arrival transcript's shape: a replacement carries the changed-file counts, and an invalid cursor answers with a reset snapshot, so one read is always enough.
+  """
+  @spec request_editor_transcript(pid(), :snapshot | Transcript.Cursor.t()) ::
+          :gen_server.request_id()
+  def request_editor_transcript(session, cursor) when is_pid(session) and node(session) == node(),
+    do: :gen_server.send_request(session, {:editor_transcript, cursor})
 
   @doc "Requests the final local arrival snapshot in the subscriber's Session event order."
   @spec request_editor_arrival(pid(), :snapshot | Transcript.Cursor.t(), pid(), reference()) ::
@@ -950,7 +989,8 @@ defmodule MingaAgent.Session do
   def broker_detach(session, authority), do: GenServer.call(session, {:broker_detach, authority})
 
   @doc "Manually triggers context compaction on the provider."
-  @spec compact(GenServer.server()) :: {:ok, String.t()} | {:error, String.t()}
+  @spec compact(GenServer.server()) ::
+          {:ok, String.t()} | {:error, String.t() | {:conversation_read_only, String.t()}}
   def compact(session) do
     GenServer.call(session, :compact, 30_000)
   end
@@ -1247,6 +1287,24 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:send_follow_up, content})
   end
 
+  @typedoc """
+  A composer send whose provider request is still being prepared (`TurnExecution`'s `:admitting`). Its caller is answered when the provider reports its prefix: `token` names that report, and `request_id` is the id the turn's request will carry, so the Stop and queue targets shown during admission stay valid once the turn starts.
+  """
+  @type admission :: %{
+          token: reference(),
+          from: GenServer.from(),
+          request_id: String.t(),
+          content: TurnExecution.content(),
+          draft_revision: draft_admission()
+        }
+
+  @typedoc "Which composer send `request_composer_send/3` starts."
+  @type composer_send ::
+          {:idle, record_id :: String.t()}
+          | :prompt
+          | :follow_up
+          | {:attached, record_id :: String.t(), [DraftAttachment.identity(), ...]}
+
   @type queue_target :: {record_id :: String.t(), request_id :: String.t(), pos_integer()}
   @type queue_draft :: {non_neg_integer(), String.t(), [DraftAttachment.identity()], String.t()}
 
@@ -1531,6 +1589,10 @@ defmodule MingaAgent.Session do
       archived?: false,
       artifact_runtime: Keyword.get(opts, :artifact_runtime),
       workdir: Keyword.get(opts, :workdir),
+      place: nil,
+      recorded_folder: :here,
+      working_folder: nil,
+      stored_working_folder: nil,
       event_log_server: Keyword.get(opts, :event_log_server, EventLog),
       event_log_failure: nil,
       provider: provider,
@@ -1539,6 +1601,7 @@ defmodule MingaAgent.Session do
       credential_readiness: credential_readiness,
       connection: Connection.new(resolution_problem),
       turn_execution: TurnExecution.new(),
+      admission: nil,
       transcript:
         Transcript.new(
           [Message.system(initial_system_message(timestamp, Keyword.get(opts, :startup_notice)))],
@@ -1620,6 +1683,40 @@ defmodule MingaAgent.Session do
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
+
+  # The Editor's composer send. Unlike `send_prompt/2` it never makes the Session wait for the
+  # provider's prefix: a send whose prefix is still being counted is admitted when the count
+  # ends, and `from` is answered then. A send that went answers `{:sent, queue_target}`, so
+  # the caller knows the turn's queue target without waiting for its event.
+  def handle_call({:composer_send, {:idle, record_id}, content}, {caller, _tag} = from, state)
+      when node(caller) == node() and (is_binary(content) or is_list(content)) do
+    cond do
+      state.session_id != record_id ->
+        {:reply, {:error, :stale_target}, state}
+
+      TurnExecution.active?(state.turn_execution) ->
+        {:reply, {:error, :queue_target_unavailable}, state}
+
+      true ->
+        content |> handle_prompt(:steering, state, :preserve, from) |> reply_to_composer_send()
+    end
+  end
+
+  def handle_call({:composer_send, :prompt, content}, from, state)
+      when is_binary(content) or is_list(content),
+      do: content |> handle_prompt(:steering, state, :preserve, from) |> reply_to_composer_send()
+
+  def handle_call({:composer_send, :follow_up, content}, from, state)
+      when is_binary(content) or is_list(content),
+      do: content |> handle_prompt(:follow_up, state, :preserve, from) |> reply_to_composer_send()
+
+  def handle_call(
+        {:composer_send, {:attached, record_id, shown}, content},
+        {caller, _tag} = from,
+        state
+      )
+      when node(caller) == node(),
+      do: handle_attached_prompt(state, record_id, shown, content, from)
 
   def handle_call({:send_prompt_as, client_pid, content}, _from, state) do
     if driver_allowed?(state, client_pid) do
@@ -1966,6 +2063,10 @@ defmodule MingaAgent.Session do
     {:reply, Transcript.since(state.transcript, cursor), state}
   end
 
+  def handle_call({:editor_transcript, cursor}, _from, state) do
+    {:reply, editor_arrival_transcript(state.transcript, state.file_changes, cursor), state}
+  end
+
   def handle_call({:editor_arrival, cursor, subscriber, arrival}, _from, state)
       when is_pid(subscriber) and node(subscriber) == node() and is_reference(arrival) do
     case SubscriberLifecycle.role(state.subscriber_lifecycle, subscriber) do
@@ -2213,7 +2314,8 @@ defmodule MingaAgent.Session do
     role = Keyword.get(opts, :role, SubscriberLifecycle.default_role(state.subscriber_lifecycle))
 
     case reply_to_subscribe(state, pid, role, Keyword.get(opts, :questions?, false) == true) do
-      {:reply, {:ok, _attachment}, subscribed} -> {:reply, :ok, subscribed}
+      # A driver that answers questions changes the prefix, so it is counted again for it.
+      {:reply, {:ok, _attachment}, subscribed} -> {:reply, :ok, warm_native_prefix(subscribed)}
       {:reply, {:error, _reason}, _state} = error -> error
     end
   end
@@ -2260,17 +2362,10 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(:compact, _from, state) do
-    if function_exported?(state.provider.module, :compact, 2) do
-      result =
-        state.provider.module.compact(
-          ProviderLifecycle.pid(state.provider),
-          state.continuation.messages
-        )
-
-      reply_to_compact(state, result)
-    else
-      {:reply, {:error, "Provider does not support compaction"}, state}
-    end
+    # A conversation that can only be read is not rewritten either.
+    if MingaAgent.WorkingFolder.read_only?(state.working_folder),
+      do: decline_read_only(state),
+      else: compact_conversation(state)
   end
 
   def handle_call(:continue, _from, %{provider: provider} = state)
@@ -2278,17 +2373,13 @@ defmodule MingaAgent.Session do
     {:reply, {:error, "No active provider"}, state}
   end
 
-  def handle_call(:continue, _from, state) do
-    source_execution = state.turn_execution
-
-    case TurnExecution.begin_turn(source_execution) do
-      {:ok, execution} ->
-        reply_to_continue(state, execution)
-
-      {:error, :turn_active} ->
-        reply_to_continue(state, nil)
-    end
+  def handle_call(:continue, _from, %{working_folder: {:unavailable, _reason}} = state) do
+    if MingaAgent.WorkingFolder.read_only?(state.working_folder),
+      do: decline_read_only(state),
+      else: continue_turn(state)
   end
+
+  def handle_call(:continue, _from, state), do: continue_turn(state)
 
   def handle_call(
         {:activate_skill, _name},
@@ -3761,7 +3852,12 @@ defmodule MingaAgent.Session do
 
   @spec reset_new_session(state(), String.t()) :: state()
   defp reset_new_session(state, session_id) do
-    state = interrupt_question(state)
+    # A send still being admitted belongs to the conversation that is being replaced.
+    state =
+      state
+      |> cancel_admission({:error, admission_replaced_message()})
+      |> interrupt_question()
+
     source_execution = state.turn_execution
     state = interrupt_execution_approval(state, source_execution)
 
@@ -3780,11 +3876,15 @@ defmodule MingaAgent.Session do
     state = cancel_save_timer(state)
     execution = TurnExecution.reset(source_execution)
 
+    # A new conversation in this session works where the session does, whatever the previous one was.
     state = %{
       state
       | session_id: session_id,
         custom_title: nil,
         archived?: false,
+        recorded_folder: :here,
+        working_folder: state.place,
+        stored_working_folder: nil,
         created_at: now
     }
 
@@ -4148,6 +4248,12 @@ defmodule MingaAgent.Session do
     end
   end
 
+  def handle_info(
+        {:prefix_preview_ready, token, reply},
+        %{admission: %{token: token} = admission} = state
+      ),
+      do: finish_admission(state, admission, reply)
+
   def handle_info(_msg, state) do
     {:noreply, state}
   end
@@ -4265,6 +4371,9 @@ defmodule MingaAgent.Session do
   defp active_turn_target(%{provider: provider}) when ProviderLifecycle.is_detached(provider),
     do: nil
 
+  defp active_turn_target(%{session_id: session_id, admission: %{request_id: request_id}}),
+    do: {session_id, request_id}
+
   defp active_turn_target(%{
          session_id: session_id,
          continuation: %Continuation{active_request: %Request{request_id: request_id}},
@@ -4297,6 +4406,9 @@ defmodule MingaAgent.Session do
 
     state =
       state
+      |> cancel_admission(
+        {:error, "Stopped before the message was sent. Your draft is preserved."}
+      )
       |> cancel_waiting_tool(source_execution)
       |> interrupt_execution_approval(source_execution)
       |> interrupt_question()
@@ -4867,6 +4979,8 @@ defmodule MingaAgent.Session do
 
   @spec restore_turn_execution(state(), TurnExecution.t()) :: state()
   defp restore_turn_execution(state, execution) do
+    # A send still being admitted belongs to the conversation that is being replaced.
+    state = cancel_admission(state, {:error, admission_replaced_message()})
     source_execution = state.turn_execution
 
     state =
@@ -5286,9 +5400,10 @@ defmodule MingaAgent.Session do
           state(),
           String.t(),
           [DraftAttachment.identity()],
-          String.t() | [ReqLLM.Message.ContentPart.t()]
-        ) :: {:reply, term(), state()} | {:stop, term(), term(), state()}
-  defp handle_attached_prompt(state, record_id, shown, content) do
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          GenServer.from() | nil
+        ) :: {:reply, term(), state()} | {:noreply, state()} | {:stop, term(), term(), state()}
+  defp handle_attached_prompt(state, record_id, shown, content, reply_to \\ nil) do
     with :ok <- validate_composer_record(state, record_id),
          false <- TurnExecution.active?(state.turn_execution),
          {:ok, revision, retained} <-
@@ -5300,7 +5415,7 @@ defmodule MingaAgent.Session do
            ),
          {:ok, prompt} <-
            DraftAttachment.append_to_prompt(content, retained, state.model_selection) do
-      handle_draft_prompt(state, prompt, revision)
+      handle_draft_prompt(state, prompt, revision, reply_to)
     else
       true -> {:reply, {:error, :attachment_send_busy}, state}
       {:error, _reason} = error -> {:reply, error, state}
@@ -5310,11 +5425,12 @@ defmodule MingaAgent.Session do
   @spec handle_draft_prompt(
           state(),
           String.t() | [ReqLLM.Message.ContentPart.t()],
-          SessionStore.draft_admission()
+          SessionStore.draft_admission(),
+          GenServer.from() | nil
         ) ::
-          {:reply, term(), state()} | {:stop, term(), term(), state()}
-  defp handle_draft_prompt(state, prompt, admission) do
-    case handle_prompt(prompt, :steering, state, admission) do
+          {:reply, term(), state()} | {:noreply, state()} | {:stop, term(), term(), state()}
+  defp handle_draft_prompt(state, prompt, admission, reply_to \\ nil) do
+    case handle_prompt(prompt, :steering, state, admission, reply_to) do
       {:reply,
        {:error,
         {:conversation_persistence_failed, {:draft_commit_uncertain, :admit_draft, _, _}} = reason},
@@ -5330,15 +5446,16 @@ defmodule MingaAgent.Session do
           String.t() | [ReqLLM.Message.ContentPart.t()],
           TurnExecution.prompt_kind(),
           state(),
-          draft_admission()
-        ) :: {:reply, term(), state()}
-  defp handle_prompt(content, kind, state, draft_revision \\ :preserve)
+          draft_admission(),
+          GenServer.from() | nil
+        ) :: {:reply, term(), state()} | {:noreply, state()}
+  defp handle_prompt(content, kind, state, draft_revision \\ :preserve, reply_to \\ nil)
 
-  defp handle_prompt(_content, _kind, %{credential_readiness: :checking} = state, _draft_revision) do
+  defp handle_prompt(_content, _kind, %{credential_readiness: :checking} = state, _draft, _to) do
     {:reply, {:error, :credentials_pending}, state}
   end
 
-  defp handle_prompt(_content, _kind, %{credentials_configured: false} = state, _draft_revision) do
+  defp handle_prompt(_content, _kind, %{credentials_configured: false} = state, _draft, _to) do
     # No usable provider yet. Refuse locally so callers can preserve the draft instead of clearing it.
     {:reply, {:error, :credentials_not_configured}, state}
   end
@@ -5347,7 +5464,8 @@ defmodule MingaAgent.Session do
          content,
          kind,
          %{provider: provider} = state,
-         draft_revision
+         draft_revision,
+         reply_to
        )
        when ProviderLifecycle.is_detached(provider) do
     {state, refresh_result} = refresh_credentials_state_result(state)
@@ -5360,11 +5478,78 @@ defmodule MingaAgent.Session do
         {:reply, {:error, :provider_not_ready}, state}
 
       {_provider, :ok} ->
-        handle_prompt(content, kind, state, draft_revision)
+        handle_prompt(content, kind, state, draft_revision, reply_to)
     end
   end
 
-  defp handle_prompt(content, kind, state, draft_revision) do
+  defp handle_prompt(content, kind, state, draft_revision, reply_to) do
+    if MingaAgent.WorkingFolder.read_only?(state.working_folder) do
+      refuse_read_only(state)
+    else
+      admit_prompt(content, kind, state, draft_revision, reply_to)
+    end
+  end
+
+  # A restored conversation that does not belong in this session's folder would be refused further down,
+  # for its changed instructions, in words about prefixes.
+  # It is refused here, in the words it already shows.
+  @spec refuse_read_only(state()) :: {:reply, {:error, term()}, state()}
+  defp refuse_read_only(state) do
+    line = MingaAgent.WorkingFolder.refusal(state.working_folder)
+    broadcast(state, {:conversation_read_only, line})
+    {:reply, {:error, {:conversation_read_only, line}}, say_declined(state, line)}
+  end
+
+  # A continue or a compaction carries no draft.
+  # The conversation already shows its line, so the answer is that line and the card again, and no new row.
+  @spec decline_read_only(state()) :: {:reply, {:error, term()}, state()}
+  defp decline_read_only(state) do
+    line = MingaAgent.WorkingFolder.refusal(state.working_folder)
+    {:reply, {:error, {:conversation_read_only, line}}, say_read_only_line(state)}
+  end
+
+  # Nothing failed: the person asked for something this conversation cannot do here.
+  # The answer is one calm line in the transcript, said once in a row, and the turn status stays what it was.
+  @spec say_declined(state(), String.t()) :: state()
+  defp say_declined(state, line) do
+    # The line ends with the folder's path, so what happened to the draft comes first.
+    message = "Your draft was not sent and is preserved. #{line}"
+
+    case Transcript.last_message(state.transcript) do
+      {:system, ^message, :info} -> state
+      _other -> state |> append_system_message(message, :info) |> notify_messages_changed()
+    end
+  end
+
+  @spec compact_conversation(state()) :: {:reply, term(), state()}
+  defp compact_conversation(state) do
+    if function_exported?(state.provider.module, :compact, 2) do
+      result =
+        state.provider.module.compact(
+          ProviderLifecycle.pid(state.provider),
+          state.continuation.messages
+        )
+
+      reply_to_compact(state, result)
+    else
+      {:reply, {:error, "Provider does not support compaction"}, state}
+    end
+  end
+
+  @spec continue_turn(state()) :: {:reply, term(), state()}
+  defp continue_turn(state) do
+    case TurnExecution.begin_turn(state.turn_execution) do
+      {:ok, execution} ->
+        reply_to_continue(state, execution)
+
+      {:error, :turn_active} ->
+        reply_to_continue(state, nil)
+    end
+  end
+
+  @spec admit_prompt(term(), atom(), state(), term(), GenServer.from() | nil) ::
+          {:reply, term(), state()} | {:noreply, state()}
+  defp admit_prompt(content, kind, state, draft_revision, reply_to) do
     case TurnExecution.admit_prompt(state.turn_execution, kind, content) do
       {:queued, _execution} when draft_revision != :preserve ->
         {:reply, {:error, :attachment_send_busy}, state}
@@ -5376,7 +5561,7 @@ defmodule MingaAgent.Session do
         {:reply, {:error, :effect_reconciliation_required}, state}
 
       {:send_now, execution} ->
-        send_new_turn(content, state, execution, draft_revision)
+        send_new_turn(content, state, execution, draft_revision, reply_to)
 
       {:error, :prompt_queue_full} = error ->
         {:reply, error, state}
@@ -5404,6 +5589,13 @@ defmodule MingaAgent.Session do
 
   @spec queue_target_for_record(state(), String.t()) ::
           {:ok, queue_target()} | {:error, :not_persistent | :stale_target | :turn_not_active}
+  defp queue_target_for_record(%{admission: %{request_id: request_id}} = state, record_id) do
+    with :ok <- validate_composer_record(state, record_id) do
+      {next, _, _, _} = TurnExecution.pending_inputs(state.turn_execution)
+      {:ok, {record_id, request_id, next}}
+    end
+  end
+
   defp queue_target_for_record(state, record_id) do
     with :ok <- validate_composer_record(state, record_id),
          true <- TurnExecution.active?(state.turn_execution),
@@ -5489,6 +5681,11 @@ defmodule MingaAgent.Session do
   end
 
   @spec validate_queue_request(state(), String.t()) :: :ok | {:error, :stale_request}
+  # While a send is admitted, its turn's request does not exist yet. The queue target shown
+  # for it carries the id that request will have, and an input queued into it is kept when the
+  # turn starts.
+  defp validate_queue_request(%{admission: %{request_id: request_id}}, request_id), do: :ok
+
   defp validate_queue_request(state, request_id) do
     if Continuation.accepts?(state.continuation, request_id),
       do: :ok,
@@ -5619,42 +5816,172 @@ defmodule MingaAgent.Session do
           String.t() | [ReqLLM.Message.ContentPart.t()],
           state(),
           TurnExecution.t(),
-          draft_admission()
-        ) :: {:reply, term(), state()}
-  defp send_new_turn(content, state, execution, draft_revision) do
+          draft_admission(),
+          GenServer.from() | nil
+        ) :: {:reply, term(), state()} | {:noreply, state()}
+  defp send_new_turn(content, state, execution, draft_revision, reply_to) do
     case dispatch_user_prompt_submit(state, content) do
-      :ok -> begin_new_turn(content, state, execution, draft_revision)
+      :ok -> begin_new_turn(content, state, execution, draft_revision, reply_to)
       {:error, %HookResult{} = result} -> reply_to_prompt_veto(state, result)
     end
   end
 
+  # A caller that can be answered later (`reply_to`) never makes the Session wait for the
+  # provider's prefix: the send is admitted when the provider reports it (`finish_admission/3`).
   @spec begin_new_turn(
           String.t() | [ReqLLM.Message.ContentPart.t()],
           state(),
           TurnExecution.t(),
-          draft_admission()
-        ) :: {:reply, term(), state()}
-  defp begin_new_turn(content, state, execution, draft_revision) do
-    case prepare_provider_request(state) do
+          draft_admission(),
+          GenServer.from() | nil
+        ) :: {:reply, term(), state()} | {:noreply, state()}
+  defp begin_new_turn(content, state, execution, draft_revision, reply_to) do
+    wait = if reply_to, do: :defer, else: :wait
+
+    case prepare_provider_request(state, wait) do
       {:ok, prepared} ->
         admit_new_turn(content, prepared, execution, draft_revision)
+
+      {:pending, token} ->
+        {:noreply, begin_admission(state, token, reply_to, content, draft_revision)}
 
       {:error, reason} ->
         reply_to_prompt_admission_failure(state, reason)
     end
   end
 
+  @spec begin_admission(
+          state(),
+          reference(),
+          GenServer.from(),
+          TurnExecution.content(),
+          draft_admission()
+        ) :: state()
+  defp begin_admission(state, token, from, content, draft_revision) do
+    {:ok, admitting} = TurnExecution.begin_admission(state.turn_execution)
+
+    admission = %{
+      token: token,
+      from: from,
+      request_id: new_request_id(),
+      content: content,
+      draft_revision: draft_revision
+    }
+
+    state = announce_turn_status(%{state | admission: admission}, admitting)
+    %{state | turn_execution: admitting}
+  end
+
+  # The provider reported the prefix an admission waited for. The execution leaves `:admitting`
+  # first, so the turn then starts, or its refusal is reported, exactly as for a send whose
+  # prefix was ready at once.
+  @spec finish_admission(state(), admission(), term()) ::
+          {:noreply, state()} | {:stop, term(), state()}
+  defp finish_admission(state, admission, reply) do
+    case TurnExecution.end_admission(state.turn_execution) do
+      {:ok, idle} ->
+        %{state | admission: nil, turn_execution: idle}
+        |> start_admitted_turn(admission, reply)
+        |> answer_admission(admission)
+
+      {:error, :not_admitting} ->
+        # The execution left the admission without answering its caller. The send is refused,
+        # so the caller keeps its draft.
+        GenServer.reply(admission.from, {:error, admission_replaced_message()})
+        {:noreply, %{state | admission: nil}}
+    end
+  end
+
+  @spec start_admitted_turn(state(), admission(), term()) :: {:reply, term(), state()}
+  defp start_admitted_turn(state, admission, reply) do
+    with {:ok, candidate, token, result} <- reply,
+         {:ok, prepared, _result} <-
+           commit_native_prefix_preview(state, :current, candidate, token, result),
+         {:ok, prepared} <- compact_request_continuation(prepared),
+         {:ok, started} <- TurnExecution.begin_turn(prepared.turn_execution) do
+      admit_new_turn(
+        admission.content,
+        prepared,
+        started,
+        admission.draft_revision,
+        admission.request_id
+      )
+    else
+      {:error, reason} -> reply_to_prompt_admission_failure(state, reason)
+    end
+  end
+
+  # An admitted draft whose commit is uncertain stops the Session, as it does for a send whose
+  # prefix was ready at once (`handle_draft_prompt/4`).
+  @spec answer_admission({:reply, term(), state()}, admission()) ::
+          {:noreply, state()} | {:stop, term(), state()}
+  defp answer_admission(
+         {:reply,
+          {:error,
+           {:conversation_persistence_failed, {:draft_commit_uncertain, :admit_draft, _, _}} =
+             reason} = answer, failed},
+         admission
+       ) do
+    GenServer.reply(admission.from, answer)
+    {:stop, reason, failed}
+  end
+
+  defp answer_admission(reply, admission) do
+    {:reply, answer, next} = reply_to_composer_send(reply)
+    GenServer.reply(admission.from, answer)
+    {:noreply, next}
+  end
+
+  @spec admission_replaced_message() :: String.t()
+  defp admission_replaced_message,
+    do: "Not sent: the conversation changed before the message was sent. Your draft is preserved."
+
+  # Ends an admission that will not be finished (a Stop, an abort, a provider that exited): its
+  # caller is answered now, and the provider's count goes on so the next send finds its result.
+  @spec cancel_admission(state(), term()) :: state()
+  defp cancel_admission(%{admission: nil} = state, _answer), do: state
+
+  defp cancel_admission(%{admission: %{token: token, from: from}} = state, answer) do
+    if pid = ProviderLifecycle.pid(state.provider), do: discard_native_prefix_preview(pid, token)
+    GenServer.reply(from, answer)
+    %{state | admission: nil}
+  end
+
+  # The provider that was counting an admission's prefix is gone: the send is refused the way
+  # a send to a provider that is still starting is, and the execution is idle again.
+  @spec end_admission_without_provider(state()) :: state()
+  defp end_admission_without_provider(%{admission: nil} = state), do: state
+
+  defp end_admission_without_provider(%{admission: %{from: from}} = state) do
+    GenServer.reply(from, {:error, :provider_not_ready})
+    state = %{state | admission: nil}
+
+    case TurnExecution.end_admission(state.turn_execution) do
+      {:ok, idle} -> %{announce_turn_status(state, idle) | turn_execution: idle}
+      {:error, :not_admitting} -> state
+    end
+  end
+
+  # A composer send that went tells its caller the queue target of the turn it started.
+  @spec reply_to_composer_send({:reply, term(), state()} | {:noreply, state()}) ::
+          {:reply, term(), state()} | {:noreply, state()}
+  defp reply_to_composer_send({:reply, :ok, state}),
+    do: {:reply, {:sent, displayed_queue_target(state)}, state}
+
+  defp reply_to_composer_send(other), do: other
+
   @spec admit_new_turn(
           String.t() | [ReqLLM.Message.ContentPart.t()],
           state(),
           TurnExecution.t(),
-          draft_admission()
+          draft_admission(),
+          String.t() | nil
         ) :: {:reply, term(), state()}
-  defp admit_new_turn(content, state, execution, draft_revision) do
+  defp admit_new_turn(content, state, execution, draft_revision, request_id \\ nil) do
     {user_message, send_content} = build_user_message(content)
     candidate = append_msg(state, user_message)
 
-    case admit_provider_request(state, candidate, send_content, draft_revision) do
+    case admit_provider_request(state, candidate, send_content, draft_revision, request_id) do
       {:ok, request, admitted} ->
         admitted =
           admitted
@@ -6270,7 +6597,12 @@ defmodule MingaAgent.Session do
         state
 
       records ->
-        if notice_wake_ready?(state), do: start_job_notice_turn(state, records), else: state
+        # A conversation that can only be read starts no turn of its own either.
+        ready? =
+          not MingaAgent.WorkingFolder.read_only?(state.working_folder) and
+            notice_wake_ready?(state)
+
+        if ready?, do: start_job_notice_turn(state, records), else: state
     end
   end
 
@@ -6481,6 +6813,12 @@ defmodule MingaAgent.Session do
   defp notify_subscriber_connected(pid, state) do
     send(pid, {:agent_event, self(), {:credentials_status, state.credential_readiness}})
     send(pid, {:agent_event, self(), {:connection_changed, connection_snapshot(state)}})
+
+    # A subscriber that arrives during a turn learns which turn it can stop; later changes
+    # are broadcast to every subscriber.
+    if target = active_turn_target(state),
+      do: send(pid, {:agent_event, self(), {:stop_target_changed, target}})
+
     notify_retained_event_log_failure(pid, state.event_log_failure)
   end
 
@@ -7688,9 +8026,10 @@ defmodule MingaAgent.Session do
     end
   end
 
-  @spec prepare_provider_request(state()) :: {:ok, state()} | {:error, term()}
-  defp prepare_provider_request(state) do
-    with {:ok, prepared, _result} <- refresh_continuation_prefix(state, :current) do
+  @spec prepare_provider_request(state(), :wait | :defer) ::
+          {:ok, state()} | {:pending, reference()} | {:error, term()}
+  defp prepare_provider_request(state, wait \\ :wait) do
+    with {:ok, prepared, _result} <- refresh_continuation_prefix(state, :current, wait) do
       compact_request_continuation(prepared)
     end
   end
@@ -7699,12 +8038,24 @@ defmodule MingaAgent.Session do
           state(),
           state(),
           String.t() | [ReqLLM.Message.ContentPart.t()],
-          draft_admission()
+          draft_admission(),
+          String.t() | nil
         ) :: {:ok, Request.t(), state()} | {:error, term(), state()}
-  defp admit_provider_request(previous, candidate, content, draft_revision \\ :preserve) do
+  defp admit_provider_request(
+         previous,
+         candidate,
+         content,
+         draft_revision \\ :preserve,
+         request_id \\ nil
+       ) do
     with {:ok, turn_id} <- request_turn_id(candidate),
          {:ok, request, continuation} <-
-           Continuation.begin_request(candidate.continuation, new_request_id(), turn_id, content) do
+           Continuation.begin_request(
+             candidate.continuation,
+             request_id || new_request_id(),
+             turn_id,
+             content
+           ) do
       commit_admitted_request(previous, candidate, request, continuation, draft_revision)
     else
       {:error, reason} -> {:error, reason, previous}
@@ -8674,6 +9025,76 @@ defmodule MingaAgent.Session do
     state |> attach_provider_process(pid) |> finish_provider_attachment()
   end
 
+  # The provider decides where it works when it first starts.
+  # The session reads that once and pins it into the provider's start options,
+  # so a provider that starts again cannot decide again.
+  # A conversation that began in this session works in the same place.
+  # A restored conversation keeps the folder from its record.
+  @spec capture_place(state()) :: state()
+  defp capture_place(%{place: nil} = state) do
+    case provider_working_folder(state) do
+      nil -> state
+      place -> state |> pin_place(place) |> place_conversation()
+    end
+  end
+
+  defp capture_place(state), do: state
+
+  @spec pin_place(state(), MingaAgent.WorkingFolder.t()) :: state()
+  defp pin_place(state, place) do
+    lifecycle = state.provider
+
+    pinned =
+      ProviderLifecycle.replace(
+        lifecycle,
+        lifecycle.model_name,
+        lifecycle.provider_name,
+        Keyword.put(lifecycle.opts, :working_folder, place)
+      )
+
+    %{state | place: place, provider: pinned}
+  end
+
+  # Decides the conversation's folder again now that the session's place is known.
+  # A provider that starts after a restore must never give the restored conversation its own folder.
+  @spec place_conversation(state()) :: state()
+  defp place_conversation(state),
+    do: %{state | working_folder: conversation_folder(state, state.recorded_folder)}
+
+  # A conversation that began here, or a record that never ran a turn, works where the session does.
+  # A restored one continues only when its folder is that place, and otherwise can only be read.
+  @spec conversation_folder(state(), MingaAgent.WorkingFolder.t() | :undecided | :here) ::
+          MingaAgent.WorkingFolder.t() | nil
+  defp conversation_folder(state, recorded) when recorded in [:here, :undecided],
+    do: state.place
+
+  defp conversation_folder(state, {:unavailable, :not_recorded} = recorded) do
+    # A record that names no folder, shown by a provider that has none: folders are not their concern.
+    if declares_folder?(state.provider.module),
+      do: MingaAgent.WorkingFolder.in_place(recorded, session_place(state)),
+      else: nil
+  end
+
+  defp conversation_folder(state, recorded),
+    do: MingaAgent.WorkingFolder.in_place(recorded, session_place(state))
+
+  # Only a provider that declares a folder has one. For any other provider the session records none.
+  @spec provider_working_folder(state()) :: MingaAgent.WorkingFolder.t() | nil
+  defp provider_working_folder(state) do
+    answer =
+      dispatch_optional(state.provider.module, :working_folder, [
+        ProviderLifecycle.pid(state.provider)
+      ])
+
+    case answer do
+      {kind, root} = folder when kind in [:project, :folder] and is_binary(root) -> folder
+      {:unavailable, _reason} = unavailable -> unavailable
+      _not_supported -> nil
+    end
+  catch
+    :exit, _reason -> nil
+  end
+
   @spec attach_provider_process(state(), pid()) :: state()
   defp attach_provider_process(state, pid) do
     Process.unlink(pid)
@@ -8695,11 +9116,15 @@ defmodule MingaAgent.Session do
 
     state = clear_provider_start_error(state)
     state = %{state | connection: Connection.provider_recovered(state.connection)}
+    state = capture_place(state)
 
     state = apply_pending_thinking_level(state)
     state = maybe_show_auth_onboarding(state)
     dispatch_session_start(state)
-    publish_connection(state)
+
+    state
+    |> publish_connection()
+    |> warm_native_prefix()
   end
 
   @spec clear_provider_start_error(state()) :: state()
@@ -8732,6 +9157,7 @@ defmodule MingaAgent.Session do
   @spec handle_provider_death(state(), term()) :: state()
   defp handle_provider_death(state, reason) do
     Minga.Log.warning(:agent, "[Agent.Session] provider process died: #{inspect(reason)}")
+    state = end_admission_without_provider(state)
     {:failed, lifecycle, lease} = ProviderLifecycle.failure(state.provider, reason)
     release_provider_lease(lease)
 
@@ -9185,23 +9611,34 @@ defmodule MingaAgent.Session do
     end
   end
 
-  @spec refresh_continuation_prefix(state(), term()) ::
-          {:ok, state(), term()} | {:error, term()}
+  # `:defer` answers `{:pending, token}` when the provider is still counting the prefix, and
+  # the provider's `{:prefix_preview_ready, token, reply}` finishes it; `:wait` waits for that
+  # report for a short time and refuses after it.
+  @spec refresh_continuation_prefix(state(), term(), :wait | :defer) ::
+          {:ok, state(), term()} | {:pending, reference()} | {:error, term()}
+  defp refresh_continuation_prefix(state, operation, wait \\ :wait)
+
   defp refresh_continuation_prefix(
          %{continuation: %Continuation{active_request: %Request{}}},
-         _operation
+         _operation,
+         _wait
        ),
        do: {:error, :request_active}
 
   defp refresh_continuation_prefix(
          %{continuation: %Continuation{tool_checkpoint: %{}}},
-         _operation
+         _operation,
+         _wait
        ),
        do: {:error, :effect_reconciliation_required}
 
+  defp refresh_continuation_prefix(%{admission: %{}}, _operation, _wait),
+    do: {:error, :request_active}
+
   defp refresh_continuation_prefix(
          %{provider: %{module: MingaAgent.Providers.Native}} = state,
-         operation
+         operation,
+         wait
        ) do
     provider_pid = ProviderLifecycle.pid(state.provider)
 
@@ -9219,16 +9656,19 @@ defmodule MingaAgent.Session do
         do: {:with_questions, preview_operation},
         else: preview_operation
 
-    case preview_native_prefix(provider_pid, preview_operation) do
+    case preview_native_prefix(provider_pid, preview_operation, wait) do
       {:ok, candidate, token, result} ->
         commit_native_prefix_preview(state, operation, candidate, token, result)
+
+      {:pending, token} ->
+        {:pending, token}
 
       {:error, _reason} = error ->
         error
     end
   end
 
-  defp refresh_continuation_prefix(state, :current) do
+  defp refresh_continuation_prefix(state, :current, _wait) do
     case state.provider.module.get_state(ProviderLifecycle.pid(state.provider)) do
       {:ok, %{system_prompt: prompt}} when is_binary(prompt) ->
         identity = %{native_contract: :provider_owned, provider: state.provider.module}
@@ -9246,7 +9686,7 @@ defmodule MingaAgent.Session do
     end
   end
 
-  defp refresh_continuation_prefix(_state, _operation),
+  defp refresh_continuation_prefix(_state, _operation, _wait),
     do: {:error, :provider_prefix_transition_unavailable}
 
   @spec question_schema_enabled?(state(), Prefix.t() | :unknown, term()) :: boolean()
@@ -9275,18 +9715,70 @@ defmodule MingaAgent.Session do
 
   defp question_schema_enabled?(_state, :unknown, _operation), do: false
 
-  @spec preview_native_prefix(pid(), term()) :: term()
-  defp preview_native_prefix(provider, operation) do
+  # How long a caller that cannot be answered later waits for a prefix the provider is still
+  # counting. The count is not stopped when the wait ends, so the next ask finds its result.
+  @prefix_count_wait 3_000
+
+  @spec preview_native_prefix(pid(), term(), :wait | :defer) :: term()
+  defp preview_native_prefix(provider, operation, wait) do
     token = make_ref()
 
     try do
-      GenServer.call(provider, {:preview_prefix, token, operation})
+      case GenServer.call(provider, {:preview_prefix, token, operation}) do
+        {:pending, ^token} when wait == :wait -> await_native_prefix(provider, token)
+        reply -> reply
+      end
     catch
       :exit, reason ->
         discard_native_prefix_preview(provider, token)
         {:error, {:provider_unavailable, reason}}
     end
   end
+
+  @spec await_native_prefix(pid(), reference()) :: term()
+  defp await_native_prefix(provider, token) do
+    receive do
+      {:prefix_preview_ready, ^token, reply} -> reply
+    after
+      @prefix_count_wait ->
+        discard_native_prefix_preview(provider, token)
+
+        {:error,
+         "The model is still counting its fixed instructions and tools. Try again in a moment"}
+    end
+  end
+
+  # The session asks its provider to count the prefix before the first send needs it, so that
+  # send finds it ready. Only the Native provider counts; the cast is ignored by the rest.
+  @spec warm_native_prefix(state()) :: state()
+  defp warm_native_prefix(
+         %{
+           provider: %{module: MingaAgent.Providers.Native} = provider,
+           continuation: %Continuation{active_request: nil},
+           admission: nil
+         } = state
+       ) do
+    selected =
+      PrefixStore.resolve(state.continuation.prefixes, state.continuation.prefixes.selected)
+
+    operation =
+      case selected do
+        %Prefix{skills: skills} -> {:selected, :current, skills}
+        :unknown -> :current
+      end
+
+    operation =
+      if question_schema_enabled?(state, selected, :current),
+        do: {:with_questions, operation},
+        else: operation
+
+    if pid = ProviderLifecycle.pid(provider),
+      do: GenServer.cast(pid, {:warm_prefix, self(), operation})
+
+    state
+  end
+
+  defp warm_native_prefix(state), do: state
 
   @spec validate_native_prefix_preview(pid(), reference(), [ReqLLM.Message.t()]) ::
           :ok | {:error, term()}
@@ -9629,7 +10121,11 @@ defmodule MingaAgent.Session do
   @spec save_to_disk(state(), snapshot_write_mode()) :: :ok | {:error, term()}
 
   defp save_to_disk(state, draft_revision \\ :preserve) do
-    if Persistence.enabled?(state.persistence) do
+    # A session that can only show a conversation does not write its record.
+    # What it adds to the transcript, the line that says where the conversation belongs and a refused prompt,
+    # is said here and not kept.
+    if Persistence.enabled?(state.persistence) and
+         not MingaAgent.WorkingFolder.read_only?(state.working_folder) do
       now = DateTime.to_iso8601(DateTime.utc_now())
       last_message_at = DateTime.to_iso8601(Transcript.last_changed_at(state.transcript))
       {messages, message_ids} = Transcript.messages_and_ids(state.transcript)
@@ -9656,7 +10152,11 @@ defmodule MingaAgent.Session do
         file_changes: state.file_changes,
         job_ledger: state.job_ledger,
         pending_inputs: TurnExecution.pending_inputs(state.turn_execution),
-        continuation: state.continuation
+        continuation: state.continuation,
+        # The conversation's folder, never the place of the session that happens to show it.
+        working_folder: state.working_folder,
+        # A session whose provider declares no folder writes back the entry its record had.
+        stored_working_folder: state.stored_working_folder
       }
 
       case draft_revision do
@@ -9964,7 +10464,12 @@ defmodule MingaAgent.Session do
               checklist: Checklist.new(),
               checklist_archive: ChecklistArchive.new(),
               file_changes: [],
-              job_ledger: JobLedger.new()
+              job_ledger: JobLedger.new(),
+              # A record that holds only a draft has no conversation yet, so it begins in this session's place.
+              # Nothing of the conversation shown before, its folder least of all, carries over.
+              recorded_folder: :here,
+              working_folder: state.place,
+              stored_working_folder: nil
           }
 
           {:ok, restored} = install_loaded_session_state(state, staged, execution, now)
@@ -9988,9 +10493,20 @@ defmodule MingaAgent.Session do
     route = resolve_saved_model_selection(state, data)
 
     case restore_loaded_session(state, data, route) do
-      {:ok, restored} -> {:reply, :ok, restored}
+      {:ok, restored} -> {:reply, :ok, record_recovered_folder(restored, data)}
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
+  end
+
+  # A record without a folder entry gets one as soon as the restore is done, so the next restore reads the entry.
+  # The save is this session's own next message.
+  # A conversation that can only be read is not written.
+  @spec record_recovered_folder(state(), SessionStore.session_data()) :: state()
+  defp record_recovered_folder(%{working_folder: nil} = state, _data), do: state
+
+  defp record_recovered_folder(state, data) do
+    if Map.get(data, :stored_working_folder) == nil, do: send(self(), :save_session)
+    state
   end
 
   @spec restore_loaded_session(state(), SessionStore.session_data(), saved_route()) ::
@@ -10168,6 +10684,9 @@ defmodule MingaAgent.Session do
         job_ledger:
           JobLedger.restore(Map.get(data, :job_ledger, JobLedger.new()), DateTime.utc_now()),
         provider: lifecycle,
+        recorded_folder: recorded_folder(data),
+        working_folder: conversation_folder(state, recorded_folder(data)),
+        stored_working_folder: Map.get(data, :stored_working_folder),
         credential_readiness: credential_readiness,
         credentials_configured: credentials_configured,
         model_selection: selection,
@@ -10190,6 +10709,66 @@ defmodule MingaAgent.Session do
         reservation
       )
     end
+  end
+
+  # What the record holds decides: its folder entry, else the system instructions it ran with,
+  # never its messages or tool output.
+  @spec recorded_folder(SessionStore.session_data()) :: MingaAgent.WorkingFolder.t() | :undecided
+  defp recorded_folder(data) do
+    MingaAgent.WorkingFolder.of_record(
+      Map.get(data, :stored_working_folder),
+      captured_instructions(data),
+      history?(data)
+    )
+  end
+
+  @spec history?(SessionStore.session_data()) :: boolean()
+  defp history?(%{continuation: %Continuation{messages: [_first | _rest]}}), do: true
+  defp history?(_never_ran), do: false
+
+  @spec captured_instructions(SessionStore.session_data()) :: [String.t()]
+  defp captured_instructions(%{continuation: %Continuation{} = continuation}),
+    do: Continuation.captured_instructions(continuation)
+
+  # Where this session's provider works, or will work once it starts: what it decided,
+  # else what its start options say.
+  @spec session_place(state()) :: MingaAgent.WorkingFolder.t() | nil
+  defp session_place(%{place: {_kind, _detail} = place}), do: place
+
+  defp session_place(%{provider: %ProviderLifecycle{opts: opts}}) do
+    case {Keyword.get(opts, :working_folder), Keyword.get(opts, :project_view),
+          Keyword.get(opts, :project_root)} do
+      {{_kind, _detail} = decided, _view, _root} -> decided
+      {nil, %{project_root: root}, _root} when is_binary(root) -> {:project, root}
+      {nil, nil, root} when is_binary(root) -> {:project, root}
+      {nil, _view, _root} -> nil
+    end
+  end
+
+  @spec declares_folder?(module()) :: boolean()
+  defp declares_folder?(module),
+    do: Code.ensure_loaded?(module) and function_exported?(module, :working_folder, 1)
+
+  # A conversation that cannot continue here says so once, in its own transcript,
+  # so a later restore of the same record does not say it again.
+  # The Editor offers the next step from the event.
+  @spec say_read_only(state()) :: state()
+  defp say_read_only(state) do
+    if MingaAgent.WorkingFolder.read_only?(state.working_folder),
+      do: say_read_only_line(state),
+      # A conversation that continues here replaces whatever the Editor still shows about one that could not.
+      else: broadcast(state, :conversation_continues)
+  end
+
+  @spec say_read_only_line(state()) :: state()
+  defp say_read_only_line(state) do
+    line = MingaAgent.WorkingFolder.refusal(state.working_folder)
+    broadcast(state, {:conversation_read_only, line})
+
+    said? =
+      Enum.any?(Transcript.messages(state.transcript), &match?({:system, ^line, _level}, &1))
+
+    if said?, do: state, else: append_system_message(state, line, :info)
   end
 
   @spec saved_route_selection(saved_route()) ::
@@ -10353,6 +10932,9 @@ defmodule MingaAgent.Session do
         file_changes: staged.file_changes,
         persistence: persistence,
         provider: staged.provider,
+        recorded_folder: staged.recorded_folder,
+        working_folder: staged.working_folder,
+        stored_working_folder: staged.stored_working_folder,
         credential_readiness: staged.credential_readiness,
         credentials_configured: staged.credentials_configured,
         model_selection: staged.model_selection,
@@ -10367,6 +10949,7 @@ defmodule MingaAgent.Session do
     loaded = invalidate_connection(loaded, :conversation)
     loaded = retain_resolution_problem(loaded, staged.connection.resolver_problem)
     loaded = settle_loaded_provider(loaded, state.provider)
+    loaded = say_read_only(loaded)
     finish_loaded_session_restore(loaded)
   end
 

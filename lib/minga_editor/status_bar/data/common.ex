@@ -17,6 +17,7 @@ defmodule MingaEditor.StatusBar.Data.Common do
           buf_index: pos_integer(),
           buf_count: non_neg_integer(),
           notice: String.t() | nil,
+          notice_actions: [Minga.RenderModel.UI.EmptyList.Action.t()],
           selected_operation: Operation.t() | nil,
           agent_status_command: String.t() | nil,
           agent_theme_colors: Theme.Agent.t() | nil,
@@ -50,6 +51,7 @@ defmodule MingaEditor.StatusBar.Data.Common do
     :merge_conflict_count
   ]
   defstruct [
+              notice_actions: [],
               plan_limit: nil,
               needs_you_count: 0,
               minga_progress: nil,

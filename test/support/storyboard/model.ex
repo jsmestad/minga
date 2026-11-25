@@ -20,6 +20,7 @@ defmodule Minga.Test.Storyboard.Model do
           | :hover_popup
           | :float_popup
           | :file_tree
+          | :git_status
           | :agent_chat
           | :empty_state
           | :bottom_panel
@@ -27,8 +28,15 @@ defmodule Minga.Test.Storyboard.Model do
           | :observatory
           | :extension_overlay
 
-  @typedoc "One which-key entry: its key, label and kind."
-  @type which_key_entry :: %{key: String.t(), label: String.t(), kind: :command | :group}
+  @typedoc "One which-key entry: its key, label, kind, section, and live count with the colour role it draws in."
+  @type which_key_entry :: %{
+          key: String.t(),
+          label: String.t(),
+          kind: :command | :group,
+          section: String.t(),
+          count: String.t(),
+          count_tone: Minga.RenderModel.UI.WhichKey.tone()
+        }
 
   @typedoc "The which-key panel, when open."
   @type which_key :: %{prefix: String.t(), entries: [which_key_entry()]}
@@ -108,6 +116,15 @@ defmodule Minga.Test.Storyboard.Model do
   @spec open?(t(), surface()) :: boolean()
   def open?(%__MODULE__{surfaces: surfaces}, surface), do: surface in surfaces
 
+  @doc "True when the echo line shows a notice that names next steps, such as an empty answer from code actions."
+  @spec notice_with_next_steps?(t()) :: boolean()
+  def notice_with_next_steps?(%__MODULE__{
+        ui: %UI{status_bar: %{data: %{message_actions: [_ | _]}}}
+      }),
+      do: true
+
+  def notice_with_next_steps?(%__MODULE__{}), do: false
+
   @doc "The title of the empty state an open picker shows instead of results, or `nil`."
   @spec picker_empty_title(t()) :: String.t() | nil
   def picker_empty_title(%__MODULE__{ui: %UI{picker: %{visible?: true, empty: %{title: title}}}}),
@@ -181,6 +198,7 @@ defmodule Minga.Test.Storyboard.Model do
       hover_popup: visible?(ui.hover_popup),
       float_popup: visible?(ui.float_popup),
       file_tree: match?(%{status: status} when status != :hidden, ui.file_tree),
+      git_status: match?(%{panel_id: id} when id != 0, ui.git_status),
       agent_chat: visible?(ui.agent_chat),
       empty_state: visible?(ui.empty_state),
       bottom_panel: visible?(ui.bottom_panel),
@@ -201,10 +219,21 @@ defmodule Minga.Test.Storyboard.Model do
   defp visible_field(_part, _field), do: nil
 
   @spec which_key(Minga.RenderModel.UI.WhichKey.t() | nil) :: which_key() | nil
-  defp which_key(%{visible: true, prefix: prefix, bindings: bindings}) do
+  defp which_key(%{visible: true, path: path, entries: entries}) do
     %{
-      prefix: prefix,
-      entries: Enum.map(bindings, &%{key: &1.key, label: &1.description, kind: &1.kind})
+      prefix: path,
+      entries:
+        Enum.map(
+          entries,
+          &%{
+            key: &1.key,
+            label: &1.label,
+            kind: &1.kind,
+            section: &1.section,
+            count: &1.count.text,
+            count_tone: &1.count.tone
+          }
+        )
     }
   end
 

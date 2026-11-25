@@ -34,9 +34,31 @@ defmodule MingaEditor.FileTree.Rows do
   def from_tree(%FileTree{} = tree, opts \\ []) do
     tree
     |> FileTree.visible_entries()
+    |> naming_row(tree, Keyword.get(opts, :editing))
     |> Enum.with_index()
     |> from_entries(tree, opts)
   end
+
+  # An empty folder has no row for a new file or folder's name to replace.
+  # Naming the first one therefore gets its own row at the top.
+  @spec naming_row([FileTree.entry()], FileTree.t(), FileTreeState.editing() | nil) :: [
+          FileTree.entry()
+        ]
+  defp naming_row([], %FileTree{root: root}, %{type: type, index: 0})
+       when type in [:new_file, :new_folder] do
+    [
+      %{
+        path: Path.join(root, ""),
+        name: "",
+        dir?: type == :new_folder,
+        depth: 0,
+        last_child?: true,
+        guides: []
+      }
+    ]
+  end
+
+  defp naming_row(entries, _tree, _editing), do: entries
 
   @doc "Builds semantic rows from already-selected visible entries."
   @spec from_entries([indexed_entry()], FileTree.t(), options()) :: [Row.t()]

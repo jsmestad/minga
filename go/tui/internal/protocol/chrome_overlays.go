@@ -28,45 +28,63 @@ func decodeCompletion(payload []byte) (Completion, string, int) {
 	}, stringsJoin(labels, "  "), offset
 }
 
+// decodeWhichKey reads gui_which_key through the schema-generated element decoders. A payload cut short keeps
+// what decoded so far, so a malformed frame never swallows the commands after it.
 func decodeWhichKey(payload []byte) (WhichKey, string, int) {
 	if len(payload) < 2 || payload[1] == 0 {
 		return WhichKey{}, "", min(len(payload), 2)
 	}
-	if len(payload) < 8 {
-		return WhichKey{Visible: true}, "", len(payload)
+	end := len(payload)
+	which := WhichKey{Visible: true}
+	path, offset, ok := readString16(payload, 2)
+	if !ok {
+		return which, "", end
 	}
-	prefix, offset, ok := readString16(payload, 2)
-	if !ok || len(payload) < offset+4 {
-		return WhichKey{Visible: true}, "", len(payload)
+	which.Path = path
+	if offset >= end {
+		return which, path, end
 	}
-	which := WhichKey{
-		Visible:   true,
-		Prefix:    prefix,
-		Page:      payload[offset],
-		PageCount: payload[offset+1],
+	crumbs := int(payload[offset])
+	offset++
+	for range crumbs {
+		crumb, next, err := generated.DecodeWhichKeyCrumb(payload, offset, end)
+		if err != nil {
+			return which, path, end
+		}
+		which.Breadcrumb = append(which.Breadcrumb, crumb)
+		offset = next
 	}
-	count := int(u16(payload, offset+2))
-	offset += 4
-	which.Bindings = make([]WhichKeyBinding, 0, count)
-	summary := make([]string, 0, count)
-	for i := 0; i < count && len(payload) >= offset+6; i++ {
-		binding := WhichKeyBinding{Kind: payload[offset]}
-		offset++
-		var ok bool
-		binding.Key, offset, ok = readString8(payload, offset)
-		if !ok {
-			break
+	count, offset, ok := readString16(payload, offset)
+	if !ok || offset+1 >= end {
+		return which, path, end
+	}
+	which.Count = count
+	which.CountTone = payload[offset]
+	offset++
+	hints := int(payload[offset])
+	offset++
+	for range hints {
+		hint, next, err := generated.DecodeWhichKeyHint(payload, offset, end)
+		if err != nil {
+			return which, path, end
 		}
-		binding.Description, offset, ok = readString16(payload, offset)
-		if !ok {
-			break
+		which.Hints = append(which.Hints, hint)
+		offset = next
+	}
+	if offset+2 > end {
+		return which, path, end
+	}
+	entries := int(u16(payload, offset))
+	offset += 2
+	summary := make([]string, 0, entries)
+	for range entries {
+		entry, next, err := generated.DecodeWhichKeyEntry(payload, offset, end)
+		if err != nil {
+			return which, path, end
 		}
-		binding.Icon, offset, ok = readString8(payload, offset)
-		if !ok {
-			break
-		}
-		which.Bindings = append(which.Bindings, binding)
-		summary = append(summary, binding.Key+" "+binding.Description)
+		which.Entries = append(which.Entries, entry)
+		summary = append(summary, entry.Key+" "+entry.Label)
+		offset = next
 	}
 	return which, stringsJoin(summary, "  "), offset
 }

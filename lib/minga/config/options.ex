@@ -73,6 +73,7 @@ defmodule Minga.Config.Options do
           | :agent_tool_approval
           | :agent_destructive_tools
           | :agent_tool_permissions
+          | :terminal_features
           | :agent_hooks
           | :agent_session_retention_days
           | :agent_session_idle_timeout_ms
@@ -178,6 +179,7 @@ defmodule Minga.Config.Options do
           | :string_list
           | :atom_list
           | :map_or_nil
+          | {:atom_map, keys :: [atom()], values :: [atom()]}
           | :map_list
           | :float_or_nil
           | :any
@@ -305,6 +307,9 @@ defmodule Minga.Config.Options do
        "rename"
      ], "Tool names treated as destructive for approval prompts."},
     {:agent_tool_permissions, :map_or_nil, nil, "Per-tool permission overrides for agent tools."},
+    {:terminal_features,
+     {:atom_map, [:true_color, :styled_underlines, :underline_color], [:on, :off]}, %{},
+     "Terminal features forced on or off, for a terminal Minga detects wrongly. Applies when Minga starts. See `:checkhealth terminal`."},
     {:agent_hooks, :any, [], "Agent lifecycle hook declarations loaded from config."},
     {:agent_session_retention_days, :pos_integer, 30,
      "Number of days to retain persisted agent sessions."},
@@ -1151,6 +1156,25 @@ defmodule Minga.Config.Options do
 
   defp validate_type(:map_or_nil, name, value) do
     {:error, "#{name} must be a map or nil, got: #{inspect(value)}"}
+  end
+
+  # A map whose keys and values each come from a fixed list.
+  # An entry outside the lists is an error and never ignored.
+  # A mistyped key would otherwise look like a setting that does nothing.
+  defp validate_type({:atom_map, keys, values}, name, value) when is_map(value) do
+    case Enum.find(value, fn {key, setting} -> key not in keys or setting not in values end) do
+      nil ->
+        :ok
+
+      {key, setting} ->
+        {:error,
+         "#{name} maps one of #{inspect(keys)} to one of #{inspect(values)}, got: #{inspect(key)} => #{inspect(setting)}"}
+    end
+  end
+
+  defp validate_type({:atom_map, keys, values}, name, value) do
+    {:error,
+     "#{name} must be a map from one of #{inspect(keys)} to one of #{inspect(values)}, got: #{inspect(value)}"}
   end
 
   defp validate_type(:map_list, _name, value) when is_list(value) do

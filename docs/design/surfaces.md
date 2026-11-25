@@ -201,7 +201,7 @@ See [marks](marks.md#diagnostics) for underlines and signs.
 - Hover the underline or press `K` for a popover: severity, message, source, and "Fix", "Ask Minga to Fix", "Copy".
 - `]e` and `[e` move between diagnostics (Doom's next-error); `g.` opens the act menu, which includes code actions; `SPC c x` opens the list as a buffer.
 - The modeline shows counts only when there is something to report.
-- **Empty answers stay in the echo area.** When there are no code actions or no references, the echo area says so and names the next step ("No code actions here · SPC a ? ask Minga", "No references found · SPC c d definition"). An empty list never opens an empty drawer.
+- **Empty answers stay in the echo area.** When there are no code actions or no references, the echo area says so and names the next step ("No code actions at 3:7 · SPC a ? ask Minga", "No references to parse · SPC c d go to definition"; without a language server, "No references to parse (no server) · SPC s p search the project", which carries the word). An empty list never opens an empty drawer.
 - If a change Minga is making produces an error, Minga fixes it as part of its work and says so in a tool step.
 
 ## Subagent peek

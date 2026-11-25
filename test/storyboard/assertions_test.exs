@@ -59,11 +59,24 @@ defmodule Minga.Storyboard.AssertionsTest do
     Model.from_ui(ui, @theme)
   end
 
-  defp which_key(bindings),
+  defp which_key(entries),
     do: %WhichKey{
       visible: true,
-      prefix: "SPC",
-      bindings: Enum.map(bindings, &Map.put_new(&1, :icon, nil))
+      path: "SPC",
+      entries:
+        Enum.map(
+          entries,
+          &Map.merge(
+            %{
+              codepoint: 0,
+              modifiers: 0,
+              section: "",
+              count: %{text: "", tone: :muted},
+              platform_key: ""
+            },
+            &1
+          )
+        )
     }
 
   describe "modeline" do
@@ -180,14 +193,14 @@ defmodule Minga.Storyboard.AssertionsTest do
 
   describe "which-key" do
     test "groups read like leaves with a trailing chevron" do
-      ok = model(which_key: which_key([%{key: "a", description: "Minga ›", kind: :group}]))
+      ok = model(which_key: which_key([%{key: "a", label: "Minga ›", kind: :group}]))
 
       ok
       |> assert_which_key("SPC")
       |> assert_group("a", "Minga")
       |> assert_groups_read_like_leaves()
 
-      old = model(which_key: which_key([%{key: "a", description: "+ai", kind: :group}]))
+      old = model(which_key: which_key([%{key: "a", label: "+ai", kind: :group}]))
       assert_raise ExUnit.AssertionError, fn -> assert_group(old, "a", "Minga") end
       assert_raise ExUnit.AssertionError, ~r/\+ai/, fn -> assert_groups_read_like_leaves(old) end
     end
@@ -195,14 +208,21 @@ defmodule Minga.Storyboard.AssertionsTest do
     test "leaves, live counts and shown keys" do
       wk =
         which_key([
-          %{key: "a", description: "Tasks · 1 needs you", kind: :command},
-          %{key: "v", description: "Conversation", kind: :command}
+          %{
+            key: "a",
+            label: "Tasks",
+            count: %{text: "· 1 needs you", tone: :needs_you},
+            kind: :command,
+            section: "Tasks"
+          },
+          %{key: "v", label: "Conversation", kind: :command, section: "Conversation"}
         ])
 
       model(which_key: wk)
       |> assert_leaf("v", "Conversation")
-      |> assert_count("a", "1 needs you")
+      |> assert_count("a", "1 needs you", :needs_you)
       |> assert_keys_shown(["a", "v"])
+      |> assert_sections(["Tasks", "Conversation"])
 
       assert_raise ExUnit.AssertionError, ~r/"r"/, fn ->
         assert_keys_shown(model(which_key: wk), ["r"])

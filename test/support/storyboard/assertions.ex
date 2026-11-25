@@ -173,13 +173,28 @@ defmodule Minga.Test.Storyboard.Assertions do
     model
   end
 
-  @doc "Asserts the which-key entry on `key` carries a live count, such as `Tasks · 1 needs you`."
-  @spec assert_count(Model.t(), String.t(), String.t()) :: Model.t()
-  def assert_count(%Model{} = model, key, count) do
+  @doc "Asserts the which-key entry on `key` carries a live count, such as `Tasks · 1 needs you`, drawn in the `tone` colour role."
+  @spec assert_count(Model.t(), String.t(), String.t(), Minga.RenderModel.UI.WhichKey.tone()) ::
+          Model.t()
+  def assert_count(%Model{} = model, key, count, tone) do
     entry = which_key_entry!(model, key)
 
-    assert String.contains?(entry.label, " · " <> count),
-           "expected #{key} to show the count #{inspect(count)}, got #{inspect(entry.label)}"
+    assert String.contains?(entry.count, count),
+           "expected #{key} to show the count #{inspect(count)}, got #{inspect(entry.count)}"
+
+    assert entry.count_tone == tone,
+           "expected #{key}'s count in the #{tone} role, got #{entry.count_tone}"
+
+    model
+  end
+
+  @doc "Asserts the which-key sections, in order, as the panel's column headings."
+  @spec assert_sections(Model.t(), [String.t()]) :: Model.t()
+  def assert_sections(%Model{which_key: %{entries: entries}} = model, expected) do
+    sections = entries |> Enum.map(& &1.section) |> Enum.dedup()
+
+    assert sections == expected,
+           "expected which-key sections #{inspect(expected)}, got #{inspect(sections)}"
 
     model
   end
@@ -337,6 +352,26 @@ defmodule Minga.Test.Storyboard.Assertions do
   @spec summary([Minga.RenderModel.UI.StatusBar.Segment.t()]) :: String.t()
   defp summary(segments), do: inspect(Enum.map(segments, &{&1.id, &1.text, &1.state}))
 
+  @doc """
+  Asserts the echo line shows a notice and the next steps it names (`docs/design/anatomy.md`, "Notice"): `message` exactly, and `actions` as `{key, label}`, in order.
+  """
+  @spec assert_notice(Model.t(), String.t(), [action()]) :: Model.t()
+  def assert_notice(%Model{echo: echo, ui: ui} = model, message, actions) do
+    assert echo == message,
+           "expected the echo line to say #{inspect(message)}, got #{inspect(echo)}"
+
+    shown =
+      case ui.status_bar do
+        %{data: %{message_actions: named}} -> Enum.map(named, &{&1.key, &1.label})
+        _no_status_bar -> []
+      end
+
+    assert shown == actions,
+           "expected the notice to name #{inspect(actions)}, got #{inspect(shown)}"
+
+    model
+  end
+
   @doc "Asserts every error notification names its next step: at least one action."
   @spec assert_errors_name_next_step(Model.t()) :: Model.t()
   def assert_errors_name_next_step(%Model{ui: ui} = model) do
@@ -373,6 +408,17 @@ defmodule Minga.Test.Storyboard.Assertions do
     model
   end
 
+  # A panel's empty list: its title, why line, and each step as {key, label}.
+  @spec anatomy(EmptyList.t()) :: empty_state()
+  defp anatomy(%EmptyList{} = empty) do
+    %{
+      title: empty.title,
+      description: empty.why,
+      actions: Enum.map(empty.actions, &{&1.key, &1.label}),
+      selected: empty.selected
+    }
+  end
+
   @doc """
   The empty-state anatomy of the frame, or `nil` when none is shown.
 
@@ -387,6 +433,11 @@ defmodule Minga.Test.Storyboard.Assertions do
       selected: if(picker.items == [], do: nil, else: picker.selected_index)
     }
   end
+
+  def empty_state(%Model{ui: %{file_tree: %{status: :empty, empty: %EmptyList{} = empty}}}),
+    do: anatomy(empty)
+
+  def empty_state(%Model{ui: %{git_status: %{empty: %EmptyList{} = empty}}}), do: anatomy(empty)
 
   def empty_state(%Model{
         ui: %{empty_state: %{visible?: true, sections: [_ | _] = sections} = state}

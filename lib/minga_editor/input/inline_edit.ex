@@ -17,14 +17,16 @@ defmodule MingaEditor.Input.InlineEdit do
   alias MingaEditor.Input.InlineOverlay, as: Overlay
   alias MingaEditor.State.InlineEdit
 
+  import Bitwise
+
   @type state :: MingaEditor.Input.Handler.handler_state()
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
-  def handle_key(state, codepoint, _modifiers) do
+  def handle_key(state, codepoint, modifiers) do
     case Overlay.active(state, spec()) do
-      %InlineEdit{} = edit -> {:handled, handle_inline_key(state, edit, codepoint)}
+      %InlineEdit{} = edit -> {:handled, handle_inline_key(state, edit, codepoint, modifiers)}
       nil -> {:passthrough, state}
     end
   end
@@ -44,35 +46,51 @@ defmodule MingaEditor.Input.InlineEdit do
     end
   end
 
-  @spec handle_inline_key(state(), InlineEdit.t(), non_neg_integer()) :: state()
-  defp handle_inline_key(state, edit, 27), do: InlineEditCommand.reject(state, edit)
-  defp handle_inline_key(state, edit, ?n), do: InlineEditCommand.reject(state, edit)
+  # An answer is a key pressed without Control, Alt or Command. A chord is not an answer: without enhanced key
+  # reporting a terminal sends Esc followed by a key as Alt and that key when both arrive together, so Alt+Enter or
+  # Alt+y may be a person who pressed Esc to reject. A chord does nothing here: it neither accepts nor rejects.
+  @chord_mods 0x0E
 
-  defp handle_inline_key(state, %InlineEdit{phase: {:proposed, _proposal}} = edit, 13),
-    do: InlineEditCommand.accept(state, edit)
+  @spec handle_inline_key(state(), InlineEdit.t(), non_neg_integer(), non_neg_integer()) ::
+          state()
+  defp handle_inline_key(state, edit, 27, _mods), do: InlineEditCommand.reject(state, edit)
 
-  defp handle_inline_key(state, %InlineEdit{phase: :input} = edit, 13),
-    do: Overlay.submit(state, edit, "Type a rewrite instruction first", spec())
+  defp handle_inline_key(state, edit, ?n, mods) when band(mods, @chord_mods) == 0,
+    do: InlineEditCommand.reject(state, edit)
 
-  defp handle_inline_key(state, %InlineEdit{phase: {:proposed, _proposal}} = edit, ?y),
-    do: InlineEditCommand.accept(state, edit)
+  defp handle_inline_key(state, %InlineEdit{phase: {:proposed, _proposal}} = edit, 13, mods)
+       when band(mods, @chord_mods) == 0,
+       do: InlineEditCommand.accept(state, edit)
 
-  defp handle_inline_key(state, %InlineEdit{phase: {:proposed, _proposal}} = edit, codepoint)
-       when codepoint in [?j, ?k],
+  defp handle_inline_key(state, %InlineEdit{phase: :input} = edit, 13, mods)
+       when band(mods, @chord_mods) == 0,
+       do: Overlay.submit(state, edit, "Type a rewrite instruction first", spec())
+
+  defp handle_inline_key(state, %InlineEdit{phase: {:proposed, _proposal}} = edit, ?y, mods)
+       when band(mods, @chord_mods) == 0,
+       do: InlineEditCommand.accept(state, edit)
+
+  defp handle_inline_key(
+         state,
+         %InlineEdit{phase: {:proposed, _proposal}} = edit,
+         codepoint,
+         mods
+       )
+       when codepoint in [?j, ?k] and band(mods, @chord_mods) == 0,
        do: Overlay.update(state, InlineEdit.scroll(edit, scroll_delta(codepoint)), spec())
 
-  defp handle_inline_key(state, %InlineEdit{phase: {:failed, _message}} = edit, codepoint)
-       when codepoint in [?j, ?k],
+  defp handle_inline_key(state, %InlineEdit{phase: {:failed, _message}} = edit, codepoint, mods)
+       when codepoint in [?j, ?k] and band(mods, @chord_mods) == 0,
        do: Overlay.update(state, InlineEdit.scroll(edit, scroll_delta(codepoint)), spec())
 
-  defp handle_inline_key(state, %InlineEdit{phase: :input} = edit, codepoint)
+  defp handle_inline_key(state, %InlineEdit{phase: :input} = edit, codepoint, _mods)
        when codepoint in [127, 8],
        do: Overlay.backspace(state, edit, spec())
 
-  defp handle_inline_key(state, %InlineEdit{phase: :input} = edit, codepoint)
-       when codepoint >= 32, do: Overlay.append_printable(state, edit, codepoint, 0, spec())
+  defp handle_inline_key(state, %InlineEdit{phase: :input} = edit, codepoint, mods)
+       when codepoint >= 32, do: Overlay.append_printable(state, edit, codepoint, mods, spec())
 
-  defp handle_inline_key(state, _edit, _codepoint), do: state
+  defp handle_inline_key(state, _edit, _codepoint, _mods), do: state
 
   defp scroll_delta(?j), do: 1
   defp scroll_delta(?k), do: -1

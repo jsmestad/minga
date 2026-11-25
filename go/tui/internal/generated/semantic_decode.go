@@ -819,30 +819,95 @@ func DecodePickerMovementKey(data []byte, offset int, windowEnd int) (PickerMove
 	}, pos, nil
 }
 
-func DecodeWhichKeyBinding(data []byte, offset int, windowEnd int) (WhichKeyBinding, int, error) {
+func DecodeWhichKeyCrumb(data []byte, offset int, windowEnd int) (WhichKeyCrumb, int, error) {
+	pos := offset
+	key, pos, err := decodeString8Window(data, pos, windowEnd)
+	if err != nil {
+		return WhichKeyCrumb{}, offset, err
+	}
+	label, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return WhichKeyCrumb{}, offset, err
+	}
+	path, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return WhichKeyCrumb{}, offset, err
+	}
+	return WhichKeyCrumb{
+		Key:   key,
+		Label: label,
+		Path:  path,
+	}, pos, nil
+}
+
+func DecodeWhichKeyHint(data []byte, offset int, windowEnd int) (WhichKeyHint, int, error) {
+	pos := offset
+	key, pos, err := decodeString8Window(data, pos, windowEnd)
+	if err != nil {
+		return WhichKeyHint{}, offset, err
+	}
+	label, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return WhichKeyHint{}, offset, err
+	}
+	return WhichKeyHint{
+		Key:   key,
+		Label: label,
+	}, pos, nil
+}
+
+func DecodeWhichKeyEntry(data []byte, offset int, windowEnd int) (WhichKeyEntry, int, error) {
 	pos := offset
 	if err := decodeRequireWindow(windowEnd, pos+1, "kind"); err != nil {
-		return WhichKeyBinding{}, offset, err
+		return WhichKeyEntry{}, offset, err
 	}
 	kind := data[pos]
 	pos++
 	key, pos, err := decodeString8Window(data, pos, windowEnd)
 	if err != nil {
-		return WhichKeyBinding{}, offset, err
+		return WhichKeyEntry{}, offset, err
 	}
-	desc, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err := decodeRequireWindow(windowEnd, pos+4, "codepoint"); err != nil {
+		return WhichKeyEntry{}, offset, err
+	}
+	codepoint := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+1, "modifiers"); err != nil {
+		return WhichKeyEntry{}, offset, err
+	}
+	modifiers := data[pos]
+	pos++
+	label, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
-		return WhichKeyBinding{}, offset, err
+		return WhichKeyEntry{}, offset, err
 	}
-	icon, pos, err := decodeString8Window(data, pos, windowEnd)
+	section, pos, err := decodeString16Window(data, pos, windowEnd)
 	if err != nil {
-		return WhichKeyBinding{}, offset, err
+		return WhichKeyEntry{}, offset, err
 	}
-	return WhichKeyBinding{
-		Kind: kind,
-		Key:  key,
-		Desc: desc,
-		Icon: icon,
+	countVal, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return WhichKeyEntry{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "count_tone"); err != nil {
+		return WhichKeyEntry{}, offset, err
+	}
+	countTone := data[pos]
+	pos++
+	platformKey, pos, err := decodeString8Window(data, pos, windowEnd)
+	if err != nil {
+		return WhichKeyEntry{}, offset, err
+	}
+	return WhichKeyEntry{
+		Kind:        kind,
+		Key:         key,
+		Codepoint:   codepoint,
+		Modifiers:   modifiers,
+		Label:       label,
+		Section:     section,
+		Count:       countVal,
+		CountTone:   countTone,
+		PlatformKey: platformKey,
 	}, pos, nil
 }
 
@@ -1914,6 +1979,25 @@ func DecodeGuiStatusBarReview(data []byte, offset int, windowEnd int) (GuiStatus
 	}, pos, nil
 }
 
+func DecodeGuiStatusBarMessageActions(data []byte, offset int, windowEnd int) ([]EmptyListAction, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+1, "message_actions count"); err != nil {
+		return nil, offset, err
+	}
+	count := int(data[pos])
+	pos += 1
+	items := make([]EmptyListAction, 0, min(count, len(data)-pos))
+	for i := 0; i < count; i++ {
+		item, nextPos, err := DecodeEmptyListAction(data, pos, windowEnd)
+		if err != nil {
+			return nil, offset, err
+		}
+		pos = nextPos
+		items = append(items, item)
+	}
+	return items, pos, nil
+}
+
 // Section decoders for gui_surface_layout
 
 func DecodeGuiSurfaceLayoutPlacements(data []byte, offset int, windowEnd int) ([]SurfacePlacement, int, error) {
@@ -2982,6 +3066,10 @@ func DecodeGuiGitStatusFields(data []byte, offset int, windowEnd int) (GuiGitSta
 	}
 	commitTargetID := decodeU64(data, pos)
 	pos += 8
+	empty, pos, err := DecodeEmptyList(data, pos, windowEnd)
+	if err != nil {
+		return GuiGitStatusFields{}, offset, err
+	}
 	return GuiGitStatusFields{
 		RepoState:         repoState,
 		Syncing:           syncing,
@@ -2997,6 +3085,7 @@ func DecodeGuiGitStatusFields(data []byte, offset int, windowEnd int) (GuiGitSta
 		TerminalCollapsed: terminalCollapsed,
 		PanelID:           panelID,
 		CommitTargetID:    commitTargetID,
+		Empty:             empty,
 	}, pos, nil
 }
 

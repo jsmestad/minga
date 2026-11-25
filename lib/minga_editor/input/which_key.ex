@@ -4,7 +4,7 @@ defmodule MingaEditor.Input.WhichKey do
 
   Escape closes which-key and cancels the pending leader sequence in the editing model, so the next `SPC` opens which-key again instead of continuing the old sequence (#4078).
 
-  Vim walks its own leader sequence in the Normal mode state, so in Vim this handler passes every other key through. The CUA space leader keeps none: the macOS chord and retract (`CUA.SpaceLeader`) and the terminal retract window (`CUA.TUISpaceLeader`) start the sequence with `{:leader_start, node}`, so the which-key node is its only record. This handler resolves the next key inside that node before any surface sees it: a command runs, a prefix advances, and any other key closes which-key and passes through to the focused surface.
+  Vim walks its own leader sequence in the Normal mode state, so in Vim this handler passes every other key through. The CUA space leader keeps none: the macOS chord and retract (`CUA.SpaceLeader`) and the terminal retract window (`CUA.TUISpaceLeader`) start the sequence with `{:leader_start, node, prefix}`, so the which-key state is its only record. This handler resolves the next key inside that node before any surface sees it: a command runs, a prefix advances, Backspace goes back up one group (and closes which-key at the top, without reaching the surface), and any other key closes which-key and passes through to the focused surface.
   """
 
   @behaviour MingaEditor.Input.Handler
@@ -16,6 +16,7 @@ defmodule MingaEditor.Input.WhichKey do
   @type state :: MingaEditor.Input.Handler.handler_state()
 
   @key_escape 27
+  @key_backspace 127
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
@@ -33,13 +34,16 @@ defmodule MingaEditor.Input.WhichKey do
   end
 
   def handle_key(
-        %{shell_runtime: %{state: %{whichkey: %MingaEditor.State.WhichKey{node: node}}}} = state,
+        %{
+          shell_runtime: %{state: %{whichkey: %MingaEditor.State.WhichKey{node: node} = whichkey}}
+        } =
+          state,
         codepoint,
         modifiers
       )
       when node != nil do
     if cua_leader?(state),
-      do: continue_leader(state, node, {codepoint, modifiers}),
+      do: continue_leader(state, whichkey, {codepoint, modifiers}),
       else: {:passthrough, state}
   end
 
@@ -53,15 +57,26 @@ defmodule MingaEditor.Input.WhichKey do
       not Minga.Editing.in_leader?(state)
   end
 
-  @spec continue_leader(state(), Bindings.node_t(), Bindings.key()) ::
+  @spec continue_leader(state(), MingaEditor.State.WhichKey.t(), Bindings.key()) ::
           MingaEditor.Input.Handler.result()
-  defp continue_leader(state, node, key) do
+  defp continue_leader(state, whichkey, {@key_backspace, 0}) do
+    case MingaEditor.State.WhichKey.parent(whichkey) do
+      {:ok, parent, prefix_keys} ->
+        {:handled, Commands.execute(state, {:leader_progress, parent, prefix_keys})}
+
+      :top ->
+        {:handled, Commands.execute(state, :leader_cancel)}
+    end
+  end
+
+  defp continue_leader(state, %MingaEditor.State.WhichKey{node: node} = whichkey, key) do
     case Bindings.lookup(node, key) do
       {:command, command} ->
         {:handled, state |> Commands.execute(:leader_cancel) |> execute_command(command)}
 
       {:prefix, sub_node} ->
-        {:handled, Commands.execute(state, {:leader_progress, sub_node})}
+        prefix_keys = List.insert_at(whichkey.prefix_keys, -1, Bindings.format_key(key))
+        {:handled, Commands.execute(state, {:leader_progress, sub_node, prefix_keys})}
 
       :not_found ->
         {:passthrough, Commands.execute(state, :leader_cancel)}

@@ -304,41 +304,54 @@ struct GUIWhichKeyDecoderTests {
         var data = Data()
         data.append(OP_GUI_WHICH_KEY)
         data.append(1) // visible
-        appendString16(&data, "SPC") // prefix
-        data.append(0) // page
-        data.append(2) // pageCount
-        appendU16(&data, 2) // bindingCount
+        appendString16(&data, "SPC a") // path
+        data.append(2) // crumb count
+        appendString8(&data, "SPC"); appendString16(&data, ""); appendString16(&data, "SPC")
+        appendString8(&data, "a"); appendString16(&data, "Minga"); appendString16(&data, "SPC a")
+        appendString16(&data, "· 1 needs you") // count
+        data.append(1) // count tone: needs you
+        data.append(1) // hint count
+        appendString8(&data, "⌫"); appendString16(&data, "back")
+        appendU16(&data, 2) // entry count
 
-        // Binding 1: command
-        data.append(0) // kind=command
-        appendString8(&data, "f") // key
-        appendString16(&data, "Find file") // description
-        appendString8(&data, "🔍") // icon
+        // Entry 1: command
+        data.append(0)
+        appendString8(&data, "s")
+        data.append(contentsOf: [0, 0, 0, 0x73, 0]) // codepoint "s", modifiers
+        appendString16(&data, "Stop")
+        appendString16(&data, "Tasks")
+        appendString16(&data, "")
+        data.append(0) // count tone: muted
+        appendString8(&data, "⌘.")
 
-        // Binding 2: group
-        data.append(1) // kind=group
-        appendString8(&data, "b") // key
-        appendString16(&data, "Buffers") // description
-        appendString8(&data, "") // icon (empty)
+        // Entry 2: group
+        data.append(1)
+        appendString8(&data, "q")
+        data.append(contentsOf: [0, 0, 0, 0x71, 0])
+        appendString16(&data, "Queue ›")
+        appendString16(&data, "Conversation")
+        appendString16(&data, "· 2 errors")
+        data.append(2) // count tone: error
+        appendString8(&data, "")
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiWhichKey(let visible, let prefix, let page, let pageCount, let bindings) = cmd else {
+        guard case .guiWhichKey(let model) = cmd else {
             Issue.record("Expected .guiWhichKey"); return
         }
 
-        #expect(visible == true)
-        #expect(prefix == "SPC")
-        #expect(page == 0)
-        #expect(pageCount == 2)
-        #expect(bindings.count == 2)
-        #expect(bindings[0].kind == 0) // command
-        #expect(bindings[0].key == "f")
-        #expect(bindings[0].description == "Find file")
-        #expect(bindings[1].kind == 1) // group
-        #expect(bindings[1].key == "b")
-        #expect(bindings[1].description == "Buffers")
+        #expect(model.visible == true)
+        #expect(model.path == "SPC a")
+        #expect(model.breadcrumb == [.init(key: "SPC", path: "SPC"), .init(key: "a", label: "Minga", path: "SPC a")])
+        #expect(model.count == "· 1 needs you")
+        #expect(model.countTone == .needsYou)
+        #expect(model.hints == [.init(key: "⌫", label: "back")])
+        #expect(model.entries == [
+            .init(kind: 0, key: "s", codepoint: 0x73, label: "Stop", section: "Tasks", platformKey: "⌘."),
+            .init(kind: 1, key: "q", codepoint: 0x71, label: "Queue ›", section: "Conversation", count: "· 2 errors",
+                  countTone: .error),
+        ])
     }
 
     @Test("Decode gui_which_key hidden")
@@ -348,11 +361,11 @@ struct GUIWhichKeyDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == 2)
 
-        guard case .guiWhichKey(let visible, _, _, _, let bindings) = cmd else {
+        guard case .guiWhichKey(let model) = cmd else {
             Issue.record("Expected .guiWhichKey"); return
         }
-        #expect(visible == false)
-        #expect(bindings.isEmpty)
+        #expect(model.visible == false)
+        #expect(model.entries.isEmpty)
     }
 }
 
@@ -850,6 +863,37 @@ struct GUIStatusBarDecoderTests {
         }
 
         #expect(update.pendingKeys == "\"a2d")
+    }
+
+    @Test("Decode the notice's next steps (message_actions section)")
+    func decodeMessageActionsSection() throws {
+        var identity = Data()
+        identity.append(0); identity.append(0); identity.append(0)
+
+        var actions = Data()
+        actions.append(1) // count
+        appendString8(&actions, "inline_ask")
+        appendString16(&actions, "SPC a ?")
+        appendString16(&actions, "ask Minga")
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(0x13, actions),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for s in sections { data.append(s) }
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiStatusBar(let update) = cmd else {
+            Issue.record("Expected .guiStatusBar"); return
+        }
+
+        #expect(update.messageActions == [Wire.EmptyListAction(id: "inline_ask", key: "SPC a ?", label: "ask Minga")])
     }
 
     @Test("Pending keys default to empty when section absent")
@@ -1394,7 +1438,7 @@ struct GUIFileTreeDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiFileTree(let version, let treeFlags, let treeState, let generation, let selectedId, let treeWidth, let rootPath, let errorReason, let entries) = cmd else {
+        guard case .guiFileTree(let version, let treeFlags, let treeState, let generation, let selectedId, let treeWidth, let rootPath, let errorReason, let entries, _) = cmd else {
             Issue.record("Expected .guiFileTree"); return
         }
 
@@ -1479,7 +1523,7 @@ struct GUIFileTreeDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiFileTree(_, let treeFlags, let treeState, _, _, let treeWidth, let rootPath, _, let entries) = cmd else {
+        guard case .guiFileTree(_, let treeFlags, let treeState, _, _, let treeWidth, let rootPath, _, let entries, _) = cmd else {
             Issue.record("Expected .guiFileTree"); return
         }
         #expect(treeFlags & 0x01 == 0)
@@ -1511,7 +1555,7 @@ struct GUIFileTreeDecoderTests {
             let (cmd, size) = try decodeCommand(data: data, offset: 0)
             #expect(size == data.count)
 
-            guard case .guiFileTree(_, let treeFlags, let treeState, _, _, let treeWidth, let rootPath, let errorReason, let entries) = cmd else {
+            guard case .guiFileTree(_, let treeFlags, let treeState, _, _, let treeWidth, let rootPath, let errorReason, let entries, _) = cmd else {
                 Issue.record("Expected .guiFileTree"); return
             }
             #expect(treeFlags == flags)
@@ -1557,7 +1601,7 @@ struct GUIFileTreeDecoderTests {
         data.append(payload)
 
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiFileTree(_, _, _, _, _, _, _, _, let entries) = cmd else {
+        guard case .guiFileTree(_, _, _, _, _, _, _, _, let entries, _) = cmd else {
             Issue.record("Expected .guiFileTree"); return
         }
         #expect(entries.count == 1)
@@ -2838,11 +2882,12 @@ struct GUIGitStatusDecoderTests {
         data.append(2) // terminal collapsed sections
         data.append(contentsOf: [0, 0, 0, 2, 0, 0, 0, 42]) // panel identity
         data.append(contentsOf: [0, 0, 0, 3, 0, 0, 0, 43]) // commit target identity
+        data.append(Data(repeating: 0, count: 7)) // empty_list with an empty title: the tree is not clean
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let entries, let toast, let entryBasePath, let lastCommitMessage, let stashCount, let toastID, let panelID, let commitTargetID) = cmd else {
+        guard case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let entries, let toast, let entryBasePath, let lastCommitMessage, let stashCount, let toastID, let panelID, let commitTargetID, _) = cmd else {
             Issue.record("Expected .guiGitStatus"); return
         }
 
@@ -2869,8 +2914,8 @@ struct GUIGitStatusDecoderTests {
             try decodeCommand(data: Data(data.dropLast()), offset: 0)
         }
 
-        var zeroCommitTarget = Data(data.dropLast(8))
-        zeroCommitTarget.append(Data(repeating: 0, count: 8))
+        var zeroCommitTarget = Data(data.dropLast(15))
+        zeroCommitTarget.append(Data(repeating: 0, count: 15))
         #expect(throws: ProtocolDecodeError.self) {
             try decodeCommand(data: zeroCommitTarget, offset: 0)
         }
@@ -2890,19 +2935,59 @@ struct GUIGitStatusDecoderTests {
         appendU32(&data, 0) // terminal cursor
         data.append(0) // terminal collapsed sections
         data.append(Data(repeating: 0, count: 16)) // panel and commit target identity
+        let commitTargetEnd = data.count
+        data.append(Data(repeating: 0, count: 7)) // empty_list with an empty title
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
-        guard case .guiGitStatus(_, _, _, _, _, _, _, _, _, _, _, let panelID, let commitTargetID) = cmd else {
+        guard case .guiGitStatus(_, _, _, _, _, _, _, _, _, _, _, let panelID, let commitTargetID, let empty) = cmd else {
             Issue.record("Expected .guiGitStatus"); return
         }
         #expect(panelID == 0)
         #expect(commitTargetID == 0)
+        #expect(empty == nil)
 
-        data[data.count - 1] = 1
+        data[commitTargetEnd - 1] = 1
         #expect(throws: ProtocolDecodeError.self) {
             try decodeCommand(data: data, offset: 0)
         }
+    }
+
+    @Test("A clean tree decodes its empty-state anatomy and next steps")
+    func decodeCleanTree() throws {
+        var data = Data([OP_GUI_GIT_STATUS, 0, 0]) // normal repo, not syncing
+        appendU16(&data, 1) // ahead
+        appendU16(&data, 0) // behind
+        appendString16(&data, "main")
+        appendU16(&data, 0) // entry_count
+        data.append(0) // toast_present
+        appendString16(&data, "/repo")
+        appendString16(&data, "")
+        appendU16(&data, 0) // stash_count
+        appendU32(&data, 0) // terminal cursor
+        data.append(0) // terminal collapsed sections
+        data.append(contentsOf: [0, 0, 0, 0, 0, 0, 0, 9]) // panel identity
+        data.append(contentsOf: [0, 0, 0, 0, 0, 0, 0, 4]) // commit target identity
+        let glyph = Data("●".utf8)
+        data.append(UInt8(glyph.count)); data.append(glyph)
+        appendString16(&data, "Nothing to commit on main.")
+        appendString16(&data, "1 commit to push.")
+        data.append(0) // selected
+        data.append(1) // action count
+        let id = Data("git_status_push".utf8)
+        data.append(UInt8(id.count)); data.append(id)
+        appendString16(&data, "P")
+        appendString16(&data, "Push to remote")
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+        guard case .guiGitStatus(_, _, _, _, _, let entries, _, _, _, _, _, _, _, let empty) = cmd else {
+            Issue.record("Expected .guiGitStatus"); return
+        }
+        #expect(entries.isEmpty)
+        #expect(empty?.title == "Nothing to commit on main.")
+        #expect(empty?.why == "1 commit to push.")
+        #expect(empty?.actions == [Wire.EmptyListAction(id: "git_status_push", key: "P", label: "Push to remote")])
     }
 
     @Test("Invalid repo state in gui_git_status throws malformed")

@@ -13,5 +13,6 @@ defmodule Minga.DoctestTest do
   doctest Minga.Editing.Motion
   doctest Minga.Keymap.Bindings
   doctest MingaEditor.UI.WhichKey
+  doctest MingaEditor.UI.WhichKey.Counts
   doctest Minga.Command.Parser
 end

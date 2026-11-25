@@ -26,6 +26,22 @@ defmodule MingaEditor.Shell.Traditional.SidebarsTest do
     assert Sidebars.git_status_tui_state(closed) == nil
   end
 
+  test "a tree that becomes clean starts on its first next step, and a refresh with changes keeps the cursor" do
+    entry = %Minga.Git.StatusEntry{path: "a.ex", status: :modified, staged: false}
+    tui = TUIState.new() |> TUIState.move_within(0, 1, 5)
+
+    dirty =
+      %Sidebars{}
+      |> Sidebars.replace_git_status(Panel.new(%{entries: [entry]}))
+      |> Sidebars.replace_git_status_tui(tui)
+
+    still_dirty = Sidebars.replace_git_status(dirty, Panel.new(%{entries: [entry]}))
+    assert Sidebars.git_status_tui_state(still_dirty).cursor_index == 1
+
+    clean = Sidebars.replace_git_status(dirty, Panel.new(%{entries: []}))
+    assert Sidebars.git_status_tui_state(clean).cursor_index == 0
+  end
+
   test "Git status workflow close clears shell state and registered visibility" do
     base = MingaEditor.RenderPipeline.TestHelpers.base_state()
     table = base.extension_surfaces.sidebar_registry

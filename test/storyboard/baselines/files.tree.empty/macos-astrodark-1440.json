@@ -1,0 +1,252 @@
+{
+ "elements": [
+  {
+   "frame": [
+    327,
+    65,
+    1088,
+    825.5
+   ],
+   "label": "storyboard.ex, pane 1",
+   "role": "AXTextArea",
+   "value": "defmodule Storyboard do\n  @moduledoc \"A small file every storyboard scenario starts in.\"\n\n  def greet(name) do\n    \"Hello, \" <> name\n  end\nend\n"
+  }
+ ],
+ "grid": {
+  "cols": 145,
+  "rows": 43
+ },
+ "parts": [
+  {
+   "baseline": 21,
+   "frame": [
+    368,
+    9.5,
+    78,
+    15
+   ],
+   "part": "tabBar.tabLabel",
+   "text": "storyboard.ex"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    288,
+    43.5,
+    4,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "/"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    306,
+    43.5,
+    23,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "tmp"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    343,
+    43.5,
+    102,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga-storyboard"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    459,
+    43.5,
+    72,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "macos-1440"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    545,
+    43.5,
+    89,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "files.tree.empty"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    648,
+    43.5,
+    14,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "lib"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    676,
+    43.5,
+    78,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "storyboard.ex"
+  },
+  {
+   "baseline": 94.5,
+   "frame": [
+    76,
+    82,
+    101,
+    16
+   ],
+   "part": "emptyState.title",
+   "text": "notes/ is empty."
+  },
+  {
+   "baseline": 113.5,
+   "frame": [
+    76,
+    102,
+    117,
+    30
+   ],
+   "part": "emptyState.why",
+   "text": "Make the first file or folder here."
+  },
+  {
+   "baseline": 168,
+   "frame": [
+    95,
+    156.5,
+    46,
+    15
+   ],
+   "part": "emptyState.actionLabel",
+   "text": "New file"
+  },
+  {
+   "baseline": 167.5,
+   "frame": [
+    76,
+    157,
+    19,
+    14
+   ],
+   "part": "emptyState.actionKey",
+   "text": "a"
+  },
+  {
+   "baseline": 192,
+   "frame": [
+    95,
+    180.5,
+    62,
+    15
+   ],
+   "part": "emptyState.actionLabel",
+   "text": "New folder"
+  },
+  {
+   "baseline": 191.5,
+   "frame": [
+    76,
+    181,
+    19,
+    14
+   ],
+   "part": "emptyState.actionKey",
+   "text": "A"
+  },
+  {
+   "frame": [
+    0,
+    904,
+    1440,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    6,
+    904,
+    61,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "mode: NORMAL"
+  },
+  {
+   "frame": [
+    75,
+    904,
+    73,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filename: storyboard.ex"
+  },
+  {
+   "frame": [
+    1386,
+    904,
+    26,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filetype: Elixir"
+  },
+  {
+   "frame": [
+    1420,
+    904,
+    14,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "position: 1:1"
+  },
+  {
+   "frame": [
+    6,
+    907,
+    61,
+    18
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "baseline": 919.5,
+   "frame": [
+    12,
+    909,
+    49,
+    14
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  }
+ ],
+ "scenario": "files.tree.empty",
+ "size": "1440",
+ "theme": "astrodark",
+ "window": {
+  "height": 928,
+  "width": 1440
+ }
+}

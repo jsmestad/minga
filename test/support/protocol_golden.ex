@@ -715,6 +715,10 @@ defmodule Minga.Test.ProtocolGolden do
   @spec absent_toast() :: map()
   defp absent_toast, do: %{present: 0, level: 0, action: 0, message: "", id: 0}
 
+  # A tree that is not clean carries an empty_list with an empty title.
+  @spec absent_empty() :: map()
+  defp absent_empty, do: %{glyph: "", title: "", why: "", selected: 0, actions: []}
+
   @spec git_status_fixtures() :: [fixture()]
   defp git_status_fixtures do
     # not_a_repo with an absent toast: presence-byte == 0 path.
@@ -792,7 +796,8 @@ defmodule Minga.Test.ProtocolGolden do
           terminal_cursor: 0,
           terminal_collapsed: 0,
           panel_id: 0,
-          commit_target_id: 0
+          commit_target_id: 0,
+          empty: absent_empty()
         }
       },
       %{
@@ -813,7 +818,8 @@ defmodule Minga.Test.ProtocolGolden do
           terminal_cursor: 0,
           terminal_collapsed: 0,
           panel_id: 1,
-          commit_target_id: 1
+          commit_target_id: 1,
+          empty: absent_empty()
         }
       },
       %{
@@ -839,7 +845,8 @@ defmodule Minga.Test.ProtocolGolden do
           terminal_cursor: 3,
           terminal_collapsed: 8,
           panel_id: 0x2_0000_002A,
-          commit_target_id: 0x3_0000_002A
+          commit_target_id: 0x3_0000_002A,
+          empty: absent_empty()
         }
       },
       %{
@@ -860,7 +867,8 @@ defmodule Minga.Test.ProtocolGolden do
           terminal_cursor: 0,
           terminal_collapsed: 0,
           panel_id: 2,
-          commit_target_id: 2
+          commit_target_id: 2,
+          empty: absent_empty()
         }
       }
     ]

@@ -2,6 +2,7 @@
 ///
 /// The BEAM sends ordered segments with drop ranks (`Wire.StatusBarSegment`). This view measures the width it has (ADR-0001) and applies the ranks, lowest first, until the row fits. Mode, needs-you, the file name, change position, errors and persistent problems never drop. Each segment is a button that does what its key does, with a tooltip naming its meaning and key, and a VoiceOver label and hint. See docs/design/surfaces.md (Modeline) and docs/design/anatomy.md (Modeline segments).
 
+import AppKit
 import SwiftUI
 import MingaProtocol
 
@@ -26,7 +27,9 @@ public struct StatusBarView: View {
 
     public let sendAction: ViewActionHandler<Action>?
 
-    private let barHeight: CGFloat = 24
+    /// The modeline's height, a frame metric the which-key panel anchors above.
+    public static let height: CGFloat = 24
+    private let barHeight: CGFloat = StatusBarView.height
 
     public var body: some View {
         GeometryReader { proxy in
@@ -92,10 +95,24 @@ public struct StatusBarView: View {
         .fixedSize(horizontal: true, vertical: false)
     }
 
+    /// The width of the notice with its steps' keys only, measured as `noticeLine` lays it out: the message, then per step a padded dot and the key in the monospaced small face, with the stack's spacing between them.
+    var shortestNoticeWidth: CGFloat {
+        let mono = NSFont.monospacedSystemFont(ofSize: Typography.Step.small.rawValue, weight: .regular)
+        let steps = state.messageActions.reduce(CGFloat(0)) { width, action in
+            let key = ceil((action.key as NSString).size(withAttributes: [.font: mono]).width)
+            let dot = ModelineMetrics.textWidth("·") + 2 * (Spacing.md - Spacing.xs)
+            return width + dot + key + 2 * Spacing.xs
+        }
+        return ceil(ModelineMetrics.textWidth(state.message)) + steps
+    }
+
     /// Room for the echo text: what it needs, at most a third of the bar, nothing when there is no text.
-    private func echoWidth(in width: CGFloat) -> CGFloat {
+    /// A notice that names next steps is an answer, so it may take up to three quarters of the bar: enough for the whole message and the steps' keys, while droppable segments give way (as in the TUI).
+    func echoWidth(in width: CGFloat) -> CGFloat {
         guard hasCenterStatus else { return 0 }
-        return min(ModelineMetrics.textWidth(centerText) + 2 * Spacing.md, width * 0.34)
+        let plain = min(ModelineMetrics.textWidth(centerText) + 2 * Spacing.md, width * 0.34)
+        guard !state.messageActions.isEmpty, centerText == state.message else { return plain }
+        return max(plain, min(shortestNoticeWidth + 2 * Spacing.md, width * 0.75))
     }
 
     private var pendingWidth: CGFloat {
@@ -262,6 +279,53 @@ public struct StatusBarView: View {
         }
     }
 
+    // MARK: - Notice actions
+
+    /// The next steps a notice names (docs/design/anatomy.md, "Notice"): a centred dot, then each key in the accent colour and its word in the chrome text colour. Each is a button that runs its command. Without `words`, only the keys show, for a narrow echo line.
+    @ViewBuilder
+    private func noticeActions(words: Bool) -> some View {
+        ForEach(Array(state.messageActions.enumerated()), id: \.offset) { _, action in
+            Text("·")
+                .font(Typography.font(.small))
+                .foregroundStyle(theme.modelineBarFg.opacity(0.45))
+                .padding(.horizontal, Spacing.md - Spacing.xs)
+            Button {
+                sendAction?(.executeCommand(name: action.id))
+            } label: {
+                HStack(spacing: Spacing.xs) {
+                    Text(action.key)
+                        .font(Typography.monospacedSmall)
+                        .foregroundStyle(theme.accent)
+                    if words {
+                        Text(action.label)
+                            .font(Typography.font(.small))
+                            .foregroundStyle(theme.modelineBarFg.opacity(0.78))
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .fixedSize()
+            .anatomyPart("notice.action", text: words ? "\(action.key) \(action.label)" : action.key, font: .small)
+            .accessibilityLabel(Text("\(action.label), \(action.key)"))
+        }
+    }
+
+    /// What happened is the point of a notice, so the message stays whole: the next steps first give up their words and keep their keys, and only a message that cannot fit on its own truncates.
+    @ViewBuilder
+    private var noticeLine: some View {
+        let message = Text(state.message)
+            .font(Typography.font(.small))
+            .foregroundStyle(theme.modelineBarFg.opacity(0.7))
+            .lineLimit(1)
+            .anatomyPart("notice.message", text: state.message, font: .small)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Spacing.xs) { message.fixedSize(); noticeActions(words: true) }
+            HStack(spacing: Spacing.xs) { message.fixedSize(); noticeActions(words: false) }
+            message.truncationMode(.tail)
+        }
+    }
+
     // MARK: - Center segment (transient indicators)
 
     @ViewBuilder
@@ -284,11 +348,7 @@ public struct StatusBarView: View {
                         .frame(width: 14, height: 14)
                         .transition(.opacity)
                 }
-                Text(state.message)
-                    .font(Typography.font(.small))
-                    .foregroundStyle(theme.modelineBarFg.opacity(0.7))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                noticeLine
             }
         } else if !state.diagnosticHint.isEmpty {
             Text(state.diagnosticHint)

@@ -92,10 +92,10 @@ defmodule MingaEditor.Shell.Traditional.State do
 
   # ── Focused transient owners ──────────────────────────────────────────────
 
-  @doc "Applies the notice publish transition."
-  @spec publish_notice(t(), String.t()) :: t()
-  def publish_notice(%__MODULE__{} = state, message),
-    do: %{state | notice: Notice.publish(state.notice, message)}
+  @doc "Applies the notice publish transition, with the next steps the notice names."
+  @spec publish_notice(t(), String.t(), [Minga.RenderModel.UI.EmptyList.Action.t()]) :: t()
+  def publish_notice(%__MODULE__{} = state, message, actions \\ []),
+    do: %{state | notice: Notice.publish(state.notice, message, actions)}
 
   @doc "Records a notice timer for the matching notice identity."
   @spec record_notice_timer(t(), Notice.id(), reference()) :: t()
@@ -258,9 +258,10 @@ defmodule MingaEditor.Shell.Traditional.State do
     do: %{state | whichkey: WhichKey.begin(state.whichkey, node, prefix_keys)}
 
   @doc "Advances the which-key leader prefix."
-  @spec progress_whichkey(t(), Minga.Keymap.Bindings.node_t(), [String.t()]) :: t()
-  def progress_whichkey(%__MODULE__{} = state, node, prefix_keys),
-    do: %{state | whichkey: WhichKey.progress(state.whichkey, node, prefix_keys)}
+  @spec progress_whichkey(t(), Minga.Keymap.Bindings.node_t(), [String.t()], String.t() | nil) ::
+          t()
+  def progress_whichkey(%__MODULE__{} = state, node, prefix_keys, label \\ nil),
+    do: %{state | whichkey: WhichKey.progress(state.whichkey, node, prefix_keys, label)}
 
   @doc "Records a which-key timer for the matching generation."
   @spec record_whichkey_timer(t(), WhichKey.generation(), reference()) :: t()
@@ -276,16 +277,6 @@ defmodule MingaEditor.Shell.Traditional.State do
   @spec dismiss_whichkey(t()) :: t()
   def dismiss_whichkey(%__MODULE__{} = state),
     do: %{state | whichkey: WhichKey.dismiss(state.whichkey)}
-
-  @doc "Moves which-key to the next page."
-  @spec next_whichkey_page(t()) :: t()
-  def next_whichkey_page(%__MODULE__{} = state),
-    do: %{state | whichkey: WhichKey.next_page(state.whichkey)}
-
-  @doc "Moves which-key to the previous page."
-  @spec previous_whichkey_page(t()) :: t()
-  def previous_whichkey_page(%__MODULE__{} = state),
-    do: %{state | whichkey: WhichKey.previous_page(state.whichkey)}
 
   # ── Bottom panel ───────────────────────────────────────────────────────────
 

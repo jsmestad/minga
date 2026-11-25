@@ -58,6 +58,7 @@ defmodule MingaEditor.Agent.DraftSave do
           offer: pos_integer() | nil,
           retirement: {reference(), TurnExecution.queue_receipt()} | nil,
           held_presses: [held_press()],
+          sending: {reference(), String.t()} | nil,
           queued_raw: String.t() | nil,
           next_input: pos_integer() | nil,
           rearm_on_save_failure: boolean(),
@@ -72,6 +73,7 @@ defmodule MingaEditor.Agent.DraftSave do
     :timer,
     :offer,
     :retirement,
+    :sending,
     :queued_raw,
     :next_input,
     held_presses: [],
@@ -172,6 +174,9 @@ defmodule MingaEditor.Agent.DraftSave do
 
   @doc "Admits a save only when the composer is newer than its last durable marker."
   @spec begin_save(t(), reference(), marker()) :: {:ok, revision(), t()} | :unchanged | :pending
+  # A send that takes the draft's attachments moves its revision, so a save, a recall, an
+  # attachment and a removal all wait for its answer.
+  def begin_save(%__MODULE__{sending: {_, _}, attachments: [_ | _]}, _ref, _marker), do: :pending
   def begin_save(%__MODULE__{request: {:ready, _, marker}}, _ref, marker), do: :unchanged
 
   def begin_save(%__MODULE__{request: {:ready, revision, previous}} = save, ref, marker),
@@ -181,6 +186,9 @@ defmodule MingaEditor.Agent.DraftSave do
 
   @doc "Freezes the captured live marker and owns the recall until its reply arrives."
   @spec begin_recall(t(), reference(), marker()) :: {:ok, revision(), t()} | :pending
+  def begin_recall(%__MODULE__{sending: {_, _}, attachments: [_ | _]}, _ref, _marker),
+    do: :pending
+
   def begin_recall(%__MODULE__{request: {:ready, revision, previous}} = save, ref, marker),
     do:
       {:ok, revision,
@@ -196,7 +204,7 @@ defmodule MingaEditor.Agent.DraftSave do
   @spec begin_queue(t(), reference(), marker(), queue_admission(), String.t()) ::
           {:ok, revision(), t()} | :pending
   def begin_queue(
-        %__MODULE__{request: {:ready, revision, previous}, retirement: nil} = save,
+        %__MODULE__{request: {:ready, revision, previous}, retirement: nil, sending: nil} = save,
         ref,
         marker,
         attempt,
@@ -218,12 +226,38 @@ defmodule MingaEditor.Agent.DraftSave do
   The raw composer text an earlier press has already taken and not yet seen answered: the queue in flight, then every held press in order.
   """
   @spec submitted(t() | nil) :: [String.t()]
+  def submitted(%__MODULE__{sending: {_ref, raw}} = save), do: [raw | held_raws(save)]
+
   def submitted(%__MODULE__{request: {:queueing, _, _, _, _, _}, queued_raw: raw} = save)
       when is_binary(raw),
       do: [raw | held_raws(save)]
 
   def submitted(%__MODULE__{} = save), do: held_raws(save)
   def submitted(nil), do: []
+
+  @doc """
+  Marks `raw`, the composer text a send took, as out to the Session under `ref`. Until `send_answered/2`, later presses leave that text out (`unsubmitted/2`) and wait in line behind the send (`hold_press/2`), and no queue starts (`begin_queue/5`).
+
+  `:pending` while an earlier send is still out: one composer has one send out at a time.
+  """
+  @spec begin_send(t(), reference(), String.t()) :: {:ok, t()} | :pending
+  def begin_send(%__MODULE__{sending: nil} = save, ref, raw)
+      when is_reference(ref) and is_binary(raw),
+      do: {:ok, %{save | sending: {ref, raw}}}
+
+  def begin_send(%__MODULE__{sending: {_out, _taken}}, _ref, _raw), do: :pending
+
+  @doc "Ends the send that is out under `ref`, whatever the Session answered. `:stale` for any other send."
+  @spec send_answered(t(), reference()) :: {:ok, t()} | :stale
+  def send_answered(%__MODULE__{sending: {ref, _raw}} = save, ref),
+    do: {:ok, %{save | sending: nil}}
+
+  def send_answered(%__MODULE__{}, _ref), do: :stale
+
+  @doc "Whether a send from this composer is out to the Session and not yet answered."
+  @spec sending?(t() | nil) :: boolean()
+  def sending?(%__MODULE__{sending: {_ref, _raw}}), do: true
+  def sending?(_save), do: false
 
   @spec held_raws(t()) :: [String.t()]
   defp held_raws(%__MODULE__{held_presses: presses}),
@@ -246,9 +280,25 @@ defmodule MingaEditor.Agent.DraftSave do
   end
 
   @doc """
+  The raw composer text left once the text a send or a queue in flight has taken is removed from its start. Held presses are not removed: their text is still waiting in the composer.
+  """
+  @spec not_in_flight(t() | nil, String.t()) :: String.t()
+  def not_in_flight(%__MODULE__{sending: {_ref, raw}}, text) when is_binary(text),
+    do: String.replace_prefix(text, raw, "")
+
+  def not_in_flight(
+        %__MODULE__{request: {:queueing, _, _, _, _, _}, queued_raw: raw},
+        text
+      )
+      when is_binary(raw) and is_binary(text),
+      do: String.replace_prefix(text, raw, "")
+
+  def not_in_flight(_save, text) when is_binary(text), do: text
+
+  @doc """
   Holds a press the draft cannot take yet, so it runs when the draft answers instead of being refused.
 
-  A queue or steer waits while the draft is saving, loading, answering an earlier queue or retiring its receipt; a send waits only for the load. Presses wait in order, and once one is held every later press joins the back, so none overtakes another. Every other request in flight (a recall, an attachment, a submission) still refuses, because it changes what the composer holds. Whoever ends a request without `loaded/4`, `saved/3`, `failed/3` or the queue answer (`rebind_writer/2`, `keep_held/2`) carries the presses to `release_held_press/1`.
+  A queue or steer waits while the draft is saving, loading, answering an earlier queue or retiring its receipt; a send waits only for the load. Every press waits while a send from this composer is out to the Session. Presses wait in order, and once one is held every later press joins the back, so none overtakes another. Every other request in flight (a recall, an attachment, a submission) still refuses, because it changes what the composer holds. Whoever ends a request without `loaded/4`, `saved/3`, `failed/3` or the queue answer (`rebind_writer/2`, `keep_held/2`) carries the presses to `release_held_press/1`.
   """
   @spec hold_press(t(), held_press()) :: {:ok, t()} | :pending
   def hold_press(%__MODULE__{} = save, press) do
@@ -259,6 +309,7 @@ defmodule MingaEditor.Agent.DraftSave do
 
   @spec holds?(t(), :queue | :send) :: boolean()
   defp holds?(%__MODULE__{held_presses: [_ | _]}, _tag), do: true
+  defp holds?(%__MODULE__{sending: {_ref, _raw}}, _tag), do: true
   defp holds?(%__MODULE__{request: {:loading, _, _}}, _tag), do: true
   defp holds?(%__MODULE__{request: {:saving, _, _, _, _}}, :queue), do: true
   defp holds?(%__MODULE__{request: {:queueing, _, _, _, _, _}}, :queue), do: true
@@ -306,10 +357,10 @@ defmodule MingaEditor.Agent.DraftSave do
   @spec drop_held(t()) :: t()
   def drop_held(%__MODULE__{} = save), do: %{save | held_presses: []}
 
-  @doc "Carries held presses onto a draft whose load was issued again."
+  @doc "Carries held presses, and a send still out to the Session, onto a draft whose load was issued again."
   @spec keep_held(t(), t() | nil) :: t()
-  def keep_held(%__MODULE__{} = save, %__MODULE__{held_presses: presses}),
-    do: %{save | held_presses: presses}
+  def keep_held(%__MODULE__{} = save, %__MODULE__{held_presses: presses, sending: sending}),
+    do: %{save | held_presses: presses, sending: sending}
 
   def keep_held(%__MODULE__{} = save, nil), do: save
 
@@ -326,6 +377,7 @@ defmodule MingaEditor.Agent.DraftSave do
   def release_held_press(%__MODULE__{held_presses: [{:send, _, {:resolving, _}, _} | _]}),
     do: :none
 
+  def release_held_press(%__MODULE__{sending: {_ref, _raw}}), do: :none
   def release_held_press(%__MODULE__{request: {:saving, _, _, _, _}}), do: :none
   def release_held_press(%__MODULE__{request: {:loading, _, _}}), do: :none
   def release_held_press(%__MODULE__{request: {:queueing, _, _, _, _, _}}), do: :none
@@ -417,6 +469,9 @@ defmodule MingaEditor.Agent.DraftSave do
 
   @doc "Admits a draft mutation even when the text and caret have not changed."
   @spec begin_attachment(t(), reference(), marker()) :: {:ok, revision(), t()} | :pending
+  def begin_attachment(%__MODULE__{sending: {_, _}, attachments: [_ | _]}, _ref, _marker),
+    do: :pending
+
   def begin_attachment(%__MODULE__{request: {:ready, revision, previous}} = save, ref, marker),
     do: {:ok, revision, %{save | request: {:attaching, ref, revision, previous, marker}}}
 
@@ -425,6 +480,9 @@ defmodule MingaEditor.Agent.DraftSave do
   @doc "Stages removal of an exact displayed snapshot without removing it before the write succeeds."
   @spec begin_removal(t(), reference(), marker(), DraftAttachment.identity()) ::
           {:ok, revision(), t(), [DraftSnapshot.attachment()]} | :missing | :pending
+  def begin_removal(%__MODULE__{sending: {_, _}, attachments: [_ | _]}, _ref, _marker, _identity),
+    do: :pending
+
   def begin_removal(
         %__MODULE__{request: {:ready, revision, previous}} = save,
         ref,
@@ -485,7 +543,7 @@ defmodule MingaEditor.Agent.DraftSave do
   def attached(%__MODULE__{}, _ref, _revision, _attachment), do: :stale
 
   @doc "Clears live attachment metadata only once its captured text was accepted for submission."
-  @spec sent(t(), revision(), marker()) :: t()
+  @spec sent(t(), revision(), marker() | nil) :: t()
   def sent(%__MODULE__{request: {:ready, _, _}} = save, revision, marker),
     do: %{save | request: {:ready, revision, marker}, attachments: [], offer: next_offer()}
 

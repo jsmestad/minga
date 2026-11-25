@@ -10,6 +10,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
   alias MingaEditor.Frontend.Manager
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+  alias MingaEditor.Frontend.TerminalOverrides
 
   defp unique_name, do: :"port_mgr_#{:erlang.unique_integer([:positive])}"
 
@@ -48,6 +49,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
          renderer_path: renderer_path,
          port_opener: capturing_opener,
          tty_path: "/dev/tty",
+         renderer_env: fn -> [] end,
          renderer_exit_timeout_ms: 0},
         id: name
       )
@@ -57,6 +59,42 @@ defmodule MingaEditor.Frontend.ManagerTest do
       assert :use_stdio in opts
       assert {:packet, 4} in opts
       assert {:env, [{~c"MINGA_TTY", ~c"/dev/tty"}]} in opts
+    end
+
+    test "the renderer is started with the terminal features the user forces" do
+      name = unique_name()
+
+      renderer_path =
+        Path.join(System.tmp_dir!(), "minga-renderer-go-#{System.unique_integer([:positive])}")
+
+      File.write!(renderer_path, "")
+      parent = self()
+      on_exit(fn -> File.rm(renderer_path) end)
+
+      capturing_opener = fn _spec, opts ->
+        send(parent, {:port_env, Keyword.fetch!(opts, :env)})
+        Port.open({:spawn, "cat 2>/dev/null"}, [:binary, {:packet, 4}])
+      end
+
+      start_supervised!(
+        {Manager,
+         name: name,
+         renderer_path: renderer_path,
+         port_opener: capturing_opener,
+         tty_path: "/dev/tty",
+         renderer_env: fn ->
+           TerminalOverrides.env(%{underline_color: :off, styled_underlines: :on})
+         end,
+         renderer_exit_timeout_ms: 0},
+        id: name
+      )
+
+      assert_receive {:port_env, env}
+
+      assert env == [
+               {~c"MINGA_TTY", ~c"/dev/tty"},
+               {~c"MINGA_TERMINAL_FEATURES", ~c"styled_underlines=on,underline_color=off"}
+             ]
     end
   end
 
@@ -292,7 +330,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
       send_port_data(pid, nil, ready_packet(80, 24))
       send_port_data(pid, nil, <<0x13, 0>>)
       # true_color (1) detected (2)
-      send_port_data(pid, nil, <<0x62, 3::16, 1, 1, 2>>)
+      send_port_data(pid, nil, <<0x62, 4::16, 1, 1, 2, 1>>)
       assert Manager.ready?(name)
 
       :ok = Manager.subscribe(name)
@@ -305,7 +343,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
       assert first == {:ready, 80, 24}
       assert second == {:frontend_foreground, :background}
       assert {:terminal_report, report} = third
-      assert report.features == %{true_color: :detected}
+      assert report.features == %{true_color: {:detected, :answered}}
     end
 
     test "a new ready forgets what the last connection said about itself" do
@@ -314,7 +352,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
 
       send_port_data(pid, nil, ready_packet(80, 24))
       send_port_data(pid, nil, <<0x13, 0>>)
-      send_port_data(pid, nil, <<0x62, 3::16, 1, 1, 2>>)
+      send_port_data(pid, nil, <<0x62, 4::16, 1, 1, 2, 1>>)
       send_port_data(pid, nil, ready_packet(100, 30))
       assert Manager.terminal_size(name) == {100, 30}
 

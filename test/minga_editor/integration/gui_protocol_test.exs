@@ -565,6 +565,32 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["segments"] == ["lib", "foo.ex"]
     end
 
+    test "a notice's next steps round-trip after the message, and a plain message carries none",
+         %{
+           harness: harness
+         } do
+      action = %EmptyList.Action{id: "agent_inline_ask", key: "SPC a ?", label: "ask Minga"}
+
+      model = %StatusBar{
+        content_kind: :buffer,
+        data: %Data{mode: :normal, message: "No code actions at 3:7", message_actions: [action]}
+      }
+
+      decoded = round_trip(harness, StatusBarEncoder.encode_command(model), "gui_status_bar")
+
+      assert decoded["message"] == "No code actions at 3:7"
+
+      assert decoded["message_actions"] == [
+               %{"id" => "agent_inline_ask", "key" => "SPC a ?", "label" => "ask Minga"}
+             ]
+
+      plain = %{model | data: %{model.data | message_actions: []}}
+
+      assert round_trip(harness, StatusBarEncoder.encode_command(plain), "gui_status_bar")[
+               "message_actions"
+             ] == []
+    end
+
     test "gui_status_bar buffer variant encodes and decodes correctly", %{harness: harness} do
       model = %StatusBar{
         content_kind: :buffer,
@@ -1063,36 +1089,85 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "gui_which_key visible" do
-    test "round-trips visible which-key with bindings", %{harness: harness} do
-      # Build raw binary: visible=1, prefix="SPC", page=0, pageCount=2, 2 bindings
-      prefix = "SPC"
+    test "round-trips the panel: path, breadcrumb, count and tone, hints and entries", %{
+      harness: harness
+    } do
+      model = %Minga.RenderModel.UI.WhichKey{
+        visible: true,
+        path: "SPC a",
+        breadcrumb: [
+          %{key: "SPC", label: "", path: "SPC"},
+          %{key: "a", label: "Minga", path: "SPC a"}
+        ],
+        count: %{text: "· 1 needs you", tone: :needs_you},
+        hints: [%{key: "⌫", label: "back"}, %{key: "esc", label: "close"}],
+        entries: [
+          %{
+            key: "s",
+            codepoint: ?s,
+            modifiers: 0,
+            label: "Stop",
+            kind: :command,
+            section: "Tasks",
+            count: %{text: "", tone: :muted},
+            platform_key: "⌘."
+          },
+          %{
+            key: "q",
+            codepoint: ?q,
+            modifiers: 0,
+            label: "Queue ›",
+            kind: :group,
+            section: "Conversation",
+            count: %{text: "· 2 errors", tone: :error},
+            platform_key: ""
+          }
+        ]
+      }
 
-      binding1 =
-        <<0::8, 1::8, "f"::binary, 9::16, "Find file"::binary, 0::8>>
-
-      binding2 =
-        <<1::8, 1::8, "b"::binary, 7::16, "Buffers"::binary, 0::8>>
-
-      cmd =
-        <<0x72, 1::8, byte_size(prefix)::16, prefix::binary, 0::8, 2::8, 2::16, binding1::binary,
-          binding2::binary>>
-
+      {cmd, _caches} = WhichKeyEncoder.encode(model, Caches.new())
       decoded = round_trip(harness, cmd, "gui_which_key")
 
       assert decoded["type"] == "gui_which_key"
       assert decoded["visible"] == true
-      assert decoded["prefix"] == "SPC"
-      assert decoded["page"] == 0
-      assert decoded["page_count"] == 2
-      assert Enum.count(decoded["bindings"]) == 2
+      assert decoded["path"] == "SPC a"
+      assert decoded["count"] == "· 1 needs you"
+      assert decoded["count_tone"] == 1
 
-      [b1, b2] = decoded["bindings"]
-      assert b1["kind"] == 0
-      assert b1["key"] == "f"
-      assert b1["description"] == "Find file"
-      assert b2["kind"] == 1
-      assert b2["key"] == "b"
-      assert b2["description"] == "Buffers"
+      assert decoded["breadcrumb"] == [
+               %{"key" => "SPC", "label" => "", "path" => "SPC"},
+               %{"key" => "a", "label" => "Minga", "path" => "SPC a"}
+             ]
+
+      assert decoded["hints"] == [
+               %{"key" => "⌫", "label" => "back"},
+               %{"key" => "esc", "label" => "close"}
+             ]
+
+      assert decoded["entries"] == [
+               %{
+                 "kind" => 0,
+                 "key" => "s",
+                 "codepoint" => ?s,
+                 "modifiers" => 0,
+                 "label" => "Stop",
+                 "section" => "Tasks",
+                 "count" => "",
+                 "count_tone" => 0,
+                 "platform_key" => "⌘."
+               },
+               %{
+                 "kind" => 1,
+                 "key" => "q",
+                 "codepoint" => ?q,
+                 "modifiers" => 0,
+                 "label" => "Queue ›",
+                 "section" => "Conversation",
+                 "count" => "· 2 errors",
+                 "count_tone" => 2,
+                 "platform_key" => ""
+               }
+             ]
     end
   end
 
@@ -1297,6 +1372,83 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert entry_decoded["id"] == 42
       assert entry_decoded["level"] == 1
       assert entry_decoded["text"] == "File opened"
+    end
+  end
+
+  describe "empty lists in panels" do
+    test "an empty folder round-trips its next steps after its rows", %{harness: harness} do
+      empty = %EmptyList{
+        glyph: "",
+        title: "notes/ is empty.",
+        why: "Make the first file or folder here.",
+        selected: 1,
+        actions: [
+          %EmptyList.Action{id: "tree_new_file", key: "a", label: "New file"},
+          %EmptyList.Action{id: "tree_new_folder", key: "A", label: "New folder"}
+        ]
+      }
+
+      command =
+        FileTreeEncoder.encode_command(%FileTree{
+          generation: 3,
+          root_path: "/project/notes",
+          tree_width: 30,
+          status: :empty,
+          focused?: true,
+          rows: [],
+          empty: empty
+        })
+
+      decoded = round_trip(harness, command, "gui_file_tree")
+
+      assert decoded["tree_state"] == 2
+
+      assert decoded["empty"] == %{
+               "glyph" => "",
+               "title" => "notes/ is empty.",
+               "why" => "Make the first file or folder here.",
+               "selected" => 1,
+               "actions" => [
+                 %{"id" => "tree_new_file", "key" => "a", "label" => "New file"},
+                 %{"id" => "tree_new_folder", "key" => "A", "label" => "New folder"}
+               ]
+             }
+    end
+
+    test "a clean tree round-trips its next steps, and a tree with changes carries none", %{
+      harness: harness
+    } do
+      alias Minga.Frontend.Adapter.GUI.GitStatusEncoder
+      alias Minga.RenderModel.UI.GitStatus
+      alias MingaEditor.GitStatus.CleanTree
+
+      clean = %GitStatus{
+        repo_state: :normal,
+        syncing: false,
+        panel_id: 9,
+        commit_target_id: 4,
+        branch: "main",
+        ahead: 2,
+        empty: CleanTree.empty_list(%{branch: "main", ahead: 2, behind: 0}, 0)
+      }
+
+      decoded = round_trip(harness, GitStatusEncoder.encode_command(clean), "gui_git_status")
+
+      assert %{
+               "title" => "Nothing to commit on main.",
+               "why" => "2 commits to push.",
+               "selected" => 0,
+               "actions" => [%{"id" => "git_status_push", "key" => "P"} | _]
+             } = decoded["empty"]
+
+      plain =
+        round_trip(
+          harness,
+          GitStatusEncoder.encode_command(%{clean | empty: nil}),
+          "gui_git_status"
+        )
+
+      refute Map.has_key?(plain, "empty")
     end
   end
 

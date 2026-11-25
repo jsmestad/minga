@@ -39,6 +39,11 @@ defmodule Minga.Test.StubServer do
     {:reply, Transcript.since(transcript, cursor), state}
   end
 
+  def handle_call({:editor_transcript, cursor}, _from, state) do
+    {transcript, state} = fixture_transcript(state)
+    {:reply, arrival_transcript(transcript, cursor), state}
+  end
+
   def handle_call({:editor_arrival, cursor, subscriber, token}, from, state) do
     case Map.fetch(state, :arrival_observer) do
       {:ok, observer} ->
@@ -139,14 +144,7 @@ defmodule Minga.Test.StubServer do
 
   defp forward_arrival(state, cursor, subscriber, token) do
     {transcript, state} = fixture_transcript(state)
-
-    capture =
-      case Transcript.since(transcript, cursor) do
-        {:unchanged, cursor} -> {:unchanged, cursor}
-        {:changes, changes} -> {:changes, changes}
-        {:snapshot, snapshot} -> {:replace, :changed, snapshot, nil}
-        {:reset, _reason, snapshot} -> {:replace, :reset, snapshot, nil}
-      end
+    capture = arrival_transcript(transcript, cursor)
 
     send(
       subscriber,
@@ -154,6 +152,15 @@ defmodule Minga.Test.StubServer do
     )
 
     state
+  end
+
+  defp arrival_transcript(transcript, cursor) do
+    case Transcript.since(transcript, cursor) do
+      {:unchanged, cursor} -> {:unchanged, cursor}
+      {:changes, changes} -> {:changes, changes}
+      {:snapshot, snapshot} -> {:replace, :changed, snapshot, nil}
+      {:reset, _reason, snapshot} -> {:replace, :reset, snapshot, nil}
+    end
   end
 
   defp fixture_snapshot(state) do

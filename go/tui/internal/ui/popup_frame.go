@@ -22,11 +22,6 @@ func (m Model) popoverFrame() popupFrame {
 	return m.popupFrameFor(popoverCorner, popoverVerticalPadding, popoverRowInset)
 }
 
-// whichKeyFrame is the frame of the anatomy.md which-key panel.
-func (m Model) whichKeyFrame() popupFrame {
-	return m.popupFrameFor(whichKeyCorner, whichKeyInsetV, whichKeyInsetH)
-}
-
 // contentWidth is the columns left for content inside a popup outerWidth columns wide, border and padding taken out.
 func (f popupFrame) contentWidth(outerWidth int) int {
 	return max(outerWidth-f.style.GetHorizontalFrameSize(), 1)

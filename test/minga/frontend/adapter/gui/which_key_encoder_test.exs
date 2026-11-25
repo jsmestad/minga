@@ -7,83 +7,71 @@ defmodule Minga.Frontend.Adapter.GUI.WhichKeyEncoderTest do
 
   @op_gui_which_key Minga.Protocol.Opcodes.gui_which_key()
 
-  describe "encode/2" do
-    test "encodes hidden which-key" do
-      model = %WhichKey{visible: false}
-      caches = Caches.new()
+  defp visible_model do
+    %WhichKey{
+      visible: true,
+      path: "SPC a",
+      breadcrumb: [
+        %{key: "SPC", label: "", path: "SPC"},
+        %{key: "a", label: "Minga", path: "SPC a"}
+      ],
+      count: %{text: "· 1 needs you", tone: :needs_you},
+      hints: [%{key: "⌫", label: "back"}],
+      entries: [
+        %{
+          key: "s",
+          codepoint: ?s,
+          modifiers: 0,
+          label: "Stop",
+          kind: :command,
+          section: "Tasks",
+          count: %{text: "", tone: :muted},
+          platform_key: "⌘."
+        },
+        %{
+          key: "q",
+          codepoint: ?q,
+          modifiers: 0,
+          label: "Queue ›",
+          kind: :group,
+          section: "",
+          count: %{text: "· 2 errors", tone: :error},
+          platform_key: ""
+        }
+      ]
+    }
+  end
 
-      {cmd, _caches} = WhichKeyEncoder.encode(model, caches)
+  test "a hidden panel is the opcode and a zero byte" do
+    assert {<<@op_gui_which_key, 0::8>>, _caches} =
+             WhichKeyEncoder.encode(%WhichKey{visible: false}, Caches.new())
+  end
 
-      assert cmd == <<@op_gui_which_key, 0::8>>
-    end
+  test "a visible panel encodes path, breadcrumb, count and tone, hints and entries in order" do
+    {cmd, _caches} = WhichKeyEncoder.encode(visible_model(), Caches.new())
 
-    test "encodes visible which-key with exact binding bytes" do
-      model = %WhichKey{
-        visible: true,
-        prefix: "SPC",
-        page: 0,
-        page_count: 1,
-        bindings: [
-          %{key: "j", description: "down", kind: :command, icon: nil},
-          %{key: "k", description: "up", kind: :group, icon: "folder"}
-        ]
-      }
+    count = "· 1 needs you"
+    back = "⌫"
+    cmd_dot = "⌘."
+    two = "· 2 errors"
 
-      {cmd, _caches} = WhichKeyEncoder.encode(model, Caches.new())
+    assert cmd ==
+             <<@op_gui_which_key, 1::8, 5::16, "SPC a", 2::8, 3::8, "SPC", 0::16, 3::16, "SPC",
+               1::8, "a", 5::16, "Minga", 5::16, "SPC a", byte_size(count)::16, count::binary,
+               1::8, 1::8, byte_size(back)::8, back::binary, 4::16, "back", 2::16, 0::8, 1::8,
+               "s", ?s::32, 0::8, 4::16, "Stop", 5::16, "Tasks", 0::16, 0::8,
+               byte_size(cmd_dot)::8, cmd_dot::binary, 1::8, 1::8, "q", ?q::32, 0::8,
+               byte_size("Queue ›")::16, "Queue ›", 0::16, byte_size(two)::16, two::binary, 2::8,
+               0::8>>
+  end
 
-      assert cmd ==
-               <<@op_gui_which_key, 1::8, 3::16, "SPC", 0::8, 1::8, 2::16, 0::8, 1::8, "j", 4::16,
-                 "down", 0::8, "", 1::8, 1::8, "k", 2::16, "up", 6::8, "folder">>
-    end
+  test "an unchanged model is not re-sent; a changed count is" do
+    {first, caches} = WhichKeyEncoder.encode(visible_model(), Caches.new())
+    assert first != nil
+    assert {nil, caches} = WhichKeyEncoder.encode(visible_model(), caches)
 
-    test "returns nil on second call with same model (fingerprint skip)" do
-      model = %WhichKey{visible: false}
-      caches = Caches.new()
-
-      {cmd1, caches} = WhichKeyEncoder.encode(model, caches)
-      assert cmd1 != nil
-
-      {cmd2, _caches} = WhichKeyEncoder.encode(model, caches)
-      assert cmd2 == nil
-    end
-
-    test "re-encodes when model changes" do
-      model1 = %WhichKey{visible: false}
-
-      model2 = %WhichKey{
-        visible: true,
-        prefix: "SPC",
-        page: 0,
-        page_count: 1,
-        bindings: [%{key: "a", description: "action", kind: :command, icon: nil}]
-      }
-
-      caches = Caches.new()
-      {_, caches} = WhichKeyEncoder.encode(model1, caches)
-      {cmd2, _caches} = WhichKeyEncoder.encode(model2, caches)
-
-      assert cmd2 != nil
-    end
-
-    test "encodes builder-projected bindings directly" do
-      node =
-        Minga.Keymap.Bindings.new()
-        |> Minga.Keymap.Bindings.bind([{?j, 0}], :move_down, "Move down")
-        |> Minga.Keymap.Bindings.bind([{?k, 0}], :move_up, "Move up")
-
-      wk_state = %MingaEditor.State.WhichKey{
-        show: true,
-        node: node,
-        prefix_keys: ["SPC"],
-        page: 0
-      }
-
-      model = MingaEditor.RenderModel.UI.WhichKeyBuilder.build(wk_state)
-      {cmd, _caches} = WhichKeyEncoder.encode(model, Caches.new())
-
-      assert cmd ==
-               <<@op_gui_which_key, 1::8, 3::16, "SPC", 0::8, 1::8, 2::16, 0::8, 1::8, "j", 9::16,
-                 "Move down", 0::8, "", 0::8, 1::8, "k", 7::16, "Move up", 0::8, "">>
-    end
+    changed = %{visible_model() | count: %{text: "· 2 needs you", tone: :needs_you}}
+    assert {resent, _caches} = WhichKeyEncoder.encode(changed, caches)
+    assert resent != nil
   end
 end

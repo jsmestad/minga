@@ -356,18 +356,6 @@ func TestPluralCountAgreesWithItsNoun(t *testing.T) {
 	}
 }
 
-func TestWhichKeyFooterNamesOneBindingInTheSingular(t *testing.T) {
-	model := New(80, 24, nil)
-	one := ansi.Strip(model.renderWhichKeyFooter(protocol.WhichKey{Bindings: []protocol.WhichKeyBinding{{Key: "f", Description: "Find"}}}, 60))
-	two := ansi.Strip(model.renderWhichKeyFooter(protocol.WhichKey{Bindings: []protocol.WhichKeyBinding{{Key: "f"}, {Key: "g"}}}, 60))
-	if !strings.Contains(one, "1 binding ") || strings.Contains(one, "1 bindings") {
-		t.Fatalf("one binding reads %q", one)
-	}
-	if !strings.Contains(two, "2 bindings") {
-		t.Fatalf("two bindings read %q", two)
-	}
-}
-
 func TestPickerFitCountsTheNextStepRowsUnderTheEmptyHeader(t *testing.T) {
 	// A short terminal: the empty-state header takes rows that results would have had.
 	model, _ := fitPicker(t, 80, 24, 12, 3)

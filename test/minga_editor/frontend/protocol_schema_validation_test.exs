@@ -858,6 +858,13 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       git: %Git{branch: "main", diff_summary: {1, 2, 0}},
       file: %StatusFile{name: "test.ex", filetype: :elixir, icon: "", icon_color: 0xAA00FF},
       message: "test message",
+      message_actions: [
+        %Minga.RenderModel.UI.EmptyList.Action{
+          id: "search_project",
+          key: "SPC s p",
+          label: "search the project"
+        }
+      ],
       recording: false,
       dirty?: true,
       safe_mode?: false,

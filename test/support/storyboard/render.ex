@@ -17,6 +17,7 @@ defmodule Minga.Test.Storyboard.Render do
   alias Minga.Test.Storyboard.Entry
   alias Minga.Test.Storyboard.Inventory
   alias Minga.Test.Storyboard.Journeys
+  alias Minga.Test.Storyboard.Model
   alias Minga.Test.Storyboard.Registry
   alias Minga.Test.Storyboard.Session
   alias MingaEditor.Frontend.Capabilities
@@ -40,7 +41,7 @@ defmodule Minga.Test.Storyboard.Render do
   @typedoc """
   One render target: a frontend, a theme and a size.
 
-  `size` names the target in file names: `80x24` for a terminal, the window width in points (`1440`) for macOS. On macOS, `cols` and `rows` are the editor grid the frontend reports for that size; they come from `test/storyboard/macos_geometry.json`, which the macOS renderer checks against its own row fit. In the TUI, `cols` and `rows` are the terminal size, and `grid_rows` is the grid the TUI reports below its header; the session lays out for that grid.
+  `size` names the target in file names: `80x24` for a terminal, the window width in points (`1440`) for macOS. On macOS, `cols` and `rows` are the editor grid the frontend reports for that size; they come from `test/storyboard/macos_geometry.json`, which the macOS renderer checks against its own row fit. `chrome_grid` maps the chrome open at the reached frame to the grid the frontend reports instead (see `fitted_target/2`). In the TUI, `cols` and `rows` are the terminal size, and `grid_rows` is the grid the TUI reports below its header; the session lays out for that grid.
   """
   @type target :: %{
           frontend: frontend(),
@@ -49,7 +50,8 @@ defmodule Minga.Test.Storyboard.Render do
           cols: pos_integer(),
           rows: pos_integer(),
           grid_rows: pos_integer(),
-          window: {pos_integer(), pos_integer()} | nil
+          window: {pos_integer(), pos_integer()} | nil,
+          chrome_grid: %{optional(String.t()) => %{required(String.t()) => pos_integer()}}
         }
 
   @doc "The themes every scenario renders in: the default dark theme, astrodark, and a light theme."
@@ -219,12 +221,56 @@ defmodule Minga.Test.Storyboard.Render do
 
   @spec capture!(Path.t(), String.t(), String.t() | Entry.t(), [String.t()], target()) :: :ok
   defp capture!(transcripts, name, scenario, keys, target) do
-    session = drive(scenario, target, keys, name)
+    {session, target} = scenario |> drive(target, keys, name) |> fit_native_chrome(target)
     packets = Session.packets(session)
     Session.stop(session)
     path = Path.join([transcripts, name, file_name(target)])
     File.mkdir_p!(Path.dirname(path))
     write_json!(path, transcript(name, target, packets))
+  end
+
+  # The grid a frontend reports depends on the chrome around the editor (ADR-0001): on macOS the file tree and
+  # Git status are a native sidebar beside the editor, so the editor's grid narrows while one is open.
+  # A target's `chrome_grid` maps the grid-changing chrome open at the reached frame, joined with "+", to the grid the
+  # frontend reports then. The capture does what that report does in production: it resizes the editor to that grid.
+  @grid_chrome [:file_tree, :git_status]
+
+  # Chrome each frontend draws natively around the editor: a scenario that shows it needs a `chrome_grid` entry.
+  @native_below %{macos: [:file_tree, :git_status], tui: []}
+
+  @spec fit_native_chrome(Session.t(), target()) :: {Session.t(), target()}
+  defp fit_native_chrome(session, target) do
+    fitted = fitted_target(target, Session.model(session))
+
+    if {fitted.cols, fitted.grid_rows} == {target.cols, target.grid_rows},
+      do: {session, fitted},
+      else: {Session.resize(session, fitted.cols, fitted.grid_rows), fitted}
+  end
+
+  @doc """
+  The target with the grid its frontend reports for the chrome open in `model`, from the target's `chrome_grid`.
+
+  Chrome without an entry keeps the target's default grid, unless the frontend draws it natively around the editor: then the entry is missing and this raises, naming the key to add to `test/storyboard/macos_geometry.json`.
+  """
+  @spec fitted_target(target(), Model.t()) :: target()
+  def fitted_target(%{frontend: frontend, chrome_grid: chrome_grid} = target, %Model{} = model) do
+    open = Enum.filter(@grid_chrome, &Model.open?(model, &1))
+    key = Enum.map_join(open, "+", &Atom.to_string/1)
+
+    case Map.fetch(chrome_grid, key) do
+      {:ok, grid} ->
+        rows = Map.fetch!(grid, "rows")
+        %{target | cols: Map.get(grid, "cols", target.cols), rows: rows, grid_rows: rows}
+
+      :error ->
+        if Enum.any?(open, &(&1 in Map.fetch!(@native_below, frontend))) do
+          raise ArgumentError,
+                "#{frontend} at #{target.size} shows #{key} beside or below the editor, but its chrome_grid has no " <>
+                  "#{inspect(key)} entry; add the grid that frontend reports to test/storyboard/macos_geometry.json"
+        end
+
+        target
+    end
   end
 
   # A strip frame is drawn by driving a fresh session to the journey's start and replaying the steps up to it.
@@ -307,12 +353,13 @@ defmodule Minga.Test.Storyboard.Render do
           cols: cols,
           rows: rows,
           grid_rows: rows - tui_header_rows(cols),
-          window: nil
+          window: nil,
+          chrome_grid: %{}
         }
       end
 
     macos =
-      for %{"width" => width, "height" => height, "cols" => cols, "rows" => rows} <-
+      for %{"width" => width, "height" => height, "cols" => cols, "rows" => rows} = window <-
             @macos_geometry["windows"] do
         %{
           frontend: :macos,
@@ -320,7 +367,8 @@ defmodule Minga.Test.Storyboard.Render do
           cols: cols,
           rows: rows,
           grid_rows: rows,
-          window: {width, height}
+          window: {width, height},
+          chrome_grid: Map.get(window, "chrome_grid", %{})
         }
       end
 

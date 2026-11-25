@@ -27,7 +27,21 @@ defmodule MingaEditor.LspActions.ReferencesTest do
       assert selected.id == operation.id
       assert selected.status == status
       assert selected.message == message
-      assert state.shell_runtime.state.notice.message == nil
+    end
+  end
+
+  test "no references answer in the echo line with the next step, never an empty list" do
+    for response <- [{:ok, nil}, {:ok, []}] do
+      {state, operation} = start_operation()
+      state = LspActions.handle_references_response(state, response, operation.id)
+      notice = state.shell_runtime.state.notice
+
+      assert notice.message =~ ~r/^No references to /
+
+      assert [%{id: "goto_definition", key: "SPC c d", label: "go to definition"}] =
+               notice.actions
+
+      assert state.shell_runtime.state.modal == :none
     end
   end
 
@@ -139,5 +153,25 @@ defmodule MingaEditor.LspActions.ReferencesTest do
   defp with_project_root(workspace, root) do
     file_tree = FileTreeState.set_project_root(%FileTreeState{}, root)
     SessionState.set_file_tree(workspace, file_tree)
+  end
+
+  test "without a language server, a word under the cursor is offered to the project search, and no word offers nothing" do
+    import MingaEditor.CommandStateHelpers, only: [command_state: 2, start_buffer: 1]
+
+    for {text, offered, message} <- [
+          {"alpha beta", "alpha", "No references to alpha (no server)"},
+          {"   ", nil, "No references to this symbol (no server)"}
+        ] do
+      buffer = start_buffer(text)
+      state = command_state(buffer, mode: :normal) |> LspActions.find_references()
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == message
+
+      assert {^offered, _} =
+               MingaEditor.State.Search.take_project_offer(
+                 state.workspace.search,
+                 System.monotonic_time(:millisecond)
+               )
+    end
   end
 end

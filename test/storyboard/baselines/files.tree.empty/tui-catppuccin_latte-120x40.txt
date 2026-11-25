@@ -1,0 +1,258 @@
+# minga storyboard frame v1
+# scenario: files.tree.empty
+# frontend: tui
+# theme: catppuccin_latte
+# size: 120x40
+# cursor: 2,6
+## text
+ 󰙅 notes                     │ ▌  storyboard.ex
+                             │  / ❯ tmp ❯ minga-storyboard ❯ tui-120x40 ❯ files.tree.empty ❯ lib ❯ storyboard.ex
+                             │▾  1  defmodule Storyboard do
+   notes/ is empty.          │   1    @moduledoc "A small file every storyboard scenario starts in."
+   Make the first file or    │   2
+   folder here.              │▾  3    def greet(name) do
+                             │   4    │ "Hello, " <> name
+   a New file                │   5    end
+   A New folder              │   6  end
+                             │   7
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+                             │      ~
+  NORMAL  storyboard.ex                                                                                      Elixir 1:1
+## styles (row start-end fg bg attrs)
+0 0-29 #1e66f5 #ccd0da bold
+0 30-30 #4c4f69 #eff1f5 -
+0 31-31 #1e66f5 #eff1f5 bold
+0 32-119 #4c4f69 #eff1f5 -
+1 0-28 #4c4f69 #ccd0da -
+1 29-29 #1e66f5 #ccd0da -
+1 30-32 #4c4f69 #eff1f5 -
+1 33-35 #8c8fa1 #eff1f5 -
+1 36-38 #4c4f69 #eff1f5 -
+1 39-41 #8c8fa1 #eff1f5 -
+1 42-57 #4c4f69 #eff1f5 -
+1 58-60 #8c8fa1 #eff1f5 -
+1 61-70 #4c4f69 #eff1f5 -
+1 71-73 #8c8fa1 #eff1f5 -
+1 74-89 #4c4f69 #eff1f5 -
+1 90-92 #8c8fa1 #eff1f5 -
+1 93-95 #4c4f69 #eff1f5 -
+1 96-98 #8c8fa1 #eff1f5 -
+1 99-119 #4c4f69 #eff1f5 -
+2 0-28 #4c4f69 #ccd0da -
+2 29-29 #1e66f5 #ccd0da -
+2 30-31 #8c8fa1 #ccd0da bold
+2 32-35 #4c4f69 #eff1f5 -
+2 36-44 #8839ef #eff1f5 bold
+2 45-45 #4c4f69 #ccd0da -
+2 46-55 #df8e1d #eff1f5 -
+2 56-56 #4c4f69 #ccd0da -
+2 57-58 #8839ef #eff1f5 bold
+2 59-119 #4c4f69 #eff1f5 -
+3 0-2 #4c4f69 #ccd0da -
+3 3-18 #4c4f69 #ccd0da bold
+3 19-28 #4c4f69 #ccd0da -
+3 29-29 #1e66f5 #ccd0da -
+3 30-35 #5c5f77 #eff1f5 -
+3 36-37 #4c4f69 #eff1f5 -
+3 38-47 #7c7f93 #eff1f5 italic
+3 48-48 #fe640b #eff1f5 -
+3 49-99 #7c7f93 #eff1f5 italic
+3 100-119 #4c4f69 #eff1f5 -
+4 0-2 #4c4f69 #ccd0da -
+4 3-24 #8c8fa1 #ccd0da -
+4 25-28 #4c4f69 #ccd0da -
+4 29-29 #1e66f5 #ccd0da -
+4 30-35 #5c5f77 #eff1f5 -
+4 36-119 #4c4f69 #eff1f5 -
+5 0-2 #4c4f69 #ccd0da -
+5 3-14 #8c8fa1 #ccd0da -
+5 15-28 #4c4f69 #ccd0da -
+5 29-29 #1e66f5 #ccd0da -
+5 30-31 #8c8fa1 #eff1f5 -
+5 32-37 #4c4f69 #eff1f5 -
+5 38-40 #8839ef #eff1f5 bold
+5 41-41 #4c4f69 #eff1f5 -
+5 42-46 #1e66f5 #eff1f5 -
+5 47-47 #8c8fa1 #eff1f5 -
+5 48-51 #4c4f69 #eff1f5 -
+5 52-52 #8c8fa1 #eff1f5 -
+5 53-53 #4c4f69 #eff1f5 -
+5 54-55 #8839ef #eff1f5 bold
+5 56-119 #4c4f69 #eff1f5 -
+6 0-28 #4c4f69 #ccd0da -
+6 29-29 #1e66f5 #ccd0da -
+6 30-35 #5c5f77 #eff1f5 -
+6 36-37 #4c4f69 #eff1f5 -
+6 38-38 #5c5f77 #eff1f5 -
+6 39-39 #4c4f69 #eff1f5 -
+6 40-48 #40a02b #eff1f5 -
+6 49-49 #4c4f69 #eff1f5 -
+6 50-51 #04a5e5 #eff1f5 -
+6 52-119 #4c4f69 #eff1f5 -
+7 0-2 #4c4f69 #acb0be -
+7 3-3 #ccd0da #1e66f5 -
+7 4-28 #4c4f69 #acb0be -
+7 29-29 #1e66f5 #ccd0da -
+7 30-35 #5c5f77 #eff1f5 -
+7 36-37 #4c4f69 #eff1f5 -
+7 38-40 #8839ef #eff1f5 bold
+7 41-119 #4c4f69 #eff1f5 -
+8 0-2 #4c4f69 #ccd0da -
+8 3-3 #1e66f5 #ccd0da -
+8 4-28 #4c4f69 #ccd0da -
+8 29-29 #1e66f5 #ccd0da -
+8 30-35 #5c5f77 #eff1f5 -
+8 36-38 #8839ef #eff1f5 bold
+8 39-119 #4c4f69 #eff1f5 -
+9 0-28 #4c4f69 #ccd0da -
+9 29-29 #1e66f5 #ccd0da -
+9 30-35 #5c5f77 #eff1f5 -
+9 36-119 #4c4f69 #eff1f5 -
+10 0-28 #4c4f69 #ccd0da -
+10 29-29 #1e66f5 #ccd0da -
+10 30-35 #5c5f77 #eff1f5 -
+10 36-119 #8c8fa1 #eff1f5 -
+11 0-28 #4c4f69 #ccd0da -
+11 29-29 #1e66f5 #ccd0da -
+11 30-35 #5c5f77 #eff1f5 -
+11 36-119 #8c8fa1 #eff1f5 -
+12 0-28 #4c4f69 #ccd0da -
+12 29-29 #1e66f5 #ccd0da -
+12 30-35 #5c5f77 #eff1f5 -
+12 36-119 #8c8fa1 #eff1f5 -
+13 0-28 #4c4f69 #ccd0da -
+13 29-29 #1e66f5 #ccd0da -
+13 30-35 #5c5f77 #eff1f5 -
+13 36-119 #8c8fa1 #eff1f5 -
+14 0-28 #4c4f69 #ccd0da -
+14 29-29 #1e66f5 #ccd0da -
+14 30-35 #5c5f77 #eff1f5 -
+14 36-119 #8c8fa1 #eff1f5 -
+15 0-28 #4c4f69 #ccd0da -
+15 29-29 #1e66f5 #ccd0da -
+15 30-35 #5c5f77 #eff1f5 -
+15 36-119 #8c8fa1 #eff1f5 -
+16 0-28 #4c4f69 #ccd0da -
+16 29-29 #1e66f5 #ccd0da -
+16 30-35 #5c5f77 #eff1f5 -
+16 36-119 #8c8fa1 #eff1f5 -
+17 0-28 #4c4f69 #ccd0da -
+17 29-29 #1e66f5 #ccd0da -
+17 30-35 #5c5f77 #eff1f5 -
+17 36-119 #8c8fa1 #eff1f5 -
+18 0-28 #4c4f69 #ccd0da -
+18 29-29 #1e66f5 #ccd0da -
+18 30-35 #5c5f77 #eff1f5 -
+18 36-119 #8c8fa1 #eff1f5 -
+19 0-28 #4c4f69 #ccd0da -
+19 29-29 #1e66f5 #ccd0da -
+19 30-35 #5c5f77 #eff1f5 -
+19 36-119 #8c8fa1 #eff1f5 -
+20 0-28 #4c4f69 #ccd0da -
+20 29-29 #1e66f5 #ccd0da -
+20 30-35 #5c5f77 #eff1f5 -
+20 36-119 #8c8fa1 #eff1f5 -
+21 0-28 #4c4f69 #ccd0da -
+21 29-29 #1e66f5 #ccd0da -
+21 30-35 #5c5f77 #eff1f5 -
+21 36-119 #8c8fa1 #eff1f5 -
+22 0-28 #4c4f69 #ccd0da -
+22 29-29 #1e66f5 #ccd0da -
+22 30-35 #5c5f77 #eff1f5 -
+22 36-119 #8c8fa1 #eff1f5 -
+23 0-28 #4c4f69 #ccd0da -
+23 29-29 #1e66f5 #ccd0da -
+23 30-35 #5c5f77 #eff1f5 -
+23 36-119 #8c8fa1 #eff1f5 -
+24 0-28 #4c4f69 #ccd0da -
+24 29-29 #1e66f5 #ccd0da -
+24 30-35 #5c5f77 #eff1f5 -
+24 36-119 #8c8fa1 #eff1f5 -
+25 0-28 #4c4f69 #ccd0da -
+25 29-29 #1e66f5 #ccd0da -
+25 30-35 #5c5f77 #eff1f5 -
+25 36-119 #8c8fa1 #eff1f5 -
+26 0-28 #4c4f69 #ccd0da -
+26 29-29 #1e66f5 #ccd0da -
+26 30-35 #5c5f77 #eff1f5 -
+26 36-119 #8c8fa1 #eff1f5 -
+27 0-28 #4c4f69 #ccd0da -
+27 29-29 #1e66f5 #ccd0da -
+27 30-35 #5c5f77 #eff1f5 -
+27 36-119 #8c8fa1 #eff1f5 -
+28 0-28 #4c4f69 #ccd0da -
+28 29-29 #1e66f5 #ccd0da -
+28 30-35 #5c5f77 #eff1f5 -
+28 36-119 #8c8fa1 #eff1f5 -
+29 0-28 #4c4f69 #ccd0da -
+29 29-29 #1e66f5 #ccd0da -
+29 30-35 #5c5f77 #eff1f5 -
+29 36-119 #8c8fa1 #eff1f5 -
+30 0-28 #4c4f69 #ccd0da -
+30 29-29 #1e66f5 #ccd0da -
+30 30-35 #5c5f77 #eff1f5 -
+30 36-119 #8c8fa1 #eff1f5 -
+31 0-28 #4c4f69 #ccd0da -
+31 29-29 #1e66f5 #ccd0da -
+31 30-35 #5c5f77 #eff1f5 -
+31 36-119 #8c8fa1 #eff1f5 -
+32 0-28 #4c4f69 #ccd0da -
+32 29-29 #1e66f5 #ccd0da -
+32 30-35 #5c5f77 #eff1f5 -
+32 36-119 #8c8fa1 #eff1f5 -
+33 0-28 #4c4f69 #ccd0da -
+33 29-29 #1e66f5 #ccd0da -
+33 30-35 #5c5f77 #eff1f5 -
+33 36-119 #8c8fa1 #eff1f5 -
+34 0-28 #4c4f69 #ccd0da -
+34 29-29 #1e66f5 #ccd0da -
+34 30-35 #5c5f77 #eff1f5 -
+34 36-119 #8c8fa1 #eff1f5 -
+35 0-28 #4c4f69 #ccd0da -
+35 29-29 #1e66f5 #ccd0da -
+35 30-35 #5c5f77 #eff1f5 -
+35 36-119 #8c8fa1 #eff1f5 -
+36 0-28 #4c4f69 #ccd0da -
+36 29-29 #1e66f5 #ccd0da -
+36 30-35 #5c5f77 #eff1f5 -
+36 36-119 #8c8fa1 #eff1f5 -
+37 0-28 #4c4f69 #ccd0da -
+37 29-29 #1e66f5 #ccd0da -
+37 30-35 #5c5f77 #eff1f5 -
+37 36-119 #8c8fa1 #eff1f5 -
+38 0-28 #4c4f69 #ccd0da -
+38 29-29 #1e66f5 #ccd0da -
+38 30-35 #5c5f77 #eff1f5 -
+38 36-119 #8c8fa1 #eff1f5 -
+39 0-0 #8c8fa1 #e6e9ef -
+39 1-1 #4c4f69 #1e66f5 -
+39 2-7 #eff1f5 #1e66f5 bold
+39 8-8 #4c4f69 #1e66f5 -
+39 9-119 #4c4f69 #e6e9ef -

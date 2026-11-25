@@ -631,7 +631,13 @@ defmodule MingaEditor.Commands.Help do
   defp format_type(:string), do: "string"
   defp format_type(:string_or_nil), do: "string or nil"
   defp format_type(:string_list), do: "list of strings"
+  defp format_type(:atom_list), do: "list of atoms"
   defp format_type(:map_or_nil), do: "map or nil"
+
+  defp format_type({:atom_map, keys, values}),
+    do:
+      "map of #{Enum.map_join(keys, ", ", &inspect/1)} to #{Enum.map_join(values, " or ", &inspect/1)}"
+
   defp format_type(:map_list), do: "list of maps"
   defp format_type(:float_or_nil), do: "positive number or nil"
   defp format_type(:any), do: "any"

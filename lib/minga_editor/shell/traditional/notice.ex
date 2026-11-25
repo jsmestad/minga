@@ -7,19 +7,24 @@ defmodule MingaEditor.Shell.Traditional.Notice do
   notice identity.
   """
 
+  alias Minga.RenderModel.UI.EmptyList.Action
+
   @type id :: non_neg_integer()
+  @typedoc "A notice's message, and the next steps it names (`docs/design/anatomy.md`, \"Notice\")."
   @type t :: %__MODULE__{
           id: id(),
           message: String.t() | nil,
+          actions: [Action.t()],
           timer: reference() | nil
         }
 
-  defstruct id: 0, message: nil, timer: nil
+  defstruct id: 0, message: nil, actions: [], timer: nil
 
-  @doc "Publishes a latest-wins notice and advances its semantic identity."
-  @spec publish(t(), String.t()) :: t()
-  def publish(%__MODULE__{} = notice, message) when is_binary(message) do
-    %__MODULE__{id: notice.id + 1, message: message}
+  @doc "Publishes a latest-wins notice, with the next steps it names, and advances its semantic identity."
+  @spec publish(t(), String.t(), [Action.t()]) :: t()
+  def publish(%__MODULE__{} = notice, message, actions \\ [])
+      when is_binary(message) and is_list(actions) do
+    %__MODULE__{id: notice.id + 1, message: message, actions: actions}
   end
 
   @doc "Records the timer handle only when it belongs to the current identity."
@@ -49,6 +54,6 @@ defmodule MingaEditor.Shell.Traditional.Notice do
   def present?(%__MODULE__{message: message}), do: is_binary(message)
 
   @spec clear(t()) :: t()
-  defp clear(%__MODULE__{message: nil, timer: nil} = notice), do: notice
-  defp clear(%__MODULE__{} = notice), do: %{notice | message: nil, timer: nil}
+  defp clear(%__MODULE__{message: nil, timer: nil, actions: []} = notice), do: notice
+  defp clear(%__MODULE__{} = notice), do: %{notice | message: nil, actions: [], timer: nil}
 end

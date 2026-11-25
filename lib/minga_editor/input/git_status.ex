@@ -5,6 +5,7 @@ defmodule MingaEditor.Input.GitStatus do
   alias Minga.Editing
   alias Minga.Keymap
   alias MingaEditor.Commands
+  alias MingaEditor.GitStatus.CleanTree
   alias MingaEditor.GitStatus.Panel
   alias MingaEditor.GitStatus.TUIState
   alias MingaEditor.Handlers.GuiActionHandler
@@ -68,11 +69,31 @@ defmodule MingaEditor.Input.GitStatus do
   end
 
   @spec execute(EditorState.t(), atom()) :: EditorState.t()
-  defp execute(state, command) when command in [:git_status_next, :move_down],
-    do: navigate(state, &TUIState.next/2)
+  defp execute(state, command)
+       when command in [:git_status_next, :move_down, :git_status_prev, :move_up] do
+    case clean_tree(state) do
+      nil ->
+        navigate(state, row_motion(command))
 
-  defp execute(state, command) when command in [:git_status_prev, :move_up],
-    do: navigate(state, fn tui, _ -> TUIState.prev(tui) end)
+      facts ->
+        tui = tui_state(state)
+        from = CleanTree.selected_index(facts, tui.cursor_index)
+        count = length(CleanTree.commands(facts))
+
+        SidebarWorkflow.replace_git_status_tui(
+          state,
+          TUIState.move_within(tui, from, step_delta(command), count)
+        )
+    end
+  end
+
+  # ↩ opens the selected file, or on a clean tree runs the selected next step; `o` only ever opens a file.
+  defp execute(state, :git_status_activate) do
+    case clean_tree(state) do
+      nil -> file_action(state, :git_status_open_file)
+      facts -> Commands.execute(state, CleanTree.command_at(facts, tui_state(state).cursor_index))
+    end
+  end
 
   defp execute(state, :git_status_next_section), do: navigate(state, &TUIState.next_section/2)
   defp execute(state, :git_status_prev_section), do: navigate(state, &TUIState.prev_section/2)
@@ -87,13 +108,16 @@ defmodule MingaEditor.Input.GitStatus do
     end
   end
 
-  defp execute(state, :git_status_stage_all), do: dispatch_panel_action(state, :git_stage_all)
+  defp execute(state, :git_status_stage_all),
+    do: Commands.GitStatus.panel_action(state, :git_stage_all)
 
-  defp execute(state, :git_status_unstage_all), do: dispatch_panel_action(state, :git_unstage_all)
+  defp execute(state, :git_status_unstage_all),
+    do: Commands.GitStatus.panel_action(state, :git_unstage_all)
 
-  defp execute(state, :git_status_push), do: dispatch_panel_action(state, :git_push)
-  defp execute(state, :git_status_pull), do: dispatch_panel_action(state, :git_pull)
-  defp execute(state, :git_status_fetch), do: dispatch_panel_action(state, :git_fetch)
+  defp execute(state, command)
+       when command in [:git_status_push, :git_status_pull, :git_status_fetch],
+       do: Commands.execute(state, command)
+
   defp execute(state, :git_status_retry), do: GitToastWorkflow.retry_current(state)
   defp execute(state, :git_commit_open), do: Commands.execute(state, :git_commit_open)
 
@@ -116,7 +140,10 @@ defmodule MingaEditor.Input.GitStatus do
     end
   end
 
-  defp execute(state, operation) do
+  defp execute(state, operation), do: file_action(state, operation)
+
+  @spec file_action(EditorState.t(), atom()) :: EditorState.t()
+  defp file_action(state, operation) do
     case SidebarWorkflow.git_status_panel(state) do
       %Panel{id: panel_id, entries: entries, git_root: root} when is_binary(root) ->
         case TUIState.selected_file(tui_state(state), entries) do
@@ -129,16 +156,25 @@ defmodule MingaEditor.Input.GitStatus do
     end
   end
 
-  @spec dispatch_panel_action(
-          EditorState.t(),
-          :git_stage_all | :git_unstage_all | :git_push | :git_pull | :git_fetch
-        ) :: EditorState.t()
-  defp dispatch_panel_action(state, operation) do
+  # A clean tree has no file rows, only its next steps: the facts they depend on, or nil while there are entries.
+  @spec clean_tree(EditorState.t()) :: CleanTree.facts() | nil
+  defp clean_tree(state) do
     case SidebarWorkflow.git_status_panel(state) do
-      %Panel{id: panel_id} -> GuiActionHandler.dispatch(state, {operation, panel_id})
-      nil -> state
+      %Panel{repo_state: :normal, entries: []} = panel ->
+        Map.take(panel, [:branch, :ahead, :behind])
+
+      _rows_or_none ->
+        nil
     end
   end
+
+  @spec row_motion(atom()) :: (TUIState.t(), list() -> TUIState.t())
+  defp row_motion(command) when command in [:git_status_next, :move_down], do: &TUIState.next/2
+  defp row_motion(_previous), do: fn tui, _entries -> TUIState.prev(tui) end
+
+  @spec step_delta(atom()) :: -1 | 1
+  defp step_delta(command) when command in [:git_status_next, :move_down], do: 1
+  defp step_delta(_previous), do: -1
 
   @spec perform_file_action(EditorState.t(), atom(), Panel.id(), Minga.Git.StatusEntry.t()) ::
           EditorState.t()

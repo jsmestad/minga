@@ -95,7 +95,11 @@ defmodule MingaAgent.SessionStore do
           optional(:checklist_archive) => ChecklistArchive.t(),
           optional(:file_changes) => [FileChange.t()],
           optional(:job_ledger) => JobLedger.t(),
-          optional(:pending_inputs) => TurnExecution.pending_inputs()
+          optional(:pending_inputs) => TurnExecution.pending_inputs(),
+          # Written from the folder the conversation works in. Read back as the record holds it, unchecked:
+          # the session decides the folder from it with `MingaAgent.WorkingFolder.restored/1`.
+          optional(:working_folder) => MingaAgent.WorkingFolder.t(),
+          optional(:stored_working_folder) => MingaAgent.WorkingFolder.stored() | term()
         }
 
   @typep deserialized_transcript_session :: %{
@@ -2068,7 +2072,20 @@ defmodule MingaAgent.SessionStore do
     |> put_file_changes(Map.get(data, :file_changes, []))
     |> put_jobs(Map.get(data, :job_ledger))
     |> put_pending_inputs(Map.get(data, :pending_inputs))
+    |> put_working_folder(Map.get(data, :working_folder), Map.get(data, :stored_working_folder))
   end
+
+  # A session writes the folder it works in.
+  # Data that was loaded and is saved again without a session, such as an import, keeps the entry its record had.
+  # With neither, the record reads like one saved before folders were recorded.
+  @spec put_working_folder(map(), MingaAgent.WorkingFolder.t() | nil, term()) :: map()
+  defp put_working_folder(data, nil, stored) when is_map(stored),
+    do: Map.put(data, "working_folder", stored)
+
+  defp put_working_folder(data, nil, _no_entry), do: data
+
+  defp put_working_folder(data, working_folder, _stored),
+    do: Map.put(data, "working_folder", MingaAgent.WorkingFolder.stored(working_folder))
 
   @spec put_jobs(map(), JobLedger.t() | nil) :: map()
   defp put_jobs(data, nil), do: data
@@ -2191,6 +2208,7 @@ defmodule MingaAgent.SessionStore do
       session
       |> Map.put(:file_changes, changes)
       |> Map.put(:job_ledger, ledger)
+      |> Map.put(:stored_working_folder, data["working_folder"])
       |> restore_pending_inputs(data)
     end
   end

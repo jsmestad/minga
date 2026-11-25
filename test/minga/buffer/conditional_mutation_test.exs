@@ -166,23 +166,22 @@ defmodule Minga.Buffer.ConditionalMutationTest do
     end
   end
 
-  test "a successful buffer batch is one agent undo entry and failure preserves redo" do
+  test "a successful buffer batch is one Minga step, and neither it nor a failure clears your redo" do
     server = start_supervised!({Buffer, content: "one two three"})
     ctx = %{server: server, api: Buffer, identity: {:buffer, "/undo-file"}}
+    assert :ok = Buffer.insert_text(server, "> ")
+    assert :ok = Buffer.undo(server)
 
     assert :ok = mutate(ctx, revision(ctx), {:edit, [{"one", "1"}, {"three", "3"}]})
-    assert Buffer.version(server) == 1
-    assert Minga.Buffer.Process.last_undo_source(server) == @source
-    assert :ok = Buffer.undo(server)
-    assert Buffer.content(server) == "one two three"
-    refute Buffer.dirty?(server)
+    assert Buffer.content(server) == "1 two 3"
+    assert [{@source, [_one, _three]}] = Minga.Buffer.Process.minga_changes(server, "task-1")
 
     assert {:error, {:edit_failed, 2, :not_found}} =
-             mutate(ctx, revision(ctx), {:edit, [{"one", "ONE"}, {"missing", "X"}]})
+             mutate(ctx, revision(ctx), {:edit, [{"1", "ONE"}, {"missing", "X"}]})
 
     assert :ok = Buffer.redo(server)
-    assert Buffer.content(server) == "1 two 3"
-    assert :ok = Buffer.undo(server)
+    assert Buffer.content(server) == "> 1 two 3"
+    assert {:ok, 1} = Buffer.undo_agent_session(server)
     assert :ok = Buffer.undo(server)
     assert Buffer.content(server) == "one two three"
   end
@@ -209,8 +208,9 @@ defmodule Minga.Buffer.ConditionalMutationTest do
     assert {:ok, "agent\ntwo\nhuman"} = Fork.publish(fork)
     assert Buffer.content(parent) == "agent\ntwo\nhuman"
     assert Buffer.version(parent) == version + 1
-    assert Minga.Buffer.Process.last_undo_source(parent) == @source
-    Buffer.undo(parent)
+    assert [{@source, _regions}] = Minga.Buffer.Process.minga_changes(parent, "task-1")
+    assert Minga.Buffer.Process.last_undo_source(parent) == :user
+    assert {:ok, 1} = Buffer.undo_agent_session(parent)
     assert Buffer.content(parent) == "one\ntwo\nhuman"
     Buffer.undo(parent)
     assert Buffer.content(parent) == "one\ntwo\nthree"
@@ -435,7 +435,7 @@ defmodule Minga.Buffer.ConditionalMutationTest do
     assert_receive {:staged_draft, "agent\ntwo\nthree", ^parent}
     assert Buffer.content(parent) == "agent\ntwo\nhuman"
     assert Buffer.version(parent) == version + 1
-    Buffer.undo(parent)
+    assert {:ok, 1} = Buffer.undo_agent_session(parent)
     assert Buffer.content(parent) == "one\ntwo\nhuman"
   end
 

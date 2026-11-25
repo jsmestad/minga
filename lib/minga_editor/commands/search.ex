@@ -21,6 +21,7 @@ defmodule MingaEditor.Commands.Search do
   alias Minga.Core.Unicode
   alias Minga.Editing.Search.Match
   alias MingaEditor.PickerUI
+  alias MingaEditor.RenderModel.UI.EmptyStateBuilder
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.TodoSearchWorkflow
   alias MingaEditor.State, as: EditorState
@@ -56,13 +57,14 @@ defmodule MingaEditor.Commands.Search do
       ) do
     if ms.input == "" do
       Buffer.move_to(buf, ms.original_cursor)
-      state
+      # An empty query matches nothing and misses nothing.
+      record_incremental_match(state, true)
     else
       content = Buffer.content(buf)
 
       case Minga.Editing.search_next(content, ms.input, ms.original_cursor, ms.direction) do
         nil ->
-          state
+          record_incremental_match(state, false)
 
         {line, col} ->
           Buffer.move_to(buf, {line, col})
@@ -71,6 +73,7 @@ defmodule MingaEditor.Commands.Search do
             state
             | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
           }
+          |> record_incremental_match(true)
       end
     end
   end
@@ -373,10 +376,15 @@ defmodule MingaEditor.Commands.Search do
           String.t(),
           Minga.Editing.Search.direction()
         ) :: state()
+  # Nothing matched in this buffer: say so, and offer the project search with the same query (`SPC s p` carries it).
   defp apply_search_result(nil, state, _buf, pattern, direction) do
     state
     |> record_search(pattern, direction)
-    |> NoticeWorkflow.publish("Pattern not found: #{pattern}")
+    |> offer_project_search(pattern)
+    |> NoticeWorkflow.publish(
+      "No matches for “#{pattern}” in this buffer",
+      EmptyStateBuilder.next_steps([{:search_project, "search the project"}])
+    )
   end
 
   defp apply_search_result({line, col}, state, buf, pattern, direction) do
@@ -403,6 +411,22 @@ defmodule MingaEditor.Commands.Search do
   @spec record_substitution(state(), String.t()) :: state()
   defp record_substitution(%{workspace: workspace} = state, pattern) do
     search = SearchData.record_pattern(workspace.search, pattern)
+    %{state | workspace: MingaEditor.Session.State.set_search(workspace, search)}
+  end
+
+  @spec record_incremental_match(state(), boolean()) :: state()
+  defp record_incremental_match(state, found?),
+    do: MingaEditor.Editing.update_mode_state(state, &SearchState.record_match(&1, found?))
+
+  @spec offer_project_search(state(), String.t()) :: state()
+  defp offer_project_search(%{workspace: workspace} = state, pattern) do
+    search =
+      SearchData.offer_project_query(
+        workspace.search,
+        pattern,
+        System.monotonic_time(:millisecond)
+      )
+
     %{state | workspace: MingaEditor.Session.State.set_search(workspace, search)}
   end
 
@@ -477,16 +501,22 @@ defmodule MingaEditor.Commands.Search do
 
   commands(@command_specs)
 
+  # A query a notice offered (a buffer search that found nothing) starts the prompt.
   command(:search_project, "Search across project files",
     requires_buffer: false,
     execute: fn state ->
+      {offer, search} =
+        SearchData.take_project_offer(state.workspace.search, System.monotonic_time(:millisecond))
+
+      workspace = MingaEditor.Session.State.set_search(state.workspace, search)
+
       %{
         state
         | workspace:
             MingaEditor.Session.State.transition_mode(
-              state.workspace,
+              workspace,
               :search_prompt,
-              %Minga.Mode.SearchPromptState{}
+              %Minga.Mode.SearchPromptState{input: offer || ""}
             )
       }
     end

@@ -46,7 +46,8 @@ defmodule Minga.RenderModel.UI.GitStatus do
           stash_count: non_neg_integer(),
           git_toast: wire_toast(),
           terminal_cursor: non_neg_integer(),
-          terminal_collapsed: 0..15
+          terminal_collapsed: 0..15,
+          empty: Minga.RenderModel.UI.EmptyList.t() | nil
         }
 
   @enforce_keys [:repo_state, :syncing]
@@ -63,5 +64,6 @@ defmodule Minga.RenderModel.UI.GitStatus do
             stash_count: 0,
             git_toast: %{present: 0},
             terminal_cursor: 0,
-            terminal_collapsed: 0
+            terminal_collapsed: 0,
+            empty: nil
 end

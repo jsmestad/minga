@@ -32,6 +32,17 @@ const (
 	TerminalFeatureStatusFallback TerminalFeatureStatus = 4
 )
 
+// TerminalFeatureSource is a generated enum (repr u8).
+type TerminalFeatureSource uint8
+
+const (
+	TerminalFeatureSourceUnsettled     TerminalFeatureSource = 0
+	TerminalFeatureSourceAnswered      TerminalFeatureSource = 1
+	TerminalFeatureSourceKnownTerminal TerminalFeatureSource = 2
+	TerminalFeatureSourceTimeout       TerminalFeatureSource = 3
+	TerminalFeatureSourceUser          TerminalFeatureSource = 4
+)
+
 // AgentApprovalDecision is a generated enum (repr u8).
 type AgentApprovalDecision uint8
 
@@ -372,11 +383,27 @@ type PickerMovementKey struct {
 	Movement  PickerMovement
 }
 
-type WhichKeyBinding struct {
-	Kind uint8
-	Key  string
-	Desc string
-	Icon string
+type WhichKeyCrumb struct {
+	Key   string
+	Label string
+	Path  string
+}
+
+type WhichKeyHint struct {
+	Key   string
+	Label string
+}
+
+type WhichKeyEntry struct {
+	Kind        uint8
+	Key         string
+	Codepoint   uint32
+	Modifiers   uint8
+	Label       string
+	Section     string
+	Count       string
+	CountTone   uint8
+	PlatformKey string
 }
 
 type AgentTodo struct {
@@ -799,6 +826,7 @@ type GuiGitStatusFields struct {
 	TerminalCollapsed uint8
 	PanelID           uint64
 	CommitTargetID    uint64
+	Empty             EmptyList
 }
 
 type GuiBottomPanelFields struct {
