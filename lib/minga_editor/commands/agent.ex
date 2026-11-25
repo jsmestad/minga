@@ -766,7 +766,8 @@ defmodule MingaEditor.Commands.Agent do
   end
 
   # Text that names files is read by a worker; the press waits in line meanwhile.
-  # Without a saved draft to hold it on, the files are read here, as before.
+  # Without a saved draft to hold it on, a worker still reads the files and the
+  # message goes only if its composer is unchanged (`deliver_read_mentions/3`).
   @spec resolve_off_editor(
           state(),
           :steering | :follow_up,
@@ -1384,9 +1385,7 @@ defmodule MingaEditor.Commands.Agent do
   # Plain text needs nothing resolved. Text that names files must be read, which
   # can block, so a worker does it (`:read_files`) instead of the Editor (#4260).
   @spec resolve_prompt_for_session(state(), String.t(), String.t()) ::
-          {:ok, String.t() | [ReqLLM.Message.ContentPart.t()]}
-          | :read_files
-          | {:error, String.t()}
+          {:ok, String.t()} | :read_files
   defp resolve_prompt_for_session(state, text, _model) do
     cond do
       remote_session?(state) -> {:ok, text}

@@ -128,7 +128,8 @@ defmodule MingaEditor.Journeys.QueueWhileSessionBusyTest do
     traced = [
       {FileMention, :resolve_prompt, :_},
       {Project, :workspace_root, :_},
-      {File, :read, :_}
+      {File, :read, :_},
+      {Session, :model_selection, :_}
     ]
 
     :erlang.trace(editor, true, [:call, {:tracer, self()}])
@@ -190,13 +191,19 @@ defmodule MingaEditor.Journeys.QueueWhileSessionBusyTest do
     assert prompt(ctx) == "see @missing.ex nowalso tests"
     assert editor_state(ctx).workspace.agent_ui.draft_save.held_presses == []
 
-    # The composer takes presses again: the whole text goes as one message.
+    # The composer takes presses again: the whole text is pressed as one message,
+    # its files are read again, and nothing is queued or lost.
     send_key_sync(ctx, 13, @alt)
 
-    wait_until(ctx, fn _state -> minibuffer(ctx) =~ "not sent" and prompt(ctx) != "" end,
-      max_attempts: 50,
-      message: "expected the missing file to be reported again"
+    wait_until(ctx, fn state -> state.workspace.agent_ui.draft_save.held_presses == [] end,
+      max_attempts: 500,
+      interval_ms: 20,
+      message: "expected the second read to answer"
     )
+
+    assert minibuffer(ctx) =~ "not sent"
+    assert Session.queued_input_summaries(session, record) == {:ok, []}
+    assert prompt(ctx) == "see @missing.ex nowalso tests"
   end
 
   test "a read of mentioned files always answers, even when the project never does" do

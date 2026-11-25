@@ -20,6 +20,22 @@ defmodule MingaEditor.UI.Picker.ThinkingLevelSourceTest do
       assert Enum.all?(candidates, &match?(%Item{}, &1))
     end
 
+    test "with a session, lists the levels of the model the connection shows, without asking the session" do
+      selection = MingaAgent.Test.ModelSelectionFixture.selection()
+      reasoning = selection.policy.reasoning
+      # A dead pid: a call into the session would exit, so the candidates must come from state.
+      session = spawn(fn -> :ok end)
+
+      context = %{
+        context_with_level("medium")
+        | agent_session: session,
+          live_agent_ui: %{connection: %{model_selection: selection}}
+      }
+
+      candidates = ThinkingLevelSource.candidates(context)
+      assert length(candidates) == length(reasoning.options)
+    end
+
     test "marks the current thinking level as active" do
       candidates = ThinkingLevelSource.candidates(context_with_level("high"))
 
