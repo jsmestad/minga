@@ -101,6 +101,12 @@ class ReleaseContentsTest(unittest.TestCase):
         self.put(self.priv / "extensions/git_porcelain/lib/minga_git_porcelain.ex")
         self.run_checker("--source-tree", old_source)
 
+    def test_requires_the_clone_helper_only_when_selected_source_builds_it(self):
+        (self.priv / "minga-clone-tree").unlink()
+        rejected = self.run_checker(success=False)
+        self.assertIn("minga-clone-tree", rejected.stderr)
+        self.run_checker("--source-tree", self.root / "older-source")
+
     def test_accepts_all_four_actual_native_header_targets(self):
         for target in ("linux_x86_64", "linux_aarch64", "macos_x86_64", "macos_aarch64"):
             with self.subTest(target=target):

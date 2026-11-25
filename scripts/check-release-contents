@@ -176,7 +176,11 @@ def check(release, target, app=None, *, rolling_version=None, source_tree=None):
     if extensions.exists() and (not expected or {entry.name for entry in extensions.iterdir()} != expected):
         raise ValueError("Unexpected source in packaged extensions")
     required_native = [erts / "bin/beam.smp"]
-    for name in ("minga-renderer-go", "minga-parser", "minga-hook-runner", "minga-shell-output-reader", "minga-clone-tree"):
+    helpers = ["minga-renderer-go", "minga-parser", "minga-hook-runner", "minga-shell-output-reader"]
+    # Packages built from past source commits predate the overlay clone helper.
+    if (source_tree / "zig/src/clone_tree_main.zig").is_file():
+        helpers.append("minga-clone-tree")
+    for name in helpers:
         path = priv / name
         require_file(path, executable=True)
         required_native.append(path)
