@@ -14,6 +14,7 @@ defmodule MingaEditor do
   use GenServer
 
   alias MingaEditor.Agent.Arrival
+  alias MingaEditor.Agent.TranscriptSync
   alias MingaEditor.Agent.SessionFollowUp
   alias MingaEditor.Agent.SessionStart
   alias MingaEditor.Agent.Events
@@ -1593,6 +1594,7 @@ defmodule MingaEditor do
   @spec agent_request_response(state(), term()) :: {:handled, state()} | :unrelated
   defp agent_request_response(state, message) do
     with :unrelated <- Arrival.response(state, message),
+         :unrelated <- TranscriptSync.response(state, message) |> render_handled(),
          :unrelated <- SessionStart.response(state, message) |> render_handled() do
       SessionFollowUp.response(state, message) |> render_handled()
     end

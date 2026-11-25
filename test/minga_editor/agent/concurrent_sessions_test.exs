@@ -20,6 +20,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
   alias MingaAgent.Session.Transcript.Cursor
   alias MingaAgent.ToolApproval
   alias MingaAgent.ToolApproval.Target
+  alias Minga.Test.TranscriptSyncDriver
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Shell.Registry
   alias MingaEditor.Shell.Runtime
@@ -688,7 +689,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       observe_sync()
 
       state = base_state([agent_tab(1, "Agent", session)], 1)
-      state = AgentLifecycle.sync_transcript(state)
+      state = AgentLifecycle.sync_transcript(state) |> TranscriptSyncDriver.settle()
       assert_receive {:transcript_sync, :changed, count}
       original = state.workspace.agent_ui.panel.transcript
 
@@ -700,7 +701,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       theme = %{theme | syntax: Map.put(theme.syntax, :test_theme_marker, true)}
       state = state |> EditorState.apply_theme(theme) |> AgentLifecycle.restyle_transcript()
       refute_received {:transcript_sync, _, _}
-      state = AgentLifecycle.sync_transcript(state)
+      state = AgentLifecycle.sync_transcript(state) |> TranscriptSyncDriver.settle()
       assert_receive {:transcript_sync, :unchanged, 0}
       after_touch = state.workspace.agent_ui.panel.transcript
       assert after_touch.source_cursor != original.source_cursor
@@ -720,6 +721,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
         state
         |> MingaEditor.Shell.Traditional.Workflow.install_agent_panel(panel)
         |> AgentLifecycle.sync_transcript()
+        |> TranscriptSyncDriver.settle()
 
       assert_receive {:transcript_sync, :reset, ^count}
 
@@ -728,14 +730,17 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
       :ok = Session.new_session(session)
       :ok = Session.send_prompt(session, "Only in the replacement conversation")
-      replaced = AgentLifecycle.sync_transcript(state)
+      replaced = AgentLifecycle.sync_transcript(state) |> TranscriptSyncDriver.settle()
       assert_receive {:transcript_sync, :reset, _}
       messages = TranscriptFixture.messages(replaced.workspace.agent_ui.panel.transcript)
       assert {:user, "Only in the replacement conversation"} in messages
       refute {:user, "Only in the original conversation"} in messages
 
       :ok = stop_supervised(:primary)
-      assert AgentLifecycle.sync_transcript(replaced) === replaced
+
+      assert AgentLifecycle.sync_transcript(replaced) |> TranscriptSyncDriver.settle() ===
+               replaced
+
       refute_received {:transcript_sync, _, _}
     end
 
@@ -790,7 +795,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
           TranscriptFixture.projection([stale_message], message_ids: [{7, stale_message}])
         )
 
-      preserved = AgentLifecycle.sync_transcript(state)
+      preserved = AgentLifecycle.sync_transcript(state) |> TranscriptSyncDriver.settle()
       projection = preserved.workspace.agent_ui.panel.transcript
       assert TranscriptProjection.line_at(projection, 0) == {7, stale_message, 0, :text}
       assert TranscriptProjection.visible_pair(projection, 7) == {7, stale_message}
@@ -844,7 +849,12 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
     test "restyling a retained answer uses the new palette without reading the Session" do
       message = {:assistant, "plain answer"}
       session = start_supervised!({StubServer, messages: [message]})
-      state = base_state([agent_tab(1, "Agent", session)], 1) |> AgentLifecycle.sync_transcript()
+
+      state =
+        base_state([agent_tab(1, "Agent", session)], 1)
+        |> AgentLifecycle.sync_transcript()
+        |> TranscriptSyncDriver.settle()
+
       theme = state.appearance.theme
       theme = %{theme | syntax: Map.put(theme.syntax, "variable", fg: 0x123456)}
       observe_sync()
@@ -861,7 +871,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       {:ok, session} = StubServer.start_link(messages: [{:assistant, ""}])
       state = base_state([agent_tab(1, "Agent", session)], 1)
 
-      updated = AgentLifecycle.sync_transcript(state)
+      updated = AgentLifecycle.sync_transcript(state) |> TranscriptSyncDriver.settle()
 
       assert [{1, {:assistant, ""}, {:markdown_blocks, [%{kind: :spacer}]}}] =
                TranscriptProjection.presentation(updated.workspace.agent_ui.panel.transcript)

@@ -6,6 +6,8 @@ defmodule MingaEditor.State.AgentConnection do
 
   `tasks` is every task the editor follows (`MingaEditor.Agent.Tasks`): each session's latest state and open approval, whichever tab shows it.
 
+  `transcript_sync` is the one transcript read the Editor has out to its active local Session (`MingaEditor.Agent.TranscriptSync`).
+
   `arrival_budget_ms` is the time a local Agent tab arrival waits for its Session before it shows the tab as unavailable (`MingaEditor.Agent.Arrival`).
   """
 
@@ -14,6 +16,7 @@ defmodule MingaEditor.State.AgentConnection do
   alias MingaEditor.Agent.SessionFollowUp
   alias MingaEditor.Agent.SessionStart
   alias MingaEditor.Agent.Tasks
+  alias MingaEditor.Agent.TranscriptSync
   alias MingaEditor.State.RouteUsage
 
   @default_arrival_budget_ms 250
@@ -25,6 +28,7 @@ defmodule MingaEditor.State.AgentConnection do
           arrival_budget_ms: non_neg_integer(),
           question_receipts: %{pid() => binary()},
           arrival: Arrival.t() | nil,
+          transcript_sync: TranscriptSync.t() | nil,
           session_manager: GenServer.server(),
           session_starts: %{reference() => SessionStart.t()},
           session_follow_ups: %{reference() => SessionFollowUp.t()},
@@ -39,6 +43,7 @@ defmodule MingaEditor.State.AgentConnection do
             arrival_budget_ms: @default_arrival_budget_ms,
             question_receipts: %{},
             arrival: nil,
+            transcript_sync: nil,
             session_manager: MingaAgent.SessionManager,
             session_starts: %{},
             session_follow_ups: %{},
@@ -85,6 +90,11 @@ defmodule MingaEditor.State.AgentConnection do
   @doc "Keeps the active tab's outstanding local Session request in the owning Editor."
   @spec install_arrival(t(), Arrival.t() | nil) :: t()
   def install_arrival(%__MODULE__{} = connection, arrival), do: %{connection | arrival: arrival}
+
+  @doc "Keeps the Editor's one outstanding transcript read, or clears it."
+  @spec install_transcript_sync(t(), TranscriptSync.t() | nil) :: t()
+  def install_transcript_sync(%__MODULE__{} = connection, sync),
+    do: %{connection | transcript_sync: sync}
 
   @doc "Keeps a local Session start request the Editor sent and has not finished."
   @spec track_session_start(t(), SessionStart.t()) :: t()

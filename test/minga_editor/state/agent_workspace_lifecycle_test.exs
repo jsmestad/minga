@@ -365,7 +365,11 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
         }
       end)
 
-    state = MingaEditor.TabWorkflow.switch(state, agent_tab.id)
+    state =
+      state
+      |> MingaEditor.TabWorkflow.switch(agent_tab.id)
+      |> Minga.Test.TranscriptSyncDriver.settle()
+
     assert Runtime.active_session(state.shell_runtime) == session
 
     drained_workspace =
@@ -387,7 +391,11 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert workspace_payload(persisted).remote_session.last_seen_event_id == 42
 
     state = MingaEditor.TabWorkflow.switch(state, initial_tab_id)
-    state = MingaEditor.TabWorkflow.switch(state, agent_tab.id)
+
+    state =
+      state
+      |> MingaEditor.TabWorkflow.switch(agent_tab.id)
+      |> Minga.Test.TranscriptSyncDriver.settle()
 
     assert Minga.Test.TranscriptFixture.messages(state.workspace.agent_ui.panel.transcript) ==
              first_messages
