@@ -54,7 +54,48 @@ defmodule MingaAgent.Providers.NativeApplePrefixTest do
         id: make_ref()
       )
 
-    GenServer.call(pid, {:preview_prefix, make_ref(), :current})
+    await_preview(pid, :current)
+  end
+
+  # An Apple prefix that is not counted yet answers `{:pending, token}`; the provider
+  # sends the preview to its owner when the count ends.
+  defp await_preview(pid, operation) do
+    token = make_ref()
+
+    case GenServer.call(pid, {:preview_prefix, token, operation}) do
+      {:pending, ^token} ->
+        assert_receive {:prefix_preview_ready, ^token, reply}, 2_000
+        reply
+
+      reply ->
+        reply
+    end
+  end
+
+  # A counter that reports each start and counts only when the test lets it.
+  defp held_counter(owner) do
+    count = counter(owner)
+
+    fn texts, candidates, tools, reserve ->
+      send(owner, {:counting, self()})
+
+      receive do
+        :count -> count.(texts, candidates, tools, reserve)
+        {:fail, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  defp start_apple(root, counter) do
+    start_supervised!(
+      {Native,
+       subscriber: self(),
+       model_selection: apple_selection(),
+       project_root: root,
+       apple_counter: counter,
+       skip_api_key_env: true},
+      id: make_ref()
+    )
   end
 
   defp project(dir, name, instructions) do
@@ -129,21 +170,9 @@ defmodule MingaAgent.Providers.NativeApplePrefixTest do
   end
 
   test "an unchanged Apple prefix is counted once", %{tmp_dir: dir} do
-    root = project(dir, "project", @rules)
+    pid = start_apple(project(dir, "project", @rules), counter(self()))
 
-    pid =
-      start_supervised!(
-        {Native,
-         subscriber: self(),
-         model_selection: apple_selection(),
-         project_root: root,
-         apple_counter: counter(self()),
-         skip_api_key_env: true}
-      )
-
-    assert {:ok, _prefix, token, :ok} =
-             GenServer.call(pid, {:preview_prefix, make_ref(), :current})
-
+    assert {:ok, _prefix, token, :ok} = await_preview(pid, :current)
     assert :ok = GenServer.call(pid, {:commit_prefix_preview, token})
     assert_received {:counted, _tools, _reserve, _parts, _candidates}
 
@@ -153,28 +182,103 @@ defmodule MingaAgent.Providers.NativeApplePrefixTest do
     refute_received {:counted, _tools, _reserve, _parts, _candidates}
   end
 
-  test "a count that outlives its deadline is an explicit refusal well inside the caller timeout",
-       %{tmp_dir: dir} do
-    root = project(dir, "project", @rules)
-    owner = self()
+  test "a preview never waits for the count: it answers pending, then the count's result", %{
+    tmp_dir: dir
+  } do
+    pid = start_apple(project(dir, "project", @rules), held_counter(self()))
+    token = make_ref()
 
-    hung = fn _texts, _candidates, _tools, _reserve ->
-      send(owner, {:counting, self()})
+    # The count has not been let through, so an answer here cannot have waited for it.
+    assert {:pending, ^token} = GenServer.call(pid, {:preview_prefix, token, :current})
+    assert_receive {:counting, counting}
+    refute_received {:prefix_preview_ready, _token, _reply}
 
-      receive do
-        :never -> {:error, :unreachable}
-      end
-    end
+    send(counting, :count)
+    assert_receive {:prefix_preview_ready, ^token, {:ok, %Prefix{}, ^token, :ok}}
+    assert :ok = GenServer.call(pid, {:commit_prefix_preview, token})
+  end
 
-    {elapsed, result} = :timer.tc(fn -> preview(apple_selection(), root, hung) end, :millisecond)
-    assert_received {:counting, counting}
+  test "one count is in flight for a prefix, however many times it is asked for", %{tmp_dir: dir} do
+    pid = start_apple(project(dir, "project", @rules), held_counter(self()))
 
-    assert {:error, message} = result
-    assert message =~ "could not count its fixed instructions and tools within 3 seconds"
-    assert elapsed < 4_000
+    GenServer.cast(pid, {:warm_prefix, self(), :current})
+    GenServer.cast(pid, {:warm_prefix, self(), :current})
+    token = make_ref()
+    assert {:pending, ^token} = GenServer.call(pid, {:preview_prefix, token, :current})
 
-    # The counting process (the helper Port's owner) is gone, so the helper is retired too.
+    assert_receive {:counting, counting}
+    refute_received {:counting, _second}
+
+    send(counting, :count)
+    assert_receive {:prefix_preview_ready, ^token, {:ok, %Prefix{}, ^token, :ok}}
+    assert_received {:counted, _tools, _reserve, _parts, _candidates}
+    refute_received {:counted, _tools, _reserve, _parts, _candidates}
+  end
+
+  test "a prefix warmed before the first send is ready when that send asks", %{tmp_dir: dir} do
+    pid = start_apple(project(dir, "project", @rules), held_counter(self()))
+
+    GenServer.cast(pid, {:warm_prefix, self(), :current})
+    assert_receive {:counting, counting}
+    send(counting, :count)
     monitor = Process.monitor(counting)
     assert_receive {:DOWN, ^monitor, :process, ^counting, _reason}
+
+    assert {:ok, %Prefix{}, _token, :ok} =
+             GenServer.call(pid, {:preview_prefix, make_ref(), :current})
+
+    refute_received {:counting, _again}
+  end
+
+  test "a count that ends after its waiter left is kept for the next preview", %{tmp_dir: dir} do
+    pid = start_apple(project(dir, "project", @rules), held_counter(self()))
+    token = make_ref()
+    assert {:pending, ^token} = GenServer.call(pid, {:preview_prefix, token, :current})
+    assert_receive {:counting, counting}
+
+    # A Stop during admission discards the waiter; the count goes on.
+    GenServer.cast(pid, {:discard_prefix_preview, token, self()})
+    send(counting, :count)
+    monitor = Process.monitor(counting)
+    assert_receive {:DOWN, ^monitor, :process, ^counting, _reason}
+
+    assert {:ok, %Prefix{}, _token, :ok} =
+             GenServer.call(pid, {:preview_prefix, make_ref(), :current})
+
+    refute_received {:prefix_preview_ready, ^token, _reply}
+    refute_received {:counting, _again}
+  end
+
+  test "a count that fails, or whose process dies, answers the waiter with a refusal and keeps nothing",
+       %{tmp_dir: dir} do
+    for failure <- [:reported, :killed] do
+      pid = start_apple(project(dir, "project-#{failure}", @rules), held_counter(self()))
+      token = make_ref()
+      assert {:pending, ^token} = GenServer.call(pid, {:preview_prefix, token, :current})
+      assert_receive {:counting, counting}
+
+      case failure do
+        :reported -> send(counting, {:fail, :apple_count_timeout})
+        :killed -> Process.exit(counting, :kill)
+      end
+
+      assert_receive {:prefix_preview_ready, ^token, {:error, message}}
+      assert message =~ "Apple Intelligence (On Device)"
+
+      assert message =~ "counting its fixed instructions and tools" or
+               message =~ "could not count"
+
+      # Nothing was kept, so the next preview counts again.
+      assert {:pending, _token} = GenServer.call(pid, {:preview_prefix, make_ref(), :current})
+      assert_receive {:counting, _again}
+    end
+  end
+
+  test "a second preview while one waits for its count is refused", %{tmp_dir: dir} do
+    pid = start_apple(project(dir, "project", @rules), held_counter(self()))
+    assert {:pending, _token} = GenServer.call(pid, {:preview_prefix, make_ref(), :current})
+
+    assert {:error, :prefix_transition_active} =
+             GenServer.call(pid, {:preview_prefix, make_ref(), :current})
   end
 end

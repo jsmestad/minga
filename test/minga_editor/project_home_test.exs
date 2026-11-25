@@ -255,6 +255,33 @@ defmodule MingaEditor.ProjectHomeTest do
     assert editor_state(editor).workspace.keymap_scope == :editor
   end
 
+  test "a first message admitted while the model counts is named by its session, on the home and in the drawer",
+       ctx do
+    editor = open_home(ctx)
+    # A conversation started from the home, then left: the home is in front again.
+    send_keys_sync(editor, "<Space>aSn")
+    send_keys_sync(editor, "<Esc><Esc><Esc>")
+    assert showing_home?(editor)
+
+    session = spawn(fn -> receive do: (:stop -> :ok) end)
+    :sys.replace_state(editor.editor, &follow_task(&1, session, nil))
+
+    # While the send is admitting, the session reports a working turn with the targets it will carry.
+    send(editor.editor, {:agent_event, session, {:status_changed, :thinking}})
+    send(editor.editor, {:agent_event, session, {:stop_target_changed, {"record", "request"}}})
+
+    # The send's answer ({:sent, queue_target}) names nothing: the session's first-goal event does.
+    send(editor.editor, {:agent_event, session, {:title_changed, "Add tests"}})
+    state = editor_state(editor)
+
+    assert [%{label: "Add tests"}] = home_task_rows(state)
+
+    assert {:ok, %MingaEditor.Agent.Tasks.Entry{title: "Add tests"} = entry} =
+             MingaEditor.Agent.Tasks.fetch(state.agent_connection.tasks, session)
+
+    assert MingaEditor.Agent.Tasks.Entry.state(entry) == :working
+  end
+
   defp home_with_two_files(ctx) do
     editor = open_home(ctx)
     send_keys_sync(editor, ":e #{Path.join(ctx.root, "lib/a.ex")}<CR>")
