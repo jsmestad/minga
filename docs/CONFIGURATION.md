@@ -57,6 +57,7 @@ That's it. Save the file and press `SPC h r`. The status bar shows "Config reloa
 | `:font_weight` | weight atom | `:regular` | Font weight (see [Fonts](#fonts) below) |
 | `:font_ligatures` | boolean | `true` | Enable programming ligatures (see [Fonts](#fonts) below) |
 | `:cursor_animate` | boolean | `true` | Smoothly animate cursor movement in GUI frontends |
+| `:terminal_features` | map of feature to `:on` or `:off` | `%{}` | Force a terminal feature on or off (see [Terminal features](#terminal-features) below) |
 | `:log_level` | `:debug`, `:info`, `:warning`, `:error`, `:none` | `:info` | Global minimum log level (see [Logging](#logging) below) |
 | `:log_level_render` | log level or `:default` | `:default` | Log level for the render pipeline |
 | `:log_level_lsp` | log level or `:default` | `:default` | Log level for LSP client communication |
@@ -94,6 +95,16 @@ set :agent_notify_on, [:approval, :error]
 ```
 
 Use `set :agent_notifications, false` to turn off agent alerts. `:agent_notify_debounce` sets the minimum interval in milliseconds between repeated completions or repeated failures from the same session (default `5000`). It does not delay approvals.
+
+### Terminal features
+
+In a terminal, Minga asks what the terminal can do and falls back quietly where it cannot. `:checkhealth terminal` lists what it found. Sometimes it is wrong: a new terminal draws curly underlines that Minga has not heard of, or a remote shell hides that the terminal has 24-bit colour. Then you say so yourself:
+
+```elixir
+set :terminal_features, %{styled_underlines: :on, underline_color: :on}
+```
+
+Three features can be forced `:on` or `:off`: `:true_color`, `:styled_underlines` and `:underline_color`. Those are the ones Minga decides how to draw. The others (the Kitty keyboard protocol, synchronized output, focus reporting) are turned on by the terminal, which answers for them reliably, so they cannot be forced. Any other name is an error, so a typo cannot look like a setting that does nothing. The option applies when Minga starts; after changing it, restart Minga and run `:checkhealth terminal` to see the feature listed as forced by you. The details are in [the terminal design notes](design/tui.md#terminal-capabilities).
 
 ## Modeline
 
@@ -1158,7 +1169,68 @@ end
 
 This is useful for team-shared settings. Check `.minga.exs` into your repo and everyone on the team gets the same tab width, formatters, and hooks.
 
-**Note:** Project-local config is real Elixir code that runs when you open the editor in that directory. Review `.minga.exs` files in untrusted projects before opening them.
+A project can carry two more things next to it: plugin folders in `.minga/plugins/`, and MCP servers in `.minga/mcp.json`. They follow the same rules as `.minga.exs`. One thing a plugin author meets first on macOS: files unpacked from an archive are often writable by their group, and a plugin that vendors such files is refused until you run `chmod -R g-w` on the plugin folder (the reason is in [Folders Minga will not load config from](#folders-minga-will-not-load-config-from)).
+
+### Which project config is loaded
+
+Project-local config is code: `.minga.exs` is Elixir that runs, a plugin is code Minga loads, and an MCP server is a command Minga starts. So Minga is exact about where it comes from. It is read from the root of the project you launched, never from whatever directory the editor process happens to run in.
+
+- `minga lib/app.ex` or `minga ~/code/app` loads the config of that file's or folder's project.
+- `minga` with no argument, typed in a terminal, opens the project of the directory you are in, and loads its config. This is how most people open a project, and it is the same rule that restores the project's session.
+- Minga started without a terminal (from Finder or the Dock, or as a service) has no directory you chose, so it opens no project and loads no project config. Open a folder, then reload config (`SPC h r`), and the folder's config loads.
+- A reload reads the project you have open at that moment.
+
+`*Messages*` (`SPC b m`) says what happened: "Project config loaded from ~/code/app: .minga.exs, .minga/mcp.json", or why a folder's config was not loaded. With no project there is nothing to say.
+
+A relative path in a config file, as in `extension :my_ext, path: "ext"` or the source folder you give `Minga.Language.register_grammar/3`, means next to that file. It does not depend on where you started Minga.
+
+### Folders Minga will not load config from
+
+A folder as broad as your home directory, a folder above it, `/`, or the top of a mounted volume is not treated as a project just because a marker file sits there, and its `.minga.exs`, plugins and MCP servers are not loaded. The one exception is version control: if that folder is a Git repository (a dotfiles setup, for example), it is a project and its config loads. This is the same rule that decides where Minga's Agent may work; see [Projects](PROJECTS.md#where-minga-works-when-there-is-no-project).
+
+Config is also not loaded from a folder or a file that is not yours. The project folder, `.minga.exs`, the `.minga` folder, `.minga/mcp.json` and the plugins folder must belong to your account, and nobody else on the machine may be able to write them. This is what stops another account from leaving a `.minga.exs` in a shared folder such as `/tmp` for you to run. Minga follows a link first and judges what it leads to.
+
+A folder of code is held to the same rule all the way down. That means each plugin in `.minga/plugins`, the folder an `extension ..., path:` in a project's config points at, and a grammar's source folder that a project's config registers. Every folder and every file in it must be yours and closed to others: the source files, `plugin.json`, the scripts its command lines name, and folders that are still empty, because a file someone adds there later would be loaded too. Minga registers such a folder under its real path, so a link that is pointed somewhere else afterwards changes nothing.
+
+- **The folders above count too.** Each folder above the project, and above a folder of code, up to `/`, must belong to you or to the system, and others must not be able to write it. A sticky folder such as `/tmp` is fine, because there one account cannot rename or remove another account's entries. So `/tmp/my-project` loads its config, and a project inside another account's open folder does not.
+- **A folder or file that anyone can write is refused** until you remove that access (`chmod o-w`, or `chmod -R o-w` for a whole folder).
+- **Group write access depends on the platform.** On Linux it is allowed: an account usually has a group of its own, so a project folder shared with a group is shared on purpose, and that group can change what your editor runs. On macOS it is refused, because every account on a Mac is in the `staff` group, which makes "the group" everyone. Remove it with `chmod g-w` (`chmod -R g-w` for a whole folder; files unpacked from an archive often carry it).
+- **A folder of code has a size limit.** Minga examines every entry in it at each load, so a plugin or extension folder with more than 10,000 files and folders is refused. Keep dependencies and build output out of it. (Examining 10,000 entries takes well under a second.)
+- Minga reads the mode bits. An access control list (ACL) that grants someone else write access is not seen.
+
+When a folder or a file is refused, `*Messages*` names it, says why, and says what would make it loadable. One refused file leaves the rest of the project's config loaded. Minga never falls back to a parent folder's config or to the directory it was started from.
+
+On reload, the project you have open may be a different one from the project Minga started with. Its config loads, with one exception: extensions and plugins are admitted once, when Minga starts. If the other project's `.minga.exs` declares extensions, or it has a `.minga/plugins` folder, its config is left out, nothing of it is compiled, and `*Messages*` says to start Minga in that project.
+
+**Note:** These rules are a floor against other accounts on your machine. They do not judge the project's own code, and Minga does not ask before it loads a project's config: opening a file inside a repository loads that repository's config and runs it. Review `.minga.exs`, `.minga/plugins` and `.minga/mcp.json` in a project you did not write before you open it.
+
+### Programs a project's config starts
+
+Some config makes Minga start a program: an MCP server, a hook, a formatter, a language server, a plugin's slash command. Minga judges what it starts itself, and it decides where the program runs. It does not judge what the program reads once it is running.
+
+**Where it runs.** Every one of these runs in the root of the project, never in the directory Minga happened to be started from. So a relative path in a server, hook or formatter line means "in the project": `scripts/fmt.sh` is the project's `scripts/fmt.sh`, whether you ran `minga` inside the project or `cd /tmp && minga ~/code/app`. A plugin names its own files through `${MINGA_PLUGIN_ROOT}`, which Minga replaces with the plugin's real path. A project's config and a plugin cannot choose another directory: a `cwd` they supply is replaced.
+
+**Which program runs.** For an MCP server that a project declares, in `.minga/mcp.json` or with `set :agent_mcp_servers` in its `.minga.exs`:
+
+- A bare name such as `node` is your own environment. Minga looks it up when the server starts, on the `PATH` Minga has at that moment, and in absolute folders only. A relative or empty `PATH` entry is passed over, because it would mean "whatever directory this runs in". A program that is not installed shows up as a server that failed to start, and it is found the next time a conversation starts once you install it.
+- A name with a `/` in it is a file in the project. Minga examines it when it loads the config, and what it starts later is exactly that file. It must exist, and it must be yours and closed to others, with every folder between the project root and it. If it is missing or fails, that server is left out and `*Messages*` says why and what to do; reload the config (`SPC h r`) once it is fixed.
+- A path that ends up outside the project, whether you wrote an absolute path to a tool or a link of your own leads out of the project, is your own environment and only has to exist.
+
+**What is not judged.** Arguments, environment values, and whatever the program reads or imports after it starts. A hook, a formatter and a language server command are shell lines: the line is the project's own code, as much as anything in `.minga.exs`, and only its directory is decided by Minga.
+
+| What starts | Who can declare it | What Minga judges | Where it runs |
+|-------------|--------------------|-------------------|---------------|
+| MCP server in `.minga/mcp.json` | the project | the program (rules above) | the project root |
+| MCP server or hook set in a project's `.minga.exs` | the project | the server's program; a hook is a shell line | the project root |
+| A plugin's MCP server | a plugin (a project's plugin is examined file by file when it is registered) | the plugin's own relative program is resolved inside the plugin | the root of the project the session works in |
+| A plugin's hook | a plugin | nothing: a shell line run by Minga's hook runner | the root of the project whose config is loaded |
+| Language server | any config | nothing: a command line | the project root (as before) |
+| Formatter | any config | nothing: a shell line | the open project's root |
+| A plugin's slash command | a plugin | nothing | the open project's root |
+| Agent status command | your own config | nothing: a shell line | the session's folder (as before) |
+
+An MCP server from your own config starts in the folder the conversation works in, like every other server; in your own config you can give a server or a hook a `cwd` (an absolute path) to start it somewhere else. With no project open, a hook, a formatter or a slash command from your own config or a global extension runs where Minga runs, as it always did, and a conversation without a folder starts no MCP servers.
+
 
 ## Post-init hook (after.exs)
 
@@ -1186,7 +1258,7 @@ Minga loads config in this order. Each stage can override the previous one:
 
 1. `~/.config/minga/modules/*.ex` (user modules, compiled alphabetically)
 2. `~/.config/minga/config.exs` (global config)
-3. `.minga.exs` in the current working directory (project-local config)
+3. `.minga.exs` at the root of the project you launched (project-local config; see [Which project config is loaded](#which-project-config-is-loaded))
 4. `~/.config/minga/after.exs` (post-init hook)
 5. Extensions are started (from declarations in steps 2-4)
 

@@ -25,11 +25,11 @@ func decodeReport(t *testing.T, packet []byte) map[terminal.Feature]terminal.Sta
 	}
 	bodyLen := int(packet[1])<<8 | int(packet[2])
 	body := packet[3:]
-	if len(body) != bodyLen || len(body) != 1+2*int(body[0]) {
+	if len(body) != bodyLen || len(body) != 1+3*int(body[0]) {
 		t.Fatalf("lengths disagree: body_len %d, body %d, count %d", bodyLen, len(body), body[0])
 	}
 	out := map[terminal.Feature]terminal.Status{}
-	for i := 1; i < len(body); i += 2 {
+	for i := 1; i+2 < len(body); i += 3 {
 		out[terminal.Feature(body[i])] = terminal.Status(body[i+1])
 	}
 	return out
@@ -59,6 +59,13 @@ func TestTheReportIsExactlyTheCapabilitiesValue(t *testing.T) {
 				t.Fatalf("step %d: feature %d reported as %d, the frontend acts on %d", step, entry.Feature, got, caps.Status(entry.Feature))
 			}
 		}
+		// The third byte of each entry is how the frontend settled it.
+		packet := EncodeTerminalReport(caps)
+		for i, entry := range entries {
+			if got := terminal.Source(packet[4+3*i+2]); got != caps.Source(entry.Feature) {
+				t.Fatalf("step %d: feature %d source reported as %d, held as %d", step, entry.Feature, got, caps.Source(entry.Feature))
+			}
+		}
 	}
 }
 
@@ -69,9 +76,10 @@ func TestEqualCapabilitiesEncodeToEqualReports(t *testing.T) {
 	if !bytes.Equal(EncodeTerminalReport(first), EncodeTerminalReport(second)) {
 		t.Fatal("the report must depend on the capabilities value alone")
 	}
-	// true_color (1) detected (2), then styled_underlines (2), underline_color (3), kitty_keyboard (5),
-	// synchronized_output (10) and focus_reporting (11), all pending (1).
-	want := []byte{0x62, 0, 13, 6, 1, 2, 2, 1, 3, 1, 5, 1, 10, 1, 11, 1}
+	// Each entry is feature, status, source. true_color (1) detected (2), answered by the terminal (1); then
+	// styled_underlines (2), underline_color (3), kitty_keyboard (5), synchronized_output (10) and focus_reporting (11),
+	// all pending (1) and unsettled (0).
+	want := []byte{0x62, 0, 19, 6, 1, 2, 1, 2, 1, 0, 3, 1, 0, 5, 1, 0, 10, 1, 0, 11, 1, 0}
 	if got := EncodeTerminalReport(first); !bytes.Equal(got, want) {
 		t.Fatalf("report = % x, want % x", got, want)
 	}

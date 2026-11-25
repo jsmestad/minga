@@ -18,7 +18,6 @@ defmodule Minga.Buffer.State do
   @default_change_log ChangeLog.new()
   @default_conflict_index ConflictIndex.new(Document.new(""))
   @default_save_state SaveState.new()
-  @default_undo_history UndoHistory.new()
 
   @typedoc """
   Buffer type controlling behavior:
@@ -46,7 +45,8 @@ defmodule Minga.Buffer.State do
             local_persistence: %LocalPersistence{},
             buffer_type: :file,
             save_state: @default_save_state,
-            undo_history: @default_undo_history,
+            # The process builds the history for its document; an opaque history has no literal default.
+            undo_history: nil,
             name: nil,
             read_only: false,
             unlisted: false,
@@ -60,6 +60,7 @@ defmodule Minga.Buffer.State do
             swap: %SwapState{},
             auto_save_timer: nil,
             auto_save_token: nil,
+            compaction_scheduled: false,
             events_registry: Minga.Events.default_registry()
 
   @type options_server :: Minga.Config.Options.server()
@@ -87,6 +88,7 @@ defmodule Minga.Buffer.State do
           swap: SwapState.t(),
           auto_save_timer: reference() | nil,
           auto_save_token: reference() | nil,
+          compaction_scheduled: boolean(),
           events_registry: Minga.Events.registry()
         }
 
