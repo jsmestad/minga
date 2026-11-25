@@ -35,6 +35,21 @@ defmodule MingaEditor.Input.WhichKey do
      |> MingaEditor.Editing.update_mode_state(&Minga.Mode.cancel_leader/1)}
   end
 
+  # A prompt or picker's own keys, opened by the mode pill, give every other key back to that prompt or picker
+  # and close.
+  def handle_key(
+        %{
+          shell_runtime: %{
+            state: %{whichkey: %MingaEditor.State.WhichKey{node: node, owner: :scope}}
+          }
+        } =
+          state,
+        _codepoint,
+        _modifiers
+      )
+      when node != nil,
+      do: {:passthrough, WhichKeyWorkflow.dismiss(state)}
+
   def handle_key(
         %{
           shell_runtime: %{state: %{whichkey: %MingaEditor.State.WhichKey{node: node} = whichkey}}
@@ -87,10 +102,26 @@ defmodule MingaEditor.Input.WhichKey do
         |> WhichKeyWorkflow.reveal_now()
 
       {_vim, :normal} ->
-        state |> Router.route_key(@key_space, 0) |> WhichKeyWorkflow.reveal_now()
+        state
+        |> cancel_pending_leader()
+        |> Router.route_key(@key_space, 0)
+        |> WhichKeyWorkflow.reveal_now()
 
       {_vim, _other} ->
         state |> Router.route_key(@key_escape, 0) |> open_from_normal()
+    end
+  end
+
+  # A leader already pending (SPC typed, or the panel open at a group) starts over at the root: another SPC there
+  # would run `SPC SPC` instead of opening the top level.
+  @spec cancel_pending_leader(state()) :: state()
+  defp cancel_pending_leader(state) do
+    if Minga.Editing.in_leader?(state) do
+      state
+      |> WhichKeyWorkflow.dismiss()
+      |> MingaEditor.Editing.update_mode_state(&Minga.Mode.cancel_leader/1)
+    else
+      state
     end
   end
 
@@ -138,13 +169,15 @@ defmodule MingaEditor.Input.WhichKey do
         levels = length(current) - length(target)
 
         if levels > 0 and List.starts_with?(current, target),
-          do:
-            Enum.reduce(1..levels, state, fn _level, acc ->
-              Router.route_key(acc, @key_backspace, 0)
-            end),
+          do: press_backspace(state, levels),
           else: state
     end
   end
+
+  @spec press_backspace(state(), pos_integer()) :: state()
+  defp press_backspace(state, times),
+    do:
+      Enum.reduce(1..times, state, fn _time, acc -> Router.route_key(acc, @key_backspace, 0) end)
 
   @spec open_path(state()) :: String.t() | nil
   defp open_path(%{

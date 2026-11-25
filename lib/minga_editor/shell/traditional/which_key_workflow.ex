@@ -3,6 +3,7 @@ defmodule MingaEditor.Shell.Traditional.WhichKeyWorkflow do
 
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.WhichKey
 
   @default_timeout_ms 300
@@ -58,15 +59,24 @@ defmodule MingaEditor.Shell.Traditional.WhichKeyWorkflow do
   end
 
   @doc """
-  Dismisses a leader which-key under a modal that takes input. A prompt or picker's own keys, opened over that modal by the mode pill, stay: the modal changing underneath (results loading, the selection moving) is not a reason to close them.
+  Dismisses a leader which-key under a modal that takes input. A prompt or picker's own keys, opened over that modal by the mode pill, stay while the same kind of modal stays open (`next_tag`): results loading or the selection moving is not a reason to close them, but a picker that hands over to a prompt is.
   """
-  @spec dismiss_under_modal(EditorState.t()) :: EditorState.t()
+  @spec dismiss_under_modal(EditorState.t(), atom()) :: EditorState.t()
   def dismiss_under_modal(
-        %{shell_runtime: %{state: %{whichkey: %WhichKey{owner: :scope}}}} = state
-      ),
-      do: state
+        %{shell_runtime: %{state: %{whichkey: %WhichKey{owner: :scope}, modal: modal}}} = state,
+        next_tag
+      ) do
+    if ModalOverlay.tag(modal) == next_tag, do: state, else: dismiss(state)
+  end
 
-  def dismiss_under_modal(state), do: dismiss(state)
+  def dismiss_under_modal(state, _next_tag), do: dismiss(state)
+
+  @doc "Dismisses a prompt or picker's own keys when that modal closes; a leader which-key is left alone."
+  @spec dismiss_scope(EditorState.t()) :: EditorState.t()
+  def dismiss_scope(%{shell_runtime: %{state: %{whichkey: %WhichKey{owner: :scope}}}} = state),
+    do: dismiss(state)
+
+  def dismiss_scope(state), do: state
 
   @doc "Dismisses which-key and cancels its current timer best-effort."
   @spec dismiss(EditorState.t()) :: EditorState.t()

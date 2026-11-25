@@ -33,7 +33,7 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
       state
     else
       state
-      |> suppress_lower_surfaces()
+      |> suppress_lower_surfaces(variant)
       |> update_shell_state(&ShellState.open_modal(&1, modal))
     end
   end
@@ -47,7 +47,7 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
         modal
       ) do
     state
-    |> suppress_lower_surfaces()
+    |> suppress_lower_surfaces(ModalOverlay.tag(modal))
     |> update_shell_state(&ShellState.transition_modal(&1, modal))
   end
 
@@ -55,8 +55,11 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
 
   @doc "Closes a completed modal."
   @spec close(EditorState.t()) :: EditorState.t()
-  def close(%EditorState{shell_runtime: %Runtime{state: %ShellState{}}} = state),
-    do: update_shell_state(state, &ShellState.close_modal/1)
+  def close(%EditorState{shell_runtime: %Runtime{state: %ShellState{}}} = state) do
+    state
+    |> WhichKeyWorkflow.dismiss_scope()
+    |> update_shell_state(&ShellState.close_modal/1)
+  end
 
   def close(%EditorState{} = state), do: state
 
@@ -66,6 +69,7 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
     cancel_completion_timers(modal)
 
     state
+    |> WhichKeyWorkflow.dismiss_scope()
     |> drop_completion_requests(modal)
     |> update_shell_state(&ShellState.dismiss_modal/1)
   end
@@ -236,10 +240,10 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
   defp dismiss_stale_completion(state, _modal, active_tab_id),
     do: update_shell_state(state, &ShellState.dismiss_stale_modal_completion(&1, active_tab_id))
 
-  @spec suppress_lower_surfaces(EditorState.t()) :: EditorState.t()
-  defp suppress_lower_surfaces(state) do
+  @spec suppress_lower_surfaces(EditorState.t(), atom()) :: EditorState.t()
+  defp suppress_lower_surfaces(state, next_tag) do
     state
-    |> WhichKeyWorkflow.dismiss_under_modal()
+    |> WhichKeyWorkflow.dismiss_under_modal(next_tag)
     |> update_shell_state(&ShellState.suppress_lower_transients/1)
   end
 

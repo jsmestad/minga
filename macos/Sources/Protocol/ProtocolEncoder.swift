@@ -1235,9 +1235,6 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    /// Send a gui_action: space_leader_chord.
-    /// Clean chord: SPC was never sent. The BEAM enters leader mode directly.
-    /// Layout: opcode(1) + action_type(1) + codepoint(4) + modifiers(1).
     /// gui_action which_key_press: path(string16) + codepoint(u32) + modifiers(u8).
     private func encodeWhichKeyPress(path: String, codepoint: UInt32, modifiers: UInt8) {
         let utf8 = Array(path.utf8)
@@ -1262,6 +1259,9 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         writeFrame(buf)
     }
 
+    /// Send a gui_action: space_leader_chord.
+    /// Clean chord: SPC was never sent. The BEAM enters leader mode directly.
+    /// Layout: opcode(1) + action_type(1) + codepoint(4) + modifiers(1).
     private func encodeSpaceLeaderChord(codepoint: UInt32, modifiers: UInt8) {
         var buf = Data(count: 7)
         buf[0] = OP_GUI_ACTION

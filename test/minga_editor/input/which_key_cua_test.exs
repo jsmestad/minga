@@ -8,6 +8,7 @@ defmodule MingaEditor.Input.WhichKeyCUATest do
   alias Minga.Config.Options
   alias MingaEditor.RenderModel.UI.WhichKeyBuilder
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.State.WhichKey
 
   @moduletag :tmp_dir
 
@@ -48,6 +49,25 @@ defmodule MingaEditor.Input.WhichKeyCUATest do
     send_keys_sync(ctx, "<BS>")
     assert whichkey(ctx).node == nil
     assert buffer_content(ctx) == "text"
+  end
+
+  test "over a picker, a typed key and Backspace edit the query and close the picker's keys", %{
+    ctx: ctx
+  } do
+    send_gui_action(ctx, {:execute_command, "find_file"})
+    assert picker_open?(ctx)
+
+    send_gui_action(ctx, {:execute_command, "which_key_open"})
+    assert WhichKey.path(whichkey(ctx)) == "Picker"
+    send_keys_sync(ctx, "x")
+    assert whichkey(ctx).node == nil
+    assert String.ends_with?(picker_state(ctx).query, "x")
+
+    send_gui_action(ctx, {:execute_command, "which_key_open"})
+    send_keys_sync(ctx, "<BS>")
+    assert whichkey(ctx).node == nil
+    assert picker_open?(ctx)
+    refute String.ends_with?(picker_state(ctx).query, "x")
   end
 
   defp whichkey(ctx), do: Runtime.state(editor_state(ctx).shell_runtime).whichkey

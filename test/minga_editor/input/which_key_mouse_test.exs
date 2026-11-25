@@ -84,6 +84,48 @@ defmodule MingaEditor.Input.WhichKeyMouseTest do
     refute picker_open?(ctx)
   end
 
+  test "with SPC already pending, the mode pill opens the top level instead of running SPC SPC" do
+    ctx = start_editor("hello")
+    send_keys_sync(ctx, "<SPC>")
+
+    send_gui_action(ctx, {:execute_command, "which_key_open"})
+
+    assert shown_path(ctx) == "SPC"
+    refute picker_open?(ctx)
+  end
+
+  test "over a picker, a typed key goes to the picker and closes the picker's keys" do
+    ctx = start_editor("hello")
+    send_keys_sync(ctx, "<SPC>ff")
+    send_gui_action(ctx, {:execute_command, "which_key_open"})
+    assert shown_path(ctx) == "Picker"
+
+    send_keys_sync(ctx, "x")
+
+    assert shown_path(ctx) == nil
+    assert picker_open?(ctx)
+    assert String.ends_with?(picker_state(ctx).query, "x")
+  end
+
+  test "when its picker closes without a key, the picker's keys close with it" do
+    ctx = start_editor("hello")
+    send_gui_action(ctx, {:execute_command, "buffer_list"})
+    send_gui_action(ctx, {:execute_command, "which_key_open"})
+    assert shown_path(ctx) == "Picker"
+
+    # A click on a picker row picks it with no key press, so only the modal closing can close the panel.
+    {:picker, %{picker_ui: picker_ui}} = Runtime.state(editor_state(ctx).shell_runtime).modal
+    {activation_id, _index, _item} = hd(picker_ui.activation_offer.items)
+
+    send_gui_action(
+      ctx,
+      {:picker_item_activate, picker_ui.activation_offer.generation, activation_id}
+    )
+
+    refute picker_open?(ctx)
+    assert shown_path(ctx) == nil
+  end
+
   defp whichkey_labels(ctx) do
     whichkey(ctx)
     |> then(&%{&1 | show: true})
