@@ -85,7 +85,7 @@ defmodule Minga.Config.Options do
           | :agent_models
           | :agent_prompt_cache
           | :agent_notifications
-          | :agent_notify_on
+          | :agent_notify_terminal
           | :agent_system_prompt
           | :agent_append_system_prompt
           | :agent_diff_size_threshold
@@ -99,7 +99,6 @@ defmodule Minga.Config.Options do
           | :agent_approval_timeout
           | :agent_subagent_timeout
           | :agent_mention_max_file_size
-          | :agent_notify_debounce
           | :agent_diagnostic_feedback
           | :agent_react_to_lsp_errors_on_save
           | :agent_flush_before_shell
@@ -328,9 +327,9 @@ defmodule Minga.Config.Options do
     {:agent_prompt_cache, :boolean, true,
      "Whether prompt caching hints are enabled for supported providers."},
     {:agent_notifications, :boolean, true,
-     "Whether agent events can produce user notifications."},
-    {:agent_notify_on, :any, [:approval, :complete, :error],
-     "Agent event kinds that trigger notifications."},
+     "Whether a task that starts needing you while Minga is in the background alerts you."},
+    {:agent_notify_terminal, {:enum, [:off, :bell, :desktop, :bell_and_desktop]}, :off,
+     "How the terminal frontend alerts you when a task starts needing you in the background: off, the terminal bell, a desktop notification, or both."},
     {:agent_system_prompt, :string, "", "Replacement system prompt text for agent sessions."},
     {:agent_append_system_prompt, :string, "",
      "Additional text appended to the default agent system prompt."},
@@ -353,8 +352,6 @@ defmodule Minga.Config.Options do
      "Milliseconds before a delegated subagent task times out."},
     {:agent_mention_max_file_size, :pos_integer, 262_144,
      "Maximum file size in bytes that can be inlined from an agent mention."},
-    {:agent_notify_debounce, :pos_integer, 5_000,
-     "Milliseconds used to debounce repeated agent notifications."},
     {:agent_diagnostic_feedback, :boolean, true,
      "Whether diagnostics are fed back into agent context."},
     {:agent_react_to_lsp_errors_on_save, :boolean, false,

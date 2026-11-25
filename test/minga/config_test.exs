@@ -109,6 +109,11 @@ defmodule Minga.ConfigTest do
       end
     end
 
+    test "a retired option from an older config is ignored instead of stopping the config" do
+      assert :ok = Minga.Config.set(:agent_notify_on, [:approval, :error])
+      assert :ok = Minga.Config.set(:agent_notify_debounce, 5_000)
+    end
+
     test "raises ArgumentError for wrong type" do
       assert_raise ArgumentError, ~r/positive integer/, fn ->
         Minga.Config.set(:tab_width, -1)

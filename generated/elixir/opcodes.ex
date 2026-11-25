@@ -7,7 +7,7 @@ defmodule Minga.Protocol.Opcodes do
 
   # Protocol version
   @spec protocol_version() :: non_neg_integer()
-  def protocol_version, do: 51
+  def protocol_version, do: 52
 
   # Input
   @spec key_press() :: non_neg_integer()
@@ -447,5 +447,7 @@ defmodule Minga.Protocol.Opcodes do
   def gui_action_picker_fit, do: 0x70
   @spec gui_action_tasks_drawer_action() :: non_neg_integer()
   def gui_action_tasks_drawer_action, do: 0x71
+  @spec gui_action_agent_notification_open() :: non_neg_integer()
+  def gui_action_agent_notification_open, do: 0x72
 
 end

@@ -48,3 +48,20 @@ func TestStatusAgentTotalIsAbsentForBufferContent(t *testing.T) {
 		t.Fatalf("buffer-content status bar should not carry an agent total: %+v", command.Chrome.Status.Agent)
 	}
 }
+
+// The needs-you count (0x14) is for the macOS Dock badge. The terminal ignores it by design: its modeline segment already
+// shows the count, and a terminal has no Dock. The section must still decode cleanly.
+func TestStatusNeedsYouSectionIsSkippedByTheTerminal(t *testing.T) {
+	packet := statusPacket(0, nil)
+	packet[1]++
+	packet = append(packet, 0x14)
+	packet = binary.BigEndian.AppendUint16(packet, 2)
+	packet = binary.BigEndian.AppendUint16(packet, 3)
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("a status bar with the needs-you section must decode: %v", err)
+	}
+	if command.Chrome.Status.ContentKind != 0 {
+		t.Fatalf("the sections before it keep their values: %+v", command.Chrome.Status)
+	}
+}

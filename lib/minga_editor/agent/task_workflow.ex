@@ -5,8 +5,15 @@ defmodule MingaEditor.Agent.TaskWorkflow do
   The Editor calls `observe/3` for every session event before routing it, so a background task's approval and state are kept even though only the active conversation renders them. Session starts, background subagents, restarts and stops arrive through the other entry points.
 
   `answer/3` is the one way to answer a task's approval from outside its conversation (the tasks drawer, a notification). The session decides: an approval it already resolved, answered elsewhere, is refused, and the editor then says "Already answered in Minga".
+
+  ## The "needs you" alert
+
+  The editor is the one place that decides to alert you. A task that starts needing you (an approval or a question became pending) while the frontend reports that Minga is in the background asks `MingaAgent.Notifier` to post one alert, and the task keeps its identity. A task that keeps needing you does not alert again. When the task stops needing you, wherever it was answered, the alert is withdrawn, so the macOS notification goes away. A session that stops takes its alert with it: the frontend manager watches the session.
+
+  An `:unknown` foreground counts as the foreground: until the frontend says where it is (and a terminal without focus reporting never says), nothing is posted. A notification that is not sent is the safe side.
   """
 
+  alias MingaAgent.Notifier
   alias MingaAgent.ToolApproval.Public, as: PublicApproval
   alias MingaAgent.Subagent.Handle
   alias MingaEditor.Agent.PendingApproval
@@ -15,6 +22,7 @@ defmodule MingaEditor.Agent.TaskWorkflow do
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Frontend
 
   @typedoc "How an approval is answered: once, for the session, for the turn, or denied."
   @type decision :: MingaAgent.Session.approval_decision()
@@ -25,10 +33,15 @@ defmodule MingaEditor.Agent.TaskWorkflow do
   @spec already_answered() :: String.t()
   def already_answered, do: @already_answered
 
-  @doc "Applies one session event to its task."
+  @doc "Applies one session event to its task, and alerts or withdraws the alert when the task starts or stops needing you."
   @spec observe(EditorState.t(), pid(), term()) :: EditorState.t()
-  def observe(%EditorState{} = state, session, event) when is_pid(session),
-    do: EditorState.observe_agent_task_event(state, session, event, now())
+  def observe(%EditorState{} = state, session, event) when is_pid(session) do
+    before = state.agent_connection.tasks
+
+    state
+    |> EditorState.observe_agent_task_event(session, event, now())
+    |> alert(before, session)
+  end
 
   @doc "Follows a session the editor started or attached to, named by its goal when known."
   @spec follow(EditorState.t(), pid(), keyword()) :: EditorState.t()
@@ -66,10 +79,13 @@ defmodule MingaEditor.Agent.TaskWorkflow do
   def restarted(%EditorState{} = state, old, new) when is_pid(old) and is_pid(new),
     do: EditorState.replace_agent_task_session(state, old, new, now())
 
-  @doc "Stops following a session that ended."
+  @doc "Stops following a session that ended or was detached, withdrawing its alert first: a detached session lives on."
   @spec stopped(EditorState.t(), pid()) :: EditorState.t()
-  def stopped(%EditorState{} = state, session) when is_pid(session),
-    do: EditorState.forget_agent_task(state, session)
+  def stopped(%EditorState{} = state, session) when is_pid(session) do
+    state
+    |> withdraw_alert(session)
+    |> EditorState.forget_agent_task(session)
+  end
 
   @doc "Stops following every task on a remote node that disconnected."
   @spec node_disconnected(EditorState.t(), node()) :: EditorState.t()
@@ -101,12 +117,12 @@ defmodule MingaEditor.Agent.TaskWorkflow do
           MingaAgent.ToolApproval.Target.t()
         ) ::
           EditorState.t()
-  defp answered(:ok, state, session, target), do: resolve(state, session, target)
+  defp answered(:ok, state, session, target), do: resolved(state, session, target)
 
   defp answered({:error, reason}, state, session, target)
        when reason in [:no_pending_approval, :approval_not_found] do
     state
-    |> resolve(session, target)
+    |> resolved(session, target)
     |> NoticeWorkflow.publish(@already_answered)
   end
 
@@ -115,12 +131,64 @@ defmodule MingaEditor.Agent.TaskWorkflow do
     NoticeWorkflow.publish(state, "Could not answer the approval: #{inspect(reason)}")
   end
 
-  # The task's copy and the conversation's copy are cleared together, so neither shows a request the session resolved.
-  @spec resolve(EditorState.t(), pid(), MingaAgent.ToolApproval.Target.t()) :: EditorState.t()
-  defp resolve(state, session, target) do
+  @doc """
+  Clears an approval its session resolved, answered here or said to be gone, from the task and the conversation, and withdraws the task's alert.
+
+  The task's copy and the conversation's copy are cleared together, so neither shows a request the session resolved.
+  """
+  @spec resolved(EditorState.t(), pid(), MingaAgent.ToolApproval.Target.t()) :: EditorState.t()
+  def resolved(%EditorState{} = state, session, target) when is_pid(session) do
+    before = state.agent_connection.tasks
+
     state
     |> EditorState.resolve_agent_task_approval(session, target)
     |> TraditionalWorkflow.resolve_agent_approval(target, session)
+    |> alert(before, session)
+  end
+
+  @spec alert(EditorState.t(), Tasks.t(), pid()) :: EditorState.t()
+  defp alert(state, before, session) do
+    case Tasks.attention(before, state.agent_connection.tasks, session) do
+      :started -> post_alert(state, session, Frontend.foreground(state.frontend))
+      :ended -> withdraw_alert(state, session)
+      :unchanged -> state
+    end
+  end
+
+  @spec post_alert(EditorState.t(), pid(), Frontend.foreground_status()) :: EditorState.t()
+  defp post_alert(state, session, :background) do
+    id = :crypto.strong_rand_bytes(16)
+
+    case Notifier.needs_you(session, id, notifier_opts(state)) do
+      :posted -> EditorState.post_agent_task_alert(state, session, id)
+      :off -> state
+    end
+  end
+
+  # You are looking at Minga, or Minga cannot tell.
+  defp post_alert(state, _session, foreground) when foreground in [:foreground, :unknown],
+    do: state
+
+  @spec withdraw_alert(EditorState.t(), pid()) :: EditorState.t()
+  defp withdraw_alert(state, session) do
+    case Tasks.posted_alert(state.agent_connection.tasks, session) do
+      nil ->
+        state
+
+      id ->
+        :ok = Notifier.withdraw(session, id, notifier_opts(state))
+        EditorState.withdraw_agent_task_alert(state, session)
+    end
+  end
+
+  @spec notifier_opts(EditorState.t()) :: [Notifier.opt()]
+  defp notifier_opts(state) do
+    [
+      frontend:
+        if(MingaEditor.Frontend.gui?(state.frontend.capabilities), do: :native, else: :terminal),
+      options: state.interaction.options_server,
+      registry: state.extension_surfaces.events_registry
+    ]
   end
 
   @spec now() :: integer()

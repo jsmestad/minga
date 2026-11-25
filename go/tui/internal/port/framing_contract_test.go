@@ -72,6 +72,9 @@ const maxMinimalBodyProbe = 48
 // Each override is validated against the live reader exactly like an auto-probed
 // body (framesExactly), so a wrong override cannot silently pass.
 var minimalBodyOverrides = map[byte][]byte{
+	// agent_desktop_notification (fixed:18): the kind byte must be 1 (needs you) or 2 (withdrawn). Minimal: opcode +
+	// kind 2 + a zero 16-byte identity = 18 bytes.
+	generated.OPAgentDesktopNotification: append([]byte{generated.OPAgentDesktopNotification, 2}, make([]byte, 16)...),
 	// clipboard_write (len32): decodeClipboardWrite requires payload_len == 5 + text_len. Minimal:
 	// opcode + payload_len(4)=5 + target(1) + text_len(4)=0 = 10 bytes.
 	generated.OPClipboardWrite: {generated.OPClipboardWrite, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00},

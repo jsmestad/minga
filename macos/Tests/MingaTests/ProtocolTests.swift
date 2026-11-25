@@ -2,6 +2,7 @@
 
 import MingaUI
 import Testing
+import UserNotifications
 import AppKit
 import Foundation
 import QuartzCore
@@ -270,28 +271,88 @@ struct ProtocolDecoderTests {
         }
     }
 
-    @Test("Desktop alerts distinguish approval identity, retirement, and outcome debounce")
-    func decodeDesktopApprovalLifecycle() throws {
+    @Test("A needs-you alert and its withdrawal carry the alert's identity and nothing else")
+    func decodeDesktopNeedsYouLifecycle() throws {
         let bytes: [UInt8] = Array(1...16)
         let id = try #require(UUID(uuidString: "01020304-0506-0708-090A-0B0C0D0E0F10"))
-        let cases: [(UInt8, UInt32, AgentDesktopNotification)] = [
-            (1, 0, .approval(id)),
-            (2, 5000, .outcome(.complete, session: id, debounceMs: 5000)),
-            (3, 8500, .outcome(.failed, session: id, debounceMs: 8500)),
-            (4, 0, .approvalCleared(id)),
-        ]
+        let cases: [(UInt8, AgentDesktopNotification)] = [(1, .needsYou(id)), (2, .withdrawn(id))]
 
-        for (kind, interval, expected) in cases {
-            var data = Data([OP_AGENT_DESKTOP_NOTIFICATION, kind] + bytes)
-            appendWireU32(&data, interval)
+        for (kind, expected) in cases {
+            let data = Data([OP_AGENT_DESKTOP_NOTIFICATION, kind] + bytes)
             let (command, size) = try decodeCommand(data: data, offset: 0)
             guard case .agentDesktopNotification(let notification) = command else {
                 Issue.record("Expected a desktop agent notification")
                 continue
             }
             #expect(notification == expected)
-            #expect(size == data.count)
+            #expect(size == 18)
         }
+
+        // Completion (2 was outcome) and failure kinds are gone; an unknown kind is malformed.
+        for kind: UInt8 in [0, 3, 4] {
+            #expect(throws: ProtocolDecodeError.self) {
+                try decodeCommand(data: Data([OP_AGENT_DESKTOP_NOTIFICATION, kind] + bytes), offset: 0)
+            }
+        }
+    }
+
+    @Test("A notification identifier names its alert, and only Minga's")
+    func notificationIdentifierRoundTrip() throws {
+        let id = try #require(UUID(uuidString: "01020304-0506-0708-090A-0B0C0D0E0F10"))
+        #expect(DesktopAgentNotifications.alert(fromIdentifier: DesktopAgentNotifications.identifier(id)) == id)
+        #expect(DesktopAgentNotifications.alert(fromIdentifier: "agent-approval-\(id.uuidString)") == nil)
+        #expect(DesktopAgentNotifications.alert(fromIdentifier: "agent-needs-you-not-a-uuid") == nil)
+    }
+
+    @Test("A click on a needs-you notification opens its alert; other responses do not")
+    func notificationClickOpensItsAlert() throws {
+        let id = try #require(UUID(uuidString: "01020304-0506-0708-090A-0B0C0D0E0F10"))
+        let alert = DesktopAgentNotifications.identifier(id)
+        let click = UNNotificationDefaultActionIdentifier
+
+        #expect(DesktopAgentNotifications.click(actionIdentifier: click, requestIdentifier: alert) == .openAlert(id))
+        #expect(DesktopAgentNotifications.click(actionIdentifier: click, requestIdentifier: "other") == .openEditor)
+        #expect(
+            DesktopAgentNotifications.click(
+                actionIdentifier: UNNotificationDismissActionIdentifier, requestIdentifier: alert
+            ) == .ignore
+        )
+    }
+
+    @Test("The Dock badge shows the needs-you count only in the background")
+    func attentionBadge() {
+        var attention = AgentAttention()
+        attention.count(2)
+        #expect(attention.badgeLabel == nil) // in front
+        attention.activation(false)
+        #expect(attention.badgeLabel == "2")
+        attention.count(0)
+        #expect(attention.badgeLabel == nil)
+        attention.count(1)
+        attention.activation(true)
+        #expect(attention.badgeLabel == nil) // coming to the front clears it
+    }
+
+    @Test("An alert bounces the Dock icon only while Minga is in the background")
+    func attentionBounce() {
+        var attention = AgentAttention()
+        #expect(!attention.bounces)
+        attention.activation(false)
+        #expect(attention.bounces)
+    }
+
+    @Test("A refused permission logs one line, later alerts stay silent and do not ask again, and the badge still shows")
+    func attentionRefusal() {
+        var attention = AgentAttention()
+        attention.activation(false)
+        attention.count(1)
+        #expect(attention.asksForAuthorization)
+
+        #expect(attention.authorized(false) != nil)
+        #expect(!attention.asksForAuthorization)
+        #expect(!attention.posts)
+        #expect(attention.authorized(false) == nil)
+        #expect(attention.badgeLabel == "1")
     }
 
     @Test("Decode correlated native Save As request")

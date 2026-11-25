@@ -188,4 +188,14 @@ defmodule MingaEditor.State.AgentConnection do
   @spec resolve_task_approval(t(), pid(), MingaAgent.ToolApproval.Target.t()) :: t()
   def resolve_task_approval(%__MODULE__{} = connection, session, target),
     do: %{connection | tasks: Tasks.resolve_approval(connection.tasks, session, target)}
+
+  @doc "Records the \"needs you\" alert just posted for a task."
+  @spec post_task_alert(t(), pid(), <<_::128>>) :: t()
+  def post_task_alert(%__MODULE__{} = connection, session, id),
+    do: %{connection | tasks: Tasks.post_alert(connection.tasks, session, id)}
+
+  @doc "Records that a task's posted alert was withdrawn."
+  @spec withdraw_task_alert(t(), pid()) :: t()
+  def withdraw_task_alert(%__MODULE__{} = connection, session),
+    do: %{connection | tasks: Tasks.withdraw_alert(connection.tasks, session)}
 end

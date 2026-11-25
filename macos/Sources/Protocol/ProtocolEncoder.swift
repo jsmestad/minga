@@ -296,7 +296,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
              .agentRequestChanges, .agentDismiss, .chatScrolledAwayFromBottom,
              .chatReturnedToBottom, .scrollToLine, .scrollToVisualRank, .foldToggleAtLine, .focusWindow,
              .configQuery, .fontSizeAdjust, .searchFocus, .searchNext, .agentStartRemedy,
-             .searchPrevious, .searchDismiss:
+             .searchPrevious, .searchDismiss, .agentNotificationOpen:
             return nil
         }
     }
@@ -359,6 +359,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         case .closeTab(let id): encodeCloseTab(id: id)
         case .emptyStateActivate(let id): encodeEmptyStateActivate(id: id)
         case .tasksDrawerAction(let rowID, let action): encodeTasksDrawerAction(rowID: rowID, action: action)
+        case .agentNotificationOpen(let alert): encodeAgentNotificationOpen(alert: alert)
         case .tabCopyPath(let id): encodeTabCopyPath(id: id)
         case .tabReorder(let id, let newIndex): encodeTabReorder(id: id, newIndex: newIndex)
         case .tabPin(let id): encodeTabPin(id: id)
@@ -863,6 +864,12 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         buf.append(contentsOf: row)
         buf.append(UInt8(verb.count))
         buf.append(contentsOf: verb)
+        writeFrame(buf)
+    }
+
+    private func encodeAgentNotificationOpen(alert: UUID) {
+        var buf = Data([OP_GUI_ACTION, GUI_ACTION_AGENT_NOTIFICATION_OPEN])
+        withUnsafeBytes(of: alert.uuid) { buf.append(contentsOf: $0) }
         writeFrame(buf)
     }
 

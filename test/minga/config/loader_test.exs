@@ -102,8 +102,29 @@ defmodule Minga.Config.LoaderTest do
       assert Loader.load_error(pid) =~ "later config error"
       assert Loader.config_eval_error(pid) =~ "later config error"
 
-      assert Loader.migration_notice(pid) ==
-               ~s(Some configured keybindings need optional extensions. Add to config.exs and restart: extension :minga_knowledge_graph, git: "https://github.com/jsmestad/minga-knowledge-graph")
+      assert Loader.migration_notices(pid) ==
+               [
+                 ~s(Some configured keybindings need optional extensions. Add to config.exs and restart: extension :minga_knowledge_graph, git: "https://github.com/jsmestad/minga-knowledge-graph")
+               ]
+    end
+
+    test "a config that still sets a retired notification option loads, and says so once in *Messages*" do
+      {_dir, config_home, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        set :agent_notify_on, [:approval, :error]
+        set :tab_width, 3
+        """)
+
+      on_exit(cleanup)
+      name = :"loader_retired_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
+
+      assert Loader.load_error(pid) == nil
+      assert Options.get(test_options_server(), :tab_width) == 3
+      assert [note] = Loader.migration_notices(pid)
+      assert note =~ ":agent_notify_on is retired and ignored"
+      assert note =~ ":agent_notify_terminal"
     end
 
     test "the retired git porcelain declaration warns and the rest of the config still applies" do

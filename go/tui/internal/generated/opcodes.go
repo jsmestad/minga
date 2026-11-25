@@ -4,7 +4,7 @@ package generated
 
 // ProtocolVersion is the wire-contract version the frontend exchanges with
 // the BEAM in the ready handshake. A mismatch yields an explicit protocol_error.
-const ProtocolVersion uint16 = 51
+const ProtocolVersion uint16 = 52
 
 const (
 	// Input
@@ -232,4 +232,5 @@ const (
 	GUIActionAgentStartRemedy           byte = 0x6F
 	GUIActionPickerFit                  byte = 0x70
 	GUIActionTasksDrawerAction          byte = 0x71
+	GUIActionAgentNotificationOpen      byte = 0x72
 )

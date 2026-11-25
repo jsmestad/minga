@@ -45,15 +45,11 @@ struct NativeFileDialogRequest: Sendable, Equatable {
 
 // MARK: - Render command types
 
+/// The BEAM's "a task needs you" alert, or its withdrawal, by the alert's opaque identity.
+/// The BEAM decides when to alert: only when a task starts needing you while Minga is in the background.
 enum AgentDesktopNotification: Sendable, Equatable {
-    case approval(UUID)
-    case outcome(Outcome, session: UUID, debounceMs: UInt32)
-    case approvalCleared(UUID)
-
-    enum Outcome: Sendable, Hashable {
-        case complete
-        case failed
-    }
+    case needsYou(UUID)
+    case withdrawn(UUID)
 }
 
 /// A decoded render command from the BEAM.
@@ -557,20 +553,17 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         )
 
     case .agentDesktopNotification:
-        guard data.endIndex >= rest + 21 else { throw ProtocolDecodeError.malformed }
+        guard data.endIndex >= rest + 17 else { throw ProtocolDecodeError.malformed }
         let id = data.withUnsafeBytes {
             UUID(uuid: $0.loadUnaligned(fromByteOffset: rest + 1 - data.startIndex, as: uuid_t.self))
         }
-        let debounceMs = try readU32(data, rest + 17)
         let notification: AgentDesktopNotification
         switch data[rest] {
-        case 1: notification = .approval(id)
-        case 2: notification = .outcome(.complete, session: id, debounceMs: debounceMs)
-        case 3: notification = .outcome(.failed, session: id, debounceMs: debounceMs)
-        case 4: notification = .approvalCleared(id)
+        case 1: notification = .needsYou(id)
+        case 2: notification = .withdrawn(id)
         default: throw ProtocolDecodeError.malformed
         }
-        return (.agentDesktopNotification(notification), 22)
+        return (.agentDesktopNotification(notification), 18)
 
     case .setCursorShape:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
@@ -1203,6 +1196,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var filetype = ""
         var message = ""
         var messageActions: [Wire.EmptyListAction] = []
+        var needsYouCount = 0
         var macroRecording: UInt8 = 0
         var modelName = ""
         var messageCount: UInt32 = 0
@@ -1293,6 +1287,10 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             case 0x13: // MessageActions: the next steps the notice names
                 let (actions, _) = try GeneratedProtocol.decodeGuiStatusBarMessageActions(data, sStart, sStart + sectionLen)
                 messageActions = actions.map { Wire.EmptyListAction(id: $0.id, key: $0.key, label: $0.label) }
+
+            case 0x14: // NeedsYou: how many tasks need you (u16), present only while some do
+                guard sectionLen >= 2 else { throw ProtocolDecodeError.malformed }
+                needsYouCount = Int(try readU16(data, sStart))
 
             case 0x08: // Recording: macro_recording(1)
                 guard sectionLen >= 1 else { break }
@@ -1476,7 +1474,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             workspace: workspace,
             pendingKeys: pendingKeys,
             review: review,
-            messageActions: messageActions
+            messageActions: messageActions,
+            needsYouCount: needsYouCount
         )
         return (.guiStatusBar(update), pos - offset)
 

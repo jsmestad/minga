@@ -46,7 +46,6 @@ defmodule MingaAgent.Session do
   alias MingaAgent.ArtifactStore
   alias MingaAgent.ArtifactStores.Runtime, as: ArtifactRuntime
   alias MingaAgent.Message
-  alias MingaAgent.Notifier
   alias MingaAgent.ModelCandidate
   alias MingaAgent.ModelResolver
   alias MingaAgent.ModelSelection
@@ -173,7 +172,6 @@ defmodule MingaAgent.Session do
             {reference(), pid(), ConnectionTarget.t(), ModelResolver.intent()} | nil,
           pending_model_change: ModelSelection.t() | String.t() | nil,
           pending_thinking_level: String.t() | nil,
-          notifier: module() | {module(), term()},
           background_subagent: boolean(),
           hooks_enabled?: boolean(),
           session_start_hook_enabled?: boolean(),
@@ -1635,7 +1633,6 @@ defmodule MingaAgent.Session do
       apple_selection_probe: nil,
       pending_model_change: nil,
       pending_thinking_level: if(model_selection, do: nil, else: initial_thinking_level),
-      notifier: Keyword.get(opts, :notifier, Notifier),
       background_subagent: Keyword.get(opts, :background_subagent, false),
       hooks_enabled?: Keyword.get(opts, :hooks_enabled?, true),
       session_start_hook_enabled?:
@@ -3042,7 +3039,6 @@ defmodule MingaAgent.Session do
 
   @spec broadcast_approval_retirement(approval_retirement()) :: state()
   defp broadcast_approval_retirement({state, approval, resolution}) do
-    Notifier.clear_approval()
     %PublicApproval{target: target} = public_pending_approval(approval, state)
     broadcast(state, {:approval_resolved, target, resolution})
   end
@@ -4467,7 +4463,7 @@ defmodule MingaAgent.Session do
 
     case reason do
       {:conversation_persistence_failed, _} ->
-        state = notify(state, :error, @boundary_save_failure_message)
+        state = notify_hooks(state, :error, @boundary_save_failure_message)
         {:reply, {:error, ^reason}, state} = reply_to_prompt_admission_failure(state, reason)
         state
 
@@ -4525,7 +4521,7 @@ defmodule MingaAgent.Session do
 
     state
     |> mark_unsaved_active_tools()
-    |> notify(:error, message)
+    |> notify_hooks(:error, message)
     |> announce_turn_status(execution)
     |> append_error_message_once(message)
     |> notify_messages_changed()
@@ -4939,7 +4935,7 @@ defmodule MingaAgent.Session do
       {:idle, execution} ->
         state =
           state
-          |> notify(:complete, completion_notification(state))
+          |> notify_hooks(:complete, completion_notification(state))
           |> dispatch_stop()
           |> announce_turn_status(execution)
 
@@ -4962,7 +4958,7 @@ defmodule MingaAgent.Session do
 
     state =
       state
-      |> notify(:error, message)
+      |> notify_hooks(:error, message)
       |> announce_turn_status(execution)
       |> append_error_message_once(message)
       |> notify_messages_changed()
@@ -5344,8 +5340,6 @@ defmodule MingaAgent.Session do
     with :ok <- validate_approval_liveness(state, approval_id),
          {:ok, approval, execution} <-
            TurnExecution.resolve_approval(state.turn_execution, approval_id, decision) do
-      Notifier.clear_approval()
-
       state =
         {state, approval, decision}
         |> approve_prepared_invocation()
@@ -6327,7 +6321,7 @@ defmodule MingaAgent.Session do
       {:accepted, execution} ->
         state =
           state
-          |> notify(:approval, "Approval needed: #{approval.name}")
+          |> notify_hooks(:approval, "Approval needed: #{approval.name}")
           |> broadcast({:approval_pending, public_pending_approval(approval, state)})
           |> announce_display_status(execution)
 
@@ -6365,16 +6359,11 @@ defmodule MingaAgent.Session do
 
   defp completion_notification(_state), do: "Agent finished"
 
-  @spec notify(state(), atom(), String.t()) :: state()
-  defp notify(%{notifier: {module, arg}} = state, trigger, message) when is_atom(module) do
+  # Runs the user's notification hooks. Desktop alerts are the editor's: it alerts when a task starts needing you while
+  # Minga is in the background (MingaEditor.Agent.TaskWorkflow).
+  @spec notify_hooks(state(), atom(), String.t()) :: state()
+  defp notify_hooks(state, trigger, message) do
     dispatch_notification(state, trigger, message)
-    module.notify(trigger, message, arg)
-    state
-  end
-
-  defp notify(%{notifier: module} = state, trigger, message) when is_atom(module) do
-    dispatch_notification(state, trigger, message)
-    module.notify(trigger, message)
     state
   end
 
@@ -11405,8 +11394,6 @@ defmodule MingaAgent.Session do
   @impl GenServer
   @spec terminate(term(), state()) :: :ok
   def terminate(reason, state) do
-    Notifier.clear_approval()
-
     record_critical_event(state, :session_stopped, %{
       reason: inspect(reason),
       status: TurnExecution.status(state.turn_execution)

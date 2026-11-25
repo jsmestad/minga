@@ -248,7 +248,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
     end
   end
 
-  test "approval withdrawals, including owner death, survive pressure without retaining required controls" do
+  test "alert withdrawals, including owner death, survive pressure without retaining required controls" do
     name = unique_name()
     parent = self()
     writable = start_supervised!({Agent, fn -> true end}, id: make_ref())
@@ -266,29 +266,29 @@ defmodule MingaEditor.Frontend.ManagerTest do
       send(pid, {
         :minga_event,
         :agent_desktop_notification,
-        %{kind: kind, id: id, owner: owner, debounce_ms: 0}
+        %{kind: kind, id: id, owner: owner}
       })
 
-      Protocol.encode_agent_desktop_notification(kind, id, 0)
+      Protocol.encode_agent_desktop_notification(kind, id)
     end
 
-    before_ready = desktop.(:approval, <<0::128>>, self())
+    before_ready = desktop.(:needs_you, <<0::128>>, self())
     mark_ready(name, pid, fake_port)
     refute_received {:desktop_output, _, ^before_ready}
 
     for {id, owner} <- [{<<1::128>>, self()}, {<<2::128>>, second_owner}] do
-      posted = desktop.(:approval, id, owner)
+      posted = desktop.(:needs_you, id, owner)
       assert_receive {:desktop_output, true, ^posted}
     end
 
     Agent.update(writable, fn _ -> false end)
-    first_clear = desktop.(:approval_cleared, <<1::128>>, self())
-    second_clear = Protocol.encode_agent_desktop_notification(:approval_cleared, <<2::128>>, 0)
+    first_clear = desktop.(:withdrawn, <<1::128>>, self())
+    second_clear = Protocol.encode_agent_desktop_notification(:withdrawn, <<2::128>>)
     Process.exit(second_owner, :kill)
     assert_receive {:desktop_output, false, ^second_clear}
-    dropped_post = desktop.(:approval, <<3::128>>, self())
+    dropped_post = desktop.(:needs_you, <<3::128>>, self())
     assert_receive {:desktop_output, false, ^dropped_post}
-    dropped_clear = desktop.(:approval_cleared, <<3::128>>, self())
+    dropped_clear = desktop.(:withdrawn, <<3::128>>, self())
     assert Manager.output_pressure(name).control_batches == 0
     assert Manager.ready?(name)
 
@@ -297,6 +297,40 @@ defmodule MingaEditor.Frontend.ManagerTest do
     assert_receive {:desktop_output, true, ^second_clear}, 1_000
     refute_received {:desktop_output, true, ^dropped_post}
     refute_received {:desktop_output, _, ^dropped_clear}
+  end
+
+  test "a new alert identity for a session that already has one withdraws the old alert and posts the new one" do
+    name = unique_name()
+    parent = self()
+
+    commander = fn _port, batch, [:nosuspend] ->
+      send(parent, {:desktop_output, batch})
+      true
+    end
+
+    {pid, fake_port} = start_connected(name, port_commander: commander)
+    mark_ready(name, pid, fake_port)
+
+    desktop = fn kind, id ->
+      send(pid, {:minga_event, :agent_desktop_notification, %{kind: kind, id: id, owner: parent}})
+      Protocol.encode_agent_desktop_notification(kind, id)
+    end
+
+    first = desktop.(:needs_you, <<1::128>>)
+    assert_receive {:desktop_output, ^first}
+
+    # The same identity again posts nothing more.
+    _ = desktop.(:needs_you, <<1::128>>)
+    # The editor restarted or reattached the session and lost the first identity.
+    second = desktop.(:needs_you, <<2::128>>)
+    withdrawn = Protocol.encode_agent_desktop_notification(:withdrawn, <<1::128>>)
+    assert_receive {:desktop_output, ^withdrawn}
+    assert_receive {:desktop_output, ^second}
+    refute_received {:desktop_output, ^first}
+
+    # Withdrawing the new identity removes it.
+    second_withdrawn = desktop.(:withdrawn, <<2::128>>)
+    assert_receive {:desktop_output, ^second_withdrawn}
   end
 
   describe "subscription behavior" do

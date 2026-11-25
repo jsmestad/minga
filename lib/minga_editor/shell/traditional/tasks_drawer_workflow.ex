@@ -121,9 +121,24 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerWorkflow do
   Opens the drawer on the task `session`, for a notification. Single-letter actions are ignored for the first 300 ms.
   """
   @spec open_on(EditorState.t(), pid()) :: EditorState.t()
-  def open_on(%EditorState{} = state, session) when is_pid(session) do
-    row = row_for(state.agent_connection.tasks, session)
+  def open_on(%EditorState{} = state, session) when is_pid(session),
+    do: open_armed(state, row_for(state.agent_connection.tasks, session))
 
+  @doc """
+  Opens the drawer for a click on the "needs you" alert `alert`, on the task it was posted for, as `open_on/2` does.
+
+  The click acts on nothing: the row shows the task as it is now, answered or not. An alert for a task Minga no longer follows opens the drawer on the first task that needs you.
+  """
+  @spec open_alert(EditorState.t(), <<_::128>>) :: EditorState.t()
+  def open_alert(%EditorState{} = state, <<_::128>> = alert) do
+    case Tasks.alerted_session(state.agent_connection.tasks, alert) do
+      {:ok, session} -> open_on(state, session)
+      :error -> open_armed(state, first_needs_you(state))
+    end
+  end
+
+  @spec open_armed(EditorState.t(), String.t() | nil) :: EditorState.t()
+  defp open_armed(state, row) do
     state
     |> leave_text_entry()
     |> update(fn shell ->

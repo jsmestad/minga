@@ -70,6 +70,8 @@ enum ApplicationCommitEffect: Equatable {
     case accessibilityModeChanged(String)
     case agentChatVisibilityChanged(Bool)
     case agentDesktopNotification(AgentDesktopNotification)
+    /// How many tasks need you changed; the app shows it on the Dock badge while it is in the background.
+    case needsYouCountChanged(Int)
 }
 
 private enum CommitEffect {
@@ -121,6 +123,7 @@ final class CommandDispatcher {
 
     /// Tracks the last mode to detect changes.
     private var lastMode: EditorMode = .normal
+    private var lastNeedsYouCount = 0
 
     /// Tracks the last emitted line spacing so the `lineSpacingChanged` effect is
     /// detected against prior committed state. Publication installs the snapshot's
@@ -390,6 +393,10 @@ final class CommandDispatcher {
         replacementFrameState.lineSpacing = frameState.lineSpacing
         frameState = replacementFrameState
         lastMode = .normal
+        if lastNeedsYouCount != 0 {
+            lastNeedsYouCount = 0
+            applicationEffectSink(.needsYouCountChanged(0))
+        }
         lastDocumentEdited = false
         pendingPresentationInputSeq = 0
         textPresentationLeases.replaceConnection()
@@ -1269,6 +1276,10 @@ final class CommandDispatcher {
             if update.mode != lastMode {
                 lastMode = update.mode
                 effects.append(.application(.accessibilityModeChanged(guiState.statusBarState.modeName)))
+            }
+            if update.needsYouCount != lastNeedsYouCount {
+                lastNeedsYouCount = update.needsYouCount
+                effects.append(.application(.needsYouCountChanged(update.needsYouCount)))
             }
 
         case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq, let activationGeneration, let empty, let listKeys, let movementKeys):

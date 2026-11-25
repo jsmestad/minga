@@ -82,19 +82,27 @@ Invalid values show a clear error. Setting `:tab_width` to `-1` tells you it mus
 
 ### Agent desktop notifications
 
-Minga can tell you when a local agent needs tool approval, finishes its queued work, or encounters an error while you use another app. The first desktop alert asks for macOS permission. Alerts use the Minga icon and omit project names, commands, and conversation details. Clicking one brings the editor forward.
+When you switch to another app, you still want to know the moment an agent is stuck waiting on you. Minga sends one alert when a task starts needing you (it asks for a tool approval or asks you a question) while Minga is in the background. That is the only thing that alerts: a finished turn or a failed one waits in the tasks drawer (`SPC a a`) and the modeline until you come back. A task that keeps needing you does not alert again, and nothing alerts while you are looking at Minga.
 
-macOS controls whether a desktop alert is temporary or stays until you dismiss it. Set this under **System Settings → Notifications → Minga**. Dismissing a desktop alert does not approve or cancel a tool request. The approval stays in the conversation until it is resolved, and Minga then removes the corresponding desktop alert. Errors stay in the conversation even if the desktop alert disappears.
+On macOS the alert is a notification that says "Minga needs you" and nothing more: no project name, command or conversation detail leaves Minga. The first one asks for macOS permission. Clicking it brings Minga forward with the tasks drawer open on that task, ready to answer. The click itself answers nothing, and for the first 300 ms the drawer ignores single-letter keys, so a letter you were typing in another app cannot approve a request.
 
-The terminal frontend rings the terminal bell and sends a desktop alert with the same fixed messages. On macOS it posts the alert through `osascript`. On Linux it uses `notify-send`, which the `libnotify` package provides, and any freedesktop notification server shows it: mako on Omarchy, GNOME Shell, KDE Plasma. Linux alerts need a graphical session, so over SSH or on a text console you get only the bell. Open the conversation to read the tool request, result, or error.
+Answer the task anywhere, in its conversation, in the drawer or from another window, and Minga removes the notification. If you click a notification for a task that was already answered, the drawer opens on that task as it is now; the click answers nothing. An approval answered somewhere else first says "Already answered in Minga" where you tried to answer it. Dismissing a notification does not approve or deny anything. macOS controls whether a notification is temporary or stays until you dismiss it: set this under **System Settings → Notifications → Minga**.
 
-To get alerted only when an agent is blocked or fails:
+Minga knows it is in the background because the frontend says so: the macOS app reports when it becomes active or resigns, and the terminal frontend reports when its window gains or loses focus. Until the frontend says (and a terminal without focus reporting never does), Minga treats itself as being in the foreground and sends nothing. A missed alert is the safe side of not knowing.
+
+The terminal frontend is quiet by default. Turn its alert on with `:agent_notify_terminal`:
 
 ```elixir
-set :agent_notify_on, [:approval, :error]
+set :agent_notify_terminal, :bell              # ring the terminal bell
+set :agent_notify_terminal, :desktop           # a desktop notification
+set :agent_notify_terminal, :bell_and_desktop  # both
 ```
 
-Use `set :agent_notifications, false` to turn off agent alerts. `:agent_notify_debounce` sets the minimum interval in milliseconds between repeated completions or repeated failures from the same session (default `5000`). It does not delay approvals.
+The bell comes from the terminal frontend itself, so your terminal decides what it does: flash the tab, bounce the Dock icon or play a sound. A desktop notification uses `osascript` on macOS. On Linux it uses `notify-send`, which the `libnotify` package provides, and any freedesktop notification server shows it: mako on Omarchy, GNOME Shell, KDE Plasma. Linux desktop notifications need a graphical session, so over SSH or on a text console use the bell. A terminal desktop notification cannot be removed once sent, and clicking it does not open the drawer.
+
+Older configs may still set `:agent_notify_on` or `:agent_notify_debounce`. Both are retired: Minga now alerts only once, when a task starts needing you, and `:agent_notify_terminal` replaces them for the terminal. A config that still sets one loads normally, and `*Messages*` says once that the option is retired and what replaced it, so you can remove the line.
+
+Use `set :agent_notifications, false` to turn off every agent alert, on macOS and in the terminal.
 
 ### Terminal features
 
