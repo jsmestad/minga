@@ -286,6 +286,36 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:send_attached_prompt, record_id, shown, content})
   end
 
+  @doc """
+  Starts a composer send without blocking the caller.
+
+  `send` names the synchronous send whose answer the reply carries: `{:idle, record_id}` is `send_idle_composer/3`, `:prompt` is `send_prompt/2`, `:follow_up` is `queue_follow_up/2`, and `{:attached, record_id, shown}` is `send_attached_prompt/4`. The request monitors the Session, so a Session that exits answers with its exit.
+  """
+  @spec request_composer_send(pid(), composer_send(), TurnExecution.content()) ::
+          :gen_server.request_id()
+  def request_composer_send(session, send, content)
+      when is_pid(session) and node(session) == node() and
+             (is_binary(content) or is_list(content)),
+      do: :gen_server.send_request(session, composer_send_call(send, content))
+
+  @typedoc "Which composer send `request_composer_send/3` starts."
+  @type composer_send ::
+          {:idle, record_id :: String.t()}
+          | :prompt
+          | :follow_up
+          | {:attached, record_id :: String.t(), [DraftAttachment.identity(), ...]}
+
+  @spec composer_send_call(composer_send(), TurnExecution.content()) :: tuple()
+  defp composer_send_call({:idle, record_id}, content) when is_binary(record_id),
+    do: {:send_idle_composer, record_id, content}
+
+  defp composer_send_call(:prompt, content), do: {:send_prompt, content}
+  defp composer_send_call(:follow_up, content), do: {:send_follow_up, content}
+
+  defp composer_send_call({:attached, record_id, [_ | _] = shown}, content)
+       when is_binary(record_id),
+       do: {:send_attached_prompt, record_id, shown, content}
+
   @doc "Aborts only when the Session still has the expected identity."
   @spec abort_for_id(GenServer.server(), String.t()) :: :ok | {:error, :session_id_changed}
   def abort_for_id(session, expected_session_id) when is_binary(expected_session_id) do
@@ -311,6 +341,12 @@ defmodule MingaAgent.Session do
   """
   @spec stop_turn(GenServer.server(), {String.t(), String.t()}) :: :ok | {:error, :stale_turn}
   def stop_turn(session, target), do: GenServer.call(session, {:stop_turn, target})
+
+  @doc "Starts `stop_turn/2` without blocking the caller; the reply is its answer, or the Session's exit."
+  @spec request_stop_turn(pid(), {String.t(), String.t()}) :: :gen_server.request_id()
+  def request_stop_turn(session, {_, _} = target)
+      when is_pid(session) and node(session) == node(),
+      do: :gen_server.send_request(session, {:stop_turn, target})
 
   @doc "Aborts the current agent operation."
   @spec abort(GenServer.server()) :: :ok

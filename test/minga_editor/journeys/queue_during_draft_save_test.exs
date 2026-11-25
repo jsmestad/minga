@@ -181,8 +181,9 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
       :sys.get_state(ctx.editor)
       :sys.get_state(ctx.editor)
 
-      assert prompt(ctx) == ""
+      # The send is answered in the Editor's mailbox; reading the Session first lets its answer land.
       assert Enum.count(Session.messages(session), &(&1 == {:user, "hello"})) == 1
+      assert prompt(ctx) == ""
     end
 
     test "if the load fails, the typed text stays and one line says why", %{editor_ctx: ctx} do

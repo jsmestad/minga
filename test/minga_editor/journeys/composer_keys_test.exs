@@ -55,8 +55,10 @@ defmodule MingaEditor.Journeys.ComposerKeysTest do
     assert user_messages(session) == []
 
     send_keys_sync(ctx, "<Esc><CR>")
-    assert prompt(ctx) == ""
+
+    # The send is answered in the Editor's mailbox; reading the Session first lets its answer land.
     assert user_messages(session) == ["first\nsecond"]
+    assert prompt(ctx) == ""
   end
 
   test "a pending count or operator keeps Enter for Vim instead of sending", %{

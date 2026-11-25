@@ -23,6 +23,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias Minga.Test.TranscriptFixture
   alias MingaEditor.Agent.StartFailure
   alias MingaEditor.Agent.StartRequest
+  alias MingaEditor.Agent.TurnRequest
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.View
@@ -343,7 +344,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
           )
         end)
 
-      new_state = AgentCommands.submit_prompt(state)
+      new_state = state |> AgentCommands.submit_prompt() |> Minga.Test.TurnRequestDriver.settle()
 
       assert new_state.workspace.agent_ui.panel.prompt_history == []
       assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) == ""
@@ -355,7 +356,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       state =
         base_state(session: session) |> AgentCommands.input_paste("/auth\trevoke secret-value")
 
-      new_state = AgentCommands.submit_prompt(state)
+      new_state = state |> AgentCommands.submit_prompt() |> Minga.Test.TurnRequestDriver.settle()
 
       assert new_state.workspace.agent_ui.panel.prompt_history == []
       assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) == ""
@@ -399,7 +400,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         base_state(session: session)
         |> AgentCommands.input_paste("/modle")
 
-      new_state = AgentCommands.submit_prompt(state)
+      new_state = state |> AgentCommands.submit_prompt() |> Minga.Test.TurnRequestDriver.settle()
 
       assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) ==
                "/modle"
@@ -431,7 +432,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
           |> Panel.set_provider_name("")
         end)
 
-      new_state = AgentCommands.submit_prompt(state)
+      new_state = state |> AgentCommands.submit_prompt() |> Minga.Test.TurnRequestDriver.settle()
 
       assert new_state.shell_runtime.state.notice.message =~ "No model configured"
 
@@ -461,7 +462,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
           |> Panel.set_provider_name("openai")
         end)
 
-      new_state = AgentCommands.submit_prompt(state)
+      new_state = state |> AgentCommands.submit_prompt() |> Minga.Test.TurnRequestDriver.settle()
 
       assert new_state.shell_runtime.state.notice.message =~ "No agent session"
 
@@ -625,7 +626,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
           |> Panel.set_provider_name("anthropic")
         end)
 
-      new_state = AgentCommands.submit_prompt(state)
+      new_state = state |> AgentCommands.submit_prompt() |> Minga.Test.TurnRequestDriver.settle()
 
       assert_receive {:readiness_session_prompt, "ready prompt"}
       assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) == ""
@@ -715,7 +716,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
           |> Panel.set_provider_name("anthropic")
         end)
 
-      new_state = AgentCommands.submit_prompt(state)
+      new_state = state |> AgentCommands.submit_prompt() |> Minga.Test.TurnRequestDriver.settle()
 
       assert_receive {:readiness_session_prompt, "stale panel prompt"}
       assert is_nil(new_state.shell_runtime.state.notice.message)
@@ -761,13 +762,193 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
             )
           end)
 
-        new_state = AgentCommands.submit_prompt(state)
+        new_state =
+          state |> AgentCommands.submit_prompt() |> Minga.Test.TurnRequestDriver.settle()
 
         assert new_state.shell_runtime.state.notice.message =~ expected_message
 
         assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) ==
                  "draft prompt"
       end
+    end
+  end
+
+  describe "a send never waits on the Session (#4296)" do
+    setup do
+      {:ok, session} = GenServer.start(ReadinessSession, self())
+      on_exit(fn -> Process.exit(session, :kill) end)
+
+      state =
+        base_state(session: session)
+        |> project_prompt_connection(session, :configured, :running)
+        |> replace_panel(fn panel ->
+          panel
+          |> Panel.set_credentials_configured(true)
+          |> Panel.set_model_name("anthropic:claude-sonnet-4-20250514")
+          |> Panel.set_provider_name("anthropic")
+        end)
+
+      BufferProcess.replace_content(state.workspace.agent_ui.panel.prompt_buffer, "hello")
+      %{session: session, state: state}
+    end
+
+    defp composer(state),
+      do: MingaEditor.Agent.PromptBuffer.prompt_text(state.workspace.agent_ui.panel)
+
+    defp notice(state), do: state.shell_runtime.state.notice.message
+
+    test "a press returns while the Session is busy, and its answer clears the composer", %{
+      session: session,
+      state: state
+    } do
+      :ok = :sys.suspend(session)
+      pressed = AgentCommands.submit_prompt(state)
+
+      # A press that had called the busy Session would have timed out and reported it.
+      assert [%TurnRequest{session: ^session, work: {:send, :prompt, "hello", "hello"}}] =
+               Map.values(pressed.agent_connection.turn_requests)
+
+      assert composer(pressed) == "hello"
+      assert notice(pressed) == nil
+      refute_received {:readiness_session_prompt, _prompt}
+
+      :ok = :sys.resume(session)
+      sent = Minga.Test.TurnRequestDriver.settle(pressed)
+
+      assert_received {:readiness_session_prompt, "hello"}
+      assert composer(sent) == ""
+      assert sent.agent_connection.turn_requests == %{}
+    end
+
+    test "a second press while the send is out does not send the text again", %{
+      session: session,
+      state: state
+    } do
+      :ok = :sys.suspend(session)
+      pressed = state |> AgentCommands.submit_prompt() |> AgentCommands.submit_prompt()
+
+      assert map_size(pressed.agent_connection.turn_requests) == 1
+      assert notice(pressed) =~ "Wait for the earlier message to be sent"
+
+      :ok = :sys.resume(session)
+      sent = Minga.Test.TurnRequestDriver.settle(pressed)
+
+      assert_received {:readiness_session_prompt, "hello"}
+      refute_received {:readiness_session_prompt, _again}
+      assert composer(sent) == ""
+    end
+
+    test "text typed after the press stays when the send is answered", %{
+      session: session,
+      state: state
+    } do
+      :ok = :sys.suspend(session)
+      pressed = AgentCommands.submit_prompt(state)
+
+      BufferProcess.replace_content(
+        pressed.workspace.agent_ui.panel.prompt_buffer,
+        "hello and a second thought"
+      )
+
+      :ok = :sys.resume(session)
+      sent = Minga.Test.TurnRequestDriver.settle(pressed)
+
+      assert_received {:readiness_session_prompt, "hello"}
+      assert composer(sent) == " and a second thought"
+    end
+
+    test "pressed text the user edited meanwhile stays whole, and one line says the message went",
+         %{session: session, state: state} do
+      :ok = :sys.suspend(session)
+      pressed = AgentCommands.submit_prompt(state)
+      BufferProcess.replace_content(pressed.workspace.agent_ui.panel.prompt_buffer, "help")
+
+      :ok = :sys.resume(session)
+      sent = Minga.Test.TurnRequestDriver.settle(pressed)
+
+      assert composer(sent) == "help"
+      assert notice(sent) =~ "The message was sent. Newer edits were kept."
+    end
+
+    test "a Session that exits before it answers keeps the text and says why", %{
+      session: session,
+      state: state
+    } do
+      :ok = :sys.suspend(session)
+      pressed = AgentCommands.submit_prompt(state)
+      Process.exit(session, :kill)
+
+      failed = Minga.Test.TurnRequestDriver.settle(pressed)
+
+      assert composer(failed) == "hello"
+      assert notice(failed) =~ "Agent session unavailable. Your prompt was preserved."
+      assert failed.agent_connection.turn_requests == %{}
+    end
+  end
+
+  describe "a stop never waits on the Session (#4296)" do
+    defmodule StoppableSession do
+      use GenServer
+
+      @spec start(term()) :: GenServer.on_start()
+      def start(answer), do: GenServer.start(__MODULE__, answer)
+
+      @impl GenServer
+      def init(answer), do: {:ok, answer}
+
+      @impl GenServer
+      def handle_call({:stop_turn, _target}, _from, answer), do: {:reply, answer, answer}
+    end
+
+    defp stoppable(answer) do
+      {:ok, session} = StoppableSession.start(answer)
+      on_exit(fn -> Process.exit(session, :kill) end)
+      target = {"record", "request"}
+
+      state = base_state(session: session)
+      shell = state.shell_runtime.state
+
+      agent =
+        shell
+        |> MingaEditor.Shell.Traditional.State.agent()
+        |> AgentState.project_stop_target(session, target)
+
+      shell = MingaEditor.Shell.Traditional.State.replace_agent(shell, agent)
+
+      {session,
+       %{state | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell)}}
+    end
+
+    test "a stop returns while the Session is busy and is quiet once the Session stops the turn" do
+      {session, state} = stoppable(:ok)
+      :ok = :sys.suspend(session)
+      asked = AgentCommands.abort_agent(state)
+
+      assert [%TurnRequest{session: ^session, work: {:stop, {"record", "request"}}}] =
+               Map.values(asked.agent_connection.turn_requests)
+
+      :ok = :sys.resume(session)
+      stopped = Minga.Test.TurnRequestDriver.settle(asked)
+      assert stopped.shell_runtime.state.notice.message == nil
+      assert stopped.agent_connection.turn_requests == %{}
+    end
+
+    test "a stop for a turn that already ended says so" do
+      {_session, state} = stoppable({:error, :stale_turn})
+      stopped = state |> AgentCommands.abort_agent() |> Minga.Test.TurnRequestDriver.settle()
+      assert stopped.shell_runtime.state.notice.message =~ "That Agent turn is no longer active."
+    end
+
+    test "a Session that exits before it answers a stop says the stop was not confirmed" do
+      {session, state} = stoppable(:ok)
+      :ok = :sys.suspend(session)
+      asked = AgentCommands.abort_agent(state)
+      Process.exit(session, :kill)
+
+      stopped = Minga.Test.TurnRequestDriver.settle(asked)
+
+      assert stopped.shell_runtime.state.notice.message =~
+               "Could not confirm the Agent stop request."
     end
   end
 

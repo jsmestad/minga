@@ -162,6 +162,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - Typing stays responsive while the agent streams. The editor no longer waits on a busy session to update the conversation, which could hold keys for up to five seconds.
+- Sending a message or stopping a turn no longer holds the editor while the session answers. The composer keeps the message until the session takes it, text typed meanwhile stays, and a second press never sends the same text twice.
 - The macOS agent header names the session's provider before the model, including an extension route's name such as "Claude (subscription)", as the terminal already does.
 - Closing an agent workspace with its close button on macOS no longer drops its staged agent edits. The workspace stays open and offers **Publish** and **Discard** until you choose one.
 - After the macOS app reconnects to a restarted editor core, it reports the window size with your configured line spacing and gutter, so the editor no longer lays out rows or columns that the window cannot show until the next resize.
