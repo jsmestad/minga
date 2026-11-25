@@ -24,19 +24,22 @@ defmodule MingaEditor.Shell.Traditional.WhichKeyWorkflow do
     schedule(state)
   end
 
-  @doc "Advances a leader prefix unless an exclusive modal owns input."
-  @spec progress(EditorState.t(), Minga.Keymap.Bindings.node_t(), [String.t()]) :: EditorState.t()
-  def progress(%{shell_runtime: %{state: %{modal: modal}}} = state, _node, _prefix_keys)
+  @doc "Advances a leader prefix unless an exclusive modal owns input. `label` names a group whose node has no description."
+  @spec progress(EditorState.t(), Minga.Keymap.Bindings.node_t(), [String.t()], String.t() | nil) ::
+          EditorState.t()
+  def progress(state, node, prefix_keys, label \\ nil)
+
+  def progress(%{shell_runtime: %{state: %{modal: modal}}} = state, _node, _prefix_keys, _label)
       when modal != :none,
       do: state
 
-  def progress(state, node, prefix_keys) do
+  def progress(state, node, prefix_keys, label) do
     cancel_timer(state.shell_runtime.state.whichkey.timer)
 
     state =
       state
       |> update_shell_state(&ShellState.suppress_lower_transients/1)
-      |> update_shell_state(&ShellState.progress_whichkey(&1, node, prefix_keys))
+      |> update_shell_state(&ShellState.progress_whichkey(&1, node, prefix_keys, label))
 
     schedule(state)
   end

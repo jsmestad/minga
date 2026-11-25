@@ -258,9 +258,10 @@ defmodule MingaEditor.Shell.Traditional.State do
     do: %{state | whichkey: WhichKey.begin(state.whichkey, node, prefix_keys)}
 
   @doc "Advances the which-key leader prefix."
-  @spec progress_whichkey(t(), Minga.Keymap.Bindings.node_t(), [String.t()]) :: t()
-  def progress_whichkey(%__MODULE__{} = state, node, prefix_keys),
-    do: %{state | whichkey: WhichKey.progress(state.whichkey, node, prefix_keys)}
+  @spec progress_whichkey(t(), Minga.Keymap.Bindings.node_t(), [String.t()], String.t() | nil) ::
+          t()
+  def progress_whichkey(%__MODULE__{} = state, node, prefix_keys, label \\ nil),
+    do: %{state | whichkey: WhichKey.progress(state.whichkey, node, prefix_keys, label)}
 
   @doc "Records a which-key timer for the matching generation."
   @spec record_whichkey_timer(t(), WhichKey.generation(), reference()) :: t()

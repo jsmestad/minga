@@ -8,7 +8,8 @@ defmodule MingaEditor.State.WhichKey do
           timer: reference() | nil,
           show: boolean(),
           prefix_keys: [String.t()],
-          labels: [String.t()]
+          labels: [String.t()],
+          parents: [Minga.Keymap.Bindings.node_t()]
         }
 
   defstruct generation: 0,
@@ -16,7 +17,8 @@ defmodule MingaEditor.State.WhichKey do
             timer: nil,
             show: false,
             prefix_keys: [],
-            labels: []
+            labels: [],
+            parents: []
 
   @doc "Begins a new hidden which-key generation."
   @spec begin(t(), Minga.Keymap.Bindings.node_t(), [String.t()]) :: t()
@@ -29,17 +31,48 @@ defmodule MingaEditor.State.WhichKey do
     }
   end
 
-  @doc "Advances a leader prefix with a new generation while preserving visibility."
-  @spec progress(t(), Minga.Keymap.Bindings.node_t(), [String.t()]) :: t()
-  def progress(%__MODULE__{} = whichkey, node, prefix_keys) do
+  @doc """
+  Advances a leader prefix with a new generation while preserving visibility.
+
+  A longer prefix remembers the node it came from and a shorter one (Backspace) forgets as many, so `parent/1` always names the group one level up. `label` names the group when `node` carries no description of its own (the `SPC m` filetype trie that stands in for the Filetype group).
+  """
+  @spec progress(t(), Minga.Keymap.Bindings.node_t(), [String.t()], String.t() | nil) :: t()
+  def progress(%__MODULE__{} = whichkey, node, prefix_keys, label \\ nil) do
     %__MODULE__{
       generation: whichkey.generation + 1,
       node: node,
       prefix_keys: prefix_keys,
-      labels: labels(whichkey.labels, node, prefix_keys),
+      labels: labels(whichkey.labels, label_node(node, label), prefix_keys),
+      parents: parents(whichkey, length(prefix_keys)),
       show: whichkey.show
     }
   end
+
+  @doc "Returns the group one level up and its prefix, or `:top` at the first group."
+  @spec parent(t()) :: {:ok, Minga.Keymap.Bindings.node_t(), [String.t()]} | :top
+  def parent(%__MODULE__{parents: [parent | _], prefix_keys: [_ | _] = prefix_keys}),
+    do: {:ok, parent, Enum.drop(prefix_keys, -1)}
+
+  def parent(%__MODULE__{}), do: :top
+
+  @spec parents(t(), non_neg_integer()) :: [Minga.Keymap.Bindings.node_t()]
+  defp parents(%__MODULE__{node: nil}, _depth), do: []
+
+  defp parents(%__MODULE__{prefix_keys: old, node: node, parents: parents}, depth) do
+    case length(old) do
+      ^depth -> parents
+      shallower when shallower < depth -> [node | parents]
+      deeper -> Enum.drop(parents, deeper - depth)
+    end
+  end
+
+  @spec label_node(Minga.Keymap.Bindings.node_t(), String.t() | nil) :: map()
+  defp label_node(node, nil), do: node
+
+  defp label_node(%{description: description} = node, _label) when is_binary(description),
+    do: node
+
+  defp label_node(_node, label), do: %{description: label}
 
   # One label per prefix key: the group each key opened, for the breadcrumb (`SPC`, `a Minga`).
   # Going back up (Backspace) shortens the prefix, so the kept labels are cut to match.

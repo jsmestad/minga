@@ -82,6 +82,23 @@ defmodule MingaEditor.RenderModel.UI.WhichKeyBuilderTest do
              Enum.find(model.entries, &(&1.key == "s"))
   end
 
+  test "a group opened through a stand-in node keeps its label, and parents follow the prefix" do
+    root = Defaults.leader_trie()
+    filetype_trie = Bindings.bind(Bindings.new(), [{?t, 0}], :test_file, "Test file")
+
+    state =
+      %WhichKeyState{}
+      |> WhichKeyState.begin(root, ["SPC"])
+      |> WhichKeyState.progress(filetype_trie, ["SPC", "m"], "Filetype")
+
+    assert state.labels == ["", "Filetype"]
+    assert {:ok, ^root, ["SPC"]} = WhichKeyState.parent(state)
+
+    back = WhichKeyState.progress(state, root, ["SPC"])
+    assert back.labels == [""]
+    assert WhichKeyState.parent(back) == :top
+  end
+
   test "a prefix without declared sections lists groups first in one unnamed section" do
     model = WhichKeyBuilder.build(shown([{?c, 0}]))
 
