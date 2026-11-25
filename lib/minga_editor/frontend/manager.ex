@@ -196,7 +196,8 @@ defmodule MingaEditor.Frontend.Manager do
 
     result = {:ok, start_port(state, port_opener)}
 
-    if Keyword.get(opts, :backend) == :gui do
+    # macOS posts the "needs you" alert; the terminal frontend rings its bell. The editor decides when to send it.
+    if Keyword.get(opts, :backend) in [:gui, :tui] do
       Minga.Events.subscribe(:agent_desktop_notification)
     end
 
@@ -331,7 +332,7 @@ defmodule MingaEditor.Frontend.Manager do
      MingaEditor.Frontend.Manager.AgentNotifications.send_notification(state, notification)}
   end
 
-  def handle_info(:retry_agent_approval_withdrawals, state) do
+  def handle_info(:retry_agent_notification_withdrawals, state) do
     {:noreply, MingaEditor.Frontend.Manager.AgentNotifications.retry_withdrawals(state)}
   end
 

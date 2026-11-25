@@ -79,7 +79,7 @@ graph LR
 
 All frontends communicate with the BEAM over the same binary protocol on stdin/stdout. They share no memory. The BEAM is the single source of truth for all editor state; frontends are "dumb" renderers and input sources. Every internal component (each buffer, the editor, the port manager, each future plugin) runs as its own lightweight BEAM process with its own state. They can't interfere with each other because the VM enforces the boundaries.
 
-Agent desktop alerts use an out-of-band instruction with the event kind, an opaque approval or session identifier, and the configured outcome debounce interval. The BEAM decides which outcomes warrant attention and when an approval is retired. The macOS app uses its bundle identity to deliver or withdraw the matching alert. It starts the debounce interval only after posting an alert. No conversation content crosses this notification boundary.
+The "needs you" alert uses an out-of-band instruction with a kind and an opaque alert identity. The Editor decides when to alert: a task started needing you while the frontend reports that Minga is in the background. It withdraws the alert when the task stops needing you. The macOS app uses its bundle identity to post or remove the matching notification, and a click sends the identity back so the Editor opens the tasks drawer on that task. The terminal frontend rings its bell when the user asked for it. No conversation content crosses this notification boundary.
 
 This isn't a workaround for a limitation. It's the whole point.
 

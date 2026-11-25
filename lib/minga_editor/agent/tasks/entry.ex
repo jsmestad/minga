@@ -5,6 +5,8 @@ defmodule MingaEditor.Agent.Tasks.Entry do
   An entry is the editor's projection of one session's events. It never calls the session; `MingaEditor.Agent.Tasks` installs the transitions below as the session's events arrive, and the tasks drawer and the modeline read the derived `state/2` and `words/2`.
 
   `subagents` are the foreground subagents the task's `subagent` tool calls started. They live only as long as the tool call and are reported through the parent's tool events. A background subagent is a session of its own, so it is a separate entry whose `parent` names the task that started it.
+
+  `alert` is the last "needs you" alert the editor posted for the task (`MingaEditor.Agent.TaskWorkflow`): posted while it may still be on screen, withdrawn once the task stopped needing you. A withdrawn alert keeps its identity, so a click that arrives late still finds its task.
   """
 
   alias MingaAgent.ToolApproval.Public, as: PublicApproval
@@ -28,6 +30,9 @@ defmodule MingaEditor.Agent.Tasks.Entry do
   @typedoc "The design-token state a task shows, or nil for a task that has not started work."
   @type state :: :needs_you | :working | :waiting | :failed | :done | :stopped
 
+  @typedoc "The last \"needs you\" alert posted for the task, by its opaque identity."
+  @type alert :: {:posted, <<_::128>>} | {:withdrawn, <<_::128>>}
+
   @type t :: %__MODULE__{
           pid: pid(),
           seq: non_neg_integer(),
@@ -43,6 +48,7 @@ defmodule MingaEditor.Agent.Tasks.Entry do
           worked?: boolean(),
           stop_target: {String.t(), String.t()} | nil,
           outputs: [output()],
+          alert: alert() | nil,
           started_at: integer(),
           changed_at: integer(),
           subagents: [Subagent.t()]
@@ -66,6 +72,7 @@ defmodule MingaEditor.Agent.Tasks.Entry do
     worked?: false,
     stop_target: nil,
     outputs: [],
+    alert: nil,
     subagents: []
   ]
 
@@ -227,8 +234,9 @@ defmodule MingaEditor.Agent.Tasks.Entry do
   """
   @spec restart(t(), pid(), integer()) :: t()
   def restart(%__MODULE__{} = entry, new_pid, now) when is_pid(new_pid) do
+    # The crashed session's alert was withdrawn when it went down.
     %{
-      entry
+      withdraw_alert(entry)
       | pid: new_pid,
         status: :idle,
         approval: nil,
@@ -246,6 +254,17 @@ defmodule MingaEditor.Agent.Tasks.Entry do
     do: %{entry | parent: new}
 
   def reparent(%__MODULE__{} = entry, _old, _new), do: entry
+
+  @doc "Records the \"needs you\" alert just posted for the task."
+  @spec post_alert(t(), <<_::128>>) :: t()
+  def post_alert(%__MODULE__{} = entry, <<_::128>> = id), do: %{entry | alert: {:posted, id}}
+
+  @doc "Records that the task's posted alert was withdrawn. It keeps the identity, for a late click."
+  @spec withdraw_alert(t()) :: t()
+  def withdraw_alert(%__MODULE__{alert: {:posted, id}} = entry),
+    do: %{entry | alert: {:withdrawn, id}}
+
+  def withdraw_alert(%__MODULE__{} = entry), do: entry
 
   @doc "Marks the task stopped: its session ended or the user stopped it."
   @spec stop(t(), integer()) :: t()

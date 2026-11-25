@@ -281,6 +281,24 @@ defmodule MingaEditor.State do
     %{state | agent_connection: connection}
   end
 
+  @doc "Records the \"needs you\" alert just posted for a task."
+  @spec post_agent_task_alert(t(), pid(), <<_::128>>) :: t()
+  def post_agent_task_alert(%__MODULE__{} = state, session, id) do
+    %{
+      state
+      | agent_connection: AgentConnection.post_task_alert(state.agent_connection, session, id)
+    }
+  end
+
+  @doc "Records that a task's posted alert was withdrawn."
+  @spec withdraw_agent_task_alert(t(), pid()) :: t()
+  def withdraw_agent_task_alert(%__MODULE__{} = state, session) do
+    %{
+      state
+      | agent_connection: AgentConnection.withdraw_task_alert(state.agent_connection, session)
+    }
+  end
+
   @doc "Commits an extension snapshot transition unless semantic Editor state superseded it."
   @spec accept_extension_event_result(t(), t(), t()) :: {:ok, t()} | :stale
   def accept_extension_event_result(

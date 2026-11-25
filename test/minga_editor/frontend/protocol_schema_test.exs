@@ -289,7 +289,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       agent_composer_queue: 0x6E,
       agent_start_remedy: 0x6F,
       picker_fit: 0x70,
-      tasks_drawer_action: 0x71
+      tasks_drawer_action: 0x71,
+      agent_notification_open: 0x72
     )
   end
 

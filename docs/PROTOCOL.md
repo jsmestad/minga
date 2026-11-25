@@ -71,7 +71,7 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 | `0x18` | protocol_error | 3 + msg_len | Version-mismatch error; frontend shows it and stops decoding |
 | `0x1A` | application_quit_response | variable | Return the correlated BEAM quit-policy outcome |
 | `0x27` | measure_text | 7 + text_len | Request display width of text |
-| `0x61` | agent_desktop_notification | 22 | Post a native agent alert or withdraw a resolved approval |
+| `0x61` | agent_desktop_notification | 18 | Alert that a task needs you, or withdraw that alert |
 
 ### BEAM → Frontend (Config Commands)
 
@@ -250,16 +250,17 @@ Outcome values are `0` needs decision, `1` proceeding, `2` cancelled, and `3` sa
 
 ### `0x61` agent_desktop_notification
 
-The BEAM sends one native notification instruction outside a render transaction. The Go frontend sizes and skips it. The packet contains no conversation text, tool arguments, paths, or provider errors.
+The BEAM sends one "a task needs you" alert, or its withdrawal, outside a render transaction. The packet contains no conversation text, tool arguments, paths, or provider errors.
 
 ```
 opcode:      u8 = 0x61
-kind:        u8
+kind:        u8    (1 = needs you, 2 = withdrawn)
 identity:    [16]u8
-debounce_ms: u32
 ```
 
-Kind `1` posts an approval alert and `4` withdraws the alert with the same opaque approval identity. Kind `2` reports completion and `3` reports an agent error. These use an opaque session identity and a debounce interval in milliseconds. The native app decides when to deliver from app activity and the user's notification settings. The BEAM remains the authority for whether an approval is actionable.
+The BEAM decides when to alert (`MingaEditor.Agent.TaskWorkflow`): a task has just started needing you, because an approval or a question became pending, while the frontend reports that Minga is in the background (`frontend_foreground`, `0x13`). A task that keeps needing you is not alerted again. When the task stops needing you, wherever it was answered, the BEAM withdraws the alert with the same identity, and it withdraws it too when the task's session stops. A frontend never checks whether it is active before it posts: the BEAM is the authority.
+
+The macOS app posts a notification for kind `1` and removes it for kind `2`. A click on the notification sends the `agent_notification_open` gui_action (`0x72`) with the same identity, and the BEAM opens the tasks drawer on that task. The terminal frontend receives the alert only when the user set `:agent_notify_terminal` to ring the bell; it writes BEL to its terminal for kind `1` and ignores kind `2`.
 
 ---
 
@@ -974,7 +975,7 @@ foreground:  u8    (1 = in the foreground, 0 = in the background)
 
 The terminal frontend turns on focus reporting (mode 1004) and sends the event when the terminal reports that its window got or lost the focus. macOS sends it once after `ready` and whenever the app becomes active or resigns. This is not keyboard focus inside the editor, which is `gui_focus_owner`.
 
-The BEAM keeps `:foreground`, `:background` or `:unknown` (`MingaEditor.State.Frontend.foreground/1`). It is `:unknown` until a frontend reports and again after every `ready`, and a terminal without focus reporting never reports. A reader matches all three values. For anything that would interrupt the user, `:unknown` counts as the foreground: a notification that is not sent is the safe side. The Editor broadcasts `:frontend_foreground_changed` (`Minga.Events.FrontendForegroundChangedEvent`) on every change, so code below the editor layer subscribes instead of asking the Editor.
+The BEAM keeps `:foreground`, `:background` or `:unknown` (`MingaEditor.State.Frontend.foreground/1`). It is `:unknown` until a frontend reports and again after every `ready`, and a terminal without focus reporting never reports. A reader matches all three values. For anything that would interrupt the user, `:unknown` counts as the foreground: a notification that is not sent is the safe side. The "needs you" alert (`0x61`) follows this rule. The Editor broadcasts `:frontend_foreground_changed` (`Minga.Events.FrontendForegroundChangedEvent`) on every change, so code below the editor layer subscribes instead of asking the Editor.
 
 ### `0x62` terminal_report
 

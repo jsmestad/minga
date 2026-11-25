@@ -327,6 +327,77 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerTest do
     end
   end
 
+  describe "a click on a needs-you alert" do
+    # The suite turns agent alerts off globally; this editor reads its own options, with the terminal bell on.
+    defp alerting_editor do
+      options = start_supervised!({Minga.Config.Options, name: nil}, id: make_ref())
+      {:ok, _} = Minga.Config.Options.set(options, :agent_notify_terminal, :bell)
+      ctx = start_editor("hello world", options_server: options)
+      Minga.Events.subscribe(:agent_desktop_notification, registry: ctx.events_registry)
+      send(ctx.editor, {:minga_input, {:frontend_foreground, :background}})
+      ctx
+    end
+
+    test "opens the drawer with the keyboard on that alert's task, and answers nothing" do
+      ctx = alerting_editor()
+      first = FakeTaskSession.start(ctx.editor, "First", :needs_you, observer: self())
+
+      assert_receive {:minga_event, :agent_desktop_notification,
+                      %{kind: :needs_you, id: id, owner: ^first}}
+
+      # The newer task sorts first, so landing on "First" is the alert's identity, not the drawer's default.
+      FakeTaskSession.start(ctx.editor, "Second", :needs_you, observer: self())
+      assert_receive {:minga_event, :agent_desktop_notification, %{kind: :needs_you}}
+      send_keys_sync(ctx, "<Space>aa")
+      assert selected_title(drawer(ctx)) == "Second"
+      send_keys_sync(ctx, "<Space>aa")
+
+      send_gui_action(ctx, {:agent_notification_open, id})
+
+      model = drawer(ctx)
+      assert model.visible? and model.focused?
+      assert selected_title(model) == "First"
+      refute_received {:fake_task_answered, _pid, _decision}
+
+      # The drawer opened on its own, so a letter typed right after the click answers nothing.
+      send_keys_sync(ctx, "y")
+      refute_received {:fake_task_answered, _pid, _decision}
+    end
+
+    test "an alert answered elsewhere lands on its task as it is now" do
+      ctx = alerting_editor()
+      asking = FakeTaskSession.start(ctx.editor, "Asking", :needs_you, observer: self())
+      FakeTaskSession.start(ctx.editor, "Other", :needs_you)
+
+      assert_receive {:minga_event, :agent_desktop_notification,
+                      %{kind: :needs_you, id: id, owner: ^asking}}
+
+      approval = FakeTaskSession.approval(asking)
+      send(ctx.editor, {:agent_event, asking, {:approval_resolved, approval.target, :approve}})
+      assert_receive {:minga_event, :agent_desktop_notification, %{kind: :withdrawn, id: ^id}}
+
+      send_gui_action(ctx, {:agent_notification_open, id})
+
+      model = drawer(ctx)
+      assert model.visible?
+      assert %{title: "Asking"} = selected = TasksDrawer.selected(model)
+      refute selected.state == :needs_you
+      refute_received {:fake_task_answered, _pid, _decision}
+    end
+
+    test "an alert Minga no longer knows opens the drawer on the first task that needs you" do
+      ctx = alerting_editor()
+      FakeTaskSession.start(ctx.editor, "Done", :done)
+      FakeTaskSession.start(ctx.editor, "Asking", :needs_you)
+
+      send_gui_action(ctx, {:agent_notification_open, <<7::128>>})
+
+      model = drawer(ctx)
+      assert model.visible? and model.focused?
+      assert selected_title(model) == "Asking"
+    end
+  end
+
   describe "the keyboard comes back" do
     test "ctrl-g gives the keyboard back to the window and the drawer stays on screen", %{
       ctx: ctx

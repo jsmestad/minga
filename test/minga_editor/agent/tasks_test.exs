@@ -350,6 +350,68 @@ defmodule MingaEditor.Agent.TasksTest do
     end
   end
 
+  describe "the needs-you alert" do
+    setup do
+      pid = session()
+      {:ok, pid: pid, tasks: Tasks.follow(Tasks.new(), pid, 0, title: "Add tests")}
+    end
+
+    test "attention names the moment a task starts or stops needing you", %{pid: pid, tasks: idle} do
+      asking = Tasks.observe(idle, pid, {:approval_pending, approval(1)}, 1)
+      also_asking = Tasks.observe(asking, pid, {:question_requested, :q1, "Which file?"}, 2)
+      answered = Tasks.observe(asking, pid, {:approval_resolved, approval(1).target, :approve}, 3)
+      stranger = session()
+
+      cases = [
+        {idle, asking, :started},
+        {Tasks.new(), asking, :started},
+        {asking, also_asking, :unchanged},
+        {asking, asking, :unchanged},
+        {asking, answered, :ended},
+        {asking, Tasks.forget(asking, pid), :ended},
+        {idle, answered, :unchanged}
+      ]
+
+      for {before, now, expected} <- cases do
+        assert Tasks.attention(before, now, pid) == expected
+      end
+
+      assert Tasks.attention(asking, asking, stranger) == :unchanged
+    end
+
+    test "an alert is posted, then withdrawn, and its task is still found by it", %{
+      pid: pid,
+      tasks: tasks
+    } do
+      id = <<1::128>>
+      assert Tasks.posted_alert(tasks, pid) == nil
+      assert Tasks.alerted_session(tasks, id) == :error
+
+      posted = Tasks.post_alert(tasks, pid, id)
+      assert Tasks.posted_alert(posted, pid) == id
+      assert Tasks.alerted_session(posted, id) == {:ok, pid}
+
+      withdrawn = Tasks.withdraw_alert(posted, pid)
+      assert Tasks.posted_alert(withdrawn, pid) == nil
+      assert Tasks.alerted_session(withdrawn, id) == {:ok, pid}
+      assert Tasks.withdraw_alert(withdrawn, pid) == withdrawn
+
+      assert Tasks.alerted_session(Tasks.forget(posted, pid), id) == :error
+    end
+
+    test "a restarted task keeps its alert's identity, withdrawn with the crashed session", %{
+      pid: pid,
+      tasks: tasks
+    } do
+      id = <<2::128>>
+      new = session()
+      restarted = tasks |> Tasks.post_alert(pid, id) |> Tasks.replace(pid, new, 5)
+
+      assert Tasks.posted_alert(restarted, new) == nil
+      assert Tasks.alerted_session(restarted, id) == {:ok, new}
+    end
+  end
+
   defp title(%Entry{} = entry), do: Entry.title(entry)
   defp title(%Subagent{title: title}), do: title
 end

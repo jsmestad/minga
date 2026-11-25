@@ -241,9 +241,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
          %PendingApproval{session_pid: session_pid, approval: %PublicApproval{target: target}},
          :ok
        ) do
-    state
-    |> MingaEditor.Shell.Traditional.Workflow.resolve_agent_approval(target, session_pid)
-    |> EditorState.resolve_agent_task_approval(session_pid, target)
+    MingaEditor.Agent.TaskWorkflow.resolved(state, session_pid, target)
   end
 
   defp apply_approval_response(
@@ -253,8 +251,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
        )
        when reason in [:no_pending_approval, :approval_not_found] do
     state
-    |> MingaEditor.Shell.Traditional.Workflow.resolve_agent_approval(target, session_pid)
-    |> EditorState.resolve_agent_task_approval(session_pid, target)
+    |> MingaEditor.Agent.TaskWorkflow.resolved(session_pid, target)
     |> publish_approval_failure(reason)
   end
 

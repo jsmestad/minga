@@ -2,86 +2,64 @@ import AppKit
 import MingaUI
 import UserNotifications
 
-/// Posts under Minga's bundle identity. The editor remains the owner of approvals and errors.
+/// Posts the BEAM's "a task needs you" alerts under Minga's bundle identity, and removes them when the BEAM withdraws them.
+///
+/// The BEAM decides when to alert: only when a task starts needing you while Minga is in the background. This class never checks whether the app is active.
+/// A click brings the editor forward and tells the BEAM which alert was clicked, so it opens the tasks drawer on that task.
 @MainActor
 final class DesktopAgentNotifications: NSObject, UNUserNotificationCenterDelegate {
+    private nonisolated static let identifierPrefix = "agent-needs-you-"
+
     private let center = UNUserNotificationCenter.current()
     private let openEditor: @MainActor () -> Void
-    private var approvals: [UUID: Task<Void, Never>] = [:]
-    private var outcomes: [OutcomeKey: Task<Void, Never>] = [:]
+    private let openAlert: @MainActor (UUID) -> Void
+    private var alerts: [UUID: Task<Void, Never>] = [:]
 
-    private struct OutcomeKey: Hashable {
-        let session: UUID
-        let outcome: AgentDesktopNotification.Outcome
-    }
-
-    init(openEditor: @escaping @MainActor () -> Void) {
+    init(openEditor: @escaping @MainActor () -> Void, openAlert: @escaping @MainActor (UUID) -> Void) {
         self.openEditor = openEditor
+        self.openAlert = openAlert
         super.init()
         center.delegate = self
     }
 
     func receive(_ notification: AgentDesktopNotification) {
         switch notification {
-        case .approvalCleared(let id):
-            approvals.removeValue(forKey: id)?.cancel()
-            withdrawApprovals([approvalIdentifier(id)])
-        case .approval(let id):
-            postApproval(id)
-        case .outcome(let outcome, let session, let debounceMs):
-            postOutcome(outcome, session: session, debounceMs: debounceMs)
+        case .withdrawn(let id):
+            alerts.removeValue(forKey: id)?.cancel()
+            withdraw([Self.identifier(id)])
+        case .needsYou(let id):
+            post(id)
         }
     }
 
     func retireConnection() {
-        guard !approvals.isEmpty || !outcomes.isEmpty else { return }
-        for task in approvals.values { task.cancel() }
-        withdrawApprovals(approvals.keys.map(approvalIdentifier))
-        approvals.removeAll()
-        for task in outcomes.values { task.cancel() }
-        outcomes.removeAll()
+        guard !alerts.isEmpty else { return }
+        for task in alerts.values { task.cancel() }
+        withdraw(alerts.keys.map(Self.identifier))
+        alerts.removeAll()
     }
 
-    private func postApproval(_ id: UUID) {
-        guard !NSApp.isActive, approvals[id] == nil else { return }
-        approvals[id] = Task {
-            let delivered = await deliver(
-                id: approvalIdentifier(id), title: "Tool Approval Needed",
-                body: "The agent is waiting for you to review a tool request."
-            )
+    private func post(_ id: UUID) {
+        guard alerts[id] == nil else { return }
+        alerts[id] = Task {
+            let delivered = await deliver(id: Self.identifier(id))
             if Task.isCancelled {
-                // Retirement can race an add already in progress.
-                withdrawApprovals([approvalIdentifier(id)])
+                // A withdrawal can race an add already in progress.
+                withdraw([Self.identifier(id)])
             } else if !delivered {
-                approvals[id] = nil
+                alerts[id] = nil
             }
         }
     }
 
-    private func postOutcome(_ outcome: AgentDesktopNotification.Outcome, session: UUID, debounceMs: UInt32) {
-        let key = OutcomeKey(session: session, outcome: outcome)
-        guard !NSApp.isActive, outcomes[key] == nil else { return }
-        outcomes[key] = Task {
-            defer { if !Task.isCancelled { outcomes[key] = nil } }
-            let copy = switch outcome {
-            case .complete: (title: "Agent Finished", body: "Your response is ready to review.")
-            case .failed: (title: "Agent Needs Attention", body: "Open the conversation for details.")
-            }
-            guard await deliver(id: UUID().uuidString, title: copy.title, body: copy.body) else { return }
-            // Cooldown starts after a successful post, not when a foreground event occurs.
-            try? await Task.sleep(for: .milliseconds(debounceMs))
-        }
-    }
-
-    private func deliver(id: String, title: String, body: String) async -> Bool {
-        guard !Task.isCancelled, !NSApp.isActive else { return false }
+    private func deliver(id: String) async -> Bool {
+        guard !Task.isCancelled else { return false }
         do {
             // macOS prompts only on the first request. Later calls respect the user's choice.
-            guard try await center.requestAuthorization(options: [.alert]),
-                  !Task.isCancelled, !NSApp.isActive else { return false }
+            guard try await center.requestAuthorization(options: [.alert]), !Task.isCancelled else { return false }
             let content = UNMutableNotificationContent()
-            content.title = title
-            content.body = body
+            content.title = "Minga needs you"
+            content.body = "A task is waiting for your answer."
             content.threadIdentifier = "agent"
             try await center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
             return true
@@ -91,18 +69,29 @@ final class DesktopAgentNotifications: NSObject, UNUserNotificationCenterDelegat
         }
     }
 
-    private func approvalIdentifier(_ id: UUID) -> String { "agent-approval-\(id.uuidString)" }
-
-    private func withdrawApprovals(_ identifiers: [String]) {
+    private func withdraw(_ identifiers: [String]) {
         guard !identifiers.isEmpty else { return }
         center.removePendingNotificationRequests(withIdentifiers: identifiers)
         center.removeDeliveredNotifications(withIdentifiers: identifiers)
+    }
+
+    /// The notification identifier for an alert identity.
+    nonisolated static func identifier(_ id: UUID) -> String { identifierPrefix + id.uuidString }
+
+    /// The alert identity a notification identifier names, or nil for a notification this class did not post.
+    nonisolated static func alert(fromIdentifier identifier: String) -> UUID? {
+        guard identifier.hasPrefix(identifierPrefix) else { return nil }
+        return UUID(uuidString: String(identifier.dropFirst(identifierPrefix.count)))
     }
 
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
     ) async {
         guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
-        await openEditor()
+        let alert = Self.alert(fromIdentifier: response.notification.request.identifier)
+        await MainActor.run {
+            openEditor()
+            if let alert { openAlert(alert) }
+        }
     }
 }

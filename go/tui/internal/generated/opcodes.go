@@ -231,4 +231,5 @@ const (
 	GUIActionAgentStartRemedy           byte = 0x6F
 	GUIActionPickerFit                  byte = 0x70
 	GUIActionTasksDrawerAction          byte = 0x71
+	GUIActionAgentNotificationOpen      byte = 0x72
 )

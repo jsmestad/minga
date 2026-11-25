@@ -371,23 +371,13 @@ defmodule MingaEditor.Frontend.Protocol do
       target.window_id::16, u32(revision)::32, 1::8>>
   end
 
-  @doc "Encodes a privacy-safe agent notification or approval retirement."
-  @spec encode_agent_desktop_notification(
-          :approval | :complete | :error | :approval_cleared,
-          <<_::128>>,
-          non_neg_integer()
-        ) :: binary()
-  def encode_agent_desktop_notification(kind, <<id::128>>, debounce_ms) do
-    tag =
-      case kind do
-        :approval -> 1
-        :complete -> 2
-        :error -> 3
-        :approval_cleared -> 4
-      end
+  @doc "Encodes a privacy-safe \"a task needs you\" alert, or the withdrawal of the alert with the same identity."
+  @spec encode_agent_desktop_notification(:needs_you | :withdrawn, <<_::128>>) :: binary()
+  def encode_agent_desktop_notification(:needs_you, <<id::128>>),
+    do: <<@op_agent_desktop_notification, 1, id::128>>
 
-    <<@op_agent_desktop_notification, tag, id::128, debounce_ms::32>>
-  end
+  def encode_agent_desktop_notification(:withdrawn, <<id::128>>),
+    do: <<@op_agent_desktop_notification, 2, id::128>>
 
   @spec u32(non_neg_integer()) :: non_neg_integer()
   defp u32(value), do: Bitwise.band(value, 0xFFFFFFFF)

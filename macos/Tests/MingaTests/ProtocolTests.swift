@@ -270,28 +270,37 @@ struct ProtocolDecoderTests {
         }
     }
 
-    @Test("Desktop alerts distinguish approval identity, retirement, and outcome debounce")
-    func decodeDesktopApprovalLifecycle() throws {
+    @Test("A needs-you alert and its withdrawal carry the alert's identity and nothing else")
+    func decodeDesktopNeedsYouLifecycle() throws {
         let bytes: [UInt8] = Array(1...16)
         let id = try #require(UUID(uuidString: "01020304-0506-0708-090A-0B0C0D0E0F10"))
-        let cases: [(UInt8, UInt32, AgentDesktopNotification)] = [
-            (1, 0, .approval(id)),
-            (2, 5000, .outcome(.complete, session: id, debounceMs: 5000)),
-            (3, 8500, .outcome(.failed, session: id, debounceMs: 8500)),
-            (4, 0, .approvalCleared(id)),
-        ]
+        let cases: [(UInt8, AgentDesktopNotification)] = [(1, .needsYou(id)), (2, .withdrawn(id))]
 
-        for (kind, interval, expected) in cases {
-            var data = Data([OP_AGENT_DESKTOP_NOTIFICATION, kind] + bytes)
-            appendWireU32(&data, interval)
+        for (kind, expected) in cases {
+            let data = Data([OP_AGENT_DESKTOP_NOTIFICATION, kind] + bytes)
             let (command, size) = try decodeCommand(data: data, offset: 0)
             guard case .agentDesktopNotification(let notification) = command else {
                 Issue.record("Expected a desktop agent notification")
                 continue
             }
             #expect(notification == expected)
-            #expect(size == data.count)
+            #expect(size == 18)
         }
+
+        // Completion (2 was outcome) and failure kinds are gone; an unknown kind is malformed.
+        for kind: UInt8 in [0, 3, 4] {
+            #expect(throws: ProtocolDecodeError.self) {
+                try decodeCommand(data: Data([OP_AGENT_DESKTOP_NOTIFICATION, kind] + bytes), offset: 0)
+            }
+        }
+    }
+
+    @Test("A notification identifier names its alert, and only Minga's")
+    func notificationIdentifierRoundTrip() throws {
+        let id = try #require(UUID(uuidString: "01020304-0506-0708-090A-0B0C0D0E0F10"))
+        #expect(DesktopAgentNotifications.alert(fromIdentifier: DesktopAgentNotifications.identifier(id)) == id)
+        #expect(DesktopAgentNotifications.alert(fromIdentifier: "agent-approval-\(id.uuidString)") == nil)
+        #expect(DesktopAgentNotifications.alert(fromIdentifier: "agent-needs-you-not-a-uuid") == nil)
     }
 
     @Test("Decode correlated native Save As request")

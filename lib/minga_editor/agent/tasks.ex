@@ -167,6 +167,51 @@ defmodule MingaEditor.Agent.Tasks do
     end
   end
 
+  @doc """
+  Whether the task of `pid` started or stopped needing you between `before` and `now`.
+
+  `:started` when it needs you now and did not before (it was not followed, or it was in another state); `:ended` when it needed you before and no longer does; `:unchanged` otherwise. A task that keeps needing you, for example a question that arrives while an approval is pending, is `:unchanged`, so it alerts once.
+  """
+  @spec attention(t(), t(), pid()) :: :started | :ended | :unchanged
+  def attention(%__MODULE__{} = before, %__MODULE__{} = now, pid) when is_pid(pid) do
+    was? = needs_you?(before, pid)
+    is? = needs_you?(now, pid)
+
+    cond do
+      is? and not was? -> :started
+      was? and not is? -> :ended
+      true -> :unchanged
+    end
+  end
+
+  @doc "Records the \"needs you\" alert just posted for the task of `pid`."
+  @spec post_alert(t(), pid(), <<_::128>>) :: t()
+  def post_alert(%__MODULE__{} = tasks, pid, <<_::128>> = id),
+    do: update_entry(tasks, pid, &Entry.post_alert(&1, id))
+
+  @doc "Records that the alert posted for the task of `pid` was withdrawn."
+  @spec withdraw_alert(t(), pid()) :: t()
+  def withdraw_alert(%__MODULE__{} = tasks, pid),
+    do: update_entry(tasks, pid, &Entry.withdraw_alert/1)
+
+  @doc "The identity of the alert posted for the task of `pid` and not withdrawn yet, or nil."
+  @spec posted_alert(t(), pid()) :: <<_::128>> | nil
+  def posted_alert(%__MODULE__{entries: entries}, pid) do
+    case Map.fetch(entries, pid) do
+      {:ok, %Entry{alert: {:posted, id}}} -> id
+      _none -> nil
+    end
+  end
+
+  @doc "The session of the task alert `id` was posted for, posted or withdrawn since, while the task is followed."
+  @spec alerted_session(t(), <<_::128>>) :: {:ok, pid()} | :error
+  def alerted_session(%__MODULE__{entries: entries}, <<_::128>> = id) do
+    Enum.find_value(entries, :error, fn
+      {pid, %Entry{alert: {_posted_or_withdrawn, ^id}}} -> {:ok, pid}
+      _other -> nil
+    end)
+  end
+
   @doc "How many tasks need you."
   @spec needs_you_count(t()) :: non_neg_integer()
   def needs_you_count(%__MODULE__{entries: entries}),
@@ -210,6 +255,14 @@ defmodule MingaEditor.Agent.Tasks do
   @spec empty?(t()) :: boolean()
   def empty?(%__MODULE__{starting: starting} = tasks),
     do: map_size(shown(tasks)) == 0 and map_size(starting) == 0
+
+  @spec needs_you?(t(), pid()) :: boolean()
+  defp needs_you?(%__MODULE__{entries: entries}, pid) do
+    case Map.fetch(entries, pid) do
+      {:ok, entry} -> Entry.state(entry) == :needs_you
+      :error -> false
+    end
+  end
 
   @spec shown(t()) :: %{pid() => Entry.t()}
   defp shown(%__MODULE__{entries: entries}),

@@ -75,7 +75,7 @@ func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
 		generated.OPGuiCursorAnimation:      "Terminal controls cursor animation",
 		generated.OPGuiFocusOwner:           "decoded focus ownership; BEAM retains TUI input routing",
 
-		generated.OPAgentDesktopNotification: "Terminal sessions deliver notifications independently",
+		generated.OPAgentDesktopNotification: "out-of-band needs-you alert; rings the bell, ignores withdrawals",
 	}
 	payloads := map[byte][]byte{
 		generated.OPBeginFrame:              {generated.OPBeginFrame, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1},
@@ -145,7 +145,7 @@ func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
 		generated.OPGuiCursorAnimation:      {generated.OPGuiCursorAnimation, 0, 1, 0},
 		generated.OPGuiFocusOwner:           {0xAA, 0, 10, 1, 8, 0, 0, 0, 7, 0, 0, 0, 9},
 
-		generated.OPAgentDesktopNotification: {generated.OPAgentDesktopNotification, 2, 17: 1, 20: 0x13, 21: 0x88},
+		generated.OPAgentDesktopNotification: {generated.OPAgentDesktopNotification, 1, 17: 1},
 	}
 
 	schemaOpcodes := make(map[byte]struct{}, len(generated.GoRequiredOpcodes)+len(generated.GoSkippedOpcodes))

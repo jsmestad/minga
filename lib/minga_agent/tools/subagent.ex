@@ -39,7 +39,6 @@ defmodule MingaAgent.Tools.Subagent do
           worktree_backend: module(),
           worktree_backend_opts: keyword(),
           session_manager: GenServer.server(),
-          notifier: module() | {module(), term()},
           startup_timeout_ms: pos_integer()
         ]
 
@@ -279,21 +278,12 @@ defmodule MingaAgent.Tools.Subagent do
               )
           ]
           |> maybe_put_thinking_level(thinking_level)
-          |> maybe_put_notifier(opts)
           |> put_tool_approval_policy(opts)
 
         {:ok, session_opts}
 
       {:error, reason} ->
         {:error, {:provider_resolution_failed, reason}}
-    end
-  end
-
-  @spec maybe_put_notifier(keyword(), opts()) :: keyword()
-  defp maybe_put_notifier(session_opts, opts) do
-    case Keyword.fetch(opts, :notifier) do
-      {:ok, notifier} -> Keyword.put(session_opts, :notifier, notifier)
-      :error -> session_opts
     end
   end
 

@@ -164,6 +164,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:tasks_drawer_action, row_id, action}),
     do: MingaEditor.Shell.Traditional.TasksDrawerWorkflow.click(state, row_id, action)
 
+  defp dispatch_action(state, {:agent_notification_open, alert}),
+    do: MingaEditor.Shell.Traditional.TasksDrawerWorkflow.open_alert(state, alert)
+
   defp dispatch_action(state, {:agent_stop_turn, target}),
     do: AgentCommands.stop_displayed_turn(state, target)
 

@@ -45,15 +45,11 @@ struct NativeFileDialogRequest: Sendable, Equatable {
 
 // MARK: - Render command types
 
+/// The BEAM's "a task needs you" alert, or its withdrawal, by the alert's opaque identity.
+/// The BEAM decides when to alert: only when a task starts needing you while Minga is in the background.
 enum AgentDesktopNotification: Sendable, Equatable {
-    case approval(UUID)
-    case outcome(Outcome, session: UUID, debounceMs: UInt32)
-    case approvalCleared(UUID)
-
-    enum Outcome: Sendable, Hashable {
-        case complete
-        case failed
-    }
+    case needsYou(UUID)
+    case withdrawn(UUID)
 }
 
 /// A decoded render command from the BEAM.
@@ -557,20 +553,17 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         )
 
     case .agentDesktopNotification:
-        guard data.endIndex >= rest + 21 else { throw ProtocolDecodeError.malformed }
+        guard data.endIndex >= rest + 17 else { throw ProtocolDecodeError.malformed }
         let id = data.withUnsafeBytes {
             UUID(uuid: $0.loadUnaligned(fromByteOffset: rest + 1 - data.startIndex, as: uuid_t.self))
         }
-        let debounceMs = try readU32(data, rest + 17)
         let notification: AgentDesktopNotification
         switch data[rest] {
-        case 1: notification = .approval(id)
-        case 2: notification = .outcome(.complete, session: id, debounceMs: debounceMs)
-        case 3: notification = .outcome(.failed, session: id, debounceMs: debounceMs)
-        case 4: notification = .approvalCleared(id)
+        case 1: notification = .needsYou(id)
+        case 2: notification = .withdrawn(id)
         default: throw ProtocolDecodeError.malformed
         }
-        return (.agentDesktopNotification(notification), 22)
+        return (.agentDesktopNotification(notification), 18)
 
     case .setCursorShape:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }

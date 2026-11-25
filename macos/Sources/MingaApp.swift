@@ -630,12 +630,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         guard Bundle.main.bundleURL.pathExtension == "app" else { return }
-        desktopAgentNotifications = DesktopAgentNotifications {
-            NSApp.activate()
-            guard let window = NSApp.windows.first(where: { $0.identifier == EditorScene.windowIdentifier }) else { return }
-            if window.isMiniaturized { window.deminiaturize(nil) }
-            window.makeKeyAndOrderFront(nil)
-        }
+        desktopAgentNotifications = DesktopAgentNotifications(
+            openEditor: {
+                NSApp.activate()
+                guard let window = NSApp.windows.first(where: { $0.identifier == EditorScene.windowIdentifier }) else { return }
+                if window.isMiniaturized { window.deminiaturize(nil) }
+                window.makeKeyAndOrderFront(nil)
+            },
+            // The BEAM opens the tasks drawer on the alert's task, as it is now; the click answers nothing.
+            openAlert: { [weak self] alert in
+                _ = self?.encoder?.send(.agentNotificationOpen(alert: alert))
+            }
+        )
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

@@ -81,6 +81,33 @@ func TestDecodeTextPresentation(t *testing.T) {
 	}
 }
 
+func TestDecodeAgentAlert(t *testing.T) {
+	identity := make([]byte, 16)
+	for _, tc := range []struct {
+		kind     byte
+		needsYou bool
+	}{{1, true}, {2, false}} {
+		packet := append([]byte{generated.OPAgentDesktopNotification, tc.kind}, identity...)
+		// A trailing commit_frame proves the alert is bounded and does not swallow the rest of the stream.
+		packet = append(packet, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
+		command, err := DecodeCommand(packet)
+		if err != nil {
+			t.Fatalf("kind %d: DecodeCommand returned error: %v", tc.kind, err)
+		}
+		if command.Kind != CommandAgentAlert || command.Size != 18 || command.AgentAlertNeedsYou != tc.needsYou {
+			t.Fatalf("kind %d: decoded %+v", tc.kind, command)
+		}
+	}
+	for _, malformed := range [][]byte{
+		append([]byte{generated.OPAgentDesktopNotification, 3}, identity...),
+		{generated.OPAgentDesktopNotification, 1, 0, 0},
+	} {
+		if _, err := DecodeCommand(malformed); err == nil {
+			t.Fatalf("malformed alert %v decoded without error", malformed)
+		}
+	}
+}
+
 func TestDecodeProtocolError(t *testing.T) {
 	message := "protocol_version mismatch: frontend 1, beam 2"
 	packet := []byte{generated.OPProtocolError, byte(len(message) >> 8), byte(len(message))}
