@@ -16,7 +16,7 @@ defmodule Minga.Storyboard.SessionParserTest do
     Session.stop(session)
   end
 
-  test "a session starts with the parse's fold ranges applied, so its first frame draws the fold marks (#4314)" do
+  test "a settled session already has its parse's fold ranges (#4314)" do
     session = Registry.drive("edit.plain")
     state = Minga.Test.EditorCase.editor_state(session.ctx)
     window = Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)
