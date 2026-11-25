@@ -171,12 +171,15 @@ BEAM processes are organized into supervision trees that encode dependency relat
 
 ### High-level overview
 
-The top-level supervisor splits the system into four tiers. It first starts `Minga.Extension.ContributionCleanup`, the serialized writer of source-cleanup callbacks that the shell registry and Foundation registries register while they start, and then `MingaEditor.Shell.Registry` as the serialized publisher that all shell selection paths depend on. Each tier is isolated so that a crash in one doesn't cascade into the others. `rest_for_one` means tiers restart in order: if the shell registry or Foundation restarts, everything below it restarts too. A Runtime crash does not touch Services, Buffers, Foundation, or the shell registry.
+The top-level supervisor splits the system into four tiers. After the standard error holder described below, it starts `Minga.Extension.ContributionCleanup`, the serialized writer of source-cleanup callbacks that the shell registry and Foundation registries register while they start, and then `MingaEditor.Shell.Registry` as the serialized publisher that all shell selection paths depend on. Each tier is isolated so that a crash in one doesn't cascade into the others. `rest_for_one` means tiers restart in order: if the shell registry or Foundation restarts, everything below it restarts too. A Runtime crash does not touch Services, Buffers, Foundation, or the shell registry.
+
+The very first child is `Minga.LoggerHandler.Supervisor`, a small `one_for_one` supervisor with one child, `Minga.LoggerHandler.StderrRedirect`. A terminal frontend moves `:standard_error` to the log file so nothing paints over the screen, and the process that opens the log file owns that device. The holder opens it, so an Editor crash leaves the redirect alone. It sits under its own supervisor because a child of a `rest_for_one` tree that restarts takes every later child with it.
 
 ```mermaid
 graph TD
     SUP["Minga.Supervisor<br/><i>rest_for_one</i>"]
 
+    SUP --> LOGSUP["LoggerHandler.Supervisor<br/><i>owns the standard error redirect</i>"]
     SUP --> CLEANUP["ContributionCleanup<br/><i>serialized cleanup-callback writes</i>"]
     SUP --> SHELLS["Shell.Registry<br/><i>serialized shell publication</i>"]
     SUP --> FOUND["Foundation.Supervisor<br/><i>config, keymaps, events, registries</i>"]
