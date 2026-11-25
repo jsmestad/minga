@@ -38,7 +38,7 @@ defmodule MingaEditor.Frontend.Manager.AgentNotifications do
       {^id, _ref} ->
         state
 
-      # The editor lost the old identity (it restarted, or detached and reattached the session): the new alert replaces it.
+      # The editor lost the old identity (it restarted, or reattached the session). The new alert replaces it.
       {_old, ref} ->
         state |> owner_down(owner, ref) |> send_notification(event)
 
