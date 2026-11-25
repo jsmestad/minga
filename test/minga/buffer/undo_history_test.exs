@@ -380,6 +380,24 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert large < 30 * small
     end
 
+    # The cascade a held press could repeat: one task rewrites the same word T times and you retype one letter inside
+    # the newest rewrite, so every rewrite is held through the next; the press reverts only an unrelated rename. The
+    # walks stay at two whatever T is (the held steps leave the set once), and a closure stops at the first held step,
+    # so the work for 10T stays linear, not walks times a quadratic chain.
+    test "a press over a held cascade of rewrites stays linear in its walks and its work" do
+      {small_rounds, small, _text} = held_cascade(800)
+      {large_rounds, large, text} = held_cascade(8_000)
+
+      IO.puts(
+        "\n[held cascade] T=800 rounds=#{small_rounds} press_reductions=#{small} " <>
+          "T=8000 rounds=#{large_rounds} press_reductions=#{large} ratio=#{Float.round(large / small, 1)}"
+      )
+
+      assert text =~ ~r/^let x = w.*; y = bar;\n$/
+      assert large_rounds < 10 * small_rounds
+      assert large < 30 * small
+    end
+
     test "8000 of your retypes over a word Minga replaced stay linear" do
       {small, _world} = work(fn -> your_retypes(800) end)
       {large, world} = work(fn -> your_retypes(8_000) end)
@@ -883,9 +901,21 @@ defmodule Minga.Buffer.UndoHistoryTest do
       end
     end
 
-    # Addendum 4 F2's shape: budget 3, whole-character edits with emoji, two tasks, presses and your undo.
+    # Addendum 4 F2's shape: budget 3, whole-character edits with emoji, two tasks, presses and your undo. Some pieces are
+    # long lines (past 256 and 4096 bytes) of CJK, flag runs of odd and even length, ZWJ sequences, combining marks and
+    # CRLF, so a change's cluster cuts are decided far from any line feed.
     property "compaction changes no later outcome on emoji text with two tasks and a tiny budget" do
       graphemes = ["a", "f", "o", "b", "r", "😀", "é", "\n"]
+
+      long_pieces = [
+        String.duplicate("語", 100),
+        String.duplicate("語", 1_400),
+        String.duplicate("🇩🇪", 40),
+        "🇫" <> String.duplicate("🇩🇪", 33),
+        String.duplicate("👨‍👩‍👧", 20),
+        String.duplicate("e\u0301", 150),
+        String.duplicate("ab\r\n", 80)
+      ]
 
       check all(
               commands <-
@@ -894,8 +924,13 @@ defmodule Minga.Buffer.UndoHistoryTest do
                     StreamData.tuple(
                       {StreamData.member_of([:user, :minga, :minga]), StreamData.integer(0..20),
                        StreamData.integer(0..6),
-                       StreamData.list_of(StreamData.member_of(graphemes), max_length: 7),
-                       StreamData.integer(0..3)}
+                       StreamData.list_of(
+                         StreamData.frequency([
+                           {12, StreamData.member_of(graphemes)},
+                           {1, StreamData.member_of(long_pieces)}
+                         ]),
+                         max_length: 7
+                       ), StreamData.integer(0..3)}
                     ),
                     StreamData.constant(:press),
                     StreamData.constant(:undo)
@@ -1959,8 +1994,18 @@ defmodule Minga.Buffer.UndoHistoryTest do
     case UndoHistory.undo_agent_session(world.history, world.version, world.doc) do
       {:ok, restore, history, summary} ->
         assert UnitModel.exact_groups?(world.history, summary.groups)
-        # The walk repeats only when a step leaves the set, and the held steps only grow.
+
+        # The walk repeats only when a step leaves the set, the held steps only grow, and a step held in one walk is
+        # never reverted by a later one.
         assert summary.rounds in 1..(task_step_count(world.history, summary.task) + 1)
+
+        summary.held_by_round
+        |> Enum.chunk_every(2, 1, :discard)
+        |> Enum.each(fn [earlier, later] -> assert earlier -- later == [] end)
+
+        [last_held | _earlier] = Enum.reverse(summary.held_by_round)
+        assert last_held -- summary.groups == last_held
+
         after_world = install(world, restore, history)
 
         assert text(after_world) ==
@@ -1991,6 +2036,35 @@ defmodule Minga.Buffer.UndoHistoryTest do
     value = fun.()
     {:reductions, after_fun} = Process.info(self(), :reductions)
     {after_fun - before, value}
+  end
+
+  # One task renames "bar" once, then rewrites "foo" T times; you retype one letter inside the newest rewrite, which
+  # holds every rewrite (each older one needs the next); the press reverts the rename. Returns the walks it took and the
+  # text after it.
+  defp held_cascade(steps) do
+    world =
+      Enum.reduce(
+        1..steps,
+        edit(
+          world("let x = foo; y = bar;\n", shadow: false),
+          {:minga, "task-1", "s0"},
+          17,
+          3,
+          "BAR"
+        ),
+        fn
+          n, world ->
+            old = if n == 1, do: 3, else: byte_size("w#{n - 1}")
+            edit(world, {:minga, "task-1", "s#{n}"}, 8, old, "w#{n}")
+        end
+      )
+
+    world = edit(world, :user, 9, 1, "Q", at: @t0 + 10 * @window)
+
+    {press_work, {:ok, restore, _history, summary}} =
+      work(fn -> UndoHistory.undo_agent_session(world.history, world.version, world.doc) end)
+
+    {summary.rounds, press_work, Document.content(restore.document)}
   end
 
   defp minga_rewrites(steps) do

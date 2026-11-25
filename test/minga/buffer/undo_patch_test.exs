@@ -18,6 +18,34 @@ defmodule Minga.Buffer.UndoPatchTest do
     # A 6 MB image (not UTF-8, with a carriage return in its header) loaded into an empty buffer: cluster boundaries
     # are decided from a window around each cut, so trimming it costs about what trimming 6 MB of ASCII costs, not
     # work per byte (a per-byte boundary set once timed out a buffer call).
+    # The valid-text twin: one line of several megabytes of ASCII with emoji scattered through it, one byte changed in
+    # the middle. Each cut is decided from the nearest certain boundary, two ASCII bytes away here, so trimming it
+    # costs about what trimming the same line of plain ASCII costs.
+    test "trimming a long valid line with emoji decides cluster cuts near the cut" do
+      work = fn line ->
+        middle = div(byte_size(line), 2)
+
+        changed =
+          binary_part(line, 0, middle) <>
+            "!" <> binary_part(line, middle + 1, byte_size(line) - middle - 1)
+
+        {:reductions, before} = Process.info(self(), :reductions)
+        changes = UndoPatch.segment_changes(0, line, changed, false)
+        {:reductions, after_changes} = Process.info(self(), :reductions)
+        {after_changes - before, changes}
+      end
+
+      chunk = String.duplicate("abcdefghij", 100)
+      emoji = :binary.copy(chunk <> "👨‍👩‍👧", 3_000)
+      ascii = :binary.copy(chunk <> String.duplicate("x", byte_size("👨‍👩‍👧")), 3_000)
+      {ascii_work, _changes} = work.(ascii)
+      {emoji_work, changes} = work.(emoji)
+      assert [{_at, _removed, "!"}] = changes
+
+      assert emoji_work < 2 * ascii_work,
+             "#{emoji_work} reductions with emoji against #{ascii_work} for ASCII"
+    end
+
     test "trimming a large binary decides cluster cuts locally" do
       work = fn text ->
         {:reductions, before} = Process.info(self(), :reductions)

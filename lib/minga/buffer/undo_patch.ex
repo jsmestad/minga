@@ -657,26 +657,14 @@ defmodule Minga.Buffer.UndoPatch do
 
   defp trimmed_change(start, old, new) do
     ascii? = plain_ascii?(old) and plain_ascii?(new)
-    cut? = fn text, offset -> ascii? or cluster_cut?(text, offset) end
-    shared = :binary.longest_common_prefix([old, new])
-    prefix = Enum.find(shared..0//-1, &(cut?.(old, &1) and cut?.(new, &1)))
-    old_rest = byte_size(old) - prefix
-    new_rest = byte_size(new) - prefix
-
-    shared_end =
-      :binary.longest_common_suffix([
-        binary_part(old, prefix, old_rest),
-        binary_part(new, prefix, new_rest)
-      ])
-
-    suffix =
-      Enum.find(shared_end..0//-1, fn length ->
-        cut?.(old, byte_size(old) - length) and cut?.(new, byte_size(new) - length)
-      end)
+    prefix = shared_prefix(old, new, :binary.longest_common_prefix([old, new]), ascii?)
+    old_rest = binary_part(old, prefix, byte_size(old) - prefix)
+    new_rest = binary_part(new, prefix, byte_size(new) - prefix)
+    suffix = shared_suffix(old, new, :binary.longest_common_suffix([old_rest, new_rest]), ascii?)
 
     [
-      {start + prefix, binary_part(old, prefix, old_rest - suffix),
-       binary_part(new, prefix, new_rest - suffix)}
+      {start + prefix, binary_part(old_rest, 0, byte_size(old_rest) - suffix),
+       binary_part(new_rest, 0, byte_size(new_rest) - suffix)}
     ]
   end
 
@@ -684,49 +672,53 @@ defmodule Minga.Buffer.UndoPatch do
   @spec plain_ascii?(binary()) :: boolean()
   defp plain_ascii?(text), do: ascii?(text) and not String.contains?(text, "\r")
 
-  # How far back a cluster boundary looks for a line break to segment from; a line break always ends a cluster.
-  @cluster_lookback 256
-  # Bytes after the offset a boundary decision may read: enough for the next cluster to begin.
-  @cluster_lookahead 64
+  # The longest shared start that ends on a cluster boundary of both texts: the last boundary at or before `shared`
+  # they have in common. The bytes before `shared` are the same, so an anchor before it is one in both, and both texts
+  # are segmented once from the earlier of their anchors.
+  @spec shared_prefix(binary(), binary(), non_neg_integer(), boolean()) :: non_neg_integer()
+  defp shared_prefix(_old, _new, shared, true), do: shared
+  defp shared_prefix(_old, _new, 0, false), do: 0
 
-  # Whether `offset` is a grapheme cluster boundary of `text`, decided from a window around it, so the cost does not
-  # grow with the text. The window starts after the nearest line break within `@cluster_lookback` bytes, or at the
-  # start of the text. Text that is not valid UTF-8 there is cut between code points.
-  @spec cluster_cut?(binary(), non_neg_integer()) :: boolean()
-  defp cluster_cut?(text, offset) when offset == 0 or offset >= byte_size(text), do: true
+  defp shared_prefix(old, new, shared, false) do
+    from = min(Unicode.cluster_anchor(old, shared), Unicode.cluster_anchor(new, shared))
+    in_old = old |> Unicode.cluster_boundaries_between(from, shared) |> MapSet.new()
 
-  defp cluster_cut?(text, offset) do
-    from = window_from(text, offset, max(offset - @cluster_lookback, 0))
-    to = min(offset + @cluster_lookahead, byte_size(text))
-    window = binary_part(text, from, to - from)
-
-    if String.valid?(window),
-      do: window |> String.graphemes() |> boundary_at?(from, offset),
-      else: code_point_start?(text, offset)
+    new
+    |> Unicode.cluster_boundaries_between(from, shared)
+    |> Enum.filter(&MapSet.member?(in_old, &1))
+    |> Enum.max()
   end
 
-  # Whether walking the clusters from `at` lands exactly on `offset`.
-  @spec boundary_at?([String.t()], non_neg_integer(), non_neg_integer()) :: boolean()
-  defp boundary_at?(_clusters, offset, offset), do: true
-  defp boundary_at?([], at, offset), do: at == offset
-  defp boundary_at?(_clusters, at, offset) when at > offset, do: false
+  # The longest shared end that starts on a cluster boundary of both texts: the first position, counted from the start
+  # of the shared end, that is a boundary in both. Once the clusters line up the bytes match, so the search usually
+  # ends within a cluster; it looks further only when it must, doubling the stretch it reads.
+  @spec shared_suffix(binary(), binary(), non_neg_integer(), boolean()) :: non_neg_integer()
+  defp shared_suffix(_old, _new, shared, true), do: shared
+  defp shared_suffix(_old, _new, 0, false), do: 0
 
-  defp boundary_at?([cluster | rest], at, offset),
-    do: boundary_at?(rest, at + byte_size(cluster), offset)
+  defp shared_suffix(old, new, shared, false),
+    do: shared - first_common_start(old, new, shared, 256)
 
-  # The offset just after the last line break before `offset` and at or after `floor`, else `floor`.
-  @spec window_from(binary(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
-  defp window_from(text, offset, floor) do
-    case :binary.matches(text, "\n", scope: {floor, offset - floor}) do
-      [] -> floor
-      matches -> matches |> List.last() |> then(fn {at, 1} -> at + 1 end)
+  @spec first_common_start(binary(), binary(), pos_integer(), pos_integer()) :: non_neg_integer()
+  defp first_common_start(old, new, shared, stretch) do
+    reach = min(stretch, shared)
+    in_old = relative_boundaries(old, byte_size(old) - shared, reach) |> MapSet.new()
+
+    common =
+      relative_boundaries(new, byte_size(new) - shared, reach)
+      |> Enum.find(&MapSet.member?(in_old, &1))
+
+    cond do
+      common != nil -> common
+      reach == shared -> shared
+      true -> first_common_start(old, new, shared, stretch * 2)
     end
   end
 
-  @spec code_point_start?(binary(), non_neg_integer()) :: boolean()
-  defp code_point_start?(text, position) do
-    position >= byte_size(text) or Bitwise.band(:binary.at(text, position), 0xC0) != 0x80
-  end
+  @spec relative_boundaries(binary(), non_neg_integer(), non_neg_integer()) :: [non_neg_integer()]
+  defp relative_boundaries(text, start, reach),
+    do:
+      text |> Unicode.cluster_boundaries_between(start, start + reach) |> Enum.map(&(&1 - start))
 
   @doc "Returns where a forward patch starts, the bytes it removed, and the bytes it inserted."
   @spec change(t()) :: {non_neg_integer(), byte_fragment(), byte_fragment()}

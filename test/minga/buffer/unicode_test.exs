@@ -4,6 +4,111 @@ defmodule Minga.Core.UnicodeTest do
 
   alias Minga.Core.Unicode
 
+  doctest Unicode, only: [cluster_boundaries_between: 3, cluster_boundary?: 2]
+
+  # ── Cluster boundaries ────────────────────────────────────────────────────
+
+  describe "cluster_boundary?/2" do
+    # Pieces that build every shape a window could cut: wide CJK, ZWJ sequences, regional indicators in runs of odd and
+    # even length, combining marks, emoji modifiers, CR, LF and CRLF, lone continuation bytes, and ASCII, so the anchors
+    # (line feeds and ASCII pairs) fall at every alignment. Lines reach past 256 and 4096 bytes.
+    @pieces [
+      "a",
+      " ",
+      "語",
+      "e\u0301",
+      "\u0301",
+      "\u0300\u0301",
+      "👨‍👩‍👧",
+      "\u200D",
+      "🇫",
+      "🇷",
+      "🇫🇷",
+      "👍🏽",
+      "\u{1F3FD}",
+      "❤️",
+      "\u1100\u1161\u11A8",
+      "\r",
+      "\n",
+      "\r\n"
+    ]
+
+    defp text_gen(extra \\ []) do
+      StreamData.bind(StreamData.integer(1..3), fn scale ->
+        StreamData.list_of(
+          StreamData.frequency([
+            {6, StreamData.member_of(@pieces ++ extra)},
+            {1, StreamData.map(StreamData.integer(1..(400 * scale)), &String.duplicate("🇩", &1))},
+            {1,
+             StreamData.map(StreamData.integer(1..(1_500 * scale)), &String.duplicate("語", &1))}
+          ]),
+          max_length: 40
+        )
+        |> StreamData.map(&Enum.join/1)
+      end)
+    end
+
+    # The whole boundary list from the start, and every offset of a short text or 300 offsets spread over a long one
+    # (each call segments its own region, so checking every offset of a 13 KB line one by one is quadratic).
+    property "agrees with String.graphemes/1 over the whole text at every byte offset" do
+      check all(
+              text <- text_gen(),
+              picks <- StreamData.list_of(StreamData.integer(0..100_000), length: 300),
+              max_runs: 60
+            ) do
+        cuts =
+          text
+          |> String.graphemes()
+          |> Enum.scan(0, &(byte_size(&1) + &2))
+          |> then(&[0 | &1])
+
+        assert Unicode.cluster_boundaries_between(text, 0, byte_size(text)) == cuts
+        cut_set = MapSet.new(cuts)
+
+        offsets =
+          if byte_size(text) <= 3_000,
+            do: 0..byte_size(text),
+            else: Enum.map(picks, &rem(&1, byte_size(text) + 1))
+
+        for offset <- offsets do
+          assert Unicode.cluster_boundary?(text, offset) == MapSet.member?(cut_set, offset),
+                 "offset #{offset} of #{inspect(text, limit: 20)}"
+        end
+      end
+    end
+
+    property "boundaries from any offset through the end are exactly the whole-text boundaries there" do
+      check all(text <- text_gen(), at <- StreamData.integer(0..100_000), max_runs: 60) do
+        from = rem(at, byte_size(text) + 1)
+
+        cuts =
+          text
+          |> String.graphemes()
+          |> Enum.scan(0, &(byte_size(&1) + &2))
+          |> then(&[0 | &1])
+          |> Enum.filter(&(&1 >= from))
+
+        assert Unicode.cluster_boundaries_between(text, from, byte_size(text)) == cuts
+      end
+    end
+
+    # String.graphemes/1 can raise on text that is not valid UTF-8 (a ZWJ sequence before a stray byte), so the
+    # boundaries there are the code point starts, and valid lines between line feeds keep their cluster boundaries.
+    property "on text that is not valid UTF-8, never raises and cuts only at code point starts" do
+      check all(
+              text <- text_gen([<<0xAA>>, <<0xE8, 0xAA>>, <<0xFF>>]),
+              at <- StreamData.integer(0..100_000),
+              max_runs: 60
+            ) do
+        from = rem(at, byte_size(text) + 1)
+
+        for offset <- Unicode.cluster_boundaries_between(text, from, byte_size(text)) do
+          assert offset == byte_size(text) or :binary.at(text, offset) not in 0x80..0xBF
+        end
+      end
+    end
+  end
+
   # ── valid_utf8?/1 ─────────────────────────────────────────────────────────
 
   describe "valid_utf8?/1" do
