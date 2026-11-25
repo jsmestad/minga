@@ -803,10 +803,15 @@ defmodule Minga.Buffer.Process do
     abs_path = Path.expand(path)
 
     case Registry.lookup(Minga.Buffer.Registry, abs_path) do
-      [{pid, _value}] -> {:ok, pid}
+      [{pid, _value}] -> live(pid)
       [] -> :not_found
     end
   end
+
+  # The registry drops a buffer's entry a moment after the buffer exits, so a lookup right after a crash
+  # can still name the dead process. A dead buffer is not a buffer for the path.
+  @spec live(pid()) :: {:ok, pid()} | :not_found
+  defp live(pid), do: if(Process.alive?(pid), do: {:ok, pid}, else: :not_found)
 
   @doc """
   Looks up the buffer visiting the same file as `path` via `Minga.Buffer.FileRegistry`.
@@ -820,7 +825,7 @@ defmodule Minga.Buffer.Process do
     key = file_key(path)
     direct = Minga.Buffer.FileRegistry |> Registry.match(key, nil) |> Enum.map(&elem(&1, 0))
 
-    case direct ++ resolved_indirect_pids(key) do
+    case Enum.filter(direct ++ resolved_indirect_pids(key), &Process.alive?/1) do
       [] -> :not_found
       pids -> {:ok, Enum.min(pids)}
     end

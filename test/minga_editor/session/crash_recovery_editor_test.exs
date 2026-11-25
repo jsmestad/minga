@@ -12,6 +12,8 @@ defmodule MingaEditor.Session.CrashRecoveryEditorTest do
   @moduletag :tmp_dir
   @moduletag capture_log: true
   @timeout 15_000
+  # The editor retires a dead buffer when its own `:DOWN` arrives, which a busy machine can delay.
+  @retire_attempts 1_500
 
   test "the crashed buffer is retired and the file comes back with its unsaved text", %{
     tmp_dir: dir
@@ -52,7 +54,10 @@ defmodule MingaEditor.Session.CrashRecoveryEditorTest do
     assert Buffer.dirty?(reopened)
     assert active_buffer(ctx) == reopened
     assert notice_message(ctx) =~ "notes.txt was reopened with its unsaved text"
-    wait_until(ctx, fn state -> crashed not in state.workspace.buffers.list end)
+
+    wait_until(ctx, fn state -> crashed not in state.workspace.buffers.list end,
+      max_attempts: @retire_attempts
+    )
 
     # The read does not consume the swap: the text is still unsaved, so it must survive a second failure.
     assert File.exists?(Swap.swap_path(path, swap_dir: swap_dir))
@@ -82,9 +87,13 @@ defmodule MingaEditor.Session.CrashRecoveryEditorTest do
     assert_receive {:DOWN, ^monitor, :process, ^crashed, _reason}, @timeout
 
     # The runtime delivers the editor's own `:DOWN` separately, so wait for the retirement itself.
-    wait_until(ctx, fn state -> crashed not in state.workspace.buffers.list end)
+    wait_until(ctx, fn state -> crashed not in state.workspace.buffers.list end,
+      max_attempts: @retire_attempts
+    )
+
     :sys.get_state(ctx.editor)
     refute_receive {:minga_event, :buffer_opened, %Events.BufferEvent{path: ^path}}, 0
+    # The crashed buffer is dead (its `:DOWN` arrived above), so the lookup no longer names it.
     assert Buffer.pid_for_path(path) == :not_found
   end
 
