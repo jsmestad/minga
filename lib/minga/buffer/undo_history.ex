@@ -15,7 +15,7 @@ defmodule Minga.Buffer.UndoHistory do
 
   `reject_task/4` reverts all of a task's steps or nothing: a task that started later and rewrote its text, or an edit inside one of its replacements, refuses it, so a revert is exact or refused, never wrong text. `undo_agent_session/3` works step by step: newest first, each step of the most recent task reverts together with the newer groups that depend on it, which may be other tasks' steps. A group of yours joins only when none of its text is visible and reverting it brings back nothing else it deleted; it then leaves your undo stack. Otherwise your newest such edit holds the step, and your `u` can always reach it. Per-change keep and reject (#4049) may refine these rules.
 
-  Every Minga step is checked against a run budget. Past it, `compaction_wanted?/1` asks the owner to run `compact_slice/2`, which merges drafts (text a step wrote that a newer step of the same task rewrote) into the step that overwrote them; past twice the budget, the step itself merges until it is back at twice the budget. Merged steps form a class that always moves together: they flip and are discarded together, and `undo_agent_session/3` takes the whole class in one press, so a press may take the older half of a merge with it where, without compaction, that step would revert in a separate press. Under that invariant a merge changes no document and no refusal, at the moment it runs or after any later edit, undo, redo or reject: the text the merged steps wrote and deleted can never be visible while they move together, and the replacement records keep every link a dropped run carried. The round-4 case that once resolved differently after compaction now resolves the same; the compaction-invisibility properties cover it. A step merges only where no other group touched a run between the two steps; a step merged away completely leaves its class and its key.
+  Every Minga step is checked against a run budget. Past it, `compaction_wanted?/1` asks the owner to run `compact_slice/2`, which merges drafts (text a step wrote that a newer step of the same task rewrote) into the step that overwrote them; past twice the budget, the step itself merges until it is back at twice the budget. Merged steps form a class that always moves together: they flip and are discarded together, and `undo_agent_session/3` takes the whole class in one press, so a press may take the older half of a merge with it where, without compaction, that step would revert in a separate press, and a hold on one merged step holds the whole class. A press stays on the task it chose while an edit of yours holds it and your next `u` can go; it moves on to an older task only when a permanent edit holds the chosen one or your next undo is itself blocked by a later Minga step. Under that invariant a merge changes no document and no refusal, at the moment it runs or after any later edit, undo, redo or reject: the text the merged steps wrote and deleted can never be visible while they move together, and the replacement records keep every link a dropped run carried. The round-4 case that once resolved differently after compaction now resolves the same; the compaction-invisibility properties cover it. A step merges only where no other group touched a run between the two steps; a step merged away completely leaves its class and its key.
 
   `reload/3` takes in content changed on disk without losing Minga's unreviewed steps.
 
@@ -519,13 +519,36 @@ defmodule Minga.Buffer.UndoHistory do
     |> Enum.reduce_while(:empty, fn {task, _tick}, first_held ->
       case reject_steps(history, task, document) do
         {:blocked, _overlap, _task, _offset} = held ->
-          {:cont, if(first_held == :empty, do: held, else: first_held)}
+          # A press stays on the task it chose while an edit of yours holds it: `u` reaches that edit first. It moves
+          # on only past a task that only a permanent edit holds, which no undo can reach.
+          if held_by_your_undo?(history, task),
+            do: {:halt, if(first_held == :empty, do: held, else: first_held)},
+            else: {:cont, if(first_held == :empty, do: held, else: first_held)}
 
         reverted_or_error ->
           {:halt, reverted_or_error}
       end
     end)
   end
+
+  # Whether a group of yours holds one of the task's steps and your next `u` can go: then that `u` is the way forward.
+  # When your next undo is itself blocked by a later Minga step, that step's task is the way forward instead.
+  @spec held_by_your_undo?(t(), task()) :: boolean()
+  defp held_by_your_undo?(history, task) do
+    your_undo_free?(history) and
+      history
+      |> task_groups(task)
+      |> Enum.any?(fn group ->
+        closure = dependents(history.provenance, history.merges, [group], MapSet.new([group]))
+        match?({:group, _holding}, held_in(history.provenance, closure))
+      end)
+  end
+
+  @spec your_undo_free?(t()) :: boolean()
+  defp your_undo_free?(%__MODULE__{undo_entries: [entry | _rest]} = history),
+    do: Provenance.blocker(history.provenance, entry.group) == nil
+
+  defp your_undo_free?(_history), do: false
 
   @doc "Returns the task `undo_agent_session/3` works on next: the one that edited most recently, or `nil`."
   @spec next_reject(t()) :: task() | nil

@@ -421,6 +421,36 @@ defmodule Minga.Buffer.AuthorshipTest do
       assert BufferProcess.content(buffer) == "aaa bbb\n"
     end
 
+    # Addendum 4 F2: without compaction a press reverts step s1 and stops where your edit holds s4. With a budget of 3,
+    # s4 is merged into s1, so your edit holds the unit: the press reports the hold and stays on task t1 instead of
+    # moving on to t2. That is the one documented difference compaction makes to a press.
+    test "F2: a press stays on the task your edit holds, whether or not compaction merged its steps" do
+      for {opts, expected_result, expected_text} <- [
+            {[], {:ok, 1}, "afbarb"},
+            {[history_run_budget: 3], {:blocked, {:overlaps, :you}}, "afb"}
+          ] do
+        buffer = start_supervised!({BufferProcess, [content: ""] ++ opts}, id: make_ref())
+
+        at =
+          &Minga.Buffer.Position.from_point(
+            Minga.Buffer.Document.new(BufferProcess.content(buffer)),
+            &1
+          )
+
+        replace_at(buffer, at.(0), 0, "afooa", step("t2", "s1"))
+        replace_at(buffer, at.(5), 0, "😀")
+        replace_at(buffer, at.(3), 6, "barbarb", step("t1", "s4"))
+        replace_at(buffer, at.(7), 3, "", step("t1", "s1"))
+        :ok = BufferProcess.break_undo_coalescing(buffer)
+        replace_at(buffer, at.(4), 1, "")
+        replace_at(buffer, at.(2), 3, "")
+        settle_compaction(buffer)
+        assert BufferProcess.content(buffer) == "afb"
+        assert BufferProcess.undo_agent_session(buffer) == expected_result
+        assert BufferProcess.content(buffer) == expected_text
+      end
+    end
+
     # Addendum 4 F1: a deletion slides only to a place both its ends are cuts the editor can make, never across bytes of
     # a code point or into a grapheme cluster.
     test "SL1 to SL3: a deletion next to Minga's multi-byte text slides only by whole characters" do
