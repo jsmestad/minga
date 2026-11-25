@@ -9,28 +9,135 @@
 # ---- TUI -----------------------------------------------------------------------------------------------------
 
 [[exception]]
-scenario = ["edit.whichkey.leader", "minga.whichkey"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
 frontend = "tui"
-part = "whichKey.column"
-rule = "column gap"
-reason = "The TUI which-key keeps its 2 │ 2 column separator and fixed-width cells; anatomy wants a panel gap after the widest entry and no rule."
-issue = 4044
+part = "glyph"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#7c7f93 on #ccd0da",
+  "#8c8fa1 on #ccd0da",
+  "#8c8fa1 on #eff1f5",
+]
+reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in this theme."
+issue = 4137
 
 [[exception]]
-scenario = "minga.whichkey"
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
 frontend = "tui"
-part = "whichKey.entry"
-rule = "key to label"
-reason = "Single-letter keys are centred in a three-cell key column, so the label starts two cells late; the which-key rebuild sizes the column to the widest key."
-issue = 4044
+part = "text"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#838ba7 on #303446",
+  "#ca9ee6 on #626880",
+]
+reason = "Syntax colours, muted comment and gutter text, separators and chips miss 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#04a5e5 on #eff1f5",
+  "#1e66f5 on #eff1f5",
+  "#40a02b on #eff1f5",
+  "#7287fd on #ccd0da",
+  "#7c7f93 on #eff1f5",
+  "#8839ef on #acb0be",
+  "#8c8fa1 on #eff1f5",
+  "#df8e1d on #eff1f5",
+  "#eff1f5 on #1e66f5",
+]
+reason = "Syntax colours, muted comment and gutter text, separators and chips miss 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#8caaee on #414559",
+]
+reason = "Which-key keys use the accent colour (anatomy.md), which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#1e66f5 on #ccd0da",
+]
+reason = "Which-key keys use the accent colour (anatomy.md), which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.whichkey"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#d35400 on #e6e9ef",
+]
+reason = "The needs-you state colour on the modeline misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.whichkey"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#ef9f76 on #414559",
+]
+reason = "Which-key's needs-you count draws in the needs_you role, as the modeline does, which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.whichkey"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#d35400 on #ccd0da",
+]
+reason = "Which-key's needs-you count draws in the needs_you role, as the modeline does, which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
 
 [[exception]]
 scenario = ["edit.whichkey.leader", "minga.whichkey"]
 frontend = "tui"
-part = "whichKey.entry"
-rule = "same metrics everywhere (key to label)"
-reason = "Follows from the centred key column above: the gap depends on the widest key in each panel."
-issue = 4044
+part = "text"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#949cbb on #414559",
+]
+reason = "Which-key group names, counts and hint words use the text_muted role (anatomy.md: caption in the secondary colour), which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#5c5f77 on #ccd0da",
+]
+reason = "Which-key group names, counts and hint words use the text_muted role (anatomy.md: caption in the secondary colour), which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
 
 [[exception]]
 scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
@@ -59,20 +166,15 @@ reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
+scenario = ["start.project_switcher.empty"]
 frontend = "tui"
 part = "glyph"
 rule = "contrast"
 theme = "catppuccin_latte"
 pairs = [
-  "#51afef on #ccd0da",
-  "#61afef on #ccd0da",
   "#7c7f93 on #ccd0da",
   "#8c8fa1 on #ccd0da",
   "#8c8fa1 on #eff1f5",
-  "#98c379 on #ccd0da",
-  "#c678dd on #ccd0da",
-  "#e5c07b on #ccd0da",
 ]
 reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in this theme."
 issue = 4137
@@ -91,34 +193,29 @@ reason = "Syntax colours, muted comment and gutter text, separators and chips mi
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
+scenario = ["start.project_switcher.empty"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
 theme = "catppuccin_frappe"
 pairs = [
-  "#81c8be on #626880",
   "#838ba7 on #303446",
-  "#ca9ee6 on #626880",
 ]
 reason = "Syntax colours, muted comment and gutter text, separators and chips miss 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
+scenario = ["start.project_switcher.empty"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
 theme = "catppuccin_latte"
 pairs = [
   "#04a5e5 on #eff1f5",
-  "#179299 on #acb0be",
   "#1e66f5 on #e6e9ef",
   "#1e66f5 on #eff1f5",
   "#40a02b on #eff1f5",
-  "#7287fd on #ccd0da",
   "#7c7f93 on #eff1f5",
-  "#8839ef on #acb0be",
   "#8c8fa1 on #eff1f5",
   "#df8e1d on #eff1f5",
   "#eff1f5 on #1e66f5",
@@ -166,39 +263,319 @@ pairs = ["#4c4f69 on #acb0be"]
 reason = "The picker's selected-row text misses 4.5:1 on the popup selection colour in this theme."
 issue = 4137
 
+
 # ---- macOS ---------------------------------------------------------------------------------------------------
 
 [[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#242735 on #303446",
+  "#414559 on #303446",
+  "#665c50 on #303446",
+]
+reason = "Syntax colours, comments and line numbers in the editor miss 4.5:1 in this theme (a thin band such as the cursor line can sample as an ink; it is listed so the pair stays visible)."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual"]
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#40a02b on #eff1f5",
+  "#a28dd5 on #eff1f5",
+  "#ccd0da on #eff1f5",
+  "#df8e1d on #eff1f5",
+]
+reason = "Syntax colours, comments and line numbers in the editor miss 4.5:1 in this theme (a thin band such as the cursor line can sample as an ink; it is listed so the pair stays visible)."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#eff1f5 on #1e66f5",
+]
+reason = "The modeline.segment text misses 4.5:1 in this theme: the mode pill, and Minga's words in the minga role (4.45:1)."
+issue = 4137
+
+[[exception]]
 scenario = ["edit.whichkey.leader", "minga.whichkey"]
 frontend = "macos"
-part = "whichKey.entry"
-rule = "entry pitch"
-reason = "WhichKeyOverlay rows are 22 pt; anatomy wants every clickable row at the 24 pt row pitch."
-issue = 4044
+part = "whichKey.breadcrumb"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#8caaee on #414559",
+  "#ef9f76 on #414559",
+]
+reason = "The which-key breadcrumb draws its keys in the accent colour and a needs-you count in the needs_you role, which miss 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.breadcrumb"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#1e66f5 on #ccd0da",
+  "#d35400 on #ccd0da",
+]
+reason = "The which-key breadcrumb draws its keys in the accent colour and a needs-you count in the needs_you role, which miss 4.5:1 on the popup surface in this theme."
+issue = 4137
 
 [[exception]]
 scenario = ["edit.whichkey.leader", "minga.whichkey"]
 frontend = "macos"
 part = "whichKey.entry"
-rule = "key to label"
-reason = "WhichKeyOverlay puts Spacing.sm between key and label in a fixed key slot; anatomy wants the key-to-label token."
-issue = 4044
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#2e5475 on #14161b",
+  "#3e7aac on #14161b",
+]
+reason = "Which-key keys draw in the accent colour and a needs-you count in the needs_you role, which miss 4.5:1 on the popup surface in this theme; the entry part also samples the key's antialiased edge."
+issue = 4137
 
 [[exception]]
 scenario = ["edit.whichkey.leader", "minga.whichkey"]
 frontend = "macos"
-part = "whichKey.column"
-rule = "column gap"
-reason = "WhichKeyOverlay lays entries in fixed 220 pt columns, so the gap after the widest entry varies; anatomy wants the column-gap token."
-issue = 4044
+part = "whichKey.entry"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#62729c on #414559",
+  "#788fc6 on #414559",
+  "#7b94cd on #414559",
+  "#829dda on #414559",
+  "#8aa7e9 on #414559",
+  "#8aa8eb on #414559",
+  "#8caaee on #414559",
+  "#ef9f76 on #414559",
+]
+reason = "Which-key keys draw in the accent colour and a needs-you count in the needs_you role, which miss 4.5:1 on the popup surface in this theme; the entry part also samples the key's antialiased edge."
+issue = 4137
 
 [[exception]]
 scenario = ["edit.whichkey.leader", "minga.whichkey"]
 frontend = "macos"
-part = "whichKey.panel"
-rule = "inset"
-reason = "The entry block is centred in the panel, so its inset is not the panel inset token."
-issue = 4044
+part = "whichKey.entry"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#1e66f5 on #ccd0da",
+  "#286cf4 on #ccd0da",
+  "#3574f1 on #ccd0da",
+  "#4980ee on #ccd0da",
+  "#5185ed on #ccd0da",
+  "#80a2e6 on #ccd0da",
+  "#d35400 on #ccd0da",
+]
+reason = "Which-key keys draw in the accent colour and a needs-you count in the needs_you role, which miss 4.5:1 on the popup surface in this theme; the entry part also samples the key's antialiased edge."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.whichkey"]
+frontend = "macos"
+part = "whichKey.entryCount"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#ef9f76 on #414559",
+]
+reason = "A needs-you count draws in the needs_you role, as the modeline does, which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.whichkey"]
+frontend = "macos"
+part = "whichKey.entryCount"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#d35400 on #ccd0da",
+]
+reason = "A needs-you count draws in the needs_you role, as the modeline does, which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.entryKey"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#2e5475 on #14161b",
+  "#3e7aac on #14161b",
+  "#4181b6 on #14161b",
+]
+reason = "Which-key keys draw in the accent colour, which misses 4.5:1 on the popup surface in this theme; thin glyphs sample lighter at their antialiased edge."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.entryKey"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#62729c on #414559",
+  "#788fc6 on #414559",
+  "#7b94cd on #414559",
+  "#829dda on #414559",
+  "#8aa7e9 on #414559",
+  "#8caaee on #414559",
+]
+reason = "Which-key keys draw in the accent colour, which misses 4.5:1 on the popup surface in this theme; thin glyphs sample lighter at their antialiased edge."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.entryKey"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#1e66f5 on #ccd0da",
+  "#286cf4 on #ccd0da",
+  "#3574f1 on #ccd0da",
+  "#4980ee on #ccd0da",
+  "#5185ed on #ccd0da",
+  "#80a2e6 on #ccd0da",
+]
+reason = "Which-key keys draw in the accent colour, which misses 4.5:1 on the popup surface in this theme; thin glyphs sample lighter at their antialiased edge."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.groupName"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#9199b8 on #414559",
+  "#949cbb on #414559",
+]
+reason = "Which-key section names use text_muted, which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.groupName"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#5c5f77 on #ccd0da",
+  "#62657c on #ccd0da",
+  "#63667d on #ccd0da",
+]
+reason = "Which-key section names use text_muted, which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.hint"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#7c95ce on #414559",
+  "#8a91af on #414559",
+  "#8caaee on #414559",
+  "#949cbb on #414559",
+]
+reason = "Which-key's own keys (⌫ back, esc close) draw in the accent colour and their words in text_muted, which miss 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.hint"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#1e66f5 on #ccd0da",
+  "#437cef on #ccd0da",
+  "#5c5f77 on #ccd0da",
+  "#696c82 on #ccd0da",
+]
+reason = "Which-key's own keys (⌫ back, esc close) draw in the accent colour and their words in text_muted, which miss 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.whichkey"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#8caaee on #414559",
+]
+reason = "The Agent activity card's title and task, shown while Minga works, miss 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.whichkey"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#1e66f5 on #ccd0da",
+]
+reason = "The Agent activity card's title and task, and Minga's words in the minga role on the modeline bar (4.45:1), miss 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.whichkey"]
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#d05300 on #e6e9ef",
+  "#d15300 on #e6e9ef",
+  "#d8dbe0 on #e6e9ef",
+]
+reason = "The needs-you state colour on the modeline misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader"]
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#242735 on #414559",
+  "#8caaee on #414559",
+  "#ca9ee6 on #414559",
+]
+reason = "Syntax colours on the cursor line, and which-key accent keys where the panel covers the editor, miss 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader"]
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#8839ef on #ccd0da",
+  "#df8e1d on #ccd0da",
+]
+reason = "Syntax colours on the cursor line miss 4.5:1 in this theme."
+issue = 4137
 
 [[exception]]
 scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "start.project_switcher.empty"]
@@ -237,37 +614,6 @@ reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
-frontend = "macos"
-part = "editor.code"
-rule = "contrast"
-theme = "catppuccin_frappe"
-pairs = [
-  "#242735 on #303446",
-  "#414559 on #303446",
-  "#665c50 on #303446",
-]
-reason = "Syntax colours, comments and line numbers in the editor miss 4.5:1 in this theme (a thin band such as the cursor line can sample as an ink; it is listed so the pair stays visible)."
-issue = 4137
-
-[[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
-frontend = "macos"
-part = "editor.code"
-rule = "contrast"
-theme = "catppuccin_latte"
-pairs = [
-  "#179299 on #eff1f5",
-  "#40a02b on #eff1f5",
-  "#72758b on #eff1f5",
-  "#a28dd5 on #eff1f5",
-  "#ccd0da on #eff1f5",
-  "#df8e1d on #eff1f5",
-]
-reason = "Syntax colours, comments and line numbers in the editor miss 4.5:1 in this theme (a thin band such as the cursor line can sample as an ink; it is listed so the pair stays visible)."
-issue = 4137
-
-[[exception]]
 scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
 frontend = "macos"
 part = "modeline.modePill"
@@ -292,207 +638,15 @@ reason = "The modeline.modeText text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
+scenario = ["start.project_switcher.empty"]
 frontend = "macos"
 part = "modeline.segment"
 rule = "contrast"
 theme = "catppuccin_latte"
 pairs = [
-  "#8839ef on #e6e9ef",
   "#eff1f5 on #1e66f5",
 ]
 reason = "The modeline.segment text misses 4.5:1 in this theme: the mode pill, and Minga's words in the minga role (4.45:1)."
-issue = 4137
-
-[[exception]]
-scenario = ["edit.whichkey.leader", "minga.whichkey"]
-frontend = "macos"
-part = "whichKey.breadcrumb"
-rule = "contrast"
-theme = "catppuccin_latte"
-pairs = [
-  "#179299 on #ccd0da",
-]
-reason = "The whichKey.breadcrumb text misses 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
-scenario = ["edit.whichkey.leader"]
-frontend = "macos"
-part = "whichKey.count"
-rule = "contrast"
-theme = "astrodark"
-pairs = [
-  "#51545b on #14161b",
-]
-reason = "The whichKey.count text misses 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
-scenario = ["edit.whichkey.leader"]
-frontend = "macos"
-part = "whichKey.count"
-rule = "contrast"
-theme = "catppuccin_frappe"
-pairs = [
-  "#767d97 on #414559",
-]
-reason = "The whichKey.count text misses 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
-scenario = ["edit.whichkey.leader"]
-frontend = "macos"
-part = "whichKey.count"
-rule = "contrast"
-theme = "catppuccin_latte"
-pairs = [
-  "#9b9faf on #ccd0da",
-]
-reason = "The whichKey.count text misses 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
-scenario = ["edit.whichkey.leader", "minga.whichkey"]
-frontend = "macos"
-part = "whichKey.entry"
-rule = "contrast"
-theme = "astrodark"
-pairs = [
-  "#2e5475 on #14161b",
-  "#3e7aac on #14161b",
-]
-reason = "The whichKey.entry text misses 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
-scenario = ["edit.whichkey.leader", "minga.whichkey"]
-frontend = "macos"
-part = "whichKey.entry"
-rule = "contrast"
-theme = "catppuccin_frappe"
-pairs = [
-  "#5e8086 on #414559",
-  "#70a5a3 on #414559",
-  "#78b7b1 on #414559",
-  "#9ea7c7 on #414559",
-]
-reason = "The whichKey.entry text misses 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
-scenario = ["edit.whichkey.leader", "minga.whichkey"]
-frontend = "macos"
-part = "whichKey.entry"
-rule = "contrast"
-theme = "catppuccin_latte"
-pairs = [
-  "#179299 on #ccd0da",
-  "#1c54c1 on #ccd0da",
-  "#22969d on #ccd0da",
-  "#2f9aa2 on #ccd0da",
-  "#4ca4ac on #ccd0da",
-  "#72758b on #ccd0da",
-  "#75788d on #ccd0da",
-  "#7db5be on #ccd0da",
-]
-reason = "The whichKey.entry text misses 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
-scenario = ["edit.whichkey.leader", "minga.whichkey"]
-frontend = "macos"
-part = "whichKey.entryKey"
-rule = "contrast"
-theme = "astrodark"
-pairs = [
-  "#2e5475 on #14161b",
-  "#3e7aac on #14161b",
-]
-reason = "The whichKey.entryKey text misses 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
-scenario = ["edit.whichkey.leader", "minga.whichkey"]
-frontend = "macos"
-part = "whichKey.entryKey"
-rule = "contrast"
-theme = "catppuccin_frappe"
-pairs = [
-  "#5e8086 on #414559",
-  "#70a5a3 on #414559",
-  "#78b7b1 on #414559",
-]
-reason = "The whichKey.entryKey text misses 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
-scenario = ["edit.whichkey.leader", "minga.whichkey"]
-frontend = "macos"
-part = "whichKey.entryKey"
-rule = "contrast"
-theme = "catppuccin_latte"
-pairs = [
-  "#179299 on #ccd0da",
-  "#22969d on #ccd0da",
-  "#2f9aa2 on #ccd0da",
-  "#4ca4ac on #ccd0da",
-  "#7db5be on #ccd0da",
-]
-reason = "The whichKey.entryKey text misses 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
-scenario = ["edit.whichkey.leader", "minga.whichkey"]
-frontend = "macos"
-part = "whichKey.entryLabel"
-rule = "contrast"
-theme = "catppuccin_frappe"
-pairs = [
-  "#9ea7c7 on #414559",
-]
-reason = "The whichKey.entryLabel text misses 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
-scenario = ["edit.whichkey.leader", "minga.whichkey"]
-frontend = "macos"
-part = "whichKey.entryLabel"
-rule = "contrast"
-theme = "catppuccin_latte"
-pairs = [
-  "#1c54c1 on #ccd0da",
-  "#72758b on #ccd0da",
-  "#75788d on #ccd0da",
-]
-reason = "The whichKey.entryLabel text misses 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
-scenario = ["minga.whichkey"]
-frontend = "tui"
-part = "text"
-rule = "contrast"
-theme = "catppuccin_frappe"
-pairs = [
-  "#8caaee on #414559",
-  "#c6d0f5 on #626880",
-]
-reason = "The Agent activity card's title and task, shown while Minga works, miss 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
-scenario = ["minga.whichkey"]
-frontend = "tui"
-part = "text"
-rule = "contrast"
-theme = "catppuccin_latte"
-pairs = [
-  "#1e66f5 on #ccd0da",
-  "#4c4f69 on #acb0be",
-  "#8839ef on #e6e9ef",
-]
-reason = "The Agent activity card's title and task, and Minga's words in the minga role on the modeline bar (4.45:1), miss 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]

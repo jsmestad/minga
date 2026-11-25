@@ -24,19 +24,22 @@ defmodule MingaEditor.Shell.Traditional.WhichKeyWorkflow do
     schedule(state)
   end
 
-  @doc "Advances a leader prefix unless an exclusive modal owns input."
-  @spec progress(EditorState.t(), Minga.Keymap.Bindings.node_t(), [String.t()]) :: EditorState.t()
-  def progress(%{shell_runtime: %{state: %{modal: modal}}} = state, _node, _prefix_keys)
+  @doc "Advances a leader prefix unless an exclusive modal owns input. `label` names a group whose node has no description."
+  @spec progress(EditorState.t(), Minga.Keymap.Bindings.node_t(), [String.t()], String.t() | nil) ::
+          EditorState.t()
+  def progress(state, node, prefix_keys, label \\ nil)
+
+  def progress(%{shell_runtime: %{state: %{modal: modal}}} = state, _node, _prefix_keys, _label)
       when modal != :none,
       do: state
 
-  def progress(state, node, prefix_keys) do
+  def progress(state, node, prefix_keys, label) do
     cancel_timer(state.shell_runtime.state.whichkey.timer)
 
     state =
       state
       |> update_shell_state(&ShellState.suppress_lower_transients/1)
-      |> update_shell_state(&ShellState.progress_whichkey(&1, node, prefix_keys))
+      |> update_shell_state(&ShellState.progress_whichkey(&1, node, prefix_keys, label))
 
     schedule(state)
   end
@@ -57,16 +60,6 @@ defmodule MingaEditor.Shell.Traditional.WhichKeyWorkflow do
       do: update_shell_state(state, &ShellState.reveal_whichkey(&1, generation))
 
   def reveal(state, _generation), do: state
-
-  @doc "Moves which-key to the next page."
-  @spec next_page(EditorState.t()) :: EditorState.t()
-  def next_page(state),
-    do: update_shell_state(state, &ShellState.next_whichkey_page/1)
-
-  @doc "Moves which-key to the previous page."
-  @spec previous_page(EditorState.t()) :: EditorState.t()
-  def previous_page(state),
-    do: update_shell_state(state, &ShellState.previous_whichkey_page/1)
 
   @spec schedule(EditorState.t()) :: EditorState.t()
   defp schedule(state) do

@@ -235,19 +235,6 @@ defmodule Minga.Mode.NormalTest do
       assert closed.leader_node == nil
       assert closed.leader_keys == []
     end
-
-    test "which-key pagination keeps leader state" do
-      leader_trie = Defaults.leader_trie()
-
-      state =
-        fresh_state() |> Map.put(:leader_node, leader_trie) |> Map.put(:leader_keys, ["SPC"])
-
-      for {key, command} <- [{{?d, 0x02}, :whichkey_next_page}, {{?u, 0x02}, :whichkey_prev_page}] do
-        {:execute, ^command, new_state, :discard_count} = handle(key, state)
-        assert new_state.leader_node == leader_trie
-        assert new_state.leader_keys == ["SPC"]
-      end
-    end
   end
 
   describe "describe-key" do

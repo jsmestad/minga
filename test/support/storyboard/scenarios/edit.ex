@@ -53,7 +53,11 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
             "groups read like leaves: Title Case, no +",
             &assert_groups_read_like_leaves/1
           ),
-          Check.new("the Minga group reads Minga ›", &assert_group(&1, "a", "Minga"))
+          Check.new("the Minga group reads Minga ›", &assert_group(&1, "a", "Minga")),
+          Check.new(
+            "entries read in the designed sections",
+            &assert_sections(&1, ["Groups", "Often", "More"])
+          )
         ]
       ),
       Entry.built("edit.visual",

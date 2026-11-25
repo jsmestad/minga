@@ -162,37 +162,49 @@ struct FloatPopupStateLifecycleTests {
 
 @Suite("WhichKeyState Lifecycle")
 struct WhichKeyStateLifecycleTests {
-    @Test("update() converts raw bindings to view model")
-    @MainActor func updateConverts() {
+    private static let model = Wire.WhichKey(
+        visible: true, path: "SPC a",
+        breadcrumb: [.init(key: "SPC", path: "SPC"), .init(key: "a", label: "Minga", path: "SPC a")],
+        count: "· 1",
+        entries: [
+            .init(kind: 0, key: "a", label: "Agent view", section: "Tasks"),
+            .init(kind: 0, key: "n", label: "New session", section: "Tasks"),
+            .init(kind: 1, key: "q", label: "Queue ›", section: "Conversation"),
+            .init(kind: 1, key: "S", label: "Session ›", section: "More"),
+        ])
+
+    @Test("update() keeps the model and groups consecutive entries into sections")
+    @MainActor func updateGroupsSections() {
         let state = WhichKeyState()
-        let raw = [
-            Wire.WhichKeyBinding(kind: 0, key: "f", description: "Find file", icon: "🔍"),
-            Wire.WhichKeyBinding(kind: 1, key: "b", description: "Buffers", icon: "")
-        ]
-        state.update(visible: true, prefix: "SPC", page: 0, pageCount: 2,
-                     rawBindings: raw)
+        state.update(Self.model)
 
         #expect(state.visible == true)
-        #expect(state.prefix == "SPC")
-        #expect(state.page == 0)
-        #expect(state.pageCount == 2)
-        #expect(state.bindings.count == 2)
-        #expect(state.bindings[0].key == "f")
-        #expect(state.bindings[0].isGroup == false)
-        #expect(state.bindings[1].key == "b")
-        #expect(state.bindings[1].isGroup == true)
+        #expect(state.path == "SPC a")
+        #expect(state.breadcrumb.map(\.label) == ["", "Minga"])
+        #expect(state.sections.map(\.title) == ["Tasks", "Conversation", "More"])
+        #expect(state.sections[0].entries.map(\.key) == ["a", "n"])
+        #expect(state.sections[1].entries[0].isGroup == true)
     }
 
     @Test("hide() clears all state")
     @MainActor func hideClearsAll() {
         let state = WhichKeyState()
-        state.update(visible: true, prefix: "SPC", page: 0, pageCount: 1,
-                     rawBindings: [Wire.WhichKeyBinding(kind: 0, key: "f",
-                                                      description: "Find", icon: "")])
+        state.update(Self.model)
         state.hide()
 
         #expect(state.visible == false)
-        #expect(state.bindings.isEmpty)
+        #expect(state.entries.isEmpty)
+    }
+
+    @Test("A long section splits into columns filled top to bottom, each with its own key slot")
+    @MainActor func longSectionSplits() {
+        let entries = (0..<5).map { Wire.WhichKeyEntry(kind: 0, key: $0 == 4 ? "SPC" : "\($0)", label: "Row \($0)", section: "Often") }
+        let state = WhichKeyState(model: Wire.WhichKey(visible: true, path: "SPC", entries: entries))
+        let columns = WhichKeyLayout.columns(state.sections, maxRows: 3)
+
+        #expect(columns.map { $0.entries.map(\.key) } == [["0", "1", "2"], ["3", "SPC"]])
+        #expect(columns.map(\.title) == ["Often", ""])
+        #expect(columns[1].keyWidth > columns[0].keyWidth)
     }
 }
 

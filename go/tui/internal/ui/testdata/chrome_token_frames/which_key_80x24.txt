@@ -1,14 +1,13 @@
-Keys SPC  1/2
- f
- Files ›
-b
-Buffers ›
-w
-Windows ›
-╭──────────────────────────────────────────────╮
-│  Keys SPC                               1/2  │
-│ f   󰈞 Files ›        │  b   󰓩 Buffers ›      │
-│ w    Windows ›      │  a   • Minga ›        │
-│ g    Git ›          │  q   󰩈 Quit editor    │
-│  6 bindings           Tab next  •  Esc close │
-╰──────────────────────────────────────────────╯
+╭ SPC › a Minga · 1 needs you ─────────────────────────────────────────────────╮
+│ Tasks                        Conversation           Changes                  │
+│ a Agent view · 1 needs you   v Conversation split   r Pending reviews · 3    │
+│ n New session                ? Ask about this       u Undo all agent edits   │
+│ s Stop                       e Rewrite selection    p Publish edits…         │
+│                              q Queue ›                                       │
+│                                                                              │
+│ More                                                                         │
+│ x Context ›                                                                  │
+│ S Session ›                                                                  │
+│ W Why this line                                                              │
+│ A Code autobiography                                                         │
+╰────────────────────────────────────────────────────────── ⌫ back  esc close ─╯

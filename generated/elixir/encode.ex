@@ -455,16 +455,44 @@ defmodule Minga.Protocol.Encode do
     ]
   end
 
-  @spec encode_which_key_binding(map()) :: iodata()
-  def encode_which_key_binding(model), do: encode_which_key_binding(model, :which_key_binding, [])
+  @spec encode_which_key_crumb(map()) :: iodata()
+  def encode_which_key_crumb(model), do: encode_which_key_crumb(model, :which_key_crumb, [])
 
-  @spec encode_which_key_binding(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
-  defp encode_which_key_binding(model, command, path) do
+  @spec encode_which_key_crumb(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_which_key_crumb(model, command, path) do
+    [
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:key | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :key)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:label | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :label)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:path | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :path)),
+    ]
+  end
+
+  @spec encode_which_key_hint(map()) :: iodata()
+  def encode_which_key_hint(model), do: encode_which_key_hint(model, :which_key_hint, [])
+
+  @spec encode_which_key_hint(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_which_key_hint(model, command, path) do
+    [
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:key | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :key)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:label | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :label)),
+    ]
+  end
+
+  @spec encode_which_key_entry(map()) :: iodata()
+  def encode_which_key_entry(model), do: encode_which_key_entry(model, :which_key_entry, [])
+
+  @spec encode_which_key_entry(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_which_key_entry(model, command, path) do
     [
       (fn value -> validate_uint!(command, [:kind | path], value, 255); <<value::8>> end).(Map.fetch!(model, :kind)),
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:key | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :key)),
-      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:desc | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :desc)),
-      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:icon | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :icon)),
+      (fn value -> validate_uint!(command, [:codepoint | path], value, 4294967295); <<value::32>> end).(Map.fetch!(model, :codepoint)),
+      (fn value -> validate_uint!(command, [:modifiers | path], value, 255); <<value::8>> end).(Map.fetch!(model, :modifiers)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:label | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :label)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:section | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :section)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:count | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :count)),
+      (fn value -> validate_uint!(command, [:count_tone | path], value, 255); <<value::8>> end).(Map.fetch!(model, :count_tone)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:platform_key | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :platform_key)),
     ]
   end
 

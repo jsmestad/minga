@@ -595,6 +595,140 @@ struct KeyboardInputTests {
         #expect(!EditorNSView.shouldOptimisticallyEnterTextInputMode(codepoint: UnicodeScalar("i").value, statusMode: nil, cursorShape: .block))
     }
 
+    // MARK: - Space leader chord
+
+    private static let keyCodeSpace: UInt16 = 49
+    private static let keyCodeA: UInt16 = 0
+
+    private func spaceEvent(_ type: NSEvent.EventType = .keyDown, isRepeat: Bool = false) throws -> NSEvent {
+        try #require(keyEvent(type: type, keyCode: Self.keyCodeSpace, characters: " ", charactersIgnoringModifiers: " ", isRepeat: isRepeat))
+    }
+
+    private func letterEvent(_ type: NSEvent.EventType = .keyDown, modifiers: NSEvent.ModifierFlags = []) throws -> NSEvent {
+        let letter = modifiers.contains(.shift) ? "A" : "a"
+        return try #require(keyEvent(type: type, keyCode: Self.keyCodeA, modifiers: modifiers, characters: letter, charactersIgnoringModifiers: "a"))
+    }
+
+    private enum SpaceLeaderTraffic: Equatable {
+        case space
+        case chord(UInt32, UInt8)
+        case retract(UInt32, UInt8)
+    }
+
+    /// The space-leader actions and typed spaces the view sent, in order.
+    private func spaceLeaderTraffic(_ spy: SpyEncoder) -> [SpaceLeaderTraffic] {
+        spy.actions.compactMap { action in
+            switch action {
+            case .spaceLeaderChord(let codepoint, let modifiers): .chord(codepoint, modifiers)
+            case .spaceLeaderRetract(let codepoint, let modifiers): .retract(codepoint, modifiers)
+            case .keyPress(0x20, 0, _, _): .space
+            default: nil
+            }
+        }
+    }
+
+    /// Waits well past the 30ms grace window so a pending SPC has had every chance to become a space.
+    private func outlastGraceWindow() async throws {
+        try await Task.sleep(for: .milliseconds(150))
+    }
+
+    /// Waits until the grace timer has sent the held SPC as a space, so a loaded machine cannot turn a late chord into a clean one.
+    private func waitForGraceSpace(_ spy: SpyEncoder) async throws {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !spaceLeaderTraffic(spy).contains(.space), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(spaceLeaderTraffic(spy) == [.space])
+    }
+
+    @Test("a held SPC chord sends one chord and never the space, whichever key is released first")
+    @MainActor func spaceLeaderChordInBothReleaseOrders() async throws {
+        for spaceReleasedFirst in [true, false] {
+            let spy = SpyEncoder()
+            let view = try #require(makeRequiredView(spy: spy))
+
+            view.keyDown(with: try spaceEvent())
+            view.keyDown(with: try letterEvent())
+            if spaceReleasedFirst {
+                view.keyUp(with: try spaceEvent(.keyUp))
+                view.keyUp(with: try letterEvent(.keyUp))
+            } else {
+                view.keyUp(with: try letterEvent(.keyUp))
+                view.keyUp(with: try spaceEvent(.keyUp))
+            }
+            try await outlastGraceWindow()
+
+            #expect(spaceLeaderTraffic(spy) == [.chord(0x61, 0)])
+        }
+    }
+
+    @Test("a modifier pressed with the chord key travels with the one chord")
+    @MainActor func spaceLeaderChordCarriesModifier() async throws {
+        let spy = SpyEncoder()
+        let view = try #require(makeRequiredView(spy: spy))
+
+        view.keyDown(with: try spaceEvent())
+        view.keyDown(with: try letterEvent(modifiers: .shift))
+        view.keyUp(with: try letterEvent(.keyUp, modifiers: .shift))
+        view.keyUp(with: try spaceEvent(.keyUp))
+        try await outlastGraceWindow()
+
+        #expect(spaceLeaderTraffic(spy) == [.chord(0x41, 0x01)])
+    }
+
+    @Test("a SPC tap types exactly one space")
+    @MainActor func spaceLeaderTapTypesOneSpace() async throws {
+        let spy = SpyEncoder()
+        let view = try #require(makeRequiredView(spy: spy))
+
+        view.keyDown(with: try spaceEvent())
+        view.keyUp(with: try spaceEvent(.keyUp))
+        try await outlastGraceWindow()
+
+        #expect(spaceLeaderTraffic(spy) == [.space])
+    }
+
+    @Test("a SPC held past the grace window and released alone types exactly one space")
+    @MainActor func spaceLeaderHeldAloneTypesOneSpace() async throws {
+        let spy = SpyEncoder()
+        let view = try #require(makeRequiredView(spy: spy))
+
+        view.keyDown(with: try spaceEvent())
+        try await outlastGraceWindow()
+        view.keyUp(with: try spaceEvent(.keyUp))
+        try await outlastGraceWindow()
+
+        #expect(spaceLeaderTraffic(spy) == [.space])
+    }
+
+    @Test("a key pressed after the grace window retracts the sent space instead of sending a second one")
+    @MainActor func spaceLeaderLateChordRetracts() async throws {
+        let spy = SpyEncoder()
+        let view = try #require(makeRequiredView(spy: spy))
+
+        view.keyDown(with: try spaceEvent())
+        try await waitForGraceSpace(spy)
+        view.keyDown(with: try letterEvent())
+        view.keyUp(with: try spaceEvent(.keyUp))
+
+        #expect(spaceLeaderTraffic(spy) == [.space, .retract(0x61, 0)])
+    }
+
+    @Test("auto-repeat while SPC is held types spaces and never opens the leader")
+    @MainActor func spaceLeaderRepeatTypesSpaces() async throws {
+        let spy = SpyEncoder()
+        let view = try #require(makeRequiredView(spy: spy))
+
+        view.keyDown(with: try spaceEvent())
+        try await outlastGraceWindow()
+        view.keyDown(with: try spaceEvent(isRepeat: true))
+        view.keyDown(with: try spaceEvent(isRepeat: true))
+        view.keyDown(with: try letterEvent())
+        view.keyUp(with: try spaceEvent(.keyUp))
+
+        #expect(spaceLeaderTraffic(spy) == [.space, .space, .space])
+    }
+
     // MARK: - Control key bypass
 
     @Test("Ctrl+A sends character codepoint with control modifier")

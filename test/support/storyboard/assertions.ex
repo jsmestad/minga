@@ -173,13 +173,28 @@ defmodule Minga.Test.Storyboard.Assertions do
     model
   end
 
-  @doc "Asserts the which-key entry on `key` carries a live count, such as `Tasks · 1 needs you`."
-  @spec assert_count(Model.t(), String.t(), String.t()) :: Model.t()
-  def assert_count(%Model{} = model, key, count) do
+  @doc "Asserts the which-key entry on `key` carries a live count, such as `Tasks · 1 needs you`, drawn in the `tone` colour role."
+  @spec assert_count(Model.t(), String.t(), String.t(), Minga.RenderModel.UI.WhichKey.tone()) ::
+          Model.t()
+  def assert_count(%Model{} = model, key, count, tone) do
     entry = which_key_entry!(model, key)
 
-    assert String.contains?(entry.label, " · " <> count),
-           "expected #{key} to show the count #{inspect(count)}, got #{inspect(entry.label)}"
+    assert String.contains?(entry.count, count),
+           "expected #{key} to show the count #{inspect(count)}, got #{inspect(entry.count)}"
+
+    assert entry.count_tone == tone,
+           "expected #{key}'s count in the #{tone} role, got #{entry.count_tone}"
+
+    model
+  end
+
+  @doc "Asserts the which-key sections, in order, as the panel's column headings."
+  @spec assert_sections(Model.t(), [String.t()]) :: Model.t()
+  def assert_sections(%Model{which_key: %{entries: entries}} = model, expected) do
+    sections = entries |> Enum.map(& &1.section) |> Enum.dedup()
+
+    assert sections == expected,
+           "expected which-key sections #{inspect(expected)}, got #{inspect(sections)}"
 
     model
   end

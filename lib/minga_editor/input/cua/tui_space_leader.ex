@@ -89,7 +89,7 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
 
       node ->
         retract_space(space_buffer)
-        state = enter_leader(state, node)
+        state = enter_leader(state, trie, node, key)
         {:handled, state}
     end
   end
@@ -206,12 +206,16 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
     :exit, _ -> :ok
   end
 
-  @spec enter_leader(EditorState.t(), Bindings.node_t()) :: EditorState.t()
-  defp enter_leader(state, node) do
+  # Which-key opens on the group the key named, one level below SPC, so Backspace goes back up to SPC.
+  @spec enter_leader(EditorState.t(), Bindings.node_t(), Bindings.node_t(), Bindings.key()) ::
+          EditorState.t()
+  defp enter_leader(state, root, node, key) do
     if node.command != nil do
       execute_command(state, node.command)
     else
-      Commands.execute(state, {:leader_start, node})
+      state
+      |> Commands.execute({:leader_start, root, ["SPC"]})
+      |> Commands.execute({:leader_progress, node, ["SPC", Bindings.format_key(key)]})
     end
   end
 

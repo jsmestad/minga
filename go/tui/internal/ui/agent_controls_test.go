@@ -294,8 +294,9 @@ func TestAgentControlsDoNotClickThroughModalOverlays(t *testing.T) {
 			model.chrome[opcode] = protocol.ChromePayload{Opcode: opcode, Picker: protocol.Picker{Visible: true, Title: label}}
 		} else {
 			model.chrome[opcode] = protocol.ChromePayload{Opcode: opcode, Which: protocol.WhichKey{
-				Visible: true, Prefix: label,
-				Bindings: []protocol.WhichKeyBinding{{Key: "a", Description: "Agent actions"}},
+				Visible: true, Path: label,
+				Breadcrumb: []generated.WhichKeyCrumb{{Key: label, Path: label}},
+				Entries:    []generated.WhichKeyEntry{{Key: "a", Label: "Agent actions"}},
 			}}
 		}
 		if !strings.Contains(agentControlCanvasText(model), label) {

@@ -32,19 +32,19 @@
       ~
       ~
       ~
-  ╭──────────────────────────────────────────────────────────╮
-  │  Keys SPC a                                              │
-  │ ?    Ask about this       │  A   • Code autobiography   │
-  │ S   • Session ›            │  W   • Why this line        │
-  │ a   󰚩 Agent view           │  e   • Rewrite selection    │
-  │ n   • New session          │  p   • Publish edits…       │
-  │ q   • Queue ›              │  r   • Pending reviews      │
-  │ s   • Stop                 │  u   󰚩 Undo all agent edi…  │
-  │ v    Conversation split   │  x   • Context ›            │
-Ag│  14 bindings                                   Esc close │
- W╰──────────────────────────────────────────────────────────╯
- Th
-  NORMAL  storyboard.ex ◐ Minga working                                                                      Elixir 1:1
+      ~
+      ~
+      ~
+      ~
+      ~
+╭ SPC › a Minga · 1 needs you ─────────────────────────────────────────────────────────────────────────────────────────╮
+│ Tasks                        Conversation           Changes                  More                                    │
+│ a Agent view · 1 needs you   v Conversation split   r Pending reviews        x Context ›                             │
+│ n New session                ? Ask about this       u Undo all agent edits   S Session ›                             │
+│ s Stop                       e Rewrite selection    p Publish edits…         W Why this line                         │
+│                              q Queue ›                                       A Code autobiography                    │
+╰────────────────────────────────────────────────────────────────────────────────────────────────── ⌫ back  esc close ─╯
+  NORMAL  ◉ Needs you storyboard.ex ◉ Minga                                                            SPC a Elixir 1:1
 ## styles (row start-end fg bg attrs)
 0 0-0 #4c4f69 #eff1f5 -
 0 1-1 #1e66f5 #eff1f5 bold
@@ -140,135 +140,105 @@ Ag│  14 bindings                                   Esc close │
 25 6-119 #8c8fa1 #eff1f5 -
 26 0-5 #5c5f77 #eff1f5 -
 26 6-119 #8c8fa1 #eff1f5 -
-27 0-1 #5c5f77 #eff1f5 -
-27 2-61 #7c7f93 #ccd0da -
-27 62-119 #8c8fa1 #eff1f5 -
-28 0-1 #5c5f77 #eff1f5 -
-28 2-2 #7c7f93 #ccd0da -
-28 3-3 #4c4f69 #ccd0da -
-28 4-9 #4c4f69 #e6e9ef -
-28 10-14 #1e66f5 #e6e9ef bold
-28 15-59 #4c4f69 #eff1f5 -
-28 60-60 #4c4f69 #ccd0da -
-28 61-61 #7c7f93 #ccd0da -
-28 62-62 #4c4f69 #000000 -
-28 63-119 #8c8fa1 #eff1f5 -
-29 0-1 #5c5f77 #eff1f5 -
-29 2-2 #7c7f93 #ccd0da -
-29 3-3 #4c4f69 #ccd0da -
-29 4-6 #179299 #acb0be bold
-29 7-7 #4c4f69 #eff1f5 -
-29 8-8 #51afef #ccd0da -
-29 9-28 #4c4f69 #ccd0da -
-29 29-33 #7c7f93 #ccd0da -
-29 34-36 #179299 #acb0be bold
-29 37-37 #4c4f69 #eff1f5 -
-29 38-60 #4c4f69 #ccd0da -
-29 61-61 #7c7f93 #ccd0da -
-29 62-62 #4c4f69 #000000 -
-29 63-119 #8c8fa1 #eff1f5 -
-30 0-1 #5c5f77 #eff1f5 -
-30 2-2 #7c7f93 #ccd0da -
-30 3-6 #4c4f69 #ccd0da -
-30 7-7 #4c4f69 #eff1f5 -
-30 8-28 #1650c0 #ccd0da -
-30 29-33 #7c7f93 #ccd0da -
-30 34-36 #179299 #acb0be bold
-30 37-37 #4c4f69 #eff1f5 -
-30 38-60 #4c4f69 #ccd0da -
-30 61-61 #7c7f93 #ccd0da -
-30 62-62 #4c4f69 #000000 -
-30 63-119 #8c8fa1 #eff1f5 -
-31 0-1 #5c5f77 #eff1f5 -
-31 2-2 #7c7f93 #ccd0da -
-31 3-3 #4c4f69 #ccd0da -
-31 4-6 #179299 #acb0be bold
-31 7-7 #4c4f69 #eff1f5 -
-31 8-8 #e5c07b #ccd0da -
-31 9-28 #4c4f69 #ccd0da -
-31 29-33 #7c7f93 #ccd0da -
-31 34-36 #179299 #acb0be bold
-31 37-37 #4c4f69 #eff1f5 -
-31 38-60 #4c4f69 #ccd0da -
-31 61-61 #7c7f93 #ccd0da -
-31 62-62 #4c4f69 #000000 -
-31 63-119 #8c8fa1 #eff1f5 -
-32 0-1 #5c5f77 #eff1f5 -
-32 2-2 #7c7f93 #ccd0da -
-32 3-3 #4c4f69 #ccd0da -
-32 4-6 #179299 #acb0be bold
-32 7-7 #4c4f69 #eff1f5 -
-32 8-28 #4c4f69 #ccd0da -
-32 29-33 #7c7f93 #ccd0da -
-32 34-36 #179299 #acb0be bold
-32 37-37 #4c4f69 #eff1f5 -
-32 38-60 #4c4f69 #ccd0da -
-32 61-61 #7c7f93 #ccd0da -
-32 62-62 #4c4f69 #000000 -
-32 63-119 #8c8fa1 #eff1f5 -
-33 0-1 #5c5f77 #eff1f5 -
-33 2-2 #7c7f93 #ccd0da -
-33 3-6 #4c4f69 #ccd0da -
-33 7-7 #4c4f69 #eff1f5 -
-33 8-28 #1650c0 #ccd0da -
-33 29-33 #7c7f93 #ccd0da -
-33 34-36 #179299 #acb0be bold
-33 37-37 #4c4f69 #eff1f5 -
-33 38-60 #4c4f69 #ccd0da -
-33 61-61 #7c7f93 #ccd0da -
-33 62-62 #4c4f69 #000000 -
-33 63-119 #8c8fa1 #eff1f5 -
-34 0-1 #5c5f77 #eff1f5 -
-34 2-2 #7c7f93 #ccd0da -
-34 3-3 #4c4f69 #ccd0da -
-34 4-6 #179299 #acb0be bold
-34 7-7 #4c4f69 #eff1f5 -
-34 8-28 #4c4f69 #ccd0da -
-34 29-33 #7c7f93 #ccd0da -
-34 34-36 #179299 #acb0be bold
-34 37-37 #4c4f69 #eff1f5 -
-34 38-38 #e5c07b #ccd0da -
-34 39-60 #4c4f69 #ccd0da -
-34 61-61 #7c7f93 #ccd0da -
-34 62-62 #4c4f69 #000000 -
-34 63-119 #8c8fa1 #eff1f5 -
-35 0-1 #5c5f77 #eff1f5 -
-35 2-2 #7c7f93 #ccd0da -
-35 3-3 #4c4f69 #ccd0da -
-35 4-6 #179299 #acb0be bold
-35 7-7 #4c4f69 #eff1f5 -
-35 8-8 #98c379 #ccd0da -
-35 9-28 #4c4f69 #ccd0da -
-35 29-33 #7c7f93 #ccd0da -
-35 34-36 #4c4f69 #ccd0da -
-35 37-37 #4c4f69 #eff1f5 -
-35 38-58 #1650c0 #ccd0da -
-35 59-60 #4c4f69 #ccd0da -
-35 61-61 #7c7f93 #ccd0da -
-35 62-62 #4c4f69 #000000 -
-35 63-119 #8c8fa1 #eff1f5 -
-36 0-1 #1e66f5 #ccd0da bold
-36 2-2 #7c7f93 #ccd0da -
-36 3-3 #4c4f69 #ccd0da -
-36 4-15 #4c4f69 #e6e9ef -
-36 16-50 #4c4f69 #eff1f5 -
-36 51-59 #4c4f69 #e6e9ef -
-36 60-60 #4c4f69 #ccd0da -
-36 61-61 #7c7f93 #ccd0da -
-36 62-62 #4c4f69 #000000 -
-36 63-119 #4c4f69 #ccd0da -
-37 0-0 #4c4f69 #acb0be -
-37 1-1 #8839ef #acb0be bold
-37 2-61 #7c7f93 #ccd0da -
-37 62-62 #4c4f69 #000000 -
-37 63-119 #4c4f69 #eff1f5 -
-38 0-2 #4c4f69 #acb0be -
-38 3-62 #4c4f69 #000000 -
-38 63-119 #4c4f69 #eff1f5 -
+27 0-5 #5c5f77 #eff1f5 -
+27 6-119 #8c8fa1 #eff1f5 -
+28 0-5 #5c5f77 #eff1f5 -
+28 6-119 #8c8fa1 #eff1f5 -
+29 0-5 #5c5f77 #eff1f5 -
+29 6-119 #8c8fa1 #eff1f5 -
+30 0-5 #5c5f77 #eff1f5 -
+30 6-119 #8c8fa1 #eff1f5 -
+31 0-5 #5c5f77 #eff1f5 -
+31 6-119 #8c8fa1 #eff1f5 -
+32 0-0 #7c7f93 #ccd0da -
+32 1-1 #4c4f69 #ccd0da -
+32 2-4 #1e66f5 #ccd0da -
+32 5-7 #5c5f77 #ccd0da -
+32 8-8 #1e66f5 #ccd0da -
+32 9-9 #4c4f69 #ccd0da -
+32 10-14 #4c4f69 #ccd0da bold
+32 15-15 #4c4f69 #ccd0da -
+32 16-28 #d35400 #ccd0da -
+32 29-29 #4c4f69 #ccd0da -
+32 30-119 #7c7f93 #ccd0da -
+33 0-0 #7c7f93 #ccd0da -
+33 1-1 #4c4f69 #ccd0da -
+33 2-27 #5c5f77 #ccd0da -
+33 28-30 #4c4f69 #ccd0da -
+33 31-50 #5c5f77 #ccd0da -
+33 51-53 #4c4f69 #ccd0da -
+33 54-75 #5c5f77 #ccd0da -
+33 76-78 #4c4f69 #ccd0da -
+33 79-98 #5c5f77 #ccd0da -
+33 99-118 #4c4f69 #ccd0da -
+33 119-119 #7c7f93 #ccd0da -
+34 0-0 #7c7f93 #ccd0da -
+34 1-1 #4c4f69 #ccd0da -
+34 2-2 #1e66f5 #ccd0da -
+34 3-14 #4c4f69 #ccd0da -
+34 15-27 #d35400 #ccd0da -
+34 28-30 #4c4f69 #ccd0da -
+34 31-31 #1e66f5 #ccd0da -
+34 32-53 #4c4f69 #ccd0da -
+34 54-54 #1e66f5 #ccd0da -
+34 55-78 #4c4f69 #ccd0da -
+34 79-79 #1e66f5 #ccd0da -
+34 80-80 #4c4f69 #ccd0da -
+34 81-89 #1650c0 #ccd0da -
+34 90-118 #4c4f69 #ccd0da -
+34 119-119 #7c7f93 #ccd0da -
+35 0-0 #7c7f93 #ccd0da -
+35 1-1 #4c4f69 #ccd0da -
+35 2-2 #1e66f5 #ccd0da -
+35 3-30 #4c4f69 #ccd0da -
+35 31-31 #1e66f5 #ccd0da -
+35 32-53 #4c4f69 #ccd0da -
+35 54-54 #1e66f5 #ccd0da -
+35 55-78 #4c4f69 #ccd0da -
+35 79-79 #1e66f5 #ccd0da -
+35 80-80 #4c4f69 #ccd0da -
+35 81-89 #1650c0 #ccd0da -
+35 90-118 #4c4f69 #ccd0da -
+35 119-119 #7c7f93 #ccd0da -
+36 0-0 #7c7f93 #ccd0da -
+36 1-1 #4c4f69 #ccd0da -
+36 2-2 #1e66f5 #ccd0da -
+36 3-30 #4c4f69 #ccd0da -
+36 31-31 #1e66f5 #ccd0da -
+36 32-53 #4c4f69 #ccd0da -
+36 54-54 #1e66f5 #ccd0da -
+36 55-78 #4c4f69 #ccd0da -
+36 79-79 #1e66f5 #ccd0da -
+36 80-118 #4c4f69 #ccd0da -
+36 119-119 #7c7f93 #ccd0da -
+37 0-0 #7c7f93 #ccd0da -
+37 1-30 #4c4f69 #ccd0da -
+37 31-31 #1e66f5 #ccd0da -
+37 32-32 #4c4f69 #ccd0da -
+37 33-39 #1650c0 #ccd0da -
+37 40-78 #4c4f69 #ccd0da -
+37 79-79 #1e66f5 #ccd0da -
+37 80-118 #4c4f69 #ccd0da -
+37 119-119 #7c7f93 #ccd0da -
+38 0-98 #7c7f93 #ccd0da -
+38 99-99 #4c4f69 #ccd0da -
+38 100-100 #1e66f5 #ccd0da -
+38 101-101 #4c4f69 #ccd0da -
+38 102-105 #5c5f77 #ccd0da -
+38 106-107 #4c4f69 #ccd0da -
+38 108-110 #1e66f5 #ccd0da -
+38 111-111 #4c4f69 #ccd0da -
+38 112-116 #5c5f77 #ccd0da -
+38 117-117 #4c4f69 #ccd0da -
+38 118-119 #7c7f93 #ccd0da -
 39 0-0 #8c8fa1 #e6e9ef -
 39 1-1 #4c4f69 #1e66f5 -
 39 2-7 #eff1f5 #1e66f5 bold
 39 8-8 #4c4f69 #1e66f5 -
-39 9-23 #4c4f69 #e6e9ef -
-39 24-38 #8839ef #e6e9ef -
-39 39-119 #4c4f69 #e6e9ef -
+39 9-9 #4c4f69 #e6e9ef -
+39 10-20 #d35400 #e6e9ef bold
+39 21-35 #4c4f69 #e6e9ef -
+39 36-42 #d35400 #e6e9ef -
+39 43-102 #4c4f69 #e6e9ef -
+39 103-107 #5c5f77 #e6e9ef -
+39 108-119 #4c4f69 #e6e9ef -

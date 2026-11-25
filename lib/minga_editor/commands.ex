@@ -211,18 +211,20 @@ defmodule MingaEditor.Commands do
     MingaEditor.Shell.Traditional.WhichKeyWorkflow.progress(
       state,
       effective_node,
-      prefix_keys
+      prefix_keys,
+      node.description
     )
   end
 
+  # The CUA space leader keeps no mode leader state, so it names the prefix itself.
+  def execute(state, {:leader_start, node, prefix_keys}) when is_list(prefix_keys),
+    do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.begin(state, node, prefix_keys)
+
+  def execute(state, {:leader_progress, node, prefix_keys}) when is_list(prefix_keys),
+    do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.progress(state, node, prefix_keys)
+
   def execute(state, :leader_cancel),
     do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.dismiss(state)
-
-  def execute(state, :whichkey_next_page),
-    do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.next_page(state)
-
-  def execute(state, :whichkey_prev_page),
-    do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.previous_page(state)
 
   # ── Eval ───────────────────────────────────────────────────────────────────
 

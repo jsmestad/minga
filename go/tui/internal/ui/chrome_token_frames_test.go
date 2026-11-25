@@ -155,8 +155,7 @@ func chromeFrameScenarios() []chromeFrameScenario {
 			return m.renderCompletion(completion, 60, 10)
 		}},
 		{"which_key", func(m Model) []string {
-			which := protocol.WhichKey{Visible: true, Prefix: "SPC", Page: 0, PageCount: 2, Bindings: []protocol.WhichKeyBinding{{Kind: whichKeyKindGroup, Key: "f", Description: "Files ›"}, {Kind: whichKeyKindGroup, Key: "b", Description: "Buffers ›"}, {Kind: whichKeyKindGroup, Key: "w", Description: "Windows ›"}, {Kind: whichKeyKindGroup, Key: "a", Description: "Minga ›"}, {Kind: whichKeyKindGroup, Key: "g", Description: "Git ›"}, {Key: "q", Description: "Quit editor"}}}
-			return append(m.renderWhichKey(which), m.renderFloatingWhichKey(which))
+			return []string{m.renderFloatingWhichKey(whichKeyFixture())}
 		}},
 		{"picker", func(m Model) []string {
 			picker := modelPickerFixture(0)

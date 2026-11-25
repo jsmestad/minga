@@ -13,8 +13,9 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
     [
       Entry.built("minga.whichkey",
         reach: "SPC a (pause)",
-        # Minga is working in the session, so the modeline carries its state while which-key is open.
-        start: [minga: :thinking],
+        # Minga waits on you in the session, so the modeline carries Minga's state and the Tasks row its live
+        # needs-you count while which-key is open.
+        start: [minga: :needs_you],
         recognize: &Edit.which_key?(&1, "SPC a"),
         explore: :which_key,
         checks: [
@@ -35,14 +36,17 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
             |> assert_group("x", "Context")
             |> assert_group("S", "Session")
           end),
-          Check.pending(
+          Check.new(
             "Tasks shows a live needs-you count",
-            4044,
-            &assert_count(&1, "a", "1 needs you")
+            &assert_count(&1, "a", "1 needs you", :needs_you)
           ),
           Check.new(
-            "the modeline says Minga is working, in the minga role",
-            &assert_state(&1, :modeline, :working)
+            "entries read in the designed sections",
+            &assert_sections(&1, ["Tasks", "Conversation", "Changes", "More"])
+          ),
+          Check.new(
+            "the modeline says Minga needs you, in the needs-you role",
+            &assert_state(&1, :modeline, :needs_you)
           )
         ]
       ),

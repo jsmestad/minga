@@ -320,10 +320,11 @@ func (m Model) renderStatusSegments(status protocol.StatusBar) string {
 		}
 	}
 	// showcmd: echo the pending key sequence as a dim segment at the head of the right cluster so every keypress is acknowledged instantly (issue #2666).
-	// The BEAM clears it (empty string) when the sequence resolves, aborts, or which-key opens, so no timer lives here.
+	// The BEAM clears it (empty string) when the sequence resolves or aborts, and keeps it while which-key is open, so
+	// the modeline names the prefix the panel waits on; no timer lives here. It draws in the text_muted role, secondary to the filetype beside it.
 	pending := ""
 	if status.PendingKeys != "" {
-		pending = lipgloss.NewStyle().Faint(true).Foreground(m.palette().Muted()).Background(m.palette().ChromeSurface()).Render(status.PendingKeys) + surface.Render(gap(modelineSegmentGap))
+		pending = lipgloss.NewStyle().Foreground(m.palette().Role(generated.ColorRoleTextMuted)).Background(m.palette().ChromeSurface()).Render(status.PendingKeys) + surface.Render(gap(modelineSegmentGap))
 	}
 	inset := modelineInset.cols()
 	budget := max(m.width-2*inset-lipgloss.Width(pending), 0)
@@ -815,22 +816,6 @@ func (m Model) renderCompletionItemRow(item protocol.CompletionItem, selected bo
 	}
 	rowStyle := lipgloss.NewStyle().Background(rowBackground).Width(width).ColorWhitespace(true)
 	return renderPadded(rowStyle, text, width)
-}
-
-func (m Model) renderWhichKey(which protocol.WhichKey) []string {
-	title := "Keys"
-	if which.Prefix != "" {
-		title += " " + which.Prefix
-	}
-	if which.PageCount > 1 {
-		title += gap(spaceXL) + fmt.Sprintf("%d/%d", which.Page+1, which.PageCount)
-	}
-	items := make([]componentItem, 0, len(which.Bindings))
-	for _, binding := range which.Bindings {
-		label := strings.TrimSpace(binding.Icon + " " + binding.Description)
-		items = append(items, componentItem{title: binding.Key, description: label})
-	}
-	return takeLines(m.charmList(title, items, 0, m.maxOverlayHeight(), true), m.maxOverlayHeight())
 }
 
 func (m Model) renderPicker(picker protocol.Picker, preview protocol.PickerPreview) []string {

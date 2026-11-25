@@ -304,41 +304,54 @@ struct GUIWhichKeyDecoderTests {
         var data = Data()
         data.append(OP_GUI_WHICH_KEY)
         data.append(1) // visible
-        appendString16(&data, "SPC") // prefix
-        data.append(0) // page
-        data.append(2) // pageCount
-        appendU16(&data, 2) // bindingCount
+        appendString16(&data, "SPC a") // path
+        data.append(2) // crumb count
+        appendString8(&data, "SPC"); appendString16(&data, ""); appendString16(&data, "SPC")
+        appendString8(&data, "a"); appendString16(&data, "Minga"); appendString16(&data, "SPC a")
+        appendString16(&data, "· 1 needs you") // count
+        data.append(1) // count tone: needs you
+        data.append(1) // hint count
+        appendString8(&data, "⌫"); appendString16(&data, "back")
+        appendU16(&data, 2) // entry count
 
-        // Binding 1: command
-        data.append(0) // kind=command
-        appendString8(&data, "f") // key
-        appendString16(&data, "Find file") // description
-        appendString8(&data, "🔍") // icon
+        // Entry 1: command
+        data.append(0)
+        appendString8(&data, "s")
+        data.append(contentsOf: [0, 0, 0, 0x73, 0]) // codepoint "s", modifiers
+        appendString16(&data, "Stop")
+        appendString16(&data, "Tasks")
+        appendString16(&data, "")
+        data.append(0) // count tone: muted
+        appendString8(&data, "⌘.")
 
-        // Binding 2: group
-        data.append(1) // kind=group
-        appendString8(&data, "b") // key
-        appendString16(&data, "Buffers") // description
-        appendString8(&data, "") // icon (empty)
+        // Entry 2: group
+        data.append(1)
+        appendString8(&data, "q")
+        data.append(contentsOf: [0, 0, 0, 0x71, 0])
+        appendString16(&data, "Queue ›")
+        appendString16(&data, "Conversation")
+        appendString16(&data, "· 2 errors")
+        data.append(2) // count tone: error
+        appendString8(&data, "")
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiWhichKey(let visible, let prefix, let page, let pageCount, let bindings) = cmd else {
+        guard case .guiWhichKey(let model) = cmd else {
             Issue.record("Expected .guiWhichKey"); return
         }
 
-        #expect(visible == true)
-        #expect(prefix == "SPC")
-        #expect(page == 0)
-        #expect(pageCount == 2)
-        #expect(bindings.count == 2)
-        #expect(bindings[0].kind == 0) // command
-        #expect(bindings[0].key == "f")
-        #expect(bindings[0].description == "Find file")
-        #expect(bindings[1].kind == 1) // group
-        #expect(bindings[1].key == "b")
-        #expect(bindings[1].description == "Buffers")
+        #expect(model.visible == true)
+        #expect(model.path == "SPC a")
+        #expect(model.breadcrumb == [.init(key: "SPC", path: "SPC"), .init(key: "a", label: "Minga", path: "SPC a")])
+        #expect(model.count == "· 1 needs you")
+        #expect(model.countTone == .needsYou)
+        #expect(model.hints == [.init(key: "⌫", label: "back")])
+        #expect(model.entries == [
+            .init(kind: 0, key: "s", codepoint: 0x73, label: "Stop", section: "Tasks", platformKey: "⌘."),
+            .init(kind: 1, key: "q", codepoint: 0x71, label: "Queue ›", section: "Conversation", count: "· 2 errors",
+                  countTone: .error),
+        ])
     }
 
     @Test("Decode gui_which_key hidden")
@@ -348,11 +361,11 @@ struct GUIWhichKeyDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == 2)
 
-        guard case .guiWhichKey(let visible, _, _, _, let bindings) = cmd else {
+        guard case .guiWhichKey(let model) = cmd else {
             Issue.record("Expected .guiWhichKey"); return
         }
-        #expect(visible == false)
-        #expect(bindings.isEmpty)
+        #expect(model.visible == false)
+        #expect(model.entries.isEmpty)
     }
 }
 

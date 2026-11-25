@@ -239,24 +239,43 @@ active_index: zero-based index into the visible tab entries, or 255 when the cur
 
 ### 0x72 — gui_which_key
 
-Which-key popup showing available keybindings after a prefix key.
+The which-key panel: where the leader sequence is, and what each next key does. The BEAM decides the words, the order and the sections; the frontend decides how many columns a section takes to fit its window (`docs/design/surfaces.md`, `docs/design/anatomy.md`).
 
 ```
-visible byte: 0 = hidden, 1 = visible
-
 When visible:
-  opcode(1) + 1(1) + prefix_len(2) + prefix(prefix_len) + page(1) + page_count(1) + binding_count(2) + bindings...
+  opcode(1) + 1(1)
+  + path_len(2) + path(path_len)
+  + crumb_count(1) + crumbs...
+  + count_len(2) + count(count_len) + count_tone(1)
+  + hint_count(1) + hints...
+  + entry_count(2) + entries...
 
-Per binding:
-  kind(1) + key_len(1) + key(key_len) + desc_len(2) + desc(desc_len) + icon_len(1) + icon(icon_len)
+Per crumb:
+  key_len(1) + key(key_len) + label_len(2) + label(label_len) + path_len(2) + path(path_len)
+
+Per hint:
+  key_len(1) + key(key_len) + label_len(2) + label(label_len)
+
+Per entry:
+  kind(1) + key_len(1) + key(key_len) + codepoint(4) + modifiers(1)
+  + label_len(2) + label(label_len) + section_len(2) + section(section_len)
+  + count_len(2) + count(count_len) + count_tone(1)
+  + platform_key_len(1) + platform_key(platform_key_len)
 
 Kind: 0 = command, 1 = group (prefix for more keys)
+Count tone: 0 = muted, 1 = needs you, 2 = error
 
 When hidden:
   opcode(1) + 0(1)
 ```
 
-`kind` alone says whether a row is a group; frontends never infer it from the text. A group's `desc` is final display text: a Title Case label with a trailing chevron, such as `Session ›`, never a `+label`. Frontends render `desc` verbatim and draw group rows in the `group` colour role (`docs/design/keys.md`, "Groups read like leaves").
+- `path` is the formatted prefix (`SPC a`) and the panel's identity. Each crumb carries the key, the group label it opened (empty for `SPC`) and the `path` a click on it returns to.
+- `count` is the open group's live count, drawn after the breadcrumb. An entry's `count` is drawn after its label (`· 1 needs you`, `· 3`). Both are final display text. `count_tone` names the colour role: a needs-you count draws in the `needs_you` role and an error count in the `failure` role, as the modeline draws the same facts; a muted count draws in the secondary colour. A frontend reads an unknown tone as muted.
+- `hints` are the panel's own keys (`⌫ back`, `esc close`).
+- Entries arrive in display order. Consecutive entries with the same `section` form one section, headed by its name in the secondary colour; an empty `section` has no heading. A frontend may split a long section into several columns, filling each column top to bottom.
+- `kind` alone says whether a row is a group; frontends never infer it from the text. A group's `label` is final display text: a Title Case label with a trailing chevron, such as `Session ›`, never a `+label`. Frontends render labels verbatim and draw group rows in the `group` colour role (`docs/design/keys.md`, "Groups read like leaves").
+- `codepoint` and `modifiers` are the raw key the row stands for, in the `key_press` encoding.
+- `platform_key` is the macOS ⌘ equivalent (`⌘S`), sent only to native GUI frontends; empty when there is none.
 
 ### 0x73 — gui_completion
 
@@ -406,7 +425,7 @@ The `plan_limit` built-in deliberately has no native control: frontends render i
 
 Section `0x0B` is omitted when the BEAM has no GUI modeline data for this frame. A present section with zero left and right segments is explicit and tells the frontend not to synthesize fallback built-ins.
 
-`PendingKeys` (`0x0E`) is vim's `showcmd`: the pending key sequence typed in normal/operator-pending mode that has not yet resolved into a command (an accumulated count, a register prefix like `"a`, an operator like `d`, or a pending single-key op like `f`/`r`/`m`). The frontend renders it as a dim, right-aligned status-bar segment so every keypress is acknowledged instantly, underneath the delayed which-key popup. The section is omitted when the string is empty, so it clears automatically when the sequence resolves, is aborted (Esc), or which-key opens (the BEAM derives an empty string, and this section specifically omits empty payloads — unlike e.g. `Message` 0x07, which is always emitted). It renders purely from BEAM FSM state per frame with no frontend timers.
+`PendingKeys` (`0x0E`) is vim's `showcmd`: the pending key sequence typed in normal/operator-pending mode that has not yet resolved into a command (an accumulated count, a register prefix like `"a`, an operator like `d`, or a pending single-key op like `f`/`r`/`m`). The frontend renders it as a dim, right-aligned status-bar segment so every keypress is acknowledged instantly, underneath the delayed which-key popup. The section is omitted when the string is empty, so it clears automatically when the sequence resolves or is aborted (Esc). It stays while which-key is open, so the modeline names the prefix the panel waits on (the BEAM derives an empty string once the sequence ends, and this section specifically omits empty payloads — unlike e.g. `Message` 0x07, which is always emitted). It renders purely from BEAM FSM state per frame with no frontend timers.
 
 ### 0x77 — gui_picker (sectioned format)
 

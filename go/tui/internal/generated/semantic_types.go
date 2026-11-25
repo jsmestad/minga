@@ -372,11 +372,27 @@ type PickerMovementKey struct {
 	Movement  PickerMovement
 }
 
-type WhichKeyBinding struct {
-	Kind uint8
-	Key  string
-	Desc string
-	Icon string
+type WhichKeyCrumb struct {
+	Key   string
+	Label string
+	Path  string
+}
+
+type WhichKeyHint struct {
+	Key   string
+	Label string
+}
+
+type WhichKeyEntry struct {
+	Kind        uint8
+	Key         string
+	Codepoint   uint32
+	Modifiers   uint8
+	Label       string
+	Section     string
+	Count       string
+	CountTone   uint8
+	PlatformKey string
 }
 
 type AgentTodo struct {

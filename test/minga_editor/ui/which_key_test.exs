@@ -61,7 +61,8 @@ defmodule MingaEditor.UI.WhichKeyTest do
                    key: "f",
                    description: "Find file",
                    kind: :command,
-                   icon: nil
+                   codepoint: ?f,
+                   modifiers: 0
                  })
              )
 
@@ -71,7 +72,8 @@ defmodule MingaEditor.UI.WhichKeyTest do
                    key: "s",
                    description: "Save file",
                    kind: :command,
-                   icon: nil
+                   codepoint: ?s,
+                   modifiers: 0
                  })
              )
     end
@@ -108,7 +110,8 @@ defmodule MingaEditor.UI.WhichKeyTest do
                  key: "x",
                  description: "?",
                  kind: :command,
-                 icon: nil
+                 codepoint: ?x,
+                 modifiers: 0
                }
              ]
     end
@@ -121,20 +124,10 @@ defmodule MingaEditor.UI.WhichKeyTest do
                  key: "q",
                  description: "quit",
                  kind: :command,
-                 icon: nil
+                 codepoint: ?q,
+                 modifiers: 0
                }
              ]
-    end
-
-    test "attaches icon to known group labels" do
-      result = WhichKey.format_bindings([{{?g, 0}, "Git", :group}])
-      assert [%MingaEditor.UI.WhichKey.Binding{kind: :group, icon: icon}] = result
-      assert icon != nil
-    end
-
-    test "returns nil icon for unknown group labels" do
-      result = WhichKey.format_bindings([{{?z, 0}, "Zzz unknown", :group}])
-      assert [%MingaEditor.UI.WhichKey.Binding{kind: :group, icon: nil}] = result
     end
 
     test "returns empty list for empty children" do
@@ -162,7 +155,9 @@ defmodule MingaEditor.UI.WhichKeyTest do
                    key: "s",
                    description: "Save file",
                    kind: :command,
-                   icon: nil
+                   codepoint: ?s,
+                   modifiers: 0,
+                   command: :save
                  })
              )
 
@@ -172,7 +167,9 @@ defmodule MingaEditor.UI.WhichKeyTest do
                    key: "f",
                    description: "Find file",
                    kind: :command,
-                   icon: nil
+                   codepoint: ?f,
+                   modifiers: 0,
+                   command: :find
                  })
              )
     end
@@ -201,11 +198,22 @@ defmodule MingaEditor.UI.WhichKeyTest do
                %MingaEditor.UI.WhichKey.Binding{
                  key: "f",
                  description: "Files",
-                 kind: :group,
-                 icon: "󰈔"
+                 kind: :group
                }
              ] =
                bindings
+    end
+
+    test "orders groups first, then commands, each case-insensitive with lowercase first" do
+      trie =
+        Bindings.new()
+        |> Bindings.bind([{?S, 0}], :stop_session, "Stop session")
+        |> Bindings.bind([{?s, 0}], :stop, "Stop")
+        |> Bindings.bind([{?a, 0}], :tasks, "Tasks")
+        |> Bindings.bind([{?q, 0}, {?q, 0}], :queue, "Open queue")
+        |> Bindings.bind_prefix([{?q, 0}], "Queue")
+
+      assert Enum.map(WhichKey.bindings_from_node(trie), & &1.key) == ["q", "a", "s", "S"]
     end
 
     test "returns empty list for leaf node with no children" do

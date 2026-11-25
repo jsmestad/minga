@@ -101,7 +101,7 @@ enum RenderCommand: Sendable {
     case guiObservatory(visible: Bool, nodeCount: UInt16, nodes: [Wire.ObservatoryNode])
     case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, selectedItemID: String, items: [Wire.CompletionItem], documentation: String, totalCount: UInt32, matchedCount: UInt32, incomplete: Bool, generation: UInt32)
     case guiCompletionSelection(generation: UInt32, selectedItemID: String, documentation: String)
-    case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [Wire.WhichKeyBinding])
+    case guiWhichKey(Wire.WhichKey)
     case guiBreadcrumb(segments: [String])
     case guiStatusBar(StatusBarUpdate)
     case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String, loadStatus: Wire.PickerLoadStatus, queryGeneration: UInt32, acknowledgedQueryEditSeq: UInt32, activationGeneration: UInt32, empty: Wire.EmptyList? = nil, listKeys: Bool = false, movementKeys: [Wire.PickerMovementKey] = [])
@@ -1082,39 +1082,59 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         return (.guiCompletionSelection(generation: generation, selectedItemID: selectedItemID, documentation: documentation), 3 + payloadLen)
 
     case .guiWhichKey:
+        // Hand framing with schema-generated element decoders (docs/GUI_PROTOCOL.md, gui_which_key).
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
-        let visible = data[rest] != 0
-        if !visible {
-            return (.guiWhichKey(visible: false, prefix: "", page: 0, pageCount: 0, bindings: []), 2)
+        if data[rest] == 0 { return (.guiWhichKey(.hidden), 2) }
+        do {
+            let end = data.count
+            var pos = rest + 1
+            let (path, pathEnd) = try GeneratedProtocol.decodeString16Window(data, pos, end)
+            pos = pathEnd
+            guard pos < end else { throw ProtocolDecodeError.malformed }
+            let crumbCount = Int(data[pos])
+            pos += 1
+            try FrameDecodeAccounting.reserve(.arrayEntries, crumbCount)
+            var breadcrumb: [Wire.WhichKeyCrumb] = []
+            for _ in 0..<crumbCount {
+                let (crumb, next) = try GeneratedProtocol.decodeWhichKeyCrumb(data, pos, end)
+                breadcrumb.append(Wire.WhichKeyCrumb(key: crumb.key, label: crumb.label, path: crumb.path))
+                pos = next
+            }
+            let (count, countEnd) = try GeneratedProtocol.decodeString16Window(data, pos, end)
+            pos = countEnd
+            guard pos + 1 < end else { throw ProtocolDecodeError.malformed }
+            let countTone = Wire.WhichKeyCountTone(byte: data[pos])
+            pos += 1
+            let hintCount = Int(data[pos])
+            pos += 1
+            try FrameDecodeAccounting.reserve(.arrayEntries, hintCount)
+            var hints: [Wire.WhichKeyHint] = []
+            for _ in 0..<hintCount {
+                let (hint, next) = try GeneratedProtocol.decodeWhichKeyHint(data, pos, end)
+                hints.append(Wire.WhichKeyHint(key: hint.key, label: hint.label))
+                pos = next
+            }
+            guard pos + 2 <= end else { throw ProtocolDecodeError.malformed }
+            let entryCount = Int(try readU16(data, pos))
+            pos += 2
+            try FrameDecodeAccounting.reserve(.arrayEntries, entryCount)
+            var entries: [Wire.WhichKeyEntry] = []
+            entries.reserveCapacity(entryCount)
+            for _ in 0..<entryCount {
+                let (e, next) = try GeneratedProtocol.decodeWhichKeyEntry(data, pos, end)
+                entries.append(Wire.WhichKeyEntry(kind: e.kind, key: e.key, codepoint: e.codepoint, modifiers: e.modifiers,
+                                                  label: e.label, section: e.section, count: e.count,
+                                                  countTone: Wire.WhichKeyCountTone(byte: e.countTone), platformKey: e.platformKey))
+                pos = next
+            }
+            let model = Wire.WhichKey(visible: true, path: path, breadcrumb: breadcrumb, count: count, countTone: countTone,
+                                      hints: hints, entries: entries)
+            return (.guiWhichKey(model), pos - offset)
+        } catch let error as FrameResourceError {
+            throw error
+        } catch {
+            throw ProtocolDecodeError.malformed
         }
-        guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
-        let prefixLen = Int(try readU16(data, rest + 1))
-        guard data.count >= rest + 3 + prefixLen + 4 else { throw ProtocolDecodeError.malformed }
-        let prefix = try decodeUTF8(data[(rest + 3)..<(rest + 3 + prefixLen)]) ?? ""
-        let page = data[rest + 3 + prefixLen]
-        let pageCount = data[rest + 4 + prefixLen]
-        let bindingCount = Int(try readU16(data, rest + 5 + prefixLen))
-        var bindings: [Wire.WhichKeyBinding] = []
-        try FrameDecodeAccounting.reserve(.arrayEntries, bindingCount)
-        bindings.reserveCapacity(bindingCount)
-        var pos = rest + 7 + prefixLen
-        for _ in 0..<bindingCount {
-            guard data.count >= pos + 2 else { throw ProtocolDecodeError.malformed }
-            let bKind = data[pos]
-            let keyLen = Int(data[pos + 1])
-            guard data.count >= pos + 2 + keyLen + 2 else { throw ProtocolDecodeError.malformed }
-            let key = try decodeUTF8(data[(pos + 2)..<(pos + 2 + keyLen)]) ?? ""
-            let descLen = Int(try readU16(data, pos + 2 + keyLen))
-            guard data.count >= pos + 4 + keyLen + descLen + 1 else { throw ProtocolDecodeError.malformed }
-            let desc = try decodeUTF8(data[(pos + 4 + keyLen)..<(pos + 4 + keyLen + descLen)]) ?? ""
-            let iconLen = Int(data[pos + 4 + keyLen + descLen])
-            guard data.count >= pos + 5 + keyLen + descLen + iconLen else { throw ProtocolDecodeError.malformed }
-            let icon = try decodeUTF8(data[(pos + 5 + keyLen + descLen)..<(pos + 5 + keyLen + descLen + iconLen)]) ?? ""
-            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-            bindings.append(Wire.WhichKeyBinding(kind: bKind, key: key, description: desc, icon: icon))
-            pos += 5 + keyLen + descLen + iconLen
-        }
-        return (.guiWhichKey(visible: true, prefix: prefix, page: page, pageCount: pageCount, bindings: bindings), pos - offset)
 
     case .guiBreadcrumb:
         // Schema-generated decoder (gui_breadcrumb command_fields): a u8-counted

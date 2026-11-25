@@ -51,7 +51,7 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
 
       case lookup_leader(trie, codepoint, modifiers) do
         {:match, node} ->
-          enter_leader(state, node)
+          enter_leader(state, trie, node, {codepoint, modifiers})
 
         :no_match ->
           # Key doesn't match a leader prefix. Replay the withheld space
@@ -122,12 +122,22 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
 
   # ── Private ──────────────────────────────────────────────────────────────
 
-  @spec enter_leader(EditorState.t(), Minga.Keymap.Bindings.node_t()) :: EditorState.t()
-  defp enter_leader(state, node) do
+  # Which-key opens on the group the key named, one level below SPC, so Backspace goes back up to SPC.
+  @spec enter_leader(
+          EditorState.t(),
+          Minga.Keymap.Bindings.node_t(),
+          Minga.Keymap.Bindings.node_t(),
+          Minga.Keymap.Bindings.key()
+        ) :: EditorState.t()
+  defp enter_leader(state, root, node, key) do
     if node.command != nil do
       execute_command(state, node.command)
     else
-      Commands.execute(state, {:leader_start, node})
+      state
+      |> Commands.execute({:leader_start, root, ["SPC"]})
+      |> Commands.execute(
+        {:leader_progress, node, ["SPC", Minga.Keymap.Bindings.format_key(key)]}
+      )
     end
   end
 
@@ -165,11 +175,13 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
        do: dispatch_key_normally(state, codepoint, modifiers)
 
   defp retract_into_leader(state, held, codepoint, modifiers) do
-    case lookup_leader(leader_trie(state), codepoint, modifiers) do
+    trie = leader_trie(state)
+
+    case lookup_leader(trie, codepoint, modifiers) do
       {:match, node} ->
         state
         |> retract_space(held)
-        |> enter_leader(node)
+        |> enter_leader(trie, node, {codepoint, modifiers})
 
       :no_match ->
         # Key doesn't match. Leave the space, process key normally.

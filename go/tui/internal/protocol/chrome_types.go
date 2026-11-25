@@ -108,19 +108,24 @@ type CompletionItem struct {
 	MatchRanges []generated.CompletionMatchRange
 }
 
-type WhichKey struct {
-	Visible   bool
-	Prefix    string
-	Page      byte
-	PageCount byte
-	Bindings  []WhichKeyBinding
-}
+// Count tones for WhichKey.CountTone and WhichKeyEntry.CountTone: the colour role a count draws in.
+const (
+	WhichKeyCountMuted    uint8 = 0
+	WhichKeyCountNeedsYou uint8 = 1
+	WhichKeyCountError    uint8 = 2
+)
 
-type WhichKeyBinding struct {
-	Kind        byte
-	Key         string
-	Description string
-	Icon        string
+// WhichKey is the which-key panel (docs/GUI_PROTOCOL.md, gui_which_key). Entries arrive in display order; consecutive
+// entries with the same Section form one section. A count's tone names its colour role: WhichKeyCountMuted,
+// WhichKeyCountNeedsYou or WhichKeyCountError.
+type WhichKey struct {
+	Visible    bool
+	Path       string
+	Breadcrumb []generated.WhichKeyCrumb
+	Count      string
+	CountTone  uint8
+	Hints      []generated.WhichKeyHint
+	Entries    []generated.WhichKeyEntry
 }
 
 type Picker struct {

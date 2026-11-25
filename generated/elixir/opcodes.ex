@@ -7,7 +7,7 @@ defmodule Minga.Protocol.Opcodes do
 
   # Protocol version
   @spec protocol_version() :: non_neg_integer()
-  def protocol_version, do: 47
+  def protocol_version, do: 48
 
   # Input
   @spec key_press() :: non_neg_integer()

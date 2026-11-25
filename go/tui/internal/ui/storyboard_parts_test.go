@@ -96,7 +96,7 @@ func (g cellGrid) box() ([4]int, bool) {
 // storyboardParts locates the which-key panel and the modeline in a drawn frame.
 func storyboardParts(model Model, grid cellGrid) []storyboardPart {
 	var parts []storyboardPart
-	if which, ok := model.whichKey(); ok && which.Visible && len(which.Bindings) > 0 {
+	if which, ok := model.whichKey(); ok && which.Visible && len(which.Entries) > 0 {
 		parts = append(parts, whichKeyParts(which, grid)...)
 	}
 	if status, ok := model.statusBar(); ok {
@@ -113,19 +113,42 @@ func whichKeyParts(which protocol.WhichKey, grid cellGrid) []storyboardPart {
 	parts := []storyboardPart{{Part: "whichKey.panel", Frame: panel}}
 	left, right := panel[0]+1, panel[0]+panel[2]-1
 	top, bottom := panel[1]+1, panel[1]+panel[3]-1
-	if prefix := which.Prefix; prefix != "" {
-		if x := grid.find(top, left, right, prefix); x >= 0 {
-			parts = append(parts, storyboardPart{Part: "whichKey.breadcrumb", Frame: [4]int{x, top, len([]rune(prefix)), 1}, Text: prefix})
+	// The breadcrumb sits in the top border: the path's crumbs, joined by ›.
+	if len(which.Breadcrumb) > 0 {
+		crumbs := make([]string, 0, len(which.Breadcrumb))
+		for _, crumb := range which.Breadcrumb {
+			crumbs = append(crumbs, strings.TrimSpace(crumb.Key+" "+crumb.Label))
+		}
+		text := strings.Join(crumbs, " › ")
+		if x := grid.find(panel[1], panel[0], right, text); x >= 0 {
+			parts = append(parts, storyboardPart{Part: "whichKey.breadcrumb", Frame: [4]int{x, panel[1], len([]rune(text)), 1}, Text: text})
 		}
 	}
-	// Each binding is found by its description; its key is the nearest match of the key text before it on that row.
+	// Each section's name sits above its first column; scanning top-down finds the heading row before any label
+	// that repeats the word.
+	seen := map[string]bool{}
+	for _, entry := range which.Entries {
+		title := strings.TrimSpace(entry.Section)
+		if title == "" || seen[title] {
+			continue
+		}
+		seen[title] = true
+		for y := top; y < bottom; y++ {
+			if x := grid.find(y, left, right, title); x >= 0 {
+				parts = append(parts, storyboardPart{Part: "whichKey.groupName", Frame: [4]int{x, y, len([]rune(title)), 1}, Text: title})
+				break
+			}
+		}
+	}
+	// Each entry is found by its label; its key is the nearest match of the key text before it on that row, and its
+	// count the text after it.
 	used := map[[2]int]bool{}
-	for _, binding := range which.Bindings {
-		description := strings.TrimSpace(binding.Description)
-		key := strings.TrimSpace(binding.Key)
+	for _, entry := range which.Entries {
+		label := strings.TrimSpace(entry.Label)
+		key := strings.TrimSpace(entry.Key)
 		found := false
 		for y := top; y < bottom && !found; y++ {
-			x, shown, truncated := findLabel(grid, y, left, right, description, used)
+			x, shown, truncated := findLabel(grid, y, left, right, label, used)
 			if x < 0 {
 				continue
 			}
@@ -138,13 +161,18 @@ func whichKeyParts(which protocol.WhichKey, grid cellGrid) []storyboardPart {
 			ellipsis := truncated && x+shown < right && grid[y][x+shown] == "…"
 			parts = append(parts,
 				storyboardPart{Part: "whichKey.entryKey", Frame: [4]int{keyX, y, len([]rune(key)), 1}, Text: key},
-				storyboardPart{Part: "whichKey.entryLabel", Frame: [4]int{labelStart, y, x + shown - labelStart, 1}, Text: description,
+				storyboardPart{Part: "whichKey.entryLabel", Frame: [4]int{labelStart, y, x + shown - labelStart, 1}, Text: label,
 					Truncated: truncated, Ellipsis: ellipsis},
 			)
+			if count := strings.TrimSpace(entry.Count); count != "" && !truncated {
+				if cx := grid.find(y, x+shown, right, count); cx >= 0 {
+					parts = append(parts, storyboardPart{Part: "whichKey.entryCount", Frame: [4]int{cx, y, len([]rune(count)), 1}, Text: count})
+				}
+			}
 			found = true
 		}
 		if !found {
-			parts = append(parts, storyboardPart{Part: "whichKey.entry", Text: key + " " + description, Missing: true})
+			parts = append(parts, storyboardPart{Part: "whichKey.entry", Text: key + " " + label, Missing: true})
 		}
 	}
 	return parts
@@ -270,7 +298,7 @@ func TestStoryboardPartsReportWhatTheyCannotFind(t *testing.T) {
 		strings.Split("hello     ", ""),
 		strings.Split(" NORMAL  x", ""),
 	}
-	which := protocol.WhichKey{Visible: true, Bindings: []protocol.WhichKeyBinding{{Key: "f", Description: "Find file"}}}
+	which := protocol.WhichKey{Visible: true, Entries: []generated.WhichKeyEntry{{Key: "f", Label: "Find file"}}}
 	if parts := whichKeyParts(which, grid); len(parts) != 1 || parts[0].Part != "whichKey.panel" || !parts[0].Missing {
 		t.Fatalf("a which-key panel without its border is missing, got %+v", parts)
 	}

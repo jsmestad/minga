@@ -33,6 +33,11 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSource do
 
   def candidates(_context), do: [empty_state_item()]
 
+  @doc "Returns how many workspaces await review, the count which-key shows beside Pending reviews."
+  @spec pending_count(TabBar.t()) :: non_neg_integer()
+  def pending_count(%TabBar{workspaces: workspaces}),
+    do: Enum.count(workspaces, &pending_review?/1)
+
   @impl true
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: :empty}, state), do: state
