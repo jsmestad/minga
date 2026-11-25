@@ -1,36 +1,40 @@
 {
   "macos": {
-    "commit": "f182458f7e6797784b1b93364aeb4f76469390d8-dirty",
+    "commit": "f777d3e78615c1651d423d05be0640b817531a3b",
     "files": {
-      "macos-astrodark-1280.json": "3c9ef60085c9846108ce1533bc67383bf50b25368df9174e8c24a2fd494bf907",
-      "macos-astrodark-1440.json": "13345c6df401b4b0294b9043659818705e8cd1f5c92a0914ad1a97cad91218c6",
-      "macos-catppuccin_frappe-1280.json": "b9aee0b4b4e9dba3ff11b82cc7b4ca1e97b4d2a0ec9d4c014ee200c8dbe5489e",
-      "macos-catppuccin_frappe-1440.json": "881624983feefd51d9b786919232d2e09a2044cff47e7be2386d6599a01498c5",
-      "macos-catppuccin_latte-1280.json": "27d7f29e8509677124f52c9a4b227c105172056855e6faa1ce9ccc5cac21701a",
-      "macos-catppuccin_latte-1440.json": "4f8cd5ff117a52511d6623dcb1547f8dfcf71678d90945d32b88468c510bf8bd"
+      "macos-astrodark-1280.json": "e85ece2062a0f48a334e54d2c8c68982c4e81dc53936a53c098655aa3053207e",
+      "macos-astrodark-1440.json": "310f3a6b5a7c0c7432df1826d1aa9bb5d4a820f03fdb8523edd0d5ad32e0b467",
+      "macos-catppuccin_frappe-1280.json": "926bdbcf765b790cbe76955c16b5b4f609080b74f8476d655d27f174b223fd26",
+      "macos-catppuccin_frappe-1440.json": "fdd40457fe926b1e3ad1a9ee98e80591654f74b4d5c02a65661b2f0ca67420b1",
+      "macos-catppuccin_latte-1280.json": "fc50932e800387f92ecad1f8edbca14df8002398ab34397bad3dc8fbe7351dc6",
+      "macos-catppuccin_latte-1440.json": "5ff75acc762d4544f7071a214974826d46aae6b24a5b3c7a88907e5f7fc7a435"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "f721af425bd1117b032d140ec3b6f51dafa8a5f439bfe376c62429b54c74a6f0",
-      "macos-astrodark-1440.json": "969088472822ab702f3a212b7bb243b9800a8b60a8e5974c06166586684ffa17",
-      "macos-catppuccin_frappe-1280.json": "7985b381c66708f77923aeab7083a67b2aab57ac4863019f60e3b9ef5300903a",
-      "macos-catppuccin_frappe-1440.json": "9d283760cb325b2a7b1c5d958ea69788154785941326671659b168168bded9ec",
-      "macos-catppuccin_latte-1280.json": "e8b4ffa6298339fa9b01364f747146f7c8e93cbb04eaccd26196389cd3418542",
-      "macos-catppuccin_latte-1440.json": "7730ae7952917669dca5cd5e06c714c37c5a4293c48848f9c0cb8b8765f57c52"
+      "macos-astrodark-1280.json": "eb8b95ec4435f35583f159073a9b979ca5ab87d2690443549c2f661198a6ad2e",
+      "macos-astrodark-1440.json": "30f765f407ee5718872ae75739ca1eb3d9cc8c7b78d79ebadfab3a89f6b55f70",
+      "macos-catppuccin_frappe-1280.json": "0925139b8619ef2bea1d668e642d7c2688c10d199b31b9e5f17a246553833b43",
+      "macos-catppuccin_frappe-1440.json": "e2f727819c864c933677725ac9b9eac2afc601f3e531fcd4bb8e5070e9ac41b0",
+      "macos-catppuccin_latte-1280.json": "e61bfcee7a0c7c0ab3182c29d6d89a7af692f62983a7b2d5e1f872b235e39fc0",
+      "macos-catppuccin_latte-1440.json": "a1ddc7b355e7c8a45ba8a6b1a6c5ff6e20495d887bf85ca297eeb57795ae2855"
     }
+  },
+  "platform_specific": {
+    "frontend": "tui",
+    "reason": "the shared terminal empty list keeps a one-column trailing inset, so a cut line ends before the border; macOS lays its empty state out natively"
   },
   "scenario": "start.project_switcher.empty",
   "tui": {
-    "commit": "befbcee0d83726a629dd5b12016f269c10abd04a-dirty",
+    "commit": "f777d3e78615c1651d423d05be0640b817531a3b",
     "files": {
-      "tui-astrodark-120x40.txt": "6727bb63e8337013e48a3b4b4f93fea0aaba1973ed481cd657d2363b0ae9177c",
-      "tui-astrodark-150x38.txt": "9532d4a09e0852b2532c6311f16a768d67944126ce6c21a7dbf9d5d8015b1e3c",
-      "tui-astrodark-80x24.txt": "0386ec38ac1de25a893390292ce7a67932ebe28ff204ab26d8d3ec35b5515eee",
-      "tui-catppuccin_frappe-120x40.txt": "5b570f441bb334c6fb705075f05a5acc91ba87cc169868589992562166f7098e",
-      "tui-catppuccin_frappe-150x38.txt": "e27263149481bfd9f5644ce53fe6b5d70a1c01a87c883a13e2d5c746779a6ee5",
-      "tui-catppuccin_frappe-80x24.txt": "90f3c28bb368039b980faac437f156170e1378711bc9e6eb4b6d8964c34e919d",
-      "tui-catppuccin_latte-120x40.txt": "d0939655fa1c8c3ef87f62d5bed45b041b3fbcc4b8c99234b29603749f5c95aa",
-      "tui-catppuccin_latte-150x38.txt": "6e1d1b1866a0790a1a5b46fee8bdd735b336efd2c9c6b958ab8f1e532a7f8cea",
-      "tui-catppuccin_latte-80x24.txt": "0ea9a317535810e54c624bdce34baeaa1fe630a238abd0b133aef8e6909372d1"
+      "tui-astrodark-120x40.txt": "26459825ad24d3ff28649b668c0a5f044bee6dba6be9c44085b2ef9729d743f6",
+      "tui-astrodark-150x38.txt": "e98f43df57f68ad1fad53721b41052464eb581e500c3593712e55cd271e5e200",
+      "tui-astrodark-80x24.txt": "764b52a5554d2569f9567a40140210094aabd8e596e45f7eff079313aa4446cb",
+      "tui-catppuccin_frappe-120x40.txt": "055e5d3c0b74d8d89cf22c1570f767a75f66143f45aad65344f1dffe1586eb39",
+      "tui-catppuccin_frappe-150x38.txt": "3a3f52264bedba16ee0369ab460673cdac5bfbbf7a2bd04a1cd0ec367469567c",
+      "tui-catppuccin_frappe-80x24.txt": "f561b8ca4356026dff9434dd1a5da5e54f451eff642e0462b76bf59bf7ede058",
+      "tui-catppuccin_latte-120x40.txt": "88143b455a39f1217aa336b423def45ec2218e8c4192af30071ab82bad1032ef",
+      "tui-catppuccin_latte-150x38.txt": "01c70558eb2ae862487d0f0692746f4bf7502b11dc6d9458d39745bad7337d74",
+      "tui-catppuccin_latte-80x24.txt": "0610d5481b98af06c0b9cb1447cb05067e39582f94f28b75d2b4963b458de701"
     }
   }
 }

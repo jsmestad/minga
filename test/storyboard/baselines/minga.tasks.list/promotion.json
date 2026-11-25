@@ -1,6 +1,6 @@
 {
   "macos": {
-    "commit": "a70ccca581aef249ef43cab3efab936167201487",
+    "commit": "f777d3e78615c1651d423d05be0640b817531a3b",
     "files": {
       "macos-astrodark-1280.json": "f2d0e00c7d5db03d343b0390a1dd66911c5d6efb24e38c6cf70312f7ca2b51ba",
       "macos-astrodark-1440.json": "44a5b6f9fbd0258266d7ae52b70a11ce8801f42e7a9a72532ac9089880556127",
@@ -10,13 +10,17 @@
       "macos-catppuccin_latte-1440.json": "de6c70b6b9baebfade18c64ee54272d14ec074c63794583b686f654c60552ea1"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "6bcd0749373598862b36152e5c44c3dddeb2fcecf0112349d272329e21cc2305",
-      "macos-astrodark-1440.json": "08ca01bba46f35ce73b1b75edb57a576d230dcd0977635ea2aa31552831cd291",
-      "macos-catppuccin_frappe-1280.json": "c2b14576c68391e730e02828163ec237276c30c654c4002f0ea5559333ffd15c",
-      "macos-catppuccin_frappe-1440.json": "471562d0b400a3241a68f97b50889e51d0afd095a57462d2ece8be463f601a1f",
-      "macos-catppuccin_latte-1280.json": "cfd1784481ea58eb5433c6158be045eeae7b08d02b4f84ddb1a388ceebf0c85f",
-      "macos-catppuccin_latte-1440.json": "a0556567ae5c2b56dcf50a11945ad40821749aa790c3aa5cd295427e68ff4f64"
+      "macos-astrodark-1280.json": "5c817796ff00460635970384fa5d381b8481196cdae6cad3c8052bf99c1018de",
+      "macos-astrodark-1440.json": "dd3e9b8fb8a6d769719720e09986dba699959b52374e515482d8c72f6bafae8b",
+      "macos-catppuccin_frappe-1280.json": "fbe9448d7b1cafaea6775f33d846b6b3d1090d852038c7f82e5964ec68772a66",
+      "macos-catppuccin_frappe-1440.json": "9400172c9fee870b8ec224a9680ce81438d455d2658654969ff9824938e55e1a",
+      "macos-catppuccin_latte-1280.json": "3e52055cffae8bab348791c5b5c0daeb24a8541ea4a5f1a7bad756864c7cbb71",
+      "macos-catppuccin_latte-1440.json": "4f6b7ac25611be3460e0615b0467b8854a0e4eb6d4b53f3bf9e4715f8608661e"
     }
+  },
+  "platform_specific": {
+    "frontend": "tui",
+    "reason": "the shared terminal empty list keeps a one-column trailing inset, so a cut line ends before the border; macOS lays its empty state out natively"
   },
   "scenario": "minga.tasks.list",
   "tui": {

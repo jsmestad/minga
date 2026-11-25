@@ -16,11 +16,11 @@
    7
       ~
 ╭ SPC › a Minga · 1 needs you ─────────────────────────────────────────────────╮
-│ Tasks                        Conversation           Changes                  │
-│ a Agent view · 1 needs you   v Conversation split   r Pending reviews        │
-│ n New session                ? Ask about this       u Undo all agent edits   │
-│ s Stop                       e Rewrite selection    p Publish edits…         │
-│                              q Queue ›                                       │
+│ Tasks                   Conversation           Changes                       │
+│ a Tasks · 1 needs you   v Conversation split   r Pending reviews             │
+│ n New task              ? Ask about this       u Undo all agent edits        │
+│ s Stop                  e Rewrite selection    p Publish edits…              │
+│                         q Queue ›                                            │
 │                                                                              │
 │ More                                                                         │
 │ x Context ›                                                                  │
@@ -90,48 +90,48 @@
 10 30-79 #696c76 #14161b -
 11 0-0 #696c76 #14161b -
 11 1-1 #adb0bb #14161b -
-11 2-27 #858892 #14161b -
-11 28-30 #adb0bb #14161b -
-11 31-50 #858892 #14161b -
-11 51-53 #adb0bb #14161b -
-11 54-75 #858892 #14161b -
-11 76-78 #adb0bb #14161b -
+11 2-22 #858892 #14161b -
+11 23-25 #adb0bb #14161b -
+11 26-45 #858892 #14161b -
+11 46-48 #adb0bb #14161b -
+11 49-70 #858892 #14161b -
+11 71-78 #adb0bb #14161b -
 11 79-79 #696c76 #14161b -
 12 0-0 #696c76 #14161b -
 12 1-1 #adb0bb #14161b -
 12 2-2 #50a4e9 #14161b -
-12 3-14 #adb0bb #14161b -
-12 15-27 #f5983a #14161b -
-12 28-30 #adb0bb #14161b -
-12 31-31 #50a4e9 #14161b -
-12 32-53 #adb0bb #14161b -
-12 54-54 #50a4e9 #14161b -
-12 55-78 #adb0bb #14161b -
+12 3-9 #adb0bb #14161b -
+12 10-22 #f5983a #14161b -
+12 23-25 #adb0bb #14161b -
+12 26-26 #50a4e9 #14161b -
+12 27-48 #adb0bb #14161b -
+12 49-49 #50a4e9 #14161b -
+12 50-78 #adb0bb #14161b -
 12 79-79 #696c76 #14161b -
 13 0-0 #696c76 #14161b -
 13 1-1 #adb0bb #14161b -
 13 2-2 #50a4e9 #14161b -
-13 3-30 #adb0bb #14161b -
-13 31-31 #50a4e9 #14161b -
-13 32-53 #adb0bb #14161b -
-13 54-54 #50a4e9 #14161b -
-13 55-78 #adb0bb #14161b -
+13 3-25 #adb0bb #14161b -
+13 26-26 #50a4e9 #14161b -
+13 27-48 #adb0bb #14161b -
+13 49-49 #50a4e9 #14161b -
+13 50-78 #adb0bb #14161b -
 13 79-79 #696c76 #14161b -
 14 0-0 #696c76 #14161b -
 14 1-1 #adb0bb #14161b -
 14 2-2 #50a4e9 #14161b -
-14 3-30 #adb0bb #14161b -
-14 31-31 #50a4e9 #14161b -
-14 32-53 #adb0bb #14161b -
-14 54-54 #50a4e9 #14161b -
-14 55-78 #adb0bb #14161b -
+14 3-25 #adb0bb #14161b -
+14 26-26 #50a4e9 #14161b -
+14 27-48 #adb0bb #14161b -
+14 49-49 #50a4e9 #14161b -
+14 50-78 #adb0bb #14161b -
 14 79-79 #696c76 #14161b -
 15 0-0 #696c76 #14161b -
-15 1-30 #adb0bb #14161b -
-15 31-31 #50a4e9 #14161b -
-15 32-32 #adb0bb #14161b -
-15 33-39 #50a4e9 #14161b -
-15 40-78 #adb0bb #14161b -
+15 1-25 #adb0bb #14161b -
+15 26-26 #50a4e9 #14161b -
+15 27-27 #adb0bb #14161b -
+15 28-34 #50a4e9 #14161b -
+15 35-78 #adb0bb #14161b -
 15 79-79 #696c76 #14161b -
 16 0-0 #696c76 #14161b -
 16 1-78 #adb0bb #14161b -

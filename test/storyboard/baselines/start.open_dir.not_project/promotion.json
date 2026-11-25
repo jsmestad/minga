@@ -1,6 +1,6 @@
 {
   "macos": {
-    "commit": "09bd202e8f10812843ba7ef2340ff7fbc6de0297",
+    "commit": "f777d3e78615c1651d423d05be0640b817531a3b",
     "files": {
       "macos-astrodark-1280.json": "8cac31e5c9226ca6e7ab07d83b608c6a283e3d127edc958ebd9e810be7f500f3",
       "macos-astrodark-1440.json": "43a446154b5fb12f287dde5643b95f72d5105b0ed83556b42942715eecae15bd",
@@ -10,13 +10,17 @@
       "macos-catppuccin_latte-1440.json": "21f55aa9d0688457bb5e9dbeeb20be47fdd4bdf4b538aa9dbc3d8fee2c81cd23"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "0b6631adf60afa8da36cd2dd91ecab0b804f5bc58479afbbe0fe3d33c551175d",
-      "macos-astrodark-1440.json": "6da872254dd6f3c7e09fc550e3b7a1dbc4e2e9f1e33ccc446a0431bd1ba04579",
-      "macos-catppuccin_frappe-1280.json": "8bcd504c79b91eab5a195433151b4b9b1e9f3d126dd76a5affa1276e2baa0e15",
-      "macos-catppuccin_frappe-1440.json": "d4a40d7ecae5bf5ca21a0f1ce5430351c3e2b3b42813addc4125bc3433dc0f1e",
-      "macos-catppuccin_latte-1280.json": "02c907bd7d9f3ddc3c050b89ef992b3d96c0acc410b751c9cf17d3e320f3d65f",
-      "macos-catppuccin_latte-1440.json": "36d60cb5d0d8a94feda49a3f74f1eee3083b53408398c7b7337424c50cc21237"
+      "macos-astrodark-1280.json": "67377d4ab97948a3a9c108df67d2ebd34ef28913316c2867e1cea175195f9dea",
+      "macos-astrodark-1440.json": "d4e9bf8600578c8e9b4705757d4608978fa962686d96d9c037cd1d5c0c14ab5f",
+      "macos-catppuccin_frappe-1280.json": "2c70f0a4bd8aa85f85c5e1a6ce5d768982a482319592de4c1df8fa3df603ec14",
+      "macos-catppuccin_frappe-1440.json": "dddcbe73408a76e7efa7bca4faf5df087cebb607773c2df56fdedf93c67000b9",
+      "macos-catppuccin_latte-1280.json": "80305e6b82dc91466d0837d6d8062fc192752afed1acc9e7e1d736c81573df9a",
+      "macos-catppuccin_latte-1440.json": "7b7e0f749a7492ba6b1dd97ef994586a841ff782a1783da885baebe84e4b78ef"
     }
+  },
+  "platform_specific": {
+    "frontend": "tui",
+    "reason": "the shared terminal empty list keeps a one-column trailing inset, so a cut line ends before the border; macOS lays its empty state out natively"
   },
   "scenario": "start.open_dir.not_project",
   "tui": {
