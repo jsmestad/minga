@@ -44,6 +44,68 @@ defmodule MingaAgent.WorkingFolderTest do
     end
   end
 
+  describe "project/2" do
+    test "a project in an ordinary folder is a project, whatever marker made it one", %{
+      tmp_dir: dir
+    } do
+      assert WorkingFolder.project(dir, fn _root -> false end) == {:project, dir}
+      assert WorkingFolder.project(dir, fn _root -> true end) == {:project, dir}
+    end
+
+    test "a version-controlled project is trusted wherever it is, the home directory included" do
+      home = Path.expand("~")
+
+      assert WorkingFolder.project(home, fn _root -> true end) == {:project, home}
+    end
+
+    test "any other marker does not make the home directory, the root or a link to either a project",
+         %{tmp_dir: dir} do
+      home = Path.expand("~")
+      {:ok, canonical_home} = Minga.Project.Root.canonical_path(home)
+      home_link = Path.join(dir, "home")
+      File.ln_s!(home, home_link)
+
+      for {broad, canonical} <- [{home, canonical_home}, {"/", "/"}, {home_link, canonical_home}] do
+        not_a_project = WorkingFolder.project(broad, fn _root -> false end)
+
+        assert not_a_project == {:unavailable, {:too_broad, canonical}}
+        refute WorkingFolder.available?(not_a_project)
+      end
+    end
+
+    test "the refusal names the folder and what to do" do
+      home = Path.expand("~")
+
+      assert home |> WorkingFolder.project(fn _root -> false end) |> WorkingFolder.refusal() ==
+               "Minga has no folder to work in: ~ is too broad. " <>
+                 "Open a folder inside it, or move the file into a folder."
+    end
+
+    test "a folder whose only marker is its .minga directory is a project, and its instructions and skills are found",
+         %{tmp_dir: dir} do
+      notes = Path.join(dir, "notes")
+      File.mkdir_p!(Path.join(notes, ".minga/skills/journal"))
+      File.write!(Path.join(notes, ".minga/AGENTS.md"), "Write in the first person.")
+
+      File.write!(
+        Path.join(notes, ".minga/skills/journal/SKILL.md"),
+        "---\nname: journal\ndescription: Daily notes\n---\n\nOne entry a day.\n"
+      )
+
+      file = Path.join(notes, "today.md")
+      File.write!(file, "")
+
+      assert {:ok, ^notes, :minga} = Minga.Project.Detector.detect(file)
+      assert WorkingFolder.project(notes) == {:project, notes}
+      assert MingaAgent.Instructions.assemble(notes) =~ "Write in the first person."
+      assert "journal" in Enum.map(MingaAgent.Skills.discover(notes), & &1.name)
+    end
+
+    test "a root that does not exist is left to the caller's start, as before" do
+      assert WorkingFolder.project("/work/app", fn _root -> false end) == {:project, "/work/app"}
+    end
+  end
+
   describe "for_file/1" do
     test "a file's folder is the session's folder", %{tmp_dir: dir} do
       {:ok, canonical} = Minga.Project.Root.canonical_path(dir)

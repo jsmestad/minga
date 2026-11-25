@@ -5,6 +5,9 @@ defmodule Minga.Project.DetectorTest do
 
   @moduletag :tmp_dir
 
+  # The home directory of a test and everything above it, so the walk never reads the real one.
+  defp at_or_above(home), do: fn dir -> not String.starts_with?(dir, home <> "/") end
+
   describe "detect/1 with default markers" do
     test "detects git project from nested file", %{tmp_dir: tmp} do
       project = Path.join(tmp, "myproject")
@@ -68,6 +71,84 @@ defmodule Minga.Project.DetectorTest do
       File.write!(file, "")
 
       assert {:ok, ^project, :minga} = Detector.detect(file)
+    end
+
+    test "a .minga directory marks a folder as a project: its instructions and skills live there",
+         %{tmp_dir: tmp} do
+      notes = Path.join(tmp, "notes")
+      File.mkdir_p!(Path.join(notes, ".minga/skills"))
+      File.mkdir_p!(Path.join(notes, "daily"))
+      file = Path.join(notes, "daily/today.md")
+      File.write!(file, "")
+
+      assert {:ok, ^notes, :minga} = Detector.detect(file, [{".minga", :minga}])
+    end
+
+    test "Minga's own .minga directory does not make the home directory a project", %{
+      tmp_dir: tmp
+    } do
+      home = Path.join(tmp, "home")
+      File.mkdir_p!(Path.join(home, ".minga/workspaces"))
+      file = Path.join(home, "notes.txt")
+      File.write!(file, "")
+
+      assert :none = Detector.detect(file, [{".minga", :minga}], at_or_above(home))
+    end
+
+    test "a .minga file marks a root even where a directory would not", %{tmp_dir: tmp} do
+      home = Path.join(tmp, "home")
+      File.mkdir_p!(home)
+      File.write!(Path.join(home, ".minga"), "")
+      file = Path.join(home, "notes.txt")
+      File.write!(file, "")
+
+      assert {:ok, ^home, :minga} = Detector.detect(file, [{".minga", :minga}], at_or_above(home))
+    end
+
+    test "in a home directory under version control, a folder with its own .minga directory is the project",
+         %{tmp_dir: tmp} do
+      home = Path.join(tmp, "home")
+      notes = Path.join(home, "notes")
+      File.mkdir_p!(Path.join(home, ".git"))
+      File.mkdir_p!(Path.join(home, ".minga/workspaces"))
+      File.mkdir_p!(Path.join(notes, ".minga/skills"))
+      in_notes = Path.join(notes, "today.md")
+      in_home = Path.join(home, "todo.md")
+      File.write!(in_notes, "")
+      File.write!(in_home, "")
+      markers = [{".git", :git}, {".minga", :minga}]
+      broad? = at_or_above(home)
+
+      assert {:ok, ^notes, :minga} = Detector.detect(in_notes, markers, broad?)
+      assert {:ok, ^home, :git} = Detector.detect(in_home, markers, broad?)
+    end
+
+    test ".git marks a root as a directory and as the file a worktree has", %{tmp_dir: tmp} do
+      for {name, make} <- [
+            {"clone", &File.mkdir_p!/1},
+            {"worktree", &File.write!(&1, "gitdir: /elsewhere/.git/worktrees/w\n")}
+          ] do
+        root = Path.join(tmp, name)
+        File.mkdir_p!(Path.join(root, "lib"))
+        make.(Path.join(root, ".git"))
+        file = Path.join(root, "lib/a.ex")
+        File.write!(file, "")
+
+        assert {:ok, ^root, :git} = Detector.detect(file, [{".git", :git}])
+        assert Detector.version_controlled?(root)
+      end
+    end
+
+    test "only a version-control marker says a directory is under version control", %{
+      tmp_dir: tmp
+    } do
+      for marker <- ["package.json", "mix.exs", ".minga", "Makefile"] do
+        root = Path.join(tmp, "with-" <> marker)
+        File.mkdir_p!(root)
+        File.write!(Path.join(root, marker), "")
+
+        refute Detector.version_controlled?(root)
+      end
     end
 
     test "returns :none when no marker found", %{tmp_dir: tmp} do
