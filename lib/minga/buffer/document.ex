@@ -302,7 +302,7 @@ defmodule Minga.Buffer.Document do
     }
   end
 
-  @doc """
+  @doc ~S"""
   Appends `text` at the end of the document and moves the cursor onto the last character of the result, wherever the cursor was.
 
   This is what a stream of command output needs: every chunk lands at the end and the cursor follows it, resting on a character as a Normal-mode cursor does. A result that ends with a line break holds the cursor at column 0 of the empty last line.
