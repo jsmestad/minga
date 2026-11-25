@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://mingacode.dev"><strong>Website</strong></a> ·
-  <a href="https://mingacode.dev/learn/"><strong>Interactive Learn Labs</strong></a> ·
+  <a href="https://mingacode.dev/learn/"><strong>Learn</strong></a> ·
   <a href="https://mingacode.dev/why-minga"><strong>Why Minga</strong></a> ·
   <a href="https://mingacode.dev/architecture"><strong>Architecture</strong></a> ·
   <a href="https://mingacode.dev/extending"><strong>Extending</strong></a> ·
@@ -39,15 +39,15 @@ sudo apt install minga   # or: sudo dnf install minga, sudo pacman -Syu minga
 
 Press `Space` in Normal mode to open mnemonic menus (`SPC f f` find file, `SPC b b` switch buffer, `SPC s p` project search, `SPC a a` agent view). The [key reference](docs/AGENTIC-KEYMAP.md) lists what the keys do, by where you are. Get Started continues from there: connect a model and review your first staged edit.
 
-## Explore the interactive site
+## Explore the site
 
-Test Minga's keybindings, fault isolation, and Elixir configuration in your browser on [mingacode.dev](https://mingacode.dev):
+Try Minga's ideas in your browser on [mingacode.dev](https://mingacode.dev):
 
-| Lab | What you can try live |
+| Page | What you can try |
 | --- | --- |
-| **[Learn Labs](https://mingacode.dev/learn/)** | Playable key sandbox, Twist co-authoring simulator, and remote fault lab. |
-| **[BEAM Fault Lab](https://mingacode.dev/architecture)** | Trigger real-time faults (`Block Plugin`, `Crash Parser`, `Crash :after_save`) beside a shared-loop editor and step through 3-way staged merges. |
-| **[Elixir Translator](https://mingacode.dev/learn/elixir)** | Convert Neovim Lua, Emacs Elisp, or VS Code JSON into `config.exs` with live theme previews. |
+| **[Learn](https://mingacode.dev/learn/)** | Four short lessons, one job each: find a command when you forget its key, see which lines are yours and which are Minga's, bring one setting from your old editor, and test a hook before you leave an agent working alone. Lessons 01 and 02 teach the v0.1.0 design, which is not in today's build yet. |
+| **[Architecture](https://mingacode.dev/architecture)** | See why a slow language server does not freeze your typing, and step through how an approved edit waits for you. |
+| **[Lesson 03](https://mingacode.dev/learn/elixir)** | Pick Neovim, Emacs or VS Code and read the same setting as one line of Minga config. |
 
 ## Why the Erlang VM matters for code + agents
 
