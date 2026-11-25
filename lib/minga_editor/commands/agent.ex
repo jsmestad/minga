@@ -782,29 +782,63 @@ defmodule MingaEditor.Commands.Agent do
       :not_held ->
         # A composer without a saved draft has no line to wait in; a worker still
         # reads the files, and the message goes when it answers.
+        pressed = %{
+          kind: kind,
+          owner: DraftWorkflow.front_owner(state),
+          session: Runtime.active_session(state.shell_runtime),
+          raw: PromptBuffer.input_text(state.workspace.agent_ui)
+        }
+
         :ok =
           DraftWorkflow.read_mentions_off_editor(
             state,
             text,
             state.workspace.agent_ui,
-            &{:composer_mentions_read, kind, &1}
+            &{:composer_mentions_read, pressed, &1}
           )
 
         state
     end
   end
 
-  @doc "Delivers a message from a composer without a saved draft once a worker has read the files it names."
+  @typedoc "A press from a composer without a saved draft, whose mentioned files a worker is reading."
+  @type read_press :: %{
+          kind: :steering | :follow_up,
+          owner: non_neg_integer() | nil,
+          session: pid() | nil,
+          raw: String.t()
+        }
+
+  @doc """
+  Delivers a message from a composer without a saved draft once a worker has read the files it names. It goes only to the conversation it was pressed in, while that conversation is in front and its composer still holds exactly the pressed text; otherwise the text stays and one line says why.
+  """
   @spec deliver_read_mentions(
           state(),
-          :steering | :follow_up,
+          read_press(),
           {:ok, String.t() | [ReqLLM.Message.ContentPart.t()]} | {:error, String.t()}
         ) :: state()
-  def deliver_read_mentions(state, kind, {:ok, resolved}),
-    do: deliver_composer(state, resolved, kind)
+  def deliver_read_mentions(state, _pressed, {:error, message}),
+    do:
+      NoticeWorkflow.publish(
+        state,
+        message <> " The message was not sent; it is still in the composer."
+      )
 
-  def deliver_read_mentions(state, _kind, {:error, message}),
-    do: NoticeWorkflow.publish(state, message)
+  def deliver_read_mentions(
+        state,
+        %{kind: kind, owner: owner, session: session, raw: raw},
+        {:ok, resolved}
+      ) do
+    if DraftWorkflow.front_owner(state) == owner and
+         Runtime.active_session(state.shell_runtime) == session and
+         DraftWorkflow.only_pressed_text?(state, raw),
+       do: deliver_composer(state, resolved, kind),
+       else:
+         NoticeWorkflow.publish(
+           state,
+           "Not sent: the message or its conversation changed while its files were read. Press send again."
+         )
+  end
 
   @spec clear_input_after_submit(state()) :: state()
   defp clear_input_after_submit(state),
@@ -977,7 +1011,7 @@ defmodule MingaEditor.Commands.Agent do
   @doc """
   Delivers a send that waited in line, with the content from its key press.
 
-  It goes only while the composer holds exactly the pressed text (and the text of the presses still waiting behind it), so sending, which clears the composer, never takes unsent typing with it. If the user typed after the press, or the send cannot go, nothing is sent, the composer keeps everything, the presses behind it stop waiting and one line says why. A send whose conversation is no longer in front is not sent either.
+  It goes only while the composer holds exactly the pressed text, so sending, which clears the composer, never takes unsent typing, or the text of a press waiting behind it, with it. Otherwise nothing is sent, the composer keeps everything, the presses behind it stop waiting and one line says why. A send whose conversation is no longer in front is not sent either.
   """
   @spec deliver_held_send(
           state(),

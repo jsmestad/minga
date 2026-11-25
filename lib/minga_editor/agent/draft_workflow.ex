@@ -714,16 +714,20 @@ defmodule MingaEditor.Agent.DraftWorkflow do
     do: capture_queue(ui, state, owner, destination, target, kind, content, press)
 
   @doc """
-  Whether the composer holds exactly a released send's text and the text of the presses still waiting behind it, with nothing typed since. Only then does the send go: sending clears the composer, which must not take unsent typing with it.
+  Whether the composer holds exactly `raw`, the text a press took, and nothing else. Only then may that press send: sending clears the whole composer, which must not take unsent typing, or text waiting behind the press, with it.
   """
   @spec only_pressed_text?(State.t(), String.t()) :: boolean()
-  def only_pressed_text?(
-        %State{workspace: %{agent_ui: %UIState{draft_save: %DraftSave{} = save} = ui}},
-        raw
-      ),
-      do: PromptBuffer.input_text(ui) == raw <> Enum.join(DraftSave.submitted(save))
+  def only_pressed_text?(%State{workspace: %{agent_ui: %UIState{} = ui}}, raw),
+    do: PromptBuffer.input_text(ui) == raw
 
-  def only_pressed_text?(%State{}, _raw), do: false
+  @doc "The workspace in front, which owns the composer a key was pressed in."
+  @spec front_owner(State.t()) :: non_neg_integer() | nil
+  def front_owner(%State{} = state) do
+    case tab_bar(state) do
+      %TabBar{} = tabs -> TabBar.active_workspace_id(tabs)
+      nil -> nil
+    end
+  end
 
   @doc "Runs the next waiting press after a released send was delivered."
   @spec release_next(State.t(), non_neg_integer()) :: State.t()
@@ -1135,6 +1139,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
           content,
           press
         )
+        |> stop_line_on_failure()
         |> keep_outcome(outcome)
 
       {:run, {:send, kind, content, press}, released} ->
@@ -1161,6 +1166,14 @@ defmodule MingaEditor.Agent.DraftWorkflow do
         pressed
     end
   end
+
+  # A released press that could not start its queue leaves the line with its text
+  # still in the composer, so the presses behind it stop waiting too.
+  @spec stop_line_on_failure({term(), UIState.t()}) :: {term(), UIState.t()}
+  defp stop_line_on_failure({:queue_not_ready, %UIState{draft_save: %DraftSave{} = save} = ui}),
+    do: {:queue_not_ready, UIState.project_draft_save(ui, DraftSave.drop_held(save))}
+
+  defp stop_line_on_failure(result), do: result
 
   @spec dropped_outcome(term()) :: term()
   defp dropped_outcome(:unchanged), do: :queue_not_ready

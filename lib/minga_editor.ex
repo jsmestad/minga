@@ -1536,8 +1536,8 @@ defmodule MingaEditor do
     {:noreply, MingaEditor.Agent.DraftWorkflow.due(state, owner, token)}
   end
 
-  def handle_info({:composer_mentions_read, kind, result}, state) do
-    {:noreply, MingaEditor.Commands.Agent.deliver_read_mentions(state, kind, result)}
+  def handle_info({:composer_mentions_read, pressed, result}, state) do
+    {:noreply, MingaEditor.Commands.Agent.deliver_read_mentions(state, pressed, result)}
   end
 
   def handle_info({:composer_mentions_resolved, owner, ref, result}, state) do
