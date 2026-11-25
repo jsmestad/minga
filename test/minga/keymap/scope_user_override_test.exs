@@ -149,7 +149,16 @@ defmodule Minga.Keymap.Scope.UserOverrideTest do
 
       assert Scope.keys_for_command(:no_such_scope, :insert, :picker_next, context) == []
       assert picker_keys(:no_such_command) == []
-      assert Scope.keys_for_command(:picker, :normal, :picker_next, context) == []
+      assert Scope.keys_for_command(:picker, :visual, :picker_next, context) == []
+    end
+
+    test "a picker with nothing to filter moves with plain j and k, which a picker that takes text types" do
+      context = [keymap_server: test_keymap_server()]
+
+      assert {?j, 0} in Scope.keys_for_command(:picker, :normal, :picker_next, context)
+      assert {?k, 0} in Scope.keys_for_command(:picker, :normal, :picker_prev, context)
+      refute {?j, 0} in Scope.keys_for_command(:picker, :insert, :picker_next, context)
+      refute {?k, 0} in Scope.keys_for_command(:picker, :insert, :picker_prev, context)
     end
   end
 
