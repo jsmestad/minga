@@ -94,7 +94,7 @@ defmodule Minga.Keymap.GrammarTest do
     assert overlaid == MapSet.new([{:agent, :normal}, {:agent, :cua}])
   end
 
-  test "the inventory covers the composer's start remedy under every remedy", %{
+  test "the inventory covers the composer's start remedy", %{
     inventory: inventory
   } do
     assert %{scope: :agent, state: :input_normal, overlay: :none, keys: [{13, 0}]} =
@@ -241,6 +241,23 @@ defmodule Minga.Keymap.GrammarTest do
                {:agent, :normal, :diff_review, [{?y, 0}], :agent_accept_hunk},
                {:agent, :normal, :diff_review, [{?y, 0}], :agent_copy_code_block}
              ]) == [:duplicate_key]
+    end
+
+    test "a duplicate the review inherits reports once, with the reason from underneath" do
+      bindings =
+        for overlay <- [:diff_review, :none],
+            command <- [:agent_input_down, :move_down],
+            do: %{
+              scope: :agent,
+              state: :cua,
+              overlay: overlay,
+              keys: [{0xF701, 0}],
+              command: command,
+              origin: :effective
+            }
+
+      assert [%{rule: :duplicate_key, reason: "2 meanings for one key"}] =
+               KeyGrammar.violations(bindings, [], %{{:agent, :cua} => :typing})
     end
 
     test "listed review chords pass in the CUA review" do

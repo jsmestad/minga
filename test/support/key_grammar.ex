@@ -518,7 +518,11 @@ defmodule Minga.Test.KeyGrammar do
 
   @spec duplicate_keys([binding()]) :: [violation()]
   defp duplicate_keys(inventory) do
-    by_context = Enum.group_by(inventory, &{&1.scope, &1.state, &1.overlay})
+    # Groups without an overlay come first, so a duplicate an overlay inherits keeps the reason from underneath.
+    by_context =
+      inventory
+      |> Enum.group_by(&{&1.scope, &1.state, &1.overlay})
+      |> Enum.sort_by(fn {{_scope, _state, overlay}, _bindings} -> overlay != :none end)
 
     Enum.flat_map(by_context, fn {{scope, state, overlay}, bindings} ->
       two_meanings =
