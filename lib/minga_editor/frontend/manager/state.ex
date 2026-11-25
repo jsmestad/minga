@@ -34,7 +34,8 @@ defmodule MingaEditor.Frontend.Manager.State do
             command_observer: nil,
             output_retry_ms: 2,
             output_failure_ms: 50,
-            renderer_exit_timeout_ms: 2_000
+            renderer_exit_timeout_ms: 2_000,
+            renderer_env: &MingaEditor.Frontend.TerminalOverrides.launch_env/0
 
   @type t :: %__MODULE__{
           port: port() | nil,
@@ -53,6 +54,7 @@ defmodule MingaEditor.Frontend.Manager.State do
           command_observer: ([binary()] -> term()) | nil,
           output_retry_ms: pos_integer(),
           output_failure_ms: non_neg_integer(),
-          renderer_exit_timeout_ms: non_neg_integer()
+          renderer_exit_timeout_ms: non_neg_integer(),
+          renderer_env: (-> [{charlist(), charlist()}])
         }
 end
