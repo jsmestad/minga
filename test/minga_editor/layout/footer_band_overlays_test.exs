@@ -36,7 +36,10 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
   alias MingaEditor.Layout.OverlayBand
   alias MingaEditor.Layout.SurfaceRegistry
   alias MingaEditor.Observatory.Data, as: ObservatoryData
+  alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
   alias MingaEditor.RenderModel.UI.AgentContextBuilder
+  alias MingaEditor.RenderModel.UI.ExtensionOverlayBuilder
+  alias MingaEditor.RenderModel.UI.ExtensionPanelBuilder
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
@@ -58,6 +61,35 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
   end
 
   defp with_observatory(state), do: SidebarWorkflow.open_observatory(state, nil)
+
+  defp register_surface(Minga.Extension.Panel, table, _buffer),
+    do: Minga.Extension.Panel.set(table, :footer_test, "main", %{visible: true, title: "Panel"})
+
+  defp register_surface(Minga.Extension.Overlay, table, buffer),
+    do:
+      Minga.Extension.Overlay.set(table, :footer_test, "mark", buffer,
+        position: {0, 0},
+        content: "mark"
+      )
+
+  defp register_surface(SemanticUIRegistry, table, _buffer) do
+    SemanticUIRegistry.register(table, {:bundle, :footer_test}, %{
+      id: "details",
+      surface: :panel,
+      payload: %Minga.RenderModel.UI.ExtensionPanel.Panel{
+        extension: "semantic",
+        panel_id: "details",
+        title: "Details",
+        position: :right,
+        size: {:percent, 40},
+        visible?: true,
+        content: []
+      }
+    })
+  end
+
+  defp surface_entries(:extension_panel, ctx), do: ExtensionPanelBuilder.build(ctx).panels
+  defp surface_entries(:extension_overlay, ctx), do: ExtensionOverlayBuilder.build(ctx).entries
 
   defp with_agent_context(state) do
     approval =
@@ -332,6 +364,38 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
       node = FocusTree.hit_test(tree, r, c)
       assert node.content_type == :notifications
       assert node.handler == MingaEditor.Input.OverlaySink
+    end
+  end
+
+  describe "extension surfaces come from the editor's own registries (#4274)" do
+    # One row per registry the footer band reads.
+    # A surface must reach the state that names its registry, in layout and in the render model, and no other state.
+    registrations = [
+      {:extension_panel, :extension_panel_registry, Minga.Extension.Panel},
+      {:extension_panel, :agent_semantic_ui_registry, SemanticUIRegistry},
+      {:extension_overlay, :extension_overlay_registry, Minga.Extension.Overlay}
+    ]
+
+    for {surface, option, registry} <- registrations do
+      test "#{surface} from #{inspect(registry)} is placed only for the state that names it" do
+        table = Module.concat(__MODULE__, "Owned#{System.unique_integer([:positive])}")
+        start_supervised!({unquote(registry), name: table})
+
+        owner = base_state([{unquote(option), table}])
+        other = base_state()
+        :ok = register_surface(unquote(registry), table, owner.workspace.buffers.active)
+
+        for input <- [owner, Input.from_editor_state(owner)] do
+          assert SurfaceRegistry.rect_for(input, unquote(surface)) != nil
+        end
+
+        for input <- [other, Input.from_editor_state(other)] do
+          assert SurfaceRegistry.rect_for(input, unquote(surface)) == nil
+        end
+
+        assert surface_entries(unquote(surface), Context.from_editor_state(owner)) != []
+        assert surface_entries(unquote(surface), Context.from_editor_state(other)) == []
+      end
     end
   end
 

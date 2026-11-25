@@ -12,7 +12,8 @@ defmodule MingaEditor.RenderModel.UI.ExtensionOverlayBuilder do
 
   @spec build_overlay_entries(Context.t()) :: [Entry.t()]
   defp build_overlay_entries(ctx) do
-    overlays = Minga.Extension.Overlay.all()
+    registry = MingaEditor.State.ExtensionSurfaces.of(ctx).extension_overlay_registry
+    overlays = Minga.Extension.Overlay.all(registry)
 
     if overlays == [] do
       []

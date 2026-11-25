@@ -6,6 +6,7 @@ defmodule MingaEditor.Layout.FooterOverlays do
   alias MingaEditor.Renderer.RenderWindow
   alias MingaEditor.Shell.Traditional.Observatory
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
+  alias MingaEditor.State.ExtensionSurfaces
   alias MingaEditor.Window
   alias MingaEditor.Window.Content
 
@@ -20,7 +21,7 @@ defmodule MingaEditor.Layout.FooterOverlays do
        content_height_extension_overlay(state)},
       {:notifications, notifications_visible?(state), content_height_notifications(state)},
       {:observatory, observatory_visible?(state), content_height_observatory(state)},
-      {:extension_panel, extension_panel_visible?(), :max},
+      {:extension_panel, extension_panel_visible?(state), :max},
       {:agent_context, agent_context_visible?(state), :max},
       {:float_popup, float_popup_visible?(state), :max}
     ]
@@ -74,8 +75,8 @@ defmodule MingaEditor.Layout.FooterOverlays do
   defp observatory_content_height(nil), do: 1
 
   @spec content_height_extension_overlay(map()) :: non_neg_integer()
-  defp content_height_extension_overlay(_state) do
-    1 + Enum.count(Minga.Extension.Overlay.all())
+  defp content_height_extension_overlay(state) do
+    1 + Enum.count(Minga.Extension.Overlay.all(extension_overlay_registry(state)))
   end
 
   # ── Per-surface visibility, each reading the builder's underlying source ──────
@@ -146,10 +147,14 @@ defmodule MingaEditor.Layout.FooterOverlays do
 
   # Extension panel: any visible extension or semantic panel.
   # Mirrors MingaEditor.RenderModel.UI.ExtensionPanelBuilder.
-  @spec extension_panel_visible?() :: boolean()
-  defp extension_panel_visible? do
-    Minga.Extension.Panel.visible() != [] or
-      MingaEditor.Agent.SemanticUI.Registry.panels() != []
+  # The panels come from the registries this editor state names.
+  # Another editor in the same VM (a concurrent test, for one) must not put a panel into this one's layout.
+  @spec extension_panel_visible?(map()) :: boolean()
+  defp extension_panel_visible?(state) do
+    surfaces = ExtensionSurfaces.of(state)
+
+    Minga.Extension.Panel.visible(surfaces.extension_panel_registry) != [] or
+      MingaEditor.Agent.SemanticUI.Registry.panels(surfaces.agent_semantic_ui_registry) != []
   end
 
   # Observatory: the BEAM observatory panel is toggled on in shell_state.
@@ -187,7 +192,11 @@ defmodule MingaEditor.Layout.FooterOverlays do
   # Extension overlay: any registered extension inline overlay.
   # Mirrors MingaEditor.RenderModel.UI.ExtensionOverlayBuilder (entries present).
   @spec extension_overlay_visible?(map()) :: boolean()
-  defp extension_overlay_visible?(_state) do
-    Minga.Extension.Overlay.all() != []
+  defp extension_overlay_visible?(state) do
+    Minga.Extension.Overlay.all(extension_overlay_registry(state)) != []
   end
+
+  @spec extension_overlay_registry(map()) :: Minga.Extension.Overlay.table()
+  defp extension_overlay_registry(state),
+    do: ExtensionSurfaces.of(state).extension_overlay_registry
 end

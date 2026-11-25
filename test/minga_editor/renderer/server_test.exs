@@ -2461,6 +2461,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       message_store: MingaEditor.UI.Panel.MessageStore.new(),
       notifications: [],
       sidebar_registry: MingaEditor.Extension.Sidebar.default_table(),
+      extension_surfaces: MingaEditor.State.ExtensionSurfaces.new(),
       face_override_registries: %{},
       editing_model: :vim,
       keymap_server: Minga.Keymap.Active,

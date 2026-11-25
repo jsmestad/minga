@@ -75,7 +75,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       bottom_panel: bottom_panel,
       edit_timeline: EditTimelineBuilder.build(ctx),
       extension_overlay: ExtensionOverlayBuilder.build(ctx),
-      extension_panel: ExtensionPanelBuilder.build(),
+      extension_panel: ExtensionPanelBuilder.build(ctx),
       hover_popup: HoverPopupBuilder.build(ctx),
       float_popup: FloatPopupBuilder.build(ctx),
       gutter_separator: GutterSeparatorBuilder.build(ctx),

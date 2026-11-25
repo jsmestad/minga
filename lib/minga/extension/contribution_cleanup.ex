@@ -42,6 +42,18 @@ defmodule Minga.Extension.ContributionCleanup do
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(_opts \\ []), do: GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
 
+  @doc """
+  Removes an extension's entries from a registry that keys its entries by extension name.
+
+  `remove` receives the extension's name. Every other source owns nothing in such a registry, so nothing is removed.
+  """
+  @spec remove_extension_entries(contribution_source(), (atom() -> :ok)) :: :ok
+  def remove_extension_entries({:extension, name}, remove)
+      when is_atom(name) and is_function(remove, 1),
+      do: remove.(name)
+
+  def remove_extension_entries(_source, remove) when is_function(remove, 1), do: :ok
+
   @doc "Registers a cleanup callback for a contribution family."
   @spec register(atom(), cleanup_fun()) :: :ok
   def register(name, fun) when is_atom(name) and is_function(fun, 1) do

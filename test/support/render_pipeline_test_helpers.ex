@@ -74,7 +74,22 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
       parser: ParserState.new(Keyword.get(opts, :parser_manager, Minga.Parser.Manager)),
       effect_scheduler: Keyword.get(opts, :effect_scheduler),
       session: Keyword.get(opts, :session, %MingaEditor.State.Session{}),
-      extension_surfaces: ExtensionSurfaces.new(sidebar_registry: sidebar_registry),
+      extension_surfaces:
+        ExtensionSurfaces.new(
+          sidebar_registry: sidebar_registry,
+          agent_semantic_ui_registry:
+            Keyword.get_lazy(opts, :agent_semantic_ui_registry, fn ->
+              unstarted_registry("SemanticUI")
+            end),
+          extension_panel_registry:
+            Keyword.get_lazy(opts, :extension_panel_registry, fn ->
+              unstarted_registry("Panel")
+            end),
+          extension_overlay_registry:
+            Keyword.get_lazy(opts, :extension_overlay_registry, fn ->
+              unstarted_registry("Overlay")
+            end)
+        ),
       workspace: %MingaEditor.Session.State{
         editing: VimState.new(),
         buffers: %Buffers{active: buf, list: [buf], active_index: 0},
@@ -89,6 +104,13 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
       shell_runtime: Runtime.new(shell_entry, %ShellState{}),
       appearance: Appearance.select_theme(%Appearance{}, Theme.get!(:doom_one))
     }
+  end
+
+  # A name no process owns. Each registry reads a missing table as empty, so no process is needed.
+  # Nothing another test registers in the application's tables can reach a state that names its own.
+  @spec unstarted_registry(String.t()) :: atom()
+  defp unstarted_registry(kind) do
+    Module.concat(__MODULE__, "#{kind}#{System.unique_integer([:positive])}")
   end
 
   @spec private_sidebar_registry() :: Sidebar.table()

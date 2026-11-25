@@ -1,6 +1,5 @@
 defmodule MingaEditor.RenderModel.UI.ExtensionPanelBuilderTest do
-  # Uses the process-global extension panel registry.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Minga.Extension.Panel, as: ExtensionPanelRegistry
   alias Minga.RenderModel.UI.ExtensionPanel
@@ -21,30 +20,29 @@ defmodule MingaEditor.RenderModel.UI.ExtensionPanelBuilderTest do
   setup do
     semantic_table = Module.concat(__MODULE__, "SemanticUI#{System.unique_integer([:positive])}")
     start_supervised!({SemanticUIRegistry, name: semantic_table, notify: false})
-    ExtensionPanelRegistry.remove_all(:builder_test)
-    ExtensionPanelRegistry.remove_all(:builder_other)
+    panel_table = Module.concat(__MODULE__, "Panel#{System.unique_integer([:positive])}")
+    start_supervised!({ExtensionPanelRegistry, name: panel_table})
 
-    on_exit(fn ->
-      ExtensionPanelRegistry.remove_all(:builder_test)
-      ExtensionPanelRegistry.remove_all(:builder_other)
-    end)
-
-    %{semantic_table: semantic_table}
+    %{semantic_table: semantic_table, panel_table: panel_table}
   end
 
   describe "build/1" do
-    test "builds extension panel model with empty panels", %{semantic_table: semantic_table} do
-      model = ExtensionPanelBuilder.build(semantic_table)
+    test "builds extension panel model with empty panels", %{
+      semantic_table: semantic_table,
+      panel_table: panel_table
+    } do
+      model = ExtensionPanelBuilder.build(panel_table, semantic_table)
 
       assert %ExtensionPanel{} = model
       assert model.panels == []
     end
 
     test "maps visible extension panels into semantic content blocks", %{
-      semantic_table: semantic_table
+      semantic_table: semantic_table,
+      panel_table: panel_table
     } do
       :ok =
-        ExtensionPanelRegistry.set(:builder_test, :status, %{
+        ExtensionPanelRegistry.set(panel_table, :builder_test, :status, %{
           title: "Status",
           position: :right,
           size: {:lines, 8},
@@ -61,9 +59,9 @@ defmodule MingaEditor.RenderModel.UI.ExtensionPanelBuilderTest do
           ]
         })
 
-      :ok = ExtensionPanelRegistry.set(:builder_other, :hidden, %{visible: false})
+      :ok = ExtensionPanelRegistry.set(panel_table, :builder_other, :hidden, %{visible: false})
 
-      model = ExtensionPanelBuilder.build(semantic_table)
+      model = ExtensionPanelBuilder.build(panel_table, semantic_table)
 
       assert %ExtensionPanel{panels: [%Panel{} = panel]} = model
       assert panel.extension == "builder_test"
@@ -98,10 +96,11 @@ defmodule MingaEditor.RenderModel.UI.ExtensionPanelBuilderTest do
     end
 
     test "normalizes malformed extension panel content into semantic defaults", %{
-      semantic_table: semantic_table
+      semantic_table: semantic_table,
+      panel_table: panel_table
     } do
       :ok =
-        ExtensionPanelRegistry.set(:builder_test, :malformed, %{
+        ExtensionPanelRegistry.set(panel_table, :builder_test, :malformed, %{
           title: "Broken",
           position: :center,
           size: {:lines, 0},
@@ -118,7 +117,7 @@ defmodule MingaEditor.RenderModel.UI.ExtensionPanelBuilderTest do
           ]
         })
 
-      model = ExtensionPanelBuilder.build(semantic_table)
+      model = ExtensionPanelBuilder.build(panel_table, semantic_table)
 
       assert %ExtensionPanel{panels: [%Panel{} = panel]} = model
       assert panel.extension == "builder_test"
@@ -145,16 +144,17 @@ defmodule MingaEditor.RenderModel.UI.ExtensionPanelBuilderTest do
     end
 
     test "treats non-list panel content as an empty content list", %{
-      semantic_table: semantic_table
+      semantic_table: semantic_table,
+      panel_table: panel_table
     } do
       :ok =
-        ExtensionPanelRegistry.set(:builder_test, :non_list_content, %{
+        ExtensionPanelRegistry.set(panel_table, :builder_test, :non_list_content, %{
           title: "Empty",
           visible: true,
           content: :bad
         })
 
-      model = ExtensionPanelBuilder.build(semantic_table)
+      model = ExtensionPanelBuilder.build(panel_table, semantic_table)
 
       assert %ExtensionPanel{panels: [%Panel{} = panel]} = model
       assert panel.extension == "builder_test"
@@ -163,7 +163,8 @@ defmodule MingaEditor.RenderModel.UI.ExtensionPanelBuilderTest do
     end
 
     test "includes semantic dashboard sections and panels from the agent UI registry", %{
-      semantic_table: semantic_table
+      semantic_table: semantic_table,
+      panel_table: panel_table
     } do
       dashboard = [
         %Text{text: "Dashboard ready"},
@@ -194,7 +195,7 @@ defmodule MingaEditor.RenderModel.UI.ExtensionPanelBuilderTest do
           payload: semantic_panel
         })
 
-      model = ExtensionPanelBuilder.build(semantic_table)
+      model = ExtensionPanelBuilder.build(panel_table, semantic_table)
 
       assert Enum.any?(
                model.panels,

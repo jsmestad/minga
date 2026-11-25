@@ -180,6 +180,7 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
                :cursor_animate,
                :diff_views,
                :editing_model,
+               :extension_surfaces,
                :face_override_registries,
                :focus_owner,
                :focus_tree,

@@ -119,8 +119,11 @@ defmodule Minga.Extension.Overlay do
   def empty?(table), do: !table_ready?(table) or :ets.info(table, :size) == 0
 
   @spec unregister_source(ContributionCleanup.contribution_source()) :: :ok
-  def unregister_source({:extension, name}) when is_atom(name), do: remove_all(name)
-  def unregister_source(_source), do: :ok
+  @spec unregister_source(table(), ContributionCleanup.contribution_source()) :: :ok
+  def unregister_source(source), do: unregister_source(@table, source)
+
+  def unregister_source(table, source),
+    do: ContributionCleanup.remove_extension_entries(source, &remove_all(table, &1))
 
   @impl true
   @spec init(keyword()) :: {:ok, table()}
@@ -128,9 +131,12 @@ defmodule Minga.Extension.Overlay do
     table = Keyword.get(opts, :name, @table)
     create_owned_table(table)
 
-    ContributionCleanup.register(:extension_overlays, fn source ->
-      unregister_source(source)
-    end)
+    # Only the application's table answers extension shutdown. A private table belongs to whoever started it.
+    if table == @table do
+      ContributionCleanup.register(:extension_overlays, fn source ->
+        unregister_source(source)
+      end)
+    end
 
     {:ok, table}
   end
