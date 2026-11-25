@@ -59,6 +59,51 @@ defmodule Minga.Buffer.DocumentTest do
     end
   end
 
+  describe "append_text_and_follow/2" do
+    property "appends at the end from any cursor and rests the cursor on the last character" do
+      check all(
+              lines <- list_of(member_of(["", "a", "é世", "\tx"]), min_length: 1, max_length: 8),
+              cursor_line <- integer(0..(length(lines) - 1)),
+              cursor_col <- integer(0..4),
+              chunks <-
+                list_of(member_of(["", "b", "✓✓", "q\n", "\n", "\r\n", "x\ny", "e\u0301"]),
+                  min_length: 1,
+                  max_length: 6
+                )
+            ) do
+        doc =
+          lines
+          |> Enum.join("\n")
+          |> Document.new()
+          |> Document.move_to({cursor_line, cursor_col})
+
+        Enum.reduce(chunks, doc, fn chunk, doc ->
+          expected = Document.content(doc) <> chunk
+          new_doc = Document.append_text_and_follow(doc, chunk)
+          rebuilt = Document.new(expected)
+
+          assert Document.content(new_doc) == expected
+          assert Document.line_count(new_doc) == Document.line_count(rebuilt)
+
+          if chunk != "" do
+            last_line = Document.line_count(rebuilt) - 1
+            last_text = expected |> String.split("\n") |> List.last()
+
+            assert Document.cursor(new_doc) ==
+                     {last_line, Minga.Buffer.Position.last_character_on_line(last_text)}
+
+            assert Document.cursor_offset(new_doc) ==
+                     Lines.start_of(rebuilt, last_line) + elem(Document.cursor(new_doc), 1)
+          else
+            assert new_doc == doc
+          end
+
+          new_doc
+        end)
+      end
+    end
+  end
+
   describe "append_text/2" do
     property "appends at the end, keeps a cursor before the end, and matches a rebuilt line index" do
       check all(
@@ -817,6 +862,9 @@ defmodule Minga.Buffer.DocumentTest do
   defp resolve_offsets({:pending, starts, adjust_after, delta}) do
     Minga.Buffer.Lines.flush_to_tuple(starts, adjust_after, delta)
   end
+
+  defp resolve_offsets({:appended, base, tail}),
+    do: List.to_tuple(Tuple.to_list(base) ++ :array.to_list(tail))
 
   defp resolve_offsets(ls) when is_tuple(ls), do: ls
   defp resolve_offsets(nil), do: nil

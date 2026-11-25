@@ -2287,11 +2287,6 @@ defmodule Minga.Buffer.Process do
 
   def handle_call({:confirm_scratch_save, _version}, _from, state), do: {:reply, :stale, state}
 
-  def handle_call(:consume_edit_deltas, _from, state) do
-    {edits, change_log} = ChangeLog.drain_pending_changes(state.change_log)
-    {:reply, edits, %{state | change_log: change_log}}
-  end
-
   def handle_call({:consume_edit_deltas, consumer_id}, _from, state) do
     {result, change_log} = ChangeLog.take_unseen_changes(state.change_log, consumer_id)
     {:reply, result, %{state | change_log: change_log}}
@@ -2430,27 +2425,21 @@ defmodule Minga.Buffer.Process do
     {:reply, overrides, state}
   end
 
+  def handle_call({:append, ""}, _from, state), do: {:reply, :ok, state}
+
   def handle_call({:append, text}, _from, state) do
-    content = Document.content(state.document)
-    new_content = content <> text
-    new_buf = Document.new(new_content)
-    # Move cursor to end
-    line_count = Document.line_count(new_buf)
-    last_line = max(0, line_count - 1)
+    doc = state.document
+    start_byte = Document.content_byte_size(doc)
+    start_position = end_position(doc)
+    new_doc = Document.append_text_and_follow(doc, text)
+    delta = EditDelta.insertion(start_byte, start_position, text, end_position(new_doc))
 
-    last_col =
-      case Lines.slice(new_buf, last_line, 1) do
-        [row] -> Position.last_character_on_line(row)
-        _ -> 0
-      end
-
-    new_buf = Cursor.place(new_buf, {last_line, last_col})
-    appended = {byte_size(content), "", text}
-
+    # Output is not an edit the user made: it is not undoable and does not make the buffer dirty.
+    # The delta still goes to the change log and to subscribers, so a reader of this buffer
+    # (the renderer's resident rows, the conflict index) updates the appended lines only.
     new_state =
-      state
-      |> install_document(new_buf, &UndoHistory.record_untracked(&1, [appended]))
-      |> rebuild_conflict_index()
+      %{BufState.record_clean_change(state) | document: new_doc}
+      |> record_edit(delta, EditSource.unknown())
 
     {:reply, :ok, new_state}
   end
@@ -4776,6 +4765,12 @@ defmodule Minga.Buffer.Process do
 
     defer_buffer_changed(state, nil, source)
     state
+  end
+
+  @spec end_position(Document.t()) :: Document.position()
+  defp end_position(doc) do
+    last_line = Document.line_count(doc) - 1
+    {last_line, Document.content_byte_size(doc) - Lines.start_of(doc, last_line)}
   end
 
   @spec rebuild_conflict_index(state()) :: state()

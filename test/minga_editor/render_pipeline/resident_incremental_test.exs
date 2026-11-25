@@ -1165,6 +1165,94 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
     end
   end
 
+  describe "appended command output (#4062)" do
+    test "a chunk splices the line it continues and the lines it adds, and keeps every other row" do
+      state = warm(resident_state(300))
+      buffer = state.editor.workspace.buffers.active
+      {before_model, state} = build_frame(state)
+
+      :ok = BufferProcess.append(buffer, " and more\nfirst new line\nsecond new")
+
+      {model, state} = build_frame(state)
+
+      assert model.content_digest != before_model.content_digest
+      assert model.row_delta.base_row_count == 300
+      assert model.row_delta.result_row_count == 302
+
+      assert [%{start_index: 299, delete_count: 1, insert_rows: [continued, first, second]}] =
+               model.row_delta.splices
+
+      assert continued.text == "line 300: content here for testing and more"
+      assert {first.text, second.text} == {"first new line", "second new"}
+
+      # The chunk ended inside a line: the next chunk completes that row and adds one, in one splice.
+      :ok = BufferProcess.append(buffer, " line\nthird")
+      {model, _state} = build_frame(state)
+
+      assert [%{start_index: 301, delete_count: 1, insert_rows: [completed, third]}] =
+               model.row_delta.splices
+
+      assert {completed.text, third.text} == {"second new line", "third"}
+      assert completed.row_id == second.row_id
+      assert model.row_delta.result_row_count == 303
+    end
+
+    test "chunks that arrive between two frames are one splice" do
+      state = warm(resident_state(300))
+      buffer = state.editor.workspace.buffers.active
+      {_model, state} = build_frame(state)
+
+      for chunk <- ["\none", " two\nthr", "ee\n"], do: :ok = BufferProcess.append(buffer, chunk)
+
+      {model, _state} = build_frame(state)
+
+      assert [%{start_index: 299, delete_count: 1, insert_rows: rows}] = model.row_delta.splices
+
+      assert Enum.map(rows, & &1.text) ==
+               ["line 300: content here for testing", "one two", "three", ""]
+
+      assert model.row_delta.result_row_count == 303
+    end
+
+    test "more chunks between two frames than the change log keeps replace the rows once, then splice again" do
+      state = warm(resident_state(300))
+      buffer = state.editor.workspace.buffers.active
+      {_model, state} = build_frame(state)
+
+      for i <- 1..1_001, do: :ok = BufferProcess.append(buffer, "\nburst #{i}")
+      {replaced, state} = build_frame(state)
+
+      assert replaced.row_delta == nil
+      assert Enum.count(replaced.rows) == 1_301
+
+      :ok = BufferProcess.append(buffer, "\nafter the burst")
+      {model, _state} = build_frame(state)
+
+      assert [%{start_index: 1_300, delete_count: 1, insert_rows: [_last, added]}] =
+               model.row_delta.splices
+
+      assert added.text == "after the burst"
+    end
+
+    test "a log too long to be resident draws only the row a chunk changed" do
+      editor = gui_state(content: long_content(66_000), rows: 12, cols: 60, filetype: :text)
+      buffer = editor.workspace.buffers.active
+      BufferProcess.set_option(buffer, :wrap, false)
+      :ok = BufferProcess.append(buffer, "\n")
+      state = warm(editor)
+      {before_model, state} = build_frame(state)
+      assert before_model.row_store_mode == :windowed
+      assert state.output.caches.frame_rows_rasterized == 0
+
+      :ok = BufferProcess.append(buffer, "one more line\n")
+      {model, state} = build_frame(state)
+
+      assert model.row_store_mode == :windowed
+      assert Enum.any?(model.rows, &(&1.text == "one more line"))
+      assert state.output.caches.frame_rows_rasterized == 1
+    end
+  end
+
   describe "AC 1/5: edit-frame build cost is flat across resident sizes" do
     @describetag :perf
     # Operation-count assertion (not wall-clock, per the test strategy): a single

@@ -9,18 +9,25 @@ defmodule Minga.Buffer.Lines do
 
   ## Line index representation
 
-  The line index (`line_offsets` on `Document`) has three states:
+  The line index (`line_offsets` on `Document`) has four states:
 
   - **Clean tuple** `{0, 6, 12, ...}`: accurate line-start byte offsets.
   - **Pending delta** `{:pending, starts, adjust_after, delta}`: the tuple
     `starts` is stale; lines after `adjust_after` are shifted by `delta`.
     Queries apply the delta on the fly in O(1).
+  - **Appended tail** `{:appended, base, tail}`: `base` is a clean tuple and `tail` is an `:array` holding the starts of the lines appended after it. Queries read either part without flushing.
   - **`nil`**: needs a full rebuild from content.
 
   Single-character inserts and deletes (the hot path) produce pending
   deltas in O(1). Newline insertion/deletion flushes the delta and
   splices entries, which is O(line_count) but rare relative to
   non-newline edits.
+
+  ## Appending at the end
+
+  A tuple cannot grow in place, so adding lines to a clean tuple copies every start: a stream of output that appends chunk after chunk would pay for the whole index on each chunk. `update_after_append/3` adds the new starts to the tail instead, which costs O(log lines) per line, and an append never moves a start that already exists, so the tail needs no delta.
+
+  Only `update_after_append/3` creates or extends the appended form. It joins the tail into a clean tuple when the tail outgrows the base, so the base at least doubles each time and every start is copied a bounded number of times over the life of the stream. Every other update joins the tail first and continues from the clean tuple: an edit that is not an append at the end pays O(line_count) once, as a cross-line edit on a pending index does. Reads never join; `snapshot/1` builds a clean tuple for its caller without storing it.
   """
 
   alias Minga.Buffer.Document
@@ -31,8 +38,13 @@ defmodule Minga.Buffer.Lines do
   @type line_span :: {start :: non_neg_integer(), length :: non_neg_integer()}
   @type snapshot :: {line_starts(), String.t()}
 
-  # Line starts with the pending shift applied to lines after `adjust_after`.
-  @typep index_view :: {line_starts(), adjust_after :: non_neg_integer(), delta :: integer()}
+  @typep tail :: :array.array(non_neg_integer())
+
+  # What a query reads line starts from: a tuple with the pending shift applied to lines after
+  # `adjust_after`, or a clean base followed by the appended tail.
+  @typep index_view ::
+           {line_starts(), adjust_after :: non_neg_integer(), delta :: integer()}
+           | {:appended, line_starts(), tail()}
 
   # ── Line extraction (zero-copy from gap buffer halves) ──
 
@@ -66,7 +78,18 @@ defmodule Minga.Buffer.Lines do
     end
   end
 
-  def fetch(%Document{} = doc, line) when line >= 0 do
+  def fetch(
+        %Document{before: before, after: after_, line_offsets: {:appended, _base, _tail} = view},
+        line
+      )
+      when line >= 0 do
+    case view_span(view, line, byte_size(before) + byte_size(after_)) do
+      nil -> nil
+      {start, length} -> extract_from_gap(before, after_, start, length)
+    end
+  end
+
+  def fetch(%Document{line_offsets: nil} = doc, line) when line >= 0 do
     {line_starts, text} = snapshot(doc)
 
     case span(line_starts, line, byte_size(text)) do
@@ -80,11 +103,11 @@ defmodule Minga.Buffer.Lines do
   def fetch_many(%Document{}, []), do: %{}
 
   def fetch_many(%Document{before: before, after: after_} = doc, line_numbers) do
-    {starts, adjust_after, delta} = index_view(doc)
+    view = index_view(doc)
     text_size = byte_size(before) + byte_size(after_)
 
     Enum.reduce(line_numbers, %{}, fn line, lines ->
-      case adjusted_span(starts, line, text_size, adjust_after, delta) do
+      case view_span(view, line, text_size) do
         nil -> lines
         {start, length} -> Map.put(lines, line, extract_from_gap(before, after_, start, length))
       end
@@ -138,7 +161,27 @@ defmodule Minga.Buffer.Lines do
     end
   end
 
-  def slice(%Document{} = doc, first_line, count)
+  def slice(
+        %Document{before: before, after: after_, line_offsets: {:appended, _base, _tail} = view},
+        first_line,
+        count
+      )
+      when first_line >= 0 and count >= 0 do
+    text_size = byte_size(before) + byte_size(after_)
+    last_line = view_total(view) - 1
+    final_line = min(first_line + count - 1, last_line)
+
+    if first_line > last_line do
+      []
+    else
+      for line <- first_line..final_line do
+        {start, length} = view_span(view, line, text_size)
+        extract_from_gap(before, after_, start, length)
+      end
+    end
+  end
+
+  def slice(%Document{line_offsets: nil} = doc, first_line, count)
       when first_line >= 0 and count >= 0 do
     {line_starts, text} = snapshot(doc)
     text_size = byte_size(text)
@@ -169,21 +212,21 @@ defmodule Minga.Buffer.Lines do
         max_bytes
       )
       when first_line >= 0 and count >= 0 and max_bytes >= 0 do
-    {starts, adjust_after, delta} = index_view(document)
-    total = tuple_size(starts)
+    view = index_view(document)
+    total = view_total(view)
     selected_count = min(max(total - first_line, 0), count)
 
     if selected_count == 0 do
       {"", 0, total, true}
     else
-      start_byte = adjusted_offset(starts, first_line, adjust_after, delta)
+      start_byte = view_offset(view, first_line)
       next_line = first_line + selected_count
 
       stop_byte =
         if next_line == total do
           byte_size(before) + byte_size(after_)
         else
-          adjusted_offset(starts, next_line, adjust_after, delta) - 1
+          view_offset(view, next_line) - 1
         end
 
       wanted_bytes = stop_byte - start_byte
@@ -204,10 +247,25 @@ defmodule Minga.Buffer.Lines do
     {flush_to_tuple(starts, adjust_after, delta), Document.content(doc)}
   end
 
-  def snapshot(%Document{} = doc) do
+  def snapshot(%Document{line_offsets: {:appended, base, tail}} = doc) do
+    {join_appended(base, tail), Document.content(doc)}
+  end
+
+  def snapshot(%Document{line_offsets: nil} = doc) do
     text = Document.content(doc)
     {build_index(text), text}
   end
+
+  @doc """
+  Returns the document's line starts as a clean tuple.
+
+  A clean index is returned as it is. A pending or appended index is resolved for the caller in O(line_count) without being stored, and a missing index is built from the content.
+  """
+  @spec clean_starts(Document.t()) :: line_starts()
+  def clean_starts(%Document{line_offsets: nil} = doc),
+    do: doc |> Document.content() |> build_index()
+
+  def clean_starts(%Document{line_offsets: ls}), do: ensure_clean(ls)
 
   # ── Line metrics ──
 
@@ -287,26 +345,26 @@ defmodule Minga.Buffer.Lines do
   Returns the line containing document point `point` and the point where that line starts.
 
   A terminating newline belongs to the line it ends. Points past the end of the document
-  resolve to the final line. Clean and pending indexes are searched in O(log lines) without
-  flushing the index or copying content.
+  resolve to the final line. Clean, pending and appended indexes are searched in O(log lines)
+  without flushing the index or copying content.
   """
   @spec containing(Document.t(), non_neg_integer()) :: {line_index(), non_neg_integer()}
   def containing(%Document{} = doc, point) when is_integer(point) and point >= 0 do
-    {starts, adjust_after, delta} = index_view(doc)
-    line = search_containing(starts, adjust_after, delta, point, 0, tuple_size(starts) - 1)
-    {line, adjusted_offset(starts, line, adjust_after, delta)}
+    view = index_view(doc)
+    line = search_containing(view, point, 0, view_total(view) - 1)
+    {line, view_offset(view, line)}
   end
 
   @doc """
   Returns the document point where `line` starts.
 
   Lines past the final line resolve to the final line's start. Clean and pending indexes are
-  answered in O(1) without flushing the index or copying content.
+  answered in O(1) and an appended index in O(log lines), without flushing the index or copying content.
   """
   @spec start_of(Document.t(), line_index()) :: non_neg_integer()
   def start_of(%Document{} = doc, line) when is_integer(line) and line >= 0 do
-    {starts, adjust_after, delta} = index_view(doc)
-    adjusted_offset(starts, min(line, tuple_size(starts) - 1), adjust_after, delta)
+    view = index_view(doc)
+    view_offset(view, min(line, view_total(view) - 1))
   end
 
   # ── Index construction and incremental update ──
@@ -350,6 +408,22 @@ defmodule Minga.Buffer.Lines do
       _ ->
         clean = ensure_clean(ls)
         splice_newline_insert(clean, cursor_line, gap, text)
+    end
+  end
+
+  @doc """
+  Updates line_offsets after `text` is added at the end of the document, where the content was `end_byte` bytes long.
+
+  Nothing that already has a start moves, so text without a line break leaves every form of the index as it is. New lines go to the appended tail: O(log lines) for each new line, and O(line_count) on the appends where the tail outgrows its base and is joined into a clean tuple, which is a bounded number of copies per line over a stream of appends.
+  """
+  @spec update_after_append(Document.line_offsets(), non_neg_integer(), String.t()) ::
+          Document.line_offsets()
+  def update_after_append(nil, _end_byte, _text), do: nil
+
+  def update_after_append(ls, end_byte, text) do
+    case :binary.matches(text, "\n") do
+      [] -> ls
+      breaks -> append_starts(ls, Enum.map(breaks, fn {pos, _len} -> end_byte + pos + 1 end))
     end
   end
 
@@ -475,33 +549,60 @@ defmodule Minga.Buffer.Lines do
   defp index_view(%Document{line_offsets: {:pending, starts, adjust_after, delta}}),
     do: {starts, adjust_after, delta}
 
+  defp index_view(%Document{line_offsets: {:appended, _base, _tail} = view}), do: view
+
   defp index_view(%Document{line_offsets: starts})
        when is_tuple(starts) and is_integer(elem(starts, 0)),
        do: {starts, tuple_size(starts) - 1, 0}
 
-  defp index_view(%Document{} = doc) do
+  defp index_view(%Document{line_offsets: nil} = doc) do
     starts = doc |> Document.content() |> build_index()
     {starts, tuple_size(starts) - 1, 0}
   end
 
-  # Finds the greatest line whose adjusted start is at or before `point`. The upper
-  # midpoint guarantees progress when `low` moves up to `mid`.
-  @spec search_containing(
-          line_starts(),
-          non_neg_integer(),
-          integer(),
-          non_neg_integer(),
-          line_index(),
-          line_index()
-        ) :: line_index()
-  defp search_containing(_starts, _adjust_after, _delta, _point, low, low), do: low
+  @spec view_total(index_view()) :: line_count()
+  defp view_total({:appended, base, tail}), do: tuple_size(base) + :array.size(tail)
+  defp view_total({starts, _adjust_after, _delta}), do: tuple_size(starts)
 
-  defp search_containing(starts, adjust_after, delta, point, low, high) do
+  @spec view_offset(index_view(), line_index()) :: non_neg_integer()
+  defp view_offset({:appended, base, tail}, line) do
+    base_size = tuple_size(base)
+    if line < base_size, do: elem(base, line), else: :array.get(line - base_size, tail)
+  end
+
+  defp view_offset({starts, adjust_after, delta}, line),
+    do: adjusted_offset(starts, line, adjust_after, delta)
+
+  @spec view_span(index_view(), line_index(), non_neg_integer()) :: line_span() | nil
+  defp view_span(view, line, text_size) do
+    last_line = view_total(view) - 1
+
+    cond do
+      line > last_line ->
+        nil
+
+      line == last_line ->
+        start = view_offset(view, line)
+        {start, text_size - start}
+
+      true ->
+        start = view_offset(view, line)
+        {start, view_offset(view, line + 1) - start - 1}
+    end
+  end
+
+  # Finds the greatest line whose start is at or before `point`. The upper
+  # midpoint guarantees progress when `low` moves up to `mid`.
+  @spec search_containing(index_view(), non_neg_integer(), line_index(), line_index()) ::
+          line_index()
+  defp search_containing(_view, _point, low, low), do: low
+
+  defp search_containing(view, point, low, high) do
     mid = div(low + high + 1, 2)
 
-    if adjusted_offset(starts, mid, adjust_after, delta) <= point,
-      do: search_containing(starts, adjust_after, delta, point, mid, high),
-      else: search_containing(starts, adjust_after, delta, point, low, mid - 1)
+    if view_offset(view, mid) <= point,
+      do: search_containing(view, point, mid, high),
+      else: search_containing(view, point, low, mid - 1)
   end
 
   @spec accumulate_delta(Document.line_offsets(), non_neg_integer(), integer()) ::
@@ -520,6 +621,10 @@ defmodule Minga.Buffer.Lines do
     {:pending, clean, line, new_delta}
   end
 
+  # An edit that is not an append at the end ends the appended form: join once, then defer the shift.
+  defp accumulate_delta({:appended, base, tail}, line, new_delta),
+    do: {:pending, join_appended(base, tail), line, new_delta}
+
   defp accumulate_delta(starts, line, new_delta)
        when is_tuple(starts) and is_integer(elem(starts, 0)) do
     {:pending, starts, line, new_delta}
@@ -530,7 +635,33 @@ defmodule Minga.Buffer.Lines do
     flush_to_tuple(starts, adjust_after, delta)
   end
 
+  defp ensure_clean({:appended, base, tail}), do: join_appended(base, tail)
+
   defp ensure_clean(starts) when is_tuple(starts) and is_integer(elem(starts, 0)), do: starts
+
+  @spec append_starts(Document.line_offsets(), [non_neg_integer(), ...]) ::
+          Document.line_offsets()
+  defp append_starts({:appended, base, tail}, new_starts) do
+    tail =
+      Enum.reduce(new_starts, tail, fn start, tail ->
+        :array.set(:array.size(tail), start, tail)
+      end)
+
+    # The base at least doubles on each join, so a start is copied a bounded number of times.
+    if :array.size(tail) > tuple_size(base),
+      do: join_appended(base, tail),
+      else: {:appended, base, tail}
+  end
+
+  defp append_starts({:pending, starts, adjust_after, delta}, new_starts),
+    do: append_starts(flush_to_tuple(starts, adjust_after, delta), new_starts)
+
+  defp append_starts(starts, new_starts) when is_tuple(starts) and is_integer(elem(starts, 0)),
+    do: append_starts({:appended, starts, :array.new()}, new_starts)
+
+  @spec join_appended(line_starts(), tail()) :: line_starts()
+  defp join_appended(base, tail),
+    do: List.to_tuple(Tuple.to_list(base) ++ :array.to_list(tail))
 
   @spec splice_newline_insert(line_starts(), non_neg_integer(), non_neg_integer(), String.t()) ::
           line_starts()
