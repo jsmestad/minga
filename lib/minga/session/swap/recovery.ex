@@ -40,7 +40,8 @@ defmodule Minga.Session.Swap.Recovery do
   @type waiting_project :: %{root: String.t() | nil, files: pos_integer()}
 
   # `:saved` loses nothing: the file already holds the text.
-  # `:lost` drops text and says so. It carries the file path when the swap could be parsed, so a scoped scan can leave it alone.
+  # `:lost` drops text and says so.
+  # It carries the file path when the swap could be parsed, so a scoped scan can leave it alone.
   @typep verdict ::
            {:recoverable, entry()}
            | {:saved, swap_path :: String.t()}
