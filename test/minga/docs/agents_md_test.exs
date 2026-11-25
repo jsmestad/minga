@@ -100,7 +100,7 @@ defmodule Minga.Docs.AgentsMdTest do
     end
   end
 
-  # `*` matches within one path segment, as it does for `Path.wildcard/1`.
+  # `*` stays within one path segment.
   defp generated?(path) do
     pattern =
       path
