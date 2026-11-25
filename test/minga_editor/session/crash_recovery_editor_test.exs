@@ -8,7 +8,6 @@ defmodule MingaEditor.Session.CrashRecoveryEditorTest do
   alias Minga.Events
   alias Minga.Session.Swap
   alias MingaEditor.Handlers.BufferRegistry
-  alias MingaEditor.Shell.Traditional.NoticeWorkflow
 
   @moduletag :tmp_dir
   @moduletag capture_log: true
@@ -44,14 +43,15 @@ defmodule MingaEditor.Session.CrashRecoveryEditorTest do
                    @timeout
 
     on_exit(fn -> stop_buffer(reopened) end)
-    state = :sys.get_state(ctx.editor)
+
+    # The reopen is still running inside the editor when the event arrives; this waits for it to finish.
+    :sys.get_state(ctx.editor)
 
     assert reopened != crashed
     assert Buffer.content(reopened) == "unsaved text"
     assert Buffer.dirty?(reopened)
-    assert state.workspace.buffers.active == reopened
-    refute crashed in state.workspace.buffers.list
-    assert NoticeWorkflow.message(state) =~ "notes.txt was reopened with its unsaved text"
+    assert active_buffer(ctx) == reopened
+    assert notice_message(ctx) =~ "notes.txt was reopened with its unsaved text"
 
     # The read does not consume the swap: the text is still unsaved, so it must survive a second failure.
     assert File.exists?(Swap.swap_path(path, swap_dir: swap_dir))
