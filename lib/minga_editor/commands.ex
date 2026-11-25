@@ -40,6 +40,7 @@ defmodule MingaEditor.Commands do
   alias MingaEditor.Commands.Extensions, as: ExtCommands
   alias MingaEditor.Commands.Help
   alias MingaEditor.Commands.Lsp, as: LspCommands
+  alias MingaEditor.Commands.Health
   alias MingaEditor.Commands.Tutor
   alias MingaEditor.Commands.Marks
   alias MingaEditor.Commands.Movement
@@ -653,6 +654,14 @@ defmodule MingaEditor.Commands do
 
   def execute(state, {:execute_ex_command, {:tutor, []}}) do
     Tutor.execute(state, :tutor)
+  end
+
+  def execute(state, {:execute_ex_command, {:checkhealth, []}}) do
+    Health.execute(state, :checkhealth)
+  end
+
+  def execute(state, {:execute_ex_command, {:checkhealth, [topic]}}) do
+    Health.execute(state, {:checkhealth, topic})
   end
 
   def execute(state, {:execute_ex_command, {:describe_option, []}}) do

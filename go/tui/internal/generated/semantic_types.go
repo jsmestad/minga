@@ -32,6 +32,17 @@ const (
 	TerminalFeatureStatusFallback TerminalFeatureStatus = 4
 )
 
+// TerminalFeatureSource is a generated enum (repr u8).
+type TerminalFeatureSource uint8
+
+const (
+	TerminalFeatureSourceUnsettled     TerminalFeatureSource = 0
+	TerminalFeatureSourceAnswered      TerminalFeatureSource = 1
+	TerminalFeatureSourceKnownTerminal TerminalFeatureSource = 2
+	TerminalFeatureSourceTimeout       TerminalFeatureSource = 3
+	TerminalFeatureSourceUser          TerminalFeatureSource = 4
+)
+
 // AgentApprovalDecision is a generated enum (repr u8).
 type AgentApprovalDecision uint8
 

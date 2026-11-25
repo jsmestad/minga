@@ -219,10 +219,23 @@ defmodule MingaEditor.Commands.HelpTest do
   end
 
   describe "option help" do
+    test "every built-in option has a help page, whatever its type" do
+      state = build_state()
+
+      # A type the page cannot word must not crash the editor.
+      for {name, _type, _default, _description} <- Options.option_specs() do
+        assert state |> Help.describe_option(name) |> help_content() =~ Atom.to_string(name)
+      end
+
+      assert state |> Help.describe_option(:terminal_features) |> help_content() =~
+               "map of :true_color, :styled_underlines, :underline_color to :on or :off"
+    end
+
     test "describes default, configured, filetype, buffer-local, and extension options" do
       state = build_state()
 
       default = Help.describe_option(state, :tab_width) |> help_content()
+
       assert default =~ "# Option: tab_width"
       assert default =~ "Current value: 2"
       assert default =~ "Default: 2"

@@ -57,6 +57,7 @@ That's it. Save the file and press `SPC h r`. The status bar shows "Config reloa
 | `:font_weight` | weight atom | `:regular` | Font weight (see [Fonts](#fonts) below) |
 | `:font_ligatures` | boolean | `true` | Enable programming ligatures (see [Fonts](#fonts) below) |
 | `:cursor_animate` | boolean | `true` | Smoothly animate cursor movement in GUI frontends |
+| `:terminal_features` | map of feature to `:on` or `:off` | `%{}` | Force a terminal feature on or off (see [Terminal features](#terminal-features) below) |
 | `:log_level` | `:debug`, `:info`, `:warning`, `:error`, `:none` | `:info` | Global minimum log level (see [Logging](#logging) below) |
 | `:log_level_render` | log level or `:default` | `:default` | Log level for the render pipeline |
 | `:log_level_lsp` | log level or `:default` | `:default` | Log level for LSP client communication |
@@ -94,6 +95,16 @@ set :agent_notify_on, [:approval, :error]
 ```
 
 Use `set :agent_notifications, false` to turn off agent alerts. `:agent_notify_debounce` sets the minimum interval in milliseconds between repeated completions or repeated failures from the same session (default `5000`). It does not delay approvals.
+
+### Terminal features
+
+In a terminal, Minga asks what the terminal can do and falls back quietly where it cannot. `:checkhealth terminal` lists what it found. Sometimes it is wrong: a new terminal draws curly underlines that Minga has not heard of, or a remote shell hides that the terminal has 24-bit colour. Then you say so yourself:
+
+```elixir
+set :terminal_features, %{styled_underlines: :on, underline_color: :on}
+```
+
+Three features can be forced `:on` or `:off`: `:true_color`, `:styled_underlines` and `:underline_color`. Those are the ones Minga decides how to draw. The others (the Kitty keyboard protocol, synchronized output, focus reporting) are turned on by the terminal, which answers for them reliably, so they cannot be forced. Any other name is an error, so a typo cannot look like a setting that does nothing. The option applies when Minga starts; after changing it, restart Minga and run `:checkhealth terminal` to see the feature listed as forced by you. The details are in [the terminal design notes](design/tui.md#terminal-capabilities).
 
 ## Modeline
 

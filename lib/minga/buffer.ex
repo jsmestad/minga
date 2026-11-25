@@ -556,18 +556,45 @@ defmodule Minga.Buffer do
 
   # ── Undo/Redo ──────────────────────────────────────────────────────
 
-  @doc "Undo the last edit."
-  @spec undo(t()) :: :ok | {:error, Minga.Buffer.UndoPatch.apply_error()}
+  @doc "Undo your last edit group. Minga's edits are never undone this way; see `Minga.Buffer.Process.undo/1`."
+  @spec undo(t()) ::
+          :ok
+          | Minga.Buffer.UndoHistory.blocked()
+          | {:error, BufferProcess.history_error()}
   defdelegate undo(server), to: BufferProcess
 
-  @doc "Redo the last undone edit."
-  @spec redo(t()) :: :ok | {:error, Minga.Buffer.UndoPatch.apply_error()}
+  @doc "Redo your last undone edit group."
+  @spec redo(t()) ::
+          :ok
+          | Minga.Buffer.UndoHistory.blocked()
+          | {:error, BufferProcess.history_error()}
   defdelegate redo(server), to: BufferProcess
 
-  @doc "Undo all consecutive agent-sourced entries from the top of the undo stack."
+  @doc "Revert every remaining step of the Minga task that edited this buffer most recently, or of the newer task that blocks it, keeping your edits."
   @spec undo_agent_session(t()) ::
-          {:ok, non_neg_integer()} | :empty | {:error, Minga.Buffer.UndoPatch.apply_error()}
+          {:ok, non_neg_integer()}
+          | :empty
+          | Minga.Buffer.UndoHistory.blocked()
+          | {:error, BufferProcess.history_error()}
   defdelegate undo_agent_session(server), to: BufferProcess
+
+  # ── Authorship ─────────────────────────────────────────────────────
+
+  @doc "Who wrote the character at `position`: you, Minga in a task, or `:unattributed`."
+  @spec author_at(t(), Document.position()) :: Minga.Buffer.Provenance.author() | nil
+  defdelegate author_at(server, position), to: BufferProcess
+
+  @doc "The distinct authors of each line from `first_line`, at most `count` lines."
+  @spec line_authors(t(), non_neg_integer(), non_neg_integer()) :: [
+          [Minga.Buffer.Provenance.author()]
+        ]
+  defdelegate line_authors(server, first_line, count), to: BufferProcess
+
+  @doc "The remaining Minga steps of task `task_id` in this buffer, oldest first, with the ranges each touched."
+  @spec minga_changes(t(), Minga.Buffer.Author.id()) :: [
+          {Minga.Buffer.Author.key(), [{Document.position(), Document.position()}]}
+        ]
+  defdelegate minga_changes(server, task_id), to: BufferProcess
 
   @doc "Force the next edit to start a new undo group."
   @spec break_undo_coalescing(t()) :: :ok

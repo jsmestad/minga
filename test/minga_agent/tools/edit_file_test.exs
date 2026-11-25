@@ -268,7 +268,7 @@ defmodule MingaAgent.Tools.EditFileTest do
   end
 
   @tag route: :buffer
-  test "one successful batch is one buffer undo entry", ctx do
+  test "one successful batch is one Minga step in the buffer", ctx do
     {:ok, buffer} = Buffer.pid_for_path(ctx.path)
     revision = full_revision(ctx.context)
 
@@ -279,7 +279,7 @@ defmodule MingaAgent.Tools.EditFileTest do
              ])
 
     assert Buffer.dirty?(buffer)
-    Buffer.undo(buffer)
+    assert {:ok, 1} = Buffer.undo_agent_session(buffer)
     assert Buffer.content(buffer) == ctx.original
     assert File.read!(ctx.path) == ctx.original
   end

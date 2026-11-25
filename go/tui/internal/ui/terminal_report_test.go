@@ -25,7 +25,7 @@ func lastReport(packets [][]byte) map[terminal.Feature]terminal.Status {
 			continue
 		}
 		report = map[terminal.Feature]terminal.Status{}
-		for i := 4; i+1 < len(packet); i += 2 {
+		for i := 4; i+2 < len(packet); i += 3 {
 			report[terminal.Feature(packet[i])] = terminal.Status(packet[i+1])
 		}
 	}
