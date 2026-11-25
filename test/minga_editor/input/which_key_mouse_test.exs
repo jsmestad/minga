@@ -17,9 +17,12 @@ defmodule MingaEditor.Input.WhichKeyMouseTest do
     ctx = start_editor("hello")
 
     send_gui_action(ctx, {:execute_command, "which_key_open"})
-
     assert shown_path(ctx) == "SPC"
-    assert Minga.Editing.in_leader?(editor_state(ctx))
+
+    # The keys typed next walk the leader the pill opened.
+    send_keys_sync(ctx, "f")
+    assert shown_path(ctx) == "SPC f"
+    assert buffer_content(ctx) == "hello"
   end
 
   test "a row presses its key, the breadcrumb goes back up, and a stale click does nothing" do
@@ -52,14 +55,18 @@ defmodule MingaEditor.Input.WhichKeyMouseTest do
     assert shown_path(ctx) == nil
   end
 
-  test "the mode pill in Insert mode returns to Normal and opens which-key" do
+  test "in Insert mode the mode pill opens which-key, and the keys typed next walk it instead of typing" do
     ctx = start_editor("hello")
     send_keys_sync(ctx, "i")
 
     send_gui_action(ctx, {:execute_command, "which_key_open"})
-
-    assert editor_mode(ctx) == :normal
     assert shown_path(ctx) == "SPC"
+
+    send_keys_sync(ctx, "f")
+    assert shown_path(ctx) == "SPC f"
+    send_keys_sync(ctx, "<Esc>")
+
+    assert shown_path(ctx) == nil
     assert buffer_content(ctx) == "hello"
   end
 
@@ -137,6 +144,44 @@ defmodule MingaEditor.Input.WhichKeyMouseTest do
 
     refute picker_open?(ctx)
     assert shown_path(ctx) == nil
+  end
+
+  test "on the : line, the mode pill lists its keys and a typed key goes to the line and closes them" do
+    ctx = start_editor("hello")
+    send_keys_sync(ctx, ":")
+
+    send_gui_action(ctx, {:execute_command, "which_key_open"})
+    assert shown_path(ctx) == "Command line"
+
+    send_keys_sync(ctx, "w")
+    assert shown_path(ctx) == nil
+    assert editor_mode(ctx) == :command
+    assert minibuffer(ctx) =~ ":w"
+  end
+
+  test "⌘. in a file runs the stop, as SPC a s does, in Vim Normal mode" do
+    ctx = start_editor("hello")
+    editor = GenServer.whereis(ctx.editor)
+    handler_id = "which-key-cmd-period-#{System.unique_integer([:positive])}"
+
+    # A telemetry handler runs in the process that executes the command, so matching the editor's pid keeps
+    # concurrent tests' commands out.
+    :ok =
+      :telemetry.attach(
+        handler_id,
+        [:minga, :command, :execute, :start],
+        fn _event, _measurements, %{command: command}, {recipient, editor_pid} ->
+          if self() == editor_pid, do: send(recipient, {:command_ran, command})
+        end,
+        {self(), editor}
+      )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
+    send_key_sync(ctx, ?., 0x08)
+
+    assert_received {:command_ran, :agent_abort}
+    assert buffer_content(ctx) == "hello"
   end
 
   defp whichkey_labels(ctx) do

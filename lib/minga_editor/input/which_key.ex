@@ -1,10 +1,10 @@
 defmodule MingaEditor.Input.WhichKey do
   @moduledoc """
-  Gives an active which-key sequence first ownership of Escape, and walks the CUA space leader sequence.
+  Gives an active which-key sequence first ownership of Escape, and walks a leader sequence that which-key holds itself.
 
   Escape closes which-key and cancels the pending leader sequence in the editing model, so the next `SPC` opens which-key again instead of continuing the old sequence (#4078).
 
-  Vim walks its own leader sequence in the Normal mode state, so in Vim this handler passes every other key through. The CUA space leader keeps none: the macOS chord and retract (`CUA.SpaceLeader`) and the terminal retract window (`CUA.TUISpaceLeader`) start the sequence with `{:leader_start, node, prefix}`, so the which-key state is its only record. This handler resolves the next key inside that node before any surface sees it: a command runs, a prefix advances, Backspace goes back up one group (and closes which-key at the top, without reaching the surface), and any other key closes which-key and passes through to the focused surface.
+  Vim's `SPC` walks its leader sequence in the Normal mode state, so this handler passes those keys through. The CUA space leader and the mode pill keep none in the mode: the macOS chord and retract (`CUA.SpaceLeader`), the terminal retract window (`CUA.TUISpaceLeader`) and the pill (`open/1`) start the sequence with `{:leader_start, node, prefix}`, so the which-key state is its only record. This handler resolves the next key inside that node before any surface sees it: a command runs, a prefix advances, Backspace goes back up one group (and closes which-key at the top, without reaching the surface), and any other key closes which-key and passes through to the focused surface.
   """
 
   @behaviour MingaEditor.Input.Handler
@@ -18,11 +18,6 @@ defmodule MingaEditor.Input.WhichKey do
 
   @key_escape 27
   @key_backspace 127
-  @key_space 32
-
-  # Escape leaves Insert, Visual and the other Vim modes. A completion or signature-help popup takes the first one,
-  # so the pill allows a few before giving up.
-  @escapes_to_normal 3
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
@@ -63,7 +58,7 @@ defmodule MingaEditor.Input.WhichKey do
         modifiers
       )
       when node != nil do
-    if cua_leader?(state),
+    if which_key_leader?(state),
       do: continue_leader(state, whichkey, {codepoint, modifiers}),
       else: {:passthrough, state}
   end
@@ -75,7 +70,7 @@ defmodule MingaEditor.Input.WhichKey do
   @doc """
   Opens which-key at once, the way the mode pill does: the top-level leader groups, or the keys of the open prompt or picker.
 
-  In Vim, Normal mode starts the leader with `SPC`; another mode returns to Normal first. The CUA space leader starts at the leader root. A picker, a minibuffer prompt or the `:` command line shows its own scope's keys instead, because typing there edits text.
+  The leader starts at its root in which-key itself, in any mode and whatever has focus, without sending a key. A picker, a minibuffer prompt or the `:` command line shows its own scope's keys instead, because typing there edits text.
   """
   @spec open(state()) :: state()
   # The keys come from the same layers a key press resolves through, so a user override or a picker with nothing to
@@ -92,45 +87,29 @@ defmodule MingaEditor.Input.WhichKey do
   end
 
   def open(state) do
-    case {Minga.Editing.active_model(state), Minga.Editing.mode(state)} do
-      {_model, :command} ->
+    case Minga.Editing.mode(state) do
+      :command ->
         node = Minga.Keymap.Scope.Prompt.keymap(:insert, prompt_list: true)
         WhichKeyWorkflow.open_scope(state, node, "Command line")
 
-      {Minga.Editing.Model.CUA, _mode} ->
-        root = Minga.Keymap.leader_trie(state.interaction.keymap_server)
-
-        state
-        |> Commands.execute({:leader_start, root, ["SPC"]})
-        |> WhichKeyWorkflow.reveal_now()
-
-      {_vim, _mode} ->
-        state |> return_to_normal(@escapes_to_normal) |> open_from_normal()
+      _mode ->
+        open_leader(state)
     end
   end
 
-  @spec return_to_normal(state(), non_neg_integer()) :: state()
-  defp return_to_normal(state, 0), do: state
+  # The pill starts the leader in which-key itself, the way the CUA space leader does, and this handler walks it: no
+  # key is sent to the mode or the focused surface, so nothing pending (`r` waiting for its target, a count, a
+  # composer in Insert) can take one. Anything pending in the mode is dropped first, so it does not wait behind
+  # which-key for the key after it.
+  @spec open_leader(state()) :: state()
+  defp open_leader(state) do
+    root = Minga.Keymap.leader_trie(state.interaction.keymap_server)
 
-  defp return_to_normal(state, tries) do
-    if Minga.Editing.mode(state) == :normal,
-      do: state,
-      else: state |> Router.route_key(@key_escape, 0) |> return_to_normal(tries - 1)
-  end
-
-  # Normal mode starts the leader with SPC. Anything pending first (a leader sequence, `r` or `f` waiting for its
-  # target, a count, a prefix like `g`) is dropped, so the SPC starts the leader instead of finishing what was pending.
-  @spec open_from_normal(state()) :: state()
-  defp open_from_normal(state) do
-    if Minga.Editing.mode(state) == :normal do
-      state
-      |> WhichKeyWorkflow.dismiss()
-      |> MingaEditor.Editing.update_mode_state(&Minga.Mode.clear_pending/1)
-      |> Router.route_key(@key_space, 0)
-      |> WhichKeyWorkflow.reveal_now()
-    else
-      state
-    end
+    state
+    |> WhichKeyWorkflow.dismiss()
+    |> MingaEditor.Editing.update_mode_state(&Minga.Mode.clear_pending/1)
+    |> Commands.execute({:leader_start, root, ["SPC"]})
+    |> WhichKeyWorkflow.reveal_now()
   end
 
   @doc """
@@ -190,11 +169,10 @@ defmodule MingaEditor.Input.WhichKey do
 
   # Only the CUA space leader leaves its sequence to which-key. A Vim which-key node without a mode
   # leader is stale (a click resets the mode), so the key belongs to the mode, not to the group.
-  @spec cua_leader?(state()) :: boolean()
-  defp cua_leader?(state) do
-    Minga.Editing.active_model(state) == Minga.Editing.Model.CUA and
-      not Minga.Editing.in_leader?(state)
-  end
+  # Vim's SPC walks its leader in the Normal mode state. The CUA space leader and the mode pill keep the leader only
+  # in which-key, so this handler walks it.
+  @spec which_key_leader?(state()) :: boolean()
+  defp which_key_leader?(state), do: not Minga.Editing.in_leader?(state)
 
   @spec continue_leader(state(), MingaEditor.State.WhichKey.t(), Bindings.key()) ::
           MingaEditor.Input.Handler.result()

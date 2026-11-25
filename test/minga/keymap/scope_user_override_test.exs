@@ -200,6 +200,8 @@ defmodule Minga.Keymap.Scope.UserOverrideTest do
     test "answers every key the way resolve_key/4 does, with a user override on top" do
       server = test_keymap_server()
       KeymapActive.bind(server, {:picker, :insert}, "C-o", :my_picker_open, "Open mine")
+      # ⌃J moves to the next item by default; the override must win it.
+      KeymapActive.bind(server, {:picker, :insert}, "C-j", :my_picker_next, "Next mine")
 
       for vim_state <- [:insert, :normal] do
         context = [keymap_server: server, picker_split: false]
@@ -219,6 +221,17 @@ defmodule Minga.Keymap.Scope.UserOverrideTest do
 
       insert = Scope.keymap_node(:picker, :insert, keymap_server: server, picker_split: false)
       assert %{command: :my_picker_open} = insert.children[{?o, 0x02}]
+      assert %{command: :my_picker_next} = insert.children[{?j, 0x02}]
+
+      # Every key a press resolves is in the trie: the defaults that were not overridden show through.
+      assert insert.children[{?k, 0x02}].command ==
+               elem(
+                 Scope.resolve_key(:picker, :insert, {?k, 0x02},
+                   keymap_server: server,
+                   picker_split: false
+                 ),
+                 1
+               )
     end
   end
 

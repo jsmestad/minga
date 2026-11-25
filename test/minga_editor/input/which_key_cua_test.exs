@@ -70,5 +70,16 @@ defmodule MingaEditor.Input.WhichKeyCUATest do
     refute String.ends_with?(picker_state(ctx).query, "x")
   end
 
+  test "over a picker, ↩ reaches the picker and opens the selection", %{ctx: ctx} do
+    send_gui_action(ctx, {:execute_command, "find_file"})
+    send_gui_action(ctx, {:execute_command, "which_key_open"})
+    assert WhichKey.path(whichkey(ctx)) == "Picker"
+
+    send_keys_sync(ctx, "<CR>")
+
+    assert whichkey(ctx).node == nil
+    refute picker_open?(ctx)
+  end
+
   defp whichkey(ctx), do: Runtime.state(editor_state(ctx).shell_runtime).whichkey
 end
