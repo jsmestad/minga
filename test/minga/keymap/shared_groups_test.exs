@@ -27,16 +27,11 @@ defmodule Minga.Keymap.SharedGroupsTest do
   end
 
   describe "ctrl_agent_common" do
-    test "contains expected Ctrl bindings" do
+    test "binds only Ctrl+C, so the composer keeps text-editing control keys" do
       bindings = SharedGroups.ctrl_agent_common()
       commands = Enum.map(bindings, fn {_keys, cmd, _desc} -> cmd end)
 
-      assert :agent_ctrl_c in commands
-      assert :agent_scroll_half_down in commands
-      assert :agent_scroll_half_up in commands
-      assert :agent_clear_chat in commands
-      assert :agent_save_buffer in commands
-      assert :agent_unfocus_and_quit in commands
+      assert commands == [:agent_ctrl_c]
     end
   end
 
@@ -140,8 +135,9 @@ defmodule Minga.Keymap.SharedGroupsTest do
 
       # Ctrl+C excluded
       assert :not_found = Bindings.lookup(trie, {?c, 0x02})
-      # Ctrl+D still present
-      assert {:command, :agent_scroll_half_down} = Bindings.lookup(trie, {?d, 0x02})
+      # Other groups are untouched by the exclusion
+      assert {:command, :agent_insert_newline} =
+               Bindings.lookup(Bindings.merge_group(trie, :newline_variants), {?j, 0x02})
     end
   end
 
@@ -150,12 +146,13 @@ defmodule Minga.Keymap.SharedGroupsTest do
       trie =
         Bindings.new()
         |> Bindings.merge_group(:ctrl_agent_common)
-        # Scope-specific override: Ctrl+D gets a different command
-        |> Bindings.bind([{?d, 0x02}], :custom_scroll, "Custom scroll")
+        |> Bindings.merge_group(:newline_variants)
+        # Scope-specific override: Ctrl+C gets a different command
+        |> Bindings.bind([{?c, 0x02}], :custom_interrupt, "Custom interrupt")
 
-      assert {:command, :custom_scroll} = Bindings.lookup(trie, {?d, 0x02})
+      assert {:command, :custom_interrupt} = Bindings.lookup(trie, {?c, 0x02})
       # Other group bindings unaffected
-      assert {:command, :agent_ctrl_c} = Bindings.lookup(trie, {?c, 0x02})
+      assert {:command, :agent_insert_newline} = Bindings.lookup(trie, {?j, 0x02})
     end
   end
 end

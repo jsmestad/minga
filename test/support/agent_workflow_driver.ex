@@ -20,6 +20,8 @@ defmodule Minga.Test.AgentWorkflowDriver do
   alias MingaEditor.RenderModel.UI.AgentChatBuilder
 
   @ctrl MingaEditor.Input.mod_ctrl()
+  @alt 0x04
+  @cmd 0x08
 
   @type editor_ctx :: EditorCase.editor_ctx()
 
@@ -56,20 +58,20 @@ defmodule Minga.Test.AgentWorkflowDriver do
     state
   end
 
-  @doc "Types a prompt into the focused agent input and submits it with Enter."
+  @doc "Types a prompt into the focused agent input and sends it with Cmd-Enter."
   @spec submit_prompt(editor_ctx(), String.t()) :: map()
   def submit_prompt(ctx, text) when is_binary(text) do
     focus_prompt(ctx)
     EditorCase.send_keys_sync(ctx, text)
-    EditorCase.send_key_sync(ctx, 13, 0)
+    EditorCase.send_key_sync(ctx, 13, @cmd)
   end
 
-  @doc "Queues a follow-up during an active turn using Ctrl-Enter."
+  @doc "Queues a follow-up during an active turn using Alt-Enter while typing."
   @spec queue_follow_up(editor_ctx(), String.t()) :: map()
   def queue_follow_up(ctx, text) when is_binary(text) do
     focus_prompt(ctx)
     EditorCase.send_keys_sync(ctx, text)
-    EditorCase.send_key_sync(ctx, 13, @ctrl)
+    EditorCase.send_key_sync(ctx, 13, @alt)
   end
 
   @doc "Interrupts the active agent turn using the agent prompt Ctrl-C binding."

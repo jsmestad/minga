@@ -55,8 +55,8 @@ func TestFailedStartShowsTheBEAMRemedyAndSendsItOnClick(t *testing.T) {
 				if strings.Contains(text, "Enter send") {
 					t.Fatalf("composer hint says Enter sends while Enter runs the remedy:\n%s", text)
 				}
-				if size[0] == 120 && !strings.Contains(text, "Enter "+strings.ToLower(fixture.remedy.Label)) {
-					t.Fatalf("composer hint does not name the remedy Enter runs:\n%s", text)
+				if size[0] == 120 && !strings.Contains(text, fixture.remedy.KeyHint+" "+strings.ToLower(fixture.remedy.Label)) {
+					t.Fatalf("composer hint does not name the BEAM's remedy key:\n%s", text)
 				}
 
 				_ = model.View()

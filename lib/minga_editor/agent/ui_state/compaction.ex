@@ -29,19 +29,21 @@ defmodule MingaEditor.Agent.UIState.Compaction do
   @spec status_changed(t(), atom(), pct(), pct(), boolean()) :: {t(), action()}
   def status_changed(
         %__MODULE__{execution: {:deferred, fill}} = state,
-        :idle,
+        status,
         warn,
         auto,
         schedulable?
-      ) do
+      )
+      when status in [:idle, :stopped] do
     state
     |> reset_threshold()
     |> finish()
     |> apply_thresholds(fill, warn, auto, schedulable?)
   end
 
-  def status_changed(%__MODULE__{} = compaction, :idle, _, _, _),
-    do: {reset_threshold(compaction), :none}
+  def status_changed(%__MODULE__{} = compaction, status, _, _, _)
+      when status in [:idle, :stopped],
+      do: {reset_threshold(compaction), :none}
 
   def status_changed(%__MODULE__{} = compaction, _status, _, _, _), do: {compaction, :none}
 

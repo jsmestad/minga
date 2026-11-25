@@ -29,7 +29,6 @@ defmodule Minga.Keymap.SharedGroups do
 
   # Modifier bitmasks (same as used in scope modules)
   @shift 0x01
-  @alt 0x04
 
   # Special codepoints
   @enter 13
@@ -81,22 +80,14 @@ defmodule Minga.Keymap.SharedGroups do
   # ── Group definitions ──────────────────────────────────────────────────────
 
   @doc """
-  Ctrl shortcuts shared across agent vim states (insert and input_normal).
+  Ctrl shortcuts shared by the composer's Vim states (insert and input_normal).
 
-  These are agent-domain commands that use Ctrl modifiers. They're shared
-  between insert mode and input_normal mode within the agent scope. Not
-  shared with the editor scope (the editor has its own Ctrl handling via
-  the Mode FSM).
+  Only `⌃C` remains: it leaves Insert like Escape and also stops Minga while it works. The composer types text, so it binds no other control keys; scrolling, clearing, saving and closing live on Normal-mode and leader keys (`docs/design/keys.md`, Composer).
   """
   @spec ctrl_agent_common() :: [binding()]
   def ctrl_agent_common do
     [
-      {~k(C-c), :agent_ctrl_c, "Normal mode (also aborts while streaming)"},
-      {~k(C-d), :agent_scroll_half_down, "Scroll down"},
-      {~k(C-u), :agent_scroll_half_up, "Scroll up"},
-      {~k(C-l), :agent_clear_chat, "Clear chat display"},
-      {~k(C-s), :agent_save_buffer, "Save buffer"},
-      {~k(C-q), :agent_unfocus_and_quit, "Unfocus and quit"}
+      {~k(C-c), :agent_ctrl_c, "Normal mode (also aborts while streaming)"}
     ]
   end
 
@@ -156,20 +147,20 @@ defmodule Minga.Keymap.SharedGroups do
   Multi-encoding newline insertion bindings.
 
   Shift+Enter produces different byte sequences depending on the terminal
-  and protocol. These four bindings cover all known encodings:
+  and protocol. These three bindings cover all known encodings:
 
   1. `{Enter, shift}` - Kitty protocol (CSI 13;2 u)
   2. `{Ctrl+J, 0}` - Ghostty/macOS (LF = Ctrl+J in Kitty protocol)
   3. `{0x0A, 0}` - Legacy terminals (raw LF)
-  4. `{Enter, alt}` - Universal fallback (Alt+Enter works everywhere)
+
+  Alt+Enter is not in the group: the Vim composer queues the next message with it, and the CUA composer binds it as a newline itself.
   """
   @spec newline_variants() :: [binding()]
   def newline_variants do
     [
       {[{@enter, @shift}], :agent_insert_newline, "Insert newline"},
       {~k(C-j), :agent_insert_newline, "Insert newline"},
-      {[{0x0A, 0}], :agent_insert_newline, "Insert newline"},
-      {[{@enter, @alt}], :agent_insert_newline, "Insert newline"}
+      {[{0x0A, 0}], :agent_insert_newline, "Insert newline"}
     ]
   end
 end

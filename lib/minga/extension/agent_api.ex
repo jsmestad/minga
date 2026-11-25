@@ -28,7 +28,7 @@ defmodule Minga.Extension.AgentAPI do
   @default_event_log EventLog
 
   @typedoc "Agent session status."
-  @type session_status :: :idle | :plan | :thinking | :tool_executing | :error
+  @type session_status :: :idle | :stopped | :plan | :thinking | :tool_executing | :error
 
   @typedoc "Summary of an active agent session."
   @type session_summary ::

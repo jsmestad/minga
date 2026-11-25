@@ -9,6 +9,7 @@ defmodule MingaEditor.Agent.PromptBuffer do
 
   alias Minga.Buffer
   alias Minga.Buffer.Document
+  alias Minga.Editing.LineEdit
   alias MingaAgent.DraftSnapshot
   alias MingaEditor.Agent.SlashCommand
   alias MingaEditor.Agent.UIState
@@ -183,6 +184,29 @@ defmodule MingaEditor.Agent.PromptBuffer do
 
     if Buffer.cursor(pid) != {0, 0}, do: Buffer.delete_before(pid)
     UIState.record_prompt_edit(state)
+  end
+
+  @doc """
+  Applies a readline edit (`Minga.Editing.LineEdit`) to the composer line under the cursor.
+
+  The composer types text, so `⌃U` deletes to the start of the line and `⌃W` the word before the cursor, as in any field you type in. A line that holds a collapsed paste is left alone, so an edit never cuts through its placeholder.
+  """
+  @spec line_edit(UIState.t(), LineEdit.edit()) :: UIState.t()
+  def line_edit(%UIState{} = state, edit) do
+    state = ensure(state)
+    pid = state.panel.prompt_buffer
+    {line, col} = Buffer.cursor(pid)
+    [text] = Buffer.lines(pid, line, 1)
+
+    if String.contains?(text, @paste_placeholder_prefix) do
+      state
+    else
+      cursor = text |> binary_part(0, min(col, byte_size(text))) |> String.length()
+      {new_text, new_cursor} = LineEdit.apply(edit, text, cursor)
+      if new_text != text, do: Buffer.replace_lines(pid, line, line, new_text)
+      Buffer.move_to(pid, {line, new_text |> String.slice(0, new_cursor) |> byte_size()})
+      UIState.record_prompt_edit(state)
+    end
   end
 
   @doc "Replaces prompt content without recording history."

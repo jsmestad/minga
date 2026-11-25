@@ -67,6 +67,24 @@ defmodule Minga.Keymap.Scope.AgentStartRemedyTest do
     end
   end
 
+  test "in the composer's Insert, Enter stays a newline and the hint names Escape first" do
+    assert AgentScope.start_remedy_key_hint(:composer_insert) == "Esc, Enter"
+
+    for remedy <- @remedies do
+      assert AgentScope.start_remedy_keymap(:composer_insert, agent_start_remedy: remedy) ==
+               Bindings.new()
+
+      assert Bindings.lookup(AgentScope.keymap(:insert, agent_start_remedy: remedy), {13, 0}) ==
+               {:command, :agent_insert_newline}
+
+      assert Bindings.lookup(
+               AgentScope.keymap(:input_normal, agent_start_remedy: remedy),
+               {13, 0}
+             ) ==
+               {:command, :agent_submit_or_newline}
+    end
+  end
+
   describe "new_session_key_hint/3" do
     test "names the leader sequence bound to a new session wherever the leader is reachable" do
       defaults = Minga.Keymap.Defaults.leader_trie()

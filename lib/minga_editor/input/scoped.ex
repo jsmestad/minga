@@ -271,14 +271,33 @@ defmodule MingaEditor.Input.Scoped do
          )}
 
       :not_found ->
-        # Global Ctrl/Alt shortcuts retain their downstream handlers.
-        if vim_state in [:insert, :cua] and state.workspace.agent_ui.panel.input_focused and
-             cp >= 32 and band(mods, @ctrl ||| @alt) == 0 do
-          handle_agent_self_insert(state, cp, mods)
-        else
-          # Not handled by scope. Pass through so AgentNav can route semantic transcript navigation.
-          {:passthrough, state}
-        end
+        resolve_unbound_agent_key(state, vim_state, cp, mods)
+    end
+  end
+
+  # Keys the Agent scope does not bind: printable keys type into a focused
+  # composer, readline keys edit its line in Vim Insert, and every other key
+  # passes through so AgentNav can route semantic transcript navigation and
+  # global Ctrl/Alt shortcuts keep their downstream handlers.
+  @spec resolve_unbound_agent_key(
+          EditorState.t(),
+          Scope.vim_state(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: MingaEditor.Input.Handler.result()
+  defp resolve_unbound_agent_key(state, vim_state, cp, mods) do
+    focused? = state.workspace.agent_ui.panel.input_focused
+
+    cond do
+      vim_state in [:insert, :cua] and focused? and cp >= 32 and band(mods, @ctrl ||| @alt) == 0 ->
+        handle_agent_self_insert(state, cp, mods)
+
+      vim_state == :insert and focused? and Minga.Editing.LineEdit.edit_for_key({cp, mods}) ->
+        {:handled,
+         AgentPanel.composer_line_edit(state, Minga.Editing.LineEdit.edit_for_key({cp, mods}))}
+
+      true ->
+        {:passthrough, state}
     end
   end
 

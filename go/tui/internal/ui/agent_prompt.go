@@ -138,18 +138,10 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 		}
 	}
 	if placement.innerWidth >= 48 {
-		fullHint := " · Enter send · Shift+Enter newline"
-		if chat.Lifecycle == protocol.AgentChatFailed && chat.LifecycleRemedy.Kind != protocol.AgentStartRemedyNone {
-			// During a failed start Enter runs the BEAM's remedy, so name it instead of send.
-			fullHint = " · Enter " + strings.ToLower(chat.LifecycleRemedy.Label) + " · Shift+Enter newline"
-		}
-		if lipgloss.Width(label)+lipgloss.Width(fullHint) <= placement.innerWidth {
-			label += fullHint
-		} else if lipgloss.Width(label)+len(" · Shift+Enter newline") <= placement.innerWidth {
-			label += " · Shift+Enter newline"
-		}
-		if lipgloss.Width(label)+len(" · Esc normal") <= placement.innerWidth {
-			label += " · Esc normal"
+		for _, hint := range agentComposerKeyHints(chat) {
+			if lipgloss.Width(label)+lipgloss.Width(hint) <= placement.innerWidth {
+				label += hint
+			}
 		}
 	}
 	inner := lipgloss.NewStyle().Foreground(p.Accent()).Background(bg).Width(placement.innerWidth).Render(fitStyled(label, placement.innerWidth))
@@ -161,6 +153,24 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 		lines = append(lines, base.Render(border.Render("╰"+strings.Repeat("─", max(width-2, 0))+"╯")))
 	}
 	return lines
+}
+
+// agentComposerKeyHints returns the composer's key hints, most important first; each is shown while it fits.
+// The composer is a Vim buffer: Enter adds a newline in Insert and sends from Normal (and in CUA).
+// During a failed start the remedy's key comes from the BEAM, so the hint names the key that runs it.
+func agentComposerKeyHints(chat protocol.AgentChat) []string {
+	insert := chat.PromptVimMode == 1
+	if chat.Lifecycle == protocol.AgentChatFailed && chat.LifecycleRemedy.Kind != protocol.AgentStartRemedyNone {
+		remedy := " · " + chat.LifecycleRemedy.KeyHint + " " + strings.ToLower(chat.LifecycleRemedy.Label)
+		if insert {
+			return []string{remedy, " · Enter newline"}
+		}
+		return []string{remedy}
+	}
+	if insert {
+		return []string{" · Enter newline", " · Alt+Enter queue", " · Esc normal"}
+	}
+	return []string{" · Enter send", " · i insert"}
 }
 
 func agentComposerControls(chat protocol.AgentChat, width int) (control, question, attachments string) {

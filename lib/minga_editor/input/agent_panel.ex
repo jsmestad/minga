@@ -101,22 +101,41 @@ defmodule MingaEditor.Input.AgentPanel do
   @doc """
   Dispatches a composer key outside insert mode.
 
-  While the active tab's start has failed, the Agent scope binds the remedy key (Enter) for the composer; that binding runs before Vim editing. Every other key, and every key without a failed start, goes through the Mode FSM targeting the prompt buffer.
+  In Vim Normal mode with no key sequence, count or single-key completion pending, the Agent scope's `:input_normal` trie runs first: `↩` and `⌘↩` send, `⌘.` stops, and a failed start's remedy key runs its remedy. Every other key, and every key while an operator, a count, a single-key completion (`r`, `f`, `q`, `"`) or a leader sequence waits, goes through the Mode FSM targeting the prompt buffer.
   """
   @spec dispatch_composer_normal_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
   def dispatch_composer_normal_key(state, cp, mods) do
-    remedies =
-      Minga.Keymap.Scope.Agent.start_remedy_keymap(
-        :composer,
-        agent_start_remedy: UIState.start_remedy(state.workspace.agent_ui)
-      )
-
-    case Minga.Keymap.Bindings.lookup(remedies, {cp, mods}) do
+    case composer_normal_binding(state, {cp, mods}) do
       {:command, command} -> execute_prompt_binding(state, command)
-      _vim_key -> dispatch_prompt_via_mode_fsm(state, cp, mods)
+      :not_found -> dispatch_prompt_via_mode_fsm(state, cp, mods)
     end
   end
+
+  @spec composer_normal_binding(EditorState.t(), {non_neg_integer(), non_neg_integer()}) ::
+          {:command, atom()} | :not_found
+  defp composer_normal_binding(
+         %{workspace: %{editing: %{mode: :normal, mode_state: mode_state}}} = state,
+         key
+       ) do
+    if Map.get(mode_state, :pending) == nil and Map.get(mode_state, :count) == nil and
+         not Minga.Editing.owns_next_key?(state) do
+      case Keymap.resolve_scoped_key(
+             :agent,
+             :input_normal,
+             key,
+             keymap_server: state.interaction.keymap_server,
+             agent_start_remedy: UIState.start_remedy(state.workspace.agent_ui)
+           ) do
+        {:command, command} -> {:command, command}
+        _prefix_or_unbound -> :not_found
+      end
+    else
+      :not_found
+    end
+  end
+
+  defp composer_normal_binding(_state, _key), do: :not_found
 
   @spec handle_panel_escape(EditorState.t()) :: EditorState.t()
   defp handle_panel_escape(state) do
@@ -142,7 +161,23 @@ defmodule MingaEditor.Input.AgentPanel do
   end
 
   defp handle_panel_self_insert(state, cp, mods) do
-    dispatch_prompt_via_mode_fsm(state, cp, mods)
+    case Minga.Editing.LineEdit.edit_for_key({cp, mods}) do
+      nil -> dispatch_prompt_via_mode_fsm(state, cp, mods)
+      edit -> composer_line_edit(state, edit)
+    end
+  end
+
+  @doc """
+  Applies a readline edit to the focused composer's current line.
+
+  The composer is a field you type in, so the readline keys (`⌃U`, `⌃W`, `⌃A`, `⌃E`, `⌃H`, `⌃K`) edit its text in Insert, as they do in every prompt. They are text editing, not keymap bindings (`Minga.Editing.LineEdit`), so they run only when the Agent scope binds nothing for the key.
+  """
+  @spec composer_line_edit(EditorState.t(), Minga.Editing.LineEdit.edit()) :: EditorState.t()
+  def composer_line_edit(state, edit) do
+    MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+      state,
+      MingaEditor.Agent.PromptBuffer.line_edit(state.workspace.agent_ui, edit)
+    )
   end
 
   @spec execute_prompt_binding(EditorState.t(), atom()) :: EditorState.t()

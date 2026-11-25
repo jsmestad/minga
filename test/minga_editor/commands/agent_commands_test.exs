@@ -884,7 +884,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   end
 
   describe "scope_ctrl_c/1" do
-    test "aborts a live turn, restores queued messages to the prompt and leaves Insert mode" do
+    test "stops a live turn, keeps queued messages queued and leaves Insert mode" do
       session =
         start_supervised!(
           {Session,
@@ -915,9 +915,9 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       new_state = AgentCommands.scope_ctrl_c(state)
 
       assert_receive :provider_abort_called, 1_000
-      prompt = MingaEditor.Agent.PromptBuffer.input_text(new_state.workspace.agent_ui.panel)
-      assert prompt =~ "steering note"
-      assert prompt =~ "follow-up note"
+      assert MingaEditor.Agent.PromptBuffer.input_text(new_state.workspace.agent_ui.panel) == ""
+      assert Session.get_queued_messages(session) == {["steering note"], ["follow-up note"]}
+      assert Session.status(session) == :stopped
       assert Minga.Editing.mode(new_state) == :normal
     end
 
@@ -1716,31 +1716,42 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       )
     end
 
-    test "Enter in the composer retries a failed start from insert and input-normal and keeps the draft" do
+    test "Enter in the composer's Insert adds a newline and does not retry a failed start" do
+      {state, _tab, _workspace} = with_active_agent_workspace(source_workspace_state())
+      failure = StartFailure.timed_out(StartRequest.new(false, false, nil))
+      composer = failed_composer(state, failure, "draft to keep")
+      assert Minga.Editing.inserting?(composer)
+
+      pressed = press_enter(composer)
+
+      assert pressed.workspace.agent_ui.chat_lifecycle == {:failed, failure}
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(pressed.workspace.agent_ui) =~ "\n"
+    end
+
+    test "Enter in the composer's Normal mode retries a failed start and keeps the draft" do
       {state, tab, _workspace} =
         source_workspace_state()
         |> with_catalog_scheduler()
         |> with_agent_ingest()
         |> with_active_agent_workspace()
 
-      for visible? <- [true, false], leave_insert? <- [false, true] do
+      for visible? <- [true, false] do
         failure = StartFailure.timed_out(StartRequest.new(false, false, nil))
-        composer = failed_composer(state, failure, "draft to keep", visible?)
 
         composer =
-          if leave_insert?, do: AgentCommands.input_to_normal(composer), else: composer
+          state
+          |> failed_composer(failure, "draft to keep", visible?)
+          |> AgentCommands.input_to_normal()
 
         assert MingaEditor.Agent.UIState.start_remedy(composer.workspace.agent_ui) == :retry
-        assert Minga.Editing.inserting?(composer) == not leave_insert?
+        refute Minga.Editing.inserting?(composer)
         assert composer.workspace.agent_ui.panel.visible == visible?
         assert composer.workspace.agent_ui.panel.input_focused
         retried = press_enter(composer)
 
         # Built only on failure: the diagnosis dispatches Enter again to name the claiming handler.
         if retried.workspace.agent_ui.chat_lifecycle != :starting do
-          flunk(
-            retry_diagnosis(composer, retried, visible?: visible?, leave_insert?: leave_insert?)
-          )
+          flunk(retry_diagnosis(composer, retried, visible?: visible?))
         end
 
         assert Runtime.active_tab(retried.shell_runtime).id == tab.id
@@ -1762,7 +1773,11 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
     test "Enter in the composer opens provider setup when setup is the remedy" do
       {state, _tab, _workspace} = with_active_agent_workspace(source_workspace_state())
-      composer = failed_composer(state, StartFailure.missing_credentials(), "draft to keep")
+
+      composer =
+        state
+        |> failed_composer(StartFailure.missing_credentials(), "draft to keep")
+        |> AgentCommands.input_to_normal()
 
       opened = press_enter(composer)
 
@@ -1788,7 +1803,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       failure = StartFailure.session_crashed(remote)
       assert failure.remedy == nil
-      composer = failed_composer(state, failure, "hello")
+      composer = state |> failed_composer(failure, "hello") |> AgentCommands.input_to_normal()
       assert UIState.start_remedy(composer.workspace.agent_ui) == nil
 
       submitted = press_enter(composer)

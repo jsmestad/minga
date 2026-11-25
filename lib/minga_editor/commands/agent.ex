@@ -73,7 +73,7 @@ defmodule MingaEditor.Commands.Agent do
 
   When no agent pane exists: ensures an agent session is running,
   then applies the `:agent_right` layout preset (file left, agent
-  chat right). When an agent pane exists: removes it and restores
+  chat right) and focuses the composer in Insert. When an agent pane exists: removes it and restores
   the single-window layout.
 
   The agent state lives in a background agent tab (created if needed).
@@ -111,10 +111,12 @@ defmodule MingaEditor.Commands.Agent do
 
     case find_agent_tab(state) do
       %Tab{id: agent_id} ->
+        # The conversation opens with the composer focused in Insert, so you can type at once.
         state
         |> measured_tab_switch(agent_id)
         |> maybe_start_session()
         |> activate_agent_view(return_target)
+        |> scope_focus_input()
 
       nil ->
         state
@@ -1299,10 +1301,9 @@ defmodule MingaEditor.Commands.Agent do
   end
 
   @doc """
-  Aborts the current agent operation and restores any queued messages to the prompt input.
+  Stops the turn Minga is working on (`SPC a s`, `⌘.`).
 
-  Queued steering and follow-up messages are recalled from the Session and placed
-  back in the prompt buffer so nothing is lost.
+  The queue is kept: queued messages stay in `*minga-queue*` and are sent after the next turn. The composer keeps its draft, and the Session reports the status `:stopped`, which the modeline speaks as "Minga stopped".
   """
   @spec abort_agent(state()) :: state()
   def abort_agent(state) do
@@ -1321,10 +1322,7 @@ defmodule MingaEditor.Commands.Agent do
 
     with {session, ^target} <- agent.stop_target,
          ^session <- Runtime.active_session(state.shell_runtime) do
-      case DraftWorkflow.stop(state, session, target) do
-        {:saved, updated} -> updated
-        :direct -> stop_turn(state, session, target)
-      end
+      stop_turn(state, session, target)
     else
       _ -> NoticeWorkflow.publish(state, "That Agent turn is no longer active.")
     end
@@ -1333,14 +1331,8 @@ defmodule MingaEditor.Commands.Agent do
   @spec stop_turn(state(), pid(), {String.t(), String.t()}) :: state()
   defp stop_turn(state, session, target) do
     case Session.stop_turn(session, target) do
-      {:ok, :queue_kept} ->
-        NoticeWorkflow.publish(
-          state,
-          "Stop accepted. Queued input was kept in the saved session."
-        )
-
-      {:ok, queued} ->
-        restore_queued_to_prompt(state, queued)
+      :ok ->
+        state
 
       {:error, :stale_turn} ->
         NoticeWorkflow.publish(state, "That Agent turn is no longer active.")
@@ -1451,7 +1443,7 @@ defmodule MingaEditor.Commands.Agent do
         end
 
       true ->
-        # Agent is idle: Ctrl+Enter behaves like regular Enter.
+        # Agent is idle: queueing sends the message now.
         submit_prompt(state)
     end
   end
@@ -1463,7 +1455,7 @@ defmodule MingaEditor.Commands.Agent do
   @doc """
   Context-sensitive Ctrl-C handler.
 
-  Always leaves Insert mode, as Escape does (vim convention). During streaming it also aborts the agent and restores queued messages to the prompt. After a provider error it also restarts the provider.
+  Always leaves Insert mode, as Escape does (vim convention). While Minga works it also stops the turn, as `SPC a s` does, and keeps the queue. After a provider error it also restarts the provider.
   """
   @spec scope_ctrl_c(state()) :: state()
   def scope_ctrl_c(state) do
@@ -2394,8 +2386,6 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec restore_queued_to_prompt(state(), [String.t() | [ReqLLM.Message.ContentPart.t()]]) ::
           state()
-  defp restore_queued_to_prompt(state, []), do: state
-
   defp restore_queued_to_prompt(state, all_queued) do
     current_text = PromptBuffer.prompt_text(state.workspace.agent_ui.panel)
     combined = Session.combine_queue_entries_to_text(all_queued)
