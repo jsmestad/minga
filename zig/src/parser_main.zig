@@ -257,6 +257,8 @@ fn handleCommand(
         },
         .parse_buffer => |pb| {
             const bs = try getOrCreateBuffer(buffers, alloc, pb.buffer_id);
+            // Every path below sends highlight spans; this closes the parse after all of its results.
+            defer sendParseComplete(pb.buffer_id, pb.version, stdout);
             bs.setSource(alloc, pb.source) catch |err| {
                 std.log.err("parse_buffer: source update failed for buffer {d}: {}", .{ pb.buffer_id, err });
                 sendEmptyHighlightSpans(pb.buffer_id, pb.version, stdout, alloc) catch {};
@@ -467,6 +469,9 @@ fn handleEditBuffer(
         return;
     };
 
+    // Every path below sends highlight spans; this closes the parse after all of its results.
+    defer sendParseComplete(decoded.buffer_id, decoded.version, stdout);
+
     // Activate this buffer (sets language, installs its tree for incremental parsing).
     if (!activateBuffer(hl, bs)) {
         std.log.err("edit_buffer: activation failed for buffer {d}", .{decoded.buffer_id});
@@ -612,7 +617,19 @@ fn sendHighlightCompletion(
     }
 }
 
-/// Sends an empty highlight response that still completes the manager's in-flight parse.
+/// Sends the last message of a parse. Highlights go first so they reach the screen as early as possible; folds,
+/// text objects and symbols follow, and this message tells the BEAM that nothing more of the parse is coming (#4314).
+fn sendParseComplete(buffer_id: u32, version: u32, stdout: *std.Io.Writer) void {
+    var buf: [9]u8 = undefined;
+    const msg = protocol.encodeParseComplete(&buf, buffer_id, version);
+    protocol.writeMessage(stdout, msg) catch |err| {
+        std.log.err("parse_complete failed for buffer {d}: {}", .{ buffer_id, err });
+        return;
+    };
+    stdout.flush() catch {};
+}
+
+/// Sends an empty highlight response for a parse that produced no highlights.
 fn sendEmptyHighlightSpans(
     buffer_id: u32,
     version: u32,

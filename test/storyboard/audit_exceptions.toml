@@ -45,7 +45,6 @@ pairs = [
   "#04a5e5 on #eff1f5",
   "#1e66f5 on #eff1f5",
   "#40a02b on #eff1f5",
-  "#7287fd on #ccd0da",
   "#7c7f93 on #eff1f5",
   "#8839ef on #acb0be",
   "#8c8fa1 on #eff1f5",
@@ -154,7 +153,7 @@ reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in
 issue = 4137
 
 [[exception]]
-scenario = ["edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
 frontend = "tui"
 part = "glyph"
 rule = "contrast"
