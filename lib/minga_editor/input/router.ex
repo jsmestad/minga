@@ -199,9 +199,15 @@ defmodule MingaEditor.Input.Router do
          key
        )
        when node != nil,
-       do: key == {127, 0} or Minga.Keymap.Bindings.lookup(node, key) != :not_found
+       do: panel_key?(key) or Minga.Keymap.Bindings.lookup(node, key) != :not_found
 
   defp leader_panel_takes?(_state, _key), do: false
+
+  # The panel's own keys: Escape (with any modifiers) closes it, and Backspace goes up a level.
+  @spec panel_key?(Minga.Keymap.Bindings.key()) :: boolean()
+  defp panel_key?({27, _modifiers}), do: true
+  defp panel_key?({127, 0}), do: true
+  defp panel_key?(_key), do: false
 
   @spec leader_panel_open?(EditorState.t()) :: boolean()
   defp leader_panel_open?(%{

@@ -288,15 +288,41 @@ defmodule MingaEditor.Input.WhichKeyMouseTest do
     assert whichkey(ctx).labels == ["Leader", "Filetype"]
   end
 
-  test "in Insert mode, a key the leader does not know closes which-key and types itself" do
-    ctx = start_editor("hello")
-    send_keys_sync(ctx, "i")
+  # A config file completes option names after `set :`, with no language server, so it shows whether a key arms
+  # completion.
+  defp config_buffer(dir) do
+    path = Path.join(dir, ".minga.exs")
+    File.write!(path, "set :")
+    ctx = start_editor("set :", file_path: path, project_root: dir)
+    send_keys_sync(ctx, "A")
+    ctx
+  end
+
+  @tag :tmp_dir
+  test "in Insert mode, a key the leader does not know closes which-key, types itself and arms completion",
+       %{tmp_dir: dir} do
+    ctx = config_buffer(dir)
     send_gui_action(ctx, {:execute_command, "which_key_open"})
 
-    send_keys_sync(ctx, "(")
+    send_keys_sync(ctx, "e")
 
     assert shown_path(ctx) == nil
-    assert buffer_content(ctx) =~ "("
+    assert buffer_content(ctx) == "set :e"
+    assert completion_visible?(ctx)
+  end
+
+  @tag :tmp_dir
+  test "in Insert mode, Escape on the leader panel closes it without arming completion", %{
+    tmp_dir: dir
+  } do
+    ctx = config_buffer(dir)
+    send_gui_action(ctx, {:execute_command, "which_key_open"})
+
+    send_keys_sync(ctx, "<Esc>")
+
+    assert shown_path(ctx) == nil
+    assert buffer_content(ctx) == "set :"
+    refute completion_visible?(ctx)
   end
 
   defp whichkey_labels(ctx) do
