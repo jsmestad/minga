@@ -632,7 +632,8 @@ defmodule MingaAgent.Session.TurnExecution do
   defp queue_field(:steering), do: :steering_queue
   defp queue_field(:follow_up), do: :follow_up_queue
 
-  # Takes the input out of where it is, a queue or the removed inputs, and says where it was and which queue it belongs to.
+  # Takes the input out of where it is, a queue or the removed inputs.
+  # The result says where it was and which queue it belongs to.
   @spec take_placeable(t(), pos_integer()) ::
           {:ok, {:pending | :withdrawn, prompt_kind()}, queued_input(), t()}
           | {:error, :already_consumed | :queued_input_not_found}
@@ -931,7 +932,8 @@ defmodule MingaAgent.Session.TurnExecution do
 
   defp valid_queue_receipts?(_invalid, _next, _seen), do: false
 
-  # A queue's order is its user's order, so its ids need not ascend: each id is used once and is below the next one to give out.
+  # A queue's order is its user's order, so its ids need not ascend.
+  # Each id is used once and is below the next one to give out.
   @spec validate_entries(list(), pos_integer(), %{optional(pos_integer()) => true}) ::
           {:ok, %{optional(pos_integer()) => true}} | :invalid
   defp validate_entries([], _next, seen), do: {:ok, seen}
