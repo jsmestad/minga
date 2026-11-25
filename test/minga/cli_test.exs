@@ -6,6 +6,8 @@ defmodule Minga.CLITest do
 
   alias Minga.CLI
 
+  @moduletag timeout: 30_000
+
   setup do
     if Process.whereis(Minga.EventBus) == nil do
       start_supervised!(Minga.Events.child_spec(name: Minga.EventBus))
@@ -400,6 +402,22 @@ defmodule Minga.CLITest do
 
       unmarked = tmp_dir("cli-cwd-unmarked")
       assert CLI.directory_startup_project_root(unmarked) == nil
+    end
+
+    test "a cold terminal launch resolves a language-marked project before services start" do
+      root = tmp_dir("cli-cold-project")
+      nested = Path.join(root, "lib")
+      File.mkdir_p!(nested)
+      File.write!(Path.join(root, "mix.exs"), "")
+
+      code = """
+      [root] = System.argv()
+      :ok = Minga.CLI.prepare_startup(["lib"], {:terminal, root})
+      IO.write(Minga.CLI.startup_project_root())
+      """
+
+      assert {^root, 0} =
+               Minga.Test.ElixirSubprocess.eval(code, [root], stderr_to_stdout: true)
     end
 
     test "a terminal start without an argument opens the project of the terminal's directory" do
