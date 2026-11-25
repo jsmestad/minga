@@ -233,7 +233,12 @@ struct PickerSectionHeaderTests {
         let height = 4 * PickerOverlay.itemHeight
 
         #expect(PickerOverlay.visibleRowCount(items(Array(repeating: "", count: 6)), listHeight: height, selectedIndex: 0) == 4)
-        #expect(PickerOverlay.visibleRowCount(grouped, listHeight: height, selectedIndex: 0) == 3)
+        // Header A and its two rows fit. Header B fits too, but its first row does not, so that row is not counted.
+        #expect(PickerOverlay.visibleRowCount(grouped, listHeight: height, selectedIndex: 0) == 2)
+
+        // A list exactly as tall as two headers and three rows shows the first row of group B whole.
+        let threeRows = 2 * PickerOverlay.sectionHeaderHeight + 3 * PickerOverlay.itemHeight
+        #expect(PickerOverlay.visibleRowCount(grouped, listHeight: threeRows, selectedIndex: 0) == 3)
     }
 
     @Test("the highlighted row always counts, and an empty list has no fit")
