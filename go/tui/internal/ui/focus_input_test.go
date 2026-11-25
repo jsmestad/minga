@@ -33,6 +33,7 @@ func multipleVisibleFocusSurfaces(owner *protocol.Command) Model {
 		commands = append(commands, *owner)
 	}
 	applyProductionFrame(&model, 1, 0, 1, commands...)
+	markPickerFitReported(&model)
 	return model
 }
 

@@ -6,6 +6,7 @@ defmodule MingaEditor.FileTree.Freshness do
   """
 
   alias Minga.Buffer
+  alias Minga.Core.Plural
   alias Minga.LSP.SyncServer
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
@@ -685,7 +686,9 @@ defmodule MingaEditor.FileTree.Freshness do
 
     state
     |> set_file_tree(file_tree)
-    |> NoticeWorkflow.publish("File tree watcher recovery stopped after #{attempt} attempts")
+    |> NoticeWorkflow.publish(
+      "File tree watcher recovery stopped after #{Plural.count(attempt, "attempt", "attempts")}"
+    )
   end
 
   @spec watcher_retry_delay(pos_integer()) :: pos_integer()

@@ -84,7 +84,8 @@ version = "2.0.0"
 # protocol_version 43 appends a failed Agent start's remedy (u8), action label (string16) and key hint (string16) to the gui_agent_chat lifecycle section, adds agent status 6 (needs you) to the chat, status bar and workspace status bytes, and adds the agent_start_remedy gui_action.
 # protocol_version 44 appends the Agent lifecycle notice's headline (string16) and draft note (string16) to the gui_agent_chat lifecycle section, so frontends render the BEAM's copy instead of authoring their own.
 # protocol_version 45 adds the empty_list structure (the empty-state anatomy: glyph, title, why line, selected action and actions) and the gui_picker empty section (0x07) that carries it when a picker offers next steps instead of results. An action's id is the command it runs; a click sends the existing execute_command gui_action with it.
-protocol_version = 45
+# protocol_version 46 adds the gui_picker movement_keys section (0x08) (the keys that move the highlighted row, resolved from the picker keymap scope, so frontends preview exactly those keys) and the picker_fit gui_action (the result rows the frontend's picker list shows, which sizes a picker page).
+protocol_version = 46
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -1520,6 +1521,13 @@ value = 0x6E
 name = "agent_start_remedy"
 value = 0x6F
 
+# Reports how many result rows the frontend's picker list shows. Payload: generation(u32, the gui_picker header's activation_generation) + rows(u16, positive).
+# A frontend sends it after it draws a picker and again when the count changes; the BEAM pages the picker by this many rows (ADR-0001: row fit is a presentation fact the frontend owns).
+# A report for a picker that is no longer open is ignored.
+[[gui_actions]]
+name = "picker_fit"
+value = 0x70
+
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
 # Capability payload version 2 appends these fields after the original seven
@@ -1654,6 +1662,17 @@ values = [
   { name = "constant", value = 9 },
   { name = "struct", value = 11 },
   { name = "enum", value = 12 },
+]
+
+# The direction a picker movement key moves the highlighted row.
+[[enums]]
+name = "picker_movement"
+repr = "u8"
+default = "none"
+values = [
+  { name = "none", value = 0 },
+  { name = "next", value = 1 },
+  { name = "previous", value = 2 },
 ]
 
 # A picker item's status chip tone. none means the item has no chip; frontends
@@ -1968,6 +1987,15 @@ fields = [
   { name = "why", type = "string16" },
   { name = "selected", type = "u8" },
   { name = "actions", type = "counted_array", count_type = "u8", element = "empty_list_action" },
+]
+
+# One key that moves the picker's highlighted row by one. `codepoint` and `modifiers` are the key_press values the BEAM resolves, so a frontend matches the exact key it is about to send.
+[[structures]]
+name = "picker_movement_key"
+fields = [
+  { name = "codepoint", type = "u32" },
+  { name = "modifiers", type = "u8" },
+  { name = "movement", type = "enum", enum = "picker_movement" },
 ]
 
 [[structures]]
@@ -2581,6 +2609,17 @@ fields = [
   { name = "empty", type = "struct", element = "empty_list" },
   { name = "list_keys", type = "u8" },
 ]
+
+[[sections]]
+opcode = "gui_picker"
+id = 0x08
+name = "movement_keys"
+# The single keys bound to picker_next and picker_prev in the picker keymap scope, user overrides included.
+# A frontend may move its local selection preview only for a key listed here; every other key edits the query or runs another command on the BEAM.
+# A decoder that reads no such section previews no key.
+layout = "counted_array"
+count_type = "u8"
+element = "picker_movement_key"
 
 # gui_agent_chat (0x78) sections
 

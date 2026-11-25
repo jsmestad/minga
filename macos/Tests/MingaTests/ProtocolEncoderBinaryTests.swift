@@ -1040,6 +1040,31 @@ struct EncoderDisplayedTextTests {
     }
 }
 
+@Suite("Encoder Binary: picker fit")
+struct EncoderPickerFitTests {
+    @Test("fit carries the picker generation and the rows its list shows")
+    func fitLayout() {
+        let payload = captureFrame { $0.send(.pickerFit(generation: 0x01020304, rows: 13)) }
+        #expect(payload == Data([OP_GUI_ACTION, 0x70, 1, 2, 3, 4, 0, 13]))
+    }
+
+    @Test("a fit without rows or without a picker never enters the transport")
+    func invalidFitIsRejected() throws {
+        let pipe = Pipe()
+        let encoder = try ProtocolEncoder(output: pipe.fileHandleForWriting)
+        for action: OutboundAction in [.pickerFit(generation: 0, rows: 13), .pickerFit(generation: 7, rows: 0)] {
+            guard case .rejected(.invalidPayload) = encoder.send(action) else {
+                Issue.record("Invalid picker fit entered the transport")
+                continue
+            }
+        }
+        #expect(encoder.send(.pickerFit(generation: 7, rows: 1)) == .accepted)
+        withExtendedLifetime(pipe) {
+            #expect(encoder.waitForPendingWritesForTesting())
+        }
+    }
+}
+
 @Suite("Encoder Binary: canonical multiline agent prompt")
 struct EncoderAgentPromptTests {
     @Test("fit preserves the entire source presentation generation and both physical dimensions")

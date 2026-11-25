@@ -104,7 +104,8 @@ func (m *Model) reconcilePicker(picker protocol.Picker) {
 	} else if int(picker.Selected) < len(picker.Items) {
 		committedID = pickerItemID(picker.Items[picker.Selected])
 	}
-	m.localPresentation.reconcileIdentity(presentationPicker, picker.Generation, committedID, retained, picker.Visible)
+	// An open act menu owns the list keys, so a preview made before its frame arrived was a move of the menu on the BEAM; the picker row stays where the BEAM has it.
+	m.localPresentation.reconcileIdentity(presentationPicker, picker.Generation, committedID, retained, picker.Visible && !picker.ActionVisible)
 }
 
 func (m *Model) applyFileTreeSelection(selection protocol.FileTreeSelection) {
@@ -333,31 +334,22 @@ func (m *Model) localPreviewActivationPacket(msg tea.KeyPressMsg, component stri
 	return nil, false
 }
 
-func (m *Model) previewPickerNavigation(msg tea.KeyPressMsg) bool {
-	key := msg.Key()
-	if key.Mod.Contains(tea.ModCtrl) || key.Mod.Contains(tea.ModShift) || key.Mod.Contains(tea.ModAlt) || key.Mod.Contains(tea.ModSuper) {
-		return false
-	}
-
-	delta, ok := pickerNavigationDelta(key)
-	if !ok {
-		return false
-	}
-
+// previewPickerNavigation moves the local picker highlight for a key press already sent to the BEAM.
+// It moves only for a key the BEAM listed as picker movement, so the preview cannot disagree with the keymap: every other key edits the query or runs another command there.
+func (m *Model) previewPickerNavigation(keyPress []byte) bool {
 	payload, ok := m.chrome[generated.OPGuiPicker]
 	// The open act menu owns the list keys; the picker's highlighted row stays where it is.
 	if !ok || !payload.Picker.Visible || payload.Picker.ActionVisible || len(payload.Picker.Items) == 0 {
 		return false
 	}
 
-	current := m.effectivePickerIndex(payload.Picker)
-
-	next := current + delta
-	if next < 0 {
-		next = 0
-	} else if next >= len(payload.Picker.Items) {
-		next = len(payload.Picker.Items) - 1
+	delta, ok := pickerNavigationDelta(payload.Picker.MovementKeys, keyPress)
+	if !ok {
+		return false
 	}
+
+	current := m.effectivePickerIndex(payload.Picker)
+	next := pickerPreviewTarget(payload.Picker, current, delta)
 	if next == current {
 		return false
 	}
@@ -366,15 +358,42 @@ func (m *Model) previewPickerNavigation(msg tea.KeyPressMsg) bool {
 	return true
 }
 
-func pickerNavigationDelta(key tea.Key) (int, bool) {
-	switch key.Code {
-	case 'j', tea.KeyDown:
-		return 1, true
-	case 'k', tea.KeyUp:
-		return -1, true
-	default:
+// pickerPreviewTarget returns the row a move of delta rows from current lands on, or current when there is nothing to preview.
+// The BEAM wraps a one-row move at the ends of the list, so the preview wraps with it, but only when the rows held are the whole list.
+// At the edge of a partial window the row the BEAM moves to is not here, so the highlight stays until the frame arrives.
+func pickerPreviewTarget(picker protocol.Picker, current, delta int) int {
+	count := len(picker.Items)
+	next := current + delta
+	if next >= 0 && next < count {
+		return next
+	}
+	if !pickerHoldsWholeList(picker) || (delta != 1 && delta != -1) {
+		return min(max(next, 0), count-1)
+	}
+	if next < 0 {
+		return count - 1
+	}
+	return 0
+}
+
+// pickerHoldsWholeList reports whether Items are every row the BEAM's selection can reach.
+// The BEAM offers at most a window of a long result list, and counts no matches while the rows are a source's next steps.
+func pickerHoldsWholeList(picker protocol.Picker) bool {
+	return picker.Empty != nil || len(picker.Items) == int(picker.Filtered)
+}
+
+// pickerNavigationDelta returns the row delta of an encoded key press when the BEAM listed that exact codepoint and modifiers as picker movement.
+func pickerNavigationDelta(keys []protocol.PickerMovementKey, keyPress []byte) (int, bool) {
+	codepoint, modifiers, ok := protocol.KeyPressIdentity(keyPress)
+	if !ok {
 		return 0, false
 	}
+	for _, key := range keys {
+		if key.Codepoint == codepoint && key.Modifiers == modifiers {
+			return key.Delta, true
+		}
+	}
+	return 0, false
 }
 
 // previewEmptyStateNavigation locally echoes launchpad focus movement (#2689):

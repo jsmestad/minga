@@ -106,6 +106,9 @@ func GoldenDecode(name string, payload []byte) (any, int, error) {
 	case "GuiPickerModePrefix":
 		v, n, err := DecodeGuiPickerModePrefix(payload, 0, len(payload))
 		return v, n, err
+	case "GuiPickerMovementKeys":
+		v, n, err := DecodeGuiPickerMovementKeys(payload, 0, len(payload))
+		return v, n, err
 	case "GuiPickerPreviewHeader":
 		v, n, err := DecodeGuiPickerPreviewHeader(payload, 0, len(payload))
 		return v, n, err

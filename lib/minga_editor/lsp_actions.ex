@@ -25,6 +25,7 @@ defmodule MingaEditor.LspActions do
   """
 
   alias Minga.Buffer
+  alias Minga.Core.Plural
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Commands
   alias MingaEditor.HoverPopup
@@ -1176,7 +1177,7 @@ defmodule MingaEditor.LspActions do
           state.feedback.operation_feedback,
           operation_id,
           :success,
-          "Found #{count} references"
+          "Found #{Plural.count(count, "reference", "references")}"
         )
       )
 
@@ -1908,11 +1909,12 @@ defmodule MingaEditor.LspActions do
   defp workspace_edit_result({state, requested_files, file_count, edit_count, errors}, label)
        when file_count < requested_files do
     {:error, state,
-     "#{label}: applied #{edit_count} edits across #{file_count} of #{requested_files} files; failed: #{Enum.join(errors, "; ")}"}
+     "#{label}: applied #{Plural.count(edit_count, "edit", "edits")} across #{file_count} of #{Plural.count(requested_files, "file", "files")}; failed: #{Enum.join(errors, "; ")}"}
   end
 
   defp workspace_edit_result({state, _requested_files, file_count, edit_count, []}, label) do
-    {:ok, state, "#{label}: applied #{edit_count} edits across #{file_count} files"}
+    {:ok, state,
+     "#{label}: applied #{Plural.count(edit_count, "edit", "edits")} across #{Plural.count(file_count, "file", "files")}"}
   end
 
   @spec apply_single_file_edit(

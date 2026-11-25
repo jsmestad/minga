@@ -104,7 +104,7 @@ enum RenderCommand: Sendable {
     case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [Wire.WhichKeyBinding])
     case guiBreadcrumb(segments: [String])
     case guiStatusBar(StatusBarUpdate)
-    case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String, loadStatus: Wire.PickerLoadStatus, queryGeneration: UInt32, acknowledgedQueryEditSeq: UInt32, activationGeneration: UInt32, empty: Wire.EmptyList? = nil, listKeys: Bool = false)
+    case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String, loadStatus: Wire.PickerLoadStatus, queryGeneration: UInt32, acknowledgedQueryEditSeq: UInt32, activationGeneration: UInt32, empty: Wire.EmptyList? = nil, listKeys: Bool = false, movementKeys: [Wire.PickerMovementKey] = [])
     case guiPickerSelection(generation: UInt32, selectedItemID: UInt32, selectedActionID: UInt32)
     case guiPickerPreview(visible: Bool, lines: [Wire.PickerPreviewLine])
     case guiAgentChat(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: EditorMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil, lifecycle: AgentChatLifecycle = .conversation)
@@ -1458,6 +1458,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var pkLoadStatus: Wire.PickerLoadStatus = .ready
         var pkQueryGeneration: UInt32 = 0
         var pkAcknowledgedQueryEditSeq: UInt32 = 0
+        var pkMovementKeys: [Wire.PickerMovementKey] = []
         var pkActivationGeneration: UInt32 = 0
         var pkEmpty: Wire.EmptyList? = nil
         var pkListKeys = false
@@ -1540,6 +1541,16 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                         actions: e.empty.actions.map { Wire.EmptyListAction(id: $0.id, key: $0.key, label: $0.label) }
                     )
                     pkListKeys = e.listKeys != 0
+                case 0x08: // Movement keys
+                    let (keys, _) = try GeneratedProtocol.decodeGuiPickerMovementKeys(data, psStart, psEnd)
+                    // A movement this frontend does not know moves nothing, so its key is dropped.
+                    pkMovementKeys = keys.compactMap { key in
+                        switch key.movement {
+                        case .next: Wire.PickerMovementKey(codepoint: key.codepoint, modifiers: key.modifiers, delta: 1)
+                        case .previous: Wire.PickerMovementKey(codepoint: key.codepoint, modifiers: key.modifiers, delta: -1)
+                        case .none: nil
+                        }
+                    }
 
                 default: break
                 }
@@ -1552,7 +1563,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             pickerPos = psEnd
         }
 
-        return (.guiPicker(visible: pkVisible, selectedIndex: pkSelectedIndex, filteredCount: pkFilteredCount, totalCount: pkTotalCount, markedCount: pkMarkedCount, title: pkTitle, query: pkQuery, hasPreview: pkHasPreview, items: pkItems, actionMenu: pkActionMenu, modePrefix: pkModePrefix, loadStatus: pkLoadStatus, queryGeneration: pkQueryGeneration, acknowledgedQueryEditSeq: pkAcknowledgedQueryEditSeq, activationGeneration: pkActivationGeneration, empty: pkEmpty, listKeys: pkListKeys), pickerPos - offset)
+        return (.guiPicker(visible: pkVisible, selectedIndex: pkSelectedIndex, filteredCount: pkFilteredCount, totalCount: pkTotalCount, markedCount: pkMarkedCount, title: pkTitle, query: pkQuery, hasPreview: pkHasPreview, items: pkItems, actionMenu: pkActionMenu, modePrefix: pkModePrefix, loadStatus: pkLoadStatus, queryGeneration: pkQueryGeneration, acknowledgedQueryEditSeq: pkAcknowledgedQueryEditSeq, activationGeneration: pkActivationGeneration, empty: pkEmpty, listKeys: pkListKeys, movementKeys: pkMovementKeys), pickerPos - offset)
 
     case .guiPickerSelection:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }

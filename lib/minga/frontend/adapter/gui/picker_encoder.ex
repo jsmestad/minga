@@ -19,6 +19,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
   @section_picker_mode_prefix 0x05
   @section_picker_load_status 0x06
   @section_picker_empty 0x07
+  @section_picker_movement_keys 0x08
 
   @spec encode(Picker.t(), Caches.t()) :: {binary() | nil, Caches.t()}
   def encode(%Picker{} = model, %Caches{} = caches) do
@@ -73,7 +74,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
         action_menu_structure(model.action_menu),
         model.load_status,
         model.empty,
-        model.list_keys?
+        model.list_keys?,
+        model.movement_keys
       })
 
     selection = {model.selected_item_id, model.selected_action_id}
@@ -113,7 +115,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
     :gui_picker
     |> Writer.new()
     |> Writer.append(<<@op_gui_picker>>)
-    |> Writer.uint8(:section_count, if(model.empty, do: 7, else: 6))
+    |> Writer.uint8(:section_count, if(model.empty, do: 8, else: 7))
     |> Writer.section16(
       :picker_header,
       @section_picker_header,
@@ -149,6 +151,11 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
       Encode.encode_gui_picker_load_status(to_wire_load_status(model.load_status))
     )
     |> encode_empty_section(model)
+    |> Writer.section16(
+      :picker_movement_keys,
+      @section_picker_movement_keys,
+      Encode.encode_gui_picker_movement_keys(model.movement_keys)
+    )
     |> Writer.finish()
   end
 

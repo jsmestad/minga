@@ -154,6 +154,30 @@ defmodule Minga.Credo.ExplicitTargetCheckTest do
     end
   end
 
+  test "picker fit accepts only its generation and measured rows" do
+    cases = [
+      {"<<generation::32, rows::16>>", []},
+      {"<<generation::unsigned-size(32), rows::unsigned-size(16)>>", []},
+      {"<<rows::16>>", ["rows"]},
+      {"<<generation::64, rows::16>>", ["rows"]},
+      {"<<generation::signed-32, rows::16>>", ["rows"]},
+      {"<<generation::32, index::16>>", ["index"]},
+      {"<<generation::32, rows::16, index::16>>", ["index", "rows"]}
+    ]
+
+    for {payload, triggers} <- cases do
+      issues =
+        """
+        defmodule MingaEditor.Frontend.Protocol.GUI do
+          def decode_gui_action(@gui_action_picker_fit, #{payload}), do: :ok
+        end
+        """
+        |> check()
+
+      assert Enum.sort(Enum.map(issues, & &1.trigger)) == triggers
+    end
+  end
+
   test "physical capacity never exempts other targets, identities, or positional fields" do
     cases = [
       {:gui_action_other, "<<65_534::16, generation::64, columns::16, max_rows::16>>",

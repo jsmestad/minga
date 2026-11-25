@@ -78,6 +78,12 @@ defmodule Minga.Protocol.Encode do
   def encode_completion_kind(:enum), do: 12
   def encode_completion_kind(_), do: 0
 
+  @spec encode_picker_movement(atom()) :: non_neg_integer()
+  def encode_picker_movement(:none), do: 0
+  def encode_picker_movement(:next), do: 1
+  def encode_picker_movement(:previous), do: 2
+  def encode_picker_movement(_), do: 0
+
   @spec encode_picker_status_tone(atom()) :: non_neg_integer()
   def encode_picker_status_tone(:none), do: 0
   def encode_picker_status_tone(:ready), do: 1
@@ -410,6 +416,18 @@ defmodule Minga.Protocol.Encode do
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:why | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :why)),
       (fn value -> validate_uint!(command, [:selected | path], value, 255); <<value::8>> end).(Map.fetch!(model, :selected)),
       (fn items -> count = Enum.count(items); validate_uint!(command, [:actions | path], count, 255); [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_empty_list_action(value, command, [index | [:actions | path]]) end)] end).(Map.fetch!(model, :actions)),
+    ]
+  end
+
+  @spec encode_picker_movement_key(map()) :: iodata()
+  def encode_picker_movement_key(model), do: encode_picker_movement_key(model, :picker_movement_key, [])
+
+  @spec encode_picker_movement_key(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_picker_movement_key(model, command, path) do
+    [
+      (fn value -> validate_uint!(command, [:codepoint | path], value, 4294967295); <<value::32>> end).(Map.fetch!(model, :codepoint)),
+      (fn value -> validate_uint!(command, [:modifiers | path], value, 255); <<value::8>> end).(Map.fetch!(model, :modifiers)),
+      (fn value -> validate_uint!(command, [:movement | path], value, 255); <<value::8>> end).(encode_picker_movement(Map.fetch!(model, :movement))),
     ]
   end
 
@@ -1088,6 +1106,16 @@ defmodule Minga.Protocol.Encode do
       encode_empty_list(Map.fetch!(model, :empty), command, [:empty | path]),
       (fn value -> validate_uint!(command, [:list_keys | path], value, 255); <<value::8>> end).(Map.fetch!(model, :list_keys)),
     ]
+  end
+
+  @spec encode_gui_picker_movement_keys([term()]) :: iodata()
+  def encode_gui_picker_movement_keys(items) when is_list(items), do: encode_gui_picker_movement_keys(items, :gui_picker, [:movement_keys])
+
+  @spec encode_gui_picker_movement_keys([term()], atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_gui_picker_movement_keys(items, command, path) when is_list(items) do
+    count = Enum.count(items)
+    validate_uint!(command, path, count, 255)
+    [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_picker_movement_key(value, command, [index | path]) end)]
   end
 
   @spec encode_gui_agent_chat_header(map()) :: iodata()

@@ -6,6 +6,8 @@ defmodule Minga.Credo.ExplicitTargetCheck do
 
   Prompt fit has one structural physical-capacity exception: window 65534 and its u64 retained presentation identify the subject; columns and max_rows are u16 measurements, not item positions. Changed or additional fields are not exempt.
 
+  Picker fit has the same exception: the u32 picker generation identifies the subject and rows is a u16 measurement of its list, not an item position. Changed or additional fields are not exempt.
+
   An absolute visual scrollbar target carries a pane and its exact retained presentation. A rank without that presentation is not an identity.
   """
 
@@ -132,6 +134,13 @@ defmodule Minga.Credo.ExplicitTargetCheck do
       unsigned_integer_width(generation_type) == 64 and
       unsigned_integer_width(columns_type) == 16 and
       unsigned_integer_width(rows_type) == 16
+  end
+
+  defp physical_capacity?(:gui_action_picker_fit, [
+         {:"::", _, [{:generation, _, _}, generation_type]},
+         {:"::", _, [{:rows, _, _}, rows_type]}
+       ]) do
+    unsigned_integer_width(generation_type) == 32 and unsigned_integer_width(rows_type) == 16
   end
 
   defp physical_capacity?(_opcode, _fields), do: false

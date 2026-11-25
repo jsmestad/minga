@@ -33,6 +33,15 @@ defmodule Minga.RenderModel.UI.Picker do
         }
 
   @typedoc """
+  A wire-shaped key that moves the highlighted row by one. `codepoint` and `modifiers` are the key press values the picker keymap scope resolves, so a frontend previews the move only for the exact key it sends.
+  """
+  @type movement_key :: %{
+          codepoint: non_neg_integer(),
+          modifiers: non_neg_integer(),
+          movement: :next | :previous
+        }
+
+  @typedoc """
   The picker. `empty` is set when nothing matches and the source offers next steps: it holds the empty-state header, and `items` are the next-step rows, each with its key in `annotation`. `list_keys?` is true when there is nothing to filter, so the picker takes no text and its list keys apply.
   """
   @type t :: %__MODULE__{
@@ -53,6 +62,7 @@ defmodule Minga.RenderModel.UI.Picker do
           action_menu: ActionMenu.t() | nil,
           mode_prefix: String.t(),
           load_status: load_status(),
+          movement_keys: [movement_key()],
           preview_lines: [[preview_segment()]] | nil,
           empty: EmptyList.t() | nil,
           list_keys?: boolean()
@@ -75,6 +85,7 @@ defmodule Minga.RenderModel.UI.Picker do
             action_menu: nil,
             mode_prefix: "",
             load_status: :ready,
+            movement_keys: [],
             preview_lines: nil,
             empty: nil,
             list_keys?: false

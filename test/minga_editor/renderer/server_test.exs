@@ -2463,6 +2463,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       sidebar_registry: MingaEditor.Extension.Sidebar.default_table(),
       face_override_registries: %{},
       editing_model: :vim,
+      keymap_server: Minga.Keymap.Active,
       backend: :tui,
       layout: nil,
       focus_tree: nil,

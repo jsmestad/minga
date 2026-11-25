@@ -19,6 +19,7 @@ defmodule MingaAgent.Instructions do
   """
 
   alias MingaAgent.Instruction
+  alias Minga.Core.Plural
 
   @typedoc "A discovered instruction file."
   @type instruction :: Instruction.t()
@@ -92,12 +93,13 @@ defmodule MingaAgent.Instructions do
 
   @spec instruction_summary([instruction()]) :: String.t()
   defp instruction_summary(found) do
-    header = "Loaded #{Enum.count(found)} instruction file(s):\n"
+    header =
+      "Loaded #{Plural.count(Enum.count(found), "instruction file", "instruction files")}:\n"
 
     lines =
       Enum.map_join(found, "\n", fn %Instruction{label: label, path: path, content: content} ->
         size = String.length(content)
-        "  ✓ #{label} (#{path}, #{size} chars)"
+        "  ✓ #{label} (#{path}, #{Plural.count(size, "char", "chars")})"
       end)
 
     header <> lines

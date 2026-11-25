@@ -147,6 +147,15 @@ type Picker struct {
 	Empty *generated.EmptyList
 	// ListKeys is true while the picker has nothing to filter: it takes no text, and j and k move, q closes.
 	ListKeys bool
+	// MovementKeys are the keys the BEAM's picker keymap scope resolves to one-row movement. The local selection preview moves only for these keys.
+	MovementKeys []PickerMovementKey
+}
+
+// PickerMovementKey is one key_press identity and the rows it moves the highlighted row: 1 down, -1 up.
+type PickerMovementKey struct {
+	Codepoint uint32
+	Modifiers byte
+	Delta     int
 }
 
 type PickerItem struct {

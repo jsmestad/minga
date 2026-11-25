@@ -7,6 +7,7 @@ defmodule Minga.Core.DiffView do
   """
 
   alias Minga.Core.Diff
+  alias Minga.Core.Plural
 
   @type line_type :: :context | :added | :removed | :header | :fold
   @type pane_line_type :: :context | :added | :removed | :blank | :fold
@@ -247,9 +248,13 @@ defmodule Minga.Core.DiffView do
     |> add_context_rows_side_by_side(rest, original_line + 1, pane_width)
   end
 
+  @spec fold_text(non_neg_integer()) :: String.t()
+  defp fold_text(fold_count),
+    do: "  #{fold_count} unchanged #{Plural.noun(fold_count, "line", "lines")}"
+
   @spec fold_side_by_side_line(non_neg_integer()) :: side_by_side_line()
   defp fold_side_by_side_line(fold_count) do
-    text = "  #{fold_count} unchanged lines"
+    text = fold_text(fold_count)
 
     %{
       left: text,
@@ -638,7 +643,7 @@ defmodule Minga.Core.DiffView do
     if count > @fold_threshold do
       tail_offset = count - @context_lines
       fold_count = tail_offset - @context_lines
-      fold_text = "  #{fold_count} unchanged lines"
+      fold_text = fold_text(fold_count)
       fold_meta = %{type: :fold, original_line: nil, fold_count: fold_count, word_changes: nil}
 
       acc

@@ -41,7 +41,7 @@ The Charm renderer targets the Semantic UI path, not the legacy cell-grid path. 
 - tab bar and workspace chrome
 - status bar and minibuffer
 - file tree, including BEAM-gated zero-latency local selection preview for unmodified j/k and Up/Down
-- picker, picker preview, completion, and which-key overlays
+- picker, picker preview, completion, and which-key overlays. The picker's local selection preview moves only for the keys the BEAM lists in the picker's movement-keys section (the `:picker` keymap scope's one-row movement), so a letter that types into the query never moves the highlight. The TUI also reports how many result rows its picker draws (`picker_fit`), and the BEAM pages by that count
 
 It renders roughly 9 of the shared-chrome components today. Decoding and rendering the remaining components is tracked in #2100, and overall cross-frontend coverage is tracked in the Semantic UI inventory (#2113).
 

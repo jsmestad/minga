@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -150,7 +149,7 @@ func (m Model) renderAgentProseRows(lines []protocol.AgentStyledLine, wrapped []
 		out = append(out, styled)
 	}
 	if hidden := len(lines) - visible; hidden > 0 && start <= bodyRows && bodyRows < start+count {
-		more := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render(fmt.Sprintf("… +%d lines · ⏎ expand", hidden))
+		more := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render("… +" + pluralCount(hidden, "line") + " · ⏎ expand")
 		out = append(out, lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(rail+more, width)))
 	}
 	return out

@@ -143,6 +143,8 @@ type Model struct {
 	// translates them to screen coordinates for compositing and pointer input.
 	surfacePlacements []generated.SurfacePlacement
 	localPresentation localPresentation
+	// lastPickerFit is the picker row fit last sent to the BEAM, so each picker reports once and again only when its rows change.
+	lastPickerFit protocol.PickerFit
 	// transcript is the resident agent-chat transcript store (#2654). It folds
 	// gui_agent_transcript (0x86) frames and owns the local message anchor + pin
 	// flag so j/k/wheel repaint the transcript same-frame from local data. It is
@@ -316,14 +318,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// encoding so the resulting frame's commit_frame resolves the sample.
 		seq := m.latency.Stamp()
 		chat, _ := m.agentChat()
-		if packet, ok := keyPacket(msg, seq, chat.DraftAttachmentOffer); ok {
+		packet, sent := keyPacket(msg, seq, chat.DraftAttachmentOffer)
+		if sent {
 			m.send(packet)
 		}
 		switch component {
 		case "completion":
 			m.previewCompletionNavigation(msg)
 		case "picker":
-			m.previewPickerNavigation(msg)
+			if sent {
+				m.previewPickerNavigation(packet)
+			}
 		case "file_tree":
 			m.previewFileTreeNavigation(msg)
 		case "empty_state":
@@ -468,6 +473,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	m.reportAgentPromptFit()
+	m.reportPickerFit()
 	m.viewport.SetWidth(max(m.width, 1))
 	m.viewport.SetHeight(m.layout.body.Height)
 	m.viewport.SetContent(m.composeBody())

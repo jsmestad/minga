@@ -181,6 +181,67 @@ defmodule MingaEditor.State.Picker do
     |> refresh_activation_offer()
   end
 
+  @doc """
+  Returns the keymap context of this picker for the `:picker` scope.
+
+  `⌃V` is bound only when the source shows its selection in the focused window. Key dispatch and the movement keys sent to frontends both resolve with this context, so they cannot disagree.
+  """
+  @spec keymap_context(t(), Minga.Keymap.server()) :: keyword()
+  def keymap_context(%__MODULE__{source: source, callback_source: owner}, keymap_server) do
+    [
+      keymap_server: keymap_server,
+      picker_split: MingaEditor.UI.Picker.Source.opens_in_window?(source, owner)
+    ]
+  end
+
+  @keymap_scope :picker
+
+  # A picker takes text, so its keys resolve in the `:picker` scope's insert state.
+  # One with nothing to filter takes no text: its list keys (j and k move, q closes) are the scope's normal state.
+  @spec keymap_vim_state(t()) :: :insert | :normal
+  defp keymap_vim_state(%__MODULE__{} = picker_state),
+    do: if(list_keys?(picker_state), do: :normal, else: :insert)
+
+  @doc "Resolves a key press for this picker through the `:picker` keymap scope."
+  @spec resolve_key(t(), Minga.Keymap.Bindings.key(), Minga.Keymap.server()) ::
+          Minga.Keymap.Scope.resolve_result()
+  def resolve_key(%__MODULE__{} = picker_state, key, keymap_server) do
+    Minga.Keymap.Scope.resolve_key(
+      @keymap_scope,
+      keymap_vim_state(picker_state),
+      key,
+      keymap_context(picker_state, keymap_server)
+    )
+  end
+
+  @doc """
+  Returns the single keys that run `command` for this picker.
+
+  The keys resolve in the same scope, vim state and context as `resolve_key/3`, so what a frontend is told about a key cannot disagree with what the key does.
+  """
+  @spec keys_for_command(t(), atom(), Minga.Keymap.server()) :: [Minga.Keymap.Bindings.key()]
+  def keys_for_command(%__MODULE__{} = picker_state, command, keymap_server) do
+    Minga.Keymap.Scope.keys_for_command(
+      @keymap_scope,
+      keymap_vim_state(picker_state),
+      command,
+      keymap_context(picker_state, keymap_server)
+    )
+  end
+
+  @doc "Returns whether `generation` names the picker session a frontend was shown, as sent in its activation generation."
+  @spec shown_as?(t(), ActivationOffer.generation()) :: boolean()
+  def shown_as?(
+        %__MODULE__{
+          picker: %Picker{},
+          activation_offer: %ActivationOffer{generation: generation}
+        },
+        generation
+      ),
+      do: true
+
+  def shown_as?(%__MODULE__{}, _generation), do: false
+
   @doc "Returns whether a native query edit belongs to this picker and is newer than its acknowledgement."
   @spec current_query_edit?(t(), query_generation(), query_edit_seq()) :: boolean()
   def current_query_edit?(

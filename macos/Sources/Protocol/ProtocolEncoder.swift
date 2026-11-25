@@ -275,6 +275,8 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             return nil
         case .agentPromptScroll(let windowID, _, _):
             return windowID == 65534 ? nil : .invalidPayload("Invalid agent prompt scroll target")
+        case .pickerFit(let generation, let rows):
+            return generation > 0 && rows > 0 ? nil : .invalidPayload("Invalid picker fit")
         case .horizontalPan(_, _, let inputSeq):
             return inputSeq > 0 ? nil : .invalidPayload("Horizontal pan requires a positive input sequence")
         case .gitPullAndRetry(let toastID):
@@ -363,6 +365,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         case .pickerQueryChanged(let generation, let editSequence, let text): encodePickerQueryChanged(generation: generation, editSeq: editSequence, text: text)
         case .pickerItemActivate(let generation, let activationID): encodePickerItemActivate(generation: generation, activationID: activationID)
         case .pickerActionActivate(let generation, let activationID): encodePickerActionActivate(generation: generation, activationID: activationID)
+        case .pickerFit(let generation, let rows): encodePickerFit(generation: generation, rows: rows)
         case .fileTreeEditConfirm(let token, let text): encodeFileTreeEditConfirm(token: token, text: text)
         case .fileTreeEditCancel: encodeFileTreeEditCancel()
         case .fileTreeDrop(let sourcePaths, let targetIndex, let targetID, let targetPathHash, let targetPath, let targetIsDirectory, let modifiers, let generation): encodeFileTreeDrop(sourcePaths: sourcePaths, targetIndex: targetIndex, targetId: targetID, targetPathHash: targetPathHash, targetPath: targetPath, targetIsDir: targetIsDirectory, modifiers: modifiers, generation: generation)
@@ -922,6 +925,13 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         var buf = Data([OP_GUI_ACTION, GUI_ACTION_PICKER_ITEM_ACTIVATE])
         appendU32(&buf, generation)
         appendU32(&buf, activationID)
+        writeFrame(buf)
+    }
+
+    private func encodePickerFit(generation: UInt32, rows: UInt16) {
+        var buf = Data([OP_GUI_ACTION, GUI_ACTION_PICKER_FIT])
+        appendU32(&buf, generation)
+        appendU16(&buf, rows)
         writeFrame(buf)
     }
 

@@ -29,7 +29,7 @@ defmodule MingaAgent.BranchTest do
     result = Branch.list(branches)
 
     assert result =~ "first"
-    assert result =~ "1 messages"
+    assert result =~ "1 message,"
     assert result =~ "second"
     assert result =~ "2 messages"
   end

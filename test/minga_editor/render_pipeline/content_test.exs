@@ -144,7 +144,7 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       assert Enum.map(model.rows, & &1.text) ==
                ["block above", "virtual above"] ++
                  wrap_text ++
-                 ["virtual below", "block first", "block second", "folded ··· 1 lines", "tail"]
+                 ["virtual below", "block first", "block second", "folded ··· 1 line", "tail"]
 
       assert Enum.map(model.gutter.entries, & &1.display_type) ==
                [:blank, :blank, :normal] ++

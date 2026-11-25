@@ -4,6 +4,7 @@ defmodule MingaEditor.UI.Picker.AgentQueuedInputSource do
   @behaviour MingaEditor.UI.Picker.Source
 
   alias MingaAgent.Session
+  alias Minga.Core.Plural
   alias MingaAgent.Session.QueuedInputSummary
   alias MingaAgent.FileMention
   alias MingaEditor.Agent.{PromptInput, QuestionResponse, QueuedInputEdit}
@@ -183,7 +184,7 @@ defmodule MingaEditor.UI.Picker.AgentQueuedInputSource do
     %Item{
       id: {:confirm, origin, entry},
       label: entry_label(entry),
-      description: "#{entry.attachment_count} attachments"
+      description: Plural.count(entry.attachment_count, "attachment", "attachments")
     }
   end
 

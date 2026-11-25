@@ -32,13 +32,6 @@ private enum FileTreeNavigationCodepoints {
     static let upArrow: UInt32 = 57352
 }
 
-private enum PickerNavigationCodepoints {
-    static let downKey: UInt32 = 106
-    static let upKey: UInt32 = 107
-    static let downArrow: UInt32 = 57353
-    static let upArrow: UInt32 = 57352
-}
-
 private struct TerminalRejectionSignature: Equatable {
     let generation: UInt32
     let frameSeq: UInt32
@@ -1090,19 +1083,11 @@ final class CommandDispatcher {
         return guiState.completionState.previewNavigation(delta: delta)
     }
 
+    /// Moves the local picker highlight for a key press that is also sent to the BEAM.
+    /// It moves only for a key the BEAM listed as picker movement, so the preview cannot disagree with the picker keymap scope: every other key edits the query or runs another command there.
     @discardableResult
     func previewPickerNavigation(codepoint: UInt32, modifiers: UInt8) -> Bool {
-        guard modifiers == 0 else { return false }
-
-        let delta: Int
-        switch codepoint {
-        case PickerNavigationCodepoints.downKey, PickerNavigationCodepoints.downArrow:
-            delta = 1
-        case PickerNavigationCodepoints.upKey, PickerNavigationCodepoints.upArrow:
-            delta = -1
-        default:
-            return false
-        }
+        guard let delta = guiState.pickerState.movementDelta(codepoint: codepoint, modifiers: modifiers) else { return false }
         return guiState.pickerState.previewNavigation(delta: delta)
     }
 
@@ -1283,9 +1268,9 @@ final class CommandDispatcher {
                 effects.append(.application(.accessibilityModeChanged(guiState.statusBarState.modeName)))
             }
 
-        case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq, let activationGeneration, let empty, let listKeys):
+        case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq, let activationGeneration, let empty, let listKeys, let movementKeys):
             if visible {
-                guiState.pickerState.update(visible: true, selectedIndex: selectedIndex, filteredCount: filteredCount, totalCount: totalCount, markedCount: markedCount, title: title, query: query, hasPreview: hasPreview, rawItems: items, actionMenu: actionMenu, modePrefix: modePrefix, loadStatus: loadStatus, queryGeneration: queryGeneration, acknowledgedQueryEditSeq: acknowledgedQueryEditSeq, activationGeneration: activationGeneration, empty: empty, listKeys: listKeys)
+                guiState.pickerState.update(visible: true, selectedIndex: selectedIndex, filteredCount: filteredCount, totalCount: totalCount, markedCount: markedCount, title: title, query: query, hasPreview: hasPreview, rawItems: items, actionMenu: actionMenu, modePrefix: modePrefix, loadStatus: loadStatus, queryGeneration: queryGeneration, acknowledgedQueryEditSeq: acknowledgedQueryEditSeq, activationGeneration: activationGeneration, empty: empty, listKeys: listKeys, movementKeys: movementKeys)
             } else {
                 guiState.pickerState.hide()
             }

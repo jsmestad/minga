@@ -129,7 +129,7 @@ defmodule MingaEditor.LspActions.RenameTest do
       assert OperationFeedback.selected(state.feedback.operation_feedback).status == :success
 
       assert OperationFeedback.selected(state.feedback.operation_feedback).message ==
-               "Rename: applied 1 edits across 1 files"
+               "Rename: applied 1 edit across 1 file"
     end
 
     test "empty TextDocumentEdit preserves buffer revision dirty state and undo history" do
@@ -186,7 +186,7 @@ defmodule MingaEditor.LspActions.RenameTest do
         ]
       }
 
-      assert {:ok, result, "Rename: applied 1 edits across 1 files"} =
+      assert {:ok, result, "Rename: applied 1 edit across 1 file"} =
                LspActions.apply_workspace_edit_result(state, edit, "Rename")
 
       assert Minga.Buffer.content(result.workspace.buffers.active) == "new_name\n"
@@ -291,7 +291,7 @@ defmodule MingaEditor.LspActions.RenameTest do
 
       assert Minga.Buffer.content(result.workspace.buffers.active) == "new_name\n"
       assert selected.status == :error
-      assert selected.message =~ "Rename: applied 1 edits across 1 of 2 files"
+      assert selected.message =~ "Rename: applied 1 edit across 1 of 2 files"
       assert selected.message =~ "could not open buffer"
     end
   end

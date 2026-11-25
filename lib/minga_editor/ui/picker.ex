@@ -206,21 +206,28 @@ defmodule MingaEditor.UI.Picker do
     %{picker | selected: sel - 1}
   end
 
-  @doc "Moves the selection down by one page (`max_visible` items), clamped to the last item."
-  @spec page_down(t()) :: t()
-  def page_down(%__MODULE__{filtered: []} = picker), do: picker
+  @doc """
+  Moves the selection down by one page of `rows` items, clamped to the last item.
 
-  def page_down(%__MODULE__{selected: sel, filtered: filtered, max_visible: max} = picker) do
+  `rows` is the number of result rows the frontend shows (`MingaEditor.State.Frontend.picker_page_rows/1`). The picker never derives it: row fit is a presentation fact the frontend owns.
+  """
+  @spec page_down(t(), pos_integer()) :: t()
+  def page_down(%__MODULE__{filtered: []} = picker, rows) when is_integer(rows) and rows > 0,
+    do: picker
+
+  def page_down(%__MODULE__{selected: sel, filtered: filtered} = picker, rows)
+      when is_integer(rows) and rows > 0 do
     last = length(filtered) - 1
-    %{picker | selected: min(sel + max, last)}
+    %{picker | selected: min(sel + rows, last)}
   end
 
-  @doc "Moves the selection up by one page (`max_visible` items), clamped to the first item."
-  @spec page_up(t()) :: t()
-  def page_up(%__MODULE__{filtered: []} = picker), do: picker
+  @doc "Moves the selection up by one page of `rows` items, clamped to the first item. See `page_down/2`."
+  @spec page_up(t(), pos_integer()) :: t()
+  def page_up(%__MODULE__{filtered: []} = picker, rows) when is_integer(rows) and rows > 0,
+    do: picker
 
-  def page_up(%__MODULE__{selected: sel, max_visible: max} = picker) do
-    %{picker | selected: max(sel - max, 0)}
+  def page_up(%__MODULE__{selected: sel} = picker, rows) when is_integer(rows) and rows > 0 do
+    %{picker | selected: max(sel - rows, 0)}
   end
 
   @doc "Selects the filtered item at `index`; an out-of-range index leaves the picker unchanged."

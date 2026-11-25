@@ -8,6 +8,7 @@ defmodule MingaAgent.Branch do
   """
 
   alias MingaAgent.TranscriptEntry
+  alias Minga.Core.Plural
 
   @typedoc "A named conversation branch snapshot."
   @type t :: %__MODULE__{
@@ -42,7 +43,8 @@ defmodule MingaAgent.Branch do
     |> Enum.with_index(1)
     |> Enum.map_join("\n", fn {branch, index} ->
       time = Calendar.strftime(branch.created_at, "%H:%M:%S UTC")
-      "  #{index}. #{branch.name} (#{Enum.count(branch.entries)} messages, created #{time})"
+
+      "  #{index}. #{branch.name} (#{Plural.count(Enum.count(branch.entries), "message", "messages")}, created #{time})"
     end)
   end
 end

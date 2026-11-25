@@ -215,7 +215,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return result
 
-    case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq, let activationGeneration, let empty, let listKeys):
+    case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq, let activationGeneration, let empty, let listKeys, let movementKeys):
         let itemArray = items.map { i -> [String: Any] in
             ["label": i.label, "description": i.description, "icon_color": Int(i.iconColor), "annotation": i.annotation, "flags": Int(i.flags), "match_positions": i.matchPositions.map { Int($0) }, "activation_id": Int(i.activationID), "status": i.status, "status_tone": Int(i.statusTone.rawValue), "group": i.group]
         }
@@ -232,6 +232,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         result["mode_prefix"] = modePrefix
         result["has_preview"] = hasPreview
         result["items"] = itemArray
+        result["movement_keys"] = movementKeys.map { ["codepoint": Int($0.codepoint), "modifiers": Int($0.modifiers), "delta": $0.delta] }
         if let am = actionMenu {
             result["action_menu"] = ["selected_index": Int(am.selectedIndex), "actions": am.actions, "activation_ids": am.activationIDs]
         }

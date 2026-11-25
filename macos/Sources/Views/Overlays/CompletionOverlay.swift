@@ -52,7 +52,7 @@ public struct CompletionOverlay: View {
                     .frame(maxHeight: CGFloat(min(content.items.count, maxVisibleItems)) * itemHeight + 8)
                     .accessibilityElement(children: .contain)
                     .accessibilityLabel("Completion choices")
-                    .accessibilityValue("\(content.items.count) choices")
+                    .accessibilityValue(content.items.count == 1 ? "1 choice" : "\(content.items.count) choices")
 
                     // Documentation preview for the selected item. Renders only when the
                     // item carries docs, so items without docs show no pane (no layout

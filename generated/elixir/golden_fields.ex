@@ -38,6 +38,7 @@ defmodule Minga.Protocol.GoldenFields do
     "GuiPickerItems" => [{"items", "Items", {:array, {:struct, [{"icon_color", "IconColor", :scalar}, {"flags", "Flags", :scalar}, {"label", "Label", :string}, {"description", "Description", :string}, {"annotation", "Annotation", :string}, {"match_positions", "MatchPositions", {:array, :scalar}}, {"activation_id", "ActivationID", :scalar}, {"status", "Status", :string}, {"status_tone", "StatusTone", :scalar}, {"group", "Group", :string}]}}}],
     "GuiPickerLoadStatus" => [{"status", "Status", :scalar}, {"message", "Message", :string}],
     "GuiPickerModePrefix" => [{"text", "Text", :string}],
+    "GuiPickerMovementKeys" => [{"movement_keys", "MovementKeys", {:array, {:struct, [{"codepoint", "Codepoint", :scalar}, {"modifiers", "Modifiers", :scalar}, {"movement", "Movement", :scalar}]}}}],
     "GuiPickerPreviewHeader" => [{"visible", "Visible", :scalar}, {"kind", "Kind", :scalar}, {"title", "Title", :string}],
     "GuiPickerQuery" => [{"text", "Text", :string}, {"generation", "Generation", :scalar}, {"acknowledged_edit_seq", "AcknowledgedEditSeq", :scalar}],
     "GuiSearchStateFields" => [{"active", "Active", :scalar}, {"match_count", "MatchCount", :scalar}, {"current_index", "CurrentIndex", :scalar}, {"flags", "Flags", :scalar}, {"query", "Query", :string}, {"session_id", "SessionID", :scalar}, {"acknowledged_edit_seq", "AcknowledgedEditSeq", :scalar}, {"status", "Status", :scalar}],

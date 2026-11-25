@@ -261,6 +261,7 @@ func TestPickerBackdropOwnsClicksOverConflictDecisions(t *testing.T) {
 	applyProductionFrame(&model, 2, 1, 1, reviewStatusCommand(t, &review))
 	picker := pickerChrome(1, 0)
 	model.chrome[generated.OPGuiPicker] = picker
+	markPickerFitReported(&model)
 	view := model.View()
 	if !strings.Contains(ansi.Strip(view.Content), "item0") {
 		t.Fatal("expected the modal picker to be visible over Review")
