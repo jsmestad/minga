@@ -18,20 +18,28 @@ defmodule Minga.Mode.SearchPrompt do
 
   @behaviour Minga.Mode
 
+  import Bitwise
+
   alias Minga.Mode
   alias Minga.Mode.SearchPromptState
 
   @escape 27
   @enter 13
 
+  # Enter held with Control, Alt or Command is not bound here, so it does nothing. Without enhanced key reporting a
+  # terminal sends Esc then Enter as Alt+Enter when both arrive together, and that must not submit what was dropped.
+  @chord_mods 0x0E
+
   @impl Mode
   @spec handle_key(Mode.key(), SearchPromptState.t()) :: Mode.result()
 
-  def handle_key({@enter, _mods}, %SearchPromptState{input: ""} = state) do
+  def handle_key({@enter, mods}, %SearchPromptState{input: ""} = state)
+      when band(mods, @chord_mods) == 0 do
     {:transition, :normal, state}
   end
 
-  def handle_key({@enter, _mods}, %SearchPromptState{} = state) do
+  def handle_key({@enter, mods}, %SearchPromptState{} = state)
+      when band(mods, @chord_mods) == 0 do
     {:execute_then_transition, [:confirm_project_search], :normal, state}
   end
 

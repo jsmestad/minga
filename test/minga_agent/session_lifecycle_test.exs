@@ -615,6 +615,23 @@ defmodule MingaAgent.SessionLifecycleTest do
 
       refute_receive {:agent_event, _, _}, 100
     end
+
+    test "a subscriber that arrives during a turn learns which turn it can stop" do
+      session =
+        start_test_session(provider: Minga.Test.SessionSlowMockProvider, provider_opts: [])
+
+      :ok = Session.send_prompt(session, "Work on this")
+      :ok = Session.subscribe(session, self())
+
+      assert_receive {:agent_event, ^session, {:stop_target_changed, {_record, _turn} = target}}
+      assert :ok = Session.stop_turn(session, target)
+    end
+
+    test "a subscriber that arrives at an idle session is told of no turn to stop" do
+      session = start_subscribed_session()
+      assert_receive {:agent_event, ^session, {:connection_changed, _snapshot}}
+      refute_received {:agent_event, ^session, {:stop_target_changed, _target}}
+    end
   end
 
   describe "editor_snapshot/1" do

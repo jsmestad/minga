@@ -156,6 +156,8 @@ defmodule Minga.Protocol.Opcodes do
   def node_info, do: 0x3D
   @spec document_symbols() :: non_neg_integer()
   def document_symbols, do: 0x3E
+  @spec parse_complete() :: non_neg_integer()
+  def parse_complete, do: 0x3F
 
   # Gui Chrome
   @spec gui_tab_bar() :: non_neg_integer()

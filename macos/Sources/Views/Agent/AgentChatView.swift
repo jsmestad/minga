@@ -532,7 +532,8 @@ struct AgentConversationList: View {
                 .font(Typography.font(.small))
                 .textSelection(.enabled)
         }
-        .foregroundStyle(isError ? Color.red.opacity(0.7) : theme.agentTextFg.opacity(0.4))
+        // A notice is quiet, not faint: "Stopped" and a notice that names the next step are read. At 0.4 they drew at about 2:1.
+        .foregroundStyle(isError ? Color.red.opacity(0.7) : theme.agentTextFg.opacity(0.7))
         .frame(maxWidth: .infinity, alignment: .center)
     }
 

@@ -8,9 +8,14 @@ defmodule MingaEditor.Journeys.ComposerKeysTest do
   use Minga.Test.EditorCase, async: true
 
   alias Minga.Config.Options
+  alias Minga.Design.Tokens
   alias MingaAgent.Session
+  alias MingaEditor.Agent.Tasks
   alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.Session.ChromeState
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.Modeline
+  alias MingaEditor.StatusBar.Data, as: StatusBarData
 
   @moduletag :tmp_dir
   @capabilities %Capabilities{frontend_type: :native_gui, semantic_ui: true}
@@ -55,8 +60,10 @@ defmodule MingaEditor.Journeys.ComposerKeysTest do
     assert user_messages(session) == []
 
     send_keys_sync(ctx, "<Esc><CR>")
-    assert prompt(ctx) == ""
+
+    # The send is answered in the Editor's mailbox, so the composer clears when the answer lands.
     assert user_messages(session) == ["first\nsecond"]
+    await_prompt(ctx, "")
   end
 
   test "a pending count or operator keeps Enter for Vim instead of sending", %{
@@ -122,6 +129,35 @@ defmodule MingaEditor.Journeys.ComposerKeysTest do
       wait_until(ctx, fn _state -> modeline(ctx) =~ "Minga stopped" end,
         message: "expected the modeline to say Minga stopped"
       )
+    end
+  end
+
+  for {label, to_front} <- [
+        {"the conversation's split is closed", "<Esc><Esc><SPC>av"},
+        {"SPC a a went back to the file", "<Esc><Esc><SPC>aa"},
+        {"the file's window has the focus", "<Esc><Esc><C-w>h"}
+      ] do
+    test "SPC a s stops the working turn when #{label}", %{editor_ctx: ctx, session: session} do
+      send_keys_sync(ctx, "go")
+      send_key_sync(ctx, 13, @cmd)
+      await_working(ctx)
+
+      send_keys_sync(ctx, unquote(to_front))
+      send_keys_sync(ctx, "<SPC>as")
+
+      wait_until(ctx, fn _state -> Session.status(session) == :stopped end,
+        message: "expected SPC a s to stop the turn from a file buffer"
+      )
+
+      refute minibuffer(ctx) =~ "no longer active"
+
+      wait_until(ctx, fn _state -> modeline(ctx) =~ "Minga stopped" end,
+        message: "expected the modeline of the file in front to say Minga stopped"
+      )
+
+      # One fact, one value: the file's modeline, the conversation's row in the Spaces bar and
+      # its task (the tasks drawer's row) speak the same state.
+      assert spoken_states(ctx, session) == %{modeline: :stopped, space: :stopped, task: :stopped}
     end
   end
 
@@ -216,6 +252,27 @@ defmodule MingaEditor.Journeys.ComposerKeysTest do
     end)
 
     :ok
+  end
+
+  # The state each surface speaks for `session`'s conversation, in the design tokens' words.
+  defp spoken_states(ctx, session) do
+    state = editor_state(ctx)
+    {:ok, task} = Tasks.fetch(state.agent_connection.tasks, session)
+    data = state |> StatusBarData.from_state() |> StatusBarData.to_modeline_data()
+    %{left: left, right: right} = Modeline.gui_segments(data, state.appearance.theme)
+    minga = Enum.find(left ++ right, &(&1.id == :minga))
+
+    space =
+      state
+      |> ChromeState.from_editor_state()
+      |> Map.fetch!(:workspaces)
+      |> Enum.find(&(&1.kind == :agent))
+
+    %{
+      modeline: minga.state,
+      space: Tokens.agent_status_state(space.status),
+      task: Tasks.Entry.state(task)
+    }
   end
 
   defp prompt(ctx),

@@ -88,6 +88,38 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
              } = AgentContextBuilder.build(ctx)
     end
 
+    test "with a file in front, an approval the conversation had when it left is not shown as pending" do
+      session = self()
+
+      {tab_bar, workspace} =
+        Tab.new_file(1, "manual.ex") |> TabBar.new() |> TabBar.add_workspace("Agent", session)
+
+      # The approval was answered after the conversation left the front; its Session works again.
+      tab_bar = TabBar.set_workspace_agent_status(tab_bar, workspace.id, :tool_executing)
+
+      copy =
+        %AgentState{}
+        |> AgentState.apply_session_snapshot(
+          session,
+          :tool_executing,
+          approval("tc"),
+          nil,
+          "shell"
+        )
+
+      shell =
+        %TraditionalState{}
+        |> TraditionalState.install_tab_bar(tab_bar)
+        |> TraditionalState.replace_agent(copy)
+
+      # Before, the strip said "Awaiting approval for shell" beside a working status.
+      assert %AgentContext{
+               status: :iterating,
+               task: "Running tools",
+               progress: %{active_action: ""}
+             } = AgentContextBuilder.build(context(UIState.new(), shell))
+    end
+
     test "a running tool reads on the card as its step reads in the conversation" do
       for {name, args} <- [
             {"read_file", %{"path" => "./notes.txt"}},

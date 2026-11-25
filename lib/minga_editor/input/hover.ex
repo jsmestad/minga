@@ -68,11 +68,24 @@ defmodule MingaEditor.Input.Hover do
           shell_runtime: %{state: %{hover_popup: %HoverPopup{focused: true, open_action: action}}}
         } = state,
         @key_enter,
+        mods
+      )
+      when action != nil and Bitwise.band(mods, 0x0E) == 0 do
+    state = MingaEditor.Shell.Traditional.HoverPopupWorkflow.dismiss(state)
+    {:handled, execute_open_action(state, action)}
+  end
+
+  # Enter held with Control, Alt or Command neither accepts nor dismisses: Esc then Enter that arrive together are
+  # Alt+Enter in a terminal without enhanced key reporting.
+  def handle_key(
+        %{
+          shell_runtime: %{state: %{hover_popup: %HoverPopup{focused: true, open_action: action}}}
+        } = state,
+        @key_enter,
         _mods
       )
       when action != nil do
-    state = MingaEditor.Shell.Traditional.HoverPopupWorkflow.dismiss(state)
-    {:handled, execute_open_action(state, action)}
+    {:handled, state}
   end
 
   # When focused, o toggles an expandable popup (e.g. full vs truncated thinking).
