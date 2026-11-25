@@ -534,8 +534,8 @@ defmodule Minga.Buffer.UndoPatch do
     end
   end
 
-  # Words, runs of white space, and single other grapheme clusters, so a token never ends inside a cluster: a combining
-  # mark stays with its letter, and a flag or a ZWJ sequence is one token.
+  # Words, runs of white space within a line, line breaks, and single other grapheme clusters, so a token never ends
+  # inside a cluster: a combining mark stays with its letter, and a flag or a ZWJ sequence is one token.
   @spec words(String.t()) :: [String.t()]
   defp words(text) do
     text
@@ -567,8 +567,11 @@ defmodule Minga.Buffer.UndoPatch do
        when byte in ?a..?z or byte in ?A..?Z or byte in ?0..?9 or byte == ?_,
        do: :word
 
-  defp cluster_kind(<<byte, _rest::binary>>) when byte in [?\s, ?\t, ?\n, ?\r, ?\v, ?\f],
-    do: :space
+  # A line break is a token of its own, so white space on either side of it aligns on its own: "\n " and " " share the
+  # space instead of differing as two tokens.
+  defp cluster_kind(<<byte, _rest::binary>>) when byte in [?\n, ?\r], do: :other
+
+  defp cluster_kind(<<byte, _rest::binary>>) when byte in [?\s, ?\t, ?\v, ?\f], do: :space
 
   defp cluster_kind(<<byte, _rest::binary>>) when byte < 128, do: :other
 

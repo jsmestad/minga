@@ -945,6 +945,23 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert Process.get(:merge_differences) == 1
     end
 
+    # Consequence 2 reaching an older step: task 1's steps 3 and 5 are one class and your edit holds step 3. Step 5
+    # rewrote text of task 1's older step 2. Without compaction the press reverts step 5 and step 2 with it; with
+    # compaction step 5 stays with its class, so step 2, whose revert needs step 5, stays too.
+    test "an older step whose revert needs a held class stays with it" do
+      emoji_twins([
+        {:user, 0, 0, ["a", "a", "a"], 0},
+        {:minga, 10, 1, [], 3},
+        {:minga, 8, 0, ["f", "a", "o", "o", "f", "b"], 1},
+        {:minga, 14, 3, ["f", "a", "😀", "\n"], 0},
+        {:minga, 1, 3, ["o", "f"], 1},
+        {:user, 5, 4, ["é", "é", "f", "a", "😀", "é", "o"], 1},
+        :press
+      ])
+
+      assert Process.get(:merge_differences) == 1
+    end
+
     test "a hold on any member of a merged class holds the class" do
       emoji_twins([
         {:minga, 0, 0, ["a"], 3},
@@ -1275,9 +1292,14 @@ defmodule Minga.Buffer.UndoHistoryTest do
       end
     end
 
-    # With few distinct bytes the alignment may choose among equal bytes, but never more Minga bytes than survived, and
-    # when none survived the reject changes nothing (round 4's stray `7`).
-    property "with repeated bytes, Minga never keeps more bytes than survived, and the reject removes only those" do
+    # With few distinct bytes, several readings of one patch can be equally short: not only within a run of identical
+    # bytes, but also across changes, as ")(7)" to "()(" shows (insert "(" and delete "7)", or delete ")" and "7" and
+    # insert "(" at the end). The rule promises the slider's preference only for a single deletion; for several changes
+    # the recording keeps one shortest-by-word reading. So the property requires, always, that Minga keeps no more bytes
+    # than any order-preserving reading of the patch can leave it, and that the reject removes exactly the bytes it
+    # credits; and the ground truth (Minga keeps exactly what survived) for a single edit of yours where no equal byte
+    # touches the change (round 4's stray `7`).
+    property "with repeated bytes, Minga keeps no more than a reading of the edit allows, and the reject removes only those" do
       check all(
               base <- StreamData.string([?a, ?7, ?(, ?), ?\s, ?\n], min_length: 1, max_length: 16),
               minga_pieces <-
@@ -1301,6 +1323,51 @@ defmodule Minga.Buffer.UndoHistoryTest do
             ) do
         assert_identity_kept(base, minga_pieces, your_edits, :repeated)
       end
+    end
+
+    # Seed 625667, by hand. Minga's step writes "a" at 14 and 15, then "()7" at 1: "a()7\n )aaaaaa(a)(7(a ". You delete
+    # ")7\n" (Minga's ")" and "7", the file's newline) and Minga's "a" inside "(a)": "a( )aaaaaa()(7(a ". Minga's
+    # surviving bytes are the "(" at 1 and the "a" at 15. The word comparison once read "\n " as one token, so the
+    # file's space looked inserted and the ")" after it looked like Minga's; a line break is now a token of its own,
+    # and the reject removes exactly Minga's two bytes, leaving the file's text less the newline you deleted.
+    test "a deletion across a line break keeps the file's space and parenthesis as the file's" do
+      assert_identity_kept(
+        "a\n )aaaaaa()(7( ",
+        [{15, "a"}, {19, "()7"}, {14, "a"}],
+        [{24, 3, ""}, {11, 1, ""}],
+        :repeated
+      )
+
+      world =
+        Enum.reduce([{15, "a"}, {19, "()7"}, {14, "a"}], world("a\n )aaaaaa()(7( "), fn {at,
+                                                                                         piece},
+                                                                                        world ->
+          edit(world, @step_one, rem(at, byte_size(text(world)) + 1), 0, piece)
+        end)
+
+      assert text(world) == "a()7\n )aaaaaa(a)(7(a "
+      world = edit(world, :user, 0, byte_size(text(world)), "a( )aaaaaa()(7(a ")
+
+      assert [{1, 2, {:minga, "task-1"}, _}, {15, 16, {:minga, "task-1"}, _}] =
+               world.history
+               |> UndoHistory.provenance()
+               |> Provenance.spans(0, 17)
+               |> Enum.filter(&match?({_from, _to, {:minga, _task}, _key}, &1))
+
+      assert {:ok, restore, _history, _count} =
+               UndoHistory.reject_task(
+                 world.history,
+                 {:minga, "task-1"},
+                 world.version,
+                 world.doc
+               )
+
+      assert Document.content(restore.document) == "a )aaaaaa()(7( "
+
+      assert {:ok, restore, _history, _summary} =
+               UndoHistory.undo_agent_session(world.history, world.version, world.doc)
+
+      assert Document.content(restore.document) == "a )aaaaaa()(7( "
     end
 
     property "repeated SPC a u leaves only tasks your visible edits hold" do
@@ -1485,7 +1552,8 @@ defmodule Minga.Buffer.UndoHistoryTest do
   #    plain one are members of a class it reverted, or groups that depend on such a member; or, with the same steps
   #    after mapping, the compacted press reverted a step the plain press left behind that absorbed another step.
   # 2. A hold on any member holds the class, with what depends on it: the steps the plain press reverted and the
-  #    compacted one did not are members of a class with a step the plain press left behind, or depend on one.
+  #    compacted one did not are members of a class with a step the plain press left behind, depend on one, or are
+  #    older steps whose revert needs a member of such a class.
   #
   # After either, the compacted press must still be exact for its own record, keep your visible text, and repeated
   # presses and undos must finish; the two histories then differ for good and the comparison ends.
@@ -1568,9 +1636,16 @@ defmodule Minga.Buffer.UndoHistoryTest do
       end)
 
     held_back = held_closure(provenance, merges, held, absorbed)
+    held_members = held |> Enum.flat_map(class) |> MapSet.new()
+
+    # An older step whose revert needs a held class member (its closure reaches one) stays with the class.
+    needs_held? = fn step ->
+      not MapSet.disjoint?(held_closure(provenance, merges, [step], absorbed), held_members)
+    end
 
     held_class? =
-      MapSet.size(extra) == 0 and held != [] and Enum.all?(missing, &(&1 in held_back))
+      MapSet.size(extra) == 0 and held != [] and
+        Enum.all?(missing, &(&1 in held_back or needs_held?.(&1)))
 
     takes_class? or held_class?
   end
@@ -1975,6 +2050,36 @@ defmodule Minga.Buffer.UndoHistoryTest do
 
   # The text alone cannot tell which copy of equal bytes went where removed and inserted bytes share a value, or a
   # change's bytes equal the surviving byte on either side. Only histories without that pin Minga's count.
+  # Always no more Minga bytes than some reading of the edit keeps; the ground truth for a single unambiguous edit.
+  defp assert_repeated_kept(credited, surviving, {old, new_text}, ground_truth?) do
+    assert length(credited) <= most_minga_kept(old, new_text)
+    if ground_truth?, do: assert(length(credited) <= length(surviving))
+  end
+
+  # The most Minga bytes of the old text that any order-preserving matching of old bytes to equal new bytes keeps.
+  defp most_minga_kept(old, new_text) do
+    new_bytes = :binary.bin_to_list(new_text)
+
+    old
+    |> Enum.reduce(List.duplicate(0, length(new_bytes) + 1), &kept_row(&1, &2, new_bytes))
+    |> List.last()
+  end
+
+  # One row of the matching table: the most Minga bytes kept using old bytes up to this one, per prefix of the new text.
+  defp kept_row({byte, who, _id}, previous, new_bytes) do
+    weight = if who == :minga, do: 1, else: 0
+
+    {row, _left} =
+      new_bytes
+      |> Enum.zip(Enum.zip(previous, tl(previous)))
+      |> Enum.map_reduce(hd(previous), fn {new_byte, {diagonal, up}}, left ->
+        best = if new_byte == byte, do: max(max(up, left), diagonal + weight), else: max(up, left)
+        {best, best}
+      end)
+
+    [hd(previous) | row]
+  end
+
   defp ambiguous?(old, new) do
     kept = MapSet.new(for {_b, _who, id} <- new, is_integer(id), do: id)
     old_hunks = hunks(old, &MapSet.member?(kept, elem(&1, 2)))
@@ -2045,8 +2150,16 @@ defmodule Minga.Buffer.UndoHistoryTest do
     credited_bytes = Enum.map(credited, &:binary.at(new_text, &1))
 
     case kind do
-      :distinct -> assert MapSet.subset?(MapSet.new(credited_bytes), MapSet.new(surviving))
-      :repeated -> if not ambiguous?, do: assert(length(credited) <= length(surviving))
+      :distinct ->
+        assert MapSet.subset?(MapSet.new(credited_bytes), MapSet.new(surviving))
+
+      :repeated ->
+        assert_repeated_kept(
+          credited,
+          surviving,
+          {old, new_text},
+          match?([_], your_edits) and not ambiguous?
+        )
     end
 
     case UndoHistory.reject_task(world.history, {:minga, "task-1"}, world.version, world.doc) do
