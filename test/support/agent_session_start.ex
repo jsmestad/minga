@@ -13,9 +13,13 @@ defmodule Minga.Test.AgentSessionStart do
   alias MingaEditor.Agent.SessionStart
   alias MingaEditor.State, as: EditorState
 
-  @doc "Processes start replies until no start request is outstanding."
+  @doc """
+  Processes start replies until no start request is outstanding.
+
+  A real session start has no latency contract in a test, so the wait has no deadline of its own by default. Each request monitors the session manager: the manager's reply or its exit ends the wait, and the test deadline bounds it.
+  """
   @spec settle(EditorState.t(), timeout()) :: EditorState.t()
-  def settle(%EditorState{} = state, timeout \\ 5_000) do
+  def settle(%EditorState{} = state, timeout \\ :infinity) do
     if map_size(state.agent_connection.session_starts) == 0 do
       state
     else
@@ -49,11 +53,21 @@ defmodule Minga.Test.AgentSessionStart do
 
   @spec next(EditorState.t(), timeout()) :: EditorState.t()
   defp next(state, timeout) do
+    # A request id is the monitor reference of its request.
+    requests =
+      Map.new(state.agent_connection.session_starts, fn {_token, start} ->
+        {start.request, true}
+      end)
+
     receive do
       {:agent_event, session, {:session_start_attached, token}} ->
         SessionStart.attached(state, session, token)
 
       {[:alias | _ref], _reply} = message ->
+        handled(state, message)
+
+      # The manager's exit settles its start as failed; any other monitor's message stays in the mailbox.
+      {:DOWN, ref, :process, _pid, _reason} = message when is_map_key(requests, ref) ->
         handled(state, message)
     after
       timeout -> flunk("expected an Agent session start reply within #{timeout} ms")

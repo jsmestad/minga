@@ -2468,7 +2468,14 @@ defmodule MingaAgent.SessionStoreTest do
           SessionStore.load(id, Path.join(config_dir, "."), artifact_runtime: runtime)
         end)
 
-      assert_receive :reader_started
+      # The reader is linked, so its crash ends the test; a start has no one-second latency contract either.
+      receive do
+        :reader_started ->
+          :ok
+
+        {ref, result} when ref == reader.ref ->
+          flunk("snapshot reader returned before the writer resumed: #{inspect(result)}")
+      end
 
       assert :ok =
                SessionStore.save(sample_data(id), Path.join(dir, "independent-config"),
@@ -2478,8 +2485,11 @@ defmodule MingaAgent.SessionStoreTest do
       assert Task.yield(reader, 0) == nil
       assert {:ok, 0} = ArtifactStore.cleanup_unreferenced(store)
       send(writer_pid, :resume_snapshot)
-      assert :ok = Task.await(writer)
-      assert {:ok, loaded} = Task.await(reader)
+
+      # Both tasks finish with durable disk work.
+      # Awaiting monitors them, so their exit or the test deadline ends the wait.
+      assert :ok = Task.await(writer, :infinity)
+      assert {:ok, loaded} = Task.await(reader, :infinity)
       assert [{:tool_call, %ToolCall{output: ^new}}] = loaded.messages
       assert {:ok, 1} = ArtifactStore.cleanup_unreferenced(store)
 

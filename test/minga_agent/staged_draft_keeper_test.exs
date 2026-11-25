@@ -51,12 +51,35 @@ defmodule MingaAgent.StagedDraftKeeperTest do
   # Revisions reach the keeper asynchronously and queue one snapshot; poll the
   # observable store instead of assuming message order between processes.
   defp eventually(keeper, check, attempts \\ 500) do
-    :sys.get_state(keeper)
+    drained(keeper)
 
     cond do
       check.() -> :ok
       attempts == 0 -> flunk("condition never held")
       true -> eventually(keeper, check, attempts - 1)
+    end
+  end
+
+  # Returns the keeper's state once it has handled every message sent before this call.
+  # The keeper reads and writes disk inside its callbacks, so the call has no deadline of its own.
+  defp drained(keeper), do: :sys.get_state(keeper, :infinity)
+
+  # The keeper answers a recovery request inside the cast.
+  # A call queued behind the cast returns only once the answer, if there is one, is in this mailbox.
+  defp recover(keeper, root) do
+    :ok = StagedDraftKeeper.recover(keeper, root, self())
+    drained(keeper)
+    :ok
+  end
+
+  # A monitored exit follows disk work and has no latency contract; the test deadline bounds the wait.
+  defp await_down(ref, reason) do
+    receive do
+      {:DOWN, ^ref, :process, _pid, ^reason} ->
+        :ok
+
+      {:DOWN, ^ref, :process, _pid, other} ->
+        flunk("expected exit #{inspect(reason)}, got #{inspect(other)}")
     end
   end
 
@@ -73,7 +96,7 @@ defmodule MingaAgent.StagedDraftKeeperTest do
     ref = Process.monitor(changeset)
     stop_supervised!(:first)
     Process.exit(changeset, :shutdown)
-    assert_receive {:DOWN, ^ref, :process, _, :shutdown}
+    await_down(ref, :shutdown)
   end
 
   describe "Editor restart" do
@@ -93,19 +116,28 @@ defmodule MingaAgent.StagedDraftKeeperTest do
           end
         end)
 
-      assert_receive {:view, view}, 2_000
       ref = Process.monitor(editor)
+
+      # The Editor stand-in stages through disk before it answers, so its exit, not a wall clock, ends the wait.
+      view =
+        receive do
+          {:view, view} ->
+            view
+
+          {:DOWN, ^ref, :process, _pid, reason} ->
+            flunk("the Editor exited first: #{inspect(reason)}")
+        end
+
       Process.exit(editor, :kill)
-      assert_receive {:DOWN, ^ref, :process, _, :killed}
+      await_down(ref, :killed)
 
       # The changeset and fork store are not linked to the Editor.
       assert ProjectView.active?(view)
 
-      :ok = StagedDraftKeeper.recover(keeper, root, self())
+      recover(keeper, root)
 
-      assert_receive {:staged_drafts_recovered, ^root,
-                      [%Recovery{source: :live, workspace_id: 4, view: ^view, changes: changes}]},
-                     2_000
+      assert_received {:staged_drafts_recovered, ^root,
+                       [%Recovery{source: :live, workspace_id: 4, view: ^view, changes: changes}]}
 
       assert [%{path: "lib/a.ex"}] = changes
 
@@ -130,7 +162,7 @@ defmodule MingaAgent.StagedDraftKeeperTest do
 
       ref = Process.monitor(Overlay.changeset_pid(view))
       assert ProjectView.promote(view, :project_root) == :ok
-      assert_receive {:DOWN, ^ref, :process, _, :normal}, 2_000
+      await_down(ref, :normal)
       eventually(keeper, fn -> stored(root, store) == %{} end)
     end
 
@@ -142,7 +174,7 @@ defmodule MingaAgent.StagedDraftKeeperTest do
 
       ref = Process.monitor(Overlay.changeset_pid(view))
       assert ProjectView.discard(view) == :ok
-      assert_receive {:DOWN, ^ref, :process, _, :normal}, 2_000
+      await_down(ref, :normal)
       eventually(keeper, fn -> stored(root, store) == %{} end)
     end
 
@@ -168,7 +200,7 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       assert {:ok, %{owner: {:fork, _}}} = ProjectView.resolve_source(view, "lib/b.ex")
 
       StagedDraftKeeper.persist(keeper, view, 1)
-      :sys.get_state(keeper)
+      drained(keeper)
 
       assert %{{1, "lib/b.ex"} => %{base: "alpha\nbeta\n", content: "alpha\nBETA\n"}} =
                stored(root, store)
@@ -180,7 +212,7 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       :ok = ProjectView.write_file(view, "lib/a.ex", "ONE\n")
       StagedDraftKeeper.persist(keeper, view, 1)
       StagedDraftKeeper.persist(keeper, view, 2)
-      :sys.get_state(keeper)
+      drained(keeper)
 
       assert Map.keys(stored(root, store)) == [{2, "lib/a.ex"}]
     end
@@ -224,7 +256,7 @@ defmodule MingaAgent.StagedDraftKeeperTest do
     test "an agent edit in a background workspace survives a full restart",
          %{root: root, store: store, keeper: keeper, view: view} do
       StagedDraftKeeper.persist(keeper, view, 2)
-      :sys.get_state(keeper)
+      drained(keeper)
 
       {:ok, source} = ProjectView.resolve_source(view, "lib/c.ex")
       original = "one\ntwo\nthree\nfour\nfive\n"
@@ -249,8 +281,8 @@ defmodule MingaAgent.StagedDraftKeeperTest do
   defp recovered_content(view, store, root) do
     full_shutdown(view)
     fresh = start_keeper(store, :second)
-    :ok = StagedDraftKeeper.recover(fresh, root, self())
-    assert_receive {:staged_drafts_recovered, ^root, [%Recovery{source: :disk} = recovery]}, 2_000
+    recover(fresh, root)
+    assert_received {:staged_drafts_recovered, ^root, [%Recovery{source: :disk} = recovery]}
     ProjectView.read_file(recovery.view, "lib/c.ex")
   end
 
@@ -264,9 +296,9 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       full_shutdown(view)
 
       fresh = start_keeper(store, :second)
-      :ok = StagedDraftKeeper.recover(fresh, root, self())
+      recover(fresh, root)
 
-      assert_receive {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}, 2_000
+      assert_received {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}
       assert %Recovery{source: :disk, workspace_id: 1, base_changed: [], lost: []} = recovery
 
       assert recovery.changes |> Enum.map(& &1.path) |> Enum.sort() ==
@@ -276,7 +308,7 @@ defmodule MingaAgent.StagedDraftKeeperTest do
 
       ref = Process.monitor(Overlay.changeset_pid(recovery.view))
       assert ProjectView.promote(recovery.view, :project_root) == :ok
-      assert_receive {:DOWN, ^ref, :process, _, :normal}, 2_000
+      await_down(ref, :normal)
       assert File.read!(Path.join(root, "lib/a.ex")) == "ONE\ntwo\nthree\n"
       assert File.read!(Path.join(root, "lib/new.ex")) == "brand new\n"
       refute File.exists?(Path.join(root, "old.txt"))
@@ -300,8 +332,8 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       File.ln_s!(outside, Path.join(root, "lib"))
 
       fresh = start_keeper(store, :second)
-      :ok = StagedDraftKeeper.recover(fresh, root, self())
-      assert_receive {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}, 2_000
+      recover(fresh, root)
+      assert_received {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}
       assert recovery.base_changed == ["lib/a.ex"]
     end
 
@@ -317,8 +349,8 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       File.ln_s!("real_a.ex", Path.join(root, "lib/a.ex"))
 
       fresh = start_keeper(store, :second)
-      :ok = StagedDraftKeeper.recover(fresh, root, self())
-      assert_receive {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}, 2_000
+      recover(fresh, root)
+      assert_received {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}
       assert recovery.base_changed == []
     end
 
@@ -337,8 +369,8 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       File.write!(Path.join(root, "lib/b.ex"), "alpha\nbeta-human\n")
 
       fresh = start_keeper(store, :second)
-      :ok = StagedDraftKeeper.recover(fresh, root, self())
-      assert_receive {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}, 2_000
+      recover(fresh, root)
+      assert_received {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}
       assert Enum.sort(recovery.base_changed) == ["lib/a.ex", "lib/b.ex"]
 
       assert {:conflict, %{conflicts: [{:conflict, "lib/b.ex", :concurrent_edit}]}} =
@@ -367,17 +399,16 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       )
 
       fresh = start_keeper(store, :second)
-      :ok = StagedDraftKeeper.recover(fresh, root, self())
+      recover(fresh, root)
 
-      assert_receive {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}, 2_000
+      assert_received {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}
       assert recovery.lost == [{"lib/new.ex", :invalid_format}]
       assert recovery.changes |> Enum.map(& &1.path) |> Enum.sort() == ["lib/a.ex", "old.txt"]
       refute File.exists?(file)
     end
 
     test "nothing is offered when nothing was staged", %{root: root, keeper: keeper} do
-      :ok = StagedDraftKeeper.recover(keeper, root, self())
-      :sys.get_state(keeper)
+      recover(keeper, root)
       refute_received {:staged_drafts_recovered, _, _}
     end
   end
@@ -392,16 +423,16 @@ defmodule MingaAgent.StagedDraftKeeperTest do
 
       ref = Process.monitor(keeper)
       Process.exit(keeper, :kill)
-      assert_receive {:DOWN, ^ref, :process, _, :killed}
+      await_down(ref, :killed)
       restarted = start_keeper(store, :restarted)
-      :sys.get_state(restarted)
+      drained(restarted)
 
       :ok = ProjectView.write_file(view, "lib/b.ex", "alpha\nBETA\n")
       eventually(restarted, fn -> map_size(stored(root, store)) == 2 end)
 
       changeset = Process.monitor(Overlay.changeset_pid(view))
       assert ProjectView.promote(view, :project_root) == :ok
-      assert_receive {:DOWN, ^changeset, :process, _, :normal}, 2_000
+      await_down(changeset, :normal)
       eventually(restarted, fn -> stored(root, store) == %{} end)
     end
   end
@@ -417,15 +448,14 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       # The restarted Editor gives workspace 4 a fresh, empty staging area.
       {:ok, fresh} = ProjectView.overlay(root)
       StagedDraftKeeper.persist(keeper, fresh, 4)
-      :sys.get_state(keeper)
+      drained(keeper)
 
       assert Map.keys(stored(root, store)) == [{4, "lib/a.ex"}]
 
-      :ok = StagedDraftKeeper.recover(keeper, root, self())
+      recover(keeper, root)
 
-      assert_receive {:staged_drafts_recovered, ^root,
-                      [%Recovery{source: :live, view: ^surviving}]},
-                     2_000
+      assert_received {:staged_drafts_recovered, ^root,
+                       [%Recovery{source: :live, view: ^surviving}]}
     end
   end
 
@@ -443,9 +473,9 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       on_exit(fn -> File.chmod(unreadable, 0o600) end)
 
       fresh = start_keeper(store, :second)
-      :ok = StagedDraftKeeper.recover(fresh, root, self())
+      recover(fresh, root)
 
-      assert_receive {:staged_drafts_recovered, ^root, [%Recovery{view: nil} = recovery]}, 2_000
+      assert_received {:staged_drafts_recovered, ^root, [%Recovery{view: nil} = recovery]}
       assert recovery.lost == []
 
       assert recovery.retained |> Enum.map(&elem(&1, 0)) |> Enum.sort() ==
@@ -480,12 +510,12 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       ref = Process.monitor(changeset)
       stop_supervised!(:small)
       Process.exit(changeset, :shutdown)
-      assert_receive {:DOWN, ^ref, :process, _, :shutdown}
+      await_down(ref, :shutdown)
 
       fresh = start_keeper(small, :fresh)
-      :ok = StagedDraftKeeper.recover(fresh, root, self())
+      recover(fresh, root)
 
-      assert_receive {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}, 2_000
+      assert_received {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}
       assert recovery.view == nil
       assert recovery.lost == [{"lib/a.ex", :too_large}]
       refute File.exists?(file)
@@ -505,12 +535,12 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       File.mkdir_p!(Path.join(blocker, "occupied"))
 
       StagedDraftKeeper.persist(keeper, view, 1)
-      :sys.get_state(keeper)
+      drained(keeper)
       assert stored(root, store) == %{}
 
       # The keeper's retry state is the behavior under test here.
       assert %{retry_pending: true, written: %{"lib/a.ex" => nil}} =
-               :sys.get_state(keeper).tracked[view.id]
+               drained(keeper).tracked[view.id]
 
       # The failed save scheduled a retry. Clear the obstacle, then deliver
       # the retry timer's message instead of waiting for it.
@@ -533,7 +563,7 @@ defmodule MingaAgent.StagedDraftKeeperTest do
     defp publish_and_wait_for_retirement(keeper, root, store, view) do
       ref = Process.monitor(Overlay.changeset_pid(view))
       assert ProjectView.promote(view, :project_root) == :ok
-      assert_receive {:DOWN, ^ref, :process, _, :normal}, 2_000
+      await_down(ref, :normal)
 
       eventually(keeper, fn ->
         match?({:ok, [%{retired: true}]}, StagedDrafts.load(root, store))
@@ -556,13 +586,12 @@ defmodule MingaAgent.StagedDraftKeeperTest do
           # The retry timer's message, delivered instead of waited for, fails
           # again without a second warning.
           send(keeper, {:retry_delete, dir})
-          :sys.get_state(keeper)
+          drained(keeper)
         end)
 
       assert log |> String.split("could not be cleaned up") |> length() == 2
 
-      :ok = StagedDraftKeeper.recover(keeper, root, self())
-      :sys.get_state(keeper)
+      recover(keeper, root)
       refute_received {:staged_drafts_recovered, _, _}
 
       File.chmod!(dir, 0o700)
@@ -585,8 +614,7 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       File.chmod!(dir, 0o700)
 
       fresh = start_keeper(store, :second)
-      :ok = StagedDraftKeeper.recover(fresh, root, self())
-      :sys.get_state(fresh)
+      recover(fresh, root)
 
       refute_received {:staged_drafts_recovered, _, _}
       assert StagedDrafts.load(root, store) == {:ok, []}
@@ -608,16 +636,16 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       # the keeper's retry instead.
       capture_log(fn ->
         assert {:conflict, _details} = ProjectView.promote(view, :project_root)
-        eventually(keeper, fn -> :sys.get_state(keeper).tracked[view.id].retry_pending end)
+        eventually(keeper, fn -> drained(keeper).tracked[view.id].retry_pending end)
       end)
 
       full_shutdown(view)
       File.chmod!(dir, 0o700)
 
       fresh = start_keeper(store, :second)
-      :ok = StagedDraftKeeper.recover(fresh, root, self())
+      recover(fresh, root)
 
-      assert_receive {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}, 2_000
+      assert_received {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}
       assert Enum.map(recovery.changes, & &1.path) == ["lib/b.ex"]
 
       # The next save of the restored view finishes the deletion.
@@ -639,15 +667,14 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       # The view stays open with nothing staged, and deleting its drafts fails.
       capture_log(fn ->
         :ok = ProjectView.discard_file(view, "lib/a.ex")
-        eventually(keeper, fn -> :sys.get_state(keeper).tracked[view.id].retry_pending end)
+        eventually(keeper, fn -> drained(keeper).tracked[view.id].retry_pending end)
       end)
 
       full_shutdown(view)
       File.chmod!(dir, 0o700)
 
       fresh = start_keeper(store, :second)
-      :ok = StagedDraftKeeper.recover(fresh, root, self())
-      :sys.get_state(fresh)
+      recover(fresh, root)
 
       refute_received {:staged_drafts_recovered, _, _}
       refute File.exists?(dir)
@@ -665,7 +692,7 @@ defmodule MingaAgent.StagedDraftKeeperTest do
 
       capture_log(fn ->
         :ok = ProjectView.discard_file(view, "lib/a.ex")
-        eventually(keeper, fn -> :sys.get_state(keeper).tracked[view.id].retry_pending end)
+        eventually(keeper, fn -> drained(keeper).tracked[view.id].retry_pending end)
       end)
 
       # The agent stages lib/a.ex again once the store is writable.
@@ -679,9 +706,9 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       full_shutdown(view)
 
       fresh = start_keeper(store, :second)
-      :ok = StagedDraftKeeper.recover(fresh, root, self())
+      recover(fresh, root)
 
-      assert_receive {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}, 2_000
+      assert_received {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}
       assert recovery.changes |> Enum.map(& &1.path) |> Enum.sort() == ["lib/a.ex", "lib/b.ex"]
       assert ProjectView.read_file(recovery.view, "lib/a.ex") == {:ok, "ONE again\n"}
     end
@@ -710,8 +737,7 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       second_keeper =
         start_keeper([instance: second, instance_alive?: alive?] ++ second_store, :two)
 
-      :ok = StagedDraftKeeper.recover(second_keeper, root, self())
-      :sys.get_state(second_keeper)
+      recover(second_keeper, root)
       refute_received {:staged_drafts_recovered, _, _}
 
       # The first instance still saves its view.
@@ -723,14 +749,13 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       ref = Process.monitor(changeset)
       stop_supervised!(:one)
       Process.exit(changeset, :shutdown)
-      assert_receive {:DOWN, ^ref, :process, _, :shutdown}
+      await_down(ref, :shutdown)
       Agent.update(running, &MapSet.delete(&1, first))
 
-      :ok = StagedDraftKeeper.recover(second_keeper, root, self())
+      recover(second_keeper, root)
 
-      assert_receive {:staged_drafts_recovered, ^root,
-                      [%Recovery{source: :disk, workspace_id: 1} = recovery]},
-                     2_000
+      assert_received {:staged_drafts_recovered, ^root,
+                       [%Recovery{source: :disk, workspace_id: 1} = recovery]}
 
       assert recovery.changes |> Enum.map(& &1.path) |> Enum.sort() ==
                ["lib/a.ex", "lib/b.ex", "lib/new.ex", "old.txt"]
@@ -761,7 +786,7 @@ defmodule MingaAgent.StagedDraftKeeperTest do
     end
 
     # Whether the keeper still tracks the view is the behavior under test.
-    defp tracks?(keeper, view), do: Map.has_key?(:sys.get_state(keeper).tracked, view.id)
+    defp tracks?(keeper, view), do: Map.has_key?(drained(keeper).tracked, view.id)
 
     test "is neither saved into nor pruned, and the loss is logged once",
          %{root: root, store: store, took_over_keeper: keeper, view: view, dir: dir} = context do
@@ -770,7 +795,7 @@ defmodule MingaAgent.StagedDraftKeeperTest do
           :ok = ProjectView.write_file(view, "lib/b.ex", "alpha\nBETA\n")
           eventually(keeper, fn -> not tracks?(keeper, view) end)
           :ok = ProjectView.write_file(view, "lib/b.ex", "alpha\nBETA!\n")
-          :sys.get_state(keeper)
+          drained(keeper)
         end)
 
       assert log |> String.split("kept by another Minga instance") |> length() == 2
@@ -787,7 +812,7 @@ defmodule MingaAgent.StagedDraftKeeperTest do
          %{root: root, store: store, took_over_keeper: keeper, view: view, dir: dir} do
       ref = Process.monitor(Overlay.changeset_pid(view))
       assert ProjectView.promote(view, :project_root) == :ok
-      assert_receive {:DOWN, ^ref, :process, _, :normal}, 2_000
+      await_down(ref, :normal)
       eventually(keeper, fn -> not tracks?(keeper, view) end)
 
       assert File.dir?(dir)
