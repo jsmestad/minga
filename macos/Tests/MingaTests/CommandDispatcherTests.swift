@@ -1253,20 +1253,24 @@ struct CommandDispatcherRoutingTests {
             Wire.PickerItem(iconColor: 0, flags: 0, label: "item\($0)", description: "", annotation: "", matchPositions: [], activationID: UInt32($0 + 1))
         }
         let keys = [
-            Wire.PickerMovementKey(codepoint: 106, modifiers: 0x02, delta: 1),
-            Wire.PickerMovementKey(codepoint: 107, modifiers: 0x02, delta: -1),
-            Wire.PickerMovementKey(codepoint: 57_353, modifiers: 0, delta: 1)
+            Wire.PickerKey(codepoint: 106, modifiers: 0x02, delta: 1),
+            Wire.PickerKey(codepoint: 107, modifiers: 0x02, delta: -1),
+            Wire.PickerKey(codepoint: 57_353, modifiers: 0, delta: 1),
+            // Enter runs a command on the BEAM and shows nothing ahead.
+            Wire.PickerKey(codepoint: 13, modifiers: 0)
         ]
         dispatcher.applyForTesting(.guiPicker(visible: true, selectedIndex: 2, filteredCount: 5,
                                         totalCount: 5, markedCount: 0, title: "Find File", query: "",
                                         hasPreview: false, items: items, actionMenu: nil, modePrefix: "", loadStatus: .ready,
-                                        queryGeneration: 7, acknowledgedQueryEditSeq: 0, activationGeneration: 7, movementKeys: keys))
+                                        queryGeneration: 7, acknowledgedQueryEditSeq: 0, activationGeneration: 7, keys: keys))
 
         // Plain j and k type into the query on the BEAM, so they never move the preview.
         #expect(dispatcher.previewPickerNavigation(codepoint: 106, modifiers: 0) == false)
         #expect(dispatcher.previewPickerNavigation(codepoint: 107, modifiers: 0) == false)
         // ↑ is not in this picker's list, for example after a user unbound it.
         #expect(dispatcher.previewPickerNavigation(codepoint: 57_352, modifiers: 0) == false)
+        // A listed key without a preview moves nothing here.
+        #expect(dispatcher.previewPickerNavigation(codepoint: 13, modifiers: 0) == false)
         #expect(gui.pickerState.effectiveSelectedIndex == 2)
 
         #expect(dispatcher.previewPickerNavigation(codepoint: 106, modifiers: 0x02))

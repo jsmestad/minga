@@ -2059,7 +2059,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let q, let hasPreview, let decodedItems, let decodedMenu, let modePrefix, _, let queryGeneration, let acknowledgedQueryEditSeq, _, _, _, _) = cmd else {
+        guard case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let q, let hasPreview, let decodedItems, let decodedMenu, let modePrefix, _, let queryGeneration, let acknowledgedQueryEditSeq, _, _, _, _, _) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
 
@@ -2121,7 +2121,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let decodedEmpty, let listKeys, _) = cmd else {
+        guard case .guiPicker(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let decodedEmpty, let listKeys, _, _) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
 
@@ -2136,7 +2136,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == 2)
 
-        guard case .guiPicker(let visible, _, _, _, let markedCount, _, _, _, let items, let actionMenu, let modePrefix, _, _, _, _, _, _, _) = cmd else {
+        guard case .guiPicker(let visible, _, _, _, let markedCount, _, _, _, let items, let actionMenu, let modePrefix, _, _, _, _, _, _, _, _) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
         #expect(visible == false)
@@ -2179,27 +2179,33 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(let visible, _, _, _, _, _, _, _, _, let am, let modePrefix, _, _, _, _, _, _, let movementKeys) = cmd else {
+        guard case .guiPicker(let visible, _, _, _, _, _, _, _, _, let am, let modePrefix, _, _, _, _, _, _, let keys, let listRevision) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
         #expect(visible == true)
         #expect(modePrefix == "")
         #expect(am == nil)
-        #expect(movementKeys.isEmpty)
+        #expect(keys.isEmpty)
+        #expect(listRevision == 0)
     }
 
-    @Test("Decode gui_picker movement keys: the keys the BEAM resolves to one-row movement")
-    func decodeMovementKeys() throws {
+    @Test("Decode gui_picker keys and the list revision: every key the picker binds, with the preview it may show")
+    func decodeKeysAndListRevision() throws {
         var header = Data()
         header.append(1) // visible
         appendU16(&header, 0); appendU16(&header, 0); appendU16(&header, 0)
         header.append(0) // hasPreview
+        appendU16(&header, 0) // title
+        appendU16(&header, 0) // marked count
+        appendU32(&header, 7) // activation generation
+        appendU32(&header, 5) // list revision
 
         var keys = Data()
-        keys.append(3)
+        appendU16(&keys, 4)
         appendU32(&keys, 106); keys.append(0x02); keys.append(1) // ⌃J next
         appendU32(&keys, 57_352); keys.append(0); keys.append(2) // ↑ previous
-        appendU32(&keys, 120); keys.append(0); keys.append(9) // a movement this frontend does not know
+        appendU32(&keys, 13); keys.append(0); keys.append(0) // Enter: forwarded, nothing shown ahead
+        appendU32(&keys, 120); keys.append(0x02); keys.append(9) // a preview this frontend does not know
 
         var data = Data()
         data.append(OP_GUI_PICKER)
@@ -2210,13 +2216,18 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let movementKeys) = cmd else {
+        guard case .guiPicker(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let generation, _, _, let decoded, let listRevision) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
-        #expect(movementKeys == [
-            Wire.PickerMovementKey(codepoint: 106, modifiers: 0x02, delta: 1),
-            Wire.PickerMovementKey(codepoint: 57_352, modifiers: 0, delta: -1)
+        #expect(decoded == [
+            Wire.PickerKey(codepoint: 106, modifiers: 0x02, delta: 1),
+            Wire.PickerKey(codepoint: 57_352, modifiers: 0, delta: -1),
+            Wire.PickerKey(codepoint: 13, modifiers: 0, delta: 0),
+            // Still forwarded: only its preview is unknown.
+            Wire.PickerKey(codepoint: 120, modifiers: 0x02, delta: 0)
         ])
+        #expect(generation == 7)
+        #expect(listRevision == 5)
     }
 }
 

@@ -50,7 +50,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 
 **Text encoding:** All text fields (titles, language names, query source, semantic content) are UTF-8 encoded.
 
-**Protocol version:** The schema carries a `protocol_version` integer (currently 46). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. See [Protocol Version Negotiation](#protocol-version-negotiation) and [GUI_PROTOCOL.md](GUI_PROTOCOL.md).
+**Protocol version:** The schema carries a `protocol_version` integer (currently 47). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. See [Protocol Version Negotiation](#protocol-version-negotiation) and [GUI_PROTOCOL.md](GUI_PROTOCOL.md).
 
 ---
 

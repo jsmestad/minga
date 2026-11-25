@@ -1087,8 +1087,7 @@ final class CommandDispatcher {
     /// It moves only for a key the BEAM listed as picker movement, so the preview cannot disagree with the picker keymap scope: every other key edits the query or runs another command there.
     @discardableResult
     func previewPickerNavigation(codepoint: UInt32, modifiers: UInt8) -> Bool {
-        guard let delta = guiState.pickerState.movementDelta(codepoint: codepoint, modifiers: modifiers) else { return false }
-        return guiState.pickerState.previewNavigation(delta: delta)
+        guiState.pickerState.previewNavigation(codepoint: codepoint, modifiers: modifiers)
     }
 
     /// Install one domain command into the presented FrameState/GUIState and
@@ -1268,9 +1267,9 @@ final class CommandDispatcher {
                 effects.append(.application(.accessibilityModeChanged(guiState.statusBarState.modeName)))
             }
 
-        case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq, let activationGeneration, let empty, let listKeys, let movementKeys):
+        case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq, let activationGeneration, let empty, let listKeys, let keys, let listRevision):
             if visible {
-                guiState.pickerState.update(visible: true, selectedIndex: selectedIndex, filteredCount: filteredCount, totalCount: totalCount, markedCount: markedCount, title: title, query: query, hasPreview: hasPreview, rawItems: items, actionMenu: actionMenu, modePrefix: modePrefix, loadStatus: loadStatus, queryGeneration: queryGeneration, acknowledgedQueryEditSeq: acknowledgedQueryEditSeq, activationGeneration: activationGeneration, empty: empty, listKeys: listKeys, movementKeys: movementKeys)
+                guiState.pickerState.update(visible: true, selectedIndex: selectedIndex, filteredCount: filteredCount, totalCount: totalCount, markedCount: markedCount, title: title, query: query, hasPreview: hasPreview, rawItems: items, actionMenu: actionMenu, modePrefix: modePrefix, loadStatus: loadStatus, queryGeneration: queryGeneration, acknowledgedQueryEditSeq: acknowledgedQueryEditSeq, activationGeneration: activationGeneration, empty: empty, listKeys: listKeys, keys: keys, listRevision: listRevision)
             } else {
                 guiState.pickerState.hide()
             }

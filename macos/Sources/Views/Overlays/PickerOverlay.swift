@@ -179,6 +179,7 @@ public struct PickerOverlay: View {
                     selectionForegroundColor: theme.popupFg,
                     insertionPointColor: theme.accent
                 ),
+                binds: { [state] codepoint, modifiers in state.binds(codepoint: codepoint, modifiers: modifiers) },
                 sendAction: queryFieldAction
             )
             .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
@@ -536,7 +537,10 @@ public struct PickerOverlay: View {
         return { action in
             switch action {
             case .queryChanged(let generation, let editSequence, let text): sendAction(.queryChanged(generation: generation, editSequence: editSequence, text: text))
-            case .keyPress(let codepoint, let modifiers, let sequence): sendAction(.keyPress(codepoint: codepoint, modifiers: modifiers, sequence: sequence))
+            case .keyPress(let codepoint, let modifiers, let sequence):
+                // The highlight moves at once for a key the BEAM allows a preview for, as it does when the editor view has the keys.
+                _ = state.previewNavigation(codepoint: codepoint, modifiers: modifiers)
+                sendAction(.keyPress(codepoint: codepoint, modifiers: modifiers, sequence: sequence))
             }
         }
     }

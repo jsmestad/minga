@@ -414,14 +414,14 @@ Fuzzy finder / command palette state. Uses sectioned envelope: `opcode(1) + sect
 
 | Section ID | Name | Content |
 |-----------|------|--------|
-| 0x01 | Header | visible, selected_index, filtered_count, total_count, has_preview, title, marked_count, activation_generation |
+| 0x01 | Header | visible, selected_index, filtered_count, total_count, has_preview, title, marked_count, activation_generation, list_revision |
 | 0x02 | Query | query string, native editing generation, acknowledged native edit sequence |
 | 0x03 | Items | item_count + items (positional per item) |
 | 0x04 | ActionMenu | visible flag + selected + actions + activation IDs |
 | 0x05 | ModePrefix | mode prefix string |
 | 0x06 | LoadStatus | ready, loading, or an error message |
 | 0x07 | Empty | the empty-state header (an `empty_list`) and list_keys, present only while the picker offers next steps instead of results |
-| 0x08 | MovementKeys | the keys that move the highlighted row by one |
+| 0x08 | Keys | every single key the picker binds, each with the preview a frontend may show |
 
 ```
 When visible:
@@ -433,7 +433,7 @@ Each section:
 Header section 0x01 payload:
   visible(1) + selected_index(2) + filtered_count(2) + total_count(2)
   + has_preview(1) + title_len(2) + title(title_len) + marked_count(2)
-  + activation_generation(4)
+  + activation_generation(4) + list_revision(4)
 
 Query section 0x02 payload:
   query_len(2) + query(query_len) + generation(4) + acknowledged_edit_seq(4)
@@ -467,8 +467,8 @@ empty_list (shared by every surface that shows an empty state):
   Per action: id_len(1) + id + key_len(2) + key + label_len(2) + label
 
 MovementKeys section 0x08 payload (protocol_version 46):
-  key_count(1) + keys...
-  Per key: codepoint(4) + modifiers(1) + movement(1: 1 next, 2 previous)
+  key_count(2) + keys...
+  Per key: codepoint(4) + modifiers(1) + preview(1: 0 none, 1 next, 2 previous)
 
 icon_color is a 24-bit RGB value for the item's icon.
 flags bits:
@@ -491,7 +491,13 @@ mode prefix badges show switched picker sources like command, buffer, or project
 The empty section says what happened when nothing matches (docs/design/anatomy.md, "Empty state"): the title (with the state glyph if there is one) and one muted why line, drawn on the row labels' leading edge above the items. Its items are then the source's next steps ("Search ignored files too", annotation "-- -u"), selected, moved, run and clicked like any row; frontends draw no file icon on them. A picker sends an empty_list with no actions because its next steps are items. list_keys is 1 when the picker has nothing to filter: it takes no text, the BEAM moves keyboard focus to the editor view, frontends hide the query field and show "j k move, ↩ run, q close", and plain keys go to the BEAM. With list_keys 0 the field stays live and the hints read "⌃J ⌃K move, ↩ run, esc close".
 An empty_list action's id is the registered command it runs; a surface that draws actions sends a click as the `execute_command` gui_action (0x16) with that id. `selected` is the preselected action.
 
-movement keys are the single keys the `:picker` keymap scope resolves to `picker_next` and `picker_prev`, user overrides included. A picker that takes text resolves them in the scope's insert state; a picker with nothing to filter (`list_keys`) resolves them in its normal state, so plain `j` and `k` are listed there and nowhere else. Each is the `key_press` codepoint and modifiers the BEAM resolves. A frontend may move its local selection preview only for a key press that matches a listed key exactly; every other key edits the query or runs another command on the BEAM. A frontend never keeps its own list of picker keys, and a picker without this section previews no key. Movement values a frontend does not know move nothing. The BEAM wraps a one-row move at the ends of the list. A preview wraps with it only when the frontend holds the whole list: `empty` is present, or it holds `filtered_count` rows. The BEAM offers at most a window of a long list, so at the edge of a partial window the preview stays where it is until the frame arrives. A preview does not outlive a frame whose action menu is open: the menu owns the list keys, so a key pressed before that frame arrived moved the menu.
+keys are every single key the `:picker` keymap scope binds to a command in the picker's current key state, user overrides included. A picker that takes text resolves them in the scope's insert state; a picker with nothing to filter (`list_keys`) resolves them in its normal state, so plain `j` and `k` are listed there and nowhere else. Each is the `key_press` codepoint and modifiers the BEAM resolves. A key that starts a longer sequence is not listed.
+
+A frontend with a native query field sends exactly the listed keys to the BEAM as key presses and keeps every other key for the text, so a user's binding works in the field and an unbound key stops reaching the BEAM. A frontend never keeps its own list of picker keys, and a picker without this section forwards and previews no key. The list is never cut short: an encoder that cannot count the keys fails. On macOS the field can forward named keys and Control chords; a plain character always types.
+
+`preview` is what a frontend may show before the BEAM answers, and nothing else: `next` and `previous` move the local selection preview by one row, `none` shows nothing. It is `none` for every key while the action menu is open, because the menu owns the movement keys. It does not say which command the key runs, and a value a frontend does not know previews nothing while the key is still forwarded. The BEAM wraps a one-row move at the ends of the list. A preview wraps with it only when the frontend holds the whole list: `empty` is present, or it holds `filtered_count` rows. The BEAM offers at most a window of a long list, so at the edge of a partial window the preview stays where it is until the frame arrives. A preview does not outlive a frame whose action menu is open: the menu owns the list keys, so a key pressed before that frame arrived moved the menu.
+
+list_revision names the list of offered rows. The BEAM changes it whenever the rows, their order or their window change, and never for a selection move or the action menu. The BEAM's selection is a position in the list, so a preview is valid only under the list it was made under: a frontend records the activation generation and the list revision with a preview and drops the preview when a frame carries another pair, even if the previewed row is still listed.
 
 Native frontends may optimistically edit the query with a platform text control so caret movement, selection, paste, cut, copy, undo, and IME composition remain local and immediate. Query semantics remain BEAM-owned. The frontend sends each complete field value with the current `generation` and a monotonically increasing edit sequence. The BEAM echoes the accepted sequence as `acknowledged_edit_seq`; the frontend must not replace a newer unacknowledged local value with an older echo. A new generation replaces all pending local edits.
 

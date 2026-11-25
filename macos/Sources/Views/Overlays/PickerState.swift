@@ -192,13 +192,17 @@ public final class PickerState {
     /// True while the picker has nothing to filter: it takes no text, so the query field steps aside and the editor view's keys (j and k move, q closes) reach the picker.
     public var listKeys: Bool = false
     /// The keys the BEAM's picker keymap scope resolves to one-row movement. The local selection preview moves only for these keys.
-    public var movementKeys: [Wire.PickerMovementKey] = []
+    /// The single keys the BEAM's picker keymap scope binds for this picker. The query field forwards exactly these and keeps every other key for the text.
+    public var keys: [Wire.PickerKey] = []
+    /// Names the list of offered rows. A selection preview is kept only under the revision it was made under.
+    public var listRevision: UInt32 = 0
 
-    public func update(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, rawItems: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String = "", loadStatus: Wire.PickerLoadStatus = .ready, queryGeneration: UInt32 = 0, acknowledgedQueryEditSeq: UInt32 = 0, activationGeneration: UInt32 = 0, empty: Wire.EmptyList? = nil, listKeys: Bool = false, movementKeys: [Wire.PickerMovementKey] = []) {
+    public func update(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, rawItems: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String = "", loadStatus: Wire.PickerLoadStatus = .ready, queryGeneration: UInt32 = 0, acknowledgedQueryEditSeq: UInt32 = 0, activationGeneration: UInt32 = 0, empty: Wire.EmptyList? = nil, listKeys: Bool = false, keys: [Wire.PickerKey] = [], listRevision: UInt32 = 0) {
         self.visible = visible
         self.empty = empty
         self.listKeys = listKeys
-        self.movementKeys = movementKeys
+        self.keys = keys
+        self.listRevision = listRevision
         self.filteredCount = Int(filteredCount)
         self.totalCount = Int(totalCount)
         self.markedCount = Int(markedCount)
@@ -234,7 +238,7 @@ public final class PickerState {
         let selectedActivationID = nextItems[safe: self.selectedIndex]?.activation.activationID ?? 0
         let retainedIDs = Set(nextItems.map { String($0.activation.activationID) })
         // An open act menu owns the list keys, so a preview made before its frame arrived was a move of the menu on the BEAM; the picker row stays where the BEAM has it.
-        let effectiveID = localPresentationStore.reconcile(surface: .picker, generation: activationGeneration, committedItemID: String(selectedActivationID), retainedItemIDs: retainedIDs, visible: visible && actionMenu == nil)
+        let effectiveID = localPresentationStore.reconcile(surface: .picker, generation: activationGeneration, revision: listRevision, committedItemID: String(selectedActivationID), retainedItemIDs: retainedIDs, visible: visible && actionMenu == nil)
         self.previewSelectedIndex = nextItems.firstIndex(where: { String($0.activation.activationID) == effectiveID }).flatMap { $0 == self.selectedIndex ? nil : $0 }
         if let am = actionMenu {
             self.actionMenu = PickerActionMenu(
@@ -264,7 +268,7 @@ public final class PickerState {
         if let committedIndex = items.firstIndex(where: { $0.activation.activationID == selectedItemID }) {
             selectedIndex = committedIndex
             let retainedIDs = Set(items.map { String($0.activation.activationID) })
-            let effectiveID = localPresentationStore.reconcile(surface: .picker, generation: generation, committedItemID: String(selectedItemID), retainedItemIDs: retainedIDs)
+            let effectiveID = localPresentationStore.reconcile(surface: .picker, generation: generation, revision: listRevision, committedItemID: String(selectedItemID), retainedItemIDs: retainedIDs)
             previewSelectedIndex = items.firstIndex(where: { String($0.activation.activationID) == effectiveID }).flatMap { $0 == committedIndex ? nil : $0 }
         } else {
             localPresentationStore.discard(.picker)
@@ -296,9 +300,22 @@ public final class PickerState {
         self.previewLines = []
     }
 
-    /// Returns the rows a key press moves the highlighted row, or nil when the BEAM did not list that exact key as picker movement.
+    /// True when the BEAM lists that exact key press as a key this picker binds, so it is sent to the BEAM and not typed into the query.
+    public func binds(codepoint: UInt32, modifiers: UInt8) -> Bool {
+        keys.contains { $0.codepoint == codepoint && $0.modifiers == modifiers }
+    }
+
+    /// Returns the rows a key press may move the highlighted row before the BEAM answers, or nil when the BEAM allows no preview for that exact key.
     public func movementDelta(codepoint: UInt32, modifiers: UInt8) -> Int? {
-        movementKeys.first { $0.codepoint == codepoint && $0.modifiers == modifiers }?.delta
+        guard let delta = keys.first(where: { $0.codepoint == codepoint && $0.modifiers == modifiers })?.delta, delta != 0 else { return nil }
+        return delta
+    }
+
+    /// Moves the highlighted row ahead of the BEAM for a key press that is being sent to it, when the BEAM allows a preview for that exact key.
+    @discardableResult
+    public func previewNavigation(codepoint: UInt32, modifiers: UInt8) -> Bool {
+        guard let delta = movementDelta(codepoint: codepoint, modifiers: modifiers) else { return false }
+        return previewNavigation(delta: delta)
     }
 
     public func previewNavigation(delta: Int) -> Bool {
@@ -307,7 +324,7 @@ public final class PickerState {
         let current = previewSelectedIndex ?? selectedIndex
         let next = previewTarget(from: current, delta: delta)
         guard next != current else { return false }
-        localPresentationStore.setPreview(LocalPresentationIdentity(generation: activationGeneration, itemID: String(items[next].activation.activationID)), for: .picker)
+        localPresentationStore.setPreview(LocalPresentationIdentity(generation: activationGeneration, revision: listRevision, itemID: String(items[next].activation.activationID)), for: .picker)
         previewSelectedIndex = next
         return true
     }
@@ -343,7 +360,8 @@ public final class PickerState {
         listKeys = false
         loadStatus = .ready
         actionMenu = nil
-        movementKeys = []
+        keys = []
+        listRevision = 0
     }
 }
 

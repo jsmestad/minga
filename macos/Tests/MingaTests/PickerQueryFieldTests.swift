@@ -244,27 +244,93 @@ struct PickerQueryFieldTests {
         #expect(PickerQueryReconciler.clampSelection(NSRange(location: 20, length: 1), to: "abc") == NSRange(location: 3, length: 0))
     }
 
-    @Test("picker control bindings are forwarded while command editing shortcuts remain native")
+    /// The keys the BEAM sends for an unmodified picker scope, plus a user's ⌃N for the next row.
+    private static let listed: Set<[UInt32]> = [[106, 2], [107, 2], [46, 2], [13, 0], [27, 0], [9, 0], [57_352, 0], [57_353, 0], [57_362, 0], [57_363, 0], [110, 2]]
+
+    private func route(_ codepoint: UInt32?, _ modifiers: UInt8, _ selector: String, empty: Bool = false, listed: Set<[UInt32]> = PickerQueryFieldTests.listed) -> PickerQueryKeyRouting.Route {
+        PickerQueryKeyRouting.route(
+            identity: codepoint.map { KeyPressIdentity(codepoint: $0, modifiers: modifiers) },
+            selectorName: selector,
+            fieldIsEmpty: empty,
+            binds: { listed.contains([$0, UInt32($1)]) }
+        )
+    }
+
+    @Test("the field forwards exactly the keys the BEAM lists and keeps the others for the text")
     func keyRouting() {
-        #expect(PickerQueryKeyRouting.controlBinding(characters: "j", modifiers: .control) == PickerQueryKeyCommand(codepoint: 106, modifiers: 0x02))
-        #expect(PickerQueryKeyRouting.controlBinding(characters: "k", modifiers: .control) == PickerQueryKeyCommand(codepoint: 107, modifiers: 0x02))
-        #expect(PickerQueryKeyRouting.controlBinding(characters: "v", modifiers: .control) == PickerQueryKeyCommand(codepoint: 118, modifiers: 0x02))
-        #expect(PickerQueryKeyRouting.controlBinding(characters: ".", modifiers: .control) == PickerQueryKeyCommand(codepoint: 46, modifiers: 0x02))
-        #expect(PickerQueryKeyRouting.controlBinding(characters: "d", modifiers: .control) == nil)
-        #expect(PickerQueryKeyRouting.controlBinding(characters: "a", modifiers: .control) == nil)
-        #expect(PickerQueryKeyRouting.controlBinding(characters: "v", modifiers: .option) == nil)
-        #expect(PickerQueryKeyRouting.controlBinding(characters: "v", modifiers: .command) == nil)
-        #expect(PickerQueryKeyRouting.lineEdit(characters: "w", modifiers: .control) == .deleteWordBackward)
-        #expect(PickerQueryKeyRouting.lineEdit(characters: "u", modifiers: .control) == .deleteToLineStart)
-        #expect(PickerQueryKeyRouting.lineEdit(characters: "w", modifiers: .command) == nil)
-        #expect(PickerQueryKeyRouting.isRetiredListChord("moveDown:", modifiers: .control))
-        #expect(PickerQueryKeyRouting.isRetiredListChord("moveUp:", modifiers: .control))
-        #expect(!PickerQueryKeyRouting.isRetiredListChord("moveDown:", modifiers: []))
-        #expect(PickerQueryKeyRouting.selectorBinding("pageDown:", fieldIsEmpty: false) == PickerQueryKeyCommand(codepoint: 57_363, modifiers: 0))
-        #expect(PickerQueryKeyRouting.selectorBinding("pageUp:", fieldIsEmpty: false) == PickerQueryKeyCommand(codepoint: 57_362, modifiers: 0))
-        #expect(PickerQueryKeyRouting.selectorBinding("moveDown:", fieldIsEmpty: false) == PickerQueryKeyCommand(codepoint: 57_353, modifiers: 0))
-        #expect(PickerQueryKeyRouting.selectorBinding("deleteBackward:", fieldIsEmpty: true) == PickerQueryKeyCommand(codepoint: 127, modifiers: 0))
-        #expect(PickerQueryKeyRouting.selectorBinding("deleteBackward:", fieldIsEmpty: false) == nil)
+        let forward = { (codepoint: UInt32, modifiers: UInt8) in PickerQueryKeyRouting.Route.forward(KeyPressIdentity(codepoint: codepoint, modifiers: modifiers)) }
+
+        // Listed keys go to the BEAM, whatever Cocoa would have done with them.
+        #expect(route(106, 2, "insertLineBreak:") == forward(106, 2))
+        #expect(route(107, 2, "deleteToEndOfParagraph:") == forward(107, 2))
+        #expect(route(46, 2, "noop:") == forward(46, 2))
+        #expect(route(13, 0, "insertNewline:") == forward(13, 0))
+        #expect(route(27, 0, "cancelOperation:") == forward(27, 0))
+        #expect(route(57_353, 0, "moveDown:") == forward(57_353, 0))
+        #expect(route(57_363, 0, "scrollPageDown:") == forward(57_363, 0))
+        // A key the user bound is listed like any other.
+        #expect(route(110, 2, "moveDown:") == forward(110, 2))
+
+        // Unlisted keys stay with the field: ⌃A, ⌃E, the arrows that move the caret, and ⌃P, which no picker binds.
+        #expect(route(97, 2, "moveToBeginningOfParagraph:") == .native)
+        #expect(route(101, 2, "moveToEndOfParagraph:") == .native)
+        #expect(route(57_350, 0, "moveLeft:") == .native)
+        #expect(route(112, 2, "moveUp:") == .native)
+        // The same key with another modifier is another key.
+        #expect(route(57_353, 1, "moveDownAndModifySelection:") == .native)
+        // A command without a key event behind it is the field's own.
+        #expect(route(nil, 0, "moveRight:") == .native)
+
+        // The readline edits Cocoa does not bind.
+        #expect(route(119, 2, "noop:") == .lineEdit(.deleteWordBackward))
+        #expect(route(117, 2, "noop:") == .lineEdit(.deleteToLineStart))
+
+        // Backspace is the field's, except on an empty query, where the BEAM handles it.
+        #expect(route(127, 0, "deleteBackward:") == .native)
+        #expect(route(127, 0, "deleteBackward:", empty: true) == forward(127, 0))
+    }
+
+    @Test("a key the user unbound stops reaching the BEAM, and one that would end editing does nothing")
+    func unboundKeys() {
+        let withoutEnterAndCtrlJ = PickerQueryFieldTests.listed.subtracting([[13, 0], [106, 2], [27, 0]])
+
+        #expect(route(13, 0, "insertNewline:", listed: withoutEnterAndCtrlJ) == .ignore)
+        #expect(route(106, 2, "insertLineBreak:", listed: withoutEnterAndCtrlJ) == .ignore)
+        #expect(route(27, 0, "cancelOperation:", listed: withoutEnterAndCtrlJ) == .ignore)
+        #expect(route(9, 0, "insertTab:", listed: []) == .ignore)
+        // An unbound arrow moves the caret in the field, which is harmless.
+        #expect(route(57_353, 0, "moveDown:", listed: []) == .native)
+    }
+
+    @Test("a user's binding wins over the field's own edit of the same chord")
+    func userBindingWinsOverLineEdit() {
+        let listed = PickerQueryFieldTests.listed.union([[119, 2]])
+
+        #expect(route(119, 2, "noop:", listed: listed) == .forward(KeyPressIdentity(codepoint: 119, modifiers: 2)))
+    }
+
+    @Test("a key event has the identity the editor view sends for it", arguments: [
+        // key code, characters ignoring modifiers, flags, codepoint, modifiers
+        (UInt16(38), "j", NSEvent.ModifierFlags.control, UInt32(106), UInt8(2)),
+        (47, ".", .control, 46, 2),
+        // Shift is in the character, not in the modifier bits, for a Control chord.
+        (38, "J", [.control, .shift], 74, 2),
+        (36, "\r", [], 13, 0),
+        (53, "\u{1b}", [], 27, 0),
+        (125, "\u{F701}", [.function, .numericPad], 57_353, 0),
+        (125, "\u{F701}", [.shift, .function, .numericPad], 57_353, 1),
+        (121, "\u{F72D}", .function, 57_363, 0)
+    ] as [(UInt16, String, NSEvent.ModifierFlags, UInt32, UInt8)])
+    func keyPressIdentity(keyCode: UInt16, characters: String, flags: NSEvent.ModifierFlags, codepoint: UInt32, modifiers: UInt8) {
+        #expect(KeyPressIdentity.command(keyCode: keyCode, charactersIgnoringModifiers: characters, flags: flags) == KeyPressIdentity(codepoint: codepoint, modifiers: modifiers))
+    }
+
+    @Test("plain text, Option and Command combinations have no command identity: they are text or belong to the menus")
+    func textHasNoCommandIdentity() {
+        #expect(KeyPressIdentity.command(keyCode: 38, charactersIgnoringModifiers: "j", flags: []) == nil)
+        #expect(KeyPressIdentity.command(keyCode: 38, charactersIgnoringModifiers: "j", flags: .option) == nil)
+        #expect(KeyPressIdentity.command(keyCode: 9, charactersIgnoringModifiers: "v", flags: .command) == nil)
+        #expect(KeyPressIdentity.command(keyCode: 9, charactersIgnoringModifiers: "v", flags: [.control, .command]) == nil)
     }
 
     @Test("dragging picker text cannot move the window")

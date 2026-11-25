@@ -12,12 +12,15 @@ public enum LocalPresentationSurface: Hashable, Sendable {
 public struct LocalPresentationIdentity: Equatable, Sendable {
     /// The source generation that owns the item.
     public let generation: UInt32
+    /// The revision of the list the preview was made under, for a surface whose list can change inside one generation. A surface without one leaves it 0.
+    public let revision: UInt32
     /// The source-owned item identifier within `generation`.
     public let itemID: String
 
-    /// Creates an identity from the generation and item ID supplied by the BEAM.
-    public init(generation: UInt32, itemID: String) {
+    /// Creates an identity from the generation, list revision and item ID supplied by the BEAM.
+    public init(generation: UInt32, revision: UInt32 = 0, itemID: String) {
         self.generation = generation
+        self.revision = revision
         self.itemID = itemID
     }
 }
@@ -49,16 +52,18 @@ public final class LocalPresentationStore {
 
     /// Reconciles a preview with the latest authoritative source model.
     ///
-    /// A same-generation preview survives document-only and reordered frames when its item remains present.
-    /// Generation changes, retained-item misses, committed selection catches, and hidden surfaces discard it.
+    /// A preview survives a frame of the generation and list revision it was made under while its item remains present.
+    /// Generation changes, list revision changes, retained-item misses, committed selection catches, and hidden surfaces discard it.
+    /// The BEAM's selection is a position in the list, so under another list the previewed row is no longer the row the BEAM moved to.
     @discardableResult
-    public func reconcile(surface: LocalPresentationSurface, generation: UInt32, committedItemID: String, retainedItemIDs: Set<String>, visible: Bool = true) -> String {
+    public func reconcile(surface: LocalPresentationSurface, generation: UInt32, revision: UInt32 = 0, committedItemID: String, retainedItemIDs: Set<String>, visible: Bool = true) -> String {
         guard visible, generation != 0 else {
             previews[surface] = nil
             return committedItemID
         }
         guard let preview = previews[surface],
               preview.generation == generation,
+              preview.revision == revision,
               preview.itemID != committedItemID,
               retainedItemIDs.contains(preview.itemID) else {
             previews[surface] = nil

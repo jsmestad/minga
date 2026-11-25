@@ -3881,12 +3881,7 @@ final class EditorNSView: MTKView {
 // MARK: - Key mapping
 
 private func modifierBits(from flags: NSEvent.ModifierFlags) -> UInt8 {
-    var mods: UInt8 = 0
-    if flags.contains(.shift)   { mods |= 0x01 }
-    if flags.contains(.control) { mods |= 0x02 }
-    if flags.contains(.option)  { mods |= 0x04 }
-    if flags.contains(.command) { mods |= 0x08 }
-    return mods
+    KeyPressIdentity.modifierBits(from: flags)
 }
 
 // MARK: - NSTextInputClient (IME support)
@@ -4291,34 +4286,7 @@ extension EditorNSView {
 
 /// Map special keys to Kitty keyboard protocol codepoints.
 private func mapKeyCode(_ event: NSEvent) -> UInt32? {
-    switch event.keyCode {
-    case 36:  return 13     // Return
-    case 48:  return 9      // Tab
-    case 51:  return 127    // Backspace / Delete
-    case 53:  return 27     // Escape
-    case 123: return 57350  // Left arrow
-    case 124: return 57351  // Right arrow
-    case 125: return 57353  // Down arrow
-    case 126: return 57352  // Up arrow
-    case 115: return 57360  // Home
-    case 119: return 57361  // End
-    case 116: return 57362  // Page Up
-    case 121: return 57363  // Page Down
-    case 117: return 57376  // Forward Delete
-    case 122: return 57364  // F1
-    case 120: return 57365  // F2
-    case 99:  return 57366  // F3
-    case 118: return 57367  // F4
-    case 96:  return 57368  // F5
-    case 97:  return 57369  // F6
-    case 98:  return 57370  // F7
-    case 100: return 57371  // F8
-    case 101: return 57372  // F9
-    case 109: return 57373  // F10
-    case 103: return 57374  // F11
-    case 111: return 57375  // F12
-    default:  return nil
-    }
+    KeyPressIdentity.namedKeyCodepoint(keyCode: event.keyCode)
 }
 
 // MARK: - Drag and drop

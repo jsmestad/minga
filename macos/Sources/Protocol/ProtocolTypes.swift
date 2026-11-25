@@ -652,16 +652,16 @@ public enum Wire {
         }
     }
 
-    /// One key the BEAM's picker keymap scope resolves to one-row movement.
+    /// One key the BEAM's picker keymap scope binds to a command.
     ///
-    /// `codepoint` and `modifiers` are the key press values the BEAM resolves, so the local selection preview moves only for the exact key the frontend sends.
-    public struct PickerMovementKey: Sendable, Equatable {
+    /// `codepoint` and `modifiers` are the key press values the BEAM resolves. The frontend forwards exactly the listed keys and keeps every other key for the query text.
+    public struct PickerKey: Sendable, Equatable {
         public let codepoint: UInt32
         public let modifiers: UInt8
-        /// Rows the highlighted row moves: 1 down, -1 up.
+        /// Rows the highlighted row may move before the BEAM answers: 1 down, -1 up, 0 when the key shows nothing ahead.
         public let delta: Int
 
-        public init(codepoint: UInt32, modifiers: UInt8, delta: Int) {
+        public init(codepoint: UInt32, modifiers: UInt8, delta: Int = 0) {
             self.codepoint = codepoint
             self.modifiers = modifiers
             self.delta = delta

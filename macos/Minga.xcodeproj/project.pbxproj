@@ -346,6 +346,7 @@
 		B00499E91B66E7A6E167D808 /* WhichKeyState.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEEC828C1445B3314C8989E1 /* WhichKeyState.swift */; };
 		B050A8B433483CADBF75035A /* SparklineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D721181E284AD8BA34F0354 /* SparklineView.swift */; };
 		B0A5712B943D48F8F72C1DDA /* KeyboardInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E4E980D53CCCE228BA59BD5 /* KeyboardInputTests.swift */; };
+		B0ED52166DC295EDDFB9C4AA /* KeyPressIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE8948B56CB530BC0595B59E /* KeyPressIdentity.swift */; };
 		B0ED5B46A4F6317344D58C88 /* ByteCursor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E609A9FCD637B39DD56497B /* ByteCursor.swift */; };
 		B12FA22E8F25CE3E5F55366F /* WindowContentRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 620F7F967502D4F1F7AE8F03 /* WindowContentRendererTests.swift */; };
 		B1744D1172F401BB1649EC96 /* NativeRenderPerformanceMain.swift in Sources */ = {isa = PBXBuildFile; fileRef = C96967ED4DCCC7465EC07D8B /* NativeRenderPerformanceMain.swift */; };
@@ -977,6 +978,7 @@
 		EA5181B8CD0511FCA58DC662 /* minga-tui */ = {isa = PBXFileReference; path = "minga-tui"; sourceTree = "<group>"; };
 		EE173FAAAC37ACFF47EE03B8 /* EditTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditTimelineView.swift; sourceTree = "<group>"; };
 		EE2D4BF845A8C876DB44357E /* AgentPromptPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentPromptPresentationTests.swift; sourceTree = "<group>"; };
+		EE8948B56CB530BC0595B59E /* KeyPressIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyPressIdentity.swift; sourceTree = "<group>"; };
 		EF185FF7AFC2D9E5430B6B65 /* FeedbackState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackState.swift; sourceTree = "<group>"; };
 		F0584599FD3264B1C8F85A90 /* OperationReadiness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationReadiness.swift; sourceTree = "<group>"; };
 		F080E3BF9A53CC0B7586E63E /* TextHighlightingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextHighlightingTests.swift; sourceTree = "<group>"; };
@@ -1276,6 +1278,7 @@
 				39A366B91ACA44228DF74A92 /* FocusResolution.swift */,
 				048C53BF025A1476EE8BC1A7 /* IMEComposition.swift */,
 				E4DCF10EBEB51624A4A1F428 /* InlineEditField.swift */,
+				EE8948B56CB530BC0595B59E /* KeyPressIdentity.swift */,
 				7F60610CCB4E603ACBA360C1 /* LiveResizeDebounce.swift */,
 				29556A488CB8DABE4F7DBC51 /* PresentationScrollAnimator.swift */,
 				25503C21E0D55E1515A38C7D /* ScrollAccumulator.swift */,
@@ -2383,6 +2386,7 @@
 				83ACC5A2A0BF5F5F3BA34894 /* HoverPopupOverlay.swift in Sources */,
 				51666BAFCCF8E47DA25B6E80 /* HoverPopupState.swift in Sources */,
 				310AFFC13B7C85D248C21371 /* InlineEditField.swift in Sources */,
+				B0ED52166DC295EDDFB9C4AA /* KeyPressIdentity.swift in Sources */,
 				66FAAD91BF8CF5B72C187D02 /* KeybindingsSettingsView.swift in Sources */,
 				4E4B8BDBAEF50E45C26C0057 /* LatencyHUDOverlay.swift in Sources */,
 				0E41F92F8E0358C4847E871E /* LatencyHUDState.swift in Sources */,

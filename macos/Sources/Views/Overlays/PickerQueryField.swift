@@ -1,11 +1,6 @@
 import AppKit
 import SwiftUI
 
-struct PickerQueryKeyCommand: Equatable {
-    let codepoint: UInt32
-    let modifiers: UInt8
-}
-
 enum PickerQueryKeyRouting {
     /// Readline edits the native field performs itself, so the local caret stays authoritative while you type.
     enum LineEdit: Equatable {
@@ -13,62 +8,50 @@ enum PickerQueryKeyRouting {
         case deleteToLineStart
     }
 
-    /// Forwards the picker keymap scope's chords (`Minga.Keymap.PromptKeys`): ⌃J / ⌃K move, ⌃V opens a split, ⌃. opens the act menu.
-    /// Text-editing chords (⌃A, ⌃E, ⌃H, ⌃W, ⌃U) stay with the field.
-    static func controlBinding(characters: String?, modifiers: NSEvent.ModifierFlags) -> PickerQueryKeyCommand? {
-        let flags = modifiers.intersection(.deviceIndependentFlagsMask)
+    /// What the query field does with a key that Cocoa turned into a command.
+    enum Route: Equatable {
+        /// The picker binds the key, or the BEAM handles it for a text picker: it is sent as a key press and the field does nothing.
+        case forward(KeyPressIdentity)
+        /// One of the readline edits Cocoa's field editor does not bind.
+        case lineEdit(LineEdit)
+        /// The key would end or abort editing in the field, and the picker does not bind it: it does nothing, so the query keeps its text and its focus.
+        case ignore
+        /// The field's own text editing.
+        case native
+    }
 
-        guard flags.contains(.control), !flags.contains(.command), !flags.contains(.option),
-              let character = characters?.lowercased()
-        else { return nil }
+    /// Decides what a key does in the query field.
+    ///
+    /// `binds` answers whether the BEAM lists that exact key press for the open picker (`PickerState.binds`). The field keeps no list of picker keys: a listed key is forwarded, whatever it is, and an unlisted key stays with the field. A user's binding therefore wins over the field's own editing of the same chord.
+    static func route(identity: KeyPressIdentity?, selectorName: String, fieldIsEmpty: Bool, binds: (UInt32, UInt8) -> Bool) -> Route {
+        if let identity, binds(identity.codepoint, identity.modifiers) { return .forward(identity) }
 
-        switch character {
-        case "j", "k", "v", ".":
-            return PickerQueryKeyCommand(codepoint: character.unicodeScalars.first?.value ?? 0, modifiers: 0x02)
-        default:
-            return nil
-        }
+        if let identity, let edit = lineEdit(identity) { return .lineEdit(edit) }
+
+        // Backspace on an empty query is not a picker key: the BEAM handles it for a text picker (it leaves a prefix or a folder).
+        if selectorName == "deleteBackward:", fieldIsEmpty { return .forward(KeyPressIdentity(codepoint: 127, modifiers: 0)) }
+
+        return endsEditing(selectorName) ? .ignore : .native
     }
 
     /// Returns the readline edit for ⌃W or ⌃U, which Cocoa's field editor does not bind by default.
-    static func lineEdit(characters: String?, modifiers: NSEvent.ModifierFlags) -> LineEdit? {
-        let flags = modifiers.intersection(.deviceIndependentFlagsMask)
+    static func lineEdit(_ identity: KeyPressIdentity) -> LineEdit? {
+        guard identity.modifiers == 0x02 else { return nil }
 
-        guard flags.contains(.control), !flags.contains(.command), !flags.contains(.option) else { return nil }
-
-        switch characters?.lowercased() {
-        case "w": return .deleteWordBackward
-        case "u": return .deleteToLineStart
+        switch identity.codepoint {
+        case 119: return .deleteWordBackward
+        case 117: return .deleteToLineStart
         default: return nil
         }
     }
 
-    /// Cocoa maps ⌃N and ⌃P to moveDown: and moveUp:. Pickers retired those chords for ⌃J / ⌃K, so they must not move the list.
-    static func isRetiredListChord(_ selectorName: String, modifiers: NSEvent.ModifierFlags) -> Bool {
-        let flags = modifiers.intersection(.deviceIndependentFlagsMask)
-        return flags.contains(.control) && (selectorName == "moveDown:" || selectorName == "moveUp:")
-    }
-
-    static func selectorBinding(_ selectorName: String, fieldIsEmpty: Bool) -> PickerQueryKeyCommand? {
+    /// Commands that make a one-line field end or abort its editing session. This is about the field's own life, not about what a key does in the picker.
+    static func endsEditing(_ selectorName: String) -> Bool {
         switch selectorName {
-        case "moveUp:":
-            return PickerQueryKeyCommand(codepoint: 57_352, modifiers: 0)
-        case "moveDown:":
-            return PickerQueryKeyCommand(codepoint: 57_353, modifiers: 0)
-        case "pageUp:", "scrollPageUp:":
-            return PickerQueryKeyCommand(codepoint: 57_362, modifiers: 0)
-        case "pageDown:", "scrollPageDown:":
-            return PickerQueryKeyCommand(codepoint: 57_363, modifiers: 0)
-        case "insertNewline:", "insertNewlineIgnoringFieldEditor:":
-            return PickerQueryKeyCommand(codepoint: 13, modifiers: 0)
-        case "insertTab:", "insertTabIgnoringFieldEditor:":
-            return PickerQueryKeyCommand(codepoint: 9, modifiers: 0)
-        case "cancelOperation:":
-            return PickerQueryKeyCommand(codepoint: 27, modifiers: 0)
-        case "deleteBackward:" where fieldIsEmpty:
-            return PickerQueryKeyCommand(codepoint: 127, modifiers: 0)
+        case "insertNewline:", "insertNewlineIgnoringFieldEditor:", "insertLineBreak:", "insertTab:", "insertTabIgnoringFieldEditor:", "insertBacktab:", "cancelOperation:":
+            return true
         default:
-            return nil
+            return false
         }
     }
 }
@@ -87,10 +70,12 @@ struct PickerQueryField: NSViewRepresentable {
     let placeholder: String
     let isEditable: Bool
     let style: InlineEditFieldStyle
+    /// Whether the BEAM lists a key press for the open picker. A listed key is sent to the BEAM, every other key edits the query.
+    var binds: (UInt32, UInt8) -> Bool = { _, _ in false }
     let sendAction: ViewActionHandler<Action>?
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(sendAction: sendAction, style: style)
+        Coordinator(sendAction: sendAction, style: style, binds: binds)
     }
 
     func makeNSView(context: Context) -> PickerNSTextField {
@@ -116,6 +101,7 @@ struct PickerQueryField: NSViewRepresentable {
     func updateNSView(_ field: PickerNSTextField, context: Context) {
         context.coordinator.sendAction = sendAction
         context.coordinator.style = style
+        context.coordinator.binds = binds
         field.isEditable = isEditable && sendAction != nil
         field.placeholderString = placeholder
         context.coordinator.apply(style: style, to: field)
@@ -133,13 +119,15 @@ struct PickerQueryField: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var sendAction: ViewActionHandler<Action>?
         var style: InlineEditFieldStyle
+        var binds: (UInt32, UInt8) -> Bool
         var reconciler = PickerQueryReconciler()
         weak var focusPolicy: (any EditorFocusControlling)?
         private var applyingAuthoritativeText = false
 
-        init(sendAction: ViewActionHandler<Action>?, style: InlineEditFieldStyle) {
+        init(sendAction: ViewActionHandler<Action>?, style: InlineEditFieldStyle, binds: @escaping (UInt32, UInt8) -> Bool = { _, _ in false }) {
             self.sendAction = sendAction
             self.style = style
+            self.binds = binds
         }
 
         func reconcileFocusPolicy(_ policy: (any EditorFocusControlling)?, field: NSTextField) {
@@ -212,34 +200,29 @@ struct PickerQueryField: NSViewRepresentable {
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            if let event = NSApp.currentEvent,
-               let command = PickerQueryKeyRouting.controlBinding(characters: event.charactersIgnoringModifiers, modifiers: event.modifierFlags)
-            {
-                sendAction?(.keyPress(codepoint: command.codepoint, modifiers: command.modifiers, sequence: 0))
+            let identity = NSApp.currentEvent.flatMap(KeyPressIdentity.command(from:))
+            let route = PickerQueryKeyRouting.route(
+                identity: identity,
+                selectorName: NSStringFromSelector(commandSelector),
+                fieldIsEmpty: textView.string.isEmpty,
+                binds: binds
+            )
+
+            switch route {
+            case .forward(let key):
+                sendAction?(.keyPress(codepoint: key.codepoint, modifiers: key.modifiers, sequence: 0))
                 return true
-            }
-
-            if let event = NSApp.currentEvent,
-               let edit = PickerQueryKeyRouting.lineEdit(characters: event.charactersIgnoringModifiers, modifiers: event.modifierFlags)
-            {
-                switch edit {
-                case .deleteWordBackward: textView.deleteWordBackward(nil)
-                case .deleteToLineStart: textView.deleteToBeginningOfLine(nil)
-                }
+            case .lineEdit(.deleteWordBackward):
+                textView.deleteWordBackward(nil)
                 return true
-            }
-
-            let selectorName = NSStringFromSelector(commandSelector)
-
-            if let event = NSApp.currentEvent,
-               PickerQueryKeyRouting.isRetiredListChord(selectorName, modifiers: event.modifierFlags)
-            {
+            case .lineEdit(.deleteToLineStart):
+                textView.deleteToBeginningOfLine(nil)
                 return true
+            case .ignore:
+                return true
+            case .native:
+                return false
             }
-
-            guard let command = PickerQueryKeyRouting.selectorBinding(selectorName, fieldIsEmpty: textView.string.isEmpty) else { return false }
-            sendAction?(.keyPress(codepoint: command.codepoint, modifiers: command.modifiers, sequence: 0))
-            return true
         }
 
     }
