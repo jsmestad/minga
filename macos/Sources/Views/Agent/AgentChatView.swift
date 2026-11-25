@@ -532,8 +532,8 @@ struct AgentConversationList: View {
                 .font(Typography.font(.small))
                 .textSelection(.enabled)
         }
-        // A notice is quiet, not faint: "Stopped" and a notice that names the next step are read. At 0.4 they drew at about 2:1.
-        .foregroundStyle(isError ? Color.red.opacity(0.7) : theme.agentTextFg.opacity(0.7))
+        // A notice is quiet, not faint: "Stopped" and a notice that names the next step are read, so it draws in the theme's muted text role. At 40% of the text colour it drew at about 2:1.
+        .foregroundStyle(theme.roleColor(isError ? .failure : .textMuted))
         .frame(maxWidth: .infinity, alignment: .center)
     }
 

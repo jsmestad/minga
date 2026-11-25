@@ -272,12 +272,14 @@ defmodule Minga.Keymap.Scope.Agent do
     send = if Keyword.get(opts, :stopped, false), do: "continue", else: "send"
     stop = if Keyword.get(opts, :working, false), do: stop_hint(native?, focus), else: []
 
+    # Stop comes first while a turn works: it is the key a user needs most then, and a narrow composer
+    # drops hints from the end, so the first hint is the last one lost.
     case focus do
-      :insert -> [insert_send_hint(native?, send), {"⌥↩", "queue"}] ++ stop ++ [{"esc", "normal"}]
-      :normal -> [{"↩", send}] ++ stop ++ [{"i", "insert"}]
+      :insert -> stop ++ [insert_send_hint(native?, send), {"⌥↩", "queue"}, {"esc", "normal"}]
+      :normal -> stop ++ [{"↩", send}, {"i", "insert"}]
       # Visual and the other Vim modes keep every key for the edit under way: nothing sends or stops there.
       :other_mode -> [{"esc", "normal"}]
-      :cua -> [{"↩", send}, {"⌥↩", "new line"}] ++ stop
+      :cua -> stop ++ [{"↩", send}, {"⌥↩", "new line"}]
     end
   end
 

@@ -23,7 +23,7 @@ Spaces · folder minga.conversation (1 tab) · ▎cpu A 429 with usage_limit_rea
   2 messages · Working
  ╭ Running...                                                                 ╮
  │ ❯ INSERT  Ask Minga to edit, explain, search, or run tools                 │
- │Send · Steer · Queue Next · Stop · Attachments · esc ↩ send · ⌥↩ queue      │
+ │Send · Steer · Queue Next · Stop · Attachments · ⌃C stop · esc ↩ send       │
  ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
  Review files (0)  [All Changes]  ]F  wheel

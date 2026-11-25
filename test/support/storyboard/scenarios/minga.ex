@@ -213,9 +213,9 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
         recognize: &conversation?(&1, :working),
         checks:
           conversation_checks(:working, [
+            {"⌃C", "stop"},
             {"esc ↩", "send"},
             {"⌥↩", "queue"},
-            {"⌃C", "stop"},
             {"esc", "normal"}
           ])
       ),

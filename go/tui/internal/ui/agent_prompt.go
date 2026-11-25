@@ -122,8 +122,9 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 		}
 		lines = append(lines, base.Render(fitStyled(inner, width)))
 	}
-	_, question, attachments := agentComposerControls(chat, placement.innerWidth)
-	controls := agentTurnControls(chat, placement.innerWidth)
+	controlsWidth := agentControlsWidth(chat, placement.innerWidth)
+	_, question, attachments := agentComposerControls(chat, controlsWidth)
+	controls := agentTurnControls(chat, controlsWidth)
 	var labels [4]string
 	for i, control := range controls {
 		labels[i] = control.label
@@ -131,17 +132,19 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 			labels[i] = lipgloss.NewStyle().Foreground(p.Muted()).Background(bg).Render(control.label)
 		}
 	}
-	label := strings.Join(labels[:], agentTurnControlSeparator(placement.innerWidth))
+	label := strings.Join(labels[:], agentTurnControlSeparator(controlsWidth))
 	for _, part := range []string{question, attachments} {
 		if part != "" {
 			label += " · " + part
 		}
 	}
 	if placement.innerWidth >= 48 {
+		// Hints are whole or absent, and they are lost from the end: the BEAM sends the most important first.
 		for _, hint := range agentComposerKeyHints(chat) {
-			if lipgloss.Width(label)+lipgloss.Width(hint) <= placement.innerWidth {
-				label += hint
+			if lipgloss.Width(label)+lipgloss.Width(hint) > placement.innerWidth {
+				break
 			}
+			label += hint
 		}
 	}
 	inner := lipgloss.NewStyle().Foreground(p.Accent()).Background(bg).Width(placement.innerWidth).Render(fitStyled(label, placement.innerWidth))
@@ -167,6 +170,18 @@ func agentComposerKeyHints(chat protocol.AgentChat) []string {
 		hints = append(hints, " · "+hint.Keys+" "+hint.Action)
 	}
 	return hints
+}
+
+// agentControlsWidth is the width the composer's controls lay themselves out in.
+// The first key hint is the one the BEAM ranks highest (the stop key while Minga works), so the controls leave
+// room for it: in a narrow composer their words shorten, as they do in a narrower one, before that hint is lost.
+// The drawn row and the mouse zones both use this width, so a click lands on the control it shows.
+func agentControlsWidth(chat protocol.AgentChat, width int) int {
+	hints := agentComposerKeyHints(chat)
+	if width < agentFullTurnLabelsWidth || len(hints) == 0 {
+		return width
+	}
+	return max(width-lipgloss.Width(hints[0]), 1)
 }
 
 func agentComposerControls(chat protocol.AgentChat, width int) (control, question, attachments string) {
@@ -323,9 +338,10 @@ func (m Model) presentedComposerHandler() func(tea.MouseClickMsg) {
 		return nil
 	}
 	start, y := m.layout.body.X+p.col-p.prefix, m.layout.body.Y+p.controlsRow
-	controls := agentTurnControls(chat, p.innerWidth)
+	controlsWidth := agentControlsWidth(chat, p.innerWidth)
+	controls := agentTurnControls(chat, controlsWidth)
 	var startCells, endCells [4]int
-	separator := lipgloss.Width(agentTurnControlSeparator(p.innerWidth))
+	separator := lipgloss.Width(agentTurnControlSeparator(controlsWidth))
 	width := 0
 	for i, control := range controls {
 		startCells[i] = width
@@ -378,7 +394,7 @@ func (m Model) agentComposerControlPacket(msg tea.MouseMsg) ([]byte, bool) {
 		return nil, false
 	}
 	chat, _ := m.agentChat()
-	control, question, attachments := agentComposerControls(chat, p.innerWidth)
+	control, question, attachments := agentComposerControls(chat, agentControlsWidth(chat, p.innerWidth))
 	controlWidth := lipgloss.Width(control)
 	start := p.col - p.prefix
 	if y != p.controlsRow || x < start {

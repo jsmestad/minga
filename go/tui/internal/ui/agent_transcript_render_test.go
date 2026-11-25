@@ -994,3 +994,47 @@ func TestErrorSummaryNamesAFailedStepByItsSentence(t *testing.T) {
 		t.Fatalf("error summary = %q", got)
 	}
 }
+
+// While Minga works the stop key is the hint a user needs most. The BEAM sends it first, and a composer too
+// narrow for every hint drops whole hints from the end, so the stop key stays and no hint is cut mid-word.
+func TestComposerHintsKeepTheStopKeyAtEightyColumns(t *testing.T) {
+	model := residentModel(t, 0)
+	hint := func(keys, action string) generated.ComposerHint {
+		return generated.ComposerHint{Keys: keys, Action: action}
+	}
+	for mode, hints := range map[string][]generated.ComposerHint{
+		"insert": {hint("⌃C", "stop"), hint("esc ↩", "send"), hint("⌥↩", "queue"), hint("esc", "normal")},
+		"normal": {hint("SPC a s", "stop"), hint("↩", "send"), hint("i", "insert")},
+	} {
+		for _, width := range []int{60, 80, 120} {
+			chat := protocol.AgentChat{Visible: true, Status: 1, PromptVisibleRows: 1, InputFocused: true, ComposerHints: hints}
+			rows := model.renderAgentComposerWithLimit(chat, width, 6)
+			var row string
+			for _, candidate := range rows {
+				// The controls draw as words, or as glyphs in a narrow composer.
+				if plain := ansi.Strip(candidate); strings.Contains(plain, "Stop") || strings.Contains(plain, "■") {
+					row = plain
+				}
+			}
+			stop := hints[0].Keys + " " + hints[0].Action
+			if !strings.Contains(row, " · "+stop) {
+				t.Errorf("%s at %d columns: the row has no stop hint: %q", mode, width, row)
+			}
+			// Every hint is drawn whole or not at all, in the BEAM's order.
+			rest := row
+			for _, each := range hints {
+				text := " · " + each.Keys + " " + each.Action
+				if index := strings.Index(rest, text); index >= 0 {
+					rest = rest[index+len(text):]
+					continue
+				}
+				if strings.Contains(rest, " · "+each.Keys) {
+					t.Errorf("%s at %d columns: the hint %q is cut: %q", mode, width, text, row)
+				}
+			}
+			if strings.TrimRight(strings.Trim(rest, "│"), " ") != "" && !strings.HasSuffix(strings.TrimRight(rest, " "), "│") {
+				t.Errorf("%s at %d columns: text after the last whole hint: %q", mode, width, rest)
+			}
+		}
+	}
+}

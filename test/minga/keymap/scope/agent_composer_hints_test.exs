@@ -29,23 +29,36 @@ defmodule Minga.Keymap.Scope.AgentComposerHintsTest do
              [{"⌘↩", "send"}, {"⌥↩", "queue"}, {"esc", "normal"}]
 
     assert AgentScope.composer_key_hints(:insert, native_gui: false, working: true) ==
-             [{"esc ↩", "send"}, {"⌥↩", "queue"}, {"⌃C", "stop"}, {"esc", "normal"}]
+             [{"⌃C", "stop"}, {"esc ↩", "send"}, {"⌥↩", "queue"}, {"esc", "normal"}]
 
     assert AgentScope.composer_key_hints(:normal, native_gui: false, working: true) ==
-             [{"↩", "send"}, {"SPC a s", "stop"}, {"i", "insert"}]
+             [{"SPC a s", "stop"}, {"↩", "send"}, {"i", "insert"}]
 
     # ⌃C copies with desktop shortcuts, so the terminal hints no stop key there.
     assert AgentScope.composer_key_hints(:cua, native_gui: false, working: true) ==
              [{"↩", "send"}, {"⌥↩", "new line"}]
 
     assert AgentScope.composer_key_hints(:normal, native_gui: true, working: true) ==
-             [{"↩", "send"}, {"⌘.", "stop"}, {"i", "insert"}]
+             [{"⌘.", "stop"}, {"↩", "send"}, {"i", "insert"}]
 
     assert AgentScope.composer_key_hints(:normal, stopped: true) ==
              [{"↩", "continue"}, {"i", "insert"}]
 
     assert AgentScope.composer_key_hints(:cua, native_gui: true, working: true) ==
-             [{"↩", "send"}, {"⌥↩", "new line"}, {"⌘.", "stop"}]
+             [{"⌘.", "stop"}, {"↩", "send"}, {"⌥↩", "new line"}]
+  end
+
+  test "while a turn works, the stop hint comes first wherever a stop key exists, so a narrow composer loses it last" do
+    for focus <- [:insert, :normal, :cua], native <- [true, false] do
+      hints = AgentScope.composer_key_hints(focus, native_gui: native, working: true)
+      stops = Enum.filter(hints, fn {_keys, action} -> action == "stop" end)
+
+      case stops do
+        [stop] -> assert hd(hints) == stop
+        # Desktop shortcuts in a terminal have no stop key.
+        [] -> assert {focus, native} == {:cua, false}
+      end
+    end
   end
 
   test "a failed start's remedy owns ↩ in Normal, so no hint offers to send" do
