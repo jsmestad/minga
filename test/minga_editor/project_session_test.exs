@@ -106,7 +106,7 @@ defmodule MingaEditor.ProjectSessionTest do
     save_split_session(ctx)
     saved = File.read!(Session.session_file(session_dir: ctx.sessions, project_root: ctx.root))
 
-    # Production starts the editor empty and the command line opens the file afterwards.
+    # Production starts the editor with no buffer; the editor opens the file argument itself (#4183).
     editor =
       start_editor("",
         empty: true,
@@ -118,7 +118,8 @@ defmodule MingaEditor.ProjectSessionTest do
 
     state = editor_state(editor)
     refute MingaEditor.Handlers.SessionHandler.persists_project?(state)
-    assert state.workspace.buffers.list == []
+    assert [buffer] = state.workspace.buffers.list
+    assert Minga.Buffer.file_path(buffer) == ctx.lib_a
 
     send(editor.editor, :save_session)
     _ = editor_state(editor)

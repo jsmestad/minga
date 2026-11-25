@@ -460,13 +460,47 @@ defmodule MingaEditor.Startup do
     Log.warning(:editor, "#{message}: #{inspect(reason)}")
   end
 
-  # A start without a file opens the project.
-  # A file argument does not, even though the command line opens it after the editor starts.
+  # A start without a file opens the project; a file argument opens only that file.
   @spec project_open?(pid() | nil, keyword()) :: boolean()
-  defp project_open?(active_buf, opts) do
-    is_nil(active_buf) and
-      is_nil(Keyword.get_lazy(opts, :startup_file, &Minga.CLI.startup_file/0))
+  defp project_open?(active_buf, opts), do: is_nil(active_buf) and is_nil(startup_file(opts))
+
+  @doc """
+  The file the command line asked to open, or nil.
+
+  `:startup_file` overrides the command line. Like the project root, the command line is read only when startup inference is on, so test editors never inherit the test runner's arguments.
+  """
+  @spec startup_file(keyword()) :: String.t() | nil
+  def startup_file(opts) do
+    Keyword.get_lazy(opts, :startup_file, fn ->
+      if Application.get_env(:minga, :infer_startup_project_root, true),
+        do: Minga.CLI.startup_file()
+    end)
   end
+
+  @doc """
+  Opens the command line's file argument while the editor starts (#4183).
+
+  The editor owns this open, so it cannot race a slow frontend boot the way a call from the command line did.
+  """
+  @spec open_startup_file(EditorState.t(), keyword()) :: EditorState.t()
+  def open_startup_file(%EditorState{workspace: %{buffers: %{list: []}}} = state, opts) do
+    case startup_file(opts) do
+      nil ->
+        state
+
+      path ->
+        case MingaEditor.Handlers.BufferRegistry.open_file_by_path_result(state, path) do
+          {:ok, state} ->
+            state
+
+          {:error, reason} ->
+            Log.warning(:editor, "Could not open #{path}: #{inspect(reason)}")
+            state
+        end
+    end
+  end
+
+  def open_startup_file(%EditorState{} = state, _opts), do: state
 
   @spec project_root_from_opts(keyword()) :: String.t() | nil
   defp project_root_from_opts(opts) do

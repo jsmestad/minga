@@ -37,11 +37,6 @@ config :minga, git_module: Minga.Git.Stub
 # trash operations. Tests that need real trash behavior override this in setup.
 config :minga, platform_module: Minga.Platform.Stub
 
-# Speed up CLI tests: the editor isn't running in test, so
-# wait_for_editor always times out. Use fast poll params (5ms × 4 = 20ms)
-# instead of the production default (50ms × 20 = 1s).
-config :minga, editor_wait_params: {5, 4}
-
 # Keep generic editor startup tests hermetic. Tests that verify startup root
 # inference opt in with `infer_project_root: true`.
 config :minga, infer_startup_project_root: false

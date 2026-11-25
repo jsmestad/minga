@@ -300,9 +300,24 @@ defmodule Minga.CLI do
     Map.merge(@default_flags, stored)
   end
 
-  @doc "The regular file given on the command line, or nil for a directory or no argument."
+  @doc """
+  The regular file given on the command line, or nil for a directory or no argument.
+
+  Reads what `prepare_startup/1` stored, and otherwise the raw arguments, because `mix minga` starts the editor before it parses them.
+  """
   @spec startup_file() :: String.t() | nil
-  def startup_file, do: Application.get_env(:minga, :cli_startup_file)
+  def startup_file do
+    Application.get_env(:minga, :cli_startup_file) || startup_file_from_args(argv())
+  end
+
+  @doc "The regular file raw CLI args name, or nil for a directory, no argument or an error."
+  @spec startup_file_from_args([String.t()]) :: String.t() | nil
+  def startup_file_from_args(args) when is_list(args) do
+    case parse_args(args) do
+      {:open, file, _flags} when is_binary(file) -> unless File.dir?(file), do: Path.expand(file)
+      _other -> nil
+    end
+  end
 
   @doc "Returns the project root inferred from the stored startup CLI target, if any."
   @spec startup_project_root() :: String.t() | nil
@@ -1212,51 +1227,15 @@ defmodule Minga.CLI do
   @spec open_startup_target(String.t() | nil) :: :ok
   defp open_startup_target(nil), do: :ok
 
+  # The editor opens a file argument itself while it starts (`Minga.CLI.startup_file/0`).
+  # Opening it from here raced the editor's own startup and timed out on a slow GUI boot (#4183).
   defp open_startup_target(path) do
-    if File.dir?(path) do
-      open_project(path)
-    else
-      open_file(path)
-    end
+    if File.dir?(path), do: open_project(path), else: :ok
   end
 
   @spec open_project(String.t()) :: :ok
   defp open_project(path) do
     Minga.Project.switch(path)
     :ok
-  end
-
-  @spec open_file(String.t()) :: :ok
-  defp open_file(path) do
-    {interval, retries} = editor_wait_params()
-
-    case wait_for_editor(interval, retries) do
-      :ok -> MingaEditor.open_file(path)
-      :timeout -> Minga.Log.error(:editor, "Editor process did not start in time")
-    end
-
-    :ok
-  end
-
-  @spec editor_wait_params() :: {non_neg_integer(), non_neg_integer()}
-  defp editor_wait_params do
-    # Tests can override the polling interval and retry count; production waits up to one second by default.
-    Application.get_env(:minga, :editor_wait_params, {50, 20})
-  end
-
-  @spec wait_for_editor(non_neg_integer(), non_neg_integer()) :: :ok | :timeout
-  defp wait_for_editor(_interval, 0), do: :timeout
-
-  defp wait_for_editor(interval, retries) do
-    case Process.whereis(MingaEditor) do
-      nil ->
-        receive do
-        after
-          interval -> wait_for_editor(interval, retries - 1)
-        end
-
-      _pid ->
-        :ok
-    end
   end
 end

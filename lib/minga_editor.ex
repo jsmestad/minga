@@ -399,6 +399,8 @@ defmodule MingaEditor do
       Process.send_after(self(), :evict_parser_trees, HighlightSync.eviction_check_interval_ms())
     end
 
+    state = Startup.open_startup_file(state, opts)
+
     StartupTimer.mark(:editor_init_done)
     StartupTimer.schedule_fallback_report()
     {:ok, state}

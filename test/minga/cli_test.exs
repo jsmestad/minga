@@ -536,8 +536,9 @@ defmodule Minga.CLITest do
       assert :ok = CLI.prepare_startup([path])
       assert CLI.startup_file() == Path.expand(path)
 
-      assert :ok = CLI.prepare_startup([System.tmp_dir!()])
-      assert CLI.startup_file() == nil
+      assert CLI.startup_file_from_args([path]) == Path.expand(path)
+      assert CLI.startup_file_from_args([System.tmp_dir!()]) == nil
+      assert CLI.startup_file_from_args([]) == nil
     after
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
