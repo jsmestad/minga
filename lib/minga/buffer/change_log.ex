@@ -18,13 +18,11 @@ defmodule Minga.Buffer.ChangeLog do
   @type sequence_changes ::
           {:ok, sequence(), [EditDelta.t()]} | {:reset_required, sequence()}
 
-  defstruct pending_changes: [],
-            sequence: 0,
+  defstruct sequence: 0,
             entries: [],
             consumer_cursors: %{}
 
   @opaque t :: %__MODULE__{
-            pending_changes: [EditDelta.t()],
             sequence: sequence(),
             entries: [entry()],
             consumer_cursors: %{consumer() => sequence()}
@@ -41,8 +39,7 @@ defmodule Minga.Buffer.ChangeLog do
 
     %{
       log
-      | pending_changes: [delta | log.pending_changes],
-        sequence: sequence,
+      | sequence: sequence,
         entries: Enum.take([{sequence, delta} | log.entries], @max_single_consumer_entries)
     }
   end
@@ -50,24 +47,13 @@ defmodule Minga.Buffer.ChangeLog do
   @doc "Records edit deltas in application order, exactly as recording each in turn would, but trims retained entries once."
   @spec record_changes(t(), [EditDelta.t()]) :: t()
   def record_changes(%__MODULE__{} = log, deltas) when is_list(deltas) do
-    {pending_changes, entries, sequence} =
-      Enum.reduce(deltas, {log.pending_changes, log.entries, log.sequence}, fn
-        %EditDelta{} = delta, {pending, entries, sequence} ->
-          {[delta | pending], [{sequence + 1, delta} | entries], sequence + 1}
+    {entries, sequence} =
+      Enum.reduce(deltas, {log.entries, log.sequence}, fn
+        %EditDelta{} = delta, {entries, sequence} ->
+          {[{sequence + 1, delta} | entries], sequence + 1}
       end)
 
-    %{
-      log
-      | pending_changes: pending_changes,
-        sequence: sequence,
-        entries: Enum.take(entries, @max_single_consumer_entries)
-    }
-  end
-
-  @doc "Returns globally pending changes in edit order and clears that legacy pending list."
-  @spec drain_pending_changes(t()) :: {[EditDelta.t()], t()}
-  def drain_pending_changes(%__MODULE__{} = log) do
-    {Enum.reverse(log.pending_changes), %{log | pending_changes: []}}
+    %{log | sequence: sequence, entries: Enum.take(entries, @max_single_consumer_entries)}
   end
 
   @doc """
@@ -106,7 +92,7 @@ defmodule Minga.Buffer.ChangeLog do
   @doc "Clears all recorded changes and consumer cursors without rewinding sequence."
   @spec clear(t()) :: t()
   def clear(%__MODULE__{} = log) do
-    %{log | pending_changes: [], sequence: log.sequence + 1, entries: [], consumer_cursors: %{}}
+    %{log | sequence: log.sequence + 1, entries: [], consumer_cursors: %{}}
   end
 
   @doc false

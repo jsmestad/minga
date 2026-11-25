@@ -11,7 +11,7 @@ defmodule Minga.Test.Generators do
   alias Minga.Buffer.Document
 
   @typedoc "The line-index representation an `indexed_document/0` document was built in."
-  @type index_state :: :clean | :pending_insert | :pending_delete | :missing
+  @type index_state :: :clean | :pending_insert | :pending_delete | :appended | :missing
 
   # ── Buffer content generators ─────────────────────────────────────────────
 
@@ -68,7 +68,7 @@ defmodule Minga.Test.Generators do
   @doc """
   Generates a multi-line Unicode document and the state its line index is in.
 
-  The index is clean, pending a positive shift, pending a negative shift, or missing. Pending
+  The index is clean, pending a positive shift, pending a negative shift, holding an appended tail, or missing. Pending
   edits happen between two `z` bytes, so they never touch a newline and never flush the index.
   """
   @spec indexed_document() :: StreamData.t({Document.t(), index_state()})
@@ -77,7 +77,7 @@ defmodule Minga.Test.Generators do
           prefix <- string([?a, ?\n, ?\r, 0xE9, 0x1F968], max_length: 30),
           suffix <- string([?b, ?\n, 0xE9, 0x1F968], max_length: 30),
           inserted <- string([?x, 0xE9], min_length: 1, max_length: 3),
-          state <- member_of([:clean, :pending_insert, :pending_delete, :missing])
+          state <- member_of([:clean, :pending_insert, :pending_delete, :appended, :missing])
         ) do
       anchored = prefix <> "z"
       [last_line | earlier_lines] = anchored |> String.split("\n") |> Enum.reverse()
@@ -94,6 +94,12 @@ defmodule Minga.Test.Generators do
     do: Document.insert_text(document, inserted)
 
   defp in_index_state(document, :pending_delete, _inserted), do: Document.delete_before(document)
+  # The tail holds at most as many lines as the base, or the append joins them into a clean index.
+  defp in_index_state(document, :appended, inserted) do
+    lines = min(Document.line_count(document), 3)
+    Document.append_text(document, String.duplicate("\n" <> inserted, lines))
+  end
+
   defp in_index_state(document, :missing, _inserted), do: %{document | line_offsets: nil}
 
   # ── Protocol event generators ──────────────────────────────────────────────
