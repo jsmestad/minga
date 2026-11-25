@@ -9,7 +9,7 @@ defmodule Minga.Buffer.UndoHistory do
 
   `undo/3` and `redo/3` move only your groups. They find a group's text by its runs, not by byte offsets, so they stay exact when Minga edited above, below, or inside your text since. When flipping your group would change text that a later Minga step rewrote, they change nothing and return `{:blocked, {:overlaps, minga_group}}`. Minga's edits never clear your redo stack.
 
-  Who wrote each byte follows the text only where an alignment proves it unchanged: line and word trims, the word comparison's equal segments, and lines unique on both sides. Anything else is part of the change, so unchanged text inside one long line past the word budget, or inside an unpaired span with no unique line, is credited to the writer; exact text and exact rejects come first. A single deletion inside a run of identical bytes takes another author's copy first.
+  Who wrote each byte follows the text only where an alignment proves it unchanged: line and word trims, the word comparison's equal segments, and lines unique on both sides. Anything else is part of the change, so unchanged text inside one long line past the word budget, or inside an unpaired span with no unique line, is credited to the writer; exact text and exact rejects come first. A single deletion inside a run of identical text takes another author's copy first. It moves only by whole characters: both its ends stay cuts the editor can make, between code points and never inside a grapheme cluster that a combining mark, a zero width joiner, a variation selector or an emoji modifier holds together. Every recorded run boundary is a cut between code points, so a revert never meets half a character.
 
   A step's group takes a new edit only when nothing changed the document and no group was opened since its last edit; otherwise the step continues in a new group under the same key. Every dependency between groups then points from an older group to a newer one: a later group that rewrote a group's text, or a group that edited inside a Minga group's replacement (text a step wrote in place of other text).
 
@@ -346,7 +346,7 @@ defmodule Minga.Buffer.UndoHistory do
   @doc """
   Gives the next recording the document as it was before the change, or forgets it with `nil`.
 
-  A single deletion at the edge of a run of identical bytes can then slide along that run to take another author's copy first; without it, the deletion stays where the patch put it.
+  A single deletion at the edge of a run of identical text can then slide along that run, by whole characters, to take another author's copy first; without it, the deletion stays where the patch put it.
   """
   @spec before_change(t(), Document.t() | nil) :: t()
   def before_change(%__MODULE__{} = history, document)
@@ -1346,10 +1346,87 @@ defmodule Minga.Buffer.UndoHistory do
       foreign? = &(&1 != writer and &1 != :unattributed)
       spans = Provenance.spans(provenance, lowest, highest + length)
       covered = &foreign_bytes(spans, &1, length, foreign?)
-      best = Enum.max_by(lowest..highest, covered)
+      # A deletion moves only to a place where both its ends are cuts the editor can make.
+      candidates =
+        for place <- lowest..highest, cut?(byte, place) and cut?(byte, place + length), do: place
+
+      best = Enum.max_by([at | candidates], covered)
 
       if covered.(best) > covered.(at), do: {best, bytes_at(byte, best, length), ""}, else: change
     end
+  end
+
+  # A cut the editor can make: between two code points, but never inside a grapheme cluster that a combining mark, a
+  # zero width joiner, a variation selector or an emoji modifier holds together. Unknown bytes are no cut.
+  @spec cut?((non_neg_integer() -> byte() | nil), non_neg_integer()) :: boolean()
+  defp cut?(byte, offset) do
+    case code_point_at(byte, offset) do
+      :end -> previous_joins?(byte, offset) == false
+      nil -> false
+      code_point -> not extends?(code_point) and previous_joins?(byte, offset) == false
+    end
+  end
+
+  @spec code_point_at((non_neg_integer() -> byte() | nil), non_neg_integer()) ::
+          non_neg_integer() | :end | nil
+  defp code_point_at(byte, offset) do
+    case safe_byte(byte, offset) do
+      nil -> :end
+      lead when lead in 0x80..0xBF -> nil
+      lead -> decode(byte, offset, lead)
+    end
+  end
+
+  @spec decode((non_neg_integer() -> byte() | nil), non_neg_integer(), byte()) ::
+          non_neg_integer() | nil
+  defp decode(byte, offset, lead) do
+    size =
+      cond do
+        lead < 0x80 -> 1
+        lead >= 0xF0 -> 4
+        lead >= 0xE0 -> 3
+        true -> 2
+      end
+
+    bytes = for i <- 0..(size - 1)//1, do: safe_byte(byte, offset + i)
+
+    if Enum.any?(bytes, &is_nil/1) do
+      nil
+    else
+      case :binary.list_to_bin(bytes) do
+        <<code_point::utf8>> -> code_point
+        _invalid -> nil
+      end
+    end
+  end
+
+  # Whether the code point before `offset` is a zero width joiner, which binds the next one to it.
+  @spec previous_joins?((non_neg_integer() -> byte() | nil), non_neg_integer()) :: boolean() | nil
+  defp previous_joins?(_byte, 0), do: false
+
+  defp previous_joins?(byte, offset) do
+    start =
+      Enum.find((offset - 1)..max(offset - 4, 0)//-1, &(safe_byte(byte, &1) not in 0x80..0xBF))
+
+    case start && code_point_at(byte, start) do
+      0x200D -> true
+      code_point when is_integer(code_point) -> false
+      _unknown -> nil
+    end
+  end
+
+  @extending ~r/\A[\p{M}\x{200D}\x{FE00}-\x{FE0F}\x{1F3FB}-\x{1F3FF}\x{E0020}-\x{E007F}\x{E0100}-\x{E01EF}]/u
+
+  @spec extends?(non_neg_integer()) :: boolean()
+  defp extends?(code_point), do: Regex.match?(@extending, <<code_point::utf8>>)
+
+  @spec safe_byte((non_neg_integer() -> byte() | nil), integer()) :: byte() | nil
+  defp safe_byte(_byte, offset) when offset < 0, do: nil
+
+  defp safe_byte(byte, offset) do
+    byte.(offset)
+  rescue
+    _out_of_range -> nil
   end
 
   @spec bytes_at((non_neg_integer() -> byte()), non_neg_integer(), pos_integer()) :: binary()

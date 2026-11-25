@@ -871,6 +871,36 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert Document.content(restore.document) == "ab\n"
     end
 
+    # Addendum 4 F1: every recorded run boundary is a cut between code points, after every operation, on multi-byte,
+    # combining and CJK text; deleted text is whole characters, so a revert never meets half a character.
+    property "every run boundary is a code point cut, on multi-byte, combining and CJK text" do
+      graphemes = ["ö", "é", "中", "丁", "e\u0301", "👍🏽", "👨‍👩‍👧", "a", " ", "\n"]
+
+      check all(
+              base <- StreamData.list_of(StreamData.member_of(graphemes), max_length: 8),
+              commands <-
+                StreamData.list_of(
+                  StreamData.tuple(
+                    {StreamData.member_of([:user, :user, :minga, :minga, :undo, :press]),
+                     StreamData.integer(0..20), StreamData.integer(0..3),
+                     StreamData.list_of(StreamData.member_of(graphemes), max_length: 3),
+                     StreamData.integer(0..2)}
+                  ),
+                  max_length: 25
+                ),
+              budget <- StreamData.integer(4..40),
+              max_runs: runs(200)
+            ) do
+        world = world(Enum.join(base), run_budget: budget)
+
+        Enum.reduce(commands, world, fn command, world ->
+          world = command |> grapheme_op(world) |> want_compaction() |> compact_fully(5)
+          assert_code_point_cuts(world)
+          world
+        end)
+      end
+    end
+
     # Your edit between two steps of one task, touched by both, then compaction: the merge is refused, no component of
     # the merged graph holds an edit of yours (the shadow checks after every operation), and SPC a u with u always
     # finishes.
@@ -1142,14 +1172,19 @@ defmodule Minga.Buffer.UndoHistoryTest do
         %{world | shadow: nil}
 
       {operations, provenance} ->
-        model = ProvenanceModel.replay(world.shadow.model, operations)
         merges = for({:absorb, old, new} <- operations, do: {old, new}) ++ world.shadow.merges
         merged = world.shadow.merged or merges != []
-        Process.put(:shadow_skips, length(model.skipped))
+
+        # Once two steps merged, a press may take the older half with it, so the model, which never merges, may stop
+        # following the document; it is then left behind and only the invariants are checked.
+        model =
+          if world.shadow.model && not (merged and world.shadow.merged and stale_model?(world)),
+            do: ProvenanceModel.replay(world.shadow.model, operations)
+
         assert_merged_steps_move_together(world.history, merges)
         assert UnitModel.held_components(world.history) == []
 
-        unless merged, do: assert(ProvenanceModel.text(model) == text(world))
+        if model && not merged, do: assert(ProvenanceModel.text(model) == text(world))
         Process.put(:shadowed, Process.get(:shadowed, 0) + length(operations))
 
         %{
@@ -1159,6 +1194,9 @@ defmodule Minga.Buffer.UndoHistoryTest do
         }
     end
   end
+
+  defp stale_model?(%{shadow: %{model: model}} = world),
+    do: ProvenanceModel.text(model) != text(world)
 
   defp edit(world, source, start, removed_bytes, inserted, opts \\ []) do
     at = Keyword.get(opts, :at, @t0)
@@ -1284,6 +1322,52 @@ defmodule Minga.Buffer.UndoHistoryTest do
 
   defp task_name({:minga, task, _step}), do: task
   defp task_name(other), do: other
+
+  # An edit, undo or press on whole graphemes, as the editor cuts text.
+  defp grapheme_op({:undo, _a, _b, _text, _n}, world), do: step_or_keep(world, :undo)
+
+  defp grapheme_op({:press, _a, _b, _text, _n}, world) do
+    case UndoHistory.undo_agent_session(world.history, world.version, world.doc) do
+      {:ok, restore, history, _summary} -> install(world, restore, history)
+      _held_or_empty -> world
+    end
+  end
+
+  defp grapheme_op({author, a, b, inserted, n}, world) do
+    clusters = String.graphemes(text(world))
+    offsets = clusters |> Enum.scan(0, &(byte_size(&1) + &2)) |> then(&[0 | &1])
+    from = rem(a, length(offsets))
+    to = min(from + b, length(offsets) - 1)
+    start = Enum.at(offsets, from)
+    removed = Enum.at(offsets, to) - start
+    source = if author == :user, do: :user, else: {:minga, "task-#{rem(n, 2)}", "call-#{n}"}
+    edit(world, source, start, removed, Enum.join(inserted), at: @t0 + world.version * @window)
+  end
+
+  defp assert_code_point_cuts(world) do
+    content = text(world)
+
+    cuts =
+      content
+      |> String.codepoints()
+      |> Enum.scan(0, &(byte_size(&1) + &2))
+      |> MapSet.new()
+      |> MapSet.put(0)
+
+    world.history
+    |> UndoHistory.provenance()
+    |> Provenance.runs()
+    |> Enum.reduce(0, fn run, offset ->
+      assert MapSet.member?(cuts, offset)
+
+      if run.live do
+        offset + run.bytes
+      else
+        assert String.valid?(run.text)
+        offset
+      end
+    end)
+  end
 
   defp step_or_keep(world, fun) do
     case step(world, fun) do

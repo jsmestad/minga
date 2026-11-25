@@ -421,6 +421,47 @@ defmodule Minga.Buffer.AuthorshipTest do
       assert BufferProcess.content(buffer) == "aaa bbb\n"
     end
 
+    # Addendum 4 F1: a deletion slides only to a place both its ends are cuts the editor can make, never across bytes of
+    # a code point or into a grapheme cluster.
+    test "SL1 to SL3: a deletion next to Minga's multi-byte text slides only by whole characters" do
+      for {original, at, minga, delete, after_delete, expected} <- [
+            {"öX\n", 2, "é", 2, "éX\n", "X\n"},
+            {"中X\n", 3, "丁", 3, "丁X\n", "X\n"},
+            # The same cluster twice: your deletion takes Minga's copy, whole, so the reject leaves yours.
+            {"e\u0301X\n", 3, "e\u0301", 3, "e\u0301X\n", "e\u0301X\n"}
+          ] do
+        buffer = start(original)
+        replace_at(buffer, {0, at}, 0, minga, step("t", "s"))
+        replace_at(buffer, {0, 0}, delete, "")
+        assert BufferProcess.content(buffer) == after_delete
+        assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+        assert BufferProcess.content(buffer) == expected
+      end
+    end
+
+    test "SL3 mirror: Minga deletes the character before your é; the reject brings it back and your undo works" do
+      buffer = start("öX\n")
+      replace_at(buffer, {0, 2}, 0, "é")
+      replace_at(buffer, {0, 0}, 2, "", step("t", "s"))
+      assert BufferProcess.content(buffer) == "éX\n"
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "öéX\n"
+      assert :ok = BufferProcess.undo(buffer)
+      assert BufferProcess.content(buffer) == "öX\n"
+    end
+
+    test "SL4: the task stays revertable after your deletion leaves your undo stack" do
+      buffer = start("öX\nzz\n")
+      replace_at(buffer, {0, 2}, 0, "é", step("t", "s"))
+      replace_at(buffer, {0, 0}, 2, "")
+      for _ <- 1..1001, do: replace_at(buffer, {1, 0}, 0, "y")
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) |> String.split("\n") |> hd() == "X"
+      replace_at(buffer, {1, 0}, 0, "q", step("t2", "s"))
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert :empty = BufferProcess.undo_agent_session(buffer)
+    end
+
     # Round 5 R1, SL1 to SL3: a deletion beside an identical byte takes the other author's copy, in any change list.
     test "your :s over Minga's duplicate parens takes Minga's copies, so SPC a u leaves your text" do
       buffer = start("f(a)\nf(a)\n")
