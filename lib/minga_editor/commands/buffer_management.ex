@@ -1676,7 +1676,10 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     state = %{state | shell_runtime: runtime}
 
+    # The cache stays bound to its conversation, in front or not: with a file in front it names
+    # the conversation shown last, which the modeline and Stop read.
     state
+    |> TraditionalWorkflow.install_agent_session_replaced(old_pid, new_pid)
     |> maybe_rebuild_active_agent_after_restart(new_pid)
     |> MingaEditor.Agent.DraftWorkflow.reconcile_restarted_queue(session_id, old_pid, new_pid)
   end

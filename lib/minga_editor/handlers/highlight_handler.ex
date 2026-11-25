@@ -67,6 +67,23 @@ defmodule MingaEditor.Handlers.HighlightHandler do
 
   # ── correlated buffer events ─────────────────────────────────────────────
 
+  # The parser's last message for a parse. Its results (spans, fold ranges, conceals, symbols) are all applied.
+  def handle(
+        state,
+        {:minga_highlight,
+         {:buffer_event, buffer_pid, %EventCorrelation{} = correlation, :parse_complete}}
+      )
+      when is_pid(buffer_pid) do
+    highlight = HighlightSync.get_highlight(state, buffer_pid)
+
+    if MingaEditor.UI.Highlight.accepts_correlation?(highlight, correlation) do
+      completed = MingaEditor.UI.Highlight.complete_parse(highlight, correlation)
+      {HighlightSync.put_highlight(state, buffer_pid, completed), []}
+    else
+      {state, []}
+    end
+  end
+
   def handle(
         state,
         {:minga_highlight,
@@ -352,46 +369,51 @@ defmodule MingaEditor.Handlers.HighlightHandler do
        when not is_map_key(highlights, pid),
        do: {state, []}
 
-  defp handle_conceal_spans(state, pid, spans), do: {state, [{:conceal_spans, pid, spans}]}
+  # Conceals arrive after the spans that scheduled the last frame, so a shown buffer schedules another (#4314).
+  defp handle_conceal_spans(state, pid, spans) do
+    if buffer_visible_in_window?(state, pid),
+      do: {state, [{:conceal_spans, pid, spans}, :render]},
+      else: {state, [{:conceal_spans, pid, spans}]}
+  end
 
   @spec handle_fold_ranges(EditorState.t(), pid(), [
           {non_neg_integer(), non_neg_integer()}
         ]) :: {EditorState.t(), [highlight_effect()]}
-  defp handle_fold_ranges(state, pid, ranges) when pid == state.workspace.buffers.active do
-    fold_ranges =
-      Enum.map(ranges, fn {start_line, end_line} ->
-        FoldRange.new!(start_line, end_line)
-      end)
+  # Fold ranges arrive after the parse's highlights, so the frame those highlights scheduled has no fold marks.
+  # Every window that shows the buffer takes the ranges, and a frame is scheduled so the gutter draws them without
+  # waiting for the next key (#4314). A buffer no window shows keeps nothing.
+  defp handle_fold_ranges(state, pid, ranges) do
+    windows = state.workspace.windows
 
-    new_state =
-      case MingaEditor.Session.State.active_window_struct(state.workspace) do
-        nil ->
+    case for({id, %Window{content: {:buffer, ^pid}}} <- windows.map, do: id) do
+      [] ->
+        {state, []}
+
+      ids ->
+        fold_ranges =
+          Enum.map(ranges, fn {start_line, end_line} -> FoldRange.new!(start_line, end_line) end)
+
+        windows =
+          Enum.reduce(
+            ids,
+            windows,
+            &MingaEditor.State.Windows.set_fold_ranges(&2, &1, fold_ranges)
+          )
+
+        state = %{
           state
+          | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)
+        }
 
-        %Window{id: id} ->
-          %{
-            state
-            | workspace:
-                MingaEditor.Session.State.set_windows(
-                  state.workspace,
-                  MingaEditor.State.Windows.set_fold_ranges(
-                    state.workspace.windows,
-                    id,
-                    fold_ranges
-                  )
-                )
-          }
-      end
+        effects = [
+          :render,
+          {:log, :editor, :debug,
+           "Fold ranges received: buffer=#{inspect(pid)}, count=#{Enum.count(ranges)}"}
+        ]
 
-    effects = [
-      {:log, :editor, :debug,
-       "Fold ranges received: buffer=#{inspect(pid)}, count=#{Enum.count(ranges)}"}
-    ]
-
-    {new_state, effects}
+        {state, effects}
+    end
   end
-
-  defp handle_fold_ranges(state, _pid, _ranges), do: {state, []}
 
   @spec handle_textobject_positions(EditorState.t(), pid(), map()) ::
           {EditorState.t(), [highlight_effect()]}

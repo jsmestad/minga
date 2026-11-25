@@ -17,32 +17,41 @@ defmodule Minga.Mode.SubstituteConfirm do
 
   @behaviour Minga.Mode
 
+  import Bitwise
+
   alias Minga.Mode
   alias Minga.Mode.SubstituteConfirmState
 
   @escape 27
 
+  # An answer is a letter pressed without Control, Alt or Command. A chord is not an answer: without enhanced key
+  # reporting a terminal sends Esc followed by a letter as Alt and that letter when both arrive together.
+  @chord_mods 0x0E
+
   @impl Mode
   @spec handle_key(Mode.key(), SubstituteConfirmState.t()) :: Mode.result()
 
   # y → accept current, advance
-  def handle_key({?y, _mods}, %SubstituteConfirmState{} = state) do
+  def handle_key({?y, mods}, %SubstituteConfirmState{} = state)
+      when band(mods, @chord_mods) == 0 do
     state |> SubstituteConfirmState.accept() |> advance_or_finish()
   end
 
   # n → skip current, advance
-  def handle_key({?n, _mods}, %SubstituteConfirmState{} = state) do
+  def handle_key({?n, mods}, %SubstituteConfirmState{} = state)
+      when band(mods, @chord_mods) == 0 do
     state |> SubstituteConfirmState.skip() |> advance_or_finish()
   end
 
   # a → accept all remaining, finish
-  def handle_key({?a, _mods}, %SubstituteConfirmState{} = state) do
+  def handle_key({?a, mods}, %SubstituteConfirmState{} = state)
+      when band(mods, @chord_mods) == 0 do
     state |> SubstituteConfirmState.accept_remaining() |> finish()
   end
 
   # q or Escape → finish with current decisions
-  def handle_key({cp, _mods}, %SubstituteConfirmState{} = state)
-      when cp == ?q or cp == @escape do
+  def handle_key({cp, mods}, %SubstituteConfirmState{} = state)
+      when cp == @escape or (cp == ?q and band(mods, @chord_mods) == 0) do
     finish(state)
   end
 

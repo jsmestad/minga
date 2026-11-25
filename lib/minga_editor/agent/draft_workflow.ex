@@ -714,11 +714,21 @@ defmodule MingaEditor.Agent.DraftWorkflow do
     do: capture_queue(ui, state, owner, destination, target, kind, content, press)
 
   @doc """
-  Whether the composer holds exactly `raw`, the text a press took, and nothing else. Only then may that press send: sending clears the whole composer, which must not take unsent typing, or text waiting behind the press, with it.
+  Whether the composer holds exactly `raw`, the text a press took, and nothing else. A message whose files a worker read goes only then, because nothing recorded what the press took.
   """
   @spec only_pressed_text?(State.t(), String.t()) :: boolean()
   def only_pressed_text?(%State{workspace: %{agent_ui: %UIState{} = ui}}, raw),
     do: PromptBuffer.input_text(ui) == raw
+
+  @doc """
+  Whether `raw`, the text a held press took, is still at the front of the composer once the text a send or queue in flight has taken is left out. Only then may the press send: its text was not edited and no other press took it. Text after it (typing, or a press waiting behind it) stays in the composer, because a send removes only the text it took.
+  """
+  @spec pressed_text_in_front?(State.t(), String.t()) :: boolean()
+  def pressed_text_in_front?(
+        %State{workspace: %{agent_ui: %UIState{draft_save: save} = ui}},
+        raw
+      ),
+      do: save |> DraftSave.not_in_flight(PromptBuffer.input_text(ui)) |> String.starts_with?(raw)
 
   @doc "The workspace in front, which owns the composer a key was pressed in."
   @spec front_owner(State.t()) :: non_neg_integer() | nil
@@ -760,7 +770,139 @@ defmodule MingaEditor.Agent.DraftWorkflow do
       }),
       do: true
 
+  def holding?(%State{workspace: %{agent_ui: %UIState{draft_save: %DraftSave{sending: {_, _}}}}}),
+    do: true
+
   def holding?(%State{}), do: false
+
+  @doc """
+  Marks `pressed`, the raw composer text a press took (`:all` for everything the composer in front holds), as taken by a send that is out to the Session under `ref`, and returns that raw text. Until `send_answered/5`, a later press leaves the text out and waits in line behind the send.
+
+  A composer without a saved draft keeps no line; its caller refuses a second send while one is out. `:pending` when this composer already has a send out.
+  """
+  @spec begin_send(State.t(), reference(), String.t() | :all) ::
+          {:ok, String.t(), State.t()} | :pending
+  def begin_send(
+        %State{workspace: %{agent_ui: %UIState{draft_save: save} = ui}} = state,
+        ref,
+        pressed
+      )
+      when is_reference(ref) do
+    raw = if pressed == :all, do: PromptBuffer.input_text(ui), else: pressed
+
+    case save do
+      %DraftSave{} ->
+        with {:ok, sending} <- DraftSave.begin_send(save, ref, raw) do
+          {:ok, raw, Workflow.install_agent_ui(state, UIState.project_draft_save(ui, sending))}
+        end
+
+      nil ->
+        {:ok, raw, state}
+    end
+  end
+
+  @typedoc """
+  What the Session answered to a send: `{:sent, toast}` took the text (an optional line is shown in that composer), `{:sent_attached, revision}` took it with the draft's attachments, and `:kept` refused it or never answered.
+  """
+  @type send_answer :: {:sent, String.t() | nil} | {:sent_attached, DraftSave.revision()} | :kept
+
+  @doc """
+  Applies the Session's answer to the send `ref` in the composer of workspace `owner`, in front or not.
+
+  A send that went removes only the text it took: what was typed after the press stays, and if the user edited the pressed text itself the whole composer stays and one line says so. The next press waiting behind it then runs. A send that did not go keeps the composer as it is, and the presses behind it stop waiting; the caller says why.
+  """
+  @spec send_answered(State.t(), non_neg_integer(), reference(), String.t(), send_answer()) ::
+          State.t()
+  def send_answered(state, owner, ref, raw, answer) do
+    update_origin(state, owner, fn ui ->
+      case end_send(ui, ref) do
+        {:ok, ended} -> apply_send_answer(ended, state, owner, raw, answer)
+        :stale -> {:unchanged, ui}
+      end
+    end)
+  end
+
+  # A composer without a saved draft has no record of the send; its answer applies as it is.
+  @spec end_send(UIState.t(), reference()) :: {:ok, UIState.t()} | :stale
+  defp end_send(%UIState{draft_save: %DraftSave{} = save} = ui, ref) do
+    with {:ok, ended} <- DraftSave.send_answered(save, ref),
+         do: {:ok, UIState.project_draft_save(ui, ended)}
+  end
+
+  defp end_send(%UIState{draft_save: nil} = ui, _ref), do: {:ok, ui}
+
+  @spec apply_send_answer(UIState.t(), State.t(), non_neg_integer(), String.t(), send_answer()) ::
+          {term(), UIState.t()}
+  defp apply_send_answer(
+         %UIState{draft_save: %DraftSave{} = save} = ui,
+         _state,
+         owner,
+         _raw,
+         :kept
+       ),
+       do: {:unchanged, ui |> UIState.project_draft_save(DraftSave.drop_held(save)) |> arm(owner)}
+
+  defp apply_send_answer(ui, _state, _owner, _raw, :kept), do: {:unchanged, ui}
+
+  defp apply_send_answer(ui, state, owner, raw, {:sent_attached, revision}) do
+    {outcome, taken} = take_sent_text(ui, raw)
+
+    taken
+    |> consume_sent_draft(revision, PromptBuffer.input_empty?(taken))
+    |> release_after_send(outcome, state, owner)
+  end
+
+  defp apply_send_answer(ui, state, owner, raw, {:sent, toast}) do
+    {outcome, taken} = take_sent_text(ui, raw)
+
+    taken
+    |> toast_sent(toast)
+    |> release_after_send(outcome, state, owner)
+  end
+
+  # The composer still holds exactly the pressed text: clear it as a send always has
+  # (the text joins the prompt history). Text typed after the press stays.
+  @spec take_sent_text(UIState.t(), String.t()) :: {:unchanged | :sent_older_draft, UIState.t()}
+  defp take_sent_text(ui, raw) do
+    if PromptBuffer.input_text(ui) == raw do
+      {:unchanged, PromptBuffer.clear_input_and_scroll(ui)}
+    else
+      case PromptBuffer.drop_prefix(ui, raw) do
+        {:ok, kept} -> {:unchanged, UIState.scroll_to_bottom(kept)}
+        :mismatch -> {:sent_older_draft, ui}
+      end
+    end
+  end
+
+  # An emptied composer is saved as the Session left it. Text that stays (typed after the
+  # press) is newer than the record, so it has no saved marker and the next save writes it.
+  @spec consume_sent_draft(UIState.t(), DraftSave.revision(), boolean()) :: UIState.t()
+  defp consume_sent_draft(
+         %UIState{draft_save: %DraftSave{request: {:ready, _, _}, buffer: buffer} = save} = ui,
+         revision,
+         emptied?
+       ) do
+    marker = if emptied?, do: Buffer.inspection_marker(buffer)
+    UIState.project_draft_save(ui, DraftSave.sent(save, revision, marker))
+  end
+
+  defp consume_sent_draft(ui, _revision, _emptied?), do: ui
+
+  @spec toast_sent(UIState.t(), String.t() | nil) :: UIState.t()
+  defp toast_sent(ui, nil), do: ui
+  defp toast_sent(ui, toast), do: UIState.push_toast(ui, toast, :info)
+
+  @spec release_after_send(UIState.t(), term(), State.t(), non_neg_integer()) ::
+          {term(), UIState.t()}
+  defp release_after_send(
+         %UIState{draft_save: %DraftSave{target: target}} = ui,
+         outcome,
+         state,
+         owner
+       ),
+       do: release_held_press({outcome, arm(ui, owner)}, state, owner, target)
+
+  defp release_after_send(ui, outcome, _state, _owner), do: {outcome, ui}
 
   @doc """
   What a key press takes from the composer now: the text no earlier press has taken (`DraftSave.unsubmitted/2`), expanded and raw, and the composer marker.
@@ -2116,6 +2258,8 @@ defmodule MingaEditor.Agent.DraftWorkflow do
        when outcome in [:queue_refused, :queue_receipt_unconfirmed, :queue_not_ready],
        do: report(state, outcome)
 
+  defp report_inactive(state, :sent_older_draft, _label), do: report(state, :sent_older_draft)
+
   defp report_inactive(state, {:mention_failed, _message} = outcome, _label),
     do: report(state, outcome)
 
@@ -2245,6 +2389,9 @@ defmodule MingaEditor.Agent.DraftWorkflow do
 
     state |> NoticeWorkflow.publish(message) |> MingaEditor.schedule_render(16)
   end
+
+  defp report(state, :sent_older_draft),
+    do: NoticeWorkflow.publish(state, "The message was sent. Newer edits were kept.")
 
   defp report(state, :queued_older_draft),
     do: NoticeWorkflow.publish(state, "The submitted input was queued. Newer edits were kept.")

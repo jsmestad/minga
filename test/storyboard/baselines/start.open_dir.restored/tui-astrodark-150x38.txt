@@ -7,10 +7,10 @@
 ## text
  ▌  storyboard.ex
   / ❯ tmp ❯ minga-storyboard ❯ tui-150x38 ❯ start.open_dir.restored ❯ lib ❯ storyboard.ex
-   3  defmodule Storyboard do                                             │   1  defmodule Storyboard do
+▾  3  defmodule Storyboard do                                             │▾  1  defmodule Storyboard do
    2    @moduledoc "A small file every storyboard scenario starts in."    │   1    @moduledoc "A small file every storyboard scenario starts in."
    1                                                                      │   2
-   4    def greet(name) do                                                │   3    def greet(name) do
+▾  4    def greet(name) do                                                │▾  3    def greet(name) do
    1    │ "Hello, " <> name                                               │   4    │ "Hello, " <> name
    2    end                                                               │   5    end
    3  end                                                                 │   6  end
@@ -60,7 +60,8 @@
 1 70-72 #adb0bb #1a1d23 -
 1 73-75 #3a3e47 #1a1d23 -
 1 76-149 #adb0bb #1a1d23 -
-2 0-5 #858892 #1a1d23 -
+2 0-1 #595c66 #1a1d23 -
+2 2-5 #adb0bb #1a1d23 -
 2 6-14 #dd97f1 #1a1d23 bold
 2 15-15 #adb0bb #1a1d23 -
 2 16-25 #dfab25 #1a1d23 -
@@ -68,7 +69,8 @@
 2 27-28 #dd97f1 #1a1d23 bold
 2 29-73 #adb0bb #1a1d23 -
 2 74-74 #696c76 #1a1d23 -
-2 75-80 #adb0bb #1a1d23 bold
+2 75-76 #595c66 #1a1d23 bold
+2 77-80 #adb0bb #1a1d23 -
 2 81-89 #dd97f1 #1a1d23 bold
 2 90-90 #adb0bb #1a1d23 -
 2 91-100 #dfab25 #1a1d23 -
@@ -93,7 +95,8 @@
 4 74-74 #696c76 #1a1d23 -
 4 75-80 #858892 #1a1d23 -
 4 81-149 #adb0bb #1a1d23 -
-5 0-5 #adb0bb #1e222a bold
+5 0-1 #595c66 #1e222a bold
+5 2-5 #adb0bb #1a1d23 -
 5 6-7 #adb0bb #1e222a -
 5 8-10 #dd97f1 #1a1d23 bold
 5 11-11 #adb0bb #1e222a -
@@ -105,8 +108,8 @@
 5 24-25 #dd97f1 #1a1d23 bold
 5 26-73 #adb0bb #1a1d23 -
 5 74-74 #696c76 #1a1d23 -
-5 75-80 #858892 #1a1d23 -
-5 81-82 #adb0bb #1a1d23 -
+5 75-76 #595c66 #1a1d23 -
+5 77-82 #adb0bb #1a1d23 -
 5 83-85 #dd97f1 #1a1d23 bold
 5 86-86 #adb0bb #1a1d23 -
 5 87-91 #5eb7ff #1a1d23 -

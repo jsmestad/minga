@@ -20,21 +20,21 @@
   },
   "platform_specific": {
     "frontend": "tui",
-    "reason": "the shared terminal empty list keeps a one-column trailing inset, so a cut line ends before the border; macOS lays its empty state out natively"
+    "reason": "fold marks draw now that the parse says when it is complete (#4337); macOS baselines record no fold marks, and the 80x24 empty-list inset is terminal only"
   },
   "scenario": "start.open_dir.restored",
   "tui": {
-    "commit": "dddc29e8cff1538ce3490d400103180d32e73f51-dirty",
+    "commit": "1aef18e78943df542633b1e8e28b6da4977aaf23-dirty",
     "files": {
-      "tui-astrodark-120x40.txt": "946c3ca1ccf71b2217324622ffb293ffe12e1628a4e895afa9ac5ff893c46a87",
-      "tui-astrodark-150x38.txt": "1754dd1d93f02f4a0fed570fa87e4c66731f1e24eb41484217482540e9694b4f",
-      "tui-astrodark-80x24.txt": "da7344c1a752d76111fa0b5bb898560c102aa70a4007c98f666468dc9d28c079",
-      "tui-catppuccin_frappe-120x40.txt": "9c381c4359a568857e04b95db431664e94420cceb98cdd3fe135ae7e77919651",
-      "tui-catppuccin_frappe-150x38.txt": "0f63ae6bd7dd369666b1c9770e11e8e7e3b760e51ae7d8687600d4bfc2961003",
-      "tui-catppuccin_frappe-80x24.txt": "fc42d95efe1ef554b1fc2fdcd1ba83790f147479db1900adc253fad9337ae4bf",
-      "tui-catppuccin_latte-120x40.txt": "fb21a56e1d18e93059145dd870ee02c066bb71d0a1e60f4e3ef8a8dd3c770ddd",
-      "tui-catppuccin_latte-150x38.txt": "80cc8f9659105f72956c9779b6dbbb49ed94f304c3f0aef962c5014b1648a99e",
-      "tui-catppuccin_latte-80x24.txt": "bf986ebf1c21d15f6e5cefc19813f1ce6ebeecfb74f05fe807c45f75f0a6429a"
+      "tui-astrodark-120x40.txt": "a4ad363e170fe06c5b1fd22347ec6544ab18ff8bf0ff486b15c5eaf2a6bf41ca",
+      "tui-astrodark-150x38.txt": "6a00c21d1d02750a6b4fdfbdae75b066014fd1bd3b0a403891f34144bb02968f",
+      "tui-astrodark-80x24.txt": "ade926d0885e0dd82f17542b758055fb52918c6fc0e01e9330787f2e66202533",
+      "tui-catppuccin_frappe-120x40.txt": "00a3100cd09f191371a44eb13605692123502cdd264608ce4726f92d3fbd2fc3",
+      "tui-catppuccin_frappe-150x38.txt": "eb4ef907a86f1b603c24c6d63b514bfe57c9a444ea03f4364936764adde4f159",
+      "tui-catppuccin_frappe-80x24.txt": "c4c392a2e4d5917daa4b17781b6b28918def268e842a95afe4ddc0c33ef46f17",
+      "tui-catppuccin_latte-120x40.txt": "0c91cef712283e945509389e151169fd5270726f1ce19e173caef56f5ba5959c",
+      "tui-catppuccin_latte-150x38.txt": "5dcda2f581d0e27d7f99e34c21ca6fcec9d0ee320c93035bdc37cad4f5b02498",
+      "tui-catppuccin_latte-80x24.txt": "b4cc46e4f741fc9007f083c75dbefbd4afb568e1a202a9997e958b103eefa1f8"
     }
   }
 }

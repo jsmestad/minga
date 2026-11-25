@@ -20,7 +20,7 @@
   },
   "platform_specific": {
     "frontend": "tui",
-    "reason": "the shared terminal empty list keeps a one-column trailing inset, so a cut line ends before the border; macOS lays its empty state out natively"
+    "reason": "fold marks draw now that the parse says when it is complete (#4337); macOS baselines record no fold marks, and the 80x24 empty-list inset is terminal only"
   },
   "scenario": "minga.approval.diff",
   "tui": {

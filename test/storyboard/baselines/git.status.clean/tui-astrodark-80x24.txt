@@ -6,10 +6,10 @@
 # cursor: 1,6
 ## text
  ▌  storyboard.ex
-git main  ahead 2   │   1  defmodule Storyboard do
+git main  ahead 2   │▾  1  defmodule Storyboard do
                     │   1    @moduledoc "A small file every storyboard scenario
    ● Nothing to     │   2
-     commit on      │   3    def greet(name) do
+     commit on      │▾  3    def greet(name) do
      main.          │   4    │ "Hello, " <> name
    2 commits to     │   5    end
    push.            │   6  end
@@ -35,7 +35,8 @@ git main  ahead 2   │   1  defmodule Storyboard do
 0 2-79 #adb0bb #1a1d23 -
 1 0-19 #595c66 #111317 bold
 1 20-20 #3a3e47 #1a1d23 -
-1 21-26 #adb0bb #1e222a bold
+1 21-22 #595c66 #1e222a bold
+1 23-26 #adb0bb #1a1d23 -
 1 27-35 #dd97f1 #1a1d23 bold
 1 36-36 #adb0bb #1e222a -
 1 37-46 #dfab25 #1a1d23 -
@@ -59,8 +60,8 @@ git main  ahead 2   │   1  defmodule Storyboard do
 4 3-13 #adb0bb #16181d bold
 4 14-19 #adb0bb #16181d -
 4 20-20 #3a3e47 #1a1d23 -
-4 21-26 #858892 #1a1d23 -
-4 27-28 #adb0bb #1a1d23 -
+4 21-22 #595c66 #1a1d23 -
+4 23-28 #adb0bb #1a1d23 -
 4 29-31 #dd97f1 #1a1d23 bold
 4 32-32 #adb0bb #1a1d23 -
 4 33-37 #5eb7ff #1a1d23 -

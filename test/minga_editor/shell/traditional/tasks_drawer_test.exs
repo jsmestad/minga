@@ -77,6 +77,18 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerTest do
     end
   end
 
+  test "an answer key held with Control or Alt answers nothing", %{ctx: ctx} do
+    FakeTaskSession.start(ctx.editor, "Add tests", :needs_you, observer: self())
+    send_keys_sync(ctx, "<Space>aa")
+    send_keys_sync(ctx, "<C-y>")
+    # Alt (0x04) held with n, as the frontends send it.
+    send(ctx.editor, {:minga_input, {:key_press, ?n, 0x04}})
+    _ = drawer(ctx)
+
+    refute_received {:fake_task_answered, _pid, _decision}
+    assert TasksDrawer.selected(drawer(ctx)).state == :needs_you
+  end
+
   test "esc closes the drawer and leaves the request pending", %{ctx: ctx} do
     FakeTaskSession.start(ctx.editor, "Add tests", :needs_you, observer: self())
     send_keys_sync(ctx, "<Space>aa")

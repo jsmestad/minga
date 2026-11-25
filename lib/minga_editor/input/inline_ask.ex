@@ -82,8 +82,11 @@ defmodule MingaEditor.Input.InlineAsk do
        when codepoint in [?j, ?k],
        do: Overlay.update(state, InlineAsk.scroll(ask, scroll_delta(codepoint)), spec(opts))
 
-  defp handle_inline_key(state, %InlineAsk{phase: :input} = ask, 13, _modifiers, opts),
-    do: Overlay.submit(state, ask, "Type a question first", spec(opts))
+  # Enter held with Control, Alt or Command is not bound here, so it does nothing: Esc then Enter that arrive together
+  # are Alt+Enter in a terminal without enhanced key reporting, and must not send what the person meant to drop.
+  defp handle_inline_key(state, %InlineAsk{phase: :input} = ask, 13, modifiers, opts)
+       when Bitwise.band(modifiers, 0x0E) == 0,
+       do: Overlay.submit(state, ask, "Type a question first", spec(opts))
 
   defp handle_inline_key(state, %InlineAsk{phase: :input} = ask, codepoint, _modifiers, opts)
        when codepoint in [127, 8],

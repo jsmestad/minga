@@ -276,6 +276,78 @@ defmodule MingaEditor.Agent.DraftSaveTest do
       assert DraftSave.keep_held(reissued, nil).held_presses == []
     end
 
+    test "a send that is out holds every press in every request tag, and nothing runs until it is answered" do
+      for {tag, save} <- requests(), press <- [queue_press("p"), send_press("p")] do
+        ref = make_ref()
+        assert {:ok, sending} = DraftSave.begin_send(save, ref, "taken")
+        assert DraftSave.sending?(sending), "#{tag} must show its send"
+
+        assert {:ok, held} = DraftSave.hold_press(sending, press),
+               "#{tag} must hold a #{elem(press, 0)} behind its send"
+
+        assert DraftSave.release_held_press(held) == :none, "#{tag} must wait for the answer"
+        assert DraftSave.submitted(held) == ["taken", "p"]
+        assert DraftSave.unsubmitted(held, "takenpmore") == "more"
+
+        assert :pending = DraftSave.begin_send(sending, make_ref(), "again")
+
+        assert :pending =
+                 DraftSave.begin_queue(sending, make_ref(), @marker, {1, "t", :steering}, "q")
+
+        assert :stale = DraftSave.send_answered(held, make_ref())
+
+        assert {:ok, answered} = DraftSave.send_answered(held, ref)
+        refute DraftSave.sending?(answered)
+        assert answered.request == save.request
+        assert answered.held_presses == [press]
+      end
+    end
+
+    test "only the text a send or a queue in flight took is left out; held text stays" do
+      {:ok, sending} = DraftSave.begin_send(ready(), make_ref(), "taken")
+      {:ok, held} = DraftSave.hold_press(sending, send_press("next"))
+
+      assert DraftSave.not_in_flight(held, "takennext more") == "next more"
+      assert DraftSave.not_in_flight(held, "edited") == "edited"
+      assert DraftSave.not_in_flight(queueing("queued"), "queued more") == " more"
+      assert DraftSave.not_in_flight(ready(), "all of it") == "all of it"
+      assert DraftSave.not_in_flight(nil, "all of it") == "all of it"
+    end
+
+    test "a send that takes attachments holds a save, a recall, an attachment and a removal" do
+      attached = %{ready() | attachments: [:an_attachment]}
+      {:ok, sending} = DraftSave.begin_send(attached, make_ref(), "taken")
+      marker = {0, {0, 9}}
+
+      assert :pending = DraftSave.begin_save(sending, make_ref(), marker)
+      assert :pending = DraftSave.begin_recall(sending, make_ref(), marker)
+      assert :pending = DraftSave.begin_attachment(sending, make_ref(), marker)
+      assert :pending = DraftSave.begin_removal(sending, make_ref(), marker, :any)
+
+      # A send without attachments leaves the draft free to save what is typed meanwhile.
+      {:ok, plain} = DraftSave.begin_send(ready(), make_ref(), "taken")
+      assert {:ok, 1, _saving} = DraftSave.begin_save(plain, make_ref(), marker)
+    end
+
+    test "an answered send runs the press behind it once the draft is ready" do
+      ref = make_ref()
+      {:ok, sending} = DraftSave.begin_send(ready(), ref, "first")
+      {:ok, held} = DraftSave.hold_press(sending, send_press("second"))
+      {:ok, answered} = DraftSave.send_answered(held, ref)
+
+      assert {:run, press, %{held_presses: []}} = DraftSave.release_held_press(answered)
+      assert press == send_press("second")
+    end
+
+    test "a load issued again keeps the send that is out" do
+      ref = make_ref()
+      {:ok, sending} = DraftSave.begin_send(requests().loading, ref, "taken")
+      reissued = DraftSave.loading({self(), "record"}, self(), make_ref(), @marker)
+
+      assert {:ok, _answered} =
+               DraftSave.send_answered(DraftSave.keep_held(reissued, sending), ref)
+    end
+
     test "a save moved to a replacement writer leaves its presses ready to run" do
       %{saving: saving} = requests()
       {:ok, held} = DraftSave.hold_press(saving, queue_press("p"))

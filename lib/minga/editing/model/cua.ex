@@ -105,8 +105,8 @@ defmodule Minga.Editing.Model.CUA do
   #
   # Modifier bit flags (matching the port protocol):
   #   bit 0 (1)  = Shift
-  #   bit 1 (2)  = Alt/Option
-  #   bit 2 (4)  = Ctrl
+  #   bit 1 (2)  = Ctrl
+  #   bit 2 (4)  = Alt/Option
   #   bit 3 (8)  = Super/Cmd
   #
   # Special codepoints (matching libvaxis / port protocol encoding):
@@ -115,8 +115,9 @@ defmodule Minga.Editing.Model.CUA do
   #   0x0D = Enter/Return, 0x1B = Escape, 0x09 = Tab
 
   @shift 1
-  @ctrl 4
   @cmd 8
+  # Control, Alt and Command: a key held with any of them is a chord, never text.
+  @chord_mods 0x0E
 
   @up 0xF700
   @down 0xF701
@@ -276,8 +277,8 @@ defmodule Minga.Editing.Model.CUA do
     {[], clear_selection(state)}
   end
 
-  # Ctrl+keys that should be ignored (let overlays handle them)
-  defp dispatch_key(state, _cp, mods) when Bitwise.band(mods, @ctrl) != 0 do
+  # A chord no clause above handles is ignored, so overlays can handle it and its letter is never typed.
+  defp dispatch_key(state, _cp, mods) when Bitwise.band(mods, @chord_mods) != 0 do
     {[], state}
   end
 

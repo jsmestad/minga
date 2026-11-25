@@ -27,6 +27,9 @@ defmodule MingaEditor.Agent.Tasks.Entry do
   @typedoc "What one of the task's tools reported when it finished: the tool's name and its result."
   @type output :: {name :: String.t(), result :: String.t()}
 
+  @typedoc "The turn a task's session is working on, as its session names it for Stop; nil while no turn is active."
+  @type stop_target :: {record_id :: String.t(), request_id :: String.t()}
+
   @typedoc "The design-token state a task shows, or nil for a task that has not started work."
   @type state :: :needs_you | :working | :waiting | :failed | :done | :stopped
 
@@ -44,9 +47,9 @@ defmodule MingaEditor.Agent.Tasks.Entry do
           activity: Activity.t(),
           failure: String.t() | nil,
           waiting: waiting() | nil,
+          stop_target: stop_target() | nil,
           turns: non_neg_integer(),
           worked?: boolean(),
-          stop_target: {String.t(), String.t()} | nil,
           outputs: [output()],
           alert: alert() | nil,
           started_at: integer(),
@@ -68,9 +71,9 @@ defmodule MingaEditor.Agent.Tasks.Entry do
     activity: %Activity{},
     failure: nil,
     waiting: nil,
+    stop_target: nil,
     turns: 0,
     worked?: false,
-    stop_target: nil,
     outputs: [],
     alert: nil,
     subagents: []
@@ -117,6 +120,11 @@ defmodule MingaEditor.Agent.Tasks.Entry do
   Events the task does not show are ignored, so the caller can pass every event the session sends.
   """
   @spec observe(t(), term(), integer()) :: t()
+  # The turn to stop is bookkeeping, not progress: it does not move the task's last change.
+  def observe(%__MODULE__{} = entry, {:stop_target_changed, target}, _now)
+      when is_nil(target) or tuple_size(target) == 2,
+      do: %{entry | stop_target: target}
+
   def observe(%__MODULE__{} = entry, event, now) do
     case apply_event(entry, event, now) do
       ^entry -> entry
@@ -149,9 +157,6 @@ defmodule MingaEditor.Agent.Tasks.Entry do
         outputs: record_output(entry.outputs, ended)
     }
   end
-
-  defp apply_event(entry, {:stop_target_changed, target}, _now),
-    do: %{entry | stop_target: target}
 
   defp apply_event(entry, {:tool_interrupted, id}, now) do
     %{
@@ -242,6 +247,7 @@ defmodule MingaEditor.Agent.Tasks.Entry do
         approval: nil,
         question: nil,
         waiting: nil,
+        stop_target: nil,
         activity: Activity.finish_turn(entry.activity),
         subagents: Subagent.stop_running(entry.subagents, now),
         changed_at: now
