@@ -343,6 +343,7 @@ defmodule MingaEditor do
     EventBus.subscribe(:file_watcher_ready, events_registry)
     EventBus.subscribe(:buffer_opened, events_registry)
     EventBus.subscribe(:buffer_closed, events_registry)
+    EventBus.subscribe(:buffer_crashed, events_registry)
 
     # Refresh file tree state when buffers, project files, git, diagnostics, or project roots change.
     EventBus.subscribe(:buffer_saved, events_registry)
