@@ -1439,54 +1439,6 @@ kbd {
   color: var(--text);
 }
 
-/* Inline themed architecture diagrams */
-
-.diagram-figure {
-  margin: 1.75rem 0 2.25rem;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-top: 2px solid var(--border-strong);
-  overflow: hidden;
-}
-
-.diagram-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.6rem 1rem;
-  background: var(--bg-subtle);
-  border-bottom: 1px solid var(--border);
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  color: var(--text-muted);
-}
-
-.diagram-canvas {
-  padding: 1.1rem;
-  overflow-x: auto;
-}
-
-.diagram-svg {
-  width: 100%;
-  min-width: 640px;
-  height: auto;
-  display: block;
-}
-
-.diagram-svg rect {
-  rx: 0;
-  ry: 0;
-}
-
-.diagram-caption {
-  padding: 0.75rem 1rem;
-  border-top: 1px solid var(--border);
-  font-size: 0.86rem;
-  color: var(--text-muted);
-  background: var(--bg-subtle);
-}
-
 /* Hairline numbered walkthrough steps (no pill badges) */
 
 .step-list {
@@ -1708,18 +1660,6 @@ td:first-child {
   color: var(--accent);
 }
 
-.scroll-hint {
-  display: none;
-  position: sticky;
-  left: 0;
-  padding: 0.4rem 0.85rem;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-subtle);
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--text-muted);
-}
-
 /* Defensive min-width: 0 so wide code blocks, SVGs, or tables never widen grid/flex ancestors. */
 .section-header > *,
 .split-layout > *,
@@ -1733,8 +1673,7 @@ td:first-child {
 .spine-figure,
 .code-card,
 .code-tabs,
-.table-wrap,
-.diagram-figure {
+.table-wrap {
   min-width: 0;
 }
 
@@ -2057,23 +1996,6 @@ td:first-child {
   }
   .essay-section {
     margin-bottom: 2.5rem;
-  }
-  .diagram-bar {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.2rem;
-    padding: 0.6rem 0.85rem;
-  }
-  .diagram-canvas {
-    padding: 0.75rem;
-    -webkit-overflow-scrolling: touch;
-  }
-  .diagram-caption {
-    padding: 0.7rem 0.85rem;
-    font-size: 0.83rem;
-  }
-  .scroll-hint {
-    display: block;
   }
   .table-wrap {
     -webkit-overflow-scrolling: touch;
@@ -4908,39 +4830,65 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   color: var(--accent);
 }
 
-/* Architecture: Live Side-by-Side Typing Isolation Demo */
+/* Architecture: fault simulation (same keys, two editors) */
 
-.iso-input-bar {
+.sim-label {
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--needs);
+  color: var(--needs);
+  font-weight: 600;
+}
+
+.demo-steps {
+  padding: 0.85rem 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.86rem;
+  color: var(--text-secondary);
+}
+
+.story-box .demo-steps p,
+.story-box .demo-steps ol {
+  margin: 0 0 0.6rem;
+  font-size: inherit;
+}
+
+.story-box .demo-steps ol {
+  padding-left: 1.4rem;
+}
+
+.story-box .demo-steps .demo-steps-title {
+  margin-top: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.story-box .demo-steps > :last-child {
+  margin-bottom: 0;
+}
+
+.iso-controls[hidden],
+.st-controls[hidden] {
+  display: none;
+}
+
+.demo-steps.is-enhanced {
+  display: none;
+}
+
+.iso-controls,
+.st-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.6rem 0.85rem;
-  padding: 0.75rem 1rem;
+  gap: 0.6rem 0.75rem;
+  padding: 0.85rem 1rem;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
 }
 
-.iso-input-bar label {
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
-.iso-input {
-  flex: 1;
-  min-width: 14rem;
-  padding: 0.45rem 0.7rem;
-  border: 1px solid var(--border-strong);
-  background: var(--bg-elevated);
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
-}
-
-.iso-input:focus {
-  outline: none;
-  border-color: var(--accent);
+.iso-controls .btn[aria-pressed="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .iso-compare {
@@ -4955,7 +4903,6 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  transition: box-shadow 140ms ease;
 }
 
 .iso-editor:last-child {
@@ -4987,9 +4934,26 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   color: #ffffff;
 }
 
+.iso-badges {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* The panes are always Frappé-dark, so their badges keep Frappé colours in the light theme too. */
+.iso-editor .topo-pill.is-ok { border-color: #a6d189; color: #a6d189; }
+.iso-editor .topo-pill.is-warn { border-color: #ef9f76; color: #ef9f76; }
+.iso-editor .topo-pill.is-fail { border-color: #e78284; color: #e78284; }
+
+.iso-timer {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: #e78284;
+}
+
 .iso-ed-body {
   padding: 1.05rem 0.9rem;
-  min-height: 92px;
+  min-height: 104px;
   font-family: var(--font-mono);
   font-size: 0.78rem;
   line-height: 1.6;
@@ -4997,15 +4961,15 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   flex-direction: column;
   justify-content: center;
   gap: 0.5rem;
-  overflow-x: auto;
+  min-width: 0;
 }
 
 .iso-code-line {
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
-.iso-code-line.is-frozen {
+.iso-editor.is-frozen .iso-code-line {
   opacity: 0.48;
 }
 
@@ -5027,12 +4991,17 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   50% { opacity: 0.15; }
 }
 
+.iso-ed-body .iso-stall,
+.iso-ed-body .iso-dead {
+  margin: 0;
+  font-size: 0.72rem;
+}
+
 .iso-stall {
   padding: 0.35rem 0.55rem;
   background: rgba(231, 130, 132, 0.18);
   border-left: 2px solid #e78284;
   color: #f4b8e4;
-  font-size: 0.72rem;
 }
 
 .iso-dead {
@@ -5040,44 +5009,63 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   background: rgba(231, 130, 132, 0.22);
   border: 1px solid #e78284;
   color: #ffffff;
-  font-size: 0.75rem;
 }
 
 .iso-ed-foot {
   padding: 0.5rem 0.9rem;
   background: #232634;
   border-top: 1px solid #414559;
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: 0.74rem;
   color: #a5adce;
 }
 
-.iso-notice {
-  padding: 0.7rem 1rem;
-  border-top: 1px solid var(--border);
-  background: var(--bg-subtle);
-  font-size: 0.84rem;
-  color: var(--text-secondary);
-}
-
-/* Architecture: Airy Syntax-Highlighted Staged Overlay Stepper */
-
-.st-step-row {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+.story-box .iso-notice,
+.story-box .st-foot {
+  margin: 0;
+  padding: 0.8rem 1rem;
   border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+  font-size: 0.9rem;
+  color: var(--text);
 }
 
-.st-step-row .seg-btn {
-  border: 0;
-  border-right: 1px solid var(--border);
-  padding: 0.7rem 0.75rem;
-  text-align: left;
-  white-space: nowrap;
+/* Architecture: staged edit stepper */
+
+.st-controls .btn[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: default;
 }
 
-.st-step-row .seg-btn:last-child {
-  border-right: 0;
+.st-count {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.st-choice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.6rem;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.86rem;
+  color: var(--text);
+}
+
+.st-choice[hidden] {
+  display: none;
+}
+
+.st-choice .seg-btn {
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.st-choice .seg-btn.is-active {
+  background: var(--cta-bg);
+  color: var(--cta-text);
 }
 
 .st-clean-layout {
@@ -5097,9 +5085,6 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 }
 
 .st-ed-bar {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
   padding: 0.5rem 0.9rem;
   background: #292c3c;
   border-bottom: 1px solid #414559;
@@ -5110,6 +5095,7 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 .st-ed-body {
   padding: 0.85rem 0;
   flex: 1;
+  min-height: 9.2rem;
   overflow-x: auto;
 }
 
@@ -5118,24 +5104,26 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   grid-template-columns: 3.1rem minmax(0, 1fr);
   padding: 0.14rem 0.9rem 0.14rem 0.45rem;
   line-height: 1.62;
-  white-space: pre;
+  min-height: 1.9em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .st-row.is-add {
   background: rgba(166, 209, 137, 0.14);
 }
 
+.st-row.is-del {
+  background: rgba(231, 130, 132, 0.16);
+}
+
+.st-row.is-del .st-code {
+  text-decoration: line-through;
+  text-decoration-color: rgba(231, 130, 132, 0.8);
+}
+
 .st-row.is-you {
   background: rgba(140, 170, 238, 0.16);
-}
-
-.st-row.is-conflict {
-  background: rgba(231, 130, 132, 0.18);
-}
-
-.st-cmark {
-  color: #e78284;
-  font-weight: 600;
 }
 
 .st-ln {
@@ -5143,6 +5131,33 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   padding-right: 0.75rem;
   color: #737994;
   user-select: none;
+}
+
+.st-row.is-add .st-ln,
+.st-key.is-add { color: #a6d189; }
+.st-row.is-del .st-ln,
+.st-key.is-del { color: #e78284; }
+.st-row.is-you .st-ln,
+.st-key.is-you { color: #8caaee; }
+
+.st-editor .st-legend {
+  margin: 0;
+  padding: 0.45rem 0.9rem;
+  border-top: 1px solid #414559;
+  background: #232634;
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  color: #a5adce;
+}
+
+.st-key {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  margin-left: 0.6rem;
+}
+
+.st-key:first-child {
+  margin-left: 0;
 }
 
 .st-ledger {
@@ -5160,18 +5175,6 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   flex-direction: column;
   align-items: flex-start;
   gap: 0.35rem;
-}
-
-.st-foot {
-  padding: 0.8rem 1rem;
-  border-top: 1px solid var(--border);
-  background: var(--bg-subtle);
-  font-size: 0.86rem;
-  color: var(--text-secondary);
-}
-
-.st-foot strong {
-  color: var(--text);
 }
 
 /* Extending: the config and package cards sit side by side and may run wider than the essay column. */
@@ -5236,15 +5239,6 @@ td [data-status="planned"]:not([data-pill="off"])::before {
     border-top: 1px solid var(--border);
     flex-direction: row;
     flex-wrap: wrap;
-  }
-}
-
-@media (max-width: 680px) {
-  .st-step-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .st-step-row .seg-btn {
-    border-bottom: 1px solid var(--border);
   }
 }
 

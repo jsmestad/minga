@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Architecture &amp; The Spine: Minga</title>
-  <meta name="description" content="How Minga separates a concurrent Erlang VM core from native macOS, terminal, and tree-sitter OS processes, stages agent edits safely, and keeps both frontends in lockstep under ADR-0006.">
+  <title>Architecture, why it is safe: Minga</title>
+  <meta name="description" content="Why you can let Minga work in your repository: a slow language server or a busy agent does not freeze your typing, and in a project you open in the editor, an edit you approve stays staged until you publish. Two simulations, and the limits.">
   <link rel="canonical" href="https://mingacode.dev/architecture">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#303446" media="(prefers-color-scheme: dark)">
@@ -13,18 +13,18 @@
   <meta property="og:locale" content="en_US">
   <meta property="og:type" content="article">
   <meta property="og:url" content="https://mingacode.dev/architecture">
-  <meta property="og:title" content="Architecture &amp; The Spine: Minga">
-  <meta property="og:description" content="How Minga separates a concurrent Erlang VM core from native macOS, terminal, and tree-sitter OS processes, stages agent edits safely, and keeps both frontends in lockstep.">
+  <meta property="og:title" content="Architecture, why it is safe: Minga">
+  <meta property="og:description" content="Why you can let Minga work in your repository: a slow language server or a busy agent does not freeze your typing, and in a project you open in the editor, an edit you approve stays staged until you publish. Two simulations, and the limits.">
   <meta property="og:image" content="https://mingacode.dev/assets/og-minga.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Architecture &amp; The Spine: Minga">
-  <meta name="twitter:description" content="How Minga separates a concurrent Erlang VM core from native macOS, terminal, and tree-sitter OS processes, stages agent edits safely, and keeps both frontends in lockstep.">
+  <meta name="twitter:title" content="Architecture, why it is safe: Minga">
+  <meta name="twitter:description" content="Why you can let Minga work in your repository: a slow language server or a busy agent does not freeze your typing, and in a project you open in the editor, an edit you approve stays staged until you publish. Two simulations, and the limits.">
   <meta name="twitter:image" content="https://mingacode.dev/assets/og-minga.png">
   <meta name="twitter:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
-  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Architecture & The Spine: Minga","description":"How Minga separates a concurrent Erlang VM core from native macOS, terminal, and tree-sitter OS processes, stages agent edits safely, and keeps both frontends in lockstep under ADR-0006.","url":"https://mingacode.dev/architecture","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Architecture","item":"https://mingacode.dev/architecture"}]}]}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Architecture, why it is safe: Minga","description":"Why you can let Minga work in your repository: a slow language server or a busy agent does not freeze your typing, and in a project you open in the editor, an edit you approve stays staged until you publish. Two simulations, and the limits.","url":"https://mingacode.dev/architecture","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Architecture","item":"https://mingacode.dev/architecture"}]}]}</script>
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
@@ -67,258 +67,189 @@
   <main id="main">
     <header class="essay-hero">
       <div class="container">
-        <p class="section-index"><span>ARCHITECTURE</span> Runtime &amp; Clients</p>
-        <h1>Architecture &amp; The Spine</h1>
-        <p class="essay-subtitle">Minga puts concurrency, isolation, state ownership, and UI semantics in one Erlang VM (BEAM) core, while separate native OS processes handle macOS rendering, terminal rendering, and syntax parsing with zero shared memory.</p>
-        <nav class="essay-toc" aria-label="Sections">
-          <a href="#process-map">1. Process &amp; client boundaries</a>
-          <a href="#buffer-aware-agents">2. Staged agent edits</a>
-          <a href="#executable-parity">3. Frontend parity</a>
-          <a href="#tradeoffs">4. Guarantees &amp; tradeoffs</a>
-          <a href="#adrs">5. Key ADRs (0001-0008)</a>
-        </nav>
+        <p class="section-index"><span>ARCHITECTURE</span> Why it is safe</p>
+        <h1>A slow language server does not freeze your typing. An approved edit waits for you.</h1>
+        <p class="essay-subtitle">You are about to let an agent work in your repository, so two things have to hold. A slow language server or a busy agent does not freeze your typing. And in a project you open in the editor, an edit you approve is staged: the file on disk and your open buffer keep the old text until you publish.</p>
+        <p class="essay-subtitle">Neither promise is unlimited. An extension command that hangs does block your keys, and a shell command or a Git commit the agent runs is not a staged edit. This page shows both promises working, then lists where they stop.</p>
+        <div class="actions">
+          <a class="btn btn-primary" href="#fault-demo">Slow a language server and watch</a>
+        </div>
       </div>
     </header>
 
     <article class="essay-body">
       <div class="container">
-        <section class="essay-section" id="process-map">
-          <h2>1. One concurrent core, thin native OS processes</h2>
-          <p>Minga uses four languages deliberately, each behind a strict OS process boundary so nothing shares memory across them. Elixir on the Erlang VM owns everything concurrent and stateful (open files, agent sessions, language servers, extensions, key scopes, theme roles, and modeline priority). Swift, Go, and Zig stay intentionally thin: Swift draws macOS with CoreText and Metal, Go draws the terminal with Bubble Tea and Lip Gloss, and Zig parses C tree-sitter grammars.</p>
+        <section class="essay-section" id="fault-demo">
+          <h2>When a language server is slow, or the parser crashes</h2>
+          <p>You ask for a completion and the language server takes three seconds to answer. In an editor that runs this work on the same loop that handles your keys, nothing you type appears until the answer comes back. Press the button to give both editors the same keys.</p>
 
-          <figure class="diagram-figure">
-            <div class="diagram-bar">
-              <span>Figure 1 · Process isolation &amp; client boundaries</span>
-              <span>Erlang VM &lt;-&gt; Native OS processes</span>
+          <div class="story-box iso-box" data-arch-fault-map>
+            <div class="story-bar">
+              <span class="sim-label">Simulation</span>
+              <span>The same keys, in two editors</span>
             </div>
-            <div class="scroll-hint" aria-hidden="true">Scroll diagram horizontally -&gt;</div>
-            <div class="diagram-canvas">
-              <svg class="diagram-svg" viewBox="0 0 880 412" role="img" aria-labelledby="fig1-title fig1-desc" xmlns="http://www.w3.org/2000/svg">
-                <title id="fig1-title">Minga architecture: Erlang VM core connected over pipes to macOS, terminal, and parser OS processes</title>
-                <desc id="fig1-desc">The Erlang VM isolates Editor Core, Open Files (one process per file), Agent Sessions, Language Servers and Extensions, and Crash-Safe Draft Services, plus Client Bridge and Headless Mode. Binary pipes connect to separate OS processes for the Swift and Metal macOS app, Go terminal client drawing the shared layout, and Zig syntax parser.</desc>
-                <defs>
-                  <marker id="arrow-accent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                    <path d="M 1 1 L 9 5 L 1 9 z" fill="var(--accent)"/>
-                  </marker>
-                  <marker id="arrow-muted" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                    <path d="M 1 1 L 9 5 L 1 9 z" fill="var(--text-muted)"/>
-                  </marker>
-                </defs>
-
-                <rect x="16" y="16" width="538" height="380" fill="var(--bg-subtle)" stroke="var(--accent-border)" stroke-width="1.4"/>
-                <text x="36" y="44" fill="var(--accent)" font-family="var(--font-mono)" font-size="11.5" font-weight="600" letter-spacing="0.04em">MINGA CORE · ERLANG VM (ELIXIR)</text>
-                <text x="36" y="62" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11.5">Separate lightweight processes, heaps, and one canonical state model</text>
-
-                <rect x="36" y="80" width="224" height="206" fill="var(--bg-elevated)" stroke="var(--accent-border)" stroke-width="1.15"/>
-                <text x="52" y="106" fill="var(--text)" font-family="var(--font-sans)" font-size="13.5" font-weight="600">Editor Core</text>
-                <text x="52" y="130" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Orders every keystroke,</text>
-                <text x="52" y="148" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">drawer, and buffer switch</text>
-                <text x="52" y="176" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Owns modeline priority,</text>
-                <text x="52" y="194" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">key scopes, and state words</text>
-                <text x="52" y="222" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Sibling renderer streams</text>
-                <text x="52" y="240" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">tokens to attached clients</text>
-                <text x="52" y="270" fill="var(--accent)" font-family="var(--font-mono)" font-size="10.5">Skipped in --headless mode</text>
-
-                <rect x="276" y="80" width="258" height="46" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1"/>
-                <text x="292" y="100" fill="var(--text)" font-family="var(--font-sans)" font-size="12.5" font-weight="600">Open Files (Buffers)</text>
-                <text x="292" y="117" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11">One isolated process and heap per file</text>
-
-                <rect x="276" y="134" width="258" height="46" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1"/>
-                <text x="292" y="154" fill="var(--text)" font-family="var(--font-sans)" font-size="12.5" font-weight="600">Agent Sessions</text>
-                <text x="292" y="171" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11">Tasks, subagent trees, approvals, staged diffs</text>
-
-                <rect x="276" y="188" width="258" height="46" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1"/>
-                <text x="292" y="208" fill="var(--text)" font-family="var(--font-sans)" font-size="12.5" font-weight="600">Language Servers, MCP &amp; Extensions</text>
-                <text x="292" y="225" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11">Crash-isolated; restarts spare open files</text>
-
-                <rect x="276" y="242" width="258" height="44" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1"/>
-                <text x="292" y="261" fill="var(--text)" font-family="var(--font-sans)" font-size="12.5" font-weight="600">Draft Durability &amp; Services</text>
-                <text x="292" y="277" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11">Persists staged edits across editor restarts</text>
-
-                <rect x="36" y="302" width="224" height="76" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1"/>
-                <text x="52" y="326" fill="var(--text)" font-family="var(--font-sans)" font-size="12.5" font-weight="600">Client Bridge</text>
-                <text x="52" y="345" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11">Streams structured UI updates</text>
-                <text x="52" y="362" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10.5">and keystrokes over binary pipes</text>
-
-                <rect x="276" y="302" width="258" height="76" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1"/>
-                <text x="292" y="326" fill="var(--text)" font-family="var(--font-sans)" font-size="12.5" font-weight="600">Headless Mode (minga --headless)</text>
-                <text x="292" y="345" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11">Attach remotely over Erlang distribution</text>
-                <text x="292" y="362" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10.5">Optional token-gated JSON-RPC gateway</text>
-
-                <line x1="554" y1="74" x2="618" y2="74" stroke="var(--accent)" stroke-width="1.5" marker-start="url(#arrow-accent)" marker-end="url(#arrow-accent)"/>
-                <text x="586" y="64" text-anchor="middle" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9.5">UI + input</text>
-
-                <line x1="554" y1="206" x2="618" y2="206" stroke="var(--accent)" stroke-width="1.5" marker-start="url(#arrow-accent)" marker-end="url(#arrow-accent)"/>
-                <text x="586" y="196" text-anchor="middle" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9.5">UI + input</text>
-
-                <line x1="554" y1="338" x2="618" y2="338" stroke="var(--text-muted)" stroke-width="1.5" marker-start="url(#arrow-muted)" marker-end="url(#arrow-muted)"/>
-                <text x="586" y="328" text-anchor="middle" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9.5">syntax</text>
-
-                <rect x="624" y="16" width="240" height="116" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1.15"/>
-                <text x="640" y="42" fill="var(--text)" font-family="var(--font-sans)" font-size="13" font-weight="600">macOS App (Swift + Metal)</text>
-                <text x="640" y="64" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Draws the shared layout:</text>
-                <text x="640" y="82" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">text, marks, smooth scroll</text>
-                <text x="640" y="112" fill="var(--accent)" font-family="var(--font-mono)" font-size="10.5">Same layout &amp; keys as TUI</text>
-
-                <rect x="624" y="148" width="240" height="116" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1.15"/>
-                <text x="640" y="174" fill="var(--text)" font-family="var(--font-sans)" font-size="13" font-weight="600">Terminal Client (Go)</text>
-                <text x="640" y="196" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">First-class Bubble Tea &amp;</text>
-                <text x="640" y="214" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Lip Gloss floating layers</text>
-                <text x="640" y="244" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10.5">Kitty keys, OSC 52, SSH</text>
-
-                <rect x="624" y="280" width="240" height="116" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1.15"/>
-                <text x="640" y="306" fill="var(--text)" font-family="var(--font-sans)" font-size="13" font-weight="600">Syntax Parser (Zig)</text>
-                <text x="640" y="328" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">50 compiled tree-sitter</text>
-                <text x="640" y="346" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">grammars in a separate process</text>
-                <text x="640" y="376" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10.5">Loads new grammars on demand</text>
-              </svg>
+            <div class="iso-controls" data-iso-controls hidden>
+              <button type="button" class="btn btn-primary" data-iso-fault="slow_server" aria-pressed="false"><span data-iso-label="start">Slow the language server for 3 s</span><span data-iso-label="next" hidden>Show what happens next</span><span data-iso-label="again" hidden>Run again</span></button>
+              <button type="button" class="btn" data-iso-fault="parser_crash" aria-pressed="false"><span data-iso-label="start">Crash the parser</span><span data-iso-label="next" hidden>Show what happens next</span><span data-iso-label="again" hidden>Crash it again</span></button>
             </div>
-            <figcaption class="diagram-caption">The BEAM owns modeline segment priority, theme roles, and key scopes so Swift and Go only draw native tokens. In headless mode, the editor and parser OS processes do not start.</figcaption>
-          </figure>
+            <p class="iso-notice" data-iso-caption aria-live="polite" hidden></p>
+            <div class="iso-compare">
+              <div class="iso-editor" data-iso-legacy>
+                <div class="iso-ed-head">
+                  <strong>Same-loop editor</strong>
+                  <span class="iso-badges">
+                    <span class="iso-timer" data-iso-timer></span>
+                    <span class="topo-pill is-ok" data-iso-show="rest">Ready</span>
+                    <span class="topo-pill is-fail" data-iso-show="slow-during" hidden>Frozen</span>
+                    <span class="topo-pill is-ok" data-iso-show="slow-after" hidden>Caught up</span>
+                    <span class="topo-pill is-fail" data-iso-show="crash-during crash-after" hidden>Exited</span>
+                  </span>
+                </div>
+                <div class="iso-ed-body">
+                  <div class="iso-code-line" data-iso-show="rest slow-during slow-after"><span data-iso-lcode>def retry_after(429), do: 250</span><span class="iso-caret"></span></div>
+                  <p class="iso-stall" data-iso-show="slow-during" hidden>Keys typed but not drawn: <span data-iso-queued>0</span></p>
+                  <p class="iso-dead" data-iso-show="crash-during crash-after" hidden>The editor process exited. Text you had not saved is gone.</p>
+                </div>
+                <div class="iso-ed-foot">Stands for an editor that runs this work on the same loop that handles your keys.</div>
+              </div>
+              <div class="iso-editor is-minga" data-iso-minga>
+                <div class="iso-ed-head">
+                  <strong>Minga</strong>
+                  <span class="iso-badges">
+                    <span class="topo-pill is-ok" data-iso-show="rest slow-during slow-after">Typing</span>
+                    <span class="topo-pill is-warn" data-iso-show="crash-during" hidden>Restarting the parser</span>
+                    <span class="topo-pill is-ok" data-iso-show="crash-after" hidden>Parser restarted</span>
+                  </span>
+                </div>
+                <div class="iso-ed-body">
+                  <div class="iso-code-line"><span data-iso-mcode>def retry_after(429), do: 250</span><span class="iso-caret is-alive"></span></div>
+                </div>
+                <div class="iso-ed-foot">Runs the language server client and the parser outside the process that handles your keys.</div>
+              </div>
+            </div>
+            <div class="demo-steps" data-iso-steps>
+              <p data-step="rest">Both editors get the same keys while one tool misbehaves.</p>
+              <p class="demo-steps-title">If the language server takes 3 seconds to answer</p>
+              <ol>
+                <li data-step="slow-during">The language server has not answered. On the left, your keys wait in a queue behind the request. On the right, Minga draws each key as it arrives, because the request went to another process.</li>
+                <li data-step="slow-after">The answer came back. The left editor drew the waiting keys in one jump. Minga had already drawn each one.</li>
+              </ol>
+              <p class="demo-steps-title">If the parser crashes</p>
+              <ol>
+                <li data-step="crash-during">The parser crashed. The left editor ran it in the same process, so the editor is gone. Minga runs the parser as a separate program: only the parser stopped, and you keep typing.</li>
+                <li data-step="crash-after">Minga started a new parser and gave it the buffer to read again. Your text and its highlighting stayed where they were the whole time. The left editor has to be reopened.</li>
+              </ol>
+            </div>
+          </div>
 
-          <div data-arch-fault-map></div>
+          <p>Minga does not run that work on the loop that handles your keys. One process takes your keys in order. The language server client, each agent session and the parser are separate processes, so a request to one of them is a message, and your next key does not wait for the server's answer. When a language server, an agent session, an extension or that key-handling process itself crashes, your open buffers stay as they were, because each buffer is its own process and none of those four owns it.</p>
+
+          <h3>Where this promise stops</h3>
+          <ul>
+            <li><strong>An extension command that hangs does block your keys.</strong> An extension's command runs inside the process that handles your keys, with no time limit. If it raises an error, Minga catches it and carries on. If it never returns, input waits. A command you declare in your own config runs as a separate task and does not block.</li>
+            <li><strong>A crash of the window or terminal client ends the session.</strong> Minga treats the client going away as a quit and shuts down. Agent edits that were staged are saved on every change and come back the next time you open the project.</li>
+            <li><strong>Not every crash is contained.</strong> A few shared services start before the buffers do, and a crash in one of them restarts everything started after it, buffers included. The four cases named above are the ones that leave buffers alone.</li>
+          </ul>
+          <p>The process map, the supervision tree and the wire protocol are in <a href="/docs/architecture.html">the Architecture reference</a>.</p>
         </section>
 
         <section class="essay-section" id="buffer-aware-agents">
-          <h2>2. How staged agent edits protect your open files</h2>
-          <p>Agent file tools in Minga have no blind filesystem write fallback. Approved edits land in an isolated staging overlay while your open buffers and working tree remain untouched until you explicitly publish or discard them.</p>
+          <h2>When Minga edits a file you are working in</h2>
+          <p>Minga rewrites a function while you fix a line in the same file. In a tool that writes straight to disk, the last write wins and one of you loses work. Step through what Minga does instead.</p>
 
-          <figure class="diagram-figure">
-            <div class="diagram-bar">
-              <span>Figure 2 · Staged edit, review, and recovery pipeline</span>
-              <span>Revision Check -&gt; Staging Overlay -&gt; 3-Way Merge</span>
+          <div class="story-box" data-staged-stepper>
+            <div class="story-bar">
+              <span class="sim-label">Simulation</span>
+              <span>One staged edit, from read to publish</span>
             </div>
-            <div class="scroll-hint" aria-hidden="true">Scroll diagram horizontally -&gt;</div>
-            <div class="diagram-canvas">
-              <svg class="diagram-svg" viewBox="0 0 880 318" role="img" aria-labelledby="fig2-title fig2-desc" xmlns="http://www.w3.org/2000/svg">
-                <title id="fig2-title">Staged agent edit pipeline with revision checks, diff review, three-way merge, and crash recovery</title>
-                <desc id="fig2-desc">Four stages left to right: 01 Revision-Checked Edit requiring a full read revision token, 02 Isolated Staging Overlay keeping open buffers and working tree untouched (materializing a temp copy only when shell tools run), 03 Diff Review for hunk-by-hunk accept or reject without stealing focus, and 04 Publish or Discard via three-way merge or conflict review. Below, your open buffer and disk stay untouched until publish, while crash-safe draft recovery persists staged edits outside the editor process so they survive crashes.</desc>
-                <defs>
-                  <marker id="arrow-flow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-                    <path d="M 1 1 L 9 5 L 1 9 z" fill="var(--accent)"/>
-                  </marker>
-                  <marker id="arrow-down" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-                    <path d="M 1 1 L 9 5 L 1 9 z" fill="var(--text-muted)"/>
-                  </marker>
-                </defs>
-
-                <rect x="16" y="22" width="182" height="136" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1.2"/>
-                <text x="32" y="46" fill="var(--accent)" font-family="var(--font-mono)" font-size="10.5" font-weight="600">01 · REVISION CHECK</text>
-                <text x="32" y="68" fill="var(--text)" font-family="var(--font-sans)" font-size="13" font-weight="600">Atomic file edit</text>
-                <text x="32" y="90" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Agent reads the full file</text>
-                <text x="32" y="108" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">and sends its revision token.</text>
-                <text x="32" y="138" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10">Stale edits reject cleanly</text>
-
-                <line x1="198" y1="90" x2="232" y2="90" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#arrow-flow)"/>
-
-                <rect x="238" y="22" width="188" height="136" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1.2"/>
-                <text x="254" y="46" fill="var(--accent)" font-family="var(--font-mono)" font-size="10.5" font-weight="600">02 · STAGING OVERLAY</text>
-                <text x="254" y="68" fill="var(--text)" font-family="var(--font-sans)" font-size="13" font-weight="600">Isolated fork</text>
-                <text x="254" y="90" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Edits stage off your working</text>
-                <text x="254" y="108" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">tree (temp copy for shell runs).</text>
-                <text x="254" y="138" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10">No blind disk writes</text>
-
-                <line x1="426" y1="90" x2="460" y2="90" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#arrow-flow)"/>
-
-                <rect x="466" y="22" width="188" height="136" fill="var(--accent-soft)" stroke="var(--accent-border)" stroke-width="1.4"/>
-                <text x="482" y="46" fill="var(--accent)" font-family="var(--font-mono)" font-size="10.5" font-weight="600">03 · DIFF REVIEW</text>
-                <text x="482" y="68" fill="var(--text)" font-family="var(--font-sans)" font-size="13" font-weight="600">Hunk-by-hunk review</text>
-                <text x="482" y="90" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Read-only viewer today;</text>
-                <text x="482" y="108" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Twist + *minga-review* next.</text>
-                <text x="482" y="138" fill="var(--accent)" font-family="var(--font-mono)" font-size="10">Background writes stay quiet</text>
-
-                <line x1="654" y1="90" x2="688" y2="90" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#arrow-flow)"/>
-
-                <rect x="694" y="22" width="170" height="136" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1.2"/>
-                <text x="710" y="46" fill="var(--accent)" font-family="var(--font-mono)" font-size="10.5" font-weight="600">04 · PUBLISH</text>
-                <text x="710" y="68" fill="var(--text)" font-family="var(--font-sans)" font-size="13" font-weight="600">3-way merge or drop</text>
-                <text x="710" y="90" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">SPC a p merges into open</text>
-                <text x="710" y="108" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">buffers &amp; disk with undo.</text>
-                <text x="710" y="138" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10">Overlap -&gt; conflict review</text>
-
-                <line x1="332" y1="158" x2="332" y2="204" stroke="var(--text-muted)" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#arrow-down)"/>
-
-                <rect x="16" y="208" width="182" height="92" fill="var(--bg-subtle)" stroke="var(--border)" stroke-width="1.15"/>
-                <text x="32" y="234" fill="var(--text)" font-family="var(--font-sans)" font-size="12.5" font-weight="600">Open Buffer &amp; Disk</text>
-                <text x="32" y="256" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Untouched until publish.</text>
-                <text x="32" y="278" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10">Your undo stays intact</text>
-
-                <rect x="238" y="208" width="626" height="92" fill="var(--bg-subtle)" stroke="var(--border)" stroke-width="1.15"/>
-                <text x="256" y="234" fill="var(--text)" font-family="var(--font-sans)" font-size="12.5" font-weight="600">Crash-Safe Draft Recovery (Independent of the Editor Process)</text>
-                <text x="256" y="256" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Survives editor restarts and crashes. Saves private atomic drafts with each file's base revision</text>
-                <text x="256" y="278" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10.5">~/.local/share/minga/staged_drafts · Restores unpublished edits on next start</text>
-              </svg>
+            <div class="st-controls" data-st-controls hidden>
+              <button type="button" class="btn" data-st-nav="back" aria-disabled="true">Back</button>
+              <button type="button" class="btn btn-primary" data-st-nav="next"><span data-st-show="1 2 3-clean 3-conflict">Next</span><span data-st-show="4-clean 4-conflict" hidden>Start over</span></button>
+              <span class="st-count">Step <span data-st-count>1</span> of 4</span>
             </div>
-            <figcaption class="diagram-caption">Ordinary quit stops if unpublished edits remain; force quits (<code>:qa!</code>, <code>:cq</code>, or <code>:q!</code>) discard on purpose. <span data-status="planned" data-since="v0.1.0">In v0.1.0, per-author undo keeps <code>u</code> / <code>⌘Z</code> separate from Minga's edits.</span></figcaption>
-          </figure>
+            <p class="st-foot" data-st-caption aria-live="polite" hidden></p>
+            <div class="st-choice" data-st-show="3-clean 3-conflict" role="group" aria-label="What if you edit the same line?" hidden>
+              <span>What if you edit the same line?</span>
+              <button type="button" class="seg-btn" data-st-conflict-mode="clean" aria-pressed="true">I edit another line</button>
+              <button type="button" class="seg-btn" data-st-conflict-mode="conflict" aria-pressed="false">I edit the same line</button>
+            </div>
+            <div class="st-clean-layout">
+              <div class="st-editor">
+                <div class="st-ed-bar">
+                  <span data-st-show="1">retry.ex, as Minga read it</span>
+                  <span data-st-show="2" hidden>retry.ex, Minga's staged copy</span>
+                  <span data-st-show="3-clean 3-conflict" hidden>retry.ex, your open buffer</span>
+                  <span data-st-show="4-clean" hidden>retry.ex, after publish</span>
+                  <span data-st-show="4-conflict" hidden>retry.ex, publish stopped at line 12</span>
+                </div>
+                <div class="st-ed-body" data-st-rows>
+                  <div class="st-row"><span class="st-ln">12</span><span class="st-code">def classify(status) when status &gt;= 500, do: :retry</span></div>
+                  <div class="st-row"><span class="st-ln">13</span><span class="st-code">def classify(_status), do: :fatal</span></div>
+                  <div class="st-row"><span class="st-ln">14</span><span class="st-code"></span></div>
+                  <div class="st-row"><span class="st-ln">15</span><span class="st-code">def timeout_ms, do: 5_000</span></div>
+                </div>
+                <p class="st-legend"><span class="st-key is-del">-</span> removed <span class="st-key is-add">+</span> Minga's line <span class="st-key is-you">~</span> your line</p>
+              </div>
+              <div class="st-ledger">
+                <div class="st-stat">
+                  <span class="lens-k">FILE ON DISK</span>
+                  <span class="topo-pill is-ok" data-st-show="1 2 3-clean 3-conflict 4-conflict">Unchanged</span>
+                  <span class="topo-pill is-warn" data-st-show="4-clean" hidden>Minga's edit written</span>
+                </div>
+                <div class="st-stat">
+                  <span class="lens-k">YOUR OPEN BUFFER</span>
+                  <span class="topo-pill is-ok" data-st-show="1 2">Unchanged</span>
+                  <span class="topo-pill is-ok" data-st-show="3-clean" hidden>Your edit on line 15</span>
+                  <span class="topo-pill is-ok" data-st-show="3-conflict" hidden>Your edit on line 12</span>
+                  <span class="topo-pill is-ok" data-st-show="4-clean" hidden>Both edits</span>
+                  <span class="topo-pill is-ok" data-st-show="4-conflict" hidden>Your line 12, kept</span>
+                </div>
+                <div class="st-stat">
+                  <span class="lens-k">STAGED</span>
+                  <span class="topo-pill" data-st-show="1">Nothing yet</span>
+                  <span class="topo-pill is-warn" data-st-show="2 3-clean 3-conflict" hidden>1 edit, waiting for you</span>
+                  <span class="topo-pill is-ok" data-st-show="4-clean" hidden>Empty</span>
+                  <span class="topo-pill is-fail" data-st-show="4-conflict" hidden>1 edit, in conflict</span>
+                </div>
+              </div>
+            </div>
+            <div class="demo-steps" data-st-steps>
+              <ol>
+                <li data-step="1"><strong>Minga reads the file.</strong> The read comes back with a token for exactly this text. An edit has to send that token back. If the file changed in between, Minga's whole edit is rejected and it has to read again.</li>
+                <li data-step="2"><strong>You approve the edit, and it is staged.</strong> Minga's copy of the file has a new line 12. The file on disk and your open buffer still have the old one.</li>
+              </ol>
+              <p class="demo-steps-title">If you edit another line</p>
+              <ol start="3">
+                <li data-step="3-clean"><strong>You keep working.</strong> You change line 15 in your buffer. The staged edit is not in your way, and your change is not in its way.</li>
+                <li data-step="4-clean"><strong>You publish.</strong> Press <kbd>SPC</kbd> <kbd>a</kbd> <kbd>p</kbd> and choose Publish. Minga writes its line 12 to the file and merges it into your buffer, so your buffer has both changes. Your line 15 is still yours to save.</li>
+              </ol>
+              <p class="demo-steps-title">If you edit the same line</p>
+              <ol start="3">
+                <li data-step="3-conflict"><strong>You keep working.</strong> You change line 12 in your buffer, the same line Minga's staged edit replaces.</li>
+                <li data-step="4-conflict"><strong>You publish, and Minga stops.</strong> Both of you changed line 12, so Minga does not overwrite yours. Your line stays in your buffer, Minga's version stays staged, and Minga opens the file's review and tells you to settle the conflict and publish again. You can also discard the staged edit.</li>
+              </ol>
+            </div>
+          </div>
 
-          <div data-staged-stepper></div>
-        </section>
+          <p>Staged edits are not kept only in memory. Minga saves each one, with the version of the file it was made against, every time the staged set changes. The exception is a draft over the store's size limit: Minga records it as lost and tells you. If Minga crashes, the next start for the same project restores them and offers Publish and Discard again. An ordinary quit stops while anything is staged.</p>
 
-        <section class="essay-section" id="executable-parity">
-          <h2>3. Keeping macOS and the terminal in lockstep</h2>
-          <p>Frontend parity is enforced in code and CI (<a href="/docs/design-storyboard.html"><code>docs/design/storyboard.md</code></a>):</p>
+          <h3>Where this promise stops</h3>
           <ul>
-            <li><strong>Generated UI tokens &amp; CI guards.</strong> Semantic roles (<code>minga</code>, <code>you</code>, <code>needs_you</code>, <code>failure</code>, <code>done</code>) generate from <code>docs/design_tokens.toml</code> into Swift, Go, and Elixir via <code>mix codegen</code>, enforced by color-literal, state-word, and WCAG contrast tests across Catppuccin Frappé (default), AstroDark, and light themes.</li>
-            <li><strong>Side-by-side visual diffs.</strong> Shared scenario fixtures in <code>docs/design/scenarios.toml</code> render offscreen on macOS (wide/narrow) and in the Go TUI (truecolor/16-color) to flag drift on UI PRs (v0.1.0).</li>
-            <li data-status="planned" data-since="v0.1.0"><strong>Automated keyboard checks.</strong> Headless tests verify keyboard/mouse reachability, &lt;= 3 <kbd>esc</kbd>/<kbd>q</kbd> presses back to editing, defined empty states, and zero focus theft.</li>
-            <li><strong>Progressive terminal support.</strong> Uses Kitty keyboard, OSC 52 clipboard, and mode 2026 sync down to 16-color terminals; <span data-status="planned" data-since="v0.1.0">vector gutter marks, OSC 8 links, OSC 9/777 alerts, OSC 9;4 tab progress, mode 1004 focus dimming, and <code>:checkhealth terminal</code> follow for v0.1.0.</span></li>
+            <li><strong>It holds in a project you open in the editor.</strong> A session that owns its staging area publishes its edits when it ends normally. That is the case when a session runs without the editor, or when the editor has no project open.</li>
+            <li><strong>It covers Minga's file tools, not shell commands or Git.</strong> A shell command the agent runs is an ordinary program. By default Minga asks you before running one, and it runs in a temporary copy of the project with the staged edits applied. A command that names a path outside that copy can still write there. The copy also shares the project's <code>deps</code> directory and its installed <code>node_modules</code> packages, so a command that changes dependencies changes your project. The agent's Git stage and commit tools also ask first, and then act on your real repository.</li>
+            <li><strong>A forced quit discards staged edits on purpose.</strong> <code>:q!</code>, <code>:qa!</code> and <code>:cq</code> quit without asking.</li>
+            <li><strong>Publish waits for the agent to finish its turn.</strong> While a turn runs, Minga says so and changes nothing.</li>
           </ul>
-        </section>
-
-        <section class="essay-section" id="tradeoffs">
-          <h2>4. Runtime guarantees and tradeoffs</h2>
-          <ul>
-            <li><strong>Ordered input, isolated background work.</strong> Interactive input stays serialized in one editor mailbox while buffers, LSPs, hooks, MCP servers, extensions, and agents run in preemptive BEAM processes with separate heaps; fast model streams coalesce ahead of typing.</li>
-            <li><strong>Staging boundaries.</strong> Today's review pane is read-only and LSPs inspect published buffers; agent shell commands materialize the overlay into a temp directory skipping <code>.git</code> and <code>node_modules</code>.</li>
-            <li><strong>Crash-safe tools and retained logs.</strong> Tool calls write ahead to disk before execution (never replayed on crash), and full shell output persists beyond the 51 KiB model preview across compactions and restarts (<a href="/docs/session-recovery.html">Session Recovery</a>).</li>
-          </ul>
+          <p>The rules for staging, merging and recovery are in <a href="/docs/buffer-aware-agents.html">Buffer-Aware Agents</a>, and the keys are in <a href="/docs/agentic-keymap.html#publishing-approved-edits">Publishing Approved Edits</a>.</p>
         </section>
 
         <section class="essay-section" id="adrs">
-          <h2>5. Architecture Decision Records (0001-0008)</h2>
-          <p>Eight structural invariants recorded in the repository:</p>
-
-          <ul class="spec-ledger">
-            <li class="spec-row">
-              <span class="spec-key spec-key-strong"><a href="/docs/0001-frontend-owns-row-fit.html">ADR-0001</a></span>
-              <span class="spec-detail"><strong>Clients own viewport row fit.</strong> Swift and Go measure visible rows and report that count; the core never guesses rows from pixel math.</span>
-            </li>
-            <li class="spec-row">
-              <span class="spec-key spec-key-strong"><a href="/docs/0002-editor-state-transitions-have-explicit-owners.html">ADR-0002</a></span>
-              <span class="spec-detail"><strong>Explicit state owners.</strong> Each sub-state has one owning writer module while interactive commands serialize in one editor mailbox.</span>
-            </li>
-            <li class="spec-row">
-              <span class="spec-key spec-key-strong"><a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a></span>
-              <span class="spec-detail"><strong>Compiled extensions activate on restart.</strong> Config reloads live; compiled packages activate in a fresh VM generation to prevent split-version bugs.</span>
-            </li>
-            <li class="spec-row">
-              <span class="spec-key spec-key-strong"><a href="/docs/0004-products-are-root-applets-over-a-fixed-engine.html">ADR-0004</a></span>
-              <span class="spec-detail"><strong>Task workflows over fixed owners (v0.1.0).</strong> Readable Elixir workflows compose real buffer, agent, and permission primitives without shadow state.</span>
-            </li>
-            <li class="spec-row">
-              <span class="spec-key spec-key-strong"><a href="/docs/0005-frontend-owns-immediate-ui-feedback.html">ADR-0005</a></span>
-              <span class="spec-detail"><strong>Clients own immediate motion.</strong> Smooth trackpad scrolling and local previews stay native while edits and cursors stay authoritative in the core.</span>
-            </li>
-            <li class="spec-row">
-              <span class="spec-key spec-key-strong"><a href="/docs/0006-the-spine.html">ADR-0006</a></span>
-              <span class="spec-detail" data-status="planned" data-since="v0.1.0"><strong>The Spine (v0.1.0).</strong> One minimal layout across macOS and terminal, on-demand drawers, Twist/Orbit marks, per-author undo, Vim keys preserved in files, and generated token parity (<a href="/docs/design.html"><code>docs/design/</code></a>).</span>
-            </li>
-            <li class="spec-row">
-              <span class="spec-key spec-key-strong"><a href="/docs/0007-cua-is-a-key-profile.html">ADR-0007</a></span>
-              <span class="spec-detail"><strong>CUA is a key profile.</strong> Standard desktop shortcuts live in a named allow-list profile without altering core editing commands.</span>
-            </li>
-            <li class="spec-row">
-              <span class="spec-key spec-key-strong"><a href="/docs/0008-terminal-engine.html">ADR-0008</a></span>
-              <span class="spec-detail"><strong>Terminal engine (Proposed).</strong> Selects <code>libghostty-vt</code> in a Zig helper process (<code>libvterm</code> fallback) with the BEAM owning terminal buffers.</span>
-            </li>
-          </ul>
-
-          <p class="section-foot-link">Full specs: <a href="/docs/architecture.html">Architecture</a> · <a href="/docs/buffer-aware-agents.html">Buffer-Aware Agents</a> · <a href="/docs/protocol.html">Port Protocol</a> · <a href="/docs/gui_protocol.html">GUI Protocol</a> · <a href="/docs/charm_tui.html">Go TUI</a> · <a href="/docs/remote_agents.html">Remote Agents</a></p>
+          <h2>Where the rest lives</h2>
+          <p id="executable-parity">The macOS app and the terminal client draw the same core state. How their screens are compared is in <a href="/docs/design-storyboard.html">the storyboard guide</a>.</p>
+          <p>Two recorded decisions back this page. <a href="/docs/0002-editor-state-transitions-have-explicit-owners.html">ADR-0002</a> keeps one process in charge of the order of your keys. <a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a> lets changed extension code take effect only after Minga restarts, so a running session never mixes two versions of an extension. The other decisions are in <a href="https://github.com/jsmestad/minga/tree/main/docs/adr">the decision records</a>.</p>
 
           <div class="actions">
-            <a class="btn btn-primary" href="/extending">Extending Minga</a>
-            <a class="btn" href="/getting-started">Getting Started</a>
+            <a class="btn btn-primary" href="/getting-started">Make a first reviewed edit</a>
           </div>
         </section>
       </div>
