@@ -75,6 +75,76 @@ defmodule MingaEditor.State.PickerTest do
       assert closed_again.activation_offer.actions == []
     end
 
+    test "the offer's revision changes with the offered rows and with nothing else" do
+      [first, second, third] =
+        for id <- [:first, :second, :third], do: %Item{id: id, label: "#{id}"}
+
+      fourth = %Item{id: :fourth, label: "fourth"}
+      picker = Picker.new([first, second, third], title: "Choose")
+
+      state =
+        %PickerState{picker: picker, query_generation: 7}
+        |> PickerState.refresh_activation_offer()
+
+      revision = state.activation_offer.revision
+      list = &Picker.new(&1, title: "Choose")
+
+      for {change, transition, changes?} <- [
+            {"an identical refresh", &PickerState.refresh_activation_offer/1, false},
+            {"a selection move", &PickerState.update_picker(&1, Picker.move_down(picker)), false},
+            {"a move that wraps", &PickerState.update_picker(&1, Picker.move_up(picker)), false},
+            {"opening the action menu",
+             &PickerState.open_action_menu(&1, [{"Open", :open}], first), false},
+            {"the same rows in another order",
+             &PickerState.update_picker(&1, list.([second, first, third])), true},
+            {"a row less", &PickerState.update_picker(&1, list.([first, third])), true},
+            {"a row more", &PickerState.update_picker(&1, list.([first, second, third, fourth])),
+             true},
+            {"another row in the same place",
+             &PickerState.update_picker(&1, list.([first, second, fourth])), true},
+            {"no rows", &PickerState.update_picker(&1, list.([])), true}
+          ] do
+        after_change = transition.(state).activation_offer.revision
+
+        assert after_change != revision == changes?,
+               "#{change}: revision #{revision} became #{after_change}"
+      end
+    end
+
+    test "closing the action menu keeps the revision, and a new picker session starts it again" do
+      item = %Item{id: :first, label: "First"}
+
+      opened =
+        %PickerState{picker: Picker.new([item], title: "Choose"), query_generation: 7}
+        |> PickerState.refresh_activation_offer()
+        |> PickerState.update_picker(Picker.new([], title: "Choose"))
+        |> PickerState.update_picker(Picker.new([item], title: "Choose"))
+        |> PickerState.open_action_menu([{"Open", :open}], item)
+
+      assert opened.activation_offer.revision == 2
+      assert PickerState.close_action_menu(opened).activation_offer.revision == 2
+
+      next_session = PickerState.refresh_activation_offer(%{opened | query_generation: 8})
+      assert next_session.activation_offer.revision == 0
+    end
+
+    test "moving to another window of a long list changes the revision, moving inside one does not" do
+      items = for id <- 1..150, do: %Item{id: id, label: Integer.to_string(id)}
+      picker = Picker.new(items, title: "All", results: :all)
+
+      state =
+        %PickerState{picker: picker, query_generation: 7}
+        |> PickerState.refresh_activation_offer()
+
+      revision = state.activation_offer.revision
+      inside = PickerState.update_picker(state, Picker.move_down(picker))
+      # Up from the first row wraps to row 150, which is in the second window of 100.
+      outside = PickerState.update_picker(state, Picker.move_up(picker))
+
+      assert inside.activation_offer.revision == revision
+      assert outside.activation_offer.revision != revision
+    end
+
     test "offers at most the rendered result window" do
       items = for id <- 1..150, do: %Item{id: id, label: Integer.to_string(id)}
 

@@ -215,16 +215,16 @@ defmodule MingaEditor.State.Picker do
   end
 
   @doc """
-  Returns the single keys that run `command` for this picker.
+  Returns every single key the `:picker` keymap scope binds for this picker, each with its command.
 
-  The keys resolve in the same scope, vim state and context as `resolve_key/3`, so what a frontend is told about a key cannot disagree with what the key does.
+  They are the keys `resolve_key/3` runs a command for, in the same key state, so the keys a frontend is sent cannot differ from the keys the picker acts on.
   """
-  @spec keys_for_command(t(), atom(), Minga.Keymap.server()) :: [Minga.Keymap.Bindings.key()]
-  def keys_for_command(%__MODULE__{} = picker_state, command, keymap_server) do
-    Minga.Keymap.Scope.keys_for_command(
+  @spec bound_keys(t(), Minga.Keymap.server()) ::
+          [{Minga.Keymap.Bindings.key(), atom() | tuple()}]
+  def bound_keys(%__MODULE__{} = picker_state, keymap_server) do
+    Minga.Keymap.Scope.single_key_bindings(
       @keymap_scope,
       keymap_vim_state(picker_state),
-      command,
       keymap_context(picker_state, keymap_server)
     )
   end

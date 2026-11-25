@@ -326,9 +326,11 @@ func TestPickerPreviewDoesNotOutliveTheFrameThatOpensTheActMenu(t *testing.T) {
 	}
 }
 
-func TestPickerDecodesTheMovementKeysSection(t *testing.T) {
-	header := []byte{1, 0, 0, 0, 0, 0, 0, 0}
-	keys := []byte{2, 0, 0, 0, 'j', protocol.ModCtrl, 1, 0, 0, 0xE0, 0x08, 0, 2}
+func TestPickerDecodesTheKeysSectionAndTheListRevision(t *testing.T) {
+	// The header ends with the activation generation (7) and the list revision (5).
+	header := []byte{1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 5}
+	// Three keys: ⌃J previews the next row, ↑ the previous one, and Enter runs a command with nothing to preview.
+	keys := []byte{0, 3, 0, 0, 0, 'j', protocol.ModCtrl, 1, 0, 0, 0xE0, 0x08, 0, 2, 0, 0, 0, 13, 0, 0}
 	payload := []byte{generated.OPGuiPicker, 2, 0x01, 0, byte(len(header))}
 	payload = append(payload, header...)
 	payload = append(payload, 0x08, 0, byte(len(keys)))
@@ -338,10 +340,51 @@ func TestPickerDecodesTheMovementKeysSection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode = %v", err)
 	}
+	picker := command.Chrome.Picker
 	want := []protocol.PickerMovementKey{{Codepoint: 'j', Modifiers: protocol.ModCtrl, Delta: 1}, {Codepoint: 57352, Modifiers: 0, Delta: -1}}
-	got := command.Chrome.Picker.MovementKeys
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+	if got := picker.MovementKeys; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("movement keys = %+v, want %+v", got, want)
+	}
+	if picker.Generation != 7 || picker.Revision != 5 {
+		t.Fatalf("generation, revision = %d, %d, want 7, 5", picker.Generation, picker.Revision)
+	}
+}
+
+func TestPickerPreviewIsDroppedWhenTheListItWasMadeUnderChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(*protocol.Picker)
+		index  int
+	}{
+		{"the same list keeps the preview", func(*protocol.Picker) {}, 2},
+		{"the same list with the selection the BEAM moved keeps it until it is caught up", func(p *protocol.Picker) { p.Selected, p.SelectedID = 0, p.Items[0].ActivationID }, 2},
+		{"another revision drops it although the row is still listed", func(p *protocol.Picker) { p.Revision++ }, 1},
+		{"a refiltered list drops it", func(p *protocol.Picker) { p.Revision++; p.Items = p.Items[1:]; p.Filtered = 4; p.Selected = 0 }, 0},
+		{"a reordered list drops it", func(p *protocol.Picker) { p.Revision++; p.Items[2], p.Items[3] = p.Items[3], p.Items[2] }, 1},
+		{"another generation drops it", func(p *protocol.Picker) { p.Generation++ }, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model, _ := fitPicker(t, 120, 40, 5, 7)
+			first := pickerChrome(5, 1)
+			first.Picker.Revision = 3
+			model.chrome[generated.OPGuiPicker] = first
+
+			updated, _ := model.Update(ctrlKey('j'))
+			model = updated.(Model)
+			if got := model.effectivePickerIndex(first.Picker); got != 2 {
+				t.Fatalf("highlighted index before the frame = %d, want 2", got)
+			}
+
+			frame := pickerChrome(5, 1)
+			frame.Picker.Revision = 3
+			tc.change(&frame.Picker)
+			model.chrome[generated.OPGuiPicker] = frame
+			model.reconcilePicker(frame.Picker)
+
+			if got := model.effectivePickerIndex(frame.Picker); got != tc.index {
+				t.Fatalf("highlighted index after the frame = %d, want %d", got, tc.index)
+			}
+		})
 	}
 }
 

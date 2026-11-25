@@ -795,27 +795,27 @@ func DecodeEmptyList(data []byte, offset int, windowEnd int) (EmptyList, int, er
 	}, pos, nil
 }
 
-func DecodePickerMovementKey(data []byte, offset int, windowEnd int) (PickerMovementKey, int, error) {
+func DecodePickerKey(data []byte, offset int, windowEnd int) (PickerKey, int, error) {
 	pos := offset
 	if err := decodeRequireWindow(windowEnd, pos+4, "codepoint"); err != nil {
-		return PickerMovementKey{}, offset, err
+		return PickerKey{}, offset, err
 	}
 	codepoint := decodeU32(data, pos)
 	pos += 4
 	if err := decodeRequireWindow(windowEnd, pos+1, "modifiers"); err != nil {
-		return PickerMovementKey{}, offset, err
+		return PickerKey{}, offset, err
 	}
 	modifiers := data[pos]
 	pos++
-	if err := decodeRequireWindow(windowEnd, pos+1, "movement"); err != nil {
-		return PickerMovementKey{}, offset, err
+	if err := decodeRequireWindow(windowEnd, pos+1, "preview"); err != nil {
+		return PickerKey{}, offset, err
 	}
-	movement := PickerMovement(data[pos])
+	preview := PickerKeyPreview(data[pos])
 	pos++
-	return PickerMovementKey{
+	return PickerKey{
 		Codepoint: codepoint,
 		Modifiers: modifiers,
-		Movement:  movement,
+		Preview:   preview,
 	}, pos, nil
 }
 
@@ -1275,6 +1275,7 @@ func DecodeGuiPickerHeader(data []byte, offset int, windowEnd int) (GuiPickerHea
 	var title string
 	var markedCount uint16
 	var activationGeneration uint32
+	var listRevision uint32
 	if pos+2 <= windowEnd {
 		titleLen := int(decodeU16(data, pos))
 		if pos+2+titleLen <= windowEnd {
@@ -1286,6 +1287,10 @@ func DecodeGuiPickerHeader(data []byte, offset int, windowEnd int) (GuiPickerHea
 				if pos+4 <= windowEnd {
 					activationGeneration = decodeU32(data, pos)
 					pos += 4
+					if pos+4 <= windowEnd {
+						listRevision = decodeU32(data, pos)
+						pos += 4
+					}
 				}
 			}
 		}
@@ -1299,6 +1304,7 @@ func DecodeGuiPickerHeader(data []byte, offset int, windowEnd int) (GuiPickerHea
 		Title:                title,
 		MarkedCount:          markedCount,
 		ActivationGeneration: activationGeneration,
+		ListRevision:         listRevision,
 	}, pos, nil
 }
 
@@ -1445,19 +1451,19 @@ func DecodeGuiPickerEmpty(data []byte, offset int, windowEnd int) (GuiPickerEmpt
 	}, pos, nil
 }
 
-func DecodeGuiPickerMovementKeys(data []byte, offset int, windowEnd int) ([]PickerMovementKey, int, error) {
+func DecodeGuiPickerKeys(data []byte, offset int, windowEnd int) ([]PickerKey, int, error) {
 	pos := offset
-	if err := decodeRequireWindow(windowEnd, pos+1, "movement_keys count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+2, "keys count"); err != nil {
 		return nil, offset, err
 	}
-	count := int(data[pos])
-	pos += 1
-	if err := decodeRequireWindow(windowEnd, pos+count*6, "movement_keys"); err != nil {
+	count := int(decodeU16(data, pos))
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+count*6, "keys"); err != nil {
 		return nil, offset, err
 	}
-	items := make([]PickerMovementKey, 0, count)
+	items := make([]PickerKey, 0, count)
 	for i := 0; i < count; i++ {
-		item, nextPos, err := DecodePickerMovementKey(data, pos, windowEnd)
+		item, nextPos, err := DecodePickerKey(data, pos, windowEnd)
 		if err != nil {
 			return nil, offset, err
 		}

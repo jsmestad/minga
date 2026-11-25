@@ -91,13 +91,13 @@ const (
 	CompletionKindEnum     CompletionKind = 12
 )
 
-// PickerMovement is a generated enum (repr u8).
-type PickerMovement uint8
+// PickerKeyPreview is a generated enum (repr u8).
+type PickerKeyPreview uint8
 
 const (
-	PickerMovementNone     PickerMovement = 0
-	PickerMovementNext     PickerMovement = 1
-	PickerMovementPrevious PickerMovement = 2
+	PickerKeyPreviewNone     PickerKeyPreview = 0
+	PickerKeyPreviewNext     PickerKeyPreview = 1
+	PickerKeyPreviewPrevious PickerKeyPreview = 2
 )
 
 // PickerStatusTone is a generated enum (repr u8).
@@ -336,10 +336,10 @@ type EmptyList struct {
 	Actions  []EmptyListAction
 }
 
-type PickerMovementKey struct {
+type PickerKey struct {
 	Codepoint uint32
 	Modifiers uint8
-	Movement  PickerMovement
+	Preview   PickerKeyPreview
 }
 
 type WhichKeyBinding struct {
@@ -394,7 +394,7 @@ const (
 	SurfacePlacementSize     = 13
 	ThemeColorSize           = 4
 	CompletionMatchRangeSize = 4
-	PickerMovementKeySize    = 6
+	PickerKeySize            = 6
 )
 
 type GuiWindowContentHeader struct {
@@ -630,6 +630,7 @@ type GuiPickerHeader struct {
 	Title                string
 	MarkedCount          uint16
 	ActivationGeneration uint32
+	ListRevision         uint32
 }
 
 type GuiPickerQuery struct {

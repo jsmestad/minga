@@ -4,6 +4,8 @@ defmodule MingaEditor.State.Picker.ActivationOffer do
 
   Native frontends return the generation and activation id exactly as rendered.
   The editor resolves that pair back to the item or source action captured here.
+
+  The offer also names the list it shows. `revision` changes whenever the offered rows change: another row, another order, or another window of a long list. A frontend that moved its highlight ahead of the editor keeps that highlight only while the revision is the one it was made under, because the editor's selection is a position in the list and a changed list puts another row there.
   """
 
   alias MingaEditor.UI.Picker
@@ -18,15 +20,18 @@ defmodule MingaEditor.State.Picker.ActivationOffer do
   @type item_entry :: {activation_id(), non_neg_integer(), Item.t()}
   @type action_entry :: {activation_id(), Source.action_entry(), Item.t()}
 
+  @type revision :: non_neg_integer()
+
   @type t :: %__MODULE__{
           generation: generation(),
+          revision: revision(),
           items: [item_entry()],
           actions: [action_entry()],
           next_activation_id: activation_id()
         }
 
   @enforce_keys [:generation]
-  defstruct generation: 1, items: [], actions: [], next_activation_id: 1
+  defstruct generation: 1, revision: 0, items: [], actions: [], next_activation_id: 1
 
   @doc "Reconciles a picker offer while preserving opaque ids for retained semantic items."
   @spec refresh(t(), Picker.t() | nil, MingaEditor.State.Picker.action_menu(), generation()) ::
@@ -34,7 +39,14 @@ defmodule MingaEditor.State.Picker.ActivationOffer do
   def refresh(%__MODULE__{generation: generation} = offer, picker, action_menu, generation) do
     {items, next_id} = build_item_entries(picker, offer.items, offer.next_activation_id)
     {actions, next_id} = action_entries(action_menu, offer.actions, next_id)
-    %{offer | items: items, actions: actions, next_activation_id: next_id}
+
+    %{
+      offer
+      | revision: next_revision(offer, items),
+        items: items,
+        actions: actions,
+        next_activation_id: next_id
+    }
   end
 
   def refresh(%__MODULE__{}, picker, action_menu, generation) do
@@ -48,6 +60,25 @@ defmodule MingaEditor.State.Picker.ActivationOffer do
       next_activation_id: next_id
     }
   end
+
+  @doc "Returns the revision of the offered rows. It changes when the rows, their order or their window change, and never for a selection move or the action menu."
+  @spec revision(t()) :: revision()
+  def revision(%__MODULE__{revision: revision}), do: revision
+
+  # The rows are the same list when every row keeps its identity and its position.
+  # The comparison is made here, by the owner, so no caller can forget to report a change.
+  @spec next_revision(t(), [item_entry()]) :: revision()
+  defp next_revision(%__MODULE__{revision: revision, items: previous}, items) do
+    if same_rows?(previous, items), do: revision, else: rem(revision + 1, @max_u32 + 1)
+  end
+
+  @spec same_rows?([item_entry()], [item_entry()]) :: boolean()
+  defp same_rows?([], []), do: true
+
+  defp same_rows?([{id, index, _was} | previous], [{id, index, _is} | items]),
+    do: same_rows?(previous, items)
+
+  defp same_rows?(_previous, _items), do: false
 
   @doc "Returns the exact bounded item window represented by this offer."
   @spec offered_items(t()) :: [item_entry()]

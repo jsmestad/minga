@@ -19,7 +19,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
   @section_picker_mode_prefix 0x05
   @section_picker_load_status 0x06
   @section_picker_empty 0x07
-  @section_picker_movement_keys 0x08
+  @section_picker_keys 0x08
 
   @spec encode(Picker.t(), Caches.t()) :: {binary() | nil, Caches.t()}
   def encode(%Picker{} = model, %Caches{} = caches) do
@@ -69,13 +69,14 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
         model.total_count,
         model.marked_count,
         model.activation_generation,
+        model.list_revision,
         model.has_preview?,
         model.items,
         action_menu_structure(model.action_menu),
         model.load_status,
         model.empty,
         model.list_keys?,
-        model.movement_keys
+        model.keys
       })
 
     selection = {model.selected_item_id, model.selected_action_id}
@@ -152,9 +153,9 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
     )
     |> encode_empty_section(model)
     |> Writer.section16(
-      :picker_movement_keys,
-      @section_picker_movement_keys,
-      Encode.encode_gui_picker_movement_keys(model.movement_keys)
+      :picker_keys,
+      @section_picker_keys,
+      Encode.encode_gui_picker_keys(model.keys)
     )
     |> Writer.finish()
   end
@@ -195,7 +196,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
       has_preview: if(model.has_preview?, do: 1, else: 0),
       title: model.title,
       marked_count: model.marked_count,
-      activation_generation: model.activation_generation
+      activation_generation: model.activation_generation,
+      list_revision: model.list_revision
     }
   end
 

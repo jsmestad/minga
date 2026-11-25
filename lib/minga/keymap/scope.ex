@@ -261,12 +261,13 @@ defmodule Minga.Keymap.Scope do
   end
 
   @doc """
-  Returns the single keys that run `command` in a scope and vim state.
+  Returns every single key a scope binds to a command in a vim state, with the command it runs.
 
-  The keys come from the same layers `resolve_key/4` walks, so a user override that rebinds or shadows a default key changes the result. A key in a lower layer counts only when it still resolves to `command`. Multi-key sequences are left out.
+  The keys come from the same layers `resolve_key/4` walks, so each key is listed with the command `resolve_key/4` returns for it: a user override that rebinds or shadows a default key changes the result. A key that starts a longer sequence is left out, and so are the later keys of a sequence.
   """
-  @spec keys_for_command(scope_name(), vim_state(), atom(), context()) :: [Bindings.key()]
-  def keys_for_command(scope_name, vim_state, command, context \\ []) when is_atom(command) do
+  @spec single_key_bindings(scope_name(), vim_state(), context()) ::
+          [{Bindings.key(), atom() | tuple()}]
+  def single_key_bindings(scope_name, vim_state, context \\ []) do
     case module_for(scope_name) do
       nil ->
         []
@@ -275,16 +276,20 @@ defmodule Minga.Keymap.Scope do
         layers = layers(mod, scope_name, vim_state, context)
 
         layers
-        |> Enum.flat_map(&Bindings.sequences_for_command(&1, command))
-        |> Enum.flat_map(fn
-          [key] -> [key]
-          _sequence -> []
-        end)
+        |> Enum.flat_map(&first_keys/1)
         |> Enum.uniq()
-        |> Enum.filter(&(lookup_in_layers(layers, &1) == {:command, command}))
+        |> Enum.flat_map(fn key ->
+          case lookup_in_layers(layers, key) do
+            {:command, command} -> [{key, command}]
+            _prefix -> []
+          end
+        end)
         |> Enum.sort()
     end
   end
+
+  @spec first_keys(Bindings.node_t()) :: [Bindings.key()]
+  defp first_keys(trie), do: for({key, _label, _kind} <- Bindings.children(trie), do: key)
 
   # The keybinding layers of a scope in priority order.
   @spec layers(module(), scope_name(), vim_state(), context()) :: [Bindings.node_t()]

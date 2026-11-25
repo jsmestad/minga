@@ -33,16 +33,20 @@ defmodule Minga.RenderModel.UI.Picker do
         }
 
   @typedoc """
-  A wire-shaped key that moves the highlighted row by one. `codepoint` and `modifiers` are the key press values the picker keymap scope resolves, so a frontend previews the move only for the exact key it sends.
+  A wire-shaped key the picker keymap scope binds to a command. `codepoint` and `modifiers` are the key press values the scope resolves, so a frontend matches the exact key it is about to send.
+
+  `preview` is what a frontend may show before the editor answers: `:next` and `:previous` move the highlighted row by one, `:none` shows nothing. It says nothing about which command the key runs.
   """
-  @type movement_key :: %{
+  @type key :: %{
           codepoint: non_neg_integer(),
           modifiers: non_neg_integer(),
-          movement: :next | :previous
+          preview: :none | :next | :previous
         }
 
   @typedoc """
   The picker. `empty` is set when nothing matches and the source offers next steps: it holds the empty-state header, and `items` are the next-step rows, each with its key in `annotation`. `list_keys?` is true when there is nothing to filter, so the picker takes no text and its list keys apply.
+
+  `keys` are the single keys the picker acts on in its current key state. `list_revision` names the list of offered rows: it changes when the rows, their order or their window change.
   """
   @type t :: %__MODULE__{
           visible?: boolean(),
@@ -62,7 +66,8 @@ defmodule Minga.RenderModel.UI.Picker do
           action_menu: ActionMenu.t() | nil,
           mode_prefix: String.t(),
           load_status: load_status(),
-          movement_keys: [movement_key()],
+          keys: [key()],
+          list_revision: non_neg_integer(),
           preview_lines: [[preview_segment()]] | nil,
           empty: EmptyList.t() | nil,
           list_keys?: boolean()
@@ -85,7 +90,8 @@ defmodule Minga.RenderModel.UI.Picker do
             action_menu: nil,
             mode_prefix: "",
             load_status: :ready,
-            movement_keys: [],
+            keys: [],
+            list_revision: 0,
             preview_lines: nil,
             empty: nil,
             list_keys?: false

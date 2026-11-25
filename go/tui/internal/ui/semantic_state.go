@@ -105,7 +105,7 @@ func (m *Model) reconcilePicker(picker protocol.Picker) {
 		committedID = pickerItemID(picker.Items[picker.Selected])
 	}
 	// An open act menu owns the list keys, so a preview made before its frame arrived was a move of the menu on the BEAM; the picker row stays where the BEAM has it.
-	m.localPresentation.reconcileIdentity(presentationPicker, picker.Generation, committedID, retained, picker.Visible && !picker.ActionVisible)
+	m.localPresentation.reconcileIdentityAt(presentationPicker, picker.Generation, picker.Revision, committedID, retained, picker.Visible && !picker.ActionVisible)
 }
 
 func (m *Model) applyFileTreeSelection(selection protocol.FileTreeSelection) {
@@ -317,7 +317,7 @@ func (m *Model) localPreviewActivationPacket(msg tea.KeyPressMsg, component stri
 	}
 	if preview, ok := m.localPresentation.identityPreview(presentationPicker); component == "picker" && ok {
 		// While the act menu is open, ↩ runs the menu's action on the BEAM, never the previewed picker row.
-		if picker, present := m.picker(); present && picker.Visible && !picker.ActionVisible && preview.generation == picker.Generation {
+		if picker, present := m.picker(); present && picker.Visible && !picker.ActionVisible && preview.generation == picker.Generation && preview.revision == picker.Revision {
 			index := pickerItemIndexByID(picker, preview.itemID)
 			if index >= 0 {
 				return pickerActivationPacket(preview.generation, picker.Items[index].ActivationID), true
@@ -354,7 +354,7 @@ func (m *Model) previewPickerNavigation(keyPress []byte) bool {
 		return false
 	}
 
-	m.localPresentation.setIdentityPreview(presentationPicker, payload.Picker.Generation, pickerItemID(payload.Picker.Items[next]))
+	m.localPresentation.setIdentityPreviewAt(presentationPicker, payload.Picker.Generation, payload.Picker.Revision, pickerItemID(payload.Picker.Items[next]))
 	return true
 }
 
@@ -457,7 +457,7 @@ func emptyStateNavigationDelta(key tea.Key) (int, bool) {
 }
 
 func (m Model) effectivePickerIndex(picker protocol.Picker) int {
-	if preview, ok := m.localPresentation.identityPreview(presentationPicker); ok && preview.generation == picker.Generation {
+	if preview, ok := m.localPresentation.identityPreview(presentationPicker); ok && preview.generation == picker.Generation && preview.revision == picker.Revision {
 		if index := pickerItemIndexByID(picker, preview.itemID); index >= 0 {
 			return index
 		}

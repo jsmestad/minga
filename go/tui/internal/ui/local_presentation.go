@@ -19,7 +19,10 @@ const (
 
 type presentationIdentity struct {
 	generation uint32
-	itemID     string
+	// revision names the list the preview was made under, for a surface whose list can change inside one generation.
+	// A surface without such a revision leaves it 0.
+	revision uint32
+	itemID   string
 }
 
 type presentationScroll struct {
@@ -150,11 +153,16 @@ func (lp *localPresentation) storeUnwrappedScroll(windowID uint16, scroll presen
 }
 
 func (lp *localPresentation) setIdentityPreview(surface presentationSurface, generation uint32, itemID string) {
+	lp.setIdentityPreviewAt(surface, generation, 0, itemID)
+}
+
+// setIdentityPreviewAt records a preview made under one list revision of a generation.
+func (lp *localPresentation) setIdentityPreviewAt(surface presentationSurface, generation, revision uint32, itemID string) {
 	if generation == 0 || itemID == "" {
 		delete(lp.identityPreviews, surface)
 		return
 	}
-	lp.identityPreviews[surface] = presentationIdentity{generation: generation, itemID: itemID}
+	lp.identityPreviews[surface] = presentationIdentity{generation: generation, revision: revision, itemID: itemID}
 }
 
 func (lp localPresentation) identityPreview(surface presentationSurface) (presentationIdentity, bool) {
@@ -163,8 +171,14 @@ func (lp localPresentation) identityPreview(surface presentationSurface) (presen
 }
 
 func (lp *localPresentation) reconcileIdentity(surface presentationSurface, generation uint32, committedItemID string, retainedItemIDs map[string]struct{}, visible bool) string {
+	return lp.reconcileIdentityAt(surface, generation, 0, committedItemID, retainedItemIDs, visible)
+}
+
+// reconcileIdentityAt keeps a preview only while the frame shows the generation and the list revision the preview was made under.
+// The BEAM's selection is a position in the list, so under another list the previewed row is no longer where the BEAM moved to.
+func (lp *localPresentation) reconcileIdentityAt(surface presentationSurface, generation, revision uint32, committedItemID string, retainedItemIDs map[string]struct{}, visible bool) string {
 	preview, ok := lp.identityPreviews[surface]
-	if !visible || generation == 0 || !ok || preview.generation != generation || preview.itemID == committedItemID {
+	if !visible || generation == 0 || !ok || preview.generation != generation || preview.revision != revision || preview.itemID == committedItemID {
 		delete(lp.identityPreviews, surface)
 		return committedItemID
 	}

@@ -1142,9 +1142,11 @@ defmodule Minga.Integration.GUIProtocolTest do
         action_menu: nil,
         mode_prefix: ">",
         load_status: :ready,
-        movement_keys: [
-          %{codepoint: ?j, modifiers: 0x02, movement: :next},
-          %{codepoint: 57_352, modifiers: 0, movement: :previous}
+        list_revision: 5,
+        keys: [
+          %{codepoint: ?j, modifiers: 0x02, preview: :next},
+          %{codepoint: 57_352, modifiers: 0, preview: :previous},
+          %{codepoint: 13, modifiers: 0, preview: :none}
         ]
       }
 
@@ -1190,11 +1192,14 @@ defmodule Minga.Integration.GUIProtocolTest do
       refute Map.has_key?(decoded, "empty")
       assert decoded["list_keys"] == false
 
-      # Movement keys reach the frontend as the exact key press identity and a row delta.
-      assert decoded["movement_keys"] == [
-               %{"codepoint" => ?j, "modifiers" => 2, "delta" => 1},
-               %{"codepoint" => 57_352, "modifiers" => 0, "delta" => -1}
+      # Keys reach the frontend as the exact key press identity and the preview it may show.
+      assert decoded["keys"] == [
+               %{"codepoint" => ?j, "modifiers" => 2, "preview" => "next"},
+               %{"codepoint" => 57_352, "modifiers" => 0, "preview" => "previous"},
+               %{"codepoint" => 13, "modifiers" => 0, "preview" => "none"}
              ]
+
+      assert decoded["list_revision"] == 5
     end
 
     test "round-trips the empty section of a picker that offers next steps", %{harness: harness} do

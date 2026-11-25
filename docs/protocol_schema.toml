@@ -85,7 +85,8 @@ version = "2.0.0"
 # protocol_version 44 appends the Agent lifecycle notice's headline (string16) and draft note (string16) to the gui_agent_chat lifecycle section, so frontends render the BEAM's copy instead of authoring their own.
 # protocol_version 45 adds the empty_list structure (the empty-state anatomy: glyph, title, why line, selected action and actions) and the gui_picker empty section (0x07) that carries it when a picker offers next steps instead of results. An action's id is the command it runs; a click sends the existing execute_command gui_action with it.
 # protocol_version 46 adds the gui_picker movement_keys section (0x08) (the keys that move the highlighted row, resolved from the picker keymap scope, so frontends preview exactly those keys) and the picker_fit gui_action (the result rows the frontend's picker list shows, which sizes a picker page).
-protocol_version = 46
+# protocol_version 47 turns the gui_picker movement_keys section (0x08) into keys: every single key the picker keymap scope binds, each with the preview a frontend may show (none, next, previous), counted in two bytes, so a native query field forwards exactly those keys. The gui_picker header gains list_revision, which names the list of offered rows, so a frontend drops a selection preview made under another list.
+protocol_version = 47
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -1664,9 +1665,10 @@ values = [
   { name = "enum", value = 12 },
 ]
 
-# The direction a picker movement key moves the highlighted row.
+# What a frontend may show for a picker key before the BEAM answers: nothing, or the highlighted row one down or one up.
+# It is not the command the key runs. A value a frontend does not know previews nothing; the key is still forwarded.
 [[enums]]
-name = "picker_movement"
+name = "picker_key_preview"
 repr = "u8"
 default = "none"
 values = [
@@ -1989,13 +1991,13 @@ fields = [
   { name = "actions", type = "counted_array", count_type = "u8", element = "empty_list_action" },
 ]
 
-# One key that moves the picker's highlighted row by one. `codepoint` and `modifiers` are the key_press values the BEAM resolves, so a frontend matches the exact key it is about to send.
+# One key the picker's keymap scope binds to a command. `codepoint` and `modifiers` are the key_press values the BEAM resolves, so a frontend matches the exact key it is about to send.
 [[structures]]
-name = "picker_movement_key"
+name = "picker_key"
 fields = [
   { name = "codepoint", type = "u32" },
   { name = "modifiers", type = "u8" },
-  { name = "movement", type = "enum", enum = "picker_movement" },
+  { name = "preview", type = "enum", enum = "picker_key_preview" },
 ]
 
 [[structures]]
@@ -2548,6 +2550,9 @@ fields = [
   { name = "title", type = "string16", optional = true },
   { name = "marked_count", type = "u16", optional = true },
   { name = "activation_generation", type = "u32", optional = true },
+  # Names the list of offered rows. It changes when the rows, their order or their window change, never for a selection move.
+  # A frontend drops its local selection preview when a frame carries another revision than the one the preview was made under.
+  { name = "list_revision", type = "u32", optional = true },
 ]
 
 [[sections]]
@@ -2613,13 +2618,14 @@ fields = [
 [[sections]]
 opcode = "gui_picker"
 id = 0x08
-name = "movement_keys"
-# The single keys bound to picker_next and picker_prev in the picker keymap scope, user overrides included.
-# A frontend may move its local selection preview only for a key listed here; every other key edits the query or runs another command on the BEAM.
-# A decoder that reads no such section previews no key.
+name = "keys"
+# Every single key the picker keymap scope binds to a command in the picker's current key state, user overrides included.
+# A frontend sends each listed key to the BEAM as a key press and keeps every other key for the query text.
+# It may move its local selection preview only as the key's `preview` says.
+# A decoder that reads no such section forwards and previews no key.
 layout = "counted_array"
-count_type = "u8"
-element = "picker_movement_key"
+count_type = "u16"
+element = "picker_key"
 
 # gui_agent_chat (0x78) sections
 

@@ -368,16 +368,18 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
      }}
   end
 
-  describe "movement keys" do
+  describe "keys" do
     @ctrl 0x02
 
-    defp movement_model(state) do
+    defp keys_model(state, action_menu \\ nil) do
       [%Item{id: :one, label: "one"}, %Item{id: :two, label: "two"}]
       |> PickerState.new(title: "Files")
-      |> picker_modal(RecentFileSource, nil, "", :ready)
+      |> picker_modal(RecentFileSource, action_menu, "", :ready)
       |> build_context(state)
       |> PickerBuilder.build()
     end
+
+    defp previews(model), do: Map.new(model.keys, &{{&1.codepoint, &1.modifiers}, &1.preview})
 
     defp state_with_keymap(keymap_server) do
       state = TestHelpers.base_state(port_manager: nil)
@@ -388,11 +390,9 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       }
     end
 
-    test "are the picker scope's one-row movement keys and never a plain letter" do
+    test "are every single key the picker scope binds, with the preview each may show" do
       keymap = start_supervised!({Minga.Keymap.Active, name: nil})
-      model = movement_model(state_with_keymap(keymap))
-
-      keys = Map.new(model.movement_keys, &{{&1.codepoint, &1.modifiers}, &1.movement})
+      keys = keymap |> state_with_keymap() |> keys_model() |> previews()
 
       assert keys == %{
                {?j, @ctrl} => :next,
@@ -400,43 +400,71 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
                {0xF701, 0} => :next,
                {?k, @ctrl} => :previous,
                {57_352, 0} => :previous,
-               {0xF700, 0} => :previous
+               {0xF700, 0} => :previous,
+               # Enter, Esc, Tab, PageDown, PageUp and the act menu run a command and show nothing ahead.
+               {13, 0} => :none,
+               {27, 0} => :none,
+               {9, 0} => :none,
+               {57_363, 0} => :none,
+               {57_362, 0} => :none,
+               {?., @ctrl} => :none
              }
+    end
 
-      refute Map.has_key?(keys, {?j, 0})
-      refute Map.has_key?(keys, {?k, 0})
+    test "never hold a plain letter of a picker that takes text" do
+      keymap = start_supervised!({Minga.Keymap.Active, name: nil})
+      keys = keymap |> state_with_keymap() |> keys_model() |> previews()
+
+      refute Enum.any?(keys, fn {{codepoint, modifiers}, _preview} ->
+               modifiers == 0 and codepoint in ?!..?~
+             end)
     end
 
     test "follow a user override of the picker scope" do
       keymap = start_supervised!({Minga.Keymap.Active, name: nil})
       Minga.Keymap.Active.bind(keymap, {:picker, :insert}, "C-n", :picker_next, "Next")
       Minga.Keymap.Active.bind(keymap, {:picker, :insert}, "C-j", :picker_select, "Open")
+      Minga.Keymap.Active.bind(keymap, {:picker, :insert}, "C-o", :picker_act_menu, "Act")
 
-      keys =
-        state_with_keymap(keymap)
-        |> movement_model()
-        |> Map.fetch!(:movement_keys)
-        |> Map.new(&{{&1.codepoint, &1.modifiers}, &1.movement})
+      keys = keymap |> state_with_keymap() |> keys_model() |> previews()
 
       assert keys[{?n, @ctrl}] == :next
-      refute Map.has_key?(keys, {?j, @ctrl})
+
+      # The key still reaches the picker, but it opens the selection now, so nothing is shown ahead.
+      assert keys[{?j, @ctrl}] == :none
+      assert keys[{?o, @ctrl}] == :none
     end
 
-    test "every sent key runs the movement it names when it reaches the picker" do
+    test "show nothing ahead while the action menu is open, because the menu owns the movement keys" do
+      keymap = start_supervised!({Minga.Keymap.Active, name: nil})
+      menu = {[{"Open", :open}, {"Kill", :kill}], 0, %Item{id: :one, label: "one"}}
+
+      keys = keymap |> state_with_keymap() |> keys_model(menu) |> previews()
+
+      assert keys[{?j, @ctrl}] == :none
+      assert keys[{?k, @ctrl}] == :none
+      assert map_size(keys) == 12
+    end
+
+    test "every sent key runs a command when it reaches the picker, and a previewed key runs its move" do
       keymap = start_supervised!({Minga.Keymap.Active, name: nil})
       Minga.Keymap.Active.bind(keymap, {:picker, :insert}, "C-n", :picker_next, "Next")
-      model = movement_model(state_with_keymap(keymap))
+      model = keys_model(state_with_keymap(keymap))
 
-      for key <- model.movement_keys do
-        command = Map.fetch!(%{next: :picker_next, previous: :picker_prev}, key.movement)
-
-        assert {:command, ^command} =
+      for key <- model.keys do
+        assert {:command, command} =
                  Minga.Keymap.resolve_scoped_key(
                    :picker,
                    :insert,
                    {key.codepoint, key.modifiers},
                    keymap_server: keymap
                  )
+
+        case key.preview do
+          :next -> assert command == :picker_next
+          :previous -> assert command == :picker_prev
+          :none -> assert command not in [:picker_next, :picker_prev]
+        end
       end
     end
   end

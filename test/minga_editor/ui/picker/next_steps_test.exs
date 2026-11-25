@@ -96,7 +96,7 @@ defmodule MingaEditor.UI.Picker.NextStepsTest do
       typing = open(["alpha", "beta"]) |> Context.from_editor_state() |> PickerBuilder.build()
 
       moves = fn model ->
-        Map.new(model.movement_keys, &{{&1.codepoint, &1.modifiers}, &1.movement})
+        Map.new(model.keys, &{{&1.codepoint, &1.modifiers}, &1.preview})
       end
 
       # With nothing to filter, plain j and k move the selection, so a frontend may preview them.
@@ -106,10 +106,11 @@ defmodule MingaEditor.UI.Picker.NextStepsTest do
       refute Map.has_key?(moves.(typing), {?j, 0})
       refute Map.has_key?(moves.(typing), {?k, 0})
 
-      # Every key in the list moves the selection the way it says, and types nothing.
-      for %{codepoint: codepoint, modifiers: modifiers, movement: movement} <- list.movement_keys do
+      # Every key that may be previewed moves the selection the way it says, and types nothing.
+      for %{codepoint: codepoint, modifiers: modifiers, preview: preview} <- list.keys,
+          preview != :none do
         {start, expected} =
-          case movement do
+          case preview do
             :next -> {open([]), "Open a file"}
             :previous -> {PickerUI.handle_key(open([]), ?j, 0), "Add a folder"}
           end

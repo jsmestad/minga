@@ -39,6 +39,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
         filtered_count: 1,
         total_count: 2,
         marked_count: 1,
+        list_revision: 9,
         has_preview?: true,
         items: [
           # Wire-shaped item map as produced by the builder: flags 0b1010 = 10 (marked + active),
@@ -59,9 +60,10 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
         action_menu: %ActionMenu{actions: ["Open"], selected_index: 0},
         mode_prefix: ">",
         load_status: {:error, "boom"},
-        movement_keys: [
-          %{codepoint: ?j, modifiers: 0x02, movement: :next},
-          %{codepoint: 57_352, modifiers: 0, movement: :previous}
+        keys: [
+          %{codepoint: ?j, modifiers: 0x02, preview: :next},
+          %{codepoint: 57_352, modifiers: 0, preview: :previous},
+          %{codepoint: 13, modifiers: 0, preview: :none}
         ],
         preview_lines: [[{"hello", 0xFFFFFF, true}]]
       }
@@ -74,7 +76,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
 
       # Header (0x01)
       <<1::8, selected::16, filtered::16, total::16, has_preview::8, title_len::16,
-        title::binary-size(title_len), marked::16, activation_generation::32>> = sections[0x01]
+        title::binary-size(title_len), marked::16, activation_generation::32, list_revision::32>> =
+        sections[0x01]
 
       assert selected == 0
       assert filtered == 1
@@ -83,6 +86,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
       assert title == "Pick"
       assert marked == 1
       assert activation_generation == model.activation_generation
+      assert list_revision == 9
 
       # Query (0x02): text plus native-edit generation and acknowledgement.
       assert <<1::16, "o", 7::32, 11::32>> = sections[0x02]
@@ -117,8 +121,9 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
       # Load status (0x06): error (2) with message
       assert <<2::8, 4::16, "boom">> = sections[0x06]
 
-      # Movement keys (0x08): count, then codepoint(u32) + modifiers(u8) + movement(u8: 1 next, 2 previous)
-      assert <<2::8, ?j::32, 0x02::8, 1::8, 57_352::32, 0::8, 2::8>> = sections[0x08]
+      # Keys (0x08): count(u16), then codepoint(u32) + modifiers(u8) + preview(u8: 0 none, 1 next, 2 previous)
+      assert <<3::16, ?j::32, 0x02::8, 1::8, 57_352::32, 0::8, 2::8, 13::32, 0::8, 0::8>> =
+               sections[0x08]
 
       # Preview: visible, one line, one bold white "hello" segment.
       assert <<@op_gui_picker_preview, 1::8, 1::16, 1::8, 0xFFFFFF::24, 1::8, 5::16, "hello">> =

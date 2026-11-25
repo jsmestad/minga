@@ -78,11 +78,11 @@ defmodule Minga.Protocol.Encode do
   def encode_completion_kind(:enum), do: 12
   def encode_completion_kind(_), do: 0
 
-  @spec encode_picker_movement(atom()) :: non_neg_integer()
-  def encode_picker_movement(:none), do: 0
-  def encode_picker_movement(:next), do: 1
-  def encode_picker_movement(:previous), do: 2
-  def encode_picker_movement(_), do: 0
+  @spec encode_picker_key_preview(atom()) :: non_neg_integer()
+  def encode_picker_key_preview(:none), do: 0
+  def encode_picker_key_preview(:next), do: 1
+  def encode_picker_key_preview(:previous), do: 2
+  def encode_picker_key_preview(_), do: 0
 
   @spec encode_picker_status_tone(atom()) :: non_neg_integer()
   def encode_picker_status_tone(:none), do: 0
@@ -419,15 +419,15 @@ defmodule Minga.Protocol.Encode do
     ]
   end
 
-  @spec encode_picker_movement_key(map()) :: iodata()
-  def encode_picker_movement_key(model), do: encode_picker_movement_key(model, :picker_movement_key, [])
+  @spec encode_picker_key(map()) :: iodata()
+  def encode_picker_key(model), do: encode_picker_key(model, :picker_key, [])
 
-  @spec encode_picker_movement_key(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
-  defp encode_picker_movement_key(model, command, path) do
+  @spec encode_picker_key(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_picker_key(model, command, path) do
     [
       (fn value -> validate_uint!(command, [:codepoint | path], value, 4294967295); <<value::32>> end).(Map.fetch!(model, :codepoint)),
       (fn value -> validate_uint!(command, [:modifiers | path], value, 255); <<value::8>> end).(Map.fetch!(model, :modifiers)),
-      (fn value -> validate_uint!(command, [:movement | path], value, 255); <<value::8>> end).(encode_picker_movement(Map.fetch!(model, :movement))),
+      (fn value -> validate_uint!(command, [:preview | path], value, 255); <<value::8>> end).(encode_picker_key_preview(Map.fetch!(model, :preview))),
     ]
   end
 
@@ -1026,6 +1026,7 @@ defmodule Minga.Protocol.Encode do
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:title | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :title)),
       (fn value -> validate_uint!(command, [:marked_count | path], value, 65535); <<value::16>> end).(Map.fetch!(model, :marked_count)),
       (fn value -> validate_uint!(command, [:activation_generation | path], value, 4294967295); <<value::32>> end).(Map.fetch!(model, :activation_generation)),
+      (fn value -> validate_uint!(command, [:list_revision | path], value, 4294967295); <<value::32>> end).(Map.fetch!(model, :list_revision)),
     ]
   end
 
@@ -1108,14 +1109,14 @@ defmodule Minga.Protocol.Encode do
     ]
   end
 
-  @spec encode_gui_picker_movement_keys([term()]) :: iodata()
-  def encode_gui_picker_movement_keys(items) when is_list(items), do: encode_gui_picker_movement_keys(items, :gui_picker, [:movement_keys])
+  @spec encode_gui_picker_keys([term()]) :: iodata()
+  def encode_gui_picker_keys(items) when is_list(items), do: encode_gui_picker_keys(items, :gui_picker, [:keys])
 
-  @spec encode_gui_picker_movement_keys([term()], atom(), [atom() | non_neg_integer()]) :: iodata()
-  defp encode_gui_picker_movement_keys(items, command, path) when is_list(items) do
+  @spec encode_gui_picker_keys([term()], atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_gui_picker_keys(items, command, path) when is_list(items) do
     count = Enum.count(items)
-    validate_uint!(command, path, count, 255)
-    [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_picker_movement_key(value, command, [index | path]) end)]
+    validate_uint!(command, path, count, 65535)
+    [<<count::16>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_picker_key(value, command, [index | path]) end)]
   end
 
   @spec encode_gui_agent_chat_header(map()) :: iodata()

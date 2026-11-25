@@ -104,61 +104,101 @@ defmodule Minga.Keymap.Scope.UserOverrideTest do
     end
   end
 
-  describe "keys_for_command/4" do
+  describe "single_key_bindings/3" do
     @ctrl 0x02
     @arrow_down 57_353
     @arrow_down_mac 0xF701
+    @enter 13
+    @escape 27
 
-    defp picker_keys(command),
-      do: Scope.keys_for_command(:picker, :insert, command, keymap_server: test_keymap_server())
+    defp picker_bindings(vim_state \\ :insert) do
+      :picker
+      |> Scope.single_key_bindings(vim_state, keymap_server: test_keymap_server())
+      |> Map.new()
+    end
 
-    test "lists the default single keys of a command" do
-      assert picker_keys(:picker_next) ==
+    defp keys_of(bindings, command), do: for({key, ^command} <- bindings, do: key) |> Enum.sort()
+
+    test "lists every default single key with its command" do
+      bindings = picker_bindings()
+
+      assert keys_of(bindings, :picker_next) ==
                Enum.sort([{?j, @ctrl}, {@arrow_down, 0}, {@arrow_down_mac, 0}])
 
-      assert {?k, @ctrl} in picker_keys(:picker_prev)
-      refute {?j, 0} in picker_keys(:picker_next)
+      for {key, command} <- [
+            {{?k, @ctrl}, :picker_prev},
+            {{@enter, 0}, :picker_select},
+            {{@escape, 0}, :picker_cancel},
+            {{?., @ctrl}, :picker_act_menu}
+          ] do
+        assert bindings[key] == command
+      end
+
+      refute Map.has_key?(bindings, {?j, 0})
     end
 
     test "a user binding adds its key" do
       KeymapActive.bind(test_keymap_server(), {:picker, :insert}, "C-n", :picker_next, "Next")
 
-      assert {?n, @ctrl} in picker_keys(:picker_next)
-      assert {?j, @ctrl} in picker_keys(:picker_next)
+      bindings = picker_bindings()
+      assert bindings[{?n, @ctrl}] == :picker_next
+      assert bindings[{?j, @ctrl}] == :picker_next
     end
 
-    test "a user binding that takes a default key removes it from the old command" do
+    test "a user binding that takes a default key lists it once, with the user's command" do
       KeymapActive.bind(test_keymap_server(), {:picker, :insert}, "C-j", :picker_select, "Open")
 
-      refute {?j, @ctrl} in picker_keys(:picker_next)
-      assert {@arrow_down, 0} in picker_keys(:picker_next)
-      assert {?j, @ctrl} in picker_keys(:picker_select)
+      bindings = picker_bindings()
+      assert bindings[{?j, @ctrl}] == :picker_select
+      assert {@arrow_down, 0} in keys_of(bindings, :picker_next)
+      refute {?j, @ctrl} in keys_of(bindings, :picker_next)
     end
 
-    test "every listed key resolves to the command" do
+    test "a key that starts a longer sequence is left out, with the later keys of the sequence" do
+      KeymapActive.bind(
+        test_keymap_server(),
+        {:picker, :insert},
+        "C-x C-f",
+        :picker_select,
+        "Open"
+      )
+
+      bindings = picker_bindings()
+      refute Map.has_key?(bindings, {?x, @ctrl})
+      refute Map.has_key?(bindings, {?f, @ctrl})
+    end
+
+    test "a default key the user made a prefix is no longer a single key" do
+      KeymapActive.bind(test_keymap_server(), {:picker, :insert}, "C-j C-j", :picker_next, "Next")
+
+      refute Map.has_key?(picker_bindings(), {?j, @ctrl})
+    end
+
+    test "every listed key resolves to the command it is listed with" do
       KeymapActive.bind(test_keymap_server(), {:picker, :insert}, "C-j", :picker_prev, "Previous")
 
-      for command <- [:picker_next, :picker_prev], key <- picker_keys(command) do
+      for vim_state <- [:insert, :normal], {key, command} <- picker_bindings(vim_state) do
         assert {:command, ^command} =
-                 Scope.resolve_key(:picker, :insert, key, keymap_server: test_keymap_server())
+                 Scope.resolve_key(:picker, vim_state, key, keymap_server: test_keymap_server())
       end
     end
 
-    test "an unknown scope or an unbound command has no keys" do
+    test "an unknown scope or a key state the scope does not bind has no keys" do
       context = [keymap_server: test_keymap_server()]
 
-      assert Scope.keys_for_command(:no_such_scope, :insert, :picker_next, context) == []
-      assert picker_keys(:no_such_command) == []
-      assert Scope.keys_for_command(:picker, :visual, :picker_next, context) == []
+      assert Scope.single_key_bindings(:no_such_scope, :insert, context) == []
+      assert Scope.single_key_bindings(:picker, :visual, context) == []
     end
 
     test "a picker with nothing to filter moves with plain j and k, which a picker that takes text types" do
-      context = [keymap_server: test_keymap_server()]
+      list = picker_bindings(:normal)
+      text = picker_bindings(:insert)
 
-      assert {?j, 0} in Scope.keys_for_command(:picker, :normal, :picker_next, context)
-      assert {?k, 0} in Scope.keys_for_command(:picker, :normal, :picker_prev, context)
-      refute {?j, 0} in Scope.keys_for_command(:picker, :insert, :picker_next, context)
-      refute {?k, 0} in Scope.keys_for_command(:picker, :insert, :picker_prev, context)
+      assert list[{?j, 0}] == :picker_next
+      assert list[{?k, 0}] == :picker_prev
+      assert list[{?q, 0}] == :picker_cancel
+      refute Map.has_key?(text, {?j, 0})
+      refute Map.has_key?(text, {?k, 0})
     end
   end
 

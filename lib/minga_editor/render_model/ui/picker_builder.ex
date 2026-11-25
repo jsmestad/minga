@@ -21,9 +21,6 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
 
   @preview_max_lines 50
 
-  # The wire counts movement keys in one byte. Keys past the limit lose only their local preview.
-  @max_movement_keys 255
-
   @spec build(Context.t()) :: PickerModel.t()
   def build(ctx) do
     case get_in_modal(ctx) do
@@ -89,6 +86,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       total_count: length(picker.items),
       marked_count: Picker.marked_count(picker),
       activation_generation: activation_offer.generation,
+      list_revision: ActivationOffer.revision(activation_offer),
       selected_item_id: selected_item_id,
       selected_action_id: selected_action_activation_id(action_menu, activation_offer),
       has_preview?: has_preview,
@@ -96,7 +94,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       action_menu: action_menu_model(action_menu, activation_offer),
       mode_prefix: PickerState.mode_prefix(picker_state),
       load_status: load_status,
-      movement_keys: movement_keys(ctx, picker_state),
+      keys: keys(ctx, picker_state, action_menu),
       preview_lines: preview_lines,
       empty: empty_model(picker.empty),
       list_keys?: Picker.list_keys?(picker)
@@ -110,19 +108,22 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   defp empty_model(%Empty{} = empty),
     do: EmptyStateBuilder.empty_list(empty.title, empty.why, [], glyph: empty.glyph)
 
-  # The keys the `:picker` scope resolves to one-row movement, user overrides included.
-  # A frontend previews a move only for these keys, so its preview cannot disagree with `PickerUI.handle_key/3`.
-  @spec movement_keys(Context.t(), PickerState.t()) :: [PickerModel.movement_key()]
-  defp movement_keys(%Context{intent: %{frame: %{keymap_server: keymap_server}}}, picker_state) do
-    keys =
-      for {command, movement} <- [picker_next: :next, picker_prev: :previous],
-          {codepoint, modifiers} <-
-            PickerState.keys_for_command(picker_state, command, keymap_server) do
-        %{codepoint: codepoint, modifiers: modifiers, movement: movement}
-      end
-
-    Enum.take(keys, @max_movement_keys)
+  # Every single key the `:picker` scope binds for this picker, user overrides included, so a frontend forwards exactly
+  # the keys `PickerUI.handle_key/3` acts on and keeps the others for the query.
+  # None is cut off: a missing key would stay in a native text field although the picker binds it.
+  @spec keys(Context.t(), PickerState.t(), PickerState.action_menu()) :: [PickerModel.key()]
+  defp keys(%Context{intent: %{frame: %{keymap_server: keymap_server}}}, picker_state, menu) do
+    for {{codepoint, modifiers}, command} <- PickerState.bound_keys(picker_state, keymap_server) do
+      %{codepoint: codepoint, modifiers: modifiers, preview: key_preview(command, menu)}
+    end
   end
+
+  # What a frontend may show before the editor answers. Only a one-row move of the highlighted row can be shown ahead,
+  # and the open action menu owns the movement keys, so nothing moves in the list then.
+  @spec key_preview(atom() | tuple(), PickerState.action_menu()) :: :none | :next | :previous
+  defp key_preview(:picker_next, nil), do: :next
+  defp key_preview(:picker_prev, nil), do: :previous
+  defp key_preview(_command, _action_menu), do: :none
 
   @spec picker_preview(Context.t(), PickerState.t()) ::
           {boolean(), [[PickerModel.preview_segment()]] | nil}

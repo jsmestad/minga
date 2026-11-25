@@ -4102,18 +4102,23 @@ func TestPickerEffectiveIndexUsesPreviewWhenSet(t *testing.T) {
 	}
 }
 
-func TestPickerReconcileRetainsPreviewAcrossSameGenerationReorder(t *testing.T) {
+func TestPickerFrameWithAnotherListRevisionDropsThePreview(t *testing.T) {
 	model := New(30, 10, nil)
-	model.localPresentation.setIdentityPreview(presentationPicker, 7, "3")
+	model.localPresentation.setIdentityPreviewAt(presentationPicker, 7, 0, "3")
 	payload := pickerChrome(3, 1)
+	// The BEAM names a reordered list with another revision: its selection is a position, so the previewed row is no longer the row it moved to.
+	payload.Picker.Revision = 1
 	payload.Picker.Items[0], payload.Picker.Items[2] = payload.Picker.Items[2], payload.Picker.Items[0]
 
 	_ = model.applyCommands(frame(
 		protocol.Command{Kind: protocol.CommandChrome, Chrome: payload},
 	))
 
-	if got := model.effectivePickerIndex(model.chrome[generated.OPGuiPicker].Picker); got != 0 {
-		t.Fatalf("same-generation reorder should retain preview by ID at index 0, got %d", got)
+	if got := model.effectivePickerIndex(model.chrome[generated.OPGuiPicker].Picker); got != 1 {
+		t.Fatalf("a frame with another list revision should show the committed row at index 1, got %d", got)
+	}
+	if _, ok := model.localPresentation.identityPreview(presentationPicker); ok {
+		t.Fatal("the preview made under the earlier list should be dropped")
 	}
 }
 

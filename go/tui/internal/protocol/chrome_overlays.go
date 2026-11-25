@@ -100,6 +100,7 @@ func decodePicker(payload []byte) (Picker, string, int) {
 			if h, _, err := generated.DecodeGuiPickerHeader(payload, sectionStart, sectionEnd); err == nil {
 				picker.Visible = h.Visible != 0
 				picker.Generation = h.ActivationGeneration
+				picker.Revision = h.ListRevision
 				picker.Selected = h.SelectedIndex
 				picker.Filtered = h.FilteredCount
 				picker.Total = h.TotalCount
@@ -139,8 +140,8 @@ func decodePicker(payload []byte) (Picker, string, int) {
 				picker.Empty = &empty
 				picker.ListKeys = e.ListKeys != 0
 			}
-		case 0x08: // Movement keys
-			if keys, _, err := generated.DecodeGuiPickerMovementKeys(payload, sectionStart, sectionEnd); err == nil {
+		case 0x08: // Keys
+			if keys, _, err := generated.DecodeGuiPickerKeys(payload, sectionStart, sectionEnd); err == nil {
 				picker.MovementKeys = mapPickerMovementKeys(keys)
 			}
 		}
@@ -152,14 +153,15 @@ func decodePicker(payload []byte) (Picker, string, int) {
 	return picker, summary, size
 }
 
-// mapPickerMovementKeys lowers the generated movement keys into row deltas. A key whose movement this frontend does not know moves nothing, so it is dropped.
-func mapPickerMovementKeys(keys []generated.PickerMovementKey) []PickerMovementKey {
+// mapPickerMovementKeys keeps the picker keys whose preview is a one-row move and lowers them into row deltas.
+// The terminal sends every key press to the BEAM, so a key with no preview, or with a preview this frontend does not know, needs no entry here.
+func mapPickerMovementKeys(keys []generated.PickerKey) []PickerMovementKey {
 	out := make([]PickerMovementKey, 0, len(keys))
 	for _, key := range keys {
-		switch key.Movement {
-		case generated.PickerMovementNext:
+		switch key.Preview {
+		case generated.PickerKeyPreviewNext:
 			out = append(out, PickerMovementKey{Codepoint: key.Codepoint, Modifiers: key.Modifiers, Delta: 1})
-		case generated.PickerMovementPrevious:
+		case generated.PickerKeyPreviewPrevious:
 			out = append(out, PickerMovementKey{Codepoint: key.Codepoint, Modifiers: key.Modifiers, Delta: -1})
 		}
 	}
