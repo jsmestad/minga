@@ -1,5 +1,5 @@
 defmodule Minga.Session.Swap.PidAliveTest do
-  @moduledoc "Tests for the `Minga.Session.Swap` functions that ask the OS about a process, which spawns `ps` on macOS."
+  @moduledoc "Tests for the `Minga.Session.Swap` functions that ask the OS about a process: `/proc` on Linux, `ps` on macOS."
 
   # Spawns an OS process (`ps`); concurrent spawns hit the BEAM's erl_child_setup EPIPE race.
   use ExUnit.Case, async: false
@@ -27,18 +27,17 @@ defmodule Minga.Session.Swap.PidAliveTest do
 
   describe "owner_alive?/1 with the real start time" do
     test "a swap of another live process is owned only with that process's own start time" do
-      # The OS process that started this VM is alive for as long as the test runs.
-      parent = parent_pid()
-      {:ok, started} = Instance.start_time(parent)
+      # Process 1 (launchd, init, or a container's entry point) runs for as long as the test does.
+      {:ok, started} = Instance.start_time(1)
 
-      assert Swap.owner_alive?(%{os_pid: parent, run_started: started})
-      refute Swap.owner_alive?(%{os_pid: parent, run_started: "Thu Jan  1 00:00:00 1970"})
+      assert Swap.owner_alive?(%{os_pid: 1, run_started: started})
+      refute Swap.owner_alive?(%{os_pid: 1, run_started: "Thu Jan  1 00:00:00 1970"})
       refute Swap.owner_alive?(%{os_pid: 99_999_999, run_started: started})
     end
-  end
 
-  defp parent_pid do
-    {output, 0} = System.cmd("ps", ["-p", Integer.to_string(Swap.os_pid()), "-o", "ppid="])
-    output |> String.trim() |> String.to_integer()
+    test "a swap from before the start time was recorded is kept while its process id is in use" do
+      assert Swap.owner_alive?(%{os_pid: 1, run_started: nil})
+      refute Swap.owner_alive?(%{os_pid: 99_999_999, run_started: nil})
+    end
   end
 end
