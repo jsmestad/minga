@@ -1102,7 +1102,7 @@ exits = [
   { key = "⌘. or SPC a s", click = "Stop", to = "minga.conversation.stopped" },
   { key = "SPC a r", click = "2 files changed · review", to = "minga.review.buffer" },
   { key = "↩ on a Started line", click = "Started line", to = "minga.subagent.peek" },
-  { key = "SPC a v", click = "close split", to = "edit.working" },
+  { key = "esc esc SPC a v", click = "close split", to = "edit.working" },
   { key = "q (Normal mode, outside the composer)", click = "", to = "edit.working" },
 ]
 
@@ -1327,7 +1327,7 @@ exits = [
   { key = "↩ (composer)", click = "Continue", to = "minga.conversation" },
   { key = "⌥↩", click = "Queue", to = "minga.queue" },
   { key = "SPC a r", click = "Review", to = "minga.review.buffer" },
-  { key = "SPC a v", click = "close split", to = "edit.plain" },
+  { key = "esc esc SPC a v", click = "close split", to = "edit.plain" },
   { key = "q (Normal mode, outside the composer)", click = "", to = "edit.plain" },
 ]
 notes = "Says what was interrupted and what was already changed. The modeline reads \"Minga stopped\"; the queue is kept; Continue resumes the same task."

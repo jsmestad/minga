@@ -660,15 +660,7 @@ defmodule MingaAgent.Markdown do
   end
 
   # Bold: __...__
-  defp do_parse_inline("__" <> rest, acc) do
-    case String.split(rest, "__", parts: 2) do
-      [bold_text, remaining] ->
-        do_parse_inline(remaining, [{bold_text, :bold} | acc])
-
-      [_no_close] ->
-        do_parse_inline(rest, [{"__", :plain} | acc])
-    end
-  end
+  defp do_parse_inline("__" <> rest, acc), do: parse_underscore_span(rest, "__", :bold, acc)
 
   # Italic: *...*  (but not ** which is bold)
   defp do_parse_inline("*" <> rest, acc) do
@@ -682,15 +674,7 @@ defmodule MingaAgent.Markdown do
   end
 
   # Italic: _..._ (but not __ which is bold)
-  defp do_parse_inline("_" <> rest, acc) do
-    case String.split(rest, "_", parts: 2) do
-      [italic_text, remaining] when italic_text != "" ->
-        do_parse_inline(remaining, [{italic_text, :italic} | acc])
-
-      _ ->
-        do_parse_inline(rest, [{"_", :plain} | acc])
-    end
-  end
+  defp do_parse_inline("_" <> rest, acc), do: parse_underscore_span(rest, "_", :italic, acc)
 
   # Regular character: consume up to next special character
   defp do_parse_inline(text, acc) do
@@ -704,6 +688,39 @@ defmodule MingaAgent.Markdown do
         do_parse_inline(rest, [{char, :plain} | acc])
     end
   end
+
+  # An underscore inside a word is part of the word, as in CommonMark: `usage_limit_reached`
+  # is one name, not "usage", an italic "limit" and "reached". Underscores open a
+  # span only at the start of a word and close it only at the end of one.
+  @spec parse_underscore_span(String.t(), String.t(), :bold | :italic, [segment()]) :: [segment()]
+  defp parse_underscore_span(rest, mark, style, acc) do
+    case underscore_span(rest, mark, word_before?(acc)) do
+      {inner, remaining} -> do_parse_inline(remaining, [{inner, style} | acc])
+      nil -> do_parse_inline(rest, [{mark, :plain} | acc])
+    end
+  end
+
+  @spec underscore_span(String.t(), String.t(), boolean()) :: {String.t(), String.t()} | nil
+  defp underscore_span(_rest, _mark, true), do: nil
+
+  defp underscore_span(rest, "__", false) do
+    case Regex.run(~r/^(.+?)__(?![\p{L}\p{N}])(.*)$/su, rest) do
+      [_, inner, remaining] -> {inner, remaining}
+      nil -> nil
+    end
+  end
+
+  defp underscore_span(rest, "_", false) do
+    case Regex.run(~r/^(.+?)_(?![\p{L}\p{N}_])(.*)$/su, rest) do
+      [_, inner, remaining] -> {inner, remaining}
+      nil -> nil
+    end
+  end
+
+  # Whether the text parsed so far ends in a letter or a digit.
+  @spec word_before?([segment()]) :: boolean()
+  defp word_before?([{text, :plain} | _earlier]), do: String.match?(text, ~r/[\p{L}\p{N}]$/u)
+  defp word_before?(_acc), do: false
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
 

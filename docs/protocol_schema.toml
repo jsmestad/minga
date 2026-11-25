@@ -88,7 +88,8 @@ version = "2.0.0"
 # protocol_version 46 adds the gui_picker movement_keys section (0x08) (the keys that move the highlighted row, resolved from the picker keymap scope, so frontends preview exactly those keys) and the picker_fit gui_action (the result rows the frontend's picker list shows, which sizes a picker page).
 # protocol_version 47 adds two frontend-to-BEAM events. frontend_foreground (0x13, the slot batch_end left in version 3) says whether the frontend is in the foreground: the terminal reports its focus, macOS its active state. terminal_report (0x62) is the terminal frontend's snapshot of which terminal features it detected, misses or replaces with a fallback, with the enums terminal_feature and terminal_feature_status.
 # protocol_version 48 reshapes gui_which_key: the panel names its path, breadcrumb, group count and hints, and each entry carries its raw key, section, live count and macOS ⌘ equivalent. Each count carries a tone byte (0 muted, 1 needs you, 2 error) naming its colour role. Paging and icons are retired.
-protocol_version = 49
+# protocol_version 50 (#4055) appends each tool call's state (u8, a shared state id) and one-line step sentence (string16) to gui_agent_chat messages 0x04 and 0x08, adds the composer hints section 0x10, adds tab and workspace agent status 7 (stopped) and adds context-card status 6 (stopped).
+protocol_version = 50
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -1849,6 +1850,13 @@ values = [
 #   enum                           — closed byte vocabulary ([[enums]] entry)
 
 [[structures]]
+name = "composer_hint"
+fields = [
+  { name = "keys", type = "string16" },
+  { name = "action", type = "string16" },
+]
+
+[[structures]]
 name = "rect"
 fields = [
   { name = "row", type = "u16" },
@@ -2755,6 +2763,14 @@ fields = [
   { name = "key_hint", type = "string16" },
   { name = "headline", type = "string16" },
   { name = "note", type = "string16" },
+]
+
+[[sections]]
+opcode = "gui_agent_chat"
+id = 0x10
+name = "composer_hints"
+fields = [
+  { name = "hints", type = "counted_array", count_type = "u8", element = "composer_hint" },
 ]
 
 # gui_picker_preview (0x7D) sections

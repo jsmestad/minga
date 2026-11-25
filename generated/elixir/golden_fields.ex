@@ -6,6 +6,7 @@ defmodule Minga.Protocol.GoldenFields do
   """
 
   @units %{
+    "GuiAgentChatComposerHints" => [{"hints", "Hints", {:array, {:struct, [{"keys", "Keys", :string}, {"action", "Action", :string}]}}}],
     "GuiAgentChatDraftAttachments" => [{"count", "Count", :scalar}, {"offer", "Offer", :scalar}],
     "GuiAgentChatHeader" => [{"visible", "Visible", :scalar}, {"status", "Status", :scalar}],
     "GuiAgentChatLifecycle" => [{"kind", "Kind", :scalar}, {"reason", "Reason", :string}, {"remedy", "Remedy", :scalar}, {"action_label", "ActionLabel", :string}, {"key_hint", "KeyHint", :string}, {"headline", "Headline", :string}, {"note", "Note", :string}],

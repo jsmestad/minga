@@ -1627,23 +1627,24 @@ defmodule MingaEditor.Commands.Agent do
   @doc """
   Context-sensitive Ctrl-C handler.
 
-  Always leaves Insert mode, as Escape does (vim convention). While Minga works it also stops the turn, as `SPC a s` does, and keeps the queue. After a provider error it also restarts the provider.
+  Always leaves Insert mode, as Escape does (vim convention). While this conversation has a turn to stop it also stops the turn, as `SPC a s` does, and keeps the queue: that includes a turn that waits for an approval, a turn in plan mode and a turn that reported an error and is still running. With no turn to stop, after a provider error it restarts the provider.
   """
   @spec scope_ctrl_c(state()) :: state()
   def scope_ctrl_c(state) do
     state
-    |> interrupt_for_ctrl_c(
-      MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state).runtime.status
-    )
+    |> interrupt_for_ctrl_c(MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state))
     |> input_to_normal()
   end
 
-  @spec interrupt_for_ctrl_c(state(), atom()) :: state()
-  defp interrupt_for_ctrl_c(state, status) when status in [:thinking, :tool_executing],
-    do: abort_agent(state)
+  # Stop acts on the stop target, so the composer's `⌃C stop` hint and this
+  # command agree on when there is something to stop.
+  @spec interrupt_for_ctrl_c(state(), MingaEditor.State.Agent.t()) :: state()
+  defp interrupt_for_ctrl_c(state, %{stop_target: {_session, _target}}), do: abort_agent(state)
 
-  defp interrupt_for_ctrl_c(state, :error), do: restart_agent_provider(state)
-  defp interrupt_for_ctrl_c(state, _status), do: state
+  defp interrupt_for_ctrl_c(state, %{runtime: %{status: :error}}),
+    do: restart_agent_provider(state)
+
+  defp interrupt_for_ctrl_c(state, _agent), do: state
 
   @doc "Starts an agent session if one isn't already running. No-op otherwise."
   @spec ensure_agent_session(state()) :: state()

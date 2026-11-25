@@ -47,6 +47,8 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   @section_chat_stop_target 0x0C
   @section_chat_queue_target 0x0E
   @section_chat_lifecycle 0x0F
+  # The focused composer's key hints, as the BEAM authors them; omitted when empty.
+  @section_chat_composer_hints 0x10
 
   @spec encode(AgentChat.t(), Caches.t()) :: {binary() | nil, Caches.t()}
   def encode(%AgentChat{} = model, %Caches{} = caches) do
@@ -124,6 +126,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
       |> add_stop_target_section(model.stop_target)
       |> add_queue_target_section(model.queue_target)
       |> add_lifecycle_section(model)
+      |> add_composer_hints_section(model.composer_hints)
 
     sections =
       case model.prompt_presentation do
@@ -144,6 +147,18 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     |> Writer.uint8(:section_count, Enum.count(sections))
     |> Writer.append(sections)
     |> Writer.finish()
+  end
+
+  @spec add_composer_hints_section([binary()], [AgentChat.composer_hint()]) :: [binary()]
+  defp add_composer_hints_section(sections, []), do: sections
+
+  defp add_composer_hints_section(sections, hints) do
+    payload =
+      %{hints: Enum.map(hints, fn {keys, action} -> %{keys: keys, action: action} end)}
+      |> Minga.Protocol.Encode.encode_gui_agent_chat_composer_hints()
+      |> :erlang.iolist_to_binary()
+
+    [encode_section(@section_chat_composer_hints, payload) | sections]
   end
 
   @spec add_lifecycle_section([binary()], AgentChat.t()) :: [binary()]

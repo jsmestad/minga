@@ -113,6 +113,9 @@ public struct AgentPromptView: View {
                 .accessibilityLabel("Draft attachments")
                 .accessibilityValue("\(state.draftAttachmentCount)")
             }
+            if !state.composerHints.isEmpty {
+                AgentComposerHints(hints: state.composerHints)
+            }
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.md)
@@ -219,6 +222,32 @@ public struct AgentPromptView: View {
         .padding(.horizontal, Spacing.xl)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(isSlash ? "Slash command completion" : "File mention completion")
+    }
+}
+
+/// The focused composer's key hints, exactly as the BEAM sends them: the keys, then what they do ("⌘↩ send  ⌥↩ queue  esc normal"). They show only while the composer has focus.
+struct AgentComposerHints: View {
+    let hints: [AgentComposerHint]
+    @Environment(\.themeColors) private var theme
+
+    var body: some View {
+        HStack(spacing: Spacing.md) {
+            ForEach(Array(hints.enumerated()), id: \.offset) { _, hint in
+                HStack(spacing: Spacing.xs) {
+                    Text(hint.keys)
+                        .font(Typography.font(.caption, weight: .medium))
+                        .foregroundStyle(theme.agentTextFg)
+                    Text(hint.action)
+                        .font(Typography.font(.caption))
+                        .foregroundStyle(theme.agentMutedFg)
+                }
+                .accessibilityElement(children: .combine)
+            }
+            Spacer(minLength: 0)
+        }
+        .lineLimit(1)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Composer keys")
     }
 }
 

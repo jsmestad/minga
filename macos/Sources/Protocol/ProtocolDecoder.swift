@@ -107,7 +107,7 @@ enum RenderCommand: Sendable {
     case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String, loadStatus: Wire.PickerLoadStatus, queryGeneration: UInt32, acknowledgedQueryEditSeq: UInt32, activationGeneration: UInt32, empty: Wire.EmptyList? = nil, listKeys: Bool = false, movementKeys: [Wire.PickerMovementKey] = [])
     case guiPickerSelection(generation: UInt32, selectedItemID: UInt32, selectedActionID: UInt32)
     case guiPickerPreview(visible: Bool, lines: [Wire.PickerPreviewLine])
-    case guiAgentChat(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: EditorMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil, lifecycle: AgentChatLifecycle = .conversation)
+    case guiAgentChat(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: EditorMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil, lifecycle: AgentChatLifecycle = .conversation, composerHints: [AgentComposerHint] = [])
     case guiAgentHelp(visible: Bool, groups: [Wire.HelpGroup])
     /// Resident agent-chat transcript stream (0x86, #2654). `mode` is 0=full_replace, 1=append.
     /// `truncated` marks older messages sitting outside the resident byte-cap window. On append,
@@ -1678,6 +1678,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var promptPresentation: UInt64?
         var queueTarget: AgentQueueTarget?
         var lifecycle: AgentChatLifecycle = .conversation
+        var composerHints: [AgentComposerHint] = []
 
         for _ in 0..<chatSectionCount {
             guard data.count >= chatPos + 3 else { throw ProtocolDecodeError.malformed }
@@ -1794,6 +1795,23 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 guard sequence != 0 else { throw ProtocolDecodeError.malformed }
                 queueTarget = AgentQueueTarget(turn: AgentStopTarget(sessionID: sessionID, requestID: requestID), sequence: sequence)
 
+            case 0x10: // ComposerHints: count(1), per hint keys(string16) + action(string16)
+                var pos = csStart
+                let end = csStart + csLen
+                guard csLen >= 1 else { throw ProtocolDecodeError.malformed }
+                let count = Int(data[pos])
+                pos += 1
+                try FrameDecodeAccounting.reserve(.arrayEntries, count)
+                var hints: [AgentComposerHint] = []
+                hints.reserveCapacity(count)
+                for _ in 0..<count {
+                    let keys = try readString16(data: data, pos: &pos, end: end)
+                    let action = try readString16(data: data, pos: &pos, end: end)
+                    hints.append(AgentComposerHint(keys: keys, action: action))
+                }
+                guard pos == end else { throw ProtocolDecodeError.malformed }
+                composerHints = hints
+
             case 0x0F:
                 var pos = csStart + 1
                 let end = csStart + csLen
@@ -1830,7 +1848,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             chatPos = csStart + csLen
         }
 
-        return (.guiAgentChat(visible: chatVisible, status: AgentStatus(rawValue: chatStatus), model: chatModel, thinkingLevel: chatThinkingLevel, prompt: chatPrompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: EditorMode(rawValue: promptVimMode), promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, draftAttachmentCount: draftAttachmentCount, draftAttachmentOffer: draftAttachmentOffer, question: question, stopTarget: stopTarget, promptPresentation: promptPresentation ?? 0, queueTarget: queueTarget, lifecycle: lifecycle), chatPos - offset)
+        return (.guiAgentChat(visible: chatVisible, status: AgentStatus(rawValue: chatStatus), model: chatModel, thinkingLevel: chatThinkingLevel, prompt: chatPrompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: EditorMode(rawValue: promptVimMode), promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, draftAttachmentCount: draftAttachmentCount, draftAttachmentOffer: draftAttachmentOffer, question: question, stopTarget: stopTarget, promptPresentation: promptPresentation ?? 0, queueTarget: queueTarget, lifecycle: lifecycle, composerHints: composerHints), chatPos - offset)
 
     case .guiAgentHelp:
         guard rest + 4 <= data.endIndex else { throw ProtocolDecodeError.malformed }
@@ -4352,6 +4370,10 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
         var toolPos = pos + 8
         let name = try readRequiredString16(data: data, pos: &toolPos, end: end)
         let summary = try readRequiredString16(data: data, pos: &toolPos, end: end)
+        guard end >= toolPos + 1 else { throw ProtocolDecodeError.malformed }
+        let stepState = data[toolPos]
+        toolPos += 1
+        let step = Wire.ToolStep(text: try readRequiredString16(data: data, pos: &toolPos, end: end), state: stepState)
         guard end >= toolPos + 4 else { throw ProtocolDecodeError.malformed }
         let resultLen = Int(try readU32(data, toolPos))
         let resultStart = toolPos + 4
@@ -4362,20 +4384,20 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
         if end > baseOffset {
             let autoApprovedScope = data[baseOffset]
             if autoApprovedScope <= 2 {
-                let messageWithAuto = Wire.ChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, previewKind: 0, previewLines: []), retainedOutputOffer: retainedOffer)
+                let messageWithAuto = Wire.ChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, previewKind: 0, previewLines: [], step: step), retainedOutputOffer: retainedOffer)
                 try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                 candidates.append(DecodedChatMessageCandidate(message: messageWithAuto, nextOffset: baseOffset + 1))
                 if end > baseOffset + 1,
                    let preview = try? FrameDecodeAccounting.withCheckpoint({
                        try decodeToolPreview(data: data, start: baseOffset + 1, end: end)
                    }) {
-                    let messageWithPreview = Wire.ChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, previewKind: preview.kind, previewLines: preview.lines), retainedOutputOffer: retainedOffer)
+                    let messageWithPreview = Wire.ChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, previewKind: preview.kind, previewLines: preview.lines, step: step), retainedOutputOffer: retainedOffer)
                     try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                     candidates.append(DecodedChatMessageCandidate(message: messageWithPreview, nextOffset: preview.nextOffset))
                 }
             }
         }
-        let messageWithoutAuto = Wire.ChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, autoApprovedScope: 0, durationMs: duration, result: result, previewKind: 0, previewLines: []), retainedOutputOffer: retainedOffer)
+        let messageWithoutAuto = Wire.ChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, autoApprovedScope: 0, durationMs: duration, result: result, previewKind: 0, previewLines: [], step: step), retainedOutputOffer: retainedOffer)
         try FrameDecodeAccounting.reserve(.arrayEntries, 1)
         candidates.append(DecodedChatMessageCandidate(message: messageWithoutAuto, nextOffset: baseOffset))
         return candidates
@@ -4461,6 +4483,10 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
         var stcNamePos = pos + 8
         let stcName = try readRequiredString16(data: data, pos: &stcNamePos, end: end)
         let stcSummary = try readRequiredString16(data: data, pos: &stcNamePos, end: end)
+        guard end >= stcNamePos + 1 else { throw ProtocolDecodeError.malformed }
+        let stcStepState = data[stcNamePos]
+        stcNamePos += 1
+        let stcStep = Wire.ToolStep(text: try readRequiredString16(data: data, pos: &stcNamePos, end: end), state: stcStepState)
         guard end >= stcNamePos + 2 else { throw ProtocolDecodeError.malformed }
         let stcLineCount = Int(try readU16(data, stcNamePos))
         var stcLines: [[Wire.StyledTextRun]] = []
@@ -4513,20 +4539,20 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
         if end > stcBaseOffset {
             let stcAutoApprovedScope = data[stcBaseOffset]
             if stcAutoApprovedScope <= 2 {
-                let stcMessageWithAuto = Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, autoApprovedScope: stcAutoApprovedScope, durationMs: stcDuration, resultLines: stcLines, previewKind: 0, previewLines: []), retainedOutputOffer: retainedOffer)
+                let stcMessageWithAuto = Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, autoApprovedScope: stcAutoApprovedScope, durationMs: stcDuration, resultLines: stcLines, previewKind: 0, previewLines: [], step: stcStep), retainedOutputOffer: retainedOffer)
                 try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                 stcCandidates.append(DecodedChatMessageCandidate(message: stcMessageWithAuto, nextOffset: stcBaseOffset + 1))
                 if end > stcBaseOffset + 1,
                    let stcPreview = try? FrameDecodeAccounting.withCheckpoint({
                        try decodeToolPreview(data: data, start: stcBaseOffset + 1, end: end)
                    }) {
-                    let stcMessageWithPreview = Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, autoApprovedScope: stcAutoApprovedScope, durationMs: stcDuration, resultLines: stcLines, previewKind: stcPreview.kind, previewLines: stcPreview.lines), retainedOutputOffer: retainedOffer)
+                    let stcMessageWithPreview = Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, autoApprovedScope: stcAutoApprovedScope, durationMs: stcDuration, resultLines: stcLines, previewKind: stcPreview.kind, previewLines: stcPreview.lines, step: stcStep), retainedOutputOffer: retainedOffer)
                     try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                     stcCandidates.append(DecodedChatMessageCandidate(message: stcMessageWithPreview, nextOffset: stcPreview.nextOffset))
                 }
             }
         }
-        let stcMessageWithoutAuto = Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, autoApprovedScope: 0, durationMs: stcDuration, resultLines: stcLines, previewKind: 0, previewLines: []), retainedOutputOffer: retainedOffer)
+        let stcMessageWithoutAuto = Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, autoApprovedScope: 0, durationMs: stcDuration, resultLines: stcLines, previewKind: 0, previewLines: [], step: stcStep), retainedOutputOffer: retainedOffer)
         try FrameDecodeAccounting.reserve(.arrayEntries, 1)
         stcCandidates.append(DecodedChatMessageCandidate(message: stcMessageWithoutAuto, nextOffset: stcBaseOffset))
         return stcCandidates

@@ -111,19 +111,22 @@ func chromeFrameScenarios() []chromeFrameScenario {
 	review := protocol.StatusReview{Path: "lib/minga_editor/render_model/ui/review.ex", Freshness: protocol.ReviewStale}
 	conflict := review
 	conflict.ConflictIndex = 2
-	chat := protocol.AgentChat{Visible: true, Status: 1, ModelName: "anthropic:claude-sonnet-4", ThinkingLevel: "medium", Prompt: "ordinary draft", PromptVisibleRows: 1, InputFocused: true}
+	chat := protocol.AgentChat{Visible: true, Status: 1, ModelName: "anthropic:claude-sonnet-4", ThinkingLevel: "medium", Prompt: "ordinary draft", PromptVisibleRows: 1, InputFocused: true,
+		ComposerHints: []generated.ComposerHint{{Keys: "↩", Action: "send"}, {Keys: "i", Action: "insert"}}}
 	failed := protocol.AgentChat{
 		Visible: true, Status: agentStatusNeedsYou, Lifecycle: protocol.AgentChatFailed, LifecycleReason: "provider unavailable",
 		LifecycleRemedy: protocol.AgentStartRemedy{Kind: protocol.AgentStartRemedyRetry, Label: "Retry", KeyHint: "r"},
 		LifecycleNotice: protocol.AgentLifecycleNotice{Headline: "Agent session stopped", Note: "Your draft is saved. SPC a n starts a new session."},
 		ModelName:       "Not started", Prompt: "kept draft", PromptVisibleRows: 1,
 	}
-	tool := protocol.AgentChatMessage{ID: 7, Kind: agentKindTool, Name: "read_file", Summary: "lib/minga.ex", Result: "defmodule Minga do\nend", Status: 1, PreviewLines: []string{"defmodule Minga do"}, RetainedOutputOffer: [16]byte{1}}
+	tool := protocol.AgentChatMessage{ID: 7, Kind: agentKindTool, Name: "read_file", Summary: "lib/minga.ex", Step: "Read lib/minga.ex", State: 6, Result: "defmodule Minga do\nend", Status: 1, PreviewLines: []string{"defmodule Minga do"}, RetainedOutputOffer: [16]byte{1}}
 	collapsed := tool
 	collapsed.Collapsed = true
 	failedTool := tool
 	failedTool.IsError = true
 	failedTool.Status = 2
+	failedTool.Step = "Could not read lib/minga.ex"
+	failedTool.State = 5
 	approval := protocol.AgentChatMessage{ID: 8, Kind: agentKindApprovalTool, Name: "write_file", Summary: "lib/minga.ex", PreviewLines: []string{"+ defmodule Minga do", "+ end"}, ApprovalTarget: approvalControlTarget("A")}
 	return []chromeFrameScenario{
 		{"tabs", func(m Model) []string {

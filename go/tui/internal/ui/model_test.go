@@ -1503,7 +1503,7 @@ func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
 	model.transcript.apply(protocol.AgentTranscript{Present: true, Mode: 0, Epoch: 1, Messages: []protocol.AgentChatMessage{
 		{Kind: 0x01, Text: "please fix the agent view"},
 		{Kind: 0x02, Text: "I will make the agent surface semantic."},
-		{Kind: 0x04, Name: "read_file", Summary: "go/tui/internal/ui/render_surfaces.go", Status: 1, DurationMS: 25, Collapsed: true},
+		{Kind: 0x04, Name: "read_file", Summary: "go/tui/internal/ui/render_surfaces.go", Step: "Read go/tui/internal/ui/render_surfaces.go", State: 6, Status: 1, DurationMS: 25, Collapsed: true},
 		{Kind: 0x09, Name: "edit_file", Summary: "Update agent renderer", PreviewLines: []string{"+ semantic panel"}},
 		{Kind: 0x06, Usage: protocol.AgentUsage{Input: 1200, Output: 300, CostMicros: 500}},
 		{Kind: 0x01, Text: "now explain the renderer"},
@@ -1511,7 +1511,7 @@ func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
 	}})
 
 	view := ansi.Strip(strings.Join(model.renderAgentChatPanelWithLimit(chat, 120, 28), "\n"))
-	for _, want := range []string{"󰚩 Agent", "anthropic / claude-sonnet-4", "◌ medium", "Read", "read_file", "path:", "Approval edit_file", "This turn reported no usage.", "Usage", "NORMAL", "fix the renderer", "◇ Session", "Provider", "Model", "Latest usage", "Input    1.2K", "Output   300", "Hints", "╰"} {
+	for _, want := range []string{"󰚩 Agent", "anthropic / claude-sonnet-4", "◌ medium", "● Read go/tui/internal/ui/render_surfaces.go", "Approval edit_file", "This turn reported no usage.", "Usage", "NORMAL", "fix the renderer", "◇ Session", "Provider", "Model", "Latest usage", "Input    1.2K", "Output   300", "Hints", "╰"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("agent chat panel missing %q in %q", want, view)
 		}
@@ -1532,7 +1532,7 @@ func TestAgentChatAssistantMarkdownCodeCardPreservesBlankLinesAndTruncates(t *te
 	if !strings.Contains(view, "›") {
 		t.Fatalf("markdown code card should mark truncated code lines: %q", view)
 	}
-	if !strings.Contains(view, "│ │ ") {
+	if !strings.Contains(view, "\n    │ ") {
 		t.Fatalf("markdown code card should preserve blank code rows: %q", view)
 	}
 }
@@ -1579,7 +1579,7 @@ func TestAgentChatAssistantStyledLinesPreserveCodeIndentationAndOverflow(t *test
 	msg := protocol.AgentChatMessage{Kind: agentKindStyled, StyledLines: styledLines}
 
 	view := ansi.Strip(strings.Join(model.renderAgentAssistantMessage(msg, 80), "\n"))
-	if !strings.Contains(view, "│   def hello do") || !strings.Contains(view, "│     :world") {
+	if !strings.Contains(view, "      def hello do") || !strings.Contains(view, "        :world") {
 		t.Fatalf("styled assistant should preserve code indentation: %q", view)
 	}
 	if !strings.Contains(view, "… +3 lines · ⏎ expand") {
@@ -1674,47 +1674,54 @@ func TestAgentChatToolExpandedRendersMultipleResultLines(t *testing.T) {
 		Kind:      agentKindTool,
 		Name:      "grep",
 		Summary:   "TODO in lib",
+		Step:      "Searched for TODO in lib",
+		State:     6,
 		Status:    1,
 		Collapsed: false,
 		Result:    "first match\nsecond match\nthird match",
 	}
 
 	view := ansi.Strip(strings.Join(model.renderAgentToolMessage(msg, 96), "\n"))
-	for _, want := range []string{"Tool", "TODO in lib", "first match", "second match", "third match"} {
+	for _, want := range []string{"● Searched for TODO in lib", "first match", "second match", "third match"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("expanded tool result missing %q in %q", want, view)
 		}
 	}
 }
 
-func TestAgentChatToolCollapsedShowsExpansionHint(t *testing.T) {
+func TestAgentChatToolCollapsedIsOneLine(t *testing.T) {
 	model := New(96, 24, nil)
 	msg := protocol.AgentChatMessage{
 		Kind:      agentKindTool,
 		Name:      "read_file",
 		Summary:   "lib/app.ex",
+		Step:      "Read lib/app.ex",
+		State:     6,
 		Status:    1,
 		Collapsed: true,
 		Result:    "line one\nline two",
 	}
 
-	view := ansi.Strip(strings.Join(model.renderAgentToolMessage(msg, 96), "\n"))
-	if !strings.Contains(view, "result collapsed") || !strings.Contains(view, "Ctrl+Alt+X") {
-		t.Fatalf("collapsed tool should show expansion hint: %q", view)
+	rows := model.renderAgentToolMessage(msg, 96)
+	view := ansi.Strip(strings.Join(rows, "\n"))
+	if len(rows) != 1 || !strings.Contains(view, "● Read lib/app.ex") {
+		t.Fatalf("a collapsed tool step is one line with its sentence: %q", view)
 	}
 	if strings.Contains(view, "line two") {
 		t.Fatalf("collapsed tool should not dump result lines: %q", view)
 	}
 }
 
-func TestAgentChatToolRendersInlineDiffPreview(t *testing.T) {
+func TestAgentChatToolExpandedRendersInlineDiffPreview(t *testing.T) {
 	model := New(96, 24, nil)
 	msg := protocol.AgentChatMessage{
 		Kind:         agentKindTool,
 		Name:         "edit_file",
 		Summary:      "lib/app.ex",
+		Step:         "Edited lib/app.ex",
+		State:        6,
 		Status:       1,
-		Collapsed:    true,
+		Collapsed:    false,
 		PreviewKind:  1,
 		PreviewLines: []string{"file: lib/app.ex", "-old", "+new"},
 	}

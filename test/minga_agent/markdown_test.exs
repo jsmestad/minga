@@ -311,6 +311,37 @@ defmodule MingaAgent.MarkdownTest do
       result = Markdown.parse_inline("Hello 🌍 world")
       assert [{"Hello 🌍 world", :plain}] = result
     end
+
+    test "an underscore inside a word is part of the word, not emphasis" do
+      for text <- [
+            "A 429 with usage_limit_reached is its own case.",
+            "Call Minga.Buffer.apply_edit or insert_text here",
+            "snake__case__name and file_name.ex",
+            "ünï_cödé_näme and v2_final_3"
+          ] do
+        assert Markdown.parse_inline(text) == [{text, :plain}]
+      end
+    end
+
+    test "underscores around a word or a phrase still mark emphasis" do
+      assert Markdown.parse_inline("this is _really_ slow") ==
+               [{"this is ", :plain}, {"really", :italic}, {" slow", :plain}]
+
+      assert Markdown.parse_inline("__never__ call it") ==
+               [{"never", :bold}, {" call it", :plain}]
+
+      assert Markdown.parse_inline("(_two words_)") ==
+               [{"(", :plain}, {"two words", :italic}, {")", :plain}]
+
+      # The span closes at the end of a word, so a name inside it keeps its underscores.
+      assert Markdown.parse_inline("see _usage_limit_reached_ here") ==
+               [{"see ", :plain}, {"usage_limit_reached", :italic}, {" here", :plain}]
+    end
+
+    test "an underscore that opens nothing stays as typed" do
+      assert Markdown.parse_inline("_private and _other") == [{"_private and _other", :plain}]
+      assert Markdown.parse_inline("a _ b") == [{"a _ b", :plain}]
+    end
   end
 
   describe "extract_code_blocks/1" do

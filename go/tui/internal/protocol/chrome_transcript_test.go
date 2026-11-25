@@ -120,6 +120,8 @@ func TestDecodeAgentTranscriptRetainedBodyFields(t *testing.T) {
 	tool = append(tool, u32Bytes(25)...)
 	tool = append(tool, string16("read_file")...)
 	tool = append(tool, string16("lib/app.ex")...)
+	tool = append(tool, 5)
+	tool = append(tool, string16("Could not read lib/app.ex")...)
 	tool = append(tool, u32Bytes(2)...)
 	tool = append(tool, []byte("ok")...)
 	tool = append(tool, 1, 3)
@@ -130,6 +132,8 @@ func TestDecodeAgentTranscriptRetainedBodyFields(t *testing.T) {
 	styledTool = append(styledTool, u32Bytes(42)...)
 	styledTool = append(styledTool, string16("shell")...)
 	styledTool = append(styledTool, string16("ran")...)
+	styledTool = append(styledTool, 6)
+	styledTool = append(styledTool, string16("Ran `ran`")...)
 	styledTool = append(styledTool, 0, 1, 0, 1)
 	markdown := []byte{0x0A, 0, 1}
 	markdown = append(markdown, u32Bytes(77)...)
@@ -204,6 +208,9 @@ func TestDecodeAgentTranscriptRetainedBodyFields(t *testing.T) {
 	styledToolRun := got.Messages[5].StyledLines[0][0]
 	if got.Messages[5].Name != "shell" || got.Messages[5].Summary != "ran" || got.Messages[5].Status != 1 || !got.Messages[5].IsError || !got.Messages[5].Collapsed || got.Messages[5].DurationMS != 42 || got.Messages[5].Result != "done" || got.Messages[5].AutoApprovedScope != 2 || got.Messages[5].PreviewKind != 1 || got.Messages[5].PreviewLines[0] != "-old" || styledToolRun.Text != "done" || styledToolRun.FG != 0x98BE65 || styledToolRun.BG != 0x21242B || !styledToolRun.Code() {
 		t.Fatalf("styled tool fields not retained: %+v", got.Messages[5])
+	}
+	if got.Messages[4].State != 5 || got.Messages[4].Step != "Could not read lib/app.ex" || got.Messages[5].State != 6 || got.Messages[5].Step != "Ran `ran`" {
+		t.Fatalf("tool steps not retained: %q/%d %q/%d", got.Messages[4].Step, got.Messages[4].State, got.Messages[5].Step, got.Messages[5].State)
 	}
 	if plain, styled := got.Messages[9], got.Messages[10]; plain.Kind != 0x04 || styled.Kind != 0x08 ||
 		plain.RetainedOutputOffer != offer || styled.RetainedOutputOffer != offer ||
@@ -401,6 +408,8 @@ func TestDecodeCommittedToolOutcomeBytes(t *testing.T) {
 				body = append(body, u32Bytes(0)...)
 				body = append(body, string16("shell")...)
 				body = append(body, string16("echo example")...)
+				body = append(body, 1)
+				body = append(body, string16("Running `echo example`")...)
 				if kind == 0x08 {
 					body = append(body, 0, 1, 0, 1) // one styled line and run
 					body = append(body, string16(explanation)...)

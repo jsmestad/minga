@@ -56,6 +56,8 @@ func cardSpineState(status byte) (generated.SpineState, bool) {
 		return generated.StateDone, true
 	case 5:
 		return generated.StateFailed, true
+	case 6:
+		return generated.StateStopped, true
 	default:
 		return 0, false
 	}

@@ -70,6 +70,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentContextEncoder do
   defp status_to_byte(:needs_you), do: 3
   defp status_to_byte(:done), do: 4
   defp status_to_byte(:errored), do: 5
+  defp status_to_byte(:stopped), do: 6
 
   @spec encode_progress(AgentContext.t()) :: binary()
   defp encode_progress(%AgentContext{progress: progress}) do

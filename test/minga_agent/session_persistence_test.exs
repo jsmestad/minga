@@ -1310,6 +1310,58 @@ defmodule MingaAgent.SessionPersistenceTest do
     assert :sys.get_state(session).continuation.active_request.request_id == request.request_id
   end
 
+  test "a seeded finished tool call is the assistant's call and its paired result; a running one is refused" do
+    session =
+      start_test_session(
+        provider: Minga.Test.SessionMockProvider,
+        provider_opts: [],
+        persist?: false
+      )
+
+    expired = %{
+      MingaAgent.ToolCall.new("t2", "shell", %{"command" => "ls"})
+      | status: :error,
+        terminal_reason: :approval_timeout,
+        result: "expired",
+        is_error: true
+    }
+
+    calls = [
+      {:tool_call,
+       %{
+         MingaAgent.ToolCall.new("t1", "read_file", %{"path" => "a.ex"})
+         | status: :complete,
+           result: "ok"
+       }},
+      {:tool_call, expired}
+    ]
+
+    assert :ok = Session.seed_messages(session, [{:user, "go"} | calls])
+    assert Enum.take(Session.messages(session), -2) == calls
+
+    model = :sys.get_state(session).continuation.messages
+
+    assert [
+             %{role: :user},
+             %{role: :assistant, tool_calls: [first]},
+             %{role: :tool} = ok,
+             %{role: :assistant, tool_calls: [second]},
+             %{role: :tool} = failed
+           ] =
+             model
+
+    assert {first.id, ok.tool_call_id, ok.metadata.tool_outcome} == {"t1", "t1", :complete}
+    assert {second.id, failed.tool_call_id} == {"t2", "t2"}
+
+    assert {failed.metadata.tool_outcome, failed.metadata.tool_outcome_reason} ==
+             {:error, :approval_timeout}
+
+    running = {:tool_call, MingaAgent.ToolCall.new("t3", "shell", %{"command" => "ls"})}
+
+    assert {:error, {:unsupported_seed_message, ^running}} =
+             Session.seed_messages(session, [running])
+  end
+
   test "branching an entry without a model boundary leaves the transcript unchanged" do
     session =
       start_test_session(
@@ -1732,7 +1784,8 @@ defmodule MingaAgent.SessionPersistenceTest do
   @tag :tmp_dir
   test "live Stop and provider death reconcile retained output without replacing a saved winner",
        %{tmp_dir: dir} do
-    for interruption <- [:stop, :provider_death] do
+    # :stop is the old abort; :user_stop is Stop (⌘. or SPC a s), which ends the turn stopped.
+    for interruption <- [:stop, :user_stop, :provider_death] do
       session =
         start_test_session(
           provider_restart_backoff_base_ms: 30_000,
@@ -1874,6 +1927,10 @@ defmodule MingaAgent.SessionPersistenceTest do
             assert :ok = Session.abort(session)
             :idle
 
+          :user_stop ->
+            assert :ok = Session.stop_turn(session, {record_id, request.request_id})
+            :stopped
+
           :provider_death ->
             Process.exit(Session.get_provider(session), :kill)
             assert_receive {:agent_event, ^session, {:status_changed, :error}}, @event_timeout
@@ -1898,8 +1955,12 @@ defmodule MingaAgent.SessionPersistenceTest do
               do: {id, message}
         )
 
+      # A step the user stopped reads as stopped, not failed; the model is still told
+      # its outcome is uncertain.
+      step_status = if interruption == :user_stop, do: :cancelled, else: :error
+
       for id <- ["retained-stop", "legacy-stop"] do
-        assert stopped[id].status == :error
+        assert stopped[id].status == step_status
         assert stopped[id].terminal_reason == nil
         assert stopped[id].is_error
         refute stopped[id].collapsed
@@ -1928,7 +1989,7 @@ defmodule MingaAgent.SessionPersistenceTest do
       assert stopped["legacy-stop"].output == nil
       assert stopped["legacy-stop"].result =~ "legacy captured chunk\n"
       assert Map.get(results["legacy-stop"].metadata, :output) == nil
-      expected_outcome = if interruption == :stop, do: :cancelled, else: :error
+      expected_outcome = if interruption in [:stop, :user_stop], do: :cancelled, else: :error
       assert stopped["unadmitted-stop"].status == expected_outcome
       assert stopped["unadmitted-stop"].duration_ms == nil
       assert stopped["unadmitted-stop"].terminal_reason == nil
@@ -1943,6 +2004,14 @@ defmodule MingaAgent.SessionPersistenceTest do
 
         assert stopped["unadmitted-stop"].result =~ "legacy pre-approval bytes"
       end
+
+      reconciliation_notice? =
+        Enum.any?(Session.messages(session), fn
+          {:system, text, _level} -> text =~ "reconciled without replay"
+          _message -> false
+        end)
+
+      assert reconciliation_notice? == (interruption != :user_stop)
 
       assert stopped["saved-stop"] === before_stop["saved-stop"]
       assert results["saved-stop"] === saved_result

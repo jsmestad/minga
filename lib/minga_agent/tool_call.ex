@@ -134,6 +134,28 @@ defmodule MingaAgent.ToolCall do
       when status in [:complete, :denied, :cancelled, :error],
       do: tc
 
+  @doc """
+  Marks a call the user stopped mid-run: it is cancelled, not failed, and keeps its captured output and expansion. Its outcome may still be uncertain; the transcript says it was stopped.
+  """
+  @spec stop(t()) :: t()
+  def stop(%__MODULE__{status: :running} = tc) do
+    %{
+      tc
+      | status: :cancelled,
+        terminal_reason: nil,
+        result: stopped_text(tc.result),
+        is_error: true,
+        duration_ms: terminal_duration(tc, :cancelled, nil)
+    }
+  end
+
+  def stop(%__MODULE__{status: status} = tc)
+      when status in [:complete, :denied, :cancelled, :error],
+      do: tc
+
+  defp stopped_text(""), do: "stopped"
+  defp stopped_text(partial), do: "stopped\n\n" <> partial
+
   defp aborted_text(""), do: "aborted"
   defp aborted_text(partial), do: "aborted\n\n" <> partial
 

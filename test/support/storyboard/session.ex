@@ -52,6 +52,8 @@ defmodule Minga.Test.Storyboard.Session do
 
   `:minga` puts Minga in an Agent status before the first key, for example `:thinking` for "Minga is working". The status goes into the editor's live presentation cache, the value every surface reads, so the modeline, the activity card and the rest show it the way they would for a running session. The factory has no running session, so nothing changes the status afterwards.
 
+  `:conversation` starts a real Agent session before the first key, so `SPC a v` opens a conversation that already has a transcript and a turn. It takes `messages:` (`MingaAgent.Message` values seeded into the transcript, default none), `prompt:` (the message that starts the turn), `turn:` (`:idle`, `:working` or `:stopped`, default `:idle`) and `queue:` (follow-up messages queued while Minga works, kept by a stop). The session runs on a provider that never finishes a turn, so a working turn stays working; the fixture returns to the file before the first key, as the cold start expects.
+
   The storyboard renderer (#4036) adds four more: `:root` (a fixed project directory, so the path the chrome shows is the same on every machine; the caller keeps it unique among concurrent sessions in one run, and the directory is written atomically and never deleted, so concurrent runs on one machine can share it), `:theme` (a built-in theme name such as `:astrodark`, set on a private options server before the editor starts), `:capabilities` (the `MingaEditor.Frontend.Capabilities` the frontend would report), and `:record_packets` (keep every packet for `packets/1`).
   """
   @spec start(keyword()) :: t()
@@ -75,7 +77,7 @@ defmodule Minga.Test.Storyboard.Session do
         rendering: Keyword.get(opts, :rendering, :disabled),
         record_packets: Keyword.get(opts, :record_packets, false),
         parser_manager: parser
-      ]
+      ] ++ conversation_editor_opts(Keyword.get(opts, :conversation))
 
     {theme_opts, theme_children} = theme_opts(Keyword.get(opts, :theme))
 
@@ -89,6 +91,7 @@ defmodule Minga.Test.Storyboard.Session do
     await_highlights!(ctx, parser)
     install_minga_status(ctx, Keyword.get(opts, :minga))
     install_git_status(ctx, root, Keyword.get(opts, :git_status))
+    start_conversation(ctx, Keyword.get(opts, :conversation))
 
     session = %__MODULE__{
       ctx: ctx,
@@ -101,6 +104,145 @@ defmodule Minga.Test.Storyboard.Session do
 
     %{session | home_window: window_id(session)}
   end
+
+  @typedoc "The `:conversation` start option."
+  @type conversation :: [
+          messages: [MingaAgent.Message.t()],
+          notices: [{String.t(), :info | :warning | :error}],
+          prompt: String.t(),
+          turn: :idle | :working | :stopped,
+          queue: [String.t()]
+        ]
+
+  @spec conversation_editor_opts(conversation() | nil) :: keyword()
+  defp conversation_editor_opts(nil), do: []
+
+  defp conversation_editor_opts(_conversation),
+    do: [
+      agent_provider_module: Minga.Test.SessionSlowMockProvider,
+      agent_arrival_budget_ms: 4_000
+    ]
+
+  # Opens the conversation once to start its session, fills it through the
+  # Session API, then closes it so the scenario's own keys open it again.
+  @spec start_conversation(EditorCase.editor_ctx(), conversation() | nil) :: :ok
+  defp start_conversation(_ctx, nil), do: :ok
+
+  defp start_conversation(ctx, conversation) do
+    conversation =
+      Keyword.validate!(conversation,
+        messages: [],
+        notices: [],
+        prompt: nil,
+        turn: :idle,
+        queue: []
+      )
+
+    EditorCase.send_keys_sync(ctx, "<SPC>av")
+    session = await_conversation_session!(ctx)
+
+    if conversation[:messages] != [],
+      do: :ok = MingaAgent.Session.seed_messages(session, conversation[:messages])
+
+    # Notices follow the seeded messages, the way Minga adds them to a conversation.
+    for {text, level} <- conversation[:notices],
+        do: MingaAgent.Session.add_system_message(session, text, level)
+
+    run_turn(ctx, session, conversation)
+    await_transcript!(ctx, session)
+    EditorCase.send_keys_sync(ctx, "<Esc><Esc><SPC>av")
+
+    EditorCase.wait_until(ctx, &(not &1.workspace.agent_ui.panel.visible),
+      max_attempts: 500,
+      message: "expected the storyboard conversation's split to close before the first key"
+    )
+
+    :ok
+  end
+
+  # The Editor names the task and fills its transcript when it hears the Session's
+  # messages changed; wait for that, so every theme's frame starts from the same state.
+  @spec await_transcript!(EditorCase.editor_ctx(), pid()) :: map()
+  defp await_transcript!(ctx, session) do
+    expected = length(MingaAgent.Session.messages(session))
+
+    EditorCase.wait_until(
+      ctx,
+      fn state ->
+        MingaEditor.Agent.UIState.TranscriptProjection.source_count(
+          state.workspace.agent_ui.panel.transcript
+        ) == expected
+      end,
+      max_attempts: 500,
+      message: "expected the Editor to hold the storyboard conversation's transcript"
+    )
+  end
+
+  @spec run_turn(EditorCase.editor_ctx(), pid(), conversation()) :: :ok
+  defp run_turn(ctx, session, conversation) do
+    case conversation[:turn] do
+      :idle ->
+        :ok
+
+      turn when turn in [:working, :stopped] ->
+        :ok = MingaAgent.Session.send_prompt(session, conversation[:prompt] || "Keep going")
+        await_working!(ctx)
+
+        for text <- conversation[:queue] do
+          {:queued, :follow_up} = MingaAgent.Session.queue_follow_up(session, text)
+        end
+
+        if turn == :stopped, do: stop_turn!(ctx, session)
+        :ok
+    end
+  end
+
+  @spec stop_turn!(EditorCase.editor_ctx(), pid()) :: :ok
+  defp stop_turn!(ctx, session) do
+    %{stop_target: {_, _} = target} = MingaAgent.Session.editor_snapshot(session)
+    :ok = MingaAgent.Session.stop_turn(session, target)
+
+    EditorCase.wait_until(ctx, &(agent_status(&1) == :stopped),
+      max_attempts: 500,
+      message: "expected the storyboard conversation to stop"
+    )
+
+    :ok
+  end
+
+  @spec await_working!(EditorCase.editor_ctx()) :: map()
+  defp await_working!(ctx) do
+    EditorCase.wait_until(ctx, &(agent_status(&1) in [:thinking, :tool_executing]),
+      max_attempts: 500,
+      message: "expected the storyboard conversation to be working"
+    )
+  end
+
+  @spec await_conversation_session!(EditorCase.editor_ctx()) :: pid()
+  defp await_conversation_session!(ctx) do
+    state =
+      EditorCase.wait_until(
+        ctx,
+        fn state ->
+          session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
+
+          is_pid(session) and
+            match?(
+              %{connection: %{provider_phase: :running, target: %{session: ^session}}},
+              state.workspace.agent_ui
+            )
+        end,
+        max_attempts: 500,
+        interval_ms: 20,
+        message: "expected SPC a v to start the storyboard conversation's session"
+      )
+
+    MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
+  end
+
+  @spec agent_status(map()) :: atom()
+  defp agent_status(state),
+    do: MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state).runtime.status
 
   @spec install_minga_status(EditorCase.editor_ctx(), Minga.Design.Tokens.agent_status() | nil) ::
           :ok
@@ -189,33 +331,104 @@ defmodule Minga.Test.Storyboard.Session do
   @doc "The text grid the headless frontend shows now, one string per row. Requires `rendering: :enabled`."
   @spec screen_text(t()) :: [String.t()]
   def screen_text(%__MODULE__{ctx: ctx}) do
-    _ = EditorCase.editor_state(ctx)
+    await_rendered!(ctx)
     Minga.Test.HeadlessPort.get_screen_text(ctx.port)
   end
 
-  @doc "The number of tree-sitter highlight spans the active buffer carries now. Zero without a parser."
-  @spec highlight_span_count(t()) :: non_neg_integer()
-  def highlight_span_count(%__MODULE__{ctx: ctx}) do
-    ctx |> EditorCase.editor_state() |> highlight_spans() |> tuple_size()
+  # A key schedules its render on a short timer, so the grid can lag the editor.
+  # A conversation that is still arriving holds its frame back, so nothing is
+  # scheduled yet while the grid still shows the tab the user left. Wait until no
+  # frame is held or scheduled and the frontend has acknowledged the latest one.
+  @spec await_rendered!(EditorCase.editor_ctx()) :: map()
+  defp await_rendered!(ctx) do
+    alias MingaEditor.State.RenderCorrelation
+
+    EditorCase.wait_until(
+      ctx,
+      fn %{render: %{render_correlation: correlation}} = state ->
+        not MingaEditor.Agent.Arrival.defer_frame?(state) and
+          not RenderCorrelation.scheduled?(correlation) and
+          RenderCorrelation.last_receipt_revision(correlation) ==
+            RenderCorrelation.latest_intent_revision(correlation)
+      end,
+      max_attempts: 500,
+      message: "expected the headless frontend to show the editor's latest frame"
+    )
   end
 
-  @doc "Resizes the editor's grid to `cols` x `rows`, the way a frontend reports a new row fit, and waits for the frame."
+  @doc """
+  The most tree-sitter highlight spans any open buffer carries now. Zero without a parser.
+
+  It reads every buffer, not only the active one, so a scenario whose focus is elsewhere (the composer, a picker) still proves the file beside it shows real colours.
+  """
+  @spec highlight_span_count(t()) :: non_neg_integer()
+  def highlight_span_count(%__MODULE__{ctx: ctx}) do
+    state = EditorCase.editor_state(ctx)
+
+    state.parser.highlighting.highlights
+    |> Map.values()
+    |> Enum.map(&tuple_size(&1.spans))
+    |> Enum.max(fn -> 0 end)
+  end
+
+  @doc """
+  The rows a terminal's header takes above the grid at `cols` columns, read from the frame the editor would commit now.
+
+  It mirrors `headerChrome` in go/tui/internal/ui/render_chrome.go: the workspace bar when there is more than one workspace, the tab bar, and the breadcrumb from `breadcrumb_min_cols` columns up when it has segments. It is never less than one row.
+  """
+  @spec tui_header_rows(t(), pos_integer(), pos_integer()) :: pos_integer()
+  def tui_header_rows(%__MODULE__{ctx: ctx}, cols, breadcrumb_min_cols) do
+    ui = ctx |> EditorCase.editor_state() |> semantic_ui()
+
+    rows =
+      Enum.count(
+        [
+          match?(%{workspaces: [_, _ | _]}, ui.workspaces),
+          match?(%{tabs: [_ | _]}, ui.tab_bar),
+          cols >= breadcrumb_min_cols and match?(%{segments: [_ | _]}, ui.breadcrumb)
+        ],
+        & &1
+      )
+
+    max(rows, 1)
+  end
+
+  @doc "Reports a new grid size, the way a frontend does when its row fit or its header changes, and waits for the frame laid out for it."
   @spec resize(t(), pos_integer(), pos_integer()) :: t()
-  def resize(%__MODULE__{ctx: ctx} = session, cols, rows),
-    do: %{session | ctx: EditorCase.send_resize(ctx, cols, rows)}
+  def resize(%__MODULE__{ctx: ctx} = session, cols, rows) do
+    ctx = EditorCase.send_resize(ctx, cols, rows)
+    await_rendered!(ctx)
+    %{session | ctx: ctx}
+  end
 
   @doc "Returns the semantic frame the editor would commit now."
   @spec model(t()) :: Model.t()
   def model(%__MODULE__{ctx: ctx}) do
     state = EditorCase.editor_state(ctx)
+    ui = semantic_ui(state)
+
+    ui |> with_resident_transcript(state) |> Model.from_ui(state.appearance.theme)
+  end
+
+  @spec semantic_ui(map()) :: Minga.RenderModel.UI.t()
+  defp semantic_ui(state) do
     status_bar = StatusBarData.from_state(state)
     minibuffer = MinibufferData.from_state(state)
 
     {ui, _context} =
       state |> Context.from_editor_state() |> UIBuilder.build_ui(status_bar, minibuffer)
 
-    Model.from_ui(ui, state.appearance.theme)
+    ui
   end
+
+  # The conversation's resident transcript belongs to the renderer, so a model
+  # built from editor state alone has no messages. Admit a fresh seed the way a
+  # new renderer would, so checks see the transcript the frontends draw.
+  @spec with_resident_transcript(Minga.RenderModel.UI.t(), map()) :: Minga.RenderModel.UI.t()
+  defp with_resident_transcript(%{agent_chat: %{visible?: true}} = ui, state),
+    do: %{ui | agent_chat: Minga.Test.AgentWorkflowDriver.chat_model(state)}
+
+  defp with_resident_transcript(ui, _state), do: ui
 
   @doc """
   Stops the session's editor, buffer and headless port before the test ends.
@@ -428,6 +641,8 @@ defmodule Minga.Test.Storyboard.Session do
   # Without a root, every session gets a fresh private project. A fixed root (the renderer's) is shared by every run
   # on the machine, including concurrent runs in other worktrees, so it is never deleted: its files are written
   # atomically with the same content every time, and a run never removes a project another run is using.
+  # Its saved workspaces are cleared, though: the editor restores them at start, so a capture would otherwise
+  # show the task names and tabs an earlier capture left there instead of the scenario's own.
   @spec make_project(Path.t() | nil, Path.t(), String.t()) :: Path.t()
   defp make_project(nil, file_name, content) do
     root = Path.join(System.tmp_dir!(), "minga-storyboard-#{System.unique_integer([:positive])}")
@@ -435,7 +650,10 @@ defmodule Minga.Test.Storyboard.Session do
     write_project(root, file_name, content)
   end
 
-  defp make_project(root, file_name, content), do: write_project(root, file_name, content)
+  defp make_project(root, file_name, content) do
+    File.rm_rf!(Path.join([root, ".minga", "workspaces"]))
+    write_project(root, file_name, content)
+  end
 
   @spec write_project(Path.t(), Path.t(), String.t()) :: Path.t()
   defp write_project(root, file_name, content) do

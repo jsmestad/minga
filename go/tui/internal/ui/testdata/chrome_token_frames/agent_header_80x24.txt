@@ -1,4 +1,4 @@
 󰚩 Agent  anthropic / claude-sonnet-4       ◐ Working   ◌ medium [History] [Help]
-    ────────────────────────────────────────────────────────────────────────────
+
 Queued  next prompt waits
 │ Enter  send                          │

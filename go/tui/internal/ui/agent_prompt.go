@@ -156,21 +156,17 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 }
 
 // agentComposerKeyHints returns the composer's key hints, most important first; each is shown while it fits.
-// The composer is a Vim buffer: Enter adds a newline in Insert and sends from Normal (and in CUA).
-// During a failed start the remedy's key comes from the BEAM, so the hint names the key that runs it.
+// The BEAM authors the hints for the composer's mode and the turn's state, so the TUI and the GUI say the same
+// keys. During a failed start the remedy's key comes first.
 func agentComposerKeyHints(chat protocol.AgentChat) []string {
-	insert := chat.PromptVimMode == 1
+	hints := make([]string, 0, len(chat.ComposerHints)+1)
 	if chat.Lifecycle == protocol.AgentChatFailed && chat.LifecycleRemedy.Kind != protocol.AgentStartRemedyNone {
-		remedy := " · " + chat.LifecycleRemedy.KeyHint + " " + strings.ToLower(chat.LifecycleRemedy.Label)
-		if insert {
-			return []string{remedy, " · Enter newline"}
-		}
-		return []string{remedy}
+		hints = append(hints, " · "+chat.LifecycleRemedy.KeyHint+" "+strings.ToLower(chat.LifecycleRemedy.Label))
 	}
-	if insert {
-		return []string{" · Enter newline", " · Alt+Enter queue", " · Esc normal"}
+	for _, hint := range chat.ComposerHints {
+		hints = append(hints, " · "+hint.Keys+" "+hint.Action)
 	}
-	return []string{" · Enter send", " · i insert"}
+	return hints
 }
 
 func agentComposerControls(chat protocol.AgentChat, width int) (control, question, attachments string) {

@@ -228,15 +228,15 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
     end
 
     test "speak, with the status bar and chat header, the state the token table gives each status" do
-      # The card names a running tool iterating only to say what the working state is doing,
-      # and has no stopped status, so a stopped session reads idle there.
+      # The card names a running tool iterating only to say what the working state is doing.
       card_states = %{
         working: [:working],
         iterating: [:working],
         needs_you: [:needs_you],
         errored: [:failed],
         done: [:done],
-        idle: [nil, :stopped]
+        stopped: [:stopped],
+        idle: [nil]
       }
 
       # Live statuses come from an attached session; stored ones from a detached workspace,

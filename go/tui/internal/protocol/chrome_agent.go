@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strings"
+
+	"github.com/jsmestad/minga/go/tui/internal/generated"
 )
 
 func decodeAgentContext(payload []byte) (AgentContext, string, int) {
@@ -180,6 +182,10 @@ func decodeAgentChat(payload []byte) (AgentChat, string, int) {
 			requestID, end, ok := readString16(section, next)
 			if ok && requestID != "" && len(section)-end == 8 {
 				chat.QueueTarget = AgentQueueTarget{AgentStopTarget{sessionID, requestID}, binary.BigEndian.Uint64(section[end:])}
+			}
+		case 0x10:
+			if hints, _, err := generated.DecodeGuiAgentChatComposerHints(section, 0, len(section)); err == nil {
+				chat.ComposerHints = hints.Hints
 			}
 		case 0x0F:
 			if lifecycle, ok := decodeAgentChatLifecycle(section); ok {
@@ -408,6 +414,15 @@ func decodeToolCallMessage(msg AgentChatMessage, body []byte, offset int, styled
 	}
 	msg.Summary = summary
 	msg.Text = strings.TrimSpace(name + " " + summary)
+	if len(body) < next+1 {
+		return msg, false
+	}
+	msg.State = body[next]
+	step, next, ok := readString16(body, next+1)
+	if !ok {
+		return msg, false
+	}
+	msg.Step = step
 
 	if styled {
 		lines, afterLines, ok := decodeStyledLines(body, next)

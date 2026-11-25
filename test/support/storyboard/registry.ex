@@ -84,12 +84,26 @@ defmodule Minga.Test.Storyboard.Registry do
 
     case entry.reach do
       "" -> session
-      path -> Session.press(session, path)
+      path -> session |> Session.press(path) |> await_recognized(entry)
     end
   end
 
   def drive(%Entry{id: id, status: {:pending, issue, reason}}, _opts) do
     raise ArgumentError, "#{id} is pending ##{issue} (#{reason}) and cannot be driven yet"
+  end
+
+  # Some keys finish their work after the key is handled (opening the
+  # conversation waits for the model catalog), so wait until the frame is the
+  # scenario before anyone looks at it.
+  @spec await_recognized(Session.t(), Entry.t()) :: Session.t()
+  defp await_recognized(%Session{ctx: ctx} = session, %Entry{id: id, recognize: recognize}) do
+    Minga.Test.EditorCase.wait_until(ctx, fn _state -> recognize.(Session.model(session)) end,
+      max_attempts: 250,
+      interval_ms: 20,
+      message: "expected #{id}'s reach keys to land on #{id}"
+    )
+
+    session
   end
 
   @doc """

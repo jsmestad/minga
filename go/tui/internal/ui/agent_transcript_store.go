@@ -398,7 +398,7 @@ func (p *transcriptPlan) commit() {
 // styled/markdown/preview payloads. Shared decoded strings still count once per
 // occurrence, so revisions and removals have exact additive resource effects.
 func transcriptPayloadBytes(message protocol.AgentChatMessage) uint64 {
-	total := uint64(len(message.Text)) + uint64(len(message.Name)) + uint64(len(message.Summary)) + uint64(len(message.Result))
+	total := uint64(len(message.Text)) + uint64(len(message.Name)) + uint64(len(message.Summary)) + uint64(len(message.Result)) + uint64(len(message.Step))
 	total += uint64(len(message.ApprovalTarget.SessionID)) + uint64(len(message.ApprovalTarget.RequestID)) + uint64(len(message.ApprovalTarget.ToolCallID))
 	total += transcriptStyledBytes(message.StyledLines)
 	for _, block := range message.MarkdownBlocks {

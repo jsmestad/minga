@@ -953,6 +953,42 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert Minga.Editing.mode(new_state) == :normal
     end
 
+    test "stops a turn the runtime status does not report as working" do
+      # A turn in plan mode reports :plan, a starting turn :idle, and a turn that
+      # reported an error and kept running :error. The composer hints Stop for all three.
+      for status <- [:plan, :idle, :error] do
+        session =
+          start_supervised!(
+            {Session,
+             provider: SessionSlowMockProvider, provider_opts: [test_pid: self()], persist?: false},
+            id: {:ctrl_c_session, status}
+          )
+
+        assert :ok = Session.subscribe(session)
+        assert :ok = Session.send_prompt(session, "active turn")
+        assert_receive {:agent_event, ^session, {:stop_target_changed, {_, _}} = stop_event}
+
+        state =
+          base_state(session: session)
+          |> then(fn state ->
+            MingaEditor.Shell.Traditional.Workflow.install_agent_state(
+              state,
+              (&AgentState.set_status(&1, status)).(
+                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+              )
+            )
+          end)
+          |> MingaEditor.Agent.Events.dispatch(session, stop_event)
+          |> enter_insert()
+
+        new_state = AgentCommands.scope_ctrl_c(state)
+
+        assert_receive :provider_abort_called, 1_000
+        assert {status, Session.status(session)} == {status, :stopped}
+        assert Minga.Editing.mode(new_state) == :normal
+      end
+    end
+
     test "retries the provider and leaves Insert mode when the agent is in error state" do
       {:ok, session} = RestartStubSession.start_link(self())
 

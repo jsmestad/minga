@@ -131,7 +131,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
 
   defp task(_activity, :iterating, _action), do: "Running tools"
   defp task(_activity, :working, _action), do: "Thinking"
-  defp task(_activity, _status, _action), do: "Agent activity"
+  defp task(_activity, _status, _action), do: "Minga"
 
   # The card speaks the state the design tokens give the status, like the modeline. Running a
   # tool is the working state; the card names it iterating only to say what Minga is doing.
@@ -144,8 +144,8 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   defp card_status(:needs_you), do: :needs_you
   defp card_status(:failed), do: :errored
   defp card_status(:done), do: :done
-  # The card has no stopped status; a stopped session reads as idle there.
-  defp card_status(state) when state in [:stopped, :waiting, nil], do: :idle
+  defp card_status(:stopped), do: :stopped
+  defp card_status(state) when state in [:waiting, nil], do: :idle
 
   @spec active_action(Activity.t(), MingaAgent.ToolApproval.Public.t() | nil) :: String.t() | nil
   defp active_action(_activity, %MingaAgent.ToolApproval.Public{name: name}),

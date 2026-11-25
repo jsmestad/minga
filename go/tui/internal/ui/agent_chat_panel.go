@@ -304,12 +304,10 @@ func (m Model) renderAgentBlankLine(width int) string {
 	return lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(strings.Repeat(" ", max(width, 1)))
 }
 
+// renderAgentTranscriptSeparator is the blank row between conversation blocks:
+// the calm transcript has no rules between messages.
 func (m Model) renderAgentTranscriptSeparator(width int) string {
-	p := m.palette()
-	indent := gap(agentTranscriptBodyIndent)
-	ruleWidth := max(width-len(indent), 0)
-	rule := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Render(strings.Repeat("─", ruleWidth))
-	return lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(indent+rule, width))
+	return lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render("")
 }
 
 func (m Model) renderAgentTranscriptHeader(width int) string {
@@ -604,6 +602,8 @@ func nonEmpty(value string, fallback string) string {
 }
 
 // renderAgentStatusBadge draws the status's word on its state's colour role, both from the shared token table, so the colour never contradicts the word.
+// The word is cut out of the fill in the header's own colour: a role is chosen to stand out from the header, so the header's colour stands out from the role.
+// The theme's text colours are picked against the surfaces, not against a role, and can match a role's lightness.
 func (m Model) renderAgentStatusBadge(status byte) string {
 	p := m.palette()
 	label := agentChatStatusLabel(status)
@@ -618,7 +618,7 @@ func (m Model) renderAgentStatusBadge(status byte) string {
 	if state == generated.StateWorking {
 		label = m.agentSpinner() + " " + label
 	}
-	return style.Foreground(p.SelectionText()).Background(p.Role(state.Token().Role)).Render(label)
+	return style.Foreground(p.AgentHeader()).Background(p.Role(state.Token().Role)).Render(label)
 }
 
 func (m Model) agentSpinner() string {
@@ -693,7 +693,7 @@ func (m Model) agentTranscriptAllLines(messages []protocol.AgentChatMessage, wid
 		if len(block) == 0 {
 			continue
 		}
-		if !first {
+		if !first && agentTranscriptGapBefore(msg) {
 			lines = append(lines, m.renderAgentTranscriptSeparator(width))
 		}
 		lines = append(lines, block...)
@@ -725,22 +725,47 @@ func (m Model) renderAgentMessage(msg protocol.AgentChatMessage, width int) []st
 
 func (m Model) renderAgentSystemMessage(msg protocol.AgentChatMessage, width int) []string {
 	p := m.palette()
-	label := "System"
-	marker := "i"
+	marker, label, attention := agentSystemLabel(msg)
 	markerColor := p.Accent()
 	textColor := p.Muted()
-	if msg.Status == 1 || strings.Contains(strings.ToLower(msg.Text), "error") || strings.Contains(strings.ToLower(msg.Text), "couldn't authenticate") {
-		label = "Needs attention"
-		marker = "!"
+	if attention {
 		markerColor = p.Diagnostic(0)
 		textColor = p.AgentText()
 	}
 	markerText := lipgloss.NewStyle().Bold(true).Foreground(markerColor).Background(p.AgentPanel()).Render(marker)
 	labelText := lipgloss.NewStyle().Bold(true).Foreground(markerColor).Background(p.AgentPanel()).Render(" " + label)
 	lead := gap(agentTranscriptInset) + markerText + labelText
-	body := lipgloss.NewStyle().Foreground(textColor).Background(p.AgentPanel()).Render(gap(spaceXL) + firstCompactLine(msg.Text, agentTranscriptTextWidth(width, lead+gap(spaceXL))))
-	line := lead + body
-	return []string{lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(line, width))}
+	indent := strings.Repeat(" ", lipgloss.Width(lead))
+	bodyStyle := lipgloss.NewStyle().Foreground(textColor).Background(p.AgentPanel())
+	rowStyle := lipgloss.NewStyle().Background(p.AgentPanel()).Width(width)
+	lines := agentSystemBodyLines(msg, width)
+	out := make([]string, 0, len(lines))
+	for index, text := range lines {
+		head := indent
+		if index == 0 {
+			head = lead
+		}
+		out = append(out, rowStyle.Render(fitStyled(head+bodyStyle.Render(gap(spaceXL)+text), width)))
+	}
+	return out
+}
+
+// agentSystemLabel names a system row: a plain note, or one that needs the user's attention.
+func agentSystemLabel(msg protocol.AgentChatMessage) (marker, label string, attention bool) {
+	text := strings.ToLower(msg.Text)
+	if msg.Status == 1 || strings.Contains(text, "error") || strings.Contains(text, "couldn't authenticate") {
+		return "!", "Needs attention", true
+	}
+	return "i", "System", false
+}
+
+// agentSystemBodyLines wraps a system row's text to the width beside its label. A long
+// row keeps its last words, which often say what to do, instead of being clipped.
+func agentSystemBodyLines(msg protocol.AgentChatMessage, width int) []string {
+	marker, label, _ := agentSystemLabel(msg)
+	lead := gap(agentTranscriptInset) + marker + " " + label + gap(spaceXL)
+	text := strings.Join(strings.Fields(msg.Text), " ")
+	return strings.Split(ansi.Wrap(text, agentTranscriptTextWidth(width, lead), ""), "\n")
 }
 
 func (m Model) renderAgentUserMessage(msg protocol.AgentChatMessage, width int) []string {
@@ -749,9 +774,8 @@ func (m Model) renderAgentUserMessage(msg protocol.AgentChatMessage, width int) 
 	if len(lines) == 0 {
 		lines = []string{""}
 	}
-	marker := lipgloss.NewStyle().Bold(true).Foreground(p.AgentUserBorder()).Background(p.AgentPanel()).Render(gap(agentTranscriptInset) + "❯")
-	label := lipgloss.NewStyle().Bold(true).Foreground(p.AgentUserLabel()).Background(p.AgentPanel()).Render(" You")
-	header := marker + label
+	// The speaker's label in its colour role above plain text (docs/design/surfaces.md).
+	header := lipgloss.NewStyle().Bold(true).Foreground(p.Role(generated.ColorRoleYou)).Background(p.AgentPanel()).Render(gap(agentTranscriptInset) + "You")
 	out := []string{lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(header, width))}
 	bodyStyle := lipgloss.NewStyle().Foreground(p.AgentText()).Background(p.AgentPanel())
 	for _, bodyLine := range lines {
@@ -917,59 +941,67 @@ func agentThinkingBodyLines(collapsed bool) int {
 	return agentThinkingExpandedLines
 }
 
+// renderAgentToolMessage draws a tool call as one calm line: the state's glyph in
+// its colour role and the sentence the BEAM wrote ("Read native.ex"). A retained
+// output adds its reader below; an expanded call shows its preview and output.
 func (m Model) renderAgentToolMessage(msg protocol.AgentChatMessage, width int) []string {
 	p := m.palette()
-	statusIcon, statusColor := m.agentToolStatus(msg)
-	name := nonEmpty(msg.Name, "tool")
-	presentation := agentToolPresentationFor(name)
-	summary := nonEmpty(msg.Summary, msg.Text)
 	surface := p.AgentPanel()
-	toolHeader := p.AgentToolHeader()
-	railStyle := lipgloss.NewStyle().Foreground(statusColor).Background(surface)
-	status := lipgloss.NewStyle().Bold(true).Foreground(statusColor).Background(surface).Render(statusIcon + " " + agentToolStatusLabel(msg))
-	title := lipgloss.NewStyle().Bold(true).Foreground(toolHeader).Background(surface).Render(presentation.Icon + " " + presentation.Title)
-	rawName := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render(name)
-	meta := agentToolMeta(msg)
-	metaText := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render(meta)
-	header := railStyle.Render(agentToolBranch) + " " + status + " " + title + lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render(" · ") + rawName
-	if meta != "" {
-		header += lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render(" · ") + metaText
-	}
-	label := lipgloss.NewStyle().Foreground(toolHeader).Background(surface).Render(presentation.SummaryLabel + ":")
-	lead := railStyle.Render(agentToolRail) + gap(spaceXL) + label
-	summaryText := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render(gap(spaceXS) + firstCompactLine(summary, agentTranscriptTextWidth(width, lead+gap(spaceXS))))
-	body := lead + summaryText
-	lines := []string{
-		lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(header, width)),
-		lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(body, width)),
-	}
-
-	if len(msg.PreviewLines) > 0 {
-		lines = append(lines, m.renderAgentToolPreviewLines(msg.PreviewKind, msg.PreviewLines, width, statusColor)...)
-	}
+	glyph, glyphColor := m.agentToolStepMark(msg)
+	mark := lipgloss.NewStyle().Foreground(glyphColor).Background(surface).Render(gap(agentTranscriptInset) + glyph)
+	lead := mark + gap(spaceXS)
+	text := lipgloss.NewStyle().Foreground(p.AgentText()).Background(surface).Render(firstCompactLine(agentToolStepText(msg), agentTranscriptTextWidth(width, lead)))
+	lines := []string{lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(lead+text, width))}
 
 	if agentToolOffersRetainedOutput(msg) {
 		labelText := "[Read retained output]"
 		if width < 5+len(labelText) {
 			labelText = "[Output]"
 		}
-		label := railStyle.Render(labelText)
+		label := lipgloss.NewStyle().Foreground(glyphColor).Background(surface).Render(labelText)
 		if width >= 5+len(labelText) && m.zones != nil {
 			zone := fmt.Sprintf("%s%d:%x", zonePrefixAgentRetainedOutput, msg.ID, msg.RetainedOutputOffer)
 			label = m.zones.markCachedTranscriptControl(zone, label)
 		}
 		hint := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render(gap(spaceXL) + "Ctrl+Alt+O reads latest")
-		indent := strings.Repeat(" ", lipgloss.Width(agentToolBranch+" "))
+		indent := strings.Repeat(" ", lipgloss.Width(lead))
 		lines = append(lines, lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(indent+label+hint, width)))
 	}
-	if agentToolIsError(msg) && hasAgentToolResult(msg) {
-		lines = append(lines, m.renderAgentToolResultLines(agentToolStatusLabel(msg), msg, width, statusColor)...)
-	} else if hasAgentToolResult(msg) && msg.Collapsed {
-		lines = append(lines, m.renderAgentToolCollapsedHint(width, statusColor))
-	} else if !msg.Collapsed {
-		lines = append(lines, m.renderAgentToolResultLines(presentation.ResultLabel, msg, width, statusColor)...)
+	if !msg.Collapsed {
+		if len(msg.PreviewLines) > 0 {
+			lines = append(lines, m.renderAgentToolPreviewLines(msg.PreviewKind, msg.PreviewLines, width, glyphColor)...)
+		}
+		if hasAgentToolResult(msg) {
+			lines = append(lines, m.renderAgentToolResultLines(agentToolPresentationFor(msg.Name).ResultLabel, msg, width, glyphColor)...)
+		}
 	}
 	return lines
+}
+
+// agentToolStepMark is the glyph and colour of the step's state, from the shared
+// state tokens. A running call turns the spinner, as agentMessageAnimated
+// expects; a missing state byte draws the working glyph without inventing one.
+func (m Model) agentToolStepMark(msg protocol.AgentChatMessage) (string, color.Color) {
+	p := m.palette()
+	state, ok := generated.SpineStateFromWire(msg.State)
+	if !ok {
+		state = generated.StateWorking
+	}
+	token := state.Token()
+	glyph := token.Glyph
+	if msg.Status == 0 {
+		glyph = m.agentSpinner()
+	}
+	return glyph, p.Role(token.Role)
+}
+
+// agentToolStepText is the BEAM's sentence, or the tool's name and arguments for
+// a BEAM that sent none.
+func agentToolStepText(msg protocol.AgentChatMessage) string {
+	if msg.Step != "" {
+		return msg.Step
+	}
+	return nonEmpty(msg.Summary, msg.Name)
 }
 
 type agentToolPresentation struct {
@@ -1004,51 +1036,6 @@ func agentToolPresentationFor(name string) agentToolPresentation {
 	}
 }
 
-func (m Model) agentToolStatus(msg protocol.AgentChatMessage) (string, color.Color) {
-	p := m.palette()
-	switch msg.Status {
-	case 0:
-		return m.agentSpinner(), p.Warning()
-	case 1:
-		return "✓", p.Diagnostic(3)
-	case 2:
-		return "×", p.Diagnostic(0)
-	case 3:
-		return "⊘", p.Warning()
-	case 4:
-		return "■", p.Muted()
-	case 5:
-		return "◷", p.Warning()
-	default:
-		if msg.IsError {
-			return "×", p.Diagnostic(0)
-		}
-		return "?", p.Muted()
-	}
-}
-
-func agentToolStatusLabel(msg protocol.AgentChatMessage) string {
-	switch msg.Status {
-	case 0:
-		return "running"
-	case 1:
-		return "done"
-	case 2:
-		return "ERROR"
-	case 3:
-		return "Denied"
-	case 4:
-		return "Cancelled"
-	case 5:
-		return "Expired"
-	default:
-		if msg.IsError {
-			return "ERROR"
-		}
-		return "unknown"
-	}
-}
-
 func agentToolIsError(msg protocol.AgentChatMessage) bool {
 	switch msg.Status {
 	case 0, 1, 3, 4:
@@ -1060,34 +1047,12 @@ func agentToolIsError(msg protocol.AgentChatMessage) bool {
 	}
 }
 
-func agentToolMeta(msg protocol.AgentChatMessage) string {
-	parts := make([]string, 0, 2)
-	if msg.DurationMS > 0 && msg.Status != 3 && msg.Status != 5 {
-		parts = append(parts, fmt.Sprintf("%dms", msg.DurationMS))
-	}
-	switch msg.AutoApprovedScope {
-	case 1:
-		parts = append(parts, "auto session")
-	case 2:
-		parts = append(parts, "auto turn")
-	}
-	return strings.Join(parts, " · ")
-}
-
 func hasAgentToolResult(msg protocol.AgentChatMessage) bool {
 	return strings.TrimSpace(msg.Result) != "" || len(msg.StyledLines) > 0
 }
 
 func agentToolOffersRetainedOutput(msg protocol.AgentChatMessage) bool {
 	return msg.ID != 0 && msg.RetainedOutputOffer != [16]byte{}
-}
-
-func (m Model) renderAgentToolCollapsedHint(width int, railColor color.Color) string {
-	p := m.palette()
-	rail := lipgloss.NewStyle().Foreground(railColor).Background(p.AgentPanel()).Render(agentToolRail)
-	bodyStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.AgentPanel()).Italic(true)
-	line := rail + gap(spaceXL) + bodyStyle.Render("result collapsed, Ctrl+Alt+X expands latest tool")
-	return lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(line, width))
 }
 
 func (m Model) renderAgentToolPreviewLines(kind byte, lines []string, width int, railColor color.Color) []string {

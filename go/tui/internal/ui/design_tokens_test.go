@@ -80,6 +80,7 @@ func TestAgentContextCardStatusMatchesMacOSCardStatus(t *testing.T) {
 		{3, generated.StateNeedsYou.Token().Word, generated.ColorRoleNeedsYou},
 		{4, generated.StateDone.Token().Word, generated.ColorRoleDone},
 		{5, generated.StateFailed.Token().Word, generated.ColorRoleFailure},
+		{6, generated.StateStopped.Token().Word, generated.StateStopped.Token().Role},
 		{9, "Idle", generated.ColorRoleWaiting},
 	}
 	for _, tc := range cases {

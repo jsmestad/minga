@@ -543,7 +543,7 @@ In Normal mode:
 | `esc` | Leave the composer for the conversation, where `q` closes the view |
 | `SPC a q f` | Queue the message for after the agent's turn |
 
-Shift with an arrow key keeps its Vim meaning here and does not start a selection. To select, press `esc`, then `v`, and use Vim motions. With desktop shortcuts, `↩` sends, `⇧↩`, `⌥↩` and `⌃J` start a new line, and Up and Down recall earlier messages. To pull queued messages back into the composer, run the "Dequeue messages back to editor" command from the command palette.
+Shift with an arrow key keeps its Vim meaning here and does not start a selection. To select, press `esc`, then `v`, and use Vim motions. With desktop shortcuts, `↩` sends, `⇧↩`, `⌥↩` and `⌃J` start a new line, Up and Down recall earlier messages, and `⌘.` stops Minga while it works (macOS). To pull queued messages back into the composer, run the "Dequeue messages back to editor" command from the command palette.
 
 ## In the terminal
 

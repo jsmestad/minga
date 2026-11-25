@@ -1349,7 +1349,7 @@ struct AgentChatViewTests {
         let roles = body.findAll(ViewType.VStack.self).compactMap { try? $0.accessibilityLabel().string() }
 
         #expect(strings.filter { $0 == "Minga" }.count == 3)
-        #expect(roles.filter { $0 == "Assistant reply" }.count == 3)
+        #expect(roles.filter { $0 == "Minga" }.count == 3)
         #expect(strings.contains("You"))
         for reply in ["Plain reply", "Styled reply", "Markdown reply"] {
             #expect(strings.contains(reply))
@@ -1827,37 +1827,33 @@ enum ViewInspectorQuery {
 @Suite("Committed agent tool outcomes")
 @MainActor
 struct AgentToolOutcomeViewTests {
-    @Test("Plain and styled cards prefer the outcome byte over compatibility isError",
-          arguments: [UInt8(0), 1, 2, 3, 4, 5], [false, true])
-    func badges(status: UInt8, styled: Bool) throws {
-        let labels = ["running", "done", "error", "Denied", "Cancelled", "Expired"]
-        let explanation = "Approval expired before execution"
-        let run = Wire.StyledTextRun(text: explanation, fgR: 255, fgG: 255, fgB: 255,
+    @Test("A tool step is one line: the state's mark and the BEAM's sentence, with its output on expand",
+          arguments: [(UInt8(1), "Running `echo example`"), (6, "Ran `echo example`"),
+                      (5, "Could not run `echo example`"), (4, "Stopped while running `echo example`")],
+          [false, true])
+    func toolStep(step: (UInt8, String), styled: Bool) throws {
+        let (wire, sentence) = step
+        let state = try #require(SpineState(wire: wire))
+        let output = "example output"
+        let run = Wire.StyledTextRun(text: output, fgR: 255, fgG: 255, fgB: 255,
                                     bgR: 0, bgG: 0, bgB: 0, bold: false, italic: false, underline: false)
-        for isError in [false, true] {
-            let card = AgentToolCallCard(
-                messageID: 1, name: "shell", summary: "echo example", status: status,
-                isError: isError, collapsed: false, autoApprovedScope: 0, durationMs: 233_900,
-                result: styled ? nil : explanation, resultLines: styled ? [[run]] : nil,
-                previewLines: ["echo example"], sendAction: nil
-            ).environment(\.themeColors, ThemeColors())
-            let body = try card.inspect()
-            let strings = body.findAll(ViewType.Text.self).compactMap { try? $0.string() }
-            #expect(strings.contains(labels[Int(status)]))
-            #expect(strings.contains(explanation))
-            #expect(strings.contains("echo example"))
-            #expect(body.findAll(ViewType.ProgressView.self).count == (status == 0 ? 1 : 0))
-            if status != 2 {
-                #expect(!strings.contains("error"))
-            }
-            if status == 3 || status == 5 {
-                #expect(!strings.contains("233.9s"))
-            }
-            let header = try #require(body.findAll(ViewType.HStack.self).first {
-                (try? $0.accessibilityLabel().string()) == "shell: \(labels[Int(status)]). echo example"
-            })
-            #expect(try header.accessibilityLabel().string().contains(labels[Int(status)]))
-        }
+        let card = AgentToolCallCard(
+            messageID: 1, name: "shell", summary: "echo example",
+            step: Wire.ToolStep(text: sentence, state: wire), collapsed: false, autoApprovedScope: 0,
+            result: styled ? nil : output, resultLines: styled ? [[run]] : nil,
+            previewLines: [], sendAction: nil
+        ).environment(\.themeColors, ThemeColors())
+        let body = try card.inspect()
+        let strings = body.findAll(ViewType.Text.self).compactMap { try? $0.string() }
+        #expect(strings.contains(sentence))
+        #expect(strings.contains(output))
+        // The sentence carries the state; no status word or raw tool name is added beside it.
+        #expect(!strings.contains("error"))
+        #expect(!strings.contains("shell"))
+        let line = try #require(body.findAll(ViewType.HStack.self).first {
+            (try? $0.accessibilityLabel().string()) == "\(state.word): \(sentence)"
+        })
+        #expect(try line.accessibilityLabel().string().hasPrefix(state.word))
     }
 
     @Test("Waiting header announces approval instead of executing and has no progress spinner")

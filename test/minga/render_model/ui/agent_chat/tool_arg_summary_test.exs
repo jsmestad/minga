@@ -32,10 +32,62 @@ defmodule Minga.RenderModel.UI.AgentChat.ToolArgSummaryTest do
     end
 
     test "removed mutation tool names use the ordinary fallback" do
-      args = %{"path" => "lib/app.ex"}
-
       for name <- ["multi_edit_file", "apply_diff"] do
-        assert ToolArgSummary.summarize(name, args) == inspect(args, limit: 80)
+        assert ToolArgSummary.summarize(name, %{"path" => "lib/app.ex"}) == "lib/app.ex"
+      end
+    end
+
+    test "a value that is not text names nothing, for every tool" do
+      for {name, args} <- [
+            {"find", %{"pattern" => 1000}},
+            {"find", %{"name" => %{"x" => 1}, "path" => "lib"}},
+            {"grep", %{"pattern" => %{"x" => 1}, "path" => "lib"}},
+            {"grep", %{"query" => ["a"], "path" => "lib"}},
+            {"grep", %{"pattern" => 7}},
+            {"git_stage", %{"paths" => [%{}]}},
+            {"git_stage", %{"paths" => ["lib/a.ex", 3]}},
+            {"subagent", %{"task" => %{"nested" => true}}},
+            {"read_file", %{"path" => %{"nested" => true}}},
+            {"shell", %{"command" => 1.5}},
+            {"git_commit", %{"message" => nil}}
+          ] do
+        assert ToolArgSummary.summarize(name, args) == ""
+      end
+    end
+
+    test "a place that is not text is left out and the subject still reads" do
+      assert ToolArgSummary.summarize("grep", %{"pattern" => "TODO", "path" => 3}) == "TODO"
+      assert ToolArgSummary.summarize("find", %{"name" => "*.ex", "path" => %{}}) == "*.ex"
+    end
+
+    test "a search without a path names what it searches for, whatever else it carries" do
+      assert ToolArgSummary.summarize("grep", %{"pattern" => "TODO", "case_sensitive" => false}) ==
+               "TODO"
+
+      assert ToolArgSummary.summarize("grep", %{query: "TODO", glob: "*.ex"}) == "TODO"
+    end
+
+    test "a subagent names its task, not its settings" do
+      args = %{"task" => "Audit the tests", "background" => true, "model" => "small"}
+
+      assert ToolArgSummary.summarize("subagent", args) == "Audit the tests"
+    end
+
+    test "a find by pattern alone names the pattern" do
+      assert ToolArgSummary.summarize("find", %{"pattern" => "lib/other.ex"}) == "lib/other.ex"
+      assert ToolArgSummary.summarize("find", %{name: "*.ex"}) == "*.ex"
+    end
+
+    test "any other tool reads as its plain arguments, never as an Elixir map" do
+      for {args, summary} <- [
+            {%{"query" => "drafts"}, "drafts"},
+            {%{"limit" => 5, "query" => "drafts"}, "limit: 5, query: drafts"},
+            {%{"files" => ["a.ex", "b.ex"]}, "a.ex, b.ex"},
+            {%{"options" => %{"deep" => true}, "query" => "x"}, "x"},
+            {%{"query" => nil}, ""}
+          ] do
+        assert ToolArgSummary.summarize("lsp_symbols", args) == summary
+        refute summary =~ "%{"
       end
     end
   end

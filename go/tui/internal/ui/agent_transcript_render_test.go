@@ -98,7 +98,7 @@ func TestAgentTranscriptWrapsStyledTextAfterATabAtTheRightEdge(t *testing.T) {
 	}))
 	rows := model.transcriptRenderer.render(model, model.transcript, 8, 34)
 	if len(rows) != 3 || !strings.Contains(ansi.Strip(rows[1]), strings.Repeat("x", 29)) ||
-		!strings.HasPrefix(ansi.Strip(rows[2]), "  │     Z") {
+		!strings.HasPrefix(ansi.Strip(rows[2]), "        Z") {
 		t.Fatalf("tab expansion must move the styled suffix to a continuation row: %q", rows)
 	}
 }
@@ -737,7 +737,7 @@ func TestVisibleStreamingCollapseWidthThemeAndAnimationStayExact(t *testing.T) {
 		got := model.transcriptRenderer.render(model, model.transcript, 30, width)
 		want := windowTopAnchored(model.agentTranscriptAllLines(testTranscriptMessages(model.transcript), width), 30, 0)
 		if strings.Join(got, "\n") != strings.Join(want, "\n") {
-			t.Fatalf("bounded output differs at width %d", width)
+			t.Fatalf("bounded output differs at width %d:\ngot  %q\nwant %q", width, ansi.Strip(strings.Join(got, "\n")), ansi.Strip(strings.Join(want, "\n")))
 		}
 	}
 
@@ -891,5 +891,38 @@ func TestAgentHeaderOmitsCountUntilStatusTotalArrives(t *testing.T) {
 	body := ansi.Strip(model.content())
 	if strings.Contains(body, "56 messages") || strings.Contains(body, "messages ·") {
 		t.Fatalf("Agent header must not guess a message count without the BEAM total: %q", body)
+	}
+}
+
+func TestLongSystemRowWrapsToTheWidthAndKeepsItsLastWords(t *testing.T) {
+	model := residentModel(t, 0)
+	text := "Could not read /Users/someone/code/project/lib/deeply/nested/module/file_name.ex because it was moved; open it again from the file tree"
+	model.transcript.apply(protocol.AgentTranscript{
+		Present:  true,
+		Mode:     0,
+		Epoch:    1,
+		Messages: []protocol.AgentChatMessage{{ID: 1, Kind: agentKindSystem, Text: text}},
+	})
+	width := 80
+
+	rows := model.transcriptRenderer.render(model, model.transcript, 20, width)
+	got := ansi.Strip(strings.Join(rows, "\n"))
+	if !strings.Contains(got, "open it again from the file tree") {
+		t.Fatalf("a long system row must keep its last words: %q", got)
+	}
+	wrapped := 0
+	for _, row := range rows {
+		if ansi.StringWidth(row) > width {
+			t.Fatalf("row wider than %d columns: %q", width, ansi.Strip(row))
+		}
+		if strings.TrimSpace(ansi.Strip(row)) != "" {
+			wrapped++
+		}
+	}
+	if wrapped < 2 {
+		t.Fatalf("a row longer than the width should wrap onto more rows: %q", got)
+	}
+	if count, _ := measureAgentMessage(model.transcript.entry(0).message, width); count != wrapped {
+		t.Fatalf("measured %d rows, drew %d", count, wrapped)
 	}
 }

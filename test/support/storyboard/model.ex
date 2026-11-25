@@ -44,8 +44,20 @@ defmodule Minga.Test.Storyboard.Model do
   @typedoc "Who owns the keyboard in this frame."
   @type focus :: %{surface: atom(), responder: atom(), window_id: pos_integer()}
 
+  @typedoc """
+  The conversation as the frontends draw it: each message's speaker in order (`:you` or `:minga`; a tool step is `{:step, state, sentence}`; a notice from Minga is `{:notice, level, text}`), and the composer's key hints.
+  """
+  @type conversation :: %{
+          blocks: [
+            :you | :minga | {:step, atom(), String.t()} | {:notice, atom(), String.t()} | atom()
+          ],
+          hints: [{String.t(), String.t()}],
+          status: atom()
+        }
+
   @type t :: %__MODULE__{
           ui: UI.t(),
+          conversation: conversation() | nil,
           theme: MingaEditor.UI.Theme.t() | nil,
           mode: atom(),
           pending_keys: String.t(),
@@ -62,6 +74,7 @@ defmodule Minga.Test.Storyboard.Model do
   defstruct [
     :ui,
     :theme,
+    :conversation,
     :which_key,
     :focus,
     :echo,
@@ -104,9 +117,35 @@ defmodule Minga.Test.Storyboard.Model do
       focus: focus(ui.focus_owner),
       echo: data && data.message,
       picker_title: visible_field(ui.picker, :title),
-      minibuffer_prompt: visible_field(ui.minibuffer, :prompt)
+      minibuffer_prompt: visible_field(ui.minibuffer, :prompt),
+      conversation: conversation(ui.agent_chat)
     }
   end
+
+  @spec conversation(term()) :: conversation() | nil
+  defp conversation(%{visible?: true} = chat) do
+    %{
+      blocks: Enum.map(chat.resident_messages, &block/1),
+      hints: chat.composer_hints,
+      status: chat.status
+    }
+  end
+
+  defp conversation(_chat), do: nil
+
+  @spec block(term()) ::
+          :you | :minga | {:step, atom(), String.t()} | {:notice, atom(), String.t()} | atom()
+  defp block({id, body}) when is_integer(id), do: block(body)
+  defp block({:user, _text}), do: :you
+  defp block({:user, _text, _attachments}), do: :you
+
+  defp block({kind, _body}) when kind in [:assistant, :styled_assistant, :assistant_markdown],
+    do: :minga
+
+  defp block({:tool_call, view}), do: {:step, view.state, view.step}
+  defp block({:styled_tool_call, view, _lines}), do: {:step, view.state, view.step}
+  defp block({:system, text, level}), do: {:notice, level, text}
+  defp block(body) when is_tuple(body), do: elem(body, 0)
 
   @doc "Transient surfaces: the ones that exist to be acted on and closed."
   @spec transient_surfaces() :: [surface()]

@@ -318,6 +318,8 @@ struct ThemeColorsSlotMappingTests {
     func cardStatusTokens() {
         #expect(CardStatus.needsYou.label == SpineState.needsYou.word)
         #expect(CardStatus.errored.label == SpineState.failed.word)
+        #expect(CardStatus.stopped.label == SpineState.stopped.word)
+        #expect(CardStatus.stopped.role == SpineState.stopped.role)
         #expect(CardStatus.done.role == SpineState.done.role)
         #expect(CardStatus.iterating.spineState == .working)
         #expect(CardStatus.iterating.label == SpineState.working.word)

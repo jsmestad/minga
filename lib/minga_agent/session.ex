@@ -330,7 +330,11 @@ defmodule MingaAgent.Session do
     GenServer.call(session, :restart_provider)
   end
 
-  @doc "Seeds a session transcript without sending a prompt."
+  @doc """
+  Seeds a session transcript without sending a prompt.
+
+  It takes user and assistant messages, and finished tool calls: a finished call becomes the assistant's call and its result in the model's history, so the two stay paired. A running call cannot be seeded.
+  """
   @spec seed_messages(GenServer.server(), [Message.t()]) :: :ok | {:error, term()}
   def seed_messages(session, messages) when is_list(messages) do
     GenServer.call(session, {:seed_messages, messages})
@@ -4304,16 +4308,20 @@ defmodule MingaAgent.Session do
   end
 
   @spec stop_active_turn(state()) :: {:reply, :ok, state()}
-  defp stop_active_turn(state),
-    do: {:reply, :ok, abort_turn(state, &TurnExecution.stop/1, "Stopped")}
+  defp stop_active_turn(state), do: {:reply, :ok, abort_turn(state, :stopped)}
+
+  # A stop is the user's choice: the turn ends as stopped, its running tools as
+  # cancelled, and the transcript says only "Stopped". An abort ends the turn idle
+  # and reports what the interruption left uncertain.
+  @typep interruption :: :stopped | :aborted
 
   @spec abort_turn(state()) :: state()
-  defp abort_turn(state), do: abort_turn(state, &TurnExecution.abort/1, "Aborted")
+  defp abort_turn(state), do: abort_turn(state, :aborted)
 
-  @spec abort_turn(state(), (TurnExecution.t() -> TurnExecution.t()), String.t()) :: state()
-  defp abort_turn(state, transition, notice) do
+  @spec abort_turn(state(), interruption()) :: state()
+  defp abort_turn(state, cause) do
     source_execution = state.turn_execution
-    execution = transition.(source_execution)
+    execution = interrupted_execution(source_execution, cause)
 
     state =
       state
@@ -4321,15 +4329,23 @@ defmodule MingaAgent.Session do
       |> interrupt_execution_approval(source_execution)
       |> interrupt_question()
       |> abort_provider()
-      |> abort_active_tools(source_execution, false)
+      |> abort_active_tools(source_execution, false, cause)
       |> cancel_provider_request()
-      |> reconcile_interrupted_checkpoint()
-      |> append_system_message(notice, :info)
+      |> reconcile_interrupted_checkpoint(cause)
+      |> append_system_message(interruption_notice(cause), :info)
       |> notify_messages_changed()
       |> announce_turn_status(execution)
 
     %{state | turn_execution: execution}
   end
+
+  @spec interrupted_execution(TurnExecution.t(), interruption()) :: TurnExecution.t()
+  defp interrupted_execution(execution, :stopped), do: TurnExecution.stop(execution)
+  defp interrupted_execution(execution, :aborted), do: TurnExecution.abort(execution)
+
+  @spec interruption_notice(interruption()) :: String.t()
+  defp interruption_notice(:stopped), do: "Stopped"
+  defp interruption_notice(:aborted), do: "Aborted"
 
   @spec enter_plan_mode(state()) :: state()
   defp enter_plan_mode(state) do
@@ -4521,13 +4537,16 @@ defmodule MingaAgent.Session do
     end)
   end
 
-  @spec reconcile_interrupted_checkpoint(state()) :: state()
+  @spec reconcile_interrupted_checkpoint(state(), interruption()) :: state()
+  defp reconcile_interrupted_checkpoint(state, cause \\ :aborted)
+
   defp reconcile_interrupted_checkpoint(
-         %{continuation: %Continuation{tool_checkpoint: nil}} = state
+         %{continuation: %Continuation{tool_checkpoint: nil}} = state,
+         _cause
        ),
        do: state
 
-  defp reconcile_interrupted_checkpoint(state) do
+  defp reconcile_interrupted_checkpoint(state, cause) do
     if Enum.any?(state.tool_authority.invocations, fn {_key, entry} ->
          not is_nil(entry.failure)
        end) do
@@ -4535,7 +4554,7 @@ defmodule MingaAgent.Session do
     else
       case reconciliation_outputs(state) do
         {:ok, outputs} ->
-          finish_interrupted_checkpoint_reconciliation(state, outputs)
+          finish_interrupted_checkpoint_reconciliation(state, outputs, cause)
 
         {:error, reason} ->
           state
@@ -4549,9 +4568,10 @@ defmodule MingaAgent.Session do
 
   @spec finish_interrupted_checkpoint_reconciliation(
           state(),
-          %{optional(String.t()) => Output.t()}
+          %{optional(String.t()) => Output.t()},
+          interruption()
         ) :: state()
-  defp finish_interrupted_checkpoint_reconciliation(state, outputs) do
+  defp finish_interrupted_checkpoint_reconciliation(state, outputs, cause) do
     transcript_id = boundary_transcript_id(state.transcript)
 
     {continuation, reconciliation} =
@@ -4568,13 +4588,8 @@ defmodule MingaAgent.Session do
       state
       |> Map.put(:continuation, continuation)
       |> freeze_checklist(transcript_id)
-      |> reconcile_transcript_tool_calls(reconciliation)
-      |> append_system_message(
-        "Interrupted tool-call group reconciled without replay: " <>
-          "#{indeterminate_count} admitted call(s) are indeterminate and " <>
-          "#{not_executed_count} unadmitted call(s) were not executed.",
-        if(indeterminate_count == 0, do: :info, else: :error)
-      )
+      |> reconcile_transcript_tool_calls(reconciliation, cause)
+      |> report_reconciliation(cause, indeterminate_count, not_executed_count)
 
     case commit_effect_snapshot(state, candidate) do
       {:ok, committed} ->
@@ -4589,18 +4604,46 @@ defmodule MingaAgent.Session do
     end
   end
 
-  @spec reconcile_transcript_tool_calls(state(), [map()]) :: state()
-  defp reconcile_transcript_tool_calls(state, reconciliation) do
+  # The user already sees "Stopped" and each stopped step; the counts are for an
+  # interruption the user did not ask for.
+  @spec report_reconciliation(state(), interruption(), non_neg_integer(), non_neg_integer()) ::
+          state()
+  defp report_reconciliation(state, :stopped, _indeterminate, _not_executed), do: state
+
+  defp report_reconciliation(state, :aborted, indeterminate_count, not_executed_count) do
+    append_system_message(
+      state,
+      "Interrupted tool-call group reconciled without replay: " <>
+        "#{indeterminate_count} admitted call(s) are indeterminate and " <>
+        "#{not_executed_count} unadmitted call(s) were not executed.",
+      if(indeterminate_count == 0, do: :info, else: :error)
+    )
+  end
+
+  @spec reconcile_transcript_tool_calls(state(), [map()], interruption()) :: state()
+  defp reconcile_transcript_tool_calls(state, reconciliation, cause) do
     transcript =
       Enum.reduce(reconciliation, state.transcript, fn result, transcript ->
         Transcript.update_tool_call(transcript, result.tool_call_id, fn tool_call ->
           {:tool_call, reconciled} = reconcile_transcript_tool_call(tool_call, result)
-          reconciled
+          keep_stopped(reconciled, tool_call, cause)
         end)
       end)
 
     %{state | transcript: transcript}
   end
+
+  # A call the user stopped stays stopped, even though its outcome is uncertain:
+  # the reconciled result text still says what the model was told.
+  @spec keep_stopped(ToolCall.t(), ToolCall.t(), interruption()) :: ToolCall.t()
+  defp keep_stopped(
+         %ToolCall{status: :error} = reconciled,
+         %ToolCall{status: :cancelled},
+         :stopped
+       ),
+       do: ToolCall.reconcile(reconciled, :cancelled, nil, reconciled.result, reconciled.output)
+
+  defp keep_stopped(reconciled, _tool_call, _cause), do: reconciled
 
   @spec reconcile_transcript_tool_call(ToolCall.t(), map() | nil) :: Message.t()
   defp reconcile_transcript_tool_call(
@@ -5164,8 +5207,8 @@ defmodule MingaAgent.Session do
 
   defp abort_provider(state), do: state
 
-  @spec abort_active_tools(state(), TurnExecution.t(), boolean()) :: state()
-  defp abort_active_tools(state, execution, notify?) do
+  @spec abort_active_tools(state(), TurnExecution.t(), boolean(), interruption()) :: state()
+  defp abort_active_tools(state, execution, notify?, cause \\ :aborted) do
     case TurnExecution.active_tools(execution) do
       [] ->
         state
@@ -5173,7 +5216,9 @@ defmodule MingaAgent.Session do
       tools ->
         state =
           Enum.reduce(tools, state, fn {id, _name}, state ->
-            transcript = Transcript.update_tool_call(state.transcript, id, &ToolCall.abort/1)
+            transcript =
+              Transcript.update_tool_call(state.transcript, id, &interrupt_tool_call(&1, cause))
+
             state = %{state | transcript: transcript}
             record_critical_event(state, :tool_call_interrupted, %{tool_call_id: id})
             broadcast(state, {:tool_interrupted, id})
@@ -5182,6 +5227,10 @@ defmodule MingaAgent.Session do
         if notify?, do: notify_messages_changed(state), else: state
     end
   end
+
+  @spec interrupt_tool_call(ToolCall.t(), interruption()) :: ToolCall.t()
+  defp interrupt_tool_call(tool_call, :stopped), do: ToolCall.stop(tool_call)
+  defp interrupt_tool_call(tool_call, :aborted), do: ToolCall.abort(tool_call)
 
   @spec apply_turn_usage(state(), Event.token_usage() | nil) :: state()
   defp apply_turn_usage(state, nil), do: notify_messages_changed(state)
@@ -6126,6 +6175,27 @@ defmodule MingaAgent.Session do
     %{state | transcript: Transcript.append_many(state.transcript, messages)}
   end
 
+  # A finished tool call in the model's history: the assistant's call, then its result.
+  @spec seeded_tool_call(ToolCall.t()) :: [ReqLLM.Message.t()]
+  defp seeded_tool_call(%ToolCall{id: id, name: name, args: args, status: status} = call) do
+    meta =
+      seeded_reason(
+        %{is_error: status != :complete, tool_outcome: status, output: call.output},
+        call
+      )
+
+    [
+      Context.assistant("", tool_calls: [{name, args, id: id}]),
+      Context.tool_result_message(name, id, call.result, meta)
+    ]
+  end
+
+  @spec seeded_reason(map(), ToolCall.t()) :: map()
+  defp seeded_reason(meta, %ToolCall{terminal_reason: :approval_timeout}),
+    do: Map.put(meta, :tool_outcome_reason, :approval_timeout)
+
+  defp seeded_reason(meta, %ToolCall{}), do: meta
+
   @spec model_seed_messages([Message.t()]) ::
           {:ok, [ReqLLM.Message.t()]} | {:error, {:unsupported_seed_message, term()}}
   defp model_seed_messages(messages) do
@@ -6135,6 +6205,9 @@ defmodule MingaAgent.Session do
 
       {:assistant, text}, {:ok, acc} when is_binary(text) ->
         {:cont, {:ok, [Context.assistant(text) | acc]}}
+
+      {:tool_call, %ToolCall{status: status} = call}, {:ok, acc} when status != :running ->
+        {:cont, {:ok, Enum.reverse(seeded_tool_call(call), acc)}}
 
       message, {:ok, _acc} ->
         {:halt, {:error, {:unsupported_seed_message, message}}}
@@ -10701,7 +10774,7 @@ defmodule MingaAgent.Session do
           state
           |> Map.put(:continuation, continuation)
           |> freeze_checklist(transcript_id)
-          |> reconcile_transcript_tool_calls(reconciliation)
+          |> reconcile_transcript_tool_calls(reconciliation, :aborted)
           |> append_system_message(message, if(indeterminate_count == 0, do: :info, else: :error))
 
         case commit_loaded_checkpoint_snapshot(state, candidate) do

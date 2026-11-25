@@ -168,6 +168,17 @@ defmodule Minga.Protocol.Encode do
   def encode_operation_status(:stale), do: 8
   def encode_operation_status(_), do: 1
 
+  @spec encode_composer_hint(map()) :: iodata()
+  def encode_composer_hint(model), do: encode_composer_hint(model, :composer_hint, [])
+
+  @spec encode_composer_hint(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_composer_hint(model, command, path) do
+    [
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:keys | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :keys)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:action | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :action)),
+    ]
+  end
+
   @spec encode_rect(map()) :: iodata()
   def encode_rect(model), do: encode_rect(model, :rect, [])
 
@@ -1237,6 +1248,16 @@ defmodule Minga.Protocol.Encode do
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:key_hint | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :key_hint)),
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:headline | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :headline)),
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:note | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :note)),
+    ]
+  end
+
+  @spec encode_gui_agent_chat_composer_hints(map()) :: iodata()
+  def encode_gui_agent_chat_composer_hints(model), do: encode_gui_agent_chat_composer_hints(model, :gui_agent_chat, [:composer_hints])
+
+  @spec encode_gui_agent_chat_composer_hints(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_gui_agent_chat_composer_hints(model, command, path) do
+    [
+      (fn items -> count = Enum.count(items); validate_uint!(command, [:hints | path], count, 255); [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_composer_hint(value, command, [index | [:hints | path]]) end)] end).(Map.fetch!(model, :hints)),
     ]
   end
 

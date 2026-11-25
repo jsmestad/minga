@@ -23,6 +23,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Agent.View.PromptFrame
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
+  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.TabBar
   alias Minga.RenderModel.UI.AgentChat
   alias Minga.RenderModel.UI.AgentChat.ApprovalView
@@ -31,6 +32,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias Minga.Keymap.Scope.Agent, as: AgentScope
   alias Minga.RenderModel.UI.AgentChat.ToolArgSummary
   alias Minga.RenderModel.UI.AgentChat.ToolCallView
+  alias Minga.RenderModel.UI.AgentChat.ToolStep
   alias Minga.RenderModel.UI.AgentChat.Usage
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Window.Content
@@ -84,6 +86,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     visible_rows = projection.visible_rows
 
     {resident_messages, resident_truncated?, transcript_epoch} = resident_transcript(ctx)
+    stop_target = stop_target(shell_agent.stop_target, session)
 
     %AgentChat{
       visible?: true,
@@ -103,12 +106,11 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       draft_attachment_count: attachment_count(agent_ui.draft_save),
       draft_attachment_offer: DraftSave.attachment_offer(agent_ui.draft_save),
       pending_question: pending_question(shell_agent.pending_question, session),
-      stop_target: stop_target(shell_agent.stop_target, session),
+      stop_target: stop_target,
       queue_target: queue_target(shell_agent.queue_target, agent_ui.draft_save, session),
       prompt_completion: build_prompt_completion(panel),
-      input_focused:
-        panel.input_focused and ctx.intent.frame.focus_owner.responder == :editor_view and
-          ctx.intent.frame.focus_owner.surface == :agent,
+      input_focused: composer_focused?(ctx, panel),
+      composer_hints: composer_hints(ctx, panel, shell_agent, stop_target != nil),
       resident_messages: resident_messages,
       resident_truncated?: resident_truncated?,
       transcript_epoch: transcript_epoch
@@ -294,6 +296,48 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   defp chat_status(_shell_state, _agent_ui, {:failed, _reason, _remedy}), do: :needs_you
   defp chat_status(_shell_state, _agent_ui, _unavailable), do: :idle
 
+  # The composer has the keys only while it is focused and nothing (a picker, an
+  # overlay) holds them above it.
+  @spec composer_focused?(Context.t(), Panel.t()) :: boolean()
+  defp composer_focused?(ctx, panel) do
+    panel.input_focused and ctx.intent.frame.focus_owner.responder == :editor_view and
+      ctx.intent.frame.focus_owner.surface == :agent
+  end
+
+  # The focused composer's key hints come from the Agent scope, which binds the
+  # keys they name; a composer without the keys shows none.
+  @spec composer_hints(Context.t(), Panel.t(), AgentState.t(), boolean()) :: [
+          AgentChat.composer_hint()
+        ]
+  defp composer_hints(ctx, panel, shell_agent, stoppable?) do
+    if composer_focused?(ctx, panel),
+      do: focused_composer_hints(ctx, shell_agent, stoppable?),
+      else: []
+  end
+
+  # Stop is hinted exactly when this conversation has a turn to stop: the stop
+  # target is what the stop command acts on, so the hint cannot name a key that
+  # does nothing. It covers a turn that waits for an approval, a turn in plan
+  # mode and a turn that reported an error and is still running, none of which
+  # the runtime status reports as working.
+  @spec focused_composer_hints(Context.t(), AgentState.t(), boolean()) :: [
+          AgentChat.composer_hint()
+        ]
+  defp focused_composer_hints(ctx, shell_agent, stoppable?) do
+    AgentScope.composer_key_hints(
+      composer_focus(ctx.intent.frame.editing_model, ctx.workspace.editing.mode),
+      native_gui: MingaEditor.Frontend.gui?(ctx.intent.frame.capabilities),
+      working: stoppable?,
+      stopped: AgentState.status(shell_agent) == :stopped,
+      remedy: UIState.start_remedy(ctx.workspace.agent_ui) != nil
+    )
+  end
+
+  @spec composer_focus(atom(), atom()) :: AgentScope.composer_focus()
+  defp composer_focus(:cua, _mode), do: :cua
+  defp composer_focus(_vim, :insert), do: :insert
+  defp composer_focus(_vim, _mode), do: :normal
+
   @spec submission_generation(PromptFrame.t()) :: pos_integer() | nil
   defp submission_generation(%PromptFrame{
          presentation: %{
@@ -466,12 +510,15 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
           ToolCallView.t()
   defp tool_call_view(%ToolCall{} = tc, scope, id) do
     preview = tc.preview || ToolApproval.build_transcript_preview(tc.name, tc.args)
+    status = tool_call_status(tc)
 
     %ToolCallView{
       name: tc.name,
       summary: tool_call_summary(tc),
+      step: ToolStep.sentence(tc.name, tc.args, status),
+      state: ToolStep.state(status),
       result: tc.result,
-      status: tool_call_status(tc),
+      status: status,
       is_error: tc.is_error,
       collapsed: tc.collapsed,
       duration_ms: tc.duration_ms,
@@ -526,11 +573,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   end
 
   @spec tool_call_summary(ToolCall.t()) :: String.t()
-  defp tool_call_summary(%ToolCall{name: name, args: args}) when is_map(args),
+  defp tool_call_summary(%ToolCall{name: name, args: args}),
     do: ToolArgSummary.summarize(name, args)
-
-  defp tool_call_summary(%ToolCall{name: name} = tc) do
-    args = Map.get(tc, :args) || %{}
-    ToolArgSummary.summarize(name, args)
-  end
 end
