@@ -201,7 +201,7 @@ reason = "The entry block is centred in the panel, so its inset is not the panel
 issue = 4044
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "start.project_switcher.empty"]
 frontend = "macos"
 part = "breadcrumb.segment"
 rule = "contrast"
@@ -213,7 +213,7 @@ reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "start.project_switcher.empty"]
 frontend = "macos"
 part = "breadcrumb.segment"
 rule = "contrast"
@@ -225,7 +225,7 @@ reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "start.project_switcher.empty"]
 frontend = "macos"
 part = "breadcrumb.segment"
 rule = "contrast"
@@ -268,7 +268,7 @@ reason = "Syntax colours, comments and line numbers in the editor miss 4.5:1 in 
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
 frontend = "macos"
 part = "modeline.modePill"
 rule = "contrast"
@@ -280,7 +280,7 @@ reason = "The modeline.modePill text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
 frontend = "macos"
 part = "modeline.modeText"
 rule = "contrast"
@@ -292,7 +292,7 @@ reason = "The modeline.modeText text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
 frontend = "macos"
 part = "modeline.segment"
 rule = "contrast"
@@ -493,4 +493,88 @@ pairs = [
   "#8839ef on #e6e9ef",
 ]
 reason = "The Agent activity card's title and task, and Minga's words in the minga role on the modeline bar (4.45:1), miss 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["start.project_switcher.empty"]
+frontend = "macos"
+part = "breadcrumb.segment"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#262938 on #414559",
+]
+reason = "The breadcrumb's segments use this theme's chrome text colours, which miss the contrast floor."
+issue = 4137
+
+[[exception]]
+scenario = ["start.project_switcher.empty"]
+frontend = "macos"
+part = "breadcrumb.segment"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#e6e9ef on #ccd0da",
+]
+reason = "The breadcrumb's segments use this theme's chrome text colours, which miss the contrast floor."
+issue = 4137
+
+[[exception]]
+scenario = ["start.project_switcher.empty"]
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#29333c on #1a1d23",
+]
+reason = "Code colours in this theme miss the contrast floor on the editor surface behind the picker."
+issue = 4137
+
+[[exception]]
+scenario = ["start.project_switcher.empty"]
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#5f647c on #303446",
+]
+reason = "Code colours in this theme miss the contrast floor on the editor surface behind the picker."
+issue = 4137
+
+[[exception]]
+scenario = ["start.project_switcher.empty"]
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#acb0be on #eff1f5",
+]
+reason = "Code colours in this theme miss the contrast floor on the editor surface behind the picker."
+issue = 4137
+
+[[exception]]
+scenario = ["start.project_switcher.empty"]
+frontend = "macos"
+part = "emptyState.why"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#686b82 on #ccd0da",
+]
+reason = "This theme's secondary popup text misses 4.5:1 on the popup surface."
+issue = 4137
+
+[[exception]]
+scenario = ["start.project_switcher.empty"]
+frontend = "macos"
+part = "picker.hints"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#686b82 on #ccd0da",
+]
+reason = "This theme's secondary popup text misses 4.5:1 on the popup surface."
 issue = 4137
