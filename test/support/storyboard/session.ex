@@ -318,8 +318,8 @@ defmodule Minga.Test.Storyboard.Session do
         :ok
 
       System.monotonic_time(:millisecond) > deadline ->
-        raise "the storyboard parser applied no highlights within #{@highlight_deadline_ms} ms; " <>
-                "is priv/minga-parser built (mix native.build.support)?"
+        raise "the storyboard parser applied no highlights, or never completed the parse, within " <>
+                "#{@highlight_deadline_ms} ms; is priv/minga-parser built and current (mix native.build.support)?"
 
       true ->
         receive do

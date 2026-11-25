@@ -139,12 +139,17 @@ defmodule MingaEditor.UI.Highlight do
     %{highlight | parser_correlation: correlation}
   end
 
-  @doc "Resets only parser-version correlation while preserving its registration generation."
+  @doc """
+  Resets only parser-version correlation while preserving its registration generation.
+
+  A restarted parser counts versions from 1 again, so the completed parse is forgotten too: a new parse that reuses
+  its version is not settled until it completes.
+  """
   @spec reset_parser_version(t()) :: t()
   def reset_parser_version(
         %__MODULE__{parser_correlation: %EventCorrelation{} = correlation} = highlight
       ) do
-    %{highlight | parser_correlation: %{correlation | version: 0}}
+    %{highlight | parser_correlation: %{correlation | version: 0}, completed_parse: nil}
   end
 
   def reset_parser_version(%__MODULE__{} = highlight), do: highlight

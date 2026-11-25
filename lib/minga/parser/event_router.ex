@@ -328,7 +328,6 @@ defmodule Minga.Parser.EventRouter do
   defp event_buffer_id({:textobject_positions, id, _, _}), do: id
   defp event_buffer_id({:document_symbols, id, _, _}), do: id
   defp event_buffer_id({:conceal_spans, id, _, _}), do: id
-  defp event_buffer_id({:parse_complete, id, _}), do: id
   defp event_buffer_id(_event), do: nil
 
   @spec snippet_buffer_id?(non_neg_integer() | nil) :: boolean()

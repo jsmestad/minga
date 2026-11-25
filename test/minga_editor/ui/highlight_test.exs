@@ -129,6 +129,43 @@ defmodule Minga.HighlightTest do
     after_count - before_count
   end
 
+  describe "parse completion" do
+    test "a parse is settled only when the newest correlated parse has completed" do
+      generation = make_ref()
+      first = EventCorrelation.new(generation, 1)
+      second = EventCorrelation.new(generation, 2)
+
+      highlight = Highlight.correlate(Highlight.new(), EventCorrelation.new(generation, 0))
+      refute Highlight.parse_settled?(highlight)
+
+      highlight = Highlight.accept_correlation(highlight, first)
+      refute Highlight.parse_settled?(highlight)
+
+      highlight = Highlight.complete_parse(highlight, first)
+      assert Highlight.parse_settled?(highlight)
+
+      highlight = Highlight.accept_correlation(highlight, second)
+      refute Highlight.parse_settled?(highlight)
+      assert Highlight.parse_settled?(Highlight.complete_parse(highlight, second))
+    end
+
+    test "after a parser restart, a parse that reuses a completed version is not settled until it completes" do
+      generation = make_ref()
+      first = EventCorrelation.new(generation, 1)
+
+      highlight =
+        Highlight.new()
+        |> Highlight.correlate(EventCorrelation.new(generation, 0))
+        |> Highlight.accept_correlation(first)
+        |> Highlight.complete_parse(first)
+        |> Highlight.reset_parser_version()
+        |> Highlight.accept_correlation(first)
+
+      refute Highlight.parse_settled?(highlight)
+      assert Highlight.parse_settled?(Highlight.complete_parse(highlight, first))
+    end
+  end
+
   describe "state construction and versioning" do
     test "new, custom themes, capture names, and span versions keep their public contracts" do
       hl = Highlight.new()
