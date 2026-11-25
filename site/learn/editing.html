@@ -90,7 +90,7 @@
             <span class="lab-stepper" data-lab-stepper></span>
           </div>
 
-            <div class="spine-specimen lk-stage" data-lab-stage role="group" aria-label="Simulated Minga window with the file new_feature.md. Click it or move focus to it, then press the keys the caption names.">
+            <div class="spine-specimen lk-stage" data-lab-stage role="group" aria-label="Simulated Minga window with a file open. Click it or move focus to it, then press the keys the caption names.">
               <div class="spine-titlebar">
                 <span class="spine-wordmark">minga</span>
                 <span class="lk-title">
@@ -275,161 +275,231 @@
                   <div class="lk-menu" data-menu="top" hidden>
                     <p class="lk-crumb">SPC</p>
                     <ul class="lk-rows">
-                      <li data-key="SPC"><kbd>SPC</kbd> Find file</li>
-                      <li data-key=","><kbd>,</kbd> Switch file</li>
-                      <li class="lk-group" data-key="a"><kbd>a</kbd> Minga ›</li>
-                      <li class="lk-group" data-key="b"><kbd>b</kbd> Buffers ›</li>
-                      <li class="lk-group" data-key="c"><kbd>c</kbd> Code ›</li>
-                      <li class="lk-group" data-key="f"><kbd>f</kbd> Files ›</li>
-                      <li class="lk-group" data-key="g"><kbd>g</kbd> Git ›</li>
-                      <li class="lk-group" data-key="h"><kbd>h</kbd> Help ›</li>
-                      <li class="lk-group" data-key="o"><kbd>o</kbd> Open ›</li>
-                      <li class="lk-group" data-key="p"><kbd>p</kbd> Project ›</li>
-                      <li class="lk-group" data-key="q"><kbd>q</kbd> Quit ›</li>
-                      <li class="lk-group" data-key="s"><kbd>s</kbd> Search ›</li>
-                      <li class="lk-group" data-key="t"><kbd>t</kbd> Toggles ›</li>
-                      <li class="lk-group" data-key="w"><kbd>w</kbd> Windows ›</li>
+                      <li data-key="SPC"><kbd>SPC</kbd> <span>Find file in project</span></li>
+                      <li data-key=","><kbd>,</kbd> <span>Switch buffer</span></li>
+                      <li data-key=":"><kbd>:</kbd> <span>Execute command</span></li>
+                      <li data-key=";"><kbd>;</kbd> <span>Eval expression</span></li>
+                      <li data-key="/"><kbd>/</kbd> <span>Search project</span></li>
+                      <li data-key="1 2 3 4"><kbd>1-4</kbd> <span>Pinned</span></li>
+                      <li class="lk-group" data-key="a"><kbd>a</kbd> <span>Minga ›</span></li>
+                      <li class="lk-group" data-key="b"><kbd>b</kbd> <span>Buffers ›</span></li>
+                      <li class="lk-group" data-key="c"><kbd>c</kbd> <span>Code ›</span></li>
+                      <li class="lk-group" data-key="f"><kbd>f</kbd> <span>Files ›</span></li>
+                      <li class="lk-group" data-key="g"><kbd>g</kbd> <span>Git ›</span></li>
+                      <li class="lk-group" data-key="h"><kbd>h</kbd> <span>Help ›</span></li>
+                      <li class="lk-group" data-key="o"><kbd>o</kbd> <span>Open ›</span></li>
+                      <li class="lk-group" data-key="p"><kbd>p</kbd> <span>Project ›</span></li>
+                      <li class="lk-group" data-key="q"><kbd>q</kbd> <span>Quit ›</span></li>
+                      <li class="lk-group" data-key="s"><kbd>s</kbd> <span>Search ›</span></li>
+                      <li class="lk-group" data-key="t"><kbd>t</kbd> <span>Toggles ›</span></li>
+                      <li class="lk-group" data-key="w"><kbd>w</kbd> <span>Windows ›</span></li>
                     </ul>
                   </div>
                   <div class="lk-menu" data-menu="a" hidden>
                     <p class="lk-crumb">SPC › a  Minga</p>
                     <ul class="lk-rows">
-                      <li data-key="a"><kbd>a</kbd> Tasks</li>
-                      <li data-key="v"><kbd>v</kbd> Conversation</li>
-                      <li data-key="r"><kbd>r</kbd> Review</li>
-                      <li data-key="n"><kbd>n</kbd> New task</li>
-                      <li data-key="i"><kbd>i</kbd> Inspect</li>
-                      <li data-key="w"><kbd>w</kbd> Watch</li>
-                      <li data-key="s"><kbd>s</kbd> Stop</li>
-                      <li data-key="y"><kbd>y</kbd> Keep change</li>
-                      <li data-key="d"><kbd>d</kbd> Reject change</li>
-                      <li data-key="u"><kbd>u</kbd> Reject all…</li>
-                      <li data-key="?"><kbd>?</kbd> Ask about this</li>
-                      <li data-key="e"><kbd>e</kbd> Rewrite selection</li>
-                      <li data-key="W"><kbd>W</kbd> Why this line</li>
-                      <li data-key="A"><kbd>A</kbd> Code autobiography</li>
-                      <li data-key="p"><kbd>p</kbd> Publish edits…</li>
-                      <li class="lk-group" data-key="q"><kbd>q</kbd> Queue ›</li>
-                      <li class="lk-group" data-key="x"><kbd>x</kbd> Context ›</li>
-                      <li class="lk-group" data-key="S"><kbd>S</kbd> Session ›</li>
+                      <li data-key="a"><kbd>a</kbd> <span>Tasks</span></li>
+                      <li data-key="v"><kbd>v</kbd> <span>Conversation</span></li>
+                      <li data-key="r"><kbd>r</kbd> <span>Review</span></li>
+                      <li data-key="n"><kbd>n</kbd> <span>New task</span></li>
+                      <li data-key="i"><kbd>i</kbd> <span>Inspect</span></li>
+                      <li data-key="w"><kbd>w</kbd> <span>Watch</span></li>
+                      <li data-key="s"><kbd>s</kbd> <span>Stop</span></li>
+                      <li data-key="y"><kbd>y</kbd> <span>Keep change</span></li>
+                      <li data-key="d"><kbd>d</kbd> <span>Reject change</span></li>
+                      <li data-key="u"><kbd>u</kbd> <span>Reject all…</span></li>
+                      <li data-key="?"><kbd>?</kbd> <span>Ask about this</span></li>
+                      <li data-key="e"><kbd>e</kbd> <span>Rewrite selection</span></li>
+                      <li data-key="W"><kbd>W</kbd> <span>Why this line</span></li>
+                      <li data-key="A"><kbd>A</kbd> <span>Code autobiography</span></li>
+                      <li data-key="p"><kbd>p</kbd> <span>Publish edits…</span></li>
+                      <li class="lk-group" data-key="q"><kbd>q</kbd> <span>Queue ›</span></li>
+                      <li class="lk-group" data-key="x"><kbd>x</kbd> <span>Context ›</span></li>
+                      <li class="lk-group" data-key="S"><kbd>S</kbd> <span>Session ›</span></li>
                     </ul>
                   </div>
                   <div class="lk-menu" data-menu="a_q" hidden>
                     <p class="lk-crumb">SPC › a › q  Queue</p>
                     <ul class="lk-rows">
-                      <li data-key="q"><kbd>q</kbd> Open the queue</li>
-                      <li data-key="f"><kbd>f</kbd> Queue a follow-up</li>
+                      <li data-key="q"><kbd>q</kbd> <span>Open queue</span></li>
+                      <li data-key="f"><kbd>f</kbd> <span>Queue as follow-up</span></li>
                     </ul>
                   </div>
                   <div class="lk-menu" data-menu="a_x" hidden>
                     <p class="lk-crumb">SPC › a › x  Context</p>
                     <ul class="lk-rows">
-                      <li data-key="b"><kbd>b</kbd> Attach this buffer</li>
-                      <li data-key="f"><kbd>f</kbd> Attach a project file</li>
-                      <li data-key="d"><kbd>d</kbd> Attach diagnostics</li>
-                      <li data-key="l"><kbd>l</kbd> List attachments</li>
+                      <li data-key="b"><kbd>b</kbd> <span>Attach this buffer</span></li>
+                      <li data-key="f"><kbd>f</kbd> <span>Attach a project file</span></li>
+                      <li data-key="d"><kbd>d</kbd> <span>Attach diagnostics</span></li>
+                      <li data-key="l"><kbd>l</kbd> <span>List attachments</span></li>
                     </ul>
                   </div>
                   <div class="lk-menu" data-menu="a_S" hidden>
                     <p class="lk-crumb">SPC › a › S  Session</p>
                     <ul class="lk-rows">
-                      <li data-key="h"><kbd>h</kbd> Resume a session</li>
-                      <li data-key="R"><kbd>R</kbd> Rename the session</li>
-                      <li data-key="m"><kbd>m</kbd> Pick the model</li>
-                      <li data-key="t"><kbd>t</kbd> Thinking level</li>
-                      <li data-key="l"><kbd>l</kbd> Where it runs</li>
-                      <li data-key="H"><kbd>H</kbd> Retained messages</li>
-                      <li data-key="k"><kbd>k</kbd> Checklist</li>
-                      <li data-key="s"><kbd>s</kbd> Stop the session</li>
+                      <li data-key="h"><kbd>h</kbd> <span>Resume a session</span></li>
+                      <li data-key="R"><kbd>R</kbd> <span>Rename session</span></li>
+                      <li data-key="m"><kbd>m</kbd> <span>Pick model</span></li>
+                      <li data-key="t"><kbd>t</kbd> <span>Pick thinking level</span></li>
+                      <li data-key="l"><kbd>l</kbd> <span>Pick where it runs</span></li>
+                      <li data-key="H"><kbd>H</kbd> <span>Read retained messages</span></li>
+                      <li data-key="k"><kbd>k</kbd> <span>Inspect checklist</span></li>
+                      <li data-key="s"><kbd>s</kbd> <span>Stop session</span></li>
                     </ul>
                   </div>
                   <div class="lk-menu" data-menu="b" hidden>
                     <p class="lk-crumb">SPC › b  Buffers</p>
                     <ul class="lk-rows">
-                      <li data-key="b"><kbd>b</kbd> Switch file</li>
-                      <li data-key="D"><kbd>D</kbd> Close other buffers</li>
-                      <li data-key="K"><kbd>K</kbd> Close all buffers</li>
+                      <li data-key="b"><kbd>b</kbd> <span>Switch buffer</span></li>
+                      <li data-key="B"><kbd>B</kbd> <span>Switch buffer (all)</span></li>
+                      <li data-key="n"><kbd>n</kbd> <span>Next buffer</span></li>
+                      <li data-key="p"><kbd>p</kbd> <span>Previous buffer</span></li>
+                      <li data-key="d"><kbd>d</kbd> <span>Kill buffer</span></li>
+                      <li data-key="X"><kbd>X</kbd> <span>Force kill buffer</span></li>
+                      <li data-key="D"><kbd>D</kbd> <span>Close other buffers</span></li>
+                      <li data-key="K"><kbd>K</kbd> <span>Close all buffers</span></li>
+                      <li data-key="m"><kbd>m</kbd> <span>View messages</span></li>
+                      <li data-key="W"><kbd>W</kbd> <span>View warnings</span></li>
+                      <li data-key="N"><kbd>N</kbd> <span>New buffer</span></li>
+                      <li data-key="l"><kbd>l</kbd> <span>Set language</span></li>
                     </ul>
                   </div>
                   <div class="lk-menu" data-menu="c" hidden>
                     <p class="lk-crumb">SPC › c  Code</p>
                     <ul class="lk-rows">
-                      <li data-key="d"><kbd>d</kbd> Go to definition</li>
-                      <li data-key="D"><kbd>D</kbd> Find references</li>
-                      <li data-key="x"><kbd>x</kbd> Diagnostics list</li>
-                      <li data-key="v"><kbd>v</kbd> Expand selection</li>
-                      <li data-key="V"><kbd>V</kbd> Shrink selection</li>
+                      <li data-key="a"><kbd>a</kbd> <span>Code actions</span></li>
+                      <li data-key="d"><kbd>d</kbd> <span>Go to definition</span></li>
+                      <li data-key="D"><kbd>D</kbd> <span>Find references</span></li>
+                      <li data-key="f"><kbd>f</kbd> <span>Format buffer</span></li>
+                      <li data-key="i"><kbd>i</kbd> <span>Go to implementation</span></li>
+                      <li data-key="k"><kbd>k</kbd> <span>Hover documentation</span></li>
+                      <li data-key="r"><kbd>r</kbd> <span>Rename symbol</span></li>
+                      <li data-key="t"><kbd>t</kbd> <span>Go to type definition</span></li>
+                      <li data-key="x"><kbd>x</kbd> <span>List diagnostics</span></li>
+                      <li data-key="h"><kbd>h</kbd> <span>Call hierarchy (incoming)</span></li>
+                      <li data-key="H"><kbd>H</kbd> <span>Call hierarchy (outgoing)</span></li>
+                      <li data-key="v"><kbd>v</kbd> <span>Expand selection</span></li>
+                      <li data-key="V"><kbd>V</kbd> <span>Shrink selection</span></li>
+                      <li class="lk-group" data-key="l"><kbd>l</kbd> <span>LSP ›</span></li>
+                    </ul>
+                  </div>
+                  <div class="lk-menu" data-menu="c_l" hidden>
+                    <p class="lk-crumb">SPC › c › l  LSP</p>
+                    <ul class="lk-rows">
+                      <li data-key="i"><kbd>i</kbd> <span>LSP info</span></li>
+                      <li data-key="r"><kbd>r</kbd> <span>Restart LSP</span></li>
+                      <li data-key="s"><kbd>s</kbd> <span>Stop LSP</span></li>
+                      <li data-key="S"><kbd>S</kbd> <span>Start LSP</span></li>
+                      <li data-key="I"><kbd>I</kbd> <span>Manage tools</span></li>
                     </ul>
                   </div>
                   <div class="lk-menu" data-menu="f" hidden>
                     <p class="lk-crumb">SPC › f  Files</p>
                     <ul class="lk-rows">
-                      <li data-key="o"><kbd>o</kbd> Open a remote file</li>
-                      <li data-key="s"><kbd>s</kbd> Save file</li>
+                      <li data-key="f"><kbd>f</kbd> <span>Find file</span></li>
+                      <li data-key="F"><kbd>F</kbd> <span>Find file other window</span></li>
+                      <li data-key="o"><kbd>o</kbd> <span>Open remote file</span></li>
+                      <li data-key="s"><kbd>s</kbd> <span>Save file</span></li>
+                      <li data-key="p"><kbd>p</kbd> <span>Open config file</span></li>
                     </ul>
                   </div>
                   <div class="lk-menu" data-menu="g" hidden>
                     <p class="lk-crumb">SPC › g  Git</p>
                     <ul class="lk-rows">
-                      <li data-key="g"><kbd>g</kbd> Git status</li>
-                      <li data-key="s"><kbd>s</kbd> Stage hunk</li>
-                      <li data-key="b"><kbd>b</kbd> Switch branch</li>
-                      <li data-key="B"><kbd>B</kbd> Blame</li>
+                      <li data-key="g"><kbd>g</kbd> <span>Git status</span></li>
+                      <li data-key="s"><kbd>s</kbd> <span>Stage hunk</span></li>
+                      <li data-key="B"><kbd>B</kbd> <span>Blame for the current line or file</span></li>
+                      <li data-key="b"><kbd>b</kbd> <span>Switch branch</span></li>
                     </ul>
                   </div>
                   <div class="lk-menu" data-menu="h" hidden>
                     <p class="lk-crumb">SPC › h  Help</p>
                     <ul class="lk-rows">
-                      <li data-key="a"><kbd>a</kbd> Apropos</li>
-                      <li data-key="c"><kbd>c</kbd> Describe command</li>
-                      <li data-key="k"><kbd>k</kbd> Describe key</li>
+                      <li data-key="a"><kbd>a</kbd> <span>Apropos</span></li>
+                      <li data-key="b"><kbd>b</kbd> <span>Describe bindings</span></li>
+                      <li data-key="c"><kbd>c</kbd> <span>Describe command</span></li>
+                      <li data-key="f"><kbd>f</kbd> <span>Describe function</span></li>
+                      <li data-key="k"><kbd>k</kbd> <span>Describe key</span></li>
+                      <li data-key="l"><kbd>l</kbd> <span>Show keystroke history</span></li>
+                      <li data-key="v"><kbd>v</kbd> <span>Describe option</span></li>
+                      <li data-key="r"><kbd>r</kbd> <span>Reload config</span></li>
+                      <li data-key="t"><kbd>t</kbd> <span>Pick theme</span></li>
+                      <li data-key="T"><kbd>T</kbd> <span>Interactive tutorial</span></li>
+                      <li class="lk-group" data-key="e"><kbd>e</kbd> <span>Extensions ›</span></li>
+                    </ul>
+                  </div>
+                  <div class="lk-menu" data-menu="h_e" hidden>
+                    <p class="lk-crumb">SPC › h › e  Extensions</p>
+                    <ul class="lk-rows">
+                      <li data-key="l"><kbd>l</kbd> <span>List extensions</span></li>
+                      <li data-key="u"><kbd>u</kbd> <span>Update all extensions</span></li>
+                      <li data-key="U"><kbd>U</kbd> <span>Update extension</span></li>
                     </ul>
                   </div>
                   <div class="lk-menu" data-menu="o" hidden>
                     <p class="lk-crumb">SPC › o  Open</p>
                     <ul class="lk-rows">
-                      <li data-key="t"><kbd>t</kbd> Terminal drawer</li>
-                      <li data-key="T"><kbd>T</kbd> New terminal</li>
+                      <li data-key="b"><kbd>b</kbd> <span>BEAM observatory</span></li>
+                      <li data-key="p"><kbd>p</kbd> <span>Toggle file tree</span></li>
+                      <li data-key="r"><kbd>r</kbd> <span>Reveal file in tree</span></li>
+                      <li data-key="t"><kbd>t</kbd> <span>Toggle the terminal drawer</span></li>
+                      <li data-key="T"><kbd>T</kbd> <span>New terminal in the current window</span></li>
                     </ul>
                   </div>
                   <div class="lk-menu" data-menu="p" hidden>
                     <p class="lk-crumb">SPC › p  Project</p>
                     <ul class="lk-rows">
-                      <li data-key="h"><kbd>h</kbd> Project home</li>
-                      <li data-key="p"><kbd>p</kbd> Switch project</li>
+                      <li data-key="f"><kbd>f</kbd> <span>Find file in project</span></li>
+                      <li data-key="p"><kbd>p</kbd> <span>Switch project</span></li>
+                      <li data-key="i"><kbd>i</kbd> <span>Invalidate project cache</span></li>
+                      <li data-key="a"><kbd>a</kbd> <span>Add known project</span></li>
+                      <li data-key="d"><kbd>d</kbd> <span>Remove known project</span></li>
+                      <li data-key="r"><kbd>r</kbd> <span>Recent files in project</span></li>
+                      <li data-key="."><kbd>.</kbd> <span>Browse project</span></li>
+                      <li data-key="T"><kbd>T</kbd> <span>Test project</span></li>
+                      <li data-key="h"><kbd>h</kbd> <span>Project home</span></li>
                     </ul>
                   </div>
                   <div class="lk-menu" data-menu="q" hidden>
                     <p class="lk-crumb">SPC › q  Quit</p>
                     <ul class="lk-rows">
-                      <li data-key="q"><kbd>q</kbd> Quit</li>
-                      <li data-key="n"><kbd>n</kbd> Start fresh</li>
+                      <li data-key="q"><kbd>q</kbd> <span>Quit editor</span></li>
+                      <li data-key="n"><kbd>n</kbd> <span>Start fresh</span></li>
                     </ul>
                   </div>
                   <div class="lk-menu" data-menu="s" hidden>
                     <p class="lk-crumb">SPC › s  Search</p>
                     <ul class="lk-rows">
-                      <li data-key="p"><kbd>p</kbd> Search project</li>
-                      <li data-key="i"><kbd>i</kbd> Document symbols</li>
-                      <li data-key="j"><kbd>j</kbd> Jump list</li>
-                      <li data-key="u"><kbd>u</kbd> Edit timeline</li>
-                      <li data-key="q"><kbd>q</kbd> Quickfix</li>
+                      <li data-key="p"><kbd>p</kbd> <span>Search project</span></li>
+                      <li data-key="s"><kbd>s</kbd> <span>Search in buffer</span></li>
+                      <li data-key="t"><kbd>t</kbd> <span>Search TODOs</span></li>
+                      <li data-key="r"><kbd>r</kbd> <span>Search and replace</span></li>
+                      <li data-key="i"><kbd>i</kbd> <span>Document symbols</span></li>
+                      <li data-key="j"><kbd>j</kbd> <span>Jump list</span></li>
+                      <li data-key="u"><kbd>u</kbd> <span>Edit timeline</span></li>
+                      <li data-key="w"><kbd>w</kbd> <span>Search workspace symbols</span></li>
+                      <li data-key="q"><kbd>q</kbd> <span>Quickfix</span></li>
                     </ul>
                   </div>
                   <div class="lk-menu" data-menu="t" hidden>
                     <p class="lk-crumb">SPC › t  Toggles</p>
                     <ul class="lk-rows">
-                      <li data-key="l"><kbd>l</kbd> Line numbers</li>
-                      <li data-key="w"><kbd>w</kbd> Word wrap</li>
-                      <li data-key="i"><kbd>i</kbd> Invisible characters</li>
+                      <li data-key="l"><kbd>l</kbd> <span>Toggle line numbers</span></li>
+                      <li data-key="p"><kbd>p</kbd> <span>Toggle bottom panel</span></li>
+                      <li data-key="i"><kbd>i</kbd> <span>Toggle invisible chars</span></li>
+                      <li data-key="w"><kbd>w</kbd> <span>Toggle word wrap</span></li>
                     </ul>
                   </div>
                   <div class="lk-menu" data-menu="w" hidden>
                     <p class="lk-crumb">SPC › w  Windows</p>
                     <ul class="lk-rows">
-                      <li data-key="v"><kbd>v</kbd> Vertical split</li>
-                      <li data-key="s"><kbd>s</kbd> Horizontal split</li>
-                      <li data-key="d"><kbd>d</kbd> Close window</li>
+                      <li data-key="h"><kbd>h</kbd> <span>Window left</span></li>
+                      <li data-key="j"><kbd>j</kbd> <span>Window down</span></li>
+                      <li data-key="k"><kbd>k</kbd> <span>Window up</span></li>
+                      <li data-key="l"><kbd>l</kbd> <span>Window right</span></li>
+                      <li data-key="v"><kbd>v</kbd> <span>Vertical split</span></li>
+                      <li data-key="s"><kbd>s</kbd> <span>Horizontal split</span></li>
+                      <li data-key="d"><kbd>d</kbd> <span>Close window</span></li>
                     </ul>
                   </div>
                 </div>
@@ -461,41 +531,44 @@
             <li data-step="menu">
               <p data-lab-instruction>Press <kbd>SPC</kbd> and read the menu</p>
               <p data-lab-caption="rest">This is your spec, open in Minga. You want another file, and you cannot remember the key for it. Click the file, then press <kbd>SPC</kbd> (the space bar).</p>
-              <p data-lab-caption="menu_opened"><kbd data-lab-key>SPC</kbd> opened the menu: every key you can press next, with a name beside it. A name that ends in › opens a group. In Minga the menu appears when you pause after <kbd>SPC</kbd>, and never if you type straight through; this lab opens it at once. Next, press <kbd>b</kbd> to look inside Buffers.</p>
-              <p data-lab-caption="vim_file"><kbd data-lab-key>That key</kbd> works in Minga as it does in Vim: inside a file, Vim keys keep their meaning. It is not part of this lab, so nothing moved here. Press <kbd>SPC</kbd> to open the menu.</p>
+              <p data-lab-caption="menu_opened"><kbd data-lab-key>SPC</kbd> opened the menu: every key you can press next, with a name beside it. Next, press <kbd>b</kbd> to look inside Buffers; a name that ends in › opens a group. In Minga the menu appears when you pause after <kbd>SPC</kbd>, and never if you type straight through; this lab opens it at once.</p>
+              <p data-lab-caption="vim_file"><kbd data-lab-key>That key</kbd> works in Minga as it does in Vim. It is not part of this lab, so nothing moved here. Press <kbd>SPC</kbd> to open the menu. Inside a file, Vim keys keep their meaning.</p>
               <p data-lab-caption="other_file"><kbd data-lab-key>That key</kbd> is not part of this lab, so nothing changed here. Press <kbd>SPC</kbd> to open the menu.</p>
-              <p data-lab-caption="q_file">In a file, <kbd data-lab-key>q</kbd> is the Vim macro key: in Minga it starts recording a macro, and it closes nothing. This lab does not record macros, so nothing changed. Press <kbd>SPC</kbd> to open the menu.</p>
+              <p data-lab-caption="q_file">In a file, <kbd data-lab-key>q</kbd> is the Vim macro key: in Minga it starts recording a macro, and it closes nothing. This lab does not record one, so nothing changed. Press <kbd>SPC</kbd> to open the menu.</p>
               <p data-lab-caption="esc_file"><kbd data-lab-key>esc</kbd> closes a menu or a list. Nothing is open right now, so nothing changed. Press <kbd>SPC</kbd> to open the menu.</p>
             </li>
             <li data-step="group">
               <p data-lab-instruction>Press a group's letter, such as <kbd>b</kbd>, to look inside it</p>
               <p data-lab-caption="menu_for_group"><kbd data-lab-key>SPC</kbd> opened the menu again. Next, press <kbd>b</kbd> to look inside Buffers, or any other letter with a › after its name.</p>
-              <p data-lab-caption="wrong_group"><kbd data-lab-key>That key</kbd> is the file switcher, and you will open it in the next step. The menu is still open. First look inside a group: press <kbd>b</kbd> for Buffers.</p>
-              <p data-lab-caption="group_opened"><kbd data-lab-key>That key</kbd> opened a group. The line at the top of the menu says where you are, and the rows are the keys you can press from here. Next, press <kbd>⌫</kbd> (Backspace) to go back up one level.</p>
-              <p data-lab-caption="leaf"><kbd data-lab-key>That key</kbd> runs the row you picked in Minga. This lab runs only the file switcher, so the menu closed and nothing else changed. Press <kbd>SPC</kbd> to open the menu again.</p>
+              <p data-lab-caption="wrong_group"><kbd data-lab-key>That key</kbd> opens the switcher, and you will use it in the next step. First look inside a group: press <kbd>b</kbd> for Buffers. The menu is still open.</p>
+              <p data-lab-caption="group_opened"><kbd data-lab-key>That key</kbd> opened a group. Next, press <kbd>⌫</kbd> (Backspace) to go back up one level. The line at the top of the menu says where you are, and the rows are the keys you can press from here.</p>
+              <p data-lab-caption="leaf">In Minga, <kbd data-lab-key>that key</kbd> runs the row you picked. This lab runs only the file switcher, so the menu closed and nothing else changed. Press <kbd>SPC</kbd> to open the menu again.</p>
               <p data-lab-caption="page_menu">In Minga, <kbd data-lab-key>that key</kbd> turns the page of a menu that is too long for one screen. This menu fits on one page, so nothing changed and it is still open.</p>
-              <p data-lab-caption="unlisted"><kbd data-lab-key>That key</kbd> is not on the menu, so there is nothing to run. Minga drops the keys and closes the menu. Press <kbd>SPC</kbd> to open it again.</p>
+              <p data-lab-caption="chord_menu"><kbd data-lab-key>That key</kbd> is not part of this lab, so nothing changed here. The menu is still open.</p>
+              <p data-lab-caption="unlisted"><kbd data-lab-key>That key</kbd> is not on the menu, so nothing runs, and Minga closes the menu. Press <kbd>SPC</kbd> to open it again.</p>
             </li>
             <li data-step="open_file">
               <p data-lab-instruction>Press <kbd>SPC ,</kbd> to list your files, then <kbd>↩</kbd> to open one</p>
-              <p data-lab-caption="back_for_switcher"><kbd data-lab-key>⌫</kbd> went back up to the top of the menu, and the menu stayed open. Next, press <kbd>,</kbd> (comma): the row named Switch file.</p>
+              <p data-lab-caption="back_for_switcher"><kbd data-lab-key>⌫</kbd> went back up to the top of the menu, and the menu stayed open. Next, press <kbd>,</kbd> (comma): the row named Switch buffer. A buffer is an open file, and in v0.1.0 this list holds your project's files too.</p>
               <p data-lab-caption="back_more"><kbd data-lab-key>⌫</kbd> went back up one level. Press <kbd>⌫</kbd> again to reach the top of the menu.</p>
-              <p data-lab-caption="menu_for_switcher"><kbd data-lab-key>SPC</kbd> opened the menu again. Next, press <kbd>,</kbd> (comma): the row named Switch file.</p>
+              <p data-lab-caption="restart_for_switcher">Inside a group, <kbd data-lab-key>SPC</kbd> is not a row, so Minga starts the menu again from the top. Next, press <kbd>,</kbd> (comma): the row named Switch buffer.</p>
+              <p data-lab-caption="menu_for_switcher"><kbd data-lab-key>SPC</kbd> opened the menu again. Next, press <kbd>,</kbd> (comma): the row named Switch buffer.</p>
               <p data-lab-caption="switcher_opened"><kbd data-lab-key>SPC ,</kbd> opened the file switcher: a list of your files, above the status line. The highlight starts on sync.ex. Press <kbd>↓</kbd> or <kbd>↑</kbd> to move it, then <kbd>↩</kbd> (Return) to open the highlighted file.</p>
               <p data-lab-caption="moved"><kbd data-lab-key>That key</kbd> moved the highlight. <kbd>↩</kbd> (Return) opens the highlighted file, and <kbd>esc</kbd> closes the list without opening anything.</p>
               <p data-lab-caption="typing_switcher">In Minga, <kbd data-lab-key>that key</kbd> would go into the Find file line as text and narrow the list. This lab does not narrow it. Press <kbd>↓</kbd> or <kbd>↑</kbd> to move, <kbd>↩</kbd> to open a file, or <kbd>esc</kbd> to close.</p>
               <p data-lab-caption="other_switcher"><kbd data-lab-key>That key</kbd> is not part of this lab, so nothing changed. Press <kbd>↓</kbd> or <kbd>↑</kbd> to move, <kbd>↩</kbd> to open a file, or <kbd>esc</kbd> to close.</p>
-              <p data-lab-caption="file_opened"><kbd data-lab-key>↩</kbd> opened the highlighted file, and the switcher closed by itself. The title bar and the status line now name that file. One thing is left: backing out. Press <kbd>SPC</kbd> to open the menu again.</p>
+              <p data-lab-caption="file_opened"><kbd data-lab-key>↩</kbd> opened the highlighted file, and the switcher closed by itself. One thing is left, backing out: press <kbd>SPC</kbd> to open the menu again. The title bar and the status line now name the new file.</p>
               <p data-lab-caption="closed_early"><kbd data-lab-key>esc</kbd> closed what was open, and nothing ran. Press <kbd>SPC</kbd> to open the menu again.</p>
             </li>
             <li data-step="close">
-              <p data-lab-instruction>Open the menu again with <kbd>SPC</kbd>, then close it with <kbd>esc</kbd></p>
-              <p data-lab-caption="menu_for_close"><kbd data-lab-key>SPC</kbd> opened the menu. Suppose you opened it by mistake. Press <kbd>esc</kbd> to close it, and nothing runs.</p>
+              <p data-lab-instruction>Press <kbd>SPC</kbd> again, then close what you opened with <kbd>esc</kbd></p>
+              <p data-lab-caption="menu_for_close"><kbd data-lab-key>SPC</kbd> opened the menu. Press <kbd>esc</kbd> to close it. Suppose you opened it by mistake: nothing runs.</p>
+              <p data-lab-caption="restart_for_close">Inside a group, <kbd data-lab-key>SPC</kbd> is not a row, so Minga starts the menu again from the top. Press <kbd>esc</kbd> to close it.</p>
               <p data-lab-caption="group_for_close"><kbd data-lab-key>That key</kbd> opened a group. You can still back out from here: press <kbd>esc</kbd> to close the whole menu.</p>
               <p data-lab-caption="back_for_close"><kbd data-lab-key>⌫</kbd> went back up one level. Press <kbd>esc</kbd> to close the whole menu.</p>
               <p data-lab-caption="switcher_for_close"><kbd data-lab-key>SPC ,</kbd> opened the file switcher. Press <kbd>esc</kbd> to close it without opening a file.</p>
               <p data-lab-caption="file_opened_again"><kbd data-lab-key>↩</kbd> opened the highlighted file, and the switcher closed by itself. To finish, press <kbd>SPC</kbd> to open the menu, then <kbd>esc</kbd> to close it.</p>
-              <p data-lab-caption="closed_done"><kbd data-lab-key>esc</kbd> closed it, and nothing ran. That is the whole method: press <kbd>SPC</kbd>, read the menu, pick a row, and press <kbd>esc</kbd> when you change your mind. You found the file switcher without remembering a shortcut.</p>
+              <p data-lab-caption="closed_done"><kbd data-lab-key>esc</kbd> closed what you opened, and nothing ran. That is the whole method: press <kbd>SPC</kbd>, read the menu, pick a row, and press <kbd>esc</kbd> when you change your mind. You found the file switcher without remembering a shortcut.</p>
               <p data-lab-caption="after_done"><kbd data-lab-key>That key</kbd> has nothing left to do: you have finished the lab. Press Start again to run it once more.</p>
             </li>
           </ol>
@@ -512,7 +585,7 @@
         </div>
 
         <ul class="pillar-list lk-points">
-          <li><strong>The <kbd>SPC</kbd> menu shows what comes next.</strong> Every Minga command starts with <kbd>SPC</kbd>, then a group letter, then an action letter. You only have to remember <kbd>SPC</kbd>: the menu names the rest, one level at a time. The menu is called which-key, after the Emacs and Neovim tool that does the same job.</li>
+          <li><strong>The <kbd>SPC</kbd> menu shows what comes next.</strong> Minga's commands start with <kbd>SPC</kbd>; most then take a group letter and an action letter. You only have to remember <kbd>SPC</kbd>: the menu names the rest, one level at a time. The menu is called which-key, after the Emacs and Neovim tool that does the same job.</li>
           <li><strong>Inside a file, Vim keys keep their Vim meaning.</strong> <kbd>j</kbd> moves down, <kbd>w</kbd> jumps a word, <kbd>i</kbd> lets you type, <kbd>u</kbd> undoes and <kbd>q</kbd> records a macro. Minga never takes a letter away from Vim inside your text, which is why its own commands start with <kbd>SPC</kbd>.</li>
         </ul>
 

@@ -83,8 +83,9 @@ const KEY_GLYPHS: Readonly<Record<string, string>> = { RET: "↩", ESC: "esc", D
 const MODIFIER_GLYPHS: Readonly<Record<string, string>> = { "C-": "⌃", "M-": "⌥", "D-": "⌘" };
 
 /**
- * Writes one key name from normalizeKey the way the site shows keys (docs/design/keys.md, "Notation"): modifiers as Mac glyphs with the letter in capitals,
- * the Return, Escape, Backspace and arrow keys as the page writes them, and every other key as itself. A caption and the keycast show this form, never the raw name.
+ * Writes one key name from normalizeKey the way the site shows keys (docs/design/keys.md, "Notation").
+ * Modifiers are Mac glyphs with the letter in capitals; the Return, Escape, Backspace and arrow keys are as the page writes them; every other key is itself.
+ * A caption and the keycast show this form, never the raw name.
  */
 export function displayKey(name: string): string {
   const [, mods = "", base = name] = /^((?:[CMD]-)*)(.+)$/su.exec(name) ?? [];

@@ -1,8 +1,9 @@
 /*
  * View for the Lesson 02 lab: find a command through the leader menu.
  *
- * The page holds every node and every word: the files, one menu panel for each group, the switcher and the captions. This file finds the nodes once,
- * then shows and hides them for each state. The menu and the switcher sit above the status line and take no room in the layout, so opening one moves nothing.
+ * The page holds every node and every word: the files, one menu panel for each group, the switcher and the captions.
+ * This file finds the nodes once, then shows and hides them for each state.
+ * The menu and the switcher sit above the status line and take no room in the layout, so opening one moves nothing.
  * Keys reach the lab through the lab stage only, so the page keeps its own keys whenever the stage does not have focus.
  */
 
@@ -37,6 +38,9 @@ export function mountSandbox(root: HTMLElement): void {
   const fileParts = Array.from(root.querySelectorAll<HTMLElement>("[data-file]"));
   const rows = Array.from(root.querySelectorAll<HTMLElement>("[data-switch-row]"));
 
+  const menuRows = Array.from(root.querySelectorAll<HTMLElement>("[data-menu] [data-key]"));
+  /** The keys of a menu row. One row may stand for several keys (the four pins). */
+  const rowKeys = (row: HTMLElement): string[] => (row.dataset.key ?? "").split(" ");
   const rowIndex = (row: HTMLElement): number => FILE_IDS.findIndex((id) => id === row.dataset.switchRow);
 
   let state = createSandboxState();
@@ -46,6 +50,9 @@ export function mountSandbox(root: HTMLElement): void {
     root.dataset.surface = surface(state);
     menus.hidden = menu === null;
     for (const panel of panels) panel.hidden = panel.dataset.menu !== menu;
+    // The row of the key the current step waits for carries a mark, so the eye finds it without the caption.
+    const next = menu === null ? null : nextKey(state);
+    for (const row of menuRows) row.classList.toggle("is-next", next !== null && !row.closest("[hidden]") && rowKeys(row).includes(next));
     switcher.hidden = state.switcher === null;
     for (const row of rows) row.classList.toggle("is-selected", rowIndex(row) === state.switcher);
     for (const part of fileParts) part.hidden = part.dataset.file !== state.file;
@@ -83,7 +90,8 @@ export function mountSandbox(root: HTMLElement): void {
       update(openRow(state, rowIndex(row)));
       return;
     }
-    const key = target?.closest<HTMLElement>("[data-key]")?.dataset.key;
+    const keyed = target?.closest<HTMLElement>("[data-key]");
+    const key = keyed ? rowKeys(keyed)[0] : undefined;
     if (key === undefined) return;
     if (key === LEADER && surface(state) !== "file" && !target?.closest("[data-menu]")) return;
     update(pressKey(state, key).state);

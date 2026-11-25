@@ -154,6 +154,30 @@ describe("find-a-command lab: every key gets an answer", () => {
     { place: "step2_top", key: "i", caption: "unlisted", names: "SPC i", handled: false, then: { surface: "file", menu: null } },
     { place: "step2_top", key: "RET", caption: "unlisted", names: "SPC ↩", handled: false, then: { surface: "file", menu: null } },
     { place: "step2_top", key: "C-d", caption: "page_menu", names: "⌃D", handled: true },
+    // A chord or a function key that is not a row changes only the caption: the menu stays, and the browser keeps the key.
+    { place: "step2_top", key: "C-j", caption: "chord_menu", names: "⌃J", handled: false },
+    { place: "step2_top", key: "C-k", caption: "chord_menu", names: "⌃K", handled: false },
+    { place: "step2_top", key: "C-n", caption: "chord_menu", names: "⌃N", handled: false },
+    { place: "step2_top", key: "C-p", caption: "chord_menu", names: "⌃P", handled: false },
+    { place: "step2_top", key: "C-g", caption: "chord_menu", names: "⌃G", handled: false },
+    { place: "step2_top", key: "M-x", caption: "chord_menu", names: "⌥X", handled: false },
+    { place: "step2_top", key: "F5", caption: "chord_menu", names: "F5", handled: false },
+    { place: "step3_group", key: "C-j", caption: "chord_menu", names: "⌃J", handled: false },
+    { place: "step3_subgroup", key: "F5", caption: "chord_menu", names: "F5", handled: false },
+    { place: "step4_group", key: "M-x", caption: "chord_menu", names: "⌥X", handled: false },
+    // Rows of the full menu that the lab does not run.
+    { place: "step2_top", key: ":", caption: "leaf", names: "SPC :", handled: true, then: { surface: "file", menu: null } },
+    { place: "step2_top", key: ";", caption: "leaf", names: "SPC ;", handled: true, then: { surface: "file", menu: null } },
+    { place: "step2_top", key: "/", caption: "leaf", names: "SPC /", handled: true, then: { surface: "file", menu: null } },
+    { place: "step2_top", key: "1", caption: "leaf", names: "SPC 1", handled: true, then: { surface: "file", menu: null } },
+    { place: "step2_top", key: "4", caption: "leaf", names: "SPC 4", handled: true, then: { surface: "file", menu: null } },
+    { place: "step2_top", key: "5", caption: "unlisted", names: "SPC 5", handled: false, then: { surface: "file", menu: null } },
+    { place: "step2_top", key: "m", caption: "unlisted", names: "SPC m", handled: false, then: { surface: "file", menu: null } },
+    { place: "step3_group", key: "d", caption: "leaf", names: "SPC b d", handled: true, then: { surface: "file", menu: null } },
+    // Inside a group the leader is not a row: the menu starts again at the top.
+    { place: "step3_group", key: "SPC", caption: "restart_for_switcher", names: "SPC", handled: true, then: { step: "open_file", surface: "menu", menu: "top" } },
+    { place: "step3_subgroup", key: "SPC", caption: "restart_for_switcher", names: "SPC", handled: true, then: { step: "open_file", surface: "menu", menu: "top" } },
+    { place: "step4_group", key: "SPC", caption: "restart_for_close", names: "SPC", handled: true, then: { step: "close", surface: "menu", menu: "top" } },
     { place: "step3_group", key: "C-u", caption: "page_menu", names: "⌃U", handled: true },
     { place: "step2_top", key: "ESC", caption: "closed_early", names: "esc", handled: true, then: { step: "group", surface: "file", menu: null } },
     { place: "step2_top", key: "DEL", caption: "closed_early", names: "⌫", handled: true, then: { step: "group", surface: "file", menu: null } },
@@ -164,6 +188,7 @@ describe("find-a-command lab: every key gets an answer", () => {
     { place: "step3_group", key: "D", caption: "leaf", names: "SPC b D", handled: true, then: { surface: "file", menu: null } },
     { place: "step3_group", key: "j", caption: "unlisted", names: "SPC b j", handled: false, then: { surface: "file", menu: null } },
     { place: "step3_group", key: "q", caption: "unlisted", names: "SPC b q", handled: false, then: { surface: "file", menu: null } },
+    { place: "step3_group", key: "RET", caption: "unlisted", names: "SPC b ↩", handled: false, then: { surface: "file", menu: null } },
     { place: "step3_group", key: "ESC", caption: "closed_early", names: "esc", handled: true, then: { step: "open_file", surface: "file", menu: null } },
     { place: "step3_subgroup", key: "DEL", caption: "back_more", names: "⌫", handled: true, then: { menu: "a" } },
     { place: "step3_subgroup", key: "m", caption: "leaf", names: "SPC a S m", handled: true, then: { surface: "file", menu: null } },
@@ -298,6 +323,19 @@ describe("find-a-command lab: the menu", () => {
         assert.ok(state.caption === "leaf" || state.caption === "switcher_opened", `${id} ${key}`);
         assert.equal(openMenu(state), null, `${id} ${key}`);
       }
+    }
+  });
+
+  it("the menu is the whole leader menu: 18 panels and 143 keys", () => {
+    assert.equal(MENU_IDS.length, 18);
+    assert.equal(MENU_IDS.reduce((sum, id) => sum + MENUS[id].groups.length + MENUS[id].leaves.length, 0), 143);
+  });
+
+  it("the next key of a step is a row of the menu that is open, so the page can mark it", () => {
+    for (const place of ["step2_top", "step3_top"] as const) {
+      const state = at(place);
+      const menu = MENUS[openMenu(state)!];
+      assert.ok([...menu.groups, ...menu.leaves].includes(nextKey(state)!), place);
     }
   });
 
@@ -448,13 +486,16 @@ describe("find-a-command lab: the page holds the words for every id the state em
     }
   });
 
-  /** The rows of one menu panel in the page, as [key, is a group] pairs. */
+  /** The keys of one menu panel in the page, as [key, is a group] pairs. One row may stand for several keys (the four pins). */
   function panelRows(id: MenuId): [string, boolean][] {
     const panel = new RegExp(`<div class="lk-menu" data-menu="${id}" hidden>(.*?)</ul>`, "s").exec(page.html)?.[1] ?? "";
-    return Array.from(panel.matchAll(/<li( class="lk-group")? data-key="([^"]+)"><kbd>([^<]+)<\/kbd> ([^<]+)<\/li>/g), (m) => {
-      assert.equal(m[2], m[3], `${id}: the row shows the key it presses`);
+    assert.equal((panel.match(/<li\b/g) ?? []).length, (panel.match(/<li( class="lk-group")? data-key="[^"]+"><kbd>[^<]+<\/kbd> <span>[^<]+<\/span><\/li>/g) ?? []).length, `${id}: every row has a key and a name`);
+    return Array.from(panel.matchAll(/<li( class="lk-group")? data-key="([^"]+)"><kbd>([^<]+)<\/kbd> <span>([^<]+)<\/span><\/li>/g)).flatMap((m) => {
+      const keys = m[2]!.split(" ");
+      const shown = keys.length === 1 ? keys[0] : `${keys[0]}-${keys.at(-1)}`;
+      assert.equal(m[3], shown, `${id}: the row shows the keys it presses`);
       assert.equal(m[4]!.endsWith(" ›"), m[1] !== undefined, `${id} ${m[2]}: a group, and only a group, ends in the chevron`);
-      return [m[2]!, m[1] !== undefined];
+      return keys.map((key): [string, boolean] => [key, m[1] !== undefined]);
     });
   }
 

@@ -25,7 +25,7 @@ export const OPEN_KEY = "RET";
 export const MOVE_DOWN_KEYS: readonly string[] = ["DOWN", "C-j"];
 export const MOVE_UP_KEYS: readonly string[] = ["UP", "C-k"];
 
-export type MenuId = "top" | "a" | "a_q" | "a_x" | "a_S" | "b" | "c" | "f" | "g" | "h" | "o" | "p" | "q" | "s" | "t" | "w";
+export type MenuId = "top" | "a" | "a_q" | "a_x" | "a_S" | "b" | "c" | "c_l" | "f" | "g" | "h" | "h_e" | "o" | "p" | "q" | "s" | "t" | "w";
 
 export interface MenuSpec {
   /** Keys that open a group one level down. */
@@ -34,24 +34,29 @@ export interface MenuSpec {
   readonly leaves: readonly string[];
 }
 
-/** The menu tree, as keys only. The page holds one panel for each menu with one row for each key, and a test holds the two together. */
+/**
+ * The menu tree, as keys only: the leader menu of the v0.1.0 design. It is today's leader bindings (lib/minga/keymap/defaults.ex) without the keys docs/design/keys.md retires and with the keys it adds.
+ * The page holds one panel for each menu with one row for each key, and a test holds the two together.
+ */
 export const MENUS: Readonly<Record<MenuId, MenuSpec>> = {
-  top: { groups: ["a", "b", "c", "f", "g", "h", "o", "p", "q", "s", "t", "w"], leaves: [LEADER, ","] },
+  top: { groups: ["a", "b", "c", "f", "g", "h", "o", "p", "q", "s", "t", "w"], leaves: [LEADER, ",", ":", ";", "/", "1", "2", "3", "4"] },
   a: { groups: ["q", "x", "S"], leaves: ["a", "v", "r", "n", "i", "w", "s", "y", "d", "u", "?", "e", "W", "A", "p"] },
   a_q: { groups: [], leaves: ["q", "f"] },
   a_x: { groups: [], leaves: ["b", "f", "d", "l"] },
   a_S: { groups: [], leaves: ["h", "R", "m", "t", "l", "H", "k", "s"] },
-  b: { groups: [], leaves: ["b", "D", "K"] },
-  c: { groups: [], leaves: ["d", "D", "x", "v", "V"] },
-  f: { groups: [], leaves: ["o", "s"] },
-  g: { groups: [], leaves: ["g", "s", "b", "B"] },
-  h: { groups: [], leaves: ["a", "c", "k"] },
-  o: { groups: [], leaves: ["t", "T"] },
-  p: { groups: [], leaves: ["h", "p"] },
+  b: { groups: [], leaves: ["b", "B", "n", "p", "d", "X", "D", "K", "m", "W", "N", "l"] },
+  c: { groups: ["l"], leaves: ["a", "d", "D", "f", "i", "k", "r", "t", "x", "h", "H", "v", "V"] },
+  c_l: { groups: [], leaves: ["i", "r", "s", "S", "I"] },
+  f: { groups: [], leaves: ["f", "F", "o", "s", "p"] },
+  g: { groups: [], leaves: ["g", "s", "B", "b"] },
+  h: { groups: ["e"], leaves: ["a", "b", "c", "f", "k", "l", "v", "r", "t", "T"] },
+  h_e: { groups: [], leaves: ["l", "u", "U"] },
+  o: { groups: [], leaves: ["b", "p", "r", "t", "T"] },
+  p: { groups: [], leaves: ["f", "p", "i", "a", "d", "r", ".", "T", "h"] },
   q: { groups: [], leaves: ["q", "n"] },
-  s: { groups: [], leaves: ["p", "i", "j", "u", "q"] },
-  t: { groups: [], leaves: ["l", "w", "i"] },
-  w: { groups: [], leaves: ["v", "s", "d"] },
+  s: { groups: [], leaves: ["p", "s", "t", "r", "i", "j", "u", "w", "q"] },
+  t: { groups: [], leaves: ["l", "p", "i", "w"] },
+  w: { groups: [], leaves: ["h", "j", "k", "l", "v", "s", "d"] },
 };
 
 export const MENU_IDS = Object.keys(MENUS) as MenuId[];
@@ -88,8 +93,8 @@ export const START_FILE: FileId = "spec";
 export const SWITCHER_START = 1;
 
 /**
- * Keys a Vim user tries first in a file. Each one is bound in Minga's Normal mode today (normal_bindings/0 in lib/minga/keymap/defaults.ex, the prefixes in
- * lib/minga/keymap/normal_prefixes.ex and the arrow keys in lib/minga/mode/normal.ex), so the caption may say that it works. The lab does not simulate them.
+ * Keys a Vim user tries first in a file. The lab does not simulate them.
+ * Each one is bound in Minga's Normal mode today, so the caption may say that it works: normal_bindings/0 in lib/minga/keymap/defaults.ex, the prefixes in lib/minga/keymap/normal_prefixes.ex and the arrow keys in lib/minga/mode/normal.ex.
  */
 const VIM_KEYS: ReadonlySet<string> = new Set([
   ..."hjkl0$^GwbeWBE%{}HML+-fFtT;,iaAIoOvVR:dcypPxXDCsSJK~r><u/?nN*#m@.=gz][",
@@ -111,6 +116,11 @@ const VIM_KEYS: ReadonlySet<string> = new Set([
 /** In Minga these two page through a menu that is too long for one screen (lib/minga/mode/normal.ex). They do not close it. */
 export const MENU_PAGE_KEYS: readonly string[] = ["C-d", "C-u"];
 
+/** A key pressed with Control, Option or Command, or a function key. The browser may act on one the lab does not bind, so in a menu such a key changes only the caption. */
+function isChord(key: string): boolean {
+  return /^(?:[CMD]-)+./u.test(key) || /^F\d+$/.test(key);
+}
+
 export type CaptionId =
   | "rest"
   | "menu_opened"
@@ -128,6 +138,9 @@ export type CaptionId =
   | "leaf"
   | "unlisted"
   | "page_menu"
+  | "chord_menu"
+  | "restart_for_switcher"
+  | "restart_for_close"
   | "closed_early"
   | "closed_done"
   | "moved"
@@ -158,6 +171,9 @@ export const CAPTION_IDS: readonly CaptionId[] = [
   "leaf",
   "unlisted",
   "page_menu",
+  "chord_menu",
+  "restart_for_switcher",
+  "restart_for_close",
   "closed_early",
   "closed_done",
   "moved",
@@ -289,6 +305,11 @@ function inMenu(state: SandboxState, key: string): Answer {
     return { caption, keys: [key], pending: up, handled: true };
   }
   if (MENU_PAGE_KEYS.includes(key)) return { caption: "page_menu", keys: [key], pending, handled: true };
+  if (isChord(key)) return { caption: "chord_menu", keys: [key], pending, handled: false };
+  // Inside a group the leader is not a row: Minga drops the sequence and starts the menu again at the top (lib/minga/mode/normal.ex).
+  if (key === LEADER && pending.length > 1) {
+    return { caption: step === "close" ? "restart_for_close" : "restart_for_switcher", keys: [key], pending: [LEADER], handled: true };
+  }
   const next = stepPrefix(SEQUENCES, pending, key);
   if (next.status === "pending") {
     return { caption: step === "close" ? "group_for_close" : "group_opened", keys: next.keys, pending: next.pending, completes: "group", handled: true };

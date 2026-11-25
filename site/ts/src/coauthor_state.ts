@@ -6,7 +6,7 @@
  */
 
 import { createKeycast, keycastPush, type KeycastState } from "./lab/keycast.ts";
-import { displayKeys, stepPrefix } from "./lab/stage.ts";
+import { displayKey, displayKeys, stepPrefix } from "./lab/stage.ts";
 
 export type StepId = "find" | "edit_undo" | "reject" | "keep";
 /** The four steps. They are also the lesson's progress ids: LESSON_STEPS.agents in progress.ts lists the same ids, and a test holds the two together. */
@@ -214,7 +214,7 @@ export function currentStep(state: CoAuthorState): StepId | null {
  */
 export function captionKeysText(state: CoAuthorState): string {
   const keys = state.captionKeys;
-  return keys[0] === "]" || keys[0] === "[" ? keys.join("") : displayKeys(keys);
+  return keys[0] === "]" || keys[0] === "[" ? keys.map(displayKey).join("") : displayKeys(keys);
 }
 
 /** The steps the learner has completed, in order. A step with two moves is done after its second move. */

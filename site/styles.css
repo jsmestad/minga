@@ -4842,13 +4842,23 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
   column-gap: 1.25rem;
 }
 
+/* A long name wraps under itself, beside its key, so a row never loses words in a narrow column. */
 .lk-rows li {
-  overflow: hidden;
+  display: flex;
   break-inside: avoid;
   color: #c6d0f5;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   cursor: pointer;
+}
+
+/* The key the current step waits for. The mark is still: no blink and no motion. */
+.lk-rows li.is-next {
+  background: rgba(239, 159, 118, 0.2);
+  box-shadow: inset 2px 0 0 #ef9f76;
+}
+
+.lk-rows li.is-next span {
+  color: #e6ebff;
+  font-weight: 700;
 }
 
 .lk-rows li:hover,
@@ -4857,9 +4867,10 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
 }
 
 .lk-rows kbd {
-  display: inline-block;
+  flex: none;
   min-width: 2.3em;
-  padding: 0;
+  margin-right: 0.6em;
+  padding: 0 0 0 0.3em;
   color: var(--sb-you);
 }
 
@@ -4972,7 +4983,7 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
 
   .lk-rows kbd {
     min-width: 1.9em;
-    margin-right: 0.2em;
+    margin-right: 0.5em;
   }
 
   .lk-menus,
