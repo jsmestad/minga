@@ -1521,12 +1521,9 @@ value = 0x6E
 name = "agent_start_remedy"
 value = 0x6F
 
-# Reports how many result rows the frontend's picker list shows. Payload:
-# generation(u32, the gui_picker header's activation_generation) + rows(u16,
-# positive). A frontend sends it after it draws a picker and again when the
-# count changes; the BEAM pages the picker by this many rows (ADR-0001: row fit
-# is a presentation fact the frontend owns). A report for a picker that is no
-# longer open is ignored.
+# Reports how many result rows the frontend's picker list shows. Payload: generation(u32, the gui_picker header's activation_generation) + rows(u16, positive).
+# A frontend sends it after it draws a picker and again when the count changes; the BEAM pages the picker by this many rows (ADR-0001: row fit is a presentation fact the frontend owns).
+# A report for a picker that is no longer open is ignored.
 [[gui_actions]]
 name = "picker_fit"
 value = 0x70
@@ -1992,9 +1989,7 @@ fields = [
   { name = "actions", type = "counted_array", count_type = "u8", element = "empty_list_action" },
 ]
 
-# One key that moves the picker's highlighted row by one. `codepoint` and
-# `modifiers` are the key_press values the BEAM resolves, so a frontend matches
-# the exact key it is about to send.
+# One key that moves the picker's highlighted row by one. `codepoint` and `modifiers` are the key_press values the BEAM resolves, so a frontend matches the exact key it is about to send.
 [[structures]]
 name = "picker_movement_key"
 fields = [
@@ -2619,11 +2614,9 @@ fields = [
 opcode = "gui_picker"
 id = 0x08
 name = "movement_keys"
-# The single keys bound to picker_next and picker_prev in the picker keymap
-# scope, user overrides included. A frontend may move its local selection
-# preview only for a key listed here; every other key edits the query or runs
-# another command on the BEAM. A decoder that reads no such section previews no
-# key.
+# The single keys bound to picker_next and picker_prev in the picker keymap scope, user overrides included.
+# A frontend may move its local selection preview only for a key listed here; every other key edits the query or runs another command on the BEAM.
+# A decoder that reads no such section previews no key.
 layout = "counted_array"
 count_type = "u8"
 element = "picker_movement_key"

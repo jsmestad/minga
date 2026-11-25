@@ -111,7 +111,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
     do: EmptyStateBuilder.empty_list(empty.title, empty.why, [], glyph: empty.glyph)
 
   # The keys the `:picker` scope resolves to one-row movement, user overrides included.
-  # A frontend previews a move only for these keys, so its preview cannot disagree with `MingaEditor.PickerUI.handle_key/3`.
+  # A frontend previews a move only for these keys, so its preview cannot disagree with `PickerUI.handle_key/3`.
   @spec movement_keys(Context.t(), PickerState.t()) :: [PickerModel.movement_key()]
   defp movement_keys(%Context{intent: %{frame: %{keymap_server: keymap_server}}}, picker_state) do
     keys =
