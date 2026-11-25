@@ -1927,6 +1927,22 @@ struct AgentToolOutcomeViewTests {
         #expect(body.findAll(ViewType.ProgressView.self).isEmpty)
     }
 
+    @Test("Motion is paused only where a capture host asks for it: a normal launch animates")
+    @MainActor func motionIsNotPausedByDefault() throws {
+        #expect(EnvironmentValues().motionPaused == false)
+
+        // The app's own view tree never sets the value; only the two capture hosts do.
+        let sources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Sources")
+        let captureHosts: Set<String> = ["PreviewHostApp.swift", "PreviewRegistry+Storyboard.swift"]
+        var setters: Set<String> = []
+        let files = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)
+        while let file = files?.nextObject() as? URL {
+            guard file.pathExtension == "swift", let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
+            if text.contains(".environment(\\.motionPaused") { setters.insert(file.lastPathComponent) }
+        }
+        #expect(setters == captureHosts)
+    }
+
     @Test("A working header draws the working mark of the state vocabulary, not a system spinner that ignores Reduce Motion and never lets a captured frame settle")
     func workingHeaderDrawsTheWorkingMark() throws {
         let state = AgentChatState(status: .thinking, model: "test")
