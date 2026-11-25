@@ -152,6 +152,17 @@ defmodule Minga.Session do
   @spec scan_recoverable_swaps(keyword()) :: [swap_entry()]
   defdelegate scan_recoverable_swaps(opts \\ []), to: Minga.Session.Swap.Recovery, as: :scan
 
+  @typedoc "Unsaved text waiting in one project: its canonical root (`nil` outside any project) and the number of files."
+  @type waiting_project :: Minga.Session.Swap.Recovery.waiting_project()
+
+  @doc """
+  Lists the projects that have unsaved text waiting in swap files, with the number of files in each.
+
+  It removes nothing. Pass `scope:` to `scan_recoverable_swaps/1` to get the entries of one project or one file.
+  """
+  @spec recoverable_projects(keyword()) :: [waiting_project()]
+  defdelegate recoverable_projects(opts \\ []), to: Minga.Session.Swap.Recovery
+
   @doc "Recovers content from a swap file. Returns `{:ok, original_path, content}`."
   @spec recover_swap_file(String.t()) :: {:ok, String.t(), String.t()} | {:error, term()}
   defdelegate recover_swap_file(swap_path), to: Minga.Session.Swap.Recovery, as: :recover
