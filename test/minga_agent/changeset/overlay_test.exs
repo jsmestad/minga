@@ -556,17 +556,27 @@ defmodule MingaAgent.Changeset.OverlayTest do
       %{overlay: overlay}
     end
 
-    test "materialization returns the failure instead of linking the packages", %{
-      overlay: overlay
-    } do
-      assert {:error, :eacces} = Overlay.materialize_project(overlay)
-      assert File.lstat(Path.join(overlay.overlay_dir, "node_modules")) == {:error, :enoent}
-    end
-
-    test "a tool write through a package link returns the failure", %{
+    test "materialization links the packages, as when cloning is unsupported", %{
       project: project,
       overlay: overlay
     } do
+      assert {:ok,
+              %{
+                cloned_entries: 0,
+                linked_entries: 1,
+                clone_fallbacks: 1,
+                clone_fallback_reason: :eacces
+              }} =
+               Overlay.materialize_project(overlay)
+
+      assert resolved_from_project?(overlay, project, "node_modules/left-pad/package.json")
+    end
+
+    test "a tool write through a package link returns the failure instead of refusing the link",
+         %{
+           project: project,
+           overlay: overlay
+         } do
       File.mkdir_p!(Path.join(overlay.overlay_dir, "node_modules"))
       package = Path.join(overlay.overlay_dir, "node_modules/left-pad")
       File.ln_s!(Path.join(project, "node_modules/left-pad"), package)

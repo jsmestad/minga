@@ -4,7 +4,7 @@ defmodule MingaAgent.Changeset.Overlay.Cloner do
 
   An overlay clones installed JavaScript packages so a command that writes inside one changes only the overlay. A clone shares its data blocks with the source until either side writes, so cloning a large `node_modules` costs metadata, not bytes. An implementation must fail rather than fall back to a byte-for-byte copy.
 
-  A clone fails in one of two ways. `{:error, {:unsupported, reason}}` means cloning is not possible here: the file system cannot share blocks, the source and the target are on different file systems, or the platform has no clone call. The overlay then links the packages instead. Any other `{:error, reason}` is a real failure, such as a permission error, and the overlay returns it.
+  A clone fails in one of two ways. `{:error, {:unsupported, reason}}` means cloning is not possible here: the file system cannot share blocks, the source and the target are on different file systems, or the platform has no clone call. Any other `{:error, reason}` is a real failure, such as a permission error or a tree that changed during the clone. Materialization links the packages after either kind and warns once. A tool write into a linked package is refused with `:symlink_traversal` when cloning is unsupported, and returns a real failure as its error.
 
   `MingaAgent.Changeset.Overlay` picks the implementation from the `:overlay_cloner` application environment, defaulting to `MingaAgent.Changeset.Overlay.NativeCloner`.
   """

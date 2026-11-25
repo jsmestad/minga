@@ -7,6 +7,7 @@ defmodule MingaAgent.Changeset.OverlayCloneTest do
 
   alias MingaAgent.Changeset.Overlay
   alias MingaAgent.Changeset.Overlay.NativeCloner
+  alias MingaAgent.Test.Overlay.FailingCloner
 
   @moduletag :tmp_dir
   @moduletag timeout: 60_000
@@ -73,6 +74,21 @@ defmodule MingaAgent.Changeset.OverlayCloneTest do
       end)
 
     assert log |> String.split("could not be cloned") |> length() == 2
+  end
+
+  test "a materialization whose clone fails warns with the reason and links the packages",
+       %{project: project} do
+    {:ok, overlay} = Overlay.create(project, cloner: FailingCloner)
+    on_exit(fn -> Overlay.cleanup(overlay) end)
+
+    log =
+      capture_log(fn ->
+        assert {:ok, %{clone_fallbacks: 1, linked_entries: 2}} =
+                 Overlay.materialize_project(overlay)
+      end)
+
+    assert log =~ "could not be cloned (:eacces)"
+    assert File.lstat!(Path.join(overlay.overlay_dir, "node_modules/left-pad")).type == :symlink
   end
 
   # A missing helper makes every clone unsupported, which would read as a clone regression.

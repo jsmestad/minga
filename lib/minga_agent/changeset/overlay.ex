@@ -8,7 +8,7 @@ defmodule MingaAgent.Changeset.Overlay do
 
   Installed JavaScript dependencies are cloned, not copied. The first materialization clones each project `node_modules` tree into the overlay with one copy-on-write clone (`MingaAgent.Changeset.Overlay.Cloner`). The `minga-clone-tree` helper makes it with one `clonefile(2)` call for the whole tree on macOS, and clones each file with `FICLONE` on Linux. A clone shares data blocks with the project until either side writes. Node's upward `node_modules` lookup resolves packages from the overlay, and every write inside the tree, including changes inside an installed package by a postinstall script or `patch-package`, lands in the overlay. Links inside the tree are copied as links, so pnpm's relative links resolve inside the clone; a link with an absolute target, such as an `npm link`, still reaches that target. A later materialization keeps the existing tree and adds only entries it is missing, cloning each one.
 
-  When a tree cannot be cloned (the overlay and the project are on different volumes, the file system cannot share blocks, as on HFS+ or ext4, or the helper binary is missing), the overlay never copies its bytes. It builds a real `node_modules` directory instead and symlinks each installed package to the project's copy. `.bin`, `@scope`, and pnpm's `.pnpm` directories are real overlay directories whose existing entries are linked or, for small regular files such as shims, copied one by one. Tool caches (`node_modules/.vite`, `node_modules/.cache`), package-manager metadata, and newly installed packages land in the overlay, but a command that writes inside an installed package follows its link into the project. Each materialization that falls back says so once in `*Messages*`. Any other clone failure, such as a permission error, fails the materialization instead of falling back.
+  When a tree cannot be cloned (the overlay and the project are on different volumes, the file system cannot share blocks, as on HFS+ or ext4, or the helper binary is missing), the overlay never copies its bytes. It builds a real `node_modules` directory instead and symlinks each installed package to the project's copy. `.bin`, `@scope`, and pnpm's `.pnpm` directories are real overlay directories whose existing entries are linked or, for small regular files such as shims, copied one by one. Tool caches (`node_modules/.vite`, `node_modules/.cache`), package-manager metadata, and newly installed packages land in the overlay, but a command that writes inside an installed package follows its link into the project. Any other clone failure, such as an unreadable file or a tree that changes during the clone, falls back the same way, so a command never fails where links would have worked. Each materialization that falls back says so once in `*Messages*`, naming the first reason.
 
   A tool write, delete, or commit under a project `node_modules` first gets the dependency tree a command would see. A package link on its path that points at the project's copy is then replaced with a clone of that package. When cloning is unsupported, the write is refused with `:symlink_traversal`, and any other clone failure is returned, so a tool never writes through a link and never leaves a partial package behind.
 
@@ -554,7 +554,8 @@ defmodule MingaAgent.Changeset.Overlay do
 
     case clone_entry(overlay, project_path, clone) do
       :ok -> swap_clone_for_link(clone, link, project_path)
-      {:fallback, _reason} -> {:error, :symlink_traversal}
+      {:not_cloned, :unsupported, _reason} -> {:error, :symlink_traversal}
+      {:not_cloned, :failed, reason} -> {:error, reason}
       {:error, _reason} = error -> error
     end
   end
@@ -831,7 +832,7 @@ defmodule MingaAgent.Changeset.Overlay do
       :ok ->
         {:ok, %{stats | cloned_entries: stats.cloned_entries + 1}}
 
-      {:fallback, reason} ->
+      {:not_cloned, _outcome, reason} ->
         stats = record_clone_fallback(stats, reason)
         build_link_farm(overlay, kind, :link, source_path, target_path, stats)
 
@@ -847,7 +848,7 @@ defmodule MingaAgent.Changeset.Overlay do
       :ok ->
         {:ok, %{stats | cloned_entries: stats.cloned_entries + 1}}
 
-      {:fallback, reason} ->
+      {:not_cloned, _outcome, reason} ->
         link_entry(source_path, target_path, record_clone_fallback(stats, reason))
 
       {:error, _reason} = error ->
@@ -858,10 +859,12 @@ defmodule MingaAgent.Changeset.Overlay do
   # Clones a project entry to an overlay path that does not exist yet. Every
   # overlay ancestor is checked first, so a clone never lands outside the
   # overlay. A failed clone's partial output is removed; removal deletes links
-  # inside it, never their targets. Only an unsupported clone falls back to
-  # links; any other failure is returned.
+  # inside it, never their targets. A clone that did not happen says whether
+  # cloning is unsupported here or failed: materialization links the entry
+  # either way, while a tool write refuses an unsupported clone and returns a
+  # failed one. {:error, reason} is a failure outside the clone itself.
   @spec clone_entry(t(), String.t(), String.t()) ::
-          :ok | {:fallback, term()} | {:error, term()}
+          :ok | {:not_cloned, :unsupported | :failed, term()} | {:error, term()}
   defp clone_entry(overlay, source_path, target_path) do
     with :ok <- reject_materialization_symlink(overlay, target_path),
          :ok <- File.mkdir_p(Path.dirname(target_path)) do
@@ -870,17 +873,17 @@ defmodule MingaAgent.Changeset.Overlay do
           :ok
 
         {:error, {:unsupported, reason}} ->
-          discard_partial_clone(target_path, {:fallback, reason})
+          discard_partial_clone(target_path, {:not_cloned, :unsupported, reason})
 
         {:error, reason} ->
-          discard_partial_clone(target_path, {:error, reason})
+          discard_partial_clone(target_path, {:not_cloned, :failed, reason})
       end
     end
   end
 
-  @spec discard_partial_clone(String.t(), {:fallback | :error, term()}) ::
-          {:fallback, term()} | {:error, term()}
-  defp discard_partial_clone(target_path, {_outcome, reason} = result) do
+  @spec discard_partial_clone(String.t(), {:not_cloned, :unsupported | :failed, term()}) ::
+          {:not_cloned, :unsupported | :failed, term()} | {:error, term()}
+  defp discard_partial_clone(target_path, {:not_cloned, _outcome, reason} = result) do
     case File.rm_rf(target_path) do
       {:ok, _removed} -> result
       {:error, cleanup, _path} -> {:error, {:clone_cleanup_failed, reason, cleanup}}
