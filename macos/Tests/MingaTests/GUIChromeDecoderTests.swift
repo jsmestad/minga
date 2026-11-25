@@ -2121,7 +2121,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let decodedEmpty, let listKeys) = cmd else {
+        guard case .guiPicker(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let decodedEmpty, let listKeys, _) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
 
