@@ -111,7 +111,8 @@ defmodule Minga.Buffer.UndoHistory do
             task_started: %{},
             run_budget: @run_budget,
             compaction_wanted: false,
-            over_budget_reported: false
+            over_budget_reported: false,
+            before: nil
 
   @opaque t :: %__MODULE__{
             provenance: Provenance.t(),
@@ -132,7 +133,8 @@ defmodule Minga.Buffer.UndoHistory do
             task_started: %{Author.t() => Provenance.group_id()},
             run_budget: pos_integer(),
             compaction_wanted: boolean(),
-            over_budget_reported: boolean()
+            over_budget_reported: boolean(),
+            before: Document.t() | nil
           }
 
   @doc """
@@ -180,7 +182,7 @@ defmodule Minga.Buffer.UndoHistory do
 
     provenance =
       replay(
-        history.recording,
+        %{history | before: nil},
         provenance,
         :untracked,
         UndoPatch.changes(old_document, new_document)
@@ -243,7 +245,7 @@ defmodule Minga.Buffer.UndoHistory do
 
     cap_entries(%{
       history
-      | provenance: replay(history.recording, provenance, group, patches),
+      | provenance: replay(history, provenance, group, patches),
         undo_entries: [entry | history.undo_entries],
         undo_size: history.undo_size + 1,
         tick: tick,
@@ -260,7 +262,7 @@ defmodule Minga.Buffer.UndoHistory do
 
     %{
       history
-      | provenance: replay(history.recording, history.provenance, group, patches),
+      | provenance: replay(history, history.provenance, group, patches),
         tick: tick,
         task_run: %{task_run | tick_after: tick},
         task_ticks: Map.put(history.task_ticks, task, tick)
@@ -292,6 +294,16 @@ defmodule Minga.Buffer.UndoHistory do
     Provenance.run_count(history.provenance) <= div(history.run_budget * 3, 4) and
       Provenance.dead_bytes(history.provenance) <= div(@dead_text_budget * 3, 4)
   end
+
+  @doc """
+  Gives the next recording the document as it was before the change, or forgets it with `nil`.
+
+  A single deletion at the edge of a run of identical bytes can then slide along that run to take another author's copy first; without it, the deletion stays where the patch put it.
+  """
+  @spec before_change(t(), Document.t() | nil) :: t()
+  def before_change(%__MODULE__{} = history, document)
+      when is_struct(document, Document) or is_nil(document),
+      do: %{history | before: document}
 
   @doc "Returns whether a Minga step left the history over its run budget, so the owner should run `compact_slice/2`."
   @spec compaction_wanted?(t()) :: boolean()
@@ -877,7 +889,7 @@ defmodule Minga.Buffer.UndoHistory do
 
     %{
       history
-      | provenance: replay(history.recording, history.provenance, top.group, patches),
+      | provenance: replay(history, history.provenance, top.group, patches),
         undo_entries: [%{top | tick_from: tick} | rest],
         tick: tick,
         last_recorded_at: at
@@ -1026,9 +1038,9 @@ defmodule Minga.Buffer.UndoHistory do
 
   # Patches are in undo order, so the document saw them last to first.
   # Each patch is recorded as its smallest changes, from the last to the first so their offsets stay valid.
-  @spec replay(recording(), Provenance.t(), Provenance.group_id() | :untracked, [UndoPatch.t()]) ::
+  @spec replay(t(), Provenance.t(), Provenance.group_id() | :untracked, [UndoPatch.t()]) ::
           Provenance.t()
-  defp replay(:coarse, provenance, group, patches) do
+  defp replay(%__MODULE__{recording: :coarse}, provenance, group, patches) do
     patches
     |> Enum.reverse()
     |> Enum.reduce(provenance, fn patch, acc ->
@@ -1037,145 +1049,101 @@ defmodule Minga.Buffer.UndoHistory do
     end)
   end
 
-  defp replay(:precise, provenance, group, patches) do
+  defp replay(%__MODULE__{before: before}, provenance, group, patches) do
     writer =
       if group == :untracked, do: :unattributed, else: Provenance.group_author(provenance, group)
+
+    # The document before the change describes only the first patch applied, which is the only one when there is one.
+    context = if match?([_], patches), do: before
 
     patches
     |> Enum.reverse()
     |> Enum.reduce(provenance, fn patch, acc ->
-      Provenance.edit_all(acc, group, anchored_changes(acc, writer, patch))
+      changes =
+        acc |> anchored_changes(writer, patch) |> slide_lone_deletion(acc, writer, context)
+
+      Provenance.edit_all(acc, group, changes)
     end)
   end
 
-  # No fallback may give the writer an unchanged byte another author wrote. Each live span in the patch's old range by
-  # someone other than the writer, or text that predates tracking, is an anchor: when its exact bytes still appear, in
-  # order, in the new text, the change is cut around them and they keep their author. An anchor that no longer appears
-  # was really rewritten and stays inside the change. The text between anchors is compared line by line, and word by
-  # word next to an anchor.
+  # A single pure deletion inside a run of identical bytes gives the same text wherever it sits in that run; it takes
+  # the place that covers the most bytes another author wrote, so the writer consumes the other author's copy and a
+  # reject can never bring back a byte where it was not.
+  @spec slide_lone_deletion([change()], Provenance.t(), Provenance.author(), Document.t() | nil) ::
+          [change()]
+  defp slide_lone_deletion(
+         [{at, removed, ""}] = changes,
+         provenance,
+         writer,
+         %Document{} = document
+       )
+       when removed != "" do
+    length = byte_size(removed)
+    byte = &Document.byte_at(document, &1)
+    size = Document.content_byte_size(document)
+
+    lowest =
+      slide_on(at, length, -1, fn from ->
+        from > 0 and byte.(from - 1) == byte.(from + length - 1)
+      end)
+
+    highest =
+      slide_on(at, length, 1, fn from ->
+        from + length < size and byte.(from) == byte.(from + length)
+      end)
+
+    if lowest == highest do
+      changes
+    else
+      foreign? = &(&1 != writer and &1 != :unattributed)
+      spans = Provenance.spans(provenance, lowest, highest + length)
+      covered = &foreign_bytes(spans, &1, length, foreign?)
+      best = Enum.max_by(lowest..highest, covered)
+
+      if covered.(best) > covered.(at),
+        do: [{best, Document.slice_byte_range(document, best, length), ""}],
+        else: changes
+    end
+  end
+
+  defp slide_lone_deletion(changes, _provenance, _writer, _document), do: changes
+
+  @spec slide_on(non_neg_integer(), pos_integer(), -1 | 1, (non_neg_integer() -> boolean())) ::
+          non_neg_integer()
+  defp slide_on(from, length, step, can_move?) do
+    if can_move?.(from), do: slide_on(from + step, length, step, can_move?), else: from
+  end
+
+  # Another author's text survives only where an alignment proves it unchanged: prefix and suffix trims, the word
+  # comparison's equal segments, and lines unique on both sides. Next to another author's text the word comparison
+  # always runs. Text no alignment proves unchanged is part of the change, which can credit unchanged text inside a
+  # long unpaired span to the writer; exact text and exact rejects come first. See `slide_lone_deletion/4` for a
+  # deletion at the edge of a run of identical bytes.
   @spec anchored_changes(Provenance.t(), Provenance.author(), UndoPatch.t()) :: [change()]
   defp anchored_changes(provenance, writer, patch) do
     {start, old, new} = UndoPatch.change(patch)
+    foreign? = &(&1 != writer and &1 != :unattributed)
+    spans = Provenance.spans(provenance, start, start + byte_size(old))
 
-    foreign =
-      for {from, to, author, _key} <- Provenance.spans(provenance, start, start + byte_size(old)),
-          author != writer and author != :unattributed,
-          do: {from - start, to - from}
-
-    case foreign do
-      [] -> UndoPatch.precise_changes(patch)
-      anchors -> cut_around(start, old, new, anchors)
-    end
-  end
-
-  # Each anchor goes to the occurrence nearest where the length change so far puts it. When that choice leaves a later
-  # anchor with no place, the cut is made again taking each anchor's first occurrence in order, which finds a place for
-  # every anchor whenever one exists; the cut that keeps more anchors wins.
-  @spec cut_around(non_neg_integer(), binary(), binary(), [{non_neg_integer(), pos_integer()}]) ::
-          [change()]
-  defp cut_around(start, old, new, anchors) do
-    total = length(anchors)
-    {changes, kept} = cut_with(:nearest, start, old, new, anchors)
-
-    if kept == total do
-      changes
+    if Enum.any?(spans, &foreign?.(elem(&1, 2))) do
+      UndoPatch.segment_changes(start, old, new, true)
     else
-      case cut_with(:first, start, old, new, anchors) do
-        {first_changes, first_kept} when first_kept > kept -> first_changes
-        _fewer -> changes
-      end
+      UndoPatch.precise_changes(patch)
     end
   end
 
-  @spec cut_with(:nearest | :first, non_neg_integer(), binary(), binary(), [
-          {non_neg_integer(), pos_integer()}
-        ]) ::
-          {[change()], non_neg_integer()}
-  defp cut_with(strategy, start, old, new, anchors) do
-    {changes, old_from, new_from, kept} =
-      Enum.reduce(anchors, {[], 0, 0, 0}, fn anchor, acc ->
-        cut_at_anchor(acc, anchor, strategy, {start, old, new})
-      end)
+  @spec foreign_bytes(
+          [Provenance.span()],
+          non_neg_integer(),
+          pos_integer(),
+          (Provenance.author() -> boolean())
+        ) ::
+          non_neg_integer()
+  defp foreign_bytes(spans, from, length, foreign?) do
+    to = from + length
 
-    last =
-      UndoPatch.segment_changes(
-        start + old_from,
-        binary_part(old, old_from, byte_size(old) - old_from),
-        binary_part(new, new_from, byte_size(new) - new_from),
-        true
-      )
-
-    {[last | changes] |> Enum.reverse() |> Enum.concat(), kept}
-  end
-
-  @spec cut_at_anchor(
-          {[[change()]], non_neg_integer(), non_neg_integer(), non_neg_integer()},
-          {non_neg_integer(), pos_integer()},
-          :nearest | :first,
-          {non_neg_integer(), binary(), binary()}
-        ) :: {[[change()]], non_neg_integer(), non_neg_integer(), non_neg_integer()}
-  defp cut_at_anchor(
-         {changes, old_from, new_from, kept} = acc,
-         {at, length},
-         strategy,
-         {start, old, new}
-       ) do
-    bytes = binary_part(old, at, length)
-
-    case find_anchor(strategy, new, bytes, new_from, at + (new_from - old_from)) do
-      nil ->
-        acc
-
-      found ->
-        segment =
-          UndoPatch.segment_changes(
-            start + old_from,
-            binary_part(old, old_from, at - old_from),
-            binary_part(new, new_from, found - new_from),
-            true
-          )
-
-        {[segment | changes], at + length, found + length, kept + 1}
-    end
-  end
-
-  # `:nearest` takes the occurrence closest to `expected`, the earlier one on a tie; `:first`, the first one. Both look
-  # only after the previous anchor, so anchors stay in order.
-  @spec find_anchor(:nearest | :first, binary(), binary(), non_neg_integer(), integer()) ::
-          non_neg_integer() | nil
-  defp find_anchor(:first, new, bytes, new_from, _expected), do: match_from(new, bytes, new_from)
-
-  defp find_anchor(:nearest, new, bytes, new_from, expected) do
-    from = min(max(new_from, expected), byte_size(new))
-    after_expected = match_from(new, bytes, from)
-    before_expected = last_match_before(new, bytes, new_from, from)
-
-    case {before_expected, after_expected} do
-      {nil, found} -> found
-      {found, nil} -> found
-      {before, later} -> if from - before <= later - from, do: before, else: later
-    end
-  end
-
-  @spec match_from(binary(), binary(), non_neg_integer()) :: non_neg_integer() | nil
-  defp match_from(new, bytes, from) do
-    case :binary.match(new, bytes, scope: {from, byte_size(new) - from}) do
-      {found, _length} -> found
-      :nomatch -> nil
-    end
-  end
-
-  # The last occurrence that starts in [new_from, before), searching only that stretch.
-  @spec last_match_before(binary(), binary(), non_neg_integer(), non_neg_integer()) ::
-          non_neg_integer() | nil
-  defp last_match_before(_new, _bytes, new_from, before) when before <= new_from, do: nil
-
-  defp last_match_before(new, bytes, new_from, before) do
-    stop = min(before + byte_size(bytes) - 1, byte_size(new))
-
-    case :binary.matches(new, bytes, scope: {new_from, stop - new_from}) do
-      [] -> nil
-      matches -> matches |> List.last() |> elem(0)
+    for {span_from, span_to, author, _key} <- spans, foreign?.(author), reduce: 0 do
+      bytes -> bytes + max(0, min(to, span_to) - max(from, span_from))
     end
   end
 

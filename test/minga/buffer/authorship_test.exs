@@ -319,9 +319,68 @@ defmodule Minga.Buffer.AuthorshipTest do
       assert BufferProcess.content(buffer) == "a = 1\nalpha beta gamma delta\nb = 2\n"
     end
 
+    # Round 5 R2, CH1 and CH2: two steps of one task over one spot, then your retype of the result.
+    test "retyping what two steps of a task wrote over one word rejects to your text alone" do
+      for {original, start, width, first, second, mine, expected} <- [
+            {"abc\n", 1, 1, "X", "Y", "Z", "aZc\n"},
+            {"call(foo)\n", 5, 3, "bar", "baz", "qux", "call(qux)\n"}
+          ] do
+        buffer = start(original)
+        replace_at(buffer, {0, start}, width, first, step("t1", "s1"))
+        replace_at(buffer, {0, start}, byte_size(first), second, step("t1", "s2"))
+        replace_at(buffer, {0, start}, byte_size(second), mine)
+        assert {:ok, 2} = BufferProcess.undo_agent_session(buffer)
+        assert BufferProcess.content(buffer) == expected
+      end
+    end
+
+    # Round 5 R1, AN2: the edit tool adds a one-byte suffix on every line; your :s replaces the suffixed word.
+    test "SPC a u after your :s over Minga's one-byte insertions changes nothing" do
+      original = Enum.map_join(1..8, fn n -> "v#{n} = f(beta) # #{n}\n" end)
+      buffer = start(original)
+      minga_replace(buffer, String.replace(original, "beta", "beta7"), step("t", "c1"))
+
+      :ok =
+        BufferProcess.replace_content(
+          buffer,
+          String.replace(BufferProcess.content(buffer), "beta7", "BETA")
+        )
+
+      before = BufferProcess.content(buffer)
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == before
+    end
+
+    # Round 5, R1's documented limit: one line past the word budget has no alignment inside it, so Minga's edit of its
+    # ends takes the whole line, your word included. Your undo is then blocked, and the reject is exact.
+    test "a line past the word budget is one change: your word in it goes to Minga, and the reject brings it back" do
+      words = Enum.map_join(1..700, " ", &"word#{&1}")
+      buffer = start("# Title\n" <> words <> "\n")
+      middle = byte_size(Enum.map_join(1..350, " ", &"word#{&1}"))
+      replace_at(buffer, {1, middle}, 0, " MINE")
+      mine = BufferProcess.content(buffer)
+      identity = {:buffer, "/long"}
+      expected = Minga.Buffer.FileMutation.revision(mine, BufferProcess.version(buffer), identity)
+      pairs = [{"word1 ", "WORD1 "}, {"word700\n", "WORD700\n"}]
+
+      assert {:ok, _receipt} =
+               BufferProcess.conditional_mutate(
+                 buffer,
+                 expected,
+                 {:edit, pairs},
+                 identity,
+                 step("t", "c1")
+               )
+
+      assert BufferProcess.author_at(buffer, {1, middle + 2}) == {:minga, "t"}
+      assert {:blocked, _reason} = BufferProcess.undo(buffer)
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == mine
+    end
+
     # Round 3's L1: a long prose line where Minga edits the first and last words around a word of yours.
     test "your word in a long line keeps its author and its undo when Minga edits the line's ends" do
-      for count <- [100, 140, 700] do
+      for count <- [60, 100] do
         words = Enum.map_join(1..count, " ", &"word#{&1}")
         buffer = start("# Title\n" <> words <> "\n")
         middle = byte_size(Enum.map_join(1..div(count, 2), " ", &"word#{&1}"))

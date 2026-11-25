@@ -49,7 +49,10 @@ defmodule Minga.Test.ProvenanceModel do
         first = Enum.at(live, start)
         last = Enum.at(live, start + removed_bytes - 1)
         left = if start > 0, do: Enum.at(live, start - 1)
-        marked = MapSet.union(MapSet.new(first..last//1), covered(model, live, first, last, left))
+
+        marked =
+          MapSet.union(MapSet.new(first..last//1), covered(model, group, live, first, last, left))
+
         {owner, overlapped} = overlapped(model, group, live, marked, left, first, last)
 
         model.entries
@@ -365,24 +368,31 @@ defmodule Minga.Test.ProvenanceModel do
     end
   end
 
-  # A deletion that consumes a replacement also covers the text it replaced. A replacement is one edit's inserted text
-  # followed by the tombstones its group made, so the deletion consumes one when it ends with the group's text and does
-  # not start inside the same replacement. It then marks the dead bytes right after it that the group deleted, up to the
-  # first byte that is live, inserted by the group, or not deleted by it.
-  defp covered(model, live, first, last, left_index) do
-    owner = Enum.at(model.entries, last).group
+  # A deletion that consumes replacements also covers the text they replaced. The groups whose live bytes it deleted
+  # (other than the deleter) are the consumed set; unless it starts inside a replacement of one of them, it marks the
+  # dead bytes right after it that a consumed group wrote or deleted, up to the first live byte or byte of no consumed
+  # group, passing inert bytes.
+  defp covered(model, group, live, first, last, left_index) do
+    live_set = MapSet.new(live)
 
-    if owner == nil or inside?(model, left_index, first, owner) do
+    consumed =
+      for index <- first..last//1,
+          MapSet.member?(live_set, index),
+          owner = Enum.at(model.entries, index).group,
+          owner != nil and owner != group,
+          uniq: true,
+          do: owner
+
+    if consumed == [] or inside?(model, left_index, first, consumed) do
       MapSet.new()
     else
-      live = MapSet.new(live)
-
       model.entries
       |> Enum.with_index()
       |> Enum.drop(last + 1)
       |> Enum.reject(fn {entry, _index} -> inert?(entry) end)
       |> Enum.take_while(fn {entry, index} ->
-        not MapSet.member?(live, index) and entry.group != owner and owner in entry.deletions
+        not MapSet.member?(live_set, index) and
+          (entry.group in consumed or Enum.any?(entry.deletions, &(&1 in consumed)))
       end)
       |> MapSet.new(fn {_entry, index} -> index end)
     end
@@ -395,8 +405,10 @@ defmodule Minga.Test.ProvenanceModel do
 
   defp inside?(_model, nil, _first, _owner), do: false
 
-  defp inside?(model, left_index, first, owner) do
-    Enum.at(model.entries, left_index).group == owner and
+  defp inside?(model, left_index, first, consumed) do
+    owner = Enum.at(model.entries, left_index).group
+
+    owner in consumed and
       not (model.entries
            |> Enum.slice((left_index + 1)..(first - 1)//1)
            |> Enum.any?(&separates?(&1, owner)))

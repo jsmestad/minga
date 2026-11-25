@@ -3904,7 +3904,9 @@ defmodule Minga.Buffer.Process do
     history =
       state.undo_history
       |> history_in_step(state, state.document, :before)
+      |> UndoHistory.before_change(state.document)
       |> record_history(state, document, record)
+      |> UndoHistory.before_change(nil)
       |> history_in_step(state, document, :after)
 
     schedule_compaction(%{state | document: document, undo_history: history})

@@ -534,6 +534,84 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert offset >= 6
     end
 
+    # Round 5 R1: AN1, your :s over Minga's one-byte insertions, and the slider cases.
+    test "your edit over Minga's short insertions leaves no Minga byte behind to delete elsewhere" do
+      lines =
+        for n <- 1..10, do: "    value_#{n} = compute(alpha_#{n}, beta, gamma) # note #{n}\n"
+
+      c0 = Enum.join(lines)
+      c1 = String.replace(c0, "beta", "beta7")
+      c2 = String.replace(c1, "beta7", "BETA")
+      history = UndoHistory.new(Document.new(c0))
+
+      history =
+        UndoHistory.record_edit_batch(
+          history,
+          1,
+          UndoPatch.changes(Document.new(c0), Document.new(c1)),
+          @step_one,
+          @t0
+        )
+
+      history =
+        UndoHistory.record_edit_batch(
+          history,
+          2,
+          UndoPatch.changes(Document.new(c1), Document.new(c2)),
+          :user,
+          @t0
+        )
+
+      refute history
+             |> UndoHistory.provenance()
+             |> Provenance.spans(0, byte_size(c2))
+             |> Enum.any?(&match?({_f, _t, {:minga, _}, _k}, &1))
+
+      assert {:ok, restore, _history, 1} =
+               UndoHistory.reject_task(history, {:minga, "task-1"}, 3, Document.new(c2))
+
+      assert Document.content(restore.document) == c2
+      assert {:ok, restore, _history} = UndoHistory.undo(history, 3, Document.new(c2))
+      assert Document.content(restore.document) == c1
+    end
+
+    for {name, minga_at} <- [{"before", 1}, {"after", 2}] do
+      test "deleting one of two parens takes Minga's copy when Minga's is #{name} the base one" do
+        world = world("f(a)\n") |> edit(@step_one, unquote(minga_at), 0, "(")
+        assert text(world) == "f((a)\n"
+        world = edit(world, :user, 1, 1, "")
+        assert text(world) == "f(a)\n"
+
+        case UndoHistory.reject_task(world.history, {:minga, "task-1"}, world.version, world.doc) do
+          {:ok, restore, _history, _count} ->
+            assert Document.content(restore.document) == "f(a)\n"
+
+          {:blocked, _reason} ->
+            :ok
+        end
+
+        assert {:ok, world, _restore} = step(world, :undo)
+        assert text(world) == "f((a)\n"
+      end
+    end
+
+    test "Minga deleting one of two parens takes yours, so your undo is blocked and the reject is exact" do
+      world = world("f(a)\n") |> edit(:user, 1, 0, "(")
+      world = edit(world, @step_one, 2, 1, "")
+      assert text(world) == "f(a)\n"
+      assert {:blocked, {:overlaps, @step_one}} = step(world, :undo)
+
+      assert {:ok, restore, _history, 1} =
+               UndoHistory.reject_task(
+                 world.history,
+                 {:minga, "task-1"},
+                 world.version,
+                 world.doc
+               )
+
+      assert Document.content(restore.document) == "f((a)\n"
+    end
+
     test "undo_agent_session is :empty without Minga steps" do
       assert UndoHistory.undo_agent_session(UndoHistory.new(), 0, Document.new("")) == :empty
     end
@@ -713,82 +791,43 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert {:done, _history, _slice} = UndoHistory.compact_slice(history, 100)
     end
 
-    # A1: your whole-region rewrite never takes another author's bytes that survive in order, wherever they are.
-    property "Minga's bytes that survive your rewrite in order keep their author, and the reject is exact or refused" do
+    # R1: another author's bytes keep their identity only where an alignment proves them unchanged. Ground truth comes
+    # from applying known edits to bytes with known identity. With every byte distinct, a byte credited to Minga must be
+    # one of Minga's that survived, and the reject removes exactly the bytes credited to Minga or is refused.
+    property "with distinct bytes, Minga keeps only bytes it wrote that survived, and the reject removes exactly those" do
       check all(
-              pieces <-
+              {base, minga_pieces, your_edits} <- distinct_scenario(),
+              max_runs: runs(400)
+            ) do
+        assert_identity_kept(base, minga_pieces, your_edits, :distinct)
+      end
+    end
+
+    # With few distinct bytes the alignment may choose among equal bytes, but never more Minga bytes than survived, and
+    # when none survived the reject changes nothing (round 4's stray `7`).
+    property "with repeated bytes, Minga never keeps more bytes than survived, and the reject removes only those" do
+      check all(
+              base <- StreamData.string([?a, ?7, ?(, ?), ?\s, ?\n], min_length: 1, max_length: 16),
+              minga_pieces <-
                 StreamData.list_of(
                   StreamData.tuple(
-                    {StreamData.boolean(),
-                     StreamData.string([?a..?c, ?\s], min_length: 1, max_length: 4)}
+                    {StreamData.integer(0..20),
+                     StreamData.string([?a, ?7, ?(, ?)], min_length: 1, max_length: 3)}
                   ),
                   min_length: 1,
-                  max_length: 8
+                  max_length: 3
                 ),
-              edits <-
+              your_edits <-
                 StreamData.list_of(
                   StreamData.tuple(
-                    {StreamData.boolean(), StreamData.string([?a..?c, ?\s, ?\n], max_length: 3)}
+                    {StreamData.integer(0..40), StreamData.integer(0..3),
+                     StreamData.string([?a, ?7, ?(, ?), ?B], max_length: 3)}
                   ),
-                  length: 9
+                  max_length: 4
                 ),
-              max_runs: runs(500)
+              max_runs: runs(600)
             ) do
-        # Build the document from base and Minga pieces: Minga writes its pieces into a base made of the rest.
-        base = pieces |> Enum.reject(&elem(&1, 0)) |> Enum.map_join(&elem(&1, 1))
-        world = world(base <> "\n")
-
-        {world, _offset} =
-          Enum.reduce(pieces, {world, 0}, fn
-            {true, text}, {world, offset} ->
-              {edit(world, @step_one, offset, 0, text), offset + byte_size(text)}
-
-            {false, text}, {world, offset} ->
-              {world, offset + byte_size(text)}
-          end)
-
-        # Your rewrite keeps every Minga span whole and in order and changes only the text between spans. Adjacent Minga
-        # pieces are one span, so nothing is inserted between them.
-        previous = [false | Enum.map(pieces, &elem(&1, 0))]
-
-        {new_text, minga_positions} =
-          pieces
-          |> Enum.zip(edits)
-          |> Enum.zip(previous)
-          |> Enum.map(fn {pair, after_minga?} -> {pair, after_minga?} end)
-          |> Enum.reduce({"", []}, fn
-            {{{true, text}, {_drop, extra}}, after_minga?}, {acc, positions} ->
-              extra = if after_minga?, do: "", else: extra
-              {acc <> extra <> text, [{byte_size(acc <> extra), text} | positions]}
-
-            {{{false, text}, {drop, extra}}, _after_minga?}, {acc, positions} ->
-              {acc <> if(drop, do: extra, else: text <> extra), positions}
-          end)
-
-        old_size = byte_size(text(world)) - 1
-        world = edit(world, :user, 0, old_size, new_text)
-
-        # Where equal bytes could anchor in more than one place the choice is free; what survives is Minga's text, in
-        # order and whole.
-        minga_text =
-          for {from, to, {:minga, "task-1"}, _key} <-
-                Provenance.spans(UndoHistory.provenance(world.history), 0, byte_size(text(world))),
-              into: <<>>,
-              do: binary_part(text(world), from, to - from)
-
-        assert minga_text == minga_positions |> Enum.reverse() |> Enum.map_join(&elem(&1, 1))
-
-        case UndoHistory.reject_task(world.history, {:minga, "task-1"}, world.version, world.doc) do
-          {:ok, restore, _history, _count} ->
-            assert Document.content(restore.document) ==
-                     UnitModel.reverted_text(world.history, text(world), [{:minga, "task-1"}])
-
-          {:blocked, _reason} ->
-            refute UnitModel.exact?(world.history, [{:minga, "task-1"}])
-
-          :empty ->
-            assert minga_positions == []
-        end
+        assert_identity_kept(base, minga_pieces, your_edits, :repeated)
       end
     end
 
@@ -812,10 +851,15 @@ defmodule Minga.Buffer.UndoHistoryTest do
     removed = binary_part(Document.content(world.doc), start, removed_bytes)
     patch = UndoPatch.replacement(start, removed, inserted, Document.cursor(world.doc))
 
+    # As the buffer process does, the recording sees the document from before the edit.
+    before = UndoHistory.before_change(world.history, world.doc)
+
     history =
       if Keyword.get(opts, :force, false),
-        do: UndoHistory.record_edit_force(world.history, world.version, patch, source, at),
-        else: UndoHistory.record_edit(world.history, world.version, patch, source, at)
+        do: UndoHistory.record_edit_force(before, world.version, patch, source, at),
+        else: UndoHistory.record_edit(before, world.version, patch, source, at)
+
+    history = UndoHistory.before_change(history, nil)
 
     {:ok, doc} = Document.splice_byte_range(world.doc, start, removed_bytes, inserted, {0, 0})
     %{world | history: history, doc: doc, version: world.version + 1}
@@ -995,6 +1039,138 @@ defmodule Minga.Buffer.UndoHistoryTest do
   # A refusal stays a refusal; compaction may change which step or group it names first.
   defp blocked_task({:blocked, {:overlaps, _key}}), do: :blocked
   defp blocked_task(other), do: other
+
+  # Distinct printable bytes: a base, Minga's insertions, and your edits, each byte used once.
+  defp distinct_scenario do
+    gen all(
+          shuffled <- StreamData.constant(Enum.to_list(?!..?~)) |> StreamData.map(&Enum.shuffle/1),
+          base_size <- StreamData.integer(1..12),
+          minga_sizes <-
+            StreamData.list_of(StreamData.integer(1..3), min_length: 1, max_length: 3),
+          minga_at <- StreamData.list_of(StreamData.integer(0..30), length: 3),
+          edits <-
+            StreamData.list_of(
+              StreamData.tuple(
+                {StreamData.integer(0..40), StreamData.integer(0..3), StreamData.integer(0..3)}
+              ),
+              max_length: 4
+            )
+        ) do
+      {base, rest} = Enum.split(shuffled, base_size)
+
+      {minga_pieces, rest} =
+        minga_sizes
+        |> Enum.zip(minga_at)
+        |> Enum.map_reduce(rest, fn {size, at}, rest ->
+          {piece, rest} = Enum.split(rest, size)
+          {{at, List.to_string(piece)}, rest}
+        end)
+
+      {your_edits, _rest} =
+        Enum.map_reduce(edits, rest, fn {at, removed, inserted}, rest ->
+          {piece, rest} = Enum.split(rest, inserted)
+          {{at, removed, List.to_string(piece)}, rest}
+        end)
+
+      {List.to_string(base), minga_pieces, your_edits}
+    end
+  end
+
+  # The text alone cannot tell which copy of equal bytes went where removed and inserted bytes share a value, or a
+  # change's bytes equal the surviving byte on either side. Only histories without that pin Minga's count.
+  defp ambiguous?(old, new) do
+    kept = MapSet.new(for {_b, _who, id} <- new, is_integer(id), do: id)
+    old_hunks = hunks(old, &MapSet.member?(kept, elem(&1, 2)))
+    new_hunks = hunks(new, &is_integer(elem(&1, 2)))
+
+    removed_values = MapSet.new(for {removed, _n} <- old_hunks, {b, _who, _id} <- removed, do: b)
+
+    inserted_values =
+      MapSet.new(for {inserted, _n} <- new_hunks, {b, _who, _id} <- inserted, do: b)
+
+    # A removed byte equal to an inserted one anywhere gives the text two equally long alignments.
+    not MapSet.disjoint?(removed_values, inserted_values) or
+      Enum.zip(old_hunks, new_hunks)
+      |> Enum.any?(fn {{removed, old_neighbours}, {inserted, new_neighbours}} ->
+        values = Enum.map(removed ++ inserted, &elem(&1, 0))
+        neighbours = Enum.map(old_neighbours ++ new_neighbours, &elem(&1, 0))
+        values != [] and (Enum.any?(neighbours, &(&1 in values)) or values != Enum.uniq(values))
+      end)
+  end
+
+  # The bytes between consecutive kept bytes, with those kept neighbours, one entry per gap including both ends.
+  defp hunks(bytes, kept?) do
+    {gaps, current, previous} =
+      Enum.reduce(bytes, {[], [], nil}, fn byte, {gaps, current, previous} ->
+        if kept?.(byte),
+          do:
+            {[{Enum.reverse(current), Enum.reject([previous, byte], &is_nil/1)} | gaps], [], byte},
+          else: {gaps, [byte | current], previous}
+      end)
+
+    Enum.reverse([{Enum.reverse(current), Enum.reject([previous], &is_nil/1)} | gaps])
+  end
+
+  defp assert_identity_kept(base, minga_pieces, your_edits, kind) do
+    # Bytes as {byte, author} through Minga's insertions, recorded one by one, then your edits, recorded as one patch.
+    {world, bytes} =
+      Enum.reduce(minga_pieces, {world(base), for(<<b <- base>>, do: {b, :base})}, fn {at, piece},
+                                                                                      {world,
+                                                                                       bytes} ->
+        at = rem(at, length(bytes) + 1)
+
+        {edit(world, @step_one, at, 0, piece),
+         List.insert_at(bytes, at, Enum.map(:binary.bin_to_list(piece), &{&1, :minga}))
+         |> List.flatten()}
+      end)
+
+    old = Enum.with_index(bytes, fn {b, who}, id -> {b, who, id} end)
+
+    bytes =
+      Enum.reduce(Enum.with_index(your_edits), old, fn {{at, removed, inserted}, n}, bytes ->
+        at = rem(at, length(bytes) + 1)
+        {before, rest} = Enum.split(bytes, at)
+        mine = Enum.map(:binary.bin_to_list(inserted), &{&1, :you, {:new, n}})
+        before ++ mine ++ Enum.drop(rest, removed)
+      end)
+
+    ambiguous? = ambiguous?(old, bytes)
+    bytes = Enum.map(bytes, fn {b, who, _id} -> {b, who} end)
+    new_text = for {b, _who} <- bytes, into: <<>>, do: <<b>>
+    world = edit(world, :user, 0, byte_size(text(world)), new_text)
+    assert text(world) == new_text
+    surviving = for {b, :minga} <- bytes, do: b
+    spans = Provenance.spans(UndoHistory.provenance(world.history), 0, byte_size(new_text))
+
+    credited =
+      for {from, to, {:minga, _task}, _key} <- spans, offset <- from..(to - 1)//1, do: offset
+
+    credited_bytes = Enum.map(credited, &:binary.at(new_text, &1))
+
+    case kind do
+      :distinct -> assert MapSet.subset?(MapSet.new(credited_bytes), MapSet.new(surviving))
+      :repeated -> if not ambiguous?, do: assert(length(credited) <= length(surviving))
+    end
+
+    case UndoHistory.reject_task(world.history, {:minga, "task-1"}, world.version, world.doc) do
+      {:ok, restore, _history, _count} ->
+        credited = MapSet.new(credited)
+
+        expected =
+          for {b, offset} <- Enum.with_index(:binary.bin_to_list(new_text)),
+              not MapSet.member?(credited, offset),
+              into: <<>>,
+              do: <<b>>
+
+        assert Document.content(restore.document) == expected
+
+      {:blocked, _reason} ->
+        :ok
+
+      :empty ->
+        :ok
+    end
+  end
 
   # Runs compaction slices until the history says it is done, checking P6 at the end.
   defp compact_fully(world, slice) do

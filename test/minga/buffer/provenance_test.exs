@@ -321,6 +321,52 @@ defmodule Minga.Buffer.ProvenanceTest do
       end
     end
 
+    # R2: chains of steps of one task over one spot, then your replacement around it, then the task's reject.
+    property "your replacement over a chain of a task's steps covers every replaced text, matching the model" do
+      check all(
+              original <- StreamData.string([?a..?e], min_length: 3, max_length: 10),
+              chain <-
+                StreamData.list_of(
+                  StreamData.tuple(
+                    {integer(0..3), integer(0..3),
+                     StreamData.string([?x..?z], min_length: 1, max_length: 3)}
+                  ),
+                  min_length: 2,
+                  max_length: 4
+                ),
+              {a, b} <- StreamData.tuple({integer(0..3), integer(0..3)}),
+              mine <- StreamData.string([?Q..?S], max_length: 3),
+              max_runs: runs(2_000)
+            ) do
+        initial = {Provenance.new(byte_size(original)), ProvenanceModel.new(original), original}
+
+        {state, spot} =
+          Enum.reduce(Enum.with_index(chain), {initial, {1, 1}}, fn {{shift, width, text}, n},
+                                                                    {{prov, model, doc},
+                                                                     {at, size}} ->
+            {step, prov, model} = open(prov, model, @task, {:minga, "task", "call-#{n}"})
+            start = min(max(at + shift - 1, 0), byte_size(doc))
+            removed = min(max(size + width - 1, 1), byte_size(doc) - start)
+            {replace({prov, model, doc}, step, start, removed, text), {start, byte_size(text)}}
+          end)
+
+        {prov, model, doc} = state
+        {at, size} = spot
+        {you, prov, model} = open(prov, model, :you, nil)
+        start = max(at - a, 0)
+        removed = min(size + a + b, byte_size(doc) - start)
+        state = replace({prov, model, doc}, you, start, removed, mine)
+        assert_matches(state)
+
+        {_prov, model, _doc} = state
+
+        state =
+          Enum.reduce(for({id, %{author: @task}} <- model.groups, do: id), state, &revert(&2, &1))
+
+        assert_matches(state)
+      end
+    end
+
     property "compaction changes no document for any revert where each task's steps move together" do
       check all(
               original <- StreamData.string([?a..?e, ?\n], max_length: 20),

@@ -399,9 +399,12 @@ defmodule Minga.Buffer.UndoPatch do
         ]
   def segment_changes(at, old, new, words?)
       when is_integer(at) and at >= 0 and is_binary(old) and is_binary(new) and is_boolean(words?) do
-    case line_pairs(lines_with_newlines(old), lines_with_newlines(new)) do
+    old_lines = lines_with_newlines(old)
+    new_lines = lines_with_newlines(new)
+
+    case line_pairs(old_lines, new_lines) do
       [] ->
-        precise_pair(at, old, new, words?)
+        unpaired_changes(at, old, new, {old_lines, new_lines}, words?)
 
       pairs ->
         pairs
@@ -410,6 +413,60 @@ defmodule Minga.Buffer.UndoPatch do
         end)
         |> elem(0)
     end
+  end
+
+  # Lines that do not pair up are compared whole while the word comparison fits its budget. Past it, the lines that
+  # occur once on each side and in the same order pin the two sides, as in `changes/2`, and each gap between them is
+  # compared again; only a gap with no such line stays one change.
+  @spec unpaired_changes(
+          non_neg_integer(),
+          binary(),
+          binary(),
+          {[binary()], [binary()]},
+          boolean()
+        ) :: [
+          {non_neg_integer(), byte_fragment(), byte_fragment()}
+        ]
+  defp unpaired_changes(at, old, new, {old_lines, new_lines}, words?) do
+    anchors =
+      if match?([_, _ | _], old_lines ++ new_lines) and String.valid?(old) and String.valid?(new) and
+           not within_word_budget?(words(old), words(new)),
+         do: unique_anchors(old_lines, new_lines),
+         else: []
+
+    case anchors do
+      [] -> precise_pair(at, old, new, words?)
+      _anchored -> anchored_gaps(at, {old_lines, new_lines}, anchors, words?)
+    end
+  end
+
+  @spec anchored_gaps(
+          non_neg_integer(),
+          {[binary()], [binary()]},
+          [{non_neg_integer(), non_neg_integer()}],
+          boolean()
+        ) ::
+          [{non_neg_integer(), byte_fragment(), byte_fragment()}]
+  defp anchored_gaps(at, {old_lines, new_lines}, anchors, words?) do
+    old_tuple = List.to_tuple(old_lines)
+    new_tuple = List.to_tuple(new_lines)
+
+    old_offsets =
+      old_lines |> Enum.scan(0, &(byte_size(&1) + &2)) |> then(&List.to_tuple([0 | &1]))
+
+    ends = [{tuple_size(old_tuple), tuple_size(new_tuple)}]
+
+    {changes, _next} =
+      Enum.flat_map_reduce(anchors ++ ends, {0, 0}, fn {old_anchor, new_anchor},
+                                                       {old_from, new_from} ->
+        old_gap = old_tuple |> tuple_slice(old_from, old_anchor) |> Enum.join()
+        new_gap = new_tuple |> tuple_slice(new_from, new_anchor) |> Enum.join()
+
+        {segment_changes(at + elem(old_offsets, old_from), old_gap, new_gap, words?),
+         {old_anchor + 1, new_anchor + 1}}
+      end)
+
+    changes
   end
 
   # Trims a pair and, when asked, splits what remains into its changed words.

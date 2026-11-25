@@ -138,12 +138,12 @@ defmodule Minga.Buffer.Provenance do
         following = run_starting_at(prov.tree, start)
         preceding = preceding_run(prov.tree, following)
         left = live_before(prov.tree, start)
-        {prov, last} = delete_from(prov, group_id, following, removed, 0, nil)
+        {prov, last, consumed} = delete_from(prov, group_id, following, removed, 0, {nil, []})
         right = if removed_bytes > 0, do: run_starting_at(prov.tree, start)
 
         prov
         |> mark_partial_overlap(group_id, left, following, last, right)
-        |> cover_replaced(group_id, last, left, following)
+        |> cover_replaced(group_id, consumed_groups(consumed, group_id), left, following, last)
         |> insert_between(group_id, author, preceding, following, inserted_bytes)
         |> renumber_when_deep()
         |> remember_fresh()
@@ -835,35 +835,35 @@ defmodule Minga.Buffer.Provenance do
   defp preceding_run(tree, %Run{id: id}), do: RunTree.previous(tree, id)
 
   # Kills the live runs that hold `removed`, starting at `run`, and marks the tombstones between them.
-  # Returns the last live run it killed, as it was before.
+  # Returns the last live run it killed, as it was before, and the live runs it killed.
   @spec delete_from(
           t(),
           group_id() | nil,
           Run.t() | nil,
           binary(),
           non_neg_integer(),
-          Run.t() | nil
+          {Run.t() | nil, [Run.t()]}
         ) ::
-          {t(), Run.t() | nil}
-  defp delete_from(prov, _group_id, _run, removed, consumed, last)
+          {t(), Run.t() | nil, [Run.t()]}
+  defp delete_from(prov, _group_id, _run, removed, consumed, {last, killed})
        when consumed == byte_size(removed),
-       do: {prov, last}
+       do: {prov, last, killed}
 
-  defp delete_from(prov, group_id, %Run{live: true} = run, removed, consumed, _last) do
+  defp delete_from(prov, group_id, %Run{live: true} = run, removed, consumed, {_last, killed}) do
     following = RunTree.next(prov.tree, run.id)
     text = binary_part(removed, consumed, run.bytes)
 
     prov
     |> mark_deleted(group_id, run, text)
-    |> delete_from(group_id, following, removed, consumed + run.bytes, run)
+    |> delete_from(group_id, following, removed, consumed + run.bytes, {run, [run | killed]})
   end
 
-  defp delete_from(prov, group_id, %Run{} = run, removed, consumed, last) do
+  defp delete_from(prov, group_id, %Run{} = run, removed, consumed, acc) do
     following = RunTree.next(prov.tree, run.id)
 
     prov
     |> mark_deleted(group_id, run, run.text)
-    |> delete_from(group_id, following, removed, consumed, last)
+    |> delete_from(group_id, following, removed, consumed, acc)
   end
 
   # A deletion by another author that starts or ends strictly inside a Minga replacement cannot say which part of the
@@ -980,32 +980,38 @@ defmodule Minga.Buffer.Provenance do
   # A replacement is one edit's inserted text followed by the tombstones it made, so the deletion consumes one when it
   # ends with that group's text and does not start inside the same replacement. It then marks that replacement's
   # tombstones, which are the dead runs right after it that the group deleted.
-  @spec cover_replaced(t(), group_id() | nil, Run.t() | nil, Run.t() | nil, Run.t() | nil) :: t()
-  defp cover_replaced(prov, _group_id, nil, _left, _first), do: prov
-  defp cover_replaced(prov, _group_id, %Run{group: nil}, _left, _first), do: prov
+  @spec cover_replaced(
+          t(),
+          group_id() | nil,
+          [group_id()],
+          Run.t() | nil,
+          Run.t() | nil,
+          Run.t() | nil
+        ) :: t()
+  defp cover_replaced(prov, _group_id, [], _left, _first, _last), do: prov
 
-  defp cover_replaced(prov, group_id, %Run{group: owner} = last, left, first) do
-    if inside_replacement?(left, owner, runs_between(prov.tree, left, first)),
+  defp cover_replaced(prov, group_id, consumed, left, first, last) do
+    if inside_replacement?(left, consumed, runs_between(prov.tree, left, first)),
       do: prov,
-      else: cover_tombstones(prov, group_id, owner, RunTree.next(prov.tree, last.id))
+      else: cover_tombstones(prov, group_id, consumed, RunTree.next(prov.tree, last.id))
   end
 
   # The replacement's tombstones are contiguous, so the walk ends at the first run that is live, inserted by the same
   # group, or not deleted by it. The cost is the size of that replacement, however many tombstones lie beyond it.
-  @spec cover_tombstones(t(), group_id() | nil, group_id(), Run.t() | nil) :: t()
-  defp cover_tombstones(prov, _group_id, _owner, nil), do: prov
+  @spec cover_tombstones(t(), group_id() | nil, [group_id()], Run.t() | nil) :: t()
+  defp cover_tombstones(prov, _group_id, _consumed, nil), do: prov
 
-  defp cover_tombstones(prov, group_id, owner, run) do
+  defp cover_tombstones(prov, group_id, consumed, run) do
     following = RunTree.next(prov.tree, run.id)
 
-    case cover_step(run, owner) do
+    case cover_step(run, consumed) do
       :cover ->
         prov
         |> mark_deleted(group_id, run, run.text)
-        |> cover_tombstones(group_id, owner, following)
+        |> cover_tombstones(group_id, consumed, following)
 
       :pass ->
-        cover_tombstones(prov, group_id, owner, following)
+        cover_tombstones(prov, group_id, consumed, following)
 
       :stop ->
         prov
@@ -1447,7 +1453,8 @@ defmodule Minga.Buffer.Provenance do
 
     tail = mark_in_pass(deleted ++ pass.right, groups, group_id, owner)
     {deleted, after_segment} = Enum.split(tail, length(deleted))
-    deleted ++ cover_in_pass(after_segment, group_id, last, left, left_between)
+    consumed = segment |> Enum.filter(& &1.live) |> consumed_groups(group_id)
+    deleted ++ cover_in_pass(after_segment, group_id, consumed, left, left_between)
   end
 
   # The owner when the deletion ends strictly inside a replacement; the live run after it is found only when needed.
@@ -1555,28 +1562,32 @@ defmodule Minga.Buffer.Provenance do
 
   defp mark_tombstones_in_pass([], _group_id, _owner), do: []
 
-  @spec cover_in_pass([Run.t()], group_id() | nil, Run.t() | nil, Run.t() | nil, [Run.t()]) :: [
+  @spec cover_in_pass([Run.t()], group_id() | nil, [group_id()], Run.t() | nil, [Run.t()]) :: [
           Run.t()
         ]
-  defp cover_in_pass(runs, _group_id, nil, _left, _left_gap), do: runs
-  defp cover_in_pass(runs, _group_id, %Run{group: nil}, _left, _left_gap), do: runs
+  defp cover_in_pass(runs, _group_id, [], _left, _left_gap), do: runs
 
-  defp cover_in_pass(runs, group_id, %Run{group: owner}, left, left_gap) do
-    if inside_replacement?(left, owner, left_gap),
+  defp cover_in_pass(runs, group_id, consumed, left, left_gap) do
+    if inside_replacement?(left, consumed, left_gap),
       do: runs,
-      else: cover_list(runs, group_id, owner)
+      else: cover_list(runs, group_id, consumed)
   end
 
-  @spec cover_list([Run.t()], group_id() | nil, group_id()) :: [Run.t()]
-  defp cover_list([run | rest] = runs, group_id, owner) do
-    case cover_step(run, owner) do
-      :cover -> List.wrap(deleted(run, group_id, run.text)) ++ cover_list(rest, group_id, owner)
-      :pass -> [run | cover_list(rest, group_id, owner)]
-      :stop -> runs
+  @spec cover_list([Run.t()], group_id() | nil, [group_id()]) :: [Run.t()]
+  defp cover_list([run | rest] = runs, group_id, consumed) do
+    case cover_step(run, consumed) do
+      :cover ->
+        List.wrap(deleted(run, group_id, run.text)) ++ cover_list(rest, group_id, consumed)
+
+      :pass ->
+        [run | cover_list(rest, group_id, consumed)]
+
+      :stop ->
+        runs
     end
   end
 
-  defp cover_list([], _group_id, _owner), do: []
+  defp cover_list([], _group_id, _consumed), do: []
 
   # Gives every run an evenly spaced locator and rebuilds the tree, the groups' run sets, and both indexes from the
   # runs, in O(n).
@@ -1675,9 +1686,10 @@ defmodule Minga.Buffer.Provenance do
 
   # A deletion starts inside a replacement when the live text before it belongs to the same group and no tombstone of
   # that group separates them; such a tombstone ends one replacement before the next begins.
-  @spec inside_replacement?(Run.t() | nil, group_id(), Enumerable.t()) :: boolean()
-  defp inside_replacement?(%Run{group: owner}, owner, between),
-    do: not Enum.any?(between, &separates?(&1, owner))
+  @spec inside_replacement?(Run.t() | nil, [group_id()], Enumerable.t()) :: boolean()
+  defp inside_replacement?(%Run{group: owner}, consumed, between) when owner != nil do
+    owner in consumed and not Enum.any?(between, &separates?(&1, owner))
+  end
 
   defp inside_replacement?(_left, _owner, _between), do: false
 
@@ -1691,14 +1703,22 @@ defmodule Minga.Buffer.Provenance do
   defp inert?(%Run{group: nil}), do: false
   defp inert?(%Run{group: group, deletions: deletions}), do: group in deletions
 
-  # One step of the cover walk after a deletion that consumes `owner`'s replacement: the replacement's tombstones are
-  # deleted too (`:cover`), and they are contiguous, so the walk stops at the first run that is not one.
-  @spec cover_step(Run.t(), group_id()) :: :cover | :pass | :stop
-  defp cover_step(run, owner) do
+  # The groups whose live text a deletion consumed, other than the deleter: their replacements go with it.
+  @spec consumed_groups([Run.t()], group_id() | nil) :: [group_id()]
+  defp consumed_groups(killed, group_id),
+    do:
+      for(%Run{group: group} <- killed, group != nil and group != group_id, uniq: true, do: group)
+
+  # One step of the cover walk after a deletion that consumed the live text of the groups in `consumed`: a tombstone
+  # one of them wrote or deleted belongs to their replacements and is deleted too (`:cover`). The replacements'
+  # tombstones are contiguous, so the walk stops at the first live run or tombstone of no consumed group, and costs
+  # only the replacements it covers.
+  @spec cover_step(Run.t(), [group_id()]) :: :cover | :pass | :stop
+  defp cover_step(run, consumed) do
     cond do
       inert?(run) -> :pass
-      run.group == owner -> :stop
-      not run.live and owner in run.deletions -> :cover
+      run.live -> :stop
+      run.group in consumed or Enum.any?(run.deletions, &(&1 in consumed)) -> :cover
       true -> :stop
     end
   end
