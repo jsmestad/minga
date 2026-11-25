@@ -336,9 +336,16 @@ defmodule Minga.Buffer.Provenance do
 
   @doc """
   Returns every applied group not yours that deleted text group `id` wrote or removed after it did, as group ids.
+
+  `reverting?` names the groups that revert with `id`: text one of them wrote and one of them deleted is left out, as in `blocker_among/3`.
   """
-  @spec later_deleters_of(t(), group_id()) :: [group_id()]
-  def later_deleters_of(%__MODULE__{groups: groups, tree: tree}, id) do
+  @spec later_deleters_of(t(), group_id(), (group_id() -> boolean())) :: [group_id()]
+  def later_deleters_of(
+        %__MODULE__{groups: groups, tree: tree},
+        id,
+        reverting? \\ fn _id -> false end
+      )
+      when is_function(reverting?, 1) do
     groups
     |> Map.fetch!(id)
     |> Map.fetch!(:runs)
@@ -346,7 +353,9 @@ defmodule Minga.Buffer.Provenance do
     |> Enum.flat_map(fn run_id ->
       {:ok, run, _offset} = RunTree.fetch(tree, run_id)
 
-      for deleter <- later_deleters(run, id),
+      internal? = reverting?.(run.group) and Enum.any?(run.deletions, reverting?)
+
+      for deleter <- if(internal?, do: [], else: later_deleters(run, id)),
           deleter != id,
           deleting = Map.fetch!(groups, deleter),
           deleting.applied and deleting.author != :you,
@@ -356,7 +365,9 @@ defmodule Minga.Buffer.Provenance do
   end
 
   @doc """
-  Returns a key that `blocker/3` would return for one of the groups in `ids`, or `nil` when none is blocked.
+  Returns a key that `blocker/3` would return for one of the groups in `ids` reverting together, or `nil` when none is blocked.
+
+  A later deletion of text that one of the groups wrote and one of them deleted does not count: that text stays dead when they revert, whoever else deleted it. A single group's `blocker/3` is unchanged.
 
   When the groups hold a large share of the runs, one pass over every run answers in O(n) instead of looking each run up.
   """
@@ -366,16 +377,36 @@ defmodule Minga.Buffer.Provenance do
       when is_list(ids) and is_function(blocks?, 2) do
     touched = Enum.reduce(ids, 0, &(:gb_sets.size(Map.fetch!(prov.groups, &1).runs) + &2))
 
+    set = MapSet.new(ids)
+
     if touched * 8 > RunTree.count(prov.tree),
-      do: blocker_in_one_pass(prov, MapSet.new(ids), blocks?),
-      else: Enum.find_value(ids, &blocker(prov, &1, blocks?))
+      do: blocker_in_one_pass(prov, set, blocks?),
+      else: Enum.find_value(ids, &set_blocker(prov, &1, set, blocks?))
   end
+
+  @spec set_blocker(t(), group_id(), MapSet.t(group_id()), (author(), group_key() -> boolean())) ::
+          group_key() | nil
+  defp set_blocker(%__MODULE__{groups: groups, tree: tree}, id, set, blocks?) do
+    Map.fetch!(groups, id).runs
+    |> :gb_sets.to_list()
+    |> Enum.find_value(fn run_id ->
+      {:ok, run, _offset} = RunTree.fetch(tree, run_id)
+      if not internal?(run, set), do: run_blocker(run, id, groups, blocks?)
+    end)
+  end
+
+  # Text a member of the set wrote and a member deleted stays dead when the set reverts, whoever else deleted it, so
+  # a later deletion of it protects nothing and never blocks the set.
+  @spec internal?(Run.t(), MapSet.t(group_id())) :: boolean()
+  defp internal?(run, set),
+    do: MapSet.member?(set, run.group) and Enum.any?(run.deletions, &MapSet.member?(set, &1))
 
   @spec blocker_in_one_pass(t(), MapSet.t(group_id()), (author(), group_key() -> boolean())) ::
           group_key() | nil
   defp blocker_in_one_pass(prov, ids, blocks?) do
     prov.tree
     |> RunTree.to_list()
+    |> Enum.reject(&internal?(&1, ids))
     |> Enum.find_value(fn run ->
       run
       |> run_groups()

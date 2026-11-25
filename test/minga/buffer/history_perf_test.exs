@@ -160,11 +160,29 @@ defmodule Minga.Buffer.HistoryPerfTest do
     assert first_key < baseline + 50
   end
 
-  # R5: steps sent back to back, with no gap for the compaction slices, still keep the history bounded.
+  # R5: steps sent back to back, with no gap for the compaction slices, still keep the history bounded, and cost in all
+  # less than twice the same steps on a buffer that never compacts.
   test "20 back-to-back whole-file steps keep the runs under three times the budget" do
-    buffer = start_supervised!({BufferProcess, content: file(12_000)}, id: make_ref())
+    {times, buffer} = back_to_back([])
+    # Right after the burst, before the slices catch up.
+    runs = runs(buffer)
+    {record_count, _runs, bytes_per_run} = records(buffer)
+    {plain_times, _plain} = back_to_back(history_run_budget: 100_000_000)
 
-    # CPU time of the whole VM around each call, so other load on the machine does not count.
+    IO.puts(
+      "\n[back-to-back] steps_cpu_ms=#{inspect(times)} without_compaction_cpu_ms=#{inspect(plain_times)} " <>
+        "runs=#{runs} records=#{record_count} bytes_per_run=#{bytes_per_run}"
+    )
+
+    assert record_count <= runs
+    assert runs <= 75_000
+    assert Enum.sum(times) < 2 * Enum.sum(plain_times)
+  end
+
+  # CPU time of the whole VM around each call, so other load on the machine does not count.
+  defp back_to_back(opts) do
+    buffer = start_supervised!({BufferProcess, [content: file(12_000)] ++ opts}, id: make_ref())
+
     times =
       for round <- 1..20 do
         new = String.replace(BufferProcess.content(buffer), ~r/beta\d*/, "beta#{round}")
@@ -174,17 +192,7 @@ defmodule Minga.Buffer.HistoryPerfTest do
         cpu_ms
       end
 
-    runs = runs(buffer)
-    {record_count, _runs, bytes_per_run} = records(buffer)
-
-    IO.puts(
-      "\n[back-to-back] steps_cpu_ms=#{inspect(times)} runs=#{runs} records=#{record_count} " <>
-        "bytes_per_run=#{bytes_per_run}"
-    )
-
-    assert record_count <= runs
-    assert runs <= 75_000
-    assert Enum.max(times) < 2_000
+    {times, buffer}
   end
 
   # R4: your :s over 12000 lines that each hold a Minga change records in linear time.

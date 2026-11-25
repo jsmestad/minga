@@ -480,6 +480,47 @@ defmodule Minga.Buffer.ProvenanceTest do
          {:edit, :you, 0, 1, ""},
          {:reject, [:t2], "\n"},
          {:reject, [:t1], "\n"}
+       ]},
+      # A later sweep over text the reverted task both wrote and deleted protects nothing: the reject is allowed, with
+      # or without compaction (which drops that text). Task t1 writes "aa" and deletes the second "a"; an untracked
+      # edit replaces the first; task t2 writes "c" after the tombstone; task t3 deletes "uc", sweeping it.
+      {"sweep over text the task wrote and deleted", "",
+       [
+         {:open, :g1, "t1"},
+         {:edit, :g1, 0, 0, "aa"},
+         {:open, :g2, "t1"},
+         {:edit, :g2, 1, 1, ""},
+         {:edit, :untracked, 0, 1, "u"},
+         {:open, :g4, "t2"},
+         {:edit, :g4, 1, 0, "c"},
+         {:open, :g5, "t3"},
+         {:edit, :g5, 0, 2, ""},
+         {:reject_task, [:g1, :g2], "t1", ""}
+       ]},
+      {"sweep over text the task wrote and deleted, compacted", "",
+       [
+         {:open, :g1, "t1"},
+         {:edit, :g1, 0, 0, "aa"},
+         {:open, :g2, "t1"},
+         {:edit, :g2, 1, 1, ""},
+         :compact,
+         {:edit, :untracked, 0, 1, "u"},
+         {:open, :g4, "t2"},
+         {:edit, :g4, 1, 0, "c"},
+         {:open, :g5, "t3"},
+         {:edit, :g5, 0, 2, ""},
+         {:reject_task, [:g1, :g2], "t1", ""}
+       ]},
+      # A later task that deleted live text the task wrote still refuses it.
+      {"later deletion of the task's live text", "",
+       [
+         {:open, :g1, "t1"},
+         {:edit, :g1, 0, 0, "aa"},
+         {:open, :g2, "t1"},
+         {:edit, :g2, 1, 1, ""},
+         {:open, :g5, "t3"},
+         {:edit, :g5, 0, 1, ""},
+         {:reject_task, [:g1, :g2], "t1", {:refused, "t3"}}
        ]}
     ]
 
@@ -878,6 +919,27 @@ defmodule Minga.Buffer.ProvenanceTest do
   defp hand_step(:compact, state) do
     assert {:ok, prov, _merged, _examined} = Provenance.compact_oldest(state.prov)
     %{state | prov: prov}
+  end
+
+  # A whole task's reject, refused by a later task's deletion the way `UndoHistory.reject_task/4` checks it.
+  defp hand_step({:reject_task, names, task, expected}, state) do
+    ids = Enum.map(names, &Map.fetch!(state.ids, &1))
+    existing = Enum.filter(ids, &Provenance.group?(state.prov, &1))
+    blocks? = fn author, _key -> author != :you and author != {:minga, task} end
+    production = Provenance.blocker_among(state.prov, existing, blocks?)
+    model = ProvenanceModel.blockers_among(state.model, ids, blocks?)
+
+    case expected do
+      {:refused, by} ->
+        assert {:minga, ^by, _step} = production
+        assert Enum.any?(model, &match?({:minga, ^by, _step}, &1))
+        state
+
+      text ->
+        assert production == nil
+        assert model == MapSet.new()
+        hand_step({:reject, names, text}, state)
+    end
   end
 
   defp hand_step({:reject, names, expected}, state) do
@@ -1448,7 +1510,7 @@ defmodule Minga.Buffer.ProvenanceTest do
 
         model_ok? =
           ProvenanceModel.overlaps_among(world.model, ids) == MapSet.new() and
-            Enum.all?(ids, &(ProvenanceModel.blockers(world.model, &1, blocks?) == MapSet.new()))
+            ProvenanceModel.blockers_among(world.model, ids, blocks?) == MapSet.new()
 
         count(if prov_ok?, do: :rejects, else: :refused_rejects)
 

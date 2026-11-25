@@ -27,7 +27,7 @@ defmodule Minga.Test.UndoUnitModel do
   end
 
   @doc """
-  Returns whether reverting the groups in `groups` together is exact, at group level: every applied Minga group that later deleted text one of them wrote or removed is in the set (your later deletions never block), every group that edited inside a Minga group's replacement is in the set and no permanent edit did, and every group of yours in the set has no visible text, brings back no other text it deleted, and has its Minga rewriters in the set.
+  Returns whether reverting the groups in `groups` together is exact, at group level: every applied Minga group that later deleted text one of them wrote or removed is in the set (your later deletions never block, and text the set both wrote and deleted does not count), every group that edited inside a Minga group's replacement is in the set and no permanent edit did, and every group of yours in the set has no visible text, brings back no other text it deleted, and has its Minga rewriters in the set.
   """
   @spec exact_groups?(UndoHistory.t(), [pos_integer()]) :: boolean()
   def exact_groups?(history, groups) do
@@ -41,6 +41,7 @@ defmodule Minga.Test.UndoUnitModel do
 
       rewriters =
         for run <- runs,
+            not internal?(run, set),
             removed_by?(run, group),
             d <- later(run, group),
             d != group and d not in run.covered_by,
@@ -333,7 +334,7 @@ defmodule Minga.Test.UndoUnitModel do
     tasks != [] and
       Enum.all?(set, fn
         {:you, group} ->
-          rewriters = rewriter_tasks(facts, group, fn _task -> true end)
+          rewriters = rewriter_tasks(facts, group, reverted, fn _task -> true end)
 
           own_live_bytes(facts, group) == 0 and not revives?(facts, group, reverted) and
             Enum.any?(rewriters, &(&1 in set)) and Enum.all?(rewriters, &(&1 in set)) and
@@ -344,7 +345,7 @@ defmodule Minga.Test.UndoUnitModel do
           newer? = &(&1 != task and Map.get(facts.starts, &1, 0) > start)
 
           Enum.all?(Map.fetch!(facts.tasks, task), fn group ->
-            Enum.all?(rewriter_tasks(facts, group, newer?), &(&1 in set)) and
+            Enum.all?(rewriter_tasks(facts, group, reverted, newer?), &(&1 in set)) and
               Enum.all?(
                 overlap_nodes(facts, group, reverted),
                 &(&1 != :permanent_you and &1 in set)
@@ -356,9 +357,11 @@ defmodule Minga.Test.UndoUnitModel do
   defp node_groups(_facts, {:you, group}), do: [group]
   defp node_groups(facts, task), do: Map.fetch!(facts.tasks, task)
 
-  # Tasks whose applied steps deleted text `group` wrote or removed, after it did.
-  defp rewriter_tasks(facts, group, counts?) do
+  # Tasks whose applied steps deleted text `group` wrote or removed, after it did, except text the reverted groups both
+  # wrote and deleted.
+  defp rewriter_tasks(facts, group, reverted, counts?) do
     for run <- facts.runs,
+        not internal?(run, reverted),
         removed_by?(run, group),
         deleter <- later(run, group),
         deleter not in run.covered_by,
@@ -369,6 +372,10 @@ defmodule Minga.Test.UndoUnitModel do
         uniq: true,
         do: task
   end
+
+  # Text a group of the set wrote and a group of the set deleted stays dead when the set reverts.
+  defp internal?(run, set),
+    do: MapSet.member?(set, run.group) and Enum.any?(run.deletions, &MapSet.member?(set, &1))
 
   # The group wrote the run or deleted it while it was visible; sweeping or covering it never removed it.
   defp removed_by?(%{group: id}, id), do: true

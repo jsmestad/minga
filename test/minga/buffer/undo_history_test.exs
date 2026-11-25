@@ -881,17 +881,16 @@ defmodule Minga.Buffer.UndoHistoryTest do
       IO.puts("\n[twins, emoji] merge differences: #{Process.get(:merge_differences, 0)}")
     end
 
-    # Merge consequence 1, by hand. Task 0 writes "aaaa" (step 1). Task 1 writes seven a's before it (step 2). Task 0
-    # writes "\no" over five a's, four of task 1's and one of its own (step 3), and task 1 deletes "oaaa", step 3's "o"
-    # and the rest of step 1's a's (step 4). The press on task 1 reverts step 4, and step 2 with step 3, which rewrote
-    # it. Without compaction that leaves step 1's "aaaa". With a budget of 3, step 1 was absorbed into step 3, so the
-    # press takes it too and leaves "".
+    # Merge consequence 1, by hand. Task 0 writes "aa" (step 1); task 1 replaces it with "a😀ao" (step 2), then "ao"
+    # with "aa" (step 3), sweeping step 1's deleted text; task 0 replaces "😀aa" (step 4). The press on task 0 reverts
+    # steps 4 and 1, and step 3, which swept step 1's text. Without compaction that leaves step 2's "a". With a budget
+    # of 3, step 2 was absorbed into step 3, so the press takes it too and leaves "".
     test "a press that reverts a merged step takes its whole class" do
       emoji_twins([
-        {:minga, 0, 0, ["a", "a", "a", "a"], 0},
-        {:minga, 0, 0, ["a", "a", "a", "a", "a", "a", "a"], 1},
-        {:minga, 15, 5, ["\n", "o"], 0},
-        {:minga, 13, 4, [], 1},
+        {:minga, 0, 0, ["a", "a"], 0},
+        {:minga, 0, 2, ["a", "😀", "a", "o"], 3},
+        {:minga, 7, 3, ["a", "a"], 1},
+        {:minga, 16, 3, ["é", "f", "o", "😀", "r", "b", "r"], 0},
         :press
       ])
 

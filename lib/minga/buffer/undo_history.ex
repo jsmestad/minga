@@ -13,11 +13,11 @@ defmodule Minga.Buffer.UndoHistory do
 
   A step's group takes a new edit only when nothing changed the document and no group was opened since its last edit; otherwise the step continues in a new group under the same key. Every dependency between groups then points from an older group to a newer one: a later group that rewrote a group's text, or a group that edited inside a Minga group's replacement (text a step wrote in place of other text).
 
-  `reject_task/4` reverts all of a task's steps or nothing: a task that started later and rewrote its text, or an edit inside one of its replacements, refuses it, so a revert is exact or refused, never wrong text. `undo_agent_session/3` works step by step: newest first, each step of the most recent task reverts together with the newer groups that depend on it, which may be other tasks' steps. A group of yours joins only when none of its text is visible and reverting it brings back nothing else it deleted; it then leaves your undo stack. Otherwise your newest such edit holds the step, and your `u` can always reach it. Per-change keep and reject (#4049) may refine these rules.
+  `reject_task/4` reverts all of a task's steps or nothing: a task that started later and rewrote its text, or an edit inside one of its replacements, refuses it, so a revert is exact or refused, never wrong text. Groups that revert together are checked as one set: text one of them wrote and one of them deleted stays dead when they revert, so a later deletion of it neither refuses a reject nor joins a press. `undo_agent_session/3` works step by step: newest first, each step of the most recent task reverts together with the newer groups that depend on it, which may be other tasks' steps. A group of yours joins only when none of its text is visible and reverting it brings back nothing else it deleted; it then leaves your undo stack. Otherwise your newest such edit holds the step, and your `u` can always reach it. Per-change keep and reject (#4049) may refine these rules.
 
   Every Minga step is checked against a run budget. Past it, `compaction_wanted?/1` asks the owner to run `compact_slice/2`, which merges drafts (text a step wrote that a newer step of the same task rewrote) into the step that overwrote them; past twice the budget, the step itself merges drafts too, until it has removed as many runs as it added, examining at most six times as many, so a burst of steps pays for its own drafts as it goes and the owner's slices finish the rest. A step merges only where no other group touched a run between the two steps; a step merged away completely leaves its class and its key.
 
-  Steps never merge while a group of yours newer than the oldest step of the class they would form can still be undone: history from before your latest edit compacts once that edit is final (it leaves your undo stack). A merge changes no document and no refusal at the moment it runs. Merged steps form a class that always moves together: they flip and are discarded together. Later history can still tell merged steps apart, so merging has two consequences for `undo_agent_session/3`, and only these two:
+  Steps never merge while a group of yours newer than the oldest step of the class they would form can still be undone: history from before your latest edit compacts once that edit is final (it leaves your undo stack). That is the documented memory limit: when you type between Minga's rewrites of a whole file, nothing from before your edits merges, and each rewrite of a 12,000-line file adds about 13,000 runs (about 16 MB) until the over-budget warning fires and you revert tasks or your edits leave the undo history. Keeping Minga's changes (#4049) will make those steps final, which must drop their tombstones and records. Minga editing 20 lines of such a file 1,000 times with a typed word between stays under the budget, at about 23,000 runs and 24 MB. A merge changes no document and no refusal at the moment it runs. Merged steps form a class that always moves together: they flip and are discarded together. Later history can still tell merged steps apart, so merging has two consequences for `undo_agent_session/3`, and only these two:
 
   1. A press that reverts a merged step takes its whole class: the older half of the merge too, with anything that depends on it, where without compaction the older half would wait for a later press. For example, a press on one task that takes another task's step with it (because it rewrote that step) also takes the steps merged into that step.
   2. A hold on any member holds the class. Only an edit of yours made after the merge can hold it; that edit is newer than the class, so your `u` reaches it before anything the class waits for.
@@ -564,7 +564,15 @@ defmodule Minga.Buffer.UndoHistory do
       history
       |> task_groups(task)
       |> Enum.any?(fn group ->
-        closure = dependents(history.provenance, history.merges, [group], MapSet.new([group]))
+        closure =
+          dependents(
+            history.provenance,
+            history.merges,
+            [group],
+            MapSet.new([group]),
+            MapSet.new()
+          )
+
         match?({:group, _holding}, held_in(history.provenance, closure))
       end)
   end
@@ -624,7 +632,7 @@ defmodule Minga.Buffer.UndoHistory do
   @spec take_closure(map(), Provenance.t(), MapSet.t(), Provenance.group_id()) ::
           {Provenance.t(), MapSet.t()}
   defp take_closure(walk, flags, taken, group) do
-    closure = dependents(flags, walk.history.merges, [group], MapSet.new([group]))
+    closure = dependents(flags, walk.history.merges, [group], MapSet.new([group]), taken)
 
     case held_in(flags, closure) do
       nil ->
@@ -640,20 +648,29 @@ defmodule Minga.Buffer.UndoHistory do
   # and the groups that edited inside its replacements; for a group of yours, the Minga groups that rewrote it. A
   # permanent mark stands for an edit that can never revert. Every edge points to a newer group, so the walk ends.
   # Steps compaction merged are one node: each brings its whole merge class, so a class never reverts in halves.
-  @spec dependents(Provenance.t(), merges(), [Provenance.group_id() | :permanent], MapSet.t()) ::
+  # Text the closure and the groups this press already took (`taken`) both wrote and deleted stays dead when they all
+  # revert, so a later deletion of it adds nothing.
+  @spec dependents(
+          Provenance.t(),
+          merges(),
+          [Provenance.group_id() | :permanent],
+          MapSet.t(),
           MapSet.t()
-  defp dependents(_provenance, _merges, [], closure), do: closure
+        ) :: MapSet.t()
+  defp dependents(_provenance, _merges, [], closure, _taken), do: closure
 
-  defp dependents(provenance, merges, [:permanent | rest], closure),
-    do: dependents(provenance, merges, rest, closure)
+  defp dependents(provenance, merges, [:permanent | rest], closure, taken),
+    do: dependents(provenance, merges, rest, closure, taken)
 
-  defp dependents(provenance, merges, [group | rest], closure) do
+  defp dependents(provenance, merges, [group | rest], closure, taken) do
+    reverting? = &(MapSet.member?(closure, &1) or MapSet.member?(taken, &1))
+
     found =
-      (direct_dependents(provenance, group) ++ merge_class(merges, group))
+      (direct_dependents(provenance, group, reverting?) ++ merge_class(merges, group))
       |> Enum.uniq()
       |> Enum.reject(&MapSet.member?(closure, &1))
 
-    dependents(provenance, merges, found ++ rest, Enum.into(found, closure))
+    dependents(provenance, merges, found ++ rest, Enum.into(found, closure), taken)
   end
 
   @doc """
@@ -707,11 +724,13 @@ defmodule Minga.Buffer.UndoHistory do
     end)
   end
 
-  @spec direct_dependents(Provenance.t(), Provenance.group_id()) :: [
+  # The applied Minga groups that deleted text `group` wrote or removed after it did, leaving out text the reverting
+  # groups both wrote and deleted, and the groups that marked its replacement.
+  @spec direct_dependents(Provenance.t(), Provenance.group_id(), (term() -> boolean())) :: [
           Provenance.group_id() | :permanent
         ]
-  defp direct_dependents(provenance, group) do
-    rewriters = later_minga_deleters(provenance, group)
+  defp direct_dependents(provenance, group, reverting?) do
+    rewriters = Provenance.later_deleters_of(provenance, group, reverting?)
 
     if Provenance.group_key(provenance, group) == nil do
       rewriters
@@ -728,11 +747,6 @@ defmodule Minga.Buffer.UndoHistory do
           Provenance.group_id() | :permanent
   defp overlap_node(group) when is_integer(group), do: group
   defp overlap_node({:permanent, _key}), do: :permanent
-
-  # Every applied Minga group that deleted text `group` wrote or removed, after it did.
-  @spec later_minga_deleters(Provenance.t(), Provenance.group_id()) :: [Provenance.group_id()]
-  defp later_minga_deleters(provenance, group),
-    do: Provenance.later_deleters_of(provenance, group)
 
   # Where an edit of yours holds a closure: a permanent edit, or a group of yours with visible text or whose revert
   # would bring back other text it deleted. The newest such group of yours is named; your `u` reaches it first.
@@ -895,7 +909,8 @@ defmodule Minga.Buffer.UndoHistory do
     |> task_groups(task)
     |> Enum.sort(:desc)
     |> Enum.find_value(0, fn group ->
-      closure = dependents(history.provenance, history.merges, [group], MapSet.new([group]))
+      closure =
+        dependents(history.provenance, history.merges, [group], MapSet.new([group]), MapSet.new())
 
       case held_in(history.provenance, closure) do
         {:group, holding} -> group_offset(history.provenance, holding)

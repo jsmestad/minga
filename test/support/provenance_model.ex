@@ -12,7 +12,7 @@ defmodule Minga.Test.ProvenanceModel do
   2. **Placement.** An insertion goes immediately before the visible byte at its offset, after any deleted bytes there; a deletion marks every byte from its first to its last deleted visible byte. Text typed at a spot lands after text that used to be there, and text an older group removed from the middle of a range cannot come back inside text you deleted. Deleting a visible byte is a direct deletion; marking a byte that is already deleted is a sweep.
   3. **Replacement.** An edit that inserts text over a non-empty range is a replacement: it made the bytes it inserted, and it replaced the visible bytes in its range and the deleted bytes strictly inside it that can still come back. A byte can never come back when the group that wrote it is final and unapplied, or it was deleted by the group that wrote it, by an untracked change, or by a final applied group; it gets the deleter but no replacement lists it. No later edit can stand for text no history can ever show again.
   4. **Consumption.** A deletion that leaves none of an applied replacement's text visible covers what it replaced: every deleted byte the replacement replaced gets the deleter (a cover), and the replacements that made those bytes are examined in turn, each once. When some of the replacement's text stays visible and the deleter is another author than the replacement's Minga step, every byte the replacement made is marked with the deleter instead. A replacement whose group is not applied (undone, or discarded unapplied: it never happened) neither covers nor marks; the model logs it in `skipped`. When you delete what Minga wrote in place of some text, rejecting Minga must not bring that text back; when you delete only part of it, no one can say which part of the replaced text your edit stands for.
-  5. **Exactness refusal.** No undo, redo or reject may show text beside a later rewrite of it. An undo or redo of a group is refused while a group that is not yours, applied and not final, deleted a byte the group wrote or deleted while it was visible, after it did, directly or by a sweep (a cover never counts), and the byte can still come back; a reject of a task is refused the same way by a task that started later, or while a group outside it that marked one of its replacements (rule 4) is applied, for good once that group is final and applied. Undoing your replacement after Minga rewrote part of it would leave Minga's rewrite beside the text yours replaced, a document that never existed.
+  5. **Exactness refusal.** No undo, redo or reject may show text beside a later rewrite of it. An undo or redo of a group is refused while a group that is not yours, applied and not final, deleted a byte the group wrote or deleted while it was visible, after it did, directly or by a sweep (a cover never counts), and the byte can still come back; a reject of a task is refused the same way by a task that started later, or while a group outside it that marked one of its replacements (rule 4) is applied, for good once that group is final and applied. Groups that revert together (a task's reject, a press's steps, a merged class) are checked as one set: a later deletion of a byte that a group in the set wrote and a group in the set deleted does not refuse them, since the byte stays dead when the set reverts, whoever else deleted it; a single group's undo or redo is checked alone. Undoing your replacement after Minga rewrote part of it would leave Minga's rewrite beside the text yours replaced, a document that never existed.
 
   **Invariant.** Steps that compaction merged never differ in applied or final state: they flip and finalize together. The group of a replacement is read from its first made run, and compaction can leave one replacement's made runs under both steps.
 
@@ -299,6 +299,32 @@ defmodule Minga.Test.ProvenanceModel do
         into: MapSet.new(),
         do: group.key
   end
+
+  @doc """
+  Returns the blockers of reverting the groups in `ids` together: `blockers/3` of each, except that a later deletion of a byte one of them wrote and one of them deleted does not count, since the byte stays dead when they revert, whoever else deleted it.
+  """
+  @spec blockers_among(t(), [pos_integer()], (Provenance.author(), Provenance.group_key() ->
+                                                boolean())) ::
+          MapSet.t()
+  def blockers_among(model, ids, blocks?) do
+    set = MapSet.new(ids)
+
+    for id <- ids,
+        entry <- model.entries,
+        not internal?(entry, set),
+        removed_by?(entry, id),
+        not dead_forever?(model, entry),
+        deleter <- later_deleters(entry, id),
+        deleter != id and deleter != :untracked,
+        deleter not in entry.covered_by,
+        group = Map.fetch!(model.groups, deleter),
+        group.applied and not group.final and blocks?.(group.author, group.key),
+        into: MapSet.new(),
+        do: group.key
+  end
+
+  defp internal?(entry, set),
+    do: MapSet.member?(set, entry.group) and Enum.any?(entry.deletions, &MapSet.member?(set, &1))
 
   # The group wrote the byte or deleted it while it was visible; a sweep or a cover never removed it.
   defp removed_by?(%{group: id}, id), do: true
