@@ -13,7 +13,7 @@
    4    │ "Hello, " <> name
    5    end
    6  end
-╭─ SPC ────────────────────────────────────────────────────────────────────────╮
+╭─ SPC Leader ─────────────────────────────────────────────────────────────────╮
 │ Groups              Often                      More                          │
 │ a Minga ›           SPC Find file in project   p   Project ›                 │
 │ s Search ›          ,   Switch buffer          TAB Workspace ›               │
@@ -78,10 +78,16 @@
 8 0-1 #7c7f93 #ccd0da -
 8 2-2 #4c4f69 #ccd0da -
 8 3-5 #1e66f5 #ccd0da -
-8 6-6 #4c4f69 #ccd0da -
-8 7-79 #7c7f93 #ccd0da -
+8 6-13 #4c4f69 #ccd0da -
+8 14-79 #7c7f93 #ccd0da -
 9 0-0 #7c7f93 #ccd0da -
-9 1-78 #4c4f69 #ccd0da -
+9 1-1 #4c4f69 #ccd0da -
+9 2-18 #5c5f77 #ccd0da -
+9 19-21 #4c4f69 #ccd0da -
+9 22-45 #5c5f77 #ccd0da -
+9 46-48 #4c4f69 #ccd0da -
+9 49-67 #5c5f77 #ccd0da -
+9 68-78 #4c4f69 #ccd0da -
 9 79-79 #7c7f93 #ccd0da -
 10 0-0 #7c7f93 #ccd0da -
 10 1-1 #4c4f69 #ccd0da -
@@ -198,12 +204,18 @@
 22 0-58 #7c7f93 #ccd0da -
 22 59-59 #4c4f69 #ccd0da -
 22 60-60 #1e66f5 #ccd0da -
-22 61-67 #4c4f69 #ccd0da -
+22 61-61 #4c4f69 #ccd0da -
+22 62-65 #5c5f77 #ccd0da -
+22 66-67 #4c4f69 #ccd0da -
 22 68-70 #1e66f5 #ccd0da -
-22 71-77 #4c4f69 #ccd0da -
+22 71-71 #4c4f69 #ccd0da -
+22 72-76 #5c5f77 #ccd0da -
+22 77-77 #4c4f69 #ccd0da -
 22 78-79 #7c7f93 #ccd0da -
 23 0-0 #8c8fa1 #e6e9ef -
 23 1-1 #4c4f69 #1e66f5 -
 23 2-7 #eff1f5 #1e66f5 bold
 23 8-8 #4c4f69 #1e66f5 -
-23 9-79 #4c4f69 #e6e9ef -
+23 9-64 #4c4f69 #e6e9ef -
+23 65-67 #5c5f77 #e6e9ef -
+23 68-79 #4c4f69 #e6e9ef -

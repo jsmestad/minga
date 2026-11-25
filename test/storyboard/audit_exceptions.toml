@@ -130,6 +130,30 @@ pairs = [
 reason = "The needs-you state colour on the modeline misses 4.5:1 in this theme."
 issue = 4137
 
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#949cbb on #414559",
+]
+reason = "Which-key group names, counts and hint words use the text_muted role (anatomy.md: caption in the secondary colour), which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#5c5f77 on #ccd0da",
+]
+reason = "Which-key group names, counts and hint words use the text_muted role (anatomy.md: caption in the secondary colour), which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
+
 # ---- macOS ---------------------------------------------------------------------------------------------------
 
 [[exception]]

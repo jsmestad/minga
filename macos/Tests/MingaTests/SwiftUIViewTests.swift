@@ -319,7 +319,7 @@ struct WhichKeyOverlayViewTests {
             .environment(\.themeColors, ThemeColors())
         let strings = try sut.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
-        for text in ["SPC", "a", "Minga", "· 1 needs you", "⌫", "back", "Files", "f", "Find file", "· 2", "b", "Buffers ›", "⌘S"] {
+        for text in ["SPC", "a", "Minga", "· 1 needs you", "back", "Files", "f", "Find file", "· 2", "b", "Buffers ›", "⌘S"] {
             #expect(strings.contains(text), "missing \(text)")
         }
     }

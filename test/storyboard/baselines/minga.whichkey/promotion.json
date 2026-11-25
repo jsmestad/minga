@@ -20,17 +20,17 @@
   },
   "scenario": "minga.whichkey",
   "tui": {
-    "commit": "8c688ec822a6fc389c7444d76fa48c732343e1ef-dirty",
+    "commit": "306a30bda3495152b8d1541817fd4e3028064603-dirty",
     "files": {
-      "tui-astrodark-120x40.txt": "bc189a7fde3c6e50d12117ec03fa1c7f8ac090e4344331035330128346a188f9",
-      "tui-astrodark-150x38.txt": "c6e73a29c3cdb74e1172fe86ecd42aaf27be30015aa827029414bcd1c6bfa0fa",
-      "tui-astrodark-80x24.txt": "3c25f29b3c682167602c0f3c43e2fada17335fea7efe1e4ae068032df98efcd4",
-      "tui-catppuccin_frappe-120x40.txt": "8adc4aacea620bb67c183e4c739c7f7fda0cf878f3671cabaeab4db4f58d435b",
-      "tui-catppuccin_frappe-150x38.txt": "13f600c2a2ad16b1e2836dafdb747c39ef622f5402f7068831c6a922ceb03829",
-      "tui-catppuccin_frappe-80x24.txt": "7d44427dcf2abce3dbecb1af6b6d04b13064ce3875731e5215a4eef0e99005d1",
-      "tui-catppuccin_latte-120x40.txt": "dd926f2a5f326ae692c6656d2afb78d9a2548c3d179eabf9d029d01c30c50bd6",
-      "tui-catppuccin_latte-150x38.txt": "481b54a53f869b3ab237a09566525708b410703552ad01b034886cc1c2af26b6",
-      "tui-catppuccin_latte-80x24.txt": "c347a6615334d20eab6819581edd418ca5888240bf72e00a204472c29e814725"
+      "tui-astrodark-120x40.txt": "3e8aac304fa8a833ba61dac76963d6ac67e6dcb9bd9a9e984f369d8a4cbeef89",
+      "tui-astrodark-150x38.txt": "11f71ec5488f75707a47de5366ee09c07943385b084c5087bc2b4d23aaed850f",
+      "tui-astrodark-80x24.txt": "774ce4fe85ac5e0bb612af6c1c697eb72731cde3ff4eb1619d49db3ebb1c163f",
+      "tui-catppuccin_frappe-120x40.txt": "a3f623667efec9d2342df889bcf671bd8355cd8056eccdc393dbb276f0b14b7a",
+      "tui-catppuccin_frappe-150x38.txt": "9bc8b7031508dd00560c140ba0d6a4f0360b229eb34bd429011d68da09061d6a",
+      "tui-catppuccin_frappe-80x24.txt": "b38e8be2a24bfd500b141204bb345e84c1db7e7e6187388e78b6b1ad3732788d",
+      "tui-catppuccin_latte-120x40.txt": "bbcfefa458b189d05fcaba4107bd88ac596833fa41e2e439671ae764df3d5b07",
+      "tui-catppuccin_latte-150x38.txt": "2a9526fde70241c83c83e05bf8102c7fea5cd3d92909f70ccb1c1d28fd813425",
+      "tui-catppuccin_latte-80x24.txt": "c1a87705b6155bc228100a0b261a20cb5847281f7fac2db7efe69f724f1f40b1"
     }
   }
 }
