@@ -850,6 +850,24 @@ func (m Model) emptyListMousePacket(empty generated.EmptyList, msg tea.MouseMsg)
 	return nil, false
 }
 
+// modePillMousePacket answers a click on the mode pill even while a picker is open: the pill opens the picker's own
+// keys over it (docs/design/surfaces.md, Mouse), so the click must not count as a click outside the picker.
+func (m Model) modePillMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	status, ok := m.statusBar()
+	if !ok {
+		return nil, false
+	}
+	for index, segment := range status.Left {
+		if segment.Name != "mode" || segment.Command == "" {
+			continue
+		}
+		if zoneInfo := m.zones.Get(zoneIDModelineSegment(index)); zoneInfo != nil && zoneInfo.InBounds(msg) {
+			return protocol.EncodeGUIExecuteCommand(segment.Command), true
+		}
+	}
+	return nil, false
+}
+
 func (m Model) tabMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	tabs, ok := m.tabBar()
 	if !ok {

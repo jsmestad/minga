@@ -465,6 +465,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				break
 			}
+			if packet, handled := m.modePillMousePacket(msg); handled {
+				m.send(packet)
+				break
+			}
 			if packet, handled := m.pickerPointerPacket(click); handled {
 				if packet != nil {
 					m.send(packet)
