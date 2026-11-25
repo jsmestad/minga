@@ -543,17 +543,19 @@ defmodule Minga.Buffer.UndoHistory do
     |> Enum.sort_by(&elem(&1, 1), :desc)
     |> Enum.reduce_while(:empty, fn {task, _tick}, first_held ->
       case reject_steps(history, task, document) do
-        {:blocked, _overlap, _task, _offset} = held ->
-          # A press stays on the task it chose while an edit of yours holds it: `u` reaches that edit first. It moves
-          # on only past a task that only a permanent edit holds, which no undo can reach.
-          if held_by_your_undo?(history, task),
-            do: {:halt, if(first_held == :empty, do: held, else: first_held)},
-            else: {:cont, if(first_held == :empty, do: held, else: first_held)}
-
-        reverted_or_error ->
-          {:halt, reverted_or_error}
+        {:blocked, _overlap, _task, _offset} = held -> held_press(history, task, held, first_held)
+        reverted_or_error -> {:halt, reverted_or_error}
       end
     end)
+  end
+
+  # A press stays on the task it chose while an edit of yours holds it: `u` reaches that edit first. It moves on past a
+  # task only a permanent edit holds, which no undo can reach, or when your next undo is itself blocked by a later
+  # Minga step, which a press must revert first. It reports the first hold it met.
+  @spec held_press(t(), task(), tuple(), :empty | tuple()) :: {:halt | :cont, tuple()}
+  defp held_press(history, task, held, first_held) do
+    first_held = if first_held == :empty, do: held, else: first_held
+    if held_by_your_undo?(history, task), do: {:halt, first_held}, else: {:cont, first_held}
   end
 
   # Whether a group of yours holds one of the task's steps and your next `u` can go: then that `u` is the way forward.

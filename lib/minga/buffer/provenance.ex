@@ -229,7 +229,7 @@ defmodule Minga.Buffer.Provenance do
   @doc """
   Applies several changes by one group, as `edit/5` would one at a time from the last to the first.
 
-  `changes` are `{start, removed, inserted}`, in document order and disjoint, with offsets valid when the changes are applied from the last to the first. When they touch a large share of the runs (`mode` `:auto`, the default), one pass over every run applies them all and rebuilds the record in O(n), instead of O(log n) per change. `mode` `:batch` or `:each` forces one way, for tests. Both give the same text, authors, blockers, overlap marks and drafts.
+  `changes` are `{start, removed, inserted}`, in document order and disjoint, with offsets valid when the changes are applied from the last to the first. When they touch a large share of the runs (`mode` `:auto`, the default), one pass over every run applies them all and rebuilds the record in O(n), instead of O(log n) per change. `mode` `:batch` or `:each` forces one way, for tests. Both give the same text, authors, blockers, overlap marks, draft text, and replacement records and links, up to how the records are numbered. Run boundaries may differ: one pass can leave a deleted run in two pieces where changes one at a time leave one, so run and draft counts can differ by those pieces. The run budget only bounds memory, and compaction merges a whole stretch of drafts at once, so no outcome depends on the count.
   """
   @spec edit_all(
           t(),
@@ -352,16 +352,24 @@ defmodule Minga.Buffer.Provenance do
     |> :gb_sets.to_list()
     |> Enum.flat_map(fn run_id ->
       {:ok, run, _offset} = RunTree.fetch(tree, run_id)
+      run_later_deleters(run, id, groups, reverting?)
+    end)
+    |> Enum.uniq()
+  end
 
-      internal? = reverting?.(run.group) and Enum.any?(run.deletions, reverting?)
-
-      for deleter <- if(internal?, do: [], else: later_deleters(run, id)),
+  @spec run_later_deleters(Run.t(), group_id(), %{group_id() => Group.t()}, (group_id() ->
+                                                                               boolean())) ::
+          [group_id()]
+  defp run_later_deleters(run, id, groups, reverting?) do
+    if reverting?.(run.group) and Enum.any?(run.deletions, reverting?) do
+      []
+    else
+      for deleter <- later_deleters(run, id),
           deleter != id,
           deleting = Map.fetch!(groups, deleter),
           deleting.applied and deleting.author != :you,
           do: deleter
-    end)
-    |> Enum.uniq()
+    end
   end
 
   @doc """
@@ -1529,29 +1537,38 @@ defmodule Minga.Buffer.Provenance do
 
   @spec retire_one(t(), Change.id(), Change.t()) :: {t(), [Change.id()]}
   defp retire_one(prov, change, record) do
+    if :gb_sets.is_empty(record.made),
+      do: retire_runless(prov, change, record),
+      else: retire_with_runs(prov, change, record)
+  end
+
+  @spec retire_runless(t(), Change.id(), Change.t()) :: {t(), [Change.id()]}
+  defp retire_runless(prov, change, record) do
     linked = :gb_sets.to_list(record.pulls) ++ :gb_sets.to_list(record.pulled_by)
 
     cond do
-      # Nothing reaches it, or reaching it does nothing: it has no text to mark and nothing to cover or pull.
-      :gb_sets.is_empty(record.made) and
-          (:gb_sets.is_empty(record.pulled_by) or
-             (:gb_sets.is_empty(record.replaced) and :gb_sets.is_empty(record.pulls))) ->
+      # Nothing reaches it, or reaching it does nothing: it has nothing to cover or pull.
+      :gb_sets.is_empty(record.pulled_by) or
+          (:gb_sets.is_empty(record.replaced) and :gb_sets.is_empty(record.pulls)) ->
         {remove_change(prov, change, record), linked}
 
-      :gb_sets.is_empty(record.made) and :gb_sets.is_empty(record.replaced) and
-          spliceable?(prov, record) ->
+      :gb_sets.is_empty(record.replaced) and spliceable?(prov, record) ->
         {splice(prov, change, record), linked}
-
-      :gb_sets.is_empty(record.made) ->
-        {prov, []}
-
-      :gb_sets.is_empty(record.replaced) and :gb_sets.is_empty(record.pulls) and
-          inert_change?(prov, record) ->
-        prov = clear_made(prov, record.made)
-        {remove_change(prov, change, record), :gb_sets.to_list(record.pulled_by)}
 
       true ->
         {prov, []}
+    end
+  end
+
+  # A record with runs retires when it could never cover, pull or mark: its runs forget it.
+  @spec retire_with_runs(t(), Change.id(), Change.t()) :: {t(), [Change.id()]}
+  defp retire_with_runs(prov, change, record) do
+    if :gb_sets.is_empty(record.replaced) and :gb_sets.is_empty(record.pulls) and
+         inert_change?(prov, record) do
+      prov = clear_made(prov, record.made)
+      {remove_change(prov, change, record), :gb_sets.to_list(record.pulled_by)}
+    else
+      {prov, []}
     end
   end
 

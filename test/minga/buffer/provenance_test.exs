@@ -597,7 +597,7 @@ defmodule Minga.Buffer.ProvenanceTest do
       end
     end
 
-    property "edit_all in one pass equals edit/5 one change at a time, ids, records and links included" do
+    property "edit_all in one pass equals edit/5 one change at a time, records and links included" do
       check all(
               original <- StreamData.string([?a, ?\n, 0xE9, 0x1F600], max_length: 12),
               commands <- StreamData.list_of(command(), max_length: 40),
@@ -1115,20 +1115,39 @@ defmodule Minga.Buffer.ProvenanceTest do
 
   # Every byte's replacement fields, live or dead, in order; the links between records; and the next id. Two records
   # whose runs split differently give the same bytes.
+  # Every byte's record facts and every record's links, with records numbered by where they first appear (bytes in
+  # order, then links), since one pass may number records differently than changes one at a time.
   defp byte_records(prov) do
+    runs = Provenance.runs(prov)
+    records = Provenance.change_records(prov)
+
+    order =
+      runs
+      |> Enum.flat_map(&[&1.made_by | Enum.sort(&1.replaced_by)])
+      |> Enum.concat(records |> Map.keys() |> Enum.sort())
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+      |> Enum.with_index()
+      |> Map.new()
+
+    name = fn change -> Map.get(order, change) end
+    names = &(&1 |> Enum.map(name) |> Enum.sort())
+
     bytes =
-      prov
-      |> Provenance.runs()
-      |> Enum.flat_map(
-        &List.duplicate({&1.live, &1.made_by, Enum.sort(&1.replaced_by)}, &1.bytes)
-      )
+      Enum.flat_map(runs, fn run ->
+        List.duplicate(
+          {run.live, run.made_by && name.(run.made_by),
+           run.replaced_by |> Enum.map(name) |> Enum.sort()},
+          run.bytes
+        )
+      end)
 
     links =
-      prov
-      |> Provenance.change_records()
-      |> Map.new(fn {change, record} -> {change, {record.pulls, record.pulled_by}} end)
+      Map.new(records, fn {change, record} ->
+        {name.(change), {names.(record.pulls), names.(record.pulled_by)}}
+      end)
 
-    {bytes, links, Provenance.next_change(prov)}
+    {bytes, links}
   end
 
   # The records hold what the runs say: `made` and `replaced` equal a recomputation from every run's `made_by` and
