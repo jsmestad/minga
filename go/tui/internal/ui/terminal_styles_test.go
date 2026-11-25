@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
+	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
 func sameColor(a, b color.Color) bool {
@@ -143,5 +144,68 @@ func TestTheDrawnBytesCarryTheUnderlineStyle(t *testing.T) {
 		if !strings.Contains(drawn, "58") {
 			t.Fatalf("severity %d: %q does not colour the underline (SGR 58)", tc.severity, drawn)
 		}
+	}
+}
+
+func TestASpaceInsideAStyledDiagnosticKeepsTheUnderline(t *testing.T) {
+	model := New(80, 24, nil)
+	model.capabilities.Resolve(generated.TerminalFeatureStyledUnderlines, true)
+	model.capabilities.Resolve(generated.TerminalFeatureUnderlineColor, true)
+	curly := model.diagnosticStyle(lipgloss.NewStyle(), 0)
+
+	for _, text := range []string{" ", "  "} {
+		drawn := renderCell(curly, text)
+		if !strings.Contains(drawn, "4:3") {
+			t.Fatalf("a space inside an error must carry the curly underline: %q", drawn)
+		}
+		if strings.Count(drawn, " ") != len(text) || strings.Contains(drawn, "x") {
+			t.Fatalf("the spaces themselves must be what is drawn: %q", drawn)
+		}
+	}
+
+	// Text, and anything without a styled underline, is drawn by Lip Gloss as it always was.
+	plain := model.diagnosticStyle(lipgloss.NewStyle(), 0).UnderlineStyle(lipgloss.UnderlineSingle)
+	for _, tc := range []struct {
+		style lipgloss.Style
+		text  string
+	}{{curly, "ab"}, {curly, "a b"}, {plain, " "}, {lipgloss.NewStyle(), " "}, {curly, ""}} {
+		if got, want := renderCell(tc.style, tc.text), tc.style.Render(tc.text); got != want {
+			t.Fatalf("renderCell(%q) = %q, want Lip Gloss's own %q", tc.text, got, want)
+		}
+	}
+}
+
+func TestLinesAreRecomposedWhenTheTerminalsFeaturesOrPlaceChange(t *testing.T) {
+	window := protocol.WindowContent{
+		ID: 1, CursorVisible: true, ContentEpoch: 1,
+		Rows: []protocol.WindowRow{{ID: 1, ContentHash: 11, Text: "line one"}, {ID: 2, ContentHash: 22, Text: "line two"}},
+	}
+	for _, tc := range []struct {
+		name       string
+		msg        tea.Msg
+		recomposed bool
+	}{
+		{"the terminal says it draws styled underlines", tea.CapabilityMsg{Content: "Smulx=\x1b[4:%p1%dm"}, true},
+		{"the terminal window goes to the background", tea.BlurMsg{}, true},
+		{"the timeout settles what was pending", capabilityTimeoutMsg{}, true},
+		{"an answer for a capability the frontend does not use", tea.CapabilityMsg{Content: "RGB=8"}, false},
+		{"a focus event while already in the foreground", tea.FocusMsg{}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(80, 24, make(chan []byte, 16))
+			m = applyTo(t, m, fullWindowFrame(1, window)...)
+			if hits, misses := recomposeCounters(m); hits != 2 || misses != 0 {
+				t.Fatalf("warm cache before the message: hits=%d misses=%d, want 2/0", hits, misses)
+			}
+
+			updated, _ := m.Update(tc.msg)
+			m = updated.(Model)
+
+			// The compose that ran during this Update: misses mean the lines were drawn again, not served from the cache.
+			hits, misses := frameCounters(m)
+			if recomposed := misses == 2 && hits == 0; recomposed != tc.recomposed {
+				t.Fatalf("after the message: hits=%d misses=%d, recomposed should be %v", hits, misses, tc.recomposed)
+			}
+		})
 	}
 }

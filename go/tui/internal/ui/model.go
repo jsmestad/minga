@@ -285,8 +285,8 @@ func latencyHUDEnvEnabled() bool {
 type agentAnimationTickMsg struct{}
 
 // Init starts capability detection. Bubble Tea asks the terminal for its colour profile, its keyboard enhancements
-// and synchronized output on its own; focus reporting is asked for here. The timeout settles whatever the terminal
-// never answers.
+// and synchronized output on its own. Asked for here are focus reporting and, where the terminal can be asked safely,
+// the terminfo capabilities for styled and coloured underlines. The timeout settles whatever the terminal never answers.
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{tea.Raw(ansi.RequestModeFocusEvent)}
 	for _, capability := range m.termcapQueries {

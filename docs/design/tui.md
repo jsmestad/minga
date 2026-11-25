@@ -41,7 +41,23 @@ Some features need a modern terminal. Each one is detected at startup and degrad
 
 The terminal's answers arrive after startup, or never. Each feature is pending until the terminal answers or two seconds have passed; after that it is detected, or it uses its fallback, or it is missing when nothing replaces it. The frontend keeps one value for this and tells the BEAM the same value (`terminal_report` in [`docs/PROTOCOL.md`](../PROTOCOL.md)), so the report cannot differ from what is drawn.
 
-Styled underlines and the underline colour have no query that every terminal answers. They are known from the terminals that document them (Kitty, Ghostty, WezTerm, iTerm, foot, Alacritty, VTE from 0.52), or from the terminal's own terminfo answer (`Smulx`, `Setulc`). Inside tmux or screen the variables describe the outer terminal and the multiplexer decides what passes, so only the answer counts there. Until one of these says yes, diagnostics use the plain underline.
+Styled underlines and the underline colour have no query that every terminal answers: iTerm and the VTE terminals draw them and answer no terminfo query. So each of the two is settled in one of three ways, and the frontend remembers which:
+
+- **Answered by the terminal.** The terminal answers the terminfo query for `Smulx` (styled underlines) or `Setulc` (underline colour). An answer with a value turns the feature on; an answer that names the capability without a value turns it off. The terminal's own answer always wins over the table below.
+- **Known terminal.** The terminal is in this table, which mirrors `KnownTerminals` in `go/tui/internal/terminal/known_terminals.go`. The table is never used inside tmux or screen: there the variables describe the outer terminal and the multiplexer decides what passes.
+- **Fallback.** Neither said yes within two seconds, so diagnostics use the plain underline.
+
+| Terminal | Recognised by | Since |
+|---|---|---|
+| Kitty | `TERM=xterm-kitty` or `KITTY_WINDOW_ID` | |
+| Ghostty | `TERM_PROGRAM=ghostty` or `TERM=xterm-ghostty` | |
+| WezTerm | `TERM_PROGRAM=WezTerm` or `TERM=wezterm` | |
+| iTerm | `TERM_PROGRAM=iTerm.app` | |
+| foot | `TERM=foot` or `foot-extra` | |
+| Alacritty | `TERM=alacritty` | |
+| VTE terminals (GNOME Terminal and others) | `VTE_VERSION` of 5200 or more | VTE 0.52 |
+
+Apple's Terminal is not asked (it prints the query into the screen), and neither is any terminal over SSH, where the terminal at the other end is not the one the variables describe. A table goes stale, so a config option to force a feature on or off comes with `:checkhealth terminal`, which will also show how each feature was settled.
 
 Focus reporting does two jobs: when the terminal window loses focus, the borders that mark the focused pane take their quiet colour and the terminal draws its cursor hollow, and "needs you" escalates to a notification because you are not looking.
 

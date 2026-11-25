@@ -165,7 +165,7 @@ func TestStyledUnderlinesAreKnownFromTheTerminalsThatDocumentThem(t *testing.T) 
 	}
 }
 
-func TestATerminfoAnswerCountsOnlyWithItsValue(t *testing.T) {
+func TestATerminfoAnswerSettlesTheFeatureEitherWay(t *testing.T) {
 	for _, tc := range []struct {
 		content string
 		styled  Status
@@ -174,8 +174,13 @@ func TestATerminfoAnswerCountsOnlyWithItsValue(t *testing.T) {
 		{"Smulx=\x1b[4:%p1%dm", detected, pending},
 		{"Setulc=\x1b[58:2::%p1%dm", pending, detected},
 		{"Smulx=\x1b[4:%p1%dm;Setulc=\x1b[58:2::%p1%dm", detected, detected},
-		{"Smulx", pending, pending},
+		// A capability named without a value: the terminal says it does not have it.
+		{"Smulx", fallback, pending},
+		{"Smulx=", fallback, pending},
+		{"Setulc", pending, fallback},
+		// Answers for other capabilities, and noise, say nothing about these two.
 		{"RGB=8", pending, pending},
+		{"Smulxx=1", pending, pending},
 		{"", pending, pending},
 	} {
 		caps := NewCapabilities()
@@ -183,17 +188,92 @@ func TestATerminfoAnswerCountsOnlyWithItsValue(t *testing.T) {
 		if caps.Status(generated.TerminalFeatureStyledUnderlines) != tc.styled || caps.Status(generated.TerminalFeatureUnderlineColor) != tc.colour {
 			t.Fatalf("%q: styled %d, colour %d", tc.content, caps.Status(generated.TerminalFeatureStyledUnderlines), caps.Status(generated.TerminalFeatureUnderlineColor))
 		}
-		if changed != (tc.styled == detected || tc.colour == detected) {
+		if changed != (tc.styled != pending || tc.colour != pending) {
 			t.Fatalf("%q: changed = %v", tc.content, changed)
 		}
 	}
 }
 
-func TestAppleTerminalIsNotAskedForTerminfo(t *testing.T) {
-	if got := TermcapQueries(env(map[string]string{"TERM_PROGRAM": "Apple_Terminal"})); got != nil {
-		t.Fatalf("queries for Apple's Terminal = %v, want none: it prints the query into the screen", got)
+func TestTheTerminalsOwnAnswerWinsOverTheTable(t *testing.T) {
+	ghostty := env(map[string]string{"TERM_PROGRAM": "ghostty"})
+	styled := generated.TerminalFeatureStyledUnderlines
+
+	listed := NewCapabilities().WithEnvironment(ghostty)
+	if listed.Status(styled) != detected || listed.Source(styled) != SourceKnownTerminal {
+		t.Fatalf("a listed terminal: status %d, source %d", listed.Status(styled), listed.Source(styled))
 	}
-	if got := TermcapQueries(env(map[string]string{"TERM_PROGRAM": "ghostty"})); len(got) != 2 {
-		t.Fatalf("queries = %v, want the styled underline and underline colour capabilities", got)
+
+	// The terminal says no although the table said yes: a table goes stale, the terminal does not.
+	denied := listed
+	if !denied.ObserveTermcap("Smulx") || denied.Status(styled) != fallback || denied.Source(styled) != SourceAnswered {
+		t.Fatalf("an answer of no must replace the table: status %d, source %d", denied.Status(styled), denied.Source(styled))
+	}
+
+	// The terminal confirms the table: the status stays, and the report can say the terminal answered.
+	confirmed := listed
+	if confirmed.ObserveTermcap("Smulx=\x1b[4:%p1%dm") {
+		t.Fatal("a confirming answer does not change the status")
+	}
+	if confirmed.Status(styled) != detected || confirmed.Source(styled) != SourceAnswered {
+		t.Fatalf("a confirming answer: status %d, source %d", confirmed.Status(styled), confirmed.Source(styled))
+	}
+
+	// An unlisted terminal that answers yes gets the feature from its answer alone.
+	unlisted := NewCapabilities().WithEnvironment(env(map[string]string{"TERM": "xterm-256color"}))
+	unlisted.ObserveTermcap("Smulx=\x1b[4:%p1%dm")
+	if unlisted.Status(styled) != detected || unlisted.Source(styled) != SourceAnswered {
+		t.Fatalf("an unlisted terminal that answers: status %d, source %d", unlisted.Status(styled), unlisted.Source(styled))
+	}
+}
+
+func TestEveryVerdictSaysHowItWasSettled(t *testing.T) {
+	caps := NewCapabilities().WithEnvironment(env(map[string]string{"TERM_PROGRAM": "iTerm.app"}))
+	caps.Resolve(generated.TerminalFeatureTrueColor, true)
+	caps.Expire()
+
+	want := map[Feature]Source{
+		generated.TerminalFeatureTrueColor:          SourceAnswered,
+		generated.TerminalFeatureStyledUnderlines:   SourceKnownTerminal,
+		generated.TerminalFeatureUnderlineColor:     SourceKnownTerminal,
+		generated.TerminalFeatureKittyKeyboard:      SourceTimeout,
+		generated.TerminalFeatureSynchronizedOutput: SourceTimeout,
+		generated.TerminalFeatureFocusReporting:     SourceTimeout,
+	}
+	for _, entry := range caps.Entries() {
+		if entry.Source != want[entry.Feature] {
+			t.Fatalf("feature %d: source %d, want %d", entry.Feature, entry.Source, want[entry.Feature])
+		}
+	}
+	if NewCapabilities().Source(generated.TerminalFeatureTrueColor) != SourceUnsettled {
+		t.Fatal("a pending feature is not settled by anything yet")
+	}
+}
+
+func TestEveryKnownTerminalSaysWhatItRestsOn(t *testing.T) {
+	for _, terminal := range KnownTerminals {
+		if terminal.Name == "" || terminal.Basis == "" || len(terminal.Features) == 0 {
+			t.Fatalf("the table entry %+v must name the terminal, its basis and its features", terminal.Name)
+		}
+	}
+}
+
+func TestTerminfoIsAskedOnlyWhereTheQueryIsSafe(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		vars  map[string]string
+		asked bool
+	}{
+		{"Ghostty", map[string]string{"TERM_PROGRAM": "ghostty"}, true},
+		{"an unknown local terminal", map[string]string{"TERM": "xterm-256color"}, true},
+		{"Apple's Terminal prints the query into the screen", map[string]string{"TERM_PROGRAM": "Apple_Terminal"}, false},
+		{"over SSH the terminal at the other end is unknown, and may be Apple's", map[string]string{"TERM": "xterm-256color", "SSH_TTY": "/dev/ttys004"}, false},
+		{"over SSH a forwarded TERM_PROGRAM does not make it safe", map[string]string{"TERM_PROGRAM": "ghostty", "SSH_TTY": "/dev/pts/1"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := TermcapQueries(env(tc.vars))
+			if (len(got) == 2) != tc.asked || (!tc.asked && got != nil) {
+				t.Fatalf("queries = %v, asked = %v", got, tc.asked)
+			}
+		})
 	}
 }

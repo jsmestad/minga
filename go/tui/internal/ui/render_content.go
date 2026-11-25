@@ -599,7 +599,7 @@ func (m Model) renderRowAt(window protocol.WindowContent, row protocol.WindowRow
 			// visible cells blank, rather than shifting the following text.
 			text = strings.Repeat(" ", min(end, scrollRight)-max(col, scrollLeft))
 		}
-		builder.WriteString(style.Render(text))
+		builder.WriteString(renderCell(style, text))
 		col = end
 	}
 	// A span's background covers its whole column range, including columns past the row
@@ -644,6 +644,21 @@ func (m Model) diagnosticStyle(style lipgloss.Style, severity byte) lipgloss.Sty
 		return style.UnderlineColor(tone)
 	}
 	return style.Foreground(tone)
+}
+
+// renderCell draws the text of one cell with its style.
+//
+// Lip Gloss draws a space inside underlined text with its own plain underline, which would cut a curly or dotted
+// underline at every space of a diagnostic. Such a space is drawn with the sequence the text gets, so the underline
+// runs through.
+func renderCell(style lipgloss.Style, text string) string {
+	underline := style.GetUnderlineStyle()
+	if underline == lipgloss.UnderlineNone || underline == lipgloss.UnderlineSingle || strings.Trim(text, " ") != "" || text == "" {
+		return style.Render(text)
+	}
+	// The placeholder cannot occur in the escape sequences around it: they hold digits, punctuation and a final letter m.
+	const placeholder = "x"
+	return strings.ReplaceAll(style.Render(strings.Repeat(placeholder, len(text))), placeholder, " ")
 }
 
 // The wire's diagnostic severities: 0 error, 1 warning, 2 info, 3 hint.
