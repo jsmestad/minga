@@ -119,22 +119,11 @@
    "frame": [
     20,
     564,
-    21,
+    63,
     14
    ],
    "part": "whichKey.breadcrumb",
-   "text": "SPC"
-  },
-  {
-   "baseline": 573.5,
-   "frame": [
-    1326,
-    564,
-    35,
-    14
-   ],
-   "part": "whichKey.hint",
-   "text": "\u232b back"
+   "text": "SPC Leader"
   },
   {
    "baseline": 573.5,
@@ -146,6 +135,17 @@
    ],
    "part": "whichKey.hint",
    "text": "esc close"
+  },
+  {
+   "baseline": 574,
+   "frame": [
+    1320,
+    564.5,
+    41,
+    13
+   ],
+   "part": "whichKey.hint",
+   "text": "\u232b back"
   },
   {
    "frame": [

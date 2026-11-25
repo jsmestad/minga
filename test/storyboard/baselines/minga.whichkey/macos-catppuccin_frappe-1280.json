@@ -51,17 +51,6 @@
   {
    "baseline": 665.5,
    "frame": [
-    1166,
-    656,
-    35,
-    14
-   ],
-   "part": "whichKey.hint",
-   "text": "\u232b back"
-  },
-  {
-   "baseline": 665.5,
-   "frame": [
     1209,
     656,
     51,
@@ -69,6 +58,17 @@
    ],
    "part": "whichKey.hint",
    "text": "esc close"
+  },
+  {
+   "baseline": 666,
+   "frame": [
+    1160,
+    656.5,
+    41,
+    13
+   ],
+   "part": "whichKey.hint",
+   "text": "\u232b back"
   },
   {
    "frame": [
