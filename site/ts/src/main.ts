@@ -4,7 +4,6 @@ import { mountArchFaultMap, mountStagedStepper } from "./arch_interactive.ts";
 import { mountCoAuthorSim } from "./coauthor_view.ts";
 import { mountElixirPlayground, mountElixirTranslator } from "./elixir_lab.ts";
 import { highlightStaticShellBlocks } from "./highlight.ts";
-import { mountMarksThemeSwitcher } from "./home_interactive.ts";
 import { mountLearnHub } from "./hub_view.ts";
 import { mountRemoteLab } from "./remote_lab.ts";
 import { mountSandbox } from "./sandbox_view.ts";
@@ -34,7 +33,6 @@ function init(): void {
   mount("[data-elixir-playground]", mountElixirPlayground);
   mount("[data-remote-lab]", mountRemoteLab);
   mount("[data-spec-board-demo]", mountSpecBoardDemo);
-  mount("[data-marks-theme-switcher]", mountMarksThemeSwitcher);
   mount("[data-arch-fault-map]", mountArchFaultMap);
   mount("[data-staged-stepper]", mountStagedStepper);
 
