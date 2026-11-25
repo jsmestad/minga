@@ -85,6 +85,7 @@ const (
 	OPMatchItemResult     byte = 0x3C
 	OPNodeInfo            byte = 0x3D
 	OPDocumentSymbols     byte = 0x3E
+	OPParseComplete       byte = 0x3F
 
 	// Gui Chrome
 	OPGuiTabBar            byte = 0x71

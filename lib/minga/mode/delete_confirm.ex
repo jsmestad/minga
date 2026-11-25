@@ -16,25 +16,33 @@ defmodule Minga.Mode.DeleteConfirm do
 
   @behaviour Minga.Mode
 
+  import Bitwise
+
   alias Minga.Mode
   alias Minga.Mode.DeleteConfirmState
 
   @escape 27
 
+  # An answer is a letter pressed without Control, Alt or Command. A chord is not an answer: without enhanced key
+  # reporting a terminal sends Esc followed by a letter as Alt and that letter when both arrive together.
+  @chord_mods 0x0E
+
   @impl Mode
   @spec handle_key(Mode.key(), DeleteConfirmState.t()) :: Mode.result()
 
   # y → confirm deletion (trash or permanent depending on phase)
-  def handle_key({?y, _mods}, %DeleteConfirmState{phase: :trash} = state) do
+  def handle_key({?y, mods}, %DeleteConfirmState{phase: :trash} = state)
+      when band(mods, @chord_mods) == 0 do
     {:execute_then_transition, [{:delete_confirm_trash, state.path}], :normal, state}
   end
 
-  def handle_key({?y, _mods}, %DeleteConfirmState{phase: :permanent} = state) do
+  def handle_key({?y, mods}, %DeleteConfirmState{phase: :permanent} = state)
+      when band(mods, @chord_mods) == 0 do
     {:execute_then_transition, [{:delete_confirm_permanent, state.path}], :normal, state}
   end
 
   # n → cancel
-  def handle_key({?n, _mods}, %DeleteConfirmState{} = state) do
+  def handle_key({?n, mods}, %DeleteConfirmState{} = state) when band(mods, @chord_mods) == 0 do
     {:execute_then_transition, [:delete_confirm_cancel], :normal, state}
   end
 

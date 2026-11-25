@@ -663,6 +663,13 @@ name = "document_symbols"
 value = 0x3E
 direction = "parser_to_beam"
 
+# The last message of every parse: every other result of the parse precedes it.
+[[opcodes]]
+category = "parser_responses"
+name = "parse_complete"
+value = 0x3F
+direction = "parser_to_beam"
+
 # Native GUI chrome and forward-compatible GUI commands.
 [[opcodes]]
 category = "gui_chrome"

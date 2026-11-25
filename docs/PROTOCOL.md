@@ -139,6 +139,7 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 | `0x3B` | request_reparse | 5 | Parser requests full reparse after stale edit deltas |
 | `0x3C` | match_item_result | 6 or 14 | Structural match position result (or nil) |
 | `0x3D` | node_info | 6 or 24 + type_len | Structural navigation target range and node type |
+| `0x3F` | parse_complete | 9 | The last message of a parse |
 
 ### Frontend → BEAM (Diagnostics)
 
@@ -833,6 +834,20 @@ buffer_id:  u32          the buffer that needs a full reparse
 Total size: 5 bytes.
 
 **Behavior:** The BEAM receives this event, looks up the buffer PID for the given `buffer_id`, and sends a full `set_language` + `parse_buffer` sequence for that buffer. This is the same path used when setting up a buffer for the first time, so custom user queries are replayed correctly.
+
+### `0x3F` parse_complete
+
+The last message of every parse that sent `highlight_spans`, from `parse_buffer` and from `edit_buffer`, including a parse that failed and sent empty spans.
+
+```
+opcode:     u8  = 0x3F
+buffer_id:  u32          the buffer that was parsed
+version:    u32          version from the parse request
+```
+
+Total size: 9 bytes.
+
+**Behavior:** A parse sends `highlight_names` and `highlight_spans` first, so highlights reach the screen as early as possible. Its conceal spans, injection ranges, fold ranges, text object positions, and document symbols follow, and `parse_complete` comes last. The BEAM admits the buffer's next parse only after `parse_complete`, and the editor records the parse as complete, so it knows no more results of that version are on their way. Before this message existed, the spans ended a parse and the fold ranges that followed could miss the frame the spans scheduled ([#4314](https://github.com/jsmestad/minga/issues/4314)).
 
 ---
 

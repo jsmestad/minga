@@ -109,6 +109,14 @@ SPC a  Minga
 | `SPC a Q` | (answer a question; answered from the tasks drawer row) | shipped, retired (164) |
 | `SPC a o` | (moved to `SPC f o`) | shipped, retired (161) |
 
+**What `SPC a s` stops.** One turn, never several, from any buffer:
+
+1. the conversation in front;
+2. with a file in front, the conversation shown last, which is the one the file's modeline speaks for;
+3. otherwise the only conversation that is working.
+
+With several conversations working and none of them shown last, Stop stops nothing and says so in one line. A specific task is stopped from its row in the tasks drawer (`x`). With a conversation in front, Stop acts on that conversation only, so it does nothing while that conversation is not working. With nothing working, Stop does nothing and says nothing.
+
 **`SPC a q` Queue ›**
 
 | Keys | Action | Status |

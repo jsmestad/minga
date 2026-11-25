@@ -70,6 +70,23 @@ defmodule MingaEditor.Input.HoverTest do
       assert Runtime.state(new_state.shell_runtime).hover_popup.scroll_offset == 0
     end
 
+    test "Enter held with Control, Alt or Command neither opens nor dismisses a popup with an Open action" do
+      state = state_with_hover(focused: true)
+
+      popup =
+        HoverPopup.with_open_action(
+          Runtime.state(state.shell_runtime).hover_popup,
+          :open_messages
+        )
+
+      state = MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(state, popup)
+
+      # Without enhanced key reporting a terminal sends Esc then Enter as Alt+Enter when both arrive together.
+      for mods <- [0x02, 0x04, 0x08] do
+        assert {:handled, ^state} = Hover.handle_key(state, 13, mods)
+      end
+    end
+
     test "q dismisses" do
       state = state_with_hover(focused: true)
       assert {:handled, new_state} = Hover.handle_key(state, @key_q, @none)

@@ -22,7 +22,7 @@ func NewInputFilter() *InputFilter {
 }
 
 func (f *InputFilter) Filter(model tea.Model, msg tea.Msg) tea.Msg {
-	msg = normalizeTerminalInput(msg)
+	msg = normalizeTerminalInput(resolveKeyBoundary(msg))
 	switch msg := msg.(type) {
 	case tea.MouseClickMsg:
 		if msg.Button == tea.MouseLeft {

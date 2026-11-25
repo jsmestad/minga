@@ -576,17 +576,6 @@ defmodule MingaEditor.Commands.AgentSession do
     end
   end
 
-  @doc "Sends a prompt to a local or remote session, enforcing the remote broker boundary."
-  @spec send_prompt_pid(pid(), String.t() | [ReqLLM.Message.ContentPart.t()]) ::
-          :ok | {:queued, :steering} | {:error, term()}
-  def send_prompt_pid(session, prompt) when is_pid(session) and node(session) == node() do
-    Session.send_prompt(session, prompt)
-  end
-
-  def send_prompt_pid(session, prompt) when is_pid(session) do
-    SessionClient.send_prompt(session, prompt)
-  end
-
   @doc "Resolves the exact displayed tool approval through the local or remote session boundary."
   @spec respond_to_approval_pid(pid(), Session.approval_target(), Session.approval_decision()) ::
           :ok | {:error, term()}
