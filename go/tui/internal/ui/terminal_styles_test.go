@@ -2,6 +2,7 @@ package ui
 
 import (
 	"image/color"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -119,5 +120,28 @@ func TestFocusBordersDimWhileTheTerminalIsInTheBackground(t *testing.T) {
 	model = updated.(Model)
 	if !sameColor(model.palette().FocusBorder(quiet), model.palette().Accent()) {
 		t.Fatal("back in the foreground the focus border has the accent again")
+	}
+}
+
+func TestTheDrawnBytesCarryTheUnderlineStyle(t *testing.T) {
+	model := New(80, 24, nil)
+	plain := model.diagnosticStyle(lipgloss.NewStyle(), 0).Render("x")
+	if strings.Contains(plain, "4:3") || strings.Contains(plain, "58:") || strings.Contains(plain, "58;") {
+		t.Fatalf("a terminal that was not seen to draw styled underlines got them: %q", plain)
+	}
+
+	model.capabilities.Resolve(generated.TerminalFeatureStyledUnderlines, true)
+	model.capabilities.Resolve(generated.TerminalFeatureUnderlineColor, true)
+	for _, tc := range []struct {
+		severity byte
+		sgr      string
+	}{{0, "4:3"}, {1, "4:4"}, {3, "4:4"}} {
+		drawn := model.diagnosticStyle(lipgloss.NewStyle(), tc.severity).Render("x")
+		if !strings.Contains(drawn, tc.sgr) {
+			t.Fatalf("severity %d: %q does not carry SGR %s", tc.severity, drawn, tc.sgr)
+		}
+		if !strings.Contains(drawn, "58") {
+			t.Fatalf("severity %d: %q does not colour the underline (SGR 58)", tc.severity, drawn)
+		}
 	}
 }

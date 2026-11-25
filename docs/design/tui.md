@@ -41,7 +41,9 @@ Some features need a modern terminal. Each one is detected at startup and degrad
 
 The terminal's answers arrive after startup, or never. Each feature is pending until the terminal answers or two seconds have passed; after that it is detected, or it uses its fallback, or it is missing when nothing replaces it. The frontend keeps one value for this and tells the BEAM the same value (`terminal_report` in [`docs/PROTOCOL.md`](../PROTOCOL.md)), so the report cannot differ from what is drawn.
 
-Focus reporting does two jobs: when the terminal window loses focus, borders dim and the cursor becomes hollow, and "needs you" escalates to a notification because you are not looking.
+Styled underlines and the underline colour have no query that every terminal answers. They are known from the terminals that document them (Kitty, Ghostty, WezTerm, iTerm, foot, Alacritty, VTE from 0.52), or from the terminal's own terminfo answer (`Smulx`, `Setulc`). Inside tmux or screen the variables describe the outer terminal and the multiplexer decides what passes, so only the answer counts there. Until one of these says yes, diagnostics use the plain underline.
+
+Focus reporting does two jobs: when the terminal window loses focus, the borders that mark the focused pane take their quiet colour and the terminal draws its cursor hollow, and "needs you" escalates to a notification because you are not looking.
 
 `:checkhealth terminal` opens a buffer listing each feature, whether this terminal supports it, and what Minga uses instead when it does not. Users should never have to guess why two terminals behave differently.
 
