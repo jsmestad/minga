@@ -158,6 +158,27 @@ defmodule Minga.Keymap.Active do
     ets_get(server, {:leader_keys_for, command}, nil)
   end
 
+  @doc """
+  The leader key sequence that runs `command`, as the design writes it (`SPC s p`), or `""` when no leader key runs it.
+
+  A command bound twice (`SPC s p` and its alias `SPC /`) is taught by its mnemonic sequence, the one spelled in letters. Reads one row of the index kept beside the live trie, so a user override is what gets taught and a caller on the render path does not copy the trie.
+  """
+  @spec leader_key(atom(), GenServer.server()) :: String.t()
+  def leader_key(command, server \\ __MODULE__) when is_atom(command) do
+    case ets_get(server, {:leader_key_taught, command}, nil) do
+      nil -> ""
+      keys -> "SPC " <> Bindings.format_sequence(keys)
+    end
+  end
+
+  @spec mnemonic?([Bindings.key()]) :: boolean()
+  defp mnemonic?(keys) do
+    Enum.all?(keys, fn
+      {codepoint, 0} -> codepoint in ?a..?z or codepoint in ?A..?Z
+      _modified -> false
+    end)
+  end
+
   @doc "Returns this owner's named scope declarations from its required source selector."
   @spec scope_declarations(GenServer.server()) :: %{Scope.scope_name() => module()}
   def scope_declarations(server) do
@@ -463,7 +484,8 @@ defmodule Minga.Keymap.Active do
     :ok
   end
 
-  # The trie and its index change together: a row per bound sequence, and a row per command with its shortest one.
+  # The trie and its index change together: a row per bound sequence, and rows per command.
+  # A command's rows hold its shortest sequence and the one empty states teach.
   # New rows go in before stale rows come out, so a reader mid-update sees the old or the new binding, never none.
   @spec put_leader_trie(:ets.table(), Bindings.node_t()) :: :ok
   defp put_leader_trie(table, trie) do
@@ -473,16 +495,26 @@ defmodule Minga.Keymap.Active do
     shortest =
       Enum.reduce(commands, %{}, fn {keys, command}, acc -> Map.put_new(acc, command, keys) end)
 
+    # A command bound twice is taught by its first sequence spelled in letters (`s p` over the alias `/`).
+    taught =
+      Enum.reduce(commands, shortest, fn {keys, command}, acc ->
+        if mnemonic?(keys) and not mnemonic?(Map.fetch!(acc, command)),
+          do: Map.put(acc, command, keys),
+          else: acc
+      end)
+
     rows =
       Enum.map(commands, fn {keys, command} -> {{:leader_command_at, keys}, command} end) ++
-        Enum.map(shortest, fn {command, keys} -> {{:leader_keys_for, command}, keys} end)
+        Enum.map(shortest, fn {command, keys} -> {{:leader_keys_for, command}, keys} end) ++
+        Enum.map(taught, fn {command, keys} -> {{:leader_key_taught, command}, keys} end)
 
     current = MapSet.new(rows, &elem(&1, 0))
 
     stale =
       for {key, _value} <-
             :ets.match_object(table, {{:leader_command_at, :_}, :_}) ++
-              :ets.match_object(table, {{:leader_keys_for, :_}, :_}),
+              :ets.match_object(table, {{:leader_keys_for, :_}, :_}) ++
+              :ets.match_object(table, {{:leader_key_taught, :_}, :_}),
           not MapSet.member?(current, key),
           do: key
 

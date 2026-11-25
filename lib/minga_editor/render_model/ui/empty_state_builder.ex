@@ -1,6 +1,6 @@
 defmodule MingaEditor.RenderModel.UI.EmptyStateBuilder do
   @moduledoc """
-  Builds the launchpad render model from workspace state (#2689).
+  Builds the launchpad render model from workspace state (#2689), and the empty-state anatomy every empty list surface shows (`empty_list/4`).
 
   Pure over the `MingaEditor.State.Launchpad` snapshot: session and recents
   data were captured when the empty state was entered, so no filesystem or
@@ -12,6 +12,7 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilder do
   alias Minga.Keymap.Bindings
   alias Minga.Language.Devicon
   alias Minga.Language.Filetype
+  alias Minga.RenderModel.UI.EmptyList
   alias Minga.RenderModel.UI.EmptyState
   alias Minga.RenderModel.UI.EmptyState.Item
   alias Minga.RenderModel.UI.EmptyState.Section
@@ -25,6 +26,35 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilder do
     {"action-file-tree", "file tree", :toggle_file_tree},
     {"action-palette", "command palette", :command_palette}
   ]
+
+  @typedoc """
+  One next step of an empty list: the command it runs and its label, with the key that runs it when the surface's own scope binds a bare key. Without a key, the key is the command's leader sequence from the live keymap.
+  """
+  @type step :: {atom(), String.t()} | {atom(), String.t(), String.t()}
+
+  @doc """
+  Builds the empty-state anatomy a list surface shows when it is empty (`docs/design/surfaces.md`, "Empty states and notices with actions"): what happened, why, and the next steps, with the first preselected.
+
+  Each action's id is the command it runs, so a click sends it as the existing `execute_command` GUI action and needs no surface code. Options: `glyph:` (the state glyph before the title) and `selected:` (the preselected action, 0 by default).
+  """
+  @spec empty_list(String.t(), String.t(), [step()], keyword()) :: EmptyList.t()
+  def empty_list(title, why, steps, opts \\ [])
+      when is_binary(title) and is_binary(why) and is_list(steps) do
+    %EmptyList{
+      glyph: Keyword.get(opts, :glyph, ""),
+      title: title,
+      why: why,
+      actions: Enum.map(steps, &action/1),
+      selected: Keyword.get(opts, :selected, 0)
+    }
+  end
+
+  @spec action(step()) :: EmptyList.Action.t()
+  defp action({command, label}), do: action({command, label, Active.leader_key(command)})
+
+  defp action({command, label, key})
+       when is_atom(command) and is_binary(label) and is_binary(key),
+       do: %EmptyList.Action{id: Atom.to_string(command), key: key, label: label}
 
   @spec build(Context.t()) :: EmptyState.t()
   def build(%Context{workspace: %{launchpad: %Launchpad{} = lp}, windows: %Windows{} = windows}) do

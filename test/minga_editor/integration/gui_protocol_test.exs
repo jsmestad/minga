@@ -27,6 +27,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   alias Minga.RenderModel.UI.FileTree.Editing
   alias Minga.RenderModel.UI.FileTree.Flags
   alias Minga.RenderModel.UI.FileTree.Row
+  alias Minga.RenderModel.UI.EmptyList
   alias Minga.RenderModel.UI.Picker, as: PickerModel
   alias Minga.RenderModel.UI.TabBar
   alias Minga.RenderModel.UI.TabBar.Tab
@@ -1182,6 +1183,49 @@ defmodule Minga.Integration.GUIProtocolTest do
       # status_tone error is 3 (none 0, ready 1, warn 2, error 3, checking 4, neutral 5).
       assert model_row["status_tone"] == 3
       assert model_row["group"] == "Claude (subscription)"
+      refute Map.has_key?(decoded, "empty")
+      assert decoded["list_keys"] == false
+    end
+
+    test "round-trips the empty section of a picker that offers next steps", %{harness: harness} do
+      model = %PickerModel{
+        visible?: true,
+        title: "Switch project",
+        filtered_count: 1,
+        items: [
+          %{
+            icon_color: 0,
+            flags: 0,
+            label: "Add a folder",
+            description: "",
+            annotation: "SPC p a",
+            match_positions: [],
+            activation_id: 5,
+            status: "",
+            status_tone: :none,
+            group: ""
+          }
+        ],
+        empty: %EmptyList{title: "No projects yet.", why: "Minga remembers folders you open."},
+        list_keys?: true
+      }
+
+      cmd = PickerEncoder.encode_command(model)
+      picker_size = byte_size(cmd) - 2
+      assert <<picker::binary-size(^picker_size), _preview::binary>> = cmd
+
+      decoded = round_trip(harness, picker, "gui_picker")
+
+      assert decoded["empty"] == %{
+               "glyph" => "",
+               "title" => "No projects yet.",
+               "why" => "Minga remembers folders you open.",
+               "selected" => 0,
+               "actions" => []
+             }
+
+      assert decoded["list_keys"] == true
+      assert [%{"label" => "Add a folder", "annotation" => "SPC p a"}] = decoded["items"]
     end
   end
 

@@ -15,6 +15,7 @@ defmodule Minga.Test.Storyboard.Assertions do
   import ExUnit.Assertions
 
   alias Minga.Design.Tokens
+  alias Minga.RenderModel.UI.EmptyList
   alias Minga.Test.Storyboard.Model
   alias MingaEditor.UI.Theme
 
@@ -372,8 +373,21 @@ defmodule Minga.Test.Storyboard.Assertions do
     model
   end
 
-  @doc "The empty-state anatomy of the frame, or `nil` when none is shown."
+  @doc """
+  The empty-state anatomy of the frame, or `nil` when none is shown.
+
+  A picker that offers next steps shows the anatomy's title and why line in its `empty` header, and its next steps as result rows: each row's key is its annotation, and the selected row is the preselected action. The zero-buffers launchpad has sections and no why line.
+  """
   @spec empty_state(Model.t()) :: empty_state() | nil
+  def empty_state(%Model{ui: %{picker: %{visible?: true, empty: %EmptyList{} = empty} = picker}}) do
+    %{
+      title: empty.title,
+      description: empty.why,
+      actions: Enum.map(picker.items, &{&1.annotation, &1.label}),
+      selected: if(picker.items == [], do: nil, else: picker.selected_index)
+    }
+  end
+
   def empty_state(%Model{
         ui: %{empty_state: %{visible?: true, sections: [_ | _] = sections} = state}
       }) do

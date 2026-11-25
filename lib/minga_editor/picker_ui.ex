@@ -37,6 +37,7 @@ defmodule MingaEditor.PickerUI do
   alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.AgentRetainedOutputSource
   alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.Empty
   alias MingaEditor.UI.Picker.AgentModelSource
   alias MingaEditor.UI.Picker.DirectorySource
   alias MingaEditor.UI.Picker.FetchEffect
@@ -159,13 +160,12 @@ defmodule MingaEditor.PickerUI do
     ctx = Context.from_editor_state(state, context)
     items = Source.candidates(source_module, ctx, callback_source)
 
-    case items do
-      [] ->
-        state
-
-      _ ->
-        state = prepare_picker_open(state)
-        open_with_items(state, source_module, items, context, callback_source)
+    # A source with next steps opens even when empty, so the picker can say what to do; others stay closed.
+    if items == [] and not Source.offers_next_steps?(source_module) do
+      state
+    else
+      state = prepare_picker_open(state)
+      open_with_items(state, source_module, items, context, callback_source)
     end
   end
 
@@ -286,7 +286,7 @@ defmodule MingaEditor.PickerUI do
         picker_state = payload.picker_ui
 
         new_picker_state =
-          picker_state |> commit_fetch(items, candidates, meta) |> update_fallback_after_fetch()
+          picker_state |> commit_fetch(items, candidates, meta) |> offer_fallback_when_empty()
 
         new_state =
           state
@@ -438,6 +438,7 @@ defmodule MingaEditor.PickerUI do
       }
       |> PickerState.begin_query_session()
       |> PickerState.remember_origin_cursor(picker_restore_cursor(state))
+      |> offer_fallback_when_empty()
 
     MingaEditor.Shell.Traditional.ModalWorkflow.open(
       new_state,
@@ -472,7 +473,9 @@ defmodule MingaEditor.PickerUI do
         query
       )
       when is_binary(query) do
-    if PickerState.current_query_edit?(picker_state, generation, edit_seq) do
+    # A picker with nothing to filter takes no text, so a late native edit changes nothing.
+    if PickerState.current_query_edit?(picker_state, generation, edit_seq) and
+         not PickerState.list_keys?(picker_state) do
       replace_current_query(state, picker_state, query, edit_seq)
     else
       state
@@ -504,8 +507,13 @@ defmodule MingaEditor.PickerUI do
         } = state,
         text
       ) do
-    query = PickerState.mode_prefix(picker_state) <> picker.query <> text
-    replace_current_query(state, picker_state, query, edit_seq + 1)
+    # A picker with nothing to filter takes no text, pasted or typed.
+    if Picker.list_keys?(picker) do
+      state
+    else
+      query = PickerState.mode_prefix(picker_state) <> picker.query <> text
+      replace_current_query(state, picker_state, query, edit_seq + 1)
+    end
   end
 
   def append_query(state, _text), do: state
@@ -837,13 +845,17 @@ defmodule MingaEditor.PickerUI do
         codepoint,
         mods
       ) do
+    vim_state = if PickerState.list_keys?(picker_state), do: :normal, else: :insert
+
     case Keymap.resolve_scoped_key(
            :picker,
-           :insert,
+           vim_state,
            {codepoint, mods},
            picker_keymap_context(state, picker_state)
          ) do
       {:command, command} -> run_command(state, picker_state, command)
+      # A picker with nothing to filter takes no text.
+      _unbound when vim_state == :normal -> state
       _unbound -> edit_query(state, picker_state, codepoint, mods)
     end
   end
@@ -934,6 +946,9 @@ defmodule MingaEditor.PickerUI do
   defp run_command(state, %PickerState{extension: %ExtensionPicker{}}, :picker_complete),
     do: state
 
+  defp run_command(state, %PickerState{picker: %Picker{empty: %Empty{}}}, :picker_complete),
+    do: state
+
   defp run_command(
          state,
          %PickerState{picker: %Picker{} = picker, source: source},
@@ -971,8 +986,14 @@ defmodule MingaEditor.PickerUI do
          :picker_open_split
        ) do
     case Picker.selected_item(picker) do
-      nil -> state
-      item -> open_in_split(state, item, source, callback_source)
+      nil ->
+        state
+
+      %Item{id: {:next_step, _step}} = item ->
+        select_item(state, picker, item, source, callback_source)
+
+      item ->
+        open_in_split(state, item, source, callback_source)
     end
   end
 
@@ -1226,8 +1247,8 @@ defmodule MingaEditor.PickerUI do
     end
   end
 
-  @spec update_fallback_after_fetch(PickerState.t()) :: PickerState.t()
-  defp update_fallback_after_fetch(%PickerState{picker: picker} = state) do
+  @spec offer_fallback_when_empty(PickerState.t()) :: PickerState.t()
+  defp offer_fallback_when_empty(%PickerState{picker: picker} = state) do
     case picker_fallback(state, picker) do
       ^picker -> state
       updated -> PickerState.update_picker(state, updated)
@@ -1243,6 +1264,19 @@ defmodule MingaEditor.PickerUI do
        when query != "" do
     item = PublicSource.fallback(state.callback_source, state.source, query, args)
     Picker.offer_fallback(picker, item)
+  end
+
+  defp picker_fallback(
+         %PickerState{extension: nil, load_status: :ready, source: source} = state,
+         %Picker{filtered: []} = picker
+       )
+       when is_atom(source) and not is_nil(source) do
+    request = %{query: picker.query, total: length(picker.items), context: state.context}
+
+    case Source.empty(source, request, state.callback_source) do
+      nil -> picker
+      empty -> Picker.offer_empty(picker, empty)
+    end
   end
 
   defp picker_fallback(_state, picker), do: picker
@@ -1319,6 +1353,10 @@ defmodule MingaEditor.PickerUI do
         PublicSource.actions(owner, source, public_item, args)
 
       {%PickerState{extension: %ExtensionPicker{}}, _item} ->
+        []
+
+      # A next-step row is an action already; it has no act menu.
+      {%PickerState{}, %Item{id: {:next_step, _step}}} ->
         []
 
       {%PickerState{}, _item} ->
@@ -2064,7 +2102,9 @@ defmodule MingaEditor.PickerUI do
            }
          } = state
        ) do
-    if Picker.Source.live_preview?(source, callback_source) do
+    # Next-step rows are actions, so moving onto one never runs it.
+    if Picker.Source.live_preview?(source, callback_source) and
+         not Picker.offering_next_steps?(picker) do
       case Picker.selected_item(picker) do
         nil ->
           state

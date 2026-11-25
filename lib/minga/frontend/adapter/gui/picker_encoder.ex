@@ -5,6 +5,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
   alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Encode
   alias Minga.Protocol.Opcodes
+  alias Minga.RenderModel.UI.EmptyList
   alias Minga.RenderModel.UI.Picker
   alias Minga.RenderModel.UI.Picker.ActionMenu
 
@@ -17,6 +18,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
   @section_picker_action_menu 0x04
   @section_picker_mode_prefix 0x05
   @section_picker_load_status 0x06
+  @section_picker_empty 0x07
 
   @spec encode(Picker.t(), Caches.t()) :: {binary() | nil, Caches.t()}
   def encode(%Picker{} = model, %Caches{} = caches) do
@@ -69,7 +71,9 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
         model.has_preview?,
         model.items,
         action_menu_structure(model.action_menu),
-        model.load_status
+        model.load_status,
+        model.empty,
+        model.list_keys?
       })
 
     selection = {model.selected_item_id, model.selected_action_id}
@@ -109,7 +113,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
     :gui_picker
     |> Writer.new()
     |> Writer.append(<<@op_gui_picker>>)
-    |> Writer.uint8(:section_count, 6)
+    |> Writer.uint8(:section_count, if(model.empty, do: 7, else: 6))
     |> Writer.section16(
       :picker_header,
       @section_picker_header,
@@ -144,7 +148,34 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
       @section_picker_load_status,
       Encode.encode_gui_picker_load_status(to_wire_load_status(model.load_status))
     )
+    |> encode_empty_section(model)
     |> Writer.finish()
+  end
+
+  @spec encode_empty_section(Writer.t(), Picker.t()) :: Writer.t()
+  defp encode_empty_section(writer, %Picker{empty: nil}), do: writer
+
+  defp encode_empty_section(writer, %Picker{empty: %EmptyList{} = empty} = model) do
+    Writer.section16(
+      writer,
+      :picker_empty,
+      @section_picker_empty,
+      Encode.encode_gui_picker_empty(%{
+        empty: to_wire_empty_list(empty),
+        list_keys: if(model.list_keys?, do: 1, else: 0)
+      })
+    )
+  end
+
+  @spec to_wire_empty_list(EmptyList.t()) :: map()
+  defp to_wire_empty_list(%EmptyList{} = empty) do
+    %{
+      glyph: empty.glyph,
+      title: empty.title,
+      why: empty.why,
+      selected: empty.selected,
+      actions: Enum.map(empty.actions, &%{id: &1.id, key: &1.key, label: &1.label})
+    }
   end
 
   @spec to_wire_header(Picker.t()) :: map()

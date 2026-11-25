@@ -11,7 +11,9 @@ defmodule Minga.Storyboard.AssertionsTest do
 
   alias Minga.Design.Tokens
   alias Minga.RenderModel.UI
+  alias Minga.RenderModel.UI.EmptyList
   alias Minga.RenderModel.UI.EmptyState
+  alias Minga.RenderModel.UI.Picker
   alias Minga.RenderModel.UI.FocusOwner
   alias Minga.RenderModel.UI.Notifications
   alias Minga.RenderModel.UI.StatusBar
@@ -50,6 +52,7 @@ defmodule Minga.Storyboard.AssertionsTest do
         window_id: 1
       },
       empty_state: Keyword.get(opts, :empty_state),
+      picker: Keyword.get(opts, :picker),
       notifications: Keyword.get(opts, :notifications)
     }
 
@@ -251,6 +254,34 @@ defmodule Minga.Storyboard.AssertionsTest do
       end
 
       assert_raise ExUnit.AssertionError, fn -> assert_empty_state(model(), []) end
+    end
+
+    test "a picker shows the anatomy as its empty header and its next steps as rows" do
+      row = fn label, key -> %{label: label, annotation: key} end
+
+      picker = fn selected ->
+        %Picker{
+          visible?: true,
+          title: "Switch project",
+          selected_index: selected,
+          items: [row.("Add a folder", "SPC p a"), row.("Open a file", "SPC f f")],
+          empty: %EmptyList{title: "No projects yet.", why: "Minga remembers folders you open."}
+        }
+      end
+
+      assert_empty_state(model(picker: picker.(0)),
+        title: "No projects yet.",
+        description: "Minga remembers folders you open.",
+        actions: [{"SPC p a", "Add a folder"}, {"SPC f f", "Open a file"}]
+      )
+
+      assert_raise ExUnit.AssertionError, ~r/preselected/, fn ->
+        assert_empty_state(model(picker: picker.(1)), [])
+      end
+
+      assert_raise ExUnit.AssertionError, ~r/description/, fn ->
+        assert_empty_state(model(picker: picker.(0)), description: "")
+      end
     end
 
     test "an error notice must name a next step" do

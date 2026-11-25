@@ -1,6 +1,7 @@
 defmodule MingaEditor.RenderModel.UI.EmptyStateBuilderTest do
   use ExUnit.Case, async: true
 
+  alias Minga.RenderModel.UI.EmptyList
   alias Minga.RenderModel.UI.EmptyState
   alias MingaEditor.RenderModel.UI.EmptyStateBuilder
   alias MingaEditor.Frontend.Emit.Context
@@ -104,5 +105,45 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilderTest do
 
     assert chords["action-find-file"] == "SPC f f"
     assert chords["action-palette"] == "SPC :"
+  end
+
+  describe "empty_list/4" do
+    test "builds the anatomy with each action's key from the live keymap and its command as the id" do
+      list =
+        EmptyStateBuilder.empty_list(
+          "No projects yet.",
+          "Minga remembers folders you open.",
+          [{:project_add, "Add a folder"}, {:find_file, "Open a file"}]
+        )
+
+      assert %EmptyList{
+               glyph: "",
+               title: "No projects yet.",
+               why: "Minga remembers folders you open.",
+               selected: 0,
+               actions: [
+                 %EmptyList.Action{id: "project_add", key: "SPC p a", label: "Add a folder"},
+                 %EmptyList.Action{id: "find_file", key: "SPC f f", label: "Open a file"}
+               ]
+             } = list
+    end
+
+    test "a surface's own bare key, a glyph and a preselected action are kept as given" do
+      list =
+        EmptyStateBuilder.empty_list(
+          "Nothing to commit on main.",
+          "Up to date.",
+          [
+            {:git_log, "Show log", "l"},
+            {:project_add, "Add a folder"}
+          ],
+          glyph: "●",
+          selected: 1
+        )
+
+      assert list.glyph == "●"
+      assert list.selected == 1
+      assert [%{id: "git_log", key: "l"}, %{key: "SPC p a"}] = list.actions
+    end
   end
 end

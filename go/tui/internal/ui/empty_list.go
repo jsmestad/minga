@@ -1,0 +1,83 @@
+package ui
+
+import (
+	"image/color"
+	"strings"
+
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/jsmestad/minga/go/tui/internal/generated"
+)
+
+// emptyListColors are the colour roles of the panel an empty list sits in.
+type emptyListColors struct {
+	surface       color.Color
+	text          color.Color
+	muted         color.Color
+	accent        color.Color
+	selection     color.Color
+	selectionText color.Color
+}
+
+// emptyListHeader draws what happened and why (docs/design/anatomy.md, "Empty state"): the panel inset row, the title with its glyph, the why line, and the gap before the action list. The BEAM writes the copy; this only lays it out.
+func emptyListHeader(empty generated.EmptyList, width int, colors emptyListColors, p palette) []string {
+	base := lipgloss.NewStyle().Background(colors.surface).ColorWhitespace(true)
+	inset := gap(emptyStateInset)
+	room := max(width-len(inset), 1)
+	lines := make([]string, 0, 5)
+
+	blank := base.Width(width).Render("")
+	for range emptyStateInset.rows() {
+		lines = append(lines, blank)
+	}
+
+	title := empty.Title
+	if empty.Glyph != "" {
+		title = empty.Glyph + gap(emptyStateGlyphToTitle) + title
+	}
+	titleStyle := emptyStateTitleText.style(p).Inherit(base).Foreground(colors.text)
+	lines = append(lines, base.Width(width).Render(inset+titleStyle.Render(ansi.Truncate(title, room, "…"))))
+	for range emptyStateTitleToWhy.rows() {
+		lines = append(lines, blank)
+	}
+
+	if strings.TrimSpace(empty.Why) != "" {
+		whyStyle := base.Foreground(colors.muted)
+		lines = append(lines, base.Width(width).Render(inset+whyStyle.Render(ansi.Truncate(empty.Why, room, "…"))))
+	}
+	for range emptyStateWhyToActions.rows() {
+		lines = append(lines, blank)
+	}
+	return lines
+}
+
+// emptyListActions draws the action list: a fixed key column in the accent colour, then the label. The selected row is a full-width selection bar whose key is a reverse-video chip.
+func emptyListActions(empty generated.EmptyList, width int, colors emptyListColors) []string {
+	keyWidth := 0
+	for _, action := range empty.Actions {
+		keyWidth = max(keyWidth, ansi.StringWidth(action.Key))
+	}
+	column := keyWidth + emptyStateKeyColumnGap.cols()
+	inset := gap(emptyStateInset)
+
+	lines := make([]string, 0, len(empty.Actions))
+	for index, action := range empty.Actions {
+		selected := index == int(empty.Selected)
+		background := colors.surface
+		labelColor := colors.text
+		if selected {
+			background = colors.selection
+			labelColor = colors.selectionText
+		}
+		row := lipgloss.NewStyle().Background(background).ColorWhitespace(true)
+		key := row.Foreground(colors.accent).Render(action.Key)
+		if selected {
+			key = row.Foreground(colors.surface).Background(colors.accent).Render(action.Key)
+		}
+		padding := row.Render(strings.Repeat(" ", max(column-ansi.StringWidth(action.Key), 1)))
+		room := max(width-len(inset)-column, 1)
+		label := row.Foreground(labelColor).Render(ansi.Truncate(action.Label, room, "…"))
+		lines = append(lines, row.Width(width).Render(row.Render(inset)+key+padding+label))
+	}
+	return lines
+}

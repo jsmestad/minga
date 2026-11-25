@@ -143,6 +143,10 @@ type Picker struct {
 	ActionIndex         byte
 	ActionVisible       bool
 	Items               []PickerItem
+	// Empty is set while the picker offers its source's next steps instead of results: the header says what happened and why, and Items are the next-step rows.
+	Empty *generated.EmptyList
+	// ListKeys is true while the picker has nothing to filter: it takes no text, and j and k move, q closes.
+	ListKeys bool
 }
 
 type PickerItem struct {

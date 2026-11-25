@@ -69,6 +69,23 @@ defmodule Minga.Keymap.ActiveTest do
     end
   end
 
+  describe "leader_key/2" do
+    test "teaches a command by its mnemonic sequence, not a symbol alias", %{store: s} do
+      # SPC s p and SPC / both search the project; the design teaches the letters.
+      assert Active.leader_key(:search_project, s) == "SPC s p"
+      assert Active.leader_key(:project_add, s) == "SPC p a"
+    end
+
+    test "follows a user override and is empty for a command no leader key runs", %{store: s} do
+      :ok = Active.bind(s, :normal, "SPC z z", :empty_state_probe, "Probe")
+      assert Active.leader_key(:empty_state_probe, s) == "SPC z z"
+      assert Active.leader_key(:no_such_command_bound, s) == ""
+
+      :ok = Active.unbind(s, :normal, "SPC z z")
+      assert Active.leader_key(:empty_state_probe, s) == ""
+    end
+  end
+
   describe "normal_bindings/1" do
     test "returns defaults when no overrides", %{store: s} do
       bindings = Active.normal_bindings(s)

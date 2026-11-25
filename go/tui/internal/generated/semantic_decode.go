@@ -732,6 +732,69 @@ func DecodePickerItem(data []byte, offset int, windowEnd int) (PickerItem, int, 
 	}, pos, nil
 }
 
+func DecodeEmptyListAction(data []byte, offset int, windowEnd int) (EmptyListAction, int, error) {
+	pos := offset
+	id, pos, err := decodeString8Window(data, pos, windowEnd)
+	if err != nil {
+		return EmptyListAction{}, offset, err
+	}
+	key, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return EmptyListAction{}, offset, err
+	}
+	label, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return EmptyListAction{}, offset, err
+	}
+	return EmptyListAction{
+		ID:    id,
+		Key:   key,
+		Label: label,
+	}, pos, nil
+}
+
+func DecodeEmptyList(data []byte, offset int, windowEnd int) (EmptyList, int, error) {
+	pos := offset
+	glyph, pos, err := decodeString8Window(data, pos, windowEnd)
+	if err != nil {
+		return EmptyList{}, offset, err
+	}
+	title, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return EmptyList{}, offset, err
+	}
+	why, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return EmptyList{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "selected"); err != nil {
+		return EmptyList{}, offset, err
+	}
+	selected := data[pos]
+	pos++
+	if err := decodeRequireWindow(windowEnd, pos+1, "actions count"); err != nil {
+		return EmptyList{}, offset, err
+	}
+	actionsCount := int(data[pos])
+	pos += 1
+	actions := make([]EmptyListAction, 0, min(actionsCount, len(data)-pos))
+	for i := 0; i < actionsCount; i++ {
+		item, nextPos, err := DecodeEmptyListAction(data, pos, windowEnd)
+		if err != nil {
+			return EmptyList{}, offset, err
+		}
+		pos = nextPos
+		actions = append(actions, item)
+	}
+	return EmptyList{
+		Glyph:    glyph,
+		Title:    title,
+		Why:      why,
+		Selected: selected,
+		Actions:  actions,
+	}, pos, nil
+}
+
 func DecodeWhichKeyBinding(data []byte, offset int, windowEnd int) (WhichKeyBinding, int, error) {
 	pos := offset
 	if err := decodeRequireWindow(windowEnd, pos+1, "kind"); err != nil {
@@ -1338,6 +1401,23 @@ func DecodeGuiPickerLoadStatus(data []byte, offset int, windowEnd int) (GuiPicke
 	return GuiPickerLoadStatus{
 		Status:  status,
 		Message: message,
+	}, pos, nil
+}
+
+func DecodeGuiPickerEmpty(data []byte, offset int, windowEnd int) (GuiPickerEmpty, int, error) {
+	pos := offset
+	empty, pos, err := DecodeEmptyList(data, pos, windowEnd)
+	if err != nil {
+		return GuiPickerEmpty{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "list_keys"); err != nil {
+		return GuiPickerEmpty{}, offset, err
+	}
+	listKeys := data[pos]
+	pos++
+	return GuiPickerEmpty{
+		Empty:    empty,
+		ListKeys: listKeys,
 	}, pos, nil
 }
 

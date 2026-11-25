@@ -1,7 +1,11 @@
 defmodule Minga.Test.Storyboard.Scenarios.Start do
   @moduledoc "Registry entries for the `start` journey: launch, opening a project, quitting."
 
+  import Minga.Test.Storyboard.Assertions
+
+  alias Minga.Test.Storyboard.Check
   alias Minga.Test.Storyboard.Entry
+  alias Minga.Test.Storyboard.Model
 
   @doc "Every `start` entry."
   @spec entries() :: [Entry.t()]
@@ -28,7 +32,22 @@ defmodule Minga.Test.Storyboard.Scenarios.Start do
         4057,
         "a directory without markers opens as its own root"
       ),
-      Entry.pending("start.project_switcher.empty", 4058, "empty lists point somewhere"),
+      Entry.built("start.project_switcher.empty",
+        reach: "SPC p p",
+        recognize: &Model.empty_picker?(&1, ~r/switch project/i, ~r/^No projects yet/),
+        checks: [
+          Check.new(
+            "no known projects says how Minga learns them and offers the next steps",
+            fn model ->
+              assert_empty_state(model,
+                title: "No projects yet.",
+                description: "Minga remembers folders you open.",
+                actions: [{"SPC p a", "Add a folder"}, {"SPC f f", "Open a file"}]
+              )
+            end
+          )
+        ]
+      ),
       Entry.pending(
         "start.quit.confirm",
         4056,

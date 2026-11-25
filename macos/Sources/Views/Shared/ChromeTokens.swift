@@ -69,3 +69,16 @@ public enum Radius {
     /// 12pt: large cards and prompt capsules.
     public static let xl: CGFloat = 12
 }
+
+/// Empty state: every empty list and every notice with actions (docs/design/anatomy.md, "Empty state").
+public enum EmptyStateMetrics {
+    /// Inset from the panel edge, and the leading edge the title, why line and action keys share.
+    public static let inset = Spacing.panel
+    public static let glyphToTitle = Spacing.sm
+    public static let titleToWhy = Spacing.xs
+    public static let whyToActions = Spacing.xxl
+    /// Row pitch of an action: every clickable row is at least 24pt tall.
+    public static let actionPitch: CGFloat = 24
+    /// The key column is as wide as the widest key plus this gap.
+    public static let keyColumnGap = Spacing.lg
+}

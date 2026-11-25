@@ -3,6 +3,7 @@ defmodule Minga.RenderModel.UI.Picker do
   Semantic picker model for GUI adapters.
   """
 
+  alias Minga.RenderModel.UI.EmptyList
   alias Minga.RenderModel.UI.Picker.ActionMenu
 
   @type load_status :: :ready | :loading | {:error, String.t()}
@@ -31,6 +32,9 @@ defmodule Minga.RenderModel.UI.Picker do
           group: String.t()
         }
 
+  @typedoc """
+  The picker. `empty` is set when nothing matches and the source offers next steps: it holds the empty-state header, and `items` are the next-step rows, each with its key in `annotation`. `list_keys?` is true when there is nothing to filter, so the picker takes no text and its list keys apply.
+  """
   @type t :: %__MODULE__{
           visible?: boolean(),
           title: String.t(),
@@ -49,7 +53,9 @@ defmodule Minga.RenderModel.UI.Picker do
           action_menu: ActionMenu.t() | nil,
           mode_prefix: String.t(),
           load_status: load_status(),
-          preview_lines: [[preview_segment()]] | nil
+          preview_lines: [[preview_segment()]] | nil,
+          empty: EmptyList.t() | nil,
+          list_keys?: boolean()
         }
 
   defstruct visible?: false,
@@ -69,5 +75,7 @@ defmodule Minga.RenderModel.UI.Picker do
             action_menu: nil,
             mode_prefix: "",
             load_status: :ready,
-            preview_lines: nil
+            preview_lines: nil,
+            empty: nil,
+            list_keys?: false
 end
