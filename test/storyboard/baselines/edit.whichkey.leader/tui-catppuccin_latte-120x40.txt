@@ -29,7 +29,7 @@
       ~
       ~
       ~
-╭─ SPC Leader ─────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+╭ SPC Leader ──────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ Groups        Often                      More                                                                        │
 │ a Minga ›     SPC Find file in project   p   Project ›                                                               │
 │ s Search ›    ,   Switch buffer          TAB Workspace ›                                                             │
@@ -134,13 +134,13 @@
 22 6-119 #8c8fa1 #eff1f5 -
 23 0-5 #5c5f77 #eff1f5 -
 23 6-119 #8c8fa1 #eff1f5 -
-24 0-1 #7c7f93 #ccd0da -
-24 2-2 #4c4f69 #ccd0da -
-24 3-5 #1e66f5 #ccd0da -
-24 6-6 #4c4f69 #ccd0da -
-24 7-12 #4c4f69 #ccd0da bold
-24 13-13 #4c4f69 #ccd0da -
-24 14-119 #7c7f93 #ccd0da -
+24 0-0 #7c7f93 #ccd0da -
+24 1-1 #4c4f69 #ccd0da -
+24 2-4 #1e66f5 #ccd0da -
+24 5-5 #4c4f69 #ccd0da -
+24 6-11 #4c4f69 #ccd0da bold
+24 12-12 #4c4f69 #ccd0da -
+24 13-119 #7c7f93 #ccd0da -
 25 0-0 #7c7f93 #ccd0da -
 25 1-1 #4c4f69 #ccd0da -
 25 2-12 #5c5f77 #ccd0da -

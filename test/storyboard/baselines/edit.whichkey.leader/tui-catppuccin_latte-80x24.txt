@@ -13,7 +13,7 @@
    4    │ "Hello, " <> name
    5    end
    6  end
-╭─ SPC Leader ─────────────────────────────────────────────────────────────────╮
+╭ SPC Leader ──────────────────────────────────────────────────────────────────╮
 │ Groups        Often                      More                                │
 │ a Minga ›     SPC Find file in project   p   Project ›                       │
 │ s Search ›    ,   Switch buffer          TAB Workspace ›                     │
@@ -75,13 +75,13 @@
 7 0-5 #5c5f77 #eff1f5 -
 7 6-8 #8839ef #eff1f5 bold
 7 9-79 #4c4f69 #eff1f5 -
-8 0-1 #7c7f93 #ccd0da -
-8 2-2 #4c4f69 #ccd0da -
-8 3-5 #1e66f5 #ccd0da -
-8 6-6 #4c4f69 #ccd0da -
-8 7-12 #4c4f69 #ccd0da bold
-8 13-13 #4c4f69 #ccd0da -
-8 14-79 #7c7f93 #ccd0da -
+8 0-0 #7c7f93 #ccd0da -
+8 1-1 #4c4f69 #ccd0da -
+8 2-4 #1e66f5 #ccd0da -
+8 5-5 #4c4f69 #ccd0da -
+8 6-11 #4c4f69 #ccd0da bold
+8 12-12 #4c4f69 #ccd0da -
+8 13-79 #7c7f93 #ccd0da -
 9 0-0 #7c7f93 #ccd0da -
 9 1-1 #4c4f69 #ccd0da -
 9 2-12 #5c5f77 #ccd0da -

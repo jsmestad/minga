@@ -309,7 +309,8 @@ func (m Model) renderWhichKeyEntry(entry generated.WhichKeyEntry, column whichKe
 	return key + text
 }
 
-// whichKeyTopBorder draws the breadcrumb in the panel's top border: `╭─ SPC › a Minga · 1 needs you ─────╮`.
+// whichKeyTopBorder draws the breadcrumb in the panel's top border: `╭ SPC › a Minga · 1 needs you ─────╮`. The
+// breadcrumb starts in column 2, the panel's leading edge, where section names and keys start (anatomy rule 1).
 func (m Model) whichKeyTopBorder(which protocol.WhichKey, width int) string {
 	p := m.palette()
 	border := lipgloss.NewStyle().Foreground(p.PopupBorder()).Background(p.PopupSurface())
@@ -338,12 +339,12 @@ func (m Model) whichKeyTopBorder(which protocol.WhichKey, width int) string {
 		crumbs.WriteString(surface.Render(" ") + count.Render(which.Count))
 	}
 	title := surface.Render(" ") + crumbs.String() + surface.Render(" ")
-	room := max(width-4, 0)
+	room := max(width-3, 0)
 	if lipgloss.Width(title) > room {
 		title = ansi.Truncate(title, room, "…")
 	}
-	fill := max(width-3-lipgloss.Width(title), 0)
-	return border.Render("╭─") + title + border.Render(strings.Repeat("─", fill)+"╮")
+	fill := max(width-2-lipgloss.Width(title), 0)
+	return border.Render("╭") + title + border.Render(strings.Repeat("─", fill)+"╮")
 }
 
 // whichKeyBottomBorder draws the panel's own keys right-aligned in the bottom border: `╰──── ⌫ back  esc close ─╯`.

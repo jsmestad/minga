@@ -79,8 +79,12 @@ func TestWhichKeyPanelIsFullWidthAboveTheModelineWithoutAShadow(t *testing.T) {
 func TestWhichKeyBordersCarryTheBreadcrumbAndHints(t *testing.T) {
 	model := whichKeyModel(120, 40)
 	lines := strings.Split(ansi.Strip(model.renderFloatingWhichKey(whichKeyFixture())), "\n")
-	if top := lines[0]; !strings.HasPrefix(top, "╭─ SPC › a Minga · 1 needs you ─") || !strings.HasSuffix(top, "╮") {
+	if top := lines[0]; !strings.HasPrefix(top, "╭ SPC › a Minga · 1 needs you ─") || !strings.HasSuffix(top, "╮") {
 		t.Fatalf("top border should carry the breadcrumb and the group count: %q", top)
+	}
+	// One leading edge: the breadcrumb starts in the column where section names start.
+	if crumb, section := strings.Index(lines[0], "SPC"), strings.Index(lines[1], "Tasks"); len([]rune(lines[0][:crumb])) != len([]rune(lines[1][:section])) {
+		t.Fatalf("breadcrumb and section names should share a leading edge: %q / %q", lines[0], lines[1])
 	}
 	if bottom := lines[len(lines)-1]; !strings.HasSuffix(bottom, " ⌫ back  esc close ─╯") {
 		t.Fatalf("bottom border should carry the panel's keys: %q", bottom)

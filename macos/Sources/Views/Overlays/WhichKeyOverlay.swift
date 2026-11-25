@@ -50,13 +50,13 @@ public struct WhichKeyOverlay: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: Spacing.md) {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
             breadcrumb
             Spacer(minLength: Spacing.xl)
             // Hint to next hint is xl, as in drawer hints and the TUI's two columns (anatomy rule 6).
-            HStack(spacing: Spacing.xl) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.xl) {
                 ForEach(Array(state.hints.enumerated()), id: \.offset) { _, hint in
-                    HStack(spacing: Spacing.xs) {
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                         hintKey(hint.key)
                         Text(hint.label)
                             .font(Typography.font(.caption))
@@ -98,7 +98,7 @@ public struct WhichKeyOverlay: View {
     }
 
     private var breadcrumb: some View {
-        HStack(spacing: Spacing.xs) {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
             ForEach(Array(state.breadcrumb.enumerated()), id: \.offset) { index, crumb in
                 if index > 0 {
                     Text("›")
@@ -152,13 +152,13 @@ public struct WhichKeyOverlay: View {
     }
 
     private func entryRow(_ entry: Wire.WhichKeyEntry, keyWidth: CGFloat) -> some View {
-        HStack(spacing: 0) {
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
             Text(entry.key)
                 .font(Typography.monospacedSmall)
                 .foregroundStyle(theme.accent)
                 .anatomyPart("whichKey.entryKey", text: entry.key, font: .small, monospaced: true)
                 .frame(width: keyWidth, alignment: .leading)
-            HStack(spacing: Spacing.md) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
                 // Group rows arrive from the BEAM as Title Case labels with a trailing chevron ("Session ›") and draw
                 // in the group colour role (docs/design/keys.md); commands are plain text.
                 Text(entry.label)
@@ -182,6 +182,7 @@ public struct WhichKeyOverlay: View {
                 }
             }
         }
+        // Key, label, count and ⌘ key share one baseline (anatomy rule 3), not one vertical centre.
         .frame(height: Self.rowPitch)
         .anatomyPart("whichKey.entry", text: "\(entry.key) \(entry.label)")
     }

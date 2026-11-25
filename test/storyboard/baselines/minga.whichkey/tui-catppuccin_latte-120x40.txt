@@ -37,7 +37,7 @@
       ~
       ~
       ~
-╭─ SPC › a Minga · 1 needs you ────────────────────────────────────────────────────────────────────────────────────────╮
+╭ SPC › a Minga · 1 needs you ─────────────────────────────────────────────────────────────────────────────────────────╮
 │ Tasks                        Conversation           Changes                  More                                    │
 │ a Agent view · 1 needs you   v Conversation split   r Pending reviews        x Context ›                             │
 │ n New session                ? Ask about this       u Undo all agent edits   S Session ›                             │
@@ -150,17 +150,17 @@
 30 6-119 #8c8fa1 #eff1f5 -
 31 0-5 #5c5f77 #eff1f5 -
 31 6-119 #8c8fa1 #eff1f5 -
-32 0-1 #7c7f93 #ccd0da -
-32 2-2 #4c4f69 #ccd0da -
-32 3-5 #1e66f5 #ccd0da -
-32 6-8 #5c5f77 #ccd0da -
-32 9-9 #1e66f5 #ccd0da -
-32 10-10 #4c4f69 #ccd0da -
-32 11-15 #4c4f69 #ccd0da bold
-32 16-16 #4c4f69 #ccd0da -
-32 17-29 #d35400 #ccd0da -
-32 30-30 #4c4f69 #ccd0da -
-32 31-119 #7c7f93 #ccd0da -
+32 0-0 #7c7f93 #ccd0da -
+32 1-1 #4c4f69 #ccd0da -
+32 2-4 #1e66f5 #ccd0da -
+32 5-7 #5c5f77 #ccd0da -
+32 8-8 #1e66f5 #ccd0da -
+32 9-9 #4c4f69 #ccd0da -
+32 10-14 #4c4f69 #ccd0da bold
+32 15-15 #4c4f69 #ccd0da -
+32 16-28 #d35400 #ccd0da -
+32 29-29 #4c4f69 #ccd0da -
+32 30-119 #7c7f93 #ccd0da -
 33 0-0 #7c7f93 #ccd0da -
 33 1-1 #4c4f69 #ccd0da -
 33 2-27 #5c5f77 #ccd0da -
