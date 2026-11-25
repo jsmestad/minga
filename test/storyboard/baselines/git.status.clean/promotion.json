@@ -18,23 +18,19 @@
       "macos-catppuccin_latte-1440.json": "b1a6247d6ccbd5bfeaff97504d0c0f18f721c52809fdc24c7ef5ef6a90a32270"
     }
   },
-  "platform_specific": {
-    "frontend": "tui",
-    "reason": "the scenario now opens its file from the project home, so the TUI frame is drawn before the parser's fold ranges arrive and shows no fold marks; macOS draws no fold marks in either frame"
-  },
   "scenario": "git.status.clean",
   "tui": {
-    "commit": "dddc29e8cff1538ce3490d400103180d32e73f51-dirty",
+    "commit": "1aef18e78943df542633b1e8e28b6da4977aaf23-dirty",
     "files": {
-      "tui-astrodark-120x40.txt": "4644b8a2b8ed4e59f27872c3a04332098ab14cbae9e4fb7bbd3ee4961964a0e6",
-      "tui-astrodark-150x38.txt": "bd0ee7d1f43e806cade5dd5ca0998800a2ccfb790746c7ddeccae4c4b6c34465",
-      "tui-astrodark-80x24.txt": "32673d12be1977f071e4d57c6668709c1249add0c7f3427c4ee9d725d4b56492",
-      "tui-catppuccin_frappe-120x40.txt": "dd1dce14b36835b6c9d67b101903b4a74481ed5c23d7c55a3aa3c9e4ceffbffd",
-      "tui-catppuccin_frappe-150x38.txt": "6ae41f2ba8a7c6b4622aea3b4ee6de40016efc802efc5c6541de92b9862aa0e6",
-      "tui-catppuccin_frappe-80x24.txt": "2dbf748960c9b0dee3192e4b359399dd5730513621b21b8c5a5dbb941878d303",
-      "tui-catppuccin_latte-120x40.txt": "ffa9d2a64577a5e0fb4bd6d26f24d2eaa2727caa051401afc8dde8f6acdb9b3d",
-      "tui-catppuccin_latte-150x38.txt": "98326bc7a6876314849f61c22555fe0df244ac8012f5712e27e2de4364eec24e",
-      "tui-catppuccin_latte-80x24.txt": "20cab1e8c71f903333b998d310bc2486e7710932f1433b7da99d008e50e8341d"
+      "tui-astrodark-120x40.txt": "f1fac6313282d0534472d04331676ebf8e8851908d55a2a7ee6307da746cfffd",
+      "tui-astrodark-150x38.txt": "d429cae196440f0070e412e8f4f221aaa65f1c5f0451e2bc803e53bb37aec48c",
+      "tui-astrodark-80x24.txt": "66ac70859a6caa25355d1f56a3e3071e60fbfcf1f61470f000c2b0c3cfacfebf",
+      "tui-catppuccin_frappe-120x40.txt": "4adea322e948d1466ef24f95f01d4d415dd8b7258ac16369036df77709ace231",
+      "tui-catppuccin_frappe-150x38.txt": "e94d2a79d727450d5eaa51ffd879a2aa3396386e8a701e427ef19146e7b15fcb",
+      "tui-catppuccin_frappe-80x24.txt": "7bab80fbd456aa9ea2ea43cc1072bce09e4d2768fe07fa7ad2fff97980690224",
+      "tui-catppuccin_latte-120x40.txt": "3c6ec64d3f272b3f758348cb2d67753fbffd897a040ab10cb6c152d9e7a8950b",
+      "tui-catppuccin_latte-150x38.txt": "1c874685af98eec46ef61a3012db9fc098d28354738d055228a57c7cdb40cde7",
+      "tui-catppuccin_latte-80x24.txt": "acd31819c955630fdcacb0128e1b43d3111c8738d81adbc2386e3112b4975834"
     }
   }
 }
