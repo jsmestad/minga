@@ -8,6 +8,8 @@ defmodule MingaEditor.State.AgentConnection do
 
   `transcript_sync` is the one transcript read the Editor has out to its active local Session (`MingaEditor.Agent.TranscriptSync`).
 
+  `turn_requests` holds each composer send and stop the Editor has out to a Session (`MingaEditor.Agent.TurnRequest`).
+
   `arrival_budget_ms` is the time a local Agent tab arrival waits for its Session before it shows the tab as unavailable (`MingaEditor.Agent.Arrival`).
   """
 
@@ -17,6 +19,7 @@ defmodule MingaEditor.State.AgentConnection do
   alias MingaEditor.Agent.SessionStart
   alias MingaEditor.Agent.Tasks
   alias MingaEditor.Agent.TranscriptSync
+  alias MingaEditor.Agent.TurnRequest
   alias MingaEditor.State.RouteUsage
 
   @default_arrival_budget_ms 250
@@ -32,6 +35,7 @@ defmodule MingaEditor.State.AgentConnection do
           session_manager: GenServer.server(),
           session_starts: %{reference() => SessionStart.t()},
           session_follow_ups: %{reference() => SessionFollowUp.t()},
+          turn_requests: %{reference() => TurnRequest.t()},
           route_usage: RouteUsage.t(),
           tasks: Tasks.t()
         }
@@ -47,6 +51,7 @@ defmodule MingaEditor.State.AgentConnection do
             session_manager: MingaAgent.SessionManager,
             session_starts: %{},
             session_follow_ups: %{},
+            turn_requests: %{},
             route_usage: %RouteUsage{},
             tasks: %Tasks{}
 
@@ -121,6 +126,16 @@ defmodule MingaEditor.State.AgentConnection do
   @spec finish_session_follow_up(t(), reference()) :: t()
   def finish_session_follow_up(%__MODULE__{} = connection, token) when is_reference(token),
     do: %{connection | session_follow_ups: Map.delete(connection.session_follow_ups, token)}
+
+  @doc "Keeps a composer send or a stop the Editor sent to a Session and has not seen answered."
+  @spec track_turn_request(t(), TurnRequest.t()) :: t()
+  def track_turn_request(%__MODULE__{} = connection, %TurnRequest{token: token} = request),
+    do: %{connection | turn_requests: Map.put(connection.turn_requests, token, request)}
+
+  @doc "Forgets an answered send or stop."
+  @spec finish_turn_request(t(), reference()) :: t()
+  def finish_turn_request(%__MODULE__{} = connection, token) when is_reference(token),
+    do: %{connection | turn_requests: Map.delete(connection.turn_requests, token)}
 
   @doc "Records a contributed route's reported status for the modeline."
   @spec record_route_status(t(), StatusChangedEvent.t()) :: t()
