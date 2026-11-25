@@ -284,6 +284,60 @@ defmodule MingaEditor.Frontend.ManagerTest do
       assert_receive {:minga_input, {:request_keyframe, 42, 7}}
     end
 
+    test "what a frontend said about itself reaches a subscriber that registers late, after its ready" do
+      name = unique_name()
+      pid = start_manager(name)
+
+      # The frontend is ready, says it is in the background and reports its terminal before anyone listens.
+      send_port_data(pid, nil, ready_packet(80, 24))
+      send_port_data(pid, nil, <<0x13, 0>>)
+      # true_color (1) detected (2)
+      send_port_data(pid, nil, <<0x62, 3::16, 1, 1, 2>>)
+      assert Manager.ready?(name)
+
+      :ok = Manager.subscribe(name)
+
+      # They arrive in the frontend's order: ready first, because ready resets what the editor knew.
+      assert_receive {:minga_input, first}
+      assert_receive {:minga_input, second}
+      assert_receive {:minga_input, third}
+
+      assert first == {:ready, 80, 24}
+      assert second == {:frontend_foreground, :background}
+      assert {:terminal_report, report} = third
+      assert report.features == %{true_color: :detected}
+    end
+
+    test "a new ready forgets what the last connection said about itself" do
+      name = unique_name()
+      pid = start_manager(name)
+
+      send_port_data(pid, nil, ready_packet(80, 24))
+      send_port_data(pid, nil, <<0x13, 0>>)
+      send_port_data(pid, nil, <<0x62, 3::16, 1, 1, 2>>)
+      send_port_data(pid, nil, ready_packet(100, 30))
+      assert Manager.terminal_size(name) == {100, 30}
+
+      :ok = Manager.subscribe(name)
+
+      assert_receive {:minga_input, {:ready, 100, 30}}
+      refute_receive {:minga_input, {:frontend_foreground, _status}}, 50
+      refute_receive {:minga_input, {:terminal_report, _report}}, 50
+    end
+
+    test "a frontend that said nothing about itself replays only its ready" do
+      name = unique_name()
+      pid = start_manager(name)
+      send_port_data(pid, nil, ready_packet(80, 24))
+      assert Manager.ready?(name)
+
+      :ok = Manager.subscribe(name)
+
+      assert_receive {:minga_input, {:ready, 80, 24}}
+      refute_receive {:minga_input, {:frontend_foreground, _status}}, 50
+      refute_receive {:minga_input, {:terminal_report, _report}}, 50
+    end
+
     test "duplicate subscriptions receive one copy of each event" do
       name = unique_name()
       pid = start_manager(name)

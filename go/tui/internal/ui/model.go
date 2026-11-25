@@ -302,11 +302,13 @@ func (m *Model) observeTerminal(msg tea.Msg) {
 	case tea.ColorProfileMsg:
 		m.capabilities.Resolve(generated.TerminalFeatureTrueColor, msg.Profile == colorprofile.TrueColor)
 	case tea.ModeReportMsg:
+		// A mode the terminal knows but has permanently off cannot be used, so it counts as absent.
+		usable := !msg.Value.IsNotRecognized() && !msg.Value.IsPermanentlyReset()
 		switch msg.Mode {
 		case ansi.ModeFocusEvent:
-			m.capabilities.Resolve(generated.TerminalFeatureFocusReporting, !msg.Value.IsNotRecognized())
+			m.capabilities.Resolve(generated.TerminalFeatureFocusReporting, usable)
 		case ansi.ModeSynchronizedOutput:
-			m.capabilities.Resolve(generated.TerminalFeatureSynchronizedOutput, !msg.Value.IsNotRecognized())
+			m.capabilities.Resolve(generated.TerminalFeatureSynchronizedOutput, usable)
 		}
 	case capabilityTimeoutMsg:
 		m.capabilities.Expire()

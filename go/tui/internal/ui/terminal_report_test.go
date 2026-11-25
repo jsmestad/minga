@@ -88,6 +88,8 @@ var terminalAnswers = []struct {
 	{"focus reporting is a mode the terminal does not know", tea.ModeReportMsg{Mode: ansi.ModeFocusEvent, Value: ansi.ModeNotRecognized}, generated.TerminalFeatureFocusReporting, generated.TerminalFeatureStatusMissing},
 	{"synchronized output is a mode the terminal knows", tea.ModeReportMsg{Mode: ansi.ModeSynchronizedOutput, Value: ansi.ModeSet}, generated.TerminalFeatureSynchronizedOutput, generated.TerminalFeatureStatusDetected},
 	{"synchronized output is a mode the terminal does not know", tea.ModeReportMsg{Mode: ansi.ModeSynchronizedOutput, Value: ansi.ModeNotRecognized}, generated.TerminalFeatureSynchronizedOutput, generated.TerminalFeatureStatusMissing},
+	{"synchronized output is permanently off: it cannot be used", tea.ModeReportMsg{Mode: ansi.ModeSynchronizedOutput, Value: ansi.ModePermanentlyReset}, generated.TerminalFeatureSynchronizedOutput, generated.TerminalFeatureStatusMissing},
+	{"focus reporting is permanently off: it cannot be used", tea.ModeReportMsg{Mode: ansi.ModeFocusEvent, Value: ansi.ModePermanentlyReset}, generated.TerminalFeatureFocusReporting, generated.TerminalFeatureStatusMissing},
 }
 
 func TestATerminalAnswerSettlesItsFeatureAndWaitsForTheOthers(t *testing.T) {
