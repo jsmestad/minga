@@ -173,12 +173,28 @@ defmodule MingaEditor.Input.Router do
     old_mode = Editing.mode(state)
     was_inserting = Editing.inserting?(state)
     record? = not MingaEditor.PromptUI.sensitive_input?(state)
+    # A key that walks a which-key leader types nothing, so it must not arm completion.
+    walked_leader? = which_key_leader_open?(state)
 
     state
     |> dispatch_split(codepoint, modifiers)
     |> record_keystroke(codepoint, modifiers, old_mode, record?)
-    |> maybe_handle_completion(was_inserting, codepoint, modifiers)
+    |> then(fn state ->
+      if walked_leader?,
+        do: state,
+        else: maybe_handle_completion(state, was_inserting, codepoint, modifiers)
+    end)
   end
+
+  @spec which_key_leader_open?(EditorState.t()) :: boolean()
+  defp which_key_leader_open?(%{
+         shell_runtime: %{
+           state: %{whichkey: %MingaEditor.State.WhichKey{node: node, owner: :leader}}
+         }
+       }),
+       do: node != nil
+
+  defp which_key_leader_open?(_state), do: false
 
   @spec dispatch_split(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   defp dispatch_split(%EditorState{} = state, codepoint, modifiers) do

@@ -243,6 +243,50 @@ defmodule MingaEditor.Input.WhichKeyMouseTest do
     assert buffer_content(ctx) == "hello"
   end
 
+  test "with completion still waiting on its source, the mode pill closes it and opens the leader" do
+    ctx = start_editor("hello")
+    send_keys_sync(ctx, "A")
+
+    # A completion waiting on its source is the completion modal with no items yet.
+    payload = MingaEditor.State.ModalOverlay.Completion.new(1, completion: nil)
+
+    :sys.replace_state(
+      ctx.editor,
+      &MingaEditor.Shell.Traditional.ModalWorkflow.open(&1, {:completion, payload})
+    )
+
+    send_gui_action(ctx, {:execute_command, "which_key_open"})
+
+    assert Runtime.state(editor_state(ctx).shell_runtime).modal == :none
+    assert shown_path(ctx) == "SPC"
+  end
+
+  test "a macro that cancelled an operator with the mode pill replays the cancel" do
+    ctx = start_editor("one\ntwo\nthree")
+    send_keys_sync(ctx, "qad")
+    send_gui_action(ctx, {:execute_command, "which_key_open"})
+    send_keys_sync(ctx, "<Esc>jq")
+    assert buffer_content(ctx) == "one\ntwo\nthree"
+
+    send_keys_sync(ctx, "gg@a")
+
+    # Without the recorded cancel, the replay would run `dj` and delete two lines.
+    assert buffer_content(ctx) == "one\ntwo\nthree"
+  end
+
+  @tag :tmp_dir
+  test "SPC m from the mode pill opens the buffer's filetype keys", %{tmp_dir: dir} do
+    path = Path.join(dir, "demo.ex")
+    File.write!(path, "defmodule Demo do\nend\n")
+    ctx = start_editor("defmodule Demo do\nend\n", file_path: path, project_root: dir)
+
+    send_gui_action(ctx, {:execute_command, "which_key_open"})
+    send_keys_sync(ctx, "m")
+
+    assert shown_path(ctx) == "SPC m"
+    assert map_size(whichkey(ctx).node.children) > 0
+  end
+
   defp whichkey_labels(ctx) do
     whichkey(ctx)
     |> then(&%{&1 | show: true})

@@ -107,12 +107,18 @@ defmodule MingaEditor.Input.WhichKey do
       MingaEditor.Input.InlineOverlay.active(state, MingaEditor.Input.InlineAsk.spec([])) != nil
   end
 
-  # A completion popup is a modal, and a leader does not start under a modal, so the pill closes it first.
+  # A completion popup, shown or still waiting on its source, is a modal, and a leader does not start under a modal,
+  # so the pill closes it first.
   @spec dismiss_completion(state()) :: state()
-  defp dismiss_completion(state) do
-    if MingaEditor.Shell.Traditional.ModalWorkflow.completion(state) == nil,
-      do: state,
-      else: MingaEditor.Shell.Traditional.ModalWorkflow.dismiss(state)
+  defp dismiss_completion(state), do: MingaEditor.CompletionHandling.dismiss(state)
+
+  # An operator waiting for its motion is cancelled the way Escape cancels it, through the mode, so a macro being
+  # recorded and dot-repeat see the cancel too.
+  @spec cancel_operator(state()) :: state()
+  defp cancel_operator(state) do
+    if Minga.Editing.mode(state) == :operator_pending,
+      do: MingaEditor.KeyDispatch.handle_key(state, @key_escape, 0),
+      else: state
   end
 
   # The pill starts the leader in which-key itself, the way the CUA space leader does, and this handler walks it: no
@@ -127,7 +133,7 @@ defmodule MingaEditor.Input.WhichKey do
     state
     |> WhichKeyWorkflow.dismiss()
     |> dismiss_completion()
-    |> MingaEditor.Editing.cancel_operator()
+    |> cancel_operator()
     |> MingaEditor.Editing.update_mode_state(&Minga.Mode.clear_pending/1)
     |> Commands.execute({:leader_start, root, ["SPC"]})
     |> WhichKeyWorkflow.reveal_now()
@@ -188,8 +194,6 @@ defmodule MingaEditor.Input.WhichKey do
 
   defp open_path(_state), do: nil
 
-  # Only the CUA space leader leaves its sequence to which-key. A Vim which-key node without a mode
-  # leader is stale (a click resets the mode), so the key belongs to the mode, not to the group.
   # Vim's SPC walks its leader in the Normal mode state. The CUA space leader and the mode pill keep the leader only
   # in which-key, so this handler walks it.
   @spec which_key_leader?(state()) :: boolean()

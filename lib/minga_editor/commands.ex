@@ -220,8 +220,14 @@ defmodule MingaEditor.Commands do
   def execute(state, {:leader_start, node, prefix_keys}) when is_list(prefix_keys),
     do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.begin(state, node, prefix_keys)
 
+  # `SPC m` opens the active buffer's filetype keys here too, as the Vim leader's 2-tuple form does.
   def execute(state, {:leader_progress, node, prefix_keys}) when is_list(prefix_keys),
-    do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.progress(state, node, prefix_keys)
+    do:
+      MingaEditor.Shell.Traditional.WhichKeyWorkflow.progress(
+        state,
+        filetype_group(state, prefix_keys, node),
+        prefix_keys
+      )
 
   def execute(state, :leader_cancel),
     do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.dismiss(state)
@@ -957,6 +963,14 @@ defmodule MingaEditor.Commands do
       _ -> []
     end
   end
+
+  @spec filetype_group(EditorState.t(), [String.t()], Bindings.node_t()) :: Bindings.node_t()
+  defp filetype_group(state, ["SPC", "m"], node) do
+    ft_trie = filetype_trie_for(state, current_filetype(state))
+    if ft_trie.children == %{}, do: node, else: ft_trie
+  end
+
+  defp filetype_group(_state, _prefix_keys, node), do: node
 
   @spec maybe_substitute_filetype_trie(EditorState.t(), Bindings.node_t()) ::
           {Bindings.node_t(), EditorState.t()}
