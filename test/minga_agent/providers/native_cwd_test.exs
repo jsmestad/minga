@@ -1,5 +1,5 @@
 defmodule MingaAgent.Providers.NativeCwdTest do
-  # Changes the VM-global working directory to verify Native's no-project fallback.
+  # Changes the VM-global working directory to verify that a session without a project never works there.
   use Minga.Test.SessionCase, async: false
 
   alias MingaAgent.ProjectView
@@ -10,7 +10,8 @@ defmodule MingaAgent.Providers.NativeCwdTest do
   @moduletag :tmp_dir
   @moduletag :heavy
 
-  test "find uses the owned fallback view when no project is active", %{tmp_dir: dir} do
+  test "find is declined, and the process directory is never searched, when no project is active",
+       %{tmp_dir: dir} do
     dir = Path.expand(dir)
     cwd = Path.join(dir, "cwd")
     File.mkdir_p!(cwd)
@@ -86,6 +87,7 @@ defmodule MingaAgent.Providers.NativeCwdTest do
       view = Native.project_view(Session.get_provider(session))
       working_dir = ProjectView.working_dir(view)
       refute working_dir == cwd
+      refute File.exists?(Path.join(working_dir, "sample.ex"))
 
       assert :ok = Session.send_prompt(session, "Find Elixir files")
       assert_receive {:agent_event, ^session, {:status_changed, :idle}}, 10_000
@@ -95,16 +97,14 @@ defmodule MingaAgent.Providers.NativeCwdTest do
               %ToolCall{
                 id: "tc_find_without_project",
                 name: "find",
-                status: :complete,
-                is_error: false,
+                status: :denied,
                 result: result
               }} = List.keyfind(messages, :tool_call, 0)
 
-      assert result =~ "find pattern=*.ex"
-      assert result =~ "path=#{working_dir}"
-      assert result =~ ~s(filter_root: "#{cwd}")
+      assert result == "Minga has no folder to work in. Open a file or a folder."
+      refute result =~ "sample.ex"
       assert {:assistant, "done"} in messages
-      assert File.read!(Path.join(working_dir, "sample.ex")) == sample
+      assert File.read!(Path.join(cwd, "sample.ex")) == sample
     end)
   end
 end

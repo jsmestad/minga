@@ -5967,7 +5967,8 @@ defmodule MingaAgent.Session do
         tool_call_id: event.tool_call_id,
         name: event.name,
         args: event.args,
-        reply_to: event.reply_to
+        reply_to: event.reply_to,
+        working_directory: event.working_directory
       )
 
     case TurnExecution.request_approval(state.turn_execution, approval) do
@@ -8117,6 +8118,17 @@ defmodule MingaAgent.Session do
   end
 
   defp provider_active_skill_names(_provider_state), do: []
+
+  # The hook learns the folder the session was started in, or none. A session without a folder has no root to report.
+  @spec session_start_root(state()) :: String.t() | nil
+  defp session_start_root(state) do
+    opts = state.provider.opts
+
+    case Keyword.get(opts, :working_folder) do
+      nil -> Keyword.get(opts, :project_root)
+      working_folder -> MingaAgent.WorkingFolder.root(working_folder)
+    end
+  end
 
   @spec provider_project_root(map(), state()) :: String.t() | nil
   defp provider_project_root(%{project_root: project_root}, _state)
@@ -10836,7 +10848,11 @@ defmodule MingaAgent.Session do
   defp dispatch_session_start(state) do
     payload =
       state.session_id
-      |> SessionStartPayload.new(state.provider.model_name, state.provider.provider_name)
+      |> SessionStartPayload.new(
+        state.provider.model_name,
+        state.provider.provider_name,
+        session_start_root(state)
+      )
       |> SessionStartPayload.to_map()
 
     case Task.Supervisor.start_child(state.hook_task_supervisor, fn ->

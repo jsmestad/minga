@@ -2092,38 +2092,146 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert File.read!(target(context)) == "sensitive fixture"
   end
 
-  test "approved shell execution uses the working directory when no project is active", context do
-    # A nil override discovers the active Project before falling back to cwd.
-    # Close that owner explicitly instead of inheriting another scenario's workspace.
+  test "a shell call in a session without a folder is answered before approval and never runs",
+       context do
+    # With no decided folder, no explicit root and no active project, the session has no folder.
+    # The process working directory is not a fallback.
     assert :ok = Minga.Project.close()
     assert Minga.Project.root() == nil
-    working_directory = Path.join(context.dir, "no-project-cwd")
-    File.mkdir_p!(working_directory)
-    expected = "approval working-directory fixture"
-    File.write!(Path.join(working_directory, "cwd-proof.txt"), expected)
+    proof = Path.join(context.dir, "ran.txt")
 
     assert {:ok, _} = Options.set(context.options_name, :agent_tool_approval, :destructive)
     assert {:ok, _} = Options.set(context.options_name, :agent_destructive_tools, ["shell"])
 
-    File.cd!(working_directory, fn ->
+    session =
+      start_session(context,
+        tool_calls: [{"shell", %{"command" => "touch #{proof}"}, "prefix-call"}],
+        provider_opts: [project_root: nil]
+      )
+
+    assert :ok = Session.send_prompt(session, "run it")
+    await_done(session, "shell")
+    refute_received {:agent_event, ^session, {:approval_pending, _approval}}
+
+    result = saved_tool_result(context, session)
+    # Minga declined the call. It is recorded as declined, not as an error.
+    assert result.metadata.tool_outcome == :denied
+
+    assert Enum.map_join(result.content, "", & &1.text) ==
+             "Minga has no folder to work in. Open a file or a folder."
+
+    refute File.exists?(proof)
+  end
+
+  test "a view left from an earlier start does not give a session without a folder its files",
+       context do
+    File.write!(target(context), "must stay out of reach")
+    {:ok, stale_view} = MingaAgent.ProjectView.overlay(context.project)
+    on_exit(fn -> MingaAgent.ProjectView.close(stale_view) end)
+
+    session =
+      start_session(context,
+        tool_calls: [{"read_file", %{"path" => "effect.txt"}, "prefix-call"}],
+        provider_opts: [
+          project_root: nil,
+          project_view: stale_view,
+          working_folder: {:unavailable, :none}
+        ]
+      )
+
+    assert :ok = Session.send_prompt(session, "read it")
+    await_done(session, "read_file")
+
+    result = saved_tool_result(context, session)
+    assert result.metadata.tool_outcome == :denied
+    text = Enum.map_join(result.content, "", & &1.text)
+    assert text == "Minga has no folder to work in. Open a file or a folder."
+    refute text =~ "must stay out of reach"
+  end
+
+  # Every folder under the checkout has a project above it, so the plain folder lives outside it.
+  # The process working directory is the checkout, which differs from the folder: nothing may resolve there.
+  for {tool, args, expected} <- [
+        {"read_file", %{"path" => "lib/other.ex"}, "outside the checkout"},
+        {"find", %{"pattern" => "*.ex", "path" => "."}, "other.ex"},
+        {"grep", %{"pattern" => "outside"}, "other.ex"},
+        {"list_directory", %{"path" => "lib"}, "other.ex"},
+        {"shell", %{"command" => "cat lib/other.ex"}, "outside the checkout"},
+        {"write_file",
+         %{
+           "path" => "lib/new.ex",
+           "mode" => "create",
+           "content" => "new\n",
+           "expected_revision" => "absent"
+         }, "lib/new.ex"}
+      ] do
+    @tag tool: tool, args: args, expected: expected
+    test "in a plain folder outside any project, #{tool} resolves against that folder", context do
+      assert :ok = Minga.Project.close()
+      outside = Path.join(System.tmp_dir!(), "minga-plain-folder-#{context.suffix}")
+      File.mkdir_p!(Path.join(outside, "lib"))
+      on_exit(fn -> File.rm_rf!(outside) end)
+      File.write!(Path.join(outside, "lib/other.ex"), "outside the checkout\n")
+      working_folder = MingaAgent.WorkingFolder.folder(outside)
+      assert {:folder, folder} = working_folder
+
+      # The search tools ship in a bundle this test's private registry does not load.
+      for spec <- MingaAgent.Tools.specs_for_source({:bundle, :read_only_tools}),
+          spec.name == context.tool do
+        assert :ok = ToolRegistry.register(context.registry, spec)
+      end
+
+      refute File.cwd!() == folder
+      refute File.exists?(Path.join(File.cwd!(), "lib/other.ex"))
+
       session =
         start_session(context,
-          tool_calls: [{"shell", %{"command" => "cat cwd-proof.txt"}, "prefix-call"}],
-          provider_opts: [project_root: nil]
+          tool_calls: [{context.tool, context.args, "prefix-call"}],
+          provider_opts: [project_root: folder, working_folder: working_folder]
         )
 
-      assert :ok = Session.send_prompt(session, "read the working directory's proof file")
+      assert :sys.get_state(Session.get_provider(session)).project_root == folder
+      assert :ok = Session.send_prompt(session, "work on lib/other.ex")
+      await_done(session, context.tool)
 
-      assert_receive {:agent_event, ^session,
-                      {:approval_pending, %Public{target: %Target{} = approval_target}}},
-                     @timeout
-
-      assert :ok = Session.respond_to_approval(session, approval_target, :approve)
-      await_done(session, "shell")
       result = saved_tool_result(context, session)
-      assert result.metadata.is_error == false
-      assert Enum.map_join(result.content, "", & &1.text) == expected
-    end)
+      text = Enum.map_join(result.content, "", & &1.text)
+      assert result.metadata.is_error == false, text
+      assert text =~ context.expected
+      refute File.exists?(Path.join(File.cwd!(), "lib/new.ex"))
+    end
+  end
+
+  test "the shell approval card names the folder the command then runs in, whatever the arguments claim",
+       context do
+    assert {:ok, _} = Options.set(context.options_name, :agent_tool_approval, :destructive)
+    assert {:ok, _} = Options.set(context.options_name, :agent_destructive_tools, ["shell"])
+    elsewhere = Path.join(context.dir, "elsewhere")
+    File.mkdir_p!(elsewhere)
+
+    session =
+      start_session(context,
+        tool_calls: [
+          {"shell", %{"command" => "pwd -P > where.txt", "cwd" => elsewhere}, "prefix-call"}
+        ]
+      )
+
+    assert :ok = Session.send_prompt(session, "where")
+
+    assert_receive {:agent_event, ^session,
+                    {:approval_pending,
+                     %Public{target: %Target{} = approval_target, preview: preview}}},
+                   @timeout
+
+    assert "cwd: #{context.project}" in preview.lines
+    refute Enum.any?(preview.lines, &(&1 =~ elsewhere))
+
+    assert :ok = Session.respond_to_approval(session, approval_target, :approve)
+    await_done(session, "shell")
+
+    # The command ran in Minga's editable view of the session folder, so the file it wrote is staged there
+    # and nothing was written into the folder the argument named.
+    refute File.exists?(Path.join(elsewhere, "where.txt"))
   end
 
   test "builtin and bundled metadata do not add approval beyond the current global policy",

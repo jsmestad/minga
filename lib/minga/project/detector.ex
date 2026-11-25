@@ -90,8 +90,8 @@ defmodule Minga.Project.Detector do
   Finds the project root for a file given a flat list of marker filenames.
 
   This is the compatibility API used by `Minga.LSP.RootDetector`. It returns
-  just the root path (no project type), falling back to `File.cwd!/0` when
-  no marker is found.
+  just the root path (no project type), falling back to the file's own folder when
+  no marker is found. The process working directory is never the fallback: it is not where the file is.
   """
   @spec find_root(String.t(), [String.t()]) :: String.t()
   def find_root(file_path, root_markers)
@@ -100,7 +100,7 @@ defmodule Minga.Project.Detector do
 
     case detect(file_path, typed_markers) do
       {:ok, root, _type} -> root
-      :none -> File.cwd!()
+      :none -> file_path |> Path.expand() |> Path.dirname()
     end
   end
 

@@ -87,11 +87,18 @@ defmodule MingaAgent.SessionExport do
   @spec export_to_file([ReqLLM.Message.t()], export_opts()) ::
           {:ok, String.t()} | {:error, String.t()}
   def export_to_file(messages, opts) do
-    root = Keyword.get(opts, :project_root, File.cwd!())
-    format = Keyword.get(opts, :format, :markdown)
+    case Keyword.get(opts, :project_root) do
+      root when is_binary(root) -> export_into(root, messages, opts)
+      _no_folder -> {:error, "Minga has no folder to export into. Open a file or a folder."}
+    end
+  end
 
+  # The caller names the folder. The process working directory is not a place the user chose.
+  @spec export_into(String.t(), [ReqLLM.Message.t()], export_opts()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp export_into(root, messages, opts) do
     result =
-      case format do
+      case Keyword.get(opts, :format, :markdown) do
         :html -> to_html(messages, opts)
         _ -> to_markdown(messages, opts)
       end

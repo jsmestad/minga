@@ -200,13 +200,14 @@ defmodule MingaAgent.Event do
   defmodule ToolApproval do
     @moduledoc false
     @enforce_keys [:tool_call_id, :name, :reply_to]
-    defstruct [:tool_call_id, :name, :reply_to, args: %{}]
+    defstruct [:tool_call_id, :name, :reply_to, :working_directory, args: %{}]
 
     @type t :: %__MODULE__{
             tool_call_id: String.t(),
             name: String.t(),
             args: map(),
-            reply_to: pid()
+            reply_to: pid(),
+            working_directory: String.t() | nil
           }
   end
 

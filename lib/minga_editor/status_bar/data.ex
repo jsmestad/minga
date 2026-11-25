@@ -465,9 +465,17 @@ defmodule MingaEditor.StatusBar.Data do
       session_id: connected_session_id(agent_ui.connection, agent_session(state)),
       model: Panel.model_label(agent_ui.panel),
       status: agent.runtime.status,
-      workdir: File.cwd!()
+      workdir: status_command_workdir(state)
     }
   end
+
+  # The status command runs where the editor works: the project, else the folder it was opened on.
+  # Reading the process working directory here would call the file server from the Editor on every refresh.
+  @spec status_command_workdir(EditorState.t() | map()) :: String.t() | nil
+  defp status_command_workdir(%{workspace: %{file_tree: file_tree}}),
+    do: file_tree.project_root || file_tree.original_root
+
+  defp status_command_workdir(_state), do: nil
 
   # The cached connection names the session it describes. A connection left
   # over from a stopped or replaced session must not lend its id to the next one.

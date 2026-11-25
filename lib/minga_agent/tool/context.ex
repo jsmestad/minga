@@ -19,6 +19,7 @@ defmodule MingaAgent.Tool.Context do
   @typedoc "Opaque-ish runtime context passed to source-owned tool builders."
   @type t :: %__MODULE__{
           project_root: String.t(),
+          working_folder: MingaAgent.WorkingFolder.t() | nil,
           router_context: RouterContext.t(),
           artifact_store: GenServer.server() | nil,
           capture_key: capture_key() | nil,
@@ -31,6 +32,7 @@ defmodule MingaAgent.Tool.Context do
   @enforce_keys [:project_root, :router_context]
   defstruct [
     :project_root,
+    :working_folder,
     :router_context,
     :artifact_store,
     :capture_key,
@@ -69,6 +71,15 @@ defmodule MingaAgent.Tool.Context do
       metadata: Keyword.get(attrs, :metadata, %{})
     }
   end
+
+  @doc """
+  Records where the session may work, so the executor can refuse a tool that needs a folder the session does not have.
+
+  A context without this decision (`nil`) is not restricted: its builder supplied an explicit project root.
+  """
+  @spec put_working_folder(t(), MingaAgent.WorkingFolder.t()) :: t()
+  def put_working_folder(%__MODULE__{} = context, working_folder),
+    do: %{context | working_folder: working_folder}
 
   @doc "Scopes a record-owned artifact capability to one durably admitted tool call."
   @spec for_tool_call(t(), GenServer.server(), String.t(), String.t()) :: t()

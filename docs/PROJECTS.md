@@ -23,6 +23,27 @@ The `.minga` sentinel is useful for directories that don't have a standard build
 
 Once detected, the project root is stored for the current session and used to scope file finding (`SPC p f`, `SPC f f`) and project search (`SPC s p`, `SPC /`).
 
+## Where Minga works when there is no project
+
+Not every file lives in a project. A note in a scratch folder, a config file, a script on the desktop: none of them has a marker above it. When you ask Minga to work on such a file, it still needs one folder to read, search, edit and run commands in. It picks that folder once, when the conversation starts, in this order:
+
+1. The detected project, if there is one.
+2. The folder you opened the editor on.
+3. The folder of the file you started from.
+
+The conversation says where it landed: "Minga is working in ~/notes. No project was detected there." Relative paths you mention resolve against that folder, and shell commands run there.
+
+Minga never falls back to the directory the editor process happened to start in. For an app started from Finder or the Dock that directory is `/`, which is not a folder you chose.
+
+Two cases leave Minga with no folder at all:
+
+- **Nothing is open.** No project, no folder and no file. The conversation says "Minga has no folder to work in. Open a file or a folder."
+- **The only candidate is too broad.** A file that sits directly in your home directory, in a folder above it, in `/`, or at the top of a mounted volume would make that whole tree Minga's workspace. Minga declines and says so: "Minga has no folder to work in: ~ is too broad. Open a folder inside it, or move the file into a folder." Another name for the same place does not get around this: the folder is compared by its real path and by the directory itself, so a symlink, a different case, or a second mount of the same volume is just as broad. Minga never substitutes your home directory.
+
+Nothing has failed in either case, and the conversation still works for questions. Every tool that could reach your files answers with that same sentence until there is a folder: reading and editing, search, Git, the language server, shell commands, subagents, MCP servers and extension tools. The declined calls show as "Denied", not as errors. What still works is what cannot touch your files: asking you a question, the checklist, describing Minga, reading memory and fetching a URL. To give Minga one, open a file inside a folder (or open the folder) and start a new conversation; a conversation keeps the folder it started with, and one that started without a folder stays that way, including when Minga restarts its session.
+
+If you want a loose folder to behave like a project, drop an empty `.minga` file in it.
+
 ## Known projects
 
 When you switch to a project, Minga remembers its root so you can return to it with `SPC p p`. The list survives restarts in `$XDG_CONFIG_HOME/minga/known-projects`, or `~/.config/minga/known-projects` if `XDG_CONFIG_HOME` is not set. Development builds use `known-projects-dev` in the same directory, so source launches don't change the installed editor's list.

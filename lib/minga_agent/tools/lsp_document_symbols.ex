@@ -16,9 +16,10 @@ defmodule MingaAgent.Tools.LspDocumentSymbols do
 
   Shows hierarchical structure with symbol kind, name, and line number.
   """
-  @spec execute(String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  def execute(path) when is_binary(path) do
+  @spec execute(String.t(), keyword()) :: {:ok, String.t()} | {:error, String.t()}
+  def execute(path, opts \\ []) when is_binary(path) do
     abs_path = Path.expand(path)
+    shown = LspBridge.display_path(abs_path, Keyword.get(opts, :root))
 
     case LspBridge.document_for_path(abs_path) do
       {:ok, %{client: client, uri: uri}} ->
@@ -35,7 +36,7 @@ defmodule MingaAgent.Tools.LspDocumentSymbols do
 
           {:ok, symbols} when is_list(symbols) ->
             items = LspBridge.flatten_document_symbols(symbols)
-            {:ok, format_symbols(path, items)}
+            {:ok, format_symbols(shown, items)}
 
           {:error, :timeout} ->
             {:error, "Document symbols request timed out"}
@@ -54,8 +55,7 @@ defmodule MingaAgent.Tools.LspDocumentSymbols do
           [{String.t(), non_neg_integer(), non_neg_integer(), String.t()}]
         ) :: String.t()
   defp format_symbols(path, items) do
-    rel = relative_path(path)
-    header = "#{rel} symbols (#{Enum.count(items)}):"
+    header = "#{path} symbols (#{Enum.count(items)}):"
 
     details =
       Enum.map(items, fn {_path, line, _col, label} ->
@@ -63,17 +63,5 @@ defmodule MingaAgent.Tools.LspDocumentSymbols do
       end)
 
     Enum.join([header | details], "\n")
-  end
-
-  @spec relative_path(String.t()) :: String.t()
-  defp relative_path(path) do
-    cwd = File.cwd!()
-    expanded = Path.expand(path)
-
-    if String.starts_with?(expanded, cwd <> "/") do
-      Path.relative_to(expanded, cwd)
-    else
-      path
-    end
   end
 end

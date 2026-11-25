@@ -229,6 +229,70 @@ defmodule MingaAgent.Tool.ExecutorTest do
 
       assert_received {:built, ^context}
     end
+
+    test "a session without a folder runs only tools that stay away from the user's files", %{
+      table: table
+    } do
+      parent = self()
+
+      # `produce_rewrite` is on the short list of tools known to stay away from the user's files.
+      # The registry reserves the built-in names on that list.
+      tools = [
+        {"folder_read", %{category: :filesystem}},
+        {"folder_shell", %{category: :shell}},
+        {"folder_spawn", %{category: :agent, capabilities: [:spawn_agent]}},
+        {"folder_unknown", %{category: :custom}},
+        {"produce_rewrite", %{category: :custom}}
+      ]
+
+      for {name, fields} <- tools do
+        spec =
+          %{
+            source: :config,
+            name: name,
+            description: "Folder gate",
+            parameter_schema: %{},
+            context_requirements: [:tool_context],
+            build: fn _context ->
+              fn _args ->
+                send(parent, {:ran, name})
+                {:ok, "ran"}
+              end
+            end
+          }
+          |> Map.merge(fields)
+          |> Spec.new!()
+
+        assert :ok = Registry.register(table, spec)
+      end
+
+      context =
+        [
+          project_root: "/tmp/context-root",
+          router_context: MingaAgent.ToolRouter.context(nil, nil)
+        ]
+        |> Context.new()
+        |> Context.put_working_folder({:unavailable, :none})
+
+      line = "Minga has no folder to work in. Open a file or a folder."
+
+      for name <- ["folder_read", "folder_shell", "folder_spawn", "folder_unknown"] do
+        assert {:error, {:tool_refused, {:no_working_folder, ^line}}} =
+                 Executor.execute(name, %{}, table, :exec, tool_context: context)
+      end
+
+      refute_received {:ran, _name}
+
+      assert {:ok, "ran"} =
+               Executor.execute("produce_rewrite", %{}, table, :exec, tool_context: context)
+
+      assert_received {:ran, "produce_rewrite"}
+
+      with_folder = Context.put_working_folder(context, {:folder, "/tmp/context-root"})
+
+      assert {:ok, "ran"} =
+               Executor.execute("folder_read", %{}, table, :exec, tool_context: with_folder)
+    end
   end
 
   describe "argument admission" do

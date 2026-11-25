@@ -48,9 +48,7 @@ defmodule MingaEditor.BufferFileIdentity do
   def resolve(%EditorState{} = state, buffer_pid) when is_pid(buffer_pid) do
     case Buffer.file_path(buffer_pid) do
       path when is_binary(path) ->
-        root = project_root(state.workspace)
-
-        case FileRef.from_path(root, path) do
+        case project_file_ref(project_root(state.workspace), path) do
           {:ok, file_ref} ->
             {:ok, file_ref, file_ref.display_name}
 
@@ -78,10 +76,17 @@ defmodule MingaEditor.BufferFileIdentity do
     end
   end
 
-  @spec project_root(SessionState.t()) :: String.t()
+  # A file with no project and no opened folder belongs to no root.
+  # Asking the file server for the process directory here would block the Editor and name a folder nobody chose.
+  @spec project_root(SessionState.t()) :: String.t() | nil
   defp project_root(%SessionState{} = workspace) do
-    workspace.file_tree.project_root || workspace.file_tree.original_root || File.cwd!()
+    workspace.file_tree.project_root || workspace.file_tree.original_root
   end
+
+  @spec project_file_ref(String.t() | nil, String.t()) ::
+          {:ok, FileRef.t()} | {:error, :outside_project}
+  defp project_file_ref(nil, _path), do: {:error, :outside_project}
+  defp project_file_ref(root, path), do: FileRef.from_path(root, path)
 
   @spec traditional_tab_bar(Runtime.t()) :: TabBar.t() | nil
   defp traditional_tab_bar(%Runtime{state: %TraditionalState{} = shell_state}) do

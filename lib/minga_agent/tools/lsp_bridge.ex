@@ -133,6 +133,18 @@ defmodule MingaAgent.Tools.LspBridge do
   def path_to_uri(path), do: SyncServer.path_to_uri(path)
 
   @doc """
+  Shows `path` relative to the session's folder when it lies inside it, and unchanged otherwise.
+
+  The folder is the session's, passed by the tool. The process working directory is never consulted: it is not where the user's files are.
+  """
+  @spec display_path(String.t(), String.t() | nil) :: String.t()
+  def display_path(path, nil), do: path
+
+  def display_path(path, root) when is_binary(root) do
+    if String.starts_with?(path, root <> "/"), do: Path.relative_to(path, root), else: path
+  end
+
+  @doc """
   Converts an LSP URI to a file path.
   """
   @spec uri_to_path(String.t()) :: String.t()

@@ -18,6 +18,7 @@ defmodule MingaEditor.Input.InlineOverlay do
 
   import Bitwise, only: [band: 2]
 
+  alias MingaAgent.WorkingFolder
   alias MingaEditor.State, as: EditorState
 
   @typedoc """
@@ -123,12 +124,44 @@ defmodule MingaEditor.Input.InlineOverlay do
     end
   end
 
-  @doc "Returns the project root for the active session."
+  @doc """
+  Returns the root an inline session works in: the project, else the folder the editor was opened on, else the folder of the file in view.
+
+  With none of these, or only a folder as broad as the home directory or a volume root, the session gets a private empty root: it answers from the text it was given and its file tools have no folder. The process working directory is never used.
+  """
   @spec project_root(state()) :: String.t()
   def project_root(state) do
     file_tree = state.workspace.file_tree
-    file_tree.project_root || file_tree.original_root || File.cwd!()
+
+    case file_tree.project_root do
+      root when is_binary(root) -> root
+      nil -> plain_folder_root(state, file_tree.original_root)
+    end
   end
+
+  @spec plain_folder_root(state(), String.t() | nil) :: String.t()
+  defp plain_folder_root(state, opened_folder) do
+    [WorkingFolder.folder(opened_folder), WorkingFolder.for_file(active_file(state))]
+    |> WorkingFolder.first_available()
+    |> inline_root()
+  end
+
+  # The session creates and checks its private root itself. The Editor only names it.
+  @spec inline_root(WorkingFolder.t()) :: String.t()
+  defp inline_root({:unavailable, _reason}), do: WorkingFolder.placeholder_root()
+  defp inline_root(working_folder), do: WorkingFolder.root(working_folder)
+
+  @spec active_file(state()) :: String.t() | nil
+  defp active_file(%{workspace: %{buffers: %{active: buffer}}}) when is_pid(buffer) do
+    case Minga.Buffer.file_path(buffer) do
+      path when is_binary(path) -> path
+      _no_file -> nil
+    end
+  catch
+    :exit, _reason -> nil
+  end
+
+  defp active_file(_state), do: nil
 
   @doc "True when the modifier bits carry no control/meta that should suppress text input."
   @spec printable_text_input?(non_neg_integer()) :: boolean()

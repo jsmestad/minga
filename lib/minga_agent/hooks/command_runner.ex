@@ -96,15 +96,25 @@ defmodule MingaAgent.Hooks.CommandRunner do
 
   @spec discover_helper_path() :: {:ok, String.t()} | {:error, term()}
   defp discover_helper_path do
+    priv = :minga |> :code.priv_dir() |> List.to_string()
+
+    # A development build links its priv directory to the checkout, so the Zig output sits beside the real one.
     candidates = [
-      Path.join(:code.priv_dir(:minga), @helper_name),
-      Path.join([File.cwd!(), "priv", @helper_name]),
-      Path.join([File.cwd!(), "zig", "zig-out", "bin", @helper_name])
+      Path.join(priv, @helper_name),
+      Path.join([checkout_root(priv), "zig", "zig-out", "bin", @helper_name])
     ]
 
     case Enum.find(candidates, &File.exists?/1) do
       nil -> {:error, {:helper_not_found, candidates}}
       path -> {:ok, path}
+    end
+  end
+
+  @spec checkout_root(String.t()) :: String.t()
+  defp checkout_root(priv) do
+    case Minga.Project.Root.canonical_path(priv) do
+      {:ok, canonical} -> Path.dirname(canonical)
+      {:error, _reason} -> Path.dirname(priv)
     end
   end
 

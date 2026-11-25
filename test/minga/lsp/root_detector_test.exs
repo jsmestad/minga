@@ -58,18 +58,20 @@ defmodule Minga.LSP.RootDetectorTest do
       assert RootDetector.find_root(file, ["mix.exs"]) == inner
     end
 
-    test "falls back to cwd when no marker found", %{tmp_dir: tmp} do
+    test "falls back to the file's folder, never the process directory, when no marker is found",
+         %{tmp_dir: tmp} do
       file = Path.join(tmp, "orphan.txt")
       File.write!(file, "")
 
-      assert RootDetector.find_root(file, ["nonexistent_marker.xyz"]) == File.cwd!()
+      assert RootDetector.find_root(file, ["nonexistent_marker.xyz"]) == tmp
+      refute tmp == File.cwd!()
     end
 
-    test "falls back to cwd with empty markers list", %{tmp_dir: tmp} do
+    test "falls back to the file's folder with an empty marker list", %{tmp_dir: tmp} do
       file = Path.join(tmp, "orphan.txt")
       File.write!(file, "")
 
-      assert RootDetector.find_root(file, []) == File.cwd!()
+      assert RootDetector.find_root(file, []) == tmp
     end
 
     test "handles file in root directory", %{tmp_dir: tmp} do

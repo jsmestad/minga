@@ -42,7 +42,8 @@ defmodule MingaEditor.Agent.SessionStart do
           project_view: ProjectView.t() | nil,
           created_project_view?: boolean(),
           start_request: StartRequest.t(),
-          phase: phase()
+          phase: phase(),
+          folder_notice: String.t() | nil
         }
 
   @enforce_keys [
@@ -54,7 +55,7 @@ defmodule MingaEditor.Agent.SessionStart do
     :start_request,
     :phase
   ]
-  defstruct @enforce_keys
+  defstruct @enforce_keys ++ [:folder_notice]
 
   @doc """
   Sends the start request for the agent workspace `workspace_id` and returns at once.
@@ -92,7 +93,8 @@ defmodule MingaEditor.Agent.SessionStart do
       project_view: project_view,
       created_project_view?: created?,
       start_request: start_request,
-      phase: {:awaiting, timer}
+      phase: {:awaiting, timer},
+      folder_notice: folder_notice(session_opts, start_request)
     })
   end
 
@@ -179,6 +181,8 @@ defmodule MingaEditor.Agent.SessionStart do
           |> Workspace.set_project_view(start.project_view)
           |> clear_stored_ui(Runtime.active_workspace?(state.shell_runtime, start.workspace))
 
+        post_folder_notice(session, start.folder_notice)
+
         state
         |> WorkspaceWorkflow.install_tab_bar(TabBar.accept_workspace(tabs, workspace))
         |> install_started_runtime(start.workspace, session)
@@ -190,6 +194,22 @@ defmodule MingaEditor.Agent.SessionStart do
         state
     end
   end
+
+  # A new conversation outside a detected project says once where Minga works, or that it has no folder.
+  # A restored conversation already carries the line from the start that created it.
+  @spec folder_notice(keyword(), StartRequest.t()) :: String.t() | nil
+  defp folder_notice(_session_opts, %StartRequest{follow_up: {:restore, _, _, _, _}}), do: nil
+
+  defp folder_notice(session_opts, %StartRequest{}) do
+    case get_in(session_opts, [:provider_opts, :working_folder]) do
+      nil -> nil
+      working_folder -> MingaAgent.WorkingFolder.notice(working_folder)
+    end
+  end
+
+  @spec post_folder_notice(pid(), String.t() | nil) :: :ok
+  defp post_folder_notice(_session, nil), do: :ok
+  defp post_folder_notice(session, line), do: MingaAgent.Session.add_system_message(session, line)
 
   @spec clear_stored_ui(Workspace.agent(), boolean()) :: Workspace.agent()
   defp clear_stored_ui(workspace, true), do: Workspace.set_agent_ui(workspace, nil)

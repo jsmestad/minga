@@ -126,18 +126,20 @@ defmodule Minga.Project.DetectorTest do
       assert Detector.find_root(file, ["mix.exs"]) == project
     end
 
-    test "falls back to cwd when no marker found", %{tmp_dir: tmp} do
+    test "falls back to the file's folder, never the process directory, when no marker is found",
+         %{tmp_dir: tmp} do
       file = Path.join(tmp, "orphan.txt")
       File.write!(file, "")
 
-      assert Detector.find_root(file, ["nonexistent.xyz"]) == File.cwd!()
+      assert Detector.find_root(file, ["nonexistent.xyz"]) == tmp
+      refute tmp == File.cwd!()
     end
 
-    test "falls back to cwd with empty markers list", %{tmp_dir: tmp} do
+    test "falls back to the file's folder with an empty marker list", %{tmp_dir: tmp} do
       file = Path.join(tmp, "orphan.txt")
       File.write!(file, "")
 
-      assert Detector.find_root(file, []) == File.cwd!()
+      assert Detector.find_root(file, []) == tmp
     end
   end
 

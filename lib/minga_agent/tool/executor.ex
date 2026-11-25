@@ -279,7 +279,22 @@ defmodule MingaAgent.Tool.Executor do
       else: :ok
   end
 
+  # The last gate before a tool runs: a session without a folder never runs a tool that works on files.
+  defp ensure_context_available(
+         %Spec{} = spec,
+         %Context{working_folder: {_kind, _detail} = working_folder}
+       ) do
+    case MingaAgent.WorkingFolder.refusal(working_folder) do
+      nil -> :ok
+      line -> folder_gate(MingaAgent.WorkingFolder.runs_without_folder?(spec), line)
+    end
+  end
+
   defp ensure_context_available(%Spec{}, %Context{}), do: :ok
+
+  @spec folder_gate(boolean(), String.t()) :: :ok | {:error, {:tool_refused, term()}}
+  defp folder_gate(true, _line), do: :ok
+  defp folder_gate(false, line), do: {:error, {:tool_refused, {:no_working_folder, line}}}
 
   @spec dispatch_post_hook(boolean(), AgentConfig.t(), String.t(), String.t(), map(), result()) ::
           :ok

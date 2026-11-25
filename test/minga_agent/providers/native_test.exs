@@ -781,7 +781,7 @@ defmodule MingaAgent.Providers.NativeTest do
       assert session_state.system_prompt =~ "PROJECT RULE 1419"
     end
 
-    test "falls back to the process working directory when no project is active" do
+    test "has no folder, and never the process working directory, when no project is active" do
       if previous_root = Minga.Project.workspace_root() do
         on_exit(fn -> assert {:ok, _snapshot} = Minga.Project.activate(previous_root) end)
       end
@@ -792,8 +792,12 @@ defmodule MingaAgent.Providers.NativeTest do
       {:ok, pid} = start_provider(project_root: nil)
 
       assert {:ok, session_state} = Native.get_state(pid)
-      assert session_state.project_root == File.cwd!()
-      assert session_state.system_prompt =~ "Project root: #{File.cwd!()}"
+      assert session_state.project_root == MingaAgent.WorkingFolder.placeholder_root()
+      refute session_state.project_root == File.cwd!()
+      refute session_state.system_prompt =~ "Project root:"
+
+      assert session_state.system_prompt =~
+               "Minga has no folder to work in. Open a file or a folder."
     end
 
     test "default Git tools are advertised only inside a repository", %{tmp_dir: dir} do

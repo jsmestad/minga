@@ -20,14 +20,14 @@ defmodule MingaAgent.Hooks.SessionStartPayload do
         }
 
   @doc "Builds a payload from session state fields."
-  @spec new(String.t(), String.t(), String.t()) :: t()
-  def new(session_id, model, provider)
+  @spec new(String.t(), String.t(), String.t(), String.t() | nil) :: t()
+  def new(session_id, model, provider, project_root)
       when is_binary(session_id) and is_binary(model) and is_binary(provider) do
     %__MODULE__{
       session_id: session_id,
       model: model,
       provider: provider,
-      project_root: project_root()
+      project_root: project_root || ""
     }
   end
 
@@ -41,12 +41,5 @@ defmodule MingaAgent.Hooks.SessionStartPayload do
       "provider" => payload.provider,
       "project_root" => payload.project_root
     }
-  end
-
-  @spec project_root() :: String.t()
-  defp project_root do
-    File.cwd!()
-  rescue
-    _ -> ""
   end
 end

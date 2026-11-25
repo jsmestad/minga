@@ -46,7 +46,7 @@ defmodule MingaAgent.ToolApproval do
       tool_call_id: Keyword.fetch!(opts, :tool_call_id),
       name: name,
       args: args,
-      preview: build_preview(name, args),
+      preview: build_preview(name, args, Keyword.get(opts, :working_directory)),
       reply_to: Keyword.get(opts, :reply_to)
     }
   end
@@ -60,11 +60,24 @@ defmodule MingaAgent.ToolApproval do
     Public.new(target, approval.name, approval.args, approval.preview)
   end
 
-  @doc "Builds the structured preview shown in inline approval cards."
-  @spec build_preview(String.t(), map()) :: preview()
-  def build_preview(name, args) when is_binary(name) and is_map(args) do
-    do_build_preview(name, stringify_keys(args))
+  @doc """
+  Builds the structured preview shown in inline approval cards.
+
+  `working_directory` is the session's folder, where a shell command runs. The command's arguments never name it: an argument the tool ignores must not decide what the person is shown.
+  """
+  @spec build_preview(String.t(), map(), String.t() | nil) :: preview()
+  def build_preview(name, args, working_directory \\ nil) when is_binary(name) and is_map(args) do
+    name
+    |> do_build_preview(stringify_keys(args))
+    |> with_working_directory(name, working_directory)
   end
+
+  @spec with_working_directory(preview(), String.t(), String.t() | nil) :: preview()
+  defp with_working_directory(%Preview{kind: :command} = preview, "shell", directory)
+       when is_binary(directory),
+       do: Preview.new(:command, preview.summary, preview.lines ++ ["cwd: #{directory}"])
+
+  defp with_working_directory(preview, _name, _directory), do: preview
 
   @doc "Builds an IO-free structured preview for completed transcript tool-call cards."
   @spec build_transcript_preview(String.t(), map()) :: preview()
@@ -84,13 +97,9 @@ defmodule MingaAgent.ToolApproval do
   end
 
   @spec do_build_preview(String.t(), map()) :: preview()
-  defp do_build_preview("shell", %{"command" => command} = args) do
+  defp do_build_preview("shell", %{"command" => command}) do
     command = stringify_value(command)
-
-    cwd =
-      stringify_value(Map.get(args, "cwd") || Map.get(args, "working_directory") || File.cwd!())
-
-    Preview.new(:command, command, preview_lines(["$ #{command}", "cwd: #{cwd}"]))
+    Preview.new(:command, command, preview_lines(["$ #{command}"]))
   end
 
   defp do_build_preview("write_file", %{"path" => path} = args) when is_binary(path) do
