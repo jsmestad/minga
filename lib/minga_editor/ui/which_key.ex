@@ -84,7 +84,8 @@ defmodule MingaEditor.UI.WhichKey do
     |> Enum.uniq_by(&same_action/1)
   end
 
-  # One row per action: a prompt binds Next to ⌃J and to both arrow encodings, and the first key in order stands for them.
+  # One row per action: a prompt binds Next to ⌃J and to both arrow encodings.
+  # The first key in order stands for them.
   @spec same_action(binding()) :: term()
   defp same_action(%Binding{kind: :command, command: command, description: description})
        when command != nil,

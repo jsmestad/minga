@@ -179,6 +179,9 @@ public struct WhichKeyOverlay: View {
                 entryRow(entry, keyWidth: column.keyWidth)
             }
         }
+        // A row fills its column so the whole row is the click target; the column itself stays as wide as its
+        // longest entry, so the columns pack from the leading edge instead of sharing out the panel's width.
+        .fixedSize(horizontal: true, vertical: false)
         .anatomyPart("whichKey.column")
     }
 
