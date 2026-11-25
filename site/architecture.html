@@ -68,9 +68,9 @@
     <header class="essay-hero">
       <div class="container">
         <p class="section-index"><span>ARCHITECTURE</span> Why it is safe</p>
-        <h1>A slow tool does not freeze your typing. An approved edit waits for you.</h1>
+        <h1>A slow language server does not freeze your typing. An approved edit waits for you.</h1>
         <p class="essay-subtitle">You are about to let an agent work in your repository, so two things have to hold. A slow language server or a busy agent does not freeze your typing. And in a session you start from the editor, an edit you approve is staged: the file on disk and your open buffer keep the old text until you publish.</p>
-        <p class="essay-subtitle">Neither promise is unlimited. An extension command that hangs does block your keys, and a shell command the agent runs is an ordinary program, not a staged edit. This page shows both promises working, then lists where they stop.</p>
+        <p class="essay-subtitle">Neither promise is unlimited. An extension command that hangs does block your keys, and a shell command or a Git commit the agent runs is not a staged edit. This page shows both promises working, then lists where they stop.</p>
         <div class="actions">
           <a class="btn btn-primary" href="#fault-demo">Slow a language server and watch</a>
         </div>
@@ -80,7 +80,7 @@
     <article class="essay-body">
       <div class="container">
         <section class="essay-section" id="fault-demo">
-          <h2>When a tool is slow, or crashes</h2>
+          <h2>When a language server is slow, or the parser crashes</h2>
           <p>You ask for a completion and the language server takes three seconds to answer. In an editor that runs this work on the same loop that handles your keys, nothing you type appears until the answer comes back. Press the button to give both editors the same keys.</p>
 
           <div class="story-box iso-box" data-arch-fault-map>
@@ -110,12 +110,7 @@
                   <p class="iso-stall" data-iso-show="slow-during" hidden>Keys typed but not drawn: <span data-iso-queued>0</span></p>
                   <p class="iso-dead" data-iso-show="crash-during crash-after" hidden>The editor process exited. Text you had not saved is gone.</p>
                 </div>
-                <div class="iso-ed-foot">
-                  <span data-iso-show="rest">Stands for an editor that runs this work on the same loop that handles your keys.</span>
-                  <span data-iso-show="slow-during" hidden>The loop is waiting for the language server.</span>
-                  <span data-iso-show="slow-after" hidden>The waiting keys were drawn in one jump.</span>
-                  <span data-iso-show="crash-during crash-after" hidden>The parser ran inside the editor, so its crash took the editor down.</span>
-                </div>
+                <div class="iso-ed-foot">Stands for an editor that runs this work on the same loop that handles your keys.</div>
               </div>
               <div class="iso-editor is-minga" data-iso-minga>
                 <div class="iso-ed-head">
@@ -129,13 +124,7 @@
                 <div class="iso-ed-body">
                   <div class="iso-code-line"><span data-iso-mcode>def retry_after(429), do: 250</span><span class="iso-caret is-alive"></span></div>
                 </div>
-                <div class="iso-ed-foot">
-                  <span data-iso-show="rest">Runs the language server client and the parser outside the process that handles your keys.</span>
-                  <span data-iso-show="slow-during" hidden>Still waiting for the language server. Your keys are not.</span>
-                  <span data-iso-show="slow-after" hidden>The answer arrived. No key waited for it.</span>
-                  <span data-iso-show="crash-during" hidden>The parser is a separate program. Minga is starting a new one.</span>
-                  <span data-iso-show="crash-after" hidden>A new parser is running, and Minga sent it the file again.</span>
-                </div>
+                <div class="iso-ed-foot">Runs the language server client and the parser outside the process that handles your keys.</div>
               </div>
             </div>
             <ol class="demo-steps" data-iso-steps>
@@ -233,7 +222,7 @@
           <h3>Where this promise stops</h3>
           <ul>
             <li><strong>It holds in a session you start from the editor.</strong> A session that runs without the editor and owns its staging area publishes its edits when it ends normally.</li>
-            <li><strong>It covers Minga's file tools, not shell commands.</strong> A shell command the agent runs is an ordinary program. By default Minga asks you before running one, and it runs in a temporary copy of the project with the staged edits applied. A command that names a path outside that copy can still write there.</li>
+            <li><strong>It covers Minga's file tools, not shell commands or Git.</strong> A shell command the agent runs is an ordinary program. By default Minga asks you before running one, and it runs in a temporary copy of the project with the staged edits applied. A command that names a path outside that copy can still write there. The agent's Git stage and commit tools also ask first, and then act on your real repository.</li>
             <li><strong>A forced quit discards staged edits on purpose.</strong> <code>:q!</code>, <code>:qa!</code> and <code>:cq</code> quit without asking.</li>
             <li><strong>Publish waits for the agent to finish its turn.</strong> While a turn runs, Minga says so and changes nothing.</li>
           </ul>

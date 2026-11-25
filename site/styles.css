@@ -4916,6 +4916,11 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   gap: 0.5rem;
 }
 
+/* The panes are always Frappé-dark, so their badges keep Frappé colours in the light theme too. */
+.iso-editor .topo-pill.is-ok { border-color: #a6d189; color: #a6d189; }
+.iso-editor .topo-pill.is-warn { border-color: #ef9f76; color: #ef9f76; }
+.iso-editor .topo-pill.is-fail { border-color: #e78284; color: #e78284; }
+
 .iso-timer {
   font-family: var(--font-mono);
   font-size: 0.7rem;
@@ -5029,7 +5034,14 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 }
 
 .st-choice .seg-btn {
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.st-choice .seg-btn.is-active {
+  background: var(--cta-bg);
+  color: var(--cta-text);
 }
 
 .st-clean-layout {
