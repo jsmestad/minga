@@ -49,8 +49,8 @@ defmodule MingaEditor.RenderModel.UI.WhichKeyBuilderTest do
     bound = model.entries |> MapSet.new(& &1.key)
 
     # The git extension owns SPC g, so the default trie may not bind it; declared keys that are unbound are skipped.
-    assert groups == Enum.filter(~w(a s c g f b w o h t q :), &MapSet.member?(bound, &1))
-    assert often == ["SPC", ",", "/"]
+    assert groups == Enum.filter(~w(a s c g f b w o h t q), &MapSet.member?(bound, &1))
+    assert often == ["SPC", ",", "/", ":"]
     # Every bound root key is listed exactly once.
     assert Enum.sort(groups ++ often ++ more) ==
              Defaults.leader_trie()

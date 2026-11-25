@@ -522,9 +522,6 @@ public enum Wire {
 
     // MARK: - Which key
 
-    /// One which-key row from gui_which_key (docs/GUI_PROTOCOL.md). `key` is the formatted key and
-    /// `codepoint` with `modifiers` the raw key a click presses; `count` and `platformKey` are final
-    /// display text, empty when there is none.
     /// The colour role a which-key count draws in. The BEAM decides it from the fact it counts; an unknown byte reads as muted.
     public enum WhichKeyCountTone: UInt8, Sendable, Equatable {
         /// A plain count, in the secondary colour.
@@ -537,6 +534,9 @@ public enum Wire {
         public init(byte: UInt8) { self = WhichKeyCountTone(rawValue: byte) ?? .muted }
     }
 
+    /// One which-key row from gui_which_key (docs/GUI_PROTOCOL.md). `key` is the formatted key and
+    /// `codepoint` with `modifiers` the raw key a click presses; `count` and `platformKey` are final
+    /// display text, empty when there is none. `countTone` names the count's colour role.
     public struct WhichKeyEntry: Sendable, Equatable {
         public let kind: UInt8  // 0 = command, 1 = group
         public let key: String

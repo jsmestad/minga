@@ -108,16 +108,16 @@ type CompletionItem struct {
 	MatchRanges []generated.CompletionMatchRange
 }
 
-// WhichKey is the which-key panel (docs/GUI_PROTOCOL.md, gui_which_key). Entries arrive in display order; consecutive
-// entries with the same Section form one section. A count's tone names its colour role: WhichKeyCountMuted,
-// WhichKeyCountNeedsYou or WhichKeyCountError.
-// Count tones for WhichKey.CountTone and WhichKeyEntry.CountTone.
+// Count tones for WhichKey.CountTone and WhichKeyEntry.CountTone: the colour role a count draws in.
 const (
 	WhichKeyCountMuted    uint8 = 0
 	WhichKeyCountNeedsYou uint8 = 1
 	WhichKeyCountError    uint8 = 2
 )
 
+// WhichKey is the which-key panel (docs/GUI_PROTOCOL.md, gui_which_key). Entries arrive in display order; consecutive
+// entries with the same Section form one section. A count's tone names its colour role: WhichKeyCountMuted,
+// WhichKeyCountNeedsYou or WhichKeyCountError.
 type WhichKey struct {
 	Visible    bool
 	Path       string
