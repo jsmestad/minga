@@ -185,6 +185,17 @@
    ],
    "part": "modeline.modeText",
    "text": "NORMAL"
+  },
+  {
+   "baseline": 919.5,
+   "frame": [
+    635.5,
+    909,
+    259,
+    14
+   ],
+   "part": "notice.message",
+   "text": "Restored 1 file from last time \u00b7 SPC q n start fresh"
   }
  ],
  "scenario": "start.open_dir.restored",

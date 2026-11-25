@@ -28,7 +28,7 @@
       ~                                │      ~
       ~                                │      ~
       ~                                │      ~
-  NORMAL  storyboard.ex Restored 1 file from last time · SPC q n sta Elixir 4:3
+  NORMAL  storyboard.ex Restored 1 file from last time · SPC q n st… Elixir 4:3
 ## styles (row start-end fg bg attrs)
 0 0-0 #c6d0f5 #303446 -
 0 1-1 #8caaee #303446 bold

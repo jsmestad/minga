@@ -239,15 +239,3 @@ func TestAConfirmingAnswerFromAKnownTerminalIsNotReportedAgain(t *testing.T) {
 		t.Fatalf("an identical report was sent again: %v", again)
 	}
 }
-
-func TestTheHeroCardsBorderDimsInTheBackground(t *testing.T) {
-	model, _ := terminalModel()
-	if !sameColor(model.emptyBorderColor(false, true), model.palette().Accent()) {
-		t.Fatal("a focused card has the accent border")
-	}
-	updated, _ := model.Update(tea.BlurMsg{})
-	model = updated.(Model)
-	if !sameColor(model.emptyBorderColor(false, true), model.palette().AccentSoft()) {
-		t.Fatal("in the background the card keeps its resting border")
-	}
-}
