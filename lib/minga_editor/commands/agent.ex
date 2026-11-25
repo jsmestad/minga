@@ -936,7 +936,7 @@ defmodule MingaEditor.Commands.Agent do
           "A message was not sent because its conversation is no longer in front. Its text is still in that composer."
         )
 
-      composer_marker(panel) == marker ->
+      same_text?(composer_marker(panel), marker) ->
         deliver_held_in_front(state, press, DraftWorkflow.submission(state))
 
       PromptBuffer.input_empty?(panel) ->
@@ -980,6 +980,12 @@ defmodule MingaEditor.Commands.Agent do
       :ordinary -> deliver_unqueued_composer(state, kind, content, submission)
     end
   end
+
+  # The text is unchanged when the buffer version is; a cursor move (leaving
+  # Insert, a click) does not change what would be sent.
+  @spec same_text?(DraftSave.marker() | nil, DraftSave.marker()) :: boolean()
+  defp same_text?({version, _cursor}, {version, _pressed_cursor}), do: true
+  defp same_text?(_current, _pressed), do: false
 
   @spec composer_marker(Panel.t()) :: DraftSave.marker() | nil
   defp composer_marker(%Panel{prompt_buffer: pid}) when is_pid(pid),

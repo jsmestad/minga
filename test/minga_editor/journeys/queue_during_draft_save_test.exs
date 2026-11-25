@@ -140,6 +140,23 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
       refute {:user, "hello"} in Session.messages(session)
     end
 
+    test "a held send still goes when only the cursor moved after the press", %{
+      editor_ctx: ctx,
+      session: session
+    } do
+      load = begin_load(ctx)
+      send_keys_sync(ctx, "hello")
+      send_key_sync(ctx, 13, @cmd)
+      send_keys_sync(ctx, "<Esc>0")
+      answer_load(ctx, load, :ok)
+
+      wait_until(ctx, fn _state -> {:user, "hello"} in Session.messages(session) end,
+        max_attempts: 500,
+        interval_ms: 20,
+        message: "expected the held send to go after a cursor move"
+      )
+    end
+
     test "a held send already sent by a second press is not sent again", %{
       editor_ctx: ctx,
       session: session
