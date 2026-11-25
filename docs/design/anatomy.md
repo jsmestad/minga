@@ -69,6 +69,7 @@ A real split along the bottom of the window. Structure: divider, header, body.
 | Header height | row pitch | 24 pt | in the top border |
 | Header leading and trailing inset | `lg` | 12 pt | 1 column |
 | Title to counts | `md` | 8 pt | 1 column |
+| Count group to next count group | `xl` | 16 pt | 2 columns |
 | Key to its hint label | `xs` | 4 pt | 1 column |
 | Hint to next hint | `xl` | 16 pt | 2 columns |
 | Body leading and trailing inset | `lg` | 12 pt | 1 column |

@@ -1,6 +1,8 @@
 defmodule MingaEditor.Frontend.Manager.AgentNotifications do
   @moduledoc """
-  Best-effort desktop alert admission and reliable retirement of admitted approvals.
+  Best-effort admission of "a task needs you" alerts and reliable withdrawal of admitted ones.
+
+  The editor decides when to alert (`MingaEditor.Agent.TaskWorkflow`) and `MingaAgent.Notifier` publishes the alert with its task's session as the owner. Each session has at most one admitted alert. It is withdrawn when the editor says so, or when the session stops, through the owner monitor. macOS posts and removes a notification; the terminal frontend rings its bell and ignores withdrawals.
 
   Alerts must not occupy the renderer's required control queue or turn slow rendering into a terminal transport failure.
   """
@@ -9,66 +11,64 @@ defmodule MingaEditor.Frontend.Manager.AgentNotifications do
   alias MingaEditor.Frontend.Manager.State
   alias MingaEditor.Frontend.Protocol
 
-  defstruct admitted_approvals: %{}, withdrawals: MapSet.new()
+  defstruct admitted: %{}, withdrawals: MapSet.new()
 
   @typep id :: <<_::128>>
-  @typep kind :: :approval | :approval_cleared | :complete | :error
+  @typep kind :: :needs_you | :withdrawn
   @type t :: %__MODULE__{
-          admitted_approvals: %{pid() => {id(), reference()}},
+          admitted: %{pid() => {id(), reference()}},
           withdrawals: MapSet.t(id())
         }
 
   @retry_withdrawal_ms 100
 
-  @doc "Posts an alert once, or retires an approval previously admitted on this connection."
-  @spec send_notification(State.t(), %{
-          kind: kind(),
-          id: id(),
-          owner: pid(),
-          debounce_ms: non_neg_integer()
-        }) :: State.t()
+  @doc "Posts an alert, replacing an owner's alert with another identity, or withdraws the alert with that identity admitted on this connection."
+  @spec send_notification(State.t(), %{kind: kind(), id: id(), owner: pid()}) :: State.t()
   def send_notification(%{ready: false} = state, _event), do: state
 
-  def send_notification(state, %{kind: :approval_cleared, id: id, owner: owner}) do
-    case Map.get(state.agent_notifications.admitted_approvals, owner) do
+  def send_notification(state, %{kind: :withdrawn, id: id, owner: owner}) do
+    case Map.get(state.agent_notifications.admitted, owner) do
       {^id, ref} -> owner_down(state, owner, ref)
       _ -> state
     end
   end
 
-  def send_notification(state, %{kind: :approval, id: id, owner: owner}) do
-    output = state.agent_notifications
+  def send_notification(state, %{kind: :needs_you, id: id, owner: owner} = event) do
+    case Map.get(state.agent_notifications.admitted, owner) do
+      {^id, _ref} ->
+        state
 
-    if Map.has_key?(output.admitted_approvals, owner) do
-      state
-    else
-      case write(state, :approval, id, 0) do
-        {:accepted, state} ->
-          admitted_approvals =
-            Map.put(output.admitted_approvals, owner, {id, Process.monitor(owner)})
+      # The editor lost the old identity (it restarted, or reattached the session). The new alert replaces it.
+      {_old, ref} ->
+        state |> owner_down(owner, ref) |> send_notification(event)
 
-          %{state | agent_notifications: %{output | admitted_approvals: admitted_approvals}}
-
-        {_result, state} ->
-          state
-      end
+      nil ->
+        admit(state, id, owner)
     end
   end
 
-  def send_notification(state, %{kind: kind, id: id, debounce_ms: debounce_ms}) do
-    {_result, state} = write(state, kind, id, debounce_ms)
-    state
+  @spec admit(State.t(), id(), pid()) :: State.t()
+  defp admit(state, id, owner) do
+    case write(state, :needs_you, id) do
+      {:accepted, state} ->
+        output = state.agent_notifications
+        admitted = Map.put(output.admitted, owner, {id, Process.monitor(owner)})
+        %{state | agent_notifications: %{output | admitted: admitted}}
+
+      {_result, state} ->
+        state
+    end
   end
 
-  @doc "Withdraws the approval owned by the matching session monitor."
+  @doc "Withdraws the alert owned by the matching session monitor."
   @spec owner_down(State.t(), pid(), reference()) :: State.t()
   def owner_down(state, owner, ref) do
     output = state.agent_notifications
 
-    case Map.get(output.admitted_approvals, owner) do
+    case Map.get(output.admitted, owner) do
       {id, ^ref} ->
         Process.demonitor(ref, [:flush])
-        output = %{output | admitted_approvals: Map.delete(output.admitted_approvals, owner)}
+        output = %{output | admitted: Map.delete(output.admitted, owner)}
         withdraw(%{state | agent_notifications: output}, id)
 
       _ ->
@@ -76,10 +76,10 @@ defmodule MingaEditor.Frontend.Manager.AgentNotifications do
     end
   end
 
-  @doc "Retires all approval monitors on transport disconnect."
+  @doc "Retires all alert monitors on transport disconnect."
   @spec disconnect(State.t()) :: State.t()
   def disconnect(state) do
-    Enum.each(state.agent_notifications.admitted_approvals, fn {_owner, {_id, ref}} ->
+    Enum.each(state.agent_notifications.admitted, fn {_owner, {_id, ref}} ->
       Process.demonitor(ref, [:flush])
     end)
 
@@ -98,7 +98,7 @@ defmodule MingaEditor.Frontend.Manager.AgentNotifications do
 
   @spec withdraw(State.t(), id()) :: State.t()
   defp withdraw(state, id) do
-    case write(state, :approval_cleared, id, 0) do
+    case write(state, :withdrawn, id) do
       {:unwritable, state} ->
         output = state.agent_notifications
         if MapSet.size(output.withdrawals) == 0, do: schedule_retry()
@@ -112,7 +112,7 @@ defmodule MingaEditor.Frontend.Manager.AgentNotifications do
 
   @spec retry_withdrawal(id(), State.t()) :: {:cont | :halt, State.t()}
   defp retry_withdrawal(id, state) do
-    case write(state, :approval_cleared, id, 0) do
+    case write(state, :withdrawn, id) do
       {:accepted, state} ->
         output = state.agent_notifications
         output = %{output | withdrawals: MapSet.delete(output.withdrawals, id)}
@@ -128,15 +128,15 @@ defmodule MingaEditor.Frontend.Manager.AgentNotifications do
 
   @spec schedule_retry() :: reference()
   defp schedule_retry do
-    Process.send_after(self(), :retry_agent_approval_withdrawals, @retry_withdrawal_ms)
+    Process.send_after(self(), :retry_agent_notification_withdrawals, @retry_withdrawal_ms)
   end
 
-  @spec write(State.t(), kind(), id(), non_neg_integer()) ::
+  @spec write(State.t(), kind(), id()) ::
           {MingaEditor.Frontend.Manager.lifecycle_admission(), State.t()}
-  defp write(state, kind, id, debounce_ms) do
+  defp write(state, kind, id) do
     OutputHandler.admit_lifecycle_command(
       state,
-      Protocol.encode_agent_desktop_notification(kind, id, debounce_ms)
+      Protocol.encode_agent_desktop_notification(kind, id)
     )
   end
 end

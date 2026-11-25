@@ -1,16 +1,10 @@
 defmodule Minga.RenderModel.UI.EmptyState do
   @moduledoc """
-  Semantic model for the zero-buffers launchpad surface (#2689).
+  Semantic model for the project home, `*home*` (#4056), shown in the active window.
 
-  Sections are data-driven: the session section exists only when a saved
-  session has entries, recents only when the project has recent files, and
-  the start section always. Chords are resolved from the live keymap by the
-  builder, never hardcoded, so hints stay truthful to user overrides.
+  The header says where you are: `title` (the project or folder name, or "Minga" outside a project), `path` (home-relative), and `status`, one line with the branch and change count, or why there is no project. `note` is an optional muted second line. Sections follow in display order: recent files or recent projects, Minga's tasks, and the next actions. Chords are resolved from the live keymap by the builder, never hardcoded, so hints stay truthful to user overrides.
 
-  Frontends own the layout (SwiftUI column with the logo watermark, TUI
-  centered block from the shared chrome primitives); this struct carries
-  only content and focus. Activation semantics live on the BEAM: frontends
-  echo `empty_state_activate` with an item id.
+  Frontends own the layout (a left-aligned resting view on both); this struct carries only content and focus. Activation semantics live on the BEAM: frontends echo `empty_state_activate` with an item id.
   """
 
   alias Minga.RenderModel.UI.EmptyState.Item
@@ -18,16 +12,20 @@ defmodule Minga.RenderModel.UI.EmptyState do
 
   @type t :: %__MODULE__{
           visible?: boolean(),
-          crashed?: boolean(),
           focused_id: String.t() | nil,
-          version: String.t(),
+          title: String.t(),
+          path: String.t(),
+          status: String.t(),
+          note: String.t(),
           sections: [Section.t()]
         }
 
   defstruct visible?: false,
-            crashed?: false,
             focused_id: nil,
-            version: "",
+            title: "",
+            path: "",
+            status: "",
+            note: "",
             sections: []
 
   @doc "Returns every item across sections in display order."

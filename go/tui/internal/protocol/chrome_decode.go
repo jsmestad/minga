@@ -76,6 +76,16 @@ func decodeChrome(payload []byte) (ChromePayload, bool, error) {
 		chrome.AgentTranscript, chrome.Summary, chrome.Bytes = decodeAgentTranscript(payload)
 	case generated.OPGuiEditTimeline:
 		chrome.Timeline, chrome.Summary, chrome.Bytes = decodeEditTimeline(payload)
+	case generated.OPGuiTasksDrawer:
+		size := payloadLen32Size(payload)
+		if size == 0 {
+			return ChromePayload{}, true, fmt.Errorf("malformed gui_tasks_drawer: truncated payload")
+		}
+		drawer, _, err := generated.DecodeGuiTasksDrawerFields(payload, 5, size)
+		if err != nil {
+			return ChromePayload{}, true, err
+		}
+		chrome.TasksDrawer, chrome.Summary, chrome.Bytes = drawer, "tasks drawer", size
 	case generated.OPGuiGutterSep:
 		chrome.Gutter, chrome.Summary, chrome.Bytes = decodeGutterSeparator(payload)
 	case generated.OPGuiCursorline:

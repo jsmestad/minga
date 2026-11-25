@@ -7,7 +7,7 @@ defmodule Minga.Config.Loader do
   1. `~/.config/minga/modules/*.ex` (compile at OS-process startup; retain on reload)
   2. `~/.config/minga/themes/*.exs` (load user themes, before config eval)
   3. `~/.config/minga/config.exs` (global config)
-  4. `.minga.exs` in the current working directory (project-local config)
+  4. `.minga.exs` at the project root (project-local config)
   5. `~/.config/minga/gui_settings.exs` (generated GUI settings overlay)
   6. `~/.config/minga/after.exs` (post-init hook)
 
@@ -22,6 +22,14 @@ defmodule Minga.Config.Loader do
 
   If the file doesn't exist, the editor starts with defaults. No error,
   no warning.
+
+  ## Project-local configuration
+
+  A project can carry its own configuration: `.minga.exs` (evaluated as Elixir), `.minga/plugins` (plugin directories that are registered) and `.minga/mcp.json` (MCP servers, which are command lines Minga starts). All three are read from the project root the loader is given, never from the directory the VM runs in.
+
+  The root is explicit data. At startup it is the project of what was launched (`Minga.CLI.startup_project_root/0`). On reload the editor passes its active project. With no project, nothing project-local is loaded.
+
+  The root has to pass `Minga.Project.Trust.project_root/1`, the rule the Agent uses for its working folder: a folder as broad as the home directory or the filesystem root is a project only under version control. A root that is refused, or that does not resolve, loads nothing. `project_config/1` says which of these happened, and the editor prints it in `*Messages*`.
   """
 
   use Agent
@@ -38,6 +46,8 @@ defmodule Minga.Config.Loader do
   alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Keymap
   alias Minga.Popup.Registry, as: PopupRegistry
+  alias Minga.Project.Sources
+  alias Minga.Project.Trust
   alias Minga.Log
   alias Minga.Telemetry.StartupProgress
 
@@ -57,28 +67,59 @@ defmodule Minga.Config.Loader do
            keymap_server: keymap_server(),
            options_server: options_server(),
            cleanup_callbacks: %{atom() => ContributionCleanup.cleanup_fun()} | nil,
-           config_home: String.t() | nil
+           config_home: String.t() | nil,
+           project_root: String.t() | nil
          }
+
+  @typedoc """
+  What happened to project-local configuration in the latest load.
+
+  `:none` means no project was given. `{:loaded, root, files}` names the trusted root and the project-local files and folders that were found and read there, possibly none. `{:refused, reason}` means the root was not accepted as a project, so nothing was read from it.
+  """
+  @type project_config ::
+          :none
+          | {:loaded, root :: String.t(), files :: [String.t()], left_out :: [left_out()]}
+          | {:refused, root :: String.t(), project_refusal()}
+
+  @typedoc "A project-local file or folder that was found and not read, with the reason."
+  @type left_out ::
+          {path :: String.t(), Trust.code_refusal()}
+
+  @typedoc """
+  Why a whole project's configuration was left out.
+
+  Besides the trust rule's reasons, `:extensions_need_restart` means the project declares extensions and is not the project Minga started with. Extensions are admitted once, when Minga starts.
+  """
+  @type project_refusal :: Trust.config_refusal() | :extensions_need_restart
 
   @typep load_report :: %{
            config_path: String.t(),
            load_error: String.t() | nil,
            config_eval_error: String.t() | nil,
-           migration_notice: String.t() | nil,
+           migration_notices: [String.t()],
            loaded_modules: [module()],
            modules_errors: [String.t()],
            modules_fingerprint: binary(),
            extension_declarations_fingerprint: binary(),
            project_config_path: String.t() | nil,
            project_config_error: String.t() | nil,
+           project_config: project_config(),
            gui_settings_path: String.t(),
            gui_settings_error: String.t() | nil,
            after_error: String.t() | nil,
            lsp_settings: %{atom() => map()}
          }
 
-  @typedoc "Loader state: stable runtime inputs and the latest load report."
-  @type state :: %{inputs: inputs(), report: load_report()}
+  @typedoc """
+  Loader state: runtime inputs, the latest load report, and the project Minga started with.
+
+  `startup_project` keeps that project's root and the fingerprint of the extensions it declared, because those were admitted when the VM started and a reload cannot admit others.
+  """
+  @type state :: %{
+          inputs: inputs(),
+          report: load_report(),
+          startup_project: %{root: String.t() | nil, declarations: binary()}
+        }
 
   # ── Client API ──────────────────────────────────────────────────────────────
 
@@ -115,16 +156,19 @@ defmodule Minga.Config.Loader do
       keymap_server: keymap_server,
       options_server: options_server,
       cleanup_callbacks: Keyword.get(opts, :cleanup_callbacks),
-      config_home: Keyword.get(opts, :config_home)
+      config_home: Keyword.get(opts, :config_home),
+      project_root: Keyword.get(opts, :project_root)
     }
 
     artifact_admission = Keyword.get(opts, :artifact_admission, ArtifactAdmission)
 
     Agent.start_link(
       fn ->
+        project = trusted_project(inputs.project_root)
+
         report =
           StartupProgress.during_config_load(fn ->
-            load_all(inputs, Minga.SafeMode.active?(), :compile)
+            load_all(inputs, Minga.SafeMode.active?(), :compile, project)
           end)
 
         :ok =
@@ -133,7 +177,14 @@ defmodule Minga.Config.Loader do
             Application.get_env(:minga, :seal_extension_artifact_generation, true)
           )
 
-        %{inputs: inputs, report: report}
+        %{
+          inputs: inputs,
+          report: report,
+          startup_project: %{
+            root: project_identity(project, inputs.project_root),
+            declarations: declarations_fingerprint(project_declarations(project))
+          }
+        }
       end,
       name: name
     )
@@ -175,10 +226,30 @@ defmodule Minga.Config.Loader do
   def config_eval_error, do: config_eval_error(__MODULE__)
   def config_eval_error(server), do: Agent.get(server, & &1.report.config_eval_error)
 
-  @doc "Returns the startup notice for saved bindings that need an opt-in extension."
-  @spec migration_notice() :: String.t() | nil
-  @spec migration_notice(GenServer.server()) :: String.t() | nil
-  def migration_notice(server \\ __MODULE__), do: Agent.get(server, & &1.report.migration_notice)
+  @doc """
+  Returns the startup notices about the config itself, for `*Messages*`: saved bindings that need an opt-in extension, and
+  each retired option the config still sets.
+  """
+  @spec migration_notices() :: [String.t()]
+  @spec migration_notices(GenServer.server()) :: [String.t()]
+  def migration_notices(server \\ __MODULE__),
+    do: Agent.get(server, & &1.report.migration_notices)
+
+  @doc """
+  Keeps a retired option's note for `*Messages*` while the config loads. Returns `:not_loading` outside a load, so the
+  caller can show the note directly.
+  """
+  @spec record_retired_option(String.t()) :: :ok | :not_loading
+  def record_retired_option(note) when is_binary(note) do
+    case Process.get(:minga_config_retired_notes) do
+      notes when is_list(notes) ->
+        Process.put(:minga_config_retired_notes, [note | notes])
+        :ok
+
+      nil ->
+        :not_loading
+    end
+  end
 
   @doc false
   @spec record_config_binding(atom()) :: :ok
@@ -264,34 +335,188 @@ defmodule Minga.Config.Loader do
   @spec reload(GenServer.server()) :: :ok | {:error, String.t()}
   def reload, do: reload(__MODULE__)
 
-  def reload(server) do
+  def reload(server), do: reload_project(server, :same)
+
+  @doc """
+  Reloads config with `project_root` as the project whose configuration is read.
+
+  The editor passes its active project, which may differ from the one the VM started with. `nil` means no project: nothing project-local is loaded.
+  """
+  @spec reload(GenServer.server(), String.t() | nil) :: :ok | {:error, String.t()}
+  def reload(server, project_root) when is_binary(project_root) or is_nil(project_root),
+    do: reload_project(server, {:root, project_root})
+
+  @spec reload_project(GenServer.server(), :same | {:root, String.t() | nil}) ::
+          :ok | {:error, String.t()}
+  defp reload_project(server, target) do
     Writer.set_reloading(true)
 
     try do
-      do_reload(server)
+      do_reload(server, target)
     after
       Writer.set_reloading(false)
     end
   end
 
-  @spec do_reload(GenServer.server()) :: :ok | {:error, String.t()}
-  defp do_reload(server) do
-    %{report: report} = state = Agent.get(server, & &1)
+  @doc "Says what the latest load did with project-local configuration."
+  @spec project_config() :: project_config()
+  @spec project_config(GenServer.server()) :: project_config()
+  def project_config, do: project_config(__MODULE__)
+  def project_config(server), do: Agent.get(server, & &1.report.project_config)
+
+  @doc """
+  The directory a process started because of config runs in, or `nil` when no project's config is in effect.
+
+  It is the canonical root of the project the latest load used: the project that was launched, or the one that was open at the last reload. A hook acts on the project, so a relative path in its command line means "in the project". It must not depend on the directory Minga itself happens to run in, which is the source tree for a source build and whatever the shell was in for a release.
+  """
+  @spec project_directory() :: String.t() | nil
+  @spec project_directory(GenServer.server()) :: String.t() | nil
+  def project_directory(server \\ __MODULE__) do
+    case project_config(server) do
+      {:loaded, root, _files, _left_out} -> if File.dir?(root), do: root
+      _none_or_refused -> nil
+    end
+  catch
+    :exit, _loader_not_running -> nil
+  end
+
+  @doc "The line for `*Messages*` about project-local configuration, or `nil` when there is nothing to say."
+  @spec project_config_message(project_config()) :: String.t() | nil
+  def project_config_message(:none), do: nil
+  def project_config_message({:loaded, _root, [], []}), do: nil
+
+  def project_config_message({:loaded, root, files, left_out}) do
+    folder = Minga.Project.collapse_home(root)
+
+    [loaded_line(folder, root, files), left_out_line(folder, root, left_out)]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(" ")
+  end
+
+  def project_config_message({:refused, root, reason}) do
+    folder = Minga.Project.collapse_home(root)
+
+    "Project config in #{folder} not loaded: #{refusal_text(reason, refused_name(reason, folder))}"
+  end
+
+  # The folder the rule judged, which is where a link leads, not the link's own name.
+  @spec refused_name(project_refusal(), String.t()) :: String.t()
+  defp refused_name({kind, path}, _folder)
+       when kind in [:too_broad, :not_yours, :writable_by_others, :writable_by_group],
+       do: Minga.Project.collapse_home(path)
+
+  defp refused_name(_reason, folder), do: folder
+
+  @spec loaded_line(String.t(), String.t(), [String.t()]) :: String.t() | nil
+  defp loaded_line(_folder, _root, []), do: nil
+
+  defp loaded_line(folder, root, files),
+    do: "Project config loaded from #{folder}: #{relative_names(files, root)}."
+
+  @spec left_out_line(String.t(), String.t(), [left_out()]) :: String.t() | nil
+  defp left_out_line(_folder, _root, []), do: nil
+
+  defp left_out_line(folder, root, left_out) do
+    parts =
+      Enum.map_join(left_out, "; ", fn {path, reason} ->
+        "#{relative_names([path], root)} (#{refusal_text(reason, Path.relative_to(path, root))})"
+      end)
+
+    "Not loaded from #{folder}: #{parts}"
+  end
+
+  @spec relative_names([String.t()], String.t()) :: String.t()
+  defp relative_names(paths, root), do: Enum.map_join(paths, ", ", &Path.relative_to(&1, root))
+
+  # Each refusal says what is wrong and what makes it loadable. The trust rule's own reasons are worded in
+  # `Minga.Project.Trust`, in one place for every loader.
+  @spec refusal_text(project_refusal() | Trust.code_refusal(), String.t()) :: String.t()
+  defp refusal_text(:extensions_need_restart, name),
+    do:
+      "it declares extensions or has plugins, and those load only when Minga starts. " <>
+        "Start Minga in #{name} to use its config."
+
+  defp refusal_text(reason, name), do: Trust.explain(reason, name)
+
+  @spec do_reload(GenServer.server(), :same | {:root, String.t() | nil}) ::
+          :ok | {:error, String.t()}
+  defp do_reload(server, target) do
+    %{report: report, inputs: inputs, startup_project: startup} = state = Agent.get(server, & &1)
+    root = target_root(target, inputs.project_root)
 
     with nil <- user_module_restart_required(report),
-         nil <- extension_declaration_restart_required(report) do
-      reload_current_extension_generation(server, state)
+         nil <- global_declaration_restart_required(report),
+         {:ok, project} <- admit_project(trusted_project(root), root, startup) do
+      # The new root becomes the loader's project only now that the reload is admitted.
+      admitted = %{state | inputs: %{inputs | project_root: root}}
+      reload_current_extension_generation(server, admitted, project)
     else
       message when is_binary(message) -> reject_reload(server, message)
     end
   end
 
-  @spec reload_current_extension_generation(GenServer.server(), state()) ::
+  @spec target_root(:same | {:root, String.t() | nil}, String.t() | nil) :: String.t() | nil
+  defp target_root(:same, current), do: current
+  defp target_root({:root, root}, _current), do: root
+
+  # Extensions are admitted once, when the VM starts, for the project it started with.
+  # That project must still declare what it declared then, or Minga has to restart.
+  # Another project loads on reload only if it declares none and has no plugins.
+  # Otherwise its config is left out, and only its config. Nothing of it is compiled.
+  @spec admit_project(trusted_project(), String.t() | nil, %{
+          root: String.t() | nil,
+          declarations: binary()
+        }) :: {:ok, trusted_project()} | String.t()
+  defp admit_project(project, root, %{root: startup_root, declarations: admitted}) do
+    if project_identity(project, root) == startup_root,
+      do: admit_startup_project(project, admitted),
+      else: admit_other_project(project)
+  end
+
+  @spec admit_startup_project(trusted_project(), binary()) ::
+          {:ok, trusted_project()} | String.t()
+  defp admit_startup_project(project, admitted) do
+    if declarations_fingerprint(project_declarations(project)) == admitted,
+      do: {:ok, project},
+      else: "Extension declarations changed; restart Minga before config reload"
+  end
+
+  @spec admit_other_project(trusted_project()) :: {:ok, trusted_project()}
+  defp admit_other_project(project) do
+    # A plugin is an extension too: it would be compiled now and refused afterwards, so it is not started at all.
+    if not declares_extensions?(project_declarations(project)) and
+         project_plugin_names(project) == [],
+       do: {:ok, project},
+       else: {:ok, {:error, :extensions_need_restart}}
+  end
+
+  # Which project this is, whatever spelling of its path the caller used.
+  # A usable project is known by its canonical root, any other by the path as given.
+  # The editor's name for the open project can differ from the name Minga was started with (a link, `/tmp`).
+  @spec project_identity(trusted_project(), String.t() | nil) :: String.t() | nil
+  defp project_identity({:ok, %Sources{root: canonical}}, _root), do: canonical
+  defp project_identity(_refused_or_none, root), do: root
+
+  # A config file that does not parse declares nothing: evaluating it reports the error and registers nothing.
+  # A file whose declarations cannot be read off its source might declare anything, so it counts.
+  @spec declares_extensions?([term()]) :: boolean()
+  defp declares_extensions?(declarations) do
+    Enum.any?(declarations, fn
+      {_path, {:invalid_config, _hash}} -> false
+      _declaration -> true
+    end)
+  end
+
+  @spec project_plugin_names(trusted_project()) :: [String.t()]
+  defp project_plugin_names({:ok, %Sources{} = sources}), do: Sources.plugin_names(sources)
+  defp project_plugin_names(_no_trusted_project), do: []
+
+  @spec reload_current_extension_generation(GenServer.server(), state(), trusted_project()) ::
           :ok | {:error, String.t()}
-  defp reload_current_extension_generation(server, state) do
+  defp reload_current_extension_generation(server, state, project) do
     case ExtSupervisor.pending_artifact_restarts(Minga.Extension.Registry) do
       [] ->
-        do_reload_unchanged_generation(server, state)
+        do_reload_unchanged_generation(server, state, project)
 
       changed ->
         names = Enum.map_join(changed, ", ", &Atom.to_string/1)
@@ -313,37 +538,40 @@ defmodule Minga.Config.Loader do
     end
   end
 
-  @spec extension_declaration_restart_required(load_report()) :: String.t() | nil
-  defp extension_declaration_restart_required(%{
+  @spec global_declaration_restart_required(load_report()) :: String.t() | nil
+  defp global_declaration_restart_required(%{
          config_path: config_path,
          gui_settings_path: gui_settings_path,
          extension_declarations_fingerprint: admitted_fingerprint
        }) do
-    current_fingerprint =
-      extension_declarations_fingerprint(
-        config_path,
-        resolve_project_config_path(),
-        gui_settings_path
-      )
-
-    if current_fingerprint == admitted_fingerprint do
-      nil
-    else
-      "Extension declarations changed; restart Minga before config reload"
-    end
+    if extension_declarations_fingerprint(config_path, gui_settings_path) == admitted_fingerprint,
+      do: nil,
+      else: "Extension declarations changed; restart Minga before config reload"
   end
 
-  @spec extension_declarations_fingerprint(String.t(), String.t() | nil, String.t()) :: binary()
-  defp extension_declarations_fingerprint(config_path, project_config_path, gui_settings_path) do
+  # The extension declarations of the global sources: the config file, the GUI settings and the post-init hook.
+  @spec extension_declarations_fingerprint(String.t(), String.t()) :: binary()
+  defp extension_declarations_fingerprint(config_path, gui_settings_path) do
     after_path = Path.join(Path.dirname(config_path), "after.exs")
 
-    declarations =
-      [config_path, project_config_path, gui_settings_path, after_path]
-      |> Enum.reject(&is_nil/1)
-      |> Enum.flat_map(&extension_declarations/1)
-
-    :crypto.hash(:sha256, :erlang.term_to_binary({File.cwd!(), declarations}))
+    [config_path, gui_settings_path, after_path]
+    |> Enum.flat_map(&extension_declarations/1)
+    |> declarations_fingerprint()
   end
+
+  # A relative `path:` resolves against the file that declares it, which is part of each declaration.
+  # The directory the VM runs in plays no part.
+  @spec declarations_fingerprint([term()]) :: binary()
+  defp declarations_fingerprint(declarations),
+    do: :crypto.hash(:sha256, :erlang.term_to_binary(declarations))
+
+  # What a project's own config declares. A project that is refused or absent declares nothing.
+  @spec project_declarations(trusted_project()) :: [term()]
+  defp project_declarations({:ok, %Sources{config: {:ok, %{path: path, content: content}}}}),
+    do: extension_declarations(path, content)
+
+  # A file the load refuses, or a project that is refused or absent, declares nothing.
+  defp project_declarations(_no_usable_config), do: []
 
   @spec extension_declarations(String.t()) :: [term()]
   defp extension_declarations(path) do
@@ -461,8 +689,9 @@ defmodule Minga.Config.Loader do
     {:error, message}
   end
 
-  @spec do_reload_unchanged_generation(GenServer.server(), state()) :: :ok | {:error, String.t()}
-  defp do_reload_unchanged_generation(server, %{inputs: inputs, report: report}) do
+  @spec do_reload_unchanged_generation(GenServer.server(), state(), trusted_project()) ::
+          :ok | {:error, String.t()}
+  defp do_reload_unchanged_generation(server, %{inputs: inputs, report: report}, project) do
     # Stop all running extensions first. If that fails, do not tear down
     # registries or start a new load, because the old extension tree is still
     # partially live and a reset would orphan it.
@@ -480,9 +709,9 @@ defmodule Minga.Config.Loader do
 
         # Reload deliberately ignores startup safe mode so fixed config can be loaded without restarting.
         new_report =
-          load_all(inputs, false, {:reuse, report.loaded_modules, report.modules_errors})
+          load_all(inputs, false, {:reuse, report.loaded_modules, report.modules_errors}, project)
 
-        Agent.update(server, &%{&1 | report: new_report})
+        Agent.update(server, &%{&1 | report: new_report, inputs: inputs})
         reload_result(new_report)
 
       message ->
@@ -515,13 +744,14 @@ defmodule Minga.Config.Loader do
   # callback) won't see this dict and will fall back to registered defaults.
   # Extensions are skipped in test mode, so this only affects long-lived runtime
   # callers.
-  @spec load_all(inputs(), boolean(), user_module_mode()) :: load_report()
-  defp load_all(inputs, safe_mode?, user_module_mode) when is_boolean(safe_mode?) do
+  @spec load_all(inputs(), boolean(), user_module_mode(), trusted_project()) :: load_report()
+  defp load_all(inputs, safe_mode?, user_module_mode, project) when is_boolean(safe_mode?) do
     %{keymap_server: keymap_server, options_server: options_server} = inputs
     previous_keymap_server = Process.put(:minga_config_keymap, keymap_server)
     previous_options_server = Process.put(:minga_config_options, options_server)
     previous_lsp_settings = Process.put(:minga_config_lsp_settings, %{})
     previous_bound_commands = Process.put(:minga_config_bound_commands, MapSet.new())
+    previous_retired_notes = Process.put(:minga_config_retired_notes, [])
 
     try do
       config_cleanup_error =
@@ -571,10 +801,9 @@ defmodule Minga.Config.Loader do
 
         StartupTimer.mark(:config_global_eval)
 
-        # 4. Eval project-local config
-        project_path = resolve_project_config_path()
-        project_config_error = eval_if_exists(project_path)
-        project_mcp_error = load_project_mcp_json()
+        # 4. Eval project-local config, from the project root the loader was given and only if it is trusted.
+        project_file = eval_project_config(project)
+        project_mcp = load_project_mcp_json(project)
         StartupTimer.mark(:config_project_eval)
 
         # 5. Eval generated GUI settings overlay
@@ -593,7 +822,8 @@ defmodule Minga.Config.Loader do
         StartupTimer.mark(:config_after_and_settings)
 
         # 8. Discover plugins and start extensions after every config source has declared them.
-        plugin_error = discover_and_register_plugins(inputs.config_home)
+        {project_plugins, plugin_error} =
+          discover_and_register_plugins(inputs.config_home, project)
 
         start_all_error =
           if Process.whereis(Minga.Extension.RootSupervisor) != nil &&
@@ -607,7 +837,7 @@ defmodule Minga.Config.Loader do
           merge_error_messages([
             config_cleanup_error,
             load_error,
-            project_mcp_error,
+            project_part_error(project_mcp),
             plugin_error,
             start_all_error
           ])
@@ -618,14 +848,20 @@ defmodule Minga.Config.Loader do
           config_path: config_path,
           load_error: load_error,
           config_eval_error: config_eval_error,
-          migration_notice: extension_migration_notice(),
+          migration_notices: migration_notices_found(),
           loaded_modules: loaded_modules,
           modules_errors: modules_errors,
           modules_fingerprint: modules_fingerprint,
           extension_declarations_fingerprint:
-            extension_declarations_fingerprint(config_path, project_path, gui_settings_path),
-          project_config_path: project_path,
-          project_config_error: project_config_error,
+            extension_declarations_fingerprint(config_path, gui_settings_path),
+          project_config_path: project_part_path(project_file),
+          project_config_error: project_part_error(project_file),
+          project_config:
+            project_config(inputs.project_root, project, [
+              project_file,
+              project_mcp,
+              project_plugins
+            ]),
           gui_settings_path: gui_settings_path,
           gui_settings_error: gui_settings_error,
           after_error: after_error,
@@ -637,6 +873,7 @@ defmodule Minga.Config.Loader do
       restore_pdict(:minga_config_options, previous_options_server)
       restore_pdict(:minga_config_lsp_settings, previous_lsp_settings)
       restore_pdict(:minga_config_bound_commands, previous_bound_commands)
+      restore_pdict(:minga_config_retired_notes, previous_retired_notes)
     end
   end
 
@@ -648,19 +885,31 @@ defmodule Minga.Config.Loader do
       config_path: config_path,
       load_error: nil,
       config_eval_error: nil,
-      migration_notice: nil,
+      migration_notices: [],
       loaded_modules: [],
       modules_errors: [],
       modules_fingerprint: user_modules_fingerprint(config_dir),
       extension_declarations_fingerprint:
-        extension_declarations_fingerprint(config_path, nil, gui_settings_path),
+        extension_declarations_fingerprint(config_path, gui_settings_path),
       project_config_path: nil,
       project_config_error: nil,
+      project_config: :none,
       gui_settings_path: gui_settings_path,
       gui_settings_error: nil,
       after_error: nil,
       lsp_settings: %{}
     }
+  end
+
+  # The extension notice, then each retired option in the order the config set it.
+  @spec migration_notices_found() :: [String.t()]
+  defp migration_notices_found do
+    retired = Process.get(:minga_config_retired_notes, []) |> Enum.reverse()
+
+    case extension_migration_notice() do
+      nil -> retired
+      notice -> [notice | retired]
+    end
   end
 
   @spec extension_migration_notice() :: String.t() | nil
@@ -684,26 +933,77 @@ defmodule Minga.Config.Loader do
 
   # ── Plugin Discovery ──────────────────────────────────────────────────────────
 
-  @spec discover_and_register_plugins(String.t() | nil) :: String.t() | nil
-  defp discover_and_register_plugins(config_home) do
-    user_dir = user_plugins_dir(config_home)
-    project_dir = project_plugins_dir()
+  # Returns what happened to the project's plugin folder, so the report can name it, and the merged errors.
+  @spec discover_and_register_plugins(String.t() | nil, trusted_project()) ::
+          {project_part(), String.t() | nil}
+  defp discover_and_register_plugins(config_home, project) do
+    user_errors = register_plugins_from_dir(user_plugins_dir(config_home))
+    project_plugins = register_project_plugins(project)
 
-    user_errors = register_plugins_from_dir(user_dir)
-    project_errors = register_plugins_from_dir(project_dir)
-
-    merge_error_messages(user_errors ++ project_errors)
+    {project_plugins,
+     merge_error_messages(user_errors ++ List.wrap(project_part_error(project_plugins)))}
   end
+
+  # A plugin is code Minga loads, so the folder and each plugin in it must be the user's own.
+  # Each is resolved to its canonical path first, and that path is what gets registered.
+  @spec register_project_plugins(trusted_project()) :: project_part()
+  defp register_project_plugins(
+         {:ok, %Sources{plugins: {:ok, %{folder: folder, plugins: plugins}}}}
+       ) do
+    errors = Enum.reduce(plugins, [], &register_project_plugin/2)
+    {:loaded, folder, merge_error_messages(errors)}
+  end
+
+  defp register_project_plugins({:ok, %Sources{plugins: {:refused, dir, reason}}}),
+    do: {:refused, dir, reason}
+
+  defp register_project_plugins(_absent_or_no_trusted_project), do: :absent
+
+  # The canonical root that was examined is what gets registered.
+  @spec register_project_plugin(Sources.plugin(), [String.t()]) :: [String.t()]
+  defp register_project_plugin({name, {:ok, canonical}}, errors),
+    do: register_plugin_entry(canonical, name, errors)
+
+  defp register_project_plugin({name, {:error, reason}}, errors),
+    do: ["Plugin #{name} not loaded: #{Trust.explain(reason)}" | errors]
 
   @spec user_plugins_dir(String.t() | nil) :: String.t()
   defp user_plugins_dir(config_home) do
     Path.join(config_dir(config_home), "plugins")
   end
 
-  @spec project_plugins_dir() :: String.t()
-  defp project_plugins_dir do
-    Path.join([File.cwd!(), ".minga", "plugins"])
+  # The project root as the trust rule sees it: accepted with its canonical path and the account that must own
+  # what is read from it, refused, or absent.
+  @typep trusted_project :: {:ok, Sources.t()} | {:error, project_refusal()} | :none
+
+  # What happened to one project-local file or folder.
+  @typep project_part ::
+           :absent
+           | {:loaded, String.t(), error :: String.t() | nil}
+           | {:refused, String.t(), Trust.code_refusal()}
+
+  # `Minga.Project.Sources` examines the root and everything in it once. The load uses what it returns.
+  @spec trusted_project(String.t() | nil) :: trusted_project()
+  defp trusted_project(nil), do: :none
+  defp trusted_project(root) when is_binary(root), do: Sources.admit(root)
+
+  @spec project_config(String.t() | nil, trusted_project(), [project_part()]) :: project_config()
+  defp project_config(_root, :none, _parts), do: :none
+  defp project_config(root, {:error, reason}, _parts), do: {:refused, root, reason}
+
+  defp project_config(_root, {:ok, %Sources{root: canonical}}, parts) do
+    loaded = for {:loaded, path, _error} <- parts, do: path
+    left_out = for {:refused, path, reason} <- parts, do: {path, reason}
+    {:loaded, canonical, loaded, left_out}
   end
+
+  @spec project_part_path(project_part()) :: String.t() | nil
+  defp project_part_path({:loaded, path, _error}), do: path
+  defp project_part_path(_absent_or_refused), do: nil
+
+  @spec project_part_error(project_part()) :: String.t() | nil
+  defp project_part_error({:loaded, _path, error}), do: error
+  defp project_part_error(_absent_or_refused), do: nil
 
   @spec register_plugins_from_dir(String.t()) :: [String.t()]
   defp register_plugins_from_dir(dir) do
@@ -1028,43 +1328,158 @@ defmodule Minga.Config.Loader do
   defp config_dir(config_home) when is_binary(config_home), do: Path.join(config_home, "minga")
   defp config_dir(nil), do: Minga.UserPaths.config_dir!()
 
-  @spec load_project_mcp_json() :: String.t() | nil
-  defp load_project_mcp_json do
-    path = Path.join([File.cwd!(), ".minga", "mcp.json"])
+  @spec load_project_mcp_json(trusted_project()) :: project_part()
+  defp load_project_mcp_json(
+         {:ok, %Sources{mcp: {:ok, %{path: path, content: content}}} = sources}
+       ),
+       do: {:loaded, path, parse_project_mcp_json(content, path, sources)}
 
-    if File.exists?(path) do
-      path
-      |> File.read()
-      |> parse_project_mcp_json(path)
+  defp load_project_mcp_json({:ok, %Sources{mcp: {:refused, path, reason}}}),
+    do: {:refused, path, reason}
+
+  defp load_project_mcp_json(_absent_or_no_trusted_project), do: :absent
+
+  @spec eval_project_config(trusted_project()) :: project_part()
+  defp eval_project_config(
+         {:ok, %Sources{config: {:ok, %{path: path, content: content}}} = sources}
+       ),
+       do: {:loaded, path, eval_project_source(content, path, sources)}
+
+  defp eval_project_config({:ok, %Sources{config: {:refused, path, reason}}}),
+    do: {:refused, path, reason}
+
+  defp eval_project_config(_absent_or_no_trusted_project), do: :absent
+
+  # While a project's config is evaluated, an `extension ..., path:` it declares is held to the ownership rule
+  # too (`Minga.Config`): the account that must own those sources travels in the process dictionary.
+  # The MCP servers and hooks the file adds are processes the project declares. They are picked out afterwards,
+  # by comparing the options before and after, and go through `declared_by_project/3`.
+  @spec eval_project_source(binary(), String.t(), Sources.t()) :: String.t() | nil
+  defp eval_project_source(source, path, %Sources{} = sources) do
+    previous = Process.put(:minga_config_owner, {:owner, sources.user_id})
+    options = Process.get(:minga_config_options, Options.default_server())
+    servers_before = Options.get(options, :agent_mcp_servers)
+    hooks_before = Options.get(options, :agent_hooks)
+
+    try do
+      error = eval_config_source(source, path)
+      declared = declared_by_project(options, {servers_before, hooks_before}, sources)
+      merge_error_messages([error | declared])
+    after
+      restore_pdict(:minga_config_owner, previous)
     end
   end
 
-  @spec parse_project_mcp_json({:ok, String.t()} | {:error, term()}, String.t()) ::
-          String.t() | nil
-  defp parse_project_mcp_json({:ok, content}, path) do
+  # An entry that was there before the project's file ran is the user's own. Every other entry is the project's:
+  # a server is started from the program `Sources.process/5` returns, in the project root, and a hook runs there.
+  @spec declared_by_project(GenServer.server(), {term(), term()}, Sources.t()) :: [String.t()]
+  defp declared_by_project(options, {servers_before, hooks_before}, sources) do
+    {servers, refused} =
+      options
+      |> Options.get(:agent_mcp_servers)
+      |> List.wrap()
+      |> Enum.map_reduce([], fn server, refused ->
+        if server in List.wrap(servers_before),
+          do: {server, refused},
+          else: project_server_entry(server, sources, refused)
+      end)
+
+    hooks =
+      options
+      |> Options.get(:agent_hooks)
+      |> List.wrap()
+      |> Enum.map(fn hook ->
+        if hook in List.wrap(hooks_before), do: hook, else: project_hook_entry(hook, sources)
+      end)
+
+    [
+      set_option_error(options, :agent_mcp_servers, Enum.reject(servers, &is_nil/1)),
+      set_option_error(options, :agent_hooks, hooks)
+      | Enum.reverse(refused)
+    ]
+  end
+
+  @spec set_option_error(GenServer.server(), atom(), term()) :: String.t() | nil
+  defp set_option_error(options, name, value) do
+    if Options.get(options, name) == value do
+      nil
+    else
+      case Options.set(options, name, value) do
+        {:ok, _value} -> nil
+        {:error, message} -> message
+      end
+    end
+  end
+
+  @spec project_server_entry(term(), Sources.t(), [String.t()]) :: {map() | nil, [String.t()]}
+  defp project_server_entry(server, sources, refused) do
+    with {:ok, %MingaAgent.MCP.ServerConfig{} = config} <-
+           MingaAgent.MCP.ServerConfig.normalize(server),
+         {:ok, started} <- project_server(config, sources) do
+      {Map.from_struct(started), refused}
+    else
+      {:error, reason} when is_binary(reason) -> {nil, [reason | refused]}
+      _not_a_server -> {nil, ["MCP server entry not loaded: #{inspect(server)}" | refused]}
+    end
+  end
+
+  @spec project_server(MingaAgent.MCP.ServerConfig.t(), Sources.t(), {[map()], [String.t()]}) ::
+          {[map()], [String.t()]}
+  defp project_server(server, sources, {started, refused}) do
+    case project_server(server, sources) do
+      {:ok, server} -> {[Map.from_struct(server) | started], refused}
+      {:error, message} -> {started, [message | refused]}
+    end
+  end
+
+  # The program and the working directory come from the owner, never from the project's own data.
+  @spec project_server(MingaAgent.MCP.ServerConfig.t(), Sources.t()) ::
+          {:ok, MingaAgent.MCP.ServerConfig.t()} | {:error, String.t()}
+  defp project_server(%MingaAgent.MCP.ServerConfig{} = server, %Sources{} = sources) do
+    case Sources.process(sources, server.command, server.args, server.env) do
+      {:ok, process} ->
+        {:ok, MingaAgent.MCP.ServerConfig.started_from(server, process.executable, process.cwd)}
+
+      {:error, reason} ->
+        {:error, "MCP server #{server.name} not loaded: #{Trust.explain(reason)}"}
+    end
+  end
+
+  # A hook is one shell line that Minga's own hook runner starts, so there is no program of the project's to
+  # judge. What Minga decides is where it runs: in the project root.
+  @spec project_hook_entry(term(), Sources.t()) :: term()
+  defp project_hook_entry(hook, %Sources{root: root}) when is_map(hook),
+    do: hook |> Map.delete("cwd") |> Map.put(:cwd, root)
+
+  defp project_hook_entry(hook, %Sources{root: root}) when is_list(hook) do
+    if Keyword.keyword?(hook), do: Keyword.put(hook, :cwd, root), else: hook
+  end
+
+  defp project_hook_entry(hook, _sources), do: hook
+
+  @spec parse_project_mcp_json(binary(), String.t(), Sources.t()) :: String.t() | nil
+  defp parse_project_mcp_json(content, path, sources) do
     case JSON.decode(content) do
-      {:ok, decoded} -> register_project_mcp_servers(decoded)
+      {:ok, decoded} -> register_project_mcp_servers(decoded, sources)
       {:error, reason} -> "#{path}: invalid JSON: #{inspect(reason)}"
     end
   end
 
-  defp parse_project_mcp_json({:error, reason}, path), do: "#{path}: #{inspect(reason)}"
-
-  @spec register_project_mcp_servers(term()) :: String.t() | nil
-  defp register_project_mcp_servers(%{"mcpServers" => servers}) when is_map(servers) do
+  @spec register_project_mcp_servers(term(), Sources.t()) :: String.t() | nil
+  defp register_project_mcp_servers(%{"mcpServers" => servers}, sources) when is_map(servers) do
     case normalize_project_mcp_server_entries(servers) do
-      {:ok, entries} -> append_project_mcp_servers(entries)
+      {:ok, entries} -> append_project_mcp_servers(entries, sources)
       {:error, reason} -> reason
     end
   end
 
-  defp register_project_mcp_servers(%{"servers" => servers}) when is_list(servers),
-    do: append_project_mcp_servers(servers)
+  defp register_project_mcp_servers(%{"servers" => servers}, sources) when is_list(servers),
+    do: append_project_mcp_servers(servers, sources)
 
-  defp register_project_mcp_servers(servers) when is_list(servers),
-    do: append_project_mcp_servers(servers)
+  defp register_project_mcp_servers(servers, sources) when is_list(servers),
+    do: append_project_mcp_servers(servers, sources)
 
-  defp register_project_mcp_servers(_decoded) do
+  defp register_project_mcp_servers(_decoded, _sources) do
     ".minga/mcp.json must contain a mcpServers object, servers list, or server list"
   end
 
@@ -1084,17 +1499,19 @@ defmodule Minga.Config.Loader do
     end
   end
 
-  @spec append_project_mcp_servers([map()]) :: String.t() | nil
-  defp append_project_mcp_servers(servers) do
+  @spec append_project_mcp_servers([map()], Sources.t()) :: String.t() | nil
+  defp append_project_mcp_servers(servers, sources) do
     case MingaAgent.MCP.ServerConfig.normalize_list(servers) do
       {:ok, normalized} ->
-        server = Process.get(:minga_config_options, Options.default_server())
-        existing = Options.get(server, :agent_mcp_servers)
-        configs = Enum.map(normalized, &Map.from_struct/1)
+        {started, refused} =
+          Enum.reduce(Enum.reverse(normalized), {[], []}, &project_server(&1, sources, &2))
 
-        case Options.set(server, :agent_mcp_servers, existing ++ configs) do
-          {:ok, _servers} -> nil
-          {:error, message} -> message
+        options = Process.get(:minga_config_options, Options.default_server())
+        existing = Options.get(options, :agent_mcp_servers)
+
+        case Options.set(options, :agent_mcp_servers, existing ++ started) do
+          {:ok, _servers} -> merge_error_messages(refused)
+          {:error, message} -> merge_error_messages([message | refused])
         end
 
       {:error, reason} ->
@@ -1102,20 +1519,7 @@ defmodule Minga.Config.Loader do
     end
   end
 
-  @spec resolve_project_config_path() :: String.t() | nil
-  defp resolve_project_config_path do
-    path = Path.join(File.cwd!(), ".minga.exs")
-
-    if File.exists?(path) do
-      path
-    else
-      nil
-    end
-  end
-
-  @spec eval_if_exists(String.t() | nil) :: String.t() | nil
-  defp eval_if_exists(nil), do: nil
-
+  @spec eval_if_exists(String.t()) :: String.t() | nil
   defp eval_if_exists(path) do
     if File.exists?(path) do
       eval_config_file(path)
@@ -1140,9 +1544,24 @@ defmodule Minga.Config.Loader do
   end
 
   @spec eval_config_file(String.t()) :: String.t() | nil
-  defp eval_config_file(path) do
-    Code.eval_file(path)
-    nil
+  defp eval_config_file(path), do: eval_config(path, fn -> Code.eval_file(path) end)
+
+  # Evaluates content that was already read, under the name of the file it came from.
+  @spec eval_config_source(binary(), String.t()) :: String.t() | nil
+  defp eval_config_source(source, path),
+    do: eval_config(path, fn -> Code.eval_string(source, [], file: path) end)
+
+  @spec eval_config(String.t(), (-> term())) :: String.t() | nil
+  defp eval_config(path, evaluate) do
+    # A relative `extension ..., path:` in this file resolves against the file's own folder (`Minga.Config`).
+    previous = Process.put(:minga_config_file, path)
+
+    try do
+      evaluate.()
+      nil
+    after
+      restore_pdict(:minga_config_file, previous)
+    end
   rescue
     e in [SyntaxError, TokenMissingError, CompileError] ->
       msg = "Config syntax error in #{path}: #{Exception.message(e)}"

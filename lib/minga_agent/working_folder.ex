@@ -10,6 +10,7 @@ defmodule MingaAgent.WorkingFolder do
   alias Minga.Project
   alias Minga.Project.Detector
   alias Minga.Project.Root
+  alias Minga.Project.Trust
 
   @typedoc """
   Why a session has no folder.
@@ -74,19 +75,20 @@ defmodule MingaAgent.WorkingFolder do
 
   def project(root, version_controlled?)
       when is_binary(root) and is_function(version_controlled?, 1) do
-    cond do
-      root == placeholder_root() -> {:unavailable, :none}
-      version_controlled?.(root) -> {:project, root}
-      true -> project_unless_broad(root, Root.canonical_path(root))
-    end
+    if root == placeholder_root(),
+      do: {:unavailable, :none},
+      else: trusted_project(root, Trust.project_root(root, version_controlled?))
   end
 
-  @spec project_unless_broad(String.t(), {:ok, String.t()} | {:error, term()}) :: t()
-  defp project_unless_broad(root, {:ok, canonical}),
-    do: classify_project(root, canonical, broad?(canonical))
+  # `Minga.Project.Trust` holds the rule, shared with the configuration load.
+  @spec trusted_project(String.t(), {:ok, String.t()} | {:error, Trust.refusal()}) :: t()
+  defp trusted_project(root, {:ok, _canonical}), do: {:project, root}
+
+  defp trusted_project(_root, {:error, {:too_broad, canonical}}),
+    do: {:unavailable, {:too_broad, canonical}}
 
   # A root that does not resolve is not a place tools can reach. The caller's start fails on it as before.
-  defp project_unless_broad(root, {:error, _reason}), do: {:project, root}
+  defp trusted_project(root, {:error, :unresolvable}), do: {:project, root}
 
   @spec classify_project(String.t(), String.t(), boolean()) :: t()
   defp classify_project(_root, canonical, true), do: {:unavailable, {:too_broad, canonical}}
@@ -126,7 +128,7 @@ defmodule MingaAgent.WorkingFolder do
 
   def folder(path) when is_binary(path) do
     case canonical_directory(path) do
-      {:ok, canonical} -> classify(canonical, broad?(canonical))
+      {:ok, canonical} -> classify(canonical, Trust.broad?(canonical))
       :error -> {:unavailable, :none}
     end
   end
@@ -157,9 +159,9 @@ defmodule MingaAgent.WorkingFolder do
   defp at_directory(root, _canonical, :version_control), do: {:project, root}
 
   defp at_directory(root, canonical, :marker),
-    do: classify_project(root, canonical, broad?(canonical))
+    do: classify_project(root, canonical, Trust.broad?(canonical))
 
-  defp at_directory(_root, canonical, :none), do: classify(canonical, broad?(canonical))
+  defp at_directory(_root, canonical, :none), do: classify(canonical, Trust.broad?(canonical))
 
   # What marks the root itself as a project, by the detector the editor uses to find projects.
   @spec project_evidence(String.t()) :: :version_control | :marker | :none
@@ -441,52 +443,6 @@ defmodule MingaAgent.WorkingFolder do
       _relative_missing_or_not_a_directory -> :error
     end
   end
-
-  # Names are compared first, then the directories themselves, so another spelling of the home directory or
-  # the filesystem root (a different case, a firmlink, an unusual mount point) is as broad as the usual one.
-  @spec broad?(String.t()) :: boolean()
-  defp broad?(canonical) do
-    Root.broad_path?(canonical) or contains_home?(canonical) or
-      same_directory?(canonical, "/") or volume_root?(canonical)
-  end
-
-  # The home directory and every folder above it hold all of the person's files.
-  @spec contains_home?(String.t()) :: boolean()
-  defp contains_home?(canonical) do
-    home = Path.expand("~")
-
-    home_names =
-      case Root.canonical_path(home) do
-        {:ok, canonical_home} -> [home, canonical_home]
-        {:error, _reason} -> [home]
-      end
-
-    Enum.any?(home_names, &(&1 == canonical or String.starts_with?(&1, canonical <> "/"))) or
-      same_directory?(canonical, home)
-  end
-
-  @spec same_directory?(String.t(), String.t()) :: boolean()
-  defp same_directory?(left, right) do
-    case {File.stat(left), File.stat(right)} do
-      {{:ok, a}, {:ok, b}} -> identity(a) == identity(b)
-      _unreadable -> false
-    end
-  end
-
-  # A directory on another device than its parent is the top of a mounted volume.
-  @spec volume_root?(String.t()) :: boolean()
-  defp volume_root?(directory) do
-    case {File.stat(directory), File.stat(Path.dirname(directory))} do
-      {{:ok, a}, {:ok, b}} -> device(a) != device(b)
-      _unreadable -> false
-    end
-  end
-
-  @spec identity(File.Stat.t()) :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
-  defp identity(%File.Stat{} = stat), do: {stat.major_device, stat.minor_device, stat.inode}
-
-  @spec device(File.Stat.t()) :: {non_neg_integer(), non_neg_integer()}
-  defp device(%File.Stat{} = stat), do: {stat.major_device, stat.minor_device}
 
   # A too-broad candidate explains more than a missing one, so it wins over `:none`.
   @spec first_refusal([t()], t()) :: t()

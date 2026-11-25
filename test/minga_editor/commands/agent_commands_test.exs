@@ -1333,11 +1333,17 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       AgentCommands.settle_turn_request(state, request, :ok)
     end
 
+    # The session names its task by announcing its first goal.
     defp named(state, session, title) do
       %{
         state
         | agent_connection:
-            MingaEditor.State.AgentConnection.name_task(state.agent_connection, session, title)
+            MingaEditor.State.AgentConnection.observe_task_event(
+              state.agent_connection,
+              session,
+              {:title_changed, title},
+              0
+            )
       }
     end
 
@@ -1861,7 +1867,13 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
                MingaEditor.Input.AgentPanel.handle_paste(state_a, "keyboard draft")
 
       state_a = MingaEditor.Input.Router.route_key(state_a, 27, 0)
+
+      # With no file to return to, closing the conversation shows the project home; the task keeps its draft.
       state_a = MingaEditor.Commands.execute(state_a, :agent_close)
+      assert state_a.workspace.keymap_scope == :editor
+      assert MingaEditor.Input.EmptyState.showing_home?(state_a)
+      state_a = MingaEditor.TabWorkflow.switch(state_a, tab_a.id)
+      state_a = collect_arrival(state_a, session_a)
       assert state_a.workspace.keymap_scope == :agent
       assert View.active?(state_a.workspace.agent_ui.view)
 

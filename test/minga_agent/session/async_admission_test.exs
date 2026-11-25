@@ -129,6 +129,27 @@ defmodule MingaAgent.Session.AsyncAdmissionTest do
     assert :ok = Session.stop_turn(session, {record, turn})
   end
 
+  test "a first message admitted after its count announces its goal once the turn starts, so its task is named",
+       %{
+         session: session,
+         root: root
+       } do
+    assert :ok = Session.subscribe(session, self())
+    cold(root)
+
+    request =
+      composer_send(session, {:idle, Session.session_id(session)}, "Add tests for the classifier")
+
+    assert_receive {:counting, counting}
+
+    # Still admitting: nothing has named the task yet.
+    refute_received {:agent_event, ^session, {:title_changed, _goal}}
+
+    send(counting, :count)
+    assert {:reply, {:sent, _queue_target}} = answer(request)
+    assert_receive {:agent_event, ^session, {:title_changed, "Add tests for the classifier"}}
+  end
+
   test "a prompt during admission queues like a prompt during a working turn", %{
     session: session,
     root: root

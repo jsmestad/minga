@@ -23,7 +23,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Code do
       ),
       Entry.pending("code.diagnostics.none", 4058, "an empty diagnostics list points somewhere"),
       Entry.built("code.actions.none",
-        reach: "SPC c a",
+        reach: "1 SPC c a",
         recognize: &(is_binary(&1.echo) and &1.echo =~ ~r/^No code actions/),
         checks: [
           Check.new(
@@ -39,7 +39,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Code do
         ]
       ),
       Entry.built("code.references.none",
-        reach: "SPC c D",
+        reach: "1 SPC c D",
         recognize: &(is_binary(&1.echo) and &1.echo =~ ~r/^No references/),
         checks: [
           Check.new(

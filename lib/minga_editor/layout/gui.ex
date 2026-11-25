@@ -12,9 +12,14 @@ defmodule MingaEditor.Layout.GUI do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.RenderPipeline.Input, as: RenderInput
   alias MingaEditor.MinibufferData
+  alias MingaEditor.Shell.Traditional.Drawers
+  alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.Window.Content
 
   @timeline_rows 3
+  @drawer_share 0.4
+  @drawer_min_rows 4
+  @editor_min_rows 3
 
   @doc """
   Computes content, timeline and minibuffer rectangles from the reported row grid.
@@ -48,6 +53,9 @@ defmodule MingaEditor.Layout.GUI do
     {editor_height, edit_timeline} =
       reserve_timeline(editor_height, vp.cols, native_gui?, windows)
 
+    {editor_height, tasks_drawer} =
+      reserve_drawer(editor_height, vp.cols, native_gui?, drawer_showing?(state))
+
     editor_area = {0, 0, vp.cols, editor_height}
 
     # All windows are no-modeline; the global SwiftUI status bar handles status display.
@@ -70,6 +78,7 @@ defmodule MingaEditor.Layout.GUI do
       agent_panel: nil,
       status_bar: nil,
       edit_timeline: edit_timeline,
+      tasks_drawer: tasks_drawer,
       minibuffer: minibuffer
     }
   end
@@ -94,6 +103,35 @@ defmodule MingaEditor.Layout.GUI do
         {height, nil}
     end
   end
+
+  # A drawer is a real split along the bottom (docs/design/surfaces.md "Drawers"): the terminal gives it 40% of the rows
+  # above the footer, at least a header, two rows and a hint border, and never the editor's last three rows.
+  # Native drawers sit outside the reported grid.
+  @spec reserve_drawer(non_neg_integer(), pos_integer(), boolean(), boolean()) ::
+          {non_neg_integer(), Layout.rect() | nil}
+  defp reserve_drawer(height, _cols, _native_gui?, false), do: {height, nil}
+  defp reserve_drawer(height, _cols, true, true), do: {height, nil}
+
+  defp reserve_drawer(height, cols, false, true) do
+    rows =
+      (height * @drawer_share)
+      |> round()
+      |> max(@drawer_min_rows)
+      |> min(height - @editor_min_rows)
+
+    if rows > 0,
+      do: {height - rows, {height - rows, 0, cols, rows}},
+      else: {height, nil}
+  end
+
+  @spec drawer_showing?(EditorState.t() | RenderInput.t()) :: boolean()
+  defp drawer_showing?(%EditorState{shell_runtime: %{state: %ShellState{} = shell}}),
+    do: shell |> ShellState.drawers() |> Drawers.showing?(:tasks)
+
+  defp drawer_showing?(%RenderInput{intent: %{frame: %{shell_state: %ShellState{} = shell}}}),
+    do: shell |> ShellState.drawers() |> Drawers.showing?(:tasks)
+
+  defp drawer_showing?(_state), do: false
 
   @spec timeline_rect(non_neg_integer(), pos_integer(), non_neg_integer()) :: Layout.rect() | nil
   defp timeline_rect(_row, _cols, 0), do: nil

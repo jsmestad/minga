@@ -92,6 +92,102 @@ public enum NotificationLevel: Sendable, Equatable {
 /// Namespace for all binary protocol data types decoded from the BEAM.
 public enum Wire {
 
+    /// The tasks drawer (`*minga-tasks*`): every task Minga is working on, as the BEAM wrote it (gui_tasks_drawer).
+    public struct TasksDrawer: Sendable, Equatable {
+        /// A key and what it does.
+        public struct Hint: Sendable, Equatable {
+            public let key: String
+            public let label: String
+            public init(key: String, label: String) {
+                self.key = key
+                self.label = label
+            }
+        }
+
+        /// One task or subagent row. `id` is the row's identity; clicks carry it back.
+        public struct Row: Sendable, Equatable, Identifiable {
+            public let id: String
+            public let depth: UInt8
+            public let isLastChild: Bool
+            public let isSelected: Bool
+            public let state: SpineState?
+            public let title: String
+            public let words: String
+            public let age: String
+            public let detail: [String]
+            public let actions: [Hint]
+
+            public init(
+                id: String, depth: UInt8, isLastChild: Bool, isSelected: Bool, state: SpineState?,
+                title: String, words: String, age: String, detail: [String], actions: [Hint]
+            ) {
+                self.id = id
+                self.depth = depth
+                self.isLastChild = isLastChild
+                self.isSelected = isSelected
+                self.state = state
+                self.title = title
+                self.words = words
+                self.age = age
+                self.detail = detail
+                self.actions = actions
+            }
+        }
+
+        public let visible: Bool
+        public let focused: Bool
+        public let name: String
+        public let title: String
+        public let note: String
+        public let counts: [(state: SpineState, count: Int)]
+        public let hints: [Hint]
+        public let rows: [Row]
+        /// What the drawer shows: the list, one request's diff, or one task's output.
+        public enum View: UInt8, Sendable { case list = 0, diff = 1, output = 2 }
+        public let view: View
+        public let viewTitle: String
+        public let viewLines: [String]
+        public let viewOffset: Int
+        /// A question the drawer is asking (a stop to confirm), or empty.
+        public let prompt: String
+        /// The empty-state anatomy when the drawer has no tasks: what happened, why, and the next steps.
+        public let empty: EmptyList?
+
+        public init(
+            visible: Bool, focused: Bool, name: String, title: String, note: String,
+            counts: [(state: SpineState, count: Int)], hints: [Hint], rows: [Row],
+            view: View = .list, viewTitle: String = "", viewLines: [String] = [], viewOffset: Int = 0,
+            prompt: String = "", empty: EmptyList? = nil
+        ) {
+            self.visible = visible
+            self.focused = focused
+            self.name = name
+            self.title = title
+            self.note = note
+            self.counts = counts
+            self.hints = hints
+            self.rows = rows
+            self.view = view
+            self.viewTitle = viewTitle
+            self.viewLines = viewLines
+            self.viewOffset = viewOffset
+            self.prompt = prompt
+            self.empty = empty
+        }
+
+        public static let hidden = TasksDrawer(
+            visible: false, focused: false, name: "", title: "", note: "", counts: [], hints: [], rows: []
+        )
+
+        public static func == (lhs: TasksDrawer, rhs: TasksDrawer) -> Bool {
+            lhs.visible == rhs.visible && lhs.focused == rhs.focused && lhs.name == rhs.name
+                && lhs.title == rhs.title && lhs.note == rhs.note && lhs.hints == rhs.hints && lhs.rows == rhs.rows
+                && lhs.view == rhs.view && lhs.viewTitle == rhs.viewTitle && lhs.viewLines == rhs.viewLines
+                && lhs.viewOffset == rhs.viewOffset && lhs.prompt == rhs.prompt && lhs.empty == rhs.empty
+                && lhs.counts.map(\.state) == rhs.counts.map(\.state) && lhs.counts.map(\.count) == rhs.counts.map(\.count)
+        }
+    }
+
     /// The keyboard owner named by a committed BEAM frame.
     public struct FocusOwner: Sendable, Equatable {
         /// Native responder kinds, projected directly from the wire byte.
@@ -284,14 +380,32 @@ public enum Wire {
         }
     }
 
-    // MARK: - Launchpad empty state
+    // MARK: - Project home
 
-    /// A single launchpad row decoded from the gui_empty_state protocol message (0xA5).
+    /// The project home header decoded from gui_empty_state (0xA5, #4056): where you are.
     ///
-    /// `kind`: 0=resume, 1=recent_file, 2=action, 3=hint. The BEAM sends semantic
-    /// data only; the frontend owns all layout. `jumpKey` (single instant key),
-    /// `chord` (space-separated keystroke tokens), and a `detail` beginning with
-    /// ":" select one of three input-visual treatments.
+    /// `title` is the project or folder name ("Minga" outside a project), `path` is home-relative,
+    /// `status` is one line (branch and change count, or why there is no project), and `note` is an
+    /// optional muted second line.
+    public struct EmptyStateHeader: Sendable, Equatable {
+        public let title: String
+        public let path: String
+        public let status: String
+        public let note: String
+
+        public init(title: String = "", path: String = "", status: String = "", note: String = "") {
+            self.title = title
+            self.path = path
+            self.status = status
+            self.note = note
+        }
+    }
+
+    /// One project home row decoded from gui_empty_state (0xA5).
+    ///
+    /// `kind`: 1=recent file, 2=action, 4=project, 5=task. `jumpKey` is the number key that opens
+    /// the row, `chord` the leader sequence an action runs. `detail` and `meta` are muted text after
+    /// the label. `state` is a design-token state name ("needs_you") whose mark a task row draws.
     public struct EmptyStateItem: Sendable, Identifiable {
         public let kind: UInt8
         public let id: String
@@ -301,8 +415,10 @@ public enum Wire {
         public let chord: String
         public let icon: String
         public let iconColorRGB: UInt32
+        public let meta: String
+        public let state: String
 
-        public init(kind: UInt8, id: String, label: String, detail: String, jumpKey: String, chord: String, icon: String, iconColorRGB: UInt32) {
+        public init(kind: UInt8, id: String, label: String, detail: String, jumpKey: String, chord: String, icon: String, iconColorRGB: UInt32, meta: String = "", state: String = "") {
             self.kind = kind
             self.id = id
             self.label = label
@@ -311,22 +427,27 @@ public enum Wire {
             self.chord = chord
             self.icon = icon
             self.iconColorRGB = iconColorRGB
+            self.meta = meta
+            self.state = state
         }
     }
 
-    /// A launchpad section decoded from gui_empty_state (0xA5).
+    /// A project home section decoded from gui_empty_state (0xA5).
     ///
-    /// `sectionId`: 0=session, 1=recent, 2=start, 3=footer.
+    /// `sectionId`: 1=recent files, 4=recent projects, 5=Minga tasks, 6=next actions. `empty` is the
+    /// muted line shown when the section has no rows.
     public struct EmptyStateSection: Sendable, Identifiable {
         public let sectionId: UInt8
         public let title: String
+        public let empty: String
         public let items: [EmptyStateItem]
 
         public var id: UInt8 { sectionId }
 
-        public init(sectionId: UInt8, title: String, items: [EmptyStateItem]) {
+        public init(sectionId: UInt8, title: String, items: [EmptyStateItem], empty: String = "") {
             self.sectionId = sectionId
             self.title = title
+            self.empty = empty
             self.items = items
         }
     }

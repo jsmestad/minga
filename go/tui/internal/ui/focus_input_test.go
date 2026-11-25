@@ -191,7 +191,7 @@ func TestLaunchpadLeaderOwnerPreventsNavigationBehindWhichKey(t *testing.T) {
 		t.Fatal("Down moved launchpad focus while the committed owner was the leader handler")
 	}
 	state, visible := model.emptyState()
-	if !visible || state.FocusedID != "resume" {
+	if !visible || state.FocusedID != "recent-1" {
 		t.Fatalf("leader navigation changed the retained launchpad: %+v", state)
 	}
 	packets := drainOutboundPackets(out)

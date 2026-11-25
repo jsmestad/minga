@@ -139,10 +139,17 @@ defmodule MingaEditor.Agent.CatalogStartup do
 
   @spec settle_start(EditorState.t(), start(), AgentSession.catalog_start_result(), Outcome.t()) ::
           {EditorState.t(), Outcome.t()}
-  defp settle_start(state, {:start, workspace, _, _, _}, result, outcome) do
+  defp settle_start(state, {:start, workspace, _, _, follow_up}, result, outcome) do
     case AgentSession.complete_deferred_start(state, workspace, result) do
-      {:ok, next} -> {next, outcome}
-      :stale -> {state, Outcome.stale(outcome, :agent_origin_changed)}
+      {:ok, next} ->
+        {next, outcome}
+
+      # A task the drawer started whose workspace is gone did not start; its row says so.
+      :stale ->
+        state =
+          MingaEditor.Agent.TaskWorkflow.start_failed(state, follow_up, "Agent could not start")
+
+        {state, Outcome.stale(outcome, :agent_origin_changed)}
     end
   end
 

@@ -101,6 +101,7 @@ defmodule MingaEditor do
           | {:session_dir, String.t()}
           | {:startup_file, String.t() | nil}
           | {:startup_directory, String.t() | nil}
+          | {:home, keyword()}
           | {:suppress_tool_prompts, boolean()}
           | {:agent_arrival_budget_ms, non_neg_integer()}
           | {:pane_generation_allocator, (-> pos_integer())}
@@ -373,8 +374,10 @@ defmodule MingaEditor do
     EventBus.subscribe(:tool_missing, events_registry)
     EventBus.subscribe(:log_message, events_registry)
 
-    if migration_notice = Minga.Config.Loader.migration_notice() do
-      Minga.API.message(migration_notice)
+    Enum.each(Minga.Config.Loader.migration_notices(), &Minga.API.message/1)
+
+    if project_config = Minga.Config.project_config_message() do
+      Minga.API.message(project_config)
     end
 
     EventBus.subscribe(:face_overrides_changed, events_registry)
@@ -902,8 +905,8 @@ defmodule MingaEditor do
      %{state | frontend: MingaEditor.State.Frontend.accept_capabilities(state.frontend, caps)}}
   end
 
-  # The frontend moved to the foreground or to the background. The editor keeps the fact, and tells the rest of Minga
-  # once per change: a reader below the editor (the agent's notifier) cannot ask the editor for it.
+  # The frontend moved to the foreground or to the background. The editor keeps the fact for its own "needs you"
+  # alert, and tells the rest of Minga once per change: a reader below the editor cannot ask the editor for it.
   def handle_info({:minga_input, {:frontend_foreground, status}}, %MingaEditor.State{} = state) do
     case MingaEditor.State.report_frontend_foreground(state, status) do
       {state, :unchanged} -> {:noreply, state}

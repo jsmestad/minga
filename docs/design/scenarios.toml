@@ -228,7 +228,7 @@ boards = { macos = "Batch4_files_empty.dc.html", tui = "Batch4_files_empty.dc.ht
 transient = true
 exits = [
   { key = "SPC p a", click = "mode pill › Project › Switch project (macOS: also the menu bar)", to = "start.project_switcher" },
-  { key = "esc", click = "click outside", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "start.open_dir.home" },
 ]
 
 [[scenario]]
@@ -349,7 +349,7 @@ exits = [
   { key = "SPC g c", click = "mode pill › Git › Commit (macOS: also the menu bar)", to = "git.commit" },
   { key = "SPC g x", click = "mode pill › Git › Conflicts (macOS: also the menu bar)", to = "git.conflict" },
   { key = "SPC g z", click = "mode pill › Git › Stash (macOS: also the menu bar)", to = "git.stash" },
-  { key = "SPC a a", click = "modeline needs-you segment, or mode pill › Minga › Tasks", to = "minga.tasks.list" },
+  { key = "SPC a a", click = "modeline needs-you segment, or mode pill › Minga › Tasks", to = "minga.tasks.empty", note = "nothing else is happening, so no tasks yet" },
   { key = "SPC a n", click = "mode pill › Minga › New task (macOS: also the menu bar)", to = "minga.task.new" },
   { key = "SPC a v", click = "modeline Minga segment", to = "minga.conversation" },
   { key = "SPC a r", click = "mode pill › Minga › Review (macOS: also the menu bar)", to = "minga.review.buffer" },
@@ -1009,7 +1009,7 @@ status = "designed"
 boards = { macos = "V41WhichKey.dc.html", tui = "V41TuiEdit.dc.html", mouse = "Mouse_Video_ModePill.dc.html" }
 transient = true
 exits = [
-  { key = "a", click = "Tasks row", to = "minga.tasks.needs_you" },
+  { key = "a", click = "Tasks row", to = "minga.tasks.empty", note = "from a fresh start there are no tasks yet" },
   { key = "v", click = "Conversation row", to = "minga.conversation" },
   { key = "r", click = "Review row", to = "minga.review.buffer" },
   { key = "i", click = "Inspect row", to = "minga.subagent.peek" },
@@ -1040,13 +1040,12 @@ exits = [
   { key = "=", click = "Show diff", to = "minga.approval.diff" },
   { key = "↩", click = "row title", to = "minga.conversation" },
   { key = "i", click = "Inspect", to = "minga.subagent.peek" },
-  { key = "r", click = "Retry now", to = "minga.tasks.working" },
   { key = "o", click = "Output", to = "minga.task.output" },
   { key = "↩ on a done row", click = "Review", to = "minga.review.buffer" },
   { key = "q", click = "drawer close", to = "edit.working" },
   { key = "esc", click = "", to = "edit.working", keyboard_only = "q has the click (drawer close); esc is the keyboard twin" },
 ]
-notes = "Empty state (no tasks) is not designed: see minga.tasks.empty."
+notes = "Rows show one action each by state: r Retry on waiting and failed rows, o Output, i Inspect, ↩ Review on done rows; those exits are listed on minga.tasks.list, where such a row is selected. Empty state: see minga.tasks.empty."
 
 [[scenario]]
 id = "minga.review.buffer"
@@ -1145,7 +1144,7 @@ id = "minga.tasks.list"
 journey = "minga"
 title = "Tasks drawer with nothing waiting on you"
 surfaces = ["editor", "drawer:tasks", "modeline"]
-states = ["working", "waiting", "failed", "done"]
+states = ["working", "waiting", "stopped", "failed", "done"]
 frontends = ["macos", "tui"]
 status = "designed"
 boards = { macos = "V41Tasks.dc.html", tui = "V41TuiTasks.dc.html" }
@@ -1155,7 +1154,7 @@ empty_state = "minga.tasks.empty"
 exits = [
   { key = "↩", click = "row title", to = "minga.conversation" },
   { key = "i", click = "Inspect", to = "minga.subagent.peek" },
-  { key = "r", click = "Retry now", to = "minga.tasks.list" },
+  { key = "r", click = "Retry now", to = "minga.tasks.working", note = "the retried task works again, still selected" },
   { key = "o", click = "Output", to = "minga.task.output" },
   { key = "q", click = "drawer close", to = "edit.plain" },
   { key = "esc", click = "", to = "edit.plain", keyboard_only = "q has the click" },
@@ -1193,12 +1192,12 @@ exits = [
   { key = "q", click = "drawer close", to = "edit.plain" },
   { key = "esc", click = "", to = "edit.plain", keyboard_only = "q has the click" },
 ]
-notes = "Voice: \"No one's at the table yet\". Offers n New task."
+notes = "Voice: \"No one's at the table yet\". Offers c New task (n is Deny on a needs-you row)."
 
 [[scenario]]
 id = "minga.task.new"
 journey = "minga"
-title = "New task ›: the minibuffer prompt for a new task (n in the tasks drawer, or SPC a n)"
+title = "New task ›: the minibuffer prompt for a new task (c in the tasks drawer, or SPC a n)"
 surfaces = ["drawer:tasks", "minibuffer"]
 states = []
 frontends = ["macos", "tui"]

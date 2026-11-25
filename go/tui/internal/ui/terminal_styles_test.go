@@ -319,19 +319,7 @@ func TestAForcedFeatureIsReportedAsTheUsersAndDrawnAsForced(t *testing.T) {
 	if profile, forced := forcedOn.ForcedColorProfile(colorprofile.ANSI); !forced || profile != colorprofile.TrueColor {
 		t.Fatalf("forced on = %v, %v; want true colour", profile, forced)
 	}
-	if _, forced := New(80, 24, nil).ForcedColorProfile(colorprofile.TrueColor); forced {
+	if _, forced := New(80, 24, nil).ForcedColorProfile(colorprofile.ANSI); forced {
 		t.Fatal("without an override the profile is detected")
-	}
-}
-
-func TestTheHeroCardsBorderDimsInTheBackground(t *testing.T) {
-	model, _ := terminalModel()
-	if !sameColor(model.emptyBorderColor(false, true), model.palette().Accent()) {
-		t.Fatal("a focused card has the accent border")
-	}
-	updated, _ := model.Update(tea.BlurMsg{})
-	model = updated.(Model)
-	if !sameColor(model.emptyBorderColor(false, true), model.palette().AccentSoft()) {
-		t.Fatal("in the background the card keeps its resting border")
 	}
 }

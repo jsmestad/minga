@@ -21,9 +21,9 @@ Endpoints, all measured from the moment the final key-down was posted:
 
 Scenarios (one launch each):
 
-* n-immediate: SPC a n as soon as the first frame is presented, then later opens.
-* n-later: SPC a n after --later-delay seconds, then later opens.
-* a-immediate / a-later: the same with SPC a a.
+* n-immediate: SPC a S n (new session) as soon as the first frame is presented, then later opens.
+* n-later: SPC a S n after --later-delay seconds, then later opens.
+* a-immediate / a-later: the same with SPC a v (the agent view).
 """
 
 import argparse
@@ -42,7 +42,7 @@ import time
 
 HERE = Path(__file__).resolve().parent
 FIXTURE_TEXT = "Shipping Agent open timing fixture\n"
-OPEN_KEYS = {"n": ["space", "a", "n"], "a": ["space", "a", "a"]}
+OPEN_KEYS = {"n": ["space", "a", "S", "n"], "a": ["space", "a", "v"]}
 
 
 def realtime_minus_uptime_ns():

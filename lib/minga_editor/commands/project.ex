@@ -17,7 +17,7 @@ defmodule MingaEditor.Commands.Project do
   @type state :: EditorState.t()
 
   @command_specs [
-    {:project_find_file, "Find file in project", true},
+    {:project_find_file, "Find file in project", false},
     {:project_invalidate, "Invalidate project cache", true},
     {:project_close, "Close project", false},
     {:project_add, "Add project", false},

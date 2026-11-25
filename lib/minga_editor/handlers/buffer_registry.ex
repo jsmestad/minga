@@ -293,8 +293,11 @@ defmodule MingaEditor.Handlers.BufferRegistry do
     {state, tab} = ShellWorkflow.resolve_tab_by_buffer(state, pid)
 
     case tab do
-      %Tab{id: tab_id} -> {:ok, TabWorkflow.switch(state, tab_id), pid, :switched_tab}
-      _ -> {:ok, add_buffer(state, pid, context: :open), pid, :opened_tab}
+      %Tab{id: tab_id} ->
+        {:ok, TabWorkflow.switch(state, tab_id), pid, :switched_tab}
+
+      _ ->
+        {:ok, add_buffer(state, pid, context: :open), pid, :opened_tab}
     end
   end
 
@@ -440,9 +443,8 @@ defmodule MingaEditor.Handlers.BufferRegistry do
     end
   end
 
+  # With no active tab (the project home), every file tab is inactive and holds its buffers in its snapshot.
   @spec inactive_file_tab_buffer_pids(state(), Tab.id() | nil) :: [pid()]
-  defp inactive_file_tab_buffer_pids(_state, nil), do: []
-
   defp inactive_file_tab_buffer_pids(
          %{shell_runtime: %{state: %{tab_bar: %TabBar{tabs: tabs}}}},
          active_tab_id

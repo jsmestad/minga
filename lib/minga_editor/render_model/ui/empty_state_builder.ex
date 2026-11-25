@@ -1,11 +1,8 @@
 defmodule MingaEditor.RenderModel.UI.EmptyStateBuilder do
   @moduledoc """
-  Builds the launchpad render model from workspace state (#2689), and the empty-state anatomy every empty list surface shows (`empty_list/4`).
+  Builds the project home render model, `*home*` (#4056), from workspace state, and the empty-state anatomy every empty list surface shows (`empty_list/4`).
 
-  Pure over the `MingaEditor.State.Launchpad` snapshot: session and recents
-  data were captured when the empty state was entered, so no filesystem or
-  process calls happen per frame except cheap ETS keymap reads. Chords are
-  resolved from the live keymap so hints always match user overrides.
+  Pure over the `MingaEditor.State.Launchpad` snapshot: project, git and recent data were captured when the home was entered, so no filesystem or process calls happen per frame except cheap ETS keymap reads. Minga's tasks come from the frame's task rows (`MingaEditor.Agent.Tasks`). Chords are resolved from the live keymap so hints always match user overrides.
   """
 
   alias Minga.Keymap.Active
@@ -16,16 +13,10 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilder do
   alias Minga.RenderModel.UI.EmptyState
   alias Minga.RenderModel.UI.EmptyState.Item
   alias Minga.RenderModel.UI.EmptyState.Section
+  alias MingaEditor.Agent.Tasks.Entry
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.State.Launchpad
   alias MingaEditor.State.Windows
-
-  # {item id, label, leader-bound command} for the start section, in order.
-  @actions [
-    {"action-find-file", "open file", :find_file},
-    {"action-file-tree", "file tree", :toggle_file_tree},
-    {"action-palette", "command palette", :command_palette}
-  ]
 
   @typedoc """
   One next step of an empty list: the command it runs and its label, with the key that runs it when the surface's own scope binds a bare key. Without a key, the key is the command's leader sequence from the live keymap.
@@ -61,15 +52,23 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilder do
        do: %EmptyList.Action{id: Atom.to_string(command), key: key, label: label}
 
   @spec build(Context.t()) :: EmptyState.t()
-  def build(%Context{workspace: %{launchpad: %Launchpad{} = lp}, windows: %Windows{} = windows}) do
+  def build(
+        %Context{workspace: %{launchpad: %Launchpad{} = home}, windows: %Windows{} = windows} =
+          ctx
+      ) do
     case Windows.active_struct(windows) do
       %{content: {:empty, :semantic}} ->
+        {status, note} = header_lines(home)
+
         %EmptyState{
           visible?: true,
-          crashed?: lp.crashed?,
-          focused_id: lp.focused_id,
-          version: version(),
-          sections: sections(lp)
+          focused_id: home.focused_id,
+          title: title(home),
+          # Outside a project there is no path to show; the status line says so.
+          path: if(home.root, do: display_path(home.root), else: ""),
+          status: status,
+          note: note,
+          sections: sections(home, tasks(ctx, home), keymap_server(ctx))
         }
 
       _other ->
@@ -79,58 +78,64 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilder do
 
   def build(%Context{}), do: %EmptyState{visible?: false}
 
-  @spec sections(Launchpad.t()) :: [Section.t()]
-  defp sections(%Launchpad{} = lp) do
-    [session_section(lp), recent_section(lp), start_section(lp), footer_section(lp)]
-    |> Enum.reject(&(&1.items == []))
-  end
+  @doc "The buffer name the modeline shows while the home is in the active window."
+  @spec buffer_name() :: String.t()
+  def buffer_name, do: "*home*"
 
-  @spec session_section(Launchpad.t()) :: Section.t()
-  defp session_section(%Launchpad{session_file_count: 0} = lp) do
-    if first_run?(lp) do
-      %Section{
-        id: :session,
-        title: "Get started",
-        items: [
-          %Item{
-            id: "action-tutor",
-            kind: :action,
-            label: "open the tutorial",
-            detail: ":Tutor",
-            jump_key: "RET"
-          }
-        ]
-      }
-    else
-      %Section{id: :session, items: []}
+  @doc "A path as the home shows it: under the home directory it starts with `~`, as a shell prompt shows it."
+  @spec display_path(String.t() | nil) :: String.t()
+  def display_path(nil), do: "~"
+
+  def display_path(path) when is_binary(path) do
+    home = System.user_home() || ""
+
+    cond do
+      home == "" -> path
+      path == home -> "~"
+      String.starts_with?(path, home <> "/") -> "~" <> String.replace_prefix(path, home, "")
+      true -> path
     end
   end
 
-  defp session_section(%Launchpad{} = lp) do
-    {title, label} =
-      if lp.crashed? do
-        {"Crashed session", "restore session"}
-      else
-        {"Session", "resume last session"}
-      end
+  @spec title(Launchpad.t()) :: String.t()
+  defp title(%Launchpad{root: nil}), do: "Minga"
+  defp title(%Launchpad{root: root}), do: Path.basename(root)
 
-    %Section{
-      id: :session,
-      title: title,
-      items: [
-        %Item{
-          id: Launchpad.resume_id(),
-          kind: :resume,
-          label: label,
-          detail: file_count_label(lp.session_file_count),
-          jump_key: "r"
-        }
-      ]
-    }
+  @spec header_lines(Launchpad.t()) :: {String.t(), String.t()}
+  defp header_lines(%Launchpad{place: :outside}), do: {"No project here.", ""}
+
+  defp header_lines(%Launchpad{place: :folder}) do
+    {"Not a project: no .git, mix.exs, package.json or other marker here.",
+     "Minga uses this folder as the root for now."}
+  end
+
+  defp header_lines(%Launchpad{place: :project, git: nil}), do: {"", ""}
+
+  defp header_lines(%Launchpad{place: :project, git: %{branch: branch, changed: 0}}),
+    do: {branch, ""}
+
+  defp header_lines(%Launchpad{place: :project, git: %{branch: branch, changed: changed}}),
+    do: {"#{branch} · #{changed} changed", ""}
+
+  @spec sections(Launchpad.t(), [Launchpad.task()], GenServer.server()) :: [Section.t()]
+  defp sections(%Launchpad{place: :outside} = home, tasks, keymap) do
+    Enum.reject(
+      [project_section(home), task_section(tasks), next_section(home, keymap)],
+      &is_nil/1
+    )
+  end
+
+  defp sections(%Launchpad{} = home, tasks, keymap) do
+    Enum.reject(
+      [recent_section(home), task_section(tasks), next_section(home, keymap)],
+      &is_nil/1
+    )
   end
 
   @spec recent_section(Launchpad.t()) :: Section.t()
-  defp recent_section(%Launchpad{recents: recents}) do
+  defp recent_section(%Launchpad{place: place, recents: recents}) do
+    title = if place == :folder, do: "Recent in this folder", else: "Recent in this project"
+
     items =
       recents
       |> Enum.with_index(1)
@@ -141,96 +146,108 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilder do
           id: Launchpad.recent_id(i),
           kind: :recent_file,
           label: Path.basename(path),
-          detail: Path.dirname(path),
+          detail: directory(path),
           jump_key: Integer.to_string(i),
           icon: icon,
           icon_color: color
         }
       end)
 
-    %Section{id: :recent, title: "Recent", items: items}
+    %Section{id: :recent, title: title, empty: "Nothing opened here yet.", items: items}
   end
 
-  @spec start_section(Launchpad.t()) :: Section.t()
-  defp start_section(%Launchpad{} = lp) do
-    trie = leader_trie()
-
-    action_items =
-      Enum.map(@actions, fn {id, label, command} ->
-        {icon, color} = action_icon(command)
-
+  @spec project_section(Launchpad.t()) :: Section.t()
+  defp project_section(%Launchpad{projects: projects} = home) do
+    items =
+      projects
+      |> Enum.with_index(1)
+      |> Enum.map(fn {root, i} ->
         %Item{
-          id: id,
-          kind: :action,
-          label: label,
-          chord: leader_chord(trie, command),
-          icon: icon,
-          icon_color: color
+          id: Launchpad.project_id(i),
+          kind: :project,
+          label: Path.basename(root),
+          detail: display_path(root),
+          meta: if(Launchpad.waiting?(home, root), do: "unsaved text to recover", else: ""),
+          jump_key: Integer.to_string(i)
         }
       end)
 
+    %Section{id: :projects, title: "Recent projects", empty: "No projects yet.", items: items}
+  end
+
+  # Minga's tasks, as the shared task model names and states them, so the home, the drawer and the modeline agree.
+  @spec task_section([Launchpad.task()]) :: Section.t() | nil
+  defp task_section([]), do: nil
+
+  defp task_section(tasks) do
+    now = System.os_time(:millisecond)
+
     items =
-      if first_run?(lp) do
-        action_items
-      else
-        Enum.concat(action_items, [
-          %Item{id: "action-tutor", kind: :action, label: "tutorial", detail: ":Tutor"}
-        ])
-      end
+      Enum.map(tasks, fn {workspace_id, %Entry{} = entry} ->
+        %Item{
+          id: Launchpad.task_id(workspace_id),
+          kind: :task,
+          label: Entry.title(entry),
+          detail: Entry.words(entry, now),
+          state: Entry.state(entry)
+        }
+      end)
 
-    %Section{id: :start, title: "Start", items: items}
+    %Section{id: :tasks, title: "Minga tasks", items: items}
   end
 
-  @spec footer_section(Launchpad.t()) :: Section.t()
-  defp footer_section(%Launchpad{} = lp) do
-    write_label = if first_run?(lp), do: "to start writing", else: "write"
-    quit_label = if first_run?(lp), do: "to quit", else: "quit"
+  @spec next_section(Launchpad.t(), GenServer.server()) :: Section.t()
+  defp next_section(%Launchpad{} = home, keymap) do
+    trie = leader_trie(keymap)
 
-    %Section{
-      id: :footer,
-      items: [
-        %Item{id: "hint-write", kind: :hint, label: write_label, jump_key: "i"},
-        %Item{id: "hint-quit", kind: :hint, label: quit_label, detail: ":q"}
-      ]
-    }
+    items =
+      Enum.map(Launchpad.actions(home), fn {command, label} ->
+        %Item{
+          id: Launchpad.action_id(command),
+          kind: :action,
+          label: label,
+          chord: leader_chord(trie, command)
+        }
+      end)
+
+    %Section{id: :next, title: "Next", items: items}
   end
 
-  @spec first_run?(Launchpad.t()) :: boolean()
-  defp first_run?(%Launchpad{session_file_count: 0, recents: []}), do: true
-  defp first_run?(%Launchpad{}), do: false
+  @spec tasks(Context.t(), Launchpad.t()) :: [Launchpad.task()]
+  defp tasks(%Context{intent: %{frame: %{home_tasks: tasks}}}, _home) when is_list(tasks),
+    do: tasks
 
-  @spec file_count_label(pos_integer()) :: String.t()
-  defp file_count_label(1), do: "1 file"
-  defp file_count_label(n), do: "#{n} files"
+  defp tasks(%Context{}, _home), do: []
 
-  @spec leader_trie() :: Bindings.node_t() | nil
-  defp leader_trie do
-    Active.leader_trie()
+  @spec directory(String.t()) :: String.t()
+  defp directory(path) do
+    case Path.dirname(path) do
+      "." -> ""
+      dir -> dir
+    end
+  end
+
+  # The keymap the frame was built with, so the home's chords match the keys this editor runs.
+  @spec keymap_server(Context.t()) :: GenServer.server()
+  defp keymap_server(%Context{intent: %{frame: %{keymap_server: nil}}}), do: Active
+  defp keymap_server(%Context{intent: %{frame: %{keymap_server: server}}}), do: server
+  defp keymap_server(%Context{}), do: Active
+
+  @spec leader_trie(GenServer.server()) :: Bindings.node_t() | nil
+  defp leader_trie(keymap) do
+    Active.leader_trie(keymap)
   catch
     :exit, _ -> nil
   end
 
+  # The shortest binding reads best in the key column (`SPC SPC` over `SPC p f`).
   @spec leader_chord(Bindings.node_t() | nil, atom()) :: String.t()
   defp leader_chord(nil, _command), do: ""
 
   defp leader_chord(trie, command) do
     case Bindings.sequences_for_command(trie, command) do
-      [keys | _rest] -> "SPC " <> Bindings.format_sequence(keys)
       [] -> ""
-    end
-  end
-
-  @spec action_icon(atom()) :: {String.t(), non_neg_integer()}
-  defp action_icon(:find_file), do: {"\u{F0224}", 0x61AFEF}
-  defp action_icon(:toggle_file_tree), do: {"\u{F0256}", 0x78909C}
-  defp action_icon(:command_palette), do: {"\u{F0633}", 0x51AFEF}
-  defp action_icon(_command), do: {"", 0}
-
-  @spec version() :: String.t()
-  defp version do
-    case Application.spec(:minga, :vsn) do
-      vsn when is_list(vsn) -> "v" <> List.to_string(vsn)
-      _ -> ""
+      sequences -> "SPC " <> Bindings.format_sequence(Enum.min_by(sequences, &length/1))
     end
   end
 end

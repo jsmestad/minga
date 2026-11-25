@@ -1,11 +1,10 @@
-/// Native launchpad view, shown when zero buffers are open.
+/// The project home, `*home*` (#4056), shown in the editor window when it rests on the home.
 ///
-/// Swapped in over the Metal editor surface (like `AgentChatView`) when
-/// `EmptyStateState.visible`. Renders a centered ~480pt column over a large,
-/// low-opacity MingaLogo watermark: a titled-border hero card (session resume
-/// or get-started), small-caps section rules with recent files and action
-/// rows, and a dim footer. Keyboard still flows to the BEAM; this view is
-/// display + mouse only. Activation (click) is BEAM-authoritative.
+/// Swapped in over the Metal editor surface (like `AgentChatView`) when `EmptyStateState.visible`.
+/// A quiet, left-aligned resting view: the header says where you are (name, path, git line, an
+/// optional note), then recent files or recent projects with their number keys, Minga's tasks with
+/// their state marks, and the next actions with their keys in a fixed column. Keyboard still flows
+/// to the BEAM; this view is display and mouse only. Activation (click) is BEAM-authoritative.
 
 import SwiftUI
 import MingaProtocol
@@ -22,304 +21,142 @@ public struct EmptyStateView: View {
 
     public let state: EmptyStateState
     @Environment(\.themeColors) private var theme
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     public let sendAction: ViewActionHandler<Action>?
-
-    /// Fixed column width for the launchpad content (GUI sibling of the TUI's ~56 columns).
-    private let columnWidth: CGFloat = 480
 
     /// Row currently hovered by the mouse (for hover fills).
     @State private var hoverId: String?
-    /// Drives the ~120ms fade-in on appear.
-    @State private var appeared = false
 
     private let nerdFont = "Symbols Nerd Font Mono"
 
+    /// Width of the key column: wide enough for "SPC SPC" in the monospaced key font.
+    private let keyColumnWidth: CGFloat = 64
+    private let numberColumnWidth: CGFloat = 12
+
+    /// Rows never stretch past a readable measure on a wide window.
+    private let maxContentWidth: CGFloat = 640
+
     public var body: some View {
-        ZStack {
-            // Solid backdrop so the hidden Metal surface never shows through.
-            theme.editorBg
-
-            watermark
-
+        ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: Spacing.xxl) {
+                header
                 ForEach(state.sections) { section in
                     sectionView(section)
                 }
             }
-            .frame(width: columnWidth)
+            .frame(maxWidth: maxContentWidth, alignment: .leading)
+            .padding(.horizontal, Spacing.section)
+            .padding(.vertical, Spacing.panel)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .opacity(appeared ? 1 : 0)
-        .onAppear {
-            if reduceMotion {
-                appeared = true
-            } else {
-                withAnimation(.easeOut(duration: 0.12)) { appeared = true }
-            }
-        }
+        .scrollIndicators(.never)
+        .background(theme.editorBg)
     }
 
-    // MARK: - Watermark
+    // MARK: - Header
 
-    private var watermark: some View {
-        Image("MingaLogo")
-            .resizable()
-            .renderingMode(.template)
-            .aspectRatio(contentMode: .fit)
-            .foregroundStyle(theme.editorFg)
-            .frame(width: 540)
-            .opacity(0.09)
-            .allowsHitTesting(false)
+    private var header: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text(state.title)
+                .font(Typography.font(.heading, weight: .semibold))
+                .foregroundStyle(theme.editorFg)
+            ForEach([state.path, state.status, state.note].filter { !$0.isEmpty }, id: \.self) { line in
+                Text(line)
+                    .font(Typography.font(.body))
+                    .foregroundStyle(theme.chromeMutedFg)
+                    .lineLimit(1)
+            }
+        }
     }
 
     // MARK: - Sections
 
-    @ViewBuilder
     private func sectionView(_ section: EmptyStateSectionModel) -> some View {
-        switch section.kindEnum {
-        case .session:
-            cardSection(section)
-        case .recent:
-            rowsSection(section) { recentRow($0) }
-        case .start:
-            rowsSection(section) { actionRow($0) }
-        case .footer:
-            footerView(section)
-        case .none:
-            rowsSection(section) { actionRow($0) }
-        }
-    }
-
-    /// A small-caps section label with a trailing hairline rule (RECENT / START).
-    private func ruleLabel(_ title: String) -> some View {
-        HStack(spacing: Spacing.md) {
-            Text(title.uppercased())
-                .font(Typography.font(.caption, weight: .semibold))
-                .tracking(1.5)
-                .foregroundStyle(theme.chromeMutedFg)
-            Rectangle()
-                .fill(theme.popupBorder.opacity(0.09))
-                .frame(height: 1)
-        }
-    }
-
-    @ViewBuilder
-    private func rowsSection<Row: View>(_ section: EmptyStateSectionModel, @ViewBuilder row: @escaping (EmptyStateItemModel) -> Row) -> some View {
         VStack(alignment: .leading, spacing: Spacing.hairline) {
-            ruleLabel(section.title)
-                .padding(.bottom, Spacing.xs)
-            ForEach(section.items) { item in
-                row(item)
-            }
-        }
-    }
-
-    // MARK: - Hero card (session resume / get-started)
-
-    private func cardSection(_ section: EmptyStateSectionModel) -> some View {
-        let focused = section.items.contains { state.isFocused($0.itemId) }
-        // Only one accent border exists at a time: the card brightens to accent
-        // solely while a row inside it is focused. Crash tints border + title warning.
-        let borderColor = state.crashed
-            ? theme.gutterWarningFg
-            : (focused ? theme.accent : theme.popupBorder)
-        let titleColor = state.crashed
-            ? theme.gutterWarningFg
-            : (focused ? theme.accent : theme.chromeMutedFg)
-
-        return VStack(spacing: Spacing.hairline) {
-            ForEach(section.items) { item in
-                cardRow(item)
-            }
-        }
-        .padding(.vertical, Spacing.md)
-        .padding(.horizontal, Spacing.md)
-        .frame(maxWidth: .infinity)
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.lg)
-                .stroke(borderColor, lineWidth: 1)
-        )
-        .overlay(alignment: .topLeading) {
-            // Title embedded in the top border edge (VSCode titled-border style).
             Text(section.title)
-                .font(Typography.font(.small, weight: .semibold))
-                .foregroundStyle(titleColor)
-                .padding(.horizontal, Spacing.xs)
-                .background(theme.editorBg)
-                .offset(x: 14, y: -7)
-        }
-        .padding(.top, Spacing.md)
-    }
-
-    private func cardRow(_ item: EmptyStateItemModel) -> some View {
-        // Cards default to Enter activation; show the jump key if one exists,
-        // else a return glyph indicating Enter activates the focused card.
-        let leadingChip = item.jumpKey.isEmpty ? "\u{21B5}" : item.jumpKey
-        return rowButton(item) {
-            HStack(spacing: Spacing.lg) {
-                keycap(leadingChip)
-                Text(item.label)
-                    .font(Typography.font(.emphasis))
-                    .foregroundStyle(theme.editorFg)
-                Spacer(minLength: Spacing.lg)
-                detailVisual(item)
+                .font(Typography.font(.emphasis, weight: .semibold))
+                .foregroundStyle(theme.chromeMutedFg)
+                .padding(.bottom, Spacing.xs)
+            if section.items.isEmpty, !section.empty.isEmpty {
+                Text(section.empty)
+                    .font(Typography.font(.body))
+                    .foregroundStyle(theme.chromeMutedFg)
+            }
+            ForEach(section.items) { item in
+                row(item, keyWidth: keyColumnWidth(for: section))
             }
         }
     }
 
-    // MARK: - Recent rows
+    // MARK: - Rows
 
-    private func recentRow(_ item: EmptyStateItemModel) -> some View {
+    /// One row: the key column (number key, chord, or a task's state mark), the label, then muted
+    /// detail and meta. The focused row carries the selection fill.
+    private func row(_ item: EmptyStateItemModel, keyWidth: CGFloat) -> some View {
         rowButton(item) {
             HStack(spacing: Spacing.lg) {
-                if item.jumpKey.isEmpty {
-                    Color.clear.frame(width: keycapWidth, height: 1)
-                } else {
-                    keycap(item.jumpKey)
+                keyColumn(item)
+                    .frame(width: keyWidth, alignment: .leading)
+                if item.kindEnum == .recentFile, !item.icon.isEmpty {
+                    Text(item.icon)
+                        .font(.custom(nerdFont, size: Typography.Step.emphasis.rawValue))
+                        .foregroundStyle(item.iconColor ?? theme.chromeMutedFg)
+                        .frame(width: 18, alignment: .center)
                 }
-                devicon(item)
                 Text(item.label)
                     .font(Typography.font(.emphasis))
                     .foregroundStyle(theme.editorFg)
                     .lineLimit(1)
-                Spacer(minLength: Spacing.lg)
                 if !item.detail.isEmpty {
                     Text(item.detail)
+                        .font(Typography.font(.body))
+                        .foregroundStyle(detailColor(item))
+                        .lineLimit(1)
+                }
+                if !item.meta.isEmpty {
+                    Text(item.meta)
                         .font(Typography.font(.body))
                         .foregroundStyle(theme.chromeMutedFg)
                         .lineLimit(1)
                 }
+                Spacer(minLength: 0)
             }
         }
     }
 
-    // MARK: - Action rows
-
-    private func actionRow(_ item: EmptyStateItemModel) -> some View {
-        rowButton(item) {
-            HStack(spacing: Spacing.lg) {
-                devicon(item)
-                Text(item.label)
-                    .font(Typography.font(.emphasis))
-                    .foregroundStyle(theme.editorFg)
-                Spacer(minLength: Spacing.lg)
-                inputVisual(item)
-            }
-        }
+    /// The key column is as wide as the section's widest key (anatomy, "Empty state"): a number key column is
+    /// narrow, a chord column fits the longest chord.
+    private func keyColumnWidth(for section: EmptyStateSectionModel) -> CGFloat {
+        let widest = section.items.map(\.keyText.count).max() ?? 0
+        return widest <= 1 ? numberColumnWidth : keyColumnWidth
     }
 
-    // MARK: - Footer
-
-    private func footerView(_ section: EmptyStateSectionModel) -> some View {
-        HStack(spacing: Spacing.md) {
-            ForEach(Array(section.items.enumerated()), id: \.element.id) { index, item in
-                if index > 0 {
-                    Text("\u{00B7}")
-                        .font(Typography.font(.body))
-                        .foregroundStyle(theme.chromeDisabledFg)
-                }
-                HStack(spacing: Spacing.xs) {
-                    // The hint's key leads: a jump keycap chip (`i` write) or
-                    // an accent ex command (`:q` quit); the verb stays muted.
-                    if !item.jumpKey.isEmpty {
-                        keycap(item.jumpKey)
-                    } else if item.detail.hasPrefix(":") {
-                        Text(item.detail)
-                            .font(Typography.font(.body, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(theme.accent)
-                    }
-                    if !item.label.isEmpty {
-                        Text(item.label)
-                            .font(Typography.font(.body))
-                            .foregroundStyle(theme.chromeMutedFg)
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .center)
-        .padding(.top, Spacing.xs)
-    }
-
-    // MARK: - Input visuals (three teaching classes)
-
-    /// Right-side visual for action rows.
-    /// jump_key -> single keycap chip; chord -> one chip per token; a `:` detail
-    /// -> bold accent monospace text with no chip.
     @ViewBuilder
-    private func inputVisual(_ item: EmptyStateItemModel) -> some View {
-        if !item.chord.isEmpty {
-            HStack(spacing: Spacing.xs) {
-                ForEach(Array(item.chordTokens.enumerated()), id: \.offset) { _, token in
-                    keycap(token)
-                }
-            }
-        } else if !item.jumpKey.isEmpty {
-            keycap(item.jumpKey)
-        } else if item.detail.hasPrefix(":") {
-            Text(item.detail)
-                .font(Typography.font(.body, weight: .semibold, design: .monospaced))
+    private func keyColumn(_ item: EmptyStateItemModel) -> some View {
+        if item.kindEnum == .task {
+            StateMark(state: SpineState(rawValue: item.state) ?? .waiting)
+                .frame(width: 10, height: 10)
+        } else {
+            Text(item.keyText)
+                .font(Typography.monospacedSmall)
                 .foregroundStyle(theme.accent)
-        } else if !item.detail.isEmpty {
-            Text(item.detail)
-                .font(Typography.font(.body))
-                .foregroundStyle(theme.chromeMutedFg)
         }
     }
 
-    /// Trailing visual for card/recent rows whose jump key is a leading chip:
-    /// a `:` detail is accent monospace text; any other detail is dim.
-    @ViewBuilder
-    private func detailVisual(_ item: EmptyStateItemModel) -> some View {
-        if item.isExCommandDetail || (item.jumpKey.isEmpty && item.detail.hasPrefix(":")) {
-            Text(item.detail)
-                .font(Typography.font(.body, weight: .semibold, design: .monospaced))
-                .foregroundStyle(theme.accent)
-        } else if !item.detail.isEmpty {
-            Text(item.detail)
-                .font(Typography.font(.body))
-                .foregroundStyle(theme.chromeMutedFg)
+    private func detailColor(_ item: EmptyStateItemModel) -> Color {
+        if item.kindEnum == .task, let state = SpineState(rawValue: item.state) {
+            return theme.stateColor(state)
         }
+        return theme.chromeMutedFg
     }
 
-    // MARK: - Primitives
-
-    private let keycapWidth: CGFloat = 22
-
-    private func keycap(_ text: String) -> some View {
-        Text(text)
-            .font(Typography.font(.small, weight: .semibold, design: .monospaced))
-            .foregroundStyle(theme.editorFg)
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.hairline)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.sm)
-                    .fill(theme.editorFg.opacity(0.08))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Radius.sm)
-                    .stroke(theme.popupBorder.opacity(0.6), lineWidth: 1)
-            )
-    }
-
-    private func devicon(_ item: EmptyStateItemModel) -> some View {
-        Text(item.icon.isEmpty ? "\u{2022}" : item.icon)
-            .font(.custom(nerdFont, size: Typography.Step.emphasis.rawValue))
-            .foregroundStyle(item.iconColor ?? theme.chromeMutedFg)
-            .frame(width: 18, alignment: .center)
-    }
-
-    /// Wraps a row in the picker-style focus/hover highlight and click activation.
-    /// Hint rows are non-interactive.
+    /// Wraps a row in the selection and hover fills and click activation.
     @ViewBuilder
     private func rowButton<Content: View>(_ item: EmptyStateItemModel, @ViewBuilder content: () -> Content) -> some View {
-        let activatable = item.kindEnum != .hint
         let focused = state.isFocused(item.itemId)
         let hovered = hoverId == item.itemId
         content()
             .padding(.horizontal, Spacing.md)
-            .padding(.vertical, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: Radius.md)
@@ -327,18 +164,18 @@ public struct EmptyStateView: View {
             )
             .contentShape(Rectangle())
             .onHover { hovering in
-                guard activatable else { return }
                 if hovering {
                     hoverId = item.itemId
                 } else if hoverId == item.itemId {
                     hoverId = nil
                 }
             }
-            .pointingHandCursor(isEnabled: activatable)
+            .pointingHandCursor(isEnabled: true)
             .onTapGesture {
-                guard activatable else { return }
                 sendAction?(.activate(id: item.itemId))
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
     }
 
     private func rowFill(focused: Bool, hovered: Bool) -> Color {

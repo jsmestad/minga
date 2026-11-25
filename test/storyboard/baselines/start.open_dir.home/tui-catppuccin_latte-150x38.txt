@@ -1,0 +1,108 @@
+# minga storyboard frame v1
+# scenario: start.open_dir.home
+# frontend: tui
+# theme: catppuccin_latte
+# size: 150x38
+# cursor: none
+## text
+*home* (start.open_dir.home) - Minga
+
+   start.open_dir.home
+   /tmp/minga-storyboard/tui-150x38/start.open_dir.home
+
+   Recent in this project
+   1   storyboard.ex  lib
+
+   Next
+   SPC SPC Find a file
+   SPC a n New task
+   SPC o p File tree
+   SPC p p Switch project
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  NORMAL  *home*                                                                                                                             Text 1:1
+## styles (row start-end fg bg attrs)
+0 0-149 #1e66f5 #ccd0da bold
+1 0-149 #4c4f69 #eff1f5 -
+2 0-2 #4c4f69 #eff1f5 -
+2 3-21 #4c4f69 #eff1f5 bold
+2 22-149 #4c4f69 #eff1f5 -
+3 0-2 #4c4f69 #eff1f5 -
+3 3-54 #8c8fa1 #eff1f5 -
+3 55-149 #4c4f69 #eff1f5 -
+4 0-149 #4c4f69 #eff1f5 -
+5 0-2 #4c4f69 #eff1f5 -
+5 3-24 #8c8fa1 #eff1f5 bold
+5 25-149 #4c4f69 #eff1f5 -
+6 0-2 #4c4f69 #acb0be -
+6 3-3 #eff1f5 #4c4f69 bold,reverse
+6 4-7 #4c4f69 #acb0be -
+6 8-20 #4c4f69 #acb0be bold
+6 21-149 #4c4f69 #acb0be -
+7 0-149 #4c4f69 #eff1f5 -
+8 0-2 #4c4f69 #eff1f5 -
+8 3-6 #8c8fa1 #eff1f5 bold
+8 7-149 #4c4f69 #eff1f5 -
+9 0-2 #4c4f69 #eff1f5 -
+9 3-9 #1e66f5 #eff1f5 bold
+9 10-149 #4c4f69 #eff1f5 -
+10 0-2 #4c4f69 #eff1f5 -
+10 3-9 #1e66f5 #eff1f5 bold
+10 10-149 #4c4f69 #eff1f5 -
+11 0-2 #4c4f69 #eff1f5 -
+11 3-9 #1e66f5 #eff1f5 bold
+11 10-149 #4c4f69 #eff1f5 -
+12 0-2 #4c4f69 #eff1f5 -
+12 3-9 #1e66f5 #eff1f5 bold
+12 10-149 #4c4f69 #eff1f5 -
+13 0-149 #4c4f69 #eff1f5 -
+14 0-149 #4c4f69 #eff1f5 -
+15 0-149 #4c4f69 #eff1f5 -
+16 0-149 #4c4f69 #eff1f5 -
+17 0-149 #4c4f69 #eff1f5 -
+18 0-149 #4c4f69 #eff1f5 -
+19 0-149 #4c4f69 #eff1f5 -
+20 0-149 #4c4f69 #eff1f5 -
+21 0-149 #4c4f69 #eff1f5 -
+22 0-149 #4c4f69 #eff1f5 -
+23 0-149 #4c4f69 #eff1f5 -
+24 0-149 #4c4f69 #eff1f5 -
+25 0-149 #4c4f69 #eff1f5 -
+26 0-149 #4c4f69 #eff1f5 -
+27 0-149 #4c4f69 #eff1f5 -
+28 0-149 #4c4f69 #eff1f5 -
+29 0-149 #4c4f69 #eff1f5 -
+30 0-149 #4c4f69 #eff1f5 -
+31 0-149 #4c4f69 #eff1f5 -
+32 0-149 #4c4f69 #eff1f5 -
+33 0-149 #4c4f69 #eff1f5 -
+34 0-149 #4c4f69 #eff1f5 -
+35 0-149 #4c4f69 #eff1f5 -
+36 0-149 #4c4f69 #eff1f5 -
+37 0-0 #8c8fa1 #e6e9ef -
+37 1-1 #4c4f69 #1e66f5 -
+37 2-7 #eff1f5 #1e66f5 bold
+37 8-8 #4c4f69 #1e66f5 -
+37 9-149 #4c4f69 #e6e9ef -

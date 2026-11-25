@@ -248,6 +248,14 @@ defmodule MingaEditor.Agent.SessionStart do
   defp fail(state, start, %StartFailure{} = failure, reason) do
     Minga.Log.error(:agent, "[Agent] #{failure.message} (#{inspect(reason)})")
     discard_project_view(start)
+
+    state =
+      MingaEditor.Agent.TaskWorkflow.start_failed(
+        state,
+        start.start_request.follow_up,
+        failure.headline
+      )
+
     tabs = Runtime.traditional_tab_bar(state.shell_runtime)
 
     case tabs && TabBar.get_workspace(tabs, start.workspace) do

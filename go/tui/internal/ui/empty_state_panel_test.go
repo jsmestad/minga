@@ -15,37 +15,33 @@ import (
 func returningUserEmptyState() protocol.EmptyState {
 	return protocol.EmptyState{
 		Visible:   true,
-		Version:   "v0.9",
-		FocusedID: "resume",
+		Title:     "minga",
+		Path:      "~/code/minga",
+		Status:    "main · 11 changed",
+		FocusedID: "recent-1",
 		Sections: []protocol.EmptyStateSection{
 			{
-				ID:    emptyStateSectionSession,
-				Title: "Session",
-				Items: []protocol.EmptyStateItem{
-					{Kind: emptyStateKindResume, ID: "resume", Label: "resume last session", Detail: "4 files", JumpKey: "r"},
-				},
-			},
-			{
 				ID:    emptyStateSectionRecent,
-				Title: "Recent",
+				Title: "Recent in this project",
+				Empty: "Nothing opened here yet.",
 				Items: []protocol.EmptyStateItem{
-					{Kind: emptyStateKindRecentFile, ID: "recent-1", Label: "startup.ex", Detail: "lib/minga_editor", JumpKey: "1", Icon: "", IconColor: 0x61AFEF},
-					{Kind: emptyStateKindRecentFile, ID: "recent-2", Label: "render_content.go", Detail: "go/tui/internal/ui", JumpKey: "2", Icon: "", IconColor: 0x519ABA},
+					{Kind: emptyStateKindRecentFile, ID: "recent-1", Label: "startup.ex", Detail: "lib/minga_editor", JumpKey: "1", Icon: "\ue62d", IconColor: 0x61AFEF},
+					{Kind: emptyStateKindRecentFile, ID: "recent-2", Label: "render_content.go", Detail: "go/tui/internal/ui", JumpKey: "2", Icon: "\ue627", IconColor: 0x519ABA},
 				},
 			},
 			{
-				ID:    emptyStateSectionStart,
-				Title: "Start",
+				ID:    emptyStateSectionTasks,
+				Title: "Minga tasks",
 				Items: []protocol.EmptyStateItem{
-					{Kind: emptyStateKindAction, ID: "action-find-file", Label: "open file", Chord: "SPC f f", Icon: "", IconColor: 0x61AFEF},
-					{Kind: emptyStateKindAction, ID: "action-tutor", Label: "tutorial", Detail: ":Tutor"},
+					{Kind: emptyStateKindTask, ID: "task-3", Label: "Add tests for the usage-limit classifier", Detail: "Needs you", State: "needs_you"},
 				},
 			},
 			{
-				ID: emptyStateSectionFooter,
+				ID:    emptyStateSectionNext,
+				Title: "Next",
 				Items: []protocol.EmptyStateItem{
-					{Kind: emptyStateKindHint, ID: "hint-write", Label: "write", JumpKey: "i"},
-					{Kind: emptyStateKindHint, ID: "hint-quit", Label: "quit", Detail: ":q"},
+					{Kind: emptyStateKindAction, ID: "action-project_find_file", Label: "Find a file", Chord: "SPC SPC"},
+					{Kind: emptyStateKindAction, ID: "action-toggle_file_tree", Label: "File tree", Chord: "SPC o p"},
 				},
 			},
 		},
@@ -62,87 +58,65 @@ func modelWithEmptyState(width, height uint16, state protocol.EmptyState) Model 
 	return model
 }
 
-func TestRenderEmptyStateShowsLaunchpadContent(t *testing.T) {
+func TestRenderEmptyStateShowsProjectHome(t *testing.T) {
 	model := modelWithEmptyState(80, 30, returningUserEmptyState())
 	view := ansi.Strip(model.content())
 
 	for _, want := range []string{
-		"m i n g a", // letter-spaced wordmark
-		"v0.9",      // faint version
-		"Session",   // session card title in the top border (cards keep case)
-		"resume last session",
-		"4 files",          // right-aligned detail
-		"RECENT",           // section rule label (uppercased at render time)
-		"startup.ex",       // recent basename
-		"lib/minga_editor", // recent directory (width >= 64 keeps it)
-		"START",
-		"open file",
-		"SPC",   // chord chip token
-		"write", // footer verb
-		"quit",
-		"╭", "╰", "│", // card border
-		"▸", // focus marker on the resume card
+		"minga", "~/code/minga", "main · 11 changed",
+		"Recent in this project", "startup.ex", "lib/minga_editor",
+		"Minga tasks", "◉", "Add tests for the usage-limit classifier", "Needs you",
+		"Next", "SPC SPC", "Find a file", "SPC o p", "File tree",
 	} {
 		if !strings.Contains(view, want) {
-			t.Fatalf("launchpad view missing %q:\n%s", want, view)
+			t.Fatalf("home view missing %q:\n%s", want, view)
 		}
 	}
 }
 
-func TestRenderEmptyStateNeverExceedsBodyHeight(t *testing.T) {
+func TestRenderEmptyStateLinesUpTheKeyColumn(t *testing.T) {
 	model := modelWithEmptyState(80, 30, returningUserEmptyState())
-	lines := model.renderEmptyState(returningUserEmptyState())
-	if len(lines) != model.bodyHeight() {
-		t.Fatalf("launchpad rendered %d lines, want bodyHeight %d", len(lines), model.bodyHeight())
+	view := ansi.Strip(model.content())
+
+	find := func(label string) int {
+		for _, line := range strings.Split(view, "\n") {
+			if i := strings.Index(line, label); i >= 0 {
+				return i
+			}
+		}
+		t.Fatalf("missing %q:\n%s", label, view)
+		return -1
+	}
+	if find("Find a file") != find("File tree") {
+		t.Fatalf("action labels should share one column:\n%s", view)
 	}
 }
 
-func TestRenderEmptyStateDegradesAtSmallHeight(t *testing.T) {
-	// bodyHeight = height - header(1) - footer(1). At height 15 the body is 13
-	// rows: below the 16-row chrome breakpoint, so the wordmark and section rules
-	// drop while the hero card stays.
-	model := modelWithEmptyState(80, 15, returningUserEmptyState())
-	view := ansi.Strip(model.content())
-
-	if strings.Contains(view, "m i n g a") {
-		t.Fatalf("wordmark should drop below the 16-row chrome breakpoint:\n%s", view)
-	}
-	if strings.Contains(view, "─── Recent") {
-		t.Fatalf("section rules should drop below the 16-row chrome breakpoint:\n%s", view)
-	}
-	if !strings.Contains(view, "resume last session") {
-		t.Fatalf("hero card should survive height degradation:\n%s", view)
+func TestRenderEmptyStateShowsTheEmptyLine(t *testing.T) {
+	state := returningUserEmptyState()
+	state.Sections[0].Items = nil
+	model := modelWithEmptyState(80, 30, state)
+	if view := ansi.Strip(model.content()); !strings.Contains(view, "Nothing opened here yet.") {
+		t.Fatalf("an empty section should say so:\n%s", view)
 	}
 }
 
-func TestRenderEmptyStateDegradesAtNarrowWidth(t *testing.T) {
-	// Width 46 is below the 48-column card-border breakpoint (borders drop to a
-	// plain row under a rule) and below the 64-column breakpoint (recents lose
-	// the directory column).
-	model := modelWithEmptyState(46, 30, returningUserEmptyState())
-	view := ansi.Strip(model.content())
-
-	if strings.Contains(view, "╭") {
-		t.Fatalf("card borders should drop below 48 columns:\n%s", view)
-	}
-	if strings.Contains(view, "lib/minga_editor") {
-		t.Fatalf("recent directory column should drop below 64 columns:\n%s", view)
-	}
-	if !strings.Contains(view, "resume last session") || !strings.Contains(view, "startup.ex") {
-		t.Fatalf("core rows should survive width degradation:\n%s", view)
+func TestRenderEmptyStateNeverExceedsBodyHeight(t *testing.T) {
+	for _, height := range []uint16{6, 12, 30} {
+		model := modelWithEmptyState(80, height, returningUserEmptyState())
+		lines := model.renderEmptyState(returningUserEmptyState())
+		if len(lines) != model.bodyHeight() {
+			t.Fatalf("height %d: home rendered %d lines, want bodyHeight %d", height, len(lines), model.bodyHeight())
+		}
 	}
 }
 
-func TestRenderEmptyStateMinimalUnderTwelveRows(t *testing.T) {
-	// bodyHeight = 13 - 2 = 11, below the 12-row minimal cutoff.
-	model := modelWithEmptyState(80, 13, returningUserEmptyState())
-	view := ansi.Strip(model.content())
-
-	if strings.Contains(view, "╭") || strings.Contains(view, "startup.ex") {
-		t.Fatalf("minimal fallback should drop cards and recents:\n%s", view)
-	}
-	if !strings.Contains(view, "minga") {
-		t.Fatalf("minimal fallback should still show the wordmark:\n%s", view)
+func TestRenderEmptyStateFitsNarrowWidth(t *testing.T) {
+	model := modelWithEmptyState(30, 30, returningUserEmptyState())
+	for _, line := range model.renderEmptyState(returningUserEmptyState()) {
+		if w := ansi.StringWidth(line); w != 30 {
+			t.Fatalf("every line should be exactly 30 cells, got %d: %q", w, ansi.Strip(line))
+		}
 	}
 }
 

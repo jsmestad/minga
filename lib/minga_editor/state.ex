@@ -246,10 +246,24 @@ defmodule MingaEditor.State do
     %{state | agent_connection: connection}
   end
 
-  @doc "Names a task by the goal it was given, when it has none yet."
-  @spec name_agent_task(t(), pid(), String.t()) :: t()
-  def name_agent_task(%__MODULE__{} = state, session, title) do
-    connection = AgentConnection.name_task(state.agent_connection, session, title)
+  @doc "Shows a task the drawer started before its session binds; returns the row's sequence number too."
+  @spec start_agent_task(t(), reference(), String.t(), integer()) :: {t(), non_neg_integer()}
+  def start_agent_task(%__MODULE__{} = state, id, title, now) do
+    {connection, seq} = AgentConnection.start_task(state.agent_connection, id, title, now)
+    {%{state | agent_connection: connection}, seq}
+  end
+
+  @doc "Turns a starting task into the task of the session that bound for it."
+  @spec bind_agent_task(t(), reference(), pid(), integer()) :: t()
+  def bind_agent_task(%__MODULE__{} = state, id, session, now) do
+    connection = AgentConnection.bind_task(state.agent_connection, id, session, now)
+    %{state | agent_connection: connection}
+  end
+
+  @doc "Shows that a starting task's session could not start."
+  @spec fail_agent_task_start(t(), reference(), String.t()) :: t()
+  def fail_agent_task_start(%__MODULE__{} = state, id, message) do
+    connection = AgentConnection.fail_task_start(state.agent_connection, id, message)
     %{state | agent_connection: connection}
   end
 
@@ -279,6 +293,24 @@ defmodule MingaEditor.State do
   def resolve_agent_task_approval(%__MODULE__{} = state, session, target) do
     connection = AgentConnection.resolve_task_approval(state.agent_connection, session, target)
     %{state | agent_connection: connection}
+  end
+
+  @doc "Records the \"needs you\" alert just posted for a task."
+  @spec post_agent_task_alert(t(), pid(), <<_::128>>) :: t()
+  def post_agent_task_alert(%__MODULE__{} = state, session, id) do
+    %{
+      state
+      | agent_connection: AgentConnection.post_task_alert(state.agent_connection, session, id)
+    }
+  end
+
+  @doc "Records that a task's posted alert was withdrawn."
+  @spec withdraw_agent_task_alert(t(), pid()) :: t()
+  def withdraw_agent_task_alert(%__MODULE__{} = state, session) do
+    %{
+      state
+      | agent_connection: AgentConnection.withdraw_task_alert(state.agent_connection, session)
+    }
   end
 
   @doc "Commits an extension snapshot transition unless semantic Editor state superseded it."
@@ -448,6 +480,17 @@ defmodule MingaEditor.State do
     {state, result}
   end
 
+  @doc """
+  Takes a pending picker preview: returns whether the next buffer selection was only a preview, and clears it.
+
+  The buffer picker on the project home uses it so that moving through the list never switches tabs; only a confirmed selection does.
+  """
+  @spec take_preview(t()) :: {boolean(), t()}
+  def take_preview(%__MODULE__{} = state) do
+    {context, lifecycle} = BufferLifecycle.consume_buffer_context(state.buffer_lifecycle)
+    {context == :preview, %{state | buffer_lifecycle: lifecycle}}
+  end
+
   @doc "Purely installs a workflow-calculated buffer shell transition into the root."
   @spec install_buffer_shell_transition(t(), ShellRuntime.t(), SessionState.t()) :: t()
   def install_buffer_shell_transition(
@@ -513,13 +556,46 @@ defmodule MingaEditor.State do
     state = retire_file_tab_operations(state)
     runtime = remove_file_tabs(state.shell_runtime)
 
-    launchpad_opts = [
-      {:project_root, SessionState.project_root(state.workspace)}
-      | EditorSessionState.session_opts(state.session)
-    ]
-
-    workspace = SessionState.enter_empty_state(state.workspace, launchpad_opts)
+    workspace = SessionState.enter_empty_state(state.workspace, home_opts(state))
     %{state | shell_runtime: runtime, workspace: workspace}
+  end
+
+  @doc "Marks the home's recent projects that have unsaved text waiting, when the home shows (startup recovery)."
+  @spec mark_home_waiting(t(), [Minga.Session.waiting_project()]) :: t()
+  def mark_home_waiting(
+        %__MODULE__{workspace: %{launchpad: %MingaEditor.State.Launchpad{} = home}} = state,
+        [_ | _] = waiting
+      ) do
+    home = MingaEditor.State.Launchpad.mark_waiting(home, waiting)
+    %{state | workspace: SessionState.set_launchpad(state.workspace, home)}
+  end
+
+  def mark_home_waiting(%__MODULE__{} = state, _waiting), do: state
+
+  @doc """
+  Shows the project home: the active tab steps aside with a snapshot of its buffers, windows and splits, and the home is what shows while no tab is active (`SPC p h`, or leaving a task).
+
+  Opening any of the tab's files, or the task's row on the home, switches back to the tab and restores the snapshot. Callers that leave an agent tab stash its agent state first (`MingaEditor.TabWorkflow.leave_to_home/1`).
+  """
+  @spec show_home(t()) :: t()
+  def show_home(%__MODULE__{} = state) do
+    case traditional_tab_bar(state.shell_runtime) do
+      %TabBar{active_id: current_id} = tab_bar when is_integer(current_id) ->
+        state = retire_file_tab_operations(state)
+        context = TabContext.snapshot(state.workspace)
+        tab_bar = tab_bar |> TabBar.update_context(current_id, context) |> TabBar.step_aside()
+        runtime = install_tab_bar(state.shell_runtime, tab_bar)
+        workspace = SessionState.enter_home(state.workspace, home_opts(state))
+        %{state | shell_runtime: runtime, workspace: workspace}
+
+      _no_active_tab ->
+        %{state | workspace: SessionState.enter_home(state.workspace, home_opts(state))}
+    end
+  end
+
+  @spec home_opts(t()) :: keyword()
+  defp home_opts(%__MODULE__{} = state) do
+    [project_root: SessionState.project_root(state.workspace)]
   end
 
   @doc "Restores a tab context and installs synthesized defaults for a brand-new tab."

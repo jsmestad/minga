@@ -17,6 +17,7 @@ defmodule Minga.RenderModel.UI.FocusOwner do
           | :search
           | :hover_popup
           | :empty_state
+          | :tasks
 
   @enforce_keys [:responder, :surface, :window_id]
   defstruct [:responder, :surface, :window_id, generation: 0]

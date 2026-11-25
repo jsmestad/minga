@@ -372,6 +372,7 @@ opcode(1) + section_count(1) + [section_id(1) + section_len(2) + payload(section
 | 0x11 | ReviewConflict | `conflict_index:u32` (one-based). Requires a Review section in the same update with a nonzero generation and nonempty item ID. |
 | 0x12 | ReviewConflictKeys | `keep_mine_key:string16` + `use_agent_key:string16`. Sent with every ReviewConflict section. The BEAM-authored key hints for the two conflict decisions in the active editing model (`x`/`y` in Vim; `Cmd+Backspace`/`Cmd+Enter` in a native GUI and `Ctrl+Backspace`/`Ctrl+Enter` in a terminal in CUA). Frontends label the decisions with these strings and never author key hints. A frontend that predates the section skips it. |
 | 0x13 | MessageActions | count(1) + `empty_list_action` entries (`id:string8` + `key:string16` + `label:string16`). Present only while the Message section shows a notice that names next steps, such as "No code actions at 3:7" with "SPC a ? ask Minga". Frontends draw each as `key label` after the message, and a click sends `execute_command` (0x16) with the action's `id`. A frontend that predates the section skips it. |
+| 0x14 | NeedsYou | `needs_you_count:u16`. How many tasks need you, the same count as the modeline's needs-you segment and the tasks drawer. Present only while at least one does. The macOS app shows it on the Dock badge while it is in the background. A frontend that predates the section skips it. |
 
 The Operation section is omitted when the Editor-global operation store is empty. It is independent of the Message section, so a structured-only payload remains discoverable. Operation selection prefers the newest active (`pending`, `queued`, or `running`) record and otherwise the newest retained terminal record. An older terminal outcome never displaces a newer active operation.
 
@@ -572,7 +573,7 @@ Each section uses `section_id(1) + section_len(2) + payload(section_len)`. Secti
 | 0x0C | StopTarget | `session_id(string16) + request_id(string16)`. Both IDs are nonempty. Absence clears the target and disables the displayed Stop control. |
 | 0x0D | PromptPresentation | `generation(8)`. The nonzero ID names the retained prompt displayed by both frontends and binds its workspace, saved conversation, source buffer and content revision. Absence means no pointer Send target. |
 | 0x0E | QueueTarget | `session_id(string16) + request_id(string16) + sequence(8)`. The target names one insertion position of the active saved-session queue. Absence disables Steer and Queue Next. |
-| 0x0F | ChatLifecycle | `kind(1) + reason(string16) + remedy(1) + action_label(string16) + key_hint(string16) + headline(string16) + note(string16)`. Omitted for a live conversation. `1` means starting, `2` means failed, and `3` means unavailable. A failed lifecycle's `reason` is one plain sentence about the cause. `remedy` is the one action a failed start offers: `0` none, `1` retry, `2` set up provider. `action_label` is the button text and `key_hint` the key that runs the same action; frontends render both exactly as sent and never author remedy copy. Activating the action sends `agent_start_remedy` with the same remedy byte. Starting and unavailable send an empty reason, remedy `0` and empty remedy strings. `headline` names what happened to the tab, for example "Agent could not start", "Agent session stopped" or "Starting Agent", and is sent for every lifecycle in this section. `note` is the draft note shown under the notice when the composer is visible, for example "Your draft is saved. SPC a n starts a new session."; it names the new-session key bound for the current editing model, and an empty note means no note line. Frontends render `headline` and `note` exactly as sent. Neither frontend shows approval controls while the conversation is not live. A zero-row prompt means the composer is unavailable. |
+| 0x0F | ChatLifecycle | `kind(1) + reason(string16) + remedy(1) + action_label(string16) + key_hint(string16) + headline(string16) + note(string16)`. Omitted for a live conversation. `1` means starting, `2` means failed, and `3` means unavailable. A failed lifecycle's `reason` is one plain sentence about the cause. `remedy` is the one action a failed start offers: `0` none, `1` retry, `2` set up provider. `action_label` is the button text and `key_hint` the key that runs the same action; frontends render both exactly as sent and never author remedy copy. Activating the action sends `agent_start_remedy` with the same remedy byte. Starting and unavailable send an empty reason, remedy `0` and empty remedy strings. `headline` names what happened to the tab, for example "Agent could not start", "Agent session stopped" or "Starting Agent", and is sent for every lifecycle in this section. `note` is the draft note shown under the notice when the composer is visible, for example "Your draft is saved. SPC a S n starts a new session."; it names the new-session key bound for the current editing model, and an empty note means no note line. Frontends render `headline` and `note` exactly as sent. Neither frontend shows approval controls while the conversation is not live. A zero-row prompt means the composer is unavailable. |
 
 The Prompt section's `vim_mode` uses the status bar's mode values (0=normal, 1=insert, 2=visual, 3=command, 4=operator_pending, 5=search, 6=replace), because both indicators show the same editing mode. Frontends decode both bytes with one mapping.
 
@@ -597,6 +598,21 @@ The envelope is `opcode(1) + payload_length(4, big-endian) + payload`. The paylo
 Help overlays the existing body without reserving editor rows or changing the draft, selection, input method, mode or keyboard owner. The Go frontend uses the BEAM-authored `agent_help` surface placement, numeric ID 27, with the active pane's fitted content rectangle. Picker and completion retain higher precedence. Native frontends use their existing body allocation. Scrolling is discardable local presentation.
 
 The Help button sends named command `agent_toggle_help`; Close Help sends directional command `agent_dismiss_help`. They do not synthesize question-mark or Escape typing. Covered editing input cannot change or submit the draft, and dismissal restores the same underlying context.
+
+
+### 0xAC: gui_tasks_drawer
+
+`*minga-tasks*` lists every task Minga is working on, so one place can show and answer all of them. The BEAM decides every word, the order (needs-you first), the selection, each row's actions and the drawer's views; frontends lay it out by the "Drawer" and "List row" anatomy in `docs/design/anatomy.md` and draw the state marks from the design tokens.
+
+The envelope is `opcode(1) + payload_length(4, big-endian) + payload`, with the fields generated from `docs/protocol_schema.toml`: `visible(1) + focused(1) + name(string8) + title(string16) + note(string16) + counts(u8 count of state(1) + count(2)) + hints(u8 count of key(string8) + label(string16)) + rows(u16 count of row) + view(1) + view_title(string16) + view_lines(u16 count of string16) + view_offset(2) + prompt(string16) + has_empty(u8) + empty(empty_list)`. A row is `id(string8) + depth(1) + flags(1) + state(1) + title(string16) + words(string16) + age(string8) + detail(u8 count of string16) + actions(u8 count of key(string8) + label(string16))`.
+
+- `state` is the design-token state wire byte (`docs/design_tokens.toml`, `[[states]].wire`); `0` is no state.
+- Row flags: bit 0 marks the last subagent of its task (draw `└─`), bit 1 the selected row.
+- `note` names a drawer this one hid ("Messages hidden · q returns"); `prompt` is a question the drawer is asking (a stop to confirm). Both are empty when there is none.
+- `view` is `0` for the list, `1` for the selected request's diff and `2` for a task's output; a diff or output shows `view_title` over `view_lines` from `view_offset`.
+- A hidden drawer sends `visible = 0` and empty fields.
+
+The terminal reserves the drawer's rows: the Go frontend draws it in the `tasks_drawer` surface placement, numeric ID 28, a real split above the timeline and footer. Native frontends draw it as a view beneath the editor, so the reported grid shrinks. Clicks send `tasks_drawer_action` with the row's identity.
 
 
 ### 0x79 — gui_gutter_separator
@@ -976,31 +992,36 @@ The frontend applies a delta only when it has retained content for the same `win
 
 ### 0xA5 — gui_empty_state
 
-The zero-buffers launchpad (#2689): data-driven sections (session resume, recent files, actions, footer) with chords resolved from the user's live keymap. Frontends lay the surface out natively (SwiftUI column with the logo watermark; TUI centered block) and render it instead of window content while visible. Activation is echoed back with the `empty_state_activate` gui_action (0x07 sub-opcode 0x5B, payload string8 item id) so semantics stay BEAM-side.
+The project home, `*home*` (#4056): the resting view a window shows when there is nothing to restore or when you press `SPC p h`. The header says where you are; sections list recent files (or recent projects outside a project), Minga's tasks with their states, and the next actions with chords resolved from the user's live keymap. Both frontends lay it out as a left-aligned resting view in place of window content while it is visible. Activation is echoed back with the `empty_state_activate` gui_action (0x07 sub-opcode 0x5B, payload string8 item id) so semantics stay BEAM-side.
 
 ```
 opcode(1) + payload_len(2) + payload
 
 Payload:
-  visible(1): 0 = hidden (payload ends here), 1 = visible
-  flags(1): bit 0 = crashed (previous session did not shut down cleanly)
-  version: string8
+  version(1): 0 = hidden (payload ends here), 2 = visible (version 1 was the retired launchpad)
+  title: string16 (project or folder name, "Minga" outside a project)
+  path: string16 (home-relative root; empty outside a project)
+  status: string16 (branch and change count, or why there is no project; may be empty)
+  note: string16 (optional muted second line)
   focused_id: string8 (empty = no focus)
   section_count(1), per section:
-    section_id(1): 0 = session, 1 = recent, 2 = start, 3 = footer
+    section_id(1): 1 = recent files, 4 = recent projects, 5 = Minga tasks, 6 = next actions
     title: string8
+    empty: string16 (muted line shown when the section has no rows)
     item_count(1), per item:
-      kind(1): 0 = resume, 1 = recent_file, 2 = action, 3 = hint
+      kind(1): 1 = recent_file, 2 = action, 4 = project, 5 = task
       id: string8
       label: string16
-      detail: string16
-      jump_key: string8 (empty = none; single keycap chip when present)
-      chord: string8 (space-separated keystroke tokens, e.g. "SPC f f"; one chip per token)
-      icon: string8 (Nerd Font glyph, may be empty)
+      detail: string16 (muted: a directory, a path, a state word)
+      meta: string16 (muted trailing text, such as an age)
+      jump_key: string8 (the number key that opens the row; empty = none)
+      chord: string8 (the leader sequence an action runs, e.g. "SPC SPC")
+      icon: string8 (Nerd Font glyph for file rows, may be empty)
       icon_color: u32 (0xRRGGBB, 0 = theme default)
+      state: string8 (design-token state name for a task row, e.g. "needs_you"; empty otherwise)
 ```
 
-Input-visual classes: a non-empty `jump_key` renders as a single keycap chip, a non-empty `chord` renders chip-per-token, and a `detail` starting with `:` renders as accent text (ex command). `focused_id` is authoritative; frontends may locally echo focus movement between frames but reconcile to it.
+The key column shows the jump key, the chord, or a task's state mark, at one fixed width per section. `focused_id` is authoritative; frontends may locally echo focus movement between frames but reconcile to it.
 
 ### 0x81 — gui_hover_popup
 
@@ -1380,6 +1401,8 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x6E | agent_composer_queue | `prompt_generation(8) + attachment_offer(8) + kind(1) + session_id(string16) + request_id(string16) + sequence(8)` | Queue the displayed draft for the exact active turn. Kind `0` steers; kind `1` queues a follow-up. Echo the committed prompt, attachment, and queue identities from the same frame. A stale action does not send, queue, or clear the draft. |
 | 0x6F | agent_start_remedy | `remedy(1)` | Run the remedy the displayed failed start offers: `1` retry, `2` set up provider. The BEAM runs it only while the active Agent tab still offers that remedy, so a click on a stale notice does nothing. |
 | 0x70 | picker_fit | generation(4) + rows(2) | Report how many result rows the frontend's picker list shows. `generation` is the picker's `activation_generation`; `rows` is positive. The BEAM moves a picker page (PageDown, PageUp) by `rows`. |
+| 0x71 | tasks_drawer_action | `row_id(string8) + action(string8)` | A click in the tasks drawer. `action` is `select` for the row itself, or the key its control shows (`y`, `a`, `t`, `n`, `=`, `r`, `o`, `i`, `x`, `↩`, `c`), or `q` with an empty row id for the drawer's close control, or `focus` with an empty row id for a click anywhere else in the drawer, which gives it the keyboard without moving the selection. The row id is the identity from `gui_tasks_drawer`, never a position, so the BEAM acts on the task the user saw. |
+| 0x72 | agent_notification_open | `identity(16)` | A click on a "needs you" notification. `identity` is the `agent_desktop_notification` (`0x61`) identity of the clicked alert. The BEAM opens the tasks drawer with the keyboard on that alert's task, selected by identity, and answers nothing: the row shows the task as it is now, and single-letter keys are ignored for 300 ms. An identity the BEAM no longer knows opens the drawer on the first task that needs you. |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |
@@ -1626,7 +1649,7 @@ All integers use big-endian byte order. The payload is exactly 10 bytes; fronten
 | Field | Meaning |
 |-------|---------|
 | `responder` | `0` editor view, `1` picker query, `2` search query, `3` inline edit field |
-| `surface` | `0` editor, `1` file tree, `2` agent, `3` Git status, `4` conflict, `5` inline edit, `6` inline ask, `7` prompt, `8` picker, `9` completion, `10` command completion, `11` search, `12` focused hover popup, `13` empty launchpad |
+| `surface` | `0` editor, `1` file tree, `2` agent, `3` Git status, `4` conflict, `5` inline edit, `6` inline ask, `7` prompt, `8` picker, `9` completion, `10` command completion, `11` search, `12` focused hover popup, `13` empty launchpad, `14` the tasks drawer |
 | `window_id` | Active BEAM editor window ID, unsigned 32-bit |
 | `generation` | Picker activation, insert completion, command-completion presentation generation, or admitted file-tree edit token; zero for surfaces without a source generation, unsigned 32-bit |
 

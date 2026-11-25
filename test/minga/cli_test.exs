@@ -396,10 +396,98 @@ defmodule Minga.CLITest do
       File.write!(Path.join(root, "mix.exs"), "defmodule Example.MixProject do\nend\n")
       File.mkdir_p!(nested)
 
-      assert canonical_path(CLI.cwd_startup_project_root(nested)) == canonical_path(root)
+      assert canonical_path(CLI.directory_startup_project_root(nested)) == canonical_path(root)
 
       unmarked = tmp_dir("cli-cwd-unmarked")
-      assert CLI.cwd_startup_project_root(unmarked) == nil
+      assert CLI.directory_startup_project_root(unmarked) == nil
+    end
+
+    test "a terminal start without an argument opens the project of the terminal's directory" do
+      root = tmp_dir("cli-launch-project")
+      nested = Path.join(root, "lib")
+      File.write!(Path.join(root, "mix.exs"), "defmodule Example.MixProject do\nend\n")
+      File.mkdir_p!(nested)
+
+      assert :ok = CLI.prepare_startup([], {:terminal, nested})
+      assert canonical_path(CLI.startup_project_root()) == canonical_path(root)
+    after
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_project_root)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_launch)
+    end
+
+    test "a start by the app without an argument opens no project, whatever directory the VM runs in" do
+      # This test runs in the Minga checkout, which is a project. The app's start must not pick it up.
+      assert CLI.directory_startup_project_root(File.cwd!()) != nil
+
+      assert :ok = CLI.prepare_startup([], :app)
+      assert CLI.startup_project_root() == nil
+    after
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_project_root)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_launch)
+    end
+
+    test "a start by the app with a folder argument opens that folder's project" do
+      root = tmp_dir("cli-app-argument")
+      File.write!(Path.join(root, "mix.exs"), "defmodule Example.MixProject do\nend\n")
+
+      assert :ok = CLI.prepare_startup([root], :app)
+      assert canonical_path(CLI.startup_project_root()) == canonical_path(root)
+    after
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_project_root)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_launch)
+    end
+
+    test "a relative argument is resolved against the launch directory, not the VM's directory" do
+      root = tmp_dir("cli-relative-argument")
+      File.mkdir_p!(Path.join(root, "lib"))
+      File.write!(Path.join(root, "mix.exs"), "defmodule Example.MixProject do\nend\n")
+      File.write!(Path.join(root, "lib/a.ex"), "")
+      refute canonical_path(File.cwd!()) == canonical_path(root)
+
+      assert :ok =
+               CLI.prepare_startup(["--config", "my.exs", "lib/a.ex"], {:terminal, root})
+
+      assert CLI.startup_file() == Path.join(root, "lib/a.ex")
+      assert canonical_path(CLI.startup_project_root()) == canonical_path(root)
+      assert CLI.startup_flags().config_file == Path.join(root, "my.exs")
+
+      # The second way the editor asks for the startup project resolves the argument the same way.
+      assert canonical_path(CLI.startup_project_root_from_args(["lib/a.ex"])) ==
+               canonical_path(root)
+    after
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_project_root)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_file)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_flags)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_launch)
+    end
+
+    test "the terminal launch is the directory the launcher recorded, else the directory the command runs in" do
+      assert CLI.terminal_launch(%{"MINGA_LAUNCH_DIR" => "/work/project"}) ==
+               {:terminal, "/work/project"}
+
+      assert CLI.terminal_launch(%{}) == {:terminal, File.cwd!()}
+      # A relative value is not a directory anyone chose.
+      assert CLI.terminal_launch(%{"MINGA_LAUNCH_DIR" => "project"}) == {:terminal, File.cwd!()}
+    end
+
+    test "a folder whose only marker is its .minga directory is the startup project" do
+      # The start asks the detector, as every other place does (#4310), instead of its own walk over file names.
+      root = tmp_dir("cli-dot-minga")
+      File.mkdir_p!(Path.join(root, ".minga/skills"))
+      File.mkdir_p!(Path.join(root, "notes"))
+
+      assert canonical_path(CLI.directory_startup_project_root(Path.join(root, "notes"))) ==
+               canonical_path(root)
     end
 
     test "argv inference logs unexpected failures instead of silently swallowing them" do
@@ -430,7 +518,7 @@ defmodule Minga.CLITest do
     end
   end
 
-  describe "prepare_startup/1" do
+  describe "prepare_startup/2" do
     test "decodes release-transported arguments without losing spaces" do
       previous = System.get_env("MINGA_CLI_ARGS_B64")
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
@@ -457,14 +545,17 @@ defmodule Minga.CLITest do
 
     test "stores GUI startup flags before application services start" do
       assert :ok =
-               CLI.prepare_startup([
-                 "--editor",
-                 "--minimal",
-                 "--safe",
-                 "--config",
-                 "/tmp/minga-early.exs",
-                 "README.md"
-               ])
+               CLI.prepare_startup(
+                 [
+                   "--editor",
+                   "--minimal",
+                   "--safe",
+                   "--config",
+                   "/tmp/minga-early.exs",
+                   "README.md"
+                 ],
+                 CLI.terminal_launch()
+               )
 
       assert %{
                view_mode: :editor,
@@ -526,18 +617,18 @@ defmodule Minga.CLITest do
       File.write!(path, "")
       on_exit(fn -> File.rm(path) end)
 
-      assert :ok = CLI.prepare_startup([path])
+      assert :ok = CLI.prepare_startup([path], CLI.terminal_launch())
       assert CLI.startup_file() == Path.expand(path)
 
       # A directory argument clears a file remembered by an earlier start.
-      assert :ok = CLI.prepare_startup([System.tmp_dir!()])
+      assert :ok = CLI.prepare_startup([System.tmp_dir!()], CLI.terminal_launch())
       assert Application.get_env(:minga, :cli_startup_file) == nil
 
       assert CLI.startup_file() == nil
       assert CLI.startup_directory() == Path.expand(System.tmp_dir!())
 
       # A file argument clears a directory remembered by an earlier start.
-      assert :ok = CLI.prepare_startup([path])
+      assert :ok = CLI.prepare_startup([path], CLI.terminal_launch())
       assert CLI.startup_directory() == nil
     after
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck

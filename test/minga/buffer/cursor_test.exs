@@ -270,7 +270,7 @@ defmodule Minga.Buffer.CursorTest do
     check all(
             prefix <- list_of(member_of(@place_fragments), max_length: 12),
             suffix <- list_of(member_of(@place_fragments), max_length: 12),
-            state <- member_of([:split, :pending_insert, :pending_delete, :missing])
+            state <- member_of([:split, :pending_insert, :pending_delete, :appended, :missing])
           ) do
       doc =
         suffix
@@ -296,11 +296,14 @@ defmodule Minga.Buffer.CursorTest do
     end
   end
 
-  @spec in_index_state(Document.t(), :split | :pending_insert | :pending_delete | :missing) ::
-          Document.t()
+  @spec in_index_state(
+          Document.t(),
+          :split | :pending_insert | :pending_delete | :appended | :missing
+        ) :: Document.t()
   defp in_index_state(doc, :split), do: doc
   defp in_index_state(doc, :pending_insert), do: Document.insert_text(doc, "x")
   defp in_index_state(doc, :pending_delete), do: Document.delete_before(doc)
+  defp in_index_state(doc, :appended), do: Document.append_text(doc, "\nq")
   defp in_index_state(doc, :missing), do: %{doc | line_offsets: nil}
 
   # The previous placement contract: clamp against the whole target line of the flat text.
@@ -359,6 +362,9 @@ defmodule Minga.Buffer.CursorTest do
   defp resolve_offsets({:pending, starts, adjust_after, delta}) do
     Minga.Buffer.Lines.flush_to_tuple(starts, adjust_after, delta)
   end
+
+  defp resolve_offsets({:appended, base, tail}),
+    do: List.to_tuple(Tuple.to_list(base) ++ :array.to_list(tail))
 
   defp resolve_offsets(ls) when is_tuple(ls), do: ls
   defp resolve_offsets(nil), do: nil

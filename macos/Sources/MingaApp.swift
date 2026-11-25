@@ -630,12 +630,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         guard Bundle.main.bundleURL.pathExtension == "app" else { return }
-        desktopAgentNotifications = DesktopAgentNotifications {
-            NSApp.activate()
-            guard let window = NSApp.windows.first(where: { $0.identifier == EditorScene.windowIdentifier }) else { return }
-            if window.isMiniaturized { window.deminiaturize(nil) }
-            window.makeKeyAndOrderFront(nil)
-        }
+        desktopAgentNotifications = DesktopAgentNotifications(
+            openEditor: {
+                NSApp.activate()
+                guard let window = NSApp.windows.first(where: { $0.identifier == EditorScene.windowIdentifier }) else { return }
+                if window.isMiniaturized { window.deminiaturize(nil) }
+                window.makeKeyAndOrderFront(nil)
+            },
+            // The BEAM opens the tasks drawer on the alert's task, as it is now; the click answers nothing.
+            openAlert: { [weak self] alert in
+                _ = self?.encoder?.send(.agentNotificationOpen(alert: alert))
+            }
+        )
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        desktopAgentNotifications?.activation(true)
+    }
+
+    func applicationDidResignActive(_ notification: Notification) {
+        desktopAgentNotifications?.activation(false)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -944,6 +958,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appState.windowTitle = title
         case .agentDesktopNotification(let notification):
             if coreConnectionIsLive { desktopAgentNotifications?.receive(notification) }
+        case .needsYouCountChanged(let count):
+            desktopAgentNotifications?.needsYouCount(count)
         case .documentEditedChanged(let edited):
             editorNSView?.window?.isDocumentEdited = edited
         case .windowBackgroundChanged(let red, let green, let blue):

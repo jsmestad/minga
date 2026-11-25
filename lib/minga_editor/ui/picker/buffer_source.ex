@@ -98,7 +98,12 @@ defmodule MingaEditor.UI.Picker.BufferSource do
     if Enum.member?(buffers.list, pid) do
       MingaEditor.BufferActivation.activate(state, Buffers.switch_to_pid(buffers, pid))
     else
-      state
+      # From the project home, the buffer lives in a tab behind it. A preview leaves the home in place;
+      # a confirmed selection switches to that tab.
+      case EditorState.take_preview(state) do
+        {true, state} -> state
+        {false, state} -> switch_to_owning_tab(state, pid)
+      end
     end
   end
 
@@ -130,7 +135,37 @@ defmodule MingaEditor.UI.Picker.BufferSource do
   def on_bulk_action(:kill_marked, items, state), do: kill_items(items, state)
   def on_bulk_action(_action, _items, state), do: state
 
+  @spec switch_to_owning_tab(EditorState.t(), pid()) :: EditorState.t()
+  defp switch_to_owning_tab(state, pid) do
+    case MingaEditor.Shell.Workflow.resolve_tab_by_buffer(state, pid) do
+      {state, %MingaEditor.State.Tab{id: id}} -> MingaEditor.TabWorkflow.switch(state, id)
+      {state, nil} -> state
+    end
+  end
+
+  # On the project home the listed files live in the tabs behind it: killing one closes its tab, as the tab bar does.
   @spec kill_items([Item.t()], term()) :: term()
+  defp kill_items(
+         items,
+         %{workspace: %{launchpad: %MingaEditor.State.Launchpad{}, buffers: %Buffers{list: []}}} =
+           state
+       ) do
+    items
+    |> Enum.flat_map(fn
+      %Item{id: {:buffer, pid}} when is_pid(pid) -> [pid]
+      _item -> []
+    end)
+    |> Enum.reduce(state, fn pid, state ->
+      case MingaEditor.Shell.Workflow.resolve_tab_by_buffer(state, pid) do
+        {state, %MingaEditor.State.Tab{id: id}} ->
+          MingaEditor.Commands.BufferManagement.execute(state, {:close_tab, id})
+
+        {state, nil} ->
+          state
+      end
+    end)
+  end
+
   defp kill_items(items, %{workspace: %{buffers: %Buffers{} = bs}} = state) do
     pids = items |> Enum.map(&item_pid(&1, bs.list)) |> Enum.reject(&is_nil/1) |> Enum.uniq()
 

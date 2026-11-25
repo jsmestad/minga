@@ -353,7 +353,7 @@ defmodule MingaAgent.Providers.Native do
     base_tools = filter_base_tools_for_read_only(base_tools, read_only?)
     active_skills = load_active_skills(project_root, Keyword.get(opts, :active_skill_names, []))
 
-    # An MCP server is another program that starts in the process directory, so none starts without a folder.
+    # An MCP server is another program, and it starts in the session's folder, so none starts without one.
     configured_mcp_configs =
       if WorkingFolder.available?(working_folder),
         do: configured_mcp_servers(opts, config, subscriber, read_only?),
@@ -590,11 +590,21 @@ defmodule MingaAgent.Providers.Native do
 
   defp maybe_notify_mcp_source_removed(_state, _configs, _payload), do: :ok
 
-  # An MCP server is another program, started in the process directory with whatever reach it has.
-  # A session without a folder starts none, whoever configured or contributed it.
+  # An MCP server is another program, with whatever reach it has. A session without a folder starts none,
+  # whoever configured or contributed it. Every server the session does start, from config or from an extension,
+  # starts in the session's folder unless it already has a directory: a server a project declares has that
+  # project's root. So a relative path in a server's command line never means the directory Minga runs in.
   @spec folder_mcp_configs(WorkingFolder.t(), [MCPServerConfig.t()]) :: [MCPServerConfig.t()]
   defp folder_mcp_configs(working_folder, configs) do
-    if WorkingFolder.available?(working_folder), do: configs, else: []
+    directory =
+      if WorkingFolder.available?(working_folder),
+        do: existing_directory(working_root(working_folder))
+
+    # A folder that is gone by now (removed, unmounted) starts none either: there is nowhere to start them.
+    case directory do
+      nil -> []
+      directory -> Enum.map(configs, &MCPServerConfig.in_directory(&1, directory))
+    end
   end
 
   @spec registry_mcp_servers_from_state(map()) :: [MCPServerConfig.t()]
@@ -1453,6 +1463,11 @@ defmodule MingaAgent.Providers.Native do
     else
       []
     end
+  end
+
+  @spec existing_directory(String.t()) :: String.t() | nil
+  defp existing_directory(path) do
+    if File.dir?(path), do: path, else: nil
   end
 
   @spec mcp_extension_enabled?(keyword()) :: boolean()

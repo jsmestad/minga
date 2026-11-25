@@ -46,7 +46,6 @@ defmodule MingaAgent.Session do
   alias MingaAgent.ArtifactStore
   alias MingaAgent.ArtifactStores.Runtime, as: ArtifactRuntime
   alias MingaAgent.Message
-  alias MingaAgent.Notifier
   alias MingaAgent.ModelCandidate
   alias MingaAgent.ModelResolver
   alias MingaAgent.ModelSelection
@@ -173,7 +172,6 @@ defmodule MingaAgent.Session do
             {reference(), pid(), ConnectionTarget.t(), ModelResolver.intent()} | nil,
           pending_model_change: ModelSelection.t() | String.t() | nil,
           pending_thinking_level: String.t() | nil,
-          notifier: module() | {module(), term()},
           background_subagent: boolean(),
           hooks_enabled?: boolean(),
           session_start_hook_enabled?: boolean(),
@@ -363,6 +361,11 @@ defmodule MingaAgent.Session do
       when is_pid(session) and node(session) == node() and is_list(messages) do
     :gen_server.send_request(session, {:seed_messages, messages})
   end
+
+  @doc "Sends a prompt without waiting; the reply is `send_prompt/2`'s result."
+  @spec request_send_prompt(pid(), String.t()) :: :gen_server.request_id()
+  def request_send_prompt(session, content) when is_pid(session) and is_binary(content),
+    do: :gen_server.send_request(session, {:send_prompt, content})
 
   @doc "Returns the current session status."
   @spec status(GenServer.server()) :: status()
@@ -1630,7 +1633,6 @@ defmodule MingaAgent.Session do
       apple_selection_probe: nil,
       pending_model_change: nil,
       pending_thinking_level: if(model_selection, do: nil, else: initial_thinking_level),
-      notifier: Keyword.get(opts, :notifier, Notifier),
       background_subagent: Keyword.get(opts, :background_subagent, false),
       hooks_enabled?: Keyword.get(opts, :hooks_enabled?, true),
       session_start_hook_enabled?:
@@ -2215,8 +2217,12 @@ defmodule MingaAgent.Session do
   def handle_call({:rename_conversation, target, title}, {caller, _tag}, state)
       when node(caller) == node() do
     case rename_saved_conversation(state, target, title) do
-      {:ok, title} -> {:reply, {:ok, title}, %{state | custom_title: title}}
-      {:error, _reason} = error -> {:reply, error, state}
+      # The tasks drawer shows the new name.
+      {:ok, title} ->
+        {:reply, {:ok, title}, broadcast(%{state | custom_title: title}, {:title_changed, title})}
+
+      {:error, _reason} = error ->
+        {:reply, error, state}
     end
   end
 
@@ -3033,7 +3039,6 @@ defmodule MingaAgent.Session do
 
   @spec broadcast_approval_retirement(approval_retirement()) :: state()
   defp broadcast_approval_retirement({state, approval, resolution}) do
-    Notifier.clear_approval()
     %PublicApproval{target: target} = public_pending_approval(approval, state)
     broadcast(state, {:approval_resolved, target, resolution})
   end
@@ -4458,7 +4463,7 @@ defmodule MingaAgent.Session do
 
     case reason do
       {:conversation_persistence_failed, _} ->
-        state = notify(state, :error, @boundary_save_failure_message)
+        state = notify_hooks(state, :error, @boundary_save_failure_message)
         {:reply, {:error, ^reason}, state} = reply_to_prompt_admission_failure(state, reason)
         state
 
@@ -4516,7 +4521,7 @@ defmodule MingaAgent.Session do
 
     state
     |> mark_unsaved_active_tools()
-    |> notify(:error, message)
+    |> notify_hooks(:error, message)
     |> announce_turn_status(execution)
     |> append_error_message_once(message)
     |> notify_messages_changed()
@@ -4930,7 +4935,7 @@ defmodule MingaAgent.Session do
       {:idle, execution} ->
         state =
           state
-          |> notify(:complete, completion_notification(state))
+          |> notify_hooks(:complete, completion_notification(state))
           |> dispatch_stop()
           |> announce_turn_status(execution)
 
@@ -4953,7 +4958,7 @@ defmodule MingaAgent.Session do
 
     state =
       state
-      |> notify(:error, message)
+      |> notify_hooks(:error, message)
       |> announce_turn_status(execution)
       |> append_error_message_once(message)
       |> notify_messages_changed()
@@ -5335,8 +5340,6 @@ defmodule MingaAgent.Session do
     with :ok <- validate_approval_liveness(state, approval_id),
          {:ok, approval, execution} <-
            TurnExecution.resolve_approval(state.turn_execution, approval_id, decision) do
-      Notifier.clear_approval()
-
       state =
         {state, approval, decision}
         |> approve_prepared_invocation()
@@ -5979,6 +5982,7 @@ defmodule MingaAgent.Session do
         ) :: {:reply, term(), state()}
   defp admit_new_turn(content, state, execution, draft_revision, request_id \\ nil) do
     {user_message, send_content} = build_user_message(content)
+    first_goal = first_goal(state, user_message)
     candidate = append_msg(state, user_message)
 
     case admit_provider_request(state, candidate, send_content, draft_revision, request_id) do
@@ -5986,6 +5990,7 @@ defmodule MingaAgent.Session do
         admitted =
           admitted
           |> record_user_message_event(user_message)
+          |> announce_first_goal(first_goal)
           |> notify_messages_changed()
 
         dispatch_new_turn_request(admitted, request, execution)
@@ -5995,6 +6000,20 @@ defmodule MingaAgent.Session do
         reply_to_prompt_admission_failure(failed_state, reason)
     end
   end
+
+  # The first prompt of an untitled conversation is its goal; the tasks drawer names the task by it.
+  @spec first_goal(state(), Message.t()) :: String.t() | nil
+  defp first_goal(%{custom_title: title}, _message) when is_binary(title), do: nil
+
+  defp first_goal(state, message) do
+    if first_user_prompt(Transcript.messages(state.transcript)) == nil,
+      do: readable_title(first_user_prompt([message])),
+      else: nil
+  end
+
+  @spec announce_first_goal(state(), String.t() | nil) :: state()
+  defp announce_first_goal(state, nil), do: state
+  defp announce_first_goal(state, goal), do: broadcast(state, {:title_changed, goal})
 
   @spec acknowledge_consumed_draft({:reply, term(), state()}, draft_admission()) ::
           {:reply, term(), state()}
@@ -6302,7 +6321,7 @@ defmodule MingaAgent.Session do
       {:accepted, execution} ->
         state =
           state
-          |> notify(:approval, "Approval needed: #{approval.name}")
+          |> notify_hooks(:approval, "Approval needed: #{approval.name}")
           |> broadcast({:approval_pending, public_pending_approval(approval, state)})
           |> announce_display_status(execution)
 
@@ -6340,16 +6359,11 @@ defmodule MingaAgent.Session do
 
   defp completion_notification(_state), do: "Agent finished"
 
-  @spec notify(state(), atom(), String.t()) :: state()
-  defp notify(%{notifier: {module, arg}} = state, trigger, message) when is_atom(module) do
+  # Runs the user's notification hooks. Desktop alerts are the editor's: it alerts when a task starts needing you while
+  # Minga is in the background (MingaEditor.Agent.TaskWorkflow).
+  @spec notify_hooks(state(), atom(), String.t()) :: state()
+  defp notify_hooks(state, trigger, message) do
     dispatch_notification(state, trigger, message)
-    module.notify(trigger, message, arg)
-    state
-  end
-
-  defp notify(%{notifier: module} = state, trigger, message) when is_atom(module) do
-    dispatch_notification(state, trigger, message)
-    module.notify(trigger, message)
     state
   end
 
@@ -11380,8 +11394,6 @@ defmodule MingaAgent.Session do
   @impl GenServer
   @spec terminate(term(), state()) :: :ok
   def terminate(reason, state) do
-    Notifier.clear_approval()
-
     record_critical_event(state, :session_stopped, %{
       reason: inspect(reason),
       status: TurnExecution.status(state.turn_execution)

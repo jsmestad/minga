@@ -66,6 +66,7 @@ defmodule MingaEditor.Layout do
           agent_panel: rect() | nil,
           status_bar: rect() | nil,
           edit_timeline: rect() | nil,
+          tasks_drawer: rect() | nil,
           minibuffer: rect()
         }
 
@@ -80,7 +81,8 @@ defmodule MingaEditor.Layout do
     horizontal_separators: [],
     agent_panel: nil,
     status_bar: nil,
-    edit_timeline: nil
+    edit_timeline: nil,
+    tasks_drawer: nil
   ]
 
   # ── Public API ─────────────────────────────────────────────────────────────

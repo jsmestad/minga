@@ -86,6 +86,17 @@ defmodule MingaEditor.UI.Picker.Context do
           theme: Theme.t()
         }
 
+  # The project home holds no buffer of its own; the files of the tabs behind it are what can be switched to.
+  @spec listed_buffers(State.t()) :: Buffers.t()
+  defp listed_buffers(
+         %State{
+           workspace: %{launchpad: %MingaEditor.State.Launchpad{}, buffers: %Buffers{list: []}}
+         } = state
+       ),
+       do: %Buffers{list: MingaEditor.Handlers.BufferRegistry.buffer_inventory(state)}
+
+  defp listed_buffers(%State{workspace: %{buffers: buffers}}), do: buffers
+
   @doc """
   Builds a picker context from the full editor state.
 
@@ -99,7 +110,7 @@ defmodule MingaEditor.UI.Picker.Context do
     picker_ui = picker_ui_from_modal(state, extra_context)
 
     %__MODULE__{
-      buffers: state.workspace.buffers,
+      buffers: listed_buffers(state),
       editing: state.workspace.editing,
       file_tree: state.workspace.file_tree,
       search: state.workspace.search,

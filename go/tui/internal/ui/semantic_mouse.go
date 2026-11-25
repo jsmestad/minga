@@ -319,6 +319,15 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 		// Empty, separator, header, and summary cells never fall through to text.
 		return nil, true
 	}
+	if m.layout.drawer.Contains(mouse.X, mouse.Y) {
+		if !m.floatingOverlayContains(mouse.X, mouse.Y) {
+			if packet, ok := m.tasksDrawerMousePacket(msg); ok {
+				return packet, true
+			}
+		}
+		// Borders, counts and empty rows never fall through to text.
+		return nil, true
+	}
 	if packet, ok := m.agentDisplayedControlPacket(msg); ok {
 		return packet, true
 	}
@@ -583,11 +592,10 @@ func (m Model) notificationMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	return nil, false
 }
 
-// emptyStateMousePacket maps a click on an activatable launchpad row to
-// empty_state_activate(id) (#2689), the same authoritative activation the
-// keyboard jump keys reach on the BEAM. Hint rows (footer) carry no zone and
-// are never activatable. A click that hits no row returns ok=false so it falls
-// through to the raw mouse path.
+// emptyStateMousePacket maps a click on a project home row to
+// empty_state_activate(id) (#4056), the same authoritative activation `↩` and
+// the number keys reach on the BEAM. A click that hits no row returns ok=false
+// so it falls through to the raw mouse path.
 func (m Model) emptyStateMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	state, ok := m.emptyState()
 	if !ok || !state.Visible {
@@ -595,9 +603,6 @@ func (m Model) emptyStateMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	}
 	for _, section := range state.Sections {
 		for _, item := range section.Items {
-			if item.Kind == emptyStateKindHint {
-				continue
-			}
 			zoneInfo := m.zones.Get(zoneIDEmptyStateItem(item.ID))
 			if zoneInfo != nil && zoneInfo.InBounds(msg) {
 				return protocol.EncodeGUIEmptyStateActivate(item.ID), true

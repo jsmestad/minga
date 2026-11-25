@@ -35,6 +35,7 @@ defmodule MingaAgent.Hooks.Hook do
           module: module() | nil,
           function: atom() | nil,
           timeout_ms: pos_integer(),
+          cwd: String.t() | nil,
           extension_source: atom() | nil,
           extension_module: module() | nil
         }
@@ -46,6 +47,7 @@ defmodule MingaAgent.Hooks.Hook do
     :command,
     :module,
     :function,
+    :cwd,
     :extension_source,
     :extension_module,
     type: :shell,
@@ -71,6 +73,7 @@ defmodule MingaAgent.Hooks.Hook do
          {:ok, tool_pattern} <- normalize_tool_pattern(raw, event),
          {:ok, command, mod, fun} <- normalize_type_fields(raw, type),
          {:ok, timeout_ms} <- normalize_timeout(fetch(raw, :timeout_ms)),
+         {:ok, cwd} <- normalize_cwd(fetch(raw, :cwd)),
          {:ok, extension_source} <- normalize_optional_atom(fetch(raw, :extension_source)),
          {:ok, extension_module} <- normalize_optional_atom(fetch(raw, :extension_module)) do
       {:ok,
@@ -82,6 +85,7 @@ defmodule MingaAgent.Hooks.Hook do
          module: mod,
          function: fun,
          timeout_ms: timeout_ms,
+         cwd: cwd,
          extension_source: extension_source,
          extension_module: extension_module
        }}
@@ -251,6 +255,12 @@ defmodule MingaAgent.Hooks.Hook do
 
   defp normalize_timeout(value),
     do: {:error, "agent hook timeout_ms must be a positive integer, got: #{inspect(value)}"}
+
+  # The directory a shell hook runs in. A hook a project declares gets the project root from the config loader.
+  @spec normalize_cwd(term()) :: {:ok, String.t() | nil} | {:error, String.t()}
+  defp normalize_cwd(nil), do: {:ok, nil}
+  defp normalize_cwd(cwd) when is_binary(cwd) and cwd != "", do: {:ok, cwd}
+  defp normalize_cwd(other), do: {:error, "agent hook cwd must be a path, got: #{inspect(other)}"}
 
   @spec normalize_optional_atom(term()) :: {:ok, atom() | nil} | {:error, String.t()}
   defp normalize_optional_atom(nil), do: {:ok, nil}

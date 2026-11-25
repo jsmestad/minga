@@ -115,6 +115,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x63       | file_dialog_result      |
   | 0x64       | focus_window            |
   | 0x70       | picker_fit              |
+  | 0x71       | tasks_drawer_action     |
+  | 0x72       | agent_notification_open |
 
   """
 
@@ -147,6 +149,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_agent_composer_submit Opcodes.gui_action_agent_composer_submit()
   @gui_action_agent_composer_queue Opcodes.gui_action_agent_composer_queue()
   @gui_action_agent_start_remedy Opcodes.gui_action_agent_start_remedy()
+  @gui_action_tasks_drawer_action Opcodes.gui_action_tasks_drawer_action()
+  @gui_action_agent_notification_open Opcodes.gui_action_agent_notification_open()
   @gui_action_agent_open_question Opcodes.gui_action_agent_open_question()
   @gui_action_agent_stop_turn Opcodes.gui_action_agent_stop_turn()
   @gui_action_execute_command Opcodes.gui_action_execute_command()
@@ -276,6 +280,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
              MingaAgent.Session.queue_target()}
           | {:agent_open_question, pos_integer()}
           | {:agent_start_remedy, :retry | :set_up_provider}
+          | {:tasks_drawer_action, row_id :: String.t(), action :: String.t()}
+          | {:agent_notification_open, alert :: <<_::128>>}
           | {:agent_stop_turn, {String.t(), String.t()}}
           | {:agent_tool_approval, ApprovalTarget.t(), MingaAgent.Session.approval_decision()}
           | {:execute_command, name :: String.t()}
@@ -779,6 +785,17 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_agent_open_question, <<offer::64>>) when offer > 0,
     do: {:ok, {:agent_open_question, offer}}
+
+  def decode_gui_action(
+        @gui_action_tasks_drawer_action,
+        <<id_length::8, row_id::binary-size(id_length), action_length::8,
+          action::binary-size(action_length)>>
+      )
+      when action_length > 0,
+      do: {:ok, {:tasks_drawer_action, row_id, action}}
+
+  def decode_gui_action(@gui_action_agent_notification_open, <<alert::binary-size(16)>>),
+    do: {:ok, {:agent_notification_open, alert}}
 
   def decode_gui_action(@gui_action_agent_start_remedy, <<1::8>>),
     do: {:ok, {:agent_start_remedy, :retry}}

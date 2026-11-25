@@ -261,6 +261,118 @@ defmodule Minga.Buffer.LinesTest do
     end
   end
 
+  describe "update_after_append/3" do
+    @starts {0, 3, 6}
+
+    test "text without a line break leaves every form of the index as it is" do
+      for index <- [@starts, {:pending, @starts, 1, 2}, appended_index(@starts, [9]), nil] do
+        assert Lines.update_after_append(index, 12, "tail") == index
+      end
+    end
+
+    test "new lines go to the tail while it is no longer than the base" do
+      assert {:appended, @starts, tail} = Lines.update_after_append(@starts, 8, "a\nb\n")
+      assert :array.to_list(tail) == [10, 12]
+
+      assert {:appended, @starts, tail} =
+               Lines.update_after_append({:appended, @starts, tail}, 12, "c\n")
+
+      assert :array.to_list(tail) == [10, 12, 14]
+    end
+
+    test "a tail that outgrows its base is joined into a clean index" do
+      index = appended_index(@starts, [10, 12, 14])
+
+      assert Lines.update_after_append(index, 14, "d\n") == {0, 3, 6, 10, 12, 14, 16}
+      assert Lines.update_after_append({0}, 0, "a\nb\n") == {0, 2, 4}
+    end
+
+    test "a pending shift is applied before the new lines are added" do
+      assert {:appended, {0, 3, 8}, tail} =
+               Lines.update_after_append({:pending, @starts, 1, 2}, 10, "\n")
+
+      assert :array.to_list(tail) == [11]
+    end
+
+    test "a missing index stays missing" do
+      assert Lines.update_after_append(nil, 4, "a\n") == nil
+    end
+  end
+
+  describe "an appended index under other updates" do
+    test "every update that is not an append joins the tail first" do
+      index = appended_index({0, 3}, [6])
+
+      assert Lines.update_after_insert(index, 0, 1, "x") == {:pending, {0, 3, 6}, 0, 1}
+      assert Lines.update_after_insert(index, 0, 1, "x\n") == {0, 3, 5, 8}
+      assert Lines.update_after_delete_before(index, 1, 1, true) == {0, 5}
+      assert Lines.update_after_delete_at(index, 0, 1, false) == {:pending, {0, 3, 6}, 0, -1}
+      assert Lines.update_after_span_replace(index, 0, 1, 0, [{1, 1}], -1) == {0, 2, 5}
+    end
+
+    test "clean_starts/1 resolves every form without storing it" do
+      text = "ab\ncd\nef"
+
+      for {document, _state} <- [
+            {Document.new(text), :clean},
+            {text |> Document.new() |> Document.insert_text("x"), :pending},
+            {"ab\ncd" |> Document.new() |> Document.append_text("\nef"), :appended},
+            {%{Document.new(text) | line_offsets: nil}, :missing}
+          ] do
+        assert Lines.clean_starts(document) ==
+                 document |> Document.content() |> Lines.build_index()
+      end
+    end
+  end
+
+  property "any run of appends and edits leaves the index of a rebuilt document" do
+    step =
+      one_of([
+        tuple({constant(:append), string([?a, ?\n, ?\r, 0xE9], max_length: 8)}),
+        tuple({constant(:follow), string([?a, ?\n, ?\r, 0xE9], max_length: 8)}),
+        tuple({constant(:insert), string([?x, ?\n], max_length: 3)}),
+        constant(:delete_before),
+        constant(:delete_at),
+        tuple({constant(:move), integer(0..12), integer(0..6)})
+      ])
+
+    check all(
+            text <- string([?a, ?\n, 0xE9], max_length: 20),
+            steps <- list_of(step, max_length: 25)
+          ) do
+      document =
+        Enum.reduce(steps, Document.new(text), fn step, document ->
+          document = apply_step(document, step)
+          content = Document.content(document)
+          rebuilt = Lines.build_index(content)
+
+          assert Lines.clean_starts(document) == rebuilt
+          assert Document.line_count(document) == tuple_size(rebuilt)
+
+          for line <- 0..tuple_size(rebuilt) do
+            assert Lines.fetch(document, line) == content |> String.split("\n") |> Enum.at(line)
+
+            assert Lines.start_of(document, line) ==
+                     elem(rebuilt, min(line, tuple_size(rebuilt) - 1))
+          end
+
+          assert Lines.slice(document, 0, tuple_size(rebuilt) + 1) == String.split(content, "\n")
+          document
+        end)
+
+      assert Document.cursor_offset(document) <= byte_size(Document.content(document))
+    end
+  end
+
+  defp apply_step(document, {:append, text}), do: Document.append_text(document, text)
+  defp apply_step(document, {:follow, text}), do: Document.append_text_and_follow(document, text)
+  defp apply_step(document, {:insert, text}), do: Document.insert_text(document, text)
+  defp apply_step(document, :delete_before), do: Document.delete_before(document)
+  defp apply_step(document, :delete_at), do: Document.delete_at(document)
+  defp apply_step(document, {:move, line, column}), do: Document.move_to(document, {line, column})
+
+  defp appended_index(base, tail), do: {:appended, base, :array.from_list(tail)}
+
   test "fetch/2 works after mutations invalidate the cache" do
     buf = Document.new("aaa\nbbb\nccc")
     assert Lines.fetch(buf, 1) == "bbb"
@@ -285,6 +397,7 @@ defmodule Minga.Buffer.LinesTest do
   defp index_state(%Document{line_offsets: {:pending, _starts, _line, delta}}) when delta < 0,
     do: :pending_delete
 
+  defp index_state(%Document{line_offsets: {:appended, _base, _tail}}), do: :appended
   defp index_state(%Document{line_offsets: nil}), do: :missing
   defp index_state(%Document{line_offsets: starts}) when is_tuple(starts), do: :clean
 

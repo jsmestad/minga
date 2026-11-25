@@ -152,10 +152,22 @@ defmodule MingaEditor.State.AgentConnection do
   def follow_task(%__MODULE__{} = connection, session, now, opts \\ []) when is_pid(session),
     do: %{connection | tasks: Tasks.follow(connection.tasks, session, now, opts)}
 
-  @doc "Names a task by the goal it was given, when it has none yet."
-  @spec name_task(t(), pid(), String.t()) :: t()
-  def name_task(%__MODULE__{} = connection, session, title) when is_pid(session),
-    do: %{connection | tasks: Tasks.name(connection.tasks, session, title)}
+  @doc "Shows a task the drawer started before its session binds; returns the row's sequence number too."
+  @spec start_task(t(), reference(), String.t(), integer()) :: {t(), non_neg_integer()}
+  def start_task(%__MODULE__{} = connection, id, title, now) do
+    {tasks, seq} = Tasks.start(connection.tasks, id, title, now)
+    {%{connection | tasks: tasks}, seq}
+  end
+
+  @doc "Turns a starting task into the task of the session that bound for it."
+  @spec bind_task(t(), reference(), pid(), integer()) :: t()
+  def bind_task(%__MODULE__{} = connection, id, session, now),
+    do: %{connection | tasks: Tasks.bind(connection.tasks, id, session, now)}
+
+  @doc "Shows that a starting task's session could not start."
+  @spec fail_task_start(t(), reference(), String.t()) :: t()
+  def fail_task_start(%__MODULE__{} = connection, id, message),
+    do: %{connection | tasks: Tasks.start_failed(connection.tasks, id, message)}
 
   @doc "Carries a task over to the session that replaced its crashed one."
   @spec replace_task_session(t(), pid(), pid(), integer()) :: t()
@@ -176,4 +188,14 @@ defmodule MingaEditor.State.AgentConnection do
   @spec resolve_task_approval(t(), pid(), MingaAgent.ToolApproval.Target.t()) :: t()
   def resolve_task_approval(%__MODULE__{} = connection, session, target),
     do: %{connection | tasks: Tasks.resolve_approval(connection.tasks, session, target)}
+
+  @doc "Records the \"needs you\" alert just posted for a task."
+  @spec post_task_alert(t(), pid(), <<_::128>>) :: t()
+  def post_task_alert(%__MODULE__{} = connection, session, id),
+    do: %{connection | tasks: Tasks.post_alert(connection.tasks, session, id)}
+
+  @doc "Records that a task's posted alert was withdrawn."
+  @spec withdraw_task_alert(t(), pid()) :: t()
+  def withdraw_task_alert(%__MODULE__{} = connection, session),
+    do: %{connection | tasks: Tasks.withdraw_alert(connection.tasks, session)}
 end

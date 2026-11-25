@@ -12,6 +12,7 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.ConfigStateEncoder
   alias Minga.Frontend.Adapter.GUI.CursorAnimationEncoder
   alias Minga.Frontend.Adapter.GUI.EditTimelineEncoder
+  alias Minga.Frontend.Adapter.GUI.TasksDrawerEncoder
   alias Minga.Frontend.Adapter.GUI.EmptyStateEncoder
   alias Minga.Frontend.Adapter.GUI.EncodedFrame
   alias Minga.Frontend.Adapter.GUI.ExtensionOverlayEncoder
@@ -69,6 +70,7 @@ defmodule Minga.Frontend.Adapter.GUI do
     {:agent_chat, AgentTranscriptEncoder},
     {:bottom_panel, BottomPanelEncoder},
     {:edit_timeline, EditTimelineEncoder},
+    {:tasks_drawer, TasksDrawerEncoder},
     {:extension_overlay, ExtensionOverlayEncoder},
     {:extension_panel, ExtensionPanelEncoder},
     {:hover_popup, HoverPopupEncoder},

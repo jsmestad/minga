@@ -3,6 +3,7 @@ defmodule MingaEditor.RenderPipeline.FrameIntent do
 
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.StatusBar.Data, as: StatusBarData
 
@@ -41,7 +42,9 @@ defmodule MingaEditor.RenderPipeline.FrameIntent do
   ]
 
   @enforce_keys @fields
-  defstruct @fields
+  # The project home's task rows and the tasks drawer are derived here, like the status bar data. A frame without the
+  # home has no home rows; the drawer is built from the tasks and the drawers.
+  defstruct [{:home_tasks, []}, {:tasks_drawer, nil} | @fields]
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -74,7 +77,9 @@ defmodule MingaEditor.RenderPipeline.FrameIntent do
           line_spacing: number() | nil,
           cursor_animate: boolean() | nil,
           gui_config_state: term(),
-          presentation_target: MingaEditor.PresentationTarget.t() | nil
+          presentation_target: MingaEditor.PresentationTarget.t() | nil,
+          home_tasks: [MingaEditor.State.Launchpad.task()],
+          tasks_drawer: Minga.RenderModel.UI.TasksDrawer.t() | nil
         }
 
   @spec from_editor_state(EditorState.t()) :: t()
@@ -111,9 +116,33 @@ defmodule MingaEditor.RenderPipeline.FrameIntent do
         Minga.Config.Options.get(state.interaction.options_server, :line_spacing) || 1.0,
       cursor_animate: Minga.Config.Options.get(state.interaction.options_server, :cursor_animate),
       gui_config_state: state.appearance.gui_config_state,
-      presentation_target: MingaEditor.PresentationTarget.from_editor_state(state)
+      presentation_target: MingaEditor.PresentationTarget.from_editor_state(state),
+      home_tasks: home_tasks(state),
+      tasks_drawer: tasks_drawer(state)
     }
   end
+
+  # The tasks the project home lists, from the shared task model; none while the home is not shown.
+  @spec home_tasks(EditorState.t()) :: [MingaEditor.State.Launchpad.task()]
+  defp home_tasks(
+         %EditorState{workspace: %{launchpad: %MingaEditor.State.Launchpad{} = home}} = state
+       ) do
+    tab_bar = Runtime.state(state.shell_runtime) |> Map.get(:tab_bar)
+    MingaEditor.State.Launchpad.tasks(state.agent_connection.tasks, tab_bar, home)
+  end
+
+  defp home_tasks(%EditorState{}), do: []
+
+  @spec tasks_drawer(EditorState.t()) :: Minga.RenderModel.UI.TasksDrawer.t()
+  defp tasks_drawer(%EditorState{shell_runtime: %Runtime{state: %ShellState{} = shell}} = state) do
+    MingaEditor.RenderModel.UI.TasksDrawerBuilder.build(
+      state.agent_connection.tasks,
+      ShellState.drawers(shell),
+      System.os_time(:millisecond)
+    )
+  end
+
+  defp tasks_drawer(%EditorState{}), do: Minga.RenderModel.UI.TasksDrawer.hidden()
 
   @doc "Replaces only the bulk highlight payload while preserving frame metadata."
   @spec with_highlight_payload(t(), %{pid() => MingaEditor.UI.Highlight.t()}, map()) :: t()

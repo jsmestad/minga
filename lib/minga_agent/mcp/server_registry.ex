@@ -166,14 +166,18 @@ defmodule MingaAgent.MCP.ServerRegistry do
   @spec normalize_server(source(), atom() | String.t(), keyword(), non_neg_integer()) ::
           {:ok, entry()} | :error
   defp normalize_server(source, name, opts, index) when is_list(opts) do
+    # An extension does not choose the directory its servers start in: they start in the session's project.
     server_map =
       opts
+      |> Keyword.delete(:cwd)
       |> Keyword.put(:name, server_id(name))
       |> Keyword.put(:source, source)
       |> Map.new()
+      |> Map.delete("cwd")
 
     case ServerConfig.normalize(server_map) do
       {:ok, %ServerConfig{} = config} ->
+        config = ServerConfig.program_in(config, extension_root(source))
         {:ok, %{source: source, id: Integer.to_string(index), config: config}}
 
       {:error, reason} ->
@@ -183,6 +187,28 @@ defmodule MingaAgent.MCP.ServerRegistry do
   end
 
   defp normalize_server(_source, _name, _opts, _index), do: :error
+
+  # The folder that holds an extension's own files, when it can be located. Its relative program is a file there.
+  @spec extension_root(source()) :: String.t() | nil
+  defp extension_root({:extension, name}) when is_atom(name) do
+    case Minga.Extension.Registry.get(name) do
+      {:ok, entry} -> absolute_folder(Minga.Extension.Entry.root(entry))
+      :error -> nil
+    end
+  catch
+    :exit, _registry_not_running -> nil
+  end
+
+  defp extension_root(_source), do: nil
+
+  # An extension defined in memory has no folder of its own. A relative answer would mean the directory Minga
+  # runs in, so only an absolute one counts.
+  @spec absolute_folder(String.t() | nil) :: String.t() | nil
+  defp absolute_folder(root) when is_binary(root) do
+    if Path.type(root) == :absolute, do: root
+  end
+
+  defp absolute_folder(nil), do: nil
 
   @spec maybe_add_entry([entry()], MapSet.t(String.t()), entry()) ::
           {[entry()], MapSet.t(String.t())}

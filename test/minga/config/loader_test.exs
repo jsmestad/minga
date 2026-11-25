@@ -1,11 +1,7 @@
 defmodule Minga.Config.LoaderTest do
   # credo:disable-for-this-file Credo.Check.Refactor.Apply
-  # Not async: the project-local config tests call `File.cd!/1` to point the
-  # loader at a temp project directory, but the BEAM cwd is process-global.
-  # Running these in parallel with other compilation work breaks
-  # `Code.compile_file/1` calls in unrelated suites. Per-test Options/Keymap
-  # servers handle the singleton-isolation goal of #1448; the env-and-cwd
-  # races are out of scope.
+  # Not async: these tests reset the shared extension registry, hooks, advice and command registry, and they
+  # set Application env. One test changes the VM's working directory to prove that the loader does not read it.
   use ExUnit.Case, async: false
 
   alias Minga.Command.Registry, as: CommandRegistry
@@ -106,8 +102,29 @@ defmodule Minga.Config.LoaderTest do
       assert Loader.load_error(pid) =~ "later config error"
       assert Loader.config_eval_error(pid) =~ "later config error"
 
-      assert Loader.migration_notice(pid) ==
-               ~s(Some configured keybindings need optional extensions. Add to config.exs and restart: extension :minga_knowledge_graph, git: "https://github.com/jsmestad/minga-knowledge-graph")
+      assert Loader.migration_notices(pid) ==
+               [
+                 ~s(Some configured keybindings need optional extensions. Add to config.exs and restart: extension :minga_knowledge_graph, git: "https://github.com/jsmestad/minga-knowledge-graph")
+               ]
+    end
+
+    test "a config that still sets a retired notification option loads, and says so once in *Messages*" do
+      {_dir, config_home, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        set :agent_notify_on, [:approval, :error]
+        set :tab_width, 3
+        """)
+
+      on_exit(cleanup)
+      name = :"loader_retired_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
+
+      assert Loader.load_error(pid) == nil
+      assert Options.get(test_options_server(), :tab_width) == 3
+      assert [note] = Loader.migration_notices(pid)
+      assert note =~ ":agent_notify_on is retired and ignored"
+      assert note =~ ":agent_notify_terminal"
     end
 
     test "the retired git porcelain declaration warns and the rest of the config still applies" do
@@ -228,8 +245,6 @@ defmodule Minga.Config.LoaderTest do
       ExtRegistry.reset()
     end)
 
-    previous_cwd = File.cwd!()
-
     project_dir =
       Path.join(
         System.tmp_dir!(),
@@ -237,7 +252,6 @@ defmodule Minga.Config.LoaderTest do
       )
 
     File.mkdir_p!(project_dir)
-    File.cd!(project_dir)
 
     project_ext_dir = Path.join(project_dir, "project_ext")
     after_ext_dir = Path.join(project_dir, "after_ext")
@@ -293,7 +307,6 @@ defmodule Minga.Config.LoaderTest do
     """)
 
     on_exit(fn ->
-      File.cd!(previous_cwd)
       File.rm_rf!(project_dir)
       :code.purge(Minga.TestExtensions.ProjectConfigExt)
       :code.delete(Minga.TestExtensions.ProjectConfigExt)
@@ -302,7 +315,9 @@ defmodule Minga.Config.LoaderTest do
     end)
 
     name = :"loader_project_after_ext_#{System.unique_integer([:positive])}"
-    {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
+
+    {:ok, pid} =
+      Loader.start_link(name: name, config_home: config_home, project_root: project_dir)
 
     assert Loader.load_error(pid) == nil
     assert {:ok, project_entry} = ExtRegistry.get(:project_config_ext)
@@ -595,17 +610,15 @@ defmodule Minga.Config.LoaderTest do
       set :tab_width, 8
       """)
 
-      original_cwd = File.cwd!()
-      File.cd!(project_dir)
-
       on_exit(fn ->
-        File.cd!(original_cwd)
         cleanup.()
         File.rm_rf!(project_dir)
       end)
 
       name = :"loader_project_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
+
+      {:ok, pid} =
+        Loader.start_link(name: name, config_home: config_home, project_root: project_dir)
 
       assert Loader.project_config_error(pid) == nil
       assert Options.get(test_options_server(), :tab_width) == 8
@@ -621,26 +634,29 @@ defmodule Minga.Config.LoaderTest do
 
       File.write!(
         Path.join([project_dir, ".minga", "mcp.json"]),
-        ~s({"mcpServers":{"github":{"command":"npx","args":["-y","@modelcontextprotocol/server-github"],"env":{"GITHUB_TOKEN":"token"}}}})
+        ~s({"mcpServers":{"github":{"command":"sh","args":["-y","@modelcontextprotocol/server-github"],"env":{"GITHUB_TOKEN":"token"}}}})
       )
 
-      original_cwd = File.cwd!()
-      File.cd!(project_dir)
-
       on_exit(fn ->
-        File.cd!(original_cwd)
         cleanup.()
         File.rm_rf!(project_dir)
       end)
 
       name = :"loader_project_mcp_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
+
+      {:ok, pid} =
+        Loader.start_link(name: name, config_home: config_home, project_root: project_dir)
 
       assert Loader.load_error(pid) == nil
       assert [server] = Options.get(test_options_server(), :agent_mcp_servers)
       server = Map.new(server, fn {key, value} -> {to_string(key), value} end)
       assert Map.get(server, "name") == "github"
-      assert Map.get(server, "command") == "npx"
+
+      # A bare name is found on PATH when the server starts, and the server starts in the project.
+      assert Map.get(server, "command") == "sh"
+      assert Map.get(server, "args") == ["-y", "@modelcontextprotocol/server-github"]
+      {:ok, canonical} = Minga.Project.Root.canonical_path(project_dir)
+      assert Map.get(server, "cwd") == canonical
     end
 
     test "reports a clear error when mcpServers contains a non-map value" do
@@ -656,17 +672,15 @@ defmodule Minga.Config.LoaderTest do
         ~s({"mcpServers":{"github":42}})
       )
 
-      original_cwd = File.cwd!()
-      File.cd!(project_dir)
-
       on_exit(fn ->
-        File.cd!(original_cwd)
         cleanup.()
         File.rm_rf!(project_dir)
       end)
 
       name = :"loader_project_mcp_bad_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
+
+      {:ok, pid} =
+        Loader.start_link(name: name, config_home: config_home, project_root: project_dir)
 
       assert Loader.load_error(pid) =~ ".minga/mcp.json mcpServers.github must be a map, got: 42"
       # The global config evaluated: a bad project MCP file does not leave the editor on defaults.
@@ -682,19 +696,743 @@ defmodule Minga.Config.LoaderTest do
         Path.join(System.tmp_dir!(), "minga_noproj_#{System.unique_integer([:positive])}")
 
       File.mkdir_p!(project_dir)
-      original_cwd = File.cwd!()
-      File.cd!(project_dir)
 
       on_exit(fn ->
-        File.cd!(original_cwd)
         cleanup.()
         File.rm_rf!(project_dir)
       end)
 
       name = :"loader_noproj_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
+
+      {:ok, pid} =
+        Loader.start_link(name: name, config_home: config_home, project_root: project_dir)
 
       assert Loader.project_config_error(pid) == nil
+    end
+  end
+
+  describe "where project-local config comes from" do
+    # These tests register plugins and extensions to see whether a folder's config was read. The registry is
+    # shared, so each test starts from an empty one, and nothing is started: registration is the mark.
+    setup do
+      ensure_extension_runtime()
+      previous = Application.get_env(:minga, :load_extensions)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.put_env(:minga, :load_extensions, false)
+
+      on_exit(fn ->
+        restore_application_env(:load_extensions, previous)
+        if Process.whereis(ExtRegistry), do: ExtRegistry.reset()
+      end)
+
+      :ok
+    end
+
+    # A folder that holds every kind of project-local configuration, each of which leaves a mark if it is read.
+    defp project_with_everything(label) do
+      root = Path.join(System.tmp_dir!(), "minga_#{label}_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join([root, ".minga", "plugins", "marker_plugin"]))
+      File.write!(Path.join(root, ".minga.exs"), "use Minga.Config\nset :tab_width, 8\n")
+
+      File.write!(
+        Path.join([root, ".minga", "mcp.json"]),
+        ~s({"mcpServers":{"marker":{"command":"true"}}})
+      )
+
+      on_exit(fn -> File.rm_rf!(root) end)
+      root
+    end
+
+    defp start_loader(config_home, project_root) do
+      name = :"loader_root_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Loader.start_link(name: name, config_home: config_home, project_root: project_root)
+
+      pid
+    end
+
+    defp nothing_project_local_loaded? do
+      Options.get(test_options_server(), :tab_width) != 8 and
+        Options.get(test_options_server(), :agent_mcp_servers) == [] and
+        ExtRegistry.get(:marker_plugin) == :error
+    end
+
+    test "the project's own files load, and the report names the folder and the files" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+      root = project_with_everything("project")
+      {:ok, canonical} = Minga.Project.Root.canonical_path(root)
+
+      pid = start_loader(config_home, root)
+
+      assert Options.get(test_options_server(), :tab_width) == 8
+      assert [_marker] = Options.get(test_options_server(), :agent_mcp_servers)
+      assert {:ok, _plugin} = ExtRegistry.get(:marker_plugin)
+
+      assert {:loaded, ^canonical, files, []} = Loader.project_config(pid)
+
+      assert Enum.map(files, &Path.relative_to(&1, canonical)) ==
+               [".minga.exs", ".minga/mcp.json", ".minga/plugins"]
+
+      assert Loader.project_config_message(Loader.project_config(pid)) ==
+               "Project config loaded from #{Minga.Project.collapse_home(canonical)}: " <>
+                 ".minga.exs, .minga/mcp.json, .minga/plugins."
+    end
+
+    test "the directory the VM runs in is not read when the project is elsewhere" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      launch_directory = project_with_everything("launch_dir")
+      project = Path.join(System.tmp_dir!(), "minga_empty_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(project)
+      {:ok, canonical} = Minga.Project.Root.canonical_path(project)
+      previous = File.cwd!()
+      File.cd!(launch_directory)
+
+      on_exit(fn ->
+        File.cd!(previous)
+        cleanup.()
+        File.rm_rf!(project)
+      end)
+
+      pid = start_loader(config_home, project)
+
+      assert nothing_project_local_loaded?()
+      assert Loader.project_config(pid) == {:loaded, canonical, [], []}
+      assert Loader.project_config_message(Loader.project_config(pid)) == nil
+    end
+
+    test "the loader says which directory a process started because of config runs in" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+      root = project_with_everything("directory")
+      {:ok, canonical} = Minga.Project.Root.canonical_path(root)
+
+      assert Loader.project_directory(start_loader(config_home, root)) == canonical
+
+      # No project, or a project whose config is refused, gives none: such a process runs where Minga runs.
+      assert Loader.project_directory(start_loader(config_home, nil)) == nil
+      File.chmod!(root, 0o777)
+      assert Loader.project_directory(start_loader(config_home, root)) == nil
+      assert Loader.project_directory(:no_such_loader) == nil
+    end
+
+    test "with no project nothing project-local loads, whatever the VM's directory holds" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      launch_directory = project_with_everything("no_project")
+      previous = File.cwd!()
+      File.cd!(launch_directory)
+
+      on_exit(fn ->
+        File.cd!(previous)
+        cleanup.()
+      end)
+
+      pid = start_loader(config_home, nil)
+
+      assert nothing_project_local_loaded?()
+      assert Loader.project_config(pid) == :none
+    end
+
+    test "a root that is too broad loads nothing, directly or through a link" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      link = Path.join(System.tmp_dir!(), "minga_root_link_#{System.unique_integer([:positive])}")
+      File.ln_s!("/", link)
+
+      on_exit(fn ->
+        cleanup.()
+        File.rm(link)
+      end)
+
+      for root <- ["/", link] do
+        pid = start_loader(config_home, root)
+
+        assert nothing_project_local_loaded?()
+        assert Loader.project_config(pid) == {:refused, root, {:too_broad, "/"}}
+
+        # The message names the folder that was opened, and judges the folder it really is.
+        assert Loader.project_config_message(Loader.project_config(pid)) ==
+                 "Project config in #{root} not loaded: / is too broad and not under version control. " <>
+                   "Config loads from a project folder inside it, or once / is a Git repository."
+      end
+    end
+
+    test "a root that cannot be found loads nothing and says so" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+
+      missing =
+        Path.join(System.tmp_dir!(), "minga_missing_#{System.unique_integer([:positive])}")
+
+      pid = start_loader(config_home, missing)
+
+      assert nothing_project_local_loaded?()
+      assert Loader.project_config(pid) == {:refused, missing, :unresolvable}
+
+      assert Loader.project_config_message(Loader.project_config(pid)) ==
+               "Project config in #{Minga.Project.collapse_home(missing)} not loaded: the folder cannot be found."
+    end
+
+    test "a reload reads the project the editor passes, and no project unloads it" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+      root = project_with_everything("reload")
+
+      # A project that Minga did not start with loads on reload only if it brings no extensions or plugins.
+      File.rm_rf!(Path.join([root, ".minga", "plugins"]))
+      pid = start_loader(config_home, nil)
+      assert nothing_project_local_loaded?()
+
+      assert :ok = Loader.reload(pid, root)
+      assert Options.get(test_options_server(), :tab_width) == 8
+      assert {:loaded, _canonical, [_one, _two], []} = Loader.project_config(pid)
+
+      assert :ok = Loader.reload(pid, nil)
+      assert nothing_project_local_loaded?()
+      assert Loader.project_config(pid) == :none
+    end
+
+    test "a relative extension path in a project's config means next to that file" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+      root = Path.join(System.tmp_dir!(), "minga_relative_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join(root, "ext"))
+      on_exit(fn -> File.rm_rf!(root) end)
+
+      File.write!(Path.join(root, ".minga.exs"), """
+      use Minga.Config
+      extension :relative_marker, path: "ext"
+      """)
+
+      {:ok, canonical} = Minga.Project.Root.canonical_path(root)
+      pid = start_loader(config_home, root)
+
+      assert Loader.project_config_error(pid) == nil
+      assert {:ok, entry} = ExtRegistry.get(:relative_marker)
+      assert Minga.Extension.Entry.source_path(entry) == Path.join(canonical, "ext")
+    end
+
+    test "a folder and a file that a project's config names mean next to that file, and are held to the rule" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+      base = Path.join(System.tmp_dir!(), "minga_named_#{System.unique_integer([:positive])}")
+      root = Path.join(base, "project")
+      on_exit(fn -> File.rm_rf!(base) end)
+
+      for folder <- [
+            "project/grammar",
+            "project/open_grammar/later",
+            "outside/grammar",
+            "open/grammar"
+          ] do
+        File.mkdir_p!(Path.join(base, folder))
+      end
+
+      File.write!(Path.join(root, "grammar/highlights.scm"), "(own)")
+      File.write!(Path.join(root, "grammar/open.scm"), "(open)")
+      File.chmod!(Path.join(root, "grammar/open.scm"), 0o666)
+      File.chmod!(Path.join(root, "open_grammar/later"), 0o777)
+      File.chmod!(Path.join(base, "open"), 0o777)
+      {:ok, canonical} = Minga.Project.Root.canonical_path(root)
+      {:ok, canonical_base} = Minga.Project.Root.canonical_path(base)
+      report = Path.join(canonical_base, "report")
+
+      # The file records what each name it writes resolves to while it is evaluated.
+      File.write!(Path.join(root, ".minga.exs"), """
+      use Minga.Config
+
+      File.write!(
+        #{inspect(report)},
+        :erlang.term_to_binary(%{
+          own: Minga.Config.config_code_folder("grammar"),
+          open: Minga.Config.config_code_folder("open_grammar"),
+          outside: Minga.Config.config_code_folder("../outside/grammar"),
+          under_open: Minga.Config.config_code_folder("../open/grammar"),
+          file: Minga.Config.read_config_named_file("grammar/highlights.scm"),
+          open_file: Minga.Config.read_config_named_file("grammar/open.scm")
+        })
+      )
+      """)
+
+      # `grammar/open.scm` sits in the grammar folder, so that folder is judged without it here.
+      pid = start_loader(config_home, root)
+      assert Loader.project_config_error(pid) == nil
+      found = :erlang.binary_to_term(File.read!(report))
+
+      assert found.file == {:ok, "(own)"}
+
+      assert found.open_file ==
+               {:error, {:writable_by_others, Path.join(canonical, "grammar/open.scm")}}
+
+      # A folder with a file anyone can write in it is refused whole, and so is one with an open subfolder.
+      assert {:error, own_refusal} = found.own
+      assert own_refusal =~ "grammar/open.scm"
+      assert {:error, open_refusal} = found.open
+      assert open_refusal =~ "anyone on this machine can write"
+      # `..` gains nothing: the folder is judged where it really is, with the folders above it.
+      assert found.outside == {:ok, Path.join(canonical_base, "outside/grammar")}
+      assert {:error, under_open_refusal} = found.under_open
+      assert under_open_refusal =~ Path.join(canonical_base, "open")
+
+      # Outside a config file there is no such folder and no rule: the user's own code names what it likes.
+      assert Minga.Config.expand_config_path("grammar") == Path.expand("grammar")
+      assert Minga.Config.config_code_folder("grammar") == {:ok, Path.expand("grammar")}
+    end
+
+    test "a folder anyone on the machine can write gives no config, directly or through a link" do
+      # The finding this guards: another account plants a marker and `.minga.exs` in a shared folder such as /tmp.
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      shared = project_with_everything("shared")
+      File.chmod!(shared, 0o777)
+      {:ok, canonical} = Minga.Project.Root.canonical_path(shared)
+
+      link =
+        Path.join(System.tmp_dir!(), "minga_shared_link_#{System.unique_integer([:positive])}")
+
+      File.ln_s!(shared, link)
+
+      on_exit(fn ->
+        cleanup.()
+        File.rm(link)
+      end)
+
+      for root <- [shared, link] do
+        pid = start_loader(config_home, root)
+
+        assert nothing_project_local_loaded?()
+        assert Loader.project_config(pid) == {:refused, root, {:writable_by_others, canonical}}
+
+        assert Loader.project_config_message(Loader.project_config(pid)) =~
+                 "not loaded: anyone on this machine can write"
+
+        assert Loader.project_config_message(Loader.project_config(pid)) =~ "chmod o-w"
+      end
+    end
+
+    test "a config file anyone can write is left out, and the rest of the project's config loads" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+      root = project_with_everything("open_file")
+      {:ok, canonical} = Minga.Project.Root.canonical_path(root)
+      File.chmod!(Path.join(root, ".minga.exs"), 0o666)
+
+      pid = start_loader(config_home, root)
+
+      refute Options.get(test_options_server(), :tab_width) == 8
+      assert [_marker] = Options.get(test_options_server(), :agent_mcp_servers)
+
+      assert {:loaded, ^canonical, loaded, [{left_out, {:writable_by_others, _file}}]} =
+               Loader.project_config(pid)
+
+      assert Path.relative_to(left_out, canonical) == ".minga.exs"
+
+      assert Enum.map(loaded, &Path.relative_to(&1, canonical)) == [
+               ".minga/mcp.json",
+               ".minga/plugins"
+             ]
+
+      message = Loader.project_config_message(Loader.project_config(pid))
+      assert message =~ "Project config loaded from"
+      assert message =~ ".minga.exs (anyone on this machine can write .minga.exs."
+    end
+
+    test "a plugin anyone can write is not registered" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+      root = project_with_everything("open_plugin")
+      File.chmod!(Path.join([root, ".minga", "plugins", "marker_plugin"]), 0o777)
+
+      pid = start_loader(config_home, root)
+
+      assert ExtRegistry.get(:marker_plugin) == :error
+
+      assert Loader.load_error(pid) =~
+               "Plugin marker_plugin not loaded: anyone on this machine can write"
+    end
+
+    test "a plugin with an empty subfolder anyone can write is not registered: a file added later would be loaded" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+      root = project_with_everything("open_subfolder")
+      later = Path.join([root, ".minga", "plugins", "marker_plugin", "lib", "later"])
+      File.mkdir_p!(later)
+      File.chmod!(later, 0o777)
+
+      pid = start_loader(config_home, root)
+
+      assert ExtRegistry.get(:marker_plugin) == :error
+
+      assert Loader.load_error(pid) =~
+               "Plugin marker_plugin not loaded: anyone on this machine can write"
+
+      assert Loader.load_error(pid) =~
+               "marker_plugin/lib/later. Remove write access for others (chmod o-w,"
+    end
+
+    test "a plugin whose plugin.json or script anyone can write is not registered" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+
+      for {label, open} <- [{"open_manifest", "plugin.json"}, {"open_script", "bin/serve.sh"}] do
+        root = project_with_everything(label)
+        plugin = Path.join([root, ".minga", "plugins", "marker_plugin"])
+        File.mkdir_p!(Path.join(plugin, "bin"))
+
+        File.write!(
+          Path.join(plugin, "plugin.json"),
+          ~s({"name":"marker","mcp_servers":[{"name":"m","command":"${MINGA_PLUGIN_ROOT}/bin/serve.sh"}]})
+        )
+
+        File.write!(Path.join(plugin, "bin/serve.sh"), "#!/bin/sh\n")
+        File.chmod!(Path.join(plugin, open), 0o777)
+
+        pid = start_loader(config_home, root)
+
+        assert ExtRegistry.get(:marker_plugin) == :error
+        assert Loader.load_error(pid) =~ "marker_plugin/#{open}. Remove write access for others"
+      end
+    end
+
+    test "nothing is read from a .minga folder anyone can write: its plugins and its MCP servers stay out" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+      root = project_with_everything("open_dot_minga")
+      {:ok, canonical} = Minga.Project.Root.canonical_path(root)
+      File.chmod!(Path.join(root, ".minga"), 0o777)
+
+      pid = start_loader(config_home, root)
+
+      # Another account could rename the plugins folder away and put its own in its place.
+      assert ExtRegistry.get(:marker_plugin) == :error
+      assert Options.get(test_options_server(), :agent_mcp_servers) == []
+      # `.minga.exs` sits in the project folder itself, which is the user's own.
+      assert Options.get(test_options_server(), :tab_width) == 8
+
+      open = {:writable_by_others, Path.join(canonical, ".minga")}
+
+      assert {:loaded, ^canonical, [_config_file], [{_mcp_json, ^open}, {_plugins_folder, ^open}]} =
+               Loader.project_config(pid)
+    end
+
+    test "a plugin is registered under its canonical path, so a link repointed later changes nothing" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+      root = project_with_everything("linked_plugin")
+      plugins = Path.join([root, ".minga", "plugins"])
+      File.rm_rf!(Path.join(plugins, "marker_plugin"))
+      File.mkdir_p!(Path.join(root, "checked"))
+      File.mkdir_p!(Path.join(root, "swapped_in"))
+      File.ln_s!(Path.join(root, "checked"), Path.join(plugins, "marker_plugin"))
+      {:ok, checked} = Minga.Project.Root.canonical_path(Path.join(root, "checked"))
+
+      start_loader(config_home, root)
+
+      assert {:ok, entry} = ExtRegistry.get(:marker_plugin)
+      assert Minga.Extension.Entry.source_path(entry) == checked
+
+      # The name in the plugins folder now leads elsewhere. What was registered is the folder that was checked.
+      File.rm!(Path.join(plugins, "marker_plugin"))
+      File.ln_s!(Path.join(root, "swapped_in"), Path.join(plugins, "marker_plugin"))
+
+      assert {:ok, entry} = ExtRegistry.get(:marker_plugin)
+      assert Minga.Extension.Entry.source_path(entry) == checked
+    end
+
+    test "an extension path in a project's config must lead to code that is the user's own" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+      root = Path.join(System.tmp_dir!(), "minga_ext_owner_#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm_rf!(root) end)
+
+      for name <- ["own_ext", "open_ext", "open_parent/under_open_ext"] do
+        File.mkdir_p!(Path.join([root, name, "lib"]))
+        File.write!(Path.join([root, name, "lib", "ext.ex"]), "")
+      end
+
+      # An empty folder anyone can write, and a folder that sits under one.
+      File.mkdir_p!(Path.join([root, "open_ext", "lib", "later"]))
+      File.chmod!(Path.join([root, "open_ext", "lib", "later"]), 0o777)
+      File.chmod!(Path.join(root, "open_parent"), 0o777)
+      File.ln_s!(Path.join(root, "own_ext"), Path.join(root, "linked_ext"))
+
+      File.write!(Path.join(root, ".minga.exs"), """
+      use Minga.Config
+      extension :own_marker, path: "own_ext"
+      extension :linked_marker, path: "linked_ext"
+      extension :open_marker, path: "open_ext"
+      extension :under_open_marker, path: "open_parent/under_open_ext"
+      set :tab_width, 8
+      """)
+
+      {:ok, canonical} = Minga.Project.Root.canonical_path(root)
+      pid = start_loader(config_home, root)
+
+      assert {:ok, _entry} = ExtRegistry.get(:own_marker)
+      assert ExtRegistry.get(:open_marker) == :error
+      assert ExtRegistry.get(:under_open_marker) == :error
+      # What is registered is the canonical folder that was checked, not the name the config used.
+      assert {:ok, linked} = ExtRegistry.get(:linked_marker)
+      assert Minga.Extension.Entry.source_path(linked) == Path.join(canonical, "own_ext")
+      # The rest of the file still applies, and the file itself counts as loaded.
+      assert Options.get(test_options_server(), :tab_width) == 8
+      assert Loader.project_config_error(pid) == nil
+    end
+
+    # A project with scripts: one the user's own, one anyone can write.
+    defp project_with_scripts(label) do
+      root = project_with_everything(label)
+      File.mkdir_p!(Path.join(root, "scripts"))
+
+      for name <- ["own.sh", "open.sh"] do
+        File.write!(Path.join([root, "scripts", name]), "#!/bin/sh\n")
+        File.chmod!(Path.join([root, "scripts", name]), 0o755)
+      end
+
+      File.chmod!(Path.join(root, "scripts/open.sh"), 0o777)
+      {:ok, canonical} = Minga.Project.Root.canonical_path(root)
+      {root, canonical}
+    end
+
+    defp servers_by_name do
+      Map.new(Options.get(test_options_server(), :agent_mcp_servers), &{&1.name, &1})
+    end
+
+    test "an MCP server from .minga/mcp.json starts from an examined program, in the project root" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+      {root, canonical} = project_with_scripts("mcp_program")
+
+      File.write!(
+        Path.join([root, ".minga", "mcp.json"]),
+        JSON.encode!(%{
+          "mcpServers" => %{
+            "own" => %{
+              "command" => "scripts/own.sh",
+              "args" => ["scripts/open.sh", "--config=scripts/x"],
+              "cwd" => "/tmp"
+            },
+            "open" => %{"command" => "scripts/open.sh"},
+            "missing" => %{"command" => "scripts/later.sh"},
+            "on_path" => %{"command" => "true", "cwd" => "/tmp"}
+          }
+        })
+      )
+
+      pid = start_loader(config_home, root)
+      servers = servers_by_name()
+
+      assert Enum.sort(Map.keys(servers)) == ["on_path", "own"]
+
+      # The canonical program that was examined is what is registered, and the project's own data does not
+      # choose the directory. Arguments are the project's own and are passed on untouched.
+      assert servers["own"].command == Path.join(canonical, "scripts/own.sh")
+      assert servers["own"].cwd == canonical
+      assert servers["own"].args == ["scripts/open.sh", "--config=scripts/x"]
+      # A bare name is the user's environment: it is found on PATH when the server starts.
+      assert servers["on_path"].command == "true"
+      assert servers["on_path"].cwd == canonical
+
+      assert Loader.load_error(pid) =~
+               "MCP server open not loaded: anyone on this machine can write"
+
+      assert Loader.load_error(pid) =~ "MCP server missing not loaded:"
+
+      assert Loader.load_error(pid) =~
+               "scripts/later.sh is not there. Create it, or correct the name, and reload config."
+    end
+
+    test "servers and hooks that a project's .minga.exs adds are the project's: examined, and run in its root" do
+      {_dir, config_home, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        set :agent_mcp_servers, [%{name: "mine", command: "true"}]
+        set :agent_hooks, [%{event: :stop, command: "echo mine"}]
+        """)
+
+      on_exit(cleanup)
+      {root, canonical} = project_with_scripts("exs_processes")
+      File.rm!(Path.join([root, ".minga", "mcp.json"]))
+
+      File.write!(Path.join(root, ".minga.exs"), """
+      use Minga.Config
+
+      set :agent_mcp_servers, [
+        %{name: "mine", command: "true"},
+        %{name: "own", command: "scripts/own.sh", cwd: "/tmp"},
+        %{name: "open", command: "scripts/open.sh"}
+      ]
+
+      set :agent_hooks, [
+        %{event: :stop, command: "echo mine"},
+        %{event: :stop, command: "scripts/own.sh", cwd: "/tmp"}
+      ]
+      """)
+
+      pid = start_loader(config_home, root)
+      servers = servers_by_name()
+
+      assert Enum.sort(Map.keys(servers)) == ["mine", "own"]
+      # The entry the user's own config declared is left exactly as it was.
+      assert servers["mine"] == %{name: "mine", command: "true"}
+      assert servers["own"].command == Path.join(canonical, "scripts/own.sh")
+      assert servers["own"].cwd == canonical
+
+      assert [%{command: "echo mine"} = mine, %{command: "scripts/own.sh", cwd: ^canonical}] =
+               Options.get(test_options_server(), :agent_hooks)
+
+      refute Map.has_key?(mine, :cwd)
+
+      assert Loader.project_config_error(pid) =~
+               "MCP server open not loaded: anyone on this machine can write"
+    end
+
+    test "a project folder its group can write loads where an account has its own group, and not on macOS" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+      root = project_with_everything("group")
+      {:ok, canonical} = Minga.Project.Root.canonical_path(root)
+      File.chmod!(root, 0o775)
+
+      pid = start_loader(config_home, root)
+
+      # The rule is decided in `Minga.Project.Trust`, whose own tests cover both platforms with an injected one.
+      case Minga.Project.Trust.platform() do
+        :macos ->
+          assert nothing_project_local_loaded?()
+          assert Loader.project_config(pid) == {:refused, root, {:writable_by_group, canonical}}
+          assert Loader.project_config_message(Loader.project_config(pid)) =~ "chmod g-w"
+
+        :other ->
+          assert Options.get(test_options_server(), :tab_width) == 8
+          assert {:loaded, _canonical, [_one, _two, _three], []} = Loader.project_config(pid)
+      end
+    end
+
+    test "a project inside another never reads the outer project's files" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+      outer = project_with_everything("outer")
+      inner = Path.join(outer, "packages/inner")
+      File.mkdir_p!(inner)
+      {:ok, canonical} = Minga.Project.Root.canonical_path(inner)
+
+      pid = start_loader(config_home, inner)
+
+      assert nothing_project_local_loaded?()
+      assert Loader.project_config(pid) == {:loaded, canonical, [], []}
+    end
+
+    test "after a switch to another project a reload works, and only a project that declares extensions is left out" do
+      {dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+
+      project = fn label, content ->
+        root =
+          Path.join(System.tmp_dir!(), "minga_#{label}_#{System.unique_integer([:positive])}")
+
+        File.mkdir_p!(Path.join(root, "ext"))
+        if content, do: File.write!(Path.join(root, ".minga.exs"), content)
+        on_exit(fn -> File.rm_rf!(root) end)
+        root
+      end
+
+      started_in =
+        project.(
+          "a",
+          "use Minga.Config\nset :tab_width, 8\nextension :declared_in_a, path: \"ext\"\n"
+        )
+
+      plain = project.("b", nil)
+
+      declares =
+        project.(
+          "c",
+          "use Minga.Config\nset :tab_width, 6\nextension :declared_in_c, path: \"ext\"\n"
+        )
+
+      pid = start_loader(config_home, started_in)
+      assert Options.get(test_options_server(), :tab_width) == 8
+
+      # The sequence that failed: switch to a project without config, change the global config, reload.
+      File.write!(Path.join(dir, "config.exs"), "use Minga.Config\nset :scroll_margin, 9\n")
+      assert :ok = Loader.reload(pid, plain)
+      assert Options.get(test_options_server(), :scroll_margin) == 9
+      refute Options.get(test_options_server(), :tab_width) == 8
+      assert {:loaded, _plain, [], []} = Loader.project_config(pid)
+
+      # A project that declares extensions cannot be admitted after start. Only its config is left out.
+      assert :ok = Loader.reload(pid, declares)
+      assert Options.get(test_options_server(), :scroll_margin) == 9
+      refute Options.get(test_options_server(), :tab_width) == 6
+      assert Loader.project_config(pid) == {:refused, declares, :extensions_need_restart}
+
+      assert Loader.project_config_message(Loader.project_config(pid)) =~
+               "it declares extensions or has plugins, and those load only when Minga starts."
+
+      # A plugin is an extension too. A project that only has a plugins folder is left out the same way,
+      # and its plugin is not registered, so nothing of it is compiled.
+      with_plugin = project_with_everything("d")
+      assert :ok = Loader.reload(pid, with_plugin)
+      assert Loader.project_config(pid) == {:refused, with_plugin, :extensions_need_restart}
+      assert ExtRegistry.get(:marker_plugin) == :error
+      refute Options.get(test_options_server(), :tab_width) == 8
+      # None of its MCP servers is registered either, so none can be started.
+      assert Options.get(test_options_server(), :agent_mcp_servers) == []
+
+      # Back in the project Minga started with, its config loads again, with or without a restart.
+      assert :ok = Loader.reload(pid, started_in)
+      assert Options.get(test_options_server(), :tab_width) == 8
+      assert {:loaded, _started_in, [_config], []} = Loader.project_config(pid)
+      assert :ok = Loader.reload(pid)
+
+      restarted = start_loader(config_home, started_in)
+      assert Options.get(test_options_server(), :tab_width) == 8
+      assert {:loaded, _started_in, [_config], []} = Loader.project_config(restarted)
+    end
+
+    test "the project Minga started with is recognised on reload under another spelling of its path" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+      root = project_with_everything("spelling")
+      {:ok, canonical} = Minga.Project.Root.canonical_path(root)
+      link = root <> "_link"
+      File.ln_s!(root, link)
+      on_exit(fn -> File.rm(link) end)
+
+      pid = start_loader(config_home, root)
+      assert {:ok, _entry} = ExtRegistry.get(:marker_plugin)
+
+      # It has a plugin, so as another project it would be left out. It is the same project.
+      assert :ok = Loader.reload(pid, link)
+      assert {:loaded, ^canonical, [_one, _two, _three], []} = Loader.project_config(pid)
+      assert Options.get(test_options_server(), :tab_width) == 8
+      assert {:ok, _entry} = ExtRegistry.get(:marker_plugin)
+    end
+
+    test "the project Minga started with must still declare the extensions it declared then" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+      root = Path.join(System.tmp_dir!(), "minga_changed_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join(root, "ext"))
+      on_exit(fn -> File.rm_rf!(root) end)
+      File.write!(Path.join(root, ".minga.exs"), "use Minga.Config\n")
+
+      pid = start_loader(config_home, root)
+
+      File.write!(
+        Path.join(root, ".minga.exs"),
+        "use Minga.Config\nextension :added_later, path: \"ext\"\n"
+      )
+
+      assert {:error, "Extension declarations changed; restart Minga before config reload"} =
+               Loader.reload(pid)
+    end
+
+    test "the loader's source never asks for the VM's working directory" do
+      source = File.read!("lib/minga/config/loader.ex")
+
+      refute source =~ "File.cwd"
+      refute source =~ ":file.get_cwd"
     end
   end
 
@@ -721,17 +1459,15 @@ defmodule Minga.Config.LoaderTest do
       set :tab_width, 8
       """)
 
-      original_cwd = File.cwd!()
-      File.cd!(project_dir)
-
       on_exit(fn ->
-        File.cd!(original_cwd)
         cleanup.()
         File.rm_rf!(project_dir)
       end)
 
       name = :"loader_gui_settings_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
+
+      {:ok, pid} =
+        Loader.start_link(name: name, config_home: config_home, project_root: project_dir)
 
       assert Loader.gui_settings_error(pid) == nil
       assert Options.get(test_options_server(), :tab_width) == 8
@@ -764,17 +1500,15 @@ defmodule Minga.Config.LoaderTest do
       set :tab_width, 9
       """)
 
-      original_cwd = File.cwd!()
-      File.cd!(project_dir)
-
       on_exit(fn ->
-        File.cd!(original_cwd)
         cleanup.()
         File.rm_rf!(project_dir)
       end)
 
       name = :"loader_gui_after_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
+
+      {:ok, pid} =
+        Loader.start_link(name: name, config_home: config_home, project_root: project_dir)
 
       assert Loader.gui_settings_error(pid) == nil
       assert Loader.after_error(pid) == nil
@@ -892,17 +1626,15 @@ defmodule Minga.Config.LoaderTest do
       set :line_numbers, :relative
       """)
 
-      original_cwd = File.cwd!()
-      File.cd!(project_dir)
-
       on_exit(fn ->
-        File.cd!(original_cwd)
         cleanup.()
         File.rm_rf!(project_dir)
       end)
 
       name = :"loader_non_gui_explicit_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
+
+      {:ok, pid} =
+        Loader.start_link(name: name, config_home: config_home, project_root: project_dir)
 
       assert Loader.gui_settings_error(pid) == nil
       refute Options.explicitly_set?(test_options_server(), :line_numbers)
@@ -1335,7 +2067,6 @@ defmodule Minga.Config.LoaderTest do
 
     test "reload detects a newly created project extension declaration" do
       {_minga_dir, config_home, cleanup_config} = make_config_dir("use Minga.Config\n")
-      previous_cwd = File.cwd!()
 
       project_dir =
         Path.join(
@@ -1344,18 +2075,19 @@ defmodule Minga.Config.LoaderTest do
         )
 
       File.mkdir_p!(project_dir)
-      File.cd!(project_dir)
       extension_name = :loader_new_project_extension
 
       on_exit(fn ->
-        File.cd!(previous_cwd)
         File.rm_rf!(project_dir)
         ExtRegistry.unregister(extension_name)
         cleanup_config.()
       end)
 
       name = :"loader_new_project_config_#{System.unique_integer([:positive])}"
-      {:ok, loader} = Loader.start_link(name: name, config_home: config_home)
+
+      {:ok, loader} =
+        Loader.start_link(name: name, config_home: config_home, project_root: project_dir)
+
       assert Loader.load_error(loader) == nil
 
       File.write!(Path.join(project_dir, ".minga.exs"), """
@@ -1909,9 +2641,6 @@ defmodule Minga.Config.LoaderTest do
       set :tab_width, 99
       """)
 
-      original_cwd = File.cwd!()
-      File.cd!(project_dir)
-
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.put_env(:minga, :cli_startup_flags, %{
         view_mode: :auto,
@@ -1920,7 +2649,6 @@ defmodule Minga.Config.LoaderTest do
       })
 
       on_exit(fn ->
-        File.cd!(original_cwd)
         # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         Application.delete_env(:minga, :cli_startup_flags)
         cleanup.()
@@ -1929,7 +2657,9 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       name = :"loader_custom_proj_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
+
+      {:ok, pid} =
+        Loader.start_link(name: name, config_home: config_home, project_root: project_dir)
 
       # Project-local config overrides the custom global config (last writer wins)
       assert Options.get(test_options_server(), :tab_width) == 99
@@ -2034,19 +2764,18 @@ defmodule Minga.Config.LoaderTest do
       File.mkdir_p!(project_dir)
       File.write!(Path.join(project_dir, ".minga.exs"), "use Minga.Config\nset :tab_width, 45\n")
 
-      previous_cwd = File.cwd!()
-      File.cd!(project_dir)
       Minga.SafeMode.put(true)
 
       on_exit(fn ->
         Minga.SafeMode.put(false)
-        File.cd!(previous_cwd)
         cleanup.()
         File.rm_rf!(project_dir)
       end)
 
       name = :"loader_safe_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
+
+      {:ok, pid} =
+        Loader.start_link(name: name, config_home: config_home, project_root: project_dir)
 
       assert Options.get(test_options_server(), :tab_width) == 2
       assert Loader.loaded_modules(pid) == []

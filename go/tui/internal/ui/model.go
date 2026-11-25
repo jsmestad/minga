@@ -933,6 +933,12 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 			// land in Minga's *Messages* buffer instead.
 			m.protocolError = command.ProtocolError
 			m.logToMessages(protocol.LogLevelErr, "Go TUI protocol error: %s", command.ProtocolError)
+		case protocol.CommandAgentAlert:
+			// Out of band: a task started needing you while the terminal is in the background, and the user asked for
+			// the bell (:agent_notify_terminal). A withdrawal has nothing to undo.
+			if command.AgentAlertNeedsYou {
+				cmds = append(cmds, tea.Raw("\a"))
+			}
 		case protocol.CommandRendererShutdown:
 			// Out of band: the BEAM is stopping and waits for this process to
 			// exit. Quitting lets Bubble Tea restore the terminal; any open
