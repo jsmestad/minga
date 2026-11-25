@@ -11,6 +11,7 @@ defmodule MingaEditor.Agent.TranscriptSyncTest do
   alias Minga.Test.TranscriptSyncDriver
   alias MingaAgent.Session
   alias MingaAgent.Session.Transcript.Cursor
+  alias MingaEditor.Agent.Arrival
   alias MingaEditor.Agent.StreamEventWorkflow
   alias MingaEditor.Agent.TranscriptSync
   alias MingaEditor.Agent.UIState
@@ -50,6 +51,8 @@ defmodule MingaEditor.Agent.TranscriptSyncTest do
     :ok = :sys.resume(session)
     state = TranscriptSyncDriver.settle(state)
     :erlang.trace(session, false, [:receive])
+    barrier = :erlang.trace_delivered(session)
+    assert_receive {:trace_delivered, ^session, ^barrier}
 
     assert TranscriptFixture.messages(projection(state)) == Session.messages(session)
     assert transcript_reads(session) == 2
@@ -96,6 +99,28 @@ defmodule MingaEditor.Agent.TranscriptSyncTest do
 
     assert TranscriptFixture.messages(projection(switched)) == []
     assert switched.agent_connection.transcript_sync == nil
+  end
+
+  test "a reply that lands while the Session is still arriving is dropped; the arrival owns the read" do
+    session = start_session([{:assistant, "Answer"}])
+    :ok = :sys.suspend(session)
+    state = event_state(session) |> stream()
+    requested = state.agent_connection.transcript_sync
+
+    arriving =
+      EditorState.install_agent_arrival(state, %Arrival{
+        token: make_ref(),
+        tab: 1,
+        session: session,
+        phase: :forwarded
+      })
+
+    assert Arrival.pending?(arriving, session)
+    :ok = :sys.resume(session)
+    assert {:handled, arriving} = TranscriptSync.response(arriving, reply!(requested))
+
+    assert TranscriptFixture.messages(projection(arriving)) == []
+    assert arriving.agent_connection.transcript_sync == nil
   end
 
   test "asking for another Session abandons the read out to the one left behind" do
