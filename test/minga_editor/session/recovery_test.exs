@@ -6,6 +6,7 @@ defmodule MingaEditor.Session.RecoveryTest do
   alias MingaEditor.Session.State, as: SessionState
   alias Minga.Session
   alias Minga.Session.Snapshot
+  alias Minga.Session.Swap
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Session.Recovery
   alias MingaEditor.State.Buffers
@@ -198,9 +199,9 @@ defmodule MingaEditor.Session.RecoveryTest do
   # Writes the swap that a killed editor left for the file.
   defp leftover_swap(swap_dir, path, content) do
     opts = [swap_dir: swap_dir, os_pid: 4242]
-    {:ok, prepared} = Minga.Session.Swap.prepare(path, content, opts)
-    :ok = Minga.Session.Swap.publish(prepared)
-    Minga.Session.Swap.swap_path(path, opts)
+    {:ok, prepared} = Swap.prepare(path, content, opts)
+    :ok = Swap.publish(prepared)
+    Swap.swap_path(path, opts)
   end
 
   defp snapshot(clean_shutdown?) do

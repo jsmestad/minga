@@ -146,7 +146,7 @@ defmodule MingaEditor.SwapFilesTest do
   describe "the next start after the editor was killed" do
     test "opening the project restores its session and recovers its unsaved text, in one step",
          ctx do
-      save_session(ctx, [ctx.files.a, ctx.files.b])
+      save_session(ctx, [ctx.files.a, ctx.files.b], ctx.files.b)
       swap_a = leftover_swap(ctx, ctx.files.a, "unsaved a\n")
       swap_c = leftover_swap(ctx, ctx.files.c, "unsaved c\n")
       swap_elsewhere = leftover_swap(ctx, ctx.files.elsewhere, "unsaved elsewhere\n")
@@ -242,12 +242,12 @@ defmodule MingaEditor.SwapFilesTest do
     editor
   end
 
-  defp save_session(ctx, files) do
+  defp save_session(ctx, files, active_file) do
     snapshot = %Snapshot{
       version: 2,
       project_root: ctx.root,
       buffers: Enum.map(files, &%BufferEntry{file: &1}),
-      active_file: List.last(files)
+      active_file: active_file
     }
 
     :ok = Session.save(snapshot, session_dir: ctx.sessions, project_root: ctx.root)
