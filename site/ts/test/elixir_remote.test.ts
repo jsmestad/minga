@@ -19,7 +19,6 @@ import {
   type TranslatorRow,
 } from "../src/elixir_lab.ts";
 import { LESSON_STEPS } from "../src/progress.ts";
-import { evaluatePreToolUse } from "../src/remote_lab.ts";
 import { readPageLab } from "./support/page_copy.ts";
 
 const PAGE = "learn/elixir.html";
@@ -222,19 +221,5 @@ describe("Lesson 04 config builder", () => {
     assert.deepEqual(lab.texts, ["copied", "copy_failed"]);
     assert.match(lab.html, /data-cfg-theme-name aria-live="polite">Catppuccin Frappé</);
     assert.equal(lab.attr("aria-live").length, 1, "the theme name is the builder's only live region");
-  });
-});
-
-describe("Lesson 05 PreToolUse veto evaluator", () => {
-  it("blocks destructive shell commands with exit 1 and allows safe test commands with exit 0", () => {
-    const veto = evaluatePreToolUse("git push --force origin main");
-    assert.equal(veto.allowed, false);
-    assert.equal(veto.exitCode, 1);
-    assert.match(veto.stderr, /Blocked by local safety hook/);
-
-    const safe = evaluatePreToolUse("mix test test/minga_agent/retry_test.exs");
-    assert.equal(safe.allowed, true);
-    assert.equal(safe.exitCode, 0);
-    assert.equal(safe.stderr, "");
   });
 });

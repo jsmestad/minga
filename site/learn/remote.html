@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Remote Devboxes, MCP &amp; Safety Guardrails: Learn Minga</title>
-  <meta name="description" content="Lesson 05: Interactive fault-injection lab for minga --headless SSH attach, crash-isolated stdio MCP servers, deterministic PreToolUse shell veto hooks, and corporate InferenceRoute gateways.">
+  <title>Leave an agent unattended: Learn Minga</title>
+  <meta name="description" content="Lesson 05: before you leave an agent working with nobody watching, install a hook that stops dangerous shell commands, test its rules in your browser, and keep the work running on a remote machine with your laptop closed.">
   <link rel="canonical" href="https://mingacode.dev/learn/remote">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#303446" media="(prefers-color-scheme: dark)">
@@ -13,18 +13,18 @@
   <meta property="og:locale" content="en_US">
   <meta property="og:type" content="article">
   <meta property="og:url" content="https://mingacode.dev/learn/remote">
-  <meta property="og:title" content="Remote Devboxes, MCP &amp; Safety Guardrails: Learn Minga">
-  <meta property="og:description" content="Simulate laptop sleep, MCP crashes, and PreToolUse vetoes in a live BEAM supervision lab, then copy the production configs.">
+  <meta property="og:title" content="Leave an agent unattended: Learn Minga">
+  <meta property="og:description" content="Test the hook script that stops a force push or a delete of your home directory, then copy it and the commands that keep an agent working on a remote machine.">
   <meta property="og:image" content="https://mingacode.dev/assets/og-minga.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Remote Devboxes, MCP &amp; Safety Guardrails: Learn Minga">
-  <meta name="twitter:description" content="Simulate laptop sleep, MCP crashes, and PreToolUse vetoes in a live BEAM supervision lab, then copy the production configs.">
+  <meta name="twitter:title" content="Leave an agent unattended: Learn Minga">
+  <meta name="twitter:description" content="Test the hook script that stops a force push or a delete of your home directory, then copy it and the commands that keep an agent working on a remote machine.">
   <meta name="twitter:image" content="https://mingacode.dev/assets/og-minga.png">
   <meta name="twitter:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
-  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Remote Devboxes, MCP & Safety Guardrails: Learn Minga","description":"Lesson 05: Interactive fault-injection lab for minga --headless SSH attach, crash-isolated stdio MCP servers, deterministic PreToolUse shell veto hooks, and corporate InferenceRoute gateways.","url":"https://mingacode.dev/learn/remote","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Learn","item":"https://mingacode.dev/learn/"},{"@type":"ListItem","position":3,"name":"Remote Devboxes, MCP & Safety","item":"https://mingacode.dev/learn/remote"}]}]}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Leave an agent unattended: Learn Minga","description":"Lesson 05: before you leave an agent working with nobody watching, install a hook that stops dangerous shell commands, test its rules in your browser, and keep the work running on a remote machine with your laptop closed.","url":"https://mingacode.dev/learn/remote","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Learn","item":"https://mingacode.dev/learn/"},{"@type":"ListItem","position":3,"name":"Leave an agent unattended","item":"https://mingacode.dev/learn/remote"}]}]}</script>
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
@@ -36,6 +36,8 @@
           document.documentElement.setAttribute("data-theme", saved);
         }
       } catch (_) {}
+      // The lab lays out as live before it mounts, so mounting moves nothing. The module's onerror takes this back.
+      document.documentElement.classList.add("labs-pending");
     })();
   </script>
 </head>
@@ -68,64 +70,198 @@
   <main id="main" class="lesson-page lesson-theme-done">
     <section class="lesson-stage">
       <div class="container">
-        <p class="learn-breadcrumb"><a href="/learn/">Learn</a> <span>/</span> Lesson 05 of 05 · Supervision &amp; Fault-Injection Lab</p>
-        <div class="stage-head">
-          <div>
-            <h1>Remote Devboxes, MCP &amp; Safety Guardrails</h1>
-            <p class="stage-lead">Break the live topology below: close the laptop lid while the remote BEAM node keeps working, crash an isolated MCP server without losing buffers, and test real shell commands against a deterministic <code>PreToolUse</code> veto hook.</p>
+        <p class="learn-breadcrumb"><a href="/learn/">Learn</a> <span>/</span> Lesson 05 of 05 · Leave an agent unattended</p>
+        <h1>Leave an agent working while you are away</h1>
+        <p class="stage-lead">The agent is halfway through a task and you want to close the laptop. By default Minga asks you before each shell command, so an agent nobody is watching waits at the first one. Tell Minga to stop asking, and nothing stands between the agent and <code>git push --force</code>. A hook is the rule that stays: a short script Minga runs before every shell command the agent asks for, and when the script says no, the command does not run. Test the one below, then install it.</p>
+
+        <div class="veto-lab" data-remote-lab>
+          <div class="lab-head">
+            <span class="lab-labels">
+              <span class="lab-title">Test the hook before you rely on it</span>
+              <span class="lab-sim-label">Simulation</span>
+            </span>
+            <span class="lab-stepper" data-lab-stepper></span>
           </div>
-          <nav class="stage-jumps" aria-label="Lesson sections">
-            <a href="#fault-lab">Fault lab</a>
-            <a href="#headless-devbox">Headless SSH</a>
-            <a href="#pretooluse-hooks">PreToolUse</a>
-            <a href="#isolated-mcp">MCP &amp; Gateways</a>
-          </nav>
-        </div>
 
-        <div id="fault-lab" data-remote-lab>
-          <div class="lab-noscript">Enable JavaScript to use the interactive Supervision &amp; Fault-Injection Lab, or copy the production configs below.</div>
-        </div>
-      </div>
-    </section>
+          <div class="veto-grid">
+            <div class="veto-main">
+              <div class="veto-tester" data-lab-stage role="group" aria-label="Hook tester">
+                <form class="veto-form" data-veto-form>
+                  <label class="veto-label" for="veto-command">A shell command the agent asks to run</label>
+                  <div class="veto-input-row">
+                    <input id="veto-command" class="veto-input" type="text" value="git push --force origin main" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-veto-input>
+                    <button type="submit" class="lab-control veto-run">Run the hook</button>
+                  </div>
+                </form>
 
-    <section class="section section-tinted" id="headless-devbox">
-      <div class="container">
-        <div class="section-header">
-          <p class="section-index"><span>01</span> Headless</p>
-          <h2>Keep agents working across laptop sleep on your devbox.</h2>
-          <p>In headless mode, the server runs only buffer, project, and agent services (no editor, renderer, or parser OS processes). When you run <code>minga attach</code>, your local client renders the UI and subscribes over Erlang distribution with a shared <code>RELEASE_COOKIE</code> (<a href="/docs/remote_agents.html">Remote Agents</a>).</p>
-        </div>
+                <div class="veto-presets" role="group" aria-labelledby="veto-presets-label">
+                  <span class="veto-label" id="veto-presets-label">Or run one of these</span>
+                  <button type="button" class="lab-control veto-preset" data-veto-preset>git push --force origin main</button>
+                  <button type="button" class="lab-control veto-preset" data-veto-preset>rm -rf /</button>
+                  <button type="button" class="lab-control veto-preset" data-veto-preset>rm -rf /tmp/prod</button>
+                  <button type="button" class="lab-control veto-preset" data-veto-preset>npm test</button>
+                </div>
 
-        <div class="code-card is-frappe">
-          <div class="code-header">
-            <span>Remote devbox + local attach</span>
-            <button type="button" class="copy-btn" data-copy-target="cmd-remote-attach">Copy</button>
-          </div>
-          <pre><code id="cmd-remote-attach"># 1. On your Linux devbox (keep user services alive after logout):
-loginctl enable-linger "$USER"
-minga --headless
+                <div class="veto-result" data-veto-result data-verdict="none">
+                  <p class="veto-verdict">
+                    <span class="veto-verdict-word" data-veto-verdict="none">Not run yet</span>
+                    <span class="veto-verdict-word" data-veto-verdict="blocked" hidden>exit 1 · Blocked</span>
+                    <span class="veto-verdict-word" data-veto-verdict="allowed" hidden>exit 0 · Allowed</span>
+                    <span class="veto-runs">Runs: <span data-veto-runs>0</span></span>
+                  </p>
+                  <p class="veto-io-label">What the hook prints</p>
+                  <p class="veto-stderr"><span data-veto-out="none">Nothing yet.</span><span data-veto-out="allowed" hidden>Nothing. The hook stays quiet when it allows a command.</span><span data-veto-out="blocked" data-veto-message hidden></span></p>
+                  <p class="veto-io-label">What Minga sends the hook</p>
+                  <pre class="veto-stdin"><code data-veto-stdin>{
+  "event": "PreToolUse",
+  "tool_call_id": "tc_123",
+  "tool_name": "shell",
+  "arguments": {
+    "command": "git push --force origin main"
+  }
+}</code></pre>
+                </div>
+              </div>
 
-# 2. From your Mac or another terminal (zero source code copied locally):
-minga attach ssh://devbox/work/app</code></pre>
-        </div>
-      </div>
-    </section>
+              <p class="lab-caption" data-lab-caption-line></p>
 
-    <section class="section" id="pretooluse-hooks">
-      <div class="container">
-        <div class="section-header">
-          <p class="section-index"><span>02</span> Guardrails</p>
-          <h2>Deterministic <code>PreToolUse</code> shell veto hooks.</h2>
-          <p>Prompts suggest; shell exit codes enforce. Non-zero exit blocks the tool and surfaces stderr in chat (<a href="/docs/hooks.html">Hooks</a>). Reload live with <kbd>SPC h r</kbd>.</p>
-        </div>
-
-        <div class="grid-2">
-          <div class="code-card is-frappe">
-            <div class="code-header">
-              <span>~/.config/minga/config.exs · Hook registration</span>
-              <button type="button" class="copy-btn" data-copy-target="cmd-hook-cfg">Copy</button>
+              <ol data-lab-steps>
+                <li data-step="blocked">
+                  <p data-lab-instruction>Run a command the hook blocks</p>
+                  <p data-lab-caption="rest">The field holds a command you would not want run while you are away. Press Enter, or press Run the hook, to see what the hook does with it.</p>
+                  <p data-lab-caption="empty">The field is empty, so there is nothing to test. Type a command, or press one of the four under the field.</p>
+                  <p data-lab-caption="allowed_first">Allowed. No rule matched, so the hook exited 0 and the command would run. To see the hook say no, run <code>git push --force origin main</code>.</p>
+                  <p data-lab-caption="blocked">Blocked. A rule matched, so the hook exited 1 and Minga does not run the command. The rule is marked in the script. Next: with that command in the field, change it until the hook lets it through.</p>
+                </li>
+                <li data-step="edited">
+                  <p data-lab-instruction>Edit it until it passes</p>
+                  <p data-lab-caption="still_blocked">Still blocked. The hook's message names what it found. Take that part out of the command, then press Enter again.</p>
+                  <p data-lab-caption="allowed_other">That passes, but you did not edit the blocked command to get there. Run the blocked command again, then change it in the field yourself.</p>
+                  <p data-lab-caption="edited">Allowed. The hook stopped the dangerous form of the command, not the whole tool, so the agent can still do the safe version of the same job. Next: run a command that was never a problem, such as <code>npm test</code>.</p>
+                </li>
+                <li data-step="safe">
+                  <p data-lab-instruction>Run a safe command</p>
+                  <p data-lab-caption="blocked_late">Blocked. For this step, run a command the hook has no reason to stop, such as <code>npm test</code>.</p>
+                  <p data-lab-caption="safe_same">Allowed, but you ran that command in the last step. Run a different one, such as <code>npm test</code>.</p>
+                  <p data-lab-caption="safe">Allowed. Ordinary work passes and the hook prints nothing. You have now seen the hook block a command, seen what gets past it, and seen it stay out of the way. Keep going: try the commands you are worried about.</p>
+                  <p data-lab-caption="free_blocked">Blocked. The hook's message names what it found, and the rule is marked in the script.</p>
+                  <p data-lab-caption="free_allowed">Allowed. No rule matched this command. If you want it stopped, the script needs another rule.</p>
+                </li>
+              </ol>
             </div>
-            <pre><code id="cmd-hook-cfg">set <span class="tok-atom">:agent_hooks</span>, [
+
+            <div class="code-card is-frappe veto-script">
+              <div class="code-header">
+                <span>check-shell-command.sh · the hook the tester reads its rules from</span>
+                <button type="button" class="copy-btn" data-copy-target="cmd-hook-sh">Copy</button>
+              </div>
+              <pre><code id="cmd-hook-sh" data-veto-script>#!/bin/sh
+<span class="ccm"># Minga runs this before each shell command the agent asks for.</span>
+<span class="ccm"># Exit 0 and the command goes ahead. Any other exit stops it.</span>
+
+<span class="ccm"># Minga sends the request as JSON on stdin. jq reads the command out of it.</span>
+cmd=$(jq -r '.arguments.command // ""') || {
+  echo "check-shell-command.sh could not read the command. Is jq installed?" &gt;&amp;2
+  exit 1
+}
+
+<span class="ccm"># block_if PATTERN REASON: stop the command when the pattern matches it.</span>
+block_if() {
+  if printf '%s\n' "$cmd" | LC_ALL=C grep -Eiq -- "$1"; then
+    echo "<span data-veto-prefix>Blocked by your hook:</span> $2" &gt;&amp;2
+    exit 1
+  fi
+}
+
+<span class="veto-rule" data-veto-rule="force_push">block_if '<span data-veto-pattern>(^|[^a-z])git +push( [^;&amp;|]*)? (-f|--force)</span>' '<span data-veto-reason>force push</span>'</span>
+<span class="veto-rule" data-veto-rule="delete_root_or_home">block_if '<span data-veto-pattern>(^|[^a-z])rm +-(rf|fr) +"?(/|~|\$HOME)[/*]*([^a-z0-9._/*-]|$)</span>' '<span data-veto-reason>recursive delete of / or your home directory</span>'</span>
+
+exit 0</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <p class="veto-note">The tester runs in your browser. It reads its two rules from the script printed beside it, so the rules you test are the rules you copy.</p>
+      </div>
+    </section>
+
+    <section class="section section-tinted" id="rules">
+      <div class="container">
+        <div class="section-header">
+          <p class="section-index"><span>01</span> The hook</p>
+          <h2>What the hook blocks, and what happens next.</h2>
+          <p>A hook is a shell command you name in your Minga config. This one is for <code>PreToolUse</code>, the moment before a tool runs. A tool is one kind of action the agent can take, and <code>shell</code> is the tool that runs commands. Before each <code>shell</code> call, Minga starts your script and writes a small JSON description of the call to its input. The script reads the command from <code>arguments.command</code> and answers with its exit code: 0 lets the call run, and any other number stops it (<a href="/docs/hooks.html">Hooks</a>).</p>
+        </div>
+
+        <div class="veto-facts">
+          <div>
+            <h3>The two rules</h3>
+            <p>Each <code>block_if</code> line holds a pattern and the reason the hook prints. A pattern is a regular expression, a compact way to describe text. Both rules ignore upper and lower case and allow extra spaces.</p>
+            <ul>
+              <li><strong>Force push.</strong> <code>git push</code> followed by <code>-f</code> or by any option that starts with <code>--force</code>. That includes <code>--force-with-lease</code>, on purpose: an agent nobody is watching should not rewrite a shared branch.</li>
+              <li><strong>Recursive delete of <code>/</code> or your home directory.</strong> <code>rm -rf</code> or <code>rm -fr</code> aimed at <code>/</code>, <code>~</code> or <code>$HOME</code>, and at nothing longer. <code>rm -rf ./build</code> passes, and so does <code>rm -rf /tmp/prod</code>.</li>
+            </ul>
+          </div>
+          <div>
+            <h3>When the hook says no</h3>
+            <ul>
+              <li>Minga does not run the command. It ignores what the script printed to standard output and shows what it printed to standard error as an error in the chat. The agent gets the refusal as the result of the call and carries on with its turn.</li>
+              <li>The hook runs on every <code>shell</code> call, whether Minga asked you first or you told it to stop asking.</li>
+              <li>A hook that fails also stops the command. If the script is missing, is not marked as runnable, or cannot find <code>jq</code>, it exits with a number other than 0, and Minga treats that as a no.</li>
+              <li>A hook that takes too long also stops the command. The limit is 30 seconds unless you set <code>timeout_ms</code>. When it passes, Minga ends the script and shows an error in the chat.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="limits">
+      <div class="container">
+        <div class="section-header">
+          <p class="section-index"><span>02</span> Limits</p>
+          <h2>What this hook does not catch.</h2>
+          <p>The hook reads the text of a command. It does not know what the command will do. A pattern hook is a seat belt, not a sandbox: it misses the same damage written another way, and it stops a harmless command that only mentions a blocked one.</p>
+        </div>
+
+        <ul class="veto-limits">
+          <li><strong>Another spelling gets through.</strong> <code>git push origin :main</code> deletes the branch on the server with no <code>--force</code> at all. <code>rm -r -f /</code> splits the options, so the second rule does not match it.</li>
+          <li><strong>A script hides the command.</strong> If the agent writes <code>cleanup.sh</code> and runs it, the hook sees <code>sh cleanup.sh</code> and nothing inside the file.</li>
+          <li><strong>A mention is enough to block.</strong> <code>echo "rm -rf /"</code> deletes nothing, and the hook stops it anyway. The agent gets the reason and can word the command another way.</li>
+          <li><strong>Other paths are yours to add.</strong> The second rule names <code>/</code> and your home directory. If <code>/tmp/prod</code> matters to you, write a rule for it, and test it above the way you tested these.</li>
+          <li><strong>Minga's own limits still apply.</strong> A shell command runs in a temporary copy of your project with the staged edits applied. A command that names a path outside that copy can still write there, and the copy shares the project's <code>deps</code> directory and its installed <code>node_modules</code> packages. The agent's Git stage and commit tools act on your real repository. <a href="/architecture">Architecture</a> lists these limits.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section section-tinted" id="install">
+      <div class="container">
+        <div class="section-header">
+          <p class="section-index"><span>03</span> Install</p>
+          <h2>Install the hook, then stop being asked.</h2>
+          <p>Three steps, in this order. The hook goes in first, so there is no time when the agent runs shell commands with no rule and no question.</p>
+        </div>
+
+        <ol class="veto-install">
+          <li>
+            <p><strong>Save the script and make it runnable.</strong> The second line opens the file in your editor; paste the script from the top of this page into it and save. The third line, <code>chmod</code>, marks that file as a program. The script needs <code>jq</code>, a small program that reads JSON; install it with your package manager, for example <code>brew install jq</code> or <code>sudo apt install jq</code>.</p>
+            <div class="code-card is-frappe">
+              <div class="code-header">
+                <span>Terminal</span>
+                <button type="button" class="copy-btn" data-copy-target="cmd-hook-install">Copy</button>
+              </div>
+              <pre><code id="cmd-hook-install">mkdir -p ~/.config/minga/hooks
+"${EDITOR:-vi}" ~/.config/minga/hooks/check-shell-command.sh
+chmod +x ~/.config/minga/hooks/check-shell-command.sh</code></pre>
+            </div>
+          </li>
+          <li>
+            <p><strong>Tell Minga to run it.</strong> Add this to <code>~/.config/minga/config.exs</code>, below the <code>use Minga.Config</code> line the file starts with. Then restart Minga, which reads the file when it starts. <code>event</code> names the moment, <code>tool</code> names the tool the hook applies to, and <code>timeout_ms</code> gives the script ten seconds to answer.</p>
+            <div class="code-card is-frappe">
+              <div class="code-header">
+                <span>~/.config/minga/config.exs</span>
+                <button type="button" class="copy-btn" data-copy-target="cmd-hook-cfg">Copy</button>
+              </div>
+              <pre><code id="cmd-hook-cfg">set <span class="tok-atom">:agent_hooks</span>, [
   %{
     event: <span class="tok-str">"PreToolUse"</span>,
     tool: <span class="tok-str">"shell"</span>,
@@ -133,56 +269,81 @@ minga attach ssh://devbox/work/app</code></pre>
     timeout_ms: <span class="tok-num">10_000</span>
   }
 ]</code></pre>
-          </div>
-
-          <div class="code-card is-frappe">
-            <div class="code-header">
-              <span>~/.config/minga/hooks/check-shell-command.sh</span>
-              <button type="button" class="copy-btn" data-copy-target="cmd-hook-sh">Copy</button>
             </div>
-            <pre><code id="cmd-hook-sh">#!/usr/bin/env bash
-set -euo pipefail
-
-cmd=$(jq -r '.arguments.command // ""')
-
-if [[ "$cmd" == *"git push --force"* || "$cmd" == *"rm -rf /"* ]]; then
-  echo "Blocked by local safety hook: destructive command not allowed." &gt;&amp;2
-  exit 1
-fi</code></pre>
-          </div>
-        </div>
+          </li>
+          <li>
+            <p><strong>Check the real file, then trust the shell tool.</strong> Send the script the same JSON Minga sends. The first line below must end with <code>exit 1</code> and the second with <code>exit 0</code>. After that, the next time Minga asks you about a shell command, trust the shell tool for the rest of the session: use the approval card's button, or leave the composer and press <kbd>a</kbd>. The agent stops waiting for you, and the hook still runs on every call.</p>
+            <div class="code-card is-frappe">
+              <div class="code-header">
+                <span>Terminal</span>
+                <button type="button" class="copy-btn" data-copy-target="cmd-hook-check">Copy</button>
+              </div>
+              <pre><code id="cmd-hook-check">echo '{"arguments":{"command":"git push --force origin main"}}' | ~/.config/minga/hooks/check-shell-command.sh; echo "exit $?"
+echo '{"arguments":{"command":"npm test"}}' | ~/.config/minga/hooks/check-shell-command.sh; echo "exit $?"</code></pre>
+            </div>
+          </li>
+        </ol>
       </div>
     </section>
 
-    <section class="section section-tinted" id="isolated-mcp">
+    <section class="section" id="remote">
       <div class="container">
         <div class="section-header">
-          <p class="section-index"><span>03</span> MCP &amp; Gateways</p>
-          <h2>Crash-isolated stdio MCP servers.</h2>
-          <p>Each stdio MCP server runs isolated with prefixed tools (<code>mcp_&lt;server&gt;__&lt;tool&gt;</code>) and destructive approval by default (<a href="/docs/mcp.html">MCP</a>). Read secrets from env vars so tokens never enter dotfiles.</p>
+          <p class="section-index"><span>04</span> Remote</p>
+          <h2>Close the laptop and the work keeps going.</h2>
+          <p>An agent that runs on your laptop sleeps when the laptop does. Run Minga on a machine that stays on, and your laptop becomes a window you can close. The agent, your config and your hook all live on that machine, so install the hook there (<a href="/docs/remote_agents.html">Remote Agents</a>).</p>
         </div>
+
+        <figure class="away-figure">
+          <div class="away-row" role="img" aria-label="Your laptop is closed and not connected. On the remote machine, the agent is still Working.">
+            <div class="away-box">
+              <span class="away-where">Your laptop</span>
+              <span class="away-what">Lid closed</span>
+            </div>
+            <div class="away-link">not connected</div>
+            <div class="away-box away-remote">
+              <span class="away-where">Remote machine</span>
+              <span class="away-what"><svg class="state-mark state-working" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-opacity="0.28" stroke-width="1.5"/><path d="M8 2.5 A5.5 5.5 0 0 1 13.5 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="13.5" cy="8" r="2.1" fill="currentColor"/></svg> <span class="state-working">Working</span> · running the tests</span>
+            </div>
+          </div>
+          <figcaption>If the laptop closes while a command is running, the remote machine keeps the session alive. The next time you attach, Minga catches you up on what happened while you were away.</figcaption>
+        </figure>
 
         <div class="code-card is-frappe">
           <div class="code-header">
-            <span>~/.config/minga/config.exs · Multiple stdio MCP servers</span>
-            <button type="button" class="copy-btn" data-copy-target="cmd-mcp-cfg">Copy</button>
+            <span>Remote machine once, then your laptop</span>
+            <button type="button" class="copy-btn" data-copy-target="cmd-remote-attach">Copy</button>
           </div>
-          <pre><code id="cmd-mcp-cfg">set <span class="tok-atom">:agent_mcp_servers</span>, [
-  %{
-    name: <span class="tok-str">"github"</span>,
-    command: <span class="tok-str">"npx"</span>,
-    args: [<span class="tok-str">"-y"</span>, <span class="tok-str">"@modelcontextprotocol/server-github"</span>],
-    env: %{<span class="tok-str">"GITHUB_PERSONAL_ACCESS_TOKEN"</span> =&gt; <span class="tok-mod">System</span>.fetch_env!(<span class="tok-str">"GITHUB_TOKEN"</span>)}
-  },
-  %{
-    name: <span class="tok-str">"postgres"</span>,
-    command: <span class="tok-str">"npx"</span>,
-    args: [<span class="tok-str">"-y"</span>, <span class="tok-str">"@modelcontextprotocol/server-postgres"</span>, <span class="tok-mod">System</span>.fetch_env!(<span class="tok-str">"DATABASE_URL"</span>)]
-  }
-]</code></pre>
+          <pre><code id="cmd-remote-attach"># Once, on the remote Linux machine, from a checkout of the Minga repository.
+mkdir -p ~/.config/systemd/user
+cp rel/systemd/minga-headless.service ~/.config/systemd/user/
+# Set ExecStart, WorkingDirectory, RELEASE_COOKIE and your provider key before the service starts.
+"${EDITOR:-vi}" ~/.config/systemd/user/minga-headless.service
+systemctl --user daemon-reload
+systemctl --user enable --now minga-headless.service
+loginctl enable-linger "$USER"
+
+# Each time, on your laptop, with the same RELEASE_COOKIE in your environment.
+minga attach ssh://devbox/work/app</code></pre>
         </div>
 
-        <p class="section-foot-link">For corporate LLM proxies (<code>MingaAgent.InferenceRoute</code>) and credential boundaries, see <a href="/extending#security-and-reloads">Extending Minga</a>; for terminal protocol support over SSH, see <a href="/docs/architecture.html">Architecture</a>.</p>
+        <ul class="veto-limits">
+          <li><strong>The first half</strong> installs Minga as a service, a program the system starts and keeps running with no window. The service file comes from the Minga repository, so run these lines in a checkout of it. The file ships with a placeholder password, which is why the block opens it in your editor before anything starts. <code>loginctl enable-linger</code> tells Linux to keep your services running after you log out. A remote Mac uses a different service file; Remote Agents has those steps.</li>
+          <li><strong><code>RELEASE_COOKIE</code></strong> is a shared password: one long random value, at least 32 random bytes, that the remote machine and your laptop both hold. Anyone who has it can control the remote Minga, so keep the machine on a private network.</li>
+          <li><strong><code>minga attach</code></strong> uses SSH to start that service if it is not running, then opens the agent session for <code>/work/app</code> on the machine named <code>devbox</code>. The project stays on the remote machine. Minga does not copy your source code to the laptop.</li>
+          <li><strong>To leave,</strong> close the laptop, or run <code>minga detach</code> to disconnect and keep the laptop open. Either way the agent's turn keeps running.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section section-tinted" id="tonight">
+      <div class="container">
+        <div class="section-header">
+          <p class="section-index"><span>05</span> Tonight</p>
+          <h2>What you can do differently tonight.</h2>
+          <p>Before this lesson, leaving an agent alone meant one of two things: it waited for an answer, or it ran every command it liked. Now there is a third way. Save the script, add the config, check the real file with the two test lines, and trust the shell tool for the session. Then give the agent its task and walk away. When a new worry comes up, write one more <code>block_if</code> line and test it here first.</p>
+          <p>If your agent also uses tools from an MCP server, a separate program that gives it extra tools such as access to GitHub, Minga asks before running those too unless you allow them one by one; <a href="/docs/mcp.html">MCP</a> has the setup.</p>
+        </div>
 
         <nav class="lesson-pager" aria-label="Lesson navigation">
           <a class="pager-link" href="/learn/elixir">
@@ -217,6 +378,6 @@ fi</code></pre>
   </footer>
 
   <script defer src="/site.js"></script>
-  <script type="module" src="/assets/learn-labs.js"></script>
+  <script type="module" src="/assets/learn-labs.js" onerror="document.documentElement.classList.add('labs-failed')"></script>
 </body>
 </html>

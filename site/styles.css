@@ -3682,6 +3682,8 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
   font-size: 0.72rem;
 }
 
+/* State pills. The Architecture demos use them. */
+
 .topo-pill {
   padding: 0.12rem 0.45rem;
   font-family: var(--font-mono);
@@ -3695,135 +3697,308 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
 .topo-pill.is-warn { border-color: var(--needs); color: var(--needs); }
 .topo-pill.is-fail { border-color: var(--fail); color: var(--fail); }
 
-.topo-nodes {
+/* Lesson 05: test the hook, and the closed-laptop figure. The lab's own chrome is the lab kit's. */
+
+.veto-lab {
+  margin-top: 1.75rem;
+}
+
+.veto-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.55rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.25rem 1.5rem;
+  align-items: start;
 }
 
-.topo-node {
-  border: 1px solid var(--border);
-  padding: 0.55rem 0.65rem;
-  background: var(--bg-subtle);
-  font-size: 0.79rem;
+.veto-main,
+.veto-script {
+  min-width: 0;
 }
 
-.topo-node.is-ok {
-  border-left: 2px solid var(--done);
-}
-
-.topo-node.is-fail {
-  border-left: 2px solid var(--fail);
-  background: color-mix(in srgb, var(--fail) 10%, var(--bg-subtle));
-}
-
-.topo-node strong {
-  display: block;
-  font-size: 0.8rem;
-  margin-bottom: 0.15rem;
-}
-
-.topo-node span {
-  font-size: 0.74rem;
-  color: var(--text-muted);
-}
-
-.topo-link {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  text-align: center;
-  color: var(--done);
-  white-space: nowrap;
-}
-
-.topo-link.is-detached {
-  color: var(--needs);
-}
-
-.veto-panel {
+/* The tester is a set of controls, so it shows only where the lab can run: laid out before the module mounts, and live after. With scripts off, or when the module fails, the step list and the script stand in for it. */
+.veto-tester {
+  display: none;
   padding: 1rem;
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--border-strong);
   background: var(--bg-elevated);
 }
 
-.veto-head {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.65rem;
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
+.labs-pending .veto-tester,
+.lab-live .veto-tester {
+  display: block;
 }
 
-.veto-presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-  margin-bottom: 0.65rem;
+.labs-failed .veto-tester,
+.lab-failed .veto-tester {
+  display: none !important;
+}
+
+.veto-label,
+.veto-io-label {
+  display: block;
+  margin: 0 0 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
 }
 
 .veto-input-row {
   display: flex;
   gap: 0.55rem;
-  margin-bottom: 0.85rem;
 }
 
 .veto-input {
   flex: 1 1 auto;
   min-width: 0;
   padding: 0.52rem 0.7rem;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
+  border-radius: 0;
   background: var(--bg-code);
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 0.8rem;
+  /* 16px keeps a phone from zooming the page when the field takes focus. */
+  font-size: 1rem;
 }
 
-.veto-io {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 0.85rem;
+.veto-input:focus-visible,
+.veto-lab .lab-control:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
-.veto-io pre {
-  margin: 0.35rem 0 0;
-  padding: 0.65rem 0.75rem;
-  background: var(--bg-code);
+/* The one primary action. The lab kit's control rule comes later in this file, so these two rules carry the lab's class to win. */
+.veto-lab .veto-run {
+  flex: 0 0 auto;
+  background: var(--cta-bg);
+  color: var(--cta-text);
+  border-color: var(--cta-border);
+}
+
+.veto-lab .veto-run:hover {
+  background: var(--cta-bg-hover);
+  color: var(--cta-text-hover);
+}
+
+.veto-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+}
+
+.veto-presets .veto-label {
+  flex: 1 0 100%;
+  margin: 0;
+}
+
+.veto-lab .veto-preset {
+  font-weight: 400;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.veto-result {
+  margin-top: 1rem;
+  padding: 0.75rem 0.85rem;
   border: 1px solid var(--border);
+  border-left: 2px solid var(--border-strong);
+  background: var(--bg);
+}
+
+.veto-result[data-verdict="blocked"] {
+  border-left-color: var(--fail);
+}
+
+.veto-result[data-verdict="allowed"] {
+  border-left-color: var(--done);
+}
+
+.veto-verdict {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.3rem 1rem;
+  margin: 0 0 0.7rem;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+
+.veto-verdict-word {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.veto-verdict-word[data-veto-verdict="blocked"] {
+  color: var(--fail);
+}
+
+.veto-verdict-word[data-veto-verdict="allowed"] {
+  color: var(--done);
+}
+
+.veto-verdict-word[hidden] {
+  display: none;
+}
+
+.veto-runs {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.veto-stdin {
+  margin: 0;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  background: var(--bg-code);
   overflow-x: auto;
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+.veto-stderr {
+  margin: 0 0 0.7rem;
+  min-height: 1.5em;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+}
+
+.veto-stderr [data-veto-message] {
+  color: var(--fail);
+}
+
+.veto-script pre {
   font-size: 0.74rem;
 }
 
-.veto-io-label {
-  display: block;
+/* The rule lines are the longest in the script and the ones the reader came for, so the script wraps instead of scrolling sideways. Copy still takes the text with its own line breaks. */
+.veto-script pre code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The script line whose rule stopped the last command. The card is always Frappé-dark, so the mark keeps a Frappé colour in the light theme too. */
+.veto-rule.is-matched {
+  background: rgba(231, 130, 132, 0.2);
+  box-shadow: -3px 0 0 #e78284;
+}
+
+.veto-note {
+  margin: 0.9rem 0 0;
+  max-width: var(--measure);
+  font-size: 0.86rem;
+  color: var(--text-muted);
+}
+
+.veto-facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.25rem 2.5rem;
+}
+
+.veto-facts h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.veto-facts ul,
+.veto-limits {
+  margin: 0.6rem 0 0;
+  padding-left: 1.2rem;
+}
+
+.veto-facts li + li,
+.veto-limits li + li {
+  margin-top: 0.55rem;
+}
+
+.veto-limits {
+  max-width: 54rem;
+}
+
+.veto-install {
+  margin: 0;
+  padding-left: 1.3rem;
+  max-width: 54rem;
+}
+
+.veto-install > li + li {
+  margin-top: 1.5rem;
+}
+
+.veto-install p {
+  margin: 0 0 0.7rem;
+}
+
+.veto-install pre code,
+.away-figure + .code-card pre code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.away-figure {
+  margin: 0 0 1.5rem;
+  max-width: 54rem;
+}
+
+.away-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.4fr);
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.away-box {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.85rem 1rem;
+  border: 1px dashed var(--border-strong);
+  background: var(--bg);
+  font-family: var(--font-mono);
+}
+
+.away-remote {
+  border-style: solid;
+  border-top: 2px solid var(--accent);
+}
+
+.away-where {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.away-what {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.86rem;
+  color: var(--text);
+}
+
+.away-link {
   font-family: var(--font-mono);
   font-size: 0.7rem;
   color: var(--text-muted);
 }
 
-.veto-result {
-  margin: 0.35rem 0 0.4rem;
-  padding: 0.65rem 0.75rem;
-  border: 1px solid var(--border);
-  font-family: var(--font-mono);
-  font-size: 0.76rem;
-}
-
-.veto-result.is-ok {
-  border-left: 2px solid var(--done);
-  color: var(--done);
-}
-
-.veto-result.is-fail {
-  border-left: 2px solid var(--fail);
-  color: var(--fail);
-}
-
-.veto-sub {
-  font-size: 0.82rem;
+.away-figure figcaption {
+  margin-top: 0.7rem;
+  font-size: 0.86rem;
   color: var(--text-muted);
-  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .veto-lab *,
+  .veto-lab *::before,
+  .veto-lab *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 /* Get Started: goal and prerequisites sit close to the first command */
@@ -3866,22 +4041,19 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
   .stage-head,
   .workbench-shell,
   .bento-card-wide,
-  .topo-canvas {
+  .veto-grid {
     grid-template-columns: 1fr;
   }
   .bento-card-wide .bento-motif {
     border-left: 0;
     border-top: 1px solid var(--border);
   }
-  .topo-link {
-    padding: 0.15rem 0;
-  }
 }
 
 @media (max-width: 768px) {
   .curriculum-bento,
   .ca-peek-split,
-  .veto-io {
+  .veto-facts {
     grid-template-columns: 1fr;
   }
   .ca-peek-worker {
@@ -3905,7 +4077,7 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
     padding: 2rem 0 2.25rem;
   }
   .sb-wk-grid,
-  .topo-nodes {
+  .away-row {
     grid-template-columns: 1fr;
   }
   .veto-input-row {

@@ -1,262 +1,102 @@
-/* Lesson 05: Interactive Headless Devbox, MCP Fault-Injection & PreToolUse Veto Lab. */
+/*
+ * View for the Lesson 05 lab: test a shell command against the hook script printed on the page.
+ *
+ * The page holds every node and every word. This file finds the nodes once, reads the rules from the printed script, and then changes text,
+ * classes and attributes. It never rebuilds the command field, never writes to it unless a preset may fill it (see presetFillsField), and starts no timer.
+ * The field is an ordinary text input inside a form: Enter submits the form, and no key is captured anywhere.
+ */
 
-import { completeMission, getCompletedMissions } from "./progress.ts";
+import { mountCaption } from "./lab/caption.ts";
+import { mountLab } from "./lab/copy.ts";
+import { mountStage } from "./lab/stage.ts";
+import { mountStepper } from "./lab/stepper.ts";
+import { completeMission } from "./progress.ts";
+import { createVetoState, currentStep, hookPayload, newlyDone, reduceVeto, STEP_IDS, type VetoEvent, type VetoRule } from "./veto_state.ts";
 
-export interface PreToolUseResult {
-  readonly allowed: boolean;
-  readonly exitCode: 0 | 1;
-  readonly stdinJson: string;
-  readonly stderr: string;
-  readonly summary: string;
+function text(el: Element | null): string {
+  return (el?.textContent ?? "").trim();
 }
 
-const BLOCKED_PATTERNS: readonly { readonly re: RegExp; readonly reason: string }[] = [
-  { re: /git\s+push\b.*(--force|-f\b)/i, reason: "Force push is blocked by local PreToolUse safety hook." },
-  { re: /rm\s+-rf\s+(\/|~|\$HOME|\*)/i, reason: "Recursive delete targeting root or broad path is blocked." },
-  { re: /\b(drop\s+table|truncate\s+table)\b/i, reason: "Destructive SQL DDL is blocked outside migration scripts." },
-];
-
-export function evaluatePreToolUse(command: string): PreToolUseResult {
-  const trimmed = command.trim();
-  const stdinJson = JSON.stringify(
-    { event: "PreToolUse", tool_call_id: "tc_123", tool_name: "shell", arguments: { command: trimmed } },
-    null,
-    2,
-  );
-  for (const rule of BLOCKED_PATTERNS) {
-    if (rule.re.test(trimmed)) {
-      return {
-        allowed: false,
-        exitCode: 1,
-        stdinJson,
-        stderr: `Blocked by local safety hook: ${rule.reason}`,
-        summary: "Hook exited 1 -> tool call vetoed before execution; stderr surfaced in chat.",
-      };
-    }
+/** The rules as the printed script states them, in script order, with the script line that holds each one. */
+function readRules(root: HTMLElement): { rules: VetoRule[]; lines: Map<string, HTMLElement> } {
+  const rules: VetoRule[] = [];
+  const lines = new Map<string, HTMLElement>();
+  for (const line of root.querySelectorAll<HTMLElement>("[data-veto-script] [data-veto-rule]")) {
+    const id = line.dataset.vetoRule ?? "";
+    const pattern = text(line.querySelector("[data-veto-pattern]"));
+    if (id === "" || pattern === "") continue;
+    rules.push({ id, pattern, reason: text(line.querySelector("[data-veto-reason]")) });
+    lines.set(id, line);
   }
-  return {
-    allowed: true,
-    exitCode: 0,
-    stdinJson,
-    stderr: "",
-    summary: "Hook exited 0 -> tool proceeds to normal user approval (y / a / t / n).",
-  };
-}
-
-export type RemoteMissionId = "detach_reattach" | "mcp_crash" | "pretooluse_veto";
-
-const REMOTE_MISSIONS: readonly { readonly id: RemoteMissionId; readonly label: string; readonly hint: string }[] = [
-  { id: "detach_reattach", label: "Survive laptop sleep", hint: "Close laptop lid, then Reattach via SSH" },
-  { id: "mcp_crash", label: "Contain an MCP crash", hint: "Crash GitHub MCP and inspect healthy nodes" },
-  { id: "pretooluse_veto", label: "Trigger a PreToolUse veto", hint: "Run git push --force through the hook" },
-];
-
-function esc(text: string): string {
-  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+  return { rules, lines };
 }
 
 export function mountRemoteLab(root: HTMLElement): void {
-  const completed = new Set(Array.from(getCompletedMissions("remote")) as RemoteMissionId[]);
-  let attached = true;
-  let detachedSteps = 0;
-  let githubMcpUp = true;
-  let commandInput = "git push --force origin main";
-  let lastHook = evaluatePreToolUse(commandInput);
-  let lastEvent = "Connected to remote Linux devbox over Erlang distribution. Every service runs in its own supervised BEAM process.";
-  let stepTimer: number | undefined;
-
-  function mark(m: RemoteMissionId): void {
-    if (!completed.has(m)) {
-      completed.add(m);
-      completeMission("remote", m);
-    }
+  const stageEl = root.querySelector<HTMLElement>("[data-lab-stage]");
+  const captionLine = root.querySelector<HTMLElement>("[data-lab-caption-line]");
+  const stepperHost = root.querySelector<HTMLElement>("[data-lab-stepper]");
+  const form = root.querySelector<HTMLFormElement>("[data-veto-form]");
+  const input = root.querySelector<HTMLInputElement>("[data-veto-input]");
+  const result = root.querySelector<HTMLElement>("[data-veto-result]");
+  const stdin = root.querySelector<HTMLElement>("[data-veto-stdin]");
+  const runs = root.querySelector<HTMLElement>("[data-veto-runs]");
+  const message = root.querySelector<HTMLElement>("[data-veto-message]");
+  if (!stageEl || !captionLine || !stepperHost || !form || !input || !result || !stdin || !runs || !message) {
+    throw new Error("The hook tester's markup is incomplete");
   }
+  const { rules, lines } = readRules(root);
+  if (rules.length === 0) throw new Error("The printed hook script has no rules to test");
+
+  const copy = mountLab(root);
+  const caption = mountCaption(captionLine, copy);
+  const stepper = mountStepper(stepperHost, copy.steps);
+  mountStage(root, { stage: stageEl });
+
+  const prefix = text(root.querySelector("[data-veto-prefix]"));
+  const verdicts = Array.from(root.querySelectorAll<HTMLElement>("[data-veto-verdict]"));
+  const outputs = Array.from(root.querySelectorAll<HTMLElement>("[data-veto-out]"));
+  let state = createVetoState(input.value);
 
   function render(): void {
-    const missionsHtml = REMOTE_MISSIONS.map((m) => {
-      const done = completed.has(m.id);
-      return `
-        <li class="mission-row ${done ? "is-done" : ""}">
-          <span class="mission-check" aria-hidden="true">${done ? "●" : "○"}</span>
-          <div>
-            <strong>${esc(m.label)}</strong>
-            <span>${esc(m.hint)}</span>
-          </div>
-        </li>`;
-    }).join("");
+    // The field is written only when a preset filled it. Text the reader typed is never replaced.
+    if (input!.value !== state.field) input!.value = state.field;
 
-    root.innerHTML = `
-      <div class="workbench-shell">
-        <div class="workbench-main">
-          <div class="lab-toolbar" role="toolbar" aria-label="Fault-injection controls">
-            <button type="button" class="lab-cmd" data-rm-action="toggle-lid">
-              <span>${attached ? "SSH" : "ATTACH"}</span> ${attached ? "Close laptop lid (detach)" : "minga attach ssh://devbox/work/app"}
-            </button>
-            <button type="button" class="lab-cmd" data-rm-action="toggle-mcp">
-              <span>${githubMcpUp ? "FAULT" : "SESSION"}</span> ${githubMcpUp ? "Crash GitHub MCP" : "Reconnect in new session"}
-            </button>
-            <button type="button" class="lab-cmd lab-cmd-muted" data-rm-action="reset">Reset</button>
-          </div>
+    const last = state.last;
+    const verdict = last === null ? "none" : last.verdict.allowed ? "allowed" : "blocked";
+    result!.dataset.verdict = verdict;
+    for (const el of verdicts) el.hidden = el.dataset.vetoVerdict !== verdict;
+    runs!.textContent = String(state.runs);
+    if (last !== null) stdin!.textContent = hookPayload(last.command);
 
-          <div class="topo-canvas">
-            <div class="topo-zone ${attached ? "is-ok" : "is-detached"}">
-              <div class="topo-zone-head">
-                <strong>YOUR LAPTOP</strong>
-                <span class="topo-pill ${attached ? "is-ok" : "is-warn"}">${attached ? "Attached" : "Lid closed · Sleeping"}</span>
-              </div>
-              <div class="topo-node">
-                <strong>macOS App / Go TUI</strong>
-                <span>${attached ? "Streaming UI tokens over ssh://devbox" : "Disconnected cleanly; zero source files stored locally"}</span>
-              </div>
-            </div>
+    const rule = last?.verdict.rule ?? null;
+    message!.textContent = rule === null ? "" : `${prefix} ${rule.reason}`;
+    for (const el of outputs) el.hidden = el.dataset.vetoOut !== verdict;
+    for (const [id, line] of lines) line.classList.toggle("is-matched", id === rule?.id);
 
-            <div class="topo-link ${attached ? "is-ok" : "is-detached"}" aria-hidden="true">
-              ${attached ? "<-- SSH / Erlang Dist -->" : "x-- detached --x"}
-            </div>
-
-            <div class="topo-zone is-ok">
-              <div class="topo-zone-head">
-                <strong>LINUX DEVBOX · minga --headless</strong>
-                <span class="topo-pill is-ok">systemd linger · Alive</span>
-              </div>
-              <div class="topo-nodes">
-                <div class="topo-node is-ok">
-                  <strong>Open Buffers &amp; Undo</strong>
-                  <span>Isolated per-file heaps · Intact</span>
-                </div>
-                <div class="topo-node is-ok">
-                  <strong>Agent Session &amp; Logs</strong>
-                  <span>${detachedSteps > 0 ? `Completed ${detachedSteps} ${detachedSteps === 1 ? "step" : "steps"} while offline · logs retained` : "Working · shell logs persisted past 51 KiB preview"}</span>
-                </div>
-                <div class="topo-node ${githubMcpUp ? "is-ok" : "is-fail"}">
-                  <strong>GitHub MCP (stdio)</strong>
-                  <span>${githubMcpUp ? "Healthy · mcp_github__* available" : "Crashed · only mcp_github__* dropped out"}</span>
-                </div>
-                <div class="topo-node is-ok">
-                  <strong>Postgres MCP + Built-in Tools</strong>
-                  <span>Unaffected · still serving queries &amp; file tools</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="veto-panel">
-            <div class="veto-head">
-              <strong>PreToolUse SHELL VETO TESTER</strong>
-              <span class="topo-pill ${lastHook.allowed ? "is-ok" : "is-fail"}">exit ${lastHook.exitCode} · ${lastHook.allowed ? "ALLOWED" : "VETOED"}</span>
-            </div>
-            <div class="veto-presets">
-              <button type="button" class="lab-cmd" data-rm-cmd="git push --force origin main"><span>Veto</span> git push --force</button>
-              <button type="button" class="lab-cmd" data-rm-cmd="rm -rf /tmp/prod"><span>Veto</span> rm -rf /</button>
-              <button type="button" class="lab-cmd" data-rm-cmd="mix test test/minga_agent/retry_test.exs"><span>Allow</span> mix test</button>
-            </div>
-            <div class="veto-input-row">
-              <label class="sr-only" for="rm-cmd-input">Shell command to test against PreToolUse hook</label>
-              <input id="rm-cmd-input" class="veto-input" type="text" data-rm-input>
-              <button type="button" class="btn" data-rm-action="run-hook">Run hook</button>
-            </div>
-            <div class="veto-io">
-              <div>
-                <span class="veto-io-label">stdin -&gt; check-shell-command.sh</span>
-                <pre><code data-rm-stdin></code></pre>
-              </div>
-              <div>
-                <span class="veto-io-label">result (exit ${lastHook.exitCode})</span>
-                <p class="veto-result ${lastHook.allowed ? "is-ok" : "is-fail"}" data-rm-result></p>
-                ${lastHook.stderr ? '<p class="veto-sub" data-rm-sub></p>' : ""}
-              </div>
-            </div>
-          </div>
-
-          <div class="lab-note" aria-live="polite" data-rm-event></div>
-        </div>
-
-        <aside class="workbench-missions" aria-label="Remote & safety missions">
-          <div class="missions-head">
-            <span>MISSIONS</span>
-            <span>${completed.size} / ${REMOTE_MISSIONS.length}</span>
-          </div>
-          <p class="missions-sub">Inject faults directly into the supervision topology and test the PreToolUse shell guardrail.</p>
-          <ul class="mission-list">${missionsHtml}</ul>
-        </aside>
-      </div>`;
-
-    const rmInput = root.querySelector<HTMLInputElement>("[data-rm-input]");
-    if (rmInput) rmInput.value = commandInput;
-    const rmStdin = root.querySelector<HTMLElement>("[data-rm-stdin]");
-    if (rmStdin) rmStdin.textContent = lastHook.stdinJson;
-    const rmResult = root.querySelector<HTMLElement>("[data-rm-result]");
-    if (rmResult) rmResult.textContent = lastHook.stderr || lastHook.summary;
-    const rmSub = root.querySelector<HTMLElement>("[data-rm-sub]");
-    if (rmSub) rmSub.textContent = lastHook.summary;
-    const rmEvent = root.querySelector<HTMLElement>("[data-rm-event]");
-    if (rmEvent) rmEvent.textContent = lastEvent;
+    caption.show(state.caption);
+    stepper.update(currentStep(state) ?? STEP_IDS[STEP_IDS.length - 1]!, state.done);
   }
 
-  root.addEventListener("click", (event) => {
-    const target = event.target as HTMLElement | null;
-    if (!target) return;
+  function send(event: VetoEvent): void {
+    const before = state;
+    state = reduceVeto(state, event, rules);
+    for (const step of newlyDone(before, state)) completeMission("remote", step);
+    render();
+  }
 
-    const cmdBtn = target.closest<HTMLElement>("[data-rm-cmd]");
-    if (cmdBtn) {
-      commandInput = cmdBtn.getAttribute("data-rm-cmd") ?? commandInput;
-      lastHook = evaluatePreToolUse(commandInput);
-      if (!lastHook.allowed) mark("pretooluse_veto");
-      lastEvent = lastHook.summary;
-      render();
-      return;
-    }
-
-    const actBtn = target.closest<HTMLElement>("[data-rm-action]");
-    if (!actBtn) return;
-    const action = actBtn.getAttribute("data-rm-action");
-
-    if (action === "toggle-lid") {
-      if (attached) {
-        attached = false;
-        detachedSteps = 1;
-        lastEvent = "Laptop lid closed: client detached, remote minga --headless kept working and retaining logs. Click Reattach.";
-        if (stepTimer !== undefined) window.clearInterval(stepTimer);
-        stepTimer = window.setInterval(() => {
-          if (!attached && detachedSteps < 4) {
-            detachedSteps += 1;
-            render();
-          }
-        }, 1200);
-      } else {
-        attached = true;
-        if (stepTimer !== undefined) window.clearInterval(stepTimer);
-        mark("detach_reattach");
-        lastEvent = `Reattached via minga attach ssh://devbox/work/app: caught up on ${detachedSteps} background steps with zero lost output.`;
-      }
-      render();
-    } else if (action === "toggle-mcp") {
-      githubMcpUp = !githubMcpUp;
-      if (!githubMcpUp) {
-        mark("mcp_crash");
-        lastEvent = "GitHub MCP exited mid-turn: only mcp_github__* tools dropped out while open buffers, undo, Postgres MCP, and built-in tools stayed green.";
-      } else {
-        lastEvent = "Started a fresh session with GitHub MCP healthy; crashed servers use restart: :temporary so they never loop mid-turn.";
-      }
-      render();
-    } else if (action === "run-hook") {
-      const inputEl = root.querySelector<HTMLInputElement>("[data-rm-input]");
-      commandInput = inputEl?.value ?? commandInput;
-      lastHook = evaluatePreToolUse(commandInput);
-      if (!lastHook.allowed) mark("pretooluse_veto");
-      lastEvent = lastHook.summary;
-      render();
-    } else if (action === "reset") {
-      attached = true;
-      detachedSteps = 0;
-      githubMcpUp = true;
-      if (stepTimer !== undefined) window.clearInterval(stepTimer);
-      commandInput = "git push --force origin main";
-      lastHook = evaluatePreToolUse(commandInput);
-      lastEvent = "Topology reset: all supervised services healthy.";
-      render();
-    }
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    send({ type: "run", field: input.value });
+    // Some browsers do not focus a button on a pointer click. Focus must not be left on <body>.
+    if (!root.contains(document.activeElement)) (event.submitter ?? input).focus({ preventScroll: true });
   });
+
+  for (const preset of root.querySelectorAll<HTMLButtonElement>("[data-veto-preset]")) {
+    preset.addEventListener("click", () => {
+      send({ type: "preset", command: text(preset), field: input.value });
+      if (!root.contains(document.activeElement)) preset.focus({ preventScroll: true });
+    });
+  }
 
   render();
 }
