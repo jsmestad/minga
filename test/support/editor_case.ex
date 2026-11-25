@@ -1146,17 +1146,32 @@ defmodule Minga.Test.EditorCase do
   end
 
   @doc """
-  Sends a semantic `gui_action` to the editor and waits for the next frame.
+  Sends a semantic `gui_action` to the editor and returns once the editor has handled it, with a frame rendered after that.
 
   Models how a native/Go frontend reports semantic interactions (file-tree
   clicks, sidebar actions, tab selection) instead of raw cell coordinates.
+
+  The order of the steps is the guarantee:
+
+  1. The action is sent.
+  2. A call to the editor from this same process returns. Two messages from one process are handled in the order they were sent, so the action has been handled by then. This is the signal, not a wait.
+  3. Only now a frame waiter is registered and a render is requested, and a second call to the editor returns, so that render has been handled too and no frame of the helper's own is still to come. The editor commits each frame with a call to the frontend and continues when that call returns, so no frame from before the action can still be on its way. Every frame committed from here on was rendered from a state after the action.
+
+  Waiting for "the first frame after the action is sent" is not enough: a message from another process (a Session that just started, a timer) can reach the editor ahead of the action and render the screen as it was before it. A journey that asserted right after this helper then saw the screen from before the click (#4312).
+
+  While the editor holds frames back for an Agent arrival, the frame this returns is the first one it commits afterwards.
   """
   @spec send_gui_action(editor_ctx(), term()) :: :ok
   def send_gui_action(%{editor: editor, port: port} = ctx, action) do
     assert_rendering_enabled!(ctx, "send_gui_action/2")
+    send(editor, {:minga_input, {:gui_action, action}})
     _ = sync_editor(editor)
     ref = HeadlessPort.prepare_await(port)
-    send(editor, {:minga_input, {:gui_action, action}})
+    :ok = MingaEditor.render(editor)
+
+    # The render request is handled, and its frame committed, before this returns. A frame of the helper's own
+    # must not arrive later and be taken for the next thing a test waits for.
+    _ = sync_editor(editor)
     {:ok, snapshot} = HeadlessPort.collect_frame(ref, @sync_timeout)
     Process.put({:last_frame_snapshot, port}, snapshot)
     :ok
