@@ -840,6 +840,26 @@ defmodule Minga.Buffer.UndoHistoryTest do
       end
     end
 
+    # Round 4's MB case, pinned. After a compaction, later edits may in general resolve differently than without it
+    # for superseded drafts (the moduledoc says so); with merges that never skip a group, this case now agrees.
+    test "the round-4 compaction case: your undo after later edits agrees with and without compaction" do
+      ops = [
+        {:user, 413, 2, "éb\nx"},
+        {:minga, "t2", "s1", 818, 1, "xéa"},
+        {:untracked, 574, 2, "x"},
+        {:minga, "t2", "s2", 357, 3, ""},
+        {:untracked, 34, 2, "axéé"}
+      ]
+
+      for init <- ["", "abc\ndef\n", "héllo 😀\nwörld\n", "x", "a\r\nb\r\n"] do
+        {plain, doc, version} = coarse_ops(init, ops, false)
+        {compacted, ^doc, ^version} = coarse_ops(init, ops, true)
+
+        assert outcome_of(UndoHistory.undo(plain, version, Document.new(doc))) ==
+                 outcome_of(UndoHistory.undo(compacted, version, Document.new(doc)))
+      end
+    end
+
     test "compaction reports a history still over budget once, when no drafts are left" do
       world =
         Enum.reduce(1..6, world("a\nb\nc\n", run_budget: 4), fn n, world ->
@@ -1095,6 +1115,55 @@ defmodule Minga.Buffer.UndoHistoryTest do
       StreamData.integer(0..2)
     })
   end
+
+  defp coarse_ops(init, ops, compact?) do
+    history =
+      UndoHistory.new(Document.new(init),
+        recording: :coarse,
+        run_budget: if(compact?, do: 4, else: 100_000_000)
+      )
+
+    Enum.reduce(ops, {history, init, 1}, fn op, {history, doc, version} ->
+      {history, doc} = coarse_op(history, doc, version, op)
+      history = if compact?, do: elem(UndoHistory.compact_slice(history, 50), 1), else: history
+      {history, doc, version + 1}
+    end)
+  end
+
+  defp coarse_op(history, doc, _version, {:untracked, at, length, text}) do
+    {start, removed} = codepoint_range(doc, at, length)
+    change = {start, binary_part(doc, start, removed), text}
+    {UndoHistory.record_untracked(history, [change]), splice(doc, start, removed, text)}
+  end
+
+  defp coarse_op(history, doc, version, op) do
+    {source, at, length, text} =
+      case op do
+        {:user, at, length, text} -> {:user, at, length, text}
+        {:minga, task, step, at, length, text} -> {{:minga, task, step}, at, length, text}
+      end
+
+    {start, removed} = codepoint_range(doc, at, length)
+    patch = UndoPatch.replacement(start, binary_part(doc, start, removed), text, {0, 0})
+
+    {UndoHistory.record_edit(history, version, patch, source, version * 1000),
+     splice(doc, start, removed, text)}
+  end
+
+  defp codepoint_range(doc, at, length) do
+    bounds = doc |> String.codepoints() |> Enum.scan(0, &(byte_size(&1) + &2)) |> then(&[0 | &1])
+    from = rem(at, length(bounds))
+    to = min(from + length, length(bounds) - 1)
+    {Enum.at(bounds, from), Enum.at(bounds, to) - Enum.at(bounds, from)}
+  end
+
+  defp splice(doc, start, removed, text),
+    do:
+      binary_part(doc, 0, start) <>
+        text <> binary_part(doc, start + removed, byte_size(doc) - start - removed)
+
+  defp outcome_of({:ok, restore, _history}), do: {:ok, Document.content(restore.document)}
+  defp outcome_of(other), do: other
 
   # Asks for compaction whatever the budget says, as a Minga step over budget would.
   defp want_compaction(world) do

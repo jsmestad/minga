@@ -9,9 +9,13 @@ defmodule Minga.Buffer.UndoHistory do
 
   `undo/3` and `redo/3` move only your groups. They find a group's text by its runs, not by byte offsets, so they stay exact when Minga edited above, below, or inside your text since. When flipping your group would change text that a later Minga step rewrote, they change nothing and return `{:blocked, {:overlaps, minga_group}}`. Minga's edits never clear your redo stack.
 
-  `reject_task/4` and `undo_agent_session/3` revert all of a task's steps together, and a revert is exact or refused, never wrong text. A task that started later and rewrote the task's text blocks it until it is reverted first. So does an edit that deleted part of one of the task's replacements (text a step wrote in place of other text), because the revert could not tell which part of the replaced text that edit stands for. `undo_agent_session/3` follows these dependencies and reverts a whole unit of tasks that depend on each other; see `next_reject/1`. A group of yours joins that unit only when Minga rewrote all of its text after it, so its undo is blocked and none of its text is visible; it then leaves your undo stack. An edit of yours with visible text inside a task's change holds that task until you undo it. Per-change keep and reject (#4049) may refine these rules to single steps.
+  Who wrote each byte follows the text only where an alignment proves it unchanged: line and word trims, the word comparison's equal segments, and lines unique on both sides. Anything else is part of the change, so unchanged text inside one long line past the word budget, or inside an unpaired span with no unique line, is credited to the writer; exact text and exact rejects come first. A single deletion inside a run of identical bytes takes another author's copy first.
 
-  Every Minga step is checked against a run budget. Past it, `compaction_wanted?/1` asks the owner to run `compact_slice/2`, which merges drafts (text a step wrote that a newer step of the same task rewrote) into the step that overwrote them. At that moment the document, the text of your undo and redo and of every reject, and whether each is blocked are unchanged; a step merges only where no other group touched a run between the two steps.
+  A step's group takes a new edit only when nothing changed the document and no group was opened since its last edit; otherwise the step continues in a new group under the same key. Every dependency between groups then points from an older group to a newer one: a later group that rewrote a group's text, or a group that edited inside a Minga group's replacement (text a step wrote in place of other text).
+
+  `reject_task/4` reverts all of a task's steps or nothing: a task that started later and rewrote its text, or an edit inside one of its replacements, refuses it, so a revert is exact or refused, never wrong text. `undo_agent_session/3` works step by step: newest first, each step of the most recent task reverts together with the newer groups that depend on it, which may be other tasks' steps. A group of yours joins only when none of its text is visible and reverting it brings back nothing else it deleted; it then leaves your undo stack. Otherwise your newest such edit holds the step, and your `u` can always reach it. Per-change keep and reject (#4049) may refine these rules.
+
+  Every Minga step is checked against a run budget. Past it, `compaction_wanted?/1` asks the owner to run `compact_slice/2`, which merges drafts (text a step wrote that a newer step of the same task rewrote) into the step that overwrote them; past twice the budget, the step itself merges until it is back at twice the budget. At the moment of a merge the document, the text of your undo and redo and of every reject, and whether each is blocked are unchanged; a step merges only where no other group touched a run between the two steps. Later edits may still resolve differently than they would have without the merge, because the merged step's replacement now spans the absorbed one's.
 
   `reload/3` takes in content changed on disk without losing Minga's unreviewed steps.
 
@@ -279,7 +283,24 @@ defmodule Minga.Buffer.UndoHistory do
         step_ticks: Map.put(history.step_ticks, group, tick)
     }
     |> cap_untasked()
+    |> compact_inline()
     |> want_compaction()
+  end
+
+  # Backpressure for steps that arrive faster than the owner's slices run.
+  # Past twice the budget, recording merges drafts until the history is back at twice the budget.
+  # It examines at most four budgets' worth of runs, so a burst pays as it goes and one call stays bounded.
+  @spec compact_inline(t()) :: t()
+  defp compact_inline(history) do
+    limit = 2 * history.run_budget
+
+    if Provenance.run_count(history.provenance) > limit do
+      done? = &(Provenance.run_count(&1.provenance) <= limit)
+      {history, _examined, _merged} = compact_until(history, 4 * history.run_budget, 0, [], done?)
+      history
+    else
+      history
+    end
   end
 
   # Checked after each Minga step: only Minga's steps make drafts.
@@ -352,10 +373,16 @@ defmodule Minga.Buffer.UndoHistory do
     end
   end
 
-  @spec compact_until(t(), pos_integer(), non_neg_integer(), [{minga_group(), minga_group()}]) ::
+  @spec compact_until(
+          t(),
+          pos_integer(),
+          non_neg_integer(),
+          [{minga_group(), minga_group()}],
+          (t() -> boolean())
+        ) ::
           {t(), non_neg_integer(), [{minga_group(), minga_group()}]}
-  defp compact_until(history, max_runs, examined, merged) do
-    if examined >= max_runs or under_target?(history) do
+  defp compact_until(history, max_runs, examined, merged, done? \\ &under_target?/1) do
+    if examined >= max_runs or done?.(history) do
       {history, examined, merged}
     else
       case Provenance.compact_oldest(history.provenance) do
@@ -367,7 +394,7 @@ defmodule Minga.Buffer.UndoHistory do
             {Provenance.group_key(history.provenance, old), Provenance.group_key(provenance, new)}
 
           history = forget_empty_step(history, old, provenance)
-          compact_until(history, max_runs, examined + runs, [pair | merged])
+          compact_until(history, max_runs, examined + runs, [pair | merged], done?)
       end
     end
   end

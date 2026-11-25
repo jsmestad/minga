@@ -476,9 +476,10 @@ defmodule Minga.Buffer.UndoPatch do
   defp precise_pair(start, old, new, words?) do
     case trimmed_change(start, old, new) do
       [{at, old_middle, new_middle}] = change ->
-        if words? or several_words?(old_middle, new_middle),
-          do: word_changes(at, old_middle, new_middle),
-          else: change
+        if several_words?(old_middle, new_middle) or
+             (words? and not ascii?(old_middle <> new_middle)),
+           do: word_changes(at, old_middle, new_middle),
+           else: change
 
       [] ->
         []
@@ -492,6 +493,12 @@ defmodule Minga.Buffer.UndoPatch do
     do: separator?(old_middle) or separator?(new_middle)
 
   @separator_bytes ~c" \t\r\n.,;:()[]{}<>=+-*/&|!?'\"`~@#$%^"
+
+  # ASCII text without a separator byte is one token, so a word comparison could not split it either way.
+  @spec ascii?(binary()) :: boolean()
+  defp ascii?(<<byte, rest::binary>>) when byte < 128, do: ascii?(rest)
+  defp ascii?(<<>>), do: true
+  defp ascii?(_non_ascii), do: false
 
   @spec separator?(binary()) :: boolean()
   defp separator?(<<byte, _rest::binary>>) when byte in @separator_bytes, do: true

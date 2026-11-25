@@ -590,11 +590,11 @@ defmodule Minga.Buffer.ProvenanceTest do
     changes = disjoint_changes(text, a, b, inserted)
     batch = Provenance.edit_all(prov, id, changes, :batch)
 
-    assert same_record?(
-             batch,
-             Provenance.edit_all(prov, id, changes, :each),
-             Map.keys(model.groups)
-           )
+    each = Provenance.edit_all(prov, id, changes, :each)
+    assert same_record?(batch, each, Map.keys(model.groups))
+
+    # The one pass merges what typing forward merges, so it never holds more runs; the budget never sees it inflate.
+    assert Provenance.run_count(batch) <= Provenance.run_count(each)
 
     prov = batch
 

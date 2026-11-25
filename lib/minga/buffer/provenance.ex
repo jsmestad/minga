@@ -1447,7 +1447,7 @@ defmodule Minga.Buffer.Provenance do
       |> Enum.reverse()
       |> Enum.reduce(pass, &apply_in_pass(prov.groups, group_id, author, &1, &2))
 
-    rebuild(prov, Enum.reverse(left, right))
+    rebuild(prov, left |> Enum.reverse(right) |> merge_live_neighbours())
   end
 
   @spec apply_in_pass(
@@ -1633,6 +1633,23 @@ defmodule Minga.Buffer.Provenance do
   end
 
   defp cover_list([], _group_id, _consumed), do: []
+
+  # Neighbouring live runs of the same group and author with no deleters or marks are one run, as typing forward
+  # makes them; the one-pass path then never holds more runs than the same edits made one at a time.
+  @spec merge_live_neighbours([Run.t()]) :: [Run.t()]
+  defp merge_live_neighbours(runs) do
+    runs
+    |> Enum.reduce([], fn
+      %Run{live: true, deletions: [], overlaps: []} = run,
+      [%Run{live: true, deletions: [], overlaps: []} = previous | rest]
+      when run.group == previous.group and run.author == previous.author ->
+        [%{previous | bytes: previous.bytes + run.bytes} | rest]
+
+      run, acc ->
+        [run | acc]
+    end)
+    |> Enum.reverse()
+  end
 
   # Gives every run an evenly spaced locator and rebuilds the tree, the groups' run sets, and both indexes from the
   # runs, in O(n).

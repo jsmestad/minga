@@ -2,11 +2,13 @@ defmodule Minga.Buffer.HistoryPerfTest do
   # Timings are only meaningful when nothing else runs; the review's perf7 and perf10 repros on a 12000-line file.
   use ExUnit.Case, async: false
 
+  alias Minga.Buffer.Document
   alias Minga.Buffer.EditSource
   alias Minga.Buffer.FileMutation
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Buffer.Provenance
   alias Minga.Buffer.UndoHistory
+  alias Minga.Buffer.UndoPatch
 
   @moduletag :perf
   @moduletag timeout: 600_000
@@ -29,6 +31,14 @@ defmodule Minga.Buffer.HistoryPerfTest do
 
     {:ok, _receipt} =
       BufferProcess.conditional_mutate(buffer, revision, {:replace, content}, identity, source)
+  end
+
+  # CPU time of the whole VM, in milliseconds, so other load on the machine does not count.
+  defp cpu(fun) do
+    {_total, _since} = :erlang.statistics(:runtime)
+    value = fun.()
+    {_total, cpu_ms} = :erlang.statistics(:runtime)
+    {cpu_ms, value}
   end
 
   defp ms(fun) do
@@ -75,13 +85,13 @@ defmodule Minga.Buffer.HistoryPerfTest do
           do: elem(ms(fn -> BufferProcess.insert_text(buffer, char) end), 0)
 
     :ok = BufferProcess.break_undo_coalescing(buffer)
-    {undo, _result} = ms(fn -> BufferProcess.undo(buffer) end)
-    {changes, _result} = ms(fn -> BufferProcess.minga_changes(buffer, "t") end)
-    {reject, {:ok, _steps}} = ms(fn -> BufferProcess.undo_agent_session(buffer) end)
+    {undo, _result} = cpu(fn -> BufferProcess.undo(buffer) end)
+    {changes, _result} = cpu(fn -> BufferProcess.minga_changes(buffer, "t") end)
+    {reject, {:ok, _steps}} = cpu(fn -> BufferProcess.undo_agent_session(buffer) end)
 
     IO.puts(
       "\n[perf7] steps_ms=#{inspect(Enum.map(step_times, &round/1))} runs=#{runs(buffer)} " <>
-        "keys_ms=#{inspect(key_times)} undo_ms=#{undo} minga_changes_ms=#{changes} reject_ms=#{reject}"
+        "keys_ms=#{inspect(key_times)} undo_cpu_ms=#{undo} minga_changes_cpu_ms=#{changes} reject_cpu_ms=#{reject}"
     )
 
     assert Enum.max(key_times) < 50
@@ -102,15 +112,64 @@ defmodule Minga.Buffer.HistoryPerfTest do
     settled(buffer)
     :erlang.garbage_collect(buffer)
     :ok = BufferProcess.move_to(buffer, {6000, 10})
-    {first_key, :ok} = ms(fn -> BufferProcess.insert_text(buffer, "h") end)
+    {_total, _since} = :erlang.statistics(:runtime)
+    :ok = BufferProcess.insert_text(buffer, "h")
+    {_total, first_key} = :erlang.statistics(:runtime)
 
-    # The same keystroke in a buffer with no history, reported beside it. The first keystroke after a full collection
-    # also copies the history's heap once, so on a heavily loaded machine this bound can fail without a regression.
+    # CPU time, beside the same keystroke in a buffer with no history. The first keystroke after a full collection also
+    # copies the history's heap once.
     fresh = start_supervised!({BufferProcess, content: file(12_000)}, id: make_ref())
     :erlang.garbage_collect(fresh)
     :ok = BufferProcess.move_to(fresh, {6000, 10})
-    {baseline, :ok} = ms(fn -> BufferProcess.insert_text(fresh, "h") end)
+    {_total, _since} = :erlang.statistics(:runtime)
+    :ok = BufferProcess.insert_text(fresh, "h")
+    {_total, baseline} = :erlang.statistics(:runtime)
     IO.puts("\n[perf10] first_key_ms=#{first_key} baseline_ms=#{baseline}")
     assert first_key < baseline + 50
+  end
+
+  # R5: steps sent back to back, with no gap for the compaction slices, still keep the history bounded.
+  test "20 back-to-back whole-file steps keep the runs under three times the budget" do
+    buffer = start_supervised!({BufferProcess, content: file(12_000)}, id: make_ref())
+
+    # CPU time of the whole VM around each call, so other load on the machine does not count.
+    times =
+      for round <- 1..20 do
+        new = String.replace(BufferProcess.content(buffer), ~r/beta\d*/, "beta#{round}")
+        {_total, _since} = :erlang.statistics(:runtime)
+        agent_write(buffer, new, EditSource.minga("t", "s#{round}"))
+        {_total, cpu_ms} = :erlang.statistics(:runtime)
+        cpu_ms
+      end
+
+    runs = runs(buffer)
+    IO.puts("\n[back-to-back] steps_cpu_ms=#{inspect(times)} runs=#{runs}")
+    assert runs <= 75_000
+    assert Enum.max(times) < 2_000
+  end
+
+  # R4: your :s over 12000 lines that each hold a Minga change records in linear time.
+  test "your :s over Minga's change on every line of 12000 records quickly" do
+    original = file(12_000)
+    minga = String.replace(original, "beta", "beta7")
+    yours = String.replace(minga, "beta7", "BETA")
+    history = UndoHistory.new(Document.new(original))
+    patches = UndoPatch.changes(Document.new(original), Document.new(minga))
+    history = UndoHistory.record_edit_batch(history, 1, patches, {:minga, "t", "s1"}, 0)
+    patches = UndoPatch.changes(Document.new(minga), Document.new(yours))
+
+    # CPU time, so other load on the machine does not count.
+    best =
+      for _ <- 1..5 do
+        :erlang.garbage_collect()
+        {_total, _since} = :erlang.statistics(:runtime)
+        UndoHistory.record_edit_batch(history, 2, patches, :user, 1)
+        {_total, cpu_ms} = :erlang.statistics(:runtime)
+        cpu_ms
+      end
+      |> Enum.min()
+
+    IO.puts("\n[R4] record_cpu_ms=#{best}")
+    assert best < 100
   end
 end
