@@ -58,7 +58,7 @@ defmodule MingaEditor.UnsavedTextListTest do
     editor = start_editor("scratch", swap_dir: ctx.swap_dir)
 
     open_list(editor)
-    assert [%{description: "2 lines, the file is gone · just now"}] = rows(editor)
+    assert [%{description: "1 line, the file is gone · just now"}] = rows(editor)
     send_keys_sync(editor, "<CR>")
 
     {:ok, buffer} = Buffer.pid_for_path(ctx.gone)
@@ -76,7 +76,7 @@ defmodule MingaEditor.UnsavedTextListTest do
     choose_discard(editor)
 
     assert prompt_label(editor) ==
-             "Delete the unsaved text of notes.ex (3 lines)? It cannot be undone. (y/n): "
+             "Delete the unsaved text of notes.ex (2 lines)? It cannot be undone. (y/n): "
 
     # Anything but yes keeps the text.
     send_keys_sync(editor, "n<CR>")
@@ -91,6 +91,19 @@ defmodule MingaEditor.UnsavedTextListTest do
     refute File.exists?(swap)
     assert Buffer.pid_for_path(ctx.notes) == :not_found
     assert File.read!(ctx.notes) == "saved\n"
+  end
+
+  test "discarding text that another editor took meanwhile says so instead of \"deleted\"", ctx do
+    swap = leftover_swap(ctx, ctx.notes, "one\ntwo\n")
+    editor = start_editor("scratch", swap_dir: ctx.swap_dir)
+
+    open_list(editor)
+    choose_discard(editor)
+    # Another editor recovers the text while the prompt is open: its buffer owns it now.
+    File.rm!(swap)
+    send_keys_sync(editor, "y<CR>")
+
+    assert notice_message(editor) == "The unsaved text of notes.ex is no longer waiting"
   end
 
   test "a file with unsaved changes of its own keeps them, and the waiting text stays", ctx do

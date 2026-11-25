@@ -47,11 +47,31 @@ defmodule MingaEditor.UI.Prompt.UnsavedTextDiscardConfirm do
 
   defp confirm(text, state, {path, swap_path}) do
     if String.downcase(String.trim(text)) in ["y", "yes"] do
-      :ok = Session.discard_swap_file(swap_path)
-      Minga.Log.info(:editor, "Deleted the unsaved text of #{path} (#{swap_path})")
-      NoticeWorkflow.publish(state, "Deleted the unsaved text of #{name(path)}")
+      NoticeWorkflow.publish(state, discard(path, swap_path))
     else
       NoticeWorkflow.publish(state, "Kept the unsaved text of #{name(path)}")
+    end
+  end
+
+  # Deletes the swap and returns what to tell the user, which is only "deleted" when it was.
+  @spec discard(String.t(), String.t()) :: String.t()
+  defp discard(path, swap_path) do
+    case Session.discard_swap_file(swap_path) do
+      :ok ->
+        Minga.Log.info(:editor, "Deleted the unsaved text of #{path} (#{swap_path})")
+        "Deleted the unsaved text of #{name(path)}"
+
+      # Another editor, or a start of this one, took the text meanwhile. Nothing was deleted here.
+      {:error, :enoent} ->
+        "The unsaved text of #{name(path)} is no longer waiting"
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :editor,
+          "Could not delete the unsaved text of #{path} (#{swap_path}): #{inspect(reason)}"
+        )
+
+        "Could not delete the unsaved text of #{name(path)}. It is still waiting."
     end
   end
 

@@ -174,9 +174,13 @@ defmodule Minga.Session do
   @spec waiting_unsaved_text(keyword()) :: [waiting_unsaved_text()]
   defdelegate waiting_unsaved_text(opts \\ []), to: Minga.Session.Swap.Recovery, as: :waiting
 
-  @doc "Deletes a swap file because the user decided against its text. This cannot be undone."
-  @spec discard_swap_file(String.t()) :: :ok
-  defdelegate discard_swap_file(swap_path), to: Minga.Session.Swap.Recovery, as: :discard
+  @doc """
+  Deletes a swap file because the user decided against its text. This cannot be undone.
+
+  `{:error, :enoent}` means the swap was already gone, for example because another editor recovered it.
+  """
+  @spec discard_swap_file(String.t()) :: :ok | {:error, File.posix()}
+  defdelegate discard_swap_file(swap_path), to: Minga.Session.Swap.Recovery, as: :remove
 
   @doc "Reads the file path and unsaved text of a swap file and leaves the swap file on disk."
   @spec read_swap_file(String.t()) :: {:ok, String.t(), binary()} | {:error, term()}

@@ -519,8 +519,8 @@ defmodule Minga.Session.Swap.RecoveryTest do
       assert entry.swap_mtime == now - 300
       assert entry.file_exists?
       refute entry.changed_since?
-      # "one", "TWO", "three", "four" and the empty piece after the last newline.
-      assert entry.lines == 5
+      # The final newline ends the fourth line; it does not start a fifth.
+      assert entry.lines == 4
       # "two" became "TWO" and "four" was added: two lines differ.
       assert entry.changed_lines == 2
     end
@@ -561,6 +561,34 @@ defmodule Minga.Session.Swap.RecoveryTest do
              ) == waiting
 
       for swap <- [gone_swap, held_swap, loose_swap], do: assert(File.exists?(swap))
+    end
+
+    test "counts the lines that differ without comparing line by line", ctx do
+      file = Path.join(ctx.root, "lib/long.ex")
+      saved = Enum.map_join(1..30_000, "\n", &"line #{&1}")
+      File.write!(file, saved)
+
+      for {name, unsaved, expected} <- [
+            # Every line rewritten: the count is the number of lines, not twice that.
+            {"rewritten", Enum.map_join(1..30_000, "\n", &"changed #{&1}"), 30_000},
+            # Lines only moved: the text differs, and that is all the count can say.
+            {"moved", "line 30000\n" <> Enum.map_join(1..29_999, "\n", &"line #{&1}"), 1},
+            # Only the final newline differs.
+            {"newline", saved <> "\n", 1},
+            {"appended", saved <> "\nmore\nand more", 2}
+          ] do
+        swap = write_swap_file(ctx.swap_dir, file, unsaved)
+        assert [%{changed_lines: ^expected}] = Recovery.waiting(scan_opts(ctx.swap_dir)), name
+        File.rm!(swap)
+      end
+    end
+
+    test "remove/1 deletes a swap and says when it was already gone", ctx do
+      swap = write_swap_file(ctx.swap_dir, Path.join(ctx.root, "lib/x.ex"), "unsaved")
+
+      assert Minga.Session.discard_swap_file(swap) == :ok
+      refute File.exists?(swap)
+      assert Minga.Session.discard_swap_file(swap) == {:error, :enoent}
     end
 
     test "is empty when nothing waits or the swap directory does not exist", ctx do

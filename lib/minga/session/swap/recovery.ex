@@ -26,7 +26,7 @@ defmodule Minga.Session.Swap.Recovery do
   @typedoc """
   One swap file with unsaved text that is waiting, with what a person needs to decide about it.
 
-  `project` is the canonical root of the project the file is in, or `nil`. `lines` counts the lines of the unsaved text. `changed_lines` counts the lines that differ from the file on disk (a rewritten line counts once); it is `nil` when the file is gone or cannot be read, or when either text is too long to compare cheaply.
+  `project` is the canonical root of the project the file is in, or `nil`. `lines` counts the lines of the unsaved text. `changed_lines` counts the lines that differ from the file on disk (a rewritten line counts once, and lines that only moved do not count); it is `nil` when the file is gone or cannot be read.
   """
   @type waiting_entry :: %{
           path: String.t(),
@@ -36,7 +36,7 @@ defmodule Minga.Session.Swap.Recovery do
           project: String.t() | nil,
           file_exists?: boolean(),
           lines: non_neg_integer(),
-          changed_lines: non_neg_integer() | nil
+          changed_lines: pos_integer() | nil
         }
 
   @typedoc """
@@ -188,6 +188,14 @@ defmodule Minga.Session.Swap.Recovery do
       {:ok, meta.path, content}
     end
   end
+
+  @doc """
+  Deletes a swap file because the user decided against its text, and says whether it did.
+
+  `{:error, :enoent}` means the swap is already gone: something else recovered or removed it meanwhile.
+  """
+  @spec remove(String.t()) :: :ok | {:error, File.posix()}
+  def remove(swap_path) when is_binary(swap_path), do: File.rm(swap_path)
 
   @doc "Deletes a swap file (user declined recovery)."
   @spec discard(String.t()) :: :ok
@@ -344,14 +352,11 @@ defmodule Minga.Session.Swap.Recovery do
   defp canonical_missing(path, path), do: path
   defp canonical_missing(path, parent), do: Path.join(canonical(parent), Path.basename(path))
 
-  # Longer texts are not compared line by line: the list must open at once.
-  @max_compared_lines 20_000
-
   @spec waiting_entry(entry()) :: [waiting_entry()]
   defp waiting_entry(entry) do
     case Swap.read(entry.swap_path) do
       {:ok, _meta, content} ->
-        unsaved = String.split(content, "\n")
+        unsaved = text_lines(content)
         file = File.read(entry.path)
 
         [
@@ -369,28 +374,36 @@ defmodule Minga.Session.Swap.Recovery do
     end
   end
 
-  # A rewritten line is one line the unsaved text added and one it dropped, and counts once:
-  # the larger of the two totals is the number of lines a person would say differ.
-  @spec changed_lines({:ok, binary()} | {:error, term()}, [String.t()]) ::
-          non_neg_integer() | nil
-  defp changed_lines({:ok, text}, unsaved) when length(unsaved) <= @max_compared_lines do
-    saved = String.split(text, "\n")
+  # The lines of a text as a person counts them: a final newline ends the last line, it does not start another.
+  @spec text_lines(binary()) :: [String.t()]
+  defp text_lines(""), do: []
 
-    if length(saved) <= @max_compared_lines do
-      {added, dropped} =
-        saved
-        |> List.myers_difference(unsaved)
-        |> Enum.reduce({0, 0}, fn
-          {:eq, _lines}, counts -> counts
-          {:ins, lines}, {added, dropped} -> {added + length(lines), dropped}
-          {:del, lines}, {added, dropped} -> {added, dropped + length(lines)}
-        end)
-
-      max(added, dropped)
-    end
+  defp text_lines(text) do
+    text |> String.trim_trailing("\n") |> String.split("\n")
   end
 
-  defp changed_lines(_file, _unsaved), do: nil
+  # How many lines differ, in time linear in the size of both texts, so one long file cannot stall the list.
+  # Each text's lines are counted by content. A rewritten line is one line the unsaved text gained and one
+  # the file had that it lost, and counts once: the larger of the two totals is the number a person would say.
+  # The swap is listed because its text differs from the file, so the answer is never zero.
+  @spec changed_lines({:ok, binary()} | {:error, term()}, [String.t()]) :: pos_integer() | nil
+  defp changed_lines({:ok, text}, unsaved) do
+    saved = text |> text_lines() |> Enum.frequencies()
+    kept = Enum.frequencies(unsaved)
+
+    max(max(surplus(kept, saved), surplus(saved, kept)), 1)
+  end
+
+  defp changed_lines({:error, _reason}, _unsaved), do: nil
+
+  # The number of lines `counts` has beyond what `other` has of the same content.
+  @spec surplus(%{String.t() => pos_integer()}, %{String.t() => pos_integer()}) ::
+          non_neg_integer()
+  defp surplus(counts, other) do
+    Enum.reduce(counts, 0, fn {line, count}, total ->
+      total + max(count - Map.get(other, line, 0), 0)
+    end)
+  end
 
   @spec reject_inside([entry()], scope() | nil) :: [entry()]
   defp reject_inside(entries, nil), do: entries
