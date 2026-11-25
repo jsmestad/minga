@@ -140,6 +140,18 @@ defmodule Minga.Buffer.UndoPatchTest do
       assert UndoPatch.precise_changes(UndoPatch.replacement(3, "same", "same", {0, 0})) == []
     end
 
+    test "a changed segment with leading continuation bytes still produces an exact patch" do
+      for {old, new} <- [
+            {<<0x80>>, <<0x80, 0x80>>},
+            {<<0xAB, 0xAB>>, <<0xAB, 0xBB>>},
+            {<<"a\n", 0x80, 0x80>>, <<"b\n", 0x80, 0x81>>}
+          ],
+          words? <- [false, true] do
+        changes = UndoPatch.segment_changes(0, old, new, words?)
+        assert rebuild(old, changes) == new
+      end
+    end
+
     property "applying the changes from the last to the first rebuilds the patch's result" do
       check all(
               old <- StreamData.string([?a..?c, ?\n, ?é], max_length: 30),
