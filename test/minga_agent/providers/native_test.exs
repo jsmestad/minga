@@ -2842,7 +2842,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
   describe "send_prompt with LLM error" do
     # The 429 ChatGPT Pro returned on 2026-11-23 when its weekly limit was reached, as ReqLLM reports it.
-    defp recorded_usage_limit_error(body_overrides \\ %{}) do
+    defp recorded_usage_limit_error(body_overrides) do
       ReqLLM.Error.API.Request.exception(
         reason: "The usage limit has been reached",
         status: 429,
@@ -2875,7 +2875,9 @@ defmodule MingaAgent.Providers.NativeTest do
     test "a usage limit that fails the stream reads as one with its reset, and is not retried",
          %{tmp_dir: dir} do
       calls = :counters.new(1, [:atomics])
-      failure = recorded_usage_limit_error()
+      # The reset is three days out, so the message names the day on any date this runs.
+      resets_at = DateTime.utc_now() |> DateTime.add(3, :day) |> DateTime.truncate(:second)
+      failure = recorded_usage_limit_error(%{"resets_at" => DateTime.to_unix(resets_at)})
 
       failing_stream = fn ->
         build_stream_response(
@@ -2906,13 +2908,13 @@ defmodule MingaAgent.Providers.NativeTest do
                  service: "ChatGPT",
                  plan: "pro",
                  window_minutes: 10_080,
-                 resets_at: ~U[2026-11-25 17:01:06Z]
+                 resets_at: ^resets_at
                },
                message: message
              } = Enum.find(events, &match?(%Event.Error{}, &1))
 
       assert message =~
-               ~r/\AYour ChatGPT Pro usage limit is reached\. It resets \w{3}, Nov 2[56] at \d{1,2}:\d{2} (AM|PM)\. Choose another model with \/model to continue now\.\z/
+               ~r/\AYour ChatGPT Pro usage limit is reached\. It resets \w{3}, \w{3} \d{1,2} at \d{1,2}:\d{2} (AM|PM)\. Choose another model with \/model to continue now\.\z/
 
       assert :counters.get(calls, 1) == 1
     end
