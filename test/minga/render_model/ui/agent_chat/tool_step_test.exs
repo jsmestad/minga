@@ -30,11 +30,17 @@ defmodule Minga.RenderModel.UI.AgentChat.ToolStepTest do
     end
   end
 
-  test "shell commands are quoted, and a multi-line command keeps its first line" do
+  test "shell commands are quoted, and a multi-line command keeps its first line and says there is more" do
     assert ToolStep.sentence("shell", %{"command" => "mix test"}, :complete) == "Ran `mix test`"
 
     assert ToolStep.sentence("shell", %{"command" => "cd lib &&\n  mix test\n"}, :running) ==
-             "Running `cd lib &&`"
+             "Running `cd lib && …`"
+
+    # The question never reads as the whole command when a later line does something else.
+    assert ToolStep.question("shell", %{"command" => "echo ok\nrm -rf ~/work"}) ==
+             "Run `echo ok …`?"
+
+    assert ToolStep.question("shell", %{"command" => "\n  mix test\n"}) == "Run `mix test`?"
   end
 
   test "each named tool reads as a verb; an unknown tool is named by its words" do

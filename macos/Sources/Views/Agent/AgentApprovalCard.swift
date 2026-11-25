@@ -77,11 +77,13 @@ public struct AgentApprovalCard: View {
         .overlay(approvalPreviewBorder)
     }
 
+    /// A preview line wraps to the card and is never cut: a command is the decision itself, and a part of it that is not drawn is a part approved unread.
     private func approvalPreviewLine(_ line: String) -> some View {
         Text(line)
             .font(Typography.font(.caption, design: .monospaced))
             .foregroundStyle(approvalPreviewLineColor(line))
-            .truncationMode(.tail)
+            .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func approvalPreviewLineColor(_ line: String) -> Color {

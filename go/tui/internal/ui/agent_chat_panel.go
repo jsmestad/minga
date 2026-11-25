@@ -1190,9 +1190,9 @@ func (m Model) renderAgentApprovalMessage(msg protocol.AgentChatMessage, width i
 		m.renderApprovalCardLine(headerContent, innerWidth, border, innerBG),
 	}
 
-	// Preview lines
-	for _, previewLine := range msg.PreviewLines[:min(len(msg.PreviewLines), 2)] {
-		preview := lipgloss.NewStyle().Foreground(p.Muted()).Background(innerBG).Render(gap(spaceXL) + firstCompactLine(previewLine, max(innerWidth-2*approvalCardLead.cols()-spaceXL.cols(), 8)))
+	// Preview rows
+	for _, row := range approvalPreviewRows(msg, approvalPreviewWidth(width)) {
+		preview := lipgloss.NewStyle().Foreground(p.Muted()).Background(innerBG).Render(gap(spaceXL) + row)
 		lines = append(lines, m.renderApprovalCardLine(preview, innerWidth, border, innerBG))
 	}
 
@@ -1211,6 +1211,37 @@ func (m Model) renderAgentApprovalMessage(msg protocol.AgentChatMessage, width i
 
 // approvalCardLead is the inset inside an approval card's border, before its content and kept clear after it.
 const approvalCardLead = spaceXS
+
+// approvalPreviewKindCommand is the preview kind of a shell command.
+const approvalPreviewKindCommand byte = 2
+
+// approvalPreviewWidth is the width of a preview row's text inside an approval card of the given outer width.
+func approvalPreviewWidth(width int) int {
+	innerWidth := max(width-2, 1)
+	return max(innerWidth-2*approvalCardLead.cols()-spaceXL.cols(), 8)
+}
+
+// approvalPreviewRows are the text rows under an approval card's question.
+// A command is the decision itself: every line of it is drawn, wrapped to the card, so nothing you approve is cut off at the card's edge.
+// The BEAM bounds the command's length and says so in a row of its own when it leaves part out.
+// Every other kind is a sample of the change the question already names, so it shows its first two lines, cut to the card.
+func approvalPreviewRows(msg protocol.AgentChatMessage, width int) []string {
+	if msg.PreviewKind != approvalPreviewKindCommand {
+		rows := make([]string, 0, 2)
+		for _, line := range msg.PreviewLines[:min(len(msg.PreviewLines), 2)] {
+			rows = append(rows, firstCompactLine(line, width))
+		}
+		return rows
+	}
+	var rows []string
+	for _, line := range msg.PreviewLines {
+		for _, part := range strings.Split(strings.ReplaceAll(line, "\r\n", "\n"), "\n") {
+			part = sanitizeTerminalText(part)
+			rows = append(rows, wrapText(part, width)...)
+		}
+	}
+	return rows
+}
 
 func (m Model) renderApprovalCardLine(content string, innerWidth int, border lipgloss.Style, innerBG color.Color) string {
 	body := lipgloss.NewStyle().Background(innerBG).Width(innerWidth).Render(fitStyled(gap(approvalCardLead)+content, innerWidth))

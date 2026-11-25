@@ -79,7 +79,7 @@ extension PreviewRegistry {
                 Wire.ChatMessage(beamId: 1, content: .user(text: "Run the full test suite and fix any failures.")),
                 Wire.ChatMessage(beamId: 2, content: .thinking(text: "I'll run the tests first to identify failures before making changes.", collapsed: true)),
                 Wire.ChatMessage(beamId: 3, content: .toolCall(name: "read", summary: "mix.exs", status: 1, isError: false, collapsed: true, autoApprovedScope: 1, durationMs: 62, result: "Read 48 lines", previewKind: 0, previewLines: [])),
-                Wire.ChatMessage(beamId: 4, content: .approvalToolCall(name: "shell", summary: "mix test --trace", toolCallId: "tc-approve-1", sessionId: "session-approval-preview", requestId: "request-approval-preview", previewKind: 2, previewLines: ["mix test --trace", "", "Runs the full test suite with verbose output.", "This command may take several minutes."])),
+                Wire.ChatMessage(beamId: 4, content: .approvalToolCall(name: "shell", summary: "Run `mix test --trace`?", toolCallId: "tc-approve-1", sessionId: "session-approval-preview", requestId: "request-approval-preview", previewKind: 2, previewLines: ["$ mix test --trace", "cwd: /Users/me/code/minga"])),
             ]
         )
 

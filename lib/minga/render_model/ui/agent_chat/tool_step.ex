@@ -117,9 +117,13 @@ defmodule Minga.RenderModel.UI.AgentChat.ToolStep do
   defp target("ask_user", _args), do: ""
 
   defp target(name, args) when name in ["shell", "bash"] do
-    case ToolArgSummary.summarize(name, args) |> first_line() do
-      "" -> ""
-      command -> "`" <> clip(command) <> "`"
+    command = name |> ToolArgSummary.summarize(args) |> String.trim()
+
+    # A command of several lines is named by its first, marked so it never reads as the whole command.
+    case String.split(command, ["\r\n", "\n", "\r"], parts: 2) do
+      [""] -> ""
+      [line] -> "`" <> clip(line) <> "`"
+      [line, _more] -> "`" <> clip(String.trim(line) <> " …") <> "`"
     end
   end
 

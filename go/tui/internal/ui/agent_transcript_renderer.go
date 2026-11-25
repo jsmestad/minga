@@ -424,6 +424,9 @@ func measureAgentMessage(message protocol.AgentChatMessage, width int) (int, age
 	if message.Kind == agentKindSystem {
 		return len(agentSystemBodyLines(message, width)), nil
 	}
+	if message.Kind == agentKindApprovalTool {
+		return approvalCardFrameRows + len(approvalPreviewRows(message, approvalPreviewWidth(width))), nil
+	}
 	count := agentMessageRowCount(message)
 	if !agentMessageHasStyledProse(message) {
 		return count, nil
@@ -465,6 +468,9 @@ func agentMarkdownBlockIsProse(block protocol.AgentMarkdownBlock) bool {
 	return block.Kind >= 0x01 && block.Kind <= 0x04
 }
 
+// approvalCardFrameRows are an approval card's rows other than its preview: two borders, the question and two rows of actions.
+const approvalCardFrameRows = 5
+
 func agentMessageRowCount(message protocol.AgentChatMessage) int {
 	switch message.Kind {
 	case agentKindUsage:
@@ -495,7 +501,8 @@ func agentMessageRowCount(message protocol.AgentChatMessage) int {
 		}
 		return count + cappedRows(len(agentToolTextLines(message.Result)), agentToolExpandedLines)
 	case agentKindApprovalTool:
-		return 5 + min(len(message.PreviewLines), 2)
+		// A command's rows depend on the card's width; measureAgentMessage counts them.
+		return approvalCardFrameRows + min(len(message.PreviewLines), 2)
 	default:
 		return 1 + max(compactTextLineCount(message.Text, 3), 1)
 	}
