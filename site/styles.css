@@ -4591,6 +4591,12 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   box-shadow: 0 0 0 1px var(--sb-minga);
 }
 
+/* The count stays on one line when the step label next to it wraps. */
+.ca-lab .lab-stepper-count {
+  flex: none;
+  white-space: nowrap;
+}
+
 .ca-controls {
   align-items: center;
   gap: 0.5rem 1rem;
@@ -4659,6 +4665,12 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 
   .ca-lab .lab-caption {
     min-height: 9.4em;
+  }
+
+  /* The buttons, the keys and the hint wrap to two rows on a phone. The row keeps that height when a button or the hint goes, so the key under it does not move. */
+  .ca-controls {
+    min-height: 5.6rem;
+    align-content: flex-start;
   }
 }
 
