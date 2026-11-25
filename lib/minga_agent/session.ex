@@ -5527,10 +5527,12 @@ defmodule MingaAgent.Session do
     with {:ok, prepared} <- prepare_provider_request(state),
          candidate = append_msg(%{prepared | turn_execution: execution}, user_message),
          {:ok, request, admitted} <- admit_provider_request(prepared, candidate, send_content) do
+      # The queue left with this request: an open queue view must hear it, as it hears an edit.
       admitted =
         admitted
         |> record_user_message_event(user_message)
         |> notify_messages_changed()
+        |> broadcast(:queues_recalled)
 
       case send_admitted_prompt(admitted, request, execution) do
         {:ok, started} -> started
@@ -10387,9 +10389,10 @@ defmodule MingaAgent.Session do
   @spec publish_dispatched_steering(state(), [Message.t()]) :: state()
   defp publish_dispatched_steering(state, []), do: state
 
+  # Steering messages left the queue with this dispatch, so the queue's viewers are told too.
   defp publish_dispatched_steering(state, messages) do
     Enum.each(messages, &record_user_message_event(state, &1))
-    notify_messages_changed(state)
+    state |> notify_messages_changed() |> broadcast(:queues_recalled)
   end
 
   @spec assess_native_dispatch(

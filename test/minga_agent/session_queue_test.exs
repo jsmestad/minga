@@ -126,11 +126,15 @@ defmodule MingaAgent.SessionQueueTest do
       for {kind, text, enqueue} <- cases do
         session = start_slow_turn()
         assert {:queued, ^kind} = enqueue.(session, text)
+        refute_received {:agent_event, ^session, :queues_recalled}
 
         Minga.Test.SessionSlowMockProvider.proceed(Session.get_provider(session))
         assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
         assert Enum.any?(Session.messages(session), &match?({:user, ^text}, &1))
         assert Session.get_queued_messages(session) == {[], []}
+
+        # The queue left with the next turn: whoever shows the queue is told it changed.
+        assert_receive {:agent_event, ^session, :queues_recalled}, @event_timeout
 
         finish_slow_turn(session)
       end

@@ -582,11 +582,15 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
              )
 
     assert {:ok, 2, nil} = SessionStore.read_presentation(record, context.store_dir, opts)
+    refute_received {:agent_event, ^session, :queues_recalled}
     assert :ok = Session.respond_to_approval(session, approval_target, :approve)
 
     assert_receive {:transport_request, 2, messages, _options}, @timeout
 
     assert %ReqLLM.Message{role: :user, content: [%{text: "steer now"}]} = List.last(messages)
+
+    # The steering message left the queue in the middle of the turn: its viewers are told.
+    assert_receive {:agent_event, ^session, :queues_recalled}, @timeout
 
     refute Enum.any?(messages, fn message ->
              Enum.any?(message.content || [], &match?(%{text: "after this turn"}, &1))
