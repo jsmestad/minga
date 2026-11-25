@@ -1,4 +1,5 @@
 for path <- Path.wildcard("credo/checks/*.exs"), do: Code.require_file(path)
+Code.require_file("mix/protocol_generator.ex")
 
 defmodule Minga.Docs.AgentsMdTest do
   @moduledoc "Checks that the agent guides point at repository paths and loadable layer entry points."
@@ -9,6 +10,10 @@ defmodule Minga.Docs.AgentsMdTest do
   @guides ["AGENTS.md", "macos/AGENTS.md"]
   @repo_prefix ~r/^(lib|test|docs|macos|go|zig|scripts|credo|config|mix|extensions)\//
   @module_name ~r/^Minga(?:Editor|Agent)?(?:\.[A-Z][A-Za-z0-9]*)*$/
+
+  # Some generated sources are gitignored, so a fresh checkout has no such file until `mix codegen` runs.
+  # A guide may still name them: the committed generator declares every path it writes.
+  @generated_paths Minga.Mix.ProtocolGenerator.generated_paths()
 
   for guide <- @guides do
     @guide guide
@@ -83,7 +88,9 @@ defmodule Minga.Docs.AgentsMdTest do
     |> String.trim_trailing("/")
   end
 
-  defp path_exists?(path) do
+  defp path_exists?(path), do: on_disk?(path) or generated?(path)
+
+  defp on_disk?(path) do
     absolute = Path.join(@root, path)
 
     if String.contains?(path, "*") do
@@ -91,6 +98,17 @@ defmodule Minga.Docs.AgentsMdTest do
     else
       File.exists?(absolute)
     end
+  end
+
+  # `*` stays within one path segment.
+  defp generated?(path) do
+    pattern =
+      path
+      |> String.split("*")
+      |> Enum.map_join("[^/]*", &Regex.escape/1)
+      |> then(&Regex.compile!("^" <> &1 <> "$"))
+
+    Enum.any?(@generated_paths, &Regex.match?(pattern, &1))
   end
 
   defp module_exists?(name) do

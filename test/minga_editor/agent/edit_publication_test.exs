@@ -369,7 +369,11 @@ defmodule MingaEditor.Agent.EditPublicationTest do
 
       keeper = start_supervised!({StagedDraftKeeper, [name: nil] ++ store}, id: :after)
       :ok = StagedDraftKeeper.recover(keeper, root, self())
-      assert_receive {:staged_drafts_recovered, ^root, recoveries}, 2_000
+
+      # The keeper answers inside the cast, after its disk work.
+      # A call queued behind the cast returns only once the answer is in this mailbox.
+      :sys.get_state(keeper, :infinity)
+      assert_received {:staged_drafts_recovered, ^root, recoveries}
 
       state = EditPublication.recovered(restarted(state, id), root, recoveries)
 

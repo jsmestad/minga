@@ -1681,6 +1681,41 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     # The Editor's own key entry: every input handler in precedence order.
     defp press_enter(state), do: MingaEditor.Input.Router.dispatch(state, 13, 0)
 
+    # This failure has been seen without a reproduction (#4271): the lifecycle stayed failed after Enter.
+    # The message names every input the retry decision reads, so the next occurrence shows which one was wrong.
+    defp retry_diagnosis(before, retried, iteration) do
+      """
+      Enter did not move the failed start to :starting (#{inspect(iteration)}).
+      chat_lifecycle after Enter: #{inspect(retried.workspace.agent_ui.chat_lifecycle)}
+      start remedy before Enter: #{inspect(UIState.start_remedy(before.workspace.agent_ui))}
+      handler that claims Enter: #{inspect(MingaEditor.Input.Router.claiming_handler(before, 13, 0))}
+      active workspace before: #{active_workspace_summary(before)}
+      active workspace after: #{active_workspace_summary(retried)}
+      Enter replaced the shell state: #{before.shell_runtime.state != retried.shell_runtime.state}
+      starts in flight before: #{start_phases(before)}
+      starts in flight after: #{start_phases(retried)}
+      shell entry held by the state: #{inspect(retried.shell_runtime.entry)}
+      shell entry in the registry: #{inspect(MingaEditor.Shell.Registry.get(:traditional))}
+      model catalog epoch: #{LLMDB.epoch()}
+      editing mode before: #{inspect(before.workspace.editing.mode)}, keymap scope: #{inspect(before.workspace.keymap_scope)}
+      notice after: #{inspect(MingaEditor.Shell.Traditional.NoticeWorkflow.message(retried))}
+      """
+    end
+
+    defp active_workspace_summary(state) do
+      case state.shell_runtime.state.tab_bar do
+        %TabBar{} = tabs -> inspect(TabBar.active_workspace(tabs), limit: 16)
+        other -> "no tab bar: #{inspect(other)}"
+      end
+    end
+
+    defp start_phases(state) do
+      inspect(
+        for {_token, start} <- state.agent_connection.session_starts,
+            do: {start.workspace, start.phase}
+      )
+    end
+
     test "Enter in the composer retries a failed start from insert and input-normal and keeps the draft" do
       {state, tab, _workspace} =
         source_workspace_state()
@@ -1701,7 +1736,13 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         assert composer.workspace.agent_ui.panel.input_focused
         retried = press_enter(composer)
 
-        assert retried.workspace.agent_ui.chat_lifecycle == :starting
+        # Built only on failure: the diagnosis dispatches Enter again to name the claiming handler.
+        if retried.workspace.agent_ui.chat_lifecycle != :starting do
+          flunk(
+            retry_diagnosis(composer, retried, visible?: visible?, leave_insert?: leave_insert?)
+          )
+        end
+
         assert Runtime.active_tab(retried.shell_runtime).id == tab.id
 
         assert MingaEditor.Agent.PromptBuffer.prompt_text(retried.workspace.agent_ui) ==

@@ -14,10 +14,14 @@ defmodule MingaAgent.SessionPersistenceTest do
   alias MingaAgent.ToolApproval.Public
   alias MingaAgent.ToolApproval.Target
 
+  # The session answers a read or a save inside the cast, after its store work on disk.
+  # A call queued behind the cast returns only once that answer is in this mailbox.
+  # No wall-clock deadline is involved.
   defp request_draft(session, record_id, operation) do
     ref = make_ref()
     :ok = Session.request_composer_draft(session, record_id, ref, operation)
-    assert_receive {:composer_draft_result, ^session, ^record_id, ^ref, result}
+    :sys.get_state(session, :infinity)
+    assert_received {:composer_draft_result, ^session, ^record_id, ^ref, result}
     result
   end
 
