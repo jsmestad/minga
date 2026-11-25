@@ -40,7 +40,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Files do
       ),
       Entry.pending("files.file_list", 4054, "picker results exported to a buffer"),
       Entry.built("files.project_find",
-        reach: "SPC SPC",
+        reach: "1 SPC SPC",
         recognize: &(Model.open?(&1, :picker) and &1.picker_title =~ ~r/find file/i)
       )
     ]

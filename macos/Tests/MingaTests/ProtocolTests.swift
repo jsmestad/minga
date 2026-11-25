@@ -446,41 +446,49 @@ struct ProtocolDecoderTests {
         #expect(todos.isEmpty)
     }
 
-    @Test("Decode visible gui_empty_state launchpad frame")
+    @Test("Decode visible gui_empty_state project home frame")
     func decodeGuiEmptyStateVisible() throws {
         var body = Data()
-        body.append(1)          // visible
-        body.append(0x01)       // flags: crashed
-        appendWireString8(&body, "v0.9")
-        appendWireString8(&body, "resume")   // focused_id
+        body.append(2)          // payload version 2 (visible)
+        appendWireString16(&body, "minga")
+        appendWireString16(&body, "~/code/minga")
+        appendWireString16(&body, "main · 11 changed")
+        appendWireString16(&body, "")
+        appendWireString8(&body, "task-3")   // focused_id
 
         body.append(2)          // section_count
 
-        // Section 0: session (one resume card row)
-        body.append(0)                          // section_id = session
-        appendWireString8(&body, "Crashed session")
+        // Minga tasks: one task row with a state
+        body.append(5)                          // section_id = tasks
+        appendWireString8(&body, "Minga tasks")
+        appendWireString16(&body, "")           // empty
         body.append(1)                          // item_count
-        body.append(0)                          // kind = resume
-        appendWireString8(&body, "resume")      // id
-        appendWireString16(&body, "restore session")
-        appendWireString16(&body, "4 files")
-        appendWireString8(&body, "r")           // jump_key
-        appendWireString8(&body, "")            // chord
-        appendWireString8(&body, "\u{f0453}")   // icon
-        appendWireU32(&body, 0xFF8800)          // icon_color
-
-        // Section 2: start (one action row with a chord)
-        body.append(2)                          // section_id = start
-        appendWireString8(&body, "Start")
-        body.append(1)                          // item_count
-        body.append(2)                          // kind = action
-        appendWireString8(&body, "find_file")   // id
-        appendWireString16(&body, "open file")
-        appendWireString16(&body, "")
+        body.append(5)                          // kind = task
+        appendWireString8(&body, "task-3")
+        appendWireString16(&body, "Add tests")
+        appendWireString16(&body, "Needs you")  // detail
+        appendWireString16(&body, "2m")         // meta
         appendWireString8(&body, "")            // jump_key
-        appendWireString8(&body, "SPC f f")     // chord
-        appendWireString8(&body, "\u{f0224}")   // icon
-        appendWireU32(&body, 0)                 // icon_color = default
+        appendWireString8(&body, "")            // chord
+        appendWireString8(&body, "")            // icon
+        appendWireU32(&body, 0)                 // icon_color
+        appendWireString8(&body, "needs_you")   // state
+
+        // Next: one action row with a chord
+        body.append(6)                          // section_id = next
+        appendWireString8(&body, "Next")
+        appendWireString16(&body, "")
+        body.append(1)
+        body.append(2)                          // kind = action
+        appendWireString8(&body, "action-project_find_file")
+        appendWireString16(&body, "Find a file")
+        appendWireString16(&body, "")
+        appendWireString16(&body, "")
+        appendWireString8(&body, "")
+        appendWireString8(&body, "SPC SPC")
+        appendWireString8(&body, "")
+        appendWireU32(&body, 0)
+        appendWireString8(&body, "")
 
         var data = Data([OP_GUI_EMPTY_STATE])
         appendWireU16(&data, UInt16(body.count))
@@ -488,39 +496,29 @@ struct ProtocolDecoderTests {
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
-        guard case .guiEmptyState(let visible, let crashed, let version, let focusedId, let sections) = cmd else {
+        guard case .guiEmptyState(let visible, let header, let focusedId, let sections) = cmd else {
             Issue.record("Expected .guiEmptyState, got \(String(describing: cmd))")
             return
         }
 
         #expect(visible)
-        #expect(crashed)
-        #expect(version == "v0.9")
-        #expect(focusedId == "resume")
+        #expect(header == Wire.EmptyStateHeader(title: "minga", path: "~/code/minga", status: "main · 11 changed"))
+        #expect(focusedId == "task-3")
         #expect(sections.count == 2)
 
-        let session = sections[0]
-        #expect(session.sectionId == 0)
-        #expect(session.title == "Crashed session")
-        #expect(session.items.count == 1)
-        let resume = session.items[0]
-        #expect(resume.kind == 0)
-        #expect(resume.id == "resume")
-        #expect(resume.label == "restore session")
-        #expect(resume.detail == "4 files")
-        #expect(resume.jumpKey == "r")
-        #expect(resume.chord.isEmpty)
-        #expect(resume.iconColorRGB == 0xFF8800)
+        let task = sections[0].items[0]
+        #expect(sections[0].sectionId == 5)
+        #expect(task.kind == 5)
+        #expect(task.label == "Add tests")
+        #expect(task.detail == "Needs you")
+        #expect(task.meta == "2m")
+        #expect(task.state == "needs_you")
 
-        let start = sections[1]
-        #expect(start.sectionId == 2)
-        let action = start.items[0]
+        let action = sections[1].items[0]
+        #expect(sections[1].sectionId == 6)
         #expect(action.kind == 2)
-        #expect(action.id == "find_file")
-        #expect(action.label == "open file")
-        #expect(action.jumpKey.isEmpty)
-        #expect(action.chord == "SPC f f")
-        #expect(action.iconColorRGB == 0)
+        #expect(action.chord == "SPC SPC")
+        #expect(action.label == "Find a file")
     }
 
     @Test("Decode hidden gui_empty_state single-byte payload")
@@ -531,7 +529,7 @@ struct ProtocolDecoderTests {
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
-        guard case .guiEmptyState(let visible, _, _, _, let sections) = cmd else {
+        guard case .guiEmptyState(let visible, _, _, let sections) = cmd else {
             Issue.record("Expected .guiEmptyState, got \(String(describing: cmd))")
             return
         }

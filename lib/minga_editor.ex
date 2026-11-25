@@ -98,6 +98,7 @@ defmodule MingaEditor do
           | {:swap_dir, String.t()}
           | {:session_dir, String.t()}
           | {:startup_file, String.t() | nil}
+          | {:home, keyword()}
           | {:suppress_tool_prompts, boolean()}
           | {:agent_arrival_budget_ms, non_neg_integer()}
           | {:pane_generation_allocator, (-> pos_integer())}

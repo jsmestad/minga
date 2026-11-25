@@ -228,7 +228,7 @@ boards = { macos = "Batch4_files_empty.dc.html", tui = "Batch4_files_empty.dc.ht
 transient = true
 exits = [
   { key = "SPC p a", click = "mode pill › Project › Switch project (macOS: also the menu bar)", to = "start.project_switcher" },
-  { key = "esc", click = "click outside", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "start.open_dir.home" },
 ]
 
 [[scenario]]

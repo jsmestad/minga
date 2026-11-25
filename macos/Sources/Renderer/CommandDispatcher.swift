@@ -1182,9 +1182,9 @@ final class CommandDispatcher {
         case .guiTabBar(let activeIndex, let tabs):
             guiState.tabBarState.update(activeIndex: activeIndex, entries: tabs)
 
-        case .guiEmptyState(let visible, let crashed, let version, let focusedId, let sections):
+        case .guiEmptyState(let visible, let header, let focusedId, let sections):
             if visible {
-                guiState.emptyStateState.update(crashed: crashed, version: version, focusedId: focusedId, sections: sections)
+                guiState.emptyStateState.update(header: header, focusedId: focusedId, sections: sections)
             } else {
                 guiState.emptyStateState.hide()
             }

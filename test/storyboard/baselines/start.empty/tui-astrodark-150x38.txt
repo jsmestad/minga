@@ -1,0 +1,106 @@
+# minga storyboard frame v1
+# scenario: start.empty
+# frontend: tui
+# theme: astrodark
+# size: 150x38
+# cursor: none
+## text
+*home* (~) - Minga
+
+   Minga
+   No project here.
+
+   Recent projects
+   1 start.empty  /tmp/minga-storyboard/tui-150x38/start.empty
+
+   Next
+   SPC p p Switch project
+   SPC f f Find a file
+   SPC p a Add a project
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  NORMAL  *home*                                                                                                                             Text 1:1
+## styles (row start-end fg bg attrs)
+0 0-149 #50a4e9 #111317 bold
+1 0-149 #adb0bb #1a1d23 -
+2 0-2 #adb0bb #1a1d23 -
+2 3-7 #adb0bb #1a1d23 bold
+2 8-149 #adb0bb #1a1d23 -
+3 0-2 #adb0bb #1a1d23 -
+3 3-18 #595c66 #1a1d23 -
+3 19-149 #adb0bb #1a1d23 -
+4 0-149 #adb0bb #1a1d23 -
+5 0-2 #adb0bb #1a1d23 -
+5 3-17 #595c66 #1a1d23 bold
+5 18-149 #adb0bb #1a1d23 -
+6 0-2 #adb0bb #26343f -
+6 3-3 #1a1d23 #adb0bb bold,reverse
+6 4-4 #adb0bb #26343f -
+6 5-15 #adb0bb #26343f bold
+6 16-149 #adb0bb #26343f -
+7 0-149 #adb0bb #1a1d23 -
+8 0-2 #adb0bb #1a1d23 -
+8 3-6 #595c66 #1a1d23 bold
+8 7-149 #adb0bb #1a1d23 -
+9 0-2 #adb0bb #1a1d23 -
+9 3-9 #50a4e9 #1a1d23 bold
+9 10-149 #adb0bb #1a1d23 -
+10 0-2 #adb0bb #1a1d23 -
+10 3-9 #50a4e9 #1a1d23 bold
+10 10-149 #adb0bb #1a1d23 -
+11 0-2 #adb0bb #1a1d23 -
+11 3-9 #50a4e9 #1a1d23 bold
+11 10-149 #adb0bb #1a1d23 -
+12 0-149 #adb0bb #1a1d23 -
+13 0-149 #adb0bb #1a1d23 -
+14 0-149 #adb0bb #1a1d23 -
+15 0-149 #adb0bb #1a1d23 -
+16 0-149 #adb0bb #1a1d23 -
+17 0-149 #adb0bb #1a1d23 -
+18 0-149 #adb0bb #1a1d23 -
+19 0-149 #adb0bb #1a1d23 -
+20 0-149 #adb0bb #1a1d23 -
+21 0-149 #adb0bb #1a1d23 -
+22 0-149 #adb0bb #1a1d23 -
+23 0-149 #adb0bb #1a1d23 -
+24 0-149 #adb0bb #1a1d23 -
+25 0-149 #adb0bb #1a1d23 -
+26 0-149 #adb0bb #1a1d23 -
+27 0-149 #adb0bb #1a1d23 -
+28 0-149 #adb0bb #1a1d23 -
+29 0-149 #adb0bb #1a1d23 -
+30 0-149 #adb0bb #1a1d23 -
+31 0-149 #adb0bb #1a1d23 -
+32 0-149 #adb0bb #1a1d23 -
+33 0-149 #adb0bb #1a1d23 -
+34 0-149 #adb0bb #1a1d23 -
+35 0-149 #adb0bb #1a1d23 -
+36 0-149 #adb0bb #1a1d23 -
+37 0-0 #595c66 #111317 -
+37 1-1 #adb0bb #50a4e9 -
+37 2-7 #1a1d23 #50a4e9 bold
+37 8-8 #adb0bb #50a4e9 -
+37 9-149 #adb0bb #111317 -

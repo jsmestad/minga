@@ -25,7 +25,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Search do
       Entry.pending("search.project.no_results", 4058, "no results become next steps"),
       Entry.pending("search.quickfix", 4059, "the quickfix drawer"),
       Entry.built("search.buffer",
-        reach: "/",
+        reach: "1 /",
         recognize: &(&1.mode == :search and not Model.open?(&1, :which_key))
       )
     ]

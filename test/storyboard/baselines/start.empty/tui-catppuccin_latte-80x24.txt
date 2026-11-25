@@ -1,0 +1,78 @@
+# minga storyboard frame v1
+# scenario: start.empty
+# frontend: tui
+# theme: catppuccin_latte
+# size: 80x24
+# cursor: none
+## text
+*home* (~) - Minga
+
+   Minga
+   No project here.
+
+   Recent projects
+   1 start.empty  /tmp/minga-storyboard/tui-80x24/start.empty
+
+   Next
+   SPC p p Switch project
+   SPC f f Find a file
+   SPC p a Add a project
+
+
+
+
+
+
+
+
+
+
+
+  NORMAL  *home*                                                       Text 1:1
+## styles (row start-end fg bg attrs)
+0 0-79 #1e66f5 #ccd0da bold
+1 0-79 #4c4f69 #eff1f5 -
+2 0-2 #4c4f69 #eff1f5 -
+2 3-7 #4c4f69 #eff1f5 bold
+2 8-79 #4c4f69 #eff1f5 -
+3 0-2 #4c4f69 #eff1f5 -
+3 3-18 #8c8fa1 #eff1f5 -
+3 19-79 #4c4f69 #eff1f5 -
+4 0-79 #4c4f69 #eff1f5 -
+5 0-2 #4c4f69 #eff1f5 -
+5 3-17 #8c8fa1 #eff1f5 bold
+5 18-79 #4c4f69 #eff1f5 -
+6 0-2 #4c4f69 #acb0be -
+6 3-3 #eff1f5 #4c4f69 bold,reverse
+6 4-4 #4c4f69 #acb0be -
+6 5-15 #4c4f69 #acb0be bold
+6 16-79 #4c4f69 #acb0be -
+7 0-79 #4c4f69 #eff1f5 -
+8 0-2 #4c4f69 #eff1f5 -
+8 3-6 #8c8fa1 #eff1f5 bold
+8 7-79 #4c4f69 #eff1f5 -
+9 0-2 #4c4f69 #eff1f5 -
+9 3-9 #1e66f5 #eff1f5 bold
+9 10-79 #4c4f69 #eff1f5 -
+10 0-2 #4c4f69 #eff1f5 -
+10 3-9 #1e66f5 #eff1f5 bold
+10 10-79 #4c4f69 #eff1f5 -
+11 0-2 #4c4f69 #eff1f5 -
+11 3-9 #1e66f5 #eff1f5 bold
+11 10-79 #4c4f69 #eff1f5 -
+12 0-79 #4c4f69 #eff1f5 -
+13 0-79 #4c4f69 #eff1f5 -
+14 0-79 #4c4f69 #eff1f5 -
+15 0-79 #4c4f69 #eff1f5 -
+16 0-79 #4c4f69 #eff1f5 -
+17 0-79 #4c4f69 #eff1f5 -
+18 0-79 #4c4f69 #eff1f5 -
+19 0-79 #4c4f69 #eff1f5 -
+20 0-79 #4c4f69 #eff1f5 -
+21 0-79 #4c4f69 #eff1f5 -
+22 0-79 #4c4f69 #eff1f5 -
+23 0-0 #8c8fa1 #e6e9ef -
+23 1-1 #4c4f69 #1e66f5 -
+23 2-7 #eff1f5 #1e66f5 bold
+23 8-8 #4c4f69 #1e66f5 -
+23 9-79 #4c4f69 #e6e9ef -

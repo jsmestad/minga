@@ -12,62 +12,60 @@ defmodule Minga.Frontend.Adapter.GUI.EmptyStateEncoderTest do
   defp model do
     %EmptyState{
       visible?: true,
-      crashed?: true,
-      focused_id: "resume",
-      version: "v0.9",
+      focused_id: "recent-1",
+      title: "minga",
+      path: "~/code/minga",
+      status: "main · 2 changed",
+      note: "",
       sections: [
         %Section{
-          id: :session,
-          title: "Crashed session",
+          id: :recent,
+          title: "Recent",
+          empty: "None.",
           items: [
             %Item{
-              id: "resume",
-              kind: :resume,
-              label: "restore session",
-              detail: "4 files",
-              jump_key: "r"
+              id: "recent-1",
+              kind: :recent_file,
+              label: "a.ex",
+              detail: "lib",
+              meta: "2 h ago",
+              jump_key: "1",
+              icon: "x",
+              icon_color: 0x61AFEF
             }
           ]
         },
         %Section{
-          id: :start,
-          title: "Start",
+          id: :tasks,
+          title: "Tasks",
           items: [
-            %Item{
-              id: "action-find-file",
-              kind: :action,
-              label: "open file",
-              chord: "SPC f f",
-              icon: "x",
-              icon_color: 0x61AFEF
-            }
+            %Item{id: "task-3", kind: :task, label: "Fix", detail: "Needs you", state: :needs_you}
           ]
         }
       ]
     }
   end
 
-  test "encodes the visible payload layout" do
+  test "encodes the version 2 home payload layout" do
     {cmd, _caches} = EmptyStateEncoder.encode(model(), Caches.new())
 
     assert <<@op_gui_empty_state, len::16, payload::binary-size(len)>> = cmd
 
-    assert <<1::8, flags::8, 4::8, "v0.9", 6::8, "resume", 2::8, rest::binary>> = payload
-    assert Bitwise.band(flags, 0x01) == 0x01
+    status = "main · 2 changed"
+    status_len = byte_size(status)
 
-    # First section: session (0), title, one resume item (kind 0).
-    assert <<0::8, 15::8, "Crashed session", 1::8, 0::8, 6::8, "resume", label_len::16,
+    assert <<2::8, 5::16, "minga", 12::16, "~/code/minga", ^status_len::16,
+             ^status::binary-size(^status_len), 0::16, 8::8, "recent-1", 2::8, rest::binary>> =
+             payload
+
+    # Recent files (1): title, empty line, one row (kind 1) with meta and no state.
+    assert <<1::8, 6::8, "Recent", 5::16, "None.", 1::8, 1::8, 8::8, "recent-1", 4::16, "a.ex",
+             3::16, "lib", 7::16, "2 h ago", 1::8, "1", 0::8, 1::8, "x", 0x61AFEF::32, 0::8,
              rest::binary>> = rest
 
-    assert <<"restore session", detail_len::16, "4 files", 1::8, "r", 0::8, 0::8, 0::32,
-             rest::binary>> = rest
-
-    assert label_len == byte_size("restore session")
-    assert detail_len == byte_size("4 files")
-
-    # Second section: start (2), one action item (kind 2) with a chord.
-    assert <<2::8, 5::8, "Start", 1::8, 2::8, 16::8, "action-find-file", 9::16, "open file",
-             0::16, 0::8, 7::8, "SPC f f", 1::8, "x", 0x61AFEF::32>> = rest
+    # Minga tasks (5): one task row (kind 5) carrying its state token name.
+    assert <<5::8, 5::8, "Tasks", 0::16, 1::8, 5::8, 6::8, "task-3", 3::16, "Fix", 9::16,
+             "Needs you", 0::16, 0::8, 0::8, 0::8, 0::32, 9::8, "needs_you">> = rest
   end
 
   test "hidden state encodes a single visible=0 byte" do

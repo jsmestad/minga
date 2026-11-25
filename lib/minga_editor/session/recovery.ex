@@ -126,11 +126,14 @@ defmodule MingaEditor.Session.Recovery do
     {held_back, fresh} =
       effect |> recoverable_entries(scope) |> Enum.split_with(& &1.changed_since?)
 
+    waiting = waiting_projects(effect, scope)
+
     resume = %{
       snapshot: snapshot,
       recovered: read_entries(fresh),
       held_back: held_back,
-      waiting_elsewhere: waiting_elsewhere(effect, scope)
+      waiting_elsewhere: count_files(waiting),
+      waiting_projects: waiting
     }
 
     case resume do
@@ -221,15 +224,14 @@ defmodule MingaEditor.Session.Recovery do
     Enum.map(entries, fn entry -> {entry, Session.read_swap_file(entry.swap_path)} end)
   end
 
-  # The number of files with unsaved text waiting that this start does not recover.
-  @spec waiting_elsewhere(t(), Session.Swap.Recovery.scope() | nil) :: non_neg_integer()
-  defp waiting_elsewhere(%__MODULE__{swap_enabled?: false}, _scope), do: 0
+  # The projects with unsaved text waiting that this start does not recover, with their file counts.
+  @spec waiting_projects(t(), Session.Swap.Recovery.scope() | nil) :: [Session.waiting_project()]
+  defp waiting_projects(%__MODULE__{swap_enabled?: false}, _scope), do: []
 
-  defp waiting_elsewhere(%__MODULE__{swap_opts: opts}, nil),
-    do: opts |> Session.recoverable_projects() |> count_files()
+  defp waiting_projects(%__MODULE__{swap_opts: opts}, nil), do: Session.recoverable_projects(opts)
 
-  defp waiting_elsewhere(%__MODULE__{swap_opts: opts}, scope),
-    do: opts |> Keyword.put(:outside, scope) |> Session.recoverable_projects() |> count_files()
+  defp waiting_projects(%__MODULE__{swap_opts: opts}, scope),
+    do: opts |> Keyword.put(:outside, scope) |> Session.recoverable_projects()
 
   @spec count_files([Session.waiting_project()]) :: non_neg_integer()
   defp count_files(projects), do: projects |> Enum.map(& &1.files) |> Enum.sum()

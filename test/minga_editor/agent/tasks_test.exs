@@ -45,7 +45,10 @@ defmodule MingaEditor.Agent.TasksTest do
         {[{:status_changed, :thinking}, {:error, "test run crashed"}], :failed},
         {[{:question_requested, :q1, "Which file?"}], :needs_you},
         {[{:question_requested, :q1, "Which file?"}, {:question_answered, :q1}], nil},
-        {[{:status_changed, :stopped}], :stopped}
+        {[{:status_changed, :thinking}, {:status_changed, :stopped}], :stopped},
+        # A restored conversation that never ran a turn is at rest, not stopped.
+        {[{:status_changed, :stopped}], nil},
+        {[{:status_changed, :idle}, {:status_changed, :stopped}], nil}
       ]
 
       for {events, expected} <- cases do

@@ -49,20 +49,20 @@ extension PreviewRegistry {
             .environment(theme)
     }
 
-    // MARK: - EmptyStateView (launchpad, #2689)
+    // MARK: - EmptyStateView (project home, #4056)
 
     static func emptyStatePreview() -> some View {
-        emptyStateView(sections: PreviewFixtures.emptyStateReturningUser(), focusedId: "resume")
+        emptyStateView(header: PreviewFixtures.emptyStateReturningUserHeader(), sections: PreviewFixtures.emptyStateReturningUser(), focusedId: "recent-1")
     }
 
     static func emptyStateFirstRunPreview() -> some View {
-        emptyStateView(sections: PreviewFixtures.emptyStateFirstRun(), focusedId: "action-tutor")
+        emptyStateView(header: Wire.EmptyStateHeader(title: "Minga", path: "~", status: "No project here."), sections: PreviewFixtures.emptyStateFirstRun(), focusedId: "project-1")
     }
 
-    static func emptyStateView(sections: [Wire.EmptyStateSection], focusedId: String) -> some View {
+    static func emptyStateView(header: Wire.EmptyStateHeader, sections: [Wire.EmptyStateSection], focusedId: String) -> some View {
         let state = EmptyStateState()
         let theme = PreviewFixtures.theme()
-        state.update(crashed: false, version: "v0.9", focusedId: focusedId, sections: sections)
+        state.update(header: header, focusedId: focusedId, sections: sections)
 
         return EmptyStateView(state: state, sendAction: { _ in })
             .frame(width: 900, height: 640)

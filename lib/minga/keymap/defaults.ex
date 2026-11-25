@@ -86,6 +86,7 @@ defmodule Minga.Keymap.Defaults do
 
     # ── Quit ──────────────────────────────────────────────────────────────────
     {~k(q q), :quit_all, "Quit editor"},
+    {~k(q n), :session_start_fresh, "Start fresh"},
     {~k(q u), :unsaved_text, "Unsaved text"},
 
     # ── Help ──────────────────────────────────────────────────────────────────
@@ -133,6 +134,7 @@ defmodule Minga.Keymap.Defaults do
     {~k(p r), :project_recent_files, "Recent files in project"},
     {~k(p .), :project_browse, "Browse project"},
     {~k(p T), :test_all, "Test project"},
+    {~k(p h), :project_home, "Project home"},
 
     # ── Open ──────────────────────────────────────────────────────────────────
     {~k(o b), :toggle_beam_observatory, "BEAM observatory"},

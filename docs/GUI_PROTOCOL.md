@@ -976,31 +976,36 @@ The frontend applies a delta only when it has retained content for the same `win
 
 ### 0xA5 — gui_empty_state
 
-The zero-buffers launchpad (#2689): data-driven sections (session resume, recent files, actions, footer) with chords resolved from the user's live keymap. Frontends lay the surface out natively (SwiftUI column with the logo watermark; TUI centered block) and render it instead of window content while visible. Activation is echoed back with the `empty_state_activate` gui_action (0x07 sub-opcode 0x5B, payload string8 item id) so semantics stay BEAM-side.
+The project home, `*home*` (#4056): the resting view a window shows when there is nothing to restore or when you press `SPC p h`. The header says where you are; sections list recent files (or recent projects outside a project), Minga's tasks with their states, and the next actions with chords resolved from the user's live keymap. Both frontends lay it out as a left-aligned resting view in place of window content while it is visible. Activation is echoed back with the `empty_state_activate` gui_action (0x07 sub-opcode 0x5B, payload string8 item id) so semantics stay BEAM-side.
 
 ```
 opcode(1) + payload_len(2) + payload
 
 Payload:
-  visible(1): 0 = hidden (payload ends here), 1 = visible
-  flags(1): bit 0 = crashed (previous session did not shut down cleanly)
-  version: string8
+  version(1): 0 = hidden (payload ends here), 2 = visible (version 1 was the retired launchpad)
+  title: string16 (project or folder name, "Minga" outside a project)
+  path: string16 (home-relative root; empty outside a project)
+  status: string16 (branch and change count, or why there is no project; may be empty)
+  note: string16 (optional muted second line)
   focused_id: string8 (empty = no focus)
   section_count(1), per section:
-    section_id(1): 0 = session, 1 = recent, 2 = start, 3 = footer
+    section_id(1): 1 = recent files, 4 = recent projects, 5 = Minga tasks, 6 = next actions
     title: string8
+    empty: string16 (muted line shown when the section has no rows)
     item_count(1), per item:
-      kind(1): 0 = resume, 1 = recent_file, 2 = action, 3 = hint
+      kind(1): 1 = recent_file, 2 = action, 4 = project, 5 = task
       id: string8
       label: string16
-      detail: string16
-      jump_key: string8 (empty = none; single keycap chip when present)
-      chord: string8 (space-separated keystroke tokens, e.g. "SPC f f"; one chip per token)
-      icon: string8 (Nerd Font glyph, may be empty)
+      detail: string16 (muted: a directory, a path, a state word)
+      meta: string16 (muted trailing text, such as an age)
+      jump_key: string8 (the number key that opens the row; empty = none)
+      chord: string8 (the leader sequence an action runs, e.g. "SPC SPC")
+      icon: string8 (Nerd Font glyph for file rows, may be empty)
       icon_color: u32 (0xRRGGBB, 0 = theme default)
+      state: string8 (design-token state name for a task row, e.g. "needs_you"; empty otherwise)
 ```
 
-Input-visual classes: a non-empty `jump_key` renders as a single keycap chip, a non-empty `chord` renders chip-per-token, and a `detail` starting with `:` renders as accent text (ex command). `focused_id` is authoritative; frontends may locally echo focus movement between frames but reconcile to it.
+The key column shows the jump key, the chord, or a task's state mark, at one fixed width per section. `focused_id` is authoritative; frontends may locally echo focus movement between frames but reconcile to it.
 
 ### 0x81 — gui_hover_popup
 

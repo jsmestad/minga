@@ -114,13 +114,25 @@ defmodule MingaEditor.Handlers.FileEventHandler do
     state
   end
 
+  # The project home's header shows the branch and change count; it learns them when the repository reports in.
+  @spec refresh_home_git(EditorState.t(), Minga.Events.GitStatusEvent.t()) :: EditorState.t()
+  defp refresh_home_git(
+         %{workspace: %{launchpad: %MingaEditor.State.Launchpad{} = home}} = state,
+         event
+       ) do
+    home = MingaEditor.State.Launchpad.accept_git(home, event)
+    %{state | workspace: MingaEditor.Session.State.set_launchpad(state.workspace, home)}
+  end
+
+  defp refresh_home_git(state, _event), do: state
+
   @spec handle_git_status_changed(EditorState.t(), Minga.Events.GitStatusEvent.t()) ::
           {EditorState.t(), [file_effect()]}
   defp handle_git_status_changed(
          state,
          %Minga.Events.GitStatusEvent{git_root: git_root, entries: entries} = event
        ) do
-    state = FileTreeFreshness.refresh_git_status(state, event)
+    state = state |> FileTreeFreshness.refresh_git_status(event) |> refresh_home_git(event)
 
     case SidebarWorkflow.git_status_panel(state) do
       %GitStatusPanel{git_root: ^git_root} = panel ->
@@ -140,7 +152,9 @@ defmodule MingaEditor.Handlers.FileEventHandler do
         {new_state, [{:render, 16}]}
 
       _other_panel ->
-        if FileTreeFreshness.open?(state), do: {state, [{:render, 16}]}, else: {state, []}
+        if FileTreeFreshness.open?(state) or MingaEditor.Input.EmptyState.showing_home?(state),
+          do: {state, [{:render, 16}]},
+          else: {state, []}
     end
   end
 

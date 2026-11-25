@@ -100,6 +100,7 @@ defmodule Minga.Test.EditorCase do
     - `:empty` — start with no buffer at all, as `minga .` does (default false); `:buffer` is then nil
     - `:session_dir` — enable session persistence in this directory (default: off)
     - `:swap_dir`: the editor's swap directory, scanned for unsaved text at startup by a non-headless backend (default: off)
+    - `:home` — overrides for the project home's reads (`MingaEditor.State.Launchpad.new/1`), such as `recents:` or `place:`
     - `:name` — optional Editor registration name (defaults to a unique test name)
     - `:child_id` — optional supervisor child id, so a caller can `stop_supervised/1` the editor before the test ends
     - `:record_packets` — keep every packet the editor sends, for `Minga.Test.HeadlessPort.packets/1` (default false)
@@ -206,6 +207,11 @@ defmodule Minga.Test.EditorCase do
     editor_opts =
       if Keyword.has_key?(opts, :parser_manager),
         do: [{:parser_manager, Keyword.fetch!(opts, :parser_manager)} | editor_opts],
+        else: editor_opts
+
+    editor_opts =
+      if Keyword.has_key?(opts, :home),
+        do: [{:home, Keyword.fetch!(opts, :home)} | editor_opts],
         else: editor_opts
 
     editor_opts =

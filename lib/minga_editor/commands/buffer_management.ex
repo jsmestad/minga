@@ -297,6 +297,21 @@ defmodule MingaEditor.Commands.BufferManagement do
     |> close_tab_or_quit(:discard)
   end
 
+  # From the project home (no tab active), closing a tab behind it keeps the home.
+  # Closing a background tab from another tab keeps that tab the same way.
+  def execute(
+        %{shell_runtime: %{state: %{tab_bar: %TabBar{active_id: nil}}}} = state,
+        {:close_tab, id}
+      )
+      when is_integer(id) do
+    state = close_targeted_tab(state, id)
+
+    case MingaEditor.Shell.Runtime.active_tab(state.shell_runtime) do
+      nil -> state
+      _restored -> MingaEditor.TabWorkflow.leave_to_home(state)
+    end
+  end
+
   def execute(state, {:close_tab, id}) when is_integer(id) do
     close_targeted_tab(state, id)
   end
@@ -3584,7 +3599,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   command(:abort_quit, "Abort and quit with error exit code", requires_buffer: false)
   command(:confirm_quit_yes, "Confirm quit (yes)", requires_buffer: false)
   command(:confirm_quit_no, "Confirm quit (no)", requires_buffer: false)
-  command(:buffer_list, "Switch buffer", requires_buffer: true)
+  command(:buffer_list, "Switch buffer", requires_buffer: false)
   command(:buffer_list_all, "Switch buffer (all)", requires_buffer: true)
   command(:buffer_next, "Next buffer", requires_buffer: true)
   command(:buffer_prev, "Previous buffer", requires_buffer: true)

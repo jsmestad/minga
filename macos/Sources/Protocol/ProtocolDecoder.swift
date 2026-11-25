@@ -151,11 +151,11 @@ enum RenderCommand: Sendable {
     case guiExtensionRuntime(FrontendExtensionRuntimeMessage)
     case guiSearchState(active: Bool, matchCount: UInt32, currentIndex: UInt32, flags: UInt8, query: String, sessionID: UInt32, acknowledgedEditSeq: UInt32, status: UInt8)
     case guiSidebars(version: UInt8, activeId: String, sidebars: [Wire.SidebarMetadata])
-    /// gui_empty_state (0xA5): the launchpad shown when zero buffers are open.
-    /// `visible` false means the launchpad is hidden (payload is a single byte);
-    /// `crashed` marks an unclean previous shutdown. Static, data-driven sections
-    /// (session/recent/start/footer) carry semantic rows the frontend lays out.
-    case guiEmptyState(visible: Bool, crashed: Bool, version: String, focusedId: String, sections: [Wire.EmptyStateSection])
+    /// gui_empty_state (0xA5, payload version 2): the project home, shown while no tab is active.
+    /// `visible` false means the home is hidden (payload is a single byte).
+    /// The header names the project, path, repository status and a note; the sections (recent files or recent projects,
+    /// Minga's tasks, next actions) carry semantic rows the frontend lays out.
+    case guiEmptyState(visible: Bool, header: Wire.EmptyStateHeader, focusedId: String, sections: [Wire.EmptyStateSection])
 }
 
 extension RenderCommand {
@@ -651,11 +651,12 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         return (.guiNotifications(notifications), 1 + 2 + payloadLen)
 
     case .guiEmptyState:
-        // len16 framed. Payload: visible(1). When visible: flags(1, bit0=crashed),
-        // version:string8, focused_id:string8, section_count(1), then per section:
-        // section_id(1), title:string8, item_count(1), then per item:
-        // kind(1), id:string8, label:string16, detail:string16, jump_key:string8,
-        // chord:string8, icon:string8, icon_color(u32 0xRRGGBB).
+        // len16 framed project home (#4056). Payload: version(1), 0 meaning hidden. When visible
+        // (version 2): title, path, status, note (string16 each), focused_id:string8,
+        // section_count(1), then per section: section_id(1), title:string8, empty:string16,
+        // item_count(1), then per item: kind(1), id:string8, label:string16, detail:string16,
+        // meta:string16, jump_key:string8, chord:string8, icon:string8, icon_color(u32 0xRRGGBB),
+        // state:string8.
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let payloadLen = Int(try readU16(data, rest))
         let payloadStart = rest + 2
@@ -665,13 +666,14 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let visible = data[pos] != 0
         pos += 1
         guard visible else {
-            return (.guiEmptyState(visible: false, crashed: false, version: "", focusedId: "", sections: []), 1 + 2 + payloadLen)
+            return (.guiEmptyState(visible: false, header: Wire.EmptyStateHeader(), focusedId: "", sections: []), 1 + 2 + payloadLen)
         }
-        guard pos + 1 <= payloadEnd else { throw ProtocolDecodeError.malformed }
-        let esFlags = data[pos]
-        pos += 1
-        let esCrashed = esFlags & 0x01 != 0
-        let esVersion = try readString8(data: data, pos: &pos, end: payloadEnd)
+        let header = Wire.EmptyStateHeader(
+            title: try readString16(data: data, pos: &pos, end: payloadEnd),
+            path: try readString16(data: data, pos: &pos, end: payloadEnd),
+            status: try readString16(data: data, pos: &pos, end: payloadEnd),
+            note: try readString16(data: data, pos: &pos, end: payloadEnd)
+        )
         let esFocusedId = try readString8(data: data, pos: &pos, end: payloadEnd)
         guard pos + 1 <= payloadEnd else { throw ProtocolDecodeError.malformed }
         let esSectionCount = Int(data[pos])
@@ -684,6 +686,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             let sectionId = data[pos]
             pos += 1
             let title = try readString8(data: data, pos: &pos, end: payloadEnd)
+            let empty = try readString16(data: data, pos: &pos, end: payloadEnd)
             guard pos + 1 <= payloadEnd else { throw ProtocolDecodeError.malformed }
             let itemCount = Int(data[pos])
             pos += 1
@@ -697,19 +700,21 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 let itemId = try readString8(data: data, pos: &pos, end: payloadEnd)
                 let label = try readString16(data: data, pos: &pos, end: payloadEnd)
                 let detail = try readString16(data: data, pos: &pos, end: payloadEnd)
+                let meta = try readString16(data: data, pos: &pos, end: payloadEnd)
                 let jumpKey = try readString8(data: data, pos: &pos, end: payloadEnd)
                 let chord = try readString8(data: data, pos: &pos, end: payloadEnd)
                 let icon = try readString8(data: data, pos: &pos, end: payloadEnd)
                 guard pos + 4 <= payloadEnd else { throw ProtocolDecodeError.malformed }
                 let iconColor = try readU32(data, pos)
                 pos += 4
+                let state = try readString8(data: data, pos: &pos, end: payloadEnd)
                 try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-                items.append(Wire.EmptyStateItem(kind: kind, id: itemId, label: label, detail: detail, jumpKey: jumpKey, chord: chord, icon: icon, iconColorRGB: iconColor))
+                items.append(Wire.EmptyStateItem(kind: kind, id: itemId, label: label, detail: detail, jumpKey: jumpKey, chord: chord, icon: icon, iconColorRGB: iconColor, meta: meta, state: state))
             }
             try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-            esSections.append(Wire.EmptyStateSection(sectionId: sectionId, title: title, items: items))
+            esSections.append(Wire.EmptyStateSection(sectionId: sectionId, title: title, items: items, empty: empty))
         }
-        return (.guiEmptyState(visible: true, crashed: esCrashed, version: esVersion, focusedId: esFocusedId, sections: esSections), 1 + 2 + payloadLen)
+        return (.guiEmptyState(visible: true, header: header, focusedId: esFocusedId, sections: esSections), 1 + 2 + payloadLen)
 
     // GUI chrome commands.
     case .guiFileTree:

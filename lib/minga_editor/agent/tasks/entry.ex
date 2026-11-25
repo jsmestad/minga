@@ -247,7 +247,14 @@ defmodule MingaEditor.Agent.Tasks.Entry do
 
   defp change_status(entry, :error), do: %{entry | status: :error, waiting: nil}
 
-  defp change_status(entry, status) when status in [:idle, :plan, :stopped],
+  # Stopped means a working turn was stopped. A session at rest that reports :stopped (a restored conversation
+  # that never ran a turn, for example) stays at rest.
+  defp change_status(%__MODULE__{status: old} = entry, :stopped) when old in @working,
+    do: %{entry | status: :stopped}
+
+  defp change_status(entry, :stopped), do: entry
+
+  defp change_status(entry, status) when status in [:idle, :plan],
     do: %{entry | status: status}
 
   defp change_status(entry, _status), do: entry

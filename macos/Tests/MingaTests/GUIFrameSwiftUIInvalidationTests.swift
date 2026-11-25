@@ -1411,8 +1411,7 @@ struct GUIFrameSwiftUIInvalidationTests {
 
     private static func updateEmptyState(_ gui: GUIState, label: String) {
         gui.emptyStateState.update(
-            crashed: false,
-            version: "test",
+            header: Wire.EmptyStateHeader(title: "test"),
             focusedId: "launchpad",
             sections: [emptyStateSection(label: label)]
         )
@@ -1449,8 +1448,7 @@ struct GUIFrameSwiftUIInvalidationTests {
     private static func emptyStateCommand(label: String) -> RenderCommand {
         .guiEmptyState(
             visible: true,
-            crashed: false,
-            version: "test",
+            header: Wire.EmptyStateHeader(title: "test"),
             focusedId: "launchpad",
             sections: [emptyStateSection(label: label)]
         )
@@ -1458,8 +1456,8 @@ struct GUIFrameSwiftUIInvalidationTests {
 
     private static func emptyStateSection(label: String) -> Wire.EmptyStateSection {
         Wire.EmptyStateSection(
-            sectionId: 2,
-            title: "Start",
+            sectionId: 6,
+            title: "Next",
             items: [Wire.EmptyStateItem(
                 kind: 2,
                 id: "launchpad",

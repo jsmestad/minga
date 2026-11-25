@@ -1,21 +1,21 @@
 
+   minga
+   ~/code/minga
+   main · 11 changed
+
+   Recent in this project
+   1   startup.ex  lib/minga_editor
+   2   render_content.go  go/tui/internal/ui
+
+   Minga tasks
+   ◉ Add tests for the usage-limit classifier  Needs you
+
+   Next
+   SPC SPC Find a file
+   SPC o p File tree
 
 
-                              ◆  m i n g a   v0.9
 
-            ╭ Session ─────────────────────────────────────────────╮
-            │ ▸  r   resume last session                   4 files │
-            ╰──────────────────────────────────────────────────────╯
-
-              ─── RECENT ───────────────────────────────────────────
-                1      startup.ex                  lib/minga_editor
-                2      render_content.go         go/tui/internal/ui
-
-              ─── START ────────────────────────────────────────────
-                     open file                         SPC   f   f
-                     tutorial                                :Tutor
-
-                             i  write  ·  :q  quit
 
 
 
