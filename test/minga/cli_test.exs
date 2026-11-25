@@ -336,7 +336,7 @@ defmodule Minga.CLITest do
       assert message =~ "minga README.md                    Open file for editing"
 
       assert message =~
-               "minga .                            Start agentic view with project as context"
+               "minga .                            Open the project: pick up where you left off"
 
       assert message =~ "Keep agentic view and don't load the file as agent context"
     end
@@ -492,6 +492,8 @@ defmodule Minga.CLITest do
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_project_root)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_file)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :minimal_mode)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :safe_mode)
@@ -506,6 +508,8 @@ defmodule Minga.CLITest do
       Application.delete_env(:minga, :cli_startup_flags)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_project_root)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_file)
     end
 
     test "file argument returns :ok even when editor isn't running" do
@@ -515,23 +519,56 @@ defmodule Minga.CLITest do
       Application.delete_env(:minga, :cli_startup_flags)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_project_root)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_file)
     end
 
-    test "directory argument stores agentic startup mode and startup project root" do
+    test "a file argument is remembered so the editor opens it instead of the project session" do
+      path =
+        Path.join(
+          System.tmp_dir!(),
+          "minga_cli_startup_file_#{System.unique_integer([:positive])}.ex"
+        )
+
+      File.write!(path, "")
+      on_exit(fn -> File.rm(path) end)
+
+      assert :ok = CLI.prepare_startup([path])
+      assert CLI.startup_file() == Path.expand(path)
+
+      # A directory argument clears a file remembered by an earlier start.
+      assert :ok = CLI.prepare_startup([System.tmp_dir!()])
+      assert Application.get_env(:minga, :cli_startup_file) == nil
+
+      assert CLI.startup_file() == nil
+    after
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_project_root)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_file)
+    end
+
+    test "directory argument stores editor startup mode and startup project root" do
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_flags)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_project_root)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_file)
       root = System.tmp_dir!()
 
       assert :ok = CLI.main([root])
-      assert %{view_mode: :agentic, no_context: false, config_file: nil} = CLI.startup_flags()
+      assert %{view_mode: :editor, no_context: false, config_file: nil} = CLI.startup_flags()
       assert CLI.startup_project_root() == Path.expand(root)
     after
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_project_root)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_file)
     end
 
     test "main stores startup flags in application env" do
@@ -544,6 +581,8 @@ defmodule Minga.CLITest do
       Application.delete_env(:minga, :cli_startup_flags)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_project_root)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_file)
     end
 
     test "main stores config_file flag from --config" do
@@ -556,6 +595,8 @@ defmodule Minga.CLITest do
       Application.delete_env(:minga, :cli_startup_flags)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_project_root)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_file)
     end
 
     test "main stores debug_log path in application env" do
@@ -617,10 +658,10 @@ defmodule Minga.CLITest do
       assert result.view_mode == :editor
     end
 
-    test "directory resolves auto view to agentic" do
+    test "directory resolves auto view to the editor, which opens the project" do
       {:open, _, flags} = CLI.parse_args([System.tmp_dir!()])
       result = CLI.apply_flag_implications(flags, System.tmp_dir!())
-      assert result.view_mode == :agentic
+      assert result.view_mode == :editor
     end
 
     test "nil leaves auto view unresolved" do

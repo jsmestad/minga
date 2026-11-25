@@ -27,6 +27,7 @@ defmodule MingaEditor.Session.Recovery do
   alias MingaEditor.Effect.Policy
   alias MingaEditor.Effect.Request
   alias MingaEditor.EffectScheduler
+  alias MingaEditor.Handlers.SessionHandler
   alias MingaEditor.Handlers.SessionRestore
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
@@ -102,7 +103,7 @@ defmodule MingaEditor.Session.Recovery do
   @spec run(t()) :: {:ok, result()} | {:error, term()}
   def run(%__MODULE__{} = effect) do
     case recoverable_entries(effect) do
-      [] -> load_crashed_session(effect)
+      [] -> load_project_session(effect)
       entries -> {:ok, {:recover, recover_entries(entries)}}
     end
   end
@@ -153,13 +154,15 @@ defmodule MingaEditor.Session.Recovery do
     Enum.map(entries, fn entry -> {entry, Session.recover_swap_file(entry.swap_path)} end)
   end
 
-  @spec load_crashed_session(t()) :: {:ok, result()} | {:error, term()}
-  defp load_crashed_session(%__MODULE__{session_enabled?: false}), do: {:ok, :none}
+  # Opening a project picks up where you left off, after a clean quit as well as after a crash.
+  # A saved session with no files leaves the project home in place.
+  @spec load_project_session(t()) :: {:ok, result()} | {:error, term()}
+  defp load_project_session(%__MODULE__{session_enabled?: false}), do: {:ok, :none}
 
-  defp load_crashed_session(%__MODULE__{session_opts: opts}) do
+  defp load_project_session(%__MODULE__{session_opts: opts}) do
     case Session.load(opts) do
-      {:ok, %Snapshot{clean_shutdown: true}} -> {:ok, :none}
-      {:ok, %Snapshot{} = snapshot} -> {:ok, {:restore, snapshot}}
+      {:ok, %Snapshot{buffers: [_ | _]} = snapshot} -> {:ok, {:restore, snapshot}}
+      {:ok, %Snapshot{}} -> {:ok, :none}
       {:error, _reason} -> {:ok, :none}
     end
   end
@@ -175,10 +178,10 @@ defmodule MingaEditor.Session.Recovery do
 
   @spec current_configuration?(EditorState.t(), t()) :: boolean()
   defp current_configuration?(state, effect) do
-    SessionState.swap_enabled?(state.session) == effect.swap_enabled? and
-      SessionState.enabled?(state.session) == effect.session_enabled? and
+    SessionHandler.swap_recovery_enabled?(state) == effect.swap_enabled? and
+      SessionHandler.restore_enabled?(state) == effect.session_enabled? and
       SessionState.swap_opts(state.session) == effect.swap_opts and
-      SessionState.session_opts(state.session) == effect.session_opts
+      SessionHandler.project_session_opts(state) == effect.session_opts
   end
 
   @spec current_startup_identity(EditorState.t(), t()) :: :current | {:stale, atom()}

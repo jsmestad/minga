@@ -171,7 +171,8 @@ defmodule MingaEditor.Startup do
         },
         keymap_scope: keymap_scope,
         agent_ui: agentic_state,
-        launchpad: startup_launchpad(active_buf, keymap_scope, opts)
+        launchpad:
+          startup_launchpad(active_buf, keymap_scope, [{:project_root, project_root} | opts])
       }
       |> MingaEditor.Session.State.set_file_tree(file_tree)
 
@@ -236,7 +237,11 @@ defmodule MingaEditor.Startup do
           sidebar_registry: sidebar_registry
         ),
       effect_scheduler: Keyword.get(opts, :effect_scheduler),
-      session: EditorSessionState.new(Keyword.take(opts, [:swap_dir, :session_dir]))
+      session:
+        EditorSessionState.new([
+          {:project_session?, project_open?(active_buf, opts)}
+          | Keyword.take(opts, [:swap_dir, :session_dir])
+        ])
     }
 
     shell_state =
@@ -383,7 +388,7 @@ defmodule MingaEditor.Startup do
   @spec startup_launchpad(pid() | nil, atom(), keyword()) ::
           MingaEditor.State.Launchpad.t() | nil
   defp startup_launchpad(nil, scope, opts) when scope != :agent do
-    MingaEditor.State.Launchpad.new(Keyword.take(opts, [:session_dir]))
+    MingaEditor.State.Launchpad.new(Keyword.take(opts, [:session_dir, :project_root]))
   end
 
   defp startup_launchpad(_active_buf, _scope, _opts), do: nil
@@ -454,6 +459,48 @@ defmodule MingaEditor.Startup do
   defp log_contribution_registration({:error, reason}, message) do
     Log.warning(:editor, "#{message}: #{inspect(reason)}")
   end
+
+  # A start without a file opens the project; a file argument opens only that file.
+  @spec project_open?(pid() | nil, keyword()) :: boolean()
+  defp project_open?(active_buf, opts), do: is_nil(active_buf) and is_nil(startup_file(opts))
+
+  @doc """
+  The file the command line asked to open, or nil.
+
+  `:startup_file` overrides the command line. Like the project root, the command line is read only when startup inference is on, so test editors never inherit the test runner's arguments.
+  """
+  @spec startup_file(keyword()) :: String.t() | nil
+  def startup_file(opts) do
+    Keyword.get_lazy(opts, :startup_file, fn ->
+      if Application.get_env(:minga, :infer_startup_project_root, true),
+        do: Minga.CLI.startup_file()
+    end)
+  end
+
+  @doc """
+  Opens the command line's file argument while the editor starts (#4183).
+
+  The editor owns this open, so it cannot race a slow frontend boot the way a call from the command line did.
+  """
+  @spec open_startup_file(EditorState.t(), keyword()) :: EditorState.t()
+  def open_startup_file(%EditorState{workspace: %{buffers: %{list: []}}} = state, opts) do
+    case startup_file(opts) do
+      nil ->
+        state
+
+      path ->
+        case MingaEditor.Handlers.BufferRegistry.open_file_by_path_result(state, path) do
+          {:ok, state} ->
+            state
+
+          {:error, reason} ->
+            Log.warning(:editor, "Could not open #{path}: #{inspect(reason)}")
+            state
+        end
+    end
+  end
+
+  def open_startup_file(%EditorState{} = state, _opts), do: state
 
   @spec project_root_from_opts(keyword()) :: String.t() | nil
   defp project_root_from_opts(opts) do

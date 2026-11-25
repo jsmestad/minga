@@ -171,8 +171,6 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "Minga.Editing" => ["MingaEditor.MacroRecorder"],
     # Application supervisor starts shell and handler registries at the OTP boundary.
     "Minga.Application" => ["MingaEditor.Shell.Registry", "MingaEditor.Input.HandlerRegistry"],
-    # Session persistence currently references the editor state snapshot type.
-    "Minga.Session" => ["MingaEditor.State"],
     # Diagnostics decoration maps severities to presentation gutter faces.
     "Minga.Diagnostics.Decorations" => ["MingaEditor.UI.Theme.Gutter"],
     # Buffer state uses typed config option aliases while the option registry remains stateful.

@@ -97,6 +97,8 @@ defmodule Minga.Test.EditorCase do
     - `:width` — terminal width (default 80)
     - `:height` — terminal height (default 24)
     - `:file_path` — optional file path for the buffer
+    - `:empty` — start with no buffer at all, as `minga .` does (default false); `:buffer` is then nil
+    - `:session_dir` — enable session persistence in this directory (default: off)
     - `:name` — optional Editor registration name (defaults to a unique test name)
     - `:child_id` — optional supervisor child id, so a caller can `stop_supervised/1` the editor before the test ends
     - `:record_packets` — keep every packet the editor sends, for `Minga.Test.HeadlessPort.packets/1` (default false)
@@ -138,15 +140,7 @@ defmodule Minga.Test.EditorCase do
         do: [{:options_server, Keyword.get(opts, :options_server)} | buffer_opts],
         else: buffer_opts
 
-    {:ok, buffer} = BufferProcess.start_link(buffer_opts)
-
-    # Inject clipboard mode directly on the buffer so the Editor never
-    # reads the global Config.Options for clipboard. Each test is isolated.
-    BufferProcess.set_option(buffer, :clipboard, clipboard)
-
-    # Editor tests drive saves explicitly. Disable background autosave so a
-    # shared options reset cannot race assertions about dirty buffer state.
-    BufferProcess.set_option(buffer, :auto_save_delay_ms, 0)
+    buffer = start_test_buffer(Keyword.get(opts, :empty, false), buffer_opts, clipboard)
 
     # Pin editing model per-editor so async tests don't race on global ETS.
     editing_model = Keyword.get(opts, :editing_model, :vim)
@@ -167,7 +161,9 @@ defmodule Minga.Test.EditorCase do
       editing_model: editing_model,
       events_registry: events_registry,
       sidebar_registry: sidebar_registry,
-      suppress_tool_prompts: true
+      suppress_tool_prompts: true,
+      # The CLI's remembered file argument is global; a test editor never inherits it.
+      startup_file: Keyword.get(opts, :startup_file)
     ]
 
     editor_opts =
@@ -208,6 +204,11 @@ defmodule Minga.Test.EditorCase do
         do: [{:parser_manager, Keyword.fetch!(opts, :parser_manager)} | editor_opts],
         else: editor_opts
 
+    editor_opts =
+      if Keyword.has_key?(opts, :session_dir),
+        do: [{:session_dir, Keyword.fetch!(opts, :session_dir)} | editor_opts],
+        else: editor_opts
+
     # Thread project_root for file tree isolation in tests
     project_root = Keyword.get(opts, :project_root)
 
@@ -233,6 +234,22 @@ defmodule Minga.Test.EditorCase do
       events_registry: events_registry,
       sidebar_registry: sidebar_registry
     })
+  end
+
+  @spec start_test_buffer(boolean(), keyword(), atom()) :: pid() | nil
+  defp start_test_buffer(true, _buffer_opts, _clipboard), do: nil
+
+  defp start_test_buffer(false, buffer_opts, clipboard) do
+    {:ok, buffer} = BufferProcess.start_link(buffer_opts)
+
+    # Inject clipboard mode directly on the buffer so the Editor never
+    # reads the global Config.Options for clipboard. Each test is isolated.
+    BufferProcess.set_option(buffer, :clipboard, clipboard)
+
+    # Editor tests drive saves explicitly. Disable background autosave so a
+    # shared options reset cannot race assertions about dirty buffer state.
+    BufferProcess.set_option(buffer, :auto_save_delay_ms, 0)
+    buffer
   end
 
   @doc "Starts a headless editor with a pre-existing buffer."

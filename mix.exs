@@ -496,6 +496,7 @@ defmodule Minga.MixProject do
               unless Minga.CLI.terminal_command_args?(argv), do: Application.put_env(:minga, :start_editor, true)
               if System.get_env(\"MINGA_GUI_RENDERER\"), do: Application.put_env(:minga, :backend, :gui)
               if System.get_env(\"MINGA_PORT_MODE\") == \"connected\", do: Minga.LoggerHandler.install()
+              Minga.CLI.prepare_startup(argv)
               Application.ensure_all_started(:minga)
               Minga.CLI.main(argv)
           end

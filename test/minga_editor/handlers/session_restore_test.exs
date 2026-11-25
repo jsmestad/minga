@@ -28,7 +28,7 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
       active_file: first_path
     }
 
-    assert :ok = Session.save(snapshot, session_dir: dir)
+    assert :ok = Session.save(snapshot, session_dir: dir, project_root: dir)
 
     restored = dir |> initial_state() |> SessionRestore.restore_session()
     assert [_, _] = TabBar.visible_file_tabs(restored.shell_runtime.state.tab_bar)
@@ -79,7 +79,7 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
       active_file: first_path
     }
 
-    assert :ok = Session.save(snapshot, session_dir: dir)
+    assert :ok = Session.save(snapshot, session_dir: dir, project_root: dir)
 
     %EditorState{} = state = initial_state(dir)
 
@@ -103,7 +103,7 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
       active_file: missing_path
     }
 
-    assert :ok = Session.save(snapshot, session_dir: dir)
+    assert :ok = Session.save(snapshot, session_dir: dir, project_root: dir)
     %EditorState{} = state = initial_state(dir)
 
     restored =
@@ -125,7 +125,7 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
       active_file: first_path
     }
 
-    assert :ok = Session.save(snapshot, session_dir: dir)
+    assert :ok = Session.save(snapshot, session_dir: dir, project_root: dir)
     %EditorState{} = state = initial_state(dir)
 
     restored =
@@ -195,7 +195,7 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
       active_file: missing_path
     }
 
-    assert :ok = Session.save(snapshot, session_dir: dir)
+    assert :ok = Session.save(snapshot, session_dir: dir, project_root: dir)
 
     restored = dir |> initial_state() |> SessionRestore.restore_session()
 

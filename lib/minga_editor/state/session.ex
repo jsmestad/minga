@@ -30,6 +30,7 @@ defmodule MingaEditor.State.Session do
           swap_dir: String.t() | nil,
           session_dir: String.t() | nil,
           session_started?: boolean(),
+          project_session?: boolean(),
           pending_quit: pending_quit(),
           application_quit: application_quit(),
           last_test_command: last_test_command()
@@ -39,6 +40,7 @@ defmodule MingaEditor.State.Session do
             swap_dir: nil,
             session_dir: nil,
             session_started?: false,
+            project_session?: true,
             pending_quit: nil,
             application_quit: :idle,
             last_test_command: nil
@@ -48,9 +50,18 @@ defmodule MingaEditor.State.Session do
   def new(opts \\ []) do
     %__MODULE__{
       swap_dir: Keyword.get(opts, :swap_dir),
-      session_dir: Keyword.get(opts, :session_dir)
+      session_dir: Keyword.get(opts, :session_dir),
+      project_session?: Keyword.get(opts, :project_session?, true)
     }
   end
+
+  @doc """
+  True when this editor opened the project itself (`minga .`, or `minga` inside a project), so it restores and saves the project's session.
+
+  An editor started on one file (`minga lib/foo.ex`, or as git's editor) neither restores nor overwrites the project's session.
+  """
+  @spec project_session?(t()) :: boolean()
+  def project_session?(%__MODULE__{project_session?: owns?}), do: owns?
 
   @doc "Latches completion of the one-time editor startup workflow."
   @spec complete_startup(t(), t()) :: t()

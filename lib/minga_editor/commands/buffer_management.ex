@@ -2993,6 +2993,9 @@ defmodule MingaEditor.Commands.BufferManagement do
   # fuzzer can prevent `System.stop/1` from killing the VM mid-test.
   @spec exit_editor(state(), 0) :: state()
   defp exit_editor(state, 0) do
+    # The next `minga .` in this project picks up exactly where this quit left off.
+    :ok = MingaEditor.Handlers.SessionHandler.save_now(state)
+
     if any_buffer_dirty?(state) do
       :ok = WaitRequests.cancel_all("editor closed with unsaved changes")
     else

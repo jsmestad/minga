@@ -92,6 +92,7 @@ defmodule MingaEditor do
           | {:project_root, String.t() | nil}
           | {:swap_dir, String.t()}
           | {:session_dir, String.t()}
+          | {:startup_file, String.t() | nil}
           | {:suppress_tool_prompts, boolean()}
           | {:agent_arrival_budget_ms, non_neg_integer()}
           | {:pane_generation_allocator, (-> pos_integer())}
@@ -398,6 +399,8 @@ defmodule MingaEditor do
     if state.frontend.backend != :headless do
       Process.send_after(self(), :evict_parser_trees, HighlightSync.eviction_check_interval_ms())
     end
+
+    state = Startup.open_startup_file(state, opts)
 
     StartupTimer.mark(:editor_init_done)
     StartupTimer.schedule_fallback_report()

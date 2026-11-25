@@ -9,8 +9,8 @@ defmodule Minga.CLI do
   By default, Minga boots into the agentic view (controlled by the `:startup_view` config option). CLI flags can override the config:
 
   - `--editor` forces the traditional file editing view
-  - File arguments open in the traditional file editing view by default
-  - Directory arguments open the agentic view with the directory as context
+  - File arguments open the file in its project
+  - Directory arguments open the project: its saved session, or the project home
   - `--no-context` opens the agentic view but skips loading the CLI file argument as preview context
   - `--headless` starts only the services and agent runtime, plus the JSON-RPC Gateway
   """
@@ -299,6 +299,14 @@ defmodule Minga.CLI do
     stored = Application.get_env(:minga, :cli_startup_flags, %{})
     Map.merge(@default_flags, stored)
   end
+
+  @doc """
+  The regular file given on the command line, or nil for a directory or no argument.
+
+  Every launcher stores it with `prepare_startup/1` before the editor starts: releases in `Minga.Application`, source launchers in the `mix minga` alias.
+  """
+  @spec startup_file() :: String.t() | nil
+  def startup_file, do: Application.get_env(:minga, :cli_startup_file)
 
   @doc "Returns the project root inferred from the stored startup CLI target, if any."
   @spec startup_project_root() :: String.t() | nil
@@ -1019,23 +1027,37 @@ defmodule Minga.CLI do
   def apply_flag_implications(%{view_mode: :auto} = flags, file),
     do: resolve_auto_view_mode(flags, file)
 
+  # A file and a directory both open in the editor.
+  # A directory opens its project: the saved session, or the project home.
   @spec resolve_auto_view_mode(flags(), String.t()) :: flags()
-  defp resolve_auto_view_mode(flags, file) do
-    resolve_auto_view_mode_for_directory(flags, File.dir?(file))
-  end
-
-  @spec resolve_auto_view_mode_for_directory(flags(), boolean()) :: flags()
-  defp resolve_auto_view_mode_for_directory(flags, true), do: %{flags | view_mode: :agentic}
-  defp resolve_auto_view_mode_for_directory(flags, false), do: %{flags | view_mode: :editor}
+  defp resolve_auto_view_mode(flags, _file), do: %{flags | view_mode: :editor}
 
   @spec store_startup_flags(flags(), String.t() | nil) :: :ok
   defp store_startup_flags(flags, file) do
     effective = apply_flag_implications(flags, file)
     Application.put_env(:minga, :cli_startup_flags, effective)
     store_startup_project_root(file)
+    store_startup_file(file)
     store_debug_log_path(effective.debug_log)
     Minga.SafeMode.put(effective.safe_mode)
     if effective.minimal, do: Application.put_env(:minga, :minimal_mode, true)
+    :ok
+  end
+
+  # A regular file argument opens that file, not the project's saved session.
+  @spec store_startup_file(String.t() | nil) :: :ok
+  defp store_startup_file(path) when is_binary(path) do
+    if File.dir?(path) do
+      Application.delete_env(:minga, :cli_startup_file)
+    else
+      Application.put_env(:minga, :cli_startup_file, Path.expand(path))
+    end
+
+    :ok
+  end
+
+  defp store_startup_file(nil) do
+    Application.delete_env(:minga, :cli_startup_file)
     :ok
   end
 
@@ -1176,9 +1198,9 @@ defmodule Minga.CLI do
       --port <port>          Gateway port for headless mode (default: 4820)
 
     Examples:
-      minga                              Start agentic view
+      minga                              Open the project in this directory
       minga README.md                    Open file for editing
-      minga .                            Start agentic view with project as context
+      minga .                            Open the project: pick up where you left off
       minga --editor README.md           Open file in traditional editor
       minga attach ssh://devbox/work/app  Attach to a remote server-side checkout
       minga sessions ssh://devbox         List remote sessions without launching the editor
@@ -1194,51 +1216,15 @@ defmodule Minga.CLI do
   @spec open_startup_target(String.t() | nil) :: :ok
   defp open_startup_target(nil), do: :ok
 
+  # The editor opens a file argument itself while it starts (`Minga.CLI.startup_file/0`).
+  # Opening it from here raced the editor's own startup and timed out on a slow GUI boot (#4183).
   defp open_startup_target(path) do
-    if File.dir?(path) do
-      open_project(path)
-    else
-      open_file(path)
-    end
+    if File.dir?(path), do: open_project(path), else: :ok
   end
 
   @spec open_project(String.t()) :: :ok
   defp open_project(path) do
     Minga.Project.switch(path)
     :ok
-  end
-
-  @spec open_file(String.t()) :: :ok
-  defp open_file(path) do
-    {interval, retries} = editor_wait_params()
-
-    case wait_for_editor(interval, retries) do
-      :ok -> MingaEditor.open_file(path)
-      :timeout -> Minga.Log.error(:editor, "Editor process did not start in time")
-    end
-
-    :ok
-  end
-
-  @spec editor_wait_params() :: {non_neg_integer(), non_neg_integer()}
-  defp editor_wait_params do
-    # Tests can override the polling interval and retry count; production waits up to one second by default.
-    Application.get_env(:minga, :editor_wait_params, {50, 20})
-  end
-
-  @spec wait_for_editor(non_neg_integer(), non_neg_integer()) :: :ok | :timeout
-  defp wait_for_editor(_interval, 0), do: :timeout
-
-  defp wait_for_editor(interval, retries) do
-    case Process.whereis(MingaEditor) do
-      nil ->
-        receive do
-        after
-          interval -> wait_for_editor(interval, retries - 1)
-        end
-
-      _pid ->
-        :ok
-    end
   end
 end
