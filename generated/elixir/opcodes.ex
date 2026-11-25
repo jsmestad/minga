@@ -441,5 +441,9 @@ defmodule Minga.Protocol.Opcodes do
   def gui_action_agent_start_remedy, do: 0x6F
   @spec gui_action_picker_fit() :: non_neg_integer()
   def gui_action_picker_fit, do: 0x70
+  @spec gui_action_which_key_press() :: non_neg_integer()
+  def gui_action_which_key_press, do: 0x71
+  @spec gui_action_which_key_back() :: non_neg_integer()
+  def gui_action_which_key_back, do: 0x72
 
 end

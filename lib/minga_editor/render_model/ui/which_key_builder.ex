@@ -14,7 +14,8 @@ defmodule MingaEditor.RenderModel.UI.WhichKeyBuilder do
 
   @more "More"
 
-  @hints [%{key: "⌫", label: "back"}, %{key: "esc", label: "close"}]
+  @close %{key: "esc", label: "close"}
+  @hints [%{key: "⌫", label: "back"}, @close]
 
   @typedoc """
   Build options:
@@ -30,7 +31,7 @@ defmodule MingaEditor.RenderModel.UI.WhichKeyBuilder do
   def build(%WhichKeyState{show: false}, _opts), do: %WhichKey{visible: false}
   def build(%WhichKeyState{node: nil}, _opts), do: %WhichKey{visible: false}
 
-  def build(%WhichKeyState{node: node, prefix_keys: prefix_keys, labels: labels}, opts) do
+  def build(%WhichKeyState{node: node, prefix_keys: prefix_keys, labels: labels} = state, opts) do
     counts = Keyword.get(opts, :counts, %{})
     platform_keys? = Keyword.get(opts, :platform_keys?, false)
     group_prefix = group_prefix(prefix_keys)
@@ -38,7 +39,7 @@ defmodule MingaEditor.RenderModel.UI.WhichKeyBuilder do
     entries =
       node
       |> WhichKeyUI.bindings_from_node()
-      |> sectioned(Defaults.which_key_sections(group_prefix))
+      |> sectioned(sections(state, group_prefix))
       |> Enum.map(fn {section, binding} ->
         entry(binding, section, group_prefix, counts, platform_keys?)
       end)
@@ -48,10 +49,19 @@ defmodule MingaEditor.RenderModel.UI.WhichKeyBuilder do
       path: Enum.join(prefix_keys, " "),
       breadcrumb: breadcrumb(prefix_keys, labels),
       count: Counts.get(counts, {:group, group_prefix}),
-      hints: @hints,
+      hints: hints(state),
       entries: entries
     }
   end
+
+  # A prompt or picker's keys have no leader sections, and Backspace there edits the text.
+  @spec sections(WhichKeyState.t(), String.t()) :: [{String.t(), [String.t()]}]
+  defp sections(%WhichKeyState{owner: :scope}, _group_prefix), do: []
+  defp sections(%WhichKeyState{}, group_prefix), do: Defaults.which_key_sections(group_prefix)
+
+  @spec hints(WhichKeyState.t()) :: [WhichKey.hint()]
+  defp hints(%WhichKeyState{owner: :scope}), do: [@close]
+  defp hints(%WhichKeyState{}), do: @hints
 
   # The formatted sequence after the leader, which names the open group (`"a"` for `SPC a`).
   @spec group_prefix([String.t()]) :: String.t()

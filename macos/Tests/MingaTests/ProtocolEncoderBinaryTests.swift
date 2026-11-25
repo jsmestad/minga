@@ -885,6 +885,20 @@ struct EncoderGUIActionTests {
         #expect(name == "buffer_prev")
     }
 
+    @Test("which_key_press encodes the panel path, the raw key and its modifiers")
+    func whichKeyPressLayout() {
+        let payload = captureFrame { $0.send(.whichKeyPress(path: "SPC a", codepoint: 0x71, modifiers: 2)) }
+
+        #expect(payload == Data([OP_GUI_ACTION, GUI_ACTION_WHICH_KEY_PRESS, 0, 5] + Array("SPC a".utf8) + [0, 0, 0, 0x71, 2]))
+    }
+
+    @Test("which_key_back encodes the crumb path")
+    func whichKeyBackLayout() {
+        let payload = captureFrame { $0.send(.whichKeyBack(path: "SPC")) }
+
+        #expect(payload == Data([OP_GUI_ACTION, GUI_ACTION_WHICH_KEY_BACK, 0, 3] + Array("SPC".utf8)))
+    }
+
     @Test("workspace_rename encodes id and name with length prefix")
     func workspaceRenameLayout() {
         let payload = captureFrame { $0.send(.workspaceRename(id: 7, name: "Research Bot")) }

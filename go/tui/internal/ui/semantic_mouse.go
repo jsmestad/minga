@@ -349,6 +349,9 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 // overlayMousePacket is checked before spatial dispatch because overlays render
 // above all layout zones and must intercept clicks regardless of position.
 func (m Model) overlayMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	if packet, ok := m.whichKeyMousePacket(msg); ok {
+		return packet, true
+	}
 	if packet, ok := m.agentHelpMousePacket(msg); ok {
 		return packet, true
 	}

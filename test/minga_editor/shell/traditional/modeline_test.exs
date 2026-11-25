@@ -313,6 +313,8 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
   describe "clicks and keys" do
     test "designed segments do what their leader key does and name that key" do
       expected = [
+        # The mode pill is the mouse's front door: a click opens which-key, as SPC and a pause do.
+        mode: {"SPC", :which_key_open},
         needs_you: {"SPC a a", :toggle_agentic_view},
         filename: {"SPC ,", :buffer_list},
         minga: {"SPC a v", :toggle_agent_split},

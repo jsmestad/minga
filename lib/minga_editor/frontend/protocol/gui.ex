@@ -161,6 +161,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_workspace_set_icon Opcodes.gui_action_workspace_set_icon()
   @gui_action_workspace_close Opcodes.gui_action_workspace_close()
   @gui_action_space_leader_chord Opcodes.gui_action_space_leader_chord()
+  @gui_action_which_key_press Opcodes.gui_action_which_key_press()
+  @gui_action_which_key_back Opcodes.gui_action_which_key_back()
   @gui_action_space_leader_retract Opcodes.gui_action_space_leader_retract()
   @gui_action_find_pasteboard_search Opcodes.gui_action_find_pasteboard_search()
   @gui_action_agent_approve Opcodes.gui_action_agent_approve()
@@ -291,6 +293,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:workspace_set_icon, id :: non_neg_integer(), icon :: String.t()}
           | {:workspace_close, id :: non_neg_integer()}
           | {:space_leader_chord, codepoint :: non_neg_integer(), modifiers :: non_neg_integer()}
+          | {:which_key_press, path :: String.t(), codepoint :: non_neg_integer(),
+             modifiers :: non_neg_integer()}
+          | {:which_key_back, path :: String.t()}
           | {:space_leader_retract, codepoint :: non_neg_integer(),
              modifiers :: non_neg_integer()}
           | {:find_pasteboard_search, text :: String.t(), direction :: non_neg_integer()}
@@ -894,6 +899,18 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         <<codepoint::32, modifiers::8>>
       ),
       do: {:ok, {:space_leader_chord, codepoint, modifiers}}
+
+  def decode_gui_action(
+        @gui_action_which_key_press,
+        <<path_len::16, path::binary-size(path_len), codepoint::32, modifiers::8>>
+      ),
+      do: {:ok, {:which_key_press, path, codepoint, modifiers}}
+
+  def decode_gui_action(
+        @gui_action_which_key_back,
+        <<path_len::16, path::binary-size(path_len)>>
+      ),
+      do: {:ok, {:which_key_back, path}}
 
   def decode_gui_action(
         @gui_action_space_leader_retract,

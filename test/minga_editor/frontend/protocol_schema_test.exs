@@ -287,7 +287,9 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       agent_stop_turn: 0x6D,
       agent_composer_queue: 0x6E,
       agent_start_remedy: 0x6F,
-      picker_fit: 0x70
+      picker_fit: 0x70,
+      which_key_press: 0x71,
+      which_key_back: 0x72
     )
   end
 

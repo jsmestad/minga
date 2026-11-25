@@ -41,6 +41,9 @@ func TestGUISendersUseOnlyRemainingActions(t *testing.T) {
 		"GUIActionChatReturnedToBottom":       false,
 		"GUIActionFoldToggleAtLine":           false,
 		"GUIActionPickerFit":                  false,
+		// Which-key clicks name the open panel's path and the row's raw key, never a row index.
+		"GUIActionWhichKeyPress": false,
+		"GUIActionWhichKeyBack":  false,
 	}
 	file, err := parser.ParseFile(token.NewFileSet(), "events.go", nil, 0)
 	if err != nil {

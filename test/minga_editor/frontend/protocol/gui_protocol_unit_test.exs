@@ -20,6 +20,19 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     end
   end
 
+  describe "decode_gui_action for which-key clicks" do
+    test "decodes a row press with the panel path and the raw key, and a breadcrumb back" do
+      assert {:ok, {:which_key_press, "SPC a", ?q, 0}} ==
+               ProtocolGUI.decode_gui_action(0x70, <<5::16, "SPC a", ?q::32, 0::8>>)
+
+      assert {:ok, {:which_key_back, "SPC"}} ==
+               ProtocolGUI.decode_gui_action(0x71, <<3::16, "SPC">>)
+
+      assert :error == ProtocolGUI.decode_gui_action(0x70, <<5::16, "SPC a", ?q::32>>)
+      assert :error == ProtocolGUI.decode_gui_action(0x71, <<9::16, "SPC">>)
+    end
+  end
+
   describe "decode_gui_action for accessibility pane focus" do
     test "decodes an exact window identifier" do
       assert {:ok, {:focus_window, 513, 9_223_372_036_854_775_000}} ==

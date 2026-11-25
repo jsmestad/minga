@@ -319,6 +319,26 @@ func EncodeGUIExecuteCommand(command string) []byte {
 	return append(out, payload...)
 }
 
+// EncodeGUIWhichKeyPress presses a which-key row's key while the panel on path is still open (docs/GUI_PROTOCOL.md).
+func EncodeGUIWhichKeyPress(path string, codepoint uint32, modifiers byte) []byte {
+	out := append([]byte{generated.OPGuiAction, generated.GUIActionWhichKeyPress}, encodeString16(path)...)
+	out = binary.BigEndian.AppendUint32(out, codepoint)
+	return append(out, modifiers)
+}
+
+// EncodeGUIWhichKeyBack goes back up the which-key breadcrumb to the crumb on path.
+func EncodeGUIWhichKeyBack(path string) []byte {
+	return append([]byte{generated.OPGuiAction, generated.GUIActionWhichKeyBack}, encodeString16(path)...)
+}
+
+func encodeString16(value string) []byte {
+	payload := []byte(value)
+	if len(payload) > 65535 {
+		payload = payload[:65535]
+	}
+	return append([]byte{byte(len(payload) >> 8), byte(len(payload))}, payload...)
+}
+
 func EncodeGUIAgentComposerSubmit(generation, offer uint64) []byte {
 	packet := [18]byte{generated.OPGuiAction, generated.GUIActionAgentComposerSubmit}
 	binary.BigEndian.PutUint64(packet[2:], generation)

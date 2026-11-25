@@ -44,6 +44,30 @@ defmodule MingaEditor.Shell.Traditional.WhichKeyWorkflow do
     schedule(state)
   end
 
+  @doc "Shows the pending which-key generation now, without waiting for the pause (the mode pill opens it by click)."
+  @spec reveal_now(EditorState.t()) :: EditorState.t()
+  def reveal_now(state), do: reveal(state, state.shell_runtime.state.whichkey.generation)
+
+  @doc """
+  Opens which-key on the keys of a prompt or picker scope, at once. It opens over the prompt or picker, so unlike a leader sequence it does not yield to the modal that owns input.
+  """
+  @spec open_scope(EditorState.t(), Minga.Keymap.Bindings.node_t(), String.t()) :: EditorState.t()
+  def open_scope(state, node, name) do
+    cancel_timer(state.shell_runtime.state.whichkey.timer)
+    update_shell_state(state, &ShellState.open_whichkey_scope(&1, node, name))
+  end
+
+  @doc """
+  Dismisses a leader which-key under a modal that takes input. A prompt or picker's own keys, opened over that modal by the mode pill, stay: the modal changing underneath (results loading, the selection moving) is not a reason to close them.
+  """
+  @spec dismiss_under_modal(EditorState.t()) :: EditorState.t()
+  def dismiss_under_modal(
+        %{shell_runtime: %{state: %{whichkey: %WhichKey{owner: :scope}}}} = state
+      ),
+      do: state
+
+  def dismiss_under_modal(state), do: dismiss(state)
+
   @doc "Dismisses which-key and cancels its current timer best-effort."
   @spec dismiss(EditorState.t()) :: EditorState.t()
   def dismiss(state) do

@@ -1555,6 +1555,20 @@ value = 0x6F
 name = "picker_fit"
 value = 0x70
 
+# Presses a which-key row's key, as if typed. Payload: path(string16) +
+# codepoint(u32) + modifiers(u8). The path is the panel's identity from
+# gui_which_key; the BEAM presses the key only while that panel is still open.
+[[gui_actions]]
+name = "which_key_press"
+value = 0x71
+
+# Goes back up the which-key breadcrumb. Payload: path(string16), the crumb's
+# path from gui_which_key. The BEAM goes up only while the open panel is below
+# that path.
+[[gui_actions]]
+name = "which_key_back"
+value = 0x72
+
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
 # Capability payload version 2 appends these fields after the original seven

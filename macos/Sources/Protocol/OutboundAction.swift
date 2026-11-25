@@ -146,6 +146,10 @@ nonisolated public enum OutboundAction: Equatable, Sendable {
     case workspaceSetIcon(id: UInt16, icon: String)
     case workspaceClose(id: UInt16)
     case spaceLeaderChord(codepoint: UInt32, modifiers: UInt8)
+    /// Presses a which-key row's key while the panel on `path` is still open.
+    case whichKeyPress(path: String, codepoint: UInt32, modifiers: UInt8)
+    /// Goes back up the which-key breadcrumb to the crumb on `path`.
+    case whichKeyBack(path: String)
     case spaceLeaderRetract(codepoint: UInt32, modifiers: UInt8)
     case findPasteboardSearch(text: String, direction: UInt8)
     case agentApprove

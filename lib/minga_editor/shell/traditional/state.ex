@@ -257,6 +257,11 @@ defmodule MingaEditor.Shell.Traditional.State do
   def begin_whichkey(%__MODULE__{} = state, node, prefix_keys),
     do: %{state | whichkey: WhichKey.begin(state.whichkey, node, prefix_keys)}
 
+  @doc "Opens the keys of a prompt or picker scope in which-key at once."
+  @spec open_whichkey_scope(t(), Minga.Keymap.Bindings.node_t(), String.t()) :: t()
+  def open_whichkey_scope(%__MODULE__{} = state, node, name),
+    do: %{state | whichkey: WhichKey.open_scope(state.whichkey, node, name)}
+
   @doc "Advances the which-key leader prefix."
   @spec progress_whichkey(t(), Minga.Keymap.Bindings.node_t(), [String.t()], String.t() | nil) ::
           t()

@@ -5,15 +5,25 @@
 /// 24 pt row pitch; keys sit in a fixed key column (the column's widest key plus `md`) in the accent colour, and group
 /// names, plain counts and ⌘ keys in the text_muted role. A needs-you or error count draws in that state's role, as the
 /// modeline does. Fades in within 120 ms, and not at all under Reduce Motion.
+///
+/// Every row and every breadcrumb crumb is a button (docs/design/surfaces.md, Mouse): a row presses its key, a crumb
+/// goes back up to it. Each click names the panel's path, so the BEAM ignores one aimed at a panel that has moved on.
 
 import SwiftUI
 import MingaProtocol
 
 public struct WhichKeyOverlay: View {
-    public init(state: WhichKeyState) {
+    public enum Action: Equatable, Sendable {
+        case press(path: String, codepoint: UInt32, modifiers: UInt8)
+        case back(path: String)
+    }
+
+    public init(state: WhichKeyState, sendAction: ViewActionHandler<Action>? = nil) {
         self.state = state
+        self.sendAction = sendAction
     }
     public let state: WhichKeyState
+    public let sendAction: ViewActionHandler<Action>?
     @Environment(\.themeColors) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -47,7 +57,6 @@ public struct WhichKeyOverlay: View {
                     .strokeBorder(theme.popupBorder.opacity(0.5), lineWidth: 1)
             )
             .anatomyPart("whichKey.panel")
-            .allowsHitTesting(false)
             .transition(.opacity.animation(Self.fadeAnimation(reduceMotion: reduceMotion)))
         }
     }
@@ -110,14 +119,7 @@ public struct WhichKeyOverlay: View {
                         .font(Typography.font(.small))
                         .foregroundStyle(theme.roleColor(.textMuted))
                 }
-                Text(crumb.key)
-                    .font(Typography.monospacedSmall)
-                    .foregroundStyle(theme.accent)
-                if !crumb.label.isEmpty {
-                    Text(crumb.label)
-                        .font(Typography.font(.small, weight: .semibold))
-                        .foregroundStyle(theme.popupFg)
-                }
+                crumbButton(crumb)
             }
             if !state.count.isEmpty {
                 Text(state.count)
@@ -127,6 +129,30 @@ public struct WhichKeyOverlay: View {
         }
         .lineLimit(1)
         .anatomyPart("whichKey.breadcrumb", text: breadcrumbText, font: .small)
+    }
+
+    /// A crumb above the open group goes back up to it; the open group's own crumb is plain text.
+    @ViewBuilder
+    private func crumbButton(_ crumb: Wire.WhichKeyCrumb) -> some View {
+        let words = HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+            Text(crumb.key)
+                .font(Typography.monospacedSmall)
+                .foregroundStyle(theme.accent)
+            if !crumb.label.isEmpty {
+                Text(crumb.label)
+                    .font(Typography.font(.small, weight: .semibold))
+                    .foregroundStyle(theme.popupFg)
+            }
+        }
+        if crumb.path == state.path {
+            words
+        } else {
+            Button(action: { sendAction?(.back(path: crumb.path)) }) { words }
+                .buttonStyle(.plain)
+                .pointingHandCursor()
+                .help("Back to \(crumb.path)")
+                .accessibilityLabel("Back to \(crumb.label.isEmpty ? crumb.key : crumb.label)")
+        }
     }
 
     // MARK: - Columns
@@ -157,39 +183,71 @@ public struct WhichKeyOverlay: View {
     }
 
     private func entryRow(_ entry: Wire.WhichKeyEntry, keyWidth: CGFloat) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 0) {
-            Text(entry.key)
-                .font(Typography.monospacedSmall)
-                .foregroundStyle(theme.accent)
-                .anatomyPart("whichKey.entryKey", text: entry.key, font: .small, monospaced: true)
-                .frame(width: keyWidth, alignment: .leading)
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
-                // Group rows arrive from the BEAM as Title Case labels with a trailing chevron ("Session ›") and draw
-                // in the group colour role (docs/design/keys.md); commands are plain text.
-                Text(entry.label)
-                    .font(Typography.font(.body))
-                    .foregroundStyle(entry.isGroup ? theme.roleColor(.group) : theme.popupFg)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .anatomyPart("whichKey.entryLabel", text: entry.label, font: .body)
-                if !entry.count.isEmpty {
-                    Text(entry.count)
-                        .font(Typography.font(.caption))
-                        .foregroundStyle(countColor(entry.countTone))
+        WhichKeyRowButton(action: {
+            sendAction?(.press(path: state.path, codepoint: entry.codepoint, modifiers: entry.modifiers))
+        }) {
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                Text(entry.key)
+                    .font(Typography.monospacedSmall)
+                    .foregroundStyle(theme.accent)
+                    .anatomyPart("whichKey.entryKey", text: entry.key, font: .small, monospaced: true)
+                    .frame(width: keyWidth, alignment: .leading)
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
+                    // Group rows arrive from the BEAM as Title Case labels with a trailing chevron ("Session ›") and
+                    // draw in the group colour role (docs/design/keys.md); commands are plain text.
+                    Text(entry.label)
+                        .font(Typography.font(.body))
+                        .foregroundStyle(entry.isGroup ? theme.roleColor(.group) : theme.popupFg)
                         .lineLimit(1)
-                        .anatomyPart("whichKey.entryCount", text: entry.count, font: .caption)
-                }
-                if !entry.platformKey.isEmpty {
-                    Text(entry.platformKey)
-                        .font(Typography.monospacedSmall)
-                        .foregroundStyle(theme.roleColor(.textMuted))
-                        .anatomyPart("whichKey.platformKey", text: entry.platformKey, font: .small, monospaced: true)
+                        .truncationMode(.tail)
+                        .anatomyPart("whichKey.entryLabel", text: entry.label, font: .body)
+                    if !entry.count.isEmpty {
+                        Text(entry.count)
+                            .font(Typography.font(.caption))
+                            .foregroundStyle(countColor(entry.countTone))
+                            .lineLimit(1)
+                            .anatomyPart("whichKey.entryCount", text: entry.count, font: .caption)
+                    }
+                    if !entry.platformKey.isEmpty {
+                        Text(entry.platformKey)
+                            .font(Typography.monospacedSmall)
+                            .foregroundStyle(theme.roleColor(.textMuted))
+                            .anatomyPart("whichKey.platformKey", text: entry.platformKey, font: .small, monospaced: true)
+                    }
                 }
             }
         }
         // Key, label, count and ⌘ key share one baseline (anatomy rule 3), not one vertical centre.
         .frame(height: Self.rowPitch)
+        .help(entry.isGroup ? "Open \(entry.label)" : "\(entry.label) · \(state.path) \(entry.key)")
+        .accessibilityLabel(entry.label)
+        .accessibilityHint("Press \(entry.key)")
         .anatomyPart("whichKey.entry", text: "\(entry.key) \(entry.label)")
+    }
+}
+
+/// A which-key row as a plain button: the whole row is the target, and a hover tints it so the row a click will
+/// press is the one under the pointer.
+private struct WhichKeyRowButton<Label: View>: View {
+    let action: () -> Void
+    @ViewBuilder let label: () -> Label
+    @Environment(\.themeColors) private var theme
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            label()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm)
+                .fill(hovered ? theme.popupSelBg : Color.clear)
+                .padding(.horizontal, -Spacing.xs)
+        )
+        .onHover { hovered = $0 }
+        .pointingHandCursor()
     }
 }
 

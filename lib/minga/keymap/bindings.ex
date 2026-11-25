@@ -527,6 +527,14 @@ defmodule Minga.Keymap.Bindings do
   def format_key({13, _}), do: "RET"
   def format_key({27, _}), do: "ESC"
 
+  # Arrows and paging keys, in both encodings the frontends send (Kitty keyboard protocol and macOS function keys).
+  def format_key({code, 0}) when code in [57_352, 0xF700], do: "↑"
+  def format_key({code, 0}) when code in [57_353, 0xF701], do: "↓"
+  def format_key({code, 0}) when code in [57_350, 0xF702], do: "←"
+  def format_key({code, 0}) when code in [57_351, 0xF703], do: "→"
+  def format_key({57_362, 0}), do: "PgUp"
+  def format_key({57_363, 0}), do: "PgDn"
+
   def format_key({codepoint, modifiers}) do
     char = <<codepoint::utf8>>
     modifier_prefix(modifiers) <> char

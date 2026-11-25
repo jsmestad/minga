@@ -81,7 +81,7 @@ defmodule MingaEditor.Input do
   @doc """
   Returns interactive transient handlers in precedence order above the active surface.
 
-  Exclusive modals and completion run first, followed by which-key, focused hover, signature help, and finally operation cancellation. If none consumes the key, the Editor delegates to the active surface.
+  Exclusive modals and completion run first, followed by focused hover, signature help, and finally operation cancellation. Which-key sits above the prompt and the picker: a leader sequence never runs under them, and the prompt or picker keys the mode pill opens over them get the key first (esc closes only the panel). If none consumes the key, the Editor delegates to the active surface.
   """
   @spec overlay_handlers() :: [module()]
   def overlay_handlers do
@@ -90,11 +90,11 @@ defmodule MingaEditor.Input do
       ConflictPrompt,
       InlineEdit,
       InlineAsk,
+      Completion,
+      WhichKey,
       Prompt,
       Picker,
-      Completion,
       AgentHelp,
-      WhichKey,
       Hover,
       SignatureHelp,
       OperationCancellation

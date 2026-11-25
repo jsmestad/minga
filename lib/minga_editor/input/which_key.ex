@@ -11,12 +11,14 @@ defmodule MingaEditor.Input.WhichKey do
 
   alias Minga.Keymap.Bindings
   alias MingaEditor.Commands
+  alias MingaEditor.Input.Router
   alias MingaEditor.Shell.Traditional.WhichKeyWorkflow
 
   @type state :: MingaEditor.Input.Handler.handler_state()
 
   @key_escape 27
   @key_backspace 127
+  @key_space 32
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
@@ -48,6 +50,109 @@ defmodule MingaEditor.Input.WhichKey do
   end
 
   def handle_key(state, _codepoint, _modifiers), do: {:passthrough, state}
+
+  # ── Mouse: the mode pill, rows and the breadcrumb ────────────────────────────
+
+  @doc """
+  Opens which-key at once, the way the mode pill does: the top-level leader groups, or the keys of the open prompt or picker.
+
+  In Vim, Normal mode starts the leader with `SPC`; another mode returns to Normal first. The CUA space leader starts at the leader root. A picker, a minibuffer prompt or the `:` command line shows its own scope's keys instead, because typing there edits text.
+  """
+  @spec open(state()) :: state()
+  def open(%{shell_runtime: %{state: %{modal: {:picker, %{picker_ui: picker}}}}} = state) do
+    context = MingaEditor.PickerUI.picker_keymap_context(state, picker)
+
+    WhichKeyWorkflow.open_scope(
+      state,
+      Minga.Keymap.Scope.Picker.keymap(:insert, context),
+      "Picker"
+    )
+  end
+
+  def open(%{shell_runtime: %{state: %{modal: {:prompt, _payload}}}} = state),
+    do:
+      WhichKeyWorkflow.open_scope(state, Minga.Keymap.Scope.Prompt.keymap(:insert, []), "Prompt")
+
+  def open(state) do
+    case {Minga.Editing.active_model(state), Minga.Editing.mode(state)} do
+      {_model, :command} ->
+        node = Minga.Keymap.Scope.Prompt.keymap(:insert, prompt_list: true)
+        WhichKeyWorkflow.open_scope(state, node, "Command line")
+
+      {Minga.Editing.Model.CUA, _mode} ->
+        root = Minga.Keymap.leader_trie(state.interaction.keymap_server)
+
+        state
+        |> Commands.execute({:leader_start, root, ["SPC"]})
+        |> WhichKeyWorkflow.reveal_now()
+
+      {_vim, :normal} ->
+        state |> Router.route_key(@key_space, 0) |> WhichKeyWorkflow.reveal_now()
+
+      {_vim, _other} ->
+        state |> Router.route_key(@key_escape, 0) |> open_from_normal()
+    end
+  end
+
+  @spec open_from_normal(state()) :: state()
+  defp open_from_normal(state) do
+    if Minga.Editing.mode(state) == :normal,
+      do: state |> Router.route_key(@key_space, 0) |> WhichKeyWorkflow.reveal_now(),
+      else: state
+  end
+
+  @doc """
+  Presses a which-key row's key, as if typed, while the panel on `path` is still the open one. A click on a panel that has since changed or closed does nothing.
+  """
+  @spec press(state(), String.t(), non_neg_integer(), non_neg_integer()) :: state()
+  def press(state, path, codepoint, modifiers) do
+    if open_path(state) == path,
+      do: state |> close_scope_panel() |> Router.route_key(codepoint, modifiers),
+      else: state
+  end
+
+  # A row of a prompt or picker's keys runs that key in the prompt or picker, so the panel closes first:
+  # the key is meant for what is underneath (the Close row's esc closes the picker, not just the panel).
+  @spec close_scope_panel(state()) :: state()
+  defp close_scope_panel(
+         %{shell_runtime: %{state: %{whichkey: %MingaEditor.State.WhichKey{owner: :scope}}}} =
+           state
+       ),
+       do: WhichKeyWorkflow.dismiss(state)
+
+  defp close_scope_panel(state), do: state
+
+  @doc """
+  Goes back up the breadcrumb to the crumb on `path`, one Backspace per level, while the open panel is below it.
+  """
+  @spec back(state(), String.t()) :: state()
+  def back(state, path) do
+    target = String.split(path, " ", trim: true)
+
+    case open_path(state) do
+      nil ->
+        state
+
+      open ->
+        current = String.split(open, " ", trim: true)
+        levels = length(current) - length(target)
+
+        if levels > 0 and List.starts_with?(current, target),
+          do:
+            Enum.reduce(1..levels, state, fn _level, acc ->
+              Router.route_key(acc, @key_backspace, 0)
+            end),
+          else: state
+    end
+  end
+
+  @spec open_path(state()) :: String.t() | nil
+  defp open_path(%{
+         shell_runtime: %{state: %{whichkey: %MingaEditor.State.WhichKey{} = whichkey}}
+       }),
+       do: MingaEditor.State.WhichKey.path(whichkey)
+
+  defp open_path(_state), do: nil
 
   # Only the CUA space leader leaves its sequence to which-key. A Vim which-key node without a mode
   # leader is stale (a click resets the mode), so the key belongs to the mode, not to the group.

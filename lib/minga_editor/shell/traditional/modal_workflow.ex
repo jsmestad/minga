@@ -239,7 +239,7 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
   @spec suppress_lower_surfaces(EditorState.t()) :: EditorState.t()
   defp suppress_lower_surfaces(state) do
     state
-    |> WhichKeyWorkflow.dismiss()
+    |> WhichKeyWorkflow.dismiss_under_modal()
     |> update_shell_state(&ShellState.suppress_lower_transients/1)
   end
 

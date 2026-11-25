@@ -13,6 +13,11 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
     [
       Entry.built("minga.whichkey",
         reach: "SPC a (pause)",
+        # Mode pill, then the Minga row.
+        click_reach: [
+          {:gui_action, {:execute_command, "which_key_open"}},
+          {:gui_action, {:which_key_press, "SPC", ?a, 0}}
+        ],
         # Minga waits on you in the session, so the modeline carries Minga's state and the Tasks row its live
         # needs-you count while which-key is open.
         start: [minga: :needs_you],

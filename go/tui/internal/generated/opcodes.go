@@ -229,4 +229,6 @@ const (
 	GUIActionAgentComposerQueue         byte = 0x6E
 	GUIActionAgentStartRemedy           byte = 0x6F
 	GUIActionPickerFit                  byte = 0x70
+	GUIActionWhichKeyPress              byte = 0x71
+	GUIActionWhichKeyBack               byte = 0x72
 )

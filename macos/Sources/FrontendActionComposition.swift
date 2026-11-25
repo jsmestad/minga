@@ -48,6 +48,13 @@ nonisolated public enum FrontendActionComposition {
     }
 
 
+    public static func outbound(_ action: WhichKeyOverlay.Action) -> OutboundAction {
+        switch action {
+        case .press(let path, let codepoint, let modifiers): .whichKeyPress(path: path, codepoint: codepoint, modifiers: modifiers)
+        case .back(let path): .whichKeyBack(path: path)
+        }
+    }
+
     public static func outbound(_ action: AgentHelpView.Action) -> OutboundAction {
         switch action {
         case .dismiss: .executeCommand(name: "agent_dismiss_help")

@@ -324,6 +324,24 @@ struct WhichKeyOverlayViewTests {
         }
     }
 
+    @Test("A row presses its key on the panel's path; a crumb above the open group goes back up")
+    @MainActor func rowAndCrumbClicks() throws {
+        let model = Wire.WhichKey(
+            visible: true, path: "SPC a",
+            breadcrumb: [.init(key: "SPC", path: "SPC"), .init(key: "a", label: "Minga", path: "SPC a")],
+            entries: [.init(kind: 1, key: "q", codepoint: 0x71, label: "Queue ›", section: "Conversation")])
+        var sent: [WhichKeyOverlay.Action] = []
+        let sut = WhichKeyOverlay(state: WhichKeyState(model: model), sendAction: { sent.append($0) })
+            .environment(\.themeColors, ThemeColors())
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+
+        // The SPC crumb and the Queue row are buttons; the open group's crumb is not.
+        #expect(buttons.count == 2)
+        for button in buttons { try button.tap() }
+        #expect(sent.contains(.back(path: "SPC")))
+        #expect(sent.contains(.press(path: "SPC a", codepoint: 0x71, modifiers: 0)))
+    }
+
     @Test("The fade-in fits the 120 ms budget, and Reduce Motion turns it off")
     func fadeBudget() {
         #expect(WhichKeyOverlay.fadeDuration <= 0.12)
