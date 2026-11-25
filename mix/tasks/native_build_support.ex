@@ -2,12 +2,12 @@ defmodule Mix.Tasks.Native.Build.Support do
   @moduledoc """
   Builds native support binaries required by BEAM tests and GUI packaging.
 
-  This builds the Zig parser and hook runner. It is the explicit replacement for the old implicit native build hidden inside `mix compile`.
+  This builds the Zig parser and helpers (hook runner, shell output reader, overlay clone helper). It is the explicit replacement for the old implicit native build hidden inside `mix compile`.
   """
 
   use Mix.Task
 
-  @shortdoc "Builds native parser and hook-runner support binaries"
+  @shortdoc "Builds native parser and helper support binaries"
 
   @impl Mix.Task
   @spec run([String.t()]) :: :ok

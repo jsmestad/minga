@@ -55,6 +55,12 @@ macos_ipc_exclude = if System.get_env("MINGA_IPC_HELPER"), do: [], else: [:macos
 apple_inference_exclude =
   if System.get_env("MINGA_APPLE_INFERENCE") == "1", do: [], else: [:apple_inference]
 
+# `:overlay_clone` tests clone with the real minga-clone-tree helper, which needs
+# macOS and an APFS temporary directory. Linux reflink support depends on the
+# file system.
+overlay_clone_exclude =
+  if match?({:unix, :darwin}, :os.type()), do: [], else: [:overlay_clone]
+
 # `:distributed` tests boot a real peer node (Erlang distribution / epmd) and
 # are excluded by default. Run them with `mix test --include distributed`.
 # `:perf` tests drive timing-sensitive render-path benchmarks and print
@@ -64,7 +70,8 @@ ExUnit.start(
   capture_log: true,
   assert_receive_timeout: 1_000,
   exclude:
-    [:pi, :distributed, :perf] ++ swift_exclude ++ macos_ipc_exclude ++ apple_inference_exclude
+    [:pi, :distributed, :perf] ++
+      swift_exclude ++ macos_ipc_exclude ++ apple_inference_exclude ++ overlay_clone_exclude
 )
 
 # A quit command calls System.stop/1 through :shutdown_fn. A test that presses a quit key (the storyboard explorer's

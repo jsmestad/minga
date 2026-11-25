@@ -36,6 +36,7 @@ erl_crash.dump
 /priv/minga-parser
 /priv/minga-hook-runner
 /priv/minga-shell-output-reader
+/priv/minga-clone-tree
 /priv/minga-apple-inference
 /priv/minga-apple-inference.next-*
 /priv/minga-test-harness

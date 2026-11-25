@@ -33,6 +33,11 @@ config :logger, level: :warning
 # Tests that need real git (git integration tests) override this in setup.
 config :minga, git_module: Minga.Git.Stub
 
+# Agent overlays link installed JavaScript packages instead of cloning them
+# with the minga-clone-tree helper, so async tests never spawn it. Clone tests
+# pick a cloner explicitly.
+config :minga, overlay_cloner: MingaAgent.Test.Overlay.UnsupportedCloner
+
 # Use the platform stub so tests don't shell out to osascript/gio for
 # trash operations. Tests that need real trash behavior override this in setup.
 config :minga, platform_module: Minga.Platform.Stub

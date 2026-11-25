@@ -7,7 +7,7 @@ defmodule Minga.MixProject do
   @rolling_version_pattern ~r/\A#{Regex.escape(@version)}-dev\.[1-9][0-9]*\z/
   # Compile the shared declarations, not the SDK-only stubs alongside them.
   @elixirc_paths ["generated/elixir", "lib", "sdk/lib/declarations"]
-  @native_release_artifacts ~w(minga-renderer-go minga-parser minga-hook-runner minga-shell-output-reader)
+  @native_release_artifacts ~w(minga-renderer-go minga-parser minga-hook-runner minga-shell-output-reader minga-clone-tree)
   @release_priv_entries @native_release_artifacts ++
                           ~w(queries tree_sitter tutor.txt minga-apple-inference)
   @tui_release_files ~w(mix/release_erts.ex mix/tasks/release.tui.ex)
