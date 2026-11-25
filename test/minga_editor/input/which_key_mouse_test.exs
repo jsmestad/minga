@@ -285,6 +285,18 @@ defmodule MingaEditor.Input.WhichKeyMouseTest do
 
     assert shown_path(ctx) == "SPC m"
     assert map_size(whichkey(ctx).node.children) > 0
+    assert whichkey(ctx).labels == ["Leader", "Filetype"]
+  end
+
+  test "in Insert mode, a key the leader does not know closes which-key and types itself" do
+    ctx = start_editor("hello")
+    send_keys_sync(ctx, "i")
+    send_gui_action(ctx, {:execute_command, "which_key_open"})
+
+    send_keys_sync(ctx, "(")
+
+    assert shown_path(ctx) == nil
+    assert buffer_content(ctx) =~ "("
   end
 
   defp whichkey_labels(ctx) do

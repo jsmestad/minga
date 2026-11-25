@@ -173,28 +173,45 @@ defmodule MingaEditor.Input.Router do
     old_mode = Editing.mode(state)
     was_inserting = Editing.inserting?(state)
     record? = not MingaEditor.PromptUI.sensitive_input?(state)
-    # A key that walks a which-key leader types nothing, so it must not arm completion.
-    walked_leader? = which_key_leader_open?(state)
+
+    # A key the open leader panel takes (a group, a command, Backspace) types nothing, and neither does a key that leaves
+    # a leader panel open (the terminal's space leader starts one), so neither arms completion. A key the panel does not
+    # know passes through and types, and arms completion as usual.
+    leader_key? = leader_panel_takes?(state, {codepoint, modifiers})
 
     state
     |> dispatch_split(codepoint, modifiers)
     |> record_keystroke(codepoint, modifiers, old_mode, record?)
     |> then(fn state ->
-      if walked_leader?,
+      if leader_key? or leader_panel_open?(state),
         do: state,
         else: maybe_handle_completion(state, was_inserting, codepoint, modifiers)
     end)
   end
 
-  @spec which_key_leader_open?(EditorState.t()) :: boolean()
-  defp which_key_leader_open?(%{
+  @spec leader_panel_takes?(EditorState.t(), Minga.Keymap.Bindings.key()) :: boolean()
+  defp leader_panel_takes?(
+         %{
+           shell_runtime: %{
+             state: %{whichkey: %MingaEditor.State.WhichKey{node: node, owner: :leader}}
+           }
+         },
+         key
+       )
+       when node != nil,
+       do: key == {127, 0} or Minga.Keymap.Bindings.lookup(node, key) != :not_found
+
+  defp leader_panel_takes?(_state, _key), do: false
+
+  @spec leader_panel_open?(EditorState.t()) :: boolean()
+  defp leader_panel_open?(%{
          shell_runtime: %{
            state: %{whichkey: %MingaEditor.State.WhichKey{node: node, owner: :leader}}
          }
        }),
        do: node != nil
 
-  defp which_key_leader_open?(_state), do: false
+  defp leader_panel_open?(_state), do: false
 
   @spec dispatch_split(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   defp dispatch_split(%EditorState{} = state, codepoint, modifiers) do

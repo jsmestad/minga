@@ -221,13 +221,10 @@ defmodule MingaEditor.Commands do
     do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.begin(state, node, prefix_keys)
 
   # `SPC m` opens the active buffer's filetype keys here too, as the Vim leader's 2-tuple form does.
-  def execute(state, {:leader_progress, node, prefix_keys}) when is_list(prefix_keys),
-    do:
-      MingaEditor.Shell.Traditional.WhichKeyWorkflow.progress(
-        state,
-        filetype_group(state, prefix_keys, node),
-        prefix_keys
-      )
+  def execute(state, {:leader_progress, node, prefix_keys}) when is_list(prefix_keys) do
+    {node, label} = filetype_group(state, prefix_keys, node)
+    MingaEditor.Shell.Traditional.WhichKeyWorkflow.progress(state, node, prefix_keys, label)
+  end
 
   def execute(state, :leader_cancel),
     do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.dismiss(state)
@@ -964,13 +961,26 @@ defmodule MingaEditor.Commands do
     end
   end
 
-  @spec filetype_group(EditorState.t(), [String.t()], Bindings.node_t()) :: Bindings.node_t()
+  # The filetype trie has no description of its own, so the crumb keeps the leader's name for `SPC m`.
+  @spec filetype_group(EditorState.t(), [String.t()], Bindings.node_t()) ::
+          {Bindings.node_t(), String.t() | nil}
   defp filetype_group(state, ["SPC", "m"], node) do
     ft_trie = filetype_trie_for(state, current_filetype(state))
-    if ft_trie.children == %{}, do: node, else: ft_trie
+    label = filetype_group_label(state)
+    if ft_trie.children == %{}, do: {node, label}, else: {ft_trie, label}
   end
 
-  defp filetype_group(_state, _prefix_keys, node), do: node
+  defp filetype_group(_state, _prefix_keys, node), do: {node, nil}
+
+  @spec filetype_group_label(EditorState.t()) :: String.t() | nil
+  defp filetype_group_label(state) do
+    case Bindings.lookup(Keymap.leader_trie(state.interaction.keymap_server), {?m, 0}) do
+      {:prefix, %{description: description}} -> description
+      _other -> nil
+    end
+  catch
+    :exit, _ -> nil
+  end
 
   @spec maybe_substitute_filetype_trie(EditorState.t(), Bindings.node_t()) ::
           {Bindings.node_t(), EditorState.t()}
