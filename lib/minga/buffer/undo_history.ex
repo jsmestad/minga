@@ -650,30 +650,33 @@ defmodule Minga.Buffer.UndoHistory do
   # repeats at most once per step of the task, and only when one is held.
   defp walk_steps(walk, task) do
     steps = walk.history |> task_groups(task) |> Enum.sort(:desc)
-    {taken, rounds} = settle_walk(walk, steps, MapSet.new(), 1)
+    {taken, rounds} = settle_walk(walk, steps, [], 1)
     walk = %{walk | rounds: rounds}
     if MapSet.size(taken) == 0, do: {:ok, walk}, else: revert_groups(walk, taken)
   end
 
-  @spec settle_walk(map(), [Provenance.group_id()], MapSet.t(), pos_integer()) ::
+  # `held_out` lists the steps found held so far; they no longer count as reverting.
+  @spec settle_walk(map(), [Provenance.group_id()], [Provenance.group_id()], pos_integer()) ::
           {MapSet.t(), pos_integer()}
   defp settle_walk(walk, steps, held_out, round) do
-    pool = MapSet.difference(MapSet.new(steps), held_out)
+    pool = MapSet.new(steps -- held_out)
     {taken, held} = walk_once(walk, steps, pool)
 
-    if MapSet.subset?(held, held_out),
-      do: {taken, round},
-      else: settle_walk(walk, steps, MapSet.union(held_out, held), round + 1)
+    case held -- held_out do
+      [] -> {taken, round}
+      newly_held -> settle_walk(walk, steps, newly_held ++ held_out, round + 1)
+    end
   end
 
   # One pass over the task's steps, newest first, with `pool` counting as reverting; returns what it took and which of
-  # the task's steps it found held.
-  @spec walk_once(map(), [Provenance.group_id()], MapSet.t()) :: {MapSet.t(), MapSet.t()}
+  # the task's steps it found held, as a list.
+  @spec walk_once(map(), [Provenance.group_id()], MapSet.t()) ::
+          {MapSet.t(), [Provenance.group_id()]}
   defp walk_once(walk, steps, pool) do
     {_flags, taken, held} =
       Enum.reduce(
         steps,
-        {walk.history.provenance, MapSet.new(), MapSet.new()},
+        {walk.history.provenance, MapSet.new(), []},
         &visit_step(walk, pool, &1, &2)
       )
 
@@ -684,9 +687,9 @@ defmodule Minga.Buffer.UndoHistory do
           map(),
           MapSet.t(),
           Provenance.group_id(),
-          {Provenance.t(), MapSet.t(), MapSet.t()}
+          {Provenance.t(), MapSet.t(), [Provenance.group_id()]}
         ) ::
-          {Provenance.t(), MapSet.t(), MapSet.t()}
+          {Provenance.t(), MapSet.t(), [Provenance.group_id()]}
   defp visit_step(walk, pool, group, {_flags, taken, _held} = acc) do
     if MapSet.member?(taken, group), do: acc, else: decide_step(walk, pool, group, acc)
   end
@@ -695,13 +698,13 @@ defmodule Minga.Buffer.UndoHistory do
           map(),
           MapSet.t(),
           Provenance.group_id(),
-          {Provenance.t(), MapSet.t(), MapSet.t()}
+          {Provenance.t(), MapSet.t(), [Provenance.group_id()]}
         ) ::
-          {Provenance.t(), MapSet.t(), MapSet.t()}
+          {Provenance.t(), MapSet.t(), [Provenance.group_id()]}
   defp decide_step(walk, pool, group, {flags, taken, held}) do
     case take_closure(walk, flags, taken, pool, group) do
       {:taken, flags, taken} -> {flags, taken, held}
-      :held -> {flags, taken, MapSet.put(held, group)}
+      :held -> {flags, taken, [group | held]}
     end
   end
 
