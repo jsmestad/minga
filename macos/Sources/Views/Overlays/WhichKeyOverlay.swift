@@ -2,9 +2,9 @@
 ///
 /// One panel anchored above the modeline: the breadcrumb and the panel's own keys in a 24 pt header row, then one
 /// column per section the BEAM sends, each with its name dim above it and as wide as its longest entry. Rows sit on the
-/// 24 pt row pitch; keys sit in a fixed key column (the column's widest key plus `md`) in the accent colour, and group
-/// names, plain counts and ⌘ keys in the text_muted role. A needs-you or error count draws in that state's role, as the
-/// modeline does. Fades in within 120 ms, and not at all under Reduce Motion.
+/// 24 pt row pitch; keys sit in a fixed key column (the column's widest key plus `md`) in the accent colour. Group
+/// names and plain counts use the secondary colour. ⌘ keys use the panel foreground so the small symbols stay legible.
+/// A needs-you or error count draws in that state's role, as the modeline does. Fades in within 120 ms, and not at all under Reduce Motion.
 ///
 /// Every row and every breadcrumb crumb is a button (docs/design/surfaces.md, Mouse): a row presses its key, a crumb
 /// goes back up to it. Each click names the panel's path, so the BEAM ignores one aimed at a panel that has moved on.
@@ -213,8 +213,8 @@ public struct WhichKeyOverlay: View {
                     }
                     if !entry.platformKey.isEmpty {
                         Text(entry.platformKey)
-                            .font(Typography.monospacedSmall)
-                            .foregroundStyle(theme.roleColor(.textMuted))
+                            .font(Typography.monospacedSmall.weight(.semibold))
+                            .foregroundStyle(theme.popupFg)
                             .anatomyPart("whichKey.platformKey", text: entry.platformKey, font: .small, monospaced: true)
                     }
                 }
