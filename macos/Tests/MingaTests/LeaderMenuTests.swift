@@ -1,17 +1,13 @@
 import Testing
 @testable import MingaUI
-import AppKit
 import MingaProtocol
 
 /// The macOS menu bar mirrors SPC (docs/design/surfaces.md, Mouse): each leader group lands in its menu, items show
-/// the key sequence dimmed after the label, ⌘ equivalents fill the shortcut column, and nested groups are submenus.
+/// the key sequence after the label, ⌘ equivalents fill the shortcut column unless the app's menus already use the
+/// key, and nested groups are submenus.
 @Suite("Leader menu bar mirror")
 @MainActor
 struct LeaderMenuTests {
-    private final class Target: NSObject {
-        @objc func run(_ sender: NSMenuItem) {}
-    }
-
     private let items: [Wire.MenuBarItem] = [
         .init(path: "a", label: "Minga ›", section: "Groups", kind: 1),
         .init(path: "a a", label: "Agent view", section: "Tasks", kind: 0, command: "toggle_agentic_view"),
@@ -20,68 +16,64 @@ struct LeaderMenuTests {
         .init(path: "a q q", label: "Open queue", kind: 0, command: "agent_queued_inputs"),
         .init(path: "f", label: "Files ›", section: "Groups", kind: 1),
         .init(path: "f s", label: "Save file", kind: 0, command: "save", platformKey: "⌘S"),
+        .init(path: "p", label: "Project ›", section: "More", kind: 1),
+        .init(path: "p p", label: "Switch project", kind: 0, command: "project_switch"),
         .init(path: "s", label: "Search ›", section: "Groups", kind: 1),
         .init(path: "s p", label: "Search project", kind: 0, command: "search_project"),
+        .init(path: "c", label: "Code ›", section: "Groups", kind: 1),
+        .init(path: "c a", label: "Code action", kind: 0, command: "code_action"),
+        .init(path: "g", label: "Git ›", section: "Groups", kind: 1),
+        .init(path: "g s", label: "Git status", kind: 0, command: "git_status"),
+        .init(path: "x", label: "Extension ›", section: "More", kind: 1),
+        .init(path: "x r", label: "Run extension", kind: 0, command: "extension_run"),
     ]
 
-    /// The label part of an item's title; the key sequence follows it after three spaces.
-    private func label(_ item: NSMenuItem) -> String {
-        item.title.components(separatedBy: "   ").first ?? item.title
+    @Test("groups land in their host menus, with Search, Code and Git as menus of their own")
+    func hosts() {
+        let tree = LeaderMenu.tree(items)
+
+        #expect(tree[.app]?.map(\.title).prefix(3) == ["Agent view", "Stop", "Queue"])
+        #expect(tree[.file]?.map(\.title) == ["Save file", "Switch project"])
+        #expect(tree[.search]?.map(\.title) == ["Search project"])
+        #expect(tree[.code]?.map(\.title) == ["Code action"])
+        #expect(tree[.git]?.map(\.title) == ["Git status"])
     }
 
-    private func mainMenu() -> NSMenu {
-        let main = NSMenu(title: "Main")
-        for title in ["Minga", "File", "Edit", "Window", "Help"] {
-            let holder = main.addItem(withTitle: title, action: nil, keyEquivalent: "")
-            holder.submenu = NSMenu(title: title)
-        }
-        main.item(withTitle: "File")?.submenu?.addItem(withTitle: "Save", action: nil, keyEquivalent: "s")
-        return main
+    @Test("an item carries its key sequence and command, and nested groups become submenus")
+    func nodes() {
+        let app = LeaderMenu.tree(items)[.app] ?? []
+        let stop = app.first { $0.title == "Stop" }
+
+        #expect(stop?.sequence == "SPC a s")
+        #expect(stop?.command == "agent_abort")
+        #expect(app.first { $0.title == "Queue" }?.children.map(\.title) == ["Open queue"])
+        #expect(app.first { $0.title == "Queue" }?.startsSection == true, "Queue is in another section than Tasks")
     }
 
-    @Test("an item shows its label and the key sequence dimmed, and runs its command")
-    func itemTitle() {
-        let item = LeaderMenu.item(items[2], action: #selector(Target.run(_:)), target: nil)
+    @Test("a ⌘ equivalent is kept unless the app's own menus already use that key")
+    func shortcuts() {
+        let tree = LeaderMenu.tree(items)
 
-        #expect(label(item) == "Stop")
-        #expect(item.attributedTitle?.string == "Stop   SPC a s")
-        let range = (item.attributedTitle!.string as NSString).range(of: "SPC a s")
-        #expect(item.attributedTitle?.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor == .secondaryLabelColor)
-        #expect(item.representedObject as? String == "agent_abort")
-        #expect(item.keyEquivalent == "." && item.keyEquivalentModifierMask == .command)
+        #expect(tree[.app]?.first { $0.title == "Stop" }?.shortcut == ".")
+        #expect(tree[.file]?.first { $0.title == "Save file" }?.shortcut == nil, "⌘S belongs to File › Save")
     }
 
-    @Test("groups land in their menus, nested groups become submenus, and a ⌘ key another item owns is not claimed twice")
-    func install() {
-        let main = mainMenu()
-        LeaderMenu.install(items, into: main, action: #selector(Target.run(_:)), target: nil)
+    @Test("a second group in one host starts a section, and a group no host lists is a submenu of the app menu")
+    func sectionsAndUnlistedGroups() {
+        let tree = LeaderMenu.tree(items)
 
-        let app = main.item(withTitle: "Minga")!.submenu!
-        #expect(app.items.prefix(3).map(label) == ["Agent view", "Stop", ""])
-        let queue = app.items.first { label($0) == "Queue" }
-        #expect(queue?.submenu?.items.map(label) == ["Open queue"])
-
-        let file = main.item(withTitle: "File")!.submenu!
-        let save = file.items.first { label($0) == "Save file" }
-        #expect(save != nil && save?.keyEquivalent == "", "⌘S belongs to the existing Save item")
-
-        // Search has no menu yet, so it gets one before Window.
-        let titles = main.items.map(\.title)
-        #expect(titles.firstIndex(of: "Search")! < titles.firstIndex(of: "Window")!)
-        #expect(LeaderMenu.isInstalled(in: main))
-
-        // A reinstall replaces the mirror instead of adding a second copy.
-        LeaderMenu.install(items, into: main, action: #selector(Target.run(_:)), target: nil)
-        #expect(main.item(withTitle: "Minga")!.submenu!.items.filter { label($0) == "Stop" }.count == 1)
-        #expect(main.items.filter { $0.title == "Search" }.count == 1)
+        #expect(tree[.file]?.first { $0.title == "Switch project" }?.startsSection == true)
+        let extensionGroup = tree[.app]?.first { $0.title == "Extension" }
+        #expect(extensionGroup?.children.map(\.title) == ["Run extension"])
     }
 
-    @Test("installing nothing removes the mirror")
-    func remove() {
-        let main = mainMenu()
-        LeaderMenu.install(items, into: main, action: #selector(Target.run(_:)), target: nil)
-        LeaderMenu.install([], into: main, action: #selector(Target.run(_:)), target: nil)
-        #expect(!LeaderMenu.isInstalled(in: main))
-        #expect(main.items.map(\.title) == ["Minga", "File", "Edit", "Window", "Help"])
+    @Test("the menu bar state rebuilds the tree on each new list and ignores a repeat")
+    func state() {
+        let state = MenuBarState()
+        state.update(items)
+        #expect(state.nodes(.git).map(\.title) == ["Git status"])
+
+        state.update([])
+        #expect(state.nodes(.git).isEmpty)
     }
 }

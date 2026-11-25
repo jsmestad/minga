@@ -4914,11 +4914,9 @@ struct CommandDispatcherStagingTests {
         #expect(requested.isEmpty)
     }
 
-    @Test("a committed gui_menu_bar reaches the menu bar state and its installer")
+    @Test("a committed gui_menu_bar reaches the menu bar state, which builds the Search menu")
     @MainActor func guiMenuBarReachesMenuBarState() throws {
         let (dispatcher, gui) = makeDispatcher()
-        var installed: [[Wire.MenuBarItem]] = []
-        gui.menuBarState.onChange = { installed.append($0) }
         let items = [
             Wire.MenuBarItem(path: "s", label: "Search", kind: 1),
             Wire.MenuBarItem(path: "s s", label: "Search buffer", kind: 0, command: "search_buffer"),
@@ -4930,7 +4928,7 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
         #expect(gui.menuBarState.items == items)
-        #expect(installed == [items])
+        #expect(gui.menuBarState.nodes(.search).map(\.title) == ["Search buffer"])
     }
 
     @Test("gui_config_state outside a transaction rejects without mutating settings")

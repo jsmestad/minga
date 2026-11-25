@@ -65,6 +65,7 @@
 		1D201910AC17B9679EA92EF1 /* ChromeTokenGuardrailTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80EA8C68F821B15E3CC4A419 /* ChromeTokenGuardrailTests.swift */; };
 		1D82893846FDC6E8EE3E0882 /* BottomPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54D2036E3609EB1C3E575CFC /* BottomPanelView.swift */; };
 		1D9A6FDB56CB7F1171752686 /* MingaAccessibilityWorkflowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BA45C1637C0437758F83585 /* MingaAccessibilityWorkflowTests.swift */; };
+		1E163DCC80F544A38CC29484 /* LeaderMenuCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A1A5D32438825E49B61F6AE /* LeaderMenuCommands.swift */; };
 		1EE1BE95F948B359F08BC48A /* StatusBarUpdate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D450D75A36486FD84AD6BB8 /* StatusBarUpdate.swift */; };
 		1F63B0C5DDEE8531953BF846 /* DesktopAgentNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32910BFDA4AA569777D05011 /* DesktopAgentNotifications.swift */; };
 		202FE31E4797C05A204650F5 /* SidebarHostState.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBA4340DA5B9E9B544083A8B /* SidebarHostState.swift */; };
@@ -219,6 +220,7 @@
 		6C8CF90718CDC85058D9B3A8 /* ConformanceTranscriptTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 801F49D62225A511B8510EAA /* ConformanceTranscriptTests.swift */; };
 		6CF0F1BB4E1BDC0182EDCCB1 /* Instrumentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53CEDDFB3856C44BA51C8A7B /* Instrumentation.swift */; };
 		6D00B9B59415F742DC1CF6CB /* ConformancePixelRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47A76BCA983E350B800BA712 /* ConformancePixelRunner.swift */; };
+		6D753BB1015D3297D7B4493E /* LeaderMenuCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A1A5D32438825E49B61F6AE /* LeaderMenuCommands.swift */; };
 		6DC4EDE61F449DC8AFF50B20 /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 764F85CBFE17A90A0A61F2B6 /* StatusBarView.swift */; };
 		6DC89F81DBC022B3FCBA39BB /* EditorGeometry+App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F6F03841A5D97A688A35CC9 /* EditorGeometry+App.swift */; };
 		6E3FC5B5D64DB5096C6DAFF6 /* Fonts in Resources */ = {isa = PBXBuildFile; fileRef = B21BFD6A61768F0EDFCAB95B /* Fonts */; };
@@ -289,6 +291,7 @@
 		8FB0DF76DEB5112AD590BB11 /* CoreTextMetalRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DDE4A535E0895090BF02EE8 /* CoreTextMetalRenderer.swift */; };
 		91B8BE371D5CA58EC153394A /* WhichKeyOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10FA7BF770B3453A402B9F78 /* WhichKeyOverlay.swift */; };
 		932C189ED218AC16620D8C19 /* BitmapRasterizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42375D2D8B25AF31BEB11AB5 /* BitmapRasterizer.swift */; };
+		9384C7A70E9A833C86527797 /* LeaderMenuCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A1A5D32438825E49B61F6AE /* LeaderMenuCommands.swift */; };
 		9389C4BEECC9AD359668C332 /* FrontendViewAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BEB8DC845D4EFF9A458AFED /* FrontendViewAction.swift */; };
 		939991DD65293C6C796EAA66 /* FontManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79F5D551302873BE8F7240ED /* FontManager.swift */; };
 		93E7D214A27256CF06571EFE /* ProtocolDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56750F0AAE58AF9A98BF5841 /* ProtocolDecoder.swift */; };
@@ -336,6 +339,7 @@
 		A9551F6F0EB19FB618A8DB3E /* EditorSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE9448826AA38AB5FC0CEB79 /* EditorSettingsView.swift */; };
 		A9A6E5D89CD2F9856836A993 /* PresentedTextLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 142572DC7370F7C7BD227891 /* PresentedTextLayout.swift */; };
 		A9EE5F81AE818C176D03A6E3 /* RecoveryManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1AF508EECAEFEA4ADC41409 /* RecoveryManagerTests.swift */; };
+		AA69EA8C197E572401CD9F0F /* LeaderMenuCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A1A5D32438825E49B61F6AE /* LeaderMenuCommands.swift */; };
 		AA7E2D965B0C9EDAC24EDF45 /* OffscreenRendererTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D888819632DC480A41633573 /* OffscreenRendererTestSupport.swift */; };
 		AB200EDC2BD9693D8D52CE98 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9FC2118EA77254CBCAE7B0B /* AppState.swift */; };
 		AB445AD42EF996DC400DC5BF /* ScrollSettleReconcileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E15F1EAA861D1AAC8832D56 /* ScrollSettleReconcileTests.swift */; };
@@ -740,6 +744,7 @@
 		28BF059A78F3F69F10E2416D /* AgentTranscriptViewReplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTranscriptViewReplay.swift; sourceTree = "<group>"; };
 		29556A488CB8DABE4F7DBC51 /* PresentationScrollAnimator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresentationScrollAnimator.swift; sourceTree = "<group>"; };
 		29B1B8E7DB6EBD5518F1CE39 /* AccessibilityTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityTestSupport.swift; sourceTree = "<group>"; };
+		2A1A5D32438825E49B61F6AE /* LeaderMenuCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaderMenuCommands.swift; sourceTree = "<group>"; };
 		2BAB83B99298DE01101D3C60 /* PreviewFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewFixtures.swift; sourceTree = "<group>"; };
 		2C5D3251FFD1F88776503EC7 /* NativeSidebarKindTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSidebarKindTests.swift; sourceTree = "<group>"; };
 		2F9726FEBA64A746BB5A80EC /* FocusOwnerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusOwnerState.swift; sourceTree = "<group>"; };
@@ -1399,6 +1404,7 @@
 				5F6F03841A5D97A688A35CC9 /* EditorGeometry+App.swift */,
 				08297E994D0956F8C8C66EF8 /* FrontendActionComposition.swift */,
 				53CEDDFB3856C44BA51C8A7B /* Instrumentation.swift */,
+				2A1A5D32438825E49B61F6AE /* LeaderMenuCommands.swift */,
 				DCE21D8CE7F63E5298CE289B /* MainRunLoopAction.swift */,
 				9B81375947A9D7F9FCA85C91 /* MenuSnapshotProbe.swift */,
 				4A647814918768E62822D4A1 /* MingaApp.swift */,
@@ -2104,6 +2110,7 @@
 				E4A2887CDB5EDB64080E5096 /* FrameState.swift in Sources */,
 				ABE7AA8517D1D7FBD7CC1816 /* IMEComposition.swift in Sources */,
 				8AB3B55F301192FA4F4A4E41 /* Instrumentation.swift in Sources */,
+				1E163DCC80F544A38CC29484 /* LeaderMenuCommands.swift in Sources */,
 				EE84DA1BF4952359DD0DC343 /* LineTextureAtlas.swift in Sources */,
 				0C0F3AF675E0AA401FEC648F /* LiveResizeDebounce.swift in Sources */,
 				4CBC4101191FA686C76D6DDF /* MainRunLoopAction.swift in Sources */,
@@ -2183,6 +2190,7 @@
 				DF498FA4A0E14A495D35773F /* FrameState.swift in Sources */,
 				245180E7A0626A8C48245493 /* IMEComposition.swift in Sources */,
 				98B18D9FDEF20AFA62901108 /* Instrumentation.swift in Sources */,
+				AA69EA8C197E572401CD9F0F /* LeaderMenuCommands.swift in Sources */,
 				06D741E1FB11DDFC35EC3B18 /* LineTextureAtlas.swift in Sources */,
 				DAA7EF98BE173F84E9F3E48E /* LiveResizeDebounce.swift in Sources */,
 				CEB3691E26B8719E1D6C3569 /* MainRunLoopAction.swift in Sources */,
@@ -2254,6 +2262,7 @@
 				842F37A4A6D1D95F63E41E2A /* FrameState.swift in Sources */,
 				D916997E44A9619D08995FDA /* IMEComposition.swift in Sources */,
 				6CF0F1BB4E1BDC0182EDCCB1 /* Instrumentation.swift in Sources */,
+				9384C7A70E9A833C86527797 /* LeaderMenuCommands.swift in Sources */,
 				5C9DBC1F399D8F7BE8EA2701 /* LineTextureAtlas.swift in Sources */,
 				88D0A6915FA4D55AB0859E57 /* LiveResizeDebounce.swift in Sources */,
 				F25FB924543E14CA08076577 /* MainRunLoopAction.swift in Sources */,
@@ -2546,6 +2555,7 @@
 				B0A5712B943D48F8F72C1DDA /* KeyboardInputTests.swift in Sources */,
 				25D865A5AD887E5F31FA162D /* LatencyHUDStateTests.swift in Sources */,
 				0B3E634DA8224698DD9BEE4A /* LatencyRecorderTests.swift in Sources */,
+				6D753BB1015D3297D7B4493E /* LeaderMenuCommands.swift in Sources */,
 				4DE50AFB1ABCF116D9EFE340 /* LeaderMenuTests.swift in Sources */,
 				26DAAF2C2CCC2713AD30C539 /* LineTextureAtlas.swift in Sources */,
 				64F4537439FC69C8D9094419 /* LiveResizeDebounce.swift in Sources */,

@@ -98,6 +98,7 @@ struct MingaApp: App {
         .defaultSize(width: defaultWindowWidth, height: defaultWindowHeight)
         .commands {
             MingaMenuCommands(appState: appDelegate.appState)
+            LeaderMenuCommands(appState: appDelegate.appState)
         }
 
         Settings {
@@ -601,7 +602,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dispatcher: CommandDispatcher?
     private var desktopAgentNotifications: DesktopAgentNotifications?
     /// Mirrors the leader keymap into the menu bar (docs/design/surfaces.md, Mouse).
-    private var leaderMenu: LeaderMenuInstaller?
     private var applicationQuitCoordinator: ApplicationQuitCoordinator?
     private var applicationQuitAlert: NSAlert?
     private var activeFilePanel: NSSavePanel?
@@ -715,10 +715,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
         scheduleEditorWindowLaunchFallback()
-
-        let leaderMenu = LeaderMenuInstaller { [weak self] action in self?.encoder?.send(action) }
-        self.leaderMenu = leaderMenu
-        appState.gui.menuBarState.onChange = { [weak leaderMenu] items in leaderMenu?.install(items) }
 
         // Initial backing scale for Retina rendering. The window does not exist yet, so NSScreen.main is the only safe source here. EditorNSView.viewDidMoveToWindow/viewDidChangeBackingProperties corrects this if the window lands on another display.
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
