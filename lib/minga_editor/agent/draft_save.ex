@@ -280,6 +280,11 @@ defmodule MingaEditor.Agent.DraftSave do
       {_before, []} ->
         :stale
 
+      # A press whose files cannot be read leaves the line with every press behind
+      # it, since their text was taken after its text, which stays in the composer.
+      {before, [_press | _rest]} when result == :failed ->
+        {:ok, %{save | held_presses: before}}
+
       {before, [press | rest]} ->
         {:ok, %{save | held_presses: before ++ resolve(press, result) ++ rest}}
     end
@@ -289,14 +294,17 @@ defmodule MingaEditor.Agent.DraftSave do
   defp content({:queue, _target, _kind, content, _press}), do: content
   defp content({:send, _kind, content, _press}), do: content
 
-  @spec resolve(held_press(), {:ok, TurnExecution.content()} | :failed) :: [held_press()]
-  defp resolve(_press, :failed), do: []
+  @spec resolve(held_press(), {:ok, TurnExecution.content()}) :: [held_press()]
 
   defp resolve({:queue, target, kind, _content, press}, {:ok, content}),
     do: [{:queue, target, kind, content, press}]
 
   defp resolve({:send, kind, _content, press}, {:ok, content}),
     do: [{:send, kind, content, press}]
+
+  @doc "Drops every held press; their text stays in the composer."
+  @spec drop_held(t()) :: t()
+  def drop_held(%__MODULE__{} = save), do: %{save | held_presses: []}
 
   @doc "Carries held presses onto a draft whose load was issued again."
   @spec keep_held(t(), t() | nil) :: t()
@@ -372,15 +380,17 @@ defmodule MingaEditor.Agent.DraftSave do
 
   @doc "Retires a refused submission without erasing the original live draft."
   @spec queue_refused(t(), reference(), :retryable | :blocked) :: t()
+  # A refused queue's text stays in the composer, so every press waiting behind it
+  # (whose text was taken after that text) stops waiting too; all of it stays.
   def queue_refused(
         %__MODULE__{request: {:queueing, ref, revision, previous, _, _}} = save,
         ref,
         :retryable
       ),
-      do: %{save | request: {:ready, revision, previous}}
+      do: %{save | request: {:ready, revision, previous}, held_presses: []}
 
   def queue_refused(%__MODULE__{request: {:queueing, ref, _, _, _, _}} = save, ref, :blocked),
-    do: %{save | request: :blocked}
+    do: %{save | request: :blocked, held_presses: []}
 
   @doc "Installs a confirmed recall or prevents autosave from overwriting a conflicting saved draft."
   @spec recall_result(

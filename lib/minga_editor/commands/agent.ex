@@ -780,14 +780,31 @@ defmodule MingaEditor.Commands.Agent do
         held
 
       :not_held ->
-        case resolve_mentions(text,
-               model_selection: shown_model_selection(state.workspace.agent_ui)
-             ) do
-          {:ok, resolved} -> deliver_composer(state, resolved, kind)
-          {:error, msg} -> NoticeWorkflow.publish(state, msg)
-        end
+        # A composer without a saved draft has no line to wait in; a worker still
+        # reads the files, and the message goes when it answers.
+        :ok =
+          DraftWorkflow.read_mentions_off_editor(
+            state,
+            text,
+            state.workspace.agent_ui,
+            &{:composer_mentions_read, kind, &1}
+          )
+
+        state
     end
   end
+
+  @doc "Delivers a message from a composer without a saved draft once a worker has read the files it names."
+  @spec deliver_read_mentions(
+          state(),
+          :steering | :follow_up,
+          {:ok, String.t() | [ReqLLM.Message.ContentPart.t()]} | {:error, String.t()}
+        ) :: state()
+  def deliver_read_mentions(state, kind, {:ok, resolved}),
+    do: deliver_composer(state, resolved, kind)
+
+  def deliver_read_mentions(state, _kind, {:error, message}),
+    do: NoticeWorkflow.publish(state, message)
 
   @spec clear_input_after_submit(state()) :: state()
   defp clear_input_after_submit(state),
@@ -958,9 +975,9 @@ defmodule MingaEditor.Commands.Agent do
   defp delivery_kind(_state, kind), do: kind
 
   @doc """
-  Delivers a send held while the composer's saved draft loaded, with the content from its key press.
+  Delivers a send that waited in line, with the content from its key press.
 
-  It is sent only while the composer still holds exactly what was pressed. If the composer is empty, the text was sent another way since the press, and nothing happens. If the user changed it after the press, nothing is sent: the composer keeps everything and one line asks for another press, so Minga never guesses which text was meant. A send whose conversation is no longer in front is not sent either; its text stays in that composer.
+  It goes only while the composer holds exactly the pressed text (and the text of the presses still waiting behind it), so sending, which clears the composer, never takes unsent typing with it. If the user typed after the press, or the send cannot go, nothing is sent, the composer keeps everything, the presses behind it stop waiting and one line says why. A send whose conversation is no longer in front is not sent either.
   """
   @spec deliver_held_send(
           state(),
@@ -968,25 +985,22 @@ defmodule MingaEditor.Commands.Agent do
           {:send_now | :steering | :follow_up, String.t() | [ReqLLM.Message.ContentPart.t()],
            DraftSave.press()}
         ) :: state()
-  def deliver_held_send(state, owner, {_kind, _content, {_source, _raw, marker}} = press) do
-    panel = state.workspace.agent_ui.panel
-
+  def deliver_held_send(state, owner, {_kind, _content, {_source, raw, _marker}} = press) do
     cond do
       not DraftWorkflow.active_owner?(state, owner) ->
-        NoticeWorkflow.publish(
-          state,
+        state
+        |> DraftWorkflow.drop_held(owner)
+        |> NoticeWorkflow.publish(
           "A message was not sent because its conversation is no longer in front. Its text is still in that composer."
         )
 
-      same_text?(composer_marker(panel), marker) ->
-        deliver_held_in_front(state, press, DraftWorkflow.submission(state))
-
-      PromptBuffer.input_empty?(panel) ->
-        state
+      DraftWorkflow.only_pressed_text?(state, raw) ->
+        deliver_held_in_front(state, owner, press, DraftWorkflow.submission(state))
 
       true ->
-        NoticeWorkflow.publish(
-          state,
+        state
+        |> DraftWorkflow.drop_held(owner)
+        |> NoticeWorkflow.publish(
           "Not sent: the message changed after you pressed send. Press send again."
         )
     end
@@ -994,15 +1008,19 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec deliver_held_in_front(
           state(),
+          non_neg_integer(),
           {:send_now | :steering | :follow_up, String.t() | [ReqLLM.Message.ContentPart.t()],
            DraftSave.press()},
           term()
         ) :: state()
-  defp deliver_held_in_front(state, _press, {:error, message}),
-    do: NoticeWorkflow.publish(state, message)
+  defp deliver_held_in_front(state, owner, _press, {:error, message}),
+    do: state |> DraftWorkflow.drop_held(owner) |> NoticeWorkflow.publish(message)
 
-  defp deliver_held_in_front(state, {kind, content, press}, submission),
-    do: deliver_held_input(state, kind, content, submission, press)
+  defp deliver_held_in_front(state, owner, {kind, content, press}, submission) do
+    state
+    |> deliver_held_input(kind, content, submission, press)
+    |> DraftWorkflow.release_next(owner)
+  end
 
   @spec deliver_held_input(
           state(),
@@ -1022,18 +1040,6 @@ defmodule MingaEditor.Commands.Agent do
       :ordinary -> deliver_unqueued_composer(state, kind, content, submission)
     end
   end
-
-  # The text is unchanged when the buffer version is; a cursor move (leaving
-  # Insert, a click) does not change what would be sent.
-  @spec same_text?(DraftSave.marker() | nil, DraftSave.marker()) :: boolean()
-  defp same_text?({version, _cursor}, {version, _pressed_cursor}), do: true
-  defp same_text?(_current, _pressed), do: false
-
-  @spec composer_marker(Panel.t()) :: DraftSave.marker() | nil
-  defp composer_marker(%Panel{prompt_buffer: pid}) when is_pid(pid),
-    do: Buffer.inspection_marker(pid)
-
-  defp composer_marker(%Panel{}), do: nil
 
   @spec deliver_composer_input(
           state(),
@@ -1355,10 +1361,6 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  @spec shown_model_selection(UIState.t()) :: MingaAgent.ModelSelection.t() | nil
-  defp shown_model_selection(%UIState{connection: %{model_selection: selection}}), do: selection
-  defp shown_model_selection(%UIState{}), do: nil
-
   @spec remote_session?(state()) :: boolean()
   defp remote_session?(state) do
     case Runtime.active_session(state.shell_runtime) do
@@ -1417,12 +1419,6 @@ defmodule MingaEditor.Commands.Agent do
           "Agent error: #{inspect(reason)}"
         )
     end
-  end
-
-  @spec resolve_mentions(String.t(), keyword()) ::
-          {:ok, String.t()} | {:ok, [ReqLLM.Message.ContentPart.t()]} | {:error, String.t()}
-  defp resolve_mentions(text, opts) do
-    FileMention.resolve_prompt(text, Minga.Project.workspace_root(), opts)
   end
 
   @spec project_root() :: String.t() | nil

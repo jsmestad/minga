@@ -713,6 +713,42 @@ defmodule MingaEditor.Agent.DraftWorkflow do
   defp capture_pressed_queue(ui, state, owner, destination, target, kind, content, press),
     do: capture_queue(ui, state, owner, destination, target, kind, content, press)
 
+  @doc """
+  Whether the composer holds exactly a released send's text and the text of the presses still waiting behind it, with nothing typed since. Only then does the send go: sending clears the composer, which must not take unsent typing with it.
+  """
+  @spec only_pressed_text?(State.t(), String.t()) :: boolean()
+  def only_pressed_text?(
+        %State{workspace: %{agent_ui: %UIState{draft_save: %DraftSave{} = save} = ui}},
+        raw
+      ),
+      do: PromptBuffer.input_text(ui) == raw <> Enum.join(DraftSave.submitted(save))
+
+  def only_pressed_text?(%State{}, _raw), do: false
+
+  @doc "Runs the next waiting press after a released send was delivered."
+  @spec release_next(State.t(), non_neg_integer()) :: State.t()
+  def release_next(state, owner) do
+    update_origin(state, owner, fn
+      %UIState{draft_save: %DraftSave{target: target}} = ui ->
+        release_held_press({:unchanged, ui}, state, owner, target)
+
+      ui ->
+        {:unchanged, ui}
+    end)
+  end
+
+  @doc "Drops the presses waiting behind a send that did not go; their text stays in the composer."
+  @spec drop_held(State.t(), non_neg_integer()) :: State.t()
+  def drop_held(state, owner) do
+    update_origin(state, owner, fn
+      %UIState{draft_save: %DraftSave{} = save} = ui ->
+        {:unchanged, UIState.project_draft_save(ui, DraftSave.drop_held(save))}
+
+      ui ->
+        {:unchanged, ui}
+    end)
+  end
+
   @doc "Whether presses are waiting their turn, so a new press must wait behind them."
   @spec holding?(State.t()) :: boolean()
   def holding?(%State{
@@ -845,38 +881,51 @@ defmodule MingaEditor.Agent.DraftWorkflow do
   defp mention_press(_state, _ui, kind, content, press, _expected),
     do: {:send, kind, content, press}
 
-  # Reading mentioned files and the project root can block, so a worker does it
-  # and answers the Editor with `{:composer_mentions_resolved, ...}`.
+  @unread_mentions "Could not read the files the message names."
+
   @spec read_mentions(State.t(), non_neg_integer(), reference(), String.t(), UIState.t()) :: :ok
-  defp read_mentions(%State{effect_scheduler: scheduler}, owner, ref, text, ui)
-       when scheduler != nil do
+  defp read_mentions(state, owner, ref, text, ui),
+    do: read_mentions_off_editor(state, text, ui, &{:composer_mentions_resolved, owner, ref, &1})
+
+  @doc """
+  Reads the files `text` names and the project root in a worker, never on the Editor, and sends the Editor `reply.(result)`. The worker always answers: a crash or an exit is a failed read. Without an effect scheduler (bare test editors) the read happens here.
+  """
+  @spec read_mentions_off_editor(
+          State.t(),
+          String.t(),
+          UIState.t(),
+          ({:ok, TurnExecution.content()} | {:error, String.t()} -> term())
+        ) :: :ok
+  def read_mentions_off_editor(%State{effect_scheduler: scheduler}, text, ui, reply)
+      when scheduler != nil do
     editor = self()
     selection = shown_model_selection(ui)
+    read = fn -> send(editor, reply.(safe_resolve_mentions(text, selection))) end
 
-    {:ok, _worker} =
-      Task.Supervisor.start_child(EffectScheduler.task_supervisor(scheduler), fn ->
-        send(editor, {:composer_mentions_resolved, owner, ref, resolve_mentions(text, selection)})
-      end)
-
-    :ok
-  end
-
-  defp read_mentions(_state, owner, ref, text, ui) do
-    send(
-      self(),
-      {:composer_mentions_resolved, owner, ref, resolve_mentions(text, shown_model_selection(ui))}
-    )
+    case Task.Supervisor.start_child(EffectScheduler.task_supervisor(scheduler), read) do
+      {:ok, _worker} -> :ok
+      {:error, _reason} -> send(editor, reply.({:error, @unread_mentions}))
+    end
 
     :ok
   end
 
-  @spec resolve_mentions(String.t(), MingaAgent.ModelSelection.t() | nil) ::
+  def read_mentions_off_editor(_state, text, ui, reply) do
+    send(self(), reply.(safe_resolve_mentions(text, shown_model_selection(ui))))
+    :ok
+  end
+
+  @spec safe_resolve_mentions(String.t(), MingaAgent.ModelSelection.t() | nil) ::
           {:ok, TurnExecution.content()} | {:error, String.t()}
-  defp resolve_mentions(text, selection),
-    do:
-      MingaAgent.FileMention.resolve_prompt(text, Minga.Project.workspace_root(),
-        model_selection: selection
-      )
+  defp safe_resolve_mentions(text, selection) do
+    MingaAgent.FileMention.resolve_prompt(text, Minga.Project.workspace_root(),
+      model_selection: selection
+    )
+  rescue
+    _error -> {:error, @unread_mentions}
+  catch
+    _kind, _reason -> {:error, @unread_mentions}
+  end
 
   @spec shown_model_selection(UIState.t()) :: MingaAgent.ModelSelection.t() | nil
   defp shown_model_selection(%UIState{connection: %{model_selection: selection}}), do: selection
@@ -1560,7 +1609,10 @@ defmodule MingaEditor.Agent.DraftWorkflow do
          {:ok, {sequence, token, kind, revision}}
        )
        when revision == previous + 1 do
-    if Buffer.inspection_marker(buffer) == initial do
+    # Clear only a composer that holds exactly the queued text: a press that left
+    # the line can leave its text in front without moving the marker.
+    if Buffer.inspection_marker(buffer) == initial and
+         PromptBuffer.input_text(ui) == save.queued_raw do
       cleared = PromptBuffer.clear_input_and_scroll(ui)
       updated = DraftSave.queue_saved(save, ref, revision, Buffer.inspection_marker(buffer))
       {{:queued, kind}, UIState.project_draft_save(cleared, updated)}

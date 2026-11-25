@@ -650,7 +650,10 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
           |> Panel.set_provider_name("anthropic")
         end)
 
-      new_state = AgentCommands.submit_prompt(state)
+      # Mentioned files are read off the Editor; the answer comes back as a message.
+      pressed = AgentCommands.submit_prompt(state)
+      assert_receive {:composer_mentions_read, kind, result}
+      new_state = AgentCommands.deliver_read_mentions(pressed, kind, result)
 
       assert new_state.shell_runtime.state.notice.message =~ "Cannot resolve file mentions"
 

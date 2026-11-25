@@ -223,6 +223,51 @@ defmodule MingaEditor.Agent.DraftSaveTest do
       assert DraftSave.unsubmitted(nil, "plain") == "plain"
     end
 
+    test "a press that leaves the line with its text in the composer takes every later press with it" do
+      {:ok, one} = DraftSave.hold_press(queueing("alpha"), queue_press("bravo"))
+      {:queueing, ref, _, _, _, _} = one.request
+
+      for disposition <- [:retryable, :blocked] do
+        assert DraftSave.queue_refused(one, ref, disposition).held_presses == []
+      end
+
+      mention = make_ref()
+
+      resolving =
+        {:queue, {"record", "request", 1}, :follow_up, {:resolving, mention},
+         {"b", "b", {0, {0, 1}}}}
+
+      held =
+        ready()
+        |> DraftSave.hold_resolving(queue_press("a"))
+        |> DraftSave.hold_resolving(resolving)
+
+      held = DraftSave.hold_resolving(held, queue_press("c"))
+
+      assert {:ok, failed} = DraftSave.resolved(held, mention, :failed)
+      assert failed.held_presses == [queue_press("a")]
+
+      assert {:ok, read} = DraftSave.resolved(held, mention, {:ok, "B"})
+      assert [_, {:queue, _, _, "B", _}, _] = read.held_presses
+      assert DraftSave.resolved(read, mention, {:ok, "again"}) == :stale
+    end
+
+    test "a press still reading its files keeps every press behind it waiting" do
+      ref = make_ref()
+      resolving = {:send, :steering, {:resolving, ref}, {"x", "x", {0, {0, 1}}}}
+
+      held =
+        ready()
+        |> DraftSave.hold_resolving(resolving)
+        |> DraftSave.hold_resolving(send_press("y"))
+
+      assert DraftSave.release_held_press(held) == :none
+      {:ok, read} = DraftSave.resolved(held, ref, {:ok, "X"})
+
+      assert {:run, {:send, :steering, "X", _}, %{held_presses: [_]}} =
+               DraftSave.release_held_press(read)
+    end
+
     test "a load issued again keeps the held presses" do
       %{loading: loading} = requests()
       {:ok, held} = DraftSave.hold_press(loading, send_press("p"))

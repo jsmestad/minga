@@ -169,6 +169,56 @@ defmodule MingaEditor.Journeys.QueueWhileSessionBusyTest do
     end
   end
 
+  test "a file that cannot be read stops its press and every press behind it; all the text stays",
+       %{editor_ctx: ctx, session: session} do
+    :ok = Session.send_prompt(session, "start")
+    await_working(ctx)
+
+    send_keys_sync(ctx, "see @missing.ex now")
+    send_key_sync(ctx, 13, @alt)
+    send_keys_sync(ctx, "also tests")
+    send_key_sync(ctx, 13, @alt)
+
+    wait_until(ctx, fn _state -> minibuffer(ctx) =~ "not sent" end,
+      max_attempts: 500,
+      interval_ms: 20,
+      message: "expected one line saying the message was not sent"
+    )
+
+    {_session, record} = editor_state(ctx).workspace.agent_ui.draft_save.target
+    assert Session.queued_input_summaries(session, record) == {:ok, []}
+    assert prompt(ctx) == "see @missing.ex nowalso tests"
+    assert editor_state(ctx).workspace.agent_ui.draft_save.held_presses == []
+
+    # The composer takes presses again: the whole text goes as one message.
+    send_key_sync(ctx, 13, @alt)
+
+    wait_until(ctx, fn _state -> minibuffer(ctx) =~ "not sent" and prompt(ctx) != "" end,
+      max_attempts: 50,
+      message: "expected the missing file to be reported again"
+    )
+  end
+
+  test "a read of mentioned files always answers, even when the project never does" do
+    # The read runs here because no effect scheduler is given; a Project that never
+    # answers makes its call exit, and the read must still answer with a failure.
+    :ok = :sys.suspend(Project)
+
+    try do
+      :ok =
+        MingaEditor.Agent.DraftWorkflow.read_mentions_off_editor(
+          :no_scheduler,
+          "see @lib/a.ex",
+          UIState.new(),
+          &{:read, &1}
+        )
+    after
+      :sys.resume(Project)
+    end
+
+    assert_received {:read, {:error, "Could not read the files the message names."}}
+  end
+
   test "text typed after the last press stays, and one more press queues only it", %{
     editor_ctx: ctx,
     session: session
