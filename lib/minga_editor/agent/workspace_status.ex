@@ -73,42 +73,63 @@ defmodule MingaEditor.Agent.WorkspaceStatus do
   Surfaces that show only the active workspace (the activity strip, the status bar, the chat header) call this.
   """
   @spec active(term(), UIState.t() | nil) :: t()
-  def active(%TraditionalState{} = shell_state, ui) do
+  def active(shell_state, ui) do
+    case presented(shell_state) do
+      {:live, workspace, live} -> resolve(workspace, live, ui)
+      {:shown_last, workspace} -> shown_last_status(workspace, ui)
+    end
+  end
+
+  @doc """
+  Returns the live cache while it presents what is in front: the active Agent workspace's conversation, or no conversation at all.
+
+  With a file in front and a cache built from a conversation it returns nil. That cache's question, approval and status are copies from the moment the conversation left the front, so a surface drawn over the file must not present them as current.
+  """
+  @spec front_agent(term()) :: AgentState.t() | nil
+  def front_agent(shell_state) do
+    case presented(shell_state) do
+      {:live, _workspace, live} -> live
+      {:shown_last, _workspace} -> nil
+    end
+  end
+
+  # What the active workspace presents: the live cache, or, with a file in front, the workspace of
+  # the conversation shown last (nil once its Session has ended).
+  @typep presented ::
+           {:live, Workspace.t() | nil, AgentState.t() | nil} | {:shown_last, Workspace.t() | nil}
+
+  @spec presented(term()) :: presented()
+  defp presented(%TraditionalState{} = shell_state) do
     live = TraditionalState.agent(shell_state)
 
     case TraditionalState.tab_bar(shell_state) do
-      %TabBar{} = tab_bar -> resolve_active(tab_bar, TabBar.active_workspace(tab_bar), live, ui)
-      nil -> resolve(nil, live, ui)
+      %TabBar{} = tab_bar -> presented(tab_bar, TabBar.active_workspace(tab_bar), live)
+      nil -> {:live, nil, live}
     end
   end
 
-  def active(_shell_state, ui), do: resolve(nil, nil, ui)
+  defp presented(_shell_state), do: {:live, nil, nil}
 
-  # With a file in front, the conversation shown last speaks through its own workspace's stored status.
-  @spec resolve_active(TabBar.t(), Workspace.t() | nil, AgentState.t(), UIState.t() | nil) :: t()
-  defp resolve_active(_tab_bar, %Workspace{payload: %WorkspaceAgent{}} = active, live, ui),
-    do: resolve(active, live, ui)
+  @spec presented(TabBar.t(), Workspace.t() | nil, AgentState.t()) :: presented()
+  defp presented(_tab_bar, %Workspace{payload: %WorkspaceAgent{}} = active, live),
+    do: {:live, active, live}
 
-  defp resolve_active(
-         _tab_bar,
-         active,
-         _live,
-         %UIState{chat_lifecycle: {:failed, _failure}} = ui
-       ),
-       do: resolve(active, nil, ui)
-
-  defp resolve_active(tab_bar, active, %AgentState{} = live, ui) do
+  defp presented(tab_bar, active, live) do
     case AgentState.session(live) do
-      nil -> resolve(active, live, ui)
-      session -> tab_bar |> TabBar.find_workspace_by_session(session) |> shown_last_status()
+      nil -> {:live, active, live}
+      session -> {:shown_last, TabBar.find_workspace_by_session(tab_bar, session)}
     end
   end
 
-  @spec shown_last_status(Workspace.t() | nil) :: t()
-  defp shown_last_status(%Workspace{payload: %WorkspaceAgent{agent_ui: ui}} = workspace),
+  # A conversation that is not in front speaks through its own workspace's stored status.
+  @spec shown_last_status(Workspace.t() | nil, UIState.t() | nil) :: t()
+  defp shown_last_status(_workspace, %UIState{chat_lifecycle: {:failed, _failure}}),
+    do: :needs_you
+
+  defp shown_last_status(%Workspace{payload: %WorkspaceAgent{agent_ui: ui}} = workspace, _ui),
     do: resolve(workspace, nil, ui)
 
-  defp shown_last_status(nil), do: :idle
+  defp shown_last_status(nil, _ui), do: :idle
 
   @doc "Returns the live shell presentation cache from a shell state snapshot, or nil for another shell."
   @spec live_agent(term()) :: AgentState.t() | nil

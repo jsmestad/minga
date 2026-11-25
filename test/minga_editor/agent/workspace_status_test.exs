@@ -133,6 +133,27 @@ defmodule MingaEditor.Agent.WorkspaceStatusTest do
       assert WorkspaceStatus.active(:another_shell, UIState.new()) == :idle
     end
 
+    test "front_agent/1 gives the cache only while it presents what is in front" do
+      session = self()
+      {tab_bar, id} = file_in_front(session)
+      copy = left_working(session)
+      unbound = AgentState.set_status(%AgentState{}, :error)
+      agent_tab = Tab.new_agent(2, "Agent") |> Tab.set_group(id)
+      conversation_in_front = %{tab_bar | tabs: [agent_tab | tab_bar.tabs], active_id: 2}
+
+      cases = [
+        {"a copy of a conversation that left the front", shell(tab_bar, copy), nil},
+        {"a cache that presents no conversation", shell(tab_bar, unbound), unbound},
+        {"the conversation in front", shell(conversation_in_front, copy), copy},
+        {"a shell without workspaces", shell(nil, copy), copy},
+        {"another shell", :another_shell, nil}
+      ]
+
+      for {name, shell_state, expected} <- cases do
+        assert WorkspaceStatus.front_agent(shell_state) == expected, name
+      end
+    end
+
     test "a failed start in the file's own conversation needs the user" do
       {tab_bar, _id} = file_in_front(self())
       failed = UIState.fail_start(UIState.new(), StartFailure.timed_out(StartRequest.default()))

@@ -245,6 +245,18 @@ defmodule MingaEditor.State.Agent do
   @spec session(t()) :: pid() | nil
   def session(%__MODULE__{session: session}), do: session
 
+  @doc """
+  Carries the cache over to the Session that replaced a crashed one.
+
+  A cache that presents another conversation is unchanged.
+  """
+  @spec session_replaced(t(), pid(), pid()) :: t()
+  def session_replaced(%__MODULE__{session: old} = agent, old, new) when is_pid(new),
+    do: %{agent | session: new}
+
+  def session_replaced(%__MODULE__{} = agent, old, new) when is_pid(old) and is_pid(new),
+    do: agent
+
   @doc "Applies the render-cache fields returned by an agent session snapshot, and binds the cache to that Session."
   @spec apply_session_snapshot(
           t(),
