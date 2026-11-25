@@ -15,7 +15,7 @@ defmodule Minga.Buffer.UndoHistory do
 
   `reject_task/4` reverts all of a task's steps or nothing: a task that started later and rewrote its text, or an edit inside one of its replacements, refuses it, so a revert is exact or refused, never wrong text. `undo_agent_session/3` works step by step: newest first, each step of the most recent task reverts together with the newer groups that depend on it, which may be other tasks' steps. A group of yours joins only when none of its text is visible and reverting it brings back nothing else it deleted; it then leaves your undo stack. Otherwise your newest such edit holds the step, and your `u` can always reach it. Per-change keep and reject (#4049) may refine these rules.
 
-  Every Minga step is checked against a run budget. Past it, `compaction_wanted?/1` asks the owner to run `compact_slice/2`, which merges drafts (text a step wrote that a newer step of the same task rewrote) into the step that overwrote them; past twice the budget, the step itself merges until it is back at twice the budget. Merged steps form a class that always moves together: they flip and are discarded together, and `undo_agent_session/3` takes the whole class in one press, so a press may take the older half of a merge with it where, without compaction, that step would revert in a separate press, and a hold on one merged step holds the whole class. A press stays on the task it chose while an edit of yours holds it and your next `u` can go; it moves on to an older task only when a permanent edit holds the chosen one or your next undo is itself blocked by a later Minga step. Under that invariant a merge changes no document and no refusal, at the moment it runs or after any later edit, undo, redo or reject: the text the merged steps wrote and deleted can never be visible while they move together, and the replacement records keep every link a dropped run carried. The round-4 case that once resolved differently after compaction now resolves the same; the compaction-invisibility properties cover it. A step merges only where no other group touched a run between the two steps; a step merged away completely leaves its class and its key.
+  Every Minga step is checked against a run budget. Past it, `compaction_wanted?/1` asks the owner to run `compact_slice/2`, which merges drafts (text a step wrote that a newer step of the same task rewrote) into the step that overwrote them; past twice the budget, the step itself merges drafts too, examining at most twice the runs it added, so a burst of steps pays for its own drafts as it goes and the owner's slices finish the rest. Steps never merge around an edit of yours between them that the merged class touched. Merged steps form a class that always moves together: they flip and are discarded together, and `undo_agent_session/3` takes the whole class in one press, so a press may take the older half of a merge with it where, without compaction, that step would revert in a separate press, and a hold on one merged step holds the whole class. A press stays on the task it chose while an edit of yours holds it and your next `u` can go; it moves on to an older task only when a permanent edit holds the chosen one or your next undo is itself blocked by a later Minga step. Under that invariant a merge changes no document and no refusal, at the moment it runs or after any later edit, undo, redo or reject: the text the merged steps wrote and deleted can never be visible while they move together, and the replacement records keep every link a dropped run carried. The round-4 case that once resolved differently after compaction now resolves the same; the compaction-invisibility properties cover it. A step merges only where no other group touched a run between the two steps; a step merged away completely leaves its class and its key.
 
   `reload/3` takes in content changed on disk without losing Minga's unreviewed steps.
 
@@ -37,6 +37,8 @@ defmodule Minga.Buffer.UndoHistory do
   import EditSource, only: [is_undo_source: 1]
 
   @max_entries 1000
+  # Runs a recording may examine for compaction even when its step added few; see `compact_inline/2`.
+  @inline_compaction_floor 2_000
   # Runs, tombstones included, past which a Minga step asks for draft compaction; measured, see the PR for #4048.
   @run_budget 25_000
   # Deleted text kept as tombstones past which compaction is asked for even under the run budget.
@@ -278,30 +280,34 @@ defmodule Minga.Buffer.UndoHistory do
     task_run = extend_task_run(history, task, version)
     {group, history} = minga_group(history, source)
     {tick, history} = advance(history)
+    runs_before = Provenance.run_count(history.provenance)
+    provenance = replay(history, history.provenance, group, patches)
 
     %{
       history
-      | provenance: replay(history, history.provenance, group, patches),
+      | provenance: provenance,
         tick: tick,
         task_run: %{task_run | tick_after: tick},
         task_ticks: Map.put(history.task_ticks, task, tick),
         step_ticks: remember_step_tick(history.step_ticks, source, group, tick)
     }
     |> cap_untasked()
-    |> compact_inline()
+    |> compact_inline(max(Provenance.run_count(provenance) - runs_before, 0))
     |> want_compaction()
   end
 
   # Backpressure for steps that arrive faster than the owner's slices run.
-  # Past twice the budget, recording merges drafts until the history is back at twice the budget.
-  # It examines at most four budgets' worth of runs, so a burst pays as it goes and one call stays bounded.
-  @spec compact_inline(t()) :: t()
-  defp compact_inline(history) do
+  # Past twice the budget, recording merges drafts toward twice the budget, examining at most twice the runs the step
+  # added (and at least a few thousand): a burst of steps pays for its own drafts as it goes, so the runs stay bounded,
+  # and one call costs at most about twice the same step without it. The owner's slices finish the rest.
+  @spec compact_inline(t(), non_neg_integer()) :: t()
+  defp compact_inline(history, added) do
     limit = 2 * history.run_budget
 
     if Provenance.run_count(history.provenance) > limit do
       done? = &(Provenance.run_count(&1.provenance) <= limit)
-      {history, _examined, _merged} = compact_until(history, 4 * history.run_budget, 0, [], done?)
+      work = max(2 * added, @inline_compaction_floor)
+      {history, _examined, _merged} = compact_until(history, work, 0, [], done?)
       history
     else
       history
@@ -588,13 +594,16 @@ defmodule Minga.Buffer.UndoHistory do
       |> task_groups(task)
       |> Enum.sort(:desc)
       |> Enum.reduce({walk.history.provenance, MapSet.new()}, fn group, {flags, taken} ->
-        if MapSet.member?(taken, group), do: {flags, taken}, else: take_closure(walk, flags, taken, group)
+        if MapSet.member?(taken, group),
+          do: {flags, taken},
+          else: take_closure(walk, flags, taken, group)
       end)
 
     if MapSet.size(taken) == 0, do: {:ok, walk}, else: revert_groups(walk, taken)
   end
 
-  @spec take_closure(map(), Provenance.t(), MapSet.t(), Provenance.group_id()) :: {Provenance.t(), MapSet.t()}
+  @spec take_closure(map(), Provenance.t(), MapSet.t(), Provenance.group_id()) ::
+          {Provenance.t(), MapSet.t()}
   defp take_closure(walk, flags, taken, group) do
     closure = dependents(flags, walk.history.merges, [group], MapSet.new([group]))
 

@@ -1354,11 +1354,18 @@ defmodule Minga.Buffer.UndoHistoryTest do
       held and taken -- reverted == [] and reverted -- taken != [] ->
         held_with_merged_step?(task, reverted, taken, plain, compacted)
 
-      # Difference 2: the compacted press reverted more, the older half of a merge with its newer half, and whatever
-      # depends on it.
+      # Difference 2: the compacted press reverted more, the older half of a merge with its newer half (still a group
+      # in its class, or absorbed into it completely), and whatever depends on it.
       true ->
+        provenance = UndoHistory.provenance(compacted.history)
+
+        absorbed =
+          for {group, _key} <- plain.history.minga,
+              not Provenance.group?(provenance, group),
+              do: group
+
         Enum.all?(reverted, &(&1 in taken or not Map.has_key?(classes, &1))) and
-          Enum.any?(taken -- reverted, &Map.has_key?(classes, &1))
+          (Enum.any?(taken -- reverted, &Map.has_key?(classes, &1)) or absorbed != [])
     end
   end
 
