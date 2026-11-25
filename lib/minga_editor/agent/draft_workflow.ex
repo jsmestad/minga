@@ -1175,6 +1175,13 @@ defmodule MingaEditor.Agent.DraftWorkflow do
 
   defp stop_line_on_failure(result), do: result
 
+  @doc "Ends a reason with the line every unsent press shows."
+  @spec not_sent(String.t()) :: String.t()
+  def not_sent(reason),
+    do:
+      String.trim_trailing(reason, ".") <>
+        ". The message was not sent; it is still in the composer."
+
   @spec dropped_outcome(term()) :: term()
   defp dropped_outcome(:unchanged), do: :queue_not_ready
   defp dropped_outcome(:failed), do: :failed_with_press
@@ -2119,7 +2126,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
     do:
       NoticeWorkflow.publish(
         state,
-        message <> " The message was not sent; it is still in the composer."
+        not_sent(message)
       )
 
   defp report(state, :failed_with_press) do

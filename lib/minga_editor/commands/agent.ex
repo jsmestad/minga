@@ -822,7 +822,7 @@ defmodule MingaEditor.Commands.Agent do
     do:
       NoticeWorkflow.publish(
         state,
-        message <> " The message was not sent; it is still in the composer."
+        MingaEditor.Agent.DraftWorkflow.not_sent(message)
       )
 
   def deliver_read_mentions(
