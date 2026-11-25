@@ -4663,13 +4663,20 @@ td [data-status="planned"]:not([data-pill="off"])::before {
     align-items: flex-start;
   }
 
+  /* The tallest caption is five lines at 390px. */
   .ca-lab .lab-caption {
-    min-height: 9.4em;
+    min-height: 8.2em;
   }
 
-  /* The buttons, the keys and the hint wrap to two rows on a phone. The row keeps that height when a button or the hint goes, so the key under it does not move. */
+  /* On a phone the hint comes first, on its own row, so it is on screen with the file and names the button under it. */
+  .ca-controls .lab-focus-cue {
+    order: -1;
+    flex-basis: 100%;
+  }
+
+  /* The hint, the buttons and the keys take up to three rows on a phone. The row keeps that height when a button or the hint goes, so the key under it does not move. */
   .ca-controls {
-    min-height: 5.6rem;
+    min-height: 7.2rem;
     align-content: flex-start;
   }
 }

@@ -77,7 +77,7 @@
         <div class="stage-head">
           <div>
             <h1>You and Minga, in the same file</h1>
-            <p class="stage-lead">You are still editing your spec, and Minga has just made two changes to it. Before you accept anything, you need to know which lines are yours, which are Minga's, and which you both wrote. Minga marks that in the margin of every line, and your undo never touches Minga's work. Try it in the file below: it takes four steps.</p>
+            <p class="stage-lead">You are still editing your spec, and Minga has just made two changes to it. Before you accept anything, you need to know which lines are yours, which are Minga's, and which you both wrote. Minga marks that in the margin of every changed line, and your undo never touches Minga's work. Try it in the file below: it takes four steps.</p>
           </div>
         </div>
 
@@ -169,7 +169,7 @@
             <button type="button" class="lab-control" data-ca-play hidden>Press the keys for me</button>
             <button type="button" class="lab-control" data-ca-reset hidden>Start again</button>
             <span class="lab-keycast" data-lab-keycast aria-hidden="true"></span>
-            <span class="lab-focus-cue">Click the file, then press the keys.</span>
+            <span class="lab-focus-cue">Click the file and press the keys, or tap "Press the keys for me".</span>
           </div>
 
           <ul class="ca-legend" aria-label="What the marks in the margin mean">
@@ -185,21 +185,26 @@
               <p data-lab-caption="found"><kbd data-lab-key>]h</kbd> moved the cursor to line 7, the first line of Minga's change. The double line in the margin marks lines 7 and 8 as Minga's. Next, press <kbd>i</kbd> to edit line 7.</p>
               <p data-lab-caption="unhandled_find"><kbd data-lab-key>That key</kbd> does nothing here. Press <kbd>]h</kbd> to jump to Minga's first change.</p>
               <p data-lab-caption="wrong_find"><kbd data-lab-key>That key</kbd> is not the next key. First press <kbd>]h</kbd> to jump to Minga's first change.</p>
+              <p data-lab-caption="cancelled_find"><kbd data-lab-key>That command</kbd> is cancelled: Esc dropped the keys you had started. Press <kbd>]h</kbd> to jump to Minga's first change.</p>
             </li>
             <li data-step="edit_undo">
               <p data-lab-instruction>Press <kbd>i</kbd> for a ready-made edit, then <kbd>u</kbd> to undo it</p>
-              <p data-lab-caption="edited">In Minga, <kbd data-lab-key>i</kbd> lets you type. Here the lab typed one edit for you: 30 seconds is now 60. One half of the double line on line 7 took your colour, because you and Minga both wrote that line now. Next, press <kbd>u</kbd> to undo.</p>
-              <p data-lab-caption="undone"><kbd data-lab-key>u</kbd> took back your edit and nothing else: 60 is 30 again, and Minga's two lines are still here. Undo reaches only what you typed. Next, press <kbd>SPC a d</kbd> to reject this change.</p>
+              <p data-lab-caption="edited">In Minga, <kbd data-lab-key>i</kbd> lets you type. Here the lab typed one edit for you and pressed Esc: 30 seconds is now 60. One half of the double line on line 7 took your colour, because you and Minga both wrote that line now. Next, press <kbd>u</kbd> to undo.</p>
+              <p data-lab-caption="undone"><kbd data-lab-key>u</kbd> took back your edit and nothing else: 60 is 30 again, and Minga's two lines are still here. Undo reaches only what you typed. Next, press <kbd>SPC a d</kbd> (Space, then <kbd>a</kbd>, then <kbd>d</kbd>) to reject this change.</p>
               <p data-lab-caption="unhandled_edit"><kbd data-lab-key>That key</kbd> does nothing here. Press <kbd>i</kbd>, and the lab makes one edit on line 7 for you.</p>
               <p data-lab-caption="wrong_edit"><kbd data-lab-key>That key</kbd> is not the next key. Press <kbd>i</kbd>, and the lab makes one edit on line 7 for you.</p>
+              <p data-lab-caption="cancelled_edit"><kbd data-lab-key>That command</kbd> is cancelled: Esc dropped the keys you had started. Press <kbd>i</kbd>, and the lab makes one edit on line 7 for you.</p>
               <p data-lab-caption="unhandled_undo"><kbd data-lab-key>That key</kbd> does nothing here. Press <kbd>u</kbd> to undo your edit on line 7.</p>
               <p data-lab-caption="wrong_undo"><kbd data-lab-key>That key</kbd> is not the next key. Press <kbd>u</kbd> to undo your edit on line 7.</p>
+              <p data-lab-caption="cancelled_undo"><kbd data-lab-key>That command</kbd> is cancelled: Esc dropped the keys you had started. Press <kbd>u</kbd> to undo your edit on line 7.</p>
             </li>
             <li data-step="reject">
               <p data-lab-instruction>Press <kbd>SPC a d</kbd> to reject that change</p>
               <p data-lab-caption="rejected"><kbd data-lab-key>SPC a d</kbd> rejected the change. Minga's two lines are gone. Your own line under them, "Work on a slow connection", is still here, now on line 7. Next, press <kbd>]h</kbd> to jump to Minga's other change.</p>
               <p data-lab-caption="unhandled_reject"><kbd data-lab-key>That key</kbd> does nothing here. Press <kbd>SPC a d</kbd> (Space, then <kbd>a</kbd>, then <kbd>d</kbd>) to reject the change on lines 7 and 8.</p>
               <p data-lab-caption="wrong_reject"><kbd data-lab-key>That key</kbd> is not the next key. Press <kbd>SPC a d</kbd> to reject the change on lines 7 and 8.</p>
+              <p data-lab-caption="nothing_to_undo"><kbd data-lab-key>u</kbd> found nothing of yours left to undo, so nothing changed. Minga's lines 7 and 8 are still here: undo never removes them. Next, press <kbd>SPC a d</kbd> (Space, then <kbd>a</kbd>, then <kbd>d</kbd>) to reject this change.</p>
+              <p data-lab-caption="cancelled_reject"><kbd data-lab-key>That command</kbd> is cancelled: Esc dropped the keys you had started. Press <kbd>SPC a d</kbd> (Space, then <kbd>a</kbd>, then <kbd>d</kbd>) to reject the change on lines 7 and 8.</p>
             </li>
             <li data-step="keep">
               <p data-lab-instruction>Press <kbd>]h</kbd>, then <kbd>SPC a y</kbd> to keep the other change</p>
@@ -207,8 +212,10 @@
               <p data-lab-caption="kept"><kbd data-lab-key>SPC a y</kbd> kept the change. Its mark is now one thin, faint line: these lines are settled, and they stay marked until your next commit. You found a change, tried an edit, took it back, rejected one change and kept the other.</p>
               <p data-lab-caption="unhandled_find_other"><kbd data-lab-key>That key</kbd> does nothing here. Press <kbd>]h</kbd> to jump to Minga's other change.</p>
               <p data-lab-caption="wrong_find_other"><kbd data-lab-key>That key</kbd> is not the next key. The cursor is on your own line, so first press <kbd>]h</kbd> to jump to Minga's other change.</p>
+              <p data-lab-caption="cancelled_find_other"><kbd data-lab-key>That command</kbd> is cancelled: Esc dropped the keys you had started. Press <kbd>]h</kbd> to jump to Minga's other change.</p>
               <p data-lab-caption="unhandled_keep"><kbd data-lab-key>That key</kbd> does nothing here. Press <kbd>SPC a y</kbd> (Space, then <kbd>a</kbd>, then <kbd>y</kbd>) to keep the change on lines 8 to 10.</p>
               <p data-lab-caption="wrong_keep"><kbd data-lab-key>That key</kbd> is not the next key. Press <kbd>SPC a y</kbd> to keep the change on lines 8 to 10.</p>
+              <p data-lab-caption="cancelled_keep"><kbd data-lab-key>That command</kbd> is cancelled: Esc dropped the keys you had started. Press <kbd>SPC a y</kbd> (Space, then <kbd>a</kbd>, then <kbd>y</kbd>) to keep the change on lines 8 to 10.</p>
               <p data-lab-caption="pending"><kbd data-lab-key>The first key</kbd> starts a command. Minga is waiting for the rest of it.</p>
               <p data-lab-caption="after_done"><kbd data-lab-key>That key</kbd> has nothing left to do: you have reviewed both changes. Press Start again to run the lab once more.</p>
             </li>
@@ -226,7 +233,7 @@
         </div>
 
         <ul class="pillar-list ca-points">
-          <li><strong>One thin line is yours.</strong> Every line you wrote and have not committed carries it. Nothing Minga does removes one of your lines.</li>
+          <li><strong>One thin line is yours.</strong> Every line you wrote and have not committed carries it. If Minga's change removes one of your lines, the change stays marked until you keep it, and rejecting it brings the line back.</li>
           <li><strong>A double line is Minga's, and it waits for you.</strong> The two lines cross on the first line of each change, so you can see where a change starts. A change stays marked until you keep it or reject it.</li>
           <li><strong>When you edit one of Minga's lines, half of its double line takes your colour.</strong> You both wrote that line, and the mark says so.</li>
           <li><strong><kbd>u</kbd> takes back only what you typed.</strong> It never removes Minga's lines. Those leave one way: you reject the change with <kbd>SPC a d</kbd>.</li>

@@ -46,7 +46,7 @@ export function mountCoAuthorSim(root: HTMLElement): void {
     }
     for (const el of editTexts) el.hidden = (el.dataset.caText === "edit") !== state.edited;
     play.hidden = nextKeys(state) === null;
-    caption.show(state.caption, captionKeysText(state));
+    caption.show(state.caption, captionKeysText(state), state.presses);
     stepper.update(currentStep(state) ?? "", doneSteps(state));
     keycast.update(state.keycast);
   }

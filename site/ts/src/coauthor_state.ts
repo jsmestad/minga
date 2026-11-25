@@ -9,6 +9,7 @@ import { createKeycast, keycastPush, type KeycastState } from "./lab/keycast.ts"
 import { stepPrefix } from "./lab/stage.ts";
 
 export type StepId = "find" | "edit_undo" | "reject" | "keep";
+/** The four steps. They are also the lesson's progress ids: LESSON_STEPS.agents in progress.ts lists the same ids, and a test holds the two together. */
 export const STEP_IDS: readonly StepId[] = ["find", "edit_undo", "reject", "keep"];
 
 /** A step holds one or two moves. "finished" comes after the last step. */
@@ -26,6 +27,9 @@ export const COMMAND_KEYS: Readonly<Record<Command, readonly string[]>> = {
   reject: ["SPC", "a", "d"],
   keep: ["SPC", "a", "y"],
 };
+
+/** Cancels a command that is waiting for its next key. */
+export const CANCEL_KEY = "ESC";
 
 const COMMANDS = Object.keys(COMMAND_KEYS) as Command[];
 const SEQUENCES: readonly (readonly string[])[] = COMMANDS.map((command) => COMMAND_KEYS[command]);
@@ -77,6 +81,8 @@ export type CaptionId =
   | "pending"
   | `unhandled_${WaitingMove}`
   | `wrong_${WaitingMove}`
+  | `cancelled_${WaitingMove}`
+  | "nothing_to_undo"
   | "after_done";
 
 const WAITING_MOVES = MOVES.filter((move): move is WaitingMove => move !== "finished");
@@ -92,6 +98,8 @@ export const CAPTION_IDS: readonly CaptionId[] = [
   "pending",
   ...WAITING_MOVES.map((move): CaptionId => `unhandled_${move}`),
   ...WAITING_MOVES.map((move): CaptionId => `wrong_${move}`),
+  ...WAITING_MOVES.map((move): CaptionId => `cancelled_${move}`),
+  "nothing_to_undo",
   "after_done",
 ];
 
@@ -105,6 +113,8 @@ export interface CoAuthorState {
   /** The keys the caption names: the sequence just pressed, or the prefix still waiting. */
   readonly captionKeys: readonly string[];
   readonly keycast: KeycastState;
+  /** How many keys the lab has taken. The caption line draws again for each one, so a repeated key is still answered. */
+  readonly presses: number;
 }
 
 export function createCoAuthorState(): CoAuthorState {
@@ -116,6 +126,7 @@ export function createCoAuthorState(): CoAuthorState {
     caption: "rest",
     captionKeys: [],
     keycast: createKeycast(),
+    presses: 0,
   };
 }
 
@@ -148,6 +159,8 @@ function applyMove(state: CoAuthorState, move: WaitingMove): Pick<CoAuthorState,
 
 function runCommand(state: CoAuthorState, command: Command, keys: readonly string[]): CoAuthorState {
   if (state.move === "finished") return { ...state, caption: "after_done", captionKeys: keys };
+  // The learner has just undone the one edit. A second undo is the proof of the lesson: it finds nothing of theirs, and Minga's lines stay.
+  if (state.move === "reject" && command === "undo") return { ...state, caption: "nothing_to_undo", captionKeys: keys };
   if (MOVE_SPECS[state.move].expects !== command) return { ...state, caption: `wrong_${state.move}`, captionKeys: keys };
   return { ...state, ...applyMove(state, state.move), move: nextMove(state.move), captionKeys: keys };
 }
@@ -159,11 +172,18 @@ export interface KeyResult {
 }
 
 /** Feeds one key press, named the way the lab stage names keys, into the lab. */
-export function pressKey(state: CoAuthorState, key: string): KeyResult {
-  const step = stepPrefix(SEQUENCES, state.keycast.pending, key);
+export function pressKey(before: CoAuthorState, key: string): KeyResult {
+  const state: CoAuthorState = { ...before, presses: before.presses + 1 };
+  const waiting = state.keycast.pending;
+  const step = stepPrefix(SEQUENCES, waiting, key);
   const keycast = keycastPush(state.keycast, step);
   if (step.status === "pending") {
     return { state: { ...state, keycast, caption: "pending", captionKeys: step.keys }, handled: true };
+  }
+  if (key === CANCEL_KEY && waiting.length > 0) {
+    // Escape drops the command the learner had started. The caption names the keys that were dropped, not Escape.
+    const caption: CaptionId = state.move === "finished" ? "after_done" : `cancelled_${state.move}`;
+    return { state: { ...state, keycast, caption, captionKeys: waiting }, handled: true };
   }
   if (step.status === "unknown") {
     const caption: CaptionId = state.move === "finished" ? "after_done" : `unhandled_${state.move}`;

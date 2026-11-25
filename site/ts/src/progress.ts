@@ -4,12 +4,37 @@ const STORAGE_KEY = "minga-learn-progress-v1";
 
 export type LessonId = "editing" | "agents" | "elixir" | "remote";
 
-export const LESSON_TOTALS: Record<LessonId, number> = {
-  editing: 5,
-  agents: 4,
-  elixir: 3,
-  remote: 3,
+/**
+ * The progress ids of each lesson, in order: one id for each step or mission its lab can complete. The hub counts against this list and a lab records ids from it.
+ * A lab that changes its steps changes its list here. Ids left in a visitor's storage from an older lab are not in the list, so they no longer count.
+ */
+export const LESSON_STEPS: Readonly<Record<LessonId, readonly string[]>> = {
+  editing: ["which_key", "pin_file", "act_menu", "parity", "dismiss"],
+  agents: ["find", "edit_undo", "reject", "keep"],
+  elixir: ["translator", "theme_preview", "preset"],
+  remote: ["detach_reattach", "mcp_crash", "pretooluse_veto"],
 };
+
+function isLessonId(lesson: string): lesson is LessonId {
+  return Object.hasOwn(LESSON_STEPS, lesson);
+}
+
+export interface LessonSummary {
+  readonly done: number;
+  readonly total: number;
+}
+
+/**
+ * Counts a lesson's progress in a stored map. Only the lesson's current ids count, each once.
+ * An id from an older lab, a lesson that does not exist and a stored value of the wrong shape all count as nothing.
+ */
+export function summarizeLesson(stored: unknown, lesson: string): LessonSummary {
+  if (!isLessonId(lesson)) return { done: 0, total: 0 };
+  const steps = LESSON_STEPS[lesson];
+  const list: unknown = stored !== null && typeof stored === "object" ? (stored as Record<string, unknown>)[lesson] : undefined;
+  const have = new Set(Array.isArray(list) ? list : []);
+  return { done: steps.filter((id) => have.has(id)).length, total: steps.length };
+}
 
 type ProgressMap = Partial<Record<LessonId, string[]>>;
 
@@ -57,8 +82,6 @@ export function clearLessonProgress(lesson: LessonId): void {
   writeMap(map);
 }
 
-export function getLessonSummary(lesson: LessonId): { done: number; total: number } {
-  const total = LESSON_TOTALS[lesson];
-  const done = Math.min(total, getCompletedMissions(lesson).size);
-  return { done, total };
+export function getLessonSummary(lesson: LessonId): LessonSummary {
+  return summarizeLesson(readMap(), lesson);
 }

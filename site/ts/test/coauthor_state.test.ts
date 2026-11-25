@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { missing, readPageLab } from "./support/page_copy.ts";
 import {
+  CANCEL_KEY,
   CAPTION_IDS,
   CHANGE_LINES,
   COMMAND_KEYS,
@@ -154,12 +155,27 @@ describe("same-file lab: steps complete only in order", () => {
         assert.equal(result.handled, true);
         assert.deepEqual(substance(result.state), substance(state));
         assert.equal(file(result.state), file(state));
-        assert.equal(result.state.caption, state.move === "finished" ? "after_done" : `wrong_${state.move}`);
+        const secondUndo = state.move === "reject" && command === "undo";
+        assert.equal(result.state.caption, state.move === "finished" ? "after_done" : secondUndo ? "nothing_to_undo" : `wrong_${state.move}`);
         assert.deepEqual(result.state.captionKeys, keys);
         assert.deepEqual(result.state.keycast.recent.at(-1), keys);
       });
     }
   }
+
+  it("a second undo finds nothing of the learner's, leaves Minga's lines, and says so", () => {
+    const undone = run(createCoAuthorState(), "next_change", "edit", "undo");
+    const again = pressKey(undone, "u");
+    assert.equal(again.handled, true);
+    assert.equal(again.state.caption, "nothing_to_undo");
+    assert.deepEqual(substance(again.state), substance(undone));
+    assert.equal(file(again.state), `${TOP} ${FIRST} slow:you ${SECOND}`);
+    // Only straight after the undo. Anywhere else an undo out of order is an ordinary wrong key.
+    assert.deepEqual(
+      atEachMove().map((state) => run(state, "undo").caption === "nothing_to_undo"),
+      MOVES.map((move) => move === "reject"),
+    );
+  });
 
   it("the same command twice does not skip a move", () => {
     const twice = run(createCoAuthorState(), "next_change", "next_change");
@@ -183,6 +199,15 @@ describe("same-file lab: a key the lab does not bind", () => {
       }
     });
   }
+
+  it("counts every press, so the caption line can answer the same key twice", () => {
+    const once = press(createCoAuthorState(), "j");
+    const twice = press(once, "j");
+    assert.equal(twice.caption, once.caption);
+    assert.deepEqual(twice.captionKeys, once.captionKeys);
+    assert.deepEqual([createCoAuthorState().presses, once.presses, twice.presses], [0, 1, 2]);
+    assert.equal(run(createCoAuthorState(), "reject").presses, 3);
+  });
 
   it("names each key in turn under one caption id", () => {
     let state = createCoAuthorState();
@@ -236,6 +261,28 @@ describe("same-file lab: commands of more than one key", () => {
     assert.equal(captionKeysText(createCoAuthorState()), "");
   });
 
+  it("Escape cancels a command that is waiting: the prefix goes, the file stays, and the caption names the dropped keys and the move", () => {
+    for (const state of atEachMove()) {
+      for (const prefix of [["]"], ["SPC"], ["SPC", "a"]]) {
+        const result = pressKey(press(state, ...prefix), CANCEL_KEY);
+        assert.equal(result.handled, true);
+        assert.equal(result.state.caption, state.move === "finished" ? "after_done" : `cancelled_${state.move}`);
+        assert.deepEqual(result.state.captionKeys, prefix);
+        assert.deepEqual(result.state.keycast.pending, []);
+        assert.deepEqual(substance(result.state), substance(state));
+        // The cancelled prefix is gone for good: the move's own command still runs from a clean start.
+        const next = nextKeys(state);
+        if (next) assert.equal(press(result.state, ...next).move, MOVES[MOVES.indexOf(state.move) + 1]);
+      }
+    }
+  });
+
+  it("Escape with nothing waiting is a key the lab does not bind", () => {
+    const result = pressKey(createCoAuthorState(), CANCEL_KEY);
+    assert.equal(result.handled, false);
+    assert.equal(result.state.caption, "unhandled_find");
+  });
+
   it("every command is reachable one key at a time, and only its last key runs it", () => {
     const states = atEachMove();
     for (const [i, command] of PATH.entries()) {
@@ -277,6 +324,7 @@ describe("same-file lab: the page holds the words for every id the state emits",
     for (const state of atEachMove()) {
       seen.add(state.caption);
       for (const key of ["j", "]", "SPC"]) seen.add(pressKey(state, key).state.caption);
+      seen.add(press(state, "SPC", CANCEL_KEY).caption);
       for (const command of COMMANDS) seen.add(run(state, command).caption);
     }
     return [...seen];
