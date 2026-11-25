@@ -26,7 +26,7 @@ defmodule Minga.Session.Swap.Recovery do
   @typedoc """
   One swap file with unsaved text that is waiting, with what a person needs to decide about it.
 
-  `project` is the canonical root of the project the file is in, or `nil`. `lines` counts the lines of the unsaved text. `changed_lines` counts the lines that differ from the file on disk; it is `nil` when the file is gone or cannot be read, or when either text is too long to compare cheaply.
+  `project` is the canonical root of the project the file is in, or `nil`. `lines` counts the lines of the unsaved text. `changed_lines` counts the lines that differ from the file on disk (a rewritten line counts once); it is `nil` when the file is gone or cannot be read, or when either text is too long to compare cheaply.
   """
   @type waiting_entry :: %{
           path: String.t(),
@@ -155,11 +155,12 @@ defmodule Minga.Session.Swap.Recovery do
   def waiting(opts \\ []) do
     dir = Swap.swap_dir(opts)
     pid_alive? = Keyword.get(opts, :pid_alive?, &Swap.pid_alive?/1)
+    owner_alive? = owner_check(opts)
 
     case File.ls(dir) do
       {:ok, files} ->
         dir
-        |> verdicts(files, pid_alive?)
+        |> verdicts(files, pid_alive?, owner_alive?)
         |> Enum.flat_map(fn
           {:recoverable, entry} -> waiting_entry(entry)
           _other -> []
@@ -362,19 +363,24 @@ defmodule Minga.Session.Swap.Recovery do
     end
   end
 
-  # The number of lines of the unsaved text that the file does not have, plus the lines of the file that it dropped.
+  # A rewritten line is one line the unsaved text added and one it dropped, and counts once:
+  # the larger of the two totals is the number of lines a person would say differ.
   @spec changed_lines({:ok, binary()} | {:error, term()}, [String.t()]) ::
           non_neg_integer() | nil
   defp changed_lines({:ok, text}, unsaved) when length(unsaved) <= @max_compared_lines do
     saved = String.split(text, "\n")
 
     if length(saved) <= @max_compared_lines do
-      saved
-      |> List.myers_difference(unsaved)
-      |> Enum.reduce(0, fn
-        {:eq, _lines}, count -> count
-        {_ins_or_del, lines}, count -> count + length(lines)
-      end)
+      {added, dropped} =
+        saved
+        |> List.myers_difference(unsaved)
+        |> Enum.reduce({0, 0}, fn
+          {:eq, _lines}, counts -> counts
+          {:ins, lines}, {added, dropped} -> {added + length(lines), dropped}
+          {:del, lines}, {added, dropped} -> {added, dropped + length(lines)}
+        end)
+
+      max(added, dropped)
     end
   end
 

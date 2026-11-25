@@ -1,0 +1,143 @@
+defmodule MingaEditor.UnsavedTextListTest do
+  @moduledoc """
+  `SPC q u` lists unsaved text that no start recovers by itself. A row can be recovered into a buffer for its file, or discarded after a confirmation.
+  """
+
+  # The list decides which swap owners are gone with the real check, which runs `ps`.
+  use Minga.Test.EditorCase, async: false, rendering: :disabled
+
+  alias Minga.Buffer
+  alias Minga.Session.Swap
+
+  @moduletag :tmp_dir
+  @moduletag capture_log: true
+
+  # No process has this id, so a swap written under it belongs to an editor that is gone.
+  @dead_editor 99_999_999
+
+  setup %{tmp_dir: dir} do
+    other = Path.join(dir, "other_project")
+    File.mkdir_p!(Path.join(other, "lib"))
+    File.write!(Path.join(other, "mix.exs"), "")
+    file = Path.join(other, "lib/notes.ex")
+    File.write!(file, "saved\n")
+    swap_dir = Path.join(dir, "swap")
+
+    %{notes: file, gone: Path.join(other, "lib/deleted_dir/gone.ex"), swap_dir: swap_dir}
+  end
+
+  test "the list shows what is waiting, and a row is recovered into a buffer for its file", ctx do
+    swap = leftover_swap(ctx, ctx.notes, "unsaved in another project\n")
+    editor = start_editor("scratch", swap_dir: ctx.swap_dir)
+
+    open_list(editor)
+
+    assert [%{label: "lib/notes.ex", description: "1 line differs"} = row] = rows(editor)
+    assert row.group =~ "other_project"
+    assert row.annotation == "just now"
+
+    send_keys_sync(editor, "<CR>")
+
+    {:ok, buffer} = Buffer.pid_for_path(ctx.notes)
+    on_exit(fn -> DynamicSupervisor.terminate_child(Minga.Buffer.Supervisor, buffer) end)
+    assert Buffer.content(buffer) == "unsaved in another project\n"
+    assert Buffer.dirty?(buffer)
+    assert active_buffer(editor) == buffer
+    assert notice_message(editor) =~ "Recovered the unsaved text of notes.ex"
+    # The buffer holds the text now, so the swap it came from is gone and the list is empty.
+    refute File.exists?(swap)
+    assert File.read!(ctx.notes) == "saved\n"
+
+    open_list(editor)
+    assert [%{id: :empty, label: "No unsaved text is waiting"}] = rows(editor)
+  end
+
+  test "text whose file and directory are gone is recovered into a buffer for that path", ctx do
+    leftover_swap(ctx, ctx.gone, "typed for an hour\n")
+    editor = start_editor("scratch", swap_dir: ctx.swap_dir)
+
+    open_list(editor)
+    assert [%{description: "2 lines, the file is gone"}] = rows(editor)
+    send_keys_sync(editor, "<CR>")
+
+    {:ok, buffer} = Buffer.pid_for_path(ctx.gone)
+    on_exit(fn -> DynamicSupervisor.terminate_child(Minga.Buffer.Supervisor, buffer) end)
+    assert Buffer.file_path(buffer) == ctx.gone
+    assert Buffer.content(buffer) == "typed for an hour\n"
+    assert active_buffer(editor) == buffer
+  end
+
+  test "discard asks first, says what goes, and deletes only on yes", ctx do
+    swap = leftover_swap(ctx, ctx.notes, "one\ntwo\n")
+    editor = start_editor("scratch", swap_dir: ctx.swap_dir)
+
+    open_list(editor)
+    choose_discard(editor)
+
+    assert prompt_label(editor) ==
+             "Delete the unsaved text of notes.ex (3 lines)? It cannot be undone. (y/n): "
+
+    # Anything but yes keeps the text.
+    send_keys_sync(editor, "n<CR>")
+    assert notice_message(editor) == "Kept the unsaved text of notes.ex"
+    assert File.exists?(swap)
+
+    open_list(editor)
+    choose_discard(editor)
+    send_keys_sync(editor, "y<CR>")
+
+    assert notice_message(editor) == "Deleted the unsaved text of notes.ex"
+    refute File.exists?(swap)
+    assert Buffer.pid_for_path(ctx.notes) == :not_found
+    assert File.read!(ctx.notes) == "saved\n"
+  end
+
+  test "a file with unsaved changes of its own keeps them, and the waiting text stays", ctx do
+    swap = leftover_swap(ctx, ctx.notes, "from before the crash\n")
+    editor = start_editor("scratch", swap_dir: ctx.swap_dir)
+    {:ok, buffer} = Buffer.ensure_for_path(ctx.notes)
+    on_exit(fn -> DynamicSupervisor.terminate_child(Minga.Buffer.Supervisor, buffer) end)
+    :ok = Buffer.replace_content(buffer, "typed since\n")
+
+    open_list(editor)
+    send_keys_sync(editor, "<CR>")
+
+    assert Buffer.content(buffer) == "typed since\n"
+    assert File.exists?(swap)
+    assert notice_message(editor) =~ "notes.ex has unsaved changes of its own"
+  end
+
+  defp open_list(editor) do
+    send_keys_sync(editor, "<SPC>qu")
+
+    wait_until(editor, fn _state -> rows(editor) != [] end,
+      max_attempts: 200,
+      message: "the list of waiting unsaved text did not load"
+    )
+  end
+
+  defp rows(editor) do
+    case picker_state(editor) do
+      nil -> []
+      picker -> picker.filtered
+    end
+  end
+
+  # The act menu lists Recover first and Discard second.
+  defp choose_discard(editor), do: send_keys_sync(editor, "<C-.><C-j><CR>")
+
+  defp prompt_label(editor) do
+    case editor_state(editor).shell_runtime.state.modal do
+      {:prompt, %{prompt_ui: %{label: label}}} -> label
+      other -> flunk("expected a prompt, got #{inspect(other, limit: 3)}")
+    end
+  end
+
+  # Writes the swap that a killed editor left for the file.
+  defp leftover_swap(ctx, path, content) do
+    opts = [swap_dir: ctx.swap_dir, os_pid: @dead_editor]
+    {:ok, prepared} = Swap.prepare(path, content, opts)
+    :ok = Swap.publish(prepared)
+    Swap.swap_path(path, opts)
+  end
+end

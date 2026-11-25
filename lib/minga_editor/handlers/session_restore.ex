@@ -78,11 +78,11 @@ defmodule MingaEditor.Handlers.SessionRestore do
     name = Path.basename(path)
 
     with {:ok, file_path, content} <- Session.read_swap_file(swap_path),
-         {:ok, state} <- adopt(state, file_path, content, swap_path) do
+         {:ok, buffer} <- adopt(state, file_path, content, swap_path) do
       Minga.Log.info(:editor, "Recovered unsaved text: #{file_path}")
 
       state
-      |> show_in_front(file_path)
+      |> show_in_front(buffer, file_path)
       |> NoticeWorkflow.publish(
         "Recovered the unsaved text of #{name}: save to keep it, undo to drop it"
       )
@@ -381,9 +381,9 @@ defmodule MingaEditor.Handlers.SessionRestore do
           {state(), non_neg_integer()}
   defp recover_entry({entry, {:ok, file_path, content}}, {state, count}) do
     case adopt(state, file_path, content, entry.swap_path) do
-      {:ok, state} ->
+      {:ok, buffer} ->
         Minga.Log.info(:editor, "Recovered unsaved text: #{file_path}")
-        {state, count + 1}
+        {show_recovered(state, buffer, file_path), count + 1}
 
       {:error, reason} ->
         Minga.Log.warning(
@@ -417,11 +417,11 @@ defmodule MingaEditor.Handlers.SessionRestore do
 
   # Gives the text to the buffer for the file: the one that is already open, or a new one.
   # A file that no longer exists gets a buffer for its path, so the text can be saved back.
-  @spec adopt(state(), String.t(), String.t(), String.t()) :: {:ok, state()} | {:error, term()}
+  @spec adopt(state(), String.t(), String.t(), String.t()) :: {:ok, pid()} | {:error, term()}
   defp adopt(state, file_path, content, swap_path) do
     with {:ok, buffer} <- buffer_for(state, file_path),
          :ok <- Buffer.adopt_recovered_text(buffer, content, swap_path) do
-      {:ok, show_recovered(state, buffer, file_path)}
+      {:ok, buffer}
     end
   catch
     # The buffer can stop between its lookup or start and the call.
@@ -442,11 +442,12 @@ defmodule MingaEditor.Handlers.SessionRestore do
     end
   end
 
-  @spec show_in_front(state(), String.t()) :: state()
-  defp show_in_front(state, file_path) do
+  # The user asked for this text, so its file takes the screen.
+  @spec show_in_front(state(), pid(), String.t()) :: state()
+  defp show_in_front(state, buffer, file_path) do
     case BufferRegistry.file_tab_for_path_in_active_workspace(state, file_path) do
       %{id: tab_id} -> MingaEditor.TabWorkflow.switch(state, tab_id)
-      nil -> state
+      nil -> BufferRegistry.register_buffer(state, buffer, file_path)
     end
   end
 
