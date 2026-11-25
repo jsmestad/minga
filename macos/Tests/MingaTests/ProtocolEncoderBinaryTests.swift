@@ -177,6 +177,19 @@ struct EncoderNativeFileDialogTests {
     }
 }
 
+// MARK: - Frontend foreground event
+
+@Suite("Encoder Binary: Frontend foreground")
+struct EncoderFrontendForegroundTests {
+    @Test("the app's place is one byte after the opcode: 1 in the foreground, 0 in the background", arguments: [(true, UInt8(1)), (false, UInt8(0))])
+    func layout(foreground: Bool, byte: UInt8) {
+        let payload = captureFrame { $0.send(.frontendForeground(foreground)) }
+
+        #expect(payload == Data([OP_FRONTEND_FOREGROUND, byte]))
+        #expect(OP_FRONTEND_FOREGROUND == 0x13)
+    }
+}
+
 // MARK: - Ready event
 
 @Suite("Encoder Binary: Ready")

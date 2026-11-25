@@ -50,7 +50,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 
 **Text encoding:** All text fields (titles, language names, query source, semantic content) are UTF-8 encoded.
 
-**Protocol version:** The schema carries a `protocol_version` integer (currently 46). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. See [Protocol Version Negotiation](#protocol-version-negotiation) and [GUI_PROTOCOL.md](GUI_PROTOCOL.md).
+**Protocol version:** The schema carries a `protocol_version` integer (currently 47). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. See [Protocol Version Negotiation](#protocol-version-negotiation) and [GUI_PROTOCOL.md](GUI_PROTOCOL.md).
 
 ---
 
@@ -64,7 +64,6 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 |--------|------|------|-------------|
 | `0x10` | begin_frame | 13 | Open a generation-aware frame transaction (frame_seq + base_frame_seq + generation); see Frame Transactions |
 | `0x11` | commit_frame | 9 | Close a frame transaction; promote staging and present (frame_seq + input_seq) |
-| `0x13` | _(reserved)_ | — | Freed by retiring batch_end in v3; do not reassign before a version bump past 3 |
 | `0x14` | renderer_shutdown | 1 | Ask a spawned terminal renderer to restore the terminal and exit |
 | `0x15` | set_cursor_shape | 2 | Change cursor appearance |
 | `0x16` | set_title | 3 + title_len | Set the window/terminal title |
@@ -111,6 +110,8 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 | `0x1E` | editor_text_event | 33 | Pointer target in an immutable displayed text row |
 | `0x1F` | text_presentation_state | 12 | Ordered active/discarded text presentation lifetime |
 | `0x05` | capabilities_updated | 9 or 23 | Updated versioned capabilities after async detection |
+| `0x13` | frontend_foreground | 2 | Whether the frontend is in the foreground: terminal window focus, or the macOS app's active state |
+| `0x62` | terminal_report | 4 + 2 per feature | The terminal frontend's snapshot of its host terminal's features |
 | `0x08` | request_keyframe | 9 | Ask the BEAM to start a fresh recovery generation (last_good_frame_seq + failed generation) |
 | `0x09` | scroll_batch | 6 | Pane-targeted vertical wheel or trackpad displacement |
 | `0x0A` | frame_applied | 9 | Report semantic publication of a complete frame |
@@ -154,10 +155,6 @@ The cell-paradigm render opcodes (`draw_text` 0x10, `set_cursor` 0x11, `clear` 0
 ### `0x10` begin_frame / `0x11` commit_frame
 
 Frame transaction markers. See the "Frame Transactions" section for the full wire shapes, invalidation rules, and keyframe semantics.
-
-### `0x13` _(reserved; batch_end retired in protocol_version 3)_
-
-`batch_end` (0x13) was the single per-frame terminator before protocol_version 3. It was retired in #2219 child B: its echoed input-correlation u32 (ticket #2215) moved verbatim onto `commit_frame`, and the begin/commit transaction pair now brackets every frame. The 0x13 slot is reserved and must not be reassigned before a version bump past 3 (the freed-value reuse policy).
 
 ### `0x15` set_cursor_shape
 
@@ -964,6 +961,39 @@ max_window_rows:        u32
 Capability format 2 has 20 payload bytes (23 bytes including opcode/version/length).
 
 **Behavior:** The BEAM updates its stored capabilities for this frontend. No re-render is triggered; the updated caps take effect on the next frame.
+
+
+### `0x13` frontend_foreground
+
+Whether the frontend is in the foreground. The slot was `batch_end` until protocol_version 3 and was free for reuse after that version.
+
+```
+opcode:      u8  = 0x13
+foreground:  u8    (1 = in the foreground, 0 = in the background)
+```
+
+The terminal frontend turns on focus reporting (mode 1004) and sends the event when the terminal reports that its window got or lost the focus. macOS sends it once after `ready` and whenever the app becomes active or resigns. This is not keyboard focus inside the editor, which is `gui_focus_owner`.
+
+The BEAM keeps `:foreground`, `:background` or `:unknown` (`MingaEditor.State.Frontend.foreground/1`). It is `:unknown` until a frontend reports and again after every `ready`, and a terminal without focus reporting never reports. A reader matches all three values. For anything that would interrupt the user, `:unknown` counts as the foreground: a notification that is not sent is the safe side. The Editor broadcasts `:frontend_foreground_changed` (`Minga.Events.FrontendForegroundChangedEvent`) on every change, so code below the editor layer subscribes instead of asking the Editor.
+
+### `0x62` terminal_report
+
+The terminal frontend's report of its host terminal's features. A frontend without a host terminal never sends it.
+
+```
+opcode:    u8  = 0x62
+body_len:  u16
+count:     u8
+count x:
+  feature: u8    (terminal_feature: 1 true_color, 2 styled_underlines, 3 underline_color, 4 hyperlinks,
+                  5 kitty_keyboard, 6 desktop_notifications, 7 tab_title, 8 tab_progress, 9 kitty_graphics,
+                  10 synchronized_output, 11 focus_reporting, 12 clipboard_osc52)
+  status:  u8    (terminal_feature_status: 0 unknown, 1 pending, 2 detected, 3 missing, 4 fallback)
+```
+
+Every event is a complete snapshot and replaces the BEAM's copy (`MingaEditor.Frontend.TerminalReport`). The frontend sends it right after `ready`, with `pending` for every feature it has asked the terminal about, then once more when the terminal has answered or two seconds have passed, and again if a later answer changes an entry. After the two seconds no entry is `pending`: a feature the terminal did not answer for is `fallback` when Minga has a replacement and `missing` when it has none. A feature the frontend does not list is `unknown` on the BEAM, as is a feature id this BEAM does not know, which it skips.
+
+The frontend builds one value from the terminal's answers and uses it for its own choices and for this report, so what the BEAM lists is what the frontend does. The capability bytes of `ready` are unchanged: they describe what the BEAM adapts its rendering to, and it adapts to none of these features.
 
 ### Capability Fields
 

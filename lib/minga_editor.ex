@@ -908,6 +908,7 @@ defmodule MingaEditor do
   end
 
   def handle_info({:minga_input, {:terminal_report, report}}, %MingaEditor.State{} = state) do
+    Log.debug(:port, fn -> "Terminal report: #{inspect(Enum.sort(report.features))}" end)
     {:noreply, MingaEditor.State.accept_terminal_report(state, report)}
   end
 
@@ -2196,6 +2197,8 @@ defmodule MingaEditor do
   @spec announce_frontend_foreground(MingaEditor.State.t(), :foreground | :background | :unknown) ::
           MingaEditor.State.t()
   defp announce_frontend_foreground(%MingaEditor.State{} = state, status) do
+    Log.debug(:port, "Frontend foreground: #{status}")
+
     EventBus.broadcast(
       :frontend_foreground_changed,
       %Minga.Events.FrontendForegroundChangedEvent{status: status},

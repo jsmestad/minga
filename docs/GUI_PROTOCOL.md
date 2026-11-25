@@ -1587,6 +1587,8 @@ When `visible` is `0`, the payload is only `visible(1)` and the frontend clears 
 
 ### 0xAA: gui_focus_owner
 
+This is keyboard focus inside the editor. Whether the frontend itself is in the foreground (the terminal window has the focus, or the macOS app is active) is a separate fact the frontend reports with `frontend_foreground`; see [`PROTOCOL.md`](PROTOCOL.md#0x13-frontend_foreground).
+
 When a picker opens while Minga is in the background, bringing its window forward must focus the picker query, not the editor. The BEAM names the keyboard owner so native lifecycle events restore the right responder without guessing from the view hierarchy.
 
 Protocol version 30 adds focused hover and the empty launchpad to the existing surface table below. Version 29 native clients reject values 12 and 13, so the exact `ready` version handshake rejects those clients before any frames are streamed. The opcode and ten-byte payload shape are unchanged.
