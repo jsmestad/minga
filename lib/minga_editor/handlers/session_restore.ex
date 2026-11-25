@@ -32,7 +32,7 @@ defmodule MingaEditor.Handlers.SessionRestore do
           {Session.swap_entry(), {:ok, String.t(), String.t()} | {:error, term()}}
 
   @typedoc """
-  What one start has to pick up: the project's saved session, the unsaved text of its swap files, and how many other places have unsaved text waiting.
+  What one start has to pick up: the project's saved session, the unsaved text of its swap files, the swap files it holds back, and how many other files have unsaved text waiting.
   """
   @type resume :: %{
           snapshot: Snapshot.t() | nil,
@@ -280,16 +280,19 @@ defmodule MingaEditor.Handlers.SessionRestore do
     end)
   end
 
-  # Unsaved text of other projects is never recovered into this one, so say that it exists.
+  # Unsaved text that belongs somewhere else is never recovered into this start, so say that it exists.
   @spec announce_waiting_elsewhere(non_neg_integer()) :: :ok
   defp announce_waiting_elsewhere(0), do: :ok
 
-  defp announce_waiting_elsewhere(1),
-    do: Minga.API.message("Unsaved text from 1 other project is waiting; open it to recover it")
+  defp announce_waiting_elsewhere(1) do
+    Minga.API.message(
+      "Unsaved text of 1 other file is waiting; open its project or the file to recover it"
+    )
+  end
 
   defp announce_waiting_elsewhere(count) do
     Minga.API.message(
-      "Unsaved text from #{count} other projects is waiting; open them to recover it"
+      "Unsaved text of #{count} other files is waiting; open their project or the files to recover it"
     )
   end
 

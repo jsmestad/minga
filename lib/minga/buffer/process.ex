@@ -535,14 +535,19 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:adopt_recovered_text, content, swap_path}, @file_io_call_timeout)
   end
 
+  # A quit must not wait long on a buffer that is busy with slow file work.
+  @swap_release_timeout 2_000
+
   @doc """
   Stops swap writes and removes this buffer's swap file in `swap_dir`, because the user is quitting on purpose.
 
+  The call gives up after `timeout` (2 seconds by default). A buffer that did not answer keeps its swap file, and the next start offers that text again: that is better than a quit that hangs.
+
   The supervisor stops buffers without running `terminate/2`, so a quit has to ask. After this call the buffer writes no swap file again. A buffer that writes into another directory, or writes no swap files, is left as it is.
   """
-  @spec release_swap(GenServer.server(), String.t()) :: :ok
-  def release_swap(server, swap_dir) when is_binary(swap_dir),
-    do: GenServer.call(server, {:release_swap, swap_dir}, @file_io_call_timeout)
+  @spec release_swap(GenServer.server(), String.t(), timeout()) :: :ok
+  def release_swap(server, swap_dir, timeout \\ @swap_release_timeout) when is_binary(swap_dir),
+    do: GenServer.call(server, {:release_swap, swap_dir}, timeout)
 
   @doc "Atomically replaces content at `expected_version`, preserving the nearest valid cursor position."
   @spec replace_content_if_version(
@@ -1933,7 +1938,7 @@ defmodule Minga.Buffer.Process do
         {:reply, {:error, :modified}, state}
 
       true ->
-        state = replace_content_state(state, content, :recovery)
+        state = put_recovered_text(state, content)
         :ok = take_over_recovered_swap(state, swap_path)
         {:reply, :ok, state}
     end
@@ -3188,7 +3193,7 @@ defmodule Minga.Buffer.Process do
       swap_path = Minga.Session.Swap.swap_path(path, SwapState.backend_options(state.swap, 0))
 
       case Minga.Session.Swap.read(swap_path) do
-        {:ok, %{path: ^path}, content} -> take_kept_text(state, content, swap_path)
+        {:ok, %{path: ^path} = kept, content} -> take_kept_text(state, content, kept)
         _no_kept_swap -> state
       end
     else
@@ -3198,8 +3203,8 @@ defmodule Minga.Buffer.Process do
 
   defp take_kept_swap(state), do: state
 
-  @spec take_kept_text(state(), binary(), String.t()) :: state()
-  defp take_kept_text(state, content, swap_path) do
+  @spec take_kept_text(state(), binary(), Minga.Session.Swap.metadata()) :: state()
+  defp take_kept_text(state, content, %{swap_path: swap_path} = kept) do
     if Document.content(state.document) == content do
       :ok = remove_recovered_swap(state, swap_path, nil)
       state
@@ -3209,8 +3214,34 @@ defmodule Minga.Buffer.Process do
         "Opened #{state.file_path} with the unsaved text that its crashed buffer left in #{swap_path}"
       )
 
-      replace_content_state(state, content, :recovery)
+      :ok = warn_if_file_is_newer(state, kept)
+      put_recovered_text(state, content)
     end
+  end
+
+  # The swap name carries the OS process id, and a later run can get the id of a run that crashed.
+  # Its leftover swap then looks like this run's own. The text is still shown, never saved unasked,
+  # and the log says that the file is newer, so the user knows which of the two to keep.
+  @spec warn_if_file_is_newer(state(), Minga.Session.Swap.metadata()) :: :ok
+  defp warn_if_file_is_newer(%{file_path: path}, %{mtime: kept_at}) do
+    case File.stat(path, time: :posix) do
+      {:ok, %File.Stat{mtime: saved_at}} when saved_at > kept_at ->
+        Minga.Log.warning(
+          :editor,
+          "#{path} was saved after that unsaved text was kept: undo brings back the file's text"
+        )
+
+      _older_or_missing ->
+        :ok
+    end
+  end
+
+  # Recovered text is shown, never saved on its own. Auto-save would write it over the file about a second
+  # after it appears, before anyone has looked at it, and over a change the file got in the meantime.
+  # The next edit or an explicit save is the user's decision, and auto-save resumes from there.
+  @spec put_recovered_text(state(), binary()) :: state()
+  defp put_recovered_text(state, content) do
+    state |> replace_content_state(content, :recovery) |> cancel_auto_save_timer()
   end
 
   # Makes this buffer's own swap file hold the recovered text before the swap it came from is removed.

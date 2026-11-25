@@ -440,21 +440,24 @@ defmodule Minga.Buffer do
   @doc """
   Stops swap writes in every file buffer that writes into `swap_dir` and removes their swap files, because the user is quitting on purpose.
 
+  Each buffer gets `timeout` (2 seconds by default) to answer. One that is too busy keeps its swap file, and the next start offers that text again, which is better than a quit that hangs.
+
   A swap file is kept for text the user never decided about: after a crash, a kill, or a lost frontend. A quit that saves or discards is a decision, so nothing of this run may be recovered on the next start. A swap kept by a buffer that crashed earlier in this run is not touched: that text was never saved or discarded.
   """
-  @spec release_swaps(String.t()) :: :ok
-  def release_swaps(swap_dir) when is_binary(swap_dir) do
+  @spec release_swaps(String.t(), timeout()) :: :ok
+  def release_swaps(swap_dir, timeout \\ 2_000) when is_binary(swap_dir) do
     Minga.Buffer.Registry
     |> Registry.select([{{:_, :"$1", :_}, [], [:"$1"]}])
     |> Enum.uniq()
-    |> Enum.each(&release_swap(&1, swap_dir))
+    |> Enum.each(&release_swap(&1, swap_dir, timeout))
   end
 
-  @spec release_swap(pid(), String.t()) :: :ok
-  defp release_swap(buffer, swap_dir) do
-    BufferProcess.release_swap(buffer, swap_dir)
+  @spec release_swap(pid(), String.t(), timeout()) :: :ok
+  defp release_swap(buffer, swap_dir, timeout) do
+    BufferProcess.release_swap(buffer, swap_dir, timeout)
   catch
-    # A buffer can stop while the editor quits. Its swap is then handled by its own `terminate/2`.
+    # A buffer can stop while the editor quits; its own `terminate/2` then handles its swap.
+    # A buffer that is too busy to answer in time keeps its swap, and the next start offers that text again.
     :exit, _reason -> :ok
   end
 

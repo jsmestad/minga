@@ -133,6 +133,15 @@ defmodule MingaEditor.Session.RecoveryTest do
       assert resume.waiting_elsewhere == 1
     end
 
+    test "the waiting count is in files, whatever project they are in", ctx do
+      second = Path.join(ctx.there.root, "second.txt")
+      File.write!(second, "saved")
+      leftover_swap(ctx.swap_dir, second, "unsaved second")
+
+      assert {:ok, {:resume, %{waiting_elsewhere: 2}}} =
+               Recovery.run(effect(ctx, {:project, ctx.here.root}))
+    end
+
     test "an editor with nothing open recovers nothing and says how much is waiting", ctx do
       assert Recovery.run(effect(ctx, :none)) ==
                {:ok,

@@ -55,6 +55,28 @@ defmodule Minga.Buffer.SwapRecoveryAdoptionTest do
       assert File.ls!(ctx.swap_dir) == []
     end
 
+    test "recovered text is not auto-saved until the user edits", ctx do
+      registry = Module.concat(__MODULE__, "Events#{System.unique_integer([:positive])}")
+      start_supervised!({Registry, keys: :duplicate, name: registry})
+      :ok = Minga.Events.subscribe(:buffer_saved, registry)
+
+      old_swap = leftover_swap(ctx, "unsaved text")
+      buffer = start_buffer(ctx, swap_dir: ctx.swap_dir, events_registry: registry)
+      {:ok, 50} = BufferProcess.set_option(buffer, :auto_save_delay_ms, 50)
+
+      :ok = Buffer.adopt_recovered_text(buffer, "unsaved text", old_swap)
+
+      # Auto-save would have written the file by now. The text is on the screen, not in the file.
+      refute_receive {:minga_event, :buffer_saved, _event}, 400
+      assert File.read!(ctx.path) == "saved text"
+      assert Buffer.dirty?(buffer)
+
+      # An edit is the user's decision about the text, and auto-save resumes from there.
+      :ok = Buffer.insert_text(buffer, "edited: ")
+      assert_receive {:minga_event, :buffer_saved, _event}, 5_000
+      assert File.read!(ctx.path) == "edited: unsaved text"
+    end
+
     test "a buffer with unsaved changes holds newer text and keeps both", ctx do
       old_swap = leftover_swap(ctx, "text from before the crash")
       buffer = start_buffer(ctx, swap_dir: ctx.swap_dir)
@@ -196,6 +218,21 @@ defmodule Minga.Buffer.SwapRecoveryAdoptionTest do
       write_swap_after_debounce(buffer)
 
       assert :ok = BufferProcess.release_swap(buffer, Path.join(ctx.swap_dir, "elsewhere"))
+
+      assert File.exists?(Swap.swap_path(ctx.path, swap_dir: ctx.swap_dir))
+    end
+
+    test "a buffer that cannot answer in time keeps its swap and does not hold up the quit",
+         ctx do
+      buffer = start_buffer(ctx, swap_dir: ctx.swap_dir)
+      :ok = Buffer.replace_content(buffer, "unsaved text")
+      write_swap_after_debounce(buffer)
+
+      # The buffer is busy with something slow.
+      :sys.suspend(buffer)
+      assert {:timeout, _call} = catch_exit(BufferProcess.release_swap(buffer, ctx.swap_dir, 50))
+      assert :ok = Buffer.release_swaps(ctx.swap_dir, 50)
+      :sys.resume(buffer)
 
       assert File.exists?(Swap.swap_path(ctx.path, swap_dir: ctx.swap_dir))
     end

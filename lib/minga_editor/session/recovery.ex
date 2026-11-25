@@ -210,15 +210,18 @@ defmodule MingaEditor.Session.Recovery do
     Enum.map(entries, fn entry -> {entry, Session.read_swap_file(entry.swap_path)} end)
   end
 
-  # The number of other places (projects, or loose files as one place) with unsaved text waiting.
+  # The number of files with unsaved text waiting that this start does not recover.
   @spec waiting_elsewhere(t(), Session.Swap.Recovery.scope() | nil) :: non_neg_integer()
   defp waiting_elsewhere(%__MODULE__{swap_enabled?: false}, _scope), do: 0
 
   defp waiting_elsewhere(%__MODULE__{swap_opts: opts}, nil),
-    do: opts |> Session.recoverable_projects() |> length()
+    do: opts |> Session.recoverable_projects() |> count_files()
 
   defp waiting_elsewhere(%__MODULE__{swap_opts: opts}, scope),
-    do: opts |> Keyword.put(:outside, scope) |> Session.recoverable_projects() |> length()
+    do: opts |> Keyword.put(:outside, scope) |> Session.recoverable_projects() |> count_files()
+
+  @spec count_files([Session.waiting_project()]) :: non_neg_integer()
+  defp count_files(projects), do: projects |> Enum.map(& &1.files) |> Enum.sum()
 
   # Opening a project picks up where you left off, after a clean quit as well as after a crash.
   # A saved session with no files leaves the project home in place.
