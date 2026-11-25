@@ -42,6 +42,10 @@ defmodule MingaEditor.Input.ScopedAgentSubStatesTest do
       {:ok, state: state}
     end
 
+    test "Esc defers the approval: the request stays pending", %{state: state} do
+      assert {:passthrough, ^state} = MingaEditor.Input.ToolApproval.handle_key(state, 27, 0)
+    end
+
     test "unrelated key passes through approval routing", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, ?x, 0)
       # The approval handler passes it through, and downstream routing still handles the key.
