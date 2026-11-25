@@ -315,7 +315,8 @@ defmodule Minga.Buffer.ProvenanceTest do
   # production and the never-drop model. Groups are named; a Minga group's task is its first element.
   describe "hand-computed cases" do
     @hand_cases [
-      # CH2: two steps of one task rewrite one word (recorded as precise changes), you retype it: the reject keeps yours.
+      # CH2: two steps of one task rewrite one word (recorded as precise changes), you retype it.
+      # The reject keeps yours.
       {"CH2", "call(foo)\n",
        [
          {:open, :s1, "t1"},
@@ -401,7 +402,8 @@ defmodule Minga.Buffer.ProvenanceTest do
          {:edit, :t2, 0, 1, ""},
          {:reject, [:t1], "ab"}
        ]},
-      # Forgotten text: an untracked change took "Q" out of the step's "QP"; your later replacement around that spot does
+      # Forgotten text: an untracked change took "Q" out of the step's "QP"; your later replacement around that spot
+      # does
       # not stand for it, so deleting your replacement leaves the step's reject exact.
       {"forgotten text", "xyz",
        [
@@ -428,7 +430,8 @@ defmodule Minga.Buffer.ProvenanceTest do
          {:reject, [:t], "XY"},
          {:undo, :you, "ab"}
        ]},
-      # The compaction case found by the oracle: t2 rewrote t1's "c", not the "\nc" you deleted, so your undo is allowed.
+      # The compaction case found by the oracle: t2 rewrote t1's "c", not the "\nc" you deleted.
+      # Your undo is allowed.
       {"undo after compaction", "",
        [
          {:open, :s1, "t1"},
@@ -682,13 +685,6 @@ defmodule Minga.Buffer.ProvenanceTest do
               commands <- StreamData.list_of(oracle_command(), max_length: 80),
               max_runs: runs(400)
             ) do
-        if twin_failure(original, commands) do
-          File.write!(
-            System.get_env("TWIN_DUMP", "/dev/null"),
-            inspect({original, commands}, limit: :infinity)
-          )
-        end
-
         Enum.reduce(commands, {oracle_world(original, true), oracle_world(original, true)}, fn
           command, twins ->
             {plain, compacted} = twins = twin_step(command, twins)
@@ -698,152 +694,6 @@ defmodule Minga.Buffer.ProvenanceTest do
             twins
         end)
       end
-    end
-
-    @tag :oracle_debug
-    test "debug: minimize the dumped twin failure" do
-      path = System.get_env("TWIN_DUMP_MIN")
-      if path, do: minimize_twin_dump(path)
-    end
-
-    defp minimize_twin_dump(path) do
-      {{original, commands}, _} = path |> File.read!() |> Code.eval_string()
-
-      shrink = fn commands ->
-        Enum.reduce(length(commands)..0//-1, commands, fn index, acc ->
-          candidate = List.delete_at(acc, index)
-          if index < length(acc) and twin_failure(original, candidate), do: candidate, else: acc
-        end)
-      end
-
-      minimal =
-        Stream.iterate(commands, shrink)
-        |> Stream.chunk_every(2, 1)
-        |> Enum.find(fn [a, b] -> a == b end)
-        |> hd()
-
-      IO.inspect({original, minimal}, label: "TWIN MINIMAL", limit: :infinity)
-
-      Enum.reduce(
-        minimal,
-        {oracle_world(original, true), oracle_world(original, true)},
-        fn command, twins ->
-          {plain, compacted} = twin_step(command, twins)
-
-          IO.inspect({command, plain.text, compacted.text, plain.outcome, compacted.outcome},
-            label: "TWIN STEP"
-          )
-
-          for p <- [plain.prov, compacted.prov] do
-            for r <- Provenance.runs(p),
-                do:
-                  IO.inspect(
-                    {r.bytes, r.live, r.group, r.deletions, r.covered_by, r.swept_by, r.made_by,
-                     r.text},
-                    label: "  run"
-                  )
-
-            IO.puts("  --")
-          end
-
-          {plain, compacted}
-        end
-      )
-    end
-
-    @tag :oracle_debug
-    test "debug: minimize the dumped oracle failure" do
-      path = System.get_env("ORACLE_DUMP_MIN")
-      if path, do: minimize_oracle_dump(path)
-    end
-
-    defp minimize_oracle_dump(path) do
-      {{original, commands, _command, focus?}, _} = path |> File.read!() |> Code.eval_string()
-
-      fails? = fn commands ->
-        world = oracle_world(original, focus? == true)
-
-        Enum.reduce_while(commands, world, fn command, world ->
-          world = oracle_run(command, world)
-
-          if ProvenanceModel.text(world.model) != world.text,
-            do: {:halt, :fail},
-            else: {:cont, world}
-        end) == :fail
-      end
-
-      shrink = fn commands ->
-        Enum.reduce(length(commands)..0//-1, commands, fn index, acc ->
-          candidate = List.delete_at(acc, index)
-          if index < length(acc) and fails?.(candidate), do: candidate, else: acc
-        end)
-      end
-
-      minimal =
-        Stream.iterate(commands, shrink)
-        |> Stream.chunk_every(2, 1)
-        |> Enum.find(fn [a, b] -> a == b end)
-        |> hd()
-
-      IO.inspect({original, minimal}, label: "MINIMAL", limit: :infinity)
-
-      # The first step after which flipping a single group gives a different text on the two sides.
-      probe = fn world ->
-        units =
-          Enum.map(world.yours, &[&1]) ++ Map.values(world.tasks)
-
-        for ids <- units,
-            group = world.model.groups[hd(ids)],
-            not group.final,
-            existing = Enum.filter(ids, &Provenance.group?(world.prov, &1)),
-            {:ok, doc, _first, _prov} =
-              if(group.applied,
-                do: Provenance.revert_all(world.prov, existing, Document.new(world.text)),
-                else:
-                  Enum.reduce(existing, {:ok, Document.new(world.text), nil, world.prov}, fn id,
-                                                                                             {:ok,
-                                                                                              d,
-                                                                                              _f,
-                                                                                              p} ->
-                    Provenance.reapply(p, id, d)
-                  end)
-              ),
-            model_text =
-              ProvenanceModel.text(
-                Enum.reduce(
-                  ids,
-                  world.model,
-                  &ProvenanceModel.set_applied(&2, &1, not group.applied)
-                )
-              ),
-            Document.content(doc) != model_text,
-            do: {ids, Document.content(doc), model_text}
-      end
-
-      first_bad =
-        minimal
-        |> Enum.scan({nil, oracle_world(original, focus? == true)}, fn command, {_step, world} ->
-          {command, oracle_run(command, world)}
-        end)
-        |> Enum.find_index(fn {_command, world} -> probe.(world) != [] end)
-
-      IO.inspect(first_bad, label: "FIRST DIVERGENT STEP")
-      Process.put(:step, 0)
-
-      Process.put(
-        :verbose,
-        String.to_integer(
-          System.get_env("VFROM", "#{max((first_bad || length(minimal) - 1) - 1, 0)}")
-        )
-      )
-
-      Process.put(
-        :verbose_until,
-        String.to_integer(System.get_env("VTO", "#{first_bad || length(minimal) - 1}"))
-      )
-
-      Process.put(:probe, probe)
-      fails?.(Enum.take(minimal, (first_bad || length(minimal) - 1) + 1))
     end
 
     property "compaction changes no document for any revert where each task's steps move together" do
@@ -1158,57 +1008,6 @@ defmodule Minga.Buffer.ProvenanceTest do
 
     each = Provenance.edit_all(prov, id, changes, :each)
 
-    if System.get_env("PARITY_DUMP") &&
-         (not same_record?(batch, each, open_ids(model)) or
-            byte_records(batch) != byte_records(each)) do
-      show = fn p ->
-        {for(
-           r <- Provenance.runs(p),
-           do:
-             {r.bytes, r.live, r.group, r.deletions, r.overlaps, r.made_by, r.replaced_by, r.text}
-         ), Provenance.change_records(p), Provenance.faulted?(p)}
-      end
-
-      {bb, bl, bn} = byte_records(batch)
-      {eb, el, en} = byte_records(each)
-      first = Enum.zip(bb, eb) |> Enum.find_index(fn {x, y} -> x != y end)
-
-      link_diff =
-        for k <- Enum.uniq(Map.keys(bl) ++ Map.keys(el)), bl[k] != el[k], do: {k, bl[k], el[k]}
-
-      parts = %{
-        spans: spans(batch, text) == spans(each, text),
-        drafts:
-          {draft_bytes(batch), draft_bytes(each),
-           Enum.sum(for r <- Provenance.runs(batch), draft?(r, batch.groups), do: r.bytes),
-           Enum.sum(for r <- Provenance.runs(each), draft?(r, each.groups), do: r.bytes)},
-        dead: dead_text(batch) == dead_text(each),
-        overlaps:
-          for(
-            i <- open_ids(model),
-            MapSet.new(Provenance.overlaps_among(batch, [i]), &elem(&1, 0)) !=
-              MapSet.new(Provenance.overlaps_among(each, [i]), &elem(&1, 0)),
-            do: i
-          ),
-        blockers:
-          for(
-            i <- open_ids(model),
-            Provenance.blocker(batch, i) != Provenance.blocker(each, i),
-            do: i
-          )
-      }
-
-      File.write!(
-        System.get_env("PARITY_DUMP"),
-        inspect(
-          {id, changes, parts, {first, first && Enum.at(bb, first), first && Enum.at(eb, first)},
-           link_diff, {bn, en}, show.(prov), show.(batch), show.(each)},
-          limit: :infinity,
-          pretty: true
-        )
-      )
-    end
-
     assert same_record?(batch, each, open_ids(model))
     assert byte_records(batch) == byte_records(each)
 
@@ -1426,14 +1225,6 @@ defmodule Minga.Buffer.ProvenanceTest do
     Enum.reduce(commands, oracle_world(original, focus?), fn command, world ->
       before = world
       world = oracle_run(command, world)
-
-      if ProvenanceModel.text(world.model) != world.text do
-        File.write!(
-          System.get_env("ORACLE_DUMP", "/dev/null"),
-          inspect({original, commands, command, focus?}, limit: :infinity)
-        )
-      end
-
       assert ProvenanceModel.text(world.model) == world.text
       assert Provenance.size(world.prov) == byte_size(world.text)
       assert spans(world.prov, world.text) == ProvenanceModel.authors(world.model)
@@ -1483,45 +1274,7 @@ defmodule Minga.Buffer.ProvenanceTest do
     })
   end
 
-  defp oracle_run(command, world) do
-    world = oracle_step(command, world)
-    step = Process.get(:step, 0)
-    Process.put(:step, step + 1)
-
-    if Process.get(:verbose) && step >= Process.get(:verbose) &&
-         step <= Process.get(:verbose_until) do
-      if probe = Process.get(:probe), do: IO.inspect(probe.(world), label: "PROBE")
-
-      IO.inspect({command, world.text, ProvenanceModel.text(world.model)}, label: "STEP")
-
-      for run <- Provenance.runs(world.prov),
-          do:
-            IO.inspect(
-              {run.bytes, run.live, run.group, run.deletions, run.overlaps, run.made_by,
-               run.replaced_by, run.text},
-              label: "  run"
-            )
-
-      IO.inspect(
-        {Provenance.change_records(world.prov), world.prov.group_marks,
-         Provenance.overlaps_among(world.prov, Map.keys(world.prov.groups))},
-        label: "  records"
-      )
-
-      for e <- world.model.entries,
-          do:
-            IO.inspect({<<e.byte>>, e.group, e.deletions, e.overlaps, e.made_by, e.replaced_by},
-              label: "  byte"
-            )
-
-      IO.inspect(
-        Map.new(world.model.groups, fn {id, g} -> {id, {g.author, g.applied, g.final}} end),
-        label: "  groups"
-      )
-    end
-
-    world
-  end
+  defp oracle_run(command, world), do: oracle_step(command, world)
 
   defp oracle_step({kind, a, b, c, inserted}, %{focus: true} = world) do
     cond do
@@ -1574,7 +1327,7 @@ defmodule Minga.Buffer.ProvenanceTest do
         oracle_open(world, :you, nil, nil)
 
       choice when choice in [2, 3] and tasks != [] ->
-        task = Enum.at(Enum.sort(tasks), rem(a, length(tasks)))
+        task = tasks |> Enum.sort() |> List.to_tuple() |> elem(rem(a, length(tasks)))
         oracle_open(world, {:minga, task}, {:minga, task, "call-#{world.next_task}-#{a}"}, task)
 
       choice when choice in [2, 3, 4] ->
@@ -1699,17 +1452,6 @@ defmodule Minga.Buffer.ProvenanceTest do
 
         count(if prov_ok?, do: :rejects, else: :refused_rejects)
 
-        if Process.get(:verbose),
-          do: IO.inspect({task, ids, existing, prov_ok?, model_ok?}, label: "REJECT")
-
-        if Process.get(:verbose),
-          do:
-            IO.inspect(
-              {Provenance.overlaps_among(world.prov, existing),
-               ProvenanceModel.overlaps_among(world.model, ids)},
-              label: "OVERLAPS"
-            )
-
         world = oracle_flip(world, ids, false, prov_ok?, model_ok?)
         if prov_ok? and model_ok? and rem(a, 2) == 0, do: oracle_finalize(world, ids), else: world
     end
@@ -1723,45 +1465,34 @@ defmodule Minga.Buffer.ProvenanceTest do
       {oracle_step(command, %{plain | outcome: nil}),
        oracle_step(command, %{compacted | outcome: nil})}
 
-  defp twin_failure(original, commands) do
-    commands
-    |> Enum.reduce_while({oracle_world(original, true), oracle_world(original, true)}, fn command,
-                                                                                          twins ->
-      {plain, compacted} = twins = twin_step(command, twins)
-
-      if plain.text != compacted.text or plain.outcome != compacted.outcome,
-        do: {:halt, :fail},
-        else: {:cont, twins}
-    end)
-    |> Kernel.==(:fail)
-  end
-
   # Who refused, by task: compaction may rename the step that did, never its task.
   defp who({:minga, task, _step}), do: {:task, task}
   defp who(other), do: other
+
+  defp flip_production(world, ids, false) do
+    {:ok, document, _first, prov} =
+      Provenance.revert_all(world.prov, ids, Document.new(world.text))
+
+    {prov, Document.content(document)}
+  end
+
+  defp flip_production(world, ids, true) do
+    {prov, document} =
+      Enum.reduce(ids, {world.prov, Document.new(world.text)}, fn id, {prov, document} ->
+        {:ok, document, _first, prov} = Provenance.reapply(prov, id, document)
+        {prov, document}
+      end)
+
+    {prov, Document.content(document)}
+  end
 
   defp oracle_flip(world, ids, applied, prov_ok?, model_ok?) do
     existing = Enum.filter(ids, &Provenance.group?(world.prov, &1))
 
     {prov, text} =
-      if prov_ok? do
-        flip = if applied, do: &Provenance.reapply/3, else: &Provenance.revert/3
-
-        {:ok, document, _first, prov} =
-          if applied,
-            do:
-              Enum.reduce(existing, {:ok, Document.new(world.text), nil, world.prov}, fn id,
-                                                                                         {:ok,
-                                                                                          doc, _f,
-                                                                                          p} ->
-                flip.(p, id, doc)
-              end),
-            else: Provenance.revert_all(world.prov, existing, Document.new(world.text))
-
-        {prov, Document.content(document)}
-      else
-        {world.prov, world.text}
-      end
+      if prov_ok?,
+        do: flip_production(world, existing, applied),
+        else: {world.prov, world.text}
 
     model =
       if model_ok?,
@@ -1783,7 +1514,10 @@ defmodule Minga.Buffer.ProvenanceTest do
       tasks != [] ->
         oracle_finalize(
           world,
-          Map.fetch!(world.tasks, Enum.at(Enum.sort(tasks), rem(a, length(tasks))))
+          Map.fetch!(
+            world.tasks,
+            tasks |> Enum.sort() |> List.to_tuple() |> elem(rem(a, length(tasks)))
+          )
         )
 
       true ->

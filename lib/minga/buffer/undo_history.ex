@@ -15,7 +15,7 @@ defmodule Minga.Buffer.UndoHistory do
 
   `reject_task/4` reverts all of a task's steps or nothing: a task that started later and rewrote its text, or an edit inside one of its replacements, refuses it, so a revert is exact or refused, never wrong text. `undo_agent_session/3` works step by step: newest first, each step of the most recent task reverts together with the newer groups that depend on it, which may be other tasks' steps. A group of yours joins only when none of its text is visible and reverting it brings back nothing else it deleted; it then leaves your undo stack. Otherwise your newest such edit holds the step, and your `u` can always reach it. Per-change keep and reject (#4049) may refine these rules.
 
-  Every Minga step is checked against a run budget. Past it, `compaction_wanted?/1` asks the owner to run `compact_slice/2`, which merges drafts (text a step wrote that a newer step of the same task rewrote) into the step that overwrote them; past twice the budget, the step itself merges until it is back at twice the budget. A merge changes no document and no refusal, at the moment it runs or after any later edit, undo, redo or reject: the text the merged steps wrote and deleted can never be visible while they move together, and the replacement records keep every link a dropped run carried. A step merges only where no other group touched a run between the two steps. After a merge the two steps revert as one, so `SPC a u` counts them as one step.
+  Every Minga step is checked against a run budget. Past it, `compaction_wanted?/1` asks the owner to run `compact_slice/2`, which merges drafts (text a step wrote that a newer step of the same task rewrote) into the step that overwrote them; past twice the budget, the step itself merges until it is back at twice the budget. Merged steps form a class that always moves together: they flip and are discarded together, and `undo_agent_session/3` takes the whole class in one press, so a press may take the older half of a merge with it where, without compaction, that step would revert in a separate press. Under that invariant a merge changes no document and no refusal, at the moment it runs or after any later edit, undo, redo or reject: the text the merged steps wrote and deleted can never be visible while they move together, and the replacement records keep every link a dropped run carried. The round-4 case that once resolved differently after compaction now resolves the same; the compaction-invisibility properties cover it. A step merges only where no other group touched a run between the two steps; a step merged away completely leaves its class and its key.
 
   `reload/3` takes in content changed on disk without losing Minga's unreviewed steps.
 
@@ -62,6 +62,9 @@ defmodule Minga.Buffer.UndoHistory do
 
   @typedoc "How finely edits are recorded; see `new/2`."
   @type recording :: :precise | :coarse
+
+  @typedoc "Steps compaction merged, as links between groups; a class of linked steps reverts as one."
+  @type merges :: %{Provenance.group_id() => MapSet.t(Provenance.group_id())}
 
   @typedoc "A change applied to the document: start byte, removed bytes, inserted bytes."
   @type change :: {non_neg_integer(), binary(), binary()}
@@ -125,7 +128,8 @@ defmodule Minga.Buffer.UndoHistory do
             compaction_wanted: false,
             over_budget_reported: false,
             before: nil,
-            step_ticks: %{}
+            step_ticks: %{},
+            merges: %{}
 
   @opaque t :: %__MODULE__{
             provenance: Provenance.t(),
@@ -148,7 +152,8 @@ defmodule Minga.Buffer.UndoHistory do
             compaction_wanted: boolean(),
             over_budget_reported: boolean(),
             before: Document.t() | nil,
-            step_ticks: %{Provenance.group_id() => Entry.tick()}
+            step_ticks: %{Provenance.group_id() => Entry.tick()},
+            merges: %{Provenance.group_id() => MapSet.t(Provenance.group_id())}
           }
 
   @doc """
@@ -404,7 +409,8 @@ defmodule Minga.Buffer.UndoHistory do
           pair =
             {Provenance.group_key(history.provenance, old), Provenance.group_key(provenance, new)}
 
-          history = forget_empty_step(history, old, provenance)
+          merges = merge_partners(history.merges, old, new, Provenance.group?(provenance, old))
+          history = forget_empty_step(%{history | merges: merges}, old, provenance)
           compact_until(history, max_runs, examined + runs, [pair | merged], done?)
       end
     end
@@ -564,7 +570,7 @@ defmodule Minga.Buffer.UndoHistory do
           {:cont, {:ok, map()}} | {:halt, {:error, UndoPatch.apply_error()}}
   defp revert_closure(walk, group) do
     provenance = walk.history.provenance
-    closure = dependents(provenance, [group], MapSet.new([group]))
+    closure = dependents(provenance, walk.history.merges, [group], MapSet.new([group]))
 
     case held_in(provenance, closure) do
       nil ->
@@ -581,15 +587,72 @@ defmodule Minga.Buffer.UndoHistory do
   # Everything newer that must revert with these groups: for a Minga group, later Minga groups that rewrote its text
   # and the groups that edited inside its replacements; for a group of yours, the Minga groups that rewrote it. A
   # permanent mark stands for an edit that can never revert. Every edge points to a newer group, so the walk ends.
-  @spec dependents(Provenance.t(), [Provenance.group_id()], MapSet.t()) :: MapSet.t()
-  defp dependents(_provenance, [], closure), do: closure
+  # Steps compaction merged are one node: each brings its whole merge class, so a class never reverts in halves.
+  @spec dependents(Provenance.t(), merges(), [Provenance.group_id() | :permanent], MapSet.t()) ::
+          MapSet.t()
+  defp dependents(_provenance, _merges, [], closure), do: closure
 
-  defp dependents(provenance, [:permanent | rest], closure),
-    do: dependents(provenance, rest, closure)
+  defp dependents(provenance, merges, [:permanent | rest], closure),
+    do: dependents(provenance, merges, rest, closure)
 
-  defp dependents(provenance, [group | rest], closure) do
-    found = Enum.reject(direct_dependents(provenance, group), &MapSet.member?(closure, &1))
-    dependents(provenance, found ++ rest, Enum.into(found, closure))
+  defp dependents(provenance, merges, [group | rest], closure) do
+    found =
+      (direct_dependents(provenance, group) ++ merge_class(merges, group))
+      |> Enum.uniq()
+      |> Enum.reject(&MapSet.member?(closure, &1))
+
+    dependents(provenance, merges, found ++ rest, Enum.into(found, closure))
+  end
+
+  @doc """
+  Returns the steps that compaction merged with `group`, directly or through other merged steps, `group` included. They revert together.
+  """
+  @spec merge_class(t() | merges(), Provenance.group_id()) :: [Provenance.group_id()]
+  def merge_class(%__MODULE__{merges: merges}, group), do: merge_class(merges, group)
+
+  def merge_class(merges, group) when is_map(merges),
+    do: merges |> class_from([group], MapSet.new([group])) |> MapSet.to_list()
+
+  @spec class_from(merges(), [Provenance.group_id()], MapSet.t()) :: MapSet.t()
+  defp class_from(_merges, [], seen), do: seen
+
+  defp class_from(merges, [group | rest], seen) do
+    next = merges |> Map.get(group, MapSet.new()) |> Enum.reject(&MapSet.member?(seen, &1))
+    class_from(merges, next ++ rest, Enum.into(next, seen))
+  end
+
+  # Compaction merged `old` into `new`. While `old` keeps runs of its own the two are linked; once it has none, its
+  # other partners link to `new` instead, and it leaves its class.
+  @spec merge_partners(merges(), Provenance.group_id(), Provenance.group_id(), boolean()) ::
+          merges()
+  defp merge_partners(merges, old, new, true), do: merges |> link(old, new) |> link(new, old)
+
+  defp merge_partners(merges, old, new, false) do
+    merges
+    |> Map.get(old, MapSet.new())
+    |> MapSet.delete(new)
+    |> Enum.reduce(merges, fn partner, acc -> acc |> link(partner, new) |> link(new, partner) end)
+    |> unlink(old)
+  end
+
+  @spec link(merges(), Provenance.group_id(), Provenance.group_id()) :: merges()
+  defp link(merges, from, to), do: Map.update(merges, from, MapSet.new([to]), &MapSet.put(&1, to))
+
+  # Takes a group out of its class, keeping the rest of the class connected.
+  @spec unlink(merges(), Provenance.group_id()) :: merges()
+  defp unlink(merges, group) do
+    {partners, merges} = Map.pop(merges, group, MapSet.new())
+    partners = MapSet.to_list(partners)
+
+    merges =
+      for a <- partners, b <- partners, a != b, reduce: merges do
+        acc -> link(acc, a, b)
+      end
+
+    Enum.reduce(partners, merges, fn partner, acc ->
+      rest = acc |> Map.get(partner, MapSet.new()) |> MapSet.delete(group)
+      if MapSet.size(rest) == 0, do: Map.delete(acc, partner), else: Map.put(acc, partner, rest)
+    end)
   end
 
   @spec direct_dependents(Provenance.t(), Provenance.group_id()) :: [
@@ -728,7 +791,8 @@ defmodule Minga.Buffer.UndoHistory do
           Map.filter(history.task_ticks, fn {task, _tick} -> MapSet.member?(live_tasks, task) end),
         task_started:
           Map.drop(history.task_started, Enum.reject(touched, &MapSet.member?(live_tasks, &1))),
-        step_ticks: Map.drop(history.step_ticks, groups)
+        step_ticks: Map.drop(history.step_ticks, groups),
+        merges: Enum.reduce(groups, history.merges, &unlink(&2, &1))
     }
   end
 
@@ -779,7 +843,7 @@ defmodule Minga.Buffer.UndoHistory do
     |> task_groups(task)
     |> Enum.sort(:desc)
     |> Enum.find_value(0, fn group ->
-      closure = dependents(history.provenance, [group], MapSet.new([group]))
+      closure = dependents(history.provenance, history.merges, [group], MapSet.new([group]))
 
       case held_in(history.provenance, closure) do
         {:group, holding} -> group_offset(history.provenance, holding)

@@ -122,7 +122,33 @@ defmodule Minga.Test.UndoUnitModel do
     mark_edges =
       for run <- runs, {owner, overlap} <- run.overlaps, is_integer(overlap), do: {owner, overlap}
 
-    Enum.all?(deleter_edges ++ mark_edges, fn {older, newer} -> older < newer end)
+    # Steps compaction merged revert as one node: an edge counts between their classes, and the classes must form no
+    # cycle.
+    class = fn group -> history |> UndoHistory.merge_class(group) |> Enum.max() end
+
+    edges =
+      for {from, to} <- deleter_edges ++ mark_edges,
+          a = class.(from),
+          b = class.(to),
+          a != b,
+          uniq: true,
+          do: {a, b}
+
+    acyclic_graph?(edges)
+  end
+
+  # Kahn's algorithm: the graph is acyclic when repeatedly removing nodes with no incoming edge removes every node.
+  defp acyclic_graph?([]), do: true
+
+  defp acyclic_graph?(edges) do
+    targets = MapSet.new(edges, &elem(&1, 1))
+
+    sources =
+      edges |> Enum.map(&elem(&1, 0)) |> Enum.reject(&MapSet.member?(targets, &1)) |> MapSet.new()
+
+    if MapSet.size(sources) == 0,
+      do: false,
+      else: edges |> Enum.reject(&MapSet.member?(sources, elem(&1, 0))) |> acyclic_graph?()
   end
 
   @doc "Returns whether reverting the nodes in `set` together is exact."

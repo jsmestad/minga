@@ -871,6 +871,35 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert Document.content(restore.document) == "ab\n"
     end
 
+    # The shrunk history for Addendum 3 item 3: compaction merged a step only across a stretch, and SPC a u used to
+    # revert the newer half while the older half stayed applied. A merged class now reverts as one; the shadow checks
+    # after every operation that merged steps never differ in applied or final state.
+    test "SPC a u never reverts half of a merged class" do
+      commands = [
+        {:minga, 623, 1, "\nb\na", 1},
+        {:minga, 119, 1, "c\nb\n", 1},
+        {:user, 650, 3, "", 1},
+        {:user, 352, 1, "c\n", 2},
+        {:minga, 319, 2, "c\nac", 2},
+        {:minga, 522, 3, "aa", 1},
+        {:minga, 613, 2, "\n\nb", 2},
+        {:undo, 663, 1, "b", 0},
+        {:redo, 591, 1, "\nb", 0},
+        {:undo, 282, 3, "\nc", 1},
+        {:user, 114, 0, "", 1},
+        {:user, 934, 0, "", 1},
+        {:user, 782, 0, "bc", 1}
+      ]
+
+      world =
+        Enum.reduce(commands, world("abc\ndef\n", run_budget: 18), fn command, world ->
+          command |> run(world) |> want_compaction() |> compact_fully(15)
+        end)
+
+      {:done, world} = unwind(world)
+      assert text(world) == "abc\ndef\n"
+    end
+
     # Round 4's DL2 and the reused-step counterexample: a step that resumes after your edit opens a new group.
     test "a step resumed after your edit inside its change never deadlocks with your undo" do
       for second <- [@step_two, @step_one] do
@@ -1006,7 +1035,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
         history: %{history | provenance: Provenance.start_trace(history.provenance)},
         doc: Document.new(text),
         version: 0,
-        shadow: %{model: ProvenanceModel.new(text), merged: false}
+        shadow: %{model: ProvenanceModel.new(text), merged: false, merges: []}
       }
     else
       %{history: history, doc: Document.new(text), version: 0, shadow: nil}
@@ -1017,6 +1046,31 @@ defmodule Minga.Buffer.UndoHistoryTest do
   # document after every operation.
   defp shadow(%{shadow: nil} = world), do: world
 
+  # Steps a compaction merged never differ in applied or final state: they flip and finalize together, which reading a
+  # change's group from its first made run relies on. A step merged and still holding runs of its own is in the class
+  # of the step it merged into.
+  defp assert_merged_steps_move_together(history, merges) do
+    provenance = UndoHistory.provenance(history)
+
+    for {old, new} <- merges,
+        Provenance.group?(provenance, old),
+        Provenance.group?(provenance, new) do
+      assert new in UndoHistory.merge_class(history, old)
+    end
+
+    %{merges: links} = history
+
+    for {group, _partners} <- links do
+      class = UndoHistory.merge_class(history, group)
+      assert Enum.all?(class, &Provenance.group?(provenance, &1))
+
+      assert class |> Enum.map(&Provenance.applied?(provenance, &1)) |> Enum.uniq() |> length() ==
+               1
+    end
+
+    Process.put(:merged_pairs, Process.get(:merged_pairs, 0) + length(merges))
+  end
+
   defp shadow(world) do
     case Provenance.take_trace(world.history.provenance) do
       {nil, _provenance} ->
@@ -1024,8 +1078,10 @@ defmodule Minga.Buffer.UndoHistoryTest do
 
       {operations, provenance} ->
         model = ProvenanceModel.replay(world.shadow.model, operations)
-        merged = world.shadow.merged or Enum.any?(operations, &match?({:absorb, _old, _new}, &1))
+        merges = for({:absorb, old, new} <- operations, do: {old, new}) ++ world.shadow.merges
+        merged = world.shadow.merged or merges != []
         Process.put(:shadow_skips, length(model.skipped))
+        assert_merged_steps_move_together(world.history, merges)
 
         unless merged, do: assert(ProvenanceModel.text(model) == text(world))
         Process.put(:shadowed, Process.get(:shadowed, 0) + length(operations))
@@ -1033,7 +1089,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
         %{
           world
           | history: %{world.history | provenance: provenance},
-            shadow: %{model: model, merged: merged}
+            shadow: %{model: model, merged: merged, merges: merges}
         }
     end
   end

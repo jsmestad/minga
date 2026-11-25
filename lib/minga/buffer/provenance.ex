@@ -24,6 +24,10 @@ defmodule Minga.Buffer.Provenance do
   2. **Run-less, pulled.** When its last made run is dropped, the record keeps that run's group as `owner` (listed in the group-to-records index) and stays while another record pulls it. A record `p` pulls `q` when a run `q` made, which `p` had replaced, is dropped: consuming `p` still reaches `q`. Compaction that removes the owner renames it to the step that absorbed it. Discarding the owner kept makes the owner `:permanent`, which counts as applied.
   3. **Gone.** A run-less record that nothing pulls, or that has nothing replaced and pulls nothing, is removed; so is every record its owner's discard unapplied leaves behind, with its pull edges. Removing a record removes it from its runs' `replaced_by` and from every link.
 
+  A run-less record that replaced nothing only links: it is spliced out, its pullers pulling its targets directly, when it belongs to the same group as each puller or is permanent. So records and pull edges stay bounded by the runs.
+
+  **Invariant.** Steps that `absorb/4` merged never differ in applied or final state: the owner (`Minga.Buffer.UndoHistory`) flips and discards a merge class together. A change's group is read from its first made run, and a stretch can leave one change's made runs under both steps; that is harmless only under this invariant.
+
   Records settle at the end of each operation. `made` and `replaced` always equal a recomputation from the runs' `made_by` and `replaced_by`; `pulls`, `pulled_by` and `owner` record dropped runs and cannot be recomputed, so the never-drop reference model in the tests checks what they do.
 
   ## Lines
@@ -291,9 +295,9 @@ defmodule Minga.Buffer.Provenance do
     do: blocker(prov, id, fn author, _key -> author != :you end)
 
   @doc """
-  Returns the key of an applied group that `blocks?` accepts and that itself deleted text this group wrote or removed after this group did, or `nil`.
+  Returns the key of an applied group that `blocks?` accepts and that deleted text this group wrote or removed after this group did, or `nil`.
 
-  Only text this group wrote, or deleted while it was visible, counts, and only a deletion that is not a cover: it rewrote that text. A tombstone this group only swept (it lay strictly inside the group's deleted range) is bookkeeping, not text the group removed. A deletion a cover added (the group consumed a replacement, and the text that replacement replaced went with it) never blocks. `blocks?` receives the deleting group's author and key. `blocker/2` counts every group that is not yours; a reject counts the groups of other tasks.
+  Only text this group wrote, or deleted while it was visible, counts: a tombstone this group only swept (it lay strictly inside the group's deleted range) or covered is bookkeeping, not text the group removed. The later group counts when it deleted that text directly or by a sweep; a deletion a cover added (the group consumed a replacement, and the text that replacement replaced went with it) never blocks. `blocks?` receives the deleting group's author and key. `blocker/2` counts every group that is not yours; a reject counts the groups of other tasks.
   """
   @spec blocker(t(), group_id(), (author(), group_key() -> boolean())) :: group_key() | nil
   def blocker(%__MODULE__{groups: groups, tree: tree}, id, blocks?)
@@ -321,8 +325,9 @@ defmodule Minga.Buffer.Provenance do
     end
   end
 
-  # Whether `id` wrote the run or deleted it while it was visible. Sweeping it as a tombstone inside a range, or covering
-  # it with a consumed replacement, never makes a group the one who removed it.
+  # Whether `id` wrote the run or deleted it while it was visible.
+  # Sweeping it as a tombstone inside a range, or covering it with a consumed replacement, never makes a group the one
+  # who removed it.
   @spec removed_by?(Run.t(), group_id()) :: boolean()
   defp removed_by?(%Run{group: id}, id), do: true
 
@@ -717,6 +722,22 @@ defmodule Minga.Buffer.Provenance do
     kept_ids = MapSet.new(kept, & &1.id)
     dropped = Enum.reject(before, &MapSet.member?(kept_ids, &1.id))
     prov = Enum.reduce(dropped, prov, &forget_changes(&2, &1))
+
+    # A replacement whose runs changed group may now share its group with what it pulls: look at those again.
+    relabeled =
+      for run <- before, run.group == old, run.made_by != nil, uniq: true, do: run.made_by
+
+    prov = %{
+      prov
+      | stale:
+          Enum.flat_map(relabeled, fn change ->
+            case prov.changes do
+              %{^change => record} -> :gb_sets.to_list(record.pulls)
+              _gone -> []
+            end
+          end) ++ prov.stale
+    }
+
     named_old = for run <- before, old in run_groups(run), do: run.id
     named_new = for run <- kept, new in run_groups(run), do: run.id
 
@@ -785,8 +806,8 @@ defmodule Minga.Buffer.Provenance do
     swept_by = substitute(run.swept_by, old, new)
     covered_by = substitute(run.covered_by, old, new)
 
-    # When one step swept the run and the other covered it, the merged step swept it: the sweep could block before the
-    # merge, and the merge must not change who blocks.
+    # The merged step deleted the run in the strongest way either step did: directly, else by a sweep, else by a cover.
+    # A sweep can block and a cover cannot, so the merge keeps who blocks.
     covered_by = if swept?, do: List.delete(covered_by, new), else: covered_by
 
     %{
@@ -1133,8 +1154,8 @@ defmodule Minga.Buffer.Provenance do
     end
   end
 
-  # Deleting visible text is direct: it clears any earlier cover or sweep by the group. Newly deleting a tombstone inside
-  # the range is a sweep.
+  # Deleting visible text is direct: it clears any earlier cover or sweep by the group.
+  # Newly deleting a tombstone inside the range is a sweep.
   @spec how_deleted(Run.t(), Run.t(), group_id(), boolean()) :: Run.t()
   defp how_deleted(dead, _run, group_id, true),
     do: %{
@@ -1144,9 +1165,21 @@ defmodule Minga.Buffer.Provenance do
     }
 
   defp how_deleted(dead, run, group_id, false) do
-    if group_id in run.deletions,
-      do: dead,
-      else: %{dead | swept_by: [group_id | dead.swept_by]}
+    cond do
+      # A sweep counts over an earlier cover by the same group, as it does in either order.
+      group_id in run.covered_by ->
+        %{
+          dead
+          | covered_by: List.delete(dead.covered_by, group_id),
+            swept_by: [group_id | dead.swept_by]
+        }
+
+      group_id in run.deletions ->
+        dead
+
+      true ->
+        %{dead | swept_by: [group_id | dead.swept_by]}
+    end
   end
 
   # The record of a replacement whose edit marked `replaced` and dropped runs made by `pulled`. An edit that can neither
@@ -1282,16 +1315,9 @@ defmodule Minga.Buffer.Provenance do
       nil ->
         drop_run(prov, run)
 
+      # A group that deleted the run before, directly or by a sweep, keeps that kind.
       ^run ->
-        # A group that only swept the run and now covers it counts as covering it, in either order.
-        if group_id in run.swept_by,
-          do:
-            put_run(prov, run, %{
-              run
-              | swept_by: List.delete(run.swept_by, group_id),
-                covered_by: [group_id | run.covered_by]
-            }),
-          else: prov
+        prov
 
       dead ->
         kill_run(prov, group_id, run, %{dead | covered_by: [group_id | dead.covered_by]})
@@ -1407,6 +1433,10 @@ defmodule Minga.Buffer.Provenance do
              (:gb_sets.is_empty(record.replaced) and :gb_sets.is_empty(record.pulls))) ->
         {remove_change(prov, change, record), linked}
 
+      :gb_sets.is_empty(record.made) and :gb_sets.is_empty(record.replaced) and
+          spliceable?(prov, record) ->
+        {splice(prov, change, record), linked}
+
       :gb_sets.is_empty(record.made) ->
         {prov, []}
 
@@ -1418,6 +1448,47 @@ defmodule Minga.Buffer.Provenance do
       true ->
         {prov, []}
     end
+  end
+
+  # A run-less record that replaced nothing only links its pullers to its targets. When it belongs to the same group as
+  # every puller (or is permanent), reaching it adds no applied check of its own, so the pullers can pull its targets
+  # directly. Without this, a spot renamed once per step would keep one record per step after compaction.
+  @spec spliceable?(t(), Change.t()) :: boolean()
+  defp spliceable?(_prov, %Change{owner: :permanent}), do: true
+
+  defp spliceable?(prov, record) do
+    record.pulled_by
+    |> :gb_sets.to_list()
+    |> Enum.all?(fn puller ->
+      case prov.changes do
+        %{^puller => puller_record} -> record_owner(prov, puller_record) == record.owner
+        _gone -> false
+      end
+    end)
+  end
+
+  # The group a record belongs to, read from its first made run while it has runs.
+  @spec record_owner(t(), Change.t()) :: Change.owner() | group_id() | nil
+  defp record_owner(prov, %Change{owner: :runs} = record) do
+    case first_run(prov.tree, record.made) do
+      %Run{group: group} -> group
+      nil -> nil
+    end
+  end
+
+  defp record_owner(_prov, %Change{owner: owner}), do: owner
+
+  @spec splice(t(), Change.id(), Change.t()) :: t()
+  defp splice(prov, change, record) do
+    pullers = :gb_sets.to_list(record.pulled_by)
+    targets = :gb_sets.to_list(record.pulls)
+
+    prov =
+      for puller <- pullers, target <- targets, puller != target, reduce: prov do
+        acc -> pull(acc, puller, target)
+      end
+
+    remove_change(prov, change, record)
   end
 
   # Forgets a record: its runs stop naming it, and the records it pulls or that pull it stop linking it.
@@ -1514,7 +1585,8 @@ defmodule Minga.Buffer.Provenance do
         %{
           prov
           | changes: records,
-            owned: Map.update(owned, new, changes, &MapSet.union(&1, changes))
+            owned: Map.update(owned, new, changes, &MapSet.union(&1, changes)),
+            stale: MapSet.to_list(changes) ++ prov.stale
         }
     end
   end
@@ -2116,36 +2188,206 @@ defmodule Minga.Buffer.Provenance do
       |> Enum.reverse()
       |> Enum.reduce(pass, &apply_in_pass(group_id, author, &1, &2))
 
-    runs = pass.left |> Enum.reverse(pass.right) |> merge_live_neighbours()
-    rebuilt = rebuild(%{prov | next_change: pass.next_change}, runs, pass.dropped)
-
-    rebuilt =
-      Enum.reduce(pass.dropped, rebuilt, fn run, acc ->
-        acc |> link_dropped(run) |> transfer_marks(run.overlaps)
-      end)
-
     ranges =
       changes
       |> Enum.map(fn {start, removed, _inserted} -> {start, start + byte_size(removed)} end)
       |> List.to_tuple()
 
     last = tuple_size(ranges) - 1
-
     steps = Enum.reverse(pass.steps)
 
+    # The covers and marks every change's worklist makes, decided on the record as it was before the pass, then applied
+    # to the run list in the same pass that rebuilds the tree: O(n) for the whole batch.
+    plan =
+      steps
+      |> Enum.with_index()
+      |> Enum.reduce(%{covers: MapSet.new(), marks: %{}, fault: false}, fn
+        {{seeds, _change, _pulled}, applied}, plan ->
+          plan_each(prov, group_id, seeds, MapSet.new(seeds), {ranges, last - applied}, plan)
+      end)
+
+    {runs, covered_away} =
+      pass.left |> Enum.reverse(pass.right) |> apply_plan(plan, group_id)
+
+    dropped = covered_away ++ pass.dropped
+
     rebuilt =
-      Enum.reduce(steps, rebuilt, fn
-        {_seeds, nil, _pulled}, acc -> acc
-        {_seeds, change, pulled}, acc -> Enum.reduce(pulled, acc, &pull(&2, change, &1))
+      rebuild(%{prov | next_change: pass.next_change}, merge_live_neighbours(runs), dropped)
+
+    rebuilt = if plan.fault, do: fault(rebuilt, :all), else: rebuilt
+
+    rebuilt =
+      Enum.reduce(dropped, rebuilt, fn run, acc ->
+        acc |> link_dropped(run) |> transfer_marks(run.overlaps)
       end)
 
     steps
-    |> Enum.with_index()
-    |> Enum.reduce(rebuilt, fn {{seeds, _change, _pulled}, applied}, acc ->
-      consume(acc, group_id, seeds, &consumed_by(prov, ranges, last - applied, &1, &2))
+    |> Enum.reduce(rebuilt, fn
+      {_seeds, nil, _pulled}, acc -> acc
+      {_seeds, change, pulled}, acc -> Enum.reduce(pulled, acc, &pull(&2, change, &1))
     end)
     |> settle_changes()
   end
+
+  @typep plan :: %{
+           covers: MapSet.t(Locator.t()),
+           marks: %{Locator.t() => [Run.overlap()]},
+           fault: boolean()
+         }
+
+  # `consume/4` for one change of a batch, as a plan over the runs before the pass. `at` is the ranges and the index,
+  # in document order, of the change being applied.
+  @spec plan_each(
+          t(),
+          group_id() | nil,
+          [Change.id()],
+          MapSet.t(),
+          {tuple(), non_neg_integer()},
+          plan()
+        ) ::
+          plan()
+  defp plan_each(_prov, _group_id, [], _seen, _at, plan), do: plan
+
+  defp plan_each(prov, group_id, [change | rest], seen, at, plan) do
+    {plan, reached} = plan_change(prov, group_id, change, at, plan)
+    reached = reached |> Enum.uniq() |> Enum.reject(&MapSet.member?(seen, &1))
+    plan_each(prov, group_id, reached ++ rest, Enum.into(reached, seen), at, plan)
+  end
+
+  @spec plan_change(t(), group_id() | nil, Change.id(), {tuple(), non_neg_integer()}, plan()) ::
+          {plan(), [Change.id()]}
+  defp plan_change(prov, group_id, change, {ranges, index} = at, plan) do
+    with {:ok, record} <- Map.fetch(prov.changes, change),
+         {:ok, made} <- fetch_runs(prov.tree, record.made) do
+      owner = owner_of(record, made)
+
+      cond do
+        is_integer(owner) and not Map.has_key?(prov.groups, owner) ->
+          {%{plan | fault: true}, []}
+
+        # A change carries its replacement only while it is applied.
+        is_integer(owner) and not Map.fetch!(prov.groups, owner).applied ->
+          {plan, []}
+
+        consumed_by(prov, ranges, index, change, made) == :partial ->
+          {plan_marks(plan, prov.groups, group_id, owner, made), []}
+
+        true ->
+          plan_cover(prov, record, at, plan)
+      end
+    else
+      :error -> {%{plan | fault: true}, []}
+    end
+  end
+
+  @spec plan_marks(plan(), %{group_id() => Group.t()}, group_id() | nil, group_id() | nil, [
+          Run.t()
+        ]) :: plan()
+  defp plan_marks(plan, groups, group_id, owner, made) do
+    if group_id != nil and is_integer(owner) and foreign_owner?(groups, owner, group_id) do
+      marks =
+        Enum.reduce(made, plan.marks, fn run, marks ->
+          Map.update(marks, run.id, [{owner, group_id}], &[{owner, group_id} | &1])
+        end)
+
+      %{plan | marks: marks}
+    else
+      plan
+    end
+  end
+
+  # Dead replaced runs are covered. A replaced run this batch deleted itself by now is not covered again, but the
+  # replacement that made it is still reached.
+  @spec plan_cover(t(), Change.t(), {tuple(), non_neg_integer()}, plan()) ::
+          {plan(), [Change.id()]}
+  defp plan_cover(prov, record, {ranges, index}, plan) do
+    record.replaced
+    |> :gb_sets.to_list()
+    |> Enum.reduce({plan, :gb_sets.to_list(record.pulls)}, fn run_id, {plan, reached} ->
+      plan_covered_run(RunTree.fetch(prov.tree, run_id), {ranges, index}, plan, reached)
+    end)
+  end
+
+  @spec plan_covered_run(
+          {:ok, Run.t(), non_neg_integer()} | :error,
+          {tuple(), non_neg_integer()},
+          plan(),
+          [Change.id()]
+        ) :: {plan(), [Change.id()]}
+  defp plan_covered_run({:ok, %Run{live: false} = run, _offset}, _at, plan, reached),
+    do: {%{plan | covers: MapSet.put(plan.covers, run.id)}, List.wrap(run.made_by) ++ reached}
+
+  defp plan_covered_run({:ok, run, offset}, {ranges, index}, plan, reached) do
+    if touched?(ranges, index, offset, offset + run.bytes),
+      do: {plan, List.wrap(run.made_by) ++ reached},
+      else: {plan, reached}
+  end
+
+  defp plan_covered_run(:error, _at, plan, reached), do: {%{plan | fault: true}, reached}
+
+  # Applies a plan's marks and covers to the runs after the pass. Returns the runs and the ones a cover dropped.
+  @spec apply_plan([Run.t()], plan(), group_id() | nil) :: {[Run.t()], [Run.t()]}
+  defp apply_plan(runs, %{covers: covers, marks: marks}, group_id) do
+    if MapSet.size(covers) == 0 and marks == %{} do
+      {runs, []}
+    else
+      {kept, dropped} =
+        Enum.reduce(runs, {[], []}, &apply_plan_to(&1, &2, covers, marks, group_id))
+
+      {Enum.reverse(kept), dropped}
+    end
+  end
+
+  @spec apply_plan_to(
+          Run.t(),
+          {[Run.t()], [Run.t()]},
+          MapSet.t(Locator.t()),
+          %{Locator.t() => [Run.overlap()]},
+          group_id() | nil
+        ) :: {[Run.t()], [Run.t()]}
+  defp apply_plan_to(run, {kept, dropped}, covers, marks, group_id) do
+    run = marked(run, Map.get(marks, run.id, []))
+
+    case planned_cover(run, MapSet.member?(covers, run.id), group_id) do
+      nil -> {kept, [run | dropped]}
+      covered -> {[covered | kept], dropped}
+    end
+  end
+
+  @spec marked(Run.t(), [Run.overlap()]) :: Run.t()
+  defp marked(run, marks),
+    do:
+      Enum.reduce(marks, run, fn {owner, overlapper}, acc ->
+        with_overlap(acc, owner, overlapper)
+      end)
+
+  @spec planned_cover(Run.t(), boolean(), group_id() | nil) :: Run.t() | nil
+  defp planned_cover(run, false, _group_id), do: run
+  defp planned_cover(%Run{live: true} = run, true, _group_id), do: run
+
+  defp planned_cover(run, true, group_id) do
+    case deleted(run, group_id, run.text) do
+      nil -> nil
+      ^run -> run
+      dead -> %{dead | covered_by: [group_id | dead.covered_by]}
+    end
+  end
+
+  # Whether a range from `index` on, in document order, deletes any byte from `from` up to `to`.
+  @spec touched?(tuple(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: boolean()
+  defp touched?(ranges, index, from, to),
+    do: touched_from?(ranges, first_ending_after(ranges, index, tuple_size(ranges), from), to)
+
+  @spec touched_from?(tuple(), non_neg_integer(), non_neg_integer()) :: boolean()
+  defp touched_from?(ranges, index, to) when index < tuple_size(ranges) do
+    case elem(ranges, index) do
+      {start, _stop} when start >= to -> false
+      {start, stop} when stop > start -> true
+      _insertion -> touched_from?(ranges, index + 1, to)
+    end
+  end
+
+  defp touched_from?(_ranges, _index, _to), do: false
 
   # Whether a replacement keeps live text once the changes from `index` to the last, in document order, are applied:
   # its made runs as they were before the pass, less those changes' ranges.

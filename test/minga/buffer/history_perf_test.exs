@@ -72,6 +72,15 @@ defmodule Minga.Buffer.HistoryPerfTest do
     {records, run_count, div(bytes, max(run_count, 1))}
   end
 
+  # Records plus pull edges, and runs.
+  defp record_links(buffer) do
+    %{undo_history: history} = :sys.get_state(buffer)
+    provenance = UndoHistory.provenance(history)
+    records = Provenance.change_records(provenance)
+    pulls = records |> Map.values() |> Enum.map(&length(&1.pulls)) |> Enum.sum()
+    {map_size(records) + pulls, Provenance.run_count(provenance)}
+  end
+
   test "20 whole-file steps stay under the run budget, and every call afterwards stays fast" do
     buffer = start_supervised!({BufferProcess, content: file(12_000)}, id: make_ref())
 
@@ -81,6 +90,12 @@ defmodule Minga.Buffer.HistoryPerfTest do
 
         {time, _result} =
           ms(fn -> agent_write(buffer, new, EditSource.minga("t", "s#{round}")) end)
+
+        # Replacement records and their links stay bounded by the runs at every step (Addendum 3).
+        {links, run_count} = record_links(buffer)
+
+        assert links <= 2 * run_count,
+               "round #{round}: #{links} records and links for #{run_count} runs"
 
         time
       end

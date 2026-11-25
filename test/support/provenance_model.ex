@@ -6,19 +6,17 @@ defmodule Minga.Test.ProvenanceModel do
 
   ## Specification
 
-  Each statement says what the model does and why, in terms of what you see in the document.
+  Five rules and one invariant. Each says what the model does and why, in terms of what you see in the document.
 
-  1. A byte is visible when the group that wrote it is applied and no group that deleted it is applied. Undo, redo and reject only flip groups, so every one of them shows exactly the text those groups wrote or removed.
-  2. An insertion goes immediately before the visible byte at its offset, after any deleted bytes there. Text typed at a spot lands after text that used to be there, so restoring that older text later puts it back before yours.
-  3. A deletion marks every byte from its first to its last deleted visible byte, deleted bytes between them included. Text an older group removed from the middle of the range cannot come back inside text you deleted. Marking a byte that is already deleted is a sweep: it keeps the byte out, but the group never removed it.
-  4. An edit that inserts text over a non-empty range is a replacement. It made the bytes it inserted. It replaced the visible bytes in its range and the deleted bytes strictly inside it that can still come back. A byte that can never come back (statement 9) is not replaced by anyone, though it gets the deleter: no later edit can stand for text no history can ever show again.
-  5. A deletion consumes a replacement when none of the bytes the replacement made stays visible. It then deletes every deleted byte the replacement replaced as well, and the replacements that made those bytes are examined in turn, each once. When you delete what Minga wrote in place of some text, rejecting Minga must not bring that text back, because you removed its stand-in.
-  6. A replacement that keeps a visible byte was only partly consumed. When it is a Minga step's and the deleter is another author, every byte it made gets an overlap mark naming the deleter. A part of a replacement cannot say which part of the replaced text it stands for, so rejecting the step must be refused (rule 8) until that deletion is undone.
-  7. A change carries its replacement only while its group is applied. A reached replacement whose group is undone, or was discarded unapplied (it never happened), neither covers nor marks; the model logs it in `skipped`. Text a step that never happened replaced is visible again, and nothing anyone deletes later stands for it.
-  8. Rejecting a set of groups is refused while a group outside the set marked one of their replacements (statement 6) and is applied, for good once it is final and applied. An inexact reject would change text you did not ask to change.
-  9. A byte can never come back when the group that wrote it is final and unapplied, when it was deleted by the group that wrote it, by an untracked change, or by a final applied group. No undo, redo or reject can show it again.
-  10. A cover adds a deleter only to bytes that are already deleted. A cover never changes the document at the moment of the edit; it only decides what later undo, redo or reject shows.
-  11. `u` is refused when a later step rewrote the group's text: a group that is not yours, applied and not final, deleted (directly or by a sweep, not through a cover) a byte the undone group wrote or deleted while it was visible, after it did, and the byte can still come back. A byte the undone group only swept or covered is not text it removed. Undoing then would leave Minga's rewrite beside the text yours replaced, a document that never existed. A cover is derived, not a rewrite: deleting Minga's stand-in takes the replaced text along, and that never refuses anything. The same rule refuses a reject while another task that started later rewrote the task's text.
+  1. **Visibility.** A byte is visible when the group that wrote it is applied and no group that deleted it is applied. Undo, redo and reject only flip groups, so each shows exactly the text those groups wrote or removed.
+  2. **Placement.** An insertion goes immediately before the visible byte at its offset, after any deleted bytes there; a deletion marks every byte from its first to its last deleted visible byte. Text typed at a spot lands after text that used to be there, and text an older group removed from the middle of a range cannot come back inside text you deleted. Deleting a visible byte is a direct deletion; marking a byte that is already deleted is a sweep.
+  3. **Replacement.** An edit that inserts text over a non-empty range is a replacement: it made the bytes it inserted, and it replaced the visible bytes in its range and the deleted bytes strictly inside it that can still come back. A byte can never come back when the group that wrote it is final and unapplied, or it was deleted by the group that wrote it, by an untracked change, or by a final applied group; it gets the deleter but no replacement lists it. No later edit can stand for text no history can ever show again.
+  4. **Consumption.** A deletion that leaves none of an applied replacement's text visible covers what it replaced: every deleted byte the replacement replaced gets the deleter (a cover), and the replacements that made those bytes are examined in turn, each once. When some of the replacement's text stays visible and the deleter is another author than the replacement's Minga step, every byte the replacement made is marked with the deleter instead. A replacement whose group is not applied (undone, or discarded unapplied: it never happened) neither covers nor marks; the model logs it in `skipped`. When you delete what Minga wrote in place of some text, rejecting Minga must not bring that text back; when you delete only part of it, no one can say which part of the replaced text your edit stands for.
+  5. **Exactness refusal.** No undo, redo or reject may show text beside a later rewrite of it. An undo or redo of a group is refused while a group that is not yours, applied and not final, deleted a byte the group wrote or deleted while it was visible, after it did, directly or by a sweep (a cover never counts), and the byte can still come back; a reject of a task is refused the same way by a task that started later, or while a group outside it that marked one of its replacements (rule 4) is applied, for good once that group is final and applied. Undoing your replacement after Minga rewrote part of it would leave Minga's rewrite beside the text yours replaced, a document that never existed.
+
+  **Invariant.** Steps that compaction merged never differ in applied or final state: they flip and finalize together. The group of a replacement is read from its first made run, and compaction can leave one replacement's made runs under both steps.
+
+  A consequence, tested on its own: a cover only adds a deleter to bytes that are already deleted, so it never changes the document at the moment of the edit.
 
   `replay/2` applies a trace from `Minga.Buffer.Provenance.start_trace/1`, so a history driven through `Minga.Buffer.UndoHistory` can be checked against the model.
   """
@@ -138,8 +136,8 @@ defmodule Minga.Test.ProvenanceModel do
     if change, do: {%{model | next_change: change + 1}, change}, else: {model, nil}
   end
 
-  # A direct deletion rewrote the byte; a cover only took it with the replacement it consumed. A direct deletion by a
-  # group that covered the byte before makes that deletion direct.
+  # A direct deletion rewrote the byte; a sweep kept a deleted byte out; a cover only took it with the replacement it
+  # consumed. A group's strongest kind wins: direct over sweep over cover, in either order.
   defp add_deleter(entry, deleter, :direct) do
     entry = %{
       entry
@@ -153,35 +151,32 @@ defmodule Minga.Test.ProvenanceModel do
   end
 
   defp add_deleter(entry, deleter, :sweep) do
-    if deleter in entry.deletions,
-      do: entry,
-      else: %{
-        entry
-        | deletions: [deleter | entry.deletions],
-          swept_by: [deleter | entry.swept_by]
-      }
-  end
-
-  defp add_deleter(entry, deleter, :cover) do
     cond do
-      # A group that only swept the byte and now covers it counts as covering it, in either order.
-      deleter in entry.swept_by ->
+      # A sweep counts over an earlier cover by the same group, as it does in either order.
+      deleter in entry.covered_by ->
         %{
           entry
-          | swept_by: List.delete(entry.swept_by, deleter),
-            covered_by: [deleter | entry.covered_by]
+          | covered_by: List.delete(entry.covered_by, deleter),
+            swept_by: [deleter | entry.swept_by]
         }
 
       deleter in entry.deletions ->
         entry
 
       true ->
-        %{
-          entry
-          | deletions: [deleter | entry.deletions],
-            covered_by: [deleter | entry.covered_by]
-        }
+        %{entry | deletions: [deleter | entry.deletions], swept_by: [deleter | entry.swept_by]}
     end
+  end
+
+  # A group that deleted the byte before, directly or by a sweep, keeps that kind when it covers it too.
+  defp add_deleter(entry, deleter, :cover) do
+    if deleter in entry.deletions,
+      do: entry,
+      else: %{
+        entry
+        | deletions: [deleter | entry.deletions],
+          covered_by: [deleter | entry.covered_by]
+      }
   end
 
   # The cover worklist over bytes: each replacement once, in the order reached.
@@ -288,7 +283,7 @@ defmodule Minga.Test.ProvenanceModel do
   end
 
   @doc """
-  Returns the keys of the applied groups that are not final, that `blocks?` accepts (given author and key), and that directly deleted text group `id` wrote or removed after it did. A deletion a cover added does not count, and neither do bytes that can never come back.
+  Returns the keys of the applied groups that are not final, that `blocks?` accepts (given author and key), and that deleted text group `id` wrote or removed while it was visible, after it did, directly or by a sweep. A deletion a cover added does not count, and neither do bytes that can never come back.
   """
   @spec blockers(t(), pos_integer(), (Provenance.author(), Provenance.group_key() -> boolean())) ::
           MapSet.t()
