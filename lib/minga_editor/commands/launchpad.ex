@@ -28,7 +28,17 @@ defmodule MingaEditor.Commands.Launchpad do
     requires_buffer: false
   )
 
-  @spec execute(state(), :resume_session | :session_start_fresh) :: state()
+  command(:unsaved_text, "List unsaved text kept after a crash, to recover or discard it",
+    requires_buffer: false
+  )
+
+  @spec execute(state(), :resume_session | :session_start_fresh | :unsaved_text) :: state()
+  def execute(state, :unsaved_text) do
+    MingaEditor.PickerUI.open(state, MingaEditor.UI.Picker.UnsavedTextSource, %{
+      swap_opts: MingaEditor.State.Session.swap_opts(state.session)
+    })
+  end
+
   def execute(state, :resume_session) do
     SessionRestore.restore_session(state)
   end

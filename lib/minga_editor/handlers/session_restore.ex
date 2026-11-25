@@ -69,6 +69,44 @@ defmodule MingaEditor.Handlers.SessionRestore do
   end
 
   @doc """
+  Puts the unsaved text of one waiting swap file into a buffer for its file and shows that buffer.
+
+  This is the user's own choice from the list of waiting text, so it also applies to text that a start held back, and to a file or directory that no longer exists. The buffer becomes the owner of the text on disk. A buffer that has unsaved changes of its own keeps them, and the swap stays.
+  """
+  @spec recover_waiting(state(), Session.swap_entry()) :: state()
+  def recover_waiting(state, %{path: path, swap_path: swap_path}) do
+    name = Path.basename(path)
+
+    with {:ok, file_path, content} <- Session.read_swap_file(swap_path),
+         {:ok, state} <- adopt(state, file_path, content, swap_path) do
+      Minga.Log.info(:editor, "Recovered unsaved text: #{file_path}")
+
+      state
+      |> show_in_front(file_path)
+      |> NoticeWorkflow.publish(
+        "Recovered the unsaved text of #{name}: save to keep it, undo to drop it"
+      )
+    else
+      {:error, :modified} ->
+        NoticeWorkflow.publish(
+          state,
+          "#{name} has unsaved changes of its own: save or discard them, then recover again"
+        )
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :editor,
+          "#{not_recovered(path, reason)} The unsaved text stays in #{swap_path}."
+        )
+
+        NoticeWorkflow.publish(
+          state,
+          "Could not recover the unsaved text of #{name}. It is kept."
+        )
+    end
+  end
+
+  @doc """
   Applies an already-loaded session from the Editor process: reopens its files with their cursors, rebuilds its window splits with each window's cursor and scroll, focuses the window that had focus, and says in the echo area how many files came back.
   """
   @spec apply_session_snapshot(state(), Session.snapshot()) :: state()
@@ -273,9 +311,11 @@ defmodule MingaEditor.Handlers.SessionRestore do
   defp announce_held_back([]), do: :ok
 
   defp announce_held_back(entries) do
+    hint = unsaved_text_hint("; recover or discard it with")
+
     Enum.each(entries, fn entry ->
       Minga.API.message(
-        "#{entry.path} changed after its unsaved text was kept, so the text was not put back. It is in #{entry.swap_path}"
+        "#{entry.path} changed after its unsaved text was kept, so the text was not put back#{hint}"
       )
     end)
   end
@@ -286,14 +326,27 @@ defmodule MingaEditor.Handlers.SessionRestore do
 
   defp announce_waiting_elsewhere(1) do
     Minga.API.message(
-      "Unsaved text of 1 other file is waiting; open its project or the file to recover it"
+      "Unsaved text of 1 other file is waiting; open its project or the file to recover it" <>
+        unsaved_text_hint(", or list it with")
     )
   end
 
   defp announce_waiting_elsewhere(count) do
     Minga.API.message(
-      "Unsaved text of #{count} other files is waiting; open their project or the files to recover it"
+      "Unsaved text of #{count} other files is waiting; open their project or the files to recover it" <>
+        unsaved_text_hint(", or list it with")
     )
+  end
+
+  # Names the live binding of the list of waiting unsaved text, so a user override shows up here too.
+  @spec unsaved_text_hint(String.t()) :: String.t()
+  defp unsaved_text_hint(lead) do
+    case Bindings.sequences_for_command(Active.leader_trie(), :unsaved_text) do
+      [keys | _rest] -> "#{lead} SPC #{Bindings.format_sequence(keys)}"
+      [] -> ""
+    end
+  catch
+    :exit, _ -> ""
   end
 
   # The hint names the live binding, so a user override shows up here too.
@@ -386,6 +439,14 @@ defmodule MingaEditor.Handlers.SessionRestore do
           events_registry: state.extension_surfaces.events_registry,
           allow_missing: true
         )
+    end
+  end
+
+  @spec show_in_front(state(), String.t()) :: state()
+  defp show_in_front(state, file_path) do
+    case BufferRegistry.file_tab_for_path_in_active_workspace(state, file_path) do
+      %{id: tab_id} -> MingaEditor.TabWorkflow.switch(state, tab_id)
+      nil -> state
     end
   end
 

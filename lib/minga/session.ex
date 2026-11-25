@@ -163,6 +163,21 @@ defmodule Minga.Session do
   @spec recoverable_projects(keyword()) :: [waiting_project()]
   defdelegate recoverable_projects(opts \\ []), to: Minga.Session.Swap.Recovery
 
+  @typedoc "One swap file with unsaved text that is waiting. See `Minga.Session.Swap.Recovery.waiting/1`."
+  @type waiting_unsaved_text :: Minga.Session.Swap.Recovery.waiting_entry()
+
+  @doc """
+  Lists every swap file whose unsaved text is waiting, newest first, with its project, when it was written and how much of it differs from the file.
+
+  It removes nothing. It reads each swap file and its file, so call it off the Editor process.
+  """
+  @spec waiting_unsaved_text(keyword()) :: [waiting_unsaved_text()]
+  defdelegate waiting_unsaved_text(opts \\ []), to: Minga.Session.Swap.Recovery, as: :waiting
+
+  @doc "Deletes a swap file because the user decided against its text. This cannot be undone."
+  @spec discard_swap_file(String.t()) :: :ok
+  defdelegate discard_swap_file(swap_path), to: Minga.Session.Swap.Recovery, as: :discard
+
   @doc "Reads the file path and unsaved text of a swap file and leaves the swap file on disk."
   @spec read_swap_file(String.t()) :: {:ok, String.t(), binary()} | {:error, term()}
   defdelegate read_swap_file(swap_path), to: Minga.Session.Swap.Recovery, as: :read

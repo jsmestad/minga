@@ -24,6 +24,22 @@ defmodule Minga.Session.Swap.Recovery do
         }
 
   @typedoc """
+  One swap file with unsaved text that is waiting, with what a person needs to decide about it.
+
+  `project` is the canonical root of the project the file is in, or `nil`. `lines` counts the lines of the unsaved text. `changed_lines` counts the lines that differ from the file on disk; it is `nil` when the file is gone or cannot be read, or when either text is too long to compare cheaply.
+  """
+  @type waiting_entry :: %{
+          path: String.t(),
+          swap_path: String.t(),
+          swap_mtime: integer(),
+          changed_since?: boolean(),
+          project: String.t() | nil,
+          file_exists?: boolean(),
+          lines: non_neg_integer(),
+          changed_lines: non_neg_integer() | nil
+        }
+
+  @typedoc """
   Which recoverable swap files a scan returns.
 
   `:all` returns every one. `{:project, root}` returns those whose file is inside `root`. `{:file, path}` returns the one for that file, and `{:files, paths}` those for any of the files. A swap outside the scope keeps its unsaved text on disk until its own project or file is opened: no scan drops unsaved text that it does not return.
@@ -124,6 +140,31 @@ defmodule Minga.Session.Swap.Recovery do
         |> Enum.frequencies()
         |> Enum.map(fn {root, count} -> %{root: root, files: count} end)
         |> Enum.sort_by(&{is_nil(&1.root), &1.root})
+
+      {:error, _} ->
+        []
+    end
+  end
+
+  @doc """
+  Lists every swap file whose unsaved text is waiting, newest first, with its project, when it was written and how much of it differs from the file.
+
+  It reads the swap directory and removes nothing. This is the list a person looks at to recover or discard text that no start has put back: text of a project that is not open, of a project whose directory is gone, or text that was held back because its file changed afterwards.
+  """
+  @spec waiting([option()]) :: [waiting_entry()]
+  def waiting(opts \\ []) do
+    dir = Swap.swap_dir(opts)
+    pid_alive? = Keyword.get(opts, :pid_alive?, &Swap.pid_alive?/1)
+
+    case File.ls(dir) do
+      {:ok, files} ->
+        dir
+        |> verdicts(files, pid_alive?)
+        |> Enum.flat_map(fn
+          {:recoverable, entry} -> waiting_entry(entry)
+          _other -> []
+        end)
+        |> Enum.sort_by(& &1.swap_mtime, :desc)
 
       {:error, _} ->
         []
@@ -295,6 +336,49 @@ defmodule Minga.Session.Swap.Recovery do
   @spec canonical_missing(String.t(), String.t()) :: String.t()
   defp canonical_missing(path, path), do: path
   defp canonical_missing(path, parent), do: Path.join(canonical(parent), Path.basename(path))
+
+  # Longer texts are not compared line by line: the list must open at once.
+  @max_compared_lines 20_000
+
+  @spec waiting_entry(entry()) :: [waiting_entry()]
+  defp waiting_entry(entry) do
+    case Swap.read(entry.swap_path) do
+      {:ok, _meta, content} ->
+        unsaved = String.split(content, "\n")
+        file = File.read(entry.path)
+
+        [
+          Map.merge(entry, %{
+            project: project_root(entry.path, nil),
+            file_exists?: match?({:ok, _text}, file),
+            lines: length(unsaved),
+            changed_lines: changed_lines(file, unsaved)
+          })
+        ]
+
+      # The swap went away between the listing and this read.
+      {:error, _reason} ->
+        []
+    end
+  end
+
+  # The number of lines of the unsaved text that the file does not have, plus the lines of the file that it dropped.
+  @spec changed_lines({:ok, binary()} | {:error, term()}, [String.t()]) ::
+          non_neg_integer() | nil
+  defp changed_lines({:ok, text}, unsaved) when length(unsaved) <= @max_compared_lines do
+    saved = String.split(text, "\n")
+
+    if length(saved) <= @max_compared_lines do
+      saved
+      |> List.myers_difference(unsaved)
+      |> Enum.reduce(0, fn
+        {:eq, _lines}, count -> count
+        {_ins_or_del, lines}, count -> count + length(lines)
+      end)
+    end
+  end
+
+  defp changed_lines(_file, _unsaved), do: nil
 
   @spec reject_inside([entry()], scope() | nil) :: [entry()]
   defp reject_inside(entries, nil), do: entries
