@@ -2,6 +2,7 @@
 
 import MingaUI
 import Testing
+import UserNotifications
 import AppKit
 import Foundation
 import QuartzCore
@@ -301,6 +302,21 @@ struct ProtocolDecoderTests {
         #expect(DesktopAgentNotifications.alert(fromIdentifier: DesktopAgentNotifications.identifier(id)) == id)
         #expect(DesktopAgentNotifications.alert(fromIdentifier: "agent-approval-\(id.uuidString)") == nil)
         #expect(DesktopAgentNotifications.alert(fromIdentifier: "agent-needs-you-not-a-uuid") == nil)
+    }
+
+    @Test("A click on a needs-you notification opens its alert; other responses do not")
+    func notificationClickOpensItsAlert() throws {
+        let id = try #require(UUID(uuidString: "01020304-0506-0708-090A-0B0C0D0E0F10"))
+        let alert = DesktopAgentNotifications.identifier(id)
+        let click = UNNotificationDefaultActionIdentifier
+
+        #expect(DesktopAgentNotifications.click(actionIdentifier: click, requestIdentifier: alert) == .openAlert(id))
+        #expect(DesktopAgentNotifications.click(actionIdentifier: click, requestIdentifier: "other") == .openEditor)
+        #expect(
+            DesktopAgentNotifications.click(
+                actionIdentifier: UNNotificationDismissActionIdentifier, requestIdentifier: alert
+            ) == .ignore
+        )
     }
 
     @Test("Decode correlated native Save As request")

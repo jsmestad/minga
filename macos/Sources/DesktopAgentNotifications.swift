@@ -10,6 +10,16 @@ import UserNotifications
 final class DesktopAgentNotifications: NSObject, UNUserNotificationCenterDelegate {
     private nonisolated static let identifierPrefix = "agent-needs-you-"
 
+    /// What a response to one of the app's notifications asks for.
+    enum Click: Equatable {
+        /// A dismissal or an action this class does not offer.
+        case ignore
+        /// A click on a notification this class did not post: bring the editor forward.
+        case openEditor
+        /// A click on a "needs you" alert: bring the editor forward and open the drawer on its task.
+        case openAlert(UUID)
+    }
+
     private let center = UNUserNotificationCenter.current()
     private let openEditor: @MainActor () -> Void
     private let openAlert: @MainActor (UUID) -> Void
@@ -27,6 +37,7 @@ final class DesktopAgentNotifications: NSObject, UNUserNotificationCenterDelegat
         case .withdrawn(let id):
             alerts.removeValue(forKey: id)?.cancel()
             withdraw([Self.identifier(id)])
+            PortLogger.info("Agent notification withdrawn: \(Self.identifier(id))")
         case .needsYou(let id):
             post(id)
         }
@@ -48,6 +59,8 @@ final class DesktopAgentNotifications: NSObject, UNUserNotificationCenterDelegat
                 withdraw([Self.identifier(id)])
             } else if !delivered {
                 alerts[id] = nil
+            } else {
+                PortLogger.info("Agent notification posted: \(Self.identifier(id))")
             }
         }
     }
@@ -84,14 +97,35 @@ final class DesktopAgentNotifications: NSObject, UNUserNotificationCenterDelegat
         return UUID(uuidString: String(identifier.dropFirst(identifierPrefix.count)))
     }
 
+    /// What a response asks for: only the default action (a click on the notification) does anything, and only an alert
+    /// this class posted names a task.
+    nonisolated static func click(actionIdentifier: String, requestIdentifier: String) -> Click {
+        guard actionIdentifier == UNNotificationDefaultActionIdentifier else { return .ignore }
+        guard let alert = alert(fromIdentifier: requestIdentifier) else { return .openEditor }
+        return .openAlert(alert)
+    }
+
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
     ) async {
-        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
-        let alert = Self.alert(fromIdentifier: response.notification.request.identifier)
-        await MainActor.run {
+        let click = Self.click(
+            actionIdentifier: response.actionIdentifier,
+            requestIdentifier: response.notification.request.identifier
+        )
+        await MainActor.run { handle(click) }
+    }
+
+    /// Brings the editor forward and, for an alert, tells the BEAM which one was clicked. It never answers anything.
+    func handle(_ click: Click) {
+        switch click {
+        case .ignore:
+            return
+        case .openEditor:
             openEditor()
-            if let alert { openAlert(alert) }
+        case .openAlert(let alert):
+            PortLogger.info("Agent notification clicked: \(Self.identifier(alert))")
+            openEditor()
+            openAlert(alert)
         }
     }
 }
