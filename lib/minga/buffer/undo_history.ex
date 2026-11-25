@@ -280,7 +280,7 @@ defmodule Minga.Buffer.UndoHistory do
         tick: tick,
         task_run: %{task_run | tick_after: tick},
         task_ticks: Map.put(history.task_ticks, task, tick),
-        step_ticks: Map.put(history.step_ticks, group, tick)
+        step_ticks: remember_step_tick(history.step_ticks, source, group, tick)
     }
     |> cap_untasked()
     |> compact_inline()
@@ -302,6 +302,17 @@ defmodule Minga.Buffer.UndoHistory do
       history
     end
   end
+
+  # Only a keyed step can resume its group; an untasked agent edit always opens a new one.
+  @spec remember_step_tick(
+          %{Provenance.group_id() => Entry.tick()},
+          edit_source(),
+          Provenance.group_id(),
+          Entry.tick()
+        ) ::
+          %{Provenance.group_id() => Entry.tick()}
+  defp remember_step_tick(ticks, :agent, _group, _tick), do: ticks
+  defp remember_step_tick(ticks, _key, group, tick), do: Map.put(ticks, group, tick)
 
   # Checked after each Minga step: only Minga's steps make drafts.
   # Compaction is wanted while there are drafts to merge, or once to report history that stays over budget.
@@ -412,7 +423,8 @@ defmodule Minga.Buffer.UndoHistory do
         history
         | provenance: provenance,
           minga: List.keydelete(history.minga, old, 0),
-          steps: Map.delete(history.steps, key)
+          steps: Map.delete(history.steps, key),
+          step_ticks: Map.delete(history.step_ticks, old)
       }
     end
   end
@@ -904,7 +916,8 @@ defmodule Minga.Buffer.UndoHistory do
         | provenance: provenance,
           tick: tick,
           task_run: nil,
-          task_ticks: Map.drop(rest.task_ticks, tasks)
+          task_ticks: Map.drop(rest.task_ticks, tasks),
+          step_ticks: Map.drop(rest.step_ticks, Enum.map(steps, &elem(&1, 0)))
       }
 
       document = place_cursor(reverted, first, Document.cursor(document))
@@ -1188,53 +1201,95 @@ defmodule Minga.Buffer.UndoHistory do
     |> Enum.reverse()
     |> Enum.reduce(provenance, fn patch, acc ->
       changes =
-        acc |> anchored_changes(writer, patch) |> slide_lone_deletion(acc, writer, context)
+        acc |> anchored_changes(writer, patch) |> slide_deletions(patch, acc, writer, context)
 
       Provenance.edit_all(acc, group, changes)
     end)
   end
 
-  # A single pure deletion inside a run of identical bytes gives the same text wherever it sits in that run; it takes
+  # A pure deletion inside a run of identical bytes gives the same text wherever it sits in that run; each one takes
   # the place that covers the most bytes another author wrote, so the writer consumes the other author's copy and a
-  # reject can never bring back a byte where it was not.
-  @spec slide_lone_deletion([change()], Provenance.t(), Provenance.author(), Document.t() | nil) ::
+  # reject or an undo can never bring back a byte where it was not. A deletion stays between its neighbouring changes.
+  # Bytes inside the patch come from its old text; past its edges, only a single-patch recording knows the document.
+  @spec slide_deletions(
+          [change()],
+          UndoPatch.t(),
+          Provenance.t(),
+          Provenance.author(),
+          Document.t() | nil
+        ) ::
           [change()]
-  defp slide_lone_deletion(
-         [{at, removed, ""}] = changes,
-         provenance,
-         writer,
-         %Document{} = document
-       )
-       when removed != "" do
-    length = byte_size(removed)
-    byte = &Document.byte_at(document, &1)
-    size = Document.content_byte_size(document)
+  defp slide_deletions(changes, patch, provenance, writer, context) do
+    {start, old, _new} = UndoPatch.change(patch)
+    old_end = start + byte_size(old)
 
-    lowest =
-      slide_on(at, length, -1, fn from ->
-        from > 0 and byte.(from - 1) == byte.(from + length - 1)
-      end)
+    byte = fn offset ->
+      cond do
+        offset >= start and offset < old_end -> :binary.at(old, offset - start)
+        context != nil -> Document.byte_at(context, offset)
+      end
+    end
 
-    highest =
-      slide_on(at, length, 1, fn from ->
-        from + length < size and byte.(from) == byte.(from + length)
-      end)
+    {low, high} = if context, do: {0, Document.content_byte_size(context)}, else: {start, old_end}
+    tuple = List.to_tuple(changes)
+
+    changes
+    |> Enum.with_index()
+    |> Enum.map(fn
+      {{at, removed, ""} = change, index} when removed != "" ->
+        lower = if index > 0, do: change_end(elem(tuple, index - 1)), else: low
+
+        upper =
+          if index + 1 < tuple_size(tuple), do: change_start(elem(tuple, index + 1)), else: high
+
+        slide_deletion(
+          change,
+          {at, byte_size(removed)},
+          {lower, upper},
+          byte,
+          {provenance, writer}
+        )
+
+      {change, _index} ->
+        change
+    end)
+  end
+
+  # Where a neighbour leaves room: a deletion may touch the end of a replacement, never share a place with an insertion.
+  @spec change_end(change()) :: non_neg_integer()
+  defp change_end({at, "", _inserted}), do: at + 1
+  defp change_end({at, removed, _inserted}), do: at + byte_size(removed)
+
+  @spec change_start(change()) :: non_neg_integer()
+  defp change_start({at, "", _inserted}), do: at - 1
+  defp change_start({at, _removed, _inserted}), do: at
+
+  @spec slide_deletion(
+          change(),
+          {non_neg_integer(), pos_integer()},
+          {integer(), integer()},
+          (non_neg_integer() -> byte()),
+          {Provenance.t(), Provenance.author()}
+        ) :: change()
+  defp slide_deletion(change, {at, length}, {lower, upper}, byte, {provenance, writer}) do
+    lowest = slide_on(at, length, -1, &(&1 > lower and byte.(&1 - 1) == byte.(&1 + length - 1)))
+    highest = slide_on(at, length, 1, &(&1 + length < upper and byte.(&1) == byte.(&1 + length)))
 
     if lowest == highest do
-      changes
+      change
     else
       foreign? = &(&1 != writer and &1 != :unattributed)
       spans = Provenance.spans(provenance, lowest, highest + length)
       covered = &foreign_bytes(spans, &1, length, foreign?)
       best = Enum.max_by(lowest..highest, covered)
 
-      if covered.(best) > covered.(at),
-        do: [{best, Document.slice_byte_range(document, best, length), ""}],
-        else: changes
+      if covered.(best) > covered.(at), do: {best, bytes_at(byte, best, length), ""}, else: change
     end
   end
 
-  defp slide_lone_deletion(changes, _provenance, _writer, _document), do: changes
+  @spec bytes_at((non_neg_integer() -> byte()), non_neg_integer(), pos_integer()) :: binary()
+  defp bytes_at(byte, from, length),
+    do: for(offset <- from..(from + length - 1), into: <<>>, do: <<byte.(offset)>>)
 
   @spec slide_on(non_neg_integer(), pos_integer(), -1 | 1, (non_neg_integer() -> boolean())) ::
           non_neg_integer()

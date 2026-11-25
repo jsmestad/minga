@@ -840,6 +840,42 @@ defmodule Minga.Buffer.UndoHistoryTest do
       end
     end
 
+    # Found by the round-5 bug hunt: an edit that held an early step reverted with a later one in the same press.
+    test "SPC a u names a holding edit that still exists after the press" do
+      commands = [
+        {:user, 0, 2, "aaa", 0},
+        {:user, 0, 2, "b\n cb", 1},
+        {:minga, 542, 7, "aa\n\nc ba", 2},
+        {:user, 56, 3, "bcbb\na", 2},
+        {:user, 616, 3, "", 2},
+        {:user, 789, 7, "\n  ", 1},
+        {:undo, 808, 3, "\n \n\n\n\na", 1},
+        {:minga, 804, 1, "\n\nc aa", 1},
+        {:user, 28, 2, " \nbbab\n\n", 1},
+        {:undo, 552, 8, "aa", 1},
+        {:user, 7, 0, "b\n\nb\n", 0},
+        {:user, 72, 5, "ac\nc", 2},
+        {:user, 481, 8, "b", 0},
+        {:minga, 907, 1, "c\ncb\nca\n", 2},
+        {:user, 631, 8, "", 0},
+        {:minga, 296, 6, "b\nc b", 2},
+        {:user, 375, 8, "a", 2},
+        {:minga, 449, 8, "c\n ", 1},
+        {:undo, 933, 0, "", 0},
+        {:minga, 31, 7, "b \nbc ", 1},
+        {:undo, 715, 1, "", 1},
+        {:minga, 223, 3, "\n\nc", 2},
+        {:redo, 265, 1, "a bc b\n", 1},
+        {:undo, 520, 3, "c\ncbcbb", 0},
+        {:user, 285, 5, "", 1}
+      ]
+
+      world = Enum.reduce(commands, world("ab cd ef\ngh ij\n", recording: :coarse), &run/2)
+      {:done, world} = reject_all(world)
+      %{task_ticks: ticks} = world.history
+      assert ticks == %{}
+    end
+
     # Round 4's MB case, pinned. After a compaction, later edits may in general resolve differently than without it
     # for superseded drafts (the moduledoc says so); with merges that never skip a group, this case now agrees.
     test "the round-4 compaction case: your undo after later edits agrees with and without compaction" do

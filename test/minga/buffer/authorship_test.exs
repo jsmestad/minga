@@ -336,6 +336,42 @@ defmodule Minga.Buffer.AuthorshipTest do
       end
     end
 
+    # Round 5 R1, SL1 to SL3: a deletion beside an identical byte takes the other author's copy, in any change list.
+    test "your :s over Minga's duplicate parens takes Minga's copies, so SPC a u leaves your text" do
+      buffer = start("f(a)\nf(a)\n")
+      replace_at(buffer, {0, 1}, 0, "(", step("t", "c1"))
+      replace_at(buffer, {1, 1}, 0, "(", step("t", "c1"))
+
+      :ok =
+        BufferProcess.replace_content(
+          buffer,
+          String.replace(BufferProcess.content(buffer), "((", "(")
+        )
+
+      assert {:ok, _steps} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "f(a)\nf(a)\n"
+    end
+
+    test "your change elsewhere on the line does not stop the deletion taking Minga's paren" do
+      buffer = start("f(a) x\n")
+      replace_at(buffer, {0, 1}, 0, "(", step("t", "c1"))
+      :ok = BufferProcess.replace_content(buffer, "f(a) y\n")
+      assert {:ok, _steps} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "f(a) y\n"
+    end
+
+    test "Minga's change deleting one of two parens takes yours, so your undo waits and the reject is exact" do
+      buffer = start("f(a) x\n")
+      replace_at(buffer, {0, 1}, 0, "(")
+      minga_replace(buffer, "f(a) y\n", step("t", "c1"))
+      assert {:blocked, _reason} = BufferProcess.undo(buffer)
+      assert BufferProcess.content(buffer) == "f(a) y\n"
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "f((a) x\n"
+      assert :ok = BufferProcess.undo(buffer)
+      assert BufferProcess.content(buffer) == "f(a) x\n"
+    end
+
     # Round 5 R1, AN2: the edit tool adds a one-byte suffix on every line; your :s replaces the suffixed word.
     test "SPC a u after your :s over Minga's one-byte insertions changes nothing" do
       original = Enum.map_join(1..8, fn n -> "v#{n} = f(beta) # #{n}\n" end)
