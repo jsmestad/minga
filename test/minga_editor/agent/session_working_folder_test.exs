@@ -136,6 +136,58 @@ defmodule MingaEditor.Agent.SessionWorkingFolderTest do
              {:unavailable, {:too_broad, canonical_home}}
   end
 
+  test "a restored conversation that can only be read offers a new conversation by key and by click" do
+    line =
+      "This conversation can only be read here. Start a new conversation, or restore it in /work/notes."
+
+    state =
+      recording_manager()
+      |> state()
+      |> MingaEditor.Agent.Events.dispatch(self(), {:conversation_read_only, line})
+
+    assert [notification] =
+             Enum.filter(
+               state.feedback.notifications.items,
+               &(&1.id == "agent:conversation_read_only")
+             )
+
+    key =
+      Minga.Keymap.Scope.Agent.new_session_key_hint(
+        Minga.Keymap.leader_trie(),
+        state.interaction.editing_model,
+        Minga.Config.get(:space_leader)
+      )
+
+    assert is_binary(key)
+    assert notification.title == "This conversation can only be read"
+    assert notification.body == "Key: #{key} starts a new conversation. #{line}"
+
+    assert [%{id: "new_conversation", label: "New conversation", dispatch: action}] =
+             notification.actions
+
+    # The click runs the command the key runs.
+    assert action == {:command, :agent_new_session}
+
+    assert {:ok, _command} =
+             Minga.Command.Registry.lookup(Minga.Command.Registry, :agent_new_session)
+  end
+
+  test "the read-only card goes away when the conversation on screen is one that continues" do
+    read_only_card? = fn state ->
+      Enum.any?(state.feedback.notifications.items, &(&1.id == "agent:conversation_read_only"))
+    end
+
+    shown =
+      recording_manager()
+      |> state()
+      |> MingaEditor.Agent.Events.dispatch(self(), {:conversation_read_only, "This one is read."})
+
+    assert read_only_card?.(shown)
+
+    continued = MingaEditor.Agent.Events.dispatch(shown, self(), :conversation_continues)
+    refute read_only_card?.(continued)
+  end
+
   defp state(manager) do
     state = TestHelpers.base_state(rendering: :disabled)
 

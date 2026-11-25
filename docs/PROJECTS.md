@@ -46,6 +46,24 @@ If you want a loose folder to behave like a project, drop an empty `.minga` file
 
 A marker does not make a too-broad folder acceptable to Minga's Agent, with one exception: version control. If your home directory is a Git repository (a dotfiles setup, for example), it is a project and the Agent works in it, because the whole tree really is one project. A stray `package.json`, a `mix.exs` or a `.minga` file in your home directory is not that kind of evidence, and the Agent still says the folder is too broad. The file tree and project search are not affected: they follow the detected project as before.
 
+### A conversation keeps its folder
+
+The folder is part of the conversation, not of the editor window. A saved conversation records it. When you restore the conversation while that folder is the one you have open, it picks up where it left off.
+
+A conversation cannot move to another folder, and the reason is in how it continues. Minga's instructions to the model name the folder, and a conversation can only go on under the instructions it ran with. Change the folder and the earlier turns no longer belong to what the model is told now. The tools, hooks and staged edits of the window you are in belong to its folder, too. So Minga never lets a restored conversation act somewhere it did not start, and it never moves the window's Agent to follow a conversation.
+
+What happens when you restore a conversation somewhere else is plain: you can read it, and it tells you where it belongs. "This conversation can only be read here. Start a new conversation, or restore it in ~/code/api." A notification offers **New conversation** (click it, or press the key it names). If you send a message anyway, you get the same sentence and your draft is kept.
+
+Conversations saved before Minga recorded the folder still carry it, because the instructions they ran with were saved with them. Minga reads the folder from those saved instructions, never from your messages or from tool output, and records it from then on.
+
+A few restored conversations cannot continue anywhere:
+
+- **The folder is gone.** The record keeps the path, so the conversation works again once the folder is back.
+- **It ran somewhere too broad.** A conversation from before these rules may have run in your home directory or in `/`. Minga does not work there any more, unless the folder is under version control.
+- **Its record names no folder.** Rare: the saved instructions do not name one.
+
+A conversation that started without a folder comes back the same way. It still works for questions when you restore it the way it started: with nothing open, or from the same place that was too broad.
+
 ## Known projects
 
 When you switch to a project, Minga remembers its root so you can return to it with `SPC p p`. The list survives restarts in `$XDG_CONFIG_HOME/minga/known-projects`, or `~/.config/minga/known-projects` if `XDG_CONFIG_HOME` is not set. Development builds use `known-projects-dev` in the same directory, so source launches don't change the installed editor's list.

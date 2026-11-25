@@ -106,7 +106,23 @@ defmodule MingaAgent.Provider do
   @doc "Installs an already-resolved model selection without resetting conversation context."
   @callback set_model(provider(), ModelSelection.t()) :: :ok | {:error, term()}
 
+  @typedoc """
+  Where a provider works: a detected project, a plain folder, or no folder with the reason.
+
+  The contract of the value that `MingaAgent.WorkingFolder` builds and checks.
+  """
+  @type working_folder ::
+          {:project, String.t()} | {:folder, String.t()} | {:unavailable, term()}
+
+  @doc """
+  Returns the folder the provider decided to work in when it started.
+
+  A provider that works in a folder declares it, so the session can record it with the conversation and restore the conversation into the same folder. A provider without one is restored wherever its options say.
+  """
+  @callback working_folder(provider()) :: working_folder()
+
   @optional_callbacks [
+    working_folder: 1,
     get_available_models: 1,
     get_commands: 1,
     set_thinking_level: 2,

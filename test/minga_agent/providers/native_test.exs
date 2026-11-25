@@ -2077,6 +2077,38 @@ defmodule MingaAgent.Providers.NativeTest do
              end)
     end
 
+    test "a view of another folder is refused, and the provider keeps the view of its own", %{
+      tmp_dir: dir
+    } do
+      root = Path.join(dir, "root")
+      elsewhere = Path.join(dir, "elsewhere")
+      File.mkdir_p!(root)
+      File.mkdir_p!(elsewhere)
+
+      {:ok, own_view} =
+        RecordingBackend.create(root, parent: self(), working_dir: root, workspace_id: 1)
+
+      {:ok, foreign_view} =
+        RecordingBackend.create(elsewhere,
+          parent: self(),
+          working_dir: elsewhere,
+          workspace_id: 2
+        )
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: root,
+          project_view: own_view,
+          config: agent_config(tool_approval: :none)
+        )
+
+      assert {:error, {:foreign_view, ^elsewhere}} =
+               Native.refresh_project_view(pid, foreign_view)
+
+      assert Native.project_view(pid) == own_view
+      assert {:ok, %{project_root: ^root}} = Native.get_state(pid)
+    end
+
     test "invalid declared arguments never build callbacks and corrected Native calls still execute",
          %{
            tmp_dir: dir
