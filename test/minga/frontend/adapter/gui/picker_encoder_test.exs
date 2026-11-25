@@ -249,6 +249,24 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
       refute command =~ "Two"
     end
 
+    test "another list revision or another key list is a full picker frame, never a selection update" do
+      base = %{valid_picker() | activation_generation: 7, list_revision: 3}
+      {_, caches} = PickerEncoder.encode(base, Caches.new())
+
+      for {change, model} <- [
+            {"list revision", %{base | list_revision: 4}},
+            {"keys", %{base | keys: [%{codepoint: ?n, modifiers: 0x02, preview: :next}]}}
+          ] do
+        {command, _caches} = PickerEncoder.encode(model, caches)
+
+        assert <<@op_gui_picker, _sections::binary>> = command,
+               "a change of the #{change} was not sent as a full picker frame"
+      end
+
+      # Nothing changed: nothing is sent.
+      assert {nil, _caches} = PickerEncoder.encode(base, caches)
+    end
+
     test "rejects oversized picker header coordinates and counts" do
       base = valid_picker()
 

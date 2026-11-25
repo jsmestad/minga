@@ -191,7 +191,6 @@ public final class PickerState {
     public var empty: Wire.EmptyList? = nil
     /// True while the picker has nothing to filter: it takes no text, so the query field steps aside and the editor view's keys (j and k move, q closes) reach the picker.
     public var listKeys: Bool = false
-    /// The keys the BEAM's picker keymap scope resolves to one-row movement. The local selection preview moves only for these keys.
     /// The single keys the BEAM's picker keymap scope binds for this picker. The query field forwards exactly these and keeps every other key for the text.
     public var keys: [Wire.PickerKey] = []
     /// Names the list of offered rows. A selection preview is kept only under the revision it was made under.
@@ -312,9 +311,15 @@ public final class PickerState {
     }
 
     /// Moves the highlighted row ahead of the BEAM for a key press that is being sent to it, when the BEAM allows a preview for that exact key.
+    ///
+    /// Any other key (a page, a character, a close) moves the BEAM's selection in a way the frontend does not predict, so a highlight that ran ahead is dropped and the next frame's row is shown.
     @discardableResult
     public func previewNavigation(codepoint: UInt32, modifiers: UInt8) -> Bool {
-        guard let delta = movementDelta(codepoint: codepoint, modifiers: modifiers) else { return false }
+        guard let delta = movementDelta(codepoint: codepoint, modifiers: modifiers) else {
+            localPresentationStore.discard(.picker)
+            previewSelectedIndex = nil
+            return false
+        }
         return previewNavigation(delta: delta)
     }
 

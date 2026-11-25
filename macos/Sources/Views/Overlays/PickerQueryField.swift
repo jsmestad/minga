@@ -24,6 +24,8 @@ enum PickerQueryKeyRouting {
     ///
     /// `binds` answers whether the BEAM lists that exact key press for the open picker (`PickerState.binds`). The field keeps no list of picker keys: a listed key is forwarded, whatever it is, and an unlisted key stays with the field. A user's binding therefore wins over the field's own editing of the same chord.
     static func route(identity: KeyPressIdentity?, selectorName: String, fieldIsEmpty: Bool, binds: (UInt32, UInt8) -> Bool) -> Route {
+        let identity = identity ?? platformAlias(selectorName)
+
         if let identity, binds(identity.codepoint, identity.modifiers) { return .forward(identity) }
 
         if let identity, let edit = lineEdit(identity) { return .lineEdit(edit) }
@@ -32,6 +34,11 @@ enum PickerQueryKeyRouting {
         if selectorName == "deleteBackward:", fieldIsEmpty { return .forward(KeyPressIdentity(codepoint: 127, modifiers: 0)) }
 
         return endsEditing(selectorName) ? .ignore : .native
+    }
+
+    /// ⌘. is the platform's cancel. It has no key press identity of its own (Command belongs to the menus), so it stands for Escape, the key it is an alias of.
+    static func platformAlias(_ selectorName: String) -> KeyPressIdentity? {
+        selectorName == "cancelOperation:" ? KeyPressIdentity(codepoint: 27, modifiers: 0) : nil
     }
 
     /// Returns the readline edit for ⌃W or ⌃U, which Cocoa's field editor does not bind by default.
@@ -123,6 +130,8 @@ struct PickerQueryField: NSViewRepresentable {
         var reconciler = PickerQueryReconciler()
         weak var focusPolicy: (any EditorFocusControlling)?
         private var applyingAuthoritativeText = false
+        /// The key-down event the picker last took from the field (sent to the BEAM, or left without effect), so a second command of the same event does nothing more.
+        private var consumedEventTimestamp: TimeInterval?
 
         init(sendAction: ViewActionHandler<Action>?, style: InlineEditFieldStyle, binds: @escaping (UInt32, UInt8) -> Bool = { _, _ in false }) {
             self.sendAction = sendAction
@@ -200,7 +209,16 @@ struct PickerQueryField: NSViewRepresentable {
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            let identity = NSApp.currentEvent.flatMap(KeyPressIdentity.command(from:))
+            // While an input method composes, its keys are its own: Return commits the composition, Esc cancels it.
+            guard !textView.hasMarkedText() else { return false }
+
+            let event = NSApp.currentEvent
+            let identity = event.flatMap(KeyPressIdentity.command(from:))
+
+            // Cocoa can run two commands for one key (⌃O inserts a line break and moves back). One key press is one key press for the BEAM.
+            // The second command of a key the picker already took does nothing.
+            if let event, event.type == .keyDown, event.timestamp == consumedEventTimestamp { return true }
+
             let route = PickerQueryKeyRouting.route(
                 identity: identity,
                 selectorName: NSStringFromSelector(commandSelector),
@@ -210,6 +228,7 @@ struct PickerQueryField: NSViewRepresentable {
 
             switch route {
             case .forward(let key):
+                consumedEventTimestamp = event?.timestamp
                 sendAction?(.keyPress(codepoint: key.codepoint, modifiers: key.modifiers, sequence: 0))
                 return true
             case .lineEdit(.deleteWordBackward):
@@ -219,6 +238,7 @@ struct PickerQueryField: NSViewRepresentable {
                 textView.deleteToBeginningOfLine(nil)
                 return true
             case .ignore:
+                consumedEventTimestamp = event?.timestamp
                 return true
             case .native:
                 return false

@@ -350,6 +350,38 @@ func TestPickerDecodesTheKeysSectionAndTheListRevision(t *testing.T) {
 	}
 }
 
+func TestPickerPreviewIsDroppedWhenAnotherKeyIsSent(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		key   tea.KeyPressMsg
+		index int
+	}{
+		{"a second movement key keeps moving the preview", ctrlKey('j'), 3},
+		{"PageDown moves the BEAM's selection by a page, which is not previewed", tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown}), 1},
+		{"a character edits the query", tea.KeyPressMsg(tea.Key{Code: 'a', Text: "a"}), 1},
+		{"a key the picker does not bind", ctrlKey('p'), 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model, _ := fitPicker(t, 120, 40, 5, 7)
+			model.chrome[generated.OPGuiPicker] = pickerChrome(5, 1)
+
+			updated, _ := model.Update(ctrlKey('j'))
+			model = updated.(Model)
+			if got := model.effectivePickerIndex(model.chrome[generated.OPGuiPicker].Picker); got != 2 {
+				t.Fatalf("highlighted index after ⌃J = %d, want 2", got)
+			}
+
+			updated, _ = model.Update(tc.key)
+			model = updated.(Model)
+
+			// Until the next frame the highlight shows the committed row again, so it never names a row the BEAM skipped.
+			if got := model.effectivePickerIndex(model.chrome[generated.OPGuiPicker].Picker); got != tc.index {
+				t.Fatalf("highlighted index after the second key = %d, want %d", got, tc.index)
+			}
+		})
+	}
+}
+
 func TestPickerPreviewIsDroppedWhenTheListItWasMadeUnderChanges(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

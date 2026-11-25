@@ -60,17 +60,23 @@ public nonisolated struct KeyPressIdentity: Equatable, Sendable {
     public static func command(keyCode: UInt16, charactersIgnoringModifiers: String?, flags: NSEvent.ModifierFlags) -> KeyPressIdentity? {
         let modifiers = modifierBits(from: flags.intersection(.deviceIndependentFlagsMask))
 
-        if let codepoint = namedKeyCodepoint(keyCode: keyCode) {
+        // Keypad Enter runs what Return runs.
+        if let codepoint = keyCode == keypadEnterKeyCode ? 13 : namedKeyCodepoint(keyCode: keyCode) {
             return KeyPressIdentity(codepoint: codepoint, modifiers: modifiers)
         }
 
         guard flags.contains(.control), !flags.contains(.command),
-              let scalars = charactersIgnoringModifiers?.unicodeScalars, scalars.count == 1,
-              let scalar = scalars.first
+              let character = charactersIgnoringModifiers, character.unicodeScalars.count == 1
         else { return nil }
+
+        // Caps Lock alone must not turn ⌃J into another key: only Shift picks the upper-case character.
+        let typed = flags.contains(.capsLock) && !flags.contains(.shift) ? character.lowercased() : character
+        guard typed.unicodeScalars.count == 1, let scalar = typed.unicodeScalars.first else { return nil }
 
         return KeyPressIdentity(codepoint: scalar.value, modifiers: modifiers & ~0x01)
     }
+
+    private static let keypadEnterKeyCode: UInt16 = 76
 
     /// The identity of a key-down event that is not plain text. See `command(keyCode:charactersIgnoringModifiers:flags:)`.
     public static func command(from event: NSEvent) -> KeyPressIdentity? {

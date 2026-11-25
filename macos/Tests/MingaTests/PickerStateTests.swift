@@ -213,6 +213,25 @@ struct PickerStateTests {
         #expect(state.selectedIndex == 0)
     }
 
+    @Test("a key the frontend does not preview drops a highlight that ran ahead", arguments: [
+        // ⌃J again keeps moving; Enter and the act menu key (listed, no preview) and an unlisted key drop it.
+        (UInt32(106), UInt8(0x02), 3),
+        (13, 0, 1),
+        (46, 0x02, 1),
+        (110, 0x02, 1)
+    ] as [(UInt32, UInt8, Int)])
+    func otherKeysDropThePreview(codepoint: UInt32, modifiers: UInt8, expected: Int) {
+        let state = PickerState()
+        state.update(visible: true, selectedIndex: 1, filteredCount: 5, totalCount: 5, markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: makeItems(5), actionMenu: nil, activationGeneration: 7, keys: defaultKeys)
+        #expect(state.previewNavigation(codepoint: 106, modifiers: 0x02))
+        #expect(state.effectiveSelectedIndex == 2)
+
+        _ = state.previewNavigation(codepoint: codepoint, modifiers: modifiers)
+
+        // Until the next frame the highlight shows the committed row again, so it never names a row the BEAM skipped.
+        #expect(state.effectiveSelectedIndex == expected)
+    }
+
     @Test("a preview is kept only under the list it was made under", arguments: [
         // new revision, rows in the next frame, expected highlighted row
         // The same list: the preview stays until the BEAM catches up.

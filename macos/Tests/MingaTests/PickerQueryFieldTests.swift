@@ -302,6 +302,14 @@ struct PickerQueryFieldTests {
         #expect(route(57_353, 0, "moveDown:", listed: []) == .native)
     }
 
+    @Test("⌘. is the platform's cancel: it stands for Escape, and does nothing when the picker does not bind Escape")
+    func platformCancel() {
+        #expect(route(nil, 0, "cancelOperation:") == .forward(KeyPressIdentity(codepoint: 27, modifiers: 0)))
+        #expect(route(nil, 0, "cancelOperation:", listed: []) == .ignore)
+        // Only cancel has such an alias: a command without a key behind it is otherwise the field's own.
+        #expect(route(nil, 0, "moveDown:") == .native)
+    }
+
     @Test("a user's binding wins over the field's own edit of the same chord")
     func userBindingWinsOverLineEdit() {
         let listed = PickerQueryFieldTests.listed.union([[119, 2]])
@@ -319,7 +327,12 @@ struct PickerQueryFieldTests {
         (53, "\u{1b}", [], 27, 0),
         (125, "\u{F701}", [.function, .numericPad], 57_353, 0),
         (125, "\u{F701}", [.shift, .function, .numericPad], 57_353, 1),
-        (121, "\u{F72D}", .function, 57_363, 0)
+        (121, "\u{F72D}", .function, 57_363, 0),
+        // Keypad Enter runs what Return runs.
+        (76, "\u{03}", .numericPad, 13, 0),
+        // Caps Lock alone does not make ⌃J another key; with Shift it is the upper-case character.
+        (38, "J", [.control, .capsLock], 106, 2),
+        (38, "J", [.control, .capsLock, .shift], 74, 2)
     ] as [(UInt16, String, NSEvent.ModifierFlags, UInt32, UInt8)])
     func keyPressIdentity(keyCode: UInt16, characters: String, flags: NSEvent.ModifierFlags, codepoint: UInt32, modifiers: UInt8) {
         #expect(KeyPressIdentity.command(keyCode: keyCode, charactersIgnoringModifiers: characters, flags: flags) == KeyPressIdentity(codepoint: codepoint, modifiers: modifiers))

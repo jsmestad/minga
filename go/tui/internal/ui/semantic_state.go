@@ -336,6 +336,7 @@ func (m *Model) localPreviewActivationPacket(msg tea.KeyPressMsg, component stri
 
 // previewPickerNavigation moves the local picker highlight for a key press already sent to the BEAM.
 // It moves only for a key the BEAM listed as picker movement, so the preview cannot disagree with the keymap: every other key edits the query or runs another command there.
+// Such a key (a page, a character, a close) moves the BEAM's selection in a way this frontend does not predict, so a highlight that ran ahead is dropped and the next frame's row is shown.
 func (m *Model) previewPickerNavigation(keyPress []byte) bool {
 	payload, ok := m.chrome[generated.OPGuiPicker]
 	// The open act menu owns the list keys; the picker's highlighted row stays where it is.
@@ -345,6 +346,7 @@ func (m *Model) previewPickerNavigation(keyPress []byte) bool {
 
 	delta, ok := pickerNavigationDelta(payload.Picker.MovementKeys, keyPress)
 	if !ok {
+		m.localPresentation.discardIdentity(presentationPicker)
 		return false
 	}
 
