@@ -24,9 +24,15 @@ import { readPageLab } from "./support/page_copy.ts";
 
 const PAGE = "learn/elixir.html";
 
+/** The visible text of a piece of page markup. Tags are removed until none is left, so a tag that only appears once another is gone cannot survive. */
 function text(html: string): string {
-  return html
-    .replace(/<[^>]*>/g, "")
+  let plain = html;
+  let before: string;
+  do {
+    before = plain;
+    plain = plain.replace(/<[^>]*>/g, "");
+  } while (plain !== before);
+  return plain
     .replaceAll("&lt;", "<")
     .replaceAll("&gt;", ">")
     .replaceAll("&quot;", '"')
