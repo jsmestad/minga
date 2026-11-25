@@ -14,6 +14,14 @@
         "git_status": {
           "cols": 145,
           "rows": 43
+        },
+        "agent_chat": {
+          "cols": 179,
+          "rows": 43
+        },
+        "agent_chat+agent_activity": {
+          "cols": 179,
+          "rows": 42
         }
       }
     },
@@ -30,6 +38,14 @@
         "git_status": {
           "cols": 125,
           "rows": 38
+        },
+        "agent_chat": {
+          "cols": 159,
+          "rows": 38
+        },
+        "agent_chat+agent_activity": {
+          "cols": 159,
+          "rows": 37
         }
       }
     }

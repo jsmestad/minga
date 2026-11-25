@@ -254,10 +254,12 @@ defmodule Minga.Test.Storyboard.Render do
   # Git status are a native sidebar beside the editor, so the editor's grid narrows while one is open.
   # A target's `chrome_grid` maps the grid-changing chrome open at the reached frame, joined with "+", to the grid the
   # frontend reports then. The capture does what that report does in production: it resizes the editor to that grid.
-  @grid_chrome [:file_tree, :git_status]
+  @grid_chrome [:file_tree, :git_status, :agent_chat, :agent_activity]
 
   # Chrome each frontend draws natively around the editor: a scenario that shows it needs a `chrome_grid` entry.
-  @native_below %{macos: [:file_tree, :git_status], tui: []}
+  # On macOS the conversation is a native view and the grid the window reports follows it. The Agent activity strip
+  # takes a row only above a conversation, so it changes the key ("agent_chat+agent_activity") but needs no entry alone.
+  @native_below %{macos: [:file_tree, :git_status, :agent_chat], tui: []}
 
   @spec fit_native_chrome(Session.t(), target()) :: {Session.t(), target()}
   defp fit_native_chrome(session, target) do

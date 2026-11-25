@@ -1279,8 +1279,8 @@ struct AgentChatViewTests {
         #expect(state.promptMode == .insert)
     }
 
-    @Test("Auto-approved tool calls show the subtle scope pill")
-    @MainActor func autoApprovedIndicatorRenders() throws {
+    @Test("A tool step adds no approval words of its own to the BEAM's sentence")
+    @MainActor func autoApprovedStepAddsNoWords() throws {
         let state = chatState(messages: [
             .toolCall(id: 1, name: "shell", summary: "git diff --cached", status: 1, isError: false, collapsed: true, autoApprovedScope: 1, durationMs: 500, result: "", previewKind: 0, previewLines: []),
             .toolCall(id: 2, name: "shell", summary: "git status --short", status: 1, isError: false, collapsed: true, autoApprovedScope: 2, durationMs: 250, result: "", previewKind: 0, previewLines: [])
@@ -1291,8 +1291,8 @@ struct AgentChatViewTests {
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
-        #expect(strings.contains("auto-approved · session"))
-        #expect(strings.contains("auto-approved · turn"))
+        #expect(!strings.contains { $0.localizedCaseInsensitiveContains("auto-approved") })
+        #expect(!strings.contains { $0.localizedCaseInsensitiveContains("session") || $0.localizedCaseInsensitiveContains("turn") })
     }
 
     @Test("Styled assistant keeps decorative rails literal")
