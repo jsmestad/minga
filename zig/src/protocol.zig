@@ -103,6 +103,7 @@ pub const OP_REQUEST_REPARSE = opcodes.OP_REQUEST_REPARSE;
 pub const OP_MATCH_ITEM_RESULT = opcodes.OP_MATCH_ITEM_RESULT;
 pub const OP_NODE_INFO = opcodes.OP_NODE_INFO;
 pub const OP_DOCUMENT_SYMBOLS = opcodes.OP_DOCUMENT_SYMBOLS;
+pub const OP_PARSE_COMPLETE = opcodes.OP_PARSE_COMPLETE;
 
 // Gui Chrome
 pub const OP_GUI_TAB_BAR = opcodes.OP_GUI_TAB_BAR;
@@ -159,6 +160,7 @@ pub const OP_GUI_COMPLETION_SELECTION = opcodes.OP_GUI_COMPLETION_SELECTION;
 pub const OP_GUI_PICKER_SELECTION = opcodes.OP_GUI_PICKER_SELECTION;
 pub const OP_GUI_TEXT_PRESENTATION = opcodes.OP_GUI_TEXT_PRESENTATION;
 pub const OP_GUI_RESIDENT_SEMANTICS = opcodes.OP_GUI_RESIDENT_SEMANTICS;
+pub const OP_GUI_TASKS_DRAWER = opcodes.OP_GUI_TASKS_DRAWER;
 
 pub const GUI_ACTION_SELECT_TAB = opcodes.GUI_ACTION_SELECT_TAB;
 pub const GUI_ACTION_CLOSE_TAB = opcodes.GUI_ACTION_CLOSE_TAB;
@@ -1776,6 +1778,15 @@ pub fn encodeFoldRanges(allocator: std.mem.Allocator, buffer_id: u32, version: u
         std.mem.writeInt(u32, buf[off + 4 ..][0..4], r.end_line, .big);
     }
 
+    return buf;
+}
+
+/// Encodes parse_complete: opcode(1) + buffer_id(4) + version(4). It is the last message of every parse, so the BEAM
+/// knows every other result of that parse has arrived before it.
+pub fn encodeParseComplete(buf: *[9]u8, buffer_id: u32, version: u32) []const u8 {
+    buf[0] = OP_PARSE_COMPLETE;
+    std.mem.writeInt(u32, buf[1..5], buffer_id, .big);
+    std.mem.writeInt(u32, buf[5..9], version, .big);
     return buf;
 }
 
@@ -3397,6 +3408,12 @@ test "encodeLogMessage buffer too small returns error" {
 }
 
 // ── Request reparse protocol tests ────────────────────────────────────────────
+
+test "encodeParseComplete byte layout" {
+    var buf: [9]u8 = undefined;
+    const msg = encodeParseComplete(&buf, 0x01020304, 7);
+    try std.testing.expectEqualSlices(u8, &.{ OP_PARSE_COMPLETE, 1, 2, 3, 4, 0, 0, 0, 7 }, msg);
+}
 
 test "encodeRequestReparse byte layout" {
     var buf: [5]u8 = undefined;

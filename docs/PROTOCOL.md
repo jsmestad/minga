@@ -71,7 +71,7 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 | `0x18` | protocol_error | 3 + msg_len | Version-mismatch error; frontend shows it and stops decoding |
 | `0x1A` | application_quit_response | variable | Return the correlated BEAM quit-policy outcome |
 | `0x27` | measure_text | 7 + text_len | Request display width of text |
-| `0x61` | agent_desktop_notification | 22 | Post a native agent alert or withdraw a resolved approval |
+| `0x61` | agent_desktop_notification | 18 | Alert that a task needs you, or withdraw that alert |
 
 ### BEAM → Frontend (Config Commands)
 
@@ -111,7 +111,7 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 | `0x1F` | text_presentation_state | 12 | Ordered active/discarded text presentation lifetime |
 | `0x05` | capabilities_updated | 9 or 23 | Updated versioned capabilities after async detection |
 | `0x13` | frontend_foreground | 2 | Whether the frontend is in the foreground: terminal window focus, or the macOS app's active state |
-| `0x62` | terminal_report | 4 + 2 per feature | The terminal frontend's snapshot of its host terminal's features |
+| `0x62` | terminal_report | 4 + 3 per feature | The terminal frontend's snapshot of its host terminal's features |
 | `0x08` | request_keyframe | 9 | Ask the BEAM to start a fresh recovery generation (last_good_frame_seq + failed generation) |
 | `0x09` | scroll_batch | 6 | Pane-targeted vertical wheel or trackpad displacement |
 | `0x0A` | frame_applied | 9 | Report semantic publication of a complete frame |
@@ -139,6 +139,7 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 | `0x3B` | request_reparse | 5 | Parser requests full reparse after stale edit deltas |
 | `0x3C` | match_item_result | 6 or 14 | Structural match position result (or nil) |
 | `0x3D` | node_info | 6 or 24 + type_len | Structural navigation target range and node type |
+| `0x3F` | parse_complete | 9 | The last message of a parse |
 
 ### Frontend → BEAM (Diagnostics)
 
@@ -250,16 +251,17 @@ Outcome values are `0` needs decision, `1` proceeding, `2` cancelled, and `3` sa
 
 ### `0x61` agent_desktop_notification
 
-The BEAM sends one native notification instruction outside a render transaction. The Go frontend sizes and skips it. The packet contains no conversation text, tool arguments, paths, or provider errors.
+The BEAM sends one "a task needs you" alert, or its withdrawal, outside a render transaction. The packet contains no conversation text, tool arguments, paths, or provider errors.
 
 ```
 opcode:      u8 = 0x61
-kind:        u8
+kind:        u8    (1 = needs you, 2 = withdrawn)
 identity:    [16]u8
-debounce_ms: u32
 ```
 
-Kind `1` posts an approval alert and `4` withdraws the alert with the same opaque approval identity. Kind `2` reports completion and `3` reports an agent error. These use an opaque session identity and a debounce interval in milliseconds. The native app decides when to deliver from app activity and the user's notification settings. The BEAM remains the authority for whether an approval is actionable.
+The BEAM decides when to alert (`MingaEditor.Agent.TaskWorkflow`): a task has just started needing you, because an approval or a question became pending, while the frontend reports that Minga is in the background (`frontend_foreground`, `0x13`). A task that keeps needing you is not alerted again. When the task stops needing you, wherever it was answered, the BEAM withdraws the alert with the same identity, and it withdraws it too when the task's session stops. A frontend never checks whether it is active before it posts: the BEAM is the authority.
+
+The macOS app posts a notification for kind `1` and removes it for kind `2`. A click on the notification sends the `agent_notification_open` gui_action (`0x72`) with the same identity, and the BEAM opens the tasks drawer on that task. The terminal frontend receives the alert only when the user set `:agent_notify_terminal` to ring the bell; it writes BEL to its terminal for kind `1` and ignores kind `2`.
 
 ---
 
@@ -834,6 +836,20 @@ Total size: 5 bytes.
 
 **Behavior:** The BEAM receives this event, looks up the buffer PID for the given `buffer_id`, and sends a full `set_language` + `parse_buffer` sequence for that buffer. This is the same path used when setting up a buffer for the first time, so custom user queries are replayed correctly.
 
+### `0x3F` parse_complete
+
+The last message of every parse that sent `highlight_spans`, from `parse_buffer` and from `edit_buffer`, including a parse that failed and sent empty spans.
+
+```
+opcode:     u8  = 0x3F
+buffer_id:  u32          the buffer that was parsed
+version:    u32          version from the parse request
+```
+
+Total size: 9 bytes.
+
+**Behavior:** A parse sends `highlight_names` and `highlight_spans` first, so highlights reach the screen as early as possible. Its conceal spans, injection ranges, fold ranges, text object positions, and document symbols follow, and `parse_complete` comes last. The BEAM admits the buffer's next parse only after `parse_complete`, and the editor records the parse as complete, so it knows no more results of that version are on their way. Before this message existed, the spans ended a parse and the fold ranges that followed could miss the frame the spans scheduled ([#4314](https://github.com/jsmestad/minga/issues/4314)).
+
 ---
 
 ## Log Messages (Frontend → BEAM)
@@ -974,7 +990,7 @@ foreground:  u8    (1 = in the foreground, 0 = in the background)
 
 The terminal frontend turns on focus reporting (mode 1004) and sends the event when the terminal reports that its window got or lost the focus. macOS sends it once after `ready` and whenever the app becomes active or resigns. This is not keyboard focus inside the editor, which is `gui_focus_owner`.
 
-The BEAM keeps `:foreground`, `:background` or `:unknown` (`MingaEditor.State.Frontend.foreground/1`). It is `:unknown` until a frontend reports and again after every `ready`, and a terminal without focus reporting never reports. A reader matches all three values. For anything that would interrupt the user, `:unknown` counts as the foreground: a notification that is not sent is the safe side. The Editor broadcasts `:frontend_foreground_changed` (`Minga.Events.FrontendForegroundChangedEvent`) on every change, so code below the editor layer subscribes instead of asking the Editor.
+The BEAM keeps `:foreground`, `:background` or `:unknown` (`MingaEditor.State.Frontend.foreground/1`). It is `:unknown` until a frontend reports and again after every `ready`, and a terminal without focus reporting never reports. A reader matches all three values. For anything that would interrupt the user, `:unknown` counts as the foreground: a notification that is not sent is the safe side. The "needs you" alert (`0x61`) follows this rule. The Editor broadcasts `:frontend_foreground_changed` (`Minga.Events.FrontendForegroundChangedEvent`) on every change, so code below the editor layer subscribes instead of asking the Editor.
 
 ### `0x62` terminal_report
 
@@ -989,9 +1005,12 @@ count x:
                   5 kitty_keyboard, 6 desktop_notifications, 7 tab_title, 8 tab_progress, 9 kitty_graphics,
                   10 synchronized_output, 11 focus_reporting, 12 clipboard_osc52)
   status:  u8    (terminal_feature_status: 0 unknown, 1 pending, 2 detected, 3 missing, 4 fallback)
+  source:  u8    (terminal_feature_source: 0 unsettled, 1 answered, 2 known_terminal, 3 timeout, 4 user)
 ```
 
-Every event is a complete snapshot and replaces the BEAM's copy (`MingaEditor.Frontend.TerminalReport`). The frontend sends it right after `ready`, with `pending` for every feature it has asked the terminal about, then once more when the terminal has answered or two seconds have passed, and again if a later answer changes an entry. After the two seconds no entry is `pending`: a feature the terminal did not answer for is `fallback` when Minga has a replacement and `missing` when it has none. A feature the frontend does not list is `unknown` on the BEAM, as is a feature id this BEAM does not know, which it skips.
+`source` says how the frontend settled the status, so `:checkhealth terminal` can say why: the terminal answered a query or showed the feature by using it (`answered`), the terminal is in the frontend's table of known terminals (`known_terminal`), the terminal did not answer in time (`timeout`), or the user forced the feature with the `:terminal_features` option (`user`). A feature that is still `pending` is `unsettled`. A source the BEAM does not know reads as `unsettled`.
+
+Every event is a complete snapshot and replaces the BEAM's copy (`MingaEditor.Frontend.TerminalReport`). The frontend sends it right after `ready`, with `pending` for every feature it has asked the terminal about, then once more when the terminal has answered or two seconds have passed, and again if a later answer changes an entry's status or its source. After the two seconds no entry is `pending`: a feature the terminal did not answer for is `fallback` when Minga has a replacement and `missing` when it has none. A feature the frontend does not list is `unknown` on the BEAM, as is a feature id this BEAM does not know, which it skips.
 
 The frontend builds one value from the terminal's answers and uses it for its own choices and for this report, so what the BEAM lists is what the frontend does. The capability bytes of `ready` are unchanged: they describe what the BEAM adapts its rendering to, and it adapts to none of these features.
 

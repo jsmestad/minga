@@ -3998,6 +3998,7 @@ struct CommandDispatcherStagingTests {
             case .linkCursorChanged: events.append("link")
             case .focusOwnerChanged: events.append("focus-owner")
             case .agentDesktopNotification: events.append("agent-desktop-notification")
+            case .needsYouCountChanged: events.append("needs-you-count")
             }
         }
         gui.frontendExtensions.register(

@@ -35,6 +35,7 @@ defmodule MingaEditor.Input do
   alias MingaEditor.Input.Scoped
   alias MingaEditor.Input.Sidebar
   alias MingaEditor.Input.SignatureHelp
+  alias MingaEditor.Input.TasksDrawer
   alias MingaEditor.Input.ToolApproval
   alias MingaEditor.Input.WhichKey
 
@@ -55,6 +56,8 @@ defmodule MingaEditor.Input do
   # Update it when a handler that claims SPC is added, removed, or moved.
   @builtin_surface_handlers [
     {MentionCompletion, 10},
+    # The drawer answers the task it selects, so it runs ahead of the conversation's approval keys.
+    {TasksDrawer, 15},
     {ToolApproval, 20},
     {AgentPanel, 40},
     {Sidebar, 45},

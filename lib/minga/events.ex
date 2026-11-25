@@ -281,7 +281,7 @@ defmodule Minga.Events do
 
     Sent by the Editor when what it knows about the frontend's place changes. The frontend reports that it moved to the foreground or to the background: the terminal window got or lost focus, or the macOS app became active or resigned. A new frontend connection makes the status `:unknown` again until that frontend reports.
 
-    A subscriber that must act only while nobody is looking keeps the last status it received. Until the first event the status is not known, and a terminal without focus reporting never sends one. Treat `:unknown` as the foreground when the action would interrupt the user: a notification that is not sent is the safe side.
+    A subscriber that must act only while nobody is looking keeps the last status it received. Until the first event the status is not known, and a terminal without focus reporting never sends one. Treat `:unknown` as the foreground when the action would interrupt the user: a notification that is not sent is the safe side. The editor's own "needs you" alert (`MingaEditor.Agent.TaskWorkflow`) reads the same fact from its state and follows the same rule.
     """
     @enforce_keys [:status]
     defstruct [:status]
@@ -559,10 +559,9 @@ defmodule Minga.Events do
   @spec broadcast(:agent_session_restarted, MingaAgent.SessionManager.SessionRestartedEvent.t()) ::
           :ok
   @spec broadcast(:agent_desktop_notification, %{
-          kind: :approval | :approval_cleared | :complete | :error,
+          kind: :needs_you | :withdrawn,
           id: <<_::128>>,
-          owner: pid(),
-          debounce_ms: non_neg_integer()
+          owner: pid()
         }) :: :ok
   @spec broadcast(:background_subagent_started, MingaAgent.Subagent.Handle.t()) :: :ok
   @spec broadcast(:node_connected, Minga.Distribution.Events.NodeConnectedEvent.t()) :: :ok

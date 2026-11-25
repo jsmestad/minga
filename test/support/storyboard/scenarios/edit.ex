@@ -2,7 +2,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
   @moduledoc """
   Registry entries for the `edit` journey: plain editing, the leader which-key and visual selection.
 
-  `edit.plain` is the factory's cold start and its home: every way-out check ends here.
+  The factory's cold start is the project home (`start.open_dir.home`); `1` opens the project's file there, which is `edit.plain`.
   """
 
   import Minga.Test.Storyboard.Assertions
@@ -16,9 +16,9 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
   def entries do
     [
       Entry.built("edit.plain",
-        reach: "",
+        reach: "1",
         recognize: &home?/1,
-        click_reach: [],
+        click_reach: [{:gui_action, {:empty_state_activate, "recent-1"}}],
         explore: :normal,
         checks: [
           Check.new("a resting view: nothing transient, nothing pending", &assert_resting/1),
@@ -63,7 +63,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
         ]
       ),
       Entry.built("edit.visual",
-        reach: "v",
+        reach: "1 v",
         recognize:
           &(&1.mode in [:visual, :visual_line, :visual_block] and not Model.transient_open?(&1)),
         checks: [
@@ -84,7 +84,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
       ),
       Entry.pending("chrome.tooltip", 4053, "hover teaches a modeline segment's meaning and key"),
       Entry.built("edit.command_line",
-        reach: ":",
+        reach: "1 :",
         recognize: &(&1.mode == :command and not Model.open?(&1, :which_key))
       )
     ]

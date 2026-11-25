@@ -1,0 +1,28 @@
+defmodule Minga.Buffer.Provenance.Group do
+  @moduledoc """
+  One unit of history: the runs one author's edit group inserted or deleted, and whether the group is applied.
+
+  For you, a group is one undo step. For Minga, a group is one step of one task. The group keeps the locators of its runs in an ordered set, so undoing or rejecting it visits exactly those runs, in O(k log n) for k runs, without scanning the document.
+
+  `Minga.Buffer.Provenance` is the only writer of groups.
+  """
+
+  alias Minga.Buffer.Provenance.Locator
+  alias Minga.Buffer.Provenance.Run
+
+  @enforce_keys [:author, :key]
+  # `runs` has no literal default: an empty `:gb_sets` value is opaque, so `Minga.Buffer.Provenance` builds it.
+  defstruct [:author, :key, :runs, applied: true]
+
+  @typedoc """
+  How a group names itself to callers: Minga's author key for a Minga step, `{:untasked, n}` for the `n`th agent edit with no task, and `nil` for your groups.
+  """
+  @type key :: Minga.Buffer.Author.key() | {:untasked, pos_integer()} | nil
+
+  @type t :: %__MODULE__{
+          author: Run.author(),
+          key: key(),
+          applied: boolean(),
+          runs: :gb_sets.set(Locator.t())
+        }
+end

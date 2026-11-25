@@ -10,8 +10,11 @@ defmodule Minga.Frontend.Adapter.GUI.EmptyStateEncoder do
 
   @op_gui_empty_state Opcodes.gui_empty_state()
 
-  @section_ids %{session: 0, recent: 1, start: 2, footer: 3}
-  @item_kinds %{resume: 0, recent_file: 1, action: 2, hint: 3}
+  # Wire ids for the project home (payload version 2).
+  # Ids 0, 2 and 3 belonged to the version 1 launchpad and stay retired.
+  @section_ids %{recent: 1, projects: 4, tasks: 5, next: 6}
+  @item_kinds %{recent_file: 1, action: 2, project: 4, task: 5}
+  @payload_version 2
 
   @spec encode(EmptyState.t() | nil, Caches.t()) :: {binary() | nil, Caches.t()}
   def encode(nil, %Caches{} = caches), do: encode(%EmptyState{}, caches)
@@ -41,14 +44,14 @@ defmodule Minga.Frontend.Adapter.GUI.EmptyStateEncoder do
 
   @spec encode_payload(EmptyState.t()) :: binary()
   defp encode_payload(%EmptyState{} = model) do
-    flags = if model.crashed?, do: 0x01, else: 0x00
-
     writer =
       :gui_empty_state
       |> Writer.new()
-      |> Writer.append(<<1::8>>)
-      |> Writer.uint8(:flags, flags)
-      |> Writer.string8(:version, model.version)
+      |> Writer.uint8(:payload_version, @payload_version)
+      |> Writer.string16(:title, model.title)
+      |> Writer.string16(:path, model.path)
+      |> Writer.string16(:status, model.status)
+      |> Writer.string16(:note, model.note)
       |> Writer.string8(:focused_id, model.focused_id || "")
       |> Writer.uint8(:section_count, Enum.count(model.sections))
 
@@ -63,6 +66,7 @@ defmodule Minga.Frontend.Adapter.GUI.EmptyStateEncoder do
       writer
       |> Writer.uint8(:section_id, Map.fetch!(@section_ids, section.id))
       |> Writer.string8(:section_title, section.title)
+      |> Writer.string16(:section_empty, section.empty)
       |> Writer.uint8(:section_item_count, Enum.count(section.items))
 
     Enum.reduce(section.items, writer, &encode_item/2)
@@ -75,9 +79,15 @@ defmodule Minga.Frontend.Adapter.GUI.EmptyStateEncoder do
     |> Writer.string8(:item_id, item.id)
     |> Writer.string16(:item_label, item.label)
     |> Writer.string16(:item_detail, item.detail)
+    |> Writer.string16(:item_meta, item.meta)
     |> Writer.string8(:item_jump_key, item.jump_key || "")
     |> Writer.string8(:item_chord, item.chord)
     |> Writer.string8(:item_icon, item.icon)
     |> Writer.uint32(:item_icon_color, item.icon_color)
+    |> Writer.string8(:item_state, state_name(item.state))
   end
+
+  @spec state_name(atom() | nil) :: String.t()
+  defp state_name(nil), do: ""
+  defp state_name(state) when is_atom(state), do: Atom.to_string(state)
 end

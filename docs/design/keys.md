@@ -55,7 +55,7 @@ Keys are chords and mnemonics, not shortcuts. This is [principle 11](principles.
 | `SPC g B` | Blame for the current line or file (Doom) | new; replaces the proposed `SPC g b`. The git extension owns `SPC g`; it still binds blame on `SPC g b` |
 | `SPC g b` | Switch branch (Doom), reserved for the git group | new |
 | `SPC g w` / `SPC g a` | (moved to `SPC a`) | shipped, retired (203, 204) |
-| `SPC s u` | Edit timeline, the undo history including Minga's steps (Doom) | shipped; opens today's timeline of Minga's edits, and your own steps join it with #4048 |
+| `SPC s u` | Edit timeline, the undo history including Minga's steps (Doom) | shipped; opens today's timeline of Minga's edits; your own steps do not join it yet |
 | `SPC s i` | Document symbols (Doom imenu) | shipped; was `SPC s j` (46) and `SPC c j` (107) |
 | `SPC s j` | Jump list (Doom) | shipped; was document symbols (46) |
 | `SPC c j` | (retired; duplicate of document symbols) | shipped, retired (107) |
@@ -63,8 +63,8 @@ Keys are chords and mnemonics, not shortcuts. This is [principle 11](principles.
 | `SPC h a` | Apropos (Doom): commands and options in one search | shipped; was a duplicate of `SPC h c` (86) |
 | `SPC o t` | Toggle the terminal drawer (Doom) | new |
 | `SPC o T` | New terminal in the current window (Doom) | new |
-| `SPC p h` | Project home (`*home*`) from anywhere | new |
-| `SPC q n` | Start fresh instead of the restored session: closes the restored files and opens the project home | new |
+| `SPC p h` | Project home (`*home*`) from anywhere | shipped |
+| `SPC q n` | Start fresh instead of the restored session: closes the restored files and opens the project home | shipped |
 | `SPC q u` | Unsaved text: list the text kept after a crash that no start recovered, to recover or discard it | shipped (#4257) |
 | `SPC f o` | Open a remote file | shipped; was `SPC a o` (161) |
 | `SPC b P`, `SPC b <`, `SPC b >` | (tabs are gone) | shipped, retired (69, 70, 71) |
@@ -88,8 +88,8 @@ SPC a  Minga
 
 | Keys | Action | Status |
 |---|---|---|
-| `SPC a a` | Tasks drawer | changed (138, was "Toggle agent split") |
-| `SPC a n` | New task (the minibuffer prompt) | changed (143, was "New local agent session") |
+| `SPC a a` | Tasks drawer | shipped (138, was "Toggle agent split") |
+| `SPC a n` | New task (the minibuffer prompt) | shipped (143, was "New local agent session"; that is now `SPC a S n`) |
 | `SPC a s` | Stop; ⌘. on macOS | kept (141) |
 | `SPC a u` | Reject all of a task's changes, after "y/n" | kept key (166), now confirms |
 | `SPC a v` | Conversation split | kept (140) |
@@ -108,6 +108,16 @@ SPC a  Minga
 | `SPC a c` | (copy file to workspace; workspaces are gone) | shipped, retired (148) |
 | `SPC a Q` | (answer a question; answered from the tasks drawer row) | shipped, retired (164) |
 | `SPC a o` | (moved to `SPC f o`) | shipped, retired (161) |
+
+**What `SPC a s` stops.** One turn, never several, from any buffer:
+
+1. the conversation in front;
+2. with a file in front, the conversation shown last, which is the one the file's modeline speaks for;
+3. otherwise the only conversation that is working.
+
+With several conversations working and none of them shown last, Stop stops nothing and says so in one line. A specific task is stopped from its row in the tasks drawer (`x`). With a conversation in front, Stop acts on that conversation only, so it does nothing while that conversation is not working. With nothing working, Stop does nothing and says nothing.
+
+The modeline answers a stop of the conversation it speaks for: it reads "Minga stopped". When Stop ends another conversation (rule 3, with a different conversation or none shown last), nothing in view changes, so the echo area names what was stopped by its goal: "Stopped: Write the report".
 
 **`SPC a q` Queue ›**
 
@@ -129,6 +139,7 @@ SPC a  Minga
 
 | Keys | Action | Status |
 |---|---|---|
+| `SPC a S n` | Start a new, empty session in the conversation | shipped; was `SPC a n` (143), which is now New task |
 | `SPC a S h` | Resume a session | shipped; was `SPC a h` (149) |
 | `SPC a S R` | Rename the session | shipped; was `SPC a R` (150) |
 | `SPC a S m` | Pick the model | shipped; was `SPC a m` (147) |
@@ -154,7 +165,7 @@ SPC a  Minga
 | `g.` | Act menu on whatever is under the cursor | changed (`normal_prefixes.ex:27`, was "Code actions"); code actions are part of the act menu |
 | `K` | Hover; `K` again focuses it | kept |
 | `⌃O` / `⌃I` | Back / forward in the jump list (⌘[ / ⌘] on macOS; Tab is ⌃I, as in Vim) | shipped; replaces the proposed ⌃⌘← / ⌃⌘→ |
-| `u`, ⌘Z | Undo your own edits only | changed behavior |
+| `u`, ⌘Z | Undo your own edits only | shipped (#4048); Minga's edits never enter your undo, and an undo that would cross text Minga later rewrote does nothing |
 | `gt` / `gT` | (tabs are gone) | shipped, retired |
 
 `SPC .` stays Doom's "find file in this directory"; the act menu lives on `g.` in Normal mode and `⌃.` wherever you type.

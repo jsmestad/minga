@@ -153,8 +153,10 @@ defmodule MingaAgent.Hooks.Registry do
           non_neg_integer()
         ) :: [entry()]
   defp normalize_hook(source, event, opts, module, index) when is_list(opts) do
+    # An extension does not choose the directory its hooks run in: they run in the open project.
     hook_opts =
       opts
+      |> Keyword.delete(:cwd)
       |> Keyword.put(:event, event)
       |> maybe_put_extension_source(source)
       |> maybe_put_extension_module(module)

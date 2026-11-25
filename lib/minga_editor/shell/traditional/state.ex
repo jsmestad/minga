@@ -13,6 +13,7 @@ defmodule MingaEditor.Shell.Traditional.State do
   alias MingaEditor.Shell.Traditional.AgentSurfaces
   alias MingaEditor.Agent.ConnectionPrompt
   alias MingaEditor.Shell.Traditional.ClickRegions
+  alias MingaEditor.Shell.Traditional.Drawers
   alias MingaEditor.Shell.Traditional.Flashes
   alias MingaEditor.Shell.Traditional.GitToast
   alias MingaEditor.Shell.Traditional.InputState
@@ -44,6 +45,7 @@ defmodule MingaEditor.Shell.Traditional.State do
           notice: Notice.t(),
           whichkey: WhichKey.t(),
           bottom_panel: BottomPanel.t(),
+          drawers: Drawers.t(),
           sidebars: Sidebars.t(),
           git_toast: GitToast.t(),
           tab_bar: TabBar.t() | nil,
@@ -59,6 +61,7 @@ defmodule MingaEditor.Shell.Traditional.State do
             notice: %Notice{},
             whichkey: %WhichKey{},
             bottom_panel: %BottomPanel{},
+            drawers: %Drawers{},
             sidebars: %Sidebars{},
             git_toast: %GitToast{},
             tab_bar: nil,
@@ -289,15 +292,108 @@ defmodule MingaEditor.Shell.Traditional.State do
   @spec bottom_panel(t()) :: BottomPanel.t()
   def bottom_panel(%__MODULE__{bottom_panel: panel}), do: panel
 
-  @doc "Blurs the shell-owned bottom panel."
+  @doc "Blurs the shell-owned bottom panel and the drawer: the keyboard went back to a window."
   @spec blur_bottom_panel(t()) :: t()
-  def blur_bottom_panel(%__MODULE__{} = state),
-    do: %{state | bottom_panel: BottomPanel.blur(state.bottom_panel)}
+  def blur_bottom_panel(%__MODULE__{} = state) do
+    %{
+      state
+      | bottom_panel: BottomPanel.blur(state.bottom_panel),
+        drawers: Drawers.blur(state.drawers)
+    }
+  end
 
-  @doc "Installs an exact bottom-panel value."
+  @doc """
+  Installs an exact bottom-panel value.
+
+  The Messages panel is a drawer: showing it hides the drawer on screen beneath it, and hiding it brings that drawer back (`MingaEditor.Shell.Traditional.Drawers`).
+  """
   @spec install_bottom_panel(t(), BottomPanel.t()) :: t()
-  def install_bottom_panel(%__MODULE__{} = state, %BottomPanel{} = panel),
-    do: %{state | bottom_panel: panel}
+  def install_bottom_panel(%__MODULE__{bottom_panel: old} = state, %BottomPanel{} = panel) do
+    drawers =
+      case {old.visible, panel.visible} do
+        {false, true} -> state.drawers |> Drawers.open(:messages) |> elem(0)
+        {true, false} -> state.drawers |> Drawers.close(:messages) |> elem(0)
+        _unchanged -> state.drawers
+      end
+
+    %{state | bottom_panel: panel, drawers: drawers}
+  end
+
+  # ── Drawers ────────────────────────────────────────────────────────────────
+
+  @doc "Returns the bottom drawers."
+  @spec drawers(t()) :: Drawers.t()
+  def drawers(%__MODULE__{drawers: drawers}), do: drawers
+
+  @doc "Opens the tasks drawer with the keyboard, hiding the Messages panel beneath it when that was showing."
+  @spec open_tasks_drawer(t()) :: t()
+  def open_tasks_drawer(%__MODULE__{} = state) do
+    case Drawers.open(state.drawers, :tasks) do
+      {drawers, :messages} ->
+        %{state | drawers: drawers, bottom_panel: BottomPanel.hide(state.bottom_panel)}
+
+      {drawers, _hidden} ->
+        %{state | drawers: drawers}
+    end
+  end
+
+  @doc "Closes the tasks drawer; the Messages panel comes back when the drawer had replaced it."
+  @spec close_tasks_drawer(t()) :: t()
+  def close_tasks_drawer(%__MODULE__{} = state) do
+    case Drawers.close(state.drawers, :tasks) do
+      {drawers, :messages} ->
+        panel =
+          state.bottom_panel |> BottomPanel.show(state.bottom_panel.filter) |> BottomPanel.focus()
+
+        %{state | drawers: drawers, bottom_panel: panel}
+
+      {drawers, _revealed} ->
+        %{state | drawers: drawers}
+    end
+  end
+
+  @doc "Gives the keyboard back to the editor while the drawer stays on screen."
+  @spec blur_drawer(t()) :: t()
+  def blur_drawer(%__MODULE__{} = state), do: %{state | drawers: Drawers.blur(state.drawers)}
+
+  @doc "Gives the drawer on screen the keyboard."
+  @spec focus_drawer(t()) :: t()
+  def focus_drawer(%__MODULE__{} = state), do: %{state | drawers: Drawers.focus(state.drawers)}
+
+  @doc "Selects a tasks drawer row by its identity."
+  @spec select_task_row(t(), String.t() | nil) :: t()
+  def select_task_row(%__MODULE__{} = state, row_id),
+    do: %{state | drawers: Drawers.select(state.drawers, row_id)}
+
+  @doc "Selects one of the empty tasks drawer's next steps by its index."
+  @spec select_drawer_empty_action(t(), non_neg_integer()) :: t()
+  def select_drawer_empty_action(%__MODULE__{} = state, index),
+    do: %{state | drawers: Drawers.select_empty(state.drawers, index)}
+
+  @doc "Shows the tasks drawer's list, or one row's diff or output."
+  @spec show_drawer_view(t(), Drawers.view()) :: t()
+  def show_drawer_view(%__MODULE__{} = state, view),
+    do: %{state | drawers: Drawers.show(state.drawers, view)}
+
+  @doc "Scrolls the tasks drawer's diff or output view."
+  @spec scroll_drawer(t(), non_neg_integer()) :: t()
+  def scroll_drawer(%__MODULE__{} = state, offset),
+    do: %{state | drawers: Drawers.scroll(state.drawers, offset)}
+
+  @doc "Asks the tasks drawer to confirm stopping a row's task, or clears the question."
+  @spec confirm_drawer_stop(t(), {String.t(), {String.t(), String.t()}} | nil) :: t()
+  def confirm_drawer_stop(%__MODULE__{} = state, row_id),
+    do: %{state | drawers: Drawers.confirm_stop(state.drawers, row_id)}
+
+  @doc "Remembers the start of a two-key drawer binding, or clears it with nil."
+  @spec await_drawer_key(t(), Minga.Keymap.Bindings.node_t() | nil) :: t()
+  def await_drawer_key(%__MODULE__{} = state, prefix),
+    do: %{state | drawers: Drawers.await_key(state.drawers, prefix)}
+
+  @doc "Ignores the drawer's single-letter actions until `until_ms`."
+  @spec arm_drawer(t(), integer()) :: t()
+  def arm_drawer(%__MODULE__{} = state, until_ms),
+    do: %{state | drawers: Drawers.arm(state.drawers, until_ms)}
 
   # ── Sidebar and Observatory lifecycle ─────────────────────────────────────
 

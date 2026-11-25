@@ -248,14 +248,21 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
       {_, effects} =
         HighlightHandler.handle(state, {:minga_highlight, {:conceal_spans, buf, spans}})
 
-      assert {:conceal_spans, buf, spans} in effects
+      assert effects == [{:conceal_spans, buf, spans}, :render]
+
+      # A buffer no window shows still takes its conceals, without a frame.
+      {hidden_state, hidden_buf} = state_with_other_buffer(base_state())
+      hidden_state = with_highlight(hidden_state, hidden_buf)
 
       dispatch_state =
-        HighlightHandler.dispatch(state, {:minga_highlight, {:conceal_spans, buf, spans}})
+        HighlightHandler.dispatch(
+          hidden_state,
+          {:minga_highlight, {:conceal_spans, hidden_buf, spans}}
+        )
 
-      [conceal] = Buffer.decorations(buf).conceal_ranges
+      [conceal] = Buffer.decorations(hidden_buf).conceal_ranges
 
-      assert dispatch_state == state
+      assert dispatch_state == hidden_state
       assert conceal.start_pos == {0, 0}
       assert conceal.end_pos == {0, 5}
       assert conceal.replacement == nil
@@ -278,6 +285,140 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
                  state,
                  {:minga_highlight, {:highlight_spans, other_buf, []}}
                )
+    end
+  end
+
+  describe "fold ranges (#4314)" do
+    test "fold ranges for a shown buffer schedule a frame, so the gutter draws them without a key press" do
+      state = base_state()
+      buf = active_buffer(state)
+
+      {_state, effects} =
+        HighlightHandler.handle(state, {:minga_highlight, {:fold_ranges, buf, [{0, 5}]}})
+
+      assert :render in effects
+    end
+
+    test "every window that shows the buffer takes its fold ranges, the active one or not" do
+      {state, other_buf} = state_with_visible_other_buffer(base_state())
+
+      {new_state, effects} =
+        HighlightHandler.handle(state, {:minga_highlight, {:fold_ranges, other_buf, [{0, 5}]}})
+
+      assert :render in effects
+
+      assert [%{start_line: 0, end_line: 5}] =
+               Map.fetch!(new_state.workspace.windows.map, 2).fold_ranges
+
+      assert active_window(new_state).fold_ranges == []
+    end
+
+    test "a parse settles only when parse_complete follows its spans and fold ranges" do
+      state = base_state()
+      buffer = active_buffer(state)
+      registered = EventCorrelation.new(make_ref(), 0)
+      parse = %{registered | version: 1}
+
+      state =
+        state
+        |> with_highlight(buffer)
+        |> then(fn state ->
+          current = HighlightSync.get_highlight(state, buffer)
+          HighlightSync.put_highlight(state, buffer, Highlight.correlate(current, registered))
+        end)
+
+      state =
+        Enum.reduce([{:highlight_spans, []}, {:fold_ranges, [{0, 5}]}], state, fn payload,
+                                                                                  state ->
+          {state, effects} =
+            HighlightHandler.handle(
+              state,
+              {:minga_highlight, {:buffer_event, buffer, parse, payload}}
+            )
+
+          assert :render in effects
+          refute Highlight.parse_settled?(HighlightSync.get_highlight(state, buffer))
+          state
+        end)
+
+      {state, []} =
+        HighlightHandler.handle(
+          state,
+          {:minga_highlight, {:buffer_event, buffer, parse, :parse_complete}}
+        )
+
+      assert Highlight.parse_settled?(HighlightSync.get_highlight(state, buffer))
+      assert [%{start_line: 0, end_line: 5}] = active_window(state).fold_ranges
+
+      # The next parse's spans unsettle it again until that parse completes.
+      {state, _effects} =
+        HighlightHandler.handle(
+          state,
+          {:minga_highlight,
+           {:buffer_event, buffer, %{parse | version: 2}, {:highlight_spans, []}}}
+        )
+
+      refute Highlight.parse_settled?(HighlightSync.get_highlight(state, buffer))
+    end
+
+    test "a parse_complete from another registration generation is dropped" do
+      state = base_state()
+      buffer = active_buffer(state)
+      registered = EventCorrelation.new(make_ref(), 0)
+
+      state =
+        state
+        |> with_highlight(buffer)
+        |> then(fn state ->
+          current = HighlightSync.get_highlight(state, buffer)
+          HighlightSync.put_highlight(state, buffer, Highlight.correlate(current, registered))
+        end)
+
+      foreign = EventCorrelation.new(make_ref(), 1)
+
+      assert {^state, []} =
+               HighlightHandler.handle(
+                 state,
+                 {:minga_highlight, {:buffer_event, buffer, foreign, :parse_complete}}
+               )
+    end
+
+    test "fold ranges from a parse an edit has superseded do not apply" do
+      state = base_state()
+      buffer = active_buffer(state)
+      registered = EventCorrelation.new(make_ref(), 0)
+
+      state =
+        state
+        |> with_highlight(buffer)
+        |> then(fn state ->
+          current = HighlightSync.get_highlight(state, buffer)
+          HighlightSync.put_highlight(state, buffer, Highlight.correlate(current, registered))
+        end)
+
+      # The edit's parse (version 2) has completed; a late result of the parse before the edit (version 1) arrives.
+      {state, _effects} =
+        HighlightHandler.handle(
+          state,
+          {:minga_highlight,
+           {:buffer_event, buffer, %{registered | version: 2}, {:fold_ranges, [{0, 3}]}}}
+        )
+
+      {state, _effects} =
+        HighlightHandler.handle(
+          state,
+          {:minga_highlight,
+           {:buffer_event, buffer, %{registered | version: 2}, {:highlight_spans, []}}}
+        )
+
+      assert {^state, []} =
+               HighlightHandler.handle(
+                 state,
+                 {:minga_highlight,
+                  {:buffer_event, buffer, %{registered | version: 1}, {:fold_ranges, [{0, 9}]}}}
+               )
+
+      assert [%{start_line: 0, end_line: 3}] = active_window(state).fold_ranges
     end
   end
 

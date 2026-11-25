@@ -374,6 +374,7 @@
 		B560AA260DA6DC554626BA95 /* OperationReadiness.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0584599FD3264B1C8F85A90 /* OperationReadiness.swift */; };
 		B57E349B478FEA37E86436D1 /* AnatomyPart.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F9FE79436F64015AD281EDE /* AnatomyPart.swift */; };
 		B5D79AA3EB89928091967F73 /* ProtocolEventHandoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB164EE3CF13E41E95FFD9AA /* ProtocolEventHandoff.swift */; };
+		B6A0C6D5A5D55FD68F0CAFE7 /* TasksDrawerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6EE7523485E3C7AB2154D76 /* TasksDrawerView.swift */; };
 		B6BE99B3BFD3369D50383A45 /* ChromeTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41B163D79D71D7866C8EEA59 /* ChromeTokens.swift */; };
 		B6F6BC02D79641B220329521 /* NativeRenderResources.swift in Sources */ = {isa = PBXBuildFile; fileRef = E945E6E53217CEC4BAAECBDD /* NativeRenderResources.swift */; };
 		B7203DF9CF85663B0A266580 /* PowerThermalPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4D576456737CFE8706B66F5 /* PowerThermalPolicy.swift */; };
@@ -487,6 +488,7 @@
 		E6EC6B985861390890206FAE /* SpaceLeaderChordTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00AA008911B23AC750EC8089 /* SpaceLeaderChordTests.swift */; };
 		E6F3BFAAB63F1108DFD81FBF /* RendererResidentSliceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7863B32F1CFA231CFB9F509B /* RendererResidentSliceTests.swift */; };
 		E7A77B344139B5748EC8E4CC /* FeedbackStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E557E349097FF119EFE0F827 /* FeedbackStateTests.swift */; };
+		E80B2F0DA0FFDC2C1F49ABB5 /* TasksDrawerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE3ACD16EC263A79DF5199A0 /* TasksDrawerState.swift */; };
 		E83FE0F57269470F961BB883 /* MingaMenuTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3071CE420790A3C046C25D6E /* MingaMenuTests.swift */; };
 		E8DAC5BD5013095E550BF4E8 /* CompletionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 124E376C3B8F6EC62765F5C1 /* CompletionState.swift */; };
 		E986DB2DA0989A52D16B1E69 /* PickerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60980E90FDD864409144BA5B /* PickerState.swift */; };
@@ -995,6 +997,7 @@
 		EA5181B8CD0511FCA58DC662 /* minga-tui */ = {isa = PBXFileReference; path = "minga-tui"; sourceTree = "<group>"; };
 		EE173FAAAC37ACFF47EE03B8 /* EditTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditTimelineView.swift; sourceTree = "<group>"; };
 		EE2D4BF845A8C876DB44357E /* AgentPromptPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentPromptPresentationTests.swift; sourceTree = "<group>"; };
+		EE3ACD16EC263A79DF5199A0 /* TasksDrawerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksDrawerState.swift; sourceTree = "<group>"; };
 		EF185FF7AFC2D9E5430B6B65 /* FeedbackState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackState.swift; sourceTree = "<group>"; };
 		F0584599FD3264B1C8F85A90 /* OperationReadiness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationReadiness.swift; sourceTree = "<group>"; };
 		F080E3BF9A53CC0B7586E63E /* TextHighlightingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextHighlightingTests.swift; sourceTree = "<group>"; };
@@ -1010,6 +1013,7 @@
 		F58394320996A90ACC7739CA /* SearchToolbarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchToolbarTests.swift; sourceTree = "<group>"; };
 		F6104336F33C41EBE21B10F6 /* SearchState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchState.swift; sourceTree = "<group>"; };
 		F6C3196976BC934B3112EF96 /* IMECompositionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMECompositionTests.swift; sourceTree = "<group>"; };
+		F6EE7523485E3C7AB2154D76 /* TasksDrawerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksDrawerView.swift; sourceTree = "<group>"; };
 		FA1B4D69D3277F2372A8F6F1 /* FrameMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameMetrics.swift; sourceTree = "<group>"; };
 		FA4E6DE435D18BF410FFA386 /* ApplicationQuitCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationQuitCoordinator.swift; sourceTree = "<group>"; };
 		FA51F390E49935563AB0AEB6 /* PointingHandModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PointingHandModifier.swift; sourceTree = "<group>"; };
@@ -1504,6 +1508,8 @@
 				0A2CBCDF99282365E723D45A /* TabBarState.swift */,
 				4CDC572B6F7D2CD90E07CA61 /* TabBarView.swift */,
 				F1F77D3367DCC1BAD0BCC1BE /* TabIconColors.swift */,
+				EE3ACD16EC263A79DF5199A0 /* TasksDrawerState.swift */,
+				F6EE7523485E3C7AB2154D76 /* TasksDrawerView.swift */,
 				D0D4C9BE8CA9DC30BCE6ED49 /* WorkspaceHeaderView.swift */,
 				671A222860B90E08D7975099 /* WorkspaceIconPicker.swift */,
 				B59BD32DD25D2C6C5A90D898 /* WorkspaceIndicatorView.swift */,
@@ -2459,6 +2465,8 @@
 				C9EE9DC782AEA94BAA0FC538 /* TabBarState.swift in Sources */,
 				F07A71D61F5E19EF77AD31D2 /* TabBarView.swift in Sources */,
 				89FA6506E1654B93AC775B71 /* TabIconColors.swift in Sources */,
+				E80B2F0DA0FFDC2C1F49ABB5 /* TasksDrawerState.swift in Sources */,
+				B6A0C6D5A5D55FD68F0CAFE7 /* TasksDrawerView.swift in Sources */,
 				1042F0D41E737771D9D00FB5 /* TextHighlighting.swift in Sources */,
 				44F3933928CFFBF0F491C9BE /* ThemeColors.swift in Sources */,
 				91B8BE371D5CA58EC153394A /* WhichKeyOverlay.swift in Sources */,

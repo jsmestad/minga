@@ -37,7 +37,7 @@ sudo apt install minga   # or: sudo dnf install minga, sudo pacman -Syu minga
 
 [Get Started](https://mingacode.dev/getting-started#install) is the one place install steps live. It has the repository setup and signing key for each distribution, the terminal client for macOS, and the source build for older Linux and Intel Macs.
 
-Press `Space` in Normal mode to open mnemonic menus (`SPC f f` find file, `SPC b b` switch buffer, `SPC s p` project search, `SPC a a` agent view). The [key reference](docs/AGENTIC-KEYMAP.md) lists what the keys do, by where you are. Get Started continues from there: connect a model and review your first staged edit.
+Press `Space` in Normal mode to open mnemonic menus (`SPC f f` find file, `SPC b b` switch buffer, `SPC s p` project search, `SPC a v` agent view, `SPC a a` tasks). The [key reference](docs/AGENTIC-KEYMAP.md) lists what the keys do, by where you are. Get Started continues from there: connect a model and review your first staged edit.
 
 ## Explore the site
 

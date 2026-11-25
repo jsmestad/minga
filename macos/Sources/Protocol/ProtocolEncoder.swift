@@ -194,6 +194,8 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             return oversizedString(message, limit: Int(UInt16.max))
         case .emptyStateActivate(let id):
             return oversizedString(id, limit: Int(UInt8.max))
+        case .tasksDrawerAction(let rowID, let action):
+            return oversizedString(rowID, limit: Int(UInt8.max)) ?? oversizedString(action, limit: Int(UInt8.max))
         case .pickerQueryChanged(_, _, let text):
             return oversizedString(text, limit: Int(UInt16.max))
         case .fileTreeEditConfirm(_, let text):
@@ -296,7 +298,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
              .agentRequestChanges, .agentDismiss, .chatScrolledAwayFromBottom,
              .chatReturnedToBottom, .scrollToLine, .scrollToVisualRank, .foldToggleAtLine, .focusWindow,
              .configQuery, .fontSizeAdjust, .searchFocus, .searchNext, .agentStartRemedy,
-             .searchPrevious, .searchDismiss:
+             .searchPrevious, .searchDismiss, .agentNotificationOpen:
             return nil
         }
     }
@@ -358,6 +360,8 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         case .selectTab(let id): encodeSelectTab(id: id)
         case .closeTab(let id): encodeCloseTab(id: id)
         case .emptyStateActivate(let id): encodeEmptyStateActivate(id: id)
+        case .tasksDrawerAction(let rowID, let action): encodeTasksDrawerAction(rowID: rowID, action: action)
+        case .agentNotificationOpen(let alert): encodeAgentNotificationOpen(alert: alert)
         case .tabCopyPath(let id): encodeTabCopyPath(id: id)
         case .tabReorder(let id, let newIndex): encodeTabReorder(id: id, newIndex: newIndex)
         case .tabPin(let id): encodeTabPin(id: id)
@@ -857,6 +861,22 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
     /// Activates a launchpad row (resume card, recent file, or action) by its
     /// semantic id. Activation is authoritative on the BEAM; the frontend only
     /// forwards the click.
+    private func encodeTasksDrawerAction(rowID: String, action: String) {
+        let row = Array(rowID.utf8)
+        let verb = Array(action.utf8)
+        var buf = Data([OP_GUI_ACTION, GUI_ACTION_TASKS_DRAWER_ACTION, UInt8(row.count)])
+        buf.append(contentsOf: row)
+        buf.append(UInt8(verb.count))
+        buf.append(contentsOf: verb)
+        writeFrame(buf)
+    }
+
+    private func encodeAgentNotificationOpen(alert: UUID) {
+        var buf = Data([OP_GUI_ACTION, GUI_ACTION_AGENT_NOTIFICATION_OPEN])
+        withUnsafeBytes(of: alert.uuid) { buf.append(contentsOf: $0) }
+        writeFrame(buf)
+    }
+
     private func encodeEmptyStateActivate(id: String) {
         let utf8 = Array(id.utf8)
         let idLen = utf8.count

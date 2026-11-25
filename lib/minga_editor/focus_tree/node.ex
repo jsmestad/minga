@@ -41,6 +41,7 @@ defmodule MingaEditor.FocusTree.Node do
           | :extension_panel
           | :observatory
           | :edit_timeline
+          | :tasks_drawer
           | :notifications
           | :extension_overlay
           | :which_key

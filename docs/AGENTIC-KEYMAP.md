@@ -118,6 +118,7 @@ Press `SPC` in Normal mode. These sequences also work from the agent view, the f
 | `SPC p d` | Remove a known project |
 | `SPC p i` | Rebuild the project file cache |
 | `SPC p T` | Run the project's tests |
+| `SPC p h` | The project home, `*home*` |
 
 [Projects](PROJECTS.md) explains how Minga finds the project these keys act on.
 
@@ -200,6 +201,7 @@ Press `SPC` in Normal mode. These sequences also work from the agent view, the f
 | `SPC h e u` | Update all extensions |
 | `SPC h e U` | Update one extension |
 | `SPC q q` | Quit Minga |
+| `SPC q n` | Start fresh: close the files the last session restored and go to the project home |
 | `SPC q u` | List unsaved text kept after a crash, to recover or discard it |
 
 **Filetype (`SPC m`)**
@@ -285,7 +287,7 @@ With `set :editing_model, :cua`, letters type text in a file at all times, as in
 
 ## In the agent view
 
-You are here after `SPC a a`. The agent view shows your conversation with the agent, the files it changed, and the composer where you write to it. The conversation is for reading, so single letters are commands instead of text. Press `?` at any time for the keys that apply right now.
+You are here after `SPC a v`. The agent view shows your conversation with the agent, the files it changed, and the composer where you write to it. The conversation is for reading, so single letters are commands instead of text. Press `?` at any time for the keys that apply right now.
 
 ### Reading the conversation
 
@@ -423,6 +425,31 @@ Staged edits are never lost silently. Every ordinary way out stops and shows the
 Staged edits also survive a crash or restart. If the editor restarts on its own (for example after the watchdog recovers a frozen editor), the staged edits are still running and come back to their workspace. If Minga itself exits without a publish or discard, such as after a crash, the next start for the same project restores them: `*Messages*` says how many files were restored, and the same Publish and Discard notification appears. Minga saves each staged edit together with the version of the file it was made against. If that file changed on disk while Minga was not running, `*Messages*` says so, and publishing merges the two or keeps the edit staged as a conflict; it never overwrites your change. A saved edit that cannot be restored is named in `*Messages*` as lost.
 
 The saved copies are private to your user (`~/.local/share/minga/staged_drafts`, or under `$XDG_DATA_HOME`), and Minga deletes them when you publish or discard. [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md) explains how staging works underneath.
+
+## In the tasks drawer
+
+You are here after `SPC a a`, or after clicking the modeline's needs-you segment. The drawer at the bottom of the window lists every task Minga is working on, needs-you first, with subagents beneath the task that started them. A drawer that opens while a task needs you starts on that task, so its keys answer it at once. Nothing in the drawer takes typed text, so single letters act on the selected task, and leader keys still work.
+
+| Keys | Action |
+|------|--------|
+| `j` / `k` or the arrows | Move between tasks |
+| `y` | Approve the selected task's request once |
+| `a` | Trust that tool for the rest of the session |
+| `t` | Trust that tool for the rest of the turn |
+| `n` | Deny the request |
+| `=` | Show what the request would change; `]h` and `[h` step between changes |
+| `c` | New task: type its goal in the "New task ›" prompt |
+| `r` | Retry a waiting, failed or stopped task |
+| `o` | Show the task's recent tool output; `↩` there opens the first `file:line` it names |
+| `i` | Inspect the task: open its conversation |
+| `x` | Stop the task's turn, after asking; `y` stops it, `n` keeps it running |
+| `↩` | Open the task's conversation, or its pending reviews when it is done |
+| `q` or `esc` | Step back from a diff or output view, then close the drawer |
+| `⌃G` | Give the keyboard back to the window and keep the drawer on screen |
+
+Click a row to select it and give the drawer the keyboard, or click an action on a row to run it on that task. A click on the drawer's empty space gives it the keyboard without moving the selection. An answer in the drawer and an answer in the conversation are the same answer: whichever comes second says "Already answered in Minga".
+
+One drawer shows at a time. Opening the tasks drawer while `*Messages*` is open hides Messages, and the drawer's header says "Messages hidden · q returns"; `q` brings Messages back.
 
 ## In a list or picker
 

@@ -39,14 +39,22 @@ defmodule Minga.Buffer.Document do
   alias Minga.Core.Unicode
 
   @enforce_keys [:before, :after, :cursor_line, :cursor_col, :line_count, :line_offsets]
-  defstruct [:before, :after, :cursor_line, :cursor_col, :line_count, :line_offsets]
+  defstruct [
+    :before,
+    :after,
+    :cursor_line,
+    :cursor_col,
+    :line_count,
+    :line_offsets,
+    :append_anchor
+  ]
 
   @typedoc """
   Cached line-start byte offsets.
 
   Clean: a tuple of line-start positions `{0, 6, 12, ...}`.
   Pending: `{:pending, starts_tuple, adjust_after_line, delta}` for
-  deferred shift. `nil` when the cache needs a full rebuild.
+  deferred shift. Appended: `{:appended, base_tuple, tail_array}` for lines added at the end. `nil` when the cache needs a full rebuild. `Minga.Buffer.Lines` owns these forms; read the index through it.
   """
   @type line_offsets :: tuple() | nil
 
@@ -57,7 +65,8 @@ defmodule Minga.Buffer.Document do
           cursor_line: non_neg_integer(),
           cursor_col: non_neg_integer(),
           line_count: pos_integer(),
-          line_offsets: line_offsets()
+          line_offsets: line_offsets(),
+          append_anchor: non_neg_integer() | nil
         }
 
   @type position :: Position.t()
@@ -235,7 +244,8 @@ defmodule Minga.Buffer.Document do
         cursor_line: new_line,
         cursor_col: new_col,
         line_count: new_lc,
-        line_offsets: new_ls
+        line_offsets: new_ls,
+        append_anchor: nil
     }
   end
 
@@ -255,7 +265,30 @@ defmodule Minga.Buffer.Document do
   """
   @spec append_text(t(), String.t()) :: t()
   def append_text(%__MODULE__{} = doc, ""), do: doc
-  def append_text(%__MODULE__{after: ""} = doc, text), do: insert_text(doc, text)
+
+  def append_text(
+        %__MODULE__{
+          before: before,
+          after: "",
+          cursor_line: line,
+          cursor_col: col,
+          line_count: lc,
+          line_offsets: ls
+        } = doc,
+        text
+      ) do
+    {new_line, new_col, new_lc} = compute_cursor_after_insert(line, col, lc, text)
+
+    %{
+      doc
+      | before: before <> text,
+        cursor_line: new_line,
+        cursor_col: new_col,
+        line_count: new_lc,
+        line_offsets: Lines.update_after_append(ls, byte_size(before), text),
+        append_anchor: nil
+    }
+  end
 
   def append_text(%__MODULE__{after: after_, line_count: lc, line_offsets: ls} = doc, text) do
     end_byte = content_byte_size(doc)
@@ -264,8 +297,85 @@ defmodule Minga.Buffer.Document do
       doc
       | after: after_ <> text,
         line_count: lc + Lines.break_count(text),
-        line_offsets: Lines.update_after_insert(ls, lc - 1, end_byte, text)
+        line_offsets: Lines.update_after_append(ls, end_byte, text),
+        append_anchor: nil
     }
+  end
+
+  @doc ~S"""
+  Appends `text` at the end of the document and moves the cursor onto the last character of the result, wherever the cursor was.
+
+  This is what a stream of command output needs: every chunk lands at the end and the cursor follows it, resting on a character as a Normal-mode cursor does. A result that ends with a line break holds the cursor at column 0 of the empty last line.
+
+  The append anchor is a certified grapheme boundary in the final line, independent of the cursor. Appending segments from that boundary, not from the beginning of a growing line. Other text edits discard the anchor; the next chunk seeds it from the final line.
+
+  ## Examples
+
+      iex> doc = Minga.Buffer.Document.new("one\ntw")
+      iex> doc = Minga.Buffer.Document.append_text_and_follow(doc, "o\nthree")
+      iex> Minga.Buffer.Document.content(doc)
+      "one\ntwo\nthree"
+      iex> Minga.Buffer.Document.cursor(doc)
+      {2, 4}
+      iex> doc = Minga.Buffer.Document.append_text_and_follow(doc, "\n")
+      iex> Minga.Buffer.Document.cursor(doc)
+      {3, 0}
+  """
+  @spec append_text_and_follow(t(), String.t()) :: t()
+  def append_text_and_follow(%__MODULE__{} = doc, ""), do: doc
+
+  def append_text_and_follow(%__MODULE__{} = doc, text) when is_binary(text) do
+    end_byte = content_byte_size(doc)
+    {tail, anchor, line_start, line_count} = appended_final_line(doc, text, end_byte)
+    {caret_in_tail, character_size, restart} = Unicode.final_append_character(tail)
+    caret = anchor + caret_in_tail
+
+    %{
+      doc
+      | before: append_prefix_at(doc, text, end_byte, caret),
+        after: :binary.copy(binary_part(tail, caret_in_tail, character_size)),
+        cursor_line: line_count - 1,
+        cursor_col: caret - line_start,
+        line_count: line_count,
+        line_offsets: Lines.update_after_append(doc.line_offsets, end_byte, text),
+        append_anchor: anchor + restart
+    }
+  end
+
+  @spec appended_final_line(t(), binary(), non_neg_integer()) ::
+          {binary(), non_neg_integer(), non_neg_integer(), pos_integer()}
+  defp appended_final_line(doc, text, end_byte) do
+    tail_size = Lines.last_line_width(text)
+
+    if tail_size == byte_size(text) do
+      line_start = Lines.start_of(doc, doc.line_count - 1)
+      anchor = doc.append_anchor || line_start
+      tail = slice_byte_range(doc, anchor, end_byte - anchor)
+      {tail <> text, anchor, line_start, doc.line_count}
+    else
+      start_in_chunk = byte_size(text) - tail_size
+      line_start = end_byte + start_in_chunk
+      tail = binary_part(text, start_in_chunk, tail_size)
+      {tail, line_start, line_start, doc.line_count + Lines.break_count(text)}
+    end
+  end
+
+  @spec append_prefix_at(t(), binary(), non_neg_integer(), non_neg_integer()) :: binary()
+  defp append_prefix_at(%__MODULE__{before: before, after: suffix}, text, end_byte, caret) do
+    gap = byte_size(before)
+
+    cond do
+      caret == gap ->
+        before
+
+      caret > gap ->
+        old_bytes = min(caret, end_byte) - gap
+        new_bytes = max(0, caret - end_byte)
+        before <> binary_part(suffix, 0, old_bytes) <> binary_part(text, 0, new_bytes)
+
+      true ->
+        binary_part(before, 0, caret)
+    end
   end
 
   @doc """
@@ -314,7 +424,8 @@ defmodule Minga.Buffer.Document do
         cursor_line: new_line,
         cursor_col: new_col,
         line_count: new_lc,
-        line_offsets: new_ls
+        line_offsets: new_ls,
+        append_anchor: nil
     }
   end
 
@@ -337,7 +448,7 @@ defmodule Minga.Buffer.Document do
             _ -> Lines.update_after_delete_at(ls, line, byte_size(newline), true)
           end
 
-        %{buf | after: rest, line_count: lc - 1, line_offsets: new_ls}
+        %{buf | after: rest, line_count: lc - 1, line_offsets: new_ls, append_anchor: nil}
 
       {grapheme, rest} ->
         new_ls =
@@ -346,7 +457,7 @@ defmodule Minga.Buffer.Document do
             _ -> Lines.update_after_delete_at(ls, line, byte_size(grapheme), false)
           end
 
-        %{buf | after: rest, line_offsets: new_ls}
+        %{buf | after: rest, line_offsets: new_ls, append_anchor: nil}
 
       nil ->
         buf
@@ -384,6 +495,7 @@ defmodule Minga.Buffer.Document do
         after: suffix,
         cursor_line: last_line,
         cursor_col: Lines.last_line_width(replacement),
+        append_anchor: nil,
         line_offsets:
           Lines.update_after_span_replace(
             doc.line_offsets,
@@ -482,7 +594,7 @@ defmodule Minga.Buffer.Document do
   end
 
   def trim_leading_lines(%__MODULE__{} = doc, count) when count > 0 do
-    offsets = resolve_line_offsets(doc)
+    offsets = Lines.clean_starts(doc)
     trim_bytes = elem(offsets, count)
     gap = byte_size(doc.before)
 
@@ -519,21 +631,6 @@ defmodule Minga.Buffer.Document do
       line_count: remaining,
       line_offsets: new_offsets
     }
-  end
-
-  # Resolves line_offsets to a clean tuple of integers, handling pending
-  # and nil states without materializing the full content when possible.
-  @spec resolve_line_offsets(t()) :: tuple()
-  defp resolve_line_offsets(%__MODULE__{line_offsets: ls})
-       when is_tuple(ls) and is_integer(elem(ls, 0)),
-       do: ls
-
-  defp resolve_line_offsets(%__MODULE__{line_offsets: {:pending, starts, adjust_after, delta}}) do
-    Lines.flush_to_tuple(starts, adjust_after, delta)
-  end
-
-  defp resolve_line_offsets(%__MODULE__{} = doc) do
-    Lines.build_index(content(doc))
   end
 
   @doc false

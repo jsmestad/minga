@@ -23,7 +23,8 @@ type emptyListColors struct {
 func emptyListHeader(empty generated.EmptyList, width int, colors emptyListColors, p palette) []string {
 	base := lipgloss.NewStyle().Background(colors.surface).ColorWhitespace(true)
 	inset := gap(emptyStateInset)
-	room := max(width-len(inset), 1)
+	// The text keeps a trailing inset, so a cut line's ellipsis never touches the border.
+	room := max(width-len(inset)-listRowTrailingInset.cols(), 1)
 	lines := make([]string, 0, 5)
 
 	blank := base.Width(width).Render("")
@@ -103,7 +104,7 @@ func emptyListActions(empty generated.EmptyList, width int, colors emptyListColo
 			key = row.Foreground(colors.surface).Background(colors.accent).Render(action.Key)
 		}
 		padding := row.Render(strings.Repeat(" ", max(column-ansi.StringWidth(action.Key), 1)))
-		room := max(width-len(inset)-column, 1)
+		room := max(width-len(inset)-listRowTrailingInset.cols()-column, 1)
 		label := row.Foreground(labelColor).Render(ansi.Truncate(action.Label, room, "…"))
 		lines = append(lines, row.Width(width).Render(row.Render(inset)+key+padding+label))
 	}

@@ -80,12 +80,15 @@ defmodule Minga.Editing.Formatter do
   (exit code 0) or `{:error, reason}` on failure.
   """
   @spec format(String.t(), formatter_spec()) :: {:ok, Result.t()} | {:error, failure()}
-  def format(content, command_string) when is_binary(content) and is_binary(command_string) do
+  @spec format(String.t(), formatter_spec(), String.t() | nil) ::
+          {:ok, Result.t()} | {:error, failure()}
+  def format(content, command_string, directory \\ nil)
+      when is_binary(content) and is_binary(command_string) do
     workspace = temp_path()
 
     case start_cleanup_owner(workspace) do
       {:ok, cleanup_owner} ->
-        run_in_workspace(content, command_string, workspace, cleanup_owner)
+        run_in_workspace(content, {command_string, directory}, workspace, cleanup_owner)
 
       {:error, reason} ->
         {:error, {:subprocess, "formatter error: #{format_file_error(reason)}"}}
@@ -95,9 +98,12 @@ defmodule Minga.Editing.Formatter do
       {:error, {:subprocess, "formatter error: #{Exception.message(e)}"}}
   end
 
-  @spec run_in_workspace(String.t(), String.t(), String.t(), cleanup_owner()) ::
+  # The formatter line, and the directory it runs in: the open project's root, or `nil` for where Minga runs.
+  @typep command :: {command_string :: String.t(), directory :: String.t() | nil}
+
+  @spec run_in_workspace(String.t(), command(), String.t(), cleanup_owner()) ::
           {:ok, Result.t()} | {:error, failure()}
-  defp run_in_workspace(content, command_string, workspace, cleanup_owner) do
+  defp run_in_workspace(content, command, workspace, cleanup_owner) do
     input_path = Path.join(workspace, "input")
     stdout_path = Path.join(workspace, "stdout")
     stderr_path = Path.join(workspace, "stderr")
@@ -106,19 +112,21 @@ defmodule Minga.Editing.Formatter do
       File.write!(input_path, content)
       File.write!(stdout_path, "")
       File.write!(stderr_path, "")
-      run_formatter(command_string, input_path, stdout_path, stderr_path)
+      run_formatter(command, input_path, stdout_path, stderr_path)
     after
       cleanup_workspace(cleanup_owner, workspace)
     end
   end
 
-  @spec run_formatter(String.t(), String.t(), String.t(), String.t()) ::
+  @spec run_formatter(command(), String.t(), String.t(), String.t()) ::
           {:ok, Result.t()} | {:error, failure()}
-  defp run_formatter(command_string, input_path, stdout_path, stderr_path) do
+  defp run_formatter({command_string, directory}, input_path, stdout_path, stderr_path) do
     shell_cmd =
       "(#{command_string}\n) < #{escape_path(input_path)} > #{escape_path(stdout_path)} 2> #{escape_path(stderr_path)}"
 
-    {_shell_output, exit_code} = System.shell(shell_cmd)
+    # A relative path in the line means "in the project", whatever directory Minga itself runs in.
+    shell_opts = if is_binary(directory), do: [cd: directory], else: []
+    {_shell_output, exit_code} = System.shell(shell_cmd, shell_opts)
     stdout = File.read!(stdout_path)
     stderr = File.read!(stderr_path)
 

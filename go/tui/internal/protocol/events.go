@@ -89,11 +89,11 @@ func EncodeFrontendForeground(foreground bool) []byte {
 // The capabilities value is the only input, so the report cannot say anything the frontend does not act on.
 func EncodeTerminalReport(capabilities terminal.Capabilities) []byte {
 	entries := capabilities.Entries()
-	bodyLen := 1 + 2*len(entries)
+	bodyLen := 1 + 3*len(entries)
 	out := make([]byte, 0, 3+bodyLen)
 	out = append(out, generated.OPTerminalReport, byte(bodyLen>>8), byte(bodyLen), byte(len(entries)))
 	for _, entry := range entries {
-		out = append(out, byte(entry.Feature), byte(entry.Status))
+		out = append(out, byte(entry.Feature), byte(entry.Status), byte(entry.Source))
 	}
 	return out
 }

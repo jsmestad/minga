@@ -88,8 +88,10 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   defp action(%Context{workspace: %{agent_ui: %{chat_lifecycle: {:failed, failure}}}}, _activity),
     do: failure.message
 
+  # With a file in front, the cache's question and approval are copies from when the conversation
+  # left, so they are not shown; the strip's status comes from the conversation's stored status.
   defp action(%Context{intent: %{frame: %{shell_state: shell_state}}}, activity) do
-    case WorkspaceStatus.live_agent(shell_state) do
+    case WorkspaceStatus.front_agent(shell_state) do
       %AgentState{pending_question: %PendingQuestion{}} ->
         "Waiting for your answer"
 

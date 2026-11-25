@@ -179,7 +179,7 @@ This evidence is an emitted-text-cell capture, not pixel, color, animation or li
 
 ## Time Agent opening in the packaged terminal editor
 
-Use the shipping launcher to measure what a user waits for after pressing `SPC a n`. The renderer boot smoke cannot measure this request because it does not start the BEAM or send keys. From the source checkout, run:
+Use the shipping launcher to measure what a user waits for after pressing `SPC a S n`. The renderer boot smoke cannot measure this request because it does not start the BEAM or send keys. From the source checkout, run:
 
 ```bash
 timing_root="$(mktemp -d)"

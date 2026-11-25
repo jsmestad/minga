@@ -32,6 +32,17 @@ const (
 	TerminalFeatureStatusFallback TerminalFeatureStatus = 4
 )
 
+// TerminalFeatureSource is a generated enum (repr u8).
+type TerminalFeatureSource uint8
+
+const (
+	TerminalFeatureSourceUnsettled     TerminalFeatureSource = 0
+	TerminalFeatureSourceAnswered      TerminalFeatureSource = 1
+	TerminalFeatureSourceKnownTerminal TerminalFeatureSource = 2
+	TerminalFeatureSourceTimeout       TerminalFeatureSource = 3
+	TerminalFeatureSourceUser          TerminalFeatureSource = 4
+)
+
 // AgentApprovalDecision is a generated enum (repr u8).
 type AgentApprovalDecision uint8
 
@@ -409,6 +420,32 @@ type AgentTodo struct {
 	Description string
 }
 
+type TasksDrawerCount struct {
+	State uint8
+	Count uint16
+}
+
+type TasksDrawerHint struct {
+	Key   string
+	Label string
+}
+
+type TasksDrawerLine struct {
+	Text string
+}
+
+type TasksDrawerRow struct {
+	ID      string
+	Depth   uint8
+	Flags   uint8
+	State   uint8
+	Title   string
+	Words   string
+	Age     string
+	Detail  []TasksDrawerLine
+	Actions []TasksDrawerHint
+}
+
 type EditTimelineEntry struct {
 	Index          uint8
 	ToolName       string
@@ -450,6 +487,7 @@ const (
 	ThemeColorSize           = 4
 	CompletionMatchRangeSize = 4
 	PickerMovementKeySize    = 6
+	TasksDrawerCountSize     = 3
 )
 
 type GuiWindowContentHeader struct {
@@ -864,6 +902,24 @@ type GuiSearchStateFields struct {
 	SessionID           uint32
 	AcknowledgedEditSeq uint32
 	Status              uint8
+}
+
+type GuiTasksDrawerFields struct {
+	Visible    uint8
+	Focused    uint8
+	Name       string
+	Title      string
+	Note       string
+	Counts     []TasksDrawerCount
+	Hints      []TasksDrawerHint
+	Rows       []TasksDrawerRow
+	View       uint8
+	ViewTitle  string
+	ViewLines  []TasksDrawerLine
+	ViewOffset uint16
+	Prompt     string
+	HasEmpty   uint8
+	Empty      EmptyList
 }
 
 type GuiEditTimelineFields struct {

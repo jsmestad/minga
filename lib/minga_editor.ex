@@ -100,6 +100,7 @@ defmodule MingaEditor do
           | {:swap_dir, String.t()}
           | {:session_dir, String.t()}
           | {:startup_file, String.t() | nil}
+          | {:home, keyword()}
           | {:suppress_tool_prompts, boolean()}
           | {:agent_arrival_budget_ms, non_neg_integer()}
           | {:pane_generation_allocator, (-> pos_integer())}
@@ -372,8 +373,10 @@ defmodule MingaEditor do
     EventBus.subscribe(:tool_missing, events_registry)
     EventBus.subscribe(:log_message, events_registry)
 
-    if migration_notice = Minga.Config.Loader.migration_notice() do
-      Minga.API.message(migration_notice)
+    Enum.each(Minga.Config.Loader.migration_notices(), &Minga.API.message/1)
+
+    if project_config = Minga.Config.project_config_message() do
+      Minga.API.message(project_config)
     end
 
     EventBus.subscribe(:face_overrides_changed, events_registry)
@@ -900,8 +903,8 @@ defmodule MingaEditor do
      %{state | frontend: MingaEditor.State.Frontend.accept_capabilities(state.frontend, caps)}}
   end
 
-  # The frontend moved to the foreground or to the background. The editor keeps the fact, and tells the rest of Minga
-  # once per change: a reader below the editor (the agent's notifier) cannot ask the editor for it.
+  # The frontend moved to the foreground or to the background. The editor keeps the fact for its own "needs you"
+  # alert, and tells the rest of Minga once per change: a reader below the editor cannot ask the editor for it.
   def handle_info({:minga_input, {:frontend_foreground, status}}, %MingaEditor.State{} = state) do
     case MingaEditor.State.report_frontend_foreground(state, status) do
       {state, :unchanged} -> {:noreply, state}
@@ -910,7 +913,7 @@ defmodule MingaEditor do
   end
 
   def handle_info({:minga_input, {:terminal_report, report}}, %MingaEditor.State{} = state) do
-    log_terminal_report(report)
+    log_terminal_report(MingaEditor.State.Frontend.terminal_report(state.frontend), report)
     {:noreply, MingaEditor.State.accept_terminal_report(state, report)}
   end
 
@@ -2217,17 +2220,23 @@ defmodule MingaEditor do
 
   # One line when the terminal's answers are in, so a user who wonders why two terminals differ finds it in *Messages*.
   # The first report of a start still has open questions and is not worth a line.
-  @spec log_terminal_report(MingaEditor.Frontend.TerminalReport.t()) :: :ok
-  defp log_terminal_report(%MingaEditor.Frontend.TerminalReport{features: features}) do
-    if :pending in Map.values(features) do
-      :ok
-    else
+  # Neither is a report that changes only how a feature was settled. `:checkhealth terminal` shows the rest.
+  @spec log_terminal_report(
+          MingaEditor.Frontend.TerminalReport.t() | nil,
+          MingaEditor.Frontend.TerminalReport.t()
+        ) :: :ok
+  defp log_terminal_report(previous, report) do
+    alias MingaEditor.Frontend.TerminalReport
+
+    if TerminalReport.settled?(report) and TerminalReport.statuses_changed?(previous, report) do
       summary =
-        features
-        |> Enum.sort()
+        report
+        |> TerminalReport.statuses()
         |> Enum.map_join(", ", fn {feature, status} -> "#{feature} #{status}" end)
 
       Log.info(:port, "Terminal features: #{summary}")
+    else
+      :ok
     end
   end
 

@@ -7,6 +7,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
+	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
@@ -102,6 +103,7 @@ const (
 	surfaceIDNotifications    uint16 = 25
 	surfaceIDExtensionOverlay uint16 = 26
 	surfaceIDAgentHelp        uint16 = 27
+	surfaceIDTasksDrawer      uint16 = 28
 )
 
 // overlayCandidate is one floating surface that may occupy the single active
@@ -289,16 +291,18 @@ func (m Model) renderAgentContext(context protocol.AgentContext) []string {
 	return takeLines(m.charmList("Agent context", items, 0, m.maxOverlayHeight(), true), m.maxOverlayHeight())
 }
 
+// todoStatusName names a checklist item's status the way macOS does ("Now", "Done", "Blocked", "Next"), with Done taken
+// from the state tokens, so both frontends read the same words.
 func todoStatusName(status byte) string {
 	switch status {
 	case 1:
-		return "doing"
+		return "Now"
 	case 2:
-		return "done"
+		return generated.StateDone.Token().Word
 	case 3:
-		return "blocked"
+		return "Blocked"
 	default:
-		return "todo"
+		return "Next"
 	}
 }
 

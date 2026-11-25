@@ -17,7 +17,7 @@ func boardModeline() protocol.StatusBar {
 	return protocol.StatusBar{
 		Left: []protocol.StatusSegment{
 			{Name: "mode", Text: "NORMAL"},
-			{Name: "needs_you", Text: "Needs you", State: 2, Label: "1 task needs you", Key: "SPC a a", Command: "toggle_agentic_view"},
+			{Name: "needs_you", Text: "Needs you", State: 2, Label: "1 task needs you", Key: "SPC a a", Command: "agent_tasks"},
 			{Name: "filename", Text: "chrome_state.ex ●", Command: "buffer_list"},
 			{Name: "change", Text: "change 1/2"},
 			{Name: "git", Text: "main +11", Drop: 4},
@@ -114,7 +114,7 @@ func TestModelineHoverEchoesMeaningAndKey(t *testing.T) {
 	}
 
 	click, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX + 1, Y: zone.StartY}))
-	if !ok || string(click) != string(protocol.EncodeGUIExecuteCommand("toggle_agentic_view")) {
+	if !ok || string(click) != string(protocol.EncodeGUIExecuteCommand("agent_tasks")) {
 		t.Fatalf("clicking needs-you should run its key's command, ok=%v packet=%v", ok, click)
 	}
 

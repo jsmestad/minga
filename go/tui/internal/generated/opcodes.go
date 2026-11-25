@@ -85,6 +85,7 @@ const (
 	OPMatchItemResult     byte = 0x3C
 	OPNodeInfo            byte = 0x3D
 	OPDocumentSymbols     byte = 0x3E
+	OPParseComplete       byte = 0x3F
 
 	// Gui Chrome
 	OPGuiTabBar            byte = 0x71
@@ -141,6 +142,7 @@ const (
 	OPGuiPickerSelection     byte = 0xA7
 	OPGuiTextPresentation    byte = 0xA8
 	OPGuiResidentSemantics   byte = 0xA9
+	OPGuiTasksDrawer         byte = 0xAC
 
 	GUIActionSelectTab                  byte = 0x01
 	GUIActionCloseTab                   byte = 0x02

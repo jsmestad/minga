@@ -12,6 +12,7 @@ set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")/../.." && pwd -P)"
 . "$PROJECT_DIR/bin/lib/source-cli.sh"
+enter_source_tree
 if terminal_only "$@"; then
   exec mix minga -- "$@"
 fi

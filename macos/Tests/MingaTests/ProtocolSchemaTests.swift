@@ -189,6 +189,7 @@ struct ProtocolSchemaSwiftTests {
         try expectGuiActions(schema, [
             ("agent_prompt_fit", GUI_ACTION_AGENT_PROMPT_FIT),
             ("picker_fit", GUI_ACTION_PICKER_FIT),
+            ("agent_notification_open", GUI_ACTION_AGENT_NOTIFICATION_OPEN),
             ("agent_prompt_scroll", GUI_ACTION_AGENT_PROMPT_SCROLL),
             ("scroll_to_visual_rank", GUI_ACTION_SCROLL_TO_VISUAL_RANK),
             ("agent_read_retained_output", GUI_ACTION_AGENT_READ_RETAINED_OUTPUT)

@@ -12,7 +12,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Search do
   def entries do
     [
       Entry.built("search.buffer.no_results",
-        reach: "/limit_lable ↩",
+        reach: "1 /limit_lable ↩",
         recognize: &(is_binary(&1.echo) and &1.echo =~ ~r/^No matches for/),
         checks: [
           Check.new("the echo line says nothing matched and names the wider search", fn model ->
@@ -25,7 +25,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Search do
       Entry.pending("search.project.no_results", 4058, "no results become next steps"),
       Entry.pending("search.quickfix", 4059, "the quickfix drawer"),
       Entry.built("search.buffer",
-        reach: "/",
+        reach: "1 /",
         recognize: &(&1.mode == :search and not Model.open?(&1, :which_key))
       )
     ]

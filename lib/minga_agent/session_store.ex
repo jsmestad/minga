@@ -1778,7 +1778,11 @@ defmodule MingaAgent.SessionStore do
     |> Enum.sort_by(& &1.last_message_at, :desc)
   end
 
-  @doc "Lists conversations and non-empty draft-only records without exposing unsent input."
+  @doc """
+  Lists conversations and non-empty draft-only records without exposing unsent input.
+
+  A conversation that was never prompted and holds no draft is not listed: there is nothing in it to go back to. Such a record, for example the session a resume started before it restored the chosen conversation, stays on disk untouched; it is only left out of the list.
+  """
   @spec list_recoverable(String.t() | nil) :: [recovery_entry()]
   def list_recoverable(config_dir \\ nil) do
     config_dir
@@ -2544,9 +2548,14 @@ defmodule MingaAgent.SessionStore do
   defp recovery_entry(record, path) do
     case conversation_meta(record_conversation(record)) do
       nil -> draft_recovery_entry(record, path)
+      %{turn_count: 0} = meta -> if draft?(record), do: {:conversation, meta}
       meta -> {:conversation, meta}
     end
   end
+
+  @spec draft?(map()) :: boolean()
+  defp draft?(record),
+    do: match?({:ok, {_revision, %DraftSnapshot{}}}, decode_presentation(record))
 
   @spec draft_recovery_entry(map(), String.t()) :: recovery_entry() | nil
   defp draft_recovery_entry(

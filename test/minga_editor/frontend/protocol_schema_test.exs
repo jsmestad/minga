@@ -133,7 +133,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       request_reparse: 0x3B,
       match_item_result: 0x3C,
       node_info: 0x3D,
-      document_symbols: 0x3E
+      document_symbols: 0x3E,
+      parse_complete: 0x3F
     )
   end
 
@@ -195,7 +196,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_completion_selection: 0xA6,
       gui_picker_selection: 0xA7,
       gui_text_presentation: 0xA8,
-      gui_resident_semantics: 0xA9
+      gui_resident_semantics: 0xA9,
+      gui_tasks_drawer: 0xAC
     )
   end
 

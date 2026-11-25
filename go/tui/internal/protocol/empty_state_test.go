@@ -27,51 +27,47 @@ func frameEmptyState(body []byte) []byte {
 	return append(out, body...)
 }
 
+func homeItem(kind byte, id, label, detail, meta, jump, chord, icon string, color uint32, state string) []byte {
+	var item []byte
+	item = append(item, kind)
+	item = append(item, str8(id)...)
+	item = append(item, str16(label)...)
+	item = append(item, str16(detail)...)
+	item = append(item, str16(meta)...)
+	item = append(item, str8(jump)...)
+	item = append(item, str8(chord)...)
+	item = append(item, str8(icon)...)
+	item = append(item, u32be(color)...)
+	return append(item, str8(state)...)
+}
+
 func TestDecodeEmptyStateRoundTrip(t *testing.T) {
 	var body []byte
-	body = append(body, 0x01, 0x00) // visible=1, flags=0 (not crashed)
-	body = append(body, str8("v0.9")...)
-	body = append(body, str8("resume")...)
+	body = append(body, 0x02) // payload version 2 (visible)
+	body = append(body, str16("minga")...)
+	body = append(body, str16("~/code/minga")...)
+	body = append(body, str16("main · 11 changed")...)
+	body = append(body, str16("")...)
+	body = append(body, str8("recent-1")...)
 	body = append(body, 0x03) // three sections
 
-	// session
-	body = append(body, 0x00)               // section id: session
-	body = append(body, str8("Session")...) // title
-	body = append(body, 0x01)               // one item
-	body = append(body, 0x00)               // kind: resume
-	body = append(body, str8("resume")...)  // id
-	body = append(body, str16("resume last session")...)
-	body = append(body, str16("4 files")...) // detail
-	body = append(body, str8("r")...)        // jump_key
-	body = append(body, str8("")...)         // chord
-	body = append(body, str8("")...)         // icon
-	body = append(body, u32be(0)...)         // icon_color
+	body = append(body, 0x01) // recent files
+	body = append(body, str8("Recent in this project")...)
+	body = append(body, str16("Nothing opened here yet.")...)
+	body = append(body, 0x01)
+	body = append(body, homeItem(0x01, "recent-1", "startup.ex", "lib/minga_editor", "2 h ago", "1", "", "e", 0x61AFEF, "")...)
 
-	// recent
-	body = append(body, 0x01)                         // section id: recent
-	body = append(body, str8("Recent")...)            // title
-	body = append(body, 0x01)                         // one item
-	body = append(body, 0x01)                         // kind: recent_file
-	body = append(body, str8("recent-1")...)          // id
-	body = append(body, str16("startup.ex")...)       // label
-	body = append(body, str16("lib/minga_editor")...) // detail
-	body = append(body, str8("1")...)                 // jump_key
-	body = append(body, str8("")...)                  // chord
-	body = append(body, str8("")...)                 // icon glyph
-	body = append(body, u32be(0x61AFEF)...)           // icon_color
+	body = append(body, 0x05) // Minga tasks
+	body = append(body, str8("Minga tasks")...)
+	body = append(body, str16("")...)
+	body = append(body, 0x01)
+	body = append(body, homeItem(0x05, "task-3", "Add tests", "Needs you", "", "", "", "", 0, "needs_you")...)
 
-	// start
-	body = append(body, 0x02)             // section id: start
-	body = append(body, str8("Start")...) // title
-	body = append(body, 0x01)             // one item
-	body = append(body, 0x02)             // kind: action
-	body = append(body, str8("action-find-file")...)
-	body = append(body, str16("open file")...) // label
-	body = append(body, str16("")...)          // detail
-	body = append(body, str8("")...)           // jump_key
-	body = append(body, str8("SPC f f")...)    // chord
-	body = append(body, str8("4")...)         // icon glyph
-	body = append(body, u32be(0x61AFEF)...)    // icon_color
+	body = append(body, 0x06) // next actions
+	body = append(body, str8("Next")...)
+	body = append(body, str16("")...)
+	body = append(body, 0x01)
+	body = append(body, homeItem(0x02, "action-project_find_file", "Find a file", "", "", "", "SPC SPC", "", 0, "")...)
 
 	frame := frameEmptyState(body)
 
@@ -79,40 +75,34 @@ func TestDecodeEmptyStateRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode empty_state: %v", err)
 	}
-	if cmd.Kind != CommandChrome {
-		t.Fatalf("empty_state should decode as chrome, got kind %v", cmd.Kind)
-	}
-	if cmd.Size != len(frame) {
-		t.Fatalf("empty_state size = %d, want %d", cmd.Size, len(frame))
+	if cmd.Kind != CommandChrome || cmd.Size != len(frame) {
+		t.Fatalf("empty_state kind=%v size=%d, want chrome size %d", cmd.Kind, cmd.Size, len(frame))
 	}
 
 	state := cmd.Chrome.EmptyState
-	if !state.Visible || state.Crashed {
-		t.Fatalf("visible=%v crashed=%v, want visible not crashed", state.Visible, state.Crashed)
-	}
-	if state.Version != "v0.9" || state.FocusedID != "resume" {
-		t.Fatalf("version=%q focused=%q", state.Version, state.FocusedID)
+	if !state.Visible || state.Title != "minga" || state.Path != "~/code/minga" || state.Status != "main · 11 changed" || state.FocusedID != "recent-1" {
+		t.Fatalf("header mismatch: %+v", state)
 	}
 	if len(state.Sections) != 3 {
 		t.Fatalf("sections = %d, want 3", len(state.Sections))
 	}
 
-	session := state.Sections[0]
-	if session.ID != 0 || session.Title != "Session" || len(session.Items) != 1 {
-		t.Fatalf("session section mismatch: %+v", session)
+	recent := state.Sections[0]
+	if recent.ID != 1 || recent.Title != "Recent in this project" || recent.Empty != "Nothing opened here yet." {
+		t.Fatalf("recent section mismatch: %+v", recent)
 	}
-	resume := session.Items[0]
-	if resume.Kind != 0 || resume.ID != "resume" || resume.Label != "resume last session" || resume.Detail != "4 files" || resume.JumpKey != "r" {
-		t.Fatalf("resume item mismatch: %+v", resume)
+	file := recent.Items[0]
+	if file.Kind != 1 || file.ID != "recent-1" || file.Label != "startup.ex" || file.Detail != "lib/minga_editor" || file.Meta != "2 h ago" || file.JumpKey != "1" || file.IconColor != 0x61AFEF {
+		t.Fatalf("recent item mismatch: %+v", file)
 	}
 
-	recent := state.Sections[1].Items[0]
-	if recent.Kind != 1 || recent.ID != "recent-1" || recent.Label != "startup.ex" || recent.Detail != "lib/minga_editor" || recent.JumpKey != "1" || recent.IconColor != 0x61AFEF {
-		t.Fatalf("recent item mismatch: %+v", recent)
+	task := state.Sections[1].Items[0]
+	if task.Kind != 5 || task.ID != "task-3" || task.State != "needs_you" || task.Detail != "Needs you" {
+		t.Fatalf("task item mismatch: %+v", task)
 	}
 
 	action := state.Sections[2].Items[0]
-	if action.Kind != 2 || action.ID != "action-find-file" || action.Label != "open file" || action.Chord != "SPC f f" || action.IconColor != 0x61AFEF {
+	if action.Kind != 2 || action.Chord != "SPC SPC" || action.Label != "Find a file" {
 		t.Fatalf("action item mismatch: %+v", action)
 	}
 }
@@ -134,19 +124,23 @@ func TestDecodeEmptyStateHidden(t *testing.T) {
 	}
 }
 
-func TestDecodeEmptyStateCrashedFlag(t *testing.T) {
+func TestDecodeEmptyStateTruncatedSectionKeepsHeader(t *testing.T) {
 	var body []byte
-	body = append(body, 0x01, 0x01) // visible=1, flags bit0 = crashed
-	body = append(body, str8("v0.9")...)
-	body = append(body, str8("resume")...)
-	body = append(body, 0x00) // zero sections
+	body = append(body, 0x02)
+	body = append(body, str16("notes")...)
+	body = append(body, str16("~/Downloads/notes")...)
+	body = append(body, str16("Not a project")...)
+	body = append(body, str16("Minga uses this folder as the root for now.")...)
+	body = append(body, str8("")...)
+	body = append(body, 0x01, 0x01) // one section, id recent, then nothing
 
 	cmd, err := DecodeCommand(frameEmptyState(body))
 	if err != nil {
-		t.Fatalf("decode crashed empty_state: %v", err)
+		t.Fatalf("decode truncated empty_state: %v", err)
 	}
-	if !cmd.Chrome.EmptyState.Crashed {
-		t.Fatalf("crashed flag should decode true")
+	state := cmd.Chrome.EmptyState
+	if !state.Visible || state.Note != "Minga uses this folder as the root for now." || len(state.Sections) != 0 {
+		t.Fatalf("a truncated section should keep the header and drop the section: %+v", state)
 	}
 }
 

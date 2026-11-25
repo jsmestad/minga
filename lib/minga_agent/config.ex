@@ -91,8 +91,7 @@ defmodule MingaAgent.Config do
 
     # Notifications
     notifications: true,
-    notify_on: [:approval, :complete, :error],
-    notify_debounce_ms: 5_000,
+    notify_terminal: :off,
 
     # UI
     panel_split: 65,
@@ -133,8 +132,7 @@ defmodule MingaAgent.Config do
           max_mention_candidates: pos_integer(),
           memory_max_tokens: pos_integer(),
           notifications: boolean(),
-          notify_on: [atom()],
-          notify_debounce_ms: pos_integer(),
+          notify_terminal: :off | :bell | :desktop | :bell_and_desktop,
           panel_split: pos_integer(),
           diff_size_threshold: pos_integer(),
           session_retention_days: pos_integer(),
@@ -179,8 +177,7 @@ defmodule MingaAgent.Config do
       subagent_timeout_ms: get(:agent_subagent_timeout, 300_000),
       max_file_size: get(:agent_mention_max_file_size, 256 * 1024),
       notifications: get(:agent_notifications, true),
-      notify_on: get(:agent_notify_on, [:approval, :complete, :error]),
-      notify_debounce_ms: get(:agent_notify_debounce, 5_000),
+      notify_terminal: get(:agent_notify_terminal, :off),
       panel_split: get(:agent_panel_split, 65),
       diff_size_threshold: get(:agent_diff_size_threshold, 1_048_576),
       session_retention_days: get(:agent_session_retention_days, 30),

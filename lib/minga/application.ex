@@ -317,9 +317,20 @@ defmodule Minga.Application do
   @spec maybe_prepare_cli_startup() :: :ok
   defp maybe_prepare_cli_startup do
     if cli_boot?() do
-      Minga.CLI.prepare_startup(Minga.CLI.argv())
+      Minga.CLI.prepare_startup(Minga.CLI.argv(), boot_launch())
     else
       :ok
+    end
+  end
+
+  # How this VM was started decides what a start without a file or folder opens.
+  # A source launcher records its launch before the application starts, and that record stands.
+  # The standalone terminal release is a terminal command. Otherwise the app started the VM: no directory was chosen.
+  @spec boot_launch() :: Minga.CLI.launch()
+  defp boot_launch do
+    case Application.get_env(:minga, :cli_launch) do
+      nil -> if standalone_cli?(), do: Minga.CLI.terminal_launch(), else: :app
+      recorded -> recorded
     end
   end
 

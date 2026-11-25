@@ -36,11 +36,11 @@
       ~
       ~
 ╭ SPC › a Minga · 1 needs you ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ Tasks                        Conversation           Changes                  More                                                                  │
-│ a Agent view · 1 needs you   v Conversation split   r Pending reviews        x Context ›                                                           │
-│ n New session                ? Ask about this       u Undo all agent edits   S Session ›                                                           │
-│ s Stop                       e Rewrite selection    p Publish edits…         W Why this line                                                       │
-│                              q Queue ›                                       A Code autobiography                                                  │
+│ Tasks                   Conversation           Changes                  More                                                                       │
+│ a Tasks · 1 needs you   v Conversation split   r Pending reviews        x Context ›                                                                │
+│ n New task              ? Ask about this       u Undo all agent edits   S Session ›                                                                │
+│ s Stop                  e Rewrite selection    p Publish edits…         W Why this line                                                            │
+│                         q Queue ›                                       A Code autobiography                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── ⌫ back  esc close ─╯
   NORMAL  ◉ Needs you storyboard.ex ◉ Minga                                                                                          SPC a Elixir 1:1
 ## styles (row start-end fg bg attrs)
@@ -157,62 +157,62 @@
 30 30-149 #7c7f93 #ccd0da -
 31 0-0 #7c7f93 #ccd0da -
 31 1-1 #4c4f69 #ccd0da -
-31 2-27 #5c5f77 #ccd0da -
-31 28-30 #4c4f69 #ccd0da -
-31 31-50 #5c5f77 #ccd0da -
-31 51-53 #4c4f69 #ccd0da -
-31 54-75 #5c5f77 #ccd0da -
-31 76-78 #4c4f69 #ccd0da -
-31 79-98 #5c5f77 #ccd0da -
-31 99-148 #4c4f69 #ccd0da -
+31 2-22 #5c5f77 #ccd0da -
+31 23-25 #4c4f69 #ccd0da -
+31 26-45 #5c5f77 #ccd0da -
+31 46-48 #4c4f69 #ccd0da -
+31 49-70 #5c5f77 #ccd0da -
+31 71-73 #4c4f69 #ccd0da -
+31 74-93 #5c5f77 #ccd0da -
+31 94-148 #4c4f69 #ccd0da -
 31 149-149 #7c7f93 #ccd0da -
 32 0-0 #7c7f93 #ccd0da -
 32 1-1 #4c4f69 #ccd0da -
 32 2-2 #1e66f5 #ccd0da -
-32 3-14 #4c4f69 #ccd0da -
-32 15-27 #d35400 #ccd0da -
-32 28-30 #4c4f69 #ccd0da -
-32 31-31 #1e66f5 #ccd0da -
-32 32-53 #4c4f69 #ccd0da -
-32 54-54 #1e66f5 #ccd0da -
-32 55-78 #4c4f69 #ccd0da -
-32 79-79 #1e66f5 #ccd0da -
-32 80-80 #4c4f69 #ccd0da -
-32 81-89 #1650c0 #ccd0da -
-32 90-148 #4c4f69 #ccd0da -
+32 3-9 #4c4f69 #ccd0da -
+32 10-22 #d35400 #ccd0da -
+32 23-25 #4c4f69 #ccd0da -
+32 26-26 #1e66f5 #ccd0da -
+32 27-48 #4c4f69 #ccd0da -
+32 49-49 #1e66f5 #ccd0da -
+32 50-73 #4c4f69 #ccd0da -
+32 74-74 #1e66f5 #ccd0da -
+32 75-75 #4c4f69 #ccd0da -
+32 76-84 #1650c0 #ccd0da -
+32 85-148 #4c4f69 #ccd0da -
 32 149-149 #7c7f93 #ccd0da -
 33 0-0 #7c7f93 #ccd0da -
 33 1-1 #4c4f69 #ccd0da -
 33 2-2 #1e66f5 #ccd0da -
-33 3-30 #4c4f69 #ccd0da -
-33 31-31 #1e66f5 #ccd0da -
-33 32-53 #4c4f69 #ccd0da -
-33 54-54 #1e66f5 #ccd0da -
-33 55-78 #4c4f69 #ccd0da -
-33 79-79 #1e66f5 #ccd0da -
-33 80-80 #4c4f69 #ccd0da -
-33 81-89 #1650c0 #ccd0da -
-33 90-148 #4c4f69 #ccd0da -
+33 3-25 #4c4f69 #ccd0da -
+33 26-26 #1e66f5 #ccd0da -
+33 27-48 #4c4f69 #ccd0da -
+33 49-49 #1e66f5 #ccd0da -
+33 50-73 #4c4f69 #ccd0da -
+33 74-74 #1e66f5 #ccd0da -
+33 75-75 #4c4f69 #ccd0da -
+33 76-84 #1650c0 #ccd0da -
+33 85-148 #4c4f69 #ccd0da -
 33 149-149 #7c7f93 #ccd0da -
 34 0-0 #7c7f93 #ccd0da -
 34 1-1 #4c4f69 #ccd0da -
 34 2-2 #1e66f5 #ccd0da -
-34 3-30 #4c4f69 #ccd0da -
-34 31-31 #1e66f5 #ccd0da -
-34 32-53 #4c4f69 #ccd0da -
-34 54-54 #1e66f5 #ccd0da -
-34 55-78 #4c4f69 #ccd0da -
-34 79-79 #1e66f5 #ccd0da -
-34 80-148 #4c4f69 #ccd0da -
+34 3-25 #4c4f69 #ccd0da -
+34 26-26 #1e66f5 #ccd0da -
+34 27-48 #4c4f69 #ccd0da -
+34 49-49 #1e66f5 #ccd0da -
+34 50-73 #4c4f69 #ccd0da -
+34 74-74 #1e66f5 #ccd0da -
+34 75-148 #4c4f69 #ccd0da -
 34 149-149 #7c7f93 #ccd0da -
 35 0-0 #7c7f93 #ccd0da -
-35 1-30 #4c4f69 #ccd0da -
-35 31-31 #1e66f5 #ccd0da -
-35 32-32 #4c4f69 #ccd0da -
-35 33-39 #1650c0 #ccd0da -
-35 40-78 #4c4f69 #ccd0da -
-35 79-79 #1e66f5 #ccd0da -
-35 80-148 #4c4f69 #ccd0da -
+35 1-25 #4c4f69 #ccd0da -
+35 26-26 #1e66f5 #ccd0da -
+35 27-27 #4c4f69 #ccd0da -
+35 28-34 #1650c0 #ccd0da -
+35 35-73 #4c4f69 #ccd0da -
+35 74-74 #1e66f5 #ccd0da -
+35 75-148 #4c4f69 #ccd0da -
 35 149-149 #7c7f93 #ccd0da -
 36 0-128 #7c7f93 #ccd0da -
 36 129-129 #4c4f69 #ccd0da -

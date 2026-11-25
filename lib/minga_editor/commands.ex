@@ -40,6 +40,7 @@ defmodule MingaEditor.Commands do
   alias MingaEditor.Commands.Extensions, as: ExtCommands
   alias MingaEditor.Commands.Help
   alias MingaEditor.Commands.Lsp, as: LspCommands
+  alias MingaEditor.Commands.Health
   alias MingaEditor.Commands.Tutor
   alias MingaEditor.Commands.Marks
   alias MingaEditor.Commands.Movement
@@ -64,6 +65,24 @@ defmodule MingaEditor.Commands do
   @type action ::
           {:dot_repeat, non_neg_integer() | nil}
           | {:replay_macro, String.t()}
+
+  # Ex commands that read or change the active buffer.
+  @active_buffer_ex_commands [
+    :substitute,
+    :save,
+    :save_as,
+    :save_quit,
+    :force_save,
+    :force_save_as,
+    :force_edit,
+    :sort,
+    :global,
+    :normal,
+    :read,
+    :goto_line,
+    :set_filetype,
+    :rename
+  ]
 
   # These ex commands stay on the direct BufferManagement path so shutdown, save, and tab behavior stay as-is.
   @buffer_management_ex_commands [
@@ -599,6 +618,13 @@ defmodule MingaEditor.Commands do
 
   # ── Ex commands (tuple dispatch) ──────────────────────────────────────────
 
+  # With no buffer in the window (the project home, or an editor with no file), commands on the active buffer say so.
+  def execute(%{workspace: %{buffers: %{active: nil}}} = state, {:execute_ex_command, parsed})
+      when is_tuple(parsed) and tuple_size(parsed) > 0 and
+             elem(parsed, 0) in @active_buffer_ex_commands do
+    NoticeWorkflow.publish(state, "No file open")
+  end
+
   def execute(state, {:execute_ex_command, {:lsp_info, []}}),
     do: LspCommands.execute(state, :lsp_info)
 
@@ -656,6 +682,14 @@ defmodule MingaEditor.Commands do
 
   def execute(state, {:execute_ex_command, {:tutor, []}}) do
     Tutor.execute(state, :tutor)
+  end
+
+  def execute(state, {:execute_ex_command, {:checkhealth, []}}) do
+    Health.execute(state, :checkhealth)
+  end
+
+  def execute(state, {:execute_ex_command, {:checkhealth, [topic]}}) do
+    Health.execute(state, {:checkhealth, topic})
   end
 
   def execute(state, {:execute_ex_command, {:describe_option, []}}) do
@@ -723,7 +757,10 @@ defmodule MingaEditor.Commands do
     state
   end
 
-  defp execute_checked(state, cmd, %Command{execute: fun}) do
+  defp execute_checked(state, cmd, %Command{} = command), do: run_checked(state, cmd, command)
+
+  @spec run_checked(state(), atom(), Command.t()) :: state() | {state(), action()}
+  defp run_checked(state, cmd, %Command{execute: fun}) do
     state = maybe_mark_authoritative_scroll(state, cmd)
 
     with_jump_recorded(state, cmd, fn state ->

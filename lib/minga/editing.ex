@@ -310,6 +310,11 @@ defmodule Minga.Editing do
           {:ok, Minga.Editing.Formatter.Result.t()} | {:error, Minga.Editing.Formatter.failure()}
   defdelegate format(content, command_string), to: Minga.Editing.Formatter
 
+  @doc "Formats `content` with a formatter line that runs in `directory`, the open project's root."
+  @spec format(String.t(), Minga.Editing.Formatter.formatter_spec(), String.t() | nil) ::
+          {:ok, Minga.Editing.Formatter.Result.t()} | {:error, Minga.Editing.Formatter.failure()}
+  defdelegate format(content, command_string, directory), to: Minga.Editing.Formatter
+
   @doc "Apply save-time transforms (trim trailing whitespace, final newline)."
   defdelegate apply_save_transforms(content, trim, final_newline), to: Minga.Editing.Formatter
 

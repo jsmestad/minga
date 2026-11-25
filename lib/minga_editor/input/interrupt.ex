@@ -72,6 +72,7 @@ defmodule MingaEditor.Input.Interrupt do
       state
       |> maybe_cancel_space_leader()
       |> maybe_blur_bottom_panel()
+      |> maybe_blur_drawer()
       |> maybe_blur_agent_prompt()
       |> maybe_unfocus_file_tree()
       |> maybe_clear_sidebar_focus()
@@ -96,6 +97,14 @@ defmodule MingaEditor.Input.Interrupt do
        do: %{state | shell_runtime: Runtime.blur_bottom_panel(state.shell_runtime)}
 
   defp maybe_blur_bottom_panel(state), do: state
+
+  defp maybe_blur_drawer(%{shell_runtime: %{state: %TraditionalState{} = shell_state}} = state) do
+    if TraditionalState.drawers(shell_state).focused?,
+      do: %{state | shell_runtime: Runtime.blur_bottom_panel(state.shell_runtime)},
+      else: state
+  end
+
+  defp maybe_blur_drawer(state), do: state
 
   defp maybe_blur_agent_prompt(
          %{workspace: %{agent_ui: %{panel: %{input_focused: true}}}} = state

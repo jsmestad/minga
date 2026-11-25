@@ -16,6 +16,17 @@ defmodule Minga.Storyboard.SessionParserTest do
     Session.stop(session)
   end
 
+  test "a settled session already has its parse's fold ranges (#4314)" do
+    session = Registry.drive("edit.plain")
+    state = Minga.Test.EditorCase.editor_state(session.ctx)
+    window = Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)
+
+    assert window.fold_ranges != [],
+           "the session settled before the parse's fold ranges arrived; its frames draw no fold marks"
+
+    Session.stop(session)
+  end
+
   test "an edit reaches the shared parser, which highlights the new text" do
     session = Registry.drive("edit.plain")
     original = session |> buffer_text() |> byte_size()
@@ -30,7 +41,10 @@ defmodule Minga.Storyboard.SessionParserTest do
     Session.stop(session)
   end
 
-  defp buffer_text(session), do: Minga.Test.EditorCase.buffer_content(session.ctx)
+  defp buffer_text(session) do
+    state = Minga.Test.EditorCase.editor_state(session.ctx)
+    Minga.Buffer.content(state.workspace.buffers.active)
+  end
 
   # The end of the last highlighted span, in bytes: it moves past the old text only after a parse of the edit.
   defp highlighted_extent(session) do

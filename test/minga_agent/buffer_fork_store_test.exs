@@ -294,7 +294,7 @@ defmodule MingaAgent.BufferForkStoreTest do
 
       assert %{} == BufferForkStore.all(store)
       assert Minga.Buffer.content(parent) == "modified content\n"
-      Minga.Buffer.undo(parent)
+      assert {:ok, 1} = Minga.Buffer.undo_agent_session(parent)
       assert Minga.Buffer.content(parent) == "line one\n"
       assert File.read!(path) == "line one\n"
     end

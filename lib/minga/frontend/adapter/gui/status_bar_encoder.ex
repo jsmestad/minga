@@ -41,6 +41,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   @section_review_conflict 0x11
   @section_review_conflict_keys 0x12
   @section_message_actions 0x13
+  @section_needs_you 0x14
 
   # Modeline section format 3 adds each segment's drop rank, flags, state, compact text, key and label.
   @modeline_format 3
@@ -139,6 +140,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
       modeline_segment_sections(data.modeline_segments),
       pending_keys_sections(data.pending_keys),
       message_actions_sections(data.message_actions),
+      needs_you_sections(data.needs_you_count),
       [
         section(
           @section_selection,
@@ -337,6 +339,18 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
 
     [section(@section_message_actions, payload)]
   end
+
+  # The needs-you count as a number, so the macOS Dock badge shows the same value as the modeline segment.
+  @spec needs_you_sections(non_neg_integer()) :: [binary()]
+  defp needs_you_sections(0), do: []
+
+  defp needs_you_sections(count) when is_integer(count) and count > 0,
+    do: [
+      section(
+        @section_needs_you,
+        Writer.new(@command) |> Writer.uint16(:needs_you_count, count) |> Writer.finish()
+      )
+    ]
 
   @spec pending_keys_sections(String.t() | nil) :: [binary()]
   defp pending_keys_sections(pending) when pending in [nil, ""], do: []

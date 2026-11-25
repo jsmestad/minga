@@ -75,13 +75,13 @@ reason = "the Orbit marks are not in the code yet"
 
 [[claim]]
 phrase = "per-author undo"
-pattern = "per_author|author_undo"
+pattern = "defmodule Minga\\.Buffer\\.Provenance do"
 paths = ["lib"]
 reason = "undo is not split by author yet"
 
 [[claim]]
 phrase = "undoes only your"
-pattern = "per_author|author_undo"
+pattern = "defmodule Minga\\.Buffer\\.Provenance do"
 paths = ["lib"]
 reason = "undo is not split by author yet"
 

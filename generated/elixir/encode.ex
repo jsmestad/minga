@@ -34,6 +34,14 @@ defmodule Minga.Protocol.Encode do
   def encode_terminal_feature_status(:fallback), do: 4
   def encode_terminal_feature_status(_), do: 0
 
+  @spec encode_terminal_feature_source(atom()) :: non_neg_integer()
+  def encode_terminal_feature_source(:unsettled), do: 0
+  def encode_terminal_feature_source(:answered), do: 1
+  def encode_terminal_feature_source(:known_terminal), do: 2
+  def encode_terminal_feature_source(:timeout), do: 3
+  def encode_terminal_feature_source(:user), do: 4
+  def encode_terminal_feature_source(_), do: 0
+
   @spec encode_agent_approval_decision(atom()) :: non_neg_integer()
   def encode_agent_approval_decision(:unknown), do: 0
   def encode_agent_approval_decision(:approve), do: 1
@@ -519,6 +527,56 @@ defmodule Minga.Protocol.Encode do
     [
       (fn value -> validate_uint!(command, [:status | path], value, 255); <<value::8>> end).(Map.fetch!(model, :status)),
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:description | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :description)),
+    ]
+  end
+
+  @spec encode_tasks_drawer_count(map()) :: iodata()
+  def encode_tasks_drawer_count(model), do: encode_tasks_drawer_count(model, :tasks_drawer_count, [])
+
+  @spec encode_tasks_drawer_count(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_tasks_drawer_count(model, command, path) do
+    [
+      (fn value -> validate_uint!(command, [:state | path], value, 255); <<value::8>> end).(Map.fetch!(model, :state)),
+      (fn value -> validate_uint!(command, [:count | path], value, 65535); <<value::16>> end).(Map.fetch!(model, :count)),
+    ]
+  end
+
+  @spec encode_tasks_drawer_hint(map()) :: iodata()
+  def encode_tasks_drawer_hint(model), do: encode_tasks_drawer_hint(model, :tasks_drawer_hint, [])
+
+  @spec encode_tasks_drawer_hint(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_tasks_drawer_hint(model, command, path) do
+    [
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:key | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :key)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:label | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :label)),
+    ]
+  end
+
+  @spec encode_tasks_drawer_line(map()) :: iodata()
+  def encode_tasks_drawer_line(model), do: encode_tasks_drawer_line(model, :tasks_drawer_line, [])
+
+  @spec encode_tasks_drawer_line(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_tasks_drawer_line(model, command, path) do
+    [
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:text | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :text)),
+    ]
+  end
+
+  @spec encode_tasks_drawer_row(map()) :: iodata()
+  def encode_tasks_drawer_row(model), do: encode_tasks_drawer_row(model, :tasks_drawer_row, [])
+
+  @spec encode_tasks_drawer_row(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_tasks_drawer_row(model, command, path) do
+    [
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:id | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :id)),
+      (fn value -> validate_uint!(command, [:depth | path], value, 255); <<value::8>> end).(Map.fetch!(model, :depth)),
+      (fn value -> validate_uint!(command, [:flags | path], value, 255); <<value::8>> end).(Map.fetch!(model, :flags)),
+      (fn value -> validate_uint!(command, [:state | path], value, 255); <<value::8>> end).(Map.fetch!(model, :state)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:title | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :title)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:words | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :words)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:age | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :age)),
+      (fn items -> count = Enum.count(items); validate_uint!(command, [:detail | path], count, 255); [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_tasks_drawer_line(value, command, [index | [:detail | path]]) end)] end).(Map.fetch!(model, :detail)),
+      (fn items -> count = Enum.count(items); validate_uint!(command, [:actions | path], count, 255); [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_tasks_drawer_hint(value, command, [index | [:actions | path]]) end)] end).(Map.fetch!(model, :actions)),
     ]
   end
 
@@ -1488,6 +1546,30 @@ defmodule Minga.Protocol.Encode do
       (fn value -> validate_uint!(command, [:session_id | path], value, 4294967295); <<value::32>> end).(Map.fetch!(model, :session_id)),
       (fn value -> validate_uint!(command, [:acknowledged_edit_seq | path], value, 4294967295); <<value::32>> end).(Map.fetch!(model, :acknowledged_edit_seq)),
       (fn value -> validate_uint!(command, [:status | path], value, 255); <<value::8>> end).(Map.fetch!(model, :status)),
+    ]
+  end
+
+  @spec encode_gui_tasks_drawer(map()) :: iodata()
+  def encode_gui_tasks_drawer(model), do: encode_gui_tasks_drawer(model, :gui_tasks_drawer, [])
+
+  @spec encode_gui_tasks_drawer(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_gui_tasks_drawer(model, command, path) do
+    [
+      (fn value -> validate_uint!(command, [:visible | path], value, 255); <<value::8>> end).(Map.fetch!(model, :visible)),
+      (fn value -> validate_uint!(command, [:focused | path], value, 255); <<value::8>> end).(Map.fetch!(model, :focused)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:name | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :name)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:title | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :title)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:note | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :note)),
+      (fn items -> count = Enum.count(items); validate_uint!(command, [:counts | path], count, 255); [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_tasks_drawer_count(value, command, [index | [:counts | path]]) end)] end).(Map.fetch!(model, :counts)),
+      (fn items -> count = Enum.count(items); validate_uint!(command, [:hints | path], count, 255); [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_tasks_drawer_hint(value, command, [index | [:hints | path]]) end)] end).(Map.fetch!(model, :hints)),
+      (fn items -> count = Enum.count(items); validate_uint!(command, [:rows | path], count, 65535); [<<count::16>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_tasks_drawer_row(value, command, [index | [:rows | path]]) end)] end).(Map.fetch!(model, :rows)),
+      (fn value -> validate_uint!(command, [:view | path], value, 255); <<value::8>> end).(Map.fetch!(model, :view)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:view_title | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :view_title)),
+      (fn items -> count = Enum.count(items); validate_uint!(command, [:view_lines | path], count, 65535); [<<count::16>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_tasks_drawer_line(value, command, [index | [:view_lines | path]]) end)] end).(Map.fetch!(model, :view_lines)),
+      (fn value -> validate_uint!(command, [:view_offset | path], value, 65535); <<value::16>> end).(Map.fetch!(model, :view_offset)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:prompt | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :prompt)),
+      (fn value -> validate_uint!(command, [:has_empty | path], value, 255); <<value::8>> end).(Map.fetch!(model, :has_empty)),
+      encode_empty_list(Map.fetch!(model, :empty), command, [:empty | path]),
     ]
   end
 

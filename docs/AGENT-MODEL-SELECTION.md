@@ -22,7 +22,7 @@ set :agent_model, "anthropic:claude-sonnet-4-20250514"
 
 The value is the provider name, a colon, and the model name. New agent sessions start on that model.
 
-To pick from a list instead, open the agent with `SPC a a` and run `/model`. It lists the models your credentials can reach. Choosing one switches the current conversation and keeps its history.
+To pick from a list instead, open the agent with `SPC a v` and run `/model`. It lists the models your credentials can reach. Choosing one switches the current conversation and keeps its history.
 
 If you would rather not keep a key in your shell, run `/auth anthropic` and type the key into the masked prompt. Minga stores it in `~/.config/minga/credentials.json`, readable only by you. A key in an environment variable takes precedence over a stored one.
 

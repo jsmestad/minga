@@ -2,107 +2,205 @@ import AppKit
 import MingaUI
 import UserNotifications
 
-/// Posts under Minga's bundle identity. The editor remains the owner of approvals and errors.
-@MainActor
-final class DesktopAgentNotifications: NSObject, UNUserNotificationCenterDelegate {
-    private let center = UNUserNotificationCenter.current()
-    private let openEditor: @MainActor () -> Void
-    private var approvals: [UUID: Task<Void, Never>] = [:]
-    private var outcomes: [OutcomeKey: Task<Void, Never>] = [:]
-
-    private struct OutcomeKey: Hashable {
-        let session: UUID
-        let outcome: AgentDesktopNotification.Outcome
+/// The app's background escalation for "a task needs you" (docs/design/surfaces.md, "Notifications and background"):
+/// a Dock badge with the needs-you count, one informational bounce, and a notification.
+///
+/// The BEAM decides when a task starts needing you while Minga is in the background; this value only decides how the
+/// app shows it. The badge needs no permission, so it still shows when macOS refuses notifications.
+struct AgentAttention: Equatable {
+    /// What macOS answered when the app asked to post notifications.
+    enum Authorization: Equatable {
+        case unasked
+        case granted
+        case refused
     }
 
-    init(openEditor: @escaping @MainActor () -> Void) {
+    private(set) var authorization: Authorization = .unasked
+    private(set) var needsYouCount = 0
+    private(set) var active = true
+
+    /// The Dock badge: the needs-you count while Minga is in the background, and nothing in front or at zero.
+    var badgeLabel: String? {
+        guard !active, needsYouCount > 0 else { return nil }
+        return String(needsYouCount)
+    }
+
+    /// Whether a new alert bounces the Dock icon once: only while Minga is in the background, never in front.
+    var bounces: Bool { !active }
+
+    /// Whether to ask macOS for permission before posting: only until it has answered.
+    var asksForAuthorization: Bool { authorization == .unasked }
+
+    /// Whether a notification may be posted: not once macOS refused.
+    var posts: Bool { authorization != .refused }
+
+    mutating func count(_ count: Int) { needsYouCount = max(count, 0) }
+
+    mutating func activation(_ active: Bool) { self.active = active }
+
+    /// Records macOS's answer. Returns the one line to log for a refusal; later refusals return nil, so the log stays calm.
+    mutating func authorized(_ granted: Bool) -> String? {
+        let firstRefusal = !granted && authorization != .refused
+        authorization = granted ? .granted : .refused
+        guard firstRefusal else { return nil }
+        return "Desktop notifications are off: macOS did not grant Minga permission. The Dock badge still shows what needs you."
+    }
+}
+
+/// Posts the BEAM's "a task needs you" alerts under Minga's bundle identity, and removes them when the BEAM withdraws them.
+///
+/// The BEAM decides when to post an alert. AppKit activation only controls the Dock badge and bounce.
+/// A click brings the editor forward and tells the BEAM which alert was clicked, so it opens the tasks drawer on that task.
+@MainActor
+final class DesktopAgentNotifications: NSObject, UNUserNotificationCenterDelegate {
+    private nonisolated static let identifierPrefix = "agent-needs-you-"
+
+    /// What a response to one of the app's notifications asks for.
+    enum Click: Equatable {
+        /// A dismissal or an action this class does not offer.
+        case ignore
+        /// A click on a notification this class did not post: bring the editor forward.
+        case openEditor
+        /// A click on a "needs you" alert: bring the editor forward and open the drawer on its task.
+        case openAlert(UUID)
+    }
+
+    private let center = UNUserNotificationCenter.current()
+    private let openEditor: @MainActor () -> Void
+    private let openAlert: @MainActor (UUID) -> Void
+    private var alerts: [UUID: Task<Void, Never>] = [:]
+    private var attention = AgentAttention()
+
+    init(openEditor: @escaping @MainActor () -> Void, openAlert: @escaping @MainActor (UUID) -> Void) {
         self.openEditor = openEditor
+        self.openAlert = openAlert
         super.init()
         center.delegate = self
+        attention.activation(NSApp.isActive)
+    }
+
+    /// Shows how many tasks need you on the Dock badge while Minga is in the background.
+    func needsYouCount(_ count: Int) {
+        attention.count(count)
+        showBadge()
+    }
+
+    func activation(_ active: Bool) {
+        attention.activation(active)
+        showBadge()
+    }
+
+    private func showBadge() {
+        let label = attention.badgeLabel
+        if NSApp.dockTile.badgeLabel != label { NSApp.dockTile.badgeLabel = label }
     }
 
     func receive(_ notification: AgentDesktopNotification) {
         switch notification {
-        case .approvalCleared(let id):
-            approvals.removeValue(forKey: id)?.cancel()
-            withdrawApprovals([approvalIdentifier(id)])
-        case .approval(let id):
-            postApproval(id)
-        case .outcome(let outcome, let session, let debounceMs):
-            postOutcome(outcome, session: session, debounceMs: debounceMs)
+        case .withdrawn(let id):
+            alerts.removeValue(forKey: id)?.cancel()
+            withdraw([Self.identifier(id)])
+            PortLogger.info("Agent notification withdrawn: \(Self.identifier(id))")
+        case .needsYou(let id):
+            // One informational bounce per task that starts needing you, and never while Minga is in front.
+            if attention.bounces { NSApp.requestUserAttention(.informationalRequest) }
+            post(id)
         }
     }
 
     func retireConnection() {
-        guard !approvals.isEmpty || !outcomes.isEmpty else { return }
-        for task in approvals.values { task.cancel() }
-        withdrawApprovals(approvals.keys.map(approvalIdentifier))
-        approvals.removeAll()
-        for task in outcomes.values { task.cancel() }
-        outcomes.removeAll()
+        needsYouCount(0)
+        guard !alerts.isEmpty else { return }
+        for task in alerts.values { task.cancel() }
+        withdraw(alerts.keys.map(Self.identifier))
+        alerts.removeAll()
     }
 
-    private func postApproval(_ id: UUID) {
-        guard !NSApp.isActive, approvals[id] == nil else { return }
-        approvals[id] = Task {
-            let delivered = await deliver(
-                id: approvalIdentifier(id), title: "Tool Approval Needed",
-                body: "The agent is waiting for you to review a tool request."
-            )
+    private func post(_ id: UUID) {
+        guard alerts[id] == nil else { return }
+        alerts[id] = Task {
+            let delivered = await deliver(id: Self.identifier(id))
             if Task.isCancelled {
-                // Retirement can race an add already in progress.
-                withdrawApprovals([approvalIdentifier(id)])
+                // A withdrawal can race an add already in progress.
+                withdraw([Self.identifier(id)])
             } else if !delivered {
-                approvals[id] = nil
+                alerts[id] = nil
+            } else {
+                PortLogger.info("Agent notification posted: \(Self.identifier(id))")
             }
         }
     }
 
-    private func postOutcome(_ outcome: AgentDesktopNotification.Outcome, session: UUID, debounceMs: UInt32) {
-        let key = OutcomeKey(session: session, outcome: outcome)
-        guard !NSApp.isActive, outcomes[key] == nil else { return }
-        outcomes[key] = Task {
-            defer { if !Task.isCancelled { outcomes[key] = nil } }
-            let copy = switch outcome {
-            case .complete: (title: "Agent Finished", body: "Your response is ready to review.")
-            case .failed: (title: "Agent Needs Attention", body: "Open the conversation for details.")
-            }
-            guard await deliver(id: UUID().uuidString, title: copy.title, body: copy.body) else { return }
-            // Cooldown starts after a successful post, not when a foreground event occurs.
-            try? await Task.sleep(for: .milliseconds(debounceMs))
+    private func deliver(id: String) async -> Bool {
+        guard !Task.isCancelled, attention.posts else { return false }
+        if attention.asksForAuthorization {
+            // macOS prompts only on the first request; a refusal is remembered, so later alerts do not ask again.
+            let granted = (try? await center.requestAuthorization(options: [.alert])) ?? false
+            if let line = attention.authorized(granted) { PortLogger.info(line) }
+            guard granted else { return false }
         }
-    }
-
-    private func deliver(id: String, title: String, body: String) async -> Bool {
-        guard !Task.isCancelled, !NSApp.isActive else { return false }
+        guard !Task.isCancelled else { return false }
         do {
-            // macOS prompts only on the first request. Later calls respect the user's choice.
-            guard try await center.requestAuthorization(options: [.alert]),
-                  !Task.isCancelled, !NSApp.isActive else { return false }
             let content = UNMutableNotificationContent()
-            content.title = title
-            content.body = body
+            content.title = "Minga needs you"
+            content.body = "A task is waiting for your answer."
             content.threadIdentifier = "agent"
             try await center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
             return true
+        } catch let error as UNError where error.code == .notificationsNotAllowed {
+            // Permission was withdrawn after it was granted: the same calm, single line as a refusal.
+            if let line = attention.authorized(false) { PortLogger.info(line) }
+            return false
         } catch {
             PortLogger.warn("Could not deliver an agent notification", privateDetail: error.localizedDescription)
             return false
         }
     }
 
-    private func approvalIdentifier(_ id: UUID) -> String { "agent-approval-\(id.uuidString)" }
-
-    private func withdrawApprovals(_ identifiers: [String]) {
+    private func withdraw(_ identifiers: [String]) {
         guard !identifiers.isEmpty else { return }
         center.removePendingNotificationRequests(withIdentifiers: identifiers)
         center.removeDeliveredNotifications(withIdentifiers: identifiers)
     }
 
+    /// The notification identifier for an alert identity.
+    nonisolated static func identifier(_ id: UUID) -> String { identifierPrefix + id.uuidString }
+
+    /// The alert identity a notification identifier names, or nil for a notification this class did not post.
+    nonisolated static func alert(fromIdentifier identifier: String) -> UUID? {
+        guard identifier.hasPrefix(identifierPrefix) else { return nil }
+        return UUID(uuidString: String(identifier.dropFirst(identifierPrefix.count)))
+    }
+
+    /// What a response asks for: only the default action (a click on the notification) does anything, and only an alert
+    /// this class posted names a task.
+    nonisolated static func click(actionIdentifier: String, requestIdentifier: String) -> Click {
+        guard actionIdentifier == UNNotificationDefaultActionIdentifier else { return .ignore }
+        guard let alert = alert(fromIdentifier: requestIdentifier) else { return .openEditor }
+        return .openAlert(alert)
+    }
+
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
     ) async {
-        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
-        await openEditor()
+        let click = Self.click(
+            actionIdentifier: response.actionIdentifier,
+            requestIdentifier: response.notification.request.identifier
+        )
+        await MainActor.run { handle(click) }
+    }
+
+    /// Brings the editor forward and, for an alert, tells the BEAM which one was clicked. It never answers anything.
+    func handle(_ click: Click) {
+        switch click {
+        case .ignore:
+            return
+        case .openEditor:
+            openEditor()
+        case .openAlert(let alert):
+            PortLogger.info("Agent notification clicked: \(Self.identifier(alert))")
+            openEditor()
+            openAlert(alert)
+        }
     }
 }

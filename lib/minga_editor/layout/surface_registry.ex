@@ -172,6 +172,7 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
           | :extension_panel
           | :observatory
           | :edit_timeline
+          | :tasks_drawer
           | :notifications
           | :extension_overlay
 
@@ -222,6 +223,7 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   @z_extension_panel 190
   @z_observatory 180
   @z_edit_timeline 170
+  @z_tasks_drawer 175
   @z_notifications 160
   @z_extension_overlay 150
 
@@ -428,6 +430,7 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   def surface_id(:extension_panel), do: :extension_panel
   def surface_id(:observatory), do: :observatory
   def surface_id(:edit_timeline), do: :edit_timeline
+  def surface_id(:tasks_drawer), do: :tasks_drawer
   def surface_id(:notifications), do: :notifications
   def surface_id(:extension_overlay), do: :extension_overlay
   def surface_id({:custom, :sidebar}), do: :custom_sidebar
@@ -468,6 +471,7 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   def surface_id_u16(:notifications), do: 25
   def surface_id_u16(:extension_overlay), do: 26
   def surface_id_u16(:agent_help), do: 27
+  def surface_id_u16(:tasks_drawer), do: 28
 
   @doc """
   Maps a registry `hit_kind` atom to its `u8` wire value.
@@ -507,6 +511,7 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   defp z_for(:extension_panel), do: @z_extension_panel
   defp z_for(:observatory), do: @z_observatory
   defp z_for(:edit_timeline), do: @z_edit_timeline
+  defp z_for(:tasks_drawer), do: @z_tasks_drawer
   defp z_for(:notifications), do: @z_notifications
   defp z_for(:extension_overlay), do: @z_extension_overlay
   defp z_for(:agent_help), do: @z_overlay

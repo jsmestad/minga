@@ -130,6 +130,13 @@ nonisolated public enum FrontendActionComposition {
         }
     }
 
+    public static func outbound(_ action: TasksDrawerView.Action) -> OutboundAction {
+        switch action {
+        case .rowAction(let rowID, let action): .tasksDrawerAction(rowID: rowID, action: action)
+        case .runCommand(let name): .executeCommand(name: name)
+        }
+    }
+
     public static func outbound(_ action: EmptyStateView.Action) -> OutboundAction {
         switch action {
         case .activate(let id): .emptyStateActivate(id: id)

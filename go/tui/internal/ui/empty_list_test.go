@@ -156,3 +156,22 @@ func TestCleanTreeKeepsItsStepsBelowARetryRow(t *testing.T) {
 		}
 	}
 }
+
+func TestEmptyListCutTextKeepsItsTrailingInset(t *testing.T) {
+	model := New(80, 24, nil)
+	empty := generated.EmptyList{
+		Title:   "No one's at the table yet.",
+		Why:     "Tasks you start, and the conversations you open, wait here while they work.",
+		Actions: []generated.EmptyListAction{{ID: "new", Key: "c", Label: "Start a new task that works in the background"}},
+	}
+	lines := stripLines(emptyListHeader(empty, 40, model.pickerEmptyColors(), model.palette()))
+	lines = append(lines, stripLines(emptyListActions(empty, 40, model.pickerEmptyColors()))...)
+	for _, line := range lines {
+		if strings.Contains(line, "…") && ansi.StringWidth(line) != 40-listRowTrailingInset.cols() {
+			t.Fatalf("a cut line ends its ellipsis one column before the edge: %q", line)
+		}
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), "…") {
+		t.Fatalf("the fixture must cut a line: %q", lines)
+	}
+}

@@ -1,0 +1,40 @@
+{
+  "macos": {
+    "commit": "f777d3e78615c1651d423d05be0640b817531a3b",
+    "files": {
+      "macos-astrodark-1280.json": "f2d0e00c7d5db03d343b0390a1dd66911c5d6efb24e38c6cf70312f7ca2b51ba",
+      "macos-astrodark-1440.json": "44a5b6f9fbd0258266d7ae52b70a11ce8801f42e7a9a72532ac9089880556127",
+      "macos-catppuccin_frappe-1280.json": "1929faa58907785e9c7cc5b1290be80b96eb70ca0093d52518c38c66ea2d207d",
+      "macos-catppuccin_frappe-1440.json": "23f8d0a874282c09031a76863d0f657bfd539969c3dfc93669147e72db2c8412",
+      "macos-catppuccin_latte-1280.json": "ea20da34d924a240094eea3d0f9334a1d8ca3307fc853764999eef9c16c5b4d8",
+      "macos-catppuccin_latte-1440.json": "de6c70b6b9baebfade18c64ee54272d14ec074c63794583b686f654c60552ea1"
+    },
+    "transcripts": {
+      "macos-astrodark-1280.json": "5c817796ff00460635970384fa5d381b8481196cdae6cad3c8052bf99c1018de",
+      "macos-astrodark-1440.json": "dd3e9b8fb8a6d769719720e09986dba699959b52374e515482d8c72f6bafae8b",
+      "macos-catppuccin_frappe-1280.json": "fbe9448d7b1cafaea6775f33d846b6b3d1090d852038c7f82e5964ec68772a66",
+      "macos-catppuccin_frappe-1440.json": "9400172c9fee870b8ec224a9680ce81438d455d2658654969ff9824938e55e1a",
+      "macos-catppuccin_latte-1280.json": "3e52055cffae8bab348791c5b5c0daeb24a8541ea4a5f1a7bad756864c7cbb71",
+      "macos-catppuccin_latte-1440.json": "4f6b7ac25611be3460e0615b0467b8854a0e4eb6d4b53f3bf9e4715f8608661e"
+    }
+  },
+  "platform_specific": {
+    "frontend": "tui",
+    "reason": "fold marks draw now that the parse says when it is complete (#4337); macOS baselines record no fold marks, and the 80x24 empty-list inset is terminal only"
+  },
+  "scenario": "minga.tasks.list",
+  "tui": {
+    "commit": "7ff44a4d3d75d4af6705033ab9ab459c163cde5c",
+    "files": {
+      "tui-astrodark-120x40.txt": "317c422db19acdbf73aff27229fc35f429ed92aa79e38e826c88926d2639a12f",
+      "tui-astrodark-150x38.txt": "c2aced89449482ddedc69a1619a43ee56dc9fd0dbdfba8c02b22e4482e1d5d5f",
+      "tui-astrodark-80x24.txt": "aa21ba333e2e97ab4962dd404e6b7df2340c5f92cc613068da0321bae495d635",
+      "tui-catppuccin_frappe-120x40.txt": "9bd598e268ddf50c8dd928cf1167ea6507d094469aea5dcb038f91bb99b1c0c1",
+      "tui-catppuccin_frappe-150x38.txt": "c2d251745028528819c777b6d3d287929384eaa374c9dfa63956d88602af2c08",
+      "tui-catppuccin_frappe-80x24.txt": "c03ce1db5ef8f4c232a80a67b221795ac0b70b02161fb1a60680d33433ce800c",
+      "tui-catppuccin_latte-120x40.txt": "4f0357b5b4d1062e93ad8c48a11242635fcae070b93fb3433a8007f0f2075282",
+      "tui-catppuccin_latte-150x38.txt": "0035075f7f2252916ddb32327a9e6943244b3468afcddaa24ecf2f4e744bb8d7",
+      "tui-catppuccin_latte-80x24.txt": "dcc994226520b42e4ced518d5d607ae57a3e829c01715d32039943a73970fd65"
+    }
+  }
+}

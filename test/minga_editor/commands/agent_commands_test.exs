@@ -305,17 +305,19 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     @spec start_link(pid()) :: GenServer.on_start()
     def start_link(owner), do: GenServer.start_link(__MODULE__, owner)
 
+    # `queue_target` is the turn a sent prompt starts, as the Session names it in its answer.
     @impl GenServer
-    def init(owner), do: {:ok, owner}
+    def init({owner, queue_target}), do: {:ok, {owner, queue_target}}
+    def init(owner), do: {:ok, {owner, nil}}
 
     @impl GenServer
     def handle_call(:model_selection, _from, state) do
       {:reply, MingaAgent.Test.ModelSelectionFixture.selection(), state}
     end
 
-    def handle_call({:send_prompt, content}, _from, owner) do
+    def handle_call({:composer_send, :prompt, content}, _from, {owner, queue_target} = state) do
       send(owner, {:readiness_session_prompt, content})
-      {:reply, :ok, owner}
+      {:reply, {:sent, queue_target}, state}
     end
   end
 
@@ -832,6 +834,32 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert sent.agent_connection.turn_requests == %{}
     end
 
+    test "the answer of a send that started a turn shows that turn before the Session's event arrives" do
+      target = {"prompt-readiness-test", "turn-1", 1}
+      {:ok, session} = GenServer.start(ReadinessSession, {self(), target})
+      on_exit(fn -> Process.exit(session, :kill) end)
+
+      state =
+        base_state(session: session)
+        |> project_prompt_connection(session, :configured, :running)
+        |> replace_panel(fn panel ->
+          panel
+          |> Panel.set_credentials_configured(true)
+          |> Panel.set_model_name("anthropic:claude-sonnet-4-20250514")
+          |> Panel.set_provider_name("anthropic")
+        end)
+
+      BufferProcess.replace_content(state.workspace.agent_ui.panel.prompt_buffer, "hello")
+      sent = state |> AgentCommands.submit_prompt() |> Minga.Test.TurnRequestDriver.settle()
+
+      # No queue-target event was delivered: the answer alone names the turn, so a press made
+      # right after it queues into that turn and is not sent as a first message.
+      assert MingaEditor.Shell.Traditional.State.agent(sent.shell_runtime.state).queue_target ==
+               {session, target}
+
+      assert composer(sent) == ""
+    end
+
     test "a second press while the send is out does not send the text again", %{
       session: session,
       state: state
@@ -1216,6 +1244,181 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   describe "abort_agent/1" do
     test "no-ops when no session exists" do
       state = base_state(session: nil)
+      assert AgentCommands.abort_agent(state) == state
+    end
+
+    # A session that never answers: these tests read which turn Stop asked for.
+    defp working(state, target) do
+      session =
+        spawn_link(fn ->
+          receive do
+            :never -> :ok
+          end
+        end)
+
+      now = System.system_time(:millisecond)
+
+      connection =
+        state.agent_connection
+        |> MingaEditor.State.AgentConnection.follow_task(session, now)
+        |> MingaEditor.State.AgentConnection.observe_task_event(
+          session,
+          {:stop_target_changed, target},
+          now
+        )
+
+      {session, %{state | agent_connection: connection}}
+    end
+
+    # The cache as it is once a file is in front: bound to the conversation shown last, with the turn it showed then.
+    defp shown_last(state, session, target) do
+      shell = state.shell_runtime.state
+
+      agent =
+        shell
+        |> MingaEditor.Shell.Traditional.State.agent()
+        |> AgentState.apply_session_snapshot(session, :thinking, nil, nil, nil)
+        |> AgentState.project_stop_target(session, target)
+
+      shell = MingaEditor.Shell.Traditional.State.replace_agent(shell, agent)
+      %{state | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell)}
+    end
+
+    defp asked_to_stop(state) do
+      for %TurnRequest{session: session, work: {:stop, target}} <-
+            Map.values(state.agent_connection.turn_requests),
+          do: {session, target}
+    end
+
+    test "with a file buffer in front, the only working turn is stopped" do
+      {session, state} = working(base_state(session: nil), {"record", "turn"})
+      stopped = AgentCommands.abort_agent(state)
+
+      assert asked_to_stop(stopped) == [{session, {"record", "turn"}}]
+      assert stopped.shell_runtime.state.notice.message == nil
+    end
+
+    test "with a file buffer in front, the conversation shown last is stopped at its current turn" do
+      {_other, state} = working(base_state(session: nil), {"other", "turn"})
+      {last, state} = working(state, {"last", "turn-2"})
+
+      # The turn the editor showed for it has since been replaced.
+      stopped = state |> shown_last(last, {"last", "turn-1"}) |> AgentCommands.abort_agent()
+
+      assert asked_to_stop(stopped) == [{last, {"last", "turn-2"}}]
+    end
+
+    test "the conversation shown last is stopped even when its turn started after it left the front" do
+      {_other, state} = working(base_state(session: nil), {"other", "turn"})
+      {last, state} = working(state, {"last", "turn-1"})
+
+      # The editor never showed a turn for it: the turn began with a file in front.
+      stopped = state |> shown_last(last, nil) |> AgentCommands.abort_agent()
+
+      assert asked_to_stop(stopped) == [{last, {"last", "turn-1"}}]
+    end
+
+    test "with several turns working and none shown last, nothing is stopped and one line says why" do
+      {_a, state} = working(base_state(session: nil), {"a", "turn"})
+      {_b, state} = working(state, {"b", "turn"})
+      kept = AgentCommands.abort_agent(state)
+
+      assert asked_to_stop(kept) == []
+      assert kept.shell_runtime.state.notice.message =~ "Several conversations are working"
+    end
+
+    # The Session's answer to the one stop that is out.
+    defp stop_answered(state) do
+      [request] = Map.values(state.agent_connection.turn_requests)
+      AgentCommands.settle_turn_request(state, request, :ok)
+    end
+
+    # The session names its task by announcing its first goal.
+    defp named(state, session, title) do
+      %{
+        state
+        | agent_connection:
+            MingaEditor.State.AgentConnection.observe_task_event(
+              state.agent_connection,
+              session,
+              {:title_changed, title},
+              0
+            )
+      }
+    end
+
+    # A file in the manual workspace takes the front; the conversation keeps its own workspace.
+    defp file_in_front(state) do
+      shell = state.shell_runtime.state
+      {tab_bar, file} = TabBar.add(shell.tab_bar, :file, "notes.txt")
+
+      shell =
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
+          shell,
+          TabBar.switch_to(tab_bar, file.id)
+        )
+
+      %{state | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell)}
+    end
+
+    test "a stop the modeline does not show names the stopped task; a stop it shows says nothing" do
+      target = {"record", "turn"}
+
+      # Rule 3 with nothing shown last: the only working conversation is stopped from a file.
+      {only, unseen} = working(base_state(session: nil), target)
+      unseen = unseen |> named(only, "Write the report") |> AgentCommands.abort_agent()
+      assert asked_to_stop(unseen) == [{only, target}]
+
+      # Rule 3 again, with another conversation shown last: the modeline speaks for that one.
+      other = spawn_link(fn -> Process.sleep(:infinity) end)
+      {only_b, elsewhere} = working(base_state(session: other), target)
+
+      elsewhere =
+        elsewhere
+        |> named(only_b, "Fix the build")
+        |> shown_last(other, nil)
+        |> file_in_front()
+        |> AgentCommands.abort_agent()
+
+      assert asked_to_stop(elsewhere) == [{only_b, target}]
+
+      # Rule 2: the conversation shown last is stopped from a file, and its modeline says so.
+      shown = spawn_link(fn -> Process.sleep(:infinity) end)
+      now = System.system_time(:millisecond)
+      seen = base_state(session: shown)
+
+      connection =
+        seen.agent_connection
+        |> MingaEditor.State.AgentConnection.follow_task(shown, now)
+        |> MingaEditor.State.AgentConnection.observe_task_event(
+          shown,
+          {:stop_target_changed, target},
+          now
+        )
+
+      in_front = %{seen | agent_connection: connection} |> named(shown, "Tidy the tests")
+      from_file = in_front |> shown_last(shown, target) |> file_in_front()
+
+      # A task that was never given a goal here, in no conversation the Spaces bar names.
+      {unnamed_only, unnamed} = working(base_state(session: nil), target)
+      unnamed = AgentCommands.abort_agent(unnamed)
+      assert asked_to_stop(unnamed) == [{unnamed_only, target}]
+
+      cases = [
+        {"the only one working, nothing shown last", unseen, "Stopped: Write the report"},
+        {"a task without a goal or a conversation name", unnamed, "Stopped"},
+        {"the only one working, another shown last", elsewhere, "Stopped: Fix the build"},
+        {"the one shown last, from a file", AgentCommands.abort_agent(from_file), nil},
+        {"the one in front", AgentCommands.abort_agent(in_front), nil}
+      ]
+
+      for {name, stopped, expected} <- cases do
+        assert stop_answered(stopped).shell_runtime.state.notice.message == expected, name
+      end
+    end
+
+    test "a turn that ended is not stopped, and nothing says it is no longer active" do
+      {_session, state} = working(base_state(session: nil), nil)
       assert AgentCommands.abort_agent(state) == state
     end
   end
@@ -1664,7 +1867,13 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
                MingaEditor.Input.AgentPanel.handle_paste(state_a, "keyboard draft")
 
       state_a = MingaEditor.Input.Router.route_key(state_a, 27, 0)
+
+      # With no file to return to, closing the conversation shows the project home; the task keeps its draft.
       state_a = MingaEditor.Commands.execute(state_a, :agent_close)
+      assert state_a.workspace.keymap_scope == :editor
+      assert MingaEditor.Input.EmptyState.showing_home?(state_a)
+      state_a = MingaEditor.TabWorkflow.switch(state_a, tab_a.id)
+      state_a = collect_arrival(state_a, session_a)
       assert state_a.workspace.keymap_scope == :agent
       assert View.active?(state_a.workspace.agent_ui.view)
 

@@ -142,9 +142,9 @@ defmodule Minga.Keymap.Scope do
   @callback included_groups() :: [atom() | {atom(), keyword()}]
 
   @doc """
-  Returns whether this scope belongs to a modal (a picker or a prompt) rather than a surface.
+  Returns whether this scope's keys resolve only inside its own input handler (a picker, a prompt or the tasks drawer) rather than as a surface's workspace scope.
 
-  A modal scope's keys resolve inside its modal's input handler. It is never the workspace scope, so `surface_scopes/0` leaves it out. Optional; a scope without it is a surface scope.
+  Such a scope is never the workspace scope, so `surface_scopes/0` leaves it out. Optional; a scope without it is a surface scope.
   """
   @callback modal?() :: boolean()
 

@@ -385,6 +385,74 @@ defmodule Minga.Test.Storyboard.Assertions do
   end
 
   @doc """
+  Asserts the tasks drawer is on screen with the keyboard, every row shows a state mark and words, and needs-you rows come first.
+  """
+  @spec assert_tasks_drawer(Model.t()) :: Model.t()
+  def assert_tasks_drawer(%Model{ui: %{tasks_drawer: drawer}} = model) do
+    assert drawer && drawer.visible? && drawer.focused?,
+           "expected the tasks drawer with the keyboard"
+
+    assert_focus(model, :tasks)
+
+    for row <- drawer.rows do
+      assert row.state in Tokens.state_ids(), "row #{inspect(row.title)} has no state mark"
+      assert row.words != "", "row #{inspect(row.title)} has no state words"
+    end
+
+    states = drawer.rows |> Enum.filter(&(&1.depth == 0)) |> Enum.map(& &1.state)
+    {asking, rest} = Enum.split_while(states, &(&1 == :needs_you))
+    refute :needs_you in rest, "needs-you rows must come first, got #{inspect(asking ++ rest)}"
+    model
+  end
+
+  @doc "Asserts the drawer's selected row is in `state`, and that a needs-you row shows its request and its answers."
+  @spec assert_tasks_selected(Model.t(), Tokens.state_id()) :: Model.t()
+  def assert_tasks_selected(%Model{ui: %{tasks_drawer: drawer}} = model, state) do
+    selected = Minga.RenderModel.UI.TasksDrawer.selected(drawer)
+
+    assert selected && selected.state == state,
+           "expected a selected #{state} row, got #{inspect(selected)}"
+
+    if state == :needs_you do
+      assert selected.detail != [], "the needs-you row must show its request"
+      assert selected.actions |> Enum.map(&elem(&1, 0)) |> Enum.take(4) == ["y", "a", "t", "n"]
+    end
+
+    model
+  end
+
+  @doc "Asserts a task's subagents are drawn beneath it as a tree, the last one closing the branch."
+  @spec assert_tasks_tree(Model.t()) :: Model.t()
+  def assert_tasks_tree(%Model{ui: %{tasks_drawer: %{rows: rows}}} = model) do
+    children = Enum.filter(rows, &(&1.depth == 1))
+    assert children != [], "expected subagents beneath their task"
+    assert List.last(children).last?, "the last subagent closes its branch"
+    model
+  end
+
+  @doc "Asserts the tasks drawer's key hints include `keys`."
+  @spec assert_keys_hinted(Model.t(), [String.t()]) :: Model.t()
+  def assert_keys_hinted(%Model{ui: %{tasks_drawer: %{hints: hints}}} = model, keys) do
+    shown = Enum.map(hints, &elem(&1, 0))
+
+    for key <- keys,
+        do: assert(key in shown, "expected #{key} in the drawer's hints #{inspect(shown)}")
+
+    model
+  end
+
+  @doc "Asserts the drawer header counts each state shown in the rows."
+  @spec assert_tasks_counts(Model.t()) :: Model.t()
+  def assert_tasks_counts(%Model{ui: %{tasks_drawer: %{rows: rows, counts: counts}}} = model) do
+    expected = rows |> Enum.map(& &1.state) |> Enum.frequencies()
+
+    assert Map.new(counts) == expected,
+           "header counts #{inspect(counts)}, rows #{inspect(expected)}"
+
+    model
+  end
+
+  @doc """
   Asserts the empty-state anatomy: `title:`, `description:` and `actions:` (a list of `{key, label}`), with the first action preselected.
   """
   @spec assert_empty_state(Model.t(), keyword()) :: Model.t()
@@ -422,7 +490,7 @@ defmodule Minga.Test.Storyboard.Assertions do
   @doc """
   The empty-state anatomy of the frame, or `nil` when none is shown.
 
-  A picker that offers next steps shows the anatomy's title and why line in its `empty` header, and its next steps as result rows: each row's key is its annotation, and the selected row is the preselected action. The zero-buffers launchpad has sections and no why line.
+  A picker that offers next steps shows the anatomy's title and why line in its `empty` header, and its next steps as result rows: each row's key is its annotation, and the selected row is the preselected action. The tasks drawer with no tasks carries the whole anatomy in its `empty` field. The zero-buffers launchpad has sections and no why line.
   """
   @spec empty_state(Model.t()) :: empty_state() | nil
   def empty_state(%Model{ui: %{picker: %{visible?: true, empty: %EmptyList{} = empty} = picker}}) do
@@ -439,12 +507,21 @@ defmodule Minga.Test.Storyboard.Assertions do
 
   def empty_state(%Model{ui: %{git_status: %{empty: %EmptyList{} = empty}}}), do: anatomy(empty)
 
+  def empty_state(%Model{ui: %{tasks_drawer: %{visible?: true, empty: %EmptyList{} = empty}}}) do
+    %{
+      title: empty.title,
+      description: empty.why,
+      actions: Enum.map(empty.actions, &{&1.key, &1.label}),
+      selected: empty.selected
+    }
+  end
+
   def empty_state(%Model{
         ui: %{empty_state: %{visible?: true, sections: [_ | _] = sections} = state}
       }) do
     [first | _] = sections
     items = Enum.flat_map(sections, & &1.items)
-    actions = for item <- items, item.kind in [:action, :recent_file, :resume], do: item
+    actions = for item <- items, item.kind in [:action, :recent_file, :project, :task], do: item
 
     %{
       title: first.title,

@@ -19,7 +19,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Files do
       Entry.pending("files.switcher.no_match", 4058, "no match offers create and search rows"),
       Entry.built("files.tree.empty",
         start: [empty_dirs: ["notes"]],
-        reach: "SPC o p j .",
+        reach: "1 SPC o p j .",
         recognize: &(Model.open?(&1, :file_tree) and &1.ui.file_tree.status == :empty),
         checks: [
           Check.new(

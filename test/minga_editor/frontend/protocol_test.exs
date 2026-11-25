@@ -148,19 +148,48 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     end
   end
 
+  describe "the needs-you alert" do
+    test "an alert and its withdrawal carry only a kind and the alert's identity" do
+      id = <<0xAB::128>>
+      assert Protocol.encode_agent_desktop_notification(:needs_you, id) == <<0x61, 1, id::binary>>
+      assert Protocol.encode_agent_desktop_notification(:withdrawn, id) == <<0x61, 2, id::binary>>
+    end
+
+    test "a click on an alert names it by its identity, and nothing else" do
+      id = <<0xCD::128>>
+
+      assert Protocol.decode_event(<<0x07, 0x72, id::binary>>) ==
+               {:ok, {:gui_action, {:agent_notification_open, id}}}
+
+      for malformed <- [<<0x07, 0x72>>, <<0x07, 0x72, 1::120>>, <<0x07, 0x72, id::binary, 0>>] do
+        assert {:error, _reason} = Protocol.decode_event(malformed)
+      end
+    end
+  end
+
   describe "decode_event/1 — terminal_report" do
     test "decodes the terminal frontend's snapshot of its terminal's features" do
-      # true_color (1) detected (2), kitty_keyboard (5) pending (1)
-      body = <<2, 1, 2, 5, 1>>
+      # Each entry is feature, status, source: true_color (1) detected (2), answered by the terminal (1);
+      # kitty_keyboard (5) pending (1), unsettled (0); styled_underlines (2) detected (2), set by the user (4).
+      body = <<3, 1, 2, 1, 5, 1, 0, 2, 2, 4>>
 
       assert {:ok, {:terminal_report, report}} =
                Protocol.decode_event(<<0x62, byte_size(body)::16, body::binary>>)
 
-      assert report.features == %{true_color: :detected, kitty_keyboard: :pending}
+      assert report.features == %{
+               true_color: {:detected, :answered},
+               kitty_keyboard: {:pending, :unsettled},
+               styled_underlines: {:detected, :user}
+             }
     end
 
     test "a report whose length or count is wrong is malformed" do
-      for malformed <- [<<0x62>>, <<0x62, 0, 5, 2, 1, 2>>, <<0x62, 0, 3, 2, 1, 2>>] do
+      for malformed <- [
+            <<0x62>>,
+            <<0x62, 0, 5, 2, 1, 2>>,
+            <<0x62, 0, 3, 2, 1, 2>>,
+            <<0x62, 0, 3, 1, 1, 2>>
+          ] do
         assert Protocol.decode_event(malformed) == {:error, :malformed}
       end
     end

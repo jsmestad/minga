@@ -1,25 +1,26 @@
 defmodule Minga.RenderModel.UI.EmptyState.Item do
   @moduledoc """
-  One launchpad row.
+  One row of the project home.
 
-  The input-visual class is derivable: a non-nil `jump_key` renders as a
-  single keycap chip (press one key), a non-empty `chord` renders as one
-  chip per keystroke token (`"SPC f f"`), and an ex-command `detail`
-  (`":Tutor"`) renders as accent text with no chip.
+  `jump_key` is the single key that opens the row (`"1"` to `"9"` for recent files and projects), drawn as a number column. `chord` is the leader sequence an action row runs (`"SPC SPC"`), drawn in the accent key column. `detail` is the muted second part of the row (a directory, a path, a state word) and `meta` the trailing muted text (an age). A task row carries its design-token `state` (`Minga.Design.Tokens`), whose mark and colour frontends draw before the label.
   """
 
-  @typedoc "Row behavior kind for focus/activation."
-  @type kind :: :resume | :recent_file | :action | :hint
+  alias Minga.Design.Tokens
+
+  @typedoc "Row kind, for focus and activation."
+  @type kind :: :recent_file | :project | :task | :action
 
   @type t :: %__MODULE__{
           id: String.t(),
           kind: kind(),
           label: String.t(),
           detail: String.t(),
+          meta: String.t(),
           jump_key: String.t() | nil,
           chord: String.t(),
           icon: String.t(),
-          icon_color: non_neg_integer()
+          icon_color: non_neg_integer(),
+          state: Tokens.state_id() | nil
         }
 
   @enforce_keys [:id, :kind, :label]
@@ -27,8 +28,10 @@ defmodule Minga.RenderModel.UI.EmptyState.Item do
             kind: nil,
             label: "",
             detail: "",
+            meta: "",
             jump_key: nil,
             chord: "",
             icon: "",
-            icon_color: 0
+            icon_color: 0,
+            state: nil
 end

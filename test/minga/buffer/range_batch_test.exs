@@ -296,7 +296,7 @@ defmodule Minga.Buffer.RangeBatchTest do
   # `Document.move_to/2` does.
   @spec assert_round_trip(Document.t(), {:ok, Document.t(), [UndoPatch.t()]}) :: true
   defp assert_round_trip(doc, {:ok, new_doc, patches}) do
-    history = UndoHistory.record_edit_batch(UndoHistory.new(), 0, patches, :lsp, 1)
+    history = UndoHistory.record_edit_batch(UndoHistory.new(doc), 0, patches, :lsp, 1)
 
     assert {:ok, undone, history} = UndoHistory.undo(history, 1, new_doc)
     assert Document.content(undone.document) == Document.content(doc)

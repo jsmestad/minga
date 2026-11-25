@@ -51,9 +51,11 @@ defmodule Minga.Command.Registry do
     MingaEditor.Commands.Extensions,
     MingaEditor.Commands.Macros,
     MingaEditor.Commands.Formatting,
+    MingaEditor.Commands.Health,
     MingaEditor.Commands.Help,
     MingaEditor.Commands.Launchpad,
     MingaEditor.Commands.Tutor,
+    MingaEditor.Commands.Tasks,
     MingaEditor.Commands.UI,
     MingaEditor.Commands.Tool,
     MingaEditor.Commands.Workspace

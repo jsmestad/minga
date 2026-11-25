@@ -1067,6 +1067,16 @@ struct EncoderDisplayedTextTests {
     }
 }
 
+@Suite("Encoder Binary: agent notification open")
+struct EncoderAgentNotificationOpenTests {
+    @Test("a click on a needs-you alert names the alert by its 16-byte identity")
+    func openLayout() throws {
+        let id = try #require(UUID(uuidString: "01020304-0506-0708-090A-0B0C0D0E0F10"))
+        let payload = captureFrame { $0.send(.agentNotificationOpen(alert: id)) }
+        #expect(payload == Data([OP_GUI_ACTION, 0x72] + Array(1...16)))
+    }
+}
+
 @Suite("Encoder Binary: picker fit")
 struct EncoderPickerFitTests {
     @Test("fit carries the picker generation and the rows its list shows")

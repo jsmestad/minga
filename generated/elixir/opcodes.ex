@@ -156,6 +156,8 @@ defmodule Minga.Protocol.Opcodes do
   def node_info, do: 0x3D
   @spec document_symbols() :: non_neg_integer()
   def document_symbols, do: 0x3E
+  @spec parse_complete() :: non_neg_integer()
+  def parse_complete, do: 0x3F
 
   # Gui Chrome
   @spec gui_tab_bar() :: non_neg_integer()
@@ -264,6 +266,8 @@ defmodule Minga.Protocol.Opcodes do
   def gui_text_presentation, do: 0xA8
   @spec gui_resident_semantics() :: non_neg_integer()
   def gui_resident_semantics, do: 0xA9
+  @spec gui_tasks_drawer() :: non_neg_integer()
+  def gui_tasks_drawer, do: 0xAC
 
 
   # GUI action sub-opcodes (Frontend to BEAM)

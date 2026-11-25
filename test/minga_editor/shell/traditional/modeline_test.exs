@@ -348,7 +348,7 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
 
     test "with no reachable leader the click stays and the hint goes" do
       data = Map.put(@full_data, :key_hints?, false)
-      assert segment(data, :needs_you).target == :toggle_agentic_view
+      assert segment(data, :needs_you).target == :agent_tasks
       assert segment(data, :needs_you).key == ""
     end
 

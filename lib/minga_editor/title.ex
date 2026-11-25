@@ -72,6 +72,22 @@ defmodule MingaEditor.Title do
   end
 
   @spec build_content_context(state()) :: map()
+  # The project home (no buffer behind the window) names itself and its project, not a missing file.
+  defp build_content_context(%{
+         workspace: %{
+           launchpad: %MingaEditor.State.Launchpad{root: root},
+           buffers: %{active: nil}
+         }
+       }) do
+    %{
+      type: :buffer,
+      display_name: MingaEditor.RenderModel.UI.EmptyStateBuilder.buffer_name(),
+      filepath: "",
+      directory: if(root, do: Path.basename(root), else: "~"),
+      dirty: false
+    }
+  end
+
   defp build_content_context(%EditorState{} = state) do
     case MingaEditor.Session.State.active_window_struct(state.workspace) do
       %MingaEditor.Window{content: {:agent_chat, _session}} ->
@@ -144,6 +160,24 @@ defmodule MingaEditor.Title do
   end
 
   @spec build_vars(state()) :: [{String.t(), String.t()}]
+  defp build_vars(
+         %{workspace: %{launchpad: %MingaEditor.State.Launchpad{}, buffers: %{active: nil}}} =
+           state
+       ) do
+    ctx = build_content_context(state)
+    mode = state.workspace.editing.mode |> to_string() |> String.upcase()
+
+    [
+      {"filename", ctx.display_name},
+      {"filepath", ""},
+      {"directory", ctx.directory},
+      {"dirty", ""},
+      {"readonly", ""},
+      {"mode", mode},
+      {"bufname", ctx.display_name}
+    ]
+  end
+
   defp build_vars(%EditorState{} = state) do
     ctx = build_content_context(state)
     mode_str = state |> Minga.Editing.mode() |> to_string() |> String.upcase()

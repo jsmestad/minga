@@ -388,7 +388,10 @@ defmodule MingaEditor.Startup do
   @spec startup_launchpad(pid() | nil, atom(), keyword()) ::
           MingaEditor.State.Launchpad.t() | nil
   defp startup_launchpad(nil, scope, opts) when scope != :agent do
-    MingaEditor.State.Launchpad.new(Keyword.take(opts, [:session_dir, :project_root]))
+    # `:home` overrides the home's reads, so tests and the storyboard factory start from a known home.
+    MingaEditor.State.Launchpad.new(
+      Keyword.take(opts, [:project_root]) ++ Keyword.get(opts, :home, [])
+    )
   end
 
   defp startup_launchpad(_active_buf, _scope, _opts), do: nil
@@ -494,13 +497,26 @@ defmodule MingaEditor.Startup do
             state
 
           {:error, reason} ->
-            Log.warning(:editor, "Could not open #{path}: #{inspect(reason)}")
-            state
+            # Say why in the echo area and *Messages*, so the home never shows without an explanation.
+            message = "Could not open #{path}: #{open_failure(reason)}"
+            Minga.API.message(message)
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, message)
         end
     end
   end
 
   def open_startup_file(%EditorState{} = state, _opts), do: state
+
+  @spec open_failure(term()) :: String.t()
+  defp open_failure(:eacces), do: "permission denied"
+  defp open_failure(:eisdir), do: "it is a directory"
+  defp open_failure(:enotdir), do: "a parent is not a directory"
+  defp open_failure({:error, reason}), do: open_failure(reason)
+
+  defp open_failure(reason) when is_atom(reason),
+    do: reason |> :file.format_error() |> List.to_string()
+
+  defp open_failure(reason), do: inspect(reason)
 
   @spec project_root_from_opts(keyword()) :: String.t() | nil
   defp project_root_from_opts(opts) do
