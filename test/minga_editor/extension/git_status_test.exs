@@ -209,4 +209,43 @@ defmodule MingaEditor.Extension.GitStatusTest do
     status = SidebarWorkflow.git_status_tui_state(navigated)
     assert MingaEditor.GitStatus.TUIState.selected_file(status, [entry]) == entry
   end
+
+  test "a clean tree moves through its next steps with j and k", ctx do
+    file_path = Path.join(ctx.tmp_dir, "clean.txt")
+    File.write!(file_path, "committed text\n")
+    :ok = Stub.set_root(file_path, ctx.tmp_dir)
+    :ok = Stub.set_status(ctx.tmp_dir, [])
+
+    on_exit(fn ->
+      Stub.clear(file_path)
+      Stub.clear(ctx.tmp_dir)
+    end)
+
+    repo = start_supervised!({Repo, git_root: ctx.tmp_dir})
+    :ok = Repo.await_refresh(repo)
+    :ok = Contributions.prepare_runtime(ctx.name, ctx.artifact, [], [])
+    :ok = CodeLease.activate_source(ctx.source, [StatusProvider])
+
+    state = TestHelpers.base_state(sidebar_registry: Sidebar.default_table())
+    :ok = Buffer.open(state.workspace.buffers.active, file_path)
+    opened = GitStatus.toggle(state)
+    assert %Panel{repo_state: :normal, entries: []} = SidebarWorkflow.git_status_panel(opened)
+
+    down = MingaEditor.Input.Router.route_key(opened, ?j, 0)
+    assert SidebarWorkflow.git_status_tui_state(down).cursor_index == 1
+
+    # The cursor stays on the last step instead of running past it.
+    still = MingaEditor.Input.Router.route_key(down, ?j, 0)
+    assert SidebarWorkflow.git_status_tui_state(still).cursor_index == 1
+
+    up = MingaEditor.Input.Router.route_key(still, ?k, 0)
+    assert SidebarWorkflow.git_status_tui_state(up).cursor_index == 0
+
+    # Enter runs the highlighted step and `o` only opens files; both resolve through the panel's keys.
+    assert {:command, :git_status_activate} =
+             Minga.Keymap.Scope.resolve_key(:git_status, :normal, {13, 0})
+
+    assert {:command, :git_status_open_file} =
+             Minga.Keymap.Scope.resolve_key(:git_status, :normal, {?o, 0})
+  end
 end

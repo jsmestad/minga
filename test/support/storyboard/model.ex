@@ -20,6 +20,7 @@ defmodule Minga.Test.Storyboard.Model do
           | :hover_popup
           | :float_popup
           | :file_tree
+          | :git_status
           | :agent_chat
           | :empty_state
           | :bottom_panel
@@ -115,6 +116,15 @@ defmodule Minga.Test.Storyboard.Model do
   @spec open?(t(), surface()) :: boolean()
   def open?(%__MODULE__{surfaces: surfaces}, surface), do: surface in surfaces
 
+  @doc "True when the echo line shows a notice that names next steps, such as an empty answer from code actions."
+  @spec notice_with_next_steps?(t()) :: boolean()
+  def notice_with_next_steps?(%__MODULE__{
+        ui: %UI{status_bar: %{data: %{message_actions: [_ | _]}}}
+      }),
+      do: true
+
+  def notice_with_next_steps?(%__MODULE__{}), do: false
+
   @doc "The title of the empty state an open picker shows instead of results, or `nil`."
   @spec picker_empty_title(t()) :: String.t() | nil
   def picker_empty_title(%__MODULE__{ui: %UI{picker: %{visible?: true, empty: %{title: title}}}}),
@@ -188,6 +198,7 @@ defmodule Minga.Test.Storyboard.Model do
       hover_popup: visible?(ui.hover_popup),
       float_popup: visible?(ui.float_popup),
       file_tree: match?(%{status: status} when status != :hidden, ui.file_tree),
+      git_status: match?(%{panel_id: id} when id != 0, ui.git_status),
       agent_chat: visible?(ui.agent_chat),
       empty_state: visible?(ui.empty_state),
       bottom_panel: visible?(ui.bottom_panel),

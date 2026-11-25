@@ -412,7 +412,8 @@ struct StatusBarViewViewTests {
     private func statusBarUpdate(
         message: String = "",
         leftSegments: [Wire.StatusBarSegment] = [],
-        rightSegments: [Wire.StatusBarSegment] = []
+        rightSegments: [Wire.StatusBarSegment] = [],
+        messageActions: [Wire.EmptyListAction] = []
     ) -> StatusBarUpdate {
         StatusBarUpdate(
             contentKind: 0, mode: 0, cursorLine: 42, cursorCol: 9,
@@ -426,7 +427,8 @@ struct StatusBarViewViewTests {
             backgroundSubagentCount: 0, backgroundSubagentLabel: "",
             modelineSegmentsPresent: true,
             modelineLeftSegments: leftSegments,
-            modelineRightSegments: rightSegments
+            modelineRightSegments: rightSegments,
+            messageActions: messageActions
         )
     }
 
@@ -450,6 +452,24 @@ struct StatusBarViewViewTests {
         for words in ["NORMAL", "Needs you", "chrome_state.ex ●", "change 1/2", "main +11", "Minga working 2/3", "Elixir", "240:31"] {
             #expect(strings.contains(words), "missing \(words)")
         }
+    }
+
+    @Test("At 610 pt a notice with a next step gets room for its whole message and the step's key; a plain message keeps a third")
+    @MainActor func noticeWithStepsKeepsItsMessage() {
+        let left = [segment(0, "NORMAL", kind: "mode"), segment(1, "proj.ex", kind: "filename"), segment(2, "main", kind: "git", drop: 4)]
+        let right = [segment(0, "Elixir", kind: "filetype", drop: 2), segment(1, "1:8", kind: "position", drop: 3)]
+        let message = "No matches for “limit_lable” in this buffer"
+
+        let plain = StatusBarView(state: statusBarState(message: message, leftSegments: left, rightSegments: right), sendAction: nil)
+        #expect(plain.echoWidth(in: 610) <= 610 * 0.34)
+
+        let answer = StatusBarState()
+        answer.announce = { _ in }
+        answer.update(from: statusBarUpdate(message: message, leftSegments: left, rightSegments: right, messageActions: [Wire.EmptyListAction(id: "search_project", key: "SPC s p", label: "search the project")]))
+        let view = StatusBarView(state: answer, sendAction: nil)
+        #expect(view.echoWidth(in: 610) >= view.shortestNoticeWidth + 2 * Spacing.md)
+        let kept = view.fittedSegments(width: 610).kinds
+        #expect(kept.contains("mode") && kept.contains("filename"))
     }
 
     @Test("Narrowing drops filetype, position and git in order, then shrinks Minga, then warnings")

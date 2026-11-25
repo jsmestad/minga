@@ -171,6 +171,7 @@ defmodule MingaEditor.StatusBar.Data do
       buf_index: state.workspace.buffers.active_index + 1,
       buf_count: Enum.count(state.workspace.buffers.list),
       notice: notice_message(state),
+      notice_actions: notice_actions(state),
       selected_operation: OperationFeedback.selected(state.feedback.operation_feedback),
       agent_status_command: agent_status_command_content(state, agent),
       # Colors follow the status the modeline shows, which comes from the active
@@ -250,6 +251,12 @@ defmodule MingaEditor.StatusBar.Data do
   end
 
   defp plan_limit(_state), do: nil
+
+  @spec notice_actions(EditorState.t() | map()) :: [Minga.RenderModel.UI.EmptyList.Action.t()]
+  defp notice_actions(%{shell_runtime: %{state: %{notice: %Notice{actions: actions}}}}),
+    do: actions
+
+  defp notice_actions(_state), do: []
 
   @spec notice_message(EditorState.t() | map()) :: String.t() | nil
   defp notice_message(%{

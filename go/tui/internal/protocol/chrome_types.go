@@ -212,6 +212,8 @@ type FileTree struct {
 	Width      uint16
 	Error      string
 	Rows       []FileTreeRow
+	// Empty is the empty-folder anatomy (status 2): what happened and the next steps, which run their command on click.
+	Empty *generated.EmptyList
 }
 
 type FileTreeRow struct {
@@ -243,9 +245,11 @@ type StatusBar struct {
 	Filename    string
 	Filetype    string
 	Message     string
-	PendingKeys string
-	Operation   *generated.GuiStatusBarOperation
-	Review      *StatusReview
+	// MessageActions are the next steps the echo-line notice names, drawn after Message; a click runs the action's command.
+	MessageActions []generated.EmptyListAction
+	PendingKeys    string
+	Operation      *generated.GuiStatusBarOperation
+	Review         *StatusReview
 	// Agent is set only for agent-content status bars (content kind 1). It carries
 	// the BEAM-owned conversation total, not the resident transcript count.
 	Agent *StatusAgent
@@ -299,6 +303,8 @@ type GitStatus struct {
 	StashCount        uint16
 	TerminalCursor    uint32
 	TerminalCollapsed byte
+	// Empty is a clean tree's empty-state anatomy: what happened and the next steps, which run their command on click.
+	Empty *generated.EmptyList
 }
 
 type GitStatusEntry struct {

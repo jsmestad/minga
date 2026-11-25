@@ -9,7 +9,7 @@
 # ---- TUI -----------------------------------------------------------------------------------------------------
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
 frontend = "tui"
 part = "glyph"
 rule = "contrast"
@@ -23,7 +23,7 @@ reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -36,7 +36,7 @@ reason = "Syntax colours, muted comment and gutter text, separators and chips mi
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -56,7 +56,7 @@ reason = "Syntax colours, muted comment and gutter text, separators and chips mi
 issue = 4137
 
 [[exception]]
-scenario = ["edit.whichkey.leader"]
+scenario = ["edit.whichkey.leader", "files.tree.empty", "git.status.clean"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -68,7 +68,7 @@ reason = "Which-key keys use the accent colour (anatomy.md), which misses 4.5:1 
 issue = 4137
 
 [[exception]]
-scenario = ["edit.whichkey.leader"]
+scenario = ["edit.whichkey.leader", "files.tree.empty", "git.status.clean"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -140,7 +140,7 @@ reason = "Which-key group names, counts and hint words use the text_muted role (
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
 frontend = "tui"
 part = "glyph"
 rule = "contrast"
@@ -154,7 +154,7 @@ reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in
 issue = 4137
 
 [[exception]]
-scenario = ["edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
+scenario = ["edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
 frontend = "tui"
 part = "glyph"
 rule = "contrast"
@@ -180,7 +180,7 @@ reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -205,7 +205,7 @@ reason = "Syntax colours, muted comment and gutter text, separators and chips mi
 issue = 4137
 
 [[exception]]
-scenario = ["start.project_switcher.empty"]
+scenario = ["start.project_switcher.empty", "code.actions.none", "code.references.none", "search.buffer.no_results"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -234,7 +234,7 @@ reason = "The picker's selected-row marker misses 3:1 on the popup selection col
 issue = 4137
 
 [[exception]]
-scenario = "start.project_switcher.empty"
+scenario = ["start.project_switcher.empty", "files.tree.empty", "git.status.clean"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -254,7 +254,7 @@ reason = "The picker's selected-row marker misses 3:1 on the popup selection col
 issue = 4137
 
 [[exception]]
-scenario = "start.project_switcher.empty"
+scenario = ["start.project_switcher.empty", "files.tree.empty", "git.status.clean"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -267,7 +267,7 @@ issue = 4137
 # ---- macOS ---------------------------------------------------------------------------------------------------
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
 frontend = "macos"
 part = "editor.code"
 rule = "contrast"
@@ -281,7 +281,7 @@ reason = "Syntax colours, comments and line numbers in the editor miss 4.5:1 in 
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual"]
+scenario = ["edit.plain", "edit.visual", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
 frontend = "macos"
 part = "editor.code"
 rule = "contrast"
@@ -296,7 +296,7 @@ reason = "Syntax colours, comments and line numbers in the editor miss 4.5:1 in 
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
 frontend = "macos"
 part = "modeline.segment"
 rule = "contrast"
@@ -578,7 +578,7 @@ reason = "Syntax colours on the cursor line miss 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "start.project_switcher.empty"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
 frontend = "macos"
 part = "breadcrumb.segment"
 rule = "contrast"
@@ -590,7 +590,7 @@ reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "start.project_switcher.empty"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
 frontend = "macos"
 part = "breadcrumb.segment"
 rule = "contrast"
@@ -602,7 +602,7 @@ reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "start.project_switcher.empty"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
 frontend = "macos"
 part = "breadcrumb.segment"
 rule = "contrast"
@@ -614,7 +614,7 @@ reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
 frontend = "macos"
 part = "modeline.modePill"
 rule = "contrast"
@@ -626,7 +626,7 @@ reason = "The modeline.modePill text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
 frontend = "macos"
 part = "modeline.modeText"
 rule = "contrast"
@@ -710,7 +710,7 @@ reason = "Code colours in this theme miss the contrast floor on the editor surfa
 issue = 4137
 
 [[exception]]
-scenario = ["start.project_switcher.empty"]
+scenario = ["start.project_switcher.empty", "files.tree.empty", "git.status.clean"]
 frontend = "macos"
 part = "emptyState.why"
 rule = "contrast"
@@ -731,4 +731,170 @@ pairs = [
   "#686b82 on #ccd0da",
 ]
 reason = "This theme's secondary popup text misses 4.5:1 on the popup surface."
+issue = 4137
+
+[[exception]]
+scenario = ["code.actions.none", "code.references.none", "search.buffer.no_results"]
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#595c66 on #111317",
+]
+reason = "The echo line's next-step key and its separator use this theme's accent and muted colours on the status bar, which miss 3:1."
+issue = 4137
+
+[[exception]]
+scenario = ["code.actions.none", "code.references.none", "search.buffer.no_results"]
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#8c8fa1 on #e6e9ef",
+]
+reason = "The echo line's next-step key and its separator use this theme's accent and muted colours on the status bar, which miss 3:1."
+issue = 4137
+
+[[exception]]
+scenario = ["git.status.clean"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#595c66 on #111317",
+  "#595c66 on #16181d",
+]
+reason = "Empty-state copy, next-step keys and the echo line use this theme's muted text and accent colours, which miss 4.5:1."
+issue = 4137
+
+[[exception]]
+scenario = ["files.tree.empty", "git.status.clean"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#414559 on #8caaee",
+  "#838ba7 on #414559",
+]
+reason = "Empty-state copy, next-step keys and the echo line use this theme's muted text and accent colours, which miss 4.5:1."
+issue = 4137
+
+[[exception]]
+scenario = ["code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#8c8fa1 on #ccd0da",
+  "#a86d10 on #e6e9ef",
+  "#ccd0da on #1e66f5",
+]
+reason = "Empty-state copy, next-step keys and the echo line use this theme's muted text and accent colours, which miss 4.5:1."
+issue = 4137
+
+[[exception]]
+scenario = ["files.tree.empty"]
+frontend = "macos"
+part = "emptyState.actionKey"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#4483b7 on #26343f",
+]
+reason = "The sidebar's next-step keys use this theme's accent on the panel and selection backgrounds, which miss the contrast floor."
+issue = 4137
+
+[[exception]]
+scenario = ["files.tree.empty", "git.status.clean"]
+frontend = "macos"
+part = "emptyState.actionKey"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#8198d1 on #626880",
+  "#829dda on #414559",
+  "#8caaee on #414559",
+  "#8caaee on #626880",
+]
+reason = "The sidebar's next-step keys use this theme's accent on the panel and selection backgrounds, which miss the contrast floor."
+issue = 4137
+
+[[exception]]
+scenario = ["files.tree.empty", "git.status.clean"]
+frontend = "macos"
+part = "emptyState.actionKey"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#1e66f5 on #acb0be",
+  "#1e66f5 on #ccd0da",
+  "#3574f1 on #ccd0da",
+  "#487ce5 on #acb0be",
+]
+reason = "The sidebar's next-step keys use this theme's accent on the panel and selection backgrounds, which miss the contrast floor."
+issue = 4137
+
+[[exception]]
+scenario = ["files.tree.empty", "git.status.clean"]
+frontend = "macos"
+part = "emptyState.actionLabel"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#c6d0f5 on #626880",
+]
+reason = "The sidebar's selected next step uses this theme's panel text on the selection colour, which misses the contrast floor."
+issue = 4137
+
+[[exception]]
+scenario = ["files.tree.empty", "git.status.clean"]
+frontend = "macos"
+part = "emptyState.actionLabel"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#4c4f69 on #acb0be",
+]
+reason = "The sidebar's selected next step uses this theme's panel text on the selection colour, which misses the contrast floor."
+issue = 4137
+
+[[exception]]
+scenario = ["search.buffer.no_results"]
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#6c6f85 on #e6e9ef",
+]
+reason = "The search modeline segment uses this theme's muted text on the status bar, which misses the contrast floor."
+issue = 4137
+
+[[exception]]
+scenario = ["code.actions.none", "code.references.none", "search.buffer.no_results"]
+frontend = "macos"
+part = "notice.action"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#1e66f5 on #e6e9ef",
+]
+reason = "The echo line's next-step key uses this theme's accent on the status bar, which misses the contrast floor."
+issue = 4137
+
+[[exception]]
+scenario = ["code.actions.none", "code.references.none", "search.buffer.no_results"]
+frontend = "macos"
+part = "notice.message"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#7a7d91 on #e6e9ef",
+]
+reason = "The echo line's answer uses this theme's muted message text on the status bar, which misses the contrast floor."
 issue = 4137

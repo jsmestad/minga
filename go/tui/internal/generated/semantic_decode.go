@@ -1979,6 +1979,25 @@ func DecodeGuiStatusBarReview(data []byte, offset int, windowEnd int) (GuiStatus
 	}, pos, nil
 }
 
+func DecodeGuiStatusBarMessageActions(data []byte, offset int, windowEnd int) ([]EmptyListAction, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+1, "message_actions count"); err != nil {
+		return nil, offset, err
+	}
+	count := int(data[pos])
+	pos += 1
+	items := make([]EmptyListAction, 0, min(count, len(data)-pos))
+	for i := 0; i < count; i++ {
+		item, nextPos, err := DecodeEmptyListAction(data, pos, windowEnd)
+		if err != nil {
+			return nil, offset, err
+		}
+		pos = nextPos
+		items = append(items, item)
+	}
+	return items, pos, nil
+}
+
 // Section decoders for gui_surface_layout
 
 func DecodeGuiSurfaceLayoutPlacements(data []byte, offset int, windowEnd int) ([]SurfacePlacement, int, error) {
@@ -3047,6 +3066,10 @@ func DecodeGuiGitStatusFields(data []byte, offset int, windowEnd int) (GuiGitSta
 	}
 	commitTargetID := decodeU64(data, pos)
 	pos += 8
+	empty, pos, err := DecodeEmptyList(data, pos, windowEnd)
+	if err != nil {
+		return GuiGitStatusFields{}, offset, err
+	}
 	return GuiGitStatusFields{
 		RepoState:         repoState,
 		Syncing:           syncing,
@@ -3062,6 +3085,7 @@ func DecodeGuiGitStatusFields(data []byte, offset int, windowEnd int) (GuiGitSta
 		TerminalCollapsed: terminalCollapsed,
 		PanelID:           panelID,
 		CommitTargetID:    commitTargetID,
+		Empty:             empty,
 	}, pos, nil
 }
 

@@ -186,6 +186,38 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilderTest do
       assert without_ellipsis_model.operation.kind == model.operation.kind
     end
 
+    test "a notice's next steps show only while the notice is the message the echo line shows" do
+      action = %Minga.RenderModel.UI.EmptyList.Action{
+        id: "inline_ask",
+        key: "SPC a ?",
+        label: "ask Minga"
+      }
+
+      operation = Operation.new(7, :lsp_rename, "main.ex", "Renaming", true, 7)
+
+      data =
+        put_common(minimal_buffer_data(), fn common ->
+          common
+          |> put_status(&%{&1 | recording: false})
+          |> then(
+            &%{
+              &1
+              | notice: "No code actions here",
+                notice_actions: [action],
+                selected_operation: nil
+            }
+          )
+        end)
+
+      assert StatusBarBuilder.build(data, minimal_theme(), minimal_ctx()).data.message_actions ==
+               [action]
+
+      running = put_common(data, &%{&1 | selected_operation: operation})
+
+      assert StatusBarBuilder.build(running, minimal_theme(), minimal_ctx()).data.message_actions ==
+               []
+    end
+
     test "arbitrates macro, operation, notice, then diagnostic while retaining operation data" do
       operation = Operation.new(7, :lsp_rename, "main.ex", "Renaming", true, 7)
 

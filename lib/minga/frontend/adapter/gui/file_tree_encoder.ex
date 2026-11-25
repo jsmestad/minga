@@ -1,6 +1,7 @@
 defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
   @moduledoc false
 
+  alias Minga.Frontend.Adapter.GUI.EmptyListWire
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.Wire
   alias Minga.Frontend.Adapter.GUI.Wire.Writer
@@ -14,7 +15,8 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
   @type ready_fingerprint :: {:ready, non_neg_integer(), non_neg_integer()}
   @type fingerprint ::
           ready_fingerprint()
-          | {:file_tree_state, non_neg_integer(), String.t(), non_neg_integer(), term()}
+          | {:file_tree_state, non_neg_integer(), String.t(), non_neg_integer(), term(),
+             boolean(), term()}
 
   @spec encode(FileTree.t(), Caches.t()) :: {binary() | nil, Caches.t()}
   def encode(%FileTree{status: status} = model, %Caches{} = caches)
@@ -68,6 +70,7 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
     payload =
       model.rows
       |> Enum.reduce(writer, fn row, acc -> encode_row(row, root, model, acc) end)
+      |> encode_empty(model.empty)
       |> Writer.finish()
 
     :gui_file_tree
@@ -76,6 +79,14 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
     |> Writer.payload32(:payload, payload)
     |> Writer.finish()
   end
+
+  # An empty folder's payload ends with its empty_list after the (zero) rows.
+  @spec encode_empty(Writer.t(), Minga.RenderModel.UI.EmptyList.t() | nil) :: Writer.t()
+  defp encode_empty(writer, nil), do: writer
+
+  defp encode_empty(writer, empty),
+    do:
+      Writer.append(writer, Minga.Protocol.Encode.encode_empty_list(EmptyListWire.to_wire(empty)))
 
   @spec encode_selection_command(FileTree.t()) :: binary()
   defp encode_selection_command(%FileTree{} = model) do
@@ -98,7 +109,8 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
   # hidden trees both carry rows and use the structural fingerprint path above.
   @spec fingerprint(FileTree.t()) :: fingerprint()
   defp fingerprint(%FileTree{} = model) do
-    {:file_tree_state, model.generation, model.root_path || "", model.tree_width, model.status}
+    {:file_tree_state, model.generation, model.root_path || "", model.tree_width, model.status,
+     model.focused?, model.empty}
   end
 
   @spec ready_structural_fingerprint(FileTree.t()) :: non_neg_integer()

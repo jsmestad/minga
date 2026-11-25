@@ -2,6 +2,7 @@ defmodule MingaEditor.RenderModel.UI.GitStatusBuilder do
   @moduledoc false
 
   alias Minga.RenderModel.UI.GitStatus
+  alias MingaEditor.GitStatus.CleanTree
   alias MingaEditor.GitStatus.TUIState
   alias MingaEditor.Shell.Traditional.GitToast
 
@@ -41,12 +42,30 @@ defmodule MingaEditor.RenderModel.UI.GitStatusBuilder do
   end
 
   @spec build(map() | nil, boolean(), map() | nil, TUIState.t() | nil) :: GitStatus.t()
-  def build(panel, syncing, toast, nil), do: build(panel, syncing, toast)
+  def build(panel, syncing, toast, nil), do: build(panel, syncing, toast, TUIState.new())
 
   def build(panel, syncing, toast, %TUIState{} = tui) do
     {cursor, collapsed} = TUIState.presentation(tui)
-    %{build(panel, syncing, toast) | terminal_cursor: cursor, terminal_collapsed: collapsed}
+    model = build(panel, syncing, toast)
+
+    %{
+      model
+      | terminal_cursor: cursor,
+        terminal_collapsed: collapsed,
+        empty: clean_tree(model, cursor)
+    }
   end
+
+  # A clean tree says so and offers its next steps; any other state has no empty list.
+  @spec clean_tree(GitStatus.t(), non_neg_integer()) :: Minga.RenderModel.UI.EmptyList.t() | nil
+  defp clean_tree(%GitStatus{repo_state: :normal, entries: []} = model, cursor),
+    do:
+      CleanTree.empty_list(
+        %{branch: model.branch, ahead: model.ahead, behind: model.behind},
+        cursor
+      )
+
+  defp clean_tree(%GitStatus{}, _cursor), do: nil
 
   @spec panel_to_map(map()) :: map()
   defp panel_to_map(%{__struct__: _module} = panel), do: Map.from_struct(panel)

@@ -32,6 +32,7 @@ defmodule MingaEditor.LspActions do
   alias MingaEditor.LspDecorations
   alias MingaEditor.Mouse.HitTest
   alias MingaEditor.PickerUI
+  alias MingaEditor.RenderModel.UI.EmptyStateBuilder
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Feedback
   alias MingaEditor.State.LSP, as: LSPState
@@ -75,6 +76,64 @@ defmodule MingaEditor.LspActions do
         send_lsp_request(state, client, buf, "textDocument/definition", :definition)
     end
   end
+
+  # Empty answers stay in the echo area (docs/design/surfaces.md, "Diagnostics"): say so, where, and the next step.
+  @spec no_code_actions(state(), String.t()) :: state()
+  defp no_code_actions(%{workspace: %{buffers: %{active: buf}}} = state, why) when is_pid(buf) do
+    {line, col} = Buffer.cursor(buf)
+
+    NoticeWorkflow.publish(
+      state,
+      "No code actions at #{line + 1}:#{col + 1}#{why}",
+      EmptyStateBuilder.next_steps([{:inline_ask, "ask Minga"}])
+    )
+  end
+
+  defp no_code_actions(state, why),
+    do:
+      NoticeWorkflow.publish(
+        state,
+        "No code actions here#{why}",
+        EmptyStateBuilder.next_steps([{:inline_ask, "ask Minga"}])
+      )
+
+  # Without a language server nothing can find references.
+  # The next step searches the project for the word, which `SPC s p` carries.
+  # The copy stays short so the step's key fits beside it in 80 columns.
+  @spec references_without_server(state()) :: state()
+  defp references_without_server(state) do
+    step = EmptyStateBuilder.next_steps([{:search_project, "search the project"}])
+
+    case symbol_at_cursor(state) do
+      nil ->
+        NoticeWorkflow.publish(state, "No references to this symbol (no server)", step)
+
+      symbol ->
+        search =
+          MingaEditor.State.Search.offer_project_query(
+            state.workspace.search,
+            symbol,
+            System.monotonic_time(:millisecond)
+          )
+
+        NoticeWorkflow.publish(
+          %{state | workspace: MingaEditor.Session.State.set_search(state.workspace, search)},
+          "No references to #{symbol} (no server)",
+          step
+        )
+    end
+  end
+
+  # The word under the cursor, which a project search can look for, or nil when the cursor is not on a word.
+  @spec symbol_at_cursor(state()) :: String.t() | nil
+  defp symbol_at_cursor(%{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
+    {line, col} = Buffer.cursor(buf)
+    text = buf |> Buffer.lines_at([line]) |> Map.get(line, "")
+
+    Minga.Editing.Search.word_at_cursor(Minga.Buffer.Document.new(text), {0, col})
+  end
+
+  defp symbol_at_cursor(_state), do: nil
 
   @doc "Sends a textDocument/definition request and previews the target in a popup."
   @spec peek_definition(state()) :: state()
@@ -131,7 +190,7 @@ defmodule MingaEditor.LspActions do
 
     case lsp_client_for(state, buf) do
       nil ->
-        NoticeWorkflow.publish(state, "No language server")
+        references_without_server(state)
 
       client ->
         file_path = Buffer.file_path(buf)
@@ -264,7 +323,7 @@ defmodule MingaEditor.LspActions do
 
   def code_action(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
-      nil -> NoticeWorkflow.publish(state, "No language server")
+      nil -> no_code_actions(state, " (no language server)")
       client -> code_action_for_client(state, buf, client, Buffer.file_path(buf))
     end
   end
@@ -1074,54 +1133,16 @@ defmodule MingaEditor.LspActions do
     }
   end
 
-  defp do_handle_references_response(state, {:ok, nil}, operation_id) do
-    %{
-      state
-      | feedback:
-          Feedback.accept_operation_feedback(
-            state.feedback,
-            OperationFeedback.finish(
-              state.feedback.operation_feedback,
-              operation_id,
-              :success,
-              "No references found"
-            )
-          )
-    }
-  end
+  defp do_handle_references_response(state, {:ok, nil}, operation_id),
+    do: no_references(state, operation_id)
 
-  defp do_handle_references_response(state, {:ok, []}, operation_id) do
-    %{
-      state
-      | feedback:
-          Feedback.accept_operation_feedback(
-            state.feedback,
-            OperationFeedback.finish(
-              state.feedback.operation_feedback,
-              operation_id,
-              :success,
-              "No references found"
-            )
-          )
-    }
-  end
+  defp do_handle_references_response(state, {:ok, []}, operation_id),
+    do: no_references(state, operation_id)
 
   defp do_handle_references_response(state, {:ok, [single]}, operation_id) do
     case Location.decode(single) do
       nil ->
-        %{
-          state
-          | feedback:
-              Feedback.accept_operation_feedback(
-                state.feedback,
-                OperationFeedback.finish(
-                  state.feedback.operation_feedback,
-                  operation_id,
-                  :success,
-                  "No references found"
-                )
-              )
-        }
+        no_references(state, operation_id)
 
       {uri, line, col} ->
         state = jump_to_location(state, uri, line, col)
@@ -1148,21 +1169,7 @@ defmodule MingaEditor.LspActions do
   end
 
   @spec finish_references_picker(state(), pos_integer(), [map()]) :: state()
-  defp finish_references_picker(state, operation_id, []) do
-    %{
-      state
-      | feedback:
-          Feedback.accept_operation_feedback(
-            state.feedback,
-            OperationFeedback.finish(
-              state.feedback.operation_feedback,
-              operation_id,
-              :success,
-              "No references found"
-            )
-          )
-    }
-  end
+  defp finish_references_picker(state, operation_id, []), do: no_references(state, operation_id)
 
   defp finish_references_picker(state, operation_id, items) do
     count = Enum.count(items)
@@ -1182,6 +1189,27 @@ defmodule MingaEditor.LspActions do
       )
 
     %{state | feedback: feedback}
+  end
+
+  # The server found none: the operation ends, and the echo line names the next step instead of opening an empty list.
+  @spec no_references(state(), pos_integer()) :: state()
+  defp no_references(state, operation_id) do
+    feedback =
+      Feedback.accept_operation_feedback(
+        state.feedback,
+        OperationFeedback.finish(
+          state.feedback.operation_feedback,
+          operation_id,
+          :success,
+          "No references found"
+        )
+      )
+
+    NoticeWorkflow.publish(
+      %{state | feedback: feedback},
+      "No references to #{symbol_at_cursor(state) || "this symbol"}",
+      EmptyStateBuilder.next_steps([{:goto_definition, "go to definition"}])
+    )
   end
 
   # ── Document highlight response ───────────────────────────────────────────
@@ -1247,13 +1275,11 @@ defmodule MingaEditor.LspActions do
     NoticeWorkflow.publish(state, "Code action request failed")
   end
 
-  def handle_code_action_response(state, {:ok, nil}, _context, _generation) do
-    NoticeWorkflow.publish(state, "No code actions available")
-  end
+  def handle_code_action_response(state, {:ok, nil}, _context, _generation),
+    do: no_code_actions(state, "")
 
-  def handle_code_action_response(state, {:ok, []}, _context, _generation) do
-    NoticeWorkflow.publish(state, "No code actions available")
-  end
+  def handle_code_action_response(state, {:ok, []}, _context, _generation),
+    do: no_code_actions(state, "")
 
   def handle_code_action_response(state, {:ok, actions}, context, generation)
       when is_list(actions) do

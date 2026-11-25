@@ -1,5 +1,6 @@
 /// Observable git status state driven by the BEAM via gui_git_status protocol messages.
 
+import MingaProtocol
 import SwiftUI
 
 /// Git file status codes sent by the BEAM. Matches the values in
@@ -349,7 +350,11 @@ public final class GitStatusState {
     }
 
     /// Update from a decoded gui_git_status protocol message.
-    public func update(repoState: GitRepoState, branchName: String, ahead: UInt16, behind: UInt16, syncing: Bool, entries: [GitStatusEntry], toast: (String, ToastLevel, ToastAction)?, entryBasePath: String, lastCommitMessage: String, stashCount: UInt16, toastID: UInt64 = 0, panelID: UInt64, commitTargetID: UInt64) {
+    /// A clean tree's empty-state anatomy from the BEAM: what happened and the next steps. Nil while the tree has changes.
+    public private(set) var cleanTree: Wire.EmptyList? = nil
+
+    public func update(repoState: GitRepoState, branchName: String, ahead: UInt16, behind: UInt16, syncing: Bool, entries: [GitStatusEntry], toast: (String, ToastLevel, ToastAction)?, entryBasePath: String, lastCommitMessage: String, stashCount: UInt16, toastID: UInt64 = 0, panelID: UInt64, commitTargetID: UInt64, cleanTree: Wire.EmptyList? = nil) {
+        if self.cleanTree != cleanTree { self.cleanTree = cleanTree }
         snapshot = snapshot.updating(repoState: repoState, branchName: branchName, ahead: ahead, behind: behind, syncing: syncing, entries: entries, toast: toast, entryBasePath: entryBasePath, lastCommitMessage: lastCommitMessage, stashCount: stashCount, toastID: toastID, panelID: panelID, commitTargetID: commitTargetID)
     }
 
@@ -360,6 +365,7 @@ public final class GitStatusState {
 
     /// Hide the git status panel (BEAM toggled sidebar off or switched tab).
     public func hide(syncing: Bool = false, toast: (String, ToastLevel, ToastAction)? = nil, toastID: UInt64 = 0) {
+        cleanTree = nil
         snapshot = snapshot.hiding(syncing: syncing, toast: toast, toastID: toastID)
     }
 

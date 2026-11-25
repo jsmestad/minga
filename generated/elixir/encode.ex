@@ -914,6 +914,16 @@ defmodule Minga.Protocol.Encode do
     ]
   end
 
+  @spec encode_gui_status_bar_message_actions([term()]) :: iodata()
+  def encode_gui_status_bar_message_actions(items) when is_list(items), do: encode_gui_status_bar_message_actions(items, :gui_status_bar, [:message_actions])
+
+  @spec encode_gui_status_bar_message_actions([term()], atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_gui_status_bar_message_actions(items, command, path) when is_list(items) do
+    count = Enum.count(items)
+    validate_uint!(command, path, count, 255)
+    [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_empty_list_action(value, command, [index | path]) end)]
+  end
+
   @spec encode_gui_gutter_window(map()) :: iodata()
   def encode_gui_gutter_window(model), do: encode_gui_gutter_window(model, :gui_gutter, [:window])
 
@@ -1393,6 +1403,7 @@ defmodule Minga.Protocol.Encode do
       (fn value -> validate_uint!(command, [:terminal_collapsed | path], value, 255); <<value::8>> end).(Map.fetch!(model, :terminal_collapsed)),
       (fn value -> validate_uint!(command, [:panel_id | path], value, 18446744073709551615); <<value::64>> end).(Map.fetch!(model, :panel_id)),
       (fn value -> validate_uint!(command, [:commit_target_id | path], value, 18446744073709551615); <<value::64>> end).(Map.fetch!(model, :commit_target_id)),
+      encode_empty_list(Map.fetch!(model, :empty), command, [:empty | path]),
     ]
   end
 

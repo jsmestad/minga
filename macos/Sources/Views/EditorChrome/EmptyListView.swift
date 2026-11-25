@@ -12,7 +12,7 @@ struct EmptyListHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: EmptyStateMetrics.titleToWhy) {
-            HStack(spacing: EmptyStateMetrics.glyphToTitle) {
+            HStack(alignment: .firstTextBaseline, spacing: EmptyStateMetrics.glyphToTitle) {
                 if !empty.glyph.isEmpty {
                     Text(empty.glyph)
                         .font(Typography.font(.emphasis, weight: .semibold))
@@ -30,8 +30,8 @@ struct EmptyListHeader: View {
                     .anatomyPart("emptyState.why", text: empty.why, font: .body)
             }
         }
-        .lineLimit(1)
-        .truncationMode(.tail)
+        // A narrow panel, such as a sidebar, wraps the copy instead of cutting it off; a wrapped title hangs under its first word.
+        .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }

@@ -46,6 +46,7 @@ defmodule Minga.Command.Registry do
     MingaEditor.Commands.InlineEdit,
     MingaEditor.Commands.RemoteFiles,
     MingaEditor.Commands.FileTree,
+    MingaEditor.Commands.GitStatus,
     MingaEditor.Commands.Testing,
     MingaEditor.Commands.Extensions,
     MingaEditor.Commands.Macros,

@@ -5,6 +5,8 @@ defmodule MingaEditor.State.Search do
   Tracks the last search pattern and direction (for `n`/`N` repeat),
   the pending project-wide search query (read off the editor path by the
   project search picker source), and the complete GUI search session.
+
+  It also holds the query a notice offers to the next project search, which expires shortly after the notice.
   """
 
   alias Minga.Search.IndexGeneration
@@ -19,12 +21,14 @@ defmodule MingaEditor.State.Search do
           last_pattern: String.t() | nil,
           last_direction: Minga.Editing.Search.direction(),
           project_query: String.t() | nil,
+          project_offer: {String.t(), integer()} | nil,
           gui_search: gui_search() | nil
         }
 
   defstruct last_pattern: nil,
             last_direction: :forward,
             project_query: nil,
+            project_offer: nil,
             gui_search: nil
 
   @doc "Records the last search pattern and direction."
@@ -44,6 +48,24 @@ defmodule MingaEditor.State.Search do
   def set_project_query(%__MODULE__{} = s, query) when is_binary(query) do
     %{s | project_query: query}
   end
+
+  # How long a notice's offer stays good.
+  # The notice shows for two seconds, and the step it names is pressed soon after or not at all.
+  @offer_ms 10_000
+
+  @doc "Offers a query to the next project search, such as a buffer search that found nothing, until a short while after `now_ms`."
+  @spec offer_project_query(t(), String.t(), integer()) :: t()
+  def offer_project_query(%__MODULE__{} = s, query, now_ms)
+      when is_binary(query) and is_integer(now_ms),
+      do: %{s | project_offer: {query, now_ms + @offer_ms}}
+
+  @doc "Takes the offered project search query, if it is still good at `now_ms`, so it starts the next project search only once; a later, unrelated project search starts empty."
+  @spec take_project_offer(t(), integer()) :: {String.t() | nil, t()}
+  def take_project_offer(%__MODULE__{project_offer: {query, until_ms}} = s, now_ms)
+      when now_ms <= until_ms,
+      do: {query, %{s | project_offer: nil}}
+
+  def take_project_offer(%__MODULE__{} = s, _now_ms), do: {nil, %{s | project_offer: nil}}
 
   @doc "Starts a fresh GUI search session while preserving its query and options."
   @spec focus_gui_search(t(), boolean()) :: t()

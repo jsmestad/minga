@@ -122,6 +122,8 @@ public struct StatusBarUpdate: Sendable {
     /// vim showcmd: pending key sequence typed but not yet resolved. Empty when nothing is pending.
     public let pendingKeys: String
     public let review: Review?
+    /// The next steps the echo-line notice names, drawn after `message`; a click runs the action's command.
+    public let messageActions: [Wire.EmptyListAction]
 
     public init(
         contentKind: UInt8,
@@ -163,8 +165,10 @@ public struct StatusBarUpdate: Sendable {
         selection: SelectionInfo = .init(mode: 0, size: 0),
         workspace: WorkspaceInfo? = nil,
         pendingKeys: String = "",
-        review: Review? = nil
+        review: Review? = nil,
+        messageActions: [Wire.EmptyListAction] = []
     ) {
+        self.messageActions = messageActions
         self.contentKind = EditorContentKind(rawValue: contentKind)
         self.mode = EditorMode(rawValue: mode)
         self.cursorLine = cursorLine

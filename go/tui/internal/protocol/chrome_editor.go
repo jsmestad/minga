@@ -273,6 +273,12 @@ func decodeFileTree(payload []byte) (FileTree, string, int) {
 		tree.Error = errorReason
 		tree.Rows = decodeFileTreeRows(body, next, rowCount)
 	}
+	// An empty folder's payload ends with its empty_list after the (zero) rows.
+	if ok && status == 2 && rowCount == 0 && len(body) > next {
+		if empty, _, err := generated.DecodeEmptyList(body, next, len(body)); err == nil {
+			tree.Empty = &empty
+		}
+	}
 	statusText := map[byte]string{0: "hidden", 1: "loading", 2: "empty", 3: "ready", 4: "error"}[status]
 	if selected != "" {
 		return tree, fmt.Sprintf("%s %s (%d)", statusText, selected, rowCount), size
@@ -387,6 +393,10 @@ func decodeStatus(payload []byte) (StatusBar, string, int, error) {
 			}
 		case 0x0B:
 			status.Left, status.Right = decodeStatusSegments(section)
+		case 0x13:
+			if actions, _, err := generated.DecodeGuiStatusBarMessageActions(section, 0, len(section)); err == nil {
+				status.MessageActions = actions
+			}
 		case 0x0E:
 			if keys, _, ok := readString16(section, 0); ok {
 				status.PendingKeys = keys
@@ -610,7 +620,15 @@ func decodeGitStatus(payload []byte) (GitStatus, string, int) {
 	git.PanelID = binary.BigEndian.Uint64(payload[offset+7 : offset+15])
 	git.CommitTargetID = binary.BigEndian.Uint64(payload[offset+15 : offset+23])
 	offset += 23
-	return git, gitSummary(git), offset
+	// The trailing empty_list describes a clean tree; an empty title means the tree is not clean.
+	empty, next, err := generated.DecodeEmptyList(payload, offset, len(payload))
+	if err != nil {
+		return git, gitSummary(git), len(payload)
+	}
+	if empty.Title != "" {
+		git.Empty = &empty
+	}
+	return git, gitSummary(git), next
 }
 
 func gitSummary(git GitStatus) string {

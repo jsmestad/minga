@@ -333,7 +333,7 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoderTest do
 
     <<base_len::16, entry_base_path::binary-size(base_len), commit_len::16,
       last_commit_message::binary-size(commit_len), stash_count::16, terminal_cursor::32,
-      terminal_collapsed::8, panel_id::64, commit_target_id::64>> = rest
+      terminal_collapsed::8, panel_id::64, commit_target_id::64, empty::binary>> = rest
 
     %{
       repo_state: repo_state,
@@ -348,6 +348,7 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoderTest do
       stash_count: stash_count,
       terminal_cursor: terminal_cursor,
       terminal_collapsed: terminal_collapsed,
+      empty: decode_empty(empty),
       panel_id: panel_id,
       commit_target_id: commit_target_id
     }
@@ -372,5 +373,53 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoderTest do
            rest::binary>>
        ) do
     {%{level: level, action: action, message: msg, id: id}, rest}
+  end
+
+  # The trailing empty_list: an empty title means the tree is not clean.
+  defp decode_empty(
+         <<glyph_len::8, glyph::binary-size(glyph_len), title_len::16,
+           title::binary-size(title_len), why_len::16, why::binary-size(why_len), selected::8,
+           count::8, actions::binary>>
+       ) do
+    %{
+      glyph: glyph,
+      title: title,
+      why: why,
+      selected: selected,
+      actions: decode_actions(actions, count)
+    }
+  end
+
+  defp decode_actions(_rest, 0), do: []
+
+  defp decode_actions(
+         <<id_len::8, id::binary-size(id_len), key_len::16, key::binary-size(key_len),
+           label_len::16, label::binary-size(label_len), rest::binary>>,
+         count
+       ),
+       do: [{id, key, label} | decode_actions(rest, count - 1)]
+
+  describe "a clean tree" do
+    test "carries its empty-state anatomy, and any other tree an empty title" do
+      empty =
+        MingaEditor.GitStatus.CleanTree.empty_list(%{branch: "main", ahead: 0, behind: 0}, 0)
+
+      clean = %GitStatus{repo_state: :normal, syncing: false, branch: "main", empty: empty}
+      {cmd, _caches} = GitStatusEncoder.encode(clean, Caches.new())
+
+      assert %{
+               glyph: "●",
+               title: "Nothing to commit on main.",
+               why: "Up to date with its upstream.",
+               selected: 0,
+               actions: [
+                 {"git_status_pull", "l", "Pull from remote"},
+                 {"git_status_fetch", "f", "Fetch from remote"}
+               ]
+             } = decode_git_status(cmd).empty
+
+      {plain, _caches} = GitStatusEncoder.encode(%{clean | empty: nil}, Caches.new())
+      assert %{title: "", actions: []} = decode_git_status(plain).empty
+    end
   end
 end

@@ -96,7 +96,7 @@ enum RenderCommand: Sendable {
     case registerFont(id: UInt8, family: String)
     case guiTheme(slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)])
     case guiTabBar(activeIndex: UInt8, tabs: [Wire.TabEntry])
-    case guiFileTree(version: UInt8, treeFlags: UInt8, treeState: UInt8, generation: UInt32, selectedId: String, treeWidth: UInt16, rootPath: String, errorReason: String, entries: [Wire.FileTreeEntry])
+    case guiFileTree(version: UInt8, treeFlags: UInt8, treeState: UInt8, generation: UInt32, selectedId: String, treeWidth: UInt16, rootPath: String, errorReason: String, entries: [Wire.FileTreeEntry], empty: Wire.EmptyList? = nil)
     case guiFileTreeSelection(generation: UInt32, selectedId: String, focused: Bool)
     case guiObservatory(visible: Bool, nodeCount: UInt16, nodes: [Wire.ObservatoryNode])
     case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, selectedItemID: String, items: [Wire.CompletionItem], documentation: String, totalCount: UInt32, matchedCount: UInt32, incomplete: Bool, generation: UInt32)
@@ -140,7 +140,7 @@ enum RenderCommand: Sendable {
     case guiCursorAnimation(enabled: Bool)
     case guiFocusOwner(Wire.FocusOwner)
     case guiSplitSeparators(borderColor: UInt32, verticals: [Wire.VerticalSeparator], horizontals: [Wire.HorizontalSeparator])
-    case guiGitStatus(repoState: UInt8, syncing: Bool, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry], toast: (message: String, level: UInt8, action: UInt8)?, entryBasePath: String, lastCommitMessage: String, stashCount: UInt16, toastID: UInt64 = 0, panelID: UInt64, commitTargetID: UInt64)
+    case guiGitStatus(repoState: UInt8, syncing: Bool, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry], toast: (message: String, level: UInt8, action: UInt8)?, entryBasePath: String, lastCommitMessage: String, stashCount: UInt16, toastID: UInt64 = 0, panelID: UInt64, commitTargetID: UInt64, empty: Wire.EmptyList? = nil)
     case guiWorkspaces(version: UInt8, activeWorkspaceId: UInt16, mode: WorkspaceViewMode, flags: WorkspaceFlags, workspaces: [Wire.WorkspaceEntry], visibleTabs: [Wire.WorkspaceTabEntry])
     case guiAgentContext(visible: Bool, task: String, dispatchTimestamp: Date, status: CardStatus, canApprove: Bool, progress: Wire.AgentProgress, todos: [Wire.AgentTodo])
     case guiConfigState(Wire.ConfigState)
@@ -876,8 +876,21 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             ))
         }
 
+        // An empty folder (tree_state 2, no rows) ends with its empty_list: what happened and the next steps.
+        var empty: Wire.EmptyList? = nil
+        if treeState == 2, entries.isEmpty, pos < payloadStart + payloadLen {
+            guard let (decoded, next) = try? GeneratedProtocol.decodeEmptyList(data, pos, payloadStart + payloadLen) else {
+                throw ProtocolDecodeError.malformed
+            }
+            empty = Wire.EmptyList(
+                glyph: decoded.glyph, title: decoded.title, why: decoded.why, selected: decoded.selected,
+                actions: decoded.actions.map { Wire.EmptyListAction(id: $0.id, key: $0.key, label: $0.label) }
+            )
+            pos = next
+        }
+
         guard pos == payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
-        return (.guiFileTree(version: version, treeFlags: treeFlags, treeState: treeState, generation: generation, selectedId: selectedId, treeWidth: treeWidth, rootPath: rootPath, errorReason: errorReason, entries: entries), 5 + payloadLen)
+        return (.guiFileTree(version: version, treeFlags: treeFlags, treeState: treeState, generation: generation, selectedId: selectedId, treeWidth: treeWidth, rootPath: rootPath, errorReason: errorReason, entries: entries, empty: empty), 5 + payloadLen)
 
     case .guiObservatory:
         guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
@@ -1183,6 +1196,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var filename = ""
         var filetype = ""
         var message = ""
+        var messageActions: [Wire.EmptyListAction] = []
         var macroRecording: UInt8 = 0
         var modelName = ""
         var messageCount: UInt32 = 0
@@ -1269,6 +1283,10 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 if sectionLen >= 2 + mLen, mLen > 0 {
                     message = try decodeUTF8(data[(sStart + 2)..<(sStart + 2 + mLen)]) ?? ""
                 }
+
+            case 0x13: // MessageActions: the next steps the notice names
+                let (actions, _) = try GeneratedProtocol.decodeGuiStatusBarMessageActions(data, sStart, sStart + sectionLen)
+                messageActions = actions.map { Wire.EmptyListAction(id: $0.id, key: $0.key, label: $0.label) }
 
             case 0x08: // Recording: macro_recording(1)
                 guard sectionLen >= 1 else { break }
@@ -1451,7 +1469,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             selection: selection,
             workspace: workspace,
             pendingKeys: pendingKeys,
-            review: review
+            review: review,
+            messageActions: messageActions
         )
         return (.guiStatusBar(update), pos - offset)
 
@@ -2645,7 +2664,16 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let gsCommitTargetID = try readU64(data, gsPos + 15)
         guard (gsPanelID == 0) == (gsCommitTargetID == 0) else { throw ProtocolDecodeError.malformed }
         gsPos += 23
-        return (.guiGitStatus(repoState: gsRepoState, syncing: gsSyncing, ahead: gsAhead, behind: gsBehind, branchName: gsBranchName, entries: gsEntries, toast: gsToast, entryBasePath: gsEntryBasePath, lastCommitMessage: gsLastCommitMessage, stashCount: gsStashCount, toastID: gsToastID, panelID: gsPanelID, commitTargetID: gsCommitTargetID),
+        // The trailing empty_list describes a clean tree; an empty title means the tree is not clean.
+        guard let (gsEmptyList, gsEmptyEnd) = try? GeneratedProtocol.decodeEmptyList(data, gsPos, data.count) else {
+            throw ProtocolDecodeError.malformed
+        }
+        gsPos = gsEmptyEnd
+        let gsEmpty: Wire.EmptyList? = gsEmptyList.title.isEmpty ? nil : Wire.EmptyList(
+            glyph: gsEmptyList.glyph, title: gsEmptyList.title, why: gsEmptyList.why, selected: gsEmptyList.selected,
+            actions: gsEmptyList.actions.map { Wire.EmptyListAction(id: $0.id, key: $0.key, label: $0.label) }
+        )
+        return (.guiGitStatus(repoState: gsRepoState, syncing: gsSyncing, ahead: gsAhead, behind: gsBehind, branchName: gsBranchName, entries: gsEntries, toast: gsToast, entryBasePath: gsEntryBasePath, lastCommitMessage: gsLastCommitMessage, stashCount: gsStashCount, toastID: gsToastID, panelID: gsPanelID, commitTargetID: gsCommitTargetID, empty: gsEmpty),
                 gsPos - offset)
 
     case .guiWorkspaces:
