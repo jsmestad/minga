@@ -9,30 +9,33 @@ defmodule MingaEditor.Agent.Tasks do
 
   alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.Agent.Tasks.Entry
+  alias MingaEditor.Agent.Tasks.Starting
   alias MingaEditor.Agent.Tasks.Subagent
 
   @typedoc "A row of the task tree: a task, or a foreground subagent beneath one."
   @type node_t :: %{
-          required(:item) => Entry.t() | Subagent.t(),
+          required(:item) => Entry.t() | Subagent.t() | Starting.t(),
           required(:depth) => non_neg_integer(),
-          required(:parent) => pid() | nil
+          required(:parent) => pid() | nil,
+          required(:parent_seq) => non_neg_integer() | nil
         }
 
   @type t :: %__MODULE__{
           entries: %{pid() => Entry.t()},
+          starting: %{reference() => Starting.t()},
           next_seq: non_neg_integer()
         }
 
-  defstruct entries: %{}, next_seq: 0
+  defstruct entries: %{}, starting: %{}, next_seq: 0
 
-  # Rows are ordered needs-you first, then by how soon each state wants a look.
+  # Rows are ordered needs-you first (docs/design/surfaces.md, "Tasks"), then in the design tokens' state order.
   @state_rank %{
     needs_you: 0,
     working: 1,
     waiting: 2,
-    failed: 3,
-    done: 4,
-    stopped: 5,
+    stopped: 3,
+    failed: 4,
+    done: 5,
     nil: 6
   }
 
@@ -78,6 +81,40 @@ defmodule MingaEditor.Agent.Tasks do
   end
 
   defp observe_unfollowed(tasks, _pid, _event, _now), do: tasks
+
+  @doc "Shows a task the drawer started before its session binds. Returns the tasks and the new row's sequence number."
+  @spec start(t(), reference(), String.t(), integer()) :: {t(), non_neg_integer()}
+  def start(%__MODULE__{next_seq: seq} = tasks, id, title, now)
+      when is_reference(id) and is_binary(title) do
+    starting = %Starting{id: id, seq: seq, title: title, started_at: now}
+    # A new start clears the starts that failed before it; their reasons were shown on their rows.
+    kept = Map.reject(tasks.starting, fn {_id, start} -> Starting.state(start) == :failed end)
+    {%{tasks | next_seq: seq + 1, starting: Map.put(kept, id, starting)}, seq}
+  end
+
+  @doc "Turns a starting task into the task of the session that bound for it."
+  @spec bind(t(), reference(), pid(), integer()) :: t()
+  def bind(%__MODULE__{} = tasks, id, session, now) when is_pid(session) do
+    case Map.pop(tasks.starting, id) do
+      {nil, _starting} ->
+        follow(tasks, session, now)
+
+      {%Starting{title: title}, starting} ->
+        follow(%{tasks | starting: starting}, session, now, title: title)
+    end
+  end
+
+  @doc "Shows that a starting task's session could not start."
+  @spec start_failed(t(), reference(), String.t()) :: t()
+  def start_failed(%__MODULE__{} = tasks, id, message) do
+    case Map.fetch(tasks.starting, id) do
+      {:ok, starting} ->
+        %{tasks | starting: Map.put(tasks.starting, id, Starting.fail(starting, message))}
+
+      :error ->
+        tasks
+    end
+  end
 
   @doc "Names a followed task by its goal, when it has none yet."
   @spec name(t(), pid(), String.t()) :: t()
@@ -148,41 +185,56 @@ defmodule MingaEditor.Agent.Tasks do
   @doc """
   The tasks as a tree, flattened in display order.
 
-  Top-level tasks come needs-you first, then working, waiting, failed and done, the most recently changed first within a state. Each task is followed by its subagents, foreground subagents before background ones, at depth 1.
+  Top-level tasks come needs-you first, then working, waiting, stopped, failed and done, the most recently changed first within a state. Each task is followed by its subagents, foreground subagents before background ones, at depth 1. A session without a goal yet (`Entry.goal?/1`) is not shown.
   """
   @spec tree(t()) :: [node_t()]
-  def tree(%__MODULE__{entries: entries}) do
-    children = Enum.group_by(Map.values(entries), & &1.parent)
+  def tree(%__MODULE__{starting: starting} = tasks) do
+    shown = shown(tasks)
+    children = Enum.group_by(Map.values(shown), & &1.parent)
 
-    entries
+    shown
     |> Map.values()
-    |> Enum.filter(&root?(&1, entries))
+    |> Enum.filter(&root?(&1, shown))
+    |> Enum.concat(Map.values(starting))
     |> Enum.sort_by(&sort_key/1)
-    |> Enum.flat_map(fn entry ->
-      [%{item: entry, depth: 0, parent: nil} | subagent_nodes(entry, children)]
+    |> Enum.flat_map(fn
+      %Starting{} = start ->
+        [%{item: start, depth: 0, parent: nil, parent_seq: nil}]
+
+      entry ->
+        [%{item: entry, depth: 0, parent: nil, parent_seq: nil} | subagent_nodes(entry, children)]
     end)
   end
 
-  @doc "True when no task is followed."
+  @doc "True when there is no task to show: no session with a goal and no task starting."
   @spec empty?(t()) :: boolean()
-  def empty?(%__MODULE__{entries: entries}), do: map_size(entries) == 0
+  def empty?(%__MODULE__{starting: starting} = tasks),
+    do: map_size(shown(tasks)) == 0 and map_size(starting) == 0
+
+  @spec shown(t()) :: %{pid() => Entry.t()}
+  defp shown(%__MODULE__{entries: entries}),
+    do: Map.filter(entries, fn {_pid, entry} -> Entry.goal?(entry) end)
 
   @spec subagent_nodes(Entry.t(), %{(pid() | nil) => [Entry.t()]}) :: [node_t()]
-  defp subagent_nodes(%Entry{pid: pid, subagents: foreground}, children) do
+  defp subagent_nodes(%Entry{pid: pid, seq: seq, subagents: foreground}, children) do
     background = children |> Map.get(pid, []) |> Enum.sort_by(& &1.seq)
 
-    Enum.map(foreground ++ background, &%{item: &1, depth: 1, parent: pid})
+    Enum.map(foreground ++ background, &%{item: &1, depth: 1, parent: pid, parent_seq: seq})
   end
 
   @spec node_state(node_t()) :: Entry.state() | nil
   defp node_state(%{item: %Entry{} = entry}), do: Entry.state(entry)
+  defp node_state(%{item: %Starting{} = start}), do: Starting.state(start)
   defp node_state(%{item: %Subagent{state: state}}), do: state
 
   @spec root?(Entry.t(), %{pid() => Entry.t()}) :: boolean()
   defp root?(%Entry{parent: nil}, _entries), do: true
   defp root?(%Entry{parent: parent}, entries), do: not Map.has_key?(entries, parent)
 
-  @spec sort_key(Entry.t()) :: {non_neg_integer(), integer(), integer()}
+  @spec sort_key(Entry.t() | Starting.t()) :: {non_neg_integer(), integer(), integer()}
+  defp sort_key(%Starting{} = start),
+    do: {Map.fetch!(@state_rank, Starting.state(start)), -start.started_at, -start.seq}
+
   defp sort_key(entry),
     do: {Map.fetch!(@state_rank, Entry.state(entry)), -entry.changed_at, -entry.seq}
 

@@ -22,6 +22,12 @@ defmodule MingaEditor.Agent.SessionFollowUpTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
+  alias MingaEditor.Handlers.GuiActionHandler
+  alias MingaEditor.Shell.Traditional.ModalWorkflow
+  alias MingaEditor.Shell.Traditional.TasksDrawerWorkflow
+  alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
+  alias MingaEditor.State.Picker, as: PickerState
+  alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.AgentSessionSource
   alias MingaEditor.UI.Picker.Item
 
@@ -154,6 +160,56 @@ defmodule MingaEditor.Agent.SessionFollowUpTest do
 
       assert refused.shell_runtime.state.notice.message == "Session changed. Reopen Sessions."
       refute inspect(Session.messages(session)) =~ "stale choice"
+    end
+  end
+
+  describe "a Sessions picker choice made from a file" do
+    test "opens the chosen conversation in an Agent tab, which takes the keyboard from the tasks drawer",
+         %{state: state, dir: dir} do
+      saved = save_record(dir, "picked from a file")
+      assert Runtime.active_tab_kind(state.shell_runtime) == :file
+      state = TasksDrawerWorkflow.open(state)
+      assert TasksDrawerWorkflow.focused?(state)
+
+      picker_state =
+        %PickerState{
+          picker:
+            Picker.new([%Item{id: {saved, {:disk, nil}}, label: "saved"}], title: "Sessions"),
+          source: AgentSessionSource,
+          restore: 0
+        }
+        |> PickerState.begin_query_session()
+
+      opened = ModalWorkflow.open(state, {:picker, PickerPayload.new(picker_state)})
+      generation = picker_state.activation_offer.generation
+      picked = GuiActionHandler.dispatch(opened, {:picker_item_activate, generation, 1})
+      provider = assert_provider_held()
+
+      bound = AgentSessionStart.settle(picked)
+      HeldStartProvider.release(provider)
+      shown = settle_through_editor(bound)
+
+      session = Runtime.active_session(shown.shell_runtime)
+      assert Runtime.active_tab_kind(shown.shell_runtime) == :agent
+      assert inspect(Session.messages(session)) =~ "picked from a file"
+      refute TasksDrawerWorkflow.focused?(shown)
+    end
+
+    test "resuming twice leaves no empty record in Sessions", %{state: state, dir: dir} do
+      first = save_record(dir, "first conversation")
+      second = save_record(dir, "second conversation")
+      before = SessionStore.list_recoverable(dir)
+
+      shown = resume_from_file(state, first)
+      shown = shown |> MingaEditor.TabWorkflow.switch(1) |> resume_from_file(second)
+      assert inspect(Session.messages(Runtime.active_session(shown.shell_runtime))) =~ "second"
+
+      after_resumes = SessionStore.list_recoverable(dir)
+
+      refute Enum.any?(after_resumes, &match?({:conversation, %{turn_count: 0}}, &1)),
+             "Sessions lists a record with no turns: #{inspect(after_resumes)}"
+
+      assert length(after_resumes) == length(before)
     end
   end
 
@@ -315,6 +371,34 @@ defmodule MingaEditor.Agent.SessionFollowUpTest do
 
     connection = AgentConnection.new(HeldStartProvider, test_pid: self())
     %{state | agent_connection: %{connection | session_manager: held_manager(dir)}}
+  end
+
+  # Chooses `saved` in Sessions from the file tab in front, as a click would, and waits until it shows.
+  defp resume_from_file(state, saved) do
+    picker_state =
+      %PickerState{
+        picker: Picker.new([%Item{id: {saved, {:disk, nil}}, label: "saved"}], title: "Sessions"),
+        source: AgentSessionSource,
+        restore: 0
+      }
+      |> PickerState.begin_query_session()
+
+    opened = ModalWorkflow.open(state, {:picker, PickerPayload.new(picker_state)})
+    generation = picker_state.activation_offer.generation
+
+    picked =
+      opened
+      |> GuiActionHandler.dispatch({:picker_item_activate, generation, 1})
+      |> AgentSessionStart.settle()
+
+    # A resume that started a session holds its provider until released; one into an open tab starts none.
+    receive do
+      {:provider_start_held, provider} -> HeldStartProvider.release(provider)
+    after
+      2_000 -> :ok
+    end
+
+    settle_through_editor(picked)
   end
 
   # The manager outlives a session the test kills and stops its sessions when the test ends.

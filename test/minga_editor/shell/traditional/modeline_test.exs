@@ -313,7 +313,7 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
   describe "clicks and keys" do
     test "designed segments do what their leader key does and name that key" do
       expected = [
-        needs_you: {"SPC a a", :toggle_agentic_view},
+        needs_you: {"SPC a a", :agent_tasks},
         filename: {"SPC ,", :buffer_list},
         minga: {"SPC a v", :toggle_agent_split},
         errors: {"SPC c x", :diagnostics_list},
@@ -346,7 +346,7 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
 
     test "with no reachable leader the click stays and the hint goes" do
       data = Map.put(@full_data, :key_hints?, false)
-      assert segment(data, :needs_you).target == :toggle_agentic_view
+      assert segment(data, :needs_you).target == :agent_tasks
       assert segment(data, :needs_you).key == ""
     end
 

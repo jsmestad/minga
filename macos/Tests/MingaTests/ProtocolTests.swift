@@ -145,7 +145,7 @@ struct ProtocolDecoderTests {
                 _ = try decodeCommand(data: Data(complete.prefix(count)), offset: 0)
             }
         }
-        let invalidValues: [(UInt8, UInt8)] = [(4, 0), (0, 14), (255, 255)]
+        let invalidValues: [(UInt8, UInt8)] = [(4, 0), (0, 15), (255, 255)]
         for (responder, surface) in invalidValues {
             var packet = complete
             packet[3] = responder

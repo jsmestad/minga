@@ -200,7 +200,7 @@ defmodule MingaEditor.ProjectHomeTest do
   test "a task started from the home returns to the home and its row opens it again", ctx do
     editor = open_home(ctx)
 
-    send_keys_sync(editor, "<Space>an")
+    send_keys_sync(editor, "<Space>aSn")
     assert editor_state(editor).workspace.keymap_scope == :agent
 
     send_keys_sync(editor, "<Esc><Esc><Esc>")
@@ -286,7 +286,7 @@ defmodule MingaEditor.ProjectHomeTest do
   test "a task started from the home with files behind it returns to the home", ctx do
     editor = home_with_two_files(ctx)
 
-    send_keys_sync(editor, "<Space>an")
+    send_keys_sync(editor, "<Space>aSn")
     assert editor_state(editor).workspace.keymap_scope == :agent
     send_keys_sync(editor, "<Esc><Esc><Esc>")
 

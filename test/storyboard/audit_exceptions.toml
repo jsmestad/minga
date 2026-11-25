@@ -835,3 +835,415 @@ pairs = [
 ]
 reason = "The echo line's answer uses this theme's muted message text on the status bar, which misses the contrast floor."
 issue = 4137
+
+# ---- Tasks drawer (#4045) -------------------------------------------------------------------------------------
+#
+# The drawer draws with the theme's own roles: muted text, state colours, the accent for key hints and the list
+# selection the file tree uses. These pairs miss their contrast target on the drawer's surface in these themes, the
+# same token problem the entries above record for other surfaces. The token fix in #4137 removes them.
+
+[[exception]]
+scenario = ["minga.approval.diff", "minga.task.new", "minga.task.output", "minga.tasks.empty", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "macos"
+part = "breadcrumb.segment"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#6f7179 on #111317",
+]
+reason = "The same breadcrumb.segment pairs the entries above record for other scenarios, shown with the tasks drawer open."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.approval.diff", "minga.task.new", "minga.task.output", "minga.tasks.empty", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "macos"
+part = "breadcrumb.segment"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#878eab on #292c3c",
+]
+reason = "The same breadcrumb.segment pairs the entries above record for other scenarios, shown with the tasks drawer open."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.approval.diff", "minga.task.new", "minga.task.output", "minga.tasks.empty", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "macos"
+part = "breadcrumb.segment"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#8a8d9f on #e6e9ef",
+]
+reason = "The same breadcrumb.segment pairs the entries above record for other scenarios, shown with the tasks drawer open."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.approval.diff", "minga.task.new", "minga.task.output", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "macos"
+part = "drawer.count"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#7b7e88 on #1a1d23",
+]
+reason = "The drawer's drawer.count colour comes from the theme's tokens and misses its contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.approval.diff", "minga.task.new", "minga.task.output", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "macos"
+part = "drawer.count"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#388e25 on #eff1f5",
+  "#797c8f on #eff1f5",
+  "#7e8195 on #eff1f5",
+  "#808397 on #eff1f5",
+  "#898b9e on #eff1f5",
+  "#8a8d9e on #eff1f5",
+  "#d35400 on #eff1f5",
+]
+reason = "The drawer's drawer.count colour comes from the theme's tokens and misses its contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.approval.diff"]
+frontend = "macos"
+part = "drawer.hint"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#4588c0 on #1a1d23",
+]
+reason = "The drawer's drawer.hint colour comes from the theme's tokens and misses its contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.approval.diff"]
+frontend = "macos"
+part = "drawer.hint"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#7b95d0 on #303446",
+  "#7f99d6 on #303446",
+]
+reason = "The drawer's drawer.hint colour comes from the theme's tokens and misses its contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.approval.diff", "minga.task.new", "minga.task.output", "minga.tasks.empty", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "macos"
+part = "drawer.hint"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#1e66f5 on #eff1f5",
+  "#427ef5 on #eff1f5",
+  "#4a83f5 on #eff1f5",
+  "#707388 on #eff1f5",
+  "#76798d on #eff1f5",
+]
+reason = "The drawer's drawer.hint colour comes from the theme's tokens and misses its contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.approval.diff", "minga.task.new", "minga.task.output", "minga.tasks.empty", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#665c50 on #303446",
+]
+reason = "The same editor.code pairs the entries above record for other scenarios, shown with the tasks drawer open."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.approval.diff", "minga.task.new", "minga.task.output", "minga.tasks.empty", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#40a02b on #eff1f5",
+  "#a28dd5 on #eff1f5",
+  "#df8e1d on #eff1f5",
+]
+reason = "The same editor.code pairs the entries above record for other scenarios, shown with the tasks drawer open."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.tasks.empty"]
+frontend = "macos"
+part = "emptyState.actionKey"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#8caaee on #626880",
+]
+reason = "The drawer's emptyState.actionKey colour comes from the theme's tokens and misses its contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.tasks.empty"]
+frontend = "macos"
+part = "emptyState.actionKey"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#1e66f5 on #eff1f5",
+]
+reason = "The drawer's emptyState.actionKey colour comes from the theme's tokens and misses its contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.tasks.empty"]
+frontend = "macos"
+part = "emptyState.actionLabel"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#c6d0f5 on #626880",
+]
+reason = "The drawer's emptyState.actionLabel colour comes from the theme's tokens and misses its contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.tasks.empty"]
+frontend = "macos"
+part = "emptyState.actionLabel"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#4c4f69 on #acb0be",
+]
+reason = "The drawer's emptyState.actionLabel colour comes from the theme's tokens and misses its contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.tasks.empty"]
+frontend = "macos"
+part = "emptyState.why"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#707388 on #eff1f5",
+]
+reason = "The drawer's emptyState.why colour comes from the theme's tokens and misses its contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.task.new", "minga.tasks.list", "minga.tasks.needs_you"]
+frontend = "macos"
+part = "listRow.meta"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#696c76 on #1a1d23",
+]
+reason = "The drawer's listRow.meta colour comes from the theme's tokens and misses its contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.task.new", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "macos"
+part = "listRow.meta"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#838ba7 on #303446",
+  "#c6d0f5 on #626880",
+]
+reason = "The drawer's listRow.meta colour comes from the theme's tokens and misses its contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.task.new", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "macos"
+part = "listRow.meta"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#388e25 on #eff1f5",
+  "#4c4f69 on #acb0be",
+  "#7c7f93 on #eff1f5",
+]
+reason = "The drawer's listRow.meta colour comes from the theme's tokens and misses its contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.task.new", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "macos"
+part = "listRow.title"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#c6d0f5 on #626880",
+]
+reason = "The drawer's listRow.title colour comes from the theme's tokens and misses its contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.task.new", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "macos"
+part = "listRow.title"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#4c4f69 on #acb0be",
+  "#d35400 on #e6e9ef",
+]
+reason = "The drawer's listRow.title colour comes from the theme's tokens and misses its contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.approval.diff", "minga.task.new", "minga.task.output", "minga.tasks.empty", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "macos"
+part = "modeline.modePill"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#eff1f5 on #1e66f5",
+]
+reason = "The same modeline.modePill pairs the entries above record for other scenarios, shown with the tasks drawer open."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.approval.diff", "minga.task.new", "minga.task.output", "minga.tasks.empty", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "macos"
+part = "modeline.modeText"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#eff1f5 on #1e66f5",
+]
+reason = "The same modeline.modeText pairs the entries above record for other scenarios, shown with the tasks drawer open."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.approval.diff", "minga.task.new", "minga.task.output", "minga.tasks.empty", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#d35400 on #e6e9ef",
+  "#eff1f5 on #1e66f5",
+]
+reason = "The modeline.segment colour comes from the theme's tokens and misses its contrast target in this theme, with the tasks drawer open."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.approval.diff", "minga.task.new", "minga.task.output", "minga.tasks.empty", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#3a3e47 on #1a1d23",
+  "#595c66 on #111317",
+  "#595c66 on #1a1d23",
+  "#595c66 on #1e222a",
+  "#696c76 on #26343f",
+]
+reason = "The drawer's muted text, counts, ages, state words and tree glyphs come from the theme's tokens and miss their contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.approval.diff", "minga.task.new", "minga.task.output", "minga.tasks.empty", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#838ba7 on #414559",
+  "#838ba7 on #626880",
+  "#ca9ee6 on #626880",
+  "#ef9f76 on #626880",
+]
+reason = "The drawer's muted text, counts, ages, state words and tree glyphs come from the theme's tokens and miss their contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.approval.diff", "minga.task.new", "minga.task.output", "minga.tasks.empty", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#388e25 on #ccd0da",
+  "#7c7f93 on #acb0be",
+  "#7c7f93 on #ccd0da",
+  "#8839ef on #acb0be",
+  "#8c8fa1 on #ccd0da",
+  "#8c8fa1 on #eff1f5",
+  "#d35400 on #acb0be",
+]
+reason = "The drawer's muted text, counts, ages, state words and tree glyphs come from the theme's tokens and miss their contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.approval.diff", "minga.task.new", "minga.task.output", "minga.tasks.empty", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#595c66 on #111317",
+  "#595c66 on #1a1d23",
+  "#696c76 on #111317",
+  "#696c76 on #1a1d23",
+]
+reason = "The drawer's muted text, counts, ages, state words and tree glyphs come from the theme's tokens and miss their contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.approval.diff", "minga.task.new", "minga.task.output", "minga.tasks.empty", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#414559 on #8caaee",
+  "#838ba7 on #303446",
+  "#838ba7 on #414559",
+  "#8caaee on #414559",
+  "#c6d0f5 on #626880",
+  "#ca9ee6 on #414559",
+  "#e78284 on #414559",
+  "#ef9f76 on #414559",
+]
+reason = "The drawer's muted text, counts, ages, state words and tree glyphs come from the theme's tokens and miss their contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.approval.diff", "minga.task.new", "minga.task.output", "minga.tasks.empty", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#04a5e5 on #eff1f5",
+  "#1e66f5 on #ccd0da",
+  "#1e66f5 on #eff1f5",
+  "#388e25 on #ccd0da",
+  "#40a02b on #ccd0da",
+  "#40a02b on #eff1f5",
+  "#4c4f69 on #acb0be",
+  "#7c7f93 on #ccd0da",
+  "#7c7f93 on #eff1f5",
+  "#8839ef on #ccd0da",
+  "#8c8fa1 on #ccd0da",
+  "#8c8fa1 on #eff1f5",
+  "#ccd0da on #1e66f5",
+  "#d20f39 on #ccd0da",
+  "#d35400 on #ccd0da",
+  "#d35400 on #e6e9ef",
+  "#df8e1d on #eff1f5",
+  "#eff1f5 on #1e66f5",
+]
+reason = "The drawer's muted text, counts, ages, state words and tree glyphs come from the theme's tokens and miss their contrast target on the drawer surface or the list selection in this theme."
+issue = 4137

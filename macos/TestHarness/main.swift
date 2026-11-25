@@ -265,6 +265,30 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return ["type": "gui_picker_preview", "visible": visible, "lines": lineArray]
 
+    case .guiTasksDrawer(let drawer):
+        let hint = { (hint: Wire.TasksDrawer.Hint) -> [String: Any] in ["key": hint.key, "label": hint.label] }
+        return [
+            "type": "gui_tasks_drawer", "visible": drawer.visible, "focused": drawer.focused,
+            "view": Int(drawer.view.rawValue), "view_title": drawer.viewTitle, "view_lines": drawer.viewLines,
+            "view_offset": drawer.viewOffset, "prompt": drawer.prompt,
+            "empty": drawer.empty.map { empty -> [String: Any] in
+                [
+                    "title": empty.title, "why": empty.why, "selected": Int(empty.selected),
+                    "actions": empty.actions.map { ["id": $0.id, "key": $0.key, "label": $0.label] }
+                ]
+            } ?? NSNull(),
+            "name": drawer.name, "title": drawer.title, "note": drawer.note,
+            "counts": drawer.counts.map { ["state": $0.state.rawValue, "count": $0.count] },
+            "hints": drawer.hints.map(hint),
+            "rows": drawer.rows.map { row -> [String: Any] in
+                [
+                    "id": row.id, "depth": Int(row.depth), "last": row.isLastChild, "selected": row.isSelected,
+                    "state": row.state?.rawValue ?? "", "title": row.title, "words": row.words, "age": row.age,
+                    "detail": row.detail, "actions": row.actions.map(hint)
+                ]
+            }
+        ]
+
     case .guiAgentHelp(let visible, let groups):
         return [
             "type": "gui_agent_help", "visible": visible,

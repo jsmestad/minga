@@ -230,14 +230,15 @@ defmodule Minga.Test.Storyboard.Render do
   end
 
   # The grid a frontend reports depends on the chrome around the editor (ADR-0001): on macOS the file tree and
-  # Git status are a native sidebar beside the editor, so the editor's grid narrows while one is open, and the
+  # Git status are a native sidebar beside the editor, so the editor's grid narrows while one is open; the tasks drawer
+  # and the minibuffer prompt beneath it are native views below the editor, so the grid shrinks while they are open; the
   # project home (`empty_state`) draws no tab bar or breadcrumb on either frontend, so its grid grows.
   # A target's `chrome_grid` maps the grid-changing chrome open at the reached frame, joined with "+", to the grid the
   # frontend reports then. The capture does what that report does in production: it resizes the editor to that grid.
-  @grid_chrome [:empty_state, :file_tree, :git_status]
+  @grid_chrome [:empty_state, :file_tree, :git_status, :tasks_drawer, :minibuffer]
 
   # Chrome each frontend draws natively around the editor: a scenario that shows it needs a `chrome_grid` entry.
-  @native_below %{macos: [:file_tree, :git_status], tui: []}
+  @native_below %{macos: [:file_tree, :git_status, :tasks_drawer], tui: []}
 
   @spec fit_native_chrome(Session.t(), target()) :: {Session.t(), target()}
   defp fit_native_chrome(session, target) do

@@ -381,7 +381,7 @@ struct StatusBarViewViewTests {
     private var boardLeft: [Wire.StatusBarSegment] {
         [
             segment(0, "NORMAL", kind: "mode", label: "Normal mode"),
-            segment(1, "Needs you", kind: "needs_you", command: "toggle_agentic_view", state: .needsYou, key: "SPC a a", label: "1 task needs you"),
+            segment(1, "Needs you", kind: "needs_you", command: "agent_tasks", state: .needsYou, key: "SPC a a", label: "1 task needs you"),
             segment(2, "chrome_state.ex ●", kind: "filename", command: "buffer_list", key: "SPC ,", label: "chrome_state.ex, unsaved"),
             segment(3, "change 1/2", kind: "change", label: "Minga's change 1 of 2"),
             segment(4, "main +11", kind: "git", drop: 4, label: "Branch main, 11 changed lines"),
@@ -509,7 +509,7 @@ struct StatusBarViewViewTests {
         for button in body.findAll(ViewType.Button.self) {
             try button.tap()
         }
-        for command in ["toggle_agentic_view", "buffer_list", "toggle_agent_split", "diagnostics_list"] {
+        for command in ["agent_tasks", "buffer_list", "toggle_agent_split", "diagnostics_list"] {
             #expect(spy.actions.contains(.executeCommand(name: command)), "no click for \(command)")
         }
 

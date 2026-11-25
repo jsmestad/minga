@@ -1788,7 +1788,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     {status, message} =
       if reason in [:normal, :shutdown],
         do: {:idle, "Agent session ended"},
-        else: {:error, "Agent session crashed (SPC a n to restart)"}
+        else: {:error, "Agent session crashed (SPC a S n to restart)"}
 
     state
     |> TraditionalWorkflow.install_agent_spinner_stop()
@@ -1888,7 +1888,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     msg =
       if reason in [:normal, :shutdown],
         do: "Agent session ended",
-        else: "Agent session crashed (SPC a n to restart)"
+        else: "Agent session crashed (SPC a S n to restart)"
 
     NoticeWorkflow.publish(state, msg)
   end

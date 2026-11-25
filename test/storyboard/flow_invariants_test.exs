@@ -188,7 +188,7 @@ defmodule Minga.Storyboard.FlowInvariantsTest do
         model = entry |> Registry.drive() |> Session.model()
 
         assert model.which_key != nil or Model.open?(model, :picker) or
-                 Model.open?(model, :minibuffer),
+                 Model.open?(model, :minibuffer) or drawer_offers_action?(model),
                "#{entry.id} shows a state that needs action without offering one: #{Model.signature(model)}"
       end
     end
@@ -246,6 +246,14 @@ defmodule Minga.Storyboard.FlowInvariantsTest do
   end
 
   @spec action_state?(String.t()) :: boolean()
+  # The tasks drawer is an action surface: its focused rows carry their keys.
+  defp drawer_offers_action?(%Model{
+         ui: %{tasks_drawer: %{visible?: true, focused?: true, rows: rows}}
+       }),
+       do: Enum.any?(rows, &(&1.actions != []))
+
+  defp drawer_offers_action?(%Model{}), do: false
+
   defp action_state?(id), do: Enum.any?(Inventory.fetch!(id)["states"], &(&1 in @action_states))
 
   # Walks the leader trie and lists every node: prefixes with their child count, and commands.

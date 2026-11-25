@@ -124,10 +124,10 @@ Mockups and storyboards draw at the app's real default metrics, so they never pr
 - Each row: the state glyph, the task's goal as its title, state words ("Editing chrome_state.ex · step 2 of 3", "Waiting · rate limited, retry in 40 s"), and its age.
 - The header counts each state.
 - The row that needs you expands to show the request ("Create test/minga_agent/usage_limit_test.exs +86") and its actions as text: "`y` Approve once  `a` Always for this session  `t` This turn  `n` Deny  `=` Show diff  `↩` Open conversation".
-- Every other row shows its one relevant action: `r` Retry on waiting and failed rows, `o` Output, `i` Inspect, `↩` Review on done rows.
+- Every other row shows its one relevant action: `r` Retry on waiting and failed rows, `r` Continue on stopped rows, `o` Output, `i` Inspect, `↩` Review on done rows. After needs-you, rows follow the state order: working, waiting, stopped, failed, done.
 - A task that fans out shows its subagents beneath it as a tree (`├─`, `└─`), each with its state.
-- Empty state: "No one's at the table yet." with one next action, `n` New task. `q` or `esc` returns focus to the window you came from.
-- New task: `n` in the drawer (or `SPC a n`) opens a "New task ›" minibuffer prompt. The goal you type becomes the task's title; the selection is attached as context, `@` adds more, `↩` starts it, `esc` cancels.
+- Empty state: "No one's at the table yet." with one primary next action, preselected: `c` New task; a second step where the board shows one, `SPC a S h` Resume an earlier session. `q` or `esc` returns focus to the window you came from.
+- New task: `c` in the drawer (or `SPC a n`) opens a "New task ›" minibuffer prompt (`n` is Deny on a needs-you row). The goal you type becomes the task's title; the selection is attached as context, `@` adds more, `↩` starts it, `esc` cancels.
 
 ## Review
 

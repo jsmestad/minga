@@ -319,6 +319,15 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 		// Empty, separator, header, and summary cells never fall through to text.
 		return nil, true
 	}
+	if m.layout.drawer.Contains(mouse.X, mouse.Y) {
+		if !m.floatingOverlayContains(mouse.X, mouse.Y) {
+			if packet, ok := m.tasksDrawerMousePacket(msg); ok {
+				return packet, true
+			}
+		}
+		// Borders, counts and empty rows never fall through to text.
+		return nil, true
+	}
 	if packet, ok := m.agentDisplayedControlPacket(msg); ok {
 		return packet, true
 	}

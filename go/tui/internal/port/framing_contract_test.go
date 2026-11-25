@@ -95,6 +95,8 @@ var minimalBodyOverrides = map[byte][]byte{
 	generated.OPGuiFocusOwner: {generated.OPGuiFocusOwner, 0, 10, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0},
 	// gui_agent_help (len32): version 1 and hidden visibility form the minimal body.
 	generated.OPGuiAgentHelp: {generated.OPGuiAgentHelp, 0, 0, 0, 2, 1, 0},
+	// gui_tasks_drawer (len32): a hidden drawer is twenty zero bytes: flags, empty strings, empty lists and a zero offset.
+	generated.OPGuiTasksDrawer: append([]byte{generated.OPGuiTasksDrawer, 0, 0, 0, 28}, make([]byte, 28)...),
 }
 
 func TestFramingContractEveryFramedOpcode(t *testing.T) {

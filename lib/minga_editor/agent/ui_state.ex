@@ -482,6 +482,18 @@ defmodule MingaEditor.Agent.UIState do
 
   # ── Model/provider config ──────────────────────────────────────────────────
 
+  @doc "The model the attached session runs on, or nil before a session's connection is attached."
+  @spec model_selection(t()) :: MingaAgent.ModelSelection.t() | nil
+  def model_selection(%__MODULE__{connection: %ConnectionSnapshot{model_selection: selection}}),
+    do: selection
+
+  def model_selection(%__MODULE__{}), do: nil
+
+  @doc "Makes the next session started in this workspace run on `selection`'s exact route."
+  @spec start_on_model(t(), MingaAgent.ModelSelection.t()) :: t()
+  def start_on_model(%__MODULE__{panel: panel} = state, %MingaAgent.ModelSelection{} = selection),
+    do: %{state | panel: Panel.start_on_model(panel, selection)}
+
   @doc "Projects model facts only until an authoritative connection snapshot is attached."
   @spec project_model_selection(t(), MingaAgent.ModelSelection.t() | nil) :: t()
   def project_model_selection(%__MODULE__{connection: %ConnectionSnapshot{}} = state, _selection),

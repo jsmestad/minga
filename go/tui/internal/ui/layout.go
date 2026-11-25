@@ -28,6 +28,7 @@ type uiLayout struct {
 	body     uiRect
 	footer   uiRect
 	timeline uiRect // persistent BEAM-authored chrome, never an overlay candidate
+	drawer   uiRect // the tasks drawer's BEAM-reserved rows, a real split above the timeline and footer
 	leftPane uiRect // file tree or sidebar; zero when neither is visible
 }
 
@@ -50,6 +51,16 @@ func (m Model) computeLayout() uiLayout {
 			}
 		}
 	}
+	var drawer uiRect
+	if _, visible := m.tasksDrawer(); visible {
+		if rect, placed := m.surfaceRectOnGrid(surfaceIDTasksDrawer, grid); placed {
+			rect.Height = min(rect.Height, bodyBottom-rect.Y)
+			if rect.Width > 0 && rect.Height > 0 {
+				drawer = rect
+				bodyBottom = min(bodyBottom, drawer.Y)
+			}
+		}
+	}
 	bodyHeight := max(bodyBottom-headerHeight, 0)
 
 	leftPaneWidth := m.leftChromeWidth()
@@ -60,6 +71,7 @@ func (m Model) computeLayout() uiLayout {
 		body:     uiRect{X: leftPaneWidth, Y: headerHeight, Width: max(width-leftPaneWidth, 1), Height: bodyHeight},
 		footer:   uiRect{X: 0, Y: footerY, Width: width, Height: footerHeight},
 		timeline: timeline,
+		drawer:   drawer,
 		leftPane: uiRect{X: 0, Y: 0, Width: leftPaneWidth, Height: headerHeight + bodyHeight},
 	}
 }

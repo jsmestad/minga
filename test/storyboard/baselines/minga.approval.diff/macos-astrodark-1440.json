@@ -1,0 +1,311 @@
+{
+ "elements": [
+  {
+   "frame": [
+    79,
+    65,
+    1338.5,
+    595
+   ],
+   "label": "storyboard.ex, pane 1",
+   "role": "AXTextArea",
+   "value": "defmodule Storyboard do\n  @moduledoc \"A small file every storyboard scenario starts in.\"\n\n  def greet(name) do\n    \"Hello, \" <> name\n  end\nend\n"
+  }
+ ],
+ "grid": {
+  "cols": 177,
+  "rows": 31
+ },
+ "parts": [
+  {
+   "baseline": 21,
+   "frame": [
+    318,
+    9.5,
+    78,
+    15
+   ],
+   "part": "tabBar.tabLabel",
+   "text": "storyboard.ex"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    40,
+    43.5,
+    4,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "/"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    58,
+    43.5,
+    23,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "tmp"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    95,
+    43.5,
+    102,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga-storyboard"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    211,
+    43.5,
+    72,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "macos-1440"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    297,
+    43.5,
+    109,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga.approval.diff"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    420,
+    43.5,
+    14,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "lib"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    448,
+    43.5,
+    78,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "storyboard.ex"
+  },
+  {
+   "frame": [
+    32,
+    664,
+    1408,
+    240
+   ],
+   "part": "drawer"
+  },
+  {
+   "frame": [
+    32,
+    664,
+    1408,
+    1
+   ],
+   "part": "drawer.divider"
+  },
+  {
+   "frame": [
+    32,
+    665,
+    1408,
+    24
+   ],
+   "part": "drawer.header"
+  },
+  {
+   "baseline": 681.5,
+   "frame": [
+    44,
+    669,
+    78,
+    16
+   ],
+   "part": "drawer.title",
+   "text": "Minga Tasks"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    130,
+    670,
+    18,
+    14
+   ],
+   "part": "drawer.count",
+   "text": "1"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1120,
+    670,
+    37,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "y once"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1165,
+    670,
+    47,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "a always"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1220,
+    670,
+    55,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "t this turn"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1283,
+    670,
+    37,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "n deny"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1328,
+    670,
+    41,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "]h next"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1377,
+    670,
+    51,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "esc back"
+  },
+  {
+   "frame": [
+    0,
+    904,
+    1440,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    6,
+    904,
+    61,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "mode: NORMAL"
+  },
+  {
+   "frame": [
+    75,
+    904,
+    71,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "needs_you: Needs you"
+  },
+  {
+   "frame": [
+    154,
+    904,
+    73,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filename: storyboard.ex"
+  },
+  {
+   "frame": [
+    1386,
+    904,
+    26,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filetype: Elixir"
+  },
+  {
+   "frame": [
+    1420,
+    904,
+    14,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "position: 1:1"
+  },
+  {
+   "frame": [
+    6,
+    907,
+    61,
+    18
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "baseline": 919.5,
+   "frame": [
+    12,
+    909,
+    49,
+    14
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  }
+ ],
+ "scenario": "minga.approval.diff",
+ "size": "1440",
+ "theme": "astrodark",
+ "window": {
+  "height": 928,
+  "width": 1440
+ }
+}

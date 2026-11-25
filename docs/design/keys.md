@@ -88,8 +88,8 @@ SPC a  Minga
 
 | Keys | Action | Status |
 |---|---|---|
-| `SPC a a` | Tasks drawer | changed (138, was "Toggle agent split") |
-| `SPC a n` | New task (the minibuffer prompt) | changed (143, was "New local agent session") |
+| `SPC a a` | Tasks drawer | shipped (138, was "Toggle agent split") |
+| `SPC a n` | New task (the minibuffer prompt) | shipped (143, was "New local agent session"; that is now `SPC a S n`) |
 | `SPC a s` | Stop; ⌘. on macOS | kept (141) |
 | `SPC a u` | Reject all of a task's changes, after "y/n" | kept key (166), now confirms |
 | `SPC a v` | Conversation split | kept (140) |
@@ -129,6 +129,7 @@ SPC a  Minga
 
 | Keys | Action | Status |
 |---|---|---|
+| `SPC a S n` | Start a new, empty session in the conversation | shipped; was `SPC a n` (143), which is now New task |
 | `SPC a S h` | Resume a session | shipped; was `SPC a h` (149) |
 | `SPC a S R` | Rename the session | shipped; was `SPC a R` (150) |
 | `SPC a S m` | Pick the model | shipped; was `SPC a m` (147) |

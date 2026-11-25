@@ -572,7 +572,7 @@ Each section uses `section_id(1) + section_len(2) + payload(section_len)`. Secti
 | 0x0C | StopTarget | `session_id(string16) + request_id(string16)`. Both IDs are nonempty. Absence clears the target and disables the displayed Stop control. |
 | 0x0D | PromptPresentation | `generation(8)`. The nonzero ID names the retained prompt displayed by both frontends and binds its workspace, saved conversation, source buffer and content revision. Absence means no pointer Send target. |
 | 0x0E | QueueTarget | `session_id(string16) + request_id(string16) + sequence(8)`. The target names one insertion position of the active saved-session queue. Absence disables Steer and Queue Next. |
-| 0x0F | ChatLifecycle | `kind(1) + reason(string16) + remedy(1) + action_label(string16) + key_hint(string16) + headline(string16) + note(string16)`. Omitted for a live conversation. `1` means starting, `2` means failed, and `3` means unavailable. A failed lifecycle's `reason` is one plain sentence about the cause. `remedy` is the one action a failed start offers: `0` none, `1` retry, `2` set up provider. `action_label` is the button text and `key_hint` the key that runs the same action; frontends render both exactly as sent and never author remedy copy. Activating the action sends `agent_start_remedy` with the same remedy byte. Starting and unavailable send an empty reason, remedy `0` and empty remedy strings. `headline` names what happened to the tab, for example "Agent could not start", "Agent session stopped" or "Starting Agent", and is sent for every lifecycle in this section. `note` is the draft note shown under the notice when the composer is visible, for example "Your draft is saved. SPC a n starts a new session."; it names the new-session key bound for the current editing model, and an empty note means no note line. Frontends render `headline` and `note` exactly as sent. Neither frontend shows approval controls while the conversation is not live. A zero-row prompt means the composer is unavailable. |
+| 0x0F | ChatLifecycle | `kind(1) + reason(string16) + remedy(1) + action_label(string16) + key_hint(string16) + headline(string16) + note(string16)`. Omitted for a live conversation. `1` means starting, `2` means failed, and `3` means unavailable. A failed lifecycle's `reason` is one plain sentence about the cause. `remedy` is the one action a failed start offers: `0` none, `1` retry, `2` set up provider. `action_label` is the button text and `key_hint` the key that runs the same action; frontends render both exactly as sent and never author remedy copy. Activating the action sends `agent_start_remedy` with the same remedy byte. Starting and unavailable send an empty reason, remedy `0` and empty remedy strings. `headline` names what happened to the tab, for example "Agent could not start", "Agent session stopped" or "Starting Agent", and is sent for every lifecycle in this section. `note` is the draft note shown under the notice when the composer is visible, for example "Your draft is saved. SPC a S n starts a new session."; it names the new-session key bound for the current editing model, and an empty note means no note line. Frontends render `headline` and `note` exactly as sent. Neither frontend shows approval controls while the conversation is not live. A zero-row prompt means the composer is unavailable. |
 
 The Prompt section's `vim_mode` uses the status bar's mode values (0=normal, 1=insert, 2=visual, 3=command, 4=operator_pending, 5=search, 6=replace), because both indicators show the same editing mode. Frontends decode both bytes with one mapping.
 
@@ -597,6 +597,21 @@ The envelope is `opcode(1) + payload_length(4, big-endian) + payload`. The paylo
 Help overlays the existing body without reserving editor rows or changing the draft, selection, input method, mode or keyboard owner. The Go frontend uses the BEAM-authored `agent_help` surface placement, numeric ID 27, with the active pane's fitted content rectangle. Picker and completion retain higher precedence. Native frontends use their existing body allocation. Scrolling is discardable local presentation.
 
 The Help button sends named command `agent_toggle_help`; Close Help sends directional command `agent_dismiss_help`. They do not synthesize question-mark or Escape typing. Covered editing input cannot change or submit the draft, and dismissal restores the same underlying context.
+
+
+### 0xAC: gui_tasks_drawer
+
+`*minga-tasks*` lists every task Minga is working on, so one place can show and answer all of them. The BEAM decides every word, the order (needs-you first), the selection, each row's actions and the drawer's views; frontends lay it out by the "Drawer" and "List row" anatomy in `docs/design/anatomy.md` and draw the state marks from the design tokens.
+
+The envelope is `opcode(1) + payload_length(4, big-endian) + payload`, with the fields generated from `docs/protocol_schema.toml`: `visible(1) + focused(1) + name(string8) + title(string16) + note(string16) + counts(u8 count of state(1) + count(2)) + hints(u8 count of key(string8) + label(string16)) + rows(u16 count of row) + view(1) + view_title(string16) + view_lines(u16 count of string16) + view_offset(2) + prompt(string16)`. A row is `id(string8) + depth(1) + flags(1) + state(1) + title(string16) + words(string16) + age(string8) + detail(u8 count of string16) + actions(u8 count of key(string8) + label(string16))`.
+
+- `state` is the design-token state wire byte (`docs/design_tokens.toml`, `[[states]].wire`); `0` is no state.
+- Row flags: bit 0 marks the last subagent of its task (draw `└─`), bit 1 the selected row.
+- `note` names a drawer this one hid ("Messages hidden · q returns"); `prompt` is a question the drawer is asking (a stop to confirm). Both are empty when there is none.
+- `view` is `0` for the list, `1` for the selected request's diff and `2` for a task's output; a diff or output shows `view_title` over `view_lines` from `view_offset`.
+- A hidden drawer sends `visible = 0` and empty fields.
+
+The terminal reserves the drawer's rows: the Go frontend draws it in the `tasks_drawer` surface placement, numeric ID 28, a real split above the timeline and footer. Native frontends draw it as a view beneath the editor, so the reported grid shrinks. Clicks send `tasks_drawer_action` with the row's identity.
 
 
 ### 0x79 — gui_gutter_separator
@@ -1385,6 +1400,7 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x6E | agent_composer_queue | `prompt_generation(8) + attachment_offer(8) + kind(1) + session_id(string16) + request_id(string16) + sequence(8)` | Queue the displayed draft for the exact active turn. Kind `0` steers; kind `1` queues a follow-up. Echo the committed prompt, attachment, and queue identities from the same frame. A stale action does not send, queue, or clear the draft. |
 | 0x6F | agent_start_remedy | `remedy(1)` | Run the remedy the displayed failed start offers: `1` retry, `2` set up provider. The BEAM runs it only while the active Agent tab still offers that remedy, so a click on a stale notice does nothing. |
 | 0x70 | picker_fit | generation(4) + rows(2) | Report how many result rows the frontend's picker list shows. `generation` is the picker's `activation_generation`; `rows` is positive. The BEAM moves a picker page (PageDown, PageUp) by `rows`. |
+| 0x71 | tasks_drawer_action | `row_id(string8) + action(string8)` | A click in the tasks drawer. `action` is `select` for the row itself, or the key its control shows (`y`, `a`, `t`, `n`, `=`, `r`, `o`, `i`, `x`, `↩`, `c`), or `q` with an empty row id for the drawer's close control, or `focus` with an empty row id for a click anywhere else in the drawer, which gives it the keyboard without moving the selection. The row id is the identity from `gui_tasks_drawer`, never a position, so the BEAM acts on the task the user saw. |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |
@@ -1631,7 +1647,7 @@ All integers use big-endian byte order. The payload is exactly 10 bytes; fronten
 | Field | Meaning |
 |-------|---------|
 | `responder` | `0` editor view, `1` picker query, `2` search query, `3` inline edit field |
-| `surface` | `0` editor, `1` file tree, `2` agent, `3` Git status, `4` conflict, `5` inline edit, `6` inline ask, `7` prompt, `8` picker, `9` completion, `10` command completion, `11` search, `12` focused hover popup, `13` empty launchpad |
+| `surface` | `0` editor, `1` file tree, `2` agent, `3` Git status, `4` conflict, `5` inline edit, `6` inline ask, `7` prompt, `8` picker, `9` completion, `10` command completion, `11` search, `12` focused hover popup, `13` empty launchpad, `14` the tasks drawer |
 | `window_id` | Active BEAM editor window ID, unsigned 32-bit |
 | `generation` | Picker activation, insert completion, command-completion presentation generation, or admitted file-tree edit token; zero for surfaces without a source generation, unsigned 32-bit |
 

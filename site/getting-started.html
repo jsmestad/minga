@@ -181,7 +181,7 @@ minga .</code></pre>
 
           <h3>Two things to know about keys</h3>
           <p>Minga uses Vim keys by default, so a file is always in one of two modes. In <strong>Normal mode</strong> keys are commands. In <strong>Insert mode</strong> keys type text. Press <kbd>i</kbd> to enter Insert mode and <kbd>esc</kbd> to return to Normal mode.</p>
-          <p>In Normal mode the spacebar, written <kbd>SPC</kbd>, opens a menu of every command. A sequence such as <kbd>SPC a a</kbd> means: press space, then <kbd>a</kbd>, then <kbd>a</kbd>. If you would rather use desktop shortcuts, see <a href="#defaults">the keys section below</a>.</p>
+          <p>In Normal mode the spacebar, written <kbd>SPC</kbd>, opens a menu of every command. A sequence such as <kbd>SPC a v</kbd> means: press space, then <kbd>a</kbd>, then <kbd>v</kbd>. If you would rather use desktop shortcuts, see <a href="#defaults">the keys section below</a>.</p>
         </section>
 
         <section class="essay-section" id="connect-model">
@@ -199,7 +199,7 @@ minga .</code></pre>
           <p>The other providers work the same way: <code>OPENAI_API_KEY</code>, <code>GOOGLE_API_KEY</code>, <code>OPENROUTER_API_KEY</code>, <code>GROQ_API_KEY</code>, <code>MISTRAL_API_KEY</code>, <code>DEEPSEEK_API_KEY</code>.</p>
 
           <h3>If you have no key set, or you use the macOS app</h3>
-          <p>An app started from Finder or the Dock does not get variables you exported in a terminal. Save the key in Minga instead, from the agent view: your conversation with the agent, and the composer where you write to it. If you started with <code>minga .</code>, you are already there. From a file, press <kbd>SPC a a</kbd> in Normal mode. The composer is not focused when the agent view opens, so press <kbd>i</kbd> or click the composer, then type this and press <kbd>↩</kbd>:</p>
+          <p>An app started from Finder or the Dock does not get variables you exported in a terminal. Save the key in Minga instead, from the agent view: your conversation with the agent, and the composer where you write to it. If you started with <code>minga .</code>, you are already there. From a file, press <kbd>SPC a v</kbd> in Normal mode. The composer is not focused when the agent view opens, so press <kbd>i</kbd> or click the composer, then type this and press <kbd>↩</kbd>:</p>
           <div class="code-card">
             <div class="code-header">
               <span>Composer</span>
@@ -223,7 +223,7 @@ minga .</code></pre>
               <span class="step-badge">01</span>
               <div>
                 <h3>Open the agent view</h3>
-                <p>If you started with <code>minga .</code>, you are already there. From a file, press <kbd>SPC a a</kbd> in Normal mode.</p>
+                <p>If you started with <code>minga .</code>, you are already there. From a file, press <kbd>SPC a v</kbd> in Normal mode.</p>
               </div>
             </li>
             <li class="step-item">
@@ -285,8 +285,12 @@ minga .</code></pre>
               <span class="spec-detail"><strong>Save, and quit.</strong> <code>:w</code> and <code>:q</code> work too.</span>
             </li>
             <li class="spec-row">
-              <span class="spec-key"><kbd>SPC a a</kbd></span>
+              <span class="spec-key"><kbd>SPC a v</kbd></span>
               <span class="spec-detail"><strong>Open the agent view,</strong> or return from it to where you were.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key"><kbd>SPC a a</kbd></span>
+              <span class="spec-detail"><strong>Tasks drawer.</strong> Every task Minga is working on, needs-you first. Answer an approval with <kbd>y</kbd>, <kbd>a</kbd>, <kbd>t</kbd> or <kbd>n</kbd>, start a task with <kbd>c</kbd>, close with <kbd>q</kbd>.</span>
             </li>
             <li class="spec-row">
               <span class="spec-key"><kbd>SPC a p</kbd></span>

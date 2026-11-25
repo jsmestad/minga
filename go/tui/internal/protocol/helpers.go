@@ -147,6 +147,8 @@ func opcodeName(opcode byte) string {
 		return "agent help"
 	case generated.OPGuiEditTimeline:
 		return "edit timeline"
+	case generated.OPGuiTasksDrawer:
+		return "tasks drawer"
 	case generated.OPGuiGutterSep:
 		return "gutter separator"
 	case generated.OPGuiCursorline:

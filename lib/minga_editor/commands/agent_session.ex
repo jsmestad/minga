@@ -6,6 +6,7 @@ defmodule MingaEditor.Commands.AgentSession do
   from agent sessions. Extracted from `Commands.Agent` to reduce module size.
   """
 
+  alias MingaAgent.ModelSelection
   alias MingaAgent.ProjectView
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaAgent.Session
@@ -112,7 +113,7 @@ defmodule MingaEditor.Commands.AgentSession do
   @doc """
   Shows the starting Agent workspace in the `:starting` state and starts its session without waiting.
 
-  The workspace is resolved once (the active Agent workspace, else a background one with its own Agent tab) and its id travels with the start through the catalog wait, so the reply binds there even if the user switches away. The live UI changes only when that workspace is active; otherwise its stored UI shows the starting state until the user arrives. A second call while that workspace's start is in flight does nothing. Options: `:session_start_hook_enabled?`, `:recover_interrupted_work?`, and `:follow_up`, work that runs once the session is bound (see `MingaEditor.Agent.SessionStart`).
+  The workspace is resolved once (the active Agent workspace, else a background one with its own Agent tab) and its id travels with the start through the catalog wait, so the reply binds there even if the user switches away. The live UI changes only when that workspace is active; otherwise its stored UI shows the starting state until the user arrives. A second call while that workspace's start is in flight does nothing. Options: `:session_start_hook_enabled?`, `:recover_interrupted_work?`, `:follow_up`, work that runs once the session is bound (see `MingaEditor.Agent.SessionStart`), `:background`, which always starts in a new background workspace, and `:model`, a `MingaAgent.ModelSelection` the new session runs on instead of the configured default.
   """
   @spec start_agent_session(state()) :: state()
   @spec start_agent_session(state(), keyword()) :: state()
@@ -124,9 +125,16 @@ defmodule MingaEditor.Commands.AgentSession do
         Keyword.get(opts, :follow_up)
       )
 
-    case starting_workspace(state) do
+    starting =
+      if Keyword.get(opts, :background, false),
+        do: background_starting_workspace(state),
+        else: starting_workspace(state)
+
+    case starting do
       {state, workspace_id} when is_integer(workspace_id) ->
-        begin_start(state, workspace_id, request)
+        state
+        |> start_on_model(workspace_id, Keyword.get(opts, :model))
+        |> begin_start(workspace_id, request)
 
       {state, nil} ->
         startup_failed(state, StartFailure.no_workspace(request))
@@ -177,6 +185,12 @@ defmodule MingaEditor.Commands.AgentSession do
   end
 
   defp active_start_failure(_state), do: nil
+
+  @spec start_on_model(state(), pos_integer(), ModelSelection.t() | nil) :: state()
+  defp start_on_model(state, _workspace_id, nil), do: state
+
+  defp start_on_model(state, workspace_id, %ModelSelection{} = selection),
+    do: update_workspace_ui(state, workspace_id, &UIState.start_on_model(&1, selection))
 
   @spec begin_start(state(), pos_integer(), StartRequest.t()) :: state()
   defp begin_start(state, workspace_id, %StartRequest{} = request) do
@@ -246,6 +260,7 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec startup_failed(state(), StartFailure.t()) :: state()
   def startup_failed(state, %StartFailure{} = failure) do
     Minga.Log.error(:agent, "[Agent] #{failure.message}")
+    state = fail_drawer_task(state, failure)
 
     TraditionalWorkflow.install_agent_ui(
       state,
@@ -253,9 +268,21 @@ defmodule MingaEditor.Commands.AgentSession do
     )
   end
 
+  # A start the tasks drawer asked for shows its failure on the drawer's row too.
+  @spec fail_drawer_task(state(), StartFailure.t()) :: state()
+  defp fail_drawer_task(
+         state,
+         %StartFailure{remedy: {:retry, %StartRequest{follow_up: follow_up}}} = failure
+       ),
+       do: MingaEditor.Agent.TaskWorkflow.start_failed(state, follow_up, failure.headline)
+
+  defp fail_drawer_task(state, %StartFailure{}), do: state
+
   @doc "Shows a startup failure in the starting workspace, live or stored, and keeps its draft."
   @spec workspace_start_failed(state(), pos_integer(), StartFailure.t()) :: state()
   def workspace_start_failed(state, workspace_id, %StartFailure{} = failure) do
+    state = fail_drawer_task(state, failure)
+
     if active_workspace?(state, workspace_id) do
       startup_failed(state, failure)
     else
@@ -458,6 +485,16 @@ defmodule MingaEditor.Commands.AgentSession do
   end
 
   defp starting_workspace(state), do: {state, nil}
+
+  # A task started from the tasks drawer runs in a workspace of its own, beside the conversation in front and never in
+  # place of another start that has not bound yet.
+  @spec background_starting_workspace(state()) :: {state(), pos_integer() | nil}
+  defp background_starting_workspace(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tabs}}} = state
+       ),
+       do: create_agent_workspace(state, tabs)
+
+  defp background_starting_workspace(state), do: {state, nil}
 
   # A background start reuses only a local workspace a previous start made:
   # never a remote workspace, and never one restored from a saved session
