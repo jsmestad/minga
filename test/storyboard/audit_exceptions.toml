@@ -991,3 +991,77 @@ pairs = [
 ]
 reason = "The echo line's answer uses this theme's muted message text on the status bar, which misses the contrast floor."
 issue = 4137
+
+[[exception]]
+scenario = ["minga.conversation", "minga.conversation.stopped"]
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#282828 on #303446",
+]
+reason = "A capture artefact, not text: the storyboard session lays the composer's prompt pane out narrower than the app does, and the strip of the composer it does not cover shows the Metal layer's clear colour. The dev app at the same size shows no strip."
+issue = 4348
+
+[[exception]]
+scenario = ["minga.conversation", "minga.conversation.stopped"]
+frontend = "macos"
+part = "modeline.modePill"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#eff1f5 on #40a02b",
+]
+reason = "The Insert mode pill draws the theme's base colour on its green, which misses 4.5:1 in this theme (2.96:1), as the Normal pill does on its blue. The conversation is the first scenario captured in Insert."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.conversation", "minga.conversation.stopped"]
+frontend = "macos"
+part = "modeline.modeText"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#eff1f5 on #40a02b",
+]
+reason = "The Insert mode pill draws the theme's base colour on its green, which misses 4.5:1 in this theme (2.96:1), as the Normal pill does on its blue. The conversation is the first scenario captured in Insert."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.conversation.stopped"]
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#696c76 on #111317",
+]
+reason = "The modeline.segment text misses 4.5:1 in this theme: \"Minga stopped\" in the stopped state's muted role colour (3.25:1 or more)."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.conversation.stopped"]
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#838ba7 on #292c3c",
+]
+reason = "The modeline.segment text misses 4.5:1 in this theme: \"Minga stopped\" in the stopped state's muted role colour (3.25:1 or more)."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.conversation", "minga.conversation.stopped"]
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#7c7f93 on #e6e9ef",
+  "#8839ef on #e6e9ef",
+  "#eff1f5 on #40a02b",
+]
+reason = "The modeline.segment text misses 4.5:1 in this theme: the Insert mode pill (the theme's base colour on its green, 2.96:1), and Minga's words in the minga role while it works (4.45:1), and \"Minga stopped\" in the stopped state's muted role colour (3.25:1 or more)."
+issue = 4137

@@ -1,0 +1,122 @@
+# minga storyboard frame v1
+# scenario: minga.conversation.stopped
+# frontend: tui
+# theme: catppuccin_latte
+# size: 80x24
+# cursor: 17,13
+## text
+Spaces · folder minga.conversation.stopped (1 tab) · ▎cpu A 429 with usage_limit
+ ▌ 󰚩 Show the plan limit and…
+ 󰚩 Agent  Resolving model…            Stopped  [Tasks] [History] [Help] [Queue]
+  Transcript ──────────────────────────────────────────────────────────────────
+             that file to review the plan, window and reset time.
+
+   You
+     Also show the reset time in the modeline.
+
+   Minga
+     Also show the reset time in the modeline.
+
+   i System  Stopped
+
+   i System  Agent UI registry online
+  2 messages · Stopped
+ ╭ Prompt                                                                     ╮
+ │ ❯ INSERT  Ask Minga to edit, explain, search, or run tools                 │
+ │Send · Steer · Queue Next · Stop · Attachments · esc ↩ continue · ⌥↩ queue  │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+────────────────────────────────────────────────────────────────────────────────
+ Review files (0)  [All Changes]  ]F  wheel
+No changed files
+  INSERT  [no file] ○ Minga stopped                                    Text 1:1
+## styles (row start-end fg bg attrs)
+0 0-52 #8c8fa1 #ccd0da -
+0 53-79 #1e66f5 #ccd0da bold
+1 0-0 #4c4f69 #eff1f5 -
+1 1-1 #1e66f5 #eff1f5 bold
+1 2-79 #4c4f69 #eff1f5 -
+2 0-0 #4c4f69 #eff1f5 -
+2 1-7 #1e66f5 #ccd0da bold
+2 8-9 #8c8fa1 #ccd0da -
+2 10-25 #1e66f5 #ccd0da -
+2 26-35 #4c4f69 #eff1f5 -
+2 36-36 #8c8fa1 #ccd0da -
+2 37-37 #4c4f69 #7c7f93 -
+2 38-44 #ccd0da #7c7f93 bold
+2 45-45 #4c4f69 #7c7f93 -
+2 46-46 #4c4f69 #eff1f5 -
+2 47-53 #8c8fa1 #ccd0da -
+2 54-54 #4c4f69 #eff1f5 -
+2 55-63 #8c8fa1 #ccd0da -
+2 64-64 #4c4f69 #eff1f5 -
+2 65-70 #8c8fa1 #ccd0da -
+2 71-71 #4c4f69 #eff1f5 -
+2 72-78 #8c8fa1 #ccd0da -
+2 79-79 #4c4f69 #eff1f5 -
+3 0-0 #4c4f69 #eff1f5 -
+3 1-12 #8c8fa1 #eff1f5 bold
+3 13-78 #8c8fa1 #eff1f5 -
+3 79-79 #4c4f69 #eff1f5 -
+4 0-10 #4c4f69 #eff1f5 -
+4 11-64 #8c8fa1 #eff1f5 -
+4 65-79 #4c4f69 #eff1f5 -
+5 0-79 #4c4f69 #eff1f5 -
+6 0-0 #4c4f69 #eff1f5 -
+6 1-5 #1e66f5 #eff1f5 bold
+6 6-79 #4c4f69 #eff1f5 -
+7 0-79 #4c4f69 #eff1f5 -
+8 0-79 #4c4f69 #eff1f5 -
+9 0-0 #4c4f69 #eff1f5 -
+9 1-7 #8839ef #eff1f5 bold
+9 8-79 #4c4f69 #eff1f5 -
+10 0-0 #4c4f69 #eff1f5 -
+10 1-4 #40a02b #eff1f5 -
+10 5-79 #4c4f69 #eff1f5 -
+11 0-79 #4c4f69 #eff1f5 -
+12 0-2 #4c4f69 #eff1f5 -
+12 3-10 #1e66f5 #eff1f5 bold
+12 11-19 #8c8fa1 #eff1f5 -
+12 20-79 #4c4f69 #eff1f5 -
+13 0-79 #4c4f69 #eff1f5 -
+14 0-2 #4c4f69 #eff1f5 -
+14 3-10 #1e66f5 #eff1f5 bold
+14 11-36 #8c8fa1 #eff1f5 -
+14 37-79 #4c4f69 #eff1f5 -
+15 0-0 #4c4f69 #eff1f5 -
+15 1-78 #8c8fa1 #eff1f5 -
+15 79-79 #4c4f69 #eff1f5 -
+16 0-0 #4c4f69 #eff1f5 -
+16 1-78 #1e66f5 #eff1f5 -
+16 79-79 #4c4f69 #eff1f5 -
+17 0-0 #4c4f69 #eff1f5 -
+17 1-1 #1e66f5 #eff1f5 -
+17 2-12 #1e66f5 #eff1f5 bold
+17 13-76 #8c8fa1 #eff1f5 italic
+17 77-77 #4c4f69 #eff1f5 -
+17 78-78 #1e66f5 #eff1f5 -
+17 79-79 #4c4f69 #eff1f5 -
+18 0-0 #4c4f69 #eff1f5 -
+18 1-1 #1e66f5 #eff1f5 -
+18 2-5 #8c8fa1 #eff1f5 -
+18 6-8 #4c4f69 #eff1f5 -
+18 9-13 #8c8fa1 #eff1f5 -
+18 14-16 #4c4f69 #eff1f5 -
+18 17-26 #8c8fa1 #eff1f5 -
+18 27-29 #4c4f69 #eff1f5 -
+18 30-33 #8c8fa1 #eff1f5 -
+18 34-77 #4c4f69 #eff1f5 -
+18 78-78 #1e66f5 #eff1f5 -
+18 79-79 #4c4f69 #eff1f5 -
+19 0-0 #4c4f69 #eff1f5 -
+19 1-78 #1e66f5 #eff1f5 -
+19 79-79 #4c4f69 #eff1f5 -
+20 0-79 #8c8fa1 #ccd0da -
+21 0-79 #1e66f5 #ccd0da bold
+22 0-79 #4c4f69 #ccd0da -
+23 0-0 #8c8fa1 #e6e9ef -
+23 1-1 #4c4f69 #40a02b -
+23 2-7 #eff1f5 #40a02b bold
+23 8-8 #4c4f69 #40a02b -
+23 9-19 #4c4f69 #e6e9ef -
+23 20-34 #7c7f93 #e6e9ef -
+23 35-79 #4c4f69 #e6e9ef -
