@@ -53,7 +53,9 @@ defmodule Minga.Session do
     path = session_file(opts)
     dir = Path.dirname(path)
     json = snapshot |> encodable() |> JSON.encode!()
-    tmp = path <> ".tmp"
+
+    # A unique temp name per write, so a save on quit and a periodic save never interleave in one file.
+    tmp = "#{path}.#{System.unique_integer([:positive])}.tmp"
 
     with :ok <- File.mkdir_p(dir),
          :ok <- File.write(tmp, json),

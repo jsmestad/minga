@@ -102,7 +102,33 @@ defmodule MingaEditor.ProjectSessionTest do
     assert notice_message(editor) == "Restored 1 file from last time"
   end
 
-  test "an editor started on one file neither restores nor saves the project's session", ctx do
+  test "minga <file> neither restores nor saves the project's session", ctx do
+    save_split_session(ctx)
+    saved = File.read!(Session.session_file(session_dir: ctx.sessions, project_root: ctx.root))
+
+    # Production starts the editor empty and the command line opens the file afterwards.
+    editor =
+      start_editor("",
+        empty: true,
+        startup_file: ctx.lib_a,
+        project_root: ctx.root,
+        session_dir: ctx.sessions,
+        rendering: :disabled
+      )
+
+    state = editor_state(editor)
+    refute MingaEditor.Handlers.SessionHandler.persists_project?(state)
+    assert state.workspace.buffers.list == []
+
+    send(editor.editor, :save_session)
+    _ = editor_state(editor)
+
+    assert File.read!(Session.session_file(session_dir: ctx.sessions, project_root: ctx.root)) ==
+             saved
+  end
+
+  test "an editor started with a file buffer neither restores nor saves the project's session",
+       ctx do
     save_split_session(ctx)
     saved = File.read!(Session.session_file(session_dir: ctx.sessions, project_root: ctx.root))
 
