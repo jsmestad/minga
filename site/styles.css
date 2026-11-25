@@ -4840,11 +4840,35 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 }
 
 .demo-steps {
-  margin: 0;
-  padding: 0.85rem 1rem 0.85rem 2.4rem;
+  padding: 0.85rem 1rem;
   border-top: 1px solid var(--border);
   font-size: 0.86rem;
   color: var(--text-secondary);
+}
+
+.story-box .demo-steps p,
+.story-box .demo-steps ol {
+  margin: 0 0 0.6rem;
+  font-size: inherit;
+}
+
+.story-box .demo-steps ol {
+  padding-left: 1.4rem;
+}
+
+.story-box .demo-steps .demo-steps-title {
+  margin-top: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.story-box .demo-steps > :last-child {
+  margin-bottom: 0;
+}
+
+.iso-controls[hidden],
+.st-controls[hidden] {
+  display: none;
 }
 
 .demo-steps.is-enhanced {

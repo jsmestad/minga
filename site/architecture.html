@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Architecture, why it is safe: Minga</title>
-  <meta name="description" content="Why you can let Minga work in your repository: a slow language server or a busy agent does not freeze your typing, and in a session you start from the editor, an edit you approve stays staged until you publish. Two simulations, and the limits.">
+  <meta name="description" content="Why you can let Minga work in your repository: a slow language server or a busy agent does not freeze your typing, and in a project you open in the editor, an edit you approve stays staged until you publish. Two simulations, and the limits.">
   <link rel="canonical" href="https://mingacode.dev/architecture">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#303446" media="(prefers-color-scheme: dark)">
@@ -14,17 +14,17 @@
   <meta property="og:type" content="article">
   <meta property="og:url" content="https://mingacode.dev/architecture">
   <meta property="og:title" content="Architecture, why it is safe: Minga">
-  <meta property="og:description" content="Why you can let Minga work in your repository: a slow language server or a busy agent does not freeze your typing, and in a session you start from the editor, an edit you approve stays staged until you publish. Two simulations, and the limits.">
+  <meta property="og:description" content="Why you can let Minga work in your repository: a slow language server or a busy agent does not freeze your typing, and in a project you open in the editor, an edit you approve stays staged until you publish. Two simulations, and the limits.">
   <meta property="og:image" content="https://mingacode.dev/assets/og-minga.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Architecture, why it is safe: Minga">
-  <meta name="twitter:description" content="Why you can let Minga work in your repository: a slow language server or a busy agent does not freeze your typing, and in a session you start from the editor, an edit you approve stays staged until you publish. Two simulations, and the limits.">
+  <meta name="twitter:description" content="Why you can let Minga work in your repository: a slow language server or a busy agent does not freeze your typing, and in a project you open in the editor, an edit you approve stays staged until you publish. Two simulations, and the limits.">
   <meta name="twitter:image" content="https://mingacode.dev/assets/og-minga.png">
   <meta name="twitter:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
-  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Architecture, why it is safe: Minga","description":"Why you can let Minga work in your repository: a slow language server or a busy agent does not freeze your typing, and in a session you start from the editor, an edit you approve stays staged until you publish. Two simulations, and the limits.","url":"https://mingacode.dev/architecture","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Architecture","item":"https://mingacode.dev/architecture"}]}]}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Architecture, why it is safe: Minga","description":"Why you can let Minga work in your repository: a slow language server or a busy agent does not freeze your typing, and in a project you open in the editor, an edit you approve stays staged until you publish. Two simulations, and the limits.","url":"https://mingacode.dev/architecture","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Architecture","item":"https://mingacode.dev/architecture"}]}]}</script>
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
@@ -69,7 +69,7 @@
       <div class="container">
         <p class="section-index"><span>ARCHITECTURE</span> Why it is safe</p>
         <h1>A slow language server does not freeze your typing. An approved edit waits for you.</h1>
-        <p class="essay-subtitle">You are about to let an agent work in your repository, so two things have to hold. A slow language server or a busy agent does not freeze your typing. And in a session you start from the editor, an edit you approve is staged: the file on disk and your open buffer keep the old text until you publish.</p>
+        <p class="essay-subtitle">You are about to let an agent work in your repository, so two things have to hold. A slow language server or a busy agent does not freeze your typing. And in a project you open in the editor, an edit you approve is staged: the file on disk and your open buffer keep the old text until you publish.</p>
         <p class="essay-subtitle">Neither promise is unlimited. An extension command that hangs does block your keys, and a shell command or a Git commit the agent runs is not a staged edit. This page shows both promises working, then lists where they stop.</p>
         <div class="actions">
           <a class="btn btn-primary" href="#fault-demo">Slow a language server and watch</a>
@@ -88,7 +88,7 @@
               <span class="sim-label">Simulation</span>
               <span>The same keys, in two editors</span>
             </div>
-            <div class="iso-controls">
+            <div class="iso-controls" data-iso-controls hidden>
               <button type="button" class="btn btn-primary" data-iso-fault="slow_server" aria-pressed="false"><span data-iso-label="start">Slow the language server for 3 s</span><span data-iso-label="next" hidden>Show what happens next</span><span data-iso-label="again" hidden>Run again</span></button>
               <button type="button" class="btn" data-iso-fault="parser_crash" aria-pressed="false"><span data-iso-label="start">Crash the parser</span><span data-iso-label="next" hidden>Show what happens next</span><span data-iso-label="again" hidden>Crash it again</span></button>
             </div>
@@ -127,16 +127,22 @@
                 <div class="iso-ed-foot">Runs the language server client and the parser outside the process that handles your keys.</div>
               </div>
             </div>
-            <ol class="demo-steps" data-iso-steps>
-              <li data-step="rest">Press a button above. Both editors get the same keys while one tool misbehaves.</li>
-              <li data-step="slow-during">The language server has not answered. On the left, your keys wait in a queue behind the request. On the right, Minga draws each key as it arrives, because the request went to another process.</li>
-              <li data-step="slow-after">The answer came back. The left editor drew the waiting keys in one jump. Minga had already drawn each one.</li>
-              <li data-step="crash-during">The parser crashed. The left editor ran it in the same process, so the editor is gone. Minga runs the parser as a separate program: only the parser stopped, and you keep typing.</li>
-              <li data-step="crash-after">Minga started a new parser and sent it the file again, so syntax colours recover without you doing anything. The left editor has to be reopened.</li>
-            </ol>
+            <div class="demo-steps" data-iso-steps>
+              <p data-step="rest">Both editors get the same keys while one tool misbehaves.</p>
+              <p class="demo-steps-title">If the language server takes 3 seconds to answer</p>
+              <ol>
+                <li data-step="slow-during">The language server has not answered. On the left, your keys wait in a queue behind the request. On the right, Minga draws each key as it arrives, because the request went to another process.</li>
+                <li data-step="slow-after">The answer came back. The left editor drew the waiting keys in one jump. Minga had already drawn each one.</li>
+              </ol>
+              <p class="demo-steps-title">If the parser crashes</p>
+              <ol>
+                <li data-step="crash-during">The parser crashed. The left editor ran it in the same process, so the editor is gone. Minga runs the parser as a separate program: only the parser stopped, and you keep typing.</li>
+                <li data-step="crash-after">Minga started a new parser and gave it the buffer to read again. Your text and its highlighting stayed where they were the whole time. The left editor has to be reopened.</li>
+              </ol>
+            </div>
           </div>
 
-          <p>Minga does not run that work on the loop that handles your keys. One process takes your keys in order. The language server client, each agent session and the parser are separate processes, so a request to one of them is a message, and your next key does not wait for the answer. When a language server, an agent session, an extension or that key-handling process itself crashes, your open buffers stay as they were, because each buffer is its own process and none of those four owns it.</p>
+          <p>Minga does not run that work on the loop that handles your keys. One process takes your keys in order. The language server client, each agent session and the parser are separate processes, so a request to one of them is a message, and your next key does not wait for the server's answer. When a language server, an agent session, an extension or that key-handling process itself crashes, your open buffers stay as they were, because each buffer is its own process and none of those four owns it.</p>
 
           <h3>Where this promise stops</h3>
           <ul>
@@ -156,7 +162,7 @@
               <span class="sim-label">Simulation</span>
               <span>One staged edit, from read to publish</span>
             </div>
-            <div class="st-controls">
+            <div class="st-controls" data-st-controls hidden>
               <button type="button" class="btn" data-st-nav="back" aria-disabled="true">Back</button>
               <button type="button" class="btn btn-primary" data-st-nav="next"><span data-st-show="1 2 3-clean 3-conflict">Next</span><span data-st-show="4-clean 4-conflict" hidden>Start over</span></button>
               <span class="st-count">Step <span data-st-count>1</span> of 4</span>
@@ -207,22 +213,30 @@
                 </div>
               </div>
             </div>
-            <ol class="demo-steps" data-st-steps>
-              <li data-step="1"><strong>Minga reads the file.</strong> The read comes back with a token for exactly this text. An edit has to send that token back. If the file changed in between, Minga's whole edit is rejected and it has to read again.</li>
-              <li data-step="2"><strong>You approve the edit, and it is staged.</strong> Minga's copy of the file has a new line 12. The file on disk and your open buffer still have the old one.</li>
-              <li data-step="3-clean"><strong>You keep working.</strong> You change line 15 in your buffer. The staged edit is not in your way, and your change is not in its way.</li>
-              <li data-step="3-conflict"><strong>You keep working.</strong> You change line 12 in your buffer, the same line Minga's staged edit replaces.</li>
-              <li data-step="4-clean"><strong>You publish.</strong> Press <kbd>SPC</kbd> <kbd>a</kbd> <kbd>p</kbd> and choose Publish. Minga merges its line 12 with your line 15, writes the file and updates your buffer. Both changes are there.</li>
-              <li data-step="4-conflict"><strong>You publish, and Minga stops.</strong> Both of you changed line 12, so Minga does not overwrite yours. Your line stays in your buffer, Minga's version stays staged, and Minga opens the file's review and tells you to settle the conflict and publish again. You can also discard the staged edit.</li>
-            </ol>
+            <div class="demo-steps" data-st-steps>
+              <ol>
+                <li data-step="1"><strong>Minga reads the file.</strong> The read comes back with a token for exactly this text. An edit has to send that token back. If the file changed in between, Minga's whole edit is rejected and it has to read again.</li>
+                <li data-step="2"><strong>You approve the edit, and it is staged.</strong> Minga's copy of the file has a new line 12. The file on disk and your open buffer still have the old one.</li>
+              </ol>
+              <p class="demo-steps-title">If you edit another line</p>
+              <ol start="3">
+                <li data-step="3-clean"><strong>You keep working.</strong> You change line 15 in your buffer. The staged edit is not in your way, and your change is not in its way.</li>
+                <li data-step="4-clean"><strong>You publish.</strong> Press <kbd>SPC</kbd> <kbd>a</kbd> <kbd>p</kbd> and choose Publish. Minga writes its line 12 to the file and merges it into your buffer, so your buffer has both changes. Your line 15 is still yours to save.</li>
+              </ol>
+              <p class="demo-steps-title">If you edit the same line</p>
+              <ol start="3">
+                <li data-step="3-conflict"><strong>You keep working.</strong> You change line 12 in your buffer, the same line Minga's staged edit replaces.</li>
+                <li data-step="4-conflict"><strong>You publish, and Minga stops.</strong> Both of you changed line 12, so Minga does not overwrite yours. Your line stays in your buffer, Minga's version stays staged, and Minga opens the file's review and tells you to settle the conflict and publish again. You can also discard the staged edit.</li>
+              </ol>
+            </div>
           </div>
 
-          <p>Staged edits are not kept only in memory. Minga saves each one, with the version of the file it was made against, every time the staged set changes. If Minga crashes, the next start for the same project restores them and offers Publish and Discard again. An ordinary quit stops while anything is staged.</p>
+          <p>Staged edits are not kept only in memory. Minga saves each one, with the version of the file it was made against, every time the staged set changes. The exception is a draft over the store's size limit: Minga records it as lost and tells you. If Minga crashes, the next start for the same project restores them and offers Publish and Discard again. An ordinary quit stops while anything is staged.</p>
 
           <h3>Where this promise stops</h3>
           <ul>
-            <li><strong>It holds in a session you start from the editor.</strong> A session that runs without the editor and owns its staging area publishes its edits when it ends normally.</li>
-            <li><strong>It covers Minga's file tools, not shell commands or Git.</strong> A shell command the agent runs is an ordinary program. By default Minga asks you before running one, and it runs in a temporary copy of the project with the staged edits applied. A command that names a path outside that copy can still write there. The agent's Git stage and commit tools also ask first, and then act on your real repository.</li>
+            <li><strong>It holds in a project you open in the editor.</strong> A session that owns its staging area publishes its edits when it ends normally. That is the case when a session runs without the editor, or when the editor has no project open.</li>
+            <li><strong>It covers Minga's file tools, not shell commands or Git.</strong> A shell command the agent runs is an ordinary program. By default Minga asks you before running one, and it runs in a temporary copy of the project with the staged edits applied. A command that names a path outside that copy can still write there. The copy also shares the project's <code>deps</code> directory and its installed <code>node_modules</code> packages, so a command that changes dependencies changes your project. The agent's Git stage and commit tools also ask first, and then act on your real repository.</li>
             <li><strong>A forced quit discards staged edits on purpose.</strong> <code>:q!</code>, <code>:qa!</code> and <code>:cq</code> quit without asking.</li>
             <li><strong>Publish waits for the agent to finish its turn.</strong> While a turn runs, Minga says so and changes nothing.</li>
           </ul>

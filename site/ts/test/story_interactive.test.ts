@@ -60,6 +60,22 @@ describe("Architecture fault simulation & staged edit stepper", () => {
     assert.equal(triggerIsolationFault("slow_server").mingaText, ISOLATION_BASE_LINE);
   });
 
+  it("offers Run again when a run has ended, with or without reduced motion", () => {
+    const done = finishIsolationFault(triggerIsolationFault("slow_server"));
+    assert.equal(faultButtonLabel(done, "slow_server", false), "again");
+    assert.equal(faultButtonLabel(done, "parser_crash", false), "start");
+  });
+
+  it("ignores ticks once a run has ended, and draws later keys in both editors", () => {
+    const done = finishIsolationFault(applyTypedText(triggerIsolationFault("slow_server"), ISOLATION_TYPED));
+    assert.deepEqual(tickIsolationSim(done, 5000), done);
+
+    const later = applyTypedChar(done, "!");
+    assert.equal(later.legacyText, `${ISOLATION_BASE_LINE}${ISOLATION_TYPED}!`);
+    assert.equal(later.legacyText, later.mingaText);
+    assert.equal(later.legacyQueued, 0);
+  });
+
   it("shows the conflict choice changing nothing in steps 1 and 2", () => {
     for (const step of [1, 2] as const) {
       assert.deepEqual(computeStagedSnapshot({ step, conflictMode: true }), computeStagedSnapshot({ step, conflictMode: false }));

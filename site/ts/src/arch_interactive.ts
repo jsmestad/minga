@@ -7,7 +7,8 @@ import { renderElixirLineDom } from "./highlight.ts";
 export type FaultKind = "slow_server" | "parser_crash";
 
 /** Names the caption, badges and footers the page shows. Each value matches a `data-step` and `data-iso-show` key in the page. */
-export type IsolationView = "rest" | "slow-during" | "slow-after" | "crash-during" | "crash-after";
+export const ISOLATION_VIEWS = ["rest", "slow-during", "slow-after", "crash-during", "crash-after"] as const;
+export type IsolationView = (typeof ISOLATION_VIEWS)[number];
 
 export type FaultButtonLabel = "start" | "next" | "again";
 
@@ -90,7 +91,8 @@ export function faultButtonLabel(state: IsolationSimState, kind: FaultKind, redu
 export type StagedStep = 1 | 2 | 3 | 4;
 
 /** Matches a `data-step` and `data-st-show` key in the page. */
-export type StagedViewKey = "1" | "2" | "3-clean" | "3-conflict" | "4-clean" | "4-conflict";
+export const STAGED_VIEW_KEYS = ["1", "2", "3-clean", "3-conflict", "4-clean", "4-conflict"] as const;
+export type StagedViewKey = (typeof STAGED_VIEW_KEYS)[number];
 
 export interface StagedPipelineState {
   readonly step: StagedStep;
@@ -177,13 +179,18 @@ function showOnly(root: HTMLElement, attr: string, key: string): void {
   }
 }
 
-/** Copies one step's page copy into the live caption. Returns false when the page has no such step. */
-function copyStep(steps: HTMLElement | null, caption: HTMLElement | null, key: string): boolean {
+/** Copies one step's page copy into the live caption and hides the static list. When the page has no such step, it shows the static list again instead of leaving a stale caption, and reports the key. */
+function showStep(steps: HTMLElement | null, caption: HTMLElement | null, key: string): void {
   const source = steps?.querySelector<HTMLElement>(`[data-step="${key}"]`);
-  if (!source || !caption) return false;
+  if (!source || !caption) {
+    console.error(`architecture demo: the page has no step "${key}"`);
+    if (caption) caption.hidden = true;
+    steps?.classList.remove("is-enhanced");
+    return;
+  }
   caption.replaceChildren(...Array.from(source.childNodes, (node) => node.cloneNode(true)));
   caption.hidden = false;
-  return true;
+  steps?.classList.add("is-enhanced");
 }
 
 export function mountArchFaultMap(root: HTMLElement): void {
@@ -214,7 +221,7 @@ export function mountArchFaultMap(root: HTMLElement): void {
     if (state.view !== shownView) {
       shownView = state.view;
       showOnly(root, "data-iso-show", state.view);
-      if (copyStep(steps, caption, state.view)) steps?.classList.add("is-enhanced");
+      showStep(steps, caption, state.view);
       legacyPane?.classList.toggle("is-broken", state.view === "slow-during" || state.legacyDead);
       legacyPane?.classList.toggle("is-frozen", state.view === "slow-during");
     }
@@ -282,6 +289,8 @@ export function mountArchFaultMap(root: HTMLElement): void {
     start(kind);
   });
 
+  const controls = root.querySelector<HTMLElement>("[data-iso-controls]");
+  if (controls) controls.hidden = false;
   render();
 }
 
@@ -295,6 +304,7 @@ export function mountStagedStepper(root: HTMLElement): void {
   const back = root.querySelector<HTMLElement>('[data-st-nav="back"]');
 
   let state = createStagedPipelineState();
+  let shownView: StagedViewKey | null = null;
 
   function renderRows(rows: readonly StagedCodeRow[]): void {
     if (!rowsEl) return;
@@ -316,8 +326,11 @@ export function mountStagedStepper(root: HTMLElement): void {
   function render(): void {
     const snap = computeStagedSnapshot(state);
     showOnly(root, "data-st-show", snap.view);
-    if (copyStep(steps, caption, snap.view)) steps?.classList.add("is-enhanced");
-    renderRows(snap.rows);
+    if (snap.view !== shownView) {
+      shownView = snap.view;
+      showStep(steps, caption, snap.view);
+      renderRows(snap.rows);
+    }
     if (count) count.textContent = String(state.step);
     back?.setAttribute("aria-disabled", state.step === 1 ? "true" : "false");
     for (const btn of root.querySelectorAll<HTMLElement>("[data-st-conflict-mode]")) {
@@ -345,5 +358,7 @@ export function mountStagedStepper(root: HTMLElement): void {
     }
   });
 
+  const controls = root.querySelector<HTMLElement>("[data-st-controls]");
+  if (controls) controls.hidden = false;
   render();
 }
