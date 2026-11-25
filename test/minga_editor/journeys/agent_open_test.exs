@@ -157,7 +157,7 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
     assert agent.id != manual.id
 
     send_gui_action(ctx, {:select_tab, manual.id})
-    refute match?(%{visible?: true}, agent_chat(ctx))
+    await_hidden_conversation(ctx)
 
     frame = HeadlessPort.prepare_await(ctx.port)
     send(ctx.editor, {:minga_input, {:gui_action, {:select_tab, agent.id}}})
@@ -426,6 +426,29 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
             "No committed Agent conversation matching #{inspect(expected)}; last model: #{inspect(model)}"
           )
       end
+    end
+  end
+
+  # `send_gui_action/2` returns after the first frame committed once the action is
+  # sent, which can be a render scheduled before the editor handled it (the new
+  # conversation's draft and arrival work renders on its own). Wait for the frame
+  # that shows the conversation gone.
+  defp await_hidden_conversation(ctx),
+    do: await_hidden_conversation(ctx, System.monotonic_time(:millisecond) + 5_000)
+
+  defp await_hidden_conversation(ctx, deadline) do
+    ref = HeadlessPort.prepare_await(ctx.port)
+    model = agent_chat(ctx)
+
+    if match?(%{visible?: true}, model) do
+      timeout = max(deadline - System.monotonic_time(:millisecond), 0)
+
+      case HeadlessPort.collect_frame(ref, timeout) do
+        {:ok, _snapshot} -> await_hidden_conversation(ctx, deadline)
+        {:error, :timeout} -> flunk("The Agent conversation stayed visible: #{inspect(model)}")
+      end
+    else
+      model
     end
   end
 
