@@ -270,7 +270,7 @@ defmodule MingaEditor.PromptUITest do
     end
   end
 
-  describe "handle_key/3 — a yes or no prompt" do
+  describe "handle_key/3: a yes or no prompt" do
     defp confirm_prompt do
       prompt = PromptState.new(:confirm, TestHandler, "Delete? ", context: nil)
 
@@ -281,9 +281,21 @@ defmodule MingaEditor.PromptUITest do
     end
 
     test "y answers yes and n answers no" do
-      for key <- [?y, ?Y, ?n, ?N, @escape] do
+      for {key, outcome} <- [
+            {?y, :submitted},
+            {?Y, :submitted},
+            {?n, :cancelled},
+            {?N, :cancelled},
+            {@escape, :cancelled}
+          ] do
+        Process.delete(:submitted)
+        Process.delete(:cancelled)
+
         {answered, nil} = PromptUI.handle_key(confirm_prompt(), key, 0)
+
         refute PromptUI.open?(answered)
+        assert Process.get(outcome) != nil
+        assert Process.get(if(outcome == :submitted, do: :cancelled, else: :submitted)) == nil
       end
     end
 

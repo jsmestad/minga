@@ -105,8 +105,8 @@ defmodule Minga.Editing.Model.CUA do
   #
   # Modifier bit flags (matching the port protocol):
   #   bit 0 (1)  = Shift
-  #   bit 1 (2)  = Alt/Option
-  #   bit 2 (4)  = Ctrl
+  #   bit 1 (2)  = Ctrl
+  #   bit 2 (4)  = Alt/Option
   #   bit 3 (8)  = Super/Cmd
   #
   # Special codepoints (matching libvaxis / port protocol encoding):

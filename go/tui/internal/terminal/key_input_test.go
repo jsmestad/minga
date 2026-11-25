@@ -236,15 +236,17 @@ func TestWithEnhancedKeyReportingTheRuleDoesNothing(t *testing.T) {
 }
 
 func TestALoneEscapeWithNothingAfterItIsTheEscKeyAfterTheEscapeTimeout(t *testing.T) {
+	// The wait is what lets a sequence split after its first byte be joined. It is the library's, and unchanged.
+	// Under an escape timeout that never ends, a lone Esc is held: nothing delivers it.
+	held := newKeyStream(t, true, noTimeout)
+	held.write("\x1b")
+	held.none()
+
+	// Under the real timeout it is delivered once the timeout ends.
 	stream := newKeyStream(t, true, uv.DefaultEscTimeout)
 	stream.write("\x1b")
-	got, wait := stream.next()
-	if got != escape {
+	if got, _ := stream.next(); got != escape {
 		t.Fatalf("got %+v, want the Esc key", got)
-	}
-	// This wait is what lets a sequence split after its first byte be joined. It is the library's, and unchanged.
-	if wait < uv.DefaultEscTimeout/2 {
-		t.Fatalf("a lone Esc arrived after %v, before the escape timeout of %v could have ended", wait, uv.DefaultEscTimeout)
 	}
 	stream.none()
 
@@ -342,6 +344,8 @@ func TestAMarkInsideAPasteIsNotPasted(t *testing.T) {
 		"no lone ESC at all":                      {"\x1b[200~ab cd\x1b[201~"},
 	} {
 		t.Run(name, func(t *testing.T) {
+			// The library delivers an ESC inside a paste only when its timeout ends, so this runs with the real one.
+			// The pasted text is the same whether the timeout ended before or after the next read.
 			marked, plain := newKeyStream(t, true, uv.DefaultEscTimeout), newKeyStream(t, false, uv.DefaultEscTimeout)
 			for _, write := range writes {
 				marked.write(write)

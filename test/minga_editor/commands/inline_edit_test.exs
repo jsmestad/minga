@@ -131,6 +131,27 @@ defmodule MingaEditor.Commands.InlineEditTest do
     assert Buffer.content(buffer) == "one\ntwo\nthree"
   end
 
+  test "a letter held with Control, Alt or Command neither answers a proposal nor types into the instruction",
+       %{tmp_dir: root} do
+    {state, buffer} = state_with_file(root, "lib/auth.ex", "one\ntwo\nthree")
+    typing = state |> put_visual_selection({0, 0}) |> InlineEditCommand.open()
+    proposal = active_edit(typing, buffer) |> InlineEdit.proposed("ONE\nTWO")
+    proposed = MingaEditor.Shell.Traditional.Workflow.install_inline_edit(typing, proposal)
+
+    # Without enhanced key reporting a terminal sends Esc then y as Alt+y when both arrive together.
+    for mods <- [0x02, 0x04, 0x08] do
+      for answer <- [?y, ?n, ?j, ?k] do
+        assert {:handled, kept} = InlineEditInput.handle_key(proposed, answer, mods)
+        assert active_edit(kept, buffer) == proposal
+      end
+
+      assert {:handled, untyped} = InlineEditInput.handle_key(typing, ?f, mods)
+      assert active_edit(untyped, buffer).prompt == ""
+    end
+
+    assert Buffer.content(buffer) == "one\ntwo\nthree"
+  end
+
   test "accept handles unicode line endings with byte columns", %{tmp_dir: root} do
     {state, buffer} = state_with_file(root, "lib/unicode.ex", "éé\nthree")
     state = state |> put_visual_selection({0, 0}) |> InlineEditCommand.open()
