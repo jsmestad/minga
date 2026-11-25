@@ -587,6 +587,27 @@ defmodule Minga.Buffer.ProcessTest do
       assert {:ok, ^pid} = Buffer.pid_for_path(target)
       assert Buffer.save(pid) == {:error, :buffer_not_saveable}
     end
+
+    @tag :tmp_dir
+    test "a buffer that has just died is not found, although the registry still lists it for a moment",
+         %{tmp_dir: dir} do
+      path = Path.join(dir, "died.txt")
+      File.write!(path, "content")
+
+      for _round <- 1..50 do
+        pid = start_supervised!({BufferProcess, file_path: path}, id: make_ref())
+        assert {:ok, ^pid} = BufferProcess.pid_for_path(path)
+        assert {:ok, ^pid} = BufferProcess.pid_for_file(path)
+
+        monitor = Process.monitor(pid)
+        Process.exit(pid, :kill)
+        assert_receive {:DOWN, ^monitor, :process, ^pid, :killed}
+
+        # The registry removes the entry on its own schedule; the lookups do not wait for it.
+        assert BufferProcess.pid_for_path(path) == :not_found
+        assert BufferProcess.pid_for_file(path) == :not_found
+      end
+    end
   end
 
   describe "special buffer properties" do
