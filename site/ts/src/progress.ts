@@ -9,7 +9,7 @@ export type LessonId = "editing" | "agents" | "elixir" | "remote";
  * A lab that changes its steps changes its list here. Ids left in a visitor's storage from an older lab are not in the list, so they no longer count.
  */
 export const LESSON_STEPS: Readonly<Record<LessonId, readonly string[]>> = {
-  editing: ["which_key", "pin_file", "act_menu", "parity", "dismiss"],
+  editing: ["menu", "group", "open_file", "close"],
   agents: ["find", "edit_undo", "reject", "keep"],
   elixir: ["translated", "copied"],
   remote: ["blocked", "edited", "safe"],

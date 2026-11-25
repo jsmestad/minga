@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { captionChange } from "../src/lab/caption.ts";
 import { esc } from "../src/lab/esc.ts";
 import { createKeycast, keycastPush, keycastText } from "../src/lab/keycast.ts";
-import { capturesKey, focusAfterControlClick, nextVisible, normalizeKey, stepPrefix } from "../src/lab/stage.ts";
+import { capturesKey, displayKey, displayKeys, focusAfterControlClick, nextVisible, normalizeKey, stepPrefix } from "../src/lab/stage.ts";
 import { stepperModel } from "../src/lab/stepper.ts";
 import {
   canGoBack,
@@ -205,6 +205,39 @@ describe("lab kit: keycast", () => {
     // Two sequences stay two entries; the renderer gives each its own element, so they never read as one.
     assert.deepEqual(cast.recent.map(keycastText), ["SPC ,", "x"]);
     assert.equal(cast.recent.length, 2);
+  });
+
+  it("shows each key the way the site writes keys, never the raw name", () => {
+    const cases: readonly [string, string][] = [
+      ["SPC", "SPC"],
+      ["a", "a"],
+      ["K", "K"],
+      [",", ","],
+      ["-", "-"],
+      ["RET", "↩"],
+      ["ESC", "esc"],
+      ["DEL", "⌫"],
+      ["TAB", "Tab"],
+      ["UP", "↑"],
+      ["DOWN", "↓"],
+      ["LEFT", "←"],
+      ["RIGHT", "→"],
+      ["C-j", "⌃J"],
+      ["C-K", "⌃K"],
+      ["C-.", "⌃."],
+      ["C--", "⌃-"],
+      ["M-RET", "⌥↩"],
+      ["D-s", "⌘S"],
+      ["C-M-q", "⌃⌥Q"],
+      ["C-ESC", "⌃esc"],
+      ["F5", "F5"],
+      ["PageDown", "PageDown"],
+    ];
+    for (const [name, shown] of cases) assert.equal(displayKey(name), shown, name);
+    assert.equal(displayKeys(["SPC", "b", "D"]), "SPC b D");
+    assert.equal(displayKeys([]), "");
+    assert.equal(keycastText(["SPC", "ESC"]), "SPC esc");
+    assert.equal(keycastText(["C-j"]), "⌃J");
   });
 
   it("keeps only the newest sequences", () => {

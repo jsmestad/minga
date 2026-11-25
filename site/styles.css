@@ -1292,52 +1292,6 @@ kbd {
   font-size: 0.92rem;
 }
 
-/* Surface parity panels (macOS & Terminal) */
-
-.surface-panel {
-  border: 1px solid var(--border);
-  border-top: 2px solid var(--border-strong);
-  background: var(--bg-elevated);
-  padding: 1.4rem 1.5rem;
-}
-
-.surface-panel-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding-bottom: 0.85rem;
-  margin-bottom: 1rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.surface-panel-head h3 {
-  font-size: 1.05rem;
-}
-
-.surface-panel-tag {
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.surface-panel ul {
-  margin: 0.85rem 0 0;
-  padding-left: 1.15rem;
-  color: var(--text-secondary);
-  font-size: 0.92rem;
-}
-
-.surface-panel li {
-  margin-bottom: 0.45rem;
-}
-
-.surface-panel li:last-child {
-  margin-bottom: 0;
-}
-
 /* Guide directory (open hairline 2-column index) */
 
 .guide-index {
@@ -1888,13 +1842,6 @@ td:first-child {
   .feature-cell {
     padding: 1.25rem 1.15rem;
   }
-  .surface-panel {
-    padding: 1.15rem;
-  }
-  .surface-panel-head {
-    flex-wrap: wrap;
-    gap: 0.25rem 0.75rem;
-  }
   .boundary-band {
     padding: 1.15rem;
     gap: 1.25rem;
@@ -2385,15 +2332,6 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 .lab-cmd-muted {
   margin-left: auto;
   color: var(--text-muted);
-}
-
-.lab-cursor {
-  box-shadow: inset 2px 0 0 0 #8caaee;
-}
-
-.lab-line-rejected {
-  opacity: 0.36;
-  text-decoration: line-through;
 }
 
 .lab-note {
@@ -2892,16 +2830,6 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   min-width: 0;
 }
 
-.workbench-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.55rem 0.85rem;
-  padding: 0.65rem 0.9rem;
-  background: var(--bg-subtle);
-  border-bottom: 1px solid var(--border);
-}
-
 .seg-group {
   display: inline-flex;
   border: 1px solid var(--border);
@@ -2934,11 +2862,6 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   background: var(--cta-bg);
   color: var(--cta-text);
   font-weight: 600;
-}
-
-.seg-btn-reset {
-  margin-left: auto;
-  border: 1px solid var(--border);
 }
 
 .workbench-missions {
@@ -3009,281 +2932,6 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 
 .mission-row.is-done strong {
   color: var(--done);
-}
-
-/* Lesson 02: Playable Mini-Minga Sandbox overlays */
-
-.sb-viewport {
-  border: 0;
-  outline: none;
-}
-
-.sb-viewport:focus-visible {
-  box-shadow: inset 0 0 0 2px var(--you);
-}
-
-.sb-viewport.is-tui {
-  background: #232634;
-}
-
-.sb-tui-chrome {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.45rem 0.9rem;
-  background: #1e2030;
-  border-bottom: 1px solid #ca9ee6;
-  font-size: 0.72rem;
-  color: #ca9ee6;
-}
-
-.sb-stage-body {
-  position: relative;
-}
-
-.sb-whichkey,
-.sb-drawer,
-.sb-act,
-.sb-hover {
-  border-top: 1px solid #51576d;
-  background: #232634;
-  color: #c6d0f5;
-  font-size: 0.76rem;
-}
-
-.sb-wk-head,
-.sb-drawer-head,
-.sb-act-head,
-.sb-hover-head {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.35rem 0.75rem;
-  padding: 0.45rem 0.85rem;
-  background: #1e2030;
-  border-bottom: 1px solid #414559;
-  font-size: 0.72rem;
-}
-
-.sb-wk-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  padding: 0.45rem 0.65rem;
-  gap: 0.35rem;
-}
-
-.sb-wk-item {
-  appearance: none;
-  border: 1px solid transparent;
-  background: transparent;
-  color: #c6d0f5;
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  padding: 0.38rem 0.55rem;
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  cursor: pointer;
-  text-align: left;
-}
-
-.sb-wk-item:hover {
-  background: rgba(140, 170, 238, 0.14);
-  border-color: #414559;
-}
-
-.sb-wk-k {
-  color: #8caaee;
-  font-weight: 700;
-  min-width: 1.6rem;
-}
-
-.sb-wk-grp {
-  color: #ca9ee6;
-  font-weight: 600;
-}
-
-.sb-drawer-close,
-.sb-inline-btn {
-  appearance: none;
-  border: 1px solid #51576d;
-  background: #292c3c;
-  color: #c6d0f5;
-  padding: 0.18rem 0.48rem;
-  font-family: var(--font-mono);
-  font-size: 0.69rem;
-  cursor: pointer;
-}
-
-.sb-drawer-close:hover,
-.sb-inline-btn:hover {
-  border-color: #ca9ee6;
-}
-
-.sb-sw-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.sb-sw-row {
-  display: grid;
-  grid-template-columns: 5rem 7.5rem minmax(0, 1fr) auto auto;
-  gap: 0.55rem;
-  align-items: center;
-  padding: 0.45rem 0.85rem;
-  border-bottom: 1px solid #303446;
-  cursor: pointer;
-}
-
-.sb-sw-row.is-selected {
-  background: rgba(140, 170, 238, 0.16);
-}
-
-.sb-sw-sec {
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  color: #838ba7;
-}
-
-.sb-sw-note {
-  font-size: 0.71rem;
-  color: #ca9ee6;
-  white-space: nowrap;
-}
-
-.sb-sw-pin {
-  appearance: none;
-  border: 1px solid #51576d;
-  background: #292c3c;
-  color: #c6d0f5;
-  padding: 0.18rem 0.5rem;
-  font-family: var(--font-mono);
-  font-size: 0.69rem;
-  cursor: pointer;
-}
-
-.sb-sw-pin:hover {
-  border-color: #8caaee;
-}
-
-.sb-act {
-  border-top: 2px solid #ca9ee6;
-}
-
-.sb-act-decision {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  border-bottom: 1px solid #414559;
-}
-
-.sb-act-half {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: #c6d0f5;
-  padding: 0.65rem 0.75rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.12rem;
-  text-align: center;
-  font-family: var(--font-mono);
-  cursor: pointer;
-}
-
-.sb-act-half + .sb-act-half {
-  border-left: 1px solid #414559;
-}
-
-.sb-act-half.is-preselected {
-  background: rgba(202, 158, 230, 0.18);
-}
-
-.sb-act-half:hover {
-  background: rgba(202, 158, 230, 0.25);
-}
-
-.sb-act-half strong span {
-  color: #ca9ee6;
-  margin-right: 0.2rem;
-}
-
-.sb-act-half small {
-  font-size: 0.69rem;
-  color: #a5adce;
-}
-
-.sb-act-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.sb-act-row {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: #c6d0f5;
-  display: flex;
-  justify-content: space-between;
-  padding: 0.42rem 0.85rem;
-  font-family: var(--font-mono);
-  font-size: 0.73rem;
-  cursor: pointer;
-}
-
-.sb-act-row:hover {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.sb-hover.is-focused {
-  box-shadow: inset 2px 0 0 0 #8caaee;
-}
-
-.sb-hover-body {
-  margin: 0;
-  padding: 0.65rem 0.85rem;
-  font-size: 0.74rem;
-  color: #c6d0f5;
-}
-
-.sb-hover-body code {
-  background: transparent;
-  border: 0;
-  color: #8caaee;
-  white-space: normal;
-}
-
-.sb-hover-foot {
-  display: flex;
-  gap: 0.45rem;
-  padding: 0 0.85rem 0.65rem;
-}
-
-.sb-echo {
-  padding: 0.35rem 0.85rem;
-  background: #232634;
-  border-top: 1px solid #414559;
-  font-size: 0.71rem;
-  color: #a5adce;
-}
-
-.ml-clickable {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  font-family: inherit;
-  font-size: inherit;
-  cursor: pointer;
-  padding: 0;
-}
-
-.ml-pill.ml-clickable {
-  padding: 0.1rem 0.5rem;
-  background: rgba(140, 170, 238, 0.22);
-}
-
-.ml-clickable:hover {
-  text-decoration: underline;
 }
 
 /* Lesson 04: the settings translator and the config builder (site/ts/src/elixir_lab.ts). */
@@ -4065,15 +3713,6 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
     border-left: 0;
     border-top: 1px solid #414559;
   }
-  .sb-sw-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 0.25rem 0.5rem;
-  }
-  .sb-sw-sec,
-  .sb-sw-note,
-  .sb-sw-row > .ml-dim {
-    display: none;
-  }
 }
 
 @media (max-width: 680px) {
@@ -4081,15 +3720,11 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
   .lesson-stage {
     padding: 2rem 0 2.25rem;
   }
-  .sb-wk-grid,
   .away-row {
     grid-template-columns: 1fr;
   }
   .veto-input-row {
     flex-direction: column;
-  }
-  .seg-btn-reset {
-    margin-left: 0;
   }
 }
 
@@ -4345,7 +3980,8 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
 /* Home: a spec becomes a board. The Lesson 03 lab (.ca-lab, below) shows the same spec file, so it shares this block's colour tokens and its line, gutter and mark rules (.sb-line, .sb-gutter, .sb-braid, .sb-you-strand). The stage is a Minga window in the default Catppuccin Frappé theme, so its colours are fixed and do not follow the site theme. The markup's own state is the final frame; a mounted demo sets data-beat, data-rewritten and data-edited on the figure. */
 
 .sb-demo,
-.ca-lab {
+.ca-lab,
+.lk-lab {
   --sb-bg: #303446;
   --sb-mantle: #292c3c;
   --sb-rule: #414559;
@@ -4363,7 +3999,8 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
 }
 
 .sb-demo [hidden],
-.ca-lab [hidden] {
+.ca-lab [hidden],
+.lk-lab [hidden] {
   display: none !important;
 }
 
@@ -4908,7 +4545,11 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
   .ca-lab,
   .ca-lab *,
   .ca-lab *::before,
-  .ca-lab *::after {
+  .ca-lab *::after,
+  .lk-lab,
+  .lk-lab *,
+  .lk-lab *::before,
+  .lk-lab *::after {
     animation: none !important;
     transition: none !important;
   }
@@ -4979,22 +4620,27 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
 }
 
 /* The count stays on one line when the step label next to it wraps. */
-.ca-lab .lab-stepper-count {
+.ca-lab .lab-stepper-count,
+.lk-lab .lab-stepper-count {
   flex: none;
   white-space: nowrap;
 }
 
-.ca-controls {
+.ca-controls,
+.lk-controls {
   align-items: center;
   gap: 0.5rem 1rem;
 }
 
 .ca-lab:not(.lab-live) .lab-keycast,
-.ca-lab:not(.lab-live) .lab-focus-cue {
+.ca-lab:not(.lab-live) .lab-focus-cue,
+.lk-lab:not(.lab-live) .lab-keycast,
+.lk-lab:not(.lab-live) .lab-focus-cue {
   display: none;
 }
 
-.ca-controls .lab-keycast {
+.ca-controls .lab-keycast,
+.lk-controls .lab-keycast {
   min-width: 9rem;
 }
 
@@ -5028,11 +4674,13 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
   background: var(--sb-bg);
 }
 
-.ca-points {
+.ca-points,
+.lk-points {
   max-width: var(--measure);
 }
 
-.ca-takeaway {
+.ca-takeaway,
+.lk-takeaway {
   max-width: var(--measure);
   margin: 1.75rem 0 0;
   color: var(--text);
@@ -5045,7 +4693,8 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
   }
 
   /* The step label wraps to two lines on a phone. The row keeps that height for every step, so the stage does not move. */
-  .ca-lab .lab-stepper {
+  .ca-lab .lab-stepper,
+  .lk-lab .lab-stepper {
     height: 3.4em;
     align-items: flex-start;
   }
@@ -5056,15 +4705,284 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
   }
 
   /* On a phone the hint comes first, on its own row, so it is on screen with the file and names the button under it. */
-  .ca-controls .lab-focus-cue {
+  .ca-controls .lab-focus-cue,
+  .lk-controls .lab-focus-cue {
     order: -1;
     flex-basis: 100%;
   }
 
   /* The hint, the buttons and the keys take up to three rows on a phone. The row keeps that height when a button or the hint goes, so the key under it does not move. */
-  .ca-controls {
+  .ca-controls,
+  .lk-controls {
     min-height: 7.2rem;
     align-content: flex-start;
+  }
+}
+
+/* Lesson 02: find a command through the SPC menu. The stage is the same Minga window as the Lesson 03 lab (.ca-lab, above) and shares its line and gutter rules. The menu and the file switcher sit above the status line and take no room in the layout, so opening or closing one moves neither the text nor the status line. A mounted lab sets data-surface on the figure and shows one menu panel, the switcher or neither. */
+
+.lk-lab {
+  --sb-u: 30px;
+  --sb-font: 0.92rem;
+  margin-top: 0;
+}
+
+/* The stage takes keys only while it has focus, so it shows when it does. */
+.lk-stage {
+  cursor: pointer;
+}
+
+.lk-lab.is-stage-focused .lk-stage:not(:focus-visible) {
+  border-color: var(--sb-minga);
+  box-shadow: 0 0 0 1px var(--sb-minga);
+}
+
+.lk-stage kbd {
+  color: #e6ebff;
+  font-size: inherit;
+}
+
+/* One line for every file name, so the title bar keeps its height when another file opens. */
+.lk-title {
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lk-body {
+  position: relative;
+}
+
+/* The text area keeps the height of twelve lines for every file, so the status line and the caption under the stage never move. */
+.lk-buffer {
+  counter-reset: lk-line;
+  min-height: calc(var(--sb-u) * 12 + 1.7rem);
+}
+
+.lk-buffer .sb-line {
+  counter-increment: lk-line;
+}
+
+.lk-buffer .sb-ln::before {
+  content: counter(lk-line);
+}
+
+.lk-buffer .sb-line:first-child {
+  background: rgba(140, 170, 238, 0.12);
+}
+
+.lk-code .sb-text {
+  white-space: pre-wrap;
+}
+
+.lk-buffer .ckw { color: #ca9ee6; }
+.lk-buffer .cat { color: #8caaee; }
+.lk-buffer .cst { color: #a6d189; }
+.lk-buffer .cnum { color: #ef9f76; }
+
+/* Before the first click: a label on the file itself that says where the keys go. It takes no room, so it comes and goes without moving anything. */
+.lk-cue {
+  display: none;
+  position: absolute;
+  right: 0.8rem;
+  bottom: 0.8rem;
+  margin: 0;
+  padding: 0.3rem 0.65rem;
+  background: #ef9f76;
+  color: #232634;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.lk-lab.lab-live .lk-cue {
+  display: block;
+}
+
+.lk-lab.is-stage-focused .lk-cue {
+  visibility: hidden;
+}
+
+/* The menu and the switcher (docs/design/surfaces.md, "Which-key" and "Switcher"): anchored above the status line, fading in within 120 ms. */
+.lk-menus,
+.lk-switcher {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  border-top: 1px solid var(--sb-rule);
+  background: var(--sb-mantle);
+  font-size: 0.78rem;
+  line-height: 1.6;
+  animation: lk-fade 120ms ease-out both;
+}
+
+@keyframes lk-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.lk-menu {
+  padding: 0.5rem 0.85rem 0.65rem;
+}
+
+.lk-crumb {
+  margin: 0 0 0.35rem;
+  color: var(--sb-dim);
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+}
+
+.lk-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  columns: 11.5rem auto;
+  column-gap: 1.25rem;
+}
+
+.lk-rows li {
+  overflow: hidden;
+  break-inside: avoid;
+  color: #c6d0f5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.lk-rows li:hover,
+.lk-sw-row:hover {
+  background: rgba(140, 170, 238, 0.12);
+}
+
+.lk-rows kbd {
+  display: inline-block;
+  min-width: 2.3em;
+  padding: 0;
+  color: var(--sb-you);
+}
+
+/* A group reads like a row, in the group colour with a chevron after its name. */
+.lk-rows .lk-group {
+  color: var(--sb-minga);
+}
+
+.lk-switcher {
+  padding: 0.45rem 0 0.5rem;
+}
+
+.lk-sw-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.1rem 1rem;
+  margin: 0;
+  padding: 0 0.85rem 0.4rem;
+  border-bottom: 1px solid var(--sb-rule);
+}
+
+.lk-sw-prompt {
+  color: #e6ebff;
+  font-weight: 700;
+}
+
+.lk-sw-hints {
+  color: var(--sb-dim);
+}
+
+.lk-sw-hints kbd {
+  color: #c6d0f5;
+}
+
+.lk-sw-sec {
+  margin: 0.35rem 0 0;
+  padding: 0 0.85rem 0 1.5rem;
+  color: var(--sb-dim);
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.lk-sw-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0.05rem 0.85rem 0.05rem 1.5rem;
+  color: #c6d0f5;
+  cursor: pointer;
+}
+
+.lk-sw-row.is-selected {
+  background: rgba(140, 170, 238, 0.26);
+  color: #e6ebff;
+  font-weight: 700;
+}
+
+/* A changed file carries a thin strand in the you colour at its left edge. */
+.lk-sw-you {
+  position: absolute;
+  top: 0.2rem;
+  bottom: 0.2rem;
+  left: 0.85rem;
+  width: 2px;
+  background: var(--sb-you);
+}
+
+.lk-sw-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--sb-dim);
+  font-weight: 400;
+}
+
+.lk-sw-dot {
+  width: 0.45em;
+  height: 0.45em;
+  border-radius: 50%;
+  background: var(--sb-you);
+}
+
+.lk-pill {
+  cursor: pointer;
+}
+
+/* The longest caption is three lines on a wide screen. The line keeps that height, so the buttons under it do not move. */
+.lk-lab .lab-caption {
+  min-height: 4.65em;
+}
+
+@media (max-width: 900px) {
+  .lk-lab {
+    --sb-u: 28px;
+    --sb-font: 0.8rem;
+  }
+
+  .lk-stage .spine-titlebar {
+    grid-template-columns: 4rem minmax(0, 1fr) 4rem;
+  }
+
+  .lk-rows {
+    columns: 9.5rem auto;
+    column-gap: 0.75rem;
+  }
+
+  .lk-rows kbd {
+    min-width: 1.9em;
+    margin-right: 0.2em;
+  }
+
+  .lk-menus,
+  .lk-switcher {
+    font-size: 0.72rem;
+  }
+
+  /* The longest caption is six lines at 390px. */
+  .lk-lab .lab-caption {
+    min-height: 9.4em;
   }
 }
 

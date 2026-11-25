@@ -9,7 +9,7 @@
  * - onKey returns true only for a key the lab binds. The stage keeps a bound key from the browser (a Control chord included), never Tab or a Command chord.
  *   A lab still answers an unbound key in its caption and returns false, which is how "every key answers" and "Tab always leaves" hold together.
  *
- * Key names and prefix tracking are pure, so a lab's state tests can drive them without a DOM.
+ * Key names, their display form and prefix tracking are pure, so a lab's state tests can drive them without a DOM.
  */
 
 export interface KeyLike {
@@ -77,6 +77,25 @@ export function normalizeKey(event: KeyLike): string | null {
   const typed = typedWithAltGraph(event) || typedWithOption(event);
   const mods = `${event.ctrlKey && !typed ? "C-" : ""}${event.altKey && !typed ? "M-" : ""}${event.metaKey ? "D-" : ""}`;
   return `${mods}${base}`;
+}
+
+const KEY_GLYPHS: Readonly<Record<string, string>> = { RET: "↩", ESC: "esc", DEL: "⌫", TAB: "Tab", UP: "↑", DOWN: "↓", LEFT: "←", RIGHT: "→" };
+const MODIFIER_GLYPHS: Readonly<Record<string, string>> = { "C-": "⌃", "M-": "⌥", "D-": "⌘" };
+
+/**
+ * Writes one key name from normalizeKey the way the site shows keys (docs/design/keys.md, "Notation"): modifiers as Mac glyphs with the letter in capitals,
+ * the Return, Escape, Backspace and arrow keys as the page writes them, and every other key as itself. A caption and the keycast show this form, never the raw name.
+ */
+export function displayKey(name: string): string {
+  const [, mods = "", base = name] = /^((?:[CMD]-)*)(.+)$/su.exec(name) ?? [];
+  const glyphs = (mods.match(/[CMD]-/g) ?? []).map((mod) => MODIFIER_GLYPHS[mod]).join("");
+  const shown = KEY_GLYPHS[base] ?? base;
+  return `${glyphs}${glyphs !== "" && Array.from(shown).length === 1 ? shown.toUpperCase() : shown}`;
+}
+
+/** A key sequence as the site shows it: each key in its display form, with a space between keys. */
+export function displayKeys(keys: readonly string[]): string {
+  return keys.map(displayKey).join(" ");
 }
 
 /**

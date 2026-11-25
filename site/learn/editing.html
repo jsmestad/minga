@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Editing, Keys &amp; Minimal UI: Learn Minga</title>
-  <meta name="description" content="Lesson 02: Play a live keyboard-driven Mini-Minga Sandbox covering the v0.1.0 minimal layout, Doom-first Spacebar leader grammar, pinned files, bottom drawers, the Act Menu, mouse paths, and CUA shortcuts.">
+  <title>Find Any Command with SPC: Learn Minga</title>
+  <meta name="description" content="Lesson 02: you do not have to memorise shortcuts. In a simulated Minga window, press SPC, read the menu, look inside a group, open a file and back out with Esc.">
   <link rel="canonical" href="https://mingacode.dev/learn/editing">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#303446" media="(prefers-color-scheme: dark)">
@@ -13,18 +13,18 @@
   <meta property="og:locale" content="en_US">
   <meta property="og:type" content="article">
   <meta property="og:url" content="https://mingacode.dev/learn/editing">
-  <meta property="og:title" content="Editing, Keys &amp; Minimal UI: Learn Minga">
-  <meta property="og:description" content="Play a live Mini-Minga keyboard sandbox and master Minga's v0.1.0 minimal UI, which-key, Switcher, Act Menu, and CUA profile.">
+  <meta property="og:title" content="Find Any Command with SPC: Learn Minga">
+  <meta property="og:description" content="A hands-on lab: forget the key, press SPC and read the menu. Look inside a group, open a file and back out with Esc.">
   <meta property="og:image" content="https://mingacode.dev/assets/og-minga.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Editing, Keys &amp; Minimal UI: Learn Minga">
-  <meta name="twitter:description" content="Play a live Mini-Minga keyboard sandbox and master Minga's v0.1.0 minimal UI, which-key, Switcher, Act Menu, and CUA profile.">
+  <meta name="twitter:title" content="Find Any Command with SPC: Learn Minga">
+  <meta name="twitter:description" content="A hands-on lab: forget the key, press SPC and read the menu. Look inside a group, open a file and back out with Esc.">
   <meta name="twitter:image" content="https://mingacode.dev/assets/og-minga.png">
   <meta name="twitter:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
-  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Editing, Keys & Minimal UI: Learn Minga","description":"Lesson 02: Play a live keyboard-driven Mini-Minga Sandbox covering the v0.1.0 minimal layout, Doom-first Spacebar leader grammar, pinned files, bottom drawers, the Act Menu, mouse paths, and CUA shortcuts.","url":"https://mingacode.dev/learn/editing","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Learn","item":"https://mingacode.dev/learn/"},{"@type":"ListItem","position":3,"name":"Editing, Keys & Minimal UI","item":"https://mingacode.dev/learn/editing"}]}]}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Find Any Command with SPC: Learn Minga","description":"Lesson 02: you do not have to memorise shortcuts. In a simulated Minga window, press SPC, read the menu, look inside a group, open a file and back out with Esc.","url":"https://mingacode.dev/learn/editing","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Learn","item":"https://mingacode.dev/learn/"},{"@type":"ListItem","position":3,"name":"Find Any Command with SPC","item":"https://mingacode.dev/learn/editing"}]}]}</script>
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
@@ -36,6 +36,8 @@
           document.documentElement.setAttribute("data-theme", saved);
         }
       } catch (_) {}
+      // The labs lay out as live before they mount, so mounting moves nothing. The module's onerror takes this back.
+      document.documentElement.classList.add("labs-pending");
     })();
   </script>
 </head>
@@ -71,128 +73,451 @@
     </div>
     <section class="lesson-stage">
       <div class="container">
-        <p class="learn-breadcrumb"><a href="/learn/">Learn</a> <span>/</span> Lesson 02 of 05 · Interactive Workbench</p>
+        <p class="learn-breadcrumb"><a href="/learn/">Learn</a> <span>/</span> Lesson 02 of 05 · Find any command</p>
         <div class="stage-head">
           <div>
-            <h1>Editing, Keys &amp; Minimal UI</h1>
-            <p class="stage-lead">Click into the live Mini-Minga viewport below and press <kbd>SPC</kbd>, <kbd>SPC ,</kbd>, <kbd>g.</kbd>, <kbd>K</kbd>, or right-click a line to try the v0.1.0 key grammar (<a class="nowrap" href="/docs/0006-the-spine.html">ADR-0006</a>).</p>
+            <h1>Forgot the key? Press SPC.</h1>
+            <p class="stage-lead">Your spec is open and you want a different file. You know Minga can switch files, but you cannot remember the key. You do not have to memorise shortcuts: press <kbd>SPC</kbd> (the space bar), and Minga lists every key you can press next, with a name beside each one. Try it in the file below. It takes four steps.</p>
           </div>
-          <nav class="stage-jumps" aria-label="Lesson sections">
-            <a href="#sandbox">Sandbox</a>
-            <a href="#key-grammar">Key grammar</a>
-            <a href="#surfaces">Drawers &amp; Act Menu</a>
-            <a href="#cua-profile">Mouse &amp; CUA</a>
-          </nav>
         </div>
 
-        <div id="sandbox" data-minga-sandbox>
-          <div class="lab-noscript">Enable JavaScript to use the playable Mini-Minga Sandbox, or read the key grammar and surface rules below.</div>
-        </div>
+        <figure class="spine-figure lk-lab" id="sandbox" data-minga-sandbox>
+          <div class="lab-head">
+            <span class="lab-labels">
+              <span class="lab-title">Find a command</span>
+              <span class="lab-sim-label">Simulation</span>
+            </span>
+            <span class="lab-stepper" data-lab-stepper></span>
+          </div>
+
+            <div class="spine-specimen lk-stage" data-lab-stage role="group" aria-label="Simulated Minga window with the file new_feature.md. Click it or move focus to it, then press the keys the caption names.">
+              <div class="spine-titlebar">
+                <span class="spine-wordmark">minga</span>
+                <span class="lk-title">
+                  <span class="spine-title-file" data-file="spec">new_feature.md</span>
+                  <span class="spine-title-file" data-file="sync" hidden>sync.ex <span>lib/notes</span></span>
+                  <span class="spine-title-file" data-file="sync_test" hidden>sync_test.exs <span>test/notes</span></span>
+                  <span class="spine-title-file" data-file="readme" hidden>README.md</span>
+                </span>
+                <span></span>
+              </div>
+              <div class="lk-body">
+                <div class="sb-buffer lk-buffer" data-file="spec">
+                  <div class="sb-line" data-author="you">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                    <span class="sb-text"><span class="sb-md-h"># Offline sync</span></span>
+                  </div>
+                  <div class="sb-line" data-author="you">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                    <span class="sb-text"></span>
+                  </div>
+                  <div class="sb-line" data-author="you">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                    <span class="sb-text">Notes must work with no connection.</span>
+                  </div>
+                  <div class="sb-line" data-author="you">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                    <span class="sb-text"></span>
+                  </div>
+                  <div class="sb-line" data-author="you">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                    <span class="sb-text"><span class="sb-md-h">## Requirements</span></span>
+                  </div>
+                  <div class="sb-line" data-author="you">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                    <span class="sb-text">- Save notes on the device</span>
+                  </div>
+                  <div class="sb-line" data-author="you">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                    <span class="sb-text">- Sync when online in the background</span>
+                  </div>
+                  <div class="sb-line" data-author="you">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                    <span class="sb-text">- On failure, retry 3 times</span>
+                  </div>
+                  <div class="sb-line" data-author="you">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                    <span class="sb-text">- Show sync status</span>
+                  </div>
+                </div>
+                <div class="sb-buffer lk-buffer lk-code" data-file="sync" hidden>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text"><span class="ckw">defmodule</span> <span class="cat">Notes.Sync</span> <span class="ckw">do</span></span>
+                  </div>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text">  <span class="cat">@moduledoc</span> <span class="cst">&quot;Sends saved notes to the server.&quot;</span></span>
+                  </div>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text"></span>
+                  </div>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text">  <span class="cat">@retries</span> <span class="cnum">3</span></span>
+                  </div>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text"></span>
+                  </div>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text">  <span class="ckw">def</span> run(notes) <span class="ckw">do</span></span>
+                  </div>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text">    <span class="cat">Enum</span>.each(notes, &amp;push/<span class="cnum">1</span>)</span>
+                  </div>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text">  <span class="ckw">end</span></span>
+                  </div>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text"><span class="ckw">end</span></span>
+                  </div>
+                </div>
+                <div class="sb-buffer lk-buffer lk-code" data-file="sync_test" hidden>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text"><span class="ckw">defmodule</span> <span class="cat">Notes.SyncTest</span> <span class="ckw">do</span></span>
+                  </div>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text">  <span class="ckw">use</span> <span class="cat">ExUnit.Case</span>, async: <span class="cnum">true</span></span>
+                  </div>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text"></span>
+                  </div>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text">  <span class="ckw">test</span> <span class="cst">&quot;retries a failed sync&quot;</span> <span class="ckw">do</span></span>
+                  </div>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text">    <span class="ckw">assert</span> <span class="cat">Notes.Sync</span>.run(notes()) == <span class="cnum">:ok</span></span>
+                  </div>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text">  <span class="ckw">end</span></span>
+                  </div>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text"><span class="ckw">end</span></span>
+                  </div>
+                </div>
+                <div class="sb-buffer lk-buffer" data-file="readme" hidden>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text"><span class="sb-md-h"># Notes</span></span>
+                  </div>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text"></span>
+                  </div>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text">A small notes app that works offline.</span>
+                  </div>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text"></span>
+                  </div>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text"><span class="sb-md-h">## Develop</span></span>
+                  </div>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text">- mix deps.get</span>
+                  </div>
+                  <div class="sb-line" data-author="none">
+                    <span class="sb-ln" aria-hidden="true"></span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"></span>
+                    <span class="sb-text">- mix test</span>
+                  </div>
+                </div>
+                <p class="lk-cue">Click here, then press the keys</p>
+                <div class="lk-menus" data-lk-menus hidden>
+                  <div class="lk-menu" data-menu="top" hidden>
+                    <p class="lk-crumb">SPC</p>
+                    <ul class="lk-rows">
+                      <li data-key="SPC"><kbd>SPC</kbd> Find file</li>
+                      <li data-key=","><kbd>,</kbd> Switch file</li>
+                      <li class="lk-group" data-key="a"><kbd>a</kbd> Minga ›</li>
+                      <li class="lk-group" data-key="b"><kbd>b</kbd> Buffers ›</li>
+                      <li class="lk-group" data-key="c"><kbd>c</kbd> Code ›</li>
+                      <li class="lk-group" data-key="f"><kbd>f</kbd> Files ›</li>
+                      <li class="lk-group" data-key="g"><kbd>g</kbd> Git ›</li>
+                      <li class="lk-group" data-key="h"><kbd>h</kbd> Help ›</li>
+                      <li class="lk-group" data-key="o"><kbd>o</kbd> Open ›</li>
+                      <li class="lk-group" data-key="p"><kbd>p</kbd> Project ›</li>
+                      <li class="lk-group" data-key="q"><kbd>q</kbd> Quit ›</li>
+                      <li class="lk-group" data-key="s"><kbd>s</kbd> Search ›</li>
+                      <li class="lk-group" data-key="t"><kbd>t</kbd> Toggles ›</li>
+                      <li class="lk-group" data-key="w"><kbd>w</kbd> Windows ›</li>
+                    </ul>
+                  </div>
+                  <div class="lk-menu" data-menu="a" hidden>
+                    <p class="lk-crumb">SPC › a  Minga</p>
+                    <ul class="lk-rows">
+                      <li data-key="a"><kbd>a</kbd> Tasks</li>
+                      <li data-key="v"><kbd>v</kbd> Conversation</li>
+                      <li data-key="r"><kbd>r</kbd> Review</li>
+                      <li data-key="n"><kbd>n</kbd> New task</li>
+                      <li data-key="i"><kbd>i</kbd> Inspect</li>
+                      <li data-key="w"><kbd>w</kbd> Watch</li>
+                      <li data-key="s"><kbd>s</kbd> Stop</li>
+                      <li data-key="y"><kbd>y</kbd> Keep change</li>
+                      <li data-key="d"><kbd>d</kbd> Reject change</li>
+                      <li data-key="u"><kbd>u</kbd> Reject all…</li>
+                      <li data-key="?"><kbd>?</kbd> Ask about this</li>
+                      <li data-key="e"><kbd>e</kbd> Rewrite selection</li>
+                      <li data-key="W"><kbd>W</kbd> Why this line</li>
+                      <li data-key="A"><kbd>A</kbd> Code autobiography</li>
+                      <li data-key="p"><kbd>p</kbd> Publish edits…</li>
+                      <li class="lk-group" data-key="q"><kbd>q</kbd> Queue ›</li>
+                      <li class="lk-group" data-key="x"><kbd>x</kbd> Context ›</li>
+                      <li class="lk-group" data-key="S"><kbd>S</kbd> Session ›</li>
+                    </ul>
+                  </div>
+                  <div class="lk-menu" data-menu="a_q" hidden>
+                    <p class="lk-crumb">SPC › a › q  Queue</p>
+                    <ul class="lk-rows">
+                      <li data-key="q"><kbd>q</kbd> Open the queue</li>
+                      <li data-key="f"><kbd>f</kbd> Queue a follow-up</li>
+                    </ul>
+                  </div>
+                  <div class="lk-menu" data-menu="a_x" hidden>
+                    <p class="lk-crumb">SPC › a › x  Context</p>
+                    <ul class="lk-rows">
+                      <li data-key="b"><kbd>b</kbd> Attach this buffer</li>
+                      <li data-key="f"><kbd>f</kbd> Attach a project file</li>
+                      <li data-key="d"><kbd>d</kbd> Attach diagnostics</li>
+                      <li data-key="l"><kbd>l</kbd> List attachments</li>
+                    </ul>
+                  </div>
+                  <div class="lk-menu" data-menu="a_S" hidden>
+                    <p class="lk-crumb">SPC › a › S  Session</p>
+                    <ul class="lk-rows">
+                      <li data-key="h"><kbd>h</kbd> Resume a session</li>
+                      <li data-key="R"><kbd>R</kbd> Rename the session</li>
+                      <li data-key="m"><kbd>m</kbd> Pick the model</li>
+                      <li data-key="t"><kbd>t</kbd> Thinking level</li>
+                      <li data-key="l"><kbd>l</kbd> Where it runs</li>
+                      <li data-key="H"><kbd>H</kbd> Retained messages</li>
+                      <li data-key="k"><kbd>k</kbd> Checklist</li>
+                      <li data-key="s"><kbd>s</kbd> Stop the session</li>
+                    </ul>
+                  </div>
+                  <div class="lk-menu" data-menu="b" hidden>
+                    <p class="lk-crumb">SPC › b  Buffers</p>
+                    <ul class="lk-rows">
+                      <li data-key="b"><kbd>b</kbd> Switch file</li>
+                      <li data-key="D"><kbd>D</kbd> Close other buffers</li>
+                      <li data-key="K"><kbd>K</kbd> Close all buffers</li>
+                    </ul>
+                  </div>
+                  <div class="lk-menu" data-menu="c" hidden>
+                    <p class="lk-crumb">SPC › c  Code</p>
+                    <ul class="lk-rows">
+                      <li data-key="d"><kbd>d</kbd> Go to definition</li>
+                      <li data-key="D"><kbd>D</kbd> Find references</li>
+                      <li data-key="x"><kbd>x</kbd> Diagnostics list</li>
+                      <li data-key="v"><kbd>v</kbd> Expand selection</li>
+                      <li data-key="V"><kbd>V</kbd> Shrink selection</li>
+                    </ul>
+                  </div>
+                  <div class="lk-menu" data-menu="f" hidden>
+                    <p class="lk-crumb">SPC › f  Files</p>
+                    <ul class="lk-rows">
+                      <li data-key="o"><kbd>o</kbd> Open a remote file</li>
+                      <li data-key="s"><kbd>s</kbd> Save file</li>
+                    </ul>
+                  </div>
+                  <div class="lk-menu" data-menu="g" hidden>
+                    <p class="lk-crumb">SPC › g  Git</p>
+                    <ul class="lk-rows">
+                      <li data-key="g"><kbd>g</kbd> Git status</li>
+                      <li data-key="s"><kbd>s</kbd> Stage hunk</li>
+                      <li data-key="b"><kbd>b</kbd> Switch branch</li>
+                      <li data-key="B"><kbd>B</kbd> Blame</li>
+                    </ul>
+                  </div>
+                  <div class="lk-menu" data-menu="h" hidden>
+                    <p class="lk-crumb">SPC › h  Help</p>
+                    <ul class="lk-rows">
+                      <li data-key="a"><kbd>a</kbd> Apropos</li>
+                      <li data-key="c"><kbd>c</kbd> Describe command</li>
+                      <li data-key="k"><kbd>k</kbd> Describe key</li>
+                    </ul>
+                  </div>
+                  <div class="lk-menu" data-menu="o" hidden>
+                    <p class="lk-crumb">SPC › o  Open</p>
+                    <ul class="lk-rows">
+                      <li data-key="t"><kbd>t</kbd> Terminal drawer</li>
+                      <li data-key="T"><kbd>T</kbd> New terminal</li>
+                    </ul>
+                  </div>
+                  <div class="lk-menu" data-menu="p" hidden>
+                    <p class="lk-crumb">SPC › p  Project</p>
+                    <ul class="lk-rows">
+                      <li data-key="h"><kbd>h</kbd> Project home</li>
+                      <li data-key="p"><kbd>p</kbd> Switch project</li>
+                    </ul>
+                  </div>
+                  <div class="lk-menu" data-menu="q" hidden>
+                    <p class="lk-crumb">SPC › q  Quit</p>
+                    <ul class="lk-rows">
+                      <li data-key="q"><kbd>q</kbd> Quit</li>
+                      <li data-key="n"><kbd>n</kbd> Start fresh</li>
+                    </ul>
+                  </div>
+                  <div class="lk-menu" data-menu="s" hidden>
+                    <p class="lk-crumb">SPC › s  Search</p>
+                    <ul class="lk-rows">
+                      <li data-key="p"><kbd>p</kbd> Search project</li>
+                      <li data-key="i"><kbd>i</kbd> Document symbols</li>
+                      <li data-key="j"><kbd>j</kbd> Jump list</li>
+                      <li data-key="u"><kbd>u</kbd> Edit timeline</li>
+                      <li data-key="q"><kbd>q</kbd> Quickfix</li>
+                    </ul>
+                  </div>
+                  <div class="lk-menu" data-menu="t" hidden>
+                    <p class="lk-crumb">SPC › t  Toggles</p>
+                    <ul class="lk-rows">
+                      <li data-key="l"><kbd>l</kbd> Line numbers</li>
+                      <li data-key="w"><kbd>w</kbd> Word wrap</li>
+                      <li data-key="i"><kbd>i</kbd> Invisible characters</li>
+                    </ul>
+                  </div>
+                  <div class="lk-menu" data-menu="w" hidden>
+                    <p class="lk-crumb">SPC › w  Windows</p>
+                    <ul class="lk-rows">
+                      <li data-key="v"><kbd>v</kbd> Vertical split</li>
+                      <li data-key="s"><kbd>s</kbd> Horizontal split</li>
+                      <li data-key="d"><kbd>d</kbd> Close window</li>
+                    </ul>
+                  </div>
+                </div>
+                <div class="lk-switcher" data-lk-switcher hidden>
+                  <p class="lk-sw-head"><span class="lk-sw-prompt">Find file ›</span><span class="lk-sw-hints"><kbd>↓</kbd> <kbd>↑</kbd> or <kbd>⌃J</kbd> / <kbd>⌃K</kbd> move · <kbd>↩</kbd> open · <kbd>esc</kbd> close</span></p>
+                  <p class="lk-sw-sec">Changed</p>
+                  <p class="lk-sw-row" data-switch-row="spec"><span class="lk-sw-you" aria-hidden="true"></span><span class="lk-sw-name">new_feature.md</span><span class="lk-sw-note"><span class="lk-sw-dot" aria-hidden="true"></span>not saved</span></p>
+                  <p class="lk-sw-sec">Recent</p>
+                  <p class="lk-sw-row" data-switch-row="sync"><span class="lk-sw-name">sync.ex</span><span class="lk-sw-note">lib/notes</span></p>
+                  <p class="lk-sw-row" data-switch-row="sync_test"><span class="lk-sw-name">sync_test.exs</span><span class="lk-sw-note">test/notes</span></p>
+                  <p class="lk-sw-row" data-switch-row="readme"><span class="lk-sw-name">README.md</span><span class="lk-sw-note"></span></p>
+                </div>
+              </div>
+              <div class="spine-modeline">
+                <div class="ml-left"><span class="ml-pill lk-pill" data-key="SPC">NORMAL</span><span class="ml-file" data-file="spec">new_feature.md</span><span class="ml-file" data-file="sync" hidden>sync.ex</span><span class="ml-file" data-file="sync_test" hidden>sync_test.exs</span><span class="ml-file" data-file="readme" hidden>README.md</span></div>
+                <div class="ml-right"><span class="ml-dim" data-file="spec">markdown</span><span class="ml-dim" data-file="sync" hidden>elixir</span><span class="ml-dim" data-file="sync_test" hidden>elixir</span><span class="ml-dim" data-file="readme" hidden>markdown</span></div>
+              </div>
+            </div>
+
+          <p class="lab-caption" data-lab-caption-line></p>
+          <div class="lab-timeline-controls lk-controls">
+            <button type="button" class="lab-control" data-lk-play hidden>Press the next key for me</button>
+            <button type="button" class="lab-control" data-lk-reset hidden>Start again</button>
+            <span class="lab-keycast" data-lab-keycast aria-hidden="true"></span>
+            <span class="lab-focus-cue">Click the file and press the keys, or tap "Press the next key for me".</span>
+          </div>
+
+          <ol data-lab-steps>
+            <li data-step="menu">
+              <p data-lab-instruction>Press <kbd>SPC</kbd> and read the menu</p>
+              <p data-lab-caption="rest">This is your spec, open in Minga. You want another file, and you cannot remember the key for it. Click the file, then press <kbd>SPC</kbd> (the space bar).</p>
+              <p data-lab-caption="menu_opened"><kbd data-lab-key>SPC</kbd> opened the menu: every key you can press next, with a name beside it. A name that ends in › opens a group. In Minga the menu appears when you pause after <kbd>SPC</kbd>, and never if you type straight through; this lab opens it at once. Next, press <kbd>b</kbd> to look inside Buffers.</p>
+              <p data-lab-caption="vim_file"><kbd data-lab-key>That key</kbd> works in Minga as it does in Vim: inside a file, Vim keys keep their meaning. It is not part of this lab, so nothing moved here. Press <kbd>SPC</kbd> to open the menu.</p>
+              <p data-lab-caption="other_file"><kbd data-lab-key>That key</kbd> is not part of this lab, so nothing changed here. Press <kbd>SPC</kbd> to open the menu.</p>
+              <p data-lab-caption="q_file">In a file, <kbd data-lab-key>q</kbd> is the Vim macro key: in Minga it starts recording a macro, and it closes nothing. This lab does not record macros, so nothing changed. Press <kbd>SPC</kbd> to open the menu.</p>
+              <p data-lab-caption="esc_file"><kbd data-lab-key>esc</kbd> closes a menu or a list. Nothing is open right now, so nothing changed. Press <kbd>SPC</kbd> to open the menu.</p>
+            </li>
+            <li data-step="group">
+              <p data-lab-instruction>Press a group's letter, such as <kbd>b</kbd>, to look inside it</p>
+              <p data-lab-caption="menu_for_group"><kbd data-lab-key>SPC</kbd> opened the menu again. Next, press <kbd>b</kbd> to look inside Buffers, or any other letter with a › after its name.</p>
+              <p data-lab-caption="wrong_group"><kbd data-lab-key>That key</kbd> is the file switcher, and you will open it in the next step. The menu is still open. First look inside a group: press <kbd>b</kbd> for Buffers.</p>
+              <p data-lab-caption="group_opened"><kbd data-lab-key>That key</kbd> opened a group. The line at the top of the menu says where you are, and the rows are the keys you can press from here. Next, press <kbd>⌫</kbd> (Backspace) to go back up one level.</p>
+              <p data-lab-caption="leaf"><kbd data-lab-key>That key</kbd> runs the row you picked in Minga. This lab runs only the file switcher, so the menu closed and nothing else changed. Press <kbd>SPC</kbd> to open the menu again.</p>
+              <p data-lab-caption="unlisted"><kbd data-lab-key>That key</kbd> is not on the menu, so there is nothing to run. Minga drops the keys and closes the menu. Press <kbd>SPC</kbd> to open it again.</p>
+            </li>
+            <li data-step="open_file">
+              <p data-lab-instruction>Press <kbd>SPC ,</kbd> to list your files, then <kbd>↩</kbd> to open one</p>
+              <p data-lab-caption="back_for_switcher"><kbd data-lab-key>⌫</kbd> went back up to the top of the menu, and the menu stayed open. Next, press <kbd>,</kbd> (comma): the row named Switch file.</p>
+              <p data-lab-caption="back_more"><kbd data-lab-key>⌫</kbd> went back up one level. Press <kbd>⌫</kbd> again to reach the top of the menu.</p>
+              <p data-lab-caption="menu_for_switcher"><kbd data-lab-key>SPC</kbd> opened the menu again. Next, press <kbd>,</kbd> (comma): the row named Switch file.</p>
+              <p data-lab-caption="switcher_opened"><kbd data-lab-key>SPC ,</kbd> opened the file switcher: a list of your files, above the status line. The highlight starts on sync.ex. Press <kbd>↓</kbd> or <kbd>↑</kbd> to move it, then <kbd>↩</kbd> (Return) to open the highlighted file.</p>
+              <p data-lab-caption="moved"><kbd data-lab-key>That key</kbd> moved the highlight. <kbd>↩</kbd> (Return) opens the highlighted file, and <kbd>esc</kbd> closes the list without opening anything.</p>
+              <p data-lab-caption="typing_switcher">In Minga, <kbd data-lab-key>that key</kbd> would go into the Find file line as text and narrow the list. This lab does not narrow it. Press <kbd>↓</kbd> or <kbd>↑</kbd> to move, <kbd>↩</kbd> to open a file, or <kbd>esc</kbd> to close.</p>
+              <p data-lab-caption="other_switcher"><kbd data-lab-key>That key</kbd> is not part of this lab, so nothing changed. Press <kbd>↓</kbd> or <kbd>↑</kbd> to move, <kbd>↩</kbd> to open a file, or <kbd>esc</kbd> to close.</p>
+              <p data-lab-caption="file_opened"><kbd data-lab-key>↩</kbd> opened the highlighted file, and the switcher closed by itself. The title bar and the status line now name that file. One thing is left: backing out. Press <kbd>SPC</kbd> to open the menu again.</p>
+              <p data-lab-caption="closed_early"><kbd data-lab-key>esc</kbd> closed what was open, and nothing ran. Press <kbd>SPC</kbd> to open the menu again.</p>
+            </li>
+            <li data-step="close">
+              <p data-lab-instruction>Open the menu again with <kbd>SPC</kbd>, then close it with <kbd>esc</kbd></p>
+              <p data-lab-caption="menu_for_close"><kbd data-lab-key>SPC</kbd> opened the menu. Suppose you opened it by mistake. Press <kbd>esc</kbd> to close it, and nothing runs.</p>
+              <p data-lab-caption="group_for_close"><kbd data-lab-key>That key</kbd> opened a group. You can still back out from here: press <kbd>esc</kbd> to close the whole menu.</p>
+              <p data-lab-caption="back_for_close"><kbd data-lab-key>⌫</kbd> went back up one level. Press <kbd>esc</kbd> to close the whole menu.</p>
+              <p data-lab-caption="switcher_for_close"><kbd data-lab-key>SPC ,</kbd> opened the file switcher. Press <kbd>esc</kbd> to close it without opening a file.</p>
+              <p data-lab-caption="file_opened_again"><kbd data-lab-key>↩</kbd> opened the highlighted file, and the switcher closed by itself. To finish, press <kbd>SPC</kbd> to open the menu, then <kbd>esc</kbd> to close it.</p>
+              <p data-lab-caption="closed_done"><kbd data-lab-key>esc</kbd> closed it, and nothing ran. That is the whole method: press <kbd>SPC</kbd>, read the menu, pick a row, and press <kbd>esc</kbd> when you change your mind. You found the file switcher without remembering a shortcut.</p>
+              <p data-lab-caption="after_done"><kbd data-lab-key>That key</kbd> has nothing left to do: you have finished the lab. Press Start again to run it once more.</p>
+            </li>
+          </ol>
+        </figure>
       </div>
     </section>
 
-    <section class="section" id="key-grammar">
+    <section class="section section-tinted" id="two-rules">
       <div class="container">
         <div class="section-header">
-          <p class="section-index"><span>01</span> Grammar</p>
-          <h2>Chords you can say out loud, Doom first.</h2>
-          <p>Four rules govern every binding so you can predict shortcuts without memorizing them. For current prerelease keys, see <a href="/getting-started">Lesson 01</a>.</p>
+          <p class="section-index"><span>01</span> What you saw</p>
+          <h2>Two rules cover the rest of the keyboard.</h2>
+          <p>You opened a file without knowing its key. The same two rules get you to every other command.</p>
         </div>
 
-        <div class="grid-2">
-          <div class="surface-panel">
-            <div class="surface-panel-head">
-              <h3>1. Mnemonic leader (<kbd>SPC</kbd>)</h3>
-              <span class="surface-panel-tag">Discoverable</span>
-            </div>
-            <p>Pause after <kbd>SPC</kbd> for which-key: <code>a</code> Minga, <code>b</code> buffers, <code>c</code> code, <code>f</code> files, <code>g</code> git, <code>s</code> search, <code>w</code> windows. Groups use trailing <code>›</code> with live counts (<code>Tasks · 1 needs you</code>).</p>
-          </div>
-
-          <div class="surface-panel">
-            <div class="surface-panel-head">
-              <h3>2. Vim inside code; bare keys in drawers</h3>
-              <span class="surface-panel-tag">Context, not toggles</span>
-            </div>
-            <p>Inside files, <kbd>y</kbd> yanks, <kbd>n</kbd> steps search, <kbd>=</kbd> formats, and <kbd>q</kbd> records macros. Bare single letters (<kbd>y</kbd>, <kbd>n</kbd>, <kbd>q</kbd>) live strictly in special buffers like <code>*minga-tasks*</code> and <code>*minga-review*</code>.</p>
-          </div>
-
-          <div class="surface-panel">
-            <div class="surface-panel-head">
-              <h3>3. Navigate without tabs</h3>
-              <span class="surface-panel-tag">Switcher + Pins</span>
-            </div>
-            <p>Open Switcher (<kbd>SPC ,</kbd>) for Pinned, Changed, and Recent files. Pin up to four with <kbd>⌃T</kbd>, jump with <kbd>SPC 1</kbd>–<kbd>4</kbd> (<kbd>⌘1</kbd>–<kbd>4</kbd>), and step history with <kbd>⌃O</kbd> / <kbd>⌃I</kbd>.</p>
-          </div>
-
-          <div class="surface-panel">
-            <div class="surface-panel-head">
-              <h3>4. Established modifiers only</h3>
-              <span class="surface-panel-tag">Predictable chords</span>
-            </div>
-            <p>In live prompts (<kbd>SPC SPC</kbd>, <kbd>SPC s p</kbd>), typing always edits the query; move with <kbd>⌃J</kbd>/<kbd>⌃K</kbd>, open split with <kbd>⌃V</kbd>, and open the Act Menu with <kbd>⌃.</kbd>. macOS keys (<kbd>⌘S</kbd>, <kbd>⌘Z</kbd>, <kbd>⌘W</kbd>) alias leader chords.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="section section-tinted" id="surfaces">
-      <div class="container">
-        <div class="section-header">
-          <p class="section-index"><span>02</span> Surfaces</p>
-          <h2>One drawer at a time, two-level Hover, and the Act Menu.</h2>
-          <p><strong><kbd>q</kbd> closes special buffers and splits</strong>; <strong><kbd>esc</kbd> cancels anything transient</strong>. Panels yield before code drops below 100 columns.</p>
-        </div>
-
-        <ul class="spec-ledger">
-          <li class="spec-row">
-            <span class="spec-key"><kbd>g.</kbd> / <kbd>⌃.</kbd> / Right-click</span>
-            <span class="spec-detail"><strong>The Act Menu leads with the decision.</strong> On yes/no targets, the top bar splits into <code>y</code> Keep and <code>n</code> Reject with consequences; actions below show direct keys on the right so you outgrow the menu.</span>
-          </li>
-          <li class="spec-row">
-            <span class="spec-key"><kbd>K</kbd> then <kbd>K</kbd></span>
-            <span class="spec-detail"><strong>Two-level Hover.</strong> First <kbd>K</kbd> peeks (diagnostic, signature, docs, attribution); second <kbd>K</kbd> focuses it to scroll or copy.</span>
-          </li>
-          <li class="spec-row">
-            <span class="spec-key"><kbd>SPC c d</kbd> / <kbd>SPC c D</kbd></span>
-            <span class="spec-detail"><strong>Definition &amp; references.</strong> Expand/shrink syntax selection with <kbd>SPC c v</kbd> / <kbd>SPC c V</kbd>.</span>
-          </li>
-          <li class="spec-row">
-            <span class="spec-key"><kbd>SPC c x</kbd> / <kbd>SPC g g</kbd></span>
-            <span class="spec-detail"><strong>Diagnostics, git &amp; quickfix.</strong> Step diagnostics (<kbd>]e</kbd>/<kbd>[e</kbd>), git hunks (<kbd>]d</kbd>/<kbd>[d</kbd>), inline blame (<kbd>SPC g B</kbd>), quickfix (<kbd>SPC s q</kbd>), and edit timeline (<kbd>SPC s u</kbd>). See <a href="/docs/agentic-keymap.html">Keymap Reference</a>.</span>
-          </li>
+        <ul class="pillar-list lk-points">
+          <li><strong>The <kbd>SPC</kbd> menu shows what comes next.</strong> Every Minga command starts with <kbd>SPC</kbd>, then a group letter, then an action letter. You only have to remember <kbd>SPC</kbd>: the menu names the rest, one level at a time. The menu is called which-key, after the Emacs and Neovim tool that does the same job.</li>
+          <li><strong>Inside a file, Vim keys keep their Vim meaning.</strong> <kbd>j</kbd> moves down, <kbd>w</kbd> jumps a word, <kbd>i</kbd> lets you type, <kbd>u</kbd> undoes and <kbd>q</kbd> records a macro. Minga never takes a letter away from Vim inside your text, which is why its own commands start with <kbd>SPC</kbd>.</li>
         </ul>
-      </div>
-    </section>
 
-    <section class="section" id="cua-profile">
-      <div class="container">
-        <div class="section-header">
-          <p class="section-index"><span>03</span> Mouse &amp; CUA</p>
-          <h2>First-class mouse paths and desktop shortcuts (:cua).</h2>
-          <p>Every screen works by mouse, and every click teaches its key. Prefer desktop shortcuts? Add <code>set :editing_model, :cua</code>.</p>
-        </div>
-
-        <div class="grid-2">
-          <div class="surface-panel">
-            <div class="surface-panel-head">
-              <h3>Mouse paths</h3>
-              <span class="surface-panel-tag">Every click teaches a key</span>
-            </div>
-            <ul>
-              <li>Click the <code>NORMAL</code> pill for top-level which-key (mirrored in the macOS menu bar).</li>
-              <li>Click any modeline segment (needs-you, file, changes, diagnostics, git) to jump straight there.</li>
-              <li>Right-click anywhere for the Act Menu; hold <kbd>⌘</kbd> on macOS to reveal shortcuts on visible controls.</li>
-            </ul>
-          </div>
-
-          <div class="surface-panel">
-            <div class="surface-panel-head">
-              <h3>Desktop shortcuts (CUA)</h3>
-              <span class="surface-panel-tag">ADR-0007</span>
-            </div>
-            <p><code>:cua</code> (<a href="/docs/0007-cua-is-a-key-profile.html">ADR-0007</a>) binds standard desktop clipboard, undo, save, and palette shortcuts (<code>Cmd+C/V/X/Z/Shift+Z/S</code> on macOS; <code>Ctrl+C/V/X/Z/Y/S</code> and <code>Ctrl+P</code> / <code>Ctrl+Shift+P</code> in the terminal) over the same minimal buffer layout.</p>
-          </div>
-        </div>
+        <p class="lk-takeaway">Backing out is as simple: <kbd>esc</kbd> closes any menu, list or prompt you opened. In Minga's own read-only views, such as the task list, letters are not text, so <kbd>q</kbd> closes the view there.</p>
+        <p class="lk-takeaway">The rest of the keys are in the <a href="/docs/design-keys.html">v0.1.0 key plan</a>. It is the plan for v0.1.0, not the keys of today's build. If you prefer desktop shortcuts to Vim keys, add <code>set :editing_model, :cua</code> to your config file; that option is in today's build, and <a href="/docs/configuration.html">Configuration</a> shows where the line goes.</p>
+        <p class="lk-takeaway">What you can do differently: stop keeping a list of shortcuts. When you want a command, press <kbd>SPC</kbd> and read. The keys you use every day will stick on their own, and then you type them straight through and the menu never appears.</p>
 
         <nav class="lesson-pager" aria-label="Lesson navigation">
           <a class="pager-link" href="/getting-started">
@@ -201,7 +526,7 @@
           </a>
           <a class="pager-link pager-next" href="/learn/agents">
             <span class="pager-dir">Next · Lesson 03 -&gt;</span>
-            <span class="pager-title">Co-Authoring &amp; Parallel Agents</span>
+            <span class="pager-title">You and Minga, in the same file</span>
           </a>
         </nav>
       </div>
@@ -227,6 +552,6 @@
   </footer>
 
   <script defer src="/site.js"></script>
-  <script type="module" src="/assets/learn-labs.js"></script>
+  <script type="module" src="/assets/learn-labs.js" onerror="document.documentElement.classList.add('labs-failed')"></script>
 </body>
 </html>
