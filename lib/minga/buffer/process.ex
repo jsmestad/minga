@@ -3920,7 +3920,26 @@ defmodule Minga.Buffer.Process do
       |> UndoHistory.before_change(nil)
       |> history_in_step(state, document, :after)
 
-    schedule_compaction(%{state | document: document, undo_history: history})
+    {merged, history} = UndoHistory.take_inline_merges(history)
+    state = %{state | document: document, undo_history: history}
+    log_inline_merges(state, merged)
+    schedule_compaction(state)
+  end
+
+  # Steps recording merged on the edit path (past twice the run budget) get the same *Messages* line as a slice's.
+  @spec log_inline_merges(state(), [{UndoHistory.minga_group(), UndoHistory.minga_group()}]) ::
+          :ok
+  defp log_inline_merges(_state, []), do: :ok
+
+  defp log_inline_merges(state, merged) do
+    runs = state.undo_history |> UndoHistory.provenance() |> Provenance.run_count()
+
+    log_to_messages(
+      state,
+      "Compacted Minga's history in #{display_name_from_state(state)} while recording: " <>
+        "merged #{merged_steps(merged)}; #{runs} runs remain",
+      :info
+    )
   end
 
   # A Minga step left the history over its run budget: compact it in slices between messages, off the edit path.

@@ -1394,7 +1394,8 @@ defmodule Minga.Buffer.UndoHistoryTest do
   # was absorbed into). Two differences are the contract of merging, and each is recognized by its mechanism:
   #
   # 1. A press that reverts a merged step takes its whole class: the steps the compacted press reverted beyond the
-  #    plain one are members of a class it reverted, or groups that depend on such a member.
+  #    plain one are members of a class it reverted, or groups that depend on such a member; or, with the same steps
+  #    after mapping, the compacted press reverted a step the plain press left behind that absorbed another step.
   # 2. A hold on any member holds the class: the steps the plain press reverted and the compacted one did not are in a
   #    class with a step the plain press left behind.
   #
@@ -1446,19 +1447,34 @@ defmodule Minga.Buffer.UndoHistoryTest do
     missing = MapSet.difference(reverted, taken)
     provenance = UndoHistory.provenance(compacted_before.history)
 
+    plain_groups = for {group, _key} <- plain_before.history.minga, do: group
+    left = plain_groups -- Map.get(plain, :pressed, [])
+    left_behind = finals.(left)
+
+    # Consequence 1 with the same steps after mapping: the compacted press reverted a step the plain press left
+    # behind that an absorbed step merged into, or one a step it left behind was absorbed into.
+    absorbers = absorbed |> Map.values() |> MapSet.new()
+
+    absorbed_left? =
+      Enum.any?(left, fn group ->
+        into = final_step(group, absorbed)
+        into in taken and (into != group or group in absorbers)
+      end)
+
     takes_class? =
       MapSet.size(missing) == 0 and
-        Enum.all?(extra, fn step ->
-          Enum.any?(taken, fn member ->
-            step in class.(member) or step in finals.(dependents_of(provenance, class.(member)))
-          end)
-        end)
-
-    plain_groups = for {group, _key} <- plain_before.history.minga, do: group
-    left_behind = finals.(plain_groups -- Map.get(plain, :pressed, []))
+        if MapSet.size(extra) == 0,
+          do: absorbed_left?,
+          else:
+            Enum.all?(extra, fn step ->
+              Enum.any?(taken, fn member ->
+                step in class.(member) or
+                  step in finals.(dependents_of(provenance, class.(member)))
+              end)
+            end)
 
     held_class? =
-      MapSet.size(extra) == 0 and
+      MapSet.size(extra) == 0 and MapSet.size(missing) > 0 and
         Enum.all?(missing, fn step ->
           Enum.any?(class.(step), &(&1 in left_behind)) or step in left_behind
         end)

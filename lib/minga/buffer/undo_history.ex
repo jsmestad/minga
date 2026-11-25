@@ -145,7 +145,8 @@ defmodule Minga.Buffer.UndoHistory do
             over_budget_reported: false,
             before: nil,
             step_ticks: %{},
-            merges: %{}
+            merges: %{},
+            inline_merged: []
 
   @opaque t :: %__MODULE__{
             provenance: Provenance.t(),
@@ -169,7 +170,8 @@ defmodule Minga.Buffer.UndoHistory do
             over_budget_reported: boolean(),
             before: Document.t() | nil,
             step_ticks: %{Provenance.group_id() => Entry.tick()},
-            merges: %{Provenance.group_id() => MapSet.t(Provenance.group_id())}
+            merges: %{Provenance.group_id() => MapSet.t(Provenance.group_id())},
+            inline_merged: [{minga_group(), minga_group()}]
           }
 
   @doc """
@@ -324,8 +326,8 @@ defmodule Minga.Buffer.UndoHistory do
       target = max(limit, runs - added)
       done? = &(Provenance.run_count(&1.provenance) <= target)
       work = max(6 * added, @inline_compaction_floor)
-      {history, _examined, _merged} = compact_until(history, work, 0, [], done?)
-      history
+      {history, _examined, merged} = compact_until(history, work, 0, [], done?)
+      %{history | inline_merged: merged ++ history.inline_merged}
     else
       history
     end
@@ -375,6 +377,13 @@ defmodule Minga.Buffer.UndoHistory do
   def before_change(%__MODULE__{} = history, document)
       when is_struct(document, Document) or is_nil(document),
       do: %{history | before: document}
+
+  @doc """
+  Returns the steps recording merged on the edit path since the last call, as `{older, newer}` in the order they merged, and the history without them. The owner names them in *Messages*, as it does a slice's.
+  """
+  @spec take_inline_merges(t()) :: {[{minga_group(), minga_group()}], t()}
+  def take_inline_merges(%__MODULE__{inline_merged: merged} = history),
+    do: {Enum.reverse(merged), %{history | inline_merged: []}}
 
   @doc "Returns whether a Minga step left the history over its run budget, so the owner should run `compact_slice/2`."
   @spec compaction_wanted?(t()) :: boolean()

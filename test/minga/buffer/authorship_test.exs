@@ -251,6 +251,32 @@ defmodule Minga.Buffer.AuthorshipTest do
       assert BufferProcess.content(buffer) == original
     end
 
+    test "steps merged while recording, past twice the budget, are named in *Messages* too" do
+      registry = Module.concat(__MODULE__, "Events#{System.unique_integer([:positive])}")
+      start_supervised!({Registry, keys: :duplicate, name: registry})
+      :ok = Minga.Events.subscribe(:log_message, registry)
+      original = Enum.map_join(1..40, fn n -> "value_#{n} = beta\n" end)
+
+      buffer =
+        start_supervised!(
+          {BufferProcess, content: original, events_registry: registry, history_run_budget: 10},
+          id: make_ref()
+        )
+
+      for round <- 1..2 do
+        minga_replace(
+          buffer,
+          String.replace(BufferProcess.content(buffer), ~r/beta\d*/, "beta#{round}"),
+          step("t", "s#{round}")
+        )
+      end
+
+      assert_receive {:minga_event, :log_message,
+                      %{text: "Compacted Minga's history in " <> compacted}}
+
+      assert compacted =~ "while recording: merged task t step s1 into task t step s2"
+    end
+
     test "SPC a u reverts what it can, names the line of your edit that holds the rest, and names an edit it drops" do
       registry = Module.concat(__MODULE__, "Events#{System.unique_integer([:positive])}")
       start_supervised!({Registry, keys: :duplicate, name: registry})
@@ -910,9 +936,9 @@ defmodule Minga.Buffer.AuthorshipTest do
       assert text =~ "were reset after an internal error"
     end
 
-    # The buffer process never crashes on broken history bookkeeping: undo and a compaction slice reset the history
-    # and refuse, and the text stays.
-    test "an undo or a compaction slice that raises resets the history instead of crashing the buffer" do
+    # The buffer process never crashes on broken history bookkeeping: undo, redo, SPC a u and a compaction slice reset
+    # the history and refuse, and the text stays.
+    test "an undo, redo, SPC a u or compaction slice that raises resets the history instead of crashing the buffer" do
       registry = Module.concat(__MODULE__, "Events#{System.unique_integer([:positive])}")
       start_supervised!({Registry, keys: :duplicate, name: registry})
       :ok = Minga.Events.subscribe(:log_message, registry)
@@ -931,6 +957,33 @@ defmodule Minga.Buffer.AuthorshipTest do
 
       assert {:error, :history_reset} = BufferProcess.undo(buffer)
       assert BufferProcess.content(buffer) == "Jello"
+
+      assert_receive {:minga_event, :log_message,
+                      %{level: :error, text: "Undo history and authorship" <> _}}
+
+      :sys.replace_state(
+        buffer,
+        &%{&1 | undo_history: %{&1.undo_history | redo_entries: [:broken]}}
+      )
+
+      assert {:error, :history_reset} = BufferProcess.redo(buffer)
+
+      assert_receive {:minga_event, :log_message,
+                      %{level: :error, text: "Undo history and authorship" <> _}}
+
+      :sys.replace_state(buffer, fn state ->
+        history = state.undo_history
+
+        broken = %{
+          history
+          | minga: [{999, {:minga, "t", "s"}}],
+            task_ticks: %{{:minga, "t"} => 1}
+        }
+
+        %{state | undo_history: broken}
+      end)
+
+      assert {:error, :history_reset} = BufferProcess.undo_agent_session(buffer)
 
       assert_receive {:minga_event, :log_message,
                       %{level: :error, text: "Undo history and authorship" <> _}}
