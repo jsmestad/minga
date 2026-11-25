@@ -77,6 +77,29 @@ defmodule Minga.Keymap.Bindings do
     %Node{}
   end
 
+  @doc "Uses the active filetype's `SPC m` bindings when it declares any, otherwise the global group."
+  @spec effective_filetype_group(node_t(), node_t()) :: node_t()
+  def effective_filetype_group(global, %Node{children: children}) when map_size(children) == 0,
+    do: global
+
+  def effective_filetype_group(%Node{} = global, %Node{children: children}),
+    do: %{global | children: children}
+
+  @doc "Projects the active filetype into the root before its reachable groups are enumerated."
+  @spec with_filetype_group(node_t(), node_t()) :: node_t()
+  def with_filetype_group(%Node{children: children} = root, %Node{} = filetype) do
+    case Map.fetch(children, {?m, 0}) do
+      {:ok, %Node{command: nil} = group} ->
+        case effective_filetype_group(group, filetype) do
+          ^group -> root
+          effective -> %{root | children: Map.put(children, {?m, 0}, effective)}
+        end
+
+      _other ->
+        root
+    end
+  end
+
   @doc """
   Binds a key sequence to a command in the trie.
 

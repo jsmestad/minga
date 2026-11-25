@@ -14,9 +14,9 @@ defmodule MingaEditor.State.WhichKey do
         }
 
   @typedoc """
-  Who reads the next key: `:leader` for a leader sequence, whose next key walks the group; `:scope` for the keys of a prompt or picker scope (opened by the mode pill), where the next key goes to the prompt or picker and closes the panel.
+  Who reads the next key: `:leader` walks a leader sequence, `:mode_prefix` leaves the key with the Vim mode, and `:scope` leaves it with the prompt or picker and closes the panel.
   """
-  @type owner :: :leader | :scope
+  @type owner :: :leader | :mode_prefix | :scope
 
   defstruct generation: 0,
             node: nil,
@@ -28,13 +28,14 @@ defmodule MingaEditor.State.WhichKey do
             owner: :leader
 
   @doc "Begins a new hidden which-key generation."
-  @spec begin(t(), Minga.Keymap.Bindings.node_t(), [String.t()]) :: t()
-  def begin(%__MODULE__{} = whichkey, node, prefix_keys) do
+  @spec begin(t(), Minga.Keymap.Bindings.node_t(), [String.t()], :leader | :mode_prefix) :: t()
+  def begin(%__MODULE__{} = whichkey, node, prefix_keys, owner \\ :leader) do
     %__MODULE__{
       generation: whichkey.generation + 1,
       node: node,
       prefix_keys: prefix_keys,
-      labels: labels([], node, prefix_keys)
+      labels: labels([], node, prefix_keys),
+      owner: owner
     }
   end
 
@@ -94,7 +95,7 @@ defmodule MingaEditor.State.WhichKey do
 
   @spec node_label(Minga.Keymap.Bindings.node_t(), [String.t()]) :: String.t()
   # The leader's own crumb names it, as the boards do: `SPC Leader`.
-  defp node_label(_node, [_leader]), do: "Leader"
+  defp node_label(_node, ["SPC"]), do: "Leader"
 
   defp node_label(%{description: description}, _prefix) when is_binary(description),
     do: description

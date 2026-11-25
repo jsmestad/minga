@@ -353,6 +353,7 @@ defmodule MingaEditor do
     EventBus.subscribe(:buffer_opened, events_registry)
     EventBus.subscribe(:buffer_closed, events_registry)
     EventBus.subscribe(:buffer_crashed, events_registry)
+    EventBus.subscribe(:buffer_filetype_changed, events_registry)
 
     # Refresh file tree state when buffers, project files, git, diagnostics, or project roots change.
     EventBus.subscribe(:buffer_saved, events_registry)
@@ -1721,27 +1722,104 @@ defmodule MingaEditor do
   @spec refresh_gui_config_state(EditorState.t()) :: EditorState.t()
   def refresh_gui_config_state(%MingaEditor.State{frontend: %{capabilities: caps}} = state) do
     if MingaEditor.Frontend.gui?(caps) do
+      buffer = state.workspace.buffers.active
+      filetype = gui_menu_filetype(buffer)
+
       snapshot =
         MingaEditor.Frontend.Protocol.GUI.config_state(
           state.interaction.options_server,
           state.interaction.keymap_server
         )
         |> MingaEditor.RenderModel.UI.ConfigStateBuilder.from_wire()
-        |> MingaEditor.RenderModel.UI.ConfigStateBuilder.with_leader_menu(
-          state.interaction.keymap_server
-          |> Minga.Keymap.leader_trie()
-          |> MingaEditor.RenderModel.UI.LeaderMenuBuilder.build()
-        )
+        |> put_gui_leader_menu(state.interaction.keymap_server, filetype)
 
-      %{
-        state
-        | appearance: MingaEditor.State.Appearance.cache_gui_config(state.appearance, snapshot)
-      }
+      cache_gui_config(state, snapshot, {buffer, filetype})
     else
       state
     end
   catch
     :exit, _ -> state
+  end
+
+  @doc "Refreshes the native menu when the active buffer changes or its filetype is invalidated."
+  @spec refresh_gui_leader_menu(EditorState.t(), :active_buffer | pid() | nil) :: EditorState.t()
+  def refresh_gui_leader_menu(state, source \\ :active_buffer)
+
+  def refresh_gui_leader_menu(%{appearance: %{gui_menu_source: nil}} = state, _source),
+    do: state
+
+  def refresh_gui_leader_menu(
+        %{workspace: %{buffers: %{active: buffer}}, appearance: %{gui_menu_source: {buffer, _}}} =
+          state,
+        :active_buffer
+      ),
+      do: state
+
+  def refresh_gui_leader_menu(state, :active_buffer),
+    do: refresh_gui_leader_menu(state, state.workspace.buffers.active)
+
+  def refresh_gui_leader_menu(
+        %{workspace: %{buffers: %{active: buffer}}, appearance: appearance} = state,
+        buffer
+      ) do
+    filetype = gui_menu_filetype(buffer)
+    source = {buffer, filetype}
+
+    case appearance.gui_menu_source do
+      ^source ->
+        state
+
+      {_old_buffer, ^filetype} ->
+        cache_gui_config(state, appearance.gui_config_state, source)
+
+      {_old_buffer, _old_filetype} ->
+        snapshot =
+          put_gui_leader_menu(
+            appearance.gui_config_state,
+            state.interaction.keymap_server,
+            filetype
+          )
+
+        cache_gui_config(state, snapshot, source)
+    end
+  catch
+    :exit, _ -> state
+  end
+
+  def refresh_gui_leader_menu(state, _inactive_buffer), do: state
+
+  @spec gui_menu_filetype(pid() | nil) :: atom()
+  defp gui_menu_filetype(nil), do: :text
+
+  defp gui_menu_filetype(buffer) do
+    Minga.Buffer.filetype(buffer)
+  catch
+    :exit, _ -> :text
+  end
+
+  @spec put_gui_leader_menu(Minga.RenderModel.UI.ConfigState.t(), Minga.Keymap.server(), atom()) ::
+          Minga.RenderModel.UI.ConfigState.t()
+  defp put_gui_leader_menu(snapshot, keymap, filetype) do
+    items =
+      MingaEditor.RenderModel.UI.LeaderMenuBuilder.build(
+        Minga.Keymap.leader_trie(keymap),
+        Minga.Keymap.filetype_trie(keymap, filetype)
+      )
+
+    MingaEditor.RenderModel.UI.ConfigStateBuilder.with_leader_menu(snapshot, items)
+  end
+
+  @spec cache_gui_config(
+          EditorState.t(),
+          Minga.RenderModel.UI.ConfigState.t(),
+          MingaEditor.State.Appearance.gui_menu_source()
+        ) :: EditorState.t()
+  defp cache_gui_config(state, snapshot, source) do
+    %{
+      state
+      | appearance:
+          MingaEditor.State.Appearance.cache_gui_config(state.appearance, snapshot, source)
+    }
   end
 
   @spec apply_runtime_config_option(EditorState.t(), atom(), term()) :: EditorState.t()

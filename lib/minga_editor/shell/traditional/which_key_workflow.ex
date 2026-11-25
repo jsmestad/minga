@@ -1,6 +1,7 @@
 defmodule MingaEditor.Shell.Traditional.WhichKeyWorkflow do
   @moduledoc "Effectful timer workflow for the pure which-key lifecycle owner."
 
+  alias Minga.Mode.State, as: ModeState
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay
@@ -9,21 +10,52 @@ defmodule MingaEditor.Shell.Traditional.WhichKeyWorkflow do
   @default_timeout_ms 300
 
   @doc "Begins a delayed generation unless an exclusive modal owns input."
-  @spec begin(EditorState.t(), Minga.Keymap.Bindings.node_t(), [String.t()]) :: EditorState.t()
-  def begin(%{shell_runtime: %{state: %{modal: modal}}} = state, _node, _prefix_keys)
+  @spec begin(
+          EditorState.t(),
+          Minga.Keymap.Bindings.node_t(),
+          [String.t()],
+          :leader | :mode_prefix
+        ) ::
+          EditorState.t()
+  def begin(state, node, prefix_keys, owner \\ :leader)
+
+  def begin(%{shell_runtime: %{state: %{modal: modal}}} = state, _node, _prefix_keys, _owner)
       when modal != :none,
       do: state
 
-  def begin(state, node, prefix_keys) do
+  def begin(state, node, prefix_keys, owner) do
     cancel_timer(state.shell_runtime.state.whichkey.timer)
 
     state =
       state
       |> update_shell_state(&ShellState.suppress_lower_transients/1)
-      |> update_shell_state(&ShellState.begin_whichkey(&1, node, prefix_keys))
+      |> update_shell_state(&ShellState.begin_whichkey(&1, node, prefix_keys, owner))
 
     schedule(state)
   end
+
+  @doc "Projects a changed Vim prefix into which-key without taking ownership of its next key."
+  @spec sync_mode_prefix(EditorState.t(), Minga.Mode.state(), Minga.Mode.state()) ::
+          EditorState.t()
+  def sync_mode_prefix(
+        %{shell_runtime: %{state: %ShellState{}}} = state,
+        %ModeState{prefix_keys: previous},
+        %ModeState{prefix_node: node, prefix_keys: keys}
+      )
+      when is_map(node) and keys != previous,
+      do: begin(state, node, Enum.reverse(keys), :mode_prefix)
+
+  def sync_mode_prefix(state, _previous, %ModeState{prefix_node: node}) when is_map(node),
+    do: state
+
+  def sync_mode_prefix(
+        %{shell_runtime: %{state: %{whichkey: %WhichKey{owner: :mode_prefix}}}} = state,
+        _previous,
+        _next
+      ),
+      do: dismiss(state)
+
+  def sync_mode_prefix(state, _previous, _next), do: state
 
   @doc "Advances a leader prefix unless an exclusive modal owns input. `label` names a group whose node has no description."
   @spec progress(EditorState.t(), Minga.Keymap.Bindings.node_t(), [String.t()], String.t() | nil) ::

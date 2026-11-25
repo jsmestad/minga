@@ -281,6 +281,7 @@ defmodule MingaEditor.Input.WhichKeyMouseTest do
     ctx = start_editor("defmodule Demo do\nend\n", file_path: path, project_root: dir)
 
     send_gui_action(ctx, {:execute_command, "which_key_open"})
+    assert "Filetype ›" in whichkey_labels(ctx)
     send_keys_sync(ctx, "m")
 
     assert shown_path(ctx) == "SPC m"

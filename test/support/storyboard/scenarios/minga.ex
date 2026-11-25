@@ -32,9 +32,10 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
   def entries do
     [
       Entry.built("minga.whichkey",
-        reach: "SPC a (pause)",
+        reach: "1 SPC a (pause)",
         # Mode pill, then the Minga row.
         click_reach: [
+          {:gui_action, {:empty_state_activate, "recent-1"}},
           {:gui_action, {:execute_command, "which_key_open"}},
           {:gui_action, {:which_key_press, "SPC", ?a, 0}}
         ],

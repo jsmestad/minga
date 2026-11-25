@@ -1132,7 +1132,8 @@ private extension RenderCommand {
         case .guiFocusOwner: 64
         case .guiAgentHelp: 65
         case .agentDesktopNotification: 66
-        case .guiMenuBar: 67
+        case .guiTasksDrawer: 67
+        case .guiMenuBar: 68
         }
     }
 }

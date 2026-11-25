@@ -10,15 +10,19 @@ defmodule MingaEditor.State.Appearance do
   alias Minga.RenderModel.UI.ConfigState
   alias MingaEditor.UI.Theme
 
+  @type gui_menu_source :: {pid() | nil, atom()}
+
   @type t :: %__MODULE__{
           theme: Theme.t(),
           font_size_override: pos_integer() | nil,
-          gui_config_state: ConfigState.t() | nil
+          gui_config_state: ConfigState.t() | nil,
+          gui_menu_source: gui_menu_source() | nil
         }
 
   defstruct theme: MingaEditor.UI.Theme.Fallback.theme(),
             font_size_override: nil,
-            gui_config_state: nil
+            gui_config_state: nil,
+            gui_menu_source: nil
 
   @doc "Selects the active editor theme."
   @spec select_theme(t(), Theme.t()) :: t()
@@ -32,7 +36,7 @@ defmodule MingaEditor.State.Appearance do
       do: %{appearance | font_size_override: size}
 
   @doc "Caches the semantic native settings snapshot emitted in-frame."
-  @spec cache_gui_config(t(), ConfigState.t() | nil) :: t()
-  def cache_gui_config(%__MODULE__{} = appearance, snapshot),
-    do: %{appearance | gui_config_state: snapshot}
+  @spec cache_gui_config(t(), ConfigState.t() | nil, gui_menu_source() | nil) :: t()
+  def cache_gui_config(%__MODULE__{} = appearance, snapshot, menu_source \\ nil),
+    do: %{appearance | gui_config_state: snapshot, gui_menu_source: menu_source}
 end

@@ -369,7 +369,7 @@ struct GUIWhichKeyDecoderTests {
     }
 }
 
-// MARK: - gui_menu_bar (0xAC)
+// MARK: - gui_menu_bar (0xAD)
 
 @Suite("GUI Menu Bar Decoder")
 struct GUIMenuBarDecoderTests {

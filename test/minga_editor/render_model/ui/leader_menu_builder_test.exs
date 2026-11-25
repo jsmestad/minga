@@ -1,6 +1,7 @@
 defmodule MingaEditor.RenderModel.UI.LeaderMenuBuilderTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Keymap.Bindings
   alias Minga.Keymap.Defaults
   alias MingaEditor.RenderModel.UI.LeaderMenuBuilder
 
@@ -31,5 +32,20 @@ defmodule MingaEditor.RenderModel.UI.LeaderMenuBuilderTest do
 
     assert %{command: "save", platform_key: "⌘S"} = items["f s"]
     assert %{command: "quit_all", platform_key: "⌘Q"} = items["q q"]
+  end
+
+  test "the active filetype replaces the global Filetype commands but not the group" do
+    global =
+      Bindings.bind(Defaults.leader_trie(), [{?m, 0}, {?x, 0}], :minibuffer, "Global action")
+
+    filetype = Bindings.bind(Bindings.new(), [{?a, 0}], :alternate_file, "Alternate file")
+
+    fallback = Map.new(LeaderMenuBuilder.build(global), &{&1.path, &1})
+    active = Map.new(LeaderMenuBuilder.build(global, filetype), &{&1.path, &1})
+
+    assert %{label: "Filetype", kind: :group} = active["m"]
+    assert %{command: "minibuffer"} = fallback["m x"]
+    refute Map.has_key?(active, "m x")
+    assert %{command: "alternate_file"} = active["m a"]
   end
 end

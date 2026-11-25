@@ -315,7 +315,7 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       expected = [
         # The mode pill is the mouse's front door: a click opens which-key, as SPC and a pause do.
         mode: {"SPC", :which_key_open},
-        needs_you: {"SPC a a", :toggle_agentic_view},
+        needs_you: {"SPC a a", :agent_tasks},
         filename: {"SPC ,", :buffer_list},
         minga: {"SPC a v", :toggle_agent_split},
         errors: {"SPC c x", :diagnostics_list},

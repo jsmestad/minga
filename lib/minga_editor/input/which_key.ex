@@ -23,6 +23,14 @@ defmodule MingaEditor.Input.WhichKey do
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
   def handle_key(
+        %{shell_runtime: %{state: %{whichkey: %MingaEditor.State.WhichKey{owner: :mode_prefix}}}} =
+          state,
+        _codepoint,
+        _modifiers
+      ),
+      do: {:passthrough, state}
+
+  def handle_key(
         %{shell_runtime: %{state: %{whichkey: %MingaEditor.State.WhichKey{node: node}}}} = state,
         @key_escape,
         _modifiers

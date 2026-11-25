@@ -11,8 +11,9 @@ defmodule MingaEditor.RenderModel.UI.LeaderMenuBuilder do
   alias MingaEditor.RenderModel.UI.WhichKeyBuilder
   alias MingaEditor.UI.WhichKey.Binding
 
-  @spec build(Bindings.node_t()) :: [ConfigState.menu_item()]
-  def build(%Bindings.Node{} = leader_trie), do: items(leader_trie, [])
+  @spec build(Bindings.node_t(), Bindings.node_t()) :: [ConfigState.menu_item()]
+  def build(%Bindings.Node{} = leader_trie, filetype_trie \\ Bindings.new()),
+    do: leader_trie |> Bindings.with_filetype_group(filetype_trie) |> items([])
 
   @spec items(Bindings.node_t(), [String.t()]) :: [ConfigState.menu_item()]
   defp items(node, prefix) do

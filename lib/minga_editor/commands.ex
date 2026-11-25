@@ -216,30 +216,31 @@ defmodule MingaEditor.Commands do
   # ── Leader / which-key (return action tuples) ─────────────────────────────
 
   def execute(state, {:leader_start, node}) do
-    MingaEditor.Shell.Traditional.WhichKeyWorkflow.begin(
+    node = leader_with_filetype(state, node)
+
+    state
+    |> Editing.set_leader_node(node)
+    |> MingaEditor.Shell.Traditional.WhichKeyWorkflow.begin(node, leader_keys_from_mode(state))
+  end
+
+  def execute(state, {:leader_progress, node}) do
+    MingaEditor.Shell.Traditional.WhichKeyWorkflow.progress(
       state,
       node,
       leader_keys_from_mode(state)
     )
   end
 
-  def execute(state, {:leader_progress, node}) do
-    prefix_keys = leader_keys_from_mode(state)
-    {effective_node, state} = maybe_substitute_filetype_trie(state, node)
-
-    MingaEditor.Shell.Traditional.WhichKeyWorkflow.progress(
+  # The CUA space leader keeps no mode leader state, so it names the prefix itself.
+  def execute(state, {:leader_start, node, prefix_keys}) when is_list(prefix_keys) do
+    MingaEditor.Shell.Traditional.WhichKeyWorkflow.begin(
       state,
-      effective_node,
-      prefix_keys,
-      node.description
+      leader_with_filetype(state, node),
+      prefix_keys
     )
   end
 
-  # The CUA space leader keeps no mode leader state, so it names the prefix itself.
-  def execute(state, {:leader_start, node, prefix_keys}) when is_list(prefix_keys),
-    do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.begin(state, node, prefix_keys)
-
-  # `SPC m` opens the active buffer's filetype keys here too, as the Vim leader's 2-tuple form does.
+  # A CUA chord may enter a raw group directly, without reading the assembled root.
   def execute(state, {:leader_progress, node, prefix_keys}) when is_list(prefix_keys) do
     {node, label} = filetype_group(state, prefix_keys, node)
     MingaEditor.Shell.Traditional.WhichKeyWorkflow.progress(state, node, prefix_keys, label)
@@ -1004,7 +1005,7 @@ defmodule MingaEditor.Commands do
   defp filetype_group(state, ["SPC", "m"], node) do
     ft_trie = filetype_trie_for(state, current_filetype(state))
     label = filetype_group_label(state)
-    if ft_trie.children == %{}, do: {node, label}, else: {ft_trie, label}
+    {Bindings.effective_filetype_group(node, ft_trie), label}
   end
 
   defp filetype_group(_state, _prefix_keys, node), do: {node, nil}
@@ -1019,24 +1020,9 @@ defmodule MingaEditor.Commands do
     :exit, _ -> nil
   end
 
-  @spec maybe_substitute_filetype_trie(EditorState.t(), Bindings.node_t()) ::
-          {Bindings.node_t(), EditorState.t()}
-  defp maybe_substitute_filetype_trie(state, node) do
-    case Editing.mode_state(state) do
-      %{leader_keys: ["m", "SPC"]} ->
-        filetype = current_filetype(state)
-        ft_trie = filetype_trie_for(state, filetype)
-
-        if ft_trie.children == %{} do
-          {node, state}
-        else
-          state = Editing.set_leader_node(state, ft_trie)
-          {ft_trie, state}
-        end
-
-      _ ->
-        {node, state}
-    end
+  @spec leader_with_filetype(EditorState.t(), Bindings.node_t()) :: Bindings.node_t()
+  defp leader_with_filetype(state, root) do
+    Bindings.with_filetype_group(root, filetype_trie_for(state, current_filetype(state)))
   end
 
   @spec current_filetype(EditorState.t()) :: atom()

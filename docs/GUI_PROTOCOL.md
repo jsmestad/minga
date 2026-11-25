@@ -1401,8 +1401,10 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x6E | agent_composer_queue | `prompt_generation(8) + attachment_offer(8) + kind(1) + session_id(string16) + request_id(string16) + sequence(8)` | Queue the displayed draft for the exact active turn. Kind `0` steers; kind `1` queues a follow-up. Echo the committed prompt, attachment, and queue identities from the same frame. A stale action does not send, queue, or clear the draft. |
 | 0x6F | agent_start_remedy | `remedy(1)` | Run the remedy the displayed failed start offers: `1` retry, `2` set up provider. The BEAM runs it only while the active Agent tab still offers that remedy, so a click on a stale notice does nothing. |
 | 0x70 | picker_fit | generation(4) + rows(2) | Report how many result rows the frontend's picker list shows. `generation` is the picker's `activation_generation`; `rows` is positive. The BEAM moves a picker page (PageDown, PageUp) by `rows`. |
-| 0x71 | which_key_press | `path(string16) + codepoint(4) + modifiers(1)` | Press a which-key row's key, as if typed. `path` is the open panel's path from `gui_which_key`; the BEAM presses the key only while that panel is still open, so a click on a stale panel does nothing. |
-| 0x72 | which_key_back | `path(string16)` | Go back up to a breadcrumb crumb's `path`. The BEAM goes up only while the open panel is below that path. |
+| 0x71 | tasks_drawer_action | `row_id(string8) + action(string8)` | A click in the tasks drawer. `action` is `select` for the row itself, or the key its control shows (`y`, `a`, `t`, `n`, `=`, `r`, `o`, `i`, `x`, `↩`, `c`), or `q` with an empty row id for the drawer's close control, or `focus` with an empty row id for a click anywhere else in the drawer, which gives it the keyboard without moving the selection. The row id is the identity from `gui_tasks_drawer`, never a position, so the BEAM acts on the task the user saw. |
+| 0x72 | agent_notification_open | `identity(16)` | A click on a "needs you" notification. `identity` is the `agent_desktop_notification` (`0x61`) identity of the clicked alert. The BEAM opens the tasks drawer with the keyboard on that alert's task, selected by identity, and answers nothing: the row shows the task as it is now, and single-letter keys are ignored for 300 ms. An identity the BEAM no longer knows opens the drawer on the first task that needs you. |
+| 0x73 | which_key_press | `path(string16) + codepoint(4) + modifiers(1)` | Press a which-key row's key, as if typed. `path` is the open panel's path from `gui_which_key`; the BEAM presses the key only while that panel is still open, so a click on a stale panel does nothing. |
+| 0x74 | which_key_back | `path(string16)` | Go back up to a breadcrumb crumb's `path`. The BEAM goes up only while the open panel is below that path. |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |
@@ -1446,7 +1448,7 @@ Each option is `name_len(1) + name + type_tag(1) + value_payload`. Type tags are
 
 The frontend sends `config_query` when the Settings window appears. It sends `config_update` for each changed control. The BEAM applies the option immediately and persists GUI-originated changes to `~/.config/minga/gui_settings.exs`, loaded after `config.exs` and `.minga.exs` but before `after.exs`.
 
-## Menu Bar (0xAC)
+## Menu Bar (0xAD)
 
 `gui_menu_bar` is the leader keymap the macOS menu bar mirrors (docs/design/surfaces.md, Mouse, pattern 2). It uses the standard envelope: `opcode(1) + payload_len(2) + payload`, and the payload is `item_count(2) + items`. Each item is `path(string16) + label(string16) + section(string16) + kind(1) + command(string16) + platform_key(string8)`.
 
