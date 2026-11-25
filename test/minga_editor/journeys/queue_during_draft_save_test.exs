@@ -19,7 +19,8 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
 
   @moduletag :tmp_dir
   @capabilities %Capabilities{frontend_type: :native_gui, semantic_ui: true}
-  @ctrl 0x02
+  @alt 0x04
+  @cmd 0x08
 
   setup %{tmp_dir: dir} do
     path = Path.join(dir, "journey.txt")
@@ -46,8 +47,8 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
 
   # {what the key does, the key, the queue the text lands in}
   for {kind, mods, expected} <- [
-        {"a steer", 0, {["later"], []}},
-        {"a follow-up", @ctrl, {[], ["later"]}}
+        {"a steer (⌘↩)", @cmd, {["later"], []}},
+        {"a follow-up (⌥↩)", @alt, {[], ["later"]}}
       ] do
     @mods mods
     @expected expected
@@ -67,7 +68,7 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
          editor_ctx: ctx,
          session: session
        } do
-    press_during_autosave(ctx, session, @ctrl, " still")
+    press_during_autosave(ctx, session, @alt, " still")
 
     assert Session.get_queued_messages(session) == {[], ["later"]}
     {_session, record} = draft_save(ctx).target
