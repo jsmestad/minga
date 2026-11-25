@@ -7,7 +7,6 @@ defmodule MingaEditor.Commands.AgentSubStates do
   """
 
   alias MingaEditor.Agent.PendingApproval
-  alias MingaEditor.Agent.ChatSearch
   alias MingaAgent.FileMention
   alias MingaAgent.ProjectView
   alias MingaAgent.ProjectView.Overlay
@@ -30,41 +29,6 @@ defmodule MingaEditor.Commands.AgentSubStates do
   import Bitwise
 
   @type state :: EditorState.t()
-
-  # ── Search input handling ──────────────────────────────────────────────────
-
-  @doc "Handles a key during active search input."
-  @spec handle_search_key(state(), non_neg_integer()) :: state()
-  def handle_search_key(state, 13) do
-    update_agent_ui(state, &UIState.confirm_search/1)
-  end
-
-  def handle_search_key(state, 27) do
-    saved = UIState.search_saved_scroll(state.workspace.agent_ui)
-    state = update_agent_ui(state, &UIState.cancel_search/1)
-    if saved, do: update_agent_ui(state, &UIState.set_scroll(&1, saved)), else: state
-  end
-
-  def handle_search_key(state, 127) do
-    query = UIState.search_query(state.workspace.agent_ui) || ""
-
-    if query == "" do
-      handle_search_key(state, 27)
-    else
-      new_query = String.slice(query, 0..-2//1)
-      state = update_agent_ui(state, &UIState.update_search_query(&1, new_query))
-      run_search(state, new_query)
-    end
-  end
-
-  def handle_search_key(state, cp) when cp >= 32 and cp <= 126 do
-    char = <<cp::utf8>>
-    query = (UIState.search_query(state.workspace.agent_ui) || "") <> char
-    state = update_agent_ui(state, &UIState.update_search_query(&1, query))
-    run_search(state, query)
-  end
-
-  def handle_search_key(state, _cp), do: state
 
   @doc "Starts search mode in the chat."
   @spec start_search(state()) :: state()
@@ -530,14 +494,6 @@ defmodule MingaEditor.Commands.AgentSubStates do
     Minga.Project.files()
   catch
     :exit, _ -> []
-  end
-
-  @spec run_search(state(), String.t()) :: state()
-  defp run_search(state, query) do
-    items = TranscriptProjection.presentation(state.workspace.agent_ui.panel.transcript)
-    matches = ChatSearch.find_matches(items, query)
-    state = update_agent_ui(state, &UIState.set_search_matches(&1, matches))
-    if matches != [], do: scroll_to_current_match(state), else: state
   end
 
   @spec scroll_to_current_match(state()) :: state()

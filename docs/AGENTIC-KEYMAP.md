@@ -254,7 +254,7 @@ These work in Normal mode without the leader.
 
 | Keys | Action |
 |------|--------|
-| `⌃S` or `⌘S` | Save the file. `⌘S` needs the macOS app or a terminal that reports `⌘` |
+| `⌃S` or `⌘S` | Save the file, in any mode. `⌘S` needs the macOS app or a terminal that reports `⌘` |
 | `⌃Q` | Close the tab. With desktop shortcuts, quit Minga |
 
 ### While the completion menu is open

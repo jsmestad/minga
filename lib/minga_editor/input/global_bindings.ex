@@ -6,7 +6,7 @@ defmodule MingaEditor.Input.GlobalBindings do
   take priority over the mode FSM but yield to modal overlays (conflict
   prompt, picker, completion).
 
-  Cmd+S is the macOS platform key for save (`docs/design/keys.md`, rule 5). The macOS app runs Save from its menu and never sends the key, so it arrives here only from a terminal that reports Cmd (the Kitty keyboard protocol). It saves in every mode, as the menu item does. In the CUA profile the Editor scope binds Cmd+S itself and runs first, so one press saves once.
+  Cmd+S is the macOS platform key for save. It sits here beside Ctrl+S, and not in a scope as an alias under rule 5 of `docs/design/keys.md`, so that it saves in every mode as the macOS menu item does; this handler is outside the key grammar's inventory, as Ctrl+S is. The macOS app runs Save from its menu and never sends the key, so it arrives here only from a terminal that reports Cmd (the Kitty keyboard protocol). In the CUA profile the Editor scope binds Cmd+S itself and runs first, so one press saves once.
   """
 
   @behaviour MingaEditor.Input.Handler
