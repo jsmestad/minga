@@ -784,6 +784,8 @@ An editor that loses your last hour of typing to a crash or a dead battery is no
 
 **Who writes.** Every local file buffer in a VM that runs an interactive editor (`Minga.Session.buffer_swap_dir/0`), including a new buffer that gets its file name later with `:w name`. A headless editor, a benchmark, a storyboard run and a gateway-only runtime write no swap files, because nothing would recover them and a later real session would "recover" text that no user typed.
 
+**Who owns a swap file.** Recovery leaves a swap alone while the run that wrote it is alive, so it must know which run that is. A process id does not say: after a reboot the editor, or any other program, gets the id of a run that crashed. Each swap file records the process id and the moment that run's VM started. A swap with this VM's process id is this run's only when it also carries this VM's start time. A swap with another process id is owned only when the OS reports a running process with that id that started at the recorded moment, and a zombie process owns nothing. Everything else is the text of a run that is gone, and is recovered (`Minga.Session.Swap.owner_alive?/2`).
+
 **When a swap file leaves the disk.** A swap file is the only copy of its text, so it is removed in these cases and no others:
 
 - the buffer is saved or closed;

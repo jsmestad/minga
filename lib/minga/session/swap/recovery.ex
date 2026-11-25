@@ -34,6 +34,7 @@ defmodule Minga.Session.Swap.Recovery do
   @type option ::
           {:swap_dir, String.t()}
           | {:pid_alive?, (integer() -> boolean())}
+          | {:owner_alive?, (Swap.metadata() -> boolean())}
           | {:scope, scope()}
           | {:roots, [String.t()]}
           | {:outside, scope()}
@@ -71,13 +72,15 @@ defmodule Minga.Session.Swap.Recovery do
   ## Options
 
   - `:swap_dir` - override the default swap directory (for testing)
-  - `:pid_alive?` - override the PID liveness check (for testing)
+  - `:owner_alive?` - decides whether the run that wrote a swap is alive (default `Minga.Session.Swap.owner_alive?/1`)
+  - `:pid_alive?` - decides it from the process id alone, and replaces `:owner_alive?` too (for testing)
   - `:scope` - which entries to return (default `:all`); see `t:scope/0`
   """
   @spec scan([option()]) :: [entry()]
   def scan(opts \\ []) do
     dir = Swap.swap_dir(opts)
     pid_alive? = Keyword.get(opts, :pid_alive?, &Swap.pid_alive?/1)
+    owner_alive? = owner_check(opts)
     scope = Keyword.get(opts, :scope, :all)
 
     case File.ls(dir) do
@@ -85,7 +88,7 @@ defmodule Minga.Session.Swap.Recovery do
         sweep_orphaned_temporary_files(dir, files, pid_alive?)
 
         dir
-        |> verdicts(files, pid_alive?)
+        |> verdicts(files, pid_alive?, owner_alive?)
         |> Enum.flat_map(&apply_verdict(&1, scope))
 
       {:error, _} ->
@@ -106,11 +109,12 @@ defmodule Minga.Session.Swap.Recovery do
   def recoverable_projects(opts \\ []) do
     dir = Swap.swap_dir(opts)
     pid_alive? = Keyword.get(opts, :pid_alive?, &Swap.pid_alive?/1)
+    owner_alive? = owner_check(opts)
 
     case File.ls(dir) do
       {:ok, files} ->
         dir
-        |> verdicts(files, pid_alive?)
+        |> verdicts(files, pid_alive?, owner_alive?)
         |> Enum.flat_map(fn
           {:recoverable, entry} -> [entry]
           _removed_or_left_alone -> []
@@ -166,19 +170,31 @@ defmodule Minga.Session.Swap.Recovery do
     end
   end
 
-  @spec verdicts(String.t(), [String.t()], (integer() -> boolean())) :: [verdict()]
-  defp verdicts(dir, files, pid_alive?) do
+  @typep pid_check :: (integer() -> boolean())
+  @typep owner_check :: (Swap.metadata() -> boolean())
+
+  # A parsed swap names its owner run. A caller that decides by process id alone (tests) decides this too.
+  @spec owner_check([option()]) :: owner_check()
+  defp owner_check(opts) do
+    case Keyword.fetch(opts, :pid_alive?) do
+      {:ok, pid_alive?} -> fn meta -> pid_alive?.(meta.os_pid) end
+      :error -> Keyword.get(opts, :owner_alive?, &Swap.owner_alive?/1)
+    end
+  end
+
+  @spec verdicts(String.t(), [String.t()], pid_check(), owner_check()) :: [verdict()]
+  defp verdicts(dir, files, pid_alive?, owner_alive?) do
     files
     |> Enum.filter(&String.ends_with?(&1, ".swap"))
-    |> Enum.map(&verdict(Path.join(dir, &1), pid_alive?))
+    |> Enum.map(&verdict(Path.join(dir, &1), pid_alive?, owner_alive?))
   end
 
   # Decides what a swap file is, without changing anything on disk.
-  @spec verdict(String.t(), (integer() -> boolean())) :: verdict()
-  defp verdict(swap_path, pid_alive?) do
+  @spec verdict(String.t(), pid_check(), owner_check()) :: verdict()
+  defp verdict(swap_path, pid_alive?, owner_alive?) do
     case Swap.read(swap_path) do
       {:ok, meta, content} ->
-        if pid_alive?.(meta.os_pid), do: :left_alone, else: orphan_verdict(meta, content)
+        if owner_alive?.(meta), do: :left_alone, else: orphan_verdict(meta, content)
 
       {:error, :invalid_format} ->
         if owner_alive?(swap_path, pid_alive?), do: :left_alone, else: {:unparseable, swap_path}

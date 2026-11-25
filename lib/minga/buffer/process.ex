@@ -3184,6 +3184,7 @@ defmodule Minga.Buffer.Process do
   defp swap_options(opts, _remote), do: Keyword.put_new(opts, :swap_backend, Minga.Session.Swap)
 
   # A buffer of this run that crashed left its unsaved text at the swap path this buffer is about to use.
+  # So did an earlier run that had this run's OS process id, for a file the startup recovery did not cover.
   # Without this step the next edit would overwrite that text, and a save, a close or a quit would delete it.
   # So a buffer that starts on such a path takes the text and is the owner of that swap file from then on.
   @spec take_kept_swap(state()) :: state()
@@ -3211,7 +3212,7 @@ defmodule Minga.Buffer.Process do
     else
       Minga.Log.info(
         :editor,
-        "Opened #{state.file_path} with the unsaved text that its crashed buffer left in #{swap_path}"
+        "Opened #{state.file_path} with the unsaved text that was kept for it in #{swap_path}"
       )
 
       :ok = warn_if_file_is_newer(state, kept)

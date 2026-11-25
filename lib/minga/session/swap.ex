@@ -29,6 +29,17 @@ defmodule Minga.Session.Swap do
       path=/absolute/path/to/file.ex
       os_pid=12345
       mtime=1711234567
+      run_started=1711230000
+
+  ## Who owns a swap file
+
+  A swap file belongs to one run of the editor, and recovery must leave it alone while that run is alive. An OS process id alone does not identify a run: after a reboot a new run, or any other program, gets the id of a run that crashed. So the owner is the process id together with the moment that run's VM started (`run_started`, seconds since the epoch):
+
+  - a swap with this VM's process id is this run's only when it also carries this VM's start time, which needs no OS call;
+  - a swap with another process id is owned by a live run only when the OS reports a running process with that id that started at the recorded moment (`ps` gives the elapsed time, and a few seconds of difference are allowed);
+  - a process the OS reports as a zombie has exited and owns nothing.
+
+  A swap written before `run_started` existed has only the process id, so it is owned when some other process with that id runs, and never by this VM.
   """
 
   @behaviour Minga.Session.Swap.Backend
@@ -43,8 +54,16 @@ defmodule Minga.Session.Swap do
           path: String.t(),
           os_pid: integer(),
           mtime: integer(),
+          run_started: integer() | nil,
           swap_path: String.t()
         }
+
+  @typedoc "What the OS says about a process id: gone (or a zombie), or running since a moment that is `nil` when it cannot be read."
+  @type process_state :: :gone | {:running, started :: integer() | nil}
+
+  # The VM's start as Erlang records it and the process start that `ps` gives differ by well under a second.
+  # Process ids are not reused within seconds of the same start time, so a few seconds of slack cannot match a stranger.
+  @start_tolerance_s 5
 
   @doc "Returns the swap directory path."
   @spec swap_dir(keyword()) :: String.t()
@@ -100,7 +119,10 @@ defmodule Minga.Session.Swap do
     target = swap_path(file_path, opts)
     tmp = temporary_path(target, Keyword.get(opts, :generation))
 
-    header = "path=#{file_path}\nos_pid=#{os_pid_val}\nmtime=#{System.os_time(:second)}"
+    header =
+      "path=#{file_path}\nos_pid=#{os_pid_val}\nmtime=#{System.os_time(:second)}" <>
+        run_started_field(opts)
+
     header_len = byte_size(header)
     data = <<@magic, header_len::32-big, header::binary, content::binary>>
 
@@ -168,17 +190,117 @@ defmodule Minga.Session.Swap do
     end
   end
 
-  @doc "Checks whether the given OS PID is still running."
+  @doc """
+  Checks whether a process with the given OS process id is running. A zombie counts as gone.
+
+  This says nothing about which program it is. To decide whether a swap file's owner is alive, use `owner_alive?/2`.
+  """
   @spec pid_alive?(integer()) :: boolean()
-  def pid_alive?(os_pid) when is_integer(os_pid) do
-    case System.cmd("kill", ["-0", Integer.to_string(os_pid)],
-           stderr_to_stdout: true,
-           into: ""
-         ) do
-      {_, 0} -> true
-      _ -> false
+  def pid_alive?(os_pid) when is_integer(os_pid), do: process_state(os_pid) != :gone
+
+  @doc """
+  The moment this VM started, in seconds since the epoch. Together with the OS process id it identifies this run.
+
+  The value is computed once and kept, so it stays the same for the life of the VM.
+  """
+  @spec run_started() :: integer()
+  def run_started do
+    case :persistent_term.get({__MODULE__, :run_started}, nil) do
+      nil ->
+        started =
+          System.convert_time_unit(
+            :erlang.system_info(:start_time) + :erlang.time_offset(),
+            :native,
+            :second
+          )
+
+        :persistent_term.put({__MODULE__, :run_started}, started)
+        started
+
+      started ->
+        started
     end
   end
+
+  @doc """
+  Decides whether the run that wrote a swap file is still alive, from the owner recorded in its header.
+
+  See "Who owns a swap file" in the module documentation. `probe` asks the OS about a process id; tests pass their own so that no OS process is spawned.
+  """
+  @spec owner_alive?(metadata(), (integer() -> process_state())) :: boolean()
+  def owner_alive?(%{os_pid: owner_pid, run_started: recorded}, probe \\ &process_state/1)
+      when is_integer(owner_pid) and is_function(probe, 1) do
+    if owner_pid == os_pid() do
+      recorded == run_started()
+    else
+      same_run?(probe.(owner_pid), recorded)
+    end
+  end
+
+  @spec same_run?(process_state(), integer() | nil) :: boolean()
+  defp same_run?(:gone, _recorded), do: false
+
+  # Without both moments the process id is all there is to go by.
+  # A live process then keeps the swap: never take a live run's text.
+  defp same_run?({:running, nil}, _recorded), do: true
+  defp same_run?({:running, _started}, nil), do: true
+  defp same_run?({:running, started}, recorded), do: abs(started - recorded) <= @start_tolerance_s
+
+  @doc "Asks the OS whether a process id is running and since when. Spawns `ps`, so tests of other code pass a stand-in."
+  @spec process_state(integer()) :: process_state()
+  def process_state(os_pid) when is_integer(os_pid) do
+    case System.cmd("ps", ["-p", Integer.to_string(os_pid), "-o", "stat=", "-o", "etime="],
+           stderr_to_stdout: true,
+           env: [{"LC_ALL", "C"}]
+         ) do
+      {output, 0} -> parse_process_state(output, System.os_time(:second))
+      {_output, _status} -> :gone
+    end
+  end
+
+  @doc """
+  Reads one `ps -o stat= -o etime=` line: the process state letters and the elapsed time as `[[days-]hours:]minutes:seconds`.
+
+  `now` is in seconds since the epoch. An empty line means the process is gone, and so does a state that starts with `Z`: a zombie has exited and only waits for its parent.
+  """
+  @spec parse_process_state(String.t(), integer()) :: process_state()
+  def parse_process_state(output, now) when is_binary(output) and is_integer(now) do
+    case String.split(output) do
+      [] -> :gone
+      ["Z" <> _state | _elapsed] -> :gone
+      [_state, elapsed | _rest] -> {:running, started(elapsed, now)}
+      [_state] -> {:running, nil}
+    end
+  end
+
+  @spec started(String.t(), integer()) :: integer() | nil
+  defp started(elapsed, now) do
+    {days, clock} =
+      case String.split(elapsed, "-", parts: 2) do
+        [days, clock] -> {days, clock}
+        [clock] -> {"0", clock}
+      end
+
+    with {days, ""} <- Integer.parse(days),
+         {:ok, seconds} <- clock_seconds(String.split(clock, ":")) do
+      now - (days * 86_400 + seconds)
+    else
+      _unreadable -> nil
+    end
+  end
+
+  @spec clock_seconds([String.t()]) :: {:ok, non_neg_integer()} | :error
+  defp clock_seconds(parts) when length(parts) in 2..3 do
+    parts
+    |> Enum.reduce_while({:ok, 0}, fn part, {:ok, total} ->
+      case Integer.parse(part) do
+        {value, ""} -> {:cont, {:ok, total * 60 + value}}
+        _not_a_number -> {:halt, :error}
+      end
+    end)
+  end
+
+  defp clock_seconds(_parts), do: :error
 
   @doc "Returns the current OS process ID as an integer."
   @spec os_pid() :: integer()
@@ -187,6 +309,18 @@ defmodule Minga.Session.Swap do
   end
 
   # ── Private ─────────────────────────────────────────────────────────────
+
+  # A swap written as this run records when the run started. One written on behalf of another process id
+  # (tests, tools) records a start only when it is given one.
+  @spec run_started_field(keyword()) :: String.t()
+  defp run_started_field(opts) do
+    started =
+      if Keyword.has_key?(opts, :os_pid),
+        do: Keyword.get(opts, :run_started),
+        else: Keyword.get(opts, :run_started, run_started())
+
+    if is_integer(started), do: "\nrun_started=#{started}", else: ""
+  end
 
   @spec temporary_path(String.t(), term()) :: String.t()
   defp temporary_path(target, generation) do
@@ -283,9 +417,26 @@ defmodule Minga.Session.Swap do
          {:ok, mtime_str} <- Map.fetch(fields, "mtime"),
          {os_pid, ""} <- Integer.parse(pid_str),
          {mtime, ""} <- Integer.parse(mtime_str) do
-      {:ok, %{path: path, os_pid: os_pid, mtime: mtime}}
+      {:ok,
+       %{
+         path: path,
+         os_pid: os_pid,
+         mtime: mtime,
+         run_started: run_started(fields["run_started"])
+       }}
     else
       _ -> {:error, :invalid_format}
+    end
+  end
+
+  # Swap files from before the field existed have none.
+  @spec run_started(String.t() | nil) :: integer() | nil
+  defp run_started(nil), do: nil
+
+  defp run_started(text) do
+    case Integer.parse(text) do
+      {started, ""} -> started
+      _not_a_number -> nil
     end
   end
 end
