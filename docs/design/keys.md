@@ -55,7 +55,7 @@ Keys are chords and mnemonics, not shortcuts. This is [principle 11](principles.
 | `SPC g B` | Blame for the current line or file (Doom) | new; replaces the proposed `SPC g b`. The git extension owns `SPC g`; it still binds blame on `SPC g b` |
 | `SPC g b` | Switch branch (Doom), reserved for the git group | new |
 | `SPC g w` / `SPC g a` | (moved to `SPC a`) | shipped, retired (203, 204) |
-| `SPC s u` | Edit timeline, the undo history including Minga's steps (Doom) | shipped; opens today's timeline of Minga's edits, and your own steps join it with #4048 |
+| `SPC s u` | Edit timeline, the undo history including Minga's steps (Doom) | shipped; opens today's timeline of Minga's edits; your own steps do not join it yet |
 | `SPC s i` | Document symbols (Doom imenu) | shipped; was `SPC s j` (46) and `SPC c j` (107) |
 | `SPC s j` | Jump list (Doom) | shipped; was document symbols (46) |
 | `SPC c j` | (retired; duplicate of document symbols) | shipped, retired (107) |
@@ -164,7 +164,7 @@ The modeline answers a stop of the conversation it speaks for: it reads "Minga s
 | `g.` | Act menu on whatever is under the cursor | changed (`normal_prefixes.ex:27`, was "Code actions"); code actions are part of the act menu |
 | `K` | Hover; `K` again focuses it | kept |
 | `⌃O` / `⌃I` | Back / forward in the jump list (⌘[ / ⌘] on macOS; Tab is ⌃I, as in Vim) | shipped; replaces the proposed ⌃⌘← / ⌃⌘→ |
-| `u`, ⌘Z | Undo your own edits only | changed behavior |
+| `u`, ⌘Z | Undo your own edits only | shipped (#4048); Minga's edits never enter your undo, and an undo that would cross text Minga later rewrote does nothing |
 | `gt` / `gT` | (tabs are gone) | shipped, retired |
 
 `SPC .` stays Doom's "find file in this directory"; the act menu lives on `g.` in Normal mode and `⌃.` wherever you type.

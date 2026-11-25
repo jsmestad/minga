@@ -14,6 +14,168 @@ defmodule Minga.Buffer.UndoPatchTest do
     applied
   end
 
+  describe "precise_changes/1" do
+    # A 6 MB image (not UTF-8, with a carriage return in its header) loaded into an empty buffer: cluster boundaries
+    # are decided from a window around each cut, so trimming it costs about what trimming 6 MB of ASCII costs, not
+    # work per byte (a per-byte boundary set once timed out a buffer call).
+    # The valid-text twin: one line of several megabytes of ASCII with emoji scattered through it, one byte changed in
+    # the middle. Each cut is decided from the nearest certain boundary, two ASCII bytes away here, so trimming it
+    # costs about what trimming the same line of plain ASCII costs.
+    test "trimming a long valid line with emoji decides cluster cuts near the cut" do
+      work = fn line ->
+        middle = div(byte_size(line), 2)
+
+        changed =
+          binary_part(line, 0, middle) <>
+            "!" <> binary_part(line, middle + 1, byte_size(line) - middle - 1)
+
+        {:reductions, before} = Process.info(self(), :reductions)
+        changes = UndoPatch.segment_changes(0, line, changed, false)
+        {:reductions, after_changes} = Process.info(self(), :reductions)
+        {after_changes - before, changes}
+      end
+
+      chunk = String.duplicate("abcdefghij", 100)
+      emoji = :binary.copy(chunk <> "👨‍👩‍👧", 3_000)
+      ascii = :binary.copy(chunk <> String.duplicate("x", byte_size("👨‍👩‍👧")), 3_000)
+      {ascii_work, _changes} = work.(ascii)
+      {emoji_work, changes} = work.(emoji)
+      assert [{_at, _removed, "!"}] = changes
+
+      assert emoji_work < 2 * ascii_work,
+             "#{emoji_work} reductions with emoji against #{ascii_work} for ASCII"
+    end
+
+    test "trimming a large binary decides cluster cuts locally" do
+      work = fn text ->
+        {:reductions, before} = Process.info(self(), :reductions)
+        changes = UndoPatch.segment_changes(0, "", text, false)
+        {:reductions, after_changes} = Process.info(self(), :reductions)
+        {after_changes - before, changes}
+      end
+
+      image = <<137, 80, 78, 71, 13, 10, 26, 10>> <> :binary.copy(<<0>>, 6 * 1_024 * 1_024)
+      {ascii, _changes} = work.(:binary.copy("a", byte_size(image)))
+      {binary, changes} = work.(image)
+      assert [{0, "", ^image}] = changes
+
+      assert binary < 2 * ascii,
+             "#{binary} reductions for the image against #{ascii} for ASCII"
+    end
+
+    # Round 3's boundary cases around the 512-word cap: under it each changed word is its own change, past it the
+    # trimmed span is one change; either way the changes rebuild the new text.
+    test "changed words at both ends of a line are separate changes up to the word cap" do
+      for count <- [126, 127, 128, 129, 130, 255, 256, 257] do
+        old = Enum.map_join(1..count, " ", &"w#{&1}")
+        new = old |> String.replace("w1 ", "W1 ") |> String.replace(" w#{count}", " W#{count}")
+        changes = UndoPatch.precise_changes(UndoPatch.replacement(0, old, new, {0, 0}))
+        assert rebuild(old, changes) == new
+        # The cap counts the tokens (words, spaces, punctuation) of both sides together.
+        expected = if 2 * (2 * count - 1) <= 512, do: 2, else: 1
+        assert Enum.count(changes) == expected, "#{count} words"
+      end
+    end
+
+    test "a reversed 20000-word line and 12000 paired lines stay within budget" do
+      old = Enum.map_join(1..20_000, " ", &"w#{&1}")
+      new = Enum.map_join(20_000..1//-1, " ", &"w#{&1}")
+
+      {micros, changes} =
+        :timer.tc(fn -> UndoPatch.precise_changes(UndoPatch.replacement(0, old, new, {0, 0})) end)
+
+      assert rebuild(old, changes) == new
+      assert micros < 1_000_000
+
+      lines =
+        Enum.map_join(1..12_000, fn n ->
+          "    value_#{n} = compute(alpha_#{n}, beta, gamma) # note #{n}\n"
+        end)
+
+      renamed = String.replace(lines, "beta", "beta2")
+
+      {micros, changes} =
+        :timer.tc(fn ->
+          UndoPatch.precise_changes(UndoPatch.replacement(0, lines, renamed, {0, 0}))
+        end)
+
+      assert rebuild(lines, changes) == renamed
+      assert Enum.count(changes) == 12_000
+      assert micros < 1_000_000
+    end
+
+    test "a changed region keeps only the bytes that changed" do
+      patch = UndoPatch.replacement(10, "def run(x), do: x\n", "def run(y), do: x\n", {0, 0})
+      assert UndoPatch.precise_changes(patch) == [{18, "x", "y"}]
+    end
+
+    test "lines paired one to one are compared one by one" do
+      patch = UndoPatch.replacement(0, "a\nb\nc\n", "  a\n  b\n  c\n", {0, 0})
+      assert UndoPatch.precise_changes(patch) == [{0, "", "  "}, {2, "", "  "}, {4, "", "  "}]
+    end
+
+    test "two changed words on one line are two changes" do
+      patch = UndoPatch.replacement(0, "call(foo, bar, baz)\n", "call(FOO, bar, BAZ)\n", {0, 0})
+      assert UndoPatch.precise_changes(patch) == [{5, "foo", "FOO"}, {15, "baz", "BAZ"}]
+    end
+
+    test "the same words reordered on a long line stay one change and stay fast" do
+      words = Enum.map(1..4_000, &"word#{&1}")
+      old = Enum.join(words, " ") <> "\n"
+      new = (words |> Enum.reverse() |> Enum.join(" ")) <> "\n"
+
+      {micros, changes} =
+        :timer.tc(fn -> UndoPatch.precise_changes(UndoPatch.replacement(0, old, new, {0, 0})) end)
+
+      assert [{_at, _removed, _inserted}] = changes
+      assert micros < 1_000_000
+    end
+
+    test "trimming keeps whole code points" do
+      patch = UndoPatch.replacement(0, "é", "è", {0, 0})
+      assert UndoPatch.precise_changes(patch) == [{0, "é", "è"}]
+    end
+
+    test "an unchanged patch has no changes" do
+      assert UndoPatch.precise_changes(UndoPatch.replacement(3, "same", "same", {0, 0})) == []
+    end
+
+    property "applying the changes from the last to the first rebuilds the patch's result" do
+      check all(
+              old <- StreamData.string([?a..?c, ?\n, ?é], max_length: 30),
+              new <- StreamData.string([?a..?c, ?\n, ?é], max_length: 30),
+              prefix <- StreamData.string([?a..?c, ?\n], max_length: 5),
+              max_runs: 2_000
+            ) do
+        start = byte_size(prefix)
+        patch = UndoPatch.replacement(start, old, new, {0, 0})
+        changes = UndoPatch.precise_changes(patch)
+
+        rebuilt =
+          changes
+          |> Enum.reverse()
+          |> Enum.reduce(prefix <> old, fn {at, removed, inserted}, text ->
+            assert binary_part(text, at, byte_size(removed)) == removed
+
+            binary_part(text, 0, at) <>
+              inserted <>
+              binary_part(
+                text,
+                at + byte_size(removed),
+                byte_size(text) - at - byte_size(removed)
+              )
+          end)
+
+        assert rebuilt == prefix <> new
+        assert Enum.all?(changes, fn {_at, removed, inserted} -> removed != inserted end)
+
+        assert Enum.all?(changes, fn {_at, removed, inserted} ->
+                 String.valid?(removed) and String.valid?(inserted)
+               end)
+      end
+    end
+  end
+
   describe "changes/2" do
     test "three separated changed regions become three whole-line patches, nearest the start first" do
       old = Document.move_to(doc("a\nkeep 1\nb\nkeep 2\nc\n"), {1, 2})
@@ -81,9 +243,8 @@ defmodule Minga.Buffer.UndoPatchTest do
       assert Document.content(undone) == Document.content(old)
     end
 
-    # A permutation holds the same lines on both sides.
-    # Only the edit distance itself, not a line count, shows that a precise diff costs too much.
-    test "reordering the lines of a large file records the reordered span as one region" do
+    # A permutation holds the same lines on both sides; past the budget, the lines still in order pin the regions.
+    test "reordering the lines of a large file splits only on lines that keep their order, and replays exactly" do
       lines = for n <- 1..2_000, do: "line #{n}\n"
       swapped = lines |> Enum.chunk_every(2) |> Enum.flat_map(&Enum.reverse/1)
       shuffled = few_values_shuffle(4_000)
@@ -96,12 +257,12 @@ defmodule Minga.Buffer.UndoPatchTest do
         old = doc("header\n" <> Enum.join(old_lines) <> "footer\n")
         new = doc("header\n" <> Enum.join(new_lines) <> "footer\n")
 
-        assert [patch] = UndoPatch.changes(old, new)
-        assert patch.start_byte == byte_size("header\n")
+        assert [first | _] = patches = UndoPatch.changes(old, new)
+        assert first.start_byte >= byte_size("header\n")
 
-        {:ok, undone, [redo]} = UndoPatch.apply_all([patch], new)
+        {:ok, undone, redo} = UndoPatch.apply_all(patches, new)
         assert Document.content(undone) == Document.content(old)
-        assert {:ok, redone} = UndoPatch.apply(redo, undone)
+        assert {:ok, redone, _undo} = UndoPatch.apply_all(redo, undone)
         assert Document.content(redone) == Document.content(new)
       end
     end
@@ -118,9 +279,9 @@ defmodule Minga.Buffer.UndoPatchTest do
                Enum.map(patches, &{&1.start_byte, &1.old_text, &1.new_text})
     end
 
-    # Shuffles this large hold the same lines on both sides.
-    # They differ in far more lines than the budget allows, so each takes the capped fallback.
-    property "a shuffled large file becomes one region that undoes and redoes exactly" do
+    # Shuffles this large hold the same lines on both sides and differ in far more lines than the budget allows, so they
+    # split on the lines that keep their order and diff each gap again.
+    property "a shuffled large file undoes and redoes exactly" do
       check all(
               count <- integer(800..1_500),
               seed <- integer(1..1_000_000),
@@ -131,9 +292,9 @@ defmodule Minga.Buffer.UndoPatchTest do
         old = Document.move_to(doc(Enum.join(lines)), {rem(cursor_pick, count), 2})
         new = doc(Enum.join(seeded_shuffle(lines, seed)))
 
-        assert [patch] = UndoPatch.changes(old, new)
+        patches = UndoPatch.changes(old, new)
 
-        {:ok, undone, redo} = UndoPatch.apply_all([patch], new)
+        {:ok, undone, redo} = UndoPatch.apply_all(patches, new)
         assert Document.content(undone) == Document.content(old)
         assert Document.cursor(undone) == Document.cursor(old)
 
@@ -844,5 +1005,15 @@ defmodule Minga.Buffer.UndoPatchTest do
     stops = [0 | text |> String.codepoints() |> Enum.scan(0, &(byte_size(&1) + &2))]
     index = rem(pick, length(stops))
     {Enum.at(stops, index), Enum.at(stops, min(index + width, length(stops) - 1))}
+  end
+
+  defp rebuild(text, changes) do
+    changes
+    |> Enum.reverse()
+    |> Enum.reduce(text, fn {start, removed, inserted}, acc ->
+      binary_part(acc, 0, start) <>
+        inserted <>
+        binary_part(acc, start + byte_size(removed), byte_size(acc) - start - byte_size(removed))
+    end)
   end
 end
