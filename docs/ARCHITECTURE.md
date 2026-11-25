@@ -729,6 +729,9 @@ sequenceDiagram
     Zig->>Parser: 0x31 highlight_names
     Zig->>Parser: 0x30 highlight_spans
     Parser->>Ed: spans + capture names
+    Zig->>Parser: 0x36 fold_ranges, 0x39 textobject_positions, 0x3E document_symbols
+    Zig->>Parser: 0x3F parse_complete
+    Parser->>Ed: fold ranges, then parse complete
 
     Note over Ed,Render: Next render frame
     Ed->>Render: render snapshot with highlight spans

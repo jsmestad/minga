@@ -49,6 +49,7 @@ defmodule Minga.Parser.Protocol do
   @op_match_item_result Opcodes.match_item_result()
   @op_node_info Opcodes.node_info()
   @op_document_symbols Opcodes.document_symbols()
+  @op_parse_complete Opcodes.parse_complete()
 
   # Well-known textobject type IDs (match Zig constants)
   @textobj_function 0
@@ -346,6 +347,11 @@ defmodule Minga.Parser.Protocol do
 
   def decode_event(<<@op_request_reparse, buffer_id::32>>) do
     {:ok, {:request_reparse, buffer_id}}
+  end
+
+  # The last message of a parse: every other result of that version has arrived before it (#4314).
+  def decode_event(<<@op_parse_complete, buffer_id::32, version::32>>) do
+    {:ok, {:parse_complete, buffer_id, version}}
   end
 
   def decode_event(<<@op_document_symbols, buffer_id::32, version::32, count::32, rest::binary>>) do

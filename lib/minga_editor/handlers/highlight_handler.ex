@@ -67,6 +67,23 @@ defmodule MingaEditor.Handlers.HighlightHandler do
 
   # ── correlated buffer events ─────────────────────────────────────────────
 
+  # The parser's last message for a parse. Its results (spans, fold ranges, conceals, symbols) are all applied.
+  def handle(
+        state,
+        {:minga_highlight,
+         {:buffer_event, buffer_pid, %EventCorrelation{} = correlation, :parse_complete}}
+      )
+      when is_pid(buffer_pid) do
+    highlight = HighlightSync.get_highlight(state, buffer_pid)
+
+    if MingaEditor.UI.Highlight.accepts_correlation?(highlight, correlation) do
+      completed = MingaEditor.UI.Highlight.complete_parse(highlight, correlation)
+      {HighlightSync.put_highlight(state, buffer_pid, completed), []}
+    else
+      {state, []}
+    end
+  end
+
   def handle(
         state,
         {:minga_highlight,
@@ -352,7 +369,12 @@ defmodule MingaEditor.Handlers.HighlightHandler do
        when not is_map_key(highlights, pid),
        do: {state, []}
 
-  defp handle_conceal_spans(state, pid, spans), do: {state, [{:conceal_spans, pid, spans}]}
+  # Conceals arrive after the spans that scheduled the last frame, so a shown buffer schedules another (#4314).
+  defp handle_conceal_spans(state, pid, spans) do
+    if buffer_visible_in_window?(state, pid),
+      do: {state, [{:conceal_spans, pid, spans}, :render]},
+      else: {state, [{:conceal_spans, pid, spans}]}
+  end
 
   @spec handle_fold_ranges(EditorState.t(), pid(), [
           {non_neg_integer(), non_neg_integer()}

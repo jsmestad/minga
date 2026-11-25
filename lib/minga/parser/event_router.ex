@@ -66,6 +66,9 @@ defmodule Minga.Parser.EventRouter do
       {:ok, {:request_reparse, buffer_id}} ->
         {recover_parser_buffer(work, port, buffer_id), snippets}
 
+      {:ok, {:parse_complete, buffer_id, version}} ->
+        {complete_parse(work, port, buffer_id, version, subscribers), snippets}
+
       {:ok, {:log_message, _level, _text} = event} ->
         broadcast(subscribers, {:minga_highlight, event})
         {work, snippets}
@@ -170,22 +173,6 @@ defmodule Minga.Parser.EventRouter do
           port() | nil,
           %{pid() => reference()}
         ) :: ParseSync.t()
-  defp broadcast_editor_event(
-         {:highlight_spans, buffer_id, version, _spans} = event,
-         work,
-         port,
-         subscribers
-       ) do
-    with buffer_pid when is_pid(buffer_pid) <- BufferRegistry.resolve(work.buffers, buffer_id),
-         {:ok, next_work, completed} <- ParseSync.complete_parse(work, port, buffer_pid, version) do
-      correlation = EventCorrelation.new(completed.generation, version)
-      broadcast_buffer_event(subscribers, event, buffer_pid, correlation)
-      next_work
-    else
-      _stale_or_missing -> work
-    end
-  end
-
   defp broadcast_editor_event(event, work, _port, subscribers) do
     case editor_event_identity(event) do
       {buffer_id, version} ->
@@ -201,6 +188,7 @@ defmodule Minga.Parser.EventRouter do
   @spec editor_event_identity(term()) ::
           {non_neg_integer(), pos_integer() | :unversioned}
           | :global
+  defp editor_event_identity({:highlight_spans, id, version, _}), do: {id, version}
   defp editor_event_identity({:conceal_spans, id, version, _}), do: {id, version}
   defp editor_event_identity({:fold_ranges, id, version, _}), do: {id, version}
   defp editor_event_identity({:textobject_positions, id, version, _}), do: {id, version}
@@ -295,6 +283,32 @@ defmodule Minga.Parser.EventRouter do
   defp maybe_complete_highlight(buffer_id, pending, _port, snippets),
     do: {:handled, SnippetState.put(snippets, buffer_id, pending)}
 
+  # Parse completion is its own message, the last of every parse, so the editor has every result of the parse (fold
+  # ranges, conceals, symbols) when it learns the parse is done (#4314). A snippet parse already finished with its
+  # spans; its completion is dropped.
+  @spec complete_parse(
+          ParseSync.t(),
+          port() | nil,
+          non_neg_integer(),
+          pos_integer(),
+          %{pid() => reference()}
+        ) :: ParseSync.t()
+  defp complete_parse(work, port, buffer_id, version, subscribers) do
+    if snippet_buffer_id?(buffer_id) do
+      work
+    else
+      with buffer_pid when is_pid(buffer_pid) <- BufferRegistry.resolve(work.buffers, buffer_id),
+           {:ok, next_work, completed} <-
+             ParseSync.complete_parse(work, port, buffer_pid, version) do
+        correlation = EventCorrelation.new(completed.generation, version)
+        broadcast_buffer_event(subscribers, :parse_complete, buffer_pid, correlation)
+        next_work
+      else
+        _stale_or_missing -> work
+      end
+    end
+  end
+
   @spec recover_parser_buffer(ParseSync.t(), port() | nil, non_neg_integer()) :: ParseSync.t()
   defp recover_parser_buffer(work, port, buffer_id) do
     case BufferRegistry.resolve(work.buffers, buffer_id) do
@@ -314,6 +328,7 @@ defmodule Minga.Parser.EventRouter do
   defp event_buffer_id({:textobject_positions, id, _, _}), do: id
   defp event_buffer_id({:document_symbols, id, _, _}), do: id
   defp event_buffer_id({:conceal_spans, id, _, _}), do: id
+  defp event_buffer_id({:parse_complete, id, _}), do: id
   defp event_buffer_id(_event), do: nil
 
   @spec snippet_buffer_id?(non_neg_integer() | nil) :: boolean()

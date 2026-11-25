@@ -65,6 +65,35 @@ defmodule Minga.Parser.ManagerTest do
     end
   end
 
+  # Highlights go first so they reach the screen early; parse_complete is the last message of every parse, so the
+  # editor has the parse's fold ranges, conceals and symbols when it learns the parse is done (#4314).
+  describe "parse completion" do
+    test "a full parse sends spans first, then its fold ranges and symbols, and parse_complete last" do
+      server = start_parser_manager()
+      :ok = Manager.subscribe(server)
+      buffer = setup_buffer(server, "defmodule Foo do\n  def bar do\n    :ok\n  end\nend\n")
+
+      kinds = parse_results(buffer)
+      assert hd(kinds) in [:highlight_names, :highlight_spans]
+      assert :fold_ranges in kinds
+      assert :document_symbols in kinds
+
+      assert Enum.find_index(kinds, &(&1 == :highlight_spans)) <
+               Enum.find_index(kinds, &(&1 == :fold_ranges))
+    end
+
+    test "an edit's parse ends with parse_complete after its fold ranges" do
+      server = start_parser_manager()
+      :ok = Manager.subscribe(server)
+      buffer = setup_buffer(server, "defmodule Foo do\n  def foo do\n    :ok\n  end\nend\n")
+      _first = parse_results(buffer)
+
+      :ok = Minga.Buffer.apply_edit(buffer, 1, 6, 1, 8, "bar")
+
+      assert :fold_ranges in parse_results(buffer)
+    end
+  end
+
   describe "request_indent/3" do
     test "returns nil without waiting when the parser port is unavailable" do
       server = start_parser_manager(parser_path: "/missing/minga-parser")
@@ -156,7 +185,19 @@ defmodule Minga.Parser.ManagerTest do
       assert {:parse, _ref} = scheduler.timeout_token
       refute_received {:request_sync_snapshot, _, ^manager, _}
 
-      send_parse_completion(manager, port, first_id, 1)
+      send_parse_spans(manager, port, first_id, 1)
+
+      # The spans reach the editor while the parse is still in flight; only parse_complete admits the next buffer.
+      assert_receive {:minga_highlight,
+                      {:buffer_event, ^first,
+                       %EventCorrelation{generation: ^generation, version: 1},
+                       {:highlight_spans, []}}},
+                     2_000
+
+      :sys.get_state(server)
+      refute_received {:request_sync_snapshot, _, ^manager, _}
+
+      send_parse_complete(manager, port, first_id, 1)
 
       # Both messages come from Manager to this test; match either to check their actual order.
       assert_receive message when elem(message, 0) in [:request_sync_snapshot, :minga_highlight],
@@ -166,8 +207,7 @@ defmodule Minga.Parser.ManagerTest do
 
       assert_receive {:minga_highlight,
                       {:buffer_event, ^first,
-                       %EventCorrelation{generation: ^generation, version: 1},
-                       {:highlight_spans, []}}},
+                       %EventCorrelation{generation: ^generation, version: 1}, :parse_complete}},
                      2_000
 
       send_snapshot(manager, second, second_token, "defmodule Second do\nend\n")
@@ -193,10 +233,16 @@ defmodule Minga.Parser.ManagerTest do
                       {:buffer_event, ^buffer, _correlation, {:highlight_spans, []}}},
                      2_000
 
+      assert_receive {:minga_highlight, {:buffer_event, ^buffer, _correlation, :parse_complete}},
+                     2_000
+
       assert :ok = Manager.request_parse(buffer, server)
 
       assert_receive {:minga_highlight,
                       {:buffer_event, ^buffer, _correlation, {:highlight_spans, []}}},
+                     2_000
+
+      assert_receive {:minga_highlight, {:buffer_event, ^buffer, _correlation, :parse_complete}},
                      2_000
     end
 
@@ -513,10 +559,19 @@ defmodule Minga.Parser.ManagerTest do
   end
 
   defp send_parse_completion(manager, port, buffer_id, version) do
+    send_parse_spans(manager, port, buffer_id, version)
+    send_parse_complete(manager, port, buffer_id, version)
+  end
+
+  defp send_parse_spans(manager, port, buffer_id, version) do
     send(
       manager,
       {port, {:data, <<Opcodes.highlight_spans(), buffer_id::32, version::32, 0::32>>}}
     )
+  end
+
+  defp send_parse_complete(manager, port, buffer_id, version) do
+    send(manager, {port, {:data, <<Opcodes.parse_complete(), buffer_id::32, version::32>>}})
   end
 
   defp replace_port_with_closed_handle(server) do
@@ -546,5 +601,21 @@ defmodule Minga.Parser.ManagerTest do
 
   defp parser_path do
     Path.expand("../../../zig/zig-out/bin/minga-parser", __DIR__)
+  end
+
+  # The kinds of this buffer's parser events, in arrival order, through the parse_complete that ends one parse.
+  defp parse_results(buffer, kinds \\ []) do
+    receive do
+      {:minga_highlight, {:buffer_event, ^buffer, _correlation, :parse_complete}} ->
+        Enum.reverse(kinds)
+
+      {:minga_highlight, {:buffer_event, ^buffer, _correlation, {kind, _payload}}} ->
+        parse_results(buffer, [kind | kinds])
+    after
+      2_000 ->
+        flunk(
+          "no parse_complete ended the parse; results so far: #{inspect(Enum.reverse(kinds))}"
+        )
+    end
   end
 end

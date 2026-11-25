@@ -196,7 +196,10 @@ defmodule Minga.Test.Storyboard.Session do
   @doc "The number of tree-sitter highlight spans the active buffer carries now. Zero without a parser."
   @spec highlight_span_count(t()) :: non_neg_integer()
   def highlight_span_count(%__MODULE__{ctx: ctx}) do
-    ctx |> EditorCase.editor_state() |> highlight_spans() |> tuple_size()
+    highlight =
+      ctx |> EditorCase.editor_state() |> MingaEditor.HighlightSync.get_active_highlight()
+
+    tuple_size(highlight.spans)
   end
 
   @doc "Resizes the editor's grid to `cols` x `rows`, the way a frontend reports a new row fit, and waits for the frame."
@@ -295,9 +298,10 @@ defmodule Minga.Test.Storyboard.Session do
     end
   end
 
-  # The parser answers asynchronously: the editor applies the spans, then schedules a render. A session is ready when
-  # the spans are applied and, when it renders, the frame that shows them has reached the headless frontend. Parser
-  # events wake the wait early; the short timeout only re-checks a render that is still in flight.
+  # The parser answers asynchronously: the editor applies the spans, then schedules a render; fold ranges and conceals
+  # follow, and parse_complete ends the parse. A session is ready when the newest parse is complete and, when it
+  # renders, the frame that shows all of it has reached the headless frontend (#4314). Parser events wake the wait
+  # early; the short timeout only re-checks a render that is still in flight.
   @spec await_highlights!(EditorCase.editor_ctx(), GenServer.server()) :: :ok
   defp await_highlights!(ctx, parser) do
     :ok = Minga.Parser.Manager.subscribe(parser)
@@ -310,7 +314,7 @@ defmodule Minga.Test.Storyboard.Session do
     state = EditorCase.editor_state(ctx)
 
     cond do
-      tuple_size(highlight_spans(state)) > 0 and rendered?(ctx, state) ->
+      highlights_settled?(state) and rendered?(ctx, state) ->
         :ok
 
       System.monotonic_time(:millisecond) > deadline ->
@@ -389,8 +393,11 @@ defmodule Minga.Test.Storyboard.Session do
     end
   end
 
-  @spec highlight_spans(MingaEditor.State.t()) :: tuple()
-  defp highlight_spans(state), do: MingaEditor.HighlightSync.get_active_highlight(state).spans
+  @spec highlights_settled?(MingaEditor.State.t()) :: boolean()
+  defp highlights_settled?(state) do
+    highlight = MingaEditor.HighlightSync.get_active_highlight(state)
+    tuple_size(highlight.spans) > 0 and MingaEditor.UI.Highlight.parse_settled?(highlight)
+  end
 
   # The relay is a supervised child of the test, stopped with the session.
   @spec start_relay(EditorCase.editor_ctx(), GenServer.server()) :: term()
