@@ -9,9 +9,12 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
 
   alias Minga.Config.Options
   alias MingaAgent.Session
+  alias MingaEditor.Agent.DraftSave
+  alias MingaEditor.Agent.UIState
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
+  alias MingaEditor.Shell.Traditional.Workflow
   alias MingaEditor.State.TabBar
 
   @moduletag :tmp_dir
@@ -77,15 +80,12 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
     :ok = Session.send_prompt(session, "start")
     await_working(ctx)
 
-    send_keys_sync(ctx, "later")
     owner = owner(ctx)
-    %{timer: token} = draft_save(ctx)
-    assert is_reference(token), "typing arms the composer's autosave"
+    send_keys_sync(ctx, "later")
 
-    # Both messages wait in the Editor's mailbox, so the queue key is handled
-    # after the autosave is sent and before the Session's answer can arrive.
-    :ok = :sys.suspend(ctx.editor)
-    send(ctx.editor, {:composer_draft_due, owner, token})
+    # Hold the Editor, start its autosave, and press the key behind it: the key is
+    # handled after the save is sent and before the Session's answer can arrive.
+    start_autosave_while_held(ctx, owner)
     send(ctx.editor, {:minga_input, {:key_press, 13, mods}})
 
     for <<char::utf8 <- typed_after>>,
@@ -94,9 +94,65 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
     :ok = :sys.resume(ctx.editor)
 
     wait_until(ctx, fn _state -> Session.get_queued_messages(session) != {[], []} end,
-      max_attempts: 200,
+      max_attempts: 500,
+      interval_ms: 20,
       message: "expected the held input to be queued once the save answered"
     )
+  end
+
+  # Typing arms the autosave through an asynchronous buffer event and a 350 ms
+  # timer, which a loaded machine can fire at any moment. Hold the Editor while its
+  # draft is ready but has unsaved edits, and arm the timer with a known token if
+  # typing has not armed it yet. A real timer message already queued starts the
+  # same save first, and the duplicate is ignored. If the real save got there
+  # first, edit once more (net unchanged) and try again.
+  defp start_autosave_while_held(ctx, owner, attempts \\ 10)
+
+  defp start_autosave_while_held(_ctx, _owner, 0),
+    do: flunk("never held the composer with unsaved edits")
+
+  defp start_autosave_while_held(ctx, owner, attempts) do
+    wait_until(
+      ctx,
+      fn state -> match?({:ready, _, _}, state.workspace.agent_ui.draft_save.request) end,
+      max_attempts: 500,
+      interval_ms: 20,
+      message: "expected the composer draft to settle"
+    )
+
+    :ok = :sys.suspend(ctx.editor)
+    %{workspace: %{agent_ui: %{draft_save: save}}} = :sys.get_state(ctx.editor)
+
+    case save do
+      %{request: {:ready, _, saved}, buffer: buffer} when is_pid(buffer) ->
+        if Minga.Buffer.inspection_marker(buffer) == saved do
+          :ok = :sys.resume(ctx.editor)
+          send_keys_sync(ctx, "x<BS>")
+          start_autosave_while_held(ctx, owner, attempts - 1)
+        else
+          send(ctx.editor, {:composer_draft_due, owner, arm_known_timer(ctx.editor)})
+        end
+
+      _settling ->
+        :ok = :sys.resume(ctx.editor)
+        start_autosave_while_held(ctx, owner, attempts - 1)
+    end
+  end
+
+  defp arm_known_timer(editor) do
+    token = make_ref()
+
+    %{workspace: %{agent_ui: %{draft_save: %{timer: timer}}}} =
+      :sys.replace_state(editor, fn state ->
+        ui = state.workspace.agent_ui
+
+        case DraftSave.schedule(ui.draft_save, token) do
+          {:ok, armed} -> Workflow.install_agent_ui(state, UIState.project_draft_save(ui, armed))
+          :pending -> state
+        end
+      end)
+
+    timer
   end
 
   defp await_session(ctx) do
@@ -136,8 +192,8 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
 
   defp configure_model(%{editor: editor}) do
     :sys.replace_state(editor, fn state ->
-      ui = MingaEditor.Agent.UIState.set_model_name(state.workspace.agent_ui, "openai:test-model")
-      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
+      ui = UIState.set_model_name(state.workspace.agent_ui, "openai:test-model")
+      Workflow.install_agent_ui(state, ui)
     end)
 
     :ok
