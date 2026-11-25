@@ -36,7 +36,13 @@ defmodule MingaEditor.UI.Picker.UnsavedTextSource do
   @impl true
   @spec async_fetch(Context.t()) :: {:ok, [Item.t()], Source.fetch_meta()} | {:error, String.t()}
   def async_fetch(%Context{picker_ui: %{context: %{swap_opts: swap_opts}}}) do
-    {:ok, swap_opts |> Session.waiting_unsaved_text() |> items(System.os_time(:second)), %{}}
+    # An editor without a swap directory (a headless or test editor) keeps no unsaved text, so nothing waits.
+    waiting =
+      if is_binary(Keyword.get(swap_opts, :swap_dir)),
+        do: Session.waiting_unsaved_text(swap_opts),
+        else: []
+
+    {:ok, items(waiting, System.os_time(:second)), %{}}
   end
 
   def async_fetch(%Context{}), do: {:ok, [empty_item()], %{}}

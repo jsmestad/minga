@@ -106,6 +106,16 @@ defmodule MingaEditor.UnsavedTextListTest do
     assert notice_message(editor) == "The unsaved text of notes.ex is no longer waiting"
   end
 
+  test "an editor that keeps no swap files shows an empty list instead of failing" do
+    editor = start_editor("scratch")
+
+    open_list(editor)
+
+    assert [%{id: :empty, label: "No unsaved text is waiting"}] = rows(editor)
+    send_keys_sync(editor, "<CR>")
+    refute picker_open?(editor)
+  end
+
   test "a file with unsaved changes of its own keeps them, and the waiting text stays", ctx do
     swap = leftover_swap(ctx, ctx.notes, "from before the crash\n")
     editor = start_editor("scratch", swap_dir: ctx.swap_dir)
