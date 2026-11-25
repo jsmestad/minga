@@ -237,6 +237,15 @@ body.dark {
   border-bottom-color: var(--minga-accent);
 }
 
+@media (min-width: 861px) and (max-width: 1040px) {
+  .minga-nav {
+    gap: 0.35rem 0.85rem;
+  }
+  .minga-brand-version {
+    display: none;
+  }
+}
+
 .minga-topbar-controls {
   display: flex;
   align-items: center;
