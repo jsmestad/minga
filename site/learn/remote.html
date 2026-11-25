@@ -167,7 +167,10 @@ cmd=$(jq -r '.arguments.command // ""') || {
 }
 
 <span class="ccm"># Read tabs as spaces.</span>
-cmd=$(printf '%s\n' "$cmd" | tr '\t' ' ')
+cmd=$(printf '%s\n' "$cmd" | tr '\t' ' ') || {
+  echo "check-shell-command.sh could not prepare the command." &gt;&amp;2
+  exit 1
+}
 
 <span class="ccm"># block_if PATTERN REASON: stop the command when the pattern matches it.</span>
 <span class="ccm"># A pattern grep cannot read also stops the command, so a typing mistake here never lets one through.</span>
@@ -181,8 +184,8 @@ block_if() {
 }
 
 <span class="veto-rule" data-veto-rule="force_push">block_if '<span data-veto-pattern>(^|[^a-z])git( [^;&amp;|]*)? push( [^;&amp;|]*)? (-[a-z]*f|--force|[+])</span>' '<span data-veto-reason>force push</span>'</span>
-<span class="veto-rule" data-veto-rule="delete_root_or_home">block_if '<span data-veto-pattern>(^|[^a-z-])rm( +[^;&amp;| ]+)* +"?(/|~|\$[{]?HOME[}]?)[/*.]*([^a-z0-9._/*-]|$)</span>' '<span data-veto-reason>delete of / or your home directory</span>'</span>
-<span class="veto-rule" data-veto-rule="minga_config">block_if '<span data-veto-pattern>[.]config/minga</span>' '<span data-veto-reason>a command that names your Minga config or this hook</span>'</span>
+<span class="veto-rule" data-veto-rule="delete_root_or_home">block_if '<span data-veto-pattern>(^|[^a-z-])rm( +[^;&amp;| ]+)* +"?(/|~|\$[{]?HOME[}]?)"?[/*.]*"?([^a-z0-9._/*"}-]|$)</span>' '<span data-veto-reason>delete of / or your home directory</span>'</span>
+<span class="veto-rule" data-veto-rule="minga_config">block_if '<span data-veto-pattern>[.]config/minga(/|[^a-z0-9_.-]|$)</span>' '<span data-veto-reason>a command that names your Minga config or this hook</span>'</span>
 
 exit 0</code></pre>
             </div>
@@ -208,7 +211,7 @@ exit 0</code></pre>
             <ul>
               <li><strong>Force push.</strong> <code>git</code>, then <code>push</code>, then <code>-f</code>, any option that starts with <code>--force</code>, or a branch written with a leading plus sign, which forces without a flag. Options between the words do not hide it: <code>git -C app push -f</code> is caught. <code>--force-with-lease</code> is included on purpose, because an agent nobody is watching should not rewrite a shared branch.</li>
               <li><strong>Delete of <code>/</code> or your home directory.</strong> Any <code>rm</code> aimed at <code>/</code>, <code>~</code> or <code>$HOME</code> and at nothing longer, whatever options it carries. <code>rm -rf ./build</code> passes, and so do <code>rm -rf /tmp/prod</code> and <code>rm -rf ~/.cache</code>.</li>
-              <li><strong>Your Minga config and this hook.</strong> Any command that names <code>.config/minga</code>, so the agent cannot switch the hook off by editing the script or the config that runs it. This also stops a command that only reads those files.</li>
+              <li><strong>Your Minga config and this hook.</strong> Any command that names the <code>.config/minga</code> directory or a file in it, so the agent cannot switch the hook off by editing the script or the config that runs it. This also stops a command that only reads those files.</li>
             </ul>
           </div>
           <div>
@@ -238,7 +241,7 @@ exit 0</code></pre>
           <li><strong>A script hides the command.</strong> If the agent writes <code>cleanup.sh</code> and runs it, the hook sees <code>sh cleanup.sh</code> and nothing inside the file.</li>
           <li><strong>A mention is enough to block.</strong> <code>echo "rm -rf /"</code> deletes nothing, and the hook stops it anyway. The agent gets the reason and can word the command another way.</li>
           <li><strong>Other paths are yours to add.</strong> The second rule names <code>/</code> and your home directory. If <code>/tmp/prod</code> matters to you, add a <code>block_if</code> line for it. The tester on this page runs only the three printed rules, so check a new rule against the real file, with lines like the two in step 3 below: once with a command it should stop, and once with one it should not.</li>
-          <li><strong>The agent runs commands as you.</strong> It can use your SSH keys, your Git and cloud logins, and the API keys Minga was started with, and it can push to any branch without forcing. Before you leave it alone, protect <code>main</code> on the Git server, and prefer a separate machine or user account that holds only what this task needs.</li>
+          <li><strong>The agent runs commands as you.</strong> It can use your SSH keys, your Git and cloud logins, and the API keys Minga was started with, including, on a remote machine, the <code>RELEASE_COOKIE</code> that reaches your laptop while you are attached, and it can push to any branch without forcing. Before you leave it alone, protect <code>main</code> on the Git server, and prefer a separate machine or user account that holds only what this task needs.</li>
           <li><strong>The agent can edit files outside the project,</strong> including this script and your config. The third rule stops the obvious ways to do that, not every way.</li>
           <li><strong>Minga's own limits still apply.</strong> A shell command runs in a temporary copy of your project with the staged edits applied. A command that names a path outside that copy can still write there, and the copy shares the project's <code>deps</code> directory and its installed <code>node_modules</code> packages. The agent's Git stage and commit tools act on your real repository. <a href="/architecture">Architecture</a> lists these limits.</li>
         </ul>
@@ -331,7 +334,7 @@ mkdir -p ~/.config/systemd/user
 cp rel/systemd/minga-headless.service ~/.config/systemd/user/
 # Let only you read the file, then swap its placeholder password for a random one.
 chmod 600 ~/.config/systemd/user/minga-headless.service
-sed -i "s/__CHANGE_ME_WITH_AT_LEAST_32_RANDOM_BYTES__/$(openssl rand -hex 32)/" ~/.config/systemd/user/minga-headless.service
+printf 's/__CHANGE_ME_WITH_AT_LEAST_32_RANDOM_BYTES__/%s/\n' "$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')" | sed -i -f - ~/.config/systemd/user/minga-headless.service
 systemctl --user daemon-reload
 systemctl --user enable --now minga-headless.service
 loginctl enable-linger "$USER"
@@ -344,8 +347,10 @@ mkdir -p ~/.config/minga
 minga --cookie-file ~/.config/minga/remote-cookie attach ssh://devbox/work/app</code></pre>
         </div>
 
+        <p class="veto-note">If you run these lines again, restart the service and repeat the read-back.</p>
+
         <ul class="veto-limits">
-          <li><strong>The first part</strong> installs Minga as a service, a program the system starts and keeps running with no window. The service file comes from the Minga repository, so run these lines in a checkout of it. The file ships with a placeholder password. The <code>sed</code> line replaces it with 64 random characters before the service ever starts, and <code>chmod 600</code> lets only your user read the file. The service runs <code>~/.local/bin/minga</code>; if yours is somewhere else, or the service needs your model provider's API key, edit the file before the <code>systemctl</code> lines.</li>
+          <li><strong>The first part</strong> installs Minga as a service, a program the system starts and keeps running with no window. The service file comes from the Minga repository, so run these lines in a checkout of it. The file ships with a placeholder password. The <code>printf</code> line replaces it with 64 random characters before the service ever starts. It hands the new value to <code>sed</code> on its input, so the value never appears on a command line, where other users of the machine could see it in the list of running programs. <code>chmod 600</code> lets only your user read the file. The service runs <code>~/.local/bin/minga</code>; if yours is somewhere else, or the service needs your model provider's API key, edit the file before the <code>systemctl</code> lines.</li>
           <li><strong><code>loginctl enable-linger</code></strong> tells Linux to keep your services running after you log out. It also starts them at boot, before you log in. A remote Mac uses a different service file; Remote Agents has those steps.</li>
           <li><strong><code>RELEASE_COOKIE</code></strong> is that password, and it is a password for running code. Anyone who has it and can reach the machine can run any program as your user there, and on your laptop too while you are attached. SSH only starts the service; the session then connects directly over Erlang distribution, the network protocol Minga's runtime uses between machines, which is not encrypted. Reach the machine only over a private encrypted network such as Tailscale or WireGuard, and firewall port 4369 and the distribution ports from everything else.</li>
           <li><strong>The second part</strong> gives your laptop the same password without putting it in your shell's environment, where every program you start would inherit it. <code>umask 077</code> creates the file readable by you alone, and Minga refuses a cookie file that other users can read.</li>

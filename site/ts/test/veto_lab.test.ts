@@ -100,6 +100,18 @@ const VERDICTS: readonly (readonly [command: string, rule: string | null, why: s
   ["cd /tmp && rm -rf /;ls", "delete_root_or_home", "root inside a chain"],
   ["rm -rf / --no-preserve-root", "delete_root_or_home", "root with another option after it"],
   ['echo "rm -rf /"', "delete_root_or_home", "a mention is blocked too, stated on the page"],
+  ['rm -rf "$HOME/"', "delete_root_or_home", "home with a slash inside the quotes"],
+  ['rm -rf "$HOME"/', "delete_root_or_home", "home with a slash after the quotes"],
+  ['rm -rf "$HOME"/*', "delete_root_or_home", "everything in home, quoted"],
+  ['rm -rf "${HOME}"', "delete_root_or_home", "home in braces and quotes"],
+  ['rm -rf "${HOME:?}"', "delete_root_or_home", "home with a guard in the braces"],
+  ['rm -rf -- "$HOME"', "delete_root_or_home", "quoted home after the end-of-options mark"],
+  ['rm -rf "$HOME" /tmp', "delete_root_or_home", "quoted home as the first of two targets"],
+  ['rm -rf "/"', "delete_root_or_home", "root in quotes"],
+  ['rm -rf "~"', "delete_root_or_home", "a quoted tilde"],
+  ['rm -rf "$HOME"/.cache/pip', null, "a cache directory under a quoted home"],
+  ['rm -rf "${HOME}"/.npm', null, "a dot directory under a quoted home in braces"],
+  ['rm -rf "/"tmp', null, "a path that only starts with a quoted slash"],
   ["rm -rf /tmp/prod", null, "the rule names root and home, not every path under root"],
   ["rm -rf ./build", null, "a path in the project"],
   ["rm -rf ~/code", null, "a directory inside home is not home"],
@@ -116,6 +128,11 @@ const VERDICTS: readonly (readonly [command: string, rule: string | null, why: s
   ["sed -i s/shell/none/ ~/.config/minga/config.exs", "minga_config", "editing the config"],
   ["rm -rf ~/.config/minga", "minga_config", "deleting the config directory passes the delete rule and is caught here"],
   ["cat $HOME/.CONFIG/Minga/config.exs", "minga_config", "reading the config, in any case"],
+  ["ls ~/.config/minga", "minga_config", "the directory itself, with nothing after it"],
+  ["ls ~/.config/minga/", "minga_config", "the directory with a slash"],
+  ['cat "$HOME/.config/minga"', "minga_config", "the directory at the end of a quoted path"],
+  ["cat ~/.config/mingarc", null, "a file whose name only starts the same way"],
+  ["ls ~/.config/minga-old", null, "a directory whose name only starts the same way"],
   ["ls ~/.config/nvim", null, "another program's config"],
   ["npm test", null, "ordinary work"],
   ["mix test", null, "ordinary work"],
@@ -211,7 +228,7 @@ describe("Lesson 05 hook tester: the lab agrees with the real script", () => {
   }
 
   it("stops every command when a pattern is not a valid regular expression", { skip: hasJq ? false : "jq is not installed" }, () => {
-    const broken = SCRIPT.replace("block_if '[.]config/minga'", "block_if '(unclosed'");
+    const broken = SCRIPT.replace("block_if '[.]config/minga(/|[^a-z0-9_.-]|$)'", "block_if '(unclosed'");
     assert.notEqual(broken, SCRIPT);
     withScript(broken, (path) => {
       const real = run("sh", [path], hookPayload("npm test"));
