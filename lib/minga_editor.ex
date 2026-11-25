@@ -376,6 +376,10 @@ defmodule MingaEditor do
       Minga.API.message(migration_notice)
     end
 
+    if project_config = Minga.Config.project_config_message() do
+      Minga.API.message(project_config)
+    end
+
     EventBus.subscribe(:face_overrides_changed, events_registry)
     EventBus.subscribe(:agent_session_stopped, events_registry)
     EventBus.subscribe(:agent_session_restarted, events_registry)

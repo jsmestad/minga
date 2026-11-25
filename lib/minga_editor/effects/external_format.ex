@@ -20,38 +20,58 @@ defmodule MingaEditor.Effects.ExternalFormat do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Operation
   @enforce_keys [:buffer, :formatter]
-  defstruct [:buffer, :formatter, :continuation]
+  defstruct [:buffer, :formatter, :continuation, :directory]
 
   @type t :: %__MODULE__{
           buffer: pid(),
           formatter: Minga.Editing.Formatter.formatter_spec(),
-          continuation: BufferManagement.save_continuation() | nil
+          continuation: BufferManagement.save_continuation() | nil,
+          directory: String.t() | nil
         }
 
-  @doc "Builds a latest-wins request for a Buffer process and existing operation identity."
+  @doc """
+  Builds a latest-wins request for a Buffer process and existing operation identity.
+
+  `directory` is where the formatter line runs: the open project's root, so a relative path in the line means "in the project". With `nil` it runs where Minga runs.
+  """
   @spec request(
           pid(),
           Minga.Editing.Formatter.formatter_spec(),
           Operation.id(),
-          BufferManagement.save_continuation() | nil
+          BufferManagement.save_continuation() | nil,
+          String.t() | nil
         ) ::
           Request.t()
-  def request(buffer, formatter, operation_id, continuation \\ nil) when is_pid(buffer) do
+  def request(buffer, formatter, operation_id, continuation \\ nil, directory \\ nil)
+      when is_pid(buffer) do
     Request.new(
-      %__MODULE__{buffer: buffer, formatter: formatter, continuation: continuation},
+      %__MODULE__{
+        buffer: buffer,
+        formatter: formatter,
+        continuation: continuation,
+        directory: existing_directory(directory)
+      },
       {:buffer, buffer},
       Policy.latest_wins(),
       operation_id: operation_id
     )
   end
 
+  @spec existing_directory(String.t() | nil) :: String.t() | nil
+  defp existing_directory(directory) when is_binary(directory) do
+    if File.dir?(directory), do: directory
+  end
+
+  defp existing_directory(nil), do: nil
+
   @impl true
   @spec run(t()) :: {:ok, ExternalFormatResult.t()} | {:error, term()}
-  def run(%__MODULE__{buffer: buffer, formatter: formatter}) do
+  def run(%__MODULE__{buffer: buffer, formatter: formatter, directory: directory}) do
     {content, version} = Buffer.content_with_version(buffer)
     file_name = (Buffer.file_path(buffer) || "scratch") |> Path.basename()
 
-    case Minga.Editing.format(content, formatter) do
+    # The formatter acts on the project, so it runs in the open project's root.
+    case Minga.Editing.format(content, formatter, directory) do
       {:ok, formatted} ->
         {:ok,
          ExternalFormatResult.new(

@@ -1423,8 +1423,11 @@ defmodule MingaEditor.Agent.SlashCommand do
     do: {:error, "No active agent session"}
 
   defp start_dynamic_command(state, cmd, command_path, command_args, session) do
+    # The command acts on the open project, so it runs in its root, the same root a config reload passes on.
+    directory = existing_directory(state.workspace.file_tree.project_root)
+
     case Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
-           run_dynamic_command(session, cmd, command_path, command_args)
+           run_dynamic_command(session, cmd, {command_path, command_args}, directory)
          end) do
       {:ok, _task_pid} ->
         {:ok, NoticeWorkflow.publish(state, "Running /#{cmd.name}…")}
@@ -1436,9 +1439,17 @@ defmodule MingaEditor.Agent.SlashCommand do
     :exit, reason -> {:error, "Command /#{cmd.name} could not start: #{inspect(reason)}"}
   end
 
-  @spec run_dynamic_command(pid(), Command.t(), String.t(), [String.t()]) :: :ok
-  defp run_dynamic_command(session, cmd, command_path, command_args) do
-    case DynamicSlashCommand.run(command_path, command_args) do
+  @spec existing_directory(String.t() | nil) :: String.t() | nil
+  defp existing_directory(directory) when is_binary(directory) do
+    if File.dir?(directory), do: directory
+  end
+
+  defp existing_directory(nil), do: nil
+
+  @spec run_dynamic_command(pid(), Command.t(), {String.t(), [String.t()]}, String.t() | nil) ::
+          :ok
+  defp run_dynamic_command(session, cmd, {command_path, command_args}, directory) do
+    case DynamicSlashCommand.run(command_path, command_args, directory) do
       {output, 0} ->
         deliver_dynamic_command_message(session, String.trim(output), :info)
 

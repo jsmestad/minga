@@ -79,7 +79,10 @@ defmodule Minga.Language.TreeSitter do
     filetype_atom = Keyword.get(opts, :filetype_atom)
     compiler = Keyword.get(opts, :compiler)
 
-    with {:ok, lib_path} <- ensure_compiled(name, source_dir, compiler),
+    # A relative folder written in a config file means next to that file, not where the editor was started.
+    # A folder a project's config names is compiled only if it passes the rule for a folder of code.
+    with {:ok, source_dir} <- Minga.Config.config_code_folder(source_dir),
+         {:ok, lib_path} <- ensure_compiled(name, source_dir, compiler),
          :ok <- load_into_parser(name, lib_path),
          :ok <- send_queries(name, opts),
          :ok <- register_filetype_mappings(name, filetype_atom, opts) do
@@ -297,7 +300,7 @@ defmodule Minga.Language.TreeSitter do
         nil
 
       path ->
-        case File.read(Path.expand(path)) do
+        case Minga.Config.read_config_named_file(path) do
           {:ok, query} ->
             resolve_query_inherits(query, query_type)
 
