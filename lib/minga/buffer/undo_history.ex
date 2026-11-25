@@ -579,32 +579,32 @@ defmodule Minga.Buffer.UndoHistory do
 
   # Visits the task's remaining groups newest first and reverts each one whose dependents can go with it.
   @spec walk_steps(map(), task()) :: {:ok, map()} | {:error, UndoPatch.apply_error()}
+  # Every decision reads only which groups are applied, so the walk decides on flags (a closure it takes is marked
+  # unapplied for the decisions after it) and then reverts everything it took in one pass and discards it once. Each
+  # step's closure costs its own runs; the whole press costs the task's runs plus one pass over the document.
   defp walk_steps(walk, task) do
-    walk.history
-    |> task_groups(task)
-    |> Enum.sort(:desc)
-    |> Enum.reduce_while({:ok, walk}, fn group, {:ok, walk} ->
-      if Provenance.group?(walk.history.provenance, group),
-        do: revert_closure(walk, group),
-        else: {:cont, {:ok, walk}}
-    end)
+    {_flags, taken} =
+      walk.history
+      |> task_groups(task)
+      |> Enum.sort(:desc)
+      |> Enum.reduce({walk.history.provenance, MapSet.new()}, fn group, {flags, taken} ->
+        if MapSet.member?(taken, group), do: {flags, taken}, else: take_closure(walk, flags, taken, group)
+      end)
+
+    if MapSet.size(taken) == 0, do: {:ok, walk}, else: revert_groups(walk, taken)
   end
 
-  @spec revert_closure(map(), Provenance.group_id()) ::
-          {:cont, {:ok, map()}} | {:halt, {:error, UndoPatch.apply_error()}}
-  defp revert_closure(walk, group) do
-    provenance = walk.history.provenance
-    closure = dependents(provenance, walk.history.merges, [group], MapSet.new([group]))
+  @spec take_closure(map(), Provenance.t(), MapSet.t(), Provenance.group_id()) :: {Provenance.t(), MapSet.t()}
+  defp take_closure(walk, flags, taken, group) do
+    closure = dependents(flags, walk.history.merges, [group], MapSet.new([group]))
 
-    case held_in(provenance, closure) do
+    case held_in(flags, closure) do
       nil ->
-        case revert_groups(walk, closure) do
-          {:ok, walk} -> {:cont, {:ok, walk}}
-          {:error, _reason} = error -> {:halt, error}
-        end
+        groups = closure |> MapSet.delete(:permanent) |> MapSet.to_list()
+        {Provenance.assume_unapplied(flags, groups), Enum.into(groups, taken)}
 
       _held ->
-        {:cont, {:ok, walk}}
+        {flags, taken}
     end
   end
 

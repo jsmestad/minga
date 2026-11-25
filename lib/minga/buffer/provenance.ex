@@ -614,7 +614,7 @@ defmodule Minga.Buffer.Provenance do
     end)
   end
 
-  @doc "Returns how many bytes of the group's own text are live."
+  @doc "Returns how many bytes of the group's own text are live, by the groups' applied flags."
   @spec live_bytes_of(t(), group_id()) :: non_neg_integer()
   def live_bytes_of(%__MODULE__{groups: groups, tree: tree}, id) do
     groups
@@ -623,8 +623,24 @@ defmodule Minga.Buffer.Provenance do
     |> :gb_sets.to_list()
     |> Enum.reduce(0, fn run_id, bytes ->
       {:ok, run, _offset} = RunTree.fetch(tree, run_id)
-      if run.group == id, do: bytes + Run.live_bytes(run), else: bytes
+      if run.group == id and live?(run, groups), do: bytes + run.bytes, else: bytes
     end)
+  end
+
+  @doc """
+  Returns the provenance with the groups in `ids` marked unapplied and nothing else changed, for deciding what a set of reverts would allow before making them: every query that reads only applied flags (`later_deleters_of/2`, `overlapping_groups/2`, `live_bytes_of/2`, `revives_deleted?/3`) answers as if they were reverted. The runs are not flipped, so the result must not be edited, flipped or kept.
+  """
+  @spec assume_unapplied(t(), [group_id()]) :: t()
+  def assume_unapplied(%__MODULE__{} = prov, ids) when is_list(ids) do
+    groups =
+      Enum.reduce(ids, prov.groups, fn id, groups ->
+        case groups do
+          %{^id => group} -> %{groups | id => %{group | applied: false}}
+          _gone -> groups
+        end
+      end)
+
+    %{prov | groups: groups}
   end
 
   @doc """
