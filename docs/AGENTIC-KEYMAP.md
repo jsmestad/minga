@@ -136,7 +136,7 @@ Press `SPC` in Normal mode. These sequences also work from the agent view, the f
 | `SPC a a` | Open the agent view, or return from it to where you were |
 | `SPC a v` | Today the same as `SPC a a` |
 | `SPC a n` | New agent session |
-| `SPC a s` | Stop the agent's current turn; queued messages stay queued |
+| `SPC a s` | Stop the agent's current turn; queued messages stay queued. It works from any buffer: with no conversation in front it stops the conversation shown last, or the only one working |
 | `SPC a ?` | Ask about the current line or the selection, inline |
 | `SPC a e` | Rewrite the selection, inline |
 | `SPC a r` | Pending reviews |

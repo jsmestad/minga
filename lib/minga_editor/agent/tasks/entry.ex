@@ -22,6 +22,9 @@ defmodule MingaEditor.Agent.Tasks.Entry do
   """
   @type waiting :: {:retry, integer(), String.t()} | {:limit, String.t()}
 
+  @typedoc "The turn a task's session is working on, as its session names it for Stop; nil while no turn is active."
+  @type stop_target :: {record_id :: String.t(), request_id :: String.t()}
+
   @typedoc "The design-token state a task shows, or nil for a task that has not started work."
   @type state :: :needs_you | :working | :waiting | :failed | :done | :stopped
 
@@ -36,6 +39,7 @@ defmodule MingaEditor.Agent.Tasks.Entry do
           activity: Activity.t(),
           failure: String.t() | nil,
           waiting: waiting() | nil,
+          stop_target: stop_target() | nil,
           turns: non_neg_integer(),
           started_at: integer(),
           changed_at: integer(),
@@ -56,6 +60,7 @@ defmodule MingaEditor.Agent.Tasks.Entry do
     activity: %Activity{},
     failure: nil,
     waiting: nil,
+    stop_target: nil,
     turns: 0,
     subagents: []
   ]
@@ -97,6 +102,11 @@ defmodule MingaEditor.Agent.Tasks.Entry do
   Events the task does not show are ignored, so the caller can pass every event the session sends.
   """
   @spec observe(t(), term(), integer()) :: t()
+  # The turn to stop is bookkeeping, not progress: it does not move the task's last change.
+  def observe(%__MODULE__{} = entry, {:stop_target_changed, target}, _now)
+      when is_nil(target) or tuple_size(target) == 2,
+      do: %{entry | stop_target: target}
+
   def observe(%__MODULE__{} = entry, event, now) do
     case apply_event(entry, event, now) do
       ^entry -> entry

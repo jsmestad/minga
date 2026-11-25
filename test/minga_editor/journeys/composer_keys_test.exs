@@ -127,6 +127,27 @@ defmodule MingaEditor.Journeys.ComposerKeysTest do
     end
   end
 
+  for {label, to_front} <- [
+        {"the conversation's split is closed", "<Esc><Esc><SPC>av"},
+        {"SPC a a went back to the file", "<Esc><Esc><SPC>aa"},
+        {"the file's window has the focus", "<Esc><Esc><C-w>h"}
+      ] do
+    test "SPC a s stops the working turn when #{label}", %{editor_ctx: ctx, session: session} do
+      send_keys_sync(ctx, "go")
+      send_key_sync(ctx, 13, @cmd)
+      await_working(ctx)
+
+      send_keys_sync(ctx, unquote(to_front))
+      send_keys_sync(ctx, "<SPC>as")
+
+      wait_until(ctx, fn _state -> Session.status(session) == :stopped end,
+        message: "expected SPC a s to stop the turn from a file buffer"
+      )
+
+      refute minibuffer(ctx) =~ "no longer active"
+    end
+  end
+
   test "Ctrl+U deletes to the start of the line and no longer scrolls while typing", %{
     editor_ctx: ctx
   } do

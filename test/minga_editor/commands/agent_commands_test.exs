@@ -1218,6 +1218,79 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       state = base_state(session: nil)
       assert AgentCommands.abort_agent(state) == state
     end
+
+    # A session that never answers: these tests read which turn Stop asked for.
+    defp working(state, target) do
+      session =
+        spawn_link(fn ->
+          receive do
+            :never -> :ok
+          end
+        end)
+
+      now = System.system_time(:millisecond)
+
+      connection =
+        state.agent_connection
+        |> MingaEditor.State.AgentConnection.follow_task(session, now)
+        |> MingaEditor.State.AgentConnection.observe_task_event(
+          session,
+          {:stop_target_changed, target},
+          now
+        )
+
+      {session, %{state | agent_connection: connection}}
+    end
+
+    defp shown_last(state, session, target) do
+      shell = state.shell_runtime.state
+
+      agent =
+        shell
+        |> MingaEditor.Shell.Traditional.State.agent()
+        |> AgentState.project_stop_target(session, target)
+
+      shell = MingaEditor.Shell.Traditional.State.replace_agent(shell, agent)
+      %{state | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell)}
+    end
+
+    defp asked_to_stop(state) do
+      for %TurnRequest{session: session, work: {:stop, target}} <-
+            Map.values(state.agent_connection.turn_requests),
+          do: {session, target}
+    end
+
+    test "with a file buffer in front, the only working turn is stopped" do
+      {session, state} = working(base_state(session: nil), {"record", "turn"})
+      stopped = AgentCommands.abort_agent(state)
+
+      assert asked_to_stop(stopped) == [{session, {"record", "turn"}}]
+      assert stopped.shell_runtime.state.notice.message == nil
+    end
+
+    test "with a file buffer in front, the conversation shown last is stopped at its current turn" do
+      {_other, state} = working(base_state(session: nil), {"other", "turn"})
+      {last, state} = working(state, {"last", "turn-2"})
+
+      # The turn the editor showed for it has since been replaced.
+      stopped = state |> shown_last(last, {"last", "turn-1"}) |> AgentCommands.abort_agent()
+
+      assert asked_to_stop(stopped) == [{last, {"last", "turn-2"}}]
+    end
+
+    test "with several turns working and none shown last, nothing is stopped and one line says why" do
+      {_a, state} = working(base_state(session: nil), {"a", "turn"})
+      {_b, state} = working(state, {"b", "turn"})
+      kept = AgentCommands.abort_agent(state)
+
+      assert asked_to_stop(kept) == []
+      assert kept.shell_runtime.state.notice.message =~ "Several conversations are working"
+    end
+
+    test "a turn that ended is not stopped, and nothing says it is no longer active" do
+      {_session, state} = working(base_state(session: nil), nil)
+      assert AgentCommands.abort_agent(state) == state
+    end
   end
 
   describe "scope_ctrl_c/1" do

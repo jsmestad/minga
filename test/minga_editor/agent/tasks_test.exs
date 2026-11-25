@@ -56,6 +56,23 @@ defmodule MingaEditor.Agent.TasksTest do
       end
     end
 
+    test "a session's turn can be stopped while it reports one, without counting as progress", %{
+      pid: pid,
+      tasks: tasks
+    } do
+      assert Tasks.stoppable(tasks) == []
+      {:ok, before} = Tasks.fetch(tasks, pid)
+
+      working = Tasks.observe(tasks, pid, {:stop_target_changed, {"record", "turn-1"}}, 9_999)
+      assert Tasks.stoppable(working) == [{pid, {"record", "turn-1"}}]
+
+      {:ok, entry} = Tasks.fetch(working, pid)
+      assert entry.changed_at == before.changed_at
+
+      ended = Tasks.observe(working, pid, {:stop_target_changed, nil}, 9_999)
+      assert Tasks.stoppable(ended) == []
+    end
+
     test "an open approval needs you before any other state", %{pid: pid, tasks: tasks} do
       tasks =
         tasks
