@@ -20,6 +20,24 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
     }
   end
 
+  test "a provider's own client is asked for Apple's system model, so no test reaches the host's helper" do
+    owner = self()
+    apple = %LLMDB.Model{provider: :apple, id: "system"}
+
+    client = fn model, messages, opts ->
+      send(owner, {:asked, model, messages, opts})
+      {:error, :held_by_the_test}
+    end
+
+    assert {:error, :held_by_the_test} = ReqLLMAdapter.stream(client, apple, [], max_tokens: 1)
+    assert_received {:asked, ^apple, [], [max_tokens: 1]}
+
+    # Any other Apple model is no route at all, whichever client is asked.
+    other = %LLMDB.Model{provider: :apple, id: "another"}
+    assert {:error, :invalid_apple_route} = ReqLLMAdapter.stream(client, other, [], [])
+    refute_received {:asked, ^other, _messages, _opts}
+  end
+
   test "host outcome metadata never reaches a provider and opaque provider metadata survives" do
     for output <- [nil, %{"opaque" => "provider-owned"}] do
       metadata = %{
