@@ -71,9 +71,26 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
     "max" => :max
   }
 
-  @doc "Returns the default ReqLLM streaming client."
+  @doc """
+  Returns the default streaming client: the on-device helper for Apple's system model, ReqLLM for every other model.
+
+  A provider started with its own client asks that client for every model, Apple's included, so a test never reaches the host's Apple Intelligence.
+  """
   @spec default_client() :: llm_client()
-  def default_client, do: &ReqLLM.stream_text/3
+  def default_client, do: &__MODULE__.default_stream/3
+
+  @doc "Streams one request from the model's own transport. See `default_client/0`."
+  @spec default_stream(LLMDB.Model.t(), [ReqLLM.Message.t()], keyword()) ::
+          {:ok, StreamResponse.t()} | {:error, term()}
+  def default_stream(%LLMDB.Model{provider: :apple, id: "system"} = model, messages, opts) do
+    case Apple.availability() do
+      {:ok, _context} -> Apple.stream_text(model, messages, opts)
+      {:error, reason} -> {:error, {:apple_unavailable, reason}}
+    end
+  end
+
+  def default_stream(%LLMDB.Model{} = model, messages, opts),
+    do: ReqLLM.stream_text(model, messages, opts)
 
   @doc "Validates an already-resolved model selection before ReqLLM sees it."
   @spec validate_selection(ModelSelection.t()) ::
@@ -220,15 +237,9 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   @doc "Runs one ReqLLM streaming request attempt. Retry ownership stays in Native."
   @spec stream(llm_client(), LLMDB.Model.t(), [ReqLLM.Message.t()], keyword()) ::
           {:ok, StreamResponse.t()} | {:error, term()}
-  def stream(_llm_client, %LLMDB.Model{provider: :apple, id: "system"} = model, messages, opts) do
-    case Apple.availability() do
-      {:ok, _context} -> Apple.stream_text(model, messages, opts)
-      {:error, reason} -> {:error, {:apple_unavailable, reason}}
-    end
-  end
-
-  def stream(_llm_client, %LLMDB.Model{provider: :apple}, _messages, _opts),
-    do: {:error, :invalid_apple_route}
+  def stream(_llm_client, %LLMDB.Model{provider: :apple, id: id}, _messages, _opts)
+      when id != "system",
+      do: {:error, :invalid_apple_route}
 
   # Contributed routes run through their registered module and receive only Minga-owned values.
   def stream(
