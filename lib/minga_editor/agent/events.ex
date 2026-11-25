@@ -110,6 +110,19 @@ defmodule MingaEditor.Agent.Events do
       |> MingaEditor.Handlers.Notifications.model_limit_reached(message)
       |> MingaEditor.schedule_render(16)
 
+  def dispatch(%EditorState{} = state, _session_pid, {:conversation_read_only, line})
+      when is_binary(line),
+      do:
+        state
+        |> MingaEditor.Handlers.Notifications.conversation_read_only(line)
+        |> MingaEditor.schedule_render(16)
+
+  def dispatch(%EditorState{} = state, _session_pid, :conversation_continues),
+    do:
+      state
+      |> MingaEditor.Handlers.Notifications.dismiss_conversation_read_only()
+      |> MingaEditor.schedule_render(16)
+
   def dispatch(
         %EditorState{} = state,
         session_pid,

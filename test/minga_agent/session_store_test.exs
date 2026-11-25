@@ -884,6 +884,65 @@ defmodule MingaAgent.SessionStoreTest do
       assert loaded.model_name == "claude-sonnet-4"
     end
 
+    test "the folder a conversation works in is written to its record and read back as written",
+         %{tmp_dir: dir} do
+      folders = [
+        {{:project, "/work/minga"}, %{"kind" => "project", "root" => "/work/minga"}},
+        {{:folder, "/work/notes"}, %{"kind" => "folder", "root" => "/work/notes"}},
+        {{:unavailable, :none}, %{"kind" => "none"}},
+        {{:unavailable, {:gone, :folder, "/work/gone"}},
+         %{"kind" => "folder", "root" => "/work/gone"}}
+      ]
+
+      for {{working_folder, stored}, index} <- Enum.with_index(folders) do
+        data = Map.put(sample_data("with-folder-#{index}"), :working_folder, working_folder)
+        assert :ok = SessionStore.save(data, dir)
+
+        path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+        assert JSON.decode!(File.read!(path))["working_folder"] == stored
+        assert {:ok, %{stored_working_folder: ^stored}} = SessionStore.load(data.id, dir)
+      end
+    end
+
+    test "loaded data that is saved again keeps the folder its record had", %{tmp_dir: dir} do
+      data = Map.put(sample_data("loaded-then-saved"), :working_folder, {:folder, "/work/notes"})
+      assert :ok = SessionStore.save(data, dir)
+      assert {:ok, loaded} = SessionStore.load(data.id, dir)
+
+      assert :ok = SessionStore.save(loaded, dir)
+
+      stored = %{"kind" => "folder", "root" => "/work/notes"}
+      assert {:ok, %{stored_working_folder: ^stored}} = SessionStore.load(data.id, dir)
+    end
+
+    test "a record without a folder still loads, and says it has none", %{tmp_dir: dir} do
+      data = sample_data("saved-before-folders")
+      assert :ok = SessionStore.save(data, dir)
+
+      path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+      refute Map.has_key?(JSON.decode!(File.read!(path)), "working_folder")
+      assert {:ok, %{stored_working_folder: nil} = loaded} = SessionStore.load(data.id, dir)
+      assert loaded.id == data.id
+    end
+
+    test "a folder entry that does not read as a folder does not stop the record from loading",
+         %{tmp_dir: dir} do
+      data = Map.put(sample_data("unreadable-folder"), :working_folder, {:folder, "/work/notes"})
+      assert :ok = SessionStore.save(data, dir)
+      path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+
+      record =
+        path
+        |> File.read!()
+        |> JSON.decode!()
+        |> Map.put("working_folder", ["not", "a", "folder"])
+
+      File.write!(path, JSON.encode!(record))
+
+      assert {:ok, %{stored_working_folder: ["not", "a", "folder"]}} =
+               SessionStore.load(data.id, dir)
+    end
+
     test "persists a versioned secret-free executable selection", %{tmp_dir: dir} do
       selection = model_selection()
       data = Map.put(sample_data("selected-route"), :model_selection, selection)

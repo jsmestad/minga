@@ -264,6 +264,17 @@ defmodule MingaAgent.Providers.Native do
     GenServer.call(pid, :agent_hooks)
   end
 
+  @doc """
+  Returns the folder this provider decided to work in when it started.
+
+  The session records it with the conversation, so a restored conversation works in the same folder.
+  """
+  @impl MingaAgent.Provider
+  @spec working_folder(GenServer.server()) :: WorkingFolder.t()
+  def working_folder(pid) do
+    GenServer.call(pid, :working_folder)
+  end
+
   @doc "Returns the project view associated with this provider, or nil."
   @spec project_view(GenServer.server()) :: ProjectView.t() | nil
   def project_view(pid) do
@@ -993,6 +1004,10 @@ defmodule MingaAgent.Providers.Native do
 
   def handle_call(:project_view, _from, state) do
     {:reply, state.project_view, state}
+  end
+
+  def handle_call(:working_folder, _from, state) do
+    {:reply, state.working_folder, state}
   end
 
   def handle_call(:changeset, _from, state) do
@@ -1760,7 +1775,13 @@ defmodule MingaAgent.Providers.Native do
     })
   end
 
-  defp refresh_edit_view(state, view) do
+  # The provider works in one folder for its whole life.
+  # A view of another folder would move its tools there while its instructions still name the first, so it is refused.
+  defp refresh_edit_view(%{project_root: root}, %ProjectView{project_root: other})
+       when other != root,
+       do: {:error, {:foreign_view, other}}
+
+  defp refresh_edit_view(state, %ProjectView{} = view) do
     with :ok <- release_owned_edit_view(state) do
       install_refreshed_view(%{
         state
@@ -3726,7 +3747,7 @@ defmodule MingaAgent.Providers.Native do
   defp environment_line(project_root, working_folder) do
     case WorkingFolder.refusal(working_folder) do
       nil ->
-        "- Project root: #{project_root}"
+        WorkingFolder.root_line(project_root)
 
       line ->
         "- No working folder. #{line} " <>

@@ -556,6 +556,25 @@ defmodule MingaAgent.Session.Continuation do
     %{continuation | durable_revision: continuation.revision}
   end
 
+  @doc """
+  The system instructions captured with this conversation.
+
+  They are the selected prefix's instructions. A record written before prefixes were captured has none selected, and its system messages are the instructions it ran with. User, assistant and tool messages are never returned.
+  """
+  @spec captured_instructions(t()) :: [String.t()]
+  def captured_instructions(%__MODULE__{prefixes: prefixes, messages: messages}) do
+    case PrefixStore.resolve(prefixes, prefixes.selected) do
+      %Prefix{instructions: instructions} when is_binary(instructions) ->
+        [instructions]
+
+      _unknown ->
+        for %Message{role: :system, content: content} <- messages,
+            %ContentPart{type: :text, text: text} <- List.wrap(content),
+            is_binary(text),
+            do: text
+    end
+  end
+
   @doc "Returns whether the current completed boundary is durably resumable."
   @spec durable?(t()) :: boolean()
   def durable?(%__MODULE__{} = continuation),

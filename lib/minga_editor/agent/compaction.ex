@@ -109,6 +109,13 @@ defmodule MingaEditor.Agent.Compaction do
     {state, outcome}
   end
 
+  # A conversation that can only be read is not compacted. That is its state, not a failure to report.
+  defp apply_active(
+         state,
+         %Outcome{value: {:failed, {:conversation_read_only, _line}}} = outcome
+       ),
+       do: {update_active_ui(state, &clear_ui_progress/1), outcome}
+
   defp apply_active(state, %Outcome{value: {:failed, reason}} = outcome) do
     state =
       update_active_ui(state, fn ui ->
@@ -155,6 +162,11 @@ defmodule MingaEditor.Agent.Compaction do
       |> UIState.push_toast("Context compacted", :info)
     end)
   end
+
+  defp apply_background_outcome(state, workspace_id, _session, %Outcome{
+         value: {:failed, {:conversation_read_only, _line}}
+       }),
+       do: update_background_ui(state, workspace_id, &clear_ui_progress/1)
 
   defp apply_background_outcome(state, workspace_id, _session, %Outcome{
          value: {:failed, reason}
