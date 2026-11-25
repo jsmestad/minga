@@ -1967,7 +1967,6 @@ defmodule MingaEditor.Agent.DraftWorkflow do
 
   defp report(state, :unchanged), do: state
 
-  @spec tab_bar(State.t()) :: TabBar.t() | nil
   @doc "Reports whether `owner` is the workspace in front, whose composer a held send came from."
   @spec active_owner?(State.t(), non_neg_integer()) :: boolean()
   def active_owner?(%State{} = state, owner) do

@@ -122,7 +122,7 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
       refute minibuffer(ctx) =~ "Wait for the saved composer"
     end
 
-    test "a held send sends only the pressed text and keeps what was typed after it", %{
+    test "a held send whose message changed after the press is not sent, and nothing is lost", %{
       editor_ctx: ctx,
       session: session
     } do
@@ -132,14 +132,38 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
       send_keys_sync(ctx, " more")
       answer_load(ctx, load, :ok)
 
-      wait_until(ctx, fn _state -> {:user, "hello"} in Session.messages(session) end,
-        max_attempts: 500,
-        interval_ms: 20,
-        message: "expected the pressed text to be sent once the draft loaded"
+      assert prompt(ctx) == "hello more"
+
+      assert minibuffer(ctx) ==
+               "Not sent: the message changed after you pressed send. Press send again."
+
+      refute {:user, "hello"} in Session.messages(session)
+    end
+
+    test "a held send already sent by a second press is not sent again", %{
+      editor_ctx: ctx,
+      session: session
+    } do
+      load = begin_load(ctx)
+      send_keys_sync(ctx, "hello")
+      send_key_sync(ctx, 13, @cmd)
+
+      # The load answers and a second press lands before the held send is delivered.
+      :ok = :sys.suspend(ctx.editor)
+      %{owner: owner, ref: ref, revision: revision, target: {session_pid, id}} = load
+
+      send(
+        ctx.editor,
+        {:composer_draft_result, session_pid, id, {owner, ref}, {:ok, revision, nil}}
       )
 
-      assert prompt(ctx) == "hello more"
-      assert minibuffer(ctx) == "The pressed input was sent. Newer edits were kept."
+      send(ctx.editor, {:minga_input, {:key_press, 13, @cmd}})
+      :ok = :sys.resume(ctx.editor)
+      :sys.get_state(ctx.editor)
+      :sys.get_state(ctx.editor)
+
+      assert prompt(ctx) == ""
+      assert Enum.count(Session.messages(session), &(&1 == {:user, "hello"})) == 1
     end
 
     test "if the load fails, the typed text stays and one line says why", %{editor_ctx: ctx} do

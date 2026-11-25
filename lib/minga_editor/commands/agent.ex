@@ -916,7 +916,9 @@ defmodule MingaEditor.Commands.Agent do
   defp delivery_kind(_state, kind), do: kind
 
   @doc """
-  Delivers a send held while the composer's saved draft loaded, with the content from its key press. Text typed after the press stays in the composer; a send whose conversation is no longer in front is not sent, and its text stays in that composer.
+  Delivers a send held while the composer's saved draft loaded, with the content from its key press.
+
+  It is sent only while the composer still holds exactly what was pressed. If the composer is empty, the text was sent another way since the press, and nothing happens. If the user changed it after the press, nothing is sent: the composer keeps everything and one line asks for another press, so Minga never guesses which text was meant. A send whose conversation is no longer in front is not sent either; its text stays in that composer.
   """
   @spec deliver_held_send(
           state(),
@@ -924,14 +926,27 @@ defmodule MingaEditor.Commands.Agent do
           {:send_now | :steering | :follow_up, String.t() | [ReqLLM.Message.ContentPart.t()],
            String.t(), DraftSave.marker()}
         ) :: state()
-  def deliver_held_send(state, owner, press) do
-    if DraftWorkflow.active_owner?(state, owner) do
-      deliver_held_in_front(state, press, DraftWorkflow.submission(state))
-    else
-      NoticeWorkflow.publish(
-        state,
-        "A message was not sent because its conversation is no longer in front. Its text is still in that composer."
-      )
+  def deliver_held_send(state, owner, {_kind, _content, _source, marker} = press) do
+    panel = state.workspace.agent_ui.panel
+
+    cond do
+      not DraftWorkflow.active_owner?(state, owner) ->
+        NoticeWorkflow.publish(
+          state,
+          "A message was not sent because its conversation is no longer in front. Its text is still in that composer."
+        )
+
+      composer_marker(panel) == marker ->
+        deliver_held_in_front(state, press, DraftWorkflow.submission(state))
+
+      PromptBuffer.input_empty?(panel) ->
+        state
+
+      true ->
+        NoticeWorkflow.publish(
+          state,
+          "Not sent: the message changed after you pressed send. Press send again."
+        )
     end
   end
 
@@ -944,14 +959,8 @@ defmodule MingaEditor.Commands.Agent do
   defp deliver_held_in_front(state, _press, {:error, message}),
     do: NoticeWorkflow.publish(state, message)
 
-  defp deliver_held_in_front(state, {kind, content, source, marker}, submission) do
-    panel = state.workspace.agent_ui.panel
-    kept = if composer_marker(panel) == marker, do: nil, else: PromptBuffer.input_text(panel)
-
-    state
-    |> deliver_held_input(kind, content, submission, {source, marker})
-    |> keep_newer_edits(kept)
-  end
+  defp deliver_held_in_front(state, {kind, content, source, marker}, submission),
+    do: deliver_held_input(state, kind, content, submission, {source, marker})
 
   @spec deliver_held_input(
           state(),
@@ -977,21 +986,6 @@ defmodule MingaEditor.Commands.Agent do
     do: Buffer.inspection_marker(pid)
 
   defp composer_marker(%Panel{}), do: nil
-
-  # A delivered send clears the composer. When the user typed after the press,
-  # put that text back: only what was pressed was sent.
-  @spec keep_newer_edits(state(), String.t() | nil) :: state()
-  defp keep_newer_edits(state, nil), do: state
-
-  defp keep_newer_edits(state, kept) do
-    if PromptBuffer.input_empty?(state.workspace.agent_ui.panel) do
-      state
-      |> update_agent_ui(&PromptBuffer.set_prompt_text(&1, kept))
-      |> NoticeWorkflow.publish("The pressed input was sent. Newer edits were kept.")
-    else
-      state
-    end
-  end
 
   @spec deliver_composer_input(
           state(),
