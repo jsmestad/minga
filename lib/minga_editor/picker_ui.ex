@@ -21,7 +21,6 @@ defmodule MingaEditor.PickerUI do
   """
 
   alias Minga.Editing.LineEdit
-  alias Minga.Keymap
   alias MingaEditor.Effect.Request
   alias MingaEditor.EffectScheduler
   alias MingaEditor.State, as: EditorState
@@ -871,22 +870,26 @@ defmodule MingaEditor.PickerUI do
         codepoint,
         mods
       ) do
-    vim_state = if PickerState.list_keys?(picker_state), do: :normal, else: :insert
-
-    case Keymap.resolve_scoped_key(
-           :picker,
-           vim_state,
+    case PickerState.resolve_key(
+           picker_state,
            {codepoint, mods},
-           picker_keymap_context(state, picker_state)
+           state.interaction.keymap_server
          ) do
       {:command, command} -> run_command(state, picker_state, command)
-      # A picker with nothing to filter takes no text.
-      _unbound when vim_state == :normal -> state
-      _unbound -> edit_query(state, picker_state, codepoint, mods)
+      _unbound -> unbound_key(state, picker_state, codepoint, mods)
     end
   end
 
   def handle_key(state, _cp, _mods), do: state
+
+  # A picker with nothing to filter takes no text, so a key it does not bind does nothing.
+  @spec unbound_key(state(), PickerState.t(), non_neg_integer(), non_neg_integer()) ::
+          state() | {state(), action()}
+  defp unbound_key(state, picker_state, codepoint, mods) do
+    if PickerState.list_keys?(picker_state),
+      do: state,
+      else: edit_query(state, picker_state, codepoint, mods)
+  end
 
   @doc "Returns the keymap context for the open picker: `⌃V` is bound only when its source shows the selection in the focused window."
   @spec picker_keymap_context(state(), PickerState.t()) :: keyword()

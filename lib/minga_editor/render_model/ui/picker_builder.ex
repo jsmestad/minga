@@ -4,7 +4,6 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   import Bitwise
 
   alias Minga.Buffer
-  alias Minga.Keymap.Scope
   alias Minga.RenderModel.UI.EmptyList
   alias Minga.RenderModel.UI.Picker, as: PickerModel
   alias Minga.RenderModel.UI.Picker.ActionMenu
@@ -115,11 +114,10 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   # A frontend previews a move only for these keys, so its preview cannot disagree with `MingaEditor.PickerUI.handle_key/3`.
   @spec movement_keys(Context.t(), PickerState.t()) :: [PickerModel.movement_key()]
   defp movement_keys(%Context{intent: %{frame: %{keymap_server: keymap_server}}}, picker_state) do
-    context = PickerState.keymap_context(picker_state, keymap_server)
-
     keys =
       for {command, movement} <- [picker_next: :next, picker_prev: :previous],
-          {codepoint, modifiers} <- Scope.keys_for_command(:picker, :insert, command, context) do
+          {codepoint, modifiers} <-
+            PickerState.keys_for_command(picker_state, command, keymap_server) do
         %{codepoint: codepoint, modifiers: modifiers, movement: movement}
       end
 

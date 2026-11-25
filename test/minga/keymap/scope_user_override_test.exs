@@ -145,9 +145,11 @@ defmodule Minga.Keymap.Scope.UserOverrideTest do
     end
 
     test "an unknown scope or an unbound command has no keys" do
-      assert Scope.keys_for_command(:no_such_scope, :insert, :picker_next) == []
+      context = [keymap_server: test_keymap_server()]
+
+      assert Scope.keys_for_command(:no_such_scope, :insert, :picker_next, context) == []
       assert picker_keys(:no_such_command) == []
-      assert Scope.keys_for_command(:picker, :normal, :picker_next) == []
+      assert Scope.keys_for_command(:picker, :normal, :picker_next, context) == []
     end
   end
 
