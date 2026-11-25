@@ -61,16 +61,36 @@ defmodule MingaEditor.Frontend.TerminalHealth do
   end
 
   @doc """
-  Returns the features the option forces that the running frontend did not take from the user.
+  Returns the settings of the option that the running frontend does not have.
 
-  That happens after the option changed without a restart, and where something other than the BEAM starts the frontend.
+  A setting is in effect when the frontend reports the feature as the user's and its status is what the setting asks for. It is not in effect after the option changed without a restart, and where something other than the BEAM starts the frontend.
   """
   @spec not_applied(TerminalReport.t(), TerminalOverrides.t()) :: [{atom(), :on | :off}]
   def not_applied(%TerminalReport{} = report, overrides) when is_map(overrides) do
     overrides
-    |> Enum.filter(fn {feature, _setting} -> TerminalReport.source(report, feature) != :user end)
+    |> Enum.reject(fn {feature, setting} ->
+      in_effect?(TerminalReport.entry(report, feature), setting)
+    end)
     |> Enum.sort()
   end
+
+  @doc """
+  Returns the features the running frontend was started with as forced that the option no longer names.
+
+  They stay forced until Minga restarts, because the frontend reads the user's choice once, at its start.
+  """
+  @spec no_longer_set(TerminalReport.t(), TerminalOverrides.t()) :: [TerminalReport.feature()]
+  def no_longer_set(%TerminalReport{} = report, overrides) when is_map(overrides) do
+    for feature <- TerminalReport.features(),
+        TerminalReport.source(report, feature) == :user,
+        not Map.has_key?(overrides, feature),
+        do: feature
+  end
+
+  @spec in_effect?(TerminalReport.entry(), :on | :off) :: boolean()
+  defp in_effect?({:detected, :user}, :on), do: true
+  defp in_effect?({status, :user}, :off) when status in [:fallback, :missing], do: true
+  defp in_effect?(_entry, _setting), do: false
 
   @doc "Returns the page as text, one line per list element."
   @spec lines(subject(), TerminalOverrides.t()) :: [String.t()]
@@ -93,7 +113,8 @@ defmodule MingaEditor.Frontend.TerminalHealth do
   def lines(%TerminalReport{} = report, overrides) when is_map(overrides) do
     ["Terminal", ""] ++
       Enum.flat_map(rows(report), &row_lines/1) ++
-      not_applied_lines(not_applied(report, overrides)) ++ footer()
+      not_applied_lines(not_applied(report, overrides)) ++
+      no_longer_set_lines(no_longer_set(report, overrides)) ++ footer()
   end
 
   @spec standing(TerminalReport.status()) :: standing()
@@ -149,6 +170,17 @@ defmodule MingaEditor.Frontend.TerminalHealth do
       "",
       "Set in your config, not applied: #{settings}.",
       "Restart Minga to apply it. If something else starts Minga's terminal frontend, set #{TerminalOverrides.variable()} yourself, for example #{example(pending)}."
+    ]
+  end
+
+  @spec no_longer_set_lines([TerminalReport.feature()]) :: [String.t()]
+  defp no_longer_set_lines([]), do: []
+
+  defp no_longer_set_lines(features) do
+    [
+      "",
+      "Forced when Minga started, no longer in your config: #{Enum.join(features, ", ")}.",
+      "Restart Minga to let it detect them again."
     ]
   end
 

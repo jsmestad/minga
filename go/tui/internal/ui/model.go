@@ -260,15 +260,20 @@ func (m Model) WithTerminalOverrides(value string) (Model, []string) {
 	return m, problems
 }
 
-// ForcedColorProfile returns the colour profile the program must use because the user forced true colour on or off.
-// Without it Bubble Tea detects the profile from the environment, and the report follows what it finds.
-func (m Model) ForcedColorProfile() (colorprofile.Profile, bool) {
+// ForcedColorProfile returns the colour profile the program must use because the user forced true colour on or off,
+// given the profile detection would choose. Forced on is true colour. Forced off caps the detected profile at 256
+// colours: a terminal with 16 colours or none keeps what it has.
+// Without an override Bubble Tea detects the profile itself, and the report follows what it finds.
+func (m Model) ForcedColorProfile(detected colorprofile.Profile) (colorprofile.Profile, bool) {
 	forced, on := m.capabilities.Forced(generated.TerminalFeatureTrueColor)
 	if !forced {
 		return colorprofile.Unknown, false
 	}
 	if on {
 		return colorprofile.TrueColor, true
+	}
+	if detected < colorprofile.ANSI256 {
+		return detected, true
 	}
 	return colorprofile.ANSI256, true
 }

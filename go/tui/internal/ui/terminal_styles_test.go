@@ -302,11 +302,24 @@ func TestAForcedFeatureIsReportedAsTheUsersAndDrawnAsForced(t *testing.T) {
 		t.Fatalf("true colour forced off = %d, want fallback", report[generated.TerminalFeatureTrueColor])
 	}
 
-	// A forced colour profile is what the program is started with.
-	if profile, forced := model.ForcedColorProfile(); !forced || profile != colorprofile.ANSI256 {
-		t.Fatalf("forced profile = %v, %v; want the 256 colour profile", profile, forced)
+	// A forced colour profile is what the program is started with. Forced off caps what detection found at 256
+	// colours, so a terminal with fewer keeps what it has.
+	for detected, want := range map[colorprofile.Profile]colorprofile.Profile{
+		colorprofile.TrueColor: colorprofile.ANSI256,
+		colorprofile.ANSI256:   colorprofile.ANSI256,
+		colorprofile.ANSI:      colorprofile.ANSI,
+		colorprofile.ASCII:     colorprofile.ASCII,
+		colorprofile.NoTTY:     colorprofile.NoTTY,
+	} {
+		if profile, forced := model.ForcedColorProfile(detected); !forced || profile != want {
+			t.Fatalf("forced off with %v detected = %v, %v; want %v", detected, profile, forced, want)
+		}
 	}
-	if _, forced := New(80, 24, nil).ForcedColorProfile(); forced {
+	forcedOn, _ := New(80, 24, nil).WithTerminalOverrides("true_color=on")
+	if profile, forced := forcedOn.ForcedColorProfile(colorprofile.ANSI); !forced || profile != colorprofile.TrueColor {
+		t.Fatalf("forced on = %v, %v; want true colour", profile, forced)
+	}
+	if _, forced := New(80, 24, nil).ForcedColorProfile(colorprofile.TrueColor); forced {
 		t.Fatal("without an override the profile is detected")
 	}
 }

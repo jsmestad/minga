@@ -49,6 +49,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
          renderer_path: renderer_path,
          port_opener: capturing_opener,
          tty_path: "/dev/tty",
+         renderer_env: fn -> [] end,
          renderer_exit_timeout_ms: 0},
         id: name
       )
@@ -60,7 +61,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
       assert {:env, [{~c"MINGA_TTY", ~c"/dev/tty"}]} in opts
     end
 
-    test "the renderer is started with the terminal features the user forces, read at each start" do
+    test "the renderer is started with the terminal features the user forces" do
       name = unique_name()
 
       renderer_path =

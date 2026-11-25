@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/jsmestad/minga/go/tui/internal/port"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 	"github.com/jsmestad/minga/go/tui/internal/terminal"
@@ -60,7 +61,7 @@ func run() error {
 		tea.WithOutput(filter.TrackOutput(tty)),
 		tea.WithFilter(filter.Filter),
 	}
-	if profile, forced := model.ForcedColorProfile(); forced {
+	if profile, forced := model.ForcedColorProfile(colorprofile.Detect(tty, os.Environ())); forced {
 		options = append(options, tea.WithColorProfile(profile))
 	}
 	program := tea.NewProgram(model, options...)
