@@ -9,7 +9,7 @@ defmodule Minga.LoggerHandler do
      (writes to `~/.local/share/minga/minga.log`)
   2. Adds a custom handler that forwards messages to the `*Messages*` buffer
      via `Minga.Events` broadcasts
-  3. Redirects the `:standard_io` and `:standard_error` IO devices to the same log file so that raw Mix output, `IO.puts/2`, and raw BEAM warnings don't corrupt the TUI either
+  3. Asks `Minga.LoggerHandler.StderrRedirect` to move the `:standard_error` device to the same log file, so compiler diagnostics, `IO.warn/1` and `IO.puts(:stderr, ...)` don't corrupt the TUI either. The holder owns the log-file device, not the caller, so the redirect survives an Editor crash
 
   ## Crash recovery
 
@@ -32,6 +32,8 @@ defmodule Minga.LoggerHandler do
   `install/0` is idempotent: safe to call on every Editor init even
   when the handlers are already in place from a previous Editor lifetime.
   """
+
+  alias Minga.LoggerHandler.StderrRedirect
 
   @handler_id :minga_messages
   @file_handler_id :minga_file
@@ -79,7 +81,7 @@ defmodule Minga.LoggerHandler do
   end
 
   @doc """
-  Install the file handler and stdio redirects for TUI mode.
+  Install the file handler and the standard error redirect for TUI mode.
 
   Idempotent: skips any handler or redirect that is already in place.
   Safe to call on every Editor init, including restarts after a crash
@@ -112,17 +114,10 @@ defmodule Minga.LoggerHandler do
     # 2. Add our custom handler that sends to *Messages*.
     install_messages_handler()
 
-    # 3. Redirect :standard_io and :standard_error to the log file so Mix output,
-    #    IO.puts, IO.warn, and raw BEAM warnings don't paint over the TUI. We open
-    #    unicode-mode file devices and register them using the OTP IO names.
-    #    Idempotent: skip if already redirected.
-    unless stdout_redirected?() do
-      redirect_standard_io(log_path)
-    end
-
-    unless stderr_redirected?() do
-      redirect_standard_error(log_path)
-    end
+    # 3. Redirect :standard_error to the log file, so compiler diagnostics and IO.warn don't paint over the TUI.
+    #    The holder owns the log-file device, so the redirect outlives the Editor that asked for it.
+    #    Idempotent in the holder.
+    _result = StderrRedirect.redirect(log_path)
 
     log_path
   end
@@ -132,8 +127,7 @@ defmodule Minga.LoggerHandler do
   def uninstall do
     :logger.remove_handler(@handler_id)
     :logger.remove_handler(@file_handler_id)
-    restore_standard_io()
-    restore_standard_error()
+    StderrRedirect.restore()
 
     # Re-add the stock console handler
     :logger.add_handler(:default, :logger_std_h, %{
@@ -267,65 +261,6 @@ defmodule Minga.LoggerHandler do
     end
   end
 
-  # ── stdio redirects ───────────────────────────────────────────────────────
-
-  @spec redirect_standard_io(String.t()) :: :ok
-  defp redirect_standard_io(log_path) do
-    redirect_registered_io(:standard_io, :minga_original_stdout, :minga_stdout_file, log_path)
-  end
-
-  @spec redirect_standard_error(String.t()) :: :ok
-  defp redirect_standard_error(log_path) do
-    redirect_registered_io(:standard_error, :minga_original_stderr, :minga_stderr_file, log_path)
-  end
-
-  @spec redirect_registered_io(atom(), atom(), atom(), String.t()) :: :ok
-  defp redirect_registered_io(device_name, original_key, file_key, log_path) do
-    case Process.whereis(device_name) do
-      nil ->
-        :ok
-
-      original ->
-        :persistent_term.put(original_key, original)
-        {:ok, file} = File.open(log_path, [:append, :utf8])
-        :persistent_term.put(file_key, file)
-
-        Process.unregister(device_name)
-        Process.register(file, device_name)
-    end
-
-    :ok
-  end
-
-  @spec restore_standard_io() :: :ok
-  defp restore_standard_io do
-    restore_registered_io(:standard_io, :minga_original_stdout, :minga_stdout_file)
-  end
-
-  @spec restore_standard_error() :: :ok
-  defp restore_standard_error do
-    restore_registered_io(:standard_error, :minga_original_stderr, :minga_stderr_file)
-  end
-
-  @spec restore_registered_io(atom(), atom(), atom()) :: :ok
-  defp restore_registered_io(device_name, original_key, file_key) do
-    try do
-      original = :persistent_term.get(original_key)
-      file = :persistent_term.get(file_key)
-
-      Process.unregister(device_name)
-      Process.register(original, device_name)
-      File.close(file)
-
-      :persistent_term.erase(original_key)
-      :persistent_term.erase(file_key)
-    rescue
-      ArgumentError -> :ok
-    end
-
-    :ok
-  end
-
   # ── Message formatting ─────────────────────────────────────────────────────
 
   @spec format_message(atom(), term(), map()) :: String.t()
@@ -350,15 +285,5 @@ defmodule Minga.LoggerHandler do
   @spec handler_installed?(atom()) :: boolean()
   defp handler_installed?(handler_id) do
     match?({:ok, _}, :logger.get_handler_config(handler_id))
-  end
-
-  @spec stdout_redirected?() :: boolean()
-  defp stdout_redirected? do
-    :persistent_term.get(:minga_original_stdout, nil) != nil
-  end
-
-  @spec stderr_redirected?() :: boolean()
-  defp stderr_redirected? do
-    :persistent_term.get(:minga_original_stderr, nil) != nil
   end
 end

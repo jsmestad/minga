@@ -10,6 +10,8 @@ defmodule Minga.Application do
   ## Supervision Tree
 
       Minga.Supervisor (rest_for_one)
+      ├── Minga.LoggerHandler.Supervisor (one_for_one)
+      │   └── Minga.LoggerHandler.StderrRedirect (owns the standard error redirect)
       ├── Minga.Extension.ContributionCleanup (serialized cleanup-callback registration)
       ├── MingaEditor.Shell.Registry         (serialized shell publication)
       ├── MingaEditor.Input.HandlerRegistry  (serialized input-handler publication)
@@ -134,6 +136,18 @@ defmodule Minga.Application do
 
     base_children =
       [
+        # The holder of the standard error redirect has its own supervisor.
+        # This tree is rest_for_one: a holder restarting directly under it would take every later child.
+        %{
+          id: Minga.LoggerHandler.Supervisor,
+          start:
+            {Supervisor, :start_link,
+             [
+               [Minga.LoggerHandler.StderrRedirect],
+               [strategy: :one_for_one, name: Minga.LoggerHandler.Supervisor]
+             ]},
+          type: :supervisor
+        },
         # Shell.Registry, HandlerRegistry, Foundation registries, and bundled
         # packs register cleanup callbacks while they start.
         Minga.Extension.ContributionCleanup,
