@@ -184,7 +184,10 @@ defmodule Minga.Config.Loader do
   def migration_notices(server \\ __MODULE__),
     do: Agent.get(server, & &1.report.migration_notices)
 
-  @doc false
+  @doc """
+  Keeps a retired option's note for `*Messages*` while the config loads. Returns `:not_loading` outside a load, so the
+  caller can show the note directly.
+  """
   @spec record_retired_option(String.t()) :: :ok | :not_loading
   def record_retired_option(note) when is_binary(note) do
     case Process.get(:minga_config_retired_notes) do
