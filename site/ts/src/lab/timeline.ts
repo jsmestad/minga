@@ -159,10 +159,10 @@ export interface TimelineControls {
  * Wires the page's own buttons to a timeline and returns the function that shows the right ones for a state.
  * Replay shows when a run has ended. Next and Back show only in stepped mode. The buttons are never rebuilt; a button with nothing to do is hidden.
  *
- * A state change can hide the button that has focus (the prompt's timeout hides its answer button). Pass the stage, and focus then moves to the
- * next button that is still visible (Next, then Replay, then Back), or to the stage when none is.
+ * A state change can hide the button that has focus (the prompt's timeout hides its answer button). Focus then moves to the next button that is
+ * still visible (Next, then Replay, then Back), or to the stage when none is. The stage is required so that no lab can leave focus to fall to <body>.
  */
-export function bindTimelineControls(timeline: Timeline, controls: TimelineControls, stage?: Pick<LabStage, "rescueFocus">): (state: TimelineState) => void {
+export function bindTimelineControls(timeline: Timeline, controls: TimelineControls, stage: Pick<LabStage, "rescueFocus">): (state: TimelineState) => void {
   controls.replay?.addEventListener("click", () => timeline.send({ type: "replay" }));
   controls.next?.addEventListener("click", () => timeline.send({ type: "next" }));
   controls.back?.addEventListener("click", () => timeline.send({ type: "back" }));
@@ -176,6 +176,6 @@ export function bindTimelineControls(timeline: Timeline, controls: TimelineContr
     if (controls.next) controls.next.hidden = !canGoNext(state);
     if (controls.back) controls.back.hidden = !canGoBack(state);
     if (controls.answer) controls.answer.hidden = state.phase !== "prompt";
-    if (focused?.hidden) stage?.rescueFocus(focused, order);
+    if (focused?.hidden) stage.rescueFocus(focused, order);
   };
 }

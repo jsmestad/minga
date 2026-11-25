@@ -60,18 +60,21 @@ describe("lab kit: key names", () => {
     assert.equal(capturesKey({ key: "Escape" }, false), true);
   });
 
-  it("never keeps Tab, Shift+Tab, or a Control or Command chord, even when the lab handled the key", () => {
+  it("never keeps Tab, Shift+Tab or a Command chord, even when the lab handled the key", () => {
     for (const handled of [false, true]) {
       assert.equal(capturesKey({ key: "Tab" }, handled), false, `Tab handled=${handled}`);
       assert.equal(capturesKey({ key: "Tab", shiftKey: true } as Parameters<typeof capturesKey>[0], handled), false, `Shift+Tab handled=${handled}`);
-      assert.equal(capturesKey({ key: "r", metaKey: true }, handled), false, `Cmd+r handled=${handled}`);
-      assert.equal(capturesKey({ key: "j", ctrlKey: true }, handled), false, `Ctrl+j handled=${handled}`);
+      assert.equal(capturesKey({ key: "j", metaKey: true }, handled), false, `Cmd+j handled=${handled}`);
       assert.equal(capturesKey({ key: "l", ctrlKey: true, metaKey: true }, handled), false, `Ctrl+Cmd+l handled=${handled}`);
     }
     assert.equal(normalizeKey({ key: "Tab" }), "TAB");
   });
 
-  it("keeps an Option chord or a function key only when the lab handled it", () => {
+  it("keeps a Control chord, an Option chord or a function key only when the lab handled it", () => {
+    for (const key of ["j", "k", "t", "."]) {
+      assert.equal(capturesKey({ key, ctrlKey: true }, true), true, `Ctrl+${key} handled`);
+      assert.equal(capturesKey({ key, ctrlKey: true }, false), false, `Ctrl+${key} not handled`);
+    }
     assert.equal(capturesKey({ key: "F5" }, false), false);
     assert.equal(capturesKey({ key: "F5" }, true), true);
     assert.equal(capturesKey({ key: "Enter", altKey: true }, false), false);

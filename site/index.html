@@ -36,6 +36,8 @@
           document.documentElement.setAttribute("data-theme", saved);
         }
       } catch (_) {}
+      // The labs lay out as live before they mount, so mounting moves nothing. The module's onerror takes this back.
+      document.documentElement.classList.add("labs-pending");
     })();
   </script>
 </head>
@@ -669,6 +671,6 @@ extension <span class="tok-atom">:minga_git_extended</span>,
   </footer>
 
   <script defer src="/site.js"></script>
-  <script type="module" src="/assets/learn-labs.js"></script>
+  <script type="module" src="/assets/learn-labs.js" onerror="document.documentElement.classList.add('labs-failed')"></script>
 </body>
 </html>

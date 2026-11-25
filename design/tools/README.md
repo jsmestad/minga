@@ -102,7 +102,10 @@ The kit's chrome classes are in `site/styles.css` under "Lab kit". A lab uses th
 
 | Class or attribute | Where | What it does |
 |---|---|---|
-| `lab-live` | the lab root, set by `mountLab` | Hides `[data-lab-steps]` and shows the live chrome. A browser that runs scripts lays the figure out this way before the lab mounts (`@media (scripting: enabled)`), so mounting does not move the page. |
+| `labs-pending` | `<html>`, set by the page's inline head script | Lays each lab out as live before it mounts (list hidden, caption and control rows reserved), so mounting does not move the page. A script blocker stops the inline script too, so the step list stays visible. |
+| `labs-failed` | `<html>`, set by `onerror` on the lab module's `<script>` tag | The module did not load. Every lab falls back to its static figure and step list. |
+| `lab-failed` | one lab root, set by `main.ts` when that lab's mount throws | That lab falls back to its static figure and step list, and the error is logged. The other labs still mount. |
+| `lab-live` | the lab root, set by `mountLab` | Hides `[data-lab-steps]` and shows the live chrome. |
 | `lab-head` | the row above the stage | Holds `lab-labels` (`lab-title`, `lab-sim-label`) and `lab-stepper`. |
 | `lab-caption` | the caption line, directly under the stage | The one line of narration. It keeps a minimum height so the controls under it do not move. |
 | `lab-timeline-controls`, `lab-control` | the row of timeline buttons, and each button | Replay, Next and Back. The buttons are in the page with `hidden`; the kit shows the ones that apply. |
@@ -110,6 +113,10 @@ The kit's chrome classes are in `site/styles.css` under "Lab kit". A lab uses th
 | `is-stage-focused` | the lab root, set by `mountStage` | Present while focus is inside the stage. |
 | `[data-lab-stage]` | the stage | Shows a focus ring when the keyboard put focus on it. |
 | `lab-sr` | anywhere | Text for screen readers only. |
+
+A page that hosts a kit lab needs both hooks: `document.documentElement.classList.add("labs-pending")` in its inline head script, and `onerror="document.documentElement.classList.add('labs-failed')"` on the module script tag. `site/index.html` has them; each other page gets them when its lab moves to the kit.
+
+**Keys.** A lab passes `onKey` to `mountStage` and returns `true` only for a key it binds. The stage keeps a bound key from the browser, a Control chord included, so a lab that teaches Control+J can stop the browser acting on it. Tab, Shift+Tab and Command chords are never kept. For a key the lab does not bind, it may still update its caption and returns `false`: every key gets an answer, and Tab and the browser's own shortcuts keep working.
 
 A lab's state test proves that the page has words for every id the state can emit. `site/ts/test/support/page_copy.ts` reads the contract from a page without a DOM; `site/ts/test/spec_board_state.test.ts` shows the use.
 

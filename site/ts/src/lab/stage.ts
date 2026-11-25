@@ -6,6 +6,9 @@
  * - A lab that takes keys also gets focus on its stage after a pointer click on a control, so the next key press lands in the stage. A control worked from the keyboard keeps focus, so it can be pressed again.
  * - The root carries the class "is-stage-focused" while focus is inside the stage, so the stylesheet can show a "click here, then press keys" cue when it is not.
  *
+ * - onKey returns true only for a key the lab binds. The stage keeps a bound key from the browser (a Control chord included), never Tab or a Command chord.
+ *   A lab still answers an unbound key in its caption and returns false, which is how "every key answers" and "Tab always leaves" hold together.
+ *
  * Key names and prefix tracking are pure, so a lab's state tests can drive them without a DOM.
  */
 
@@ -68,16 +71,19 @@ export function normalizeKey(event: KeyLike): string | null {
 }
 
 /**
- * Whether a focused stage keeps this key from the page. Tab always leaves the stage, and a Control or Command chord always stays with the browser,
- * even when the lab handled the key. An Option chord or a function key is kept only when the lab handled it.
+ * Whether a focused stage keeps this key from the page.
+ *
+ * - Tab and Shift+Tab always leave the stage, and a Command chord always stays with the browser, even when the lab handled the key.
+ * - A Control chord, an Option chord or a function key is kept only when the lab handled it. A lab that teaches Control+J must be able to stop
+ *   the browser acting on it; a Control chord the lab does not bind stays a browser shortcut.
+ * - Any other key is kept, so the space bar does not scroll the page while the stage has focus.
  */
 export function capturesKey(event: KeyLike, handled: boolean): boolean {
   if (event.key === "Tab" || event.metaKey) return false;
-  const altGraph = typedWithAltGraph(event);
-  if (event.ctrlKey && !altGraph) return false;
   if (handled) return true;
+  if (typedWithAltGraph(event)) return true;
   if (/^F\d+$/.test(event.key)) return false;
-  return !event.altKey || altGraph;
+  return !(event.ctrlKey || event.altKey);
 }
 
 export type PrefixStatus = "pending" | "matched" | "unknown";
@@ -133,7 +139,11 @@ export function focusAfterControlClick(click: { readonly keyed: boolean; readonl
 export interface StageOptions {
   /** The focusable element. It keeps its identity for the life of the lab. */
   readonly stage: HTMLElement;
-  /** Called for each named key pressed in the focused stage, Tab included. Return true when the lab handled it. Omit it for a lab that takes no keys. */
+  /**
+   * Called for each named key pressed in the focused stage, Tab included. Omit it for a lab that takes no keys.
+   * Return true only for a key the lab binds. For any other key, update the caption if you like ("that key does nothing here") and return false:
+   * every key still gets an answer, and Tab and the browser's own shortcuts keep working.
+   */
   readonly onKey?: (key: string, event: KeyboardEvent) => boolean | void;
 }
 

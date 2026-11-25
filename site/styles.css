@@ -4192,19 +4192,32 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   display: none;
 }
 
-/* Before a lab mounts, a browser that runs scripts already lays the figure out as the live lab (list hidden, caption and controls rows reserved), so mounting does not move the content below it. With scripting off none of this applies, and the step list shows. */
-@media (scripting: enabled) {
-  [data-lab-steps] {
-    display: none;
-  }
+/* Before a lab mounts, the page's inline head script has set labs-pending on <html>, and the figure is already laid out as the live lab (list hidden, caption and controls rows reserved), so mounting does not move the content below it. With scripts off or blocked the class is never set, and the step list shows. */
+.labs-pending [data-lab-steps] {
+  display: none;
+}
 
-  .lab-caption:empty {
-    display: block;
-  }
+.labs-pending .lab-caption:empty {
+  display: block;
+}
 
-  .lab-timeline-controls {
-    display: flex;
-  }
+.labs-pending .lab-timeline-controls {
+  display: flex;
+}
+
+/* Failure. labs-failed on <html> means the lab module did not load; lab-failed on a lab root means that lab's mount threw. Either way the lab reads as its static figure plus the step list, which holds every caption and link. These rules must beat every pending and live rule above, whatever its weight, so they are the one place the lab kit uses !important. */
+.labs-failed [data-lab-steps],
+.lab-failed [data-lab-steps] {
+  display: block !important;
+}
+
+.labs-failed .lab-caption,
+.lab-failed .lab-caption,
+.labs-failed .lab-timeline-controls,
+.lab-failed .lab-timeline-controls,
+.labs-failed .lab-stepper,
+.lab-failed .lab-stepper {
+  display: none !important;
 }
 
 .lab-sr {
@@ -4466,15 +4479,18 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   display: flex;
 }
 
-/* Before the demo mounts, a browser that runs scripts shows the final frame laid out as the live stage: the composer row is there and the replaced words are gone, so no line wraps differently once it mounts. */
-@media (scripting: enabled) {
-  .sb-composer {
-    display: flex;
-  }
+/* Before the demo mounts (labs-pending), the final frame is laid out as the live stage: the composer row is there and the replaced words are gone, so no line wraps differently once it mounts. A failed demo takes both back. */
+.labs-pending .sb-composer {
+  display: flex;
+}
 
-  .sb-demo:not(.lab-live) .sb-text del {
-    display: none;
-  }
+.labs-pending:not(.labs-failed) .sb-demo:not(.lab-live):not(.lab-failed) .sb-text del {
+  display: none;
+}
+
+.labs-failed .sb-composer,
+.lab-failed .sb-composer {
+  display: none !important;
 }
 
 .sb-composer-who {
@@ -4791,18 +4807,18 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   }
 }
 
-/* The figure before it mounts, in a browser that runs scripts: the same phone layout as the final frame, so mounting does not change its height. */
-@media (max-width: 900px) and (scripting: enabled) {
-  .sb-demo:not(.lab-live) .sb-line:not([data-line="heading"], [data-line="save"], [data-line="sync"], [data-line="retry"], [data-line="status"]),
-  .sb-demo:not(.lab-live) .sb-composer {
+/* The figure before it mounts (labs-pending): the same narrow layout as the final frame, so mounting does not change its height. */
+@media (max-width: 900px) {
+  .labs-pending:not(.labs-failed) .sb-demo:not(.lab-live):not(.lab-failed) .sb-line:not([data-line="heading"], [data-line="save"], [data-line="sync"], [data-line="retry"], [data-line="status"]),
+  .labs-pending:not(.labs-failed) .sb-demo:not(.lab-live):not(.lab-failed) .sb-composer {
     display: none;
   }
 
-  .sb-demo:not(.lab-live) .sb-buffer {
+  .labs-pending:not(.labs-failed) .sb-demo:not(.lab-live):not(.lab-failed) .sb-buffer {
     min-height: 9.85rem;
   }
 
-  .sb-demo:not(.lab-live) .sb-pane-board {
+  .labs-pending:not(.labs-failed) .sb-demo:not(.lab-live):not(.lab-failed) .sb-pane-board {
     min-height: 20.7rem;
   }
 }

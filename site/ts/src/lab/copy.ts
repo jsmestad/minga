@@ -13,6 +13,7 @@
  *   - Visible words live in the page HTML, never in TypeScript. Lab state holds ids. design/tools/site_check.py reads the page, so it checks the copy.
  *   - Build DOM nodes once. Update text, classes and attributes. Never assign innerHTML over a region that holds a control, and never replace a focused node.
  *   - Listen for keys on the stage element only. No lab listens on window or document.
+ *   - onKey returns true only for a key the lab binds. For an unbound key the lab may still update its caption, and returns false.
  *
  * The page-copy contract. A lab root holds one ordered list. It is ordinary visible HTML, so it is also the fallback when JavaScript is off:
  *
@@ -34,6 +35,10 @@
  *
  * Chrome classes in site/styles.css ("Lab kit"). A lab uses these and adds only its own stage styles:
  *
+ *   labs-pending           on <html>, set by the page's inline head script. Lays each lab out as live before it mounts, so mounting moves nothing.
+ *                          A script blocker stops that inline script too, so the step list stays visible.
+ *   labs-failed            on <html>, set by onerror on the lab module's <script> tag. Every lab falls back to its static figure and step list.
+ *   lab-failed             on one lab root, set by main.ts when that lab's mount throws. That lab falls back; the others still mount.
  *   lab-live               on the root once the lab is mounted (set by mountLab). Hides [data-lab-steps] and shows the live chrome.
  *   lab-head               the row above the stage: lab-labels (lab-title, lab-sim-label) and lab-stepper.
  *   lab-caption            the caption line, directly under the stage.
