@@ -319,6 +319,42 @@ struct ProtocolDecoderTests {
         )
     }
 
+    @Test("The Dock badge shows the needs-you count only in the background")
+    func attentionBadge() {
+        var attention = AgentAttention()
+        attention.count(2)
+        #expect(attention.badgeLabel == nil) // in front
+        attention.activation(false)
+        #expect(attention.badgeLabel == "2")
+        attention.count(0)
+        #expect(attention.badgeLabel == nil)
+        attention.count(1)
+        attention.activation(true)
+        #expect(attention.badgeLabel == nil) // coming to the front clears it
+    }
+
+    @Test("An alert bounces the Dock icon only while Minga is in the background")
+    func attentionBounce() {
+        var attention = AgentAttention()
+        #expect(!attention.bounces)
+        attention.activation(false)
+        #expect(attention.bounces)
+    }
+
+    @Test("A refused permission logs one line, later alerts stay silent and do not ask again, and the badge still shows")
+    func attentionRefusal() {
+        var attention = AgentAttention()
+        attention.activation(false)
+        attention.count(1)
+        #expect(attention.asksForAuthorization)
+
+        #expect(attention.authorized(false) != nil)
+        #expect(!attention.asksForAuthorization)
+        #expect(!attention.posts)
+        #expect(attention.authorized(false) == nil)
+        #expect(attention.badgeLabel == "1")
+    }
+
     @Test("Decode correlated native Save As request")
     func decodeNativeSaveAsRequest() throws {
         let path = "/tmp/notes.txt"

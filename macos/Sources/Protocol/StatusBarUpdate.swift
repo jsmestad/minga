@@ -124,6 +124,8 @@ public struct StatusBarUpdate: Sendable {
     public let review: Review?
     /// The next steps the echo-line notice names, drawn after `message`; a click runs the action's command.
     public let messageActions: [Wire.EmptyListAction]
+    /// How many tasks need you: the same count as the modeline's needs-you segment, for the Dock badge.
+    public let needsYouCount: Int
 
     public init(
         contentKind: UInt8,
@@ -166,9 +168,11 @@ public struct StatusBarUpdate: Sendable {
         workspace: WorkspaceInfo? = nil,
         pendingKeys: String = "",
         review: Review? = nil,
-        messageActions: [Wire.EmptyListAction] = []
+        messageActions: [Wire.EmptyListAction] = [],
+        needsYouCount: Int = 0
     ) {
         self.messageActions = messageActions
+        self.needsYouCount = needsYouCount
         self.contentKind = EditorContentKind(rawValue: contentKind)
         self.mode = EditorMode(rawValue: mode)
         self.cursorLine = cursorLine

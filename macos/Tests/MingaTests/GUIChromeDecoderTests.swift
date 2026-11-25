@@ -896,6 +896,24 @@ struct GUIStatusBarDecoderTests {
         #expect(update.messageActions == [Wire.EmptyListAction(id: "inline_ask", key: "SPC a ?", label: "ask Minga")])
     }
 
+    @Test("Decode the needs-you count (needs_you section), zero when absent")
+    func decodeNeedsYouSection() throws {
+        var identity = Data()
+        identity.append(0); identity.append(0); identity.append(0)
+
+        func decode(_ sections: [Data]) throws -> Int? {
+            var data = Data()
+            data.append(OP_GUI_STATUS_BAR)
+            data.append(UInt8(sections.count))
+            for s in sections { data.append(s) }
+            guard case .guiStatusBar(let update) = try decodeCommand(data: data, offset: 0).0 else { return nil }
+            return update.needsYouCount
+        }
+
+        #expect(try decode([buildSection(SECTION_IDENTITY, identity), buildSection(0x14, Data([0, 2]))]) == 2)
+        #expect(try decode([buildSection(SECTION_IDENTITY, identity)]) == 0)
+    }
+
     @Test("Pending keys default to empty when section absent")
     func pendingKeysDefaultEmpty() throws {
         var identity = Data()

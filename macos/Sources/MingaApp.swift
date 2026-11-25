@@ -950,6 +950,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appState.windowTitle = title
         case .agentDesktopNotification(let notification):
             if coreConnectionIsLive { desktopAgentNotifications?.receive(notification) }
+        case .needsYouCountChanged(let count):
+            desktopAgentNotifications?.needsYouCount(count)
         case .documentEditedChanged(let edited):
             editorNSView?.window?.isDocumentEdited = edited
         case .windowBackgroundChanged(let red, let green, let blue):

@@ -1196,6 +1196,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var filetype = ""
         var message = ""
         var messageActions: [Wire.EmptyListAction] = []
+        var needsYouCount = 0
         var macroRecording: UInt8 = 0
         var modelName = ""
         var messageCount: UInt32 = 0
@@ -1286,6 +1287,10 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             case 0x13: // MessageActions: the next steps the notice names
                 let (actions, _) = try GeneratedProtocol.decodeGuiStatusBarMessageActions(data, sStart, sStart + sectionLen)
                 messageActions = actions.map { Wire.EmptyListAction(id: $0.id, key: $0.key, label: $0.label) }
+
+            case 0x14: // NeedsYou: how many tasks need you (u16), present only while some do
+                guard sectionLen >= 2 else { throw ProtocolDecodeError.malformed }
+                needsYouCount = Int(try readU16(data, sStart))
 
             case 0x08: // Recording: macro_recording(1)
                 guard sectionLen >= 1 else { break }
@@ -1469,7 +1474,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             workspace: workspace,
             pendingKeys: pendingKeys,
             review: review,
-            messageActions: messageActions
+            messageActions: messageActions,
+            needsYouCount: needsYouCount
         )
         return (.guiStatusBar(update), pos - offset)
 

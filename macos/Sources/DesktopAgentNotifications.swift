@@ -2,6 +2,51 @@ import AppKit
 import MingaUI
 import UserNotifications
 
+/// The app's background escalation for "a task needs you" (docs/design/surfaces.md, "Notifications and background"):
+/// a Dock badge with the needs-you count, one informational bounce, and a notification.
+///
+/// The BEAM decides when a task starts needing you while Minga is in the background; this value only decides how the
+/// app shows it. The badge needs no permission, so it still shows when macOS refuses notifications.
+struct AgentAttention: Equatable {
+    /// What macOS answered when the app asked to post notifications.
+    enum Authorization: Equatable {
+        case unasked
+        case granted
+        case refused
+    }
+
+    private(set) var authorization: Authorization = .unasked
+    private(set) var needsYouCount = 0
+    private(set) var active = true
+
+    /// The Dock badge: the needs-you count while Minga is in the background, and nothing in front or at zero.
+    var badgeLabel: String? {
+        guard !active, needsYouCount > 0 else { return nil }
+        return String(needsYouCount)
+    }
+
+    /// Whether a new alert bounces the Dock icon once: only while Minga is in the background, never in front.
+    var bounces: Bool { !active }
+
+    /// Whether to ask macOS for permission before posting: only until it has answered.
+    var asksForAuthorization: Bool { authorization == .unasked }
+
+    /// Whether a notification may be posted: not once macOS refused.
+    var posts: Bool { authorization != .refused }
+
+    mutating func count(_ count: Int) { needsYouCount = max(count, 0) }
+
+    mutating func activation(_ active: Bool) { self.active = active }
+
+    /// Records macOS's answer. Returns the one line to log for a refusal; later refusals return nil, so the log stays calm.
+    mutating func authorized(_ granted: Bool) -> String? {
+        let firstRefusal = !granted && authorization != .refused
+        authorization = granted ? .granted : .refused
+        guard firstRefusal else { return nil }
+        return "Desktop notifications are off: macOS did not grant Minga permission. The Dock badge still shows what needs you."
+    }
+}
+
 /// Posts the BEAM's "a task needs you" alerts under Minga's bundle identity, and removes them when the BEAM withdraws them.
 ///
 /// The BEAM decides when to alert: only when a task starts needing you while Minga is in the background. This class never checks whether the app is active.
@@ -24,12 +69,37 @@ final class DesktopAgentNotifications: NSObject, UNUserNotificationCenterDelegat
     private let openEditor: @MainActor () -> Void
     private let openAlert: @MainActor (UUID) -> Void
     private var alerts: [UUID: Task<Void, Never>] = [:]
+    private var attention = AgentAttention()
+    private var activationObservers: [NSObjectProtocol] = []
 
     init(openEditor: @escaping @MainActor () -> Void, openAlert: @escaping @MainActor (UUID) -> Void) {
         self.openEditor = openEditor
         self.openAlert = openAlert
         super.init()
         center.delegate = self
+        attention.activation(NSApp.isActive)
+        let notifications = NotificationCenter.default
+        for (name, active) in [(NSApplication.didBecomeActiveNotification, true), (NSApplication.didResignActiveNotification, false)] {
+            activationObservers.append(notifications.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.activation(active) }
+            })
+        }
+    }
+
+    /// Shows how many tasks need you on the Dock badge while Minga is in the background.
+    func needsYouCount(_ count: Int) {
+        attention.count(count)
+        showBadge()
+    }
+
+    private func activation(_ active: Bool) {
+        attention.activation(active)
+        showBadge()
+    }
+
+    private func showBadge() {
+        let label = attention.badgeLabel
+        if NSApp.dockTile.badgeLabel != label { NSApp.dockTile.badgeLabel = label }
     }
 
     func receive(_ notification: AgentDesktopNotification) {
@@ -39,11 +109,14 @@ final class DesktopAgentNotifications: NSObject, UNUserNotificationCenterDelegat
             withdraw([Self.identifier(id)])
             PortLogger.info("Agent notification withdrawn: \(Self.identifier(id))")
         case .needsYou(let id):
+            // One informational bounce per task that starts needing you, and never while Minga is in front.
+            if attention.bounces { NSApp.requestUserAttention(.informationalRequest) }
             post(id)
         }
     }
 
     func retireConnection() {
+        needsYouCount(0)
         guard !alerts.isEmpty else { return }
         for task in alerts.values { task.cancel() }
         withdraw(alerts.keys.map(Self.identifier))
@@ -66,16 +139,25 @@ final class DesktopAgentNotifications: NSObject, UNUserNotificationCenterDelegat
     }
 
     private func deliver(id: String) async -> Bool {
+        guard !Task.isCancelled, attention.posts else { return false }
+        if attention.asksForAuthorization {
+            // macOS prompts only on the first request; a refusal is remembered, so later alerts do not ask again.
+            let granted = (try? await center.requestAuthorization(options: [.alert])) ?? false
+            if let line = attention.authorized(granted) { PortLogger.info(line) }
+            guard granted else { return false }
+        }
         guard !Task.isCancelled else { return false }
         do {
-            // macOS prompts only on the first request. Later calls respect the user's choice.
-            guard try await center.requestAuthorization(options: [.alert]), !Task.isCancelled else { return false }
             let content = UNMutableNotificationContent()
             content.title = "Minga needs you"
             content.body = "A task is waiting for your answer."
             content.threadIdentifier = "agent"
             try await center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
             return true
+        } catch let error as UNError where error.code == .notificationsNotAllowed {
+            // Permission was withdrawn after it was granted: the same calm, single line as a refusal.
+            if let line = attention.authorized(false) { PortLogger.info(line) }
+            return false
         } catch {
             PortLogger.warn("Could not deliver an agent notification", privateDetail: error.localizedDescription)
             return false
