@@ -929,6 +929,22 @@ defmodule Minga.Buffer.UndoHistoryTest do
     # Without compaction the press reverts steps 4 and 1; step 4's text was already gone under your edit. With
     # compaction the hold on step 2 holds the class, so step 4 stays. The document is the same, and press and u still
     # finish.
+    # Consequence 2 with a dependent: task 0's steps 1 and 3 are one class and your edit holds step 3. Without
+    # compaction the press reverts step 1 and task 1's step 2, which rewrote step 1's text; with compaction the class
+    # stays, and so does step 2, which only had to go with step 1.
+    test "a held class keeps what depends on it" do
+      emoji_twins([
+        {:minga, 0, 0, ["a", "a", "a", "a", "a", "o"], 0},
+        {:minga, 5, 2, ["f", "a"], 3},
+        {:minga, 0, 3, ["r", "é", "f", "😀"], 2},
+        {:user, 20, 6, ["é"], 3},
+        {:minga, 20, 4, ["a", "😀", "é", "b", "é"], 2},
+        :press
+      ])
+
+      assert Process.get(:merge_differences) == 1
+    end
+
     test "a hold on any member of a merged class holds the class" do
       emoji_twins([
         {:minga, 0, 0, ["a"], 3},
@@ -1468,8 +1484,8 @@ defmodule Minga.Buffer.UndoHistoryTest do
   # 1. A press that reverts a merged step takes its whole class: the steps the compacted press reverted beyond the
   #    plain one are members of a class it reverted, or groups that depend on such a member; or, with the same steps
   #    after mapping, the compacted press reverted a step the plain press left behind that absorbed another step.
-  # 2. A hold on any member holds the class: the steps the plain press reverted and the compacted one did not are in a
-  #    class with a step the plain press left behind.
+  # 2. A hold on any member holds the class, with what depends on it: the steps the plain press reverted and the
+  #    compacted one did not are members of a class with a step the plain press left behind, or depend on one.
   #
   # After either, the compacted press must still be exact for its own record, keep your visible text, and repeated
   # presses and undos must finish; the two histories then differ for good and the comparison ends.
@@ -1544,13 +1560,29 @@ defmodule Minga.Buffer.UndoHistoryTest do
       MapSet.size(missing) == 0 and
         if(MapSet.size(extra) == 0, do: absorbed_left?, else: Enum.all?(extra, from_class?))
 
+    # The held classes: missing steps in a class with a step the plain press left behind. What they hold back is their
+    # members and everything that depends on them, followed through.
+    held =
+      Enum.filter(missing, fn step ->
+        step in left_behind or Enum.any?(class.(step), &(&1 in left_behind))
+      end)
+
+    held_back = held_closure(provenance, merges, held, absorbed)
+
     held_class? =
-      MapSet.size(extra) == 0 and MapSet.size(missing) > 0 and
-        Enum.all?(missing, fn step ->
-          Enum.any?(class.(step), &(&1 in left_behind)) or step in left_behind
-        end)
+      MapSet.size(extra) == 0 and held != [] and Enum.all?(missing, &(&1 in held_back))
 
     takes_class? or held_class?
+  end
+
+  defp held_closure(provenance, merges, steps, absorbed) do
+    Stream.iterate(MapSet.new(steps), fn found ->
+      members = Enum.flat_map(found, &UndoHistory.merge_class(merges, &1))
+      newer = dependents_of(provenance, members)
+      MapSet.union(found, MapSet.new(Enum.concat(members, newer), &final_step(&1, absorbed)))
+    end)
+    |> Stream.chunk_every(2, 1)
+    |> Enum.find_value(fn [a, b] -> if a == b, do: a end)
   end
 
   defp dependents_of(provenance, groups) do
