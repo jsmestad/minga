@@ -71,6 +71,18 @@ defmodule Minga.RenderModel.UI.AgentChat.ToolStep do
     join("Asking to " <> infinitive, target(name, args))
   end
 
+  @doc """
+  The question an approval card asks, in the decision's own words: "Write notes.txt?", "Run `mix test`?".
+
+  It is the card's headline on both frontends (`docs/design/terminal.md` asks an approval the same way: "Run mix ecto.reset?"), so the card names what you are deciding, never the tool.
+  """
+  @spec question(String.t(), map()) :: String.t()
+  def question(name, args) when is_binary(name) and is_map(args) do
+    name = String.trim(name)
+    {_gerund, _past, infinitive} = verbs(name)
+    capitalize(join(infinitive, target(name, args))) <> "?"
+  end
+
   @spec phrase(status(), String.t(), String.t(), String.t(), String.t()) :: String.t()
   defp phrase(:running, gerund, _past, _infinitive, target), do: join(gerund, target)
   defp phrase(:complete, _gerund, past, _infinitive, target), do: join(past, target)
@@ -131,6 +143,11 @@ defmodule Minga.RenderModel.UI.AgentChat.ToolStep do
   @spec join(String.t(), String.t()) :: String.t()
   defp join(verb, ""), do: verb
   defp join(verb, target), do: verb <> " " <> target
+
+  # "run `mix test`" becomes "Run `mix test`" at the start of a sentence.
+  @spec capitalize(String.t()) :: String.t()
+  defp capitalize(<<first::utf8, rest::binary>>), do: String.upcase(<<first::utf8>>) <> rest
+  defp capitalize(""), do: ""
 
   # "Reading native.ex" becomes "reading native.ex" after a leading clause.
   @spec lower(String.t()) :: String.t()

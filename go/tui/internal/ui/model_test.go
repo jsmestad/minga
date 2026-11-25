@@ -1504,14 +1504,14 @@ func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
 		{Kind: 0x01, Text: "please fix the agent view"},
 		{Kind: 0x02, Text: "I will make the agent surface semantic."},
 		{Kind: 0x04, Name: "read_file", Summary: "go/tui/internal/ui/render_surfaces.go", Step: "Read go/tui/internal/ui/render_surfaces.go", State: 6, Status: 1, DurationMS: 25, Collapsed: true},
-		{Kind: 0x09, Name: "edit_file", Summary: "Update agent renderer", PreviewLines: []string{"+ semantic panel"}},
+		{Kind: 0x09, Name: "edit_file", Summary: "Edit go/tui/internal/ui/agent_chat_panel.go?", PreviewLines: []string{"+ semantic panel"}},
 		{Kind: 0x06, Usage: protocol.AgentUsage{Input: 1200, Output: 300, CostMicros: 500}},
 		{Kind: 0x01, Text: "now explain the renderer"},
 		{Kind: 0x02, Text: "This turn reported no usage."},
 	}})
 
 	view := ansi.Strip(strings.Join(model.renderAgentChatPanelWithLimit(chat, 120, 28), "\n"))
-	for _, want := range []string{"󰚩 Agent", "anthropic / claude-sonnet-4", "◌ medium", "● Read go/tui/internal/ui/render_surfaces.go", "Approval edit_file", "This turn reported no usage.", "Usage", "NORMAL", "fix the renderer", "◇ Session", "Provider", "Model", "Latest usage", "Input    1.2K", "Output   300", "Hints", "╰"} {
+	for _, want := range []string{"󰚩 Agent", "anthropic / claude-sonnet-4", "◌ medium", "● Read go/tui/internal/ui/render_surfaces.go", "◉ Edit go/tui/internal/ui/agent_chat_panel.go?", "This turn reported no usage.", "Usage", "NORMAL", "fix the renderer", "◇ Session", "Provider", "Model", "Latest usage", "Input    1.2K", "Output   300", "Hints", "╰"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("agent chat panel missing %q in %q", want, view)
 		}

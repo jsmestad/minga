@@ -321,9 +321,11 @@ defmodule Minga.RenderModel.UI.AgentChat do
     Pre-resolved core view of an inline approval tool call card.
 
     The editor builder runs the agent's approval-preview builder (or reads a
-    supplied preview), then stores the already-built `summary`, `preview_kind`
-    (`:diff | :command | :target | :args`), and `preview_lines` here. The GUI
+    supplied preview), then stores the already-built `preview_kind`
+    (`:diff | :command | :target | :args`) and `preview_lines` here. The GUI
     encoder serializes these resolved fields without touching any agent struct.
+
+    `summary` is the card's headline: the question it asks, in the decision's own words ("Write notes.txt?", "Run `mix test`?"), from `Minga.RenderModel.UI.AgentChat.ToolStep.question/2`. Frontends draw it as the card's title and never show `name`, the tool's raw name, to the user.
     """
 
     @typedoc "Resolved preview kind for an approval card."

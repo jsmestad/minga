@@ -1178,13 +1178,12 @@ func (m Model) renderAgentApprovalMessage(msg protocol.AgentChatMessage, width i
 	// Top border
 	top := border.Render("╭" + strings.Repeat("─", max(width-2, 0)) + "╮")
 
-	// Header: ◆ Approval <name> · <kind>  <summary>
-	headerLabel := lipgloss.NewStyle().Bold(true).Foreground(p.Warning()).Background(innerBG).Render("◆ Approval")
-	name := lipgloss.NewStyle().Bold(true).Foreground(p.AgentText()).Background(innerBG).Render(" " + nonEmpty(msg.Name, "tool"))
-	kind := lipgloss.NewStyle().Foreground(p.Accent()).Background(innerBG).Render(" · " + approvalPreviewKindName(msg.PreviewKind))
-	summaryBudget := max(innerWidth-lipgloss.Width(headerLabel)-lipgloss.Width(name)-lipgloss.Width(kind)-3, 8)
-	summary := lipgloss.NewStyle().Foreground(p.AgentText()).Background(innerBG).Render(gap(spaceXL) + firstCompactLine(msg.Summary, summaryBudget))
-	headerContent := headerLabel + name + kind + summary
+	// Header: the needs-you glyph and the question the BEAM wrote ("Write notes.txt?").
+	// The frontend adds no words of its own and never shows the tool's raw name.
+	glyph := lipgloss.NewStyle().Bold(true).Foreground(p.Warning()).Background(innerBG).Render(generated.StateNeedsYou.Token().Glyph)
+	headlineBudget := max(innerWidth-lipgloss.Width(glyph)-spaceXS.cols()-2*approvalCardLead.cols(), 8)
+	headline := lipgloss.NewStyle().Bold(true).Foreground(p.AgentText()).Background(innerBG).Render(gap(spaceXS) + firstCompactLine(msg.Summary, headlineBudget))
+	headerContent := glyph + headline
 
 	lines := []string{
 		outerStyle.Render(fitStyled(top, width)),

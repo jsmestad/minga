@@ -1279,6 +1279,21 @@ struct AgentChatViewTests {
         #expect(state.promptMode == .insert)
     }
 
+    @Test("An approval card's title is the BEAM's question, with no words of the frontend's and no raw tool name")
+    @MainActor func approvalCardTitleIsTheQuestion() throws {
+        let state = chatState(messages: [
+            .approvalToolCall(id: 1, name: "write_file", summary: "Write ./notes.txt?", toolCallId: "call-1", sessionId: "session-a", requestId: "request-a", previewKind: 1, previewLines: ["+hello"])
+        ])
+
+        let sut = AgentChatView(state: state, isInsertMode: false, sendAction: nil)
+            .environment(\.themeColors, ThemeColors())
+        let strings = try sut.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("Write ./notes.txt?"))
+        #expect(!strings.contains("write_file"))
+        #expect(!strings.contains("Approval required"))
+    }
+
     @Test("A tool step adds no approval words of its own to the BEAM's sentence")
     @MainActor func autoApprovedStepAddsNoWords() throws {
         let state = chatState(messages: [

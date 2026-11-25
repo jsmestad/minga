@@ -556,7 +556,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       tool_call_id: tool_call_id,
       session_id: session_id,
       request_id: request_id,
-      summary: preview.summary,
+      # The card's headline: the question in the decision's words, from the admitted call.
+      summary: ToolStep.question(approval.name, approval.args),
       preview_kind: preview.kind,
       preview_lines: preview.lines
     }

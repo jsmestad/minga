@@ -127,7 +127,7 @@ func chromeFrameScenarios() []chromeFrameScenario {
 	failedTool.Status = 2
 	failedTool.Step = "Could not read lib/minga.ex"
 	failedTool.State = 5
-	approval := protocol.AgentChatMessage{ID: 8, Kind: agentKindApprovalTool, Name: "write_file", Summary: "lib/minga.ex", PreviewLines: []string{"+ defmodule Minga do", "+ end"}, ApprovalTarget: approvalControlTarget("A")}
+	approval := protocol.AgentChatMessage{ID: 8, Kind: agentKindApprovalTool, Name: "write_file", Summary: "Write lib/minga.ex?", PreviewLines: []string{"+ defmodule Minga do", "+ end"}, ApprovalTarget: approvalControlTarget("A")}
 	return []chromeFrameScenario{
 		{"tabs", func(m Model) []string {
 			return one(m.renderTabs(protocol.TabBar{Tabs: []protocol.Tab{{ID: 1, Label: "main.go", Active: true, Dirty: true}, {ID: 2, Label: "render_chrome.go"}, {ID: 3, Label: "Untitled-1", Ephemeral: true}}}, m.width))

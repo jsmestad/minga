@@ -635,7 +635,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
                    session_id: "session/会",
                    request_id: "admitted-request/é",
                    tool_call_id: "tc/🛠",
-                   summary: "captured lib/app.ex",
+                   summary: "Edit lib/app.ex?",
                    preview_kind: :diff,
                    preview_lines: ["-captured old", "+captured new"]
                  }}},
@@ -688,6 +688,32 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     refute model.status in [:error, :needs_you]
   end
 
+  test "an approval card's headline asks in the decision's words and never names the raw tool" do
+    session = fake_session_pid()
+
+    for {name, args, headline} <- [
+          {"write_file", %{"path" => "./notes.txt", "content" => "hello"}, "Write ./notes.txt?"},
+          {"shell", %{"command" => "mix ecto.reset"}, "Run `mix ecto.reset`?"},
+          {"multi_edit_file", %{"path" => "lib/a.ex"}, "Edit lib/a.ex?"},
+          {"lsp_rename", %{}, "Run lsp rename?"}
+        ] do
+      target = ApprovalTarget.new("session-A", "request-1", "tool-1")
+      approval = PublicApproval.new(target, name, args, Preview.new(:args, "raw", []))
+
+      agent =
+        AgentState.set_pending_approval(%AgentState{}, PendingApproval.new(session, approval))
+
+      panel = synced_panel([{:tool_call, ToolCall.new(target.tool_call_id, name, args)}])
+
+      model = context(session, panel, agent: agent) |> AgentChatBuilder.build()
+
+      assert [{_id, {:approval_tool_call, %ApprovalView{summary: ^headline}}} | _] =
+               model.resident_messages
+
+      refute headline =~ name
+    end
+  end
+
   test "build/1 does not reactivate historical tool cards when a request reuses a tool ID" do
     session = fake_session_pid()
     target = ApprovalTarget.new("session-A", "new-admitted-request", "reused-tool-id")
@@ -731,7 +757,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
                  session_id: "session-A",
                  request_id: "new-admitted-request",
                  tool_call_id: "reused-tool-id",
-                 summary: "echo current"
+                 summary: "Run `echo current`?"
                }}}
              | _
            ] = model.resident_messages

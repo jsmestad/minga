@@ -20,7 +20,6 @@ macos/Sources/Renderer/FrameState.swift	var gitDeletedFg: UInt32 = 0xFF6C6B
 macos/Sources/Renderer/FrameState.swift	var scrollIndicatorColor: UInt32 = 0x555555
 macos/Sources/Renderer/WindowContentRenderer.swift	var defaultFgRGB: UInt32 = 0xBBC2CF
 macos/Sources/Renderer/WindowContentRenderer.swift	let color = NSColor(red: r, green: g, blue: b, alpha: 1.0)
-macos/Sources/Views/Agent/AgentApprovalCard.swift	.foregroundStyle(Color.orange)
 macos/Sources/Views/Agent/AgentApprovalCard.swift	return Color.green.opacity(0.75)
 macos/Sources/Views/Agent/AgentApprovalCard.swift	return Color.red.opacity(0.75)
 macos/Sources/Views/Agent/AgentApprovalCard.swift	RoundedRectangle(cornerRadius: Radius.lg).stroke(Color.orange.opacity(0.5), lineWidth: 1)

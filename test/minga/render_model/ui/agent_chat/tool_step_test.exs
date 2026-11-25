@@ -70,6 +70,20 @@ defmodule Minga.RenderModel.UI.AgentChat.ToolStepTest do
     end
   end
 
+  test "an approval card asks its question in the decision's words, never by the tool's name" do
+    for {name, args, question} <- [
+          {"write_file", %{"path" => "./notes.txt"}, "Write ./notes.txt?"},
+          {"shell", %{"command" => "mix ecto.reset"}, "Run `mix ecto.reset`?"},
+          {"edit_file", %{"path" => "lib/retry.ex"}, "Edit lib/retry.ex?"},
+          {"git_commit", %{"message" => "fix it"}, "Commit fix it?"},
+          {"lsp_rename", %{}, "Run lsp rename?"},
+          {"delete_file", %{"path" => 7}, "Delete?"}
+        ] do
+      assert ToolStep.question(name, args) == question
+      refute question =~ "_"
+    end
+  end
+
   test "an argument that is not text names nothing instead of failing" do
     for {name, args, sentence} <- [
           {"read_file", %{"path" => nil}, "Read"},

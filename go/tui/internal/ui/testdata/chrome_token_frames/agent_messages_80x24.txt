@@ -18,7 +18,7 @@
      content: defmodule Minga do
             : end
 ╭──────────────────────────────────────────────────────────────────────────────╮
-│ ◆ Approval write_file · args  lib/minga.ex                                   │
+│ ◉ Write lib/minga.ex?                                                        │
 │   + defmodule Minga do                                                       │
 │   + end                                                                      │
 │ [y] Approve  [n] Reject                                                      │
