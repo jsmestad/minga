@@ -122,7 +122,7 @@ defmodule MingaEditor.Session.CrashRecovery do
 
   @spec reopen(EditorState.t(), t(), String.t(), String.t()) :: EditorState.t()
   defp reopen(state, %__MODULE__{} = effect, path, content) do
-    case start_with_text(state, path, content) do
+    case start_with_text(state, path, content, effect.swap_path) do
       {:ok, buffer} ->
         Log.info(:editor, "Recovered after a crash: #{Path.basename(path)}")
 
@@ -153,19 +153,23 @@ defmodule MingaEditor.Session.CrashRecovery do
 
   # Starts the buffer for the file and gives it the recovered text, which marks it dirty.
   # A buffer that is already open for the file holds newer text, so it is never overwritten.
-  @spec start_with_text(EditorState.t(), String.t(), String.t()) ::
+  @spec start_with_text(EditorState.t(), String.t(), String.t(), String.t()) ::
           {:ok, pid()} | {:error, term()}
-  defp start_with_text(state, path, content) do
+  defp start_with_text(state, path, content, swap_path) do
     case Buffer.pid_for_path(path) do
       {:ok, _open_buffer} ->
         {:error, :already_open}
 
       :not_found ->
+        # The new buffer writes into the directory the crashed one used, so it owns the same swap file.
+        # Saving or closing it removes the swap; a second crash rewrites it.
         with {:ok, buffer} <-
                Commands.start_buffer(path, state.interaction.options_server,
-                 events_registry: state.extension_surfaces.events_registry
+                 events_registry: state.extension_surfaces.events_registry,
+                 swap_dir: Path.dirname(swap_path),
+                 allow_missing: true
                ),
-             :ok <- Buffer.replace_content(buffer, content, :recovery) do
+             :ok <- Buffer.adopt_recovered_text(buffer, content, swap_path) do
           {:ok, buffer}
         end
     end

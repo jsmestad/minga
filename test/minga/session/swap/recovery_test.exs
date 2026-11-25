@@ -274,6 +274,14 @@ defmodule Minga.Session.Swap.RecoveryTest do
       assert missing in paths
     end
 
+    test "a files scope returns the swaps of the named files", ctx do
+      opts = scan_opts(ctx.swap_dir) ++ [scope: {:files, [ctx.beta.file, "/no/such/file.ex"]}]
+
+      assert [%{path: path}] = Recovery.scan(opts)
+      assert path == ctx.beta.file
+      assert Recovery.scan(scan_opts(ctx.swap_dir) ++ [scope: {:files, []}]) == []
+    end
+
     test "the default scope returns every recoverable swap", ctx do
       paths = ctx.swap_dir |> scan_opts() |> Recovery.scan() |> Enum.map(& &1.path) |> Enum.sort()
 
@@ -403,8 +411,50 @@ defmodule Minga.Session.Swap.RecoveryTest do
              ]
     end
 
+    test "outside: leaves out what a scan with that scope returns", %{tmp_dir: tmp_dir} do
+      swap_dir = Path.join(tmp_dir, "swap")
+      File.mkdir_p!(swap_dir)
+
+      [opened, other] =
+        for name <- ["opened", "other"] do
+          root = Path.join(tmp_dir, name)
+          File.mkdir_p!(root)
+          File.write!(Path.join(root, "mix.exs"), "")
+          file = Path.join(root, "notes.txt")
+          File.write!(file, "saved")
+          write_swap_file(swap_dir, file, "unsaved #{name}")
+          root
+        end
+
+      {:ok, other_root} = Minga.Project.Root.canonical_path(other)
+      opts = scan_opts(swap_dir) ++ [outside: {:project, opened}]
+
+      assert Recovery.recoverable_projects(opts) == [%{root: other_root, files: 1}]
+    end
+
     test "is empty when the swap directory does not exist" do
       assert Recovery.recoverable_projects(swap_dir: "/nonexistent/path") == []
+    end
+  end
+
+  describe "read/1" do
+    test "returns the file path and the text, and leaves the swap file on disk", %{
+      tmp_dir: tmp_dir
+    } do
+      original = Path.join(tmp_dir, "notes.txt")
+      swap_path = write_swap_file(tmp_dir, original, "unsaved text")
+
+      assert Recovery.read(swap_path) == {:ok, original, "unsaved text"}
+      assert Minga.Session.read_swap_file(swap_path) == {:ok, original, "unsaved text"}
+      assert File.exists?(swap_path)
+    end
+
+    test "reports a swap that cannot be parsed", %{tmp_dir: tmp_dir} do
+      swap_path = Path.join(tmp_dir, "broken.swap")
+      File.write!(swap_path, "garbage")
+
+      assert Recovery.read(swap_path) == {:error, :invalid_format}
+      assert File.exists?(swap_path)
     end
   end
 end

@@ -29,17 +29,35 @@ defmodule MingaEditor.Session.CrashRecoveryReopenTest do
     assert NoticeWorkflow.message(recovered) =~ "crashed.txt was reopened with its unsaved text"
   end
 
-  test "a file that cannot be reopened leaves the editor unchanged", %{tmp_dir: dir} do
+  test "a file that was deleted since the crash comes back as a buffer for its path", %{
+    tmp_dir: dir
+  } do
     missing = Path.join(dir, "deleted-since.txt")
+    state = initial_state(dir)
+
+    {recovered, _outcome} = CrashRecovery.apply(state, read(missing, "unsaved text"))
+    buffer = recovered.workspace.buffers.active
+    on_exit(fn -> stop_buffer(buffer) end)
+
+    assert Minga.Buffer.file_path(buffer) == missing
+    assert Minga.Buffer.content(buffer) == "unsaved text"
+    assert Minga.Buffer.dirty?(buffer)
+  end
+
+  test "a file that cannot be reopened leaves the editor unchanged", %{tmp_dir: dir} do
+    # A regular file stands where the directory was, so no buffer can open the path.
+    blocker = Path.join(dir, "now-a-file")
+    File.write!(blocker, "")
+    unopenable = Path.join(blocker, "notes.txt")
     state = initial_state(dir)
 
     log =
       capture_log(fn ->
-        assert {^state, _outcome} = CrashRecovery.apply(state, read(missing, "unsaved text"))
+        assert {^state, _outcome} = CrashRecovery.apply(state, read(unopenable, "unsaved text"))
       end)
 
-    assert log =~ "Could not reopen #{missing}"
-    assert log =~ "It stays in #{missing}.swap"
+    assert log =~ "Could not reopen #{unopenable}"
+    assert log =~ "It stays in #{unopenable}.swap"
   end
 
   test "a background buffer comes back in the background", %{tmp_dir: dir} do
