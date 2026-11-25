@@ -713,6 +713,34 @@ defmodule Minga.Buffer.UndoHistoryTest do
       end
     end
 
+    # Round 5: when a press's dependents left out covers, it took your deletion in one step and a Minga cover of the
+    # same text in another, which brought back the text you deleted.
+    test "a press never splits your deletion from a later cover of the same text" do
+      commands = [
+        {:user, 593, 8, "", 2},
+        {:minga, 697, 8, "a   \ncc\n", 2},
+        {:agent, 962, 2, " \na\na\n ", 1},
+        {:minga, 370, 8, " b\ncc b", 1},
+        {:agent, 226, 3, "cca\n", 0},
+        {:user, 501, 5, "a ", 2},
+        {:agent, 338, 1, "", 2},
+        {:minga, 83, 2, "\na ", 1},
+        {:minga, 364, 4, "", 0},
+        {:minga, 660, 1, "a\nacc", 0},
+        {:user, 724, 3, "", 2},
+        {:minga, 32, 4, "c bacacc", 1},
+        {:agent, 592, 6, "\n bcb", 0},
+        {:minga, 228, 8, "", 1},
+        {:undo, 50, 1, "acbbc", 2},
+        {:minga, 564, 6, "ca", 1},
+        {:agent, 274, 1, " b bba", 0}
+      ]
+
+      world = Enum.reduce(commands, world("ab cd ef\ngh ij\n", recording: :coarse), &run/2)
+      assert_rejects_exact_or_refused(world)
+      assert {:done, _world} = reject_all(world)
+    end
+
     # Past the 512-word cap a long line is recorded as one change even when precise.
     property "a Minga rewrite of a line longer than the word cap, edited inside by you, rejects exactly or is refused" do
       words = for n <- 1..600, do: "w#{n}"

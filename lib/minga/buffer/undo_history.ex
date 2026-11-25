@@ -747,8 +747,9 @@ defmodule Minga.Buffer.UndoHistory do
     end)
   end
 
-  # The applied Minga groups that deleted text `group` wrote or removed after it did, leaving out text the reverting
-  # groups both wrote and deleted, and the groups that marked its replacement.
+  # The applied Minga groups that deleted, after `group`, a run it wrote or deleted in any way (covers included: your
+  # deletion and a later cover of the same text both keep it dead, so they revert together), leaving out text the
+  # reverting groups both wrote and deleted; and the groups that marked its replacement.
   @spec direct_dependents(Provenance.t(), Provenance.group_id(), (term() -> boolean())) :: [
           Provenance.group_id() | :permanent
         ]

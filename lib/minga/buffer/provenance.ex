@@ -335,7 +335,9 @@ defmodule Minga.Buffer.Provenance do
     do: id in run.deletions and id not in run.covered_by and id not in run.swept_by
 
   @doc """
-  Returns every applied group not yours that deleted text group `id` wrote or removed after it did, as group ids: the groups `blocker/3` would name, directly or by a sweep, never by a cover.
+  Returns every applied group not yours that deleted, after group `id` did, a run `id` wrote or deleted in any way, as group ids.
+
+  This is wider than `blocker/3` on purpose: it also counts covers, and runs `id` only swept or covered. A press takes these groups with `id`, and reverting `id` while such a group stays could bring back text you deleted (your deletion and a later cover of the same text both keep it dead). Taking more only reverts more, and stays exact.
 
   `reverting?` names the groups that revert with `id`: text one of them wrote and one of them deleted is left out, as in `blocker_among/3`.
   """
@@ -361,13 +363,11 @@ defmodule Minga.Buffer.Provenance do
                                                                                boolean())) ::
           [group_id()]
   defp run_later_deleters(run, id, groups, reverting?) do
-    if not removed_by?(run, id) or
-         (reverting?.(run.group) and Enum.any?(run.deletions, reverting?)) do
+    if reverting?.(run.group) and Enum.any?(run.deletions, reverting?) do
       []
     else
       for deleter <- later_deleters(run, id),
           deleter != id,
-          deleter not in run.covered_by,
           deleting = Map.fetch!(groups, deleter),
           deleting.applied and deleting.author != :you,
           do: deleter
