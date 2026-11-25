@@ -44,6 +44,51 @@ defmodule MingaEditor.Agent.PromptBuffer do
 
   def prompt_text(%Panel{}), do: ""
 
+  @doc "Expands collapsed paste placeholders in part of the raw composer text, as `prompt_text/1` does for all of it."
+  @spec expand_text(UIState.t() | Panel.t(), String.t()) :: String.t()
+  def expand_text(%UIState{panel: panel}, raw), do: expand_text(panel, raw)
+
+  def expand_text(%Panel{pasted_blocks: blocks}, raw) when is_binary(raw),
+    do: substitute_placeholders(raw, blocks)
+
+  @doc """
+  Removes `prefix` from the start of the composer when the composer still starts with it, keeping the rest and the cursor's place in it. Answers `:mismatch` when the user has since edited the prefix itself.
+
+  A queued press uses it once the queue is confirmed: the text the press took leaves the composer, and what was typed after the press stays.
+  """
+  @spec drop_prefix(UIState.t(), String.t()) :: {:ok, UIState.t()} | :mismatch
+  def drop_prefix(%UIState{panel: %Panel{prompt_buffer: pid}} = state, prefix)
+      when is_pid(pid) and is_binary(prefix) do
+    content = Buffer.content(pid)
+
+    if String.starts_with?(content, prefix) do
+      cursor = Buffer.cursor(pid)
+      size = byte_size(prefix)
+      Buffer.replace_content(pid, binary_part(content, size, byte_size(content) - size))
+      Buffer.move_to(pid, cursor_after_prefix(cursor, prefix))
+      {:ok, UIState.record_prompt_edit(state)}
+    else
+      :mismatch
+    end
+  end
+
+  def drop_prefix(%UIState{}, _prefix), do: :mismatch
+
+  # The cursor keeps its place in the text that stays: on the prefix's last line
+  # it moves left by the prefix's width there, and later lines move up.
+  @spec cursor_after_prefix({non_neg_integer(), non_neg_integer()}, String.t()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp cursor_after_prefix({line, col}, prefix) do
+    lines = String.split(prefix, "\n")
+    last_line = length(lines) - 1
+
+    cond do
+      line > last_line -> {line - last_line, col}
+      line == last_line -> {0, max(col - byte_size(List.last(lines)), 0)}
+      true -> {0, 0}
+    end
+  end
+
   @doc "Captures the current composer for storage without retaining credential input or deleted pastes."
   @spec draft_snapshot(UIState.t(), [DraftSnapshot.attachment()]) ::
           {:ok, DraftSnapshot.t() | nil} | {:error, :composer_unavailable | :private_input}

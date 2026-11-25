@@ -622,10 +622,19 @@ defmodule MingaEditor.Commands.Agent do
     submit_prompt(
       state,
       panel,
-      PromptBuffer.input_empty?(panel),
+      pressed_text(state) |> String.trim() |> Kernel.==(""),
       Runtime.active_session(state.shell_runtime)
     )
   end
+
+  # The text a send, queue or steer key takes: what no earlier press has already
+  # taken while its queue is answered (`DraftWorkflow.pressed/1`).
+  @spec pressed_text(state()) :: String.t()
+  defp pressed_text(%{workspace: %{agent_ui: %UIState{panel: %Panel{prompt_buffer: pid}} = ui}})
+       when is_pid(pid),
+       do: ui |> DraftWorkflow.pressed() |> elem(0)
+
+  defp pressed_text(state), do: PromptBuffer.prompt_text(state.workspace.agent_ui.panel)
 
   @spec submit_prompt(state(), Panel.t(), boolean(), pid() | nil) :: state()
   defp submit_prompt(state, _panel, true, _session), do: state
@@ -638,8 +647,8 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  defp submit_prompt(state, panel, false, _session) do
-    text = PromptBuffer.prompt_text(panel)
+  defp submit_prompt(state, _panel, false, _session) do
+    text = pressed_text(state)
 
     if SlashCommand.indented_credential_command?(text) do
       reject_indented_credential_command(state)
@@ -843,9 +852,9 @@ defmodule MingaEditor.Commands.Agent do
   @spec queue_displayed_prompt(state(), :steering | :follow_up, Session.queue_target()) :: state()
   def queue_displayed_prompt(state, kind, target) do
     panel = state.workspace.agent_ui.panel
-    text = PromptBuffer.prompt_text(panel)
+    text = pressed_text(state)
 
-    with false <- PromptBuffer.input_empty?(panel),
+    with false <- String.trim(text) == "",
          false <-
            SlashCommand.slash_command?(text) or SlashCommand.indented_credential_command?(text),
          :ready <- prompt_submit_status(state),
@@ -896,8 +905,8 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  # A press made while the saved draft loads waits for the load (#4260); every
-  # other refusal is reported.
+  # A press made while the draft's own bookkeeping is busy (loading, or answering
+  # an earlier queue) waits for it (#4260); every other refusal is reported.
   @spec hold_or_refuse(
           state(),
           :send_now | :steering | :follow_up,
@@ -905,9 +914,9 @@ defmodule MingaEditor.Commands.Agent do
           String.t()
         ) :: state()
   defp hold_or_refuse(state, kind, resolved, message) do
-    case DraftWorkflow.hold_while_loading(state, kind, resolved) do
+    case DraftWorkflow.hold_while_busy(state, kind, resolved) do
       {:held, held} -> held
-      :not_loading -> NoticeWorkflow.publish(state, message)
+      :not_busy -> NoticeWorkflow.publish(state, message)
     end
   end
 
@@ -924,9 +933,9 @@ defmodule MingaEditor.Commands.Agent do
           state(),
           non_neg_integer(),
           {:send_now | :steering | :follow_up, String.t() | [ReqLLM.Message.ContentPart.t()],
-           String.t(), DraftSave.marker()}
+           DraftSave.press()}
         ) :: state()
-  def deliver_held_send(state, owner, {_kind, _content, _source, marker} = press) do
+  def deliver_held_send(state, owner, {_kind, _content, {_source, _raw, marker}} = press) do
     panel = state.workspace.agent_ui.panel
 
     cond do
@@ -953,14 +962,14 @@ defmodule MingaEditor.Commands.Agent do
   @spec deliver_held_in_front(
           state(),
           {:send_now | :steering | :follow_up, String.t() | [ReqLLM.Message.ContentPart.t()],
-           String.t(), DraftSave.marker()},
+           DraftSave.press()},
           term()
         ) :: state()
   defp deliver_held_in_front(state, _press, {:error, message}),
     do: NoticeWorkflow.publish(state, message)
 
-  defp deliver_held_in_front(state, {kind, content, source, marker}, submission),
-    do: deliver_held_input(state, kind, content, submission, {source, marker})
+  defp deliver_held_in_front(state, {kind, content, press}, submission),
+    do: deliver_held_input(state, kind, content, submission, press)
 
   @spec deliver_held_input(
           state(),
@@ -969,7 +978,7 @@ defmodule MingaEditor.Commands.Agent do
           :ordinary
           | {:remote, DraftSave.target()}
           | {:attached, DraftSave.target(), [MingaAgent.DraftAttachment.identity()]},
-          {String.t(), DraftSave.marker()}
+          DraftSave.press()
         ) :: state()
   defp deliver_held_input(state, :send_now, content, submission, _press),
     do: deliver_unqueued_composer(state, :send_now, content, submission)
@@ -1302,14 +1311,23 @@ defmodule MingaEditor.Commands.Agent do
   @spec resolve_prompt_for_session(state(), String.t(), String.t()) ::
           {:ok, String.t() | [ReqLLM.Message.ContentPart.t()]} | {:error, String.t()}
   defp resolve_prompt_for_session(state, text, _model) do
-    if remote_session?(state) do
-      {:ok, text}
-    else
-      # minga:allow-blocking — Editor, once per local prompt submit to resolve file mentions for the active model
-      selection = Session.model_selection(Runtime.active_session(state.shell_runtime))
-      resolve_mentions(text, model_selection: selection)
+    cond do
+      remote_session?(state) ->
+        {:ok, text}
+
+      FileMention.extract_mentions(text) == [] ->
+        {:ok, text}
+
+      # The model comes from the connection the Editor already shows, never from a
+      # call into a Session that may be busy working (#4260).
+      true ->
+        resolve_mentions(text, model_selection: shown_model_selection(state.workspace.agent_ui))
     end
   end
+
+  @spec shown_model_selection(UIState.t()) :: MingaAgent.ModelSelection.t() | nil
+  defp shown_model_selection(%UIState{connection: %{model_selection: selection}}), do: selection
+  defp shown_model_selection(%UIState{}), do: nil
 
   @spec remote_session?(state()) :: boolean()
   defp remote_session?(state) do
@@ -1509,10 +1527,10 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Queues the current input as a follow-up; submits normally when agent is idle."
   @spec scope_queue_follow_up(state()) :: state()
   def scope_queue_follow_up(state) do
-    panel = state.workspace.agent_ui.panel
+    text = pressed_text(state)
 
     cond do
-      PromptBuffer.input_empty?(panel) ->
+      String.trim(text) == "" ->
         state
 
       Runtime.active_session(state.shell_runtime) == nil ->
@@ -1525,8 +1543,6 @@ defmodule MingaEditor.Commands.Agent do
         :thinking,
         :tool_executing
       ] ->
-        text = PromptBuffer.prompt_text(panel)
-
         case {SlashCommand.indented_credential_command?(text), SlashCommand.slash_command?(text)} do
           {true, _} ->
             reject_indented_credential_command(state)

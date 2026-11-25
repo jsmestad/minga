@@ -106,10 +106,14 @@ defmodule MingaEditor.Agent.DraftSaveTest do
     assert {:ok, 3, _pending_save} = DraftSave.begin_save(accepted, make_ref(), newer)
   end
 
-  describe "a queue pressed while the composer's own autosave is in flight" do
+  describe "presses the draft cannot take yet" do
     @marker {0, {0, 3}}
-    @deferred {:queue, {"record", "request", 1}, :follow_up, "later", "later", {0, {0, 5}}}
-    @send {:send, :steering, "hello", "hello", {0, {0, 5}}}
+    @receipt {1, "s", :follow_up, 1}
+
+    defp queue_press(text),
+      do: {:queue, {"record", "request", 1}, :follow_up, text, {text, text, {0, {0, 5}}}}
+
+    defp send_press(text), do: {:send, :steering, text, {text, text, {0, {0, 5}}}}
 
     defp ready do
       target = {self(), "record"}
@@ -119,16 +123,19 @@ defmodule MingaEditor.Agent.DraftSaveTest do
       |> DraftSave.loaded(1, @marker, nil)
     end
 
-    # One composer in each request tag a queue can meet.
+    defp queueing(raw) do
+      {:ok, 1, queueing} =
+        DraftSave.begin_queue(ready(), make_ref(), {0, {0, 4}}, {1, "t", :follow_up}, raw)
+
+      queueing
+    end
+
+    # One composer in each request tag a press can meet.
     defp requests do
       ready = ready()
       {:ok, 1, saving} = DraftSave.begin_save(ready, make_ref(), {0, {0, 4}})
       {:ok, 1, recalling} = DraftSave.begin_recall(ready, make_ref(), {0, {0, 4}})
       {:ok, 1, attaching} = DraftSave.begin_attachment(ready, make_ref(), {0, {0, 4}})
-
-      {:ok, 1, queueing} =
-        DraftSave.begin_queue(ready, make_ref(), {0, {0, 4}}, {1, "t", :follow_up})
-
       {:saving, save_ref, _, _, _} = saving.request
       {:ok, blocked} = DraftSave.failed(saving, save_ref, :blocked)
       {:attaching, attach_ref, _, _, _} = attaching.request
@@ -138,31 +145,32 @@ defmodule MingaEditor.Agent.DraftSaveTest do
       reloading_recall =
         DraftSave.reload_recall(%{blocked | request: :recall_conflicted}, make_ref(), @marker)
 
-      retiring = DraftSave.retire_queue_receipt(saving, make_ref(), {1, "s", :follow_up, 1})
-
       %{
         ready: ready,
+        retiring: DraftSave.retire_queue_receipt(ready, make_ref(), @receipt),
         saving: saving,
+        queueing: queueing("earlier"),
+        loading: loading,
         recalling: recalling,
         attaching: attaching,
-        queueing: queueing,
-        loading: loading,
         reloading_recall: reloading_recall,
         blocked: blocked,
-        attachment_review_required: review_required,
-        saving_while_retiring: retiring
+        attachment_review_required: review_required
       }
     end
 
-    test "a queue waits for an autosave or a load, a send only for a load; every other request refuses" do
-      holds = %{queue: [:saving, :loading], send: [:loading]}
+    test "a queue waits while the draft saves, loads, answers a queue or retires its receipt; a send only for a load" do
+      holds = %{
+        queue: [:saving, :loading, :queueing, :retiring],
+        send: [:loading]
+      }
 
-      for {tag, save} <- requests(), press <- [@deferred, @send] do
+      for {tag, save} <- requests(), press <- [queue_press("p"), send_press("p")] do
         expected = if tag in holds[elem(press, 0)], do: :hold, else: :refuse
 
         case {expected, DraftSave.hold_press(save, press)} do
           {:hold, {:ok, held}} ->
-            assert held.held_press == press
+            assert held.held_presses == [press]
 
           {:refuse, :pending} ->
             :ok
@@ -173,91 +181,61 @@ defmodule MingaEditor.Agent.DraftSaveTest do
       end
     end
 
-    test "a press held behind a load runs when the load answers, and is dropped if it fails" do
-      %{loading: loading} = requests()
+    test "presses wait in order and run one at a time, first pressed first" do
+      {:ok, one} = DraftSave.hold_press(queueing("first"), queue_press("second"))
+      {:ok, two} = DraftSave.hold_press(one, queue_press("third"))
+      assert two.held_presses == [queue_press("second"), queue_press("third")]
 
-      for press <- [@deferred, @send] do
-        {:ok, held} = DraftSave.hold_press(loading, press)
-        {:loading, ref, _} = held.request
-        assert DraftSave.release_held_press(held) == :none
+      {:queueing, ref, _, _, _, _} = two.request
+      answered = DraftSave.queue_saved(two, ref, 2, nil)
 
-        loaded = DraftSave.loaded(held, 1, @marker, nil)
-        assert {:run, ^press, %{held_press: nil}} = DraftSave.release_held_press(loaded)
+      assert {:run, press, rest} = DraftSave.release_held_press(answered)
+      assert press == queue_press("second")
+      assert rest.held_presses == [queue_press("third")]
+    end
 
-        {:ok, failed} = DraftSave.failed(held, ref, :blocked)
-        assert {:drop, %{held_press: nil}} = DraftSave.release_held_press(failed)
+    test "nothing runs while the draft is busy; a ready draft runs the first; an unusable one drops them all" do
+      for busy <- [:saving, :loading, :queueing, :retiring] do
+        {:ok, held} = DraftSave.hold_press(requests()[busy], queue_press("p"))
+        assert DraftSave.release_held_press(held) == :none, "#{busy} must keep holding"
       end
-    end
 
-    test "a load issued again keeps the held press" do
       %{loading: loading} = requests()
-      {:ok, held} = DraftSave.hold_press(loading, @send)
+      {:ok, held} = DraftSave.hold_press(loading, send_press("p"))
+      {:loading, ref, _marker} = held.request
+
+      assert {:run, _, %{held_presses: []}} =
+               held |> DraftSave.loaded(1, @marker, nil) |> DraftSave.release_held_press()
+
+      {:ok, failed} = DraftSave.failed(held, ref, :blocked)
+      assert {:drop, %{held_presses: []}} = DraftSave.release_held_press(failed)
+    end
+
+    test "a press takes only the text no earlier press has taken" do
+      {:ok, held} = DraftSave.hold_press(queueing("alpha"), queue_press("bravo"))
+
+      assert DraftSave.submitted(held) == ["alpha", "bravo"]
+      assert DraftSave.unsubmitted(held, "alphabravocharlie") == "charlie"
+      assert DraftSave.unsubmitted(held, "alphabravo") == ""
+      # Text that was already pressed but has since been edited is taken whole.
+      assert DraftSave.unsubmitted(held, "alpXhabravo") == "alpXhabravo"
+      assert DraftSave.unsubmitted(ready(), "plain") == "plain"
+      assert DraftSave.unsubmitted(nil, "plain") == "plain"
+    end
+
+    test "a load issued again keeps the held presses" do
+      %{loading: loading} = requests()
+      {:ok, held} = DraftSave.hold_press(loading, send_press("p"))
       reissued = DraftSave.loading({self(), "record"}, self(), make_ref(), @marker)
-      assert DraftSave.keep_held(reissued, held).held_press == @send
-      assert DraftSave.keep_held(reissued, nil).held_press == nil
+      assert DraftSave.keep_held(reissued, held).held_presses == [send_press("p")]
+      assert DraftSave.keep_held(reissued, nil).held_presses == []
     end
 
-    test "the held queue runs when the save answers, and only then" do
+    test "a save moved to a replacement writer leaves its presses ready to run" do
       %{saving: saving} = requests()
-      {:ok, held} = DraftSave.hold_press(saving, @deferred)
-      {:saving, ref, _, _, _} = held.request
-
-      assert DraftSave.release_held_press(held) == :none
-      assert {:ok, saved} = DraftSave.saved(held, ref, 2)
-      assert {:run, @deferred, released} = DraftSave.release_held_press(saved)
-      assert released.held_press == nil
-      assert DraftSave.release_held_press(released) == :none
-    end
-
-    test "a save that leaves the composer unable to queue drops the held queue" do
-      %{saving: saving} = requests()
-      {:ok, held} = DraftSave.hold_press(saving, @deferred)
-      {:saving, ref, _, _, _} = held.request
-
-      assert {:ok, blocked} = DraftSave.failed(held, ref, :blocked)
-      assert {:drop, dropped} = DraftSave.release_held_press(blocked)
-      assert dropped.held_press == nil
-
-      assert {:ok, retried} = DraftSave.failed(held, ref, :retryable)
-      assert {:run, @deferred, _} = DraftSave.release_held_press(retried)
-    end
-
-    test "a held queue whose save leaves a receipt retiring is dropped" do
-      %{saving: saving} = requests()
-      {:ok, held} = DraftSave.hold_press(saving, @deferred)
-      {:saving, ref, _, _, _} = held.request
-      {:ok, saved} = DraftSave.saved(held, ref, 2)
-      retiring = DraftSave.retire_queue_receipt(saved, make_ref(), {1, "s", :follow_up, 1})
-
-      assert {:drop, %{held_press: nil}} = DraftSave.release_held_press(retiring)
-    end
-
-    test "a later press replaces the held queue" do
-      %{saving: saving} = requests()
-      {:ok, held} = DraftSave.hold_press(saving, @deferred)
-      newer = put_elem(@deferred, 3, "later still")
-      assert {:ok, %{held_press: ^newer}} = DraftSave.hold_press(held, newer)
-    end
-
-    test "a queue that starts clears the held one" do
-      %{saving: saving} = requests()
-      {:ok, held} = DraftSave.hold_press(saving, @deferred)
-      {:saving, ref, _, _, _} = held.request
-      {:ok, saved} = DraftSave.saved(held, ref, 2)
-
-      assert {:ok, 2, queueing} =
-               DraftSave.begin_queue(saved, make_ref(), {0, {0, 6}}, {1, "t", :follow_up})
-
-      assert queueing.held_press == nil
-    end
-
-    test "a save moved to a replacement writer keeps the hold for release" do
-      %{saving: saving} = requests()
-      {:ok, held} = DraftSave.hold_press(saving, @deferred)
-      replacement = spawn(fn -> :ok end)
-
-      rebound = DraftSave.rebind_writer(held, replacement)
-      assert {:run, @deferred, _} = DraftSave.release_held_press(rebound)
+      {:ok, held} = DraftSave.hold_press(saving, queue_press("p"))
+      rebound = DraftSave.rebind_writer(held, spawn(fn -> :ok end))
+      assert {:run, _, _} = DraftSave.release_held_press(rebound)
     end
   end
 end

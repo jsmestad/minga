@@ -73,8 +73,8 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
     assert Session.get_queued_messages(session) == {[], ["later"]}
     {_session, record} = draft_save(ctx).target
     assert {:ok, [%{preview: "later"}]} = Session.queued_input_summaries(session, record)
-    # Edited after the press, so the composer is kept whole rather than cleared.
-    assert prompt(ctx) == "later still"
+    # The pressed text leaves the composer; what was typed after the press stays.
+    assert prompt(ctx) == " still"
   end
 
   describe "a press made while the saved draft is still loading" do
@@ -86,7 +86,7 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
       send_keys_sync(ctx, "hello")
       send_key_sync(ctx, 13, @cmd)
 
-      assert {:send, _kind, "hello", "hello", _marker} = draft_save(ctx).held_press
+      assert [{:send, _kind, "hello", {"hello", "hello", _marker}}] = draft_save(ctx).held_presses
       refute minibuffer(ctx) =~ "Wait for the saved composer"
 
       answer_load(ctx, load, :ok)
@@ -110,7 +110,9 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
       send_keys_sync(ctx, "later")
       send_key_sync(ctx, 13, @alt)
 
-      assert {:queue, _target, :follow_up, "later", "later", _marker} = draft_save(ctx).held_press
+      assert [{:queue, _target, :follow_up, "later", {"later", "later", _marker}}] =
+               draft_save(ctx).held_presses
+
       answer_load(ctx, load, :ok)
 
       wait_until(ctx, fn _state -> Session.get_queued_messages(session) == {[], ["later"]} end,
@@ -189,7 +191,7 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
       send_key_sync(ctx, 13, @cmd)
       answer_load(ctx, load, {:error, :stale_target})
 
-      assert draft_save(ctx).held_press == nil
+      assert draft_save(ctx).held_presses == []
       assert prompt(ctx) == "hello"
 
       assert minibuffer(ctx) ==

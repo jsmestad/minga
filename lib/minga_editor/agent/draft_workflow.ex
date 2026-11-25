@@ -670,14 +670,14 @@ defmodule MingaEditor.Agent.DraftWorkflow do
     do: queue(state, kind, content, expected, :now)
 
   @doc """
-  Like `queue/4`, for a press made earlier: `press` is the composer text and marker at that press, or `:now` to read them at this call.
+  Like `queue/4`, for a press made earlier: `press` is what that press took (`t:DraftSave.press/0`), or `:now` to take it at this call.
   """
   @spec queue(
           State.t(),
           TurnExecution.prompt_kind(),
           TurnExecution.content(),
           Session.queue_target() | :current,
-          {String.t(), DraftSave.marker()} | :now
+          DraftSave.press() | :now
         ) ::
           {:saved, State.t()} | :ordinary
   def queue(%State{} = state, kind, content, expected, press) do
@@ -705,7 +705,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
           Session.queue_target(),
           TurnExecution.prompt_kind(),
           TurnExecution.content(),
-          {String.t(), DraftSave.marker()} | :now
+          DraftSave.press() | :now
         ) :: {term(), UIState.t()}
   defp capture_pressed_queue(ui, state, owner, destination, target, kind, content, :now),
     do: capture_queue(ui, state, owner, destination, target, kind, content)
@@ -714,59 +714,69 @@ defmodule MingaEditor.Agent.DraftWorkflow do
     do: capture_queue(ui, state, owner, destination, target, kind, content, press)
 
   @doc """
-  Holds a send, queue or steer pressed while the composer's saved draft is still loading, so it runs when the load answers instead of being refused. `kind` is what the press does: `:send_now`, or the prompt kind it sends or queues as.
+  What a key press takes from the composer now: the text no earlier press has taken (`DraftSave.unsubmitted/2`), expanded and raw, and the composer marker.
 
-  Returns `:not_loading` when the draft is not loading, so the caller reports its own refusal.
+  Every key that sends, queues or steers reads its text here, once, so a press never repeats text an earlier press took while that press's queue is still being answered.
   """
-  @spec hold_while_loading(
+  @spec pressed(UIState.t()) :: DraftSave.press()
+  def pressed(%UIState{draft_save: save, panel: %{prompt_buffer: buffer}} = ui)
+      when is_pid(buffer) do
+    raw = DraftSave.unsubmitted(save, PromptBuffer.input_text(ui))
+    {PromptBuffer.expand_text(ui, raw), raw, Buffer.inspection_marker(buffer)}
+  end
+
+  @doc """
+  Holds a send, queue or steer pressed while the composer's own draft bookkeeping is busy (its saved draft loading, an earlier queue being answered, presses already waiting), so it runs when the draft answers instead of being refused. `kind` is what the press does: `:send_now`, or the prompt kind it sends or queues as.
+
+  Returns `:not_busy` when nothing would hold the press, so the caller reports its own refusal.
+  """
+  @spec hold_while_busy(
           State.t(),
           :send_now | TurnExecution.prompt_kind(),
           TurnExecution.content()
-        ) :: {:held, State.t()} | :not_loading
-  def hold_while_loading(
+        ) :: {:held, State.t()} | :not_busy
+  def hold_while_busy(
         %State{
           workspace: %{
             agent_ui:
               %UIState{
-                draft_save: %DraftSave{request: {:loading, _, _}, buffer: buffer} = save,
+                draft_save: %DraftSave{buffer: buffer} = save,
                 panel: %{prompt_buffer: buffer}
-              } = ui
+              } =
+                ui
           }
         } = state,
         kind,
         content
       ) do
-    case queue_while_loading(state, kind, content) do
+    case queue_while_busy(state, kind, content) do
       {:saved, held} ->
         {:held, held}
 
       :ordinary ->
-        press =
-          {:send, kind, content, PromptBuffer.prompt_text(ui), Buffer.inspection_marker(buffer)}
-
-        case DraftSave.hold_press(save, press) do
+        case DraftSave.hold_press(save, {:send, kind, content, pressed(ui)}) do
           {:ok, held} ->
             {:held, Workflow.install_agent_ui(state, UIState.project_draft_save(ui, held))}
 
           :pending ->
-            :not_loading
+            :not_busy
         end
     end
   catch
-    :exit, _reason -> :not_loading
+    :exit, _reason -> :not_busy
   end
 
-  def hold_while_loading(%State{}, _kind, _content), do: :not_loading
+  def hold_while_busy(%State{}, _kind, _content), do: :not_busy
 
   # A queue or steer for a working turn waits in the draft workflow; a send waits
   # for the Editor.
-  @spec queue_while_loading(
+  @spec queue_while_busy(
           State.t(),
           :send_now | TurnExecution.prompt_kind(),
           TurnExecution.content()
         ) :: {:saved, State.t()} | :ordinary
-  defp queue_while_loading(_state, :send_now, _content), do: :ordinary
-  defp queue_while_loading(state, kind, content), do: queue(state, kind, content)
+  defp queue_while_busy(_state, :send_now, _content), do: :ordinary
+  defp queue_while_busy(state, kind, content), do: queue(state, kind, content)
 
   @spec supports_saved_queue?(UIState.t(), pid()) :: boolean()
   defp supports_saved_queue?(_ui, session) when node(session) == node(), do: true
@@ -789,20 +799,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
           TurnExecution.content()
         ) :: {term(), UIState.t()}
   defp capture_queue(
-         %UIState{draft_save: %DraftSave{target: destination, retirement: {_, _}}} = ui,
-         state,
-         owner,
-         destination,
-         _target,
-         _kind,
-         _content
-       ),
-       do: {:queue_not_ready, retry_retirement(ui, state, owner)}
-
-  defp capture_queue(
-         %UIState{
-           draft_save: %DraftSave{target: destination, buffer: buffer}
-         } = ui,
+         %UIState{draft_save: %DraftSave{target: destination, retirement: retirement}} = ui,
          state,
          owner,
          destination,
@@ -810,16 +807,9 @@ defmodule MingaEditor.Agent.DraftWorkflow do
          kind,
          content
        ) do
-    capture_queue(
-      ui,
-      state,
-      owner,
-      destination,
-      target,
-      kind,
-      content,
-      {PromptBuffer.prompt_text(ui), Buffer.inspection_marker(buffer)}
-    )
+    # A receipt still retiring holds the press behind it; ask again for its retirement.
+    ui = if retirement, do: retry_retirement(ui, state, owner), else: ui
+    capture_queue(ui, state, owner, destination, target, kind, content, pressed(ui))
   catch
     :exit, _reason -> {:queue_not_ready, ui}
   end
@@ -827,9 +817,9 @@ defmodule MingaEditor.Agent.DraftWorkflow do
   defp capture_queue(ui, _state, _owner, _destination, _target, _kind, _content),
     do: {:queue_not_ready, ui}
 
-  # `press` is the composer text and marker when the key was pressed. A queue held
-  # behind an autosave runs later with both, so the queued item shows what was
-  # sent and text typed after the press stays in the composer.
+  # `press` is what the key press took. A press held behind the draft runs later
+  # with it, so the queued item shows what was pressed and text typed after the
+  # press stays in the composer.
   @spec capture_queue(
           UIState.t(),
           State.t(),
@@ -838,7 +828,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
           Session.queue_target(),
           TurnExecution.prompt_kind(),
           TurnExecution.content(),
-          {String.t(), DraftSave.marker()}
+          DraftSave.press()
         ) :: {term(), UIState.t()}
   defp capture_queue(
          %UIState{
@@ -851,7 +841,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
          {record, _, sequence} = target,
          kind,
          content,
-         {source, marker}
+         {source, raw, marker} = press
        ) do
     ref = make_ref()
     token = Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
@@ -859,7 +849,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
 
     with false <- nil in shown,
          {:ok, revision, pending} <-
-           DraftSave.begin_queue(save, ref, marker, {sequence, token, kind}) do
+           DraftSave.begin_queue(save, ref, marker, {sequence, token, kind}, raw) do
       operation =
         {:queue, target, kind, {revision, token, shown, source}, content}
 
@@ -868,7 +858,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
         {:error, _reason} -> {:queue_not_ready, ui}
       end
     else
-      :pending -> hold_press(ui, save, {:queue, target, kind, content, source, marker})
+      :pending -> hold_press(ui, save, {:queue, target, kind, content, press})
       _unavailable -> {:queue_not_ready, ui}
     end
   catch
@@ -912,19 +902,38 @@ defmodule MingaEditor.Agent.DraftWorkflow do
       {:drop, released} ->
         {dropped_outcome(outcome), UIState.project_draft_save(ui, released)}
 
-      {:run, {:queue, target, kind, content, source, marker}, released} ->
+      {:run, {:queue, target, kind, content, press}, released} ->
         ui
         |> UIState.project_draft_save(released)
-        |> capture_queue(state, owner, destination, target, kind, content, {source, marker})
+        |> capture_queue(
+          state,
+          owner,
+          destination,
+          current_turn(state, target),
+          kind,
+          content,
+          press
+        )
         |> keep_outcome(outcome)
 
-      {:run, {:send, kind, content, source, marker}, released} ->
-        send(self(), {:composer_held_send, owner, {kind, content, source, marker}})
+      {:run, {:send, kind, content, press}, released} ->
+        send(self(), {:composer_held_send, owner, {kind, content, press}})
         {outcome, UIState.project_draft_save(ui, released)}
     end
   end
 
   defp release_held_press(result, _state, _owner, _destination), do: result
+
+  # A held press queues into the turn it was pressed in. Each queued input moves
+  # that turn's next-input number, so take the number the turn shows now; a turn
+  # that has since ended keeps the press's own target, which the Session refuses.
+  @spec current_turn(State.t(), Session.queue_target()) :: Session.queue_target()
+  defp current_turn(state, {record, request, _sequence} = pressed) do
+    case TraditionalState.agent(state.shell_runtime.state).queue_target do
+      {_session, {^record, ^request, _next} = current} -> current
+      _ended -> pressed
+    end
+  end
 
   @spec dropped_outcome(term()) :: term()
   defp dropped_outcome(:unchanged), do: :queue_not_ready
@@ -1097,10 +1106,12 @@ defmodule MingaEditor.Agent.DraftWorkflow do
   @doc "Installs only a result for the original workspace, record and outstanding request."
   @spec handle_result(State.t(), pid(), String.t(), non_neg_integer(), reference(), result()) ::
           State.t()
-  def handle_result(state, _session, id, owner, ref, :ok) do
+  def handle_result(state, session, id, owner, ref, :ok) do
     update_origin(state, owner, fn
       %UIState{draft_save: %DraftSave{target: {_, ^id}, retirement: {^ref, _}} = save} = ui ->
-        {:unchanged, UIState.project_draft_save(ui, DraftSave.queue_receipt_retired(save, ref))}
+        retired = UIState.project_draft_save(ui, DraftSave.queue_receipt_retired(save, ref))
+        # Presses held behind the retiring receipt run now, in order.
+        release_held_press({:unchanged, retired}, state, owner, {session, id})
 
       ui ->
         {:unchanged, ui}
@@ -1377,7 +1388,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
       {{:queued, kind}, UIState.project_draft_save(cleared, updated)}
     else
       updated = DraftSave.queue_saved(save, ref, revision, nil)
-      {:queued_older_draft, arm(UIState.project_draft_save(ui, updated), owner)}
+      keep_typed_after_press(ui, save, updated, kind, owner)
     end
   end
 
@@ -1744,6 +1755,27 @@ defmodule MingaEditor.Agent.DraftWorkflow do
   catch
     :exit, _reason -> :edited
   end
+
+  # The composer changed after the press. The text the press took leaves it and
+  # what was typed after the press stays; if the user edited the pressed text
+  # itself, the whole composer stays and one line says so.
+  @spec keep_typed_after_press(
+          UIState.t(),
+          DraftSave.t(),
+          DraftSave.t(),
+          TurnExecution.prompt_kind(),
+          non_neg_integer()
+        ) :: {term(), UIState.t()}
+  defp keep_typed_after_press(ui, %DraftSave{queued_raw: raw}, updated, kind, owner)
+       when is_binary(raw) do
+    case PromptBuffer.drop_prefix(ui, raw) do
+      {:ok, kept} -> {{:queued, kind}, arm(UIState.project_draft_save(kept, updated), owner)}
+      :mismatch -> {:queued_older_draft, arm(UIState.project_draft_save(ui, updated), owner)}
+    end
+  end
+
+  defp keep_typed_after_press(ui, _save, updated, _kind, owner),
+    do: {:queued_older_draft, arm(UIState.project_draft_save(ui, updated), owner)}
 
   @spec fail_result(UIState.t(), DraftSave.t(), reference(), :retryable | :blocked) ::
           {term(), UIState.t()}
