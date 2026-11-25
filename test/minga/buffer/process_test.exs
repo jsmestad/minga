@@ -1176,12 +1176,12 @@ defmodule Minga.Buffer.ProcessTest do
   end
 
   describe "undo source metadata" do
-    test "edits tag undo source by caller" do
+    test "edits tag undo source by caller, and Minga's edits stay off your undo stack" do
       cases = [
         {:user, "hello", fn pid -> BufferProcess.insert_char(pid, "X") end},
-        {@minga, "hello world",
+        {nil, "hello world",
          fn pid -> BufferProcess.find_and_replace(pid, "hello", "goodbye", @minga) end},
-        {@minga, "hello world", fn pid -> conditional_batch(pid, [{"hello", "goodbye"}]) end},
+        {nil, "hello world", fn pid -> conditional_batch(pid, [{"hello", "goodbye"}]) end},
         {:lsp, "hello",
          fn pid -> BufferProcess.apply_edits(pid, [{{0, 0}, {0, 5}, "goodbye"}]) end}
       ]
@@ -1203,21 +1203,21 @@ defmodule Minga.Buffer.ProcessTest do
 
     test "source metadata survives undo/redo round-trip" do
       pid = start_supervised!({BufferProcess, content: "hello world"})
-      BufferProcess.find_and_replace(pid, "hello", "goodbye", @minga)
+      BufferProcess.apply_edits(pid, [{{0, 0}, {0, 5}, "goodbye"}])
 
-      # Undo pops the agent entry and creates a redo entry carrying the source
+      # Undo pops the language server's group and creates a redo entry carrying the source
       BufferProcess.undo(pid)
-      assert BufferProcess.last_redo_source(pid) == @minga
+      assert BufferProcess.last_redo_source(pid) == :lsp
 
       # Redo pushes it back to undo history
       BufferProcess.redo(pid)
-      assert BufferProcess.last_undo_source(pid) == @minga
+      assert BufferProcess.last_undo_source(pid) == :lsp
     end
 
     test "find_and_replace redo reapplies multiline replacements" do
       pid = start_supervised!({BufferProcess, content: "alpha\nbeta\ngamma"})
 
-      assert {:ok, _} = BufferProcess.find_and_replace(pid, "beta", "one\ntwo", @minga)
+      assert {:ok, _} = BufferProcess.find_and_replace(pid, "beta", "one\ntwo", :user)
       assert BufferProcess.content(pid) == "alpha\none\ntwo\ngamma"
 
       BufferProcess.undo(pid)
@@ -1231,7 +1231,7 @@ defmodule Minga.Buffer.ProcessTest do
       pid = start_supervised!({BufferProcess, content: "hello café world"})
 
       assert {:ok, %{before: "hello café world", after: "hello 茶 world"}} =
-               conditional_batch(pid, [{"café", "茶"}])
+               conditional_batch(pid, [{"café", "茶"}], :user)
 
       assert BufferProcess.content(pid) == "hello 茶 world"
 
@@ -1244,8 +1244,8 @@ defmodule Minga.Buffer.ProcessTest do
 
     test "replace_content records explicit and default sources" do
       pid = start_supervised!({BufferProcess, content: "hello"})
-      BufferProcess.replace_content(pid, "goodbye", :agent)
-      assert BufferProcess.last_undo_source(pid) == :agent
+      BufferProcess.replace_content(pid, "goodbye", :lsp)
+      assert BufferProcess.last_undo_source(pid) == :lsp
 
       pid = start_supervised!({BufferProcess, content: "hello"}, id: :default_source_buffer)
       BufferProcess.replace_content(pid, "goodbye")
@@ -1378,19 +1378,20 @@ defmodule Minga.Buffer.ProcessTest do
       end
     end
 
-    test "interleaved user and agent edits preserve correct sources" do
+    test "your undo is blocked where a later Minga step rewrote your text" do
       pid = start_supervised!({BufferProcess, content: "hello world"})
 
       BufferProcess.insert_char(pid, "X")
       BufferProcess.break_undo_coalescing(pid)
-      assert BufferProcess.last_undo_source(pid) == :user
-
       BufferProcess.find_and_replace(pid, "Xhello", "goodbye", @minga)
-      assert BufferProcess.last_undo_source(pid) == @minga
-
-      # Undo the agent edit; the user entry below should now be at the head.
-      BufferProcess.undo(pid)
       assert BufferProcess.last_undo_source(pid) == :user
+
+      assert BufferProcess.undo(pid) == {:blocked, {:overlaps, @minga}}
+      assert BufferProcess.content(pid) == "goodbye world"
+
+      assert {:ok, 1} = BufferProcess.undo_agent_session(pid)
+      assert :ok = BufferProcess.undo(pid)
+      assert BufferProcess.content(pid) == "hello world"
     end
   end
 
@@ -2009,19 +2010,23 @@ defmodule Minga.Buffer.ProcessTest do
       end
     end
 
-    test "replacing text creates a single undo entry" do
+    test "Minga's replacement is one step that your undo leaves alone" do
       {:ok, pid} = BufferProcess.start_link(content: "aaa bbb ccc")
       BufferProcess.find_and_replace(pid, "bbb", "BBB", @minga)
       assert BufferProcess.content(pid) == "aaa BBB ccc"
+      assert [{@minga, [_one_region]}] = BufferProcess.minga_changes(pid, "task-1")
 
       BufferProcess.undo(pid)
+      assert BufferProcess.content(pid) == "aaa BBB ccc"
+
+      assert {:ok, 1} = BufferProcess.undo_agent_session(pid)
       assert BufferProcess.content(pid) == "aaa bbb ccc"
     end
 
     test "two rapid find_and_replace calls produce two independent undo entries" do
       {:ok, pid} = BufferProcess.start_link(content: "aaa bbb ccc")
-      BufferProcess.find_and_replace(pid, "aaa", "AAA", @minga)
-      BufferProcess.find_and_replace(pid, "ccc", "CCC", @minga)
+      BufferProcess.find_and_replace(pid, "aaa", "AAA", :user)
+      BufferProcess.find_and_replace(pid, "ccc", "CCC", :user)
       assert BufferProcess.content(pid) == "AAA bbb CCC"
 
       BufferProcess.undo(pid)
@@ -2245,10 +2250,10 @@ defmodule Minga.Buffer.ProcessTest do
     end
   end
 
-  defp conditional_batch(pid, edits) do
+  defp conditional_batch(pid, edits, source \\ @minga) do
     {content, version} = BufferProcess.content_with_version(pid)
     identity = {:buffer, "/conditional-batch-test"}
     expected = Minga.Buffer.FileMutation.revision(content, version, identity)
-    BufferProcess.conditional_mutate(pid, expected, {:edit, edits}, identity, @minga)
+    BufferProcess.conditional_mutate(pid, expected, {:edit, edits}, identity, source)
   end
 end

@@ -134,8 +134,142 @@ defmodule Minga.Buffer.UndoPatch do
 
     case diff do
       {:ok, hunks} -> Enum.map(hunks, &{&1.old_start, &1.old_count, &1.start_line, &1.count})
-      :over_budget -> [{0, old_count, 0, new_count}]
+      :over_budget -> unique_line_regions(old_middle, new_middle)
     end
+  end
+
+  # Past the budget, the lines that occur exactly once on each side and in the same order on both still pin the two
+  # sides together (the longest increasing subsequence of their positions, O(n log n)). The gaps between those lines
+  # are diffed again under the same budget, so one inserted line or a scattered rewrite stays a set of small regions.
+  # Only a gap with no such line becomes one region.
+  @spec unique_line_regions([binary()], [binary()]) :: [
+          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
+        ]
+  defp unique_line_regions(old_middle, new_middle) do
+    case unique_anchors(old_middle, new_middle) do
+      [] ->
+        [{0, length(old_middle), 0, length(new_middle)}]
+
+      anchors ->
+        old_tuple = List.to_tuple(old_middle)
+        new_tuple = List.to_tuple(new_middle)
+        ends = [{tuple_size(old_tuple), tuple_size(new_tuple)}]
+
+        {regions, _next} =
+          Enum.flat_map_reduce(
+            anchors ++ ends,
+            {0, 0},
+            &gap_regions(&1, &2, old_tuple, new_tuple)
+          )
+
+        regions
+    end
+  end
+
+  # Diffs the gap before one anchor under the same budget, shifted to the middle's positions.
+  @spec gap_regions(
+          {non_neg_integer(), non_neg_integer()},
+          {non_neg_integer(), non_neg_integer()},
+          tuple(),
+          tuple()
+        ) ::
+          {[{non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}],
+           {non_neg_integer(), non_neg_integer()}}
+  defp gap_regions({old_anchor, new_anchor}, {old_from, new_from}, old_tuple, new_tuple) do
+    gap =
+      middle_regions(
+        tuple_slice(old_tuple, old_from, old_anchor),
+        tuple_slice(new_tuple, new_from, new_anchor)
+      )
+
+    shifted = for {os, oc, ns, nc} <- gap, do: {os + old_from, oc, ns + new_from, nc}
+    {shifted, {old_anchor + 1, new_anchor + 1}}
+  end
+
+  @spec tuple_slice(tuple(), non_neg_integer(), non_neg_integer()) :: [binary()]
+  defp tuple_slice(tuple, from, to), do: for(index <- from..(to - 1)//1, do: elem(tuple, index))
+
+  # Pairs of positions of lines unique on both sides, in increasing order on both.
+  @spec unique_anchors([binary()], [binary()]) :: [{non_neg_integer(), non_neg_integer()}]
+  defp unique_anchors(old_middle, new_middle) do
+    old_unique = unique_positions(old_middle)
+    new_unique = unique_positions(new_middle)
+
+    old_unique
+    |> Enum.flat_map(fn {line, old_at} ->
+      case new_unique do
+        %{^line => new_at} -> [{old_at, new_at}]
+        _missing -> []
+      end
+    end)
+    |> Enum.sort()
+    |> longest_increasing()
+  end
+
+  @spec unique_positions([binary()]) :: %{binary() => non_neg_integer()}
+  defp unique_positions(lines) do
+    {positions, counts} =
+      lines
+      |> Enum.with_index()
+      |> Enum.reduce({%{}, %{}}, fn {line, index}, {positions, counts} ->
+        {Map.put_new(positions, line, index), Map.update(counts, line, 1, &(&1 + 1))}
+      end)
+
+    Map.filter(positions, fn {line, _index} -> Map.fetch!(counts, line) == 1 end)
+  end
+
+  # Longest subsequence of pairs, already sorted by the first position, that increases in the second position too.
+  # Patience sorting over the second positions, O(n log n).
+  @spec longest_increasing([{non_neg_integer(), non_neg_integer()}]) :: [
+          {non_neg_integer(), non_neg_integer()}
+        ]
+  defp longest_increasing([]), do: []
+
+  defp longest_increasing(pairs) do
+    {tops, links} =
+      pairs
+      |> Enum.with_index()
+      |> Enum.reduce({:gb_trees.empty(), %{}}, fn {{_old_at, new_at} = pair, index},
+                                                  {tops, links} ->
+        # `tops` maps a pile number to {new position, index} of its top; piles have increasing tops.
+        pile = first_pile_at_least(tops, new_at)
+        previous = if pile > 0, do: elem(:gb_trees.get(pile - 1, tops), 1)
+        {:gb_trees.enter(pile, {new_at, index}, tops), Map.put(links, index, {pair, previous})}
+      end)
+
+    {_last_new, last_index} = elem(:gb_trees.largest(tops), 1)
+    follow_links(links, last_index, [])
+  end
+
+  @spec first_pile_at_least(:gb_trees.tree(), non_neg_integer()) :: non_neg_integer()
+  defp first_pile_at_least(tops, new_at) do
+    search_piles(tops, new_at, 0, :gb_trees.size(tops))
+  end
+
+  @spec search_piles(:gb_trees.tree(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp search_piles(_tops, _new_at, low, high) when low >= high, do: low
+
+  defp search_piles(tops, new_at, low, high) do
+    middle = div(low + high, 2)
+    {top, _index} = :gb_trees.get(middle, tops)
+
+    if top < new_at,
+      do: search_piles(tops, new_at, middle + 1, high),
+      else: search_piles(tops, new_at, low, middle)
+  end
+
+  @spec follow_links(
+          %{non_neg_integer() => {tuple(), non_neg_integer() | nil}},
+          non_neg_integer() | nil,
+          list()
+        ) ::
+          [{non_neg_integer(), non_neg_integer()}]
+  defp follow_links(_links, nil, acc), do: acc
+
+  defp follow_links(links, index, acc) do
+    {pair, previous} = Map.fetch!(links, index)
+    follow_links(links, previous, [pair | acc])
   end
 
   # Drops the leading and trailing lines both sides share, returning how many leading lines were
@@ -243,6 +377,357 @@ defmodule Minga.Buffer.UndoPatch do
     end_byte = Document.content_byte_size(document) - matched
     Document.slice_byte_range(document, end_byte - count, count)
   end
+
+  @doc """
+  Returns the smallest byte changes a forward patch makes, in document order, as `{start, removed, inserted}`.
+
+  When the old and new text have the same number of lines, each pair of lines is compared on its own; otherwise the whole text is one pair. Each pair loses the bytes both sides share at the start and the end, on grapheme cluster boundaries, and what remains is compared word by word (tokens never end inside a cluster), so a line that changes two words records two changes and the text between them stays out. The word comparison runs only when the trimmed pair holds at most 512 words in all, which bounds its cost whatever the words are; past that, the trimmed pair is one change. Everything else is linear in the patch's bytes. Offsets are in the document the patch applies to, so applying the changes from the last to the first gives the patch's result.
+
+  `Minga.Buffer.UndoHistory` records changes this precise, so an edit that rewrites whole lines only takes authorship of the bytes it changed.
+  """
+  @spec precise_changes(t()) :: [{non_neg_integer(), byte_fragment(), byte_fragment()}]
+  def precise_changes(%__MODULE__{start_byte: start, old_text: removed, new_text: inserted}),
+    do: segment_changes(start, removed, inserted, false)
+
+  @doc """
+  Returns the smallest changes that turn `old`, located at byte `at`, into `new`, like `precise_changes/1`.
+
+  With `words?` true, the text left after trimming each line pair is also compared word by word (up to 512 words per pair), so separately changed words become separate changes. `Minga.Buffer.UndoHistory` asks for words only next to another author's text, where an unchanged word must keep its author.
+  """
+  @spec segment_changes(non_neg_integer(), byte_fragment(), byte_fragment(), boolean()) :: [
+          {non_neg_integer(), byte_fragment(), byte_fragment()}
+        ]
+  def segment_changes(at, old, new, words?)
+      when is_integer(at) and at >= 0 and is_binary(old) and is_binary(new) and is_boolean(words?) do
+    old_lines = lines_with_newlines(old)
+    new_lines = lines_with_newlines(new)
+
+    case line_pairs(old_lines, new_lines) do
+      [] ->
+        unpaired_changes(at, old, new, {old_lines, new_lines}, words?)
+
+      pairs ->
+        pairs
+        |> Enum.flat_map_reduce(at, fn {old_line, new_line}, offset ->
+          {precise_pair(offset, old_line, new_line, words?), offset + byte_size(old_line)}
+        end)
+        |> elem(0)
+    end
+  end
+
+  # Lines that do not pair up are compared whole while the word comparison fits its budget. Past it, the lines that
+  # occur once on each side and in the same order pin the two sides, as in `changes/2`, and each gap between them is
+  # compared again; only a gap with no such line stays one change.
+  @spec unpaired_changes(
+          non_neg_integer(),
+          binary(),
+          binary(),
+          {[binary()], [binary()]},
+          boolean()
+        ) :: [
+          {non_neg_integer(), byte_fragment(), byte_fragment()}
+        ]
+  defp unpaired_changes(at, old, new, {old_lines, new_lines}, words?) do
+    anchors =
+      if match?([_, _ | _], old_lines ++ new_lines) and String.valid?(old) and String.valid?(new) and
+           not within_word_budget?(words(old), words(new)),
+         do: unique_anchors(old_lines, new_lines),
+         else: []
+
+    case anchors do
+      [] -> precise_pair(at, old, new, words?)
+      _anchored -> anchored_gaps(at, {old_lines, new_lines}, anchors, words?)
+    end
+  end
+
+  @spec anchored_gaps(
+          non_neg_integer(),
+          {[binary()], [binary()]},
+          [{non_neg_integer(), non_neg_integer()}],
+          boolean()
+        ) ::
+          [{non_neg_integer(), byte_fragment(), byte_fragment()}]
+  defp anchored_gaps(at, {old_lines, new_lines}, anchors, words?) do
+    old_tuple = List.to_tuple(old_lines)
+    new_tuple = List.to_tuple(new_lines)
+
+    old_offsets =
+      old_lines |> Enum.scan(0, &(byte_size(&1) + &2)) |> then(&List.to_tuple([0 | &1]))
+
+    ends = [{tuple_size(old_tuple), tuple_size(new_tuple)}]
+
+    {changes, _next} =
+      Enum.flat_map_reduce(anchors ++ ends, {0, 0}, fn {old_anchor, new_anchor},
+                                                       {old_from, new_from} ->
+        old_gap = old_tuple |> tuple_slice(old_from, old_anchor) |> Enum.join()
+        new_gap = new_tuple |> tuple_slice(new_from, new_anchor) |> Enum.join()
+
+        {segment_changes(at + elem(old_offsets, old_from), old_gap, new_gap, words?),
+         {old_anchor + 1, new_anchor + 1}}
+      end)
+
+    changes
+  end
+
+  # Trims a pair and, when asked, splits what remains into its changed words.
+  @spec precise_pair(non_neg_integer(), binary(), binary(), boolean()) :: [
+          {non_neg_integer(), byte_fragment(), byte_fragment()}
+        ]
+  defp precise_pair(start, old, new, words?) do
+    case trimmed_change(start, old, new) do
+      [{at, old_middle, new_middle}] = change ->
+        if several_words?(old_middle, new_middle) or
+             (words? and not ascii?(old_middle <> new_middle)),
+           do: word_changes(at, old_middle, new_middle),
+           else: change
+
+      [] ->
+        []
+    end
+  end
+
+  # A trimmed pair with no separator on either side is one word on each side, so a word comparison could not split it.
+  # A byte scan of the trimmed text decides, so a whole-file rename of single tokens never tokenizes.
+  @spec several_words?(binary(), binary()) :: boolean()
+  defp several_words?(old_middle, new_middle),
+    do: separator?(old_middle) or separator?(new_middle)
+
+  @separator_bytes ~c" \t\r\n.,;:()[]{}<>=+-*/&|!?'\"`~@#$%^"
+
+  # ASCII text without a separator byte is one token, so a word comparison could not split it either way.
+  @spec ascii?(binary()) :: boolean()
+  defp ascii?(<<byte, rest::binary>>) when byte < 128, do: ascii?(rest)
+  defp ascii?(<<>>), do: true
+  defp ascii?(_non_ascii), do: false
+
+  @spec separator?(binary()) :: boolean()
+  defp separator?(<<byte, _rest::binary>>) when byte in @separator_bytes, do: true
+  defp separator?(<<_byte, rest::binary>>), do: separator?(rest)
+  defp separator?(<<>>), do: false
+
+  # A word diff costs at most (words on both sides) squared, so this bound caps it at a few milliseconds whatever the
+  # words are, including the same words reordered.
+  @max_words 512
+
+  @spec word_changes(non_neg_integer(), binary(), binary()) :: [
+          {non_neg_integer(), byte_fragment(), byte_fragment()}
+        ]
+  defp word_changes(at, old, new) do
+    if String.valid?(old) and String.valid?(new),
+      do: diff_words(at, old, new, words(old), words(new)),
+      else: [{at, old, new}]
+  end
+
+  @spec diff_words(non_neg_integer(), String.t(), String.t(), [String.t()], [String.t()]) :: [
+          {non_neg_integer(), byte_fragment(), byte_fragment()}
+        ]
+  defp diff_words(at, old, new, old_words, new_words) do
+    if within_word_budget?(old_words, new_words) do
+      old_words
+      |> List.myers_difference(new_words)
+      |> script_changes(at)
+      |> Enum.flat_map(fn {change_at, removed, inserted} ->
+        trimmed_change(change_at, removed, inserted)
+      end)
+    else
+      [{at, old, new}]
+    end
+  end
+
+  # Words, runs of white space within a line, line breaks, and single other grapheme clusters, so a token never ends
+  # inside a cluster: a combining mark stays with its letter, and a flag or a ZWJ sequence is one token.
+  @spec words(String.t()) :: [String.t()]
+  defp words(text) do
+    text
+    |> String.graphemes()
+    |> Enum.chunk_while(
+      nil,
+      fn cluster, acc ->
+        kind = cluster_kind(cluster)
+
+        case acc do
+          {^kind, pieces} when kind != :other -> {:cont, {kind, [cluster | pieces]}}
+          nil -> {:cont, {kind, [cluster]}}
+          {_kind, pieces} -> {:cont, join_reversed(pieces), {kind, [cluster]}}
+        end
+      end,
+      fn
+        nil -> {:cont, nil}
+        {_kind, pieces} -> {:cont, join_reversed(pieces), nil}
+      end
+    )
+  end
+
+  @spec join_reversed([String.t()]) :: String.t()
+  defp join_reversed(pieces), do: pieces |> Enum.reverse() |> Enum.join()
+
+  # A cluster's kind is its first code point's: a word character, white space, or anything else.
+  @spec cluster_kind(String.t()) :: :word | :space | :other
+  defp cluster_kind(<<byte, _rest::binary>>)
+       when byte in ?a..?z or byte in ?A..?Z or byte in ?0..?9 or byte == ?_,
+       do: :word
+
+  # A line break is a token of its own, so white space on either side of it aligns on its own: "\n " and " " share the
+  # space instead of differing as two tokens.
+  defp cluster_kind(<<byte, _rest::binary>>) when byte in [?\n, ?\r], do: :other
+
+  defp cluster_kind(<<byte, _rest::binary>>) when byte in [?\s, ?\t, ?\v, ?\f], do: :space
+
+  defp cluster_kind(<<byte, _rest::binary>>) when byte < 128, do: :other
+
+  defp cluster_kind(cluster) do
+    cond do
+      Regex.match?(~r/\A\w/u, cluster) -> :word
+      Regex.match?(~r/\A\s/u, cluster) -> :space
+      true -> :other
+    end
+  end
+
+  @spec within_word_budget?([String.t()], [String.t()]) :: boolean()
+  defp within_word_budget?(old_words, new_words),
+    do: length(old_words) + length(new_words) <= @max_words
+
+  # Turns an edit script over words into changes located in the old text, in document order.
+  @spec script_changes([{:eq | :del | :ins, [String.t()]}], non_neg_integer()) :: [
+          {non_neg_integer(), binary(), binary()}
+        ]
+  defp script_changes(script, at) do
+    {changes, _offset, pending} =
+      Enum.reduce(script, {[], at, nil}, fn
+        {:eq, words}, {changes, offset, pending} ->
+          {flush(changes, pending), offset + :erlang.iolist_size(words), nil}
+
+        {:del, words}, {changes, offset, pending} ->
+          {start, removed, inserted} = pending || {offset, [], []}
+          {changes, offset + :erlang.iolist_size(words), {start, [removed, words], inserted}}
+
+        {:ins, words}, {changes, offset, pending} ->
+          {start, removed, inserted} = pending || {offset, [], []}
+          {changes, offset, {start, removed, [inserted, words]}}
+      end)
+
+    changes |> flush(pending) |> Enum.reverse()
+  end
+
+  @spec flush(
+          [{non_neg_integer(), binary(), binary()}],
+          {non_neg_integer(), iodata(), iodata()} | nil
+        ) ::
+          [{non_neg_integer(), binary(), binary()}]
+  defp flush(changes, nil), do: changes
+
+  defp flush(changes, {start, removed, inserted}),
+    do: [{start, :erlang.iolist_to_binary(removed), :erlang.iolist_to_binary(inserted)} | changes]
+
+  # Lines pair one to one only when both sides have the same number of lines, more than one.
+  @spec line_pairs([binary()], [binary()]) :: [{binary(), binary()}]
+  defp line_pairs([_, _ | _] = removed_lines, inserted_lines) do
+    if length(removed_lines) == length(inserted_lines),
+      do: Enum.zip(removed_lines, inserted_lines),
+      else: []
+  end
+
+  defp line_pairs(_removed_lines, _inserted_lines), do: []
+
+  @spec lines_with_newlines(binary()) :: [binary()]
+  defp lines_with_newlines(""), do: []
+
+  defp lines_with_newlines(text) do
+    {lines, from} =
+      text
+      |> :binary.matches("\n")
+      |> Enum.reduce({[], 0}, fn {position, 1}, {lines, from} ->
+        {[binary_part(text, from, position + 1 - from) | lines], position + 1}
+      end)
+
+    lines =
+      if from < byte_size(text),
+        do: [binary_part(text, from, byte_size(text) - from) | lines],
+        else: lines
+
+    Enum.reverse(lines)
+  end
+
+  # Drops the bytes both sides share at the start and at the end, keeping whole grapheme clusters (UAX #29), so a
+  # change never starts or ends inside a cluster such as a flag, a jamo syllable or a letter with its combining mark.
+  @spec trimmed_change(non_neg_integer(), binary(), binary()) :: [
+          {non_neg_integer(), byte_fragment(), byte_fragment()}
+        ]
+  defp trimmed_change(_start, same, same), do: []
+
+  defp trimmed_change(start, old, new) do
+    ascii? = plain_ascii?(old) and plain_ascii?(new)
+    prefix = shared_prefix(old, new, :binary.longest_common_prefix([old, new]), ascii?)
+    old_rest = binary_part(old, prefix, byte_size(old) - prefix)
+    new_rest = binary_part(new, prefix, byte_size(new) - prefix)
+    suffix = shared_suffix(old, new, :binary.longest_common_suffix([old_rest, new_rest]), ascii?)
+
+    [
+      {start + prefix, binary_part(old_rest, 0, byte_size(old_rest) - suffix),
+       binary_part(new_rest, 0, byte_size(new_rest) - suffix)}
+    ]
+  end
+
+  # ASCII without a carriage return has a cluster boundary between every two bytes, so trimming it needs no segmenting.
+  @spec plain_ascii?(binary()) :: boolean()
+  defp plain_ascii?(text), do: ascii?(text) and not String.contains?(text, "\r")
+
+  # The longest shared start that ends on a cluster boundary of both texts: the last boundary at or before `shared`
+  # they have in common. The bytes before `shared` are the same, so an anchor before it is one in both, and both texts
+  # are segmented once from the earlier of their anchors.
+  @spec shared_prefix(binary(), binary(), non_neg_integer(), boolean()) :: non_neg_integer()
+  defp shared_prefix(_old, _new, shared, true), do: shared
+  defp shared_prefix(_old, _new, 0, false), do: 0
+
+  defp shared_prefix(old, new, shared, false) do
+    from = min(Unicode.cluster_anchor(old, shared), Unicode.cluster_anchor(new, shared))
+    in_old = old |> Unicode.cluster_boundaries_between(from, shared) |> MapSet.new()
+
+    new
+    |> Unicode.cluster_boundaries_between(from, shared)
+    |> Enum.filter(&MapSet.member?(in_old, &1))
+    |> Enum.max()
+  end
+
+  # The longest shared end that starts on a cluster boundary of both texts: the first position, counted from the start
+  # of the shared end, that is a boundary in both. Once the clusters line up the bytes match, so the search usually
+  # ends within a cluster; it looks further only when it must, doubling the stretch it reads.
+  @spec shared_suffix(binary(), binary(), non_neg_integer(), boolean()) :: non_neg_integer()
+  defp shared_suffix(_old, _new, shared, true), do: shared
+  defp shared_suffix(_old, _new, 0, false), do: 0
+
+  defp shared_suffix(old, new, shared, false),
+    do: shared - first_common_start(old, new, shared, 256)
+
+  @spec first_common_start(binary(), binary(), pos_integer(), pos_integer()) :: non_neg_integer()
+  defp first_common_start(old, new, shared, stretch) do
+    reach = min(stretch, shared)
+    in_old = relative_boundaries(old, byte_size(old) - shared, reach) |> MapSet.new()
+
+    common =
+      relative_boundaries(new, byte_size(new) - shared, reach)
+      |> Enum.find(&MapSet.member?(in_old, &1))
+
+    cond do
+      common != nil -> common
+      reach == shared -> shared
+      true -> first_common_start(old, new, shared, stretch * 2)
+    end
+  end
+
+  @spec relative_boundaries(binary(), non_neg_integer(), non_neg_integer()) :: [non_neg_integer()]
+  defp relative_boundaries(text, start, reach),
+    do:
+      text |> Unicode.cluster_boundaries_between(start, start + reach) |> Enum.map(&(&1 - start))
+
+  @doc "Returns where a forward patch starts, the bytes it removed, and the bytes it inserted."
+  @spec change(t()) :: {non_neg_integer(), byte_fragment(), byte_fragment()}
+  def change(%__MODULE__{start_byte: start_byte, old_text: removed, new_text: inserted}),
+    do: {start_byte, removed, inserted}
+
+  @doc "Returns the cursor the patch restores when applied."
+  @spec cursor(t()) :: Document.position()
+  def cursor(%__MODULE__{cursor: cursor}), do: cursor
 
   @doc "Returns the inverse patch for the current document state."
   @spec invert(t(), Document.t()) :: t()

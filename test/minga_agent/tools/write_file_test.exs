@@ -121,7 +121,7 @@ defmodule MingaAgent.Tools.WriteFileTest do
   end
 
   @tag route: :buffer
-  test "replacement is undoable without writing the disk file", ctx do
+  test "replacement can be reverted without writing the disk file", ctx do
     {:ok, buffer} = Buffer.pid_for_path(ctx.path)
 
     assert {:ok, _} =
@@ -135,7 +135,7 @@ defmodule MingaAgent.Tools.WriteFileTest do
     assert Buffer.content(buffer) == ""
     assert Buffer.dirty?(buffer)
     assert File.read!(ctx.path) == "original"
-    Buffer.undo(buffer)
+    assert {:ok, 1} = Buffer.undo_agent_session(buffer)
     assert Buffer.content(buffer) == "original"
   end
 

@@ -133,6 +133,43 @@ defmodule MingaAgent.Providers.NativeMCPRegistryTest do
     refute Enum.any?(Native.tools(provider), &(&1.name == "list_mcp_tools"))
   end
 
+  test "a server an extension contributes starts in the session's folder, whenever it is registered",
+       %{
+         tmp_dir: dir
+       } do
+    {:ok, folder} = Minga.Project.Root.canonical_path(dir)
+    # The extension asks for another directory. It does not get to choose.
+    early = {:early, command: "sh", args: ["scripts/serve.sh"], cwd: "/tmp"}
+    late = {:late, command: "sh", args: ["scripts/serve.sh"]}
+    assert :ok = ServerRegistry.register_many(@source, [early])
+
+    {:ok, provider} =
+      Native.start_link(
+        subscriber: self(),
+        model: "anthropic:claude-sonnet-4-20250514",
+        model_selection: MingaAgent.Test.ModelSelectionFixture.selection(),
+        project_root: dir,
+        tools: [],
+        config: %AgentConfig{mcp_servers: [], tool_approval: :none},
+        mcp_enabled?: true,
+        mcp_transport: FakeTransport,
+        mcp_transport_opts: [tools: [mcp_tool_def()], test_pid: self()],
+        skip_api_key_env: true
+      )
+
+    assert {:ok, [_tool]} = GenServer.call(provider, :list_mcp_tools, :infinity)
+
+    assert_receive {:mcp_transport_config,
+                    %{name: "early", cwd: ^folder, args: ["scripts/serve.sh"]}},
+                   @receive_timeout
+
+    # A server that arrives while the session runs goes through the same place.
+    assert :ok = ServerRegistry.register_many(@source, [early, late])
+    :sys.get_state(provider)
+    assert {:ok, [_early_tool, _late_tool]} = GenServer.call(provider, :list_mcp_tools, :infinity)
+    assert_receive {:mcp_transport_config, %{name: "late", cwd: ^folder}}, @receive_timeout
+  end
+
   defp mcp_tool_def do
     %{
       "name" => "echo-text",

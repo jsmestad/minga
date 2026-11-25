@@ -61,7 +61,8 @@ defmodule MingaAgent.Tool.ContextTest do
       assert {:ok, _receipt} =
                Context.conditional_mutate(context, path, expected, {:replace, "one\n2\n"})
 
-      assert Minga.Buffer.Process.last_undo_source(buffer) == {:minga, "task-9", "call-4"}
+      assert [{{:minga, "task-9", "call-4"}, _regions}] =
+               Minga.Buffer.Process.minga_changes(buffer, "task-9")
     end
 
     test "a staged edit of an open buffer is published under the author key", %{tmp_dir: root} do
@@ -84,7 +85,10 @@ defmodule MingaAgent.Tool.ContextTest do
       assert Minga.Buffer.content(buffer) == "one\ntwo\n"
       assert :ok = ProjectView.promote(view, :project_root)
       assert Minga.Buffer.content(buffer) == "1\ntwo\n"
-      assert Minga.Buffer.Process.last_undo_source(buffer) == {:minga, "task-9", "call-5"}
+
+      assert [{{:minga, "task-9", "call-5"}, _regions}] =
+               Minga.Buffer.Process.minga_changes(buffer, "task-9")
+
       assert :ok = ProjectView.close(view)
     end
   end

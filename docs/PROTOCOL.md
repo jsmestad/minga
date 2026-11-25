@@ -111,7 +111,7 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 | `0x1F` | text_presentation_state | 12 | Ordered active/discarded text presentation lifetime |
 | `0x05` | capabilities_updated | 9 or 23 | Updated versioned capabilities after async detection |
 | `0x13` | frontend_foreground | 2 | Whether the frontend is in the foreground: terminal window focus, or the macOS app's active state |
-| `0x62` | terminal_report | 4 + 2 per feature | The terminal frontend's snapshot of its host terminal's features |
+| `0x62` | terminal_report | 4 + 3 per feature | The terminal frontend's snapshot of its host terminal's features |
 | `0x08` | request_keyframe | 9 | Ask the BEAM to start a fresh recovery generation (last_good_frame_seq + failed generation) |
 | `0x09` | scroll_batch | 6 | Pane-targeted vertical wheel or trackpad displacement |
 | `0x0A` | frame_applied | 9 | Report semantic publication of a complete frame |
@@ -1005,9 +1005,12 @@ count x:
                   5 kitty_keyboard, 6 desktop_notifications, 7 tab_title, 8 tab_progress, 9 kitty_graphics,
                   10 synchronized_output, 11 focus_reporting, 12 clipboard_osc52)
   status:  u8    (terminal_feature_status: 0 unknown, 1 pending, 2 detected, 3 missing, 4 fallback)
+  source:  u8    (terminal_feature_source: 0 unsettled, 1 answered, 2 known_terminal, 3 timeout, 4 user)
 ```
 
-Every event is a complete snapshot and replaces the BEAM's copy (`MingaEditor.Frontend.TerminalReport`). The frontend sends it right after `ready`, with `pending` for every feature it has asked the terminal about, then once more when the terminal has answered or two seconds have passed, and again if a later answer changes an entry. After the two seconds no entry is `pending`: a feature the terminal did not answer for is `fallback` when Minga has a replacement and `missing` when it has none. A feature the frontend does not list is `unknown` on the BEAM, as is a feature id this BEAM does not know, which it skips.
+`source` says how the frontend settled the status, so `:checkhealth terminal` can say why: the terminal answered a query or showed the feature by using it (`answered`), the terminal is in the frontend's table of known terminals (`known_terminal`), the terminal did not answer in time (`timeout`), or the user forced the feature with the `:terminal_features` option (`user`). A feature that is still `pending` is `unsettled`. A source the BEAM does not know reads as `unsettled`.
+
+Every event is a complete snapshot and replaces the BEAM's copy (`MingaEditor.Frontend.TerminalReport`). The frontend sends it right after `ready`, with `pending` for every feature it has asked the terminal about, then once more when the terminal has answered or two seconds have passed, and again if a later answer changes an entry's status or its source. After the two seconds no entry is `pending`: a feature the terminal did not answer for is `fallback` when Minga has a replacement and `missing` when it has none. A feature the frontend does not list is `unknown` on the BEAM, as is a feature id this BEAM does not know, which it skips.
 
 The frontend builds one value from the terminal's answers and uses it for its own choices and for this report, so what the BEAM lists is what the frontend does. The capability bytes of `ready` are unchanged: they describe what the BEAM adapts its rendering to, and it adapts to none of these features.
 

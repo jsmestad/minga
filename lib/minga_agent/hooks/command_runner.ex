@@ -121,7 +121,7 @@ defmodule MingaAgent.Hooks.CommandRunner do
   @spec run_helper(Hook.t(), String.t(), String.t(), run_opts()) :: Result.t()
   defp run_helper(%Hook{} = hook, helper_path, payload_json, opts) do
     backend = helper_backend(opts)
-    backend_opts = Keyword.get(opts, :helper_backend_opts, [])
+    backend_opts = in_directory(Keyword.get(opts, :helper_backend_opts, []), hook, opts)
     clock = Keyword.get(opts, :clock, &monotonic_now_ms/0)
     guard_timeout_ms = Keyword.get(opts, :guard_timeout_ms, @guard_timeout_ms)
     args = helper_args(hook, payload_json)
@@ -147,6 +147,21 @@ defmodule MingaAgent.Hooks.CommandRunner do
     e -> helper_start_error(hook, e)
   catch
     kind, reason -> helper_start_error(hook, {kind, reason})
+  end
+
+  # A hook runs in the directory it was given (a project's hook: that project's root), or in the root of the
+  # project whose config is in effect. With neither, it runs where Minga runs, as before.
+  # `:project_directory` lets a test say which project that is.
+  @spec in_directory(keyword(), Hook.t(), run_opts()) :: keyword()
+  defp in_directory(backend_opts, %Hook{cwd: cwd}, opts) do
+    directory =
+      cwd ||
+        Keyword.get_lazy(opts, :project_directory, &Minga.Config.Loader.project_directory/0)
+
+    case directory do
+      directory when is_binary(directory) -> Keyword.put_new(backend_opts, :cd, directory)
+      nil -> backend_opts
+    end
   end
 
   @spec helper_backend(run_opts()) :: module()

@@ -349,7 +349,7 @@ defmodule Minga.Bench.BatchReplacements do
       "history #{workload.name}: #{byte_size(text)} bytes, #{length(patches)} patches"
     )
 
-    recorded = UndoHistory.record_edit_batch(UndoHistory.new(), 0, patches, :lsp, 1)
+    recorded = UndoHistory.record_edit_batch(UndoHistory.new(Document.new(text)), 0, patches, :lsp, 1)
     {:ok, undo_restore, after_undo} = UndoHistory.undo(recorded, 1, edited)
     {_undone, redo_patches} = sequential_replay(patches, edited)
 

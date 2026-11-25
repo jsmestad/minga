@@ -218,6 +218,19 @@ defmodule Minga.Config do
   @spec reload() :: :ok | {:error, term()}
   defdelegate reload(), to: Loader
 
+  @doc """
+  Reloads config and reads project-local configuration from `project_root`.
+
+  The editor passes its active project. `nil` means no project, so nothing project-local is loaded. See `Minga.Config.Loader` for the trust rule a root has to pass.
+  """
+  @spec reload(String.t() | nil) :: :ok | {:error, term()}
+  def reload(project_root) when is_binary(project_root) or is_nil(project_root),
+    do: Loader.reload(Loader, project_root)
+
+  @doc "The line for `*Messages*` about what the latest load did with project-local configuration, if any."
+  @spec project_config_message() :: String.t() | nil
+  def project_config_message, do: Loader.project_config_message(Loader.project_config())
+
   @doc "Returns the error from the last config load, or nil if it loaded cleanly."
   @spec load_error() :: term() | nil
   defdelegate load_error(), to: Loader
@@ -772,16 +785,89 @@ defmodule Minga.Config do
     end
   end
 
+  # Only a project's config is held to the ownership rule. The user's own global config is trusted as written.
+  @spec own_extension_sources(String.t(), {:owner, non_neg_integer() | nil} | nil) ::
+          {:ok, String.t()} | {:error, Minga.Project.Trust.code_refusal()}
+  defp own_extension_sources(expanded, nil), do: {:ok, expanded}
+
+  # The folder is a code root: its own all the way down and safe all the way up. What is registered is the
+  # canonical path that was checked, so no other spelling of it is read later.
+  defp own_extension_sources(expanded, {:owner, user_id}) do
+    Minga.Project.Trust.code_root(expanded, user_id)
+  end
+
+  @doc """
+  Expands a path that a config file wrote.
+
+  A relative path in a config file means "next to this file", wherever the editor was started: while a config file is being evaluated, `path` is expanded against that file's folder. Outside a config file there is no such folder, and the path is expanded as written.
+  """
+  @spec expand_config_path(String.t()) :: String.t()
+  def expand_config_path(path) when is_binary(path),
+    do: expand_extension_path(path, Process.get(:minga_config_file))
+
+  @doc """
+  Resolves a folder of code that a config file names, such as a grammar's sources.
+
+  The path is expanded next to the config file (`expand_config_path/1`). While a project's config is evaluated, the folder is also held to the ownership rule for a folder of code (`Minga.Project.Trust.code_root/3`): what comes back is its canonical path, or the reason it is not used. `..` gains nothing, because the folder is judged where it really is. The user's own config is not held to the rule.
+  """
+  @spec config_code_folder(String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def config_code_folder(path) when is_binary(path) do
+    expanded = expand_config_path(path)
+
+    case own_extension_sources(expanded, Process.get(:minga_config_owner)) do
+      {:ok, folder} -> {:ok, folder}
+      {:error, reason} -> {:error, "#{expanded} not used: #{Minga.Project.Trust.explain(reason)}"}
+    end
+  end
+
+  @doc """
+  Reads a file that a config file names, such as a grammar's query file.
+
+  The path is expanded next to the config file. While a project's config is evaluated, the file is read the way the config itself is: opened, examined as the open file, and read from that same file (`Minga.Project.Trust.read_config_file/3`).
+  """
+  @spec read_config_named_file(String.t()) :: {:ok, binary()} | {:error, term()}
+  def read_config_named_file(path) when is_binary(path) do
+    expanded = expand_config_path(path)
+
+    case Process.get(:minga_config_owner) do
+      {:owner, user_id} ->
+        with {:ok, content, _canonical} <-
+               Minga.Project.Trust.read_config_file(expanded, user_id),
+             do: {:ok, content}
+
+      nil ->
+        File.read(expanded)
+    end
+  end
+
+  @spec expand_extension_path(String.t(), String.t() | nil) :: String.t()
+  defp expand_extension_path(path, config_file) when is_binary(config_file),
+    do: Path.expand(path, Path.dirname(config_file))
+
+  defp expand_extension_path(path, nil), do: Path.expand(path)
+
   @spec register_extension_source(atom(), keyword(), {boolean(), boolean(), boolean()}) :: :ok
   defp register_extension_source(name, opts, {true, false, false}) do
     {path, config} = Keyword.pop(opts, :path)
-    expanded = Path.expand(path)
+    expanded = expand_extension_path(path, Process.get(:minga_config_file))
 
     unless File.dir?(expanded) do
       Minga.Log.warning(:config, "extension #{name}: path does not exist: #{expanded}")
     end
 
-    ExtRegistry.register(name, expanded, config)
+    case own_extension_sources(expanded, Process.get(:minga_config_owner)) do
+      {:ok, checked} ->
+        ExtRegistry.register(name, checked, config)
+
+      {:error, reason} ->
+        # A project's config may only point at code that is the user's own. The rest of the file still applies.
+        Minga.Log.warning(
+          :config,
+          "extension #{name}: #{expanded} not loaded: #{Minga.Project.Trust.explain(reason)}"
+        )
+
+        :ok
+    end
   end
 
   defp register_extension_source(name, opts, {false, true, false}) do

@@ -15,14 +15,13 @@ defmodule MingaAgent.Hooks.CommandRunner.PortHelperBackend do
 
   @impl true
   @spec start(String.t(), [String.t()], String.t(), keyword()) :: {:ok, t()} | {:error, term()}
-  def start(helper_path, args, payload_json, _opts)
+  def start(helper_path, args, payload_json, opts)
       when is_binary(helper_path) and is_list(args) and is_binary(payload_json) do
     port =
-      Port.open({:spawn_executable, helper_path}, [
-        :binary,
-        :exit_status,
-        args: args
-      ])
+      Port.open(
+        {:spawn_executable, helper_path},
+        working_directory(opts) ++ [:binary, :exit_status, args: args]
+      )
 
     handle = %__MODULE__{port: port, os_pid: port_os_pid(port)}
     send_payload(port, payload_json)
@@ -53,6 +52,15 @@ defmodule MingaAgent.Hooks.CommandRunner.PortHelperBackend do
   def stop(%__MODULE__{port: port, os_pid: os_pid}) do
     kill_helper_process(os_pid)
     close_port(port)
+  end
+
+  # The helper runs the hook's shell line in the directory it is started in.
+  @spec working_directory(keyword()) :: [{:cd, charlist()}]
+  defp working_directory(opts) do
+    case Keyword.get(opts, :cd) do
+      directory when is_binary(directory) -> [{:cd, String.to_charlist(directory)}]
+      nil -> []
+    end
   end
 
   @spec send_payload(port(), String.t()) :: :ok
