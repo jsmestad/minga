@@ -638,13 +638,12 @@ reason = "The modeline.modeText text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
+scenario = ["start.project_switcher.empty"]
 frontend = "macos"
 part = "modeline.segment"
 rule = "contrast"
 theme = "catppuccin_latte"
 pairs = [
-  "#8839ef on #e6e9ef",
   "#eff1f5 on #1e66f5",
 ]
 reason = "The modeline.segment text misses 4.5:1 in this theme: the mode pill, and Minga's words in the minga role (4.45:1)."
