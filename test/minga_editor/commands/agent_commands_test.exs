@@ -158,6 +158,10 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         },
         agent_ui: agentic
       },
+      # Keys in these tests go through the input handlers, which ask the sidebar table who has focus.
+      # The table is this state's own, so a sidebar another test opened cannot take them (#4271).
+      extension_surfaces:
+        MingaEditor.State.ExtensionSurfaces.new(sidebar_registry: private_sidebar_registry()),
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
@@ -171,6 +175,12 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         ),
       interaction: %Interaction{}
     }
+  end
+
+  defp private_sidebar_registry do
+    table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
+    start_supervised!({MingaEditor.Extension.Sidebar, name: table, notify: false}, id: table)
+    table
   end
 
   @spec stop_owned_prompt(pid()) :: :ok
@@ -1320,6 +1330,9 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
             )
             |> WorkspaceState.enter_empty_state(),
           interaction: Interaction.new(options_server: options),
+          # Keys in this test go through the input handlers too: a sidebar table of its own (#4271).
+          extension_surfaces:
+            MingaEditor.State.ExtensionSurfaces.new(sidebar_registry: private_sidebar_registry()),
           shell_runtime:
             Runtime.new(Runtime.default_entry(), %MingaEditor.Shell.Traditional.State{})
         }
