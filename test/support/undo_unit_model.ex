@@ -122,19 +122,117 @@ defmodule Minga.Test.UndoUnitModel do
     mark_edges =
       for run <- runs, {owner, overlap} <- run.overlaps, is_integer(overlap), do: {owner, overlap}
 
-    # Steps compaction merged revert as one node: an edge counts between their classes, and the classes must form no
-    # cycle.
-    class = fn group -> history |> UndoHistory.merge_class(group) |> Enum.max() end
+    # Steps compaction merged revert as one node: an edge counts between their classes. Cycles through Minga steps of
+    # other tasks are allowed (the walk takes the whole component); the components must form no cycle.
+    history
+    |> class_edges(deleter_edges ++ mark_edges)
+    |> components()
+    |> condensed()
+    |> acyclic_graph?()
+  end
+
+  @doc """
+  Returns whether some strongly connected component of the merged dependency graph with more than one node holds a group of yours with visible text. That is the round-4 deadlock in the merged view: the component would be held by your edit while a step in it blocks your undo.
+  """
+  @spec held_component?(UndoHistory.t()) :: boolean()
+  def held_component?(history), do: held_components(history) != []
+
+  @doc "Returns the components `held_component?/1` finds, with the edges between their nodes."
+  @spec held_components(UndoHistory.t()) :: [MapSet.t()]
+  def held_components(history) do
+    %{groups: all} = provenance = UndoHistory.provenance(history)
+    runs = Provenance.runs(provenance)
 
     edges =
-      for {from, to} <- deleter_edges ++ mark_edges,
-          a = class.(from),
-          b = class.(to),
-          a != b,
-          uniq: true,
-          do: {a, b}
+      for run <- runs,
+          group <- Enum.reject([run.group | run.deletions], &is_nil/1),
+          Map.has_key?(all, group),
+          d <- later(run, group),
+          d != group,
+          Map.fetch!(all, d).author != :you,
+          do: {group, d}
 
-    acyclic_graph?(edges)
+    marks =
+      for run <- runs, {owner, overlap} <- run.overlaps, is_integer(overlap), do: {owner, overlap}
+
+    history
+    |> class_edges(edges ++ marks)
+    |> components()
+    |> elem(0)
+    |> Enum.filter(fn component ->
+      MapSet.size(component) > 1 and
+        Enum.any?(component, fn group ->
+          Map.has_key?(all, group) and Map.fetch!(all, group).author == :you and
+            Provenance.live_bytes_of(provenance, group) > 0
+        end)
+    end)
+  end
+
+  defp class_edges(history, edges) do
+    class = fn group -> history |> UndoHistory.merge_class(group) |> Enum.max() end
+    for {from, to} <- edges, a = class.(from), b = class.(to), a != b, uniq: true, do: {a, b}
+  end
+
+  # Strongly connected components by Kosaraju's algorithm, each a set of nodes.
+  defp components(edges) do
+    nodes = edges |> Enum.flat_map(fn {a, b} -> [a, b] end) |> Enum.uniq()
+    forward = Enum.group_by(edges, &elem(&1, 0), &elem(&1, 1))
+    backward = Enum.group_by(edges, &elem(&1, 1), &elem(&1, 0))
+
+    {order, _seen} =
+      Enum.reduce(nodes, {[], MapSet.new()}, fn node, {order, seen} ->
+        visit(node, forward, order, seen)
+      end)
+
+    {components, _seen} =
+      Enum.reduce(order, {[], MapSet.new()}, fn node, {components, seen} ->
+        if MapSet.member?(seen, node) do
+          {components, seen}
+        else
+          {component, seen} = collect(node, backward, MapSet.new(), seen)
+          {[component | components], seen}
+        end
+      end)
+
+    {components, edges}
+  end
+
+  defp visit(node, graph, order, seen) do
+    if MapSet.member?(seen, node) do
+      {order, seen}
+    else
+      {order, seen} =
+        graph
+        |> Map.get(node, [])
+        |> Enum.reduce({order, MapSet.put(seen, node)}, fn next, {o, s} ->
+          visit(next, graph, o, s)
+        end)
+
+      {[node | order], seen}
+    end
+  end
+
+  defp collect(node, graph, component, seen) do
+    if MapSet.member?(seen, node) do
+      {component, seen}
+    else
+      graph
+      |> Map.get(node, [])
+      |> Enum.reduce({MapSet.put(component, node), MapSet.put(seen, node)}, fn next, {c, s} ->
+        collect(next, graph, c, s)
+      end)
+    end
+  end
+
+  # The edges between components.
+  defp condensed({components, edges}) do
+    index =
+      components
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {component, i} -> Enum.map(component, &{&1, i}) end)
+      |> Map.new()
+
+    for {a, b} <- edges, x = index[a], y = index[b], x != y, uniq: true, do: {x, y}
   end
 
   # Kahn's algorithm: the graph is acyclic when repeatedly removing nodes with no incoming edge removes every node.

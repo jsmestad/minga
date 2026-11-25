@@ -673,25 +673,102 @@ defmodule Minga.Buffer.Provenance do
 
   A draft is a tombstone a Minga step wrote that a newer step of the same task deleted, both still applied: text the task wrote and then rewrote itself. Returns `{:ok, provenance, {old_group, new_group}, runs_examined}`, or `:none` when there are no drafts.
   """
-  @spec compact_oldest(t()) :: {:ok, t(), {group_id(), group_id()}, pos_integer()} | :none
-  def compact_oldest(%__MODULE__{} = prov) do
-    if :gb_sets.is_empty(prov.drafts) do
-      :none
-    else
-      {old, draft_id} = :gb_sets.smallest(prov.drafts)
-      {:ok, draft, _offset} = RunTree.fetch(prov.tree, draft_id)
-      new = draft_partner(draft, prov.groups)
+  @spec compact_oldest(t(), (group_id() -> [group_id()])) ::
+          {:ok, t(), {group_id(), group_id()}, pos_integer()} | :none
+  def compact_oldest(%__MODULE__{} = prov, class_of \\ &[&1]) when is_function(class_of, 1) do
+    prov.drafts
+    |> :gb_sets.iterator()
+    |> mergeable_draft(prov, class_of, %{})
+    |> case do
+      nil ->
+        :none
 
-      {first, last} =
-        RunTree.stretch(
-          prov.tree,
-          draft_id,
-          &(names?(&1, old, new) and merge_safe?(&1, old, new))
-        )
+      {old, new, draft_id} ->
+        {first, last} =
+          RunTree.stretch(
+            prov.tree,
+            draft_id,
+            &(names?(&1, old, new) and merge_safe?(&1, old, new))
+          )
 
-      {prov, examined} = absorb_stretch(prov, old, new, first, last)
-      {:ok, prov, {old, new}, examined}
+        {prov, examined} = absorb_stretch(prov, old, new, first, last)
+        {:ok, prov, {old, new}, examined}
     end
+  end
+
+  # The oldest draft whose merge `merge_allowed?/3` accepts, each pair checked once.
+  @spec mergeable_draft(
+          :gb_sets.iter(term()),
+          t(),
+          (group_id() -> [group_id()]),
+          %{{group_id(), group_id()} => boolean()}
+        ) :: {group_id(), group_id(), Locator.t()} | nil
+  defp mergeable_draft(iterator, prov, class_of, checked) do
+    case :gb_sets.next(iterator) do
+      :none ->
+        nil
+
+      {{old, draft_id}, rest} ->
+        {:ok, draft, _offset} = RunTree.fetch(prov.tree, draft_id)
+        new = draft_partner(draft, prov.groups)
+
+        allowed =
+          Map.get_lazy(checked, {old, new}, fn ->
+            merge_allowed?(prov, Enum.uniq([old, new | class_of.(old) ++ class_of.(new)]))
+          end)
+
+        if allowed,
+          do: {old, new, draft_id},
+          else: mergeable_draft(rest, prov, class_of, Map.put(checked, {old, new}, false))
+    end
+  end
+
+  # Steps never merge into one class around a group of yours between them that the class touched: one that deleted
+  # or marked the text of a step older than it in the class, or whose text, or text it removed, a newer step in the
+  # class deleted. The class would revert as one, held by your edit while a step in it blocks your undo. `members` is
+  # the class the merge would make, so merges cannot chain around the rule. Only your groups count; they are few and
+  # become final.
+  @spec merge_allowed?(t(), [group_id()]) :: boolean()
+  defp merge_allowed?(prov, members) do
+    {low, high} = Enum.min_max(members)
+
+    not Enum.any?(prov.groups, fn
+      {id, %Group{author: :you} = group} when id > low and id < high ->
+        touched_by_class?(prov, id, group, members)
+
+      _other ->
+        false
+    end)
+  end
+
+  @spec touched_by_class?(t(), group_id(), Group.t(), [group_id()]) :: boolean()
+  defp touched_by_class?(prov, id, group, members) do
+    {lower, upper} = Enum.split_with(members, &(&1 < id))
+
+    marked? =
+      Enum.any?(lower, &(id in Map.get(prov.group_marks, &1, []))) or
+        prov.overlap_runs
+        |> Map.get(id, [])
+        |> Enum.any?(fn run_id ->
+          case RunTree.fetch(prov.tree, run_id) do
+            {:ok, run, _offset} -> Enum.any?(lower, &({&1, id} in run.overlaps))
+            :error -> false
+          end
+        end)
+
+    marked? or
+      group.runs
+      |> :gb_sets.to_list()
+      |> Enum.any?(fn run_id ->
+        case RunTree.fetch(prov.tree, run_id) do
+          {:ok, run, _offset} ->
+            (id in run.deletions and Enum.any?(lower, &(&1 == run.group or &1 in run.deletions))) or
+              Enum.any?(upper, &(&1 in run.deletions))
+
+          :error ->
+            false
+        end
+      end)
   end
 
   @doc """

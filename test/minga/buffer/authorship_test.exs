@@ -33,6 +33,17 @@ defmodule Minga.Buffer.AuthorshipTest do
 
   defp step(task, step), do: EditSource.minga(task, step)
 
+  # Compaction runs in slices the buffer sends itself; wait until none is left.
+  defp settle_compaction(buffer, attempts \\ 10_000)
+  defp settle_compaction(_buffer, 0), do: flunk("compaction never settled")
+
+  defp settle_compaction(buffer, attempts) do
+    case :sys.get_state(buffer) do
+      %{compaction_scheduled: true} -> settle_compaction(buffer, attempts - 1)
+      _idle -> buffer
+    end
+  end
+
   defp minga_replace(buffer, content, source \\ @minga) do
     assert {:ok, _version} =
              BufferProcess.replace_content_if_version(
@@ -385,6 +396,29 @@ defmodule Minga.Buffer.AuthorshipTest do
       assert BufferProcess.content(buffer) == "call(bar)\n"
       assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
       assert BufferProcess.content(buffer) == "call(foo)\n"
+    end
+
+    # The hybrid rule for merge classes: your edit sits between two steps of one task, touched by both. Compaction must
+    # not merge those steps, or the class would be held by your edit while the newer step blocks your undo of it.
+    test "compaction never merges steps of one task around your edit that both touched" do
+      buffer =
+        start_supervised!({BufferProcess, content: "aaa bbb\n", history_run_budget: 1},
+          id: make_ref()
+        )
+
+      minga_replace(buffer, "AAA BBB\n", step("t1", "s1"))
+      replace_at(buffer, {0, 4}, 2, "xy")
+      minga_replace(buffer, "QQQ ZyB\n", step("t1", "s2"))
+      settle_compaction(buffer)
+      %{undo_history: history} = :sys.get_state(buffer)
+      assert Provenance.draft_count(UndoHistory.provenance(history)) > 0
+
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "AAA xyB\n"
+      assert :ok = BufferProcess.undo(buffer)
+      assert BufferProcess.content(buffer) == "AAA BBB\n"
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "aaa bbb\n"
     end
 
     # Round 5 R1, SL1 to SL3: a deletion beside an identical byte takes the other author's copy, in any change list.

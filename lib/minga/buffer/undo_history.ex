@@ -378,7 +378,8 @@ defmodule Minga.Buffer.UndoHistory do
     }
 
     cond do
-      not under_target?(history) and slice.drafts > 0 ->
+      # Drafts the slice could not merge (a merge around an edit of yours is refused) leave nothing more to do.
+      not under_target?(history) and slice.drafts > 0 and merged != [] ->
         {:more, history, slice}
 
       over_budget?(history) and not history.over_budget_reported ->
@@ -401,7 +402,7 @@ defmodule Minga.Buffer.UndoHistory do
     if examined >= max_runs or done?.(history) do
       {history, examined, merged}
     else
-      case Provenance.compact_oldest(history.provenance) do
+      case Provenance.compact_oldest(history.provenance, &merge_class(history.merges, &1)) do
         :none ->
           {history, examined, merged}
 

@@ -871,6 +871,71 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert Document.content(restore.document) == "ab\n"
     end
 
+    # Your edit between two steps of one task, touched by both, then compaction: the merge is refused, no component of
+    # the merged graph holds an edit of yours (the shadow checks after every operation), and SPC a u with u always
+    # finishes.
+    property "your edit between two steps that both touched it never deadlocks SPC a u after compaction" do
+      check all(
+              rounds <-
+                StreamData.list_of(
+                  StreamData.tuple(
+                    {StreamData.integer(0..20), StreamData.integer(1..3),
+                     StreamData.integer(0..2),
+                     StreamData.string([?x..?z], min_length: 1, max_length: 3),
+                     StreamData.string([?A..?C], min_length: 1, max_length: 3),
+                     StreamData.boolean()}
+                  ),
+                  min_length: 1,
+                  max_length: 4
+                ),
+              budget <- StreamData.integer(1..12),
+              max_runs: runs(200)
+            ) do
+        world =
+          Enum.reduce(
+            Enum.with_index(rounds),
+            world("aaa bbb ccc\nddd eee\n", run_budget: budget),
+            fn
+              {{at, width, inside, yours, minga, other_spot?}, n}, world ->
+                size = byte_size(text(world))
+                start = rem(at, max(size - 4, 1))
+
+                world =
+                  edit(
+                    world,
+                    {:minga, "t", "s#{2 * n}"},
+                    start,
+                    min(width + 2, size - start),
+                    "M#{minga}"
+                  )
+
+                mine_at = min(start + 1 + inside, byte_size(text(world)) - 1)
+                world = edit(world, :user, mine_at, 1, yours, at: @t0 + (4 * n + 1) * @window)
+                size = byte_size(text(world))
+                theirs_at = min(mine_at + rem(inside, 2), size - 1)
+                world = edit(world, {:minga, "t", "s#{2 * n + 1}"}, theirs_at, 1, minga)
+
+                world =
+                  if other_spot?,
+                    do:
+                      edit(
+                        world,
+                        {:minga, "t", "s#{2 * n + 1}"},
+                        0,
+                        min(3, byte_size(text(world))),
+                        "QQ"
+                      ),
+                    else: world
+
+                world |> want_compaction() |> compact_fully(5)
+            end
+          )
+
+        {:done, world} = unwind(world)
+        assert text(world) == "aaa bbb ccc\nddd eee\n"
+      end
+    end
+
     # The shrunk history for Addendum 3 item 3: compaction merged a step only across a stretch, and SPC a u used to
     # revert the newer half while the older half stayed applied. A merged class now reverts as one; the shadow checks
     # after every operation that merged steps never differ in applied or final state.
@@ -1042,10 +1107,6 @@ defmodule Minga.Buffer.UndoHistoryTest do
     end
   end
 
-  # Replays what the history did into the never-drop model. Until a compaction merges two steps, the model's text is the
-  # document after every operation.
-  defp shadow(%{shadow: nil} = world), do: world
-
   # Steps a compaction merged never differ in applied or final state: they flip and finalize together, which reading a
   # change's group from its first made run relies on. A step merged and still holding runs of its own is in the class
   # of the step it merged into.
@@ -1071,6 +1132,10 @@ defmodule Minga.Buffer.UndoHistoryTest do
     Process.put(:merged_pairs, Process.get(:merged_pairs, 0) + length(merges))
   end
 
+  # Replays what the history did into the never-drop model. Until a compaction merges two steps, the model's text is the
+  # document after every operation.
+  defp shadow(%{shadow: nil} = world), do: world
+
   defp shadow(world) do
     case Provenance.take_trace(world.history.provenance) do
       {nil, _provenance} ->
@@ -1082,6 +1147,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
         merged = world.shadow.merged or merges != []
         Process.put(:shadow_skips, length(model.skipped))
         assert_merged_steps_move_together(world.history, merges)
+        assert UnitModel.held_components(world.history) == []
 
         unless merged, do: assert(ProvenanceModel.text(model) == text(world))
         Process.put(:shadowed, Process.get(:shadowed, 0) + length(operations))
@@ -1490,7 +1556,14 @@ defmodule Minga.Buffer.UndoHistoryTest do
         compact_fully(world, slice)
       else
         %{run_budget: budget} = history
-        assert result.runs <= div(budget * 3, 4) or result.drafts == 0
+        # Drafts may remain whose merge is refused around an edit of yours; none is left to merge.
+        assert result.runs <= div(budget * 3, 4) or
+                 Provenance.compact_oldest(
+                   history.provenance,
+                   &UndoHistory.merge_class(history, &1)
+                 ) ==
+                   :none
+
         world
       end
     else
