@@ -240,7 +240,10 @@ defmodule MingaEditor.Handlers.EventDispatcher do
       ) do
     case subscribe_to_session(state, handle.pid) do
       :ok ->
-        state = Workflow.ensure_available(state)
+        state =
+          state
+          |> Workflow.ensure_available()
+          |> MingaEditor.Agent.TaskWorkflow.follow_subagent(handle)
 
         {runtime, workspace} =
           Runtime.route_event(
@@ -272,8 +275,13 @@ defmodule MingaEditor.Handlers.EventDispatcher do
         _msg
       ) do
     case handle_agent_session_restarted(state, event) do
-      {:ok, state} -> MingaEditor.schedule_render(state, 16)
-      {:stale, state} -> state
+      {:ok, state} ->
+        state
+        |> MingaEditor.Agent.TaskWorkflow.restarted(event.old_pid, event.new_pid)
+        |> MingaEditor.schedule_render(16)
+
+      {:stale, state} ->
+        state
     end
   end
 
@@ -293,6 +301,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     end
 
     state
+    |> MingaEditor.Agent.TaskWorkflow.stopped(pid)
     |> MingaEditor.Agent.Arrival.retire(pid)
     |> MingaEditor.Agent.QuestionResponse.retire_remote_attachment(pid)
     |> Commands.BufferManagement.handle_agent_session_down(pid, reason)
@@ -466,8 +475,11 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   end
 
   @spec handle_node_disconnected(EditorState.t(), NodeDisconnectedEvent.t()) :: EditorState.t()
-  defp handle_node_disconnected(state, %{server_name: server_name}) do
-    state = MingaEditor.Shell.Workflow.ensure_available(state)
+  defp handle_node_disconnected(state, %{server_name: server_name, node: node}) do
+    state =
+      state
+      |> MingaEditor.Shell.Workflow.ensure_available()
+      |> MingaEditor.Agent.TaskWorkflow.node_disconnected(node)
 
     state =
       %{

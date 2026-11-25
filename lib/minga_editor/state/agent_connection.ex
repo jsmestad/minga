@@ -4,6 +4,8 @@ defmodule MingaEditor.State.AgentConnection do
 
   Provider configuration, the local arrival budget and the session manager that starts local sessions are immutable after startup; the ingest process may be replaced as the editor's supervised agent integration restarts. `route_usage` holds the plan usage contributed model routes last reported.
 
+  `tasks` is every task the editor follows (`MingaEditor.Agent.Tasks`): each session's latest state and open approval, whichever tab shows it.
+
   `arrival_budget_ms` is the time a local Agent tab arrival waits for its Session before it shows the tab as unavailable (`MingaEditor.Agent.Arrival`).
   """
 
@@ -11,6 +13,7 @@ defmodule MingaEditor.State.AgentConnection do
   alias MingaEditor.Agent.Arrival
   alias MingaEditor.Agent.SessionFollowUp
   alias MingaEditor.Agent.SessionStart
+  alias MingaEditor.Agent.Tasks
   alias MingaEditor.State.RouteUsage
 
   @default_arrival_budget_ms 250
@@ -25,7 +28,8 @@ defmodule MingaEditor.State.AgentConnection do
           session_manager: GenServer.server(),
           session_starts: %{reference() => SessionStart.t()},
           session_follow_ups: %{reference() => SessionFollowUp.t()},
-          route_usage: RouteUsage.t()
+          route_usage: RouteUsage.t(),
+          tasks: Tasks.t()
         }
 
   @derive {Inspect, except: [:question_receipts]}
@@ -38,7 +42,8 @@ defmodule MingaEditor.State.AgentConnection do
             session_manager: MingaAgent.SessionManager,
             session_starts: %{},
             session_follow_ups: %{},
-            route_usage: %RouteUsage{}
+            route_usage: %RouteUsage{},
+            tasks: %Tasks{}
 
   @doc "The production local arrival budget in milliseconds."
   @spec default_arrival_budget_ms() :: non_neg_integer()
@@ -111,4 +116,39 @@ defmodule MingaEditor.State.AgentConnection do
   @spec record_route_status(t(), StatusChangedEvent.t()) :: t()
   def record_route_status(%__MODULE__{} = connection, %StatusChangedEvent{} = event),
     do: %{connection | route_usage: RouteUsage.record(connection.route_usage, event)}
+
+  @doc "Applies one session event to the task it belongs to, at wall-clock time `now`."
+  @spec observe_task_event(t(), pid(), term(), integer()) :: t()
+  def observe_task_event(%__MODULE__{} = connection, session, event, now) when is_pid(session),
+    do: %{connection | tasks: Tasks.observe(connection.tasks, session, event, now)}
+
+  @doc "Starts following a session as a task. Options as `MingaEditor.Agent.Tasks.follow/4`."
+  @spec follow_task(t(), pid(), integer(), keyword()) :: t()
+  def follow_task(%__MODULE__{} = connection, session, now, opts \\ []) when is_pid(session),
+    do: %{connection | tasks: Tasks.follow(connection.tasks, session, now, opts)}
+
+  @doc "Names a task by the goal it was given, when it has none yet."
+  @spec name_task(t(), pid(), String.t()) :: t()
+  def name_task(%__MODULE__{} = connection, session, title) when is_pid(session),
+    do: %{connection | tasks: Tasks.name(connection.tasks, session, title)}
+
+  @doc "Carries a task over to the session that replaced its crashed one."
+  @spec replace_task_session(t(), pid(), pid(), integer()) :: t()
+  def replace_task_session(%__MODULE__{} = connection, old, new, now),
+    do: %{connection | tasks: Tasks.replace(connection.tasks, old, new, now)}
+
+  @doc "Stops following every task on a node that disconnected."
+  @spec forget_node_tasks(t(), node()) :: t()
+  def forget_node_tasks(%__MODULE__{} = connection, node),
+    do: %{connection | tasks: Tasks.forget_node(connection.tasks, node)}
+
+  @doc "Stops following a session that ended."
+  @spec forget_task(t(), pid()) :: t()
+  def forget_task(%__MODULE__{} = connection, session),
+    do: %{connection | tasks: Tasks.forget(connection.tasks, session)}
+
+  @doc "Clears a task's approval once its session accepted an answer or said none is pending."
+  @spec resolve_task_approval(t(), pid(), MingaAgent.ToolApproval.Target.t()) :: t()
+  def resolve_task_approval(%__MODULE__{} = connection, session, target),
+    do: %{connection | tasks: Tasks.resolve_approval(connection.tasks, session, target)}
 end

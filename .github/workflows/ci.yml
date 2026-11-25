@@ -69,15 +69,28 @@ jobs:
               "scripts/check_conformance_recovery",
           ]
 
-          # The render benchmarks build and measure native code against generated protocol sources only.
+          # The render benchmarks measure the native render path, so only its inputs select them (#4136): the dispatcher, Metal renderer and shader, protocol decode, fonts, the signposts and scroll-track geometry the renderer calls, the state stores and snapshots the dispatcher commits into (the State+View naming rule), the generated protocol sources, and the benchmark harness, scripts and gate. SwiftUI views, AppKit hosts, app lifecycle, previews and unit tests are compiled into the benchmark tool but never run by it; Swift correctness still builds and tests them on every macOS change.
           SWIFT_PERFORMANCE = ALWAYS + [
-              "macos/**",
+              "macos/project.yml",
+              "macos/Sources/Instrumentation.swift",
+              "macos/Sources/Renderer/**",
+              "macos/Sources/Protocol/**",
+              "macos/Sources/Font/**",
+              "macos/Sources/Views/Editor/EditorScrollTrack.swift",
+              "macos/Sources/Views/Shared/**",
+              "macos/Sources/Views/*State.swift",
+              "macos/Sources/Views/*Snapshot.swift",
+              "macos/Tests/NativePerformance/**",
+              "macos/Tests/Performance/**",
               "docs/protocol_schema.toml",
               "mix/protocol_generator.ex",
+              "mix/tasks/protocol.gen.ex",
               "scripts/install_xcodegen",
               "scripts/bench_render_performance_ab",
               "scripts/check_render_performance",
               "scripts/bench_native_render_performance_ab",
+              "scripts/check_native_render_performance",
+              "scripts/check_native_render_measurement_result",
           ]
 
           # Native release producer and consumer boundaries.
@@ -884,9 +897,15 @@ jobs:
             bash scripts/bench_render_performance_ab --head-only "$HEAD_REF"
           fi
 
+      # Hosted macOS runs this on a paravirtual GPU that other tenants preempt, and the known-old renderer can trap before producing measurements. CI therefore measures HEAD only against the absolute budgets; paired A/B evidence is captured separately on stable same-machine hardware.
+      #
+      # Decision (#4136): two rules keep runner timing noise from failing a pull request. First, the detector's SWIFT_PERFORMANCE list runs this job only when a change can reach the measured render path. Second, when the job does run (a render-path change, or an always-run input such as this workflow), the two wall-clock p95 budgets, gpu_active_time and handoff_to_copy_completion, pass when at least one whole run meets both. Host scheduling only adds time, so one run inside the unchanged 8.33 ms budget shows that the path fits a 120 Hz frame, and a path that is too slow breaches in every run. CPU-time budgets keep the median of the runs. Resource, transcript-accounting and capacity counters fail on any run. When all three runs breach a wall-clock budget and nothing else fails, four confirmation runs follow (about 8 s each) and the gate fails only when all seven breach. Any other failure is final after three runs. A run that crashes or writes no measurement fails at once.
+      #
+      # Recorded hosted variance: 125 jobs, 375 runs, 2026-11-23 to 2026-11-24 (98 pull request, 27 main; macos-15, Apple Paravirtual device), all on ordinary development changes. handoff_to_copy_completion p95 per run: median 4.09 ms, 90th percentile 7.90 ms, maximum 18.94 ms; 26 runs (6.9%) exceeded 8.33 ms. Spread between the fastest and slowest run of one job: median 2.64 ms, 95th percentile 7.53 ms, maximum 13.30 ms. The previous median-of-three verdict failed 4 of the 125 jobs (3.2%): three documentation-only pull requests and #4127. The quietest run of a job: median 3.21 ms, maximum 6.85 ms, so this verdict passes all 125 with at least 1.48 ms of headroom. gpu_active_time p95 behaves the same way: 13 runs exceeded the budget, and the lowest value in a job never exceeded 5.59 ms.
+      #
+      # What the verdict still catches: with a uniform slowdown added to every recorded run, all three runs of a job breach in 106 of the 125 jobs at +6 ms, and at +7 ms every one of the 375 runs breaches (the fastest recorded run is 1.46 ms), so any seven fail. Confirmation runs can clear a three-run breach only when a later run is inside the budget. NativeRenderPerformanceGateTests covers the rule. What it gives up: a tail regression that stays inside the budget in at least one run. The stable-hardware paired comparison owns that case.
       - name: Gate native Metal completion path
         run: |
-          # Hosted macOS GPU scheduling is not a stable baseline environment, and the known-old renderer can trap before producing measurements. CI gates HEAD's absolute budgets; paired A/B evidence is captured separately on stable same-machine hardware.
           HEAD_REF=$(git rev-parse HEAD)
           bash scripts/bench_native_render_performance_ab --head-only "$HEAD_REF"
 

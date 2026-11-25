@@ -1792,8 +1792,17 @@ defmodule MingaEditor do
   end
 
   defp route_agent_event(state, session_pid, event) do
-    route_agent_event(state, session_pid, event, agent_event_owner(state, session_pid))
+    owner = agent_event_owner(state, session_pid)
+    route_agent_event(observe_task(state, session_pid, event, owner), session_pid, event, owner)
   end
+
+  # Every session the editor follows is a task, whichever tab shows it; inline sessions are not.
+  @spec observe_task(EditorState.t(), pid(), term(), atom()) :: EditorState.t()
+  defp observe_task(state, _session_pid, _event, owner) when owner in [:inline_edit, :inline_ask],
+    do: state
+
+  defp observe_task(state, session_pid, event, _owner),
+    do: MingaEditor.Agent.TaskWorkflow.observe(state, session_pid, event)
 
   # Applies a coalesced stream batch (#2289). Mirrors route_agent_event owner
   # routing: the active foreground agent's batch mutates the agent surface once;
@@ -1802,7 +1811,9 @@ defmodule MingaEditor do
   # schedules a render. Ephemeral inline sessions never route through Ingest.
   @spec route_agent_stream_batch(EditorState.t(), pid(), [term()]) :: {:noreply, EditorState.t()}
   defp route_agent_stream_batch(state, session_pid, batch) do
-    route_agent_stream_batch(state, session_pid, batch, agent_event_owner(state, session_pid))
+    owner = agent_event_owner(state, session_pid)
+    state = observe_task(state, session_pid, :output_streamed, owner)
+    route_agent_stream_batch(state, session_pid, batch, owner)
   end
 
   @spec route_agent_stream_batch(EditorState.t(), pid(), [term()], atom()) ::

@@ -5783,6 +5783,10 @@ defmodule MingaAgent.Session do
     |> broadcast({:text_delta, delta})
   end
 
+  # Waiting, not failed: the tasks drawer counts down to the retry.
+  defp handle_provider_event(%Event.RetryScheduled{delay_ms: delay_ms, reason: reason}, state),
+    do: broadcast(state, {:retry_scheduled, delay_ms, reason})
+
   defp handle_provider_event(%Event.ThinkingDelta{delta: delta}, state) do
     state
     |> Map.update!(:transcript, &Transcript.append_stream_tail(&1, :thinking, [delta]))

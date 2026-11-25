@@ -1647,7 +1647,7 @@ exits = [
   { key = "n", click = "deny", to = "terminal.minga_shell" },
   { key = "esc", click = "", to = "terminal.minga_shell", keyboard_only = "esc defers: the request stays pending and needs-you stays lit" },
 ]
-notes = "Open: does esc deny, or leave the request pending?"
+notes = "esc defers: the request stays pending and answerable (settled by #4045)."
 
 [[scenario]]
 id = "terminal.window"

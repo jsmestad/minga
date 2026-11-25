@@ -419,6 +419,109 @@ struct NativeRenderPerformanceGateTests {
         ).contains { $0.contains("handoff_to_copy_completion p95") })
     }
 
+    @Test("hosted verdict passes a noisy triple that the median verdict fails")
+    func hostedVerdictPassesWhenOneRunMeetsBothWallClockBudgets() {
+        // Wall-clock p95 values recorded by one hosted CI job on unchanged renderer code.
+        let recorded = [
+            measurement(gpuP95: 6.51, completionWallP95: 9.52),
+            measurement(gpuP95: 6.74, completionWallP95: 8.61),
+            measurement(gpuP95: 3.87, completionWallP95: 5.11)
+        ]
+
+        #expect(NativeRenderPerformanceGate.absoluteFailures(measurements: recorded)
+            .contains { $0.contains("handoff_to_copy_completion p95 8.61ms") })
+        #expect(NativeRenderPerformanceGate.hostedVerdict(measurements: recorded) == .passed)
+        #expect(NativeRenderPerformanceGate.quietestRun(recorded) == recorded[2])
+    }
+
+    @Test("hosted verdict fails a completion path that is slow in every run", arguments: [3, 7])
+    func hostedVerdictFailsWhenEveryRunBreaches(runCount: Int) {
+        let slowed = (0..<runCount).map { run in
+            measurement(gpuP95: 8.5 + Double(run), completionWallP95: 9.4 + Double(run))
+        }
+        let verdict = NativeRenderPerformanceGate.hostedVerdict(measurements: slowed.reversed())
+
+        #expect(verdict == .wallClockBreach([
+            "gpu_active_time p95 8.50ms exceeds 8.33ms",
+            "handoff_to_copy_completion p95 9.40ms exceeds 8.33ms"
+        ]))
+    }
+
+    @Test("hosted verdict needs one whole run within both wall-clock budgets")
+    func hostedVerdictRejectsPerMetricMinima() {
+        let gpuBreach = measurement(gpuP95: 8.34, completionWallP95: 8.0)
+        let completionBreach = measurement(gpuP95: 4.0, completionWallP95: 8.34)
+        let verdict = NativeRenderPerformanceGate.hostedVerdict(
+            measurements: [gpuBreach, completionBreach, completionBreach]
+        )
+
+        #expect(verdict == .wallClockBreach(["gpu_active_time p95 8.34ms exceeds 8.33ms"]))
+    }
+
+    @Test("hosted verdict keeps CPU budgets on the median")
+    func hostedVerdictKeepsCPUBudgetsOnTheMedian() {
+        let passing = measurement()
+        let cpuOutlier = measurement(freezeP95: 5, drawP95: 20, drawP99: 20)
+
+        #expect(NativeRenderPerformanceGate.hostedVerdict(
+            measurements: [passing, passing, cpuOutlier]
+        ) == .passed)
+        let verdict = NativeRenderPerformanceGate.hostedVerdict(
+            measurements: [passing, cpuOutlier, cpuOutlier]
+        )
+        #expect(verdict.failures.contains { $0.contains("freeze_publication p95") })
+        #expect(verdict.failures.contains { $0.contains("draw_cpu p95") })
+        #expect(verdict.failures.contains { $0.contains("draw_cpu p99") })
+    }
+
+    @Test("only a breach confined to the wall-clock budgets is open to confirmation runs")
+    func hostedVerdictSeparatesConfirmableBreachesFromFinalFailures() {
+        let slow = measurement(gpuP95: 9, completionWallP95: 10)
+        let slowWithCPUBreach = measurement(drawP95: 20, gpuP95: 9, completionWallP95: 10)
+        let slowWithAllocation = measurement(gpuP95: 9, completionWallP95: 10, allocations: 1)
+
+        guard case .wallClockBreach = NativeRenderPerformanceGate.hostedVerdict(
+            measurements: [slow, slow, slow]
+        ) else {
+            Issue.record("a breach in every run with nothing else wrong must be confirmable")
+            return
+        }
+        for sample in [slowWithCPUBreach, slowWithAllocation] {
+            guard case .failed(let failures) = NativeRenderPerformanceGate.hostedVerdict(
+                measurements: [sample, sample, sample]
+            ) else {
+                Issue.record("a CPU or counter failure must be final")
+                continue
+            }
+            #expect(failures.contains { $0.contains("handoff_to_copy_completion p95") })
+        }
+    }
+
+    @Test("hosted verdict keeps counters and sample validation fail-closed")
+    func hostedVerdictKeepsCountersAndValidationFailClosed() {
+        let passing = measurement()
+        let resourceFailure = measurement(allocatedBytes: 1, allocations: 1, dropped: 1, generations: 4)
+        let verdict = NativeRenderPerformanceGate.hostedVerdict(
+            measurements: [passing, passing, resourceFailure]
+        )
+        let failures = verdict.failures
+
+        #expect(verdict == .failed(failures))
+        #expect(failures.contains { $0.contains("allocated up to 1 bytes") })
+        #expect(failures.contains { $0.contains("1 native allocations") })
+        #expect(failures.contains { $0.contains("failed or discarded 1 frames") })
+        #expect(failures.contains { $0.contains("retained 4 generations") })
+        #expect(NativeRenderPerformanceGate.hostedVerdict(
+            measurements: [passing, passing]
+        ) == .failed(["native absolute comparison requires an odd count of at least three"]))
+        #expect(NativeRenderPerformanceGate.hostedVerdict(
+            measurements: [passing, passing, measurement(attempted: 999)]
+        ) == .failed(["invalid native measurement"]))
+        #expect(NativeRenderPerformanceGate.hostedVerdict(
+            measurements: [passing, passing, measurement(capacityRecovery: [capacityMeasurement(refreshRateHz: 60)])]
+        ) == .failed(["native capacity recovery must measure exactly 60 Hz and 120 Hz"]))
+    }
+
     @Test("absolute comparison keeps resource failures fail-closed")
     func absoluteComparisonKeepsResourceFailuresFailClosed() {
         let passing = measurement()

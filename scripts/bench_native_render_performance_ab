@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Run the complete native Metal renderer on alternating same-runner base/HEAD pairs.
+#
+# --head-only is the shared-runner mode CI uses. It measures HEAD three times and asks the gate for its hosted verdict: the two wall-clock p95 budgets pass when at least one whole run meets both, because host scheduling can delay a run but cannot make the path faster. When all three runs breach a wall-clock budget and nothing else fails, four confirmation runs follow and the same verdict covers all seven. Any other failure is final after three runs. See the "Gate native Metal completion path" step in .github/workflows/ci.yml for the recorded hosted-runner variance behind this rule.
 set -uo pipefail
 
 repo_root=$(git rev-parse --show-toplevel) || exit 2
@@ -84,7 +86,7 @@ measure_revision() {
     return "$result_status"
   fi
   if (( status != 0 )); then
-    echo "Native measurement recorded a budget breach; deferring the decision to the fixed-sample aggregate" | tee -a "$metrics_file"
+    echo "Native measurement recorded a budget breach; deferring the decision to the verdict over all runs" | tee -a "$metrics_file"
   fi
   echo "::endgroup::"
   [[ -s "$output" ]] || return 1
@@ -97,14 +99,14 @@ measure_revision() {
 }
 
 run_head_measurements() {
-  local sample
-  for sample in 1 2 3; do
+  local first_sample=$1 count=$2 sample
+  for ((sample = first_sample; sample < first_sample + count; sample++)); do
     measure_revision head "$sample" "$head_source" "$head_build" || return 1
   done
 }
 
 compare_head_measurements() {
-  local args=() path
+  local args=(--hosted) path
   for path in "${head_runs[@]}"; do args+=(--head "$path"); done
   MINGA_NATIVE_RENDER_ROOT="$head_source" "$runner" --compare "$head_build" "${args[@]}" 2>&1 | tee -a "$metrics_file"
 }
@@ -135,7 +137,14 @@ if ! build_revision "$head_sha" head "$head_source" "$head_build" "MINGA_SNAPSHO
 fi
 
 if (( head_only )); then
-  run_head_measurements || exit 1
+  # A run that crashes or writes no measurement fails here and is never retried.
+  run_head_measurements 1 3 || exit 1
+  compare_head_measurements
+  verdict=$?
+  # Status 3 means only wall-clock budgets breached, in every run. A CPU budget, a counter, or a broken comparison tool is final: more runs cannot clear it.
+  (( verdict == 3 )) || exit "$verdict"
+  echo "All three hosted runs breached a wall-clock budget; collecting four confirmation runs." | tee -a "$metrics_file"
+  run_head_measurements 4 4 || exit 1
   compare_head_measurements
   exit $?
 fi

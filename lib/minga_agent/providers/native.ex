@@ -1806,6 +1806,8 @@ defmodule MingaAgent.Providers.Native do
         delta:
           "\n⏳ #{reason} — retrying in #{delay_s}s (attempt #{attempt}/#{lctx.max_retries})...\n"
       })
+
+      emit(lctx, %Event.RetryScheduled{attempt: attempt, delay_ms: delay_ms, reason: reason})
     end
 
     result =
