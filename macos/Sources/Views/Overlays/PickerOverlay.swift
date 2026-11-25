@@ -174,7 +174,7 @@ public struct PickerOverlay: View {
             if state.empty != nil {
                 Text(state.listKeys ? "j k move   ↩ run   q close" : "⌃J ⌃K move   ↩ run   esc close")
                     .font(Typography.font(.small))
-                    .foregroundStyle(theme.popupFg.opacity(0.5))
+                    .foregroundStyle(theme.popupSecondaryFg)
                     .lineLimit(1)
                     .fixedSize()
                     .anatomyPart("picker.hints", text: "move run close", font: .small)
@@ -240,7 +240,7 @@ public struct PickerOverlay: View {
             }
 
             if let empty = state.empty {
-                EmptyListHeader(empty: empty, textColor: theme.popupFg, mutedColor: theme.popupFg.opacity(0.6))
+                EmptyListHeader(empty: empty, textColor: theme.popupFg, mutedColor: theme.popupSecondaryFg)
                     .padding(.leading, Self.rowTextLeading)
                     .padding(.trailing, Spacing.md)
                     .padding(.top, EmptyStateMetrics.inset)
