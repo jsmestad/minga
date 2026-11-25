@@ -11,7 +11,6 @@ defmodule MingaEditor.AgentLifecycle do
 
   alias MingaAgent.Checklist
   alias MingaEditor.Agent.Activity
-  alias MingaEditor.Agent.ConnectionAction
   alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.MarkdownHighlight
   alias MingaEditor.Agent.Transcript
@@ -20,7 +19,6 @@ defmodule MingaEditor.AgentLifecycle do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Session, as: AgentSession
   alias MingaAgent.Session.ConnectionSnapshot
-  alias MingaAgent.Session.ConnectionTarget
   alias MingaAgent.Session.Transcript.{Changes, Cursor, Entry, Snapshot}
   alias MingaAgent.TranscriptEntry
   alias MingaEditor.Agent.UIState
@@ -231,45 +229,12 @@ defmodule MingaEditor.AgentLifecycle do
     end
   end
 
+  # A local Session answers in the Editor's mailbox; the Editor never waits on it
+  # (`MingaEditor.Agent.TranscriptSync`).
   @spec sync_session_transcript(state(), pid(), :refresh | :messages_changed) :: state()
   defp sync_session_transcript(state, session, _trigger)
-       when is_pid(session) and node(session) == node() do
-    projection = state.workspace.agent_ui.panel.transcript
-
-    # minga:allow-blocking — Editor, incremental sync per stream batch and tab switch (#3611, #3613)
-    case AgentSession.transcript_since(session, projection.source_cursor || :snapshot) do
-      {:unchanged, cursor} ->
-        reuse_transcript(state, cursor)
-
-      {:changes, %Changes{entries: [], pin_changes: [], cursor: cursor}} ->
-        reuse_transcript(state, cursor)
-
-      {:changes, %Changes{} = changes} ->
-        install_transcript_changes(state, changes, 1)
-
-      {:snapshot, snapshot} ->
-        state
-        |> recover_changed_files(session)
-        |> install_transcript_snapshot(snapshot, :changed)
-
-      {:reset, _reason, snapshot} ->
-        state
-        |> recover_changed_files(session)
-        |> install_transcript_snapshot(snapshot, :reset)
-
-      {:error, :invalid_cursor} ->
-        Minga.Log.warning(
-          :agent,
-          "Agent transcript cursor was invalid; reading an atomic snapshot."
-        )
-
-        # minga:allow-blocking — Editor, atomic snapshot fallback inside the incremental sync after an invalid cursor
-        {:snapshot, snapshot} = AgentSession.transcript_since(session, :snapshot)
-        install_transcript_snapshot(state, snapshot, :reset, 2)
-    end
-  catch
-    :exit, _ -> state
-  end
+       when is_pid(session) and node(session) == node(),
+       do: MingaEditor.Agent.TranscriptSync.request(state, session)
 
   defp sync_session_transcript(state, session, trigger) when is_pid(session) do
     case {safe_session_messages(session), trigger} do
@@ -294,31 +259,27 @@ defmodule MingaEditor.AgentLifecycle do
     |> apply_arrival_transcript(transcript)
   end
 
-  @spec apply_arrival_transcript(state(), AgentSession.editor_arrival_transcript()) :: state()
-  defp apply_arrival_transcript(state, {:unchanged, cursor}) do
-    reuse_transcript(state, cursor, 2)
+  @doc "Installs one transcript read the active local Session answered (`MingaEditor.Agent.TranscriptSync`)."
+  @spec install_transcript_reply(state(), AgentSession.editor_arrival_transcript()) :: state()
+  def install_transcript_reply(state, transcript),
+    do: apply_arrival_transcript(state, transcript, 1)
+
+  @spec apply_arrival_transcript(state(), AgentSession.editor_arrival_transcript(), pos_integer()) ::
+          state()
+  defp apply_arrival_transcript(state, transcript, session_calls \\ 2)
+
+  defp apply_arrival_transcript(state, {:unchanged, cursor}, session_calls) do
+    reuse_transcript(state, cursor, session_calls)
   end
 
-  defp apply_arrival_transcript(state, {:changes, changes}) do
-    install_transcript_changes(state, changes, 2)
+  defp apply_arrival_transcript(state, {:changes, changes}, session_calls) do
+    install_transcript_changes(state, changes, session_calls)
   end
 
-  defp apply_arrival_transcript(state, {:replace, outcome, snapshot, files}) do
+  defp apply_arrival_transcript(state, {:replace, outcome, snapshot, files}, session_calls) do
     state
     |> apply_changed_file_counts(files)
-    |> install_transcript_snapshot(snapshot, outcome, 2)
-  end
-
-  @spec recover_changed_files(state(), pid()) :: state()
-  defp recover_changed_files(state, session) do
-    with {:ok, _tab, %{target: %ConnectionTarget{session: ^session} = target}} <-
-           ConnectionAction.origin(state),
-         # minga:allow-blocking — Editor, only after a transcript snapshot or reset; recovers changed-file counts once
-         {:ok, files} <- AgentSession.changed_file_counts(target) do
-      apply_changed_file_counts(state, files)
-    else
-      _unavailable -> state
-    end
+    |> install_transcript_snapshot(snapshot, outcome, session_calls)
   end
 
   @spec apply_changed_file_counts(state(), %{String.t() => pos_integer()} | nil) :: state()
@@ -333,7 +294,7 @@ defmodule MingaEditor.AgentLifecycle do
 
   @spec install_transcript_snapshot(state(), Snapshot.t(), :changed | :reset, pos_integer()) ::
           state()
-  defp install_transcript_snapshot(state, snapshot, outcome, session_calls \\ 1) do
+  defp install_transcript_snapshot(state, snapshot, outcome, session_calls) do
     projection = state.workspace.agent_ui.panel.transcript
 
     projection =
@@ -386,7 +347,7 @@ defmodule MingaEditor.AgentLifecycle do
   end
 
   @spec reuse_transcript(state(), Cursor.t(), pos_integer()) :: state()
-  defp reuse_transcript(state, cursor, calls \\ 1) do
+  defp reuse_transcript(state, cursor, calls) do
     projection =
       state.workspace.agent_ui.panel.transcript
       |> TranscriptProjection.prepare(presentation_context(state))

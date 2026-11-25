@@ -430,6 +430,16 @@ defmodule MingaAgent.Session do
     :gen_server.send_request(session, :editor_snapshot)
   end
 
+  @doc """
+  Starts a read of the transcript changes since `cursor` without blocking the caller.
+
+  The reply has the arrival transcript's shape: a replacement carries the changed-file counts, and an invalid cursor answers with a reset snapshot, so one read is always enough.
+  """
+  @spec request_editor_transcript(pid(), :snapshot | Transcript.Cursor.t()) ::
+          :gen_server.request_id()
+  def request_editor_transcript(session, cursor) when is_pid(session) and node(session) == node(),
+    do: :gen_server.send_request(session, {:editor_transcript, cursor})
+
   @doc "Requests the final local arrival snapshot in the subscriber's Session event order."
   @spec request_editor_arrival(pid(), :snapshot | Transcript.Cursor.t(), pid(), reference()) ::
           :gen_server.request_id()
@@ -1964,6 +1974,10 @@ defmodule MingaAgent.Session do
 
   def handle_call({:transcript_since, cursor}, _from, state) do
     {:reply, Transcript.since(state.transcript, cursor), state}
+  end
+
+  def handle_call({:editor_transcript, cursor}, _from, state) do
+    {:reply, editor_arrival_transcript(state.transcript, state.file_changes, cursor), state}
   end
 
   def handle_call({:editor_arrival, cursor, subscriber, arrival}, _from, state)

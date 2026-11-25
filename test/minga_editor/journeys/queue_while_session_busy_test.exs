@@ -12,6 +12,7 @@ defmodule MingaEditor.Journeys.QueueWhileSessionBusyTest do
   alias Minga.Config.Options
   alias Minga.Project
   alias Minga.Project.Root
+  alias Minga.Test.TranscriptFixture
   alias MingaAgent.FileMention
   alias MingaAgent.Session
   alias MingaEditor.Agent.UIState
@@ -168,6 +169,56 @@ defmodule MingaEditor.Journeys.QueueWhileSessionBusyTest do
       refute_received {:trace, ^editor, :call, {^module, ^function, _args}},
                       "the Editor called #{inspect(module)}.#{function} while a key was pressed"
     end
+  end
+
+  test "stream batches and message changes never wait on a busy Session, and the transcript catches up",
+       %{editor_ctx: ctx, session: session} do
+    :ok = Session.send_prompt(session, "start")
+    await_working(ctx)
+    editor = ctx.editor
+    traced = [{Session, :transcript_since, :_}, {Session, :messages, :_}]
+
+    :erlang.trace(editor, true, [:call, {:tracer, self()}])
+    for mfa <- traced, do: :erlang.trace_pattern(mfa, true, [:local])
+
+    on_exit(fn ->
+      for mfa <- traced, do: :erlang.trace_pattern(mfa, false, [:local])
+    end)
+
+    :ok = :sys.suspend(session)
+
+    {elapsed, _state} =
+      :timer.tc(fn ->
+        for _ <- 1..3, do: send(editor, {:agent_stream_batch, session, [{:text_delta, "more"}]})
+        send(editor, {:agent_event, session, :messages_changed})
+        # A Session call would hold the Editor for its 5 s timeout; this answers first.
+        :sys.get_state(editor, 2 * div(@press_budget_us, 1000))
+      end)
+
+    :ok = :sys.resume(session)
+    :erlang.trace(editor, false, [:call])
+
+    assert elapsed < @press_budget_us,
+           "the Editor waited #{div(elapsed, 1000)} ms on the Session for stream events"
+
+    for {module, function, _arity} <- traced do
+      refute_received {:trace, ^editor, :call, {^module, ^function, _args}},
+                      "the Editor called #{inspect(module)}.#{function} for a stream event"
+    end
+
+    Session.add_system_message(session, "Last word")
+    send(editor, {:agent_event, session, :messages_changed})
+
+    wait_until(
+      ctx,
+      fn state ->
+        TranscriptFixture.messages(state.workspace.agent_ui.panel.transcript) ==
+          Session.messages(session)
+      end,
+      max_attempts: 500,
+      interval_ms: 20,
+      message: "expected the Editor's transcript to match the Session's"
+    )
   end
 
   test "a file that cannot be read stops its press and every press behind it; all the text stays",
