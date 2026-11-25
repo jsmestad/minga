@@ -46,6 +46,11 @@ defmodule MingaEditor.Shell.Traditional.Workflow do
   def install_agent_spinner_stop(%EditorState{} = state),
     do: transition_agent(state, &AgentState.stop_spinner_timer/1)
 
+  @doc "Keeps the agent presentation cache bound to a conversation whose Session was replaced."
+  @spec install_agent_session_replaced(EditorState.t(), pid(), pid()) :: EditorState.t()
+  def install_agent_session_replaced(%EditorState{} = state, old, new),
+    do: transition_agent(state, &AgentState.session_replaced(&1, old, new))
+
   @doc "Resets active agent presentation cache."
   @spec install_agent_cache_reset(EditorState.t()) :: EditorState.t()
   def install_agent_cache_reset(%EditorState{} = state),

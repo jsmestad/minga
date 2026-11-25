@@ -19,12 +19,18 @@ defmodule Minga.Mode.Search do
 
   @behaviour Minga.Mode
 
+  import Bitwise
+
   alias Minga.Mode
   alias Minga.Mode.SearchState
 
   # Special codepoints
   @escape 27
   @enter 13
+
+  # Enter held with Control, Alt or Command is not bound here, so it does nothing. Without enhanced key reporting a
+  # terminal sends Esc then Enter as Alt+Enter when both arrive together, and that must not submit what was dropped.
+  @chord_mods 0x0E
 
   # Arrow key codepoints (ignore in search mode)
   @arrow_up 57_352
@@ -41,7 +47,8 @@ defmodule Minga.Mode.Search do
   @spec handle_key(Mode.key(), SearchState.t()) :: Mode.result()
 
   # Enter → confirm the search and return to Normal
-  def handle_key({@enter, _mods}, %SearchState{input: input} = state) do
+  def handle_key({@enter, mods}, %SearchState{input: input} = state)
+      when band(mods, @chord_mods) == 0 do
     if input == "" do
       {:transition, :normal, %{state | input: ""}}
     else

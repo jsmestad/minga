@@ -19,14 +19,15 @@ defmodule MingaEditor.LspActions.CodeActionTest do
       assert state.shell_runtime.state.notice.message == "Code action request failed"
     end
 
-    test "nil result sets status message" do
-      state = LspActions.handle_code_action_response(stub_state(), {:ok, nil})
-      assert state.shell_runtime.state.notice.message == "No code actions available"
-    end
+    test "no code actions answer in the echo line and name the next step, opening nothing" do
+      for result <- [nil, []] do
+        state = LspActions.handle_code_action_response(stub_state(), {:ok, result})
+        notice = state.shell_runtime.state.notice
 
-    test "empty list sets status message" do
-      state = LspActions.handle_code_action_response(stub_state(), {:ok, []})
-      assert state.shell_runtime.state.notice.message == "No code actions available"
+        assert notice.message == "No code actions here"
+        assert [%{id: "inline_ask", key: "SPC a ?", label: "ask Minga"}] = notice.actions
+        assert state.shell_runtime.state.modal == :none
+      end
     end
 
     test "actions with non-empty list opens picker" do

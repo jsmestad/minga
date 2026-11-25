@@ -34,6 +34,14 @@ defmodule Minga.Protocol.Encode do
   def encode_terminal_feature_status(:fallback), do: 4
   def encode_terminal_feature_status(_), do: 0
 
+  @spec encode_terminal_feature_source(atom()) :: non_neg_integer()
+  def encode_terminal_feature_source(:unsettled), do: 0
+  def encode_terminal_feature_source(:answered), do: 1
+  def encode_terminal_feature_source(:known_terminal), do: 2
+  def encode_terminal_feature_source(:timeout), do: 3
+  def encode_terminal_feature_source(:user), do: 4
+  def encode_terminal_feature_source(_), do: 0
+
   @spec encode_agent_approval_decision(atom()) :: non_neg_integer()
   def encode_agent_approval_decision(:unknown), do: 0
   def encode_agent_approval_decision(:approve), do: 1
@@ -455,16 +463,44 @@ defmodule Minga.Protocol.Encode do
     ]
   end
 
-  @spec encode_which_key_binding(map()) :: iodata()
-  def encode_which_key_binding(model), do: encode_which_key_binding(model, :which_key_binding, [])
+  @spec encode_which_key_crumb(map()) :: iodata()
+  def encode_which_key_crumb(model), do: encode_which_key_crumb(model, :which_key_crumb, [])
 
-  @spec encode_which_key_binding(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
-  defp encode_which_key_binding(model, command, path) do
+  @spec encode_which_key_crumb(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_which_key_crumb(model, command, path) do
+    [
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:key | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :key)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:label | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :label)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:path | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :path)),
+    ]
+  end
+
+  @spec encode_which_key_hint(map()) :: iodata()
+  def encode_which_key_hint(model), do: encode_which_key_hint(model, :which_key_hint, [])
+
+  @spec encode_which_key_hint(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_which_key_hint(model, command, path) do
+    [
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:key | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :key)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:label | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :label)),
+    ]
+  end
+
+  @spec encode_which_key_entry(map()) :: iodata()
+  def encode_which_key_entry(model), do: encode_which_key_entry(model, :which_key_entry, [])
+
+  @spec encode_which_key_entry(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_which_key_entry(model, command, path) do
     [
       (fn value -> validate_uint!(command, [:kind | path], value, 255); <<value::8>> end).(Map.fetch!(model, :kind)),
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:key | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :key)),
-      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:desc | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :desc)),
-      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:icon | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :icon)),
+      (fn value -> validate_uint!(command, [:codepoint | path], value, 4294967295); <<value::32>> end).(Map.fetch!(model, :codepoint)),
+      (fn value -> validate_uint!(command, [:modifiers | path], value, 255); <<value::8>> end).(Map.fetch!(model, :modifiers)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:label | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :label)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:section | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :section)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:count | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :count)),
+      (fn value -> validate_uint!(command, [:count_tone | path], value, 255); <<value::8>> end).(Map.fetch!(model, :count_tone)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:platform_key | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :platform_key)),
     ]
   end
 
@@ -884,6 +920,16 @@ defmodule Minga.Protocol.Encode do
       (fn value -> validate_uint!(command, [:generation | path], value, 4294967295); <<value::32>> end).(Map.fetch!(model, :generation)),
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:item_id | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :item_id)),
     ]
+  end
+
+  @spec encode_gui_status_bar_message_actions([term()]) :: iodata()
+  def encode_gui_status_bar_message_actions(items) when is_list(items), do: encode_gui_status_bar_message_actions(items, :gui_status_bar, [:message_actions])
+
+  @spec encode_gui_status_bar_message_actions([term()], atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_gui_status_bar_message_actions(items, command, path) when is_list(items) do
+    count = Enum.count(items)
+    validate_uint!(command, path, count, 255)
+    [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_empty_list_action(value, command, [index | path]) end)]
   end
 
   @spec encode_gui_gutter_window(map()) :: iodata()
@@ -1365,6 +1411,7 @@ defmodule Minga.Protocol.Encode do
       (fn value -> validate_uint!(command, [:terminal_collapsed | path], value, 255); <<value::8>> end).(Map.fetch!(model, :terminal_collapsed)),
       (fn value -> validate_uint!(command, [:panel_id | path], value, 18446744073709551615); <<value::64>> end).(Map.fetch!(model, :panel_id)),
       (fn value -> validate_uint!(command, [:commit_target_id | path], value, 18446744073709551615); <<value::64>> end).(Map.fetch!(model, :commit_target_id)),
+      encode_empty_list(Map.fetch!(model, :empty), command, [:empty | path]),
     ]
   end
 

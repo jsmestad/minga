@@ -47,6 +47,16 @@ defmodule MingaEditor.GitStatus.TUIState do
     %{tui | cursor_index: max(next_idx, 0)}
   end
 
+  @doc "Puts the cursor on the first row, such as a clean tree's first next step."
+  @spec first_row(t()) :: t()
+  def first_row(%__MODULE__{} = tui), do: %{tui | cursor_index: 0}
+
+  @doc "Moves the cursor `delta` rows from row `from` within `count` rows, such as a clean tree's next steps, which are not entries."
+  @spec move_within(t(), non_neg_integer(), integer(), pos_integer()) :: t()
+  def move_within(%__MODULE__{} = tui, from, delta, count)
+      when is_integer(from) and from >= 0 and is_integer(delta) and count > 0,
+      do: %{tui | cursor_index: (from + delta) |> max(0) |> min(count - 1)}
+
   @doc "Moves the cursor to the previous visible row."
   @spec prev(t()) :: t()
   def prev(%__MODULE__{} = tui) do

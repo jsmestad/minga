@@ -155,7 +155,7 @@ One panel anchored above the modeline.
 | Key to label | `md` | 8 pt, in a fixed key column | 1 column, in a fixed key column |
 | Label to ⌘ equivalent or count | `md` | 8 pt | 1 column |
 
-Keys use `Typography.monospacedSmall` in the accent colour; leaves use `body`; groups use `body` in the group role with a trailing `›`; group names above columns use `caption` in the secondary colour; counts use `caption`. Each column is as wide as its longest entry, and the panel is as tall as its longest group plus the breadcrumb.
+Keys use `Typography.monospacedSmall` in the accent colour; leaves use `body`; groups use `body` in the group role with a trailing `›`; group names above columns use `caption` in the secondary colour; counts and ⌘ equivalents use `caption` in the secondary colour. Each column is as wide as its longest entry, and the panel is as tall as its longest group plus the breadcrumb. The panel's own keys (`⌫ back`, `esc close`) sit at the trailing end of the breadcrumb row on macOS and in the bottom border in the TUI. A group taller than the window allows continues in a further column, filled top to bottom; in the TUI, columns that do not fit side by side wrap onto a second band under their own group names, and labels truncate with `…` only when even that does not fit.
 
 ## Modeline segments
 
@@ -212,7 +212,7 @@ Notices live in the echo line, not in floating toasts, on both frontends. A noti
 | Action to action | `md` around a `·` | 8 pt each side | 1 column each side |
 | Key to its action word | `xs` | 4 pt | 1 column |
 
-The message uses `body`; keys use `Typography.monospacedSmall` in the accent colour; action words use `body` in the secondary colour.
+The message uses `body`; keys use `Typography.monospacedSmall` in the accent colour; action words use `body` in the chrome text colour (78% on macOS), because the next step is what the notice is for. Only the `·` separators are muted. A notice with next steps may take up to three quarters of the modeline, so droppable segments give way to it. When the echo line is still too narrow, the message stays whole and the steps drop their words and keep their keys ("No matches for “x” in this buffer · SPC s p"); only a message that cannot fit on its own is cut, ending in `…`.
 
 ## Hover popover
 

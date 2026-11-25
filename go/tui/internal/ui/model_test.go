@@ -201,7 +201,7 @@ func TestFloatingPickerRendersOverEditorWithAuthoredHiddenMinibuffer(t *testing.
 			Complete: protocol.Completion{Visible: true, Items: []protocol.CompletionItem{{Label: "Enum.map"}}},
 		},
 		generated.OPGuiWhichKey: {
-			Which: protocol.WhichKey{Visible: true, Prefix: "SPC", Bindings: []protocol.WhichKeyBinding{{Key: "f", Description: "file"}}},
+			Which: protocol.WhichKey{Visible: true, Path: "SPC", Entries: []generated.WhichKeyEntry{{Key: "f", Label: "file"}}},
 		},
 		generated.OPGuiPicker: {
 			Picker: protocol.Picker{Visible: true, Title: "Files", Query: "main", Items: []protocol.PickerItem{{Label: "main.ex"}}},
@@ -249,110 +249,6 @@ func TestViewCarriesFullWindowBackgroundColor(t *testing.T) {
 	}
 	if lines := strings.Split(ansi.Strip(view.Content), "\n"); len(lines) < model.height {
 		t.Fatalf("view should cover full terminal height, got %d lines for height %d: %+v", len(lines), model.height, lines)
-	}
-}
-
-func TestWhichKeyRendersCompactFloatingPopup(t *testing.T) {
-	model := New(80, 24, nil)
-	model.chrome = map[byte]protocol.ChromePayload{
-		generated.OPGuiWhichKey: {
-			Which: protocol.WhichKey{Visible: true, Prefix: "SPC", Page: 0, PageCount: 2, Bindings: []protocol.WhichKeyBinding{{Key: "/", Description: "Search project"}, {Key: "1", Description: "Tab 1"}, {Key: "2", Description: "Tab 2"}}},
-		},
-	}
-
-	footer := strings.Join(model.footerLines(), "\n")
-	if strings.Contains(footer, "Search project") || strings.Contains(footer, "Tab 1") {
-		t.Fatalf("footer should stay a status bar while which-key floats: %q", footer)
-	}
-
-	view := ansi.Strip(model.View().Content)
-	if !strings.Contains(view, "Keys SPC") || !strings.Contains(view, "1/2") || !strings.Contains(view, "/    Search project") || !strings.Contains(view, "1   󰓩 Tab 1") {
-		t.Fatalf("which-key popup should render structured key/description rows: %q", view)
-	}
-	if !strings.Contains(view, "3 bindings") || !strings.Contains(view, "Esc") {
-		t.Fatalf("which-key popup should include a compact footer: %q", view)
-	}
-}
-
-func TestWhichKeyStylesGroupsAndLimitsColumnCount(t *testing.T) {
-	model := New(160, 24, nil)
-	bindings := []protocol.WhichKeyBinding{
-		{Kind: whichKeyKindGroup, Key: "f", Description: "Files ›"},
-		{Kind: whichKeyKindGroup, Key: "g", Description: "Git ›"},
-		{Kind: whichKeyKindGroup, Key: "b", Description: "Buffers ›"},
-		{Key: "s", Description: "Search project"},
-		{Key: "1", Description: "Tab 1"},
-		{Key: "2", Description: "Tab 2"},
-		{Key: "3", Description: "Tab 3"},
-		{Key: "4", Description: "Tab 4"},
-		{Key: "5", Description: "Tab 5"},
-	}
-	popup := ansi.Strip(model.renderFloatingWhichKey(protocol.WhichKey{Visible: true, Prefix: "SPC", Bindings: bindings}))
-	if !strings.Contains(popup, "Files ›") || !strings.Contains(popup, "Git ›") {
-		t.Fatalf("group entries should render the model's label verbatim: %q", popup)
-	}
-	if strings.Contains(popup, "› Files") || strings.Contains(popup, "› ›") || strings.Contains(popup, "+") {
-		t.Fatalf("the TUI must not invent group decoration the model does not send: %q", popup)
-	}
-	firstBindingRow := ""
-	for _, line := range strings.Split(popup, "\n") {
-		if strings.Contains(line, "Files") {
-			firstBindingRow = line
-			break
-		}
-	}
-	if count := strings.Count(firstBindingRow, "│"); count > 4 {
-		t.Fatalf("which-key should use at most three columns, got row %q", firstBindingRow)
-	}
-}
-
-func TestWhichKeyGroupsUseTheGroupColourRoleByKind(t *testing.T) {
-	model := New(120, 24, nil)
-	model.activePalette = paletteFromTheme(protocol.Theme{Colors: map[byte]uint32{byte(generated.ColorRoleGroup): 0xCA9EE6}})
-	p := model.palette()
-	group := protocol.WhichKeyBinding{Kind: whichKeyKindGroup, Key: "S", Description: "Session ›"}
-	leaf := protocol.WhichKeyBinding{Key: "s", Description: "+ looks like a group but is a command"}
-	if !whichKeyGroup(group) || whichKeyGroup(leaf) {
-		t.Fatalf("group detection must follow the binding kind, not the label text")
-	}
-	if p.Role(generated.ColorRoleGroup) != lipgloss.Color("#CA9EE6") {
-		t.Fatalf("fixture palette should carry the group role")
-	}
-	// #CA9EE6 is 202;158;230: the label itself must carry the group foreground, not only the icon before it.
-	if cell := model.renderWhichKeyCell(group, 40, 3); !strings.Contains(cell, "38;2;202;158;230mSession ›") {
-		t.Fatalf("group label should draw in the group colour role: %q", cell)
-	}
-	if cell := model.renderWhichKeyCell(leaf, 40, 3); strings.Contains(cell, "202;158;230") {
-		t.Fatalf("a command row must not use the group colour: %q", cell)
-	}
-}
-
-// Regression for #4079: rows must fit inside the panel border and inset, and long labels end in an ellipsis instead of wrapping.
-func TestWhichKeyRowsFitThePanelAndTruncateWithEllipsis(t *testing.T) {
-	for _, size := range []uint16{80, 120} {
-		model := New(size, 24, nil)
-		bindings := []protocol.WhichKeyBinding{
-			{Key: "SPC", Description: "Find file in project"},
-			{Key: ":", Description: "Execute command"},
-			{Key: ";", Description: "Eval expression with a very long description that cannot fit"},
-		}
-		for i := 0; i < 12; i++ {
-			bindings = append(bindings, protocol.WhichKeyBinding{Kind: whichKeyKindGroup, Key: fmt.Sprint(i), Description: "Group ›"})
-		}
-		popup := ansi.Strip(model.renderFloatingWhichKey(protocol.WhichKey{Visible: true, Prefix: "SPC", PageCount: 2, Bindings: bindings}))
-		lines := strings.Split(popup, "\n")
-		rows := (len(bindings) + 1) / 2
-		if want := rows + 4; len(lines) != want {
-			t.Fatalf("%d cols: want %d lines (border, header, %d rows, footer, border), got %d:\n%s", size, want, rows, len(lines), popup)
-		}
-		for _, line := range lines {
-			if got := lipgloss.Width(line); got != model.whichKeyWidth() {
-				t.Fatalf("%d cols: every line should be %d wide, got %d: %q", size, model.whichKeyWidth(), got, line)
-			}
-		}
-		if !strings.Contains(popup, "…") {
-			t.Fatalf("%d cols: a label that does not fit should end in an ellipsis:\n%s", size, popup)
-		}
 	}
 }
 
@@ -2651,7 +2547,7 @@ func TestCommittedOverlayOwnerSuppressesFileTreeNavigation(t *testing.T) {
 		owner   protocol.Command
 	}{
 		{"picker", map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: eligibleTree}, generated.OPGuiPicker: {Picker: protocol.Picker{Visible: true, Title: "Files", Items: []protocol.PickerItem{{Label: "main.ex"}}}}}, focusOwnerCommand(1, 8)},
-		{"which-key", map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: eligibleTree}, generated.OPGuiWhichKey: {Which: protocol.WhichKey{Visible: true, Prefix: "SPC", Bindings: []protocol.WhichKeyBinding{{Key: "f", Description: "file"}}}}}, focusOwnerCommand(0, 0)},
+		{"which-key", map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: eligibleTree}, generated.OPGuiWhichKey: {Which: protocol.WhichKey{Visible: true, Path: "SPC", Entries: []generated.WhichKeyEntry{{Key: "f", Label: "file"}}}}}, focusOwnerCommand(0, 0)},
 		{"agent-chat", map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: eligibleTree}, generated.OPGuiAgentChat: {AgentChat: protocol.AgentChat{Visible: true, Status: 2, ModelName: "test"}}}, focusOwnerCommand(0, 2)},
 	} {
 		t.Run(tc.name+" suppresses local navigation", func(t *testing.T) {

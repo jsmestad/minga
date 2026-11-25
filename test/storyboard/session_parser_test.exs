@@ -16,6 +16,17 @@ defmodule Minga.Storyboard.SessionParserTest do
     Session.stop(session)
   end
 
+  test "a settled session already has its parse's fold ranges (#4314)" do
+    session = Registry.drive("edit.plain")
+    state = Minga.Test.EditorCase.editor_state(session.ctx)
+    window = Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)
+
+    assert window.fold_ranges != [],
+           "the session settled before the parse's fold ranges arrived; its frames draw no fold marks"
+
+    Session.stop(session)
+  end
+
   test "an edit reaches the shared parser, which highlights the new text" do
     session = Registry.drive("edit.plain")
     original = session |> buffer_text() |> byte_size()

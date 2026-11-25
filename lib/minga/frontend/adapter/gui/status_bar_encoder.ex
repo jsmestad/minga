@@ -40,6 +40,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   @section_review 0x10
   @section_review_conflict 0x11
   @section_review_conflict_keys 0x12
+  @section_message_actions 0x13
 
   # Modeline section format 3 adds each segment's drop rank, flags, state, compact text, key and label.
   @modeline_format 3
@@ -137,6 +138,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
       sections,
       modeline_segment_sections(data.modeline_segments),
       pending_keys_sections(data.pending_keys),
+      message_actions_sections(data.message_actions),
       [
         section(
           @section_selection,
@@ -322,6 +324,19 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   defp encode_operation_status(:timeout), do: 6
   defp encode_operation_status(:canceled), do: 7
   defp encode_operation_status(:stale), do: 8
+
+  @spec message_actions_sections([Minga.RenderModel.UI.EmptyList.Action.t()]) :: [binary()]
+  defp message_actions_sections([]), do: []
+
+  defp message_actions_sections(actions) do
+    payload =
+      actions
+      |> Enum.map(&%{id: &1.id, key: &1.key, label: &1.label})
+      |> Minga.Protocol.Encode.encode_gui_status_bar_message_actions()
+      |> IO.iodata_to_binary()
+
+    [section(@section_message_actions, payload)]
+  end
 
   @spec pending_keys_sections(String.t() | nil) :: [binary()]
   defp pending_keys_sections(pending) when pending in [nil, ""], do: []

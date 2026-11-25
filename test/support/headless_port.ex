@@ -58,6 +58,7 @@ defmodule Minga.Test.HeadlessPort do
   @typedoc "Screen snapshot with grid and cursor position."
   @type screen :: %{
           optional(:agent_chat) => map() | nil,
+          optional(:gutters) => %{optional(non_neg_integer()) => map()},
           grid: grid(),
           cursor: {non_neg_integer(), non_neg_integer()},
           cursor_shape: Protocol.cursor_shape(),
@@ -729,6 +730,7 @@ defmodule Minga.Test.HeadlessPort do
       width: state.width,
       height: state.height,
       agent_chat: state.agent_chat,
+      gutters: state.gutters,
       input_seq: input_seq
     }
 
@@ -1681,7 +1683,8 @@ defmodule Minga.Test.HeadlessPort do
            selected::binary-size(selected_len), root_len::16, root::binary-size(root_len),
            width::16, row_count::16, error_len::16, error::binary-size(error_len), rest::binary>>
        ) do
-    {rows, <<>>} = decode_file_tree_rows(rest, row_count, [])
+    # The rows are followed by the empty-list tail (`EmptyListWire`), which this grid does not draw.
+    {rows, _empty_list_tail} = decode_file_tree_rows(rest, row_count, [])
 
     %{
       visible?: (flags &&& 1) == 1,

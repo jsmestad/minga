@@ -7,6 +7,7 @@ defmodule Minga.Test.Storyboard.Session do
   Call `start/1` from an ExUnit test process: the editor is started with `start_supervised`, so it stops with the test. Rendering is disabled by default because the model is built from editor state with the same builder the render pipeline uses; pass `rendering: :enabled` when a caller also needs rendered frames (#4036).
   """
 
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias Minga.Test.EditorCase
   alias Minga.Test.Storyboard.Keys
   alias Minga.Test.Storyboard.Model
@@ -59,6 +60,7 @@ defmodule Minga.Test.Storyboard.Session do
     file_name = Keyword.get(opts, :file_name, "lib/storyboard.ex")
     root = make_project(Keyword.get(opts, :root), file_name, content)
     file = Path.join(root, file_name)
+    Enum.each(Keyword.get(opts, :empty_dirs, []), &File.mkdir_p!(Path.join(root, &1)))
 
     child_id = make_ref()
     parser = Keyword.get_lazy(opts, :parser_manager, &shared_parser!/0)
@@ -86,6 +88,7 @@ defmodule Minga.Test.Storyboard.Session do
     relay = start_relay(ctx, parser)
     await_highlights!(ctx, parser)
     install_minga_status(ctx, Keyword.get(opts, :minga))
+    install_git_status(ctx, root, Keyword.get(opts, :git_status))
 
     session = %__MODULE__{
       ctx: ctx,
@@ -112,6 +115,24 @@ defmodule Minga.Test.Storyboard.Session do
     :ok
   end
 
+  # Git Status comes from an extension (GitExtended), so a scenario installs the core panel with the repository facts it needs.
+  @spec install_git_status(EditorCase.editor_ctx(), Path.t(), map() | nil) :: :ok
+  defp install_git_status(_ctx, _root, nil), do: :ok
+
+  defp install_git_status(%{editor: editor}, root, facts) do
+    panel =
+      MingaEditor.GitStatus.Panel.new(Map.merge(%{git_root: root, entry_base_path: root}, facts))
+
+    :sys.replace_state(editor, fn state ->
+      state
+      |> SidebarWorkflow.replace_git_status(panel)
+      |> SidebarWorkflow.handle_git_status_action("activate", :builtin)
+      |> MingaEditor.Renderer.render()
+    end)
+
+    :ok
+  end
+
   @doc "Presses a key path in inventory notation, or already parsed key steps. Raises if the editor dies."
   @spec press(t(), String.t() | [Keys.step()]) :: t()
   def press(%__MODULE__{} = session, notation) when is_binary(notation) do
@@ -122,6 +143,7 @@ defmodule Minga.Test.Storyboard.Session do
 
   def press(%__MODULE__{ctx: ctx} = session, steps) when is_list(steps) do
     Enum.each(steps, &step(ctx, &1))
+    await_picker_fetch!(ctx)
     session
   end
 
@@ -174,8 +196,16 @@ defmodule Minga.Test.Storyboard.Session do
   @doc "The number of tree-sitter highlight spans the active buffer carries now. Zero without a parser."
   @spec highlight_span_count(t()) :: non_neg_integer()
   def highlight_span_count(%__MODULE__{ctx: ctx}) do
-    ctx |> EditorCase.editor_state() |> highlight_spans() |> tuple_size()
+    highlight =
+      ctx |> EditorCase.editor_state() |> MingaEditor.HighlightSync.get_active_highlight()
+
+    tuple_size(highlight.spans)
   end
+
+  @doc "Resizes the editor's grid to `cols` x `rows`, the way a frontend reports a new row fit, and waits for the frame."
+  @spec resize(t(), pos_integer(), pos_integer()) :: t()
+  def resize(%__MODULE__{ctx: ctx} = session, cols, rows),
+    do: %{session | ctx: EditorCase.send_resize(ctx, cols, rows)}
 
   @doc "Returns the semantic frame the editor would commit now."
   @spec model(t()) :: Model.t()
@@ -268,9 +298,10 @@ defmodule Minga.Test.Storyboard.Session do
     end
   end
 
-  # The parser answers asynchronously: the editor applies the spans, then schedules a render. A session is ready when
-  # the spans are applied and, when it renders, the frame that shows them has reached the headless frontend. Parser
-  # events wake the wait early; the short timeout only re-checks a render that is still in flight.
+  # The parser answers asynchronously: the editor applies the spans, then schedules a render; fold ranges and conceals
+  # follow, and parse_complete ends the parse. A session is ready when the newest parse is complete and, when it
+  # renders, the frame that shows all of it has reached the headless frontend (#4314). Parser events wake the wait
+  # early; the short timeout only re-checks a render that is still in flight.
   @spec await_highlights!(EditorCase.editor_ctx(), GenServer.server()) :: :ok
   defp await_highlights!(ctx, parser) do
     :ok = Minga.Parser.Manager.subscribe(parser)
@@ -283,12 +314,12 @@ defmodule Minga.Test.Storyboard.Session do
     state = EditorCase.editor_state(ctx)
 
     cond do
-      tuple_size(highlight_spans(state)) > 0 and rendered?(ctx, state) ->
+      highlights_settled?(state) and rendered?(ctx, state) ->
         :ok
 
       System.monotonic_time(:millisecond) > deadline ->
-        raise "the storyboard parser applied no highlights within #{@highlight_deadline_ms} ms; " <>
-                "is priv/minga-parser built (mix native.build.support)?"
+        raise "the storyboard parser applied no highlights, or never completed the parse, within " <>
+                "#{@highlight_deadline_ms} ms; is priv/minga-parser built and current (mix native.build.support)?"
 
       true ->
         receive do
@@ -317,6 +348,42 @@ defmodule Minga.Test.Storyboard.Session do
     settled
   end
 
+  @fetch_deadline_ms 10_000
+
+  # An async picker (project search, find file) opens while it loads and fills in when its fetch lands.
+  # A scenario that ends on one is the frame after the fetch, so pressing waits for it, and for the frame that shows it.
+  @spec await_picker_fetch!(EditorCase.editor_ctx()) :: :ok
+  defp await_picker_fetch!(ctx) do
+    wait_for_fetch!(ctx, System.monotonic_time(:millisecond) + @fetch_deadline_ms)
+  end
+
+  defp wait_for_fetch!(ctx, deadline) do
+    state = EditorCase.editor_state(ctx)
+
+    cond do
+      not picker_loading?(state) and not tree_loading?(state) and rendered?(ctx, state) ->
+        :ok
+
+      System.monotonic_time(:millisecond) > deadline ->
+        raise "the picker fetch or file tree load did not finish within #{@fetch_deadline_ms} ms"
+
+      true ->
+        receive do
+        after
+          @wake_ms -> wait_for_fetch!(ctx, deadline)
+        end
+    end
+  end
+
+  # A rerooted or opened file tree lists its folder off the Editor process.
+  @spec tree_loading?(MingaEditor.State.t()) :: boolean()
+  defp tree_loading?(state),
+    do: MingaEditor.State.FileTree.status(state.workspace.file_tree) == :loading
+
+  @spec picker_loading?(MingaEditor.State.t()) :: boolean()
+  defp picker_loading?(state),
+    do: match?({:picker, %{picker_ui: %{load_status: :loading}}}, state.shell_runtime.state.modal)
+
   @spec flush_parser_events() :: :ok
   defp flush_parser_events do
     receive do
@@ -326,8 +393,11 @@ defmodule Minga.Test.Storyboard.Session do
     end
   end
 
-  @spec highlight_spans(MingaEditor.State.t()) :: tuple()
-  defp highlight_spans(state), do: MingaEditor.HighlightSync.get_active_highlight(state).spans
+  @spec highlights_settled?(MingaEditor.State.t()) :: boolean()
+  defp highlights_settled?(state) do
+    highlight = MingaEditor.HighlightSync.get_active_highlight(state)
+    tuple_size(highlight.spans) > 0 and MingaEditor.UI.Highlight.parse_settled?(highlight)
+  end
 
   # The relay is a supervised child of the test, stopped with the session.
   @spec start_relay(EditorCase.editor_ctx(), GenServer.server()) :: term()

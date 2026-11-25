@@ -75,7 +75,8 @@ defmodule MingaEditor.State.FileTree do
           clipboard_mark: clipboard_mark() | nil,
           filter_request: filter_request() | nil,
           watchers: Watchers.t(),
-          presentation_generation: non_neg_integer()
+          presentation_generation: non_neg_integer(),
+          empty_selected: non_neg_integer()
         }
 
   defstruct content: :closed,
@@ -89,7 +90,25 @@ defmodule MingaEditor.State.FileTree do
             clipboard_mark: nil,
             filter_request: nil,
             watchers: %Watchers{},
-            presentation_generation: 0
+            presentation_generation: 0,
+            empty_selected: 0
+
+  @doc "The next step an empty folder has preselected."
+  @spec empty_selected(t()) :: non_neg_integer()
+  def empty_selected(%__MODULE__{empty_selected: selected}), do: selected
+
+  # Another folder's empty state starts on its first step; the same folder keeps the step you moved to across refreshes.
+  @spec empty_selected_for_root(t(), String.t()) :: non_neg_integer()
+  defp empty_selected_for_root(%__MODULE__{project_root: root, empty_selected: selected}, root),
+    do: selected
+
+  defp empty_selected_for_root(%__MODULE__{}, _other_root), do: 0
+
+  @doc "Moves an empty folder's preselected next step by `delta`, staying within its `count` steps."
+  @spec move_empty_selection(t(), integer(), pos_integer()) :: t()
+  def move_empty_selection(%__MODULE__{empty_selected: selected} = ft, delta, count)
+      when is_integer(delta) and is_integer(count) and count > 0,
+      do: %{ft | empty_selected: (selected + delta) |> max(0) |> min(count - 1)}
 
   @spec content(t()) :: content()
   def content(%__MODULE__{content: content}), do: content
@@ -135,6 +154,12 @@ defmodule MingaEditor.State.FileTree do
   def status(%__MODULE__{content: :closed}), do: :hidden
   def status(%__MODULE__{content: {:loading, _tree}}), do: :loading
   def status(%__MODULE__{content: {:error, reason, _tree}}), do: {:error, reason}
+
+  # Naming the first file or folder of an empty folder draws its editing row.
+  # The folder is therefore not shown as empty meanwhile.
+  def status(%__MODULE__{content: {:ready, %FileTree{}}, interaction: {:editing, _editing}}),
+    do: :ready
+
   def status(%__MODULE__{content: {:ready, %FileTree{} = tree}}), do: classify_tree(tree)
 
   @spec visible_status?(status()) :: boolean()
@@ -184,6 +209,7 @@ defmodule MingaEditor.State.FileTree do
         interaction: :browse,
         project_root: tree.root,
         original_root: ft.original_root || tree.root,
+        empty_selected: 0,
         tree_width: tree.width,
         refresh: refresh_for_tree(ft, tree.root),
         filter_request: nil,
@@ -202,6 +228,7 @@ defmodule MingaEditor.State.FileTree do
       ft
       | content: replacement_content(ft, tree),
         project_root: tree.root,
+        empty_selected: empty_selected_for_root(ft, tree.root),
         tree_width: tree.width,
         refresh: refresh,
         filter_request: nil,
@@ -257,6 +284,7 @@ defmodule MingaEditor.State.FileTree do
       | content: {:loading, tree},
         project_root: expanded_root,
         original_root: original_root,
+        empty_selected: 0,
         tree_width: tree.width,
         interaction: :browse,
         filter_request: nil,

@@ -128,6 +128,28 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
       assert {filetype.flags, filetype.compact} == {0x01, ""}
     end
 
+    test "encodes the notice's next steps (0x13) only while it names some" do
+      action = %Minga.RenderModel.UI.EmptyList.Action{
+        id: "inline_ask",
+        key: "SPC a ?",
+        label: "ask Minga"
+      }
+
+      data = %{status_data() | message: "No code actions here", message_actions: [action]}
+      model = %StatusBar{content_kind: :buffer, data: data, workspace: workspace()}
+
+      {cmd, _caches} = StatusBarEncoder.encode(model, Caches.new())
+      sections = decode_sections(cmd)
+
+      assert sections[0x13] ==
+               <<1::8, 10::8, "inline_ask", 7::16, "SPC a ?", 9::16, "ask Minga">>
+
+      {plain, _caches} =
+        StatusBarEncoder.encode(%{model | data: %{data | message_actions: []}}, Caches.new())
+
+      refute Map.has_key?(decode_sections(plain), 0x13)
+    end
+
     test "omits pending_keys section (0x0E) when empty" do
       model = %StatusBar{content_kind: :buffer, data: status_data(), workspace: workspace()}
 

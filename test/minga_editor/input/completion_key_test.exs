@@ -99,6 +99,17 @@ defmodule MingaEditor.Input.CompletionKeyTest do
     }
   end
 
+  describe "Enter" do
+    test "held with Control, Alt or Command neither accepts the completion nor closes the menu" do
+      state = completion_state()
+
+      # Without enhanced key reporting a terminal sends Esc then Enter as Alt+Enter when both arrive together.
+      for mods <- [0x02, 0x04, 0x08] do
+        assert {:handled, ^state} = CompletionInput.handle_key(state, 13, mods)
+      end
+    end
+  end
+
   describe "arrow keys" do
     test "kitty down/up arrows navigate completion selection" do
       state = completion_state()

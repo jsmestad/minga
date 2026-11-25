@@ -298,59 +298,39 @@ struct WhichKeyOverlayViewTests {
 
     @Test("Hidden which-key renders nothing")
     @MainActor func hiddenWhichKey() throws {
-        let state = WhichKeyState()
-        state.visible = false
-
-        let sut = WhichKeyOverlay(state: state)
+        let sut = WhichKeyOverlay(state: WhichKeyState())
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
-        #expect(throws: Never.self) {
-            _ = try? body.find(text: "anything")
+        #expect(body.findAll(ViewInspectorQuery.text).isEmpty)
+    }
+
+    @Test("Visible which-key shows the breadcrumb, section names, keys, labels, counts, ⌘ keys and hints")
+    @MainActor func visibleWhichKey() throws {
+        let model = Wire.WhichKey(
+            visible: true, path: "SPC a",
+            breadcrumb: [.init(key: "SPC", path: "SPC"), .init(key: "a", label: "Minga", path: "SPC a")],
+            count: "· 1 needs you",
+            hints: [.init(key: "⌫", label: "back")],
+            entries: [
+                .init(kind: 0, key: "f", label: "Find file", section: "Files", count: "· 2"),
+                .init(kind: 1, key: "b", label: "Buffers ›", section: "Files", platformKey: "⌘S"),
+            ])
+        let sut = WhichKeyOverlay(state: WhichKeyState(model: model))
+            .environment(\.themeColors, ThemeColors())
+        let strings = try sut.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        for text in ["SPC", "a", "Minga", "· 1 needs you", "back", "Files", "f", "Find file", "· 2", "b", "Buffers ›", "⌘S"] {
+            #expect(strings.contains(text), "missing \(text)")
         }
     }
 
-    @Test("Visible which-key shows prefix and binding keys")
-    @MainActor func visibleWhichKey() throws {
-        let state = WhichKeyState()
-        state.update(
-            visible: true, prefix: "SPC", page: 0, pageCount: 1,
-            rawBindings: [
-                Wire.WhichKeyBinding(kind: 0, key: "f", description: "Find file", icon: ""),
-                Wire.WhichKeyBinding(kind: 1, key: "b", description: "Buffers", icon: ""),
-            ]
-        )
-
-        let sut = WhichKeyOverlay(state: state)
-            .environment(\.themeColors, ThemeColors())
-        let body = try sut.inspect()
-        let texts = body.findAll(ViewInspectorQuery.text)
-        let strings = texts.compactMap { try? $0.string() }
-
-        #expect(strings.contains("SPC"))
-        #expect(strings.contains("f"))
-        #expect(strings.contains("Find file"))
-        #expect(strings.contains("b"))
-        #expect(strings.contains("Buffers"))
+    @Test("The fade-in fits the 120 ms budget, and Reduce Motion turns it off")
+    func fadeBudget() {
+        #expect(WhichKeyOverlay.fadeDuration <= 0.12)
+        #expect(WhichKeyOverlay.fadeAnimation(reduceMotion: false) == .easeOut(duration: WhichKeyOverlay.fadeDuration))
+        #expect(WhichKeyOverlay.fadeAnimation(reduceMotion: true) == nil)
     }
 
-    @Test("Which-key shows page indicator when multiple pages")
-    @MainActor func pageIndicator() throws {
-        let state = WhichKeyState()
-        state.update(
-            visible: true, prefix: "SPC", page: 0, pageCount: 3,
-            rawBindings: [
-                Wire.WhichKeyBinding(kind: 0, key: "a", description: "test", icon: ""),
-            ]
-        )
-
-        let sut = WhichKeyOverlay(state: state)
-            .environment(\.themeColors, ThemeColors())
-        let body = try sut.inspect()
-        let texts = body.findAll(ViewInspectorQuery.text)
-        let strings = texts.compactMap { try? $0.string() }
-
-        #expect(strings.contains("1/3"))
-    }
 }
 
 // MARK: - BreadcrumbBar
@@ -432,7 +412,8 @@ struct StatusBarViewViewTests {
     private func statusBarUpdate(
         message: String = "",
         leftSegments: [Wire.StatusBarSegment] = [],
-        rightSegments: [Wire.StatusBarSegment] = []
+        rightSegments: [Wire.StatusBarSegment] = [],
+        messageActions: [Wire.EmptyListAction] = []
     ) -> StatusBarUpdate {
         StatusBarUpdate(
             contentKind: 0, mode: 0, cursorLine: 42, cursorCol: 9,
@@ -446,7 +427,8 @@ struct StatusBarViewViewTests {
             backgroundSubagentCount: 0, backgroundSubagentLabel: "",
             modelineSegmentsPresent: true,
             modelineLeftSegments: leftSegments,
-            modelineRightSegments: rightSegments
+            modelineRightSegments: rightSegments,
+            messageActions: messageActions
         )
     }
 
@@ -470,6 +452,24 @@ struct StatusBarViewViewTests {
         for words in ["NORMAL", "Needs you", "chrome_state.ex ●", "change 1/2", "main +11", "Minga working 2/3", "Elixir", "240:31"] {
             #expect(strings.contains(words), "missing \(words)")
         }
+    }
+
+    @Test("At 610 pt a notice with a next step gets room for its whole message and the step's key; a plain message keeps a third")
+    @MainActor func noticeWithStepsKeepsItsMessage() {
+        let left = [segment(0, "NORMAL", kind: "mode"), segment(1, "proj.ex", kind: "filename"), segment(2, "main", kind: "git", drop: 4)]
+        let right = [segment(0, "Elixir", kind: "filetype", drop: 2), segment(1, "1:8", kind: "position", drop: 3)]
+        let message = "No matches for “limit_lable” in this buffer"
+
+        let plain = StatusBarView(state: statusBarState(message: message, leftSegments: left, rightSegments: right), sendAction: nil)
+        #expect(plain.echoWidth(in: 610) <= 610 * 0.34)
+
+        let answer = StatusBarState()
+        answer.announce = { _ in }
+        answer.update(from: statusBarUpdate(message: message, leftSegments: left, rightSegments: right, messageActions: [Wire.EmptyListAction(id: "search_project", key: "SPC s p", label: "search the project")]))
+        let view = StatusBarView(state: answer, sendAction: nil)
+        #expect(view.echoWidth(in: 610) >= view.shortestNoticeWidth + 2 * Spacing.md)
+        let kept = view.fittedSegments(width: 610).kinds
+        #expect(kept.contains("mode") && kept.contains("filename"))
     }
 
     @Test("Narrowing drops filetype, position and git in order, then shrinks Minga, then warnings")

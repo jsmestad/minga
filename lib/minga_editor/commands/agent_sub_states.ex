@@ -129,8 +129,9 @@ defmodule MingaEditor.Commands.AgentSubStates do
     end
   end
 
+  # A key held with Control, Alt or Command is a chord, not text for the query: ⌘. must still stop the agent.
   def handle_mention_key(state, cp, mods)
-      when cp >= 32 and band(mods, 0x02) == 0 and band(mods, 0x04) == 0 do
+      when cp >= 32 and band(mods, 0x0E) == 0 do
     comp = state.workspace.agent_ui.panel.mention_completion
 
     if slash_completion?(comp) do

@@ -1,0 +1,116 @@
+# minga storyboard frame v1
+# scenario: code.actions.none
+# frontend: tui
+# theme: catppuccin_latte
+# size: 80x24
+# cursor: 1,6
+## text
+ ▌  storyboard.ex
+▾  1  defmodule Storyboard do
+   1    @moduledoc "A small file every storyboard scenario starts in."
+   2
+▾  3    def greet(name) do
+   4    │ "Hello, " <> name
+   5    end
+   6  end
+   7
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+  NORMAL  storyboard.ex No code actions at 1:1 (no language server) · SPC a ?
+## styles (row start-end fg bg attrs)
+0 0-0 #4c4f69 #eff1f5 -
+0 1-1 #1e66f5 #eff1f5 bold
+0 2-79 #4c4f69 #eff1f5 -
+1 0-1 #8c8fa1 #ccd0da bold
+1 2-5 #4c4f69 #eff1f5 -
+1 6-14 #8839ef #eff1f5 bold
+1 15-15 #4c4f69 #ccd0da -
+1 16-25 #df8e1d #eff1f5 -
+1 26-26 #4c4f69 #ccd0da -
+1 27-28 #8839ef #eff1f5 bold
+1 29-79 #4c4f69 #eff1f5 -
+2 0-5 #5c5f77 #eff1f5 -
+2 6-7 #4c4f69 #eff1f5 -
+2 8-17 #7c7f93 #eff1f5 italic
+2 18-18 #fe640b #eff1f5 -
+2 19-69 #7c7f93 #eff1f5 italic
+2 70-79 #4c4f69 #eff1f5 -
+3 0-5 #5c5f77 #eff1f5 -
+3 6-79 #4c4f69 #eff1f5 -
+4 0-1 #8c8fa1 #eff1f5 -
+4 2-7 #4c4f69 #eff1f5 -
+4 8-10 #8839ef #eff1f5 bold
+4 11-11 #4c4f69 #eff1f5 -
+4 12-16 #1e66f5 #eff1f5 -
+4 17-17 #8c8fa1 #eff1f5 -
+4 18-21 #4c4f69 #eff1f5 -
+4 22-22 #8c8fa1 #eff1f5 -
+4 23-23 #4c4f69 #eff1f5 -
+4 24-25 #8839ef #eff1f5 bold
+4 26-79 #4c4f69 #eff1f5 -
+5 0-5 #5c5f77 #eff1f5 -
+5 6-7 #4c4f69 #eff1f5 -
+5 8-8 #5c5f77 #eff1f5 -
+5 9-9 #4c4f69 #eff1f5 -
+5 10-18 #40a02b #eff1f5 -
+5 19-19 #4c4f69 #eff1f5 -
+5 20-21 #04a5e5 #eff1f5 -
+5 22-79 #4c4f69 #eff1f5 -
+6 0-5 #5c5f77 #eff1f5 -
+6 6-7 #4c4f69 #eff1f5 -
+6 8-10 #8839ef #eff1f5 bold
+6 11-79 #4c4f69 #eff1f5 -
+7 0-5 #5c5f77 #eff1f5 -
+7 6-8 #8839ef #eff1f5 bold
+7 9-79 #4c4f69 #eff1f5 -
+8 0-5 #5c5f77 #eff1f5 -
+8 6-79 #4c4f69 #eff1f5 -
+9 0-5 #5c5f77 #eff1f5 -
+9 6-79 #8c8fa1 #eff1f5 -
+10 0-5 #5c5f77 #eff1f5 -
+10 6-79 #8c8fa1 #eff1f5 -
+11 0-5 #5c5f77 #eff1f5 -
+11 6-79 #8c8fa1 #eff1f5 -
+12 0-5 #5c5f77 #eff1f5 -
+12 6-79 #8c8fa1 #eff1f5 -
+13 0-5 #5c5f77 #eff1f5 -
+13 6-79 #8c8fa1 #eff1f5 -
+14 0-5 #5c5f77 #eff1f5 -
+14 6-79 #8c8fa1 #eff1f5 -
+15 0-5 #5c5f77 #eff1f5 -
+15 6-79 #8c8fa1 #eff1f5 -
+16 0-5 #5c5f77 #eff1f5 -
+16 6-79 #8c8fa1 #eff1f5 -
+17 0-5 #5c5f77 #eff1f5 -
+17 6-79 #8c8fa1 #eff1f5 -
+18 0-5 #5c5f77 #eff1f5 -
+18 6-79 #8c8fa1 #eff1f5 -
+19 0-5 #5c5f77 #eff1f5 -
+19 6-79 #8c8fa1 #eff1f5 -
+20 0-5 #5c5f77 #eff1f5 -
+20 6-79 #8c8fa1 #eff1f5 -
+21 0-5 #5c5f77 #eff1f5 -
+21 6-79 #8c8fa1 #eff1f5 -
+22 0-5 #5c5f77 #eff1f5 -
+22 6-79 #8c8fa1 #eff1f5 -
+23 0-0 #8c8fa1 #e6e9ef -
+23 1-1 #4c4f69 #1e66f5 -
+23 2-7 #eff1f5 #1e66f5 bold
+23 8-8 #4c4f69 #1e66f5 -
+23 9-23 #4c4f69 #e6e9ef -
+23 24-66 #a86d10 #e6e9ef bold
+23 67-69 #8c8fa1 #e6e9ef -
+23 70-76 #1e66f5 #e6e9ef -
+23 77-79 #4c4f69 #e6e9ef -

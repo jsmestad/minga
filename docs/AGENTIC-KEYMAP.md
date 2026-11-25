@@ -136,7 +136,7 @@ Press `SPC` in Normal mode. These sequences also work from the agent view, the f
 | `SPC a a` | Open the agent view, or return from it to where you were |
 | `SPC a v` | Today the same as `SPC a a` |
 | `SPC a n` | New agent session |
-| `SPC a s` | Stop the agent's current turn; queued messages stay queued |
+| `SPC a s` | Stop the agent's current turn; queued messages stay queued. It works from any buffer: with a file in front it stops the conversation shown last (the one the modeline speaks for), or the only one working. With several working and none shown last it stops nothing and says so |
 | `SPC a ?` | Ask about the current line or the selection, inline |
 | `SPC a e` | Rewrite the selection, inline |
 | `SPC a r` | Pending reviews |
@@ -470,6 +470,8 @@ Open it with `SPC o p`. `j`, `k`, `gg`, `G`, `⌃D` and `⌃U` move as they do i
 
 With desktop shortcuts, Up and Down move, Right and Left expand and collapse, `↩` opens and `esc` closes.
 
+An empty folder lists its next steps, New file and New folder. `j` and `k` (or Up and Down) move between them, `↩` runs the highlighted one, and a click runs either.
+
 ### Git status list
 
 This list comes with the optional GitExtended extension ([Optional extensions](CONFIGURATION.md#optional-extensions)). Without the extension there is nothing to open, and these keys do nothing.
@@ -484,7 +486,8 @@ This list comes with the optional GitExtended extension ([Optional extensions](C
 | `S` / `U` | Stage all / unstage all |
 | `d` | Discard the file's changes. Asks first: `y` confirms, `n` cancels |
 | `p` | Preview the diff |
-| `o` or `↩` | Open the file |
+| `o` | Open the file |
+| `↩` | Open the file. On a clean tree, run the highlighted next step |
 | `cc` | Start a commit |
 | `cg` | Write a commit message with the agent |
 | `f` | Fetch |
@@ -492,6 +495,8 @@ This list comes with the optional GitExtended extension ([Optional extensions](C
 | `P` | Push |
 | `r` | Pull, then retry a push that failed |
 | `q` or `esc` | Close the list |
+
+A clean tree lists its next steps instead of files: Push when commits wait to go up, Pull and Fetch. `j` and `k` move between them, `↩` runs the highlighted one, and a click runs any of them. With desktop shortcuts, `P`, `l` and `f` work too.
 
 ## In a prompt or the composer
 
@@ -542,11 +547,12 @@ Shift with an arrow key keeps its Vim meaning here and does not start a selectio
 
 ## In the terminal
 
-You are here when you run Minga in a terminal instead of the macOS app. Every table above applies. A terminal cannot send `⌘` and does not report every modified key, so a few keys change:
+You are here when you run Minga in a terminal instead of the macOS app. Every table above applies. Most terminals cannot send `⌘` and do not report every modified key, so a few keys change:
 
 - **Use `⌃` where the macOS app uses `⌘`.** The desktop shortcut tables above list both columns. In the default Vim keys nothing needs `⌘`.
 - **Modified Enter and Backspace need a modern terminal.** `⌃↩`, `⌃⌫` and their Shift forms reach Minga only from a terminal that reports them (the Kitty keyboard protocol, as in Ghostty, kitty and WezTerm). Elsewhere they arrive as plain Enter and Backspace, which never accept or reject a change.
-- **`⇧↩` depends on the terminal too.** `↩` in Insert mode and `⌃J` start a new line in the composer from any terminal. `⌘↩` and `⌘.` are macOS keys: in a terminal, send with `↩` in Normal mode and stop with `SPC a s`.
+- **`⇧↩` depends on the terminal too.** `↩` in Insert mode and `⌃J` start a new line in the composer from any terminal. `⌘↩` and `⌘.` reach Minga only from a terminal that reports `⌘` (the Kitty keyboard protocol) and does not keep the key for itself. Everywhere else, send with `esc` and then `↩`, and stop with `SPC a s`.
+- **`esc` then `↩` sends, also when you type it fast.** Without the Kitty keyboard protocol a terminal sends Esc and Alt as the same byte, so Minga reads an `esc` that arrives on its own as Esc and what follows as a separate key. Inside tmux older than 3.5, set `escape-time` to 10 so tmux does not join the two keys into `⌥↩` itself.
 - **Long Help scrolls with the keyboard.** In the agent view's Help, Up, Down, Page Up, Page Down, Home and End scroll, and so does the mouse wheel.
 - **Leader keys with desktop shortcuts.** A terminal cannot tell that Space is held, so press Space and then the leader key quickly. Minga removes the space it typed.
 

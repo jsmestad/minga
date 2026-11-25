@@ -1,7 +1,37 @@
 {
-  "about": "The editor grid the macOS frontend reports at each storyboard window size, with its default chrome. The macOS storyboard renderer checks its own row fit (GridFit) against these numbers and fails with the measured grid when they differ. See docs/design/storyboard.md, \"Renders and baselines\".",
+  "about": "The editor grid the macOS frontend reports at each storyboard window size, with its default chrome. The macOS storyboard renderer checks its own row fit (GridFit) against these numbers and fails with the measured grid when they differ. See docs/design/storyboard.md, \"Renders and baselines\". `chrome_grid` maps the grid-changing chrome open at a scenario's reached frame, joined with \"+\" (for example \"tasks_drawer+minibuffer\"), to the grid the window reports then; `cols` defaults to the window's columns.",
   "windows": [
-    {"width": 1440, "height": 900, "cols": 177, "rows": 43},
-    {"width": 1280, "height": 800, "cols": 156, "rows": 38}
+    {
+      "width": 1440,
+      "height": 900,
+      "cols": 177,
+      "rows": 43,
+      "chrome_grid": {
+        "file_tree": {
+          "cols": 145,
+          "rows": 43
+        },
+        "git_status": {
+          "cols": 145,
+          "rows": 43
+        }
+      }
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "cols": 156,
+      "rows": 38,
+      "chrome_grid": {
+        "file_tree": {
+          "cols": 125,
+          "rows": 38
+        },
+        "git_status": {
+          "cols": 125,
+          "rows": 38
+        }
+      }
+    }
   ]
 }

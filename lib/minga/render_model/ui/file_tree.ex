@@ -2,7 +2,7 @@ defmodule Minga.RenderModel.UI.FileTree do
   @moduledoc """
   Semantic file tree model for GUI adapters.
 
-  The adapter derives cache fingerprints and chooses between full tree and selection-only commands from this model.
+  The adapter derives cache fingerprints and chooses between full tree and selection-only commands from this model. An `:empty` tree carries `empty`, the empty-state anatomy with its next steps.
   """
 
   alias Minga.RenderModel.UI.FileTree.Row
@@ -17,7 +17,8 @@ defmodule Minga.RenderModel.UI.FileTree do
           focused?: boolean(),
           local_navigation?: boolean(),
           selected_id: String.t(),
-          rows: [Row.t()]
+          rows: [Row.t()],
+          empty: Minga.RenderModel.UI.EmptyList.t() | nil
         }
 
   defstruct root_path: nil,
@@ -27,5 +28,6 @@ defmodule Minga.RenderModel.UI.FileTree do
             focused?: false,
             local_navigation?: false,
             selected_id: "",
-            rows: []
+            rows: [],
+            empty: nil
 end

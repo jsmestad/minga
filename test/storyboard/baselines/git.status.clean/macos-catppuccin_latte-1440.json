@@ -1,0 +1,274 @@
+{
+ "elements": [
+  {
+   "frame": [
+    327,
+    65,
+    1088,
+    825.5
+   ],
+   "label": "storyboard.ex, pane 1",
+   "role": "AXTextArea",
+   "value": "defmodule Storyboard do\n  @moduledoc \"A small file every storyboard scenario starts in.\"\n\n  def greet(name) do\n    \"Hello, \" <> name\n  end\nend\n"
+  }
+ ],
+ "grid": {
+  "cols": 145,
+  "rows": 43
+ },
+ "parts": [
+  {
+   "baseline": 21,
+   "frame": [
+    368,
+    9.5,
+    78,
+    15
+   ],
+   "part": "tabBar.tabLabel",
+   "text": "storyboard.ex"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    288,
+    43.5,
+    4,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "/"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    306,
+    43.5,
+    23,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "tmp"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    343,
+    43.5,
+    102,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga-storyboard"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    459,
+    43.5,
+    72,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "macos-1440"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    545,
+    43.5,
+    87,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "git.status.clean"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    646,
+    43.5,
+    14,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "lib"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    674,
+    43.5,
+    78,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "storyboard.ex"
+  },
+  {
+   "baseline": 74.5,
+   "frame": [
+    75,
+    62,
+    121,
+    32
+   ],
+   "part": "emptyState.title",
+   "text": "Nothing to commit on main."
+  },
+  {
+   "baseline": 109.5,
+   "frame": [
+    56,
+    98,
+    109,
+    15
+   ],
+   "part": "emptyState.why",
+   "text": "2 commits to push."
+  },
+  {
+   "baseline": 149,
+   "frame": [
+    75,
+    137.5,
+    86,
+    15
+   ],
+   "part": "emptyState.actionLabel",
+   "text": "Push to remote"
+  },
+  {
+   "baseline": 148.5,
+   "frame": [
+    56,
+    138,
+    19,
+    14
+   ],
+   "part": "emptyState.actionKey",
+   "text": "P"
+  },
+  {
+   "baseline": 173,
+   "frame": [
+    75,
+    161.5,
+    94,
+    15
+   ],
+   "part": "emptyState.actionLabel",
+   "text": "Pull from remote"
+  },
+  {
+   "baseline": 172.5,
+   "frame": [
+    56,
+    162,
+    19,
+    14
+   ],
+   "part": "emptyState.actionKey",
+   "text": "l"
+  },
+  {
+   "baseline": 197,
+   "frame": [
+    75,
+    185.5,
+    105,
+    15
+   ],
+   "part": "emptyState.actionLabel",
+   "text": "Fetch from remote"
+  },
+  {
+   "baseline": 196.5,
+   "frame": [
+    56,
+    186,
+    19,
+    14
+   ],
+   "part": "emptyState.actionKey",
+   "text": "f"
+  },
+  {
+   "frame": [
+    0,
+    904,
+    1440,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    6,
+    904,
+    61,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "mode: NORMAL"
+  },
+  {
+   "frame": [
+    75,
+    904,
+    73,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filename: storyboard.ex"
+  },
+  {
+   "frame": [
+    1386,
+    904,
+    26,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filetype: Elixir"
+  },
+  {
+   "frame": [
+    1420,
+    904,
+    14,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "position: 1:1"
+  },
+  {
+   "frame": [
+    6,
+    907,
+    61,
+    18
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "baseline": 919.5,
+   "frame": [
+    12,
+    909,
+    49,
+    14
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  }
+ ],
+ "scenario": "git.status.clean",
+ "size": "1440",
+ "theme": "catppuccin_latte",
+ "window": {
+  "height": 928,
+  "width": 1440
+ }
+}

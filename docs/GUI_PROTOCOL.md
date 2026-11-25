@@ -146,7 +146,9 @@ Legacy note: early GUI prototypes used the low 0x70 chrome range and inferred hi
 opcode(1) + payload_len(4) + payload(payload_len)
 
 Payload v4:
-  version(1) + tree_flags(1) + tree_state(1) + generation(4) + selected_id_len(2) + selected_id(selected_id_len) + root_len(2) + root(root_len) + tree_width(2) + row_count(2) + error_reason_len(2) + error_reason(error_reason_len) + rows...
+  version(1) + tree_flags(1) + tree_state(1) + generation(4) + selected_id_len(2) + selected_id(selected_id_len) + root_len(2) + root(root_len) + tree_width(2) + row_count(2) + error_reason_len(2) + error_reason(error_reason_len) + rows... + empty_list?
+
+`empty_list` (see gui_picker) follows the rows only when `tree_state` is 2 (empty) and there are no rows. It says the folder is empty and offers its next steps in the tree's own keys: New file (`a`) and New folder (`A`). While the tree has focus, j/k move `selected` and ↩ runs it; a click sends `execute_command` (0x16) with the action's id.
 
 Payload v3 omitted `generation`. Payload v2 also omitted the per-row `editing_token`. Payload v1 omitted `tree_state` and `error_reason`. Frontends should derive v1 state from `visible` and `empty`, but all new BEAM payloads use v4.
 
@@ -239,24 +241,43 @@ active_index: zero-based index into the visible tab entries, or 255 when the cur
 
 ### 0x72 — gui_which_key
 
-Which-key popup showing available keybindings after a prefix key.
+The which-key panel: where the leader sequence is, and what each next key does. The BEAM decides the words, the order and the sections; the frontend decides how many columns a section takes to fit its window (`docs/design/surfaces.md`, `docs/design/anatomy.md`).
 
 ```
-visible byte: 0 = hidden, 1 = visible
-
 When visible:
-  opcode(1) + 1(1) + prefix_len(2) + prefix(prefix_len) + page(1) + page_count(1) + binding_count(2) + bindings...
+  opcode(1) + 1(1)
+  + path_len(2) + path(path_len)
+  + crumb_count(1) + crumbs...
+  + count_len(2) + count(count_len) + count_tone(1)
+  + hint_count(1) + hints...
+  + entry_count(2) + entries...
 
-Per binding:
-  kind(1) + key_len(1) + key(key_len) + desc_len(2) + desc(desc_len) + icon_len(1) + icon(icon_len)
+Per crumb:
+  key_len(1) + key(key_len) + label_len(2) + label(label_len) + path_len(2) + path(path_len)
+
+Per hint:
+  key_len(1) + key(key_len) + label_len(2) + label(label_len)
+
+Per entry:
+  kind(1) + key_len(1) + key(key_len) + codepoint(4) + modifiers(1)
+  + label_len(2) + label(label_len) + section_len(2) + section(section_len)
+  + count_len(2) + count(count_len) + count_tone(1)
+  + platform_key_len(1) + platform_key(platform_key_len)
 
 Kind: 0 = command, 1 = group (prefix for more keys)
+Count tone: 0 = muted, 1 = needs you, 2 = error
 
 When hidden:
   opcode(1) + 0(1)
 ```
 
-`kind` alone says whether a row is a group; frontends never infer it from the text. A group's `desc` is final display text: a Title Case label with a trailing chevron, such as `Session ›`, never a `+label`. Frontends render `desc` verbatim and draw group rows in the `group` colour role (`docs/design/keys.md`, "Groups read like leaves").
+- `path` is the formatted prefix (`SPC a`) and the panel's identity. Each crumb carries the key, the group label it opened (empty for `SPC`) and the `path` a click on it returns to.
+- `count` is the open group's live count, drawn after the breadcrumb. An entry's `count` is drawn after its label (`· 1 needs you`, `· 3`). Both are final display text. `count_tone` names the colour role: a needs-you count draws in the `needs_you` role and an error count in the `failure` role, as the modeline draws the same facts; a muted count draws in the secondary colour. A frontend reads an unknown tone as muted.
+- `hints` are the panel's own keys (`⌫ back`, `esc close`).
+- Entries arrive in display order. Consecutive entries with the same `section` form one section, headed by its name in the secondary colour; an empty `section` has no heading. A frontend may split a long section into several columns, filling each column top to bottom.
+- `kind` alone says whether a row is a group; frontends never infer it from the text. A group's `label` is final display text: a Title Case label with a trailing chevron, such as `Session ›`, never a `+label`. Frontends render labels verbatim and draw group rows in the `group` colour role (`docs/design/keys.md`, "Groups read like leaves").
+- `codepoint` and `modifiers` are the raw key the row stands for, in the `key_press` encoding.
+- `platform_key` is the macOS ⌘ equivalent (`⌘S`), sent only to native GUI frontends; empty when there is none.
 
 ### 0x73 — gui_completion
 
@@ -350,6 +371,7 @@ opcode(1) + section_count(1) + [section_id(1) + section_len(2) + payload(section
 | 0x10 | Review | path_len(2) + path + freshness(1: 0=current, 1=stale) + generation(4) + item_id_len(2) + item_id |
 | 0x11 | ReviewConflict | `conflict_index:u32` (one-based). Requires a Review section in the same update with a nonzero generation and nonempty item ID. |
 | 0x12 | ReviewConflictKeys | `keep_mine_key:string16` + `use_agent_key:string16`. Sent with every ReviewConflict section. The BEAM-authored key hints for the two conflict decisions in the active editing model (`x`/`y` in Vim; `Cmd+Backspace`/`Cmd+Enter` in a native GUI and `Ctrl+Backspace`/`Ctrl+Enter` in a terminal in CUA). Frontends label the decisions with these strings and never author key hints. A frontend that predates the section skips it. |
+| 0x13 | MessageActions | count(1) + `empty_list_action` entries (`id:string8` + `key:string16` + `label:string16`). Present only while the Message section shows a notice that names next steps, such as "No code actions at 3:7" with "SPC a ? ask Minga". Frontends draw each as `key label` after the message, and a click sends `execute_command` (0x16) with the action's `id`. A frontend that predates the section skips it. |
 
 The Operation section is omitted when the Editor-global operation store is empty. It is independent of the Message section, so a structured-only payload remains discoverable. Operation selection prefers the newest active (`pending`, `queued`, or `running`) record and otherwise the newest retained terminal record. An older terminal outcome never displaces a newer active operation.
 
@@ -406,7 +428,7 @@ The `plan_limit` built-in deliberately has no native control: frontends render i
 
 Section `0x0B` is omitted when the BEAM has no GUI modeline data for this frame. A present section with zero left and right segments is explicit and tells the frontend not to synthesize fallback built-ins.
 
-`PendingKeys` (`0x0E`) is vim's `showcmd`: the pending key sequence typed in normal/operator-pending mode that has not yet resolved into a command (an accumulated count, a register prefix like `"a`, an operator like `d`, or a pending single-key op like `f`/`r`/`m`). The frontend renders it as a dim, right-aligned status-bar segment so every keypress is acknowledged instantly, underneath the delayed which-key popup. The section is omitted when the string is empty, so it clears automatically when the sequence resolves, is aborted (Esc), or which-key opens (the BEAM derives an empty string, and this section specifically omits empty payloads — unlike e.g. `Message` 0x07, which is always emitted). It renders purely from BEAM FSM state per frame with no frontend timers.
+`PendingKeys` (`0x0E`) is vim's `showcmd`: the pending key sequence typed in normal/operator-pending mode that has not yet resolved into a command (an accumulated count, a register prefix like `"a`, an operator like `d`, or a pending single-key op like `f`/`r`/`m`). The frontend renders it as a dim, right-aligned status-bar segment so every keypress is acknowledged instantly, underneath the delayed which-key popup. The section is omitted when the string is empty, so it clears automatically when the sequence resolves or is aborted (Esc). It stays while which-key is open, so the modeline names the prefix the panel waits on (the BEAM derives an empty string once the sequence ends, and this section specifically omits empty payloads — unlike e.g. `Message` 0x07, which is always emitted). It renders purely from BEAM FSM state per frame with no frontend timers.
 
 ### 0x77 — gui_picker (sectioned format)
 
@@ -1059,7 +1081,7 @@ When no splits are active, the BEAM sends counts of 0 for both separator types.
 Git status panel data for both sidebars, plus remote operation feedback used by the sidebar and status bar.
 
 ```
-opcode(1) + repo_state(1) + syncing(1) + ahead(2) + behind(2) + branch_len(2) + branch(branch_len) + entry_count(2) + entries... + toast_present(1) + toast? + entry_base_path_len(2) + entry_base_path(entry_base_path_len) + last_commit_message_len(2) + last_commit_message(last_commit_message_len) + stash_count(2) + terminal_cursor(4) + terminal_collapsed(1) + panel_id(8) + commit_target_id(8)
+opcode(1) + repo_state(1) + syncing(1) + ahead(2) + behind(2) + branch_len(2) + branch(branch_len) + entry_count(2) + entries... + toast_present(1) + toast? + entry_base_path_len(2) + entry_base_path(entry_base_path_len) + last_commit_message_len(2) + last_commit_message(last_commit_message_len) + stash_count(2) + terminal_cursor(4) + terminal_collapsed(1) + panel_id(8) + commit_target_id(8) + empty_list
 
 Per entry:
   path_hash(4) + section(1) + status(1) + path_len(2) + path(path_len)
@@ -1081,6 +1103,8 @@ Toast when toast_present == 1:
 `terminal_collapsed`: one bit per section ID. A collapsed section shows its header but not its entries. The native sidebar ignores these two terminal fields.
 `panel_id`: identifies the installed panel's displayed status snapshot. Zero means no installed panel. A status refresh retires the previous ID. A frontend sends the ID from the frame that offered the action, including actions offered before a confirmation dialog opened.
 `commit_target_id`: identifies the commit draft's repository and branch within the installed panel. It stays stable across status-only refreshes, but changes on branch changes or panel replacement. The frontend retains a local draft for this target and sends the current, displayed `panel_id` when submitting it. Zero means no installed panel.
+
+`empty_list` (see gui_picker) is always present. A clean tree (normal repository, no entries) fills it: "Nothing to commit on main." with the Done glyph, a why line that counts the commits waiting on each side, and the next steps in the panel's own keys, the one that moves waiting commits first (Push `P`, Pull `l`, Fetch `f`). Any other state sends it with an empty title, and frontends draw nothing for it. j/k move `selected` and ↩ runs it; a click sends `execute_command` (0x16) with the action's id.
 
 When the git status panel is closed, the BEAM sends `repo_state = not_a_repo`, no entries, and an empty `entry_base_path` as the hide signal. A non-git project opened in the Source Control tab also uses `repo_state = not_a_repo`, but includes the project root so the frontend can show the native "Not a git repository" empty state instead of hiding the panel. The frontend should still copy `syncing` and `toast` so remote operation feedback remains accurate while the panel is hidden.
 

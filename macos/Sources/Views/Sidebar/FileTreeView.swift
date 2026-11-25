@@ -6,6 +6,7 @@
 /// tight vertical rhythm with native macOS feel.
 
 import AppKit
+import MingaProtocol
 import SwiftUI
 
 /// Test hook that records each evaluation of the scrolling file tree content.
@@ -44,6 +45,8 @@ public struct FileTreeView: View {
         case drop(sourcePaths: [String], targetIndex: UInt16, targetID: String, targetPathHash: UInt32, targetPath: String, targetIsDirectory: Bool, modifiers: UInt8, generation: UInt32)
         case refresh
         case semantic(intent: SemanticIntent, generation: UInt32, itemID: String)
+        /// Runs an empty folder's next step by the command it names.
+        case executeCommand(name: String)
     }
 
     public let fileTreeState: FileTreeState
@@ -168,15 +171,15 @@ public struct FileTreeView: View {
                     .controlSize(.small)
                 stateText(title: "Loading files…", subtitle: "Scanning the project tree.")
             case .empty:
-                stateText(title: "No files yet", subtitle: "Create a file or refresh after adding project files.")
-                Button("New File…") {
-                    sendAction?(.semantic(intent: .newFile, generation: generation, itemID: ""))
+                if let empty = fileTreeState.empty {
+                    emptyFolder(empty)
+                } else {
+                    stateText(title: "No files yet", subtitle: "Create a file or refresh after adding project files.")
+                    Button("New File…") {
+                        sendAction?(.semantic(intent: .newFile, generation: generation, itemID: ""))
+                    }
+                    .buttonStyle(primaryStateButtonStyle)
                 }
-                .buttonStyle(primaryStateButtonStyle)
-                Button("Refresh") {
-                    sendAction?(.refresh)
-                }
-                .buttonStyle(secondaryStateButtonStyle)
             case .error:
                 stateText(title: "Couldn’t load file tree", subtitle: fileTreeState.errorReason.isEmpty ? "Check project permissions, then refresh." : fileTreeState.errorReason)
                 Button("Refresh") {
@@ -190,6 +193,24 @@ public struct FileTreeView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .padding(Spacing.xxl)
         .background(theme.treeBg)
+    }
+
+    /// The empty-folder anatomy, left-aligned at the top of the tree: what happened, then the next steps as native rows.
+    private func emptyFolder(_ empty: Wire.EmptyList) -> some View {
+        VStack(alignment: .leading, spacing: EmptyStateMetrics.whyToActions) {
+            EmptyListHeader(empty: empty, textColor: theme.treeFg, mutedColor: theme.treeFg.opacity(0.78))
+                .padding(.horizontal, EmptyStateMetrics.inset)
+            EmptyListActions(
+                empty: empty,
+                textColor: theme.treeFg,
+                accentColor: theme.accent,
+                selectionColor: theme.treeSelectionBg
+            ) { action in
+                sendAction?(.executeCommand(name: action.id))
+            }
+        }
+        .padding(.top, EmptyStateMetrics.inset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     /// Derived locally for readable text on accent-filled controls.

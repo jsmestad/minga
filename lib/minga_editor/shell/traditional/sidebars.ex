@@ -46,6 +46,17 @@ defmodule MingaEditor.Shell.Traditional.Sidebars do
   def replace_git_status(%__MODULE__{} = sidebars, nil),
     do: %{sidebars | git_status_panel: nil}
 
+  # A tree that has just become clean starts on its first next step, not on the row the cursor had among the files.
+  def replace_git_status(
+        %__MODULE__{
+          git_status_panel: %GitStatusPanel{entries: [_ | _]},
+          git_status_tui_state: %TUIState{} = tui
+        } =
+          sidebars,
+        %GitStatusPanel{entries: []} = panel
+      ),
+      do: %{sidebars | git_status_panel: panel, git_status_tui_state: TUIState.first_row(tui)}
+
   def replace_git_status(%__MODULE__{} = sidebars, %GitStatusPanel{} = panel),
     do: %{sidebars | git_status_panel: panel}
 

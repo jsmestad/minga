@@ -7,10 +7,10 @@
 ## text
  ▌  storyboard.ex
   / ❯ tmp ❯ minga-storyboard ❯ tui-120x40 ❯ edit.plain ❯ lib ❯ storyboard.ex
-   1  defmodule Storyboard do
+▾  1  defmodule Storyboard do
    1    @moduledoc "A small file every storyboard scenario starts in."
    2
-   3    def greet(name) do
+▾  3    def greet(name) do
    4    │ "Hello, " <> name
    5    end
    6  end
@@ -62,7 +62,8 @@
 1 57-59 #c6d0f5 #303446 -
 1 60-62 #838ba7 #303446 -
 1 63-119 #c6d0f5 #303446 -
-2 0-5 #babbf1 #414559 bold
+2 0-1 #838ba7 #414559 bold
+2 2-5 #c6d0f5 #303446 -
 2 6-14 #ca9ee6 #303446 bold
 2 15-15 #c6d0f5 #414559 -
 2 16-25 #e5c890 #303446 -
@@ -77,8 +78,8 @@
 3 70-119 #c6d0f5 #303446 -
 4 0-5 #949cbb #303446 -
 4 6-119 #c6d0f5 #303446 -
-5 0-5 #949cbb #303446 -
-5 6-7 #c6d0f5 #303446 -
+5 0-1 #838ba7 #303446 -
+5 2-7 #c6d0f5 #303446 -
 5 8-10 #ca9ee6 #303446 bold
 5 11-11 #c6d0f5 #303446 -
 5 12-16 #8caaee #303446 -

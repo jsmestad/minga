@@ -268,24 +268,15 @@ struct CursorShapeTests {
     }
 }
 
-// MARK: - WhichKeyBinding
+// MARK: - Wire.WhichKeyEntry
 
-@Suite("WhichKeyBinding Computed Properties")
-@MainActor
-struct WhichKeyBindingTests {
+@Suite("WhichKeyEntry Computed Properties")
+struct WhichKeyEntryTests {
 
-    @Test("isGroup is true when kind == 1")
-    func isGroupTrue() {
-        let binding = WhichKeyBinding(id: 0, isGroup: true, key: "b",
-                                      description: "Buffers", icon: "")
-        #expect(binding.isGroup == true)
-    }
-
-    @Test("isGroup is false when kind == 0")
-    func isGroupFalse() {
-        let binding = WhichKeyBinding(id: 0, isGroup: false, key: "f",
-                                      description: "Find file", icon: "🔍")
-        #expect(binding.isGroup == false)
+    @Test("isGroup follows the kind byte, never the label")
+    func isGroupFollowsKind() {
+        #expect(Wire.WhichKeyEntry(kind: 1, key: "b", label: "Buffers ›").isGroup == true)
+        #expect(Wire.WhichKeyEntry(kind: 0, key: "f", label: "+ looks like a group").isGroup == false)
     }
 }
 

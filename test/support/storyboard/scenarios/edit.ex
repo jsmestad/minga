@@ -53,7 +53,11 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
             "groups read like leaves: Title Case, no +",
             &assert_groups_read_like_leaves/1
           ),
-          Check.new("the Minga group reads Minga ›", &assert_group(&1, "a", "Minga"))
+          Check.new("the Minga group reads Minga ›", &assert_group(&1, "a", "Minga")),
+          Check.new(
+            "entries read in the designed sections",
+            &assert_sections(&1, ["Groups", "Often", "More"])
+          )
         ]
       ),
       Entry.built("edit.visual",
@@ -84,11 +88,11 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
     ]
   end
 
-  @doc "True for the resting home view: Normal mode, nothing transient, nothing pending, the editor focused."
+  @doc "True for the resting home view: Normal mode, nothing transient, nothing pending, the editor focused, and no notice naming next steps."
   @spec home?(Model.t()) :: boolean()
   def home?(%Model{} = model) do
     model.mode == :normal and not Model.transient_open?(model) and not Model.key_pending?(model) and
-      match?(%{surface: :editor}, model.focus)
+      match?(%{surface: :editor}, model.focus) and not Model.notice_with_next_steps?(model)
   end
 
   @doc "True when which-key is open on exactly `prefix`."

@@ -171,6 +171,7 @@ defmodule MingaEditor.StatusBar.Data do
       buf_index: state.workspace.buffers.active_index + 1,
       buf_count: Enum.count(state.workspace.buffers.list),
       notice: notice_message(state),
+      notice_actions: notice_actions(state),
       selected_operation: OperationFeedback.selected(state.feedback.operation_feedback),
       agent_status_command: agent_status_command_content(state, agent),
       # Colors follow the status the modeline shows, which comes from the active
@@ -251,6 +252,12 @@ defmodule MingaEditor.StatusBar.Data do
 
   defp plan_limit(_state), do: nil
 
+  @spec notice_actions(EditorState.t() | map()) :: [Minga.RenderModel.UI.EmptyList.Action.t()]
+  defp notice_actions(%{shell_runtime: %{state: %{notice: %Notice{actions: actions}}}}),
+    do: actions
+
+  defp notice_actions(_state), do: []
+
   @spec notice_message(EditorState.t() | map()) :: String.t() | nil
   defp notice_message(%{
          shell_runtime: %{state: %{notice: %Notice{message: message}}}
@@ -264,24 +271,13 @@ defmodule MingaEditor.StatusBar.Data do
 
   @spec pending_keys(EditorState.t() | map(), Minga.Mode.mode(), Minga.Mode.state() | nil) ::
           String.t()
-  # Which-key takes over the acknowledgment once its popup is showing, so the
-  # instant echo clears the moment which-key opens (#2666 AC #2). When a
-  # sequence resolves or is aborted, the FSM count/pending/leader fields reset,
-  # so the derived string is empty again with no extra bookkeeping (#2666 AC #3).
+  # The echo stays while which-key is open, so the modeline names the prefix the panel
+  # is waiting on ("SPC a"). When a sequence resolves or is aborted, the FSM
+  # count/pending/leader fields reset, so the derived string is empty again with no
+  # extra bookkeeping (#2666 AC #3).
   defp pending_keys(state, mode, mode_state) do
-    if whichkey_showing?(state) do
-      ""
-    else
-      register_prefix(active_register_name(state)) <> Minga.Mode.pending_keys(mode, mode_state)
-    end
+    register_prefix(active_register_name(state)) <> Minga.Mode.pending_keys(mode, mode_state)
   end
-
-  @spec whichkey_showing?(EditorState.t() | map()) :: boolean()
-  defp whichkey_showing?(%EditorState{shell_runtime: %{state: %{whichkey: %{show: true}}}}),
-    do: true
-
-  defp whichkey_showing?(%{shell_state: %{whichkey: %{show: true}}}), do: true
-  defp whichkey_showing?(_state), do: false
 
   @spec active_register_name(EditorState.t() | map()) :: String.t()
   defp active_register_name(%EditorState{} = state), do: Editing.active_register(state)

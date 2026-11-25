@@ -32,8 +32,14 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
   defp make_state(tmp_dir) do
     File.write!(Path.join(tmp_dir, "existing.txt"), "content")
     File.mkdir_p!(Path.join(tmp_dir, "subdir"))
+    tree_state(FileTree.new(tmp_dir))
+  end
 
-    tree = FileTree.new(tmp_dir)
+  # An empty folder, listed, with the tree focused.
+  defp empty_folder_state(tmp_dir),
+    do: tmp_dir |> FileTree.new() |> FileTree.refresh() |> tree_state()
+
+  defp tree_state(tree) do
     buf = BufferSync.start_buffer(tree)
     scheduler = start_scheduler()
 
@@ -469,6 +475,56 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       {:handled, state} = FileTreeHandler.handle_key(state, ?q, 0)
       assert editing(state).text == "q"
       assert tree(state) != nil
+    end
+  end
+
+  describe "an empty folder" do
+    test "its preselected step, New file, opens the naming row instead of the empty state", %{
+      tmp_dir: dir
+    } do
+      state = empty_folder_state(dir)
+      assert FileTreeState.status(ft(state)) == :empty
+
+      {:handled, state} = FileTreeHandler.handle_key(state, @enter, 0)
+
+      assert %{type: :new_file} = FileTreeState.editing(ft(state))
+      assert FileTreeState.status(ft(state)) == :ready
+      # The name is typed on a row of its own, since the folder has no row for it to replace.
+      assert [%{name: "", editing: %{type: :new_file}}] =
+               MingaEditor.FileTree.Rows.from_state(state)
+    end
+
+    test "in CUA the down arrow moves to New folder", %{tmp_dir: dir} do
+      state = empty_folder_state(dir)
+      state = put_in(state.interaction.editing_model, :cua)
+
+      {:handled, state} = FileTreeHandler.handle_key(state, 57_353, 0)
+      {:handled, state} = FileTreeHandler.handle_key(state, @enter, 0)
+
+      assert %{type: :new_folder} = FileTreeState.editing(ft(state))
+    end
+
+    test "another empty folder starts on its first step", %{tmp_dir: dir} do
+      state = empty_folder_state(dir)
+      {:handled, state} = FileTreeHandler.handle_key(state, ?j, 0)
+      assert FileTreeState.empty_selected(ft(state)) == 1
+
+      other = Path.join(dir, "other")
+      File.mkdir_p!(other)
+      moved = FileTreeState.replace_tree(ft(state), other |> FileTree.new() |> FileTree.refresh())
+      assert FileTreeState.empty_selected(moved) == 0
+
+      same = FileTreeState.replace_tree(ft(state), dir |> FileTree.new() |> FileTree.refresh())
+      assert FileTreeState.empty_selected(same) == 1
+    end
+
+    test "j moves to New folder, and Enter runs it", %{tmp_dir: dir} do
+      state = empty_folder_state(dir)
+
+      {:handled, state} = FileTreeHandler.handle_key(state, ?j, 0)
+      {:handled, state} = FileTreeHandler.handle_key(state, @enter, 0)
+
+      assert %{type: :new_folder} = FileTreeState.editing(ft(state))
     end
   end
 end

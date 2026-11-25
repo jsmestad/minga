@@ -108,6 +108,11 @@ defmodule MingaAgent.Providers.Native do
   @typedoc "Function that executes a matching hook."
   @type hook_runner :: (MingaAgent.Hooks.Hook.t(), PreToolUsePayload.t() -> HookResult.t())
 
+  @typedoc """
+  The one preview that answered `{:pending, token}` and waits for the count of the fit `key`. The provider sends its owner `{:prefix_preview_ready, token, reply}` when the count ends.
+  """
+  @type prefix_waiter :: %{token: reference(), owner: pid(), operation: term(), key: binary()}
+
   @typedoc "Counts candidate Apple prefixes in one helper start without generating."
   @type apple_counter :: ([String.t()], [[non_neg_integer()]], [Tool.t()], pos_integer() ->
                             {:ok, MingaAgent.Providers.Apple.prefix_counts()} | {:error, term()})
@@ -136,6 +141,8 @@ defmodule MingaAgent.Providers.Native do
           prefix_preview: map() | nil,
           apple_counter: apple_counter(),
           prefix_fit: {binary(), SystemPrompt.fit()} | nil,
+          prefix_counts: %{reference() => {binary(), pid()}},
+          prefix_waiter: prefix_waiter() | nil,
           llm_client: llm_client(),
           hook_runner: hook_runner(),
           active_skills: [Skills.skill()],
@@ -264,6 +271,17 @@ defmodule MingaAgent.Providers.Native do
     GenServer.call(pid, :agent_hooks)
   end
 
+  @doc """
+  Returns the folder this provider decided to work in when it started.
+
+  The session records it with the conversation, so a restored conversation works in the same folder.
+  """
+  @impl MingaAgent.Provider
+  @spec working_folder(GenServer.server()) :: WorkingFolder.t()
+  def working_folder(pid) do
+    GenServer.call(pid, :working_folder)
+  end
+
   @doc "Returns the project view associated with this provider, or nil."
   @spec project_view(GenServer.server()) :: ProjectView.t() | nil
   def project_view(pid) do
@@ -386,6 +404,8 @@ defmodule MingaAgent.Providers.Native do
       apple_counter:
         Keyword.get(opts, :apple_counter, &MingaAgent.Providers.Apple.count_prefixes/4),
       prefix_fit: nil,
+      prefix_counts: %{},
+      prefix_waiter: nil,
       llm_client: llm_client,
       hook_runner: hook_runner,
       active_skills: active_skills,
@@ -827,50 +847,15 @@ defmodule MingaAgent.Providers.Native do
   def handle_call({:preview_prefix, _token, _operation}, _from, %{prefix_preview: %{}} = state),
     do: {:reply, {:error, :prefix_transition_active}, state}
 
+  def handle_call({:preview_prefix, _token, _operation}, _from, %{prefix_waiter: %{}} = state),
+    do: {:reply, {:error, :prefix_transition_active}, state}
+
+  # A prefix whose fit is still being counted answers `{:pending, token}`; the provider
+  # sends `{:prefix_preview_ready, token, reply}` to the owner when the count ends.
   def handle_call({:preview_prefix, token, operation}, {owner, _}, %{subscriber: owner} = state)
       when is_reference(token) do
-    {operation, questions?} =
-      case operation do
-        {:with_questions, operation} -> {operation, true}
-        operation -> {operation, false}
-      end
-
-    selection = prefix_selection(state.selection, operation)
-
-    with {:ok, current} <- refresh_tool_registry_contributions(state),
-         {:ok, active_skills, result} <- preview_skills(current, operation),
-         {:ok, authentication} <-
-           Credentials.bind_request(
-             selection.credential,
-             current.authentication,
-             current.credential_opts
-           ),
-         identity = ModelSelection.replay_identity(selection, authentication.identity),
-         {schemas, current} = current_prefix_schemas(current),
-         schemas = schemas |> model_schemas(selection) |> question_schemas(questions?),
-         {:ok, fit, current} <- fit_system_prompt(current, active_skills, selection, schemas),
-         {:ok, candidate} <-
-           PrefixStore.candidate(
-             current.prefix_candidate,
-             fit.text,
-             schemas,
-             identity,
-             Enum.map(active_skills, & &1.name),
-             fit.omitted
-           ) do
-      preview = %{
-        token: token,
-        owner: owner,
-        selection: selection,
-        active_skills: active_skills,
-        authentication: authentication,
-        prefix: candidate
-      }
-
-      {:reply, {:ok, candidate, token, result}, %{current | prefix_preview: preview}}
-    else
-      {:error, _reason} = error -> {:reply, error, state}
-    end
+    {reply, next} = preview_prefix(state, token, owner, operation)
+    {:reply, reply, next}
   end
 
   def handle_call({:preview_prefix, _token, _operation}, _from, state),
@@ -993,6 +978,10 @@ defmodule MingaAgent.Providers.Native do
 
   def handle_call(:project_view, _from, state) do
     {:reply, state.project_view, state}
+  end
+
+  def handle_call(:working_folder, _from, state) do
+    {:reply, state.working_folder, state}
   end
 
   def handle_call(:changeset, _from, state) do
@@ -1225,14 +1214,35 @@ defmodule MingaAgent.Providers.Native do
     %{state | execution: execution}
   end
 
-  @spec handle_cast({:discard_prefix_preview, reference(), pid()}, state()) :: {:noreply, state()}
+  @spec handle_cast(
+          {:discard_prefix_preview, reference(), pid()} | {:warm_prefix, pid(), term()},
+          state()
+        ) :: {:noreply, state()}
   @impl GenServer
+  def handle_cast(
+        {:discard_prefix_preview, token, owner},
+        %{prefix_waiter: %{token: token, owner: owner}} = state
+      ) do
+    # The count goes on without its waiter, so the next preview finds the fit.
+    {:noreply, %{state | prefix_waiter: nil}}
+  end
+
   def handle_cast({:discard_prefix_preview, token, owner}, state) do
     case state.prefix_preview do
       %{token: ^token, owner: ^owner} -> {:noreply, %{state | prefix_preview: nil}}
       _stale -> {:noreply, state}
     end
   end
+
+  # The owner asks for the fit before the first send needs it, so that send finds it counted.
+  def handle_cast({:warm_prefix, owner, operation}, %{subscriber: owner} = state) do
+    case prefix_inputs(state, operation) do
+      {:ok, inputs} -> {:noreply, warm_prefix_fit(inputs)}
+      {:error, _reason} -> {:noreply, state}
+    end
+  end
+
+  def handle_cast({:warm_prefix, _owner, _operation}, state), do: {:noreply, state}
 
   @impl GenServer
   def handle_info({:minga_event, :agent_mcp_servers_changed, payload}, state) do
@@ -1291,6 +1301,15 @@ defmodule MingaAgent.Providers.Native do
         execution = ExecutionState.remove_worker(state.execution, pid)
         {:noreply, %{state | execution: execution}}
     end
+  end
+
+  def handle_info({:prefix_fit_counted, key, result}, state),
+    do: {:noreply, prefix_fit_counted(state, key, result)}
+
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{prefix_counts: counts} = state)
+      when is_map_key(counts, ref) do
+    {key, _pid} = Map.fetch!(counts, ref)
+    {:noreply, prefix_fit_counted(state, key, {:error, {:apple_count_failed, reason}})}
   end
 
   def handle_info(
@@ -1760,7 +1779,13 @@ defmodule MingaAgent.Providers.Native do
     })
   end
 
-  defp refresh_edit_view(state, view) do
+  # The provider works in one folder for its whole life.
+  # A view of another folder would move its tools there while its instructions still name the first, so it is refused.
+  defp refresh_edit_view(%{project_root: root}, %ProjectView{project_root: other})
+       when other != root,
+       do: {:error, {:foreign_view, other}}
+
+  defp refresh_edit_view(state, %ProjectView{} = view) do
     with :ok <- release_owned_edit_view(state) do
       install_refreshed_view(%{
         state
@@ -3509,6 +3534,94 @@ defmodule MingaAgent.Providers.Native do
       else: {:error, "Skill '#{name}' is not active"}
   end
 
+  @typep prefix_inputs :: %{
+           state: state(),
+           selection: ModelSelection.t(),
+           active_skills: [Skills.skill()],
+           result: term(),
+           authentication: term(),
+           identity: term(),
+           schemas: [map()]
+         }
+
+  @spec unwrap_prefix_operation(term()) :: term()
+  defp unwrap_prefix_operation({:with_questions, operation}), do: operation
+  defp unwrap_prefix_operation(operation), do: operation
+
+  # Everything a prefix is built from except its fitted system prompt.
+  @spec prefix_inputs(state(), term()) :: {:ok, prefix_inputs()} | {:error, term()}
+  defp prefix_inputs(state, operation) do
+    questions? = match?({:with_questions, _}, operation)
+    operation = unwrap_prefix_operation(operation)
+    selection = prefix_selection(state.selection, operation)
+
+    with {:ok, current} <- refresh_tool_registry_contributions(state),
+         {:ok, active_skills, result} <- preview_skills(current, operation),
+         {:ok, authentication} <-
+           Credentials.bind_request(
+             selection.credential,
+             current.authentication,
+             current.credential_opts
+           ) do
+      {schemas, current} = current_prefix_schemas(current)
+
+      {:ok,
+       %{
+         state: current,
+         selection: selection,
+         active_skills: active_skills,
+         result: result,
+         authentication: authentication,
+         identity: ModelSelection.replay_identity(selection, authentication.identity),
+         schemas: schemas |> model_schemas(selection) |> question_schemas(questions?)
+       }}
+    end
+  end
+
+  @spec warm_prefix_fit(prefix_inputs()) :: state()
+  defp warm_prefix_fit(%{state: current} = inputs) do
+    case fit_system_prompt(current, inputs.active_skills, inputs.selection, inputs.schemas) do
+      {:ok, _fit, warm} -> warm
+      {:counting, _key, counting} -> counting
+    end
+  end
+
+  @spec preview_prefix(state(), reference(), pid(), term()) ::
+          {{:ok, Prefix.t(), reference(), term()} | {:pending, reference()} | {:error, term()},
+           state()}
+  defp preview_prefix(state, token, owner, operation) do
+    with {:ok, %{state: current} = inputs} <- prefix_inputs(state, operation),
+         {:ok, fit, current} <-
+           fit_system_prompt(current, inputs.active_skills, inputs.selection, inputs.schemas),
+         {:ok, candidate} <-
+           PrefixStore.candidate(
+             current.prefix_candidate,
+             fit.text,
+             inputs.schemas,
+             inputs.identity,
+             Enum.map(inputs.active_skills, & &1.name),
+             fit.omitted
+           ) do
+      preview = %{
+        token: token,
+        owner: owner,
+        selection: inputs.selection,
+        active_skills: inputs.active_skills,
+        authentication: inputs.authentication,
+        prefix: candidate
+      }
+
+      {{:ok, candidate, token, inputs.result}, %{current | prefix_preview: preview}}
+    else
+      {:counting, key, counting} ->
+        waiter = %{token: token, owner: owner, operation: operation, key: key}
+        {{:pending, token}, %{counting | prefix_waiter: waiter}}
+
+      {:error, _reason} = error ->
+        {error, state}
+    end
+  end
+
   @spec prefix_selection(ModelSelection.t(), term()) :: ModelSelection.t()
   defp prefix_selection(current, {:selected, operation, _names}),
     do: prefix_selection(current, operation)
@@ -3563,7 +3676,7 @@ defmodule MingaAgent.Providers.Native do
   @apple_history_floor 1_536
 
   @spec fit_system_prompt(state(), [Skills.skill()], ModelSelection.t(), [map()]) ::
-          {:ok, SystemPrompt.fit(), state()} | {:error, String.t()}
+          {:ok, SystemPrompt.fit(), state()} | {:counting, binary(), state()}
   defp fit_system_prompt(
          state,
          active_skills,
@@ -3581,11 +3694,7 @@ defmodule MingaAgent.Providers.Native do
       _stale ->
         budget = %{reserve: reserve, history_floor: @apple_history_floor}
         measure = apple_prefix_measure(state.apple_counter, schemas, selection)
-
-        case SystemPrompt.fit(parts, budget, measure) do
-          {:ok, fit} -> {:ok, fit, %{state | prefix_fit: {key, fit}}}
-          {:error, reason} -> {:error, prefix_refusal_message(reason, selection)}
-        end
+        {:counting, key, count_prefix_fit(state, key, parts, budget, measure)}
     end
   end
 
@@ -3598,11 +3707,6 @@ defmodule MingaAgent.Providers.Native do
     {:ok, fit, state}
   end
 
-  # Preview runs inside Session's 5 s GenServer.call, which the Editor's synchronous prompt
-  # send also waits on for 5 s. One bounded count leaves 2 s for credential binding, schema
-  # projection, and Session's own transition, so a slow helper is refused, never a timeout.
-  @apple_count_deadline 3_000
-
   # Counts every candidate instructions entry with the same tool projection a dispatch sends.
   @spec apple_prefix_measure(apple_counter(), [map()], ModelSelection.t()) ::
           SystemPrompt.measure()
@@ -3612,7 +3716,7 @@ defmodule MingaAgent.Providers.Native do
     configured = selection.policy.limits.context
 
     fn texts, candidates ->
-      case within_count_deadline(fn -> counter.(texts, candidates, tools, reserve) end) do
+      case counter.(texts, candidates, tools, reserve) do
         {:ok, %{counts: counts, context: context}} ->
           {:ok, %{counts: counts, context: min(context, configured || context)}}
 
@@ -3622,35 +3726,94 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  # Runs the count in a process that owns the helper Port, so killing it at the deadline
-  # also closes the Port and retires the helper.
-  @spec within_count_deadline((-> result)) :: result | {:error, term()} when result: term()
-  defp within_count_deadline(count) do
-    parent = self()
-    receipt = make_ref()
-    {pid, monitor} = spawn_monitor(fn -> send(parent, {receipt, count.()}) end)
+  # Starting the Apple helper takes seconds, so the count never runs in a provider callback.
+  # One monitored process per fit key owns the helper Port and reports
+  # `{:prefix_fit_counted, key, result}`; a key that is already being counted starts nothing.
+  @spec count_prefix_fit(state(), binary(), SystemPrompt.t(), map(), SystemPrompt.measure()) ::
+          state()
+  defp count_prefix_fit(%{prefix_counts: counts} = state, key, parts, budget, measure) do
+    if Enum.any?(counts, fn {_monitor, {counting, _pid}} -> counting == key end) do
+      state
+    else
+      provider = self()
 
-    receive do
-      {^receipt, result} ->
-        Process.demonitor(monitor, [:flush])
-        result
+      {pid, monitor} =
+        spawn_monitor(fn ->
+          send(provider, {:prefix_fit_counted, key, SystemPrompt.fit(parts, budget, measure)})
+        end)
 
-      {:DOWN, ^monitor, :process, ^pid, reason} ->
-        {:error, {:apple_count_failed, reason}}
-    after
-      @apple_count_deadline ->
-        Process.exit(pid, :kill)
-        Process.demonitor(monitor, [:flush])
-
-        receive do
-          {^receipt, _late} -> :ok
-        after
-          0 -> :ok
-        end
-
-        {:error, :apple_count_timeout}
+      %{state | prefix_counts: Map.put(counts, monitor, {key, pid})}
     end
   end
+
+  # A finished count keeps its fit for the next preview, then answers the preview that waited
+  # for it. A count that ended after its waiter left (a Stop) still keeps its fit.
+  @spec prefix_fit_counted(state(), binary(), {:ok, SystemPrompt.fit()} | {:error, term()}) ::
+          state()
+  defp prefix_fit_counted(%{prefix_counts: counts} = state, key, result) do
+    case Enum.find(counts, fn {_monitor, {counting, _pid}} -> counting == key end) do
+      {monitor, {^key, _pid}} ->
+        Process.demonitor(monitor, [:flush])
+
+        %{state | prefix_counts: Map.delete(counts, monitor)}
+        |> keep_prefix_fit(key, result)
+        |> answer_prefix_waiter(key, result)
+
+      nil ->
+        state
+    end
+  end
+
+  @spec keep_prefix_fit(state(), binary(), {:ok, SystemPrompt.fit()} | {:error, term()}) ::
+          state()
+  defp keep_prefix_fit(state, key, {:ok, fit}), do: %{state | prefix_fit: {key, fit}}
+  # The reason a count failed is for the log. The refusal the user reads says what to do.
+  defp keep_prefix_fit(state, _key, {:error, {:fixed_prefix_exceeded, _budget}}), do: state
+
+  defp keep_prefix_fit(state, _key, {:error, reason}) do
+    Log.warning(
+      :agent,
+      "[Agent.Native] could not count the fixed prefix: #{Redaction.format_error(reason)}"
+    )
+
+    state
+  end
+
+  @spec answer_prefix_waiter(state(), binary(), {:ok, SystemPrompt.fit()} | {:error, term()}) ::
+          state()
+  defp answer_prefix_waiter(
+         %{prefix_waiter: %{key: key, token: token, owner: owner, operation: operation}} = state,
+         key,
+         {:ok, _fit}
+       ) do
+    # The preview runs again from the provider's current state. It finds the fit just kept,
+    # or, when the prefix changed while it was counted, waits for the count of the new one.
+    case preview_prefix(%{state | prefix_waiter: nil}, token, owner, operation) do
+      {{:pending, ^token}, waiting} ->
+        waiting
+
+      {reply, next} ->
+        send(owner, {:prefix_preview_ready, token, reply})
+        next
+    end
+  end
+
+  defp answer_prefix_waiter(
+         %{prefix_waiter: %{key: key, token: token, owner: owner, operation: operation}} = state,
+         key,
+         {:error, reason}
+       ) do
+    selection = prefix_selection(state.selection, unwrap_prefix_operation(operation))
+
+    send(
+      owner,
+      {:prefix_preview_ready, token, {:error, prefix_refusal_message(reason, selection)}}
+    )
+
+    %{state | prefix_waiter: nil}
+  end
+
+  defp answer_prefix_waiter(state, _key, _result), do: state
 
   @spec prefix_refusal_message(term(), ModelSelection.t()) :: String.t()
   defp prefix_refusal_message(
@@ -3661,11 +3824,11 @@ defmodule MingaAgent.Providers.Native do
   end
 
   defp prefix_refusal_message(:apple_count_timeout, selection) do
-    "#{selection.route.display_name} could not count its fixed instructions and tools within #{div(@apple_count_deadline, 1000)} seconds. Try again, or reopen /model to check availability"
+    "#{selection.route.display_name} did not finish counting its fixed instructions and tools. Try again, or reopen /model to check availability"
   end
 
-  defp prefix_refusal_message(reason, selection) do
-    "#{selection.route.display_name} could not count its fixed instructions and tools (#{Redaction.format_error(reason)}). Reopen /model to check availability"
+  defp prefix_refusal_message(_reason, selection) do
+    "#{selection.route.display_name} could not count its fixed instructions and tools. Try again, or reopen /model to check availability"
   end
 
   @spec format_tokens(non_neg_integer()) :: String.t()
@@ -3726,7 +3889,7 @@ defmodule MingaAgent.Providers.Native do
   defp environment_line(project_root, working_folder) do
     case WorkingFolder.refusal(working_folder) do
       nil ->
-        "- Project root: #{project_root}"
+        WorkingFolder.root_line(project_root)
 
       line ->
         "- No working folder. #{line} " <>

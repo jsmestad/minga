@@ -11,6 +11,10 @@ defmodule MingaAgent.Providers.Apple do
   @probe_timeout 2_000
   # A count must finish well inside the 5 s GenServer.call timeouts of its synchronous callers.
   @count_timeout 3_000
+  # The fixed-prefix count runs in its own process, off every caller's path (the Native
+  # provider starts it), so this only bounds a helper that hangs. Starting the helper alone
+  # takes about three seconds.
+  @prefix_count_timeout 20_000
   @inference_timeout 120_000
   @max_frame 131_072
   @unavailable %{
@@ -78,7 +82,7 @@ defmodule MingaAgent.Providers.Apple do
   @spec count([ReqLLM.Message.t()], [Tool.t()], pos_integer()) ::
           {:ok, count()} | {:error, term()}
   def count(messages, tools, max_tokens) do
-    with {:ok, frame} <- count_frame(messages, tools, max_tokens, %{}) do
+    with {:ok, frame} <- count_frame(messages, tools, max_tokens, %{}, @count_timeout) do
       case frame do
         %{"instructionsTokens" => prefix, "transcriptTokens" => total, "context" => context}
         when is_integer(prefix) and prefix >= 0 and is_integer(total) and total >= prefix and
@@ -102,7 +106,14 @@ defmodule MingaAgent.Providers.Apple do
       when is_list(parts) and is_list(candidates) do
     extra = %{parts: parts, candidates: candidates}
 
-    with {:ok, frame} <- count_frame([ReqLLM.Context.user("")], tools, max_tokens, extra),
+    with {:ok, frame} <-
+           count_frame(
+             [ReqLLM.Context.user("")],
+             tools,
+             max_tokens,
+             extra,
+             @prefix_count_timeout
+           ),
          do: prefix_counts(frame, length(candidates))
   end
 
@@ -117,14 +128,14 @@ defmodule MingaAgent.Providers.Apple do
 
   defp prefix_counts(_frame, _expected), do: {:error, :invalid_apple_frame}
 
-  @spec count_frame([ReqLLM.Message.t()], [Tool.t()], pos_integer(), map()) ::
+  @spec count_frame([ReqLLM.Message.t()], [Tool.t()], pos_integer(), map(), pos_integer()) ::
           {:ok, map()} | {:error, term()}
-  defp count_frame(messages, tools, max_tokens, extra) do
+  defp count_frame(messages, tools, max_tokens, extra, timeout) do
     with {:ok, path} <- helper_path(),
          {:ok, messages} <- project_messages(messages, []),
          {:ok, tools} <- project_tools(tools, []),
          {:ok, payload} <- encode_request("count", messages, tools, max_tokens, extra),
-         {:ok, frame} <- request_frame(path, payload, @count_timeout, :apple_count_timeout) do
+         {:ok, frame} <- request_frame(path, payload, timeout, :apple_count_timeout) do
       case frame do
         %{"error" => reason} when is_binary(reason) -> {:error, {:apple_inference, reason}}
         frame -> {:ok, frame}

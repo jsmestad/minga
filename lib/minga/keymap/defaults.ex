@@ -228,6 +228,36 @@ defmodule Minga.Keymap.Defaults do
     {~k(m), "Filetype"}
   ]
 
+  # Which-key sections, by the prefix they belong to (formatted, without the
+  # leader). Each section is a column with a dim name above it; keys are listed
+  # in display order. A bound key no section lists joins a trailing "More"
+  # section; a listed key that is not bound is skipped. Prefixes without an
+  # entry here get one unnamed section. See docs/design/surfaces.md.
+  @which_key_sections %{
+    "" => [
+      {"Groups", ~w(a s c g f b w o h t q)},
+      {"Often", ["SPC", ",", "/", ":"]}
+    ],
+    "a" => [
+      {"Tasks", ~w(a n i w s)},
+      {"Conversation", ~w(v ? e q)},
+      {"Changes", ~w(r y d u p)},
+      {"More", ~w(x S W A)}
+    ]
+  }
+
+  # macOS platform keys, as aliases of the command they run without a modifier
+  # (docs/design/keys.md, rule 5). Which-key shows them beside the entry and the
+  # macOS menu bar puts them in the shortcut column, so the two teach each other.
+  @platform_keys %{
+    save: "⌘S",
+    undo: "⌘Z",
+    quit: "⌘W",
+    quit_all: "⌘Q",
+    jump_back: "⌘[",
+    jump_forward: "⌘]"
+  }
+
   # ---------------------------------------------------------------------------
   # Public API
   # ---------------------------------------------------------------------------
@@ -249,6 +279,24 @@ defmodule Minga.Keymap.Defaults do
       Bindings.bind_prefix(trie, keys, description)
     end)
   end
+
+  @doc """
+  Returns the which-key sections for a leader prefix, as `{name, formatted_keys}` in display order.
+
+  `prefix` is the formatted sequence after the leader (`""` for `SPC` itself, `"a"` for `SPC a`). An empty list means the prefix declares no sections.
+  """
+  @spec which_key_sections(String.t()) :: [{String.t(), [String.t()]}]
+  def which_key_sections(prefix) when is_binary(prefix),
+    do: Map.get(@which_key_sections, prefix, [])
+
+  @doc "Returns the macOS ⌘ equivalent of `command` (`\"⌘S\"`), or nil when it has none."
+  @spec platform_key(atom() | tuple() | nil) :: String.t() | nil
+  def platform_key(command) when is_atom(command), do: Map.get(@platform_keys, command)
+  def platform_key(_command), do: nil
+
+  @doc "Returns every macOS ⌘ equivalent, keyed by the command it runs."
+  @spec platform_keys() :: %{atom() => String.t()}
+  def platform_keys, do: @platform_keys
 
   @doc """
   Returns the leader key as a `t:Minga.Keymap.Bindings.key/0` tuple (SPC = `{32, 0}`).

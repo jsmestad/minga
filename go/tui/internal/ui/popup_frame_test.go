@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
@@ -51,7 +52,7 @@ func TestPopupFrameBudgetFollowsEveryInsetStep(t *testing.T) {
 
 // TestPopoversFitTheirRowsInsideTheirFrame renders each bordered popover at common terminal widths and checks that the budget is the outer width minus the border and the inset token on each side, and that no fitted row wraps.
 func TestPopoversFitTheirRowsInsideTheirFrame(t *testing.T) {
-	which := protocol.WhichKey{Visible: true, Prefix: "SPC", PageCount: 2, Bindings: []protocol.WhichKeyBinding{{Key: "f", Description: "+file"}, {Key: "b", Description: "+buffer"}, {Key: "w", Description: "+window"}, {Key: "a", Description: "+agent"}, {Key: "g", Description: "+git"}, {Key: "q", Description: "quit"}, {Key: "s", Description: "+search"}, {Key: "t", Description: "+toggle"}, {Key: "h", Description: "+help"}}}
+	which := whichKeyFixture()
 	notes := protocol.Notifications{Visible: true, Items: []protocol.Notification{{ID: "n1", Title: "Update ready", Body: "Restart to apply", Source: "minga", Dismissable: true, Actions: []protocol.NotificationAction{{ID: "a1", Label: "Restart"}, {ID: "a2", Label: "Later"}}}}}
 	picker := modelPickerFixture(0)
 	picker.Query = "claude"
@@ -71,14 +72,12 @@ func TestPopoversFitTheirRowsInsideTheirFrame(t *testing.T) {
 		})
 
 		t.Run(fmt.Sprintf("which_key_%d", size.width), func(t *testing.T) {
-			outer := m.whichKeyWidth()
-			budget := m.whichKeyFrame().contentWidth(outer)
-			if want := outer - 2 - 2*whichKeyInsetH.cols(); budget != want {
-				t.Errorf("which-key budget %d, want %d", budget, want)
+			popup := m.renderFloatingWhichKey(which)
+			for _, line := range strings.Split(popup, "\n") {
+				if got := lipgloss.Width(line); got != m.width {
+					t.Errorf("which-key row is %d wide, want the full %d: %q", got, m.width, ansi.Strip(line))
+				}
 			}
-			columns := m.whichKeyColumns(budget, len(which.Bindings))
-			rows := (len(which.Bindings) + columns - 1) / columns
-			checkFramedPopup(t, m.renderFloatingWhichKey(which), outer, 1+rows+1+2+2*whichKeyInsetV.rows())
 			model := m
 			model.chrome = maps.Clone(m.chrome)
 			model.chrome[generated.OPGuiWhichKey] = protocol.ChromePayload{Opcode: generated.OPGuiWhichKey, Which: which}

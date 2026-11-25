@@ -35,6 +35,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.RenderModel.UI.WhichKeyBuilder
   alias MingaEditor.RenderModel.UI.WorkspacesBuilder
   alias MingaEditor.StatusBar.Data, as: StatusBarData
+  alias MingaEditor.UI.WhichKey.Counts, as: WhichKeyCounts
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias Minga.RenderModel
 
@@ -53,7 +54,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
     ui = %RenderModel.UI{
       theme: ThemeBuilder.build(ctx.intent.frame.theme),
       breadcrumb: BreadcrumbBuilder.build(file_path, root),
-      which_key: build_which_key(ctx),
+      which_key: build_which_key(ctx, sb_data),
       focus_owner: build_focus_owner(ctx),
       notifications: NotificationsBuilder.build(ctx.intent.frame.notifications),
       search_state: SearchStateBuilder.build(ctx.workspace.search),
@@ -110,13 +111,36 @@ defmodule MingaEditor.RenderModel.UI.Builder do
     end
   end
 
-  @spec build_which_key(Context.t()) :: Minga.RenderModel.UI.WhichKey.t() | nil
-  defp build_which_key(%Context{intent: %{frame: %{shell_state: %{whichkey: wk}}}})
+  @spec build_which_key(Context.t(), StatusBarData.t() | nil) ::
+          Minga.RenderModel.UI.WhichKey.t() | nil
+  defp build_which_key(%Context{intent: %{frame: %{shell_state: %{whichkey: wk}}}} = ctx, sb_data)
        when wk != nil do
-    WhichKeyBuilder.build(wk)
+    WhichKeyBuilder.build(wk, counts: which_key_counts(ctx, sb_data), platform_keys?: ctx.gui?)
   end
 
-  defp build_which_key(_ctx), do: nil
+  defp build_which_key(_ctx, _sb_data), do: nil
+
+  # Live counts read the modeline's facts, so which-key and the modeline never disagree.
+  # They are only built while which-key shows.
+  @spec which_key_counts(Context.t(), StatusBarData.t() | nil) :: WhichKeyCounts.t()
+  defp which_key_counts(
+         %Context{intent: %{frame: %{shell_state: %{whichkey: %{show: true}}}}} = ctx,
+         sb_data
+       ) do
+    facts = if sb_data, do: StatusBarData.to_modeline_data(sb_data), else: %{}
+
+    facts
+    |> Map.put(:pending_review_count, pending_review_count(ctx))
+    |> WhichKeyCounts.from_facts()
+  end
+
+  defp which_key_counts(_ctx, _sb_data), do: %{}
+
+  @spec pending_review_count(Context.t()) :: non_neg_integer()
+  defp pending_review_count(%Context{tab_bar: %MingaEditor.State.TabBar{} = tab_bar}),
+    do: MingaEditor.UI.Picker.PendingReviewsSource.pending_count(tab_bar)
+
+  defp pending_review_count(_ctx), do: 0
 
   @spec build_focus_owner(Context.t()) :: Minga.RenderModel.UI.FocusOwner.t()
   defp build_focus_owner(%Context{intent: %{frame: %{focus_owner: owner}}}), do: owner

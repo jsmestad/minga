@@ -57,7 +57,8 @@ defmodule Minga.Keymap.Scope.GitStatus do
          {"d", "Discard changes (with confirmation)"},
          {"S", "Stage all"},
          {"U", "Unstage all"},
-         {"o / Enter", "Open file in editor"},
+         {"o", "Open file in editor"},
+         {"Enter", "Open file, or run a clean tree's selected step"},
          {"p", "Preview diff"},
          {"P", "Push to remote"},
          {"l", "Pull from remote"},
@@ -103,7 +104,7 @@ defmodule Minga.Keymap.Scope.GitStatus do
     |> Bindings.bind(~k(f), :git_status_fetch, "Fetch from remote")
     # Open/commit
     |> Bindings.bind(~k(o), :git_status_open_file, "Open file")
-    |> Bindings.bind(~k(RET), :git_status_open_file, "Open file")
+    |> Bindings.bind(~k(RET), :git_status_activate, "Open file or run step")
     |> Bindings.bind(~k(c c), :git_commit_open, "Start commit")
     |> Bindings.bind(~k(c g), :git_generate_commit_message, "Generate AI commit message")
     # Discard confirmation
@@ -131,7 +132,10 @@ defmodule Minga.Keymap.Scope.GitStatus do
         |> Bindings.bind(~k(r), :git_status_retry, "Pull and retry")
         |> Bindings.bind(~k(TAB), :git_status_toggle_section, "Toggle section collapse")
         # Open/commit
-        |> Bindings.bind(~k(RET), :git_status_open_file, "Open file")
+        |> Bindings.bind(~k(RET), :git_status_activate, "Open file or run step")
+        |> Bindings.bind(~k(P), :git_status_push, "Push to remote")
+        |> Bindings.bind(~k(l), :git_status_pull, "Pull from remote")
+        |> Bindings.bind(~k(f), :git_status_fetch, "Fetch from remote")
         |> Bindings.bind([{?c, @cmd}], :git_commit_open, "Start commit")
         |> Bindings.bind(~k(C-c), :git_commit_open, "Start commit")
         # Close

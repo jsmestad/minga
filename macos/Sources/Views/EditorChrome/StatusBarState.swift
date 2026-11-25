@@ -52,6 +52,8 @@ public final class StatusBarState {
     public var lspStatus: UInt8 = 0
     public var gitBranch: String = ""
     public var message: String = ""
+    /// The next steps the echo-line notice names; empty when the message names none.
+    public var messageActions: [Wire.EmptyListAction] = []
     public var filetype: String = ""
     public var errorCount: UInt16 = 0
     public var warningCount: UInt16 = 0
@@ -102,6 +104,7 @@ public final class StatusBarState {
         if self.lspStatus != data.lspStatus { self.lspStatus = data.lspStatus }
         if self.gitBranch != data.gitBranch { self.gitBranch = data.gitBranch }
         if self.message != data.message { self.message = data.message }
+        if self.messageActions != data.messageActions { self.messageActions = data.messageActions }
         if self.filetype != data.filetype { self.filetype = data.filetype }
         if self.errorCount != data.errorCount { self.errorCount = data.errorCount }
         if self.warningCount != data.warningCount { self.warningCount = data.warningCount }
@@ -165,6 +168,7 @@ public final class StatusBarState {
         lspStatus = 0
         gitBranch = ""
         message = ""
+        messageActions = []
         filetype = ""
         errorCount = 0
         warningCount = 0
