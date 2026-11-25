@@ -710,6 +710,47 @@ defmodule MingaEditor.Agent.DraftWorkflow do
 
   defp capture_queue(
          %UIState{
+           draft_save: %DraftSave{target: destination, buffer: buffer}
+         } = ui,
+         state,
+         owner,
+         destination,
+         target,
+         kind,
+         content
+       ) do
+    capture_queue(
+      ui,
+      state,
+      owner,
+      destination,
+      target,
+      kind,
+      content,
+      Buffer.inspection_marker(buffer)
+    )
+  catch
+    :exit, _reason -> {:queue_not_ready, ui}
+  end
+
+  defp capture_queue(ui, _state, _owner, _destination, _target, _kind, _content),
+    do: {:queue_not_ready, ui}
+
+  # `marker` is the composer as it was when the key was pressed. A queue held
+  # behind an autosave runs later with that marker, so text typed after the
+  # press stays in the composer instead of being cleared with the queued input.
+  @spec capture_queue(
+          UIState.t(),
+          State.t(),
+          non_neg_integer(),
+          DraftSave.target(),
+          Session.queue_target(),
+          TurnExecution.prompt_kind(),
+          TurnExecution.content(),
+          DraftSave.marker()
+        ) :: {term(), UIState.t()}
+  defp capture_queue(
+         %UIState{
            draft_save: %DraftSave{target: destination, buffer: buffer} = save,
            panel: %{prompt_buffer: buffer}
          } = ui,
@@ -718,11 +759,11 @@ defmodule MingaEditor.Agent.DraftWorkflow do
          {_session, record} = destination,
          {record, _, sequence} = target,
          kind,
-         content
+         content,
+         marker
        ) do
     ref = make_ref()
     token = Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
-    marker = Buffer.inspection_marker(buffer)
     shown = Enum.map(save.attachments, &DraftAttachment.identity/1)
 
     with false <- nil in shown,
@@ -736,14 +777,62 @@ defmodule MingaEditor.Agent.DraftWorkflow do
         {:error, _reason} -> {:queue_not_ready, ui}
       end
     else
+      :pending -> defer_queue(ui, save, {target, kind, content, marker})
       _unavailable -> {:queue_not_ready, ui}
     end
   catch
     :exit, _reason -> {:queue_not_ready, ui}
   end
 
-  defp capture_queue(ui, _state, _owner, _destination, _target, _kind, _content),
+  defp capture_queue(ui, _state, _owner, _destination, _target, _kind, _content, _marker),
     do: {:queue_not_ready, ui}
+
+  # The composer's own autosave is answering: hold the queue and run it when the
+  # save does (`release_deferred_queue/4`), so a fast typist is never refused.
+  @spec defer_queue(UIState.t(), DraftSave.t(), DraftSave.deferred_queue()) ::
+          {:unchanged | :queue_not_ready, UIState.t()}
+  defp defer_queue(ui, save, deferred) do
+    case DraftSave.defer_queue(save, deferred) do
+      {:ok, held} -> {:unchanged, UIState.project_draft_save(ui, held)}
+      :pending -> {:queue_not_ready, ui}
+    end
+  end
+
+  # Runs a queue held behind an autosave once the save has answered. A save that
+  # left the composer unable to queue reports the refusal it would have shown.
+  @spec release_deferred_queue(
+          {term(), UIState.t()},
+          State.t(),
+          non_neg_integer(),
+          DraftSave.target()
+        ) :: {term(), UIState.t()}
+  defp release_deferred_queue(
+         {outcome, %UIState{draft_save: %DraftSave{} = save} = ui},
+         state,
+         owner,
+         destination
+       ) do
+    case DraftSave.release_deferred_queue(save) do
+      :none ->
+        {outcome, ui}
+
+      {:drop, released} ->
+        {:queue_not_ready, UIState.project_draft_save(ui, released)}
+
+      {:run, {target, kind, content, marker}, released} ->
+        ui
+        |> UIState.project_draft_save(released)
+        |> capture_queue(state, owner, destination, target, kind, content, marker)
+        |> keep_outcome(outcome)
+    end
+  end
+
+  defp release_deferred_queue(result, _state, _owner, _destination), do: result
+
+  # The save's own outcome stays unless the held queue has something to say.
+  @spec keep_outcome({term(), UIState.t()}, term()) :: {term(), UIState.t()}
+  defp keep_outcome({:unchanged, ui}, outcome), do: {outcome, ui}
+  defp keep_outcome(result, _outcome), do: result
 
   @doc "Checks a pending local admission against the recovered owner without submitting it again."
   @spec reconcile_restarted_queue(State.t(), String.t(), pid(), pid()) :: State.t()
@@ -924,8 +1013,10 @@ defmodule MingaEditor.Agent.DraftWorkflow do
       } = ui ->
         {outcome, updated} = apply_result(ui, save, owner, ref, result)
 
-        {outcome,
-         acknowledge_accepted_queue(updated, state, {session, id}, owner, outcome, result)}
+        acknowledged =
+          acknowledge_accepted_queue(updated, state, {session, id}, owner, outcome, result)
+
+        release_deferred_queue({outcome, acknowledged}, state, owner, {session, id})
 
       ui ->
         {:unchanged, ui}

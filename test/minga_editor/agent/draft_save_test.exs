@@ -105,4 +105,83 @@ defmodule MingaEditor.Agent.DraftSaveTest do
     assert :ordinary = DraftSave.submission(accepted)
     assert {:ok, 3, _pending_save} = DraftSave.begin_save(accepted, make_ref(), newer)
   end
+
+  describe "a queue pressed while the composer's own autosave is in flight" do
+    @marker {0, {0, 3}}
+    @deferred {{"record", "request", 1}, :follow_up, "later", {0, {0, 5}}}
+
+    defp ready do
+      target = {self(), "record"}
+
+      target
+      |> DraftSave.loading(self(), make_ref(), @marker)
+      |> DraftSave.loaded(1, @marker, nil)
+    end
+
+    # One composer in each request tag a queue can meet.
+    defp requests do
+      ready = ready()
+      {:ok, 1, saving} = DraftSave.begin_save(ready, make_ref(), {0, {0, 4}})
+      {:ok, 1, recalling} = DraftSave.begin_recall(ready, make_ref(), {0, {0, 4}})
+      {:ok, 1, attaching} = DraftSave.begin_attachment(ready, make_ref(), {0, {0, 4}})
+
+      {:ok, 1, queueing} =
+        DraftSave.begin_queue(ready, make_ref(), {0, {0, 4}}, {1, "t", :follow_up})
+
+      %{
+        ready: ready,
+        saving: saving,
+        recalling: recalling,
+        attaching: attaching,
+        queueing: queueing
+      }
+    end
+
+    test "only an autosave holds the queue; every other request still refuses it" do
+      for {tag, save} <- requests() do
+        case {tag, DraftSave.defer_queue(save, @deferred)} do
+          {:saving, {:ok, held}} ->
+            assert held.deferred_queue == @deferred
+
+          {:saving, other} ->
+            flunk("an autosave must hold the queue, got #{inspect(other)}")
+
+          {_tag, result} ->
+            assert result == :pending, "#{tag} must refuse, got #{inspect(result)}"
+        end
+      end
+    end
+
+    test "the held queue runs when the save answers, and only then" do
+      %{saving: saving} = requests()
+      {:ok, held} = DraftSave.defer_queue(saving, @deferred)
+      {:saving, ref, _, _, _} = held.request
+
+      assert DraftSave.release_deferred_queue(held) == :none
+      assert {:ok, saved} = DraftSave.saved(held, ref, 2)
+      assert {:run, @deferred, released} = DraftSave.release_deferred_queue(saved)
+      assert released.deferred_queue == nil
+      assert DraftSave.release_deferred_queue(released) == :none
+    end
+
+    test "a save that leaves the composer unable to queue drops the held queue" do
+      %{saving: saving} = requests()
+      {:ok, held} = DraftSave.defer_queue(saving, @deferred)
+      {:saving, ref, _, _, _} = held.request
+
+      assert {:ok, blocked} = DraftSave.failed(held, ref, :blocked)
+      assert {:drop, dropped} = DraftSave.release_deferred_queue(blocked)
+      assert dropped.deferred_queue == nil
+
+      assert {:ok, retried} = DraftSave.failed(held, ref, :retryable)
+      assert {:run, @deferred, _} = DraftSave.release_deferred_queue(retried)
+    end
+
+    test "a later press replaces the held queue" do
+      %{saving: saving} = requests()
+      {:ok, held} = DraftSave.defer_queue(saving, @deferred)
+      newer = put_elem(@deferred, 2, "later still")
+      assert {:ok, %{deferred_queue: ^newer}} = DraftSave.defer_queue(held, newer)
+    end
+  end
 end

@@ -9,6 +9,13 @@ defmodule MingaEditor.Agent.DraftSave do
   @type marker :: {non_neg_integer(), DraftSnapshot.position()}
   @type revision :: non_neg_integer()
   @type queue_admission :: {pos_integer(), String.t(), TurnExecution.prompt_kind()}
+
+  @typedoc """
+  A queue or steer pressed while the composer's own autosave was in flight: the displayed queue target, the kind, the content, and the composer marker at the key press. It runs as soon as the save answers.
+  """
+  @type deferred_queue ::
+          {MingaAgent.Session.queue_target(), TurnExecution.prompt_kind(),
+           TurnExecution.content(), marker()}
   @type request ::
           {:loading, reference(), marker()}
           | {:ready, revision(), marker() | nil}
@@ -34,6 +41,7 @@ defmodule MingaEditor.Agent.DraftSave do
           timer: reference() | nil,
           offer: pos_integer() | nil,
           retirement: {reference(), TurnExecution.queue_receipt()} | nil,
+          deferred_queue: deferred_queue() | nil,
           rearm_on_save_failure: boolean(),
           attachments: [DraftSnapshot.attachment()]
         }
@@ -46,6 +54,7 @@ defmodule MingaEditor.Agent.DraftSave do
     :timer,
     :offer,
     :retirement,
+    :deferred_queue,
     attachments: [],
     rearm_on_save_failure: false
   ]
@@ -173,6 +182,34 @@ defmodule MingaEditor.Agent.DraftSave do
   end
 
   def begin_queue(%__MODULE__{}, _ref, _marker, _attempt), do: :pending
+
+  @doc """
+  Holds a queue or steer pressed while the composer's own autosave is in flight, so it runs when the save answers instead of being refused.
+
+  Only an autosave defers: every other request in flight (a recall, an attachment, a submission) still refuses, because it changes what the composer holds. A later press replaces the held one; the composer shows one draft.
+  """
+  @spec defer_queue(t(), deferred_queue()) :: {:ok, t()} | :pending
+  def defer_queue(
+        %__MODULE__{request: {:saving, _, _, _, _}, retirement: nil} = save,
+        {_target, _kind, _content, _marker} = deferred
+      ),
+      do: {:ok, %{save | deferred_queue: deferred}}
+
+  def defer_queue(%__MODULE__{}, _deferred), do: :pending
+
+  @doc """
+  Releases a held queue once its save has answered: `{:run, deferred, save}` when the composer is ready to queue, `{:drop, save}` when the save left it unable to, and `:none` when nothing is held or the save is still in flight.
+  """
+  @spec release_deferred_queue(t()) :: {:run, deferred_queue(), t()} | {:drop, t()} | :none
+  def release_deferred_queue(%__MODULE__{deferred_queue: nil}), do: :none
+  def release_deferred_queue(%__MODULE__{request: {:saving, _, _, _, _}}), do: :none
+
+  def release_deferred_queue(
+        %__MODULE__{request: {:ready, _, _}, retirement: nil, deferred_queue: deferred} = save
+      ),
+      do: {:run, deferred, %{save | deferred_queue: nil}}
+
+  def release_deferred_queue(%__MODULE__{} = save), do: {:drop, %{save | deferred_queue: nil}}
 
   @doc "Moves only a pending queue acknowledgement to the replacement owner of the same record."
   @spec rebind_queue(t(), target(), pid()) ::
