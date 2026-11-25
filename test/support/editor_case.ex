@@ -154,6 +154,9 @@ defmodule Minga.Test.EditorCase do
     editor_opts = [
       name: editor_name,
       backend: backend,
+      # A test editor shares the VM with every other test, so it must not redirect the VM's console.
+      # The redirected `:standard_error` device dies with this editor and nothing restores the name.
+      redirect_console: false,
       rendering: rendering,
       port_manager: port,
       buffer: buffer,
@@ -291,6 +294,7 @@ defmodule Minga.Test.EditorCase do
     editor_opts = [
       name: :"headless_editor_#{id}",
       backend: :headless,
+      redirect_console: false,
       rendering: rendering,
       port_manager: port,
       buffer: buffer,
