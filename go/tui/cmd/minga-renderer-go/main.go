@@ -43,7 +43,7 @@ func run() error {
 	_ = os.Unsetenv(terminal.OverridesVariable)
 	model, problems := ui.NewWithTransport(width, height, out, done).WithTerminalOverrides(overrides)
 	if len(problems) > 0 {
-		log.Printf("[GO_TUI/warn] %s: ignored %s", terminal.OverridesVariable, strings.Join(problems, "; "))
+		log.Printf("[GO_TUI/warn] %s: ignored entries: %s", terminal.OverridesVariable, strings.Join(problems, "; "))
 	}
 	model = model.WithTerminalEnvironment(os.Getenv)
 	if err := protocol.WritePacket(os.Stdout, model.ReadyPacket()); err != nil {
