@@ -559,7 +559,7 @@ defmodule Minga.Buffer.UndoPatch do
   end
 
   @spec join_reversed([String.t()]) :: String.t()
-  defp join_reversed(pieces), do: pieces |> Enum.reverse() |> IO.iodata_to_binary()
+  defp join_reversed(pieces), do: pieces |> Enum.reverse() |> Enum.join()
 
   # A cluster's kind is its first code point's: a word character, white space, or anything else.
   @spec cluster_kind(String.t()) :: :word | :space | :other
