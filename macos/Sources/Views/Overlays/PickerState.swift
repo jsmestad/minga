@@ -316,8 +316,11 @@ public final class PickerState {
     @discardableResult
     public func previewNavigation(codepoint: UInt32, modifiers: UInt8) -> Bool {
         guard let delta = movementDelta(codepoint: codepoint, modifiers: modifiers) else {
-            localPresentationStore.discard(.picker)
-            previewSelectedIndex = nil
+            // The editor view calls this for every key press, so nothing is written unless a preview is held.
+            if previewSelectedIndex != nil || localPresentationStore.preview(for: .picker) != nil {
+                localPresentationStore.discard(.picker)
+                previewSelectedIndex = nil
+            }
             return false
         }
         return previewNavigation(delta: delta)
