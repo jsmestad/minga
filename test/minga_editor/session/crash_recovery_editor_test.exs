@@ -52,6 +52,7 @@ defmodule MingaEditor.Session.CrashRecoveryEditorTest do
     assert Buffer.dirty?(reopened)
     assert active_buffer(ctx) == reopened
     assert notice_message(ctx) =~ "notes.txt was reopened with its unsaved text"
+    wait_until(ctx, fn state -> crashed not in state.workspace.buffers.list end)
 
     # The read does not consume the swap: the text is still unsaved, so it must survive a second failure.
     assert File.exists?(Swap.swap_path(path, swap_dir: swap_dir))
