@@ -94,6 +94,7 @@ This check runs only on a full run. `python3 design/tools/site_check.py site/ind
 - `data-step` is the step id. Steps keep their document order.
 - `data-lab-instruction` is the step's short label, which the stepper shows.
 - `data-lab-caption="id"` is one caption. A step holds one or more, and caption ids are unique in the lab. Lab state names a caption by id; the caption line under the stage shows a copy of that element's content, links included.
+- `data-lab-key` marks the place inside a caption where the caption line names the keys just pressed (`caption.show(id, keys)`). The page puts stand-in words there, such as "That key", so the list reads well without JavaScript. This is how a lab answers a key it does not bind: one caption id, a different key each time.
 - `data-lab-text="id"` marks a named string used elsewhere in the stage, such as a prompt that the lab types out. It may sit anywhere in the lab root.
 
 The list is ordinary visible HTML, never a `<template>`, a `<script>` or an attribute value, so this check reads it. It is also what a reader sees with JavaScript off, so write it to read well as a plain list. `mountLab` in `copy.ts` reads the copy and adds the class `lab-live` to the root, and the stylesheet then hides the list. Words that belong to the stage itself (a button label, the text of a specimen) sit in the stage markup. `site/ts/src/lab/copy.ts` documents the same contract next to the code that reads it; the home page demo (`[data-spec-board-demo]` in `site/index.html`) is the reference use.

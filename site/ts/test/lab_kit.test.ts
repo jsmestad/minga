@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { captionChange } from "../src/lab/caption.ts";
 import { esc } from "../src/lab/esc.ts";
 import { createKeycast, keycastPush, keycastText } from "../src/lab/keycast.ts";
 import { capturesKey, focusAfterControlClick, nextVisible, normalizeKey, stepPrefix } from "../src/lab/stage.ts";
@@ -18,6 +19,22 @@ import {
 describe("lab kit: esc", () => {
   it("escapes the five characters that can break out of text or an attribute", () => {
     assert.equal(esc(`<a href="x" title='y'>&</a>`), "&lt;a href=&quot;x&quot; title=&#39;y&#39;&gt;&amp;&lt;/a&gt;");
+  });
+});
+
+describe("lab kit: caption", () => {
+  it("swaps for another caption, refills only the key slot when the same caption names another key, and otherwise leaves the line alone", () => {
+    const cases: readonly [shown: [string, string], next: [string, string], want: ReturnType<typeof captionChange>][] = [
+      [["", ""], ["rest", ""], "swap"],
+      [["rest", ""], ["rest", ""], "none"],
+      [["rest", ""], ["unhandled", "j"], "swap"],
+      [["unhandled", "j"], ["unhandled", "w"], "keys"],
+      [["unhandled", "w"], ["unhandled", "w"], "none"],
+      [["unhandled", "w"], ["found", "] h"], "swap"],
+    ];
+    for (const [shown, next, want] of cases) {
+      assert.equal(captionChange({ id: shown[0], keys: shown[1] }, { id: next[0], keys: next[1] }), want, `${shown} to ${next}`);
+    }
   });
 });
 
