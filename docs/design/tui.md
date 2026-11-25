@@ -65,17 +65,17 @@ Focus reporting does two jobs: when the terminal window loses focus, the borders
 
 ### Keys
 
-A terminal with enhanced key reporting (the Kitty keyboard protocol, which Kitty, Ghostty, WezTerm, iTerm, foot and Alacritty have, or xterm's modifyOtherKeys) reports each key as pressed: Esc is its own sequence with no delay, Tab is not `⌃I`, Enter is not `⌃M`, and `⌘` arrives as a modifier. Minga asks for it at startup and puts the terminal back as it was on exit.
+A terminal with the Kitty keyboard protocol (Kitty, Ghostty, WezTerm, iTerm, foot and Alacritty have it) reports each key as pressed: Esc is its own sequence with no delay, Tab is not `⌃I`, Enter is not `⌃M`, and `⌘` arrives as a modifier. Minga asks for it at startup and puts the terminal back as it was on exit. Minga also asks for xterm's modifyOtherKeys, which reports modified keys such as `⌥↩` as their own sequences but still sends Esc as a lone `ESC`, so the rule below applies there too.
 
-Without it, the Esc key and the Alt modifier are the same byte: Esc is `ESC`, and `⌥↩` is `ESC` followed by Enter. Minga tells them apart by how the bytes arrive, because a terminal writes the bytes of one key together:
+Without the Kitty keyboard protocol, the Esc key and the Alt modifier are the same byte: Esc is `ESC`, and `⌥↩` is `ESC` followed by Enter. Minga tells them apart by how the bytes arrive, because a terminal writes the bytes of one key together:
 
 - `ESC` and a key in one read are Alt and that key. `⌥↩` queues.
 - A read that is only the `ESC` byte is the Esc key, and what the next read brings is a separate key. So Esc then Enter typed by a person in a local terminal sends, however fast, and the same holds for Esc then Space or Esc then `j`. The Esc key is delivered the moment the next key arrives.
 - An Esc with nothing after it is delivered after 50 ms, the same default as Neovim's `ttimeoutlen`. That wait is what lets an arrow key still be one key when a slow link splits its sequence after the first byte, so it cannot be shorter without breaking those.
 
-The rule (`KeyInput` in `go/tui/internal/terminal/key_input.go`) cannot see two cases, and enhanced key reporting removes both:
+The rule (`KeyInput` in `go/tui/internal/terminal/key_input.go`) cannot see two cases, and the Kitty keyboard protocol removes both:
 
-- `ESC` and Enter that reach Minga in a single write are `⌥↩`. That is what a script that writes both bytes produces, what a remote link that merges two key presses produces, and what a multiplexer produces inside its own escape time. In tmux that is the `escape-time` option: 10 ms by default since tmux 3.5 and 500 ms before it, so on an older tmux set `set -sg escape-time 10`.
+- `ESC` and Enter that reach Minga in a single read are `⌥↩`. That is what a script that writes both bytes produces, what a remote link that merges two key presses produces, what a multiplexer produces inside its own escape time, and what happens when Minga is too busy to read between the two keys, so the terminal hands it both at once. In tmux that is the `escape-time` option: 10 ms by default since tmux 3.5 and 500 ms before it, so on an older tmux set `set -sg escape-time 10`.
 - Esc followed within 50 ms by one of `[ O P ] _ ^ X \` reads as it always did, because those bytes continue an escape sequence.
 
 Which `⌘` keys a terminal gets: `⌘.` (stop the agent) and `⌘↩` (send from the composer) in every profile, and `⌘S`, `⌘Z` and the other desktop shortcuts in the CUA profile, when the terminal reports `⌘` and does not keep the key for itself. In the Vim profile `⌘S` and `⌘Z` do nothing in a terminal: the macOS app runs them from its menu, not from the keymap. A terminal emulator keeps `⌘W`, `⌘Q` and `⌘1` to `⌘4` for its own windows and tabs.

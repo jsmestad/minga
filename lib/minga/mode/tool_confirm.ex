@@ -16,22 +16,28 @@ defmodule Minga.Mode.ToolConfirm do
 
   @behaviour Minga.Mode
 
+  import Bitwise
+
   alias Minga.Mode
   alias Minga.Mode.ToolConfirmState
 
   @escape 27
 
+  # An answer is a letter pressed without Control, Alt or Command. A chord is not an answer: without enhanced key
+  # reporting a terminal sends Esc followed by a letter as Alt and that letter when both arrive together.
+  @chord_mods 0x0E
+
   @impl Mode
   @spec handle_key(Mode.key(), ToolConfirmState.t()) :: Mode.result()
 
   # y → install current tool, advance or finish
-  def handle_key({?y, _mods}, %ToolConfirmState{} = state) do
+  def handle_key({?y, mods}, %ToolConfirmState{} = state) when band(mods, @chord_mods) == 0 do
     name = Enum.at(state.pending, state.current)
     advance_or_finish([{:tool_confirm_accept, name}], state)
   end
 
   # n → decline current tool, advance or finish
-  def handle_key({?n, _mods}, %ToolConfirmState{} = state) do
+  def handle_key({?n, mods}, %ToolConfirmState{} = state) when band(mods, @chord_mods) == 0 do
     name = Enum.at(state.pending, state.current)
     declined = MapSet.put(state.declined, name)
     advance_or_finish([{:tool_confirm_decline, name}], %{state | declined: declined})

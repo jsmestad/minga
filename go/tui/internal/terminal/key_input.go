@@ -3,6 +3,7 @@ package terminal
 import (
 	"io"
 	"os"
+	"strings"
 
 	"github.com/charmbracelet/x/ansi"
 )
@@ -19,11 +20,13 @@ import (
 //   - The exception is a next read that starts with a byte that continues an escape sequence (see continuesSequence):
 //     a slow link may have split the sequence after its first byte, so the library's timeout joins it as before.
 //
-// With enhanced key reporting the Esc key is never a lone ESC, so none of this applies.
+// With the Kitty keyboard protocol the Esc key is never a lone ESC, so none of this applies. xterm's modifyOtherKeys
+// still sends the Esc key as a lone ESC, so the rule applies there too.
 //
-// The rule cannot see two things. ESC and the key delivered in a single write are Alt+key by definition: a script
-// that writes both, a multiplexer that joins them inside its own escape time, or a remote link that merges two key
-// presses. And Esc followed inside the escape timeout by a byte that continues a sequence reads as it did before.
+// The rule cannot see two things. ESC and the key delivered in a single read are Alt+key by definition: a script
+// that writes both, a multiplexer that joins them inside its own escape time, a remote link that merges two key
+// presses, or a frontend too busy to read between them. And Esc followed inside the escape timeout by a byte that
+// continues a sequence reads as it did before.
 
 // keyBoundaryCode is the key code of the mark KeyInput puts between a lone ESC and the separate key after it.
 // It is the last private-use code point, which no keyboard produces.
@@ -43,6 +46,12 @@ func BoundaryKey(code rune, alt bool) (mark bool, escape bool) {
 		return false, false
 	}
 	return true, alt
+}
+
+// StripKeyBoundaryMarks removes the mark from pasted text. Inside a bracketed paste the decoder keeps the bytes of
+// every key that types no text, so a mark put after a lone ESC in the pasted bytes would otherwise be pasted.
+func StripKeyBoundaryMarks(text string) string {
+	return strings.ReplaceAll(text, string(keyBoundaryMark), "")
 }
 
 // continuesSequence reports whether a byte after ESC continues an escape sequence: the introducers of CSI, SS3, DCS,

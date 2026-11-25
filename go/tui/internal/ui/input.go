@@ -81,6 +81,9 @@ func isCharacterKey(code rune) bool {
 // resolveKeyBoundary turns the mark the terminal's input puts after a lone ESC into the key it stands for.
 // See terminal.KeyInput for the rule.
 func resolveKeyBoundary(msg tea.Msg) tea.Msg {
+	if paste, ok := msg.(tea.PasteMsg); ok {
+		return tea.PasteMsg{Content: terminal.StripKeyBoundaryMarks(paste.Content)}
+	}
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return msg

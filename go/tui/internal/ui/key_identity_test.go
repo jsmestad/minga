@@ -85,6 +85,12 @@ func TestTheInputFilterResolvesTheKeyBoundaryMark(t *testing.T) {
 		t.Fatalf("the mark after a delivered Esc = %#v, want nothing", got)
 	}
 
+	// A paste never carries the mark into the editor.
+	pasted := filter.Filter(model, tea.PasteMsg{Content: "ab\x1b\x1b[1114109ucd"})
+	if paste, ok := pasted.(tea.PasteMsg); !ok || paste.Content != "ab\x1bcd" {
+		t.Fatalf("paste = %#v, want the pasted bytes without the mark", pasted)
+	}
+
 	// Every other key passes unchanged, also Alt+Enter, which is ⌥↩.
 	for _, key := range []tea.Key{{Code: tea.KeyEnter, Mod: tea.ModAlt}, {Code: tea.KeyEsc}, {Code: 'j', Text: "j"}} {
 		if got := filter.Filter(model, tea.KeyPressMsg(key)); got != tea.Msg(tea.KeyPressMsg(key)) {

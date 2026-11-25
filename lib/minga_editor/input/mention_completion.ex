@@ -48,11 +48,16 @@ defmodule MingaEditor.Input.MentionCompletion do
 
   @enter 13
   @escape 27
+  @cmd 0x08
 
   # Modified Enter closes the popup and reaches the composer's binding.
   @spec complete_or_pass(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
   defp complete_or_pass(state, @enter, mods) when mods != 0,
+    do: {:passthrough, AgentCommands.handle_mention_key(state, @escape, 0)}
+
+  # A ⌘ chord is the composer's or the agent's key, never text for the query: ⌘. must still stop the agent.
+  defp complete_or_pass(state, cp, mods) when cp >= 32 and Bitwise.band(mods, @cmd) != 0,
     do: {:passthrough, AgentCommands.handle_mention_key(state, @escape, 0)}
 
   defp complete_or_pass(state, cp, mods),

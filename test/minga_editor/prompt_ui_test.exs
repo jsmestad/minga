@@ -223,6 +223,19 @@ defmodule MingaEditor.PromptUITest do
       assert pui.cursor == 2
     end
 
+    test "a key held with Control, Alt or Command types no letter" do
+      state = base_state() |> PromptUI.open(TestHandler, default: "a")
+
+      # Without enhanced key reporting a terminal sends Esc then f as Alt+f when both arrive together.
+      for mods <- [0x02, 0x04, 0x08] do
+        {kept, nil} = PromptUI.handle_key(state, ?f, mods)
+        assert prompt_state(kept).text == "a"
+      end
+
+      {typed, nil} = PromptUI.handle_key(state, ?F, 0x01)
+      assert prompt_state(typed).text == "aF"
+    end
+
     test "handles unicode characters" do
       state = base_state() |> PromptUI.open(TestHandler)
       {state, nil} = PromptUI.handle_key(state, 0x1F600, 0)
@@ -254,6 +267,34 @@ defmodule MingaEditor.PromptUITest do
 
       {reset, nil} = PromptUI.handle_key(empty, @backspace, 0)
       assert {"Test prompt: ", "", 0} = PromptUI.render_data(reset)
+    end
+  end
+
+  describe "handle_key/3 — a yes or no prompt" do
+    defp confirm_prompt do
+      prompt = PromptState.new(:confirm, TestHandler, "Delete? ", context: nil)
+
+      ModalWorkflow.open(
+        base_state(),
+        {:prompt, MingaEditor.State.ModalOverlay.Prompt.new(prompt)}
+      )
+    end
+
+    test "y answers yes and n answers no" do
+      for key <- [?y, ?Y, ?n, ?N, @escape] do
+        {answered, nil} = PromptUI.handle_key(confirm_prompt(), key, 0)
+        refute PromptUI.open?(answered)
+      end
+    end
+
+    test "a letter held with Control, Alt or Command is not an answer, and Esc still cancels" do
+      for key <- [?y, ?n], mods <- [0x02, 0x04, 0x08] do
+        {kept, nil} = PromptUI.handle_key(confirm_prompt(), key, mods)
+        assert PromptUI.open?(kept)
+      end
+
+      {canceled, nil} = PromptUI.handle_key(confirm_prompt(), @escape, 0x04)
+      refute PromptUI.open?(canceled)
     end
   end
 
