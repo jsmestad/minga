@@ -329,10 +329,22 @@ defmodule Minga.Mode.Normal do
   # When pending find is set (after f/F/t/T), any printable character
   # completes the motion. This must appear before the letter key handlers
   # (i, a, o, etc.) to prevent them from matching first.
+  # Kitty and NSEvent functional keys (arrows, Home, F-keys) are not text, so they are not targets.
   def handle_key({codepoint, 0}, %ModeState{pending: {:find, dir}} = state)
-      when dir in [:f, :F, :t, :T] and codepoint >= 32 do
+      when dir in [:f, :F, :t, :T] and codepoint >= 32 and codepoint != 127 and
+             codepoint not in 57_344..57_454 and codepoint not in 0xF700..0xF747 do
     char = <<codepoint::utf8>>
     {:execute, {:find_char, dir, char}, %{state | pending: nil}}
+  end
+
+  # Escape cancels the whole pending command: the find, its count, and a chosen register, as in Vim.
+  def handle_key({@escape, _mods}, %ModeState{pending: {:find, _dir}} = state) do
+    {:execute, {:select_register, "\""}, %{state | pending: nil, count: nil}}
+  end
+
+  # Any other key that cannot be a find target (a control key, a key with modifiers) cancels the find.
+  def handle_key(_key, %ModeState{pending: {:find, _dir}} = state) do
+    {:continue, %{state | pending: nil, count: nil}}
   end
 
   # ── Normal prefix trie (g, z, [, ]) ──────────────────────────────────────
