@@ -889,10 +889,107 @@ defmodule MingaEditor.Commands.Agent do
   defp deliver_composer(state, resolved, kind) do
     case DraftWorkflow.submission(state) do
       {:error, message} ->
-        NoticeWorkflow.publish(state, message)
+        hold_or_refuse(state, delivery_kind(state, kind), resolved, message)
 
       submission ->
         deliver_composer_input(state, kind, resolved, submission)
+    end
+  end
+
+  # A press made while the saved draft loads waits for the load (#4260); every
+  # other refusal is reported.
+  @spec hold_or_refuse(
+          state(),
+          :send_now | :steering | :follow_up,
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          String.t()
+        ) :: state()
+  defp hold_or_refuse(state, kind, resolved, message) do
+    case DraftWorkflow.hold_while_loading(state, kind, resolved) do
+      {:held, held} -> held
+      :not_loading -> NoticeWorkflow.publish(state, message)
+    end
+  end
+
+  @spec delivery_kind(state(), :steering | :follow_up) :: :send_now | :steering | :follow_up
+  defp delivery_kind(%{frontend: %{composer_send_now?: true}}, _kind), do: :send_now
+  defp delivery_kind(_state, kind), do: kind
+
+  @doc """
+  Delivers a send held while the composer's saved draft loaded, with the content from its key press. Text typed after the press stays in the composer; a send whose conversation is no longer in front is not sent, and its text stays in that composer.
+  """
+  @spec deliver_held_send(
+          state(),
+          non_neg_integer(),
+          {:send_now | :steering | :follow_up, String.t() | [ReqLLM.Message.ContentPart.t()],
+           String.t(), DraftSave.marker()}
+        ) :: state()
+  def deliver_held_send(state, owner, press) do
+    if DraftWorkflow.active_owner?(state, owner) do
+      deliver_held_in_front(state, press, DraftWorkflow.submission(state))
+    else
+      NoticeWorkflow.publish(
+        state,
+        "A message was not sent because its conversation is no longer in front. Its text is still in that composer."
+      )
+    end
+  end
+
+  @spec deliver_held_in_front(
+          state(),
+          {:send_now | :steering | :follow_up, String.t() | [ReqLLM.Message.ContentPart.t()],
+           String.t(), DraftSave.marker()},
+          term()
+        ) :: state()
+  defp deliver_held_in_front(state, _press, {:error, message}),
+    do: NoticeWorkflow.publish(state, message)
+
+  defp deliver_held_in_front(state, {kind, content, source, marker}, submission) do
+    panel = state.workspace.agent_ui.panel
+    kept = if composer_marker(panel) == marker, do: nil, else: PromptBuffer.input_text(panel)
+
+    state
+    |> deliver_held_input(kind, content, submission, {source, marker})
+    |> keep_newer_edits(kept)
+  end
+
+  @spec deliver_held_input(
+          state(),
+          :send_now | :steering | :follow_up,
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          :ordinary
+          | {:remote, DraftSave.target()}
+          | {:attached, DraftSave.target(), [MingaAgent.DraftAttachment.identity()]},
+          {String.t(), DraftSave.marker()}
+        ) :: state()
+  defp deliver_held_input(state, :send_now, content, submission, _press),
+    do: deliver_unqueued_composer(state, :send_now, content, submission)
+
+  defp deliver_held_input(state, kind, content, submission, press) do
+    case DraftWorkflow.queue(state, kind, content, :current, press) do
+      {:saved, updated} -> updated
+      :ordinary -> deliver_unqueued_composer(state, kind, content, submission)
+    end
+  end
+
+  @spec composer_marker(Panel.t()) :: DraftSave.marker() | nil
+  defp composer_marker(%Panel{prompt_buffer: pid}) when is_pid(pid),
+    do: Buffer.inspection_marker(pid)
+
+  defp composer_marker(%Panel{}), do: nil
+
+  # A delivered send clears the composer. When the user typed after the press,
+  # put that text back: only what was pressed was sent.
+  @spec keep_newer_edits(state(), String.t() | nil) :: state()
+  defp keep_newer_edits(state, nil), do: state
+
+  defp keep_newer_edits(state, kept) do
+    if PromptBuffer.input_empty?(state.workspace.agent_ui.panel) do
+      state
+      |> update_agent_ui(&PromptBuffer.set_prompt_text(&1, kept))
+      |> NoticeWorkflow.publish("The pressed input was sent. Newer edits were kept.")
+    else
+      state
     end
   end
 

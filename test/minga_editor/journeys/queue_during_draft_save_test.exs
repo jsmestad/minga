@@ -77,6 +77,120 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
     assert prompt(ctx) == "later still"
   end
 
+  describe "a press made while the saved draft is still loading" do
+    test "a send waits for the load and sends the text from the press", %{
+      editor_ctx: ctx,
+      session: session
+    } do
+      load = begin_load(ctx)
+      send_keys_sync(ctx, "hello")
+      send_key_sync(ctx, 13, @cmd)
+
+      assert {:send, _kind, "hello", "hello", _marker} = draft_save(ctx).held_press
+      refute minibuffer(ctx) =~ "Wait for the saved composer"
+
+      answer_load(ctx, load, :ok)
+
+      wait_until(ctx, fn _state -> prompt(ctx) == "" end,
+        max_attempts: 500,
+        interval_ms: 20,
+        message: "expected the held send to be delivered once the draft loaded"
+      )
+
+      assert {:user, "hello"} in Session.messages(session)
+    end
+
+    test "a queue pressed during a turn waits for the load and queues the text from the press", %{
+      editor_ctx: ctx,
+      session: session
+    } do
+      :ok = Session.send_prompt(session, "start")
+      await_working(ctx)
+      load = begin_load(ctx)
+      send_keys_sync(ctx, "later")
+      send_key_sync(ctx, 13, @alt)
+
+      assert {:queue, _target, :follow_up, "later", "later", _marker} = draft_save(ctx).held_press
+      answer_load(ctx, load, :ok)
+
+      wait_until(ctx, fn _state -> Session.get_queued_messages(session) == {[], ["later"]} end,
+        max_attempts: 500,
+        interval_ms: 20,
+        message: "expected the held follow-up to be queued once the draft loaded"
+      )
+
+      refute minibuffer(ctx) =~ "Wait for the saved composer"
+    end
+
+    test "a held send sends only the pressed text and keeps what was typed after it", %{
+      editor_ctx: ctx,
+      session: session
+    } do
+      load = begin_load(ctx)
+      send_keys_sync(ctx, "hello")
+      send_key_sync(ctx, 13, @cmd)
+      send_keys_sync(ctx, " more")
+      answer_load(ctx, load, :ok)
+
+      wait_until(ctx, fn _state -> {:user, "hello"} in Session.messages(session) end,
+        max_attempts: 500,
+        interval_ms: 20,
+        message: "expected the pressed text to be sent once the draft loaded"
+      )
+
+      assert prompt(ctx) == "hello more"
+      assert minibuffer(ctx) == "The pressed input was sent. Newer edits were kept."
+    end
+
+    test "if the load fails, the typed text stays and one line says why", %{editor_ctx: ctx} do
+      load = begin_load(ctx)
+      send_keys_sync(ctx, "hello")
+      send_key_sync(ctx, 13, @cmd)
+      answer_load(ctx, load, {:error, :stale_target})
+
+      assert draft_save(ctx).held_press == nil
+      assert prompt(ctx) == "hello"
+      assert minibuffer(ctx) == "Draft not saved or restored. Current input was kept."
+    end
+  end
+
+  # Re-issues the saved draft's read the way opening a conversation does, so the
+  # test decides when it answers. The Session's draft is unchanged, so the answer
+  # repeats the revision it already holds.
+  defp begin_load(ctx) do
+    owner = owner(ctx)
+    ref = make_ref()
+    %{target: target, buffer: buffer, request: {:ready, revision, _}} = draft_save(ctx)
+
+    :sys.replace_state(ctx.editor, fn state ->
+      ui = state.workspace.agent_ui
+      loading = DraftSave.loading(target, buffer, ref, Minga.Buffer.inspection_marker(buffer))
+      Workflow.install_agent_ui(state, UIState.project_draft_save(ui, loading))
+    end)
+
+    %{owner: owner, ref: ref, revision: revision, target: target}
+  end
+
+  defp answer_load(
+         ctx,
+         %{owner: owner, ref: ref, revision: revision, target: {session, id}},
+         :ok
+       ),
+       do:
+         send_result(
+           ctx,
+           {:composer_draft_result, session, id, {owner, ref}, {:ok, revision, nil}}
+         )
+
+  defp answer_load(ctx, %{owner: owner, ref: ref, target: {session, id}}, error),
+    do: send_result(ctx, {:composer_draft_result, session, id, {owner, ref}, error})
+
+  defp send_result(ctx, message) do
+    send(ctx.editor, message)
+    :sys.get_state(ctx.editor)
+    :ok
+  end
+
   defp press_during_autosave(ctx, session, mods, typed_after \\ "") do
     :ok = Session.send_prompt(session, "start")
     await_working(ctx)

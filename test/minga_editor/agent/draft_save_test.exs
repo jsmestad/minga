@@ -108,7 +108,8 @@ defmodule MingaEditor.Agent.DraftSaveTest do
 
   describe "a queue pressed while the composer's own autosave is in flight" do
     @marker {0, {0, 3}}
-    @deferred {{"record", "request", 1}, :follow_up, "later", "later", {0, {0, 5}}}
+    @deferred {:queue, {"record", "request", 1}, :follow_up, "later", "later", {0, {0, 5}}}
+    @send {:send, :steering, "hello", "hello", {0, {0, 5}}}
 
     defp ready do
       target = {self(), "record"}
@@ -133,6 +134,10 @@ defmodule MingaEditor.Agent.DraftSaveTest do
       {:attaching, attach_ref, _, _, _} = attaching.request
       {:ok, review_required} = DraftSave.failed(attaching, attach_ref, :blocked)
       loading = DraftSave.loading({self(), "record"}, self(), make_ref(), @marker)
+
+      reloading_recall =
+        DraftSave.reload_recall(%{blocked | request: :recall_conflicted}, make_ref(), @marker)
+
       retiring = DraftSave.retire_queue_receipt(saving, make_ref(), {1, "s", :follow_up, 1})
 
       %{
@@ -142,88 +147,117 @@ defmodule MingaEditor.Agent.DraftSaveTest do
         attaching: attaching,
         queueing: queueing,
         loading: loading,
+        reloading_recall: reloading_recall,
         blocked: blocked,
         attachment_review_required: review_required,
         saving_while_retiring: retiring
       }
     end
 
-    test "only an autosave holds the queue; every other request still refuses it" do
-      for {tag, save} <- requests() do
-        case {tag, DraftSave.defer_queue(save, @deferred)} do
-          {:saving, {:ok, held}} ->
-            assert held.deferred_queue == @deferred
+    test "a queue waits for an autosave or a load, a send only for a load; every other request refuses" do
+      holds = %{queue: [:saving, :loading], send: [:loading]}
 
-          {:saving, other} ->
-            flunk("an autosave must hold the queue, got #{inspect(other)}")
+      for {tag, save} <- requests(), press <- [@deferred, @send] do
+        expected = if tag in holds[elem(press, 0)], do: :hold, else: :refuse
 
-          {_tag, result} ->
-            assert result == :pending, "#{tag} must refuse, got #{inspect(result)}"
+        case {expected, DraftSave.hold_press(save, press)} do
+          {:hold, {:ok, held}} ->
+            assert held.held_press == press
+
+          {:refuse, :pending} ->
+            :ok
+
+          {expected, got} ->
+            flunk("#{tag} #{elem(press, 0)}: expected #{expected}, got #{inspect(got)}")
         end
       end
     end
 
+    test "a press held behind a load runs when the load answers, and is dropped if it fails" do
+      %{loading: loading} = requests()
+
+      for press <- [@deferred, @send] do
+        {:ok, held} = DraftSave.hold_press(loading, press)
+        {:loading, ref, _} = held.request
+        assert DraftSave.release_held_press(held) == :none
+
+        loaded = DraftSave.loaded(held, 1, @marker, nil)
+        assert {:run, ^press, %{held_press: nil}} = DraftSave.release_held_press(loaded)
+
+        {:ok, failed} = DraftSave.failed(held, ref, :blocked)
+        assert {:drop, %{held_press: nil}} = DraftSave.release_held_press(failed)
+      end
+    end
+
+    test "a load issued again keeps the held press" do
+      %{loading: loading} = requests()
+      {:ok, held} = DraftSave.hold_press(loading, @send)
+      reissued = DraftSave.loading({self(), "record"}, self(), make_ref(), @marker)
+      assert DraftSave.keep_held(reissued, held).held_press == @send
+      assert DraftSave.keep_held(reissued, nil).held_press == nil
+    end
+
     test "the held queue runs when the save answers, and only then" do
       %{saving: saving} = requests()
-      {:ok, held} = DraftSave.defer_queue(saving, @deferred)
+      {:ok, held} = DraftSave.hold_press(saving, @deferred)
       {:saving, ref, _, _, _} = held.request
 
-      assert DraftSave.release_deferred_queue(held) == :none
+      assert DraftSave.release_held_press(held) == :none
       assert {:ok, saved} = DraftSave.saved(held, ref, 2)
-      assert {:run, @deferred, released} = DraftSave.release_deferred_queue(saved)
-      assert released.deferred_queue == nil
-      assert DraftSave.release_deferred_queue(released) == :none
+      assert {:run, @deferred, released} = DraftSave.release_held_press(saved)
+      assert released.held_press == nil
+      assert DraftSave.release_held_press(released) == :none
     end
 
     test "a save that leaves the composer unable to queue drops the held queue" do
       %{saving: saving} = requests()
-      {:ok, held} = DraftSave.defer_queue(saving, @deferred)
+      {:ok, held} = DraftSave.hold_press(saving, @deferred)
       {:saving, ref, _, _, _} = held.request
 
       assert {:ok, blocked} = DraftSave.failed(held, ref, :blocked)
-      assert {:drop, dropped} = DraftSave.release_deferred_queue(blocked)
-      assert dropped.deferred_queue == nil
+      assert {:drop, dropped} = DraftSave.release_held_press(blocked)
+      assert dropped.held_press == nil
 
       assert {:ok, retried} = DraftSave.failed(held, ref, :retryable)
-      assert {:run, @deferred, _} = DraftSave.release_deferred_queue(retried)
+      assert {:run, @deferred, _} = DraftSave.release_held_press(retried)
     end
 
     test "a held queue whose save leaves a receipt retiring is dropped" do
       %{saving: saving} = requests()
-      {:ok, held} = DraftSave.defer_queue(saving, @deferred)
+      {:ok, held} = DraftSave.hold_press(saving, @deferred)
       {:saving, ref, _, _, _} = held.request
       {:ok, saved} = DraftSave.saved(held, ref, 2)
       retiring = DraftSave.retire_queue_receipt(saved, make_ref(), {1, "s", :follow_up, 1})
 
-      assert {:drop, %{deferred_queue: nil}} = DraftSave.release_deferred_queue(retiring)
+      assert {:drop, %{held_press: nil}} = DraftSave.release_held_press(retiring)
     end
 
     test "a later press replaces the held queue" do
       %{saving: saving} = requests()
-      {:ok, held} = DraftSave.defer_queue(saving, @deferred)
-      newer = put_elem(@deferred, 2, "later still")
-      assert {:ok, %{deferred_queue: ^newer}} = DraftSave.defer_queue(held, newer)
+      {:ok, held} = DraftSave.hold_press(saving, @deferred)
+      newer = put_elem(@deferred, 3, "later still")
+      assert {:ok, %{held_press: ^newer}} = DraftSave.hold_press(held, newer)
     end
 
     test "a queue that starts clears the held one" do
       %{saving: saving} = requests()
-      {:ok, held} = DraftSave.defer_queue(saving, @deferred)
+      {:ok, held} = DraftSave.hold_press(saving, @deferred)
       {:saving, ref, _, _, _} = held.request
       {:ok, saved} = DraftSave.saved(held, ref, 2)
 
       assert {:ok, 2, queueing} =
                DraftSave.begin_queue(saved, make_ref(), {0, {0, 6}}, {1, "t", :follow_up})
 
-      assert queueing.deferred_queue == nil
+      assert queueing.held_press == nil
     end
 
     test "a save moved to a replacement writer keeps the hold for release" do
       %{saving: saving} = requests()
-      {:ok, held} = DraftSave.defer_queue(saving, @deferred)
+      {:ok, held} = DraftSave.hold_press(saving, @deferred)
       replacement = spawn(fn -> :ok end)
 
       rebound = DraftSave.rebind_writer(held, replacement)
-      assert {:run, @deferred, _} = DraftSave.release_deferred_queue(rebound)
+      assert {:run, @deferred, _} = DraftSave.release_held_press(rebound)
     end
   end
 end

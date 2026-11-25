@@ -11,11 +11,16 @@ defmodule MingaEditor.Agent.DraftSave do
   @type queue_admission :: {pos_integer(), String.t(), TurnExecution.prompt_kind()}
 
   @typedoc """
-  A queue or steer pressed while the composer's own autosave was in flight: the displayed queue target, the kind, the content, and the composer text and marker at the key press. It runs as soon as the save answers, so the queued item shows and recalls exactly what was sent.
+  A key press the composer's own draft bookkeeping could not take yet, held until that bookkeeping answers. Each carries the content, and the composer text and marker at the press, so what runs later is exactly what was pressed.
+
+    * `{:queue, target, kind, ...}`: a queue or steer for the displayed working turn, pressed while the draft was saving or loading. It runs in the draft workflow.
+    * `{:send, kind, ...}`: a send pressed while the saved draft was loading. The Editor delivers it, as it would have at the press.
   """
-  @type deferred_queue ::
-          {MingaAgent.Session.queue_target(), TurnExecution.prompt_kind(),
+  @type held_press ::
+          {:queue, MingaAgent.Session.queue_target(), TurnExecution.prompt_kind(),
            TurnExecution.content(), String.t(), marker()}
+          | {:send, :send_now | TurnExecution.prompt_kind(), TurnExecution.content(), String.t(),
+             marker()}
   @type request ::
           {:loading, reference(), marker()}
           | {:ready, revision(), marker() | nil}
@@ -41,7 +46,7 @@ defmodule MingaEditor.Agent.DraftSave do
           timer: reference() | nil,
           offer: pos_integer() | nil,
           retirement: {reference(), TurnExecution.queue_receipt()} | nil,
-          deferred_queue: deferred_queue() | nil,
+          held_press: held_press() | nil,
           rearm_on_save_failure: boolean(),
           attachments: [DraftSnapshot.attachment()]
         }
@@ -54,7 +59,7 @@ defmodule MingaEditor.Agent.DraftSave do
     :timer,
     :offer,
     :retirement,
-    :deferred_queue,
+    :held_press,
     attachments: [],
     rearm_on_save_failure: false
   ]
@@ -182,39 +187,59 @@ defmodule MingaEditor.Agent.DraftSave do
        save
        | request: {:queueing, ref, revision, previous, marker, attempt},
          timer: nil,
-         deferred_queue: nil
+         held_press: nil
      }}
   end
 
   def begin_queue(%__MODULE__{}, _ref, _marker, _attempt), do: :pending
 
   @doc """
-  Holds a queue or steer pressed while the composer's own autosave is in flight, so it runs when the save answers instead of being refused.
+  Holds a press the draft cannot take yet, so it runs when the draft answers instead of being refused.
 
-  Only an autosave defers: every other request in flight (a recall, an attachment, a submission) still refuses, because it changes what the composer holds. A later press replaces the held one, and a queue that starts clears it; the composer shows one draft. Whoever ends the save without `saved/3` or `failed/3` (`rebind_writer/2`) leaves the hold for `release_deferred_queue/1`.
+  A queue or steer waits for the composer's own autosave or for its saved draft to load; a send waits only for the load. Every other request in flight (a recall, an attachment, a submission) still refuses, because it changes what the composer holds. A later press replaces the held one, and a queue that starts clears it; the composer shows one draft. Whoever ends the request without `loaded/4`, `saved/3` or `failed/3` (`rebind_writer/2`, `keep_held/2`) carries the hold to `release_held_press/1`.
   """
-  @spec defer_queue(t(), deferred_queue()) :: {:ok, t()} | :pending
-  def defer_queue(
+  @spec hold_press(t(), held_press()) :: {:ok, t()} | :pending
+  def hold_press(
         %__MODULE__{request: {:saving, _, _, _, _}, retirement: nil} = save,
-        {_target, _kind, _content, _source, _marker} = deferred
+        {:queue, _target, _kind, _content, _source, _marker} = press
       ),
-      do: {:ok, %{save | deferred_queue: deferred}}
+      do: {:ok, %{save | held_press: press}}
 
-  def defer_queue(%__MODULE__{}, _deferred), do: :pending
+  def hold_press(
+        %__MODULE__{request: {:loading, _, _}, retirement: nil} = save,
+        {:queue, _target, _kind, _content, _source, _marker} = press
+      ),
+      do: {:ok, %{save | held_press: press}}
+
+  def hold_press(
+        %__MODULE__{request: {:loading, _, _}, retirement: nil} = save,
+        {:send, _kind, _content, _source, _marker} = press
+      ),
+      do: {:ok, %{save | held_press: press}}
+
+  def hold_press(%__MODULE__{}, _press), do: :pending
+
+  @doc "Carries a held press onto a draft whose load was issued again."
+  @spec keep_held(t(), t() | nil) :: t()
+  def keep_held(%__MODULE__{} = save, %__MODULE__{held_press: press}),
+    do: %{save | held_press: press}
+
+  def keep_held(%__MODULE__{} = save, nil), do: save
 
   @doc """
-  Releases a held queue once its save has answered: `{:run, deferred, save}` when the composer is ready to queue, `{:drop, save}` when the save left it unable to, and `:none` when nothing is held or the save is still in flight.
+  Releases a held press once its request has answered: `{:run, press, save}` when the composer is ready, `{:drop, save}` when the answer left it unable to take the press, and `:none` when nothing is held or the request is still in flight.
   """
-  @spec release_deferred_queue(t()) :: {:run, deferred_queue(), t()} | {:drop, t()} | :none
-  def release_deferred_queue(%__MODULE__{deferred_queue: nil}), do: :none
-  def release_deferred_queue(%__MODULE__{request: {:saving, _, _, _, _}}), do: :none
+  @spec release_held_press(t()) :: {:run, held_press(), t()} | {:drop, t()} | :none
+  def release_held_press(%__MODULE__{held_press: nil}), do: :none
+  def release_held_press(%__MODULE__{request: {:saving, _, _, _, _}}), do: :none
+  def release_held_press(%__MODULE__{request: {:loading, _, _}}), do: :none
 
-  def release_deferred_queue(
-        %__MODULE__{request: {:ready, _, _}, retirement: nil, deferred_queue: deferred} = save
+  def release_held_press(
+        %__MODULE__{request: {:ready, _, _}, retirement: nil, held_press: press} = save
       ),
-      do: {:run, deferred, %{save | deferred_queue: nil}}
+      do: {:run, press, %{save | held_press: nil}}
 
-  def release_deferred_queue(%__MODULE__{} = save), do: {:drop, %{save | deferred_queue: nil}}
+  def release_held_press(%__MODULE__{} = save), do: {:drop, %{save | held_press: nil}}
 
   @doc "Moves only a pending queue acknowledgement to the replacement owner of the same record."
   @spec rebind_queue(t(), target(), pid()) ::
