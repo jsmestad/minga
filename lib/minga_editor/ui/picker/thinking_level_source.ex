@@ -8,7 +8,6 @@ defmodule MingaEditor.UI.Picker.ThinkingLevelSource do
   @behaviour MingaEditor.UI.Picker.Source
 
   alias MingaAgent.ModelSelection
-  alias MingaAgent.Session
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
 
@@ -31,8 +30,8 @@ defmodule MingaEditor.UI.Picker.ThinkingLevelSource do
   @impl true
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(%Context{agent_session: session} = context) when is_pid(session) do
-    # minga:allow-blocking — Editor, sync candidates on user picker open; one read
-    case Session.model_selection(session) do
+    # The model the connection shows, never a call into a Session that may be busy.
+    case shown_model_selection(context) do
       %ModelSelection{} = selection ->
         reasoning = selection.policy.reasoning
         Enum.map(reasoning.options, &format_level(&1, reasoning.effort))
@@ -43,6 +42,14 @@ defmodule MingaEditor.UI.Picker.ThinkingLevelSource do
   end
 
   def candidates(context), do: candidates_without_selection(context)
+
+  @spec shown_model_selection(Context.t()) :: ModelSelection.t() | nil
+  defp shown_model_selection(%Context{
+         live_agent_ui: %{connection: %{model_selection: selection}}
+       }),
+       do: selection
+
+  defp shown_model_selection(%Context{}), do: nil
 
   @impl true
   @spec on_select(Item.t(), term()) :: term()

@@ -136,9 +136,18 @@ defmodule MingaEditor.UI.Picker.AgentQueuedInputSource do
 
   def on_select(_item, state), do: state
 
+  @spec shown_model_selection(State.t()) :: MingaAgent.ModelSelection.t() | nil
+  defp shown_model_selection(%State{
+         workspace: %{agent_ui: %{connection: %{model_selection: selection}}}
+       }),
+       do: selection
+
+  defp shown_model_selection(%State{}), do: nil
+
   @spec request(State.t(), origin()) :: {:ok, request()} | :unavailable
-  defp request(_state, {_workspace, session, record}) when node(session) == node() do
-    root = Minga.Project.workspace_root()
+  defp request(state, {_workspace, session, record}) when node(session) == node() do
+    # Read on the Editor from state it already holds; the closure runs in a worker.
+    selection = shown_model_selection(state)
 
     {:ok,
      fn
@@ -155,7 +164,7 @@ defmodule MingaEditor.UI.Picker.AgentQueuedInputSource do
 
        {:edit_queued_input, identity, text} ->
          # minga:allow-blocking — closure runs in the QueuedInputEdit effect under EffectScheduler, not in the Editor
-         selection = Session.model_selection(session)
+         root = Minga.Project.workspace_root()
 
          with {:ok, resolved} <-
                 FileMention.resolve_prompt(text, root, model_selection: selection) do

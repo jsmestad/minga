@@ -760,8 +760,32 @@ defmodule MingaEditor.Commands.Agent do
       {:ok, resolved} ->
         deliver_composer(state, resolved, :steering)
 
-      {:error, msg} ->
-        NoticeWorkflow.publish(state, msg)
+      :read_files ->
+        resolve_off_editor(state, :steering, text, :current)
+    end
+  end
+
+  # Text that names files is read by a worker; the press waits in line meanwhile.
+  # Without a saved draft to hold it on, the files are read here, as before.
+  @spec resolve_off_editor(
+          state(),
+          :steering | :follow_up,
+          String.t(),
+          Session.queue_target() | :current
+        ) ::
+          state()
+  defp resolve_off_editor(state, kind, text, expected) do
+    case DraftWorkflow.resolve_then_deliver(state, delivery_kind(state, kind), text, expected) do
+      {:held, held} ->
+        held
+
+      :not_held ->
+        case resolve_mentions(text,
+               model_selection: shown_model_selection(state.workspace.agent_ui)
+             ) do
+          {:ok, resolved} -> deliver_composer(state, resolved, kind)
+          {:error, msg} -> NoticeWorkflow.publish(state, msg)
+        end
     end
   end
 
@@ -868,10 +892,10 @@ defmodule MingaEditor.Commands.Agent do
       :ordinary ->
         NoticeWorkflow.publish(state, "That Agent turn is no longer active. Your draft was kept.")
 
-      {:blocked, message} ->
-        NoticeWorkflow.publish(state, message)
+      :read_files ->
+        resolve_off_editor(state, kind, text, target)
 
-      {:error, message} ->
+      {:blocked, message} ->
         NoticeWorkflow.publish(state, message)
     end
   catch
@@ -884,8 +908,8 @@ defmodule MingaEditor.Commands.Agent do
       {:ok, resolved} ->
         deliver_composer(state, resolved, :follow_up)
 
-      {:error, msg} ->
-        NoticeWorkflow.publish(state, msg)
+      :read_files ->
+        resolve_off_editor(state, :follow_up, text, :current)
     end
   end
 
@@ -901,7 +925,16 @@ defmodule MingaEditor.Commands.Agent do
         hold_or_refuse(state, delivery_kind(state, kind), resolved, message)
 
       submission ->
-        deliver_composer_input(state, kind, resolved, submission)
+        # A press never overtakes one already waiting its turn.
+        if DraftWorkflow.holding?(state),
+          do:
+            hold_or_refuse(
+              state,
+              delivery_kind(state, kind),
+              resolved,
+              "Wait for the earlier message to be queued."
+            ),
+          else: deliver_composer_input(state, kind, resolved, submission)
     end
   end
 
@@ -1308,20 +1341,17 @@ defmodule MingaEditor.Commands.Agent do
   defp provider_startup_failed_message(error),
     do: "Failed to start agent: #{String.trim_trailing(error, ".")}"
 
+  # Plain text needs nothing resolved. Text that names files must be read, which
+  # can block, so a worker does it (`:read_files`) instead of the Editor (#4260).
   @spec resolve_prompt_for_session(state(), String.t(), String.t()) ::
-          {:ok, String.t() | [ReqLLM.Message.ContentPart.t()]} | {:error, String.t()}
+          {:ok, String.t() | [ReqLLM.Message.ContentPart.t()]}
+          | :read_files
+          | {:error, String.t()}
   defp resolve_prompt_for_session(state, text, _model) do
     cond do
-      remote_session?(state) ->
-        {:ok, text}
-
-      FileMention.extract_mentions(text) == [] ->
-        {:ok, text}
-
-      # The model comes from the connection the Editor already shows, never from a
-      # call into a Session that may be busy working (#4260).
-      true ->
-        resolve_mentions(text, model_selection: shown_model_selection(state.workspace.agent_ui))
+      remote_session?(state) -> {:ok, text}
+      FileMention.extract_mentions(text) == [] -> {:ok, text}
+      true -> :read_files
     end
   end
 

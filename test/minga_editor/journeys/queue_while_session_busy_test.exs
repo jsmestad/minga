@@ -12,6 +12,7 @@ defmodule MingaEditor.Journeys.QueueWhileSessionBusyTest do
   alias Minga.Config.Options
   alias Minga.Project
   alias Minga.Project.Root
+  alias MingaAgent.FileMention
   alias MingaAgent.Session
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Frontend.Capabilities
@@ -109,6 +110,62 @@ defmodule MingaEditor.Journeys.QueueWhileSessionBusyTest do
       assert Enum.map(summaries, & &1.preview) == @texts
       assert Enum.all?(summaries, &(&1.kind == :follow_up))
       refute minibuffer(ctx) =~ "Newer edits were kept"
+    end
+  end
+
+  test "files a message names are read off the Editor, and the presses keep their order", %{
+    editor_ctx: ctx,
+    session: session
+  } do
+    texts = ["alpha @lib/a.ex now", "bravo two", "charlie @lib/a.ex three"]
+    :ok = Session.send_prompt(session, "start")
+    await_working(ctx)
+
+    # Trace the Editor process while the keys are pressed: resolving a mention (the
+    # project root, the files it names) must happen in a worker, never here.
+    editor = ctx.editor
+
+    traced = [
+      {FileMention, :resolve_prompt, :_},
+      {Project, :workspace_root, :_},
+      {File, :read, :_}
+    ]
+
+    :erlang.trace(editor, true, [:call, {:tracer, self()}])
+    for mfa <- traced, do: :erlang.trace_pattern(mfa, true, [:local])
+
+    on_exit(fn ->
+      for mfa <- traced, do: :erlang.trace_pattern(mfa, false, [:local])
+    end)
+
+    for text <- texts do
+      send_keys_sync(ctx, text)
+      send_key_sync(ctx, 13, @alt)
+    end
+
+    {_session, record} = editor_state(ctx).workspace.agent_ui.draft_save.target
+
+    wait_until(
+      ctx,
+      fn _state ->
+        match?({:ok, [_, _, _]}, Session.queued_input_summaries(session, record)) and
+          prompt(ctx) == ""
+      end,
+      max_attempts: 500,
+      interval_ms: 20,
+      message: "expected three queued follow-ups and an empty composer"
+    )
+
+    :erlang.trace(editor, false, [:call])
+
+    {:ok, summaries} = Session.queued_input_summaries(session, record)
+    assert Enum.map(summaries, & &1.preview) == texts
+    assert [mentioned, _plain, _second] = Session.get_queued_messages(session) |> elem(1)
+    assert inspect(mentioned) =~ "defmodule A"
+
+    for {module, function, _arity} <- traced do
+      refute_received {:trace, ^editor, :call, {^module, ^function, _args}},
+                      "the Editor called #{inspect(module)}.#{function} while a key was pressed"
     end
   end
 

@@ -24,9 +24,14 @@ defmodule MingaEditor.Agent.DraftSave do
     * `{:send, kind, content, press}`: a send pressed while the saved draft was loading. The Editor delivers it, as it would have at the press.
   """
   @type held_press ::
-          {:queue, MingaAgent.Session.queue_target(), TurnExecution.prompt_kind(),
-           TurnExecution.content(), press()}
-          | {:send, :send_now | TurnExecution.prompt_kind(), TurnExecution.content(), press()}
+          {:queue, MingaAgent.Session.queue_target(), TurnExecution.prompt_kind(), held_content(),
+           press()}
+          | {:send, :send_now | TurnExecution.prompt_kind(), held_content(), press()}
+
+  @typedoc """
+  A held press's content, or `{:resolving, ref}` while its file mentions are read off the Editor. A press waits for its own content before it can run.
+  """
+  @type held_content :: TurnExecution.content() | {:resolving, reference()}
   @type request ::
           {:loading, reference(), marker()}
           | {:ready, revision(), marker() | nil}
@@ -54,6 +59,7 @@ defmodule MingaEditor.Agent.DraftSave do
           retirement: {reference(), TurnExecution.queue_receipt()} | nil,
           held_presses: [held_press()],
           queued_raw: String.t() | nil,
+          next_input: pos_integer() | nil,
           rearm_on_save_failure: boolean(),
           attachments: [DraftSnapshot.attachment()]
         }
@@ -67,6 +73,7 @@ defmodule MingaEditor.Agent.DraftSave do
     :offer,
     :retirement,
     :queued_raw,
+    :next_input,
     held_presses: [],
     attachments: [],
     rearm_on_save_failure: false
@@ -258,6 +265,39 @@ defmodule MingaEditor.Agent.DraftSave do
   defp holds?(%__MODULE__{request: {:ready, _, _}, retirement: {_, _}}, :queue), do: true
   defp holds?(%__MODULE__{}, _tag), do: false
 
+  @doc """
+  Holds a press whose file mentions are still being read, whatever the draft is doing: it runs, in its place in line, once `resolved/3` gives it its content.
+  """
+  @spec hold_resolving(t(), held_press()) :: t()
+  def hold_resolving(%__MODULE__{held_presses: presses} = save, press),
+    do: %{save | held_presses: presses ++ [press]}
+
+  @doc "Gives a press its resolved content, or removes it with `:failed`. `:stale` when no press waits on `ref`."
+  @spec resolved(t(), reference(), {:ok, TurnExecution.content()} | :failed) ::
+          {:ok, t()} | :stale
+  def resolved(%__MODULE__{held_presses: presses} = save, ref, result) do
+    case Enum.split_while(presses, &(content(&1) != {:resolving, ref})) do
+      {_before, []} ->
+        :stale
+
+      {before, [press | rest]} ->
+        {:ok, %{save | held_presses: before ++ resolve(press, result) ++ rest}}
+    end
+  end
+
+  @spec content(held_press()) :: held_content()
+  defp content({:queue, _target, _kind, content, _press}), do: content
+  defp content({:send, _kind, content, _press}), do: content
+
+  @spec resolve(held_press(), {:ok, TurnExecution.content()} | :failed) :: [held_press()]
+  defp resolve(_press, :failed), do: []
+
+  defp resolve({:queue, target, kind, _content, press}, {:ok, content}),
+    do: [{:queue, target, kind, content, press}]
+
+  defp resolve({:send, kind, _content, press}, {:ok, content}),
+    do: [{:send, kind, content, press}]
+
   @doc "Carries held presses onto a draft whose load was issued again."
   @spec keep_held(t(), t() | nil) :: t()
   def keep_held(%__MODULE__{} = save, %__MODULE__{held_presses: presses}),
@@ -270,6 +310,14 @@ defmodule MingaEditor.Agent.DraftSave do
   """
   @spec release_held_press(t()) :: {:run, held_press(), t()} | {:drop, t()} | :none
   def release_held_press(%__MODULE__{held_presses: []}), do: :none
+
+  # The first press waits for its own content before anything runs.
+  def release_held_press(%__MODULE__{held_presses: [{:queue, _, _, {:resolving, _}, _} | _]}),
+    do: :none
+
+  def release_held_press(%__MODULE__{held_presses: [{:send, _, {:resolving, _}, _} | _]}),
+    do: :none
+
   def release_held_press(%__MODULE__{request: {:saving, _, _, _, _}}), do: :none
   def release_held_press(%__MODULE__{request: {:loading, _, _}}), do: :none
   def release_held_press(%__MODULE__{request: {:queueing, _, _, _, _, _}}), do: :none
@@ -303,12 +351,24 @@ defmodule MingaEditor.Agent.DraftSave do
   @doc "Clears only the attachment identities admitted by this acknowledged queue operation."
   @spec queue_saved(t(), reference(), revision(), marker() | nil) :: t()
   def queue_saved(
-        %__MODULE__{request: {:queueing, ref, _, _, _, _}} = save,
+        %__MODULE__{request: {:queueing, ref, _, _, _, {sequence, _token, _kind}}} = save,
         ref,
         revision,
         marker
       ),
-      do: %{save | request: {:ready, revision, marker}, attachments: [], offer: next_offer()}
+      do: %{
+        save
+        | request: {:ready, revision, marker},
+          attachments: [],
+          offer: next_offer(),
+          next_input: sequence + 1
+      }
+
+  @doc """
+  The turn's next input number after the queues this composer has seen confirmed, or `nil` before the first. A press held behind a queue takes the later of this and the number the turn shows.
+  """
+  @spec next_input(t()) :: pos_integer() | nil
+  def next_input(%__MODULE__{next_input: next}), do: next
 
   @doc "Retires a refused submission without erasing the original live draft."
   @spec queue_refused(t(), reference(), :retryable | :blocked) :: t()
