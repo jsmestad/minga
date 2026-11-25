@@ -115,7 +115,7 @@ SPC a  Minga
 2. with a file in front, the conversation shown last, which is the one the file's modeline speaks for;
 3. otherwise the only conversation that is working.
 
-With several conversations working and none of them shown last, Stop stops nothing and says so in one line. A specific task is stopped from its row in the tasks drawer (`x`). With nothing working, Stop does nothing and says nothing.
+With several conversations working and none of them shown last, Stop stops nothing and says so in one line. A specific task is stopped from its row in the tasks drawer (`x`). With a conversation in front, Stop acts on that conversation only, so it does nothing while that conversation is not working. With nothing working, Stop does nothing and says nothing.
 
 **`SPC a q` Queue ›**
 
