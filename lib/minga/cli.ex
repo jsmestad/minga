@@ -303,21 +303,10 @@ defmodule Minga.CLI do
   @doc """
   The regular file given on the command line, or nil for a directory or no argument.
 
-  Reads what `prepare_startup/1` stored, and otherwise the raw arguments, because `mix minga` starts the editor before it parses them.
+  Every launcher stores it with `prepare_startup/1` before the editor starts: releases in `Minga.Application`, source launchers in the `mix minga` alias.
   """
   @spec startup_file() :: String.t() | nil
-  def startup_file do
-    Application.get_env(:minga, :cli_startup_file) || startup_file_from_args(argv())
-  end
-
-  @doc "The regular file raw CLI args name, or nil for a directory, no argument or an error."
-  @spec startup_file_from_args([String.t()]) :: String.t() | nil
-  def startup_file_from_args(args) when is_list(args) do
-    case parse_args(args) do
-      {:open, file, _flags} when is_binary(file) -> unless File.dir?(file), do: Path.expand(file)
-      _other -> nil
-    end
-  end
+  def startup_file, do: Application.get_env(:minga, :cli_startup_file)
 
   @doc "Returns the project root inferred from the stored startup CLI target, if any."
   @spec startup_project_root() :: String.t() | nil
