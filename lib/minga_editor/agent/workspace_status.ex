@@ -93,6 +93,22 @@ defmodule MingaEditor.Agent.WorkspaceStatus do
     end
   end
 
+  @doc """
+  The Session of the conversation the active workspace's status speaks for: the conversation in front, or, with a file in front, the conversation shown last.
+
+  It is nil when the status speaks for no conversation. A caller that acted on another conversation knows from this that nothing in view will say so.
+  """
+  @spec spoken_session(term()) :: pid() | nil
+  def spoken_session(shell_state) do
+    case presented(shell_state) do
+      {:live, %Workspace{payload: %WorkspaceAgent{session: session}}, _live} -> session
+      {:live, _workspace, %AgentState{} = live} -> AgentState.session(live)
+      {:live, _workspace, nil} -> nil
+      {:shown_last, %Workspace{payload: %WorkspaceAgent{session: session}}} -> session
+      {:shown_last, nil} -> nil
+    end
+  end
+
   # What the active workspace presents: the live cache, or, with a file in front, the workspace of
   # the conversation shown last (nil once its Session has ended).
   @typep presented ::

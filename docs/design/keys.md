@@ -117,6 +117,8 @@ SPC a  Minga
 
 With several conversations working and none of them shown last, Stop stops nothing and says so in one line. A specific task is stopped from its row in the tasks drawer (`x`). With a conversation in front, Stop acts on that conversation only, so it does nothing while that conversation is not working. With nothing working, Stop does nothing and says nothing.
 
+The modeline answers a stop of the conversation it speaks for: it reads "Minga stopped". When Stop ends another conversation (rule 3, with a different conversation or none shown last), nothing in view changes, so the echo area names what was stopped by its goal: "Stopped: Write the report".
+
 **`SPC a q` Queue ›**
 
 | Keys | Action | Status |
