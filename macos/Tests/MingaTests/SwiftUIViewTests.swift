@@ -472,6 +472,39 @@ struct StatusBarViewViewTests {
         #expect(kept.contains("mode") && kept.contains("filename"))
     }
 
+    @Test("A wide bar gives a notice room for each step's key and word; a narrow bar keeps the keys and the message caps at three quarters")
+    @MainActor func noticeReservesItsFullFormWhenItFits() {
+        let left = [segment(0, "NORMAL", kind: "mode"), segment(1, "proj.ex", kind: "filename"), segment(2, "main", kind: "git", drop: 4)]
+        let right = [segment(0, "Elixir", kind: "filetype", drop: 2), segment(1, "1:8", kind: "position", drop: 3)]
+        let search = Wire.EmptyListAction(id: "search_project", key: "SPC s p", label: "search the project")
+        let ask = Wire.EmptyListAction(id: "ask_minga", key: "SPC a ?", label: "ask Minga")
+
+        func notice(_ message: String, _ actions: [Wire.EmptyListAction]) -> StatusBarView {
+            let state = StatusBarState()
+            state.announce = { _ in }
+            state.update(from: statusBarUpdate(message: message, leftSegments: left, rightSegments: right, messageActions: actions))
+            return StatusBarView(state: state, sendAction: nil)
+        }
+
+        // One step and two steps: at 1440 pt the reserved room holds every key with its word, so the first form of the line fits.
+        for view in [notice("No references to defmodule (no server)", [search]), notice("No code actions at 1:1 (no language server)", [ask, search])] {
+            #expect(view.fullNoticeWidth > view.shortestNoticeWidth)
+            #expect(view.echoWidth(in: 1440) >= view.fullNoticeWidth + 2 * Spacing.md)
+        }
+
+        // A bar too narrow for the words still holds the message and the keys, so the keys-only form is the one that fits.
+        let narrow = notice("No matches for “limit_lable” in this buffer", [search])
+        // The narrowest bar whose three quarters hold the keys-only form; the words do not fit there.
+        let width = ceil((narrow.shortestNoticeWidth + 2 * Spacing.md) / 0.75) + 1
+        #expect(narrow.fullNoticeWidth + 2 * Spacing.md > width * 0.75)
+        #expect(narrow.shortestNoticeWidth + 2 * Spacing.md <= narrow.echoWidth(in: width))
+        #expect(narrow.echoWidth(in: width) < narrow.fullNoticeWidth + 2 * Spacing.md)
+
+        // A message longer than three quarters of the bar takes exactly three quarters and truncates there.
+        let long = notice(String(repeating: "No matches for a very long query in this buffer ", count: 4), [search])
+        #expect(long.echoWidth(in: 610) == 610 * 0.75)
+    }
+
     @Test("Narrowing drops filetype, position and git in order, then shrinks Minga, then warnings")
     @MainActor func dropLadder() {
         let segments = boardLeft + boardRight
