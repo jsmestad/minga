@@ -25,6 +25,7 @@ public struct AgentContextBar: View {
     private let barHeight: CGFloat = 28
 
     @State private var elapsedDisplay: String = "0s"
+    @Environment(\.motionPaused) private var motionPaused
 
     public var body: some View {
         if state.visible {
@@ -68,6 +69,8 @@ public struct AgentContextBar: View {
                         .font(Typography.font(.small, design: .monospaced))
                         .foregroundStyle(theme.breadcrumbFg.opacity(0.6))
                         .task(id: state.dispatchTimestamp) {
+                            // A captured frame has no running clock: it shows the strip as it is when the turn starts.
+                            guard !motionPaused else { return }
                             updateElapsedDisplay()
                             while !Task.isCancelled {
                                 do {
