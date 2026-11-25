@@ -2,10 +2,9 @@
 
 const STORAGE_KEY = "minga-learn-progress-v1";
 
-export type LessonId = "getting-started" | "editing" | "agents" | "elixir" | "remote";
+export type LessonId = "editing" | "agents" | "elixir" | "remote";
 
 export const LESSON_TOTALS: Record<LessonId, number> = {
-  "getting-started": 1,
   editing: 5,
   agents: 4,
   elixir: 3,

@@ -7,7 +7,6 @@ import { highlightStaticShellBlocks } from "./highlight.ts";
 import { mountMarksThemeSwitcher } from "./home_interactive.ts";
 import { mountLearnHub } from "./hub_view.ts";
 import { mountRemoteLab } from "./remote_lab.ts";
-import { mountRunbookFilter } from "./runbook_view.ts";
 import { mountSandbox } from "./sandbox_view.ts";
 import { mountSpecBoardDemo } from "./spec_board_view.ts";
 
@@ -29,7 +28,6 @@ function mount(selector: string, run: (root: HTMLElement) => void): void {
 
 function init(): void {
   mount("[data-learn-hub]", mountLearnHub);
-  mount("[data-runbook-filter]", mountRunbookFilter);
   mount("[data-minga-sandbox]", mountSandbox);
   mount("[data-coauthor-sim]", mountCoAuthorSim);
   mount("[data-elixir-translator]", mountElixirTranslator);

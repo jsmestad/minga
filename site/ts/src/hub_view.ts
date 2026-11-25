@@ -2,7 +2,7 @@
 
 import { getLessonSummary, type LessonId } from "./progress.ts";
 
-const LESSONS: readonly LessonId[] = ["getting-started", "editing", "agents", "elixir", "remote"];
+const LESSONS: readonly LessonId[] = ["editing", "agents", "elixir", "remote"];
 
 export function mountLearnHub(root: HTMLElement): void {
   let totalDone = 0;
@@ -30,6 +30,6 @@ export function mountLearnHub(root: HTMLElement): void {
     overall.textContent =
       totalDone > 0
         ? `Local progress: ${totalDone} of ${totalMissions} interactive missions completed`
-        : `${totalMissions} hands-on browser missions across 5 lessons · Zero accounts`;
+        : `${totalMissions} hands-on browser missions across 4 lessons · Zero accounts`;
   }
 }

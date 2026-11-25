@@ -251,6 +251,7 @@ defmodule Minga.MixProject do
           <span class="minga-brand-version">/ v0.1.0-pre</span>
         </a>
         <nav class="minga-nav" id="minga-topbar-nav" aria-label="Primary">
+          <a href="#{prefix}/getting-started">Get Started</a>
           <a href="#{prefix}/why-minga">Why Minga</a>
           <a href="#{prefix}/learn/">Learn</a>
           <a href="#{prefix}/architecture">Architecture</a>

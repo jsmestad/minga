@@ -303,6 +303,15 @@ button:focus-visible {
   border-bottom-color: var(--accent);
 }
 
+@media (min-width: 861px) and (max-width: 1040px) {
+  .site-nav {
+    gap: 0.35rem 0.85rem;
+  }
+  .brand-version {
+    display: none;
+  }
+}
+
 .header-controls {
   display: flex;
   align-items: center;
@@ -3849,26 +3858,39 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   margin: 0;
 }
 
-/* Lesson 01: Adaptive Quickstart Runbook bar */
+/* Get Started: goal and prerequisites sit close to the first command */
 
-.runbook-bar {
-  margin-bottom: 2rem;
-  padding: 1rem 1.15rem;
-  border: 1px solid var(--border);
-  border-top: 2px solid var(--border-strong);
-  background: var(--bg-subtle);
+.start-hero {
+  padding: 2.75rem 0 1.75rem;
 }
 
-.runbook-groups {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.55rem 0.75rem;
-  margin-bottom: 0.75rem;
+.start-prereqs {
+  margin-top: 0.9rem;
+  font-size: 0.93rem;
+  color: var(--text-secondary);
 }
 
-.runbook-summary {
+.start-body {
+  padding-top: 2rem;
+}
+
+.start-note {
   font-size: 0.88rem;
-  margin: 0;
+  color: var(--text-muted);
+}
+
+.start-body .step-item pre code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 768px) {
+  .start-hero {
+    padding: 1.75rem 0 1.25rem;
+  }
+  .start-body {
+    padding-top: 1.5rem;
+  }
 }
 
 @media (max-width: 960px) {
