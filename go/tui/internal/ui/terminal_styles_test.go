@@ -271,3 +271,55 @@ func TestAConfirmingAnswerFromAKnownTerminalIsReportedWithItsNewSource(t *testin
 		t.Fatalf("an identical report was sent again: %v", again)
 	}
 }
+
+func TestAForcedFeatureIsReportedAsTheUsersAndDrawnAsForced(t *testing.T) {
+	out := make(chan []byte, 16)
+	model, problems := New(80, 24, out).WithTerminalOverrides("styled_underlines=on,underline_color=off,true_color=off,bogus=on")
+	if len(problems) != 1 {
+		t.Fatalf("problems = %v, want the one unusable entry", problems)
+	}
+
+	first := [][]byte{model.TerminalReportPacket()}
+	if report, sources := lastReport(first), reportSources(first); report[generated.TerminalFeatureStyledUnderlines] != generated.TerminalFeatureStatusDetected ||
+		report[generated.TerminalFeatureUnderlineColor] != generated.TerminalFeatureStatusFallback ||
+		sources[generated.TerminalFeatureStyledUnderlines] != terminal.SourceUser || sources[generated.TerminalFeatureUnderlineColor] != terminal.SourceUser {
+		t.Fatalf("first report = %v, sources %v", report, sources)
+	}
+
+	// The terminal says the opposite of both. The user's choice stays, in the report and in what is drawn.
+	for _, msg := range []tea.Msg{tea.CapabilityMsg{Content: "Smulx;Setulc=\x1b[58:2::%p1%dm"}, tea.ColorProfileMsg{Profile: colorprofile.TrueColor}, capabilityTimeoutMsg{}} {
+		updated, _ := model.Update(msg)
+		model = updated.(Model)
+	}
+	if !model.capabilities.Supports(generated.TerminalFeatureStyledUnderlines) || model.capabilities.Supports(generated.TerminalFeatureUnderlineColor) {
+		t.Fatal("what the user forced must decide what is drawn")
+	}
+	settled := drainOutboundPackets(out)
+	if sources := reportSources(settled); sources[generated.TerminalFeatureStyledUnderlines] != terminal.SourceUser || sources[generated.TerminalFeatureTrueColor] != terminal.SourceUser {
+		t.Fatalf("settled sources = %v", sources)
+	}
+	if report := lastReport(settled); report[generated.TerminalFeatureTrueColor] != generated.TerminalFeatureStatusFallback {
+		t.Fatalf("true colour forced off = %d, want fallback", report[generated.TerminalFeatureTrueColor])
+	}
+
+	// A forced colour profile is what the program is started with. Forced off caps what detection found at 256
+	// colours, so a terminal with fewer keeps what it has.
+	for detected, want := range map[colorprofile.Profile]colorprofile.Profile{
+		colorprofile.TrueColor: colorprofile.ANSI256,
+		colorprofile.ANSI256:   colorprofile.ANSI256,
+		colorprofile.ANSI:      colorprofile.ANSI,
+		colorprofile.ASCII:     colorprofile.ASCII,
+		colorprofile.NoTTY:     colorprofile.NoTTY,
+	} {
+		if profile, forced := model.ForcedColorProfile(detected); !forced || profile != want {
+			t.Fatalf("forced off with %v detected = %v, %v; want %v", detected, profile, forced, want)
+		}
+	}
+	forcedOn, _ := New(80, 24, nil).WithTerminalOverrides("true_color=on")
+	if profile, forced := forcedOn.ForcedColorProfile(colorprofile.ANSI); !forced || profile != colorprofile.TrueColor {
+		t.Fatalf("forced on = %v, %v; want true colour", profile, forced)
+	}
+	if _, forced := New(80, 24, nil).ForcedColorProfile(colorprofile.ANSI); forced {
+		t.Fatal("without an override the profile is detected")
+	}
+}
