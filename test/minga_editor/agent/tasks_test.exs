@@ -73,6 +73,13 @@ defmodule MingaEditor.Agent.TasksTest do
       assert Tasks.stoppable(ended) == []
     end
 
+    test "a restarted session has no turn to stop until it reports one", %{pid: pid, tasks: tasks} do
+      working = Tasks.observe(tasks, pid, {:stop_target_changed, {"record", "turn-1"}}, 1)
+      replacement = session()
+
+      assert working |> Tasks.replace(pid, replacement, 2) |> Tasks.stoppable() == []
+    end
+
     test "an open approval needs you before any other state", %{pid: pid, tasks: tasks} do
       tasks =
         tasks

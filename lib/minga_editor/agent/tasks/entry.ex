@@ -204,6 +204,7 @@ defmodule MingaEditor.Agent.Tasks.Entry do
         approval: nil,
         question: nil,
         waiting: nil,
+        stop_target: nil,
         activity: Activity.finish_turn(entry.activity),
         subagents: Subagent.stop_running(entry.subagents, now),
         changed_at: now
