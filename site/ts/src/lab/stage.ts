@@ -59,14 +59,23 @@ function typedWithAltGraph(event: KeyLike): boolean {
 }
 
 /**
+ * On a Mac, Option types a character on many layouts: a German keyboard has no ] key, only Option+6. That press is the character, not a chord.
+ * It holds for Option alone (no Control, no Command) with one printable character that is not a letter. Option plus a letter stays a chord.
+ */
+function typedWithOption(event: KeyLike): boolean {
+  if (!event.altKey || event.ctrlKey || event.metaKey) return false;
+  return Array.from(event.key).length === 1 && !/[\p{L}\s]/u.test(event.key);
+}
+
+/**
  * Names a key press the way the site writes keys: a printable key as itself (Shift is already in the character), named keys in capitals,
  * and Control, Option and Command as the prefixes C-, M- and D-. A press of a modifier alone has no name and returns null.
  */
 export function normalizeKey(event: KeyLike): string | null {
   if (MODIFIER_KEYS.has(event.key)) return null;
   const base = NAMED_KEYS[event.key] ?? event.key;
-  const altGraph = typedWithAltGraph(event);
-  const mods = `${event.ctrlKey && !altGraph ? "C-" : ""}${event.altKey && !altGraph ? "M-" : ""}${event.metaKey ? "D-" : ""}`;
+  const typed = typedWithAltGraph(event) || typedWithOption(event);
+  const mods = `${event.ctrlKey && !typed ? "C-" : ""}${event.altKey && !typed ? "M-" : ""}${event.metaKey ? "D-" : ""}`;
   return `${mods}${base}`;
 }
 
@@ -81,7 +90,7 @@ export function normalizeKey(event: KeyLike): string | null {
 export function capturesKey(event: KeyLike, handled: boolean): boolean {
   if (event.key === "Tab" || event.metaKey) return false;
   if (handled) return true;
-  if (typedWithAltGraph(event)) return true;
+  if (typedWithAltGraph(event) || typedWithOption(event)) return true;
   if (/^F\d+$/.test(event.key)) return false;
   return !(event.ctrlKey || event.altKey);
 }

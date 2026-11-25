@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Co-Authoring &amp; Parallel Agents: Learn Minga</title>
-  <meta name="description" content="Lesson 03: Test per-author undo inside a braided Twist block, trigger the 300 ms anti-misfire lockout guard, inspect siblings in Subagent Peek, and review via *minga-review* in a live Catppuccin Frappé simulator.">
+  <title>Working in the Same File as Minga: Learn Minga</title>
+  <meta name="description" content="Lesson 03: practise working in the same file as Minga. See whose lines are whose, undo only your own edit, reject one of Minga's changes and keep the other.">
   <link rel="canonical" href="https://mingacode.dev/learn/agents">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#303446" media="(prefers-color-scheme: dark)">
@@ -13,18 +13,18 @@
   <meta property="og:locale" content="en_US">
   <meta property="og:type" content="article">
   <meta property="og:url" content="https://mingacode.dev/learn/agents">
-  <meta property="og:title" content="Co-Authoring &amp; Parallel Agents: Learn Minga">
-  <meta property="og:description" content="Interactive Catppuccin Frappé co-authoring mission control: Twist authorship, Orbit states, per-author undo, 300 ms lockout, and Subagent Peek.">
+  <meta property="og:title" content="Working in the Same File as Minga: Learn Minga">
+  <meta property="og:description" content="A hands-on lab: you and Minga change the same file. See whose lines are whose, undo only your own edit, reject one change and keep the other.">
   <meta property="og:image" content="https://mingacode.dev/assets/og-minga.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Co-Authoring &amp; Parallel Agents: Learn Minga">
-  <meta name="twitter:description" content="Interactive Catppuccin Frappé co-authoring mission control: Twist authorship, Orbit states, per-author undo, 300 ms lockout, and Subagent Peek.">
+  <meta name="twitter:title" content="Working in the Same File as Minga: Learn Minga">
+  <meta name="twitter:description" content="A hands-on lab: you and Minga change the same file. See whose lines are whose, undo only your own edit, reject one change and keep the other.">
   <meta name="twitter:image" content="https://mingacode.dev/assets/og-minga.png">
   <meta name="twitter:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
-  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Co-Authoring & Parallel Agents: Learn Minga","description":"Lesson 03: Test per-author undo inside a braided Twist block, trigger the 300 ms anti-misfire lockout guard, inspect siblings in Subagent Peek, and review via *minga-review* in a live Catppuccin Frappé simulator.","url":"https://mingacode.dev/learn/agents","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Learn","item":"https://mingacode.dev/learn/"},{"@type":"ListItem","position":3,"name":"Co-Authoring & Parallel Agents","item":"https://mingacode.dev/learn/agents"}]}]}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Working in the Same File as Minga: Learn Minga","description":"Lesson 03: practise working in the same file as Minga. See whose lines are whose, undo only your own edit, reject one of Minga's changes and keep the other.","url":"https://mingacode.dev/learn/agents","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Learn","item":"https://mingacode.dev/learn/"},{"@type":"ListItem","position":3,"name":"Working in the Same File as Minga","item":"https://mingacode.dev/learn/agents"}]}]}</script>
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
@@ -36,6 +36,8 @@
           document.documentElement.setAttribute("data-theme", saved);
         }
       } catch (_) {}
+      // The labs lay out as live before they mount, so mounting moves nothing. The module's onerror takes this back.
+      document.documentElement.classList.add("labs-pending");
     })();
   </script>
 </head>
@@ -71,64 +73,189 @@
     </div>
     <section class="lesson-stage">
       <div class="container">
-        <p class="learn-breadcrumb"><a href="/learn/">Learn</a> <span>/</span> Lesson 03 of 05 · Parallel Agent Mission Control</p>
+        <p class="learn-breadcrumb"><a href="/learn/">Learn</a> <span>/</span> Lesson 03 of 05 · The same file</p>
         <div class="stage-head">
           <div>
-            <h1>Co-Authoring &amp; Parallel Agents</h1>
-            <p class="stage-lead">Press <strong>u Undo yours</strong> below to revert only your own edit while Minga's Twist holds steady, test the <strong>300 ms lockout</strong>, open <strong>Subagent Peek</strong>, and review via the Act Menu.</p>
+            <h1>You and Minga, in the same file</h1>
+            <p class="stage-lead">You are still editing your spec, and Minga has just made two changes to it. Before you accept anything, you need to know which lines are yours, which are Minga's, and which you both wrote. Minga marks that in the margin of every changed line, and your undo never touches Minga's work. Try it in the file below: it takes four steps.</p>
           </div>
-          <nav class="stage-jumps" aria-label="Lesson sections">
-            <a href="#review-lab">Live simulator</a>
-            <a href="#buffers-ref">Tasks, Peek &amp; Queue</a>
-            <a href="#safe-quit">Safe quit</a>
-          </nav>
         </div>
 
-        <div id="review-lab" data-coauthor-sim>
-          <div class="lab-noscript">Enable JavaScript to use the interactive Co-Authoring Simulator, or read the buffer workflows below.</div>
-        </div>
+        <figure class="spine-figure ca-lab" id="same-file-lab" data-coauthor-sim>
+          <div class="lab-head">
+            <span class="lab-labels">
+              <span class="lab-title">Whose lines are whose</span>
+              <span class="lab-sim-label">Simulation</span>
+            </span>
+            <span class="lab-stepper" data-lab-stepper></span>
+          </div>
+
+          <div class="spine-specimen ca-stage" data-lab-stage role="group" aria-label="Simulated Minga window with the file new_feature.md. Click it or move focus to it, then press the keys the caption names.">
+            <div class="spine-titlebar">
+              <span class="spine-wordmark">minga</span>
+              <span class="spine-title-file">new_feature.md</span>
+              <span></span>
+            </div>
+            <div class="sb-buffer ca-buffer">
+              <div class="sb-line is-cursor" data-line="title" data-author="you">
+                <span class="sb-ln" aria-hidden="true"></span>
+                <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                <span class="sb-text"><span class="lab-sr">You wrote this line.</span><span class="sb-md-h"># Offline sync</span></span>
+              </div>
+              <div class="sb-line" data-line="gap_1" data-author="you">
+                <span class="sb-ln" aria-hidden="true"></span>
+                <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                <span class="sb-text"></span>
+              </div>
+              <div class="sb-line" data-line="intro" data-author="you">
+                <span class="sb-ln" aria-hidden="true"></span>
+                <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                <span class="sb-text"><span class="lab-sr">You wrote this line.</span>Notes must work with no connection.</span>
+              </div>
+              <div class="sb-line" data-line="gap_2" data-author="you">
+                <span class="sb-ln" aria-hidden="true"></span>
+                <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                <span class="sb-text"></span>
+              </div>
+              <div class="sb-line" data-line="heading" data-author="you">
+                <span class="sb-ln" aria-hidden="true"></span>
+                <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                <span class="sb-text"><span class="lab-sr">You wrote this line.</span><span class="sb-md-h">## Requirements</span></span>
+              </div>
+              <div class="sb-line" data-line="save" data-author="you">
+                <span class="sb-ln" aria-hidden="true"></span>
+                <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                <span class="sb-text"><span class="lab-sr">You wrote this line.</span>- Save notes on the device</span>
+              </div>
+              <div class="sb-line" data-line="interval" data-author="minga">
+                <span class="sb-ln" aria-hidden="true"></span>
+                <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><svg class="sb-braid sb-braid-cap" xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26"><path class="sb-strand-shade" d="M7 5 C7 11, 3 11, 3 17 L3 26" fill="none" stroke-width="2.6" stroke-linecap="round"/><path class="sb-strand-gap" d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke-width="5" stroke-linecap="round"/><path class="sb-strand-minga" d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke-width="2.6" stroke-linecap="round"/></svg><svg class="sb-braid sb-braid-fill" xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" preserveAspectRatio="none"><path class="sb-strand-shade" d="M3 0 L3 26" stroke-width="2.6"/><path class="sb-strand-minga" d="M7 0 L7 26" stroke-width="2.6"/></svg><span class="ca-kept-strand"></span></span>
+                <span class="sb-text"><span class="lab-sr"><span data-ca-mark="minga">Minga wrote this line.</span><span data-ca-mark="shared" hidden>You and Minga both wrote this line.</span><span data-ca-mark="kept" hidden>Minga wrote this line, and you kept it.</span></span>- Sync every <span class="ca-edit"><span data-ca-text="base">30</span><span class="ca-yours" data-ca-text="edit" hidden>60</span></span> seconds</span>
+              </div>
+              <div class="sb-line" data-line="banner" data-author="minga">
+                <span class="sb-ln" aria-hidden="true"></span>
+                <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><svg class="sb-braid sb-braid-fill" xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" preserveAspectRatio="none"><path class="sb-strand-shade" d="M3 0 L3 26" stroke-width="2.6"/><path class="sb-strand-minga" d="M7 0 L7 26" stroke-width="2.6"/></svg><svg class="sb-braid sb-braid-cap" xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26"><path class="sb-strand-shade" d="M3 0 L3 19" stroke-width="2.6" stroke-linecap="round"/><path class="sb-strand-minga" d="M7 0 L7 19" stroke-width="2.6" stroke-linecap="round"/></svg><span class="ca-kept-strand"></span></span>
+                <span class="sb-text"><span class="lab-sr"><span data-ca-mark="minga">Minga wrote this line.</span><span data-ca-mark="shared" hidden>You and Minga both wrote this line.</span><span data-ca-mark="kept" hidden>Minga wrote this line, and you kept it.</span></span>- Show a banner after each sync</span>
+              </div>
+              <div class="sb-line" data-line="slow" data-author="you">
+                <span class="sb-ln" aria-hidden="true"></span>
+                <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                <span class="sb-text"><span class="lab-sr">You wrote this line.</span>- Work on a slow connection</span>
+              </div>
+              <div class="sb-line" data-line="sync" data-author="minga">
+                <span class="sb-ln" aria-hidden="true"></span>
+                <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><svg class="sb-braid sb-braid-cap" xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26"><path class="sb-strand-shade" d="M7 5 C7 11, 3 11, 3 17 L3 26" fill="none" stroke-width="2.6" stroke-linecap="round"/><path class="sb-strand-gap" d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke-width="5" stroke-linecap="round"/><path class="sb-strand-minga" d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke-width="2.6" stroke-linecap="round"/></svg><svg class="sb-braid sb-braid-fill" xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" preserveAspectRatio="none"><path class="sb-strand-shade" d="M3 0 L3 26" stroke-width="2.6"/><path class="sb-strand-minga" d="M7 0 L7 26" stroke-width="2.6"/></svg><span class="ca-kept-strand"></span></span>
+                <span class="sb-text"><span class="lab-sr"><span data-ca-mark="minga">Minga wrote this line.</span><span data-ca-mark="shared" hidden>You and Minga both wrote this line.</span><span data-ca-mark="kept" hidden>Minga wrote this line, and you kept it.</span></span>- Sync in the background</span>
+              </div>
+              <div class="sb-line" data-line="retry" data-author="shared">
+                <span class="sb-ln" aria-hidden="true"></span>
+                <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><svg class="sb-braid sb-braid-fill" xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" preserveAspectRatio="none"><path class="sb-strand-shade" d="M3 0 L3 26" stroke-width="2.6"/><path class="sb-strand-minga" d="M7 0 L7 26" stroke-width="2.6"/></svg><span class="ca-kept-strand"></span></span>
+                <span class="sb-text"><span class="lab-sr"><span data-ca-mark="minga" hidden>Minga wrote this line.</span><span data-ca-mark="shared">You and Minga both wrote this line.</span><span data-ca-mark="kept" hidden>Minga wrote this line, and you kept it.</span></span>- On failure, retry <span class="ca-yours">5</span> times</span>
+              </div>
+              <div class="sb-line" data-line="status" data-author="minga">
+                <span class="sb-ln" aria-hidden="true"></span>
+                <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><svg class="sb-braid sb-braid-fill" xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" preserveAspectRatio="none"><path class="sb-strand-shade" d="M3 0 L3 26" stroke-width="2.6"/><path class="sb-strand-minga" d="M7 0 L7 26" stroke-width="2.6"/></svg><svg class="sb-braid sb-braid-cap" xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26"><path class="sb-strand-shade" d="M3 0 L3 19" stroke-width="2.6" stroke-linecap="round"/><path class="sb-strand-minga" d="M7 0 L7 19" stroke-width="2.6" stroke-linecap="round"/></svg><span class="ca-kept-strand"></span></span>
+                <span class="sb-text"><span class="lab-sr"><span data-ca-mark="minga">Minga wrote this line.</span><span data-ca-mark="shared" hidden>You and Minga both wrote this line.</span><span data-ca-mark="kept" hidden>Minga wrote this line, and you kept it.</span></span>- Show sync status</span>
+              </div>
+            </div>
+            <div class="spine-modeline">
+              <div class="ml-left"><span class="ml-pill">NORMAL</span><span class="ml-file">new_feature.md</span></div>
+              <div class="ml-right"><span class="ml-minga">Minga</span></div>
+            </div>
+          </div>
+
+          <p class="lab-caption" data-lab-caption-line></p>
+          <div class="lab-timeline-controls ca-controls">
+            <button type="button" class="lab-control" data-ca-play hidden>Press the keys for me</button>
+            <button type="button" class="lab-control" data-ca-reset hidden>Start again</button>
+            <span class="lab-keycast" data-lab-keycast aria-hidden="true"></span>
+            <span class="lab-focus-cue">Click the file and press the keys, or tap "Press the keys for me".</span>
+          </div>
+
+          <ul class="ca-legend" aria-label="What the marks in the margin mean">
+            <li><span class="ca-legend-mark sb-line" data-author="you"><span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span></span>You</li>
+            <li><span class="ca-legend-mark sb-line" data-author="minga"><span class="sb-gutter" data-surface="gutter" aria-hidden="true"><svg class="sb-braid sb-braid-fill" xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" preserveAspectRatio="none"><path class="sb-strand-shade" d="M3 0 L3 26" stroke-width="2.6"/><path class="sb-strand-minga" d="M7 0 L7 26" stroke-width="2.6"/></svg></span></span>Minga</li>
+            <li><span class="ca-legend-mark sb-line" data-author="shared"><span class="sb-gutter" data-surface="gutter" aria-hidden="true"><svg class="sb-braid sb-braid-fill" xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" preserveAspectRatio="none"><path class="sb-strand-shade" d="M3 0 L3 26" stroke-width="2.6"/><path class="sb-strand-minga" d="M7 0 L7 26" stroke-width="2.6"/></svg></span></span>Both</li>
+          </ul>
+
+          <ol data-lab-steps>
+            <li data-step="find">
+              <p data-lab-instruction>Press <kbd>]h</kbd> to find Minga's change</p>
+              <p data-lab-caption="rest">This is your spec, and Minga has made two changes to it. Click the file, then press <kbd>]h</kbd> (the <kbd>]</kbd> key, then <kbd>h</kbd>) to jump to the first one.</p>
+              <p data-lab-caption="found"><kbd data-lab-key>]h</kbd> moved the cursor to line 7, the first line of Minga's change. The double line in the margin marks lines 7 and 8 as Minga's. Next, press <kbd>i</kbd> to edit line 7.</p>
+              <p data-lab-caption="unhandled_find"><kbd data-lab-key>That key</kbd> does nothing here. Press <kbd>]h</kbd> to jump to Minga's first change.</p>
+              <p data-lab-caption="wrong_find"><kbd data-lab-key>That key</kbd> is not the next key. First press <kbd>]h</kbd> to jump to Minga's first change.</p>
+              <p data-lab-caption="cancelled_find"><kbd data-lab-key>That command</kbd> is cancelled: Esc dropped the keys you had started. Press <kbd>]h</kbd> to jump to Minga's first change.</p>
+            </li>
+            <li data-step="edit_undo">
+              <p data-lab-instruction>Press <kbd>i</kbd> for a ready-made edit, then <kbd>u</kbd> to undo it</p>
+              <p data-lab-caption="edited">In Minga, <kbd data-lab-key>i</kbd> lets you type. Here the lab typed one edit for you and pressed Esc: 30 seconds is now 60. One half of the double line on line 7 took your colour, because you and Minga both wrote that line now. Next, press <kbd>u</kbd> to undo.</p>
+              <p data-lab-caption="undone"><kbd data-lab-key>u</kbd> took back your edit and nothing else: 60 is 30 again, and Minga's two lines are still here. Undo reaches only what you typed. Next, press <kbd>SPC a d</kbd> (Space, then <kbd>a</kbd>, then <kbd>d</kbd>) to reject this change.</p>
+              <p data-lab-caption="unhandled_edit"><kbd data-lab-key>That key</kbd> does nothing here. Press <kbd>i</kbd>, and the lab makes one edit on line 7 for you.</p>
+              <p data-lab-caption="wrong_edit"><kbd data-lab-key>That key</kbd> is not the next key. Press <kbd>i</kbd>, and the lab makes one edit on line 7 for you.</p>
+              <p data-lab-caption="cancelled_edit"><kbd data-lab-key>That command</kbd> is cancelled: Esc dropped the keys you had started. Press <kbd>i</kbd>, and the lab makes one edit on line 7 for you.</p>
+              <p data-lab-caption="unhandled_undo"><kbd data-lab-key>That key</kbd> does nothing here. Press <kbd>u</kbd> to undo your edit on line 7.</p>
+              <p data-lab-caption="wrong_undo"><kbd data-lab-key>That key</kbd> is not the next key. Press <kbd>u</kbd> to undo your edit on line 7.</p>
+              <p data-lab-caption="cancelled_undo"><kbd data-lab-key>That command</kbd> is cancelled: Esc dropped the keys you had started. Press <kbd>u</kbd> to undo your edit on line 7.</p>
+            </li>
+            <li data-step="reject">
+              <p data-lab-instruction>Press <kbd>SPC a d</kbd> to reject that change</p>
+              <p data-lab-caption="rejected"><kbd data-lab-key>SPC a d</kbd> rejected the change. Minga's two lines are gone. Your own line under them, "Work on a slow connection", is still here, now on line 7. Next, press <kbd>]h</kbd> to jump to Minga's other change.</p>
+              <p data-lab-caption="unhandled_reject"><kbd data-lab-key>That key</kbd> does nothing here. Press <kbd>SPC a d</kbd> (Space, then <kbd>a</kbd>, then <kbd>d</kbd>) to reject the change on lines 7 and 8.</p>
+              <p data-lab-caption="wrong_reject"><kbd data-lab-key>That key</kbd> is not the next key. Press <kbd>SPC a d</kbd> to reject the change on lines 7 and 8.</p>
+              <p data-lab-caption="nothing_to_undo"><kbd data-lab-key>u</kbd> found nothing of yours left to undo, so nothing changed. Minga's lines 7 and 8 are still here: undo never removes them. Next, press <kbd>SPC a d</kbd> (Space, then <kbd>a</kbd>, then <kbd>d</kbd>) to reject this change.</p>
+              <p data-lab-caption="cancelled_reject"><kbd data-lab-key>That command</kbd> is cancelled: Esc dropped the keys you had started. Press <kbd>SPC a d</kbd> (Space, then <kbd>a</kbd>, then <kbd>d</kbd>) to reject the change on lines 7 and 8.</p>
+            </li>
+            <li data-step="keep">
+              <p data-lab-instruction>Press <kbd>]h</kbd>, then <kbd>SPC a y</kbd> to keep the other change</p>
+              <p data-lab-caption="found_other"><kbd data-lab-key>]h</kbd> moved the cursor to Minga's other change, lines 8 to 10. Line 9 is the line you both wrote. Next, press <kbd>SPC a y</kbd> to keep the change.</p>
+              <p data-lab-caption="kept"><kbd data-lab-key>SPC a y</kbd> kept the change. Its mark is now one thin, faint line: these lines are settled, and they stay marked until your next commit. You found a change, tried an edit, took it back, rejected one change and kept the other.</p>
+              <p data-lab-caption="unhandled_find_other"><kbd data-lab-key>That key</kbd> does nothing here. Press <kbd>]h</kbd> to jump to Minga's other change.</p>
+              <p data-lab-caption="wrong_find_other"><kbd data-lab-key>That key</kbd> is not the next key. The cursor is on your own line, so first press <kbd>]h</kbd> to jump to Minga's other change.</p>
+              <p data-lab-caption="cancelled_find_other"><kbd data-lab-key>That command</kbd> is cancelled: Esc dropped the keys you had started. Press <kbd>]h</kbd> to jump to Minga's other change.</p>
+              <p data-lab-caption="unhandled_keep"><kbd data-lab-key>That key</kbd> does nothing here. Press <kbd>SPC a y</kbd> (Space, then <kbd>a</kbd>, then <kbd>y</kbd>) to keep the change on lines 8 to 10.</p>
+              <p data-lab-caption="wrong_keep"><kbd data-lab-key>That key</kbd> is not the next key. Press <kbd>SPC a y</kbd> to keep the change on lines 8 to 10.</p>
+              <p data-lab-caption="cancelled_keep"><kbd data-lab-key>That command</kbd> is cancelled: Esc dropped the keys you had started. Press <kbd>SPC a y</kbd> (Space, then <kbd>a</kbd>, then <kbd>y</kbd>) to keep the change on lines 8 to 10.</p>
+              <p data-lab-caption="pending"><kbd data-lab-key>The first key</kbd> starts a command. Minga is waiting for the rest of it.</p>
+              <p data-lab-caption="after_done"><kbd data-lab-key>That key</kbd> has nothing left to do: you have reviewed both changes. Press Start again to run the lab once more.</p>
+            </li>
+          </ol>
+        </figure>
       </div>
     </section>
 
-    <section class="section section-tinted" id="buffers-ref">
+    <section class="section section-tinted" id="what-you-saw">
       <div class="container">
         <div class="section-header">
-          <p class="section-index"><span>01</span> Workflows</p>
-          <h2>Review inline or in buffers, inspect workers in place, queue prompts like code.</h2>
-          <p>Every agent surface opens as a buffer in a drawer or split and closes with <kbd>q</kbd>, trading docked side panels for unobstructed code width.</p>
+          <p class="section-index"><span>01</span> What you saw</p>
+          <h2>The margin answers one question: who wrote this line, and is it settled?</h2>
+          <p>You did not have to read a diff or leave the file. Three marks carried the whole review.</p>
         </div>
 
-        <ul class="spec-ledger">
-          <li class="spec-row">
-            <span class="spec-key"><kbd>]h</kbd> / <kbd>[h</kbd><br><kbd>SPC a y</kbd> / <kbd>SPC a d</kbd></span>
-            <span class="spec-detail"><strong>Inline review while coding.</strong> Jump with <kbd>]h</kbd>/<kbd>[h</kbd>, select with <kbd>ih</kbd>/<kbd>ah</kbd>, apply line ranges (<code>:'&lt;,'&gt;Minga keep</code>), or press <kbd>g.</kbd> for the Act Menu. Keeping a change with an LSP error prompts first.</span>
-          </li>
-          <li class="spec-row">
-            <span class="spec-key"><kbd>SPC a r</kbd><br><code>*minga-review*</code></span>
-            <span class="spec-detail"><strong>Batch review drawer.</strong> Bare keys act directly: <kbd>y</kbd> keep, <kbd>n</kbd> reject, <kbd>=</kbd> diff, <kbd>Y</kbd> keep all (with confirm), <kbd>q</kbd> close. <code>:Minga review</code> also fills quickfix.</span>
-          </li>
-          <li class="spec-row">
-            <span class="spec-key"><kbd>SPC a a</kbd><br><code>*minga-tasks*</code></span>
-            <span class="spec-detail"><strong>Tasks and subagent trees, needs-you first.</strong> Uniform approval keys (<kbd>y</kbd>/<kbd>a</kbd>/<kbd>t</kbd>/<kbd>n</kbd>/<kbd>=</kbd>) with a 300 ms lockout on auto-open and <em>Already answered</em> sync everywhere (<a href="/docs/agentic-keymap.html">full keymap</a>).</span>
-          </li>
-          <li class="spec-row">
-            <span class="spec-key"><kbd>SPC a i</kbd><br>Subagent Peek</span>
-            <span class="spec-detail"><strong>Inspect a worker in a right split.</strong> Unfold its brief with <kbd>za</kbd>, step siblings with <kbd>]]</kbd>/<kbd>[[</kbd>, and message it directly while keeping your parent draft intact.</span>
-          </li>
-          <li class="spec-row">
-            <span class="spec-key"><kbd>SPC a v</kbd> / <kbd>SPC a q q</kbd><br><code>*minga-queue*</code></span>
-            <span class="spec-detail"><strong>Steer mid-flight or edit your queue.</strong> Normal <kbd>↩</kbd> or <kbd>⌘↩</kbd> steers while Minga works; <kbd>⌥↩</kbd> queues follow-ups into <code>*minga-queue*</code> (reorder with <kbd>dd</kbd>/<kbd>p</kbd>); <kbd>SPC a s</kbd> stops.</span>
-          </li>
+        <ul class="pillar-list ca-points">
+          <li><strong>One thin line is yours.</strong> Every line you wrote and have not committed carries it. If Minga's change removes one of your lines, the change stays marked until you keep it, and rejecting it brings the line back.</li>
+          <li><strong>A double line is Minga's, and it waits for you.</strong> The two lines cross on the first line of each change, so you can see where a change starts. A change stays marked until you keep it or reject it.</li>
+          <li><strong>When you edit one of Minga's lines, half of its double line takes your colour.</strong> You both wrote that line, and the mark says so.</li>
+          <li><strong><kbd>u</kbd> takes back only what you typed.</strong> It never removes Minga's lines. Those leave one way: you reject the change with <kbd>SPC a d</kbd>.</li>
+          <li><strong>A kept change goes quiet.</strong> <kbd>SPC a y</kbd> turns the double line into one faint line, which stays until your next commit.</li>
         </ul>
+
+        <p class="ca-takeaway">What you can do differently: let Minga work in a file while you are still editing it. You do not need to stop and wait, because your undo cannot damage Minga's work, and a rejected change cannot take your lines with it.</p>
       </div>
     </section>
 
-    <section class="section" id="safe-quit">
+    <section class="section" id="next">
       <div class="container">
-        <div class="callout">
-          <span class="callout-title">Safe quit (<kbd>SPC q q</kbd>)</span>
-          <p>Quitting with unsaved work lists open files and prompts with explicit keys: <kbd>s</kbd> save all, <kbd>d</kbd> discard only your unsaved edits (Minga's unreviewed changes stay saved), or <kbd>esc</kbd> cancel.</p>
+        <div class="section-header">
+          <p class="section-index"><span>02</span> Beyond one file</p>
+          <h2>Two more safeguards, and where the keys come from.</h2>
         </div>
+
+        <ul class="pillar-list ca-points">
+          <li>When Minga splits a task among helper agents, called subagents, you can open any one of them beside the conversation and see what it is doing: the design calls this the <a href="/docs/design-surfaces.html#subagent-peek">subagent peek</a>.</li>
+          <li>When a list of requests opens on its own, Minga ignores single-letter answers for a moment, so a letter you were already typing cannot approve something: see <a href="/docs/design-surfaces.html#drawers">Drawers</a>.</li>
+          <li>Every key in this lesson comes from the <a href="/docs/design-keys.html">v0.1.0 key plan</a>. It is the plan for v0.1.0, not the keys of today's build.</li>
+        </ul>
 
         <nav class="lesson-pager" aria-label="Lesson navigation">
           <a class="pager-link" href="/learn/editing">
@@ -163,6 +290,6 @@
   </footer>
 
   <script defer src="/site.js"></script>
-  <script type="module" src="/assets/learn-labs.js"></script>
+  <script type="module" src="/assets/learn-labs.js" onerror="document.documentElement.classList.add('labs-failed')"></script>
 </body>
 </html>

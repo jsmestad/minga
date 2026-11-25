@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { captionChange } from "../src/lab/caption.ts";
 import { esc } from "../src/lab/esc.ts";
 import { createKeycast, keycastPush, keycastText } from "../src/lab/keycast.ts";
 import { capturesKey, focusAfterControlClick, nextVisible, normalizeKey, stepPrefix } from "../src/lab/stage.ts";
@@ -21,6 +22,38 @@ describe("lab kit: esc", () => {
   });
 });
 
+describe("lab kit: caption", () => {
+  type Shown = [id: string, keys: string, press?: number];
+  const shownOf = ([id, keys, press = 0]: Shown) => ({ id, keys, press });
+
+  it("draws another caption, refills only the key slot for another key, and otherwise leaves the line alone", () => {
+    const cases: readonly [shown: Shown, next: Shown, want: ReturnType<typeof captionChange>][] = [
+      [["", ""], ["rest", ""], "render"],
+      [["rest", ""], ["rest", ""], "none"],
+      [["rest", ""], ["unhandled", "j", 1], "render"],
+      [["unhandled", "j", 1], ["unhandled", "w", 1], "keys"],
+      [["unhandled", "w", 1], ["unhandled", "w", 1], "none"],
+      [["unhandled", "w", 1], ["found", "]h", 1], "render"],
+    ];
+    for (const [shown, next, want] of cases) assert.equal(captionChange(shownOf(shown), shownOf(next)), want, `${shown} to ${next}`);
+  });
+
+  it("draws the caption again for a new key press that changed neither the caption nor the keys, so a repeated key is answered", () => {
+    assert.equal(captionChange(shownOf(["unhandled", "j", 1]), shownOf(["unhandled", "j", 2])), "render");
+    assert.equal(captionChange(shownOf(["unhandled", "j", 2]), shownOf(["unhandled", "w", 3])), "render");
+  });
+
+  it("a lab that passes no keys and no press count gets one draw per caption id, as before", () => {
+    assert.equal(captionChange(shownOf(["", ""]), shownOf(["rest", ""])), "render");
+    assert.equal(captionChange(shownOf(["rest", ""]), shownOf(["rest", ""])), "none");
+    assert.equal(captionChange(shownOf(["rest", ""]), shownOf(["done", ""])), "render");
+  });
+
+  it("draws the caption from the page again when its keys go away, so the stand-in words come back", () => {
+    assert.equal(captionChange(shownOf(["unhandled", "x"]), shownOf(["unhandled", ""])), "render");
+  });
+});
+
 describe("lab kit: key names", () => {
   it("names keys the way the site writes them", () => {
     const cases: readonly [Parameters<typeof normalizeKey>[0], string | null][] = [
@@ -35,6 +68,14 @@ describe("lab kit: key names", () => {
       [{ key: "j", ctrlKey: true }, "C-j"],
       [{ key: "Enter", altKey: true }, "M-RET"],
       [{ key: "s", metaKey: true }, "D-s"],
+      [{ key: "]", altKey: true }, "]"],
+      [{ key: "[", altKey: true }, "["],
+      [{ key: "@", altKey: true }, "@"],
+      [{ key: "x", altKey: true }, "M-x"],
+      [{ key: "å", altKey: true }, "M-å"],
+      [{ key: " ", altKey: true }, "M-SPC"],
+      [{ key: "]", altKey: true, ctrlKey: true }, "C-M-]"],
+      [{ key: "]", altKey: true, metaKey: true }, "M-D-]"],
       [{ key: "Shift" }, null],
       [{ key: "Meta", metaKey: true }, null],
     ];
@@ -58,6 +99,13 @@ describe("lab kit: key names", () => {
     assert.equal(capturesKey({ key: "x" }, false), true);
     assert.equal(capturesKey({ key: "x" }, true), true);
     assert.equal(capturesKey({ key: "Escape" }, false), true);
+  });
+
+  it("keeps a character typed with Option like any plain key, and Option plus a letter only when the lab handled it", () => {
+    assert.equal(capturesKey({ key: "]", altKey: true }, false), true);
+    assert.equal(capturesKey({ key: "]", altKey: true }, true), true);
+    assert.equal(capturesKey({ key: "x", altKey: true }, false), false);
+    assert.equal(capturesKey({ key: "x", altKey: true }, true), true);
   });
 
   it("never keeps Tab, Shift+Tab or a Command chord, even when the lab handled the key", () => {

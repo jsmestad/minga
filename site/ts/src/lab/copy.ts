@@ -28,6 +28,7 @@
  *   data-step              the step id. Steps keep their document order.
  *   data-lab-instruction   the step's short label. The stepper shows it.
  *   data-lab-caption="id"  one caption. A step holds one or more. Caption ids are unique in the lab. A caption may hold links; the caption line clones its nodes.
+ *   data-lab-key           inside a caption: the place where the caption line names the keys just pressed. The page puts stand-in words there ("That key").
  *   data-lab-text="id"     a named string used elsewhere in the stage (a prompt, for example). It may sit anywhere in the lab root.
  *
  * The contract does not use <template>, <script> or attribute values for copy, because the checker does not read them.

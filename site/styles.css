@@ -797,23 +797,6 @@ kbd {
 
 /* Specimen internal rows */
 
-.specimen-pane-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding-bottom: 0.55rem;
-  margin-bottom: 0.7rem;
-  border-bottom: 1px solid #414559;
-  font-size: 0.74rem;
-  color: #a5adce;
-}
-
-.specimen-pane-head strong {
-  color: #c6d0f5;
-  font-weight: 600;
-}
-
 .specimen-row {
   display: flex;
   align-items: baseline;
@@ -822,14 +805,6 @@ kbd {
   font-size: 0.77rem;
   color: #b5bfe2;
 }
-.specimen-row-needs {
-  background: rgba(239, 159, 118, 0.1);
-  border-left: 2px solid #ef9f76;
-  padding: 0.5rem 0.65rem;
-  margin: 0.35rem 0;
-  display: block;
-}
-
 /* 2x2 Co-Authoring & Parallel Agent Feature Grid */
 
 .feature-grid {
@@ -1079,17 +1054,6 @@ kbd {
 
 .callout:last-child {
   margin-bottom: 0;
-}
-
-.callout-title {
-  display: block;
-  margin-bottom: 0.35rem;
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--accent);
 }
 
 /* Code Blocks */
@@ -1812,11 +1776,6 @@ td:first-child {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .specimen-pane-head {
-    flex-wrap: wrap;
-    gap: 0.25rem 0.6rem;
-    font-size: 0.72rem;
-  }
   .specimen-row {
     font-size: 0.74rem;
     overflow-wrap: break-word;
@@ -2428,10 +2387,6 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   color: var(--text-muted);
 }
 
-.lab-specimen {
-  border: 0;
-}
-
 .lab-cursor {
   box-shadow: inset 2px 0 0 0 #8caaee;
 }
@@ -2439,69 +2394,6 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 .lab-line-rejected {
   opacity: 0.36;
   text-decoration: line-through;
-}
-
-.lab-act-menu {
-  margin: 0.75rem 1rem 0;
-  border: 1px solid #ca9ee6;
-  background: #232634;
-  color: #c6d0f5;
-}
-
-.lab-act-head {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 0.35rem 0.75rem;
-  padding: 0.45rem 0.75rem;
-  border-bottom: 1px solid #414559;
-  font-size: 0.74rem;
-}
-
-.lab-act-decision {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.lab-act-half {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: #c6d0f5;
-  padding: 0.65rem 0.75rem;
-  text-align: center;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  font-family: var(--font-mono);
-}
-
-.lab-act-half + .lab-act-half {
-  border-left: 1px solid #414559;
-}
-
-.lab-act-keep {
-  background: rgba(202, 158, 230, 0.16);
-}
-
-.lab-act-half:hover {
-  background: rgba(202, 158, 230, 0.24);
-}
-
-.lab-act-half strong {
-  font-size: 0.82rem;
-  color: #e6ebff;
-}
-
-.lab-act-half strong span {
-  color: #ca9ee6;
-  margin-right: 0.25rem;
-}
-
-.lab-act-half small {
-  font-size: 0.7rem;
-  color: #a5adce;
 }
 
 .lab-note {
@@ -2625,9 +2517,6 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   }
   .lab-cmd-muted {
     margin-left: 0;
-  }
-  .lab-act-menu {
-    margin: 0.65rem 0.75rem 0;
   }
 }
 
@@ -3397,115 +3286,6 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   text-decoration: underline;
 }
 
-/* Lesson 03: Co-authoring simulator extras */
-
-.ca-toolbar-row2 {
-  background: var(--bg-subtle);
-}
-
-.ca-drawer-body {
-  padding: 0.65rem 0.85rem;
-}
-
-.ca-lock-badge {
-  padding: 0.08rem 0.4rem;
-  background: rgba(239, 159, 118, 0.24);
-  color: #ef9f76;
-  font-size: 0.68rem;
-  font-weight: 600;
-}
-
-.ca-approval-btns,
-.ca-peek-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  margin-top: 0.5rem;
-}
-
-.ca-key-chip {
-  appearance: none;
-  border: 1px solid #51576d;
-  background: #292c3c;
-  color: #c6d0f5;
-  padding: 0.24rem 0.55rem;
-  font-family: var(--font-mono);
-  font-size: 0.71rem;
-  cursor: pointer;
-}
-
-.ca-key-chip span {
-  color: #ca9ee6;
-  font-weight: 700;
-  margin-right: 0.2rem;
-}
-
-.ca-key-chip:hover {
-  border-color: #ca9ee6;
-}
-
-.ca-peek-split {
-  display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-  border-top: 1px solid #51576d;
-  background: #232634;
-}
-
-.ca-peek-parent,
-.ca-peek-worker {
-  padding: 0.75rem 0.9rem;
-  min-width: 0;
-}
-
-.ca-peek-worker {
-  border-left: 1px solid #414559;
-}
-
-.ca-draft-input {
-  width: 100%;
-  margin-top: 0.4rem;
-  padding: 0.42rem 0.6rem;
-  border: 1px solid #51576d;
-  background: #292c3c;
-  color: #c6d0f5;
-  font-family: var(--font-mono);
-  font-size: 0.73rem;
-}
-
-.ca-sib-strip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.ca-sib-glyph {
-  appearance: none;
-  border: 1px solid transparent;
-  background: transparent;
-  padding: 0.08rem 0.28rem;
-  cursor: pointer;
-  font-size: 0.8rem;
-}
-
-.ca-sib-glyph.is-current {
-  border-color: #ca9ee6;
-  background: rgba(202, 158, 230, 0.16);
-}
-
-.ca-brief-btn {
-  appearance: none;
-  width: 100%;
-  text-align: left;
-  border: 1px solid #414559;
-  background: #292c3c;
-  color: #a5adce;
-  padding: 0.4rem 0.6rem;
-  margin-bottom: 0.45rem;
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  cursor: pointer;
-}
-
 /* Lesson 04: Translator + Live Theme Preview */
 
 .tr-head {
@@ -3972,13 +3752,6 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   border: 1px solid var(--border);
 }
 
-/* Lab stage focus ring and modeline failure tone */
-
-[data-ca-stage]:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px #ca9ee6;
-}
-
 .ml-fail {
   color: #e78284;
 }
@@ -4182,9 +3955,10 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   visibility: hidden;
 }
 
-/* Home: a spec becomes a board. The stage is a Minga window in the default Catppuccin Frappé theme, so its colours are fixed and do not follow the site theme. The markup's own state is the final frame; a mounted demo sets data-beat, data-rewritten and data-edited on the figure. */
+/* Home: a spec becomes a board. The Lesson 03 lab (.ca-lab, below) shows the same spec file, so it shares this block's colour tokens and its line, gutter and mark rules (.sb-line, .sb-gutter, .sb-braid, .sb-you-strand). The stage is a Minga window in the default Catppuccin Frappé theme, so its colours are fixed and do not follow the site theme. The markup's own state is the final frame; a mounted demo sets data-beat, data-rewritten and data-edited on the figure. */
 
-.sb-demo {
+.sb-demo,
+.ca-lab {
   --sb-bg: #303446;
   --sb-mantle: #292c3c;
   --sb-rule: #414559;
@@ -4201,7 +3975,8 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   --sb-font: 1.06rem;
 }
 
-.sb-demo [hidden] {
+.sb-demo [hidden],
+.ca-lab [hidden] {
   display: none !important;
 }
 
@@ -4362,13 +4137,13 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 .sb-line[data-line="retry"] { --sb-land: 1300ms; }
 .sb-line[data-line="status"] { --sb-land: 2300ms; }
 
-.lab-live .sb-braid {
+.sb-demo.lab-live .sb-braid {
   animation: sb-draw var(--lab-draw) var(--lab-ease) both;
   animation-delay: var(--sb-land, 0ms);
 }
 
-.lab-live .sb-line[data-seg="body"] .sb-text,
-.lab-live .sb-line[data-seg="last"] .sb-text {
+.sb-demo.lab-live .sb-line[data-seg="body"] .sb-text,
+.sb-demo.lab-live .sb-line[data-seg="last"] .sb-text {
   animation: sb-land var(--lab-draw) var(--lab-ease) both;
   animation-delay: var(--sb-land, 0ms);
 }
@@ -4742,10 +4517,224 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 @media (prefers-reduced-motion: reduce) {
   .sb-demo *,
   .sb-demo *::before,
-  .sb-demo *::after {
+  .sb-demo *::after,
+  .ca-lab,
+  .ca-lab *,
+  .ca-lab *::before,
+  .ca-lab *::after {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* Lesson 03: you and Minga in the same file. The stage reuses the spec file of the home page demo (the .sb-line, .sb-gutter and mark rules above) in one pane. Its own state is the resting frame; a mounted lab sets data-move on the figure, data-author and is-cursor on each line. */
+
+.ca-lab {
+  --sb-u: 36px;
+  --sb-font: 1rem;
+  margin-top: 0;
+}
+
+/* The buffer keeps the height of the whole file (12 lines plus its padding), so the caption under the stage does not move when a rejected change takes its lines away. */
+.ca-buffer {
+  counter-reset: ca-line;
+  min-height: calc(var(--sb-u) * 12 + 1.7rem);
+}
+
+/* A rejected line is hidden, so it does not count, and the lines under it renumber. */
+.ca-buffer .sb-line {
+  counter-increment: ca-line;
+}
+
+.ca-buffer .sb-ln::before {
+  content: counter(ca-line);
+}
+
+.ca-buffer .sb-line.is-cursor {
+  background: rgba(140, 170, 238, 0.12);
+  box-shadow: inset 2px 0 0 var(--sb-you);
+}
+
+.ca-buffer .sb-line.is-cursor .sb-ln {
+  color: #c6d0f5;
+}
+
+.ca-yours {
+  color: var(--sb-you);
+  font-weight: 700;
+}
+
+/* A kept change (docs/design/marks.md, "Kept"): one thin strand in a muted minga, in place of the two strands. */
+.ca-kept-strand {
+  display: none;
+  flex: 1;
+  width: calc(var(--sb-u) * 1.5 / 26);
+  background: var(--sb-minga);
+  opacity: 0.45;
+}
+
+.sb-line[data-author="kept"] .ca-kept-strand {
+  display: block;
+}
+
+.sb-line[data-author="kept"] .sb-braid {
+  display: none;
+}
+
+/* The stage takes keys only while it has focus, so it shows when it does. */
+.ca-stage {
+  cursor: pointer;
+}
+
+.ca-lab.is-stage-focused .ca-stage:not(:focus-visible) {
+  border-color: var(--sb-minga);
+  box-shadow: 0 0 0 1px var(--sb-minga);
+}
+
+/* The count stays on one line when the step label next to it wraps. */
+.ca-lab .lab-stepper-count {
+  flex: none;
+  white-space: nowrap;
+}
+
+.ca-controls {
+  align-items: center;
+  gap: 0.5rem 1rem;
+}
+
+.ca-lab:not(.lab-live) .lab-keycast,
+.ca-lab:not(.lab-live) .lab-focus-cue {
+  display: none;
+}
+
+.ca-controls .lab-keycast {
+  min-width: 9rem;
+}
+
+/* The three-word key sits outside the editor frame. Each mark keeps the editor's own background, so it reads the same in the light and dark site themes. */
+.ca-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.6rem;
+  margin: 0.9rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+.ca-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.ca-legend-mark.sb-line {
+  --sb-u: 26px;
+  display: inline-flex;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  background: var(--sb-bg);
+}
+
+.ca-points {
+  max-width: var(--measure);
+}
+
+.ca-takeaway {
+  max-width: var(--measure);
+  margin: 1.75rem 0 0;
+  color: var(--text);
+}
+
+@media (max-width: 900px) {
+  .ca-lab {
+    --sb-u: 28px;
+    --sb-font: 0.8rem;
+  }
+
+  /* The step label wraps to two lines on a phone. The row keeps that height for every step, so the stage does not move. */
+  .ca-lab .lab-stepper {
+    height: 3.4em;
+    align-items: flex-start;
+  }
+
+  /* The tallest caption is five lines at 390px. */
+  .ca-lab .lab-caption {
+    min-height: 8.2em;
+  }
+
+  /* On a phone the hint comes first, on its own row, so it is on screen with the file and names the button under it. */
+  .ca-controls .lab-focus-cue {
+    order: -1;
+    flex-basis: 100%;
+  }
+
+  /* The hint, the buttons and the keys take up to three rows on a phone. The row keeps that height when a button or the hint goes, so the key under it does not move. */
+  .ca-controls {
+    min-height: 7.2rem;
+    align-content: flex-start;
+  }
+}
+
+/* Homepage Section 01: Semantic Theme Role Switcher */
+
+.marks-theme-bar {
+  margin-bottom: 1.5rem;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.marks-theme-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem 1rem;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+}
+
+.marks-theme-k {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.marks-role-tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  padding: 0.65rem 1rem;
+  border-top: 1px solid transparent;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+}
+
+.marks-role-tokens span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+}
+
+.marks-role-tokens i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+}
+
+.marks-role-tokens code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  opacity: 0.78;
 }
 
 /* Shared Catppuccin Frappé syntax tokens for TS-highlighted dark specimens */

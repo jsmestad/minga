@@ -1,315 +1,247 @@
-/* Pure state machine for Lesson 03: Live Parallel-Agent & Twist Co-Authoring Simulator. */
+/*
+ * State for the Lesson 03 lab: you and Minga work in the same file.
+ *
+ * The lab is one sequence of moves. Each move waits for one command; the right command changes the file and goes to the next move.
+ * Any other key changes only the caption and the keycast. Every value here is an id: the words (file text, captions, step labels) live in site/learn/agents.html.
+ */
 
-export type OrbitState = "working" | "needs_you" | "waiting" | "stopped" | "failed" | "done";
+import { createKeycast, keycastPush, type KeycastState } from "./lab/keycast.ts";
+import { stepPrefix } from "./lab/stage.ts";
 
-export interface SubagentWorker {
-  readonly id: string;
-  readonly name: string;
-  readonly state: OrbitState;
-  readonly summary: string;
-  readonly brief: string;
-  readonly steps: readonly string[];
-  readonly approvalRequest?: {
-    readonly title: string;
-    readonly detail: string;
-    readonly answeredText?: string;
-  };
+export type StepId = "find" | "edit_undo" | "reject" | "keep";
+/** The four steps. They are also the lesson's progress ids: LESSON_STEPS.agents in progress.ts lists the same ids, and a test holds the two together. */
+export const STEP_IDS: readonly StepId[] = ["find", "edit_undo", "reject", "keep"];
+
+/** A step holds one or two moves. "finished" comes after the last step. */
+export type Move = "find" | "edit" | "undo" | "reject" | "find_other" | "keep" | "finished";
+export type WaitingMove = Exclude<Move, "finished">;
+export const MOVES: readonly Move[] = ["find", "edit", "undo", "reject", "find_other", "keep", "finished"];
+
+export type Command = "next_change" | "edit" | "undo" | "reject" | "keep";
+
+/** The keys of each command, one array item per key press. */
+export const COMMAND_KEYS: Readonly<Record<Command, readonly string[]>> = {
+  next_change: ["]", "h"],
+  edit: ["i"],
+  undo: ["u"],
+  reject: ["SPC", "a", "d"],
+  keep: ["SPC", "a", "y"],
+};
+
+/** Cancels a command that is waiting for its next key. */
+export const CANCEL_KEY = "ESC";
+
+const COMMANDS = Object.keys(COMMAND_KEYS) as Command[];
+const SEQUENCES: readonly (readonly string[])[] = COMMANDS.map((command) => COMMAND_KEYS[command]);
+
+interface MoveSpec {
+  readonly step: StepId;
+  readonly expects: Command;
 }
 
-export type CoAuthorMissionId = "per_author_undo" | "lockout_guard" | "subagent_peek" | "review_change";
+const MOVE_SPECS: Readonly<Record<WaitingMove, MoveSpec>> = {
+  find: { step: "find", expects: "next_change" },
+  edit: { step: "edit_undo", expects: "edit" },
+  undo: { step: "edit_undo", expects: "undo" },
+  reject: { step: "reject", expects: "reject" },
+  find_other: { step: "keep", expects: "next_change" },
+  keep: { step: "keep", expects: "keep" },
+};
+
+export type LineId = "title" | "gap_1" | "intro" | "gap_2" | "heading" | "save" | "interval" | "banner" | "slow" | "sync" | "retry" | "status";
+export const LINE_IDS: readonly LineId[] = ["title", "gap_1", "intro", "gap_2", "heading", "save", "interval", "banner", "slow", "sync", "retry", "status"];
+
+export type ChangeId = "first" | "second";
+export type ChangeStatus = "unreviewed" | "kept" | "rejected";
+
+/** Minga's two changes. The first is two added lines; the second holds the line the learner edited before the lab starts. */
+export const CHANGE_LINES: Readonly<Record<ChangeId, readonly LineId[]>> = {
+  first: ["interval", "banner"],
+  second: ["sync", "retry", "status"],
+};
+
+/** The line of the first change that the edit move changes. */
+export const EDIT_LINE: LineId = "interval";
+/** The line of the second change that carries the learner's edit from the first frame. */
+export const SHARED_LINE: LineId = "retry";
+/** The learner's own line between the two changes. It must outlive the reject. */
+export const OWN_LINE: LineId = "slow";
+
+/** The gutter mark of a line: the learner's, Minga's, both, or one of Minga's lines after it is kept. */
+export type Mark = "you" | "minga" | "shared" | "kept";
+
+export type CaptionId =
+  | "rest"
+  | "found"
+  | "edited"
+  | "undone"
+  | "rejected"
+  | "found_other"
+  | "kept"
+  | "pending"
+  | `unhandled_${WaitingMove}`
+  | `wrong_${WaitingMove}`
+  | `cancelled_${WaitingMove}`
+  | "nothing_to_undo"
+  | "after_done";
+
+const WAITING_MOVES = MOVES.filter((move): move is WaitingMove => move !== "finished");
+
+export const CAPTION_IDS: readonly CaptionId[] = [
+  "rest",
+  "found",
+  "edited",
+  "undone",
+  "rejected",
+  "found_other",
+  "kept",
+  "pending",
+  ...WAITING_MOVES.map((move): CaptionId => `unhandled_${move}`),
+  ...WAITING_MOVES.map((move): CaptionId => `wrong_${move}`),
+  ...WAITING_MOVES.map((move): CaptionId => `cancelled_${move}`),
+  "nothing_to_undo",
+  "after_done",
+];
 
 export interface CoAuthorState {
-  readonly workers: readonly SubagentWorker[];
-  readonly activeDrawer: "none" | "tasks" | "peek";
-  readonly peekIndex: number;
-  readonly briefFolded: boolean;
-  readonly parentDraft: string;
-  readonly cursorChange: 1 | 2;
-  readonly change1: "unreviewed" | "kept" | "rejected";
-  readonly change2: "unreviewed" | "kept" | "rejected";
-  readonly userEditPresent: boolean;
-  readonly actMenuOpen: boolean;
-  readonly lockoutUntilMs: number;
-  readonly lastEvent: string;
-  readonly completed: ReadonlySet<CoAuthorMissionId>;
+  readonly move: Move;
+  readonly cursor: LineId;
+  /** The learner's edit inside Minga's first change is in the file. */
+  readonly edited: boolean;
+  readonly changes: Readonly<Record<ChangeId, ChangeStatus>>;
+  readonly caption: CaptionId;
+  /** The keys the caption names: the sequence just pressed, or the prefix still waiting. */
+  readonly captionKeys: readonly string[];
+  readonly keycast: KeycastState;
+  /** How many keys the lab has taken. The caption line draws again for each one, so a repeated key is still answered. */
+  readonly presses: number;
 }
 
-export const COAUTHOR_MISSIONS: readonly {
-  readonly id: CoAuthorMissionId;
-  readonly label: string;
-  readonly hint: string;
-}[] = [
-  { id: "per_author_undo", label: "Undo only your own edit", hint: "Press u Undo yours (Minga's lines stay)" },
-  { id: "lockout_guard", label: "Test the 300 ms guard", hint: "Trigger auto-open approval, then tap y immediately" },
-  { id: "subagent_peek", label: "Peek & step siblings", hint: "Open SPC a i Subagent Peek, then ]]" },
-  { id: "review_change", label: "Keep or reject a change", hint: "Use SPC a y, SPC a d, or g. Act Menu" },
-];
-
-export const LOCKOUT_MS = 300;
-
-const INITIAL_WORKERS: readonly SubagentWorker[] = [
-  {
-    id: "edge",
-    name: "Edge-Case Tester",
-    state: "done",
-    summary: "Reported 1 missing 529 clause",
-    brief: "Check retry status classification against 429, 500-599, and 529 overloaded responses.",
-    steps: [
-      "Read lib/minga_agent/retry.ex",
-      "Added test cases for HTTP 529 overloaded responses",
-      "Handed 1 finding back to parent conversation",
-    ],
-  },
-  {
-    id: "fact",
-    name: "Fact-Check Auditor",
-    state: "working",
-    summary: "Cross-checking backoff cap in retry.ex",
-    brief: "Verify Retry-After HTTP-date parsing and exponential backoff cap against RFC 9110.",
-    steps: [
-      "Checked HTTP 429 Retry-After parsing against RFC 9110",
-      "Cross-checking 30_000 ms cap in lib/minga_agent/retry.ex",
-    ],
-  },
-  {
-    id: "usage",
-    name: "Usage-Limit Tests",
-    state: "needs_you",
-    summary: "Create test/minga_agent/usage_limit_test.exs +86",
-    brief: "Write isolated unit tests for token usage limit recovery without touching production files.",
-    steps: [
-      "Drafted 86 lines in test/minga_agent/usage_limit_test.exs",
-      "Waiting on approval to write new test file",
-    ],
-    approvalRequest: {
-      title: "Add usage limit tests",
-      detail: "Create test/minga_agent/usage_limit_test.exs +86",
-    },
-  },
-];
-
-export function createCoAuthorState(initialCompleted: Iterable<CoAuthorMissionId> = []): CoAuthorState {
+export function createCoAuthorState(): CoAuthorState {
   return {
-    workers: INITIAL_WORKERS,
-    activeDrawer: "none",
-    peekIndex: 1,
-    briefFolded: true,
-    parentDraft: "Also verify Retry-After HTTP-date headers before merge...",
-    cursorChange: 1,
-    change1: "unreviewed",
-    change2: "unreviewed",
-    userEditPresent: true,
-    actMenuOpen: false,
-    lockoutUntilMs: 0,
-    lastEvent: "Cursor is in retry.ex (change 1/2). Line 240 has a shared blue+mauve strand from your edit.",
-    completed: new Set(initialCompleted),
+    move: "find",
+    cursor: "title",
+    edited: false,
+    changes: { first: "unreviewed", second: "unreviewed" },
+    caption: "rest",
+    captionKeys: [],
+    keycast: createKeycast(),
+    presses: 0,
   };
 }
 
-function addMission(state: CoAuthorState, mission: CoAuthorMissionId): ReadonlySet<CoAuthorMissionId> {
-  if (state.completed.has(mission)) return state.completed;
-  const next = new Set(state.completed);
-  next.add(mission);
-  return next;
+function sameKeys(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((key, i) => key === b[i]);
 }
 
-export function countNeedsYou(state: CoAuthorState): number {
-  return state.workers.filter((w) => w.state === "needs_you").length;
+function nextMove(move: Move): Move {
+  return MOVES[Math.min(MOVES.indexOf(move) + 1, MOVES.length - 1)]!;
 }
 
-export function undoUserEdit(state: CoAuthorState): CoAuthorState {
-  if (state.userEditPresent && state.change1 !== "rejected") {
-    return {
-      ...state,
-      actMenuOpen: false,
-      userEditPresent: false,
-      completed: addMission(state, "per_author_undo"),
-      lastEvent: "u undid only your edit on line 240 (backoff_ms(2) -> backoff_ms(1)). Minga's braided Twist stayed intact.",
-    };
+/** The file after the command that a move waits for. */
+function applyMove(state: CoAuthorState, move: WaitingMove): Pick<CoAuthorState, "cursor" | "edited" | "changes" | "caption"> {
+  const { cursor, edited, changes } = state;
+  switch (move) {
+    case "find":
+      return { cursor: CHANGE_LINES.first[0]!, edited, changes, caption: "found" };
+    case "edit":
+      return { cursor, edited: true, changes, caption: "edited" };
+    case "undo":
+      return { cursor, edited: false, changes, caption: "undone" };
+    case "reject":
+      return { cursor: OWN_LINE, edited, changes: { ...changes, first: "rejected" }, caption: "rejected" };
+    case "find_other":
+      return { cursor: CHANGE_LINES.second[0]!, edited, changes, caption: "found_other" };
+    case "keep":
+      return { cursor, edited, changes: { ...changes, second: "kept" }, caption: "kept" };
   }
-  return {
-    ...state,
-    actMenuOpen: false,
-    lastEvent: "Nothing of yours left to undo. Minga's changes never vanish on u; use SPC a y to keep or SPC a d to reject.",
-  };
 }
 
-export function editInsideTwist(state: CoAuthorState): CoAuthorState {
-  if (state.change1 === "rejected") {
-    return { ...state, lastEvent: "Reset the buffer to edit inside change 1 again." };
+function runCommand(state: CoAuthorState, command: Command, keys: readonly string[]): CoAuthorState {
+  if (state.move === "finished") return { ...state, caption: "after_done", captionKeys: keys };
+  // The learner has just undone the one edit. A second undo is the proof of the lesson: it finds nothing of theirs, and Minga's lines stay.
+  if (state.move === "reject" && command === "undo") return { ...state, caption: "nothing_to_undo", captionKeys: keys };
+  if (MOVE_SPECS[state.move].expects !== command) return { ...state, caption: `wrong_${state.move}`, captionKeys: keys };
+  return { ...state, ...applyMove(state, state.move), move: nextMove(state.move), captionKeys: keys };
+}
+
+export interface KeyResult {
+  readonly state: CoAuthorState;
+  /** True when the key is one the lab binds: a whole command or the start of one. The stage keeps only those keys from the page. */
+  readonly handled: boolean;
+}
+
+/** Feeds one key press, named the way the lab stage names keys, into the lab. */
+export function pressKey(before: CoAuthorState, key: string): KeyResult {
+  const state: CoAuthorState = { ...before, presses: before.presses + 1 };
+  const waiting = state.keycast.pending;
+  const step = stepPrefix(SEQUENCES, waiting, key);
+  const keycast = keycastPush(state.keycast, step);
+  if (step.status === "pending") {
+    return { state: { ...state, keycast, caption: "pending", captionKeys: step.keys }, handled: true };
   }
-  return {
-    ...state,
-    userEditPresent: true,
-    lastEvent: "Edited line 240 inside Minga's change: one gutter strand turned blue for shared authorship.",
-  };
-}
-
-export function jumpNextChange(state: CoAuthorState): CoAuthorState {
-  const nextCursor: 1 | 2 = state.cursorChange === 1 ? 2 : 1;
-  return {
-    ...state,
-    cursorChange: nextCursor,
-    actMenuOpen: false,
-    lastEvent: nextCursor === 1 ? "]h jumped to change 1 (lines 238 to 241)." : "]h jumped to change 2 (line 245, backoff_ms/1).",
-  };
-}
-
-export function reviewCurrentChange(state: CoAuthorState, decision: "kept" | "rejected"): CoAuthorState {
-  const key = state.cursorChange === 1 ? "change1" : "change2";
-  if (state[key] !== "unreviewed") {
-    return {
-      ...state,
-      actMenuOpen: false,
-      lastEvent: `Change ${state.cursorChange} is already ${state[key]}. Press ]h or Reset.`,
-    };
+  if (key === CANCEL_KEY && waiting.length > 0) {
+    // Escape drops the command the learner had started. The caption names the keys that were dropped, not Escape.
+    const caption: CaptionId = state.move === "finished" ? "after_done" : `cancelled_${state.move}`;
+    return { state: { ...state, keycast, caption, captionKeys: waiting }, handled: true };
   }
-  const nextCursor: 1 | 2 =
-    state.cursorChange === 1 && state.change2 === "unreviewed"
-      ? 2
-      : state.cursorChange === 2 && state.change1 === "unreviewed"
-        ? 1
-        : state.cursorChange;
-
-  return {
-    ...state,
-    [key]: decision,
-    cursorChange: nextCursor,
-    actMenuOpen: false,
-    completed: addMission(state, "review_change"),
-    lastEvent:
-      decision === "kept"
-        ? `SPC a y kept change ${state.cursorChange}. Its Twist faded to a quiet muted strand until commit.`
-        : `SPC a d rejected change ${state.cursorChange}. Minga's lines left cleanly without touching your undo stack.`,
-  };
-}
-
-export function toggleCoAuthorActMenu(state: CoAuthorState): CoAuthorState {
-  const cur = state.cursorChange === 1 ? state.change1 : state.change2;
-  if (cur !== "unreviewed") {
-    return { ...state, actMenuOpen: false, lastEvent: `Change ${state.cursorChange} is already ${cur}.` };
+  if (step.status === "unknown") {
+    const caption: CaptionId = state.move === "finished" ? "after_done" : `unhandled_${state.move}`;
+    return { state: { ...state, keycast, caption, captionKeys: step.keys }, handled: false };
   }
-  const open = !state.actMenuOpen;
-  return {
-    ...state,
-    actMenuOpen: open,
-    lastEvent: open
-      ? "g. opened the Direction A Act Menu leading with Keep / Reject and exact line consequences."
-      : "Closed Act Menu.",
-  };
+  const command = COMMANDS.find((name) => sameKeys(COMMAND_KEYS[name], step.keys))!;
+  return { state: runCommand({ ...state, keycast }, command, step.keys), handled: true };
 }
 
-export function autoOpenTasksWithLockout(state: CoAuthorState, nowMs: number): CoAuthorState {
-  const workers = state.workers.map((w) =>
-    w.id === "usage"
-      ? {
-          ...w,
-          state: "needs_you" as const,
-          approvalRequest: {
-            title: "Add usage limit tests",
-            detail: "Create test/minga_agent/usage_limit_test.exs +86",
-          },
-        }
-      : w
-  );
-  return {
-    ...state,
-    workers,
-    activeDrawer: "tasks",
-    actMenuOpen: false,
-    lockoutUntilMs: nowMs + LOCKOUT_MS,
-    lastEvent: "Tasks drawer auto-opened from a background request: 300 ms anti-misfire lockout armed! Try pressing y right now.",
-  };
+/** The keys the current move waits for, or null when the lab is finished. */
+export function nextKeys(state: CoAuthorState): readonly string[] | null {
+  return state.move === "finished" ? null : COMMAND_KEYS[MOVE_SPECS[state.move].expects];
 }
 
-export function openTasksDrawer(state: CoAuthorState): CoAuthorState {
-  return {
-    ...state,
-    activeDrawer: state.activeDrawer === "tasks" ? "none" : "tasks",
-    actMenuOpen: false,
-    lockoutUntilMs: 0,
-    lastEvent: state.activeDrawer === "tasks" ? "q closed *minga-tasks*." : "SPC a a opened *minga-tasks* (needs-you sorted first).",
-  };
+/** Presses the keys the current move waits for, as the lab's own button does for a reader with no keyboard. A prefix still waiting is dropped first. */
+export function playNextMove(state: CoAuthorState): CoAuthorState {
+  const start: CoAuthorState = { ...state, keycast: { ...state.keycast, pending: [] } };
+  return (nextKeys(state) ?? []).reduce((next, key) => pressKey(next, key).state, start);
 }
 
-export function answerApproval(
-  state: CoAuthorState,
-  choice: "y" | "a" | "t" | "n",
-  nowMs: number
-): CoAuthorState {
-  if (nowMs < state.lockoutUntilMs) {
-    const remaining = Math.max(1, Math.round(state.lockoutUntilMs - nowMs));
-    return {
-      ...state,
-      completed: addMission(state, "lockout_guard"),
-      lastEvent: `300 ms anti-misfire guard absorbed "${choice}" (${remaining} ms left). A stray keystroke in flight cannot approve a destructive request.`,
-    };
-  }
-
-  const labelMap: Record<"y" | "a" | "t" | "n", string> = {
-    y: "Approved once",
-    a: "Approved for this session",
-    t: "Approved for this turn",
-    n: "Denied",
-  };
-  const nextOrbit: OrbitState = choice === "n" ? "stopped" : "done";
-
-  const workers = state.workers.map((w) =>
-    w.id === "usage" && w.approvalRequest
-      ? {
-          ...w,
-          state: nextOrbit,
-          summary: `${labelMap[choice]} · Already answered in Minga`,
-          approvalRequest: {
-            ...w.approvalRequest,
-            answeredText: `${labelMap[choice]} · synced as "Already answered" everywhere else`,
-          },
-        }
-      : w
-  );
-
-  return {
-    ...state,
-    workers,
-    lockoutUntilMs: 0,
-    lastEvent: `${choice}: ${labelMap[choice]}. Modeline needs_you cleared and synced "Already answered" to notifications.`,
-  };
+/** The step the stepper shows, or null when the lab is finished: a finished lab names no key, because no key has anything left to do. */
+export function currentStep(state: CoAuthorState): StepId | null {
+  return state.move === "finished" ? null : MOVE_SPECS[state.move].step;
 }
 
-export function openSubagentPeek(state: CoAuthorState): CoAuthorState {
-  return {
-    ...state,
-    activeDrawer: "peek",
-    actMenuOpen: false,
-    lastEvent: "SPC a i opened Subagent Peek in a right split. Your unsent parent draft stayed untouched.",
-  };
+/**
+ * The keys the caption names, written the way the site writes keys: a bracket pair as one word, every other sequence with a space between keys.
+ */
+export function captionKeysText(state: CoAuthorState): string {
+  const keys = state.captionKeys;
+  return keys[0] === "]" || keys[0] === "[" ? keys.join("") : keys.join(" ");
 }
 
-export function stepPeekSibling(state: CoAuthorState, delta: 1 | -1): CoAuthorState {
-  const nextIndex = (state.peekIndex + delta + state.workers.length) % state.workers.length;
-  const worker = state.workers[nextIndex];
-  return {
-    ...state,
-    activeDrawer: "peek",
-    peekIndex: nextIndex,
-    completed: addMission(state, "subagent_peek"),
-    lastEvent: `${delta > 0 ? "]]" : "[["} stepped to sibling ${nextIndex + 1} of ${state.workers.length}: ${worker?.name ?? "worker"}.`,
-  };
+/** The steps the learner has completed, in order. A step with two moves is done after its second move. */
+export function doneSteps(state: CoAuthorState): readonly StepId[] {
+  if (state.move === "finished") return STEP_IDS;
+  return STEP_IDS.slice(0, STEP_IDS.indexOf(MOVE_SPECS[state.move].step));
 }
 
-export function toggleBriefFold(state: CoAuthorState): CoAuthorState {
-  return {
-    ...state,
-    briefFolded: !state.briefFolded,
-    lastEvent: state.briefFolded ? "za unfolded the subagent Brief." : "za folded the subagent Brief.",
-  };
+export interface FileLine {
+  readonly id: LineId;
+  readonly visible: boolean;
+  readonly mark: Mark;
 }
 
-export function closeCoAuthorDrawer(state: CoAuthorState): CoAuthorState {
-  return {
-    ...state,
-    activeDrawer: "none",
-    actMenuOpen: false,
-    lastEvent: "q closed the drawer and returned focus to retry.ex.",
-  };
+function changeOf(id: LineId): ChangeId | null {
+  if (CHANGE_LINES.first.includes(id)) return "first";
+  return CHANGE_LINES.second.includes(id) ? "second" : null;
+}
+
+export function fileLines(state: CoAuthorState): readonly FileLine[] {
+  return LINE_IDS.map((id) => {
+    const change = changeOf(id);
+    if (change === null) return { id, visible: true, mark: "you" };
+    const status = state.changes[change];
+    if (status === "rejected") return { id, visible: false, mark: "minga" };
+    if (status === "kept") return { id, visible: true, mark: "kept" };
+    const shared = id === SHARED_LINE || (id === EDIT_LINE && state.edited);
+    return { id, visible: true, mark: shared ? "shared" : "minga" };
+  });
 }
