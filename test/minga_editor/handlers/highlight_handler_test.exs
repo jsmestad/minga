@@ -281,6 +281,32 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
     end
   end
 
+  describe "fold ranges (#4314)" do
+    test "fold ranges for a shown buffer schedule a frame, so the gutter draws them without a key press" do
+      state = base_state()
+      buf = active_buffer(state)
+
+      {_state, effects} =
+        HighlightHandler.handle(state, {:minga_highlight, {:fold_ranges, buf, [{0, 5}]}})
+
+      assert :render in effects
+    end
+
+    test "every window that shows the buffer takes its fold ranges, the active one or not" do
+      {state, other_buf} = state_with_visible_other_buffer(base_state())
+
+      {new_state, effects} =
+        HighlightHandler.handle(state, {:minga_highlight, {:fold_ranges, other_buf, [{0, 5}]}})
+
+      assert :render in effects
+
+      assert [%{start_line: 0, end_line: 5}] =
+               Map.fetch!(new_state.workspace.windows.map, 2).fold_ranges
+
+      assert active_window(new_state).fold_ranges == []
+    end
+  end
+
   describe "window metadata" do
     test "fold ranges and textobject positions update the active window and ignore invisible buffers" do
       state = base_state()
