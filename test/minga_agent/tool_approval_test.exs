@@ -107,6 +107,14 @@ defmodule MingaAgent.ToolApprovalTest do
              ]
     end
 
+    test "a finished step keeps a short sample of its command; only the approval carries all of it" do
+      long = "echo " <> String.duplicate("harmless ", 200)
+
+      assert [line] = ToolApproval.build_transcript_preview("shell", %{"command" => long}).lines
+      assert String.length(line) == 300
+      assert String.starts_with?(line, "$ echo harmless")
+    end
+
     test "a command too long for one preview line says how much it leaves out, and cuts between characters" do
       command = String.duplicate("é", 9_000)
 

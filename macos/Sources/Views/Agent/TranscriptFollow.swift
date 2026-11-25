@@ -26,7 +26,7 @@ enum TranscriptFollow {
     /// The view counts as at the bottom within this distance, so a short overscroll or a rounding step does not stop the follow.
     static let bottomSlack: CGFloat = 50
 
-    /// A scroll shorter than this is rounding, not a move.
+    /// The smallest upward move that counts. Offsets arrive rounded to whole points, so a slow scroll reports steps of exactly one point: each of them is a move, not rounding.
     static let scrollEpsilon: CGFloat = 1
 
     /// - Parameters:
@@ -35,7 +35,7 @@ enum TranscriptFollow {
     static func decide(following: Bool, turnActive: Bool, from old: TranscriptScrollGeometry, to new: TranscriptScrollGeometry) -> Decision {
         if new.distanceFromBottom <= bottomSlack { return .following(catchUp: false) }
         guard following else { return .holding }
-        if old.offsetY - new.offsetY > scrollEpsilon { return .holding }
+        if old.offsetY - new.offsetY >= scrollEpsilon { return .holding }
         if new.visibleHeight < old.visibleHeight { return .following(catchUp: true) }
         guard new.contentHeight > old.contentHeight else { return .following(catchUp: false) }
         let outputArrived = turnActive || new.rowCount > old.rowCount

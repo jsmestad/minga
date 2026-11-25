@@ -578,7 +578,13 @@ func agentToolCounts(messages *residentTranscript) (int, int, int) {
 
 func lastAgentError(messages *residentTranscript) string {
 	message, _ := messages.latest(transcriptSummaryError)
-	return message.Text
+	switch message.Kind {
+	case agentKindTool, agentKindStyledTool, agentKindApprovalTool:
+		// A failed step is named by the BEAM's sentence. Its Text carries the tool's raw name, which is never shown.
+		return agentToolStepText(message)
+	default:
+		return message.Text
+	}
 }
 
 func splitAgentModelName(value string) (string, string) {

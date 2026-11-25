@@ -1926,4 +1926,14 @@ struct AgentToolOutcomeViewTests {
         #expect(body.findAll(ViewType.Text.self).contains { (try? $0.string()) == SpineState.needsYou.word })
         #expect(body.findAll(ViewType.ProgressView.self).isEmpty)
     }
+
+    @Test("A working header draws the working mark of the state vocabulary, not a system spinner that ignores Reduce Motion and never lets a captured frame settle")
+    func workingHeaderDrawsTheWorkingMark() throws {
+        let state = AgentChatState(status: .thinking, model: "test")
+        let header = AgentChatHeaderView(state: state, sendAction: nil)
+            .environment(\.themeColors, ThemeColors())
+        let body = try header.inspect()
+        #expect(body.findAll(ViewType.ProgressView.self).isEmpty)
+        #expect(!body.findAll(StateMark.self).isEmpty)
+    }
 }

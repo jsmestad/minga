@@ -73,6 +73,23 @@ struct TranscriptFollowTests {
         }
     }
 
+    @Test("a slow scroll up, one point at a time, stops the follow as soon as it leaves the bottom")
+    func slowScrollUpHolds() {
+        var following = true
+        var previous = geometry(offset: 1_400, content: 2_000)
+
+        for offset in stride(from: CGFloat(1_399), through: 1_000, by: -1) {
+            let next = geometry(offset: offset, content: 2_000)
+            following = TranscriptFollow.decide(following: following, turnActive: false, from: previous, to: next) != .holding
+            previous = next
+            #expect(following == (next.distanceFromBottom <= TranscriptFollow.bottomSlack))
+        }
+
+        // Output that arrives now does not pull the view back to the bottom.
+        let grown = geometry(offset: 1_000, content: 2_300, rows: 21)
+        #expect(TranscriptFollow.decide(following: following, turnActive: true, from: previous, to: grown) == .holding)
+    }
+
     @Test("a scroll that stays near the bottom keeps following")
     func smallScrollKeepsFollowing() {
         let before = geometry(offset: 1_400, content: 2_000)

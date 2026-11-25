@@ -159,6 +159,7 @@ enum StoryboardCapture {
         let host = NSHostingView(rootView:
             PreviewRegistry.productionContentView(appState)
                 .frame(width: CGFloat(size.width), height: CGFloat(size.height))
+                .environment(\.motionPaused, true)
                 .transaction { transaction in
                     transaction.animation = nil
                     transaction.disablesAnimations = true

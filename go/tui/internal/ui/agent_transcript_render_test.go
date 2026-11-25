@@ -983,3 +983,14 @@ func TestApprovalCardSamplesOtherPreviews(t *testing.T) {
 		t.Fatalf("preview rows = %q", got)
 	}
 }
+
+// The details rail names a failed step by the BEAM's sentence: a tool's raw name never reaches the user.
+func TestErrorSummaryNamesAFailedStepByItsSentence(t *testing.T) {
+	model := residentModel(t, 0)
+	model.transcript.apply(protocol.AgentTranscript{Present: true, Mode: 0, Epoch: 2, Messages: []protocol.AgentChatMessage{
+		{ID: 41, Kind: agentKindTool, Name: "write_file", Summary: "notes.txt", Text: "write_file notes.txt", Step: "Could not write notes.txt", Status: 2},
+	}})
+	if got := lastAgentError(model.transcript); got != "Could not write notes.txt" {
+		t.Fatalf("error summary = %q", got)
+	}
+}

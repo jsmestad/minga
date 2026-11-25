@@ -338,6 +338,34 @@ defmodule MingaAgent.MarkdownTest do
                [{"see ", :plain}, {"usage_limit_reached", :italic}, {" here", :plain}]
     end
 
+    test "bytes that are not text do not stop the parse" do
+      assert [{text, :plain}] =
+               Markdown.parse_inline("caf" <> <<0xE9>> <> "_name and " <> <<0xE9>> <> " _x")
+
+      assert String.valid?(text)
+      assert text =~ "_name and"
+    end
+
+    test "a long line of names that start with an underscore is searched once, not once for each name" do
+      line = String.duplicate(" _ab", 50_000)
+
+      {micros, segments} = :timer.tc(fn -> Markdown.parse_inline(line) end)
+
+      assert segments == [{line, :plain}]
+      # One search of the line takes a few milliseconds. One search for each name took minutes.
+      assert micros < 5_000_000
+    end
+
+    test "an opening mark with no closing mark leaves later code, bold and links as they are" do
+      assert Markdown.parse_inline("_open then `a_b`, **bold** and __also open") == [
+               {"_open then ", :plain},
+               {"a_b", :code},
+               {", ", :plain},
+               {"bold", :bold},
+               {" and __also open", :plain}
+             ]
+    end
+
     test "an underscore that opens nothing stays as typed" do
       assert Markdown.parse_inline("_private and _other") == [{"_private and _other", :plain}]
       assert Markdown.parse_inline("a _ b") == [{"a _ b", :plain}]

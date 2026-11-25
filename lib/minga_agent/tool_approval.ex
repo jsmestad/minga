@@ -148,6 +148,13 @@ defmodule MingaAgent.ToolApproval do
   end
 
   @spec do_build_transcript_preview(String.t(), map()) :: preview()
+  # A finished step is context, not a decision: it keeps a bounded sample of its command.
+  # Every shell row of a resident transcript carries this line, so it stays short.
+  defp do_build_transcript_preview("shell", %{"command" => command}) do
+    command = stringify_value(command)
+    Preview.new(:command, command, preview_lines(["$ #{command}"]))
+  end
+
   defp do_build_transcript_preview("write_file", %{"path" => path}) do
     path = stringify_value(path)
     Preview.new(:target, path, [])
