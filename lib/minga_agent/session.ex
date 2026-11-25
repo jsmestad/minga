@@ -135,6 +135,14 @@ defmodule MingaAgent.Session do
           archived?: boolean(),
           artifact_runtime: ArtifactRuntime.t() | nil,
           workdir: String.t() | nil,
+          # `place` is where this session's provider works.
+          # `working_folder` is where the conversation it shows works.
+          # They differ only for a restored conversation that belongs somewhere else.
+          place: MingaAgent.WorkingFolder.t() | nil,
+          # What the conversation's record says about its folder. `:here` for one that began in this session.
+          recorded_folder: MingaAgent.WorkingFolder.t() | :undecided | :here,
+          working_folder: MingaAgent.WorkingFolder.t() | nil,
+          stored_working_folder: term(),
           event_log_server: GenServer.server(),
           event_log_failure: event_log_failure() | nil,
           provider: ProviderLifecycle.t(),
@@ -429,6 +437,16 @@ defmodule MingaAgent.Session do
   def request_editor_snapshot(session) when is_pid(session) and node(session) == node() do
     :gen_server.send_request(session, :editor_snapshot)
   end
+
+  @doc """
+  Starts a read of the transcript changes since `cursor` without blocking the caller.
+
+  The reply has the arrival transcript's shape: a replacement carries the changed-file counts, and an invalid cursor answers with a reset snapshot, so one read is always enough.
+  """
+  @spec request_editor_transcript(pid(), :snapshot | Transcript.Cursor.t()) ::
+          :gen_server.request_id()
+  def request_editor_transcript(session, cursor) when is_pid(session) and node(session) == node(),
+    do: :gen_server.send_request(session, {:editor_transcript, cursor})
 
   @doc "Requests the final local arrival snapshot in the subscriber's Session event order."
   @spec request_editor_arrival(pid(), :snapshot | Transcript.Cursor.t(), pid(), reference()) ::
@@ -950,7 +968,8 @@ defmodule MingaAgent.Session do
   def broker_detach(session, authority), do: GenServer.call(session, {:broker_detach, authority})
 
   @doc "Manually triggers context compaction on the provider."
-  @spec compact(GenServer.server()) :: {:ok, String.t()} | {:error, String.t()}
+  @spec compact(GenServer.server()) ::
+          {:ok, String.t()} | {:error, String.t() | {:conversation_read_only, String.t()}}
   def compact(session) do
     GenServer.call(session, :compact, 30_000)
   end
@@ -1531,6 +1550,10 @@ defmodule MingaAgent.Session do
       archived?: false,
       artifact_runtime: Keyword.get(opts, :artifact_runtime),
       workdir: Keyword.get(opts, :workdir),
+      place: nil,
+      recorded_folder: :here,
+      working_folder: nil,
+      stored_working_folder: nil,
       event_log_server: Keyword.get(opts, :event_log_server, EventLog),
       event_log_failure: nil,
       provider: provider,
@@ -1966,6 +1989,10 @@ defmodule MingaAgent.Session do
     {:reply, Transcript.since(state.transcript, cursor), state}
   end
 
+  def handle_call({:editor_transcript, cursor}, _from, state) do
+    {:reply, editor_arrival_transcript(state.transcript, state.file_changes, cursor), state}
+  end
+
   def handle_call({:editor_arrival, cursor, subscriber, arrival}, _from, state)
       when is_pid(subscriber) and node(subscriber) == node() and is_reference(arrival) do
     case SubscriberLifecycle.role(state.subscriber_lifecycle, subscriber) do
@@ -2260,17 +2287,10 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(:compact, _from, state) do
-    if function_exported?(state.provider.module, :compact, 2) do
-      result =
-        state.provider.module.compact(
-          ProviderLifecycle.pid(state.provider),
-          state.continuation.messages
-        )
-
-      reply_to_compact(state, result)
-    else
-      {:reply, {:error, "Provider does not support compaction"}, state}
-    end
+    # A conversation that can only be read is not rewritten either.
+    if MingaAgent.WorkingFolder.read_only?(state.working_folder),
+      do: decline_read_only(state),
+      else: compact_conversation(state)
   end
 
   def handle_call(:continue, _from, %{provider: provider} = state)
@@ -2278,17 +2298,13 @@ defmodule MingaAgent.Session do
     {:reply, {:error, "No active provider"}, state}
   end
 
-  def handle_call(:continue, _from, state) do
-    source_execution = state.turn_execution
-
-    case TurnExecution.begin_turn(source_execution) do
-      {:ok, execution} ->
-        reply_to_continue(state, execution)
-
-      {:error, :turn_active} ->
-        reply_to_continue(state, nil)
-    end
+  def handle_call(:continue, _from, %{working_folder: {:unavailable, _reason}} = state) do
+    if MingaAgent.WorkingFolder.read_only?(state.working_folder),
+      do: decline_read_only(state),
+      else: continue_turn(state)
   end
+
+  def handle_call(:continue, _from, state), do: continue_turn(state)
 
   def handle_call(
         {:activate_skill, _name},
@@ -3780,11 +3796,15 @@ defmodule MingaAgent.Session do
     state = cancel_save_timer(state)
     execution = TurnExecution.reset(source_execution)
 
+    # A new conversation in this session works where the session does, whatever the previous one was.
     state = %{
       state
       | session_id: session_id,
         custom_title: nil,
         archived?: false,
+        recorded_folder: :here,
+        working_folder: state.place,
+        stored_working_folder: nil,
         created_at: now
     }
 
@@ -5365,6 +5385,72 @@ defmodule MingaAgent.Session do
   end
 
   defp handle_prompt(content, kind, state, draft_revision) do
+    if MingaAgent.WorkingFolder.read_only?(state.working_folder) do
+      refuse_read_only(state)
+    else
+      admit_prompt(content, kind, state, draft_revision)
+    end
+  end
+
+  # A restored conversation that does not belong in this session's folder would be refused further down,
+  # for its changed instructions, in words about prefixes.
+  # It is refused here, in the words it already shows.
+  @spec refuse_read_only(state()) :: {:reply, {:error, term()}, state()}
+  defp refuse_read_only(state) do
+    line = MingaAgent.WorkingFolder.refusal(state.working_folder)
+    broadcast(state, {:conversation_read_only, line})
+    {:reply, {:error, {:conversation_read_only, line}}, say_declined(state, line)}
+  end
+
+  # A continue or a compaction carries no draft.
+  # The conversation already shows its line, so the answer is that line and the card again, and no new row.
+  @spec decline_read_only(state()) :: {:reply, {:error, term()}, state()}
+  defp decline_read_only(state) do
+    line = MingaAgent.WorkingFolder.refusal(state.working_folder)
+    {:reply, {:error, {:conversation_read_only, line}}, say_read_only_line(state)}
+  end
+
+  # Nothing failed: the person asked for something this conversation cannot do here.
+  # The answer is one calm line in the transcript, said once in a row, and the turn status stays what it was.
+  @spec say_declined(state(), String.t()) :: state()
+  defp say_declined(state, line) do
+    # The line ends with the folder's path, so what happened to the draft comes first.
+    message = "Your draft was not sent and is preserved. #{line}"
+
+    case Transcript.last_message(state.transcript) do
+      {:system, ^message, :info} -> state
+      _other -> state |> append_system_message(message, :info) |> notify_messages_changed()
+    end
+  end
+
+  @spec compact_conversation(state()) :: {:reply, term(), state()}
+  defp compact_conversation(state) do
+    if function_exported?(state.provider.module, :compact, 2) do
+      result =
+        state.provider.module.compact(
+          ProviderLifecycle.pid(state.provider),
+          state.continuation.messages
+        )
+
+      reply_to_compact(state, result)
+    else
+      {:reply, {:error, "Provider does not support compaction"}, state}
+    end
+  end
+
+  @spec continue_turn(state()) :: {:reply, term(), state()}
+  defp continue_turn(state) do
+    case TurnExecution.begin_turn(state.turn_execution) do
+      {:ok, execution} ->
+        reply_to_continue(state, execution)
+
+      {:error, :turn_active} ->
+        reply_to_continue(state, nil)
+    end
+  end
+
+  @spec admit_prompt(term(), atom(), state(), term()) :: {:reply, term(), state()}
+  defp admit_prompt(content, kind, state, draft_revision) do
     case TurnExecution.admit_prompt(state.turn_execution, kind, content) do
       {:queued, _execution} when draft_revision != :preserve ->
         {:reply, {:error, :attachment_send_busy}, state}
@@ -6270,7 +6356,12 @@ defmodule MingaAgent.Session do
         state
 
       records ->
-        if notice_wake_ready?(state), do: start_job_notice_turn(state, records), else: state
+        # A conversation that can only be read starts no turn of its own either.
+        ready? =
+          not MingaAgent.WorkingFolder.read_only?(state.working_folder) and
+            notice_wake_ready?(state)
+
+        if ready?, do: start_job_notice_turn(state, records), else: state
     end
   end
 
@@ -8674,6 +8765,76 @@ defmodule MingaAgent.Session do
     state |> attach_provider_process(pid) |> finish_provider_attachment()
   end
 
+  # The provider decides where it works when it first starts.
+  # The session reads that once and pins it into the provider's start options,
+  # so a provider that starts again cannot decide again.
+  # A conversation that began in this session works in the same place.
+  # A restored conversation keeps the folder from its record.
+  @spec capture_place(state()) :: state()
+  defp capture_place(%{place: nil} = state) do
+    case provider_working_folder(state) do
+      nil -> state
+      place -> state |> pin_place(place) |> place_conversation()
+    end
+  end
+
+  defp capture_place(state), do: state
+
+  @spec pin_place(state(), MingaAgent.WorkingFolder.t()) :: state()
+  defp pin_place(state, place) do
+    lifecycle = state.provider
+
+    pinned =
+      ProviderLifecycle.replace(
+        lifecycle,
+        lifecycle.model_name,
+        lifecycle.provider_name,
+        Keyword.put(lifecycle.opts, :working_folder, place)
+      )
+
+    %{state | place: place, provider: pinned}
+  end
+
+  # Decides the conversation's folder again now that the session's place is known.
+  # A provider that starts after a restore must never give the restored conversation its own folder.
+  @spec place_conversation(state()) :: state()
+  defp place_conversation(state),
+    do: %{state | working_folder: conversation_folder(state, state.recorded_folder)}
+
+  # A conversation that began here, or a record that never ran a turn, works where the session does.
+  # A restored one continues only when its folder is that place, and otherwise can only be read.
+  @spec conversation_folder(state(), MingaAgent.WorkingFolder.t() | :undecided | :here) ::
+          MingaAgent.WorkingFolder.t() | nil
+  defp conversation_folder(state, recorded) when recorded in [:here, :undecided],
+    do: state.place
+
+  defp conversation_folder(state, {:unavailable, :not_recorded} = recorded) do
+    # A record that names no folder, shown by a provider that has none: folders are not their concern.
+    if declares_folder?(state.provider.module),
+      do: MingaAgent.WorkingFolder.in_place(recorded, session_place(state)),
+      else: nil
+  end
+
+  defp conversation_folder(state, recorded),
+    do: MingaAgent.WorkingFolder.in_place(recorded, session_place(state))
+
+  # Only a provider that declares a folder has one. For any other provider the session records none.
+  @spec provider_working_folder(state()) :: MingaAgent.WorkingFolder.t() | nil
+  defp provider_working_folder(state) do
+    answer =
+      dispatch_optional(state.provider.module, :working_folder, [
+        ProviderLifecycle.pid(state.provider)
+      ])
+
+    case answer do
+      {kind, root} = folder when kind in [:project, :folder] and is_binary(root) -> folder
+      {:unavailable, _reason} = unavailable -> unavailable
+      _not_supported -> nil
+    end
+  catch
+    :exit, _reason -> nil
+  end
+
   @spec attach_provider_process(state(), pid()) :: state()
   defp attach_provider_process(state, pid) do
     Process.unlink(pid)
@@ -8695,6 +8856,7 @@ defmodule MingaAgent.Session do
 
     state = clear_provider_start_error(state)
     state = %{state | connection: Connection.provider_recovered(state.connection)}
+    state = capture_place(state)
 
     state = apply_pending_thinking_level(state)
     state = maybe_show_auth_onboarding(state)
@@ -9629,7 +9791,11 @@ defmodule MingaAgent.Session do
   @spec save_to_disk(state(), snapshot_write_mode()) :: :ok | {:error, term()}
 
   defp save_to_disk(state, draft_revision \\ :preserve) do
-    if Persistence.enabled?(state.persistence) do
+    # A session that can only show a conversation does not write its record.
+    # What it adds to the transcript, the line that says where the conversation belongs and a refused prompt,
+    # is said here and not kept.
+    if Persistence.enabled?(state.persistence) and
+         not MingaAgent.WorkingFolder.read_only?(state.working_folder) do
       now = DateTime.to_iso8601(DateTime.utc_now())
       last_message_at = DateTime.to_iso8601(Transcript.last_changed_at(state.transcript))
       {messages, message_ids} = Transcript.messages_and_ids(state.transcript)
@@ -9656,7 +9822,11 @@ defmodule MingaAgent.Session do
         file_changes: state.file_changes,
         job_ledger: state.job_ledger,
         pending_inputs: TurnExecution.pending_inputs(state.turn_execution),
-        continuation: state.continuation
+        continuation: state.continuation,
+        # The conversation's folder, never the place of the session that happens to show it.
+        working_folder: state.working_folder,
+        # A session whose provider declares no folder writes back the entry its record had.
+        stored_working_folder: state.stored_working_folder
       }
 
       case draft_revision do
@@ -9964,7 +10134,12 @@ defmodule MingaAgent.Session do
               checklist: Checklist.new(),
               checklist_archive: ChecklistArchive.new(),
               file_changes: [],
-              job_ledger: JobLedger.new()
+              job_ledger: JobLedger.new(),
+              # A record that holds only a draft has no conversation yet, so it begins in this session's place.
+              # Nothing of the conversation shown before, its folder least of all, carries over.
+              recorded_folder: :here,
+              working_folder: state.place,
+              stored_working_folder: nil
           }
 
           {:ok, restored} = install_loaded_session_state(state, staged, execution, now)
@@ -9988,9 +10163,20 @@ defmodule MingaAgent.Session do
     route = resolve_saved_model_selection(state, data)
 
     case restore_loaded_session(state, data, route) do
-      {:ok, restored} -> {:reply, :ok, restored}
+      {:ok, restored} -> {:reply, :ok, record_recovered_folder(restored, data)}
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
+  end
+
+  # A record without a folder entry gets one as soon as the restore is done, so the next restore reads the entry.
+  # The save is this session's own next message.
+  # A conversation that can only be read is not written.
+  @spec record_recovered_folder(state(), SessionStore.session_data()) :: state()
+  defp record_recovered_folder(%{working_folder: nil} = state, _data), do: state
+
+  defp record_recovered_folder(state, data) do
+    if Map.get(data, :stored_working_folder) == nil, do: send(self(), :save_session)
+    state
   end
 
   @spec restore_loaded_session(state(), SessionStore.session_data(), saved_route()) ::
@@ -10168,6 +10354,9 @@ defmodule MingaAgent.Session do
         job_ledger:
           JobLedger.restore(Map.get(data, :job_ledger, JobLedger.new()), DateTime.utc_now()),
         provider: lifecycle,
+        recorded_folder: recorded_folder(data),
+        working_folder: conversation_folder(state, recorded_folder(data)),
+        stored_working_folder: Map.get(data, :stored_working_folder),
         credential_readiness: credential_readiness,
         credentials_configured: credentials_configured,
         model_selection: selection,
@@ -10190,6 +10379,66 @@ defmodule MingaAgent.Session do
         reservation
       )
     end
+  end
+
+  # What the record holds decides: its folder entry, else the system instructions it ran with,
+  # never its messages or tool output.
+  @spec recorded_folder(SessionStore.session_data()) :: MingaAgent.WorkingFolder.t() | :undecided
+  defp recorded_folder(data) do
+    MingaAgent.WorkingFolder.of_record(
+      Map.get(data, :stored_working_folder),
+      captured_instructions(data),
+      history?(data)
+    )
+  end
+
+  @spec history?(SessionStore.session_data()) :: boolean()
+  defp history?(%{continuation: %Continuation{messages: [_first | _rest]}}), do: true
+  defp history?(_never_ran), do: false
+
+  @spec captured_instructions(SessionStore.session_data()) :: [String.t()]
+  defp captured_instructions(%{continuation: %Continuation{} = continuation}),
+    do: Continuation.captured_instructions(continuation)
+
+  # Where this session's provider works, or will work once it starts: what it decided,
+  # else what its start options say.
+  @spec session_place(state()) :: MingaAgent.WorkingFolder.t() | nil
+  defp session_place(%{place: {_kind, _detail} = place}), do: place
+
+  defp session_place(%{provider: %ProviderLifecycle{opts: opts}}) do
+    case {Keyword.get(opts, :working_folder), Keyword.get(opts, :project_view),
+          Keyword.get(opts, :project_root)} do
+      {{_kind, _detail} = decided, _view, _root} -> decided
+      {nil, %{project_root: root}, _root} when is_binary(root) -> {:project, root}
+      {nil, nil, root} when is_binary(root) -> {:project, root}
+      {nil, _view, _root} -> nil
+    end
+  end
+
+  @spec declares_folder?(module()) :: boolean()
+  defp declares_folder?(module),
+    do: Code.ensure_loaded?(module) and function_exported?(module, :working_folder, 1)
+
+  # A conversation that cannot continue here says so once, in its own transcript,
+  # so a later restore of the same record does not say it again.
+  # The Editor offers the next step from the event.
+  @spec say_read_only(state()) :: state()
+  defp say_read_only(state) do
+    if MingaAgent.WorkingFolder.read_only?(state.working_folder),
+      do: say_read_only_line(state),
+      # A conversation that continues here replaces whatever the Editor still shows about one that could not.
+      else: broadcast(state, :conversation_continues)
+  end
+
+  @spec say_read_only_line(state()) :: state()
+  defp say_read_only_line(state) do
+    line = MingaAgent.WorkingFolder.refusal(state.working_folder)
+    broadcast(state, {:conversation_read_only, line})
+
+    said? =
+      Enum.any?(Transcript.messages(state.transcript), &match?({:system, ^line, _level}, &1))
+
+    if said?, do: state, else: append_system_message(state, line, :info)
   end
 
   @spec saved_route_selection(saved_route()) ::
@@ -10353,6 +10602,9 @@ defmodule MingaAgent.Session do
         file_changes: staged.file_changes,
         persistence: persistence,
         provider: staged.provider,
+        recorded_folder: staged.recorded_folder,
+        working_folder: staged.working_folder,
+        stored_working_folder: staged.stored_working_folder,
         credential_readiness: staged.credential_readiness,
         credentials_configured: staged.credentials_configured,
         model_selection: staged.model_selection,
@@ -10367,6 +10619,7 @@ defmodule MingaAgent.Session do
     loaded = invalidate_connection(loaded, :conversation)
     loaded = retain_resolution_problem(loaded, staged.connection.resolver_problem)
     loaded = settle_loaded_provider(loaded, state.provider)
+    loaded = say_read_only(loaded)
     finish_loaded_session_restore(loaded)
   end
 

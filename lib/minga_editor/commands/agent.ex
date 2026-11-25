@@ -1683,6 +1683,8 @@ defmodule MingaEditor.Commands.Agent do
     |> reset_agent_state_for_new_session(thinking_level)
     |> remember_home(from_home)
     |> AgentSession.start_agent_session(recover_interrupted_work?: false)
+    # The person took the step the read-only card offers, by key or by click.
+    |> MingaEditor.Handlers.Notifications.dismiss_conversation_read_only()
     |> scope_focus_input()
   end
 

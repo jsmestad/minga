@@ -583,6 +583,26 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
              AgentChatMessageCodec.encode_message_body({:tool_call, card})
   end
 
+  test "a prompt declined by a read-only conversation is a calm row, never an error row" do
+    # Both frontends draw the row from this model and decode the same level byte: 0 is the calm one, 1 the red one.
+    declined =
+      "Your draft was not sent and is preserved. This conversation can only be read here. " <>
+        "Start a new conversation, or restore it in ~/code/api."
+
+    panel = synced_panel([{:system, declined, :info}])
+
+    model =
+      context(fake_session_pid(), panel, theme: Theme.Fallback.theme())
+      |> AgentChatBuilder.build()
+
+    assert [{1, {:system, ^declined, :info} = row} | _] = model.resident_messages
+    assert <<0x05, 0, _rest::binary>> = AgentChatMessageCodec.encode_message_body(row)
+
+    # Nothing failed: the row alone does not put the conversation in the failed or needs-you state.
+    # The session test asserts that its status is what it was before the prompt.
+    refute model.status in [:error, :needs_you]
+  end
+
   test "build/1 does not reactivate historical tool cards when a request reuses a tool ID" do
     session = fake_session_pid()
     target = ApprovalTarget.new("session-A", "new-admitted-request", "reused-tool-id")

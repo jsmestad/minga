@@ -37,7 +37,7 @@ func run() error {
 	out := make(chan []byte, 128)
 
 	filter := ui.NewInputFilter()
-	model := ui.NewWithTransport(width, height, out, done)
+	model := ui.NewWithTransport(width, height, out, done).WithTerminalEnvironment(os.Getenv)
 	if err := protocol.WritePacket(os.Stdout, model.ReadyPacket()); err != nil {
 		return err
 	}

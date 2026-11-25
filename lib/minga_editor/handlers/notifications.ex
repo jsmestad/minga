@@ -8,6 +8,8 @@ defmodule MingaEditor.Handlers.Notifications do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Notification
 
+  @conversation_read_only_id "agent:conversation_read_only"
+
   @typedoc "Editor state (same as `MingaEditor.state()`)."
   @type state :: EditorState.t()
 
@@ -67,6 +69,59 @@ defmodule MingaEditor.Handlers.Notifications do
           }
         ]
       )
+    )
+  end
+
+  @doc """
+  Offers a new conversation when a restored one can only be read.
+
+  A conversation continues only in the folder it worked in. The transcript already carries `line`, which says why this one cannot; this adds the next step as an action, and names its key when one is bound.
+  """
+  @spec conversation_read_only(state(), String.t()) :: state()
+  def conversation_read_only(state, line) when is_binary(line) do
+    put_notification(
+      state,
+      Notification.new(
+        id: @conversation_read_only_id,
+        level: :warning,
+        title: "This conversation can only be read",
+        body: read_only_body(line, new_session_key(state)),
+        source: "Agent",
+        actions: [
+          %{
+            id: "new_conversation",
+            label: "New conversation",
+            dispatch: {:command, :agent_new_session}
+          }
+        ]
+      )
+    )
+  end
+
+  @doc "Removes the read-only card once the conversation on screen is one that continues, or a new one."
+  @spec dismiss_conversation_read_only(state()) :: state()
+  def dismiss_conversation_read_only(state) do
+    %{
+      state
+      | feedback:
+          MingaEditor.State.Feedback.dismiss_notification(
+            state.feedback,
+            @conversation_read_only_id
+          )
+    }
+  end
+
+  @spec read_only_body(String.t(), String.t() | nil) :: String.t()
+  defp read_only_body(line, nil), do: line
+  # The line ends with the folder's path, which a narrow surface may cut. The key comes first.
+  defp read_only_body(line, key), do: "Key: #{key} starts a new conversation. #{line}"
+
+  @spec new_session_key(state()) :: String.t() | nil
+  defp new_session_key(state) do
+    Minga.Keymap.Scope.Agent.new_session_key_hint(
+      Minga.Keymap.leader_trie(),
+      state.interaction.editing_model,
+      Minga.Config.get(:space_leader)
     )
   end
 

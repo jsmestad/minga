@@ -39,6 +39,12 @@ type Model struct {
 	capabilities terminal.Capabilities
 	// reportedCapabilities is the value the BEAM was last told, so an unchanged value is not sent again.
 	reportedCapabilities terminal.Capabilities
+	// termcapQueries are the terminfo capabilities Init asks the terminal for. They are set from the environment,
+	// because one terminal must not be asked at all.
+	termcapQueries []string
+	// terminalInBackground is true while the terminal reported that its window lost the focus. Borders dim then.
+	// A terminal that reports nothing is treated as focused.
+	terminalInBackground bool
 	viewport             viewport.Model
 	zones                *zoneManager
 	presentedClick       *presentedMouseClick
@@ -237,8 +243,17 @@ func (m Model) ReadyPacket() []byte {
 	return protocol.EncodeReady(size.cols, size.rows)
 }
 
-// TerminalReportPacket reports what is known about the host terminal before it has answered anything: every detected
-// feature is pending. It follows the ready packet, so the BEAM knows from the start that this frontend has a host terminal.
+// WithTerminalEnvironment settles the features the terminal is known to have from the variables it sets.
+// The renderer calls it once with the process environment; tests leave it out so they do not depend on the shell they run in.
+func (m Model) WithTerminalEnvironment(getenv func(string) string) Model {
+	m.capabilities = m.capabilities.WithEnvironment(getenv)
+	m.termcapQueries = terminal.TermcapQueries(getenv)
+	return m
+}
+
+// TerminalReportPacket reports what is known about the host terminal before it has answered anything: a feature is
+// pending unless the terminal is a known one that is taken to have it. It follows the ready packet, so the BEAM knows
+// from the start that this frontend has a host terminal.
 func (m Model) TerminalReportPacket() []byte {
 	return protocol.EncodeTerminalReport(m.capabilities)
 }
@@ -271,13 +286,16 @@ func latencyHUDEnvEnabled() bool {
 type agentAnimationTickMsg struct{}
 
 // Init starts capability detection. Bubble Tea asks the terminal for its colour profile, its keyboard enhancements
-// and synchronized output on its own; focus reporting is asked for here. The timeout settles whatever the terminal
-// never answers.
+// and synchronized output on its own. Asked for here are focus reporting and, where the terminal can be asked safely,
+// the terminfo capabilities for styled and coloured underlines. The timeout settles whatever the terminal never answers.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
-		tea.Raw(ansi.RequestModeFocusEvent),
+	cmds := []tea.Cmd{tea.Raw(ansi.RequestModeFocusEvent)}
+	for _, capability := range m.termcapQueries {
+		cmds = append(cmds, tea.RequestCapability(capability))
+	}
+	return tea.Batch(append(cmds,
 		tea.Tick(terminal.DetectionTimeout, func(time.Time) tea.Msg { return capabilityTimeoutMsg{} }),
-	)
+	)...)
 }
 
 // capabilityTimeoutMsg ends the wait for the terminal's answers to capability queries.
@@ -290,13 +308,16 @@ type capabilityTimeoutMsg struct{}
 // when the last answer is in, or when the timeout settles the rest. A later change (a first focus event from a
 // terminal that answered no query) is reported when it happens.
 func (m *Model) observeTerminal(msg tea.Msg) {
+	before, wasInBackground := m.capabilities, m.terminalInBackground
 	switch msg := msg.(type) {
 	case tea.FocusMsg:
 		m.send(protocol.EncodeFrontendForeground(true))
 		m.capabilities.Resolve(generated.TerminalFeatureFocusReporting, true)
+		m.terminalInBackground = false
 	case tea.BlurMsg:
 		m.send(protocol.EncodeFrontendForeground(false))
 		m.capabilities.Resolve(generated.TerminalFeatureFocusReporting, true)
+		m.terminalInBackground = true
 	case tea.KeyboardEnhancementsMsg:
 		m.capabilities.Resolve(generated.TerminalFeatureKittyKeyboard, msg.SupportsKeyDisambiguation())
 	case tea.ColorProfileMsg:
@@ -310,12 +331,19 @@ func (m *Model) observeTerminal(msg tea.Msg) {
 		case ansi.ModeSynchronizedOutput:
 			m.capabilities.Resolve(generated.TerminalFeatureSynchronizedOutput, usable)
 		}
+	case tea.CapabilityMsg:
+		m.capabilities.ObserveTermcap(msg.Content)
 	case capabilityTimeoutMsg:
 		m.capabilities.Expire()
 	default:
 		return
 	}
-	if m.capabilities != m.reportedCapabilities && !m.capabilities.Pending() && m.send(protocol.EncodeTerminalReport(m.capabilities)) {
+	// What is drawn depends on the terminal's features and on where the terminal is, so lines composed before the
+	// change are stale.
+	if m.capabilities != before || m.terminalInBackground != wasInBackground {
+		m.lineCache.reset()
+	}
+	if !m.capabilities.SameStatuses(m.reportedCapabilities) && !m.capabilities.Pending() && m.send(protocol.EncodeTerminalReport(m.capabilities)) {
 		m.reportedCapabilities = m.capabilities
 	}
 }

@@ -1,6 +1,7 @@
 defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
   use Minga.Test.SessionCase, async: true
 
+  alias Minga.Test.TranscriptSyncDriver
   alias MingaEditor.Agent.Compaction
   alias Minga.Git
   alias MingaEditor.Agent.DiffReview
@@ -80,7 +81,9 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     :ok = Session.seed_messages(session, [{:assistant, "Live streamed answer"}])
     state = event_state(session)
 
-    state = StreamEventWorkflow.batch(state, [{:text_delta, "Live streamed answer"}])
+    state =
+      StreamEventWorkflow.batch(state, [{:text_delta, "Live streamed answer"}])
+      |> TranscriptSyncDriver.settle()
 
     assert {:assistant, "Live streamed answer"} in Minga.Test.TranscriptFixture.messages(
              state.workspace.agent_ui.panel.transcript
@@ -101,7 +104,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
 
     state = event_state(session)
     :erlang.trace(session, true, [:receive, {:tracer, self()}])
-    state = StreamEventWorkflow.messages_changed(state)
+    state = state |> StreamEventWorkflow.messages_changed() |> TranscriptSyncDriver.settle()
     trace_barrier = :erlang.trace_delivered(session)
     assert_receive {:trace_delivered, ^session, ^trace_barrier}
     refute_received {:trace, ^session, :receive, {:"$gen_call", _from, :messages}}
@@ -115,7 +118,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     # An unchanged sync leaves names added independently of transcript updates alone.
     state = WorkspaceWorkflow.install_tab_bar(state, TabBar.update_label(tabs, 1, "Agent"))
     state = WorkspaceWorkflow.install_auto_named_workspace(state, workspace_id, "Queued next")
-    state = StreamEventWorkflow.messages_changed(state)
+    state = state |> StreamEventWorkflow.messages_changed() |> TranscriptSyncDriver.settle()
     tabs = TraditionalState.tab_bar(state.shell_runtime.state)
     assert %Tab{label: "Agent"} = TabBar.active(tabs)
     assert %Workspace{label: "Queued next"} = TabBar.find_workspace_by_session(tabs, session)
@@ -426,7 +429,10 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
       |> TraditionalWorkflow.install_agent_ui(agent_ui)
 
     approval = admit_approval(session)
-    state = SessionEventWorkflow.approval_pending(state, session, approval)
+
+    state =
+      SessionEventWorkflow.approval_pending(state, session, approval)
+      |> TranscriptSyncDriver.settle()
 
     assert %PendingApproval{session_pid: ^session, approval: ^approval} =
              TraditionalState.agent(state.shell_runtime.state).pending_approval
@@ -459,6 +465,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
       |> TraditionalWorkflow.install_agent_ui(agent_ui)
       |> TraditionalWorkflow.install_agent_status(:idle)
       |> SessionEventWorkflow.approval_pending(session, approval)
+      |> TranscriptSyncDriver.settle()
 
     assert AgentState.display_status(TraditionalState.agent(state.shell_runtime.state)) ==
              :approval_waiting
@@ -476,6 +483,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
         ] do
       resolved =
         SessionEventWorkflow.approval_resolved(state, session, approval.target, resolution)
+        |> TranscriptSyncDriver.settle()
 
       agent = TraditionalState.agent(resolved.shell_runtime.state)
       assert agent.pending_approval == nil
@@ -522,6 +530,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
       event_state(session)
       |> TraditionalWorkflow.install_agent_ui(agent_ui)
       |> SessionEventWorkflow.approval_pending(session, second)
+      |> TranscriptSyncDriver.settle()
 
     pending = TraditionalState.agent(state.shell_runtime.state).pending_approval
 

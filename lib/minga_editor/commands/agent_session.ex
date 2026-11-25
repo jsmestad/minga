@@ -305,13 +305,20 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec start_working_folder(state(), Workspace.agent()) ::
           {WorkingFolder.t(), {ProjectView.t() | nil, boolean()}}
   defp start_working_folder(state, workspace) do
-    case start_root(state, workspace) do
-      root when is_binary(root) ->
-        {WorkingFolder.project(root), start_project_view(state, workspace)}
+    # `WorkingFolder.at/1` is the one decision for a root: a project where a marker is,
+    # else a plain folder that must not be too broad.
+    # A restored conversation's record goes through it too,
+    # so a record is accepted exactly when starting in its folder now would be.
+    # The editor's project root is asked first.
+    # Without one, the candidates are plain folders: nothing above them was detected as a project.
+    case WorkingFolder.at(start_root(state, workspace)) do
+      {:project, _root} = project ->
+        {project, start_project_view(state, workspace)}
 
-      nil ->
+      no_project ->
         working_folder =
           WorkingFolder.first_available([
+            no_project,
             WorkingFolder.folder(state.workspace.file_tree.original_root),
             WorkingFolder.for_file(started_from_file(state))
           ])

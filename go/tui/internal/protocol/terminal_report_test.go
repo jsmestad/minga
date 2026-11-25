@@ -69,8 +69,9 @@ func TestEqualCapabilitiesEncodeToEqualReports(t *testing.T) {
 	if !bytes.Equal(EncodeTerminalReport(first), EncodeTerminalReport(second)) {
 		t.Fatal("the report must depend on the capabilities value alone")
 	}
-	// true_color (1) detected (2), kitty_keyboard (5) pending (1), synchronized_output (10) pending, focus_reporting (11) pending.
-	want := []byte{0x62, 0, 9, 4, 1, 2, 5, 1, 10, 1, 11, 1}
+	// true_color (1) detected (2), then styled_underlines (2), underline_color (3), kitty_keyboard (5),
+	// synchronized_output (10) and focus_reporting (11), all pending (1).
+	want := []byte{0x62, 0, 13, 6, 1, 2, 2, 1, 3, 1, 5, 1, 10, 1, 11, 1}
 	if got := EncodeTerminalReport(first); !bytes.Equal(got, want) {
 		t.Fatalf("report = % x, want % x", got, want)
 	}

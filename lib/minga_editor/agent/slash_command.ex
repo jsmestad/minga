@@ -1070,6 +1070,10 @@ defmodule MingaEditor.Agent.SlashCommand do
         :ok ->
           {:ok, emit_system_message(state, "Continuing from interrupted response...")}
 
+        # The conversation can only be read here. It has said so in its transcript and on its card.
+        {:error, {:conversation_read_only, _line}} ->
+          {:ok, state}
+
         {:error, reason} ->
           {:error, reason}
       end
@@ -1255,6 +1259,10 @@ defmodule MingaEditor.Agent.SlashCommand do
       case Session.compact(session) do
         {:ok, info} ->
           {:ok, NoticeWorkflow.publish(state, info)}
+
+        # The conversation can only be read here. It has said so in its transcript and on its card.
+        {:error, {:conversation_read_only, _line}} ->
+          {:ok, state}
 
         {:error, reason} ->
           {:error, reason}

@@ -169,6 +169,15 @@ defmodule MingaEditor.State do
     %{state | agent_connection: AgentConnection.install_arrival(state.agent_connection, arrival)}
   end
 
+  @doc "Installs the Editor's outstanding transcript read from its active local Session."
+  @spec install_agent_transcript_sync(t(), MingaEditor.Agent.TranscriptSync.t() | nil) :: t()
+  def install_agent_transcript_sync(%__MODULE__{} = state, sync) do
+    %{
+      state
+      | agent_connection: AgentConnection.install_transcript_sync(state.agent_connection, sync)
+    }
+  end
+
   @doc "Keeps the Editor-owned local Session start request."
   @spec track_agent_session_start(t(), MingaEditor.Agent.SessionStart.t()) :: t()
   def track_agent_session_start(%__MODULE__{} = state, start) do
