@@ -47,14 +47,31 @@ defmodule Minga.Session.Swap.RecoveryTest do
       assert hd(results).swap_path == swap_path
     end
 
-    test "skips swap files whose original file was deleted", %{tmp_dir: tmp_dir} do
+    test "keeps a swap whose original file was deleted: it is the only copy of that text", %{
+      tmp_dir: tmp_dir
+    } do
       swap_path = write_swap_file(tmp_dir, "/nonexistent/deleted.ex", "content")
-      assert File.exists?(swap_path)
 
-      results = Recovery.scan(scan_opts(tmp_dir))
-      assert results == []
-      # Swap file should be cleaned up
-      refute File.exists?(swap_path)
+      assert [%{path: "/nonexistent/deleted.ex", swap_path: ^swap_path}] =
+               Recovery.scan(scan_opts(tmp_dir))
+
+      assert File.exists?(swap_path)
+    end
+
+    test "leaves an unparseable swap alone while the editor named in its file name runs", %{
+      tmp_dir: tmp_dir
+    } do
+      # A running editor of another version may write a format this build cannot parse.
+      newer_format = Path.join(tmp_dir, "abc123.4242.swap")
+      File.write!(newer_format, "MINGA_SWAP_V9\nsomething else")
+
+      assert Recovery.scan(scan_opts(tmp_dir, fn pid -> pid == 4242 end)) == []
+      assert File.exists?(newer_format)
+
+      log = capture_log(fn -> assert Recovery.scan(scan_opts(tmp_dir)) == [] end)
+
+      refute File.exists?(newer_format)
+      assert log =~ "Removed a swap file that cannot be parsed"
     end
 
     test "skips swap files owned by a still-running process", %{tmp_dir: tmp_dir} do
@@ -223,26 +240,38 @@ defmodule Minga.Session.Swap.RecoveryTest do
       assert path == ctx.alpha.file
     end
 
-    test "a scoped scan never drops another project's text, even when its file is missing", ctx do
+    test "a scoped scan removes no swap that holds unsaved text or that it cannot parse", ctx do
       missing = Path.join(ctx.alpha.root, "lib/moved_away.ex")
       alpha_swap = write_swap_file(ctx.swap_dir, missing, "unsaved text of a missing file")
-      unreadable = Path.join(ctx.swap_dir, "unreadable.swap")
-      File.write!(unreadable, "garbage")
+      unparseable = Path.join(ctx.swap_dir, "unparseable.swap")
+      File.write!(unparseable, "garbage")
 
-      Recovery.scan(scan_opts(ctx.swap_dir) ++ [scope: {:project, ctx.beta.root}])
+      beta = Recovery.scan(scan_opts(ctx.swap_dir) ++ [scope: {:project, ctx.beta.root}])
 
+      assert Enum.map(beta, & &1.path) == [ctx.beta.file]
       assert File.exists?(alpha_swap)
-      assert File.exists?(unreadable)
+      assert File.exists?(unparseable)
 
-      # Opening alpha itself applies the rule to alpha's own swap.
-      log =
-        capture_log(fn ->
-          Recovery.scan(scan_opts(ctx.swap_dir) ++ [scope: {:project, ctx.alpha.root}])
-        end)
+      # Opening alpha itself returns the text of the missing file for recovery.
+      alpha = Recovery.scan(scan_opts(ctx.swap_dir) ++ [scope: {:project, ctx.alpha.root}])
 
-      refute File.exists?(alpha_swap)
-      assert log =~ "Dropped unsaved text for #{missing}"
-      assert File.exists?(unreadable)
+      assert alpha |> Enum.map(& &1.path) |> Enum.sort() == Enum.sort([ctx.alpha.file, missing])
+      assert File.exists?(alpha_swap)
+      assert File.exists?(unparseable)
+    end
+
+    test "a missing file under a symlinked project root is still in that project's scope", ctx do
+      link = Path.join(Path.dirname(ctx.alpha.root), "alpha-link")
+      File.ln_s!(ctx.alpha.root, link)
+      missing = Path.join(link, "lib/new_dir/never_saved.ex")
+      write_swap_file(ctx.swap_dir, missing, "unsaved text")
+
+      paths =
+        (scan_opts(ctx.swap_dir) ++ [scope: {:project, ctx.alpha.root}])
+        |> Recovery.scan()
+        |> Enum.map(& &1.path)
+
+      assert missing in paths
     end
 
     test "the default scope returns every recoverable swap", ctx do
@@ -264,14 +293,21 @@ defmodule Minga.Session.Swap.RecoveryTest do
       refute File.exists?(swap_path)
     end
 
-    test "a swap whose file is gone is removed, and the log names the file", %{tmp_dir: tmp_dir} do
+    test "a swap whose file is gone stays recoverable", %{tmp_dir: tmp_dir} do
       missing = Path.join(tmp_dir, "deleted.ex")
       swap_path = write_swap_file(tmp_dir, missing, "unsaved text")
 
-      log = capture_log(fn -> assert Recovery.scan(scan_opts(tmp_dir)) == [] end)
+      assert [%{path: ^missing, swap_path: ^swap_path}] = Recovery.scan(scan_opts(tmp_dir))
+      assert File.exists?(swap_path)
+    end
 
-      refute File.exists?(swap_path)
-      assert log =~ "Dropped unsaved text for #{missing}"
+    test "a swap that cannot be read right now is left alone", %{tmp_dir: tmp_dir} do
+      # A directory with a swap file's name: reading it fails with :eisdir, not a format error.
+      unreadable = Path.join(tmp_dir, "abc123.99999.swap")
+      File.mkdir_p!(unreadable)
+
+      assert Recovery.scan(scan_opts(tmp_dir)) == []
+      assert File.dir?(unreadable)
     end
 
     test "a file that cannot be read keeps its swap recoverable", %{tmp_dir: tmp_dir} do
@@ -317,11 +353,10 @@ defmodule Minga.Session.Swap.RecoveryTest do
         write_swap_file(swap_dir, file, "unsaved #{name}")
       end
 
-      # Already saved, gone, and owned by a running editor: none of these is waiting.
+      # Already saved, and owned by a running editor: neither is waiting.
       saved = Path.join(root, "lib/saved.ex")
       File.write!(saved, "same")
       saved_swap = write_swap_file(swap_dir, saved, "same")
-      gone_swap = write_swap_file(swap_dir, Path.join(root, "lib/gone.ex"), "text")
       owned = Path.join(root, "lib/owned.ex")
       File.write!(owned, "saved")
       write_swap_file(swap_dir, owned, "unsaved", os_pid: 4242)
@@ -332,7 +367,6 @@ defmodule Minga.Session.Swap.RecoveryTest do
       assert Recovery.recoverable_projects(opts) == [%{root: canonical_root, files: 2}]
       assert Minga.Session.recoverable_projects(opts) == [%{root: canonical_root, files: 2}]
       assert File.exists?(saved_swap)
-      assert File.exists?(gone_swap)
     end
 
     test "counts a file under the deepest known root, and outside every root under nil", %{
