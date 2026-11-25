@@ -377,7 +377,7 @@ Minga always opens in the editor, at a project, so the place you land depends on
 |---------|---------|
 | `minga` or `minga .` in a project | The project's last session (its files, splits and cursors), or the project home when it has none |
 | `minga some/project` | The same, for that project |
-| `minga lib/` inside a project | The project (its root is the nearest project marker above `lib/`), with the file finder already narrowed to `lib/`; backspace widens it to the whole project |
+| `minga lib/` inside a project | The project (its root is the nearest project marker above `lib/`), with the project file finder already narrowed to `lib/`; clearing the query widens it to the whole project |
 | `minga notes/` in a folder with no project markers | The folder itself as the root, on its home |
 | `minga foo.ex` | The file, open in its project |
 | `minga` outside any project | The home with your recent projects, numbered |

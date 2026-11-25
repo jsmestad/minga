@@ -503,16 +503,14 @@ defmodule MingaEditor.Startup do
   def open_startup_file(%EditorState{} = state, _opts), do: state
 
   @doc """
-  Opens the file finder filtered to the command line's subdirectory (`minga lib/` inside a project).
+  Opens the project file finder filtered to the command line's subdirectory (`minga lib/` inside a project).
 
-  The project root is the nearest marker above the directory (`Minga.CLI`), so the finder lists the whole project; its query starts at the subdirectory, and backspace widens it to the whole project.
+  The project root is the nearest marker above the directory (`Minga.CLI`), so the finder lists the whole project; its query starts at the subdirectory, and clearing the query widens it to the whole project. Like the startup file, the command line is read only when startup inference is on, so test editors never inherit the test runner's arguments.
   """
   @spec open_startup_directory(EditorState.t(), keyword()) :: EditorState.t()
   def open_startup_directory(%EditorState{} = state, opts) do
-    with dir when is_binary(dir) <-
-           Keyword.get_lazy(opts, :startup_directory, &Minga.CLI.startup_directory/0),
-         root when is_binary(root) <-
-           project_root_from_opts(opts) || Minga.CLI.startup_project_root(),
+    with dir when is_binary(dir) <- startup_directory(opts),
+         root when is_binary(root) <- project_root_from_opts(opts),
          {:ok, relative} <- subdirectory_of(dir, root) do
       MingaEditor.PickerUI.open(state, MingaEditor.UI.Picker.FileSource, %{
         initial_query: relative <> "/"
@@ -520,6 +518,14 @@ defmodule MingaEditor.Startup do
     else
       _not_a_subdirectory -> state
     end
+  end
+
+  @spec startup_directory(keyword()) :: String.t() | nil
+  defp startup_directory(opts) do
+    Keyword.get_lazy(opts, :startup_directory, fn ->
+      if Application.get_env(:minga, :infer_startup_project_root, true),
+        do: Minga.CLI.startup_directory()
+    end)
   end
 
   @spec subdirectory_of(String.t(), String.t()) :: {:ok, String.t()} | :error

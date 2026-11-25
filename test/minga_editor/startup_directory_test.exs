@@ -17,13 +17,6 @@ defmodule MingaEditor.StartupDirectoryTest do
     %{root: root}
   end
 
-  defp picker_query(editor) do
-    case editor_state(editor).shell_runtime.state.modal do
-      {:picker, %{picker_ui: %{picker: picker}}} -> picker.query
-      _other -> nil
-    end
-  end
-
   test "a subdirectory start opens the file finder narrowed to that subdirectory", ctx do
     editor =
       start_editor("",
@@ -33,7 +26,7 @@ defmodule MingaEditor.StartupDirectoryTest do
         rendering: :disabled
       )
 
-    assert picker_query(editor) == "lib/agent/"
+    assert picker_state(editor).query == "lib/agent/"
   end
 
   test "the project root itself opens no finder", ctx do
@@ -45,7 +38,7 @@ defmodule MingaEditor.StartupDirectoryTest do
         rendering: :disabled
       )
 
-    assert picker_query(editor) == nil
+    assert picker_state(editor) == nil
   end
 
   test "retired startup choices each get one line in *Messages*" do

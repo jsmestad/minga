@@ -499,6 +499,8 @@ defmodule Minga.CLITest do
       Application.delete_env(:minga, :cli_startup_project_root)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_file)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_directory)
     end
 
     test "file argument returns :ok even when editor isn't running" do
@@ -510,6 +512,8 @@ defmodule Minga.CLITest do
       Application.delete_env(:minga, :cli_startup_project_root)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_file)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_directory)
     end
 
     test "a file argument is remembered so the editor opens it instead of the project session" do
@@ -530,6 +534,11 @@ defmodule Minga.CLITest do
       assert Application.get_env(:minga, :cli_startup_file) == nil
 
       assert CLI.startup_file() == nil
+      assert CLI.startup_directory() == Path.expand(System.tmp_dir!())
+
+      # A file argument clears a directory remembered by an earlier start.
+      assert :ok = CLI.prepare_startup([path])
+      assert CLI.startup_directory() == nil
     after
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
@@ -537,6 +546,8 @@ defmodule Minga.CLITest do
       Application.delete_env(:minga, :cli_startup_project_root)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_file)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_directory)
     end
 
     test "directory argument stores editor startup mode and startup project root" do
@@ -558,6 +569,8 @@ defmodule Minga.CLITest do
       Application.delete_env(:minga, :cli_startup_project_root)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_file)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_directory)
     end
 
     test "main stores startup flags in application env" do
@@ -572,6 +585,8 @@ defmodule Minga.CLITest do
       Application.delete_env(:minga, :cli_startup_project_root)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_file)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_directory)
     end
 
     test "main stores config_file flag from --config" do
@@ -586,6 +601,8 @@ defmodule Minga.CLITest do
       Application.delete_env(:minga, :cli_startup_project_root)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_file)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_directory)
     end
 
     test "main stores debug_log path in application env" do
