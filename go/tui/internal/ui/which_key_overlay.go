@@ -304,8 +304,8 @@ func (m Model) whichKeyHits(which protocol.WhichKey) whichKeyPointerZones {
 		y += whichKeyBandRows(columns)
 	}
 	zones.box = uiRect{Width: g.outer, Height: y + 1}
-	// The crumbs sit in the top border after "╭─ ", joined by " › ".
-	x := 3
+	// The crumbs sit in the top border after "╭ ", at the panel's leading edge, joined by " › ".
+	x := 2
 	for i, crumb := range which.Breadcrumb {
 		if i > 0 {
 			x += 3

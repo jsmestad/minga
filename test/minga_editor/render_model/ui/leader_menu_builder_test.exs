@@ -17,7 +17,8 @@ defmodule MingaEditor.RenderModel.UI.LeaderMenuBuilderTest do
     # The top level follows the which-key sections: Groups first, then Often.
     top = for %{path: path} <- items, not String.contains?(path, " "), do: path
     assert hd(top) == "a"
-    assert Enum.find_index(top, &(&1 == "SPC")) > Enum.find_index(top, &(&1 == ":"))
+    assert Enum.find_index(top, &(&1 == "SPC")) > Enum.find_index(top, &(&1 == "q"))
+    assert Enum.find_index(top, &(&1 == ":")) > Enum.find_index(top, &(&1 == "SPC"))
   end
 
   test "items carry the label, the command a click runs, the section and the ⌘ equivalent" do
