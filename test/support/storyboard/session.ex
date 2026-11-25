@@ -199,6 +199,11 @@ defmodule Minga.Test.Storyboard.Session do
     ctx |> EditorCase.editor_state() |> highlight_spans() |> tuple_size()
   end
 
+  @doc "Resizes the editor's grid to `cols` x `rows`, the way a frontend reports a new row fit, and waits for the frame."
+  @spec resize(t(), pos_integer(), pos_integer()) :: t()
+  def resize(%__MODULE__{ctx: ctx} = session, cols, rows),
+    do: %{session | ctx: EditorCase.send_resize(ctx, cols, rows)}
+
   @doc "Returns the semantic frame the editor would commit now."
   @spec model(t()) :: Model.t()
   def model(%__MODULE__{ctx: ctx}) do

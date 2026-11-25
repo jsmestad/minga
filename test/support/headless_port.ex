@@ -1681,7 +1681,8 @@ defmodule Minga.Test.HeadlessPort do
            selected::binary-size(selected_len), root_len::16, root::binary-size(root_len),
            width::16, row_count::16, error_len::16, error::binary-size(error_len), rest::binary>>
        ) do
-    {rows, <<>>} = decode_file_tree_rows(rest, row_count, [])
+    # The rows are followed by the empty-list tail (`EmptyListWire`), which this grid does not draw.
+    {rows, _empty_list_tail} = decode_file_tree_rows(rest, row_count, [])
 
     %{
       visible?: (flags &&& 1) == 1,
