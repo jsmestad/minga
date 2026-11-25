@@ -12,7 +12,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Search do
   def entries do
     [
       Entry.built("search.buffer.no_results",
-        reach: "/limit_lable ↩",
+        reach: "1 /limit_lable ↩",
         recognize: &(is_binary(&1.echo) and &1.echo =~ ~r/^No matches for/),
         checks: [
           Check.new("the echo line says nothing matched and names the wider search", fn model ->
