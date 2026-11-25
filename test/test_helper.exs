@@ -74,6 +74,10 @@ ExUnit.start(
       swift_exclude ++ macos_ipc_exclude ++ apple_inference_exclude ++ overlay_clone_exclude
 )
 
+# A test that leaves `:standard_error` unregistered makes a later write by Mix kill the VM with no test result (#4289).
+# Fail the run readably at the end of the suite instead.
+Minga.Test.ConsoleGuard.install()
+
 # A quit command calls System.stop/1 through :shutdown_fn. A test that presses a quit key (the storyboard explorer's
 # way-out check presses q up to three times, which reaches SPC q q from the leader) would stop the VM, and ExUnit then
 # reports the run as finished with the remaining tests silently missing. Tests that check quitting install their own.

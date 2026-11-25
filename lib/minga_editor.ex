@@ -70,10 +70,15 @@ defmodule MingaEditor do
   alias Minga.Telemetry.StartupTimer
   # PopupLifecycle alias removed: warnings popup replaced by bottom panel (#825)
 
-  @typedoc "Options for starting the editor."
+  @typedoc """
+  Options for starting the editor.
+
+  `:redirect_console` says whether this editor owns the VM's console. An editor that owns it moves log output and `:standard_error` to the log file, so nothing paints over the terminal it draws on. That change is VM-wide. It defaults to true for every backend except `:headless`. An editor that shares its VM, such as one started by a test, passes false.
+  """
   @type start_opt ::
           {:name, GenServer.name() | nil}
           | {:backend, MingaEditor.State.backend()}
+          | {:redirect_console, boolean()}
           | {:rendering, MingaEditor.State.rendering_policy()}
           | {:port_manager, GenServer.server()}
           | {:parser_manager, GenServer.server()}
@@ -329,7 +334,7 @@ defmodule MingaEditor do
     }
 
     # Logger redirect and startup messages
-    if state.frontend.backend != :headless do
+    if Keyword.get(opts, :redirect_console, state.frontend.backend != :headless) do
       log_path = Minga.LoggerHandler.install()
       Log.info(:editor, "Editor started")
       Log.info(:editor, "Log file: #{log_path}")
