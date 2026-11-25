@@ -353,9 +353,18 @@ defmodule Minga.Session.Swap.RecoveryTest do
       end
 
       {:ok, outer_root} = Minga.Project.Root.canonical_path(outer)
+      {:ok, nested_root} = Minga.Project.Root.canonical_path(nested)
 
+      # Only the outer project is known: the nested file belongs to it, as a scan scoped to the outer root finds it.
       assert Recovery.recoverable_projects(scan_opts(swap_dir) ++ [roots: [outer]]) == [
                %{root: outer_root, files: 2},
+               %{root: nil, files: 1}
+             ]
+
+      # Both are known: the nested file counts under the deepest root that contains it.
+      assert Recovery.recoverable_projects(scan_opts(swap_dir) ++ [roots: [outer, nested]]) == [
+               %{root: outer_root, files: 1},
+               %{root: nested_root, files: 1},
                %{root: nil, files: 1}
              ]
     end
