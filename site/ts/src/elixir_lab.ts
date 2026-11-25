@@ -1,9 +1,9 @@
 /*
  * Lesson 04: the settings translator and the config builder.
  *
- * Every word a reader sees is in site/learn/elixir.html: the four rows, their snippets for each editor, the explanations, the option labels and the
- * steps after Copy. This file holds ids, option values and preview colours. It changes classes, attributes and text in place and never rebuilds a control,
- * so focus stays on the control the reader just used.
+ * Every word a reader sees is in site/learn/elixir.html: the four rows, their snippets for each editor, the explanations, the option labels and the steps after Copy.
+ * This file holds ids, option values and preview colours.
+ * It changes classes, attributes and text in place and never rebuilds a control, so focus stays on the control the reader just used.
  */
 
 import { renderElixirBlockDom } from "./highlight.ts";
@@ -48,7 +48,7 @@ export function hasTranslated(state: TranslatorState): boolean {
   return state.editor !== null && state.row !== null;
 }
 
-/** Safari on macOS does not focus a button on a pointer click, so the next key press would go to the page. Focus the control the reader used. */
+/** Safari on macOS does not focus a button or a checkbox on a pointer click, so the next key press would go to the page. Focus the control the reader used. */
 function keepFocus(control: HTMLElement): void {
   if (document.activeElement !== control) control.focus();
 }
@@ -202,6 +202,7 @@ export function mountElixirPlayground(root: HTMLElement): void {
   function setStatus(textId: string | null): void {
     if (statusEl) statusEl.textContent = textId ? copy.text(textId) : "";
     root.classList.toggle("is-copied", textId === "copied");
+    statusEl?.classList.toggle("is-warning", textId === "copy_failed");
   }
 
   let cfg = readControls();
@@ -233,6 +234,8 @@ export function mountElixirPlayground(root: HTMLElement): void {
     setStatus(null);
     render();
   });
+
+  goFormatBox?.addEventListener("click", () => keepFocus(goFormatBox));
 
   copyButton?.addEventListener("click", () => {
     keepFocus(copyButton);

@@ -3286,10 +3286,9 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   text-decoration: underline;
 }
 
-/* Lesson 04: the settings translator and the config builder (site/ts/src/elixir_lab.ts).
-   The plain rules are the page with scripts off, or after a failed mount: every editor's snippet and every explanation shows, and the controls that
-   need the script are hidden. The rules under the "live" selector lay both widgets out as the mounted lab. They apply from first paint, because the
-   page's inline head script sets labs-pending, so mounting moves nothing. */
+/* Lesson 04: the settings translator and the config builder (site/ts/src/elixir_lab.ts). */
+/* The plain rules are the page with scripts off, or after a failed mount: every editor's snippet and every explanation shows, and the controls that need the script are hidden. */
+/* The rules under the "live" selector lay both widgets out as the mounted lab. They apply from first paint, because the page's inline head script sets labs-pending, so mounting moves nothing. */
 
 .tr-intro {
   max-width: 54rem;
@@ -3487,6 +3486,24 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .tr-item:not(.is-ac
 
 /* The builder. With scripts off its controls are hidden and the default file, its preview and the three steps remain. */
 
+.cfg-intro {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+}
+
+.el-live-copy,
+html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .el-static-copy {
+  display: none;
+}
+
+html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .el-live-copy {
+  display: block;
+}
+
 .el-lab .builder-grid {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -3596,6 +3613,10 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
   margin: 0;
   font-weight: 600;
   color: var(--done);
+}
+
+.cfg-status.is-warning {
+  color: var(--needs);
 }
 
 .cfg-steps {

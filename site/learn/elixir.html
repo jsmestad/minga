@@ -149,7 +149,7 @@
           (lambda () (setq-local tab-width 8)))</code></pre>
                 </div>
                 <div class="tr-snip" data-tr-src="vscode">
-                  <p class="tr-lang">VS Code · settings.json</p>
+                  <p class="tr-lang">VS Code · settings.json, with the Go extension</p>
                   <pre><code>"[go]": {
   "editor.tabSize": 8
 }</code></pre>
@@ -196,7 +196,8 @@
                 </div>
               </div>
               <div class="tr-note" id="tr-note-format">
-                <p><code>true</code> and <code>false</code> are written as they are, with no colon and no quotes. With this line, Minga runs <code>gofmt</code>, the formatter it uses for Go, on your text before it writes the file. If the formatter fails, the file is saved as you typed it and the status line shows the error.</p>
+                <p><code>true</code> and <code>false</code> are written as they are, with no colon and no quotes. With this line, Minga formats a Go file before it writes it: with gopls, Go's language server, when it is running, and with <code>gofmt</code> otherwise.</p>
+                <p>If the file cannot be formatted, for example because of a syntax error, Minga does not save it and the status line reads "Save skipped: formatter failed". Fix the error and save again. If <code>gofmt</code> is not installed and gopls is not running, Minga saves the file unformatted and tells you the formatter is missing.</p>
                 <p>This row and the one above both change Go, so in your file they can share a line: <code>for_filetype :go, tab_width: 8, indent_with: :tabs, format_on_save: true</code>.</p>
               </div>
             </li>
@@ -217,10 +218,12 @@
                 </div>
                 <div class="tr-snip" data-tr-src="vscode">
                   <p class="tr-lang">VS Code · keybindings.json</p>
-                  <pre><code>{
-  "key": "ctrl+alt+w",
-  "command": "workbench.action.files.save"
-}</code></pre>
+                  <pre><code>[
+  {
+    "key": "ctrl+alt+w",
+    "command": "workbench.action.files.save"
+  }
+]</code></pre>
                 </div>
                 <div class="tr-snip tr-minga" data-tr-src="minga">
                   <p class="tr-lang">Minga · config.exs</p>
@@ -242,10 +245,12 @@
         <div class="section-header">
           <p class="section-index"><span>01</span> Your file</p>
           <h2>Build the file, paste it, reload.</h2>
-          <p>Choose the values you want. The file on the right changes as you choose, and the small preview above it shows the theme, the line numbers and the Go tab width. Its first line, <code>use Minga.Config</code>, makes <code>set</code>, <code>for_filetype</code> and <code>bind</code> available, so keep it at the top.</p>
+          <p>The file's first line, <code>use Minga.Config</code>, makes <code>set</code>, <code>for_filetype</code> and <code>bind</code> available, so keep it at the top.</p>
         </div>
 
         <div class="lab-box el-lab" data-elixir-playground>
+          <p class="cfg-intro el-live-copy">Choose the values you want. The file changes as you choose, and the small preview above it shows the theme, the line numbers and the Go tab width.</p>
+          <p class="cfg-intro el-static-copy">This is the file with the lesson's starting values. With JavaScript on, you can change the values here before you copy it.</p>
           <div class="builder-grid">
             <div class="builder-controls">
               <div class="builder-group">
@@ -313,7 +318,7 @@
             <span hidden data-lab-text="copied">Copied. Three steps are left, and they happen in Minga.</span>
             <span hidden data-lab-text="copy_failed">The browser did not allow the copy. Select the text of the file and copy it yourself.</span>
             <ol class="cfg-steps">
-              <li>In Minga, press <kbd>SPC f p</kbd>. It opens <code>~/.config/minga/config.exs</code>, and creates the file if you do not have one.</li>
+              <li>In Minga, open any file first: with no file open, the next key does nothing. Then press <kbd>SPC f p</kbd> (Space, then f, then p). It opens <code>~/.config/minga/config.exs</code>, and creates the file if you do not have one.</li>
               <li>Paste the text over what is there, or add only the lines you want below <code>use Minga.Config</code>. Save with <kbd>SPC f s</kbd>.</li>
               <li>Press <kbd>SPC h r</kbd>. The status line reads "Config reloaded".</li>
             </ol>

@@ -76,7 +76,7 @@ const ROW_FEATURES: Record<TranslatorRow, { feature: string; lua: RegExp; elisp:
     feature: "Your own key for Save",
     lua: /vim\.keymap\.set\("n", "<leader>fw", "<cmd>write<cr>"/,
     elisp: /global-set-key \(kbd "C-c w"\) #'save-buffer/,
-    vscode: /"key": "ctrl\+alt\+w"[\s\S]*"command": "workbench\.action\.files\.save"/,
+    vscode: /^\[\s*\{\s*"key": "ctrl\+alt\+w",\s*"command": "workbench\.action\.files\.save"\s*\}\s*\]$/,
     minga: 'bind :normal, "SPC f w", :save, "Save file"',
   },
 };
