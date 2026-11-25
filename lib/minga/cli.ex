@@ -9,8 +9,8 @@ defmodule Minga.CLI do
   By default, Minga boots into the agentic view (controlled by the `:startup_view` config option). CLI flags can override the config:
 
   - `--editor` forces the traditional file editing view
-  - File arguments open in the traditional file editing view by default
-  - Directory arguments open the agentic view with the directory as context
+  - File arguments open the file in its project
+  - Directory arguments open the project: its saved session, or the project home
   - `--no-context` opens the agentic view but skips loading the CLI file argument as preview context
   - `--headless` starts only the services and agent runtime, plus the JSON-RPC Gateway
   """
@@ -1019,14 +1019,9 @@ defmodule Minga.CLI do
   def apply_flag_implications(%{view_mode: :auto} = flags, file),
     do: resolve_auto_view_mode(flags, file)
 
+  # A file and a directory both open in the editor: a directory opens its project (the saved session, or the project home).
   @spec resolve_auto_view_mode(flags(), String.t()) :: flags()
-  defp resolve_auto_view_mode(flags, file) do
-    resolve_auto_view_mode_for_directory(flags, File.dir?(file))
-  end
-
-  @spec resolve_auto_view_mode_for_directory(flags(), boolean()) :: flags()
-  defp resolve_auto_view_mode_for_directory(flags, true), do: %{flags | view_mode: :agentic}
-  defp resolve_auto_view_mode_for_directory(flags, false), do: %{flags | view_mode: :editor}
+  defp resolve_auto_view_mode(flags, _file), do: %{flags | view_mode: :editor}
 
   @spec store_startup_flags(flags(), String.t() | nil) :: :ok
   defp store_startup_flags(flags, file) do
@@ -1176,9 +1171,9 @@ defmodule Minga.CLI do
       --port <port>          Gateway port for headless mode (default: 4820)
 
     Examples:
-      minga                              Start agentic view
+      minga                              Open the project in this directory
       minga README.md                    Open file for editing
-      minga .                            Start agentic view with project as context
+      minga .                            Open the project: pick up where you left off
       minga --editor README.md           Open file in traditional editor
       minga attach ssh://devbox/work/app  Attach to a remote server-side checkout
       minga sessions ssh://devbox         List remote sessions without launching the editor

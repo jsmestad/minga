@@ -140,7 +140,9 @@ defmodule MingaEditor.State.Launchpad do
         # A present-but-nil :session_dir must fall back to the default dir;
         # Session.session_file/1 treats any present key as a real path.
         session_opts =
-          opts |> Keyword.take([:session_dir]) |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+          opts
+          |> Keyword.take([:session_dir, :project_root])
+          |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
         case Session.load(session_opts) do
           {:ok, %{buffers: buffers}} when is_list(buffers) and buffers != [] ->

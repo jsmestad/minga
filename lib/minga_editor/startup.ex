@@ -171,7 +171,8 @@ defmodule MingaEditor.Startup do
         },
         keymap_scope: keymap_scope,
         agent_ui: agentic_state,
-        launchpad: startup_launchpad(active_buf, keymap_scope, opts)
+        launchpad:
+          startup_launchpad(active_buf, keymap_scope, [{:project_root, project_root} | opts])
       }
       |> MingaEditor.Session.State.set_file_tree(file_tree)
 
@@ -383,7 +384,7 @@ defmodule MingaEditor.Startup do
   @spec startup_launchpad(pid() | nil, atom(), keyword()) ::
           MingaEditor.State.Launchpad.t() | nil
   defp startup_launchpad(nil, scope, opts) when scope != :agent do
-    MingaEditor.State.Launchpad.new(Keyword.take(opts, [:session_dir]))
+    MingaEditor.State.Launchpad.new(Keyword.take(opts, [:session_dir, :project_root]))
   end
 
   defp startup_launchpad(_active_buf, _scope, _opts), do: nil

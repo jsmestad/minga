@@ -6,43 +6,58 @@ defmodule MingaEditor.Handlers.SessionRestore do
   """
 
   alias Minga.Buffer
+  alias Minga.Keymap.Active
+  alias Minga.Keymap.Bindings
   alias Minga.Session
+  alias Minga.Session.Layout
+  alias Minga.Session.Pane
+  alias Minga.Session.Snapshot
 
   alias MingaEditor.Commands
   alias MingaEditor.Handlers.BufferRegistry
+  alias MingaEditor.Handlers.SessionHandler
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.Session, as: EditorSessionState
+  alias MingaEditor.State.Windows
+  alias MingaEditor.Viewport
+  alias MingaEditor.Window
+  alias MingaEditor.WindowTree
 
   @typedoc "Editor state (same as `MingaEditor.state()`)."
   @type state :: EditorState.t()
 
   # ── Public functions ──────────────────────────────────────────────────
 
+  @doc "Loads this project's saved session and restores it."
   @spec restore_session(state()) :: state()
   def restore_session(state) do
-    case Session.load(EditorSessionState.session_opts(state.session)) do
+    case Session.load(SessionHandler.project_session_opts(state)) do
       {:ok, session} -> apply_session_snapshot(state, session)
       {:error, _} -> state
     end
   end
 
-  @doc "Applies already-loaded session metadata from the Editor process."
+  @doc """
+  Applies an already-loaded session from the Editor process: reopens its files with their cursors, rebuilds its window splits with each window's cursor and scroll, focuses the window that had focus, and says in the echo area how many files came back.
+  """
   @spec apply_session_snapshot(state(), Session.snapshot()) :: state()
-  def apply_session_snapshot(state, session) do
-    Minga.Log.info(:editor, "Restored from previous session")
-
+  def apply_session_snapshot(state, %Snapshot{} = session) do
     pre_restore_buffers = state.workspace.buffers.list
 
+    state = Enum.reduce(session.buffers, state, &restore_session_buffer/2)
+    restored = length(state.workspace.buffers.list) - length(pre_restore_buffers)
+    layout = session.layout && Layout.filter(session.layout, &opened?(state, &1.file))
+
     state =
-      session.buffers
-      |> Enum.reduce(state, &restore_session_buffer/2)
-      |> restore_active_file(session.active_file)
+      state
+      |> restore_active_file(active_file(session, layout))
+      |> restore_layout(layout, session.active_pane)
 
     if state.frontend.backend != :headless and state.workspace.buffers.list != pre_restore_buffers do
       Process.send_after(self(), :request_code_lens_and_inlay_hints, 800)
     end
 
-    state
+    announce_restore(state, restored)
   end
 
   @spec recover_swap_entries(state(), [Minga.Session.swap_entry()]) :: state()
@@ -66,9 +81,10 @@ defmodule MingaEditor.Handlers.SessionRestore do
     Enum.reduce(entries, state, &apply_recovered_entry/2)
   end
 
+  @doc "Schedules the startup read when there are swap files to scan or a project session to restore."
   @spec maybe_check_swap_recovery(state()) :: :ok
   def maybe_check_swap_recovery(state) do
-    if EditorSessionState.swap_enabled?(state.session) and state.frontend.backend != :headless do
+    if SessionHandler.swap_recovery_enabled?(state) or SessionHandler.restore_enabled?(state) do
       send(self(), :check_swap_recovery)
     end
 
@@ -93,6 +109,103 @@ defmodule MingaEditor.Handlers.SessionRestore do
     else
       state
     end
+  end
+
+  @spec opened?(state(), String.t()) :: boolean()
+  defp opened?(state, file), do: is_pid(BufferRegistry.find_buffer_by_path(state, file))
+
+  # The focused window's file decides which tab the layout lands in.
+  @spec active_file(Snapshot.t(), Layout.t() | nil) :: String.t() | nil
+  defp active_file(session, nil), do: session.active_file
+
+  defp active_file(session, layout) do
+    case Enum.at(Layout.panes(layout), session.active_pane) do
+      %Pane{file: file} -> file
+      nil -> session.active_file
+    end
+  end
+
+  # Rebuilds the saved splits in the active tab: the first pane reuses the focused window, the rest get new windows.
+  @spec restore_layout(state(), Layout.t() | nil, non_neg_integer()) :: state()
+  defp restore_layout(state, nil, _active_pane), do: state
+
+  defp restore_layout(state, layout, active_pane) do
+    windows = state.workspace.windows
+    {tree, {windows, _reuse}} = place(layout, {windows, [windows.active]}, state)
+    leaves = WindowTree.leaves(tree)
+    tops = Enum.zip(leaves, Enum.map(Layout.panes(layout), & &1.top))
+    focused = Enum.at(leaves, active_pane) || hd(leaves)
+
+    windows = windows |> Windows.set_tree(tree) |> Windows.set_active(focused)
+    {:ok, %Window{content: {:buffer, buffer}, cursor: cursor}} = Windows.fetch(windows, focused)
+    :ok = Buffer.move_to(buffer, cursor)
+
+    workspace = MingaEditor.Session.State.set_windows(state.workspace, windows)
+    state = MingaEditor.Layout.fit_windows(%{state | workspace: workspace})
+
+    # Fitting gives each window a fresh viewport, so the saved scroll goes back on afterwards.
+    windows =
+      Enum.reduce(tops, state.workspace.windows, fn {id, top}, acc ->
+        {:ok, window} = Windows.fetch(acc, id)
+        Windows.set_viewport(acc, id, Viewport.put_top(window.viewport, top))
+      end)
+
+    %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)}
+  end
+
+  @spec place(Layout.t(), {Windows.t(), [Window.id()]}, state()) ::
+          {MingaEditor.WindowTree.t(), {Windows.t(), [Window.id()]}}
+  defp place({:pane, %Pane{} = pane}, {windows, reuse}, state) do
+    {id, windows, reuse} =
+      case reuse do
+        [id] ->
+          {id, windows, []}
+
+        [] ->
+          {id, windows} = Windows.allocate_id(windows)
+          {id, windows, []}
+      end
+
+    buffer = BufferRegistry.find_buffer_by_path(state, pane.file)
+    window = Window.new(id, buffer, 24, 80, {pane.cursor_line, pane.cursor_col})
+
+    windows =
+      case Windows.fetch(windows, id) do
+        {:ok, _old} -> Windows.replace_window(windows, id, window)
+        :error -> Windows.add_window(windows, window)
+      end
+
+    {{:leaf, id}, {windows, reuse}}
+  end
+
+  defp place({:split, direction, first, second, size}, acc, state) do
+    {first, acc} = place(first, acc, state)
+    {second, acc} = place(second, acc, state)
+    {{:split, direction, first, second, size}, acc}
+  end
+
+  @spec announce_restore(state(), non_neg_integer()) :: state()
+  defp announce_restore(state, 0), do: state
+
+  defp announce_restore(state, count) do
+    files = if count == 1, do: "1 file", else: "#{count} files"
+    Minga.Log.info(:editor, "Restored #{files} from last time")
+
+    NoticeWorkflow.publish(
+      state,
+      "Restored #{files} from last time" <> fresh_hint()
+    )
+  end
+
+  # The hint names the live binding, so a user override shows up here too.
+  @spec fresh_hint() :: String.t()
+  defp fresh_hint do
+    case Bindings.sequences_for_command(Active.leader_trie(), :session_start_fresh) do
+      [keys | _rest] -> " · SPC #{Bindings.format_sequence(keys)} start fresh"
+      [] -> ""
+    end
+  catch
+    :exit, _ -> ""
   end
 
   @spec restore_active_file(state(), String.t() | nil) :: state()

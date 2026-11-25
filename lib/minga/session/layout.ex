@@ -41,6 +41,25 @@ defmodule Minga.Session.Layout do
     end
   end
 
+  @doc """
+  Keeps the panes `keep?` accepts. A split that loses one side collapses into the other; returns `nil` when no pane is kept.
+
+  A restore uses it to drop windows whose file no longer opens.
+  """
+  @spec filter(t(), (Pane.t() -> boolean())) :: t() | nil
+  def filter({:pane, pane} = leaf, keep?) when is_function(keep?, 1) do
+    if keep?.(pane), do: leaf, else: nil
+  end
+
+  def filter({:split, direction, first, second, size}, keep?) do
+    case {filter(first, keep?), filter(second, keep?)} do
+      {nil, nil} -> nil
+      {kept, nil} -> kept
+      {nil, kept} -> kept
+      {a, b} -> {:split, direction, a, b, size}
+    end
+  end
+
   @doc "The panes in leaf order: left before right, top before bottom."
   @spec panes(t()) :: [Pane.t()]
   def panes({:pane, pane}), do: [pane]

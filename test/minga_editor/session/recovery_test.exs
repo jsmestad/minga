@@ -31,15 +31,18 @@ defmodule MingaEditor.Session.RecoveryTest do
     assert request.policy.max_queued == 0
   end
 
-  test "run loads only an unclean session and otherwise completes safely", %{tmp_dir: dir} do
-    unclean = snapshot(false)
-    assert :ok = Session.save(unclean, session_dir: dir)
-
+  test "run restores a saved session with files after a clean quit or a crash", %{tmp_dir: dir} do
+    opts = [session_dir: dir, project_root: dir]
     state = base_state(backend: :tui, session: SessionState.new(session_dir: dir))
-    request = Recovery.request(state, [swap_dir: nil], [session_dir: dir], false, true)
-    assert Recovery.run(request.effect) == {:ok, {:restore, unclean}}
+    request = Recovery.request(state, [swap_dir: nil], opts, false, true)
 
-    assert :ok = Session.save(snapshot(true), session_dir: dir)
+    for clean? <- [true, false] do
+      saved = %{snapshot(clean?) | buffers: [%Minga.Session.BufferEntry{file: "/tmp/a.ex"}]}
+      assert :ok = Session.save(saved, opts)
+      assert Recovery.run(request.effect) == {:ok, {:restore, saved}}
+    end
+
+    assert :ok = Session.save(snapshot(true), opts)
     assert Recovery.run(request.effect) == {:ok, :none}
   end
 
@@ -48,7 +51,9 @@ defmodule MingaEditor.Session.RecoveryTest do
   } do
     session = SessionState.new(session_dir: dir)
     state = base_state(backend: :tui, session: session)
-    request = Recovery.request(state, [swap_dir: nil], [session_dir: dir], false, true)
+    opts = MingaEditor.Handlers.SessionHandler.project_session_opts(state)
+    enabled? = MingaEditor.Handlers.SessionHandler.restore_enabled?(state)
+    request = Recovery.request(state, [swap_dir: nil], opts, false, enabled?)
 
     completed = Outcome.completed(request, {:restore, snapshot(false)})
     assert {restored, %Outcome{value: {:completed, _result}}} = Recovery.apply(state, completed)

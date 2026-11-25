@@ -438,7 +438,11 @@ defmodule MingaEditor.State do
   def enter_empty_state(%__MODULE__{} = state) do
     state = retire_file_tab_operations(state)
     runtime = remove_file_tabs(state.shell_runtime)
-    launchpad_opts = EditorSessionState.session_opts(state.session)
+
+    launchpad_opts =
+      EditorSessionState.session_opts(state.session) ++
+        [project_root: MingaEditor.Session.Capture.project_root(state.workspace)]
+
     workspace = SessionState.enter_empty_state(state.workspace, launchpad_opts)
     %{state | shell_runtime: runtime, workspace: workspace}
   end

@@ -108,6 +108,24 @@ defmodule MingaEditor.Layout do
     do: shell.compute_layout(input)
 
   @doc """
+  Recomputes the layout and resizes every window to its rectangle.
+
+  Call after replacing the window tree (a split, a close or a restored session), so each window's viewport matches the space it now has.
+  """
+  @spec fit_windows(EditorState.t()) :: EditorState.t()
+  def fit_windows(%EditorState{workspace: %{windows: %{tree: nil}}} = state), do: state
+
+  def fit_windows(%EditorState{} = state) do
+    state = put(state)
+
+    Enum.reduce(get(state).window_layouts, state, fn {id, window_layout}, acc ->
+      {_row, _col, width, height} = window_layout.total
+      windows = MingaEditor.State.Windows.resize(acc.workspace.windows, id, height, width)
+      %{acc | workspace: MingaEditor.Session.State.set_windows(acc.workspace, windows)}
+    end)
+  end
+
+  @doc """
   Computes the layout and stores it in state for reuse within the same frame.
 
   Call this once at the start of a render cycle or event handler, then

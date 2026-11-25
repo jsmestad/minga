@@ -10,20 +10,22 @@ defmodule MingaEditor.Session.Capture do
   alias Minga.Session.Layout
   alias Minga.Session.Pane
   alias Minga.Session.Snapshot
+  alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Window
 
   @doc "Captures the editor's restorable window state."
   @spec snapshot(EditorState.t()) :: Snapshot.t()
-  def snapshot(%EditorState{workspace: workspace}) do
-    paths = buffer_paths(workspace.buffers.list)
+  def snapshot(%EditorState{workspace: workspace} = state) do
+    inventory = BufferRegistry.buffer_inventory(state)
+    paths = buffer_paths(inventory)
     windows = workspace.windows
     layout = layout(windows, paths)
 
     %Snapshot{
       version: Snapshot.current_version(),
       project_root: project_root(workspace),
-      buffers: Enum.map(workspace.buffers.list, &entry(&1, paths)) |> Enum.reject(&is_nil/1),
+      buffers: inventory |> Enum.map(&entry(&1, paths)) |> Enum.reject(&is_nil/1),
       active_file: Map.get(paths, workspace.buffers.active),
       layout: layout,
       active_pane: active_pane(windows, paths),
