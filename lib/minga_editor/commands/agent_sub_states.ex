@@ -241,17 +241,21 @@ defmodule MingaEditor.Commands.AgentSubStates do
          %PendingApproval{session_pid: session_pid, approval: %PublicApproval{target: target}},
          :ok
        ) do
-    MingaEditor.Shell.Traditional.Workflow.resolve_agent_approval(state, target, session_pid)
+    state
+    |> MingaEditor.Shell.Traditional.Workflow.resolve_agent_approval(target, session_pid)
+    |> EditorState.resolve_agent_task_approval(session_pid, target)
   end
 
   defp apply_approval_response(
          state,
          %PendingApproval{session_pid: session_pid, approval: %PublicApproval{target: target}},
-         {:error, :no_pending_approval}
-       ) do
+         {:error, reason}
+       )
+       when reason in [:no_pending_approval, :approval_not_found] do
     state
     |> MingaEditor.Shell.Traditional.Workflow.resolve_agent_approval(target, session_pid)
-    |> publish_approval_failure(:no_pending_approval)
+    |> EditorState.resolve_agent_task_approval(session_pid, target)
+    |> publish_approval_failure(reason)
   end
 
   defp apply_approval_response(state, %PendingApproval{}, {:error, reason}),
@@ -274,11 +278,10 @@ defmodule MingaEditor.Commands.AgentSubStates do
   defp approval_failure_message(:stale_request),
     do: "This approval belongs to an earlier request"
 
-  defp approval_failure_message(:approval_not_found),
-    do: "This tool approval is no longer current"
-
-  defp approval_failure_message(:no_pending_approval),
-    do: "Tool approval is no longer pending"
+  # Answered in the tasks drawer, a notification or another frontend first.
+  defp approval_failure_message(reason)
+       when reason in [:approval_not_found, :no_pending_approval],
+       do: MingaEditor.Agent.TaskWorkflow.already_answered()
 
   defp approval_failure_message(:not_driver),
     do: "Only the attached driver can resolve this tool approval"

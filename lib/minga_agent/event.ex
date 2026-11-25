@@ -16,6 +16,7 @@ defmodule MingaAgent.Event do
           agent_start()
           | agent_end()
           | text_delta()
+          | retry_scheduled()
           | thinking_delta()
           | tool_start()
           | tool_update()
@@ -39,6 +40,12 @@ defmodule MingaAgent.Event do
   @typedoc "A chunk of assistant response text."
   @type text_delta :: %__MODULE__.TextDelta{delta: String.t()}
 
+  @typedoc "The provider will retry a failed request after `delay_ms`, because of `reason`."
+  @type retry_scheduled :: %__MODULE__.RetryScheduled{
+          attempt: pos_integer(),
+          delay_ms: non_neg_integer(),
+          reason: String.t()
+        }
   @typedoc "A chunk of the agent's internal reasoning."
   @type thinking_delta :: %__MODULE__.ThinkingDelta{delta: String.t()}
 
@@ -134,6 +141,18 @@ defmodule MingaAgent.Event do
     @enforce_keys [:delta]
     defstruct [:delta]
     @type t :: %__MODULE__{delta: String.t()}
+  end
+
+  defmodule RetryScheduled do
+    @moduledoc false
+    @enforce_keys [:attempt, :delay_ms, :reason]
+    defstruct [:attempt, :delay_ms, :reason]
+
+    @type t :: %__MODULE__{
+            attempt: pos_integer(),
+            delay_ms: non_neg_integer(),
+            reason: String.t()
+          }
   end
 
   defmodule ThinkingDelta do

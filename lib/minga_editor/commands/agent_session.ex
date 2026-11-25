@@ -819,6 +819,7 @@ defmodule MingaEditor.Commands.AgentSession do
           :ok ->
             state
             |> MingaEditor.Agent.QuestionResponse.retire_remote_attachment(session)
+            |> MingaEditor.Agent.TaskWorkflow.stopped(session)
             |> clear_restart_session(session)
             |> mark_remote_session_disconnected(session_id)
             |> NoticeWorkflow.publish("Detached remote session #{session_id}")

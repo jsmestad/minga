@@ -2843,6 +2843,9 @@ defmodule MingaAgent.Providers.NativeTest do
   describe "send_prompt with LLM error" do
     # The 429 ChatGPT Pro returned on 2026-11-23 when its weekly limit was reached, as ReqLLM reports it.
     defp recorded_usage_limit_error(body_overrides \\ %{}) do
+      # The recorded reset is moved to two days from now, so the message always shows a future date.
+      reset_at = System.os_time(:second) + 172_541
+
       ReqLLM.Error.API.Request.exception(
         reason: "The usage limit has been reached",
         status: 429,
@@ -2853,13 +2856,16 @@ defmodule MingaAgent.Providers.NativeTest do
               "limit_window_minutes" => 10_080,
               "message" => "The usage limit has been reached",
               "plan_type" => "pro",
-              "resets_at" => 1_795_626_066,
+              "resets_at" => reset_at,
               "resets_in_seconds" => 172_541,
               "type" => "usage_limit_reached"
             },
             body_overrides
           ),
-        headers: [{"x-codex-plan-type", "pro"}, {"x-codex-primary-reset-at", "1795626067"}],
+        headers: [
+          {"x-codex-plan-type", "pro"},
+          {"x-codex-primary-reset-at", Integer.to_string(reset_at + 1)}
+        ],
         provider_code: "usage_limit_reached",
         retryable: true
       )
@@ -2906,13 +2912,15 @@ defmodule MingaAgent.Providers.NativeTest do
                  service: "ChatGPT",
                  plan: "pro",
                  window_minutes: 10_080,
-                 resets_at: ~U[2026-11-25 17:01:06Z]
+                 resets_at: %DateTime{} = resets_at
                },
                message: message
              } = Enum.find(events, &match?(%Event.Error{}, &1))
 
+      assert DateTime.diff(resets_at, DateTime.utc_now()) in 172_000..172_600
+
       assert message =~
-               ~r/\AYour ChatGPT Pro usage limit is reached\. It resets \w{3}, Nov 2[56] at \d{1,2}:\d{2} (AM|PM)\. Choose another model with \/model to continue now\.\z/
+               ~r/\AYour ChatGPT Pro usage limit is reached\. It resets \w{3}, \w{3} \d{1,2} at \d{1,2}:\d{2} (AM|PM)\. Choose another model with \/model to continue now\.\z/
 
       assert :counters.get(calls, 1) == 1
     end

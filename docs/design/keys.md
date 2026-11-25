@@ -198,7 +198,7 @@ Each row shows two keys: the letter that works inside the menu, and on the right
 | `x` | Stop the task, after confirming | working |
 | `q` | Close | all |
 
-`n` means deny on a needs-you row, so a new task is `c`. The approval keys match the agent scope today (`lib/minga/keymap/scope/agent.ex:249` to `252`: `y` or Enter approve once, `a` session, `t` turn, `n` or Esc deny).
+`n` means deny on a needs-you row, so a new task is `c`. The approval keys are the same in the conversation (`MingaEditor.Input.ToolApproval`): `y` or Enter approve once, `a` session, `t` turn, `n` deny. `esc` at any approval defers: the request stays pending and answerable from the conversation and the drawer.
 
 ## Task output (`o` on a task row)
 

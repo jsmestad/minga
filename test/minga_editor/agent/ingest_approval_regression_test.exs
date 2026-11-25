@@ -13,6 +13,8 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
   alias MingaAgent.ToolApproval.Public
   alias MingaEditor.Agent.Ingest
   alias MingaEditor.Agent.PendingApproval
+  alias MingaEditor.Agent.TaskWorkflow
+  alias MingaEditor.Agent.Tasks
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.Commands.AgentSubStates
   alias MingaEditor.Shell.Runtime
@@ -55,7 +57,10 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
     resolved = AgentSubStates.approve_tool(state)
 
     assert agent(resolved).pending_approval == nil
-    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(resolved) =~ "no longer pending"
+
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(resolved) ==
+             "Already answered in Minga"
+
     refute_received {:tool_approval_response, _, _}
   end
 
@@ -86,6 +91,57 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
     assert_receive {:tool_approval_response, "tc1", :reject}, @event_timeout
     assert agent(resolved).pending_approval == nil
     assert Session.editor_snapshot(session).pending_approval == nil
+  end
+
+  describe "answering a task's approval from outside its conversation" do
+    test "resolves the task's request and the conversation's copy together" do
+      %{session: session} = session_with_ingest_driver()
+      approval = inject_pending_approval(session)
+      state = session |> editor_state_with(approval) |> task_asks(session, approval)
+
+      answered = TaskWorkflow.answer(state, session, :approve)
+
+      assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
+      assert Tasks.approval(answered.agent_connection.tasks, session) == nil
+      assert agent(answered).pending_approval == nil
+    end
+
+    test "a request answered elsewhere first says so and sends no decision" do
+      %{session: session} = session_with_ingest_driver()
+      approval = inject_pending_approval(session)
+      state = session |> editor_state_with(approval) |> task_asks(session, approval)
+      assert :ok = Session.respond_to_approval(session, approval.target, :approve)
+      assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
+
+      answered = TaskWorkflow.answer(state, session, :reject)
+
+      assert Tasks.approval(answered.agent_connection.tasks, session) == nil
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(answered) ==
+               "Already answered in Minga"
+
+      refute_received {:tool_approval_response, _, _}
+    end
+
+    test "a task with nothing pending says it was already answered" do
+      %{session: session} = session_with_ingest_driver()
+      approval = inject_pending_approval(session)
+      state = editor_state_with(session, approval)
+
+      answered = TaskWorkflow.answer(state, session, :approve)
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(answered) ==
+               "Already answered in Minga"
+
+      refute_received {:tool_approval_response, _, _}
+    end
+  end
+
+  @spec task_asks(EditorState.t(), pid(), Public.t()) :: EditorState.t()
+  defp task_asks(state, session, approval) do
+    state
+    |> TaskWorkflow.follow(session)
+    |> TaskWorkflow.observe(session, {:approval_pending, approval})
   end
 
   @spec session_with_ingest_driver() :: %{session: pid(), ingest: pid()}

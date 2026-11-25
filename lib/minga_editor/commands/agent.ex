@@ -761,9 +761,21 @@ defmodule MingaEditor.Commands.Agent do
   # Sends the resolved content to the LLM and handles steering queue feedback.
   @spec deliver_prompt(state(), String.t() | [ReqLLM.Message.ContentPart.t()]) :: state()
   defp deliver_prompt(state, resolved) do
-    result = AgentSession.send_prompt_pid(Runtime.active_session(state.shell_runtime), resolved)
-    show_prompt_delivery(state, result)
+    session = Runtime.active_session(state.shell_runtime)
+    result = AgentSession.send_prompt_pid(session, resolved)
+
+    state
+    |> name_task(session, resolved, result)
+    |> show_prompt_delivery(result)
   end
+
+  # A task is named by the first goal it accepts.
+  @spec name_task(state(), pid() | nil, String.t() | [ReqLLM.Message.ContentPart.t()], term()) ::
+          state()
+  defp name_task(state, session, prompt, :ok) when is_pid(session),
+    do: MingaEditor.Agent.TaskWorkflow.prompted(state, session, prompt)
+
+  defp name_task(state, _session, _prompt, _result), do: state
 
   @spec show_prompt_delivery(state(), :ok | {:queued, :steering} | {:error, term()}) :: state()
   defp show_prompt_delivery(state, result) do
