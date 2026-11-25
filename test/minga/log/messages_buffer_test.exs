@@ -211,73 +211,61 @@ defmodule Minga.Log.MessagesBufferTest do
   end
 
   describe "append cost scaling" do
-    @tag timeout: 15_000
-    test "append time does not grow linearly with buffer size" do
+    test "append work at capacity follows the line limit, not the bytes held" do
+      max_lines = 2000
+      max_bytes = 50_000_000
+
+      short = start_full_buffer(:short_lines, "", max_lines, max_bytes)
+      long = start_full_buffer(:long_lines, String.duplicate("x", 400), max_lines, max_bytes)
+
+      bytes_ratio = byte_size(Buffer.content(long)) / byte_size(Buffer.content(short))
+      assert bytes_ratio > 8
+
+      short_work = append_work(short, "", max_lines, max_bytes)
+      long_work = append_work(long, String.duplicate("x", 400), max_lines, max_bytes)
+
+      # The work is counted in the buffer process's reductions, so it does not depend on how busy the machine is.
+      # Trimming works over line offsets, which is O(max_lines). Measured: about 2x the work for 13x the bytes.
+      # An append that walked the whole content (String.split/join) would grow with the bytes, about 13x here.
+      ratio = long_work / max(short_work, 1)
+
+      assert ratio < 4,
+             "100 appends cost #{long_work} reductions with #{Float.round(bytes_ratio, 1)}x the bytes, " <>
+               "#{Float.round(ratio, 1)}x the #{short_work} of short lines; expected < 4x"
+    end
+
+    defp start_full_buffer(id, pad, max_lines, max_bytes) do
       {:ok, buf} =
         start_supervised(
           {Buffer,
            content: "",
            buffer_name: "test-perf-#{System.unique_integer([:positive])}",
-           read_only: true}
-        )
-
-      max_lines = 2000
-      max_bytes = 500_000
-
-      # Fill buffer to capacity
-      for i <- 1..max_lines do
-        Buffer.bounded_append(buf, "[00:00:00] boot message #{i}\n", max_lines, max_bytes)
-      end
-
-      # Measure time for 100 appends at capacity
-      {at_capacity_us, _} =
-        :timer.tc(fn ->
-          for i <- 1..100 do
-            Buffer.bounded_append(
-              buf,
-              "[00:00:00] at-capacity message #{i}\n",
-              max_lines,
-              max_bytes
-            )
-          end
-        end)
-
-      # For comparison: 100 appends into a small buffer
-      {:ok, small_buf} =
-        start_supervised(
-          {Buffer,
-           content: "",
-           buffer_name: "test-perf-small-#{System.unique_integer([:positive])}",
            read_only: true},
-          id: :small_buf
+          id: id
         )
 
-      for i <- 1..10 do
-        Buffer.bounded_append(small_buf, "[00:00:00] small msg #{i}\n", max_lines, max_bytes)
+      for i <- 1..max_lines do
+        Buffer.bounded_append(buf, "[00:00:00] #{pad} boot message #{i}\n", max_lines, max_bytes)
       end
 
-      {small_us, _} =
-        :timer.tc(fn ->
-          for i <- 1..100 do
-            Buffer.bounded_append(
-              small_buf,
-              "[00:00:00] small-append message #{i}\n",
-              max_lines,
-              max_bytes
-            )
-          end
-        end)
+      buf
+    end
 
-      # The bounded offset work is O(max_lines) which is a fixed constant,
-      # not O(content_bytes). The ratio between a 2000-line buffer and a
-      # 10-line buffer reflects that constant overhead, not unbounded growth.
-      # The old O(n) approach (String.split/join on the full content) would
-      # produce a ratio well above 50x.
-      ratio = at_capacity_us / max(small_us, 1)
+    # Reductions the buffer process spends on 100 appends. Each append is a synchronous call,
+    # so the process is idle again when the last one returns.
+    defp append_work(buf, pad, max_lines, max_bytes) do
+      before = reductions(buf)
 
-      assert ratio < 25,
-             "append at capacity (#{at_capacity_us}us) was #{Float.round(ratio, 1)}x " <>
-               "slower than small buffer (#{small_us}us); expected < 25x"
+      for i <- 1..100 do
+        Buffer.bounded_append(buf, "[00:00:00] #{pad} at-capacity #{i}\n", max_lines, max_bytes)
+      end
+
+      reductions(buf) - before
+    end
+
+    defp reductions(pid) do
+      {:reductions, count} = Process.info(pid, :reductions)
+      count
     end
   end
 
