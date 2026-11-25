@@ -128,12 +128,23 @@ defmodule MingaEditor.Agent.DraftSaveTest do
       {:ok, 1, queueing} =
         DraftSave.begin_queue(ready, make_ref(), {0, {0, 4}}, {1, "t", :follow_up})
 
+      {:saving, save_ref, _, _, _} = saving.request
+      {:ok, blocked} = DraftSave.failed(saving, save_ref, :blocked)
+      {:attaching, attach_ref, _, _, _} = attaching.request
+      {:ok, review_required} = DraftSave.failed(attaching, attach_ref, :blocked)
+      loading = DraftSave.loading({self(), "record"}, self(), make_ref(), @marker)
+      retiring = DraftSave.retire_queue_receipt(saving, make_ref(), {1, "s", :follow_up, 1})
+
       %{
         ready: ready,
         saving: saving,
         recalling: recalling,
         attaching: attaching,
-        queueing: queueing
+        queueing: queueing,
+        loading: loading,
+        blocked: blocked,
+        attachment_review_required: review_required,
+        saving_while_retiring: retiring
       }
     end
 
@@ -175,6 +186,16 @@ defmodule MingaEditor.Agent.DraftSaveTest do
 
       assert {:ok, retried} = DraftSave.failed(held, ref, :retryable)
       assert {:run, @deferred, _} = DraftSave.release_deferred_queue(retried)
+    end
+
+    test "a held queue whose save leaves a receipt retiring is dropped" do
+      %{saving: saving} = requests()
+      {:ok, held} = DraftSave.defer_queue(saving, @deferred)
+      {:saving, ref, _, _, _} = held.request
+      {:ok, saved} = DraftSave.saved(held, ref, 2)
+      retiring = DraftSave.retire_queue_receipt(saved, make_ref(), {1, "s", :follow_up, 1})
+
+      assert {:drop, %{deferred_queue: nil}} = DraftSave.release_deferred_queue(retiring)
     end
 
     test "a later press replaces the held queue" do
