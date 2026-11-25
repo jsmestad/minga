@@ -176,14 +176,11 @@ defmodule MingaEditor.Journeys.QueueWhileSessionBusyTest do
     :ok = Session.send_prompt(session, "start")
     await_working(ctx)
     editor = ctx.editor
-    traced = [{Session, :transcript_since, :_}, {Session, :messages, :_}]
 
+    # Every synchronous call (GenServer.call, :sys) goes through :gen.do_call/4.
     :erlang.trace(editor, true, [:call, {:tracer, self()}])
-    for mfa <- traced, do: :erlang.trace_pattern(mfa, true, [:local])
-
-    on_exit(fn ->
-      for mfa <- traced, do: :erlang.trace_pattern(mfa, false, [:local])
-    end)
+    :erlang.trace_pattern({:gen, :do_call, 4}, true, [:local])
+    on_exit(fn -> :erlang.trace_pattern({:gen, :do_call, 4}, false, [:local]) end)
 
     :ok = :sys.suspend(session)
 
@@ -201,10 +198,8 @@ defmodule MingaEditor.Journeys.QueueWhileSessionBusyTest do
     assert elapsed < @press_budget_us,
            "the Editor waited #{div(elapsed, 1000)} ms on the Session for stream events"
 
-    for {module, function, _arity} <- traced do
-      refute_received {:trace, ^editor, :call, {^module, ^function, _args}},
-                      "the Editor called #{inspect(module)}.#{function} for a stream event"
-    end
+    refute_received {:trace, ^editor, :call, {:gen, :do_call, [^session | _]}},
+                    "the Editor called the Session for a stream event"
 
     Session.add_system_message(session, "Last word")
     send(editor, {:agent_event, session, :messages_changed})

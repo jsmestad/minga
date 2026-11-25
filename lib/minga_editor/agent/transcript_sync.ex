@@ -6,7 +6,7 @@ defmodule MingaEditor.Agent.TranscriptSync do
 
   While a read is out, a further ask for the same Session only marks the read dirty. A burst of batches therefore costs one more read when the reply lands, never one read per batch, and the last change is never lost.
 
-  A reply is installed only while its Session is still the active one, no arrival is pending for it, and the projection still sits at the cursor the read started from. Otherwise the reply is dropped: a newer cursor is never overwritten by an older read. A dropped or dirty reply reads the active Session again. An ask for another Session abandons the outstanding read. A Session that dies with a read out clears it.
+  A reply is installed only while its Session is still the active one, no arrival is pending for it, and the projection still sits at the cursor the read started from. Otherwise the reply is dropped: a newer cursor is never overwritten by an older read. A reply dropped because the cursor moved, or one that arrived dirty, reads the Session again. A reply for a Session that is no longer active, or whose arrival is pending, is only dropped: the tab switch or the arrival owns the next read. An ask for another Session abandons the outstanding read. A Session that dies with a read out clears it.
   """
 
   alias MingaAgent.Session
