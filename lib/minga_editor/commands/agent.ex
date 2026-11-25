@@ -22,12 +22,14 @@ defmodule MingaEditor.Commands.Agent do
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.ProvenanceJump
   alias MingaEditor.Agent.SlashCommand
+  alias MingaEditor.Agent.StatusEventWorkflow
   alias MingaEditor.Agent.Tasks
   alias MingaEditor.Agent.TurnRequest
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.TranscriptProjection
+  alias MingaEditor.Agent.WorkspaceStatus
   alias MingaEditor.Agent.View.Preview
   alias Minga.Buffer
   alias Minga.Clipboard
@@ -872,9 +874,12 @@ defmodule MingaEditor.Commands.Agent do
   Applies what a Session answered to a composer send or a stop the Editor asked for without waiting (`MingaEditor.Agent.TurnRequest`).
 
   A send that went removes its text from the composer it was pressed in, in front or not. A send that was refused, or whose Session exited before it answered, keeps the text and says why in one line.
+
+  A stop that went says nothing when the modeline shows it. When it stopped a conversation the modeline does not speak for, one line names the task that was stopped.
   """
   @spec settle_turn_request(state(), TurnRequest.t(), TurnRequest.answer()) :: state()
-  def settle_turn_request(state, %TurnRequest{work: {:stop, _target}}, :ok), do: state
+  def settle_turn_request(state, %TurnRequest{work: {:stop, _target}, session: session}, :ok),
+    do: answer_unseen_stop(state, session)
 
   def settle_turn_request(state, %TurnRequest{work: {:stop, _target}}, {:error, :stale_turn}),
     do: NoticeWorkflow.publish(state, "That Agent turn is no longer active.")
@@ -890,8 +895,58 @@ defmodule MingaEditor.Commands.Agent do
     {outcome, notice} = composer_send_outcome(send, answer)
 
     state
+    |> show_started_turn(request.session, answer)
     |> DraftWorkflow.send_answered(request.workspace, request.token, raw, outcome)
     |> publish_send_notice(notice)
+  end
+
+  # A send that started a turn names that turn's queue target in its answer. It is installed before
+  # the press waiting behind the send runs, so that press queues into the new turn. The Session's
+  # own event for the target can arrive after the answer; a press that ran in between would be sent
+  # as a first message and refused.
+  @spec show_started_turn(state(), pid(), TurnRequest.answer()) :: state()
+  defp show_started_turn(state, session, {:sent, {_record, _request, _next} = target}),
+    do: StatusEventWorkflow.queue_target_changed(state, session, target)
+
+  defp show_started_turn(state, _session, _answer), do: state
+
+  # The modeline says "Minga stopped" for the conversation it speaks for: the one in front, or,
+  # with a file in front, the one shown last. A stop of any other conversation changes nothing
+  # in view, so the echo area names the task that was stopped.
+  @spec answer_unseen_stop(state(), pid()) :: state()
+  defp answer_unseen_stop(state, session) do
+    if WorkspaceStatus.spoken_session(state.shell_runtime.state) == session,
+      do: state,
+      else: NoticeWorkflow.publish(state, stopped_status(state, session))
+  end
+
+  @spec stopped_status(state(), pid()) :: String.t()
+  defp stopped_status(state, session) do
+    case stopped_name(state, session) do
+      nil -> "Stopped"
+      name -> "Stopped: #{name}"
+    end
+  end
+
+  # The task's goal, or, for a task that was never given one here (a restored conversation),
+  # the name its conversation has in the Spaces bar.
+  @spec stopped_name(state(), pid()) :: String.t() | nil
+  defp stopped_name(state, session) do
+    case Tasks.fetch(state.agent_connection.tasks, session) do
+      {:ok, %Tasks.Entry{title: title}} when is_binary(title) -> title
+      _unnamed -> conversation_label(state, session)
+    end
+  end
+
+  @spec conversation_label(state(), pid()) :: String.t() | nil
+  defp conversation_label(state, session) do
+    with %TabBar{} = tab_bar <- Runtime.traditional_tab_bar(state.shell_runtime),
+         %{label: label} when is_binary(label) <-
+           TabBar.find_workspace_by_session(tab_bar, session) do
+      label
+    else
+      _none -> nil
+    end
   end
 
   @spec publish_send_notice(state(), String.t() | nil) :: state()
@@ -914,6 +969,8 @@ defmodule MingaEditor.Commands.Agent do
   defp composer_send_outcome({:attached, _record, _shown}, {:error, reason}),
     do: {:kept, attached_submit_error(reason)}
 
+  # A Session on this node names the turn it started; a Session on another node answers `:ok`.
+  defp composer_send_outcome(_send, {:sent, _queue_target}), do: {{:sent, nil}, nil}
   defp composer_send_outcome(_send, :ok), do: {{:sent, nil}, nil}
 
   defp composer_send_outcome(_send, {:queued, :steering}),

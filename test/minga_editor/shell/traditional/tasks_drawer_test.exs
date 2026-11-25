@@ -89,6 +89,19 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerTest do
     assert TasksDrawer.selected(drawer(ctx)).state == :needs_you
   end
 
+  test "a first message still admitting shows as a working task, named by its session's first goal",
+       %{ctx: ctx} do
+    opened = FakeTaskSession.start(ctx.editor, "An opened conversation", :opened)
+
+    # Admission (#4347): the session reports a working turn before the provider has counted its prefix,
+    # and announces the first goal when the turn starts; the send's answer names nothing.
+    send(ctx.editor, {:agent_event, opened, {:status_changed, :thinking}})
+    send(ctx.editor, {:agent_event, opened, {:title_changed, "Add tests"}})
+    send_keys_sync(ctx, "<Space>aa")
+
+    assert %{title: "Add tests", state: :working} = TasksDrawer.selected(drawer(ctx))
+  end
+
   test "esc closes the drawer and leaves the request pending", %{ctx: ctx} do
     FakeTaskSession.start(ctx.editor, "Add tests", :needs_you, observer: self())
     send_keys_sync(ctx, "<Space>aa")

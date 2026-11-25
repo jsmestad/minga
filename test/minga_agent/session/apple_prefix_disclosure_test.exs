@@ -6,6 +6,7 @@ defmodule MingaAgent.Session.ApplePrefixDisclosureTest do
   alias MingaAgent.Test.ModelSelectionFixture
 
   @moduletag :tmp_dir
+  @stuck_rule "A rule that is never counted"
 
   setup %{tmp_dir: dir} do
     root = Path.join(dir, "project")
@@ -20,11 +21,10 @@ defmodule MingaAgent.Session.ApplePrefixDisclosureTest do
     credential_opts = [config_dir: dir, oauth_path: Path.join(dir, "oauth.json"), env: env]
 
     # Counts one token per four bytes of each candidate, as a stand-in for the Apple tokenizer.
-    # Setting `hang` makes later counts never answer, like a stuck helper.
-    hang = :atomics.new(1, [])
-
+    # A prefix with the stuck rule never answers, like a stuck helper. A count hangs by what it
+    # counts, not by when it runs, so a count the Session starts on its own cannot slip past.
     counter = fn texts, candidates, _tools, _reserve ->
-      if :atomics.get(hang, 1) == 1 do
+      if Enum.any?(texts, &(&1 =~ @stuck_rule)) do
         receive do
           :never -> :ok
         end
@@ -58,7 +58,7 @@ defmodule MingaAgent.Session.ApplePrefixDisclosureTest do
         id: make_ref()
       )
 
-    %{session: session, root: root, hang: hang}
+    %{session: session, root: root}
   end
 
   test "selecting Apple with oversized project instructions says they are not sent", %{
@@ -74,16 +74,14 @@ defmodule MingaAgent.Session.ApplePrefixDisclosureTest do
 
   test "a stuck count on a changed prefix refuses the prompt before the caller's call timeout", %{
     session: session,
-    root: root,
-    hang: hang
+    root: root
   } do
     assert :ok = Session.set_model(session, "apple:system")
-    File.write!(Path.join(root, "AGENTS.md"), "A short rule.\n")
-    :atomics.put(hang, 1, 1)
+    File.write!(Path.join(root, "AGENTS.md"), "#{@stuck_rule}.\n")
 
     # The Editor sends prompts with this same default 5 s GenServer.call.
     assert {:error, reason} = Session.send_prompt(session, "hi")
-    assert reason =~ "could not count its fixed instructions and tools within 3 seconds"
+    assert reason =~ "still counting its fixed instructions and tools"
 
     assert Enum.any?(
              system_messages(session),
