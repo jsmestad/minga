@@ -278,7 +278,13 @@ defmodule Minga.Distribution.RemoteSessionE2ETest do
         )
 
       assert {:ok, 1, pending} =
-               DraftSave.begin_queue(save, original, marker, {sequence, submission, :follow_up})
+               DraftSave.begin_queue(
+                 save,
+                 original,
+                 marker,
+                 {sequence, submission, :follow_up},
+                 text
+               )
 
       ui = ui |> UIState.project_connection(connection) |> UIState.project_draft_save(pending)
 
