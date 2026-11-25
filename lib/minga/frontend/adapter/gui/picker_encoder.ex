@@ -75,7 +75,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
         model.load_status,
         model.empty,
         model.list_keys?,
-        model.movement_keys
+        model.movement_keys,
+        model.hints
       })
 
     selection = {model.selected_item_id, model.selected_action_id}
@@ -169,7 +170,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
       @section_picker_empty,
       Encode.encode_gui_picker_empty(%{
         empty: Minga.Frontend.Adapter.GUI.EmptyListWire.to_wire(empty),
-        list_keys: if(model.list_keys?, do: 1, else: 0)
+        list_keys: if(model.list_keys?, do: 1, else: 0),
+        hints: Enum.map(model.hints, fn {keys, word} -> %{keys: keys, word: word} end)
       })
     )
   end

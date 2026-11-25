@@ -1,10 +1,12 @@
 package ui
 
 import (
+	"bytes"
 	"slices"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/charmbracelet/x/ansi"
@@ -54,19 +56,21 @@ func TestEmptyPickerShowsWhatHappenedAboveItsNextStepRows(t *testing.T) {
 	}
 }
 
-func TestEmptyPickerHintsNameTheKeysThatMoveAndRunItsRows(t *testing.T) {
+func TestEmptyPickerFooterDrawsTheHintsTheBEAMSends(t *testing.T) {
 	model := New(80, 24, nil)
-	picker := protocol.Picker{Visible: true, Title: "Switch project", Empty: &generated.EmptyList{Title: "No projects yet."}}
-
-	prompt := ansi.Strip(model.renderPickerHelp(picker, 60))
-	if !strings.Contains(prompt, "⌃J ⌃K move") || !strings.Contains(prompt, "esc close") {
-		t.Fatalf("a prompt moves with ⌃J ⌃K: %q", prompt)
+	picker := protocol.Picker{
+		Visible: true,
+		Title:   "Switch project",
+		Empty:   &generated.EmptyList{Title: "No projects yet."},
+		// A user who rebinds the picker's keys sees them here: the frontend draws what it is sent.
+		Hints: []generated.KeyHint{{Keys: "n p", Word: "move"}, {Keys: "↩", Word: "run"}, {Keys: "x", Word: "close"}},
 	}
 
-	picker.ListKeys = true
-	list := ansi.Strip(model.renderPickerHelp(picker, 60))
-	if !strings.Contains(list, "j k move") || !strings.Contains(list, "q close") {
-		t.Fatalf("a list with nothing to type moves with j k: %q", list)
+	footer := ansi.Strip(model.renderPickerHelp(picker, 60))
+	for _, want := range []string{"n p move", "↩ run", "x close"} {
+		if !strings.Contains(footer, want) {
+			t.Fatalf("the footer must draw the BEAM's hint %q: %q", want, footer)
+		}
 	}
 }
 
@@ -142,6 +146,28 @@ func TestEmptyFolderDrawsItsNextStepsInTheTreesOwnKeys(t *testing.T) {
 	}
 }
 
+func TestAnEmptyPickerOnAShortTerminalShowsEveryNextStep(t *testing.T) {
+	model := New(80, 24, nil)
+	model.layout = model.computeLayout()
+	picker := protocol.Picker{
+		Visible: true,
+		Title:   "Switch project",
+		Items: []protocol.PickerItem{
+			{ActivationID: 1, Label: "Add a folder", Annotation: "SPC p a"},
+			{ActivationID: 2, Label: "Open a file", Annotation: "SPC f f"},
+		},
+		Empty: &generated.EmptyList{Title: "No projects yet.", Why: "Minga remembers the folders you open."},
+		Hints: []generated.KeyHint{{Keys: "↩", Word: "run"}},
+	}
+
+	text := strings.Join(stripLines(model.renderPicker(picker, protocol.PickerPreview{})), "\n")
+	for _, want := range []string{"No projects yet.", "Add a folder", "Open a file", "↩ run"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("an 80x24 empty picker is missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestCleanTreeKeepsItsStepsBelowARetryRow(t *testing.T) {
 	model := New(80, 24, nil)
 	empty := cleanTree()
@@ -154,5 +180,45 @@ func TestCleanTreeKeepsItsStepsBelowARetryRow(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("a clean tree with a retry toast is missing %q:\n%s", want, text)
 		}
+	}
+}
+
+// An empty picker with nothing to filter hands its keys to the editor view (responder 0) and is still the picker's list:
+// j previews the next step at once, and ↩ runs the highlighted step exactly once, as one activation and no key.
+func TestAnEmptyPickerListPreviewsItsStepsAndRunsTheHighlightedOneOnce(t *testing.T) {
+	out := make(chan []byte, 16)
+	model := New(80, 24, out)
+	payload := protocol.ChromePayload{Opcode: generated.OPGuiPicker, Picker: protocol.Picker{
+		Visible: true, Generation: 5, Selected: 0, SelectedID: 1, Filtered: 0, Total: 0,
+		Items: []protocol.PickerItem{
+			{ActivationID: 1, Label: "Add a folder", Annotation: "SPC p a"},
+			{ActivationID: 2, Label: "Open a file", Annotation: "SPC f f"},
+		},
+		Empty:    &generated.EmptyList{Title: "No projects yet."},
+		ListKeys: true,
+		MovementKeys: []protocol.PickerMovementKey{
+			{Codepoint: 'j', Modifiers: 0, Delta: 1},
+			{Codepoint: 'k', Modifiers: 0, Delta: -1},
+		},
+	}}
+	model.chrome[generated.OPGuiPicker] = payload
+	model.applyMutation(focusOwnerCommand(0, 8))
+	model = settle(model)
+	markPickerFitReported(&model)
+	drainOutboundPackets(out)
+
+	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
+	model = updated.(Model)
+	if got := model.effectivePickerIndex(model.chrome[generated.OPGuiPicker].Picker); got != 1 {
+		t.Fatalf("j must preview the next step at once, highlighted %d", got)
+	}
+	drainOutboundPackets(out)
+
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	model = updated.(Model)
+	packets := drainOutboundPackets(out)
+	want := pickerActivationPacket(5, 2)
+	if len(packets) != 1 || !bytes.Equal(packets[0], want) {
+		t.Fatalf("↩ must run the highlighted step once, as one activation: got %x, want %x", packets, want)
 	}
 }

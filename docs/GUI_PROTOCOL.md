@@ -442,7 +442,7 @@ Fuzzy finder / command palette state. Uses sectioned envelope: `opcode(1) + sect
 | 0x04 | ActionMenu | visible flag + selected + actions + activation IDs |
 | 0x05 | ModePrefix | mode prefix string |
 | 0x06 | LoadStatus | ready, loading, or an error message |
-| 0x07 | Empty | the empty-state header (an `empty_list`) and list_keys, present only while the picker offers next steps instead of results |
+| 0x07 | Empty | the empty-state header (an `empty_list`), list_keys and the footer's key hints, present only while the picker offers next steps instead of results |
 | 0x08 | MovementKeys | the keys that move the highlighted row by one |
 
 ```
@@ -480,8 +480,11 @@ ActionMenu section 0x04 payload:
 ModePrefix section 0x05 payload:
   mode_prefix_len(2) + mode_prefix(mode_prefix_len)
 
-Empty section 0x07 payload (protocol_version 45):
-  empty_list + list_keys(1)
+Empty section 0x07 payload (hint_count and key_hint since protocol_version 48):
+  empty_list + list_keys(1) + hint_count(1) + key_hint * hint_count
+
+key_hint:
+  keys:string16 + word:string16
 
 empty_list (shared by every surface that shows an empty state):
   glyph_len(1) + glyph + title_len(2) + title + why_len(2) + why
@@ -510,7 +513,7 @@ marked_count is authoritative across the full picker item set, including marked 
 action menu shows source-specific actions (e.g., "Open", "Delete", "Open in split").
 activation_generation and activation IDs form opaque source-owned identities. Retained semantic items keep their IDs across reorder and refilter within the same activation generation. Native frontends must return those values unchanged and must not derive authority from row positions, labels, paths, or source action names.
 mode prefix badges show switched picker sources like command, buffer, or project search.
-The empty section says what happened when nothing matches (docs/design/anatomy.md, "Empty state"): the title (with the state glyph if there is one) and one muted why line, drawn on the row labels' leading edge above the items. Its items are then the source's next steps ("Search ignored files too", annotation "-- -u"), selected, moved, run and clicked like any row; frontends draw no file icon on them. A picker sends an empty_list with no actions because its next steps are items. list_keys is 1 when the picker has nothing to filter: it takes no text, the BEAM moves keyboard focus to the editor view, frontends hide the query field and show "j k move, ↩ run, q close", and plain keys go to the BEAM. With list_keys 0 the field stays live and the hints read "⌃J ⌃K move, ↩ run, esc close".
+The empty section says what happened when nothing matches (docs/design/anatomy.md, "Empty state"): the title (with the state glyph if there is one) and one muted why line, drawn on the row labels' leading edge above the items. Its items are then the source's next steps ("Search ignored files too", annotation "-- -u"), selected, moved, run and clicked like any row; frontends draw no file icon on them. A picker sends an empty_list with no actions because its next steps are items. list_keys is 1 when the picker has nothing to filter: it takes no text, the BEAM moves keyboard focus to the editor view, frontends hide the query field, and plain keys go to the BEAM. With list_keys 0 the field stays live. The footer draws `hints` in order, each as "keys word" ("j k move", "↩ run", "q close" in a list; "⌃J ⌃K move", "↩ run", "esc close" in a prompt with the default keys). The BEAM resolves them from the live picker keymap, so a rebind shows; frontends hold no key literals.
 An empty_list action's id is the registered command it runs; a surface that draws actions sends a click as the `execute_command` gui_action (0x16) with that id. `selected` is the preselected action.
 
 movement keys are the single keys the `:picker` keymap scope resolves to `picker_next` and `picker_prev`, user overrides included. A picker that takes text resolves them in the scope's insert state; a picker with nothing to filter (`list_keys`) resolves them in its normal state, so plain `j` and `k` are listed there and nowhere else. Each is the `key_press` codepoint and modifiers the BEAM resolves. A frontend may move its local selection preview only for a key press that matches a listed key exactly; every other key edits the query or runs another command on the BEAM. A frontend never keeps its own list of picker keys, and a picker without this section previews no key. Movement values a frontend does not know move nothing. The BEAM wraps a one-row move at the ends of the list. A preview wraps with it only when the frontend holds the whole list: `empty` is present, or it holds `filtered_count` rows. The BEAM offers at most a window of a long list, so at the edge of a partial window the preview stays where it is until the frame arrives. A preview does not outlive a frame whose action menu is open: the menu owns the list keys, so a key pressed before that frame arrived moved the menu.

@@ -40,6 +40,50 @@ defmodule Minga.Keymap.PromptKeysTest do
     end
   end
 
+  describe "picker_hints/3" do
+    test "the hints follow what the list can do, in the keys a list or a prompt prefers" do
+      for {rows?, list_keys?, expected} <- [
+            {false, true, [{"q", "close"}]},
+            {false, false, [{"esc", "close"}]},
+            {true, true, [{"j k", "move"}, {"↩", "run"}, {"q", "close"}]},
+            {true, false, [{"⌃J ⌃K", "move"}, {"↩", "run"}, {"esc", "close"}]}
+          ] do
+        keys_for = &default_picker_keys(list_keys?, &1)
+        assert PromptKeys.picker_hints(rows?, list_keys?, keys_for) == expected
+      end
+    end
+
+    test "the hints name the keys that run each command now, so a rebind shows" do
+      rebound = %{
+        picker_next: [{?n, 0}],
+        picker_prev: [{?p, 0}],
+        picker_select: [{13, 0}],
+        picker_cancel: [{?x, 0}]
+      }
+
+      assert PromptKeys.picker_hints(true, true, &Map.fetch!(rebound, &1)) ==
+               [{"n p", "move"}, {"↩", "run"}, {"x", "close"}]
+    end
+
+    test "a key held with another modifier names it and yields to a plain or control key" do
+      rebound = %{
+        picker_next: [{?j, 0x04}, {57_353, 0}],
+        picker_prev: [{?k, 0x08}],
+        picker_select: [{13, 0x01}],
+        picker_cancel: [{?q, 0x04}, {?g, 0x02}]
+      }
+
+      assert PromptKeys.picker_hints(true, false, &Map.fetch!(rebound, &1)) ==
+               [{"↓ ⌘K", "move"}, {"⇧↩", "run"}, {"⌃G", "close"}]
+    end
+  end
+
+  # The single keys that run `command` in the default picker trie, for a list (`list_keys?`) or a prompt.
+  defp default_picker_keys(list_keys?, command) do
+    trie = if list_keys?, do: PromptKeys.picker_list_trie(), else: PromptKeys.picker_trie()
+    for [key] <- Minga.Keymap.Bindings.sequences_for_command(trie, command), do: key
+  end
+
   describe "prompt_trie/1" do
     test "binds run, cancel and complete" do
       trie = PromptKeys.prompt_trie()

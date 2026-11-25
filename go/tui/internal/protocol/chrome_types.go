@@ -152,6 +152,8 @@ type Picker struct {
 	Empty *generated.EmptyList
 	// ListKeys is true while the picker has nothing to filter: it takes no text, and j and k move, q closes.
 	ListKeys bool
+	// Hints are the footer's key hints of an empty picker, resolved by the BEAM from the live keymap.
+	Hints []generated.KeyHint
 	// MovementKeys are the keys the BEAM's picker keymap scope resolves to one-row movement. The local selection preview moves only for these keys.
 	MovementKeys []PickerMovementKey
 }

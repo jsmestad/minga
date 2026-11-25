@@ -18,19 +18,23 @@
       "macos-catppuccin_latte-1440.json": "7730ae7952917669dca5cd5e06c714c37c5a4293c48848f9c0cb8b8765f57c52"
     }
   },
+  "platform_specific": {
+    "frontend": "tui",
+    "reason": "an empty picker grows so a short terminal shows every next step"
+  },
   "scenario": "start.project_switcher.empty",
   "tui": {
-    "commit": "befbcee0d83726a629dd5b12016f269c10abd04a-dirty",
+    "commit": "90d2ee719178b13b8e2ab6233e138122db9b9b9c-dirty",
     "files": {
       "tui-astrodark-120x40.txt": "6727bb63e8337013e48a3b4b4f93fea0aaba1973ed481cd657d2363b0ae9177c",
       "tui-astrodark-150x38.txt": "9532d4a09e0852b2532c6311f16a768d67944126ce6c21a7dbf9d5d8015b1e3c",
-      "tui-astrodark-80x24.txt": "0386ec38ac1de25a893390292ce7a67932ebe28ff204ab26d8d3ec35b5515eee",
+      "tui-astrodark-80x24.txt": "3447615c73e24329172c4c36b5d1637fedf8f69d0c57fa7b10418e4a163632a8",
       "tui-catppuccin_frappe-120x40.txt": "5b570f441bb334c6fb705075f05a5acc91ba87cc169868589992562166f7098e",
       "tui-catppuccin_frappe-150x38.txt": "e27263149481bfd9f5644ce53fe6b5d70a1c01a87c883a13e2d5c746779a6ee5",
-      "tui-catppuccin_frappe-80x24.txt": "90f3c28bb368039b980faac437f156170e1378711bc9e6eb4b6d8964c34e919d",
+      "tui-catppuccin_frappe-80x24.txt": "df82c8ba171c2b3225c67361e2e6f7462208bb491d44a738e96640f313590848",
       "tui-catppuccin_latte-120x40.txt": "d0939655fa1c8c3ef87f62d5bed45b041b3fbcc4b8c99234b29603749f5c95aa",
       "tui-catppuccin_latte-150x38.txt": "6e1d1b1866a0790a1a5b46fee8bdd735b336efd2c9c6b958ab8f1e532a7f8cea",
-      "tui-catppuccin_latte-80x24.txt": "0ea9a317535810e54c624bdce34baeaa1fe630a238abd0b133aef8e6909372d1"
+      "tui-catppuccin_latte-80x24.txt": "e77bc34f959ee0714a6a20b5fe527d8539d99c3dd6b80b30907dd580d29f52f0"
     }
   }
 }

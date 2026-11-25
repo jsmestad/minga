@@ -3,6 +3,7 @@ Application.put_env(:minga, :clipboard_module, Minga.Clipboard.Mock)
 
 # Initialize the Git.Stub ETS table for in-memory git responses.
 Minga.Git.Stub.ensure_table()
+Minga.Test.ProjectSearchStub.ensure_table()
 
 # Initialize the Tool.Installer.Stub ETS table so Tool.Manager doesn't
 # crash if it spawns an install task before any test calls Stub.reset().

@@ -88,7 +88,8 @@ version = "2.0.0"
 # protocol_version 46 adds the gui_picker movement_keys section (0x08) (the keys that move the highlighted row, resolved from the picker keymap scope, so frontends preview exactly those keys) and the picker_fit gui_action (the result rows the frontend's picker list shows, which sizes a picker page).
 # protocol_version 47 adds two frontend-to-BEAM events. frontend_foreground (0x13, the slot batch_end left in version 3) says whether the frontend is in the foreground: the terminal reports its focus, macOS its active state. terminal_report (0x62) is the terminal frontend's snapshot of which terminal features it detected, misses or replaces with a fallback, with the enums terminal_feature and terminal_feature_status.
 # protocol_version 48 reshapes gui_which_key: the panel names its path, breadcrumb, group count and hints, and each entry carries its raw key, section, live count and macOS ⌘ equivalent. Each count carries a tone byte (0 muted, 1 needs you, 2 error) naming its colour role. Paging and icons are retired.
-protocol_version = 49
+# protocol_version 50 adds key_hint and the hints of the gui_picker empty section (0x07): the footer keys of an empty picker, resolved by the BEAM from the live picker keymap.
+protocol_version = 50
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -2041,6 +2042,14 @@ fields = [
   { name = "label", type = "string16" },
 ]
 
+# One key hint of a picker's footer: the keys, already labelled for display ("j k", "⌃J ⌃K", "↩"), and the word they do ("move").
+[[structures]]
+name = "key_hint"
+fields = [
+  { name = "keys", type = "string16" },
+  { name = "word", type = "string16" },
+]
+
 # The empty-state anatomy (docs/design/anatomy.md, "Empty state"): what happened (glyph and title), why (one muted line), and the next steps with the preselected one. A picker sends no actions: its next steps are its item rows.
 [[structures]]
 name = "empty_list"
@@ -2700,6 +2709,8 @@ name = "empty"
 fields = [
   { name = "empty", type = "struct", element = "empty_list" },
   { name = "list_keys", type = "u8" },
+  # The footer's key hints, resolved by the BEAM from the live picker keymap, so frontends hold no key literals.
+  { name = "hints", type = "counted_array", count_type = "u8", element = "key_hint" },
 ]
 
 [[sections]]

@@ -168,7 +168,7 @@ func TestPickerFitCountsItemsAndNotSectionHeaders(t *testing.T) {
 
 	fits := pickerFitPackets(drainOutboundPackets(out))
 	preview, _ := model.pickerPreview()
-	budget := model.pickerPopupModel().pickerLayout(preview).itemRowBudget()
+	budget := model.pickerPopupModel().pickerLayout(picker, preview).itemRowBudget()
 	start, end, headers := pickerItemWindow(picker.Items, 0, budget)
 	if !headers || end-start >= budget {
 		t.Fatalf("the fixture must spend rows on section headers: window [%d,%d) of budget %d", start, end, budget)
@@ -357,7 +357,7 @@ func TestPluralCountAgreesWithItsNoun(t *testing.T) {
 }
 
 func TestPickerFitCountsTheNextStepRowsUnderTheEmptyHeader(t *testing.T) {
-	// A short terminal: the empty-state header takes rows that results would have had.
+	// A short terminal: the empty-state header sits above the next-step rows.
 	model, _ := fitPicker(t, 80, 24, 12, 3)
 	plain, ok := model.pickerFit()
 	if !ok || plain.Rows == 0 {
@@ -372,8 +372,9 @@ func TestPickerFitCountsTheNextStepRowsUnderTheEmptyHeader(t *testing.T) {
 	if !ok {
 		t.Fatal("an empty picker with next-step rows has a fit")
 	}
-	if fit.Rows >= plain.Rows {
-		t.Fatalf("the header takes rows: fit %d, without the header %d", fit.Rows, plain.Rows)
+	// An empty picker grows to hold its header and its next steps, so the header never costs a step on a short terminal.
+	if items := len(payload.Picker.Items); int(fit.Rows) < min(items, int(plain.Rows)) {
+		t.Fatalf("the header must not hide next steps: fit %d of %d steps, without the header %d", fit.Rows, items, plain.Rows)
 	}
 	if drawn := drawnPickerItems(model); drawn == 0 || int(fit.Rows) != drawn {
 		t.Fatalf("reported %d rows, the view draws %d", fit.Rows, drawn)

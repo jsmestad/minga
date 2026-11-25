@@ -102,13 +102,22 @@ defmodule MingaEditor.Commands.DiagnosticsPickerTest do
   end
 
   @tag :tmp_dir
-  test "registered diagnostics picker remains closed for an empty current diagnostics store", %{
+  test "an empty diagnostics store opens a list that says so and points somewhere", %{
     tmp_dir: tmp_dir
   } do
     {state, uri} = state_for_path(tmp_dir)
     Diagnostics.clear(:expert, uri)
 
-    assert execute_registered(:diagnostic_list, state) == state
+    opened = execute_registered(:diagnostic_list, state)
+    {:picker, %{picker_ui: %{picker: picker}}} = opened.shell_runtime.state.modal
+
+    assert %{title: "No problems in this file.", why: "No language server checks this file."} =
+             picker.empty
+
+    assert Enum.map(picker.filtered, &{&1.label, &1.annotation}) == [
+             {"Install a language server", "SPC c l I"},
+             {"Show what ran", "SPC c l i"}
+           ]
   end
 
   defp picker_diagnostic(line, encoding) do

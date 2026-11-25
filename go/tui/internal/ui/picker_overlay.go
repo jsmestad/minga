@@ -69,7 +69,7 @@ func (m Model) pickerPopupModel() Model {
 // pickerShownItems counts the result rows the popup draws for this picker: the items in the drawn window, section headers left out.
 func (m Model) pickerShownItems(picker protocol.Picker, preview protocol.PickerPreview) int {
 	popupModel := m.pickerPopupModel()
-	layout := popupModel.pickerLayout(preview)
+	layout := popupModel.pickerLayout(picker, preview)
 	budget := max(layout.itemRowBudget()-len(popupModel.pickerEmptyHeader(picker, layout.listHeight, popupModel.width)), 0)
 	start, end, _ := pickerItemWindow(picker.Items, m.effectivePickerIndex(picker), budget)
 	return end - start

@@ -37,6 +37,10 @@ func (m *Model) focusedComponent() (string, bool) {
 		expectedResponder = 3
 	case 8:
 		expectedResponder = 1
+		// A picker with nothing to filter takes no text, so the BEAM gives the keys to the editor view (responder 0); it is still the picker's list.
+		if owner.Responder == 0 {
+			expectedResponder = 0
+		}
 	case 11:
 		expectedResponder = 2
 	}

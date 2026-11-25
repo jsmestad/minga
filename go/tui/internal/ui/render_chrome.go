@@ -914,7 +914,7 @@ func (m Model) renderPicker(picker protocol.Picker, preview protocol.PickerPrevi
 		title += gap(spaceXL) + picker.LoadError
 	}
 
-	layout := m.pickerLayout(preview)
+	layout := m.pickerLayout(picker, preview)
 	if layout.sidePreview {
 		return m.renderPickerWithSidePreview(title, picker, preview, layout)
 	}
@@ -938,8 +938,8 @@ type pickerLayout struct {
 }
 
 // pickerLayout sizes the popup for a model whose width is the popup's content width.
-func (m Model) pickerLayout(preview protocol.PickerPreview) pickerLayout {
-	layout := pickerLayout{height: m.maxOverlayHeight(), hasPreview: preview.Visible && len(preview.Lines) > 0}
+func (m Model) pickerLayout(picker protocol.Picker, preview protocol.PickerPreview) pickerLayout {
+	layout := pickerLayout{height: m.pickerHeight(picker), hasPreview: preview.Visible && len(preview.Lines) > 0}
 	if layout.hasPreview && m.width >= 100 {
 		layout.sidePreview = true
 		layout.listHeight = max(layout.height-1, 1)
@@ -951,6 +951,16 @@ func (m Model) pickerLayout(preview protocol.PickerPreview) pickerLayout {
 	}
 	layout.listHeight = itemBudget + 1
 	return layout
+}
+
+// pickerHeight is the popup's rows. An empty picker grows to hold what happened and every next step, so a short terminal never hides one.
+func (m Model) pickerHeight(picker protocol.Picker) int {
+	height := m.maxOverlayHeight()
+	if picker.Empty == nil {
+		return height
+	}
+	need := 2 + len(emptyListHeader(*picker.Empty, m.width, m.pickerEmptyColors(), m.palette())) + len(picker.Items) + 1
+	return max(height, min(need, max(m.layout.grid.Height-1, 4)))
 }
 
 // pickerListHeaderRows is the title row, plus the separator when the list has room for it.
@@ -1105,9 +1115,10 @@ func (m Model) pickerEmptyColors() emptyListColors {
 // renderPickerEmptyHelp names the keys of the next-step rows: the list keys while nothing can be typed, the prompt's list movement otherwise.
 func (m Model) renderPickerEmptyHelp(picker protocol.Picker, width int) string {
 	p := m.palette()
-	hints := []string{"⌃J ⌃K move", "↩ run", "esc close"}
-	if picker.ListKeys {
-		hints = []string{"j k move", "↩ run", "q close"}
+	// The BEAM resolves the hints from the live picker keymap, so a rebind shows here.
+	hints := make([]string, 0, len(picker.Hints))
+	for _, hint := range picker.Hints {
+		hints = append(hints, hint.Keys+" "+hint.Word)
 	}
 	text := strings.Join(hints, gap(spaceXL)) + " "
 	textStyle := lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(p.PopupChrome()).ColorWhitespace(true)

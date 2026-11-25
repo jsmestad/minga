@@ -134,7 +134,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
           title: "No results for “limit_lable”.",
           why: "Ignored and hidden files were skipped."
         },
-        list_keys?: true
+        list_keys?: true,
+        hints: [{"j k", "move"}]
       }
 
       {cmd, _caches} = PickerEncoder.encode(model, Caches.new())
@@ -146,7 +147,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
 
       expected =
         <<0::8, byte_size(title)::16, title::binary, byte_size(why)::16, why::binary, 0::8, 0::8,
-          1::8>>
+          1::8, 1::8, 3::16, "j k", 4::16, "move">>
 
       assert sections[0x07] == expected
 

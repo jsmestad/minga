@@ -441,6 +441,9 @@ defmodule Minga.Test.Storyboard.Session do
   defp write_project(root, file_name, content) do
     atomic_write!(Path.join(root, "mix.exs"), "defmodule Storyboard.MixProject do\nend\n")
     atomic_write!(Path.join(root, file_name), content)
+
+    # The scenarios search for words the project does not hold, so the search answers from memory, never ripgrep.
+    :ok = Minga.Test.ProjectSearchStub.set_results(root, [])
     root
   end
 

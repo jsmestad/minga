@@ -696,6 +696,17 @@ public enum Wire {
         }
     }
 
+    /// One key hint of a picker footer, resolved by the BEAM from the live keymap: the keys as displayed ("j k") and the word they do ("move").
+    public struct KeyHint: Sendable, Equatable {
+        public let keys: String
+        public let word: String
+
+        public init(keys: String, word: String) {
+            self.keys = keys
+            self.word = word
+        }
+    }
+
     /// One next step of an empty list: the id echoed back when it runs, the key that runs it, and its label.
     public struct EmptyListAction: Sendable, Equatable {
         public let id: String

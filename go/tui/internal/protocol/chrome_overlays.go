@@ -156,6 +156,7 @@ func decodePicker(payload []byte) (Picker, string, int) {
 				empty := e.Empty
 				picker.Empty = &empty
 				picker.ListKeys = e.ListKeys != 0
+				picker.Hints = e.Hints
 			}
 		case 0x08: // Movement keys
 			if keys, _, err := generated.DecodeGuiPickerMovementKeys(payload, sectionStart, sectionEnd); err == nil {

@@ -16,6 +16,10 @@ defmodule Minga.Project.ProjectSearch do
   This is line collection, not a streaming JSON Port protocol; structured streaming
   of `rg --json` results into the picker as they arrive is a separate follow-up.
 
+  ## Flags after `--`
+
+  As in Doom's consult-ripgrep, text after ` -- ` is ripgrep flags, not part of the pattern: `limit_lable -- -uu` searches for `limit_lable` in ignored and hidden files too. Only tokens that start with `-` pass through (never a bare `--`), so a stray word never becomes a path to search. The grep fallback has no such flags and ignores them.
+
   ## Tool preference
 
   1. `rg` (ripgrep) — preferred, fast, respects `.gitignore`, JSON output
@@ -55,12 +59,58 @@ defmodule Minga.Project.ProjectSearch do
   @spec search(String.t(), String.t()) :: result()
   def search(query, root \\ File.cwd!())
 
-  def search("", _root), do: {:error, "Empty search query"}
-
   def search(query, root) do
+    case parse_query(query) do
+      {"", _flags} -> {:error, "Empty search query"}
+      {pattern, flags} -> search_pattern(pattern, flags, root)
+    end
+  end
+
+  @doc """
+  Splits a query into its pattern and the ripgrep flags after ` -- `.
+
+      iex> Minga.Project.ProjectSearch.parse_query("limit_lable -- -u --hidden")
+      {"limit_lable", ["-u", "--hidden"]}
+
+      iex> Minga.Project.ProjectSearch.parse_query("limit_lable -- -g *.ex")
+      {"limit_lable", ["-g", "*.ex"]}
+
+      iex> Minga.Project.ProjectSearch.parse_query("limit_lable")
+      {"limit_lable", []}
+  """
+  @spec parse_query(String.t()) :: {pattern :: String.t(), flags :: [String.t()]}
+  def parse_query(query) when is_binary(query) do
+    case String.split(query, " -- ", parts: 2) do
+      [pattern, flags] -> {pattern, flags |> String.split() |> take_flags([])}
+      [pattern] -> {pattern, []}
+    end
+  end
+
+  # ripgrep flags whose value is the next argument when it is not attached (`-g *.ex`, not `-g*.ex` or `--glob=*.ex`).
+  @value_flags ~w(-g --glob --iglob -t --type -T --type-not -e --regexp -f --file -m --max-count -A --after-context
+                  -B --before-context -C --context -M --max-columns -j --threads -d --max-depth --max-filesize
+                  -E --encoding --pre --pre-glob --type-add --type-clear --ignore-file --sort --sortr
+                  --path-separator --engine --context-separator --field-match-separator)
+
+  # A flag starts with `-`, and a value flag keeps the word after it; a stray word is never a path to search.
+  # A bare `--` would end ripgrep's options before its own arguments, so it never passes through.
+  @spec take_flags([String.t()], [String.t()]) :: [String.t()]
+  defp take_flags([], acc), do: Enum.reverse(acc)
+  defp take_flags(["--" | rest], acc), do: take_flags(rest, acc)
+
+  defp take_flags([flag, value | rest], acc) when flag in @value_flags,
+    do: take_flags(rest, [value, flag | acc])
+
+  defp take_flags([flag], acc) when flag in @value_flags, do: Enum.reverse(acc)
+
+  defp take_flags(["-" <> _ = flag | rest], acc), do: take_flags(rest, [flag | acc])
+  defp take_flags([_word | rest], acc), do: take_flags(rest, acc)
+
+  @spec search_pattern(String.t(), [String.t()], String.t()) :: result()
+  defp search_pattern(pattern, flags, root) do
     case select_executable() do
-      {:rg, executable} -> search_with_rg(executable, query, root)
-      {:grep, executable} -> search_with_grep(executable, query, root)
+      {:rg, executable} -> search_with_rg(executable, pattern, flags, root)
+      {:grep, executable} -> search_with_grep(executable, pattern, root)
       :none -> {:error, "No search tool available. Install `ripgrep` (rg) for best results."}
     end
   end
@@ -168,9 +218,9 @@ defmodule Minga.Project.ProjectSearch do
 
   # ── Ripgrep ──────────────────────────────────────────────────────────────
 
-  @spec search_with_rg(String.t(), String.t(), String.t()) :: result()
-  defp search_with_rg(executable, query, root) do
-    args = ["--json", "--line-number", "--column", "--", query, "."]
+  @spec search_with_rg(String.t(), String.t(), [String.t()], String.t()) :: result()
+  defp search_with_rg(executable, query, flags, root) do
+    args = flags ++ ["--json", "--line-number", "--column", "--", query, "."]
     run_capped(executable, args, root, &parse_rg_json_line/1, "ripgrep")
   end
 

@@ -43,6 +43,8 @@ defmodule Minga.RenderModel.UI.Picker do
 
   @typedoc """
   The picker. `empty` is set when nothing matches and the source offers next steps: it holds the empty-state header, and `items` are the next-step rows, each with its key in `annotation`. `list_keys?` is true when there is nothing to filter, so the picker takes no text and its list keys apply.
+
+  `hints` are the footer's key hints of an empty picker, `{keys, word}` pairs such as `{"j k", "move"}`, resolved from the live picker keymap so frontends hold no key literals.
   """
   @type t :: %__MODULE__{
           visible?: boolean(),
@@ -65,7 +67,8 @@ defmodule Minga.RenderModel.UI.Picker do
           movement_keys: [movement_key()],
           preview_lines: [[preview_segment()]] | nil,
           empty: EmptyList.t() | nil,
-          list_keys?: boolean()
+          list_keys?: boolean(),
+          hints: [{String.t(), String.t()}]
         }
 
   defstruct visible?: false,
@@ -88,5 +91,6 @@ defmodule Minga.RenderModel.UI.Picker do
             movement_keys: [],
             preview_lines: nil,
             empty: nil,
-            list_keys?: false
+            list_keys?: false,
+            hints: []
 end

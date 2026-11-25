@@ -185,7 +185,7 @@ public struct PickerOverlay: View {
             }
 
             if state.empty != nil {
-                Text(state.listKeys ? "j k move   ↩ run   q close" : "⌃J ⌃K move   ↩ run   esc close")
+                Text(state.hints.map { "\($0.keys) \($0.word)" }.joined(separator: "   "))
                     .font(Typography.font(.small))
                     .foregroundStyle(theme.popupSecondaryFg)
                     .lineLimit(1)
