@@ -33,6 +33,20 @@ defmodule MingaEditor.Commands.InlineAskTest do
              active_ask(state, buffer)
   end
 
+  test "Enter held with Control, Alt or Command does not send the question", %{tmp_dir: root} do
+    {state, buffer} = state_with_file(root, "lib/auth.ex")
+    state = InlineAskCommand.open(state)
+    assert {:handled, typed} = InlineAskInput.handle_key(state, ?w, 0)
+    question = active_ask(typed, buffer)
+    assert question.phase == :input
+
+    # Without enhanced key reporting a terminal sends Esc then Enter as Alt+Enter when both arrive together.
+    for mods <- [0x02, 0x04, 0x08] do
+      assert {:handled, kept} = InlineAskInput.handle_key(typed, 13, mods)
+      assert active_ask(kept, buffer) == question
+    end
+  end
+
   test "input handler edits and dismisses the active ask", %{tmp_dir: root} do
     {state, buffer} = state_with_file(root, "lib/auth.ex")
     state = InlineAskCommand.open(state)

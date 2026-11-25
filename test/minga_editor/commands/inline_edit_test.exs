@@ -147,9 +147,26 @@ defmodule MingaEditor.Commands.InlineEditTest do
 
       assert {:handled, untyped} = InlineEditInput.handle_key(typing, ?f, mods)
       assert active_edit(untyped, buffer).prompt == ""
+
+      # Enter held with a chord modifier neither accepts the proposal nor rejects it.
+      assert {:handled, kept} = InlineEditInput.handle_key(proposed, 13, mods)
+      assert active_edit(kept, buffer) == proposal
     end
 
     assert Buffer.content(buffer) == "one\ntwo\nthree"
+  end
+
+  test "Enter held with Control, Alt or Command does not submit the instruction", %{tmp_dir: root} do
+    {state, buffer} = state_with_file(root, "lib/auth.ex", "one\ntwo")
+    state = state |> put_visual_selection({0, 0}) |> InlineEditCommand.open()
+    assert {:handled, typed} = InlineEditInput.handle_key(state, ?r, 0)
+    instruction = active_edit(typed, buffer)
+    assert instruction.phase == :input
+
+    for mods <- [0x02, 0x04, 0x08] do
+      assert {:handled, kept} = InlineEditInput.handle_key(typed, 13, mods)
+      assert active_edit(kept, buffer) == instruction
+    end
   end
 
   test "accept handles unicode line endings with byte columns", %{tmp_dir: root} do

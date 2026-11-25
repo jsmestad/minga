@@ -46,8 +46,9 @@ defmodule MingaEditor.Input.InlineEdit do
     end
   end
 
-  # An answer is a letter pressed without Control, Alt or Command. A chord is not an answer: without enhanced key
-  # reporting a terminal sends Esc followed by a letter as Alt and that letter when both arrive together.
+  # An answer is a key pressed without Control, Alt or Command. A chord is not an answer: without enhanced key
+  # reporting a terminal sends Esc followed by a key as Alt and that key when both arrive together, so Alt+Enter or
+  # Alt+y may be a person who pressed Esc to reject. A chord does nothing here: it neither accepts nor rejects.
   @chord_mods 0x0E
 
   @spec handle_inline_key(state(), InlineEdit.t(), non_neg_integer(), non_neg_integer()) ::
@@ -57,11 +58,13 @@ defmodule MingaEditor.Input.InlineEdit do
   defp handle_inline_key(state, edit, ?n, mods) when band(mods, @chord_mods) == 0,
     do: InlineEditCommand.reject(state, edit)
 
-  defp handle_inline_key(state, %InlineEdit{phase: {:proposed, _proposal}} = edit, 13, _mods),
-    do: InlineEditCommand.accept(state, edit)
+  defp handle_inline_key(state, %InlineEdit{phase: {:proposed, _proposal}} = edit, 13, mods)
+       when band(mods, @chord_mods) == 0,
+       do: InlineEditCommand.accept(state, edit)
 
-  defp handle_inline_key(state, %InlineEdit{phase: :input} = edit, 13, _mods),
-    do: Overlay.submit(state, edit, "Type a rewrite instruction first", spec())
+  defp handle_inline_key(state, %InlineEdit{phase: :input} = edit, 13, mods)
+       when band(mods, @chord_mods) == 0,
+       do: Overlay.submit(state, edit, "Type a rewrite instruction first", spec())
 
   defp handle_inline_key(state, %InlineEdit{phase: {:proposed, _proposal}} = edit, ?y, mods)
        when band(mods, @chord_mods) == 0,

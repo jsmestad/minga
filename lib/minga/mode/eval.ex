@@ -20,12 +20,18 @@ defmodule Minga.Mode.Eval do
 
   @behaviour Minga.Mode
 
+  import Bitwise
+
   alias Minga.Mode
   alias Minga.Mode.EvalState
 
   # Special codepoints
   @escape 27
   @enter 13
+
+  # Enter held with Control, Alt or Command is not bound here, so it does nothing. Without enhanced key reporting a
+  # terminal sends Esc then Enter as Alt+Enter when both arrive together, and that must not submit what was dropped.
+  @chord_mods 0x0E
 
   # Arrow key codepoints sent by libvaxis (exclude from printable range)
   @arrow_up 57_352
@@ -42,11 +48,13 @@ defmodule Minga.Mode.Eval do
   @spec handle_key(Mode.key(), EvalState.t()) :: Mode.result()
 
   # Enter → evaluate the accumulated input
-  def handle_key({@enter, _mods}, %EvalState{input: ""} = state) do
+  def handle_key({@enter, mods}, %EvalState{input: ""} = state)
+      when band(mods, @chord_mods) == 0 do
     {:transition, :normal, %{state | input: ""}}
   end
 
-  def handle_key({@enter, _mods}, %EvalState{input: input} = state) do
+  def handle_key({@enter, mods}, %EvalState{input: input} = state)
+      when band(mods, @chord_mods) == 0 do
     {:execute_then_transition, [{:eval_expression, input}], :normal, %{state | input: ""}}
   end
 
