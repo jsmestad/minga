@@ -518,8 +518,9 @@ struct MingaMenuCommands: Commands {
                 .disabled(!connected)
         }
 
-        // View menu
-        CommandMenu("View") {
+        // View menu: these items join the system View menu (Enter Full Screen and the rest), before its toolbar
+        // group, so the menu bar has one View menu. A CommandMenu("View") would add a second one beside it.
+        CommandGroup(before: .toolbar) {
             Button("Toggle File Tree") { encoder?.send(.togglePanel(panel: 0)) }
                 .keyboardShortcut("b", modifiers: .command)
                 .disabled(!connected)
