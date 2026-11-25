@@ -87,8 +87,29 @@ export const START_FILE: FileId = "spec";
 /** The row the highlight starts on when the switcher opens: the first file that is not the open one, so that opening it shows a change. */
 export const SWITCHER_START = 1;
 
-/** Keys a Vim user tries first in a file. Minga keeps their Vim meaning; the lab does not simulate them, and says so. */
-const VIM_KEYS: ReadonlySet<string> = new Set([..."hjklwbeWBE0$^GgiIaAoOxXdDyYpPuUrRcCsSvV:/?nN.,;*#%~<>=zZmtTfF{}[]@JKHLMQ", "C-r", "C-d", "C-u", "C-f", "C-b", "C-o", "C-v", "C-w"]);
+/**
+ * Keys a Vim user tries first in a file. Each one is bound in Minga's Normal mode today (normal_bindings/0 in lib/minga/keymap/defaults.ex, the prefixes in
+ * lib/minga/keymap/normal_prefixes.ex and the arrow keys in lib/minga/mode/normal.ex), so the caption may say that it works. The lab does not simulate them.
+ */
+const VIM_KEYS: ReadonlySet<string> = new Set([
+  ..."hjkl0$^GwbeWBE%{}HML+-fFtT;,iaAIoOvVR:dcypPxXDCsSJK~r><u/?nN*#m@.=gz][",
+  '"',
+  "'",
+  "`",
+  "C-d",
+  "C-u",
+  "C-f",
+  "C-b",
+  "C-r",
+  "C-o",
+  "UP",
+  "DOWN",
+  "LEFT",
+  "RIGHT",
+]);
+
+/** In Minga these two page through a menu that is too long for one screen (lib/minga/mode/normal.ex). They do not close it. */
+export const MENU_PAGE_KEYS: readonly string[] = ["C-d", "C-u"];
 
 export type CaptionId =
   | "rest"
@@ -106,6 +127,7 @@ export type CaptionId =
   | "switcher_for_close"
   | "leaf"
   | "unlisted"
+  | "page_menu"
   | "closed_early"
   | "closed_done"
   | "moved"
@@ -135,6 +157,7 @@ export const CAPTION_IDS: readonly CaptionId[] = [
   "switcher_for_close",
   "leaf",
   "unlisted",
+  "page_menu",
   "closed_early",
   "closed_done",
   "moved",
@@ -265,6 +288,7 @@ function inMenu(state: SandboxState, key: string): Answer {
     const caption = step === "close" ? "back_for_close" : up.length === 1 ? "back_for_switcher" : "back_more";
     return { caption, keys: [key], pending: up, handled: true };
   }
+  if (MENU_PAGE_KEYS.includes(key)) return { caption: "page_menu", keys: [key], pending, handled: true };
   const next = stepPrefix(SEQUENCES, pending, key);
   if (next.status === "pending") {
     return { caption: step === "close" ? "group_for_close" : "group_opened", keys: next.keys, pending: next.pending, completes: "group", handled: true };

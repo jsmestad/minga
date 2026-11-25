@@ -125,6 +125,9 @@ describe("find-a-command lab: every key gets an answer", () => {
     { place: "rest", key: "é", caption: "other_file", names: "é", handled: false },
     { place: "rest", key: "C-r", caption: "vim_file", names: "⌃R", handled: false },
     { place: "rest", key: "C-a", caption: "other_file", names: "⌃A", handled: false },
+    { place: "rest", key: "Q", caption: "other_file", names: "Q", handled: false },
+    { place: "rest", key: "DOWN", caption: "vim_file", names: "↓", handled: false },
+    { place: "rest", key: "=", caption: "vim_file", names: "=", handled: false },
     { place: "rest", key: "F5", caption: "other_file", names: "F5", handled: false },
     { place: "rest", key: "RET", caption: "other_file", names: "↩", handled: false },
     { place: "rest", key: "DEL", caption: "other_file", names: "⌫", handled: false },
@@ -150,6 +153,8 @@ describe("find-a-command lab: every key gets an answer", () => {
     { place: "step2_top", key: "z", caption: "unlisted", names: "SPC z", handled: false, then: { surface: "file", menu: null } },
     { place: "step2_top", key: "i", caption: "unlisted", names: "SPC i", handled: false, then: { surface: "file", menu: null } },
     { place: "step2_top", key: "RET", caption: "unlisted", names: "SPC ↩", handled: false, then: { surface: "file", menu: null } },
+    { place: "step2_top", key: "C-d", caption: "page_menu", names: "⌃D", handled: true },
+    { place: "step3_group", key: "C-u", caption: "page_menu", names: "⌃U", handled: true },
     { place: "step2_top", key: "ESC", caption: "closed_early", names: "esc", handled: true, then: { step: "group", surface: "file", menu: null } },
     { place: "step2_top", key: "DEL", caption: "closed_early", names: "⌫", handled: true, then: { step: "group", surface: "file", menu: null } },
 
@@ -416,7 +421,7 @@ describe("find-a-command lab: the page holds the words for every id the state em
   /** Every caption the state can reach: each place, then every kind of key from it. */
   function reachableCaptions(): CaptionId[] {
     const seen = new Set<CaptionId>();
-    const keys = ["j", "q", "K", "a", "b", "D", "S", "z", ",", "SPC", "ESC", "RET", "DEL", "DOWN", "C-t"];
+    const keys = ["j", "q", "Q", "a", "b", "D", "S", "z", ",", "SPC", "ESC", "RET", "DEL", "DOWN", "C-t", "C-d"];
     for (const place of PLACES) {
       const state = at(place);
       seen.add(state.caption);
