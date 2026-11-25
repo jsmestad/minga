@@ -164,44 +164,43 @@ public enum PreviewFixtures {
         state.update(activeIndex: 0, entries: tabs())
     }
 
-    /// Launchpad fixture matching what the BEAM builder emits for a returning user (#2689).
+    /// Project home fixture matching what the BEAM builder emits for a project with recents and a task (#4056).
     public static func emptyStateReturningUser() -> [Wire.EmptyStateSection] {
         [
-            Wire.EmptyStateSection(sectionId: 0, title: "Session", items: [
-                Wire.EmptyStateItem(kind: 0, id: "resume", label: "resume last session", detail: "4 files", jumpKey: "r", chord: "", icon: "", iconColorRGB: 0),
-            ]),
-            Wire.EmptyStateSection(sectionId: 1, title: "Recent", items: [
-                Wire.EmptyStateItem(kind: 1, id: "recent-1", label: "startup.ex", detail: "lib/minga_editor", jumpKey: "1", chord: "", icon: "\u{E62D}", iconColorRGB: 0xA074C4),
-                Wire.EmptyStateItem(kind: 1, id: "recent-2", label: "render_content.go", detail: "go/tui/internal/ui", jumpKey: "2", chord: "", icon: "\u{E627}", iconColorRGB: 0x519ABA),
+            Wire.EmptyStateSection(sectionId: 1, title: "Recent in this project", items: [
+                Wire.EmptyStateItem(kind: 1, id: "recent-1", label: "chrome_state.ex", detail: "lib/minga_editor/session", jumpKey: "1", chord: "", icon: "\u{E62D}", iconColorRGB: 0xA074C4),
+                Wire.EmptyStateItem(kind: 1, id: "recent-2", label: "retry.ex", detail: "lib/minga_agent", jumpKey: "2", chord: "", icon: "\u{E62D}", iconColorRGB: 0xA074C4),
                 Wire.EmptyStateItem(kind: 1, id: "recent-3", label: "ContentView.swift", detail: "macos/Sources", jumpKey: "3", chord: "", icon: "\u{E755}", iconColorRGB: 0xF05138),
+            ], empty: "Nothing opened here yet."),
+            Wire.EmptyStateSection(sectionId: 5, title: "Minga tasks", items: [
+                Wire.EmptyStateItem(kind: 5, id: "task-3", label: "Add tests for the usage-limit classifier", detail: "Needs you", jumpKey: "", chord: "", icon: "", iconColorRGB: 0, state: "needs_you"),
+                Wire.EmptyStateItem(kind: 5, id: "task-4", label: "Update the agent docs for the Spine", detail: "Done · 2 files to review", jumpKey: "", chord: "", icon: "", iconColorRGB: 0, state: "done"),
             ]),
-            Wire.EmptyStateSection(sectionId: 2, title: "Start", items: [
-                Wire.EmptyStateItem(kind: 2, id: "action-find-file", label: "open file", detail: "", jumpKey: "", chord: "SPC f f", icon: "\u{F0224}", iconColorRGB: 0x61AFEF),
-                Wire.EmptyStateItem(kind: 2, id: "action-file-tree", label: "file tree", detail: "", jumpKey: "", chord: "SPC o p", icon: "\u{F0256}", iconColorRGB: 0x78909C),
-                Wire.EmptyStateItem(kind: 2, id: "action-palette", label: "command palette", detail: "", jumpKey: "", chord: "SPC :", icon: "\u{F0633}", iconColorRGB: 0x51AFEF),
-                Wire.EmptyStateItem(kind: 2, id: "action-tutor", label: "tutorial", detail: ":Tutor", jumpKey: "", chord: "", icon: "", iconColorRGB: 0),
-            ]),
-            Wire.EmptyStateSection(sectionId: 3, title: "", items: [
-                Wire.EmptyStateItem(kind: 3, id: "hint-write", label: "write", detail: "", jumpKey: "i", chord: "", icon: "", iconColorRGB: 0),
-                Wire.EmptyStateItem(kind: 3, id: "hint-quit", label: "quit", detail: ":q", jumpKey: "", chord: "", icon: "", iconColorRGB: 0),
+            Wire.EmptyStateSection(sectionId: 6, title: "Next", items: [
+                Wire.EmptyStateItem(kind: 2, id: "action-project_find_file", label: "Find a file", detail: "", jumpKey: "", chord: "SPC SPC", icon: "", iconColorRGB: 0),
+                Wire.EmptyStateItem(kind: 2, id: "action-agent_new_session", label: "New task", detail: "", jumpKey: "", chord: "SPC a n", icon: "", iconColorRGB: 0),
+                Wire.EmptyStateItem(kind: 2, id: "action-toggle_file_tree", label: "File tree", detail: "", jumpKey: "", chord: "SPC o p", icon: "", iconColorRGB: 0),
+                Wire.EmptyStateItem(kind: 2, id: "action-project_switch", label: "Switch project", detail: "", jumpKey: "", chord: "SPC p p", icon: "", iconColorRGB: 0),
             ]),
         ]
     }
 
-    /// Launchpad fixture for a first run: tutorial hero, no session or recents (#2689).
+    /// Project home header for `emptyStateReturningUser()`.
+    public static func emptyStateReturningUserHeader() -> Wire.EmptyStateHeader {
+        Wire.EmptyStateHeader(title: "minga", path: "~/code/minga", status: "main · 11 changed")
+    }
+
+    /// Home outside any project: recent projects, numbered (#4056).
     public static func emptyStateFirstRun() -> [Wire.EmptyStateSection] {
         [
-            Wire.EmptyStateSection(sectionId: 0, title: "Get started", items: [
-                Wire.EmptyStateItem(kind: 2, id: "action-tutor", label: "open the tutorial", detail: ":Tutor", jumpKey: "RET", chord: "", icon: "", iconColorRGB: 0),
-            ]),
-            Wire.EmptyStateSection(sectionId: 2, title: "Start", items: [
-                Wire.EmptyStateItem(kind: 2, id: "action-find-file", label: "open file", detail: "", jumpKey: "", chord: "SPC f f", icon: "\u{F0224}", iconColorRGB: 0x61AFEF),
-                Wire.EmptyStateItem(kind: 2, id: "action-file-tree", label: "file tree", detail: "", jumpKey: "", chord: "SPC o p", icon: "\u{F0256}", iconColorRGB: 0x78909C),
-                Wire.EmptyStateItem(kind: 2, id: "action-palette", label: "command palette", detail: "", jumpKey: "", chord: "SPC :", icon: "\u{F0633}", iconColorRGB: 0x51AFEF),
-            ]),
-            Wire.EmptyStateSection(sectionId: 3, title: "", items: [
-                Wire.EmptyStateItem(kind: 3, id: "hint-write", label: "to start writing", detail: "", jumpKey: "i", chord: "", icon: "", iconColorRGB: 0),
-                Wire.EmptyStateItem(kind: 3, id: "hint-quit", label: "to quit", detail: ":q", jumpKey: "", chord: "", icon: "", iconColorRGB: 0),
+            Wire.EmptyStateSection(sectionId: 4, title: "Recent projects", items: [
+                Wire.EmptyStateItem(kind: 4, id: "project-1", label: "minga", detail: "~/code/self/minga", jumpKey: "1", chord: "", icon: "", iconColorRGB: 0),
+                Wire.EmptyStateItem(kind: 4, id: "project-2", label: "headsdown", detail: "~/code/work/headsdown", jumpKey: "2", chord: "", icon: "", iconColorRGB: 0),
+            ], empty: "No projects yet."),
+            Wire.EmptyStateSection(sectionId: 6, title: "Next", items: [
+                Wire.EmptyStateItem(kind: 2, id: "action-project_switch", label: "Switch project", detail: "", jumpKey: "", chord: "SPC p p", icon: "", iconColorRGB: 0),
+                Wire.EmptyStateItem(kind: 2, id: "action-find_file", label: "Find a file", detail: "", jumpKey: "", chord: "SPC f f", icon: "", iconColorRGB: 0),
+                Wire.EmptyStateItem(kind: 2, id: "action-project_add", label: "Add a project", detail: "", jumpKey: "", chord: "SPC p a", icon: "", iconColorRGB: 0),
             ]),
         ]
     }

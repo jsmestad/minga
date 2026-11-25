@@ -31,7 +31,8 @@ defmodule Minga.Storyboard.RenderTest do
           session = Render.drive(@id, %{target | theme: theme})
           grid = Session.screen_text(session)
 
-          assert Session.highlight_span_count(session) > 0,
+          # The project home shows no code, so it has nothing to highlight.
+          assert Session.highlight_span_count(session) > 0 or not Session.file_open?(session),
                  "#{@id} renders without syntax highlighting; storyboard frames must show real tree-sitter colours"
 
           if theme == first do

@@ -41,7 +41,8 @@ defmodule MingaEditor.RenderPipeline.FrameIntent do
   ]
 
   @enforce_keys @fields
-  defstruct @fields
+  # The project home's task rows, like the status bar data, are derived here; a frame without the home has none.
+  defstruct [{:home_tasks, []} | @fields]
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -74,7 +75,8 @@ defmodule MingaEditor.RenderPipeline.FrameIntent do
           line_spacing: number() | nil,
           cursor_animate: boolean() | nil,
           gui_config_state: term(),
-          presentation_target: MingaEditor.PresentationTarget.t() | nil
+          presentation_target: MingaEditor.PresentationTarget.t() | nil,
+          home_tasks: [MingaEditor.State.Launchpad.task()]
         }
 
   @spec from_editor_state(EditorState.t()) :: t()
@@ -111,9 +113,21 @@ defmodule MingaEditor.RenderPipeline.FrameIntent do
         Minga.Config.Options.get(state.interaction.options_server, :line_spacing) || 1.0,
       cursor_animate: Minga.Config.Options.get(state.interaction.options_server, :cursor_animate),
       gui_config_state: state.appearance.gui_config_state,
-      presentation_target: MingaEditor.PresentationTarget.from_editor_state(state)
+      presentation_target: MingaEditor.PresentationTarget.from_editor_state(state),
+      home_tasks: home_tasks(state)
     }
   end
+
+  # The tasks the project home lists, from the shared task model; none while the home is not shown.
+  @spec home_tasks(EditorState.t()) :: [MingaEditor.State.Launchpad.task()]
+  defp home_tasks(
+         %EditorState{workspace: %{launchpad: %MingaEditor.State.Launchpad{} = home}} = state
+       ) do
+    tab_bar = Runtime.state(state.shell_runtime) |> Map.get(:tab_bar)
+    MingaEditor.State.Launchpad.tasks(state.agent_connection.tasks, tab_bar, home)
+  end
+
+  defp home_tasks(%EditorState{}), do: []
 
   @doc "Replaces only the bulk highlight payload while preserving frame metadata."
   @spec with_highlight_payload(t(), %{pid() => MingaEditor.UI.Highlight.t()}, map()) :: t()

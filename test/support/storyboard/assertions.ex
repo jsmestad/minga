@@ -444,7 +444,7 @@ defmodule Minga.Test.Storyboard.Assertions do
       }) do
     [first | _] = sections
     items = Enum.flat_map(sections, & &1.items)
-    actions = for item <- items, item.kind in [:action, :recent_file, :resume], do: item
+    actions = for item <- items, item.kind in [:action, :recent_file, :project, :task], do: item
 
     %{
       title: first.title,

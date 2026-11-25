@@ -3,125 +3,181 @@ defmodule MingaEditor.State.LaunchpadTest do
 
   alias MingaEditor.State.Launchpad
 
-  defp launchpad(opts) do
-    defaults = [session_file_count: 0, crashed?: false, recents: []]
+  @moduletag :tmp_dir
+
+  defp home(opts) do
+    defaults = [project_root: "/work/minga", place: :project, git: nil, recents: [], projects: []]
     Launchpad.new(Keyword.merge(defaults, opts))
   end
 
-  describe "item_ids/1" do
-    test "orders resume, recents, then actions" do
-      lp = launchpad(session_file_count: 3, recents: ["a.ex", "b.ex"])
+  describe "item_ids/2" do
+    test "recent files, then Minga's tasks, then the next actions" do
+      lp = home(recents: ["a.ex", "b.ex"])
 
-      assert Launchpad.item_ids(lp) == [
-               "resume",
+      assert Launchpad.item_ids(lp, ["task-7"]) == [
                "recent-1",
                "recent-2",
-               "action-find-file",
-               "action-file-tree",
-               "action-palette",
-               "action-tutor"
+               "task-7",
+               "action-project_find_file",
+               "action-agent_new_session",
+               "action-toggle_file_tree",
+               "action-project_switch"
              ]
     end
 
-    test "first run promotes the Get started hero to the front" do
-      lp = launchpad([])
+    test "outside a project the rows are recent projects" do
+      lp = home(project_root: nil, place: :outside, projects: ["/a", "/b"])
 
-      assert Launchpad.item_ids(lp) == [
-               "action-tutor",
-               "action-find-file",
-               "action-file-tree",
-               "action-palette"
+      assert Launchpad.item_ids(lp, []) == [
+               "project-1",
+               "project-2",
+               "action-project_switch",
+               "action-find_file",
+               "action-project_add"
              ]
     end
-  end
 
-  describe "initial focus" do
-    test "prefers the resume item when a session exists" do
-      assert launchpad(session_file_count: 2, recents: ["a.ex"]).focused_id == "resume"
-    end
-
-    test "falls back to the first recent, then the first-run hero" do
-      assert launchpad(recents: ["a.ex"]).focused_id == "recent-1"
-      assert launchpad([]).focused_id == "action-tutor"
+    test "a folder that is not a project offers the file tree first" do
+      lp = home(project_root: "/tmp/notes", place: :folder)
+      assert lp.focused_id == "action-toggle_file_tree"
     end
   end
 
-  describe "move_focus/2" do
-    test "next and prev clamp at the edges" do
-      lp = launchpad(recents: ["a.ex"])
+  describe "number keys" do
+    test "open recent files in a project and recent projects outside one" do
+      assert Launchpad.numbered_id(home(recents: ["a.ex"]), 1) == "recent-1"
+      assert Launchpad.numbered_id(home(recents: ["a.ex"]), 2) == nil
+
+      outside = home(project_root: nil, place: :outside, projects: ["/a"])
+      assert Launchpad.numbered_id(outside, 1) == "project-1"
+    end
+
+    test "resolve recent files against the root and projects to their root" do
+      lp = home(recents: ["lib/a.ex"])
+      assert Launchpad.recent_path(lp, "recent-1") == "/work/minga/lib/a.ex"
+      assert Launchpad.recent_path(lp, "recent-9") == nil
+
+      outside = home(project_root: nil, place: :outside, projects: ["/a"])
+      assert Launchpad.project_root(outside, "project-1") == "/a"
+    end
+  end
+
+  describe "move_focus/3" do
+    test "moves over rows and tasks and clamps at the edges" do
+      lp = home(recents: ["a.ex"])
       assert lp.focused_id == "recent-1"
 
-      lp = Launchpad.move_focus(lp, :prev)
+      assert Launchpad.move_focus(lp, :prev, []).focused_id == "recent-1"
+      assert Launchpad.move_focus(lp, :next, ["task-3"]).focused_id == "task-3"
+      assert Launchpad.move_focus(lp, :last, []).focused_id == "action-project_switch"
+    end
+
+    test "gg goes to the first row" do
+      lp = home(recents: ["a.ex"]) |> Launchpad.move_focus(:last, [])
+      lp = lp |> Launchpad.press_g([]) |> Launchpad.press_g([])
+
       assert lp.focused_id == "recent-1"
-
-      lp = lp |> Launchpad.move_focus(:next) |> Launchpad.move_focus(:next)
-      assert lp.focused_id == "action-file-tree"
-
-      lp = Enum.reduce(1..10, lp, fn _, acc -> Launchpad.move_focus(acc, :next) end)
-      assert lp.focused_id == "action-tutor"
-    end
-
-    test "first and last jump to the edges" do
-      lp = launchpad(session_file_count: 1, recents: ["a.ex"])
-
-      assert Launchpad.move_focus(lp, :last).focused_id == "action-tutor"
-
-      back_to_first = lp |> Launchpad.move_focus(:last) |> Launchpad.move_focus(:first)
-      assert back_to_first.focused_id == "resume"
-    end
-  end
-
-  describe "gg chord" do
-    test "first g arms, second g jumps to first" do
-      lp = launchpad(session_file_count: 1) |> Launchpad.move_focus(:last)
-
-      armed = Launchpad.press_g(lp)
-      assert armed.pending_g?
-      assert armed.focused_id == "action-tutor"
-
-      done = Launchpad.press_g(armed)
-      refute done.pending_g?
-      assert done.focused_id == "resume"
-    end
-
-    test "clear_pending_g disarms" do
-      lp = launchpad([]) |> Launchpad.press_g() |> Launchpad.clear_pending_g()
       refute lp.pending_g?
     end
+  end
 
-    test "focus/2 and move_focus/2 respect first-run ordering" do
-      lp = launchpad([])
+  describe "new/1 reads the root" do
+    test "a root with a project marker is a project, any other directory a folder", %{
+      tmp_dir: dir
+    } do
+      project = Path.join(dir, "project")
+      folder = Path.join(dir, "folder")
+      File.mkdir_p!(project)
+      File.mkdir_p!(folder)
+      File.write!(Path.join(project, "mix.exs"), "")
 
-      assert Launchpad.move_focus(lp, :next).focused_id == "action-find-file"
-      assert Launchpad.move_focus(lp, :last).focused_id == "action-palette"
-
-      assert lp
-             |> Launchpad.move_focus(:last)
-             |> Launchpad.move_focus(:first)
-             |> Map.fetch!(:focused_id) == "action-tutor"
+      assert Launchpad.new(project_root: project, recents: [], git: nil).place == :project
+      assert Launchpad.new(project_root: folder, recents: [], git: nil).place == :folder
+      assert Launchpad.new(project_root: nil, projects: []).place == :outside
     end
   end
 
-  describe "recent_path/2" do
-    test "resolves 1-based recent ids and rejects unknown ids" do
-      lp = launchpad(recents: ["lib/a.ex", "lib/b.ex"])
+  describe "tasks/3" do
+    alias MingaEditor.Agent.Tasks
+    alias MingaEditor.State.TabBar
+    alias MingaEditor.State.Workspace
 
-      assert Launchpad.recent_path(lp, "recent-1") == "lib/a.ex"
-      assert Launchpad.recent_path(lp, "recent-2") == "lib/b.ex"
-      assert Launchpad.recent_path(lp, "recent-3") == nil
-      assert Launchpad.recent_path(lp, "resume") == nil
+    # One followed task per {workspace id, project root}, each shown by its own Agent workspace.
+    defp followed(specs) do
+      pids = Enum.map(specs, fn _spec -> spawn(fn -> :ok end) end)
+
+      workspaces =
+        specs
+        |> Enum.zip(pids)
+        |> Enum.map(fn {{id, root}, pid} -> Workspace.new_agent(id, "Task #{id}", pid, root) end)
+
+      tasks =
+        pids
+        |> Enum.with_index()
+        |> Enum.reduce(Tasks.new(), fn {pid, i}, acc ->
+          Tasks.follow(acc, pid, i, title: "Goal #{i}")
+        end)
+
+      {tasks, TabBar.restore_workspaces(TabBar.new_empty(nil), workspaces, nil)}
+    end
+
+    defp listed(tasks, tab_bar, home),
+      do: tasks |> Launchpad.tasks(tab_bar, home) |> Enum.map(&elem(&1, 0)) |> Enum.sort()
+
+    test "a project's home lists that project's tasks and tasks tied to no project" do
+      {tasks, tab_bar} = followed([{1, "/work/minga"}, {2, "/work/other"}, {3, nil}])
+
+      assert listed(tasks, tab_bar, home([])) == [1, 3]
+    end
+
+    test "outside a project every task is listed" do
+      {tasks, tab_bar} = followed([{1, "/work/minga"}, {2, "/work/other"}])
+
+      assert listed(tasks, tab_bar, home(project_root: nil, place: :outside)) == [1, 2]
+    end
+
+    test "a task no workspace shows is not listed" do
+      {tasks, _tab_bar} = followed([{1, "/work/minga"}])
+
+      assert listed(tasks, TabBar.new_empty(nil), home([])) == []
     end
   end
 
-  test "focus/2 only accepts existing item ids" do
-    lp = launchpad(recents: ["a.ex"])
+  describe "mark_waiting/2" do
+    test "marks the recent projects with unsaved text waiting, comparing canonical roots", %{
+      tmp_dir: dir
+    } do
+      waiting = Path.join(dir, "waiting")
+      clean = Path.join(dir, "clean")
+      File.mkdir_p!(waiting)
+      File.mkdir_p!(clean)
+      outside = home(project_root: nil, place: :outside, projects: [waiting, clean])
 
-    assert Launchpad.focus(lp, "action-palette").focused_id == "action-palette"
-    assert Launchpad.focus(lp, "bogus").focused_id == "recent-1"
+      marked =
+        Launchpad.mark_waiting(outside, [
+          %{root: waiting <> "/", files: 2},
+          %{root: nil, files: 1}
+        ])
+
+      assert Launchpad.waiting?(marked, waiting)
+      refute Launchpad.waiting?(marked, clean)
+    end
   end
 
-  test "recents cap at five" do
-    lp = launchpad(recents: Enum.map(1..9, &"file#{&1}.ex"))
-    assert [_, _, _, _, _] = lp.recents
+  describe "accept_git/2" do
+    test "takes the branch and change count of the repository the root is in" do
+      event = %Minga.Events.GitStatusEvent{
+        git_root: "/work/minga",
+        entries: [:a, :b],
+        branch: "main",
+        ahead: 0,
+        behind: 0
+      }
+
+      assert Launchpad.accept_git(home([]), event).git == %{branch: "main", changed: 2}
+
+      other = %{event | git_root: "/work/other"}
+      assert Launchpad.accept_git(home([]), other).git == nil
+    end
   end
 end

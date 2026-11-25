@@ -74,7 +74,7 @@ defmodule MingaEditor.ProjectSessionTest do
     assert windows.map[left].cursor == {40, 2}
     assert windows.map[left].viewport.top == 30
     assert windows.map[right].viewport.top == 60
-    assert notice_message(editor) == "Restored 2 files from last time"
+    assert notice_message(editor) == "Restored 2 files from last time · SPC q n start fresh"
   end
 
   test "focus returns to the window that had it, even when it shows an earlier file", ctx do
@@ -99,7 +99,7 @@ defmodule MingaEditor.ProjectSessionTest do
     assert {:leaf, only} = state.workspace.windows.tree
     assert state.workspace.windows.active == only
     assert Minga.Buffer.file_path(state.workspace.buffers.active) == ctx.lib_b
-    assert notice_message(editor) == "Restored 1 file from last time"
+    assert notice_message(editor) == "Restored 1 file from last time · SPC q n start fresh"
   end
 
   test "minga <file> neither restores nor saves the project's session", ctx do
@@ -206,5 +206,90 @@ defmodule MingaEditor.ProjectSessionTest do
              captured.layout
 
     assert {a, b} == {ctx.lib_a, ctx.lib_b}
+  end
+
+  test "a session saved from a conversation, with its workspaces on disk, brings its files back into view",
+       ctx do
+    snapshot = %Snapshot{
+      version: 2,
+      project_root: ctx.root,
+      buffers: [
+        %BufferEntry{file: ctx.lib_a, cursor_line: 0, cursor_col: 0},
+        %BufferEntry{file: ctx.lib_b, cursor_line: 0, cursor_col: 0}
+      ],
+      active_file: nil,
+      layout: nil,
+      active_pane: 0
+    }
+
+    :ok = Session.save(snapshot, session_dir: ctx.sessions, project_root: ctx.root)
+    # The workspace's file tabs are restored first, as they are after a quit from a conversation.
+    write_manual_workspace(ctx.root, ["lib/a.ex", "lib/b.ex"])
+    write_agent_workspace(ctx.root, 1)
+    editor = open_project(ctx)
+
+    state =
+      wait_until(editor, &(MingaEditor.Handlers.BufferRegistry.buffer_inventory(&1) != []),
+        max_attempts: 100,
+        message: "the saved session was not restored"
+      )
+
+    refute MingaEditor.Input.EmptyState.showing_home?(state)
+    assert Minga.Buffer.file_path(state.workspace.buffers.active) in [ctx.lib_a, ctx.lib_b]
+  end
+
+  defp write_manual_workspace(root, files) do
+    dir = Path.join(root, ".minga/workspaces")
+    File.mkdir_p!(dir)
+
+    workspace = %{
+      "schema_version" => 2,
+      "id" => 0,
+      "kind" => "manual",
+      "label" => Path.basename(root),
+      "icon" => "folder",
+      "color" => 0,
+      "custom_name" => nil,
+      "files" =>
+        Enum.map(files, fn file ->
+          %{
+            "kind" => "path",
+            "project_root" => root,
+            "relative_path" => file,
+            "display_name" => Path.basename(file)
+          }
+        end),
+      "review" => %{
+        "state" => "clean",
+        "changed_files" => [],
+        "conflict_files" => [],
+        "in_progress" => false,
+        "last_error" => nil
+      }
+    }
+
+    File.write!(Path.join(dir, "0.json"), JSON.encode!(workspace))
+  end
+
+  defp write_agent_workspace(root, id) do
+    workspace = %{
+      "schema_version" => 2,
+      "id" => id,
+      "kind" => "agent",
+      "label" => "Agent",
+      "icon" => "cpu",
+      "color" => 0,
+      "custom_name" => nil,
+      "files" => [],
+      "review" => %{
+        "state" => "clean",
+        "changed_files" => [],
+        "conflict_files" => [],
+        "in_progress" => false,
+        "last_error" => nil
+      }
+    }
+
+    File.write!(Path.join(root, ".minga/workspaces/#{id}.json"), JSON.encode!(workspace))
   end
 end

@@ -19,7 +19,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Files do
       Entry.pending("files.switcher.no_match", 4058, "no match offers create and search rows"),
       Entry.built("files.tree.empty",
         start: [empty_dirs: ["notes"]],
-        reach: "SPC o p j .",
+        reach: "1 SPC o p j .",
         recognize: &(Model.open?(&1, :file_tree) and &1.ui.file_tree.status == :empty),
         checks: [
           Check.new(
@@ -40,7 +40,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Files do
       ),
       Entry.pending("files.file_list", 4054, "picker results exported to a buffer"),
       Entry.built("files.project_find",
-        reach: "SPC SPC",
+        reach: "1 SPC SPC",
         recognize: &(Model.open?(&1, :picker) and &1.picker_title =~ ~r/find file/i)
       )
     ]

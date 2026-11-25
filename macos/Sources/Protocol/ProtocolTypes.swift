@@ -284,14 +284,32 @@ public enum Wire {
         }
     }
 
-    // MARK: - Launchpad empty state
+    // MARK: - Project home
 
-    /// A single launchpad row decoded from the gui_empty_state protocol message (0xA5).
+    /// The project home header decoded from gui_empty_state (0xA5, #4056): where you are.
     ///
-    /// `kind`: 0=resume, 1=recent_file, 2=action, 3=hint. The BEAM sends semantic
-    /// data only; the frontend owns all layout. `jumpKey` (single instant key),
-    /// `chord` (space-separated keystroke tokens), and a `detail` beginning with
-    /// ":" select one of three input-visual treatments.
+    /// `title` is the project or folder name ("Minga" outside a project), `path` is home-relative,
+    /// `status` is one line (branch and change count, or why there is no project), and `note` is an
+    /// optional muted second line.
+    public struct EmptyStateHeader: Sendable, Equatable {
+        public let title: String
+        public let path: String
+        public let status: String
+        public let note: String
+
+        public init(title: String = "", path: String = "", status: String = "", note: String = "") {
+            self.title = title
+            self.path = path
+            self.status = status
+            self.note = note
+        }
+    }
+
+    /// One project home row decoded from gui_empty_state (0xA5).
+    ///
+    /// `kind`: 1=recent file, 2=action, 4=project, 5=task. `jumpKey` is the number key that opens
+    /// the row, `chord` the leader sequence an action runs. `detail` and `meta` are muted text after
+    /// the label. `state` is a design-token state name ("needs_you") whose mark a task row draws.
     public struct EmptyStateItem: Sendable, Identifiable {
         public let kind: UInt8
         public let id: String
@@ -301,8 +319,10 @@ public enum Wire {
         public let chord: String
         public let icon: String
         public let iconColorRGB: UInt32
+        public let meta: String
+        public let state: String
 
-        public init(kind: UInt8, id: String, label: String, detail: String, jumpKey: String, chord: String, icon: String, iconColorRGB: UInt32) {
+        public init(kind: UInt8, id: String, label: String, detail: String, jumpKey: String, chord: String, icon: String, iconColorRGB: UInt32, meta: String = "", state: String = "") {
             self.kind = kind
             self.id = id
             self.label = label
@@ -311,22 +331,27 @@ public enum Wire {
             self.chord = chord
             self.icon = icon
             self.iconColorRGB = iconColorRGB
+            self.meta = meta
+            self.state = state
         }
     }
 
-    /// A launchpad section decoded from gui_empty_state (0xA5).
+    /// A project home section decoded from gui_empty_state (0xA5).
     ///
-    /// `sectionId`: 0=session, 1=recent, 2=start, 3=footer.
+    /// `sectionId`: 1=recent files, 4=recent projects, 5=Minga tasks, 6=next actions. `empty` is the
+    /// muted line shown when the section has no rows.
     public struct EmptyStateSection: Sendable, Identifiable {
         public let sectionId: UInt8
         public let title: String
+        public let empty: String
         public let items: [EmptyStateItem]
 
         public var id: UInt8 { sectionId }
 
-        public init(sectionId: UInt8, title: String, items: [EmptyStateItem]) {
+        public init(sectionId: UInt8, title: String, items: [EmptyStateItem], empty: String = "") {
             self.sectionId = sectionId
             self.title = title
+            self.empty = empty
             self.items = items
         }
     }

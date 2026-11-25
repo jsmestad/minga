@@ -448,6 +448,17 @@ defmodule MingaEditor.State do
     {state, result}
   end
 
+  @doc """
+  Takes a pending picker preview: returns whether the next buffer selection was only a preview, and clears it.
+
+  The buffer picker on the project home uses it so that moving through the list never switches tabs; only a confirmed selection does.
+  """
+  @spec take_preview(t()) :: {boolean(), t()}
+  def take_preview(%__MODULE__{} = state) do
+    {context, lifecycle} = BufferLifecycle.consume_buffer_context(state.buffer_lifecycle)
+    {context == :preview, %{state | buffer_lifecycle: lifecycle}}
+  end
+
   @doc "Purely installs a workflow-calculated buffer shell transition into the root."
   @spec install_buffer_shell_transition(t(), ShellRuntime.t(), SessionState.t()) :: t()
   def install_buffer_shell_transition(
@@ -513,13 +524,46 @@ defmodule MingaEditor.State do
     state = retire_file_tab_operations(state)
     runtime = remove_file_tabs(state.shell_runtime)
 
-    launchpad_opts = [
-      {:project_root, SessionState.project_root(state.workspace)}
-      | EditorSessionState.session_opts(state.session)
-    ]
-
-    workspace = SessionState.enter_empty_state(state.workspace, launchpad_opts)
+    workspace = SessionState.enter_empty_state(state.workspace, home_opts(state))
     %{state | shell_runtime: runtime, workspace: workspace}
+  end
+
+  @doc "Marks the home's recent projects that have unsaved text waiting, when the home shows (startup recovery)."
+  @spec mark_home_waiting(t(), [Minga.Session.waiting_project()]) :: t()
+  def mark_home_waiting(
+        %__MODULE__{workspace: %{launchpad: %MingaEditor.State.Launchpad{} = home}} = state,
+        [_ | _] = waiting
+      ) do
+    home = MingaEditor.State.Launchpad.mark_waiting(home, waiting)
+    %{state | workspace: SessionState.set_launchpad(state.workspace, home)}
+  end
+
+  def mark_home_waiting(%__MODULE__{} = state, _waiting), do: state
+
+  @doc """
+  Shows the project home: the active tab steps aside with a snapshot of its buffers, windows and splits, and the home is what shows while no tab is active (`SPC p h`, or leaving a task).
+
+  Opening any of the tab's files, or the task's row on the home, switches back to the tab and restores the snapshot. Callers that leave an agent tab stash its agent state first (`MingaEditor.TabWorkflow.leave_to_home/1`).
+  """
+  @spec show_home(t()) :: t()
+  def show_home(%__MODULE__{} = state) do
+    case traditional_tab_bar(state.shell_runtime) do
+      %TabBar{active_id: current_id} = tab_bar when is_integer(current_id) ->
+        state = retire_file_tab_operations(state)
+        context = TabContext.snapshot(state.workspace)
+        tab_bar = tab_bar |> TabBar.update_context(current_id, context) |> TabBar.step_aside()
+        runtime = install_tab_bar(state.shell_runtime, tab_bar)
+        workspace = SessionState.enter_home(state.workspace, home_opts(state))
+        %{state | shell_runtime: runtime, workspace: workspace}
+
+      _no_active_tab ->
+        %{state | workspace: SessionState.enter_home(state.workspace, home_opts(state))}
+    end
+  end
+
+  @spec home_opts(t()) :: keyword()
+  defp home_opts(%__MODULE__{} = state) do
+    [project_root: SessionState.project_root(state.workspace)]
   end
 
   @doc "Restores a tab context and installs synthesized defaults for a brand-new tab."

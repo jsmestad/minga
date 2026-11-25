@@ -1,6 +1,6 @@
 {
   "macos": {
-    "commit": "74e9d8ec633bb8c08cef2a271301beb823a1c7c2-dirty",
+    "commit": "fa2fe7d676061111d4e52d4d08a58e4f959a1182",
     "files": {
       "macos-astrodark-1280.json": "29924cd78304b13ca8decfad9cc51b15e2aeb6883a0f9b813cb2911a075152f2",
       "macos-astrodark-1440.json": "2e7b3078052a5ca94dcf945aceac761b42a9f2d7ef842fd5947325b41e909f35",
@@ -10,17 +10,17 @@
       "macos-catppuccin_latte-1440.json": "c200440264ee57cd74b92b2b3d48dd7dbf7bd96336d571f54de954ad202d7fa7"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "a69ed9cb2a93ae324796faf121c634c2930b520a326f13712aa9ae6a836e38d0",
-      "macos-astrodark-1440.json": "d38e85950c174eec6ad73781e51dab948f6cc12502d72ffb10124ec8e3d4ea5a",
-      "macos-catppuccin_frappe-1280.json": "34de1d67933ffd1ea879ef71659df7af841befd4e21686e16056b4c4755a53e9",
-      "macos-catppuccin_frappe-1440.json": "aaa4437a4061a3fa54ddce279d05c301813a241a24e23883555b29728d6cf4b4",
-      "macos-catppuccin_latte-1280.json": "6c62d665dfb259aa29cf1d45d0867e31be4e186ac99f4b55055e7ad7e582bc25",
-      "macos-catppuccin_latte-1440.json": "3124c1a34389bf35e08ba69b01b7261409b22036e3f17da51c462c5998523648"
+      "macos-astrodark-1280.json": "79d217324737fbeb7e16633de38a75da380412b8edf1e4c1a492ab2f45254f53",
+      "macos-astrodark-1440.json": "92db0cefd32ffb928ec4cf89349c113492fdb178ad02c0c9c2f23adc34299f0a",
+      "macos-catppuccin_frappe-1280.json": "8e17458463431adf6595c3b80b6fda375bfe04c40edbec3d8bc56c42b72ea8fb",
+      "macos-catppuccin_frappe-1440.json": "b3fd4c1d46857a5fb2db6d644f0724cddeb5600a75a873c59c7412a45aa6157c",
+      "macos-catppuccin_latte-1280.json": "f41ada7383377fc7b8c8a0515579758b32a6c40c9f21d5de5fb5fae25ae8f114",
+      "macos-catppuccin_latte-1440.json": "b1a6247d6ccbd5bfeaff97504d0c0f18f721c52809fdc24c7ef5ef6a90a32270"
     }
   },
   "scenario": "git.status.clean",
   "tui": {
-    "commit": "3bfe0983998c1db2b82461872d1be4363de6bb37",
+    "commit": "1aef18e78943df542633b1e8e28b6da4977aaf23-dirty",
     "files": {
       "tui-astrodark-120x40.txt": "f1fac6313282d0534472d04331676ebf8e8851908d55a2a7ee6307da746cfffd",
       "tui-astrodark-150x38.txt": "d429cae196440f0070e412e8f4f221aaa65f1c5f0451e2bc803e53bb37aec48c",

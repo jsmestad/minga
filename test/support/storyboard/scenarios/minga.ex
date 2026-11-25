@@ -12,7 +12,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
   def entries do
     [
       Entry.built("minga.whichkey",
-        reach: "SPC a (pause)",
+        reach: "1 SPC a (pause)",
         # Minga waits on you in the session, so the modeline carries Minga's state and the Tasks row its live
         # needs-you count while which-key is open.
         start: [minga: :needs_you],

@@ -9,7 +9,7 @@
 # ---- TUI -----------------------------------------------------------------------------------------------------
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.open_dir.restored"]
 frontend = "tui"
 part = "glyph"
 rule = "contrast"
@@ -18,12 +18,13 @@ pairs = [
   "#7c7f93 on #ccd0da",
   "#8c8fa1 on #ccd0da",
   "#8c8fa1 on #eff1f5",
+  "#7287fd on #eff1f5",
 ]
 reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -36,7 +37,7 @@ reason = "Syntax colours, muted comment and gutter text, separators and chips mi
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -55,7 +56,7 @@ reason = "Syntax colours, muted comment and gutter text, separators and chips mi
 issue = 4137
 
 [[exception]]
-scenario = ["edit.whichkey.leader", "files.tree.empty", "git.status.clean"]
+scenario = ["edit.whichkey.leader", "files.tree.empty", "git.status.clean", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.project_switcher.empty"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -67,7 +68,7 @@ reason = "Which-key keys use the accent colour (anatomy.md), which misses 4.5:1 
 issue = 4137
 
 [[exception]]
-scenario = ["edit.whichkey.leader", "files.tree.empty", "git.status.clean"]
+scenario = ["edit.whichkey.leader", "files.tree.empty", "git.status.clean", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.project_switcher.empty"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -139,7 +140,7 @@ reason = "Which-key group names, counts and hint words use the text_muted role (
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.open_dir.restored"]
 frontend = "tui"
 part = "glyph"
 rule = "contrast"
@@ -153,7 +154,7 @@ reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.open_dir.restored", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
 frontend = "tui"
 part = "glyph"
 rule = "contrast"
@@ -172,14 +173,12 @@ rule = "contrast"
 theme = "catppuccin_latte"
 pairs = [
   "#7c7f93 on #ccd0da",
-  "#8c8fa1 on #ccd0da",
-  "#8c8fa1 on #eff1f5",
 ]
 reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -210,13 +209,9 @@ part = "text"
 rule = "contrast"
 theme = "catppuccin_latte"
 pairs = [
-  "#04a5e5 on #eff1f5",
   "#1e66f5 on #e6e9ef",
   "#1e66f5 on #eff1f5",
-  "#40a02b on #eff1f5",
-  "#7c7f93 on #eff1f5",
   "#8c8fa1 on #eff1f5",
-  "#df8e1d on #eff1f5",
   "#eff1f5 on #1e66f5",
 ]
 reason = "Syntax colours, muted comment and gutter text, separators and chips miss 4.5:1 in this theme."
@@ -233,7 +228,7 @@ reason = "The picker's selected-row marker misses 3:1 on the popup selection col
 issue = 4137
 
 [[exception]]
-scenario = ["start.project_switcher.empty", "files.tree.empty", "git.status.clean"]
+scenario = ["start.project_switcher.empty", "files.tree.empty", "git.status.clean", "start.empty", "start.open_dir.home", "start.open_dir.not_project"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -253,7 +248,7 @@ reason = "The picker's selected-row marker misses 3:1 on the popup selection col
 issue = 4137
 
 [[exception]]
-scenario = ["start.project_switcher.empty", "files.tree.empty", "git.status.clean"]
+scenario = ["start.project_switcher.empty", "files.tree.empty", "git.status.clean", "start.empty", "start.open_dir.home", "start.open_dir.not_project"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -266,7 +261,7 @@ issue = 4137
 # ---- macOS ---------------------------------------------------------------------------------------------------
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.open_dir.restored"]
 frontend = "macos"
 part = "editor.code"
 rule = "contrast"
@@ -280,7 +275,7 @@ reason = "Syntax colours, comments and line numbers in the editor miss 4.5:1 in 
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
+scenario = ["edit.plain", "edit.visual", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.open_dir.restored"]
 frontend = "macos"
 part = "editor.code"
 rule = "contrast"
@@ -295,13 +290,14 @@ reason = "Syntax colours, comments and line numbers in the editor miss 4.5:1 in 
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored"]
 frontend = "macos"
 part = "modeline.segment"
 rule = "contrast"
 theme = "catppuccin_latte"
 pairs = [
   "#eff1f5 on #1e66f5",
+  "#818497 on #e6e9ef",
 ]
 reason = "The modeline.segment text misses 4.5:1 in this theme: the mode pill, and Minga's words in the minga role (4.45:1)."
 issue = 4137
@@ -577,7 +573,7 @@ reason = "Syntax colours on the cursor line miss 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.open_dir.restored"]
 frontend = "macos"
 part = "breadcrumb.segment"
 rule = "contrast"
@@ -589,7 +585,7 @@ reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.open_dir.restored"]
 frontend = "macos"
 part = "breadcrumb.segment"
 rule = "contrast"
@@ -601,7 +597,7 @@ reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.open_dir.restored"]
 frontend = "macos"
 part = "breadcrumb.segment"
 rule = "contrast"
@@ -613,7 +609,7 @@ reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored"]
 frontend = "macos"
 part = "modeline.modePill"
 rule = "contrast"
@@ -625,7 +621,7 @@ reason = "The modeline.modePill text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored"]
 frontend = "macos"
 part = "modeline.modeText"
 rule = "contrast"
@@ -646,66 +642,6 @@ pairs = [
   "#eff1f5 on #1e66f5",
 ]
 reason = "The modeline.segment text misses 4.5:1 in this theme: the mode pill, and Minga's words in the minga role (4.45:1)."
-issue = 4137
-
-[[exception]]
-scenario = ["start.project_switcher.empty"]
-frontend = "macos"
-part = "breadcrumb.segment"
-rule = "contrast"
-theme = "catppuccin_frappe"
-pairs = [
-  "#262938 on #414559",
-]
-reason = "The breadcrumb's segments use this theme's chrome text colours, which miss the contrast floor."
-issue = 4137
-
-[[exception]]
-scenario = ["start.project_switcher.empty"]
-frontend = "macos"
-part = "breadcrumb.segment"
-rule = "contrast"
-theme = "catppuccin_latte"
-pairs = [
-  "#e6e9ef on #ccd0da",
-]
-reason = "The breadcrumb's segments use this theme's chrome text colours, which miss the contrast floor."
-issue = 4137
-
-[[exception]]
-scenario = ["start.project_switcher.empty"]
-frontend = "macos"
-part = "editor.code"
-rule = "contrast"
-theme = "astrodark"
-pairs = [
-  "#29333c on #1a1d23",
-]
-reason = "Code colours in this theme miss the contrast floor on the editor surface behind the picker."
-issue = 4137
-
-[[exception]]
-scenario = ["start.project_switcher.empty"]
-frontend = "macos"
-part = "editor.code"
-rule = "contrast"
-theme = "catppuccin_frappe"
-pairs = [
-  "#5f647c on #303446",
-]
-reason = "Code colours in this theme miss the contrast floor on the editor surface behind the picker."
-issue = 4137
-
-[[exception]]
-scenario = ["start.project_switcher.empty"]
-frontend = "macos"
-part = "editor.code"
-rule = "contrast"
-theme = "catppuccin_latte"
-pairs = [
-  "#acb0be on #eff1f5",
-]
-reason = "Code colours in this theme miss the contrast floor on the editor surface behind the picker."
 issue = 4137
 
 [[exception]]
@@ -783,7 +719,7 @@ reason = "Empty-state copy, next-step keys and the echo line use this theme's mu
 issue = 4137
 
 [[exception]]
-scenario = ["code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results"]
+scenario = ["code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.open_dir.restored"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -887,7 +823,7 @@ reason = "The echo line's next-step key uses this theme's accent on the status b
 issue = 4137
 
 [[exception]]
-scenario = ["code.actions.none", "code.references.none", "search.buffer.no_results"]
+scenario = ["code.actions.none", "code.references.none", "search.buffer.no_results", "start.open_dir.restored"]
 frontend = "macos"
 part = "notice.message"
 rule = "contrast"

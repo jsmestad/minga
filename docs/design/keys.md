@@ -63,8 +63,8 @@ Keys are chords and mnemonics, not shortcuts. This is [principle 11](principles.
 | `SPC h a` | Apropos (Doom): commands and options in one search | shipped; was a duplicate of `SPC h c` (86) |
 | `SPC o t` | Toggle the terminal drawer (Doom) | new |
 | `SPC o T` | New terminal in the current window (Doom) | new |
-| `SPC p h` | Project home (`*home*`) from anywhere | new |
-| `SPC q n` | Start fresh instead of the restored session: closes the restored files and opens the project home | new |
+| `SPC p h` | Project home (`*home*`) from anywhere | shipped |
+| `SPC q n` | Start fresh instead of the restored session: closes the restored files and opens the project home | shipped |
 | `SPC q u` | Unsaved text: list the text kept after a crash that no start recovered, to recover or discard it | shipped (#4257) |
 | `SPC f o` | Open a remote file | shipped; was `SPC a o` (161) |
 | `SPC b P`, `SPC b <`, `SPC b >` | (tabs are gone) | shipped, retired (69, 70, 71) |

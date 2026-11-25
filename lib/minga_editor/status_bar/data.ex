@@ -78,10 +78,16 @@ defmodule MingaEditor.StatusBar.Data do
   def from_state(state) do
     active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
 
-    if active_window != nil and Content.agent_chat?(active_window.content) do
-      build_agent_data(state)
-    else
-      build_buffer_data(state)
+    cond do
+      active_window != nil and Content.agent_chat?(active_window.content) ->
+        build_agent_data(state)
+
+      # The project home rests in the window over any open buffers; the modeline names the home, not a hidden buffer.
+      active_window != nil and active_window.content == {:empty, :semantic} ->
+        build_buffer_data(state, nil)
+
+      true ->
+        build_buffer_data(state, state.workspace.buffers.active)
     end
   end
 
@@ -103,17 +109,16 @@ defmodule MingaEditor.StatusBar.Data do
 
   # ── Buffer variant ─────────────────────────────────────────────────────────
 
-  @spec build_buffer_data(EditorState.t() | map()) :: t()
-  defp build_buffer_data(state) do
+  @spec build_buffer_data(EditorState.t() | map(), pid() | nil) :: t()
+  defp build_buffer_data(state, buf) do
     %__MODULE__{
-      common: build_common_data(state, no_buffer_file_name(state)),
+      common: build_common_data(state, buf, no_buffer_file_name(state)),
       content: %StatusBuffer{}
     }
   end
 
-  @spec build_common_data(EditorState.t() | map(), String.t()) :: Common.t()
-  defp build_common_data(state, no_buffer_file_name) do
-    buf = state.workspace.buffers.active
+  @spec build_common_data(EditorState.t() | map(), pid() | nil, String.t()) :: Common.t()
+  defp build_common_data(state, buf, no_buffer_file_name) do
     {line, col} = if buf, do: BufferAPI.cursor(buf), else: {0, 0}
     line_count = if buf, do: BufferAPI.line_count(buf), else: 1
     file_name = if buf, do: buf_display_name(buf), else: no_buffer_file_name
@@ -305,12 +310,13 @@ defmodule MingaEditor.StatusBar.Data do
   defp register_prefix(""), do: ""
   defp register_prefix(name), do: "\"" <> name
 
-  # In the zero-buffers launchpad (#2689) the file segment stays empty
-  # instead of advertising a "[no file]" placeholder; any other nil-buffer
-  # context (transient races) keeps the placeholder.
+  # The project home (#4056) names itself, as Emacs names `*scratch*`.
+  # Any other nil-buffer context (transient races) keeps the placeholder.
   @spec no_buffer_file_name(EditorState.t() | map()) :: String.t()
   defp no_buffer_file_name(state) do
-    if state.workspace.launchpad, do: "", else: "[no file]"
+    if state.workspace.launchpad,
+      do: MingaEditor.RenderModel.UI.EmptyStateBuilder.buffer_name(),
+      else: "[no file]"
   end
 
   @spec buf_display_name(pid()) :: String.t()
@@ -418,7 +424,10 @@ defmodule MingaEditor.StatusBar.Data do
     panel = state.workspace.agent_ui.panel
 
     %__MODULE__{
-      common: state |> build_common_data("[no file]") |> apply_agent_modeline_theme(state),
+      common:
+        state
+        |> build_common_data(state.workspace.buffers.active, "[no file]")
+        |> apply_agent_modeline_theme(state),
       content: %StatusAgent{
         model_name: if(panel.model_name != "", do: panel.model_name, else: "Agent"),
         session_status: agent_session_status(state),

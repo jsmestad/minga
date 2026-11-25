@@ -9,7 +9,7 @@ defmodule MingaEditor.Integration.ModelineClickTest do
   alias Minga.Test.Storyboard.Session
 
   test "clicking the file segment opens the switcher, as SPC , does" do
-    session = Session.start()
+    session = Session.start() |> Session.open_file()
 
     file =
       session |> Session.model() |> Model.modeline_segments() |> Enum.find(&(&1.id == :filename))
@@ -22,7 +22,7 @@ defmodule MingaEditor.Integration.ModelineClickTest do
       |> Session.click({:gui_action, {:execute_command, Atom.to_string(file.target)}})
       |> Session.model()
 
-    pressed = Session.start() |> Session.press("SPC ,") |> Session.model()
+    pressed = Session.start() |> Session.open_file() |> Session.press("SPC ,") |> Session.model()
 
     assert Model.open?(clicked, :picker)
     assert clicked.picker_title == pressed.picker_title

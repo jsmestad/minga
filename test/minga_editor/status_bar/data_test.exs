@@ -395,15 +395,15 @@ defmodule MingaEditor.StatusBar.DataTest do
     assert common.status.agent.agent_status == :needs_you
   end
 
-  test "agent no-buffer fallback stays explicit while launchpad buffer fallback stays empty" do
+  test "agent no-buffer fallback stays explicit while the project home names itself" do
     buffer_state =
       put_in(
         state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex"))).workspace.launchpad,
-        MingaEditor.State.Launchpad.new(session_file_count: 0, recents: [])
+        MingaEditor.State.Launchpad.new(place: :outside, projects: [])
       )
 
     assert %Data{
-             common: %Common{status: %SemanticStatusData{file: %StatusFile{name: ""}}},
+             common: %Common{status: %SemanticStatusData{file: %StatusFile{name: "*home*"}}},
              content: %StatusBuffer{}
            } = Data.from_state(buffer_state)
 

@@ -29,7 +29,12 @@ defmodule Minga.Storyboard.RenderGeometryTest do
       {mac, [:git_status], {145, 43}},
       {target(:macos, "1280"), [:file_tree], {125, 38}},
       {tui, [:file_tree], {tui.cols, tui.grid_rows}},
-      {tui, [:git_status], {tui.cols, tui.grid_rows}}
+      {tui, [:git_status], {tui.cols, tui.grid_rows}},
+      # The project home draws no tab bar or breadcrumb, so both frontends report a larger grid there.
+      {mac, [:empty_state], {179, 45}},
+      {target(:macos, "1280"), [:empty_state], {159, 39}},
+      {tui, [:empty_state], {tui.cols, tui.rows - 1}},
+      {target(:tui, "80x24"), [:empty_state], {80, 23}}
     ]
 
     for {target, surfaces, {cols, rows}} <- cases do

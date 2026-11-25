@@ -252,8 +252,9 @@ defmodule MingaEditor.Target do
 
   @spec resolve_picker_reference(EditorState.t(), MingaEditor.UI.Picker.Item.t(), resolved()) ::
           {:ok, resolved()} | {:error, reason()}
+  # A buffer row names a buffer that is still open: in the active tab, or in a tab behind the project home.
   defp resolve_picker_reference(state, %{id: {:buffer, pid}}, resolved) do
-    if Enum.member?(state.workspace.buffers.list, pid),
+    if Enum.member?(MingaEditor.Handlers.BufferRegistry.buffer_inventory(state), pid),
       do: {:ok, resolved},
       else: {:error, :not_found}
   end

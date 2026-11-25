@@ -1,0 +1,84 @@
+# minga storyboard frame v1
+# scenario: start.open_dir.not_project
+# frontend: tui
+# theme: catppuccin_latte
+# size: 80x24
+# cursor: none
+## text
+*home* (start.open_dir.not_project) - Minga
+
+   start.open_dir.not_project
+   /tmp/minga-storyboard/tui-80x24/start.open_dir.not_project
+   Not a project: no .git, mix.exs, package.json or other marker here.
+   Minga uses this folder as the root for now.
+
+   Recent in this folder
+   Nothing opened here yet.
+
+   Next
+   SPC o p File tree
+   SPC SPC Find a file
+   SPC p a Remember as a project
+   SPC a n New task
+
+
+
+
+
+
+
+
+  NORMAL  *home*                                                       Text 1:1
+## styles (row start-end fg bg attrs)
+0 0-79 #1e66f5 #ccd0da bold
+1 0-79 #4c4f69 #eff1f5 -
+2 0-2 #4c4f69 #eff1f5 -
+2 3-28 #4c4f69 #eff1f5 bold
+2 29-79 #4c4f69 #eff1f5 -
+3 0-2 #4c4f69 #eff1f5 -
+3 3-60 #8c8fa1 #eff1f5 -
+3 61-79 #4c4f69 #eff1f5 -
+4 0-2 #4c4f69 #eff1f5 -
+4 3-69 #8c8fa1 #eff1f5 -
+4 70-79 #4c4f69 #eff1f5 -
+5 0-2 #4c4f69 #eff1f5 -
+5 3-45 #8c8fa1 #eff1f5 -
+5 46-79 #4c4f69 #eff1f5 -
+6 0-79 #4c4f69 #eff1f5 -
+7 0-2 #4c4f69 #eff1f5 -
+7 3-23 #8c8fa1 #eff1f5 bold
+7 24-79 #4c4f69 #eff1f5 -
+8 0-2 #4c4f69 #eff1f5 -
+8 3-26 #8c8fa1 #eff1f5 -
+8 27-79 #4c4f69 #eff1f5 -
+9 0-79 #4c4f69 #eff1f5 -
+10 0-2 #4c4f69 #eff1f5 -
+10 3-6 #8c8fa1 #eff1f5 bold
+10 7-79 #4c4f69 #eff1f5 -
+11 0-2 #4c4f69 #acb0be -
+11 3-9 #eff1f5 #4c4f69 bold,reverse
+11 10-10 #4c4f69 #acb0be -
+11 11-19 #4c4f69 #acb0be bold
+11 20-79 #4c4f69 #acb0be -
+12 0-2 #4c4f69 #eff1f5 -
+12 3-9 #1e66f5 #eff1f5 bold
+12 10-79 #4c4f69 #eff1f5 -
+13 0-2 #4c4f69 #eff1f5 -
+13 3-9 #1e66f5 #eff1f5 bold
+13 10-79 #4c4f69 #eff1f5 -
+14 0-2 #4c4f69 #eff1f5 -
+14 3-9 #1e66f5 #eff1f5 bold
+14 10-79 #4c4f69 #eff1f5 -
+15 0-79 #4c4f69 #eff1f5 -
+16 0-79 #4c4f69 #eff1f5 -
+17 0-79 #4c4f69 #eff1f5 -
+18 0-79 #4c4f69 #eff1f5 -
+19 0-79 #4c4f69 #eff1f5 -
+20 0-79 #4c4f69 #eff1f5 -
+21 0-79 #4c4f69 #eff1f5 -
+22 0-79 #4c4f69 #eff1f5 -
+23 0-0 #8c8fa1 #e6e9ef -
+23 1-1 #4c4f69 #1e66f5 -
+23 2-7 #eff1f5 #1e66f5 bold
+23 8-8 #4c4f69 #1e66f5 -
+23 9-79 #4c4f69 #e6e9ef -

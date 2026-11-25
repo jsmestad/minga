@@ -8,7 +8,7 @@ defmodule Minga.Test.Storyboard.Explorer do
   * from a scenario with `explore: :which_key`, every child of the which-key node the scenario opens, read from the leader trie;
   * the exit table from `docs/design/scenarios.toml` adds the scenario's designed exits.
 
-  Each press starts from a fresh editor driven to the scenario, so one key never leaks into the next. After the press the explorer records the scenario the frame classifies as (or `:unknown` with the frame's signature), then checks the way out: at most three presses of `esc`, or failing that of `q`, must reach the home scenario with focus back in the window the press started from.
+  Each press starts from a fresh editor driven to the scenario, so one key never leaks into the next. After the press the explorer records the scenario the frame classifies as (or `:unknown` with the frame's signature), then checks the way out: at most three presses of `esc`, or failing that of `q`, must reach a resting view (a `home = true` scenario: plain editing or the project home) with focus back in the window the press started from.
 
   A handful of leader commands leave the editor's sandbox (quit, spawn test runs, formatters or language servers, touch the global project list or extensions) or block the Editor for seconds (#4101). `skipped_commands/0` lists them with the reason; the explorer reports them as skipped, never as passing.
   """
@@ -100,7 +100,7 @@ defmodule Minga.Test.Storyboard.Explorer do
   end
 
   @doc """
-  Checks the way out from the session's current state: at most three presses of `esc`, or of `q`, reach the home scenario with focus in the starting window.
+  Checks the way out from the session's current state: at most three presses of `esc`, or of `q`, reach a resting view with focus in the starting window.
 
   `replay` rebuilds the same state for the second attempt, since the first attempt consumes it; the replayed session is stopped afterwards. The caller owns `session`, and may pass its current `model` to save building it again.
   """
@@ -169,7 +169,7 @@ defmodule Minga.Test.Storyboard.Explorer do
 
   @spec home?(Session.t(), Model.t()) :: boolean()
   defp home?(session, model) do
-    Registry.classify(model) == Registry.home() and
+    Registry.resting?(Registry.classify(model)) and
       match?(%{window_id: window} when window == session.home_window, model.focus)
   end
 
@@ -187,7 +187,13 @@ defmodule Minga.Test.Storyboard.Explorer do
 
   defp keymap_probes(%Entry{explore: :which_key, reach: reach}) do
     # The leader trie is the node after SPC, so the walk starts below the first key.
-    [{:key, 32, 0} | prefix] = reach |> Keys.parse!() |> Enum.reject(&(&1 == :pause))
+    # The reach opens the file first (`1` on the home); the which-key path starts at SPC.
+    [{:key, 32, 0} | prefix] =
+      reach
+      |> Keys.parse!()
+      |> Enum.reject(&(&1 == :pause))
+      |> Enum.drop_while(&(&1 != {:key, 32, 0}))
+
     node = Enum.reduce(prefix, Defaults.leader_trie(), &child(&2, &1))
 
     for {key, target} <- children(node) do
