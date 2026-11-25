@@ -8,6 +8,7 @@ defmodule MingaAgent.WorkingFolder do
   """
 
   alias Minga.Project
+  alias Minga.Project.Detector
   alias Minga.Project.Root
 
   @typedoc "Why a session has no folder: nothing was opened, or the only candidate is too broad to work in."
@@ -37,12 +38,35 @@ defmodule MingaAgent.WorkingFolder do
   @doc """
   A project the caller detected or was given explicitly.
 
+  A version-controlled project is trusted wherever it is, a repository rooted at the home directory included. Any other marker does not make a too-broad folder acceptable: a `package.json` or a `.minga` file in the home directory does not give Minga all of it. The breadth is judged by the canonical path, so a link to the home directory is as broad as the home directory.
+
   The private root of a session without a folder is not a project: a child session that inherits it has no folder either.
+
+  `version_controlled?` tells whether a root is under version control. It is a parameter so a test can decide it without touching a real home directory.
   """
   @spec project(String.t()) :: t()
-  def project(root) when is_binary(root) do
-    if root == placeholder_root(), do: {:unavailable, :none}, else: {:project, root}
+  @spec project(String.t(), (String.t() -> boolean())) :: t()
+  def project(root, version_controlled? \\ &Detector.version_controlled?/1)
+
+  def project(root, version_controlled?)
+      when is_binary(root) and is_function(version_controlled?, 1) do
+    cond do
+      root == placeholder_root() -> {:unavailable, :none}
+      version_controlled?.(root) -> {:project, root}
+      true -> project_unless_broad(root, Root.canonical_path(root))
+    end
   end
+
+  @spec project_unless_broad(String.t(), {:ok, String.t()} | {:error, term()}) :: t()
+  defp project_unless_broad(root, {:ok, canonical}),
+    do: classify_project(root, canonical, broad?(canonical))
+
+  # A root that does not resolve is not a place tools can reach. The caller's start fails on it as before.
+  defp project_unless_broad(root, {:error, _reason}), do: {:project, root}
+
+  @spec classify_project(String.t(), String.t(), boolean()) :: t()
+  defp classify_project(_root, canonical, true), do: {:unavailable, {:too_broad, canonical}}
+  defp classify_project(root, _canonical, false), do: {:project, root}
 
   @doc """
   The private, empty directory a session without a folder uses as its root.

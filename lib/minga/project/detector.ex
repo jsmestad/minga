@@ -20,7 +20,13 @@ defmodule Minga.Project.Detector do
   `default_markers/0` returns a broad set covering common project types:
   `.git`, `mix.exs`, `Cargo.toml`, `package.json`, `go.mod`, `pyproject.toml`,
   `.minga` (sentinel file users can drop into any directory to mark a project root).
+
+  A `.minga` file marks a root anywhere. A `.minga` directory marks one too, because a project keeps its own instructions and skills there (`.minga/AGENTS.md`, `.minga/skills`), except in a folder that is too broad to be a project: the home directory, the filesystem root or a volume root (`Minga.Project.Root.broad_path?/1`). Minga keeps its own data in a `.minga` directory in the home directory, and that must not make the home directory a project.
+
+  `.git` marks a root as a directory or as a file, which is what a worktree has. Language markers match as files or directories, because some are directories (`.dart_tool`, `_opam`).
   """
+
+  alias Minga.Project.Root
 
   @typedoc "Project type inferred from the marker that matched."
   @type project_type :: atom()
@@ -33,6 +39,15 @@ defmodule Minga.Project.Detector do
     {".git", :git},
     {".minga", :minga}
   ]
+
+  # Markers that mean a directory is under version control.
+  @version_control_markers [".git"]
+
+  # A directory with this name is Minga's own data when the folder is too broad to be a project.
+  @own_directory_marker ".minga"
+
+  @typedoc "Tells whether a folder is too broad to be a project. A test supplies its own home directory this way."
+  @type broad :: (String.t() -> boolean())
 
   @doc """
   Returns the default marker list as `{filename, project_type}` tuples.
@@ -52,6 +67,16 @@ defmodule Minga.Project.Detector do
       |> Enum.uniq_by(fn {marker, _} -> marker end)
 
     @sentinel_markers ++ lang_markers
+  end
+
+  @doc """
+  Tells whether `dir` itself is the root of a version-controlled tree.
+
+  The agent trusts a root as broad as the home directory only on this evidence. Any other marker there, a stray `package.json` for one, says nothing about whether the whole folder is one project.
+  """
+  @spec version_controlled?(String.t()) :: boolean()
+  def version_controlled?(dir) when is_binary(dir) do
+    Enum.any?(@version_control_markers, &File.exists?(Path.join(dir, &1)))
   end
 
   @doc """
@@ -79,11 +104,13 @@ defmodule Minga.Project.Detector do
   Returns `{:ok, root_path, project_type}` or `:none`.
   """
   @spec detect(String.t(), [{String.t(), project_type()}]) :: result()
-  def detect(file_path, markers) when is_binary(file_path) and is_list(markers) do
+  @spec detect(String.t(), [{String.t(), project_type()}], broad()) :: result()
+  def detect(file_path, markers, broad? \\ &broad_folder?/1)
+      when is_binary(file_path) and is_list(markers) and is_function(broad?, 1) do
     file_path
     |> Path.expand()
     |> Path.dirname()
-    |> walk_up(markers)
+    |> walk_up(markers, broad?)
   end
 
   @doc """
@@ -106,11 +133,11 @@ defmodule Minga.Project.Detector do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  @spec walk_up(String.t(), [{String.t(), project_type()}]) :: result()
-  defp walk_up(_dir, []), do: :none
+  @spec walk_up(String.t(), [{String.t(), project_type()}], broad()) :: result()
+  defp walk_up(_dir, [], _broad?), do: :none
 
-  defp walk_up(dir, markers) do
-    case find_marker(dir, markers) do
+  defp walk_up(dir, markers, broad?) do
+    case find_marker(dir, markers, broad?) do
       {:ok, type} ->
         {:ok, dir, type}
 
@@ -120,21 +147,33 @@ defmodule Minga.Project.Detector do
         if parent == dir do
           :none
         else
-          walk_up(parent, markers)
+          walk_up(parent, markers, broad?)
         end
     end
   end
 
-  @spec find_marker(String.t(), [{String.t(), project_type()}]) :: {:ok, project_type()} | :none
-  defp find_marker(dir, markers) do
+  @spec find_marker(String.t(), [{String.t(), project_type()}], broad()) ::
+          {:ok, project_type()} | :none
+  defp find_marker(dir, markers, broad?) do
     Enum.find_value(markers, :none, fn {marker, type} ->
-      path = Path.join(dir, marker)
-
-      if File.exists?(path) do
-        {:ok, type}
-      else
-        nil
-      end
+      if marker_present?(dir, marker, broad?), do: {:ok, type}
     end)
+  end
+
+  @spec marker_present?(String.t(), String.t(), broad()) :: boolean()
+  defp marker_present?(dir, @own_directory_marker = marker, broad?) do
+    path = Path.join(dir, marker)
+    File.regular?(path) or (File.dir?(path) and not broad?.(dir))
+  end
+
+  defp marker_present?(dir, marker, _broad?), do: File.exists?(Path.join(dir, marker))
+
+  # The folder is judged by where it really is, so a link to the home directory is as broad as the home directory.
+  @spec broad_folder?(String.t()) :: boolean()
+  defp broad_folder?(dir) do
+    case Root.canonical_path(dir) do
+      {:ok, canonical} -> Root.broad_path?(canonical)
+      {:error, _reason} -> Root.broad_path?(dir)
+    end
   end
 end

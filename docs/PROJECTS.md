@@ -19,7 +19,7 @@ When you open a file, Minga walks up from that file's directory looking for mark
 | `build.zig` | Zig |
 | `.minga` | Manual sentinel |
 
-The `.minga` sentinel is useful for directories that don't have a standard build tool marker. Drop an empty `.minga` file in any directory and Minga will treat it as a project root.
+The `.minga` sentinel is useful for directories that don't have a standard build tool marker. Drop an empty `.minga` file in any directory and Minga will treat it as a project root. A `.minga` directory marks a project root too: that is where a project keeps its own `AGENTS.md` and skills for Minga. The one place it does not count is a folder too broad to be a project (your home directory, `/`, the top of a mounted volume), because Minga keeps its own data in a `.minga` directory in your home directory.
 
 Once detected, the project root is stored for the current session and used to scope file finding (`SPC p f`, `SPC f f`) and project search (`SPC s p`, `SPC /`).
 
@@ -43,6 +43,8 @@ Two cases leave Minga with no folder at all:
 Nothing has failed in either case, and the conversation still works for questions. Every tool that could reach your files answers with that same sentence until there is a folder: reading and editing, search, Git, the language server, shell commands, subagents, MCP servers and extension tools. The declined calls show as "Denied", not as errors. What still works is what cannot touch your files: asking you a question, the checklist, describing Minga, reading memory and fetching a URL. To give Minga one, open a file inside a folder (or open the folder) and start a new conversation; a conversation keeps the folder it started with, and one that started without a folder stays that way, including when Minga restarts its session.
 
 If you want a loose folder to behave like a project, drop an empty `.minga` file in it.
+
+A marker does not make a too-broad folder acceptable to Minga's Agent, with one exception: version control. If your home directory is a Git repository (a dotfiles setup, for example), it is a project and the Agent works in it, because the whole tree really is one project. A stray `package.json`, a `mix.exs` or a `.minga` file in your home directory is not that kind of evidence, and the Agent still says the folder is too broad. The file tree and project search are not affected: they follow the detected project as before.
 
 ## Known projects
 
