@@ -908,7 +908,7 @@ defmodule MingaEditor do
   end
 
   def handle_info({:minga_input, {:terminal_report, report}}, %MingaEditor.State{} = state) do
-    Log.debug(:port, fn -> "Terminal report: #{inspect(Enum.sort(report.features))}" end)
+    log_terminal_report(report)
     {:noreply, MingaEditor.State.accept_terminal_report(state, report)}
   end
 
@@ -2193,6 +2193,22 @@ defmodule MingaEditor do
   @doc false
   @spec do_dismiss_completion(state()) :: state()
   defdelegate do_dismiss_completion(state), to: CompletionHandling, as: :dismiss
+
+  # One line when the terminal's answers are in, so a user who wonders why two terminals differ finds it in *Messages*.
+  # The first report of a start still has open questions and is not worth a line.
+  @spec log_terminal_report(MingaEditor.Frontend.TerminalReport.t()) :: :ok
+  defp log_terminal_report(%MingaEditor.Frontend.TerminalReport{features: features}) do
+    if :pending in Map.values(features) do
+      :ok
+    else
+      summary =
+        features
+        |> Enum.sort()
+        |> Enum.map_join(", ", fn {feature, status} -> "#{feature} #{status}" end)
+
+      Log.info(:port, "Terminal features: #{summary}")
+    end
+  end
 
   @spec announce_frontend_foreground(MingaEditor.State.t(), :foreground | :background | :unknown) ::
           MingaEditor.State.t()
