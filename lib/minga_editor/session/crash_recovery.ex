@@ -8,11 +8,11 @@ defmodule MingaEditor.Session.CrashRecovery do
 
   Three rules keep recovery from doing harm:
 
-  - **Newer text wins.** If a buffer for the file is open again by the time the swap has been read, that buffer is left alone and the swap is kept.
+  - **Newer text wins.** A buffer that is open again for the file took the kept swap when it started (`Minga.Buffer.Process` takes a kept swap at its own swap path), so it is the owner of that text. If the user has typed in it since, it keeps its newer text.
   - **One automatic reopen.** A buffer that recovery reopened and that crashes again is not reopened a second time. Its swap stays for the next start, so text that crashes its buffer cannot loop.
   - **Focus follows the crash.** The reopened buffer takes focus only when the crashed buffer had it. A background buffer comes back in the background.
 
-  The reopened buffer is dirty. Once buffers the editor opens have a swap directory (#4257), it writes that swap again and removes it on save or close.
+  The reopened buffer is dirty and owns the swap file: it writes it again after edits and removes it on save or close.
   """
 
   @behaviour MingaEditor.Effect
@@ -122,7 +122,7 @@ defmodule MingaEditor.Session.CrashRecovery do
 
   @spec reopen(EditorState.t(), t(), String.t(), String.t()) :: EditorState.t()
   defp reopen(state, %__MODULE__{} = effect, path, content) do
-    case start_with_text(state, path, content) do
+    case start_with_text(state, path, content, effect.swap_path) do
       {:ok, buffer} ->
         Log.info(:editor, "Recovered after a crash: #{Path.basename(path)}")
 
@@ -133,10 +133,10 @@ defmodule MingaEditor.Session.CrashRecovery do
           "#{Path.basename(path)} was reopened with its unsaved text after its buffer crashed"
         )
 
-      {:error, :already_open} ->
+      {:error, :modified} ->
         Log.warning(
           :editor,
-          "#{path} is open again, so its text from before the crash was not restored. It stays in #{effect.swap_path}."
+          "#{path} is open again with newer unsaved text, so its text from before the crash was not restored."
         )
 
         state
@@ -151,35 +151,51 @@ defmodule MingaEditor.Session.CrashRecovery do
     end
   end
 
-  # Starts the buffer for the file and gives it the recovered text, which marks it dirty.
-  # A buffer that is already open for the file holds newer text, so it is never overwritten.
-  @spec start_with_text(EditorState.t(), String.t(), String.t()) ::
+  # Gives the recovered text to the buffer for the file: the one that is open again, or a new one.
+  # A buffer that started after the crash took the kept swap when it started, so it holds this text already.
+  # If the user has typed in it since, it holds newer text and refuses.
+  @spec start_with_text(EditorState.t(), String.t(), String.t(), String.t()) ::
           {:ok, pid()} | {:error, term()}
-  defp start_with_text(state, path, content) do
-    case Buffer.pid_for_path(path) do
-      {:ok, _open_buffer} ->
-        {:error, :already_open}
-
-      :not_found ->
-        with {:ok, buffer} <-
-               Commands.start_buffer(path, state.interaction.options_server,
-                 events_registry: state.extension_surfaces.events_registry
-               ),
-             :ok <- Buffer.replace_content(buffer, content, :recovery) do
-          {:ok, buffer}
-        end
+  defp start_with_text(state, path, content, swap_path) do
+    with {:ok, buffer} <- buffer_for(state, path, swap_path),
+         :ok <- Buffer.adopt_recovered_text(buffer, content, swap_path) do
+      {:ok, buffer}
     end
   catch
-    # The new buffer can stop between its start and the content call.
-    # It is not monitored yet, so nothing else reports it.
+    # The buffer can stop between its lookup or start and the content call.
+    # A new one is not monitored yet, so nothing else reports it.
     :exit, reason -> {:error, {:exit, reason}}
   end
 
+  # A new buffer writes into the directory the crashed one used, so it owns the same swap file.
+  # Saving or closing it removes the swap; a second crash rewrites it.
+  @spec buffer_for(EditorState.t(), String.t(), String.t()) :: {:ok, pid()} | {:error, term()}
+  defp buffer_for(state, path, swap_path) do
+    case Buffer.pid_for_path(path) do
+      {:ok, open_buffer} ->
+        {:ok, open_buffer}
+
+      :not_found ->
+        Commands.start_buffer(path, state.interaction.options_server,
+          events_registry: state.extension_surfaces.events_registry,
+          swap_dir: Path.dirname(swap_path),
+          allow_missing: true
+        )
+    end
+  end
+
   @spec register(EditorState.t(), pid(), String.t(), boolean()) :: EditorState.t()
-  defp register(state, buffer, path, true),
+  defp register(state, buffer, path, activate?) do
+    if BufferRegistry.buffer_tracked?(state, buffer),
+      do: state,
+      else: register_new(state, buffer, path, activate?)
+  end
+
+  @spec register_new(EditorState.t(), pid(), String.t(), boolean()) :: EditorState.t()
+  defp register_new(state, buffer, path, true),
     do: BufferRegistry.register_buffer(state, buffer, path)
 
-  defp register(state, buffer, path, false),
+  defp register_new(state, buffer, path, false),
     do: BufferRegistry.register_buffer_background(state, buffer, path)
 
   @spec not_scheduled(EditorState.t(), BufferCrashedEvent.t(), term()) :: EditorState.t()

@@ -27,6 +27,7 @@ defmodule Minga.Telemetry.DevHandler do
   | `[:minga, :port, :write, :stop]` | `:port` | `[port:write] 12µs (5360 bytes)` |
   | `[:minga, :input, :dispatch, :stop]` | `:editor` | `[input:dispatch] 85µs` |
   | `[:minga, :command, :execute, :stop]` | `:editor` | `[command:move_down] 12µs` |
+  | `[:minga, :swap, :write, :stop]` | `:editor` | `[swap:prepare] 310µs` |
   | `[:minga, :agent, :transcript_sync]` | `:agent` | `[agent:transcript_sync] unchanged (0 entries read)` |
   | `[:minga, :agent, span, :stop]` for each Agent session-start span below | `:agent` | `[agent:session_subscribe] 85µs` |
 
@@ -75,6 +76,7 @@ defmodule Minga.Telemetry.DevHandler do
         [:minga, :port, :write, :stop],
         [:minga, :input, :dispatch, :stop],
         [:minga, :command, :execute, :stop],
+        [:minga, :swap, :write, :stop],
         [:minga, :agent, :transcript_sync]
         | Enum.map(@agent_session_start_spans, &[:minga, :agent, &1, :stop])
       ],
@@ -140,6 +142,13 @@ defmodule Minga.Telemetry.DevHandler do
     Minga.Log.debug(:render, fn ->
       "[render:emit_prepare] #{to_microseconds(duration)}µs (#{byte_count} bytes)"
     end)
+  end
+
+  def handle_event([:minga, :swap, :write, :stop], measurements, metadata, _config) do
+    duration = measurements.duration
+    stage = Map.get(metadata, :stage, :unknown)
+
+    Minga.Log.debug(:editor, fn -> "[swap:#{stage}] #{to_microseconds(duration)}µs" end)
   end
 
   def handle_event([:minga, :render, :hop_latency], measurements, metadata, _config) do

@@ -29,10 +29,22 @@ defmodule Minga.Session.Swap do
       path=/absolute/path/to/file.ex
       os_pid=12345
       mtime=1711234567
+      run_started=Tue Nov 24 20:27:02 2026
+
+  ## Who owns a swap file
+
+  A swap file belongs to one run of the editor, and recovery must leave it alone while that run is alive. An OS process id alone does not identify a run: after a reboot a new run, or any other program, gets the id of a run that crashed. So the owner is a `Minga.Session.Instance`: the process id together with the start time the OS reports for that process, recorded as `run_started`:
+
+  - a swap with this VM's process id is this run's only when it also carries this run's start time, which needs no OS call;
+  - a swap with another process id is owned by a live run only when the OS reports a running process with that id and exactly that start time;
+  - a process the OS reports as a zombie has exited and owns nothing.
+
+  A swap written before `run_started` existed has only the process id, so it is owned while some other process with that id runs, and never by this VM.
   """
 
   @behaviour Minga.Session.Swap.Backend
 
+  alias Minga.Session.Instance
   alias Minga.Session.Swap.Prepared
 
   @magic "MINGA_SWAP_V1\n"
@@ -43,6 +55,7 @@ defmodule Minga.Session.Swap do
           path: String.t(),
           os_pid: integer(),
           mtime: integer(),
+          run_started: String.t() | nil,
           swap_path: String.t()
         }
 
@@ -100,7 +113,10 @@ defmodule Minga.Session.Swap do
     target = swap_path(file_path, opts)
     tmp = temporary_path(target, Keyword.get(opts, :generation))
 
-    header = "path=#{file_path}\nos_pid=#{os_pid_val}\nmtime=#{System.os_time(:second)}"
+    header =
+      "path=#{file_path}\nos_pid=#{os_pid_val}\nmtime=#{System.os_time(:second)}" <>
+        run_started_field(opts)
+
     header_len = byte_size(header)
     data = <<@magic, header_len::32-big, header::binary, content::binary>>
 
@@ -168,17 +184,61 @@ defmodule Minga.Session.Swap do
     end
   end
 
-  @doc "Checks whether the given OS PID is still running."
+  @doc """
+  Checks whether a process with the given OS process id is running. A zombie counts as gone.
+
+  This says nothing about which program it is. To decide whether a swap file's owner is alive, use `owner_alive?/2`.
+  """
   @spec pid_alive?(integer()) :: boolean()
-  def pid_alive?(os_pid) when is_integer(os_pid) do
-    case System.cmd("kill", ["-0", Integer.to_string(os_pid)],
-           stderr_to_stdout: true,
-           into: ""
-         ) do
-      {_, 0} -> true
-      _ -> false
+  def pid_alive?(os_pid) when is_integer(os_pid) and os_pid > 0,
+    do: Instance.start_time(os_pid) != :error
+
+  def pid_alive?(os_pid) when is_integer(os_pid), do: false
+
+  @doc """
+  This run as an owner of swap files: its OS process id and the start time the OS reports for it.
+
+  Reading the start time asks the OS once. `Minga.Application` does that at boot, and the value is kept for the life of the VM, so later calls cost nothing and spawn nothing.
+  """
+  @spec this_run() :: Instance.t()
+  def this_run do
+    case :persistent_term.get({__MODULE__, :this_run}, nil) do
+      nil ->
+        instance = Instance.current()
+        :persistent_term.put({__MODULE__, :this_run}, instance)
+        instance
+
+      instance ->
+        instance
     end
   end
+
+  @doc """
+  Decides whether the run that wrote a swap file is still alive, from the owner recorded in its header.
+
+  See "Who owns a swap file" in the module documentation. `start_time` asks the OS when a process id started; tests pass their own so that no OS process is spawned.
+  """
+  @spec owner_alive?(metadata(), (pos_integer() -> {:ok, String.t()} | :error)) :: boolean()
+  def owner_alive?(
+        %{os_pid: owner_pid, run_started: recorded},
+        start_time \\ &Instance.start_time/1
+      )
+      when is_integer(owner_pid) and is_function(start_time, 1) do
+    %{os_pid: own_pid, started: own_started} = this_run()
+
+    cond do
+      owner_pid == own_pid -> recorded == own_started
+      owner_pid <= 0 -> false
+      true -> same_run?(start_time.(owner_pid), recorded)
+    end
+  end
+
+  @spec same_run?({:ok, String.t()} | :error, String.t() | nil) :: boolean()
+  defp same_run?(:error, _recorded), do: false
+  # A swap from before the start time was recorded has only the process id to go by.
+  # A live process then keeps the swap: never take a live run's text.
+  defp same_run?({:ok, _started}, nil), do: true
+  defp same_run?({:ok, started}, recorded), do: started == recorded
 
   @doc "Returns the current OS process ID as an integer."
   @spec os_pid() :: integer()
@@ -187,6 +247,18 @@ defmodule Minga.Session.Swap do
   end
 
   # ── Private ─────────────────────────────────────────────────────────────
+
+  # A swap written as this run records when the run started. One written on behalf of another process id
+  # (tests, tools) records a start only when it is given one.
+  @spec run_started_field(keyword()) :: String.t()
+  defp run_started_field(opts) do
+    started =
+      if Keyword.has_key?(opts, :os_pid),
+        do: Keyword.get(opts, :run_started),
+        else: Keyword.get_lazy(opts, :run_started, fn -> this_run().started end)
+
+    if is_binary(started), do: "\nrun_started=#{started}", else: ""
+  end
 
   @spec temporary_path(String.t(), term()) :: String.t()
   defp temporary_path(target, generation) do
@@ -283,7 +355,7 @@ defmodule Minga.Session.Swap do
          {:ok, mtime_str} <- Map.fetch(fields, "mtime"),
          {os_pid, ""} <- Integer.parse(pid_str),
          {mtime, ""} <- Integer.parse(mtime_str) do
-      {:ok, %{path: path, os_pid: os_pid, mtime: mtime}}
+      {:ok, %{path: path, os_pid: os_pid, mtime: mtime, run_started: fields["run_started"]}}
     else
       _ -> {:error, :invalid_format}
     end

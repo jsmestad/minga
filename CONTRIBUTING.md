@@ -152,6 +152,7 @@ This shows output like:
 | `[:minga, :input, :dispatch]` | | Keystroke through input router |
 | `[:minga, :command, :execute]` | `command` atom | Named command execution |
 | `[:minga, :port, :emit]` | `byte_count` | Protocol encoding + port write |
+| `[:minga, :swap, :write]` | `stage` atom (`snapshot`, `prepare`, `publish`), `byte_count` on `prepare` | One stage of a buffer's swap file write |
 
 ### Attaching custom handlers
 

@@ -60,7 +60,13 @@ defmodule MingaEditor.Session.CrashRecoveryEditorTest do
     )
 
     # The read does not consume the swap: the text is still unsaved, so it must survive a second failure.
-    assert File.exists?(Swap.swap_path(path, swap_dir: swap_dir))
+    swap_path = Swap.swap_path(path, swap_dir: swap_dir)
+    assert {:ok, %{path: ^path}, "unsaved text"} = Swap.read(swap_path)
+
+    # The reopened buffer owns that swap file: saving it leaves nothing to recover.
+    :ok = Buffer.save(reopened)
+    assert File.read!(path) == "unsaved text"
+    refute File.exists?(swap_path)
   end
 
   test "a buffer that crashes without unsaved text is retired and nothing is reopened", %{

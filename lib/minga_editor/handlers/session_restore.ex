@@ -27,6 +27,20 @@ defmodule MingaEditor.Handlers.SessionRestore do
   @typedoc "Editor state (same as `MingaEditor.state()`)."
   @type state :: EditorState.t()
 
+  @typedoc "A swap file found at startup, with its file path and unsaved text or the reason it could not be read."
+  @type recovered_entry ::
+          {Session.swap_entry(), {:ok, String.t(), String.t()} | {:error, term()}}
+
+  @typedoc """
+  What one start has to pick up: the project's saved session, the unsaved text of its swap files, the swap files it holds back, and how many other files have unsaved text waiting.
+  """
+  @type resume :: %{
+          snapshot: Snapshot.t() | nil,
+          recovered: [recovered_entry()],
+          held_back: [Session.swap_entry()],
+          waiting_elsewhere: non_neg_integer()
+        }
+
   # ── Public functions ──────────────────────────────────────────────────
 
   @doc "Loads this project's saved session and restores it."
@@ -39,10 +53,41 @@ defmodule MingaEditor.Handlers.SessionRestore do
   end
 
   @doc """
+  Picks up where the last run stopped, in one step: restores the saved session first, then puts the unsaved text of each swap file into its buffer, and says once what came back.
+
+  A file with unsaved text that the session did not hold is opened as well. Each buffer takes ownership of its text on disk (`Minga.Buffer.adopt_recovered_text/3`), so the swap it came from is removed only once the text is safe again. Text that cannot be shown stays in its swap file and is offered on the next start.
+
+  Unsaved text whose file was written after the swap is held back: the file holds newer text, so the swap stays on disk and a `*Messages*` line says where.
+  """
+  @spec resume(state(), resume()) :: state()
+  def resume(state, %{snapshot: snapshot, recovered: recovered} = resume) do
+    {state, restored} = restore_snapshot(state, snapshot)
+    {state, recovered_count} = recover_entries(state, recovered)
+    :ok = announce_held_back(resume.held_back)
+    :ok = announce_waiting_elsewhere(resume.waiting_elsewhere)
+    announce(state, restored, recovered_count)
+  end
+
+  @doc """
   Applies an already-loaded session from the Editor process: reopens its files with their cursors, rebuilds its window splits with each window's cursor and scroll, focuses the window that had focus, and says in the echo area how many files came back.
   """
   @spec apply_session_snapshot(state(), Session.snapshot()) :: state()
   def apply_session_snapshot(state, %Snapshot{} = session) do
+    {state, restored} = restore_snapshot(state, session)
+    announce(state, restored, 0)
+  end
+
+  @doc "Puts already-read swap text into its buffers from the Editor process, and says how many files got their unsaved text back."
+  @spec apply_recovered_entries(state(), [recovered_entry()]) :: state()
+  def apply_recovered_entries(state, entries) do
+    {state, recovered_count} = recover_entries(state, entries)
+    announce(state, 0, recovered_count)
+  end
+
+  @spec restore_snapshot(state(), Snapshot.t() | nil) :: {state(), non_neg_integer()}
+  defp restore_snapshot(state, nil), do: {state, 0}
+
+  defp restore_snapshot(state, %Snapshot{} = session) do
     pre_restore_buffers = state.workspace.buffers.list
 
     state = Enum.reduce(session.buffers, state, &restore_session_buffer/2)
@@ -61,28 +106,7 @@ defmodule MingaEditor.Handlers.SessionRestore do
       Process.send_after(self(), :request_code_lens_and_inlay_hints, 800)
     end
 
-    announce_restore(state, restored)
-  end
-
-  @spec recover_swap_entries(state(), [Minga.Session.swap_entry()]) :: state()
-  def recover_swap_entries(state, entries) do
-    recovered =
-      Enum.map(entries, fn entry -> {entry, Session.recover_swap_file(entry.swap_path)} end)
-
-    apply_recovered_entries(state, recovered)
-  end
-
-  @doc "Applies already-read swap contents from the Editor process."
-  @spec apply_recovered_entries(state(), [
-          {Session.swap_entry(), {:ok, String.t(), String.t()} | {:error, term()}}
-        ]) :: state()
-  def apply_recovered_entries(state, entries) do
-    Minga.Log.info(
-      :editor,
-      "Found #{length(entries)} file(s) with unsaved changes from a previous session"
-    )
-
-    Enum.reduce(entries, state, &apply_recovered_entry/2)
+    {state, restored}
   end
 
   @doc "Schedules the startup read when there are swap files to scan or a project session to restore."
@@ -220,16 +244,55 @@ defmodule MingaEditor.Handlers.SessionRestore do
     {{:split, direction, first, second, size}, acc}
   end
 
-  @spec announce_restore(state(), non_neg_integer()) :: state()
-  defp announce_restore(state, 0), do: state
+  # One notice for one start: what was restored and what was recovered, never two competing messages.
+  @spec announce(state(), non_neg_integer(), non_neg_integer()) :: state()
+  defp announce(state, 0, 0), do: state
 
-  defp announce_restore(state, count) do
-    files = if count == 1, do: "1 file", else: "#{count} files"
-    Minga.Log.info(:editor, "Restored #{files} from last time")
+  defp announce(state, restored, recovered) do
+    text = resume_text(restored, recovered)
+    Minga.Log.info(:editor, text)
+    hint = if restored > 0, do: fresh_hint(), else: ""
+    NoticeWorkflow.publish(state, text <> hint)
+  end
 
-    NoticeWorkflow.publish(
-      state,
-      "Restored #{files} from last time" <> fresh_hint()
+  @spec resume_text(non_neg_integer(), non_neg_integer()) :: String.t()
+  defp resume_text(restored, 0), do: "Restored #{files(restored)} from last time"
+  defp resume_text(0, recovered), do: "Recovered unsaved text in #{files(recovered)}"
+
+  defp resume_text(restored, recovered) do
+    "Restored #{files(restored)} from last time · recovered unsaved text in #{files(recovered)}"
+  end
+
+  @spec files(pos_integer()) :: String.t()
+  defp files(1), do: "1 file"
+  defp files(count), do: "#{count} files"
+
+  # A file that was written after its swap holds newer text than the swap, so the swap's text is not put back.
+  # It stays on disk, and the user is told where.
+  @spec announce_held_back([Session.swap_entry()]) :: :ok
+  defp announce_held_back([]), do: :ok
+
+  defp announce_held_back(entries) do
+    Enum.each(entries, fn entry ->
+      Minga.API.message(
+        "#{entry.path} changed after its unsaved text was kept, so the text was not put back. It is in #{entry.swap_path}"
+      )
+    end)
+  end
+
+  # Unsaved text that belongs somewhere else is never recovered into this start, so say that it exists.
+  @spec announce_waiting_elsewhere(non_neg_integer()) :: :ok
+  defp announce_waiting_elsewhere(0), do: :ok
+
+  defp announce_waiting_elsewhere(1) do
+    Minga.API.message(
+      "Unsaved text of 1 other file is waiting; open its project or the file to recover it"
+    )
+  end
+
+  defp announce_waiting_elsewhere(count) do
+    Minga.API.message(
+      "Unsaved text of #{count} other files is waiting; open their project or the files to recover it"
     )
   end
 
@@ -258,54 +321,87 @@ defmodule MingaEditor.Handlers.SessionRestore do
     end
   end
 
-  @spec apply_recovered_entry(
-          {Session.swap_entry(), {:ok, String.t(), String.t()} | {:error, term()}},
-          state()
-        ) :: state()
-  defp apply_recovered_entry({_entry, {:ok, file_path, content}}, state) do
-    Minga.Log.info(:editor, "Recovered: #{Path.basename(file_path)}")
-    recover_buffer(state, file_path, content)
-  end
+  @spec recover_entries(state(), [recovered_entry()]) :: {state(), non_neg_integer()}
+  defp recover_entries(state, entries), do: Enum.reduce(entries, {state, 0}, &recover_entry/2)
 
-  defp apply_recovered_entry({entry, {:error, reason}}, state) do
-    Minga.Log.info(
-      :editor,
-      "Failed to recover #{Path.basename(entry.path)}: #{inspect(reason)}"
-    )
-
-    state
-  end
-
-  # Opens a file and replaces its content with recovered swap data.
-  # The buffer is marked dirty since the recovered content hasn't been saved.
-  @spec recover_buffer(state(), String.t(), String.t()) :: state()
-  defp recover_buffer(state, file_path, content) do
-    case Commands.start_buffer(file_path, state.interaction.options_server,
-           events_registry: state.extension_surfaces.events_registry
-         ) do
-      {:ok, pid} ->
-        # Replace buffer content with the recovered swap data.
-        # This marks the buffer dirty (unsaved changes from the crash).
-        case Buffer.replace_content(pid, content, :recovery) do
-          :ok ->
-            BufferRegistry.register_buffer(state, pid, file_path)
-
-          {:error, :read_only} ->
-            Minga.Log.info(
-              :editor,
-              "Cannot recover #{Path.basename(file_path)}: read-only"
-            )
-
-            state
-        end
+  @spec recover_entry(recovered_entry(), {state(), non_neg_integer()}) ::
+          {state(), non_neg_integer()}
+  defp recover_entry({entry, {:ok, file_path, content}}, {state, count}) do
+    case adopt(state, file_path, content, entry.swap_path) do
+      {:ok, state} ->
+        Minga.Log.info(:editor, "Recovered unsaved text: #{file_path}")
+        {state, count + 1}
 
       {:error, reason} ->
-        Minga.Log.info(
+        Minga.Log.warning(
           :editor,
-          "Could not open buffer for #{Path.basename(file_path)}: #{inspect(reason)}"
+          "#{not_recovered(file_path, reason)} The unsaved text stays in #{entry.swap_path}."
         )
 
+        {state, count}
+    end
+  end
+
+  defp recover_entry({entry, {:error, reason}}, {state, count}) do
+    Minga.Log.warning(
+      :editor,
+      "Could not read the unsaved text of #{entry.path} from #{entry.swap_path}: #{inspect(reason)}"
+    )
+
+    {state, count}
+  end
+
+  @spec not_recovered(String.t(), term()) :: String.t()
+  defp not_recovered(file_path, :modified),
+    do:
+      "#{file_path} has newer unsaved changes, so its text from before the crash was not restored."
+
+  defp not_recovered(file_path, :read_only),
+    do: "#{file_path} is read-only, so its unsaved text was not restored."
+
+  defp not_recovered(file_path, reason),
+    do: "Could not open #{file_path} to restore its unsaved text (#{inspect(reason, limit: 5)})."
+
+  # Gives the text to the buffer for the file: the one that is already open, or a new one.
+  # A file that no longer exists gets a buffer for its path, so the text can be saved back.
+  @spec adopt(state(), String.t(), String.t(), String.t()) :: {:ok, state()} | {:error, term()}
+  defp adopt(state, file_path, content, swap_path) do
+    with {:ok, buffer} <- buffer_for(state, file_path),
+         :ok <- Buffer.adopt_recovered_text(buffer, content, swap_path) do
+      {:ok, show_recovered(state, buffer, file_path)}
+    end
+  catch
+    # The buffer can stop between its lookup or start and the call.
+    :exit, reason -> {:error, {:exit, reason}}
+  end
+
+  @spec buffer_for(state(), String.t()) :: {:ok, pid()} | {:error, term()}
+  defp buffer_for(state, file_path) do
+    case Buffer.pid_for_path(file_path) do
+      {:ok, buffer} ->
+        {:ok, buffer}
+
+      :not_found ->
+        Commands.start_buffer(file_path, state.interaction.options_server,
+          events_registry: state.extension_surfaces.events_registry,
+          allow_missing: true
+        )
+    end
+  end
+
+  # A recovered file takes the screen only when nothing else has it.
+  # After a restored session the focused file stays focused.
+  @spec show_recovered(state(), pid(), String.t()) :: state()
+  defp show_recovered(state, buffer, file_path) do
+    cond do
+      BufferRegistry.buffer_tracked?(state, buffer) ->
         state
+
+      is_nil(state.workspace.buffers.active) ->
+        BufferRegistry.register_buffer(state, buffer, file_path)
+
+      true ->
+        BufferRegistry.register_buffer_background(state, buffer, file_path)
     end
   end
 end

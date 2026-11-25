@@ -2995,6 +2995,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp exit_editor(state, 0) do
     # The next `minga .` in this project picks up exactly where this quit left off.
     :ok = MingaEditor.Handlers.SessionHandler.save_now(state)
+    :ok = release_swaps(state)
 
     if any_buffer_dirty?(state) do
       :ok = WaitRequests.cancel_all("editor closed with unsaved changes")
@@ -3007,12 +3008,24 @@ defmodule MingaEditor.Commands.BufferManagement do
     state
   end
 
+  # A quit is the user's decision about every open buffer: its changes are saved, or given up.
+  # The supervisor stops buffers without running their `terminate/2`, so their swap files are released here.
+  # After a crash, a kill or a lost frontend nobody decided, and the swap files stay for the next start.
+  @spec release_swaps(state()) :: :ok
+  defp release_swaps(state) do
+    case Keyword.get(MingaEditor.State.Session.swap_opts(state.session), :swap_dir) do
+      swap_dir when is_binary(swap_dir) -> Minga.Buffer.release_swaps(swap_dir)
+      nil -> :ok
+    end
+  end
+
   # Aborts the editor with a non-zero exit code. Used by `:cq` / `:cquit`
   # so external tools (like `git commit`) can detect the user cancelled.
   @spec abort_quit_editor(state()) :: state()
   defp abort_quit_editor(state) do
     state = EditPublication.discard_all(state)
     :ok = WaitRequests.cancel_all("editor aborted")
+    :ok = release_swaps(state)
     shutdown_fn = Application.get_env(:minga, :shutdown_fn, &System.stop/1)
     shutdown_fn.(1)
     state

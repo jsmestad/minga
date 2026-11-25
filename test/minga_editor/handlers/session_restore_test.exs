@@ -184,6 +184,82 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
     assert Minga.Buffer.content(buffer) == "new\n"
   end
 
+  test "a buffer with newer unsaved changes keeps them, and the older text stays in its swap", %{
+    tmp_dir: dir
+  } do
+    path = Path.join(dir, "edited_since.ex")
+    File.write!(path, "saved\n")
+    swap_path = Path.join(dir, "edited_since.swap")
+    File.write!(swap_path, "the swap file")
+    {:ok, buffer} = Minga.Buffer.ensure_for_path(path)
+    on_exit(fn -> DynamicSupervisor.terminate_child(Minga.Buffer.Supervisor, buffer) end)
+    :ok = Minga.Buffer.replace_content(buffer, "typed since the restart\n")
+    state = initial_state(dir)
+    entry = %{path: path, swap_path: swap_path, swap_mtime: 0}
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert SessionRestore.apply_recovered_entries(state, [
+                 {entry, {:ok, path, "from before the crash\n"}}
+               ]) == state
+      end)
+
+    assert Minga.Buffer.content(buffer) == "typed since the restart\n"
+    assert File.exists?(swap_path)
+    assert log =~ "#{path} has newer unsaved changes"
+    assert log =~ "The unsaved text stays in #{swap_path}"
+  end
+
+  test "unsaved text is still recovered when a file the user opened replaced the saved session",
+       %{
+         tmp_dir: dir
+       } do
+    path = Path.join(dir, "recovered.ex")
+    File.write!(path, "saved\n")
+    opened = Path.join(dir, "opened_meanwhile.ex")
+    File.write!(opened, "opened\n")
+    state = initial_state(dir)
+    opts = MingaEditor.Handlers.SessionHandler.project_session_opts(state)
+
+    request =
+      MingaEditor.Session.Recovery.request(state, [swap_dir: nil], opts, false, true)
+
+    snapshot = %Snapshot{version: 1, buffers: [%BufferEntry{file: path}], active_file: path}
+    entry = %{path: path, swap_path: Path.join(dir, "recovered.swap"), swap_mtime: 0}
+
+    outcome =
+      MingaEditor.Effect.Outcome.completed(
+        request,
+        {:resume,
+         %{
+           snapshot: snapshot,
+           recovered: [{entry, {:ok, path, "unsaved\n"}}],
+           held_back: [],
+           waiting_elsewhere: 0
+         }}
+      )
+
+    # The user opened a file before the startup read finished.
+    {:ok, opened_buffer} = Minga.Buffer.ensure_for_path(opened)
+    state = MingaEditor.Handlers.BufferRegistry.register_buffer(state, opened_buffer, opened)
+
+    {resumed, %MingaEditor.Effect.Outcome{value: {:completed, _result}}} =
+      MingaEditor.Session.Recovery.apply(state, outcome)
+
+    {:ok, recovered_buffer} = Minga.Buffer.pid_for_path(path)
+
+    on_exit(fn ->
+      for buffer <- [opened_buffer, recovered_buffer],
+          do: DynamicSupervisor.terminate_child(Minga.Buffer.Supervisor, buffer)
+    end)
+
+    # The file the user opened keeps the screen; the unsaved text is there in the background.
+    assert resumed.workspace.buffers.active == opened_buffer
+    assert recovered_buffer in resumed.workspace.buffers.list
+    assert Minga.Buffer.content(recovered_buffer) == "unsaved\n"
+    assert Minga.Buffer.dirty?(recovered_buffer)
+  end
+
   test "a deleted saved active file is not reopened as an empty buffer", %{tmp_dir: dir} do
     existing_path = Path.join(dir, "existing.ex")
     missing_path = Path.join(dir, "deleted.ex")

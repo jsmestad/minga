@@ -19,22 +19,25 @@ defmodule Minga.Session.Swap.Recovery do
   @type entry :: %{
           path: String.t(),
           swap_path: String.t(),
-          swap_mtime: integer()
+          swap_mtime: integer(),
+          changed_since?: boolean()
         }
 
   @typedoc """
   Which recoverable swap files a scan returns.
 
-  `:all` returns every one. `{:project, root}` returns those whose file is inside `root`. `{:file, path}` returns the one for that file. A swap outside the scope keeps its unsaved text on disk until its own project or file is opened: no scan drops unsaved text that it does not return.
+  `:all` returns every one. `{:project, root}` returns those whose file is inside `root`. `{:file, path}` returns the one for that file, and `{:files, paths}` those for any of the files. A swap outside the scope keeps its unsaved text on disk until its own project or file is opened: no scan drops unsaved text that it does not return.
   """
-  @type scope :: :all | {:project, String.t()} | {:file, String.t()}
+  @type scope :: :all | {:project, String.t()} | {:file, String.t()} | {:files, [String.t()]}
 
-  @typedoc "Options for scan and recovery operations. `:roots` applies to `recoverable_projects/1` only."
+  @typedoc "Options for scan and recovery operations. `:roots` and `:outside` apply to `recoverable_projects/1` only."
   @type option ::
           {:swap_dir, String.t()}
           | {:pid_alive?, (integer() -> boolean())}
+          | {:owner_alive?, (Swap.metadata() -> boolean())}
           | {:scope, scope()}
           | {:roots, [String.t()]}
+          | {:outside, scope()}
 
   @typedoc "Unsaved text waiting in one project. `root` is `nil` for files outside any project."
   @type waiting_project :: %{root: String.t() | nil, files: pos_integer()}
@@ -51,9 +54,7 @@ defmodule Minga.Session.Swap.Recovery do
   @doc """
   Scans the swap directory and returns the recoverable entries in scope.
 
-  Each entry contains the original file path, the swap file path,
-  and the swap file's mtime. The caller decides what to do with them
-  (show a recovery prompt, auto-recover, etc.).
+  Each entry contains the original file path, the swap file path, the time the swap was written, and `changed_since?`: whether the file was written after the swap. The caller decides what to do with them. An entry with `changed_since?` holds text that is older than the file, so it is for the user to look at, not to put back unasked.
 
   ## The lifetime of a swap file
 
@@ -71,13 +72,15 @@ defmodule Minga.Session.Swap.Recovery do
   ## Options
 
   - `:swap_dir` - override the default swap directory (for testing)
-  - `:pid_alive?` - override the PID liveness check (for testing)
+  - `:owner_alive?` - decides whether the run that wrote a swap is alive (default `Minga.Session.Swap.owner_alive?/1`)
+  - `:pid_alive?` - decides it from the process id alone, and replaces `:owner_alive?` too (for testing)
   - `:scope` - which entries to return (default `:all`); see `t:scope/0`
   """
   @spec scan([option()]) :: [entry()]
   def scan(opts \\ []) do
     dir = Swap.swap_dir(opts)
     pid_alive? = Keyword.get(opts, :pid_alive?, &Swap.pid_alive?/1)
+    owner_alive? = owner_check(opts)
     scope = Keyword.get(opts, :scope, :all)
 
     case File.ls(dir) do
@@ -85,7 +88,7 @@ defmodule Minga.Session.Swap.Recovery do
         sweep_orphaned_temporary_files(dir, files, pid_alive?)
 
         dir
-        |> verdicts(files, pid_alive?)
+        |> verdicts(files, pid_alive?, owner_alive?)
         |> Enum.flat_map(&apply_verdict(&1, scope))
 
       {:error, _} ->
@@ -99,26 +102,43 @@ defmodule Minga.Session.Swap.Recovery do
   It reads the swap directory and removes nothing. A project home or a startup message uses it to say where unsaved text is waiting, so a swap for a project that is not open is never invisible. Files outside any project are counted under a `nil` root.
 
   Pass `roots:` with the project roots the caller knows (for example its recent projects) to count each file under the deepest of those roots that contains it. Without `roots:`, each file is counted under the nearest project marker above it. A scan with `scope: {:project, root}` returns every file inside `root`, so when one known root contains another, the outer root's count leaves out the files counted under the inner one.
+
+  Pass `outside:` with a scope to leave out the files that a scan with that scope returns. An editor uses it to count the text that is waiting in other places than the one it opened.
   """
   @spec recoverable_projects([option()]) :: [waiting_project()]
   def recoverable_projects(opts \\ []) do
     dir = Swap.swap_dir(opts)
     pid_alive? = Keyword.get(opts, :pid_alive?, &Swap.pid_alive?/1)
+    owner_alive? = owner_check(opts)
 
     case File.ls(dir) do
       {:ok, files} ->
         dir
-        |> verdicts(files, pid_alive?)
+        |> verdicts(files, pid_alive?, owner_alive?)
         |> Enum.flat_map(fn
-          {:recoverable, entry} -> [project_root(entry.path, Keyword.get(opts, :roots))]
-          _removed_or_owned -> []
+          {:recoverable, entry} -> [entry]
+          _removed_or_left_alone -> []
         end)
+        |> reject_inside(Keyword.get(opts, :outside))
+        |> Enum.map(&project_root(&1.path, Keyword.get(opts, :roots)))
         |> Enum.frequencies()
         |> Enum.map(fn {root, count} -> %{root: root, files: count} end)
         |> Enum.sort_by(&{is_nil(&1.root), &1.root})
 
       {:error, _} ->
         []
+    end
+  end
+
+  @doc """
+  Reads the file path and the unsaved text of a swap file, and leaves the swap file where it is.
+
+  The reader does not own the text yet. The swap leaves the disk when a buffer takes the text over (`Minga.Buffer.adopt_recovered_text/3`), so a failure between reading and showing the text loses nothing.
+  """
+  @spec read(String.t()) :: {:ok, String.t(), binary()} | {:error, term()}
+  def read(swap_path) when is_binary(swap_path) do
+    with {:ok, meta, content} <- Swap.read(swap_path) do
+      {:ok, meta.path, content}
     end
   end
 
@@ -150,19 +170,31 @@ defmodule Minga.Session.Swap.Recovery do
     end
   end
 
-  @spec verdicts(String.t(), [String.t()], (integer() -> boolean())) :: [verdict()]
-  defp verdicts(dir, files, pid_alive?) do
+  @typep pid_check :: (integer() -> boolean())
+  @typep owner_check :: (Swap.metadata() -> boolean())
+
+  # A parsed swap names its owner run. A caller that decides by process id alone (tests) decides this too.
+  @spec owner_check([option()]) :: owner_check()
+  defp owner_check(opts) do
+    case Keyword.fetch(opts, :pid_alive?) do
+      {:ok, pid_alive?} -> fn meta -> pid_alive?.(meta.os_pid) end
+      :error -> Keyword.get(opts, :owner_alive?, &Swap.owner_alive?/1)
+    end
+  end
+
+  @spec verdicts(String.t(), [String.t()], pid_check(), owner_check()) :: [verdict()]
+  defp verdicts(dir, files, pid_alive?, owner_alive?) do
     files
     |> Enum.filter(&String.ends_with?(&1, ".swap"))
-    |> Enum.map(&verdict(Path.join(dir, &1), pid_alive?))
+    |> Enum.map(&verdict(Path.join(dir, &1), pid_alive?, owner_alive?))
   end
 
   # Decides what a swap file is, without changing anything on disk.
-  @spec verdict(String.t(), (integer() -> boolean())) :: verdict()
-  defp verdict(swap_path, pid_alive?) do
+  @spec verdict(String.t(), pid_check(), owner_check()) :: verdict()
+  defp verdict(swap_path, pid_alive?, owner_alive?) do
     case Swap.read(swap_path) do
       {:ok, meta, content} ->
-        if pid_alive?.(meta.os_pid), do: :left_alone, else: orphan_verdict(meta, content)
+        if owner_alive?.(meta), do: :left_alone, else: orphan_verdict(meta, content)
 
       {:error, :invalid_format} ->
         if owner_alive?(swap_path, pid_alive?), do: :left_alone, else: {:unparseable, swap_path}
@@ -194,7 +226,23 @@ defmodule Minga.Session.Swap.Recovery do
       # Different text, a file that no longer exists, or one that cannot be read right now.
       # The swap is the only copy of the unsaved text, so it stays recoverable.
       _different_missing_or_unreadable ->
-        {:recoverable, %{path: meta.path, swap_path: meta.swap_path, swap_mtime: meta.mtime}}
+        {:recoverable,
+         %{
+           path: meta.path,
+           swap_path: meta.swap_path,
+           swap_mtime: meta.mtime,
+           changed_since?: changed_since?(meta.path, meta.mtime)
+         }}
+    end
+  end
+
+  # True when the file was written after the swap was. The swap's text is then older than what the file holds now,
+  # so it must not replace it without the user deciding.
+  @spec changed_since?(String.t(), integer()) :: boolean()
+  defp changed_since?(path, swap_mtime) do
+    case File.stat(path, time: :posix) do
+      {:ok, %File.Stat{mtime: file_mtime}} -> file_mtime > swap_mtime
+      {:error, _reason} -> false
     end
   end
 
@@ -220,6 +268,12 @@ defmodule Minga.Session.Swap.Recovery do
   @spec in_scope?(String.t(), scope()) :: boolean()
   defp in_scope?(_path, :all), do: true
   defp in_scope?(path, {:file, file}), do: canonical(path) == canonical(file)
+
+  defp in_scope?(path, {:files, files}) do
+    file = canonical(path)
+    Enum.any?(files, &(canonical(&1) == file))
+  end
+
   defp in_scope?(path, {:project, root}), do: inside?(canonical(path), canonical(root))
 
   @spec inside?(String.t(), String.t()) :: boolean()
@@ -241,6 +295,10 @@ defmodule Minga.Session.Swap.Recovery do
   @spec canonical_missing(String.t(), String.t()) :: String.t()
   defp canonical_missing(path, path), do: path
   defp canonical_missing(path, parent), do: Path.join(canonical(parent), Path.basename(path))
+
+  @spec reject_inside([entry()], scope() | nil) :: [entry()]
+  defp reject_inside(entries, nil), do: entries
+  defp reject_inside(entries, scope), do: Enum.reject(entries, &in_scope?(&1.path, scope))
 
   # With known roots, a file belongs to the deepest root that contains it, which is how a scoped scan matches it.
   # Without them, the nearest project marker above the file names its project.

@@ -856,9 +856,11 @@ defmodule MingaEditor.Commands do
     history_attribution = Keyword.get(opts, :history_attribution, :active_workspace)
 
     MingaEditor.HugeFile.guard(file_path, options_server, fn ->
-      Buffer.ensure_for_path(file_path, events_registry,
-        options_server: options_server,
-        history_attribution: history_attribution
+      Buffer.ensure_for_path(
+        file_path,
+        events_registry,
+        [options_server: options_server, history_attribution: history_attribution] ++
+          Keyword.take(opts, [:allow_missing, :swap_dir])
       )
     end)
   end

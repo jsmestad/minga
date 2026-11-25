@@ -325,6 +325,19 @@ For the full option API, see `Minga.Config.Options`.
 
 When agent tools are [routed through `Buffer`](BUFFER-AWARE-AGENTS.md), file-backed buffers auto-save after `:auto_save_delay_ms` so agent edits are not stranded only in memory. Set it to `0` if you want every dirty buffer to wait for an explicit save.
 
+### What a crash can lose
+
+Two things keep unsaved text safe, and `:auto_save_delay_ms` decides which one is at work:
+
+| Setting | What protects your text | What a crash, a `kill` or a power cut can lose |
+|---------|-------------------------|------------------------------------------------|
+| Auto-save on (the default, `1000`) | The file itself: it is written 1 second after you stop typing | What you typed since your last pause of 1 second |
+| Auto-save off (`0`) | A swap file: it is written 5 seconds after you stop typing | What you typed since your last pause of 5 seconds |
+
+Both timers start again with every edit, so text typed without a pause that long is in memory only. With auto-save on, a swap file appears only when a save cannot finish (a read-only file, a full disk, a save conflict): the buffer stays unsaved, and after 5 seconds the swap file takes over.
+
+After a crash, opening the same project gives the text back: the session is restored, each file with a swap file shows its unsaved text, and one notice says so. A buffer that crashes on its own, while the editor keeps running, loses nothing: it writes its text as it stops, and the editor reopens the file with it. Quitting, with or without saving, removes this run's swap files. See [Unsaved text across a crash](ARCHITECTURE.md#unsaved-text-across-a-crash) for the full rules.
+
 Some buffer-aware controls are still planned:
 
 - Whether buffer forks merge automatically (clean merges only) or always go through diff review

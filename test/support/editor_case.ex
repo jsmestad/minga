@@ -99,6 +99,7 @@ defmodule Minga.Test.EditorCase do
     - `:file_path` — optional file path for the buffer
     - `:empty` — start with no buffer at all, as `minga .` does (default false); `:buffer` is then nil
     - `:session_dir` — enable session persistence in this directory (default: off)
+    - `:swap_dir`: the editor's swap directory, scanned for unsaved text at startup by a non-headless backend (default: off)
     - `:name` — optional Editor registration name (defaults to a unique test name)
     - `:child_id` — optional supervisor child id, so a caller can `stop_supervised/1` the editor before the test ends
     - `:record_packets` — keep every packet the editor sends, for `Minga.Test.HeadlessPort.packets/1` (default false)
@@ -207,6 +208,11 @@ defmodule Minga.Test.EditorCase do
     editor_opts =
       if Keyword.has_key?(opts, :session_dir),
         do: [{:session_dir, Keyword.fetch!(opts, :session_dir)} | editor_opts],
+        else: editor_opts
+
+    editor_opts =
+      if Keyword.has_key?(opts, :swap_dir),
+        do: [{:swap_dir, Keyword.fetch!(opts, :swap_dir)} | editor_opts],
         else: editor_opts
 
     # Thread project_root for file tree isolation in tests

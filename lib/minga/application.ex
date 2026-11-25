@@ -97,6 +97,9 @@ defmodule Minga.Application do
     # Booting it spins up the event recorder, extensions, and watchdog just to
     # print a string, which can add seconds of startup. Short-circuit first.
     maybe_print_info_and_halt()
+
+    # Reads this run's identity for its swap files once, here, so no later caller has to ask the OS.
+    _this_run = Minga.Session.Swap.this_run()
     maybe_prepare_cli_startup()
 
     StartupTimer.start()

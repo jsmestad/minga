@@ -32,11 +32,19 @@ defmodule MingaEditor.Session.Recovery do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Session, as: SessionState
+  alias MingaEditor.Session.State, as: WorkspaceState
   alias MingaEditor.State.TabBar
 
-  @type recovered_entry ::
-          {Session.swap_entry(), {:ok, String.t(), String.t()} | {:error, term()}}
-  @type result :: :none | {:restore, Snapshot.t()} | {:recover, [recovered_entry()]}
+  @type recovered_entry :: SessionRestore.recovered_entry()
+  @type resume :: SessionRestore.resume()
+  @type result :: :none | {:resume, resume()}
+
+  @typedoc """
+  Which swap files this start recovers.
+
+  An editor that opened a project recovers that project's files. An editor started on files recovers those files. Text of any other project stays on disk until that project is opened.
+  """
+  @type swap_scope :: {:project, String.t()} | :startup_buffers | :none
 
   @type startup_identity ::
           {shell_id :: atom(), workspace_id :: non_neg_integer() | nil,
@@ -47,15 +55,24 @@ defmodule MingaEditor.Session.Recovery do
     :session_opts,
     :swap_enabled?,
     :session_enabled?,
+    :swap_scope,
     :startup_identity
   ]
-  defstruct [:swap_opts, :session_opts, :swap_enabled?, :session_enabled?, :startup_identity]
+  defstruct [
+    :swap_opts,
+    :session_opts,
+    :swap_enabled?,
+    :session_enabled?,
+    :swap_scope,
+    :startup_identity
+  ]
 
   @type t :: %__MODULE__{
           swap_opts: keyword(),
           session_opts: keyword(),
           swap_enabled?: boolean(),
           session_enabled?: boolean(),
+          swap_scope: swap_scope(),
           startup_identity: startup_identity()
         }
 
@@ -69,6 +86,7 @@ defmodule MingaEditor.Session.Recovery do
       session_opts: session_opts,
       swap_enabled?: swap_enabled?,
       session_enabled?: session_enabled?,
+      swap_scope: swap_scope(state),
       startup_identity: startup_identity(state)
     }
 
@@ -102,9 +120,21 @@ defmodule MingaEditor.Session.Recovery do
   @impl true
   @spec run(t()) :: {:ok, result()} | {:error, term()}
   def run(%__MODULE__{} = effect) do
-    case recoverable_entries(effect) do
-      [] -> load_project_session(effect)
-      entries -> {:ok, {:recover, recover_entries(entries)}}
+    scope = scan_scope(effect)
+
+    {held_back, fresh} =
+      effect |> recoverable_entries(scope) |> Enum.split_with(& &1.changed_since?)
+
+    resume = %{
+      snapshot: load_project_session(effect),
+      recovered: read_entries(fresh),
+      held_back: held_back,
+      waiting_elsewhere: waiting_elsewhere(effect, scope)
+    }
+
+    case resume do
+      %{snapshot: nil, recovered: [], held_back: [], waiting_elsewhere: 0} -> {:ok, :none}
+      resume -> {:ok, {:resume, resume}}
     end
   end
 
@@ -116,6 +146,7 @@ defmodule MingaEditor.Session.Recovery do
       ) do
     case current_request?(state, effect) do
       :current -> apply_current(state, outcome)
+      {:session_stale, reason} -> apply_unsaved_text(state, outcome, reason)
       {:stale, reason} -> {state, Outcome.stale(outcome, reason)}
     end
   end
@@ -136,59 +167,125 @@ defmodule MingaEditor.Session.Recovery do
         :disabled
       end
 
-    {:session_recovery, swap_dir, session_file}
+    {:session_recovery, swap_dir, session_file, effect.swap_scope}
   end
 
   @spec normalize_path(term()) :: term()
   defp normalize_path(path) when is_binary(path), do: Path.expand(path)
   defp normalize_path(other), do: other
 
-  @spec recoverable_entries(t()) :: [Session.swap_entry()]
-  defp recoverable_entries(%__MODULE__{swap_enabled?: false}), do: []
+  # The swap files this editor recovers, as a scan scope. `nil` recovers none.
+  @spec scan_scope(t()) :: Session.Swap.Recovery.scope() | nil
+  defp scan_scope(%__MODULE__{swap_scope: {:project, root}}), do: {:project, root}
+  defp scan_scope(%__MODULE__{swap_scope: :none}), do: nil
 
-  defp recoverable_entries(%__MODULE__{swap_opts: opts}),
-    do: Session.scan_recoverable_swaps(opts)
-
-  @spec recover_entries([Session.swap_entry()]) :: [recovered_entry()]
-  defp recover_entries(entries) do
-    Enum.map(entries, fn entry -> {entry, Session.recover_swap_file(entry.swap_path)} end)
+  defp scan_scope(%__MODULE__{swap_scope: :startup_buffers, startup_identity: identity}) do
+    {_shell, _workspace, _tab, buffers, _active} = identity
+    {:files, Enum.flat_map(buffers, &buffer_file/1)}
   end
+
+  # Runs in the recovery worker, so the buffer call does not block the Editor.
+  @spec buffer_file(term()) :: [String.t()]
+  defp buffer_file(buffer) when is_pid(buffer) do
+    case Minga.Buffer.file_path(buffer) do
+      path when is_binary(path) -> [path]
+      nil -> []
+    end
+  catch
+    :exit, _reason -> []
+  end
+
+  defp buffer_file(_not_a_buffer), do: []
+
+  @spec recoverable_entries(t(), Session.Swap.Recovery.scope() | nil) :: [Session.swap_entry()]
+  defp recoverable_entries(%__MODULE__{swap_enabled?: false}, _scope), do: []
+  defp recoverable_entries(%__MODULE__{}, nil), do: []
+
+  defp recoverable_entries(%__MODULE__{swap_opts: opts}, scope),
+    do: Session.scan_recoverable_swaps(Keyword.put(opts, :scope, scope))
+
+  # Reading leaves each swap on disk. A swap is removed when a buffer has taken its text over.
+  @spec read_entries([Session.swap_entry()]) :: [recovered_entry()]
+  defp read_entries(entries) do
+    Enum.map(entries, fn entry -> {entry, Session.read_swap_file(entry.swap_path)} end)
+  end
+
+  # The number of files with unsaved text waiting that this start does not recover.
+  @spec waiting_elsewhere(t(), Session.Swap.Recovery.scope() | nil) :: non_neg_integer()
+  defp waiting_elsewhere(%__MODULE__{swap_enabled?: false}, _scope), do: 0
+
+  defp waiting_elsewhere(%__MODULE__{swap_opts: opts}, nil),
+    do: opts |> Session.recoverable_projects() |> count_files()
+
+  defp waiting_elsewhere(%__MODULE__{swap_opts: opts}, scope),
+    do: opts |> Keyword.put(:outside, scope) |> Session.recoverable_projects() |> count_files()
+
+  @spec count_files([Session.waiting_project()]) :: non_neg_integer()
+  defp count_files(projects), do: projects |> Enum.map(& &1.files) |> Enum.sum()
 
   # Opening a project picks up where you left off, after a clean quit as well as after a crash.
   # A saved session with no files leaves the project home in place.
-  @spec load_project_session(t()) :: {:ok, result()} | {:error, term()}
-  defp load_project_session(%__MODULE__{session_enabled?: false}), do: {:ok, :none}
+  @spec load_project_session(t()) :: Snapshot.t() | nil
+  defp load_project_session(%__MODULE__{session_enabled?: false}), do: nil
 
   defp load_project_session(%__MODULE__{session_opts: opts}) do
     case Session.load(opts) do
-      {:ok, %Snapshot{buffers: [_ | _]} = snapshot} -> {:ok, {:restore, snapshot}}
-      {:ok, %Snapshot{}} -> {:ok, :none}
-      {:error, _reason} -> {:ok, :none}
+      {:ok, %Snapshot{buffers: [_ | _]} = snapshot} -> snapshot
+      {:ok, %Snapshot{}} -> nil
+      {:error, _reason} -> nil
     end
   end
 
-  @spec current_request?(EditorState.t(), t()) :: :current | {:stale, atom()}
+  # `:session_stale` means the saved session no longer applies but the swap scan still does.
+  # A file the user opened meanwhile wins over the saved session, while unsaved text is still recovered.
+  @spec current_request?(EditorState.t(), t()) ::
+          :current | {:session_stale, atom()} | {:stale, atom()}
   defp current_request?(state, effect) do
-    if current_configuration?(state, effect) do
-      current_startup_identity(state, effect)
-    else
-      {:stale, :session_configuration_changed}
+    cond do
+      not current_swap_configuration?(state, effect) ->
+        {:stale, :session_configuration_changed}
+
+      not current_session_configuration?(state, effect) ->
+        {:session_stale, :session_configuration_changed}
+
+      startup_identity(state) != effect.startup_identity ->
+        {:session_stale, :workspace_changed}
+
+      true ->
+        :current
     end
   end
 
-  @spec current_configuration?(EditorState.t(), t()) :: boolean()
-  defp current_configuration?(state, effect) do
+  @spec current_swap_configuration?(EditorState.t(), t()) :: boolean()
+  defp current_swap_configuration?(state, effect) do
     SessionHandler.swap_recovery_enabled?(state) == effect.swap_enabled? and
-      SessionHandler.restore_enabled?(state) == effect.session_enabled? and
       SessionState.swap_opts(state.session) == effect.swap_opts and
+      current_swap_scope?(swap_scope(state), effect.swap_scope)
+  end
+
+  @spec current_session_configuration?(EditorState.t(), t()) :: boolean()
+  defp current_session_configuration?(state, effect) do
+    SessionHandler.restore_enabled?(state) == effect.session_enabled? and
       SessionHandler.project_session_opts(state) == effect.session_opts
   end
 
-  @spec current_startup_identity(EditorState.t(), t()) :: :current | {:stale, atom()}
-  defp current_startup_identity(state, effect) do
-    if startup_identity(state) == effect.startup_identity,
-      do: :current,
-      else: {:stale, :workspace_changed}
+  # An editor that began with nothing open (`:none`) or on files keeps that scope when files are opened later.
+  # Only the project changing makes the result belong to another place.
+  @spec current_swap_scope?(swap_scope(), swap_scope()) :: boolean()
+  defp current_swap_scope?({:project, root}, {:project, root}), do: true
+  defp current_swap_scope?({:project, _now}, _then), do: false
+  defp current_swap_scope?(_now, {:project, _then}), do: false
+  defp current_swap_scope?(_now, _then), do: true
+
+  @spec swap_scope(EditorState.t()) :: swap_scope()
+  defp swap_scope(state) do
+    root = WorkspaceState.project_root(state.workspace)
+
+    cond do
+      SessionState.project_session?(state.session) and is_binary(root) -> {:project, root}
+      state.workspace.buffers.list != [] -> :startup_buffers
+      true -> :none
+    end
   end
 
   @spec startup_identity(EditorState.t()) :: startup_identity()
@@ -213,13 +310,8 @@ defmodule MingaEditor.Session.Recovery do
   defp apply_current(state, %Outcome{value: {:completed, :none}} = outcome),
     do: {state, outcome}
 
-  defp apply_current(state, %Outcome{value: {:completed, {:restore, snapshot}}} = outcome) do
-    {SessionRestore.apply_session_snapshot(state, snapshot), outcome}
-  end
-
-  defp apply_current(state, %Outcome{value: {:completed, {:recover, entries}}} = outcome) do
-    {SessionRestore.apply_recovered_entries(state, entries), outcome}
-  end
+  defp apply_current(state, %Outcome{value: {:completed, {:resume, resume}}} = outcome),
+    do: {SessionRestore.resume(state, resume), outcome}
 
   defp apply_current(state, %Outcome{value: {:failed, reason}} = outcome) do
     Minga.Log.warning(:editor, "Session recovery failed: #{inspect(reason)}")
@@ -227,6 +319,17 @@ defmodule MingaEditor.Session.Recovery do
   end
 
   defp apply_current(state, %Outcome{} = outcome), do: {state, outcome}
+
+  @spec apply_unsaved_text(EditorState.t(), Outcome.t(), atom()) ::
+          {EditorState.t(), Outcome.t()}
+  defp apply_unsaved_text(
+         state,
+         %Outcome{value: {:completed, {:resume, %{recovered: [_ | _]} = resume}}} = outcome,
+         _reason
+       ),
+       do: {SessionRestore.resume(state, %{resume | snapshot: nil}), outcome}
+
+  defp apply_unsaved_text(state, outcome, reason), do: {state, Outcome.stale(outcome, reason)}
 
   @spec admission_failed(EditorState.t(), term()) :: EditorState.t()
   defp admission_failed(state, reason) do
