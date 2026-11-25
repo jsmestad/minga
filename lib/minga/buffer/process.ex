@@ -2997,12 +2997,110 @@ defmodule Minga.Buffer.Process do
 
   @impl true
   @spec terminate(term(), state()) :: :ok
-  def terminate(_reason, state) do
-    # Clean up timers and swap files on orderly shutdown (buffer closed, editor quit).
+  def terminate(reason, state) do
     state = state |> cancel_auto_save_timer() |> revoke_swap_writes()
-    delete_swap_file(state)
+
+    if deliberate_stop?(reason) do
+      # A closed buffer leaves nothing to recover.
+      delete_swap_file(state)
+    else
+      keep_swap_after_crash(state, reason)
+    end
+
     :ok
   end
+
+  # `GenServer.stop/1`, a supervisor shutdown and a `{:stop, ...}` return are deliberate. Any other reason is a crash.
+  @spec deliberate_stop?(term()) :: boolean()
+  defp deliberate_stop?(:normal), do: true
+  defp deliberate_stop?(:shutdown), do: true
+  defp deliberate_stop?({:shutdown, _detail}), do: true
+  defp deliberate_stop?(_reason), do: false
+
+  # A crash must not cost the user their unsaved text, so the swap file stays on disk.
+  # The swap on disk can be one debounce old, or missing, so the current text is written first.
+  # The log names both paths, and `:buffer_crashed` tells the editor which swap to recover.
+  @spec keep_swap_after_crash(state(), term()) :: :ok
+  defp keep_swap_after_crash(%{buffer_type: :file, file_path: path} = state, reason)
+       when is_binary(path) do
+    outcome = flush_swap_for_crash(state, path)
+
+    Minga.Log.error(
+      :editor,
+      "Buffer for #{path} crashed (#{crash_summary(reason)}). #{crash_outcome_text(outcome)}"
+    )
+
+    case outcome do
+      {:kept, swap_path} ->
+        Events.broadcast(
+          :buffer_crashed,
+          %Events.BufferCrashedEvent{buffer: self(), path: path, swap_path: swap_path},
+          state.events_registry
+        )
+
+      _nothing_to_recover ->
+        :ok
+    end
+  end
+
+  defp keep_swap_after_crash(_state, _reason), do: :ok
+
+  @spec crash_outcome_text({:kept, String.t()} | :clean | :not_kept) :: String.t()
+  defp crash_outcome_text({:kept, swap_path}), do: "Its unsaved text is kept in #{swap_path}."
+  defp crash_outcome_text(:clean), do: "It had no unsaved text."
+  defp crash_outcome_text(:not_kept), do: "Its unsaved text could not be kept."
+
+  # `:clean` means there was nothing to keep. `:not_kept` means unsaved text existed and no swap file holds it:
+  # the buffer has no swap directory, or the write failed and no earlier swap is on disk.
+  @spec flush_swap_for_crash(state(), String.t()) :: {:kept, String.t()} | :clean | :not_kept
+  defp flush_swap_for_crash(state, path) do
+    cond do
+      not BufState.dirty?(state) -> :clean
+      not SwapState.configured?(state.swap) -> :not_kept
+      true -> write_crash_swap(state, path)
+    end
+  end
+
+  @spec write_crash_swap(state(), String.t()) :: {:kept, String.t()} | :not_kept
+  defp write_crash_swap(state, path) do
+    opts = SwapState.backend_options(state.swap, state.swap.generation)
+    swap_path = Minga.Session.Swap.swap_path(path, opts)
+
+    case write_swap_now(state, path, opts) do
+      :ok ->
+        {:kept, swap_path}
+
+      {:error, reason} ->
+        # A failed write leaves the last published swap in place: older text, but still unsaved text.
+        log_swap_failure(state, {:crash_flush_failed, reason})
+        if File.exists?(swap_path), do: {:kept, swap_path}, else: :not_kept
+    end
+  end
+
+  # Runs in the dying buffer process.
+  # Every failure, including a document that cannot be read, becomes an error value.
+  # It cannot replace the original crash.
+  @spec write_swap_now(state(), String.t(), keyword()) :: :ok | {:error, term()}
+  defp write_swap_now(state, path, opts) do
+    backend = SwapState.backend(state.swap)
+
+    swap_backend_call(fn ->
+      with {:ok, prepared} <- backend.prepare(path, Document.content(state.document), opts) do
+        backend.publish(prepared)
+      end
+    end)
+  end
+
+  # A raising callback exits with `{error, stacktrace}`.
+  # Its message reads better than the raw term, and the stacktrace is in the crash report.
+  @spec crash_summary(term()) :: String.t()
+  defp crash_summary({error, stacktrace}) when is_list(stacktrace) do
+    :error |> Exception.normalize(error, stacktrace) |> Exception.message()
+  rescue
+    _not_an_error -> inspect(error, limit: 5, printable_limit: 200)
+  end
+
+  defp crash_summary(reason), do: inspect(reason, limit: 5, printable_limit: 200)
 
   # ── Find and Replace helpers ──
 

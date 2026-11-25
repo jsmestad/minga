@@ -11,6 +11,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Commands
   alias MingaEditor.HighlightSync
+  alias MingaEditor.Session.CrashRecovery
   alias MingaEditor.Shell.BufferMetadata
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Workflow, as: ShellWorkflow
@@ -87,6 +88,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   def retire_dead_buffer(%EditorState{} = state, pid) when is_pid(pid) do
     state = ShellWorkflow.ensure_available(state)
     Minga.Log.info(:editor, "Buffer process #{inspect(pid)} died, removing from state")
+    {crash, state} = EditorState.take_buffer_crash(state, pid)
 
     transitioned =
       state
@@ -100,7 +102,11 @@ defmodule MingaEditor.Handlers.BufferRegistry do
     transitioned =
       EditorState.install_buffer_shell_transition(transitioned, runtime, workspace)
 
-    WorkspaceWorkflow.persist_changes(state, transitioned)
+    # A buffer that crashed with unsaved text announced its swap file.
+    # The file is reopened with that text once the dead buffer is gone.
+    state
+    |> WorkspaceWorkflow.persist_changes(transitioned)
+    |> CrashRecovery.schedule(crash)
   end
 
   @spec do_file_tree_open(state(), pid(), String.t(), FileTree.t()) :: state()

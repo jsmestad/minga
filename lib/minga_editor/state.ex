@@ -403,6 +403,18 @@ defmodule MingaEditor.State do
     %{state | workspace: workspace, shell_runtime: runtime}
   end
 
+  @doc "Records the crash a monitored buffer announced before it exited."
+  @spec record_buffer_crash(t(), Minga.Events.BufferCrashedEvent.t()) :: t()
+  def record_buffer_crash(%__MODULE__{} = state, %Minga.Events.BufferCrashedEvent{} = crash),
+    do: %{state | buffer_lifecycle: BufferLifecycle.record_crash(state.buffer_lifecycle, crash)}
+
+  @doc "Takes the crash a dead buffer announced, or `nil` when it stopped without one."
+  @spec take_buffer_crash(t(), pid()) :: {Minga.Events.BufferCrashedEvent.t() | nil, t()}
+  def take_buffer_crash(%__MODULE__{} = state, pid) when is_pid(pid) do
+    {crash, lifecycle} = BufferLifecycle.take_crash(state.buffer_lifecycle, pid)
+    {crash, %{state | buffer_lifecycle: lifecycle}}
+  end
+
   @doc "Removes a retired buffer across every root owner that retains its identity."
   @spec remove_buffer(t(), pid()) :: t()
   def remove_buffer(%__MODULE__{} = state, pid) when is_pid(pid) do

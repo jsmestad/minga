@@ -10,6 +10,7 @@ defmodule MingaEditor.Handlers.SessionRestore do
 
   alias MingaEditor.Commands
   alias MingaEditor.Handlers.BufferRegistry
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Session, as: EditorSessionState
 
@@ -64,6 +65,41 @@ defmodule MingaEditor.Handlers.SessionRestore do
     )
 
     Enum.reduce(entries, state, &apply_recovered_entry/2)
+  end
+
+  @doc """
+  Reopens a file whose buffer crashed and gives the new buffer the unsaved text kept in its swap file.
+
+  The reopened buffer is dirty, so the text is still unsaved and the buffer owns the swap file again. If the file cannot be reopened, or the new buffer stops before it takes the text, the Editor keeps running and the swap file stays for the next start.
+  """
+  @spec recover_crashed_buffer(state(), String.t(), String.t()) :: state()
+  def recover_crashed_buffer(state, file_path, content)
+      when is_binary(file_path) and is_binary(content) do
+    case reopen_with_content(state, file_path, content) do
+      {:ok, state} ->
+        Minga.Log.info(:editor, "Recovered after a crash: #{Path.basename(file_path)}")
+
+        NoticeWorkflow.publish(
+          state,
+          "#{Path.basename(file_path)} was reopened with its unsaved text after its buffer crashed"
+        )
+
+      {:error, reason} ->
+        crash_recovery_failed(state, file_path, reason)
+    end
+  catch
+    # The reopened buffer can stop between its start and the content call. Its monitor retires it.
+    :exit, reason -> crash_recovery_failed(state, file_path, {:exit, reason})
+  end
+
+  @spec crash_recovery_failed(state(), String.t(), term()) :: state()
+  defp crash_recovery_failed(state, file_path, reason) do
+    Minga.Log.warning(
+      :editor,
+      "Could not reopen #{file_path} with its unsaved text; its swap file is kept: #{inspect(reason, limit: 5)}"
+    )
+
+    state
   end
 
   @spec maybe_check_swap_recovery(state()) :: :ok
@@ -131,24 +167,13 @@ defmodule MingaEditor.Handlers.SessionRestore do
   # The buffer is marked dirty since the recovered content hasn't been saved.
   @spec recover_buffer(state(), String.t(), String.t()) :: state()
   defp recover_buffer(state, file_path, content) do
-    case Commands.start_buffer(file_path, state.interaction.options_server,
-           events_registry: state.extension_surfaces.events_registry
-         ) do
-      {:ok, pid} ->
-        # Replace buffer content with the recovered swap data.
-        # This marks the buffer dirty (unsaved changes from the crash).
-        case Buffer.replace_content(pid, content, :recovery) do
-          :ok ->
-            BufferRegistry.register_buffer(state, pid, file_path)
+    case reopen_with_content(state, file_path, content) do
+      {:ok, state} ->
+        state
 
-          {:error, :read_only} ->
-            Minga.Log.info(
-              :editor,
-              "Cannot recover #{Path.basename(file_path)}: read-only"
-            )
-
-            state
-        end
+      {:error, :read_only} ->
+        Minga.Log.info(:editor, "Cannot recover #{Path.basename(file_path)}: read-only")
+        state
 
       {:error, reason} ->
         Minga.Log.info(
@@ -157,6 +182,19 @@ defmodule MingaEditor.Handlers.SessionRestore do
         )
 
         state
+    end
+  end
+
+  # Starts (or finds) the buffer for a file and gives it the recovered text, which marks it dirty.
+  # Then registers the buffer with the editor.
+  @spec reopen_with_content(state(), String.t(), String.t()) :: {:ok, state()} | {:error, term()}
+  defp reopen_with_content(state, file_path, content) do
+    with {:ok, pid} <-
+           Commands.start_buffer(file_path, state.interaction.options_server,
+             events_registry: state.extension_surfaces.events_registry
+           ),
+         :ok <- Buffer.replace_content(pid, content, :recovery) do
+      {:ok, BufferRegistry.register_buffer(state, pid, file_path)}
     end
   end
 end

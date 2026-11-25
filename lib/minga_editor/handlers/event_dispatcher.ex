@@ -83,6 +83,10 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   def dispatch(state, :buffer_closed, %Events.BufferClosedEvent{path: path}, _msg),
     do: FileWatcherHelpers.unwatch_closed_path(state, path)
 
+  # The buffer is still exiting. Its `:DOWN` arrives next and retires it; recovery starts there.
+  def dispatch(state, :buffer_crashed, %Events.BufferCrashedEvent{} = crash, _msg),
+    do: EditorState.record_buffer_crash(state, crash)
+
   def dispatch(
         state,
         :lsp_status_changed,

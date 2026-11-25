@@ -32,6 +32,7 @@ defmodule Minga.Events do
   | `:buffer_opened`  | `BufferEvent`        | `buffer: pid(), path: String.t()`              |
   | `:buffer_path_changed` | `BufferEvent`    | `buffer: pid(), path: String.t()`              |
   | `:buffer_closed`  | `BufferClosedEvent`  | `buffer: pid(), path: String.t() \| :scratch`  |
+  | `:buffer_crashed` | `BufferCrashedEvent` | `buffer: pid(), path: String.t(), swap_path: String.t()` |
   | `:buffer_changed` | `BufferChangedEvent` | `buffer: pid(), source: EditSource.t(), sequence: ChangeLog.sequence()`  |
   | `:file_watcher_ready` | `Minga.FileWatcher.ReadyEvent` | `watcher: pid()` |
   | `:mode_changed`   | `ModeEvent`          | `old: atom(), new: atom()`        |
@@ -93,6 +94,18 @@ defmodule Minga.Events do
     defstruct [:buffer, :path]
 
     @type t :: %__MODULE__{buffer: pid(), path: String.t() | :scratch}
+  end
+
+  defmodule BufferCrashedEvent do
+    @moduledoc """
+    Payload for `:buffer_crashed` events.
+
+    A file buffer broadcasts it from `terminate/2` when it stops for any reason other than a deliberate stop and it kept a swap file with unsaved text. `swap_path` is the file to recover. The buffer process is still alive when the event is sent and exits right after, so a subscriber that monitors the buffer sees this event before its `:DOWN`.
+    """
+    @enforce_keys [:buffer, :path, :swap_path]
+    defstruct [:buffer, :path, :swap_path]
+
+    @type t :: %__MODULE__{buffer: pid(), path: String.t(), swap_path: String.t()}
   end
 
   defmodule BufferChangedEvent do
@@ -327,6 +340,7 @@ defmodule Minga.Events do
           | :buffer_opened
           | :buffer_path_changed
           | :buffer_closed
+          | :buffer_crashed
           | :buffer_changed
           | :content_replaced
           | :mode_changed
@@ -374,6 +388,7 @@ defmodule Minga.Events do
   @type payload ::
           BufferEvent.t()
           | BufferClosedEvent.t()
+          | BufferCrashedEvent.t()
           | FileWrittenEvent.t()
           | BufferChangedEvent.t()
           | ModeEvent.t()
@@ -505,6 +520,7 @@ defmodule Minga.Events do
           BufferEvent.t()
         ) :: :ok
   @spec broadcast(:buffer_closed, BufferClosedEvent.t()) :: :ok
+  @spec broadcast(:buffer_crashed, BufferCrashedEvent.t()) :: :ok
   @spec broadcast(:buffer_changed, BufferChangedEvent.t()) :: :ok
   @spec broadcast(:mode_changed, ModeEvent.t()) :: :ok
   @spec broadcast(:tool_missing, ToolMissingEvent.t()) :: :ok
