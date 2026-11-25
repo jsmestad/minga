@@ -774,6 +774,27 @@ All positions in Minga are `{line, byte_col}`, byte offsets within a line, not g
 
 Grapheme conversion happens only at the **render boundary**, when converting cursor position to screen column. This runs only for visible lines (~40–50 per frame), which is negligible.
 
+### Unsaved text across a crash
+
+An editor that loses your last hour of typing to a crash or a dead battery is not an editor you trust. Every file buffer in an interactive editor keeps its unsaved text in a swap file, and the next start of the same project gives it back.
+
+**Writing.** Five seconds after the last edit, a dirty file buffer copies its text once and hands it to a worker process. The worker writes a temporary file in the swap directory (`~/.local/share/minga/swap`, or `$XDG_DATA_HOME/minga/swap`) and the buffer renames it into place. Nothing happens per keystroke, and the file write never runs in the buffer process. Each stage emits a `[:minga, :swap, :write]` telemetry span (`snapshot`, `prepare`, `publish`). A buffer that an agent tool opens goes through the same path (`Minga.Buffer.ensure_for_path/3`), so an edit nobody has reviewed yet is kept the same way as your own.
+
+**Who writes.** Only a VM that runs an interactive editor (`Minga.Session.buffer_swap_dir/0`). A headless editor, a benchmark, a storyboard run and a gateway-only runtime write no swap files, because nothing would recover them and a later real session would "recover" text that no user typed.
+
+**When a swap file leaves the disk.** A swap file is the only copy of its text, so it is removed in these cases and no others:
+
+- the buffer is saved or closed;
+- you quit, with or without saving (`:q`, `:qa!`, `:cq`, the quit prompt, the native quit): a quit is your decision about every open buffer, so `Minga.Buffer.release_swaps/1` removes this run's swap files before the VM stops;
+- a buffer takes the text over at the next start and has written its own swap file (`Minga.Buffer.adopt_recovered_text/3`);
+- a startup scan finds that the file on disk already holds the same text.
+
+A crash, a `kill`, a lost frontend or a power cut is not a decision, so the swap files stay. A swap file is never removed for its age, and a swap whose file no longer exists is still recovered into a buffer for that path.
+
+**Recovery.** Opening a project picks up where the last run stopped in one step (`MingaEditor.Session.Recovery`, applied by `MingaEditor.Handlers.SessionRestore.resume/2`): the saved session comes back first, then each swap file's text goes into its buffer, and one notice says what was restored and what was recovered. Only the swap files of the opened project are recovered, matched by canonical path so a symlinked project root finds them. An editor started on one file (`minga lib/foo.ex`) recovers that file only. Unsaved text of another project is never recovered into this one: it stays on disk, a `*Messages*` line says that it is waiting, and `Minga.Session.recoverable_projects/1` lists where.
+
+**A buffer that crashes while the editor keeps running** writes its swap from `terminate/2` and announces `:buffer_crashed`. The editor reopens the file with the text (`MingaEditor.Session.CrashRecovery`), and the new buffer owns the same swap file.
+
 ---
 
 ## Git Integration

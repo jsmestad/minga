@@ -640,6 +640,7 @@ The keystroke-to-render critical path is instrumented with `:telemetry` spans vi
 | `[:minga, :input, :dispatch]` | | Keystroke dispatch through input router |
 | `[:minga, :command, :execute]` | `command` atom | Named command execution |
 | `[:minga, :port, :emit]` | `byte_count` | Protocol encoding + port write |
+| `[:minga, :swap, :write]` | `stage` atom (`snapshot`, `prepare`, `publish`), `byte_count` on `prepare` | One stage of a buffer's swap file write |
 
 **Adding new spans:** Use `Minga.Telemetry.span/3` (not raw `:telemetry.span/3`). It handles the metadata passthrough correctly for telemetry 1.3:
 
