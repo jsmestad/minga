@@ -193,6 +193,12 @@ func (c *Capabilities) Expire() bool {
 	return changed
 }
 
+// SameStatuses reports whether two values say the same about every feature, whatever settled it.
+// The report sent to the BEAM carries statuses only, so a value that differs only in how a feature was settled is no news there.
+func (c Capabilities) SameStatuses(other Capabilities) bool {
+	return c.status == other.status
+}
+
 // Pending reports whether the terminal still owes an answer for some feature.
 func (c Capabilities) Pending() bool {
 	for _, feature := range reported {

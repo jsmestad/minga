@@ -209,3 +209,45 @@ func TestLinesAreRecomposedWhenTheTerminalsFeaturesOrPlaceChange(t *testing.T) {
 		})
 	}
 }
+
+func TestAConfirmingAnswerFromAKnownTerminalIsNotReportedAgain(t *testing.T) {
+	out := make(chan []byte, 16)
+	ghostty := func(name string) string {
+		if name == "TERM_PROGRAM" {
+			return "ghostty"
+		}
+		return ""
+	}
+	model := New(80, 24, out).WithTerminalEnvironment(ghostty)
+	if !model.capabilities.Supports(generated.TerminalFeatureStyledUnderlines) {
+		t.Fatal("a known terminal has styled underlines from the start")
+	}
+
+	// The timeout settles the rest: the one settled report goes out.
+	updated, _ := model.Update(capabilityTimeoutMsg{})
+	model = updated.(Model)
+	if report := lastReport(drainOutboundPackets(out)); report[generated.TerminalFeatureStyledUnderlines] != generated.TerminalFeatureStatusDetected {
+		t.Fatalf("settled report = %v", report)
+	}
+
+	// The terminal then confirms what the table said. Only how the feature was settled changes, which the report does not carry.
+	for _, content := range []string{"Smulx=\x1b[4:%p1%dm", "Setulc=\x1b[58:2::%p1%dm"} {
+		updated, _ = model.Update(tea.CapabilityMsg{Content: content})
+		model = updated.(Model)
+	}
+	if again := lastReport(drainOutboundPackets(out)); again != nil {
+		t.Fatalf("an identical report was sent again: %v", again)
+	}
+}
+
+func TestTheHeroCardsBorderDimsInTheBackground(t *testing.T) {
+	model, _ := terminalModel()
+	if !sameColor(model.emptyBorderColor(false, true), model.palette().Accent()) {
+		t.Fatal("a focused card has the accent border")
+	}
+	updated, _ := model.Update(tea.BlurMsg{})
+	model = updated.(Model)
+	if !sameColor(model.emptyBorderColor(false, true), model.palette().AccentSoft()) {
+		t.Fatal("in the background the card keeps its resting border")
+	}
+}

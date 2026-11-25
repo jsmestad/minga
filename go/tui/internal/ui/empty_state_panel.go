@@ -291,7 +291,8 @@ func (m Model) emptyBorderColor(crashed bool, focused bool) color.Color {
 	case crashed:
 		return p.Warning()
 	case focused:
-		return p.Accent()
+		// In the background nothing has the keyboard, so the card keeps its resting colour.
+		return p.FocusBorder(p.AccentSoft())
 	default:
 		return p.AccentSoft()
 	}

@@ -251,8 +251,9 @@ func (m Model) WithTerminalEnvironment(getenv func(string) string) Model {
 	return m
 }
 
-// TerminalReportPacket reports what is known about the host terminal before it has answered anything: every detected
-// feature is pending. It follows the ready packet, so the BEAM knows from the start that this frontend has a host terminal.
+// TerminalReportPacket reports what is known about the host terminal before it has answered anything: a feature is
+// pending unless the terminal is a known one that is taken to have it. It follows the ready packet, so the BEAM knows
+// from the start that this frontend has a host terminal.
 func (m Model) TerminalReportPacket() []byte {
 	return protocol.EncodeTerminalReport(m.capabilities)
 }
@@ -342,7 +343,7 @@ func (m *Model) observeTerminal(msg tea.Msg) {
 	if m.capabilities != before || m.terminalInBackground != wasInBackground {
 		m.lineCache.reset()
 	}
-	if m.capabilities != m.reportedCapabilities && !m.capabilities.Pending() && m.send(protocol.EncodeTerminalReport(m.capabilities)) {
+	if !m.capabilities.SameStatuses(m.reportedCapabilities) && !m.capabilities.Pending() && m.send(protocol.EncodeTerminalReport(m.capabilities)) {
 		m.reportedCapabilities = m.capabilities
 	}
 }
