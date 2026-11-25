@@ -1,6 +1,6 @@
 {
   "macos": {
-    "commit": "dddc29e8cff1538ce3490d400103180d32e73f51-dirty",
+    "commit": "fa2fe7d676061111d4e52d4d08a58e4f959a1182",
     "files": {
       "macos-astrodark-1280.json": "29924cd78304b13ca8decfad9cc51b15e2aeb6883a0f9b813cb2911a075152f2",
       "macos-astrodark-1440.json": "2e7b3078052a5ca94dcf945aceac761b42a9f2d7ef842fd5947325b41e909f35",
@@ -10,13 +10,17 @@
       "macos-catppuccin_latte-1440.json": "c200440264ee57cd74b92b2b3d48dd7dbf7bd96336d571f54de954ad202d7fa7"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "0a2a34fdfa5c62501a54ccb51568f6a114bd2d1e587a97f491e535f6e70eebde",
-      "macos-astrodark-1440.json": "637ff57b85645a077a0ca1465b46bfbf4b5ed6e75cbadd54680f46c434c6a106",
-      "macos-catppuccin_frappe-1280.json": "6ded19708e32394c72f6a5c97bf1bee45e3256f152ae770b2d6b00eccf378a7d",
-      "macos-catppuccin_frappe-1440.json": "afb85d8c5a838d6c72c6d65fcd4fd4fce5804445a6ab276feffc70630745a339",
-      "macos-catppuccin_latte-1280.json": "4b525670ecff8f8f035c76a1f8a0f74ecc2249d394fb2f6e52c6261c641a11ce",
-      "macos-catppuccin_latte-1440.json": "fe389296e00c2d4be6220c5a5d92bab43d92fedfd90c9ce6ae6002a384ed2206"
+      "macos-astrodark-1280.json": "79d217324737fbeb7e16633de38a75da380412b8edf1e4c1a492ab2f45254f53",
+      "macos-astrodark-1440.json": "92db0cefd32ffb928ec4cf89349c113492fdb178ad02c0c9c2f23adc34299f0a",
+      "macos-catppuccin_frappe-1280.json": "8e17458463431adf6595c3b80b6fda375bfe04c40edbec3d8bc56c42b72ea8fb",
+      "macos-catppuccin_frappe-1440.json": "b3fd4c1d46857a5fb2db6d644f0724cddeb5600a75a873c59c7412a45aa6157c",
+      "macos-catppuccin_latte-1280.json": "f41ada7383377fc7b8c8a0515579758b32a6c40c9f21d5de5fb5fae25ae8f114",
+      "macos-catppuccin_latte-1440.json": "b1a6247d6ccbd5bfeaff97504d0c0f18f721c52809fdc24c7ef5ef6a90a32270"
     }
+  },
+  "platform_specific": {
+    "frontend": "tui",
+    "reason": "the scenario now opens its file from the project home, so the TUI frame is drawn before the parser's fold ranges arrive and shows no fold marks; macOS draws no fold marks in either frame"
   },
   "scenario": "git.status.clean",
   "tui": {
