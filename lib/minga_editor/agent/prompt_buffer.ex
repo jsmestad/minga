@@ -79,12 +79,18 @@ defmodule MingaEditor.Agent.PromptBuffer do
   @spec cursor_after_prefix({non_neg_integer(), non_neg_integer()}, String.t()) ::
           {non_neg_integer(), non_neg_integer()}
   defp cursor_after_prefix({line, col}, prefix) do
-    lines = String.split(prefix, "\n")
-    last_line = length(lines) - 1
+    newlines = :binary.matches(prefix, "\n")
+    last_line = length(newlines)
+
+    last_width =
+      case newlines do
+        [] -> byte_size(prefix)
+        _ -> byte_size(prefix) - (newlines |> Enum.max() |> elem(0)) - 1
+      end
 
     cond do
       line > last_line -> {line - last_line, col}
-      line == last_line -> {0, max(col - byte_size(List.last(lines)), 0)}
+      line == last_line -> {0, max(col - last_width, 0)}
       true -> {0, 0}
     end
   end
