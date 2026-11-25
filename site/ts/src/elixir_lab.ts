@@ -10,6 +10,9 @@ import { renderElixirBlockDom } from "./highlight.ts";
 import { readLabCopy } from "./lab/copy.ts";
 import { completeMission } from "./progress.ts";
 
+/** The lesson's two progress ids, in order. LESSON_STEPS.elixir in progress.ts holds the same list. */
+export const ELIXIR_STEPS = ["translated", "copied"] as const;
+
 /* The translator. */
 
 export const SOURCE_EDITORS = ["lua", "elisp", "vscode"] as const;
@@ -71,7 +74,7 @@ export function mountElixirTranslator(root: HTMLElement): void {
       item.classList.toggle("is-active", on);
       item.querySelector(".tr-row")?.setAttribute("aria-expanded", String(on));
     }
-    if (hasTranslated(state)) completeMission("elixir", "translated");
+    if (hasTranslated(state)) completeMission("elixir", ELIXIR_STEPS[0]);
   }
 
   for (const button of editorButtons) {
@@ -244,7 +247,7 @@ export function mountElixirPlayground(root: HTMLElement): void {
     written.then(
       () => {
         setStatus("copied");
-        completeMission("elixir", "copied");
+        completeMission("elixir", ELIXIR_STEPS[1]);
       },
       () => setStatus("copy_failed"),
     );

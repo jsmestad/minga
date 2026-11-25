@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   DEFAULT_CONFIG,
+  ELIXIR_STEPS,
   GO_TAB_WIDTHS,
   LINE_NUMBER_MODES,
   MINGA_THEMES,
@@ -17,6 +18,7 @@ import {
   selectRow,
   type TranslatorRow,
 } from "../src/elixir_lab.ts";
+import { LESSON_STEPS } from "../src/progress.ts";
 import { evaluatePreToolUse } from "../src/remote_lab.ts";
 import { readPageLab } from "./support/page_copy.ts";
 
@@ -120,6 +122,12 @@ describe("Lesson 04 translator", () => {
     const open = selectRow(chooseEditor(TRANSLATOR_START, "lua"), "key");
     assert.deepEqual(selectRow(open, "key"), { editor: "lua", row: null });
     assert.deepEqual(selectRow(open, "theme"), { editor: "lua", row: "theme" });
+  });
+});
+
+describe("Lesson 04 progress", () => {
+  it("records exactly the ids the lesson list holds", () => {
+    assert.deepEqual(LESSON_STEPS.elixir, ELIXIR_STEPS);
   });
 });
 
