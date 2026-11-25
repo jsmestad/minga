@@ -739,80 +739,16 @@ defmodule Minga.Buffer.Provenance do
     end
   end
 
-  # Steps never merge into one class around a group of yours that the class touched or that a cycle could run through.
-  # A merged class reverts as one node; either would hold the class by your edit while a step blocks your undo. Dependencies point from older groups to newer ones except inside merged classes, so a cycle through
-  # your group `y` needs a class with members on both sides of `y`, an edge into `y` (another group's mark that `y`
-  # partly consumed its replacement) and an edge out of `y` (a later Minga group that deleted text `y` wrote or
-  # removed). Every merge is checked over the class it would make, so no class ever spans such a group. Only your
-  # groups count; they are few and become final.
+  # Steps never merge while a group of yours newer than the class's oldest step can still be undone. Such a group is
+  # the only way an edit of yours can reach a merged class: through a mark it left on a member's replacement, or on a
+  # dependent's, and dependents are newer still. With none, no edit of yours can hold the class or wait for it, so a
+  # merge changes nothing a press or `u` can see. History from before your latest edit compacts once that edit is
+  # final.
   @spec merge_allowed?(t(), [group_id()]) :: boolean()
   defp merge_allowed?(prov, members) do
-    {low, high} = Enum.min_max(members)
-
-    not Enum.any?(prov.groups, fn
-      {id, %Group{author: :you} = group} when id > low and id < high ->
-        touched_by_class?(prov, id, group, members) or on_a_cycle?(prov, id, group)
-
-      _other ->
-        false
-    end)
+    oldest = Enum.min(members)
+    not Enum.any?(prov.groups, &match?({id, %Group{author: :you}} when id > oldest, &1))
   end
-
-  # Your group between the class's steps that the class touched: it deleted or marked text of a step older than it in
-  # the class, or a step newer than it in the class deleted text it wrote or removed. Merged, the class would wait for
-  # your undo of that group while your newer undos wait for the class.
-  @spec touched_by_class?(t(), group_id(), Group.t(), [group_id()]) :: boolean()
-  defp touched_by_class?(prov, id, group, members) do
-    {lower, upper} = Enum.split_with(members, &(&1 < id))
-
-    marked? =
-      Enum.any?(lower, &(id in Map.get(prov.group_marks, &1, []))) or
-        prov.overlap_runs
-        |> Map.get(id, [])
-        |> Enum.any?(fn run_id ->
-          case RunTree.fetch(prov.tree, run_id) do
-            {:ok, run, _offset} -> Enum.any?(lower, &({&1, id} in run.overlaps))
-            :error -> false
-          end
-        end)
-
-    marked? or
-      group.runs
-      |> :gb_sets.to_list()
-      |> Enum.any?(fn run_id ->
-        case RunTree.fetch(prov.tree, run_id) do
-          {:ok, run, _offset} ->
-            (id in run.deletions and Enum.any?(lower, &(&1 == run.group or &1 in run.deletions))) or
-              Enum.any?(upper, &(&1 in run.deletions))
-
-          :error ->
-            false
-        end
-      end)
-  end
-
-  @spec on_a_cycle?(t(), group_id(), Group.t()) :: boolean()
-  defp on_a_cycle?(prov, id, group) do
-    marked? =
-      Map.get(prov.overlap_runs, id, []) != [] or
-        Enum.any?(prov.group_marks, fn {_owner, overlaps} -> id in overlaps end)
-
-    marked? and
-      group.runs
-      |> :gb_sets.to_list()
-      |> Enum.any?(fn run_id ->
-        case RunTree.fetch(prov.tree, run_id) do
-          {:ok, run, _offset} ->
-            Enum.any?(later_deleters(run, id), &(&1 != id and minga_group?(prov, &1)))
-
-          :error ->
-            false
-        end
-      end)
-  end
-
-  @spec minga_group?(t(), group_id()) :: boolean()
-  defp minga_group?(prov, id), do: match?(%{^id => %Group{author: {:minga, _task}}}, prov.groups)
 
   @doc """
   Merges step `old` into the newer step `new` of the same task across the stretch from locator `first` to locator `last`: every run there that names `old` as its writer or a deleter names `new` instead, and text `new` now both wrote and deleted is dropped, since it can never be live again.

@@ -421,15 +421,23 @@ defmodule Minga.Buffer.AuthorshipTest do
       assert BufferProcess.content(buffer) == "aaa bbb\n"
     end
 
-    # Addendum 4 F2: without compaction a press reverts step s1 and stops where your edit holds s4. With a budget of 3,
-    # s4 is merged into s1, so your edit holds the unit: the press reports the hold and stays on task t1 instead of
-    # moving on to t2. That is the one documented difference compaction makes to a press.
+    # Merge consequence 2, from Addendum 4 F2: without compaction a press reverts step s1 and stops where your edit
+    # holds s4. With a budget of 3, s4 is merged into s1 before your edits, so your edit holds the class: the press
+    # reports the hold and stays on task t1 instead of moving on to t2.
     test "F2: a press stays on the task your edit holds, whether or not compaction merged its steps" do
-      for {opts, expected_result, expected_text} <- [
-            {[], {:ok, 1}, "afbarb"},
-            {[history_run_budget: 3], {:blocked, {:overlaps, :you}}, "afb"}
+      for {opts, expected_result, expected_text, expected_message} <- [
+            {[], {:ok, 1}, "afbarb", ~r/^1 of 2 steps of Minga task t1 .*your edit near line 1/},
+            {[history_run_budget: 3], {:blocked, {:overlaps, :you}}, "afb",
+             ~r/^0 steps of Minga task t1 .*your edit near line 1 holds them/}
           ] do
-        buffer = start_supervised!({BufferProcess, [content: ""] ++ opts}, id: make_ref())
+        registry = Module.concat(__MODULE__, "Events#{System.unique_integer([:positive])}")
+        start_supervised!({Registry, keys: :duplicate, name: registry}, id: make_ref())
+        :ok = Minga.Events.subscribe(:log_message, registry)
+
+        buffer =
+          start_supervised!({BufferProcess, [content: "", events_registry: registry] ++ opts},
+            id: make_ref()
+          )
 
         at =
           &Minga.Buffer.Position.from_point(
@@ -448,7 +456,35 @@ defmodule Minga.Buffer.AuthorshipTest do
         assert BufferProcess.content(buffer) == "afb"
         assert BufferProcess.undo_agent_session(buffer) == expected_result
         assert BufferProcess.content(buffer) == expected_text
+        assert_receive {:minga_event, :log_message, %{text: "Reverted " <> message}}
+        assert message =~ expected_message
       end
+    end
+
+    # The press's one exception: it leaves a task your edit holds only when your next undo is itself blocked by a later
+    # Minga step. Here your "e", typed inside b1's replacement, holds b1, while a1 deleted your newer "y", so `u` must
+    # wait for a1; staying on task b would leave neither the press nor `u` able to move.
+    test "a press moves past a task your edit holds when your next undo waits for another task's step" do
+      buffer = start("q\n")
+      replace_at(buffer, {0, 0}, 1, "BCD", step("b", "b1"))
+      replace_at(buffer, {0, 1}, 1, "e")
+      :ok = BufferProcess.break_undo_coalescing(buffer)
+      replace_at(buffer, {0, 3}, 0, "y")
+      :ok = BufferProcess.break_undo_coalescing(buffer)
+      replace_at(buffer, {0, 3}, 1, "", step("a", "a1"))
+      replace_at(buffer, {0, 3}, 0, "Z", step("b", "b2"))
+      assert BufferProcess.content(buffer) == "BeDZ\n"
+
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "BeD\n"
+      assert {:blocked, {:overlaps, {:minga, "a", "a1"}}} = BufferProcess.undo(buffer)
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "BeDy\n"
+      assert :ok = BufferProcess.undo(buffer)
+      assert :ok = BufferProcess.undo(buffer)
+      assert BufferProcess.content(buffer) == "BCD\n"
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "q\n"
     end
 
     # Addendum 4 F1: a deletion slides only to a place both its ends are cuts the editor can make, never across bytes of

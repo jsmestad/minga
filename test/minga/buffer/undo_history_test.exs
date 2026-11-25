@@ -751,28 +751,84 @@ defmodule Minga.Buffer.UndoHistoryTest do
               slice <- StreamData.integer(1..20),
               max_runs: runs(300)
             ) do
-        {before, rest} = Enum.split(commands, cut)
-        plain = Enum.reduce(before, world("abc\ndef\n", run_budget: budget), &run/2)
-        compacted = plain |> want_compaction() |> compact_fully(slice)
-
-        assert text(compacted) == text(plain)
-        assert outcome(step(compacted, :undo)) == outcome(step(plain, :undo))
-        %{task_ticks: ticks} = plain.history
-
-        for {task, _tick} <- ticks do
-          assert reject_text(compacted, task) == reject_text(plain, task)
-        end
-
-        compacted =
-          Enum.reduce(rest, compacted, fn command, world ->
-            command |> run(world) |> compact_fully(slice)
-          end)
-
-        {:done, world} = unwind(compacted)
-        assert text(world) == "abc\ndef\n"
+        slices_case(commands, cut, budget, slice)
       end
 
       IO.puts("\n[compaction] history slices run: #{Process.get(:slices, 0)}")
+    end
+
+    # Two histories where merges once straddled edits of yours: `u` waited for a merged class while the press waited
+    # for your undo. Merges now wait until your edits after the class's oldest step are final, so both finish.
+    test "merged steps never deadlock a press against your undo" do
+      slices_case(
+        [
+          {:minga, 691, 1, "bb\n\n", 0},
+          {:minga, 864, 1, "aba", 2},
+          {:minga, 795, 2, "acca", 0},
+          {:user, 255, 3, "cba", 2},
+          {:user, 37, 1, "acc", 2},
+          {:user, 726, 0, "\n\n", 1},
+          {:minga, 538, 2, "\n", 1},
+          {:user, 665, 1, "\nc", 0},
+          {:minga, 357, 0, "a", 0},
+          {:user, 783, 3, "ba", 0},
+          {:user, 657, 0, "\naa", 2},
+          {:user, 257, 3, "a\naa", 2},
+          {:user, 388, 2, "", 0},
+          {:user, 977, 3, "c", 1},
+          {:user, 315, 1, "cc", 1},
+          {:user, 32, 2, "a", 2},
+          {:user, 417, 0, "aa", 2},
+          {:user, 289, 2, "aacb", 0},
+          {:user, 761, 3, "bab\n", 0},
+          {:user, 642, 3, "b", 2},
+          {:user, 407, 0, "ca", 1},
+          {:agent, 521, 3, "b", 1},
+          {:user, 226, 2, "", 1},
+          {:agent, 223, 0, "c", 0},
+          {:minga, 681, 3, "\n", 0}
+        ],
+        34,
+        22,
+        8
+      )
+
+      slices_case(
+        [
+          {:minga, 526, 0, "c", 2},
+          {:user, 51, 1, "b\nb", 1},
+          {:agent, 788, 1, "\naaa", 2},
+          {:user, 238, 2, "", 1},
+          {:minga, 236, 2, "bbc", 1},
+          {:minga, 884, 0, "b\naa", 1},
+          {:minga, 59, 2, "cc", 1},
+          {:agent, 887, 1, "cbc\n", 1},
+          {:user, 833, 1, "\n\n", 2},
+          {:minga, 622, 3, "", 0},
+          {:user, 218, 0, "abb", 0},
+          {:minga, 389, 1, "b", 1},
+          {:minga, 412, 2, "a", 1},
+          {:agent, 904, 1, "aba\n", 2},
+          {:agent, 579, 1, "bbc", 1},
+          {:minga, 908, 2, "", 1},
+          {:redo, 117, 3, "a\n", 0},
+          {:undo, 91, 1, "b", 1},
+          {:redo, 36, 1, "b\n\na", 2},
+          {:minga, 320, 3, "c\nc", 1},
+          {:minga, 5, 3, "\ncab", 1},
+          {:minga, 680, 3, "a", 2},
+          {:minga, 349, 0, "\n", 0},
+          {:minga, 269, 1, "c", 1},
+          {:user, 709, 3, "\nba\n", 0},
+          {:user, 115, 3, "bb", 2},
+          {:minga, 481, 0, "acaa", 1},
+          {:undo, 491, 3, "a", 0},
+          {:agent, 514, 1, "\n", 0}
+        ],
+        10,
+        17,
+        4
+      )
     end
 
     # Compaction is invisible to everything after it: the same history with compaction off and with a small budget (so
@@ -796,8 +852,6 @@ defmodule Minga.Buffer.UndoHistoryTest do
         compacted = world("abc\ndef\n", run_budget: budget, shadow: false)
         twin_run(commands, plain, compacted, slice, &twin_apply/2)
       end
-
-      IO.puts("\n[twins] documented differences: #{Process.get(:documented_differences, 0)}")
     end
 
     # Addendum 4 F2's shape: budget 3, whole-character edits with emoji, two tasks, presses and your undo.
@@ -821,21 +875,45 @@ defmodule Minga.Buffer.UndoHistoryTest do
                 ),
               max_runs: runs(400)
             ) do
-        plain = world("", run_budget: 1_000_000, shadow: false)
-        compacted = world("", run_budget: 3, shadow: false)
-
-        apply = fn
-          :undo, world -> twin_apply({:undo, 0, 0, "", 0}, world)
-          :press, world -> twin_apply(:press, world)
-          command, world -> {:edited, grapheme_op(command, world)}
-        end
-
-        twin_run(commands, plain, compacted, 5, apply)
+        emoji_twins(commands)
       end
 
-      IO.puts(
-        "\n[twins, emoji] documented differences: #{Process.get(:documented_differences, 0)}"
-      )
+      IO.puts("\n[twins, emoji] merge differences: #{Process.get(:merge_differences, 0)}")
+    end
+
+    # Merge consequence 1, by hand. Task 0 writes "aaaa" (step 1). Task 1 writes seven a's before it (step 2). Task 0
+    # writes "\no" over five a's, four of task 1's and one of its own (step 3), and task 1 deletes "oaaa", step 3's "o"
+    # and the rest of step 1's a's (step 4). The press on task 1 reverts step 4, and step 2 with step 3, which rewrote
+    # it. Without compaction that leaves step 1's "aaaa". With a budget of 3, step 1 was absorbed into step 3, so the
+    # press takes it too and leaves "".
+    test "a press that reverts a merged step takes its whole class" do
+      emoji_twins([
+        {:minga, 0, 0, ["a", "a", "a", "a"], 0},
+        {:minga, 0, 0, ["a", "a", "a", "a", "a", "a", "a"], 1},
+        {:minga, 15, 5, ["\n", "o"], 0},
+        {:minga, 13, 4, [], 1},
+        :press
+      ])
+
+      assert Process.get(:merge_differences) == 1
+    end
+
+    # Merge consequence 2, from round 5 case (b). Task 1's steps 2 and 4 are in one class, and your edit holds step 2.
+    # Without compaction the press reverts steps 4 and 1; step 4's text was already gone under your edit. With
+    # compaction the hold on step 2 holds the class, so step 4 stays. The document is the same, and press and u still
+    # finish.
+    test "a hold on any member of a merged class holds the class" do
+      emoji_twins([
+        {:minga, 0, 0, ["a"], 3},
+        {:minga, 15, 0, ["a", "a", "a", "a", "é", "o"], 1},
+        {:minga, 9, 5, ["é", "😀", "😀", "r"], 2},
+        {:minga, 19, 6, ["a", "a", "\n"], 3},
+        {:user, 13, 5, ["é"], 0},
+        :press,
+        :undo
+      ])
+
+      assert Process.get(:merge_differences) == 1
     end
 
     # The final review: steps that arrive faster than slices run left merged runs that no later slice could reach.
@@ -1311,83 +1389,154 @@ defmodule Minga.Buffer.UndoHistoryTest do
     edit(world, source, start, removed, inserted, at: @t0 + world.version * @window)
   end
 
-  # Runs one history twice, without compaction and with it, and compares the document and the outcome of every
-  # operation: the text after it, whether u, redo, a reject or a press was refused and for which task, and whether a
-  # press left the task held. The number of steps a press reverts is not compared (merged steps count once). The one
-  # documented difference: where the plain press reverted some steps of a task and stopped at a hold, the compacted
-  # press may find that task held as a unit, because the hold is on a step merged with the ones that reverted; the two
-  # histories then differ for good and the comparison ends there.
+  # Runs one history twice, without compaction and with it, and requires the same document and the same outcome after
+  # every operation: whether u, redo, a reject or a press was refused and for which task, whether a press left a hold,
+  # and which steps a press reverted, compared through the merges (a step absorbed completely counts as the step it
+  # was absorbed into). Two differences are the contract of merging, and each is recognized by its mechanism:
+  #
+  # 1. A press that reverts a merged step takes its whole class: the steps the compacted press reverted beyond the
+  #    plain one are members of a class it reverted, or groups that depend on such a member.
+  # 2. A hold on any member holds the class: the steps the plain press reverted and the compacted one did not are in a
+  #    class with a step the plain press left behind.
+  #
+  # After either, the compacted press must still be exact for its own record, keep your visible text, and repeated
+  # presses and undos must finish; the two histories then differ for good and the comparison ends.
   defp twin_run(commands, plain, compacted, slice, apply) do
-    Enum.reduce_while(commands, {plain, compacted}, fn command, {plain, compacted} ->
-      {plain_outcome, plain} = apply.(command, Map.delete(plain, :pressed))
-      %{merges: classes} = compacted.history
-      compacted = compacted |> Map.delete(:pressed) |> Map.put(:classes_before, classes)
-      {compacted_outcome, compacted} = apply.(command, compacted)
-      compacted = compact_fully(compacted, slice)
+    compacted =
+      compacted
+      |> Map.update!(:history, fn history ->
+        %{history | provenance: Provenance.start_trace(history.provenance)}
+      end)
+      |> Map.put(:absorbed, %{})
 
-      if compacted_outcome == plain_outcome and text(compacted) == text(plain) do
+    Enum.reduce_while(commands, {plain, compacted}, fn command, {plain, compacted} ->
+      {plain_before, compacted_before} = {plain, compacted}
+      {plain_outcome, plain} = apply.(command, Map.delete(plain, :pressed))
+      {compacted_outcome, compacted} = apply.(command, Map.delete(compacted, :pressed))
+      compacted = compacted |> compact_fully(slice) |> note_absorbed()
+      absorbed = compacted.absorbed
+      reverted = pressed_steps(plain, absorbed)
+      taken = pressed_steps(compacted, absorbed)
+
+      if compacted_outcome == plain_outcome and text(compacted) == text(plain) and
+           reverted == taken do
         {:cont, {plain, compacted}}
       else
-        assert documented_difference?(plain_outcome, compacted_outcome, plain, compacted),
+        assert command == :press and
+                 merge_difference?(
+                   reverted,
+                   taken,
+                   {plain_before, plain},
+                   compacted_before,
+                   absorbed
+                 ),
                "plain #{inspect(plain_outcome)}, compacted #{inspect(compacted_outcome)} on #{inspect(command)}"
 
-        Process.put(:documented_differences, Process.get(:documented_differences, 0) + 1)
+        assert_press_guarantees(compacted_before)
+        Process.put(:merge_differences, Process.get(:merge_differences, 0) + 1)
         {:halt, {plain, compacted}}
       end
     end)
   end
 
-  # Difference 1: the plain press reverted some steps of the task and stopped at a hold; the compacted press held
-  # more of the task (all of it, or the steps merged with the held one), because a step the plain press left behind is
-  # merged with one it reverted (absorbed into it, or in its class).
-  defp documented_difference?({:pressed, true}, {:held, _overlap, task}, plain, compacted),
-    do: held_with_merged_step?(task, Map.get(plain, :pressed, []), [], plain, compacted)
+  defp merge_difference?(reverted, taken, {plain_before, plain}, compacted_before, absorbed) do
+    %{merges: merges} = compacted_before.history
+    finals = &MapSet.new(&1, fn group -> final_step(group, absorbed) end)
+    class = &finals.(UndoHistory.merge_class(merges, final_step(&1, absorbed)))
+    extra = MapSet.difference(taken, reverted)
+    missing = MapSet.difference(reverted, taken)
+    provenance = UndoHistory.provenance(compacted_before.history)
 
-  defp documented_difference?({:pressed, held}, {:pressed, held}, plain, compacted) do
-    reverted = Map.get(plain, :pressed, [])
-    taken = Map.get(compacted, :pressed, [])
-    classes = Map.get(compacted, :classes_before, %{})
-    task = Map.get(plain, :pressed_task)
+    takes_class? =
+      MapSet.size(missing) == 0 and
+        Enum.all?(extra, fn step ->
+          Enum.any?(taken, fn member ->
+            step in class.(member) or step in finals.(dependents_of(provenance, class.(member)))
+          end)
+        end)
 
-    cond do
-      # Difference 1 again, where the compacted press still reverted part of the task.
-      held and taken -- reverted == [] and reverted -- taken != [] ->
-        held_with_merged_step?(task, reverted, taken, plain, compacted)
+    plain_groups = for {group, _key} <- plain_before.history.minga, do: group
+    left_behind = finals.(plain_groups -- Map.get(plain, :pressed, []))
 
-      # Difference 2: the compacted press reverted more, the older half of a merge with its newer half (still a group
-      # in its class, or absorbed into it completely), and whatever depends on it.
-      true ->
-        provenance = UndoHistory.provenance(compacted.history)
+    held_class? =
+      MapSet.size(extra) == 0 and
+        Enum.all?(missing, fn step ->
+          Enum.any?(class.(step), &(&1 in left_behind)) or step in left_behind
+        end)
 
-        absorbed =
-          for {group, _key} <- plain.history.minga,
-              not Provenance.group?(provenance, group),
-              do: group
+    takes_class? or held_class?
+  end
 
-        Enum.all?(reverted, &(&1 in taken or not Map.has_key?(classes, &1))) and
-          (Enum.any?(taken -- reverted, &Map.has_key?(classes, &1)) or absorbed != [])
+  defp dependents_of(provenance, groups) do
+    Enum.reduce(groups, MapSet.new(), fn group, found ->
+      if Provenance.group?(provenance, group),
+        do: Enum.into(Provenance.later_deleters_of(provenance, group), found),
+        else: found
+    end)
+  end
+
+  # A press after a merge difference: exact for its own record, keeps your visible text, and press with u finishes.
+  defp assert_press_guarantees(world) do
+    case press_reject(world) do
+      {:ok, after_world, _held} -> unwind(after_world)
+      _held_or_empty -> unwind(world)
     end
   end
 
-  defp documented_difference?(_plain, _compacted, _plain_world, _compacted_world), do: false
+  defp note_absorbed(world) do
+    {operations, provenance} = Provenance.take_trace(world.history.provenance)
+    absorbed = for {:absorb, old, new} <- operations || [], into: world.absorbed, do: {old, new}
+    %{world | history: %{world.history | provenance: provenance}, absorbed: absorbed}
+  end
 
-  defp held_with_merged_step?(task, reverted, taken, plain, compacted) do
-    provenance = UndoHistory.provenance(compacted.history)
-    kept_back = reverted -- taken
+  defp pressed_steps(world, absorbed),
+    do: world |> Map.get(:pressed, []) |> MapSet.new(&final_step(&1, absorbed))
 
-    left_behind =
-      for {group, {:minga, task_id, _step}} <- plain.history.minga,
-          {:minga, task_id} == task,
-          do: group
-
-    reverted != [] and
-      Enum.any?(left_behind, fn group ->
-        not Provenance.group?(provenance, group) or
-          Enum.any?(UndoHistory.merge_class(compacted.history, group), &(&1 in kept_back))
-      end)
+  # The step a group's text lives in after the merges: itself, or the step it was absorbed into, followed through.
+  defp final_step(group, absorbed) do
+    case absorbed do
+      %{^group => into} -> final_step(into, absorbed)
+      _not_absorbed -> group
+    end
   end
 
   # One operation and what it decided, with steps named by task: compaction may rename a step, never its task.
+  # A history of whole-grapheme edits, presses and undos, run with compaction off and with a budget of 3.
+  defp emoji_twins(commands) do
+    plain = world("", run_budget: 1_000_000, shadow: false)
+    compacted = world("", run_budget: 3, shadow: false)
+
+    apply = fn
+      :undo, world -> twin_apply({:undo, 0, 0, "", 0}, world)
+      :press, world -> twin_apply(:press, world)
+      command, world -> {:edited, grapheme_op(command, world)}
+    end
+
+    twin_run(commands, plain, compacted, 5, apply)
+  end
+
+  defp slices_case(commands, cut, budget, slice) do
+    {before, rest} = Enum.split(commands, cut)
+    plain = Enum.reduce(before, world("abc\ndef\n", run_budget: budget), &run/2)
+    compacted = plain |> want_compaction() |> compact_fully(slice)
+
+    assert text(compacted) == text(plain)
+    assert outcome(step(compacted, :undo)) == outcome(step(plain, :undo))
+    %{task_ticks: ticks} = plain.history
+
+    for {task, _tick} <- ticks do
+      assert reject_text(compacted, task) == reject_text(plain, task)
+    end
+
+    compacted =
+      Enum.reduce(rest, compacted, fn command, world ->
+        command |> run(world) |> compact_fully(slice)
+      end)
+
+    {:done, world} = unwind(compacted)
+    assert text(world) == "abc\ndef\n"
+  end
+
   defp twin_apply(:press, world) do
     case UndoHistory.undo_agent_session(world.history, world.version, world.doc) do
       {:ok, restore, history, summary} ->

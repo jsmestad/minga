@@ -2653,8 +2653,8 @@ defmodule Minga.Buffer.Process do
 
         log_to_messages(
           state,
-          "#{task_label(task)} cannot be reverted exactly in #{display_name_from_state(state)}: " <>
-            "undo your edit near line #{line + 1} (u), then SPC a u again",
+          "Reverted 0 steps of #{task_label(task)} in #{display_name_from_state(state)}: your edit near line " <>
+            "#{line + 1} holds them; undo it (u), then SPC a u again",
           :warning
         )
 
