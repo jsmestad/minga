@@ -429,7 +429,7 @@ defmodule MingaEditor.Shell.Traditional do
       ) do
     # Set attention flag when agent needs user input
     tb =
-      if status in [:idle, :error] do
+      if status in [:idle, :stopped, :error] do
         TabBar.set_attention_by_session(tb, session_pid, true)
       else
         tb

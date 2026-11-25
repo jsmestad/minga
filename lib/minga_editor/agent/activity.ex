@@ -66,7 +66,8 @@ defmodule MingaEditor.Agent.Activity do
   def apply_status(%__MODULE__{} = activity, status) when status in [:thinking, :tool_executing],
     do: start_turn(activity)
 
-  def apply_status(%__MODULE__{} = activity, :idle), do: finish_turn(activity)
+  def apply_status(%__MODULE__{} = activity, status) when status in [:idle, :stopped],
+    do: finish_turn(activity)
 
   def apply_status(%__MODULE__{active_tool_id: nil} = activity, status)
       when status in [:error, :plan],

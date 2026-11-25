@@ -1,4 +1,4 @@
 ╭ Running...                                                                   ╮
 │ ❯ NORMAL                                                                     │
-│Send · Steer · Queue Next · Stop · Attachments · Shift+Enter newline          │
+│Send · Steer · Queue Next · Stop · Attachments · Enter send · i insert        │
 ╰──────────────────────────────────────────────────────────────────────────────╯

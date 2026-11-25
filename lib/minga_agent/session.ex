@@ -296,9 +296,12 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:abort_for_id, expected_session_id, request_id})
   end
 
-  @doc "Stops the matching turn; volatile inputs return to the caller, saved inputs stay recoverable."
-  @spec stop_turn(GenServer.server(), {String.t(), String.t()}) ::
-          {:ok, [TurnExecution.content()] | :queue_kept} | {:error, :stale_turn}
+  @doc """
+  Stops the matching turn and keeps every queued input queued.
+
+  The Session reports the status `:stopped` until the next turn starts; the queue is sent after that turn, as it would have been after the stopped one.
+  """
+  @spec stop_turn(GenServer.server(), {String.t(), String.t()}) :: :ok | {:error, :stale_turn}
   def stop_turn(session, target), do: GenServer.call(session, {:stop_turn, target})
 
   @doc "Aborts the current agent operation."
@@ -458,8 +461,7 @@ defmodule MingaAgent.Session do
   @type composer_draft_operation ::
           :read
           | {:save, SessionStore.draft_revision(), DraftSnapshot.t() | nil}
-          | {:recall, SessionStore.draft_revision(), DraftSnapshot.t() | nil,
-             :keep_running | {:stop, {String.t(), String.t()}}}
+          | {:recall, SessionStore.draft_revision(), DraftSnapshot.t() | nil, :keep_running}
           | {:queue, queue_target(), TurnExecution.prompt_kind(), queue_draft(),
              TurnExecution.content()}
           | {:reconcile_queue, pos_integer(), String.t(), SessionStore.draft_revision()}
@@ -4281,24 +4283,17 @@ defmodule MingaAgent.Session do
     end
   end
 
-  @spec stop_active_turn(state()) ::
-          {:reply, {:ok, [TurnExecution.content()] | :queue_kept}, state()}
-  defp stop_active_turn(state) do
-    if Persistence.enabled?(state.persistence) do
-      result =
-        if TurnExecution.queues(state.turn_execution) == {[], []}, do: [], else: :queue_kept
-
-      {:reply, {:ok, result}, abort_turn(state)}
-    else
-      {{steering, follow_up}, execution} = TurnExecution.recall_queues(state.turn_execution)
-      {:reply, {:ok, steering ++ follow_up}, abort_turn(%{state | turn_execution: execution})}
-    end
-  end
+  @spec stop_active_turn(state()) :: {:reply, :ok, state()}
+  defp stop_active_turn(state),
+    do: {:reply, :ok, abort_turn(state, &TurnExecution.stop/1, "Stopped")}
 
   @spec abort_turn(state()) :: state()
-  defp abort_turn(state) do
+  defp abort_turn(state), do: abort_turn(state, &TurnExecution.abort/1, "Aborted")
+
+  @spec abort_turn(state(), (TurnExecution.t() -> TurnExecution.t()), String.t()) :: state()
+  defp abort_turn(state, transition, notice) do
     source_execution = state.turn_execution
-    execution = TurnExecution.abort(source_execution)
+    execution = transition.(source_execution)
 
     state =
       state
@@ -4309,7 +4304,7 @@ defmodule MingaAgent.Session do
       |> abort_active_tools(source_execution, false)
       |> cancel_provider_request()
       |> reconcile_interrupted_checkpoint()
-      |> append_system_message("Aborted", :info)
+      |> append_system_message(notice, :info)
       |> notify_messages_changed()
       |> announce_turn_status(execution)
 
@@ -5580,21 +5575,10 @@ defmodule MingaAgent.Session do
           String.t(),
           non_neg_integer(),
           DraftSnapshot.t() | nil,
-          :keep_running | {:stop, {String.t(), String.t()}}
+          :keep_running
         ) :: {{:ok, non_neg_integer(), DraftSnapshot.t()} | {:error, term()}, state()}
   defp recall_composer_draft(state, record_id, revision, draft, :keep_running),
     do: recall_composer_draft(state, record_id, revision, draft)
-
-  defp recall_composer_draft(state, record_id, revision, draft, {:stop, {_, _} = target}) do
-    case active_turn_target(state) do
-      ^target ->
-        {result, next} = recall_composer_draft(state, record_id, revision, draft)
-        {result, abort_turn(next)}
-
-      _stale ->
-        {{:error, :stale_turn}, state}
-    end
-  end
 
   defp recall_composer_draft(state, _record, _revision, _draft, _action),
     do: {{:error, :invalid_draft_snapshot}, state}

@@ -291,6 +291,48 @@ defmodule Minga.Keymap.GrammarTest do
     end
   end
 
+  describe "⌘↩ in the composer (rule 5, #4055)" do
+    defp composer_rules(scope, state, command) do
+      binding = %{
+        scope: scope,
+        state: state,
+        overlay: :none,
+        keys: [{13, @cmd}],
+        command: command,
+        origin: :effective
+      }
+
+      contexts = %{
+        {:agent, :insert} => :typing,
+        {:agent, :input_normal} => :vim_text,
+        {:agent, :normal} => :special,
+        {:editor, :normal} => :vim_source
+      }
+
+      [binding]
+      |> KeyGrammar.violations([], contexts)
+      |> Enum.map(& &1.rule)
+    end
+
+    test "passes only where it runs the composer's Normal-mode ↩ command" do
+      for state <- [:insert, :input_normal] do
+        assert composer_rules(:agent, state, :agent_submit_or_newline) == [], "#{state}"
+      end
+    end
+
+    test "fails with any other command, outside the composer, or in another scope" do
+      for {scope, state, command} <- [
+            {:agent, :insert, :agent_queue_follow_up},
+            {:agent, :input_normal, :agent_insert_newline},
+            {:agent, :normal, :agent_submit_or_newline},
+            {:editor, :normal, :agent_submit_or_newline}
+          ] do
+        assert composer_rules(scope, state, command) == [:platform_key],
+               "#{scope}/#{state} #{command}"
+      end
+    end
+  end
+
   defp format(violations) do
     Enum.map_join(violations, "\n", fn v ->
       "  #{v.rule}  #{v.scope}/#{v.state}  #{v.key}  #{v.command}  (#{v.reason})"

@@ -51,13 +51,20 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
     )
   end
 
-  test "SPC a a opens an empty composer from an editor with only a file", %{editor_ctx: ctx} do
+  test "SPC a a opens an empty composer focused in Insert from an editor with only a file", %{
+    editor_ctx: ctx
+  } do
     refute match?(%{visible?: true}, agent_chat(ctx))
 
-    assert %{visible?: true, lifecycle: :starting, prompt: "", prompt_vim_mode: 0} =
-             frame_after_open(ctx, "<SPC>a", "a")
+    assert %{
+             visible?: true,
+             lifecycle: :starting,
+             prompt: "",
+             prompt_vim_mode: 1,
+             input_focused?: true
+           } = frame_after_open(ctx, "<SPC>a", "a")
 
-    assert %{visible?: true, lifecycle: :conversation, prompt: "", prompt_vim_mode: 0} =
+    assert %{visible?: true, lifecycle: :conversation, prompt: "", prompt_vim_mode: 1} =
              await_conversation(ctx, prompt: "")
   end
 
@@ -118,7 +125,7 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
   end
 
   test "toggling to the file and back keeps the same draft", %{editor_ctx: ctx} do
-    send_keys_async(ctx, "<SPC>aaiunfinished<Esc>")
+    send_keys_async(ctx, "<SPC>aaunfinished<Esc>")
     assert %{visible?: true, prompt: "unfinished"} = agent_chat(ctx)
 
     send_keys_async(ctx, "<SPC>aa")

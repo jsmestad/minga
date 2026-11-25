@@ -89,11 +89,11 @@ An unsent snapshot stays with its original conversation after restart. Sending a
 
 ## Keep follow-up input across a restart
 
-In a local Agent conversation that saves drafts, type the next instruction while a turn is running. Press `Ctrl+Enter`, or use `SPC a q f` in Normal mode, to queue it for the next turn. Pressing `Enter` while editing steers the running turn instead. Minga clears the submitted draft only after the queue accepts it, including the snapshots shown in the composer. Typing after submission does not change what was queued.
+In a local Agent conversation that saves drafts, type the next instruction while a turn is running. Press `Alt+Enter` while typing, or use `SPC a q f` in Normal mode, to queue it for the next turn. Sending instead (`Enter` in Normal mode, or `Cmd+Enter`) steers the running turn. Stopping the turn (`SPC a s`, or `Cmd+.` on macOS) keeps the queue: it is sent after your next message. Minga clears the submitted draft only after the queue accepts it, including the snapshots shown in the composer. Typing after submission does not change what was queued.
 
 If the Session process restarts before the composer receives the result, the replacement checks the original submission. It confirms the saved queue entry or reports that the queue did not accept the draft. This check does not submit the prompt again. Newer edits stay in the composer in either case.
 
-Press `Alt+Up` in the composer to recall pending input before the Agent consumes it. To edit or withdraw one queued entry instead, open the queue with `SPC a q q`. Minga puts the recalled text ahead of your current draft and keeps its captured snapshots. Image mentions return as editable `@path` text. If you send them again, Minga resolves them again.
+To recall pending input before the Agent consumes it, run the `agent_dequeue` command ("Dequeue messages back to editor") from the command palette. To edit or withdraw one queued entry instead, open the queue with `SPC a q q`. Minga puts the recalled text ahead of your current draft and keeps its captured snapshots. Image mentions return as editable `@path` text. If you send them again, Minga resolves them again.
 
 If the draft changes while recall is finishing, Minga keeps your visible edits and saves the recalled copy separately in the original conversation. Copy the visible text somewhere safe, clear the composer, then select the same conversation in Sessions (`SPC a S h`) to reload the recalled draft.
 

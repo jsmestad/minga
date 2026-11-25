@@ -113,10 +113,11 @@ defmodule MingaEditor.Agent.ApprovedEditKeysTest do
     session = Runtime.active_session(state.shell_runtime)
     Session.subscribe(session)
 
-    send_keys_sync(ctx, "iReplace the TODO line<CR>")
+    # The composer opens in Insert; Normal-mode Enter sends.
+    send_keys_sync(ctx, "Replace the TODO line<Esc><CR>")
     assert_receive {:agent_event, ^session, {:approval_pending, _approval}}, @event_timeout
 
-    send_keys_sync(ctx, "<Esc><Esc>y")
+    send_keys_sync(ctx, "<Esc>y")
     assert_receive {:agent_event, ^session, {:status_changed, :idle}}, @event_timeout
     session
   end

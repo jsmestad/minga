@@ -498,7 +498,12 @@ func (m Model) renderAgentDetailsRail(chat protocol.AgentChat, width int, budget
 		}
 	}
 	lines = append(lines, m.renderAgentDetailsSection("Hints", width))
-	lines = append(lines, m.renderAgentDetailHint("Enter", "send prompt", width))
+	// The composer is a Vim buffer: Enter sends from Normal and adds a newline in Insert.
+	sendKey := "Enter"
+	if chat.PromptVimMode == 1 {
+		sendKey = "Esc Enter"
+	}
+	lines = append(lines, m.renderAgentDetailHint(sendKey, "send prompt", width))
 	lines = append(lines, m.renderAgentDetailHint("Tab", "complete", width))
 	lines = append(lines, m.renderAgentDetailHint("?", "agent help", width))
 	lines = append(lines, m.renderAgentDetailFrame("bottom", "", width))

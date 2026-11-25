@@ -138,8 +138,11 @@ defmodule Minga.Keymap.ScopeTest do
       assert {:command, :agent_input_to_normal} = Scope.resolve_key(:agent, :insert, {27, 0})
     end
 
-    test "Enter resolves to agent_submit_or_newline in insert mode" do
-      assert {:command, :agent_submit_or_newline} = Scope.resolve_key(:agent, :insert, {13, 0})
+    test "Enter adds a newline in insert mode and sends from input-normal" do
+      assert {:command, :agent_insert_newline} = Scope.resolve_key(:agent, :insert, {13, 0})
+
+      assert {:command, :agent_submit_or_newline} =
+               Scope.resolve_key(:agent, :input_normal, {13, 0})
     end
 
     test "Backspace resolves to agent_input_backspace in insert mode" do

@@ -750,7 +750,7 @@ Every built-in binding follows six rules (design principle 11):
 2. **Vim grammar inside buffers.** Printable keys in a Vim normal state keep their Vim meaning.
 3. **Single mnemonic letters only in special buffers** (conversation navigation, file tree, git status), never where letters type text.
 4. **Modifiers only where letters must type text, and only established conventions:** ⌃J/⌃K list movement, ⌃V/⌃T/⌃Q in pickers, ⌥↩ in the composer, ⌃\ ⌃N to leave the terminal, ⌃. for the act menu. Never bind ⌃A ⌃E ⌃H ⌃W ⌃U ⌃K in a prompt, insert state, or the composer, except for list movement.
-5. **macOS platform keys** (⌘S ⌘Z ⌘W ⌘Q ⌘. ⌘1 to ⌘4 ⌘[ ⌘]) only as aliases of a binding without modifiers.
+5. **macOS platform keys** (⌘S ⌘Z ⌘W ⌘Q ⌘. ⌘1 to ⌘4 ⌘[ ⌘], and ⌘↩ in the composer only) only as aliases of a binding without modifiers.
 6. **Never** three-modifier chords, two of ⌃ ⌥ ⌘ together (⌃⌘, ⌥⌘, ⌃⌥), or function keys.
 
 Also: one key has one meaning per scope, vim state and overlay (a focused Diff Review is its own context, see `docs/design/keys.md`), a command sits on two leader keys only when one is a declared alias, and every leader binding lives under a declared which-key group.

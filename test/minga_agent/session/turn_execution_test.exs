@@ -8,12 +8,22 @@ defmodule MingaAgent.Session.TurnExecutionTest do
   alias MingaAgent.Session.TurnExecution
   alias MingaAgent.ToolApproval
 
-  @phases [:idle, :starting, :thinking, :approval_waiting, :tool_execution, :completion, :failure]
+  @phases [
+    :idle,
+    :stopped,
+    :starting,
+    :thinking,
+    :approval_waiting,
+    :tool_execution,
+    :completion,
+    :failure
+  ]
   @modes [:exec, :plan]
 
   test "public projections derive from mode and tagged runtime phase" do
     expected_exec_statuses = %{
       idle: :idle,
+      stopped: :stopped,
       starting: :idle,
       thinking: :thinking,
       approval_waiting: :thinking,
@@ -66,7 +76,7 @@ defmodule MingaAgent.Session.TurnExecutionTest do
   end
 
   test "begin turn accepts inactive phases and rejects every active phase" do
-    for mode <- @modes, phase <- [:idle, :failure] do
+    for mode <- @modes, phase <- inactive_phases() do
       source = state(mode, phase)
       assert {:ok, next} = TurnExecution.begin_turn(source)
       assert TurnExecution.phase(next) == :starting
@@ -94,14 +104,14 @@ defmodule MingaAgent.Session.TurnExecutionTest do
   test "approval is orthogonal to active activity and rejects idle, failure, or concurrent requests" do
     approval = approval("approval-1")
 
-    for mode <- @modes, phase <- @phases -- [:idle, :approval_waiting, :failure] do
+    for mode <- @modes, phase <- @phases -- [:approval_waiting | inactive_phases()] do
       source = state(mode, phase)
       assert {:accepted, waiting} = TurnExecution.request_approval(source, approval)
       assert TurnExecution.phase(waiting) == :approval_waiting
       assert TurnExecution.pending_approval(waiting) == approval
     end
 
-    for mode <- @modes, phase <- [:idle, :failure] do
+    for mode <- @modes, phase <- inactive_phases() do
       source = state(mode, phase)
       assert :rejected = TurnExecution.request_approval(source, approval)
     end
@@ -136,6 +146,9 @@ defmodule MingaAgent.Session.TurnExecutionTest do
 
     assert {:error, :turn_not_active} =
              TurnExecution.request_question(TurnExecution.new(), pending)
+
+    assert {:error, :turn_not_active} =
+             TurnExecution.request_question(state(:exec, :stopped), pending)
 
     assert {:accepted, approval_wait} = TurnExecution.request_approval(running, approval)
 
@@ -235,6 +248,11 @@ defmodule MingaAgent.Session.TurnExecutionTest do
 
     assert idle_rejected.tool_call_id == "tool-idle"
 
+    stopped = state(:exec, :stopped)
+
+    assert {:rejected, %{tool_call_id: "tool-stopped"}} =
+             TurnExecution.auto_approve(stopped, approval_event("tool-stopped"), :session)
+
     failed = state(:exec, :failure)
 
     assert {:rejected, rejected} =
@@ -326,7 +344,7 @@ defmodule MingaAgent.Session.TurnExecutionTest do
       assert TurnExecution.queues(followed) == {["steer"], ["follow"]}
     end
 
-    for mode <- @modes, phase <- [:idle, :failure], kind <- [:steering, :follow_up] do
+    for mode <- @modes, phase <- inactive_phases(), kind <- [:steering, :follow_up] do
       source = state(mode, phase)
       assert {:send_now, starting} = TurnExecution.admit_prompt(source, kind, "now")
       assert TurnExecution.mode(starting) == mode
@@ -506,6 +524,38 @@ defmodule MingaAgent.Session.TurnExecutionTest do
     assert TurnExecution.pending_approval(aborted) == nil
   end
 
+  test "stop leaves every active phase stopped and every inactive phase unchanged" do
+    for mode <- @modes, phase <- @phases do
+      source = mode |> state(phase) |> TurnExecution.put_trust("turn-tool", :turn)
+      stopped = TurnExecution.stop(source)
+
+      if phase in active_phases() do
+        refute TurnExecution.active?(stopped)
+        assert TurnExecution.phase(stopped) == :stopped
+        assert TurnExecution.status(stopped) == if(mode == :plan, do: :plan, else: :stopped)
+        assert TurnExecution.pending_approval(stopped) == nil
+        assert TurnExecution.trust_levels(stopped) == %{}
+      else
+        assert stopped == source, "#{mode}/#{phase}"
+      end
+    end
+  end
+
+  test "a stopped turn behaves like an idle one until the next turn starts" do
+    stopped = state(:exec, :stopped)
+
+    assert TurnExecution.stop(stopped) == stopped
+    assert TurnExecution.phase(TurnExecution.abort(stopped)) == :idle
+    assert TurnExecution.phase(TurnExecution.fail(stopped, "boom")) == :failure
+    assert {:error, :invalid_phase} = TurnExecution.queued_send_failed(stopped)
+
+    assert TurnExecution.display_status(stopped) == :stopped
+    assert {:error, :invalid_phase} = TurnExecution.begin_completion(stopped)
+    assert {:ok, started} = TurnExecution.begin_turn(stopped)
+    assert TurnExecution.phase(started) == :starting
+    assert TurnExecution.status(started) == :idle
+  end
+
   test "reported errors preserve active work and fail inactive phases" do
     for mode <- @modes, phase <- active_phases() do
       source = state(mode, phase)
@@ -519,7 +569,7 @@ defmodule MingaAgent.Session.TurnExecutionTest do
       assert TurnExecution.status(errored) == if(mode == :plan, do: :plan, else: :error)
     end
 
-    for mode <- @modes, phase <- [:idle, :failure] do
+    for mode <- @modes, phase <- inactive_phases() do
       failed = mode |> state(phase) |> TurnExecution.report_error("provider failure")
 
       assert TurnExecution.phase(failed) == :failure
@@ -705,6 +755,7 @@ defmodule MingaAgent.Session.TurnExecutionTest do
   end
 
   defp state(mode, :idle), do: TurnExecution.new(mode)
+  defp state(mode, :stopped), do: mode |> state(:thinking) |> TurnExecution.stop()
 
   defp state(mode, :starting) do
     {:ok, starting} = mode |> TurnExecution.new() |> TurnExecution.begin_turn()
@@ -770,6 +821,8 @@ defmodule MingaAgent.Session.TurnExecutionTest do
       is_error: false
     }
   end
+
+  defp inactive_phases, do: [:idle, :stopped, :failure]
 
   defp active_phases,
     do: [:starting, :thinking, :approval_waiting, :tool_execution, :completion]

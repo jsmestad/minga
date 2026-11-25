@@ -806,7 +806,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
       %TabBar{} = tabs ->
         owner = TabBar.active_workspace_id(tabs)
         ref = make_ref()
-        {:saved, update_origin(state, owner, &capture_recall(&1, owner, ref, :keep_running))}
+        {:saved, update_origin(state, owner, &capture_recall(&1, owner, ref))}
 
       nil ->
         {:saved, report(state, :recall_not_ready)}
@@ -866,42 +866,14 @@ defmodule MingaEditor.Agent.DraftWorkflow do
     |> MingaEditor.schedule_render(16)
   end
 
-  @doc "Requests Stop with durable recall when the original workspace draft is ready."
-  @spec stop(State.t(), pid(), {String.t(), String.t()}) :: {:saved, State.t()} | :direct
-  def stop(
-        %State{workspace: %{agent_ui: %UIState{draft_save: %DraftSave{target: {session, id}}}}} =
-          state,
-        session,
-        {id, _request} = target
-      )
-      when node(session) == node() do
-    with %TabBar{} = tabs <- tab_bar(state),
-         owner = TabBar.active_workspace_id(tabs),
-         ref = make_ref(),
-         updated = update_origin(state, owner, &capture_recall(&1, owner, ref, {:stop, target})),
-         %DraftSave{request: {:recalling, ^ref, _, _, _}} <- updated.workspace.agent_ui.draft_save do
-      {:saved, updated}
-    else
-      _not_ready -> :direct
-    end
-  end
-
-  def stop(_state, _session, _target), do: :direct
-
-  @spec capture_recall(
-          UIState.t(),
-          non_neg_integer(),
-          reference(),
-          :keep_running | {:stop, {String.t(), String.t()}}
-        ) :: {term(), UIState.t()}
+  @spec capture_recall(UIState.t(), non_neg_integer(), reference()) :: {term(), UIState.t()}
   defp capture_recall(
          %UIState{
            draft_save: %DraftSave{target: {session, id}, buffer: buffer} = save,
            panel: %{prompt_buffer: buffer}
          } = ui,
          owner,
-         ref,
-         action
+         ref
        )
        when node(session) == node() do
     marker = Buffer.inspection_marker(buffer)
@@ -913,23 +885,18 @@ defmodule MingaEditor.Agent.DraftWorkflow do
           session,
           id,
           {owner, ref},
-          {:recall, revision, snapshot, action}
+          {:recall, revision, snapshot, :keep_running}
         )
 
       {:unchanged, UIState.project_draft_save(ui, pending)}
     else
-      _not_ready -> recall_unavailable(ui, action)
+      _not_ready -> {:recall_not_ready, ui}
     end
   catch
-    :exit, _reason -> recall_unavailable(ui, action)
+    :exit, _reason -> {:recall_not_ready, ui}
   end
 
-  defp capture_recall(ui, _owner, _ref, action), do: recall_unavailable(ui, action)
-
-  @spec recall_unavailable(UIState.t(), :keep_running | {:stop, {String.t(), String.t()}}) ::
-          {:recall_not_ready | :unchanged, UIState.t()}
-  defp recall_unavailable(ui, :keep_running), do: {:recall_not_ready, ui}
-  defp recall_unavailable(ui, {:stop, _target}), do: {:unchanged, ui}
+  defp capture_recall(ui, _owner, _ref), do: {:recall_not_ready, ui}
 
   @doc "Commits the newest prompt snapshot for the workspace that armed the timer."
   @spec due(State.t(), non_neg_integer(), reference()) :: State.t()

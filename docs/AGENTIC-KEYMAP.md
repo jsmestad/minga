@@ -136,7 +136,7 @@ Press `SPC` in Normal mode. These sequences also work from the agent view, the f
 | `SPC a a` | Open the agent view, or return from it to where you were |
 | `SPC a v` | Today the same as `SPC a a` |
 | `SPC a n` | New agent session |
-| `SPC a s` | Stop the agent's current turn |
+| `SPC a s` | Stop the agent's current turn; queued messages stay queued |
 | `SPC a ?` | Ask about the current line or the selection, inline |
 | `SPC a e` | Rewrite the selection, inline |
 | `SPC a r` | Pending reviews |
@@ -313,7 +313,7 @@ These apply while the composer is not focused.
 | `Tab` | Switch between the conversation and the changed-file view |
 | `}` / `{` | Make the conversation wider / narrower |
 | `=` | Reset the split |
-| `⌃L` | Clear the conversation display |
+| `⌘.` | Stop the agent's turn on macOS; the queue is kept (`SPC a s` everywhere) |
 | `r` | Retry or set up a provider, when the agent failed to start |
 | `?` | Show or hide Help |
 | `q` | Return to where you were |
@@ -511,24 +511,33 @@ The usual line-editing keys work in prompts and in the picker's query line: `⌃
 
 ### The agent composer
 
-The composer is where you write to the agent. Focus it with `i`, `a` or `↩` from the conversation. It is a small Vim buffer: you start in Insert mode, and `esc` takes you to Normal mode, where motions, operators and Visual mode edit your draft. The keys in this table work in Insert mode.
+The composer is where you write to the agent. `SPC a v` opens the conversation with the composer focused; from the conversation, focus it with `i`, `a` or `↩`. It is a small Vim buffer: you start in Insert mode, and `esc` takes you to Normal mode, where motions, operators and Visual mode edit your draft.
+
+In Insert mode:
 
 | Keys | Action |
 |------|--------|
-| `↩` | Send the message |
-| `⇧↩`, `⌥↩` or `⌃J` | Start a new line |
-| `⌃↩` | While the agent is working, queue the message as a follow-up. Otherwise send it |
-| `⌥↑` | Pull queued messages back into the composer |
+| `↩`, `⇧↩` or `⌃J` | Start a new line |
+| `⌘↩` | Send the message. While the agent is working, it steers the running turn |
+| `⌥↩` | While the agent is working, queue the message for after its turn. Otherwise send it |
+| `⌘.` | Stop the agent's turn on macOS. The queue and your draft are kept |
 | Up / Down | Move within the draft. At its first or last line, recall earlier messages |
-| `⌃D` / `⌃U` | Scroll the conversation ten lines while you type |
+| `⌃U`, `⌃W`, `⌃A`, `⌃E`, `⌃H`, `⌃K` | Edit the line, as in every prompt: `⌃U` deletes to the start of the line, `⌃W` the word before the cursor |
 | `⌃C` | Go to Normal mode. While the agent is working, also stop its turn |
-| `⌃L` | Clear the conversation display |
-| `⌃S` | Save the file |
-| `⌃Q` | Leave the composer and close the agent view |
-| `esc` | Go to Normal mode. From Normal mode, `esc` leaves the composer |
+| `esc` | Go to Normal mode |
 | `SPC` | Types a space while you are in Insert mode. Press `esc` first to use leader keys |
 
-Shift with an arrow key keeps its Vim meaning here and does not start a selection. To select, press `esc`, then `v`, and use Vim motions. With desktop shortcuts, `↩` sends, the newline keys above still work, and Up and Down recall earlier messages.
+In Normal mode:
+
+| Keys | Action |
+|------|--------|
+| `↩` or `⌘↩` | Send the message. While the agent is working, it steers the running turn |
+| `⌘.` | Stop the agent's turn on macOS (`SPC a s` everywhere). The queue and your draft are kept |
+| `q` | Record a macro, as in any buffer |
+| `esc` | Leave the composer for the conversation, where `q` closes the view |
+| `SPC a q f` | Queue the message for after the agent's turn |
+
+Shift with an arrow key keeps its Vim meaning here and does not start a selection. To select, press `esc`, then `v`, and use Vim motions. With desktop shortcuts, `↩` sends, `⇧↩`, `⌥↩` and `⌃J` start a new line, and Up and Down recall earlier messages. To pull queued messages back into the composer, run the "Dequeue messages back to editor" command from the command palette.
 
 ## In the terminal
 
@@ -536,7 +545,7 @@ You are here when you run Minga in a terminal instead of the macOS app. Every ta
 
 - **Use `⌃` where the macOS app uses `⌘`.** The desktop shortcut tables above list both columns. In the default Vim keys nothing needs `⌘`.
 - **Modified Enter and Backspace need a modern terminal.** `⌃↩`, `⌃⌫` and their Shift forms reach Minga only from a terminal that reports them (the Kitty keyboard protocol, as in Ghostty, kitty and WezTerm). Elsewhere they arrive as plain Enter and Backspace, which never accept or reject a change.
-- **`⇧↩` depends on the terminal too.** `⌥↩` starts a new line in the composer from any terminal.
+- **`⇧↩` depends on the terminal too.** `↩` in Insert mode and `⌃J` start a new line in the composer from any terminal. `⌘↩` and `⌘.` are macOS keys: in a terminal, send with `↩` in Normal mode and stop with `SPC a s`.
 - **Long Help scrolls with the keyboard.** In the agent view's Help, Up, Down, Page Up, Page Down, Home and End scroll, and so does the mouse wheel.
 - **Leader keys with desktop shortcuts.** A terminal cannot tell that Space is held, so press Space and then the leader key quickly. Minga removes the space it typed.
 

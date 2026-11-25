@@ -70,7 +70,10 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     agent_ui = ctx.workspace.agent_ui
 
     {presentation, session} =
-      chat_presentation(lifecycle, remedy_focus(ctx.intent.frame.editing_model, agent_ui))
+      chat_presentation(
+        lifecycle,
+        remedy_focus(ctx.intent.frame.editing_model, ctx.workspace.editing.mode, agent_ui)
+      )
 
     shell_agent = TraditionalState.agent(ctx.intent.frame.shell_state)
     panel = agent_ui.panel
@@ -258,10 +261,14 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   # Key dispatch resolves CUA keys through one trie, a focused Vim composer's
   # keys through the prompt (Enter runs the remedy), and other Vim keys through
   # chat navigation (`r` runs it), so the hint follows the same facts.
-  @spec remedy_focus(atom(), UIState.t()) :: AgentScope.start_remedy_focus()
-  defp remedy_focus(:cua, _ui), do: :cua
-  defp remedy_focus(_vim, %UIState{panel: %Panel{input_focused: true}}), do: :composer
-  defp remedy_focus(_vim, %UIState{}), do: :chat
+  @spec remedy_focus(atom(), atom(), UIState.t()) :: AgentScope.start_remedy_focus()
+  defp remedy_focus(:cua, _mode, _ui), do: :cua
+
+  defp remedy_focus(_vim, :insert, %UIState{panel: %Panel{input_focused: true}}),
+    do: :composer_insert
+
+  defp remedy_focus(_vim, _mode, %UIState{panel: %Panel{input_focused: true}}), do: :composer
+  defp remedy_focus(_vim, _mode, %UIState{}), do: :chat
 
   # The label and key hint come from the BEAM so no frontend authors remedy copy;
   # the hint is the key the Agent scope binds at the current focus.

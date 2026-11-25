@@ -180,9 +180,9 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
     end
   end
 
-  test "cold toggle renders an empty composer in Normal mode without focusing it" do
+  test "cold toggle renders an empty composer focused in Insert" do
     state = AgentCommands.toggle_agent_split(base_state(cold_composer: true))
-    assert_cold_composer(state)
+    assert_cold_composer(state, :focused)
   end
 
   test "a failed first Agent startup keeps the same composer and draft when returning to the file" do
@@ -274,12 +274,14 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
              "previous draft"
   end
 
-  defp assert_cold_composer(state) do
+  # Opening the conversation focuses the composer in Insert; arriving at or
+  # restoring an Agent tab renders its composer without focusing it.
+  defp assert_cold_composer(state, focus \\ :unfocused) do
     panel = state.workspace.agent_ui.panel
     assert is_pid(panel.prompt_buffer)
     assert Minga.Buffer.content(panel.prompt_buffer) == ""
-    refute panel.input_focused
-    assert state.workspace.editing.mode == :normal
+    assert panel.input_focused == (focus == :focused)
+    assert state.workspace.editing.mode == if(focus == :focused, do: :insert, else: :normal)
 
     intent = MingaEditor.RenderPipeline.Intent.from_editor_state(state)
 

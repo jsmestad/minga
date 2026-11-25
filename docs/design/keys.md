@@ -16,7 +16,7 @@ Keys are chords and mnemonics, not shortcuts. This is [principle 11](principles.
 2. **Vim grammar inside buffers.** Operators, motions, text objects, `]x` / `[x` pairs and the `g` prefix.
 3. **Single mnemonic letters only in special buffers.** `y` yes or keep, `n` no or reject, `r` retry, `o` output, `q` quit, and so on, in buffers where letters are not text.
 4. **Modifiers only where letters must type text,** and only from established conventions. The allow-list: `⌃J` / `⌃K` to move in a list, `⌃V` / `⌃T` / `⌃Q` in pickers (Telescope), `⌥↩` in the composer, `⌃\ ⌃N` to leave the terminal, `⌃.` for the act menu. Never a chord that collides with text editing: `⌃A`, `⌃E`, `⌃H`, `⌃W`, `⌃U`, `⌃K` (outside list movement).
-5. **macOS platform keys only as aliases** of a binding that needs no modifier: ⌘S, ⌘Z, ⌘W, ⌘Q, ⌘., ⌘1 to ⌘4, ⌘[ and ⌘].
+5. **macOS platform keys only as aliases** of a binding that needs no modifier: ⌘S, ⌘Z, ⌘W, ⌘Q, ⌘., ⌘1 to ⌘4, ⌘[ and ⌘]. In the composer only, ⌘↩ sends, as `↩` does in the composer's Normal mode.
 6. **Never** three-modifier chords, ⌃⌘ or ⌥⌘ combinations, or function keys.
 
 **Doom first.** Where Doom Emacs has a binding, Minga matches it. Neovim and LazyVim conventions come second. A deliberate divergence is written down with its reason. The key-grammar test (`test/minga/keymap/grammar_test.exs`, with a baseline of today's violations that only ever shrinks) enforces all of this.
@@ -299,14 +299,20 @@ Special buffers (git status, the file tree, blame) follow the same rule as Minga
 
 ## Composer
 
+The composer is a buffer with Vim editing that opens in Insert when `SPC a v` opens the conversation.
+
 | Keys | Action | Status |
 |---|---|---|
-| `↩` in Insert | Newline | |
-| `↩` in Normal, ⌘↩ | Send; steers while Minga works | |
-| `⌥↩` | Queue next message | changed; was ⌃↩ (`scope/agent.ex:208`) |
-| `⌘.` | Stop (`SPC a s` in the terminal) | |
-| ⌥↑ | (dequeue moves into the queue buffer) | retired (`scope/agent.ex:210`, `211`) |
-| `⌃D` / `⌃U` while typing | (`⌃U` deletes to line start; scroll from Normal mode) | retired (`scope/agent.ex:216`, `217`) |
+| `↩` in Insert | Newline | shipped (#4055); was send |
+| `↩` in Normal, ⌘↩ | Send; steers while Minga works | shipped (#4055) |
+| `⌥↩` in Insert | Queue next message (`SPC a q f` from Normal) | shipped (#4055); was ⌃↩ |
+| `⌘.` | Stop; the queue is kept (`SPC a s` in the terminal) | shipped (#4055) |
+| `esc` in Normal | Leave the composer for the conversation, where `q` closes the split | kept |
+| `q` in Normal | Vim's macro key, as in any buffer | changed (#4055); was "leave the composer" |
+| `⌃U`, `⌃W` and the other readline keys in Insert | Edit the line, as in every prompt | shipped (#4055) |
+| ⌥↑ | (dequeue moves into the queue buffer) | retired (#4055) |
+| `⌃D` / `⌃U` while typing | (`⌃U` deletes to line start; scroll from Normal mode) | retired (#4055) |
+| `⌃L` / `⌃S` / `⌃Q` | (clear, save and close live on `SPC a n`, `SPC f s` and `SPC a v` or `q`) | retired (#4055) |
 
 ## Diff Review
 

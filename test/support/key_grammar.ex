@@ -225,6 +225,16 @@ defmodule Minga.Test.KeyGrammar do
   # ⌘[ ⌘] back and forward.
   @platform_keys MapSet.new(~c"szwq.1234[]", &{&1, @cmd})
 
+  # Platform keys adopted for one surface only: {key, scope, contexts,
+  # {vim state, plain keys} whose command the key must run, why}. ⌘↩ sends from
+  # the composer (AC 1 of #4055 and docs/design/keys.md, Composer), so it is
+  # allowed only in the Agent composer, and only while it runs the command its
+  # Normal-mode ↩ runs.
+  @surface_platform_aliases [
+    {{@enter, @cmd}, :agent, [:typing, :vim_text], {:input_normal, [{@enter, 0}]},
+     "⌘↩ sends from the composer, as ↩ does in its Normal mode"}
+  ]
+
   # ── CUA profile (ADR-0007) ──────────────────────────────────────────────────
   #
   # {key, allowed commands, why}. In a CUA vim state these desktop conventions are exempt from rules 4 and 5 and may be the only binding for their action.
@@ -577,7 +587,7 @@ defmodule Minga.Test.KeyGrammar do
     context = Map.get(contexts, {scope, state})
     profile = context && profile_conventions(context, state, overlay)
 
-    case context && key_violation(binding.keys, context, profile, binding.command) do
+    case context && key_violation(binding.keys, {scope, context}, profile, binding.command) do
       nil ->
         []
 
@@ -600,14 +610,16 @@ defmodule Minga.Test.KeyGrammar do
   defp in_overlay(reason, overlay), do: "#{reason}, in the #{overlay} overlay"
 
   # First failing key in the sequence wins, so each binding yields one row.
-  @spec key_violation([key()], context(), [convention()], term()) :: {atom(), String.t()} | nil
-  defp key_violation(keys, context, profile, command) do
-    Enum.find_value(keys, fn key -> chord_violation(key, context, profile, command) end) ||
+  @spec key_violation([key()], {scope(), context()}, [convention()], term()) ::
+          {atom(), String.t()} | nil
+  defp key_violation(keys, {_scope, context} = where, profile, command) do
+    Enum.find_value(keys, fn key -> chord_violation(key, where, profile, command) end) ||
       plain_key_violation(keys, context)
   end
 
-  @spec chord_violation(key(), context(), [convention()], term()) :: {atom(), String.t()} | nil
-  defp chord_violation({codepoint, mods} = key, context, profile, command) do
+  @spec chord_violation(key(), {scope(), context()}, [convention()], term()) ::
+          {atom(), String.t()} | nil
+  defp chord_violation({codepoint, mods} = key, {scope, context}, profile, command) do
     cond do
       function_key?(codepoint) ->
         {:forbidden_chord, "function keys are never bound"}
@@ -619,6 +631,9 @@ defmodule Minga.Test.KeyGrammar do
         {:forbidden_chord, "combines two of ⌃ ⌥ ⌘"}
 
       listed?(profile, key, command) ->
+        nil
+
+      surface_platform_alias?(key, scope, context, command) ->
         nil
 
       band(mods, @cmd) != 0 ->
@@ -644,6 +659,24 @@ defmodule Minga.Test.KeyGrammar do
       true ->
         nil
     end
+  end
+
+  @spec surface_platform_alias?(key(), scope(), context(), term()) :: boolean()
+  defp surface_platform_alias?(key, scope, context, command) do
+    Enum.any?(@surface_platform_aliases, fn {alias_key, alias_scope, contexts,
+                                             {canonical_state, canonical_keys}, _why} ->
+      alias_key == key and alias_scope == scope and context in contexts and
+        command == scope_command(scope, canonical_state, canonical_keys)
+    end)
+  end
+
+  # The command a built-in scope binds to `keys` in a vim state, or nil.
+  @spec scope_command(scope(), atom(), [key()]) :: term()
+  defp scope_command(scope, state, keys) do
+    Enum.find_value(inventory(), fn
+      %{scope: ^scope, state: ^state, keys: ^keys, command: command} -> command
+      _other -> nil
+    end)
   end
 
   # Commands reachable from some binding without ⌃ ⌥ ⌘, so a platform key can

@@ -155,6 +155,23 @@ defmodule MingaAgent.SessionJobNoticeTest do
       assert job_id == record.id
     end
 
+    test "after Stop a job that ends holds its notice and the queue waits for the next prompt" do
+      session = start_session()
+      assert :ok = Session.send_prompt(session, "build it")
+      assert_receive {:continuation_request, _request}, @event_timeout
+      assert {:queued, :follow_up} = Session.queue_follow_up(session, "then test it")
+      assert %{stop_target: {_, _} = target} = Session.editor_snapshot(session)
+      assert :ok = Session.stop_turn(session, target)
+      assert Session.status(session) == :stopped
+
+      record = run_background(session, "make build")
+      await_notice(session, record.id, :pending)
+
+      refute_receive {:continuation_request, _request}, 200
+      assert Session.status(session) == :stopped
+      assert Session.get_queued_messages(session) == {[], ["then test it"]}
+    end
+
     @tag :tmp_dir
     test "a delivered notice is not delivered again after save and load", %{tmp_dir: dir} do
       runtime = start_artifact_runtime(Path.join(dir, "artifacts"))

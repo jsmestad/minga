@@ -51,14 +51,19 @@ defmodule MingaAgent.Session.TurnExecution do
 
   @type interaction :: ToolApproval.t() | PendingQuestion.t() | nil
 
-  @typedoc "Runtime phase. A turn has one blocking interaction slot, independent of provider activity and nonterminal errors."
+  @typedoc """
+  Runtime phase. A turn has one blocking interaction slot, independent of provider activity and nonterminal errors.
+
+  `:stopped` is inactive like `:idle`, after you stopped a running turn; the next turn leaves it. Queued input stays queued.
+  """
   @type phase ::
           :idle
+          | :stopped
           | {:active, activity(), interaction(), String.t() | nil}
           | {:failure, String.t()}
 
   @typedoc "Public status retained at the Session API boundary."
-  @type status :: :idle | :plan | :thinking | :tool_executing | :error
+  @type status :: :idle | :stopped | :plan | :thinking | :tool_executing | :error
   @type display_status :: status() | :approval_waiting
 
   @typedoc "Supported approval response."
@@ -95,9 +100,10 @@ defmodule MingaAgent.Session.TurnExecution do
   @spec mode(t()) :: mode()
   def mode(%__MODULE__{mode: mode}), do: mode
 
-  @doc "Returns the current runtime phase name."
+  @doc "Returns the current runtime phase name. A stopped turn reports `:stopped`, so nothing treats it as an idle Session that may start work by itself."
   @spec phase(t()) ::
           :idle
+          | :stopped
           | :starting
           | :thinking
           | :approval_waiting
@@ -116,11 +122,13 @@ defmodule MingaAgent.Session.TurnExecution do
 
   def phase(%__MODULE__{phase: {:failure, _message}}), do: :failure
   def phase(%__MODULE__{phase: :idle}), do: :idle
+  def phase(%__MODULE__{phase: :stopped}), do: :stopped
 
   @doc "Derives the stable public Session status."
   @spec status(t()) :: status()
   def status(%__MODULE__{mode: :plan}), do: :plan
   def status(%__MODULE__{phase: :idle}), do: :idle
+  def status(%__MODULE__{phase: :stopped}), do: :stopped
 
   def status(%__MODULE__{phase: {:active, _activity, _approval, message}})
       when is_binary(message),
@@ -215,7 +223,7 @@ defmodule MingaAgent.Session.TurnExecution do
 
   @doc "Begins a provider turn from an inactive state."
   @spec begin_turn(t()) :: {:ok, t()} | {:error, :turn_active}
-  def begin_turn(%__MODULE__{phase: :idle} = execution),
+  def begin_turn(%__MODULE__{phase: inactive} = execution) when inactive in [:idle, :stopped],
     do: {:ok, activate(execution, :starting)}
 
   def begin_turn(%__MODULE__{phase: {:failure, _message}} = execution),
@@ -304,10 +312,11 @@ defmodule MingaAgent.Session.TurnExecution do
   @spec auto_approve(t(), Event.ToolApproval.t(), trust_scope()) ::
           {:approved, ToolApproval.t(), t()} | {:rejected, ToolApproval.t()}
   def auto_approve(
-        %__MODULE__{phase: :idle},
+        %__MODULE__{phase: inactive},
         %Event.ToolApproval{} = event,
         _scope
-      ),
+      )
+      when inactive in [:idle, :stopped],
       do: {:rejected, approval_from_event(event)}
 
   def auto_approve(
@@ -783,6 +792,13 @@ defmodule MingaAgent.Session.TurnExecution do
     }
   end
 
+  @doc "Stops a running turn at your request: like `abort/1`, but the turn says it was stopped until the next one starts. An inactive turn is unchanged."
+  @spec stop(t()) :: t()
+  def stop(%__MODULE__{phase: {:active, _activity, _interaction, _error}} = execution),
+    do: %{abort(execution) | phase: :stopped}
+
+  def stop(%__MODULE__{} = execution), do: execution
+
   @doc "Moves any runtime phase into failure and clears turn-owned active resources."
   @spec fail(t(), String.t()) :: t()
   def fail(%__MODULE__{} = execution, message) when is_binary(message) do
@@ -824,7 +840,7 @@ defmodule MingaAgent.Session.TurnExecution do
 
   @doc "Moves an admitted turn into completion."
   @spec begin_completion(t()) :: {:ok, t()} | {:error, :invalid_phase}
-  def begin_completion(%__MODULE__{phase: :idle}),
+  def begin_completion(%__MODULE__{phase: inactive}) when inactive in [:idle, :stopped],
     do: {:error, :invalid_phase}
 
   def begin_completion(%__MODULE__{} = execution),

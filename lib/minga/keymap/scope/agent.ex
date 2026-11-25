@@ -7,8 +7,7 @@ defmodule Minga.Keymap.Scope.Agent do
   `y`/`Y` copy content, and prefix sequences (`z`, `g`, `]`, `[`) provide
   fold, go-to, and bracket navigation.
 
-  In insert mode (input field focused), printable characters go to the input
-  field. Ctrl+C and ESC return to normal mode; Ctrl+C also aborts a streaming turn.
+  The composer is a buffer with Vim editing. It starts in Insert, where `↩` adds a newline and printable characters type. In the composer's Normal mode, `↩` sends; `⌘↩` sends from either state, and sending while Minga works steers the current turn. `⌥↩` queues the next message and `⌘.` stops Minga. Ctrl+C and ESC return to Normal mode; Ctrl+C also stops a working turn.
 
   All bindings are declared as trie data and resolved through the scope
   system. Context-dependent behavior (e.g., `y` copies a code block normally
@@ -58,7 +57,9 @@ defmodule Minga.Keymap.Scope.Agent do
   end
 
   def keymap(:insert, _context), do: insert_trie()
-  def keymap(:input_normal, _context), do: input_normal_trie()
+
+  def keymap(:input_normal, context),
+    do: merge_trie(input_normal_trie(), start_remedy_keymap(:composer, context))
 
   def keymap(:cua, context) do
     cua_trie()
@@ -72,17 +73,20 @@ defmodule Minga.Keymap.Scope.Agent do
   @type start_remedy :: :retry | :set_up_provider
 
   @typedoc """
-  Where keys go: Vim chat navigation, the Vim composer (insert or input-normal), or the CUA Agent view, which has one trie for chat and composer.
+  Where keys go: Vim chat navigation, the Vim composer in Normal (`:composer`) or Insert (`:composer_insert`), or the CUA Agent view, which has one trie for chat and composer.
   """
-  @type start_remedy_focus :: :chat | :composer | :cua
+  @type start_remedy_focus :: :chat | :composer | :composer_insert | :cua
 
   # One table names, for each focus, the key that runs a failed start's remedy,
   # the command it runs and the hint frontends show. Enter goes through prompt
-  # submit, which runs the remedy unless the draft is a known slash command;
-  # `r` in chat navigation has no draft to protect and runs the remedy itself.
+  # submit, which runs the remedy unless the draft is a known slash command. In
+  # the composer's Insert, Enter adds a newline, so the hint names Escape first
+  # and Insert binds nothing more. `r` in chat navigation has no draft to protect
+  # and runs the remedy itself.
   @start_remedy_keys %{
     chat: {"r", :agent_start_remedy, "r"},
     composer: {"RET", :agent_submit_or_newline, "Enter"},
+    composer_insert: {nil, nil, "Esc, Enter"},
     cua: {"RET", :agent_submit_or_newline, "Enter"}
   }
 
@@ -100,15 +104,14 @@ defmodule Minga.Keymap.Scope.Agent do
   @doc """
   The remedy bindings at the given focus while the context offers a remedy, otherwise an empty trie.
 
-  Chat navigation merges this into its `:normal` trie, so `r` runs the remedy and every other key, including `s` for the session switcher, keeps its meaning. The Vim composer consults it before Vim editing in input-normal; in insert mode Enter already submits. CUA merges it into its single trie, so Enter submits from chat as well as from the composer. Prompt submit runs the remedy unless the draft is a known slash command.
+  Chat navigation merges this into its `:normal` trie, so `r` runs the remedy and every other key, including `s` for the session switcher, keeps its meaning. The Vim composer merges it into its input-normal trie, so Enter runs the remedy from Normal; in Insert, Enter adds a newline and the trie is empty. CUA merges it into its single trie, so Enter submits from chat as well as from the composer. Prompt submit runs the remedy unless the draft is a known slash command.
   """
   @spec start_remedy_keymap(start_remedy_focus(), Minga.Keymap.Scope.context()) ::
           Bindings.node_t()
   def start_remedy_keymap(focus, context) do
-    case Keyword.get(context, :agent_start_remedy) do
-      remedy when remedy in [:retry, :set_up_provider] ->
-        {binding, command, _hint} = Map.fetch!(@start_remedy_keys, focus)
-
+    case {Keyword.get(context, :agent_start_remedy), Map.fetch!(@start_remedy_keys, focus)} do
+      {remedy, {binding, command, _hint}}
+      when remedy in [:retry, :set_up_provider] and is_binary(binding) ->
         Bindings.bind(
           Bindings.new(),
           Minga.Keymap.KeyParser.parse!(binding),
@@ -309,8 +312,8 @@ defmodule Minga.Keymap.Scope.Agent do
     # Return to editor
     |> Bindings.bind(~k(q), :agent_close, "Return to editor")
     |> Bindings.bind(~k(ESC), :agent_dismiss_or_noop, "Dismiss/cancel")
-    # Clear
-    |> Bindings.bind(~k(C-l), :agent_clear_chat, "Clear chat display")
+    # Stop: the macOS platform alias of SPC a s
+    |> Bindings.bind([{?., @cmd}], :agent_abort, "Stop")
   end
 
   # ── Insert mode bindings ───────────────────────────────────────────────────
@@ -323,8 +326,10 @@ defmodule Minga.Keymap.Scope.Agent do
         trie
         # ESC switches to input normal mode (vim-style)
         |> Bindings.bind(~k(ESC), :agent_input_to_normal, "Normal mode")
-        # Enter submits
-        |> Bindings.bind(~k(RET), :agent_submit_or_newline, "Submit prompt")
+        # Enter adds a newline while typing; sending is Normal-mode Enter or Cmd+Enter.
+        |> Bindings.bind(~k(RET), :agent_insert_newline, "New line")
+        |> Bindings.bind([{@enter, @alt}], :agent_queue_follow_up, "Queue next message")
+        |> bind_composer_actions()
         # Backspace
         |> Bindings.bind(~k(DEL), :agent_input_backspace, "Delete character")
         # Left/right arrows handled by Vim.handle_key (shared primitive).
@@ -333,15 +338,6 @@ defmodule Minga.Keymap.Scope.Agent do
         |> Bindings.bind([{0xF701, 0}], :agent_input_down, "Move down / history next")
         |> Bindings.bind([{57_352, 0}], :agent_input_up, "Move up / history prev")
         |> Bindings.bind([{57_353, 0}], :agent_input_down, "Move down / history next")
-        # Ctrl+Enter queues as follow-up during streaming; submits normally when idle.
-        |> Bindings.bind([{@enter, @ctrl}], :agent_queue_follow_up, "Queue as follow-up")
-        # Alt+Up dequeues pending messages back into the prompt buffer.
-        |> Bindings.bind([{0xF700, @alt}], :agent_dequeue, "Dequeue to editor")
-        |> Bindings.bind([{57_352, @alt}], :agent_dequeue, "Dequeue to editor")
-        # Scope-specific overrides on top of group bindings:
-        # Ctrl+D/U get more specific descriptions in insert context
-        |> Bindings.bind(~k(C-d), :agent_scroll_half_down, "Scroll down (while typing)")
-        |> Bindings.bind(~k(C-u), :agent_scroll_half_up, "Scroll up (while typing)")
       end
     )
   end
@@ -349,8 +345,9 @@ defmodule Minga.Keymap.Scope.Agent do
   # ── Input normal mode meta keys ──────────────────────────────────────────
   #
   # Vim editing keys (motions, operators, text objects, counts, visual mode)
-  # are handled by the standard Mode FSM via dispatch_prompt_via_mode_fsm.
-  # This trie only contains meta keys that the Vim module passes through.
+  # are handled by the standard Mode FSM. The composer dispatch consults this
+  # trie first, only in Vim Normal mode with no key sequence pending, so `q`
+  # records a macro and `d` still waits for its motion.
 
   @spec input_normal_trie() :: Bindings.node_t()
   defp input_normal_trie do
@@ -360,9 +357,25 @@ defmodule Minga.Keymap.Scope.Agent do
         trie
         # A second Escape leaves input-normal and returns focus to chat navigation.
         |> Bindings.bind(~k(ESC), :agent_unfocus_input, "Back to chat nav")
-        |> Bindings.bind(~k(q), :agent_unfocus_input, "Back to chat nav")
+        |> Bindings.bind(~k(RET), :agent_submit_or_newline, "Send (steers while Minga works)")
+        |> bind_composer_actions()
       end
     )
+  end
+
+  # Composer actions with the same keys in Insert and Normal: Cmd+Enter sends
+  # (steering while Minga works) and Cmd+. stops Minga (the macOS platform alias
+  # of SPC a s). Alt+Enter, which queues, is Insert only: the key grammar allows
+  # it where you type (`docs/design/keys.md` rule 4); Normal queues with SPC a q f.
+  @spec bind_composer_actions(Bindings.node_t()) :: Bindings.node_t()
+  defp bind_composer_actions(trie) do
+    trie
+    |> Bindings.bind(
+      [{@enter, @cmd}],
+      :agent_submit_or_newline,
+      "Send (steers while Minga works)"
+    )
+    |> Bindings.bind([{?., @cmd}], :agent_abort, "Stop")
   end
 
   # ── Help content ───────────────────────────────────────────────────────────
@@ -401,21 +414,20 @@ defmodule Minga.Keymap.Scope.Agent do
          {"y", "Copy code block at cursor"},
          {"Y", "Copy full message at cursor"}
        ]},
-      {"Input",
+      {"Composer",
        [
-         {"i / a / Enter", "Focus chat input"},
-         {"Shift+Enter", "Insert newline in input"},
-         {"Up / Down", "History / cursor in input"}
+         {"i / a / Enter", "Focus the composer"},
+         {"Enter (Insert)", "New line"},
+         {"Enter (Normal) / Cmd+Enter", "Send; steers while Minga works"},
+         {"Alt+Enter", "Queue the next message"},
+         {"Cmd+. / SPC a s", "Stop; the queue is kept"},
+         {"Up / Down", "History / cursor in the composer"}
        ]},
       {"Session",
        [
-         {"Ctrl-c", "Normal mode (also aborts and restores queued while streaming)"},
-         {"Ctrl+Enter", "Queue as follow-up (or submit if idle)"},
-         {"Alt+Up", "Dequeue messages back to editor"},
-         {"Ctrl-l", "Clear display"},
+         {"Ctrl-c", "Normal mode (also stops Minga while it works)"},
          {"s", "Session switcher"},
          {"SPC a n", "New local session"},
-         {"SPC a s", "Abort agent turn"},
          {"SPC a q q", "Inspect queued inputs"},
          {"SPC a q f", "Queue follow-up from input"},
          {"SPC a S l", "Pick local/remote session"},
@@ -480,6 +492,7 @@ defmodule Minga.Keymap.Scope.Agent do
         |> merge_trie(trie)
         # Enter: focus input if not focused, submit if focused
         |> Bindings.bind(~k(RET), :agent_focus_or_submit, "Focus input / submit")
+        |> Bindings.bind([{@enter, @alt}], :agent_insert_newline, "Insert newline")
         |> Bindings.bind(~k(ESC), :agent_dismiss_or_noop, "Dismiss/cancel")
         |> Bindings.bind(~k(TAB), :agent_switch_focus, "Switch panel focus")
         # Cmd chords (GUI) + Ctrl fallbacks (TUI)

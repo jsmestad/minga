@@ -17,22 +17,8 @@ duplicate_key	agent	cua	Up(kitty)	agent_input_up | move_up	2 meanings for one ke
 duplicate_key	git_status	cua	⌃c	copy_or_interrupt | git_commit_open	2 meanings for one key
 duplicate_key	git_status	cua	⌘c	git_commit_open | yank_visual_selection	2 meanings for one key
 duplicate_leader_command	leader	normal	SPC m t a, SPC p T	test_all	one command on 2 leader keys without a declared alias
-editing_collision	agent	insert	⌃u	agent_scroll_half_up	text-editing control key where you type
 normal_mode_modifier	agent	input_normal	⌃c	agent_ctrl_c	modifier where letters are not text
-normal_mode_modifier	agent	input_normal	⌃l	agent_clear_chat	modifier where letters are not text
-normal_mode_modifier	agent	input_normal	⌃q	agent_unfocus_and_quit	modifier where letters are not text
-normal_mode_modifier	agent	input_normal	⌃s	agent_save_buffer	modifier where letters are not text
-normal_mode_modifier	agent	normal	⌃l	agent_clear_chat	modifier where letters are not text
 normal_mode_modifier	git_status	cua	⌃c	git_commit_open	modifier where letters are not text
 platform_key	git_status	cua	⌘c	git_commit_open	not an allow-listed macOS platform key
-unconventional_modifier	agent	insert	⌃RET	agent_queue_follow_up	modifier where you type is not an established convention
 unconventional_modifier	agent	insert	⌃c	agent_ctrl_c	modifier where you type is not an established convention
-unconventional_modifier	agent	insert	⌃d	agent_scroll_half_down	modifier where you type is not an established convention
 unconventional_modifier	agent	insert	⌃j	agent_insert_newline	modifier where you type is not an established convention
-unconventional_modifier	agent	insert	⌃l	agent_clear_chat	modifier where you type is not an established convention
-unconventional_modifier	agent	insert	⌃q	agent_unfocus_and_quit	modifier where you type is not an established convention
-unconventional_modifier	agent	insert	⌃s	agent_save_buffer	modifier where you type is not an established convention
-unconventional_modifier	agent	insert	⌥RET	agent_insert_newline	modifier where you type is not an established convention
-unconventional_modifier	agent	insert	⌥Up	agent_dequeue	modifier where you type is not an established convention
-unconventional_modifier	agent	insert	⌥Up(kitty)	agent_dequeue	modifier where you type is not an established convention
-vim_grammar_override	agent	input_normal	q	agent_unfocus_input	printable key rebound over Vim grammar in a text field
