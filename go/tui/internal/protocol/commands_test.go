@@ -634,7 +634,8 @@ func TestDecodeWhichKeyChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	packet = append(packet, string8("a")...)
 	packet = append(packet, string16("Minga")...)
 	packet = append(packet, string16("SPC a")...)
-	packet = append(packet, string16("· 1")...)
+	packet = append(packet, string16("· 1 needs you")...)
+	packet = append(packet, WhichKeyCountNeedsYou)
 	packet = append(packet, 1)
 	packet = append(packet, string8("⌫")...)
 	packet = append(packet, string16("back")...)
@@ -644,7 +645,8 @@ func TestDecodeWhichKeyChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	packet = append(packet, 0, 0, 0, 'q', 0)
 	packet = append(packet, string16("Queue ›")...)
 	packet = append(packet, string16("Conversation")...)
-	packet = append(packet, string16("· 2")...)
+	packet = append(packet, string16("· 2 errors")...)
+	packet = append(packet, WhichKeyCountError)
 	packet = append(packet, string8("⌘.")...)
 	packet = append(packet, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
 
@@ -656,13 +658,13 @@ func TestDecodeWhichKeyChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 		t.Fatalf("which-key size = %d, want %d", first.Size, len(packet)-9)
 	}
 	which := first.Chrome.Which
-	if !which.Visible || which.Path != "SPC a" || which.Count != "· 1" || len(which.Breadcrumb) != 2 || len(which.Hints) != 1 || len(which.Entries) != 1 {
+	if !which.Visible || which.Path != "SPC a" || which.Count != "· 1 needs you" || which.CountTone != WhichKeyCountNeedsYou || len(which.Breadcrumb) != 2 || len(which.Hints) != 1 || len(which.Entries) != 1 {
 		t.Fatalf("which-key decoded incorrectly: %+v", which)
 	}
 	if crumb := which.Breadcrumb[1]; crumb.Key != "a" || crumb.Label != "Minga" || crumb.Path != "SPC a" {
 		t.Fatalf("which-key crumb decoded incorrectly: %+v", crumb)
 	}
-	if got := which.Entries[0]; got.Kind != 1 || got.Key != "q" || got.Codepoint != 'q' || got.Label != "Queue ›" || got.Section != "Conversation" || got.Count != "· 2" || got.PlatformKey != "⌘." {
+	if got := which.Entries[0]; got.Kind != 1 || got.Key != "q" || got.Codepoint != 'q' || got.Label != "Queue ›" || got.Section != "Conversation" || got.Count != "· 2 errors" || got.CountTone != WhichKeyCountError || got.PlatformKey != "⌘." {
 		t.Fatalf("which-key entry decoded incorrectly: %+v", got)
 	}
 

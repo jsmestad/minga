@@ -112,15 +112,20 @@ defmodule MingaEditor.RenderModel.UI.WhichKeyBuilderTest do
     counts = Counts.from_facts(%{needs_you_count: 1, diagnostic_counts: {2, 0, 0, 0}})
 
     model = WhichKeyBuilder.build(state, counts: counts)
-    assert %{count: "· 1 needs you"} = Enum.find(model.entries, &(&1.key == "a"))
-    assert %{count: "· 2 errors"} = Enum.find(model.entries, &(&1.key == "c"))
-    assert %{count: ""} = Enum.find(model.entries, &(&1.key == "f"))
+
+    assert %{count: %{text: "· 1 needs you", tone: :needs_you}} =
+             Enum.find(model.entries, &(&1.key == "a"))
+
+    assert %{count: %{text: "· 2 errors", tone: :error}} =
+             Enum.find(model.entries, &(&1.key == "c"))
+
+    assert %{count: %{text: "", tone: :muted}} = Enum.find(model.entries, &(&1.key == "f"))
 
     later = WhichKeyBuilder.build(state, counts: Counts.from_facts(%{needs_you_count: 3}))
-    assert %{count: "· 3 needs you"} = Enum.find(later.entries, &(&1.key == "a"))
+    assert %{count: %{text: "· 3 needs you"}} = Enum.find(later.entries, &(&1.key == "a"))
 
     minga = WhichKeyBuilder.build(shown([{?a, 0}]), counts: counts)
-    assert minga.count == "· 1 needs you"
+    assert minga.count == %{text: "· 1 needs you", tone: :needs_you}
   end
 
   test "platform keys show only for native GUI frontends" do

@@ -525,6 +525,18 @@ public enum Wire {
     /// One which-key row from gui_which_key (docs/GUI_PROTOCOL.md). `key` is the formatted key and
     /// `codepoint` with `modifiers` the raw key a click presses; `count` and `platformKey` are final
     /// display text, empty when there is none.
+    /// The colour role a which-key count draws in. The BEAM decides it from the fact it counts; an unknown byte reads as muted.
+    public enum WhichKeyCountTone: UInt8, Sendable, Equatable {
+        /// A plain count, in the secondary colour.
+        case muted = 0
+        /// Minga needs you, in the needs-you role.
+        case needsYou = 1
+        /// Errors, in the failure role.
+        case error = 2
+
+        public init(byte: UInt8) { self = WhichKeyCountTone(rawValue: byte) ?? .muted }
+    }
+
     public struct WhichKeyEntry: Sendable, Equatable {
         public let kind: UInt8  // 0 = command, 1 = group
         public let key: String
@@ -533,12 +545,13 @@ public enum Wire {
         public let label: String
         public let section: String
         public let count: String
+        public let countTone: WhichKeyCountTone
         public let platformKey: String
 
         public var isGroup: Bool { kind == 1 }
 
         public init(kind: UInt8, key: String, codepoint: UInt32 = 0, modifiers: UInt8 = 0, label: String,
-                    section: String = "", count: String = "", platformKey: String = "") {
+                    section: String = "", count: String = "", countTone: WhichKeyCountTone = .muted, platformKey: String = "") {
             self.kind = kind
             self.key = key
             self.codepoint = codepoint
@@ -546,6 +559,7 @@ public enum Wire {
             self.label = label
             self.section = section
             self.count = count
+            self.countTone = countTone
             self.platformKey = platformKey
         }
     }
@@ -580,17 +594,19 @@ public enum Wire {
         public let path: String
         public let breadcrumb: [WhichKeyCrumb]
         public let count: String
+        public let countTone: WhichKeyCountTone
         public let hints: [WhichKeyHint]
         public let entries: [WhichKeyEntry]
 
         public static let hidden = WhichKey(visible: false)
 
         public init(visible: Bool, path: String = "", breadcrumb: [WhichKeyCrumb] = [], count: String = "",
-                    hints: [WhichKeyHint] = [], entries: [WhichKeyEntry] = []) {
+                    countTone: WhichKeyCountTone = .muted, hints: [WhichKeyHint] = [], entries: [WhichKeyEntry] = []) {
             self.visible = visible
             self.path = path
             self.breadcrumb = breadcrumb
             self.count = count
+            self.countTone = countTone
             self.hints = hints
             self.entries = entries
         }

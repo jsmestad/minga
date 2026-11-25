@@ -28,19 +28,19 @@
       ~
       ~
 ╭─ SPC Leader ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ Groups              Often                      More                                                                                                │
-│ a Minga ›           SPC Find file in project   p   Project ›                                                                                       │
-│ s Search ›          ,   Switch buffer          TAB Workspace ›                                                                                     │
-│ c Code ›            /   Search project         1   Tab 1                                                                                           │
-│ f Files ›                                      2   Tab 2                                                                                           │
-│ b Buffers ›                                    3   Tab 3                                                                                           │
-│ w Windows ›                                    4   Tab 4                                                                                           │
-│ o Open ›                                       5   Tab 5                                                                                           │
-│ h Help ›                                       6   Tab 6                                                                                           │
-│ t Toggles ›                                    7   Tab 7                                                                                           │
-│ q Quit ›                                       8   Tab 8                                                                                           │
-│ : Execute command                              9   Tab 9                                                                                           │
-│                                                ;   Eval expression                                                                                 │
+│ Groups        Often                      More                                                                                                      │
+│ a Minga ›     SPC Find file in project   p   Project ›                                                                                             │
+│ s Search ›    ,   Switch buffer          TAB Workspace ›                                                                                           │
+│ c Code ›      /   Search project         1   Tab 1                                                                                                 │
+│ f Files ›     :   Execute command        2   Tab 2                                                                                                 │
+│ b Buffers ›                              3   Tab 3                                                                                                 │
+│ w Windows ›                              4   Tab 4                                                                                                 │
+│ o Open ›                                 5   Tab 5                                                                                                 │
+│ h Help ›                                 6   Tab 6                                                                                                 │
+│ t Toggles ›                              7   Tab 7                                                                                                 │
+│ q Quit ›                                 8   Tab 8                                                                                                 │
+│                                          9   Tab 9                                                                                                 │
+│                                          ;   Eval expression                                                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── ⌫ back  esc close ─╯
   NORMAL  storyboard.ex                                                                                                                SPC Elixir 1:1
 ## styles (row start-end fg bg attrs)
@@ -131,128 +131,130 @@
 22 0-1 #7c7f93 #ccd0da -
 22 2-2 #4c4f69 #ccd0da -
 22 3-5 #1e66f5 #ccd0da -
-22 6-13 #4c4f69 #ccd0da -
+22 6-6 #4c4f69 #ccd0da -
+22 7-12 #4c4f69 #ccd0da bold
+22 13-13 #4c4f69 #ccd0da -
 22 14-149 #7c7f93 #ccd0da -
 23 0-0 #7c7f93 #ccd0da -
 23 1-1 #4c4f69 #ccd0da -
-23 2-18 #5c5f77 #ccd0da -
-23 19-21 #4c4f69 #ccd0da -
-23 22-45 #5c5f77 #ccd0da -
-23 46-48 #4c4f69 #ccd0da -
-23 49-67 #5c5f77 #ccd0da -
-23 68-148 #4c4f69 #ccd0da -
+23 2-12 #5c5f77 #ccd0da -
+23 13-15 #4c4f69 #ccd0da -
+23 16-39 #5c5f77 #ccd0da -
+23 40-42 #4c4f69 #ccd0da -
+23 43-61 #5c5f77 #ccd0da -
+23 62-148 #4c4f69 #ccd0da -
 23 149-149 #7c7f93 #ccd0da -
 24 0-0 #7c7f93 #ccd0da -
 24 1-1 #4c4f69 #ccd0da -
 24 2-2 #1e66f5 #ccd0da -
 24 3-3 #4c4f69 #ccd0da -
 24 4-10 #1650c0 #ccd0da -
-24 11-21 #4c4f69 #ccd0da -
-24 22-24 #1e66f5 #ccd0da -
-24 25-48 #4c4f69 #ccd0da -
-24 49-49 #1e66f5 #ccd0da -
-24 50-52 #4c4f69 #ccd0da -
-24 53-61 #1650c0 #ccd0da -
-24 62-148 #4c4f69 #ccd0da -
+24 11-15 #4c4f69 #ccd0da -
+24 16-18 #1e66f5 #ccd0da -
+24 19-42 #4c4f69 #ccd0da -
+24 43-43 #1e66f5 #ccd0da -
+24 44-46 #4c4f69 #ccd0da -
+24 47-55 #1650c0 #ccd0da -
+24 56-148 #4c4f69 #ccd0da -
 24 149-149 #7c7f93 #ccd0da -
 25 0-0 #7c7f93 #ccd0da -
 25 1-1 #4c4f69 #ccd0da -
 25 2-2 #1e66f5 #ccd0da -
 25 3-3 #4c4f69 #ccd0da -
 25 4-11 #1650c0 #ccd0da -
-25 12-21 #4c4f69 #ccd0da -
-25 22-22 #1e66f5 #ccd0da -
-25 23-48 #4c4f69 #ccd0da -
-25 49-51 #1e66f5 #ccd0da -
-25 52-52 #4c4f69 #ccd0da -
-25 53-63 #1650c0 #ccd0da -
-25 64-148 #4c4f69 #ccd0da -
+25 12-15 #4c4f69 #ccd0da -
+25 16-16 #1e66f5 #ccd0da -
+25 17-42 #4c4f69 #ccd0da -
+25 43-45 #1e66f5 #ccd0da -
+25 46-46 #4c4f69 #ccd0da -
+25 47-57 #1650c0 #ccd0da -
+25 58-148 #4c4f69 #ccd0da -
 25 149-149 #7c7f93 #ccd0da -
 26 0-0 #7c7f93 #ccd0da -
 26 1-1 #4c4f69 #ccd0da -
 26 2-2 #1e66f5 #ccd0da -
 26 3-3 #4c4f69 #ccd0da -
 26 4-9 #1650c0 #ccd0da -
-26 10-21 #4c4f69 #ccd0da -
-26 22-22 #1e66f5 #ccd0da -
-26 23-48 #4c4f69 #ccd0da -
-26 49-49 #1e66f5 #ccd0da -
-26 50-148 #4c4f69 #ccd0da -
+26 10-15 #4c4f69 #ccd0da -
+26 16-16 #1e66f5 #ccd0da -
+26 17-42 #4c4f69 #ccd0da -
+26 43-43 #1e66f5 #ccd0da -
+26 44-148 #4c4f69 #ccd0da -
 26 149-149 #7c7f93 #ccd0da -
 27 0-0 #7c7f93 #ccd0da -
 27 1-1 #4c4f69 #ccd0da -
 27 2-2 #1e66f5 #ccd0da -
 27 3-3 #4c4f69 #ccd0da -
 27 4-10 #1650c0 #ccd0da -
-27 11-48 #4c4f69 #ccd0da -
-27 49-49 #1e66f5 #ccd0da -
-27 50-148 #4c4f69 #ccd0da -
+27 11-15 #4c4f69 #ccd0da -
+27 16-16 #1e66f5 #ccd0da -
+27 17-42 #4c4f69 #ccd0da -
+27 43-43 #1e66f5 #ccd0da -
+27 44-148 #4c4f69 #ccd0da -
 27 149-149 #7c7f93 #ccd0da -
 28 0-0 #7c7f93 #ccd0da -
 28 1-1 #4c4f69 #ccd0da -
 28 2-2 #1e66f5 #ccd0da -
 28 3-3 #4c4f69 #ccd0da -
 28 4-12 #1650c0 #ccd0da -
-28 13-48 #4c4f69 #ccd0da -
-28 49-49 #1e66f5 #ccd0da -
-28 50-148 #4c4f69 #ccd0da -
+28 13-42 #4c4f69 #ccd0da -
+28 43-43 #1e66f5 #ccd0da -
+28 44-148 #4c4f69 #ccd0da -
 28 149-149 #7c7f93 #ccd0da -
 29 0-0 #7c7f93 #ccd0da -
 29 1-1 #4c4f69 #ccd0da -
 29 2-2 #1e66f5 #ccd0da -
 29 3-3 #4c4f69 #ccd0da -
 29 4-12 #1650c0 #ccd0da -
-29 13-48 #4c4f69 #ccd0da -
-29 49-49 #1e66f5 #ccd0da -
-29 50-148 #4c4f69 #ccd0da -
+29 13-42 #4c4f69 #ccd0da -
+29 43-43 #1e66f5 #ccd0da -
+29 44-148 #4c4f69 #ccd0da -
 29 149-149 #7c7f93 #ccd0da -
 30 0-0 #7c7f93 #ccd0da -
 30 1-1 #4c4f69 #ccd0da -
 30 2-2 #1e66f5 #ccd0da -
 30 3-3 #4c4f69 #ccd0da -
 30 4-9 #1650c0 #ccd0da -
-30 10-48 #4c4f69 #ccd0da -
-30 49-49 #1e66f5 #ccd0da -
-30 50-148 #4c4f69 #ccd0da -
+30 10-42 #4c4f69 #ccd0da -
+30 43-43 #1e66f5 #ccd0da -
+30 44-148 #4c4f69 #ccd0da -
 30 149-149 #7c7f93 #ccd0da -
 31 0-0 #7c7f93 #ccd0da -
 31 1-1 #4c4f69 #ccd0da -
 31 2-2 #1e66f5 #ccd0da -
 31 3-3 #4c4f69 #ccd0da -
 31 4-9 #1650c0 #ccd0da -
-31 10-48 #4c4f69 #ccd0da -
-31 49-49 #1e66f5 #ccd0da -
-31 50-148 #4c4f69 #ccd0da -
+31 10-42 #4c4f69 #ccd0da -
+31 43-43 #1e66f5 #ccd0da -
+31 44-148 #4c4f69 #ccd0da -
 31 149-149 #7c7f93 #ccd0da -
 32 0-0 #7c7f93 #ccd0da -
 32 1-1 #4c4f69 #ccd0da -
 32 2-2 #1e66f5 #ccd0da -
 32 3-3 #4c4f69 #ccd0da -
 32 4-12 #1650c0 #ccd0da -
-32 13-48 #4c4f69 #ccd0da -
-32 49-49 #1e66f5 #ccd0da -
-32 50-148 #4c4f69 #ccd0da -
+32 13-42 #4c4f69 #ccd0da -
+32 43-43 #1e66f5 #ccd0da -
+32 44-148 #4c4f69 #ccd0da -
 32 149-149 #7c7f93 #ccd0da -
 33 0-0 #7c7f93 #ccd0da -
 33 1-1 #4c4f69 #ccd0da -
 33 2-2 #1e66f5 #ccd0da -
 33 3-3 #4c4f69 #ccd0da -
 33 4-9 #1650c0 #ccd0da -
-33 10-48 #4c4f69 #ccd0da -
-33 49-49 #1e66f5 #ccd0da -
-33 50-148 #4c4f69 #ccd0da -
+33 10-42 #4c4f69 #ccd0da -
+33 43-43 #1e66f5 #ccd0da -
+33 44-148 #4c4f69 #ccd0da -
 33 149-149 #7c7f93 #ccd0da -
 34 0-0 #7c7f93 #ccd0da -
-34 1-1 #4c4f69 #ccd0da -
-34 2-2 #1e66f5 #ccd0da -
-34 3-48 #4c4f69 #ccd0da -
-34 49-49 #1e66f5 #ccd0da -
-34 50-148 #4c4f69 #ccd0da -
+34 1-42 #4c4f69 #ccd0da -
+34 43-43 #1e66f5 #ccd0da -
+34 44-148 #4c4f69 #ccd0da -
 34 149-149 #7c7f93 #ccd0da -
 35 0-0 #7c7f93 #ccd0da -
-35 1-48 #4c4f69 #ccd0da -
-35 49-49 #1e66f5 #ccd0da -
-35 50-148 #4c4f69 #ccd0da -
+35 1-42 #4c4f69 #ccd0da -
+35 43-43 #1e66f5 #ccd0da -
+35 44-148 #4c4f69 #ccd0da -
 35 149-149 #7c7f93 #ccd0da -
 36 0-128 #7c7f93 #ccd0da -
 36 129-129 #4c4f69 #ccd0da -

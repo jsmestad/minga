@@ -37,7 +37,8 @@ defmodule Minga.Frontend.Adapter.GUI.WhichKeyEncoder do
       |> Writer.string16(:crumb_label, crumb.label)
       |> Writer.string16(:crumb_path, crumb.path)
     end)
-    |> Writer.string16(:count, model.count)
+    |> Writer.string16(:count, model.count.text)
+    |> Writer.uint8(:count_tone, tone_byte(model.count.tone))
     |> Writer.uint8(:hint_count, Enum.count(model.hints))
     |> encode_each(model.hints, fn hint, acc ->
       acc |> Writer.string8(:hint_key, hint.key) |> Writer.string16(:hint_label, hint.label)
@@ -51,7 +52,8 @@ defmodule Minga.Frontend.Adapter.GUI.WhichKeyEncoder do
       |> Writer.uint8(:entry_modifiers, entry.modifiers)
       |> Writer.string16(:entry_label, entry.label)
       |> Writer.string16(:entry_section, entry.section)
-      |> Writer.string16(:entry_count, entry.count)
+      |> Writer.string16(:entry_count, entry.count.text)
+      |> Writer.uint8(:entry_count_tone, tone_byte(entry.count.tone))
       |> Writer.string8(:entry_platform_key, entry.platform_key)
     end)
     |> Writer.finish()
@@ -59,6 +61,11 @@ defmodule Minga.Frontend.Adapter.GUI.WhichKeyEncoder do
 
   @spec encode_each(Writer.t(), [term()], (term(), Writer.t() -> Writer.t())) :: Writer.t()
   defp encode_each(writer, items, fun), do: Enum.reduce(items, writer, fun)
+
+  @spec tone_byte(WhichKey.tone()) :: 0 | 1 | 2
+  defp tone_byte(:muted), do: 0
+  defp tone_byte(:needs_you), do: 1
+  defp tone_byte(:error), do: 2
 
   @spec kind_byte(WhichKey.kind()) :: 0 | 1
   defp kind_byte(:group), do: 1

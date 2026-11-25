@@ -173,13 +173,17 @@ defmodule Minga.Test.Storyboard.Assertions do
     model
   end
 
-  @doc "Asserts the which-key entry on `key` carries a live count, such as `Tasks · 1 needs you`."
-  @spec assert_count(Model.t(), String.t(), String.t()) :: Model.t()
-  def assert_count(%Model{} = model, key, count) do
+  @doc "Asserts the which-key entry on `key` carries a live count, such as `Tasks · 1 needs you`, drawn in the `tone` colour role."
+  @spec assert_count(Model.t(), String.t(), String.t(), Minga.RenderModel.UI.WhichKey.tone()) ::
+          Model.t()
+  def assert_count(%Model{} = model, key, count, tone) do
     entry = which_key_entry!(model, key)
 
     assert String.contains?(entry.count, count),
            "expected #{key} to show the count #{inspect(count)}, got #{inspect(entry.count)}"
+
+    assert entry.count_tone == tone,
+           "expected #{key}'s count in the #{tone} role, got #{entry.count_tone}"
 
     model
   end

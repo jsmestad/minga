@@ -235,8 +235,8 @@ defmodule Minga.Keymap.Defaults do
   # entry here get one unnamed section. See docs/design/surfaces.md.
   @which_key_sections %{
     "" => [
-      {"Groups", ~w(a s c g f b w o h t q :)},
-      {"Often", ["SPC", ",", "/"]}
+      {"Groups", ~w(a s c g f b w o h t q)},
+      {"Often", ["SPC", ",", "/", ":"]}
     ],
     "a" => [
       {"Tasks", ~w(a n i w s)},

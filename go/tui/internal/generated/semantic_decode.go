@@ -889,6 +889,11 @@ func DecodeWhichKeyEntry(data []byte, offset int, windowEnd int) (WhichKeyEntry,
 	if err != nil {
 		return WhichKeyEntry{}, offset, err
 	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "count_tone"); err != nil {
+		return WhichKeyEntry{}, offset, err
+	}
+	countTone := data[pos]
+	pos++
 	platformKey, pos, err := decodeString8Window(data, pos, windowEnd)
 	if err != nil {
 		return WhichKeyEntry{}, offset, err
@@ -901,6 +906,7 @@ func DecodeWhichKeyEntry(data []byte, offset int, windowEnd int) (WhichKeyEntry,
 		Label:       label,
 		Section:     section,
 		Count:       countVal,
+		CountTone:   countTone,
 		PlatformKey: platformKey,
 	}, pos, nil
 }

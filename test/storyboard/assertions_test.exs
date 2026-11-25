@@ -67,7 +67,13 @@ defmodule Minga.Storyboard.AssertionsTest do
         Enum.map(
           entries,
           &Map.merge(
-            %{codepoint: 0, modifiers: 0, section: "", count: "", platform_key: ""},
+            %{
+              codepoint: 0,
+              modifiers: 0,
+              section: "",
+              count: %{text: "", tone: :muted},
+              platform_key: ""
+            },
             &1
           )
         )
@@ -202,13 +208,19 @@ defmodule Minga.Storyboard.AssertionsTest do
     test "leaves, live counts and shown keys" do
       wk =
         which_key([
-          %{key: "a", label: "Tasks", count: "· 1 needs you", kind: :command, section: "Tasks"},
+          %{
+            key: "a",
+            label: "Tasks",
+            count: %{text: "· 1 needs you", tone: :needs_you},
+            kind: :command,
+            section: "Tasks"
+          },
           %{key: "v", label: "Conversation", kind: :command, section: "Conversation"}
         ])
 
       model(which_key: wk)
       |> assert_leaf("v", "Conversation")
-      |> assert_count("a", "1 needs you")
+      |> assert_count("a", "1 needs you", :needs_you)
       |> assert_keys_shown(["a", "v"])
       |> assert_sections(["Tasks", "Conversation"])
 

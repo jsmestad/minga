@@ -131,6 +131,30 @@ reason = "The needs-you state colour on the modeline misses 4.5:1 in this theme.
 issue = 4137
 
 [[exception]]
+scenario = ["minga.whichkey"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#ef9f76 on #414559",
+]
+reason = "Which-key's needs-you count draws in the needs_you role, as the modeline does, which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.whichkey"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#d35400 on #ccd0da",
+]
+reason = "Which-key's needs-you count draws in the needs_you role, as the modeline does, which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
 scenario = ["edit.whichkey.leader", "minga.whichkey"]
 frontend = "tui"
 part = "text"

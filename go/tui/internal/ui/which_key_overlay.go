@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"image/color"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -283,7 +284,7 @@ func (m Model) renderWhichKeyEntry(entry generated.WhichKeyEntry, column whichKe
 	if entry.Kind == whichKeyKindGroup {
 		labelStyle = labelStyle.Foreground(p.Role(generated.ColorRoleGroup))
 	}
-	countStyle := lipgloss.NewStyle().Foreground(p.Role(generated.ColorRoleTextMuted)).Background(p.PopupSurface())
+	countStyle := lipgloss.NewStyle().Foreground(whichKeyCountColor(p, entry.CountTone)).Background(p.PopupSurface())
 
 	label, count := entry.Label, entry.Count
 	countWidth := 0
@@ -324,11 +325,17 @@ func (m Model) whichKeyTopBorder(which protocol.WhichKey, width int) string {
 		}
 		crumbs.WriteString(keyStyle.Render(crumb.Key))
 		if crumb.Label != "" {
-			crumbs.WriteString(surface.Render(" ") + labelStyle.Render(crumb.Label))
+			style := labelStyle
+			if i == len(which.Breadcrumb)-1 {
+				// The open group's name is the panel's title.
+				style = style.Bold(true)
+			}
+			crumbs.WriteString(surface.Render(" ") + style.Render(crumb.Label))
 		}
 	}
 	if which.Count != "" {
-		crumbs.WriteString(surface.Render(" ") + faint.Render(which.Count))
+		count := lipgloss.NewStyle().Foreground(whichKeyCountColor(p, which.CountTone)).Background(p.PopupSurface())
+		crumbs.WriteString(surface.Render(" ") + count.Render(which.Count))
 	}
 	title := surface.Render(" ") + crumbs.String() + surface.Render(" ")
 	room := max(width-4, 0)
@@ -360,4 +367,17 @@ func (m Model) whichKeyBottomBorder(which protocol.WhichKey, width int) string {
 	}
 	fill := max(width-3-lipgloss.Width(text), 0)
 	return border.Render("╰"+strings.Repeat("─", fill)) + text + border.Render("─╯")
+}
+
+// whichKeyCountColor is the colour role a count's tone names: the needs-you and failure state roles, as the modeline
+// draws the same facts, or the secondary colour for a plain count.
+func whichKeyCountColor(p palette, tone uint8) color.Color {
+	switch tone {
+	case protocol.WhichKeyCountNeedsYou:
+		return p.Role(generated.ColorRoleNeedsYou)
+	case protocol.WhichKeyCountError:
+		return p.Role(generated.ColorRoleFailure)
+	default:
+		return p.Role(generated.ColorRoleTextMuted)
+	}
 }

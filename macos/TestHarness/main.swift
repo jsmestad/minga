@@ -157,12 +157,12 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
     case .guiWhichKey(let model):
         let entries = model.entries.map { e -> [String: Any] in
             ["kind": Int(e.kind), "key": e.key, "codepoint": Int(e.codepoint), "modifiers": Int(e.modifiers), "label": e.label,
-             "section": e.section, "count": e.count, "platform_key": e.platformKey]
+             "section": e.section, "count": e.count, "count_tone": Int(e.countTone.rawValue), "platform_key": e.platformKey]
         }
         let crumbs = model.breadcrumb.map { ["key": $0.key, "label": $0.label, "path": $0.path] }
         let hints = model.hints.map { ["key": $0.key, "label": $0.label] }
         return ["type": "gui_which_key", "visible": model.visible, "path": model.path, "breadcrumb": crumbs,
-                "count": model.count, "hints": hints, "entries": entries]
+                "count": model.count, "count_tone": Int(model.countTone.rawValue), "hints": hints, "entries": entries]
 
     case .guiBreadcrumb(let segments):
         return ["type": "gui_breadcrumb", "segments": segments]

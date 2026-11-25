@@ -3,8 +3,8 @@
 /// One panel anchored above the modeline: the breadcrumb and the panel's own keys in a 24 pt header row, then one
 /// column per section the BEAM sends, each with its name dim above it and as wide as its longest entry. Rows sit on the
 /// 24 pt row pitch; keys sit in a fixed key column (the column's widest key plus `md`) in the accent colour, and group
-/// names, counts and ⌘ keys in the text_muted role. Fades in
-/// within 120 ms, and not at all under Reduce Motion.
+/// names, plain counts and ⌘ keys in the text_muted role. A needs-you or error count draws in that state's role, as the
+/// modeline does. Fades in within 120 ms, and not at all under Reduce Motion.
 
 import SwiftUI
 import MingaProtocol
@@ -53,17 +53,29 @@ public struct WhichKeyOverlay: View {
         HStack(spacing: Spacing.md) {
             breadcrumb
             Spacer(minLength: Spacing.xl)
-            ForEach(Array(state.hints.enumerated()), id: \.offset) { _, hint in
-                HStack(spacing: Spacing.xs) {
-                    hintKey(hint.key)
-                    Text(hint.label)
-                        .font(Typography.font(.caption))
-                        .foregroundStyle(theme.roleColor(.textMuted))
+            // Hint to next hint is xl, as in drawer hints and the TUI's two columns (anatomy rule 6).
+            HStack(spacing: Spacing.xl) {
+                ForEach(Array(state.hints.enumerated()), id: \.offset) { _, hint in
+                    HStack(spacing: Spacing.xs) {
+                        hintKey(hint.key)
+                        Text(hint.label)
+                            .font(Typography.font(.caption))
+                            .foregroundStyle(theme.roleColor(.textMuted))
+                    }
+                    .anatomyPart("whichKey.hint", text: "\(hint.key) \(hint.label)", font: .caption)
                 }
-                .anatomyPart("whichKey.hint", text: "\(hint.key) \(hint.label)", font: .caption)
             }
         }
         .frame(height: Self.rowPitch)
+    }
+
+    /// The colour role a count's tone names: the needs-you and failure state roles, as the modeline draws the same facts, or the secondary colour for a plain count.
+    private func countColor(_ tone: Wire.WhichKeyCountTone) -> Color {
+        switch tone {
+        case .needsYou: theme.roleColor(.needsYou)
+        case .error: theme.roleColor(.failure)
+        case .muted: theme.roleColor(.textMuted)
+        }
     }
 
     /// A hint's key. Backspace draws as the SF Symbol, because ⌫ in the monospaced face reads as a close control.
@@ -105,7 +117,7 @@ public struct WhichKeyOverlay: View {
             if !state.count.isEmpty {
                 Text(state.count)
                     .font(Typography.font(.caption))
-                    .foregroundStyle(theme.roleColor(.textMuted))
+                    .foregroundStyle(countColor(state.countTone))
             }
         }
         .lineLimit(1)
@@ -158,7 +170,7 @@ public struct WhichKeyOverlay: View {
                 if !entry.count.isEmpty {
                     Text(entry.count)
                         .font(Typography.font(.caption))
-                        .foregroundStyle(theme.roleColor(.textMuted))
+                        .foregroundStyle(countColor(entry.countTone))
                         .lineLimit(1)
                         .anatomyPart("whichKey.entryCount", text: entry.count, font: .caption)
                 }

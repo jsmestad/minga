@@ -391,6 +391,7 @@ type WhichKeyEntry struct {
 	Label       string
 	Section     string
 	Count       string
+	CountTone   uint8
 	PlatformKey string
 }
 

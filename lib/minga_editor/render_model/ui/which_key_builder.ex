@@ -47,7 +47,7 @@ defmodule MingaEditor.RenderModel.UI.WhichKeyBuilder do
       visible: entries != [],
       path: Enum.join(prefix_keys, " "),
       breadcrumb: breadcrumb(prefix_keys, labels),
-      count: Counts.text(counts, {:group, group_prefix}),
+      count: Counts.get(counts, {:group, group_prefix}),
       hints: @hints,
       entries: entries
     }
@@ -91,7 +91,7 @@ defmodule MingaEditor.RenderModel.UI.WhichKeyBuilder do
       label: label(binding),
       kind: binding.kind,
       section: section,
-      count: Counts.text(counts, count_target(binding, group_prefix)),
+      count: Counts.get(counts, count_target(binding, group_prefix)),
       platform_key: platform_key(binding, platform_keys?)
     }
   end

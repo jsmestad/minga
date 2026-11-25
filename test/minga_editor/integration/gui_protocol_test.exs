@@ -1063,7 +1063,9 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "gui_which_key visible" do
-    test "round-trips the panel: path, breadcrumb, count, hints and entries", %{harness: harness} do
+    test "round-trips the panel: path, breadcrumb, count and tone, hints and entries", %{
+      harness: harness
+    } do
       model = %Minga.RenderModel.UI.WhichKey{
         visible: true,
         path: "SPC a",
@@ -1071,7 +1073,7 @@ defmodule Minga.Integration.GUIProtocolTest do
           %{key: "SPC", label: "", path: "SPC"},
           %{key: "a", label: "Minga", path: "SPC a"}
         ],
-        count: "· 1 needs you",
+        count: %{text: "· 1 needs you", tone: :needs_you},
         hints: [%{key: "⌫", label: "back"}, %{key: "esc", label: "close"}],
         entries: [
           %{
@@ -1081,7 +1083,7 @@ defmodule Minga.Integration.GUIProtocolTest do
             label: "Stop",
             kind: :command,
             section: "Tasks",
-            count: "",
+            count: %{text: "", tone: :muted},
             platform_key: "⌘."
           },
           %{
@@ -1091,7 +1093,7 @@ defmodule Minga.Integration.GUIProtocolTest do
             label: "Queue ›",
             kind: :group,
             section: "Conversation",
-            count: "· 2",
+            count: %{text: "· 2 errors", tone: :error},
             platform_key: ""
           }
         ]
@@ -1104,6 +1106,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["visible"] == true
       assert decoded["path"] == "SPC a"
       assert decoded["count"] == "· 1 needs you"
+      assert decoded["count_tone"] == 1
 
       assert decoded["breadcrumb"] == [
                %{"key" => "SPC", "label" => "", "path" => "SPC"},
@@ -1124,6 +1127,7 @@ defmodule Minga.Integration.GUIProtocolTest do
                  "label" => "Stop",
                  "section" => "Tasks",
                  "count" => "",
+                 "count_tone" => 0,
                  "platform_key" => "⌘."
                },
                %{
@@ -1133,7 +1137,8 @@ defmodule Minga.Integration.GUIProtocolTest do
                  "modifiers" => 0,
                  "label" => "Queue ›",
                  "section" => "Conversation",
-                 "count" => "· 2",
+                 "count" => "· 2 errors",
+                 "count_tone" => 2,
                  "platform_key" => ""
                }
              ]

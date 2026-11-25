@@ -1102,7 +1102,9 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             }
             let (count, countEnd) = try GeneratedProtocol.decodeString16Window(data, pos, end)
             pos = countEnd
-            guard pos < end else { throw ProtocolDecodeError.malformed }
+            guard pos + 1 < end else { throw ProtocolDecodeError.malformed }
+            let countTone = Wire.WhichKeyCountTone(byte: data[pos])
+            pos += 1
             let hintCount = Int(data[pos])
             pos += 1
             try FrameDecodeAccounting.reserve(.arrayEntries, hintCount)
@@ -1121,10 +1123,12 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             for _ in 0..<entryCount {
                 let (e, next) = try GeneratedProtocol.decodeWhichKeyEntry(data, pos, end)
                 entries.append(Wire.WhichKeyEntry(kind: e.kind, key: e.key, codepoint: e.codepoint, modifiers: e.modifiers,
-                                                  label: e.label, section: e.section, count: e.count, platformKey: e.platformKey))
+                                                  label: e.label, section: e.section, count: e.count,
+                                                  countTone: Wire.WhichKeyCountTone(byte: e.countTone), platformKey: e.platformKey))
                 pos = next
             }
-            let model = Wire.WhichKey(visible: true, path: path, breadcrumb: breadcrumb, count: count, hints: hints, entries: entries)
+            let model = Wire.WhichKey(visible: true, path: path, breadcrumb: breadcrumb, count: count, countTone: countTone,
+                                      hints: hints, entries: entries)
             return (.guiWhichKey(model), pos - offset)
         } catch let error as FrameResourceError {
             throw error

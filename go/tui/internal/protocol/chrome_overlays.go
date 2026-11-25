@@ -55,10 +55,12 @@ func decodeWhichKey(payload []byte) (WhichKey, string, int) {
 		offset = next
 	}
 	count, offset, ok := readString16(payload, offset)
-	if !ok || offset >= end {
+	if !ok || offset+1 >= end {
 		return which, path, end
 	}
 	which.Count = count
+	which.CountTone = payload[offset]
+	offset++
 	hints := int(payload[offset])
 	offset++
 	for range hints {

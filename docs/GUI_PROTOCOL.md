@@ -246,7 +246,7 @@ When visible:
   opcode(1) + 1(1)
   + path_len(2) + path(path_len)
   + crumb_count(1) + crumbs...
-  + count_len(2) + count(count_len)
+  + count_len(2) + count(count_len) + count_tone(1)
   + hint_count(1) + hints...
   + entry_count(2) + entries...
 
@@ -259,16 +259,18 @@ Per hint:
 Per entry:
   kind(1) + key_len(1) + key(key_len) + codepoint(4) + modifiers(1)
   + label_len(2) + label(label_len) + section_len(2) + section(section_len)
-  + count_len(2) + count(count_len) + platform_key_len(1) + platform_key(platform_key_len)
+  + count_len(2) + count(count_len) + count_tone(1)
+  + platform_key_len(1) + platform_key(platform_key_len)
 
 Kind: 0 = command, 1 = group (prefix for more keys)
+Count tone: 0 = muted, 1 = needs you, 2 = error
 
 When hidden:
   opcode(1) + 0(1)
 ```
 
 - `path` is the formatted prefix (`SPC a`) and the panel's identity. Each crumb carries the key, the group label it opened (empty for `SPC`) and the `path` a click on it returns to.
-- `count` is the open group's live count, drawn dim after the breadcrumb. An entry's `count` is drawn dim after its label (`· 1 needs you`, `· 3`). Both are final display text.
+- `count` is the open group's live count, drawn after the breadcrumb. An entry's `count` is drawn after its label (`· 1 needs you`, `· 3`). Both are final display text. `count_tone` names the colour role: a needs-you count draws in the `needs_you` role and an error count in the `failure` role, as the modeline draws the same facts; a muted count draws in the secondary colour. A frontend reads an unknown tone as muted.
 - `hints` are the panel's own keys (`⌫ back`, `esc close`).
 - Entries arrive in display order. Consecutive entries with the same `section` form one section, headed by its name in the secondary colour; an empty `section` has no heading. A frontend may split a long section into several columns, filling each column top to bottom.
 - `kind` alone says whether a row is a group; frontends never infer it from the text. A group's `label` is final display text: a Title Case label with a trailing chevron, such as `Session ›`, never a `+label`. Frontends render labels verbatim and draw group rows in the `group` colour role (`docs/design/keys.md`, "Groups read like leaves").

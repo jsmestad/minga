@@ -36,7 +36,10 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
             |> assert_group("x", "Context")
             |> assert_group("S", "Session")
           end),
-          Check.new("Tasks shows a live needs-you count", &assert_count(&1, "a", "1 needs you")),
+          Check.new(
+            "Tasks shows a live needs-you count",
+            &assert_count(&1, "a", "1 needs you", :needs_you)
+          ),
           Check.new(
             "entries read in the designed sections",
             &assert_sections(&1, ["Tasks", "Conversation", "Changes", "More"])

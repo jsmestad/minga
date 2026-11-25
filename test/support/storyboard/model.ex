@@ -27,13 +27,14 @@ defmodule Minga.Test.Storyboard.Model do
           | :observatory
           | :extension_overlay
 
-  @typedoc "One which-key entry: its key, label, kind, section and live count."
+  @typedoc "One which-key entry: its key, label, kind, section, and live count with the colour role it draws in."
   @type which_key_entry :: %{
           key: String.t(),
           label: String.t(),
           kind: :command | :group,
           section: String.t(),
-          count: String.t()
+          count: String.t(),
+          count_tone: Minga.RenderModel.UI.WhichKey.tone()
         }
 
   @typedoc "The which-key panel, when open."
@@ -213,7 +214,14 @@ defmodule Minga.Test.Storyboard.Model do
       entries:
         Enum.map(
           entries,
-          &%{key: &1.key, label: &1.label, kind: &1.kind, section: &1.section, count: &1.count}
+          &%{
+            key: &1.key,
+            label: &1.label,
+            kind: &1.kind,
+            section: &1.section,
+            count: &1.count.text,
+            count_tone: &1.count.tone
+          }
         )
     }
   end

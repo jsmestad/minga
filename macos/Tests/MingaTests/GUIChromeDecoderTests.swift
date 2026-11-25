@@ -308,7 +308,8 @@ struct GUIWhichKeyDecoderTests {
         data.append(2) // crumb count
         appendString8(&data, "SPC"); appendString16(&data, ""); appendString16(&data, "SPC")
         appendString8(&data, "a"); appendString16(&data, "Minga"); appendString16(&data, "SPC a")
-        appendString16(&data, "· 1") // count
+        appendString16(&data, "· 1 needs you") // count
+        data.append(1) // count tone: needs you
         data.append(1) // hint count
         appendString8(&data, "⌫"); appendString16(&data, "back")
         appendU16(&data, 2) // entry count
@@ -320,6 +321,7 @@ struct GUIWhichKeyDecoderTests {
         appendString16(&data, "Stop")
         appendString16(&data, "Tasks")
         appendString16(&data, "")
+        data.append(0) // count tone: muted
         appendString8(&data, "⌘.")
 
         // Entry 2: group
@@ -328,7 +330,8 @@ struct GUIWhichKeyDecoderTests {
         data.append(contentsOf: [0, 0, 0, 0x71, 0])
         appendString16(&data, "Queue ›")
         appendString16(&data, "Conversation")
-        appendString16(&data, "· 2")
+        appendString16(&data, "· 2 errors")
+        data.append(2) // count tone: error
         appendString8(&data, "")
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
@@ -341,11 +344,13 @@ struct GUIWhichKeyDecoderTests {
         #expect(model.visible == true)
         #expect(model.path == "SPC a")
         #expect(model.breadcrumb == [.init(key: "SPC", path: "SPC"), .init(key: "a", label: "Minga", path: "SPC a")])
-        #expect(model.count == "· 1")
+        #expect(model.count == "· 1 needs you")
+        #expect(model.countTone == .needsYou)
         #expect(model.hints == [.init(key: "⌫", label: "back")])
         #expect(model.entries == [
             .init(kind: 0, key: "s", codepoint: 0x73, label: "Stop", section: "Tasks", platformKey: "⌘."),
-            .init(kind: 1, key: "q", codepoint: 0x71, label: "Queue ›", section: "Conversation", count: "· 2"),
+            .init(kind: 1, key: "q", codepoint: 0x71, label: "Queue ›", section: "Conversation", count: "· 2 errors",
+                  countTone: .error),
         ])
     }
 

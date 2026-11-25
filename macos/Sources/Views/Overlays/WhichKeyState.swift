@@ -23,6 +23,7 @@ public final class WhichKeyState {
     public var path: String { model.path }
     public var breadcrumb: [Wire.WhichKeyCrumb] { model.breadcrumb }
     public var count: String { model.count }
+    public var countTone: Wire.WhichKeyCountTone { model.countTone }
     public var hints: [Wire.WhichKeyHint] { model.hints }
     public var entries: [Wire.WhichKeyEntry] { model.entries }
 

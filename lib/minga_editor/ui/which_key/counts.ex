@@ -4,14 +4,19 @@ defmodule MingaEditor.UI.WhichKey.Counts do
 
   Counts come from the same facts the modeline shows, so the two never disagree, and the builder recomputes them on every frame, so a count changes while the panel is open. A count is keyed by what the entry does, never by its key or label: `{:command, command}` for a command row and `{:group, prefix}` for a group, where `prefix` is the formatted sequence after the leader (`"a"` for `SPC a`).
 
-  The text is drawn verbatim and dim after the label: `"· 1 needs you"` after a command or a group, `"· 3"` for a bare number.
+  The text is drawn verbatim after the label: `"· 1 needs you"` after a command or a group, `"· 3"` for a bare number. Its tone names the colour role: `:needs_you` and `:error` draw in those state roles, as the modeline does, and `:muted` in the secondary colour.
   """
 
   @typedoc "What a count belongs to."
   @type target :: {:command, atom() | tuple()} | {:group, String.t()}
 
+  alias Minga.RenderModel.UI.WhichKey
+
+  @typedoc "One count: its text and the colour role it draws in."
+  @type count :: WhichKey.count()
+
   @typedoc "Counts by target; a target with nothing to count is absent."
-  @type t :: %{target() => String.t()}
+  @type t :: %{target() => count()}
 
   @typedoc "The facts counts are made from."
   @type facts :: %{
@@ -30,11 +35,11 @@ defmodule MingaEditor.UI.WhichKey.Counts do
 
       iex> MingaEditor.UI.WhichKey.Counts.from_facts(%{needs_you_count: 1, diagnostic_counts: {2, 0, 0, 0}})
       %{
-        {:command, :agent_attach_diagnostics} => "· 2 errors",
-        {:command, :diagnostics_list} => "· 2 errors",
-        {:command, :toggle_agentic_view} => "· 1 needs you",
-        {:group, "a"} => "· 1 needs you",
-        {:group, "c"} => "· 2 errors"
+        {:command, :agent_attach_diagnostics} => %{text: "· 2 errors", tone: :error},
+        {:command, :diagnostics_list} => %{text: "· 2 errors", tone: :error},
+        {:command, :toggle_agentic_view} => %{text: "· 1 needs you", tone: :needs_you},
+        {:group, "a"} => %{text: "· 1 needs you", tone: :needs_you},
+        {:group, "c"} => %{text: "· 2 errors", tone: :error}
       }
   """
   @spec from_facts(facts()) :: t()
@@ -49,40 +54,41 @@ defmodule MingaEditor.UI.WhichKey.Counts do
     |> Map.new()
   end
 
-  @doc "Returns the count text for `target`, or an empty string."
-  @spec text(t(), target()) :: String.t()
-  def text(counts, target) when is_map(counts), do: Map.get(counts, target, "")
+  @doc "Returns the count for `target`, or an empty muted count."
+  @spec get(t(), target()) :: count()
+  def get(counts, target) when is_map(counts),
+    do: Map.get(counts, target, %{text: "", tone: :muted})
 
-  @spec needs_you(non_neg_integer()) :: [{target(), String.t()}]
+  @spec needs_you(non_neg_integer()) :: [{target(), count()}]
   defp needs_you(count) when is_integer(count) and count > 0 do
-    text = "· #{count} needs you"
-    [{{:group, "a"}, text}, {{:command, :toggle_agentic_view}, text}]
+    count = %{text: "· #{count} needs you", tone: :needs_you}
+    [{{:group, "a"}, count}, {{:command, :toggle_agentic_view}, count}]
   end
 
   defp needs_you(_count), do: []
 
-  @spec errors(tuple() | nil) :: [{target(), String.t()}]
+  @spec errors(tuple() | nil) :: [{target(), count()}]
   defp errors({errors, _warnings, _info, _hints}) when is_integer(errors) and errors > 0 do
-    text = "· #{errors} #{plural(errors, "error", "errors")}"
+    count = %{text: "· #{errors} #{plural(errors, "error", "errors")}", tone: :error}
 
     [
-      {{:group, "c"}, text},
-      {{:command, :diagnostics_list}, text},
-      {{:command, :agent_attach_diagnostics}, text}
+      {{:group, "c"}, count},
+      {{:command, :diagnostics_list}, count},
+      {{:command, :agent_attach_diagnostics}, count}
     ]
   end
 
   defp errors(_counts), do: []
 
-  @spec changed(tuple() | nil) :: [{target(), String.t()}]
+  @spec changed(tuple() | nil) :: [{target(), count()}]
   defp changed({added, modified, deleted}) when added + modified + deleted > 0,
-    do: [{{:group, "g"}, "· #{added + modified + deleted} changed"}]
+    do: [{{:group, "g"}, %{text: "· #{added + modified + deleted} changed", tone: :muted}}]
 
   defp changed(_summary), do: []
 
-  @spec reviews(non_neg_integer()) :: [{target(), String.t()}]
+  @spec reviews(non_neg_integer()) :: [{target(), count()}]
   defp reviews(count) when is_integer(count) and count > 0,
-    do: [{{:command, :workspace_pending_reviews}, "· #{count}"}]
+    do: [{{:command, :workspace_pending_reviews}, %{text: "· #{count}", tone: :muted}}]
 
   defp reviews(_count), do: []
 

@@ -149,8 +149,10 @@
 30 3-5 #1e66f5 #ccd0da -
 30 6-8 #5c5f77 #ccd0da -
 30 9-9 #1e66f5 #ccd0da -
-30 10-16 #4c4f69 #ccd0da -
-30 17-29 #5c5f77 #ccd0da -
+30 10-10 #4c4f69 #ccd0da -
+30 11-15 #4c4f69 #ccd0da bold
+30 16-16 #4c4f69 #ccd0da -
+30 17-29 #d35400 #ccd0da -
 30 30-30 #4c4f69 #ccd0da -
 30 31-149 #7c7f93 #ccd0da -
 31 0-0 #7c7f93 #ccd0da -
@@ -168,7 +170,7 @@
 32 1-1 #4c4f69 #ccd0da -
 32 2-2 #1e66f5 #ccd0da -
 32 3-14 #4c4f69 #ccd0da -
-32 15-27 #5c5f77 #ccd0da -
+32 15-27 #d35400 #ccd0da -
 32 28-30 #4c4f69 #ccd0da -
 32 31-31 #1e66f5 #ccd0da -
 32 32-53 #4c4f69 #ccd0da -

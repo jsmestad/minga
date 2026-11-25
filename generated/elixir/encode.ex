@@ -491,6 +491,7 @@ defmodule Minga.Protocol.Encode do
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:label | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :label)),
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:section | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :section)),
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:count | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :count)),
+      (fn value -> validate_uint!(command, [:count_tone | path], value, 255); <<value::8>> end).(Map.fetch!(model, :count_tone)),
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:platform_key | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :platform_key)),
     ]
   end
