@@ -163,15 +163,19 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
         fn state ->
           session = Runtime.active_session(state.shell_runtime)
 
+          # The composer sends through its saved draft, so wait for that draft to load too.
           is_pid(session) and
             match?(
-              %{connection: %{provider_phase: :running, target: %{session: ^session}}},
+              %{
+                connection: %{provider_phase: :running, target: %{session: ^session}},
+                draft_save: %{target: {^session, _}, request: {:ready, _, _}}
+              },
               state.workspace.agent_ui
             )
         end,
         max_attempts: 500,
         interval_ms: 20,
-        message: "expected SPC a v to attach a running session"
+        message: "expected SPC a v to attach a running session with its draft loaded"
       )
 
     Runtime.active_session(state.shell_runtime)

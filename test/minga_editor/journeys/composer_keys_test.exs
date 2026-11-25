@@ -82,7 +82,6 @@ defmodule MingaEditor.Journeys.ComposerKeysTest do
     await_working(ctx)
 
     send_keys_sync(ctx, "steer")
-    settle_draft(ctx)
     send_key_sync(ctx, 13, @cmd)
     await_prompt(ctx, "")
     assert Session.get_queued_messages(session) == {["steer"], []}
@@ -159,44 +158,31 @@ defmodule MingaEditor.Journeys.ComposerKeysTest do
         fn state ->
           session = Runtime.active_session(state.shell_runtime)
 
+          # The composer sends through its saved draft, so wait for that draft to load too.
           is_pid(session) and
             match?(
-              %{connection: %{provider_phase: :running, target: %{session: ^session}}},
+              %{
+                connection: %{provider_phase: :running, target: %{session: ^session}},
+                draft_save: %{target: {^session, _}, request: {:ready, _, _}}
+              },
               state.workspace.agent_ui
             )
         end,
         max_attempts: 500,
         interval_ms: 20,
-        message: "expected SPC a v to attach a running session"
+        message: "expected SPC a v to attach a running session with its draft loaded"
       )
 
     Runtime.active_session(state.shell_runtime)
   end
 
   # A saved conversation queues through its durable draft, so the composer
-  # clears once the Session confirms the queued input.
-
-  # A saved conversation queues (and steers) only a draft it has saved; typing
-  # arms a save, so wait for it to settle first (an unsettled draft is kept).
+  # clears once the Session confirms the queued input. The key is pressed right
+  # after typing, as a fast typist does (#4260).
   defp queue(ctx, text) do
     send_keys_sync(ctx, text)
-    settle_draft(ctx)
     send_key_sync(ctx, 13, @alt)
     await_prompt(ctx, "")
-  end
-
-  defp settle_draft(ctx) do
-    wait_until(
-      ctx,
-      fn state ->
-        match?(
-          %MingaEditor.Agent.DraftSave{request: {:ready, _, _}, timer: nil},
-          state.workspace.agent_ui.draft_save
-        )
-      end,
-      max_attempts: 200,
-      message: "expected the typed draft to be saved"
-    )
   end
 
   defp await_prompt(ctx, expected) do
