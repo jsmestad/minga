@@ -117,15 +117,15 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
       # Load status (0x06): error (2) with message
       assert <<2::8, 4::16, "boom">> = sections[0x06]
 
-      # Movement keys (0x07): count, then codepoint(u32) + modifiers(u8) + movement(u8: 1 next, 2 previous)
-      assert <<2::8, ?j::32, 0x02::8, 1::8, 57_352::32, 0::8, 2::8>> = sections[0x07]
+      # Movement keys (0x08): count, then codepoint(u32) + modifiers(u8) + movement(u8: 1 next, 2 previous)
+      assert <<2::8, ?j::32, 0x02::8, 1::8, 57_352::32, 0::8, 2::8>> = sections[0x08]
 
       # Preview: visible, one line, one bold white "hello" segment.
       assert <<@op_gui_picker_preview, 1::8, 1::16, 1::8, 0xFFFFFF::24, 1::8, 5::16, "hello">> =
                preview
     end
 
-    test "a picker offering next steps adds the empty section after the six it always sends" do
+    test "a picker offering next steps adds the empty section to the seven it always sends" do
       model = %Picker{
         visible?: true,
         title: "Search project",
@@ -138,8 +138,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
       }
 
       {cmd, _caches} = PickerEncoder.encode(model, Caches.new())
-      <<@op_gui_picker, 7::8, picker_rest::binary>> = cmd
-      {sections, _preview} = take_sections(picker_rest, 7, %{})
+      <<@op_gui_picker, 8::8, picker_rest::binary>> = cmd
+      {sections, _preview} = take_sections(picker_rest, 8, %{})
 
       title = "No results for “limit_lable”."
       why = "Ignored and hidden files were skipped."
@@ -151,7 +151,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
       assert sections[0x07] == expected
 
       {plain, _caches} = PickerEncoder.encode(%{model | empty: nil}, Caches.new())
-      assert <<@op_gui_picker, 6::8, _rest::binary>> = plain
+      assert <<@op_gui_picker, 7::8, _rest::binary>> = plain
     end
 
     test "encodes open picker with action menu and preview" do

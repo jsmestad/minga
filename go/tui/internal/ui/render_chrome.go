@@ -894,6 +894,16 @@ func pickerListHeaderRows(listHeight int) int {
 	return 1
 }
 
+// pickerEmptyHeader is the empty-state header a picker that offers next steps draws above its rows, cut so at least one row stays.
+// The list and the reported row fit both subtract it, so the fit counts the rows that are on screen.
+func (m Model) pickerEmptyHeader(picker protocol.Picker, listHeight int, width int) []string {
+	if picker.Empty == nil {
+		return nil
+	}
+	header := emptyListHeader(*picker.Empty, width, m.pickerEmptyColors(), m.palette())
+	return header[:min(len(header), max(listHeight-pickerListHeaderRows(listHeight)-1, 0))]
+}
+
 // itemRowBudget is the rows of the list left for items and their section headers.
 func (l pickerLayout) itemRowBudget() int {
 	return max(l.listHeight-pickerListHeaderRows(l.listHeight), 0)
@@ -909,13 +919,9 @@ func (m Model) renderPickerList(title string, picker protocol.Picker, height int
 		sepStyle := lipgloss.NewStyle().Foreground(theme.PopupBorder()).Background(theme.PopupSurface()).Width(width).ColorWhitespace(true)
 		lines = append(lines, renderPadded(sepStyle, strings.Repeat("─", max(width, 1)), width))
 	}
-	if picker.Empty != nil {
-		header := emptyListHeader(*picker.Empty, width, m.pickerEmptyColors(), theme)
-		header = header[:min(len(header), max(height-headerRows-1, 0))]
-		lines = append(lines, header...)
-		headerRows += len(header)
-	}
-	rowBudget := max(height-headerRows, 0)
+	emptyHeader := m.pickerEmptyHeader(picker, height, width)
+	lines = append(lines, emptyHeader...)
+	rowBudget := max(height-headerRows-len(emptyHeader), 0)
 	selected := m.effectivePickerIndex(picker)
 	start, end, headers := pickerItemWindow(picker.Items, selected, rowBudget)
 	activeSlot := pickerHasActiveItem(picker.Items[start:end])

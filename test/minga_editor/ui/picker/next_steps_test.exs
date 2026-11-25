@@ -91,6 +91,36 @@ defmodule MingaEditor.UI.Picker.NextStepsTest do
              ]
     end
 
+    test "the keys sent to frontends for the selection preview are the keys that move it here" do
+      list = open([]) |> Context.from_editor_state() |> PickerBuilder.build()
+      typing = open(["alpha", "beta"]) |> Context.from_editor_state() |> PickerBuilder.build()
+
+      moves = fn model ->
+        Map.new(model.movement_keys, &{{&1.codepoint, &1.modifiers}, &1.movement})
+      end
+
+      # With nothing to filter, plain j and k move the selection, so a frontend may preview them.
+      assert %{{?j, 0} => :next, {?k, 0} => :previous} = moves.(list)
+
+      # A picker that takes text types j and k into the query: no frontend may move for them.
+      refute Map.has_key?(moves.(typing), {?j, 0})
+      refute Map.has_key?(moves.(typing), {?k, 0})
+
+      # Every key in the list moves the selection the way it says, and types nothing.
+      for %{codepoint: codepoint, modifiers: modifiers, movement: movement} <- list.movement_keys do
+        {start, expected} =
+          case movement do
+            :next -> {open([]), "Open a file"}
+            :previous -> {PickerUI.handle_key(open([]), ?j, 0), "Add a folder"}
+          end
+
+        moved = PickerUI.handle_key(start, codepoint, modifiers)
+
+        assert Picker.selected_item(picker(moved)).label == expected
+        assert picker(moved).query == ""
+      end
+    end
+
     test "q and esc close it" do
       for key <- [?q, @escape] do
         assert PickerUI.handle_key(open([]), key, 0).shell_runtime.state.modal == :none

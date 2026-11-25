@@ -252,7 +252,7 @@ func TestPickerDecodesTheMovementKeysSection(t *testing.T) {
 	keys := []byte{2, 0, 0, 0, 'j', protocol.ModCtrl, 1, 0, 0, 0xE0, 0x08, 0, 2}
 	payload := []byte{generated.OPGuiPicker, 2, 0x01, 0, byte(len(header))}
 	payload = append(payload, header...)
-	payload = append(payload, 0x07, 0, byte(len(keys)))
+	payload = append(payload, 0x08, 0, byte(len(keys)))
 	payload = append(payload, keys...)
 
 	command, err := protocol.DecodeCommand(payload)
@@ -286,5 +286,29 @@ func TestWhichKeyFooterNamesOneBindingInTheSingular(t *testing.T) {
 	}
 	if !strings.Contains(two, "2 bindings") {
 		t.Fatalf("two bindings read %q", two)
+	}
+}
+
+func TestPickerFitCountsTheNextStepRowsUnderTheEmptyHeader(t *testing.T) {
+	// A short terminal: the empty-state header takes rows that results would have had.
+	model, _ := fitPicker(t, 80, 24, 12, 3)
+	plain, ok := model.pickerFit()
+	if !ok || plain.Rows == 0 {
+		t.Fatal("an open picker has a fit")
+	}
+
+	payload := model.chrome[generated.OPGuiPicker]
+	payload.Picker.Empty = &generated.EmptyList{Title: "No results for “limit_lable”.", Why: "Ignored and hidden files were skipped."}
+	model.chrome[generated.OPGuiPicker] = payload
+
+	fit, ok := model.pickerFit()
+	if !ok {
+		t.Fatal("an empty picker with next-step rows has a fit")
+	}
+	if fit.Rows >= plain.Rows {
+		t.Fatalf("the header takes rows: fit %d, without the header %d", fit.Rows, plain.Rows)
+	}
+	if drawn := drawnPickerItems(model); drawn == 0 || int(fit.Rows) != drawn {
+		t.Fatalf("reported %d rows, the view draws %d", fit.Rows, drawn)
 	}
 }

@@ -633,13 +633,13 @@ defmodule Minga.Test.ProtocolGolden do
       %{
         name: "picker_movement_keys_list",
         decoder: "GuiPickerMovementKeys",
-        payload: section_body(picker_command(%{picker_model([]) | movement_keys: keys}), 0x07),
+        payload: section_body(picker_command(%{picker_model([]) | movement_keys: keys}), 0x08),
         expected: expected
       },
       %{
         name: "picker_movement_keys_empty",
         decoder: "GuiPickerMovementKeys",
-        payload: section_body(picker_command(picker_model([])), 0x07),
+        payload: section_body(picker_command(picker_model([])), 0x08),
         expected: []
       }
     ]

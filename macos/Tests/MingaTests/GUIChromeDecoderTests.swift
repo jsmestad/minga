@@ -2205,12 +2205,12 @@ struct GUIPickerDecoderTests {
         data.append(OP_GUI_PICKER)
         data.append(2)
         data.append(contentsOf: buildSectionData(0x01, header))
-        data.append(contentsOf: buildSectionData(0x07, keys))
+        data.append(contentsOf: buildSectionData(0x08, keys))
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let movementKeys) = cmd else {
+        guard case .guiPicker(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let movementKeys) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
         #expect(movementKeys == [
