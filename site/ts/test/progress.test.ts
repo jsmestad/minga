@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import { STEP_IDS } from "../src/coauthor_state.ts";
 import { LESSON_STEPS, summarizeLesson } from "../src/progress.ts";
 import { SANDBOX_MISSIONS } from "../src/sandbox_state.ts";
+import { STEP_IDS as VETO_STEP_IDS } from "../src/veto_state.ts";
 
 describe("lesson progress: only a lesson's current ids count", () => {
   /** What a visitor who finished the old Lesson 03 simulator has in storage. */
@@ -18,7 +19,7 @@ describe("lesson progress: only a lesson's current ids count", () => {
     { name: "another lesson's ids", stored: { editing: ["which_key"], agents: ["which_key"] }, lesson: "agents", done: 0, total: 4 },
     { name: "a lesson the site no longer has", stored: { "getting-started": ["configured"] }, lesson: "getting-started", done: 0, total: 0 },
     { name: "a lesson the site does not have", stored: { advanced: ["a", "b"] }, lesson: "advanced", done: 0, total: 0 },
-    { name: "an unknown lesson stored beside a real one", stored: { advanced: ["a"], remote: ["mcp_crash"] }, lesson: "remote", done: 1, total: 3 },
+    { name: "an unknown lesson stored beside a real one", stored: { advanced: ["a"], remote: ["blocked"] }, lesson: "remote", done: 1, total: 3 },
     { name: "a name every object has is not a lesson", stored: {}, lesson: "toString", done: 0, total: 0 },
     { name: "a stored value that is not a list", stored: { agents: "find" }, lesson: "agents", done: 0, total: 4 },
     { name: "a store that is not an object", stored: null, lesson: "agents", done: 0, total: 4 },
@@ -34,6 +35,10 @@ describe("lesson progress: only a lesson's current ids count", () => {
 describe("lesson progress: the list and the labs agree", () => {
   it("Lesson 03 records exactly the ids the list holds", () => {
     assert.deepEqual(LESSON_STEPS.agents, STEP_IDS);
+  });
+
+  it("Lesson 05 records exactly the ids the list holds", () => {
+    assert.deepEqual(LESSON_STEPS.remote, VETO_STEP_IDS);
   });
 
   it("Lesson 02 records exactly the ids the list holds", () => {

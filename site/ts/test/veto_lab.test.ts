@@ -62,24 +62,37 @@ const VERDICTS: readonly (readonly [command: string, rule: string | null, why: s
   ["git push --force-if-includes", "force_push", "any option that starts with --force"],
   ["git push -f", "force_push", "the short flag"],
   ["git push origin main -f", "force_push", "the flag after the branch"],
+  ["git push -uf origin main", "force_push", "the short flag bundled with another"],
+  ["git push origin +main", "force_push", "a leading plus sign forces without a flag"],
+  ["git -C repo push -f", "force_push", "an option between git and push"],
+  ["git -c k=v push --force", "force_push", "a config option between git and push"],
+  ["git\tpush\t--force", "force_push", "tabs read as spaces"],
   ["git  push   --force", "force_push", "extra spaces change nothing"],
   ["GIT PUSH --FORCE", "force_push", "case is ignored"],
   ["git status && git push --force", "force_push", "a push later in a chain"],
   ["cd app; git push -f origin main", "force_push", "a push after a semicolon"],
   ["legit push --force", null, "git must be a word of its own"],
   ["git push origin main; rm -f notes.txt", null, "a -f that belongs to the next command is not the push's flag"],
+  ["git push origin main && git tag -f v1", null, "a -f on the next command in a chain"],
   ["git push --follow-tags", null, "an option that only starts with f"],
+  ["git push --no-verify", null, "an option with an f inside it"],
   ["git push -u origin fix-flaky", null, "a branch name that contains -f"],
+  ["git push origin HEAD:refs/heads/feat", null, "a refspec without a plus sign"],
   ["git push origin :main", null, "deleting the remote branch is a known miss, stated on the page"],
-  ["git push origin +main", null, "a forced refspec is a known miss"],
-  ["git commit -m 'push --force later'", null, "the word push in a commit message"],
+  ["git commit -m 'pushed the fix'", null, "the word pushed in a commit message"],
   ["rm -rf /", "delete_root_or_home", "root"],
   ["rm -rf /*", "delete_root_or_home", "everything under root"],
   ["rm -rf ~", "delete_root_or_home", "home"],
   ["rm -rf ~/", "delete_root_or_home", "home with a slash"],
   ['rm -rf "$HOME"', "delete_root_or_home", "home through the variable, quoted"],
   ["rm -rf $HOME/", "delete_root_or_home", "home through the variable"],
+  ["rm -rf ${HOME}", "delete_root_or_home", "home through the variable in braces"],
   ["rm -fr /", "delete_root_or_home", "the flags the other way round"],
+  ["rm -r -f /", "delete_root_or_home", "split flags"],
+  ["rm -rf -- /", "delete_root_or_home", "after the end-of-options mark"],
+  ["rm --recursive --force /", "delete_root_or_home", "long options"],
+  ["rm -rf /tmp ~", "delete_root_or_home", "home as the second target"],
+  ["rm\t-rf\t/", "delete_root_or_home", "tabs read as spaces"],
   ["rm -Rf /", "delete_root_or_home", "case is ignored"],
   ["RM -RF /", "delete_root_or_home", "case is ignored"],
   ["rm  -rf   /", "delete_root_or_home", "extra spaces change nothing"],
@@ -90,10 +103,20 @@ const VERDICTS: readonly (readonly [command: string, rule: string | null, why: s
   ["rm -rf /tmp/prod", null, "the rule names root and home, not every path under root"],
   ["rm -rf ./build", null, "a path in the project"],
   ["rm -rf ~/code", null, "a directory inside home is not home"],
+  ["rm -rf ~/.cache", null, "a dot directory inside home is not home"],
   ["rm -rf $HOMEWORK", null, "a different variable"],
   ["rm -rf /tmp/*", null, "a glob under another directory"],
-  ["rm -r -f /", null, "split flags are a known miss, stated on the page"],
+  ["rm -f a.log > /dev/null", null, "a redirect to a path under root"],
+  ["docker run --rm -w / img", null, "an option named --rm is not the rm command"],
   ["confirm -rf /", null, "rm must be a word of its own"],
+  ["find / -delete", null, "a delete without rm is a known miss, stated on the page"],
+  ["X=/; rm -rf $X", null, "a target hidden in a variable is a known miss, stated on the page"],
+  ["sh cleanup.sh", null, "a script hides its commands, stated on the page"],
+  ["echo 'exit 0' > ~/.config/minga/hooks/check-shell-command.sh", "minga_config", "overwriting the hook"],
+  ["sed -i s/shell/none/ ~/.config/minga/config.exs", "minga_config", "editing the config"],
+  ["rm -rf ~/.config/minga", "minga_config", "deleting the config directory passes the delete rule and is caught here"],
+  ["cat $HOME/.CONFIG/Minga/config.exs", "minga_config", "reading the config, in any case"],
+  ["ls ~/.config/nvim", null, "another program's config"],
   ["npm test", null, "ordinary work"],
   ["mix test", null, "ordinary work"],
   ["ls -la", null, "ordinary work"],
@@ -102,7 +125,7 @@ const VERDICTS: readonly (readonly [command: string, rule: string | null, why: s
 describe("Lesson 05 hook tester: the rules are the script's rules", () => {
   it("reads one rule from each block_if line of the printed script, in order", () => {
     const printed = Array.from(SCRIPT.matchAll(/^block_if '(.*)' '(.*)'$/gm), (m) => ({ pattern: m[1]!, reason: m[2]! }));
-    assert.ok(printed.length >= 2, "the script has rules");
+    assert.equal(printed.length, 3, "the script has three rules");
     assert.deepEqual(
       RULES.map(({ pattern, reason }) => ({ pattern, reason })),
       printed,
@@ -114,15 +137,16 @@ describe("Lesson 05 hook tester: the rules are the script's rules", () => {
     for (const rule of RULES) {
       const withoutEscapedDollar = rule.pattern.replaceAll("\\$", "");
       assert.doesNotMatch(withoutEscapedDollar, /\\/, `${rule.id}: no backslash escapes other than \\$`);
-      assert.doesNotMatch(rule.pattern, /\[\[?[:.=]|\{|'|\(\?/, `${rule.id}: no POSIX classes, counted repeats, quotes or JavaScript-only groups`);
-      assert.doesNotMatch(withoutEscapedDollar.replace(/\[[^\]]*\]/g, ""), /\./, `${rule.id}: no bare dot`);
+      const outsideBrackets = withoutEscapedDollar.replace(/\[[^\]]*\]/g, "");
+      assert.doesNotMatch(rule.pattern, /\[\[[:=.]|'|\(\?/, `${rule.id}: no POSIX classes, quotes or JavaScript-only groups`);
+      assert.doesNotMatch(outsideBrackets, /[.{}]/, `${rule.id}: no bare dot and no counted repeat`);
     }
   });
 
   it("the script names the message prefix the lab shows", () => {
     const prefix = plain(inner(lab.html, "data-veto-prefix", "span")[0] ?? "").trim();
     assert.notEqual(prefix, "");
-    assert.ok(SCRIPT.includes(`echo "${prefix} $2" >&2`));
+    assert.ok(SCRIPT.includes(`echo "${prefix} $2" >&2; exit 1 ;;`));
   });
 });
 
@@ -153,27 +177,47 @@ describe("Lesson 05 hook tester: verdicts", () => {
 });
 
 describe("Lesson 05 hook tester: the lab agrees with the real script", () => {
-  const sh = (args: readonly string[], input: string) => spawnSync("sh", args, { input, encoding: "utf8" });
-  const hasJq = sh(["-c", "command -v jq"], "").status === 0;
+  const run = (shell: string, args: readonly string[], input: string) => spawnSync(shell, args, { input, encoding: "utf8" });
+  const has = (program: string): boolean => run("sh", ["-c", `command -v ${program}`], "").status === 0;
+  const hasJq = has("jq");
+  const prefix = plain(inner(lab.html, "data-veto-prefix", "span")[0] ?? "").trim();
+  const commands = [...VERDICTS.map(([command]) => command), ...PRESETS, FIELD_START, "", "git push origin main\n-f", "echo start\nrm -rf /\n"];
 
-  it("gives every command the exit code and message the printed script gives", { skip: hasJq ? false : "jq is not installed, so the printed script cannot run here" }, () => {
+  function withScript(script: string, check: (path: string) => void): void {
     const dir = mkdtempSync(join(tmpdir(), "minga-veto-"));
     try {
-      const script = join(dir, "check-shell-command.sh");
-      writeFileSync(script, SCRIPT);
-      chmodSync(script, 0o755);
-      const prefix = plain(inner(lab.html, "data-veto-prefix", "span")[0]!).trim();
-      const commands = [...VERDICTS.map(([command]) => command), ...PRESETS, FIELD_START, "", "git push origin main\n-f", "echo start\nrm -rf /\n"];
-      for (const command of commands) {
-        const real = sh([script], hookPayload(command));
-        const ours = evaluateHook(command, RULES);
-        assert.equal(real.status, ours.exitCode, `exit code for ${JSON.stringify(command)}`);
-        assert.equal(real.stderr.trim(), ours.rule === null ? "" : `${prefix} ${ours.rule.reason}`, `message for ${JSON.stringify(command)}`);
-      }
-      assert.equal(sh([script], "not json").status, 1, "a payload the script cannot read is a veto");
+      const path = join(dir, "check-shell-command.sh");
+      writeFileSync(path, script);
+      chmodSync(path, 0o755);
+      check(path);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  }
+
+  for (const shell of ["sh", "dash"]) {
+    const skip = !hasJq ? "jq is not installed, so the printed script cannot run here" : has(shell) ? false : `${shell} is not installed`;
+    it(`gives every command the exit code and message the printed script gives under ${shell}`, { skip }, () => {
+      withScript(SCRIPT, (path) => {
+        for (const command of commands) {
+          const real = run(shell, [path], hookPayload(command));
+          const ours = evaluateHook(command, RULES);
+          assert.equal(real.status, ours.exitCode, `exit code for ${JSON.stringify(command)}`);
+          assert.equal(real.stderr.trim(), ours.rule === null ? "" : `${prefix} ${ours.rule.reason}`, `message for ${JSON.stringify(command)}`);
+        }
+        assert.equal(run(shell, [path], "not json").status, 1, "a payload the script cannot read is a veto");
+      });
+    });
+  }
+
+  it("stops every command when a pattern is not a valid regular expression", { skip: hasJq ? false : "jq is not installed" }, () => {
+    const broken = SCRIPT.replace("block_if '[.]config/minga'", "block_if '(unclosed'");
+    assert.notEqual(broken, SCRIPT);
+    withScript(broken, (path) => {
+      const real = run("sh", [path], hookPayload("npm test"));
+      assert.equal(real.status, 1);
+      assert.match(real.stderr, /is not a valid regular expression/);
+    });
   });
 });
 

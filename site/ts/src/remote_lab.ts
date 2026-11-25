@@ -1,8 +1,7 @@
 /*
  * View for the Lesson 05 lab: test a shell command against the hook script printed on the page.
  *
- * The page holds every node and every word. This file finds the nodes once, reads the rules from the printed script, and then changes text,
- * classes and attributes. It never rebuilds the command field, never writes to it unless a preset may fill it (see presetFillsField), and starts no timer.
+ * The page holds every node and every word. This file finds the nodes once, reads the rules from the printed script, and then changes text, classes and attributes. It never rebuilds the command field, never writes to it unless a preset may fill it (see presetFillsField), and starts no timer.
  * The field is an ordinary text input inside a form: Enter submits the form, and no key is captured anywhere.
  */
 
@@ -41,7 +40,8 @@ export function mountRemoteLab(root: HTMLElement): void {
   const stdin = root.querySelector<HTMLElement>("[data-veto-stdin]");
   const runs = root.querySelector<HTMLElement>("[data-veto-runs]");
   const message = root.querySelector<HTMLElement>("[data-veto-message]");
-  if (!stageEl || !captionLine || !stepperHost || !form || !input || !result || !stdin || !runs || !message) {
+  const finished = root.querySelector<HTMLElement>("[data-veto-finished]");
+  if (!stageEl || !captionLine || !stepperHost || !form || !input || !result || !stdin || !runs || !message || !finished) {
     throw new Error("The hook tester's markup is incomplete");
   }
   const { rules, lines } = readRules(root);
@@ -73,8 +73,13 @@ export function mountRemoteLab(root: HTMLElement): void {
     for (const el of outputs) el.hidden = el.dataset.vetoOut !== verdict;
     for (const [id, line] of lines) line.classList.toggle("is-matched", id === rule?.id);
 
-    caption.show(state.caption);
-    stepper.update(currentStep(state) ?? STEP_IDS[STEP_IDS.length - 1]!, state.done);
+    // The run count goes in as the press count, so a run that lands on the same caption is drawn and announced again.
+    caption.show(state.caption, "", state.runs);
+    const step = currentStep(state);
+    stepper.update(step ?? STEP_IDS[STEP_IDS.length - 1]!, state.done);
+    // Neither is a control, so swapping them cannot strand focus.
+    stepperHost!.hidden = step === null;
+    finished!.hidden = step !== null;
   }
 
   function send(event: VetoEvent): void {

@@ -2,9 +2,8 @@
  * Pure state for the Lesson 05 lab: test a shell command against the hook script printed on the page.
  *
  * The rules are not written here. The view reads each rule's pattern and reason from the script in the page, so the lab tests the script the reader copies.
- * A pattern is a POSIX extended regular expression, limited to the parts that mean the same to grep and to JavaScript:
- * literals, bracket lists with plain ranges, groups, alternation, the * + ? repeats, the two anchors, and a backslash before a dollar sign.
- * The script matches with LC_ALL=C grep -Ei, one line at a time. evaluateHook matches the same way.
+ * A pattern is a POSIX extended regular expression, limited to the parts that mean the same to grep and to JavaScript: literals, bracket lists with plain ranges, groups, alternation, the * + ? repeats, the two anchors, and a backslash before a dollar sign.
+ * The script turns tabs into spaces, then matches with LC_ALL=C grep -Ei, one line at a time. evaluateHook does the same.
  */
 
 export interface VetoRule {
@@ -20,9 +19,9 @@ export interface HookVerdict {
   readonly rule: VetoRule | null;
 }
 
-/** The lines grep sees: the shell drops trailing newlines from the command substitution, then printf adds one back. */
+/** The lines grep sees: the shell drops trailing newlines from the command substitution, tr turns each tab into a space, and printf adds one newline back. */
 function commandLines(command: string): string[] {
-  return command.replace(/\n+$/, "").split("\n");
+  return command.replace(/\n+$/, "").replaceAll("\t", " ").split("\n");
 }
 
 /** What the hook script does with a command: the first rule whose pattern matches any line vetoes it. */
@@ -40,6 +39,7 @@ export function hookPayload(command: string): string {
   return JSON.stringify({ event: "PreToolUse", tool_call_id: "tc_123", tool_name: "shell", arguments: { command } }, null, 2);
 }
 
+/** The three steps. They are also the lesson's progress ids: LESSON_STEPS.remote in progress.ts lists the same ids, and a test holds the two together. */
 export const STEP_IDS = ["blocked", "edited", "safe"] as const;
 export type StepId = (typeof STEP_IDS)[number];
 

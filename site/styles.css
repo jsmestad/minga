@@ -3703,6 +3703,11 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
   margin-top: 1.75rem;
 }
 
+/* The stepper gives way to a finished line when all three steps are done. The kit's display rule would otherwise show a hidden one. */
+.veto-lab .lab-stepper[hidden] {
+  display: none;
+}
+
 .veto-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
