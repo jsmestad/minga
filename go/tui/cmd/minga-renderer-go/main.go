@@ -46,7 +46,7 @@ func run() error {
 	}
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
-	program := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(tty), tea.WithOutput(filter.TrackOutput(tty)), tea.WithFilter(filter.Filter))
+	program := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(terminal.NewKeyInput(tty)), tea.WithOutput(filter.TrackOutput(tty)), tea.WithFilter(filter.Filter))
 	stopHangup := quitOnHangup(program)
 	defer stopHangup()
 	return runSession(program, os.Stdin, os.Stdout, out, done, stop)

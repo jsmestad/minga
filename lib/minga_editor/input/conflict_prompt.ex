@@ -15,7 +15,12 @@ defmodule MingaEditor.Input.ConflictPrompt do
 
   @type state :: MingaEditor.Input.Handler.handler_state()
 
+  import Bitwise
+
   alias Minga.Buffer
+
+  # An answer is a letter pressed without Control, Alt or Command.
+  @chord_mods 0x0E
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
@@ -23,9 +28,9 @@ defmodule MingaEditor.Input.ConflictPrompt do
   def handle_key(
         %{shell_runtime: %{state: %{modal: {:conflict, %{buffer: buf}}}}} = state,
         ?r,
-        _mods
+        mods
       )
-      when is_pid(buf) do
+      when is_pid(buf) and band(mods, @chord_mods) == 0 do
     Buffer.reload(buf)
     name = Path.basename(Buffer.file_path(buf) || "buffer")
 
@@ -38,9 +43,9 @@ defmodule MingaEditor.Input.ConflictPrompt do
   def handle_key(
         %{shell_runtime: %{state: %{modal: {:conflict, %{buffer: buf}}}}} = state,
         ?k,
-        _mods
+        mods
       )
-      when is_pid(buf) do
+      when is_pid(buf) and band(mods, @chord_mods) == 0 do
     Buffer.acknowledge_disk_change(buf)
 
     {:handled,

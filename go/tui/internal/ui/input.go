@@ -3,9 +3,11 @@ package ui
 import (
 	"regexp"
 	"strconv"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
+	"github.com/jsmestad/minga/go/tui/internal/terminal"
 )
 
 var sgrMouseTailPattern = regexp.MustCompile(`^<?(\d+);(\d+);(\d+)([Mm])$`)
@@ -15,11 +17,6 @@ var sgrMouseTailPattern = regexp.MustCompile(`^<?(\d+);(\d+);(\d+)([Mm])$`)
 // commit_frame can resolve a keystroke-to-write sample. Paste packets carry no sequence.
 func keyPacket(msg tea.KeyPressMsg, seq uint32, composer ...uint64) ([]byte, bool) {
 	key := msg.Key()
-	// ⌃. opens the act menu; terminals report it only with the kitty keyboard protocol.
-	if key.Mod.Contains(tea.ModCtrl) && ((key.Code >= 'a' && key.Code <= 'z') || key.Code == '.') {
-		return protocol.EncodeKeyPress(key.Code, keyModifiers(key), seq), true
-	}
-
 	switch key.Code {
 	case tea.KeyEnter, tea.KeyKpEnter:
 		if len(composer) > 0 && composer[0] != 0 {
@@ -62,7 +59,44 @@ func keyPacket(msg tea.KeyPressMsg, seq uint32, composer ...uint64) ([]byte, boo
 		}
 		return protocol.EncodePaste(key.Text), true
 	}
+	// A key held with ⌃, ⌥ or ⌘ types no text, so it is identified by its code: ⌃C, ⌥F, ⌘S, and ⌃. which opens the
+	// act menu. Terminals report ⌘, and ⌃ with punctuation, only with the Kitty keyboard protocol.
+	if chordModifier(key) && isCharacterKey(key.Code) {
+		return protocol.EncodeKeyPress(key.Code, keyModifiers(key), seq), true
+	}
 	return nil, false
+}
+
+// chordModifier reports whether a key is held with a modifier that makes it a command instead of text.
+func chordModifier(key tea.Key) bool {
+	return key.Mod.Contains(tea.ModCtrl) || key.Mod.Contains(tea.ModAlt) || key.Mod.Contains(tea.ModSuper)
+}
+
+// isCharacterKey reports whether a key code is a character, not one of Bubble Tea's codes for a key without one
+// (function keys, media keys, a modifier pressed alone), which sit above the last Unicode code point.
+func isCharacterKey(code rune) bool {
+	return code < tea.KeyExtended && unicode.IsPrint(code)
+}
+
+// resolveKeyBoundary turns the mark the terminal's input puts after a lone ESC into the key it stands for.
+// See terminal.KeyInput for the rule.
+func resolveKeyBoundary(msg tea.Msg) tea.Msg {
+	if paste, ok := msg.(tea.PasteMsg); ok {
+		return tea.PasteMsg{Content: terminal.StripKeyBoundaryMarks(paste.Content)}
+	}
+	key, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return msg
+	}
+	mark, escape := terminal.BoundaryKey(key.Code, key.Mod.Contains(tea.ModAlt))
+	if !mark {
+		return msg
+	}
+	if !escape {
+		// The Esc key was already delivered when the escape timeout ended.
+		return nil
+	}
+	return tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc})
 }
 
 func pastePacket(msg tea.PasteMsg) []byte {
@@ -138,6 +172,9 @@ func keyModifiers(key tea.Key) byte {
 	}
 	if key.Mod.Contains(tea.ModShift) {
 		mods |= protocol.ModShift
+	}
+	if key.Mod.Contains(tea.ModSuper) {
+		mods |= protocol.ModSuper
 	}
 	return mods
 }

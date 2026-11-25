@@ -93,6 +93,17 @@ defmodule Minga.Editing.Model.CUATest do
       assert commands == [{:insert_char, "a"}]
     end
 
+    test "a key held with Control, Alt or Command that nothing binds types no letter" do
+      state = CUA.initial_state()
+
+      for mods <- [0x02, 0x04, 0x08] do
+        assert {:cua, [], ^state} = CUA.process_key(state, {?k, mods})
+      end
+
+      # Shift is part of the text, not a chord.
+      assert {:cua, [{:insert_char, "K"}], _state} = CUA.process_key(state, {?K, 0x01})
+    end
+
     test "space produces insert_char command" do
       state = CUA.initial_state()
       {:cua, commands, _new_state} = CUA.process_key(state, {0x20, 0})

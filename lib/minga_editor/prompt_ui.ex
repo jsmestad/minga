@@ -36,6 +36,7 @@ defmodule MingaEditor.PromptUI do
   import Bitwise
 
   @ctrl 0x02
+  @alt 0x04
   @cmd 0x08
 
   @escape 27
@@ -171,11 +172,15 @@ defmodule MingaEditor.PromptUI do
          state,
          %PromptPayload{prompt_ui: %{kind: :confirm}} = payload,
          key,
-         _mods
+         mods
        ) do
+    # An answer is a letter pressed without Control, Alt or Command; Esc cancels with any of them.
+    answer? = band(mods, @ctrl ||| @alt ||| @cmd) == 0
+
     case key do
-      yes when yes in [?y, ?Y] -> do_submit(state, payload)
-      no when no in [?n, ?N, @escape] -> do_cancel(state, payload)
+      @escape -> do_cancel(state, payload)
+      yes when yes in [?y, ?Y] and answer? -> do_submit(state, payload)
+      no when no in [?n, ?N] and answer? -> do_cancel(state, payload)
       _ -> state
     end
   end
@@ -382,11 +387,12 @@ defmodule MingaEditor.PromptUI do
 
   defp do_tab(state, _payload), do: state
 
-  # Shift and Option produce text; Control and Command never insert their letter.
+  # Shift produces text, and so does Option on macOS, where the composed character arrives without a modifier.
+  # A key that arrives with Control, Alt or Command is a chord and never inserts its letter.
   @spec do_insert(state(), PromptState.t(), non_neg_integer(), non_neg_integer()) :: state()
   defp do_insert(state, prompt, key, mods)
        when key >= 32 and key <= 0x10FFFF and not (key >= 0xD800 and key <= 0xDFFF) and
-              band(mods, @ctrl ||| @cmd) == 0 do
+              band(mods, @ctrl ||| @alt ||| @cmd) == 0 do
     install_prompt(state, PromptState.insert_text(prompt, <<key::utf8>>))
   end
 

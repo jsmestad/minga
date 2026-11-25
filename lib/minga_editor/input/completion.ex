@@ -24,6 +24,7 @@ defmodule MingaEditor.Input.Completion do
   @escape 27
   @tab 9
   @enter 13
+  @chord_mods 0x0E
   @arrow_up_legacy 0x415B1B
   @arrow_down_legacy 0x425B1B
   @arrow_up_kitty 57_352
@@ -148,7 +149,12 @@ defmodule MingaEditor.Input.Completion do
     {:handled, CompletionHandling.maybe_resolve_selected(state)}
   end
 
-  # Tab or Enter: accept the selected completion
+  # Tab or Enter: accept the selected completion. Enter held with Control, Alt or Command neither accepts nor
+  # closes the menu: Esc then Enter that arrive together are Alt+Enter in a terminal without enhanced key reporting.
+  defp do_handle(state, _completion, @enter, mods) when band(mods, @chord_mods) != 0 do
+    {:handled, state}
+  end
+
   defp do_handle(state, completion, cp, _mods) when cp in [@tab, @enter] do
     new_state = MingaEditor.do_accept_completion(state, completion)
     {:handled, new_state}
