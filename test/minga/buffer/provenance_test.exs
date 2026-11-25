@@ -239,12 +239,15 @@ defmodule Minga.Buffer.ProvenanceTest do
     # A 6000-line file edited at the start of every line, bottom-up or top-down, or at one place over and over.
     # Each insertion is its own group, so no run grows in place and every insertion needs a new locator.
     for place <- [:bottom_up, :top_down, :same_place] do
-      test "#{place} insertions keep locators at most five digits and stay fast" do
-        {micros, prov} = :timer.tc(fn -> insert_many(unquote(place), 6_000) end)
+      # Work, not time: the reductions for 6000 insertions against 600 in the same run; linear is ten times, and the
+      # bound of 30 catches anything quadratic.
+      test "#{place} insertions keep locators at most five digits and stay linear" do
+        {small, _prov} = work(fn -> insert_many(unquote(place), 600) end)
+        {large, prov} = work(fn -> insert_many(unquote(place), 6_000) end)
 
         assert Provenance.size(prov) == 6_000 * 3
         assert prov |> Provenance.runs() |> Enum.map(&length(&1.id)) |> Enum.max() <= 5
-        assert micros < 3_000_000
+        assert large < 30 * small, "#{large} reductions for 6000 against #{small} for 600"
       end
     end
   end
@@ -818,6 +821,14 @@ defmodule Minga.Buffer.ProvenanceTest do
       :none -> prov
       {:ok, prov, _merged, _examined} -> compact_all(prov)
     end
+  end
+
+  # Reductions this process spends running `fun`: work counted the same on any machine and under any load.
+  defp work(fun) do
+    {:reductions, before} = Process.info(self(), :reductions)
+    value = fun.()
+    {:reductions, after_fun} = Process.info(self(), :reductions)
+    {after_fun - before, value}
   end
 
   defp insert_many(place, lines) do

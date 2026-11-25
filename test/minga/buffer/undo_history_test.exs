@@ -364,32 +364,33 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert UndoHistory.next_reject(history) == nil
     end
 
-    test "8000 Minga steps rewriting one word stay fast though their tombstones pile up there" do
-      {micros, world} =
-        :timer.tc(fn ->
-          Enum.reduce(1..8_000, world("let x = foo;\n", shadow: false), fn n, world ->
-            old = if n == 1, do: 3, else: byte_size("w#{n - 1}")
-            edit(world, {:minga, "task-1", "s#{n}"}, 8, old, "w#{n}")
-          end)
-        end)
+    # Work, not time: the reductions this process spends recording 8000 steps against 800 of them, in the same run.
+    # Linear work is ten times as much, measured about 16 with the tree's log factor; the bound of 30 catches anything
+    # quadratic (a hundred times).
+    test "8000 Minga steps rewriting one word stay linear though their tombstones pile up there" do
+      {small, _world} = work(fn -> minga_rewrites(800) end)
+      {large, world} = work(fn -> minga_rewrites(8_000) end)
 
       assert text(world) == "let x = w8000;\n"
-      assert micros < 5_000_000
+
+      IO.puts(
+        "\n[minga rewrites] reductions 800=#{small} 8000=#{large} ratio=#{Float.round(large / small, 1)}"
+      )
+
+      assert large < 30 * small
     end
 
-    test "8000 of your retypes over a word Minga replaced stay fast" do
-      world = edit(world("let x = foo;\n", shadow: false), @step_one, 8, 3, "bar")
-
-      {micros, world} =
-        :timer.tc(fn ->
-          Enum.reduce(1..8_000, world, fn n, world ->
-            old = if n == 1, do: 3, else: byte_size("v#{n - 1}")
-            edit(world, :user, 8, old, "v#{n}", at: @t0 + n * @window)
-          end)
-        end)
+    test "8000 of your retypes over a word Minga replaced stay linear" do
+      {small, _world} = work(fn -> your_retypes(800) end)
+      {large, world} = work(fn -> your_retypes(8_000) end)
 
       assert text(world) == "let x = v8000;\n"
-      assert micros < 5_000_000
+
+      IO.puts(
+        "\n[your retypes] reductions 800=#{small} 8000=#{large} ratio=#{Float.round(large / small, 1)}"
+      )
+
+      assert large < 30 * small
     end
 
     test "reload keeps Minga's steps and records the disk change as unattributed" do
@@ -960,6 +961,26 @@ defmodule Minga.Buffer.UndoHistoryTest do
       ])
 
       assert Process.get(:merge_differences) == 1
+    end
+
+    # CI seed 483178. Task 1 writes "a" (g1) and replaces it with "faaab" (g2); task 0 replaces that with "😀ro😀ro" (g3);
+    # task 1 replaces that with "aé" (g4). The press on task 1 takes g4, g2 and g1. Text g1 wrote and g2 deleted stays
+    # dead when they revert together, so task 0's later cover of it does not pull g3 in: both histories give
+    # "😀ro😀ro". Checked as a set, the press no longer depends on the order it visits the steps in, nor on whether
+    # compaction merged g1 into g2.
+    test "a press checks its steps as a set, whatever order it walks them in" do
+      {plain, compacted} =
+        emoji_twins([
+          {:minga, 0, 0, ["a"], 1},
+          {:minga, 0, 1, ["f", "a", "a", "a", "b"], 3},
+          {:minga, 18, 5, ["😀", "r", "o", "😀", "r", "o"], 2},
+          {:minga, 0, 6, ["a", "é"], 3},
+          :press
+        ])
+
+      assert text(plain) == "😀ro😀ro"
+      assert text(compacted) == "😀ro😀ro"
+      assert Process.get(:merge_differences) == nil
     end
 
     test "a hold on any member of a merged class holds the class" do
@@ -1938,6 +1959,8 @@ defmodule Minga.Buffer.UndoHistoryTest do
     case UndoHistory.undo_agent_session(world.history, world.version, world.doc) do
       {:ok, restore, history, summary} ->
         assert UnitModel.exact_groups?(world.history, summary.groups)
+        # The walk repeats only when a step leaves the set, and the held steps only grow.
+        assert summary.rounds in 1..(task_step_count(world.history, summary.task) + 1)
         after_world = install(world, restore, history)
 
         assert text(after_world) ==
@@ -1961,6 +1984,35 @@ defmodule Minga.Buffer.UndoHistoryTest do
         :held
     end
   end
+
+  # Reductions this process spends running `fun`: work counted the same on any machine and under any load.
+  defp work(fun) do
+    {:reductions, before} = Process.info(self(), :reductions)
+    value = fun.()
+    {:reductions, after_fun} = Process.info(self(), :reductions)
+    {after_fun - before, value}
+  end
+
+  defp minga_rewrites(steps) do
+    Enum.reduce(1..steps, world("let x = foo;\n", shadow: false), fn n, world ->
+      old = if n == 1, do: 3, else: byte_size("w#{n - 1}")
+      edit(world, {:minga, "task-1", "s#{n}"}, 8, old, "w#{n}")
+    end)
+  end
+
+  defp your_retypes(steps) do
+    world = edit(world("let x = foo;\n", shadow: false), @step_one, 8, 3, "bar")
+
+    Enum.reduce(1..steps, world, fn n, world ->
+      old = if n == 1, do: 3, else: byte_size("v#{n - 1}")
+      edit(world, :user, 8, old, "v#{n}", at: @t0 + n * @window)
+    end)
+  end
+
+  defp task_step_count(%{untasked_size: size}, {:minga, :untasked}), do: size
+
+  defp task_step_count(history, task),
+    do: Enum.count(history.minga, fn {_group, key} -> Minga.Buffer.Author.author(key) == task end)
 
   # Rejecting any single task either reverts exactly what the model's visibility rule says, for a task the model calls
   # exact on its own, or is refused while the model says it is not.

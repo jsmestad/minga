@@ -13,7 +13,7 @@ defmodule Minga.Buffer.UndoHistory do
 
   A step's group takes a new edit only when nothing changed the document and no group was opened since its last edit; otherwise the step continues in a new group under the same key. Every dependency between groups then points from an older group to a newer one: a later group that rewrote a group's text, or a group that edited inside a Minga group's replacement (text a step wrote in place of other text).
 
-  `reject_task/4` reverts all of a task's steps or nothing: a task that started later and rewrote its text, or an edit inside one of its replacements, refuses it, so a revert is exact or refused, never wrong text. Groups that revert together are checked as one set: text one of them wrote and one of them deleted stays dead when they revert, so a later deletion of it neither refuses a reject nor joins a press. `undo_agent_session/3` works step by step: newest first, each step of the most recent task reverts together with the newer groups that depend on it, which may be other tasks' steps. A group of yours joins only when none of its text is visible and reverting it brings back nothing else it deleted; it then leaves your undo stack. Otherwise your newest such edit holds the step, and your `u` can always reach it. Per-change keep and reject (#4049) may refine these rules.
+  `reject_task/4` reverts all of a task's steps or nothing: a task that started later and rewrote its text, or an edit inside one of its replacements, refuses it, so a revert is exact or refused, never wrong text. Groups that revert together are checked as one set: text one of them wrote and one of them deleted stays dead when they revert, so a later deletion of it neither refuses a reject nor joins a press. A set is checked as a set whatever order a press visits its steps in: every step of the chosen task counts as reverting, a step found held leaves the set, and the walk repeats until the set stops changing, which happens within one repeat per step of the task because the held steps only grow. `undo_agent_session/3` works step by step: newest first, each step of the most recent task reverts together with the newer groups that depend on it, which may be other tasks' steps. A group of yours joins only when none of its text is visible and reverting it brings back nothing else it deleted; it then leaves your undo stack. Otherwise your newest such edit holds the step, and your `u` can always reach it. Per-change keep and reject (#4049) may refine these rules.
 
   Every Minga step is checked against a run budget. Past it, `compaction_wanted?/1` asks the owner to run `compact_slice/2`, which merges drafts (text a step wrote that a newer step of the same task rewrote) into the step that overwrote them; past twice the budget, the step itself merges drafts too, until it has removed as many runs as it added, examining at most six times as many, so a burst of steps pays for its own drafts as it goes and the owner's slices finish the rest. A step merges only where no other group touched a run between the two steps; a step merged away completely leaves its class and its key.
 
@@ -94,7 +94,9 @@ defmodule Minga.Buffer.UndoHistory do
   """
   @type hold :: {:yours | :permanent, non_neg_integer()}
 
-  @typedoc "What one `undo_agent_session/3` call reverted; see there."
+  @typedoc """
+  What one `undo_agent_session/3` call reverted; see there. `rounds` counts the walks the press needed before its set stopped changing: one, plus one for each time a step it counted as reverting turned out held.
+  """
   @type reject_summary :: %{
           task: task(),
           reverted: non_neg_integer(),
@@ -102,7 +104,8 @@ defmodule Minga.Buffer.UndoHistory do
           tasks: [task()],
           groups: [Provenance.group_id()],
           dropped: [non_neg_integer()],
-          held: hold() | nil
+          held: hold() | nil,
+          rounds: pos_integer()
         }
 
   @typedoc "A Minga step and the byte ranges it touched, as `Minga.Buffer.Provenance.regions/2` reports them."
@@ -624,7 +627,8 @@ defmodule Minga.Buffer.UndoHistory do
       document: document,
       groups: [],
       dropped: [],
-      first: nil
+      first: nil,
+      rounds: 0
     }
 
     with {:ok, walk} <- walk_steps(start, task) do
@@ -640,39 +644,86 @@ defmodule Minga.Buffer.UndoHistory do
   # press costs the task's runs plus one pass over the document. A held closure is walked again by each older step
   # that reaches it, so a chain of T held steps over the same text costs O(T^2) group visits. Remembering held
   # closures is not sound here: a larger reverting set can leave out a dependent through which the hold was reached.
+  #
+  # A set is checked as a set: every step of the task counts as reverting while the walk decides, so the order of the
+  # walk changes nothing. A step found held leaves the set and the walk repeats; the held steps only grow, so the walk
+  # repeats at most once per step of the task, and only when one is held.
   defp walk_steps(walk, task) do
-    {_flags, taken} =
-      walk.history
-      |> task_groups(task)
-      |> Enum.sort(:desc)
-      |> Enum.reduce({walk.history.provenance, MapSet.new()}, fn group, {flags, taken} ->
-        if MapSet.member?(taken, group),
-          do: {flags, taken},
-          else: take_closure(walk, flags, taken, group)
-      end)
-
+    steps = walk.history |> task_groups(task) |> Enum.sort(:desc)
+    {taken, rounds} = settle_walk(walk, steps, MapSet.new(), 1)
+    walk = %{walk | rounds: rounds}
     if MapSet.size(taken) == 0, do: {:ok, walk}, else: revert_groups(walk, taken)
   end
 
-  @spec take_closure(map(), Provenance.t(), MapSet.t(), Provenance.group_id()) ::
-          {Provenance.t(), MapSet.t()}
-  defp take_closure(walk, flags, taken, group) do
+  @spec settle_walk(map(), [Provenance.group_id()], MapSet.t(), pos_integer()) ::
+          {MapSet.t(), pos_integer()}
+  defp settle_walk(walk, steps, held_out, round) do
+    pool = MapSet.difference(MapSet.new(steps), held_out)
+    {taken, held} = walk_once(walk, steps, pool)
+
+    if MapSet.subset?(held, held_out),
+      do: {taken, round},
+      else: settle_walk(walk, steps, MapSet.union(held_out, held), round + 1)
+  end
+
+  # One pass over the task's steps, newest first, with `pool` counting as reverting; returns what it took and which of
+  # the task's steps it found held.
+  @spec walk_once(map(), [Provenance.group_id()], MapSet.t()) :: {MapSet.t(), MapSet.t()}
+  defp walk_once(walk, steps, pool) do
+    {_flags, taken, held} =
+      Enum.reduce(
+        steps,
+        {walk.history.provenance, MapSet.new(), MapSet.new()},
+        &visit_step(walk, pool, &1, &2)
+      )
+
+    {taken, held}
+  end
+
+  @spec visit_step(
+          map(),
+          MapSet.t(),
+          Provenance.group_id(),
+          {Provenance.t(), MapSet.t(), MapSet.t()}
+        ) ::
+          {Provenance.t(), MapSet.t(), MapSet.t()}
+  defp visit_step(walk, pool, group, {_flags, taken, _held} = acc) do
+    if MapSet.member?(taken, group), do: acc, else: decide_step(walk, pool, group, acc)
+  end
+
+  @spec decide_step(
+          map(),
+          MapSet.t(),
+          Provenance.group_id(),
+          {Provenance.t(), MapSet.t(), MapSet.t()}
+        ) ::
+          {Provenance.t(), MapSet.t(), MapSet.t()}
+  defp decide_step(walk, pool, group, {flags, taken, held}) do
+    case take_closure(walk, flags, taken, pool, group) do
+      {:taken, flags, taken} -> {flags, taken, held}
+      :held -> {flags, taken, MapSet.put(held, group)}
+    end
+  end
+
+  @spec take_closure(map(), Provenance.t(), MapSet.t(), MapSet.t(), Provenance.group_id()) ::
+          {:taken, Provenance.t(), MapSet.t()} | :held
+  defp take_closure(walk, flags, taken, pool, group) do
     closure =
       dependents(
         flags,
         walk.history.merges,
         [group],
         MapSet.new([group]),
-        &MapSet.member?(taken, &1)
+        &(MapSet.member?(taken, &1) or MapSet.member?(pool, &1))
       )
 
     case held_in(flags, closure) do
       nil ->
         groups = closure |> MapSet.delete(:permanent) |> MapSet.to_list()
-        {Provenance.assume_unapplied(flags, groups), Enum.into(groups, taken)}
+        {:taken, Provenance.assume_unapplied(flags, groups), Enum.into(groups, taken)}
 
       _held ->
-        {flags, taken}
+        :held
     end
   end
 
@@ -930,7 +981,8 @@ defmodule Minga.Buffer.UndoHistory do
       tasks: others,
       groups: walk.groups,
       dropped: walk.dropped,
-      held: if(every_step?, do: nil, else: held_at(rest, task))
+      held: if(every_step?, do: nil, else: held_at(rest, task)),
+      rounds: walk.rounds
     }
 
     {:ok, Restore.new(version, document, :agent), rest, summary}

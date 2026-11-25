@@ -15,6 +15,26 @@ defmodule Minga.Buffer.UndoPatchTest do
   end
 
   describe "precise_changes/1" do
+    # A 6 MB image (not UTF-8, with a carriage return in its header) loaded into an empty buffer: cluster boundaries
+    # are decided from a window around each cut, so trimming it costs about what trimming 6 MB of ASCII costs, not
+    # work per byte (a per-byte boundary set once timed out a buffer call).
+    test "trimming a large binary decides cluster cuts locally" do
+      work = fn text ->
+        {:reductions, before} = Process.info(self(), :reductions)
+        changes = UndoPatch.segment_changes(0, "", text, false)
+        {:reductions, after_changes} = Process.info(self(), :reductions)
+        {after_changes - before, changes}
+      end
+
+      image = <<137, 80, 78, 71, 13, 10, 26, 10>> <> :binary.copy(<<0>>, 6 * 1_024 * 1_024)
+      {ascii, _changes} = work.(:binary.copy("a", byte_size(image)))
+      {binary, changes} = work.(image)
+      assert [{0, "", ^image}] = changes
+
+      assert binary < 2 * ascii,
+             "#{binary} reductions for the image against #{ascii} for ASCII"
+    end
+
     # Round 3's boundary cases around the 512-word cap: under it each changed word is its own change, past it the
     # trimmed span is one change; either way the changes rebuild the new text.
     test "changed words at both ends of a line are separate changes up to the word cap" do
