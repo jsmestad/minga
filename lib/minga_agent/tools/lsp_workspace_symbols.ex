@@ -19,8 +19,8 @@ defmodule MingaAgent.Tools.LspWorkspaceSymbols do
   Results are limited to #{@max_results} to avoid overwhelming the agent's context.
   Any running LSP client can answer this request since it's project-scoped.
   """
-  @spec execute(String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  def execute(query) when is_binary(query) do
+  @spec execute(String.t(), keyword()) :: {:ok, String.t()} | {:error, String.t()}
+  def execute(query, opts \\ []) when is_binary(query) do
     case LspBridge.any_client() do
       {:ok, client} ->
         params = %{"query" => query}
@@ -39,7 +39,8 @@ defmodule MingaAgent.Tools.LspWorkspaceSymbols do
               |> Enum.map(&LspBridge.workspace_symbol_to_location/1)
 
             truncated = Enum.count(symbols) > @max_results
-            {:ok, format_results(query, items, truncated, Enum.count(symbols))}
+            root = Keyword.get(opts, :root)
+            {:ok, format_results(query, items, truncated, Enum.count(symbols), root)}
 
           {:error, :timeout} ->
             {:error, "Workspace symbols request timed out"}
@@ -57,9 +58,10 @@ defmodule MingaAgent.Tools.LspWorkspaceSymbols do
           String.t(),
           [{String.t(), non_neg_integer(), non_neg_integer(), String.t()}],
           boolean(),
-          non_neg_integer()
+          non_neg_integer(),
+          String.t() | nil
         ) :: String.t()
-  defp format_results(query, items, truncated, total) do
+  defp format_results(query, items, truncated, total, root) do
     count_str =
       if truncated do
         "#{Enum.count(items)} of #{total} symbols matching \"#{query}\" (showing first #{@max_results}):"
@@ -69,22 +71,10 @@ defmodule MingaAgent.Tools.LspWorkspaceSymbols do
 
     details =
       Enum.map(items, fn {path, line, _col, label} ->
-        rel = relative_path(path)
+        rel = LspBridge.display_path(path, root)
         "  #{label}  #{rel}:#{line + 1}"
       end)
 
     Enum.join([count_str | details], "\n")
-  end
-
-  @spec relative_path(String.t()) :: String.t()
-  defp relative_path(path) do
-    cwd = File.cwd!()
-    expanded = Path.expand(path)
-
-    if String.starts_with?(expanded, cwd <> "/") do
-      Path.relative_to(expanded, cwd)
-    else
-      path
-    end
   end
 end

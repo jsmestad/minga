@@ -1330,7 +1330,7 @@ defmodule MingaAgent.Tools do
 
         fn args ->
           path = resolve_and_validate_path!(root, args["path"])
-          LspDiagnostics.execute(path) |> retained_process_result(context)
+          LspDiagnostics.execute(path, root: root) |> retained_process_result(context)
         end
       end
     )
@@ -1376,7 +1376,7 @@ defmodule MingaAgent.Tools do
         fn args ->
           path = resolve_and_validate_path!(root, args["path"])
 
-          LspDefinition.execute(path, args["line"], args["column"])
+          LspDefinition.execute(path, args["line"], args["column"], root: root)
           |> retained_process_result(context)
         end
       end
@@ -1424,7 +1424,7 @@ defmodule MingaAgent.Tools do
         fn args ->
           path = resolve_and_validate_path!(root, args["path"])
 
-          LspReferences.execute(path, args["line"], args["column"])
+          LspReferences.execute(path, args["line"], args["column"], root: root)
           |> retained_process_result(context)
         end
       end
@@ -1509,7 +1509,7 @@ defmodule MingaAgent.Tools do
 
         fn args ->
           path = resolve_and_validate_path!(root, args["path"])
-          LspDocumentSymbols.execute(path) |> retained_process_result(context)
+          LspDocumentSymbols.execute(path, root: root) |> retained_process_result(context)
         end
       end
     )
@@ -1542,8 +1542,12 @@ defmodule MingaAgent.Tools do
       context_requirements: [:tool_context],
       metadata: %{pack: :lsp_tools, destructive: false},
       build: fn context ->
+        root = context.project_root
+
         fn args ->
-          LspWorkspaceSymbols.execute(args["query"]) |> retained_process_result(context)
+          args["query"]
+          |> LspWorkspaceSymbols.execute(root: root)
+          |> retained_process_result(context)
         end
       end
     )

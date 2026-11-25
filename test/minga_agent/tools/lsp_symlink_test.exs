@@ -86,8 +86,8 @@ defmodule MingaAgent.Tools.LspSymlinkTest do
         start_fake_client(%{"textDocument/definition" => {:ok, [location]}}, ctx.buffer)
 
         assert {:ok, result} = LspDefinition.execute(ctx.real, 0, @foo_byte_col)
-        assert result =~ "Definition: #{display_path(ctx.real)}:1:6"
-        refute result =~ display_path(ctx.link)
+        assert result =~ "Definition: #{ctx.real}:1:6"
+        refute result =~ ctx.link
       end
 
       test "the diagnostics tool reports what the server published for the buffer", ctx do
@@ -158,9 +158,6 @@ defmodule MingaAgent.Tools.LspSymlinkTest do
     :ok = Diagnostics.publish(@diagnostic_source, uri, [diagnostic])
     on_exit(fn -> Diagnostics.clear(@diagnostic_source, uri) end)
   end
-
-  @spec display_path(String.t()) :: String.t()
-  defp display_path(path), do: Path.relative_to(path, File.cwd!())
 
   @spec start_fake_client(%{String.t() => {:ok, term()} | {:error, term()}}, pid()) :: pid()
   defp start_fake_client(responses, buffer) do

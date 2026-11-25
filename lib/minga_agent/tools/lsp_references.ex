@@ -40,7 +40,7 @@ defmodule MingaAgent.Tools.LspReferences do
 
           {:ok, locations} when is_list(locations) ->
             items = LspBridge.parse_all_locations(locations)
-            {:ok, format_references(items)}
+            {:ok, format_references(items, Keyword.get(opts, :root))}
 
           {:error, :timeout} ->
             {:error, "References request timed out"}
@@ -54,31 +54,21 @@ defmodule MingaAgent.Tools.LspReferences do
     end
   end
 
-  @spec format_references([{String.t(), non_neg_integer(), non_neg_integer(), String.t()}]) ::
-          String.t()
-  defp format_references(items) do
+  @spec format_references(
+          [{String.t(), non_neg_integer(), non_neg_integer(), String.t()}],
+          String.t() | nil
+        ) :: String.t()
+  defp format_references(items, root) do
     count = Enum.count(items)
     header = "#{count} reference#{if count == 1, do: "", else: "s"} found:"
 
     details =
       Enum.map(items, fn {path, line, col, context} ->
-        rel = relative_path(path)
+        rel = LspBridge.display_path(path, root)
         ctx = if context == "", do: "", else: " — #{context}"
         "  #{rel}:#{line + 1}:#{col}#{ctx}"
       end)
 
     Enum.join([header | details], "\n")
-  end
-
-  @spec relative_path(String.t()) :: String.t()
-  defp relative_path(path) do
-    cwd = File.cwd!()
-    expanded = Path.expand(path)
-
-    if String.starts_with?(expanded, cwd <> "/") do
-      Path.relative_to(expanded, cwd)
-    else
-      path
-    end
   end
 end

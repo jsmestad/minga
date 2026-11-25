@@ -17,20 +17,26 @@ defmodule MingaAgent.Tools.LspDefinition do
 
   The line and column are 0-indexed to match LSP conventions.
   """
-  @spec execute(String.t(), non_neg_integer(), non_neg_integer()) ::
+  @spec execute(String.t(), non_neg_integer(), non_neg_integer(), keyword()) ::
           {:ok, String.t()} | {:error, String.t()}
-  def execute(path, line, col) when is_binary(path) and is_integer(line) and is_integer(col) do
+  def execute(path, line, col, opts \\ [])
+      when is_binary(path) and is_integer(line) and is_integer(col) do
     abs_path = Path.expand(path)
 
     case LspBridge.document_for_path(abs_path) do
-      {:ok, document} -> do_definition(document, path, line, col)
+      {:ok, document} -> do_definition(document, path, line, col, Keyword.get(opts, :root))
       {:error, reason} -> {:ok, reason}
     end
   end
 
-  @spec do_definition(LspBridge.document(), String.t(), non_neg_integer(), non_neg_integer()) ::
-          {:ok, String.t()} | {:error, String.t()}
-  defp do_definition(%{client: client} = document, path, line, col) do
+  @spec do_definition(
+          LspBridge.document(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t() | nil
+        ) :: {:ok, String.t()} | {:error, String.t()}
+  defp do_definition(%{client: client} = document, path, line, col, root) do
     params = LspBridge.position_params(document, line, col, Client.encoding(client))
     not_found = "No definition found at #{Path.basename(path)}:#{line + 1}:#{col}"
 
@@ -42,7 +48,7 @@ defmodule MingaAgent.Tools.LspDefinition do
         {:ok, not_found}
 
       {:ok, result} ->
-        format_definition_result(result, not_found)
+        format_definition_result(result, not_found, root)
 
       {:error, :timeout} ->
         {:error, "Definition request timed out"}
@@ -52,22 +58,27 @@ defmodule MingaAgent.Tools.LspDefinition do
     end
   end
 
-  @spec format_definition_result(term(), String.t()) :: {:ok, String.t()}
-  defp format_definition_result(result, not_found) do
+  @spec format_definition_result(term(), String.t(), String.t() | nil) :: {:ok, String.t()}
+  defp format_definition_result(result, not_found, root) do
     case LspBridge.parse_location(result) do
       nil ->
         {:ok, not_found}
 
       {def_path, def_line, def_col} ->
         context = read_context(def_path, def_line)
-        {:ok, format_definition(def_path, def_line, def_col, context)}
+        {:ok, format_definition(def_path, def_line, def_col, context, root)}
     end
   end
 
-  @spec format_definition(String.t(), non_neg_integer(), non_neg_integer(), String.t()) ::
-          String.t()
-  defp format_definition(path, line, col, context) do
-    rel = relative_path(path)
+  @spec format_definition(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t(),
+          String.t() | nil
+        ) :: String.t()
+  defp format_definition(path, line, col, context, root) do
+    rel = LspBridge.display_path(path, root)
     header = "Definition: #{rel}:#{line + 1}:#{col}"
     if context == "", do: header, else: "#{header}\n  #{context}"
   end
@@ -83,18 +94,6 @@ defmodule MingaAgent.Tools.LspDefinition do
 
       {:error, _} ->
         ""
-    end
-  end
-
-  @spec relative_path(String.t()) :: String.t()
-  defp relative_path(path) do
-    cwd = File.cwd!()
-    expanded = Path.expand(path)
-
-    if String.starts_with?(expanded, cwd <> "/") do
-      Path.relative_to(expanded, cwd)
-    else
-      path
     end
   end
 end

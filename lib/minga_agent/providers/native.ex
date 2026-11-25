@@ -92,6 +92,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Tool.Spec, as: ToolSpec
   alias MingaAgent.Tools
   alias MingaAgent.Tools.ProcessBackend.System, as: SystemProcessBackend
+  alias MingaAgent.WorkingFolder
   alias Minga.Config
   alias ReqLLM.Context
   alias ReqLLM.Message.ContentPart
@@ -122,6 +123,7 @@ defmodule MingaAgent.Providers.Native do
           execution: ExecutionState.t(),
           tools: [term()],
           project_root: String.t(),
+          working_folder: WorkingFolder.t(),
           project_view: ProjectView.t() | nil,
           owned_project_view?: boolean(),
           max_retries: non_neg_integer(),
@@ -288,7 +290,11 @@ defmodule MingaAgent.Providers.Native do
     requested_thinking = Keyword.get(opts, :thinking_level)
     selection = initial_selection!(opts, config, model, requested_thinking)
     requested_view = Keyword.get(opts, :project_view)
-    project_root = session_project_root(requested_view, opts)
+    working_folder = session_working_folder(requested_view, opts)
+
+    # A session without a folder uses no caller-supplied view: a view left from another start has a folder.
+    requested_view = if WorkingFolder.available?(working_folder), do: requested_view
+    project_root = working_root(working_folder)
 
     max_retries = Keyword.get(opts, :max_retries, config.max_retries)
     max_turns = Keyword.get(opts, :max_turns, config.max_turns)
@@ -329,12 +335,20 @@ defmodule MingaAgent.Providers.Native do
     base_tools = filter_base_tools_for_read_only(base_tools, read_only?)
     active_skills = load_active_skills(project_root, Keyword.get(opts, :active_skill_names, []))
 
-    configured_mcp_configs = configured_mcp_servers(opts, config, subscriber, read_only?)
+    # An MCP server is another program that starts in the process directory, so none starts without a folder.
+    configured_mcp_configs =
+      if WorkingFolder.available?(working_folder),
+        do: configured_mcp_servers(opts, config, subscriber, read_only?),
+        else: []
+
     config = %{config | mcp_servers: configured_mcp_configs}
 
     mcp_configs =
-      MCPServerRegistry.resolve_configs(configured_mcp_configs,
-        registry_configs: filter_registry_mcp_servers(registry_mcp_servers, opts, read_only?)
+      folder_mcp_configs(
+        working_folder,
+        MCPServerRegistry.resolve_configs(configured_mcp_configs,
+          registry_configs: filter_registry_mcp_servers(registry_mcp_servers, opts, read_only?)
+        )
       )
 
     mcp_client_opts = mcp_client_opts(opts)
@@ -359,6 +373,7 @@ defmodule MingaAgent.Providers.Native do
       execution: ExecutionState.idle(),
       tools: tools,
       project_root: project_root,
+      working_folder: working_folder,
       max_retries: max_retries,
       credential_opts: Keyword.get(opts, :credential_opts, []),
       inference_routes: inference_route_registry(opts),
@@ -505,12 +520,14 @@ defmodule MingaAgent.Providers.Native do
   defp refresh_mcp_contributions(%{read_only?: true} = state, _payload), do: state
 
   defp refresh_mcp_contributions(state, payload) do
-    configs =
+    resolved =
       state
       |> configured_mcp_servers_from_state()
       |> MCPServerRegistry.resolve_configs(
         registry_configs: registry_mcp_servers_from_state(state)
       )
+
+    configs = folder_mcp_configs(state.working_folder, resolved)
 
     if configs == state.mcp_configs do
       state
@@ -553,7 +570,16 @@ defmodule MingaAgent.Providers.Native do
 
   defp maybe_notify_mcp_source_removed(_state, _configs, _payload), do: :ok
 
+  # An MCP server is another program, started in the process directory with whatever reach it has.
+  # A session without a folder starts none, whoever configured or contributed it.
+  @spec folder_mcp_configs(WorkingFolder.t(), [MCPServerConfig.t()]) :: [MCPServerConfig.t()]
+  defp folder_mcp_configs(working_folder, configs) do
+    if WorkingFolder.available?(working_folder), do: configs, else: []
+  end
+
   @spec registry_mcp_servers_from_state(map()) :: [MCPServerConfig.t()]
+  defp registry_mcp_servers_from_state(%{working_folder: {:unavailable, _reason}}), do: []
+
   defp registry_mcp_servers_from_state(state) do
     if state.read_only? do
       []
@@ -569,15 +595,34 @@ defmodule MingaAgent.Providers.Native do
   @spec configured_mcp_servers_from_state(map()) :: [MCPServerConfig.t()]
   defp configured_mcp_servers_from_state(state), do: state.configured_mcp_configs
 
-  # A supplied project view is the session's file owner, so its root is the
-  # single root every tool resolves against. Without a view, the caller's
-  # explicit root wins over the global project and the launch directory.
-  @spec session_project_root(ProjectView.t() | nil, keyword()) :: String.t()
-  defp session_project_root(%ProjectView{project_root: root}, _opts), do: root
-
-  defp session_project_root(nil, opts) do
-    Keyword.get(opts, :project_root) || detect_project_root() || File.cwd!()
+  # The caller that starts the session decides where it works and passes that decision down.
+  # A supplied project view is the session's file owner, so its root is the single root every tool resolves against.
+  # Without a decision or a view, an explicit root wins over the active project.
+  # The process working directory is never read: with nothing else, the session has no folder.
+  @spec session_working_folder(ProjectView.t() | nil, keyword()) :: WorkingFolder.t()
+  defp session_working_folder(%ProjectView{project_root: root}, opts) do
+    case Keyword.get(opts, :working_folder) do
+      {:unavailable, _reason} = unavailable -> unavailable
+      {:folder, ^root} = folder -> folder
+      _project_or_other -> WorkingFolder.project(root)
+    end
   end
+
+  defp session_working_folder(nil, opts) do
+    case Keyword.get(opts, :working_folder) do
+      nil -> explicit_or_active_project(Keyword.get(opts, :project_root) || detect_project_root())
+      decided -> decided
+    end
+  end
+
+  @spec explicit_or_active_project(String.t() | nil) :: WorkingFolder.t()
+  defp explicit_or_active_project(root) when is_binary(root), do: WorkingFolder.project(root)
+  defp explicit_or_active_project(nil), do: {:unavailable, :none}
+
+  # A session without a folder still needs a root for its prompt, skills and editable view.
+  # It gets a private empty directory, so nothing of the user's is in reach even if a tool ran.
+  @spec working_root(WorkingFolder.t()) :: String.t()
+  defp working_root(working_folder), do: WorkingFolder.root_or_placeholder(working_folder)
 
   @spec init_edit_view(ProjectView.t() | nil, String.t()) ::
           {ProjectView.t(), pid() | nil, pid() | nil}
@@ -956,7 +1001,7 @@ defmodule MingaAgent.Providers.Native do
 
   def handle_call(:get_state, _from, state) do
     system_prompt =
-      state.project_root
+      state
       |> system_prompt_parts(state.active_skills, state.selection)
       |> SystemPrompt.text()
 
@@ -1161,6 +1206,7 @@ defmodule MingaAgent.Providers.Native do
       config: state.config,
       tools: ReqLLMAdapter.advertised_tools(request.prefix),
       project_root: state.project_root,
+      working_folder: state.working_folder,
       project_view: state.project_view,
       fork_store: state.fork_store,
       changeset: state.changeset,
@@ -1695,6 +1741,10 @@ defmodule MingaAgent.Providers.Native do
   end
 
   @spec refresh_edit_view(state(), ProjectView.t() | nil) :: {:ok, state()} | {:error, term()}
+  # A session without a folder keeps its private view: a caller's view has a folder.
+  defp refresh_edit_view(%{working_folder: {:unavailable, _reason}} = state, _view),
+    do: {:ok, state}
+
   defp refresh_edit_view(%{owned_project_view?: true} = state, nil), do: {:ok, state}
   defp refresh_edit_view(%{project_view: view} = state, view), do: {:ok, state}
 
@@ -2646,6 +2696,7 @@ defmodule MingaAgent.Providers.Native do
             lctx.tool_metadata,
             ModelSelection.image_tool_result_delivery(lctx.selection)
           )
+          |> ToolContext.put_working_folder(lctx.working_folder)
 
         execution = execute_with_approval(lctx, tool_call, tool_context, signal_execution)
 
@@ -2828,6 +2879,35 @@ defmodule MingaAgent.Providers.Native do
           execution_signal()
         ) :: approved_tool_result()
   defp execute_with_approval(lctx, tool_call, tool_context, signal_execution) do
+    case folder_refusal(lctx, tool_call.name) do
+      nil -> execute_admitted(lctx, tool_call, tool_context, signal_execution)
+      # Minga declined the call; nothing went wrong, so it is recorded as declined, not as an error.
+      line -> {line, :denied, nil, false, nil}
+    end
+  end
+
+  # A session without a folder answers before it asks for approval: there is nothing to approve.
+  # The executor refuses the same tools again, so a path that skips this check still fails closed.
+  @spec folder_refusal(loop_ctx(), String.t()) :: String.t() | nil
+  defp folder_refusal(%{working_folder: working_folder} = lctx, tool_name) do
+    case WorkingFolder.refusal(working_folder) do
+      nil -> nil
+      line -> if tool_needs_folder?(lctx, tool_name), do: line
+    end
+  end
+
+  @spec tool_needs_folder?(loop_ctx(), String.t()) :: boolean()
+  defp tool_needs_folder?(lctx, tool_name) do
+    case resolve_tool_spec(tool_name, lctx) do
+      {:ok, %ToolSpec{} = spec} -> not WorkingFolder.runs_without_folder?(spec)
+      # A name with no declaration cannot be shown to stay away from files.
+      :error -> true
+    end
+  end
+
+  @spec execute_admitted(loop_ctx(), map(), ToolContext.t(), execution_signal()) ::
+          approved_tool_result()
+  defp execute_admitted(lctx, tool_call, tool_context, signal_execution) do
     invocation = Invocation.new(lctx.request, tool_call.effect_checkpoint_id, tool_call)
 
     case GenServer.call(lctx.session_pid, {:prepare_tool_invocation, invocation}) do
@@ -2944,7 +3024,8 @@ defmodule MingaAgent.Providers.Native do
       tool_call_id: tool_call.id,
       name: tool_call.name,
       args: tool_call.arguments,
-      reply_to: self()
+      reply_to: self(),
+      working_directory: lctx.project_root
     })
 
     call_id = tool_call.id
@@ -3461,12 +3542,16 @@ defmodule MingaAgent.Providers.Native do
   defp local_spec(%Tool{provider_options: %{minga_tool_spec: %ToolSpec{} = spec}}), do: spec
   defp local_spec(%Tool{} = tool), do: ToolRegistry.from_req_tool(tool)
 
-  @spec system_prompt_parts(String.t(), [Skills.skill()], ModelSelection.t()) ::
+  @spec system_prompt_parts(state(), [Skills.skill()], ModelSelection.t()) ::
           SystemPrompt.t()
-  defp system_prompt_parts(project_root, active_skills, selection) do
+  defp system_prompt_parts(
+         %{project_root: project_root, working_folder: working_folder},
+         active_skills,
+         selection
+       ) do
     SystemPrompt.new(
-      [resolve_base_prompt(project_root), provider_tool_guidance(selection)],
-      instructions: Instructions.assemble(project_root),
+      [resolve_base_prompt(project_root, working_folder), provider_tool_guidance(selection)],
+      instructions: folder_instructions(project_root, working_folder),
       skills: Skills.format_for_prompt(active_skills),
       append_prompt: read_config_string(:agent_append_system_prompt)
     )
@@ -3485,7 +3570,7 @@ defmodule MingaAgent.Providers.Native do
          %ModelSelection{route: %{request_provider: :apple}} = selection,
          schemas
        ) do
-    parts = system_prompt_parts(state.project_root, active_skills, selection)
+    parts = system_prompt_parts(state, active_skills, selection)
     reserve = selection.policy.limits.request_output
     key = :crypto.hash(:sha256, :erlang.term_to_binary({parts, schemas, selection.policy.limits}))
 
@@ -3506,7 +3591,7 @@ defmodule MingaAgent.Providers.Native do
 
   defp fit_system_prompt(state, active_skills, selection, _schemas) do
     fit =
-      state.project_root
+      state
       |> system_prompt_parts(active_skills, selection)
       |> SystemPrompt.unbounded()
 
@@ -3616,8 +3701,8 @@ defmodule MingaAgent.Providers.Native do
 
   # Returns the base system prompt: either from config or the default template.
   # Config value can be a string prompt or a file path.
-  @spec resolve_base_prompt(String.t()) :: String.t()
-  defp resolve_base_prompt(project_root) do
+  @spec resolve_base_prompt(String.t(), WorkingFolder.t()) :: String.t()
+  defp resolve_base_prompt(project_root, working_folder) do
     custom = read_config_string(:agent_system_prompt)
 
     base =
@@ -3627,9 +3712,26 @@ defmodule MingaAgent.Providers.Native do
         @default_system_prompt_template
       end
 
-    base <>
-      "\n## Environment\n\n" <>
-      "- Project root: #{project_root}"
+    base <> "\n## Environment\n\n" <> environment_line(project_root, working_folder)
+  end
+
+  # Project instructions come from the session's folder. A session without one reads none.
+  @spec folder_instructions(String.t(), WorkingFolder.t()) :: term()
+  defp folder_instructions(project_root, working_folder) do
+    if WorkingFolder.available?(working_folder), do: Instructions.assemble(project_root)
+  end
+
+  # The model reads the same sentence the person and the tools give, so it asks for a folder instead of trying tools.
+  @spec environment_line(String.t(), WorkingFolder.t()) :: String.t()
+  defp environment_line(project_root, working_folder) do
+    case WorkingFolder.refusal(working_folder) do
+      nil ->
+        "- Project root: #{project_root}"
+
+      line ->
+        "- No working folder. #{line} " <>
+          "File, search, Git, language server and shell tools answer with that sentence until then, so do not call them."
+    end
   end
 
   # If the value looks like a file path, read it. Otherwise return as-is.
@@ -4168,6 +4270,8 @@ defmodule MingaAgent.Providers.Native do
   defp format_tool_result(result), do: inspect(result)
 
   @spec format_error(term()) :: String.t()
+  defp format_error({:tool_refused, {:no_working_folder, line}}) when is_binary(line), do: line
+
   defp format_error(
          {:request_admission_refused,
           {:fixed_prefix_exceeded, %{prefix: prefix, reserve: reserve, context: context}}}

@@ -20,14 +20,15 @@ defmodule MingaAgent.Tools.LspDiagnostics do
   and source for each diagnostic. Returns "No diagnostics" when the
   file is clean.
   """
-  @spec execute(String.t()) :: {:ok, String.t()}
-  def execute(path) when is_binary(path) do
+  @spec execute(String.t(), keyword()) :: {:ok, String.t()}
+  def execute(path, opts \\ []) when is_binary(path) do
     abs_path = Path.expand(path)
     lookup = LspBridge.document_for_path(abs_path)
+    shown = LspBridge.display_path(abs_path, Keyword.get(opts, :root))
 
     case lookup |> diagnostics_uri(abs_path) |> Diagnostics.for_uri() do
-      [] -> {:ok, no_diagnostics(path, lookup)}
-      diagnostics -> {:ok, format_diagnostics(path, diagnostics)}
+      [] -> {:ok, no_diagnostics(shown, lookup)}
+      diagnostics -> {:ok, format_diagnostics(shown, diagnostics)}
     end
   end
 
@@ -40,10 +41,10 @@ defmodule MingaAgent.Tools.LspDiagnostics do
 
   @spec no_diagnostics(String.t(), LspBridge.document_result()) :: String.t()
   defp no_diagnostics(path, {:ok, _document}),
-    do: "#{relative_path(path)}: No diagnostics. File is clean."
+    do: "#{path}: No diagnostics. File is clean."
 
   defp no_diagnostics(path, {:error, reason}),
-    do: "#{relative_path(path)}: No diagnostics available. #{reason}"
+    do: "#{path}: No diagnostics available. #{reason}"
 
   # ── Formatting ─────────────────────────────────────────────────────────────
 
@@ -51,8 +52,7 @@ defmodule MingaAgent.Tools.LspDiagnostics do
   defp format_diagnostics(path, diagnostics) do
     counts = Diagnostics.severity_counts(diagnostics)
     summary = format_counts(counts)
-    rel = relative_path(path)
-    header = "#{rel}: #{Enum.count(diagnostics)} diagnostics (#{summary})"
+    header = "#{path}: #{Enum.count(diagnostics)} diagnostics (#{summary})"
 
     details =
       Enum.map(diagnostics, fn diag ->
@@ -74,18 +74,6 @@ defmodule MingaAgent.Tools.LspDiagnostics do
     case parts do
       [] -> "clean"
       _ -> Enum.join(parts, ", ")
-    end
-  end
-
-  @spec relative_path(String.t()) :: String.t()
-  defp relative_path(path) do
-    cwd = File.cwd!()
-    expanded = Path.expand(path)
-
-    if String.starts_with?(expanded, cwd <> "/") do
-      Path.relative_to(expanded, cwd)
-    else
-      path
     end
   end
 end

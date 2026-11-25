@@ -9,6 +9,7 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaAgent.ProjectView
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaAgent.Session
+  alias MingaAgent.WorkingFolder
   alias Minga.Buffer
   alias MingaEditor.Agent.CatalogStartup
   alias MingaEditor.Agent.SessionStart
@@ -276,15 +277,16 @@ defmodule MingaEditor.Commands.AgentSession do
           end)
 
         state = update_workspace_ui(state, workspace_id, &UIState.replace_panel(&1, panel))
-        {project_view, _created?} = view = start_project_view(state, workspace)
-        root = start_root(state, workspace)
+
+        {working_folder, {project_view, _created?} = view} =
+          start_working_folder(state, workspace)
 
         opts =
           session_start_opts(
             state,
             panel,
             project_view,
-            root,
+            working_folder,
             request.hooks?,
             request.recover?
           )
@@ -294,6 +296,72 @@ defmodule MingaEditor.Commands.AgentSession do
       _gone_or_remote ->
         state
     end
+  end
+
+  # Decides once where the session works.
+  # The candidates, in order: the project, the folder the editor was opened on, the folder of the started-from file.
+  # With none of these, or only a folder as broad as Home or a volume root, the session starts without a folder.
+  # The process working directory is never a candidate.
+  @spec start_working_folder(state(), Workspace.agent()) ::
+          {WorkingFolder.t(), {ProjectView.t() | nil, boolean()}}
+  defp start_working_folder(state, workspace) do
+    case start_root(state, workspace) do
+      root when is_binary(root) ->
+        {WorkingFolder.project(root), start_project_view(state, workspace)}
+
+      nil ->
+        working_folder =
+          WorkingFolder.first_available([
+            WorkingFolder.folder(state.workspace.file_tree.original_root),
+            WorkingFolder.for_file(started_from_file(state))
+          ])
+
+        {working_folder, plain_folder_view(workspace, WorkingFolder.root(working_folder))}
+    end
+  end
+
+  # A workspace can still hold the view of an earlier start. It is reused only for the same folder.
+  # Another folder gets its own view, and a session without a folder gets none.
+  @spec plain_folder_view(Workspace.agent(), String.t() | nil) ::
+          {ProjectView.t() | nil, boolean()}
+  defp plain_folder_view(_workspace, nil), do: {nil, false}
+
+  defp plain_folder_view(workspace, root) do
+    case session_project_view(workspace, root) do
+      {%ProjectView{project_root: ^root}, _created?} = same_folder -> same_folder
+      {_view_of_another_folder, false} -> project_view_from_root(root)
+      created_or_none -> created_or_none
+    end
+  end
+
+  # The file the task started from: the file the person is in.
+  # Opening the Agent switches to its tab first, so that is usually the file tab the Agent returns to.
+  # Other open files are not candidates: guessing among them could pick a folder the person is not working in.
+  @spec started_from_file(state()) :: String.t() | nil
+  defp started_from_file(state) do
+    [state.workspace.buffers.active, return_file_buffer(state)]
+    |> Enum.filter(&is_pid/1)
+    |> Enum.find_value(&buffer_file_path/1)
+  end
+
+  @spec return_file_buffer(state()) :: pid() | nil
+  defp return_file_buffer(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tabs}}}) do
+    case TabBar.most_recent_of_kind(tabs, :file) do
+      %Tab{context: context} -> TabContext.active_buffer_pid(context)
+      nil -> nil
+    end
+  end
+
+  defp return_file_buffer(_state), do: nil
+
+  @spec buffer_file_path(pid()) :: String.t() | nil
+  defp buffer_file_path(buffer) do
+    case Buffer.file_path(buffer) do
+      path when is_binary(path) -> path
+      _no_file -> nil
+    end
+  catch
+    :exit, _reason -> nil
   end
 
   # The active workspace starts in the project the editor shows; a background
@@ -411,19 +479,19 @@ defmodule MingaEditor.Commands.AgentSession do
           state(),
           Panel.t(),
           ProjectView.t() | nil,
-          String.t() | nil,
+          WorkingFolder.t(),
           boolean(),
           boolean()
         ) ::
           keyword()
-  defp session_start_opts(state, panel, project_view, root, hooks?, recover?) do
+  defp session_start_opts(state, panel, project_view, working_folder, hooks?, recover?) do
     [
       thinking_level: panel.thinking_level,
       model_name: panel.model_name,
       provider_name: panel.provider_name,
       session_start_hook_enabled?: hooks?,
       recover_interrupted_work?: recover?,
-      provider_opts: provider_opts(state, panel, project_view, root)
+      provider_opts: provider_opts(state, panel, project_view, working_folder)
     ]
     |> maybe_put_provider_module(state.agent_connection.agent_provider_module)
   end
@@ -973,15 +1041,18 @@ defmodule MingaEditor.Commands.AgentSession do
     Map.get(mapping, String.downcase(lang))
   end
 
-  @spec provider_opts(state(), Panel.t(), ProjectView.t() | nil, String.t() | nil) :: keyword()
-  defp provider_opts(state, panel, project_view, root) do
+  @spec provider_opts(state(), Panel.t(), ProjectView.t() | nil, WorkingFolder.t()) :: keyword()
+  defp provider_opts(state, panel, project_view, working_folder) do
     state.agent_connection.agent_provider_opts
     |> Keyword.merge(
       provider: panel.provider_name,
       model: panel.model_name,
-      project_view: project_view
+      project_view: project_view,
+      working_folder: working_folder
     )
-    |> put_session_project_root(session_project_root(project_view, root))
+    |> put_session_project_root(
+      session_project_root(project_view, WorkingFolder.root(working_folder))
+    )
   end
 
   # The session works on the project the editor shows, never the launch

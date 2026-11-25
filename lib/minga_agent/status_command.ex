@@ -199,8 +199,15 @@ defmodule MingaAgent.StatusCommand do
 
   @spec run_command(String.t(), context()) :: {:ok, String.t()} | {:error, term()}
   defp run_command(command, context) do
-    workdir = Map.get(context, :workdir) || File.cwd!()
+    case Map.get(context, :workdir) do
+      workdir when is_binary(workdir) -> run_command_in(command, context, workdir)
+      _no_folder -> {:error, :no_working_folder}
+    end
+  end
 
+  # The status command runs in the folder the editor works in, which the caller names.
+  @spec run_command_in(String.t(), context(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  defp run_command_in(command, context, workdir) do
     case System.cmd("sh", ["-c", command],
            cd: workdir,
            env: env(context),
@@ -227,7 +234,7 @@ defmodule MingaAgent.StatusCommand do
       {"MINGA_SESSION_ID", env_value(Map.get(context, :session_id))},
       {"MINGA_MODEL", env_value(Map.get(context, :model))},
       {"MINGA_STATUS", env_value(Map.get(context, :status))},
-      {"MINGA_WORKDIR", env_value(Map.get(context, :workdir) || File.cwd!())}
+      {"MINGA_WORKDIR", env_value(Map.get(context, :workdir))}
     ]
   end
 

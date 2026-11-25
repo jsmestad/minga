@@ -13,6 +13,17 @@ defmodule MingaAgent.ToolApprovalTest do
       assert "$ rm -rf tmp/build" in preview.lines
     end
 
+    test "a shell preview names the session folder and ignores a directory the arguments claim" do
+      args = %{"command" => "make", "cwd" => "/somewhere/else", "working_directory" => "/another"}
+
+      assert ToolApproval.build_preview("shell", args, "/work/app").lines == [
+               "$ make",
+               "cwd: /work/app"
+             ]
+
+      assert ToolApproval.build_preview("shell", args).lines == ["$ make"]
+    end
+
     test "encodes approval previews as JSON" do
       preview = Preview.new(:diff, "lib/app.ex", ["file: lib/app.ex", "-old", "+new"])
 

@@ -988,7 +988,8 @@ defmodule MingaAgent.Session.TurnExecution do
       tool_call_id: event.tool_call_id,
       name: event.name,
       args: event.args,
-      reply_to: event.reply_to
+      reply_to: event.reply_to,
+      working_directory: event.working_directory
     )
   end
 

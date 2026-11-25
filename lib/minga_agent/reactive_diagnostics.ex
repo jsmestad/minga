@@ -198,7 +198,7 @@ defmodule MingaAgent.ReactiveDiagnostics do
 
   @spec suggestion_text(String.t(), fingerprint()) :: String.t()
   defp suggestion_text(path, {line, col, message, _source, _code}) do
-    rel = Path.relative_to_cwd(path)
+    rel = Minga.Project.collapse_home(path)
 
     "New LSP error after save in #{rel}:#{line + 1}:#{col + 1}: #{message}\n\nAsk me to apply a fix, open chat to discuss it, or ignore this suggestion to dismiss it."
   end

@@ -560,6 +560,29 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     end
   end
 
+  test "a tool Minga declined for lack of a folder is a declined card, never an error card" do
+    # Both frontends draw the card from this model and decode the same wire byte.
+    # Declined is an existing state (orange "Denied" on macOS and in the terminal); error is the red, failed one.
+    line = "Minga has no folder to work in. Open a file or a folder."
+
+    declined =
+      "no-folder-call"
+      |> ToolCall.new("read_file", %{"path" => "notes.txt"})
+      |> ToolCall.deny(line)
+
+    panel = synced_panel([{:tool_call, declined}])
+
+    model =
+      context(fake_session_pid(), panel, theme: Theme.Fallback.theme())
+      |> AgentChatBuilder.build()
+
+    assert [{1, {:tool_call, %ToolCallView{status: :denied, result: ^line} = card}} | _] =
+             model.resident_messages
+
+    assert <<0x04, 3, _rest::binary>> =
+             AgentChatMessageCodec.encode_message_body({:tool_call, card})
+  end
+
   test "build/1 does not reactivate historical tool cards when a request reuses a tool ID" do
     session = fake_session_pid()
     target = ApprovalTarget.new("session-A", "new-admitted-request", "reused-tool-id")

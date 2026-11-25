@@ -16,7 +16,7 @@ defmodule Minga.LSP.RootDetector do
 
   Walks up from `file_path`'s parent directory, checking each directory for
   the presence of any file in `root_markers`. Returns the first directory
-  that contains a marker, or `File.cwd!/0` if none is found.
+  that contains a marker, or the file's own folder if none is found.
 
   ## Examples
 
@@ -25,7 +25,7 @@ defmodule Minga.LSP.RootDetector do
       true
 
       iex> Minga.LSP.RootDetector.find_root("/tmp/no_markers_here.txt", [])
-      File.cwd!()
+      "/tmp"
   """
   @spec find_root(String.t(), [String.t()]) :: String.t()
   def find_root(file_path, root_markers)
