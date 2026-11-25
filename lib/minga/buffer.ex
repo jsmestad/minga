@@ -405,6 +405,36 @@ defmodule Minga.Buffer do
           :ok | {:error, term()}
   defdelegate replace_content(server, new_content, source \\ :user), to: BufferProcess
 
+  @doc """
+  Gives the buffer the unsaved text read from the swap file at `swap_path` and makes the buffer the owner of that text.
+
+  See `Minga.Buffer.Process.adopt_recovered_text/3`.
+  """
+  @spec adopt_recovered_text(t(), String.t(), String.t()) ::
+          :ok | {:error, :read_only | :modified}
+  defdelegate adopt_recovered_text(server, content, swap_path), to: BufferProcess
+
+  @doc """
+  Stops swap writes in every file buffer and removes their swap files, because the user is quitting on purpose.
+
+  A swap file is kept for text the user never decided about: after a crash, a kill, or a lost frontend. A quit that saves or discards is a decision, so nothing of this run may be recovered on the next start. A swap kept by a buffer that crashed earlier in this run is not touched: that text was never saved or discarded.
+  """
+  @spec release_swaps() :: :ok
+  def release_swaps do
+    Minga.Buffer.Registry
+    |> Registry.select([{{:_, :"$1", :_}, [], [:"$1"]}])
+    |> Enum.uniq()
+    |> Enum.each(&release_swap/1)
+  end
+
+  @spec release_swap(pid()) :: :ok
+  defp release_swap(buffer) do
+    BufferProcess.release_swap(buffer)
+  catch
+    # A buffer can stop while the editor quits. Its swap is then handled by its own `terminate/2`.
+    :exit, _reason -> :ok
+  end
+
   @doc "Atomically replaces content at `expected_version`, preserving the nearest valid cursor position."
   @spec replace_content_if_version(
           t(),

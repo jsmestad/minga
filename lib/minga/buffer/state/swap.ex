@@ -56,6 +56,14 @@ defmodule Minga.Buffer.State.Swap do
   @spec configured?(t()) :: boolean()
   def configured?(%__MODULE__{directory: directory}), do: is_binary(directory)
 
+  @doc """
+  Turns swap writes off for the rest of this buffer's life.
+
+  The editor releases every buffer's swap when the user quits on purpose. A buffer that is edited again while the VM stops must not write a new one.
+  """
+  @spec release(t()) :: t()
+  def release(%__MODULE__{} = state), do: %{state | directory: nil}
+
   @doc "Returns the configured storage backend."
   @spec backend(t()) :: module()
   def backend(%__MODULE__{backend: backend}) when is_atom(backend) and not is_nil(backend),
