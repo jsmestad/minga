@@ -780,6 +780,8 @@ An editor that loses your last hour of typing to a crash or a dead battery is no
 
 **Writing.** Five seconds after the last edit, a dirty file buffer copies its text once and hands it to a worker process. The worker writes a temporary file in the swap directory (`~/.local/share/minga/swap`, or `$XDG_DATA_HOME/minga/swap`) and the buffer renames it into place. Nothing happens per keystroke, and the file write never runs in the buffer process. Each stage emits a `[:minga, :swap, :write]` telemetry span (`snapshot`, `prepare`, `publish`). A buffer that an agent tool opens goes through the same path (`Minga.Buffer.ensure_for_path/3`), so an edit nobody has reviewed yet is kept the same way as your own.
 
+**What it covers.** Auto-save (`:auto_save_delay_ms`, 1 second by default) writes the file itself one second after the last edit, so with the default settings the file is the protection and a crash loses what was typed since the last pause of 1 second. The swap file is the protection when auto-save is off (`0`) or cannot finish a save: a crash then loses what was typed since the last pause of 5 seconds. Both timers start again with every edit. [What a crash can lose](CONFIGURATION.md#what-a-crash-can-lose) has the table.
+
 **Who writes.** Every local file buffer in a VM that runs an interactive editor (`Minga.Session.buffer_swap_dir/0`), including a new buffer that gets its file name later with `:w name`. A headless editor, a benchmark, a storyboard run and a gateway-only runtime write no swap files, because nothing would recover them and a later real session would "recover" text that no user typed.
 
 **When a swap file leaves the disk.** A swap file is the only copy of its text, so it is removed in these cases and no others:
