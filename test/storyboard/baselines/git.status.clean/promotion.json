@@ -1,6 +1,6 @@
 {
   "macos": {
-    "commit": "dddc29e8cff1538ce3490d400103180d32e73f51-dirty",
+    "commit": "f777d3e78615c1651d423d05be0640b817531a3b",
     "files": {
       "macos-astrodark-1280.json": "29924cd78304b13ca8decfad9cc51b15e2aeb6883a0f9b813cb2911a075152f2",
       "macos-astrodark-1440.json": "2e7b3078052a5ca94dcf945aceac761b42a9f2d7ef842fd5947325b41e909f35",
@@ -10,27 +10,31 @@
       "macos-catppuccin_latte-1440.json": "c200440264ee57cd74b92b2b3d48dd7dbf7bd96336d571f54de954ad202d7fa7"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "0a2a34fdfa5c62501a54ccb51568f6a114bd2d1e587a97f491e535f6e70eebde",
-      "macos-astrodark-1440.json": "637ff57b85645a077a0ca1465b46bfbf4b5ed6e75cbadd54680f46c434c6a106",
-      "macos-catppuccin_frappe-1280.json": "6ded19708e32394c72f6a5c97bf1bee45e3256f152ae770b2d6b00eccf378a7d",
-      "macos-catppuccin_frappe-1440.json": "afb85d8c5a838d6c72c6d65fcd4fd4fce5804445a6ab276feffc70630745a339",
-      "macos-catppuccin_latte-1280.json": "4b525670ecff8f8f035c76a1f8a0f74ecc2249d394fb2f6e52c6261c641a11ce",
-      "macos-catppuccin_latte-1440.json": "fe389296e00c2d4be6220c5a5d92bab43d92fedfd90c9ce6ae6002a384ed2206"
+      "macos-astrodark-1280.json": "387b7ab084f203dbf630e565004dc960f49bd71f8e0da85617b1caaa321feec4",
+      "macos-astrodark-1440.json": "db12d46e6dce681753330a977f5c1f789948a3237c1187080125583183876569",
+      "macos-catppuccin_frappe-1280.json": "804eb5f9093ef5b9d74ec8228a4b89d6103561632ca42520595cda4650209993",
+      "macos-catppuccin_frappe-1440.json": "2769198e0eae15358a927a877b1b826d1355098ce751cb5c6ef91ea51067690f",
+      "macos-catppuccin_latte-1280.json": "db785e10e12be2bf1b79ec90f545264f4435522d8a0bd7d851fc6d03d20546ee",
+      "macos-catppuccin_latte-1440.json": "7111452b2b936464f8400c5eae7bbf3d0bbd27c25d9e332679c9e60870a07ffa"
     }
+  },
+  "platform_specific": {
+    "frontend": "tui",
+    "reason": "the shared terminal empty list keeps a one-column trailing inset, so a cut line ends before the border; macOS lays its empty state out natively"
   },
   "scenario": "git.status.clean",
   "tui": {
-    "commit": "dddc29e8cff1538ce3490d400103180d32e73f51-dirty",
+    "commit": "f777d3e78615c1651d423d05be0640b817531a3b",
     "files": {
       "tui-astrodark-120x40.txt": "4644b8a2b8ed4e59f27872c3a04332098ab14cbae9e4fb7bbd3ee4961964a0e6",
       "tui-astrodark-150x38.txt": "bd0ee7d1f43e806cade5dd5ca0998800a2ccfb790746c7ddeccae4c4b6c34465",
-      "tui-astrodark-80x24.txt": "32673d12be1977f071e4d57c6668709c1249add0c7f3427c4ee9d725d4b56492",
+      "tui-astrodark-80x24.txt": "9bcc06e7da64bdd9bb47263dd09eb34adc2887a416ba94ec518253d4d9fbe232",
       "tui-catppuccin_frappe-120x40.txt": "dd1dce14b36835b6c9d67b101903b4a74481ed5c23d7c55a3aa3c9e4ceffbffd",
       "tui-catppuccin_frappe-150x38.txt": "6ae41f2ba8a7c6b4622aea3b4ee6de40016efc802efc5c6541de92b9862aa0e6",
-      "tui-catppuccin_frappe-80x24.txt": "2dbf748960c9b0dee3192e4b359399dd5730513621b21b8c5a5dbb941878d303",
+      "tui-catppuccin_frappe-80x24.txt": "595c011151f82caecbcbdfb75ddd84f808e11cf79409fa656053f9c6c0403b8f",
       "tui-catppuccin_latte-120x40.txt": "ffa9d2a64577a5e0fb4bd6d26f24d2eaa2727caa051401afc8dde8f6acdb9b3d",
       "tui-catppuccin_latte-150x38.txt": "98326bc7a6876314849f61c22555fe0df244ac8012f5712e27e2de4364eec24e",
-      "tui-catppuccin_latte-80x24.txt": "20cab1e8c71f903333b998d310bc2486e7710932f1433b7da99d008e50e8341d"
+      "tui-catppuccin_latte-80x24.txt": "4ac6366921029dbac17a2767ff6ab43ec3d6c72b45e1193fbd11dd8d044edb4e"
     }
   }
 }

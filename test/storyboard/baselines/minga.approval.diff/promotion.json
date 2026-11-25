@@ -1,6 +1,6 @@
 {
   "macos": {
-    "commit": "a70ccca581aef249ef43cab3efab936167201487",
+    "commit": "f777d3e78615c1651d423d05be0640b817531a3b",
     "files": {
       "macos-astrodark-1280.json": "0ca629f447c6eceedd25733a32c619422dcdda5d6d436a8c1afba0dc34318d1a",
       "macos-astrodark-1440.json": "934768ce98e319b4ee4d326ebc3573aeaf084ecb1a60af9d1b4e4d0fcf2b15b9",
@@ -10,13 +10,17 @@
       "macos-catppuccin_latte-1440.json": "a527aad87716c4baac9958ef14d6034f76b1389427296836cdd32d406543ce7f"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "073a007926e0cbee844c47fae1ef9049ee3f27b7383cbffd352f4a8183480a6f",
-      "macos-astrodark-1440.json": "85c96c5e5fbe89ffb184f587347890feeb9978db1ec49ff9dca5a9be07016b6f",
-      "macos-catppuccin_frappe-1280.json": "292af0e410bef8ca2ecabc02ca21ba23a8869492d4fcf7c521aa86d01b59e776",
-      "macos-catppuccin_frappe-1440.json": "a247ad81a91bc570971a9aecb4d9fbaa71d9ee4604f73f3aed337ab749e67118",
-      "macos-catppuccin_latte-1280.json": "5c1ce25293c13315f38b1934eb10d4315442cb8f69a504297e46320030b0edba",
-      "macos-catppuccin_latte-1440.json": "162b571688841d9dd4f5bdf03d1597ef73784040cebb59d15a9b42d9390e83ec"
+      "macos-astrodark-1280.json": "1b3c02ee706fcbba9f12963529bcca70f0b8fc10791523189cf1b8e7b389725c",
+      "macos-astrodark-1440.json": "d699dda5c36335289674f16f30e8272668549e019d597b426f0e5f545e5d0e79",
+      "macos-catppuccin_frappe-1280.json": "0715de410824461b45bd276e077f67b39eee7bda59906baed3d3248caa25fd87",
+      "macos-catppuccin_frappe-1440.json": "4fc5d30918fb4bffd28d286d0f4350bd4df74aabef7bed8a309ea2adb5bc664b",
+      "macos-catppuccin_latte-1280.json": "e802631434e8281d30c4a5012f7cf815587c53f2e90c09d67abf1b79d09a8e7f",
+      "macos-catppuccin_latte-1440.json": "9197991d9ad962faf44c784104d63ca687916a50c28183d1c8bb39f27a3cd2e7"
     }
+  },
+  "platform_specific": {
+    "frontend": "tui",
+    "reason": "the shared terminal empty list keeps a one-column trailing inset, so a cut line ends before the border; macOS lays its empty state out natively"
   },
   "scenario": "minga.approval.diff",
   "tui": {

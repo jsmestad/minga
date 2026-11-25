@@ -19,7 +19,7 @@ defmodule MingaEditor.State.LaunchpadTest do
                "recent-2",
                "task-7",
                "action-project_find_file",
-               "action-agent_new_session",
+               "action-agent_new_task",
                "action-toggle_file_tree",
                "action-project_switch"
              ]

@@ -227,6 +227,34 @@ defmodule MingaEditor.ProjectHomeTest do
     assert editor_state(editor).workspace.keymap_scope == :agent
   end
 
+  test "the home's New task opens the New task prompt, and a task started there keeps the home in front",
+       ctx do
+    editor = open_home(ctx)
+
+    send(
+      editor.editor,
+      {:minga_input, {:gui_action, {:empty_state_activate, "action-agent_new_task"}}}
+    )
+
+    assert {:prompt, %{prompt_ui: %{handler: MingaEditor.UI.Prompt.NewTask}}} =
+             editor_state(editor).shell_runtime.state.modal
+
+    # Esc cancels the prompt and leaves the home where it was.
+    send_keys_sync(editor, "<Esc>")
+    assert showing_home?(editor)
+
+    # A started task works in a background workspace, so the home stays in front.
+    send(
+      editor.editor,
+      {:minga_input, {:gui_action, {:empty_state_activate, "action-agent_new_task"}}}
+    )
+
+    send_keys_sync(editor, "Add tests<CR>")
+
+    assert showing_home?(editor)
+    assert editor_state(editor).workspace.keymap_scope == :editor
+  end
+
   defp home_with_two_files(ctx) do
     editor = open_home(ctx)
     send_keys_sync(editor, ":e #{Path.join(ctx.root, "lib/a.ex")}<CR>")

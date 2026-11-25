@@ -1,6 +1,6 @@
 {
   "macos": {
-    "commit": "f182458f7e6797784b1b93364aeb4f76469390d8-dirty",
+    "commit": "f777d3e78615c1651d423d05be0640b817531a3b",
     "files": {
       "macos-astrodark-1280.json": "0fca7de7d67893587d93d8c7af5711a2fa97c999c51d1722219f038cd3c0afcd",
       "macos-astrodark-1440.json": "6b831c9d33e936f3b41e964a6421c2c599579776efa333b79db0e89af6aa3586",
@@ -10,13 +10,17 @@
       "macos-catppuccin_latte-1440.json": "c73733ee9541d4d33c1ba97a007a56be54c7ce36b7e8cf0f295ec8a70697c3ce"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "81cfc591b0a9d0701827629ed9ed91af7304a7f7cb296130d611a79821ca8ca3",
-      "macos-astrodark-1440.json": "6b8cfc4d5a8d7a8f98f7f1fa0ee2aa896fe2ea6301f77e893ff8fb7212c46ca6",
-      "macos-catppuccin_frappe-1280.json": "d620228941fb4e214d6a4e3dc4b6b5756dcc5e7ba1be8c47d58ed0b7c53e746a",
-      "macos-catppuccin_frappe-1440.json": "f3514f2a5e96b0cae0ef52e6e57870ec303b02e2355d674e8d7093c86522617d",
-      "macos-catppuccin_latte-1280.json": "ac08c8f9ea8b492f7022ab2894c13114054972b0992194de68142275d0d2c122",
-      "macos-catppuccin_latte-1440.json": "6647cbdcc698dd21c3fc97ef8c7c8917583baa4c88dd2a1056960795753016b9"
+      "macos-astrodark-1280.json": "a4cc6a8450c462e0c316e0d33fe7edfb352a2b2b37d9406cc1f60f7ef65eee68",
+      "macos-astrodark-1440.json": "5070fa0693836c36d5235270efcbac87707f22898a69f1c0829458b6cf8247eb",
+      "macos-catppuccin_frappe-1280.json": "cf3f72630ae9c7f8d689bdf04c32eded82e8498a97eb84faa12321613972ad37",
+      "macos-catppuccin_frappe-1440.json": "bf9199ab4f6cee3acd1b8ff4a6edbedbddd1acf235fe7e70f276a19602b1186e",
+      "macos-catppuccin_latte-1280.json": "2a1d97f8d1ea7ea20c773ed65bc79f8c36665722b4b22974383ee0dc37b776a8",
+      "macos-catppuccin_latte-1440.json": "d19fa68d7eb647fbd66c56b3d9809216f393d08a0ca806720368bff5a0c655bc"
     }
+  },
+  "platform_specific": {
+    "frontend": "tui",
+    "reason": "the shared terminal empty list keeps a one-column trailing inset, so a cut line ends before the border; macOS lays its empty state out natively"
   },
   "scenario": "edit.whichkey.leader",
   "tui": {

@@ -22,11 +22,11 @@
 ╭ *minga-tasks* Minga Tasks ───────────────────────────────────────────────────╮
 │                                                                              │
 │   No one's at the table yet.                                                 │
-│   Give Minga a task. Each one gets its own conversation, review and place…   │
+│   Give Minga a task. Each one gets its own conversation, review and place in │
+│   the modeline.                                                              │
 │                                                                              │
 │   c         New task                                                         │
 │   SPC a S h Resume an earlier session                                        │
-│                                                                              │
 ╰ j/k move  ↩ run  q close ────────────────────────────────────────────────────╯
   NORMAL  storyboard.ex                                              Elixir 1:1
 ## styles (row start-end fg bg attrs)
@@ -101,24 +101,26 @@
 16 79-79 #1e66f5 #ccd0da -
 17 0-0 #1e66f5 #ccd0da -
 17 1-3 #4c4f69 #ccd0da -
-17 4-75 #8c8fa1 #ccd0da -
-17 76-78 #4c4f69 #ccd0da -
+17 4-77 #8c8fa1 #ccd0da -
+17 78-78 #4c4f69 #ccd0da -
 17 79-79 #1e66f5 #ccd0da -
 18 0-0 #1e66f5 #ccd0da -
-18 1-78 #4c4f69 #ccd0da -
+18 1-3 #4c4f69 #ccd0da -
+18 4-16 #8c8fa1 #ccd0da -
+18 17-78 #4c4f69 #ccd0da -
 18 79-79 #1e66f5 #ccd0da -
 19 0-0 #1e66f5 #ccd0da -
-19 1-3 #4c4f69 #acb0be -
-19 4-4 #ccd0da #1e66f5 -
-19 5-78 #4c4f69 #acb0be -
+19 1-78 #4c4f69 #ccd0da -
 19 79-79 #1e66f5 #ccd0da -
 20 0-0 #1e66f5 #ccd0da -
-20 1-3 #4c4f69 #ccd0da -
-20 4-12 #1e66f5 #ccd0da -
-20 13-78 #4c4f69 #ccd0da -
+20 1-3 #4c4f69 #acb0be -
+20 4-4 #ccd0da #1e66f5 -
+20 5-78 #4c4f69 #acb0be -
 20 79-79 #1e66f5 #ccd0da -
 21 0-0 #1e66f5 #ccd0da -
-21 1-78 #4c4f69 #ccd0da -
+21 1-3 #4c4f69 #ccd0da -
+21 4-12 #1e66f5 #ccd0da -
+21 13-78 #4c4f69 #ccd0da -
 21 79-79 #1e66f5 #ccd0da -
 22 0-0 #1e66f5 #ccd0da -
 22 1-1 #4c4f69 #ccd0da -

@@ -1,6 +1,6 @@
 {
   "macos": {
-    "commit": "74e9d8ec633bb8c08cef2a271301beb823a1c7c2-dirty",
+    "commit": "f777d3e78615c1651d423d05be0640b817531a3b",
     "files": {
       "macos-astrodark-1280.json": "c9a75d3ddbfdcfb91eb832a4be0929af2ca04786b00a269a2a40a2b7293f5956",
       "macos-astrodark-1440.json": "4f6f7bd3ee890ee844d104d2d88f5576ce16359cb05777d656965cb9e38b2b39",
@@ -10,13 +10,17 @@
       "macos-catppuccin_latte-1440.json": "d43cec836e5004c222e061caf758587d79aaba09eceadcf4c18234e069d7ec87"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "975915de0917a1ebabb23ab146d96d78b27b99b69b2705cdbf4c1482d7ea1aa7",
-      "macos-astrodark-1440.json": "05ead0b9a2ac0b17f6818ff43f8fb0f9df9b476d133df284d8708ed17f56b106",
-      "macos-catppuccin_frappe-1280.json": "f8ae4bc971d85332d1a42a7cfe84b28cf1fa80af57eb7f9dbd34394c5f75b940",
-      "macos-catppuccin_frappe-1440.json": "336e3c691894009d9e06e356c628a93cd0c6467874740ee5ee17dc199c1ab086",
-      "macos-catppuccin_latte-1280.json": "4b2d7cfef51f370d0c1366f1139918df5310782c8c7de47d718fbea3b4c6931c",
-      "macos-catppuccin_latte-1440.json": "d2f469b2f884d9cc2d7cb4acafb1e56494987070c5767593ddd65dac8ac54fd8"
+      "macos-astrodark-1280.json": "cb54d332aeed7864db1c0663e04bc709f1b2a4eb8fa476c7c0dd307a96e7f451",
+      "macos-astrodark-1440.json": "90dd8edddb2300955fcef9e24a8029ed3b296964ed66dc5760d584ef3a1f2003",
+      "macos-catppuccin_frappe-1280.json": "1f8981fbcb03dc12fee334357803cea235d4cea9ea8ca523c457adb4c14b97f1",
+      "macos-catppuccin_frappe-1440.json": "55a2ab3029033aeff588cb26eb6365bc6ce7504de07ef79c8a03c12450e8808a",
+      "macos-catppuccin_latte-1280.json": "0d51abb7006f105dba58dba5686ce704599d825de52f565bc9dcc1c1f5ddf6c7",
+      "macos-catppuccin_latte-1440.json": "fdcd69a4c3141f44dc9fee50e79c7dfec047319da3ba605aa7a522ee5f1f54c0"
     }
+  },
+  "platform_specific": {
+    "frontend": "tui",
+    "reason": "the shared terminal empty list keeps a one-column trailing inset, so a cut line ends before the border; macOS lays its empty state out natively"
   },
   "scenario": "code.actions.none",
   "tui": {
