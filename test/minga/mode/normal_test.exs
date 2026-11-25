@@ -84,6 +84,7 @@ defmodule Minga.Mode.NormalTest do
         {{?f, 0x02}, :page_down},
         {{?b, 0x02}, :page_up},
         {{?u, 0}, :undo},
+        {{?z, 0x08}, :undo},
         {{?r, 0x02}, :redo},
         {{?o, 0x02}, :jump_back},
         {{?i, 0x02}, :jump_forward},
