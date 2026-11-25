@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Leave an agent unattended: Learn Minga</title>
-  <meta name="description" content="Lesson 05: before you leave an agent working with nobody watching, install a hook that stops dangerous shell commands, test its rules in your browser, and keep the work running on a remote machine with your laptop closed.">
+  <meta name="description" content="Lesson 04: before you leave an agent working with nobody watching, install a hook that stops dangerous shell commands, test its rules in your browser, and keep the work running on a remote machine with your laptop closed.">
   <link rel="canonical" href="https://mingacode.dev/learn/remote">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#303446" media="(prefers-color-scheme: dark)">
@@ -24,7 +24,7 @@
   <meta name="twitter:description" content="Test the hook script that stops a force push or a delete of your home directory, then copy it and the commands that keep an agent working on a remote machine.">
   <meta name="twitter:image" content="https://mingacode.dev/assets/og-minga.png">
   <meta name="twitter:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
-  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Leave an agent unattended: Learn Minga","description":"Lesson 05: before you leave an agent working with nobody watching, install a hook that stops dangerous shell commands, test its rules in your browser, and keep the work running on a remote machine with your laptop closed.","url":"https://mingacode.dev/learn/remote","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Learn","item":"https://mingacode.dev/learn/"},{"@type":"ListItem","position":3,"name":"Leave an agent unattended","item":"https://mingacode.dev/learn/remote"}]}]}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Leave an agent unattended: Learn Minga","description":"Lesson 04: before you leave an agent working with nobody watching, install a hook that stops dangerous shell commands, test its rules in your browser, and keep the work running on a remote machine with your laptop closed.","url":"https://mingacode.dev/learn/remote","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Learn","item":"https://mingacode.dev/learn/"},{"@type":"ListItem","position":3,"name":"Leave an agent unattended","item":"https://mingacode.dev/learn/remote"}]}]}</script>
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
@@ -70,7 +70,7 @@
   <main id="main" class="lesson-page lesson-theme-done">
     <section class="lesson-stage">
       <div class="container">
-        <p class="learn-breadcrumb"><a href="/learn/">Learn</a> <span>/</span> Lesson 05 of 05 · Leave an agent unattended</p>
+        <p class="learn-breadcrumb"><a href="/learn/">Learn</a> <span>/</span> Lesson 04 of 04 · Leave an agent unattended</p>
         <h1>Leave an agent working while you are away</h1>
         <p class="stage-lead">The agent is halfway through a task and you want to close the laptop. By default Minga asks you before each shell command. With nobody there to answer, each request times out after five minutes, the command fails, and the agent carries on without it. Tell Minga to stop asking, and nothing stands between the agent and <code>git push --force</code>. A hook is the rule that stays: a short script Minga runs before every shell command the agent asks for, and when the script says no, the command does not run. Test the one below, then install it before the next task you leave running.</p>
 
@@ -371,12 +371,12 @@ minga --cookie-file ~/.config/minga/remote-cookie attach ssh://devbox/work/app</
 
         <nav class="lesson-pager" aria-label="Lesson navigation">
           <a class="pager-link" href="/learn/elixir">
-            <span class="pager-dir">&lt;- Previous · Lesson 04</span>
-            <span class="pager-title">Elixir for Minga</span>
+            <span class="pager-dir">&lt;- Previous · Lesson 03</span>
+            <span class="pager-title">Bring one setting from your old config</span>
           </a>
           <a class="pager-link pager-next" href="/learn/">
-            <span class="pager-dir">Back to curriculum -&gt;</span>
-            <span class="pager-title">Learn Hub &amp; Progress</span>
+            <span class="pager-dir">Back to Learn -&gt;</span>
+            <span class="pager-title">All lessons and your progress</span>
           </a>
         </nav>
       </div>

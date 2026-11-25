@@ -88,7 +88,7 @@ const ROW_FEATURES: Record<TranslatorRow, { feature: string; lua: RegExp; elisp:
   },
 };
 
-describe("Lesson 04 translator", () => {
+describe("Lesson 03 translator", () => {
   it("lists the same rows and editors in the page and in the script", () => {
     const lab = readPageLab(PAGE, "data-elixir-translator");
     assert.deepEqual(lab.attr("data-tr-row"), [...TRANSLATOR_ROWS]);
@@ -130,13 +130,13 @@ describe("Lesson 04 translator", () => {
   });
 });
 
-describe("Lesson 04 progress", () => {
+describe("Lesson 03 progress", () => {
   it("records exactly the ids the lesson list holds", () => {
     assert.deepEqual(LESSON_STEPS.elixir, ELIXIR_STEPS);
   });
 });
 
-describe("Lesson 04 config builder", () => {
+describe("Lesson 03 config builder", () => {
   it("writes the default config: a theme, line numbers and one Go line that indents with tabs", () => {
     assert.equal(
       generateConfigExs(DEFAULT_CONFIG),

@@ -1,35 +1,35 @@
-/* Learn Hub (/learn/): hydrates localStorage completion progress on each lesson card. */
+/*
+ * Learn hub (/learn/): shows each lesson's progress from this browser, and the one next step.
+ * The words are in the page. This file only picks which of them show, by id, and fills in the count of steps done.
+ */
 
-import { getLessonSummary, type LessonId } from "./progress.ts";
+import { hubNext, LESSON_ORDER, readProgress, summarizeLesson } from "./progress.ts";
 
-const LESSONS: readonly LessonId[] = ["editing", "agents", "elixir", "remote"];
+/** The progress badge states the page holds words for: no step done, some steps done, every step done. */
+export type BadgeState = "none" | "some" | "all";
+
+export function badgeState(done: number, total: number): BadgeState {
+  if (done === 0) return "none";
+  return done < total ? "some" : "all";
+}
+
+function showOnly(elements: Iterable<HTMLElement>, read: (el: HTMLElement) => string | undefined, id: string): void {
+  for (const el of elements) el.hidden = read(el) !== id;
+}
 
 export function mountLearnHub(root: HTMLElement): void {
-  let totalDone = 0;
-  let totalMissions = 0;
+  const stored = readProgress();
 
-  for (const id of LESSONS) {
-    const summary = getLessonSummary(id);
-    totalDone += summary.done;
-    totalMissions += summary.total;
-
-    const badge = root.querySelector<HTMLElement>(`[data-lesson-progress="${id}"]`);
-    if (badge) {
-      if (summary.done > 0) {
-        badge.textContent = summary.done >= summary.total ? `Done · ${summary.done}/${summary.total}` : `${summary.done}/${summary.total} missions`;
-        badge.classList.add("is-progress");
-        if (summary.done >= summary.total) badge.classList.add("is-complete");
-      } else {
-        badge.textContent = `${summary.total} ${summary.total === 1 ? "step" : "missions"}`;
-      }
-    }
+  for (const lesson of LESSON_ORDER) {
+    const badge = root.querySelector<HTMLElement>(`[data-lesson-progress="${lesson}"]`);
+    if (!badge) continue;
+    const { done, total } = summarizeLesson(stored, lesson);
+    const state = badgeState(done, total);
+    for (const slot of badge.querySelectorAll<HTMLElement>("[data-progress-done]")) slot.textContent = String(done);
+    showOnly(badge.querySelectorAll<HTMLElement>("[data-progress-state]"), (el) => el.dataset.progressState, state);
+    badge.dataset.progress = state;
   }
 
-  const overall = root.querySelector<HTMLElement>("[data-hub-overall]");
-  if (overall) {
-    overall.textContent =
-      totalDone > 0
-        ? `Local progress: ${totalDone} of ${totalMissions} interactive missions completed`
-        : `${totalMissions} hands-on browser missions across 4 lessons · Zero accounts`;
-  }
+  const next = hubNext(stored);
+  showOnly(root.querySelectorAll<HTMLElement>("[data-hub-next]"), (el) => el.dataset.hubNext, next.kind === "continue" ? next.lesson : next.kind);
 }

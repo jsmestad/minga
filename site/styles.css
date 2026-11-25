@@ -792,7 +792,6 @@ kbd {
 .ml-needs { color: #ef9f76; font-weight: 600; }
 .ml-file { color: #c6d0f5; font-weight: 600; }
 .ml-minga { color: #ca9ee6; }
-.ml-done { color: #a6d189; }
 .ml-dim { color: #838ba7; }
 
 /* Specimen internal rows */
@@ -2047,29 +2046,6 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   text-decoration: underline;
 }
 
-.lesson-list {
-  margin: 1.5rem 0 0;
-  padding: 0;
-  list-style: none;
-  border-top: 2px solid var(--border-strong);
-}
-
-.lesson-card {
-  display: grid;
-  grid-template-columns: 11.5rem minmax(0, 1fr);
-  gap: 0.75rem 2rem;
-  padding: 1.5rem 0;
-  border-bottom: 1px solid var(--border);
-  align-items: start;
-}
-
-.lesson-meta {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.45rem;
-}
-
 .lesson-num {
   font-family: var(--font-mono);
   font-size: 0.75rem;
@@ -2089,43 +2065,6 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   line-height: 1.25;
   text-transform: uppercase;
   color: var(--text-secondary);
-}
-
-.lesson-body {
-  min-width: 0;
-}
-
-.lesson-body h3 {
-  font-size: 1.15rem;
-  margin-bottom: 0.45rem;
-}
-
-.lesson-body h3 a {
-  text-decoration: none;
-}
-
-.lesson-body h3 a:hover {
-  color: var(--accent);
-  text-decoration: underline;
-}
-
-.lesson-body p {
-  font-size: 0.94rem;
-  margin-bottom: 0.75rem;
-}
-
-.lesson-topics {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem 0.9rem;
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  color: var(--text-muted);
-}
-
-.lesson-topics span::before {
-  content: "· ";
-  color: var(--accent);
 }
 
 .lesson-pager {
@@ -2416,16 +2355,6 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 }
 
 @media (max-width: 768px) {
-  .lesson-card {
-    grid-template-columns: 1fr;
-    gap: 0.5rem;
-    padding: 1.25rem 0;
-  }
-  .lesson-meta {
-    flex-direction: row;
-    align-items: center;
-    gap: 0.75rem;
-  }
   .builder-grid {
     grid-template-columns: 1fr;
   }
@@ -2476,43 +2405,27 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   padding: 3.75rem 0 2.75rem;
 }
 
-.hub-hero-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(0, 0.85fr);
-  gap: 2rem 3rem;
-  align-items: end;
+.learn-hub-hero h1 {
+  max-width: 30ch;
 }
 
-.hub-progress-box {
-  padding: 1.25rem 1.35rem;
-  border: 1px solid var(--border);
-  border-top: 2px solid var(--accent);
-  background: var(--bg-subtle);
+.learn-hub-hero .hero-lead {
+  max-width: 62ch;
 }
 
-.hub-progress-k {
-  display: block;
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  color: var(--accent);
-  margin-bottom: 0.45rem;
+/* The hub's one next step. The page holds one variant per state; the hub script shows the one that fits this browser's progress, and with no script the first visit shows. */
+.hub-next {
+  margin-top: 1.75rem;
 }
 
-.hub-progress-stat {
-  font-family: var(--font-mono);
-  font-size: 0.86rem;
-  font-weight: 600;
-  color: var(--text);
-  margin: 0 0 0.55rem;
+.hub-next [hidden] {
+  display: none;
 }
 
-.hub-progress-note {
-  font-size: 0.86rem;
-  line-height: 1.52;
+.hub-next-note {
+  margin: 0.75rem 0 0;
+  font-size: 0.9rem;
   color: var(--text-muted);
-  margin: 0;
 }
 
 .curriculum-bento {
@@ -2543,9 +2456,6 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 
 .bento-card-wide {
   grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.95fr);
-  align-items: stretch;
 }
 
 .bento-theme-mono { border-top-color: var(--border-strong); }
@@ -2614,11 +2524,13 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 
 .bento-badges {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.45rem;
 }
 
 .bento-prog {
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 0.67rem;
   padding: 0.14em 0.45em;
@@ -2628,137 +2540,25 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   letter-spacing: 0.04em;
 }
 
-.bento-prog.is-progress {
+.bento-prog [hidden] {
+  display: none;
+}
+
+.bento-prog[data-progress="some"] {
   border-color: var(--accent-border);
   color: var(--accent);
 }
 
-.bento-prog.is-complete {
+.bento-prog[data-progress="all"] {
   border-color: var(--done);
   color: var(--done);
 }
 
-.bento-motif {
-  border-bottom: 1px solid var(--border);
+.bento-card-content .bento-time {
   font-family: var(--font-mono);
-  font-size: 0.74rem;
-  min-width: 0;
-  overflow: hidden;
+  font-size: 0.78rem;
+  color: var(--text-muted);
 }
-
-.bento-card-wide .bento-motif {
-  border-bottom: 0;
-  border-left: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-}
-
-.motif-bar {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.45rem 0.85rem;
-  font-size: 0.68rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.motif-body {
-  padding: 0.85rem 0.95rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.42rem;
-  flex: 1;
-  justify-content: center;
-}
-
-.motif-frappe {
-  background: #303446;
-  color: #c6d0f5;
-}
-
-.motif-frappe .motif-bar {
-  background: #292c3c;
-  color: #838ba7;
-  border-bottom-color: #414559;
-}
-
-.motif-cli {
-  background: #14171f;
-  color: #e4e8f0;
-}
-
-.motif-cli .motif-bar {
-  background: #0e1015;
-  color: #7d8699;
-  border-bottom-color: #232836;
-}
-
-.motif-code,
-.motif-topo {
-  background: #303446;
-  color: #c6d0f5;
-}
-
-.motif-code .motif-bar,
-.motif-topo .motif-bar {
-  background: #292c3c;
-  color: #838ba7;
-  border-bottom-color: #414559;
-}
-
-.motif-code .tok-kw { color: #ca9ee6; }
-.motif-code .tok-atom { color: #8caaee; }
-.motif-code .tok-str { color: #a6d189; }
-.motif-code .tok-num { color: #ef9f76; }
-
-.motif-dim { color: #949cbb; }
-.motif-ok { color: #a6d189; }
-
-.motif-wk,
-.motif-ml,
-.motif-orbits,
-.motif-nodes {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.4rem 0.75rem;
-}
-
-.motif-wk {
-  padding: 0.35rem 0.55rem;
-  background: #232634;
-  border: 1px solid #414559;
-  font-size: 0.71rem;
-}
-
-.motif-act {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  border: 1px solid #ca9ee6;
-  background: #232634;
-  font-size: 0.7rem;
-}
-
-.motif-act span {
-  padding: 0.32rem 0.5rem;
-  text-align: center;
-}
-
-.motif-act span:first-child {
-  background: rgba(202, 158, 230, 0.16);
-  border-right: 1px solid #414559;
-}
-
-.mn-ok,
-.mn-fail {
-  padding: 0.18rem 0.48rem;
-  border: 1px solid #414559;
-  background: #232634;
-  font-size: 0.7rem;
-}
-
-.mn-ok { border-color: rgba(166, 209, 137, 0.55); color: #a6d189; }
-.mn-fail { border-color: rgba(231, 130, 132, 0.65); color: #e78284; }
 
 /* Per-lesson wide interactive stages */
 
@@ -2934,7 +2734,7 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   color: var(--done);
 }
 
-/* Lesson 04: the settings translator and the config builder (site/ts/src/elixir_lab.ts). */
+/* Lesson 03: the settings translator and the config builder (site/ts/src/elixir_lab.ts). */
 /* The plain rules are the page with scripts off, or after a failed mount: every editor's snippet and every explanation shows, and the controls that need the script are hidden. */
 /* The rules under the "live" selector lay both widgets out as the mounted lab. They apply from first paint, because the page's inline head script sets labs-pending, so mounting moves nothing. */
 
@@ -3291,7 +3091,7 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
   }
 }
 
-/* Lesson 05: Supervision & Fault-Injection Lab */
+/* Lesson 04: test the hook before you leave an agent unattended */
 
 .topo-canvas {
   display: grid;
@@ -3345,7 +3145,7 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
 .topo-pill.is-warn { border-color: var(--needs); color: var(--needs); }
 .topo-pill.is-fail { border-color: var(--fail); color: var(--fail); }
 
-/* Lesson 05: test the hook, and the closed-laptop figure. The lab's own chrome is the lab kit's. */
+/* Lesson 04: test the hook, and the closed-laptop figure. The lab's own chrome is the lab kit's. */
 
 .veto-lab {
   margin-top: 1.75rem;
@@ -3690,16 +3490,10 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
 }
 
 @media (max-width: 960px) {
-  .hub-hero-grid,
   .stage-head,
   .workbench-shell,
-  .bento-card-wide,
   .veto-grid {
     grid-template-columns: 1fr;
-  }
-  .bento-card-wide .bento-motif {
-    border-left: 0;
-    border-top: 1px solid var(--border);
   }
 }
 
@@ -3977,7 +3771,7 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
   visibility: hidden;
 }
 
-/* Home: a spec becomes a board. The Lesson 03 lab (.ca-lab, below) shows the same spec file, so it shares this block's colour tokens and its line, gutter and mark rules (.sb-line, .sb-gutter, .sb-braid, .sb-you-strand). The stage is a Minga window in the default Catppuccin Frappé theme, so its colours are fixed and do not follow the site theme. The markup's own state is the final frame; a mounted demo sets data-beat, data-rewritten and data-edited on the figure. */
+/* Home: a spec becomes a board. The Lesson 02 lab (.ca-lab, below) shows the same spec file, so it shares this block's colour tokens and its line, gutter and mark rules (.sb-line, .sb-gutter, .sb-braid, .sb-you-strand). The stage is a Minga window in the default Catppuccin Frappé theme, so its colours are fixed and do not follow the site theme. The markup's own state is the final frame; a mounted demo sets data-beat, data-rewritten and data-edited on the figure. */
 
 .sb-demo,
 .ca-lab,
@@ -4555,7 +4349,7 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
   }
 }
 
-/* Lesson 03: you and Minga in the same file. The stage reuses the spec file of the home page demo (the .sb-line, .sb-gutter and mark rules above) in one pane. Its own state is the resting frame; a mounted lab sets data-move on the figure, data-author and is-cursor on each line. */
+/* Lesson 02: you and Minga in the same file. The stage reuses the spec file of the home page demo (the .sb-line, .sb-gutter and mark rules above) in one pane. Its own state is the resting frame; a mounted lab sets data-move on the figure, data-author and is-cursor on each line. */
 
 .ca-lab {
   --sb-u: 36px;
@@ -4719,7 +4513,7 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
   }
 }
 
-/* Lesson 02: find a command through the SPC menu. The stage is the same Minga window as the Lesson 03 lab (.ca-lab, above) and shares its line and gutter rules. The menu and the file switcher sit above the status line and take no room in the layout, so opening or closing one moves neither the text nor the status line. A mounted lab sets data-surface on the figure and shows one menu panel, the switcher or neither. */
+/* Lesson 01: find a command through the SPC menu. The stage is the same Minga window as the Lesson 02 lab (.ca-lab, above) and shares its line and gutter rules. The menu and the file switcher sit above the status line and take no room in the layout, so opening or closing one moves neither the text nor the status line. A mounted lab sets data-surface on the figure and shows one menu panel, the switcher or neither. */
 
 .lk-lab {
   --sb-u: 30px;
@@ -5461,10 +5255,6 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
 /* Responsive breakpoints for new interactive story islands */
 
 @media (max-width: 900px) {
-  .bento-card-wide .bento-motif {
-    order: -1;
-    border-bottom: 1px solid var(--border);
-  }
   .iso-compare,
   .st-clean-layout {
     grid-template-columns: 1fr;
