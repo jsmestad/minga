@@ -64,6 +64,23 @@ defmodule MingaEditor.SwapFilesTest do
       refute File.exists?(swap_path)
     end
 
+    test "a new buffer that gets a file name with :w is covered from then on", ctx do
+      named = Path.join(ctx.root, "lib/named_later.ex")
+      editor = start_editor("", swap_dir: ctx.swap_dir)
+      send_ex_sync(editor, "new")
+      send_keys_sync(editor, "ifirst<Esc>")
+      send_ex_sync(editor, "w #{named}")
+      buffer = active_buffer(editor)
+      assert Buffer.file_path(buffer) == named
+      assert File.read!(named) == "first"
+
+      send_keys_sync(editor, "aunsaved<Esc>")
+      write_swap_after_debounce(buffer)
+
+      assert {:ok, _meta, "firstunsaved"} =
+               Swap.read(Swap.swap_path(named, swap_dir: ctx.swap_dir))
+    end
+
     test "a buffer that an agent tool opens keeps its unsaved edit the same way", ctx do
       # Agent tools reach buffers through this function, without the editor.
       {:ok, buffer} = Buffer.ensure_for_path(ctx.files.b)

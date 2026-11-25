@@ -92,8 +92,22 @@ defmodule MingaEditor.Session.CrashRecoveryReopenTest do
       end)
 
     assert Minga.Buffer.content(reopened) == "newer text\n"
-    assert log =~ "#{path} is open again"
-    assert log =~ path <> ".swap"
+    assert log =~ "#{path} is open again with newer unsaved text"
+  end
+
+  test "a buffer that is open again and untouched gets the text", %{tmp_dir: dir} do
+    path = Path.join(dir, "reopened_clean.txt")
+    File.write!(path, "saved text\n")
+    state = initial_state(dir)
+
+    {:ok, reopened} = Minga.Buffer.ensure_for_path(path)
+    on_exit(fn -> stop_buffer(reopened) end)
+
+    {recovered, _outcome} = CrashRecovery.apply(state, read(path, "crash text\n"))
+
+    assert Minga.Buffer.content(reopened) == "crash text\n"
+    assert Minga.Buffer.dirty?(reopened)
+    assert reopened in recovered.workspace.buffers.list
   end
 
   test "the reopened buffer is marked, so a crash of it is not recovered again", %{tmp_dir: dir} do

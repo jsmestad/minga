@@ -109,6 +109,61 @@ defmodule Minga.Buffer.SwapRecoveryAdoptionTest do
     end
   end
 
+  describe "a buffer that starts where a crashed buffer of this run kept its text" do
+    test "takes the text, so its edits, its close and a quit cannot destroy it unseen", ctx do
+      crashed = start_buffer(ctx, swap_dir: ctx.swap_dir)
+      :ok = Buffer.replace_content(crashed, "unsaved text of the crashed buffer")
+      crash(crashed)
+      own_swap = Swap.swap_path(ctx.path, swap_dir: ctx.swap_dir)
+      assert {:ok, _meta, "unsaved text of the crashed buffer"} = Swap.read(own_swap)
+
+      # The user opens the file again. Nothing recovered it in between.
+      reopened = start_buffer(ctx, swap_dir: ctx.swap_dir)
+
+      assert Buffer.content(reopened) == "unsaved text of the crashed buffer"
+      assert Buffer.dirty?(reopened)
+
+      # The text is on the screen now, so giving it up is the user's decision.
+      :ok = Buffer.undo(reopened)
+      assert Buffer.content(reopened) == "saved text"
+    end
+
+    test "adopting the same text again keeps the swap it already owns", ctx do
+      crashed = start_buffer(ctx, swap_dir: ctx.swap_dir)
+      :ok = Buffer.replace_content(crashed, "unsaved text")
+      crash(crashed)
+      own_swap = Swap.swap_path(ctx.path, swap_dir: ctx.swap_dir)
+      reopened = start_buffer(ctx, swap_dir: ctx.swap_dir)
+
+      # The editor's crash recovery read the same swap and hands the text over.
+      assert :ok = Buffer.adopt_recovered_text(reopened, "unsaved text", own_swap)
+
+      assert Buffer.content(reopened) == "unsaved text"
+      assert {:ok, _meta, "unsaved text"} = Swap.read(own_swap)
+    end
+
+    test "a kept swap that the file already matches is removed", ctx do
+      own_swap = Swap.swap_path(ctx.path, swap_dir: ctx.swap_dir)
+      {:ok, prepared} = Swap.prepare(ctx.path, "saved text", swap_dir: ctx.swap_dir)
+      :ok = Swap.publish(prepared)
+
+      buffer = start_buffer(ctx, swap_dir: ctx.swap_dir)
+
+      refute Buffer.dirty?(buffer)
+      refute File.exists?(own_swap)
+    end
+
+    test "a buffer without a swap directory leaves the file alone", ctx do
+      {:ok, prepared} = Swap.prepare(ctx.path, "kept text", swap_dir: ctx.swap_dir)
+      :ok = Swap.publish(prepared)
+
+      buffer = start_buffer(ctx, [])
+
+      assert Buffer.content(buffer) == "saved text"
+      assert File.exists?(Swap.swap_path(ctx.path, swap_dir: ctx.swap_dir))
+    end
+  end
+
   describe "release_swap/1" do
     test "removes the swap file, so the next start recovers nothing", ctx do
       buffer = start_buffer(ctx, swap_dir: ctx.swap_dir)
@@ -157,7 +212,14 @@ defmodule Minga.Buffer.SwapRecoveryAdoptionTest do
   end
 
   defp start_buffer(ctx, opts) do
-    start_supervised!({BufferProcess, Keyword.merge([file_path: ctx.path], opts)})
+    start_supervised!({BufferProcess, Keyword.merge([file_path: ctx.path], opts)}, id: make_ref())
+  end
+
+  # A message no callback handles makes the buffer raise, which is a crash and not a deliberate stop.
+  defp crash(buffer) do
+    monitor = Process.monitor(buffer)
+    send(buffer, :message_no_callback_handles)
+    assert_receive {:DOWN, ^monitor, :process, ^buffer, _reason}, 2_000
   end
 
   # Writes the swap a crashed editor would have left for the file.

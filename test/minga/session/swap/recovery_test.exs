@@ -328,6 +328,29 @@ defmodule Minga.Session.Swap.RecoveryTest do
       assert File.exists?(swap_path)
     end
 
+    test "an entry says whether its file was written after the swap", %{tmp_dir: tmp_dir} do
+      now = System.os_time(:second)
+      untouched = Path.join(tmp_dir, "untouched.ex")
+      saved_later = Path.join(tmp_dir, "saved_later.ex")
+      gone = Path.join(tmp_dir, "gone.ex")
+
+      for file <- [untouched, saved_later] do
+        File.write!(file, "saved text")
+        File.touch!(file, now - 100)
+      end
+
+      for file <- [untouched, saved_later, gone],
+          do: write_swap_file(tmp_dir, file, "unsaved text", mtime: now - 50)
+
+      # Another editor run, or another tool, wrote the file after the crash.
+      File.touch!(saved_later, now)
+
+      changed =
+        tmp_dir |> scan_opts() |> Recovery.scan() |> Map.new(&{&1.path, &1.changed_since?})
+
+      assert changed == %{untouched => false, saved_later => true, gone => false}
+    end
+
     test "an old swap with different text is never removed for its age", %{tmp_dir: tmp_dir} do
       original = Path.join(tmp_dir, "old.ex")
       File.write!(original, "saved text")

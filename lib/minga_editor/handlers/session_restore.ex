@@ -37,6 +37,7 @@ defmodule MingaEditor.Handlers.SessionRestore do
   @type resume :: %{
           snapshot: Snapshot.t() | nil,
           recovered: [recovered_entry()],
+          held_back: [Session.swap_entry()],
           waiting_elsewhere: non_neg_integer()
         }
 
@@ -55,12 +56,15 @@ defmodule MingaEditor.Handlers.SessionRestore do
   Picks up where the last run stopped, in one step: restores the saved session first, then puts the unsaved text of each swap file into its buffer, and says once what came back.
 
   A file with unsaved text that the session did not hold is opened as well. Each buffer takes ownership of its text on disk (`Minga.Buffer.adopt_recovered_text/3`), so the swap it came from is removed only once the text is safe again. Text that cannot be shown stays in its swap file and is offered on the next start.
+
+  Unsaved text whose file was written after the swap is held back: the file holds newer text, so the swap stays on disk and a `*Messages*` line says where.
   """
   @spec resume(state(), resume()) :: state()
-  def resume(state, %{snapshot: snapshot, recovered: recovered, waiting_elsewhere: waiting}) do
+  def resume(state, %{snapshot: snapshot, recovered: recovered} = resume) do
     {state, restored} = restore_snapshot(state, snapshot)
     {state, recovered_count} = recover_entries(state, recovered)
-    :ok = announce_waiting_elsewhere(waiting)
+    :ok = announce_held_back(resume.held_back)
+    :ok = announce_waiting_elsewhere(resume.waiting_elsewhere)
     announce(state, restored, recovered_count)
   end
 
@@ -262,6 +266,19 @@ defmodule MingaEditor.Handlers.SessionRestore do
   @spec files(pos_integer()) :: String.t()
   defp files(1), do: "1 file"
   defp files(count), do: "#{count} files"
+
+  # A file that was written after its swap holds newer text than the swap, so the swap's text is not put back.
+  # It stays on disk, and the user is told where.
+  @spec announce_held_back([Session.swap_entry()]) :: :ok
+  defp announce_held_back([]), do: :ok
+
+  defp announce_held_back(entries) do
+    Enum.each(entries, fn entry ->
+      Minga.API.message(
+        "#{entry.path} changed after its unsaved text was kept, so the text was not put back. It is in #{entry.swap_path}"
+      )
+    end)
+  end
 
   # Unsaved text of other projects is never recovered into this one, so say that it exists.
   @spec announce_waiting_elsewhere(non_neg_integer()) :: :ok

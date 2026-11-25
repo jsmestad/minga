@@ -1344,7 +1344,7 @@ defmodule Minga.Buffer.Process do
   # ── Server Callbacks ──
 
   @impl true
-  @spec init(keyword()) :: {:ok, state()} | {:stop, term()}
+  @spec init(keyword()) :: {:ok, state(), {:continue, :take_kept_swap}} | {:stop, term()}
   def init(opts) do
     # Tune GC for buffer processes: they churn binaries during edits and
     # content queries. Frequent full sweeps prevent binary ref buildup;
@@ -1399,17 +1399,22 @@ defmodule Minga.Buffer.Process do
           conflict_index: ConflictIndex.new(document),
           options: seed_options(options_server, filetype),
           explicit_options: MapSet.new(),
-          swap: opts |> Keyword.put_new(:swap_backend, Minga.Session.Swap) |> SwapState.new(),
+          swap: opts |> swap_options(storage) |> SwapState.new(),
           events_registry: Keyword.get(opts, :events_registry, Minga.Events.default_registry())
         }
 
         register_path(path)
-        {:ok, state}
+        {:ok, state, {:continue, :take_kept_swap}}
 
       {:error, reason} ->
         {:stop, reason}
     end
   end
+
+  # Runs before the buffer answers its first call, so whoever opened it sees the kept text.
+  @impl true
+  @spec handle_continue(:take_kept_swap, state()) :: {:noreply, state()}
+  def handle_continue(:take_kept_swap, state), do: {:noreply, take_kept_swap(state)}
 
   @impl true
   @spec handle_call(term(), GenServer.from(), state()) :: {:reply, term(), state()}
@@ -1911,14 +1916,21 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call({:adopt_recovered_text, content, swap_path}, _from, state) do
-    cond do
-      BufState.dirty?(state) ->
-        {:reply, {:error, :modified}, state}
+    holds_text? = Document.content(state.document) == content
 
-      # The file already holds this text, so there is nothing unsaved to keep.
-      Document.content(state.document) == content ->
+    cond do
+      # The buffer has this text already, for example because it took its own kept swap when it started.
+      # Unsaved, it must own the text on disk. Saved, nothing is unsaved and the swap can go.
+      holds_text? and BufState.dirty?(state) ->
+        :ok = take_over_recovered_swap(state, swap_path)
+        {:reply, :ok, state}
+
+      holds_text? ->
         :ok = remove_recovered_swap(state, swap_path, nil)
         {:reply, :ok, state}
+
+      BufState.dirty?(state) ->
+        {:reply, {:error, :modified}, state}
 
       true ->
         state = replace_content_state(state, content, :recovery)
@@ -3152,6 +3164,53 @@ defmodule Minga.Buffer.Process do
         backend.publish(prepared)
       end
     end)
+  end
+
+  # Every local buffer gets the VM's swap directory unless its opener chose one, so a buffer that gets its file
+  # later (`:w name` in a new buffer) is covered too. Only a file buffer with a path ever writes a swap.
+  # A remote file is not covered: its swap would name a path that means something else on this machine.
+  @spec swap_options(keyword(), BufState.storage()) :: keyword()
+  defp swap_options(opts, :local) do
+    opts
+    |> Keyword.put_new(:swap_backend, Minga.Session.Swap)
+    |> Keyword.put_new_lazy(:swap_dir, &Minga.Session.buffer_swap_dir/0)
+  end
+
+  defp swap_options(opts, _remote), do: Keyword.put_new(opts, :swap_backend, Minga.Session.Swap)
+
+  # A buffer of this run that crashed left its unsaved text at the swap path this buffer is about to use.
+  # Without this step the next edit would overwrite that text, and a save, a close or a quit would delete it.
+  # So a buffer that starts on such a path takes the text and is the owner of that swap file from then on.
+  @spec take_kept_swap(state()) :: state()
+  defp take_kept_swap(%{buffer_type: :file, file_path: path, read_only: false} = state)
+       when is_binary(path) do
+    if SwapState.configured?(state.swap) do
+      swap_path = Minga.Session.Swap.swap_path(path, SwapState.backend_options(state.swap, 0))
+
+      case Minga.Session.Swap.read(swap_path) do
+        {:ok, %{path: ^path}, content} -> take_kept_text(state, content, swap_path)
+        _no_kept_swap -> state
+      end
+    else
+      state
+    end
+  end
+
+  defp take_kept_swap(state), do: state
+
+  @spec take_kept_text(state(), binary(), String.t()) :: state()
+  defp take_kept_text(state, content, swap_path) do
+    if Document.content(state.document) == content do
+      :ok = remove_recovered_swap(state, swap_path, nil)
+      state
+    else
+      Minga.Log.info(
+        :editor,
+        "Opened #{state.file_path} with the unsaved text that its crashed buffer left in #{swap_path}"
+      )
+
+      replace_content_state(state, content, :recovery)
+    end
   end
 
   # Makes this buffer's own swap file hold the recovered text before the swap it came from is removed.

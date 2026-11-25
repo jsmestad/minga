@@ -42,7 +42,8 @@ defmodule MingaEditor.Session.RecoveryTest do
       assert :ok = Session.save(saved, opts)
 
       assert Recovery.run(request.effect) ==
-               {:ok, {:resume, %{snapshot: saved, recovered: [], waiting_elsewhere: 0}}}
+               {:ok,
+                {:resume, %{snapshot: saved, recovered: [], held_back: [], waiting_elsewhere: 0}}}
     end
 
     assert :ok = Session.save(snapshot(true), opts)
@@ -58,7 +59,7 @@ defmodule MingaEditor.Session.RecoveryTest do
     enabled? = MingaEditor.Handlers.SessionHandler.restore_enabled?(state)
     request = Recovery.request(state, [swap_dir: nil], opts, false, enabled?)
 
-    resume = %{snapshot: snapshot(false), recovered: [], waiting_elsewhere: 0}
+    resume = %{snapshot: snapshot(false), recovered: [], held_back: [], waiting_elsewhere: 0}
     completed = Outcome.completed(request, {:resume, resume})
     assert {restored, %Outcome{value: {:completed, _result}}} = Recovery.apply(state, completed)
     assert restored.session == state.session
@@ -133,7 +134,8 @@ defmodule MingaEditor.Session.RecoveryTest do
 
     test "an editor with nothing open recovers nothing and says how much is waiting", ctx do
       assert Recovery.run(effect(ctx, :none)) ==
-               {:ok, {:resume, %{snapshot: nil, recovered: [], waiting_elsewhere: 2}}}
+               {:ok,
+                {:resume, %{snapshot: nil, recovered: [], held_back: [], waiting_elsewhere: 2}}}
 
       assert File.exists?(ctx.here.swap)
       assert File.exists?(ctx.there.swap)
@@ -155,6 +157,18 @@ defmodule MingaEditor.Session.RecoveryTest do
       }
 
       assert {:ok, {:resume, %{snapshot: ^saved, recovered: [_one]}}} = Recovery.run(effect)
+    end
+
+    test "text whose file was written after the swap is held back, not handed over", ctx do
+      # The file was saved again after the crash, so it holds newer text than the swap.
+      File.touch!(ctx.here.file, System.os_time(:second) + 60)
+
+      assert {:ok, {:resume, resume}} = Recovery.run(effect(ctx, {:project, ctx.here.root}))
+
+      assert resume.recovered == []
+      assert [%{path: path, changed_since?: true}] = resume.held_back
+      assert path == ctx.here.file
+      assert File.exists?(ctx.here.swap)
     end
 
     test "a headless editor scans no swap files" do

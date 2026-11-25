@@ -122,14 +122,18 @@ defmodule MingaEditor.Session.Recovery do
   def run(%__MODULE__{} = effect) do
     scope = scan_scope(effect)
 
+    {held_back, fresh} =
+      effect |> recoverable_entries(scope) |> Enum.split_with(& &1.changed_since?)
+
     resume = %{
       snapshot: load_project_session(effect),
-      recovered: effect |> recoverable_entries(scope) |> read_entries(),
+      recovered: read_entries(fresh),
+      held_back: held_back,
       waiting_elsewhere: waiting_elsewhere(effect, scope)
     }
 
     case resume do
-      %{snapshot: nil, recovered: [], waiting_elsewhere: 0} -> {:ok, :none}
+      %{snapshot: nil, recovered: [], held_back: [], waiting_elsewhere: 0} -> {:ok, :none}
       resume -> {:ok, {:resume, resume}}
     end
   end

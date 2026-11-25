@@ -19,7 +19,8 @@ defmodule Minga.Session.Swap.Recovery do
   @type entry :: %{
           path: String.t(),
           swap_path: String.t(),
-          swap_mtime: integer()
+          swap_mtime: integer(),
+          changed_since?: boolean()
         }
 
   @typedoc """
@@ -52,9 +53,7 @@ defmodule Minga.Session.Swap.Recovery do
   @doc """
   Scans the swap directory and returns the recoverable entries in scope.
 
-  Each entry contains the original file path, the swap file path,
-  and the swap file's mtime. The caller decides what to do with them
-  (show a recovery prompt, auto-recover, etc.).
+  Each entry contains the original file path, the swap file path, the time the swap was written, and `changed_since?`: whether the file was written after the swap. The caller decides what to do with them. An entry with `changed_since?` holds text that is older than the file, so it is for the user to look at, not to put back unasked.
 
   ## The lifetime of a swap file
 
@@ -211,7 +210,23 @@ defmodule Minga.Session.Swap.Recovery do
       # Different text, a file that no longer exists, or one that cannot be read right now.
       # The swap is the only copy of the unsaved text, so it stays recoverable.
       _different_missing_or_unreadable ->
-        {:recoverable, %{path: meta.path, swap_path: meta.swap_path, swap_mtime: meta.mtime}}
+        {:recoverable,
+         %{
+           path: meta.path,
+           swap_path: meta.swap_path,
+           swap_mtime: meta.mtime,
+           changed_since?: changed_since?(meta.path, meta.mtime)
+         }}
+    end
+  end
+
+  # True when the file was written after the swap was. The swap's text is then older than what the file holds now,
+  # so it must not replace it without the user deciding.
+  @spec changed_since?(String.t(), integer()) :: boolean()
+  defp changed_since?(path, swap_mtime) do
+    case File.stat(path, time: :posix) do
+      {:ok, %File.Stat{mtime: file_mtime}} -> file_mtime > swap_mtime
+      {:error, _reason} -> false
     end
   end
 

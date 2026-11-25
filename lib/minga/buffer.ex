@@ -77,7 +77,7 @@ defmodule Minga.Buffer do
 
   ## Options
 
-  - `:swap_dir`: where the buffer writes its swap file. The default is `Minga.Session.buffer_swap_dir/0`, so every buffer of an interactive editor keeps unsaved text across a crash, whoever opened it.
+  - `:swap_dir`: where the buffer writes its swap file. Without it the buffer uses `Minga.Session.buffer_swap_dir/0`, like every local buffer, so every buffer of an interactive editor keeps unsaved text across a crash, whoever opened it.
   - `:allow_missing`: start a buffer for a path that has no file yet. Recovery uses it for unsaved text whose file is gone.
   - `:options_server`, `:history_attribution`: passed to the buffer and its `:buffer_opened` event.
   """
@@ -99,14 +99,12 @@ defmodule Minga.Buffer do
 
       :not_found ->
         if File.exists?(abs_path) or Keyword.get(opts, :allow_missing, false) do
-          swap_dir = Keyword.get_lazy(opts, :swap_dir, &Minga.Session.buffer_swap_dir/0)
-
           start_buffer_for_path(
             abs_path,
             events_registry,
             options_server,
             history_attribution,
-            swap_dir
+            Keyword.take(opts, [:swap_dir])
           )
         else
           {:error, :enoent}
@@ -119,22 +117,23 @@ defmodule Minga.Buffer do
           Minga.Events.registry(),
           Minga.Config.Options.server(),
           Minga.Events.BufferEvent.history_attribution(),
-          String.t() | nil
+          keyword()
         ) :: {:ok, pid()} | {:error, term()}
   defp start_buffer_for_path(
          abs_path,
          events_registry,
          options_server,
          history_attribution,
-         swap_dir
+         swap_opts
        ) do
     case DynamicSupervisor.start_child(
            Minga.Buffer.Supervisor,
            {__MODULE__,
-            file_path: abs_path,
-            events_registry: events_registry,
-            options_server: options_server,
-            swap_dir: swap_dir}
+            [
+              file_path: abs_path,
+              events_registry: events_registry,
+              options_server: options_server
+            ] ++ swap_opts}
          ) do
       {:ok, pid} ->
         Minga.Events.broadcast(
