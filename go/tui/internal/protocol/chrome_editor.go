@@ -387,6 +387,10 @@ func decodeStatus(payload []byte) (StatusBar, string, int, error) {
 			}
 		case 0x0B:
 			status.Left, status.Right = decodeStatusSegments(section)
+		case 0x13:
+			if actions, _, err := generated.DecodeGuiStatusBarMessageActions(section, 0, len(section)); err == nil {
+				status.MessageActions = actions
+			}
 		case 0x0E:
 			if keys, _, ok := readString16(section, 0); ok {
 				status.PendingKeys = keys

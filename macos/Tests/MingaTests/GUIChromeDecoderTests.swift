@@ -865,6 +865,37 @@ struct GUIStatusBarDecoderTests {
         #expect(update.pendingKeys == "\"a2d")
     }
 
+    @Test("Decode the notice's next steps (message_actions section)")
+    func decodeMessageActionsSection() throws {
+        var identity = Data()
+        identity.append(0); identity.append(0); identity.append(0)
+
+        var actions = Data()
+        actions.append(1) // count
+        appendString8(&actions, "inline_ask")
+        appendString16(&actions, "SPC a ?")
+        appendString16(&actions, "ask Minga")
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(0x13, actions),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for s in sections { data.append(s) }
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiStatusBar(let update) = cmd else {
+            Issue.record("Expected .guiStatusBar"); return
+        }
+
+        #expect(update.messageActions == [Wire.EmptyListAction(id: "inline_ask", key: "SPC a ?", label: "ask Minga")])
+    }
+
     @Test("Pending keys default to empty when section absent")
     func pendingKeysDefaultEmpty() throws {
         var identity = Data()

@@ -352,6 +352,26 @@ defmodule Minga.Test.Storyboard.Assertions do
   @spec summary([Minga.RenderModel.UI.StatusBar.Segment.t()]) :: String.t()
   defp summary(segments), do: inspect(Enum.map(segments, &{&1.id, &1.text, &1.state}))
 
+  @doc """
+  Asserts the echo line shows a notice and the next steps it names (`docs/design/anatomy.md`, "Notice"): `message` exactly, and `actions` as `{key, label}`, in order.
+  """
+  @spec assert_notice(Model.t(), String.t(), [action()]) :: Model.t()
+  def assert_notice(%Model{echo: echo, ui: ui} = model, message, actions) do
+    assert echo == message,
+           "expected the echo line to say #{inspect(message)}, got #{inspect(echo)}"
+
+    shown =
+      case ui.status_bar do
+        %{data: %{message_actions: named}} -> Enum.map(named, &{&1.key, &1.label})
+        _no_status_bar -> []
+      end
+
+    assert shown == actions,
+           "expected the notice to name #{inspect(actions)}, got #{inspect(shown)}"
+
+    model
+  end
+
   @doc "Asserts every error notification names its next step: at least one action."
   @spec assert_errors_name_next_step(Model.t()) :: Model.t()
   def assert_errors_name_next_step(%Model{ui: ui} = model) do

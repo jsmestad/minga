@@ -151,6 +151,9 @@ func GoldenDecode(name string, payload []byte) (any, int, error) {
 	case "GuiStatusBarMessage":
 		v, n, err := DecodeGuiStatusBarMessage(payload, 0, len(payload))
 		return v, n, err
+	case "GuiStatusBarMessageActions":
+		v, n, err := DecodeGuiStatusBarMessageActions(payload, 0, len(payload))
+		return v, n, err
 	case "GuiStatusBarModeline":
 		v, n, err := DecodeGuiStatusBarModeline(payload, 0, len(payload))
 		return v, n, err

@@ -565,6 +565,32 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["segments"] == ["lib", "foo.ex"]
     end
 
+    test "a notice's next steps round-trip after the message, and a plain message carries none",
+         %{
+           harness: harness
+         } do
+      action = %EmptyList.Action{id: "agent_inline_ask", key: "SPC a ?", label: "ask Minga"}
+
+      model = %StatusBar{
+        content_kind: :buffer,
+        data: %Data{mode: :normal, message: "No code actions at 3:7", message_actions: [action]}
+      }
+
+      decoded = round_trip(harness, StatusBarEncoder.encode_command(model), "gui_status_bar")
+
+      assert decoded["message"] == "No code actions at 3:7"
+
+      assert decoded["message_actions"] == [
+               %{"id" => "agent_inline_ask", "key" => "SPC a ?", "label" => "ask Minga"}
+             ]
+
+      plain = %{model | data: %{model.data | message_actions: []}}
+
+      assert round_trip(harness, StatusBarEncoder.encode_command(plain), "gui_status_bar")[
+               "message_actions"
+             ] == []
+    end
+
     test "gui_status_bar buffer variant encodes and decodes correctly", %{harness: harness} do
       model = %StatusBar{
         content_kind: :buffer,

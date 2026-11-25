@@ -270,10 +270,10 @@ func (m Model) footerLines() []string {
 				prefix = icon.glyph + " " + chromeStatus.Filename
 			}
 			status = prefix + gap(modelineSegmentGap) + fmt.Sprintf("%d:%d", chromeStatus.Line, chromeStatus.Column)
-			if message := m.renderStatusMessage(chromeStatus.Message); message != "" {
+			if message := m.renderStatusNotice(chromeStatus); message != "" {
 				status += gap(modelineSegmentGap) + message
 			}
-		} else if message := m.renderStatusMessage(chromeStatus.Message); message != "" {
+		} else if message := m.renderStatusNotice(chromeStatus); message != "" {
 			status = message
 		}
 	}
@@ -308,10 +308,14 @@ func (m Model) footerLines() []string {
 // The echo text reserves at most a third of the row, as on macOS, and a rank-0 segment never drops, so a long notice is cut to the room that is left instead of replacing the modeline.
 func (m Model) renderStatusSegments(status protocol.StatusBar) string {
 	surface := lipgloss.NewStyle().Background(m.palette().ChromeSurface())
-	message := m.renderStatusMessage(status.Message)
+	message := m.renderStatusNotice(status)
 	reserved := 0
 	if width := lipgloss.Width(message); width > 0 {
 		reserved = min(width+2*modelineSegmentGap.cols(), m.width*34/100)
+	}
+	// A notice that names next steps is an answer, so it may take more of the row: enough for the whole message and the steps' keys, while droppable segments give way.
+	if shortest := m.shortestNotice(status); shortest > reserved {
+		reserved = min(shortest+2*modelineSegmentGap.cols(), m.width*75/100)
 	}
 	// Hover text is a local preview: it fills only the room the segments leave and never moves them.
 	if message == "" {
@@ -333,7 +337,7 @@ func (m Model) renderStatusSegments(status protocol.StatusBar) string {
 	right := pending + m.renderModelineCluster(fitted.right)
 	available := max(m.width-2*inset-lipgloss.Width(left)-lipgloss.Width(right), 0)
 	if lipgloss.Width(message) > max(available-2*modelineSegmentGap.cols(), 0) {
-		message = fitStyled(message, max(available-2*modelineSegmentGap.cols(), 0))
+		message = m.fitStatusNotice(status, max(available-2*modelineSegmentGap.cols(), 0))
 	}
 	messageWidth := lipgloss.Width(message)
 	leftSpacer := strings.Repeat(" ", max((available-messageWidth)/2, 0))
@@ -534,6 +538,56 @@ func (m Model) extensionRuntimeStatus() string {
 	}
 	sort.Strings(ids)
 	return "ext " + strings.Join(ids, ",")
+}
+
+// renderStatusNotice draws the echo-line notice and the next steps it names (docs/design/anatomy.md, "Notice"): the message, then each action as a key in the accent colour and its word in the muted colour, separated by a centred dot. Each action is a click zone that runs its command. The operation lane draws no actions.
+func (m Model) renderStatusNotice(status protocol.StatusBar) string {
+	message := m.renderStatusMessage(status.Message)
+	return message + m.renderNoticeActions(status, message, true)
+}
+
+// fitStatusNotice fits a notice to width. What happened is the point of the notice, so the message stays whole: the next steps first give up their words and keep their keys, and only a message that cannot fit on its own is cut.
+func (m Model) fitStatusNotice(status protocol.StatusBar, width int) string {
+	message := m.renderStatusMessage(status.Message)
+	if actions := m.renderNoticeActions(status, message, true); lipgloss.Width(message+actions) <= width {
+		return message + actions
+	}
+	if keys := m.renderNoticeActions(status, message, false); lipgloss.Width(message+keys) <= width {
+		return message + keys
+	}
+	return ansi.Truncate(message, width, "…")
+}
+
+// shortestNotice is the width of a notice with next steps at its shortest, the whole message and the steps' keys, or 0 for any other echo text.
+func (m Model) shortestNotice(status protocol.StatusBar) int {
+	message := m.renderStatusMessage(status.Message)
+	keys := m.renderNoticeActions(status, message, false)
+	if keys == "" {
+		return 0
+	}
+	return lipgloss.Width(message + keys)
+}
+
+// renderNoticeActions draws the next steps a notice names, after its message, or nothing when the echo line shows something else.
+func (m Model) renderNoticeActions(status protocol.StatusBar, message string, words bool) string {
+	if message == "" || len(status.MessageActions) == 0 || ansi.Strip(message) != sanitizeTerminalText(status.Message) {
+		return ""
+	}
+	p := m.palette()
+	surface := lipgloss.NewStyle().Background(p.ChromeSurface())
+	muted := surface.Foreground(p.Muted())
+	accent := surface.Foreground(p.Accent())
+	actions := ""
+	for index, action := range status.MessageActions {
+		dot := muted.Render(gap(noticeMessageToAction) + "·" + gap(noticeActionToAction))
+		// The word is the next step itself, so it reads in the chrome text colour; only the separating dot is muted.
+		part := accent.Render(sanitizeTerminalText(action.Key))
+		if words {
+			part += surface.Foreground(p.ChromeText()).Render(gap(noticeKeyToAction) + sanitizeTerminalText(action.Label))
+		}
+		actions += dot + m.zones.Mark(zoneIDNoticeAction(index), part)
+	}
+	return actions
 }
 
 func (m Model) renderStatusMessage(message string) string {

@@ -15,6 +15,7 @@ import (
 const (
 	zonePrefixFileTreeRow      = "file-tree:row:"
 	zonePrefixModelineSegment  = "modeline:segment:"
+	zonePrefixNoticeAction     = "notice:action:"
 	zonePrefixTab              = "tab:id:"
 	zonePrefixCompletionItem   = "completion:item:"
 	zonePrefixSidebarItem      = "sidebar:item:"
@@ -43,6 +44,11 @@ func zoneIDFileTreeRow(index int) string {
 // zoneIDModelineSegment tags one modeline segment by its index in the BEAM's order (left, then right), so a click runs that segment's command and hover echoes that segment's meaning.
 func zoneIDModelineSegment(index int) string {
 	return fmt.Sprintf("%s%d", zonePrefixModelineSegment, index)
+}
+
+// zoneIDNoticeAction tags one next step of the echo-line notice by its index, so a click runs its command.
+func zoneIDNoticeAction(index int) string {
+	return fmt.Sprintf("%s%d", zonePrefixNoticeAction, index)
 }
 
 func zoneIDTab(id uint32) string {
@@ -800,6 +806,12 @@ func (m Model) modelineMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 		zoneInfo := m.zones.Get(zoneIDModelineSegment(index))
 		if zoneInfo != nil && zoneInfo.InBounds(msg) {
 			return protocol.EncodeGUIExecuteCommand(segment.Command), true
+		}
+	}
+	for index, action := range status.MessageActions {
+		zoneInfo := m.zones.Get(zoneIDNoticeAction(index))
+		if zoneInfo != nil && zoneInfo.InBounds(msg) {
+			return protocol.EncodeGUIExecuteCommand(action.ID), true
 		}
 	}
 	return nil, false

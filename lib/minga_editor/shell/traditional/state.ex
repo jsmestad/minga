@@ -92,10 +92,10 @@ defmodule MingaEditor.Shell.Traditional.State do
 
   # ── Focused transient owners ──────────────────────────────────────────────
 
-  @doc "Applies the notice publish transition."
-  @spec publish_notice(t(), String.t()) :: t()
-  def publish_notice(%__MODULE__{} = state, message),
-    do: %{state | notice: Notice.publish(state.notice, message)}
+  @doc "Applies the notice publish transition, with the next steps the notice names."
+  @spec publish_notice(t(), String.t(), [Minga.RenderModel.UI.EmptyList.Action.t()]) :: t()
+  def publish_notice(%__MODULE__{} = state, message, actions \\ []),
+    do: %{state | notice: Notice.publish(state.notice, message, actions)}
 
   @doc "Records a notice timer for the matching notice identity."
   @spec record_notice_timer(t(), Notice.id(), reference()) :: t()

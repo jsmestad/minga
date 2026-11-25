@@ -180,6 +180,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         result["lsp_status"] = Int(update.lspStatus)
         result["git_branch"] = update.gitBranch
         result["message"] = update.message
+        result["message_actions"] = update.messageActions.map { ["id": $0.id, "key": $0.key, "label": $0.label] }
         result["filetype"] = update.filetype
         result["error_count"] = Int(update.errorCount)
         result["warning_count"] = Int(update.warningCount)

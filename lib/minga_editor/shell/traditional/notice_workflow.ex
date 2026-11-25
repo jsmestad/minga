@@ -18,13 +18,21 @@ defmodule MingaEditor.Shell.Traditional.NoticeWorkflow do
 
   @timeout_ms 2_000
 
-  @doc "Publishes an ordinary notice under the status-lane arbitration contract."
-  @spec publish(EditorState.t(), String.t()) :: EditorState.t()
+  @doc """
+  Publishes an ordinary notice under the status-lane arbitration contract.
+
+  `actions` are the next steps the notice names, such as `SPC a ? ask Minga` after "No code actions here"; the echo line shows each key and word after the message, and a click runs its command. Build them with `MingaEditor.RenderModel.UI.EmptyStateBuilder.next_steps/1`.
+  """
+  @spec publish(EditorState.t(), String.t(), [Minga.RenderModel.UI.EmptyList.Action.t()]) ::
+          EditorState.t()
+  def publish(state, message, actions \\ [])
+
   def publish(
         %EditorState{shell_runtime: %Runtime{state: %ShellState{}}} = state,
-        message
+        message,
+        actions
       )
-      when is_binary(message) do
+      when is_binary(message) and is_list(actions) do
     state = cancel_current_timer(state)
 
     case OperationFeedback.selected(state.feedback.operation_feedback) do
@@ -32,11 +40,11 @@ defmodule MingaEditor.Shell.Traditional.NoticeWorkflow do
         log_hidden(state, message)
 
       _terminal_or_absent ->
-        publish_visible(state, message)
+        publish_visible(state, message, actions)
     end
   end
 
-  def publish(%EditorState{} = state, message) when is_binary(message) do
+  def publish(%EditorState{} = state, message, _actions) when is_binary(message) do
     MessageLog.append_to_store(state, message, :info)
   end
 
@@ -77,9 +85,10 @@ defmodule MingaEditor.Shell.Traditional.NoticeWorkflow do
 
   def message(%EditorState{}), do: nil
 
-  @spec publish_visible(EditorState.t(), String.t()) :: EditorState.t()
-  defp publish_visible(state, message) do
-    state = update_shell_state(state, &ShellState.publish_notice(&1, message))
+  @spec publish_visible(EditorState.t(), String.t(), [Minga.RenderModel.UI.EmptyList.Action.t()]) ::
+          EditorState.t()
+  defp publish_visible(state, message, actions) do
+    state = update_shell_state(state, &ShellState.publish_notice(&1, message, actions))
     %Notice{id: id} = state.shell_runtime.state.notice
 
     if match?(%{frontend: %{backend: :headless}}, state) do

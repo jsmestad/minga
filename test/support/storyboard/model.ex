@@ -115,6 +115,15 @@ defmodule Minga.Test.Storyboard.Model do
   @spec open?(t(), surface()) :: boolean()
   def open?(%__MODULE__{surfaces: surfaces}, surface), do: surface in surfaces
 
+  @doc "True when the echo line shows a notice that names next steps, such as an empty answer from code actions."
+  @spec notice_with_next_steps?(t()) :: boolean()
+  def notice_with_next_steps?(%__MODULE__{
+        ui: %UI{status_bar: %{data: %{message_actions: [_ | _]}}}
+      }),
+      do: true
+
+  def notice_with_next_steps?(%__MODULE__{}), do: false
+
   @doc "The title of the empty state an open picker shows instead of results, or `nil`."
   @spec picker_empty_title(t()) :: String.t() | nil
   def picker_empty_title(%__MODULE__{ui: %UI{picker: %{visible?: true, empty: %{title: title}}}}),

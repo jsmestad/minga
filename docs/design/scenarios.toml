@@ -793,7 +793,7 @@ exits = [
 [[scenario]]
 id = "code.references.none"
 journey = "code"
-title = "No references found"
+title = "No references to the word"
 surfaces = ["minibuffer"]
 states = []
 frontends = ["macos", "tui"]

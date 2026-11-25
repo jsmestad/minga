@@ -212,7 +212,7 @@ Notices live in the echo line, not in floating toasts, on both frontends. A noti
 | Action to action | `md` around a `·` | 8 pt each side | 1 column each side |
 | Key to its action word | `xs` | 4 pt | 1 column |
 
-The message uses `body`; keys use `Typography.monospacedSmall` in the accent colour; action words use `body` in the secondary colour.
+The message uses `body`; keys use `Typography.monospacedSmall` in the accent colour; action words use `body` in the chrome text colour (78% on macOS), because the next step is what the notice is for. Only the `·` separators are muted. A notice with next steps may take up to three quarters of the modeline, so droppable segments give way to it. When the echo line is still too narrow, the message stays whole and the steps drop their words and keep their keys ("No matches for “x” in this buffer · SPC s p"); only a message that cannot fit on its own is cut, ending in `…`.
 
 ## Hover popover
 

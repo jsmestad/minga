@@ -2455,6 +2455,15 @@ fields = [
   { name = "item_id", type = "string16" },
 ]
 
+# Present only while the echo line shows a notice that names next steps ("No code actions at 3:7" then "SPC a ? ask Minga"). Each action's id is the command a click runs through execute_command; key and label are drawn after the message (docs/design/anatomy.md, "Notice").
+[[sections]]
+opcode = "gui_status_bar"
+id = 0x13
+name = "message_actions"
+layout = "counted_array"
+count_type = "u8"
+element = "empty_list_action"
+
 # gui_gutter (0x7B) sections
 
 [[sections]]

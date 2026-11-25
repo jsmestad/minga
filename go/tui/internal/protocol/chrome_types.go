@@ -243,9 +243,11 @@ type StatusBar struct {
 	Filename    string
 	Filetype    string
 	Message     string
-	PendingKeys string
-	Operation   *generated.GuiStatusBarOperation
-	Review      *StatusReview
+	// MessageActions are the next steps the echo-line notice names, drawn after Message; a click runs the action's command.
+	MessageActions []generated.EmptyListAction
+	PendingKeys    string
+	Operation      *generated.GuiStatusBarOperation
+	Review         *StatusReview
 	// Agent is set only for agent-content status bars (content kind 1). It carries
 	// the BEAM-owned conversation total, not the resident transcript count.
 	Agent *StatusAgent

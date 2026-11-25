@@ -1183,6 +1183,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var filename = ""
         var filetype = ""
         var message = ""
+        var messageActions: [Wire.EmptyListAction] = []
         var macroRecording: UInt8 = 0
         var modelName = ""
         var messageCount: UInt32 = 0
@@ -1269,6 +1270,10 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 if sectionLen >= 2 + mLen, mLen > 0 {
                     message = try decodeUTF8(data[(sStart + 2)..<(sStart + 2 + mLen)]) ?? ""
                 }
+
+            case 0x13: // MessageActions: the next steps the notice names
+                let (actions, _) = try GeneratedProtocol.decodeGuiStatusBarMessageActions(data, sStart, sStart + sectionLen)
+                messageActions = actions.map { Wire.EmptyListAction(id: $0.id, key: $0.key, label: $0.label) }
 
             case 0x08: // Recording: macro_recording(1)
                 guard sectionLen >= 1 else { break }
@@ -1451,7 +1456,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             selection: selection,
             workspace: workspace,
             pendingKeys: pendingKeys,
-            review: review
+            review: review,
+            messageActions: messageActions
         )
         return (.guiStatusBar(update), pos - offset)
 

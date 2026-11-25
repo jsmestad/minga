@@ -44,10 +44,14 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilder do
       glyph: Keyword.get(opts, :glyph, ""),
       title: title,
       why: why,
-      actions: Enum.map(steps, &action/1),
+      actions: next_steps(steps),
       selected: Keyword.get(opts, :selected, 0)
     }
   end
+
+  @doc "The actions for next steps, each with its key from the live keymap unless the step names its own; a notice names its next steps with these too."
+  @spec next_steps([step()]) :: [EmptyList.Action.t()]
+  def next_steps(steps) when is_list(steps), do: Enum.map(steps, &action/1)
 
   @spec action(step()) :: EmptyList.Action.t()
   defp action({command, label}), do: action({command, label, Active.leader_key(command)})

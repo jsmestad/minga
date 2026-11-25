@@ -388,6 +388,8 @@ defmodule MingaEditor.MinibufferData do
   defp search_mode_and_prefix(:backward), do: {@mode_search_backward, "?"}
 
   @spec format_search_context(map()) :: String.t()
+  defp format_search_context(%{no_match?: true}), do: "no matches in this buffer"
+
   defp format_search_context(ms) do
     case Map.get(ms, :match_count) do
       nil -> ""
