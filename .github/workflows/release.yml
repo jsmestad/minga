@@ -669,8 +669,8 @@ jobs:
                   exit 0
                   ;;
                 cancelled)
-                  # CI cancels a main run when a newer push arrives; that newer commit publishes instead.
-                  echo "::notice::CI was cancelled for $SOURCE_SHA ($url), usually because a newer push to main superseded it. Not publishing this commit."
+                  # CI does not cancel main runs on a newer push, so a cancelled run was stopped by hand.
+                  echo "::notice::CI was cancelled for $SOURCE_SHA ($url). Not publishing this commit. Re-run CI and then this job to publish it."
                   echo "publish=false" >> "$GITHUB_OUTPUT"
                   exit 0
                   ;;

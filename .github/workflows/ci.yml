@@ -7,7 +7,9 @@ on:
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Release publishes a main commit only after its own CI passes, so a main run must finish even when a newer push arrives.
+  # Cancelling main runs starved publication during merge bursts (#4123). Pull request runs still cancel on a new push.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   MIX_ENV: test
