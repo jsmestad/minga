@@ -232,6 +232,27 @@ defmodule Minga.Buffer.Provenance do
   end
 
   @doc """
+  Returns every applied group not yours that deleted text group `id` wrote or removed after it did, as group ids.
+  """
+  @spec later_deleters_of(t(), group_id()) :: [group_id()]
+  def later_deleters_of(%__MODULE__{groups: groups, tree: tree}, id) do
+    groups
+    |> Map.fetch!(id)
+    |> Map.fetch!(:runs)
+    |> :gb_sets.to_list()
+    |> Enum.flat_map(fn run_id ->
+      {:ok, run, _offset} = RunTree.fetch(tree, run_id)
+
+      for deleter <- later_deleters(run, id),
+          deleter != id,
+          deleting = Map.fetch!(groups, deleter),
+          deleting.applied and deleting.author != :you,
+          do: deleter
+    end)
+    |> Enum.uniq()
+  end
+
+  @doc """
   Returns a key that `blocker/3` would return for one of the groups in `ids`, or `nil` when none is blocked.
 
   When the groups hold a large share of the runs, one pass over every run answers in O(n) instead of looking each run up.
@@ -286,11 +307,24 @@ defmodule Minga.Buffer.Provenance do
   @spec discard(t(), group_id()) :: t()
   def discard(%__MODULE__{} = prov, id) do
     {group, groups} = Map.pop!(prov.groups, id)
+    marked = Map.get(prov.overlap_runs, id, [])
     prov = settle_overlaps(%{prov | groups: groups}, id, group)
 
     group.runs
     |> :gb_sets.to_list()
     |> Enum.reduce(prov, fn run_id, prov -> settle_run(prov, run_id, %{id => group}) end)
+    |> refresh_runs(marked)
+  end
+
+  # Settled marks can change whether a run is a draft; the runs are refreshed once the group is gone everywhere.
+  @spec refresh_runs(t(), [Locator.t()]) :: t()
+  defp refresh_runs(prov, run_ids) do
+    Enum.reduce(run_ids, prov, fn run_id, prov ->
+      case RunTree.fetch(prov.tree, run_id) do
+        {:ok, run, _offset} -> refresh_draft(prov, run, run)
+        :error -> prov
+      end
+    end)
   end
 
   # A discarded group's overlap marks either go (it never happened) or become permanent (it always will have).
@@ -462,6 +496,10 @@ defmodule Minga.Buffer.Provenance do
   @doc "Returns how many drafts the record holds, in O(1)."
   @spec draft_count(t()) :: non_neg_integer()
   def draft_count(%__MODULE__{drafts: drafts}), do: :gb_sets.size(drafts)
+
+  @doc "Returns whether `id` is the group opened last."
+  @spec newest_group?(t(), group_id()) :: boolean()
+  def newest_group?(%__MODULE__{next_group: next_group}, id), do: id == next_group - 1
 
   @doc "Returns whether the group still exists."
   @spec group?(t(), group_id()) :: boolean()
@@ -637,12 +675,15 @@ defmodule Minga.Buffer.Provenance do
 
       tree = Enum.reduce(marked, prov.tree, &rename_marks_in(&2, &1, old, new))
 
-      %{
-        prov
-        | tree: tree,
-          groups: Map.delete(prov.groups, old),
-          overlap_runs: Map.update(overlap_runs, new, marked, &(marked ++ &1))
-      }
+      refresh_runs(
+        %{
+          prov
+          | tree: tree,
+            groups: Map.delete(prov.groups, old),
+            overlap_runs: Map.update(overlap_runs, new, marked, &(marked ++ &1))
+        },
+        marked
+      )
     else
       prov
     end
@@ -968,11 +1009,15 @@ defmodule Minga.Buffer.Provenance do
         prov
 
       marked ->
-        %{
-          prov
-          | tree: RunTree.update(prov.tree, marked),
-            overlap_runs: Map.update(prov.overlap_runs, group_id, [run.id], &[run.id | &1])
-        }
+        refresh_draft(
+          %{
+            prov
+            | tree: RunTree.update(prov.tree, marked),
+              overlap_runs: Map.update(prov.overlap_runs, group_id, [run.id], &[run.id | &1])
+          },
+          run,
+          marked
+        )
     end
   end
 
@@ -1877,11 +1922,15 @@ defmodule Minga.Buffer.Provenance do
     # An inert run names its writer among its deleters too; it counts once, so a chain of steps keeps folding.
     order = Enum.uniq([run.group | Enum.reverse(run.deletions)])
 
-    case {Enum.find_index(order, &(&1 == old)), Enum.find_index(order, &(&1 == new))} do
-      {nil, _new} -> true
-      {_old, nil} -> true
-      {old_at, new_at} -> abs(old_at - new_at) == 1
-    end
+    # No group between the two may be named either, or the merge would point a dependency backwards in time.
+    named = order ++ for({_owner, overlap} <- run.overlaps, is_integer(overlap), do: overlap)
+
+    not Enum.any?(named, &(is_integer(&1) and &1 > old and &1 < new)) and
+      case {Enum.find_index(order, &(&1 == old)), Enum.find_index(order, &(&1 == new))} do
+        {nil, _new} -> true
+        {_old, nil} -> true
+        {old_at, new_at} -> abs(old_at - new_at) == 1
+      end
   end
 
   @spec newer_step?(Group.t(), author()) :: boolean()

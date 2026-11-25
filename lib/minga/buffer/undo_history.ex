@@ -71,8 +71,16 @@ defmodule Minga.Buffer.UndoHistory do
   @typedoc "Why an undo, redo or revert did not happen: a later Minga step rewrote the same text."
   @type blocked :: {:blocked, {:overlaps, minga_group() | :you}}
 
-  # A node of the reject dependency graph: a task, a group of yours, or any edit of yours that is already permanent.
-  @typep node_id :: task() | {:you, Provenance.group_id() | :permanent}
+  @typedoc "What one `undo_agent_session/3` call reverted; see there."
+  @type reject_summary :: %{
+          task: task(),
+          reverted: non_neg_integer(),
+          total: non_neg_integer(),
+          tasks: [task()],
+          groups: [Provenance.group_id()],
+          dropped: [non_neg_integer()],
+          held: non_neg_integer() | nil
+        }
 
   @typedoc "A Minga step and the byte ranges it touched, as `Minga.Buffer.Provenance.regions/2` reports them."
   @type minga_change :: {Author.key(), [Provenance.byte_range()]}
@@ -112,7 +120,8 @@ defmodule Minga.Buffer.UndoHistory do
             run_budget: @run_budget,
             compaction_wanted: false,
             over_budget_reported: false,
-            before: nil
+            before: nil,
+            step_ticks: %{}
 
   @opaque t :: %__MODULE__{
             provenance: Provenance.t(),
@@ -134,7 +143,8 @@ defmodule Minga.Buffer.UndoHistory do
             run_budget: pos_integer(),
             compaction_wanted: boolean(),
             over_budget_reported: boolean(),
-            before: Document.t() | nil
+            before: Document.t() | nil,
+            step_ticks: %{Provenance.group_id() => Entry.tick()}
           }
 
   @doc """
@@ -265,7 +275,8 @@ defmodule Minga.Buffer.UndoHistory do
       | provenance: replay(history, history.provenance, group, patches),
         tick: tick,
         task_run: %{task_run | tick_after: tick},
-        task_ticks: Map.put(history.task_ticks, task, tick)
+        task_ticks: Map.put(history.task_ticks, task, tick),
+        step_ticks: Map.put(history.step_ticks, group, tick)
     }
     |> cap_untasked()
     |> want_compaction()
@@ -445,110 +456,160 @@ defmodule Minga.Buffer.UndoHistory do
   end
 
   @doc """
-  Reverts the next unit `next_reject/1` names, all together, and forgets its steps. See `reject_task/4`.
+  Reverts, in one call, every step of the task that edited most recently that can be reverted exactly, and forgets them. See `reject_task/4`.
 
-  Returns `{:ok, restore, history, reverted_steps, tasks, dropped}`. Groups of yours in the unit had no visible text left, since Minga rewrote all of it; they leave your undo stack, and `dropped` holds the byte offset in the restored document where each of them was. Returns `:empty` when Minga has no steps left in the buffer. When every candidate unit is held by an edit of yours, it changes nothing and returns `{:blocked, {:overlaps, :you}, task, offset}`, naming the first held task and the byte offset of that edit.
+  It works on the task that edited most recently; when that task cannot revert any step, it tries the next most recent, so a press reverts something whenever any task can. Steps are visited newest first. A step reverts together with everything newer that depends on it: a later group that rewrote its text, and a group that edited inside one of its replacements. Another task's step among them reverts with it. A group of yours among them joins only when none of its text is visible and reverting it brings back nothing else it deleted; it leaves your undo stack. Otherwise the step is held by your newest such edit, which your `u` can always reach, and older steps are still tried.
+
+  Returns `{:ok, restore, history, summary}` when at least one step reverted, where `summary` holds the task, the steps reverted (`:reverted`) and the task's steps at the start (`:total`), the other tasks whose steps reverted with them (`:tasks`), the groups reverted (`:groups`), the byte offsets of edits of yours dropped from your undo stack (`:dropped`), and the byte offset of your edit that holds the rest (`:held`, or `nil`). Returns `{:blocked, {:overlaps, :you}, task, offset}` when no step could revert, and `:empty` when Minga has no steps left in the buffer.
   """
   @spec undo_agent_session(t(), version(), Document.t()) ::
-          {:ok, Restore.t(), t(), pos_integer(), [task(), ...], [non_neg_integer()]}
+          {:ok, Restore.t(), t(), reject_summary()}
           | :empty
           | {:blocked, {:overlaps, :you}, task(), non_neg_integer()}
           | {:error, UndoPatch.apply_error()}
   def undo_agent_session(%__MODULE__{} = history, _version, %Document{} = document) do
-    case reject_choice(history) do
-      nil ->
-        :empty
-
-      {:held, task, offset} ->
-        {:blocked, {:overlaps, :you}, task, offset}
-
-      {:unit, unit} ->
-        with {:ok, restore, rest, count, dropped} <- revert_unit(history, unit, document) do
-          {:ok, restore, rest, count, unit_tasks(unit), dropped}
-        end
-    end
-  end
-
-  @doc """
-  Returns what `undo_agent_session/3` reverts next: tasks, and any groups of yours as `{:you, group}`, or `nil` when no unit can be reverted exactly.
-
-  This is a dependency graph. Its nodes are the tasks with steps in the buffer and your applied groups. A task depends on a task that started after it and rewrote its text, on a task whose step deleted part of one of its replacements, and on your group that did. Your group depends on every task that rewrote its text after it, since that blocks its undo. A strongly connected component (nodes that all depend on each other, directly or not) with no dependency outside itself reverts exactly as a whole, and Tarjan's algorithm finds such a sink component reachable from any node. Starting from the task that edited most recently, the answer is that sink when it holds a task and every group of yours in it has no visible text left. A sink of your groups alone means one of them must be undone first, which always works. Otherwise the search starts again from the next most recent task.
-  """
-  @spec next_reject(t()) :: [task() | {:you, Provenance.group_id()}, ...] | nil
-  def next_reject(%__MODULE__{} = history) do
-    case reject_choice(history) do
-      {:unit, unit} -> unit
-      _none_or_held -> nil
-    end
-  end
-
-  @spec unit_tasks([node_id()]) :: [task()]
-  defp unit_tasks(unit), do: Enum.reject(unit, &match?({:you, _group}, &1))
-
-  @spec reject_choice(t()) ::
-          {:unit, [task() | {:you, Provenance.group_id()}, ...]}
-          | {:held, task(), non_neg_integer()}
-          | nil
-  defp reject_choice(%__MODULE__{task_ticks: ticks}) when map_size(ticks) == 0, do: nil
-
-  defp reject_choice(history) do
-    starts = task_starts(history)
-    steps = Map.new(starts, fn {task, _start} -> {task, task_groups(history, task)} end)
-    edges = &dependencies(history, starts, steps, &1)
-
     history.task_ticks
     |> Enum.sort_by(&elem(&1, 1), :desc)
-    |> Enum.reduce_while(nil, fn {task, _tick}, held ->
-      unit = sink_component(task, edges)
+    |> Enum.reduce_while(:empty, fn {task, _tick}, first_held ->
+      case reject_steps(history, task, document) do
+        {:blocked, _overlap, _task, _offset} = held ->
+          {:cont, if(first_held == :empty, do: held, else: first_held)}
 
-      case held_by(history, steps, unit, task) do
-        nil -> {:halt, {:unit, unit}}
-        offset -> {:cont, held || {:held, task, offset}}
+        reverted_or_error ->
+          {:halt, reverted_or_error}
       end
     end)
   end
 
-  # Where an edit holds a sink: the sink has no task, holds a permanent edit, or holds a group of yours with visible
-  # text or whose revert would bring back text it deleted that the unit does not remove anyway.
-  @spec held_by(t(), %{task() => [Provenance.group_id()]}, [node_id(), ...], task()) ::
-          non_neg_integer() | nil
-  defp held_by(history, steps, unit, root) do
-    yours = for {:you, group} <- unit, do: group
-    provenance = history.provenance
+  @doc "Returns the task `undo_agent_session/3` works on next: the one that edited most recently, or `nil`."
+  @spec next_reject(t()) :: task() | nil
+  def next_reject(%__MODULE__{task_ticks: ticks}) when map_size(ticks) == 0, do: nil
 
-    cond do
-      :permanent in yours ->
-        permanent_offset(provenance, Map.fetch!(steps, root))
+  def next_reject(%__MODULE__{task_ticks: ticks}),
+    do: ticks |> Enum.max_by(&elem(&1, 1)) |> elem(0)
 
-      unit_tasks(unit) == [] ->
-        group_offset(provenance, hd(yours))
+  @spec reject_steps(t(), task(), Document.t()) ::
+          {:ok, Restore.t(), t(), reject_summary()}
+          | {:blocked, {:overlaps, :you}, task(), non_neg_integer()}
+          | {:error, UndoPatch.apply_error()}
+  defp reject_steps(history, task, document) do
+    total = history |> task_groups(task) |> step_count(history)
 
-      true ->
-        reverted = Enum.flat_map(unit_tasks(unit), &Map.fetch!(steps, &1)) ++ yours
+    start = %{
+      history: history,
+      document: document,
+      groups: [],
+      dropped: [],
+      held: nil,
+      first: nil
+    }
 
-        yours
-        |> Enum.find(&holds?(provenance, &1, reverted))
-        |> visible_offset(provenance)
+    with {:ok, walk} <- walk_steps(start, task) do
+      finish_walk(history, walk, task, total)
     end
   end
 
-  # A group of yours joins a revert only when Minga rewrote all of its text, so you cannot undo it yourself, and
-  # reverting it brings back nothing else it deleted.
-  @spec holds?(Provenance.t(), Provenance.group_id(), [Provenance.group_id()]) :: boolean()
-  defp holds?(provenance, group, reverted) do
-    Provenance.live_bytes_of(provenance, group) > 0 or
-      rewriters(provenance, group, fn _key -> true end, []) == [] or
-      Provenance.revives_deleted?(provenance, group, reverted)
+  # Visits the task's remaining groups newest first and reverts each one whose dependents can go with it.
+  @spec walk_steps(map(), task()) :: {:ok, map()} | {:error, UndoPatch.apply_error()}
+  defp walk_steps(walk, task) do
+    walk.history
+    |> task_groups(task)
+    |> Enum.sort(:desc)
+    |> Enum.reduce_while({:ok, walk}, fn group, {:ok, walk} ->
+      if Provenance.group?(walk.history.provenance, group),
+        do: revert_closure(walk, group),
+        else: {:cont, {:ok, walk}}
+    end)
   end
 
-  @spec visible_offset(Provenance.group_id() | nil, Provenance.t()) :: non_neg_integer() | nil
-  defp visible_offset(nil, _provenance), do: nil
-  defp visible_offset(group, provenance), do: group_offset(provenance, group)
+  @spec revert_closure(map(), Provenance.group_id()) ::
+          {:cont, {:ok, map()}} | {:halt, {:error, UndoPatch.apply_error()}}
+  defp revert_closure(walk, group) do
+    provenance = walk.history.provenance
+    closure = dependents(provenance, [group], MapSet.new([group]))
+
+    case held_in(provenance, closure) do
+      nil ->
+        case revert_groups(walk, closure) do
+          {:ok, walk} -> {:cont, {:ok, walk}}
+          {:error, _reason} = error -> {:halt, error}
+        end
+
+      offset ->
+        {:cont, {:ok, %{walk | held: walk.held || offset}}}
+    end
+  end
+
+  # Everything newer that must revert with these groups: for a Minga group, later Minga groups that rewrote its text
+  # and the groups that edited inside its replacements; for a group of yours, the Minga groups that rewrote it. A
+  # permanent mark stands for an edit that can never revert. Every edge points to a newer group, so the walk ends.
+  @spec dependents(Provenance.t(), [Provenance.group_id()], MapSet.t()) :: MapSet.t()
+  defp dependents(_provenance, [], closure), do: closure
+
+  defp dependents(provenance, [:permanent | rest], closure),
+    do: dependents(provenance, rest, closure)
+
+  defp dependents(provenance, [group | rest], closure) do
+    found = Enum.reject(direct_dependents(provenance, group), &MapSet.member?(closure, &1))
+    dependents(provenance, found ++ rest, Enum.into(found, closure))
+  end
+
+  @spec direct_dependents(Provenance.t(), Provenance.group_id()) :: [
+          Provenance.group_id() | :permanent
+        ]
+  defp direct_dependents(provenance, group) do
+    rewriters = later_minga_deleters(provenance, group)
+
+    if Provenance.group_key(provenance, group) == nil do
+      rewriters
+    else
+      overlaps =
+        for {overlap, _offset} <- Provenance.overlapping_groups(provenance, [group]),
+            do: overlap_node(overlap)
+
+      Enum.uniq(rewriters ++ overlaps)
+    end
+  end
+
+  @spec overlap_node(Provenance.group_id() | {:permanent, term()}) ::
+          Provenance.group_id() | :permanent
+  defp overlap_node(group) when is_integer(group), do: group
+  defp overlap_node({:permanent, _key}), do: :permanent
+
+  # Every applied Minga group that deleted text `group` wrote or removed, after it did.
+  @spec later_minga_deleters(Provenance.t(), Provenance.group_id()) :: [Provenance.group_id()]
+  defp later_minga_deleters(provenance, group),
+    do: Provenance.later_deleters_of(provenance, group)
+
+  # Where an edit of yours holds a closure: a permanent edit, or a group of yours with visible text or whose revert
+  # would bring back other text it deleted. The newest such group of yours is named; your `u` reaches it first.
+  @spec held_in(Provenance.t(), MapSet.t()) ::
+          {:group, Provenance.group_id()} | {:offset, non_neg_integer()} | nil
+  defp held_in(provenance, closure) do
+    reverted = closure |> MapSet.delete(:permanent) |> MapSet.to_list()
+    yours = for group <- reverted, Provenance.group_key(provenance, group) == nil, do: group
+
+    holding =
+      yours
+      |> Enum.sort(:desc)
+      |> Enum.find(
+        &(Provenance.live_bytes_of(provenance, &1) > 0 or
+            Provenance.revives_deleted?(provenance, &1, reverted))
+      )
+
+    cond do
+      holding != nil -> {:group, holding}
+      MapSet.member?(closure, :permanent) -> {:offset, permanent_offset(provenance, reverted)}
+      true -> nil
+    end
+  end
 
   @spec permanent_offset(Provenance.t(), [Provenance.group_id()]) :: non_neg_integer()
   defp permanent_offset(provenance, groups) do
+    minga = Enum.reject(groups, &(Provenance.group_key(provenance, &1) == nil))
+
     provenance
-    |> Provenance.overlapping_groups(groups)
+    |> Provenance.overlapping_groups(minga)
     |> Enum.find_value(0, fn
       {{:permanent, _key}, offset} -> offset
       _other -> nil
@@ -563,144 +624,149 @@ defmodule Minga.Buffer.UndoHistory do
     end
   end
 
+  # Reverts a closure in one document pass and forgets its groups.
+  @spec revert_groups(map(), MapSet.t()) :: {:ok, map()} | {:error, UndoPatch.apply_error()}
+  defp revert_groups(walk, closure) do
+    groups = MapSet.to_list(closure)
+    history = walk.history
+    yours = for group <- groups, Provenance.group_key(history.provenance, group) == nil, do: group
+
+    with {:ok, document, first, provenance} <-
+           Provenance.revert_all(history.provenance, groups, walk.document) do
+      dropped = Enum.map(yours, &group_offset(provenance, &1))
+
+      history =
+        history
+        |> forget_groups(groups)
+        |> then(&%{&1 | provenance: Provenance.discard_all(provenance, groups)})
+
+      {:ok,
+       %{
+         walk
+         | history: history,
+           document: document,
+           groups: groups ++ walk.groups,
+           dropped: dropped ++ walk.dropped,
+           first: first || walk.first
+       }}
+    end
+  end
+
+  # Takes reverted groups out of Minga's steps, the untasked queue, and your undo stack.
+  @spec forget_groups(t(), [Provenance.group_id()]) :: t()
+  defp forget_groups(history, groups) do
+    gone = MapSet.new(groups)
+
+    {minga_gone, minga} =
+      Enum.split_with(history.minga, fn {group, _key} -> MapSet.member?(gone, group) end)
+
+    remaining_keys = MapSet.new(minga, &elem(&1, 1))
+
+    steps =
+      Map.filter(history.steps, fn {key, group} ->
+        not MapSet.member?(gone, group) or MapSet.member?(remaining_keys, key)
+      end)
+
+    untasked = :queue.filter(&(not MapSet.member?(gone, &1)), history.untasked)
+    entries = Enum.reject(history.undo_entries, &MapSet.member?(gone, &1.group))
+    live_tasks = MapSet.new(minga, fn {_group, key} -> Author.author(key) end)
+
+    live_tasks =
+      if :queue.is_empty(untasked),
+        do: live_tasks,
+        else: MapSet.put(live_tasks, {:minga, :untasked})
+
+    touched = for {_group, key} <- minga_gone, do: Author.author(key)
+
+    %{
+      history
+      | minga: minga,
+        steps: steps,
+        untasked: untasked,
+        untasked_size: :queue.len(untasked),
+        undo_entries: entries,
+        undo_size: length(entries),
+        task_ticks:
+          Map.filter(history.task_ticks, fn {task, _tick} -> MapSet.member?(live_tasks, task) end),
+        task_started:
+          Map.drop(history.task_started, Enum.reject(touched, &MapSet.member?(live_tasks, &1))),
+        step_ticks: Map.drop(history.step_ticks, groups)
+    }
+  end
+
+  @spec finish_walk(t(), map(), task(), non_neg_integer()) ::
+          {:ok, Restore.t(), t(), reject_summary()}
+          | {:blocked, {:overlaps, :you}, task(), non_neg_integer()}
+  defp finish_walk(_history, %{groups: [], held: held} = walk, task, _total),
+    do: {:blocked, {:overlaps, :you}, task, held_offset(walk.history.provenance, held)}
+
+  defp finish_walk(history, walk, task, total) do
+    remaining = walk.history |> task_groups(task) |> step_count(walk.history)
+    every_step? = remaining == 0
+
+    {version, tick, rest} =
+      if every_step?, do: settle_tasks(walk.history, [task]), else: advance_tick(walk.history)
+
+    rest = %{rest | tick: tick, task_run: nil}
+    document = place_cursor(walk.document, walk.first, Document.cursor(walk.document))
+
+    others =
+      for group <- walk.groups,
+          key = Provenance.group_key(history.provenance, group),
+          key != nil,
+          task_of(key) != task,
+          uniq: true,
+          do: task_of(key)
+
+    summary = %{
+      task: task,
+      reverted:
+        walk.groups |> Enum.filter(&(task_of_group(history, &1) == task)) |> step_count(history),
+      total: total,
+      tasks: others,
+      groups: walk.groups,
+      dropped: walk.dropped,
+      held: if(every_step?, do: nil, else: held_offset(rest.provenance, walk.held))
+    }
+
+    {:ok, Restore.new(version, document, :agent), rest, summary}
+  end
+
+  # Where the edit that holds the rest is now, after everything this call reverted.
+  @spec held_offset(
+          Provenance.t(),
+          {:group, Provenance.group_id()} | {:offset, non_neg_integer()} | nil
+        ) ::
+          non_neg_integer()
+  defp held_offset(provenance, {:group, group}), do: group_offset(provenance, group)
+  defp held_offset(_provenance, {:offset, offset}), do: offset
+  defp held_offset(_provenance, nil), do: 0
+
+  @spec advance_tick(t()) :: {:advance, Entry.tick(), t()}
+  defp advance_tick(history) do
+    {tick, history} = advance(history)
+    {:advance, tick, history}
+  end
+
+  # The task's remaining groups: its steps' groups, or the untasked queue.
   @spec task_groups(t(), task()) :: [Provenance.group_id()]
   defp task_groups(history, task) do
     {steps, _rest} = take_task(history, task)
     Enum.map(steps, &elem(&1, 0))
   end
 
-  # A task depends on newer tasks that rewrote its text and on whatever partly deleted its replacements. Your group
-  # depends on the tasks that rewrote its text after it and on the tasks whose text it deleted. A permanent edit
-  # depends on nothing.
-  @spec dependencies(
-          t(),
-          %{task() => Provenance.group_id()},
-          %{task() => [Provenance.group_id()]},
-          node_id()
-        ) :: [node_id()]
-  defp dependencies(_history, _starts, _steps, {:you, :permanent}), do: []
-
-  defp dependencies(history, _starts, _steps, {:you, group}) do
-    # Reverting your group brings back Minga text it deleted, so that text's task reverts with it.
-    writers = for key <- Provenance.deleted_writers(history.provenance, group), do: task_of(key)
-
-    (rewriters(history.provenance, group, fn _key -> true end, []) ++ writers)
-    |> Enum.uniq()
-    |> Enum.sort()
-  end
-
-  defp dependencies(history, starts, steps, task) do
-    groups = Map.fetch!(steps, task)
-    start = Map.fetch!(starts, task)
-    newer? = fn key -> task_of(key) != task and Map.get(starts, task_of(key), 0) > start end
-    newer = Enum.flat_map(groups, &rewriters(history.provenance, &1, newer?, []))
-
-    overlapping =
-      for {overlap, _offset} <- Provenance.overlapping_groups(history.provenance, groups),
-          do: overlap_node(history.provenance, overlap)
-
-    (newer ++ overlapping) |> Enum.uniq() |> Enum.sort()
-  end
-
-  @spec overlap_node(Provenance.t(), Provenance.group_id() | {:permanent, term()}) :: node_id()
-  # A permanent mark holds for good, whoever made it: the group behind it is gone and can never be reverted.
-  defp overlap_node(_provenance, {:permanent, _key}), do: {:you, :permanent}
-
-  defp overlap_node(provenance, group) do
-    case Provenance.group_key(provenance, group) do
-      nil -> {:you, group}
+  @spec task_of_group(t(), Provenance.group_id()) :: task() | nil
+  defp task_of_group(history, group) do
+    case Provenance.group_key(history.provenance, group) do
+      nil -> nil
       key -> task_of(key)
     end
   end
 
-  # Every task with a step that `counts?` accepts and that deleted text `group` wrote or removed, after it did.
-  @spec rewriters(Provenance.t(), Provenance.group_id(), (minga_group() -> boolean()), [task()]) ::
-          [task()]
-  defp rewriters(provenance, group, counts?, found) do
-    blocks? = fn
-      :you, _key -> false
-      _author, key -> counts?.(key) and task_of(key) not in found
-    end
-
-    case Provenance.blocker(provenance, group, blocks?) do
-      nil -> found
-      key -> rewriters(provenance, group, counts?, [task_of(key) | found])
-    end
-  end
-
-  # Tarjan's algorithm from `root`, stopped at the first component it completes. Tarjan completes components in reverse
-  # topological order of the condensation, so the first one has no edge to any other component: it is a sink reachable
-  # from `root`.
-  @spec sink_component(node_id(), (node_id() -> [node_id()])) :: [node_id(), ...]
-  defp sink_component(root, edges) do
-    state = %{index: 0, indices: %{}, low: %{}, stack: [], on_stack: MapSet.new(), found: nil}
-    %{found: found} = connect(root, edges, state)
-    Enum.sort(found)
-  end
-
-  @spec connect(node_id(), (node_id() -> [node_id()]), map()) :: map()
-  defp connect(task, edges, state) do
-    state = %{
-      state
-      | index: state.index + 1,
-        indices: Map.put(state.indices, task, state.index),
-        low: Map.put(state.low, task, state.index),
-        stack: [task | state.stack],
-        on_stack: MapSet.put(state.on_stack, task)
-    }
-
-    state = Enum.reduce(edges.(task), state, &follow(task, &1, edges, &2))
-
-    if state.found == nil and state.low[task] == state.indices[task] do
-      {component, [^task | stack]} = Enum.split_while(state.stack, &(&1 != task))
-      %{state | found: [task | component], stack: stack}
-    else
-      state
-    end
-  end
-
-  @spec follow(node_id(), node_id(), (node_id() -> [node_id()]), map()) :: map()
-  defp follow(_task, _next, _edges, %{found: found} = state) when found != nil, do: state
-
-  defp follow(task, next, edges, state) do
-    cond do
-      not Map.has_key?(state.indices, next) ->
-        state = connect(next, edges, state)
-        %{state | low: Map.update!(state.low, task, &min(&1, state.low[next]))}
-
-      MapSet.member?(state.on_stack, next) ->
-        %{state | low: Map.update!(state.low, task, &min(&1, state.indices[next]))}
-
-      true ->
-        state
-    end
-  end
-
-  # Reverts one component together; nothing outside it stands in the way. Groups of yours in it leave your undo stack.
-  @spec revert_unit(t(), [task() | {:you, Provenance.group_id()}, ...], Document.t()) ::
-          {:ok, Restore.t(), t(), pos_integer(), [non_neg_integer()]}
-          | {:error, UndoPatch.apply_error()}
-  defp revert_unit(history, unit, document) do
-    tasks = unit_tasks(unit)
-    yours = for {:you, group} <- unit, do: group
-
-    {steps, rest} =
-      Enum.reduce(tasks, {[], history}, fn task, {steps, rest} ->
-        {more, rest} = take_task(rest, task)
-        {more ++ steps, rest}
-      end)
-
-    rest = drop_your_groups(rest, yours)
-
-    revert_steps_of(history, rest, tasks, steps, yours, document)
-  end
-
-  @spec drop_your_groups(t(), [Provenance.group_id()]) :: t()
-  defp drop_your_groups(history, []), do: history
-
-  defp drop_your_groups(history, groups) do
-    entries = Enum.reject(history.undo_entries, &(&1.group in groups))
-    %{history | undo_entries: entries, undo_size: length(entries)}
+  # A step can hold several groups when other edits came between its own; steps count by key.
+  @spec step_count([Provenance.group_id()], t()) :: non_neg_integer()
+  defp step_count(groups, history) do
+    groups |> Enum.map(&Provenance.group_key(history.provenance, &1)) |> Enum.uniq() |> length()
   end
 
   @doc """
@@ -725,8 +791,23 @@ defmodule Minga.Buffer.UndoHistory do
   @doc "Returns the remaining Minga steps of task `task_id` in this buffer, oldest first, with the byte ranges each touched."
   @spec minga_changes(t(), Author.id()) :: [minga_change()]
   def minga_changes(%__MODULE__{} = history, task_id) when is_binary(task_id) do
-    for {group, {:minga, ^task_id, _step} = key} <- Enum.reverse(history.minga),
-        do: {key, Provenance.regions(history.provenance, group)}
+    # A step can hold several groups when other edits came between its own; it still reads as one step.
+    steps =
+      for {group, {:minga, ^task_id, _step} = key} <- Enum.reverse(history.minga),
+          do: {key, group}
+
+    keys = steps |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
+    by_key = Enum.group_by(steps, &elem(&1, 0), &elem(&1, 1))
+
+    for key <- keys do
+      regions =
+        by_key
+        |> Map.fetch!(key)
+        |> Enum.flat_map(&Provenance.regions(history.provenance, &1))
+        |> Enum.sort()
+
+      {key, regions}
+    end
   end
 
   @doc "Resets the coalescing timer so the next recorded edit creates a new undo entry."
@@ -1000,11 +1081,23 @@ defmodule Minga.Buffer.UndoHistory do
   @spec minga_group(t(), Author.key() | :agent) :: {Provenance.group_id(), t()}
   defp minga_group(history, :agent), do: open_minga_group(history, {:minga, :untasked}, :agent)
 
+  # A step's group takes a new edit only when nothing else changed the document since that step's last edit, as your
+  # coalescing does; otherwise the step continues in a new group under the same key. A group's edits are then
+  # consecutive changes, so every dependency between groups points from an older group to a newer one.
   defp minga_group(history, key) when Author.is_key(key) do
-    case history.steps do
-      %{^key => group} -> {group, history}
-      _new_step -> open_minga_group(history, Author.author(key), key)
-    end
+    if resumable?(history, Map.get(history.steps, key)),
+      do: {Map.fetch!(history.steps, key), history},
+      else: open_minga_group(history, Author.author(key), key)
+  end
+
+  # Nothing changed the document since the group's last edit, and no group was opened since (an undo can bring the
+  # document back to the step's own last state).
+  @spec resumable?(t(), Provenance.group_id() | nil) :: boolean()
+  defp resumable?(_history, nil), do: false
+
+  defp resumable?(history, group) do
+    Map.get(history.step_ticks, group) == history.tick and
+      Provenance.newest_group?(history.provenance, group)
   end
 
   @spec open_minga_group(t(), Provenance.author(), Author.key() | :agent) ::

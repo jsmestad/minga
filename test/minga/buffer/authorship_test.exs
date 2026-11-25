@@ -182,7 +182,7 @@ defmodule Minga.Buffer.AuthorshipTest do
       assert BufferProcess.content(buffer) == "z = 1\ny = 2\n"
     end
 
-    test "SPC a u never gets stuck: a blocked task waits while the newer task that blocks it reverts" do
+    test "SPC a u reverts every step of the latest task, with a newer task's step that rewrote one of them" do
       registry = Module.concat(__MODULE__, "Events#{System.unique_integer([:positive])}")
       start_supervised!({Registry, keys: :duplicate, name: registry})
       :ok = Minga.Events.subscribe(:log_message, registry)
@@ -196,17 +196,14 @@ defmodule Minga.Buffer.AuthorshipTest do
       replace_at(buffer, {0, 1}, 1, "w", step("t2", "s1"))
       replace_at(buffer, {1, 0}, 1, "Q", step("t1", "s2"))
 
-      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
-      assert BufferProcess.content(buffer) == "ayb\nQ"
-
-      assert_receive {:minga_event, :log_message,
-                      %{text: "Reverted Minga task t2 in this buffer" <> _}}
-
       assert {:ok, 2} = BufferProcess.undo_agent_session(buffer)
       assert BufferProcess.content(buffer) == "axb\nq"
 
       assert_receive {:minga_event, :log_message,
-                      %{text: "Reverted Minga task t1 in this buffer" <> _}}
+                      %{
+                        text:
+                          "Reverted Minga task t1, with Minga task t2, in this buffer (2 step(s))"
+                      }}
 
       assert BufferProcess.undo_agent_session(buffer) == :empty
     end
@@ -243,7 +240,7 @@ defmodule Minga.Buffer.AuthorshipTest do
       assert BufferProcess.content(buffer) == original
     end
 
-    test "SPC a u names your rewritten edit it drops, and the line of a visible one that holds the task" do
+    test "SPC a u reverts what it can, names the line of your edit that holds the rest, and names an edit it drops" do
       registry = Module.concat(__MODULE__, "Events#{System.unique_integer([:positive])}")
       start_supervised!({Registry, keys: :duplicate, name: registry})
       :ok = Minga.Events.subscribe(:log_message, registry)
@@ -257,20 +254,25 @@ defmodule Minga.Buffer.AuthorshipTest do
       replace_at(buffer, {1, 2}, 1, "QR")
       replace_at(buffer, {1, 3}, 1, "Z", step("t", "s2"))
 
-      assert BufferProcess.undo_agent_session(buffer) == {:blocked, {:overlaps, :you}}
-      assert BufferProcess.content(buffer) == "top\nxbQZdy\n"
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "top\nxbQRdy\n"
 
       assert_receive {:minga_event, :log_message,
-                      %{text: "Minga task t cannot be reverted exactly in " <> rest}}
+                      %{text: "Reverted 1 of 2 steps of Minga task t in " <> rest}}
 
-      assert rest =~ "your edit near line 2 is inside its change"
+      assert rest =~ "undo your edit near line 2 (u), then SPC a u again"
 
-      replace_at(buffer, {1, 2}, 1, "P", step("t", "s3"))
-      assert {:ok, 3} = BufferProcess.undo_agent_session(buffer)
+      assert :ok = BufferProcess.undo(buffer)
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
       assert BufferProcess.content(buffer) == "top\nxay\n"
 
-      assert_receive {:minga_event, :log_message,
-                      %{text: "Reverted Minga task t in this buffer" <> _}}
+      # Your edit inside the change that your own next edit removed has nothing visible: it goes with the step.
+      replace_at(buffer, {1, 1}, 1, "bcd", step("t", "s3"))
+      replace_at(buffer, {1, 2}, 1, "Q")
+      replace_at(buffer, {1, 2}, 1, "")
+      assert BufferProcess.content(buffer) == "top\nxbdy\n"
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "top\nxay\n"
 
       assert_receive {:minga_event, :log_message,
                       %{text: "Dropped your edit near line 2 of " <> _}}

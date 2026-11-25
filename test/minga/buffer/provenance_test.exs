@@ -774,32 +774,36 @@ defmodule Minga.Buffer.ProvenanceTest do
   # A draft: a dead run of an applied Minga step that an applied newer step of its task deleted, where merging the two
   # skips no other group in the run's history.
   defp draft?(run, groups) do
+    case draft_partners(run, groups) do
+      [] -> false
+      partners -> adjacent_merge?(run, run.group, Enum.min(partners))
+    end
+  end
+
+  defp draft_partners(run, groups) do
     owner = run.group && groups[run.group]
 
-    partners =
-      if owner != nil and not run.live and owner.applied and
-           match?({:minga, task} when task != :untasked, owner.author),
-         do:
-           for(
-             d <- run.deletions,
-             d > run.group,
-             groups[d].applied,
-             groups[d].author == owner.author,
-             do: d
-           ),
-         else: []
+    if owner != nil and not run.live and owner.applied and minga_task?(owner.author),
+      do:
+        for(
+          d <- run.deletions,
+          d > run.group,
+          groups[d].applied,
+          groups[d].author == owner.author,
+          do: d
+        ),
+      else: []
+  end
 
-    case partners do
-      [] ->
-        false
+  defp minga_task?({:minga, task}), do: task != :untasked
+  defp minga_task?(_author), do: false
 
-      _some ->
-        order = Enum.uniq([run.group | Enum.reverse(run.deletions)])
-        new = Enum.min(partners)
+  defp adjacent_merge?(run, old, new) do
+    order = Enum.uniq([run.group | Enum.reverse(run.deletions)])
+    named = order ++ for({_owner, overlap} <- run.overlaps, is_integer(overlap), do: overlap)
 
-        abs(Enum.find_index(order, &(&1 == run.group)) - Enum.find_index(order, &(&1 == new))) ==
-          1
-    end
+    not Enum.any?(named, &(is_integer(&1) and &1 > old and &1 < new)) and
+      abs(Enum.find_index(order, &(&1 == old)) - Enum.find_index(order, &(&1 == new))) == 1
   end
 
   defp ids_sorted?(ids), do: ids == Enum.sort(ids) and ids == Enum.uniq(ids)

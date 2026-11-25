@@ -2646,31 +2646,15 @@ defmodule Minga.Buffer.Process do
         log_to_messages(
           state,
           "#{task_label(task)} cannot be reverted exactly in #{display_name_from_state(state)}: " <>
-            "your edit near line #{line + 1} is inside its change; undo that edit first",
+            "undo your edit near line #{line + 1} (u), then SPC a u again",
           :warning
         )
 
         {:reply, {:blocked, overlap}, state}
 
-      {:ok, restore, undo_history, count, tasks, dropped} ->
-        log_to_messages(
-          state,
-          "Reverted #{tasks_label(tasks)} in this buffer (#{count} step(s))",
-          :info
-        )
-
-        for offset <- dropped do
-          {line, _column} = Position.from_point(restore.document, offset)
-
-          log_to_messages(
-            state,
-            "Dropped your edit near line #{line + 1} of #{display_name_from_state(state)} from undo: " <>
-              "Minga had rewritten all of it inside the reverted change",
-            :info
-          )
-        end
-
-        {:reply, {:ok, count}, install_restore(state, restore, undo_history)}
+      {:ok, restore, undo_history, summary} ->
+        log_reverted_steps(state, restore.document, summary)
+        {:reply, {:ok, summary.reverted}, install_restore(state, restore, undo_history)}
     end
   end
 
@@ -3925,6 +3909,46 @@ defmodule Minga.Buffer.Process do
 
   defp schedule_compaction(state), do: state
 
+  # One *Messages* line for what SPC a u reverted, and one for each edit of yours it dropped from undo.
+  @spec log_reverted_steps(state(), Document.t(), UndoHistory.reject_summary()) :: :ok
+  defp log_reverted_steps(state, document, summary) do
+    name = display_name_from_state(state)
+    others = Enum.map_join(summary.tasks, ", ", &task_label/1)
+    with_others = if others == "", do: "", else: ", with #{others},"
+
+    case summary.held do
+      nil ->
+        log_to_messages(
+          state,
+          "Reverted #{task_label(summary.task)}#{with_others} in this buffer (#{summary.reverted} step(s))",
+          :info
+        )
+
+      offset ->
+        {line, _column} = Position.from_point(document, offset)
+
+        log_to_messages(
+          state,
+          "Reverted #{summary.reverted} of #{summary.total} steps of #{task_label(summary.task)}#{with_others} in " <>
+            "#{name}; undo your edit near line #{line + 1} (u), then SPC a u again",
+          :info
+        )
+    end
+
+    for offset <- summary.dropped do
+      {line, _column} = Position.from_point(document, offset)
+
+      log_to_messages(
+        state,
+        "Dropped your edit near line #{line + 1} of #{name} from undo: " <>
+          "Minga had rewritten all of it inside the reverted change",
+        :info
+      )
+    end
+
+    :ok
+  end
+
   # Names the steps a compaction slice merged, the first few in full.
   @spec merged_steps([{UndoHistory.minga_group(), UndoHistory.minga_group()}]) :: String.t()
   defp merged_steps(pairs) do
@@ -3939,17 +3963,6 @@ defmodule Minga.Buffer.Process do
   @spec step_label(UndoHistory.minga_group()) :: String.t()
   defp step_label({:minga, task_id, step_id}), do: "task #{task_id} step #{step_id}"
   defp step_label({:untasked, n}), do: "untasked edit #{n}"
-
-  # Tasks that depend on each other revert together; see `UndoHistory.next_reject/1`.
-  @spec tasks_label([UndoHistory.task(), ...]) :: String.t()
-  defp tasks_label([task]), do: task_label(task)
-
-  defp tasks_label(tasks) do
-    {last, others} = List.pop_at(Enum.map(tasks, &task_label/1), -1)
-
-    Enum.join(others, ", ") <>
-      " and " <> last <> ", together because they edited inside each other's changes"
-  end
 
   @spec task_label(UndoHistory.task()) :: String.t()
   defp task_label({:minga, :untasked}), do: "Minga's edits without a task"

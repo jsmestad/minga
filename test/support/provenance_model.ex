@@ -176,11 +176,15 @@ defmodule Minga.Test.ProvenanceModel do
   defp merge_safe?(entry, old, new) do
     order = Enum.uniq([entry.group | Enum.reverse(entry.deletions)])
 
-    case {Enum.find_index(order, &(&1 == old)), Enum.find_index(order, &(&1 == new))} do
-      {nil, _new} -> true
-      {_old, nil} -> true
-      {old_at, new_at} -> abs(old_at - new_at) == 1
-    end
+    # No group between the two may be named either, or the merge would point a dependency backwards in time.
+    named = order ++ for({_owner, overlap} <- entry.overlaps, is_integer(overlap), do: overlap)
+
+    not Enum.any?(named, &(is_integer(&1) and &1 > old and &1 < new)) and
+      case {Enum.find_index(order, &(&1 == old)), Enum.find_index(order, &(&1 == new))} do
+        {nil, _new} -> true
+        {_old, nil} -> true
+        {old_at, new_at} -> abs(old_at - new_at) == 1
+      end
   end
 
   defp newer?(model, id, author) do

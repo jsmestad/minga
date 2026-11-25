@@ -234,7 +234,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
         |> edit(@other_task, 0, 0, "other ")
         |> edit(@step_two, 20, 0, "two\n")
 
-      assert {:ok, restore, history, 2, _tasks, []} =
+      assert {:ok, restore, history, %{reverted: 2}} =
                UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
       assert restore.version == :advance
@@ -256,7 +256,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
     test "rejecting a task after other changes takes a new version" do
       world = world("one\n") |> edit(@step_one, 4, 0, "two\n") |> edit(:user, 0, 0, "x")
 
-      {:ok, restore, _history, 1, _tasks, []} =
+      {:ok, restore, _history, %{reverted: 1}} =
         UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
       assert restore.version == :advance
@@ -282,7 +282,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert provenance |> Provenance.runs() |> Enum.count() <= 1002
       assert Provenance.author_at(provenance, 5) == {:minga, :untasked}
 
-      {:ok, restore, history, 1000, [{:minga, :untasked}], []} =
+      {:ok, restore, history, %{reverted: 1000}} =
         UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
       assert restore.version == :advance
@@ -293,7 +293,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
                {:minga, :untasked}
 
       # The tasked step is never evicted and still reverts on its own.
-      assert {:ok, _restore, _history, 1, [{:minga, "task-1"}], []} =
+      assert {:ok, _restore, _history, %{reverted: 1}} =
                UndoHistory.undo_agent_session(history, world.version + 1, restore.document)
     end
 
@@ -352,14 +352,15 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert UndoHistory.reject_task(world.history, {:minga, "task-1"}, world.version, world.doc) ==
                {:blocked, {:overlaps, @other_task}}
 
-      # task-1 edited last, but task-2 blocks it, so the next revert is task-2's.
-      assert UndoHistory.next_reject(world.history) == [{:minga, "task-2"}]
-      world = reject_newest_task(world)
-      assert text(world) == "ayb\nQ"
-      assert UndoHistory.next_reject(world.history) == [{:minga, "task-1"}]
-      world = reject_newest_task(world)
-      assert text(world) == "axb\nq"
-      assert UndoHistory.next_reject(world.history) == nil
+      # task-1 edited last; its older step reverts together with task-2's step that rewrote it, in one press.
+      assert UndoHistory.next_reject(world.history) == {:minga, "task-1"}
+
+      assert {:ok, restore, history,
+              %{reverted: 2, total: 2, tasks: [{:minga, "task-2"}], held: nil}} =
+               UndoHistory.undo_agent_session(world.history, world.version, world.doc)
+
+      assert Document.content(restore.document) == "axb\nq"
+      assert UndoHistory.next_reject(history) == nil
     end
 
     test "8000 Minga steps rewriting one word stay fast though their tombstones pile up there" do
@@ -435,23 +436,39 @@ defmodule Minga.Buffer.UndoHistoryTest do
 
       world = undo!(world)
 
-      assert {:ok, restore, _history, 1, [{:minga, "task-1"}], []} =
+      assert {:ok, restore, _history, %{reverted: 1}} =
                UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
       assert Document.content(restore.document) == "foo, bar, baz\n"
     end
 
-    test "an edit of yours inside Minga's change that Minga then rewrote whole is dropped with the task" do
+    # Round 5 R3: the step that rewrote your edit reverts first, so your edit comes back and can be undone.
+    test "an edit of yours that a later step rewrote comes back when that step reverts, then holds the older step" do
       world = world("xay\n") |> edit(@step_one, 1, 1, "bcd") |> edit(:user, 2, 1, "Q")
       world = edit(world, @step_two, 2, 1, "Z")
       assert text(world) == "xbZdy\n"
       assert {:blocked, {:overlaps, @step_two}} = step(world, :undo)
 
-      assert {:ok, restore, history, 2, [{:minga, "task-1"}], [1]} =
+      assert {:ok, restore, history, %{reverted: 1, total: 2, held: 2, dropped: []}} =
+               UndoHistory.undo_agent_session(world.history, world.version, world.doc)
+
+      world = install(world, restore, history)
+      assert text(world) == "xbQdy\n"
+      world = undo!(world)
+      assert text(reject_newest_task(world)) == "xay\n"
+    end
+
+    # A group of yours whose text a newer group of yours deleted has nothing visible; it reverts with the step.
+    test "an edit of yours with no visible text left reverts with the step and leaves your undo" do
+      world = world("xay\n") |> edit(@step_one, 1, 1, "bcd") |> edit(:user, 2, 1, "Q")
+      world = edit(world, :user, 2, 1, "", at: @t0 + 10 * @window)
+      assert text(world) == "xbdy\n"
+
+      assert {:ok, restore, history, %{reverted: 1, dropped: [_offset]}} =
                UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
       assert Document.content(restore.document) == "xay\n"
-      assert UndoHistory.undo_count(history) == 0
+      assert UndoHistory.undo_count(history) == 1
     end
 
     test "an edit of yours inside Minga's change with text still visible holds the task" do
@@ -460,10 +477,15 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert text(world) == "xbQZdy\n"
       assert {:blocked, {:overlaps, @step_two}} = step(world, :undo)
 
-      assert {:blocked, {:overlaps, :you}, {:minga, "task-1"}, 2} =
+      # Round 5 R3: the newer step reverts, giving back your R; your edit then holds the older step until you undo it.
+      assert {:ok, restore, history, %{reverted: 1, total: 2, held: 2}} =
                UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
-      assert UndoHistory.next_reject(world.history) == nil
+      world = install(world, restore, history)
+      assert text(world) == "xbQRdy\n"
+      world = undo!(world)
+      assert text(world) == "xbcdy\n"
+      assert text(reject_newest_task(world)) == "xay\n"
     end
 
     # Review findings on round 4, as regressions.
@@ -495,7 +517,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
           edit(world, :agent, byte_size(text(world)), 0, "x", at: @t0 + n)
         end)
 
-      assert {:ok, _restore, _history, _count, [{:minga, :untasked}], []} =
+      assert {:ok, _restore, _history, _summary} =
                UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
       world = reject_newest_task(world)
@@ -519,8 +541,11 @@ defmodule Minga.Buffer.UndoHistoryTest do
       world = edit(world, @step_two, 1, 1, "W")
       assert text(world) == "XWZ bbb\n\n"
 
-      assert {:blocked, {:overlaps, :you}, {:minga, "task-1"}, _offset} =
+      # The newer step reverts and gives your Q back; your edit then holds the older step, and "ccc" stays deleted.
+      assert {:ok, restore, _history, %{reverted: 1, held: 1}} =
                UndoHistory.undo_agent_session(world.history, world.version, world.doc)
+
+      assert Document.content(restore.document) == "XQZ bbb\n\n"
     end
 
     test "a held task names the line of the permanent edit that holds it" do
@@ -663,10 +688,8 @@ defmodule Minga.Buffer.UndoHistoryTest do
       check all(commands <- StreamData.list_of(command(), max_length: 40), max_runs: runs(200)) do
         world = Enum.reduce(commands, world("abc\ndef\n"), &run/2)
 
-        case unwind(world) do
-          {:done, world} -> assert text(world) == "abc\ndef\n"
-          {:stuck, world} -> assert UnitModel.revertable_units(world.history) == MapSet.new()
-        end
+        {:done, world} = unwind(world)
+        assert text(world) == "abc\ndef\n"
       end
 
       IO.puts(
@@ -681,8 +704,9 @@ defmodule Minga.Buffer.UndoHistoryTest do
             ) do
         world = Enum.reduce(commands, world("ab cd ef\ngh ij\n", recording: :coarse), &run/2)
         assert_rejects_exact_or_refused(world)
-        {_done_or_stuck, world} = reject_all(world)
-        assert UnitModel.revertable_units(world.history) == MapSet.new()
+        {:done, world} = reject_all(world)
+        %{task_ticks: ticks} = world.history
+        assert ticks == %{}
       end
     end
 
@@ -742,10 +766,8 @@ defmodule Minga.Buffer.UndoHistoryTest do
             command |> run(world) |> compact_fully(slice)
           end)
 
-        case unwind(compacted) do
-          {:done, world} -> assert text(world) == "abc\ndef\n"
-          {:stuck, world} -> assert UnitModel.revertable_units(world.history) == MapSet.new()
-        end
+        {:done, world} = unwind(compacted)
+        assert text(world) == "abc\ndef\n"
       end
 
       IO.puts("\n[compaction] history slices run: #{Process.get(:slices, 0)}")
@@ -777,6 +799,45 @@ defmodule Minga.Buffer.UndoHistoryTest do
       provenance = UndoHistory.provenance(settled.history)
       assert Provenance.draft_count(provenance) == 0
       assert Provenance.run_count(provenance) <= 3 * length(lines) + 1
+    end
+
+    # R3: with step groups that resume only uninterrupted and merges that never skip a group, every dependency points
+    # from an older group to a newer one, after every edit, undo, redo, revert and compaction slice.
+    property "the dependency graph stays acyclic after every operation" do
+      check all(
+              commands <- StreamData.list_of(command(), max_length: 40),
+              budget <- StreamData.integer(4..20),
+              max_runs: runs(300)
+            ) do
+        Enum.reduce(commands, world("abc\ndef\n", run_budget: budget), fn command, world ->
+          world = command |> run(world) |> compact_fully(3)
+          assert UnitModel.acyclic?(world.history)
+          world
+        end)
+      end
+    end
+
+    # Round 4's DL2 and the reused-step counterexample: a step that resumes after your edit opens a new group.
+    test "a step resumed after your edit inside its change never deadlocks with your undo" do
+      for second <- [@step_two, @step_one] do
+        world =
+          world("hello world\n") |> edit(@step_one, 6, 5, "there") |> edit(:user, 8, 3, "XYZ")
+
+        world = edit(world, second, 8, 2, "ab")
+        assert text(world) == "hello thabZ\n"
+
+        {:ok, restore, history, summary} =
+          UndoHistory.undo_agent_session(world.history, world.version, world.doc)
+
+        assert summary.reverted == 1
+        assert summary.held != nil
+
+        world = install(world, restore, history)
+        assert text(world) == "hello thXYZ\n"
+        world = undo!(world)
+        assert text(world) == "hello there\n"
+        assert text(reject_newest_task(world)) == "hello world\n"
+      end
     end
 
     test "compaction reports a history still over budget once, when no drafts are left" do
@@ -834,8 +895,9 @@ defmodule Minga.Buffer.UndoHistoryTest do
     property "repeated SPC a u leaves only tasks your visible edits hold" do
       check all(commands <- StreamData.list_of(command(), max_length: 40), max_runs: runs(200)) do
         world = Enum.reduce(commands, world("abc\ndef\n"), &run/2)
-        {_done_or_stuck, world} = reject_all(world)
-        assert UnitModel.revertable_units(world.history) == MapSet.new()
+        {:done, world} = reject_all(world)
+        %{task_ticks: ticks} = world.history
+        assert ticks == %{}
       end
     end
   end
@@ -880,7 +942,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
   defp redo!(world), do: world |> step(:redo) |> elem(1)
 
   defp reject_newest_task(world) do
-    {:ok, restore, history, _count, _tasks, _dropped} =
+    {:ok, restore, history, _summary} =
       UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
     install(world, restore, history)
@@ -934,59 +996,74 @@ defmodule Minga.Buffer.UndoHistoryTest do
     end
   end
 
-  # Undoes everything you did; whenever Minga blocks your undo, reverts the next unit instead. Stops when neither can
-  # make progress, which only an edit of yours with visible text inside a change Minga rewrote can cause.
+  # Presses SPC a u until Minga has no step left, undoing your newest edit whenever a press is held, as *Messages* tells
+  # you to. Then undoes the rest of your edits. Every press is checked against the group-level model, and the whole
+  # sequence must end within a bound: the termination guarantee.
   defp unwind(world) do
-    case step(world, :undo) do
-      {:ok, world, _restore} ->
-        unwind(world)
-
-      {:blocked, {:overlaps, _key}} ->
-        case press_reject(world) do
-          {:ok, world} -> unwind(world)
-          :stuck -> {:stuck, world}
-        end
-
-      :empty ->
-        reject_all(world)
-    end
+    world = drain(world, 400)
+    %{task_ticks: ticks} = world.history
+    assert ticks == %{}
+    assert UnitModel.acyclic?(world.history)
+    {:done, undo_all(world)}
   end
 
-  defp reject_all(world) do
+  defp drain(_world, 0), do: flunk("SPC a u and u did not finish")
+
+  defp drain(world, fuel) do
     case press_reject(world) do
-      {:ok, world} -> reject_all(world)
-      :empty -> {:done, world}
-      :stuck -> {:stuck, world}
+      {:ok, world, nil} -> drain(world, fuel - 1)
+      {:ok, world, _held} -> drain(world, fuel - 1)
+      :held -> world |> undo_newest() |> drain(fuel - 1)
+      :empty -> world
     end
   end
 
-  # One press of SPC a u: it reverts a unit the brute-force model accepts, never removes visible text you wrote, or
-  # changes nothing exactly when the model finds no revertable unit.
-  defp press_reject(world) do
-    accepted = UnitModel.revertable_units(world.history)
+  # When no task can revert a step, your newest edit can be undone: no Minga step is newer than the newest Minga step,
+  # which is held by an edit of yours newer still.
+  defp undo_newest(world) do
+    case step(world, :undo) do
+      {:ok, world, _restore} -> world
+      other -> flunk("held, but your undo gave #{inspect(other)}")
+    end
+  end
 
+  defp undo_all(world) do
+    case step(world, :undo) do
+      {:ok, world, _restore} -> undo_all(world)
+      :empty -> world
+      other -> flunk("with no Minga step left, your undo gave #{inspect(other)}")
+    end
+  end
+
+  defp reject_all(world), do: {:done, drain(world, 400)}
+
+  # One press of SPC a u: what it reverts is exact for the group-level model, the document equals the model's, and no
+  # text you wrote that was visible goes.
+  defp press_reject(world) do
     case UndoHistory.undo_agent_session(world.history, world.version, world.doc) do
-      {:ok, restore, history, _count, _tasks, _dropped} ->
-        unit = UndoHistory.next_reject(world.history)
-        assert MapSet.new(unit) in accepted, "#{inspect(unit)} not in #{inspect(accepted)}"
+      {:ok, restore, history, summary} ->
+        assert UnitModel.exact_groups?(world.history, summary.groups)
         after_world = install(world, restore, history)
-        assert text(after_world) == UnitModel.reverted_text(world.history, text(world), unit)
+
+        assert text(after_world) ==
+                 UnitModel.reverted_groups_text(world.history, text(world), summary.groups)
+
         assert your_text(world) |> subsequence?(your_text(after_world))
+        assert UnitModel.acyclic?(history)
 
         Process.put(
           :multi_units,
-          Process.get(:multi_units, 0) + if(match?([_, _ | _], unit), do: 1, else: 0)
+          Process.get(:multi_units, 0) + if(match?([_, _ | _], summary.groups), do: 1, else: 0)
         )
 
-        {:ok, after_world}
+        {:ok, after_world, summary.held}
 
       :empty ->
         :empty
 
       {:blocked, {:overlaps, :you}, _task, _offset} ->
-        assert accepted == MapSet.new()
         Process.put(:stuck, Process.get(:stuck, 0) + 1)
-        :stuck
+        :held
     end
   end
 

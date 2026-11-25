@@ -15,7 +15,6 @@ defmodule MingaEditor.Commands.EditingRejectTest do
     buffer = start_buffer("xay\n")
     replace(buffer, {0, 1}, 1, "bcd", EditSource.minga("t", "s1"))
     replace(buffer, {0, 2}, 1, "QR", EditSource.user())
-    replace(buffer, {0, 3}, 1, "Z", EditSource.minga("t", "s2"))
     content = BufferProcess.content(buffer)
 
     _state = Editing.execute(command_state(buffer), :undo_agent_session)

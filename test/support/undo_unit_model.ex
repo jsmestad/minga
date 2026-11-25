@@ -26,6 +26,96 @@ defmodule Minga.Test.UndoUnitModel do
     |> MapSet.new()
   end
 
+  @doc """
+  Returns whether reverting the groups in `groups` together is exact, at group level: every applied Minga group that later deleted text one of them wrote or removed is in the set (your later deletions never block), every group that edited inside a Minga group's replacement is in the set and no permanent edit did, and every group of yours in the set has no visible text, brings back no other text it deleted, and has its Minga rewriters in the set.
+  """
+  @spec exact_groups?(UndoHistory.t(), [pos_integer()]) :: boolean()
+  def exact_groups?(history, groups) do
+    %{groups: all} = provenance = UndoHistory.provenance(history)
+    runs = Provenance.runs(provenance)
+    set = MapSet.new(groups)
+    applied? = &Map.fetch!(all, &1).applied
+
+    Enum.all?(groups, fn group ->
+      yours? = Map.fetch!(all, group).author == :you
+
+      rewriters =
+        for run <- runs,
+            run.group == group or group in run.deletions,
+            d <- later(run, group),
+            d != group,
+            applied?.(d),
+            Map.fetch!(all, d).author != :you,
+            uniq: true,
+            do: d
+
+      marks =
+        for run <- runs, group in run.deletions, {^group, overlap} <- run.overlaps, uniq: true do
+          if is_integer(overlap), do: overlap, else: :permanent
+        end
+
+      Enum.all?(rewriters, &MapSet.member?(set, &1)) and
+        if yours? do
+          visible = Enum.any?(runs, &(&1.group == group and &1.live))
+
+          revives =
+            Enum.any?(runs, fn run ->
+              run.group != group and group in run.deletions and
+                (run.group == nil or (applied?.(run.group) and not MapSet.member?(set, run.group))) and
+                not Enum.any?(run.deletions, &(applied?.(&1) and not MapSet.member?(set, &1)))
+            end)
+
+          not visible and not revives
+        else
+          Enum.all?(marks, &(&1 != :permanent and (not applied?.(&1) or MapSet.member?(set, &1))))
+        end
+    end)
+  end
+
+  @doc "Returns the text after reverting the groups in `groups` together, by the runs' visibility rule."
+  @spec reverted_groups_text(UndoHistory.t(), binary(), [pos_integer()]) :: binary()
+  def reverted_groups_text(history, text, groups) do
+    %{groups: all} = provenance = UndoHistory.provenance(history)
+    reverted = MapSet.new(groups)
+    applied? = &(Map.fetch!(all, &1).applied and not MapSet.member?(reverted, &1))
+
+    {pieces, _offset} =
+      Enum.reduce(Provenance.runs(provenance), {[], 0}, fn run, {pieces, offset} ->
+        bytes = if run.live, do: binary_part(text, offset, run.bytes), else: run.text
+        next = if run.live, do: offset + run.bytes, else: offset
+
+        live? =
+          (run.group == nil or applied?.(run.group)) and not Enum.any?(run.deletions, applied?)
+
+        {if(live?, do: [bytes | pieces], else: pieces), next}
+      end)
+
+    pieces |> Enum.reverse() |> IO.iodata_to_binary()
+  end
+
+  @doc """
+  Returns whether every dependency between groups points from an older group to a newer one: a later deleter of a group's text, a group that marked its replacement, and a Minga rewriter of your group.
+  """
+  @spec acyclic?(UndoHistory.t()) :: boolean()
+  def acyclic?(history) do
+    %{groups: all} = provenance = UndoHistory.provenance(history)
+    runs = Provenance.runs(provenance)
+
+    deleter_edges =
+      for run <- runs,
+          group <- Enum.reject([run.group | run.deletions], &is_nil/1),
+          Map.has_key?(all, group),
+          d <- later(run, group),
+          d != group,
+          Map.fetch!(all, d).author != :you,
+          do: {group, d}
+
+    mark_edges =
+      for run <- runs, {owner, overlap} <- run.overlaps, is_integer(overlap), do: {owner, overlap}
+
+    Enum.all?(deleter_edges ++ mark_edges, fn {older, newer} -> older < newer end)
+  end
+
   @doc "Returns whether reverting the nodes in `set` together is exact."
   @spec exact?(UndoHistory.t(), Enumerable.t()) :: boolean()
   def exact?(history, set), do: exact_set?(facts(history), MapSet.new(set))
