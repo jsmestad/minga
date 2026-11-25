@@ -69,6 +69,48 @@ defmodule MingaEditor.Handlers.SessionRestore do
   end
 
   @doc """
+  Puts the unsaved text of one waiting swap file into a buffer for its file and shows that buffer.
+
+  This is the user's own choice from the list of waiting text, so it also applies to text that a start held back, and to a file or directory that no longer exists. The buffer becomes the owner of the text on disk. A buffer that has unsaved changes of its own keeps them, and the swap stays.
+  """
+  @spec recover_waiting(state(), Session.swap_entry()) :: state()
+  def recover_waiting(state, %{path: path, swap_path: swap_path}) do
+    name = Path.basename(path)
+
+    with {:ok, file_path, content} <- Session.read_swap_file(swap_path),
+         {:ok, buffer} <- adopt(state, file_path, content, swap_path) do
+      Minga.Log.info(:editor, "Recovered unsaved text: #{file_path}")
+
+      state
+      |> show_in_front(buffer, file_path)
+      |> NoticeWorkflow.publish(
+        "Recovered the unsaved text of #{name}: save to keep it, undo to drop it"
+      )
+    else
+      {:error, :modified} ->
+        NoticeWorkflow.publish(
+          state,
+          "#{name} has unsaved changes of its own: save or discard them, then recover again"
+        )
+
+      # The swap is gone: another editor or a start recovered or removed it after the list was read.
+      {:error, :enoent} ->
+        NoticeWorkflow.publish(state, "The unsaved text of #{name} is no longer waiting")
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :editor,
+          "#{not_recovered(path, reason)} The unsaved text stays in #{swap_path}."
+        )
+
+        NoticeWorkflow.publish(
+          state,
+          "Could not recover the unsaved text of #{name}. It is kept."
+        )
+    end
+  end
+
+  @doc """
   Applies an already-loaded session from the Editor process: reopens its files with their cursors, rebuilds its window splits with each window's cursor and scroll, focuses the window that had focus, and says in the echo area how many files came back.
   """
   @spec apply_session_snapshot(state(), Session.snapshot()) :: state()
@@ -270,30 +312,57 @@ defmodule MingaEditor.Handlers.SessionRestore do
   # A file that was written after its swap holds newer text than the swap, so the swap's text is not put back.
   # It stays on disk, and the user is told where.
   @spec announce_held_back([Session.swap_entry()]) :: :ok
-  defp announce_held_back([]), do: :ok
-
   defp announce_held_back(entries) do
-    Enum.each(entries, fn entry ->
-      Minga.API.message(
-        "#{entry.path} changed after its unsaved text was kept, so the text was not put back. It is in #{entry.swap_path}"
-      )
-    end)
+    Enum.each(entries, fn entry -> Minga.API.message(held_back_line(entry.path)) end)
   end
 
   # Unsaved text that belongs somewhere else is never recovered into this start, so say that it exists.
   @spec announce_waiting_elsewhere(non_neg_integer()) :: :ok
-  defp announce_waiting_elsewhere(0), do: :ok
-
-  defp announce_waiting_elsewhere(1) do
-    Minga.API.message(
-      "Unsaved text of 1 other file is waiting; open its project or the file to recover it"
-    )
+  defp announce_waiting_elsewhere(count) do
+    case waiting_elsewhere_line(count) do
+      nil -> :ok
+      line -> Minga.API.message(line)
+    end
   end
 
-  defp announce_waiting_elsewhere(count) do
-    Minga.API.message(
-      "Unsaved text of #{count} other files is waiting; open their project or the files to recover it"
-    )
+  @doc """
+  The `*Messages*` line for unsaved text that a start held back because its file changed afterwards.
+
+  It names the key that lists the waiting text, read from the live keymap, so a rebind shows up in it.
+  """
+  @spec held_back_line(String.t()) :: String.t()
+  def held_back_line(path) when is_binary(path) do
+    hint = unsaved_text_hint("; recover or discard it with")
+    "#{path} changed after its unsaved text was kept, so the text was not put back#{hint}"
+  end
+
+  @doc """
+  The `*Messages*` line for unsaved text of `count` files that this start does not recover, or `nil` when there is none.
+
+  It names the key that lists the waiting text, read from the live keymap, so a rebind shows up in it.
+  """
+  @spec waiting_elsewhere_line(non_neg_integer()) :: String.t() | nil
+  def waiting_elsewhere_line(0), do: nil
+
+  def waiting_elsewhere_line(1) do
+    "Unsaved text of 1 other file is waiting; open its project or the file to recover it" <>
+      unsaved_text_hint(", or list it with")
+  end
+
+  def waiting_elsewhere_line(count) when is_integer(count) and count > 1 do
+    "Unsaved text of #{count} other files is waiting; open their project or the files to recover it" <>
+      unsaved_text_hint(", or list it with")
+  end
+
+  # Names the live binding of the list of waiting unsaved text, so a user override shows up here too.
+  @spec unsaved_text_hint(String.t()) :: String.t()
+  defp unsaved_text_hint(lead) do
+    case Bindings.sequences_for_command(Active.leader_trie(), :unsaved_text) do
+      [keys | _rest] -> "#{lead} SPC #{Bindings.format_sequence(keys)}"
+      [] -> ""
+    end
+  catch
+    :exit, _ -> ""
   end
 
   # The hint names the live binding, so a user override shows up here too.
@@ -328,9 +397,9 @@ defmodule MingaEditor.Handlers.SessionRestore do
           {state(), non_neg_integer()}
   defp recover_entry({entry, {:ok, file_path, content}}, {state, count}) do
     case adopt(state, file_path, content, entry.swap_path) do
-      {:ok, state} ->
+      {:ok, buffer} ->
         Minga.Log.info(:editor, "Recovered unsaved text: #{file_path}")
-        {state, count + 1}
+        {show_recovered(state, buffer, file_path), count + 1}
 
       {:error, reason} ->
         Minga.Log.warning(
@@ -364,11 +433,11 @@ defmodule MingaEditor.Handlers.SessionRestore do
 
   # Gives the text to the buffer for the file: the one that is already open, or a new one.
   # A file that no longer exists gets a buffer for its path, so the text can be saved back.
-  @spec adopt(state(), String.t(), String.t(), String.t()) :: {:ok, state()} | {:error, term()}
+  @spec adopt(state(), String.t(), String.t(), String.t()) :: {:ok, pid()} | {:error, term()}
   defp adopt(state, file_path, content, swap_path) do
     with {:ok, buffer} <- buffer_for(state, file_path),
          :ok <- Buffer.adopt_recovered_text(buffer, content, swap_path) do
-      {:ok, show_recovered(state, buffer, file_path)}
+      {:ok, buffer}
     end
   catch
     # The buffer can stop between its lookup or start and the call.
@@ -386,6 +455,15 @@ defmodule MingaEditor.Handlers.SessionRestore do
           events_registry: state.extension_surfaces.events_registry,
           allow_missing: true
         )
+    end
+  end
+
+  # The user asked for this text, so its file takes the screen.
+  @spec show_in_front(state(), pid(), String.t()) :: state()
+  defp show_in_front(state, buffer, file_path) do
+    case BufferRegistry.file_tab_for_path_in_active_workspace(state, file_path) do
+      %{id: tab_id} -> MingaEditor.TabWorkflow.switch(state, tab_id)
+      nil -> BufferRegistry.register_buffer(state, buffer, file_path)
     end
   end
 

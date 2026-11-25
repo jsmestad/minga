@@ -200,6 +200,7 @@ Press `SPC` in Normal mode. These sequences also work from the agent view, the f
 | `SPC h e u` | Update all extensions |
 | `SPC h e U` | Update one extension |
 | `SPC q q` | Quit Minga |
+| `SPC q u` | List unsaved text kept after a crash, to recover or discard it |
 
 **Filetype (`SPC m`)**
 

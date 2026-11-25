@@ -336,7 +336,7 @@ Two things keep unsaved text safe, and `:auto_save_delay_ms` decides which one i
 
 Both timers start again with every edit, so text typed without a pause that long is in memory only. With auto-save on, a swap file appears only when a save cannot finish (a read-only file, a full disk, a save conflict): the buffer stays unsaved, and after 5 seconds the swap file takes over.
 
-After a crash, opening the same project gives the text back: the session is restored, each file with a swap file shows its unsaved text, and one notice says so. A buffer that crashes on its own, while the editor keeps running, loses nothing: it writes its text as it stops, and the editor reopens the file with it. Quitting, with or without saving, removes this run's swap files. See [Unsaved text across a crash](ARCHITECTURE.md#unsaved-text-across-a-crash) for the full rules.
+After a crash, opening the same project gives the text back: the session is restored, each file with a swap file shows its unsaved text, and one notice says so. A buffer that crashes on its own, while the editor keeps running, loses nothing: it writes its text as it stops, and the editor reopens the file with it. Text that belongs to another project stays where it is until you open that project, and `SPC q u` lists everything that is waiting so you can recover or discard it. Quitting, with or without saving, removes this run's swap files. See [Unsaved text across a crash](ARCHITECTURE.md#unsaved-text-across-a-crash) for the full rules.
 
 Some buffer-aware controls are still planned:
 

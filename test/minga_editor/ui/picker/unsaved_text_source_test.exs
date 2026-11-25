@@ -1,0 +1,126 @@
+defmodule MingaEditor.UI.Picker.UnsavedTextSourceTest do
+  @moduledoc "The list of waiting unsaved text says where each text belongs, how old it is and how it differs from its file."
+
+  use ExUnit.Case, async: true
+
+  alias MingaEditor.UI.Picker.Empty
+  alias MingaEditor.UI.Picker.Item
+  alias MingaEditor.UI.Picker.UnsavedTextSource
+
+  @now 1_800_000_000
+
+  defp entry(overrides) do
+    Map.merge(
+      %{
+        path: "/work/alpha/lib/a.ex",
+        swap_path: "/swap/a.4242.swap",
+        swap_mtime: @now - 30,
+        changed_since?: false,
+        project: "/work/alpha",
+        file_exists?: true,
+        lines: 12,
+        changed_lines: 3
+      },
+      Map.new(overrides)
+    )
+  end
+
+  test "a row names the file from its project root, with the project as its section" do
+    assert [%Item{label: "lib/a.ex", group: "alpha · /work", search_text: "/work/alpha/lib/a.ex"}] =
+             UnsavedTextSource.items([entry([])], @now)
+  end
+
+  test "a file outside any project is listed by its full path under its own section" do
+    assert [%Item{label: "/tmp/notes.txt", group: "Outside a project"}] =
+             UnsavedTextSource.items([entry(path: "/tmp/notes.txt", project: nil)], @now)
+  end
+
+  test "a path under the home directory is shortened with a tilde" do
+    home_file = Path.join(Path.expand("~"), "notes.txt")
+
+    assert [%Item{label: "~/notes.txt"}] =
+             UnsavedTextSource.items([entry(path: home_file, project: nil)], @now)
+  end
+
+  test "the description says how the text stands against the file, and when it was written" do
+    descriptions =
+      for overrides <- [
+            [changed_lines: 3],
+            [changed_lines: 1],
+            [changed_lines: nil],
+            [file_exists?: false, changed_lines: nil, lines: 1],
+            [changed_since?: true, changed_lines: 3]
+          ] do
+        [%Item{description: description}] = UnsavedTextSource.items([entry(overrides)], @now)
+        description
+      end
+
+    assert descriptions == [
+             "3 lines differ · just now",
+             "1 line differs · just now",
+             "12 lines, differs from the file · just now",
+             "1 line, the file is gone · just now",
+             "3 lines differ, the file changed after this text was kept · just now"
+           ]
+  end
+
+  test "the age is given to the coarsest unit that still tells two crashes apart" do
+    ages =
+      for seconds <- [5, 59, 60, 3_599, 3_600, 86_399, 86_400, 172_800, 950_400] do
+        [%Item{description: description}] =
+          UnsavedTextSource.items([entry(swap_mtime: @now - seconds)], @now)
+
+        description |> String.split(" · ") |> List.last()
+      end
+
+    assert ages == [
+             "just now",
+             "just now",
+             "1 min ago",
+             "59 min ago",
+             "1 h ago",
+             "23 h ago",
+             "1 day ago",
+             "2 days ago",
+             "11 days ago"
+           ]
+  end
+
+  test "rows of one project stay together, and files outside a project come last" do
+    entries = [
+      entry(path: "/tmp/loose.txt", project: nil, swap_path: "/swap/1.swap"),
+      entry(path: "/work/beta/b.ex", project: "/work/beta", swap_path: "/swap/2.swap"),
+      entry(path: "/work/alpha/lib/a.ex", project: "/work/alpha", swap_path: "/swap/3.swap"),
+      entry(path: "/work/beta/c.ex", project: "/work/beta", swap_path: "/swap/4.swap")
+    ]
+
+    assert entries |> UnsavedTextSource.items(@now) |> Enum.map(& &1.group) == [
+             "alpha · /work",
+             "beta · /work",
+             "beta · /work",
+             "Outside a project"
+           ]
+  end
+
+  test "every row offers recover and discard, with recover as the default" do
+    [item] = UnsavedTextSource.items([entry([])], @now)
+
+    assert UnsavedTextSource.actions(item) == [{"Recover", :recover}, {"Discard", :discard}]
+  end
+
+  test "with nothing waiting, the empty list says so with one muted line and no next step" do
+    assert UnsavedTextSource.items([], @now) == []
+
+    assert %Empty{
+             title: "No unsaved text is waiting.",
+             why: "Text kept after a crash shows up here.",
+             rows: [],
+             typing?: false
+           } = UnsavedTextSource.empty(%{query: "", total: 0, context: nil})
+  end
+
+  test "a query that matches none of the waiting text says which query" do
+    assert %Empty{title: "No waiting text matches “notes”.", rows: [], typing?: true} =
+             UnsavedTextSource.empty(%{query: "notes ", total: 2, context: nil})
+  end
+end

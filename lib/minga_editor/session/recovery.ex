@@ -120,13 +120,14 @@ defmodule MingaEditor.Session.Recovery do
   @impl true
   @spec run(t()) :: {:ok, result()} | {:error, term()}
   def run(%__MODULE__{} = effect) do
-    scope = scan_scope(effect)
+    snapshot = load_project_session(effect)
+    scope = effect |> scan_scope() |> with_session_files(snapshot)
 
     {held_back, fresh} =
       effect |> recoverable_entries(scope) |> Enum.split_with(& &1.changed_since?)
 
     resume = %{
-      snapshot: load_project_session(effect),
+      snapshot: snapshot,
       recovered: read_entries(fresh),
       held_back: held_back,
       waiting_elsewhere: waiting_elsewhere(effect, scope)
@@ -183,6 +184,16 @@ defmodule MingaEditor.Session.Recovery do
     {_shell, _workspace, _tab, buffers, _active} = identity
     {:files, Enum.flat_map(buffers, &buffer_file/1)}
   end
+
+  # A file the saved session reopens gets its unsaved text back wherever it lives: the session brings
+  # the file to the screen, so showing its saved text while its unsaved text waits would be a quiet loss.
+  @spec with_session_files(Session.Swap.Recovery.scope() | nil, Snapshot.t() | nil) ::
+          Session.Swap.Recovery.scope() | nil
+  defp with_session_files(scope, nil), do: scope
+  defp with_session_files(nil, %Snapshot{}), do: nil
+
+  defp with_session_files(scope, %Snapshot{buffers: buffers}),
+    do: {:any, [scope, {:files, Enum.map(buffers, & &1.file)}]}
 
   # Runs in the recovery worker, so the buffer call does not block the Editor.
   @spec buffer_file(term()) :: [String.t()]

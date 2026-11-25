@@ -282,6 +282,19 @@ defmodule Minga.Session.Swap.RecoveryTest do
       assert Recovery.scan(scan_opts(ctx.swap_dir) ++ [scope: {:files, []}]) == []
     end
 
+    test "an any scope returns what one of its scopes returns", ctx do
+      scope = {:any, [{:project, ctx.alpha.root}, {:files, [ctx.beta.file]}]}
+
+      paths =
+        (scan_opts(ctx.swap_dir) ++ [scope: scope])
+        |> Recovery.scan()
+        |> Enum.map(& &1.path)
+        |> Enum.sort()
+
+      assert paths == Enum.sort([ctx.alpha.file, ctx.beta.file])
+      assert Recovery.scan(scan_opts(ctx.swap_dir) ++ [scope: {:any, []}]) == []
+    end
+
     test "the default scope returns every recoverable swap", ctx do
       paths = ctx.swap_dir |> scan_opts() |> Recovery.scan() |> Enum.map(& &1.path) |> Enum.sort()
 
@@ -478,6 +491,109 @@ defmodule Minga.Session.Swap.RecoveryTest do
 
       assert Recovery.read(swap_path) == {:error, :invalid_format}
       assert File.exists?(swap_path)
+    end
+  end
+
+  describe "waiting/1" do
+    setup %{tmp_dir: tmp_dir} do
+      swap_dir = Path.join(tmp_dir, "swap")
+      File.mkdir_p!(swap_dir)
+      root = Path.join(tmp_dir, "project")
+      File.mkdir_p!(Path.join(root, "lib"))
+      File.write!(Path.join(root, "mix.exs"), "")
+      {:ok, canonical_root} = Minga.Project.Root.canonical_path(root)
+      %{swap_dir: swap_dir, root: root, canonical_root: canonical_root}
+    end
+
+    test "says where each text belongs, when it was written and how it differs", ctx do
+      now = System.os_time(:second)
+      edited = Path.join(ctx.root, "lib/edited.ex")
+      File.write!(edited, "one\ntwo\nthree\n")
+      File.touch!(edited, now - 600)
+      write_swap_file(ctx.swap_dir, edited, "one\nTWO\nthree\nfour\n", mtime: now - 300)
+
+      assert [entry] = Recovery.waiting(scan_opts(ctx.swap_dir))
+
+      assert entry.path == edited
+      assert entry.project == ctx.canonical_root
+      assert entry.swap_mtime == now - 300
+      assert entry.file_exists?
+      refute entry.changed_since?
+      # The final newline ends the fourth line; it does not start a fifth.
+      assert entry.lines == 4
+      # "two" became "TWO" and "four" was added: two lines differ.
+      assert entry.changed_lines == 2
+    end
+
+    test "lists text that no start recovers by itself, newest first, and removes nothing", ctx do
+      now = System.os_time(:second)
+      gone = Path.join(ctx.root, "lib/gone.ex")
+      held_back = Path.join(ctx.root, "lib/saved_later.ex")
+      loose = Path.join(Path.dirname(ctx.root), "loose.txt")
+      File.write!(held_back, "saved later")
+      File.write!(loose, "saved")
+
+      gone_swap = write_swap_file(ctx.swap_dir, gone, "typed for an hour", mtime: now - 30)
+      held_swap = write_swap_file(ctx.swap_dir, held_back, "older text", mtime: now - 3_600)
+      loose_swap = write_swap_file(ctx.swap_dir, loose, "unsaved", mtime: now - 60)
+      File.touch!(loose, now - 120)
+      # Owned by a running editor: not waiting.
+      owned = Path.join(ctx.root, "lib/owned.ex")
+      File.write!(owned, "saved")
+      write_swap_file(ctx.swap_dir, owned, "unsaved", os_pid: 4242)
+
+      waiting = Recovery.waiting(scan_opts(ctx.swap_dir, fn pid -> pid == 4242 end))
+
+      assert Enum.map(waiting, & &1.path) == [gone, loose, held_back]
+
+      assert [
+               %{file_exists?: false, changed_lines: nil, lines: 1, project: project},
+               %{file_exists?: true, project: other_project, changed_since?: false},
+               %{file_exists?: true, changed_since?: true}
+             ] = waiting
+
+      assert project == ctx.canonical_root
+      # The loose file is outside the project. What is above it depends on where the test runs.
+      refute other_project == ctx.canonical_root
+
+      assert Minga.Session.waiting_unsaved_text(
+               scan_opts(ctx.swap_dir, fn pid -> pid == 4242 end)
+             ) == waiting
+
+      for swap <- [gone_swap, held_swap, loose_swap], do: assert(File.exists?(swap))
+    end
+
+    test "counts the lines that differ without comparing line by line", ctx do
+      file = Path.join(ctx.root, "lib/long.ex")
+      saved = Enum.map_join(1..30_000, "\n", &"line #{&1}")
+      File.write!(file, saved)
+
+      for {name, unsaved, expected} <- [
+            # Every line rewritten: the count is the number of lines, not twice that.
+            {"rewritten", Enum.map_join(1..30_000, "\n", &"changed #{&1}"), 30_000},
+            # Lines only moved: the text differs, and that is all the count can say.
+            {"moved", "line 30000\n" <> Enum.map_join(1..29_999, "\n", &"line #{&1}"), 1},
+            # Only the final newline differs.
+            {"newline", saved <> "\n", 1},
+            {"appended", saved <> "\nmore\nand more", 2}
+          ] do
+        swap = write_swap_file(ctx.swap_dir, file, unsaved)
+        assert [%{changed_lines: ^expected}] = Recovery.waiting(scan_opts(ctx.swap_dir)), name
+        File.rm!(swap)
+      end
+    end
+
+    test "remove/1 deletes a swap and says when it was already gone", ctx do
+      swap = write_swap_file(ctx.swap_dir, Path.join(ctx.root, "lib/x.ex"), "unsaved")
+
+      assert Minga.Session.discard_swap_file(swap) == :ok
+      refute File.exists?(swap)
+      assert Minga.Session.discard_swap_file(swap) == {:error, :enoent}
+    end
+
+    test "is empty when nothing waits or the swap directory does not exist", ctx do
+      assert Recovery.waiting(scan_opts(ctx.swap_dir)) == []
+      assert Recovery.waiting(swap_dir: "/nonexistent/path") == []
     end
   end
 end

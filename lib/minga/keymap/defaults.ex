@@ -86,6 +86,7 @@ defmodule Minga.Keymap.Defaults do
 
     # ── Quit ──────────────────────────────────────────────────────────────────
     {~k(q q), :quit_all, "Quit editor"},
+    {~k(q u), :unsaved_text, "Unsaved text"},
 
     # ── Help ──────────────────────────────────────────────────────────────────
     {~k(h a), :apropos, "Apropos"},
