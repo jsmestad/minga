@@ -7,8 +7,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
+	"github.com/jsmestad/minga/go/tui/internal/terminal"
 )
 
 func sameColor(a, b color.Color) bool {
@@ -210,7 +212,24 @@ func TestLinesAreRecomposedWhenTheTerminalsFeaturesOrPlaceChange(t *testing.T) {
 	}
 }
 
-func TestAConfirmingAnswerFromAKnownTerminalIsNotReportedAgain(t *testing.T) {
+// reportSources returns how the last report says each feature was settled.
+func reportSources(packets [][]byte) map[terminal.Feature]terminal.Source {
+	var sources map[terminal.Feature]terminal.Source
+	for _, packet := range packets {
+		if len(packet) < 4 || packet[0] != generated.OPTerminalReport {
+			continue
+		}
+		sources = map[terminal.Feature]terminal.Source{}
+		for i := 4; i+2 < len(packet); i += 3 {
+			sources[terminal.Feature(packet[i])] = terminal.Source(packet[i+2])
+		}
+	}
+	return sources
+}
+
+// The report carries how each feature was settled, so a terminal that confirms what the table said is news:
+// `:checkhealth terminal` must not go on saying "known terminal" after the terminal answered.
+func TestAConfirmingAnswerFromAKnownTerminalIsReportedWithItsNewSource(t *testing.T) {
 	out := make(chan []byte, 16)
 	ghostty := func(name string) string {
 		if name == "TERM_PROGRAM" {
@@ -226,17 +245,69 @@ func TestAConfirmingAnswerFromAKnownTerminalIsNotReportedAgain(t *testing.T) {
 	// The timeout settles the rest: the one settled report goes out.
 	updated, _ := model.Update(capabilityTimeoutMsg{})
 	model = updated.(Model)
-	if report := lastReport(drainOutboundPackets(out)); report[generated.TerminalFeatureStyledUnderlines] != generated.TerminalFeatureStatusDetected {
+	settled := drainOutboundPackets(out)
+	if report := lastReport(settled); report[generated.TerminalFeatureStyledUnderlines] != generated.TerminalFeatureStatusDetected {
 		t.Fatalf("settled report = %v", report)
 	}
-
-	// The terminal then confirms what the table said. Only how the feature was settled changes, which the report does not carry.
-	for _, content := range []string{"Smulx=\x1b[4:%p1%dm", "Setulc=\x1b[58:2::%p1%dm"} {
-		updated, _ = model.Update(tea.CapabilityMsg{Content: content})
-		model = updated.(Model)
+	if sources := reportSources(settled); sources[generated.TerminalFeatureStyledUnderlines] != terminal.SourceKnownTerminal {
+		t.Fatalf("settled sources = %v, want styled underlines from the table of known terminals", sources)
 	}
+
+	// The terminal then confirms what the table said. The status stays and the source changes.
+	updated, _ = model.Update(tea.CapabilityMsg{Content: "Smulx=\x1b[4:%p1%dm"})
+	model = updated.(Model)
+	confirmed := drainOutboundPackets(out)
+	if report := lastReport(confirmed); report[generated.TerminalFeatureStyledUnderlines] != generated.TerminalFeatureStatusDetected {
+		t.Fatalf("report after the answer = %v", report)
+	}
+	if sources := reportSources(confirmed); sources[generated.TerminalFeatureStyledUnderlines] != terminal.SourceAnswered {
+		t.Fatalf("sources after the answer = %v, want styled underlines answered by the terminal", sources)
+	}
+
+	// The same answer again changes nothing, so nothing is sent.
+	updated, _ = model.Update(tea.CapabilityMsg{Content: "Smulx=\x1b[4:%p1%dm"})
+	model = updated.(Model)
 	if again := lastReport(drainOutboundPackets(out)); again != nil {
 		t.Fatalf("an identical report was sent again: %v", again)
+	}
+}
+
+func TestAForcedFeatureIsReportedAsTheUsersAndDrawnAsForced(t *testing.T) {
+	out := make(chan []byte, 16)
+	model, problems := New(80, 24, out).WithTerminalOverrides("styled_underlines=on,underline_color=off,true_color=off,bogus=on")
+	if len(problems) != 1 {
+		t.Fatalf("problems = %v, want the one unusable entry", problems)
+	}
+
+	first := [][]byte{model.TerminalReportPacket()}
+	if report, sources := lastReport(first), reportSources(first); report[generated.TerminalFeatureStyledUnderlines] != generated.TerminalFeatureStatusDetected ||
+		report[generated.TerminalFeatureUnderlineColor] != generated.TerminalFeatureStatusFallback ||
+		sources[generated.TerminalFeatureStyledUnderlines] != terminal.SourceUser || sources[generated.TerminalFeatureUnderlineColor] != terminal.SourceUser {
+		t.Fatalf("first report = %v, sources %v", report, sources)
+	}
+
+	// The terminal says the opposite of both. The user's choice stays, in the report and in what is drawn.
+	for _, msg := range []tea.Msg{tea.CapabilityMsg{Content: "Smulx;Setulc=\x1b[58:2::%p1%dm"}, tea.ColorProfileMsg{Profile: colorprofile.TrueColor}, capabilityTimeoutMsg{}} {
+		updated, _ := model.Update(msg)
+		model = updated.(Model)
+	}
+	if !model.capabilities.Supports(generated.TerminalFeatureStyledUnderlines) || model.capabilities.Supports(generated.TerminalFeatureUnderlineColor) {
+		t.Fatal("what the user forced must decide what is drawn")
+	}
+	settled := drainOutboundPackets(out)
+	if sources := reportSources(settled); sources[generated.TerminalFeatureStyledUnderlines] != terminal.SourceUser || sources[generated.TerminalFeatureTrueColor] != terminal.SourceUser {
+		t.Fatalf("settled sources = %v", sources)
+	}
+	if report := lastReport(settled); report[generated.TerminalFeatureTrueColor] != generated.TerminalFeatureStatusFallback {
+		t.Fatalf("true colour forced off = %d, want fallback", report[generated.TerminalFeatureTrueColor])
+	}
+
+	// A forced colour profile is what the program is started with.
+	if profile, forced := model.ForcedColorProfile(); !forced || profile != colorprofile.ANSI256 {
+		t.Fatalf("forced profile = %v, %v; want the 256 colour profile", profile, forced)
+	}
+	if _, forced := New(80, 24, nil).ForcedColorProfile(); forced {
+		t.Fatal("without an override the profile is detected")
 	}
 }
 

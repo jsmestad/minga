@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	tea "charm.land/bubbletea/v2"
@@ -37,7 +38,14 @@ func run() error {
 	out := make(chan []byte, 128)
 
 	filter := ui.NewInputFilter()
-	model := ui.NewWithTransport(width, height, out, done).WithTerminalEnvironment(os.Getenv)
+	// What the user forced is read once and taken out of the environment, so nothing this process starts inherits it.
+	overrides := os.Getenv(terminal.OverridesVariable)
+	_ = os.Unsetenv(terminal.OverridesVariable)
+	model, problems := ui.NewWithTransport(width, height, out, done).WithTerminalOverrides(overrides)
+	if len(problems) > 0 {
+		log.Printf("[GO_TUI/warn] %s: ignored %s", terminal.OverridesVariable, strings.Join(problems, "; "))
+	}
+	model = model.WithTerminalEnvironment(os.Getenv)
 	if err := protocol.WritePacket(os.Stdout, model.ReadyPacket()); err != nil {
 		return err
 	}
@@ -46,7 +54,16 @@ func run() error {
 	}
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
-	program := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(terminal.NewKeyInput(tty)), tea.WithOutput(filter.TrackOutput(tty)), tea.WithFilter(filter.Filter))
+	options := []tea.ProgramOption{
+		tea.WithContext(ctx),
+		tea.WithInput(terminal.NewKeyInput(tty)),
+		tea.WithOutput(filter.TrackOutput(tty)),
+		tea.WithFilter(filter.Filter),
+	}
+	if profile, forced := model.ForcedColorProfile(); forced {
+		options = append(options, tea.WithColorProfile(profile))
+	}
+	program := tea.NewProgram(model, options...)
 	stopHangup := quitOnHangup(program)
 	defer stopHangup()
 	return runSession(program, os.Stdin, os.Stdout, out, done, stop)
