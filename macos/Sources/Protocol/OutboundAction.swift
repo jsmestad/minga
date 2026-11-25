@@ -61,6 +61,8 @@ nonisolated public enum OutboundAction: Equatable, Sendable {
     case ready(cols: UInt16, rows: UInt16)
     case keyPress(codepoint: UInt32, modifiers: UInt8, sequence: UInt32, composerOffer: UInt64 = 0)
     case resize(cols: UInt16, rows: UInt16)
+    /// Whether the app is in the foreground (active) or in the background. Sent once after `ready` and on every change.
+    case frontendForeground(Bool)
     case requestKeyframe(lastGoodFrameSequence: UInt32, generation: UInt32)
     case frameApplied(generation: UInt32, frameSequence: UInt32)
     case frameRejected(generation: UInt32, frameSequence: UInt32, lastAppliedFrameSequence: UInt32, reason: UInt8, disposition: UInt8)

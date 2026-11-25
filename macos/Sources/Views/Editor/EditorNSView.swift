@@ -1066,6 +1066,7 @@ final class EditorNSView: MTKView {
         } else {
             readySent = true
             encoder.send(.ready(cols: grid.cols, rows: grid.rows))
+            sendForeground()
         }
 
         PortLogger.info("\(reason): \(grid.cols)x\(grid.rows) rows")
@@ -1123,6 +1124,18 @@ final class EditorNSView: MTKView {
             name: NSWindow.didMiniaturizeNotification,
             object: window
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationActiveStateDidChange),
+            name: NSApplication.didBecomeActiveNotification,
+            object: NSApp
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationActiveStateDidChange),
+            name: NSApplication.didResignActiveNotification,
+            object: NSApp
+        )
         onFullScreenChanged?(window.styleMask.contains(.fullScreen))
 
     }
@@ -1160,8 +1173,22 @@ final class EditorNSView: MTKView {
             name: NSWindow.didMiniaturizeNotification,
             object: observedWindow
         )
+        NotificationCenter.default.removeObserver(self, name: NSApplication.didBecomeActiveNotification, object: NSApp)
+        NotificationCenter.default.removeObserver(self, name: NSApplication.didResignActiveNotification, object: NSApp)
         onFullScreenChanged?(false)
         self.observedWindow = nil
+    }
+
+    /// Tells the BEAM whether the app is in the foreground. The BEAM learns it once after `ready` and on every change,
+    /// and decides what follows (for example, whether a "needs you" turns into a notification).
+    private func sendForeground() {
+        encoder.send(.frontendForeground(NSApp.isActive))
+    }
+
+    @objc private func applicationActiveStateDidChange(_ notification: Notification) {
+        // Before `ready` the BEAM has no frontend to attach the fact to; `ready` is followed by the current state.
+        guard readySent else { return }
+        sendForeground()
     }
 
     /// Notifies the AppKit focus owner that SwiftUI updated the hosted editor view.
@@ -1251,6 +1278,7 @@ final class EditorNSView: MTKView {
             readySent = true
             dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.rows)
             encoder.send(.ready(cols: grid.cols, rows: grid.rows))
+            sendForeground()
             os_signpost(.event, log: startupLog, name: "ReadySent", "%{public}dx%{public}d", grid.cols, grid.rows)
             PortLogger.info("Window ready: \(grid.cols)x\(grid.rows) rows (\(Int(newSize.width))x\(Int(newSize.height))pt)")
         } else if inLiveResize {

@@ -138,7 +138,7 @@ The root `MingaEditor.State` contains 16 cohesive values:
 |---|---|---|
 | `workspace` | `MingaEditor.Session.State` | Active tab editing context: buffers, windows, mode state, search, file tree, mouse, hover, and agent UI. |
 | `shell_runtime` | `MingaEditor.Shell.Runtime` | Active shell identity, implementation state, and exact-identity stash. |
-| `frontend` | `MingaEditor.State.Frontend` | Transport, backend, capabilities, terminal viewport, pressure, and input correlation. |
+| `frontend` | `MingaEditor.State.Frontend` | Transport, backend, capabilities, terminal viewport, pressure, input correlation, and what the frontend said about itself: whether it is in the foreground, and its terminal report. |
 | `render` | `MingaEditor.State.Render` | Renderer connection, render correlation, messages, layout, focus, and cursor observations. |
 | `parser` | `MingaEditor.State.Parser` | Parser manager and status, highlighting, injections, and face registries. |
 | `agent_connection` | `MingaEditor.State.AgentConnection` | Agent provider configuration and ingest connection. |
@@ -381,6 +381,8 @@ Zig currently owns the tree-sitter parser process. It remains a good fit for tha
 NIFs (Native Implemented Functions) run inside the BEAM process. A failure in a NIF takes down the entire Erlang VM: every buffer, every process, everything. This directly contradicts Minga's isolation model.
 
 A Port is an OS-level process boundary. A frontend can crash completely, and the BEAM keeps running. The supervisor detects the Port died, restarts the Frontend.Manager, Renderer.Server, and Editor, then the Editor re-renders from buffer state. Your data stays intact because it lives in completely separate processes.
+
+A frontend also says two things about itself after `ready`, each once: whether it is in the foreground (`frontend_foreground`: the terminal's window focus, or the macOS app's active state) and, for the terminal, which features its host terminal has (`terminal_report`). `Frontend.Manager` keeps the last of each for the connection and replays them after `ready` to a subscriber that registers late, so an Editor that restarts learns them again. The Editor keeps them on `MingaEditor.State.Frontend` and broadcasts `:frontend_foreground_changed` on each change; code below the editor layer subscribes to that event instead of asking the Editor. See [`PROTOCOL.md`](PROTOCOL.md#0x13-frontend_foreground).
 
 ---
 

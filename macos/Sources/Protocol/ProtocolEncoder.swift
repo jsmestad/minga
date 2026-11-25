@@ -281,7 +281,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             return inputSeq > 0 ? nil : .invalidPayload("Horizontal pan requires a positive input sequence")
         case .gitPullAndRetry(let toastID):
             return toastID > 0 ? nil : .invalidPayload("Git retry requires a positive toast identity")
-        case .ready, .keyPress, .resize, .requestKeyframe, .frameApplied, .frameRejected,
+        case .ready, .keyPress, .resize, .frontendForeground, .requestKeyframe, .frameApplied, .frameRejected,
              .windowReferenceMiss, .operationNativeResult, .nativePresentationObservation,
              .applicationQuitRequest, .applicationQuitDecision, .mouse, .editorText, .textPresentationState, .scrollBatch,
              .selectTab, .closeTab, .tabCopyPath, .tabReorder, .tabPin, .tabUnpin,
@@ -323,6 +323,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         case .ready(let cols, let rows): encodeReady(cols: cols, rows: rows)
         case .keyPress(let codepoint, let modifiers, let sequence, let composerOffer): encodeKeyPress(codepoint: codepoint, modifiers: modifiers, seq: sequence, composerOffer: composerOffer)
         case .resize(let cols, let rows): encodeResize(cols: cols, rows: rows)
+        case .frontendForeground(let foreground): encodeFrontendForeground(foreground)
         case .requestKeyframe(let lastGoodFrameSequence, let generation): encodeRequestKeyframe(lastGoodFrameSeq: lastGoodFrameSequence, generation: generation)
         case .frameApplied(let generation, let frameSequence): encodeFrameApplied(generation: generation, frameSeq: frameSequence)
         case .frameRejected(let generation, let frameSequence, let lastAppliedFrameSequence, let reason, let disposition): encodeFrameRejected(generation: generation, frameSeq: frameSequence, lastAppliedFrameSeq: lastAppliedFrameSequence, reason: reason, disposition: GeneratedProtocol.FrameRejectionDisposition.decode(disposition))
@@ -625,6 +626,14 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         writeU16(&buf, 1, cols)
         writeU16(&buf, 3, rows)
         writeFrame(buf, deliveryPolicy: .coalescing(.viewportResize))
+    }
+
+    /// Tell the BEAM whether the app is in the foreground: one byte, 1 in the foreground, 0 in the background.
+    private func encodeFrontendForeground(_ foreground: Bool) {
+        var buf = Data(count: 2)
+        buf[0] = OP_FRONTEND_FOREGROUND
+        buf[1] = foreground ? 1 : 0
+        writeFrame(buf)
     }
 
     /// Request a fresh BEAM recovery generation.

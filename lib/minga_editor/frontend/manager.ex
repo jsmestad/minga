@@ -218,9 +218,14 @@ defmodule MingaEditor.Frontend.Manager do
     # and is lost. Replaying it here ensures the Editor always receives
     # the initial dimensions and capabilities regardless of startup
     # ordering.
+    #
+    # What the frontend said about itself after ready follows it, in the same order. A frontend says these things
+    # once (its place when it changes, its terminal report when it settles), so a subscriber that registers late,
+    # or an Editor that restarts, would otherwise never learn them.
     case new_state do
       %{ready: true, terminal_size: {width, height}} ->
         send(pid, {:minga_input, {:ready, width, height}})
+        replay_connection_reports(pid, new_state)
 
       _ ->
         :ok
@@ -282,6 +287,16 @@ defmodule MingaEditor.Frontend.Manager do
       {:ok, {:capabilities_updated, caps}} ->
         new_state = %{state | capabilities: caps}
         broadcast(new_state.subscribers, {:minga_input, {:capabilities_updated, caps}})
+        {:noreply, new_state}
+
+      {:ok, {:frontend_foreground, status}} ->
+        new_state = %{state | foreground: status}
+        broadcast(new_state.subscribers, {:minga_input, {:frontend_foreground, status}})
+        {:noreply, new_state}
+
+      {:ok, {:terminal_report, report}} ->
+        new_state = %{state | terminal_report: report}
+        broadcast(new_state.subscribers, {:minga_input, {:terminal_report, report}})
         {:noreply, new_state}
 
       {:ok, {:resize, width, height}} ->
@@ -507,13 +522,32 @@ defmodule MingaEditor.Frontend.Manager do
 
     case protocol_version do
       ^expected ->
-        new_state = %{state | ready: true, terminal_size: {width, height}, capabilities: caps}
+        # A ready starts a connection: what the last one said about its place and its terminal no longer holds.
+        new_state = %{
+          state
+          | ready: true,
+            terminal_size: {width, height},
+            capabilities: caps,
+            foreground: nil,
+            terminal_report: nil
+        }
+
         broadcast(new_state.subscribers, {:minga_input, {:ready, width, height}})
         {:noreply, new_state}
 
       other ->
         reject_protocol_mismatch(state, expected, other)
     end
+  end
+
+  @spec replay_connection_reports(pid(), state()) :: :ok
+  defp replay_connection_reports(pid, state) do
+    if state.foreground, do: send(pid, {:minga_input, {:frontend_foreground, state.foreground}})
+
+    if state.terminal_report,
+      do: send(pid, {:minga_input, {:terminal_report, state.terminal_report}})
+
+    :ok
   end
 
   @spec reject_protocol_mismatch(state(), non_neg_integer(), non_neg_integer()) ::

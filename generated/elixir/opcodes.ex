@@ -7,7 +7,7 @@ defmodule Minga.Protocol.Opcodes do
 
   # Protocol version
   @spec protocol_version() :: non_neg_integer()
-  def protocol_version, do: 46
+  def protocol_version, do: 47
 
   # Input
   @spec key_press() :: non_neg_integer()
@@ -50,6 +50,10 @@ defmodule Minga.Protocol.Opcodes do
   def horizontal_pan, do: 0x12
   @spec log_message() :: non_neg_integer()
   def log_message, do: 0x60
+  @spec terminal_report() :: non_neg_integer()
+  def terminal_report, do: 0x62
+  @spec frontend_foreground() :: non_neg_integer()
+  def frontend_foreground, do: 0x13
 
   # Render
   @spec begin_frame() :: non_neg_integer()

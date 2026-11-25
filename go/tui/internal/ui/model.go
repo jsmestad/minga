@@ -10,11 +10,13 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/latency"
 	"github.com/jsmestad/minga/go/tui/internal/port"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
+	"github.com/jsmestad/minga/go/tui/internal/terminal"
 )
 
 const (
@@ -29,16 +31,20 @@ const (
 )
 
 type Model struct {
-	width          int
-	height         int
-	out            chan<- []byte
-	done           <-chan struct{}
-	viewport       viewport.Model
-	zones          *zoneManager
-	presentedClick *presentedMouseClick
-	gitStatusHits  *gitStatusHits
-	gitHitRevision uint64
-	windows        map[uint16]protocol.WindowContent
+	width  int
+	height int
+	out    chan<- []byte
+	done   <-chan struct{}
+	// capabilities is what this frontend knows about its host terminal. It drives the frontend's fallbacks and is what the BEAM is told.
+	capabilities terminal.Capabilities
+	// reportedCapabilities is the value the BEAM was last told, so an unchanged value is not sent again.
+	reportedCapabilities terminal.Capabilities
+	viewport             viewport.Model
+	zones                *zoneManager
+	presentedClick       *presentedMouseClick
+	gitStatusHits        *gitStatusHits
+	gitHitRevision       uint64
+	windows              map[uint16]protocol.WindowContent
 	// residentRows is the indexed, value-semantic authority for window rows.
 	// WindowContent.Rows is retained only as a small-fixture compatibility view.
 	residentRows      map[uint16]residentRows
@@ -193,6 +199,8 @@ func NewWithTransport(width, height uint16, out chan<- []byte, done <-chan struc
 		height:                         int(height),
 		out:                            out,
 		done:                           done,
+		capabilities:                   terminal.NewCapabilities(),
+		reportedCapabilities:           terminal.NewCapabilities(),
 		viewport:                       vp,
 		zones:                          newZoneManager(),
 		presentedClick:                 &presentedMouseClick{},
@@ -229,6 +237,12 @@ func (m Model) ReadyPacket() []byte {
 	return protocol.EncodeReady(size.cols, size.rows)
 }
 
+// TerminalReportPacket reports what is known about the host terminal before it has answered anything: every detected
+// feature is pending. It follows the ready packet, so the BEAM knows from the start that this frontend has a host terminal.
+func (m Model) TerminalReportPacket() []byte {
+	return protocol.EncodeTerminalReport(m.capabilities)
+}
+
 func (m *Model) reportGridResize() {
 	size := m.layout.gridSize()
 	if size != m.reportedGrid && m.send(protocol.EncodeResize(size.cols, size.rows)) {
@@ -256,8 +270,54 @@ func latencyHUDEnvEnabled() bool {
 
 type agentAnimationTickMsg struct{}
 
+// Init starts capability detection. Bubble Tea asks the terminal for its colour profile, its keyboard enhancements
+// and synchronized output on its own; focus reporting is asked for here. The timeout settles whatever the terminal
+// never answers.
 func (m Model) Init() tea.Cmd {
-	return nil
+	return tea.Batch(
+		tea.Raw(ansi.RequestModeFocusEvent),
+		tea.Tick(terminal.DetectionTimeout, func(time.Time) tea.Msg { return capabilityTimeoutMsg{} }),
+	)
+}
+
+// capabilityTimeoutMsg ends the wait for the terminal's answers to capability queries.
+type capabilityTimeoutMsg struct{}
+
+// observeTerminal records what a terminal message says about the terminal's features and where the terminal is,
+// and tells the BEAM. It never consumes the message.
+//
+// The terminal's answers arrive one by one right after the start. They are collected, and the report goes out once:
+// when the last answer is in, or when the timeout settles the rest. A later change (a first focus event from a
+// terminal that answered no query) is reported when it happens.
+func (m *Model) observeTerminal(msg tea.Msg) {
+	switch msg := msg.(type) {
+	case tea.FocusMsg:
+		m.send(protocol.EncodeFrontendForeground(true))
+		m.capabilities.Resolve(generated.TerminalFeatureFocusReporting, true)
+	case tea.BlurMsg:
+		m.send(protocol.EncodeFrontendForeground(false))
+		m.capabilities.Resolve(generated.TerminalFeatureFocusReporting, true)
+	case tea.KeyboardEnhancementsMsg:
+		m.capabilities.Resolve(generated.TerminalFeatureKittyKeyboard, msg.SupportsKeyDisambiguation())
+	case tea.ColorProfileMsg:
+		m.capabilities.Resolve(generated.TerminalFeatureTrueColor, msg.Profile == colorprofile.TrueColor)
+	case tea.ModeReportMsg:
+		// A mode the terminal knows but has permanently off cannot be used, so it counts as absent.
+		usable := !msg.Value.IsNotRecognized() && !msg.Value.IsPermanentlyReset()
+		switch msg.Mode {
+		case ansi.ModeFocusEvent:
+			m.capabilities.Resolve(generated.TerminalFeatureFocusReporting, usable)
+		case ansi.ModeSynchronizedOutput:
+			m.capabilities.Resolve(generated.TerminalFeatureSynchronizedOutput, usable)
+		}
+	case capabilityTimeoutMsg:
+		m.capabilities.Expire()
+	default:
+		return
+	}
+	if m.capabilities != m.reportedCapabilities && !m.capabilities.Pending() && m.send(protocol.EncodeTerminalReport(m.capabilities)) {
+		m.reportedCapabilities = m.capabilities
+	}
 }
 
 func agentAnimationTick() tea.Cmd {
@@ -269,6 +329,7 @@ func agentAnimationTick() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	msg = normalizeTerminalInput(msg)
 	m.pendingClipboard = ""
+	m.observeTerminal(msg)
 	var cmd tea.Cmd
 	transitionNow := time.Time{}
 	switch msg := msg.(type) {
@@ -660,6 +721,8 @@ func (m Model) View() tea.View {
 	}
 	view := tea.NewView(out)
 	view.AltScreen = true
+	// The terminal reports when its window gets or loses the focus (mode 1004), which the BEAM hears as frontend_foreground.
+	view.ReportFocus = true
 	view.MouseMode = tea.MouseModeCellMotion
 	view.WindowTitle = m.title
 	view.BackgroundColor = m.editorBackground()

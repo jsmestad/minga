@@ -870,6 +870,12 @@ defmodule MingaEditor do
 
     new_state = EditorState.accept_frontend_ready(state, vp, caps)
 
+    # A new connection has not said where it is yet, so what the last one reported no longer holds.
+    new_state =
+      if MingaEditor.State.Frontend.foreground(state.frontend) == :unknown,
+        do: new_state,
+        else: announce_frontend_foreground(new_state, :unknown)
+
     Startup.send_font_config(new_state)
     new_state = refresh_gui_config_state(new_state)
     new_state = Renderer.reset_connection(new_state)
@@ -890,6 +896,20 @@ defmodule MingaEditor do
 
     {:noreply,
      %{state | frontend: MingaEditor.State.Frontend.accept_capabilities(state.frontend, caps)}}
+  end
+
+  # The frontend moved to the foreground or to the background. The editor keeps the fact, and tells the rest of Minga
+  # once per change: a reader below the editor (the agent's notifier) cannot ask the editor for it.
+  def handle_info({:minga_input, {:frontend_foreground, status}}, %MingaEditor.State{} = state) do
+    case MingaEditor.State.report_frontend_foreground(state, status) do
+      {state, :unchanged} -> {:noreply, state}
+      {state, status} -> {:noreply, announce_frontend_foreground(state, status)}
+    end
+  end
+
+  def handle_info({:minga_input, {:terminal_report, report}}, %MingaEditor.State{} = state) do
+    log_terminal_report(report)
+    {:noreply, MingaEditor.State.accept_terminal_report(state, report)}
   end
 
   def handle_info({:minga_input, {:resize, width, height}}, %MingaEditor.State{} = state) do
@@ -2185,4 +2205,34 @@ defmodule MingaEditor do
   @doc false
   @spec do_dismiss_completion(state()) :: state()
   defdelegate do_dismiss_completion(state), to: CompletionHandling, as: :dismiss
+
+  # One line when the terminal's answers are in, so a user who wonders why two terminals differ finds it in *Messages*.
+  # The first report of a start still has open questions and is not worth a line.
+  @spec log_terminal_report(MingaEditor.Frontend.TerminalReport.t()) :: :ok
+  defp log_terminal_report(%MingaEditor.Frontend.TerminalReport{features: features}) do
+    if :pending in Map.values(features) do
+      :ok
+    else
+      summary =
+        features
+        |> Enum.sort()
+        |> Enum.map_join(", ", fn {feature, status} -> "#{feature} #{status}" end)
+
+      Log.info(:port, "Terminal features: #{summary}")
+    end
+  end
+
+  @spec announce_frontend_foreground(MingaEditor.State.t(), :foreground | :background | :unknown) ::
+          MingaEditor.State.t()
+  defp announce_frontend_foreground(%MingaEditor.State{} = state, status) do
+    Log.debug(:port, "Frontend foreground: #{status}")
+
+    EventBus.broadcast(
+      :frontend_foreground_changed,
+      %Minga.Events.FrontendForegroundChangedEvent{status: status},
+      state.extension_surfaces.events_registry
+    )
+
+    state
+  end
 end

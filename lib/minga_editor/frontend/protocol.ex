@@ -64,6 +64,8 @@ defmodule MingaEditor.Frontend.Protocol do
   @op_application_quit_decision Opcodes.application_quit_decision()
   @op_scroll_batch Opcodes.scroll_batch()
   @op_horizontal_pan Opcodes.horizontal_pan()
+  @op_frontend_foreground Opcodes.frontend_foreground()
+  @op_terminal_report Opcodes.terminal_report()
   @op_set_title Opcodes.set_title()
   @op_set_window_bg Opcodes.set_window_bg()
   @op_set_link_cursor Opcodes.set_link_cursor()
@@ -82,6 +84,7 @@ defmodule MingaEditor.Frontend.Protocol do
 
   alias Minga.Parser.StructuralNavResult
   alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.Frontend.TerminalReport
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
   # ── Font weight encoding (shared between set_font and draw_styled_text) ──
@@ -204,6 +207,8 @@ defmodule MingaEditor.Frontend.Protocol do
           | {:ready, width :: pos_integer(), height :: pos_integer(), Capabilities.t(),
              protocol_version :: non_neg_integer()}
           | {:capabilities_updated, Capabilities.t()}
+          | {:frontend_foreground, :foreground | :background}
+          | {:terminal_report, TerminalReport.t()}
           | {:paste_event, text :: String.t()}
           | {:mouse_event, row :: integer(), col :: integer(), mouse_button(), modifiers(),
              mouse_event_type(), click_count :: pos_integer()}
@@ -735,6 +740,18 @@ defmodule MingaEditor.Frontend.Protocol do
     {:ok, {:window_ref_miss, generation, frame_seq, last_applied, window_id}}
   end
 
+  # Whether the frontend is in the foreground: the terminal's window focus, or the macOS app's active state.
+  def decode_event(<<@op_frontend_foreground, 1::8>>),
+    do: {:ok, {:frontend_foreground, :foreground}}
+
+  def decode_event(<<@op_frontend_foreground, 0::8>>),
+    do: {:ok, {:frontend_foreground, :background}}
+
+  # The terminal frontend's snapshot of its host terminal's features.
+  def decode_event(<<@op_terminal_report, body_len::16, body::binary-size(body_len)>>) do
+    with {:ok, report} <- TerminalReport.decode(body), do: {:ok, {:terminal_report, report}}
+  end
+
   def decode_event(<<@op_application_quit_request, request_id::32>>) do
     {:ok, {:application_quit_request, request_id}}
   end
@@ -859,6 +876,8 @@ defmodule MingaEditor.Frontend.Protocol do
              @op_application_quit_decision,
              @op_scroll_batch,
              @op_horizontal_pan,
+             @op_frontend_foreground,
+             @op_terminal_report,
              @op_operation_native_result,
              @op_native_presentation_observation
            ] do

@@ -85,7 +85,8 @@ version = "2.0.0"
 # protocol_version 44 appends the Agent lifecycle notice's headline (string16) and draft note (string16) to the gui_agent_chat lifecycle section, so frontends render the BEAM's copy instead of authoring their own.
 # protocol_version 45 adds the empty_list structure (the empty-state anatomy: glyph, title, why line, selected action and actions) and the gui_picker empty section (0x07) that carries it when a picker offers next steps instead of results. An action's id is the command it runs; a click sends the existing execute_command gui_action with it.
 # protocol_version 46 adds the gui_picker movement_keys section (0x08) (the keys that move the highlighted row, resolved from the picker keymap scope, so frontends preview exactly those keys) and the picker_fit gui_action (the result rows the frontend's picker list shows, which sizes a picker page).
-protocol_version = 46
+# protocol_version 47 adds two frontend-to-BEAM events. frontend_foreground (0x13, the slot batch_end left in version 3) says whether the frontend is in the foreground: the terminal reports its focus, macOS its active state. terminal_report (0x62) is the terminal frontend's snapshot of which terminal features it detected, misses or replaces with a fallback, with the enums terminal_feature and terminal_feature_status.
+protocol_version = 47
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -248,6 +249,18 @@ name = "log_message"
 value = 0x60
 direction = "frontend_to_beam"
 
+# The terminal frontend's report of terminal features: count(u8), then count entries of
+# feature(u8, terminal_feature) + status(u8, terminal_feature_status).
+# Every event is a complete snapshot that replaces the earlier one. The frontend sends it after ready,
+# with the answers it has and "pending" for queries the terminal has not answered, and again when an entry changes.
+# A frontend without a host terminal never sends it.
+[[opcodes]]
+category = "input"
+name = "terminal_report"
+value = 0x62
+direction = "frontend_to_beam"
+framing = "len16"
+
 # Render-transport commands. The 9 cell-paradigm opcodes (draw_text 0x10,
 # set_cursor 0x11, clear 0x12 (now horizontal_pan), define_region 0x14, clear_region 0x18,
 # destroy_region 0x19, set_active_region 0x1A, scroll_region 0x1B,
@@ -299,8 +312,20 @@ framing = "fixed:9"
 # batch_end (value 0x13) was retired in protocol_version 3 (#2219 child B). Its
 # input-correlation u32 moved verbatim onto commit_frame, which now closes every
 # frame transaction; both frontends gate frames and resolve keystroke latency on
-# commit_frame. The 0x13 slot is reserved (do not reassign before a version bump
-# past 3, per the freed-value reuse policy above).
+# commit_frame. The slot was free for reuse after a version bump past 3, and
+# frontend_foreground took it in protocol_version 47.
+
+# Whether the frontend is in the foreground. One byte: 0 background, 1 foreground.
+# The terminal frontend sends it when the terminal reports a focus change (mode 1004);
+# macOS sends it once after ready and whenever the app becomes active or resigns.
+# A frontend that cannot know sends nothing, and the BEAM keeps "unknown".
+# This is not keyboard focus inside the editor (gui_focus_owner).
+[[opcodes]]
+category = "input"
+name = "frontend_foreground"
+value = 0x13
+direction = "frontend_to_beam"
+framing = "fixed:2"
 
 [[opcodes]]
 category = "render"
@@ -1567,6 +1592,42 @@ introduced_in = 2
 # a bare integer. The optional `default` is the byte value an encoder emits for
 # an unmapped atom (it must appear in `values`). Validation requires unique
 # value bytes, every byte in range for the repr, and a resolvable `default`.
+
+# A terminal feature the terminal frontend detects at startup (docs/design/tui.md, "Terminal capabilities").
+[[enums]]
+name = "terminal_feature"
+repr = "u8"
+default = "unknown"
+values = [
+  { name = "unknown", value = 0 },
+  { name = "true_color", value = 1 },
+  { name = "styled_underlines", value = 2 },
+  { name = "underline_color", value = 3 },
+  { name = "hyperlinks", value = 4 },
+  { name = "kitty_keyboard", value = 5 },
+  { name = "desktop_notifications", value = 6 },
+  { name = "tab_title", value = 7 },
+  { name = "tab_progress", value = 8 },
+  { name = "kitty_graphics", value = 9 },
+  { name = "synchronized_output", value = 10 },
+  { name = "focus_reporting", value = 11 },
+  { name = "clipboard_osc52", value = 12 },
+]
+
+# What the terminal frontend knows about one terminal feature.
+# pending: the terminal was asked and has not answered. detected: the feature is used.
+# missing: the terminal does not have it and nothing replaces it. fallback: Minga uses its documented replacement.
+[[enums]]
+name = "terminal_feature_status"
+repr = "u8"
+default = "unknown"
+values = [
+  { name = "unknown", value = 0 },
+  { name = "pending", value = 1 },
+  { name = "detected", value = 2 },
+  { name = "missing", value = 3 },
+  { name = "fallback", value = 4 },
+]
 
 [[enums]]
 name = "agent_approval_decision"

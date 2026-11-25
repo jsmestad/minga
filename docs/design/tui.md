@@ -39,6 +39,8 @@ Some features need a modern terminal. Each one is detected at startup and degrad
 | Focus awareness | focus reporting (mode 1004) | no unfocused dimming |
 | Clipboard | OSC 52 | system clipboard tool |
 
+The terminal's answers arrive after startup, or never. Each feature is pending until the terminal answers or two seconds have passed; after that it is detected, or it uses its fallback, or it is missing when nothing replaces it. The frontend keeps one value for this and tells the BEAM the same value (`terminal_report` in [`docs/PROTOCOL.md`](../PROTOCOL.md)), so the report cannot differ from what is drawn.
+
 Focus reporting does two jobs: when the terminal window loses focus, borders dim and the cursor becomes hollow, and "needs you" escalates to a notification because you are not looking.
 
 `:checkhealth terminal` opens a buffer listing each feature, whether this terminal supports it, and what Minga uses instead when it does not. Users should never have to guess why two terminals behave differently.
