@@ -77,7 +77,7 @@ defmodule MingaEditor.State.Launchpad do
   def actions(%__MODULE__{place: :project}) do
     [
       {:project_find_file, "Find a file"},
-      {:agent_new_session, "New task"},
+      {:agent_new_task, "New task"},
       {:toggle_file_tree, "File tree"},
       {:project_switch, "Switch project"}
     ]
@@ -88,7 +88,7 @@ defmodule MingaEditor.State.Launchpad do
       {:toggle_file_tree, "File tree"},
       {:project_find_file, "Find a file"},
       {:project_add, "Remember as a project"},
-      {:agent_new_session, "New task"}
+      {:agent_new_task, "New task"}
     ]
   end
 
