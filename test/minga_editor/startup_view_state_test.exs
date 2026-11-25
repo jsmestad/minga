@@ -12,10 +12,10 @@ defmodule MingaEditor.StartupViewStateTest do
     assert View.active?(ui_state.view) == false
   end
 
-  test "CLI startup flags select editor, agentic, and native GUI auto modes" do
+  test "every CLI start is in the editor; only an explicit agentic view mode starts in the agent view" do
     assert_startup_scope(:tui, :editor, :editor, false)
-    assert_startup_scope(:native_gui, :agentic, :agent, true)
     assert_startup_scope(:native_gui, :auto, :editor, false)
+    assert_startup_scope(:native_gui, :agentic, :agent, true)
   end
 
   defp assert_startup_scope(backend, view_mode, expected_scope, expected_active?) do

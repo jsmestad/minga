@@ -4,15 +4,15 @@ defmodule Minga.CLI do
 
   Serves as the entry point for both `mix minga <filename>` and the installed TUI launcher.
 
-  ## Startup view
+  ## Where Minga starts
 
-  By default, Minga boots into the agentic view (controlled by the `:startup_view` config option). CLI flags can override the config:
+  Minga starts in the editor, at a project:
 
-  - `--editor` forces the traditional file editing view
-  - File arguments open the file in its project
-  - Directory arguments open the project: its saved session, or the project home
-  - `--no-context` opens the agentic view but skips loading the CLI file argument as preview context
-  - `--headless` starts only the services and agent runtime, plus the JSON-RPC Gateway
+  - `minga` and `minga <dir>` open the project: its saved session, or the project home. A subdirectory resolves to the nearest project marker above it and opens the file finder filtered to that subdirectory; a folder without markers is its own root.
+  - `minga <file>` opens the file in its project.
+  - `--headless` starts only the services and agent runtime, plus the JSON-RPC Gateway.
+
+  `--editor` and `--no-context` steered between the editor and the agentic view. They are accepted and ignored for one release, and say so in `*Messages*`.
   """
 
   alias Minga.Distribution.Cookie
@@ -36,6 +36,7 @@ defmodule Minga.CLI do
   @type flags :: %{
           view_mode: view_mode(),
           no_context: boolean(),
+          deprecated_flags: [String.t()],
           config_file: String.t() | nil,
           debug_log: String.t() | nil,
           headless: boolean(),
@@ -51,6 +52,7 @@ defmodule Minga.CLI do
   @default_flags %{
     view_mode: :auto,
     no_context: false,
+    deprecated_flags: [],
     config_file: nil,
     debug_log: nil,
     headless: false,
@@ -308,6 +310,10 @@ defmodule Minga.CLI do
   @spec startup_file() :: String.t() | nil
   def startup_file, do: Application.get_env(:minga, :cli_startup_file)
 
+  @doc "Returns the expanded directory argument of this start, if the argument was a directory."
+  @spec startup_directory() :: String.t() | nil
+  def startup_directory, do: Application.get_env(:minga, :cli_startup_directory)
+
   @doc "Returns the project root inferred from the stored startup CLI target, if any."
   @spec startup_project_root() :: String.t() | nil
   def startup_project_root do
@@ -411,12 +417,9 @@ defmodule Minga.CLI do
   defp parse_args(["--version" | _], _file, _flags), do: {:error, "minga #{Minga.version()}"}
   defp parse_args(["-v" | _], _file, _flags), do: {:error, "minga #{Minga.version()}"}
 
-  defp parse_args(["--editor" | rest], file, flags) do
-    parse_args(rest, file, %{flags | view_mode: :editor})
-  end
-
-  defp parse_args(["--no-context" | rest], file, flags) do
-    parse_args(rest, file, %{flags | no_context: true})
+  # Accepted and ignored for one release: Minga always starts in the editor (#4057).
+  defp parse_args([flag | rest], file, flags) when flag in ["--editor", "--no-context"] do
+    parse_args(rest, file, %{flags | deprecated_flags: flags.deprecated_flags ++ [flag]})
   end
 
   defp parse_args(["--headless" | rest], file, flags) do
@@ -1012,25 +1015,8 @@ defmodule Minga.CLI do
 
   @doc "Applies flag implications with file-aware startup view resolution."
   @spec apply_flag_implications(flags(), String.t() | nil) :: flags()
-  def apply_flag_implications(%{minimal: true} = flags, _file) do
-    %{flags | view_mode: :editor}
-  end
-
-  def apply_flag_implications(%{view_mode: :editor} = flags, _file), do: flags
-  def apply_flag_implications(%{view_mode: :agentic} = flags, _file), do: flags
-
-  def apply_flag_implications(%{view_mode: :auto, no_context: true} = flags, _file),
-    do: %{flags | view_mode: :agentic}
-
-  def apply_flag_implications(%{view_mode: :auto} = flags, nil), do: flags
-
-  def apply_flag_implications(%{view_mode: :auto} = flags, file),
-    do: resolve_auto_view_mode(flags, file)
-
-  # A file and a directory both open in the editor.
-  # A directory opens its project: the saved session, or the project home.
-  @spec resolve_auto_view_mode(flags(), String.t()) :: flags()
-  defp resolve_auto_view_mode(flags, _file), do: %{flags | view_mode: :editor}
+  # Every start is in the editor: no argument and a directory open the project, a file opens in its project.
+  def apply_flag_implications(flags, _file), do: %{flags | view_mode: :editor}
 
   @spec store_startup_flags(flags(), String.t() | nil) :: :ok
   defp store_startup_flags(flags, file) do
@@ -1049,8 +1035,10 @@ defmodule Minga.CLI do
   defp store_startup_file(path) when is_binary(path) do
     if File.dir?(path) do
       Application.delete_env(:minga, :cli_startup_file)
+      Application.put_env(:minga, :cli_startup_directory, Path.expand(path))
     else
       Application.put_env(:minga, :cli_startup_file, Path.expand(path))
+      Application.delete_env(:minga, :cli_startup_directory)
     end
 
     :ok
@@ -1058,6 +1046,7 @@ defmodule Minga.CLI do
 
   defp store_startup_file(nil) do
     Application.delete_env(:minga, :cli_startup_file)
+    Application.delete_env(:minga, :cli_startup_directory)
     :ok
   end
 
@@ -1186,10 +1175,8 @@ defmodule Minga.CLI do
       -v, --version          Show version
       --config <path>        Use a custom config file instead of the default
       -D, --debug-log <path> Append *Messages* and *Warnings* entries to a crash-safe log
-      --editor               Start in file editing mode (skip agentic view)
       --minimal              Minimal mode: editor-only, no services/agent (for GIT_EDITOR use)
       -Q, --safe             Safe mode: skip user config, user modules, after hooks, and extensions
-      --no-context           Keep agentic view and don't load the file as agent context
       --headless             Start services and agent runtime without a GUI frontend
       --name <name@host>     Distributed Erlang long node name
       --sname <name>         Distributed Erlang short node name
@@ -1201,7 +1188,7 @@ defmodule Minga.CLI do
       minga                              Open the project in this directory
       minga README.md                    Open file for editing
       minga .                            Open the project: pick up where you left off
-      minga --editor README.md           Open file in traditional editor
+      minga lib/                         Open the project above lib/, finding files in lib/
       minga attach ssh://devbox/work/app  Attach to a remote server-side checkout
       minga sessions ssh://devbox         List remote sessions without launching the editor
       minga kill-session ssh://devbox/work/app  Stop the remote session for that checkout
