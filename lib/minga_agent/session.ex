@@ -6608,6 +6608,12 @@ defmodule MingaAgent.Session do
   defp notify_subscriber_connected(pid, state) do
     send(pid, {:agent_event, self(), {:credentials_status, state.credential_readiness}})
     send(pid, {:agent_event, self(), {:connection_changed, connection_snapshot(state)}})
+
+    # A subscriber that arrives during a turn learns which turn it can stop; later changes
+    # are broadcast to every subscriber.
+    if target = active_turn_target(state),
+      do: send(pid, {:agent_event, self(), {:stop_target_changed, target}})
+
     notify_retained_event_log_failure(pid, state.event_log_failure)
   end
 

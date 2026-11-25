@@ -22,6 +22,7 @@ defmodule MingaEditor.Commands.Agent do
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.ProvenanceJump
   alias MingaEditor.Agent.SlashCommand
+  alias MingaEditor.Agent.Tasks
   alias MingaEditor.Agent.TurnRequest
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
@@ -1481,13 +1482,41 @@ defmodule MingaEditor.Commands.Agent do
   """
   @spec abort_agent(state()) :: state()
   def abort_agent(state) do
-    agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
-
-    case agent.stop_target do
-      {_session, target} -> stop_displayed_turn(state, target)
+    case turn_to_stop(state) do
+      {session, target} -> TurnRequest.stop(state, session, target)
+      :several -> NoticeWorkflow.publish(state, several_working_status())
       nil -> state
     end
   end
+
+  # Stop works from any buffer, so it does not need a conversation in front. It stops one
+  # turn: the turn of the conversation in front; with none in front, the turn of the
+  # conversation shown last, or the only turn there is. Every followed session reports its
+  # own turn (`Tasks.stoppable/1`), so a turn in a background workspace is known too.
+  @spec turn_to_stop(state()) :: {pid(), {String.t(), String.t()}} | :several | nil
+  defp turn_to_stop(state) do
+    stoppable = Tasks.stoppable(state.agent_connection.tasks)
+    agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+
+    case Runtime.active_session(state.shell_runtime) do
+      session when is_pid(session) -> List.keyfind(stoppable, session, 0) || agent.stop_target
+      nil -> background_turn_to_stop(stoppable, AgentState.session(agent))
+    end
+  end
+
+  # `shown_last` is the conversation the modeline of a file speaks for (`MingaEditor.Agent.WorkspaceStatus`).
+  @spec background_turn_to_stop([{pid(), {String.t(), String.t()}}], pid() | nil) ::
+          {pid(), {String.t(), String.t()}} | :several | nil
+  defp background_turn_to_stop([], _shown_last), do: nil
+  defp background_turn_to_stop([only], _shown_last), do: only
+  defp background_turn_to_stop(_stoppable, nil), do: :several
+
+  defp background_turn_to_stop(stoppable, shown_last),
+    do: List.keyfind(stoppable, shown_last, 0) || :several
+
+  @spec several_working_status() :: String.t()
+  defp several_working_status,
+    do: "Several conversations are working. Bring the one to stop to the front, then stop it."
 
   @doc "Stops the turn shown on an attached Agent surface, never its replacement."
   @spec stop_displayed_turn(state(), {String.t(), String.t()}) :: state()

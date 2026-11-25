@@ -121,6 +121,14 @@ defmodule MingaEditor.Agent.Tasks do
   @spec fetch(t(), pid()) :: {:ok, Entry.t()} | :error
   def fetch(%__MODULE__{entries: entries}, pid), do: Map.fetch(entries, pid)
 
+  @doc """
+  Every session with a turn that can be stopped now, with that turn, whichever workspace shows it.
+  """
+  @spec stoppable(t()) :: [{pid(), Entry.stop_target()}]
+  def stoppable(%__MODULE__{entries: entries}) do
+    for {pid, %Entry{stop_target: {_, _} = target}} <- entries, do: {pid, target}
+  end
+
   @doc "The approval a task is waiting on, bound to its session."
   @spec approval(t(), pid()) :: PendingApproval.t() | nil
   def approval(%__MODULE__{entries: entries}, pid) do

@@ -163,6 +163,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 - Typing stays responsive while the agent streams. The editor no longer waits on a busy session to update the conversation, which could hold keys for up to five seconds.
 - Sending a message or stopping a turn no longer holds the editor while the session answers. The composer keeps the message until the session takes it, text typed meanwhile stays, and a second press never sends the same text twice.
+- `SPC a s` stops a working turn from any buffer. With a file in front it used to answer "That Agent turn is no longer active" while the turn kept working. With several conversations working it stops the one shown last, and says so when it cannot tell which one you mean.
+- With a file in front, the modeline follows the conversation shown last. It used to keep the state that conversation had when it left the front, so it could read "Minga working" long after the turn had stopped or finished.
 - The macOS agent header names the session's provider before the model, including an extension route's name such as "Claude (subscription)", as the terminal already does.
 - Closing an agent workspace with its close button on macOS no longer drops its staged agent edits. The workspace stays open and offers **Publish** and **Discard** until you choose one.
 - After the macOS app reconnects to a restarted editor core, it reports the window size with your configured line spacing and gutter, so the editor no longer lays out rows or columns that the window cannot show until the next resize.
