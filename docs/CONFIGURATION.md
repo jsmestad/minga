@@ -48,7 +48,7 @@ That's it. Save the file and press `SPC h r`. The status bar shows "Config reloa
 | `:agent_destructive_tools` | list of strings | `["write_file", "edit_file", "delete_file", "shell", "git_stage", "git_commit", "rename"]` | Which tools are classified as destructive |
 | `:agent_session_retention_days` | positive integer | `30` | Days to keep saved agent sessions before auto-pruning |
 | `:agent_session_idle_timeout_ms` | non-negative integer | `14_400_000` | Milliseconds before an idle detached remote agent session is reclaimed; `0` disables idle reclamation |
-| `:startup_view` | `:agent` or `:editor` | `:agent` | Which view to show on startup (see [Startup view](#startup-view) below) |
+| `:startup_view` | `:agent` or `:editor` | `:editor` | Retired: no longer changes where Minga starts (see [Where Minga starts](#where-minga-starts) below) |
 | `:agent_auto_context` | boolean | `true` | Load CLI file as agent preview context on startup |
 | `:agent_mcp_servers` | list of maps | `[]` | MCP servers to launch for native agent sessions (see [MCP servers](MCP.md)) |
 | `:whichkey_layout` | `:bottom` or `:float` | `:bottom` | Which-key popup display mode (see [Which-key popup](#which-key-popup) below) |
@@ -388,60 +388,24 @@ lsp_settings :typescript_language_server, %{
 
 Use string keys when the LSP section contains punctuation, such as `"rust-analyzer"`. Atom keys are converted to strings, which works well for simple nested keys like `format` and `enable`.
 
-## Startup view
+## Where Minga starts
 
-Minga boots into the full-screen agentic view by default. The chat panel is visible, the input is focused, and an agent session starts automatically. You're ready to talk to the agent the moment Minga opens.
+Minga always opens in the editor, at a project, so the place you land depends only on what you ask it to open:
 
-If you pass a file on the command line (`minga foo.ex`), the file opens in the preview pane so the agent has context about what you're working on.
+| You run | You get |
+|---------|---------|
+| `minga` or `minga .` in a project | The project's last session (its files, splits and cursors), or the project home when it has none |
+| `minga some/project` | The same, for that project |
+| `minga lib/` inside a project | The project (its root is the nearest project marker above `lib/`), with the project file finder already narrowed to `lib/`; clearing the query widens it to the whole project |
+| `minga notes/` in a folder with no project markers | The folder itself as the root, on its home |
+| `minga foo.ex` | The file, open in its project |
+| `minga` outside any project | The home with your recent projects, numbered |
 
-### Switching to editor-first startup
+The agent is a key away from any of these: `SPC a n` starts a task, and the home lists the project's tasks.
 
-If you prefer the traditional file editing experience on startup, set `:startup_view` to `:editor`:
+### Retired choices
 
-```elixir
-set :startup_view, :editor
-```
-
-This restores the pre-1.0 behavior: Minga opens with a file buffer (or scratch buffer) and the agentic view is a toggle away via `SPC a v`.
-
-### Controlling auto-context
-
-When the agentic view is the startup view and you open a file from the CLI, the file's content is loaded into the preview pane by default. This makes the interaction feel like "I'm chatting about this file" rather than "I opened a file and there's a chat panel."
-
-To disable this and start with a blank agentic view even when a file is provided:
-
-```elixir
-set :agent_auto_context, false
-```
-
-The file is still opened in a buffer (accessible via `SPC b b`), it just isn't surfaced in the preview pane automatically.
-
-### CLI flag overrides
-
-CLI flags override config options for a single invocation:
-
-```bash
-# Force editor mode regardless of config
-minga --editor foo.ex
-
-# Agentic view but don't load the file as context
-minga --no-context foo.ex
-
-# Editor mode with no file (scratch buffer)
-minga --editor
-```
-
-### Summary of combinations
-
-| Config | CLI | Result |
-|--------|-----|--------|
-| `startup_view: :agent` (default) | `minga` | Agentic view, empty |
-| `startup_view: :agent` (default) | `minga foo.ex` | Agentic view, file in preview |
-| `startup_view: :agent`, `agent_auto_context: false` | `minga foo.ex` | Agentic view, preview empty, file in buffer list |
-| `startup_view: :agent` | `minga --no-context foo.ex` | Same as above |
-| `startup_view: :agent` | `minga --editor foo.ex` | Editor view, file open |
-| `startup_view: :editor` | `minga foo.ex` | Editor view, file open |
-| `startup_view: :editor` | `minga` | Editor view, scratch buffer |
+Older versions could boot into a full-screen agent view. The `:startup_view` option and the `--editor` and `--no-context` flags chose between the two. They no longer change anything: the flags are accepted and ignored for one release, and a line in `*Messages*` names each one you pass. A config that still sets `:startup_view, :agent` loads, and `*Messages*` tells you to remove the line.
 
 ## Which-key popup
 
@@ -1542,7 +1506,6 @@ set :font_weight, :regular
 set :font_ligatures, true
 
 # ── Agent ─────────────────────────────────────────────────────────────
-set :startup_view, :agent           # boot into agentic view (default)
 set :agent_auto_context, true       # load CLI file as preview context (default)
 set :agent_tool_approval, :destructive
 set :agent_destructive_tools, ["write_file", "edit_file", "delete_file", "shell", "git_stage", "git_commit", "rename"]

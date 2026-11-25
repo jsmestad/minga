@@ -6,6 +6,8 @@ defmodule Minga.CLITest do
 
   alias Minga.CLI
 
+  @moduletag timeout: 30_000
+
   setup do
     if Process.whereis(Minga.EventBus) == nil do
       start_supervised!(Minga.Events.child_spec(name: Minga.EventBus))
@@ -111,34 +113,22 @@ defmodule Minga.CLITest do
       assert {:error, _} = CLI.parse_args(["--help", "file.txt"])
     end
 
-    test "--editor flag sets view_mode" do
-      assert {:open, nil, %{view_mode: :editor, no_context: false, config_file: nil}} =
-               CLI.parse_args(["--editor"])
-    end
+    # --editor and --no-context steered between the editor and the agentic view. They are accepted and ignored for one
+    # release (#4057), and the editor names them in *Messages*.
+    test "--editor and --no-context are accepted, ignored and recorded, wherever they appear" do
+      cases = [
+        {["--editor"], nil, ["--editor"]},
+        {["--no-context", "foo.ex"], "foo.ex", ["--no-context"]},
+        {["--editor", "--no-context", "foo.ex"], "foo.ex", ["--editor", "--no-context"]},
+        {["foo.ex", "--editor"], "foo.ex", ["--editor"]}
+      ]
 
-    test "--editor flag with file" do
-      assert {:open, "foo.ex", %{view_mode: :editor, no_context: false, config_file: nil}} =
-               CLI.parse_args(["--editor", "foo.ex"])
-    end
-
-    test "--no-context flag sets no_context" do
-      assert {:open, nil, %{view_mode: :auto, no_context: true, config_file: nil}} =
-               CLI.parse_args(["--no-context"])
-    end
-
-    test "--no-context flag with file" do
-      assert {:open, "foo.ex", %{view_mode: :auto, no_context: true, config_file: nil}} =
-               CLI.parse_args(["--no-context", "foo.ex"])
-    end
-
-    test "--editor and --no-context together" do
-      assert {:open, "foo.ex", %{view_mode: :editor, no_context: true, config_file: nil}} =
-               CLI.parse_args(["--editor", "--no-context", "foo.ex"])
-    end
-
-    test "flags can appear after file argument" do
-      assert {:open, "foo.ex", %{view_mode: :editor, no_context: false, config_file: nil}} =
-               CLI.parse_args(["foo.ex", "--editor"])
+      for {args, file, deprecated} <- cases do
+        assert {:open, ^file,
+                %{view_mode: :auto, no_context: false, deprecated_flags: ^deprecated}} =
+                 CLI.parse_args(args),
+               inspect(args)
+      end
     end
 
     test "--config sets config_file with expanded path" do
@@ -158,7 +148,7 @@ defmodule Minga.CLITest do
     end
 
     test "--config combined with --editor" do
-      assert {:open, "foo.ex", %{view_mode: :editor, config_file: "/tmp/c.exs"}} =
+      assert {:open, "foo.ex", %{deprecated_flags: ["--editor"], config_file: "/tmp/c.exs"}} =
                CLI.parse_args(["--config", "/tmp/c.exs", "--editor", "foo.ex"])
     end
 
@@ -322,10 +312,10 @@ defmodule Minga.CLITest do
       assert message =~ "unknown flag: --unknown"
     end
 
-    test "usage text includes --editor, --no-context, --config, --debug-log, and --minimal" do
+    test "usage text includes --config, --debug-log, and --minimal, and no longer lists --editor or --no-context" do
       assert {:error, message} = CLI.parse_args(["--help"])
-      assert message =~ "--editor"
-      assert message =~ "--no-context"
+      refute message =~ "--editor"
+      refute message =~ "--no-context"
       assert message =~ "--config"
       assert message =~ "--debug-log"
       assert message =~ "--minimal"
@@ -338,7 +328,8 @@ defmodule Minga.CLITest do
       assert message =~
                "minga .                            Open the project: pick up where you left off"
 
-      assert message =~ "Keep agentic view and don't load the file as agent context"
+      assert message =~
+               "minga lib/                         Open the project above lib/, finding files in lib/"
     end
   end
 
@@ -411,6 +402,22 @@ defmodule Minga.CLITest do
 
       unmarked = tmp_dir("cli-cwd-unmarked")
       assert CLI.directory_startup_project_root(unmarked) == nil
+    end
+
+    test "a cold terminal launch resolves a language-marked project before services start" do
+      root = tmp_dir("cli-cold-project")
+      nested = Path.join(root, "lib")
+      File.mkdir_p!(nested)
+      File.write!(Path.join(root, "mix.exs"), "")
+
+      code = """
+      [root] = System.argv()
+      :ok = Minga.CLI.prepare_startup(["lib"], {:terminal, root})
+      IO.write(Minga.CLI.startup_project_root())
+      """
+
+      assert {^root, 0} =
+               Minga.Test.ElixirSubprocess.eval(code, [root], stderr_to_stdout: true)
     end
 
     test "a terminal start without an argument opens the project of the terminal's directory" do
@@ -601,6 +608,8 @@ defmodule Minga.CLITest do
       Application.delete_env(:minga, :cli_startup_project_root)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_file)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_directory)
     end
 
     test "file argument returns :ok even when editor isn't running" do
@@ -612,6 +621,8 @@ defmodule Minga.CLITest do
       Application.delete_env(:minga, :cli_startup_project_root)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_file)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_directory)
     end
 
     test "a file argument is remembered so the editor opens it instead of the project session" do
@@ -632,6 +643,11 @@ defmodule Minga.CLITest do
       assert Application.get_env(:minga, :cli_startup_file) == nil
 
       assert CLI.startup_file() == nil
+      assert CLI.startup_directory() == Path.expand(System.tmp_dir!())
+
+      # A file argument clears a directory remembered by an earlier start.
+      assert :ok = CLI.prepare_startup([path], CLI.terminal_launch())
+      assert CLI.startup_directory() == nil
     after
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
@@ -639,6 +655,8 @@ defmodule Minga.CLITest do
       Application.delete_env(:minga, :cli_startup_project_root)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_file)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_directory)
     end
 
     test "directory argument stores editor startup mode and startup project root" do
@@ -660,6 +678,8 @@ defmodule Minga.CLITest do
       Application.delete_env(:minga, :cli_startup_project_root)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_file)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_directory)
     end
 
     test "main stores startup flags in application env" do
@@ -674,13 +694,15 @@ defmodule Minga.CLITest do
       Application.delete_env(:minga, :cli_startup_project_root)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_file)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_directory)
     end
 
     test "main stores config_file flag from --config" do
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
       CLI.main(["--config", "/tmp/test_config.exs"])
-      assert %{view_mode: :auto, config_file: "/tmp/test_config.exs"} = CLI.startup_flags()
+      assert %{view_mode: :editor, config_file: "/tmp/test_config.exs"} = CLI.startup_flags()
     after
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
@@ -688,6 +710,8 @@ defmodule Minga.CLITest do
       Application.delete_env(:minga, :cli_startup_project_root)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_file)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_directory)
     end
 
     test "main stores debug_log path in application env" do
@@ -713,75 +737,27 @@ defmodule Minga.CLITest do
     end
   end
 
-  describe "apply_flag_implications/1" do
-    test "minimal implies editor view" do
-      {:open, _, flags} = CLI.parse_args(["--minimal", "COMMIT_EDITMSG"])
-      result = CLI.apply_flag_implications(flags)
-      assert result.view_mode == :editor
-      assert result.minimal == true
-    end
-
-    test "editor view alone is preserved, does not set minimal" do
-      {:open, _, flags} = CLI.parse_args(["--editor"])
-      result = CLI.apply_flag_implications(flags)
-      assert result.view_mode == :editor
-      assert result.minimal == false
-    end
-
-    test "neither flag leaves view mode auto" do
-      {:open, _, flags} = CLI.parse_args([])
-      result = CLI.apply_flag_implications(flags)
-      assert result.view_mode == :auto
-      assert result.minimal == false
-    end
-  end
-
   describe "apply_flag_implications/2" do
-    test "regular file resolves auto view to editor" do
-      path =
-        Path.join(System.tmp_dir!(), "minga_cli_file_#{System.unique_integer([:positive])}.ex")
-
-      File.write!(path, "IO.puts(:ok)\n")
-      on_exit(fn -> File.rm(path) end)
-
-      {:open, _, flags} = CLI.parse_args([path])
-      result = CLI.apply_flag_implications(flags, path)
-      assert result.view_mode == :editor
-    end
-
-    test "directory resolves auto view to the editor, which opens the project" do
-      {:open, _, flags} = CLI.parse_args([System.tmp_dir!()])
-      result = CLI.apply_flag_implications(flags, System.tmp_dir!())
-      assert result.view_mode == :editor
-    end
-
-    test "nil leaves auto view unresolved" do
-      {:open, _, flags} = CLI.parse_args([])
-      result = CLI.apply_flag_implications(flags, nil)
-      assert result.view_mode == :auto
-    end
-
-    test "no-context resolves auto view to agentic" do
-      {:open, file, flags} = CLI.parse_args(["--no-context", "foo.ex"])
-      result = CLI.apply_flag_implications(flags, file)
-      assert result.view_mode == :agentic
-      assert result.no_context == true
-    end
-
-    test "explicit editor view wins over no-context" do
-      {:open, file, flags} = CLI.parse_args(["--editor", "--no-context", "foo.ex"])
-      result = CLI.apply_flag_implications(flags, file)
-      assert result.view_mode == :editor
-      assert result.no_context == true
-    end
-
-    test "nonexistent file path resolves auto view to editor" do
-      path =
+    test "every start is in the editor: no argument, a file, a missing file, a directory, --minimal" do
+      missing =
         Path.join(System.tmp_dir!(), "minga_missing_#{System.unique_integer([:positive])}.ex")
 
-      {:open, _, flags} = CLI.parse_args([path])
-      result = CLI.apply_flag_implications(flags, path)
-      assert result.view_mode == :editor
+      for args <- [
+            [],
+            ["foo.ex"],
+            [missing],
+            [System.tmp_dir!()],
+            ["--minimal", "COMMIT_EDITMSG"],
+            ["--editor"]
+          ] do
+        {:open, file, flags} = CLI.parse_args(args)
+        assert CLI.apply_flag_implications(flags, file).view_mode == :editor, inspect(args)
+      end
+    end
+
+    test "--no-context no longer turns off the file's agent context" do
+      {:open, file, flags} = CLI.parse_args(["--no-context", "foo.ex"])
+      assert %{view_mode: :editor, no_context: false} = CLI.apply_flag_implications(flags, file)
     end
   end
 

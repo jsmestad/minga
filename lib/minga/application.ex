@@ -162,7 +162,10 @@ defmodule Minga.Application do
         if minimal? do
           []
         else
-          [Minga.Services.Supervisor, MingaAgent.Supervisor]
+          [
+            {Minga.Services.Supervisor, startup_directory: startup_workspace_directory()},
+            MingaAgent.Supervisor
+          ]
         end
 
     editor_children =
@@ -312,6 +315,11 @@ defmodule Minga.Application do
   @spec start_editor?() :: boolean()
   defp start_editor? do
     Application.get_env(:minga, :start_editor, false)
+  end
+
+  @spec startup_workspace_directory() :: String.t() | nil
+  defp startup_workspace_directory do
+    if start_editor?() and is_nil(Minga.CLI.startup_file()), do: Minga.CLI.startup_project_root()
   end
 
   @spec maybe_prepare_cli_startup() :: :ok

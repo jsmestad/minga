@@ -52,14 +52,12 @@ defmodule Minga.Project.Detector do
   @doc """
   Returns the default marker list as `{filename, project_type}` tuples.
 
-  Combines sentinel markers (`.git`, `.minga`) with root markers from
-  all registered languages. Pass a custom list to `detect/2` if you
-  need different markers.
+  Combines sentinel markers (`.git`, `.minga`) with root markers from registered languages. Before the registry starts, use the enabled bundled language definitions so launch-time detection sees the same built-in markers.
   """
   @spec default_markers() :: [{String.t(), project_type()}]
   def default_markers do
     lang_markers =
-      Minga.Language.Registry.all()
+      marker_languages()
       |> Enum.flat_map(fn lang ->
         type = lang.project_type || :unknown
         Enum.map(lang.root_markers, fn marker -> {marker, type} end)
@@ -67,6 +65,23 @@ defmodule Minga.Project.Detector do
       |> Enum.uniq_by(fn {marker, _} -> marker end)
 
     @sentinel_markers ++ lang_markers
+  end
+
+  @spec marker_languages() :: [Minga.Language.t()]
+  defp marker_languages do
+    registry = Minga.Language.Registry
+
+    if :ets.whereis(registry.default_table()) == :undefined do
+      disabled = Minga.Extensions.PackLoader.disabled_pack_names(:disabled_language_packs)
+
+      for pack <- Minga.Extensions.LanguagePacks.packs(),
+          pack.name() not in disabled,
+          language <- pack.language_modules() do
+        language.definition()
+      end
+    else
+      registry.all()
+    end
   end
 
   @doc """

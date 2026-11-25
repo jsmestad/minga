@@ -2153,6 +2153,9 @@ defmodule MingaEditor.PickerUI do
 
   @spec initial_query(module(), term()) :: String.t()
   defp initial_query(DirectorySource, %FilesystemContext{query: query}), do: query.text
+
+  # A caller can open a picker already narrowed, for example the file finder at a subdirectory (#4057).
+  defp initial_query(_source, %{initial_query: query}) when is_binary(query), do: query
   defp initial_query(_source, _context), do: ""
 
   @spec filter_initial_query(Picker.t(), module(), term()) :: Picker.t()

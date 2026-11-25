@@ -168,7 +168,8 @@ defmodule Minga.Test.EditorCase do
       sidebar_registry: sidebar_registry,
       suppress_tool_prompts: true,
       # The CLI's remembered file argument is global; a test editor never inherits it.
-      startup_file: Keyword.get(opts, :startup_file)
+      startup_file: Keyword.get(opts, :startup_file),
+      startup_directory: Keyword.get(opts, :startup_directory)
     ]
 
     editor_opts =
