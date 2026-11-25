@@ -6,10 +6,10 @@
 # cursor: 4,8
 ## text
  ▌  storyboard.ex
-   3  defmodule Storyboard do          │   1  defmodule Storyboard do
+▾  3  defmodule Storyboard do          │▾  1  defmodule Storyboard do
    2    @moduledoc "A small file every │   1    @moduledoc "A small file every s
    1                                   │   2
-   4    def greet(name) do             │   3    def greet(name) do
+▾  4    def greet(name) do             │▾  3    def greet(name) do
    1    │ "Hello, " <> name            │   4    │ "Hello, " <> name
    2    end                            │   5    end
    3  end                              │   6  end
@@ -33,7 +33,8 @@
 0 0-0 #4c4f69 #eff1f5 -
 0 1-1 #1e66f5 #eff1f5 bold
 0 2-79 #4c4f69 #eff1f5 -
-1 0-5 #5c5f77 #eff1f5 -
+1 0-1 #8c8fa1 #eff1f5 -
+1 2-5 #4c4f69 #eff1f5 -
 1 6-14 #8839ef #eff1f5 bold
 1 15-15 #4c4f69 #eff1f5 -
 1 16-25 #df8e1d #eff1f5 -
@@ -41,7 +42,8 @@
 1 27-28 #8839ef #eff1f5 bold
 1 29-38 #4c4f69 #eff1f5 -
 1 39-39 #7c7f93 #eff1f5 -
-1 40-45 #7287fd #eff1f5 bold
+1 40-41 #8c8fa1 #eff1f5 bold
+1 42-45 #4c4f69 #eff1f5 -
 1 46-54 #8839ef #eff1f5 bold
 1 55-55 #4c4f69 #eff1f5 -
 1 56-65 #df8e1d #eff1f5 -
@@ -64,7 +66,8 @@
 3 39-39 #7c7f93 #eff1f5 -
 3 40-45 #5c5f77 #eff1f5 -
 3 46-79 #4c4f69 #eff1f5 -
-4 0-5 #7287fd #ccd0da bold
+4 0-1 #8c8fa1 #ccd0da bold
+4 2-5 #4c4f69 #eff1f5 -
 4 6-7 #4c4f69 #ccd0da -
 4 8-10 #8839ef #eff1f5 bold
 4 11-11 #4c4f69 #ccd0da -
@@ -76,8 +79,8 @@
 4 24-25 #8839ef #eff1f5 bold
 4 26-38 #4c4f69 #eff1f5 -
 4 39-39 #7c7f93 #eff1f5 -
-4 40-45 #5c5f77 #eff1f5 -
-4 46-47 #4c4f69 #eff1f5 -
+4 40-41 #8c8fa1 #eff1f5 -
+4 42-47 #4c4f69 #eff1f5 -
 4 48-50 #8839ef #eff1f5 bold
 4 51-51 #4c4f69 #eff1f5 -
 4 52-56 #1e66f5 #eff1f5 -

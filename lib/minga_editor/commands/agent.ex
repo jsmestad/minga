@@ -22,6 +22,8 @@ defmodule MingaEditor.Commands.Agent do
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.ProvenanceJump
   alias MingaEditor.Agent.SlashCommand
+  alias MingaEditor.Agent.Tasks
+  alias MingaEditor.Agent.TurnRequest
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
@@ -849,53 +851,92 @@ defmodule MingaEditor.Commands.Agent do
          )
   end
 
-  @spec clear_input_after_submit(state()) :: state()
-  defp clear_input_after_submit(state),
-    do: update_agent_ui(state, &PromptBuffer.clear_input_and_scroll/1)
+  # Sends the resolved content to the LLM. The Session's answer arrives later
+  # (`settle_turn_request/3`); the Editor never waits for it.
+  @spec deliver_prompt(
+          state(),
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          String.t() | :all
+        ) :: state()
+  defp deliver_prompt(state, resolved, raw),
+    do:
+      TurnRequest.deliver(
+        state,
+        Runtime.active_session(state.shell_runtime),
+        :prompt,
+        resolved,
+        raw
+      )
 
-  # Sends the resolved content to the LLM and handles steering queue feedback.
-  @spec deliver_prompt(state(), String.t() | [ReqLLM.Message.ContentPart.t()]) :: state()
-  defp deliver_prompt(state, resolved) do
-    result = AgentSession.send_prompt_pid(Runtime.active_session(state.shell_runtime), resolved)
-    show_prompt_delivery(state, result)
+  @doc """
+  Applies what a Session answered to a composer send or a stop the Editor asked for without waiting (`MingaEditor.Agent.TurnRequest`).
+
+  A send that went removes its text from the composer it was pressed in, in front or not. A send that was refused, or whose Session exited before it answered, keeps the text and says why in one line.
+  """
+  @spec settle_turn_request(state(), TurnRequest.t(), TurnRequest.answer()) :: state()
+  def settle_turn_request(state, %TurnRequest{work: {:stop, _target}}, :ok), do: state
+
+  def settle_turn_request(state, %TurnRequest{work: {:stop, _target}}, {:error, :stale_turn}),
+    do: NoticeWorkflow.publish(state, "That Agent turn is no longer active.")
+
+  def settle_turn_request(state, %TurnRequest{work: {:stop, _target}}, _unanswered),
+    do: NoticeWorkflow.publish(state, "Could not confirm the Agent stop request.")
+
+  def settle_turn_request(
+        state,
+        %TurnRequest{work: {:send, send, _content, raw}} = request,
+        answer
+      ) do
+    {outcome, notice} = composer_send_outcome(send, answer)
+
+    state
+    |> DraftWorkflow.send_answered(request.workspace, request.token, raw, outcome)
+    |> publish_send_notice(notice)
   end
 
-  @spec show_prompt_delivery(state(), :ok | {:queued, :steering} | {:error, term()}) :: state()
-  defp show_prompt_delivery(state, result) do
-    case result do
-      :ok ->
-        clear_input_after_submit(state)
+  @spec publish_send_notice(state(), String.t() | nil) :: state()
+  defp publish_send_notice(state, nil), do: state
+  defp publish_send_notice(state, notice), do: NoticeWorkflow.publish(state, notice)
 
-      {:queued, :steering} ->
-        state
-        |> clear_input_after_submit()
-        |> update_agent_ui(&UIState.push_toast(&1, "⏳ Queued (steer). Ctrl-C to cancel.", :info))
+  @spec composer_send_outcome(Session.composer_send(), TurnRequest.answer()) ::
+          {DraftWorkflow.send_answer(), String.t() | nil}
+  defp composer_send_outcome(_send, :session_down),
+    do: {:kept, "Agent session unavailable. Your prompt was preserved."}
 
-      {:error, :provider_not_ready} ->
-        NoticeWorkflow.publish(state, provider_starting_status())
+  defp composer_send_outcome({:attached, _record, _shown}, {:ok, revision}),
+    do: {{:sent_attached, revision}, nil}
 
-      {:error, :credentials_pending} ->
-        NoticeWorkflow.publish(state, credentials_pending_status())
+  defp composer_send_outcome({:attached, _record, _shown}, {:accepted, revision, _reason}),
+    do:
+      {{:sent_attached, revision},
+       "Prompt saved in the conversation, but the provider could not start it."}
 
-      {:error, :credentials_not_configured} ->
-        NoticeWorkflow.publish(state, credentials_missing_status())
+  defp composer_send_outcome({:attached, _record, _shown}, {:error, reason}),
+    do: {:kept, attached_submit_error(reason)}
 
-      {:error, :queue_target_unavailable} ->
-        NoticeWorkflow.publish(
-          state,
-          "The Agent turn changed. Review the active turn and send again. The draft was kept."
-        )
+  defp composer_send_outcome(_send, :ok), do: {{:sent, nil}, nil}
 
-      {:error, msg} when is_binary(msg) ->
-        NoticeWorkflow.publish(state, msg)
+  defp composer_send_outcome(_send, {:queued, :steering}),
+    do: {{:sent, "⏳ Queued (steer). Ctrl-C to cancel."}, nil}
 
-      {:error, reason} ->
-        NoticeWorkflow.publish(
-          state,
-          "Agent error: #{inspect(reason)}"
-        )
-    end
-  end
+  defp composer_send_outcome(_send, {:queued, :follow_up}),
+    do: {{:sent, "⏳ Queued (follow-up). Ctrl-C to cancel."}, nil}
+
+  defp composer_send_outcome(_send, {:error, reason}), do: {:kept, prompt_refusal(reason)}
+
+  defp composer_send_outcome(_send, other),
+    do: {:kept, "Agent error: #{inspect(other)}"}
+
+  @spec prompt_refusal(term()) :: String.t()
+  defp prompt_refusal(:provider_not_ready), do: provider_starting_status()
+  defp prompt_refusal(:credentials_pending), do: credentials_pending_status()
+  defp prompt_refusal(:credentials_not_configured), do: credentials_missing_status()
+
+  defp prompt_refusal(:queue_target_unavailable),
+    do: "The Agent turn changed. Review the active turn and send again. The draft was kept."
+
+  defp prompt_refusal(message) when is_binary(message), do: message
+  defp prompt_refusal(reason), do: "Agent error: #{inspect(reason)}"
 
   @spec send_follow_up_to_llm(state(), String.t()) :: state()
   defp send_follow_up_to_llm(state, text) do
@@ -1008,7 +1049,7 @@ defmodule MingaEditor.Commands.Agent do
   @doc """
   Delivers a send that waited in line, with the content from its key press.
 
-  It goes only while the composer holds exactly the pressed text, so sending, which clears the composer, never takes unsent typing, or the text of a press waiting behind it, with it. Otherwise nothing is sent, the composer keeps everything, the presses behind it stop waiting and one line says why. A send whose conversation is no longer in front is not sent either.
+  It goes only while the composer still starts with the pressed text and no send or queue in flight has taken that text. Sending removes only that text, so typing after it and the text of a press waiting behind it stay. Otherwise nothing is sent, the composer keeps everything, the presses behind it stop waiting and one line says why. A send whose conversation is no longer in front is not sent either.
   """
   @spec deliver_held_send(
           state(),
@@ -1025,7 +1066,7 @@ defmodule MingaEditor.Commands.Agent do
           "A message was not sent because its conversation is no longer in front. Its text is still in that composer."
         )
 
-      DraftWorkflow.only_pressed_text?(state, raw) ->
+      DraftWorkflow.pressed_text_in_front?(state, raw) ->
         deliver_held_in_front(state, owner, press, DraftWorkflow.submission(state))
 
       true ->
@@ -1062,13 +1103,13 @@ defmodule MingaEditor.Commands.Agent do
           | {:attached, DraftSave.target(), [MingaAgent.DraftAttachment.identity()]},
           DraftSave.press()
         ) :: state()
-  defp deliver_held_input(state, :send_now, content, submission, _press),
-    do: deliver_unqueued_composer(state, :send_now, content, submission)
+  defp deliver_held_input(state, :send_now, content, submission, {_source, raw, _marker}),
+    do: deliver_unqueued_composer(state, :send_now, content, submission, raw)
 
   defp deliver_held_input(state, kind, content, submission, press) do
     case DraftWorkflow.queue(state, kind, content, :current, press) do
       {:saved, updated} -> updated
-      :ordinary -> deliver_unqueued_composer(state, kind, content, submission)
+      :ordinary -> deliver_unqueued_composer(state, kind, content, submission, elem(press, 1))
     end
   end
 
@@ -1086,12 +1127,12 @@ defmodule MingaEditor.Commands.Agent do
          content,
          submission
        ),
-       do: deliver_unqueued_composer(state, :send_now, content, submission)
+       do: deliver_unqueued_composer(state, :send_now, content, submission, :all)
 
   defp deliver_composer_input(state, kind, content, submission) do
     case DraftWorkflow.queue(state, kind, content) do
       {:saved, updated} -> updated
-      :ordinary -> deliver_unqueued_composer(state, kind, content, submission)
+      :ordinary -> deliver_unqueued_composer(state, kind, content, submission, :all)
     end
   end
 
@@ -1101,7 +1142,8 @@ defmodule MingaEditor.Commands.Agent do
           String.t() | [ReqLLM.Message.ContentPart.t()],
           :ordinary
           | {:remote, DraftSave.target()}
-          | {:attached, DraftSave.target(), [MingaAgent.DraftAttachment.identity()]}
+          | {:attached, DraftSave.target(), [MingaAgent.DraftAttachment.identity()]},
+          String.t() | :all
         ) :: state()
   defp deliver_unqueued_composer(
          %{
@@ -1111,12 +1153,13 @@ defmodule MingaEditor.Commands.Agent do
          } = state,
          :send_now,
          content,
-         :ordinary
+         :ordinary,
+         raw
        )
        when node(session) == node(),
-       do: show_prompt_delivery(state, Session.send_idle_composer(session, record, content))
+       do: TurnRequest.deliver(state, session, {:idle, record}, content, raw)
 
-  defp deliver_unqueued_composer(state, :send_now, _content, :ordinary),
+  defp deliver_unqueued_composer(state, :send_now, _content, :ordinary, _raw),
     do:
       NoticeWorkflow.publish(
         state,
@@ -1133,7 +1176,8 @@ defmodule MingaEditor.Commands.Agent do
          } = state,
          :follow_up,
          _content,
-         _submission
+         _submission,
+         _raw
        )
        when node(session) == node() do
     NoticeWorkflow.publish(state, "That Agent turn is no longer active. Your draft was kept.")
@@ -1152,70 +1196,47 @@ defmodule MingaEditor.Commands.Agent do
          } = state,
          _kind,
          content,
-         :ordinary
+         :ordinary,
+         raw
        )
        when node(session) == node() do
     if Runtime.active_session(state.shell_runtime) == session do
-      show_prompt_delivery(state, Session.send_idle_composer(session, record, content))
+      TurnRequest.deliver(state, session, {:idle, record}, content, raw)
     else
       NoticeWorkflow.publish(state, "The Agent conversation changed. The draft was not sent.")
     end
   end
 
-  defp deliver_unqueued_composer(state, _, content, {:remote, target}) do
+  defp deliver_unqueued_composer(state, _, content, {:remote, target}, _raw) do
     DraftWorkflow.submit_remote(state, target, [], content)
   end
 
-  defp deliver_unqueued_composer(state, :steering, content, :ordinary),
-    do: deliver_prompt(state, content)
+  defp deliver_unqueued_composer(state, :steering, content, :ordinary, raw),
+    do: deliver_prompt(state, content, raw)
 
-  defp deliver_unqueued_composer(state, :follow_up, content, :ordinary),
-    do: deliver_follow_up(state, content)
+  defp deliver_unqueued_composer(state, :follow_up, content, :ordinary, raw),
+    do: deliver_follow_up(state, content, raw)
 
-  defp deliver_unqueued_composer(state, _, content, {:attached, target, shown}),
-    do: deliver_attached_composer(state, target, shown, content)
+  defp deliver_unqueued_composer(state, _, content, {:attached, target, shown}, raw),
+    do: deliver_attached_composer(state, target, shown, content, raw)
 
   @spec deliver_attached_composer(
           state(),
           DraftSave.target(),
           [MingaAgent.DraftAttachment.identity()],
-          String.t() | [ReqLLM.Message.ContentPart.t()]
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          String.t() | :all
         ) :: state()
-  defp deliver_attached_composer(state, {session, _record} = target, shown, content)
+  defp deliver_attached_composer(state, {session, _record} = target, shown, content, _raw)
        when node(session) != node(),
        do: DraftWorkflow.submit_remote(state, target, shown, content)
 
-  defp deliver_attached_composer(state, {session, record}, shown, content) do
+  defp deliver_attached_composer(state, {session, record}, shown, content, raw) do
     if Runtime.active_session(state.shell_runtime) == session do
-      case Session.send_attached_prompt(session, record, shown, content) do
-        {:ok, revision} ->
-          clear_attached_composer(state, revision)
-
-        {:accepted, revision, _reason} ->
-          state
-          |> clear_attached_composer(revision)
-          |> NoticeWorkflow.publish(
-            "Prompt saved in the conversation, but the provider could not start it."
-          )
-
-        {:error, reason} ->
-          NoticeWorkflow.publish(state, attached_submit_error(reason))
-      end
+      TurnRequest.deliver(state, session, {:attached, record, shown}, content, raw)
     else
       NoticeWorkflow.publish(state, "The Agent conversation changed. The draft was not sent.")
     end
-  end
-
-  @spec clear_attached_composer(state(), DraftSave.revision()) :: state()
-  defp clear_attached_composer(state, revision) do
-    state
-    |> clear_input_after_submit()
-    |> update_agent_ui(fn %UIState{draft_save: %DraftSave{buffer: buffer} = save} = ui ->
-      UIState.project_draft_save(
-        ui,
-        DraftSave.sent(save, revision, Buffer.inspection_marker(buffer))
-      )
-    end)
   end
 
   @spec attached_submit_error(term()) :: String.t()
@@ -1414,41 +1435,20 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  @spec deliver_follow_up(state(), String.t() | [ReqLLM.Message.ContentPart.t()]) :: state()
-  defp deliver_follow_up(state, resolved) do
-    case Session.queue_follow_up(
-           Runtime.active_session(state.shell_runtime),
-           resolved
-         ) do
-      :ok ->
-        update_agent_ui(state, &PromptBuffer.clear_input_and_scroll/1)
-
-      {:queued, :follow_up} ->
-        state
-        |> update_agent_ui(&PromptBuffer.clear_input_and_scroll/1)
-        |> update_agent_ui(
-          &UIState.push_toast(&1, "⏳ Queued (follow-up). Ctrl-C to cancel.", :info)
-        )
-
-      {:error, :provider_not_ready} ->
-        NoticeWorkflow.publish(state, provider_starting_status())
-
-      {:error, :credentials_pending} ->
-        NoticeWorkflow.publish(state, credentials_pending_status())
-
-      {:error, :credentials_not_configured} ->
-        NoticeWorkflow.publish(state, credentials_missing_status())
-
-      {:error, msg} when is_binary(msg) ->
-        NoticeWorkflow.publish(state, msg)
-
-      {:error, reason} ->
-        NoticeWorkflow.publish(
-          state,
-          "Agent error: #{inspect(reason)}"
-        )
-    end
-  end
+  @spec deliver_follow_up(
+          state(),
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          String.t() | :all
+        ) :: state()
+  defp deliver_follow_up(state, resolved, raw),
+    do:
+      TurnRequest.deliver(
+        state,
+        Runtime.active_session(state.shell_runtime),
+        :follow_up,
+        resolved,
+        raw
+      )
 
   @spec project_root() :: String.t() | nil
   defp project_root, do: Minga.Project.resolve_root()
@@ -1477,13 +1477,41 @@ defmodule MingaEditor.Commands.Agent do
   """
   @spec abort_agent(state()) :: state()
   def abort_agent(state) do
-    agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
-
-    case agent.stop_target do
-      {_session, target} -> stop_displayed_turn(state, target)
+    case turn_to_stop(state) do
+      {session, target} -> TurnRequest.stop(state, session, target)
+      :several -> NoticeWorkflow.publish(state, several_working_status())
       nil -> state
     end
   end
+
+  # Stop works from any buffer, so it does not need a conversation in front. It stops one
+  # turn: the turn of the conversation in front; with none in front, the turn of the
+  # conversation shown last, or the only turn there is. Every followed session reports its
+  # own turn (`Tasks.stoppable/1`), so a turn in a background workspace is known too.
+  @spec turn_to_stop(state()) :: {pid(), {String.t(), String.t()}} | :several | nil
+  defp turn_to_stop(state) do
+    stoppable = Tasks.stoppable(state.agent_connection.tasks)
+    agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+
+    case Runtime.active_session(state.shell_runtime) do
+      session when is_pid(session) -> List.keyfind(stoppable, session, 0) || agent.stop_target
+      nil -> background_turn_to_stop(stoppable, AgentState.session(agent))
+    end
+  end
+
+  # `shown_last` is the conversation the modeline of a file speaks for (`MingaEditor.Agent.WorkspaceStatus`).
+  @spec background_turn_to_stop([{pid(), {String.t(), String.t()}}], pid() | nil) ::
+          {pid(), {String.t(), String.t()}} | :several | nil
+  defp background_turn_to_stop([], _shown_last), do: nil
+  defp background_turn_to_stop([only], _shown_last), do: only
+  defp background_turn_to_stop(_stoppable, nil), do: :several
+
+  defp background_turn_to_stop(stoppable, shown_last),
+    do: List.keyfind(stoppable, shown_last, 0) || :several
+
+  @spec several_working_status() :: String.t()
+  defp several_working_status,
+    do: "Several conversations are working. Bring the one to stop to the front, then stop it."
 
   @doc "Stops the turn shown on an attached Agent surface, never its replacement."
   @spec stop_displayed_turn(state(), {String.t(), String.t()}) :: state()
@@ -1492,23 +1520,10 @@ defmodule MingaEditor.Commands.Agent do
 
     with {session, ^target} <- agent.stop_target,
          ^session <- Runtime.active_session(state.shell_runtime) do
-      stop_turn(state, session, target)
+      TurnRequest.stop(state, session, target)
     else
       _ -> NoticeWorkflow.publish(state, "That Agent turn is no longer active.")
     end
-  end
-
-  @spec stop_turn(state(), pid(), {String.t(), String.t()}) :: state()
-  defp stop_turn(state, session, target) do
-    case Session.stop_turn(session, target) do
-      :ok ->
-        state
-
-      {:error, :stale_turn} ->
-        NoticeWorkflow.publish(state, "That Agent turn is no longer active.")
-    end
-  catch
-    :exit, _ -> NoticeWorkflow.publish(state, "Could not confirm the Agent stop request.")
   end
 
   @doc "Retries the current agent provider after a startup or crash error."

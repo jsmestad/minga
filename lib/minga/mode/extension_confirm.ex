@@ -18,33 +18,42 @@ defmodule Minga.Mode.ExtensionConfirm do
 
   @behaviour Minga.Mode
 
+  import Bitwise
+
   alias Minga.Mode
   alias Minga.Mode.ExtensionConfirmState
 
   @escape 27
 
+  # An answer is a letter pressed without Control, Alt or Command. A chord is not an answer: without enhanced key
+  # reporting a terminal sends Esc followed by a letter as Alt and that letter when both arrive together.
+  @chord_mods 0x0E
+
   @impl Mode
   @spec handle_key(Mode.key(), ExtensionConfirmState.t()) :: Mode.result()
 
   # Y → accept current update, advance
-  def handle_key({?Y, _mods}, %ExtensionConfirmState{} = state) do
+  def handle_key({?Y, mods}, %ExtensionConfirmState{} = state)
+      when band(mods, @chord_mods) == 0 do
     new_accepted = [state.current | state.accepted]
     advance(%{state | accepted: new_accepted, show_details: false})
   end
 
   # n → skip current, advance
-  def handle_key({?n, _mods}, %ExtensionConfirmState{} = state) do
+  def handle_key({?n, mods}, %ExtensionConfirmState{} = state)
+      when band(mods, @chord_mods) == 0 do
     advance(%{state | show_details: false})
   end
 
   # d → toggle details for current update
-  def handle_key({?d, _mods}, %ExtensionConfirmState{} = state) do
+  def handle_key({?d, mods}, %ExtensionConfirmState{} = state)
+      when band(mods, @chord_mods) == 0 do
     {:execute, :extension_confirm_details, %{state | show_details: !state.show_details}}
   end
 
   # q or Escape → finish with current decisions
-  def handle_key({cp, _mods}, %ExtensionConfirmState{} = state)
-      when cp == ?q or cp == @escape do
+  def handle_key({cp, mods}, %ExtensionConfirmState{} = state)
+      when cp == @escape or (cp == ?q and band(mods, @chord_mods) == 0) do
     {:execute_then_transition, [:apply_extension_updates], :normal,
      %{state | show_details: false}}
   end

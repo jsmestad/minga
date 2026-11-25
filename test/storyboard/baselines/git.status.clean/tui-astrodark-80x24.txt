@@ -6,17 +6,17 @@
 # cursor: 1,6
 ## text
  ▌  storyboard.ex
-git main  ahead 2   │   1  defmodule Storyboard do
+git main  ahead 2   │▾  1  defmodule Storyboard do
                     │   1    @moduledoc "A small file every storyboard scenario
    ● Nothing to     │   2
-     commit on      │   3    def greet(name) do
-     main.          │   4    │ "Hello, " <> name
-   2 commits to     │   5    end
-   push.            │   6  end
-                    │   7
-   P Push to remote │      ~
-   l Pull from rem… │      ~
-   f Fetch from re… │      ~
+     commit on main.│▾  3    def greet(name) do
+   2 commits to     │   4    │ "Hello, " <> name
+   push.            │   5    end
+                    │   6  end
+   P Push to remote │   7
+   l Pull from remo…│      ~
+   f Fetch from rem…│      ~
+                    │      ~
                     │      ~
                     │      ~
                     │      ~
@@ -35,7 +35,8 @@ git main  ahead 2   │   1  defmodule Storyboard do
 0 2-79 #adb0bb #1a1d23 -
 1 0-19 #595c66 #111317 bold
 1 20-20 #3a3e47 #1a1d23 -
-1 21-26 #adb0bb #1e222a bold
+1 21-22 #595c66 #1e222a bold
+1 23-26 #adb0bb #1a1d23 -
 1 27-35 #dd97f1 #1a1d23 bold
 1 36-36 #adb0bb #1e222a -
 1 37-46 #dfab25 #1a1d23 -
@@ -56,11 +57,10 @@ git main  ahead 2   │   1  defmodule Storyboard do
 3 21-26 #858892 #1a1d23 -
 3 27-79 #adb0bb #1a1d23 -
 4 0-2 #adb0bb #16181d -
-4 3-13 #adb0bb #16181d bold
-4 14-19 #adb0bb #16181d -
+4 3-19 #adb0bb #16181d bold
 4 20-20 #3a3e47 #1a1d23 -
-4 21-26 #858892 #1a1d23 -
-4 27-28 #adb0bb #1a1d23 -
+4 21-22 #595c66 #1a1d23 -
+4 23-28 #adb0bb #1a1d23 -
 4 29-31 #dd97f1 #1a1d23 bold
 4 32-32 #adb0bb #1a1d23 -
 4 33-37 #5eb7ff #1a1d23 -
@@ -71,8 +71,8 @@ git main  ahead 2   │   1  defmodule Storyboard do
 4 45-46 #dd97f1 #1a1d23 bold
 4 47-79 #adb0bb #1a1d23 -
 5 0-2 #adb0bb #16181d -
-5 3-9 #adb0bb #16181d bold
-5 10-19 #adb0bb #16181d -
+5 3-14 #595c66 #16181d -
+5 15-19 #adb0bb #16181d -
 5 20-20 #3a3e47 #1a1d23 -
 5 21-26 #858892 #1a1d23 -
 5 27-28 #adb0bb #1a1d23 -
@@ -81,27 +81,27 @@ git main  ahead 2   │   1  defmodule Storyboard do
 5 31-39 #87c05f #1a1d23 -
 5 40-79 #adb0bb #1a1d23 -
 6 0-2 #adb0bb #16181d -
-6 3-14 #595c66 #16181d -
-6 15-19 #adb0bb #16181d -
+6 3-7 #595c66 #16181d -
+6 8-19 #adb0bb #16181d -
 6 20-20 #3a3e47 #1a1d23 -
 6 21-26 #858892 #1a1d23 -
 6 27-28 #adb0bb #1a1d23 -
 6 29-31 #dd97f1 #1a1d23 bold
 6 32-79 #adb0bb #1a1d23 -
-7 0-2 #adb0bb #16181d -
-7 3-7 #595c66 #16181d -
-7 8-19 #adb0bb #16181d -
+7 0-19 #adb0bb #16181d -
 7 20-20 #3a3e47 #1a1d23 -
 7 21-26 #858892 #1a1d23 -
 7 27-29 #dd97f1 #1a1d23 bold
 7 30-79 #adb0bb #1a1d23 -
-8 0-19 #adb0bb #16181d -
+8 0-2 #adb0bb #26343f -
+8 3-3 #16181d #50a4e9 -
+8 4-19 #adb0bb #26343f -
 8 20-20 #3a3e47 #1a1d23 -
 8 21-26 #858892 #1a1d23 -
 8 27-79 #adb0bb #1a1d23 -
-9 0-2 #adb0bb #26343f -
-9 3-3 #16181d #50a4e9 -
-9 4-19 #adb0bb #26343f -
+9 0-2 #adb0bb #16181d -
+9 3-3 #50a4e9 #16181d -
+9 4-19 #adb0bb #16181d -
 9 20-20 #3a3e47 #1a1d23 -
 9 21-26 #858892 #1a1d23 -
 9 27-79 #595c66 #1a1d23 -
@@ -111,9 +111,7 @@ git main  ahead 2   │   1  defmodule Storyboard do
 10 20-20 #3a3e47 #1a1d23 -
 10 21-26 #858892 #1a1d23 -
 10 27-79 #595c66 #1a1d23 -
-11 0-2 #adb0bb #16181d -
-11 3-3 #50a4e9 #16181d -
-11 4-19 #adb0bb #16181d -
+11 0-19 #595c66 #111317 -
 11 20-20 #3a3e47 #1a1d23 -
 11 21-26 #858892 #1a1d23 -
 11 27-79 #595c66 #1a1d23 -

@@ -66,6 +66,17 @@ defmodule MingaEditor.Input.HandlerTest do
              )
     end
 
+    test "an answer held with Control, Alt or Command is not an answer" do
+      state = base_state()
+      buf = state.workspace.buffers.active
+      state = ModalWorkflow.open(state, {:conflict, ConflictPayload.new(buf, "/tmp/test.txt")})
+
+      for key <- [?r, ?k], mods <- [0x02, 0x04, 0x08] do
+        assert {:handled, kept} = ConflictPrompt.handle_key(state, key, mods)
+        assert ModalOverlay.match(kept.shell_runtime.state.modal, :conflict)
+      end
+    end
+
     test "swallows unrecognized keys during conflict" do
       state = base_state()
       buf = state.workspace.buffers.active

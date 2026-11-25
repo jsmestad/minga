@@ -210,6 +210,20 @@ defmodule MingaEditor.State do
     %{state | agent_connection: connection}
   end
 
+  @doc "Keeps a composer send or a stop the Editor sent to a Session and has not seen answered."
+  @spec track_agent_turn_request(t(), MingaEditor.Agent.TurnRequest.t()) :: t()
+  def track_agent_turn_request(%__MODULE__{} = state, request) do
+    connection = AgentConnection.track_turn_request(state.agent_connection, request)
+    %{state | agent_connection: connection}
+  end
+
+  @doc "Forgets an answered send or stop."
+  @spec finish_agent_turn_request(t(), reference()) :: t()
+  def finish_agent_turn_request(%__MODULE__{} = state, token) do
+    connection = AgentConnection.finish_turn_request(state.agent_connection, token)
+    %{state | agent_connection: connection}
+  end
+
   @doc "Records a contributed model route's reported status from its change event."
   @spec record_inference_route_status(t(), MingaAgent.InferenceRoute.StatusChangedEvent.t()) ::
           t()

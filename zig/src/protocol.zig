@@ -103,6 +103,7 @@ pub const OP_REQUEST_REPARSE = opcodes.OP_REQUEST_REPARSE;
 pub const OP_MATCH_ITEM_RESULT = opcodes.OP_MATCH_ITEM_RESULT;
 pub const OP_NODE_INFO = opcodes.OP_NODE_INFO;
 pub const OP_DOCUMENT_SYMBOLS = opcodes.OP_DOCUMENT_SYMBOLS;
+pub const OP_PARSE_COMPLETE = opcodes.OP_PARSE_COMPLETE;
 
 // Gui Chrome
 pub const OP_GUI_TAB_BAR = opcodes.OP_GUI_TAB_BAR;
@@ -1778,6 +1779,15 @@ pub fn encodeFoldRanges(allocator: std.mem.Allocator, buffer_id: u32, version: u
     return buf;
 }
 
+/// Encodes parse_complete: opcode(1) + buffer_id(4) + version(4). It is the last message of every parse, so the BEAM
+/// knows every other result of that parse has arrived before it.
+pub fn encodeParseComplete(buf: *[9]u8, buffer_id: u32, version: u32) []const u8 {
+    buf[0] = OP_PARSE_COMPLETE;
+    std.mem.writeInt(u32, buf[1..5], buffer_id, .big);
+    std.mem.writeInt(u32, buf[5..9], version, .big);
+    return buf;
+}
+
 /// Text object result (shared between protocol and highlighter).
 pub const TextobjectResult = struct {
     start_row: u32,
@@ -3396,6 +3406,12 @@ test "encodeLogMessage buffer too small returns error" {
 }
 
 // ── Request reparse protocol tests ────────────────────────────────────────────
+
+test "encodeParseComplete byte layout" {
+    var buf: [9]u8 = undefined;
+    const msg = encodeParseComplete(&buf, 0x01020304, 7);
+    try std.testing.expectEqualSlices(u8, &.{ OP_PARSE_COMPLETE, 1, 2, 3, 4, 0, 0, 0, 7 }, msg);
+}
 
 test "encodeRequestReparse byte layout" {
     var buf: [5]u8 = undefined;

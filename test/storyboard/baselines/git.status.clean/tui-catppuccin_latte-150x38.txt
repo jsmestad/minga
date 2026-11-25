@@ -7,10 +7,10 @@
 ## text
  ▌  storyboard.ex
   / ❯ tmp ❯ minga-storyboard ❯ tui-150x38 ❯ git.status.clean ❯ lib ❯ storyboard.ex  ·  git main  ahead 2
-git main  ahead 2             │   1  defmodule Storyboard do
+git main  ahead 2             │▾  1  defmodule Storyboard do
                               │   1    @moduledoc "A small file every storyboard scenario starts in."
    ● Nothing to commit on     │   2
-     main.                    │   3    def greet(name) do
+     main.                    │▾  3    def greet(name) do
    2 commits to push.         │   4    │ "Hello, " <> name
                               │   5    end
    P Push to remote           │   6  end
@@ -64,7 +64,8 @@ git main  ahead 2             │   1  defmodule Storyboard do
 1 104-149 #4c4f69 #eff1f5 -
 2 0-29 #8c8fa1 #ccd0da bold
 2 30-30 #8c8fa1 #eff1f5 -
-2 31-36 #7287fd #ccd0da bold
+2 31-32 #8c8fa1 #ccd0da bold
+2 33-36 #4c4f69 #eff1f5 -
 2 37-45 #8839ef #eff1f5 bold
 2 46-46 #4c4f69 #ccd0da -
 2 47-56 #df8e1d #eff1f5 -
@@ -88,9 +89,8 @@ git main  ahead 2             │   1  defmodule Storyboard do
 5 0-2 #4c4f69 #ccd0da -
 5 3-9 #4c4f69 #ccd0da bold
 5 10-29 #4c4f69 #ccd0da -
-5 30-30 #8c8fa1 #eff1f5 -
-5 31-36 #5c5f77 #eff1f5 -
-5 37-38 #4c4f69 #eff1f5 -
+5 30-32 #8c8fa1 #eff1f5 -
+5 33-38 #4c4f69 #eff1f5 -
 5 39-41 #8839ef #eff1f5 bold
 5 42-42 #4c4f69 #eff1f5 -
 5 43-47 #1e66f5 #eff1f5 -

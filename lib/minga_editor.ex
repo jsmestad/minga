@@ -16,6 +16,7 @@ defmodule MingaEditor do
   alias MingaEditor.Agent.Arrival
   alias MingaEditor.Agent.TranscriptSync
   alias MingaEditor.Agent.SessionFollowUp
+  alias MingaEditor.Agent.TurnRequest
   alias MingaEditor.Agent.SessionStart
   alias MingaEditor.Agent.Events
   alias MingaEditor.Agent.UIState
@@ -1596,6 +1597,7 @@ defmodule MingaEditor do
   defp agent_request_response(state, message) do
     with :unrelated <- Arrival.response(state, message),
          :unrelated <- TranscriptSync.response(state, message) |> render_handled(),
+         :unrelated <- TurnRequest.response(state, message) |> render_handled(),
          :unrelated <- SessionStart.response(state, message) |> render_handled() do
       SessionFollowUp.response(state, message) |> render_handled()
     end

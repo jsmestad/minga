@@ -152,6 +152,27 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
       assert {:handled, _accepted} = MentionCompletion.handle_key(state, 13, 0)
     end
 
+    test "a key held with ⌘ closes the popup and reaches its own binding, and a chord never types into the query",
+         %{completion: comp} do
+      state = base_state(keymap_scope: :agent, agentic_active: true, input_focused: true)
+
+      state =
+        MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+          state,
+          (fn p -> %{p | mention_completion: comp} end).(state.workspace.agent_ui.panel)
+        )
+
+      # ⌘. stops the agent: the popup must not take it as a typed ".".
+      assert {:passthrough, passed} = MentionCompletion.handle_key(state, ?., 0x08)
+      assert passed.workspace.agent_ui.panel.mention_completion == nil
+
+      # ⌃ and ⌥ chords stay with the popup, as before, and leave the query alone.
+      for mods <- [0x02, 0x04] do
+        assert {:handled, kept} = MentionCompletion.handle_key(state, ?f, mods)
+        assert kept.workspace.agent_ui.panel.mention_completion == comp
+      end
+    end
+
     test "passes through when no mention completion active" do
       state = base_state(keymap_scope: :agent, agentic_active: true, input_focused: true)
       {:passthrough, _} = MentionCompletion.handle_key(state, ?h, 0)

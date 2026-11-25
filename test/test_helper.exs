@@ -78,6 +78,10 @@ ExUnit.start(
 # Fail the run readably at the end of the suite instead.
 Minga.Test.ConsoleGuard.install()
 
+# A test that opens a sidebar in the table every hand-built editor state shares takes the keys of later tests (#4271).
+# Fail the run readably at the end of the suite instead.
+Minga.Test.SharedSidebarGuard.install()
+
 # A quit command calls System.stop/1 through :shutdown_fn. A test that presses a quit key (the storyboard explorer's
 # way-out check presses q up to three times, which reaches SPC q q from the leader) would stop the VM, and ExUnit then
 # reports the run as finished with the remaining tests silently missing. Tests that check quitting install their own.
