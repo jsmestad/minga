@@ -726,8 +726,8 @@ defmodule Minga.Core.Unicode do
   a region whose ends are certainly boundaries, the anchors: the start or end of the text, just after a line feed, or
   between two ASCII bytes neither of which is a carriage return (no rule joins those). The region runs from the nearest
   anchor at or before `from` to the nearest at or after `to`, found with no byte limit, so a cluster is never cut by a
-  window and the cost is the region's length. When the region is not valid UTF-8 its boundaries are the code point
-  starts: every byte that is not a UTF-8 continuation byte (`String.graphemes/1` can raise on such text).
+  window and the cost is the region's length. When the region is not valid UTF-8, its boundaries are its start and
+  end anchors and the bytes between them that are not UTF-8 continuation bytes (`String.graphemes/1` can raise).
 
   ## Examples
 
@@ -785,13 +785,19 @@ defmodule Minga.Core.Unicode do
 
   @spec code_point_starts(binary(), non_neg_integer()) :: [non_neg_integer()]
   defp code_point_starts(region, first) do
-    region
-    |> :binary.bin_to_list()
-    |> Enum.with_index(first)
-    |> List.foldr([first + byte_size(region)], fn
-      {byte, _at}, acc when byte in 0x80..0xBF -> acc
-      {_byte, at}, acc -> [at | acc]
-    end)
+    starts =
+      region
+      |> :binary.bin_to_list()
+      |> Enum.with_index(first)
+      |> List.foldr([first + byte_size(region)], fn
+        {byte, _at}, acc when byte in 0x80..0xBF -> acc
+        {_byte, at}, acc -> [at | acc]
+      end)
+
+    case starts do
+      [^first | _rest] -> starts
+      _continuation_first -> [first | starts]
+    end
   end
 
   @spec find_anchor(binary(), non_neg_integer()) :: non_neg_integer()
