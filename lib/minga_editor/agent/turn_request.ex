@@ -4,7 +4,7 @@ defmodule MingaEditor.Agent.TurnRequest do
 
   A Session admits a send only after its provider has prepared the request, which can take seconds, and it handles a stop only between its other work. The Editor therefore never calls the Session for either (#4296). It sends one `:gen_server.send_request/2` and keeps this record until the reply arrives. The request monitors the Session, so a Session that exits answers with its exit. A Session on another node is asked by a worker under the effect scheduler, which the record monitors in the same way.
 
-  A send belongs to the composer it was pressed in. While it is out, that composer counts the pressed text as taken (`MingaEditor.Agent.DraftWorkflow.begin_send/2`), so a second press never sends the same text again. The answer is applied to that composer whether or not its workspace is still in front; `MingaEditor.Commands.Agent.settle_turn_request/3` says what each answer means. A send that never got an answer keeps its text.
+  A send belongs to the composer it was pressed in. While it is out, that composer counts the pressed text as taken (`MingaEditor.Agent.DraftWorkflow.begin_send/3`), so a second press never sends the same text again. The answer is applied to that composer whether or not its workspace is still in front; `MingaEditor.Commands.Agent.settle_turn_request/3` says what each answer means. A send that never got an answer keeps its text.
   """
 
   alias MingaAgent.Session
