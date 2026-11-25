@@ -942,8 +942,11 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   # ── Reload config ──────────────────────────────────────────────────────────
 
+  # The reload reads project-local configuration from the project this editor has open.
+  # The root travels as data with the request: the reload runs off the Editor and reads no directory of its own.
   @spec reload_config(state()) :: state()
-  def reload_config(state), do: reload_config(state, Minga.Config)
+  def reload_config(state),
+    do: reload_config(state, Minga.Config, [state.workspace.file_tree.project_root])
 
   @doc "Schedules config reload through an explicit reload implementation."
   @spec reload_config(state(), module()) :: state()

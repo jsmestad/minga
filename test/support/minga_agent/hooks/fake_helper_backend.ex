@@ -16,6 +16,10 @@ defmodule MingaAgent.Hooks.FakeHelperBackend do
     events = Keyword.fetch!(opts, :events)
     id = make_ref()
     send(observer, {:fake_helper, id, :started, args, payload_json})
+    # The directory the helper would be started in, when the runner chose one.
+    if directory = Keyword.get(opts, :cd),
+      do: send(observer, {:fake_helper, id, :directory, directory})
+
     {:ok, %__MODULE__{id: id, observer: observer, events: events}}
   end
 

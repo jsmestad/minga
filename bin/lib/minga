@@ -18,6 +18,8 @@ if [ "${1:-}" = "+gui" ]; then
   exec "$PROJECT_DIR/bin/lib/minga-mac" "$@"
 fi
 
+enter_source_tree
+
 if terminal_only "$@"; then
   exec mix minga -- "$@"
 fi
@@ -83,7 +85,32 @@ should_redirect_stdio() {
 if should_redirect_stdio "$@"; then
   LOG_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/minga"
   mkdir -p "$LOG_DIR"
-  exec mix minga -- "$@" >> "$LOG_DIR/minga.log" 2>&1
+
+  # The editor draws on the terminal, so its output goes to the log.
+  # A start that fails would then fail silently: say so on the terminal, with the end of the log.
+  # The editor runs as a child so this script can do that. Signals sent to the script go on to the editor.
+  mix minga -- "$@" >> "$LOG_DIR/minga.log" 2>&1 <&0 &
+  editor=$!
+  trap 'kill -TERM "$editor" 2>/dev/null' TERM
+  trap 'kill -INT "$editor" 2>/dev/null' INT
+  trap 'kill -HUP "$editor" 2>/dev/null' HUP
+
+  # A forwarded signal ends `wait` early, with the signal's status and not the editor's.
+  # Wait until the editor has really gone, then ask for its own status.
+  wait "$editor" || true
+  while kill -0 "$editor" 2>/dev/null; do
+    wait "$editor" || true
+  done
+  status=0
+  wait "$editor" || status=$?
+
+  if [ "$status" -ne 0 ]; then
+    printf 'minga: the editor exited with status %s. The last lines of %s:\n' "$status" "$LOG_DIR/minga.log" >&2
+    # The log is the editor's output. Control characters in it must not drive this terminal.
+    tail -n 20 "$LOG_DIR/minga.log" | LC_ALL=C tr -d '\000-\010\013-\037\177' >&2
+  fi
+
+  exit "$status"
 else
   exec mix minga -- "$@"
 fi

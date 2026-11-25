@@ -109,7 +109,11 @@ defmodule Minga.Services.Supervisor do
         :svc_semantic_ui_registry,
         MingaEditor.Agent.SemanticUI.Registry
       ),
-      StartupTimer.timed_child_spec(:svc_config_loader, Minga.Config.Loader),
+      # Project-local configuration is read from the project that was launched, never from the VM's directory.
+      StartupTimer.timed_child_spec(
+        :svc_config_loader,
+        {Minga.Config.Loader, project_root: Minga.CLI.startup_project_root()}
+      ),
       StartupTimer.timed_child_spec(:svc_config_writer, Minga.Config.Writer),
       StartupTimer.timed_child_spec(:svc_lsp_supervisor, Minga.LSP.Supervisor),
       StartupTimer.timed_child_spec(:svc_lsp_sync, Minga.LSP.SyncServer),

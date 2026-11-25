@@ -19,6 +19,10 @@ defmodule MingaAgent.MCP.FakeTransport do
   @impl MingaAgent.MCP.Transport
   @spec start(ServerConfig.t(), pid(), keyword()) :: GenServer.on_start()
   def start(%ServerConfig{} = config, owner, opts) do
+    # What the server would be started with: the program and the directory, which a test may want to see.
+    if test_pid = Keyword.get(opts, :test_pid),
+      do: send(test_pid, {:mcp_transport_config, config})
+
     GenServer.start(__MODULE__, {config.name, owner, opts})
   end
 

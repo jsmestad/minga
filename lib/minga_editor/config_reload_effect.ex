@@ -42,10 +42,13 @@ defmodule MingaEditor.ConfigReloadEffect do
   end
 
   @impl true
-  @spec run(t()) :: {:ok, {reload_result(), config_state()}} | {:error, term()}
+  @spec run(t()) ::
+          {:ok, {reload_result(), config_state(), project_line :: String.t() | nil}}
+          | {:error, term()}
   def run(%__MODULE__{reload_module: reload_module, reload_args: reload_args}) do
     result = apply(reload_module, :reload, reload_args)
-    {:ok, {result, config_state(reload_module)}}
+    # Read here, off the Editor: both ask the loader process.
+    {:ok, {result, config_state(reload_module), project_line(reload_module)}}
   rescue
     exception -> {:error, {:config_reload_exception, Exception.message(exception)}}
   catch
@@ -54,7 +57,11 @@ defmodule MingaEditor.ConfigReloadEffect do
 
   @impl true
   @spec apply(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
-  def apply(state, %Outcome{value: {:completed, {result, config_state}}} = outcome) do
+  def apply(
+        state,
+        %Outcome{value: {:completed, {result, config_state, project_line}}} = outcome
+      ) do
+    say_project_config(project_line)
     {finish(state, result, config_state), outcome}
   end
 
@@ -95,6 +102,16 @@ defmodule MingaEditor.ConfigReloadEffect do
     |> report_config_state(config_state)
     |> NoticeWorkflow.publish("Config reload error: #{message}")
   end
+
+  # Says in `*Messages*` which folder project-local configuration came from, or why a folder was refused.
+  @spec say_project_config(String.t() | nil) :: :ok
+  defp say_project_config(nil), do: :ok
+  defp say_project_config(line) when is_binary(line), do: Minga.API.message(line)
+
+  # Only the global loader knows about project-local configuration; another reload implementation says nothing.
+  @spec project_line(module()) :: String.t() | nil
+  defp project_line(Minga.Config), do: Minga.Config.project_config_message()
+  defp project_line(_reload_module), do: nil
 
   @spec report_config_state(EditorState.t(), config_state()) :: EditorState.t()
   defp report_config_state(state, {:loaded, error}),
