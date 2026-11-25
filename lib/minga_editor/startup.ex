@@ -542,9 +542,17 @@ defmodule MingaEditor.Startup do
   """
   @spec announce_retired_startup_choices(Options.server() | nil) :: :ok
   def announce_retired_startup_choices(options_server) do
-    Minga.CLI.startup_flags().deprecated_flags
+    command_line_flags()
     |> retired_startup_notes(startup_view_option(options_server))
     |> Enum.each(&Minga.API.message/1)
+  end
+
+  # The command line is read only when startup inference is on, as for the startup file and directory.
+  @spec command_line_flags() :: [String.t()]
+  defp command_line_flags do
+    if Application.get_env(:minga, :infer_startup_project_root, true),
+      do: Minga.CLI.startup_flags().deprecated_flags,
+      else: []
   end
 
   @doc "The `*Messages*` lines for retired startup choices: each ignored flag, and `:startup_view` set to `:agent`."
