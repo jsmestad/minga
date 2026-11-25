@@ -1378,6 +1378,21 @@ defmodule MingaAgent.Session do
   end
 
   @doc """
+  Moves the displayed pending entry within its queue, or puts a removed entry back, in the original saved Session.
+
+  The entry is named by its identity and the place by another pending entry's id, never by a position, so two views of one queue cannot move the wrong row.
+  """
+  @spec place_queued_input(
+          GenServer.server(),
+          String.t(),
+          {pos_integer(), pos_integer()},
+          TurnExecution.queue_placement()
+        ) :: :ok | {:error, term()}
+  def place_queued_input(session, record_id, identity, placement) do
+    GenServer.call(session, {:place_queued_input, record_id, identity, placement}, 30_000)
+  end
+
+  @doc """
   Sets an edit boundary for the agent on the given file path.
 
   The agent will be restricted to editing within the specified line range
@@ -1843,6 +1858,19 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:change_queued_input, _record_id, _identity, _operation}, _from, state),
+    do: {:reply, {:error, :stale_target}, state}
+
+  def handle_call(
+        {:place_queued_input, record_id, {id, revision} = identity, placement},
+        {caller, _tag},
+        state
+      )
+      when node(caller) == node() and is_binary(record_id) and is_integer(id) and id > 0 and
+             is_integer(revision) and revision > 0 do
+    place_queued_input_reply(state, record_id, identity, placement)
+  end
+
+  def handle_call({:place_queued_input, _record_id, _identity, _placement}, _from, state),
     do: {:reply, {:error, :stale_target}, state}
 
   def handle_call({:read_draft_attachment, record_id, identity}, {caller, _tag}, state)
@@ -5902,6 +5930,26 @@ defmodule MingaAgent.Session do
   end
 
   defp change_queued_input_reply(state, _record_id, _id, _revision, _operation),
+    do: {:reply, {:error, :invalid_queue_edit}, state}
+
+  @spec place_queued_input_reply(state(), String.t(), {pos_integer(), pos_integer()}, term()) ::
+          {:reply, :ok | {:error, term()}, state()}
+  defp place_queued_input_reply(state, record_id, identity, placement)
+       when placement == :end or
+              (is_tuple(placement) and tuple_size(placement) == 2 and
+                 elem(placement, 0) in [:before, :after] and is_integer(elem(placement, 1)) and
+                 elem(placement, 1) > 0) do
+    with :ok <- validate_composer_record(state, record_id),
+         {:ok, execution} <-
+           TurnExecution.place_queued_input(state.turn_execution, identity, placement),
+         {:ok, committed} <- commit_effect_snapshot(state, %{state | turn_execution: execution}) do
+      {:reply, :ok, broadcast(committed, :queues_recalled)}
+    else
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
+
+  defp place_queued_input_reply(state, _record_id, _identity, _placement),
     do: {:reply, {:error, :invalid_queue_edit}, state}
 
   @spec recall_composer_draft(
@@ -11541,6 +11589,9 @@ defmodule MingaAgent.Session do
 
       %{message: {:change_queued_input, _, _, _}} ->
         status |> Map.replace(:message, :change_queued_input) |> Map.replace(:reason, :redacted)
+
+      %{message: {:place_queued_input, _, _, _}} ->
+        status |> Map.replace(:message, :place_queued_input) |> Map.replace(:reason, :redacted)
 
       %{message: {:remote_composer, _, _, _}} ->
         status |> Map.replace(:message, :remote_composer) |> Map.replace(:reason, :redacted)
