@@ -6,7 +6,7 @@ defmodule MingaEditor.Agent.Tasks.Entry do
 
   `subagents` are the foreground subagents the task's `subagent` tool calls started. They live only as long as the tool call and are reported through the parent's tool events. A background subagent is a session of its own, so it is a separate entry whose `parent` names the task that started it.
 
-  `alert` is the last "needs you" alert the editor posted for the task (`MingaEditor.Agent.TaskWorkflow`): posted while it may still be on screen, withdrawn once the task stopped needing you. A withdrawn alert keeps its identity, so a click that arrives late still finds its task.
+  `alert` is the last "needs you" alert the editor posted for the task (`MingaEditor.Agent.TaskWorkflow`): posted while it may still be on screen, withdrawn once the task stopped needing you. A withdrawn alert keeps its identity while the task is followed, so a click that arrives late still finds its task; once the task is forgotten, the click opens the drawer on the first task that needs you.
   """
 
   alias MingaAgent.ToolApproval.Public, as: PublicApproval
