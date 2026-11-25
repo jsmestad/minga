@@ -1,40 +1,70 @@
 defmodule Minga.Test.ProvenanceModel do
   @moduledoc """
-  A byte-by-byte reference for `Minga.Buffer.Provenance`.
+  A byte-by-byte reference for `Minga.Buffer.Provenance` that never forgets anything.
 
-  The model keeps one entry for every byte ever written, in document order, each with its author, the group that inserted it, the groups that deleted it, and the groups whose partial deletion of its replacement makes a reject inexact. It applies the same rules as the provenance tree with plain list scans, so property tests can compare the tree against it: an insertion goes immediately before the live byte at its offset, a deletion marks every entry from the first to the last deleted live byte and the text a replacement it consumed had replaced (and removes the ones its own group wrote, which can never be live again), and a byte is live when its inserting group is applied and none of its deleting groups is.
+  The model keeps one entry for every byte ever written, in document order, with its author, the group that inserted it, the groups that deleted it, its overlap marks, the replacement that made it (`made_by`) and the replacements that listed it as replaced (`replaced_by`). It never drops, absorbs or compacts a byte; a group that is discarded only becomes `final`, with its applied flag fixed. An untracked deletion is the pseudo group `:untracked`, always applied.
+
+  ## Specification
+
+  Each statement says what the model does and why, in terms of what you see in the document.
+
+  1. A byte is visible when the group that wrote it is applied and no group that deleted it is applied. Undo, redo and reject only flip groups, so every one of them shows exactly the text those groups wrote or removed.
+  2. An insertion goes immediately before the visible byte at its offset, after any deleted bytes there. Text typed at a spot lands after text that used to be there, so restoring that older text later puts it back before yours.
+  3. A deletion marks every byte from its first to its last deleted visible byte, deleted bytes between them included. Text an older group removed from the middle of the range cannot come back inside text you deleted. Marking a byte that is already deleted is a sweep: it keeps the byte out, but the group never removed it.
+  4. An edit that inserts text over a non-empty range is a replacement. It made the bytes it inserted. It replaced the visible bytes in its range and the deleted bytes strictly inside it that can still come back. A byte that can never come back (statement 9) is not replaced by anyone, though it gets the deleter: no later edit can stand for text no history can ever show again.
+  5. A deletion consumes a replacement when none of the bytes the replacement made stays visible. It then deletes every deleted byte the replacement replaced as well, and the replacements that made those bytes are examined in turn, each once. When you delete what Minga wrote in place of some text, rejecting Minga must not bring that text back, because you removed its stand-in.
+  6. A replacement that keeps a visible byte was only partly consumed. When it is a Minga step's and the deleter is another author, every byte it made gets an overlap mark naming the deleter. A part of a replacement cannot say which part of the replaced text it stands for, so rejecting the step must be refused (rule 8) until that deletion is undone.
+  7. A change carries its replacement only while its group is applied. A reached replacement whose group is undone, or was discarded unapplied (it never happened), neither covers nor marks; the model logs it in `skipped`. Text a step that never happened replaced is visible again, and nothing anyone deletes later stands for it.
+  8. Rejecting a set of groups is refused while a group outside the set marked one of their replacements (statement 6) and is applied, for good once it is final and applied. An inexact reject would change text you did not ask to change.
+  9. A byte can never come back when the group that wrote it is final and unapplied, when it was deleted by the group that wrote it, by an untracked change, or by a final applied group. No undo, redo or reject can show it again.
+  10. A cover adds a deleter only to bytes that are already deleted. A cover never changes the document at the moment of the edit; it only decides what later undo, redo or reject shows.
+  11. `u` is refused when a later step rewrote the group's text: a group that is not yours, applied and not final, deleted (directly or by a sweep, not through a cover) a byte the undone group wrote or deleted while it was visible, after it did, and the byte can still come back. A byte the undone group only swept or covered is not text it removed. Undoing then would leave Minga's rewrite beside the text yours replaced, a document that never existed. A cover is derived, not a rewrite: deleting Minga's stand-in takes the replaced text along, and that never refuses anything. The same rule refuses a reject while another task that started later rewrote the task's text.
+
+  `replay/2` applies a trace from `Minga.Buffer.Provenance.start_trace/1`, so a history driven through `Minga.Buffer.UndoHistory` can be checked against the model.
   """
 
   alias Minga.Buffer.Provenance
 
-  defstruct entries: [], groups: %{}
+  defstruct entries: [], groups: %{}, next_change: 1, skipped: []
+
+  @type deleter :: pos_integer() | :untracked
 
   @type entry :: %{
           byte: byte(),
           author: Provenance.author(),
           group: pos_integer() | nil,
-          deletions: [pos_integer()],
-          overlaps: [{pos_integer(), pos_integer() | {:permanent, term()}}]
+          deletions: [deleter()],
+          overlaps: [{pos_integer(), pos_integer()}],
+          made_by: pos_integer() | nil,
+          replaced_by: [pos_integer()],
+          covered_by: [deleter()],
+          swept_by: [deleter()]
         }
 
-  @type group :: %{author: Provenance.author(), key: Provenance.group_key(), applied: boolean()}
+  @type group :: %{
+          author: Provenance.author(),
+          key: Provenance.group_key(),
+          applied: boolean(),
+          final: boolean()
+        }
 
-  @type t :: %__MODULE__{entries: [entry()], groups: %{pos_integer() => group()}}
+  @type t :: %__MODULE__{
+          entries: [entry()],
+          groups: %{pos_integer() => group()},
+          next_change: pos_integer(),
+          skipped: [{pos_integer(), pos_integer()}]
+        }
 
   @doc "Returns a model of `text`, all of it unattributed."
   @spec new(binary()) :: t()
-  def new(text) do
-    entries =
-      for <<byte <- text>>,
-        do: %{byte: byte, author: :unattributed, group: nil, deletions: [], overlaps: []}
-
-    %__MODULE__{entries: entries}
-  end
+  def new(text),
+    do: %__MODULE__{entries: for(<<byte <- text>>, do: entry(byte, :unattributed, nil, nil))}
 
   @doc "Registers a group under the id the provenance gave it."
   @spec open_group(t(), pos_integer(), Provenance.author(), Provenance.group_key()) :: t()
   def open_group(model, id, author, key) do
-    %{model | groups: Map.put(model.groups, id, %{author: author, key: key, applied: true})}
+    group = %{author: author, key: key, applied: true, final: false}
+    %{model | groups: Map.put(model.groups, id, group)}
   end
 
   @doc "Replaces `removed_bytes` live bytes at `start` with `inserted`, written by `group`."
@@ -44,81 +74,205 @@ defmodule Minga.Test.ProvenanceModel do
     live = live_indexes(model)
     insert_at = Enum.at(live, start, length(model.entries))
 
-    entries =
-      if removed_bytes > 0 do
-        first = Enum.at(live, start)
-        last = Enum.at(live, start + removed_bytes - 1)
-        left = if start > 0, do: Enum.at(live, start - 1)
-
-        marked =
-          MapSet.union(MapSet.new(first..last//1), covered(model, group, live, first, last, left))
-
-        {owner, overlapped} = overlapped(model, group, live, marked, left, first, last)
-
-        model.entries
-        |> Enum.with_index()
-        |> Enum.flat_map(fn {entry, index} ->
-          entry =
-            if MapSet.member?(overlapped, index) and {owner, group} not in entry.overlaps,
-              do: %{entry | overlaps: [{owner, group} | entry.overlaps]},
-              else: entry
-
-          if MapSet.member?(marked, index), do: mark(entry, group), else: [entry]
-        end)
-      else
-        model.entries
-      end
-
     {group_id, author} =
       case group do
         :untracked -> {nil, :unattributed}
         id -> {id, Map.fetch!(model.groups, id).author}
       end
 
-    new_entries =
-      for <<byte <- inserted>>,
-        do: %{byte: byte, author: author, group: group_id, deletions: [], overlaps: []}
+    {model, made_by} =
+      if removed_bytes > 0,
+        do: delete(model, group, live, start, removed_bytes, inserted),
+        else: {model, nil}
 
-    {before, rest} = Enum.split(entries, insert_at)
+    new_entries = for <<byte <- inserted>>, do: entry(byte, author, group_id, made_by)
+    {before, rest} = Enum.split(model.entries, insert_at)
     %{model | entries: before ++ new_entries ++ rest}
   end
 
-  @doc "Sets whether a group is applied."
-  @spec set_applied(t(), pos_integer(), boolean()) :: t()
-  def set_applied(model, id, applied) do
-    %{model | groups: Map.update!(model.groups, id, &%{&1 | applied: applied})}
+  defp entry(byte, author, group, made_by) do
+    %{
+      byte: byte,
+      author: author,
+      group: group,
+      deletions: [],
+      overlaps: [],
+      made_by: made_by,
+      replaced_by: [],
+      covered_by: [],
+      swept_by: []
+    }
   end
 
-  @doc "Forgets a group whose state is final, keeping the live text unchanged."
-  @spec discard(t(), pos_integer()) :: t()
-  def discard(model, id) do
-    {group, groups} = Map.pop!(model.groups, id)
-    settled = if group.author == :you, do: {:permanent, :you}, else: {:permanent, group.key}
+  defp delete(model, group, live, start, removed_bytes, inserted) do
+    first = Enum.at(live, start)
+    last = Enum.at(live, start + removed_bytes - 1)
+    live_set = MapSet.new(live)
+
+    seeds =
+      for index <- first..last//1,
+          MapSet.member?(live_set, index),
+          made_by = Enum.at(model.entries, index).made_by,
+          made_by != nil,
+          uniq: true,
+          do: made_by
+
+    change = if inserted != "" and group != :untracked, do: model.next_change
 
     entries =
-      Enum.flat_map(model.entries, fn entry ->
-        overlaps =
-          Enum.flat_map(entry.overlaps, fn
-            {^id, _overlap} -> []
-            {owner, ^id} -> if group.applied, do: [{owner, settled}], else: []
-            mark -> [mark]
-          end)
-
-        entry = %{entry | overlaps: overlaps}
-
-        cond do
-          id in entry.deletions and group.applied -> []
-          entry.group == id and group.applied -> [%{entry | group: nil}]
-          entry.group == id -> []
-          true -> [%{entry | deletions: List.delete(entry.deletions, id)}]
+      model.entries
+      |> Enum.with_index()
+      |> Enum.map(fn {entry, index} ->
+        if index >= first and index <= last do
+          # Text that can never come back is not replaced by anyone, though it gets the deleter.
+          listed? = change != nil and not dead_forever?(model, entry)
+          kind = if MapSet.member?(live_set, index), do: :direct, else: :sweep
+          entry = add_deleter(entry, group, kind)
+          if listed?, do: %{entry | replaced_by: [change | entry.replaced_by]}, else: entry
+        else
+          entry
         end
       end)
 
-    %{model | entries: entries, groups: groups}
+    model = consume(%{model | entries: entries}, group, seeds, MapSet.new(seeds))
+    if change, do: {%{model | next_change: change + 1}, change}, else: {model, nil}
   end
 
+  # A direct deletion rewrote the byte; a cover only took it with the replacement it consumed. A direct deletion by a
+  # group that covered the byte before makes that deletion direct.
+  defp add_deleter(entry, deleter, :direct) do
+    entry = %{
+      entry
+      | covered_by: List.delete(entry.covered_by, deleter),
+        swept_by: List.delete(entry.swept_by, deleter)
+    }
+
+    if deleter in entry.deletions,
+      do: entry,
+      else: %{entry | deletions: [deleter | entry.deletions]}
+  end
+
+  defp add_deleter(entry, deleter, :sweep) do
+    if deleter in entry.deletions,
+      do: entry,
+      else: %{
+        entry
+        | deletions: [deleter | entry.deletions],
+          swept_by: [deleter | entry.swept_by]
+      }
+  end
+
+  defp add_deleter(entry, deleter, :cover) do
+    cond do
+      # A group that only swept the byte and now covers it counts as covering it, in either order.
+      deleter in entry.swept_by ->
+        %{
+          entry
+          | swept_by: List.delete(entry.swept_by, deleter),
+            covered_by: [deleter | entry.covered_by]
+        }
+
+      deleter in entry.deletions ->
+        entry
+
+      true ->
+        %{
+          entry
+          | deletions: [deleter | entry.deletions],
+            covered_by: [deleter | entry.covered_by]
+        }
+    end
+  end
+
+  # The cover worklist over bytes: each replacement once, in the order reached.
+  defp consume(model, _deleter, [], _seen), do: model
+
+  defp consume(model, deleter, [change | rest], seen) do
+    indexed = Enum.with_index(model.entries)
+    made = for {entry, _index} <- indexed, entry.made_by == change, do: entry
+    owner = Enum.find_value(made, & &1.group)
+
+    cond do
+      # A change carries its replacement only while it is applied.
+      owner != nil and not Map.fetch!(model.groups, owner).applied ->
+        model = %{model | skipped: [{change, owner} | model.skipped]}
+        consume(model, deleter, rest, seen)
+
+      Enum.any?(made, &live?(model, &1)) ->
+        consume(mark_part(model, deleter, owner, change), deleter, rest, seen)
+
+      true ->
+        cover(model, deleter, change, indexed, rest, seen)
+    end
+  end
+
+  defp cover(model, deleter, change, indexed, rest, seen) do
+    covered =
+      for {entry, index} <- indexed,
+          change in entry.replaced_by,
+          not live?(model, entry),
+          into: MapSet.new(),
+          do: index
+
+    reached =
+      for index <- Enum.sort(covered),
+          maker = Enum.at(model.entries, index).made_by,
+          maker != nil,
+          not MapSet.member?(seen, maker),
+          uniq: true,
+          do: maker
+
+    entries =
+      model.entries
+      |> Enum.with_index()
+      |> Enum.map(fn {entry, index} ->
+        if MapSet.member?(covered, index), do: add_deleter(entry, deleter, :cover), else: entry
+      end)
+
+    consume(%{model | entries: entries}, deleter, reached ++ rest, Enum.into(reached, seen))
+  end
+
+  # A partly consumed replacement of another author's Minga step: every byte it made is marked.
+  defp mark_part(model, :untracked, _owner, _change), do: model
+  defp mark_part(model, _deleter, nil, _change), do: model
+
+  defp mark_part(model, deleter, owner, change) do
+    owner_author = Map.fetch!(model.groups, owner).author
+
+    if match?({:minga, _task}, owner_author) and
+         owner_author != Map.fetch!(model.groups, deleter).author do
+      entries =
+        Enum.map(model.entries, fn entry ->
+          if entry.made_by == change and {owner, deleter} not in entry.overlaps,
+            do: %{entry | overlaps: [{owner, deleter} | entry.overlaps]},
+            else: entry
+        end)
+
+      %{model | entries: entries}
+    else
+      model
+    end
+  end
+
+  @doc "Sets whether a group is applied. A final group cannot change."
+  @spec set_applied(t(), pos_integer(), boolean()) :: t()
+  def set_applied(model, id, applied) do
+    group = Map.fetch!(model.groups, id)
+    if group.final, do: raise(ArgumentError, "group #{id} is final")
+    %{model | groups: %{model.groups | id => %{group | applied: applied}}}
+  end
+
+  @doc "Makes a group final, keeping every byte: its applied flag never changes again."
+  @spec discard(t(), pos_integer()) :: t()
+  def discard(model, id),
+    do: %{model | groups: Map.update!(model.groups, id, &%{&1 | final: true})}
+
+  @doc "Returns whether a group is final."
+  @spec final?(t(), pos_integer()) :: boolean()
+  def final?(model, id), do: Map.fetch!(model.groups, id).final
+
   @doc """
-  Returns the keys of the groups that make rejecting `ids` together inexact: groups outside `ids` that partly deleted one of their replacements, while applied or once permanent. Your groups are `:you`.
+  Returns the keys of the groups that make rejecting `ids` together inexact: groups outside `ids` that partly consumed one of their replacements and are applied (a final applied group counts for good). Your groups are `:you`.
   """
   @spec overlaps_among(t(), [pos_integer()]) :: MapSet.t()
   def overlaps_among(model, ids) do
@@ -126,147 +280,52 @@ defmodule Minga.Test.ProvenanceModel do
         entry.group in ids or Enum.any?(entry.deletions, &(&1 in ids)),
         {owner, overlap} <- entry.overlaps,
         owner in ids,
-        key = overlap_key(model, ids, overlap),
+        overlap not in ids,
+        group = Map.fetch!(model.groups, overlap),
+        group.applied,
         into: MapSet.new(),
-        do: key
-  end
-
-  defp overlap_key(_model, _ids, {:permanent, key}), do: key
-
-  defp overlap_key(model, ids, id) do
-    group = Map.fetch!(model.groups, id)
-
-    cond do
-      id in ids -> nil
-      not group.applied -> nil
-      group.author == :you -> :you
-      true -> group.key
-    end
-  end
-
-  @doc "Returns every draft byte as `{group, index}`: a tombstone a Minga step wrote that a newer applied step of the same task deleted, both applied."
-  @spec drafts(t()) :: [{pos_integer(), non_neg_integer()}]
-  def drafts(model) do
-    for {entry, index} <- Enum.with_index(model.entries),
-        draft?(model, entry),
-        do: {entry.group, index}
-  end
-
-  defp draft?(model, entry) do
-    case partner(model, entry) do
-      nil -> false
-      new -> merge_safe?(entry, entry.group, new)
-    end
-  end
-
-  # The oldest newer applied step of the same task that deleted a dead byte of an applied Minga step.
-  defp partner(model, entry) do
-    owner = entry.group && Map.fetch!(model.groups, entry.group)
-
-    if owner != nil and owner.applied and
-         match?({:minga, task} when task != :untasked, owner.author) and
-         not live?(model, entry) do
-      entry.deletions
-      |> Enum.filter(&(&1 > entry.group and newer?(model, &1, owner.author)))
-      |> Enum.min(fn -> nil end)
-    end
-  end
-
-  # Old and new are next to each other in the order the byte's writer and deleters came, or not both there.
-  defp merge_safe?(entry, old, new) do
-    order = Enum.uniq([entry.group | Enum.reverse(entry.deletions)])
-
-    # No group between the two may be named either, or the merge would point a dependency backwards in time.
-    named = order ++ for({_owner, overlap} <- entry.overlaps, is_integer(overlap), do: overlap)
-
-    not Enum.any?(named, &(is_integer(&1) and &1 > old and &1 < new)) and
-      case {Enum.find_index(order, &(&1 == old)), Enum.find_index(order, &(&1 == new))} do
-        {nil, _new} -> true
-        {_old, nil} -> true
-        {old_at, new_at} -> abs(old_at - new_at) == 1
-      end
-  end
-
-  defp newer?(model, id, author) do
-    group = Map.fetch!(model.groups, id)
-    group.applied and group.author == author
+        do: if(group.author == :you, do: :you, else: group.key)
   end
 
   @doc """
-  Merges the oldest draft's group into the oldest newer step of the same task that deleted it, across the longest stretch of bytes around it that name either group, and drops bytes the newer step both wrote and deleted. Returns the model unchanged when there are no drafts.
+  Returns the keys of the applied groups that are not final, that `blocks?` accepts (given author and key), and that directly deleted text group `id` wrote or removed after it did. A deletion a cover added does not count, and neither do bytes that can never come back.
   """
-  @spec compact_oldest(t()) :: t()
-  def compact_oldest(model) do
-    case model |> drafts() |> Enum.min(fn -> nil end) do
-      nil ->
-        model
-
-      {old, index} ->
-        draft = Enum.at(model.entries, index)
-        new = partner(model, draft)
-
-        names? =
-          &((&1.group in [old, new] or old in &1.deletions or new in &1.deletions) and
-              merge_safe?(&1, old, new))
-
-        indexed = Enum.with_index(model.entries)
-
-        before =
-          indexed
-          |> Enum.take(index + 1)
-          |> Enum.reverse()
-          |> Enum.take_while(&names?.(elem(&1, 0)))
-
-        after_draft = indexed |> Enum.drop(index) |> Enum.take_while(&names?.(elem(&1, 0)))
-        from = before |> List.last() |> elem(1)
-        to = after_draft |> List.last() |> elem(1)
-
-        entries =
-          Enum.flat_map(indexed, fn {entry, at} ->
-            if at < from or at > to do
-              [entry]
-            else
-              group = if entry.group == old, do: new, else: entry.group
-              deletions = substitute(entry.deletions, old, new)
-
-              if group == new and deletions == [new] and entry.overlaps == [],
-                do: [],
-                else: [
-                  %{
-                    entry
-                    | group: group,
-                      deletions: deletions,
-                      overlaps: rename_marks(entry.overlaps, old, new)
-                  }
-                ]
-            end
-          end)
-
-        model = %{model | entries: entries}
-
-        if Enum.any?(entries, &(&1.group == old or old in &1.deletions)) do
-          model
-        else
-          entries = Enum.map(entries, &%{&1 | overlaps: rename_marks(&1.overlaps, old, new)})
-          %{model | entries: entries, groups: Map.delete(model.groups, old)}
-        end
-    end
+  @spec blockers(t(), pos_integer(), (Provenance.author(), Provenance.group_key() -> boolean())) ::
+          MapSet.t()
+  def blockers(model, id, blocks? \\ fn author, _key -> author != :you end) do
+    for entry <- model.entries,
+        removed_by?(entry, id),
+        not dead_forever?(model, entry),
+        deleter <- later_deleters(entry, id),
+        deleter != id and deleter != :untracked,
+        deleter not in entry.covered_by,
+        group = Map.fetch!(model.groups, deleter),
+        group.applied and not group.final and blocks?.(group.author, group.key),
+        into: MapSet.new(),
+        do: group.key
   end
 
-  defp rename_marks(marks, old, new) do
-    marks
-    |> Enum.map(fn {owner, overlap} ->
-      {if(owner == old, do: new, else: owner), if(overlap == old, do: new, else: overlap)}
-    end)
-    |> Enum.uniq()
-  end
+  # The group wrote the byte or deleted it while it was visible; a sweep or a cover never removed it.
+  defp removed_by?(%{group: id}, id), do: true
 
-  defp substitute(list, old, new) do
-    cond do
-      old not in list -> list
-      new in list -> List.delete(list, old)
-      true -> Enum.map(list, &if(&1 == old, do: new, else: &1))
-    end
+  defp removed_by?(entry, id),
+    do: id in entry.deletions and id not in entry.covered_by and id not in entry.swept_by
+
+  # Deletions are prepended, so the groups that deleted an entry after `id` did come before it.
+  defp later_deleters(%{group: id, deletions: deletions}, id), do: deletions
+  defp later_deleters(entry, id), do: Enum.take_while(entry.deletions, &(&1 != id))
+
+  @doc "Returns whether a byte can never be live again, whatever is undone or rejected from now on."
+  @spec dead_forever?(t(), entry()) :: boolean()
+  def dead_forever?(model, entry) do
+    writer = entry.group && Map.fetch!(model.groups, entry.group)
+
+    (writer != nil and writer.final and not writer.applied) or
+      Enum.any?(entry.deletions, fn
+        :untracked -> true
+        id when id == entry.group -> true
+        id -> match?(%{final: true, applied: true}, Map.fetch!(model.groups, id))
+      end)
   end
 
   @doc "Returns the live text."
@@ -277,156 +336,43 @@ defmodule Minga.Test.ProvenanceModel do
   @spec authors(t()) :: [Provenance.author()]
   def authors(model), do: Enum.map(live_entries(model), & &1.author)
 
-  @doc "Returns the keys of every applied group not authored by you that deleted text this group wrote or removed, after this group did."
-  @spec blockers(t(), pos_integer()) :: MapSet.t()
-  def blockers(model, id) do
-    for entry <- model.entries,
-        entry.group == id or id in entry.deletions,
-        deleter <- later_deleters(entry, id),
-        deleter != id,
-        group = Map.fetch!(model.groups, deleter),
-        group.applied and group.author != :you,
-        into: MapSet.new(),
-        do: group.key
-  end
+  @doc "Returns whether an entry is live."
+  @spec live?(t(), entry()) :: boolean()
+  def live?(model, entry) do
+    inserted? = entry.group == nil or Map.fetch!(model.groups, entry.group).applied
 
-  # Deletions are prepended, so the groups that deleted an entry after `id` did come before it.
-  defp later_deleters(%{group: id, deletions: deletions}, id), do: deletions
-  defp later_deleters(entry, id), do: Enum.take_while(entry.deletions, &(&1 != id))
-
-  # A deletion by another author that starts or ends strictly inside a Minga group's replacement marks that
-  # replacement's tombstones: from the first deleted byte, over dead bytes and the owner's or the deleter's live text, to
-  # the first tombstone the owner deleted, then every such tombstone in a row.
-  defp overlapped(_model, :untracked, _live, _marked, _left, _first, _last),
-    do: {nil, MapSet.new()}
-
-  defp overlapped(model, group, live, marked, left, first, last) do
-    author = Map.fetch!(model.groups, group).author
-    live_after = MapSet.difference(MapSet.new(live), marked)
-    right = Enum.find(live, &(&1 > last and MapSet.member?(live_after, &1)))
-
-    owner =
-      cond do
-        same_replacement?(model, author, left, first) -> Enum.at(model.entries, first).group
-        same_replacement?(model, author, last, right) -> Enum.at(model.entries, last).group
-        true -> nil
-      end
-
-    # Bytes this group wrote inside the deleted range are gone before the walk, so it passes straight over them. The
-    # cover rule runs after the walk, so the tombstones it consumes are still there.
-    dropped =
-      MapSet.filter(MapSet.new(first..last//1), &(Enum.at(model.entries, &1).group == group))
-
-    if owner,
-      do: {owner, overlap_block(model, author, owner, live_after, dropped, first)},
-      else: {nil, MapSet.new()}
-  end
-
-  defp same_replacement?(_model, _author, nil, _later), do: false
-  defp same_replacement?(_model, _author, _before, nil), do: false
-
-  defp same_replacement?(model, author, before, later) do
-    owner = Enum.at(model.entries, before).group
-    owner_group = owner && Map.fetch!(model.groups, owner)
-
-    owner != nil and Enum.at(model.entries, later).group == owner and
-      match?({:minga, _task}, owner_group.author) and
-      owner_group.author != author and
-      not (model.entries
-           |> Enum.slice((before + 1)..(later - 1)//1)
-           |> Enum.any?(&separates?(&1, owner)))
-  end
-
-  defp overlap_block(model, author, owner, live_after, dropped, first) do
-    rest =
-      model.entries
-      |> Enum.with_index()
-      |> Enum.drop(first)
-      |> Enum.reject(fn {entry, index} -> MapSet.member?(dropped, index) or inert?(entry) end)
-
-    walked =
-      Enum.drop_while(rest, fn {entry, index} ->
-        if MapSet.member?(live_after, index) do
-          entry.group == owner or
-            (entry.group != nil and Map.fetch!(model.groups, entry.group).author == author)
-        else
-          owner not in entry.deletions or entry.group == owner
-        end
+    inserted? and
+      not Enum.any?(entry.deletions, fn
+        :untracked -> true
+        id -> Map.fetch!(model.groups, id).applied
       end)
-
-    case walked do
-      [{entry, index} | _] = tombstones ->
-        if MapSet.member?(live_after, index) or owner not in entry.deletions do
-          MapSet.new()
-        else
-          tombstones
-          |> Enum.take_while(fn {entry, index} ->
-            not MapSet.member?(live_after, index) and owner in entry.deletions and
-              entry.group != owner
-          end)
-          |> MapSet.new(&elem(&1, 1))
-        end
-
-      [] ->
-        MapSet.new()
-    end
   end
 
-  # A deletion that consumes replacements also covers the text they replaced. The groups whose live bytes it deleted
-  # (other than the deleter) are the consumed set; unless it starts inside a replacement of one of them, it marks the
-  # dead bytes right after it that a consumed group wrote or deleted, up to the first live byte or byte of no consumed
-  # group, passing inert bytes.
-  defp covered(model, group, live, first, last, left_index) do
-    live_set = MapSet.new(live)
+  @doc "Replays a `Minga.Buffer.Provenance` trace, oldest operation first, and returns the model after it."
+  @spec replay(t(), [tuple()]) :: t()
+  def replay(model, operations), do: Enum.reduce(operations, model, &apply_operation(&2, &1))
 
-    consumed =
-      for index <- first..last//1,
-          MapSet.member?(live_set, index),
-          owner = Enum.at(model.entries, index).group,
-          owner != nil and owner != group,
-          uniq: true,
-          do: owner
+  defp apply_operation(model, {:open_group, id, author, key}),
+    do: open_group(model, id, author, key)
 
-    if consumed == [] or inside?(model, left_index, first, consumed) do
-      MapSet.new()
-    else
-      model.entries
-      |> Enum.with_index()
-      |> Enum.drop(last + 1)
-      |> Enum.reject(fn {entry, _index} -> inert?(entry) end)
-      |> Enum.take_while(fn {entry, index} ->
-        not MapSet.member?(live_set, index) and
-          (entry.group in consumed or Enum.any?(entry.deletions, &(&1 in consumed)))
-      end)
-      |> MapSet.new(fn {_entry, index} -> index end)
-    end
+  defp apply_operation(model, {:edit, group, start, removed, inserted}),
+    do: edit(model, group, start, byte_size(removed), inserted)
+
+  defp apply_operation(model, {:edit_all, group, changes}) do
+    changes
+    |> Enum.reverse()
+    |> Enum.reduce(model, fn {start, removed, inserted}, acc ->
+      edit(acc, group, start, byte_size(removed), inserted)
+    end)
   end
 
-  # Text a step both wrote and deleted, kept only by compaction for another group's blocker; walks pass over it.
-  defp inert?(entry), do: entry.group != nil and entry.group in entry.deletions
+  defp apply_operation(model, {:set_applied, ids, applied}),
+    do: Enum.reduce(ids, model, &set_applied(&2, &1, applied))
 
-  defp separates?(entry, owner), do: owner in entry.deletions and not inert?(entry)
+  defp apply_operation(model, {:discard, ids}), do: Enum.reduce(ids, model, &discard(&2, &1))
 
-  defp inside?(_model, nil, _first, _owner), do: false
-
-  defp inside?(model, left_index, first, consumed) do
-    owner = Enum.at(model.entries, left_index).group
-
-    owner in consumed and
-      not (model.entries
-           |> Enum.slice((left_index + 1)..(first - 1)//1)
-           |> Enum.any?(&separates?(&1, owner)))
-  end
-
-  @spec mark(entry(), pos_integer() | :untracked) :: [entry()]
-  defp mark(_entry, :untracked), do: []
-
-  # A group deleting text it wrote leaves text that can never be live again; it is gone.
-  defp mark(%{group: id}, id), do: []
-
-  defp mark(entry, id) do
-    if id in entry.deletions, do: [entry], else: [%{entry | deletions: [id | entry.deletions]}]
-  end
+  # A merge keeps every byte; it changes nothing for histories in which the two steps always move together.
+  defp apply_operation(model, {:absorb, _old, _new}), do: model
 
   @spec live_indexes(t()) :: [non_neg_integer()]
   defp live_indexes(model) do
@@ -435,10 +381,4 @@ defmodule Minga.Test.ProvenanceModel do
 
   @spec live_entries(t()) :: [entry()]
   defp live_entries(model), do: Enum.filter(model.entries, &live?(model, &1))
-
-  @spec live?(t(), entry()) :: boolean()
-  defp live?(model, entry) do
-    inserted? = entry.group == nil or Map.fetch!(model.groups, entry.group).applied
-    inserted? and not Enum.any?(entry.deletions, &Map.fetch!(model.groups, &1).applied)
-  end
 end

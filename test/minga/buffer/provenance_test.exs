@@ -249,6 +249,244 @@ defmodule Minga.Buffer.ProvenanceTest do
     end
   end
 
+  describe "replacements by change identity" do
+    # Addendum 2's counterexample to every rule read from where tombstones sit: two edits of one step look alike.
+    test "deleting one edit's replacement covers only what that edit replaced" do
+      document = Document.new("ab\n")
+      {step, prov} = Provenance.open_group(Provenance.new(3), @task, @step_one)
+      {document, prov} = edit(document, prov, step, 0, "a", "X")
+      {document, prov} = edit(document, prov, step, 1, "b", "")
+      {you, prov} = Provenance.open_group(prov, :you, nil)
+      {document, prov} = edit(document, prov, you, 0, "X", "")
+      assert Document.content(document) == "\n"
+
+      assert {:ok, rejected, _first, _prov} = Provenance.revert(prov, step, document)
+      assert Document.content(rejected) == "b\n"
+    end
+
+    # The shrunk case for fix A: compaction drops the tombstone that linked two replacements, and the link survives.
+    test "after compaction drops a rewritten step's text, deleting the rewrite still covers what the first step replaced" do
+      document = Document.new("abc")
+      {one, prov} = Provenance.open_group(Provenance.new(3), @task, @step_one)
+      {document, prov} = edit(document, prov, one, 1, "b", "X")
+      {two, prov} = Provenance.open_group(prov, @task, @step_two)
+      {document, prov} = edit(document, prov, two, 1, "X", "Y")
+      assert {:ok, compacted, {^one, ^two}, _examined} = Provenance.compact_oldest(prov)
+      refute Provenance.group?(compacted, one)
+
+      {you, compacted} = Provenance.open_group(compacted, :you, nil)
+      {document, compacted} = edit(document, compacted, you, 1, "Y", "")
+      assert {:ok, rejected, _first, _prov} = Provenance.revert(compacted, two, document)
+      assert Document.content(rejected) == "ac"
+    end
+
+    test "a step that rewrites its own replacement still covers the original when you delete the rewrite" do
+      document = Document.new("ab")
+      {step, prov} = Provenance.open_group(Provenance.new(2), @task, @step_one)
+      {document, prov} = edit(document, prov, step, 0, "a", "X")
+      {document, prov} = edit(document, prov, step, 0, "X", "Y")
+      {you, prov} = Provenance.open_group(prov, :you, nil)
+      {document, prov} = edit(document, prov, you, 0, "Y", "")
+
+      assert {:ok, rejected, _first, _prov} = Provenance.revert(prov, step, document)
+      assert Document.content(rejected) == "b"
+    end
+
+    test "your edit inside a replacement marks it, and the edit that removes its last text covers the rest" do
+      document = Document.new("abc\n")
+      {step, prov} = Provenance.open_group(Provenance.new(4), @task, @step_one)
+      {document, prov} = edit(document, prov, step, 0, "abc", "XYZ")
+      {you, prov} = Provenance.open_group(prov, :you, nil)
+      {document, prov} = edit(document, prov, you, 1, "Y", "")
+      assert Provenance.overlaps_among(prov, [step]) |> Enum.map(&elem(&1, 0)) == [:you]
+
+      {later, prov} = Provenance.open_group(prov, :you, nil)
+      {document, prov} = edit(document, prov, later, 0, "XZ", "")
+      assert Document.content(document) == "\n"
+      assert {:ok, undone, _first, prov} = Provenance.revert(prov, you, document)
+      assert Document.content(undone) == "\n"
+      assert Provenance.overlaps_among(prov, [step]) == []
+      assert {:ok, rejected, _first, _prov} = Provenance.revert(prov, step, undone)
+      assert Document.content(rejected) == "\n"
+    end
+  end
+
+  # Cases whose documents and refusals were reasoned by hand, not produced by either side. Each row runs against both
+  # production and the never-drop model. Groups are named; a Minga group's task is its first element.
+  describe "hand-computed cases" do
+    @hand_cases [
+      # CH2: two steps of one task rewrite one word (recorded as precise changes), you retype it: the reject keeps yours.
+      {"CH2", "call(foo)\n",
+       [
+         {:open, :s1, "t1"},
+         {:edit, :s1, 5, 3, "bar"},
+         {:open, :s2, "t1"},
+         {:edit, :s2, 7, 1, "z"},
+         {:open, :you, :you},
+         {:edit, :you, 5, 3, "qux"},
+         {:reject, [:s1, :s2], "call(qux)\n"}
+       ]},
+      # Partial CH2: you retype only the second step's letter; "ba" stays the first step's, so the reject is refused
+      # until your edit is undone, then exact.
+      {"partial CH2", "call(foo)\n",
+       [
+         {:open, :s1, "t1"},
+         {:edit, :s1, 5, 3, "bar"},
+         {:open, :s2, "t1"},
+         {:edit, :s2, 7, 1, "z"},
+         {:open, :you, :you},
+         {:edit, :you, 7, 1, "q"},
+         {:reject, [:s1, :s2], :refused},
+         {:revert, [:you]},
+         {:reject, [:s1, :s2], "call(foo)\n"}
+       ]},
+      # CV1: one step replaces both letters in two edits; another task deletes the second, you delete the first.
+      {"CV1", "ab\n",
+       [
+         {:open, :c1, "t1"},
+         {:edit, :c1, 0, 1, "X"},
+         {:edit, :c1, 1, 1, "Y"},
+         {:open, :t2, "t2"},
+         {:edit, :t2, 1, 1, ""},
+         {:open, :you, :you},
+         {:edit, :you, 0, 1, ""},
+         {:reject, [:t2], "Y\n"}
+       ]},
+      # Addendum 2's two-edit case: deleting the first edit's replacement covers only what that edit replaced.
+      {"two edits of one step", "ab\n",
+       [
+         {:open, :s, "t1"},
+         {:edit, :s, 0, 1, "X"},
+         {:edit, :s, 1, 1, ""},
+         {:open, :you, :you},
+         {:edit, :you, 0, 1, ""},
+         {:reject, [:s], "b\n"}
+       ]},
+      # The compaction chain: the merge drops the rewritten step's text, and deleting the rewrite still covers "b".
+      {"compaction chain", "abc",
+       [
+         {:open, :s1, "t"},
+         {:edit, :s1, 1, 1, "X"},
+         {:open, :s2, "t"},
+         {:edit, :s2, 1, 1, "Y"},
+         :compact,
+         {:open, :you, :you},
+         {:edit, :you, 1, 1, ""},
+         {:reject, [:s1, :s2], "ac"}
+       ]},
+      # One step writes X over "a", then Y over its own X; you delete Y.
+      {"same step X then Y", "ab",
+       [
+         {:open, :s, "t"},
+         {:edit, :s, 0, 1, "X"},
+         {:edit, :s, 0, 1, "Y"},
+         {:open, :you, :you},
+         {:edit, :you, 0, 1, ""},
+         {:reject, [:s], "b"}
+       ]},
+      # The void case: your replacement of "a" never happened (undone, then discarded), so "Q" never stood for "a".
+      {"void", "pab",
+       [
+         {:open, :g1, :you},
+         {:edit, :g1, 1, 1, "X"},
+         {:revert, [:g1]},
+         {:discard, [:g1]},
+         {:open, :g3, :you},
+         {:edit, :g3, 1, 0, "m"},
+         {:open, :t1, "t1"},
+         {:edit, :t1, 2, 1, ""},
+         {:open, :g2, :you},
+         {:edit, :g2, 0, 2, "Q"},
+         {:open, :t2, "t2"},
+         {:edit, :t2, 0, 1, ""},
+         {:reject, [:t1], "ab"}
+       ]},
+      # Forgotten text: an untracked change took "Q" out of the step's "QP"; your later replacement around that spot does
+      # not stand for it, so deleting your replacement leaves the step's reject exact.
+      {"forgotten text", "xyz",
+       [
+         {:open, :s, "t"},
+         {:edit, :s, 1, 1, "QP"},
+         {:edit, :untracked, 1, 1, ""},
+         {:open, :g1, :you},
+         {:edit, :g1, 1, 0, "m"},
+         {:open, :g2, :you},
+         {:edit, :g2, 0, 2, "W"},
+         {:open, :g3, :you},
+         {:edit, :g3, 0, 1, ""},
+         {:reject, [:s], "yz"}
+       ]},
+      # Minga rewrote part of your replacement: your undo would leave Minga's "Z" beside "ab", a document that never
+      # existed, so it is refused naming the step; once Minga's step is rejected, your undo restores "ab".
+      {"XY then Z", "ab",
+       [
+         {:open, :you, :you},
+         {:edit, :you, 0, 2, "XY"},
+         {:open, :t, "t"},
+         {:edit, :t, 0, 1, "Z"},
+         {:undo, :you, {:refused, "t"}},
+         {:reject, [:t], "XY"},
+         {:undo, :you, "ab"}
+       ]},
+      # The compaction case found by the oracle: t2 rewrote t1's "c", not the "\nc" you deleted, so your undo is allowed.
+      {"undo after compaction", "",
+       [
+         {:open, :s1, "t1"},
+         {:edit, :s1, 0, 0, "a\nc"},
+         {:open, :s2, "t1"},
+         {:edit, :s2, 0, 2, "c\nb"},
+         {:open, :s3, "t1"},
+         {:edit, :s3, 2, 2, "c"},
+         :compact,
+         :compact,
+         {:open, :g4, :you},
+         {:edit, :g4, 1, 2, ""},
+         {:open, :t2, "t2"},
+         {:edit, :t2, 0, 1, "bbb"},
+         {:undo, :g4, "bbb\nc"}
+       ]},
+      # The only link from t2 to the "T" you deleted is a cover: t2 deleted your own replacement of "pq", and "T" went
+      # with it. A cover never rewrote anything, so your undo is allowed (it changes nothing: "T" stays deleted).
+      {"link by cover only", "pTq\n",
+       [
+         {:open, :g1, :you},
+         {:edit, :g1, 1, 1, ""},
+         {:open, :g2, :you},
+         {:edit, :g2, 0, 2, "Z"},
+         {:open, :t2, "t2"},
+         {:edit, :t2, 0, 1, ""},
+         {:undo, :g1, "\n"}
+       ]},
+      # Next to it, a direct deletion: t2 deleted the "W" you typed, so your undo is refused naming t2.
+      {"link by direct deletion", "pq\n",
+       [
+         {:open, :g1, :you},
+         {:edit, :g1, 1, 0, "W"},
+         {:open, :t2, "t2"},
+         {:edit, :t2, 1, 1, ""},
+         {:undo, :g1, {:refused, "t2"}}
+       ]},
+      # Interleaved tasks at one spot: t1 writes X over "a", t2 writes Z over X, you delete Z; the chain covers both.
+      {"interleaved tasks", "a\n",
+       [
+         {:open, :t1, "t1"},
+         {:edit, :t1, 0, 1, "X"},
+         {:open, :t2, "t2"},
+         {:edit, :t2, 0, 1, "Z"},
+         {:open, :you, :you},
+         {:edit, :you, 0, 1, ""},
+         {:reject, [:t2], "\n"},
+         {:reject, [:t1], "\n"}
+       ]}
+    ]
+
+    for {name, original, steps} <- @hand_cases do
+      test "#{name}" do
+        run_hand_case(unquote(original), unquote(Macro.escape(steps)))
+      end
+    end
+  end
+
   describe "against the byte-by-byte model" do
     property "random edits, reverts, reapplies and discards match the model" do
       check all(
@@ -262,6 +500,29 @@ defmodule Minga.Buffer.ProvenanceTest do
           state = run(command, state)
           assert_matches(state)
           state
+        end)
+      end
+    end
+
+    # A cover adds a deleter only to text that is already dead, so the document an edit leaves is exactly the splice,
+    # whatever groups are undone when it runs.
+    property "a cover never changes the visible document" do
+      check all(
+              original <- StreamData.string([?a..?c], min_length: 1, max_length: 8),
+              commands <- StreamData.list_of(command(), max_length: 50),
+              max_runs: runs(300)
+            ) do
+        initial = {Provenance.new(byte_size(original)), ProvenanceModel.new(original), original}
+
+        Enum.reduce(commands, initial, fn command, {prov, _model, _text} = state ->
+          {next_prov, _model, text} = next = run(command, state)
+          assert Provenance.size(next_prov) == byte_size(text)
+
+          if Provenance.size(prov) != Provenance.size(next_prov) or prov != next_prov do
+            assert spans(next_prov, text) == ProvenanceModel.authors(elem(next, 1))
+          end
+
+          next
         end)
       end
     end
@@ -292,7 +553,7 @@ defmodule Minga.Buffer.ProvenanceTest do
       end
     end
 
-    property "edit_all in one pass equals edit/5 one change at a time, on multi-byte text" do
+    property "edit_all in one pass equals edit/5 one change at a time, ids, records and links included" do
       check all(
               original <- StreamData.string([?a, ?\n, 0xE9, 0x1F600], max_length: 12),
               commands <- StreamData.list_of(command(), max_length: 40),
@@ -321,7 +582,7 @@ defmodule Minga.Buffer.ProvenanceTest do
       end
     end
 
-    # R2: chains of steps of one task over one spot, then your replacement around it, then the task's reject.
+    # Chains of steps of one task over one spot, then your replacement around it, then the task's reject.
     property "your replacement over a chain of a task's steps covers every replaced text, matching the model" do
       check all(
               original <- StreamData.string([?a..?e], min_length: 3, max_length: 10),
@@ -365,6 +626,224 @@ defmodule Minga.Buffer.ProvenanceTest do
 
         assert_matches(state)
       end
+    end
+
+    # The oracle for fix A. The model never drops, absorbs or compacts a byte; production drops text that can never be
+    # live again, merges steps and settles discarded groups, all interleaved at random. Tasks and your groups move as
+    # units, as the history moves them, and each side decides on its own whether an undo or a reject is refused.
+    property "with drops, compaction and discards interleaved, every document matches the never-drop model" do
+      Process.delete(:oracle)
+
+      check all(
+              original <- StreamData.string([?a..?c, ?\n], max_length: 10),
+              commands <- StreamData.list_of(oracle_command(), max_length: 70),
+              max_runs: runs(400)
+            ) do
+        oracle_check(original, commands, false)
+      end
+
+      IO.puts("\n[oracle] " <> inspect(Process.get(:oracle, %{})))
+      assert Map.get(Process.get(:oracle), :skips, 0) > 0
+    end
+
+    # The lifecycle of a record with no made runs left, generated on purpose: few tasks with long chains of steps, so
+    # compaction merges often; undo and redo around Minga's steps; discards of owners and of pullers.
+    property "records outlive their text only while pulled, through compaction and discard, matching the model" do
+      Process.delete(:oracle)
+
+      check all(
+              original <- StreamData.string([?a..?c, ?\n], max_length: 8),
+              commands <- StreamData.list_of(oracle_command(), max_length: 80),
+              max_runs: runs(400)
+            ) do
+        oracle_check(original, commands, true)
+      end
+
+      counts = Process.get(:oracle, %{})
+      IO.puts("\n[lifecycle] " <> inspect(counts))
+
+      for event <- [
+            :skips,
+            :runless,
+            :mixed_owners,
+            :owner_renamed,
+            :owner_discarded,
+            :puller_discarded
+          ] do
+        assert Map.get(counts, event, 0) > 0, "no #{event} generated"
+      end
+    end
+
+    # Compaction is invisible: the same history run with and without compaction slices at random points gives the same
+    # document and the same refusals (who refused, by task) after every operation. No model is involved.
+    property "compaction changes no later document or refusal, whatever happens after it" do
+      check all(
+              original <- StreamData.string([?a..?c, ?\n], max_length: 8),
+              commands <- StreamData.list_of(oracle_command(), max_length: 80),
+              max_runs: runs(400)
+            ) do
+        if twin_failure(original, commands) do
+          File.write!(
+            System.get_env("TWIN_DUMP", "/dev/null"),
+            inspect({original, commands}, limit: :infinity)
+          )
+        end
+
+        Enum.reduce(commands, {oracle_world(original, true), oracle_world(original, true)}, fn
+          command, twins ->
+            {plain, compacted} = twins = twin_step(command, twins)
+            assert compacted.text == plain.text
+            assert compacted.outcome == plain.outcome
+            assert_records(compacted.prov)
+            twins
+        end)
+      end
+    end
+
+    @tag :oracle_debug
+    test "debug: minimize the dumped twin failure" do
+      path = System.get_env("TWIN_DUMP_MIN")
+      if path, do: minimize_twin_dump(path)
+    end
+
+    defp minimize_twin_dump(path) do
+      {{original, commands}, _} = path |> File.read!() |> Code.eval_string()
+
+      shrink = fn commands ->
+        Enum.reduce(length(commands)..0//-1, commands, fn index, acc ->
+          candidate = List.delete_at(acc, index)
+          if index < length(acc) and twin_failure(original, candidate), do: candidate, else: acc
+        end)
+      end
+
+      minimal =
+        Stream.iterate(commands, shrink)
+        |> Stream.chunk_every(2, 1)
+        |> Enum.find(fn [a, b] -> a == b end)
+        |> hd()
+
+      IO.inspect({original, minimal}, label: "TWIN MINIMAL", limit: :infinity)
+
+      Enum.reduce(
+        minimal,
+        {oracle_world(original, true), oracle_world(original, true)},
+        fn command, twins ->
+          {plain, compacted} = twin_step(command, twins)
+
+          IO.inspect({command, plain.text, compacted.text, plain.outcome, compacted.outcome},
+            label: "TWIN STEP"
+          )
+
+          for p <- [plain.prov, compacted.prov] do
+            for r <- Provenance.runs(p),
+                do:
+                  IO.inspect(
+                    {r.bytes, r.live, r.group, r.deletions, r.covered_by, r.swept_by, r.made_by,
+                     r.text},
+                    label: "  run"
+                  )
+
+            IO.puts("  --")
+          end
+
+          {plain, compacted}
+        end
+      )
+    end
+
+    @tag :oracle_debug
+    test "debug: minimize the dumped oracle failure" do
+      path = System.get_env("ORACLE_DUMP_MIN")
+      if path, do: minimize_oracle_dump(path)
+    end
+
+    defp minimize_oracle_dump(path) do
+      {{original, commands, _command, focus?}, _} = path |> File.read!() |> Code.eval_string()
+
+      fails? = fn commands ->
+        world = oracle_world(original, focus? == true)
+
+        Enum.reduce_while(commands, world, fn command, world ->
+          world = oracle_run(command, world)
+
+          if ProvenanceModel.text(world.model) != world.text,
+            do: {:halt, :fail},
+            else: {:cont, world}
+        end) == :fail
+      end
+
+      shrink = fn commands ->
+        Enum.reduce(length(commands)..0//-1, commands, fn index, acc ->
+          candidate = List.delete_at(acc, index)
+          if index < length(acc) and fails?.(candidate), do: candidate, else: acc
+        end)
+      end
+
+      minimal =
+        Stream.iterate(commands, shrink)
+        |> Stream.chunk_every(2, 1)
+        |> Enum.find(fn [a, b] -> a == b end)
+        |> hd()
+
+      IO.inspect({original, minimal}, label: "MINIMAL", limit: :infinity)
+
+      # The first step after which flipping a single group gives a different text on the two sides.
+      probe = fn world ->
+        units =
+          Enum.map(world.yours, &[&1]) ++ Map.values(world.tasks)
+
+        for ids <- units,
+            group = world.model.groups[hd(ids)],
+            not group.final,
+            existing = Enum.filter(ids, &Provenance.group?(world.prov, &1)),
+            {:ok, doc, _first, _prov} =
+              if(group.applied,
+                do: Provenance.revert_all(world.prov, existing, Document.new(world.text)),
+                else:
+                  Enum.reduce(existing, {:ok, Document.new(world.text), nil, world.prov}, fn id,
+                                                                                             {:ok,
+                                                                                              d,
+                                                                                              _f,
+                                                                                              p} ->
+                    Provenance.reapply(p, id, d)
+                  end)
+              ),
+            model_text =
+              ProvenanceModel.text(
+                Enum.reduce(
+                  ids,
+                  world.model,
+                  &ProvenanceModel.set_applied(&2, &1, not group.applied)
+                )
+              ),
+            Document.content(doc) != model_text,
+            do: {ids, Document.content(doc), model_text}
+      end
+
+      first_bad =
+        minimal
+        |> Enum.scan({nil, oracle_world(original, focus? == true)}, fn command, {_step, world} ->
+          {command, oracle_run(command, world)}
+        end)
+        |> Enum.find_index(fn {_command, world} -> probe.(world) != [] end)
+
+      IO.inspect(first_bad, label: "FIRST DIVERGENT STEP")
+      Process.put(:step, 0)
+
+      Process.put(
+        :verbose,
+        String.to_integer(
+          System.get_env("VFROM", "#{max((first_bad || length(minimal) - 1) - 1, 0)}")
+        )
+      )
+
+      Process.put(
+        :verbose_until,
+        String.to_integer(System.get_env("VTO", "#{first_bad || length(minimal) - 1}"))
+      )
+
+      Process.put(:probe, probe)
+      fails?.(Enum.take(minimal, (first_bad || length(minimal) - 1) + 1))
     end
 
     property "compaction changes no document for any revert where each task's steps move together" do
@@ -424,7 +903,8 @@ defmodule Minga.Buffer.ProvenanceTest do
               else: {prov, model, text}
           end)
 
-        # Your edits alone: every byte you or the original file wrote that none of your applied groups deleted.
+        # Your edits alone: every byte you, the original file or an untracked change wrote that none of your applied
+        # groups and no untracked change deleted.
         yours =
           for entry <- model.entries,
               entry.author in [:you, :unattributed],
@@ -464,6 +944,118 @@ defmodule Minga.Buffer.ProvenanceTest do
     end)
   end
 
+  # ── Hand-computed cases ─────────────────────────────────────────────
+
+  defp run_hand_case(original, steps) do
+    state = %{
+      prov: Provenance.new(byte_size(original)),
+      model: ProvenanceModel.new(original),
+      text: original,
+      ids: %{}
+    }
+
+    Enum.reduce(steps, state, &hand_step/2)
+  end
+
+  defp hand_step({:open, name, owner}, state) do
+    {author, key} =
+      if owner == :you, do: {:you, nil}, else: {{:minga, owner}, {:minga, owner, "#{name}"}}
+
+    {id, prov} = Provenance.open_group(state.prov, author, key)
+
+    %{
+      state
+      | prov: prov,
+        model: ProvenanceModel.open_group(state.model, id, author, key),
+        ids: Map.put(state.ids, name, id)
+    }
+  end
+
+  defp hand_step({:edit, name, start, length, inserted}, state) do
+    group = if name == :untracked, do: :untracked, else: Map.fetch!(state.ids, name)
+    removed = binary_part(state.text, start, length)
+    text = splice(state.text, start, length, inserted)
+    model = ProvenanceModel.edit(state.model, group, start, length, inserted)
+    assert ProvenanceModel.text(model) == text
+
+    %{
+      state
+      | prov: Provenance.edit(state.prov, group, start, removed, inserted),
+        model: model,
+        text: text
+    }
+  end
+
+  defp hand_step({:revert, names}, state) do
+    ids = Enum.map(names, &Map.fetch!(state.ids, &1))
+
+    {:ok, document, _first, prov} =
+      Provenance.revert_all(state.prov, ids, Document.new(state.text))
+
+    model = Enum.reduce(ids, state.model, &ProvenanceModel.set_applied(&2, &1, false))
+    assert ProvenanceModel.text(model) == Document.content(document)
+    %{state | prov: prov, model: model, text: Document.content(document)}
+  end
+
+  defp hand_step({:discard, names}, state) do
+    ids = Enum.map(names, &Map.fetch!(state.ids, &1))
+
+    %{
+      state
+      | prov: Provenance.discard_all(state.prov, ids),
+        model: Enum.reduce(ids, state.model, &ProvenanceModel.discard(&2, &1))
+    }
+  end
+
+  defp hand_step({:undo, name, expected}, state) do
+    id = Map.fetch!(state.ids, name)
+    production = Provenance.blocker(state.prov, id)
+    model = ProvenanceModel.blockers(state.model, id)
+
+    case expected do
+      {:refused, task} ->
+        assert {:minga, ^task, _step} = production
+        assert Enum.any?(model, &match?({:minga, ^task, _step}, &1))
+        state
+
+      text ->
+        assert production == nil
+        assert model == MapSet.new()
+        hand_step({:revert, [name]}, state) |> tap(&assert(&1.text == text))
+    end
+  end
+
+  defp hand_step(:compact, state) do
+    assert {:ok, prov, _merged, _examined} = Provenance.compact_oldest(state.prov)
+    %{state | prov: prov}
+  end
+
+  defp hand_step({:reject, names, expected}, state) do
+    ids = Enum.map(names, &Map.fetch!(state.ids, &1))
+    existing = Enum.filter(ids, &Provenance.group?(state.prov, &1))
+    production_refused? = Provenance.overlaps_among(state.prov, existing) != []
+    model_refused? = ProvenanceModel.overlaps_among(state.model, ids) != MapSet.new()
+
+    case expected do
+      :refused ->
+        assert production_refused?
+        assert model_refused?
+        state
+
+      text ->
+        refute production_refused?
+        refute model_refused?
+
+        {:ok, document, _first, prov} =
+          Provenance.revert_all(state.prov, existing, Document.new(state.text))
+
+        model = Enum.reduce(ids, state.model, &ProvenanceModel.set_applied(&2, &1, false))
+        assert Document.content(document) == text
+        assert ProvenanceModel.text(model) == text
+        %{state | prov: prov, model: model, text: text}
+    end
+  end
+
   # ── Model-based helpers ─────────────────────────────────────────────
 
   defp command do
@@ -490,46 +1082,20 @@ defmodule Minga.Buffer.ProvenanceTest do
         pick(unapplied_ids(prov, model), a, state, &reapply(state, &1))
 
       kind < 89 and mode == :discard_groups ->
-        pick(Map.keys(model.groups), a, state, &discard(state, &1))
+        pick(open_ids(model), a, state, &discard(state, &1))
 
       # Several groups at once, which often takes the one-pass path.
       kind < 93 and mode == :discard_groups ->
-        discard_many(state, model.groups |> Map.keys() |> Enum.take_every(rem(a, 3) + 1))
-
-      kind < 93 ->
-        edit_command(state, a, b, c, inserted)
+        discard_many(state, model |> open_ids() |> Enum.take_every(rem(a, 3) + 1))
 
       kind < 97 ->
-        compact(state)
+        edit_command(state, a, b, c, inserted)
 
       kind < 99 ->
         batch_edit(state, a, b, c, inserted)
 
       true ->
         untracked_edit(state, a, b, inserted)
-    end
-  end
-
-  # One compaction step on both sides. It never changes the document, any visible author, or whether a group of yours
-  # is blocked, and it never adds runs.
-  defp compact({prov, model, text} = state) do
-    case Provenance.compact_oldest(prov) do
-      :none ->
-        assert ProvenanceModel.drafts(model) == []
-        state
-
-      {:ok, compacted, _merged, examined} ->
-        assert examined > 0
-        model = ProvenanceModel.compact_oldest(model)
-        assert Provenance.run_count(compacted) <= Provenance.run_count(prov)
-        assert spans(compacted, text) == spans(prov, text)
-
-        for {id, %{author: :you}} <- model.groups do
-          assert Provenance.blocker(compacted, id) == nil == (Provenance.blocker(prov, id) == nil)
-        end
-
-        Process.put(:compactions, Process.get(:compactions, 0) + 1)
-        {compacted, model, text}
     end
   end
 
@@ -591,7 +1157,60 @@ defmodule Minga.Buffer.ProvenanceTest do
     batch = Provenance.edit_all(prov, id, changes, :batch)
 
     each = Provenance.edit_all(prov, id, changes, :each)
-    assert same_record?(batch, each, Map.keys(model.groups))
+
+    if System.get_env("PARITY_DUMP") &&
+         (not same_record?(batch, each, open_ids(model)) or
+            byte_records(batch) != byte_records(each)) do
+      show = fn p ->
+        {for(
+           r <- Provenance.runs(p),
+           do:
+             {r.bytes, r.live, r.group, r.deletions, r.overlaps, r.made_by, r.replaced_by, r.text}
+         ), Provenance.change_records(p), Provenance.faulted?(p)}
+      end
+
+      {bb, bl, bn} = byte_records(batch)
+      {eb, el, en} = byte_records(each)
+      first = Enum.zip(bb, eb) |> Enum.find_index(fn {x, y} -> x != y end)
+
+      link_diff =
+        for k <- Enum.uniq(Map.keys(bl) ++ Map.keys(el)), bl[k] != el[k], do: {k, bl[k], el[k]}
+
+      parts = %{
+        spans: spans(batch, text) == spans(each, text),
+        drafts:
+          {draft_bytes(batch), draft_bytes(each),
+           Enum.sum(for r <- Provenance.runs(batch), draft?(r, batch.groups), do: r.bytes),
+           Enum.sum(for r <- Provenance.runs(each), draft?(r, each.groups), do: r.bytes)},
+        dead: dead_text(batch) == dead_text(each),
+        overlaps:
+          for(
+            i <- open_ids(model),
+            MapSet.new(Provenance.overlaps_among(batch, [i]), &elem(&1, 0)) !=
+              MapSet.new(Provenance.overlaps_among(each, [i]), &elem(&1, 0)),
+            do: i
+          ),
+        blockers:
+          for(
+            i <- open_ids(model),
+            Provenance.blocker(batch, i) != Provenance.blocker(each, i),
+            do: i
+          )
+      }
+
+      File.write!(
+        System.get_env("PARITY_DUMP"),
+        inspect(
+          {id, changes, parts, {first, first && Enum.at(bb, first), first && Enum.at(eb, first)},
+           link_diff, {bn, en}, show.(prov), show.(batch), show.(each)},
+          limit: :infinity,
+          pretty: true
+        )
+      )
+    end
+
+    assert same_record?(batch, each, open_ids(model))
+    assert byte_records(batch) == byte_records(each)
 
     # The one pass merges what typing forward merges, so it never holds more runs; the budget never sees it inflate.
     assert Provenance.run_count(batch) <= Provenance.run_count(each)
@@ -619,8 +1238,83 @@ defmodule Minga.Buffer.ProvenanceTest do
         Provenance.blocker(one, id) == Provenance.blocker(other, id) and
           MapSet.new(Provenance.overlaps_among(one, [id]), &elem(&1, 0)) ==
             MapSet.new(Provenance.overlaps_among(other, [id]), &elem(&1, 0))
-      end) and Provenance.draft_count(one) == Provenance.draft_count(other) and
+      end) and draft_bytes(one) == draft_bytes(other) and
       dead_text(one) == dead_text(other)
+  end
+
+  # How many dead bytes are drafts; how runs split does not change it.
+  defp draft_bytes(prov) do
+    drafts = MapSet.new(Provenance.drafts(prov), &elem(&1, 1))
+
+    for run <- Provenance.runs(prov),
+        MapSet.member?(drafts, run.id),
+        reduce: 0,
+        do: (acc -> acc + run.bytes)
+  end
+
+  # Every byte's replacement fields, live or dead, in order; the links between records; and the next id. Two records
+  # whose runs split differently give the same bytes.
+  defp byte_records(prov) do
+    bytes =
+      prov
+      |> Provenance.runs()
+      |> Enum.flat_map(
+        &List.duplicate({&1.live, &1.made_by, Enum.sort(&1.replaced_by)}, &1.bytes)
+      )
+
+    links =
+      prov
+      |> Provenance.change_records()
+      |> Map.new(fn {change, record} -> {change, {record.pulls, record.pulled_by}} end)
+
+    {bytes, links, Provenance.next_change(prov)}
+  end
+
+  # The records hold what the runs say: `made` and `replaced` equal a recomputation from every run's `made_by` and
+  # `replaced_by`, a record with no made run left is pulled and owned, links go both ways, and nothing faulted.
+  # `pulls` cannot be recomputed from the runs; the never-drop model checks what they do.
+  defp assert_records(prov) do
+    runs = Provenance.runs(prov)
+    records = Provenance.change_records(prov)
+
+    made =
+      for run <- runs, run.made_by != nil, reduce: %{} do
+        acc -> Map.update(acc, run.made_by, [run.id], &[run.id | &1])
+      end
+
+    replaced =
+      for run <- runs, change <- run.replaced_by, reduce: %{} do
+        acc -> Map.update(acc, change, [run.id], &[run.id | &1])
+      end
+
+    assert Enum.all?(Map.keys(made), &Map.has_key?(records, &1))
+    assert Enum.all?(Map.keys(replaced), &Map.has_key?(records, &1))
+
+    owned =
+      for {change, %{owner: owner}} <- records, is_integer(owner), reduce: %{} do
+        acc -> Map.update(acc, owner, [change], &Enum.sort([change | &1]))
+      end
+
+    assert Provenance.owned_changes(prov) == owned
+
+    for {change, record} <- records do
+      # A record outlives its made runs only while something pulls it, and then keeps the group that made them.
+      if Map.has_key?(made, change) do
+        assert record.owner == :runs
+      else
+        assert record.pulled_by != []
+        assert record.owner == :permanent or Provenance.group?(prov, record.owner)
+      end
+
+      assert record.made == Enum.sort(Map.get(made, change, []))
+      assert record.replaced == Enum.sort(Map.get(replaced, change, []))
+      assert change < Provenance.next_change(prov)
+
+      for pulled <- record.pulls, do: assert(change in Map.fetch!(records, pulled).pulled_by)
+      for puller <- record.pulled_by, do: assert(change in Map.fetch!(records, puller).pulls)
+    end
+
+    refute Provenance.faulted?(prov)
   end
 
   # The deleted text each group set of a tombstone keeps, in document order.
@@ -717,11 +1411,427 @@ defmodule Minga.Buffer.ProvenanceTest do
   defp pick([], _a, state, _fun), do: state
   defp pick(ids, a, _state, fun), do: fun.(Enum.at(ids, rem(a, length(ids))))
 
-  defp group_ids({_prov, model, _text}), do: model.groups |> Map.keys() |> Enum.sort()
-  defp applied_ids(_prov, model), do: for({id, %{applied: true}} <- model.groups, do: id)
-  defp unapplied_ids(_prov, model), do: for({id, %{applied: false}} <- model.groups, do: id)
+  defp group_ids({_prov, model, _text}), do: model |> open_ids() |> Enum.sort()
+  defp open_ids(model), do: for({id, %{final: false}} <- model.groups, do: id)
+
+  defp applied_ids(_prov, model),
+    do: for({id, %{applied: true, final: false}} <- model.groups, do: id)
+
+  defp unapplied_ids(_prov, model),
+    do: for({id, %{applied: false, final: false}} <- model.groups, do: id)
+
+  # ── The never-drop oracle ───────────────────────────────────────────
+
+  defp oracle_check(original, commands, focus?) do
+    Enum.reduce(commands, oracle_world(original, focus?), fn command, world ->
+      before = world
+      world = oracle_run(command, world)
+
+      if ProvenanceModel.text(world.model) != world.text do
+        File.write!(
+          System.get_env("ORACLE_DUMP", "/dev/null"),
+          inspect({original, commands, command, focus?}, limit: :infinity)
+        )
+      end
+
+      assert ProvenanceModel.text(world.model) == world.text
+      assert Provenance.size(world.prov) == byte_size(world.text)
+      assert spans(world.prov, world.text) == ProvenanceModel.authors(world.model)
+      assert_records(world.prov)
+      oracle_census(before, world)
+    end)
+  end
+
+  # Counts what the history exercised, so the properties can show they generate it.
+  defp oracle_census(before, world) do
+    skipped = length(world.model.skipped) - length(before.model.skipped)
+    if skipped > 0, do: count(:skips)
+    records = Provenance.change_records(world.prov)
+    if Enum.any?(records, fn {_id, r} -> is_integer(r.owner) end), do: count(:runless)
+
+    writers =
+      for run <- Provenance.runs(world.prov), run.made_by != nil, reduce: %{} do
+        acc -> Map.update(acc, run.made_by, MapSet.new([run.group]), &MapSet.put(&1, run.group))
+      end
+
+    if Enum.any?(writers, fn {_id, groups} -> MapSet.size(groups) > 1 end),
+      do: count(:mixed_owners)
+
+    world
+  end
+
+  defp oracle_world(original, focus?) do
+    %{
+      focus: focus?,
+      outcome: nil,
+      prov: Provenance.new(byte_size(original)),
+      model: ProvenanceModel.new(original),
+      text: original,
+      tasks: %{},
+      yours: [],
+      next_task: 1
+    }
+  end
+
+  defp oracle_command do
+    StreamData.tuple({
+      StreamData.integer(0..99),
+      StreamData.integer(0..1_000),
+      StreamData.integer(0..5),
+      StreamData.integer(0..12),
+      StreamData.string([?a..?c, ?\n], max_length: 3)
+    })
+  end
+
+  defp oracle_run(command, world) do
+    world = oracle_step(command, world)
+    step = Process.get(:step, 0)
+    Process.put(:step, step + 1)
+
+    if Process.get(:verbose) && step >= Process.get(:verbose) &&
+         step <= Process.get(:verbose_until) do
+      if probe = Process.get(:probe), do: IO.inspect(probe.(world), label: "PROBE")
+
+      IO.inspect({command, world.text, ProvenanceModel.text(world.model)}, label: "STEP")
+
+      for run <- Provenance.runs(world.prov),
+          do:
+            IO.inspect(
+              {run.bytes, run.live, run.group, run.deletions, run.overlaps, run.made_by,
+               run.replaced_by, run.text},
+              label: "  run"
+            )
+
+      IO.inspect(
+        {Provenance.change_records(world.prov), world.prov.group_marks,
+         Provenance.overlaps_among(world.prov, Map.keys(world.prov.groups))},
+        label: "  records"
+      )
+
+      for e <- world.model.entries,
+          do:
+            IO.inspect({<<e.byte>>, e.group, e.deletions, e.overlaps, e.made_by, e.replaced_by},
+              label: "  byte"
+            )
+
+      IO.inspect(
+        Map.new(world.model.groups, fn {id, g} -> {id, {g.author, g.applied, g.final}} end),
+        label: "  groups"
+      )
+    end
+
+    world
+  end
+
+  defp oracle_step({kind, a, b, c, inserted}, %{focus: true} = world) do
+    cond do
+      kind < 35 -> oracle_edit(world, a, b, c, inserted)
+      kind < 45 -> oracle_batch(world, a, b, c, inserted)
+      kind < 60 -> oracle_flip_yours(world, a, false)
+      kind < 70 -> oracle_flip_yours(world, a, true)
+      kind < 78 -> oracle_reject(world, a)
+      kind < 88 -> oracle_discard(world, a)
+      true -> oracle_compact(world, rem(b, 3) + 1)
+    end
+  end
+
+  defp oracle_step({kind, a, b, c, inserted}, world) do
+    cond do
+      kind < 42 -> oracle_edit(world, a, b, c, inserted)
+      kind < 48 -> oracle_batch(world, a, b, c, inserted)
+      kind < 58 -> oracle_flip_yours(world, a, false)
+      kind < 63 -> oracle_flip_yours(world, a, true)
+      kind < 73 -> oracle_reject(world, a)
+      kind < 80 -> oracle_discard(world, a)
+      true -> oracle_compact(world, rem(b, 3) + 1)
+    end
+  end
+
+  defp count(event),
+    do: Process.put(:oracle, Map.update(Process.get(:oracle, %{}), event, 1, &(&1 + 1)))
+
+  defp active_tasks(world) do
+    for {task, ids} <- world.tasks,
+        Enum.all?(ids, &match?(%{applied: true, final: false}, world.model.groups[&1])),
+        do: task
+  end
+
+  # Who writes: a new group of yours, one of your applied groups, a new step of a running task or of a new task, or an
+  # untracked change. Edits stay short over a short text, so drops and consumed replacements come often.
+  defp oracle_writer(world, a, c) do
+    yours =
+      for id <- world.yours,
+          match?(%{applied: true, final: false}, world.model.groups[id]),
+          do: id
+
+    tasks = active_tasks(world)
+
+    case oracle_choice(world, c) do
+      0 when yours != [] ->
+        {Enum.at(yours, rem(a, length(yours))), world}
+
+      choice when choice in [0, 1] ->
+        oracle_open(world, :you, nil, nil)
+
+      choice when choice in [2, 3] and tasks != [] ->
+        task = Enum.at(Enum.sort(tasks), rem(a, length(tasks)))
+        oracle_open(world, {:minga, task}, {:minga, task, "call-#{world.next_task}-#{a}"}, task)
+
+      choice when choice in [2, 3, 4] ->
+        task = "task-#{world.next_task}"
+        world = %{world | next_task: world.next_task + 1}
+        oracle_open(world, {:minga, task}, {:minga, task, "call-#{a}"}, task)
+
+      5 ->
+        {:untracked, world}
+    end
+  end
+
+  # Focused histories favour existing tasks, so one task's steps pile up over the same text.
+  defp oracle_choice(%{focus: true}, c), do: Enum.at([0, 1, 2, 2, 3, 3, 5], rem(c, 7))
+  defp oracle_choice(_world, c), do: rem(c, 6)
+
+  defp oracle_open(world, author, key, task) do
+    {id, prov} = Provenance.open_group(world.prov, author, key)
+    model = ProvenanceModel.open_group(world.model, id, author, key)
+    world = %{world | prov: prov, model: model}
+
+    world =
+      if task,
+        do: %{world | tasks: Map.update(world.tasks, task, [id], &[id | &1])},
+        else: %{world | yours: [id | world.yours]}
+
+    {id, world}
+  end
+
+  defp oracle_edit(world, a, b, c, inserted) do
+    {writer, world} = oracle_writer(world, a, c)
+    size = byte_size(world.text)
+    start = rem(a, size + 1)
+    removed_bytes = min(b, size - start)
+    removed = binary_part(world.text, start, removed_bytes)
+    count(:edits)
+
+    %{
+      world
+      | prov: Provenance.edit(world.prov, writer, start, removed, inserted),
+        model: ProvenanceModel.edit(world.model, writer, start, removed_bytes, inserted),
+        text: splice(world.text, start, removed_bytes, inserted)
+    }
+  end
+
+  defp oracle_batch(world, a, b, c, inserted) do
+    {writer, world} = oracle_writer(world, a, c)
+    changes = disjoint_changes(world.text, a, b, inserted)
+    count(:batches)
+
+    model =
+      changes
+      |> Enum.reverse()
+      |> Enum.reduce(world.model, fn {start, removed, new}, acc ->
+        ProvenanceModel.edit(acc, writer, start, byte_size(removed), new)
+      end)
+
+    %{
+      world
+      | prov:
+          Provenance.edit_all(
+            world.prov,
+            writer,
+            changes,
+            Enum.at([:auto, :batch, :each], rem(c, 3))
+          ),
+        model: model,
+        text: apply_changes(world.text, changes)
+    }
+  end
+
+  defp splice(text, start, removed, inserted),
+    do:
+      binary_part(text, 0, start) <>
+        inserted <> binary_part(text, start + removed, byte_size(text) - start - removed)
+
+  # Your undo (or redo) of one group, each side refusing on its own blockers.
+  defp oracle_flip_yours(world, a, applied) do
+    candidates =
+      for id <- world.yours,
+          match?(%{final: false}, world.model.groups[id]),
+          world.model.groups[id].applied != applied,
+          do: id
+
+    case candidates do
+      [] ->
+        world
+
+      _some ->
+        id = Enum.at(candidates, rem(a, length(candidates)))
+        blocker = Provenance.blocker(world.prov, id)
+        prov_ok? = blocker == nil
+        model_ok? = ProvenanceModel.blockers(world.model, id) == MapSet.new()
+        count(if prov_ok? == model_ok?, do: :your_flips, else: :your_flip_disagreements)
+        world = %{world | outcome: {:flip, id, applied, who(blocker)}}
+        oracle_flip(world, [id], applied, prov_ok?, model_ok?)
+    end
+  end
+
+  # A whole task's reject, as the history does it: refused while another author partly consumed one of its
+  # replacements or another task deleted its text after it.
+  defp oracle_reject(world, a) do
+    case Enum.sort(active_tasks(world)) do
+      [] ->
+        world
+
+      tasks ->
+        task = Enum.at(tasks, rem(a, length(tasks)))
+        ids = Map.fetch!(world.tasks, task)
+        existing = Enum.filter(ids, &Provenance.group?(world.prov, &1))
+        blocks? = fn author, _key -> author != :you and author != {:minga, task} end
+
+        overlaps = Provenance.overlaps_among(world.prov, existing)
+        blocker = Provenance.blocker_among(world.prov, existing, blocks?)
+        prov_ok? = overlaps == [] and blocker == nil
+        refusers = overlaps |> Enum.map(&who(elem(&1, 0))) |> Enum.sort() |> Enum.uniq()
+        world = %{world | outcome: {:reject, task, refusers, who(blocker)}}
+
+        model_ok? =
+          ProvenanceModel.overlaps_among(world.model, ids) == MapSet.new() and
+            Enum.all?(ids, &(ProvenanceModel.blockers(world.model, &1, blocks?) == MapSet.new()))
+
+        count(if prov_ok?, do: :rejects, else: :refused_rejects)
+
+        if Process.get(:verbose),
+          do: IO.inspect({task, ids, existing, prov_ok?, model_ok?}, label: "REJECT")
+
+        if Process.get(:verbose),
+          do:
+            IO.inspect(
+              {Provenance.overlaps_among(world.prov, existing),
+               ProvenanceModel.overlaps_among(world.model, ids)},
+              label: "OVERLAPS"
+            )
+
+        world = oracle_flip(world, ids, false, prov_ok?, model_ok?)
+        if prov_ok? and model_ok? and rem(a, 2) == 0, do: oracle_finalize(world, ids), else: world
+    end
+  end
+
+  defp twin_step({kind, _a, b, _c, _inserted}, {plain, compacted}) when kind >= 88,
+    do: {plain, oracle_compact(compacted, rem(b, 3) + 1)}
+
+  defp twin_step(command, {plain, compacted}),
+    do:
+      {oracle_step(command, %{plain | outcome: nil}),
+       oracle_step(command, %{compacted | outcome: nil})}
+
+  defp twin_failure(original, commands) do
+    commands
+    |> Enum.reduce_while({oracle_world(original, true), oracle_world(original, true)}, fn command,
+                                                                                          twins ->
+      {plain, compacted} = twins = twin_step(command, twins)
+
+      if plain.text != compacted.text or plain.outcome != compacted.outcome,
+        do: {:halt, :fail},
+        else: {:cont, twins}
+    end)
+    |> Kernel.==(:fail)
+  end
+
+  # Who refused, by task: compaction may rename the step that did, never its task.
+  defp who({:minga, task, _step}), do: {:task, task}
+  defp who(other), do: other
+
+  defp oracle_flip(world, ids, applied, prov_ok?, model_ok?) do
+    existing = Enum.filter(ids, &Provenance.group?(world.prov, &1))
+
+    {prov, text} =
+      if prov_ok? do
+        flip = if applied, do: &Provenance.reapply/3, else: &Provenance.revert/3
+
+        {:ok, document, _first, prov} =
+          if applied,
+            do:
+              Enum.reduce(existing, {:ok, Document.new(world.text), nil, world.prov}, fn id,
+                                                                                         {:ok,
+                                                                                          doc, _f,
+                                                                                          p} ->
+                flip.(p, id, doc)
+              end),
+            else: Provenance.revert_all(world.prov, existing, Document.new(world.text))
+
+        {prov, Document.content(document)}
+      else
+        {world.prov, world.text}
+      end
+
+    model =
+      if model_ok?,
+        do: Enum.reduce(ids, world.model, &ProvenanceModel.set_applied(&2, &1, applied)),
+        else: world.model
+
+    %{world | prov: prov, model: model, text: text}
+  end
+
+  # A group of yours falls off the stack (kept or, when undone, forgotten), or a whole task becomes final.
+  defp oracle_discard(world, a) do
+    open_yours = for id <- Enum.reverse(world.yours), not world.model.groups[id].final, do: id
+    tasks = for {task, [id | _]} <- world.tasks, not world.model.groups[id].final, do: task
+
+    cond do
+      rem(a, 2) == 0 and open_yours != [] ->
+        oracle_finalize(world, [hd(open_yours)])
+
+      tasks != [] ->
+        oracle_finalize(
+          world,
+          Map.fetch!(world.tasks, Enum.at(Enum.sort(tasks), rem(a, length(tasks))))
+        )
+
+      true ->
+        world
+    end
+  end
+
+  defp oracle_finalize(world, ids) do
+    count(:discards)
+    existing = Enum.filter(ids, &Provenance.group?(world.prov, &1))
+    owned = Provenance.owned_changes(world.prov)
+    if Enum.any?(existing, &Map.has_key?(owned, &1)), do: count(:owner_discarded)
+    records = Provenance.change_records(world.prov)
+
+    pullers =
+      for run <- Provenance.runs(world.prov),
+          run.group in existing,
+          change = run.made_by,
+          change != nil,
+          Map.fetch!(records, change).pulls != [],
+          do: change
+
+    if pullers != [], do: count(:puller_discarded)
+
+    %{
+      world
+      | prov: Provenance.discard_all(world.prov, existing),
+        model: Enum.reduce(ids, world.model, &ProvenanceModel.discard(&2, &1))
+    }
+  end
+
+  defp oracle_compact(world, 0), do: world
+
+  defp oracle_compact(world, slices) do
+    case Provenance.compact_oldest(world.prov) do
+      :none ->
+        world
+
+      {:ok, prov, {old, _new}, _examined} ->
+        count(:merges)
+        if Map.has_key?(Provenance.owned_changes(world.prov), old), do: count(:owner_renamed)
+        oracle_compact(%{world | prov: prov}, slices - 1)
+    end
+  end
 
   defp minga?(model, id), do: match?({:minga, _task}, model.groups[id].author)
+
+  defp your_applied?(_model, :untracked), do: true
 
   defp your_applied?(model, id),
     do: model.groups[id].author == :you and model.groups[id].applied
@@ -737,7 +1847,9 @@ defmodule Minga.Buffer.ProvenanceTest do
 
     assert authors == ProvenanceModel.authors(model)
 
-    for id <- Map.keys(model.groups) do
+    live_ids = for {id, group} <- model.groups, not group.final, do: id
+
+    for id <- live_ids do
       blockers = ProvenanceModel.blockers(model, id)
 
       case Provenance.blocker(prov, id) do
@@ -746,7 +1858,7 @@ defmodule Minga.Buffer.ProvenanceTest do
       end
     end
 
-    for id <- Map.keys(model.groups) do
+    for id <- live_ids do
       keys = prov |> Provenance.overlaps_among([id]) |> MapSet.new(&elem(&1, 0))
 
       assert keys == ProvenanceModel.overlaps_among(model, [id])
@@ -762,8 +1874,7 @@ defmodule Minga.Buffer.ProvenanceTest do
              |> Enum.map(&{&1.group, &1.id})
              |> Enum.sort()
 
-    draft_bytes = runs |> Enum.filter(&draft?(&1, groups)) |> Enum.map(& &1.bytes) |> Enum.sum()
-    assert draft_bytes == length(ProvenanceModel.drafts(model))
+    assert_records(prov)
     assert Enum.all?(runs, &(&1.bytes > 0))
     assert Enum.all?(runs, &match?([_ | _], &1.id))
     refute Enum.any?(runs, &match?([_, _, _, _, _ | _], &1.id))

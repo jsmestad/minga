@@ -336,6 +336,57 @@ defmodule Minga.Buffer.AuthorshipTest do
       end
     end
 
+    # Round 5 R2 by change identity (Addendum 2): each edit records what it replaced, so a consumed replacement covers
+    # exactly that, and a partly consumed one refuses the reject until your edit is undone.
+    test "deleting what one step wrote over its own earlier text rejects to the text before the step" do
+      buffer = start("ab\n")
+      replace_at(buffer, {0, 0}, 1, "X", step("t", "s1"))
+      replace_at(buffer, {0, 0}, 1, "Y", step("t", "s1"))
+      replace_at(buffer, {0, 0}, 1, "")
+      assert BufferProcess.content(buffer) == "b\n"
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "b\n"
+    end
+
+    test "two edits of one step stay apart: deleting the first one's text keeps the second one's deletion" do
+      buffer = start("ab\n")
+      replace_at(buffer, {0, 0}, 1, "X", step("t1", "s1"))
+      replace_at(buffer, {0, 1}, 1, "", step("t1", "s1"))
+      replace_at(buffer, {0, 0}, 1, "")
+      assert BufferProcess.content(buffer) == "\n"
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "b\n"
+    end
+
+    test "CV1: another task's deletion of one replacement reverts on its own, whatever you did to the other" do
+      buffer = start("ab\n")
+      replace_at(buffer, {0, 0}, 1, "X", step("t1", "c1"))
+      replace_at(buffer, {0, 1}, 1, "Y", step("t1", "c1"))
+      replace_at(buffer, {0, 1}, 1, "", step("t2", "c1"))
+      replace_at(buffer, {0, 0}, 1, "")
+      assert BufferProcess.content(buffer) == "\n"
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "Y\n"
+    end
+
+    # Partial CH2: your "q" consumed the second step's "z" but only part of the first step's "bar". The second step
+    # reverts; the first is held by your edit until you undo it, then reverts exactly.
+    test "retyping only the second step's letter holds the first step until you undo it, then rejects exactly" do
+      buffer = start("call(foo)\n")
+      replace_at(buffer, {0, 5}, 3, "bar", step("t1", "s1"))
+      replace_at(buffer, {0, 5}, 3, "baz", step("t1", "s2"))
+      replace_at(buffer, {0, 7}, 1, "q")
+      assert BufferProcess.content(buffer) == "call(baq)\n"
+
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "call(baq)\n"
+      assert {:blocked, _overlap} = BufferProcess.undo_agent_session(buffer)
+      assert :ok = BufferProcess.undo(buffer)
+      assert BufferProcess.content(buffer) == "call(bar)\n"
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "call(foo)\n"
+    end
+
     # Round 5 R1, SL1 to SL3: a deletion beside an identical byte takes the other author's copy, in any change list.
     test "your :s over Minga's duplicate parens takes Minga's copies, so SPC a u leaves your text" do
       buffer = start("f(a)\nf(a)\n")

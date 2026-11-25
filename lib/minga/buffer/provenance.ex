@@ -10,6 +10,22 @@ defmodule Minga.Buffer.Provenance do
 
   An insertion at byte `p` goes immediately before the live byte that was at `p`, so it lands after any tombstones that sit at `p`. A deletion kills the live runs in its range and also marks every tombstone strictly inside the range, so restoring that older text later cannot reappear in the middle of text a later edit removed.
 
+  ## Replacements
+
+  An edit that inserts text over a non-empty range is a replacement, recorded by identity as a `Minga.Buffer.Provenance.Change`. It made the runs it inserted. It replaced the live runs in its range and the tombstones strictly inside it that can still come back; text already gone for good (deleted by its own writer, by an untracked change or by a kept group, or written by a group discarded unapplied) is dropped from the tree and replaced by no one.
+
+  A deletion consumes a replacement when none of its made runs stays live. It then deletes the dead runs the replacement replaced too, and examines each replacement that made those runs, or that the replacement pulls, each once. A replacement that keeps live text is only partly consumed: when it is another author's Minga step, its runs get an overlap mark, and rejecting that step is refused while the deleting group is applied. A cover only adds a deleter to dead runs, so it never changes the document. A change carries its replacement only while its group is applied: a reached change whose group is undone, or was discarded unapplied (it never happened), neither covers nor marks.
+
+  ## Record lifecycle
+
+  A record is in one of three states.
+
+  1. **With text.** Created by an edit that inserted text over a non-empty range, unless it could never cover, pull or mark (it replaced nothing, pulls nothing, and is not a Minga step's). `made` lists its runs; a split adds the new piece. Its group is the writer of its first made run (`owner: :runs`). It retires to nothing when it has nothing replaced, pulls nothing, and its runs belong to no Minga step: its runs forget it.
+  2. **Run-less, pulled.** When its last made run is dropped, the record keeps that run's group as `owner` (listed in the group-to-records index) and stays while another record pulls it. A record `p` pulls `q` when a run `q` made, which `p` had replaced, is dropped: consuming `p` still reaches `q`. Compaction that removes the owner renames it to the step that absorbed it. Discarding the owner kept makes the owner `:permanent`, which counts as applied.
+  3. **Gone.** A run-less record that nothing pulls, or that has nothing replaced and pulls nothing, is removed; so is every record its owner's discard unapplied leaves behind, with its pull edges. Removing a record removes it from its runs' `replaced_by` and from every link.
+
+  Records settle at the end of each operation. `made` and `replaced` always equal a recomputation from the runs' `made_by` and `replaced_by`; `pulls`, `pulled_by` and `owner` record dropped runs and cannot be recomputed, so the never-drop reference model in the tests checks what they do.
+
   ## Lines
 
   Runs measure bytes only. A live run's text is in the document, not in the run, so splitting a run cannot count newlines without reading the document. Callers convert lines to bytes through the document's line index (`Minga.Buffer.Lines.start_of/2`) and query byte ranges here.
@@ -22,6 +38,7 @@ defmodule Minga.Buffer.Provenance do
   """
 
   alias Minga.Buffer.Document
+  alias Minga.Buffer.Provenance.Change
   alias Minga.Buffer.Provenance.Group
   alias Minga.Buffer.Provenance.Locator
   alias Minga.Buffer.Provenance.Run
@@ -35,7 +52,14 @@ defmodule Minga.Buffer.Provenance do
             recent: [],
             fresh: [],
             overlap_runs: %{},
-            drafts: :gb_sets.new()
+            drafts: :gb_sets.new(),
+            next_change: 1,
+            changes: %{},
+            stale: [],
+            faults: %{},
+            group_marks: %{},
+            owned: %{},
+            trace: nil
 
   @opaque t :: %__MODULE__{
             tree: RunTree.t(),
@@ -45,7 +69,14 @@ defmodule Minga.Buffer.Provenance do
             recent: [Locator.t()],
             fresh: [Locator.t()],
             overlap_runs: %{group_id() => [Locator.t()]},
-            drafts: :gb_sets.set({group_id(), Locator.t()})
+            drafts: :gb_sets.set({group_id(), Locator.t()}),
+            next_change: pos_integer(),
+            changes: %{Change.id() => Change.t()},
+            stale: [Change.id()],
+            faults: %{(group_id() | :all) => true},
+            group_marks: %{group_id() => [group_id() | {:permanent, term()}]},
+            owned: %{group_id() => MapSet.t(Change.id())},
+            trace: [tuple()] | nil
           }
 
   @type author :: Run.author()
@@ -85,8 +116,36 @@ defmodule Minga.Buffer.Provenance do
   def open_group(%__MODULE__{} = prov, author, key) do
     id = prov.next_group
     group = %Group{author: author, key: key}
-    {id, %{prov | groups: Map.put(prov.groups, id, group), next_group: id + 1}}
+    prov = %{prov | groups: Map.put(prov.groups, id, group), next_group: id + 1}
+    {id, traced(prov, {:open_group, id, author, key})}
   end
+
+  @doc """
+  Starts recording every operation that changes what a reference model would hold: groups opened, edits, flips and discards, oldest first in `take_trace/1`. Tests replay the trace into a model that never forgets a byte; nothing records by default.
+  """
+  @spec start_trace(t()) :: t()
+  def start_trace(%__MODULE__{} = prov), do: %{prov | trace: []}
+
+  @doc "Returns the operations recorded since the last call, oldest first, or `nil` when not recording."
+  @spec take_trace(t()) :: {[tuple()] | nil, t()}
+  def take_trace(%__MODULE__{trace: nil} = prov), do: {nil, prov}
+  def take_trace(%__MODULE__{trace: trace} = prov), do: {Enum.reverse(trace), %{prov | trace: []}}
+
+  @spec traced(t(), tuple()) :: t()
+  defp traced(%__MODULE__{trace: nil} = prov, _operation), do: prov
+
+  defp traced(%__MODULE__{trace: trace} = prov, operation),
+    do: %{prov | trace: [operation | trace]}
+
+  @spec traced_flip(
+          {:ok, Document.t(), non_neg_integer() | nil, t()} | {:error, :invalid_utf8},
+          [group_id()],
+          boolean()
+        ) :: {:ok, Document.t(), non_neg_integer() | nil, t()} | {:error, :invalid_utf8}
+  defp traced_flip({:ok, document, first, prov}, ids, applied),
+    do: {:ok, document, first, traced(prov, {:set_applied, ids, applied})}
+
+  defp traced_flip(error, _ids, _applied), do: error
 
   @doc "Returns whether the group is applied."
   @spec applied?(t(), group_id()) :: boolean()
@@ -110,6 +169,13 @@ defmodule Minga.Buffer.Provenance do
   @spec edit(t(), group_id() | :untracked, non_neg_integer(), binary(), binary()) :: t()
   def edit(%__MODULE__{} = prov, group, start, removed, inserted)
       when is_integer(start) and start >= 0 and is_binary(removed) and is_binary(inserted) do
+    prov
+    |> apply_edit(group, start, removed, inserted)
+    |> traced({:edit, group, start, removed, inserted})
+  end
+
+  @spec apply_edit(t(), group_id() | :untracked, non_neg_integer(), binary(), binary()) :: t()
+  defp apply_edit(prov, group, start, removed, inserted) do
     removed_bytes = byte_size(removed)
 
     if start + removed_bytes > size(prov) do
@@ -132,21 +198,27 @@ defmodule Minga.Buffer.Provenance do
         |> replace_inside_run(group_id, author, start, removed, inserted_bytes)
         |> renumber_when_deep()
         |> remember_fresh()
+        |> settle_changes()
 
       true ->
         prov = prov |> split_at(start) |> split_at(start + removed_bytes)
         following = run_starting_at(prov.tree, start)
         preceding = preceding_run(prov.tree, following)
-        left = live_before(prov.tree, start)
-        {prov, last, consumed} = delete_from(prov, group_id, following, removed, 0, {nil, []})
-        right = if removed_bytes > 0, do: run_starting_at(prov.tree, start)
+
+        change =
+          if inserted_bytes > 0 and removed_bytes > 0 and group_id != nil, do: prov.next_change
+
+        {prov, {killed, replaced, pulled}} =
+          delete_from(prov, group_id, change, following, removed, 0, {[], [], []})
+
+        {prov, made_by} = open_change(prov, change, replaced, pulled, author)
 
         prov
-        |> mark_partial_overlap(group_id, left, following, last, right)
-        |> cover_replaced(group_id, consumed_groups(consumed, group_id), left, following, last)
-        |> insert_between(group_id, author, preceding, following, inserted_bytes)
+        |> consume(group_id, seeds(killed), fn _change, made -> any_live(made) end)
+        |> insert_between(group_id, author, preceding, following, inserted_bytes, made_by)
         |> renumber_when_deep()
         |> remember_fresh()
+        |> settle_changes()
     end
   end
 
@@ -170,14 +242,17 @@ defmodule Minga.Buffer.Provenance do
         :each -> false
       end
 
-    if batch?,
-      do: edit_in_one_pass(prov, group, changes),
-      else:
-        changes
-        |> Enum.reverse()
-        |> Enum.reduce(prov, fn {start, removed, inserted}, acc ->
-          edit(acc, group, start, removed, inserted)
-        end)
+    edited =
+      if batch?,
+        do: edit_in_one_pass(prov, group, changes),
+        else:
+          changes
+          |> Enum.reverse()
+          |> Enum.reduce(prov, fn {start, removed, inserted}, acc ->
+            apply_edit(acc, group, start, removed, inserted)
+          end)
+
+    traced(edited, {:edit_all, group, changes})
   end
 
   @doc """
@@ -190,19 +265,19 @@ defmodule Minga.Buffer.Provenance do
   @spec revert(t(), group_id(), Document.t()) ::
           {:ok, Document.t(), non_neg_integer() | nil, t()} | {:error, :invalid_utf8}
   def revert(%__MODULE__{} = prov, id, %Document{} = document),
-    do: set_applied(prov, id, false, document)
+    do: prov |> set_applied(id, false, document) |> traced_flip([id], false)
 
   @doc "Unapplies every group in `ids` together, in one pass over the document. See `revert/3`."
   @spec revert_all(t(), [group_id()], Document.t()) ::
           {:ok, Document.t(), non_neg_integer() | nil, t()} | {:error, :invalid_utf8}
   def revert_all(%__MODULE__{} = prov, ids, %Document{} = document) when is_list(ids),
-    do: set_applied_all(prov, ids, false, document)
+    do: prov |> set_applied_all(ids, false, document) |> traced_flip(ids, false)
 
   @doc "Applies a reverted group again and returns the document with its text. See `revert/3`."
   @spec reapply(t(), group_id(), Document.t()) ::
           {:ok, Document.t(), non_neg_integer() | nil, t()} | {:error, :invalid_utf8}
   def reapply(%__MODULE__{} = prov, id, %Document{} = document),
-    do: set_applied(prov, id, true, document)
+    do: prov |> set_applied(id, true, document) |> traced_flip([id], true)
 
   @doc """
   Returns the key of an applied group that is not yours and deleted text this group wrote or removed after this group did, or `nil`.
@@ -216,9 +291,9 @@ defmodule Minga.Buffer.Provenance do
     do: blocker(prov, id, fn author, _key -> author != :you end)
 
   @doc """
-  Returns the key of an applied group that `blocks?` accepts and that deleted text this group wrote or removed after this group did, or `nil`.
+  Returns the key of an applied group that `blocks?` accepts and that itself deleted text this group wrote or removed after this group did, or `nil`.
 
-  `blocks?` receives the deleting group's author and key. `blocker/2` counts every group that is not yours; a reject counts the groups of other tasks.
+  Only text this group wrote, or deleted while it was visible, counts, and only a deletion that is not a cover: it rewrote that text. A tombstone this group only swept (it lay strictly inside the group's deleted range) is bookkeeping, not text the group removed. A deletion a cover added (the group consumed a replacement, and the text that replacement replaced went with it) never blocks. `blocks?` receives the deleting group's author and key. `blocker/2` counts every group that is not yours; a reject counts the groups of other tasks.
   """
   @spec blocker(t(), group_id(), (author(), group_key() -> boolean())) :: group_key() | nil
   def blocker(%__MODULE__{groups: groups, tree: tree}, id, blocks?)
@@ -227,9 +302,32 @@ defmodule Minga.Buffer.Provenance do
     |> :gb_sets.to_list()
     |> Enum.find_value(fn run_id ->
       {:ok, run, _offset} = RunTree.fetch(tree, run_id)
-      run |> later_deleters(id) |> Enum.find_value(&blocking_key(groups, &1, id, blocks?))
+      run_blocker(run, id, groups, blocks?)
     end)
   end
+
+  @spec run_blocker(
+          Run.t(),
+          group_id(),
+          %{group_id() => Group.t()},
+          (author(), group_key() -> boolean())
+        ) :: group_key() | nil
+  defp run_blocker(run, id, groups, blocks?) do
+    if removed_by?(run, id) do
+      run
+      |> later_deleters(id)
+      |> Enum.reject(&(&1 in run.covered_by))
+      |> Enum.find_value(&blocking_key(groups, &1, id, blocks?))
+    end
+  end
+
+  # Whether `id` wrote the run or deleted it while it was visible. Sweeping it as a tombstone inside a range, or covering
+  # it with a consumed replacement, never makes a group the one who removed it.
+  @spec removed_by?(Run.t(), group_id()) :: boolean()
+  defp removed_by?(%Run{group: id}, id), do: true
+
+  defp removed_by?(run, id),
+    do: id in run.deletions and id not in run.covered_by and id not in run.swept_by
 
   @doc """
   Returns every applied group not yours that deleted text group `id` wrote or removed after it did, as group ids.
@@ -277,9 +375,7 @@ defmodule Minga.Buffer.Provenance do
       run
       |> run_groups()
       |> Enum.filter(&MapSet.member?(ids, &1))
-      |> Enum.find_value(fn id ->
-        run |> later_deleters(id) |> Enum.find_value(&blocking_key(prov.groups, &1, id, blocks?))
-      end)
+      |> Enum.find_value(&run_blocker(run, &1, prov.groups, blocks?))
     end)
   end
 
@@ -305,15 +401,22 @@ defmodule Minga.Buffer.Provenance do
   An applied group's text becomes permanent and keeps its author; the text it deleted is dropped. An unapplied group's text is dropped and it no longer counts as a deletion of anyone's text. Use it when a group leaves every history: your oldest undo step falls off the stack, your redo steps are replaced by a new edit, or a Minga step is reverted for good.
   """
   @spec discard(t(), group_id()) :: t()
-  def discard(%__MODULE__{} = prov, id) do
+  def discard(%__MODULE__{} = prov, id), do: prov |> discard_one(id) |> traced({:discard, [id]})
+
+  @spec discard_one(t(), group_id()) :: t()
+  defp discard_one(prov, id) do
     {group, groups} = Map.pop!(prov.groups, id)
     marked = Map.get(prov.overlap_runs, id, [])
-    prov = settle_overlaps(%{prov | groups: groups}, id, group)
+
+    prov =
+      %{prov | groups: groups} |> settle_overlaps(id, group) |> settle_group_marks(%{id => group})
 
     group.runs
     |> :gb_sets.to_list()
     |> Enum.reduce(prov, fn run_id, prov -> settle_run(prov, run_id, %{id => group}) end)
     |> refresh_runs(marked)
+    |> settle_owners(%{id => group})
+    |> settle_changes()
   end
 
   # Settled marks can change whether a run is a draft; the runs are refreshed once the group is gone everywhere.
@@ -387,6 +490,11 @@ defmodule Minga.Buffer.Provenance do
   def overlapping_groups(%__MODULE__{} = prov, ids) when is_list(ids) do
     members = MapSet.new(ids)
 
+    faulted =
+      if Map.has_key?(prov.faults, :all) or Enum.any?(ids, &Map.has_key?(prov.faults, &1)),
+        do: [{{:permanent, :inconsistent}, 0}],
+        else: []
+
     ids
     |> Enum.flat_map(fn id -> :gb_sets.to_list(Map.fetch!(prov.groups, id).runs) end)
     |> Enum.uniq()
@@ -398,8 +506,55 @@ defmodule Minga.Buffer.Provenance do
           counts?(prov.groups, members, overlap),
           do: {overlap, offset}
     end)
+    |> Enum.concat(
+      for id <- ids,
+          overlap <- Map.get(prov.group_marks, id, []),
+          counts?(prov.groups, members, overlap),
+          do: {overlap, group_offset(prov, id)}
+    )
+    |> Enum.concat(faulted)
     |> Enum.uniq_by(&elem(&1, 0))
   end
+
+  @doc """
+  Returns whether a replacement record was found missing or inconsistent. Every reject is then refused, as `{:permanent, :inconsistent}` in `overlapping_groups/2`, so no reject guesses; the owner logs it.
+  """
+  @spec faulted?(t()) :: boolean()
+  def faulted?(%__MODULE__{faults: faults}), do: faults != %{}
+
+  @doc """
+  Returns every replacement record as plain data, for tests: the locators it made and replaced, and the replacements it pulls and that pull it.
+  """
+  @spec change_records(t()) :: %{
+          Change.id() => %{
+            made: [Locator.t()],
+            replaced: [Locator.t()],
+            pulls: [Change.id()],
+            pulled_by: [Change.id()],
+            owner: Change.owner()
+          }
+        }
+  def change_records(%__MODULE__{changes: changes}) do
+    Map.new(changes, fn {id, change} ->
+      {id,
+       %{
+         made: :gb_sets.to_list(change.made),
+         replaced: :gb_sets.to_list(change.replaced),
+         pulls: :gb_sets.to_list(change.pulls),
+         pulled_by: :gb_sets.to_list(change.pulled_by),
+         owner: change.owner
+       }}
+    end)
+  end
+
+  @doc "Returns the replacement records with no made runs left, by the group that owns them, for tests."
+  @spec owned_changes(t()) :: %{group_id() => [Change.id()]}
+  def owned_changes(%__MODULE__{owned: owned}),
+    do: Map.new(owned, fn {group, changes} -> {group, Enum.sort(changes)} end)
+
+  @doc "Returns the id the next replacement record will get."
+  @spec next_change(t()) :: Change.id()
+  def next_change(%__MODULE__{next_change: next_change}), do: next_change
 
   @spec counts?(%{group_id() => Group.t()}, MapSet.t(group_id()), Run.overlap()) :: boolean()
   defp counts?(_groups, _members, {:permanent, _key}), do: true
@@ -476,9 +631,12 @@ defmodule Minga.Buffer.Provenance do
   def discard_all(%__MODULE__{} = prov, ids) when is_list(ids) do
     touched = Enum.reduce(ids, 0, &(:gb_sets.size(Map.fetch!(prov.groups, &1).runs) + &2))
 
-    if touched * 8 > RunTree.count(prov.tree),
-      do: discard_in_one_pass(prov, ids),
-      else: Enum.reduce(ids, prov, &discard(&2, &1))
+    discarded =
+      if touched * 8 > RunTree.count(prov.tree),
+        do: discard_in_one_pass(prov, ids),
+        else: Enum.reduce(ids, prov, &discard_one(&2, &1))
+
+    traced(discarded, {:discard, ids})
   end
 
   @doc "Returns how many runs the record holds, tombstones included, in O(1)."
@@ -558,6 +716,7 @@ defmodule Minga.Buffer.Provenance do
 
     kept_ids = MapSet.new(kept, & &1.id)
     dropped = Enum.reject(before, &MapSet.member?(kept_ids, &1.id))
+    prov = Enum.reduce(dropped, prov, &forget_changes(&2, &1))
     named_old = for run <- before, old in run_groups(run), do: run.id
     named_new = for run <- kept, new in run_groups(run), do: run.id
 
@@ -592,7 +751,8 @@ defmodule Minga.Buffer.Provenance do
         overlap_runs: Map.update(prov.overlap_runs, new, marked, &(marked ++ &1))
     }
 
-    {remove_when_empty(prov, old, new), length(before)}
+    prov = prov |> remove_when_empty(old, new) |> settle_changes() |> traced({:absorb, old, new})
+    {prov, length(before)}
   end
 
   # A small change to a large set goes one element at a time, O(m log k); a change about the size of the set rebuilds
@@ -619,10 +779,22 @@ defmodule Minga.Buffer.Provenance do
   defp relabel(run, old, new) do
     group = if run.group == old, do: new, else: run.group
 
+    # The merged step deleted the run directly when either step did.
+    direct? = Enum.any?([old, new], &removed_by?(%{run | group: nil}, &1))
+    swept? = old in run.swept_by or new in run.swept_by
+    swept_by = substitute(run.swept_by, old, new)
+    covered_by = substitute(run.covered_by, old, new)
+
+    # When one step swept the run and the other covered it, the merged step swept it: the sweep could block before the
+    # merge, and the merge must not change who blocks.
+    covered_by = if swept?, do: List.delete(covered_by, new), else: covered_by
+
     %{
       run
       | group: group,
         deletions: substitute(run.deletions, old, new),
+        covered_by: if(direct?, do: List.delete(covered_by, new), else: covered_by),
+        swept_by: if(direct?, do: List.delete(swept_by, new), else: swept_by),
         overlaps: substitute_marks(run.overlaps, old, new)
     }
   end
@@ -675,15 +847,15 @@ defmodule Minga.Buffer.Provenance do
 
       tree = Enum.reduce(marked, prov.tree, &rename_marks_in(&2, &1, old, new))
 
-      refresh_runs(
-        %{
-          prov
-          | tree: tree,
-            groups: Map.delete(prov.groups, old),
-            overlap_runs: Map.update(overlap_runs, new, marked, &(marked ++ &1))
-        },
-        marked
-      )
+      %{
+        prov
+        | tree: tree,
+          groups: Map.delete(prov.groups, old),
+          overlap_runs: Map.update(overlap_runs, new, marked, &(marked ++ &1))
+      }
+      |> refresh_runs(marked)
+      |> rename_group_marks(old, new)
+      |> rename_owner(old, new)
     else
       prov
     end
@@ -826,11 +998,18 @@ defmodule Minga.Buffer.Provenance do
     groups =
       if right, do: Enum.reduce(run_groups(run), groups, &add_run(&2, &1, right.id)), else: groups
 
-    %{prov | tree: RunTree.insert(tree, dead), groups: groups}
-    |> index_overlaps(dead)
-    |> index_overlaps(right)
-    |> mark_deleted(group_id, dead, removed)
-    |> insert_between(group_id, author, left, dead, inserted_bytes)
+    change = if inserted_bytes > 0, do: prov.next_change
+
+    {prov, replaced, pulled} =
+      %{prov | tree: RunTree.insert(tree, dead), groups: groups}
+      |> index_overlaps(dead)
+      |> index_overlaps(right)
+      |> index_changes(dead)
+      |> index_changes(right)
+      |> replace_run(group_id, change, dead, removed, true)
+
+    {prov, made_by} = open_change(prov, change, replaced, pulled, author)
+    insert_between(prov, group_id, author, left, dead, inserted_bytes, made_by)
   end
 
   @spec grow_run_at(t(), non_neg_integer(), pos_integer()) :: t()
@@ -839,9 +1018,22 @@ defmodule Minga.Buffer.Provenance do
     %{prov | tree: RunTree.update(prov.tree, %{run | bytes: run.bytes + bytes})}
   end
 
+  # Only text with no replacement record grows: a replacement's own text stays its own run, so a later deletion can tell
+  # whether all of it is gone.
   @spec extendable?(Run.t() | nil, group_id() | nil, author()) :: boolean()
-  defp extendable?(%Run{live: true, deletions: [], group: group, author: author}, group, author),
-    do: true
+  defp extendable?(
+         %Run{
+           live: true,
+           deletions: [],
+           group: group,
+           author: author,
+           made_by: nil,
+           replaced_by: []
+         },
+         group,
+         author
+       ),
+       do: true
 
   defp extendable?(_run, _group_id, _author), do: false
 
@@ -856,7 +1048,10 @@ defmodule Minga.Buffer.Provenance do
         right = %{run | id: right_id, bytes: run_start + run.bytes - offset}
         tree = prov.tree |> RunTree.update(left) |> RunTree.insert(right)
         groups = Enum.reduce(run_groups(right), prov.groups, &add_run(&2, &1, right_id))
-        index_overlaps(%{prov | tree: tree, groups: groups}, right)
+
+        %{prov | tree: tree, groups: groups}
+        |> index_overlaps(right)
+        |> index_changes(right)
 
       _boundary_or_end ->
         prov
@@ -876,117 +1071,517 @@ defmodule Minga.Buffer.Provenance do
   defp preceding_run(tree, %Run{id: id}), do: RunTree.previous(tree, id)
 
   # Kills the live runs that hold `removed`, starting at `run`, and marks the tombstones between them.
-  # Returns the last live run it killed, as it was before, and the live runs it killed.
+  # Returns the live runs it killed, as they were, the locators of the runs it marked and kept, which `change` (when
+  # not `nil`) now lists as replaced, and the replacements that made the runs it dropped.
   @spec delete_from(
           t(),
           group_id() | nil,
+          Change.id() | nil,
           Run.t() | nil,
           binary(),
           non_neg_integer(),
-          {Run.t() | nil, [Run.t()]}
+          {[Run.t()], [Locator.t()], [Change.id()]}
         ) ::
-          {t(), Run.t() | nil, [Run.t()]}
-  defp delete_from(prov, _group_id, _run, removed, consumed, {last, killed})
+          {t(), {[Run.t()], [Locator.t()], [Change.id()]}}
+  defp delete_from(prov, _group_id, _change, _run, removed, consumed, acc)
        when consumed == byte_size(removed),
-       do: {prov, last, killed}
+       do: {prov, acc}
 
-  defp delete_from(prov, group_id, %Run{live: true} = run, removed, consumed, {_last, killed}) do
+  defp delete_from(prov, group_id, change, %Run{} = run, removed, consumed, acc) do
+    # A dropped run's marks may have moved onto this one since it was looked up.
+    run = current(prov.tree, run)
     following = RunTree.next(prov.tree, run.id)
-    text = binary_part(removed, consumed, run.bytes)
+    {killed, replaced, pulled} = acc
 
-    prov
-    |> mark_deleted(group_id, run, text)
-    |> delete_from(group_id, following, removed, consumed + run.bytes, {run, [run | killed]})
+    {text, killed, consumed_after} =
+      if run.live,
+        do: {binary_part(removed, consumed, run.bytes), [run | killed], consumed + run.bytes},
+        else: {run.text, killed, consumed}
+
+    {prov, kept, makers} = replace_run(prov, group_id, change, run, text, run.live)
+    acc = {killed, kept ++ replaced, makers ++ pulled}
+    delete_from(prov, group_id, change, following, removed, consumed_after, acc)
   end
 
-  defp delete_from(prov, group_id, %Run{} = run, removed, consumed, acc) do
-    following = RunTree.next(prov.tree, run.id)
-
-    prov
-    |> mark_deleted(group_id, run, run.text)
-    |> delete_from(group_id, following, removed, consumed, acc)
-  end
-
-  # A deletion by another author that starts or ends strictly inside a Minga replacement cannot say which part of the
-  # replaced text it stands for, so a later reject of that replacement could not be exact. The replacement's tombstones
-  # record the deleting group in `overlaps`; while it is applied, the replacing group's reject is refused.
-  @spec mark_partial_overlap(
-          t(),
-          group_id() | nil,
-          Run.t() | nil,
-          Run.t() | nil,
-          Run.t() | nil,
-          Run.t() | nil
-        ) :: t()
-  defp mark_partial_overlap(prov, nil, _left, _first, _last, _right), do: prov
-  defp mark_partial_overlap(prov, _group_id, _left, _first, nil, _right), do: prov
-
-  defp mark_partial_overlap(prov, group_id, left, first, last, right) do
-    owner =
-      replacement_owner(
-        prov.groups,
-        group_id,
-        {left, first, runs_between(prov.tree, left, first)},
-        {last, right, runs_between(prov.tree, last, right)}
-      )
-
-    if owner,
-      do: mark_overlap_block(prov, group_id, owner, current_or_next(prov.tree, first.id)),
-      else: prov
-  end
-
-  # The run as it is now, or the one after it when the deletion dropped it.
-  @spec current_or_next(RunTree.t(), Locator.t()) :: Run.t() | nil
-  defp current_or_next(tree, id) do
-    case RunTree.fetch(tree, id) do
-      {:ok, run, _offset} -> run
-      :error -> RunTree.next(tree, id)
+  @spec current(RunTree.t(), Run.t()) :: Run.t()
+  defp current(tree, run) do
+    case RunTree.fetch(tree, run.id) do
+      {:ok, now, _offset} -> now
+      :error -> run
     end
   end
 
-  # The runs strictly between two runs, lazily, so a rule that stops at the first matching tombstone walks no further.
-  @spec runs_between(RunTree.t(), Run.t() | nil, Run.t() | nil) :: Enumerable.t()
-  defp runs_between(tree, %Run{} = before, %Run{id: later_id}) do
-    Stream.unfold(RunTree.next(tree, before.id), fn
-      %Run{id: id} = run when id < later_id -> {run, RunTree.next(tree, id)}
-      _later_or_end -> nil
+  # Marks one run in an edit's range dead (an untracked deletion, or one by the run's own writer, forgets it) and lists
+  # it under `change` when it stays.
+  # A run it drops names the replacement that made it instead, which `change` then pulls.
+  @spec replace_run(t(), group_id() | nil, Change.id() | nil, Run.t(), binary(), boolean()) ::
+          {t(), [Locator.t()], [Change.id()]}
+  defp replace_run(prov, group_id, change, run, text, visible?) do
+    case deleted(run, group_id, text) do
+      nil ->
+        {drop_run(prov, run), [], List.wrap(run.made_by)}
+
+      dead ->
+        dead = how_deleted(dead, run, group_id, visible?)
+
+        {dead, kept} =
+          if change,
+            do: {%{dead | replaced_by: [change | dead.replaced_by]}, [run.id]},
+            else: {dead, []}
+
+        {if(dead == run, do: prov, else: kill_run(prov, group_id, run, dead)), kept, []}
+    end
+  end
+
+  # Deleting visible text is direct: it clears any earlier cover or sweep by the group. Newly deleting a tombstone inside
+  # the range is a sweep.
+  @spec how_deleted(Run.t(), Run.t(), group_id(), boolean()) :: Run.t()
+  defp how_deleted(dead, _run, group_id, true),
+    do: %{
+      dead
+      | covered_by: List.delete(dead.covered_by, group_id),
+        swept_by: List.delete(dead.swept_by, group_id)
+    }
+
+  defp how_deleted(dead, run, group_id, false) do
+    if group_id in run.deletions,
+      do: dead,
+      else: %{dead | swept_by: [group_id | dead.swept_by]}
+  end
+
+  # The record of a replacement whose edit marked `replaced` and dropped runs made by `pulled`. An edit that can neither
+  # cover nor mark gets none: it replaced nothing, pulls nothing and is no Minga step's. Returns the id its text names.
+  @spec open_change(t(), Change.id() | nil, [Locator.t()], [Change.id()], author()) ::
+          {t(), Change.id() | nil}
+  defp open_change(prov, nil, _replaced, _pulled, _author), do: {prov, nil}
+
+  defp open_change(prov, change, replaced, pulled, author) do
+    if replaced == [] and pulled == [] and not minga?(author) do
+      {prov, nil}
+    else
+      record = %Change{replaced: :gb_sets.from_list(replaced)}
+      prov = %{prov | changes: Map.put(prov.changes, change, record), next_change: change + 1}
+      {pulled |> Enum.uniq() |> Enum.reduce(prov, &pull(&2, change, &1)), change}
+    end
+  end
+
+  # ── Replacements ────────────────────────────────────────────────────
+  #
+  # An edit that inserted text and marked earlier text dead has a record (`Change`): the runs it made and the runs it
+  # replaced. A deletion consumes a replacement when none of its made runs stays live; the replaced text then goes
+  # with it, and every replacement whose text that covered is examined in turn, each once. A replacement that keeps
+  # live text was only partly consumed: when it is another author's Minga step, its runs get an overlap mark, so its
+  # reject is refused until that deletion is undone. Nothing is inferred from where tombstones sit.
+
+  # The replacements whose live text an edit killed, each once.
+  @spec seeds([Run.t()]) :: [Change.id()]
+  defp seeds(killed),
+    do: for(%Run{made_by: change} <- Enum.reverse(killed), change != nil, uniq: true, do: change)
+
+  @spec any_live([Run.t()]) :: :partial | :whole
+  defp any_live(made), do: if(Enum.any?(made, & &1.live), do: :partial, else: :whole)
+
+  @typep consumption :: (Change.id(), [Run.t()] -> :partial | :whole)
+
+  # Covers what the replacements in `seeds` replaced, and what they reach in turn, for a deletion by `group_id`.
+  # `consumption` says whether a replacement keeps live text as of this edit. Costs the records and runs it reaches.
+  @spec consume(t(), group_id() | nil, [Change.id()], consumption()) :: t()
+  defp consume(prov, group_id, seeds, consumption),
+    do: consume_each(prov, group_id, seeds, MapSet.new(seeds), consumption)
+
+  @spec consume_each(t(), group_id() | nil, [Change.id()], MapSet.t(), consumption()) :: t()
+  defp consume_each(prov, _group_id, [], _seen, _consumption), do: prov
+
+  defp consume_each(prov, group_id, [change | rest], seen, consumption) do
+    {prov, reached} = consume_change(prov, group_id, change, consumption)
+    reached = reached |> Enum.uniq() |> Enum.reject(&MapSet.member?(seen, &1))
+    consume_each(prov, group_id, reached ++ rest, Enum.into(reached, seen), consumption)
+  end
+
+  @spec consume_change(t(), group_id() | nil, Change.id(), consumption()) :: {t(), [Change.id()]}
+  defp consume_change(prov, group_id, change, consumption) do
+    with {:ok, record} <- Map.fetch(prov.changes, change),
+         {:ok, made} <- fetch_runs(prov.tree, record.made) do
+      owner = owner_of(record, made)
+
+      cond do
+        is_integer(owner) and not Map.has_key?(prov.groups, owner) ->
+          {fault(prov, :all), []}
+
+        # A change carries its replacement only while it is applied.
+        is_integer(owner) and not Map.fetch!(prov.groups, owner).applied ->
+          {prov, []}
+
+        consumption.(change, made) == :partial ->
+          {mark_consumed_part(prov, group_id, owner, made), []}
+
+        true ->
+          cover(prov, group_id, record)
+      end
+    else
+      :error -> {fault(prov, :all), []}
+    end
+  end
+
+  # The group a change belongs to: the writer of its first made run, or the owner it kept once they were all gone.
+  # `nil` is permanent text, which counts as applied.
+  @spec owner_of(Change.t(), [Run.t()]) :: group_id() | nil
+  defp owner_of(%Change{owner: :runs}, [first | _rest]), do: first.group
+  defp owner_of(%Change{owner: owner}, _made) when is_integer(owner), do: owner
+  defp owner_of(_record, _made), do: nil
+
+  @spec fetch_runs(RunTree.t(), :gb_sets.set(Locator.t())) :: {:ok, [Run.t()]} | :error
+  defp fetch_runs(tree, ids) do
+    ids
+    |> :gb_sets.to_list()
+    |> Enum.reduce_while({:ok, []}, fn id, {:ok, runs} ->
+      case RunTree.fetch(tree, id) do
+        {:ok, run, _offset} -> {:cont, {:ok, [run | runs]}}
+        :error -> {:halt, :error}
+      end
+    end)
+    |> then(fn
+      {:ok, runs} -> {:ok, Enum.reverse(runs)}
+      :error -> :error
     end)
   end
 
-  defp runs_between(_tree, _before, _later), do: []
+  # Marks every run of a partly consumed replacement when the deleter is another author than its Minga step.
+  @spec mark_consumed_part(t(), group_id() | nil, group_id() | nil, [Run.t()]) :: t()
+  defp mark_consumed_part(prov, group_id, owner, made) do
+    if group_id != nil and owner != nil and foreign_owner?(prov.groups, owner, group_id),
+      do: Enum.reduce(made, prov, &put_mark(&2, owner, group_id, &1)),
+      else: prov
+  end
 
-  # Walks forward from the first deleted run over the deleted text, the rest of the replacement (the owner's live text
-  # and the deleter's own text inside it) to the owner's tombstones, and marks that contiguous block. The walk costs the
-  # deletion and the replacement.
-  @spec mark_overlap_block(t(), group_id(), group_id(), Run.t() | nil) :: t()
-  defp mark_overlap_block(prov, _group_id, _owner, nil), do: prov
+  # Deletes every dead run the replacement replaced, and returns the replacements that made those runs and the ones it
+  # pulls. A live run stays: a cover never changes the document.
+  @spec cover(t(), group_id() | nil, Change.t()) :: {t(), [Change.id()]}
+  defp cover(prov, group_id, record) do
+    record.replaced
+    |> :gb_sets.to_list()
+    |> Enum.reduce({prov, :gb_sets.to_list(record.pulls)}, fn run_id, {prov, reached} ->
+      case RunTree.fetch(prov.tree, run_id) do
+        {:ok, %Run{live: false} = run, _offset} ->
+          {cover_run(prov, group_id, run), List.wrap(run.made_by) ++ reached}
 
-  defp mark_overlap_block(prov, group_id, owner, run) do
-    case overlap_step(prov.groups, group_id, owner, run) do
-      :tombstones -> mark_overlap_tombstones(prov, group_id, owner, run)
-      :pass -> mark_overlap_block(prov, group_id, owner, RunTree.next(prov.tree, run.id))
-      :stop -> prov
+        {:ok, _live, _offset} ->
+          {prov, reached}
+
+        :error ->
+          {fault(prov, :all), reached}
+      end
+    end)
+  end
+
+  # A cover deletes as an edit does (an untracked one, or one by the run's own writer, forgets the run), and records
+  # that the deletion is derived, so it never blocks.
+  @spec cover_run(t(), group_id() | nil, Run.t()) :: t()
+  defp cover_run(prov, group_id, run) do
+    case deleted(run, group_id, run.text) do
+      nil ->
+        drop_run(prov, run)
+
+      ^run ->
+        # A group that only swept the run and now covers it counts as covering it, in either order.
+        if group_id in run.swept_by,
+          do:
+            put_run(prov, run, %{
+              run
+              | swept_by: List.delete(run.swept_by, group_id),
+                covered_by: [group_id | run.covered_by]
+            }),
+          else: prov
+
+      dead ->
+        kill_run(prov, group_id, run, %{dead | covered_by: [group_id | dead.covered_by]})
     end
   end
 
-  @spec mark_overlap_tombstones(t(), group_id(), group_id(), Run.t() | nil) :: t()
-  defp mark_overlap_tombstones(prov, _group_id, _owner, nil), do: prov
+  # Something the records promise is missing. Every reject that could depend on it is refused from now on.
+  @spec fault(t(), group_id() | :all) :: t()
+  defp fault(prov, key), do: %{prov | faults: Map.put(prov.faults, key, true)}
 
-  defp mark_overlap_tombstones(prov, group_id, owner, run) do
-    following = RunTree.next(prov.tree, run.id)
+  # Lists a new run under the replacement that made it and every replacement that marked it.
+  @spec index_changes(t(), Run.t() | nil) :: t()
+  defp index_changes(prov, nil), do: prov
 
-    case tombstone_step(run, owner) do
-      :mark ->
-        prov
-        |> add_overlap(group_id, owner, run)
-        |> mark_overlap_tombstones(group_id, owner, following)
+  defp index_changes(prov, run) do
+    prov = update_change(prov, run.made_by, &%{&1 | made: :gb_sets.add(run.id, &1.made)})
 
-      :pass ->
-        mark_overlap_tombstones(prov, group_id, owner, following)
+    Enum.reduce(run.replaced_by, prov, fn change, prov ->
+      update_change(prov, change, &%{&1 | replaced: :gb_sets.add(run.id, &1.replaced)})
+    end)
+  end
 
-      :stop ->
+  @spec update_change(t(), Change.id() | nil, (Change.t() -> Change.t())) :: t()
+  defp update_change(prov, nil, _fun), do: prov
+
+  defp update_change(prov, change, fun) do
+    case prov.changes do
+      %{^change => record} -> %{prov | changes: %{prov.changes | change => fun.(record)}}
+      _missing -> fault(prov, :all)
+    end
+  end
+
+  # A dropped run leaves its replacements' sets. When it linked a replacement that marked it (`p`) to the one that
+  # made it (`q`), `p` pulls `q` from now on: consuming `p` still reaches `q`.
+  @spec forget_changes(t(), Run.t()) :: t()
+  defp forget_changes(prov, run) do
+    prov = update_change(prov, run.made_by, &%{&1 | made: :gb_sets.delete_any(run.id, &1.made)})
+    prov = keep_owner(prov, run)
+
+    prov =
+      Enum.reduce(run.replaced_by, prov, fn change, prov ->
+        update_change(prov, change, &%{&1 | replaced: :gb_sets.delete_any(run.id, &1.replaced)})
+      end)
+
+    link_dropped(prov, run)
+  end
+
+  # What a dropped run leaves behind once it is out of every set: its records are looked at again when the operation
+  # settles, and the replacements that marked it pull the one that made it.
+  @spec link_dropped(t(), Run.t()) :: t()
+  defp link_dropped(prov, run) do
+    prov = keep_owner(prov, run)
+    made_by = run.made_by
+    prov = %{prov | stale: List.wrap(made_by) ++ run.replaced_by ++ prov.stale}
+
+    if made_by == nil,
+      do: prov,
+      else: Enum.reduce(run.replaced_by, prov, &pull(&2, &1, made_by))
+  end
+
+  # When `run` was the last made run of its record, the record keeps the run's group as its owner.
+  @spec keep_owner(t(), Run.t()) :: t()
+  defp keep_owner(prov, %Run{made_by: nil}), do: prov
+
+  defp keep_owner(prov, %Run{made_by: change} = run) do
+    case prov.changes do
+      %{^change => %Change{owner: :runs} = record} ->
+        if :gb_sets.is_empty(record.made), do: own(prov, change, record, run.group), else: prov
+
+      _owned_or_gone ->
         prov
     end
+  end
+
+  @spec pull(t(), Change.id(), Change.id()) :: t()
+  defp pull(prov, same, same), do: prov
+
+  defp pull(prov, puller, pulled) do
+    prov
+    |> update_change(puller, &%{&1 | pulls: :gb_sets.add(pulled, &1.pulls)})
+    |> update_change(pulled, &%{&1 | pulled_by: :gb_sets.add(puller, &1.pulled_by)})
+  end
+
+  # Retires the replacements an operation left with nothing to do. One with no made runs left is consumed for good:
+  # every replacement that pulls it takes over what it replaced and pulls. One
+  # with nothing replaced, nothing pulled and no Minga step to mark is inert: its runs forget it.
+  @spec settle_changes(t()) :: t()
+  defp settle_changes(%__MODULE__{stale: []} = prov), do: prov
+
+  defp settle_changes(prov), do: retire(%{prov | stale: []}, Enum.uniq(prov.stale))
+
+  @spec retire(t(), [Change.id()]) :: t()
+  defp retire(prov, []), do: prov
+
+  defp retire(prov, [change | rest]) do
+    {prov, more} =
+      case prov.changes do
+        %{^change => record} -> retire_one(prov, change, record)
+        _gone -> {prov, []}
+      end
+
+    retire(prov, more ++ rest)
+  end
+
+  @spec retire_one(t(), Change.id(), Change.t()) :: {t(), [Change.id()]}
+  defp retire_one(prov, change, record) do
+    linked = :gb_sets.to_list(record.pulls) ++ :gb_sets.to_list(record.pulled_by)
+
+    cond do
+      # Nothing reaches it, or reaching it does nothing: it has no text to mark and nothing to cover or pull.
+      :gb_sets.is_empty(record.made) and
+          (:gb_sets.is_empty(record.pulled_by) or
+             (:gb_sets.is_empty(record.replaced) and :gb_sets.is_empty(record.pulls))) ->
+        {remove_change(prov, change, record), linked}
+
+      :gb_sets.is_empty(record.made) ->
+        {prov, []}
+
+      :gb_sets.is_empty(record.replaced) and :gb_sets.is_empty(record.pulls) and
+          inert_change?(prov, record) ->
+        prov = clear_made(prov, record.made)
+        {remove_change(prov, change, record), :gb_sets.to_list(record.pulled_by)}
+
+      true ->
+        {prov, []}
+    end
+  end
+
+  # Forgets a record: its runs stop naming it, and the records it pulls or that pull it stop linking it.
+  @spec remove_change(t(), Change.id(), Change.t()) :: t()
+  defp remove_change(prov, change, record) do
+    prov = disown(prov, change, record.owner)
+
+    tree =
+      record.replaced
+      |> :gb_sets.to_list()
+      |> Enum.reduce(prov.tree, fn run_id, tree ->
+        case RunTree.fetch(tree, run_id) do
+          {:ok, run, _offset} ->
+            RunTree.update(tree, %{run | replaced_by: List.delete(run.replaced_by, change)})
+
+          :error ->
+            tree
+        end
+      end)
+
+    prov = %{prov | tree: tree, changes: Map.delete(prov.changes, change)}
+
+    prov =
+      record.pulls
+      |> :gb_sets.to_list()
+      |> Enum.reduce(prov, fn pulled, prov ->
+        update_known(prov, pulled, &%{&1 | pulled_by: :gb_sets.delete_any(change, &1.pulled_by)})
+      end)
+
+    record.pulled_by
+    |> :gb_sets.to_list()
+    |> Enum.reduce(prov, fn puller, prov ->
+      update_known(prov, puller, &%{&1 | pulls: :gb_sets.delete_any(change, &1.pulls)})
+    end)
+  end
+
+  # Like `update_change/3`, for links whose other end may already be gone in the same retirement.
+  @spec update_known(t(), Change.id(), (Change.t() -> Change.t())) :: t()
+  defp update_known(prov, change, fun) do
+    case prov.changes do
+      %{^change => record} -> %{prov | changes: %{prov.changes | change => fun.(record)}}
+      _gone -> prov
+    end
+  end
+
+  # A record whose made runs are all gone keeps the group that made them, listed under that group so compaction and
+  # discard can find it.
+  @spec own(t(), Change.id(), Change.t(), group_id() | nil) :: t()
+  defp own(prov, change, record, group) do
+    owner = group || :permanent
+    prov = %{prov | changes: %{prov.changes | change => %{record | owner: owner}}}
+
+    if is_integer(owner),
+      do: %{
+        prov
+        | owned: Map.update(prov.owned, owner, MapSet.new([change]), &MapSet.put(&1, change))
+      },
+      else: prov
+  end
+
+  @spec disown(t(), Change.id(), Change.owner()) :: t()
+  defp disown(prov, change, owner) when is_integer(owner) do
+    case prov.owned do
+      %{^owner => changes} ->
+        rest = MapSet.delete(changes, change)
+
+        owned =
+          if MapSet.size(rest) == 0,
+            do: Map.delete(prov.owned, owner),
+            else: %{prov.owned | owner => rest}
+
+        %{prov | owned: owned}
+
+      _none ->
+        prov
+    end
+  end
+
+  defp disown(prov, _change, _owner), do: prov
+
+  # Compaction removed `old` into `new`: the records it owned belong to `new`.
+  @spec rename_owner(t(), group_id(), group_id()) :: t()
+  defp rename_owner(prov, old, new) do
+    case Map.pop(prov.owned, old) do
+      {nil, _owned} ->
+        prov
+
+      {changes, owned} ->
+        records =
+          Enum.reduce(changes, prov.changes, fn change, records ->
+            Map.update!(records, change, &%{&1 | owner: new})
+          end)
+
+        %{
+          prov
+          | changes: records,
+            owned: Map.update(owned, new, changes, &MapSet.union(&1, changes))
+        }
+    end
+  end
+
+  # Discarded groups that owned records: one discarded unapplied never happened, so its records go with every link to
+  # them; one discarded applied is permanent, so its records count as applied from now on.
+  @spec settle_owners(t(), %{group_id() => Group.t()}) :: t()
+  defp settle_owners(prov, discarded) do
+    Enum.reduce(discarded, prov, fn {id, group}, prov ->
+      case Map.pop(prov.owned, id) do
+        {nil, _owned} ->
+          prov
+
+        {changes, owned} ->
+          prov = %{prov | owned: owned}
+          Enum.reduce(changes, prov, &settle_owned(&2, &1, group))
+      end
+    end)
+  end
+
+  @spec settle_owned(t(), Change.id(), Group.t()) :: t()
+  defp settle_owned(prov, change, %Group{applied: true}),
+    do: update_known(prov, change, &%{&1 | owner: :permanent})
+
+  defp settle_owned(prov, change, %Group{applied: false}) do
+    case prov.changes do
+      %{^change => record} ->
+        prov = remove_change(prov, change, %{record | owner: :permanent})
+
+        %{
+          prov
+          | stale:
+              :gb_sets.to_list(record.pulls) ++ :gb_sets.to_list(record.pulled_by) ++ prov.stale
+        }
+
+      _gone ->
+        prov
+    end
+  end
+
+  # A record that can neither cover nor mark: its runs belong to no Minga step.
+  @spec inert_change?(t(), Change.t()) :: boolean()
+  defp inert_change?(prov, record) do
+    case first_run(prov.tree, record.made) do
+      %Run{group: nil} -> true
+      %Run{group: group} -> not minga?(Map.get(prov.groups, group, %{author: nil}).author)
+      nil -> false
+    end
+  end
+
+  @spec minga?(author()) :: boolean()
+  defp minga?({:minga, _task}), do: true
+  defp minga?(_author), do: false
+
+  @spec clear_made(t(), :gb_sets.set(Locator.t())) :: t()
+  defp clear_made(prov, made) do
+    tree =
+      made
+      |> :gb_sets.to_list()
+      |> Enum.reduce(prov.tree, fn run_id, tree ->
+        case RunTree.fetch(tree, run_id) do
+          {:ok, run, _offset} -> RunTree.update(tree, %{run | made_by: nil})
+          :error -> tree
+        end
+      end)
+
+    %{prov | tree: tree}
   end
 
   # A new piece of a run with overlap marks is listed under each marking group, so discarding it finds the piece.
@@ -1002,64 +1597,113 @@ defmodule Minga.Buffer.Provenance do
 
   defp index_overlaps(prov, _run), do: prov
 
-  @spec add_overlap(t(), group_id(), group_id(), Run.t()) :: t()
-  defp add_overlap(prov, group_id, owner, run) do
-    case with_overlap(run, owner, group_id) do
+  @spec put_mark(t(), group_id(), group_id() | {:permanent, term()}, Run.t()) :: t()
+  defp put_mark(prov, owner, overlapper, run) do
+    case with_overlap(run, owner, overlapper) do
       ^run ->
         prov
 
       marked ->
+        overlap_runs =
+          if is_integer(overlapper),
+            do: Map.update(prov.overlap_runs, overlapper, [run.id], &[run.id | &1]),
+            else: prov.overlap_runs
+
         refresh_draft(
-          %{
-            prov
-            | tree: RunTree.update(prov.tree, marked),
-              overlap_runs: Map.update(prov.overlap_runs, group_id, [run.id], &[run.id | &1])
-          },
+          %{prov | tree: RunTree.update(prov.tree, marked), overlap_runs: overlap_runs},
           run,
           marked
         )
     end
   end
 
-  # A deletion that consumes another group's replacement also deletes the text that replacement replaced.
-  # A replacement is one edit's inserted text followed by the tombstones it made, so the deletion consumes one when it
-  # ends with that group's text and does not start inside the same replacement. It then marks that replacement's
-  # tombstones, which are the dead runs right after it that the group deleted.
-  @spec cover_replaced(
-          t(),
-          group_id() | nil,
-          [group_id()],
-          Run.t() | nil,
-          Run.t() | nil,
-          Run.t() | nil
-        ) :: t()
-  defp cover_replaced(prov, _group_id, [], _left, _first, _last), do: prov
+  # A dropped run's overlap marks move to its owner group, so the refusal they stand for outlives the run. Keeping them
+  # on the group, not on another run, leaves every other run as it was whatever order runs drop in.
+  @spec transfer_marks(t(), [Run.overlap()]) :: t()
+  defp transfer_marks(prov, marks) do
+    Enum.reduce(marks, prov, fn {owner, overlapper}, prov ->
+      if is_map_key(prov.groups, owner) do
+        group_marks =
+          Map.update(prov.group_marks, owner, [overlapper], &Enum.uniq([overlapper | &1]))
 
-  defp cover_replaced(prov, group_id, consumed, left, first, last) do
-    if inside_replacement?(left, consumed, runs_between(prov.tree, left, first)),
-      do: prov,
-      else: cover_tombstones(prov, group_id, consumed, RunTree.next(prov.tree, last.id))
+        %{prov | group_marks: group_marks}
+      else
+        prov
+      end
+    end)
   end
 
-  # The replacement's tombstones are contiguous, so the walk ends at the first run that is live, inserted by the same
-  # group, or not deleted by it. The cost is the size of that replacement, however many tombstones lie beyond it.
-  @spec cover_tombstones(t(), group_id() | nil, [group_id()], Run.t() | nil) :: t()
-  defp cover_tombstones(prov, _group_id, _consumed, nil), do: prov
+  # Marks a group keeps for itself once discarded groups are final: about a discarded owner they go, and a discarded
+  # overlapper's settle as on runs.
+  @spec settle_group_marks(t(), %{group_id() => Group.t()}) :: t()
+  defp settle_group_marks(%__MODULE__{group_marks: group_marks} = prov, _discarded)
+       when group_marks == %{},
+       do: prov
 
-  defp cover_tombstones(prov, group_id, consumed, run) do
-    following = RunTree.next(prov.tree, run.id)
+  defp settle_group_marks(prov, discarded) do
+    group_marks =
+      for {owner, overlaps} <- Map.drop(prov.group_marks, Map.keys(discarded)),
+          settled = settle_kept_marks(overlaps, discarded),
+          settled != [],
+          into: %{},
+          do: {owner, settled}
 
-    case cover_step(run, consumed) do
-      :cover ->
-        prov
-        |> mark_deleted(group_id, run, run.text)
-        |> cover_tombstones(group_id, consumed, following)
+    %{prov | group_marks: group_marks}
+  end
 
-      :pass ->
-        cover_tombstones(prov, group_id, consumed, following)
+  @spec settle_kept_marks([group_id() | {:permanent, term()}], %{group_id() => Group.t()}) :: [
+          group_id() | {:permanent, term()}
+        ]
+  defp settle_kept_marks(overlaps, discarded) do
+    overlaps
+    |> Enum.flat_map(fn
+      id when is_map_key(discarded, id) ->
+        List.wrap(settled_overlap(id, Map.fetch!(discarded, id)))
 
-      :stop ->
-        prov
+      overlap ->
+        [overlap]
+    end)
+    |> Enum.uniq()
+  end
+
+  @spec rename_group_marks(t(), group_id(), group_id()) :: t()
+  defp rename_group_marks(%__MODULE__{group_marks: group_marks} = prov, _old, _new)
+       when group_marks == %{},
+       do: prov
+
+  defp rename_group_marks(prov, old, new) do
+    group_marks =
+      Enum.reduce(prov.group_marks, %{}, fn {owner, overlaps}, acc ->
+        renamed =
+          overlaps
+          |> Enum.map(&rename(&1, old, new))
+          |> Enum.reject(&(&1 == new and owner in [old, new]))
+
+        Map.update(acc, rename(owner, old, new), renamed, &Enum.uniq(renamed ++ &1))
+      end)
+
+    %{prov | group_marks: Map.reject(group_marks, fn {_owner, overlaps} -> overlaps == [] end)}
+  end
+
+  # Where a group's marks kept on the group point: the first of its runs, or the start of the document.
+  @spec group_offset(t(), group_id()) :: non_neg_integer()
+  defp group_offset(prov, id) do
+    with %Group{runs: runs} <- Map.get(prov.groups, id),
+         false <- :gb_sets.is_empty(runs),
+         {:ok, _run, offset} <- RunTree.fetch(prov.tree, :gb_sets.smallest(runs)) do
+      offset
+    else
+      _none -> 0
+    end
+  end
+
+  @spec first_run(RunTree.t(), :gb_sets.set(Locator.t())) :: Run.t() | nil
+  defp first_run(tree, ids) do
+    with false <- :gb_sets.is_empty(ids),
+         {:ok, run, _offset} <- RunTree.fetch(tree, :gb_sets.smallest(ids)) do
+      run
+    else
+      _none -> nil
     end
   end
 
@@ -1110,10 +1754,21 @@ defmodule Minga.Buffer.Provenance do
       end)
 
     # Renumbering keeps order, so each group's sorted locators stay sorted.
+    rename = fn set -> set |> :gb_sets.to_list() |> Enum.map(&Map.fetch!(renamed, &1)) end
+
     groups =
       Map.new(prov.groups, fn {id, group} ->
-        locators = group.runs |> :gb_sets.to_list() |> Enum.map(&Map.fetch!(renamed, &1))
-        {id, %{group | runs: :gb_sets.from_ordset(locators)}}
+        {id, %{group | runs: :gb_sets.from_ordset(rename.(group.runs))}}
+      end)
+
+    changes =
+      Map.new(prov.changes, fn {id, change} ->
+        {id,
+         %{
+           change
+           | made: :gb_sets.from_ordset(rename.(change.made)),
+             replaced: :gb_sets.from_ordset(rename.(change.replaced))
+         }}
       end)
 
     index_drafts(
@@ -1121,6 +1776,7 @@ defmodule Minga.Buffer.Provenance do
         prov
         | tree: tree,
           groups: groups,
+          changes: changes,
           deep: false,
           recent: [],
           fresh: [],
@@ -1128,25 +1784,6 @@ defmodule Minga.Buffer.Provenance do
       },
       runs
     )
-  end
-
-  @spec live_before(RunTree.t(), non_neg_integer()) :: Run.t() | nil
-  defp live_before(_tree, 0), do: nil
-
-  defp live_before(tree, offset) do
-    {run, _start} = RunTree.at_offset(tree, offset - 1)
-    run
-  end
-
-  # An untracked deletion forgets the text.
-  # A group deleting its own text leaves a run that can never be live again, so it is dropped too.
-  @spec mark_deleted(t(), group_id() | nil, Run.t(), binary()) :: t()
-  defp mark_deleted(prov, group_id, run, text) do
-    case deleted(run, group_id, text) do
-      nil -> drop_run(prov, run)
-      ^run -> prov
-      killed -> kill_run(prov, group_id, run, killed)
-    end
   end
 
   @spec kill_run(t(), group_id(), Run.t(), Run.t()) :: t()
@@ -1168,18 +1805,19 @@ defmodule Minga.Buffer.Provenance do
           author(),
           Run.t() | nil,
           Run.t() | nil,
-          non_neg_integer()
+          non_neg_integer(),
+          Change.id() | nil
         ) :: t()
-  defp insert_between(prov, _group_id, _author, _preceding, _following, 0), do: prov
+  defp insert_between(prov, _group_id, _author, _preceding, _following, 0, _made_by), do: prov
 
-  defp insert_between(prov, group_id, author, preceding, following, bytes) do
-    if extendable?(preceding, group_id, author) do
+  defp insert_between(prov, group_id, author, preceding, following, bytes, made_by) do
+    if made_by == nil and extendable?(preceding, group_id, author) do
       %{prov | tree: RunTree.update(prov.tree, %{preceding | bytes: preceding.bytes + bytes})}
     else
       {id, prov} = allocate(prov, preceding, following)
-      run = %Run{id: id, bytes: bytes, author: author, group: group_id}
+      run = %Run{id: id, bytes: bytes, author: author, group: group_id, made_by: made_by}
       groups = if group_id, do: add_run(prov.groups, group_id, id), else: prov.groups
-      %{prov | tree: RunTree.insert(prov.tree, run), groups: groups}
+      index_changes(%{prov | tree: RunTree.insert(prov.tree, run), groups: groups}, run)
     end
   end
 
@@ -1329,7 +1967,7 @@ defmodule Minga.Buffer.Provenance do
 
     case settle(run, discarded) do
       nil ->
-        drop_run(prov, run)
+        drop_run(prov, %{run | overlaps: settled_run(run, discarded).overlaps})
 
       %Run{group: nil} = settled when run.group != nil ->
         prov |> put_run(run, settled) |> coalesce(run_id)
@@ -1345,11 +1983,12 @@ defmodule Minga.Buffer.Provenance do
   defp discard_in_one_pass(prov, ids) do
     {discarded, groups} = Map.split(prov.groups, ids)
 
-    runs =
+    {runs, dropped} =
       prov.tree
       |> RunTree.to_list()
-      |> Enum.reduce([], fn run, acc -> settle_in_pass(run, discarded, acc) end)
-      |> Enum.reverse()
+      |> Enum.reduce({[], []}, fn run, acc -> settle_in_pass(run, discarded, acc) end)
+
+    runs = Enum.reverse(runs)
 
     members =
       runs
@@ -1365,22 +2004,37 @@ defmodule Minga.Buffer.Provenance do
         {id, %{group | runs: :gb_sets.from_ordset(Map.get(members, id, []))}}
       end)
 
-    index_drafts(
-      %{
-        prov
-        | tree: RunTree.from_list(runs),
-          groups: groups,
-          overlap_runs: Map.drop(prov.overlap_runs, ids)
-      },
-      runs
-    )
+    prov =
+      index_drafts(
+        %{
+          prov
+          | tree: RunTree.from_list(runs),
+            groups: groups,
+            changes: changes_from(prov.changes, runs, dropped),
+            overlap_runs: Map.drop(prov.overlap_runs, ids)
+        },
+        runs
+      )
+
+    dropped
+    |> Enum.reverse()
+    |> Enum.reduce(settle_group_marks(prov, discarded), fn run, acc ->
+      acc |> link_dropped(run) |> transfer_marks(run.overlaps)
+    end)
+    |> settle_owners(discarded)
+    |> settle_changes()
   end
 
-  @spec settle_in_pass(Run.t(), %{group_id() => Group.t()}, [Run.t()]) :: [Run.t()]
-  defp settle_in_pass(run, discarded, acc) do
+  # Settles one run into the runs kept so far, or lists it as dropped with its settled marks.
+  @spec settle_in_pass(Run.t(), %{group_id() => Group.t()}, {[Run.t()], [Run.t()]}) ::
+          {[Run.t()], [Run.t()]}
+  defp settle_in_pass(run, discarded, {kept, dropped}) do
     case settle(run, discarded) do
-      nil -> acc
-      settled -> merge_permanent(settled, acc)
+      nil ->
+        {kept, [%{run | overlaps: settled_run(run, discarded).overlaps} | dropped]}
+
+      settled ->
+        {merge_permanent(settled, kept), dropped}
     end
   end
 
@@ -1419,7 +2073,9 @@ defmodule Minga.Buffer.Provenance do
   end
 
   @spec permanent?(Run.t() | nil) :: boolean()
-  defp permanent?(%Run{live: true, group: nil, deletions: []}), do: true
+  defp permanent?(%Run{live: true, group: nil, deletions: [], made_by: nil, replaced_by: []}),
+    do: true
+
   defp permanent?(_run), do: false
 
   # ── Editing in one pass ─────────────────────────────────────────────
@@ -1429,8 +2085,18 @@ defmodule Minga.Buffer.Provenance do
   # changes. `left` holds the runs before the boundary nearest first, `right` the runs after it in order, and `pos` the
   # live offset of the boundary.
 
-  @typep pass :: %{left: [Run.t()], right: [Run.t()], pos: non_neg_integer()}
+  @typep pass :: %{
+           left: [Run.t()],
+           right: [Run.t()],
+           pos: non_neg_integer(),
+           next_change: pos_integer(),
+           steps: [{[Change.id()], Change.id() | nil, [Change.id()]}],
+           dropped: [Run.t()]
+         }
 
+  # The pass applies every deletion and insertion and numbers the replacements as `edit/5` would. The covers come
+  # after the rebuild, one change at a time in the order they were applied, with each replacement's live text taken
+  # as of that change: text a change applied later kills was still live.
   @spec edit_in_one_pass(t(), group_id() | :untracked, [{non_neg_integer(), binary(), binary()}]) ::
           t()
   defp edit_in_one_pass(prov, group, changes) do
@@ -1439,76 +2105,135 @@ defmodule Minga.Buffer.Provenance do
     pass = %{
       left: prov.tree |> RunTree.to_list() |> Enum.reverse(),
       right: [],
-      pos: RunTree.size(prov.tree)
+      pos: RunTree.size(prov.tree),
+      next_change: prov.next_change,
+      steps: [],
+      dropped: []
     }
 
-    %{left: left, right: right} =
+    pass =
       changes
       |> Enum.reverse()
-      |> Enum.reduce(pass, &apply_in_pass(prov.groups, group_id, author, &1, &2))
+      |> Enum.reduce(pass, &apply_in_pass(group_id, author, &1, &2))
 
-    rebuild(prov, left |> Enum.reverse(right) |> merge_live_neighbours())
+    runs = pass.left |> Enum.reverse(pass.right) |> merge_live_neighbours()
+    rebuilt = rebuild(%{prov | next_change: pass.next_change}, runs, pass.dropped)
+
+    rebuilt =
+      Enum.reduce(pass.dropped, rebuilt, fn run, acc ->
+        acc |> link_dropped(run) |> transfer_marks(run.overlaps)
+      end)
+
+    ranges =
+      changes
+      |> Enum.map(fn {start, removed, _inserted} -> {start, start + byte_size(removed)} end)
+      |> List.to_tuple()
+
+    last = tuple_size(ranges) - 1
+
+    steps = Enum.reverse(pass.steps)
+
+    rebuilt =
+      Enum.reduce(steps, rebuilt, fn
+        {_seeds, nil, _pulled}, acc -> acc
+        {_seeds, change, pulled}, acc -> Enum.reduce(pulled, acc, &pull(&2, change, &1))
+      end)
+
+    steps
+    |> Enum.with_index()
+    |> Enum.reduce(rebuilt, fn {{seeds, _change, _pulled}, applied}, acc ->
+      consume(acc, group_id, seeds, &consumed_by(prov, ranges, last - applied, &1, &2))
+    end)
+    |> settle_changes()
   end
 
+  # Whether a replacement keeps live text once the changes from `index` to the last, in document order, are applied:
+  # its made runs as they were before the pass, less those changes' ranges.
+  @spec consumed_by(t(), tuple(), non_neg_integer(), Change.id(), [Run.t()]) :: :partial | :whole
+  defp consumed_by(before, ranges, index, change, _made) do
+    case before.changes do
+      %{^change => record} ->
+        live? =
+          record.made |> :gb_sets.to_list() |> Enum.any?(&live_after?(before, ranges, index, &1))
+
+        if live?, do: :partial, else: :whole
+
+      _made_in_this_pass ->
+        :partial
+    end
+  end
+
+  # Whether a run that was live before the pass keeps bytes outside the ranges from `index` on.
+  @spec live_after?(t(), tuple(), non_neg_integer(), Locator.t()) :: boolean()
+  defp live_after?(before, ranges, index, run_id) do
+    case RunTree.fetch(before.tree, run_id) do
+      {:ok, %Run{live: true} = run, offset} ->
+        not covered?(ranges, index, offset, offset + run.bytes)
+
+      _dead_or_gone ->
+        false
+    end
+  end
+
+  # Whether the ranges from `index` on, disjoint and in order, cover the bytes from `from` up to `to`.
+  @spec covered?(tuple(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: boolean()
+  defp covered?(ranges, index, from, to),
+    do:
+      covered_from(ranges, first_ending_after(ranges, index, tuple_size(ranges), from), from, to)
+
+  @spec first_ending_after(tuple(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp first_ending_after(ranges, low, high, offset) when low < high do
+    middle = div(low + high, 2)
+    {_start, stop} = elem(ranges, middle)
+
+    if stop > offset,
+      do: first_ending_after(ranges, low, middle, offset),
+      else: first_ending_after(ranges, middle + 1, high, offset)
+  end
+
+  defp first_ending_after(_ranges, low, _high, _offset), do: low
+
+  @spec covered_from(tuple(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          boolean()
+  defp covered_from(_ranges, _index, point, to) when point >= to, do: true
+
+  defp covered_from(ranges, index, point, to) when index < tuple_size(ranges) do
+    {start, stop} = elem(ranges, index)
+    if start > point, do: false, else: covered_from(ranges, index + 1, max(point, stop), to)
+  end
+
+  defp covered_from(_ranges, _index, _point, _to), do: false
+
   @spec apply_in_pass(
-          %{group_id() => Group.t()},
           group_id() | nil,
           author(),
           {non_neg_integer(), binary(), binary()},
           pass()
         ) :: pass()
-  defp apply_in_pass(groups, group_id, author, {start, removed, inserted}, pass) do
+  defp apply_in_pass(group_id, author, {start, removed, inserted}, pass) do
     pass = move_right_of(pass, start + byte_size(removed), removed != "")
     {segment, pass} = take_from(pass, start, [])
+    change = if inserted != "" and removed != "" and group_id != nil, do: pass.next_change
+    {deleted, dropped} = delete_segment(segment, group_id, removed, change)
+    pulled = for %Run{made_by: maker} <- dropped, maker != nil, uniq: true, do: maker
+    made_by = record_id(change, deleted, pulled, author)
 
-    right =
-      case segment do
-        [] -> pass.right
-        [_ | _] -> delete_in_pass(segment, groups, group_id, removed, pass)
-      end
+    # A record's runs name it only when it has one; an edit that gets none lists nothing.
+    deleted =
+      if change != nil and made_by == nil,
+        do: Enum.map(deleted, &unlist(&1, change)),
+        else: deleted
 
-    inserted_runs =
-      if inserted == "",
-        do: [],
-        else: [%Run{id: [0], bytes: byte_size(inserted), author: author, group: group_id}]
+    inserted_runs = inserted_runs(inserted, author, group_id, made_by)
 
-    %{pass | right: inserted_runs ++ right}
-  end
-
-  # Deletes the segment, then marks a partly deleted replacement and covers a consumed one, in `edit/5`'s order.
-  @spec delete_in_pass(
-          [Run.t(), ...],
-          %{group_id() => Group.t()},
-          group_id() | nil,
-          binary(),
-          pass()
-        ) :: [Run.t()]
-  defp delete_in_pass(segment, groups, group_id, removed, pass) do
-    {left_gap, left} = Enum.split_while(pass.left, &(not &1.live))
-    left = List.first(left)
-    left_between = Enum.reverse(left_gap)
-    [first | _] = segment
-    last = segment |> Enum.reverse() |> Enum.find(& &1.live)
-    deleted = delete_segment(segment, group_id, removed)
-
-    owner =
-      (group_id &&
-         replacement_owner(groups, group_id, {left, first, left_between}, {last, nil, []})) ||
-        (group_id && end_owner(groups, group_id, last, pass.right))
-
-    tail = mark_in_pass(deleted ++ pass.right, groups, group_id, owner)
-    {deleted, after_segment} = Enum.split(tail, length(deleted))
-    consumed = segment |> Enum.filter(& &1.live) |> consumed_groups(group_id)
-    deleted ++ cover_in_pass(after_segment, group_id, consumed, left, left_between)
-  end
-
-  # The owner when the deletion ends strictly inside a replacement; the live run after it is found only when needed.
-  @spec end_owner(%{group_id() => Group.t()}, group_id(), Run.t(), [Run.t()]) :: group_id() | nil
-  defp end_owner(_groups, _group_id, %Run{group: nil}, _right), do: nil
-
-  defp end_owner(groups, group_id, last, right) do
-    {right_gap, after_gap} = Enum.split_while(right, &(not &1.live))
-    replacement_owner(groups, group_id, {nil, nil, []}, {last, List.first(after_gap), right_gap})
+    %{
+      pass
+      | right: inserted_runs ++ deleted ++ pass.right,
+        next_change: if(made_by, do: made_by + 1, else: pass.next_change),
+        steps: [{seeds(Enum.filter(segment, & &1.live)), made_by, pulled} | pass.steps],
+        dropped: dropped ++ pass.dropped
+    }
   end
 
   # Moves the runs after `stop` to the right side, splitting a live run that crosses it. Tombstones right at `stop` stay
@@ -1562,77 +2287,52 @@ defmodule Minga.Buffer.Provenance do
 
   defp take_from(pass, _start, acc), do: {acc, pass}
 
-  @spec delete_segment([Run.t()], group_id() | nil, binary()) :: [Run.t()]
-  defp delete_segment(segment, group_id, removed) do
-    {runs, _consumed} =
-      Enum.flat_map_reduce(segment, 0, fn
-        %Run{live: true} = run, consumed ->
-          {List.wrap(deleted(run, group_id, binary_part(removed, consumed, run.bytes))),
-           consumed + run.bytes}
+  # The id an edit's inserted text names, as `open_change/5` decides: none when it could never cover, pull or mark.
+  @spec record_id(Change.id() | nil, [Run.t()], [Change.id()], author()) :: Change.id() | nil
+  defp record_id(nil, _deleted, _pulled, _author), do: nil
 
-        run, consumed ->
-          {List.wrap(deleted(run, group_id, run.text)), consumed}
+  defp record_id(change, deleted, pulled, author) do
+    if deleted != [] or pulled != [] or minga?(author), do: change
+  end
+
+  @spec inserted_runs(binary(), author(), group_id() | nil, Change.id() | nil) :: [Run.t()]
+  defp inserted_runs("", _author, _group_id, _made_by), do: []
+
+  defp inserted_runs(inserted, author, group_id, made_by),
+    do: [
+      %Run{id: [0], bytes: byte_size(inserted), author: author, group: group_id, made_by: made_by}
+    ]
+
+  # The segment's runs once deleted, each kept one listed under `change`, and the runs the deletion dropped.
+  @spec delete_segment([Run.t()], group_id() | nil, binary(), Change.id() | nil) ::
+          {[Run.t()], [Run.t()]}
+  defp delete_segment(segment, group_id, removed, change) do
+    {kept, dropped, _consumed} =
+      Enum.reduce(segment, {[], [], 0}, fn run, {kept, dropped, consumed} ->
+        {text, consumed} =
+          if run.live,
+            do: {binary_part(removed, consumed, run.bytes), consumed + run.bytes},
+            else: {run.text, consumed}
+
+        case deleted(run, group_id, text) do
+          nil ->
+            {kept, [run | dropped], consumed}
+
+          dead ->
+            dead = how_deleted(dead, run, group_id, run.live)
+            {[replaced_by(dead, change) | kept], dropped, consumed}
+        end
       end)
 
-    runs
+    {Enum.reverse(kept), dropped}
   end
 
-  @spec mark_in_pass([Run.t()], %{group_id() => Group.t()}, group_id() | nil, group_id() | nil) ::
-          [Run.t()]
-  defp mark_in_pass(runs, _groups, _group_id, nil), do: runs
+  @spec unlist(Run.t(), Change.id()) :: Run.t()
+  defp unlist(run, change), do: %{run | replaced_by: List.delete(run.replaced_by, change)}
 
-  defp mark_in_pass([run | rest] = runs, groups, group_id, owner) do
-    case overlap_step(groups, group_id, owner, run) do
-      :tombstones -> mark_tombstones_in_pass(runs, group_id, owner)
-      :pass -> [run | mark_in_pass(rest, groups, group_id, owner)]
-      :stop -> runs
-    end
-  end
-
-  defp mark_in_pass([], _groups, _group_id, _owner), do: []
-
-  @spec mark_tombstones_in_pass([Run.t()], group_id(), group_id()) :: [Run.t()]
-  defp mark_tombstones_in_pass([run | rest] = runs, group_id, owner) do
-    case tombstone_step(run, owner) do
-      :mark ->
-        [with_overlap(run, owner, group_id) | mark_tombstones_in_pass(rest, group_id, owner)]
-
-      :pass ->
-        [run | mark_tombstones_in_pass(rest, group_id, owner)]
-
-      :stop ->
-        runs
-    end
-  end
-
-  defp mark_tombstones_in_pass([], _group_id, _owner), do: []
-
-  @spec cover_in_pass([Run.t()], group_id() | nil, [group_id()], Run.t() | nil, [Run.t()]) :: [
-          Run.t()
-        ]
-  defp cover_in_pass(runs, _group_id, [], _left, _left_gap), do: runs
-
-  defp cover_in_pass(runs, group_id, consumed, left, left_gap) do
-    if inside_replacement?(left, consumed, left_gap),
-      do: runs,
-      else: cover_list(runs, group_id, consumed)
-  end
-
-  @spec cover_list([Run.t()], group_id() | nil, [group_id()]) :: [Run.t()]
-  defp cover_list([run | rest] = runs, group_id, consumed) do
-    case cover_step(run, consumed) do
-      :cover ->
-        List.wrap(deleted(run, group_id, run.text)) ++ cover_list(rest, group_id, consumed)
-
-      :pass ->
-        [run | cover_list(rest, group_id, consumed)]
-
-      :stop ->
-        runs
-    end
-  end
-
-  defp cover_list([], _group_id, _consumed), do: []
+  @spec replaced_by(Run.t(), Change.id() | nil) :: Run.t()
+  defp replaced_by(run, nil), do: run
+  defp replaced_by(run, change), do: %{run | replaced_by: [change | run.replaced_by]}
 
   # Neighbouring live runs of the same group and author with no deleters or marks are one run, as typing forward
   # makes them; the one-pass path then never holds more runs than the same edits made one at a time.
@@ -1642,7 +2342,8 @@ defmodule Minga.Buffer.Provenance do
     |> Enum.reduce([], fn
       %Run{live: true, deletions: [], overlaps: []} = run,
       [%Run{live: true, deletions: [], overlaps: []} = previous | rest]
-      when run.group == previous.group and run.author == previous.author ->
+      when run.group == previous.group and run.author == previous.author and
+             run.made_by == previous.made_by and run.replaced_by == previous.replaced_by ->
         [%{previous | bytes: previous.bytes + run.bytes} | rest]
 
       run, acc ->
@@ -1653,8 +2354,8 @@ defmodule Minga.Buffer.Provenance do
 
   # Gives every run an evenly spaced locator and rebuilds the tree, the groups' run sets, and both indexes from the
   # runs, in O(n).
-  @spec rebuild(t(), [Run.t()]) :: t()
-  defp rebuild(prov, runs) do
+  @spec rebuild(t(), [Run.t()], [Run.t()]) :: t()
+  defp rebuild(prov, runs, dropped) do
     runs =
       runs
       |> Enum.zip(Locator.even(length(runs)))
@@ -1688,6 +2389,7 @@ defmodule Minga.Buffer.Provenance do
         prov
         | tree: RunTree.from_list(runs),
           groups: groups,
+          changes: changes_from(prov.changes, runs, dropped),
           overlap_runs: overlap_runs,
           deep: false,
           recent: [],
@@ -1695,6 +2397,53 @@ defmodule Minga.Buffer.Provenance do
       },
       runs
     )
+  end
+
+  # The replacement records rebuilt from the runs' `made_by` and `replaced_by`, in O(n). Links between records come
+  # from dropped runs, not from the runs, so they carry over. A record that only links or only a dropped run names
+  # stays until the operation settles it.
+  @spec changes_from(%{Change.id() => Change.t()}, [Run.t()], [Run.t()]) :: %{
+          Change.id() => Change.t()
+        }
+  defp changes_from(previous, runs, dropped) do
+    {made, replaced} =
+      runs
+      |> Enum.reverse()
+      |> Enum.reduce({%{}, %{}}, fn run, {made, replaced} ->
+        made =
+          if run.made_by,
+            do: Map.update(made, run.made_by, [run.id], &[run.id | &1]),
+            else: made
+
+        replaced =
+          Enum.reduce(run.replaced_by, replaced, fn change, acc ->
+            Map.update(acc, change, [run.id], &[run.id | &1])
+          end)
+
+        {made, replaced}
+      end)
+
+    linked =
+      for {id, change} <- previous,
+          not :gb_sets.is_empty(change.pulls) or not :gb_sets.is_empty(change.pulled_by),
+          do: id
+
+    named = Enum.flat_map(dropped, &(List.wrap(&1.made_by) ++ &1.replaced_by))
+
+    (Map.keys(made) ++ Map.keys(replaced) ++ linked ++ named)
+    |> Enum.uniq()
+    |> Map.new(fn id ->
+      links = Map.get(previous, id, %Change{})
+
+      {id,
+       %Change{
+         made: :gb_sets.from_ordset(Map.get(made, id, [])),
+         replaced: :gb_sets.from_ordset(Map.get(replaced, id, [])),
+         pulls: links.pulls,
+         pulled_by: links.pulled_by,
+         owner: links.owner
+       }}
+    end)
   end
 
   # ── Rules shared by the per-run and one-pass paths ──────────────────
@@ -1717,102 +2466,16 @@ defmodule Minga.Buffer.Provenance do
   # Another author's Minga text, whose partial deletion needs an overlap mark.
   @spec foreign?(%{group_id() => Group.t()}, Run.t(), group_id()) :: boolean()
   defp foreign?(_groups, %Run{group: nil}, _group_id), do: false
+  defp foreign?(groups, %Run{group: group}, group_id), do: foreign_owner?(groups, group, group_id)
 
-  defp foreign?(groups, %Run{group: group}, group_id) do
-    author = Map.fetch!(groups, group).author
+  # Whether `owner` is a Minga step by another author than `group_id`.
+  @spec foreign_owner?(%{group_id() => Group.t()}, group_id(), group_id()) :: boolean()
+  defp foreign_owner?(groups, owner, group_id) do
+    author = Map.fetch!(groups, owner).author
     match?({:minga, _task}, author) and author != Map.fetch!(groups, group_id).author
   end
 
-  # The Minga group whose replacement a deletion by `group_id` starts or ends strictly inside, or `nil`.
-  # Each pair is two live runs with the runs between them.
-  # The first pair is the live run before the deletion and its first run; the second, its last live run and the live
-  # run after it.
-  # They belong to one replacement when both are the same foreign group's text and no tombstone of that group lies
-  # between them.
-  @spec replacement_owner(
-          %{group_id() => Group.t()},
-          group_id() | nil,
-          {Run.t() | nil, Run.t() | nil, Enumerable.t()},
-          {Run.t() | nil, Run.t() | nil, Enumerable.t()}
-        ) :: group_id() | nil
-  defp replacement_owner(groups, group_id, start_pair, end_pair) do
-    Enum.find_value([start_pair, end_pair], fn
-      {%Run{group: owner} = before, %Run{group: owner}, between} when owner != nil ->
-        if foreign?(groups, before, group_id) and not Enum.any?(between, &separates?(&1, owner)),
-          do: owner
-
-      _pair ->
-        nil
-    end)
-  end
-
-  # A deletion starts inside a replacement when the live text before it belongs to the same group and no tombstone of
-  # that group separates them; such a tombstone ends one replacement before the next begins.
-  @spec inside_replacement?(Run.t() | nil, [group_id()], Enumerable.t()) :: boolean()
-  defp inside_replacement?(%Run{group: owner}, consumed, between) when owner != nil do
-    owner in consumed and not Enum.any?(between, &separates?(&1, owner))
-  end
-
-  defp inside_replacement?(_left, _owner, _between), do: false
-
-  # A tombstone of `owner`'s that ends one of its replacements before the next begins.
-  @spec separates?(Run.t(), group_id()) :: boolean()
-  defp separates?(run, owner), do: owner in run.deletions and not inert?(run)
-
-  # A run a step both wrote and deleted, which compaction keeps only for another group's blocker. Every walk passes over
-  # it as if it were gone, as such text otherwise is.
-  @spec inert?(Run.t()) :: boolean()
-  defp inert?(%Run{group: nil}), do: false
-  defp inert?(%Run{group: group, deletions: deletions}), do: group in deletions
-
-  # The groups whose live text a deletion consumed, other than the deleter: their replacements go with it.
-  @spec consumed_groups([Run.t()], group_id() | nil) :: [group_id()]
-  defp consumed_groups(killed, group_id),
-    do:
-      for(%Run{group: group} <- killed, group != nil and group != group_id, uniq: true, do: group)
-
-  # One step of the cover walk after a deletion that consumed the live text of the groups in `consumed`: a tombstone
-  # one of them wrote or deleted belongs to their replacements and is deleted too (`:cover`). The replacements'
-  # tombstones are contiguous, so the walk stops at the first live run or tombstone of no consumed group, and costs
-  # only the replacements it covers.
-  @spec cover_step(Run.t(), [group_id()]) :: :cover | :pass | :stop
-  defp cover_step(run, consumed) do
-    cond do
-      inert?(run) -> :pass
-      run.live -> :stop
-      run.group in consumed or Enum.any?(run.deletions, &(&1 in consumed)) -> :cover
-      true -> :stop
-    end
-  end
-
-  # One step of the overlap walk from the first deleted run: the owner's tombstones start the marked block, tombstones
-  # of others and the owner's or the deleter's own live text are passed, and anything else ends the walk unmarked.
-  @spec overlap_step(%{group_id() => Group.t()}, group_id(), group_id(), Run.t()) ::
-          :tombstones | :pass | :stop
-  defp overlap_step(_groups, _group_id, owner, %Run{live: false} = run),
-    do: if(separates?(run, owner), do: :tombstones, else: :pass)
-
-  defp overlap_step(_groups, _group_id, owner, %Run{group: owner}), do: :pass
-  defp overlap_step(_groups, _group_id, _owner, %Run{group: nil}), do: :stop
-
-  defp overlap_step(groups, group_id, _owner, %Run{group: group}) do
-    if Map.fetch!(groups, group).author == Map.fetch!(groups, group_id).author,
-      do: :pass,
-      else: :stop
-  end
-
-  # One step through the owner's tombstones once the walk reached them: each is marked, inert runs are passed, and the
-  # first run that is not one of them ends the block.
-  @spec tombstone_step(Run.t(), group_id()) :: :mark | :pass | :stop
-  defp tombstone_step(run, owner) do
-    cond do
-      inert?(run) -> :pass
-      not run.live and owner in run.deletions and run.group != owner -> :mark
-      true -> :stop
-    end
-  end
-
-  @spec with_overlap(Run.t(), group_id(), group_id()) :: Run.t()
+  @spec with_overlap(Run.t(), group_id(), group_id() | {:permanent, term()}) :: Run.t()
   defp with_overlap(run, owner, group_id) do
     if {owner, group_id} in run.overlaps,
       do: run,
@@ -1881,6 +2544,8 @@ defmodule Minga.Buffer.Provenance do
       run
       | group: group,
         deletions: Enum.reject(run.deletions, &Map.has_key?(discarded, &1)),
+        covered_by: Enum.reject(run.covered_by, &Map.has_key?(discarded, &1)),
+        swept_by: Enum.reject(run.swept_by, &Map.has_key?(discarded, &1)),
         overlaps: overlaps
     }
   end
@@ -1891,6 +2556,7 @@ defmodule Minga.Buffer.Provenance do
   defp put_run(prov, old, run),
     do: refresh_draft(%{prov | tree: RunTree.update(prov.tree, run)}, old, run)
 
+  # The run leaves every index; see `forget_changes/2`. Its overlap marks move to another run of their owner.
   @spec drop_run(t(), Run.t()) :: t()
   defp drop_run(prov, run) do
     groups = Enum.reduce(run_groups(run), prov.groups, &remove_run(&2, &1, run.id))
@@ -1901,6 +2567,8 @@ defmodule Minga.Buffer.Provenance do
         groups: groups,
         drafts: :gb_sets.delete_any({run.group, run.id}, prov.drafts)
     }
+    |> forget_changes(run)
+    |> transfer_marks(run.overlaps)
   end
 
   # A draft is a tombstone a Minga step wrote that a newer applied step of the same task deleted, with both applied:
@@ -1922,7 +2590,8 @@ defmodule Minga.Buffer.Provenance do
     case Map.fetch!(groups, owner) do
       %Group{applied: true, author: {:minga, task} = author} when task != :untasked ->
         run.deletions
-        |> Enum.filter(&(&1 > owner and newer_step?(Map.fetch!(groups, &1), author)))
+        # A group being discarded is already gone from the map; it is no partner.
+        |> Enum.filter(&(&1 > owner and newer_step?(Map.get(groups, &1), author)))
         |> Enum.min(fn -> nil end)
 
       _other ->
@@ -1950,7 +2619,7 @@ defmodule Minga.Buffer.Provenance do
       end
   end
 
-  @spec newer_step?(Group.t(), author()) :: boolean()
+  @spec newer_step?(Group.t() | nil, author()) :: boolean()
   defp newer_step?(%Group{applied: true, author: author}, author), do: true
   defp newer_step?(_group, _author), do: false
 

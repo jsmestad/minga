@@ -41,16 +41,25 @@ defmodule Minga.Test.UndoUnitModel do
 
       rewriters =
         for run <- runs,
-            run.group == group or group in run.deletions,
+            removed_by?(run, group),
             d <- later(run, group),
-            d != group,
+            d != group and d not in run.covered_by,
             applied?.(d),
             Map.fetch!(all, d).author != :you,
             uniq: true,
             do: d
 
+      kept = Map.get(provenance.group_marks, group, [])
+
       marks =
-        for run <- runs, group in run.deletions, {^group, overlap} <- run.overlaps, uniq: true do
+        for overlap <-
+              for(
+                run <- runs,
+                run.group == group or group in run.deletions,
+                {^group, o} <- run.overlaps,
+                do: o
+              ) ++ kept,
+            uniq: true do
           if is_integer(overlap), do: overlap, else: :permanent
         end
 
@@ -175,7 +184,13 @@ defmodule Minga.Test.UndoUnitModel do
         {task, Map.get(started, task, Enum.min(task_groups))}
       end)
 
-    facts = %{groups: groups, runs: runs, tasks: tasks, starts: starts}
+    facts = %{
+      groups: groups,
+      runs: runs,
+      tasks: tasks,
+      starts: starts,
+      group_marks: provenance.group_marks
+    }
 
     candidates =
       for {_task, task_groups} <- tasks,
@@ -220,8 +235,9 @@ defmodule Minga.Test.UndoUnitModel do
   # Tasks whose applied steps deleted text `group` wrote or removed, after it did.
   defp rewriter_tasks(facts, group, counts?) do
     for run <- facts.runs,
-        run.group == group or group in run.deletions,
+        removed_by?(run, group),
         deleter <- later(run, group),
+        deleter not in run.covered_by,
         deleter_group = Map.fetch!(facts.groups, deleter),
         deleter_group.applied and deleter_group.author != :you,
         task = task_of(deleter_group.key),
@@ -230,13 +246,24 @@ defmodule Minga.Test.UndoUnitModel do
         do: task
   end
 
+  # The group wrote the run or deleted it while it was visible; sweeping or covering it never removed it.
+  defp removed_by?(%{group: id}, id), do: true
+
+  defp removed_by?(run, id),
+    do: id in run.deletions and id not in run.covered_by and id not in run.swept_by
+
   defp later(%{group: id, deletions: deletions}, id), do: deletions
   defp later(run, id), do: Enum.take_while(run.deletions, &(&1 != id))
 
+  # Marks about the group, on its runs or kept by the group itself once their run was dropped.
   defp overlap_nodes(facts, group, reverted) do
-    for run <- facts.runs,
-        group in run.deletions,
-        {^group, overlap} <- run.overlaps,
+    on_runs =
+      for run <- facts.runs,
+          run.group == group or group in run.deletions,
+          {^group, overlap} <- run.overlaps,
+          do: overlap
+
+    for overlap <- on_runs ++ Map.get(facts.group_marks, group, []),
         node = overlap_node(facts, overlap, reverted),
         uniq: true,
         do: node

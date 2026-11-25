@@ -2643,6 +2643,14 @@ defmodule Minga.Buffer.Process do
       {:blocked, overlap, task, offset} ->
         {line, _column} = Position.from_point(state.document, offset)
 
+        if Provenance.faulted?(UndoHistory.provenance(state.undo_history)) do
+          Minga.Log.error(
+            :editor,
+            "Buffer history: a replacement record in #{display_name_from_state(state)} is inconsistent; " <>
+              "SPC a u refuses instead of guessing"
+          )
+        end
+
         log_to_messages(
           state,
           "#{task_label(task)} cannot be reverted exactly in #{display_name_from_state(state)}: " <>

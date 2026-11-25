@@ -62,6 +62,16 @@ defmodule Minga.Buffer.HistoryPerfTest do
     history |> UndoHistory.provenance() |> Provenance.run_count()
   end
 
+  # Replacement records against runs, and the record's memory per run in bytes (flat size of the whole provenance).
+  defp records(buffer) do
+    %{undo_history: history} = :sys.get_state(buffer)
+    provenance = UndoHistory.provenance(history)
+    records = provenance |> Provenance.change_records() |> map_size()
+    run_count = Provenance.run_count(provenance)
+    bytes = :erts_debug.flat_size(provenance) * :erlang.system_info(:wordsize)
+    {records, run_count, div(bytes, max(run_count, 1))}
+  end
+
   test "20 whole-file steps stay under the run budget, and every call afterwards stays fast" do
     buffer = start_supervised!({BufferProcess, content: file(12_000)}, id: make_ref())
 
@@ -77,6 +87,13 @@ defmodule Minga.Buffer.HistoryPerfTest do
 
     settled(buffer)
     assert runs(buffer) <= 25_000
+    {record_count, run_count, bytes_per_run} = records(buffer)
+
+    IO.puts(
+      "\n[records] records=#{record_count} runs=#{run_count} bytes_per_run=#{bytes_per_run}"
+    )
+
+    assert record_count <= run_count
 
     :ok = BufferProcess.move_to(buffer, {6000, 10})
 
@@ -143,7 +160,14 @@ defmodule Minga.Buffer.HistoryPerfTest do
       end
 
     runs = runs(buffer)
-    IO.puts("\n[back-to-back] steps_cpu_ms=#{inspect(times)} runs=#{runs}")
+    {record_count, _runs, bytes_per_run} = records(buffer)
+
+    IO.puts(
+      "\n[back-to-back] steps_cpu_ms=#{inspect(times)} runs=#{runs} records=#{record_count} " <>
+        "bytes_per_run=#{bytes_per_run}"
+    )
+
+    assert record_count <= runs
     assert runs <= 75_000
     assert Enum.max(times) < 2_000
   end

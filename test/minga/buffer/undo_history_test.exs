@@ -6,6 +6,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
   alias Minga.Buffer.Provenance
   alias Minga.Buffer.UndoHistory
   alias Minga.Buffer.UndoPatch
+  alias Minga.Test.ProvenanceModel
   alias Minga.Test.UndoUnitModel, as: UnitModel
 
   # Recording calls take a monotonic timestamp, so tests drive the coalescing clock instead of sleeping.
@@ -85,7 +86,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
 
     test "only your last 1000 groups stay undoable, and older text keeps its author" do
       world =
-        Enum.reduce(1..1100, world(""), fn n, world ->
+        Enum.reduce(1..1100, world("", shadow: false), fn n, world ->
           edit(world, :user, 0, 0, "x", at: @t0 + n * @window)
         end)
 
@@ -366,7 +367,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
     test "8000 Minga steps rewriting one word stay fast though their tombstones pile up there" do
       {micros, world} =
         :timer.tc(fn ->
-          Enum.reduce(1..8_000, world("let x = foo;\n"), fn n, world ->
+          Enum.reduce(1..8_000, world("let x = foo;\n", shadow: false), fn n, world ->
             old = if n == 1, do: 3, else: byte_size("w#{n - 1}")
             edit(world, {:minga, "task-1", "s#{n}"}, 8, old, "w#{n}")
           end)
@@ -377,7 +378,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
     end
 
     test "8000 of your retypes over a word Minga replaced stay fast" do
-      world = edit(world("let x = foo;\n"), @step_one, 8, 3, "bar")
+      world = edit(world("let x = foo;\n", shadow: false), @step_one, 8, 3, "bar")
 
       {micros, world} =
         :timer.tc(fn ->
@@ -464,11 +465,13 @@ defmodule Minga.Buffer.UndoHistoryTest do
       world = edit(world, :user, 2, 1, "", at: @t0 + 10 * @window)
       assert text(world) == "xbdy\n"
 
-      assert {:ok, restore, history, %{reverted: 1, dropped: [_offset]}} =
+      # Your deletion of "Q" consumed your replacement of "c", and the cover reached the step's change while "b" and
+      # "d" are live: it marks the step, so that edit reverts with the step too, and both leave your undo.
+      assert {:ok, restore, history, %{reverted: 1, dropped: [_first, _second]}} =
                UndoHistory.undo_agent_session(world.history, world.version, world.doc)
 
       assert Document.content(restore.document) == "xay\n"
-      assert UndoHistory.undo_count(history) == 1
+      assert UndoHistory.undo_count(history) == 0
     end
 
     test "an edit of yours inside Minga's change with text still visible holds the task" do
@@ -729,7 +732,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
           |> Enum.with_index()
           |> Enum.map_join(" ", fn {w, i} -> if i in rewritten, do: String.upcase(w), else: w end)
 
-        world = world(line) |> edit(@step_one, 0, byte_size(line) - 1, new_line)
+        world = world(line, shadow: false) |> edit(@step_one, 0, byte_size(line) - 1, new_line)
         {before, [target | _rest]} = new_line |> String.split(" ") |> Enum.split(your_word)
         at = before |> Enum.map(&(byte_size(&1) + 1)) |> Enum.sum()
         removed = if partial, do: max(byte_size(target) - 1, 1), else: byte_size(target)
@@ -739,8 +742,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
     end
 
     # Compaction changes no outcome reachable at the moment it runs: the document, your undo, and every task's reject.
-    # Later edits may resolve differently, because the merged step's replacement now spans the absorbed one; the
-    # compacted world then keeps every invariant on its own (the model checks in `unwind/1`).
+    # The property below checks every later outcome too.
     property "compaction slices reach 75% of the budget or leave no drafts, and change no outcome at that moment" do
       check all(
               commands <- StreamData.list_of(command(), max_length: 40),
@@ -771,6 +773,37 @@ defmodule Minga.Buffer.UndoHistoryTest do
       end
 
       IO.puts("\n[compaction] history slices run: #{Process.get(:slices, 0)}")
+    end
+
+    # Compaction is invisible to everything after it: the same history with compaction off and with a small budget (so
+    # slices and inline merges run) gives the same document and the same outcome of every u, redo, SPC a u and reject.
+    property "compaction changes no later outcome of u, redo, SPC a u or a reject" do
+      check all(
+              commands <-
+                StreamData.list_of(
+                  StreamData.one_of([
+                    command(),
+                    StreamData.constant(:press),
+                    StreamData.constant(:reject)
+                  ]),
+                  max_length: 40
+                ),
+              budget <- StreamData.integer(4..12),
+              slice <- StreamData.integer(1..6),
+              max_runs: runs(300)
+            ) do
+        plain = world("abc\ndef\n", run_budget: 1_000_000, shadow: false)
+        compacted = world("abc\ndef\n", run_budget: budget, shadow: false)
+
+        Enum.reduce(commands, {plain, compacted}, fn command, {plain, compacted} ->
+          {plain_outcome, plain} = twin_apply(command, plain)
+          {compacted_outcome, compacted} = twin_apply(command, compacted)
+          compacted = compact_fully(compacted, slice)
+          assert compacted_outcome == plain_outcome
+          assert text(compacted) == text(plain)
+          {plain, compacted}
+        end)
+      end
     end
 
     # The final review: steps that arrive faster than slices run left merged runs that no later slice could reach.
@@ -815,6 +848,27 @@ defmodule Minga.Buffer.UndoHistoryTest do
           world
         end)
       end
+    end
+
+    # The void case found by the never-drop oracle: your replacement of "a" was undone and then discarded by your next
+    # edit, so it never happened, and "Q" never stood for "a". Rejecting t1 brings "a" back.
+    test "a later edit over text of a discarded undo step stands for nothing it replaced" do
+      world =
+        world("pab\n")
+        |> edit(:user, 1, 1, "X")
+        |> undo!()
+        |> edit(:user, 1, 0, "m", at: @t0 + 2 * @window)
+        |> edit({:minga, "t1", "s"}, 2, 1, "")
+        |> edit(:user, 0, 2, "Q", at: @t0 + 4 * @window)
+        |> edit({:minga, "t2", "s"}, 0, 1, "")
+
+      assert text(world) == "b\n"
+      assert UndoHistory.redo_count(world.history) == 0
+
+      assert {:ok, restore, _history, _count} =
+               UndoHistory.reject_task(world.history, {:minga, "t1"}, world.version, world.doc)
+
+      assert Document.content(restore.document) == "ab\n"
     end
 
     # Round 4's DL2 and the reused-step counterexample: a step that resumes after your edit opens a new group.
@@ -874,26 +928,6 @@ defmodule Minga.Buffer.UndoHistoryTest do
       {:done, world} = reject_all(world)
       %{task_ticks: ticks} = world.history
       assert ticks == %{}
-    end
-
-    # Round 4's MB case, pinned. After a compaction, later edits may in general resolve differently than without it
-    # for superseded drafts (the moduledoc says so); with merges that never skip a group, this case now agrees.
-    test "the round-4 compaction case: your undo after later edits agrees with and without compaction" do
-      ops = [
-        {:user, 413, 2, "éb\nx"},
-        {:minga, "t2", "s1", 818, 1, "xéa"},
-        {:untracked, 574, 2, "x"},
-        {:minga, "t2", "s2", 357, 3, ""},
-        {:untracked, 34, 2, "axéé"}
-      ]
-
-      for init <- ["", "abc\ndef\n", "héllo 😀\nwörld\n", "x", "a\r\nb\r\n"] do
-        {plain, doc, version} = coarse_ops(init, ops, false)
-        {compacted, ^doc, ^version} = coarse_ops(init, ops, true)
-
-        assert outcome_of(UndoHistory.undo(plain, version, Document.new(doc))) ==
-                 outcome_of(UndoHistory.undo(compacted, version, Document.new(doc)))
-      end
     end
 
     test "compaction reports a history still over budget once, when no drafts are left" do
@@ -960,9 +994,49 @@ defmodule Minga.Buffer.UndoHistoryTest do
 
   # ── Helpers ─────────────────────────────────────────────────────────
 
-  # A buffer as the history sees it: history, document and version, edited like the buffer process does.
-  defp world(text, opts \\ []),
-    do: %{history: UndoHistory.new(Document.new(text), opts), doc: Document.new(text), version: 0}
+  # A buffer as the history sees it: history, document and version, edited like the buffer process does. The shadow is
+  # the never-drop model replaying every provenance operation the history makes; see `shadow/1`.
+  # The model costs O(n) per byte, so the long benchmarks run without it (`shadow: false`).
+  defp world(text, opts \\ []) do
+    {shadow?, opts} = Keyword.pop(opts, :shadow, true)
+    history = UndoHistory.new(Document.new(text), opts)
+
+    if shadow? do
+      %{
+        history: %{history | provenance: Provenance.start_trace(history.provenance)},
+        doc: Document.new(text),
+        version: 0,
+        shadow: %{model: ProvenanceModel.new(text), merged: false}
+      }
+    else
+      %{history: history, doc: Document.new(text), version: 0, shadow: nil}
+    end
+  end
+
+  # Replays what the history did into the never-drop model. Until a compaction merges two steps, the model's text is the
+  # document after every operation.
+  defp shadow(%{shadow: nil} = world), do: world
+
+  defp shadow(world) do
+    case Provenance.take_trace(world.history.provenance) do
+      {nil, _provenance} ->
+        %{world | shadow: nil}
+
+      {operations, provenance} ->
+        model = ProvenanceModel.replay(world.shadow.model, operations)
+        merged = world.shadow.merged or Enum.any?(operations, &match?({:absorb, _old, _new}, &1))
+        Process.put(:shadow_skips, length(model.skipped))
+
+        unless merged, do: assert(ProvenanceModel.text(model) == text(world))
+        Process.put(:shadowed, Process.get(:shadowed, 0) + length(operations))
+
+        %{
+          world
+          | history: %{world.history | provenance: provenance},
+            shadow: %{model: model, merged: merged}
+        }
+    end
+  end
 
   defp edit(world, source, start, removed_bytes, inserted, opts \\ []) do
     at = Keyword.get(opts, :at, @t0)
@@ -980,7 +1054,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
     history = UndoHistory.before_change(history, nil)
 
     {:ok, doc} = Document.splice_byte_range(world.doc, start, removed_bytes, inserted, {0, 0})
-    %{world | history: history, doc: doc, version: world.version + 1}
+    shadow(%{world | history: history, doc: doc, version: world.version + 1})
   end
 
   defp step(world, :undo),
@@ -1006,7 +1080,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
 
   defp install(world, restore, history) do
     version = if restore.version == :advance, do: world.version + 1, else: restore.version
-    %{world | history: history, doc: restore.document, version: version}
+    shadow(%{world | history: history, doc: restore.document, version: version})
   end
 
   defp text(world), do: Document.content(world.doc)
@@ -1044,6 +1118,50 @@ defmodule Minga.Buffer.UndoHistoryTest do
     # Spaced past the coalescing window, so every edit of yours is a group of its own.
     edit(world, source, start, removed, inserted, at: @t0 + world.version * @window)
   end
+
+  # One operation and what it decided, with steps named by task: compaction may rename a step, never its task.
+  defp twin_apply(:press, world) do
+    case UndoHistory.undo_agent_session(world.history, world.version, world.doc) do
+      {:ok, restore, history, summary} ->
+        # A merged step counts once, so the number of steps reverted is not compared; the text after it is.
+        {{:pressed, summary.held != nil}, install(world, restore, history)}
+
+      {:blocked, overlap, task, _offset} ->
+        {{:held, overlap, task}, world}
+
+      other ->
+        {other, world}
+    end
+  end
+
+  defp twin_apply(:reject, world) do
+    %{task_ticks: ticks} = world.history
+
+    case ticks |> Map.keys() |> Enum.sort() do
+      [] ->
+        {:no_task, world}
+
+      [task | _rest] ->
+        case UndoHistory.reject_task(world.history, task, world.version, world.doc) do
+          {:ok, restore, history, _count} -> {{:rejected, task}, install(world, restore, history)}
+          {:blocked, {:overlaps, key}} -> {{:refused, task, task_name(key)}, world}
+          other -> {other, world}
+        end
+    end
+  end
+
+  defp twin_apply({kind, _a, _b, _text, _n}, world) when kind in [:undo, :redo] do
+    case step(world, kind) do
+      {:ok, world, _restore} -> {{kind, :ok}, world}
+      {:blocked, {:overlaps, key}} -> {{kind, :blocked, task_name(key)}, world}
+      other -> {{kind, other}, world}
+    end
+  end
+
+  defp twin_apply(command, world), do: {:edited, run(command, world)}
+
+  defp task_name({:minga, task, _step}), do: task
+  defp task_name(other), do: other
 
   defp step_or_keep(world, fun) do
     case step(world, fun) do
@@ -1151,55 +1269,6 @@ defmodule Minga.Buffer.UndoHistoryTest do
       StreamData.integer(0..2)
     })
   end
-
-  defp coarse_ops(init, ops, compact?) do
-    history =
-      UndoHistory.new(Document.new(init),
-        recording: :coarse,
-        run_budget: if(compact?, do: 4, else: 100_000_000)
-      )
-
-    Enum.reduce(ops, {history, init, 1}, fn op, {history, doc, version} ->
-      {history, doc} = coarse_op(history, doc, version, op)
-      history = if compact?, do: elem(UndoHistory.compact_slice(history, 50), 1), else: history
-      {history, doc, version + 1}
-    end)
-  end
-
-  defp coarse_op(history, doc, _version, {:untracked, at, length, text}) do
-    {start, removed} = codepoint_range(doc, at, length)
-    change = {start, binary_part(doc, start, removed), text}
-    {UndoHistory.record_untracked(history, [change]), splice(doc, start, removed, text)}
-  end
-
-  defp coarse_op(history, doc, version, op) do
-    {source, at, length, text} =
-      case op do
-        {:user, at, length, text} -> {:user, at, length, text}
-        {:minga, task, step, at, length, text} -> {{:minga, task, step}, at, length, text}
-      end
-
-    {start, removed} = codepoint_range(doc, at, length)
-    patch = UndoPatch.replacement(start, binary_part(doc, start, removed), text, {0, 0})
-
-    {UndoHistory.record_edit(history, version, patch, source, version * 1000),
-     splice(doc, start, removed, text)}
-  end
-
-  defp codepoint_range(doc, at, length) do
-    bounds = doc |> String.codepoints() |> Enum.scan(0, &(byte_size(&1) + &2)) |> then(&[0 | &1])
-    from = rem(at, length(bounds))
-    to = min(from + length, length(bounds) - 1)
-    {Enum.at(bounds, from), Enum.at(bounds, to) - Enum.at(bounds, from)}
-  end
-
-  defp splice(doc, start, removed, text),
-    do:
-      binary_part(doc, 0, start) <>
-        text <> binary_part(doc, start + removed, byte_size(doc) - start - removed)
-
-  defp outcome_of({:ok, restore, _history}), do: {:ok, Document.content(restore.document)}
-  defp outcome_of(other), do: other
 
   # Asks for compaction whatever the budget says, as a Minga step over budget would.
   defp want_compaction(world) do
@@ -1359,7 +1428,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
     if UndoHistory.compaction_wanted?(world.history) do
       {status, history, result} = UndoHistory.compact_slice(world.history, slice)
       Process.put(:slices, Process.get(:slices, 0) + 1)
-      world = %{world | history: history}
+      world = shadow(%{world | history: history})
 
       if status == :more do
         compact_fully(world, slice)
