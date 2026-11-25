@@ -527,7 +527,6 @@ defmodule Minga.Buffer.UndoHistory do
       document: document,
       groups: [],
       dropped: [],
-      held: nil,
       first: nil
     }
 
@@ -562,8 +561,8 @@ defmodule Minga.Buffer.UndoHistory do
           {:error, _reason} = error -> {:halt, error}
         end
 
-      offset ->
-        {:cont, {:ok, %{walk | held: walk.held || offset}}}
+      _held ->
+        {:cont, {:ok, walk}}
     end
   end
 
@@ -724,8 +723,8 @@ defmodule Minga.Buffer.UndoHistory do
   @spec finish_walk(t(), map(), task(), non_neg_integer()) ::
           {:ok, Restore.t(), t(), reject_summary()}
           | {:blocked, {:overlaps, :you}, task(), non_neg_integer()}
-  defp finish_walk(_history, %{groups: [], held: held} = walk, task, _total),
-    do: {:blocked, {:overlaps, :you}, task, held_offset(walk.history.provenance, held)}
+  defp finish_walk(_history, %{groups: []} = walk, task, _total),
+    do: {:blocked, {:overlaps, :you}, task, held_offset(walk.history, task)}
 
   defp finish_walk(history, walk, task, total) do
     remaining = walk.history |> task_groups(task) |> step_count(walk.history)
@@ -753,21 +752,30 @@ defmodule Minga.Buffer.UndoHistory do
       tasks: others,
       groups: walk.groups,
       dropped: walk.dropped,
-      held: if(every_step?, do: nil, else: held_offset(rest.provenance, walk.held))
+      held: if(every_step?, do: nil, else: held_offset(rest, task))
     }
 
     {:ok, Restore.new(version, document, :agent), rest, summary}
   end
 
   # Where the edit that holds the rest is now, after everything this call reverted.
-  @spec held_offset(
-          Provenance.t(),
-          {:group, Provenance.group_id()} | {:offset, non_neg_integer()} | nil
-        ) ::
-          non_neg_integer()
-  defp held_offset(provenance, {:group, group}), do: group_offset(provenance, group)
-  defp held_offset(_provenance, {:offset, offset}), do: offset
-  defp held_offset(_provenance, nil), do: 0
+  @spec held_offset(t(), task()) :: non_neg_integer()
+  defp held_offset(history, task) do
+    # Asked of the history after everything this call reverted: an edit that held an early step may have reverted
+    # with a later one.
+    history
+    |> task_groups(task)
+    |> Enum.sort(:desc)
+    |> Enum.find_value(0, fn group ->
+      closure = dependents(history.provenance, [group], MapSet.new([group]))
+
+      case held_in(history.provenance, closure) do
+        {:group, holding} -> group_offset(history.provenance, holding)
+        {:offset, offset} -> offset
+        nil -> nil
+      end
+    end)
+  end
 
   @spec advance_tick(t()) :: {:advance, Entry.tick(), t()}
   defp advance_tick(history) do
