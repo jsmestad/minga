@@ -4914,6 +4914,25 @@ struct CommandDispatcherStagingTests {
         #expect(requested.isEmpty)
     }
 
+    @Test("a committed gui_menu_bar reaches the menu bar state and its installer")
+    @MainActor func guiMenuBarReachesMenuBarState() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        var installed: [[Wire.MenuBarItem]] = []
+        gui.menuBarState.onChange = { installed.append($0) }
+        let items = [
+            Wire.MenuBarItem(path: "s", label: "Search", kind: 1),
+            Wire.MenuBarItem(path: "s s", label: "Search buffer", kind: 0, command: "search_buffer"),
+        ]
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiMenuBar(items))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(gui.menuBarState.items == items)
+        #expect(installed == [items])
+    }
+
     @Test("gui_config_state outside a transaction rejects without mutating settings")
     @MainActor func guiConfigStateOutOfBandRejects() throws {
         let (dispatcher, gui) = makeDispatcher()

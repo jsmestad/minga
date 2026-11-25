@@ -193,13 +193,22 @@ public final class LeaderMenuInstaller: NSObject {
 
     public func install(_ items: [Wire.MenuBarItem]) {
         self.items = items
-        guard let mainMenu = NSApp.mainMenu else { return }
+        guard let mainMenu = NSApp.mainMenu else {
+            PortLogger.info("Leader menu: \(items.count) items arrived before the main menu exists")
+            return
+        }
         LeaderMenu.install(items, into: mainMenu, action: #selector(run(_:)), target: self)
+        PortLogger.info("Leader menu: installed \(items.count) items; menu bar \(Self.titles(mainMenu))")
     }
 
     private func reinstallIfMissing() {
         guard !items.isEmpty, let mainMenu = NSApp.mainMenu, !LeaderMenu.isInstalled(in: mainMenu) else { return }
         LeaderMenu.install(items, into: mainMenu, action: #selector(run(_:)), target: self)
+        PortLogger.info("Leader menu: reinstalled after the menu bar was rebuilt; menu bar \(Self.titles(mainMenu))")
+    }
+
+    private static func titles(_ menu: NSMenu) -> String {
+        menu.items.map { item in "\(item.title)(\(item.submenu?.items.count ?? 0))" }.joined(separator: " ")
     }
 
     @objc private func run(_ sender: NSMenuItem) {
