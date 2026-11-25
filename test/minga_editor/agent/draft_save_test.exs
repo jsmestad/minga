@@ -108,7 +108,7 @@ defmodule MingaEditor.Agent.DraftSaveTest do
 
   describe "a queue pressed while the composer's own autosave is in flight" do
     @marker {0, {0, 3}}
-    @deferred {{"record", "request", 1}, :follow_up, "later", {0, {0, 5}}}
+    @deferred {{"record", "request", 1}, :follow_up, "later", "later", {0, {0, 5}}}
 
     defp ready do
       target = {self(), "record"}
@@ -182,6 +182,27 @@ defmodule MingaEditor.Agent.DraftSaveTest do
       {:ok, held} = DraftSave.defer_queue(saving, @deferred)
       newer = put_elem(@deferred, 2, "later still")
       assert {:ok, %{deferred_queue: ^newer}} = DraftSave.defer_queue(held, newer)
+    end
+
+    test "a queue that starts clears the held one" do
+      %{saving: saving} = requests()
+      {:ok, held} = DraftSave.defer_queue(saving, @deferred)
+      {:saving, ref, _, _, _} = held.request
+      {:ok, saved} = DraftSave.saved(held, ref, 2)
+
+      assert {:ok, 2, queueing} =
+               DraftSave.begin_queue(saved, make_ref(), {0, {0, 6}}, {1, "t", :follow_up})
+
+      assert queueing.deferred_queue == nil
+    end
+
+    test "a save moved to a replacement writer keeps the hold for release" do
+      %{saving: saving} = requests()
+      {:ok, held} = DraftSave.defer_queue(saving, @deferred)
+      replacement = spawn(fn -> :ok end)
+
+      rebound = DraftSave.rebind_writer(held, replacement)
+      assert {:run, @deferred, _} = DraftSave.release_deferred_queue(rebound)
     end
   end
 end

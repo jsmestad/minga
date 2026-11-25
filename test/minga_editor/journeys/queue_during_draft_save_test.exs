@@ -59,7 +59,21 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
     end
   end
 
-  defp press_during_autosave(ctx, session, mods) do
+  test "the queued item keeps the text from the press, and the composer keeps what was typed after it",
+       %{
+         editor_ctx: ctx,
+         session: session
+       } do
+    press_during_autosave(ctx, session, @ctrl, " still")
+
+    assert Session.get_queued_messages(session) == {[], ["later"]}
+    {_session, record} = draft_save(ctx).target
+    assert {:ok, [%{preview: "later"}]} = Session.queued_input_summaries(session, record)
+    # Edited after the press, so the composer is kept whole rather than cleared.
+    assert prompt(ctx) == "later still"
+  end
+
+  defp press_during_autosave(ctx, session, mods, typed_after \\ "") do
     :ok = Session.send_prompt(session, "start")
     await_working(ctx)
 
@@ -73,9 +87,13 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
     :ok = :sys.suspend(ctx.editor)
     send(ctx.editor, {:composer_draft_due, owner, token})
     send(ctx.editor, {:minga_input, {:key_press, 13, mods}})
+
+    for <<char::utf8 <- typed_after>>,
+      do: send(ctx.editor, {:minga_input, {:key_press, char, 0}})
+
     :ok = :sys.resume(ctx.editor)
 
-    wait_until(ctx, fn _state -> prompt(ctx) == "" end,
+    wait_until(ctx, fn _state -> Session.get_queued_messages(session) != {[], []} end,
       max_attempts: 200,
       message: "expected the held input to be queued once the save answered"
     )

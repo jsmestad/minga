@@ -11,11 +11,11 @@ defmodule MingaEditor.Agent.DraftSave do
   @type queue_admission :: {pos_integer(), String.t(), TurnExecution.prompt_kind()}
 
   @typedoc """
-  A queue or steer pressed while the composer's own autosave was in flight: the displayed queue target, the kind, the content, and the composer marker at the key press. It runs as soon as the save answers.
+  A queue or steer pressed while the composer's own autosave was in flight: the displayed queue target, the kind, the content, and the composer text and marker at the key press. It runs as soon as the save answers, so the queued item shows and recalls exactly what was sent.
   """
   @type deferred_queue ::
           {MingaAgent.Session.queue_target(), TurnExecution.prompt_kind(),
-           TurnExecution.content(), marker()}
+           TurnExecution.content(), String.t(), marker()}
   @type request ::
           {:loading, reference(), marker()}
           | {:ready, revision(), marker() | nil}
@@ -178,7 +178,12 @@ defmodule MingaEditor.Agent.DraftSave do
         attempt
       ) do
     {:ok, revision,
-     %{save | request: {:queueing, ref, revision, previous, marker, attempt}, timer: nil}}
+     %{
+       save
+       | request: {:queueing, ref, revision, previous, marker, attempt},
+         timer: nil,
+         deferred_queue: nil
+     }}
   end
 
   def begin_queue(%__MODULE__{}, _ref, _marker, _attempt), do: :pending
@@ -186,12 +191,12 @@ defmodule MingaEditor.Agent.DraftSave do
   @doc """
   Holds a queue or steer pressed while the composer's own autosave is in flight, so it runs when the save answers instead of being refused.
 
-  Only an autosave defers: every other request in flight (a recall, an attachment, a submission) still refuses, because it changes what the composer holds. A later press replaces the held one; the composer shows one draft.
+  Only an autosave defers: every other request in flight (a recall, an attachment, a submission) still refuses, because it changes what the composer holds. A later press replaces the held one, and a queue that starts clears it; the composer shows one draft. Whoever ends the save without `saved/3` or `failed/3` (`rebind_writer/2`) leaves the hold for `release_deferred_queue/1`.
   """
   @spec defer_queue(t(), deferred_queue()) :: {:ok, t()} | :pending
   def defer_queue(
         %__MODULE__{request: {:saving, _, _, _, _}, retirement: nil} = save,
-        {_target, _kind, _content, _marker} = deferred
+        {_target, _kind, _content, _source, _marker} = deferred
       ),
       do: {:ok, %{save | deferred_queue: deferred}}
 

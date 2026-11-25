@@ -117,7 +117,10 @@ defmodule MingaEditor.Agent.DraftWorkflow do
         {:unchanged, UIState.project_draft_save(ui, DraftSave.renew_saving_driver(ui.draft_save))}
 
       {:saving, _, _, _, _} ->
+        # The replacement writer never answers the old save, so a queue held behind
+        # it is released here rather than in `handle_result/6`.
         {:unchanged, arm_remote_writer(ui, owner, session)}
+        |> release_deferred_queue(state, owner, {session, record})
 
       _other ->
         case initial_read_marker(pending) do
@@ -727,7 +730,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
       target,
       kind,
       content,
-      Buffer.inspection_marker(buffer)
+      {PromptBuffer.prompt_text(ui), Buffer.inspection_marker(buffer)}
     )
   catch
     :exit, _reason -> {:queue_not_ready, ui}
@@ -736,9 +739,9 @@ defmodule MingaEditor.Agent.DraftWorkflow do
   defp capture_queue(ui, _state, _owner, _destination, _target, _kind, _content),
     do: {:queue_not_ready, ui}
 
-  # `marker` is the composer as it was when the key was pressed. A queue held
-  # behind an autosave runs later with that marker, so text typed after the
-  # press stays in the composer instead of being cleared with the queued input.
+  # `press` is the composer text and marker when the key was pressed. A queue held
+  # behind an autosave runs later with both, so the queued item shows what was
+  # sent and text typed after the press stays in the composer.
   @spec capture_queue(
           UIState.t(),
           State.t(),
@@ -747,7 +750,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
           Session.queue_target(),
           TurnExecution.prompt_kind(),
           TurnExecution.content(),
-          DraftSave.marker()
+          {String.t(), DraftSave.marker()}
         ) :: {term(), UIState.t()}
   defp capture_queue(
          %UIState{
@@ -760,7 +763,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
          {record, _, sequence} = target,
          kind,
          content,
-         marker
+         {source, marker}
        ) do
     ref = make_ref()
     token = Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
@@ -770,21 +773,21 @@ defmodule MingaEditor.Agent.DraftWorkflow do
          {:ok, revision, pending} <-
            DraftSave.begin_queue(save, ref, marker, {sequence, token, kind}) do
       operation =
-        {:queue, target, kind, {revision, token, shown, PromptBuffer.prompt_text(ui)}, content}
+        {:queue, target, kind, {revision, token, shown, source}, content}
 
       case request(state, destination, {owner, ref}, operation) do
         :ok -> {:unchanged, UIState.project_draft_save(ui, pending)}
         {:error, _reason} -> {:queue_not_ready, ui}
       end
     else
-      :pending -> defer_queue(ui, save, {target, kind, content, marker})
+      :pending -> defer_queue(ui, save, {target, kind, content, source, marker})
       _unavailable -> {:queue_not_ready, ui}
     end
   catch
     :exit, _reason -> {:queue_not_ready, ui}
   end
 
-  defp capture_queue(ui, _state, _owner, _destination, _target, _kind, _content, _marker),
+  defp capture_queue(ui, _state, _owner, _destination, _target, _kind, _content, _press),
     do: {:queue_not_ready, ui}
 
   # The composer's own autosave is answering: hold the queue and run it when the
@@ -799,7 +802,8 @@ defmodule MingaEditor.Agent.DraftWorkflow do
   end
 
   # Runs a queue held behind an autosave once the save has answered. A save that
-  # left the composer unable to queue reports the refusal it would have shown.
+  # left the composer unable to queue keeps its own failure report, or reports the
+  # refusal the press would have shown.
   @spec release_deferred_queue(
           {term(), UIState.t()},
           State.t(),
@@ -817,17 +821,21 @@ defmodule MingaEditor.Agent.DraftWorkflow do
         {outcome, ui}
 
       {:drop, released} ->
-        {:queue_not_ready, UIState.project_draft_save(ui, released)}
+        {dropped_outcome(outcome), UIState.project_draft_save(ui, released)}
 
-      {:run, {target, kind, content, marker}, released} ->
+      {:run, {target, kind, content, source, marker}, released} ->
         ui
         |> UIState.project_draft_save(released)
-        |> capture_queue(state, owner, destination, target, kind, content, marker)
+        |> capture_queue(state, owner, destination, target, kind, content, {source, marker})
         |> keep_outcome(outcome)
     end
   end
 
   defp release_deferred_queue(result, _state, _owner, _destination), do: result
+
+  @spec dropped_outcome(term()) :: term()
+  defp dropped_outcome(:unchanged), do: :queue_not_ready
+  defp dropped_outcome(outcome), do: outcome
 
   # The save's own outcome stays unless the held queue has something to say.
   @spec keep_outcome({term(), UIState.t()}, term()) :: {term(), UIState.t()}
@@ -1721,7 +1729,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
        do: report(state, outcome)
 
   defp report_inactive(state, outcome, _label)
-       when outcome in [:queue_refused, :queue_receipt_unconfirmed],
+       when outcome in [:queue_refused, :queue_receipt_unconfirmed, :queue_not_ready],
        do: report(state, outcome)
 
   defp report_inactive(state, _outcome, _label), do: state
