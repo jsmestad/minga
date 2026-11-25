@@ -18,6 +18,8 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias MingaAgent.Test.ModelSelectionFixture
   alias Minga.Editing.Scroll
   alias MingaEditor.Agent.CatalogStartup
+  alias MingaEditor.Agent.DraftWorkflow
+  alias MingaEditor.Agent.DraftSave
   alias Minga.Test.AgentSessionStart
   alias MingaEditor.Agent.Ingest
   alias Minga.Test.TranscriptFixture
@@ -883,6 +885,118 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert composer(failed) == "hello"
       assert notice(failed) =~ "Agent session unavailable. Your prompt was preserved."
       assert failed.agent_connection.turn_requests == %{}
+    end
+  end
+
+  describe "a send takes only the text its press took (#4296)" do
+    setup do
+      {:ok, session} = GenServer.start(ReadinessSession, self())
+      on_exit(fn -> Process.exit(session, :kill) end)
+
+      state =
+        base_state(session: session)
+        |> project_prompt_connection(session, :configured, :running)
+        |> replace_panel(fn panel ->
+          panel
+          |> Panel.set_credentials_configured(true)
+          |> Panel.set_model_name("anthropic:claude-sonnet-4-20250514")
+          |> Panel.set_provider_name("anthropic")
+        end)
+
+      # A composer with a loaded saved draft, which is what keeps presses in line.
+      buffer = state.workspace.agent_ui.panel.prompt_buffer
+      marker = BufferProcess.inspection_marker(buffer)
+
+      save =
+        {session, "prompt-readiness-test"}
+        |> DraftSave.loading(buffer, make_ref(), marker)
+        |> DraftSave.loaded(1, marker, nil)
+
+      state =
+        Workflow.install_agent_ui(
+          state,
+          UIState.project_draft_save(state.workspace.agent_ui, save)
+        )
+
+      %{state: state, owner: DraftWorkflow.front_owner(state), buffer: buffer}
+    end
+
+    defp held_send(buffer, raw),
+      do: {:steering, raw, {raw, raw, BufferProcess.inspection_marker(buffer)}}
+
+    test "a held send goes when text follows it, and that text stays", %{
+      state: state,
+      owner: owner,
+      buffer: buffer
+    } do
+      BufferProcess.replace_content(buffer, "first and typed after")
+
+      sent =
+        state
+        |> AgentCommands.deliver_held_send(owner, held_send(buffer, "first"))
+        |> Minga.Test.TurnRequestDriver.settle()
+
+      assert_received {:readiness_session_prompt, "first"}
+      assert composer(sent) == " and typed after"
+      assert notice(sent) == nil
+    end
+
+    test "two held presses of the same text each send it once", %{
+      state: state,
+      owner: owner,
+      buffer: buffer
+    } do
+      BufferProcess.replace_content(buffer, "okok")
+
+      once =
+        state
+        |> AgentCommands.deliver_held_send(owner, held_send(buffer, "ok"))
+        |> Minga.Test.TurnRequestDriver.settle()
+
+      assert composer(once) == "ok"
+
+      twice =
+        once
+        |> AgentCommands.deliver_held_send(owner, held_send(buffer, "ok"))
+        |> Minga.Test.TurnRequestDriver.settle()
+
+      assert composer(twice) == ""
+      assert_received {:readiness_session_prompt, "ok"}
+      assert_received {:readiness_session_prompt, "ok"}
+      refute_received {:readiness_session_prompt, _third}
+    end
+
+    test "a held send whose text was edited is not sent and keeps the composer", %{
+      state: state,
+      owner: owner,
+      buffer: buffer
+    } do
+      BufferProcess.replace_content(buffer, "fist")
+      kept = AgentCommands.deliver_held_send(state, owner, held_send(buffer, "first"))
+
+      assert kept.agent_connection.turn_requests == %{}
+      assert composer(kept) == "fist"
+      assert notice(kept) =~ "the message changed after you pressed send"
+      refute_received {:readiness_session_prompt, _prompt}
+    end
+
+    test "a send with attachments leaves text typed after it unsaved, so the next save writes it",
+         %{state: state, owner: owner, buffer: buffer} do
+      for {typed_after, saved?} <- [{"", true}, {" and more", false}] do
+        BufferProcess.replace_content(buffer, "hello")
+        ref = make_ref()
+        assert {:ok, "hello", sending} = DraftWorkflow.begin_send(state, ref, :all)
+        BufferProcess.replace_content(buffer, "hello" <> typed_after)
+
+        answered = DraftWorkflow.send_answered(sending, owner, ref, "hello", {:sent_attached, 2})
+
+        assert composer(answered) == typed_after
+
+        assert %DraftSave{request: {:ready, 2, saved_marker}, sending: nil} =
+                 answered.workspace.agent_ui.draft_save
+
+        assert is_tuple(saved_marker) == saved?
+      end
     end
   end
 

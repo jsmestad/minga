@@ -303,6 +303,32 @@ defmodule MingaEditor.Agent.DraftSaveTest do
       end
     end
 
+    test "only the text a send or a queue in flight took is left out; held text stays" do
+      {:ok, sending} = DraftSave.begin_send(ready(), make_ref(), "taken")
+      {:ok, held} = DraftSave.hold_press(sending, send_press("next"))
+
+      assert DraftSave.not_in_flight(held, "takennext more") == "next more"
+      assert DraftSave.not_in_flight(held, "edited") == "edited"
+      assert DraftSave.not_in_flight(queueing("queued"), "queued more") == " more"
+      assert DraftSave.not_in_flight(ready(), "all of it") == "all of it"
+      assert DraftSave.not_in_flight(nil, "all of it") == "all of it"
+    end
+
+    test "a send that takes attachments holds a save, a recall, an attachment and a removal" do
+      attached = %{ready() | attachments: [:an_attachment]}
+      {:ok, sending} = DraftSave.begin_send(attached, make_ref(), "taken")
+      marker = {0, {0, 9}}
+
+      assert :pending = DraftSave.begin_save(sending, make_ref(), marker)
+      assert :pending = DraftSave.begin_recall(sending, make_ref(), marker)
+      assert :pending = DraftSave.begin_attachment(sending, make_ref(), marker)
+      assert :pending = DraftSave.begin_removal(sending, make_ref(), marker, :any)
+
+      # A send without attachments leaves the draft free to save what is typed meanwhile.
+      {:ok, plain} = DraftSave.begin_send(ready(), make_ref(), "taken")
+      assert {:ok, 1, _saving} = DraftSave.begin_save(plain, make_ref(), marker)
+    end
+
     test "an answered send runs the press behind it once the draft is ready" do
       ref = make_ref()
       {:ok, sending} = DraftSave.begin_send(ready(), ref, "first")

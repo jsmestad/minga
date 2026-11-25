@@ -40,17 +40,22 @@ defmodule MingaEditor.Agent.TurnRequest do
   defstruct @enforce_keys
 
   @doc """
-  Sends `content` from the composer in front to `session` and returns at once.
+  Sends `content` from the composer in front to `session` and returns at once. `raw` is the composer text the press took, or `:all` for a press that takes everything the composer holds.
 
   The composer keeps its text until the Session answers. A composer that already has a send out is refused with one line, and its text stays.
   """
-  @spec deliver(EditorState.t(), pid(), Session.composer_send(), TurnExecution.content()) ::
-          EditorState.t()
-  def deliver(%EditorState{} = state, session, send, content) when is_pid(session) do
+  @spec deliver(
+          EditorState.t(),
+          pid(),
+          Session.composer_send(),
+          TurnExecution.content(),
+          String.t() | :all
+        ) :: EditorState.t()
+  def deliver(%EditorState{} = state, session, send, content, raw) when is_pid(session) do
     owner = DraftWorkflow.front_owner(state)
 
     if is_integer(owner) and not sending_from?(state, owner),
-      do: begin_send(state, owner, session, send, content),
+      do: begin_send(state, owner, session, {send, content}, raw),
       else: refuse_second_send(state)
   end
 
@@ -58,13 +63,13 @@ defmodule MingaEditor.Agent.TurnRequest do
           EditorState.t(),
           non_neg_integer(),
           pid(),
-          Session.composer_send(),
-          TurnExecution.content()
+          {Session.composer_send(), TurnExecution.content()},
+          String.t() | :all
         ) :: EditorState.t()
-  defp begin_send(state, owner, session, send, content) do
+  defp begin_send(state, owner, session, {send, content}, pressed) do
     token = make_ref()
 
-    case DraftWorkflow.begin_send(state, token) do
+    case DraftWorkflow.begin_send(state, token, pressed) do
       {:ok, raw, marked} ->
         ask(marked, %__MODULE__{
           token: token,

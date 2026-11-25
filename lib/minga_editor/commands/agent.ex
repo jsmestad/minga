@@ -844,9 +844,20 @@ defmodule MingaEditor.Commands.Agent do
 
   # Sends the resolved content to the LLM. The Session's answer arrives later
   # (`settle_turn_request/3`); the Editor never waits for it.
-  @spec deliver_prompt(state(), String.t() | [ReqLLM.Message.ContentPart.t()]) :: state()
-  defp deliver_prompt(state, resolved),
-    do: TurnRequest.deliver(state, Runtime.active_session(state.shell_runtime), :prompt, resolved)
+  @spec deliver_prompt(
+          state(),
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          String.t() | :all
+        ) :: state()
+  defp deliver_prompt(state, resolved, raw),
+    do:
+      TurnRequest.deliver(
+        state,
+        Runtime.active_session(state.shell_runtime),
+        :prompt,
+        resolved,
+        raw
+      )
 
   @doc """
   Applies what a Session answered to a composer send or a stop the Editor asked for without waiting (`MingaEditor.Agent.TurnRequest`).
@@ -1042,7 +1053,7 @@ defmodule MingaEditor.Commands.Agent do
   @doc """
   Delivers a send that waited in line, with the content from its key press.
 
-  It goes only while the composer holds exactly the pressed text, so sending, which clears the composer, never takes unsent typing, or the text of a press waiting behind it, with it. Otherwise nothing is sent, the composer keeps everything, the presses behind it stop waiting and one line says why. A send whose conversation is no longer in front is not sent either.
+  It goes only while the composer still starts with the pressed text and no send or queue in flight has taken that text. Sending removes only that text, so typing after it and the text of a press waiting behind it stay. Otherwise nothing is sent, the composer keeps everything, the presses behind it stop waiting and one line says why. A send whose conversation is no longer in front is not sent either.
   """
   @spec deliver_held_send(
           state(),
@@ -1059,7 +1070,7 @@ defmodule MingaEditor.Commands.Agent do
           "A message was not sent because its conversation is no longer in front. Its text is still in that composer."
         )
 
-      DraftWorkflow.only_pressed_text?(state, raw) ->
+      DraftWorkflow.pressed_text_in_front?(state, raw) ->
         deliver_held_in_front(state, owner, press, DraftWorkflow.submission(state))
 
       true ->
@@ -1096,13 +1107,13 @@ defmodule MingaEditor.Commands.Agent do
           | {:attached, DraftSave.target(), [MingaAgent.DraftAttachment.identity()]},
           DraftSave.press()
         ) :: state()
-  defp deliver_held_input(state, :send_now, content, submission, _press),
-    do: deliver_unqueued_composer(state, :send_now, content, submission)
+  defp deliver_held_input(state, :send_now, content, submission, {_source, raw, _marker}),
+    do: deliver_unqueued_composer(state, :send_now, content, submission, raw)
 
   defp deliver_held_input(state, kind, content, submission, press) do
     case DraftWorkflow.queue(state, kind, content, :current, press) do
       {:saved, updated} -> updated
-      :ordinary -> deliver_unqueued_composer(state, kind, content, submission)
+      :ordinary -> deliver_unqueued_composer(state, kind, content, submission, elem(press, 1))
     end
   end
 
@@ -1120,12 +1131,12 @@ defmodule MingaEditor.Commands.Agent do
          content,
          submission
        ),
-       do: deliver_unqueued_composer(state, :send_now, content, submission)
+       do: deliver_unqueued_composer(state, :send_now, content, submission, :all)
 
   defp deliver_composer_input(state, kind, content, submission) do
     case DraftWorkflow.queue(state, kind, content) do
       {:saved, updated} -> updated
-      :ordinary -> deliver_unqueued_composer(state, kind, content, submission)
+      :ordinary -> deliver_unqueued_composer(state, kind, content, submission, :all)
     end
   end
 
@@ -1135,7 +1146,8 @@ defmodule MingaEditor.Commands.Agent do
           String.t() | [ReqLLM.Message.ContentPart.t()],
           :ordinary
           | {:remote, DraftSave.target()}
-          | {:attached, DraftSave.target(), [MingaAgent.DraftAttachment.identity()]}
+          | {:attached, DraftSave.target(), [MingaAgent.DraftAttachment.identity()]},
+          String.t() | :all
         ) :: state()
   defp deliver_unqueued_composer(
          %{
@@ -1145,12 +1157,13 @@ defmodule MingaEditor.Commands.Agent do
          } = state,
          :send_now,
          content,
-         :ordinary
+         :ordinary,
+         raw
        )
        when node(session) == node(),
-       do: TurnRequest.deliver(state, session, {:idle, record}, content)
+       do: TurnRequest.deliver(state, session, {:idle, record}, content, raw)
 
-  defp deliver_unqueued_composer(state, :send_now, _content, :ordinary),
+  defp deliver_unqueued_composer(state, :send_now, _content, :ordinary, _raw),
     do:
       NoticeWorkflow.publish(
         state,
@@ -1167,7 +1180,8 @@ defmodule MingaEditor.Commands.Agent do
          } = state,
          :follow_up,
          _content,
-         _submission
+         _submission,
+         _raw
        )
        when node(session) == node() do
     NoticeWorkflow.publish(state, "That Agent turn is no longer active. Your draft was kept.")
@@ -1186,42 +1200,44 @@ defmodule MingaEditor.Commands.Agent do
          } = state,
          _kind,
          content,
-         :ordinary
+         :ordinary,
+         raw
        )
        when node(session) == node() do
     if Runtime.active_session(state.shell_runtime) == session do
-      TurnRequest.deliver(state, session, {:idle, record}, content)
+      TurnRequest.deliver(state, session, {:idle, record}, content, raw)
     else
       NoticeWorkflow.publish(state, "The Agent conversation changed. The draft was not sent.")
     end
   end
 
-  defp deliver_unqueued_composer(state, _, content, {:remote, target}) do
+  defp deliver_unqueued_composer(state, _, content, {:remote, target}, _raw) do
     DraftWorkflow.submit_remote(state, target, [], content)
   end
 
-  defp deliver_unqueued_composer(state, :steering, content, :ordinary),
-    do: deliver_prompt(state, content)
+  defp deliver_unqueued_composer(state, :steering, content, :ordinary, raw),
+    do: deliver_prompt(state, content, raw)
 
-  defp deliver_unqueued_composer(state, :follow_up, content, :ordinary),
-    do: deliver_follow_up(state, content)
+  defp deliver_unqueued_composer(state, :follow_up, content, :ordinary, raw),
+    do: deliver_follow_up(state, content, raw)
 
-  defp deliver_unqueued_composer(state, _, content, {:attached, target, shown}),
-    do: deliver_attached_composer(state, target, shown, content)
+  defp deliver_unqueued_composer(state, _, content, {:attached, target, shown}, raw),
+    do: deliver_attached_composer(state, target, shown, content, raw)
 
   @spec deliver_attached_composer(
           state(),
           DraftSave.target(),
           [MingaAgent.DraftAttachment.identity()],
-          String.t() | [ReqLLM.Message.ContentPart.t()]
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          String.t() | :all
         ) :: state()
-  defp deliver_attached_composer(state, {session, _record} = target, shown, content)
+  defp deliver_attached_composer(state, {session, _record} = target, shown, content, _raw)
        when node(session) != node(),
        do: DraftWorkflow.submit_remote(state, target, shown, content)
 
-  defp deliver_attached_composer(state, {session, record}, shown, content) do
+  defp deliver_attached_composer(state, {session, record}, shown, content, raw) do
     if Runtime.active_session(state.shell_runtime) == session do
-      TurnRequest.deliver(state, session, {:attached, record, shown}, content)
+      TurnRequest.deliver(state, session, {:attached, record, shown}, content, raw)
     else
       NoticeWorkflow.publish(state, "The Agent conversation changed. The draft was not sent.")
     end
@@ -1423,14 +1439,19 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  @spec deliver_follow_up(state(), String.t() | [ReqLLM.Message.ContentPart.t()]) :: state()
-  defp deliver_follow_up(state, resolved),
+  @spec deliver_follow_up(
+          state(),
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          String.t() | :all
+        ) :: state()
+  defp deliver_follow_up(state, resolved, raw),
     do:
       TurnRequest.deliver(
         state,
         Runtime.active_session(state.shell_runtime),
         :follow_up,
-        resolved
+        resolved,
+        raw
       )
 
   @spec project_root() :: String.t() | nil

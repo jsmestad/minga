@@ -124,7 +124,7 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
       refute minibuffer(ctx) =~ "Wait for the saved composer"
     end
 
-    test "a held send whose message changed after the press is not sent, and nothing is lost", %{
+    test "a held send takes only the text it pressed; text typed after the press stays", %{
       editor_ctx: ctx,
       session: session
     } do
@@ -134,7 +134,27 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
       send_keys_sync(ctx, " more")
       answer_load(ctx, load, :ok)
 
-      assert prompt(ctx) == "hello more"
+      wait_until(ctx, fn _state -> {:user, "hello"} in Session.messages(session) end,
+        max_attempts: 500,
+        interval_ms: 20,
+        message: "expected the held send to go with the text it pressed"
+      )
+
+      assert prompt(ctx) == " more"
+      refute {:user, "hello more"} in Session.messages(session)
+    end
+
+    test "a held send whose pressed text was edited is not sent, and nothing is lost", %{
+      editor_ctx: ctx,
+      session: session
+    } do
+      load = begin_load(ctx)
+      send_keys_sync(ctx, "hello")
+      send_key_sync(ctx, 13, @cmd)
+      send_keys_sync(ctx, "<BS>p")
+      answer_load(ctx, load, :ok)
+
+      assert prompt(ctx) == "hellp"
 
       assert minibuffer(ctx) ==
                "Not sent: the message changed after you pressed send. Press send again."

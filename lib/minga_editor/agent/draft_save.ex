@@ -174,7 +174,8 @@ defmodule MingaEditor.Agent.DraftSave do
 
   @doc "Admits a save only when the composer is newer than its last durable marker."
   @spec begin_save(t(), reference(), marker()) :: {:ok, revision(), t()} | :unchanged | :pending
-  # A send that takes the draft's attachments moves its revision, so a save waits for the answer.
+  # A send that takes the draft's attachments moves its revision, so a save, a recall, an
+  # attachment and a removal all wait for its answer.
   def begin_save(%__MODULE__{sending: {_, _}, attachments: [_ | _]}, _ref, _marker), do: :pending
   def begin_save(%__MODULE__{request: {:ready, _, marker}}, _ref, marker), do: :unchanged
 
@@ -185,6 +186,9 @@ defmodule MingaEditor.Agent.DraftSave do
 
   @doc "Freezes the captured live marker and owns the recall until its reply arrives."
   @spec begin_recall(t(), reference(), marker()) :: {:ok, revision(), t()} | :pending
+  def begin_recall(%__MODULE__{sending: {_, _}, attachments: [_ | _]}, _ref, _marker),
+    do: :pending
+
   def begin_recall(%__MODULE__{request: {:ready, revision, previous}} = save, ref, marker),
     do:
       {:ok, revision,
@@ -274,6 +278,22 @@ defmodule MingaEditor.Agent.DraftSave do
         else: {:halt, text}
     end)
   end
+
+  @doc """
+  The raw composer text left once the text a send or a queue in flight has taken is removed from its start. Held presses are not removed: their text is still waiting in the composer.
+  """
+  @spec not_in_flight(t() | nil, String.t()) :: String.t()
+  def not_in_flight(%__MODULE__{sending: {_ref, raw}}, text) when is_binary(text),
+    do: String.replace_prefix(text, raw, "")
+
+  def not_in_flight(
+        %__MODULE__{request: {:queueing, _, _, _, _, _}, queued_raw: raw},
+        text
+      )
+      when is_binary(raw) and is_binary(text),
+      do: String.replace_prefix(text, raw, "")
+
+  def not_in_flight(_save, text) when is_binary(text), do: text
 
   @doc """
   Holds a press the draft cannot take yet, so it runs when the draft answers instead of being refused.
@@ -449,6 +469,9 @@ defmodule MingaEditor.Agent.DraftSave do
 
   @doc "Admits a draft mutation even when the text and caret have not changed."
   @spec begin_attachment(t(), reference(), marker()) :: {:ok, revision(), t()} | :pending
+  def begin_attachment(%__MODULE__{sending: {_, _}, attachments: [_ | _]}, _ref, _marker),
+    do: :pending
+
   def begin_attachment(%__MODULE__{request: {:ready, revision, previous}} = save, ref, marker),
     do: {:ok, revision, %{save | request: {:attaching, ref, revision, previous, marker}}}
 
@@ -457,6 +480,9 @@ defmodule MingaEditor.Agent.DraftSave do
   @doc "Stages removal of an exact displayed snapshot without removing it before the write succeeds."
   @spec begin_removal(t(), reference(), marker(), DraftAttachment.identity()) ::
           {:ok, revision(), t(), [DraftSnapshot.attachment()]} | :missing | :pending
+  def begin_removal(%__MODULE__{sending: {_, _}, attachments: [_ | _]}, _ref, _marker, _identity),
+    do: :pending
+
   def begin_removal(
         %__MODULE__{request: {:ready, revision, previous}} = save,
         ref,
@@ -517,7 +543,7 @@ defmodule MingaEditor.Agent.DraftSave do
   def attached(%__MODULE__{}, _ref, _revision, _attachment), do: :stale
 
   @doc "Clears live attachment metadata only once its captured text was accepted for submission."
-  @spec sent(t(), revision(), marker()) :: t()
+  @spec sent(t(), revision(), marker() | nil) :: t()
   def sent(%__MODULE__{request: {:ready, _, _}} = save, revision, marker),
     do: %{save | request: {:ready, revision, marker}, attachments: [], offer: next_offer()}
 

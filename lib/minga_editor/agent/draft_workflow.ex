@@ -714,11 +714,21 @@ defmodule MingaEditor.Agent.DraftWorkflow do
     do: capture_queue(ui, state, owner, destination, target, kind, content, press)
 
   @doc """
-  Whether the composer holds exactly `raw`, the text a press took, and nothing else that no earlier press has taken. Only then may that press send: its text must not have been edited, taken by a send that is already out, or followed by unsent typing or text waiting behind the press.
+  Whether the composer holds exactly `raw`, the text a press took, and nothing else. A message whose files a worker read goes only then, because nothing recorded what the press took.
   """
   @spec only_pressed_text?(State.t(), String.t()) :: boolean()
-  def only_pressed_text?(%State{workspace: %{agent_ui: %UIState{draft_save: save} = ui}}, raw),
-    do: DraftSave.unsubmitted(save, PromptBuffer.input_text(ui)) == raw
+  def only_pressed_text?(%State{workspace: %{agent_ui: %UIState{} = ui}}, raw),
+    do: PromptBuffer.input_text(ui) == raw
+
+  @doc """
+  Whether `raw`, the text a held press took, is still at the front of the composer once the text a send or queue in flight has taken is left out. Only then may the press send: its text was not edited and no other press took it. Text after it (typing, or a press waiting behind it) stays in the composer, because a send removes only the text it took.
+  """
+  @spec pressed_text_in_front?(State.t(), String.t()) :: boolean()
+  def pressed_text_in_front?(
+        %State{workspace: %{agent_ui: %UIState{draft_save: save} = ui}},
+        raw
+      ),
+      do: save |> DraftSave.not_in_flight(PromptBuffer.input_text(ui)) |> String.starts_with?(raw)
 
   @doc "The workspace in front, which owns the composer a key was pressed in."
   @spec front_owner(State.t()) :: non_neg_integer() | nil
@@ -766,14 +776,19 @@ defmodule MingaEditor.Agent.DraftWorkflow do
   def holding?(%State{}), do: false
 
   @doc """
-  Marks the text in the composer in front as taken by a send that is out to the Session under `ref`, and returns that raw text. Until `send_answered/5`, a later press leaves the text out and waits in line behind the send.
+  Marks `pressed`, the raw composer text a press took (`:all` for everything the composer in front holds), as taken by a send that is out to the Session under `ref`, and returns that raw text. Until `send_answered/5`, a later press leaves the text out and waits in line behind the send.
 
   A composer without a saved draft keeps no line; its caller refuses a second send while one is out. `:pending` when this composer already has a send out.
   """
-  @spec begin_send(State.t(), reference()) :: {:ok, String.t(), State.t()} | :pending
-  def begin_send(%State{workspace: %{agent_ui: %UIState{draft_save: save} = ui}} = state, ref)
+  @spec begin_send(State.t(), reference(), String.t() | :all) ::
+          {:ok, String.t(), State.t()} | :pending
+  def begin_send(
+        %State{workspace: %{agent_ui: %UIState{draft_save: save} = ui}} = state,
+        ref,
+        pressed
+      )
       when is_reference(ref) do
-    raw = PromptBuffer.input_text(ui)
+    raw = if pressed == :all, do: PromptBuffer.input_text(ui), else: pressed
 
     case save do
       %DraftSave{} ->
@@ -833,7 +848,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
     {outcome, taken} = take_sent_text(ui, raw)
 
     taken
-    |> consume_sent_draft(revision)
+    |> consume_sent_draft(revision, PromptBuffer.input_empty?(taken))
     |> release_after_send(outcome, state, owner)
   end
 
@@ -859,18 +874,19 @@ defmodule MingaEditor.Agent.DraftWorkflow do
     end
   end
 
-  @spec consume_sent_draft(UIState.t(), DraftSave.revision()) :: UIState.t()
+  # An emptied composer is saved as the Session left it. Text that stays (typed after the
+  # press) is newer than the record, so it has no saved marker and the next save writes it.
+  @spec consume_sent_draft(UIState.t(), DraftSave.revision(), boolean()) :: UIState.t()
   defp consume_sent_draft(
          %UIState{draft_save: %DraftSave{request: {:ready, _, _}, buffer: buffer} = save} = ui,
-         revision
-       ),
-       do:
-         UIState.project_draft_save(
-           ui,
-           DraftSave.sent(save, revision, Buffer.inspection_marker(buffer))
-         )
+         revision,
+         emptied?
+       ) do
+    marker = if emptied?, do: Buffer.inspection_marker(buffer)
+    UIState.project_draft_save(ui, DraftSave.sent(save, revision, marker))
+  end
 
-  defp consume_sent_draft(ui, _revision), do: ui
+  defp consume_sent_draft(ui, _revision, _emptied?), do: ui
 
   @spec toast_sent(UIState.t(), String.t() | nil) :: UIState.t()
   defp toast_sent(ui, nil), do: ui
