@@ -223,6 +223,28 @@ defmodule Minga.Session.Swap.RecoveryTest do
       assert path == ctx.alpha.file
     end
 
+    test "a scoped scan never drops another project's text, even when its file is missing", ctx do
+      missing = Path.join(ctx.alpha.root, "lib/moved_away.ex")
+      alpha_swap = write_swap_file(ctx.swap_dir, missing, "unsaved text of a missing file")
+      unreadable = Path.join(ctx.swap_dir, "unreadable.swap")
+      File.write!(unreadable, "garbage")
+
+      Recovery.scan(scan_opts(ctx.swap_dir) ++ [scope: {:project, ctx.beta.root}])
+
+      assert File.exists?(alpha_swap)
+      assert File.exists?(unreadable)
+
+      # Opening alpha itself applies the rule to alpha's own swap.
+      log =
+        capture_log(fn ->
+          Recovery.scan(scan_opts(ctx.swap_dir) ++ [scope: {:project, ctx.alpha.root}])
+        end)
+
+      refute File.exists?(alpha_swap)
+      assert log =~ "Dropped unsaved text for #{missing}"
+      assert File.exists?(unreadable)
+    end
+
     test "the default scope returns every recoverable swap", ctx do
       paths = ctx.swap_dir |> scan_opts() |> Recovery.scan() |> Enum.map(& &1.path) |> Enum.sort()
 
@@ -250,6 +272,16 @@ defmodule Minga.Session.Swap.RecoveryTest do
 
       refute File.exists?(swap_path)
       assert log =~ "Dropped unsaved text for #{missing}"
+    end
+
+    test "a file that cannot be read keeps its swap recoverable", %{tmp_dir: tmp_dir} do
+      # A directory stands where the file was, so reading it fails with :eisdir, not :enoent.
+      original = Path.join(tmp_dir, "now_a_directory.ex")
+      File.mkdir_p!(original)
+      swap_path = write_swap_file(tmp_dir, original, "unsaved text")
+
+      assert [%{path: ^original, swap_path: ^swap_path}] = Recovery.scan(scan_opts(tmp_dir))
+      assert File.exists?(swap_path)
     end
 
     test "an old swap with different text is never removed for its age", %{tmp_dir: tmp_dir} do
@@ -301,6 +333,31 @@ defmodule Minga.Session.Swap.RecoveryTest do
       assert Minga.Session.recoverable_projects(opts) == [%{root: canonical_root, files: 2}]
       assert File.exists?(saved_swap)
       assert File.exists?(gone_swap)
+    end
+
+    test "counts a file under the deepest known root, and outside every root under nil", %{
+      tmp_dir: tmp_dir
+    } do
+      swap_dir = Path.join(tmp_dir, "swap")
+      File.mkdir_p!(swap_dir)
+      outer = Path.join(tmp_dir, "outer")
+      nested = Path.join(outer, "tools/nested")
+      loose = Path.join(tmp_dir, "loose")
+      Enum.each([nested, loose], &File.mkdir_p!/1)
+      # A marker in the nested directory would make it its own project without `roots:`.
+      File.write!(Path.join(nested, "mix.exs"), "")
+
+      for file <- [Path.join(outer, "a.ex"), Path.join(nested, "b.ex"), Path.join(loose, "c.ex")] do
+        File.write!(file, "saved")
+        write_swap_file(swap_dir, file, "unsaved")
+      end
+
+      {:ok, outer_root} = Minga.Project.Root.canonical_path(outer)
+
+      assert Recovery.recoverable_projects(scan_opts(swap_dir) ++ [roots: [outer]]) == [
+               %{root: outer_root, files: 2},
+               %{root: nil, files: 1}
+             ]
     end
 
     test "is empty when the swap directory does not exist" do
