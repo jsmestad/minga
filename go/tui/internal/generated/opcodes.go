@@ -122,6 +122,7 @@ const (
 	OPGuiAgentContext        byte = 0x88
 	OPGuiHoverAction         byte = 0x96
 	OPGuiConfigState         byte = 0x97
+	OPGuiMenuBar             byte = 0xAC
 	OPGuiWorkspaces          byte = 0x98
 	OPGuiNotifications       byte = 0x99
 	OPGuiObservatory         byte = 0x9A

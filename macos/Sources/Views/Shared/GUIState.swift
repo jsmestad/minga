@@ -149,6 +149,9 @@ public final class GUIState {
     /// Which-key popup state.
     public let whichKeyState = WhichKeyState()
 
+    /// The leader keymap the macOS menu bar mirrors.
+    public let menuBarState = MenuBarState()
+
     /// Read-only keyboard owner and frontend-local text lease mirror.
     public let focusOwnerState = FocusOwnerState()
 

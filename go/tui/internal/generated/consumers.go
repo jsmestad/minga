@@ -72,4 +72,5 @@ var GoSkippedOpcodes = map[byte]string{
 	OPGuiLineSpacing:           "Terminal controls line spacing",
 	OPGuiCursorAnimation:       "Terminal controls cursor animation",
 	OPGuiConfigState:           "Native settings state is not used by the TUI",
+	OPGuiMenuBar:               "The terminal has no menu bar; the mode pill and which-key are its mouse path",
 }

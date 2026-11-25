@@ -36,6 +36,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x85   | gui_git_status       | Git status panel data      |
   | 0x98   | gui_workspaces    | Canonical workspace state |
   | 0x97   | gui_config_state    | Settings panel state       |
+  | 0xAC   | gui_menu_bar        | Leader menu bar mirror     |
   | 0x9E   | gui_search_state    | Search toolbar state       |
   | 0x9F   | gui_sidebars        | Semantic sidebar metadata  |
   | 0xA3   | gui_extension_runtime | Generic extension-owned frontend runtime envelope |

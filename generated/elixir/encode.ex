@@ -478,6 +478,21 @@ defmodule Minga.Protocol.Encode do
     ]
   end
 
+  @spec encode_menu_bar_item(map()) :: iodata()
+  def encode_menu_bar_item(model), do: encode_menu_bar_item(model, :menu_bar_item, [])
+
+  @spec encode_menu_bar_item(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_menu_bar_item(model, command, path) do
+    [
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:path | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :path)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:label | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :label)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:section | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :section)),
+      (fn value -> validate_uint!(command, [:kind | path], value, 255); <<value::8>> end).(Map.fetch!(model, :kind)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:command | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :command)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:platform_key | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :platform_key)),
+    ]
+  end
+
   @spec encode_which_key_entry(map()) :: iodata()
   def encode_which_key_entry(model), do: encode_which_key_entry(model, :which_key_entry, [])
 

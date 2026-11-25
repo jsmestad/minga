@@ -1724,6 +1724,11 @@ defmodule MingaEditor do
           state.interaction.keymap_server
         )
         |> MingaEditor.RenderModel.UI.ConfigStateBuilder.from_wire()
+        |> MingaEditor.RenderModel.UI.ConfigStateBuilder.with_leader_menu(
+          state.interaction.keymap_server
+          |> Minga.Keymap.leader_trie()
+          |> MingaEditor.RenderModel.UI.LeaderMenuBuilder.build()
+        )
 
       %{
         state

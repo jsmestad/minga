@@ -588,6 +588,30 @@ public enum Wire {
         }
     }
 
+    /// One item of the leader keymap the macOS menu bar mirrors (gui_menu_bar). `path` is the formatted sequence
+    /// after SPC (`a q f`), which the menu shows dimmed beside the title; `command` is what a click runs (empty for a
+    /// group, or for a command the menu cannot name); `platformKey` is its ⌘ equivalent (`⌘S`), or empty.
+    public struct MenuBarItem: Sendable, Equatable {
+        public let path: String
+        public let label: String
+        public let section: String
+        public let kind: UInt8
+        public let command: String
+        public let platformKey: String
+
+        public var isGroup: Bool { kind == 1 }
+        public var keys: [String] { path.split(separator: " ").map(String.init) }
+
+        public init(path: String, label: String, section: String = "", kind: UInt8, command: String = "", platformKey: String = "") {
+            self.path = path
+            self.label = label
+            self.section = section
+            self.kind = kind
+            self.command = command
+            self.platformKey = platformKey
+        }
+    }
+
     /// The which-key panel. The BEAM sends the words, order and sections; the view decides the columns.
     public struct WhichKey: Sendable, Equatable {
         public let visible: Bool

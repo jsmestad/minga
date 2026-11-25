@@ -144,6 +144,7 @@ enum RenderCommand: Sendable {
     case guiWorkspaces(version: UInt8, activeWorkspaceId: UInt16, mode: WorkspaceViewMode, flags: WorkspaceFlags, workspaces: [Wire.WorkspaceEntry], visibleTabs: [Wire.WorkspaceTabEntry])
     case guiAgentContext(visible: Bool, task: String, dispatchTimestamp: Date, status: CardStatus, canApprove: Bool, progress: Wire.AgentProgress, todos: [Wire.AgentTodo])
     case guiConfigState(Wire.ConfigState)
+    case guiMenuBar([Wire.MenuBarItem])
     case guiNotifications([Wire.EditorNotification])
     case guiEditTimeline(visible: Bool, viewingIndex: UInt16, entries: [Wire.TimelineEntry], files: [Wire.TimelineFile], generation: UInt32)
     case guiExtensionOverlay([Wire.ExtensionOverlayEntry])
@@ -641,6 +642,31 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         guard data.count >= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
         let state = try decodeConfigState(data: data, start: payloadStart, end: payloadStart + payloadLen)
         return (.guiConfigState(state), 1 + 2 + payloadLen)
+
+    case .guiMenuBar:
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let payloadLen = Int(try readU16(data, rest))
+        let payloadStart = rest + 2
+        let end = payloadStart + payloadLen
+        guard data.count >= end, payloadLen >= 2 else { throw ProtocolDecodeError.malformed }
+        let count = Int(try readU16(data, payloadStart))
+        try FrameDecodeAccounting.reserve(.arrayEntries, count)
+        var items: [Wire.MenuBarItem] = []
+        items.reserveCapacity(count)
+        var pos = payloadStart + 2
+        do {
+            for _ in 0..<count {
+                let (item, next) = try GeneratedProtocol.decodeMenuBarItem(data, pos, end)
+                items.append(Wire.MenuBarItem(path: item.path, label: item.label, section: item.section, kind: item.kind,
+                                              command: item.command, platformKey: item.platformKey))
+                pos = next
+            }
+        } catch let error as FrameResourceError {
+            throw error
+        } catch {
+            throw ProtocolDecodeError.malformed
+        }
+        return (.guiMenuBar(items), 1 + 2 + payloadLen)
 
     case .guiNotifications:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }

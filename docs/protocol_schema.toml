@@ -941,6 +941,17 @@ consumers = ["swift"]
 skip = { go = "Native settings state is not used by the TUI" }
 framing = "len16"
 
+# The leader keymap as the macOS menu bar mirrors it: every group and command under SPC in which-key order
+# (payload: item count u16, then menu_bar_item structures). Sent when it changes, at connect and on config reload.
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_menu_bar"
+value = 0xAC
+direction = "beam_to_frontend"
+consumers = ["swift"]
+skip = { go = "The terminal has no menu bar; the mode pill and which-key are its mouse path" }
+framing = "len16"
+
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_workspaces"
@@ -2088,6 +2099,17 @@ name = "which_key_hint"
 fields = [
   { name = "key", type = "string8" },
   { name = "label", type = "string16" },
+]
+
+[[structures]]
+name = "menu_bar_item"
+fields = [
+  { name = "path", type = "string16" },
+  { name = "label", type = "string16" },
+  { name = "section", type = "string16" },
+  { name = "kind", type = "u8" },
+  { name = "command", type = "string16" },
+  { name = "platform_key", type = "string8" },
 ]
 
 [[structures]]

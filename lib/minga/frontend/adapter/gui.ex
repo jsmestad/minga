@@ -10,6 +10,7 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.CompletionEncoder
   alias Minga.Frontend.Adapter.GUI.ConfigStateEncoder
+  alias Minga.Frontend.Adapter.GUI.MenuBarEncoder
   alias Minga.Frontend.Adapter.GUI.CursorAnimationEncoder
   alias Minga.Frontend.Adapter.GUI.EditTimelineEncoder
   alias Minga.Frontend.Adapter.GUI.EmptyStateEncoder
@@ -75,7 +76,9 @@ defmodule Minga.Frontend.Adapter.GUI do
     {:float_popup, FloatPopupEncoder},
     {:line_spacing, LineSpacingEncoder},
     {:cursor_animation, CursorAnimationEncoder},
-    {:config_state, ConfigStateEncoder}
+    {:config_state, ConfigStateEncoder},
+    # The macOS menu bar's mirror of SPC rides on the same settings snapshot.
+    {:config_state, MenuBarEncoder}
   ]
 
   @metal_component_encoders [

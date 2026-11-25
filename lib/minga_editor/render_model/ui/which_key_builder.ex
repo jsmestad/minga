@@ -72,6 +72,18 @@ defmodule MingaEditor.RenderModel.UI.WhichKeyBuilder do
   defp child_prefix("", key), do: key
   defp child_prefix(prefix, key), do: prefix <> " " <> key
 
+  @doc """
+  Returns a leader group's rows in which-key order, each with its section: the order the panel and the macOS menu bar share.
+
+  `group_prefix` is the formatted sequence after the leader (`""` for `SPC`, `"a"` for `SPC a`).
+  """
+  @spec ordered(Minga.Keymap.Bindings.node_t(), String.t()) :: [{String.t(), Binding.t()}]
+  def ordered(node, group_prefix) do
+    node
+    |> WhichKeyUI.bindings_from_node()
+    |> sectioned(Defaults.which_key_sections(group_prefix))
+  end
+
   @spec sectioned([Binding.t()], [{String.t(), [String.t()]}]) :: [{String.t(), Binding.t()}]
   defp sectioned(bindings, []), do: Enum.map(bindings, &{"", &1})
 

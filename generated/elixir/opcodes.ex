@@ -226,6 +226,8 @@ defmodule Minga.Protocol.Opcodes do
   def gui_hover_action, do: 0x96
   @spec gui_config_state() :: non_neg_integer()
   def gui_config_state, do: 0x97
+  @spec gui_menu_bar() :: non_neg_integer()
+  def gui_menu_bar, do: 0xAC
   @spec gui_workspaces() :: non_neg_integer()
   def gui_workspaces, do: 0x98
   @spec gui_notifications() :: non_neg_integer()

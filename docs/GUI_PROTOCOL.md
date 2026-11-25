@@ -1425,6 +1425,16 @@ Each option is `name_len(1) + name + type_tag(1) + value_payload`. Type tags are
 
 The frontend sends `config_query` when the Settings window appears. It sends `config_update` for each changed control. The BEAM applies the option immediately and persists GUI-originated changes to `~/.config/minga/gui_settings.exs`, loaded after `config.exs` and `.minga.exs` but before `after.exs`.
 
+## Menu Bar (0xAC)
+
+`gui_menu_bar` is the leader keymap the macOS menu bar mirrors (docs/design/surfaces.md, Mouse, pattern 2). It uses the standard envelope: `opcode(1) + payload_len(2) + payload`, and the payload is `item_count(2) + items`. Each item is `path(string16) + label(string16) + section(string16) + kind(1) + command(string16) + platform_key(string8)`.
+
+- Items arrive in which-key order, a group before its contents. `path` is the formatted sequence after `SPC` (`a q f`); its key count is the item's depth. The menu shows `SPC` and the path dimmed after the label, because a native menu cannot draw a key sequence in its shortcut column.
+- `kind` is `0` for a command and `1` for a group, whose contents become a submenu below the top level. `section` is the which-key section; a change of section starts a new menu section.
+- `command` is the command a click runs through `execute_command`; it is empty for a group and for a command that takes arguments. `platform_key` is the ⌘ equivalent (`⌘S`) the menu puts in its shortcut column, or empty.
+
+The BEAM sends it at connect and whenever the keymap changes (config reload), only when it changed. The TUI has no menu bar and does not consume it; the mode pill and which-key are its mouse path.
+
 ## Theme Color Slots
 
 Theme colors are sent as `{slot_id, r, g, b}` tuples in the `gui_theme` opcode. The slot IDs are organized by UI domain:

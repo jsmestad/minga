@@ -178,6 +178,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_hover_action: 0x96,
       gui_config_state: 0x97,
       gui_workspaces: 0x98,
+      gui_menu_bar: 0xAC,
       gui_notifications: 0x99,
       gui_observatory: 0x9A,
       gui_edit_timeline: 0x9B,
