@@ -692,9 +692,13 @@ defmodule Minga.Buffer.Provenance do
   @spec compact_oldest(t(), (group_id() -> [group_id()])) ::
           {:ok, t(), {group_id(), group_id()}, pos_integer()} | :none
   def compact_oldest(%__MODULE__{} = prov, class_of \\ &[&1]) when is_function(class_of, 1) do
+    # A draft of a step older than your newest group can never merge (see `merge_allowed?/2`), so the search starts
+    # after it: a history your edits hold costs nothing to look at. Locators are nonempty lists, so `[]` sorts first.
+    newest_yours = newest_yours(prov)
+
     prov.drafts
-    |> :gb_sets.iterator()
-    |> mergeable_draft(prov, class_of, %{})
+    |> then(&:gb_sets.iterator_from({newest_yours + 1, []}, &1))
+    |> mergeable_draft(prov, class_of, newest_yours, %{})
     |> case do
       nil ->
         :none
@@ -717,9 +721,10 @@ defmodule Minga.Buffer.Provenance do
           :gb_sets.iter(term()),
           t(),
           (group_id() -> [group_id()]),
+          non_neg_integer(),
           %{{group_id(), group_id()} => boolean()}
         ) :: {group_id(), group_id(), Locator.t()} | nil
-  defp mergeable_draft(iterator, prov, class_of, checked) do
+  defp mergeable_draft(iterator, prov, class_of, newest_yours, checked) do
     case :gb_sets.next(iterator) do
       :none ->
         nil
@@ -730,12 +735,19 @@ defmodule Minga.Buffer.Provenance do
 
         allowed =
           Map.get_lazy(checked, {old, new}, fn ->
-            merge_allowed?(prov, Enum.uniq([old, new | class_of.(old) ++ class_of.(new)]))
+            merge_allowed?(Enum.uniq([old, new | class_of.(old) ++ class_of.(new)]), newest_yours)
           end)
 
         if allowed,
           do: {old, new, draft_id},
-          else: mergeable_draft(rest, prov, class_of, Map.put(checked, {old, new}, false))
+          else:
+            mergeable_draft(
+              rest,
+              prov,
+              class_of,
+              newest_yours,
+              Map.put(checked, {old, new}, false)
+            )
     end
   end
 
@@ -744,10 +756,16 @@ defmodule Minga.Buffer.Provenance do
   # dependent's, and dependents are newer still. With none, no edit of yours can hold the class or wait for it, so a
   # merge changes nothing a press or `u` can see. History from before your latest edit compacts once that edit is
   # final.
-  @spec merge_allowed?(t(), [group_id()]) :: boolean()
-  defp merge_allowed?(prov, members) do
-    oldest = Enum.min(members)
-    not Enum.any?(prov.groups, &match?({id, %Group{author: :you}} when id > oldest, &1))
+  @spec merge_allowed?([group_id()], non_neg_integer()) :: boolean()
+  defp merge_allowed?(members, newest_yours), do: Enum.min(members) > newest_yours
+
+  # Your newest group that can still be undone or redone, or 0 when there is none.
+  @spec newest_yours(t()) :: non_neg_integer()
+  defp newest_yours(prov) do
+    Enum.reduce(prov.groups, 0, fn
+      {id, %Group{author: :you}}, newest when id > newest -> id
+      _group, newest -> newest
+    end)
   end
 
   @doc """

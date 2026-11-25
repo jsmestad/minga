@@ -3199,8 +3199,9 @@ defmodule Minga.Buffer.Process do
       :over_budget ->
         Minga.Log.warning(
           :editor,
-          "History of #{name} keeps #{slice.runs} runs with no drafts left to merge; " <>
-            "unreviewed Minga steps and your undo history hold it"
+          "History of #{name} keeps #{slice.runs} runs with nothing it can merge yet. It shrinks when you revert " <>
+            "Minga's tasks (SPC a u), and when your older edits leave your undo history (it keeps your last 1000), " <>
+            "which lets Minga's steps from before them merge"
         )
 
         Minga.Telemetry.execute([:minga, :buffer, :history_over_budget], %{runs: slice.runs}, %{
