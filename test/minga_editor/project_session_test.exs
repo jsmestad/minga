@@ -61,7 +61,7 @@ defmodule MingaEditor.ProjectSessionTest do
     editor = open_project(ctx)
 
     state =
-      wait_until(editor, &(length(&1.workspace.buffers.list) == 2),
+      wait_until(editor, &match?([_, _], &1.workspace.buffers.list),
         max_attempts: 100,
         message: "the saved session was not restored"
       )
@@ -94,7 +94,7 @@ defmodule MingaEditor.ProjectSessionTest do
     File.rm!(ctx.lib_a)
     editor = open_project(ctx)
 
-    state = wait_until(editor, &(length(&1.workspace.buffers.list) == 1), max_attempts: 100)
+    state = wait_until(editor, &match?([_], &1.workspace.buffers.list), max_attempts: 100)
 
     assert {:leaf, only} = state.workspace.windows.tree
     assert state.workspace.windows.active == only
@@ -118,7 +118,7 @@ defmodule MingaEditor.ProjectSessionTest do
     state = editor_state(editor)
 
     refute MingaEditor.Handlers.SessionHandler.persists_project?(state)
-    assert length(state.workspace.buffers.list) == 1
+    assert [_] = state.workspace.buffers.list
 
     assert File.read!(Session.session_file(session_dir: ctx.sessions, project_root: ctx.root)) ==
              saved
@@ -127,7 +127,7 @@ defmodule MingaEditor.ProjectSessionTest do
   test "starting fresh closes the restored files and keeps unsaved ones", ctx do
     save_split_session(ctx)
     editor = open_project(ctx)
-    wait_until(editor, &(length(&1.workspace.buffers.list) == 2), max_attempts: 100)
+    wait_until(editor, &match?([_, _], &1.workspace.buffers.list), max_attempts: 100)
 
     send_keys_sync(editor, "ix<Esc>")
     state = start_fresh(editor)
@@ -142,7 +142,7 @@ defmodule MingaEditor.ProjectSessionTest do
   test "starting fresh with nothing unsaved leaves no files open", ctx do
     save_split_session(ctx)
     editor = open_project(ctx)
-    wait_until(editor, &(length(&1.workspace.buffers.list) == 2), max_attempts: 100)
+    wait_until(editor, &match?([_, _], &1.workspace.buffers.list), max_attempts: 100)
 
     assert MingaEditor.Handlers.BufferRegistry.buffer_inventory(start_fresh(editor)) == []
   end
@@ -163,7 +163,7 @@ defmodule MingaEditor.ProjectSessionTest do
   test "the session captured from the editor round-trips through restore", ctx do
     save_split_session(ctx)
     editor = open_project(ctx)
-    state = wait_until(editor, &(length(&1.workspace.buffers.list) == 2), max_attempts: 100)
+    state = wait_until(editor, &match?([_, _], &1.workspace.buffers.list), max_attempts: 100)
 
     captured = MingaEditor.Session.Capture.snapshot(state)
 

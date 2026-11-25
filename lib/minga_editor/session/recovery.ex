@@ -154,7 +154,8 @@ defmodule MingaEditor.Session.Recovery do
     Enum.map(entries, fn entry -> {entry, Session.recover_swap_file(entry.swap_path)} end)
   end
 
-  # Opening a project picks up where you left off, after a clean quit as well as after a crash. A saved session with no files leaves the project home in place.
+  # Opening a project picks up where you left off, after a clean quit as well as after a crash.
+  # A saved session with no files leaves the project home in place.
   @spec load_project_session(t()) :: {:ok, result()} | {:error, term()}
   defp load_project_session(%__MODULE__{session_enabled?: false}), do: {:ok, :none}
 

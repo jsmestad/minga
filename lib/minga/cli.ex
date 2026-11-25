@@ -1023,7 +1023,8 @@ defmodule Minga.CLI do
   def apply_flag_implications(%{view_mode: :auto} = flags, file),
     do: resolve_auto_view_mode(flags, file)
 
-  # A file and a directory both open in the editor: a directory opens its project (the saved session, or the project home).
+  # A file and a directory both open in the editor.
+  # A directory opens its project: the saved session, or the project home.
   @spec resolve_auto_view_mode(flags(), String.t()) :: flags()
   defp resolve_auto_view_mode(flags, _file), do: %{flags | view_mode: :editor}
 

@@ -13,6 +13,7 @@ defmodule MingaEditor.Handlers.SessionHandler do
 
   alias Minga.Session
   alias MingaEditor.Session.Capture
+  alias MingaEditor.Session.State, as: WorkspaceState
   alias MingaEditor.Session.Recovery
   alias MingaEditor.Session.Save
   alias MingaEditor.State, as: EditorState
@@ -82,7 +83,8 @@ defmodule MingaEditor.Handlers.SessionHandler do
   defp cancel_timer(nil), do: :ok
   defp cancel_timer(timer), do: Process.cancel_timer(timer)
 
-  # A headless editor never scans swap files, but it restores a project session when one is configured, so the storyboard factory can drive `minga .` with a saved session.
+  # A headless editor never scans swap files, but it restores a configured project session.
+  # That lets the storyboard factory drive `minga .` with a saved session.
   defp handle_check_swap_recovery(state) do
     recovery_effects(
       state,
@@ -104,15 +106,18 @@ defmodule MingaEditor.Handlers.SessionHandler do
   """
   @spec project_session_opts(EditorState.t()) :: keyword()
   def project_session_opts(%EditorState{} = state) do
-    SessionState.session_opts(state.session) ++
-      [project_root: Capture.project_root(state.workspace)]
+    Keyword.put(
+      SessionState.session_opts(state.session),
+      :project_root,
+      WorkspaceState.project_root(state.workspace)
+    )
   end
 
   @doc "True when this editor owns its project's session: persistence is on, there is a project root, and the editor opened the project rather than one file."
   @spec persists_project?(EditorState.t()) :: boolean()
   def persists_project?(%EditorState{} = state) do
     SessionState.enabled?(state.session) and SessionState.project_session?(state.session) and
-      is_binary(Capture.project_root(state.workspace))
+      is_binary(WorkspaceState.project_root(state.workspace))
   end
 
   @doc """

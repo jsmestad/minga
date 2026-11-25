@@ -238,10 +238,10 @@ defmodule MingaEditor.Startup do
         ),
       effect_scheduler: Keyword.get(opts, :effect_scheduler),
       session:
-        EditorSessionState.new(
-          Keyword.take(opts, [:swap_dir, :session_dir]) ++
-            [project_session?: project_open?(active_buf, opts)]
-        )
+        EditorSessionState.new([
+          {:project_session?, project_open?(active_buf, opts)}
+          | Keyword.take(opts, [:swap_dir, :session_dir])
+        ])
     }
 
     shell_state =
@@ -460,7 +460,8 @@ defmodule MingaEditor.Startup do
     Log.warning(:editor, "#{message}: #{inspect(reason)}")
   end
 
-  # A start without a file opens the project; a file argument (even one the command line opens after the editor starts) does not.
+  # A start without a file opens the project.
+  # A file argument does not, even though the command line opens it after the editor starts.
   @spec project_open?(pid() | nil, keyword()) :: boolean()
   defp project_open?(active_buf, opts) do
     is_nil(active_buf) and

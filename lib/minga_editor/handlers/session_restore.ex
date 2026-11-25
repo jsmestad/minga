@@ -124,7 +124,8 @@ defmodule MingaEditor.Handlers.SessionRestore do
         do: {path, pid}
   end
 
-  # Drops the windows whose file did not reopen, and finds the focused window among the survivors (the first one when it was dropped).
+  # Drops the windows whose file did not reopen, and finds the focused window among the survivors.
+  # When the focused window itself was dropped, focus goes to the first survivor.
   @spec surviving_layout(Snapshot.t(), %{String.t() => pid()}) ::
           {Layout.t() | nil, non_neg_integer()}
   defp surviving_layout(%Snapshot{layout: nil}, _opened), do: {nil, 0}
@@ -173,7 +174,8 @@ defmodule MingaEditor.Handlers.SessionRestore do
     %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)}
   end
 
-  # Every buffer a restored window shows joins the active tab's buffer list, so a window never shows a buffer its tab does not hold.
+  # Every buffer a restored window shows joins the active tab's buffer list.
+  # A window never shows a buffer its tab does not hold.
   @spec adopt_layout_buffers(state(), Layout.t(), %{String.t() => pid()}) :: state()
   defp adopt_layout_buffers(state, layout, opened) do
     buffers =

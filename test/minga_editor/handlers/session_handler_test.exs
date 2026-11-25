@@ -89,7 +89,7 @@ defmodule MingaEditor.Handlers.SessionHandlerTest do
       assert {^state,
               [
                 {:recover_session_async, [swap_dir: "/missing/swaps"],
-                 [session_dir: "/missing/session", project_root: nil], true, false}
+                 [project_root: nil, session_dir: "/missing/session"], true, false}
               ]} = SessionHandler.handle(state, :check_swap_recovery)
     end
 
@@ -103,7 +103,7 @@ defmodule MingaEditor.Handlers.SessionHandlerTest do
       assert {^state,
               [
                 {:recover_session_async, _swap,
-                 [session_dir: "/missing/session", project_root: "/tmp/project"], false, true}
+                 [project_root: "/tmp/project", session_dir: "/missing/session"], false, true}
               ]} = SessionHandler.handle(state, :check_swap_recovery)
     end
 

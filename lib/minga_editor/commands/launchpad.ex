@@ -33,7 +33,8 @@ defmodule MingaEditor.Commands.Launchpad do
     SessionRestore.restore_session(state)
   end
 
-  # Closes every file without unsaved edits, one at a time, after dropping the restored splits. Unsaved files stay open, and Minga's unreviewed changes live in the review, so starting fresh never loses work.
+  # Closes every file without unsaved edits, one at a time, after dropping the restored splits.
+  # Unsaved files stay open, and Minga's unreviewed changes live in the review, so nothing is lost.
   def execute(state, :session_start_fresh) do
     state = close_splits(state)
     budget = length(BufferRegistry.buffer_inventory(state))

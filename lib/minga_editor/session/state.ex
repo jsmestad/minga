@@ -521,6 +521,12 @@ defmodule MingaEditor.Session.State do
   @spec file_tree_state(t()) :: FileTreeState.t()
   def file_tree_state(%__MODULE__{file_tree: file_tree}), do: file_tree
 
+  @doc "The project root the workspace works in (the directory it was opened on), or nil outside a project."
+  @spec project_root(t()) :: String.t() | nil
+  def project_root(%__MODULE__{file_tree: %{original_root: root}}) when is_binary(root), do: root
+  def project_root(%__MODULE__{file_tree: %{project_root: root}}) when is_binary(root), do: root
+  def project_root(%__MODULE__{}), do: nil
+
   @doc "Replaces the FileTree UI state."
   @spec set_file_tree(t(), FileTreeState.t()) :: t()
   def set_file_tree(%__MODULE__{} = wspace, %FileTreeState{} = file_tree) do

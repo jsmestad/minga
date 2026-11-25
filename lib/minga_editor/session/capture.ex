@@ -24,7 +24,7 @@ defmodule MingaEditor.Session.Capture do
 
     %Snapshot{
       version: Snapshot.current_version(),
-      project_root: project_root(workspace),
+      project_root: MingaEditor.Session.State.project_root(workspace),
       buffers: inventory |> Enum.map(&entry(&1, paths)) |> Enum.reject(&is_nil/1),
       active_file: Map.get(paths, workspace.buffers.active),
       layout: layout,
@@ -32,12 +32,6 @@ defmodule MingaEditor.Session.Capture do
       clean_shutdown: false
     }
   end
-
-  @doc "The project root the session belongs to, or nil outside a project."
-  @spec project_root(MingaEditor.Session.State.t()) :: String.t() | nil
-  def project_root(%{file_tree: %{original_root: root}}) when is_binary(root), do: root
-  def project_root(%{file_tree: %{project_root: root}}) when is_binary(root), do: root
-  def project_root(_workspace), do: nil
 
   @spec buffer_paths([pid()]) :: %{pid() => String.t()}
   defp buffer_paths(pids) do
