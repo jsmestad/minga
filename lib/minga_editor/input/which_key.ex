@@ -87,26 +87,47 @@ defmodule MingaEditor.Input.WhichKey do
   end
 
   def open(state) do
-    case Minga.Editing.mode(state) do
-      :command ->
+    cond do
+      # An inline edit or question owns every key above which-key, so a panel there could not be walked.
+      inline_overlay_active?(state) ->
+        state
+
+      Minga.Editing.mode(state) == :command ->
         node = Minga.Keymap.Scope.Prompt.keymap(:insert, prompt_list: true)
         WhichKeyWorkflow.open_scope(state, node, "Command line")
 
-      _mode ->
+      true ->
         open_leader(state)
     end
+  end
+
+  @spec inline_overlay_active?(state()) :: boolean()
+  defp inline_overlay_active?(state) do
+    MingaEditor.Input.InlineOverlay.active(state, MingaEditor.Input.InlineEdit.spec()) != nil or
+      MingaEditor.Input.InlineOverlay.active(state, MingaEditor.Input.InlineAsk.spec([])) != nil
+  end
+
+  # A completion popup is a modal, and a leader does not start under a modal, so the pill closes it first.
+  @spec dismiss_completion(state()) :: state()
+  defp dismiss_completion(state) do
+    if MingaEditor.Shell.Traditional.ModalWorkflow.completion(state) == nil,
+      do: state,
+      else: MingaEditor.Shell.Traditional.ModalWorkflow.dismiss(state)
   end
 
   # The pill starts the leader in which-key itself, the way the CUA space leader does, and this handler walks it: no
   # key is sent to the mode or the focused surface, so nothing pending (`r` waiting for its target, a count, a
   # composer in Insert) can take one. Anything pending in the mode is dropped first, so it does not wait behind
-  # which-key for the key after it.
+  # which-key for the key after it. An operator waiting for its motion is cancelled, so the key after the leader command
+  # is not read as its motion.
   @spec open_leader(state()) :: state()
   defp open_leader(state) do
     root = Minga.Keymap.leader_trie(state.interaction.keymap_server)
 
     state
     |> WhichKeyWorkflow.dismiss()
+    |> dismiss_completion()
+    |> MingaEditor.Editing.cancel_operator()
     |> MingaEditor.Editing.update_mode_state(&Minga.Mode.clear_pending/1)
     |> Commands.execute({:leader_start, root, ["SPC"]})
     |> WhichKeyWorkflow.reveal_now()

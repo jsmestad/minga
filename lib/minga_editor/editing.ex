@@ -109,6 +109,24 @@ defmodule MingaEditor.Editing do
   end
 
   @doc """
+  Drops an operator waiting for its motion (`d`, `c`, `y`) and returns to Normal mode, as Escape would. Any other mode is left as it is.
+  """
+  @spec cancel_operator(EditorState.t()) :: EditorState.t()
+  def cancel_operator(
+        %EditorState{workspace: %{editing: %{mode: :operator_pending, mode_state: mode_state}}} =
+          state
+      ) do
+    base = Minga.Mode.OperatorPendingState.to_base_state(mode_state)
+
+    install_editing(
+      state,
+      MingaEditor.VimState.transition(state.workspace.editing, :normal, base)
+    )
+  end
+
+  def cancel_operator(%EditorState{} = state), do: state
+
+  @doc """
   Updates mode_state by applying a function or merging a map.
 
   When given a function, calls it with the current mode_state and

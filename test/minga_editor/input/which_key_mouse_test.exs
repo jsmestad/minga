@@ -184,6 +184,65 @@ defmodule MingaEditor.Input.WhichKeyMouseTest do
     assert buffer_content(ctx) == "hello"
   end
 
+  # Every mode the pill can be clicked in: it opens the leader in which-key, the key typed next walks it, Escape closes
+  # only the panel, and nothing reaches the buffer. An operator waiting for its motion does not survive the pill.
+  for {name, keys, mode_after} <- [
+        {"Normal", "", :normal},
+        {"Insert", "i", :insert},
+        {"Visual", "v", :visual},
+        {"Visual line", "V", :visual},
+        {"Replace", "R", :replace},
+        {"Operator-pending", "d", :normal},
+        {"Search", "/", :search}
+      ] do
+    test "in #{name} mode, the mode pill opens the leader and types nothing" do
+      ctx = start_editor("hello")
+      if unquote(keys) != "", do: send_keys_sync(ctx, unquote(keys))
+
+      send_gui_action(ctx, {:execute_command, "which_key_open"})
+      assert shown_path(ctx) == "SPC"
+
+      send_keys_sync(ctx, "f")
+      assert shown_path(ctx) == "SPC f"
+
+      send_keys_sync(ctx, "<Esc>")
+      assert shown_path(ctx) == nil
+      assert editor_mode(ctx) == unquote(mode_after)
+      assert buffer_content(ctx) == "hello"
+    end
+  end
+
+  test "over a completion popup in Insert mode, the mode pill closes the popup and opens the leader" do
+    ctx = start_editor("hello")
+    send_keys_sync(ctx, "A")
+
+    item = %{
+      label: "help",
+      insert_text: "help",
+      filter_text: "help",
+      kind: :function,
+      detail: "",
+      documentation: ""
+    }
+
+    completion = Minga.Editing.Completion.new([item], {0, 5})
+    payload = MingaEditor.State.ModalOverlay.Completion.new(1, completion: completion)
+
+    # Opening a real popup needs a completion source; the modal it opens is the same one.
+    :sys.replace_state(
+      ctx.editor,
+      &MingaEditor.Shell.Traditional.ModalWorkflow.open(&1, {:completion, payload})
+    )
+
+    assert completion_visible?(ctx)
+
+    send_gui_action(ctx, {:execute_command, "which_key_open"})
+
+    refute completion_visible?(ctx)
+    assert shown_path(ctx) == "SPC"
+    assert buffer_content(ctx) == "hello"
+  end
+
   defp whichkey_labels(ctx) do
     whichkey(ctx)
     |> then(&%{&1 | show: true})
