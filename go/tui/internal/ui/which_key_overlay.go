@@ -17,8 +17,8 @@ import (
 // whichKeyKindGroup is the entry kind the BEAM sends for a group (docs/GUI_PROTOCOL.md, gui_which_key).
 const whichKeyKindGroup byte = 1
 
-// whichKeyMinRows is the shortest a column gets when there is width to spread a long section across columns.
-const whichKeyMinRows = 4
+// whichKeyBandGapRows is the blank row between wrapped bands (xxl: one row in the TUI).
+const whichKeyBandGapRows = 1
 
 // whichKeyMinLabelCols is the narrowest a label shrinks to (with its …) when the columns do not fit the width.
 const whichKeyMinLabelCols = 4
@@ -86,8 +86,11 @@ func whichKeyColumnsFor(sections [][]generated.WhichKeyEntry, rows int) []whichK
 			if start == 0 {
 				column.title = section[0].Section
 			}
-			for _, entry := range chunk {
+			// A section that continues in further columns keeps one key column (anatomy.md rule 2).
+			for _, entry := range section {
 				column.keyWidth = max(column.keyWidth, displayWidth(entry.Key))
+			}
+			for _, entry := range chunk {
 				column.width = max(column.width, whichKeyEntryWidth(entry))
 			}
 			column.width = max(column.width, displayWidth(column.title)-column.keyWidth-whichKeyKeyToLabel.cols())
@@ -111,9 +114,9 @@ func whichKeyTotalWidth(columns []whichKeyColumn) int {
 // whichKeyLayout arranges the sections into bands of side-by-side columns that fit width columns and height rows
 // (each band takes headingRows plus its tallest column).
 //
-// It tries, in order: one band, with the shortest columns (at least whichKeyMinRows) that still fit, so a long
-// section spreads across columns while there is room; then the tallest columns wrapped onto more bands; then one band
-// whose widest labels shrink and truncate with ….
+// Each section is one column, as tall as the section, so the panel is as tall as its longest group (anatomy.md); a
+// section taller than the window allows continues in a further column. Columns that do not fit side by side wrap
+// onto more bands; only when that does not fit either do the widest labels shrink and truncate with ….
 func whichKeyLayout(entries []generated.WhichKeyEntry, width, height, headingRows int) [][]whichKeyColumn {
 	sections := whichKeySections(entries)
 	tallest := 1
@@ -122,15 +125,7 @@ func whichKeyLayout(entries []generated.WhichKeyEntry, width, height, headingRow
 	}
 	rows := max(min(tallest, height-headingRows), 1)
 
-	var single []whichKeyColumn
-	for candidateRows := rows; candidateRows >= min(whichKeyMinRows, rows); candidateRows-- {
-		candidate := whichKeyColumnsFor(sections, candidateRows)
-		if whichKeyTotalWidth(candidate) > width {
-			break
-		}
-		single = candidate
-	}
-	if single != nil {
+	if single := whichKeyColumnsFor(sections, rows); whichKeyTotalWidth(single) <= width {
 		return [][]whichKeyColumn{single}
 	}
 
@@ -157,7 +152,10 @@ func whichKeyBands(columns []whichKeyColumn, width int) [][]whichKeyColumn {
 
 func whichKeyBandsHeight(bands [][]whichKeyColumn, headingRows int) int {
 	height := 0
-	for _, band := range bands {
+	for i, band := range bands {
+		if i > 0 {
+			height += whichKeyBandGapRows
+		}
 		height += headingRows + whichKeyBandRows(band)
 	}
 	return height
@@ -225,11 +223,15 @@ func (m Model) renderFloatingWhichKey(which protocol.WhichKey) string {
 	bands := whichKeyLayout(which.Entries, inner, max(m.height-m.footerRows()-2, 1), headingRows)
 
 	var body []string
-	for _, columns := range bands {
+	for band, columns := range bands {
+		if band > 0 {
+			// Wrapped bands are blocks: one blank row (xxl) sets the next band's group names apart from the entries above.
+			body = append(body, m.whichKeyRow(nil, inner))
+		}
 		if titled {
 			cells := make([]string, len(columns))
 			for i, column := range columns {
-				cells[i] = lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(p.PopupSurface()).Render(fit(ansi.TruncateWc(column.title, column.outerWidth(), "…"), column.outerWidth()))
+				cells[i] = lipgloss.NewStyle().Foreground(p.Role(generated.ColorRoleTextMuted)).Background(p.PopupSurface()).Render(fit(ansi.TruncateWc(column.title, column.outerWidth(), "…"), column.outerWidth()))
 			}
 			body = append(body, m.whichKeyRow(cells, inner))
 		}
@@ -281,7 +283,7 @@ func (m Model) renderWhichKeyEntry(entry generated.WhichKeyEntry, column whichKe
 	if entry.Kind == whichKeyKindGroup {
 		labelStyle = labelStyle.Foreground(p.Role(generated.ColorRoleGroup))
 	}
-	countStyle := lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(p.PopupSurface())
+	countStyle := lipgloss.NewStyle().Foreground(p.Role(generated.ColorRoleTextMuted)).Background(p.PopupSurface())
 
 	label, count := entry.Label, entry.Count
 	countWidth := 0
@@ -312,7 +314,7 @@ func (m Model) whichKeyTopBorder(which protocol.WhichKey, width int) string {
 	border := lipgloss.NewStyle().Foreground(p.PopupBorder()).Background(p.PopupSurface())
 	keyStyle := lipgloss.NewStyle().Foreground(p.Accent()).Background(p.PopupSurface())
 	labelStyle := lipgloss.NewStyle().Foreground(p.PopupText()).Background(p.PopupSurface())
-	faint := lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(p.PopupSurface())
+	faint := lipgloss.NewStyle().Foreground(p.Role(generated.ColorRoleTextMuted)).Background(p.PopupSurface())
 	surface := lipgloss.NewStyle().Background(p.PopupSurface())
 
 	var crumbs strings.Builder
@@ -342,7 +344,7 @@ func (m Model) whichKeyBottomBorder(which protocol.WhichKey, width int) string {
 	p := m.palette()
 	border := lipgloss.NewStyle().Foreground(p.PopupBorder()).Background(p.PopupSurface())
 	keyStyle := lipgloss.NewStyle().Foreground(p.Accent()).Background(p.PopupSurface())
-	muted := lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(p.PopupSurface())
+	muted := lipgloss.NewStyle().Foreground(p.Role(generated.ColorRoleTextMuted)).Background(p.PopupSurface())
 	surface := lipgloss.NewStyle().Background(p.PopupSurface())
 
 	hints := make([]string, 0, len(which.Hints))

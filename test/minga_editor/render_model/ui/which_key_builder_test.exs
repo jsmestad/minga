@@ -59,7 +59,7 @@ defmodule MingaEditor.RenderModel.UI.WhichKeyBuilderTest do
              |> Enum.sort()
 
     assert model.path == "SPC"
-    assert model.breadcrumb == [%{key: "SPC", label: "", path: "SPC"}]
+    assert model.breadcrumb == [%{key: "SPC", label: "Leader", path: "SPC"}]
     assert model.hints == [%{key: "⌫", label: "back"}, %{key: "esc", label: "close"}]
   end
 
@@ -91,11 +91,11 @@ defmodule MingaEditor.RenderModel.UI.WhichKeyBuilderTest do
       |> WhichKeyState.begin(root, ["SPC"])
       |> WhichKeyState.progress(filetype_trie, ["SPC", "m"], "Filetype")
 
-    assert state.labels == ["", "Filetype"]
+    assert state.labels == ["Leader", "Filetype"]
     assert {:ok, ^root, ["SPC"]} = WhichKeyState.parent(state)
 
     back = WhichKeyState.progress(state, root, ["SPC"])
-    assert back.labels == [""]
+    assert back.labels == ["Leader"]
     assert WhichKeyState.parent(back) == :top
   end
 

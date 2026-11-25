@@ -4,6 +4,7 @@
 │ n New session                ? Ask about this       u Undo all agent edits   │
 │ s Stop                       e Rewrite selection    p Publish edits…         │
 │                              q Queue ›                                       │
+│                                                                              │
 │ More                                                                         │
 │ x Context ›                                                                  │
 │ S Session ›                                                                  │

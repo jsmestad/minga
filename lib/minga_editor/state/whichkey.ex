@@ -86,7 +86,8 @@ defmodule MingaEditor.State.WhichKey do
   end
 
   @spec node_label(Minga.Keymap.Bindings.node_t(), [String.t()]) :: String.t()
-  defp node_label(_node, [_leader]), do: ""
+  # The leader's own crumb names it, as the boards do: `SPC Leader`.
+  defp node_label(_node, [_leader]), do: "Leader"
 
   defp node_label(%{description: description}, _prefix) when is_binary(description),
     do: description

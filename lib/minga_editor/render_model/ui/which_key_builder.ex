@@ -120,7 +120,16 @@ defmodule MingaEditor.RenderModel.UI.WhichKeyBuilder do
     |> Enum.zip(labels)
     |> Enum.with_index(1)
     |> Enum.map(fn {{key, label}, depth} ->
-      %{key: key, label: label, path: prefix_keys |> Enum.take(depth) |> Enum.join(" ")}
+      %{
+        key: key,
+        label: crumb_label(label, depth, length(prefix_keys)),
+        path: prefix_keys |> Enum.take(depth) |> Enum.join(" ")
+      }
     end)
   end
+
+  # The leader names itself only while it is the open group (`SPC Leader`); below it the breadcrumb reads `SPC › a Minga`.
+  @spec crumb_label(String.t(), pos_integer(), pos_integer()) :: String.t()
+  defp crumb_label(_label, 1, depth) when depth > 1, do: ""
+  defp crumb_label(label, _crumb, _depth), do: label
 end

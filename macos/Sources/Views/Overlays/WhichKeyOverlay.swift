@@ -2,7 +2,8 @@
 ///
 /// One panel anchored above the modeline: the breadcrumb and the panel's own keys in a 24 pt header row, then one
 /// column per section the BEAM sends, each with its name dim above it and as wide as its longest entry. Rows sit on the
-/// 24 pt row pitch; keys sit in a fixed key column (the column's widest key plus `md`) in the accent colour. Fades in
+/// 24 pt row pitch; keys sit in a fixed key column (the column's widest key plus `md`) in the accent colour, and group
+/// names, counts and ⌘ keys in the text_muted role. Fades in
 /// within 120 ms, and not at all under Reduce Motion.
 
 import SwiftUI
@@ -54,17 +55,30 @@ public struct WhichKeyOverlay: View {
             Spacer(minLength: Spacing.xl)
             ForEach(Array(state.hints.enumerated()), id: \.offset) { _, hint in
                 HStack(spacing: Spacing.xs) {
-                    Text(hint.key)
-                        .font(Typography.monospacedSmall)
-                        .foregroundStyle(theme.popupKeyFg)
+                    hintKey(hint.key)
                     Text(hint.label)
                         .font(Typography.font(.caption))
-                        .foregroundStyle(theme.popupSecondaryFg)
+                        .foregroundStyle(theme.roleColor(.textMuted))
                 }
                 .anatomyPart("whichKey.hint", text: "\(hint.key) \(hint.label)", font: .caption)
             }
         }
         .frame(height: Self.rowPitch)
+    }
+
+    /// A hint's key. Backspace draws as the SF Symbol, because ⌫ in the monospaced face reads as a close control.
+    @ViewBuilder
+    private func hintKey(_ key: String) -> some View {
+        if key == "⌫" {
+            Image(systemName: "delete.left")
+                .font(Typography.font(.caption))
+                .foregroundStyle(theme.accent)
+                .accessibilityLabel("Backspace")
+        } else {
+            Text(key)
+                .font(Typography.monospacedSmall)
+                .foregroundStyle(theme.accent)
+        }
     }
 
     private var breadcrumbText: String {
@@ -77,11 +91,11 @@ public struct WhichKeyOverlay: View {
                 if index > 0 {
                     Text("›")
                         .font(Typography.font(.small))
-                        .foregroundStyle(theme.popupSecondaryFg)
+                        .foregroundStyle(theme.roleColor(.textMuted))
                 }
                 Text(crumb.key)
                     .font(Typography.monospacedSmall)
-                    .foregroundStyle(theme.popupKeyFg)
+                    .foregroundStyle(theme.accent)
                 if !crumb.label.isEmpty {
                     Text(crumb.label)
                         .font(Typography.font(.small, weight: .semibold))
@@ -91,7 +105,7 @@ public struct WhichKeyOverlay: View {
             if !state.count.isEmpty {
                 Text(state.count)
                     .font(Typography.font(.caption))
-                    .foregroundStyle(theme.popupSecondaryFg)
+                    .foregroundStyle(theme.roleColor(.textMuted))
             }
         }
         .lineLimit(1)
@@ -113,7 +127,7 @@ public struct WhichKeyOverlay: View {
             if column.hasHeading {
                 Text(column.title)
                     .font(Typography.font(.caption))
-                    .foregroundStyle(theme.popupSecondaryFg)
+                    .foregroundStyle(theme.roleColor(.textMuted))
                     .lineLimit(1)
                     .anatomyPart("whichKey.groupName", text: column.title, font: .caption)
                     .padding(.bottom, Spacing.xs)
@@ -129,7 +143,7 @@ public struct WhichKeyOverlay: View {
         HStack(spacing: 0) {
             Text(entry.key)
                 .font(Typography.monospacedSmall)
-                .foregroundStyle(theme.popupKeyFg)
+                .foregroundStyle(theme.accent)
                 .anatomyPart("whichKey.entryKey", text: entry.key, font: .small, monospaced: true)
                 .frame(width: keyWidth, alignment: .leading)
             HStack(spacing: Spacing.md) {
@@ -144,14 +158,14 @@ public struct WhichKeyOverlay: View {
                 if !entry.count.isEmpty {
                     Text(entry.count)
                         .font(Typography.font(.caption))
-                        .foregroundStyle(theme.popupSecondaryFg)
+                        .foregroundStyle(theme.roleColor(.textMuted))
                         .lineLimit(1)
                         .anatomyPart("whichKey.entryCount", text: entry.count, font: .caption)
                 }
                 if !entry.platformKey.isEmpty {
                     Text(entry.platformKey)
                         .font(Typography.monospacedSmall)
-                        .foregroundStyle(theme.popupSecondaryFg)
+                        .foregroundStyle(theme.roleColor(.textMuted))
                         .anatomyPart("whichKey.platformKey", text: entry.platformKey, font: .small, monospaced: true)
                 }
             }

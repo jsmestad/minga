@@ -33,7 +33,7 @@ defmodule MingaEditor.Input.WhichKeyCUATest do
 
     whichkey = whichkey(ctx)
     assert whichkey.prefix_keys == ["SPC", "a"]
-    assert whichkey.labels == ["", "Minga"]
+    assert whichkey.labels == ["Leader", "Minga"]
 
     model = WhichKeyBuilder.build(%{whichkey | show: true})
     assert model.path == "SPC a"
