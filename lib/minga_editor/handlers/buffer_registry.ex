@@ -89,6 +89,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
     state = ShellWorkflow.ensure_available(state)
     Minga.Log.info(:editor, "Buffer process #{inspect(pid)} died, removing from state")
     {crash, state} = EditorState.take_buffer_crash(state, pid)
+    was_active? = state.workspace.buffers.active == pid
 
     transitioned =
       state
@@ -106,7 +107,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
     # The file is reopened with that text once the dead buffer is gone.
     state
     |> WorkspaceWorkflow.persist_changes(transitioned)
-    |> CrashRecovery.schedule(crash)
+    |> CrashRecovery.schedule(crash, was_active?)
   end
 
   @spec do_file_tree_open(state(), pid(), String.t(), FileTree.t()) :: state()

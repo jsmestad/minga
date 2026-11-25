@@ -45,7 +45,7 @@ defmodule Minga.Buffer.SwapCrashTest do
                       %BufferCrashedEvent{buffer: ^buffer, path: ^path, swap_path: ^swap_path}}
 
       # The swap belongs to this running VM, so a scan from a live editor leaves it alone.
-      assert Recovery.scan(swap_dir: ctx.swap_dir) == []
+      assert Recovery.scan(swap_dir: ctx.swap_dir, pid_alive?: fn _os_pid -> true end) == []
       assert File.exists?(swap_path)
 
       # After the VM is gone, the next start finds it and recovers the text.

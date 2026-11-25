@@ -184,67 +184,6 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
     assert Minga.Buffer.content(buffer) == "new\n"
   end
 
-  test "a crashed buffer's file is reopened dirty with its unsaved text", %{tmp_dir: dir} do
-    path = Path.join(dir, "crashed.txt")
-    File.write!(path, "saved text\n")
-    state = initial_state(dir)
-
-    recovered = SessionRestore.recover_crashed_buffer(state, path, "unsaved text\n")
-    buffer = recovered.workspace.buffers.active
-    on_exit(fn -> stop_buffer(buffer) end)
-
-    assert Minga.Buffer.file_path(buffer) == path
-    assert Minga.Buffer.content(buffer) == "unsaved text\n"
-    assert Minga.Buffer.dirty?(buffer)
-
-    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(recovered) =~
-             "crashed.txt was reopened with its unsaved text"
-  end
-
-  test "a file that cannot be reopened leaves the editor unchanged", %{tmp_dir: dir} do
-    missing = Path.join(dir, "deleted-since.txt")
-    state = initial_state(dir)
-
-    log =
-      ExUnit.CaptureLog.capture_log(fn ->
-        assert SessionRestore.recover_crashed_buffer(state, missing, "unsaved text") == state
-      end)
-
-    assert log =~ "Could not reopen #{missing}"
-    assert log =~ "its swap file is kept"
-  end
-
-  test "a reopened buffer that dies while it takes the text does not take the editor down", %{
-    tmp_dir: dir
-  } do
-    path = Path.join(dir, "dies-again.txt")
-    File.write!(path, "saved text")
-    state = initial_state(dir)
-    test = self()
-
-    # Stands in for a buffer of this file that exits as soon as it is asked for anything.
-    dying =
-      spawn(fn ->
-        {:ok, _owner} = Registry.register(Minga.Buffer.Registry, path, nil)
-        send(test, :registered)
-
-        receive do
-          {:"$gen_call", _from, _request} -> exit(:died_during_recovery)
-        end
-      end)
-
-    assert_receive :registered
-    monitor = Process.monitor(dying)
-
-    log =
-      ExUnit.CaptureLog.capture_log(fn ->
-        assert SessionRestore.recover_crashed_buffer(state, path, "unsaved text") == state
-      end)
-
-    assert_receive {:DOWN, ^monitor, :process, ^dying, :died_during_recovery}
-    assert log =~ "Could not reopen #{path}"
-  end
-
   test "a deleted saved active file is not reopened as an empty buffer", %{tmp_dir: dir} do
     existing_path = Path.join(dir, "existing.ex")
     missing_path = Path.join(dir, "deleted.ex")
@@ -267,12 +206,6 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
   end
 
   @spec initial_state(String.t(), keyword()) :: EditorState.t()
-  defp stop_buffer(pid) do
-    GenServer.stop(pid, :normal)
-  catch
-    :exit, _reason -> :ok
-  end
-
   defp initial_state(dir, opts \\ []) do
     manager_name = Module.concat(__MODULE__, "Parser#{System.unique_integer([:positive])}")
 

@@ -409,10 +409,17 @@ defmodule MingaEditor.State do
     do: %{state | buffer_lifecycle: BufferLifecycle.record_crash(state.buffer_lifecycle, crash)}
 
   @doc "Takes the crash a dead buffer announced, or `nil` when it stopped without one."
-  @spec take_buffer_crash(t(), pid()) :: {Minga.Events.BufferCrashedEvent.t() | nil, t()}
+  @spec take_buffer_crash(t(), pid()) :: {BufferLifecycle.crash() | nil, t()}
   def take_buffer_crash(%__MODULE__{} = state, pid) when is_pid(pid) do
     {crash, lifecycle} = BufferLifecycle.take_crash(state.buffer_lifecycle, pid)
     {crash, %{state | buffer_lifecycle: lifecycle}}
+  end
+
+  @doc "Remembers that crash recovery reopened this buffer."
+  @spec mark_buffer_crash_recovered(t(), pid()) :: t()
+  def mark_buffer_crash_recovered(%__MODULE__{} = state, pid) when is_pid(pid) do
+    lifecycle = BufferLifecycle.mark_crash_recovered(state.buffer_lifecycle, pid)
+    %{state | buffer_lifecycle: lifecycle}
   end
 
   @doc "Removes a retired buffer across every root owner that retains its identity."

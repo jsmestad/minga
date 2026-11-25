@@ -19,7 +19,7 @@ defmodule MingaEditor.State.BufferLifecycleCrashTest do
     pid = self()
     lifecycle = pid |> monitored() |> BufferLifecycle.record_crash(crash(pid))
 
-    assert {%BufferCrashedEvent{swap_path: "/swap/notes.swap"}, lifecycle} =
+    assert {{:first, %BufferCrashedEvent{swap_path: "/swap/notes.swap"}}, lifecycle} =
              BufferLifecycle.take_crash(lifecycle, pid)
 
     assert {nil, ^lifecycle} = BufferLifecycle.take_crash(lifecycle, pid)
@@ -36,12 +36,26 @@ defmodule MingaEditor.State.BufferLifecycleCrashTest do
     assert {nil, _lifecycle} = BufferLifecycle.take_crash(monitored(self()), self())
   end
 
-  test "retiring the monitor forgets an untaken crash" do
+  test "a buffer that crash recovery reopened announces a repeated crash" do
     pid = self()
 
     lifecycle =
       pid
       |> monitored()
+      |> BufferLifecycle.mark_crash_recovered(pid)
+      |> BufferLifecycle.record_crash(crash(pid))
+
+    assert {{:repeated, %BufferCrashedEvent{buffer: ^pid}}, _lifecycle} =
+             BufferLifecycle.take_crash(lifecycle, pid)
+  end
+
+  test "retiring the monitor forgets an untaken crash and the recovery mark" do
+    pid = self()
+
+    lifecycle =
+      pid
+      |> monitored()
+      |> BufferLifecycle.mark_crash_recovered(pid)
       |> BufferLifecycle.record_crash(crash(pid))
       |> BufferLifecycle.retire_monitor(pid)
 
