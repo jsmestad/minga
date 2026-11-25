@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 
 	"github.com/jsmestad/minga/go/tui/internal/generated"
+	"github.com/jsmestad/minga/go/tui/internal/terminal"
 )
 
 const (
@@ -73,6 +74,28 @@ func EncodeReady(width, height uint16) []byte {
 		// against. The BEAM rejects a mismatch with an explicit protocol_error.
 		byte(generated.ProtocolVersion >> 8), byte(generated.ProtocolVersion),
 	}
+}
+
+// EncodeFrontendForeground encodes whether the terminal has the window focus: 1 in the foreground, 0 in the background.
+func EncodeFrontendForeground(foreground bool) []byte {
+	if foreground {
+		return []byte{generated.OPFrontendForeground, 1}
+	}
+	return []byte{generated.OPFrontendForeground, 0}
+}
+
+// EncodeTerminalReport encodes the frontend's complete report of its host terminal's features.
+// Wire format: <0x62, body_len:u16, count:u8, count x (feature:u8, status:u8)>.
+// The capabilities value is the only input, so the report cannot say anything the frontend does not act on.
+func EncodeTerminalReport(capabilities terminal.Capabilities) []byte {
+	entries := capabilities.Entries()
+	bodyLen := 1 + 2*len(entries)
+	out := make([]byte, 0, 3+bodyLen)
+	out = append(out, generated.OPTerminalReport, byte(bodyLen>>8), byte(bodyLen), byte(len(entries)))
+	for _, entry := range entries {
+		out = append(out, byte(entry.Feature), byte(entry.Status))
+	}
+	return out
 }
 
 func EncodeResize(width, height uint16) []byte {

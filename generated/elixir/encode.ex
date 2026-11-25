@@ -10,6 +10,30 @@ defmodule Minga.Protocol.Encode do
 
   alias Minga.Protocol.EncodingError
 
+  @spec encode_terminal_feature(atom()) :: non_neg_integer()
+  def encode_terminal_feature(:unknown), do: 0
+  def encode_terminal_feature(:true_color), do: 1
+  def encode_terminal_feature(:styled_underlines), do: 2
+  def encode_terminal_feature(:underline_color), do: 3
+  def encode_terminal_feature(:hyperlinks), do: 4
+  def encode_terminal_feature(:kitty_keyboard), do: 5
+  def encode_terminal_feature(:desktop_notifications), do: 6
+  def encode_terminal_feature(:tab_title), do: 7
+  def encode_terminal_feature(:tab_progress), do: 8
+  def encode_terminal_feature(:kitty_graphics), do: 9
+  def encode_terminal_feature(:synchronized_output), do: 10
+  def encode_terminal_feature(:focus_reporting), do: 11
+  def encode_terminal_feature(:clipboard_osc52), do: 12
+  def encode_terminal_feature(_), do: 0
+
+  @spec encode_terminal_feature_status(atom()) :: non_neg_integer()
+  def encode_terminal_feature_status(:unknown), do: 0
+  def encode_terminal_feature_status(:pending), do: 1
+  def encode_terminal_feature_status(:detected), do: 2
+  def encode_terminal_feature_status(:missing), do: 3
+  def encode_terminal_feature_status(:fallback), do: 4
+  def encode_terminal_feature_status(_), do: 0
+
   @spec encode_agent_approval_decision(atom()) :: non_neg_integer()
   def encode_agent_approval_decision(:unknown), do: 0
   def encode_agent_approval_decision(:approve), do: 1

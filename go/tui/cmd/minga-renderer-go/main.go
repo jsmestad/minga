@@ -41,6 +41,9 @@ func run() error {
 	if err := protocol.WritePacket(os.Stdout, model.ReadyPacket()); err != nil {
 		return err
 	}
+	if err := protocol.WritePacket(os.Stdout, model.TerminalReportPacket()); err != nil {
+		return err
+	}
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
 	program := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(tty), tea.WithOutput(filter.TrackOutput(tty)), tea.WithFilter(filter.Filter))

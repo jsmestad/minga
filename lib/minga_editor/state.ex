@@ -341,6 +341,7 @@ defmodule MingaEditor.State do
       |> FrontendState.resize_terminal(viewport)
       |> FrontendState.accept_capabilities(capabilities)
       |> FrontendState.clear_native_presentation()
+      |> FrontendState.clear_connection_reports()
       |> FrontendState.clear_picker_rows()
       |> FrontendState.clear_file_dialog()
 
@@ -348,6 +349,26 @@ defmodule MingaEditor.State do
     render = RenderState.invalidate_layout(state.render)
     %{state | render: render}
   end
+
+  @doc """
+  Records whether the frontend is in the foreground, and says whether that changed what the editor knew.
+
+  The second element is the new status when it differs from the old one, so the caller can tell other parts of Minga exactly once.
+  """
+  @spec report_frontend_foreground(t(), :foreground | :background) ::
+          {t(), :foreground | :background | :unchanged}
+  def report_frontend_foreground(%__MODULE__{} = state, status) do
+    if FrontendState.foreground(state.frontend) == status do
+      {state, :unchanged}
+    else
+      {%{state | frontend: FrontendState.report_foreground(state.frontend, status)}, status}
+    end
+  end
+
+  @doc "Replaces the terminal frontend's report of its host terminal's features."
+  @spec accept_terminal_report(t(), MingaEditor.Frontend.TerminalReport.t()) :: t()
+  def accept_terminal_report(%__MODULE__{} = state, report),
+    do: %{state | frontend: FrontendState.accept_terminal_report(state.frontend, report)}
 
   @doc "Records how many result rows the frontend's picker list shows."
   @spec report_picker_rows(t(), pos_integer()) :: t()

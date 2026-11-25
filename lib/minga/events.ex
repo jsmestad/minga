@@ -47,6 +47,7 @@ defmodule Minga.Events do
   | `:agent_tools_changed` | `AgentToolsChangedEvent` | `source: term()` |
   | `:inference_route_status_changed` | `MingaAgent.InferenceRoute.StatusChangedEvent` | `route_id: String.t(), short_name: String.t(), status: Status.t()` |
   | `:face_overrides_changed` | `FaceOverridesChangedEvent` | `buffer: pid(), overrides: map()` |
+  | `:frontend_foreground_changed` | `FrontendForegroundChangedEvent` | `status: :foreground \| :background \| :unknown` |
   | `:agent_session_restarted` | `MingaAgent.SessionManager.SessionRestartedEvent` | `session_id, old_pid, new_pid, reason` |
   | `:background_subagent_started` | `MingaAgent.Subagent.Handle` | `session_id: String.t(), pid: pid(), task: String.t()` |
   | `:node_connected` | `Minga.Distribution.Events.NodeConnectedEvent` | `server_name, node, connected_at` |
@@ -274,6 +275,20 @@ defmodule Minga.Events do
           }
   end
 
+  defmodule FrontendForegroundChangedEvent do
+    @moduledoc """
+    Payload for `:frontend_foreground_changed` events.
+
+    Sent by the Editor when what it knows about the frontend's place changes. The frontend reports that it moved to the foreground or to the background: the terminal window got or lost focus, or the macOS app became active or resigned. A new frontend connection makes the status `:unknown` again until that frontend reports.
+
+    A subscriber that must act only while nobody is looking keeps the last status it received. Until the first event the status is not known, and a terminal without focus reporting never sends one. Treat `:unknown` as the foreground when the action would interrupt the user: a notification that is not sent is the safe side.
+    """
+    @enforce_keys [:status]
+    defstruct [:status]
+
+    @type t :: %__MODULE__{status: :foreground | :background | :unknown}
+  end
+
   defmodule FaceOverridesChangedEvent do
     @moduledoc """
     Payload for `:face_overrides_changed` events.
@@ -361,6 +376,7 @@ defmodule Minga.Events do
           | :supervisor_restarted
           | :log_message
           | :face_overrides_changed
+          | :frontend_foreground_changed
           | :agent_session_stopped
           | :agent_session_restarted
           | :agent_desktop_notification
@@ -404,6 +420,7 @@ defmodule Minga.Events do
           | ExtensionRestartRequiredEvent.t()
           | AgentHookEvent.t()
           | FaceOverridesChangedEvent.t()
+          | FrontendForegroundChangedEvent.t()
           | LoadUserThemesEvent.t()
           | OptionChangedEvent.t()
           | AgentToolsChangedEvent.t()
@@ -536,6 +553,7 @@ defmodule Minga.Events do
   @spec broadcast(:option_changed, OptionChangedEvent.t()) :: :ok
   @spec broadcast(:power_thermal_state_changed, PowerThermalStateEvent.t()) :: :ok
   @spec broadcast(:face_overrides_changed, FaceOverridesChangedEvent.t()) :: :ok
+  @spec broadcast(:frontend_foreground_changed, FrontendForegroundChangedEvent.t()) :: :ok
   @spec broadcast(:agent_session_stopped, MingaAgent.SessionManager.SessionStoppedEvent.t()) ::
           :ok
   @spec broadcast(:agent_session_restarted, MingaAgent.SessionManager.SessionRestartedEvent.t()) ::

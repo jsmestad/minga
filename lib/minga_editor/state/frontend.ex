@@ -10,6 +10,7 @@ defmodule MingaEditor.State.Frontend do
   """
 
   alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.Frontend.TerminalReport
   alias MingaEditor.NativeIPC.NativePresentationObservation
   alias MingaEditor.State.ResourcePressure
   alias MingaEditor.Viewport
@@ -22,6 +23,13 @@ defmodule MingaEditor.State.Frontend do
           | {:open, file_dialog_request_id()}
           | {:save_as, file_dialog_request_id(), pid()}
 
+  @typedoc """
+  Whether the frontend is in the foreground: the terminal has the window focus, or the macOS app is active.
+
+  `:unknown` until a frontend reports it. A terminal without focus reporting never reports, so a reader must decide what `:unknown` means for its own purpose and match all three values.
+  """
+  @type foreground_status :: :foreground | :background | :unknown
+
   @type t :: %__MODULE__{
           backend: backend(),
           rendering: rendering_policy(),
@@ -29,6 +37,8 @@ defmodule MingaEditor.State.Frontend do
           terminal_viewport: Viewport.t(),
           picker_rows: pos_integer() | nil,
           capabilities: Capabilities.t(),
+          foreground: foreground_status(),
+          terminal_report: TerminalReport.t() | nil,
           resource_pressure: ResourcePressure.t(),
           native_presentation: NativePresentationObservation.t() | nil,
           last_input_seq: non_neg_integer(),
@@ -44,6 +54,8 @@ defmodule MingaEditor.State.Frontend do
             terminal_viewport: Viewport.new(24, 80),
             picker_rows: nil,
             capabilities: %Capabilities{},
+            foreground: :unknown,
+            terminal_report: nil,
             resource_pressure: ResourcePressure.new(),
             native_presentation: nil,
             last_input_seq: 0,
@@ -73,6 +85,30 @@ defmodule MingaEditor.State.Frontend do
   @spec accept_capabilities(t(), Capabilities.t()) :: t()
   def accept_capabilities(%__MODULE__{} = frontend, %Capabilities{} = capabilities),
     do: %{frontend | capabilities: capabilities}
+
+  @doc "Records whether the frontend reported that it is in the foreground or in the background."
+  @spec report_foreground(t(), :foreground | :background) :: t()
+  def report_foreground(%__MODULE__{} = frontend, status)
+      when status in [:foreground, :background],
+      do: %{frontend | foreground: status}
+
+  @doc "Returns whether the frontend is in the foreground, in the background, or has not said."
+  @spec foreground(t()) :: foreground_status()
+  def foreground(%__MODULE__{foreground: status}), do: status
+
+  @doc "Replaces the terminal frontend's report of its host terminal's features. Each report is a complete snapshot."
+  @spec accept_terminal_report(t(), TerminalReport.t()) :: t()
+  def accept_terminal_report(%__MODULE__{} = frontend, %TerminalReport{} = report),
+    do: %{frontend | terminal_report: report}
+
+  @doc "Returns the terminal frontend's report, or `nil` when the frontend has no host terminal or has not reported yet."
+  @spec terminal_report(t()) :: TerminalReport.t() | nil
+  def terminal_report(%__MODULE__{terminal_report: report}), do: report
+
+  @doc "Forgets what a frontend connection reported about itself: a new connection reports again."
+  @spec clear_connection_reports(t()) :: t()
+  def clear_connection_reports(%__MODULE__{} = frontend),
+    do: %{frontend | foreground: :unknown, terminal_report: nil}
 
   @doc "Clears connection-scoped native presentation evidence."
   @spec clear_native_presentation(t()) :: t()

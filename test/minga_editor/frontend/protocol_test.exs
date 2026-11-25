@@ -137,6 +137,35 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     end
   end
 
+  describe "decode_event/1 — frontend_foreground" do
+    test "decodes the foreground and the background, and rejects any other byte" do
+      assert Protocol.decode_event(<<0x13, 1>>) == {:ok, {:frontend_foreground, :foreground}}
+      assert Protocol.decode_event(<<0x13, 0>>) == {:ok, {:frontend_foreground, :background}}
+
+      for malformed <- [<<0x13>>, <<0x13, 2>>, <<0x13, 1, 0>>] do
+        assert Protocol.decode_event(malformed) == {:error, :malformed}
+      end
+    end
+  end
+
+  describe "decode_event/1 — terminal_report" do
+    test "decodes the terminal frontend's snapshot of its terminal's features" do
+      # true_color (1) detected (2), kitty_keyboard (5) pending (1)
+      body = <<2, 1, 2, 5, 1>>
+
+      assert {:ok, {:terminal_report, report}} =
+               Protocol.decode_event(<<0x62, byte_size(body)::16, body::binary>>)
+
+      assert report.features == %{true_color: :detected, kitty_keyboard: :pending}
+    end
+
+    test "a report whose length or count is wrong is malformed" do
+      for malformed <- [<<0x62>>, <<0x62, 0, 5, 2, 1, 2>>, <<0x62, 0, 3, 2, 1, 2>>] do
+        assert Protocol.decode_event(malformed) == {:error, :malformed}
+      end
+    end
+  end
+
   describe "decode_event/1 — capabilities_updated" do
     test "decodes a capability-format-2 capabilities_updated event" do
       capabilities = <<0, 2, 1, 1, 0, 0, 1, 1, 67_108_864::32, 1_000_000::32, 65_536::32>>

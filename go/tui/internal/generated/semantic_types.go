@@ -2,6 +2,36 @@
 
 package generated
 
+// TerminalFeature is a generated enum (repr u8).
+type TerminalFeature uint8
+
+const (
+	TerminalFeatureUnknown              TerminalFeature = 0
+	TerminalFeatureTrueColor            TerminalFeature = 1
+	TerminalFeatureStyledUnderlines     TerminalFeature = 2
+	TerminalFeatureUnderlineColor       TerminalFeature = 3
+	TerminalFeatureHyperlinks           TerminalFeature = 4
+	TerminalFeatureKittyKeyboard        TerminalFeature = 5
+	TerminalFeatureDesktopNotifications TerminalFeature = 6
+	TerminalFeatureTabTitle             TerminalFeature = 7
+	TerminalFeatureTabProgress          TerminalFeature = 8
+	TerminalFeatureKittyGraphics        TerminalFeature = 9
+	TerminalFeatureSynchronizedOutput   TerminalFeature = 10
+	TerminalFeatureFocusReporting       TerminalFeature = 11
+	TerminalFeatureClipboardOsc52       TerminalFeature = 12
+)
+
+// TerminalFeatureStatus is a generated enum (repr u8).
+type TerminalFeatureStatus uint8
+
+const (
+	TerminalFeatureStatusUnknown  TerminalFeatureStatus = 0
+	TerminalFeatureStatusPending  TerminalFeatureStatus = 1
+	TerminalFeatureStatusDetected TerminalFeatureStatus = 2
+	TerminalFeatureStatusMissing  TerminalFeatureStatus = 3
+	TerminalFeatureStatusFallback TerminalFeatureStatus = 4
+)
+
 // AgentApprovalDecision is a generated enum (repr u8).
 type AgentApprovalDecision uint8
 
