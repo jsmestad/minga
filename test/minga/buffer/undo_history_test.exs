@@ -901,9 +901,9 @@ defmodule Minga.Buffer.UndoHistoryTest do
       end
     end
 
-    # Addendum 4 F2's shape: budget 3, whole-character edits with emoji, two tasks, presses and your undo. Some pieces are
-    # long lines (past 256 and 4096 bytes) of CJK, flag runs of odd and even length, ZWJ sequences, combining marks and
-    # CRLF, so a change's cluster cuts are decided far from any line feed.
+    # Addendum 4 F2's shape: budget 3, whole-character edits with emoji, two tasks, presses and your undo. Some pieces
+    # are long lines (past 256 and 4096 bytes) of CJK, flag runs of odd and even length, ZWJ sequences, combining marks
+    # and CRLF, so a change's cluster cuts are decided far from any line feed.
     property "compaction changes no later outcome on emoji text with two tasks and a tiny budget" do
       graphemes = ["a", "f", "o", "b", "r", "😀", "é", "\n"]
 
