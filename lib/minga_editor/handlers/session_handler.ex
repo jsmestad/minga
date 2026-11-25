@@ -12,6 +12,7 @@ defmodule MingaEditor.Handlers.SessionHandler do
   """
 
   alias Minga.Session
+  alias MingaEditor.Session.Capture
   alias MingaEditor.Session.Recovery
   alias MingaEditor.Session.Save
   alias MingaEditor.State, as: EditorState
@@ -115,8 +116,8 @@ defmodule MingaEditor.Handlers.SessionHandler do
 
   @spec handle_save_session(EditorState.t()) :: {EditorState.t(), [session_effect()]}
   defp handle_save_session(state) do
-    snapshot = Session.snapshot(state)
-    opts = SessionState.session_opts(state.session)
+    snapshot = Capture.snapshot(state)
+    opts = SessionState.session_opts(state.session) ++ [project_root: snapshot.project_root]
 
     timer_effect =
       case state.frontend.backend do

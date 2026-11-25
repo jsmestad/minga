@@ -1,10 +1,8 @@
 defmodule Minga.Session do
   @moduledoc """
-  Session state persistence for crash recovery.
+  Session persistence: what the window held, saved per project.
 
-  Periodically saves the list of open files, cursor positions, scroll
-  positions, and active buffer to a JSON file. On next launch, the
-  session is restored: files are reopened and cursors are repositioned.
+  The editor periodically saves a `Minga.Session.Snapshot` (open files, cursors, window splits with each window's scroll, and the active file) to a JSON file. Each project root has its own file (see `session_file/1`), so opening a project picks up where you left off in that project. `MingaEditor.Session.Capture` builds the snapshot from editor state.
 
   The session file includes a `version` field for forward compatibility.
   Old session files that lack newer fields get defaults when loaded.
@@ -17,10 +15,7 @@ defmodule Minga.Session do
   in `*Messages*`.
   """
 
-  alias Minga.Buffer
-
   @session_filename "session.json"
-  @current_version 1
 
   alias Minga.Session.BufferEntry
   alias Minga.Session.Snapshot
@@ -31,7 +26,11 @@ defmodule Minga.Session do
   @typedoc "A single buffer's session state."
   @type buffer_entry :: BufferEntry.t()
 
-  @doc "Returns the session file path."
+  @doc """
+  Returns the session file path.
+
+  With a `:project_root`, each project keeps its own file under `projects/` in the session directory, named after the project and a hash of its absolute path, so two projects with one name never share a session. Without one, the global `session.json` is used.
+  """
   @spec session_file(keyword()) :: String.t()
   def session_file(opts \\ []) do
     dir =
@@ -42,44 +41,10 @@ defmodule Minga.Session do
         )
       end)
 
-    Path.join(dir, @session_filename)
-  end
-
-  @doc """
-  Builds a session snapshot from the Editor's state.
-
-  Queries each open buffer for its file path and cursor position.
-  Only includes file-backed buffers (not scratch, nofile, or log buffers).
-  """
-  @spec snapshot(MingaEditor.State.t()) :: snapshot()
-  def snapshot(editor_state) do
-    buffers =
-      editor_state.workspace.buffers.list
-      |> Enum.flat_map(fn pid ->
-        file_path = Buffer.file_path(pid)
-
-        case file_path do
-          nil ->
-            []
-
-          path ->
-            {line, col} = get_cursor(pid)
-            [%BufferEntry{file: path, cursor_line: line, cursor_col: col}]
-        end
-      end)
-
-    active_file =
-      case editor_state.workspace.buffers.active do
-        nil -> nil
-        pid -> Buffer.file_path(pid)
-      end
-
-    %Snapshot{
-      version: @current_version,
-      buffers: buffers,
-      active_file: active_file,
-      clean_shutdown: false
-    }
+    case Keyword.get(opts, :project_root) do
+      root when is_binary(root) and root != "" -> Path.join([dir, "projects", project_file(root)])
+      _none -> Path.join(dir, @session_filename)
+    end
   end
 
   @doc "Saves a session snapshot to disk as JSON."
@@ -87,7 +52,7 @@ defmodule Minga.Session do
   def save(snapshot, opts \\ []) do
     path = session_file(opts)
     dir = Path.dirname(path)
-    json = JSON.encode!(snapshot)
+    json = snapshot |> encodable() |> JSON.encode!()
     tmp = path <> ".tmp"
 
     with :ok <- File.mkdir_p(dir),
@@ -142,41 +107,24 @@ defmodule Minga.Session do
 
   # ── Private ─────────────────────────────────────────────────────────────
 
-  @spec get_cursor(pid()) :: {non_neg_integer(), non_neg_integer()}
-  defp get_cursor(pid) do
-    Buffer.cursor(pid)
-  catch
-    # Race window: buffer may exit between snapshot iteration and this call.
-    :exit, _ -> {0, 0}
-  end
-
   @spec decode(String.t()) :: {:ok, snapshot()} | {:error, term()}
   defp decode(data) do
     case JSON.decode(data) do
-      {:ok, %{"buffers" => buffers} = raw} ->
-        entries =
-          Enum.map(buffers, fn b ->
-            %BufferEntry{
-              file: b["file"],
-              cursor_line: b["cursor_line"] || 0,
-              cursor_col: b["cursor_col"] || 0
-            }
-          end)
-
-        {:ok,
-         %Snapshot{
-           version: raw["version"] || 1,
-           buffers: entries,
-           active_file: raw["active_file"],
-           clean_shutdown: raw["clean_shutdown"] == true
-         }}
-
-      {:ok, _} ->
-        {:error, :invalid_format}
-
-      {:error, reason} ->
-        {:error, reason}
+      {:ok, raw} -> Snapshot.from_map(raw)
+      {:error, reason} -> {:error, reason}
     end
+  end
+
+  @spec encodable(snapshot() | map()) :: map()
+  defp encodable(%Snapshot{} = snapshot), do: Snapshot.to_map(snapshot)
+  defp encodable(map) when is_map(map), do: map
+
+  @spec project_file(String.t()) :: String.t()
+  defp project_file(root) do
+    root = Path.expand(root)
+    hash = :sha256 |> :crypto.hash(root) |> Base.encode16(case: :lower) |> binary_part(0, 16)
+    name = root |> Path.basename() |> String.replace(~r/[^A-Za-z0-9._-]/, "_")
+    "#{name}-#{hash}.json"
   end
 
   # ── Swap file delegates ───────────────────────────────────────────────────
