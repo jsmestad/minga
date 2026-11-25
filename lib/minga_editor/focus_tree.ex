@@ -177,6 +177,7 @@ defmodule MingaEditor.FocusTree do
       |> maybe_add(layout.file_tree, &file_tree_node(&1, state))
       |> maybe_add(layout.agent_panel, &agent_panel_node/1)
       |> maybe_add(layout.edit_timeline, &timeline_node/1)
+      |> maybe_add(layout.tasks_drawer, &tasks_drawer_node/1)
       |> maybe_add(layout.status_bar, &TreeNode.new(:status_bar, &1, handler: bottom_handler))
       |> Kernel.++([TreeNode.new(:minibuffer, layout.minibuffer, handler: bottom_handler)])
       |> maybe_add(bottom_panel_rect(layout, state), &bottom_panel_node/1)
@@ -199,6 +200,12 @@ defmodule MingaEditor.FocusTree do
       scrollable?: true,
       focusable?: true
     )
+  end
+
+  # Rows and actions are semantic clicks (gui_action), so raw mouse events here only stop at the drawer.
+  @spec tasks_drawer_node(Layout.rect()) :: TreeNode.t()
+  defp tasks_drawer_node(rect) do
+    TreeNode.new(:tasks_drawer, rect, handler: Input.OverlaySink, focusable?: true)
   end
 
   @spec bottom_panel_rect(Layout.t(), map() | nil) :: Layout.rect() | nil

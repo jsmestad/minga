@@ -90,9 +90,9 @@ defmodule Minga.Keymap.Scope.AgentStartRemedyTest do
       defaults = Minga.Keymap.Defaults.leader_trie()
 
       for {model, space_leader, hint} <- [
-            {:vim, :chord, "SPC a n"},
-            {:vim, :off, "SPC a n"},
-            {:cua, :chord, "SPC a n"},
+            {:vim, :chord, "SPC a S n"},
+            {:vim, :off, "SPC a S n"},
+            {:cua, :chord, "SPC a S n"},
             {:cua, :off, nil}
           ] do
         assert AgentScope.new_session_key_hint(defaults, model, space_leader) == hint,

@@ -118,6 +118,7 @@ type ChromePayload struct {
 	AgentHelp           AgentHelp
 	AgentTranscript     AgentTranscript
 	Timeline            EditTimeline
+	TasksDrawer         generated.GuiTasksDrawerFields
 	Gutter              GutterSeparator
 	CursorlineChrome    CursorlineChrome
 	WindowGutter        Gutter

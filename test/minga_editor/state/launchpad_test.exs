@@ -19,7 +19,7 @@ defmodule MingaEditor.State.LaunchpadTest do
                "recent-2",
                "task-7",
                "action-project_find_file",
-               "action-agent_new_session",
+               "action-agent_new_task",
                "action-toggle_file_tree",
                "action-project_switch"
              ]
@@ -134,6 +134,17 @@ defmodule MingaEditor.State.LaunchpadTest do
       {tasks, tab_bar} = followed([{1, "/work/minga"}, {2, "/work/other"}])
 
       assert listed(tasks, tab_bar, home(project_root: nil, place: :outside)) == [1, 2]
+    end
+
+    test "a conversation that was opened and never prompted is not listed" do
+      pid = spawn(fn -> :ok end)
+      workspace = Workspace.new_agent(1, "Agent", pid, "/work/minga")
+      tab_bar = TabBar.restore_workspaces(TabBar.new_empty(nil), [workspace], nil)
+
+      # Following a session with no title, turn, work or request leaves no goal to show.
+      tasks = Tasks.follow(Tasks.new(), pid, 0, [])
+
+      assert listed(tasks, tab_bar, home([])) == []
     end
 
     test "a task no workspace shows is not listed" do

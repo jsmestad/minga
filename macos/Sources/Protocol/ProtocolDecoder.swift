@@ -109,6 +109,7 @@ enum RenderCommand: Sendable {
     case guiPickerPreview(visible: Bool, lines: [Wire.PickerPreviewLine])
     case guiAgentChat(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: EditorMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil, lifecycle: AgentChatLifecycle = .conversation)
     case guiAgentHelp(visible: Bool, groups: [Wire.HelpGroup])
+    case guiTasksDrawer(Wire.TasksDrawer)
     /// Resident agent-chat transcript stream (0x86, #2654). `mode` is 0=full_replace, 1=append.
     /// `truncated` marks older messages sitting outside the resident byte-cap window. On append,
     /// `trimFront` messages are first evicted from the store front, then over the remainder
@@ -2937,7 +2938,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             throw ProtocolDecodeError.malformed
         }
         let start = rest + 2
-        guard data[start] <= 3, data[start + 1] <= 13 else {
+        guard data[start] <= 3, data[start + 1] <= 14 else {
             throw ProtocolDecodeError.malformed
         }
         let (fields, _) = try GeneratedProtocol.decodeGuiFocusOwnerFields(data, start, start + payloadLength)
@@ -2946,6 +2947,40 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             windowID: fields.windowID, generation: fields.generation
         )
         return (.guiFocusOwner(owner), 3 + payloadLength)
+
+    case .guiTasksDrawer:
+        guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
+        let payloadLength = Int(try readU32(data, rest))
+        let start = rest + 4
+        guard data.count >= start + payloadLength else { throw ProtocolDecodeError.malformed }
+        let (fields, _) = try GeneratedProtocol.decodeGuiTasksDrawerFields(data, start, start + payloadLength)
+        try FrameDecodeAccounting.reserve(.arrayEntries, fields.rows.count)
+        let hint = { (hint: GeneratedProtocol.TasksDrawerHint) in Wire.TasksDrawer.Hint(key: hint.key, label: hint.label) }
+        let drawer = Wire.TasksDrawer(
+            visible: fields.visible != 0, focused: fields.focused != 0,
+            name: fields.name, title: fields.title, note: fields.note,
+            counts: fields.counts.compactMap { count in
+                SpineState(wire: count.state).map { (state: $0, count: Int(count.count)) }
+            },
+            hints: fields.hints.map(hint),
+            rows: fields.rows.map { row in
+                Wire.TasksDrawer.Row(
+                    id: row.id, depth: row.depth, isLastChild: row.flags & 0x01 != 0,
+                    isSelected: row.flags & 0x02 != 0, state: SpineState(wire: row.state),
+                    title: row.title, words: row.words, age: row.age,
+                    detail: row.detail.map(\.text), actions: row.actions.map(hint)
+                )
+            },
+            view: Wire.TasksDrawer.View(rawValue: fields.view) ?? .list,
+            viewTitle: fields.viewTitle, viewLines: fields.viewLines.map(\.text),
+            viewOffset: Int(fields.viewOffset), prompt: fields.prompt,
+            empty: fields.hasEmpty == 0 ? nil : Wire.EmptyList(
+                glyph: fields.empty.glyph, title: fields.empty.title, why: fields.empty.why,
+                selected: fields.empty.selected,
+                actions: fields.empty.actions.map { Wire.EmptyListAction(id: $0.id, key: $0.key, label: $0.label) }
+            )
+        )
+        return (.guiTasksDrawer(drawer), 5 + payloadLength)
 
     case .guiEditTimeline:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }

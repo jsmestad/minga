@@ -1163,6 +1163,9 @@ final class CommandDispatcher {
         case .guiEditTimeline(let visible, let viewingIndex, let entries, let files, let generation):
             guiState.editTimelineState.update(visible: visible, viewingIndex: viewingIndex, wireEntries: entries, wireFiles: files, generation: generation)
 
+        case .guiTasksDrawer(let drawer):
+            guiState.tasksDrawerState.update(drawer)
+
         case .guiTheme(let slots):
             guiState.replaceTheme(slots: slots)
             let tc = guiState.themeColors

@@ -1,6 +1,6 @@
 {
   "macos": {
-    "commit": "09bd202e8f10812843ba7ef2340ff7fbc6de0297",
+    "commit": "f777d3e78615c1651d423d05be0640b817531a3b",
     "files": {
       "macos-astrodark-1280.json": "b7e5b1e347ede630a27cac0728468134cb1737c9541ee2d1906735ae02ce1489",
       "macos-astrodark-1440.json": "5c79b9d18a059b6e15a8f8eadfb40448552ced9ed958232e3446e6441f1fe6da",
@@ -10,13 +10,17 @@
       "macos-catppuccin_latte-1440.json": "ee0fc0670d49f4ec06a5b14b9526750f64851c19c262b93563cadbe0966707b8"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "9d5464c11f5cdef9f3e6f7e278c6d36bed4209daa9183b7e6a72175c01423c43",
-      "macos-astrodark-1440.json": "1df57a3477d3ee3ac186ec4e800a486c655e91854d570f7b11cb30fae99ef0d9",
-      "macos-catppuccin_frappe-1280.json": "effa04bd112ac95c51b774fe8b49c77a7c433f412920e0a8a8342078e3db6f48",
-      "macos-catppuccin_frappe-1440.json": "331912194736d914603c1796cbba370e1b2ee72d824974ab967811e9e69063fa",
-      "macos-catppuccin_latte-1280.json": "c3e22d30c644d7d685fe6ad1cf4cfc461fc2e013b38ced8a7e85ac8440784864",
-      "macos-catppuccin_latte-1440.json": "fbac70e6db3c57bb21f2ea146a0759f09b35e2af321e2633a65874c1ce0f4239"
+      "macos-astrodark-1280.json": "08e9f21a3985099445052510c586d9dcfdd22e8b8161d10124a48a3cdea6ef20",
+      "macos-astrodark-1440.json": "e7f62f9b1de20c2e4ba465aa56552b43fe48b345cb85ad2b64168b7883f24199",
+      "macos-catppuccin_frappe-1280.json": "e26dad19a50da4b0ff0ae27d72e4926c060f7b580d1c7c1ec6a29f5da424c78c",
+      "macos-catppuccin_frappe-1440.json": "98367de395e947204679cc592cb01d99053210383e18250a6980d82bc43b43e8",
+      "macos-catppuccin_latte-1280.json": "e7fbe5c4d65a5657921287c1f78eeead9abde4a4b22fc7c5c623420613752865",
+      "macos-catppuccin_latte-1440.json": "561eb396eb7ae4bf7b478ea36f3ede4e720bb9235580e18cebf0e868f694dd0a"
     }
+  },
+  "platform_specific": {
+    "frontend": "tui",
+    "reason": "fold marks draw now that the parse says when it is complete (#4337); macOS baselines record no fold marks, and the 80x24 empty-list inset is terminal only"
   },
   "scenario": "start.empty",
   "tui": {

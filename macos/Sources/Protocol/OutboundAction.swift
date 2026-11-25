@@ -87,6 +87,8 @@ nonisolated public enum OutboundAction: Equatable, Sendable {
     case selectTab(id: UInt32)
     case closeTab(id: UInt32)
     case emptyStateActivate(id: String)
+    /// A click in the tasks drawer: the row's identity and what the click did there.
+    case tasksDrawerAction(rowID: String, action: String)
     case tabCopyPath(id: UInt32)
     case tabReorder(id: UInt32, newIndex: UInt16)
     case tabPin(id: UInt32)

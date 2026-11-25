@@ -36,6 +36,7 @@ struct GUIObservationGuardrailTests {
         "Sources/Views/EditorChrome/SearchState.swift#SearchState": "protocol presentation owner",
         "Sources/Views/EditorChrome/StatusBarState.swift#StatusBarState": "protocol presentation owner",
         "Sources/Views/EditorChrome/TabBarState.swift#TabBarState": "protocol presentation owner",
+        "Sources/Views/EditorChrome/TasksDrawerState.swift#TasksDrawerState": "protocol presentation owner",
         "Sources/Views/EditorChrome/WorkspaceState.swift#WorkspaceState": "protocol presentation owner",
         "Sources/Views/Extensions/ExtensionOverlayState.swift#ExtensionOverlayState": "protocol presentation owner",
         "Sources/Views/Extensions/ExtensionPanelState.swift#ExtensionPanelState": "protocol presentation owner",

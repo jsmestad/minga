@@ -152,10 +152,22 @@ defmodule MingaEditor.State.AgentConnection do
   def follow_task(%__MODULE__{} = connection, session, now, opts \\ []) when is_pid(session),
     do: %{connection | tasks: Tasks.follow(connection.tasks, session, now, opts)}
 
-  @doc "Names a task by the goal it was given, when it has none yet."
-  @spec name_task(t(), pid(), String.t()) :: t()
-  def name_task(%__MODULE__{} = connection, session, title) when is_pid(session),
-    do: %{connection | tasks: Tasks.name(connection.tasks, session, title)}
+  @doc "Shows a task the drawer started before its session binds; returns the row's sequence number too."
+  @spec start_task(t(), reference(), String.t(), integer()) :: {t(), non_neg_integer()}
+  def start_task(%__MODULE__{} = connection, id, title, now) do
+    {tasks, seq} = Tasks.start(connection.tasks, id, title, now)
+    {%{connection | tasks: tasks}, seq}
+  end
+
+  @doc "Turns a starting task into the task of the session that bound for it."
+  @spec bind_task(t(), reference(), pid(), integer()) :: t()
+  def bind_task(%__MODULE__{} = connection, id, session, now),
+    do: %{connection | tasks: Tasks.bind(connection.tasks, id, session, now)}
+
+  @doc "Shows that a starting task's session could not start."
+  @spec fail_task_start(t(), reference(), String.t()) :: t()
+  def fail_task_start(%__MODULE__{} = connection, id, message),
+    do: %{connection | tasks: Tasks.start_failed(connection.tasks, id, message)}
 
   @doc "Carries a task over to the session that replaced its crashed one."
   @spec replace_task_session(t(), pid(), pid(), integer()) :: t()

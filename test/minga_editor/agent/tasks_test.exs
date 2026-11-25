@@ -174,7 +174,7 @@ defmodule MingaEditor.Agent.TasksTest do
       needs_you = Tasks.observe(tasks, pid, {:approval_pending, approval(1)}, 1)
 
       assert Entry.words(entry(needs_you, pid), 1) ==
-               "Needs you · wants to create test/usage_limit_test.exs +86"
+               "Needs you · wants to change a file"
 
       waiting = Tasks.observe(tasks, pid, {:retry_scheduled, 40_000, "HTTP 429"}, 0)
       assert Entry.words(entry(waiting, pid), 0) == "Waiting · rate limited, retry in 40 s"
@@ -182,6 +182,9 @@ defmodule MingaEditor.Agent.TasksTest do
 
       failed = Tasks.observe(tasks, pid, {:error, "test run crashed"}, 1)
       assert Entry.words(entry(failed, pid), 1) == "Failed · test run crashed"
+
+      goal_only = Tasks.observe(tasks, pid, {:title_changed, "Add tests"}, 1)
+      assert Entry.words(entry(goal_only, pid), 1) == "Starting"
     end
 
     test "a task is titled by its first goal and keeps it", %{pid: pid, tasks: tasks} do
@@ -193,6 +196,9 @@ defmodule MingaEditor.Agent.TasksTest do
         |> Tasks.name(pid, "Something later")
 
       assert Entry.title(entry(named, pid)) == "Add tests for the classifier"
+
+      renamed = Tasks.observe(named, pid, {:title_changed, "Usage-limit tests"}, 1)
+      assert Entry.title(entry(renamed, pid)) == "Usage-limit tests"
     end
   end
 
@@ -209,6 +215,48 @@ defmodule MingaEditor.Agent.TasksTest do
       assert forgotten |> Tasks.observe(pid, {:status_changed, :idle}, 2) |> Tasks.empty?()
     end
 
+    test "a session becomes a task row only once it has a goal" do
+      cases = [
+        {"an opened, never prompted conversation", [], false},
+        {"a connection that comes and goes",
+         [{:credentials_status, true}, {:connection_changed, :ready}], false},
+        {"a provider failure before any prompt", [{:error, "provider exited"}], false},
+        {"its first prompt names it", [{:title_changed, "Add tests"}], true},
+        {"a prompt starts work", [{:status_changed, :thinking}], true},
+        {"a finished turn", [{:status_changed, :thinking}, {:status_changed, :idle}], true},
+        {"an untitled turn that fails", [{:status_changed, :thinking}, {:error, "HTTP 500"}],
+         true},
+        {"an untitled turn that is stopped",
+         [{:status_changed, :thinking}, {:status_changed, :stopped}], true},
+        {"an approval asks for you", [{:approval_pending, approval(1)}], true}
+      ]
+
+      for {label, events, shown?} <- cases do
+        pid = session()
+
+        tasks =
+          Enum.reduce(events, Tasks.new() |> Tasks.follow(pid, 0), fn event, acc ->
+            Tasks.observe(acc, pid, event, 1)
+          end)
+
+        assert Entry.goal?(entry(tasks, pid)) == shown?, label
+
+        assert Enum.any?(Tasks.tree(tasks), &match?(%{item: %Entry{pid: ^pid}}, &1)) == shown?,
+               label
+
+        assert Tasks.empty?(tasks) == not shown?, label
+      end
+    end
+
+    test "a task started from the drawer has its goal from the start" do
+      pid = session()
+      id = make_ref()
+      {tasks, _seq} = Tasks.start(Tasks.new(), id, "Add tests", 0)
+      tasks = Tasks.bind(tasks, id, pid, 1)
+
+      assert [%{item: %Entry{pid: ^pid, title: "Add tests"}}] = Tasks.tree(tasks)
+    end
+
     test "a disconnected node's tasks are forgotten" do
       pid = session()
       tasks = Tasks.follow(Tasks.new(), pid, 0)
@@ -221,6 +269,33 @@ defmodule MingaEditor.Agent.TasksTest do
   end
 
   describe "the task tree" do
+    test "orders top-level tasks needs-you first, then working, waiting, stopped, failed and done" do
+      seeds = [
+        done: [{:status_changed, :thinking}, {:status_changed, :idle}],
+        failed: [{:error, "crashed"}],
+        stopped: [{:status_changed, :thinking}, {:status_changed, :stopped}],
+        waiting: [{:retry_scheduled, 40_000, "HTTP 429"}],
+        working: [{:status_changed, :thinking}],
+        needs_you: [{:approval_pending, approval(1)}]
+      ]
+
+      tasks =
+        Enum.reduce(seeds, Tasks.new(), fn {name, events}, acc ->
+          pid = session()
+          acc = Tasks.follow(acc, pid, 0, title: Atom.to_string(name))
+          Enum.reduce(events, acc, &Tasks.observe(&2, pid, &1, 1))
+        end)
+
+      assert Enum.map(Tasks.tree(tasks), &{title(&1.item), Tasks.Entry.state(&1.item)}) == [
+               {"needs_you", :needs_you},
+               {"working", :working},
+               {"waiting", :waiting},
+               {"stopped", :stopped},
+               {"failed", :failed},
+               {"done", :done}
+             ]
+    end
+
     test "lists needs-you first, then by state, with subagents beneath their task" do
       [done, working, asks, child] = for _ <- 1..4, do: session()
 

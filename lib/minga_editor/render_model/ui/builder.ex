@@ -75,6 +75,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       empty_state: EmptyStateBuilder.build(ctx),
       bottom_panel: bottom_panel,
       edit_timeline: EditTimelineBuilder.build(ctx),
+      tasks_drawer: ctx.intent.frame.tasks_drawer || Minga.RenderModel.UI.TasksDrawer.hidden(),
       extension_overlay: ExtensionOverlayBuilder.build(ctx),
       extension_panel: ExtensionPanelBuilder.build(ctx),
       hover_popup: HoverPopupBuilder.build(ctx),

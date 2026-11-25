@@ -223,15 +223,17 @@ listed. Press  Esc  to cancel and stay in the tutorial.
 
 Minga has a built-in AI agent you can chat with for help:
 
-      SPC a a   toggle the agent panel
-      SPC a n   start a new agent session
+      SPC a v   toggle the agent panel
+      SPC a a   open the tasks drawer, every task Minga is working on
+      SPC a n   start a new task: type what Minga should do
+      SPC a S n start a new, empty agent session
       SPC a ?   ask about line or selection inline
       SPC a e   rewrite selection inline
       SPC a m   move file to workspace
       SPC a c   copy file to workspace
 
-Practice: press  SPC a a  to open the agent panel, look around, then
-press  SPC a a  again to close it and return to the tutorial.
+Practice: press  SPC a v  to open the agent panel, look around, then
+press  SPC a v  again to close it and return to the tutorial.
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
                         Lesson 12: EX COMMANDS
@@ -280,7 +282,7 @@ SUMMARY
   dw ............... delete word           SPC ........ leader key
   d$/D ............. delete to end         :command ... ex command
 
-  SPC f f .. find file       SPC a a .. agent panel
+  SPC f f .. find file       SPC a v .. agent panel
   SPC b b .. buffers         SPC h T .. reopen this tutorial
   SPC f p .. config file     :Tutor ... reopen this tutorial
 

@@ -208,6 +208,22 @@ defmodule MingaEditor.Agent.UIState.Panel do
     }
   end
 
+  @doc """
+  Makes the next session started from this panel run on `selection`'s exact route, for a task started beside a conversation.
+
+  The model name is the selection's stable route id, so the session resolves the same route rather than a display name.
+  """
+  @spec start_on_model(t(), ModelSelection.t()) :: t()
+  def start_on_model(%__MODULE__{} = panel, %ModelSelection{} = selection) do
+    %{
+      panel
+      | model_name: ModelSelection.id(selection),
+        provider_name: selection.route.model_provider,
+        provider_label: nil,
+        thinking_level: selection.policy.reasoning.effort
+    }
+  end
+
   @doc "Sets the displayed provider name."
   @spec set_provider_name(t(), String.t()) :: t()
   def set_provider_name(%__MODULE__{} = panel, provider) when is_binary(provider) do

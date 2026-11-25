@@ -14,6 +14,9 @@ func (m Model) composeFrameWithLayers(content string) (string, []*lipgloss.Layer
 	if timeline := m.timelineLayer(); timeline != nil {
 		layers = append(layers, timeline)
 	}
+	if drawer := m.tasksDrawerLayer(); drawer != nil {
+		layers = append(layers, drawer)
+	}
 	layers = append(layers, m.floatingOverlayLayers()...)
 	return lipgloss.NewCompositor(layers...).Render(), layers[2:]
 }

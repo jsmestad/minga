@@ -140,7 +140,7 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       result = BufferManagement.handle_agent_session_down(state, session_pid, :killed)
 
       assert result.shell_runtime.state.notice.message ==
-               "Agent session crashed (SPC a n to restart)"
+               "Agent session crashed (SPC a S n to restart)"
     end
 
     test "clears orphan tab-only sessions when the session crashes" do
@@ -154,7 +154,7 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       assert tab.payload.agent_status == :error
 
       assert result.shell_runtime.state.notice.message ==
-               "Agent session crashed (SPC a n to restart)"
+               "Agent session crashed (SPC a S n to restart)"
     end
 
     test "sets ended status when an owned session exits normally" do
@@ -174,7 +174,7 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       result = BufferManagement.handle_agent_session_down(state, session_pid, :killed)
 
       assert result.shell_runtime.state.notice.message ==
-               "Agent session crashed (SPC a n to restart)"
+               "Agent session crashed (SPC a S n to restart)"
     end
 
     test "removes a clean project view workspace on normal session end", %{tmp_dir: dir} do

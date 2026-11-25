@@ -826,6 +826,14 @@ public struct ContentView<EditorSurface: View>: View {
                 sendAction: translatedAction(FrontendActionComposition.outbound)
             )
 
+            if input.tasksDrawerState.visible {
+                TasksDrawerView(
+                    state: input.tasksDrawerState,
+                    sendAction: translatedAction(FrontendActionComposition.outbound),
+                    availableHeight: rightPaneHeight
+                )
+            }
+
             if input.bottomPanelState.visible {
                 BottomPanelView(
                     state: input.bottomPanelState,

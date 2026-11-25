@@ -31,8 +31,11 @@ defmodule MingaEditor.Agent.SessionFollowUp do
           {:restore, String.t(), String.t() | nil, ProvenanceJump.origin() | nil,
            UIState.View.return_target()}
 
-  @typedoc "Work a session start can carry until the session binds."
-  @type work :: restore() | {:seed, [{:user | :assistant, String.t()}]}
+  @typedoc "Work a session start can carry until the session binds. `{:prompt, goal}` starts a task from the tasks drawer."
+  @type work ::
+          restore()
+          | {:seed, [{:user | :assistant, String.t()}]}
+          | {:prompt, String.t(), reference()}
 
   @typedoc "A Sessions picker reopen of a saved record, guarded by the conversation the picker showed."
   @type reopen ::
@@ -86,6 +89,14 @@ defmodule MingaEditor.Agent.SessionFollowUp do
           work,
           Session.request_seed_messages(session, messages)
         )
+
+  def run(state, workspace_id, session, {:prompt, goal, id} = work)
+      when is_pid(session) and node(session) == node() do
+    state
+    |> MingaEditor.Agent.TaskWorkflow.bound(id, session)
+    |> MingaEditor.Shell.Traditional.TasksDrawerWorkflow.select_session(session)
+    |> track(workspace_id, session, work, Session.request_send_prompt(session, goal))
+  end
 
   def run(state, workspace_id, session, {:reopen, saved_id, origin_id, :legacy_import} = work)
       when is_pid(session) and node(session) == node() do
@@ -232,6 +243,19 @@ defmodule MingaEditor.Agent.SessionFollowUp do
       else: AgentSessionSource.reopened(state, follow_up.session, saved_id, kind, result)
   end
 
+  defp answered(state, %__MODULE__{work: {:prompt, _goal, _id}}, :ok), do: state
+
+  defp answered(state, %__MODULE__{work: {:prompt, _goal, _id}}, {:queued, _kind}), do: state
+
+  # The task's row says why it did not start, so the drawer never shows a task that is quietly doing nothing.
+  defp answered(state, %__MODULE__{work: {:prompt, _goal, _id}} = follow_up, {:error, reason}) do
+    message = "did not start: #{prompt_error(reason)}"
+
+    state
+    |> MingaEditor.Agent.TaskWorkflow.observe(follow_up.session, {:error, message})
+    |> NoticeWorkflow.publish("The new task " <> message)
+  end
+
   defp answered(state, %__MODULE__{work: {:seed, _messages}} = follow_up, :ok),
     do: InlineAsk.show_seeded_session(state, follow_up.session)
 
@@ -288,6 +312,9 @@ defmodule MingaEditor.Agent.SessionFollowUp do
     do: "Inline Ask history has not been added to the agent session after 15 seconds."
 
   @spec remote_message(work() | reopen()) :: String.t()
+  defp remote_message({:prompt, _goal, _id}),
+    do: "A task starts only in a local Agent session."
+
   defp remote_message({:seed, _messages}),
     do: "Inline Ask history can be added only to a local Agent session."
 
@@ -303,6 +330,20 @@ defmodule MingaEditor.Agent.SessionFollowUp do
 
   defp exited_message({:seed, _messages}),
     do: "The agent session stopped before Inline Ask history was added."
+
+  defp exited_message({:prompt, _goal, _id}),
+    do: "The agent session stopped before the new task started."
+
+  @spec prompt_error(term()) :: String.t()
+  defp prompt_error(reason) when is_binary(reason), do: reason
+  defp prompt_error(:credentials_not_configured), do: "no model is set up (SPC a S m picks one)"
+  defp prompt_error(:credentials_pending), do: "sign-in has not finished"
+  defp prompt_error(:provider_not_ready), do: "the model was still starting"
+
+  defp prompt_error(reason) do
+    Minga.Log.warning(:agent, "[Agent] new task prompt refused: #{inspect(reason)}")
+    "the session refused the prompt"
+  end
 
   @spec cancel_timer(phase()) :: :ok
   defp cancel_timer({:awaiting, timer}) do

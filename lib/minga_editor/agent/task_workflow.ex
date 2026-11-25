@@ -42,15 +42,24 @@ defmodule MingaEditor.Agent.TaskWorkflow do
     follow(state, handle.pid, opts)
   end
 
-  @doc "Names a task by the first prompt it was sent, when it has no goal yet."
-  @spec prompted(EditorState.t(), pid(), String.t() | [ReqLLM.Message.ContentPart.t()]) ::
-          EditorState.t()
-  def prompted(%EditorState{} = state, session, prompt) when is_pid(session) do
-    case prompt_text(prompt) do
-      "" -> state
-      text -> EditorState.name_agent_task(state, session, text)
-    end
+  @doc "Shows a task started from the drawer at once, before its session binds. Returns the state and the task's row id."
+  @spec start(EditorState.t(), reference(), String.t()) :: {EditorState.t(), String.t()}
+  def start(%EditorState{} = state, id, goal) when is_reference(id) and is_binary(goal) do
+    {state, seq} = EditorState.start_agent_task(state, id, goal, now())
+    {state, "t#{seq}"}
   end
+
+  @doc "Turns a starting task into the task of the session that bound for it."
+  @spec bound(EditorState.t(), reference(), pid()) :: EditorState.t()
+  def bound(%EditorState{} = state, id, session) when is_pid(session),
+    do: EditorState.bind_agent_task(state, id, session, now())
+
+  @doc "Shows that a drawer-started task could not start, for a start whose follow-up was that task's goal."
+  @spec start_failed(EditorState.t(), term(), String.t()) :: EditorState.t()
+  def start_failed(%EditorState{} = state, {:prompt, _goal, id}, message) when is_reference(id),
+    do: EditorState.fail_agent_task_start(state, id, message)
+
+  def start_failed(%EditorState{} = state, _follow_up, _message), do: state
 
   @doc "Carries a task over to the session that replaced its crashed one."
   @spec restarted(EditorState.t(), pid(), pid()) :: EditorState.t()
@@ -112,16 +121,6 @@ defmodule MingaEditor.Agent.TaskWorkflow do
     state
     |> EditorState.resolve_agent_task_approval(session, target)
     |> TraditionalWorkflow.resolve_agent_approval(target, session)
-  end
-
-  @spec prompt_text(String.t() | [ReqLLM.Message.ContentPart.t()]) :: String.t()
-  defp prompt_text(prompt) when is_binary(prompt), do: String.trim(prompt)
-
-  defp prompt_text(parts) when is_list(parts) do
-    parts
-    |> Enum.filter(&match?(%{type: :text}, &1))
-    |> Enum.map_join("", & &1.text)
-    |> String.trim()
   end
 
   @spec now() :: integer()

@@ -1333,11 +1333,17 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       AgentCommands.settle_turn_request(state, request, :ok)
     end
 
+    # The session names its task by announcing its first goal.
     defp named(state, session, title) do
       %{
         state
         | agent_connection:
-            MingaEditor.State.AgentConnection.name_task(state.agent_connection, session, title)
+            MingaEditor.State.AgentConnection.observe_task_event(
+              state.agent_connection,
+              session,
+              {:title_changed, title},
+              0
+            )
       }
     end
 

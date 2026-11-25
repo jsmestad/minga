@@ -364,6 +364,16 @@ defmodule Minga.Integration.GUIProtocolTest do
     binary
   end
 
+  defp encode_gui_tasks_drawer(model) do
+    {binary, _caches} =
+      Minga.Frontend.Adapter.GUI.TasksDrawerEncoder.encode(
+        model,
+        Minga.Frontend.Adapter.GUI.Caches.new()
+      )
+
+    binary
+  end
+
   defp encode_gui_agent_help(model) do
     {binary, _caches} =
       Minga.Frontend.Adapter.GUI.AgentHelpEncoder.encode(
@@ -815,6 +825,124 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert copy["title"] == "Copy"
       assert Enum.count(copy["bindings"]) == 1
       assert hd(copy["bindings"])["key"] == "y"
+    end
+
+    test "gui_tasks_drawer rows, states, actions and counts round-trip", %{harness: harness} do
+      alias Minga.RenderModel.UI.TasksDrawer
+      alias Minga.RenderModel.UI.TasksDrawer.Row
+
+      model = %TasksDrawer{
+        visible?: true,
+        focused?: true,
+        note: "Messages hidden · q returns",
+        counts: [working: 2, needs_you: 1],
+        hints: [{"j/k", "move"}, {"q", "close"}],
+        rows: [
+          %Row{
+            id: "t3",
+            state: :needs_you,
+            title: "Add tests",
+            words: "Needs you · wants to change a file",
+            age: "2m",
+            detail: ["Create test/a_test.exs +86"],
+            actions: [{"y", "Approve once"}, {"n", "Deny"}],
+            selected?: true
+          },
+          %Row{
+            id: "t1",
+            state: :working,
+            title: "Plan limit",
+            words: "Running edit_file",
+            age: "4m"
+          },
+          %Row{
+            id: "t1.s1",
+            depth: 1,
+            last?: true,
+            state: :working,
+            title: "Fact-check",
+            words: "Working"
+          }
+        ]
+      }
+
+      decoded = round_trip(harness, encode_gui_tasks_drawer(model), "gui_tasks_drawer")
+
+      assert decoded["visible"] and decoded["focused"]
+      assert decoded["name"] == "*minga-tasks*"
+      assert decoded["note"] == "Messages hidden · q returns"
+
+      assert decoded["counts"] == [
+               %{"state" => "working", "count" => 2},
+               %{"state" => "needs_you", "count" => 1}
+             ]
+
+      [asking, working, subagent] = decoded["rows"]
+      assert asking["selected"] and asking["state"] == "needs_you"
+      assert asking["detail"] == ["Create test/a_test.exs +86"]
+
+      assert asking["actions"] == [
+               %{"key" => "y", "label" => "Approve once"},
+               %{"key" => "n", "label" => "Deny"}
+             ]
+
+      refute working["selected"]
+      assert subagent["depth"] == 1 and subagent["last"] and subagent["id"] == "t1.s1"
+    end
+
+    test "gui_tasks_drawer carries its empty state only when it has no tasks", %{harness: harness} do
+      alias Minga.RenderModel.UI.EmptyList
+
+      empty = %EmptyList{
+        title: "No one's at the table yet.",
+        why: "Give Minga a task.",
+        selected: 1,
+        actions: [
+          %EmptyList.Action{id: "agent_new_task", key: "c", label: "New task"},
+          %EmptyList.Action{id: "agent_session_history", key: "SPC a S h", label: "Resume"}
+        ]
+      }
+
+      decoded =
+        round_trip(
+          harness,
+          encode_gui_tasks_drawer(%Minga.RenderModel.UI.TasksDrawer{
+            visible?: true,
+            empty: empty
+          }),
+          "gui_tasks_drawer"
+        )
+
+      assert decoded["empty"] == %{
+               "title" => "No one's at the table yet.",
+               "why" => "Give Minga a task.",
+               "selected" => 1,
+               "actions" => [
+                 %{"id" => "agent_new_task", "key" => "c", "label" => "New task"},
+                 %{"id" => "agent_session_history", "key" => "SPC a S h", "label" => "Resume"}
+               ]
+             }
+
+      with_tasks =
+        round_trip(
+          harness,
+          encode_gui_tasks_drawer(%Minga.RenderModel.UI.TasksDrawer{visible?: true}),
+          "gui_tasks_drawer"
+        )
+
+      assert with_tasks["empty"] == nil
+    end
+
+    test "gui_tasks_drawer hidden frame clears the drawer", %{harness: harness} do
+      decoded =
+        round_trip(
+          harness,
+          encode_gui_tasks_drawer(%Minga.RenderModel.UI.TasksDrawer{}),
+          "gui_tasks_drawer"
+        )
+
+      refute decoded["visible"]
+      assert decoded["rows"] == []
     end
 
     test "gui_agent_help hidden frame clears the Help presentation", %{harness: harness} do

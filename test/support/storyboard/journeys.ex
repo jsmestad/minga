@@ -46,9 +46,8 @@ defmodule Minga.Test.Storyboard.Journeys do
         {"y", "minga.review.all_decided"},
         {"q", "edit.plain"}
       ]),
-      journey("recover from a rate limit", "edit.plain", [
-        {"SPC a a", "minga.tasks.list"},
-        {"r", "minga.tasks.list"},
+      journey("recover from a rate limit", "minga.tasks.list", [
+        {"r", "minga.tasks.working"},
         {"q", "edit.plain"}
       ]),
       journey("a failing test, then Minga fixes it, then review", "edit.working", [

@@ -319,7 +319,7 @@ func TestAForcedFeatureIsReportedAsTheUsersAndDrawnAsForced(t *testing.T) {
 	if profile, forced := forcedOn.ForcedColorProfile(colorprofile.ANSI); !forced || profile != colorprofile.TrueColor {
 		t.Fatalf("forced on = %v, %v; want true colour", profile, forced)
 	}
-	if _, forced := New(80, 24, nil).ForcedColorProfile(colorprofile.TrueColor); forced {
+	if _, forced := New(80, 24, nil).ForcedColorProfile(colorprofile.ANSI); forced {
 		t.Fatal("without an override the profile is detected")
 	}
 }

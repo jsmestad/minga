@@ -246,10 +246,24 @@ defmodule MingaEditor.State do
     %{state | agent_connection: connection}
   end
 
-  @doc "Names a task by the goal it was given, when it has none yet."
-  @spec name_agent_task(t(), pid(), String.t()) :: t()
-  def name_agent_task(%__MODULE__{} = state, session, title) do
-    connection = AgentConnection.name_task(state.agent_connection, session, title)
+  @doc "Shows a task the drawer started before its session binds; returns the row's sequence number too."
+  @spec start_agent_task(t(), reference(), String.t(), integer()) :: {t(), non_neg_integer()}
+  def start_agent_task(%__MODULE__{} = state, id, title, now) do
+    {connection, seq} = AgentConnection.start_task(state.agent_connection, id, title, now)
+    {%{state | agent_connection: connection}, seq}
+  end
+
+  @doc "Turns a starting task into the task of the session that bound for it."
+  @spec bind_agent_task(t(), reference(), pid(), integer()) :: t()
+  def bind_agent_task(%__MODULE__{} = state, id, session, now) do
+    connection = AgentConnection.bind_task(state.agent_connection, id, session, now)
+    %{state | agent_connection: connection}
+  end
+
+  @doc "Shows that a starting task's session could not start."
+  @spec fail_agent_task_start(t(), reference(), String.t()) :: t()
+  def fail_agent_task_start(%__MODULE__{} = state, id, message) do
+    connection = AgentConnection.fail_task_start(state.agent_connection, id, message)
     %{state | agent_connection: connection}
   end
 

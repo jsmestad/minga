@@ -19,6 +19,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   alias MingaAgent.SessionExport
   alias MingaAgent.Skills
   alias MingaEditor.Agent.ConnectionSetup
+  alias MingaEditor.Agent.ErrorWords
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Remote.SessionClient
   alias Minga.Config
@@ -1075,7 +1076,7 @@ defmodule MingaEditor.Agent.SlashCommand do
           {:ok, state}
 
         {:error, reason} ->
-          {:error, reason}
+          {:error, "Could not continue: #{ErrorWords.describe(reason)}"}
       end
     else
       {:error, "No active agent session"}
@@ -1159,7 +1160,7 @@ defmodule MingaEditor.Agent.SlashCommand do
           {:ok, emit_system_message(state, "Loaded skill: #{skill.name} — #{skill.description}")}
 
         {:error, reason} ->
-          {:error, reason}
+          {:error, ErrorWords.describe(reason)}
       end
     else
       {:error, "No active agent session"}
@@ -1176,7 +1177,7 @@ defmodule MingaEditor.Agent.SlashCommand do
           {:ok, emit_system_message(state, "Deactivated skill: #{name}")}
 
         {:error, reason} ->
-          {:error, reason}
+          {:error, ErrorWords.describe(reason)}
       end
     else
       {:error, "No active agent session"}
@@ -1334,7 +1335,7 @@ defmodule MingaEditor.Agent.SlashCommand do
          {:ok, idx} <- parse_int(args, "Invalid branch number. Use /branches to list.") do
       case Session.switch_branch(session, idx) do
         :ok -> {:ok, emit_system_message(state, "Switched to branch #{idx}.")}
-        {:error, reason} -> {:error, reason}
+        {:error, reason} -> {:error, "Could not switch: #{ErrorWords.describe(reason)}"}
       end
     end
   end

@@ -200,7 +200,7 @@ defmodule MingaEditor.ProjectHomeTest do
   test "a task started from the home returns to the home and its row opens it again", ctx do
     editor = open_home(ctx)
 
-    send_keys_sync(editor, "<Space>an")
+    send_keys_sync(editor, "<Space>aSn")
     assert editor_state(editor).workspace.keymap_scope == :agent
 
     send_keys_sync(editor, "<Esc><Esc><Esc>")
@@ -225,6 +225,61 @@ defmodule MingaEditor.ProjectHomeTest do
 
     refute showing_home?(editor)
     assert editor_state(editor).workspace.keymap_scope == :agent
+  end
+
+  test "the home's New task opens the New task prompt, and a task started there keeps the home in front",
+       ctx do
+    editor = open_home(ctx)
+
+    send(
+      editor.editor,
+      {:minga_input, {:gui_action, {:empty_state_activate, "action-agent_new_task"}}}
+    )
+
+    assert {:prompt, %{prompt_ui: %{handler: MingaEditor.UI.Prompt.NewTask}}} =
+             editor_state(editor).shell_runtime.state.modal
+
+    # Esc cancels the prompt and leaves the home where it was.
+    send_keys_sync(editor, "<Esc>")
+    assert showing_home?(editor)
+
+    # A started task works in a background workspace, so the home stays in front.
+    send(
+      editor.editor,
+      {:minga_input, {:gui_action, {:empty_state_activate, "action-agent_new_task"}}}
+    )
+
+    send_keys_sync(editor, "Add tests<CR>")
+
+    assert showing_home?(editor)
+    assert editor_state(editor).workspace.keymap_scope == :editor
+  end
+
+  test "a first message admitted while the model counts is named by its session, on the home and in the drawer",
+       ctx do
+    editor = open_home(ctx)
+    # A conversation started from the home, then left: the home is in front again.
+    send_keys_sync(editor, "<Space>aSn")
+    send_keys_sync(editor, "<Esc><Esc><Esc>")
+    assert showing_home?(editor)
+
+    session = spawn(fn -> receive do: (:stop -> :ok) end)
+    :sys.replace_state(editor.editor, &follow_task(&1, session, nil))
+
+    # While the send is admitting, the session reports a working turn with the targets it will carry.
+    send(editor.editor, {:agent_event, session, {:status_changed, :thinking}})
+    send(editor.editor, {:agent_event, session, {:stop_target_changed, {"record", "request"}}})
+
+    # The send's answer ({:sent, queue_target}) names nothing: the session's first-goal event does.
+    send(editor.editor, {:agent_event, session, {:title_changed, "Add tests"}})
+    state = editor_state(editor)
+
+    assert [%{label: "Add tests"}] = home_task_rows(state)
+
+    assert {:ok, %MingaEditor.Agent.Tasks.Entry{title: "Add tests"} = entry} =
+             MingaEditor.Agent.Tasks.fetch(state.agent_connection.tasks, session)
+
+    assert MingaEditor.Agent.Tasks.Entry.state(entry) == :working
   end
 
   defp home_with_two_files(ctx) do
@@ -286,7 +341,7 @@ defmodule MingaEditor.ProjectHomeTest do
   test "a task started from the home with files behind it returns to the home", ctx do
     editor = home_with_two_files(ctx)
 
-    send_keys_sync(editor, "<Space>an")
+    send_keys_sync(editor, "<Space>aSn")
     assert editor_state(editor).workspace.keymap_scope == :agent
     send_keys_sync(editor, "<Esc><Esc><Esc>")
 

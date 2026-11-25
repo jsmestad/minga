@@ -94,7 +94,7 @@ defmodule MingaEditor.Journeys.SendWhileSessionBusyTest do
 
     # A new conversation takes the front before the Session answers, so the answer is
     # handled with the pressed conversation in the background.
-    send_keys_async(ctx, "<SPC>an")
+    send_keys_async(ctx, "<SPC>aSn")
 
     wait_until(ctx, fn _state -> front_workspace(ctx) != agent_workspace end,
       message: "expected the new conversation in front"

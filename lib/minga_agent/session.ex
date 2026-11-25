@@ -364,6 +364,11 @@ defmodule MingaAgent.Session do
     :gen_server.send_request(session, {:seed_messages, messages})
   end
 
+  @doc "Sends a prompt without waiting; the reply is `send_prompt/2`'s result."
+  @spec request_send_prompt(pid(), String.t()) :: :gen_server.request_id()
+  def request_send_prompt(session, content) when is_pid(session) and is_binary(content),
+    do: :gen_server.send_request(session, {:send_prompt, content})
+
   @doc "Returns the current session status."
   @spec status(GenServer.server()) :: status()
   def status(session) do
@@ -2215,8 +2220,12 @@ defmodule MingaAgent.Session do
   def handle_call({:rename_conversation, target, title}, {caller, _tag}, state)
       when node(caller) == node() do
     case rename_saved_conversation(state, target, title) do
-      {:ok, title} -> {:reply, {:ok, title}, %{state | custom_title: title}}
-      {:error, _reason} = error -> {:reply, error, state}
+      # The tasks drawer shows the new name.
+      {:ok, title} ->
+        {:reply, {:ok, title}, broadcast(%{state | custom_title: title}, {:title_changed, title})}
+
+      {:error, _reason} = error ->
+        {:reply, error, state}
     end
   end
 
@@ -5979,6 +5988,7 @@ defmodule MingaAgent.Session do
         ) :: {:reply, term(), state()}
   defp admit_new_turn(content, state, execution, draft_revision, request_id \\ nil) do
     {user_message, send_content} = build_user_message(content)
+    first_goal = first_goal(state, user_message)
     candidate = append_msg(state, user_message)
 
     case admit_provider_request(state, candidate, send_content, draft_revision, request_id) do
@@ -5986,6 +5996,7 @@ defmodule MingaAgent.Session do
         admitted =
           admitted
           |> record_user_message_event(user_message)
+          |> announce_first_goal(first_goal)
           |> notify_messages_changed()
 
         dispatch_new_turn_request(admitted, request, execution)
@@ -5995,6 +6006,20 @@ defmodule MingaAgent.Session do
         reply_to_prompt_admission_failure(failed_state, reason)
     end
   end
+
+  # The first prompt of an untitled conversation is its goal; the tasks drawer names the task by it.
+  @spec first_goal(state(), Message.t()) :: String.t() | nil
+  defp first_goal(%{custom_title: title}, _message) when is_binary(title), do: nil
+
+  defp first_goal(state, message) do
+    if first_user_prompt(Transcript.messages(state.transcript)) == nil,
+      do: readable_title(first_user_prompt([message])),
+      else: nil
+  end
+
+  @spec announce_first_goal(state(), String.t() | nil) :: state()
+  defp announce_first_goal(state, nil), do: state
+  defp announce_first_goal(state, goal), do: broadcast(state, {:title_changed, goal})
 
   @spec acknowledge_consumed_draft({:reply, term(), state()}, draft_admission()) ::
           {:reply, term(), state()}

@@ -319,6 +319,18 @@ func EncodeGUIExecuteCommand(command string) []byte {
 	return append(out, payload...)
 }
 
+// EncodeGUITasksDrawerAction names a tasks drawer row by its identity and what the click did on it: "select", an
+// approval key ("y", "a", "t", "n"), or "q" to close the drawer (with an empty row id).
+func EncodeGUITasksDrawerAction(rowID, action string) []byte {
+	if len(rowID) > 255 || len(action) == 0 || len(action) > 255 {
+		return nil
+	}
+	out := []byte{generated.OPGuiAction, generated.GUIActionTasksDrawerAction, byte(len(rowID))}
+	out = append(out, rowID...)
+	out = append(out, byte(len(action)))
+	return append(out, action...)
+}
+
 func EncodeGUIAgentComposerSubmit(generation, offer uint64) []byte {
 	packet := [18]byte{generated.OPGuiAction, generated.GUIActionAgentComposerSubmit}
 	binary.BigEndian.PutUint64(packet[2:], generation)

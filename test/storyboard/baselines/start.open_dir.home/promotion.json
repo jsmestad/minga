@@ -1,6 +1,6 @@
 {
   "macos": {
-    "commit": "09bd202e8f10812843ba7ef2340ff7fbc6de0297",
+    "commit": "f777d3e78615c1651d423d05be0640b817531a3b",
     "files": {
       "macos-astrodark-1280.json": "90f82e96a96c1d79eaacde75eade1bd0b7fbe650ccdf2bfc500c46cef4428a1b",
       "macos-astrodark-1440.json": "919b7053bd959e69e1d80b0982daaa859389f246f4cefe2c7306f000f5c73f77",
@@ -10,13 +10,17 @@
       "macos-catppuccin_latte-1440.json": "4bc9084d0bbcba6fce490bbbc83846f43e1e5f9fe0c03dc0b46936ce02aa7ed7"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "ba471acf8948d17541dbe395da94cafc535deed74623ec1e163d562c09559a91",
-      "macos-astrodark-1440.json": "c30e2c2235418d922b276b664b405585f83c79381ed7e820f1c69c908cb12043",
-      "macos-catppuccin_frappe-1280.json": "88c7e76f124513ca0cdf62efe7c06add4500c753726f161acfbada9b95216789",
-      "macos-catppuccin_frappe-1440.json": "d88675d507026a595982b296e821441b486888b0406e5a2120f51d932cad45c6",
-      "macos-catppuccin_latte-1280.json": "6de541044890e5b3168b1c98870c84de6fcb0ad8310dc1f43532026003846ed5",
-      "macos-catppuccin_latte-1440.json": "337e093483e3f383f72aee4a0294c09bee99b2a9624def9bc910a02b4301000d"
+      "macos-astrodark-1280.json": "82f5f20ff3dce4e07300b49f9fc3dfde3fd2aa8297d682b504dc4e5e30d203e9",
+      "macos-astrodark-1440.json": "33b644fcc25e5d1a3a627c30a681326c65e966d2ff63e467765a44c45a9f4345",
+      "macos-catppuccin_frappe-1280.json": "7569ef1aa390c4db7bcf06f5053c8e901cff6948dad2d8ce271511d19ebd7524",
+      "macos-catppuccin_frappe-1440.json": "3ac9c0d6830ec2a2f53bf1b3f84cbbc62d4808238f2ddab991ee04ca873a2052",
+      "macos-catppuccin_latte-1280.json": "afa0eff75f692e2a71de359998ed7b2bbfa3db9828250c5aa53fa264a5fab057",
+      "macos-catppuccin_latte-1440.json": "566ed27affd7a0363f6b5a81b5e87bb0723be04c1579f4784212eb192700ef3e"
     }
+  },
+  "platform_specific": {
+    "frontend": "tui",
+    "reason": "fold marks draw now that the parse says when it is complete (#4337); macOS baselines record no fold marks, and the 80x24 empty-list inset is terminal only"
   },
   "scenario": "start.open_dir.home",
   "tui": {

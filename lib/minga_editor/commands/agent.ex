@@ -889,7 +889,7 @@ defmodule MingaEditor.Commands.Agent do
 
   def settle_turn_request(
         state,
-        %TurnRequest{work: {:send, send, content, raw}} = request,
+        %TurnRequest{work: {:send, send, _content, raw}} = request,
         answer
       ) do
     {outcome, notice} = composer_send_outcome(send, answer)
@@ -897,7 +897,6 @@ defmodule MingaEditor.Commands.Agent do
     state
     |> show_started_turn(request.session, answer)
     |> DraftWorkflow.send_answered(request.workspace, request.token, raw, outcome)
-    |> name_task(request.session, content, {send, answer})
     |> publish_send_notice(notice)
   end
 
@@ -949,22 +948,6 @@ defmodule MingaEditor.Commands.Agent do
       _none -> nil
     end
   end
-
-  # A task is named by the first goal it accepts.
-  @spec name_task(
-          state(),
-          pid(),
-          String.t() | [ReqLLM.Message.ContentPart.t()],
-          {Session.composer_send(), TurnRequest.answer()}
-        ) :: state()
-  defp name_task(state, session, prompt, {:prompt, :ok}),
-    do: MingaEditor.Agent.TaskWorkflow.prompted(state, session, prompt)
-
-  # A send that started a turn names the task, whichever way the composer sent it.
-  defp name_task(state, session, prompt, {_send, {:sent, _queue_target}}),
-    do: MingaEditor.Agent.TaskWorkflow.prompted(state, session, prompt)
-
-  defp name_task(state, _session, _prompt, _other), do: state
 
   @spec publish_send_notice(state(), String.t() | nil) :: state()
   defp publish_send_notice(state, nil), do: state

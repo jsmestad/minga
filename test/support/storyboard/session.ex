@@ -96,6 +96,7 @@ defmodule Minga.Test.Storyboard.Session do
     # Outside a project nothing restores at start; the saved session waits for the project to be opened.
     await_restore!(ctx, place != :outside and Keyword.get(opts, :restored, false))
     settle_highlights(ctx, parser)
+    seed_tasks(ctx, Keyword.get(opts, :tasks, []))
     install_minga_status(ctx, Keyword.get(opts, :minga))
     install_git_status(ctx, root, Keyword.get(opts, :git_status))
 
@@ -199,6 +200,20 @@ defmodule Minga.Test.Storyboard.Session do
       |> MingaEditor.Renderer.render()
     end)
 
+    :ok
+  end
+
+  # Fake agent sessions for scenarios that show Minga's tasks (`Minga.Test.FakeTaskSession`), oldest first.
+  @spec seed_tasks(EditorCase.editor_ctx(), [{String.t(), Minga.Test.FakeTaskSession.seed()}]) ::
+          :ok
+  defp seed_tasks(_ctx, []), do: :ok
+
+  defp seed_tasks(ctx, tasks) do
+    Enum.each(tasks, fn {title, seed} ->
+      Minga.Test.FakeTaskSession.start(ctx.editor, title, seed)
+    end)
+
+    _ = EditorCase.editor_state(ctx)
     :ok
   end
 

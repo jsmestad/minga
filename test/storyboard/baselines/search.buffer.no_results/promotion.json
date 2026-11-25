@@ -1,6 +1,6 @@
 {
   "macos": {
-    "commit": "74e9d8ec633bb8c08cef2a271301beb823a1c7c2-dirty",
+    "commit": "f777d3e78615c1651d423d05be0640b817531a3b",
     "files": {
       "macos-astrodark-1280.json": "4881614a12f24beb03914294468ff7cb76f2d70084ecba96f968482cd0acbc61",
       "macos-astrodark-1440.json": "ad97f06380694026d2c59b680aea6699057daa950a2251bdbd244448aeb9cfa1",
@@ -10,13 +10,17 @@
       "macos-catppuccin_latte-1440.json": "8dc2c92e35ec8a20984726664cebcf95cd855b115dcf5e032a353af94f9e198a"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "a985a555c34e77312660e7f42c175658f8daafe89937d983750b41b4b2a84cad",
-      "macos-astrodark-1440.json": "fb195eff28590cb0c03b1b949ecac6cada3623716111d637c70ac77cfa943418",
-      "macos-catppuccin_frappe-1280.json": "3911f9ac4ebb74c4e75c3ccf9092567e78913c98e6d770e09a7fc7f39f8d30db",
-      "macos-catppuccin_frappe-1440.json": "78282e0ae9a871701753462c39553b5931fad69af8a2afacf94e862fc6fa7c16",
-      "macos-catppuccin_latte-1280.json": "5f664279decb7aff94cba03c46c4edf231786c097bf83321af6e0f86b4830873",
-      "macos-catppuccin_latte-1440.json": "1c12dd69b61287508d8dab4871fb906aec0fce21f929aa5d3df0ddf562619f97"
+      "macos-astrodark-1280.json": "16331c3ac99027457f0bbb7a123b94908c4d059c03842c26f533aecd4029db3f",
+      "macos-astrodark-1440.json": "ae61dcd022faf448a0bd67a710d1b4510c5d2358a06e8f5364978e7a44b7bc6e",
+      "macos-catppuccin_frappe-1280.json": "80dba49705c63bbe9f6e42a427fdb1340279cbd87219de8bf7a3c9cb2d853eef",
+      "macos-catppuccin_frappe-1440.json": "b50b9c30d612b184fda75f8c3a94a90a1831822d34fa8b385a6a7ce098ff9337",
+      "macos-catppuccin_latte-1280.json": "1e801e92d5a1e6e829157b9f5ff29e993667c2edfdde092d874cfedcbf794039",
+      "macos-catppuccin_latte-1440.json": "35d20559d1e0791c798938b12723d2a0ec559680a9e7503ee40ac2bf48512ec0"
     }
+  },
+  "platform_specific": {
+    "frontend": "tui",
+    "reason": "fold marks draw now that the parse says when it is complete (#4337); macOS baselines record no fold marks, and the 80x24 empty-list inset is terminal only"
   },
   "scenario": "search.buffer.no_results",
   "tui": {

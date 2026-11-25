@@ -18,6 +18,12 @@
         "empty_state": {
           "cols": 179,
           "rows": 45
+        },
+        "tasks_drawer": {
+          "rows": 31
+        },
+        "tasks_drawer+minibuffer": {
+          "rows": 26
         }
       }
     },
@@ -38,6 +44,12 @@
         "empty_state": {
           "cols": 159,
           "rows": 39
+        },
+        "tasks_drawer": {
+          "rows": 25
+        },
+        "tasks_drawer+minibuffer": {
+          "rows": 21
         }
       }
     }

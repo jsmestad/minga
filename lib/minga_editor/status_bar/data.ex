@@ -186,7 +186,7 @@ defmodule MingaEditor.StatusBar.Data do
       workspace: workspace,
       merge_conflict_count: merge_conflict_count(buf),
       plan_limit: plan_limit(state),
-      needs_you_count: ChromeState.needs_you_count(chrome_state, agent_status),
+      needs_you_count: needs_you_count(state, agent_status),
       minga_progress: minga_progress(state),
       minga_file: minga_path,
       minga_here?: minga_here?,
@@ -682,6 +682,23 @@ defmodule MingaEditor.StatusBar.Data do
   defp modeline_selection_info(%StatusSelection{mode: :chars, size: count}), do: {:chars, count}
   defp modeline_selection_info(%StatusSelection{mode: :lines, size: count}), do: {:lines, count}
   defp modeline_selection_info(%StatusSelection{}), do: nil
+
+  # The tasks drawer's count, so the modeline and the drawer never disagree. A failed Agent start has no task yet but
+  # still needs you, so the active workspace's status counts when no task does.
+  @spec needs_you_count(EditorState.t() | map(), atom() | nil) :: non_neg_integer()
+  defp needs_you_count(%{agent_connection: %{tasks: tasks}}, agent_status) do
+    case MingaEditor.Agent.Tasks.needs_you_count(tasks) do
+      0 -> active_needs_you(agent_status)
+      count -> count
+    end
+  end
+
+  defp needs_you_count(_state, agent_status), do: active_needs_you(agent_status)
+
+  @spec active_needs_you(atom() | nil) :: 0 | 1
+  defp active_needs_you(agent_status) do
+    if Minga.Design.Tokens.agent_status_state(agent_status) == :needs_you, do: 1, else: 0
+  end
 
   @spec workspace_modeline_summary(ChromeState.t()) :: StatusWorkspace.t() | nil
   defp workspace_modeline_summary(%ChromeState{} = chrome_state) do
