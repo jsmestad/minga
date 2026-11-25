@@ -107,6 +107,19 @@ defmodule MingaEditor.UnsavedTextListTest do
     assert notice_message(editor) == "The unsaved text of notes.ex is no longer waiting"
   end
 
+  test "recovering text that another editor took meanwhile says so instead of \"kept\"", ctx do
+    swap = leftover_swap(ctx, ctx.notes, "one\ntwo\n")
+    editor = start_editor("scratch", swap_dir: ctx.swap_dir)
+
+    open_list(editor)
+    # Another editor recovers the text while the list is open: its buffer owns it now.
+    File.rm!(swap)
+    send_keys_sync(editor, "<CR>")
+
+    assert notice_message(editor) == "The unsaved text of notes.ex is no longer waiting"
+    assert Buffer.pid_for_path(ctx.notes) == :not_found
+  end
+
   test "an editor that keeps no swap files shows an empty list instead of failing" do
     editor = start_editor("scratch")
 

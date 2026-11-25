@@ -93,6 +93,10 @@ defmodule MingaEditor.Handlers.SessionRestore do
           "#{name} has unsaved changes of its own: save or discard them, then recover again"
         )
 
+      # The swap is gone: another editor or a start recovered or removed it after the list was read.
+      {:error, :enoent} ->
+        NoticeWorkflow.publish(state, "The unsaved text of #{name} is no longer waiting")
+
       {:error, reason} ->
         Minga.Log.warning(
           :editor,
