@@ -326,7 +326,14 @@ defmodule Minga.Command.Parser do
   defp do_parse("close"), do: {:window_close, []}
   defp do_parse("rename " <> name), do: {:rename, String.trim(name)}
   defp do_parse("checkhealth"), do: {:checkhealth, []}
-  defp do_parse("checkhealth " <> topic), do: {:checkhealth, [String.trim(topic)]}
+
+  defp do_parse("checkhealth " <> topic) do
+    case String.trim(topic) do
+      "" -> {:checkhealth, []}
+      page -> {:checkhealth, [page]}
+    end
+  end
+
   defp do_parse("Tutor"), do: {:tutor, []}
   defp do_parse("tutor"), do: {:tutor, []}
   defp do_parse("buffers"), do: {:buffers, []}

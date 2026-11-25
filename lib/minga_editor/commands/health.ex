@@ -10,6 +10,7 @@ defmodule MingaEditor.Commands.Health do
   alias MingaEditor.Commands.Help
   alias MingaEditor.Frontend.TerminalHealth
   alias MingaEditor.Frontend.TerminalOverrides
+  alias MingaEditor.Frontend.TerminalReport
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Frontend, as: FrontendState
 
@@ -39,13 +40,13 @@ defmodule MingaEditor.Commands.Health do
 
   @doc "Returns what the terminal page reads its facts from, for a frontend."
   @spec subject(FrontendState.t()) :: TerminalHealth.subject()
-  def subject(%FrontendState{} = frontend) do
-    case {FrontendState.terminal_report(frontend), frontend.backend} do
-      {%MingaEditor.Frontend.TerminalReport{} = report, _backend} -> report
-      {nil, :tui} -> :no_report
-      {nil, _native_or_headless} -> :not_a_terminal
-    end
-  end
+  def subject(%FrontendState{backend: backend} = frontend),
+    do: subject(FrontendState.terminal_report(frontend), backend)
+
+  @spec subject(TerminalReport.t() | nil, FrontendState.backend()) :: TerminalHealth.subject()
+  defp subject(%TerminalReport{} = report, _backend), do: report
+  defp subject(nil, :tui), do: :no_report
+  defp subject(nil, _native_or_headless), do: :not_a_terminal
 
   @spec index_lines(String.t() | nil) :: [String.t()]
   defp index_lines(unknown) do

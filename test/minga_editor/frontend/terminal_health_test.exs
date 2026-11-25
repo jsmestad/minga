@@ -94,6 +94,12 @@ defmodule MingaEditor.Frontend.TerminalHealthTest do
     assert TerminalHealth.no_longer_set(applied, %{styled_underlines: :off}) == []
 
     text = report() |> TerminalHealth.lines(%{styled_underlines: :off}) |> Enum.join("\n")
+
+    # The row itself says so, and no other row does.
+    assert text =~
+             ~r/Curly and dotted underlines\s+detected\s+a terminal known to have it  \(your config says off: not applied\)/
+
+    assert length(Regex.scan(~r/not applied\)/, text)) == 1
     assert text =~ "Set in your config, not applied: styled_underlines off."
     assert text =~ "Restart Minga to apply it."
     assert text =~ "MINGA_TERMINAL_FEATURES=styled_underlines=off"

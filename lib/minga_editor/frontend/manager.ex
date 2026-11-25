@@ -444,8 +444,8 @@ defmodule MingaEditor.Frontend.Manager do
   defp start_port(state, port_opener) do
     # Spawn mode: we're the parent. Launch the GUI binary as a child process.
     if File.exists?(state.renderer_path) do
-      # The environment is built at each start, so a renderer restarted after a config change gets the current
-      # `:terminal_features`. Connected mode has no such moment: something else started the frontend.
+      # The environment is built at each start, so a restarted renderer gets the current `:terminal_features`.
+      # Connected mode has no such moment: something else started the frontend.
       env = tty_env(state.tty_path) ++ state.renderer_env.()
 
       port =

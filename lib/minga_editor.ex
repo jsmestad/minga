@@ -2211,8 +2211,8 @@ defmodule MingaEditor do
   defdelegate do_dismiss_completion(state), to: CompletionHandling, as: :dismiss
 
   # One line when the terminal's answers are in, so a user who wonders why two terminals differ finds it in *Messages*.
-  # The first report of a start still has open questions and is not worth a line, and neither is a report that
-  # changes only how a feature was settled. `:checkhealth terminal` shows the rest.
+  # The first report of a start still has open questions and is not worth a line.
+  # Neither is a report that changes only how a feature was settled. `:checkhealth terminal` shows the rest.
   @spec log_terminal_report(
           MingaEditor.Frontend.TerminalReport.t() | nil,
           MingaEditor.Frontend.TerminalReport.t()

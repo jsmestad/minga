@@ -14,6 +14,7 @@ defmodule MingaEditor.Commands.HealthTest do
       assert Parser.parse("checkhealth terminal") == {:checkhealth, ["terminal"]}
       assert Parser.parse("checkhealth  terminal ") == {:checkhealth, ["terminal"]}
       assert Parser.parse("checkhealth lsp") == {:checkhealth, ["lsp"]}
+      assert Parser.parse("checkhealth  ") == {:checkhealth, []}
     end
   end
 

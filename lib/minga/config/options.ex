@@ -1157,8 +1157,9 @@ defmodule Minga.Config.Options do
     {:error, "#{name} must be a map or nil, got: #{inspect(value)}"}
   end
 
-  # A map whose keys and values each come from a fixed list. An entry outside the lists is an error and never
-  # ignored: a mistyped key would otherwise look like a setting that does nothing.
+  # A map whose keys and values each come from a fixed list.
+  # An entry outside the lists is an error and never ignored.
+  # A mistyped key would otherwise look like a setting that does nothing.
   defp validate_type({:atom_map, keys, values}, name, value) when is_map(value) do
     case Enum.find(value, fn {key, setting} -> key not in keys or setting not in values end) do
       nil ->

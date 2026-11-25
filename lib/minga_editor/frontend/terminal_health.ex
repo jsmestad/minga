@@ -111,9 +111,11 @@ defmodule MingaEditor.Frontend.TerminalHealth do
   end
 
   def lines(%TerminalReport{} = report, overrides) when is_map(overrides) do
+    pending = not_applied(report, overrides)
+
     ["Terminal", ""] ++
-      Enum.flat_map(rows(report), &row_lines/1) ++
-      not_applied_lines(not_applied(report, overrides)) ++
+      Enum.flat_map(rows(report), &row_lines(&1, List.keyfind(pending, &1.feature, 0))) ++
+      not_applied_lines(pending) ++
       no_longer_set_lines(no_longer_set(report, overrides)) ++ footer()
   end
 
@@ -128,17 +130,27 @@ defmodule MingaEditor.Frontend.TerminalHealth do
   defp instead(:missing, _replacement, loss) when is_binary(loss), do: "Without it, #{loss}."
   defp instead(_standing, _replacement, _loss), do: nil
 
-  @spec row_lines(row()) :: [String.t()]
-  defp row_lines(%{standing: :unused, name: name}),
-    do: ["  ·  #{String.pad_trailing(name, 32)} not used yet"]
+  # `pending` is the option's setting for this feature when the running frontend does not have it in effect.
+  @spec row_lines(row(), {atom(), :on | :off} | nil) :: [String.t()]
+  defp row_lines(%{standing: :unused, name: name}, pending),
+    do: [
+      String.trim_trailing(
+        "  ·  #{String.pad_trailing(name, 32)} not used yet#{not_applied_note(pending)}"
+      )
+    ]
 
-  defp row_lines(%{name: name, standing: standing, source: source, instead: instead}) do
+  defp row_lines(%{name: name, standing: standing, source: source, instead: instead}, pending) do
     head =
-      "  #{mark(standing)}  #{String.pad_trailing(name, 32)} #{String.pad_trailing(word(standing), 10)} #{because(standing, source)}"
+      "  #{mark(standing)}  #{String.pad_trailing(name, 32)} #{String.pad_trailing(word(standing), 10)} " <>
+        because(standing, source) <> not_applied_note(pending)
 
     # The detail starts at the row's own indent: deeper leading space would be drawn with indent guides through it.
     [String.trim_trailing(head) | List.wrap(instead && "  └  #{instead}")]
   end
+
+  @spec not_applied_note({atom(), :on | :off} | nil) :: String.t()
+  defp not_applied_note(nil), do: ""
+  defp not_applied_note({_feature, setting}), do: "  (your config says #{setting}: not applied)"
 
   @spec mark(standing()) :: String.t()
   defp mark(:detected), do: "✓"
@@ -190,15 +202,16 @@ defmodule MingaEditor.Frontend.TerminalHealth do
     "#{TerminalOverrides.variable()}=#{value}"
   end
 
+  # Page text is laid out for an 80 column terminal, one sentence per line where it can be.
   @spec footer() :: [String.t()]
   defp footer do
     [
       "",
       "Is a line wrong for your terminal? Force it in your config, then restart Minga:",
       "  set :terminal_features, %{styled_underlines: :on}",
-      "true_color, styled_underlines and underline_color can be forced :on or :off: those are the ones Minga decides",
-      "how to draw. The terminal itself turns the others on and answers for them, so forcing them would only make",
-      "this page disagree with what happens.",
+      "true_color, styled_underlines and underline_color can be forced :on or :off.",
+      "Those are the ones Minga decides how to draw.",
+      "The terminal turns the others on and answers for them, so they cannot be forced.",
       "",
       "Run :checkhealth terminal again after changing terminals."
     ]
