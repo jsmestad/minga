@@ -30,7 +30,7 @@ defmodule Minga.Buffer.ConflictIndex do
   @spec new(Document.t()) :: t()
   def new(%Document{} = document) do
     if marker_line?(document) do
-      markers = document |> all_lines() |> marker_lines(0)
+      markers = marker_lines(document, 0, Document.line_count(document) - 1)
       %__MODULE__{markers: markers, entries: parse_entries(document, markers)}
     else
       %__MODULE__{markers: [], entries: []}
@@ -70,10 +70,7 @@ defmodule Minga.Buffer.ConflictIndex do
   defp update_markers(markers, document, start_line, old_end_line, new_end_line, line_shift) do
     prefix = Enum.take_while(markers, fn {line, _kind} -> line < start_line end)
 
-    changed =
-      document
-      |> Lines.slice(start_line, new_end_line - start_line + 1)
-      |> marker_lines(start_line)
+    changed = marker_lines(document, start_line, new_end_line)
 
     suffix =
       markers
@@ -164,9 +161,6 @@ defmodule Minga.Buffer.ConflictIndex do
   defp line_start_marker?(segment),
     do: Enum.any?(@line_start_marker_patterns, &(:binary.match(segment, &1) != :nomatch))
 
-  @spec all_lines(Document.t()) :: [String.t()]
-  defp all_lines(document), do: Lines.slice(document, 0, Document.line_count(document))
-
   @spec marker_label(Document.t(), non_neg_integer(), String.t()) :: String.t()
   defp marker_label(document, line, prefix) do
     document
@@ -180,17 +174,24 @@ defmodule Minga.Buffer.ConflictIndex do
   defp optional_marker_label(_document, nil, _prefix), do: nil
   defp optional_marker_label(document, line, prefix), do: marker_label(document, line, prefix)
 
-  @spec marker_lines([String.t()], non_neg_integer()) :: [marker()]
-  defp marker_lines(lines, offset), do: marker_lines(lines, offset, [])
+  @spec marker_lines(Document.t(), non_neg_integer(), non_neg_integer()) :: [marker()]
+  defp marker_lines(document, first, last) do
+    size = Document.content_byte_size(document)
 
-  @spec marker_lines([String.t()], non_neg_integer(), [marker()]) :: [marker()]
-  defp marker_lines([], _index, markers), do: Enum.reverse(markers)
+    first..min(last, Document.line_count(document) - 1)//1
+    |> Enum.reduce([], fn line, markers ->
+      start = Lines.start_of(document, line)
 
-  defp marker_lines([line | rest], index, markers) do
-    case marker_kind(line) do
-      nil -> marker_lines(rest, index + 1, markers)
-      kind -> marker_lines(rest, index + 1, [{index, kind} | markers])
-    end
+      # None of the marker prefixes contains a line break, so a short line cannot match across one.
+      count = min(size - start, @marker_prefix_bytes)
+      prefix = Document.slice_byte_range(document, start, count)
+
+      case marker_kind(prefix) do
+        nil -> markers
+        kind -> [{line, kind} | markers]
+      end
+    end)
+    |> Enum.reverse()
   end
 
   @spec marker_kind(String.t()) :: marker_kind() | nil
