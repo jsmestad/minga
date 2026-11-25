@@ -108,15 +108,21 @@ defmodule MingaEditor.Handlers.SessionHandler do
       [project_root: Capture.project_root(state.workspace)]
   end
 
+  @doc "True when this editor owns its project's session: persistence is on, there is a project root, and the editor opened the project rather than one file."
+  @spec persists_project?(EditorState.t()) :: boolean()
+  def persists_project?(%EditorState{} = state) do
+    SessionState.enabled?(state.session) and SessionState.project_session?(state.session) and
+      is_binary(Capture.project_root(state.workspace))
+  end
+
   @doc """
   True when opening the project should restore its saved session.
 
-  Persistence must be on, the editor must have a project root, and the workspace must still be empty: a file opened from the command line wins over the saved session.
+  The editor must own the project's session (`persists_project?/1`), and the workspace must still be empty: a file opened in the meantime wins over the saved session.
   """
   @spec restore_enabled?(EditorState.t()) :: boolean()
   def restore_enabled?(%EditorState{} = state) do
-    SessionState.enabled?(state.session) and is_binary(Capture.project_root(state.workspace)) and
-      state.workspace.buffers.list == []
+    persists_project?(state) and state.workspace.buffers.list == []
   end
 
   @doc """
@@ -126,10 +132,8 @@ defmodule MingaEditor.Handlers.SessionHandler do
   """
   @spec save_now(EditorState.t()) :: :ok
   def save_now(%EditorState{} = state) do
-    snapshot = Capture.snapshot(state)
-
-    if SessionState.enabled?(state.session) and is_binary(snapshot.project_root) do
-      case Session.save(snapshot, project_session_opts(state)) do
+    if persists_project?(state) do
+      case Session.save(Capture.snapshot(state), project_session_opts(state)) do
         :ok -> :ok
         {:error, reason} -> Minga.Log.warning(:editor, "Session save failed: #{inspect(reason)}")
       end
@@ -156,21 +160,18 @@ defmodule MingaEditor.Handlers.SessionHandler do
 
   @spec handle_save_session(EditorState.t()) :: {EditorState.t(), [session_effect()]}
   defp handle_save_session(state) do
-    snapshot = Capture.snapshot(state)
-
     timer_effect =
       case state.frontend.backend do
         :headless -> {:cancel_session_timer}
         _backend -> {:restart_session_timer}
       end
 
-    # Outside a project there is no session to pick up later.
-    case snapshot.project_root do
-      nil ->
-        {state, [timer_effect]}
-
-      _root ->
-        {state, [{:save_session_async, snapshot, project_session_opts(state)}, timer_effect]}
+    # Outside a project, or in an editor started on one file, this editor has no session to save.
+    if persists_project?(state) do
+      snapshot = Capture.snapshot(state)
+      {state, [{:save_session_async, snapshot, project_session_opts(state)}, timer_effect]}
+    else
+      {state, [timer_effect]}
     end
   end
 end

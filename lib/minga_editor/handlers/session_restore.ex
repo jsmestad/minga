@@ -18,6 +18,7 @@ defmodule MingaEditor.Handlers.SessionRestore do
   alias MingaEditor.Handlers.SessionHandler
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.Window
@@ -46,12 +47,15 @@ defmodule MingaEditor.Handlers.SessionRestore do
 
     state = Enum.reduce(session.buffers, state, &restore_session_buffer/2)
     restored = length(state.workspace.buffers.list) - length(pre_restore_buffers)
-    layout = session.layout && Layout.filter(session.layout, &opened?(state, &1.file))
+
+    # Resolve every reopened file before switching tabs: each tab keeps its own buffer list.
+    opened = opened_buffers(state)
+    {layout, focus} = surviving_layout(session, opened)
 
     state =
       state
-      |> restore_active_file(active_file(session, layout))
-      |> restore_layout(layout, session.active_pane)
+      |> restore_active_file(focused_file(session, layout, focus))
+      |> restore_layout(layout, focus, opened)
 
     if state.frontend.backend != :headless and state.workspace.buffers.list != pre_restore_buffers do
       Process.send_after(self(), :request_code_lens_and_inlay_hints, 800)
@@ -111,30 +115,46 @@ defmodule MingaEditor.Handlers.SessionRestore do
     end
   end
 
-  @spec opened?(state(), String.t()) :: boolean()
-  defp opened?(state, file), do: is_pid(BufferRegistry.find_buffer_by_path(state, file))
+  @spec opened_buffers(state()) :: %{String.t() => pid()}
+  defp opened_buffers(state) do
+    for pid <- BufferRegistry.buffer_inventory(state),
+        path = Buffer.file_path(pid),
+        is_binary(path),
+        into: %{},
+        do: {path, pid}
+  end
 
-  # The focused window's file decides which tab the layout lands in.
-  @spec active_file(Snapshot.t(), Layout.t() | nil) :: String.t() | nil
-  defp active_file(session, nil), do: session.active_file
+  # Drops the windows whose file did not reopen, and finds the focused window among the survivors (the first one when it was dropped).
+  @spec surviving_layout(Snapshot.t(), %{String.t() => pid()}) ::
+          {Layout.t() | nil, non_neg_integer()}
+  defp surviving_layout(%Snapshot{layout: nil}, _opened), do: {nil, 0}
 
-  defp active_file(session, layout) do
-    case Enum.at(Layout.panes(layout), session.active_pane) do
-      %Pane{file: file} -> file
-      nil -> session.active_file
+  defp surviving_layout(%Snapshot{layout: layout, active_pane: active_pane}, opened) do
+    focused = Enum.at(Layout.panes(layout), active_pane)
+
+    case Layout.filter(layout, &Map.has_key?(opened, &1.file)) do
+      nil -> {nil, 0}
+      kept -> {kept, Enum.find_index(Layout.panes(kept), &(&1 == focused)) || 0}
     end
   end
 
-  # Rebuilds the saved splits in the active tab: the first pane reuses the focused window, the rest get new windows.
-  @spec restore_layout(state(), Layout.t() | nil, non_neg_integer()) :: state()
-  defp restore_layout(state, nil, _active_pane), do: state
+  # The focused window's file decides which tab the layout lands in.
+  @spec focused_file(Snapshot.t(), Layout.t() | nil, non_neg_integer()) :: String.t() | nil
+  defp focused_file(session, nil, _focus), do: session.active_file
+  defp focused_file(_session, layout, focus), do: Enum.at(Layout.panes(layout), focus).file
 
-  defp restore_layout(state, layout, active_pane) do
+  # Rebuilds the saved splits in the active tab: the first pane reuses the focused window, the rest get new windows.
+  @spec restore_layout(state(), Layout.t() | nil, non_neg_integer(), %{String.t() => pid()}) ::
+          state()
+  defp restore_layout(state, nil, _focus, _opened), do: state
+
+  defp restore_layout(state, layout, focus, opened) do
+    state = adopt_layout_buffers(state, layout, opened)
     windows = state.workspace.windows
-    {tree, {windows, _reuse}} = place(layout, {windows, [windows.active]}, state)
+    {tree, {windows, _reuse}} = place(layout, {windows, [windows.active]}, opened)
     leaves = WindowTree.leaves(tree)
     tops = Enum.zip(leaves, Enum.map(Layout.panes(layout), & &1.top))
-    focused = Enum.at(leaves, active_pane) || hd(leaves)
+    focused = Enum.at(leaves, focus)
 
     windows = windows |> Windows.set_tree(tree) |> Windows.set_active(focused)
     {:ok, %Window{content: {:buffer, buffer}, cursor: cursor}} = Windows.fetch(windows, focused)
@@ -153,9 +173,23 @@ defmodule MingaEditor.Handlers.SessionRestore do
     %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)}
   end
 
-  @spec place(Layout.t(), {Windows.t(), [Window.id()]}, state()) ::
+  # Every buffer a restored window shows joins the active tab's buffer list, so a window never shows a buffer its tab does not hold.
+  @spec adopt_layout_buffers(state(), Layout.t(), %{String.t() => pid()}) :: state()
+  defp adopt_layout_buffers(state, layout, opened) do
+    buffers =
+      layout
+      |> Layout.panes()
+      |> Enum.map(&Map.fetch!(opened, &1.file))
+      |> Enum.uniq()
+      |> Enum.reject(&(&1 in state.workspace.buffers.list))
+      |> Enum.reduce(state.workspace.buffers, &Buffers.add_background(&2, &1))
+
+    %{state | workspace: MingaEditor.Session.State.set_buffers(state.workspace, buffers)}
+  end
+
+  @spec place(Layout.t(), {Windows.t(), [Window.id()]}, %{String.t() => pid()}) ::
           {MingaEditor.WindowTree.t(), {Windows.t(), [Window.id()]}}
-  defp place({:pane, %Pane{} = pane}, {windows, reuse}, state) do
+  defp place({:pane, %Pane{} = pane}, {windows, reuse}, opened) do
     {id, windows, reuse} =
       case reuse do
         [id] ->
@@ -166,7 +200,7 @@ defmodule MingaEditor.Handlers.SessionRestore do
           {id, windows, []}
       end
 
-    buffer = BufferRegistry.find_buffer_by_path(state, pane.file)
+    buffer = Map.fetch!(opened, pane.file)
     window = Window.new(id, buffer, 24, 80, {pane.cursor_line, pane.cursor_col})
 
     windows =
@@ -178,9 +212,9 @@ defmodule MingaEditor.Handlers.SessionRestore do
     {{:leaf, id}, {windows, reuse}}
   end
 
-  defp place({:split, direction, first, second, size}, acc, state) do
-    {first, acc} = place(first, acc, state)
-    {second, acc} = place(second, acc, state)
+  defp place({:split, direction, first, second, size}, acc, opened) do
+    {first, acc} = place(first, acc, opened)
+    {second, acc} = place(second, acc, opened)
     {{:split, direction, first, second, size}, acc}
   end
 

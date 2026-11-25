@@ -25,7 +25,9 @@ defmodule MingaEditor.ProjectSessionTest do
     %{root: root, sessions: Path.join(dir, "sessions"), lib_a: lib_a, lib_b: lib_b}
   end
 
-  defp save_split_session(%{root: root, sessions: sessions, lib_a: a, lib_b: b}) do
+  defp save_split_session(ctx, active_pane \\ 1)
+
+  defp save_split_session(%{root: root, sessions: sessions, lib_a: a, lib_b: b}, active_pane) do
     snapshot = %Snapshot{
       version: 2,
       project_root: root,
@@ -37,7 +39,7 @@ defmodule MingaEditor.ProjectSessionTest do
       layout:
         {:split, :vertical, {:pane, %Pane{file: a, cursor_line: 40, cursor_col: 2, top: 30}},
          {:pane, %Pane{file: b, cursor_line: 70, cursor_col: 0, top: 60}}, 0},
-      active_pane: 1
+      active_pane: active_pane
     }
 
     :ok = Session.save(snapshot, session_dir: sessions, project_root: root)
@@ -73,6 +75,53 @@ defmodule MingaEditor.ProjectSessionTest do
     assert windows.map[left].viewport.top == 30
     assert windows.map[right].viewport.top == 60
     assert notice_message(editor) == "Restored 2 files from last time"
+  end
+
+  test "focus returns to the window that had it, even when it shows an earlier file", ctx do
+    save_split_session(ctx, 0)
+    editor = open_project(ctx)
+
+    state = wait_until(editor, &(map_size(&1.workspace.windows.map) == 2), max_attempts: 100)
+
+    assert {:split, :vertical, {:leaf, left}, {:leaf, _right}, 0} = state.workspace.windows.tree
+    assert state.workspace.windows.active == left
+    assert Minga.Buffer.file_path(state.workspace.buffers.active) == ctx.lib_a
+    assert Minga.Buffer.cursor(state.workspace.buffers.active) == {40, 2}
+  end
+
+  test "a window whose file is gone is dropped and focus stays on the window that had it", ctx do
+    save_split_session(ctx, 1)
+    File.rm!(ctx.lib_a)
+    editor = open_project(ctx)
+
+    state = wait_until(editor, &(length(&1.workspace.buffers.list) == 1), max_attempts: 100)
+
+    assert {:leaf, only} = state.workspace.windows.tree
+    assert state.workspace.windows.active == only
+    assert Minga.Buffer.file_path(state.workspace.buffers.active) == ctx.lib_b
+    assert notice_message(editor) == "Restored 1 file from last time"
+  end
+
+  test "an editor started on one file neither restores nor saves the project's session", ctx do
+    save_split_session(ctx)
+    saved = File.read!(Session.session_file(session_dir: ctx.sessions, project_root: ctx.root))
+
+    editor =
+      start_editor("one file",
+        file_path: ctx.lib_a,
+        project_root: ctx.root,
+        session_dir: ctx.sessions,
+        rendering: :disabled
+      )
+
+    send(editor.editor, :save_session)
+    state = editor_state(editor)
+
+    refute MingaEditor.Handlers.SessionHandler.persists_project?(state)
+    assert length(state.workspace.buffers.list) == 1
+
+    assert File.read!(Session.session_file(session_dir: ctx.sessions, project_root: ctx.root)) ==
+             saved
   end
 
   test "starting fresh closes the restored files and keeps unsaved ones", ctx do

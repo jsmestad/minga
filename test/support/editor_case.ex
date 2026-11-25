@@ -161,7 +161,9 @@ defmodule Minga.Test.EditorCase do
       editing_model: editing_model,
       events_registry: events_registry,
       sidebar_registry: sidebar_registry,
-      suppress_tool_prompts: true
+      suppress_tool_prompts: true,
+      # The CLI's remembered file argument is global; a test editor never inherits it.
+      startup_file: nil
     ]
 
     editor_opts =

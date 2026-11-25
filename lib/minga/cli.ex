@@ -300,6 +300,10 @@ defmodule Minga.CLI do
     Map.merge(@default_flags, stored)
   end
 
+  @doc "The regular file given on the command line, or nil for a directory or no argument."
+  @spec startup_file() :: String.t() | nil
+  def startup_file, do: Application.get_env(:minga, :cli_startup_file)
+
   @doc "Returns the project root inferred from the stored startup CLI target, if any."
   @spec startup_project_root() :: String.t() | nil
   def startup_project_root do
@@ -1028,9 +1032,27 @@ defmodule Minga.CLI do
     effective = apply_flag_implications(flags, file)
     Application.put_env(:minga, :cli_startup_flags, effective)
     store_startup_project_root(file)
+    store_startup_file(file)
     store_debug_log_path(effective.debug_log)
     Minga.SafeMode.put(effective.safe_mode)
     if effective.minimal, do: Application.put_env(:minga, :minimal_mode, true)
+    :ok
+  end
+
+  # A regular file argument opens that file, not the project's saved session.
+  @spec store_startup_file(String.t() | nil) :: :ok
+  defp store_startup_file(path) when is_binary(path) do
+    if File.dir?(path) do
+      Application.delete_env(:minga, :cli_startup_file)
+    else
+      Application.put_env(:minga, :cli_startup_file, Path.expand(path))
+    end
+
+    :ok
+  end
+
+  defp store_startup_file(nil) do
+    Application.delete_env(:minga, :cli_startup_file)
     :ok
   end
 

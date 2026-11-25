@@ -145,13 +145,20 @@ defmodule MingaEditor.State.Launchpad do
           |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
         case Session.load(session_opts) do
+          # A project session restores on every open, so its clean-shutdown flag says nothing about a crash.
           {:ok, %{buffers: buffers}} when is_list(buffers) and buffers != [] ->
-            {length(buffers), not Session.clean_shutdown?(session_opts)}
+            {length(buffers), crashed?(session_opts)}
 
           _ ->
             {0, false}
         end
     end
+  end
+
+  @spec crashed?(keyword()) :: boolean()
+  defp crashed?(session_opts) do
+    not Keyword.has_key?(session_opts, :project_root) and
+      not Session.clean_shutdown?(session_opts)
   end
 
   @spec safe_recent_files() :: [String.t()]
