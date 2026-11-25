@@ -1,5 +1,5 @@
 /*
- * Pure state for the Lesson 05 lab: test a shell command against the hook script printed on the page.
+ * Pure state for the Lesson 04 lab: test a shell command against the hook script printed on the page.
  *
  * The rules are not written here. The view reads each rule's pattern and reason from the script in the page, so the lab tests the script the reader copies.
  * A pattern is a POSIX extended regular expression, limited to the parts that mean the same to grep and to JavaScript: literals, bracket lists with plain ranges, groups, alternation, the * + ? repeats, the two anchors, and a backslash before a dollar sign.

@@ -145,7 +145,7 @@ const VERDICTS: readonly (readonly [command: string, rule: string | null, why: s
   ["ls -la", null, "ordinary work"],
 ];
 
-describe("Lesson 05 hook tester: the rules are the script's rules", () => {
+describe("Lesson 04 hook tester: the rules are the script's rules", () => {
   it("reads one rule from each block_if line of the printed script, in order", () => {
     const printed = Array.from(SCRIPT.matchAll(/^block_if '(.*)' '(.*)'$/gm), (m) => ({ pattern: m[1]!, reason: m[2]! }));
     assert.equal(printed.length, 3, "the script has three rules");
@@ -173,7 +173,7 @@ describe("Lesson 05 hook tester: the rules are the script's rules", () => {
   });
 });
 
-describe("Lesson 05 hook tester: verdicts", () => {
+describe("Lesson 04 hook tester: verdicts", () => {
   for (const [command, rule, why] of VERDICTS) {
     it(`${rule === null ? "allows" : "blocks"} ${JSON.stringify(command)}: ${why}`, () => {
       const verdict = evaluateHook(command, RULES);
@@ -199,7 +199,7 @@ describe("Lesson 05 hook tester: verdicts", () => {
   });
 });
 
-describe("Lesson 05 hook tester: the lab agrees with the real script", () => {
+describe("Lesson 04 hook tester: the lab agrees with the real script", () => {
   const run = (shell: string, args: readonly string[], input: string) => spawnSync(shell, args, { input, encoding: "utf8" });
   const has = (program: string): boolean => run("sh", ["-c", `command -v ${program}`], "").status === 0;
   const hasJq = has("jq");
@@ -244,7 +244,7 @@ describe("Lesson 05 hook tester: the lab agrees with the real script", () => {
   });
 });
 
-describe("Lesson 05 hook tester: presets", () => {
+describe("Lesson 04 hook tester: presets", () => {
   it("offers four commands, and each button's label is the command it runs", () => {
     assert.deepEqual(PRESETS, ["git push --force origin main", "rm -rf /", "rm -rf /tmp/prod", "npm test"]);
     for (const preset of PRESETS) assert.equal(reduceVeto(createVetoState(""), { type: "preset", command: preset, field: "" }, RULES).last?.command, preset);
@@ -263,7 +263,7 @@ describe("Lesson 05 hook tester: presets", () => {
   });
 });
 
-describe("Lesson 05 hook tester: nothing the reader typed is discarded", () => {
+describe("Lesson 04 hook tester: nothing the reader typed is discarded", () => {
   const start = createVetoState(FIELD_START);
 
   it("lets a preset fill the field only while it is empty or still holds text the lab put there", () => {
@@ -300,7 +300,7 @@ describe("Lesson 05 hook tester: nothing the reader typed is discarded", () => {
   });
 });
 
-describe("Lesson 05 hook tester: steps", () => {
+describe("Lesson 04 hook tester: steps", () => {
   const start = createVetoState(FIELD_START);
   const run = (field: string): VetoEvent => ({ type: "run", field });
   const preset = (command: string, field: string): VetoEvent => ({ type: "preset", command, field });
@@ -359,7 +359,7 @@ describe("Lesson 05 hook tester: steps", () => {
   });
 });
 
-describe("Lesson 05 hook tester: the page holds the words", () => {
+describe("Lesson 04 hook tester: the page holds the words", () => {
   it("has the three steps in order, each with an instruction", () => {
     assert.deepEqual(lab.steps, [...STEP_IDS]);
     assert.equal(inner(lab.html, "data-lab-instruction", "p").filter((label) => plain(label).trim() !== "").length, STEP_IDS.length);

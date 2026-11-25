@@ -1,5 +1,5 @@
 /*
- * View for the Lesson 03 lab: you and Minga work in the same file.
+ * View for the Lesson 02 lab: you and Minga work in the same file.
  *
  * The page holds every node and every word. This file finds the nodes once, then changes attributes, classes and text for each state.
  * Keys reach the lab through the lab stage only, so the page keeps its own keys whenever the stage does not have focus.

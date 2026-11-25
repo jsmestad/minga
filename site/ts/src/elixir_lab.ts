@@ -1,5 +1,5 @@
 /*
- * Lesson 04: the settings translator and the config builder.
+ * Lesson 03: the settings translator and the config builder.
  *
  * Every word a reader sees is in site/learn/elixir.html: the four rows, their snippets for each editor, the explanations, the option labels and the steps after Copy.
  * This file holds ids, option values and preview colours.

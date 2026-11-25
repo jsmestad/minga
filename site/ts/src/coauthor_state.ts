@@ -1,5 +1,5 @@
 /*
- * State for the Lesson 03 lab: you and Minga work in the same file.
+ * State for the Lesson 02 lab: you and Minga work in the same file.
  *
  * The lab is one sequence of moves. Each move waits for one command; the right command changes the file and goes to the next move.
  * Any other key changes only the caption and the keycast. Every value here is an id: the words (file text, captions, step labels) live in site/learn/agents.html.

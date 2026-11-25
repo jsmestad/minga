@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Learn Minga: Interactive Curriculum &amp; Labs</title>
-  <meta name="description" content="Hands-on interactive lessons for learning Minga: adaptive install runbook, playable v0.1.0 Mini-Minga key sandbox, live parallel-agent Twist simulator, Lua/Elisp/VS Code to Elixir translator, and remote fault-injection topology.">
+  <title>Learn Minga: four short lessons, one job each</title>
+  <meta name="description" content="Four short lessons, one job each: find a command when you forget its key, see which lines are yours and which are Minga's, bring one setting from your old editor, and test a hook before you leave an agent working alone. Lessons 01 and 02 teach the v0.1.0 design, which is not in today's build yet.">
   <link rel="canonical" href="https://mingacode.dev/learn/">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#303446" media="(prefers-color-scheme: dark)">
@@ -13,18 +13,18 @@
   <meta property="og:locale" content="en_US">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://mingacode.dev/learn/">
-  <meta property="og:title" content="Learn Minga: Interactive Curriculum &amp; Labs">
-  <meta property="og:description" content="Five distinct, playable lessons covering Minga's v0.1.0 interface model, parallel agent co-authoring, Elixir customization, and remote devboxes.">
+  <meta property="og:title" content="Learn Minga: four short lessons, one job each">
+  <meta property="og:description" content="Four short lessons, one job each: find a command when you forget its key, see which lines are yours and which are Minga's, bring one setting from your old editor, and test a hook before you leave an agent working alone. Lessons 01 and 02 teach the v0.1.0 design, which is not in today's build yet.">
   <meta property="og:image" content="https://mingacode.dev/assets/og-minga.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
+  <meta property="og:image:alt" content="Minga: Elixir code in a Minga window in Catppuccin Frappé, with marks in the margin that show which lines Minga changed">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Learn Minga: Interactive Curriculum &amp; Labs">
-  <meta name="twitter:description" content="Five distinct, playable lessons covering Minga's v0.1.0 interface model, parallel agent co-authoring, Elixir customization, and remote devboxes.">
+  <meta name="twitter:title" content="Learn Minga: four short lessons, one job each">
+  <meta name="twitter:description" content="Four short lessons, one job each: find a command when you forget its key, see which lines are yours and which are Minga's, bring one setting from your old editor, and test a hook before you leave an agent working alone. Lessons 01 and 02 teach the v0.1.0 design, which is not in today's build yet.">
   <meta name="twitter:image" content="https://mingacode.dev/assets/og-minga.png">
-  <meta name="twitter:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Course","name":"Learn Minga: Interactive Curriculum","url":"https://mingacode.dev/learn/","description":"Hands-on interactive lessons for learning Minga: adaptive install runbook, playable v0.1.0 Mini-Minga key sandbox, live parallel-agent Twist simulator, Lua/Elisp/VS Code to Elixir translator, and remote fault-injection topology.","provider":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"},"hasCourseInstance":{"@type":"CourseInstance","courseMode":"online","isAccessibleForFree":true},"hasPart":[{"@type":"LearningResource","name":"Lesson 01: Install & Your First Staged Edit","url":"https://mingacode.dev/getting-started"},{"@type":"LearningResource","name":"Lesson 02: Editing, Keys & Minimal UI","url":"https://mingacode.dev/learn/editing"},{"@type":"LearningResource","name":"Lesson 03: Co-Authoring & Parallel Agents","url":"https://mingacode.dev/learn/agents"},{"@type":"LearningResource","name":"Lesson 04: Elixir for Minga","url":"https://mingacode.dev/learn/elixir"},{"@type":"LearningResource","name":"Lesson 05: Remote Devboxes, MCP & Safety","url":"https://mingacode.dev/learn/remote"}]}</script>
+  <meta name="twitter:image:alt" content="Minga: Elixir code in a Minga window in Catppuccin Frappé, with marks in the margin that show which lines Minga changed">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Course","name":"Learn Minga","url":"https://mingacode.dev/learn/","description":"Four short lessons, one job each: find a command when you forget its key, see which lines are yours and which are Minga's, bring one setting from your old editor, and test a hook before you leave an agent working alone. Lessons 01 and 02 teach the v0.1.0 design, which is not in today's build yet.","provider":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"},"hasCourseInstance":{"@type":"CourseInstance","courseMode":"online","isAccessibleForFree":true},"hasPart":[{"@type":"LearningResource","name":"Start here: Install Minga and publish your first reviewed edit","url":"https://mingacode.dev/getting-started"},{"@type":"LearningResource","name":"Lesson 01: Forgot the key? Press SPC.","url":"https://mingacode.dev/learn/editing"},{"@type":"LearningResource","name":"Lesson 02: You and Minga, in the same file","url":"https://mingacode.dev/learn/agents"},{"@type":"LearningResource","name":"Lesson 03: Bring one setting from your old config","url":"https://mingacode.dev/learn/elixir"},{"@type":"LearningResource","name":"Lesson 04: Leave an agent working while you are away","url":"https://mingacode.dev/learn/remote"}]}</script>
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
@@ -68,16 +68,33 @@
   <main id="main" data-learn-hub>
     <header class="learn-hub-hero">
       <div class="container">
-        <div class="hub-hero-grid">
-          <div>
-            <p class="section-index"><span>LEARN</span> Interactive Curriculum</p>
-            <h1>Interactive labs and runbooks.</h1>
-            <p class="hero-lead">Five short lessons with live browser labs. Press real keys, trigger faults, and translate your config with zero setup.</p>
+        <p class="section-index"><span>LEARN</span> Four lessons</p>
+        <h1>Find any command, review an agent's changes, and leave it working while you are away.</h1>
+        <p class="hero-lead">Four short lessons, one job each, for after you install Minga. Lessons 01 and 02 teach the v0.1.0 design, which is not in today's build yet. Lessons 03 and 04 work in today's build.</p>
+        <div class="hub-next">
+          <div data-hub-next="start">
+            <a class="btn btn-primary" href="/getting-started">Start here: install Minga</a>
+            <p class="hub-next-note">Then go on to Lesson 01. Each lesson keeps your progress in this browser, with no account.</p>
           </div>
-          <div class="hub-progress-box">
-            <span class="hub-progress-k">CURRICULUM STATUS</span>
-            <p class="hub-progress-stat" data-hub-overall>13 hands-on browser missions across 4 lessons · Zero accounts</p>
-            <p class="hub-progress-note">Lessons 02 and 03 preview the upcoming v0.1.0 interface design (marked <strong>In development · v0.1.0</strong>). Everything else works in current builds.</p>
+          <div data-hub-next="editing" hidden>
+            <a class="btn btn-primary" href="/learn/editing">Continue Lesson 01: Find any command</a>
+            <p class="hub-next-note">This is the first lesson you have not finished. Your progress is kept in this browser.</p>
+          </div>
+          <div data-hub-next="agents" hidden>
+            <a class="btn btn-primary" href="/learn/agents">Continue Lesson 02: The same file</a>
+            <p class="hub-next-note">This is the first lesson you have not finished. Your progress is kept in this browser.</p>
+          </div>
+          <div data-hub-next="elixir" hidden>
+            <a class="btn btn-primary" href="/learn/elixir">Continue Lesson 03: Translate a setting</a>
+            <p class="hub-next-note">This is the first lesson you have not finished. Your progress is kept in this browser.</p>
+          </div>
+          <div data-hub-next="remote" hidden>
+            <a class="btn btn-primary" href="/learn/remote">Continue Lesson 04: Leave an agent unattended</a>
+            <p class="hub-next-note">This is the first lesson you have not finished. Your progress is kept in this browser.</p>
+          </div>
+          <div data-hub-next="done" hidden>
+            <a class="btn btn-primary" href="/extending">Next: make Minga your own</a>
+            <p class="hub-next-note">You have done every step of all four lessons in this browser.</p>
           </div>
         </div>
       </div>
@@ -86,121 +103,84 @@
     <section class="section" id="curriculum">
       <div class="container">
         <div class="curriculum-bento">
-          <!-- LESSON 01: Full-width Quickstart Entrypoint -->
           <a class="bento-card bento-card-wide bento-theme-mono" href="/getting-started">
             <div class="bento-card-content">
               <div class="bento-top">
-                <span class="lesson-num">LESSON 01 · QUICKSTART RUNBOOK</span>
+                <span class="lesson-num">START HERE</span>
+                <span class="lesson-tag-shipped">Works in today's build</span>
               </div>
-              <h2>Install &amp; Your First Staged Edit</h2>
-              <p>Pick your platform (macOS Homebrew, Arch/Omarchy, Ubuntu/Debian, Fedora, or source), connect a model, then review and publish your first staged edit.</p>
-              <span class="bento-cta">Open quickstart runbook <span class="bento-arrow" aria-hidden="true">-&gt;</span></span>
-            </div>
-            <div class="bento-motif motif-cli" aria-hidden="true">
-              <div class="motif-bar"><span>zsh · quickstart</span><span>macOS · Arch/Omarchy · Ubuntu · Fedora</span></div>
-              <div class="motif-body">
-                <div><span class="motif-dim">$</span> brew install --cask jsmestad/minga/minga-mac</div>
-                <div><span class="motif-dim">$</span> sudo pacman -Syu minga <span class="motif-dim"># Arch &amp; Omarchy</span></div>
-                <div class="motif-ok">● Ready · 0 files written to repo</div>
-              </div>
+              <h2>Install Minga and publish your first reviewed edit</h2>
+              <p>Install Minga, open a project, connect a model, and publish one small change that an agent wrote and you reviewed.</p>
+              <p class="bento-time">About 20 minutes, on your own machine</p>
+              <span class="bento-cta">Open Getting Started <span class="bento-arrow" aria-hidden="true">-&gt;</span></span>
             </div>
           </a>
 
-          <!-- LESSON 02: Playable Mini-Minga Sandbox -->
           <a class="bento-card bento-theme-you" href="/learn/editing" data-status="planned" data-since="v0.1.0" data-pill="off">
-            <div class="bento-motif motif-frappe" aria-hidden="true">
-              <div class="motif-bar"><span>minga · retry.ex</span><span>macOS &lt;-&gt; Go TUI</span></div>
-              <div class="motif-body">
-                <div class="motif-wk"><span>SPC ›</span> <span>a Minga ›</span> <span>, Switch</span> <span>g. Act</span></div>
-                <div class="motif-ml"><span class="ml-pill">NORMAL</span> <span>retry.ex</span> <span class="motif-dim">pinned 2</span></div>
-              </div>
-            </div>
             <div class="bento-card-content">
               <div class="bento-top">
-                <span class="lesson-num">LESSON 02 · PLAYABLE SANDBOX</span>
+                <span class="lesson-num">LESSON 01</span>
                 <span class="bento-badges">
                   <span class="lesson-tag" data-status="planned" data-since="v0.1.0"></span>
-                  <span class="bento-prog" data-lesson-progress="editing">4 missions</span>
+                  <span class="bento-prog" data-lesson-progress="editing"><span data-progress-state="none">4 steps</span><span data-progress-state="some" hidden><span data-progress-done>0</span> of 4 steps done</span><span data-progress-state="all" hidden>Done</span></span>
                 </span>
               </div>
-              <h2>Editing, Keys &amp; Minimal UI</h2>
-              <p>Drive a live Mini-Minga viewport: trigger which-key, pin files in the Switcher, open the Act Menu, toggle macOS vs. Go TUI parity, and test CUA desktop shortcuts.</p>
-              <span class="bento-cta">Launch playable sandbox <span class="bento-arrow" aria-hidden="true">-&gt;</span></span>
+              <h2>Forgot the key? Press SPC.</h2>
+              <p>Your spec is open, you want another file, and you cannot remember the key: press <kbd>SPC</kbd> and read the menu.</p>
+              <p class="bento-time">About 5 minutes, in your browser</p>
+              <span class="bento-cta">Open the lesson <span class="bento-arrow" aria-hidden="true">-&gt;</span></span>
             </div>
           </a>
 
-          <!-- LESSON 03: Live Parallel-Agent & Twist Simulator -->
           <a class="bento-card bento-theme-minga" href="/learn/agents" data-status="planned" data-since="v0.1.0" data-pill="off">
-            <div class="bento-motif motif-frappe" aria-hidden="true">
-              <div class="motif-bar"><span>*minga-tasks* &amp; Twist</span><span>3 workers</span></div>
-              <div class="motif-body">
-                <div class="motif-orbits"><span class="ml-minga">◐ Working</span> <span class="ml-needs">◉ Needs you</span> <span class="ml-done">● Done</span></div>
-                <div class="motif-act"><span>y Keep · accept 4 lines</span><span>n Reject · restores 1</span></div>
-              </div>
-            </div>
             <div class="bento-card-content">
               <div class="bento-top">
-                <span class="lesson-num">LESSON 03 · MISSION CONTROL</span>
+                <span class="lesson-num">LESSON 02</span>
                 <span class="bento-badges">
                   <span class="lesson-tag" data-status="planned" data-since="v0.1.0"></span>
-                  <span class="bento-prog" data-lesson-progress="agents">4 missions</span>
+                  <span class="bento-prog" data-lesson-progress="agents"><span data-progress-state="none">4 steps</span><span data-progress-state="some" hidden><span data-progress-done>0</span> of 4 steps done</span><span data-progress-state="all" hidden>Done</span></span>
                 </span>
               </div>
-              <h2>Co-Authoring &amp; Parallel Agents</h2>
-              <p>Test per-author undo inside a Twist block, feel the 300 ms approval lockout, inspect workers in Subagent Peek, and keep or reject hunks via the Act Menu.</p>
-              <span class="bento-cta">Open co-authoring simulator <span class="bento-arrow" aria-hidden="true">-&gt;</span></span>
+              <h2>You and Minga, in the same file</h2>
+              <p>Minga has just changed the spec you are still editing: see which lines are yours and which are Minga's, then keep one change and reject the other.</p>
+              <p class="bento-time">About 5 minutes, in your browser</p>
+              <span class="bento-cta">Open the lesson <span class="bento-arrow" aria-hidden="true">-&gt;</span></span>
             </div>
           </a>
 
-          <!-- LESSON 04: Elixir Translator & Live Theme Playground -->
           <a class="bento-card bento-theme-elixir" href="/learn/elixir">
-            <div class="bento-motif motif-code" aria-hidden="true">
-              <div class="motif-bar"><span>Lua / Elisp / JSON -&gt; Elixir</span><span>Live theme preview</span></div>
-              <div class="motif-body">
-                <div><span class="tok-kw">set</span> <span class="tok-atom">:theme</span>, <span class="tok-atom">:catppuccin_frappe</span></div>
-                <div><span class="tok-kw">on</span> <span class="tok-atom">:after_save</span>, <span class="tok-kw">fn</span> _buf, path -&gt; ... <span class="tok-kw">end</span></div>
-              </div>
-            </div>
             <div class="bento-card-content">
               <div class="bento-top">
-                <span class="lesson-num">LESSON 04 · TRANSLATOR + PLAYGROUND</span>
+                <span class="lesson-num">LESSON 03</span>
                 <span class="bento-badges">
-                  <span class="bento-prog" data-lesson-progress="elixir">2 missions</span>
+                  <span class="lesson-tag-shipped">Works in today's build</span>
+                  <span class="bento-prog" data-lesson-progress="elixir"><span data-progress-state="none">2 steps</span><span data-progress-state="some" hidden><span data-progress-done>0</span> of 2 steps done</span><span data-progress-state="all" hidden>Done</span></span>
                 </span>
               </div>
-              <h2>Elixir for Minga</h2>
-              <p>Pick your current editor (Neovim, Emacs, or VS Code) for an interactive side-by-side translator, then customize presets and watch a live mini-editor preview update in real time.</p>
-              <span class="bento-cta">Open translator &amp; playground <span class="bento-arrow" aria-hidden="true">-&gt;</span></span>
+              <h2>Bring one setting from your old config</h2>
+              <p>Your Neovim, Emacs or VS Code config picks your color theme: write the same setting as one line of Minga config, and reload it without a restart.</p>
+              <p class="bento-time">About 10 minutes, in your browser and then in Minga</p>
+              <span class="bento-cta">Open the lesson <span class="bento-arrow" aria-hidden="true">-&gt;</span></span>
             </div>
           </a>
 
-          <!-- LESSON 05: Supervision & Fault-Injection Topology -->
           <a class="bento-card bento-theme-done" href="/learn/remote">
-            <div class="bento-motif motif-topo" aria-hidden="true">
-              <div class="motif-bar"><span>minga --headless · Fault Lab</span><span>BEAM supervision</span></div>
-              <div class="motif-body">
-                <div class="motif-nodes">
-                  <span class="mn-ok">Buffers ●</span>
-                  <span class="mn-fail">GitHub MCP ◆</span>
-                  <span class="mn-ok">Postgres ●</span>
-                </div>
-                <div class="motif-dim">PreToolUse exit 1 -> vetoed before execution</div>
-              </div>
-            </div>
             <div class="bento-card-content">
               <div class="bento-top">
-                <span class="lesson-num">LESSON 05 · FAULT-INJECTION LAB</span>
+                <span class="lesson-num">LESSON 04</span>
                 <span class="bento-badges">
-                  <span class="bento-prog" data-lesson-progress="remote">3 missions</span>
+                  <span class="lesson-tag-shipped">Works in today's build</span>
+                  <span class="bento-prog" data-lesson-progress="remote"><span data-progress-state="none">3 steps</span><span data-progress-state="some" hidden><span data-progress-done>0</span> of 3 steps done</span><span data-progress-state="all" hidden>Done</span></span>
                 </span>
               </div>
-              <h2>Remote Devboxes, MCP &amp; Safety</h2>
-              <p>Close the laptop lid and reattach to a headless devbox, crash an isolated MCP server without losing buffers, and test real shell commands against a live <code>PreToolUse</code> veto hook.</p>
-              <span class="bento-cta">Launch fault-injection lab <span class="bento-arrow" aria-hidden="true">-&gt;</span></span>
+              <h2>Leave an agent working while you are away</h2>
+              <p>You want to close the laptop while an agent works: test a hook that stops dangerous shell commands, then install it before you leave.</p>
+              <p class="bento-time">About 20 minutes to test and install the hook, in your browser and a terminal</p>
+              <span class="bento-cta">Open the lesson <span class="bento-arrow" aria-hidden="true">-&gt;</span></span>
             </div>
           </a>
         </div>
-        <p class="section-foot-link" style="margin-top:2rem;">Looking for specs instead of labs? Read <a href="/why-minga">Why Minga</a> · <a href="/architecture">Architecture &amp; ADRs</a> · <a href="/extending">Extending Minga</a> · <a href="/docs/">Reference &amp; API Docs</a>.</p>
+        <p class="section-foot-link" style="margin-top:2rem;">Want the reasoning instead of a lesson? Read <a href="/why-minga">Why Minga</a>, <a href="/architecture">Architecture</a>, <a href="/extending">Extending Minga</a> or the <a href="/docs/">Reference</a>.</p>
       </div>
     </section>
   </main>

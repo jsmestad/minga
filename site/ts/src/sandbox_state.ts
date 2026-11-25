@@ -1,5 +1,5 @@
 /*
- * State for the Lesson 02 lab: find a command through the leader menu.
+ * State for the Lesson 01 lab: find a command through the leader menu.
  *
  * The lab is four steps in order: open the menu, look inside a group, open the file switcher and open a file, then close a menu without choosing.
  * Every key gets an answer. A key the lab binds changes the stage; any other key changes only the caption and the keycast.

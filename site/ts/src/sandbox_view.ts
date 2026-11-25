@@ -1,5 +1,5 @@
 /*
- * View for the Lesson 02 lab: find a command through the leader menu.
+ * View for the Lesson 01 lab: find a command through the leader menu.
  *
  * The page holds every node and every word: the files, one menu panel for each group, the switcher and the captions.
  * This file finds the nodes once, then shows and hides them for each state.

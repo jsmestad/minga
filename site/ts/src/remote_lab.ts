@@ -1,5 +1,5 @@
 /*
- * View for the Lesson 05 lab: test a shell command against the hook script printed on the page.
+ * View for the Lesson 04 lab: test a shell command against the hook script printed on the page.
  *
  * The page holds every node and every word. This file finds the nodes once, reads the rules from the printed script, and then changes text, classes and attributes. It never rebuilds the command field, never writes to it unless a preset may fill it (see presetFillsField), and starts no timer.
  * The field is an ordinary text input inside a form: Enter submits the form, and no key is captured anywhere.
