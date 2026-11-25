@@ -38,7 +38,17 @@ defmodule MingaAgent.Session.TurnExecution do
            committed_revision :: pos_integer()}
   @type pending_inputs ::
           {next_id :: pos_integer(), [queued_input()], [queued_input()], [queue_receipt()]}
+  @typedoc """
+  A queued input its user removed from a queue, newest first, with the queue it left.
+
+  It is held in memory only so the removal can be taken back (`place_queued_input/3`). It is in no queue, so it is never sent, and it is not saved with the pending inputs.
+  """
+  @type withdrawn_input :: {prompt_kind(), queued_input()}
+
+  @typedoc "Where a queued input goes in its own queue: beside another pending input, or at the end."
+  @type queue_placement :: {:before | :after, anchor_id :: pos_integer()} | :end
   @max_pending_inputs 32
+  @max_withdrawn_inputs 8
   @max_pending_bytes 16 * 1024 * 1024
   @max_queue_receipts 64
 
@@ -87,6 +97,7 @@ defmodule MingaAgent.Session.TurnExecution do
           steering_queue: [queued_input()],
           follow_up_queue: [queued_input()],
           queue_receipts: [queue_receipt()],
+          withdrawn: [withdrawn_input()],
           boundaries: %{String.t() => EditBoundary.t()}
         }
 
@@ -98,6 +109,7 @@ defmodule MingaAgent.Session.TurnExecution do
             steering_queue: [],
             follow_up_queue: [],
             queue_receipts: [],
+            withdrawn: [],
             boundaries: %{}
 
   @doc "Builds an idle execution state."
@@ -516,7 +528,168 @@ defmodule MingaAgent.Session.TurnExecution do
          {:ok, updated} <- change_queue_entry(queue, entry, revision, operation),
          next = %{execution | field => updated},
          true <- pending_size_allowed?(next) || {:error, :prompt_queue_full} do
-      {:ok, next}
+      {:ok, keep_removed(next, field, entry, operation)}
+    end
+  end
+
+  @type queue_place_error ::
+          :already_consumed
+          | :queued_input_not_found
+          | :stale_queue_revision
+          | :anchor_gone
+          | :different_queue
+          | :prompt_queue_full
+
+  @doc """
+  Puts a queued input at a place in its own queue, at the displayed revision.
+
+  A pending input moves. An input its user removed (`change_queued_input/4` with `:remove`) goes back into the queue it left, and the count and size limits are checked again. Steering inputs and follow-ups stay in their own queues: an anchor in the other queue is refused as `:different_queue`. Nothing changes on a refusal.
+  """
+  @spec place_queued_input(t(), {pos_integer(), pos_integer()}, queue_placement()) ::
+          {:ok, t()} | {:error, queue_place_error()}
+  def place_queued_input(%__MODULE__{} = execution, {id, revision}, placement) do
+    case take_placeable(execution, id) do
+      {:ok, origin, {^id, ^revision, _, _, _} = entry, rest} ->
+        place_taken(execution, rest, origin, entry, placement)
+
+      {:ok, _origin, _changed, _rest} ->
+        {:error, :stale_queue_revision}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  @spec place_taken(
+          t(),
+          t(),
+          {:pending | :withdrawn, prompt_kind()},
+          queued_input(),
+          queue_placement()
+        ) ::
+          {:ok, t()} | {:error, :anchor_gone | :different_queue | :prompt_queue_full}
+  # A pending input placed beside itself stays where it is.
+  defp place_taken(execution, _rest, {:pending, _kind}, {id, _, _, _, _}, {_side, id}),
+    do: {:ok, execution}
+
+  defp place_taken(_execution, rest, {_from, kind}, entry, placement) do
+    with {:ok, placed} <- insert_placed(rest, kind, entry, placement) do
+      if pending_size_allowed?(placed), do: {:ok, placed}, else: {:error, :prompt_queue_full}
+    end
+  end
+
+  @doc """
+  Moves one pending input out of its queue and into the composer draft, at the displayed revision.
+
+  It is `recall_draft/2` for a single input: its text goes before the draft's text and its attachments join the draft's. The input leaves the queue for good; it is not kept as a removed input.
+  """
+  @spec recall_queued_input(t(), {pos_integer(), pos_integer()}, DraftSnapshot.t() | nil) ::
+          {:ok, DraftSnapshot.t(), t()} | {:error, term()}
+  def recall_queued_input(%__MODULE__{} = execution, {id, revision}, draft) do
+    case find_pending_entry(execution, id) do
+      {:ok, field, queue, {^id, ^revision, _, _, _} = entry} ->
+        with {:ok, text, attachments} <- recall_inputs([entry], [], []),
+             {:ok, restored} <- DraftSnapshot.prepend_recalled(draft, text, attachments) do
+          {:ok, restored, %{execution | field => List.keydelete(queue, id, 0)}}
+        end
+
+      {:ok, _field, _queue, _changed} ->
+        {:error, :stale_queue_revision}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  @doc "Returns the inputs their user removed and can still put back, newest first, each with the queue it left."
+  @spec withdrawn_inputs(t()) :: [withdrawn_input()]
+  def withdrawn_inputs(%__MODULE__{withdrawn: withdrawn}), do: withdrawn
+
+  # A removed input is kept, newest first, so the removal can be taken back. The oldest ones fall off the end.
+  @spec keep_removed(t(), :steering_queue | :follow_up_queue, queued_input(), queued_edit()) ::
+          t()
+  defp keep_removed(execution, field, entry, :remove) do
+    withdrawn = bound_withdrawn([{queue_kind(field), entry} | execution.withdrawn])
+    %{execution | withdrawn: withdrawn}
+  end
+
+  defp keep_removed(execution, _field, _entry, _operation), do: execution
+
+  @spec bound_withdrawn([withdrawn_input()]) :: [withdrawn_input()]
+  defp bound_withdrawn(withdrawn) do
+    kept = Enum.take(withdrawn, @max_withdrawn_inputs)
+
+    if :erlang.external_size(kept) <= @max_pending_bytes or kept == [],
+      do: kept,
+      else: kept |> Enum.drop(-1) |> bound_withdrawn()
+  end
+
+  @spec queue_kind(:steering_queue | :follow_up_queue) :: prompt_kind()
+  defp queue_kind(:steering_queue), do: :steering
+  defp queue_kind(:follow_up_queue), do: :follow_up
+
+  @spec queue_field(prompt_kind()) :: :steering_queue | :follow_up_queue
+  defp queue_field(:steering), do: :steering_queue
+  defp queue_field(:follow_up), do: :follow_up_queue
+
+  # Takes the input out of where it is, a queue or the removed inputs, and says where it was and which queue it belongs to.
+  @spec take_placeable(t(), pos_integer()) ::
+          {:ok, {:pending | :withdrawn, prompt_kind()}, queued_input(), t()}
+          | {:error, :already_consumed | :queued_input_not_found}
+  defp take_placeable(execution, id) do
+    case find_pending_entry(execution, id) do
+      {:ok, field, queue, entry} ->
+        rest = %{execution | field => List.keydelete(queue, id, 0)}
+        {:ok, {:pending, queue_kind(field)}, entry, rest}
+
+      {:error, _reason} = not_pending ->
+        take_withdrawn(execution, id, not_pending)
+    end
+  end
+
+  @spec take_withdrawn(t(), pos_integer(), {:error, reason}) ::
+          {:ok, {:withdrawn, prompt_kind()}, queued_input(), t()} | {:error, reason}
+        when reason: :already_consumed | :queued_input_not_found
+  defp take_withdrawn(execution, id, not_pending) do
+    case Enum.find(execution.withdrawn, fn {_kind, entry} -> elem(entry, 0) == id end) do
+      nil ->
+        not_pending
+
+      {kind, entry} = found ->
+        rest = %{execution | withdrawn: List.delete(execution.withdrawn, found)}
+        {:ok, {:withdrawn, kind}, entry, rest}
+    end
+  end
+
+  @spec insert_placed(t(), prompt_kind(), queued_input(), queue_placement()) ::
+          {:ok, t()} | {:error, :anchor_gone | :different_queue}
+  defp insert_placed(execution, kind, entry, :end) do
+    field = queue_field(kind)
+    {:ok, %{execution | field => Map.fetch!(execution, field) ++ [entry]}}
+  end
+
+  defp insert_placed(execution, kind, entry, {side, anchor_id}) when side in [:before, :after] do
+    field = queue_field(kind)
+    queue = Map.fetch!(execution, field)
+
+    case Enum.find_index(queue, &(elem(&1, 0) == anchor_id)) do
+      nil ->
+        {:error, missing_anchor(execution, anchor_id)}
+
+      index ->
+        {:ok, %{execution | field => List.insert_at(queue, placed_index(index, side), entry)}}
+    end
+  end
+
+  @spec placed_index(non_neg_integer(), :before | :after) :: non_neg_integer()
+  defp placed_index(index, :before), do: index
+  defp placed_index(index, :after), do: index + 1
+
+  @spec missing_anchor(t(), pos_integer()) :: :anchor_gone | :different_queue
+  defp missing_anchor(execution, anchor_id) do
+    case find_pending_entry(execution, anchor_id) do
+      {:ok, _other_field, _queue, _entry} -> :different_queue
+      {:error, _reason} -> :anchor_gone
     end
   end
 
@@ -733,8 +906,8 @@ defmodule MingaAgent.Session.TurnExecution do
              is_list(receipts) do
     with true <- length(steering) + length(follow_up) <= @max_pending_inputs,
          true <- :erlang.external_size({steering, follow_up}) <= @max_pending_bytes,
-         {:ok, seen} <- validate_entries(steering, 0, next, %{}),
-         {:ok, _seen} <- validate_entries(follow_up, 0, next, seen),
+         {:ok, seen} <- validate_entries(steering, next, %{}),
+         {:ok, _seen} <- validate_entries(follow_up, next, seen),
          true <- length(receipts) <= @max_queue_receipts + @max_pending_inputs,
          true <- valid_queue_receipts?(receipts, next, %{}) do
       true
@@ -758,30 +931,24 @@ defmodule MingaAgent.Session.TurnExecution do
 
   defp valid_queue_receipts?(_invalid, _next, _seen), do: false
 
-  @spec validate_entries(list(), non_neg_integer(), pos_integer(), %{
-          optional(pos_integer()) => true
-        }) ::
+  # A queue's order is its user's order, so its ids need not ascend: each id is used once and is below the next one to give out.
+  @spec validate_entries(list(), pos_integer(), %{optional(pos_integer()) => true}) ::
           {:ok, %{optional(pos_integer()) => true}} | :invalid
-  defp validate_entries([], _previous, _next, seen), do: {:ok, seen}
+  defp validate_entries([], _next, seen), do: {:ok, seen}
 
-  defp validate_entries(
-         [{id, revision, content, attachments, source} | rest],
-         previous,
-         next,
-         seen
-       )
-       when is_integer(id) and id > previous and id < next and is_integer(revision) and
+  defp validate_entries([{id, revision, content, attachments, source} | rest], next, seen)
+       when is_integer(id) and id > 0 and id < next and is_integer(revision) and
               revision > 0 and is_list(attachments) do
     if valid_queue_content?(content) and valid_queue_attachments?(attachments) and
          (is_nil(source) or (is_binary(source) and String.valid?(source))) and
          not is_map_key(seen, id) do
-      validate_entries(rest, id, next, Map.put(seen, id, true))
+      validate_entries(rest, next, Map.put(seen, id, true))
     else
       :invalid
     end
   end
 
-  defp validate_entries(_invalid, _previous, _next, _seen), do: :invalid
+  defp validate_entries(_invalid, _next, _seen), do: :invalid
 
   @spec valid_queue_attachments?([term()]) :: boolean()
   defp valid_queue_attachments?(attachments) do

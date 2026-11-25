@@ -792,6 +792,275 @@ defmodule MingaAgent.Session.TurnExecutionTest do
     assert TurnExecution.reset(failed) == TurnExecution.new()
   end
 
+  describe "placing a queued input" do
+    for kind <- [:steering, :follow_up] do
+      test "a pending #{kind} input moves within its own queue and keeps its revision" do
+        kind = unquote(kind)
+        queued = queue(kind, ["a", "b", "c"])
+
+        for {identity, placement, expected} <- [
+              {{3, 1}, {:before, 1}, ["c", "a", "b"]},
+              {{3, 1}, {:after, 1}, ["a", "c", "b"]},
+              {{1, 1}, {:after, 3}, ["b", "c", "a"]},
+              {{1, 1}, :end, ["b", "c", "a"]},
+              {{3, 1}, :end, ["a", "b", "c"]},
+              {{2, 1}, {:before, 2}, ["a", "b", "c"]},
+              {{2, 1}, {:after, 2}, ["a", "b", "c"]}
+            ] do
+          assert {:ok, placed} = TurnExecution.place_queued_input(queued, identity, placement)
+          assert queue_texts(placed, kind) == expected
+          assert {:ok, _text} = TurnExecution.queued_editable_text(placed, elem(identity, 0), 1)
+          assert TurnExecution.withdrawn_inputs(placed) == []
+        end
+      end
+
+      test "a removed #{kind} input goes back into the queue it left, at the place asked for" do
+        kind = unquote(kind)
+
+        assert {:ok, removed} =
+                 kind
+                 |> queue(["a", "b", "c"])
+                 |> TurnExecution.change_queued_input(2, 1, :remove)
+
+        assert queue_texts(removed, kind) == ["a", "c"]
+        assert [{^kind, {2, 1, "b", [], nil}}] = TurnExecution.withdrawn_inputs(removed)
+
+        for {placement, expected} <- [
+              {{:before, 3}, ["a", "b", "c"]},
+              {{:before, 1}, ["b", "a", "c"]},
+              {{:after, 3}, ["a", "c", "b"]},
+              {:end, ["a", "c", "b"]}
+            ] do
+          assert {:ok, placed} = TurnExecution.place_queued_input(removed, {2, 1}, placement)
+          assert queue_texts(placed, kind) == expected
+          assert TurnExecution.withdrawn_inputs(placed) == []
+        end
+      end
+    end
+
+    test "every refusal names its reason and changes nothing" do
+      {:queued, mixed} =
+        :steering |> queue(["s1", "s2"]) |> TurnExecution.admit_prompt(:follow_up, "f3")
+
+      {:ok, edited} = TurnExecution.change_queued_input(mixed, 2, 1, {:replace_text, "s2 edited"})
+      {["s1", "s2 edited"], drained} = TurnExecution.dequeue_steering(edited)
+
+      for {state, identity, placement, reason} <- [
+            {edited, {2, 1}, :end, :stale_queue_revision},
+            {drained, {1, 1}, :end, :already_consumed},
+            {drained, {1, 1}, {:before, 1}, :already_consumed},
+            {mixed, {9, 1}, :end, :queued_input_not_found},
+            {mixed, {1, 1}, {:before, 9}, :anchor_gone},
+            {drained, {3, 1}, {:after, 1}, :anchor_gone},
+            {mixed, {1, 1}, {:before, 3}, :different_queue},
+            {mixed, {3, 1}, {:after, 2}, :different_queue}
+          ] do
+        assert TurnExecution.place_queued_input(state, identity, placement) == {:error, reason}
+      end
+    end
+
+    test "a removed input placed beside a row that has gone is refused, and still goes to the end" do
+      {:ok, removed} =
+        :follow_up |> queue(["a", "b", "c"]) |> TurnExecution.change_queued_input(2, 1, :remove)
+
+      {:ok, without_anchor} = TurnExecution.change_queued_input(removed, 3, 1, :remove)
+
+      assert TurnExecution.place_queued_input(without_anchor, {2, 1}, {:before, 3}) ==
+               {:error, :anchor_gone}
+
+      assert TurnExecution.place_queued_input(without_anchor, {2, 1}, {:before, 2}) ==
+               {:error, :anchor_gone}
+
+      assert {:ok, placed} = TurnExecution.place_queued_input(without_anchor, {2, 1}, :end)
+      assert queue_texts(placed, :follow_up) == ["a", "b"]
+    end
+
+    test "a removed input does not go back into a full queue" do
+      full = queue(:follow_up, Enum.map(1..32, &"m#{&1}"))
+      {:ok, removed} = TurnExecution.change_queued_input(full, 5, 1, :remove)
+      {:queued, refilled} = TurnExecution.admit_prompt(removed, :follow_up, "late")
+
+      assert TurnExecution.place_queued_input(refilled, {5, 1}, :end) ==
+               {:error, :prompt_queue_full}
+
+      assert [{:follow_up, {5, 1, "m5", [], nil}}] = TurnExecution.withdrawn_inputs(refilled)
+    end
+
+    test "a removed input is not sent when the turn ends, and can still be put back afterwards" do
+      {:ok, removed} =
+        :follow_up
+        |> queue(["one", "two", "three"])
+        |> TurnExecution.change_queued_input(2, 1, :remove)
+
+      assert {:ok, completing} = TurnExecution.begin_completion(removed)
+
+      assert {:send_next, ["one", "three"], starting} =
+               TurnExecution.finish_completion(completing)
+
+      assert TurnExecution.queues(starting) == {[], []}
+
+      assert TurnExecution.place_queued_input(starting, {2, 1}, {:before, 3}) ==
+               {:error, :anchor_gone}
+
+      assert {:ok, placed} = TurnExecution.place_queued_input(starting, {2, 1}, :end)
+      assert TurnExecution.queues(placed) == {[], ["two"]}
+    end
+
+    test "a removed input is in no queue: it is not saved, not recalled, and does not keep a session alive" do
+      {:ok, removed} =
+        :follow_up |> queue(["only"]) |> TurnExecution.change_queued_input(1, 1, :remove)
+
+      assert {2, [], [], _receipts} = TurnExecution.pending_inputs(removed)
+      assert TurnExecution.recall_draft(removed, nil) == {:error, :no_pending_inputs}
+      assert TurnExecution.queues(removed) == {[], []}
+
+      assert TurnExecution.change_queued_input(removed, 1, 1, :remove) ==
+               {:error, :already_consumed}
+
+      assert TurnExecution.withdrawn_inputs(TurnExecution.reset(removed)) == []
+    end
+
+    test "only the eight newest removed inputs can be put back" do
+      removed =
+        Enum.reduce(1..9, queue(:follow_up, Enum.map(1..9, &"m#{&1}")), fn id, execution ->
+          {:ok, next} = TurnExecution.change_queued_input(execution, id, 1, :remove)
+          next
+        end)
+
+      assert removed
+             |> TurnExecution.withdrawn_inputs()
+             |> Enum.map(fn {_kind, entry} -> elem(entry, 0) end) ==
+               Enum.to_list(9..2//-1)
+
+      assert TurnExecution.place_queued_input(removed, {1, 1}, :end) ==
+               {:error, :already_consumed}
+
+      assert {:ok, placed} = TurnExecution.place_queued_input(removed, {2, 1}, :end)
+      assert queue_texts(placed, :follow_up) == ["m2"]
+    end
+  end
+
+  describe "recalling one queued input" do
+    for kind <- [:steering, :follow_up] do
+      test "a pending #{kind} input moves into the draft, before what is already typed, and leaves the queue" do
+        kind = unquote(kind)
+        queued = queue(kind, ["a", "b", "c"])
+
+        assert {:ok, draft, recalled} = TurnExecution.recall_queued_input(queued, {2, 1}, nil)
+        assert draft.text == "b"
+        assert queue_texts(recalled, kind) == ["a", "c"]
+        assert TurnExecution.withdrawn_inputs(recalled) == []
+
+        assert {:ok, joined, emptied} = TurnExecution.recall_queued_input(recalled, {3, 1}, draft)
+        assert joined.text == "c\n\nb"
+        assert queue_texts(emptied, kind) == ["a"]
+      end
+    end
+
+    test "it carries the input's attachments into the draft" do
+      alias MingaAgent.Tool.Output.Reference
+      alias ReqLLM.Message.ContentPart
+
+      bytes = "Immutable attachment"
+      {:ok, token} = Reference.token("session", String.duplicate("a", 32))
+
+      {:ok, reference} =
+        Reference.new(
+          token: token,
+          media_type: "text/plain",
+          bytes: byte_size(bytes),
+          sha256: Reference.digest(bytes)
+        )
+
+      attachments = [{:file, "note.txt", "note.txt", "saved", {:snapshot, reference}}]
+      parts = [ContentPart.text("see note.txt"), ContentPart.text(bytes)]
+
+      {:ok, _receipt, queued} =
+        TurnExecution.admit_queued_submission(
+          state(:exec, :thinking),
+          :follow_up,
+          parts,
+          1,
+          {String.duplicate("a", 24), 1},
+          attachments,
+          "see note.txt"
+        )
+
+      assert {:ok, draft, recalled} = TurnExecution.recall_queued_input(queued, {1, 1}, nil)
+      assert draft.text == "see note.txt"
+      assert draft.attachments == attachments
+      assert TurnExecution.queues(recalled) == {[], []}
+    end
+
+    test "every refusal names its reason" do
+      queued = queue(:steering, ["a", "b"])
+      {:ok, edited} = TurnExecution.change_queued_input(queued, 2, 1, {:replace_text, "b edited"})
+      {:ok, removed} = TurnExecution.change_queued_input(queued, 1, 1, :remove)
+      {_sent, drained} = TurnExecution.dequeue_steering(queued)
+
+      for {state, identity, reason} <- [
+            {edited, {2, 1}, :stale_queue_revision},
+            {removed, {1, 1}, :already_consumed},
+            {drained, {2, 1}, :already_consumed},
+            {queued, {7, 1}, :queued_input_not_found}
+          ] do
+        assert TurnExecution.recall_queued_input(state, identity, nil) == {:error, reason}
+      end
+    end
+  end
+
+  describe "a saved queue" do
+    test "keeps the order its user gave it" do
+      {:ok, reordered} =
+        :follow_up
+        |> queue(["a", "b", "c"])
+        |> TurnExecution.place_queued_input({3, 1}, {:before, 1})
+
+      saved = TurnExecution.pending_inputs(reordered)
+
+      assert TurnExecution.valid_pending_inputs?(saved)
+
+      assert saved |> TurnExecution.restore_pending_inputs() |> queue_texts(:follow_up) == [
+               "c",
+               "a",
+               "b"
+             ]
+    end
+
+    test "written before queues could be reordered still loads" do
+      saved = {4, [{1, 1, "s", [], nil}], [{2, 1, "a", [], nil}, {3, 2, "b", [], "b"}], []}
+
+      assert TurnExecution.valid_pending_inputs?(saved)
+
+      assert TurnExecution.queues(TurnExecution.restore_pending_inputs(saved)) ==
+               {["s"], ["a", "b"]}
+    end
+
+    test "is refused when an id repeats, is not positive, or is not below the next id" do
+      entry = fn id -> {id, 1, "text", [], nil} end
+
+      for saved <- [
+            {4, [], [entry.(2), entry.(2)], []},
+            {4, [entry.(2)], [entry.(2)], []},
+            {4, [], [entry.(0)], []},
+            {4, [], [entry.(4)], []},
+            {4, [], [entry.(3), entry.(5)], []}
+          ] do
+        refute TurnExecution.valid_pending_inputs?(saved)
+      end
+    end
+  end
+
+  defp queue(kind, texts) do
+    Enum.reduce(texts, state(:exec, :thinking), fn text, execution ->
+      {:queued, next} = TurnExecution.admit_prompt(execution, kind, text)
+      next
+    end)
+  end
+
+  defp queue_texts(execution, :steering), do: execution |> TurnExecution.queues() |> elem(0)
+  defp queue_texts(execution, :follow_up), do: execution |> TurnExecution.queues() |> elem(1)
+
   defp state(mode, :idle), do: TurnExecution.new(mode)
   defp state(mode, :stopped), do: mode |> state(:thinking) |> TurnExecution.stop()
 
