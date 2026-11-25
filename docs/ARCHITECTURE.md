@@ -799,7 +799,9 @@ A crash, a `kill`, a lost frontend or a power cut is not a decision, so the swap
 
 **Recovered text is shown, not saved.** A buffer that takes recovered text is unsaved, and auto-save leaves it alone until you edit or save: otherwise the text would be written over the file a second after it appears.
 
-**Newer text is never replaced unasked.** A buffer that already has unsaved changes refuses recovered text. A file that was written after its swap holds newer text than the swap, so that swap is held back: it stays on disk and a `*Messages*` line names the file and the swap.
+**Nothing waits unseen.** `SPC q u` lists every swap file whose text is waiting: text of another project, of a project whose directory is gone, or text that was held back. Each row names the project and the file, when the text was written and how many lines differ. Selecting a row puts the text into a buffer for its file, even when the file or its directory no longer exists. The act menu (`⌃.`) also offers to discard it, after a prompt that names the file, says how many lines go, and says that it cannot be undone (`MingaEditor.UI.Picker.UnsavedTextSource`).
+
+**Newer text is never replaced unasked.** A buffer that already has unsaved changes refuses recovered text. A file that was written after its swap holds newer text than the swap, so that swap is held back: it stays on disk, a `*Messages*` line names the file, and the list above is where you recover or discard it.
 
 **A buffer that crashes while the editor keeps running** writes its swap from `terminate/2` and announces `:buffer_crashed`. The editor reopens the file with the text (`MingaEditor.Session.CrashRecovery`), and the new buffer owns the same swap file. The same holds without the editor's help: a buffer that starts for a file whose crashed buffer left a swap in this run takes that text when it starts, so a later edit, close or quit never destroys text that nobody has seen.
 
