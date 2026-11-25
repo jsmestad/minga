@@ -1,6 +1,6 @@
 defmodule MingaAgent.Test.Overlay.CopyCloner do
   @moduledoc """
-  Test cloner that copies the tree in Elixir, so async tests exercise the clone path without spawning `cp`.
+  Test cloner that copies the tree in Elixir, so async tests exercise the clone path without spawning the `minga-clone-tree` helper.
 
   Production cloners never copy bytes; this stub only stands in for a copy-on-write clone, which a test cannot tell apart from a copy.
   """

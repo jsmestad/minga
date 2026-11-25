@@ -183,6 +183,20 @@ pub fn build(b: *std.Build) void {
     shell_output_reader_exe.root_module.link_libc = true;
     b.installArtifact(shell_output_reader_exe);
 
+    // ── Clone tree (copy-on-write clone for agent overlays) ──────────────
+    const clone_tree_exe = b.addExecutable(.{
+        .use_llvm = use_lld,
+        .use_lld = use_lld,
+        .name = "minga-clone-tree",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/clone_tree_main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    clone_tree_exe.root_module.link_libc = true;
+    b.installArtifact(clone_tree_exe);
+
     // Parser tests (highlighter, predicates, posix_regex)
     const parser_tests = b.addTest(.{
         .use_llvm = use_lld,
@@ -242,6 +256,20 @@ pub fn build(b: *std.Build) void {
 
     const run_hook_runner_tests = b.addRunArtifact(hook_runner_tests);
     test_step.dependOn(&run_hook_runner_tests.step);
+
+    const clone_tree_tests = b.addTest(.{
+        .use_llvm = use_lld,
+        .use_lld = use_lld,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/clone_tree_main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    clone_tree_tests.root_module.link_libc = true;
+
+    const run_clone_tree_tests = b.addRunArtifact(clone_tree_tests);
+    test_step.dependOn(&run_clone_tree_tests.step);
 
     // Tree-sitter highlight benchmark used by autoresearch.
     const highlight_bench = b.addExecutable(.{

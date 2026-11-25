@@ -6,11 +6,11 @@ defmodule MingaAgent.Changeset.Overlay do
 
   Build artifact and cache directories are skipped. `MIX_BUILD_PATH` and `CARGO_TARGET_DIR` point inside the overlay, while `MIX_DEPS_PATH` reuses the project deps path. A Rust `target` directory is skipped only when it sits next to a `Cargo.toml`, because `target` is an ordinary source directory name in other ecosystems.
 
-  Installed JavaScript dependencies are cloned, not copied. The first materialization clones each project `node_modules` tree into the overlay with one copy-on-write clone (`MingaAgent.Changeset.Overlay.Cloner`, `cp -c` on APFS or `cp --reflink=always` on Linux), which shares data blocks with the project until either side writes. Node's upward `node_modules` lookup resolves packages from the overlay, and every write inside the tree, including changes inside an installed package by a postinstall script or `patch-package`, lands in the overlay. Links inside the tree are copied as links, so pnpm's relative links resolve inside the clone; a link with an absolute target, such as an `npm link`, still reaches that target. A later materialization keeps the existing tree and adds only entries it is missing, cloning each one.
+  Installed JavaScript dependencies are cloned, not copied. The first materialization clones each project `node_modules` tree into the overlay with one copy-on-write clone (`MingaAgent.Changeset.Overlay.Cloner`). The `minga-clone-tree` helper makes it with one `clonefile(2)` call for the whole tree on macOS, and clones each file with `FICLONE` on Linux. A clone shares data blocks with the project until either side writes. Node's upward `node_modules` lookup resolves packages from the overlay, and every write inside the tree, including changes inside an installed package by a postinstall script or `patch-package`, lands in the overlay. Links inside the tree are copied as links, so pnpm's relative links resolve inside the clone; a link with an absolute target, such as an `npm link`, still reaches that target. A later materialization keeps the existing tree and adds only entries it is missing, cloning each one.
 
-  When a tree cannot be cloned (the overlay and the project are on different volumes, or the filesystem cannot share blocks), the overlay never copies its bytes. It builds a real `node_modules` directory instead and symlinks each installed package to the project's copy. `.bin`, `@scope`, and pnpm's `.pnpm` directories are real overlay directories whose existing entries are linked or, for small regular files such as shims, copied one by one. Tool caches (`node_modules/.vite`, `node_modules/.cache`), package-manager metadata, and newly installed packages land in the overlay, but a command that writes inside an installed package follows its link into the project. Each materialization that falls back says so once in `*Messages*`.
+  When a tree cannot be cloned (the overlay and the project are on different volumes, the file system cannot share blocks, as on HFS+ or ext4, or the helper binary is missing), the overlay never copies its bytes. It builds a real `node_modules` directory instead and symlinks each installed package to the project's copy. `.bin`, `@scope`, and pnpm's `.pnpm` directories are real overlay directories whose existing entries are linked or, for small regular files such as shims, copied one by one. Tool caches (`node_modules/.vite`, `node_modules/.cache`), package-manager metadata, and newly installed packages land in the overlay, but a command that writes inside an installed package follows its link into the project. Each materialization that falls back says so once in `*Messages*`. Any other clone failure, such as a permission error, fails the materialization instead of falling back.
 
-  A tool write, delete, or commit under a project `node_modules` first gets the dependency tree a command would see. A package link on its path that points at the project's copy is then replaced with a clone of that package. When the package cannot be cloned, the write is refused with `:symlink_traversal`, so a tool never writes through a link and never leaves a partial package behind.
+  A tool write, delete, or commit under a project `node_modules` first gets the dependency tree a command would see. A package link on its path that points at the project's copy is then replaced with a clone of that package. When cloning is unsupported, the write is refused with `:symlink_traversal`, and any other clone failure is returned, so a tool never writes through a link and never leaves a partial package behind.
 
   Paths the changeset server deletes, writes, or renames for cleanup come from `artifact_path/3`, which refuses a path that passes through a symlink, so discard and undo never reach project files through a linked package.
   """
@@ -18,7 +18,7 @@ defmodule MingaAgent.Changeset.Overlay do
   import Bitwise, only: [band: 2]
 
   alias Minga.Buffer.Persistence.SystemFileSystem
-  alias MingaAgent.Changeset.Overlay.SystemCloner
+  alias MingaAgent.Changeset.Overlay.NativeCloner
   alias MingaAgent.Changeset.PublicationTarget
 
   @typedoc "Overlay state."
@@ -83,7 +83,7 @@ defmodule MingaAgent.Changeset.Overlay do
   end
 
   @spec default_cloner() :: module()
-  defp default_cloner, do: Application.get_env(:minga, :overlay_cloner, SystemCloner)
+  defp default_cloner, do: Application.get_env(:minga, :overlay_cloner, NativeCloner)
 
   @spec create_result(String.t(), module()) :: {:ok, t()} | {:error, term()}
   defp create_result(project_root, cloner) do
@@ -504,16 +504,16 @@ defmodule MingaAgent.Changeset.Overlay do
   # The written file itself is never unshared: only the directories above it.
   @spec unshare_package_links(t(), [String.t()]) :: :ok | {:error, term()}
   defp unshare_package_links(overlay, components) do
-    start = {Path.expand(overlay.overlay_dir), Path.expand(overlay.project_root)}
+    start = {:descend, Path.expand(overlay.overlay_dir), Path.expand(overlay.project_root)}
 
     components
     |> Enum.drop(-1)
-    |> Enum.reduce_while(start, fn component, {overlay_parent, project_parent} ->
+    |> Enum.reduce_while(start, fn component, {:descend, overlay_parent, project_parent} ->
       overlay_path = Path.join(overlay_parent, component)
       project_path = Path.join(project_parent, component)
 
       case unshare_link(overlay, overlay_path, project_path) do
-        :ok -> {:cont, {overlay_path, project_path}}
+        :ok -> {:cont, {:descend, overlay_path, project_path}}
         :stop -> {:halt, :ok}
         {:error, _reason} = error -> {:halt, error}
       end
@@ -521,9 +521,10 @@ defmodule MingaAgent.Changeset.Overlay do
     |> unshare_result()
   end
 
-  @spec unshare_result({String.t(), String.t()} | :ok | {:error, term()}) ::
+  # The walk ends with the last directory it descended into, or stops early.
+  @spec unshare_result({:descend, String.t(), String.t()} | :ok | {:error, term()}) ::
           :ok | {:error, term()}
-  defp unshare_result({_overlay_path, _project_path}), do: :ok
+  defp unshare_result({:descend, _overlay_path, _project_path}), do: :ok
   defp unshare_result(result), do: result
 
   # Only a link that points at the project's copy of the same path, as
@@ -857,23 +858,31 @@ defmodule MingaAgent.Changeset.Overlay do
   # Clones a project entry to an overlay path that does not exist yet. Every
   # overlay ancestor is checked first, so a clone never lands outside the
   # overlay. A failed clone's partial output is removed; removal deletes links
-  # inside it, never their targets.
+  # inside it, never their targets. Only an unsupported clone falls back to
+  # links; any other failure is returned.
   @spec clone_entry(t(), String.t(), String.t()) ::
           :ok | {:fallback, term()} | {:error, term()}
   defp clone_entry(overlay, source_path, target_path) do
     with :ok <- reject_materialization_symlink(overlay, target_path),
          :ok <- File.mkdir_p(Path.dirname(target_path)) do
       case overlay.cloner.clone(source_path, target_path) do
-        :ok -> :ok
-        {:error, reason} -> discard_partial_clone(target_path, reason)
+        :ok ->
+          :ok
+
+        {:error, {:unsupported, reason}} ->
+          discard_partial_clone(target_path, {:fallback, reason})
+
+        {:error, reason} ->
+          discard_partial_clone(target_path, {:error, reason})
       end
     end
   end
 
-  @spec discard_partial_clone(String.t(), term()) :: {:fallback, term()} | {:error, term()}
-  defp discard_partial_clone(target_path, reason) do
+  @spec discard_partial_clone(String.t(), {:fallback | :error, term()}) ::
+          {:fallback, term()} | {:error, term()}
+  defp discard_partial_clone(target_path, {_outcome, reason} = result) do
     case File.rm_rf(target_path) do
-      {:ok, _removed} -> {:fallback, reason}
+      {:ok, _removed} -> result
       {:error, cleanup, _path} -> {:error, {:clone_cleanup_failed, reason, cleanup}}
     end
   end

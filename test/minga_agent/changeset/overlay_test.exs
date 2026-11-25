@@ -3,6 +3,7 @@ defmodule MingaAgent.Changeset.OverlayTest do
 
   alias MingaAgent.Changeset.Overlay
   alias MingaAgent.Test.Overlay.CopyCloner
+  alias MingaAgent.Test.Overlay.FailingCloner
 
   setup do
     dir = Path.join(System.tmp_dir!(), "overlay-test-#{System.unique_integer([:positive])}")
@@ -544,6 +545,36 @@ defmodule MingaAgent.Changeset.OverlayTest do
                Overlay.materialize_file(overlay, "node_modules/left-pad/index.js", "patched\n")
 
       assert resolved_from_project?(overlay, project, "node_modules/left-pad/package.json")
+    end
+  end
+
+  describe "installed JavaScript packages when cloning fails for another reason" do
+    setup %{project: project} do
+      write_package(project, "node_modules/left-pad")
+      {:ok, overlay} = Overlay.create(project, cloner: FailingCloner)
+      on_exit(fn -> Overlay.cleanup(overlay) end)
+      %{overlay: overlay}
+    end
+
+    test "materialization returns the failure instead of linking the packages", %{
+      overlay: overlay
+    } do
+      assert {:error, :eacces} = Overlay.materialize_project(overlay)
+      assert File.lstat(Path.join(overlay.overlay_dir, "node_modules")) == {:error, :enoent}
+    end
+
+    test "a tool write through a package link returns the failure", %{
+      project: project,
+      overlay: overlay
+    } do
+      File.mkdir_p!(Path.join(overlay.overlay_dir, "node_modules"))
+      package = Path.join(overlay.overlay_dir, "node_modules/left-pad")
+      File.ln_s!(Path.join(project, "node_modules/left-pad"), package)
+
+      assert {:error, :eacces} =
+               Overlay.commit_file(overlay, "node_modules/left-pad/index.js", "patched\n")
+
+      assert File.lstat!(package).type == :symlink
     end
   end
 

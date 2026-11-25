@@ -3,7 +3,8 @@ defmodule Mix.Tasks.Compile.MingaZig do
   Opt-in Mix task that builds the Zig parser support binaries.
 
   Builds the tree-sitter parser (`minga-parser`), hook runner
-  (`minga-hook-runner`), and shell output reader (`minga-shell-output-reader`).
+  (`minga-hook-runner`), shell output reader (`minga-shell-output-reader`), and
+  overlay clone helper (`minga-clone-tree`).
 
   This task is intentionally not registered in the project's compiler list. Native binaries are built by explicit Makefile and CI steps, not by every `mix compile`.
 
@@ -14,7 +15,7 @@ defmodule Mix.Tasks.Compile.MingaZig do
 
   @zig_dir "zig"
   @priv_dir "priv"
-  @native_names ~w(minga-parser minga-hook-runner minga-shell-output-reader)
+  @native_names ~w(minga-parser minga-hook-runner minga-shell-output-reader minga-clone-tree)
   @optimize if Mix.env() == :prod, do: "ReleaseSafe", else: "Debug"
 
   @impl true

@@ -46,7 +46,7 @@ class BuildTuiPackagesTest(unittest.TestCase):
         self.put("releases/start_erl.data", f"17.1.1 {version}\n".encode())
         self.put(f"releases/{version}/start.boot")
         priv = f"lib/minga-{version}/priv/"
-        for name in ("minga-renderer-go", "minga-parser", "minga-hook-runner", "minga-shell-output-reader"):
+        for name in ("minga-renderer-go", "minga-parser", "minga-hook-runner", "minga-shell-output-reader", "minga-clone-tree"):
             self.put(priv + name, native, mode=0o755)
         for name in ("tutor.txt", "tree_sitter/api.h", "tree_sitter/parser.h", "queries/elixir/highlights.scm"):
             self.put(priv + name)

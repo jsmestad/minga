@@ -1,12 +1,12 @@
 defmodule MingaAgent.Changeset.OverlayCloneTest do
-  # Spawns `cp` and `df` (erl_child_setup EPIPE race under concurrency) and counts
-  # warnings in the global log, so it runs alone.
+  # Spawns the minga-clone-tree helper (erl_child_setup EPIPE race under
+  # concurrency) and counts warnings in the global log, so it runs alone.
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
 
   alias MingaAgent.Changeset.Overlay
-  alias MingaAgent.Changeset.Overlay.SystemCloner
+  alias MingaAgent.Changeset.Overlay.NativeCloner
 
   @moduletag :tmp_dir
   @moduletag timeout: 60_000
@@ -23,9 +23,10 @@ defmodule MingaAgent.Changeset.OverlayCloneTest do
   end
 
   @tag :overlay_clone
-  test "cp clones a node_modules tree, so a shell write inside a package leaves the project file unchanged",
+  test "the helper clones a node_modules tree, so a shell write inside a package leaves the project file unchanged",
        %{project: project, source: source} do
-    {:ok, overlay} = Overlay.create(project, cloner: SystemCloner)
+    assert_helper_built()
+    {:ok, overlay} = Overlay.create(project, cloner: NativeCloner)
     on_exit(fn -> Overlay.cleanup(overlay) end)
 
     assert {:ok, %{cloned_entries: 1, clone_fallbacks: 0}} = Overlay.materialize_project(overlay)
@@ -45,6 +46,21 @@ defmodule MingaAgent.Changeset.OverlayCloneTest do
     refute File.stat!(cloned).inode == File.stat!(source).inode
   end
 
+  @tag :overlay_clone
+  test "the helper reports an existing target as a real failure, not as unsupported", %{
+    project: project,
+    tmp_dir: dir
+  } do
+    assert_helper_built()
+    target = Path.join(dir, "existing")
+    File.mkdir_p!(target)
+
+    assert {:error, {:clone_failed, 4, message}} =
+             NativeCloner.clone(Path.join(project, "node_modules"), target)
+
+    assert message =~ "EXIST"
+  end
+
   test "a materialization that cannot clone warns once, however many trees fall back",
        %{project: project} do
     File.mkdir_p!(Path.join(project, "packages/web/node_modules/react"))
@@ -57,5 +73,11 @@ defmodule MingaAgent.Changeset.OverlayCloneTest do
       end)
 
     assert log |> String.split("could not be cloned") |> length() == 2
+  end
+
+  # A missing helper makes every clone unsupported, which would read as a clone regression.
+  defp assert_helper_built do
+    helper = Path.join(:code.priv_dir(:minga), "minga-clone-tree")
+    assert File.regular?(helper), "#{helper} is missing; run `mix native.build.support`"
   end
 end

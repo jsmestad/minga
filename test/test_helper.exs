@@ -55,8 +55,9 @@ macos_ipc_exclude = if System.get_env("MINGA_IPC_HELPER"), do: [], else: [:macos
 apple_inference_exclude =
   if System.get_env("MINGA_APPLE_INFERENCE") == "1", do: [], else: [:apple_inference]
 
-# `:overlay_clone` tests clone with the real `cp -c`, which needs macOS and an
-# APFS temporary directory. Linux reflink support depends on the filesystem.
+# `:overlay_clone` tests clone with the real minga-clone-tree helper, which needs
+# macOS and an APFS temporary directory. Linux reflink support depends on the
+# file system.
 overlay_clone_exclude =
   if match?({:unix, :darwin}, :os.type()), do: [], else: [:overlay_clone]
 
