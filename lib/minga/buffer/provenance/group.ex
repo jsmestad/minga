@@ -11,7 +11,8 @@ defmodule Minga.Buffer.Provenance.Group do
   alias Minga.Buffer.Provenance.Run
 
   @enforce_keys [:author, :key]
-  defstruct [:author, :key, applied: true, runs: :gb_sets.new()]
+  # `runs` has no literal default: an empty `:gb_sets` value is opaque, so `Minga.Buffer.Provenance` builds it.
+  defstruct [:author, :key, :runs, applied: true]
 
   @typedoc """
   How a group names itself to callers: Minga's author key for a Minga step, `{:untasked, n}` for the `n`th agent edit with no task, and `nil` for your groups.

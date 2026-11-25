@@ -381,7 +381,7 @@ defmodule Minga.Buffer.UndoPatch do
   @doc """
   Returns the smallest byte changes a forward patch makes, in document order, as `{start, removed, inserted}`.
 
-  When the old and new text have the same number of lines, each pair of lines is compared on its own; otherwise the whole text is one pair. Each pair loses the bytes both sides share at the start and the end, on code point boundaries, and what remains is compared word by word, so a line that changes two words records two changes and the text between them stays out. The word comparison runs only when the trimmed pair holds at most 512 words in all, which bounds its cost whatever the words are; past that, the trimmed pair is one change. Everything else is linear in the patch's bytes. Offsets are in the document the patch applies to, so applying the changes from the last to the first gives the patch's result.
+  When the old and new text have the same number of lines, each pair of lines is compared on its own; otherwise the whole text is one pair. Each pair loses the bytes both sides share at the start and the end, on grapheme cluster boundaries, and what remains is compared word by word (tokens never end inside a cluster), so a line that changes two words records two changes and the text between them stays out. The word comparison runs only when the trimmed pair holds at most 512 words in all, which bounds its cost whatever the words are; past that, the trimmed pair is one change. Everything else is linear in the patch's bytes. Offsets are in the document the patch applies to, so applying the changes from the last to the first gives the patch's result.
 
   `Minga.Buffer.UndoHistory` records changes this precise, so an edit that rewrites whole lines only takes authorship of the bytes it changed.
   """
@@ -534,8 +534,51 @@ defmodule Minga.Buffer.UndoPatch do
     end
   end
 
+  # Words, runs of white space, and single other grapheme clusters, so a token never ends inside a cluster: a combining
+  # mark stays with its letter, and a flag or a ZWJ sequence is one token.
   @spec words(String.t()) :: [String.t()]
-  defp words(text), do: ~r/\w+|\s+|[^\w\s]/u |> Regex.scan(text) |> List.flatten()
+  defp words(text) do
+    text
+    |> String.graphemes()
+    |> Enum.chunk_while(
+      nil,
+      fn cluster, acc ->
+        kind = cluster_kind(cluster)
+
+        case acc do
+          {^kind, pieces} when kind != :other -> {:cont, {kind, [cluster | pieces]}}
+          nil -> {:cont, {kind, [cluster]}}
+          {_kind, pieces} -> {:cont, join_reversed(pieces), {kind, [cluster]}}
+        end
+      end,
+      fn
+        nil -> {:cont, nil}
+        {_kind, pieces} -> {:cont, join_reversed(pieces), nil}
+      end
+    )
+  end
+
+  @spec join_reversed([String.t()]) :: String.t()
+  defp join_reversed(pieces), do: pieces |> Enum.reverse() |> IO.iodata_to_binary()
+
+  # A cluster's kind is its first code point's: a word character, white space, or anything else.
+  @spec cluster_kind(String.t()) :: :word | :space | :other
+  defp cluster_kind(<<byte, _rest::binary>>)
+       when byte in ?a..?z or byte in ?A..?Z or byte in ?0..?9 or byte == ?_,
+       do: :word
+
+  defp cluster_kind(<<byte, _rest::binary>>) when byte in [?\s, ?\t, ?\n, ?\r, ?\v, ?\f],
+    do: :space
+
+  defp cluster_kind(<<byte, _rest::binary>>) when byte < 128, do: :other
+
+  defp cluster_kind(cluster) do
+    cond do
+      Regex.match?(~r/\A\w/u, cluster) -> :word
+      Regex.match?(~r/\A\s/u, cluster) -> :space
+      true -> :other
+    end
+  end
 
   @spec within_word_budget?([String.t()], [String.t()]) :: boolean()
   defp within_word_budget?(old_words, new_words),
@@ -602,45 +645,60 @@ defmodule Minga.Buffer.UndoPatch do
     Enum.reverse(lines)
   end
 
-  # Drops the bytes both sides share at the start and at the end, keeping whole code points.
+  # Drops the bytes both sides share at the start and at the end, keeping whole grapheme clusters (UAX #29), so a
+  # change never starts or ends inside a cluster such as a flag, a jamo syllable or a letter with its combining mark.
   @spec trimmed_change(non_neg_integer(), binary(), binary()) :: [
           {non_neg_integer(), byte_fragment(), byte_fragment()}
         ]
   defp trimmed_change(_start, same, same), do: []
 
   defp trimmed_change(start, old, new) do
-    prefix = shared_prefix(old, new, :binary.longest_common_prefix([old, new]))
-    old_rest = binary_part(old, prefix, byte_size(old) - prefix)
-    new_rest = binary_part(new, prefix, byte_size(new) - prefix)
+    {old_cuts, new_cuts} =
+      if plain_ascii?(old) and plain_ascii?(new),
+        do: {:every_byte, :every_byte},
+        else: {cluster_cuts(old), cluster_cuts(new)}
+
+    shared = :binary.longest_common_prefix([old, new])
+
+    prefix = Enum.find(shared..0//-1, &(cut?(old_cuts, &1) and cut?(new_cuts, &1)))
+
+    old_rest = byte_size(old) - prefix
+    new_rest = byte_size(new) - prefix
+
+    shared_end =
+      :binary.longest_common_suffix([
+        binary_part(old, prefix, old_rest),
+        binary_part(new, prefix, new_rest)
+      ])
 
     suffix =
-      shared_suffix(old_rest, new_rest, :binary.longest_common_suffix([old_rest, new_rest]))
+      Enum.find(shared_end..0//-1, fn length ->
+        cut?(old_cuts, byte_size(old) - length) and cut?(new_cuts, byte_size(new) - length)
+      end)
 
     [
-      {start + prefix, binary_part(old_rest, 0, byte_size(old_rest) - suffix),
-       binary_part(new_rest, 0, byte_size(new_rest) - suffix)}
+      {start + prefix, binary_part(old, prefix, old_rest - suffix),
+       binary_part(new, prefix, new_rest - suffix)}
     ]
   end
 
-  @spec shared_prefix(binary(), binary(), non_neg_integer()) :: non_neg_integer()
-  defp shared_prefix(old, new, length) do
-    if length == 0 or (code_point_start?(old, length) and code_point_start?(new, length)),
-      do: length,
-      else: shared_prefix(old, new, length - 1)
-  end
+  # ASCII without a carriage return has a cluster boundary between every two bytes, so trimming it needs no segmenting.
+  @spec plain_ascii?(binary()) :: boolean()
+  defp plain_ascii?(text), do: ascii?(text) and not String.contains?(text, "\r")
 
-  @spec shared_suffix(binary(), binary(), non_neg_integer()) :: non_neg_integer()
-  defp shared_suffix(old, new, length) do
-    if length == 0 or
-         (code_point_start?(old, byte_size(old) - length) and
-            code_point_start?(new, byte_size(new) - length)),
-       do: length,
-       else: shared_suffix(old, new, length - 1)
-  end
+  @spec cut?(:every_byte | MapSet.t(non_neg_integer()), non_neg_integer()) :: boolean()
+  defp cut?(:every_byte, _offset), do: true
+  defp cut?(cuts, offset), do: MapSet.member?(cuts, offset)
 
-  @spec code_point_start?(binary(), non_neg_integer()) :: boolean()
-  defp code_point_start?(text, position) do
-    position >= byte_size(text) or Bitwise.band(:binary.at(text, position), 0xC0) != 0x80
+  # Every grapheme cluster boundary of the text, both ends included. Text that is not valid UTF-8 counts each byte.
+  @spec cluster_cuts(binary()) :: MapSet.t(non_neg_integer())
+  defp cluster_cuts(text) do
+    pieces =
+      if String.valid?(text),
+        do: String.graphemes(text),
+        else: for(<<byte <- text>>, do: <<byte>>)
+
+    pieces |> Enum.scan(0, &(byte_size(&1) + &2)) |> MapSet.new() |> MapSet.put(0)
   end
 
   @doc "Returns where a forward patch starts, the bytes it removed, and the bytes it inserted."

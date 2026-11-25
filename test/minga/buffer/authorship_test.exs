@@ -514,6 +514,27 @@ defmodule Minga.Buffer.AuthorshipTest do
       assert BufferProcess.content(buffer) == "q\n"
     end
 
+    # Round 5b: a deletion slides only by grapheme clusters as Unicode defines them, so regional-indicator flags and
+    # conjoining Hangul jamo stay whole; the reject never leaves a lone code point that never existed.
+    test "a deletion next to Minga's look-alike cluster never splits a flag or a jamo syllable" do
+      for {base, minga} <- [
+            {"\u{1F1EB}\u{1F1F7}", "\u{1F1EB}\u{1F1EE}"},
+            {"\u{1F1FA}\u{1F1F8}", "\u{1F1FA}\u{1F1E6}"},
+            {"\u{1F1EB}\u{1F1F7}", "\u{1F1EB}"},
+            {"\u1100\u1161", "\u1100\u1162"},
+            {"1\uFE0F\u20E3", "2\uFE0F\u20E3"}
+          ] do
+        buffer = start(base <> "X\n")
+        replace_at(buffer, {0, byte_size(base)}, 0, minga, step("t", "s"))
+        replace_at(buffer, {0, 0}, byte_size(base), "")
+        assert BufferProcess.content(buffer) == minga <> "X\n"
+        assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+        assert BufferProcess.content(buffer) == "X\n", "#{inspect(base)} before #{inspect(minga)}"
+        assert :ok = BufferProcess.undo(buffer)
+        assert BufferProcess.content(buffer) == base <> "X\n"
+      end
+    end
+
     # Addendum 4 F1: a deletion slides only to a place both its ends are cuts the editor can make, never across bytes of
     # a code point or into a grapheme cluster.
     test "SL1 to SL3: a deletion next to Minga's multi-byte text slides only by whole characters" do

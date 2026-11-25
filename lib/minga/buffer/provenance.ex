@@ -56,7 +56,7 @@ defmodule Minga.Buffer.Provenance do
             recent: [],
             fresh: [],
             overlap_runs: %{},
-            drafts: :gb_sets.new(),
+            drafts: nil,
             next_change: 1,
             changes: %{},
             stale: [],
@@ -108,7 +108,7 @@ defmodule Minga.Buffer.Provenance do
             author: :unattributed
           })
 
-    %__MODULE__{tree: tree}
+    %__MODULE__{tree: tree, drafts: :gb_sets.new()}
   end
 
   @doc "Returns the document size in bytes that this provenance describes."
@@ -119,7 +119,7 @@ defmodule Minga.Buffer.Provenance do
   @spec open_group(t(), author(), group_key()) :: {group_id(), t()}
   def open_group(%__MODULE__{} = prov, author, key) do
     id = prov.next_group
-    group = %Group{author: author, key: key}
+    group = %Group{author: author, key: key, runs: :gb_sets.new()}
     prov = %{prov | groups: Map.put(prov.groups, id, group), next_group: id + 1}
     {id, traced(prov, {:open_group, id, author, key})}
   end
@@ -1307,7 +1307,7 @@ defmodule Minga.Buffer.Provenance do
     if replaced == [] and pulled == [] and not minga?(author) do
       {prov, nil}
     else
-      record = %Change{replaced: :gb_sets.from_list(replaced)}
+      record = %{Change.new() | replaced: :gb_sets.from_list(replaced)}
       prov = %{prov | changes: Map.put(prov.changes, change, record), next_change: change + 1}
       {pulled |> Enum.uniq() |> Enum.reduce(prov, &pull(&2, change, &1)), change}
     end
@@ -1793,17 +1793,15 @@ defmodule Minga.Buffer.Provenance do
 
   defp index_overlaps(prov, _run), do: prov
 
-  @spec put_mark(t(), group_id(), group_id() | {:permanent, term()}, Run.t()) :: t()
+  # Only consumption marks runs, and its deleter is always a live group; marks settle to permanent only on discard.
+  @spec put_mark(t(), group_id(), group_id(), Run.t()) :: t()
   defp put_mark(prov, owner, overlapper, run) do
     case with_overlap(run, owner, overlapper) do
       ^run ->
         prov
 
       marked ->
-        overlap_runs =
-          if is_integer(overlapper),
-            do: Map.update(prov.overlap_runs, overlapper, [run.id], &[run.id | &1]),
-            else: prov.overlap_runs
+        overlap_runs = Map.update(prov.overlap_runs, overlapper, [run.id], &[run.id | &1])
 
         refresh_draft(
           %{prov | tree: RunTree.update(prov.tree, marked), overlap_runs: overlap_runs},
@@ -2799,7 +2797,7 @@ defmodule Minga.Buffer.Provenance do
     (Map.keys(made) ++ Map.keys(replaced) ++ linked ++ named)
     |> Enum.uniq()
     |> Map.new(fn id ->
-      links = Map.get(previous, id, %Change{})
+      links = Map.get_lazy(previous, id, &Change.new/0)
 
       {id,
        %Change{

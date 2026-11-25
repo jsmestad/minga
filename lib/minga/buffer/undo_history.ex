@@ -9,7 +9,7 @@ defmodule Minga.Buffer.UndoHistory do
 
   `undo/3` and `redo/3` move only your groups. They find a group's text by its runs, not by byte offsets, so they stay exact when Minga edited above, below, or inside your text since. When flipping your group would change text that a later Minga step rewrote, they change nothing and return `{:blocked, {:overlaps, minga_group}}`. Minga's edits never clear your redo stack.
 
-  Who wrote each byte follows the text only where an alignment proves it unchanged: line and word trims, the word comparison's equal segments, and lines unique on both sides. Anything else is part of the change, so unchanged text inside one long line past the word budget, or inside an unpaired span with no unique line, is credited to the writer; exact text and exact rejects come first. A single deletion inside a run of identical text takes another author's copy first. It moves only by whole characters: both its ends stay cuts the editor can make, between code points and never inside a grapheme cluster that a combining mark, a zero width joiner, a variation selector or an emoji modifier holds together. Every recorded run boundary is a cut between code points, so a revert never meets half a character.
+  Who wrote each byte follows the text only where an alignment proves it unchanged: line and word trims, the word comparison's equal segments, and lines unique on both sides. Anything else is part of the change, so unchanged text inside one long line past the word budget, or inside an unpaired span with no unique line, is credited to the writer; exact text and exact rejects come first. A single deletion inside a run of identical text takes another author's copy first. The slider's unit is the grapheme cluster as Unicode defines it (UAX #29, as `String.graphemes/1` segments): both ends of the deletion stay cluster boundaries, so a flag, a conjoining jamo syllable, a ZWJ sequence or a letter with its marks is never split. It segments a window bounded by line breaks within a fixed distance, so its cost stays linear; without such bounds the deletion stays where the patch put it. The changes the history records (trims, word tokens, anchored spans and one-pass batches) also start and end on cluster boundaries, and every recorded run boundary is a cut between code points, so a revert never leaves part of a cluster that never existed.
 
   A step's group takes a new edit only when nothing changed the document and no group was opened since its last edit; otherwise the step continues in a new group under the same key. Every dependency between groups then points from an older group to a newer one: a later group that rewrote a group's text, or a group that edited inside a Minga group's replacement (text a step wrote in place of other text).
 
@@ -124,12 +124,13 @@ defmodule Minga.Buffer.UndoHistory do
               {:ok, Document.t(), non_neg_integer() | nil, Provenance.t()}
               | {:error, UndoPatch.apply_error()})
 
-  defstruct provenance: Provenance.new(0),
+  # `provenance` and `untasked` hold opaque values, so they have no literal defaults; `new/2` builds them.
+  defstruct provenance: nil,
             undo_entries: [],
             undo_size: 0,
             redo_entries: [],
             minga: [],
-            untasked: :queue.new(),
+            untasked: nil,
             untasked_size: 0,
             steps: %{},
             task_run: nil,
@@ -186,6 +187,7 @@ defmodule Minga.Buffer.UndoHistory do
   def new(%Document{} = document \\ Document.new(""), opts \\ []) when is_list(opts) do
     %__MODULE__{
       provenance: Provenance.new(Document.content_byte_size(document)),
+      untasked: :queue.new(),
       recording: Keyword.get(opts, :recording, :precise),
       run_budget: Keyword.get(opts, :run_budget, @run_budget)
     }
@@ -590,7 +592,7 @@ defmodule Minga.Buffer.UndoHistory do
             history.merges,
             [group],
             MapSet.new([group]),
-            MapSet.new()
+            &no_group/1
           )
 
         match?({:group, _holding}, held_in(history.provenance, closure))
@@ -655,7 +657,14 @@ defmodule Minga.Buffer.UndoHistory do
   @spec take_closure(map(), Provenance.t(), MapSet.t(), Provenance.group_id()) ::
           {Provenance.t(), MapSet.t()}
   defp take_closure(walk, flags, taken, group) do
-    closure = dependents(flags, walk.history.merges, [group], MapSet.new([group]), taken)
+    closure =
+      dependents(
+        flags,
+        walk.history.merges,
+        [group],
+        MapSet.new([group]),
+        &MapSet.member?(taken, &1)
+      )
 
     case held_in(flags, closure) do
       nil ->
@@ -667,33 +676,36 @@ defmodule Minga.Buffer.UndoHistory do
     end
   end
 
+  @spec no_group(Provenance.group_id()) :: false
+  defp no_group(_group), do: false
+
   # Everything newer that must revert with these groups: for a Minga group, later Minga groups that rewrote its text
   # and the groups that edited inside its replacements; for a group of yours, the Minga groups that rewrote it. A
   # permanent mark stands for an edit that can never revert. Every edge points to a newer group, so the walk ends.
   # Steps compaction merged are one node: each brings its whole merge class, so a class never reverts in halves.
-  # Text the closure and the groups this press already took (`taken`) both wrote and deleted stays dead when they all
+  # Text the closure and the groups this press already took (`taken?`) both wrote and deleted stays dead when they all
   # revert, so a later deletion of it adds nothing.
   @spec dependents(
           Provenance.t(),
           merges(),
           [Provenance.group_id() | :permanent],
           MapSet.t(),
-          MapSet.t()
+          (Provenance.group_id() -> boolean())
         ) :: MapSet.t()
-  defp dependents(_provenance, _merges, [], closure, _taken), do: closure
+  defp dependents(_provenance, _merges, [], closure, _taken?), do: closure
 
-  defp dependents(provenance, merges, [:permanent | rest], closure, taken),
-    do: dependents(provenance, merges, rest, closure, taken)
+  defp dependents(provenance, merges, [:permanent | rest], closure, taken?),
+    do: dependents(provenance, merges, rest, closure, taken?)
 
-  defp dependents(provenance, merges, [group | rest], closure, taken) do
-    reverting? = &(MapSet.member?(closure, &1) or MapSet.member?(taken, &1))
+  defp dependents(provenance, merges, [group | rest], closure, taken?) do
+    reverting? = &(MapSet.member?(closure, &1) or taken?.(&1))
 
     found =
       (direct_dependents(provenance, group, reverting?) ++ merge_class(merges, group))
       |> Enum.uniq()
       |> Enum.reject(&MapSet.member?(closure, &1))
 
-    dependents(provenance, merges, found ++ rest, Enum.into(found, closure), taken)
+    dependents(provenance, merges, found ++ rest, Enum.into(found, closure), taken?)
   end
 
   @doc """
@@ -934,7 +946,7 @@ defmodule Minga.Buffer.UndoHistory do
     |> Enum.sort(:desc)
     |> Enum.find_value({:yours, 0}, fn group ->
       closure =
-        dependents(history.provenance, history.merges, [group], MapSet.new([group]), MapSet.new())
+        dependents(history.provenance, history.merges, [group], MapSet.new([group]), &no_group/1)
 
       case held_in(history.provenance, closure) do
         {:group, holding} -> {:yours, group_offset(history.provenance, holding)}
@@ -1387,6 +1399,8 @@ defmodule Minga.Buffer.UndoHistory do
     end
 
     {low, high} = if context, do: {0, Document.content_byte_size(context)}, else: {start, old_end}
+    # Where the text ends, when the whole document is known.
+    text_end = if context, do: high
     tuple = List.to_tuple(changes)
 
     changes
@@ -1402,7 +1416,7 @@ defmodule Minga.Buffer.UndoHistory do
           change,
           {at, byte_size(removed)},
           {lower, upper},
-          byte,
+          {byte, text_end},
           {provenance, writer}
         )
 
@@ -1424,10 +1438,16 @@ defmodule Minga.Buffer.UndoHistory do
           change(),
           {non_neg_integer(), pos_integer()},
           {integer(), integer()},
-          (non_neg_integer() -> byte()),
+          {(non_neg_integer() -> byte()), non_neg_integer() | nil},
           {Provenance.t(), Provenance.author()}
         ) :: change()
-  defp slide_deletion(change, {at, length}, {lower, upper}, byte, {provenance, writer}) do
+  defp slide_deletion(
+         change,
+         {at, length},
+         {lower, upper},
+         {byte, text_end},
+         {provenance, writer}
+       ) do
     lowest = slide_on(at, length, -1, &(&1 > lower and byte.(&1 - 1) == byte.(&1 + length - 1)))
     highest = slide_on(at, length, 1, &(&1 + length < upper and byte.(&1) == byte.(&1 + length)))
 
@@ -1437,9 +1457,13 @@ defmodule Minga.Buffer.UndoHistory do
       foreign? = &(&1 != writer and &1 != :unattributed)
       spans = Provenance.spans(provenance, lowest, highest + length)
       covered = &foreign_bytes(spans, &1, length, foreign?)
-      # A deletion moves only to a place where both its ends are cuts the editor can make.
+      # A deletion moves only to a place where both its ends are grapheme cluster boundaries.
+      cuts = cluster_boundaries({byte, text_end}, lowest, highest + length)
+
       candidates =
-        for place <- lowest..highest, cut?(byte, place) and cut?(byte, place + length), do: place
+        for place <- lowest..highest,
+            MapSet.member?(cuts, place) and MapSet.member?(cuts, place + length),
+            do: place
 
       best = Enum.max_by([at | candidates], covered)
 
@@ -1447,69 +1471,67 @@ defmodule Minga.Buffer.UndoHistory do
     end
   end
 
-  # A cut the editor can make: between two code points, but never inside a grapheme cluster that a combining mark, a
-  # zero width joiner, a variation selector or an emoji modifier holds together. Unknown bytes are no cut.
-  @spec cut?((non_neg_integer() -> byte() | nil), non_neg_integer()) :: boolean()
-  defp cut?(byte, offset) do
-    case code_point_at(byte, offset) do
-      :end -> previous_joins?(byte, offset) == false
-      nil -> false
-      code_point -> not extends?(code_point) and previous_joins?(byte, offset) == false
-    end
-  end
+  # How far a slide looks for the line breaks that bound its window. A line break always ends a grapheme cluster, so
+  # the text between two of them segments the same as the whole document.
+  @cluster_window 1_024
 
-  @spec code_point_at((non_neg_integer() -> byte() | nil), non_neg_integer()) ::
-          non_neg_integer() | :end | nil
-  defp code_point_at(byte, offset) do
-    case safe_byte(byte, offset) do
-      nil -> :end
-      lead when lead in 0x80..0xBF -> nil
-      lead -> decode(byte, offset, lead)
-    end
-  end
-
-  @spec decode((non_neg_integer() -> byte() | nil), non_neg_integer(), byte()) ::
-          non_neg_integer() | nil
-  defp decode(byte, offset, lead) do
-    size =
-      cond do
-        lead < 0x80 -> 1
-        lead >= 0xF0 -> 4
-        lead >= 0xE0 -> 3
-        true -> 2
-      end
-
-    bytes = for i <- 0..(size - 1)//1, do: safe_byte(byte, offset + i)
-
-    if Enum.any?(bytes, &is_nil/1) do
-      nil
+  # The grapheme cluster boundaries (UAX #29, as `String.graphemes/1` finds them) from `from` to `to`, read in a window
+  # that starts after a line break (or at the start of the text) and ends at a line break (or the end of the text).
+  # Without such bounds within `@cluster_window` bytes, or on text that is not valid UTF-8, there are none, so the
+  # deletion stays where the patch put it. The cost is the window's length.
+  @spec cluster_boundaries(
+          {(non_neg_integer() -> byte() | nil), non_neg_integer() | nil},
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: MapSet.t(non_neg_integer())
+  defp cluster_boundaries({byte, text_end}, from, to) do
+    with {:ok, first} <- window_start(byte, from, from),
+         {:ok, last} <- window_end({byte, text_end}, to, to),
+         window = for(offset <- first..(last - 1)//1, into: <<>>, do: <<byte.(offset)>>),
+         :ok <- valid_text(window) do
+      window
+      |> String.graphemes()
+      |> Enum.scan(first, &(byte_size(&1) + &2))
+      |> MapSet.new()
+      |> MapSet.put(first)
     else
-      case :binary.list_to_bin(bytes) do
-        <<code_point::utf8>> -> code_point
-        _invalid -> nil
-      end
+      :none -> MapSet.new()
     end
   end
 
-  # Whether the code point before `offset` is a zero width joiner, which binds the next one to it.
-  @spec previous_joins?((non_neg_integer() -> byte() | nil), non_neg_integer()) :: boolean() | nil
-  defp previous_joins?(_byte, 0), do: false
+  @spec valid_text(binary()) :: :ok | :none
+  defp valid_text(text), do: if(String.valid?(text), do: :ok, else: :none)
 
-  defp previous_joins?(byte, offset) do
-    start =
-      Enum.find((offset - 1)..max(offset - 4, 0)//-1, &(safe_byte(byte, &1) not in 0x80..0xBF))
+  # The offset just after the nearest line break at or before `offset`, or 0.
+  @spec window_start((non_neg_integer() -> byte() | nil), non_neg_integer(), non_neg_integer()) ::
+          {:ok, non_neg_integer()} | :none
+  defp window_start(_byte, 0, _from), do: {:ok, 0}
+  defp window_start(_byte, offset, from) when from - offset > @cluster_window, do: :none
 
-    case start && code_point_at(byte, start) do
-      0x200D -> true
-      code_point when is_integer(code_point) -> false
-      _unknown -> nil
+  defp window_start(byte, offset, from) do
+    case safe_byte(byte, offset - 1) do
+      ?\n -> {:ok, offset}
+      nil -> :none
+      _byte -> window_start(byte, offset - 1, from)
     end
   end
 
-  @extending ~r/\A[\p{M}\x{200D}\x{FE00}-\x{FE0F}\x{1F3FB}-\x{1F3FF}\x{E0020}-\x{E007F}\x{E0100}-\x{E01EF}]/u
+  # The offset just after the nearest line break at or after `offset`, or the end of the text when it is known.
+  @spec window_end(
+          {(non_neg_integer() -> byte() | nil), non_neg_integer() | nil},
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {:ok, non_neg_integer()} | :none
+  defp window_end(_text, offset, to) when offset - to > @cluster_window, do: :none
+  defp window_end({_byte, text_end}, text_end, _to), do: {:ok, text_end}
 
-  @spec extends?(non_neg_integer()) :: boolean()
-  defp extends?(code_point), do: Regex.match?(@extending, <<code_point::utf8>>)
+  defp window_end({byte, _text_end} = text, offset, to) do
+    case safe_byte(byte, offset) do
+      ?\n -> {:ok, offset + 1}
+      nil -> :none
+      _byte -> window_end(text, offset + 1, to)
+    end
+  end
 
   @spec safe_byte((non_neg_integer() -> byte() | nil), integer()) :: byte() | nil
   defp safe_byte(_byte, offset) when offset < 0, do: nil

@@ -11,11 +11,8 @@ defmodule Minga.Buffer.Provenance.Change do
 
   alias Minga.Buffer.Provenance.Locator
 
-  defstruct made: :gb_sets.new(),
-            replaced: :gb_sets.new(),
-            pulls: :gb_sets.new(),
-            pulled_by: :gb_sets.new(),
-            owner: :runs
+  # The sets have no literal defaults: an empty `:gb_sets` value is opaque, so `new/0` builds one at run time.
+  defstruct [:made, :replaced, :pulls, :pulled_by, owner: :runs]
 
   @typedoc "A change, as numbered by `Minga.Buffer.Provenance` in the order the edits were applied."
   @type id :: pos_integer()
@@ -32,4 +29,14 @@ defmodule Minga.Buffer.Provenance.Change do
           pulled_by: :gb_sets.set(id()),
           owner: owner()
         }
+
+  @doc "Returns a change that made, replaced and pulls nothing yet, owned by its runs."
+  @spec new() :: t()
+  def new,
+    do: %__MODULE__{
+      made: :gb_sets.new(),
+      replaced: :gb_sets.new(),
+      pulls: :gb_sets.new(),
+      pulled_by: :gb_sets.new()
+    }
 end

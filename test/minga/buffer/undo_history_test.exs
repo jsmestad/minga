@@ -1008,10 +1008,41 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert Document.content(restore.document) == "ab\n"
     end
 
-    # Addendum 4 F1: every recorded run boundary is a cut between code points, after every operation, on multi-byte,
-    # combining and CJK text; deleted text is whole characters, so a revert never meets half a character.
-    property "every run boundary is a code point cut, on multi-byte, combining and CJK text" do
-      graphemes = ["ö", "é", "中", "丁", "e\u0301", "👍🏽", "👨‍👩‍👧", "a", " ", "\n"]
+    # Addendum 4 F1 and round 5b: every recorded run boundary is a cut between code points, and every change the history
+    # records (after the slider, the alignment anchors and edit_all) starts and ends on a grapheme cluster boundary of
+    # the text it changes, as Unicode defines clusters: flags and lone regional indicators, conjoining jamo, ZWJ
+    # sequences, variation selectors, skin-tone modifiers, combining marks and CRLF.
+    property "every recorded change ends on grapheme cluster boundaries, and every run boundary is a code point cut" do
+      graphemes = [
+        "ö",
+        "é",
+        "中",
+        "e\u0301",
+        "\u0301",
+        "👍🏽",
+        "👍",
+        "\u{1F3FD}",
+        "👨‍👩‍👧",
+        "\u200D",
+        "❤",
+        "❤️",
+        "\uFE0F",
+        "🇫🇷",
+        "🇫🇮",
+        "🇺🇸",
+        "🇫",
+        "\u{1F1F7}",
+        "\u1100",
+        "\u1161",
+        "\u11A8",
+        "\u1100\u1161",
+        "\u1100\u1162\u11A8",
+        "a",
+        " ",
+        "\r\n",
+        "\r",
+        "\n"
+      ]
 
       check all(
               base <- StreamData.list_of(StreamData.member_of(graphemes), max_length: 8),
@@ -1028,14 +1059,27 @@ defmodule Minga.Buffer.UndoHistoryTest do
               budget <- StreamData.integer(4..40),
               max_runs: runs(200)
             ) do
-        world = world(Enum.join(base), run_budget: budget)
+        world = world(Enum.join(base), run_budget: budget, shadow: false)
+        world = update_in(world.history, &trace_history/1)
 
         Enum.reduce(commands, world, fn command, world ->
-          world = command |> grapheme_op(world) |> want_compaction() |> compact_fully(5)
+          before = text(world)
+          world = grapheme_op(command, world)
+          {operations, world} = take_history_trace(world)
+          assert_cluster_changes(before, operations, text(world))
+          world = world |> want_compaction() |> compact_fully(5)
+          {_compaction, world} = take_history_trace(world)
           assert_code_point_cuts(world)
           world
         end)
       end
+
+      assert Process.get(:cluster_changes, 0) > 0
+
+      IO.puts(
+        "\n[clusters] changes checked: #{Process.get(:cluster_changes)}, in one-pass batches: " <>
+          "#{Process.get(:cluster_batches, 0)}"
+      )
     end
 
     # Your edit between two steps of one task, touched by both, then compaction: the merge is refused, no component of
@@ -1648,6 +1692,65 @@ defmodule Minga.Buffer.UndoHistoryTest do
     source = if author == :user, do: :user, else: {:minga, "task-#{rem(n, 2)}", "call-#{n}"}
     edit(world, source, start, removed, Enum.join(inserted), at: @t0 + world.version * @window)
   end
+
+  defp trace_history(history) do
+    provenance = history |> UndoHistory.provenance() |> Provenance.start_trace()
+    %{history | provenance: provenance}
+  end
+
+  defp take_history_trace(world) do
+    {operations, provenance} = Provenance.take_trace(UndoHistory.provenance(world.history))
+    {operations || [], %{world | history: %{world.history | provenance: provenance}}}
+  end
+
+  # Replays the edits one operation recorded over the text before it, and requires each change to start and end on a
+  # grapheme cluster boundary of the text it changes. Flips (undo, a press) record no edits.
+  defp assert_cluster_changes(before, operations, after_text) do
+    replayed =
+      Enum.reduce(operations, before, fn
+        {:edit, _group, start, removed, inserted}, text ->
+          assert_cluster_change(text, {start, removed, inserted})
+          splice_text(text, start, byte_size(removed), inserted)
+
+        {:edit_all, _group, changes}, text ->
+          Process.put(:cluster_batches, Process.get(:cluster_batches, 0) + 1)
+          Enum.each(changes, &assert_cluster_change(text, &1))
+
+          changes
+          |> Enum.reverse()
+          |> Enum.reduce(text, fn {start, removed, inserted}, acc ->
+            splice_text(acc, start, byte_size(removed), inserted)
+          end)
+
+        _flip_or_group, text ->
+          text
+      end)
+
+    if Enum.any?(operations, &(elem(&1, 0) in [:edit, :edit_all])),
+      do: assert(replayed == after_text)
+  end
+
+  defp assert_cluster_change(text, {start, removed, _inserted} = change) do
+    cuts = cluster_cuts(text)
+
+    assert MapSet.member?(cuts, start) and MapSet.member?(cuts, start + byte_size(removed)),
+           "change #{inspect(change)} cuts a cluster of #{inspect(text)}"
+
+    Process.put(:cluster_changes, Process.get(:cluster_changes, 0) + 1)
+  end
+
+  defp cluster_cuts(text) do
+    text
+    |> String.graphemes()
+    |> Enum.scan(0, &(byte_size(&1) + &2))
+    |> MapSet.new()
+    |> MapSet.put(0)
+  end
+
+  defp splice_text(text, start, length, inserted),
+    do:
+      binary_part(text, 0, start) <>
+        inserted <> binary_part(text, start + length, byte_size(text) - start - length)
 
   defp assert_code_point_cuts(world) do
     content = text(world)
