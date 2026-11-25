@@ -13,6 +13,7 @@ defmodule MingaEditor.UI.Picker.UnsavedTextSource do
   alias MingaEditor.Handlers.SessionRestore
   alias MingaEditor.PromptUI
   alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.Empty
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.Source
   alias MingaEditor.UI.Prompt.UnsavedTextDiscardConfirm
@@ -45,12 +46,30 @@ defmodule MingaEditor.UI.Picker.UnsavedTextSource do
     {:ok, items(waiting, System.os_time(:second)), %{}}
   end
 
-  def async_fetch(%Context{}), do: {:ok, [empty_item()], %{}}
+  def async_fetch(%Context{}), do: {:ok, [], %{}}
 
-  @doc "Builds the rows for the waiting entries, or the one row that says nothing is waiting. `now` is in seconds."
+  @doc """
+  Says that nothing is waiting, or that nothing matches the query.
+
+  There is no next step to offer: text appears here only after a crash. So the empty list is its title and one muted line, and the picker takes `q` or `esc`.
+  """
+  @impl true
+  @spec empty(Empty.request()) :: Empty.t()
+  def empty(%{total: 0}) do
+    %Empty{
+      typing?: false,
+      title: "No unsaved text is waiting.",
+      why: "Text kept after a crash shows up here.",
+      rows: []
+    }
+  end
+
+  def empty(%{query: query}) do
+    %Empty{title: "No waiting text matches #{Empty.quoted(String.trim(query))}.", rows: []}
+  end
+
+  @doc "Builds the rows for the waiting entries. `now` is in seconds."
   @spec items([Session.waiting_unsaved_text()], integer()) :: [Item.t()]
-  def items([], _now), do: [empty_item()]
-
   def items(entries, now) do
     entries
     |> Enum.sort_by(&{is_nil(&1.project), &1.project})
@@ -91,15 +110,6 @@ defmodule MingaEditor.UI.Picker.UnsavedTextSource do
       group: group(entry),
       search_text: entry.path,
       meta: %{entry: entry}
-    }
-  end
-
-  @spec empty_item() :: Item.t()
-  defp empty_item do
-    %Item{
-      id: :empty,
-      label: "No unsaved text is waiting",
-      description: "Text kept after a crash shows up here."
     }
   end
 

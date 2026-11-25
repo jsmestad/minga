@@ -50,7 +50,8 @@ defmodule MingaEditor.UnsavedTextListTest do
     assert File.read!(ctx.notes) == "saved\n"
 
     open_list(editor)
-    assert [%{id: :empty, label: "No unsaved text is waiting"}] = rows(editor)
+    assert rows(editor) == []
+    assert %{title: "No unsaved text is waiting."} = picker_state(editor).empty
   end
 
   test "text whose file and directory are gone is recovered into a buffer for that path", ctx do
@@ -111,8 +112,15 @@ defmodule MingaEditor.UnsavedTextListTest do
 
     open_list(editor)
 
-    assert [%{id: :empty, label: "No unsaved text is waiting"}] = rows(editor)
-    send_keys_sync(editor, "<CR>")
+    assert rows(editor) == []
+
+    assert %{title: "No unsaved text is waiting.", why: "Text kept after a crash shows up here."} =
+             picker_state(editor).empty
+
+    # Nothing to filter and nothing to run: the list takes no text, and q closes it.
+    send_keys_sync(editor, "x")
+    assert picker_state(editor).query == ""
+    send_keys_sync(editor, "q")
     refute picker_open?(editor)
   end
 
@@ -134,11 +142,15 @@ defmodule MingaEditor.UnsavedTextListTest do
   defp open_list(editor) do
     send_keys_sync(editor, "<SPC>qu")
 
-    wait_until(editor, fn _state -> rows(editor) != [] end,
+    wait_until(editor, fn _state -> loaded?(picker_state(editor)) end,
       max_attempts: 200,
       message: "the list of waiting unsaved text did not load"
     )
   end
+
+  # The list has loaded when it shows rows, or says that nothing is waiting.
+  defp loaded?(nil), do: false
+  defp loaded?(picker), do: picker.filtered != [] or not is_nil(picker.empty)
 
   defp rows(editor) do
     case picker_state(editor) do

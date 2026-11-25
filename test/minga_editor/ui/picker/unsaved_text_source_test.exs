@@ -3,6 +3,7 @@ defmodule MingaEditor.UI.Picker.UnsavedTextSourceTest do
 
   use ExUnit.Case, async: true
 
+  alias MingaEditor.UI.Picker.Empty
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.UnsavedTextSource
 
@@ -107,12 +108,19 @@ defmodule MingaEditor.UI.Picker.UnsavedTextSourceTest do
     assert UnsavedTextSource.actions(item) == [{"Recover", :recover}, {"Discard", :discard}]
   end
 
-  test "an empty list says so in one row that does nothing" do
-    assert [%Item{id: :empty, label: "No unsaved text is waiting"} = empty] =
-             UnsavedTextSource.items([], @now)
+  test "with nothing waiting, the empty list says so with one muted line and no next step" do
+    assert UnsavedTextSource.items([], @now) == []
 
-    assert UnsavedTextSource.actions(empty) == []
-    assert UnsavedTextSource.on_select(empty, :state) == :state
-    assert UnsavedTextSource.on_action(:discard, empty, :state) == :state
+    assert %Empty{
+             title: "No unsaved text is waiting.",
+             why: "Text kept after a crash shows up here.",
+             rows: [],
+             typing?: false
+           } = UnsavedTextSource.empty(%{query: "", total: 0, context: nil})
+  end
+
+  test "a query that matches none of the waiting text says which query" do
+    assert %Empty{title: "No waiting text matches “notes”.", rows: [], typing?: true} =
+             UnsavedTextSource.empty(%{query: "notes ", total: 2, context: nil})
   end
 end
