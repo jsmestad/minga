@@ -289,7 +289,10 @@ func (m Model) whichKeyHits(which protocol.WhichKey) whichKeyPointerZones {
 	g := m.whichKeyGeometry(which)
 	zones := whichKeyPointerZones{path: which.Path}
 	y := 1
-	for _, columns := range g.bands {
+	for band, columns := range g.bands {
+		if band > 0 {
+			y += whichKeyBandGapRows
+		}
 		y += g.headingRows
 		x := 1 + g.inset
 		for _, column := range columns {
