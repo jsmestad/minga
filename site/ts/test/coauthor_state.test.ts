@@ -253,6 +253,7 @@ describe("same-file lab: commands of more than one key", () => {
     const table: readonly [keys: readonly string[], text: string][] = [
       [["]", "h"], "]h"],
       [["]", "x"], "]x"],
+      [["]", "C-j"], "]⌃J"],
       [["SPC", "a"], "SPC a"],
       [["SPC", "a", "d"], "SPC a d"],
       [["j"], "j"],

@@ -1,6 +1,6 @@
 /* The keycast: the keys a lab is still waiting on and the last sequences it saw. Pure state plus a renderer that keeps its nodes. */
 
-import type { PrefixStep } from "./stage.ts";
+import { displayKeys, type PrefixStep } from "./stage.ts";
 
 export interface KeycastState {
   readonly pending: readonly string[];
@@ -20,8 +20,9 @@ export function keycastPush(state: KeycastState, step: PrefixStep, limit: number
   return { pending: [], recent: [...state.recent, step.keys].slice(-limit) };
 }
 
+/** One sequence as the keycast shows it: each key in its display form (the Escape key reads "esc", Control+J reads as the glyph and the letter). */
 export function keycastText(keys: readonly string[]): string {
-  return keys.join(" ");
+  return displayKeys(keys);
 }
 
 export interface LabKeycast {

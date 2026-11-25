@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { STEP_IDS } from "../src/coauthor_state.ts";
 import { LESSON_STEPS, summarizeLesson } from "../src/progress.ts";
-import { SANDBOX_MISSIONS } from "../src/sandbox_state.ts";
+import { STEP_IDS as SANDBOX_STEP_IDS } from "../src/sandbox_state.ts";
 import { STEP_IDS as VETO_STEP_IDS } from "../src/veto_state.ts";
 
 describe("lesson progress: only a lesson's current ids count", () => {
@@ -15,8 +15,9 @@ describe("lesson progress: only a lesson's current ids count", () => {
     { name: "only ids from the old lab", stored: { agents: OLD_AGENTS }, lesson: "agents", done: 0, total: 4 },
     { name: "old and current ids mixed", stored: { agents: [...OLD_AGENTS, "find", "reject"] }, lesson: "agents", done: 2, total: 4 },
     { name: "every current id, with old ids beside them", stored: { agents: [...STEP_IDS, ...OLD_AGENTS] }, lesson: "agents", done: 4, total: 4 },
+    { name: "only ids from the old Lesson 02 sandbox", stored: { editing: ["which_key", "pin_file", "act_menu", "parity", "dismiss"] }, lesson: "editing", done: 0, total: 4 },
     { name: "an id stored twice", stored: { agents: ["find", "find"] }, lesson: "agents", done: 1, total: 4 },
-    { name: "another lesson's ids", stored: { editing: ["which_key"], agents: ["which_key"] }, lesson: "agents", done: 0, total: 4 },
+    { name: "another lesson's ids", stored: { editing: ["menu"], agents: ["menu"] }, lesson: "agents", done: 0, total: 4 },
     { name: "a lesson the site no longer has", stored: { "getting-started": ["configured"] }, lesson: "getting-started", done: 0, total: 0 },
     { name: "a lesson the site does not have", stored: { advanced: ["a", "b"] }, lesson: "advanced", done: 0, total: 0 },
     { name: "an unknown lesson stored beside a real one", stored: { advanced: ["a"], remote: ["blocked"] }, lesson: "remote", done: 1, total: 3 },
@@ -42,7 +43,7 @@ describe("lesson progress: the list and the labs agree", () => {
   });
 
   it("Lesson 02 records exactly the ids the list holds", () => {
-    assert.deepEqual(LESSON_STEPS.editing, SANDBOX_MISSIONS.map((mission) => mission.id));
+    assert.deepEqual(LESSON_STEPS.editing, SANDBOX_STEP_IDS);
   });
 
   it("the hub's fallback line states the total the lists add up to", () => {
