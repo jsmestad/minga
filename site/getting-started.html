@@ -199,7 +199,7 @@ minga .</code></pre>
           <p>The other providers work the same way: <code>OPENAI_API_KEY</code>, <code>GOOGLE_API_KEY</code>, <code>OPENROUTER_API_KEY</code>, <code>GROQ_API_KEY</code>, <code>MISTRAL_API_KEY</code>, <code>DEEPSEEK_API_KEY</code>.</p>
 
           <h3>If you have no key set, or you use the macOS app</h3>
-          <p>An app started from Finder or the Dock does not get variables you exported in a terminal. Save the key in Minga instead, from the agent view: your conversation with the agent, and the composer where you write to it. If you started with <code>minga .</code>, you are already there. From a file, press <kbd>SPC a a</kbd> in Normal mode. Type this in the composer and press <kbd>↩</kbd>:</p>
+          <p>An app started from Finder or the Dock does not get variables you exported in a terminal. Save the key in Minga instead, from the agent view: your conversation with the agent, and the composer where you write to it. If you started with <code>minga .</code>, you are already there. From a file, press <kbd>SPC a a</kbd> in Normal mode. The composer is not focused when the agent view opens, so press <kbd>i</kbd> or click the composer, then type this and press <kbd>↩</kbd>:</p>
           <div class="code-card">
             <div class="code-header">
               <span>Composer</span>
@@ -210,7 +210,7 @@ minga .</code></pre>
           <p>Type the key into the masked prompt. Do not paste a key into the conversation. Minga stores it in <code>~/.config/minga/credentials.json</code>, readable only by you. A key in an environment variable takes precedence over a stored one.</p>
 
           <h3>Choose the model</h3>
-          <p>Run <code>/model</code> in the composer. It lists the models your key can reach. Choose one, and the conversation uses it from then on.</p>
+          <p>Run <code>/model</code> in the composer (press <kbd>i</kbd> first if the cursor is not in it). It lists the models your key can reach. Choose one, and the conversation uses it from then on.</p>
           <p>To sign in with a ChatGPT subscription instead of an API key, run <code>/login</code>. <a href="/docs/agent-model-selection.html">Choosing a model</a> covers a default model for new conversations and every provider.</p>
         </section>
 
@@ -230,7 +230,7 @@ minga .</code></pre>
               <span class="step-badge">02</span>
               <div>
                 <h3>Write the request and send it</h3>
-                <p>Type in the composer and press <kbd>↩</kbd> to send. If typing does nothing, press <kbd>i</kbd> to focus the composer first. For example:</p>
+                <p>If the cursor is not in the composer, press <kbd>i</kbd> or click the composer. Then type your request and press <kbd>↩</kbd> to send. For example:</p>
                 <div class="code-card">
                   <div class="code-header">
                     <span>Composer</span>
@@ -255,7 +255,7 @@ minga .</code></pre>
         <section class="essay-section" id="review">
           <h2>5. Review it</h2>
           <p>When the agent finishes its turn, a notice says, for example, "1 agent-edited file is not on disk" and offers <strong>Publish</strong> and <strong>Discard</strong>. Read the change before you choose.</p>
-          <p>The agent view lists the files the agent changed. Choose <strong>Review</strong> on the file to read its changes. While the review has focus, <kbd>]c</kbd> moves to the next change and <kbd>[c</kbd> to the previous one.</p>
+          <p>The agent view lists the files the agent changed. Click <strong>Review</strong> next to the file to read its changes. While the review has focus, <kbd>]c</kbd> moves to the next change and <kbd>[c</kbd> to the previous one.</p>
           <p>For this first edit, read the whole change and then publish or discard it as one. The <a href="/docs/agentic-keymap.html#reviewing-a-change">key reference</a> lists the keys that accept or reject single changes.</p>
         </section>
 
