@@ -104,7 +104,8 @@ func (m *Model) reconcilePicker(picker protocol.Picker) {
 	} else if int(picker.Selected) < len(picker.Items) {
 		committedID = pickerItemID(picker.Items[picker.Selected])
 	}
-	m.localPresentation.reconcileIdentity(presentationPicker, picker.Generation, committedID, retained, picker.Visible)
+	// An open act menu owns the list keys, so a preview made before its frame arrived was a move of the menu on the BEAM; the picker row stays where the BEAM has it.
+	m.localPresentation.reconcileIdentity(presentationPicker, picker.Generation, committedID, retained, picker.Visible && !picker.ActionVisible)
 }
 
 func (m *Model) applyFileTreeSelection(selection protocol.FileTreeSelection) {
@@ -348,19 +349,37 @@ func (m *Model) previewPickerNavigation(keyPress []byte) bool {
 	}
 
 	current := m.effectivePickerIndex(payload.Picker)
-
-	next := current + delta
-	if next < 0 {
-		next = 0
-	} else if next >= len(payload.Picker.Items) {
-		next = len(payload.Picker.Items) - 1
-	}
+	next := pickerPreviewTarget(payload.Picker, current, delta)
 	if next == current {
 		return false
 	}
 
 	m.localPresentation.setIdentityPreview(presentationPicker, payload.Picker.Generation, pickerItemID(payload.Picker.Items[next]))
 	return true
+}
+
+// pickerPreviewTarget returns the row a move of delta rows from current lands on, or current when there is nothing to preview.
+// The BEAM wraps a one-row move at the ends of the list, so the preview wraps with it, but only when the rows held are the whole list.
+// At the edge of a partial window the row the BEAM moves to is not here, so the highlight stays until the frame arrives.
+func pickerPreviewTarget(picker protocol.Picker, current, delta int) int {
+	count := len(picker.Items)
+	next := current + delta
+	if next >= 0 && next < count {
+		return next
+	}
+	if !pickerHoldsWholeList(picker) || (delta != 1 && delta != -1) {
+		return min(max(next, 0), count-1)
+	}
+	if next < 0 {
+		return count - 1
+	}
+	return 0
+}
+
+// pickerHoldsWholeList reports whether Items are every row the BEAM's selection can reach.
+// The BEAM offers at most a window of a long result list, and counts no matches while the rows are a source's next steps.
+func pickerHoldsWholeList(picker protocol.Picker) bool {
+	return picker.Empty != nil || len(picker.Items) == int(picker.Filtered)
 }
 
 // pickerNavigationDelta returns the row delta of an encoded key press when the BEAM listed that exact codepoint and modifiers as picker movement.

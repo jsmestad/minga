@@ -4006,7 +4006,7 @@ func pickerChrome(items int, selected uint16) protocol.ChromePayload {
 	if int(selected) < len(pItems) {
 		selectedID = pItems[selected].ActivationID
 	}
-	return protocol.ChromePayload{Opcode: generated.OPGuiPicker, Picker: protocol.Picker{Visible: true, Generation: 7, Selected: selected, SelectedID: selectedID, Items: pItems, MovementKeys: defaultPickerMovementKeys()}}
+	return protocol.ChromePayload{Opcode: generated.OPGuiPicker, Picker: protocol.Picker{Visible: true, Generation: 7, Selected: selected, SelectedID: selectedID, Filtered: uint16(items), Total: uint16(items), Items: pItems, MovementKeys: defaultPickerMovementKeys()}}
 }
 
 // defaultPickerMovementKeys is the movement table the BEAM sends for an unmodified picker keymap scope: ⌃J and ↓ move down, ⌃K and ↑ move up.
@@ -4053,34 +4053,6 @@ func TestPickerLocalNavigationCtrlKRetreatsPreview(t *testing.T) {
 	if got := model.effectivePickerIndex(model.chrome[generated.OPGuiPicker].Picker); got != 2 {
 		t.Fatalf("⌃K should preview picker item 2, got index %d", got)
 	}
-}
-
-func TestPickerLocalNavigationClampsAtBoundaries(t *testing.T) {
-	t.Run("clamps at bottom", func(t *testing.T) {
-		model := New(30, 10, nil)
-		model.chrome[generated.OPGuiPicker] = pickerChrome(3, 2)
-		model.applyMutation(focusOwnerCommand(1, 8))
-
-		updated, _ := model.Update(ctrlKey('j'))
-		model = updated.(Model)
-
-		if _, ok := model.localPresentation.identityPreview(presentationPicker); ok {
-			t.Fatal("⌃J at last item should not set preview")
-		}
-	})
-
-	t.Run("clamps at top", func(t *testing.T) {
-		model := New(30, 10, nil)
-		model.chrome[generated.OPGuiPicker] = pickerChrome(3, 0)
-		model.applyMutation(focusOwnerCommand(1, 8))
-
-		updated, _ := model.Update(ctrlKey('k'))
-		model = updated.(Model)
-
-		if _, ok := model.localPresentation.identityPreview(presentationPicker); ok {
-			t.Fatal("⌃K at first item should not set preview")
-		}
-	})
 }
 
 func TestPickerLocalNavigationDoesNotMutateCommittedSelected(t *testing.T) {

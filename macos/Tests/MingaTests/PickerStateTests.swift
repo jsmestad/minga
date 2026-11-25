@@ -84,20 +84,46 @@ struct PickerStateTests {
         #expect(state.selectedIndex == 3)
     }
 
-    @Test("previewNavigation clamps at list boundaries")
-    func previewNavigationClamps() {
+    @Test("a one-row preview wraps at the ends only when the picker holds the whole list", arguments: [
+        // rows, selected, filtered, next steps, deltas, expected row
+        (3, 0, 3, false, [-1], 2),
+        (3, 2, 3, false, [1], 0),
+        (3, 0, 3, false, [-1, 1], 0),
+        (3, 2, 3, false, [1, -1], 2),
+        (1, 0, 1, false, [1], 0),
+        // The BEAM offers a window of a long list: the row it moves to is not here.
+        (5, 0, 250, false, [-1], 0),
+        (5, 4, 250, false, [1], 4),
+        (5, 3, 250, false, [1], 4),
+        // Next-step rows are counted as no matches, and they are the whole list.
+        (2, 1, 0, true, [1], 0),
+        (2, 0, 0, true, [-1], 1)
+    ])
+    func previewNavigationWrapsLikeTheBEAM(rows: Int, selected: Int, filtered: Int, nextSteps: Bool, deltas: [Int], expected: Int) {
         let state = PickerState()
-        populateState(state, selected: 0, count: 3)
+        let empty = nextSteps ? Wire.EmptyList(glyph: "", title: "No projects yet.", why: "", selected: 0, actions: []) : nil
+        state.update(visible: true, selectedIndex: UInt16(selected), filteredCount: UInt16(filtered), totalCount: UInt16(filtered), markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: makeItems(rows), actionMenu: nil, activationGeneration: 7, empty: empty)
 
-        let handledUp = state.previewNavigation(delta: -1)
-        #expect(handledUp == false)
-        #expect(state.previewSelectedIndex == nil)
+        for delta in deltas { _ = state.previewNavigation(delta: delta) }
 
-        populateState(state, selected: 2, count: 3)
+        #expect(state.effectiveSelectedIndex == expected)
+        #expect(state.selectedIndex == selected)
+        // A key with nothing to preview leaves no preview behind, so the next frame's row is shown as it is.
+        if deltas.count == 1 { #expect((state.previewSelectedIndex != nil) == (expected != selected)) }
+    }
 
-        let handledDown = state.previewNavigation(delta: 1)
-        #expect(handledDown == false)
-        #expect(state.previewSelectedIndex == nil)
+    @Test("a preview made before the act menu's frame arrived is dropped by that frame", arguments: [(false, 2), (true, 1)])
+    func previewDoesNotOutliveTheActMenuFrame(menuOpens: Bool, expected: Int) {
+        let state = PickerState()
+        populateState(state, selected: 1)
+        #expect(state.previewNavigation(delta: 1))
+        #expect(state.effectiveSelectedIndex == 2)
+
+        // The key moved the menu on the BEAM, so its frame still has the picker on row 1.
+        let menu = menuOpens ? Wire.PickerActionMenu(selectedIndex: 1, actions: ["Open", "Kill"], activationIDs: [41, 42]) : nil
+        state.update(visible: true, selectedIndex: 1, filteredCount: 5, totalCount: 5, markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: makeItems(5), actionMenu: menu, activationGeneration: 7)
+
+        #expect(state.effectiveSelectedIndex == expected)
     }
 
     @Test("update clears preview index")

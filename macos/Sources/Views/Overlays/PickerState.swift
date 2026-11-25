@@ -233,7 +233,8 @@ public final class PickerState {
         self.selectedIndex = min(Int(selectedIndex), max(nextItems.count - 1, 0))
         let selectedActivationID = nextItems[safe: self.selectedIndex]?.activation.activationID ?? 0
         let retainedIDs = Set(nextItems.map { String($0.activation.activationID) })
-        let effectiveID = localPresentationStore.reconcile(surface: .picker, generation: activationGeneration, committedItemID: String(selectedActivationID), retainedItemIDs: retainedIDs, visible: visible)
+        // An open act menu owns the list keys, so a preview made before its frame arrived was a move of the menu on the BEAM; the picker row stays where the BEAM has it.
+        let effectiveID = localPresentationStore.reconcile(surface: .picker, generation: activationGeneration, committedItemID: String(selectedActivationID), retainedItemIDs: retainedIDs, visible: visible && actionMenu == nil)
         self.previewSelectedIndex = nextItems.firstIndex(where: { String($0.activation.activationID) == effectiveID }).flatMap { $0 == self.selectedIndex ? nil : $0 }
         if let am = actionMenu {
             self.actionMenu = PickerActionMenu(
@@ -304,11 +305,26 @@ public final class PickerState {
         // The open act menu owns the list keys; the picker's highlighted row stays where it is.
         guard visible, actionMenu == nil, !items.isEmpty else { return false }
         let current = previewSelectedIndex ?? selectedIndex
-        let next = min(max(current + delta, 0), items.count - 1)
+        let next = previewTarget(from: current, delta: delta)
         guard next != current else { return false }
         localPresentationStore.setPreview(LocalPresentationIdentity(generation: activationGeneration, itemID: String(items[next].activation.activationID)), for: .picker)
         previewSelectedIndex = next
         return true
+    }
+
+    /// The row a move of `delta` rows from `current` lands on, or `current` when there is nothing to preview.
+    ///
+    /// The BEAM wraps a one-row move at the ends of the list, so the preview wraps with it, but only when the rows held are the whole list. At the edge of a partial window the row the BEAM moves to is not here, so the highlight stays until the frame arrives.
+    private func previewTarget(from current: Int, delta: Int) -> Int {
+        let next = current + delta
+        if items.indices.contains(next) { return next }
+        guard abs(delta) == 1, holdsWholeList else { return min(max(next, 0), items.count - 1) }
+        return next < 0 ? items.count - 1 : 0
+    }
+
+    /// True when `items` are every row the BEAM's selection can reach. The BEAM offers at most a window of a long result list, and counts no matches while the rows are a source's next steps.
+    private var holdsWholeList: Bool {
+        empty != nil || items.count == filteredCount
     }
 
     public func hide() {

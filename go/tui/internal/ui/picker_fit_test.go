@@ -247,6 +247,85 @@ func TestPickerPreviewMovesOnlyForTheKeysTheBEAMLists(t *testing.T) {
 	}
 }
 
+func TestPickerPreviewWrapsAtTheEndsOnlyWhenItHoldsTheWholeList(t *testing.T) {
+	up, down := ctrlKey('k'), ctrlKey('j')
+	nextSteps := &generated.EmptyList{Title: "No projects yet."}
+	for _, tc := range []struct {
+		name     string
+		rows     int
+		selected uint16
+		filtered uint16
+		empty    *generated.EmptyList
+		keys     []tea.KeyPressMsg
+		index    int
+	}{
+		{"on the first row, up goes to the last row", 3, 0, 3, nil, []tea.KeyPressMsg{up}, 2},
+		{"on the last row, down goes to the first row", 3, 2, 3, nil, []tea.KeyPressMsg{down}, 0},
+		{"on the first row, up then down ends on the first row", 3, 0, 3, nil, []tea.KeyPressMsg{up, down}, 0},
+		{"on the last row, down then up ends on the last row", 3, 2, 3, nil, []tea.KeyPressMsg{down, up}, 2},
+		{"a single row stays", 1, 0, 1, nil, []tea.KeyPressMsg{down}, 0},
+		{"the top edge of a partial window stays", 5, 0, 250, nil, []tea.KeyPressMsg{up}, 0},
+		{"the bottom edge of a partial window stays", 5, 4, 250, nil, []tea.KeyPressMsg{down}, 4},
+		{"inside a partial window a row still moves", 5, 3, 250, nil, []tea.KeyPressMsg{down}, 4},
+		{"next-step rows wrap down although no result is counted", 2, 1, 0, nextSteps, []tea.KeyPressMsg{down}, 0},
+		{"next-step rows wrap up", 2, 0, 0, nextSteps, []tea.KeyPressMsg{up}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model, _ := fitPicker(t, 120, 40, tc.rows, 7)
+			payload := pickerChrome(tc.rows, tc.selected)
+			payload.Picker.Filtered = tc.filtered
+			payload.Picker.Empty = tc.empty
+			model.chrome[generated.OPGuiPicker] = payload
+
+			for _, key := range tc.keys {
+				updated, _ := model.Update(key)
+				model = updated.(Model)
+			}
+
+			if got := model.effectivePickerIndex(model.chrome[generated.OPGuiPicker].Picker); got != tc.index {
+				t.Fatalf("highlighted index = %d, want %d", got, tc.index)
+			}
+			// A key with nothing to preview leaves no preview behind, so the next frame's row is shown as it is.
+			_, previewed := model.localPresentation.identityPreview(presentationPicker)
+			if moved := tc.index != int(tc.selected); len(tc.keys) == 1 && previewed != moved {
+				t.Fatalf("preview kept = %v, want %v", previewed, moved)
+			}
+		})
+	}
+}
+
+func TestPickerPreviewDoesNotOutliveTheFrameThatOpensTheActMenu(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		actionMenu bool
+		index      int
+	}{
+		{"a frame without the act menu keeps the preview", false, 2},
+		{"the frame that opens the act menu drops it: the key moved the menu on the BEAM", true, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model, _ := fitPicker(t, 120, 40, 5, 7)
+			model.chrome[generated.OPGuiPicker] = pickerChrome(5, 1)
+
+			updated, _ := model.Update(ctrlKey('j'))
+			model = updated.(Model)
+			if got := model.effectivePickerIndex(model.chrome[generated.OPGuiPicker].Picker); got != 2 {
+				t.Fatalf("highlighted index before the frame = %d, want 2", got)
+			}
+
+			frame := pickerChrome(5, 1)
+			frame.Picker.ActionVisible = tc.actionMenu
+			frame.Picker.Actions = []string{"Open", "Delete"}
+			model.chrome[generated.OPGuiPicker] = frame
+			model.reconcilePicker(frame.Picker)
+
+			if got := model.effectivePickerIndex(frame.Picker); got != tc.index {
+				t.Fatalf("highlighted index after the frame = %d, want %d", got, tc.index)
+			}
+		})
+	}
+}
+
 func TestPickerDecodesTheMovementKeysSection(t *testing.T) {
 	header := []byte{1, 0, 0, 0, 0, 0, 0, 0}
 	keys := []byte{2, 0, 0, 0, 'j', protocol.ModCtrl, 1, 0, 0, 0xE0, 0x08, 0, 2}
