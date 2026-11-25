@@ -13,22 +13,22 @@
    4    │ "Hello, " <> name
    5    end
    6  end
-  ╭──────────────────────────────────────────────╮
-  │  Keys SPC                               1/2  │
-  │ ,   󰓩 Switch buffer  │  /    Search proje…  │
-  │ 1   󰓩 Tab 1          │  2   󰓩 Tab 2          │
-  │ 3   󰓩 Tab 3          │  4   󰓩 Tab 4          │
-  │ 5   󰓩 Tab 5          │  6   󰓩 Tab 6          │
-  │ 7   󰓩 Tab 7          │  8   󰓩 Tab 8          │
-  │ 9   󰓩 Tab 9          │  :   • Execute comm…  │
-  │ ;   • Eval express…  │  SPC 󰈞 Find file in…  │
-  │ TAB 󰓫 Workspace ›    │  a   󰚩 Minga ›        │
-  │ b   󰓩 Buffers ›      │  c   • Code ›         │
-  │ f   󰈔 Files ›        │  h   󰋖 Help ›         │
-  │  20 bindings          Tab next  •  Esc close │
-  ╰──────────────────────────────────────────────╯
-
-  NORMAL  storyboard.ex                                              Elixir 1:1
+╭─ SPC ────────────────────────────────────────────────────────────────────────╮
+│ Groups              Often                      More                          │
+│ a Minga ›           SPC Find file in project   p   Project ›                 │
+│ s Search ›          ,   Switch buffer          TAB Workspace ›               │
+│ c Code ›            /   Search project         1   Tab 1                     │
+│ f Files ›                                      2   Tab 2                     │
+│ b Buffers ›                                    3   Tab 3                     │
+│ w Windows ›                                    4   Tab 4                     │
+│ o Open ›                                       5   Tab 5                     │
+│ h Help ›                                       6   Tab 6                     │
+│ t Toggles ›                                    7   Tab 7                     │
+│ q Quit ›                                       8   Tab 8                     │
+│ : Execute command                              9   Tab 9                     │
+│                                                ;   Eval expression           │
+╰────────────────────────────────────────────────────────── ⌫ back  esc close ─╯
+  NORMAL  storyboard.ex                                          SPC Elixir 1:1
 ## styles (row start-end fg bg attrs)
 0 0-0 #4c4f69 #eff1f5 -
 0 1-1 #1e66f5 #eff1f5 bold
@@ -75,179 +75,133 @@
 7 0-5 #5c5f77 #eff1f5 -
 7 6-8 #8839ef #eff1f5 bold
 7 9-79 #4c4f69 #eff1f5 -
-8 0-1 #5c5f77 #eff1f5 -
-8 2-49 #7c7f93 #ccd0da -
-8 50-79 #4c4f69 #eff1f5 -
-9 0-1 #5c5f77 #eff1f5 -
-9 2-2 #7c7f93 #ccd0da -
-9 3-3 #4c4f69 #ccd0da -
-9 4-9 #4c4f69 #e6e9ef -
-9 10-12 #1e66f5 #e6e9ef bold
-9 13-43 #4c4f69 #eff1f5 -
-9 44-47 #4c4f69 #e6e9ef -
-9 48-48 #4c4f69 #ccd0da -
-9 49-49 #7c7f93 #ccd0da -
-9 50-50 #4c4f69 #000000 -
-9 51-79 #8c8fa1 #eff1f5 -
-10 0-1 #5c5f77 #eff1f5 -
-10 2-2 #7c7f93 #ccd0da -
+8 0-1 #7c7f93 #ccd0da -
+8 2-2 #4c4f69 #ccd0da -
+8 3-5 #1e66f5 #ccd0da -
+8 6-6 #4c4f69 #ccd0da -
+8 7-79 #7c7f93 #ccd0da -
+9 0-0 #7c7f93 #ccd0da -
+9 1-78 #4c4f69 #ccd0da -
+9 79-79 #7c7f93 #ccd0da -
+10 0-0 #7c7f93 #ccd0da -
+10 1-1 #4c4f69 #ccd0da -
+10 2-2 #1e66f5 #ccd0da -
 10 3-3 #4c4f69 #ccd0da -
-10 4-6 #179299 #acb0be bold
-10 7-7 #4c4f69 #eff1f5 -
-10 8-8 #c678dd #ccd0da -
-10 9-22 #4c4f69 #ccd0da -
-10 23-27 #7c7f93 #ccd0da -
-10 28-30 #179299 #acb0be bold
-10 31-31 #4c4f69 #eff1f5 -
-10 32-32 #51afef #ccd0da -
-10 33-48 #4c4f69 #ccd0da -
-10 49-49 #7c7f93 #ccd0da -
-10 50-50 #4c4f69 #000000 -
-10 51-79 #8c8fa1 #eff1f5 -
-11 0-1 #5c5f77 #eff1f5 -
-11 2-2 #7c7f93 #ccd0da -
+10 4-10 #1650c0 #ccd0da -
+10 11-21 #4c4f69 #ccd0da -
+10 22-24 #1e66f5 #ccd0da -
+10 25-48 #4c4f69 #ccd0da -
+10 49-49 #1e66f5 #ccd0da -
+10 50-52 #4c4f69 #ccd0da -
+10 53-61 #1650c0 #ccd0da -
+10 62-78 #4c4f69 #ccd0da -
+10 79-79 #7c7f93 #ccd0da -
+11 0-0 #7c7f93 #ccd0da -
+11 1-1 #4c4f69 #ccd0da -
+11 2-2 #1e66f5 #ccd0da -
 11 3-3 #4c4f69 #ccd0da -
-11 4-6 #179299 #acb0be bold
-11 7-7 #4c4f69 #eff1f5 -
-11 8-8 #c678dd #ccd0da -
-11 9-22 #4c4f69 #ccd0da -
-11 23-27 #7c7f93 #ccd0da -
-11 28-30 #179299 #acb0be bold
-11 31-31 #4c4f69 #eff1f5 -
-11 32-32 #c678dd #ccd0da -
-11 33-48 #4c4f69 #ccd0da -
-11 49-49 #7c7f93 #ccd0da -
-11 50-50 #4c4f69 #000000 -
-11 51-79 #8c8fa1 #eff1f5 -
-12 0-1 #5c5f77 #eff1f5 -
-12 2-2 #7c7f93 #ccd0da -
+11 4-11 #1650c0 #ccd0da -
+11 12-21 #4c4f69 #ccd0da -
+11 22-22 #1e66f5 #ccd0da -
+11 23-48 #4c4f69 #ccd0da -
+11 49-51 #1e66f5 #ccd0da -
+11 52-52 #4c4f69 #ccd0da -
+11 53-63 #1650c0 #ccd0da -
+11 64-78 #4c4f69 #ccd0da -
+11 79-79 #7c7f93 #ccd0da -
+12 0-0 #7c7f93 #ccd0da -
+12 1-1 #4c4f69 #ccd0da -
+12 2-2 #1e66f5 #ccd0da -
 12 3-3 #4c4f69 #ccd0da -
-12 4-6 #179299 #acb0be bold
-12 7-7 #4c4f69 #eff1f5 -
-12 8-8 #c678dd #ccd0da -
-12 9-22 #4c4f69 #ccd0da -
-12 23-27 #7c7f93 #ccd0da -
-12 28-30 #179299 #acb0be bold
-12 31-31 #4c4f69 #eff1f5 -
-12 32-32 #c678dd #ccd0da -
-12 33-48 #4c4f69 #ccd0da -
-12 49-49 #7c7f93 #ccd0da -
-12 50-50 #4c4f69 #000000 -
-12 51-79 #8c8fa1 #eff1f5 -
-13 0-1 #5c5f77 #eff1f5 -
-13 2-2 #7c7f93 #ccd0da -
+12 4-9 #1650c0 #ccd0da -
+12 10-21 #4c4f69 #ccd0da -
+12 22-22 #1e66f5 #ccd0da -
+12 23-48 #4c4f69 #ccd0da -
+12 49-49 #1e66f5 #ccd0da -
+12 50-78 #4c4f69 #ccd0da -
+12 79-79 #7c7f93 #ccd0da -
+13 0-0 #7c7f93 #ccd0da -
+13 1-1 #4c4f69 #ccd0da -
+13 2-2 #1e66f5 #ccd0da -
 13 3-3 #4c4f69 #ccd0da -
-13 4-6 #179299 #acb0be bold
-13 7-7 #4c4f69 #eff1f5 -
-13 8-8 #c678dd #ccd0da -
-13 9-22 #4c4f69 #ccd0da -
-13 23-27 #7c7f93 #ccd0da -
-13 28-30 #179299 #acb0be bold
-13 31-31 #4c4f69 #eff1f5 -
-13 32-32 #c678dd #ccd0da -
-13 33-48 #4c4f69 #ccd0da -
-13 49-49 #7c7f93 #ccd0da -
-13 50-50 #4c4f69 #000000 -
-13 51-79 #8c8fa1 #eff1f5 -
-14 0-1 #5c5f77 #eff1f5 -
-14 2-2 #7c7f93 #ccd0da -
+13 4-10 #1650c0 #ccd0da -
+13 11-48 #4c4f69 #ccd0da -
+13 49-49 #1e66f5 #ccd0da -
+13 50-78 #4c4f69 #ccd0da -
+13 79-79 #7c7f93 #ccd0da -
+14 0-0 #7c7f93 #ccd0da -
+14 1-1 #4c4f69 #ccd0da -
+14 2-2 #1e66f5 #ccd0da -
 14 3-3 #4c4f69 #ccd0da -
-14 4-6 #179299 #acb0be bold
-14 7-7 #4c4f69 #eff1f5 -
-14 8-8 #c678dd #ccd0da -
-14 9-22 #4c4f69 #ccd0da -
-14 23-27 #7c7f93 #ccd0da -
-14 28-30 #179299 #acb0be bold
-14 31-31 #4c4f69 #eff1f5 -
-14 32-32 #c678dd #ccd0da -
-14 33-48 #4c4f69 #ccd0da -
-14 49-49 #7c7f93 #ccd0da -
-14 50-50 #4c4f69 #000000 -
-14 51-79 #8c8fa1 #eff1f5 -
-15 0-1 #5c5f77 #eff1f5 -
-15 2-2 #7c7f93 #ccd0da -
+14 4-12 #1650c0 #ccd0da -
+14 13-48 #4c4f69 #ccd0da -
+14 49-49 #1e66f5 #ccd0da -
+14 50-78 #4c4f69 #ccd0da -
+14 79-79 #7c7f93 #ccd0da -
+15 0-0 #7c7f93 #ccd0da -
+15 1-1 #4c4f69 #ccd0da -
+15 2-2 #1e66f5 #ccd0da -
 15 3-3 #4c4f69 #ccd0da -
-15 4-6 #179299 #acb0be bold
-15 7-7 #4c4f69 #eff1f5 -
-15 8-8 #c678dd #ccd0da -
-15 9-22 #4c4f69 #ccd0da -
-15 23-27 #7c7f93 #ccd0da -
-15 28-30 #179299 #acb0be bold
-15 31-31 #4c4f69 #eff1f5 -
-15 32-48 #4c4f69 #ccd0da -
-15 49-49 #7c7f93 #ccd0da -
-15 50-50 #4c4f69 #000000 -
-15 51-79 #8c8fa1 #eff1f5 -
-16 0-1 #5c5f77 #eff1f5 -
-16 2-2 #7c7f93 #ccd0da -
+15 4-12 #1650c0 #ccd0da -
+15 13-48 #4c4f69 #ccd0da -
+15 49-49 #1e66f5 #ccd0da -
+15 50-78 #4c4f69 #ccd0da -
+15 79-79 #7c7f93 #ccd0da -
+16 0-0 #7c7f93 #ccd0da -
+16 1-1 #4c4f69 #ccd0da -
+16 2-2 #1e66f5 #ccd0da -
 16 3-3 #4c4f69 #ccd0da -
-16 4-6 #179299 #acb0be bold
-16 7-7 #4c4f69 #eff1f5 -
-16 8-22 #4c4f69 #ccd0da -
-16 23-27 #7c7f93 #ccd0da -
-16 28-30 #179299 #acb0be bold
-16 31-31 #4c4f69 #eff1f5 -
-16 32-32 #61afef #ccd0da -
-16 33-48 #4c4f69 #ccd0da -
-16 49-49 #7c7f93 #ccd0da -
-16 50-50 #4c4f69 #000000 -
-16 51-79 #8c8fa1 #eff1f5 -
-17 0-1 #5c5f77 #eff1f5 -
-17 2-2 #7c7f93 #ccd0da -
-17 3-6 #4c4f69 #ccd0da -
-17 7-7 #4c4f69 #eff1f5 -
-17 8-22 #1650c0 #ccd0da -
-17 23-27 #7c7f93 #ccd0da -
-17 28-30 #4c4f69 #ccd0da -
-17 31-31 #4c4f69 #eff1f5 -
-17 32-46 #1650c0 #ccd0da -
-17 47-48 #4c4f69 #ccd0da -
-17 49-49 #7c7f93 #ccd0da -
-17 50-50 #4c4f69 #000000 -
-17 51-79 #8c8fa1 #eff1f5 -
-18 0-1 #5c5f77 #eff1f5 -
-18 2-2 #7c7f93 #ccd0da -
-18 3-6 #4c4f69 #ccd0da -
-18 7-7 #4c4f69 #eff1f5 -
-18 8-22 #1650c0 #ccd0da -
-18 23-27 #7c7f93 #ccd0da -
-18 28-30 #4c4f69 #ccd0da -
-18 31-31 #4c4f69 #eff1f5 -
-18 32-46 #1650c0 #ccd0da -
-18 47-48 #4c4f69 #ccd0da -
-18 49-49 #7c7f93 #ccd0da -
-18 50-50 #4c4f69 #000000 -
-18 51-79 #8c8fa1 #eff1f5 -
-19 0-1 #5c5f77 #eff1f5 -
-19 2-2 #7c7f93 #ccd0da -
-19 3-6 #4c4f69 #ccd0da -
-19 7-7 #4c4f69 #eff1f5 -
-19 8-22 #1650c0 #ccd0da -
-19 23-27 #7c7f93 #ccd0da -
-19 28-30 #4c4f69 #ccd0da -
-19 31-31 #4c4f69 #eff1f5 -
-19 32-46 #1650c0 #ccd0da -
-19 47-48 #4c4f69 #ccd0da -
-19 49-49 #7c7f93 #ccd0da -
-19 50-50 #4c4f69 #000000 -
-19 51-79 #8c8fa1 #eff1f5 -
-20 0-1 #5c5f77 #eff1f5 -
-20 2-2 #7c7f93 #ccd0da -
-20 3-3 #4c4f69 #ccd0da -
-20 4-15 #4c4f69 #e6e9ef -
-20 16-25 #4c4f69 #eff1f5 -
-20 26-47 #4c4f69 #e6e9ef -
-20 48-48 #4c4f69 #ccd0da -
-20 49-49 #7c7f93 #ccd0da -
-20 50-50 #4c4f69 #000000 -
-20 51-79 #8c8fa1 #eff1f5 -
-21 0-1 #5c5f77 #eff1f5 -
-21 2-49 #7c7f93 #ccd0da -
-21 50-50 #4c4f69 #000000 -
-21 51-79 #8c8fa1 #eff1f5 -
-22 0-2 #5c5f77 #eff1f5 -
-22 3-50 #4c4f69 #000000 -
-22 51-79 #8c8fa1 #eff1f5 -
+16 4-9 #1650c0 #ccd0da -
+16 10-48 #4c4f69 #ccd0da -
+16 49-49 #1e66f5 #ccd0da -
+16 50-78 #4c4f69 #ccd0da -
+16 79-79 #7c7f93 #ccd0da -
+17 0-0 #7c7f93 #ccd0da -
+17 1-1 #4c4f69 #ccd0da -
+17 2-2 #1e66f5 #ccd0da -
+17 3-3 #4c4f69 #ccd0da -
+17 4-9 #1650c0 #ccd0da -
+17 10-48 #4c4f69 #ccd0da -
+17 49-49 #1e66f5 #ccd0da -
+17 50-78 #4c4f69 #ccd0da -
+17 79-79 #7c7f93 #ccd0da -
+18 0-0 #7c7f93 #ccd0da -
+18 1-1 #4c4f69 #ccd0da -
+18 2-2 #1e66f5 #ccd0da -
+18 3-3 #4c4f69 #ccd0da -
+18 4-12 #1650c0 #ccd0da -
+18 13-48 #4c4f69 #ccd0da -
+18 49-49 #1e66f5 #ccd0da -
+18 50-78 #4c4f69 #ccd0da -
+18 79-79 #7c7f93 #ccd0da -
+19 0-0 #7c7f93 #ccd0da -
+19 1-1 #4c4f69 #ccd0da -
+19 2-2 #1e66f5 #ccd0da -
+19 3-3 #4c4f69 #ccd0da -
+19 4-9 #1650c0 #ccd0da -
+19 10-48 #4c4f69 #ccd0da -
+19 49-49 #1e66f5 #ccd0da -
+19 50-78 #4c4f69 #ccd0da -
+19 79-79 #7c7f93 #ccd0da -
+20 0-0 #7c7f93 #ccd0da -
+20 1-1 #4c4f69 #ccd0da -
+20 2-2 #1e66f5 #ccd0da -
+20 3-48 #4c4f69 #ccd0da -
+20 49-49 #1e66f5 #ccd0da -
+20 50-78 #4c4f69 #ccd0da -
+20 79-79 #7c7f93 #ccd0da -
+21 0-0 #7c7f93 #ccd0da -
+21 1-48 #4c4f69 #ccd0da -
+21 49-49 #1e66f5 #ccd0da -
+21 50-78 #4c4f69 #ccd0da -
+21 79-79 #7c7f93 #ccd0da -
+22 0-58 #7c7f93 #ccd0da -
+22 59-59 #4c4f69 #ccd0da -
+22 60-60 #1e66f5 #ccd0da -
+22 61-67 #4c4f69 #ccd0da -
+22 68-70 #1e66f5 #ccd0da -
+22 71-77 #4c4f69 #ccd0da -
+22 78-79 #7c7f93 #ccd0da -
 23 0-0 #8c8fa1 #e6e9ef -
 23 1-1 #4c4f69 #1e66f5 -
 23 2-7 #eff1f5 #1e66f5 bold

@@ -183,7 +183,7 @@ reason = "Syntax colours, comments and line numbers in the editor miss 4.5:1 in 
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader"]
 frontend = "macos"
 part = "editor.code"
 rule = "contrast"
@@ -191,7 +191,6 @@ theme = "catppuccin_latte"
 pairs = [
   "#179299 on #eff1f5",
   "#40a02b on #eff1f5",
-  "#72758b on #eff1f5",
   "#a28dd5 on #eff1f5",
   "#ccd0da on #eff1f5",
   "#df8e1d on #eff1f5",
@@ -230,7 +229,6 @@ part = "modeline.segment"
 rule = "contrast"
 theme = "catppuccin_latte"
 pairs = [
-  "#8839ef on #e6e9ef",
   "#eff1f5 on #1e66f5",
 ]
 reason = "The modeline.segment text misses 4.5:1 in this theme: the mode pill, and Minga's words in the minga role (4.45:1)."
@@ -249,42 +247,6 @@ reason = "The whichKey.breadcrumb text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.whichkey.leader"]
-frontend = "macos"
-part = "whichKey.count"
-rule = "contrast"
-theme = "astrodark"
-pairs = [
-  "#51545b on #14161b",
-]
-reason = "The whichKey.count text misses 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
-scenario = ["edit.whichkey.leader"]
-frontend = "macos"
-part = "whichKey.count"
-rule = "contrast"
-theme = "catppuccin_frappe"
-pairs = [
-  "#767d97 on #414559",
-]
-reason = "The whichKey.count text misses 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
-scenario = ["edit.whichkey.leader"]
-frontend = "macos"
-part = "whichKey.count"
-rule = "contrast"
-theme = "catppuccin_latte"
-pairs = [
-  "#9b9faf on #ccd0da",
-]
-reason = "The whichKey.count text misses 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
 scenario = ["edit.whichkey.leader", "minga.whichkey"]
 frontend = "macos"
 part = "whichKey.entry"
@@ -307,7 +269,6 @@ pairs = [
   "#5e8086 on #414559",
   "#70a5a3 on #414559",
   "#78b7b1 on #414559",
-  "#9ea7c7 on #414559",
 ]
 reason = "The whichKey.entry text misses 4.5:1 in this theme."
 issue = 4137
@@ -320,12 +281,9 @@ rule = "contrast"
 theme = "catppuccin_latte"
 pairs = [
   "#179299 on #ccd0da",
-  "#1c54c1 on #ccd0da",
   "#22969d on #ccd0da",
   "#2f9aa2 on #ccd0da",
   "#4ca4ac on #ccd0da",
-  "#72758b on #ccd0da",
-  "#75788d on #ccd0da",
   "#7db5be on #ccd0da",
 ]
 reason = "The whichKey.entry text misses 4.5:1 in this theme."
@@ -372,32 +330,6 @@ pairs = [
   "#7db5be on #ccd0da",
 ]
 reason = "The whichKey.entryKey text misses 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
-scenario = ["edit.whichkey.leader", "minga.whichkey"]
-frontend = "macos"
-part = "whichKey.entryLabel"
-rule = "contrast"
-theme = "catppuccin_frappe"
-pairs = [
-  "#9ea7c7 on #414559",
-]
-reason = "The whichKey.entryLabel text misses 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
-scenario = ["edit.whichkey.leader", "minga.whichkey"]
-frontend = "macos"
-part = "whichKey.entryLabel"
-rule = "contrast"
-theme = "catppuccin_latte"
-pairs = [
-  "#1c54c1 on #ccd0da",
-  "#72758b on #ccd0da",
-  "#75788d on #ccd0da",
-]
-reason = "The whichKey.entryLabel text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
@@ -422,4 +354,146 @@ pairs = [
   "#1e66f5 on #ccd0da",
 ]
 reason = "The Agent activity card's title and task, and Minga's words in the minga role on the modeline bar (4.45:1), miss 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader"]
+frontend = "macos"
+part = "whichKey.entryKey"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#4181b6 on #14161b",
+]
+reason = "Which-key keys draw in the popup key colour, which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.hint"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#386a95 on #14161b",
+]
+reason = "Which-key's own keys (⌫ back, esc close) draw in the popup key colour, which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.hint"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#5e8087 on #414559",
+]
+reason = "Which-key's own keys (⌫ back, esc close) draw in the popup key colour, which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.hint"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#179299 on #ccd0da",
+  "#61abb4 on #ccd0da",
+  "#686b82 on #ccd0da",
+  "#73768c on #ccd0da",
+]
+reason = "Which-key's own keys and their words use the popup key and secondary colours, which miss 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader"]
+frontend = "macos"
+part = "whichKey.entryKey"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#44a1a9 on #ccd0da",
+]
+reason = "Which-key keys draw in the popup key colour, which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader"]
+frontend = "macos"
+part = "whichKey.entry"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#44a1a9 on #ccd0da",
+]
+reason = "Which-key keys draw in the popup key colour, which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.groupName"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#686b82 on #ccd0da",
+  "#6c6f85 on #ccd0da",
+  "#6d7086 on #ccd0da",
+]
+reason = "Which-key group names use the popup secondary colour (anatomy.md), which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.whichkey"]
+frontend = "macos"
+part = "whichKey.entryCount"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#686b82 on #ccd0da",
+]
+reason = "Which-key counts use the popup secondary colour (anatomy.md), which misses 4.5:1 on the popup surface in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.whichkey"]
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#d05300 on #e6e9ef",
+  "#d15300 on #e6e9ef",
+  "#d8dbe0 on #e6e9ef",
+]
+reason = "The needs-you state colour on the modeline misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader"]
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#242735 on #414559",
+  "#ca9ee6 on #414559",
+]
+reason = "Syntax colours on the cursor line miss 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader"]
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#179299 on #ccd0da",
+  "#8839ef on #ccd0da",
+  "#df8e1d on #ccd0da",
+]
+reason = "Syntax colours on the cursor line miss 4.5:1 in this theme."
 issue = 4137

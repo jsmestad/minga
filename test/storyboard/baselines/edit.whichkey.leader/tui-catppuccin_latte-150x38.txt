@@ -27,22 +27,22 @@
       ~
       ~
       ~
-  ╭─────────────────────────────────────────────────────────────────────────╮
-  │  Keys SPC                                                          1/2  │
-  │ ,   󰓩 Switch buffer                │  /    Search project              │
-  │ 1   󰓩 Tab 1                        │  2   󰓩 Tab 2                       │
-  │ 3   󰓩 Tab 3                        │  4   󰓩 Tab 4                       │
-  │ 5   󰓩 Tab 5                        │  6   󰓩 Tab 6                       │
-  │ 7   󰓩 Tab 7                        │  8   󰓩 Tab 8                       │
-  │ 9   󰓩 Tab 9                        │  :   • Execute command             │
-  │ ;   • Eval expression              │  SPC 󰈞 Find file in project        │
-  │ TAB 󰓫 Workspace ›                  │  a   󰚩 Minga ›                     │
-  │ b   󰓩 Buffers ›                    │  c   • Code ›                      │
-  │ f   󰈔 Files ›                      │  h   󰋖 Help ›                      │
-  │  20 bindings                                     Tab next  •  Esc close │
-  ╰─────────────────────────────────────────────────────────────────────────╯
-
-  NORMAL  storyboard.ex                                                                                                                    Elixir 1:1
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+╭─ SPC ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Groups                                         Often                      More                                                                     │
+│ a Minga ›    b Buffers ›   t Toggles ›         SPC Find file in project   p   Project ›     3 Tab 3   7 Tab 7                                      │
+│ s Search ›   w Windows ›   q Quit ›            ,   Switch buffer          TAB Workspace ›   4 Tab 4   8 Tab 8                                      │
+│ c Code ›     o Open ›      : Execute command   /   Search project         1   Tab 1         5 Tab 5   9 Tab 9                                      │
+│ f Files ›    h Help ›                                                     2   Tab 2         6 Tab 6   ; Eval expression                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── ⌫ back  esc close ─╯
+  NORMAL  storyboard.ex                                                                                                                SPC Elixir 1:1
 ## styles (row start-end fg bg attrs)
 0 0-0 #4c4f69 #eff1f5 -
 0 1-1 #1e66f5 #eff1f5 bold
@@ -128,179 +128,125 @@
 20 6-149 #8c8fa1 #eff1f5 -
 21 0-5 #5c5f77 #eff1f5 -
 21 6-149 #8c8fa1 #eff1f5 -
-22 0-1 #5c5f77 #eff1f5 -
-22 2-76 #7c7f93 #ccd0da -
-22 77-149 #8c8fa1 #eff1f5 -
-23 0-1 #5c5f77 #eff1f5 -
-23 2-2 #7c7f93 #ccd0da -
-23 3-3 #4c4f69 #ccd0da -
-23 4-9 #4c4f69 #e6e9ef -
-23 10-12 #1e66f5 #e6e9ef bold
-23 13-70 #4c4f69 #eff1f5 -
-23 71-74 #4c4f69 #e6e9ef -
-23 75-75 #4c4f69 #ccd0da -
-23 76-76 #7c7f93 #ccd0da -
-23 77-77 #4c4f69 #000000 -
-23 78-149 #8c8fa1 #eff1f5 -
-24 0-1 #5c5f77 #eff1f5 -
-24 2-2 #7c7f93 #ccd0da -
-24 3-3 #4c4f69 #ccd0da -
-24 4-6 #179299 #acb0be bold
-24 7-7 #4c4f69 #eff1f5 -
-24 8-8 #c678dd #ccd0da -
-24 9-36 #4c4f69 #ccd0da -
-24 37-41 #7c7f93 #ccd0da -
-24 42-44 #179299 #acb0be bold
-24 45-45 #4c4f69 #eff1f5 -
-24 46-46 #51afef #ccd0da -
-24 47-75 #4c4f69 #ccd0da -
-24 76-76 #7c7f93 #ccd0da -
-24 77-77 #4c4f69 #000000 -
-24 78-149 #8c8fa1 #eff1f5 -
-25 0-1 #5c5f77 #eff1f5 -
-25 2-2 #7c7f93 #ccd0da -
-25 3-3 #4c4f69 #ccd0da -
-25 4-6 #179299 #acb0be bold
-25 7-7 #4c4f69 #eff1f5 -
-25 8-8 #c678dd #ccd0da -
-25 9-36 #4c4f69 #ccd0da -
-25 37-41 #7c7f93 #ccd0da -
-25 42-44 #179299 #acb0be bold
-25 45-45 #4c4f69 #eff1f5 -
-25 46-46 #c678dd #ccd0da -
-25 47-75 #4c4f69 #ccd0da -
-25 76-76 #7c7f93 #ccd0da -
-25 77-77 #4c4f69 #000000 -
-25 78-149 #8c8fa1 #eff1f5 -
-26 0-1 #5c5f77 #eff1f5 -
-26 2-2 #7c7f93 #ccd0da -
-26 3-3 #4c4f69 #ccd0da -
-26 4-6 #179299 #acb0be bold
-26 7-7 #4c4f69 #eff1f5 -
-26 8-8 #c678dd #ccd0da -
-26 9-36 #4c4f69 #ccd0da -
-26 37-41 #7c7f93 #ccd0da -
-26 42-44 #179299 #acb0be bold
-26 45-45 #4c4f69 #eff1f5 -
-26 46-46 #c678dd #ccd0da -
-26 47-75 #4c4f69 #ccd0da -
-26 76-76 #7c7f93 #ccd0da -
-26 77-77 #4c4f69 #000000 -
-26 78-149 #8c8fa1 #eff1f5 -
-27 0-1 #5c5f77 #eff1f5 -
-27 2-2 #7c7f93 #ccd0da -
-27 3-3 #4c4f69 #ccd0da -
-27 4-6 #179299 #acb0be bold
-27 7-7 #4c4f69 #eff1f5 -
-27 8-8 #c678dd #ccd0da -
-27 9-36 #4c4f69 #ccd0da -
-27 37-41 #7c7f93 #ccd0da -
-27 42-44 #179299 #acb0be bold
-27 45-45 #4c4f69 #eff1f5 -
-27 46-46 #c678dd #ccd0da -
-27 47-75 #4c4f69 #ccd0da -
-27 76-76 #7c7f93 #ccd0da -
-27 77-77 #4c4f69 #000000 -
-27 78-149 #8c8fa1 #eff1f5 -
-28 0-1 #5c5f77 #eff1f5 -
-28 2-2 #7c7f93 #ccd0da -
-28 3-3 #4c4f69 #ccd0da -
-28 4-6 #179299 #acb0be bold
-28 7-7 #4c4f69 #eff1f5 -
-28 8-8 #c678dd #ccd0da -
-28 9-36 #4c4f69 #ccd0da -
-28 37-41 #7c7f93 #ccd0da -
-28 42-44 #179299 #acb0be bold
-28 45-45 #4c4f69 #eff1f5 -
-28 46-46 #c678dd #ccd0da -
-28 47-75 #4c4f69 #ccd0da -
-28 76-76 #7c7f93 #ccd0da -
-28 77-77 #4c4f69 #000000 -
-28 78-149 #8c8fa1 #eff1f5 -
-29 0-1 #5c5f77 #eff1f5 -
-29 2-2 #7c7f93 #ccd0da -
-29 3-3 #4c4f69 #ccd0da -
-29 4-6 #179299 #acb0be bold
-29 7-7 #4c4f69 #eff1f5 -
-29 8-8 #c678dd #ccd0da -
-29 9-36 #4c4f69 #ccd0da -
-29 37-41 #7c7f93 #ccd0da -
-29 42-44 #179299 #acb0be bold
-29 45-45 #4c4f69 #eff1f5 -
-29 46-75 #4c4f69 #ccd0da -
-29 76-76 #7c7f93 #ccd0da -
-29 77-77 #4c4f69 #000000 -
-29 78-149 #8c8fa1 #eff1f5 -
-30 0-1 #5c5f77 #eff1f5 -
-30 2-2 #7c7f93 #ccd0da -
-30 3-3 #4c4f69 #ccd0da -
-30 4-6 #179299 #acb0be bold
-30 7-7 #4c4f69 #eff1f5 -
-30 8-36 #4c4f69 #ccd0da -
-30 37-41 #7c7f93 #ccd0da -
-30 42-44 #179299 #acb0be bold
-30 45-45 #4c4f69 #eff1f5 -
-30 46-46 #61afef #ccd0da -
-30 47-75 #4c4f69 #ccd0da -
-30 76-76 #7c7f93 #ccd0da -
-30 77-77 #4c4f69 #000000 -
-30 78-149 #8c8fa1 #eff1f5 -
-31 0-1 #5c5f77 #eff1f5 -
-31 2-2 #7c7f93 #ccd0da -
-31 3-6 #4c4f69 #ccd0da -
-31 7-7 #4c4f69 #eff1f5 -
-31 8-36 #1650c0 #ccd0da -
-31 37-41 #7c7f93 #ccd0da -
-31 42-44 #4c4f69 #ccd0da -
-31 45-45 #4c4f69 #eff1f5 -
-31 46-74 #1650c0 #ccd0da -
-31 75-75 #4c4f69 #ccd0da -
-31 76-76 #7c7f93 #ccd0da -
-31 77-77 #4c4f69 #000000 -
-31 78-149 #8c8fa1 #eff1f5 -
-32 0-1 #5c5f77 #eff1f5 -
-32 2-2 #7c7f93 #ccd0da -
-32 3-6 #4c4f69 #ccd0da -
-32 7-7 #4c4f69 #eff1f5 -
-32 8-36 #1650c0 #ccd0da -
-32 37-41 #7c7f93 #ccd0da -
-32 42-44 #4c4f69 #ccd0da -
-32 45-45 #4c4f69 #eff1f5 -
-32 46-74 #1650c0 #ccd0da -
-32 75-75 #4c4f69 #ccd0da -
-32 76-76 #7c7f93 #ccd0da -
-32 77-77 #4c4f69 #000000 -
-32 78-149 #8c8fa1 #eff1f5 -
-33 0-1 #5c5f77 #eff1f5 -
-33 2-2 #7c7f93 #ccd0da -
-33 3-6 #4c4f69 #ccd0da -
-33 7-7 #4c4f69 #eff1f5 -
-33 8-36 #1650c0 #ccd0da -
-33 37-41 #7c7f93 #ccd0da -
-33 42-44 #4c4f69 #ccd0da -
-33 45-45 #4c4f69 #eff1f5 -
-33 46-74 #1650c0 #ccd0da -
-33 75-75 #4c4f69 #ccd0da -
-33 76-76 #7c7f93 #ccd0da -
-33 77-77 #4c4f69 #000000 -
-33 78-149 #8c8fa1 #eff1f5 -
-34 0-1 #5c5f77 #eff1f5 -
-34 2-2 #7c7f93 #ccd0da -
+22 0-5 #5c5f77 #eff1f5 -
+22 6-149 #8c8fa1 #eff1f5 -
+23 0-5 #5c5f77 #eff1f5 -
+23 6-149 #8c8fa1 #eff1f5 -
+24 0-5 #5c5f77 #eff1f5 -
+24 6-149 #8c8fa1 #eff1f5 -
+25 0-5 #5c5f77 #eff1f5 -
+25 6-149 #8c8fa1 #eff1f5 -
+26 0-5 #5c5f77 #eff1f5 -
+26 6-149 #8c8fa1 #eff1f5 -
+27 0-5 #5c5f77 #eff1f5 -
+27 6-149 #8c8fa1 #eff1f5 -
+28 0-5 #5c5f77 #eff1f5 -
+28 6-149 #8c8fa1 #eff1f5 -
+29 0-5 #5c5f77 #eff1f5 -
+29 6-149 #8c8fa1 #eff1f5 -
+30 0-1 #7c7f93 #ccd0da -
+30 2-2 #4c4f69 #ccd0da -
+30 3-5 #1e66f5 #ccd0da -
+30 6-6 #4c4f69 #ccd0da -
+30 7-149 #7c7f93 #ccd0da -
+31 0-0 #7c7f93 #ccd0da -
+31 1-148 #4c4f69 #ccd0da -
+31 149-149 #7c7f93 #ccd0da -
+32 0-0 #7c7f93 #ccd0da -
+32 1-1 #4c4f69 #ccd0da -
+32 2-2 #1e66f5 #ccd0da -
+32 3-3 #4c4f69 #ccd0da -
+32 4-10 #1650c0 #ccd0da -
+32 11-14 #4c4f69 #ccd0da -
+32 15-15 #1e66f5 #ccd0da -
+32 16-16 #4c4f69 #ccd0da -
+32 17-25 #1650c0 #ccd0da -
+32 26-28 #4c4f69 #ccd0da -
+32 29-29 #1e66f5 #ccd0da -
+32 30-30 #4c4f69 #ccd0da -
+32 31-39 #1650c0 #ccd0da -
+32 40-48 #4c4f69 #ccd0da -
+32 49-51 #1e66f5 #ccd0da -
+32 52-75 #4c4f69 #ccd0da -
+32 76-76 #1e66f5 #ccd0da -
+32 77-79 #4c4f69 #ccd0da -
+32 80-88 #1650c0 #ccd0da -
+32 89-93 #4c4f69 #ccd0da -
+32 94-94 #1e66f5 #ccd0da -
+32 95-103 #4c4f69 #ccd0da -
+32 104-104 #1e66f5 #ccd0da -
+32 105-148 #4c4f69 #ccd0da -
+32 149-149 #7c7f93 #ccd0da -
+33 0-0 #7c7f93 #ccd0da -
+33 1-1 #4c4f69 #ccd0da -
+33 2-2 #1e66f5 #ccd0da -
+33 3-3 #4c4f69 #ccd0da -
+33 4-11 #1650c0 #ccd0da -
+33 12-14 #4c4f69 #ccd0da -
+33 15-15 #1e66f5 #ccd0da -
+33 16-16 #4c4f69 #ccd0da -
+33 17-25 #1650c0 #ccd0da -
+33 26-28 #4c4f69 #ccd0da -
+33 29-29 #1e66f5 #ccd0da -
+33 30-30 #4c4f69 #ccd0da -
+33 31-36 #1650c0 #ccd0da -
+33 37-48 #4c4f69 #ccd0da -
+33 49-49 #1e66f5 #ccd0da -
+33 50-75 #4c4f69 #ccd0da -
+33 76-78 #1e66f5 #ccd0da -
+33 79-79 #4c4f69 #ccd0da -
+33 80-90 #1650c0 #ccd0da -
+33 91-93 #4c4f69 #ccd0da -
+33 94-94 #1e66f5 #ccd0da -
+33 95-103 #4c4f69 #ccd0da -
+33 104-104 #1e66f5 #ccd0da -
+33 105-148 #4c4f69 #ccd0da -
+33 149-149 #7c7f93 #ccd0da -
+34 0-0 #7c7f93 #ccd0da -
+34 1-1 #4c4f69 #ccd0da -
+34 2-2 #1e66f5 #ccd0da -
 34 3-3 #4c4f69 #ccd0da -
-34 4-15 #4c4f69 #e6e9ef -
-34 16-52 #4c4f69 #eff1f5 -
-34 53-74 #4c4f69 #e6e9ef -
-34 75-75 #4c4f69 #ccd0da -
-34 76-76 #7c7f93 #ccd0da -
-34 77-77 #4c4f69 #000000 -
-34 78-149 #8c8fa1 #eff1f5 -
-35 0-1 #5c5f77 #eff1f5 -
-35 2-76 #7c7f93 #ccd0da -
-35 77-77 #4c4f69 #000000 -
-35 78-149 #8c8fa1 #eff1f5 -
-36 0-2 #5c5f77 #eff1f5 -
-36 3-77 #4c4f69 #000000 -
-36 78-149 #8c8fa1 #eff1f5 -
+34 4-9 #1650c0 #ccd0da -
+34 10-14 #4c4f69 #ccd0da -
+34 15-15 #1e66f5 #ccd0da -
+34 16-16 #4c4f69 #ccd0da -
+34 17-22 #1650c0 #ccd0da -
+34 23-28 #4c4f69 #ccd0da -
+34 29-29 #1e66f5 #ccd0da -
+34 30-48 #4c4f69 #ccd0da -
+34 49-49 #1e66f5 #ccd0da -
+34 50-75 #4c4f69 #ccd0da -
+34 76-76 #1e66f5 #ccd0da -
+34 77-93 #4c4f69 #ccd0da -
+34 94-94 #1e66f5 #ccd0da -
+34 95-103 #4c4f69 #ccd0da -
+34 104-104 #1e66f5 #ccd0da -
+34 105-148 #4c4f69 #ccd0da -
+34 149-149 #7c7f93 #ccd0da -
+35 0-0 #7c7f93 #ccd0da -
+35 1-1 #4c4f69 #ccd0da -
+35 2-2 #1e66f5 #ccd0da -
+35 3-3 #4c4f69 #ccd0da -
+35 4-10 #1650c0 #ccd0da -
+35 11-14 #4c4f69 #ccd0da -
+35 15-15 #1e66f5 #ccd0da -
+35 16-16 #4c4f69 #ccd0da -
+35 17-22 #1650c0 #ccd0da -
+35 23-75 #4c4f69 #ccd0da -
+35 76-76 #1e66f5 #ccd0da -
+35 77-93 #4c4f69 #ccd0da -
+35 94-94 #1e66f5 #ccd0da -
+35 95-103 #4c4f69 #ccd0da -
+35 104-104 #1e66f5 #ccd0da -
+35 105-148 #4c4f69 #ccd0da -
+35 149-149 #7c7f93 #ccd0da -
+36 0-128 #7c7f93 #ccd0da -
+36 129-129 #4c4f69 #ccd0da -
+36 130-130 #1e66f5 #ccd0da -
+36 131-137 #4c4f69 #ccd0da -
+36 138-140 #1e66f5 #ccd0da -
+36 141-147 #4c4f69 #ccd0da -
+36 148-149 #7c7f93 #ccd0da -
 37 0-0 #8c8fa1 #e6e9ef -
 37 1-1 #4c4f69 #1e66f5 -
 37 2-7 #eff1f5 #1e66f5 bold
