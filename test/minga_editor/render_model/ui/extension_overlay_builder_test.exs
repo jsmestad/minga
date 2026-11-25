@@ -1,6 +1,5 @@
 defmodule MingaEditor.RenderModel.UI.ExtensionOverlayBuilderTest do
-  # Uses the process-global extension overlay registry.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Extension.Overlay
@@ -11,20 +10,14 @@ defmodule MingaEditor.RenderModel.UI.ExtensionOverlayBuilderTest do
   import MingaEditor.RenderPipeline.TestHelpers
 
   setup do
-    Overlay.remove_all(:builder_test)
-    Overlay.remove_all(:builder_other)
-
-    on_exit(fn ->
-      Overlay.remove_all(:builder_test)
-      Overlay.remove_all(:builder_other)
-    end)
-
-    :ok
+    table = Module.concat(__MODULE__, "Overlay#{System.unique_integer([:positive])}")
+    start_supervised!({Overlay, name: table})
+    %{table: table}
   end
 
   describe "build/1" do
-    test "builds extension overlay model with no overlays" do
-      ctx = build_minimal_context()
+    test "builds extension overlay model with no overlays", %{table: table} do
+      ctx = build_minimal_context(table)
 
       model = ExtensionOverlayBuilder.build(ctx)
 
@@ -32,13 +25,15 @@ defmodule MingaEditor.RenderModel.UI.ExtensionOverlayBuilderTest do
       assert model.entries == []
     end
 
-    test "maps matching visible overlays and filters wrong-buffer or offscreen overlays" do
-      ctx = build_minimal_context(viewport_top: 2)
+    test "maps matching visible overlays and filters wrong-buffer or offscreen overlays", %{
+      table: table
+    } do
+      ctx = build_minimal_context(table, viewport_top: 2)
       active_buffer = ctx.workspace.buffers.active
       other_buffer = start_supervised!({BufferProcess, content: "other"})
 
       :ok =
-        Overlay.set(:builder_test, :visible, active_buffer,
+        Overlay.set(table, :builder_test, :visible, active_buffer,
           position: {4, 7},
           content: "AI",
           style: %{},
@@ -46,10 +41,13 @@ defmodule MingaEditor.RenderModel.UI.ExtensionOverlayBuilderTest do
         )
 
       :ok =
-        Overlay.set(:builder_test, :offscreen, active_buffer, position: {99, 0}, content: "off")
+        Overlay.set(table, :builder_test, :offscreen, active_buffer,
+          position: {99, 0},
+          content: "off"
+        )
 
       :ok =
-        Overlay.set(:builder_other, :wrong_buffer, other_buffer,
+        Overlay.set(table, :builder_other, :wrong_buffer, other_buffer,
           position: {4, 0},
           content: "wrong"
         )
@@ -69,8 +67,8 @@ defmodule MingaEditor.RenderModel.UI.ExtensionOverlayBuilderTest do
     end
   end
 
-  defp build_minimal_context(opts \\ []) do
-    state = gui_state()
+  defp build_minimal_context(table, opts \\ []) do
+    state = gui_state(extension_overlay_registry: table)
     ctx = MingaEditor.Frontend.Emit.Context.from_editor_state(state)
     viewport_top = Keyword.get(opts, :viewport_top, 0)
     window = Map.fetch!(ctx.windows.map, ctx.windows.active)

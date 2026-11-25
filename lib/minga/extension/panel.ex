@@ -131,18 +131,27 @@ defmodule Minga.Extension.Panel do
   def empty?(table), do: !table_ready?(table) or :ets.info(table, :size) == 0
 
   @spec hide(atom(), term()) :: :ok
-  def hide(extension_name, panel_id) when is_atom(extension_name) do
-    update_visibility(@table, extension_name, panel_id, false)
+  @spec hide(table(), atom(), term()) :: :ok
+  def hide(extension_name, panel_id), do: hide(@table, extension_name, panel_id)
+
+  def hide(table, extension_name, panel_id) when is_atom(extension_name) do
+    update_visibility(table, extension_name, panel_id, false)
   end
 
   @spec show(atom(), term()) :: :ok
-  def show(extension_name, panel_id) when is_atom(extension_name) do
-    update_visibility(@table, extension_name, panel_id, true)
+  @spec show(table(), atom(), term()) :: :ok
+  def show(extension_name, panel_id), do: show(@table, extension_name, panel_id)
+
+  def show(table, extension_name, panel_id) when is_atom(extension_name) do
+    update_visibility(table, extension_name, panel_id, true)
   end
 
   @spec unregister_source(ContributionCleanup.contribution_source()) :: :ok
-  def unregister_source({:extension, name}) when is_atom(name), do: remove_all(name)
-  def unregister_source(_source), do: :ok
+  @spec unregister_source(table(), ContributionCleanup.contribution_source()) :: :ok
+  def unregister_source(source), do: unregister_source(@table, source)
+
+  def unregister_source(table, source),
+    do: ContributionCleanup.remove_extension_entries(source, &remove_all(table, &1))
 
   @impl true
   @spec init(keyword()) :: {:ok, table()}
@@ -150,9 +159,12 @@ defmodule Minga.Extension.Panel do
     table = Keyword.get(opts, :name, @table)
     create_owned_table(table)
 
-    ContributionCleanup.register(:extension_panels, fn source ->
-      unregister_source(source)
-    end)
+    # Only the application's table answers extension shutdown. A private table belongs to whoever started it.
+    if table == @table do
+      ContributionCleanup.register(:extension_panels, fn source ->
+        unregister_source(source)
+      end)
+    end
 
     {:ok, table}
   end

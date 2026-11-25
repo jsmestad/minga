@@ -9,12 +9,16 @@ defmodule MingaEditor.State.ExtensionSurfaces do
   @type t :: %__MODULE__{
           events_registry: Minga.Events.registry(),
           sidebar_registry: MingaEditor.Extension.Sidebar.table(),
-          agent_semantic_ui_registry: MingaEditor.Agent.SemanticUI.Registry.table()
+          agent_semantic_ui_registry: MingaEditor.Agent.SemanticUI.Registry.table(),
+          extension_panel_registry: Minga.Extension.Panel.table(),
+          extension_overlay_registry: Minga.Extension.Overlay.table()
         }
 
   defstruct events_registry: Minga.EventBus,
             sidebar_registry: MingaEditor.Extension.Sidebar,
-            agent_semantic_ui_registry: MingaEditor.Agent.SemanticUI.Registry
+            agent_semantic_ui_registry: MingaEditor.Agent.SemanticUI.Registry,
+            extension_panel_registry: Minga.Extension.Panel,
+            extension_overlay_registry: Minga.Extension.Overlay
 
   @doc "Creates extension registry state for one editor instance."
   @spec new(keyword()) :: t()
@@ -23,9 +27,22 @@ defmodule MingaEditor.State.ExtensionSurfaces do
       events_registry: Keyword.get(opts, :events_registry, Minga.EventBus),
       sidebar_registry: Keyword.get(opts, :sidebar_registry, MingaEditor.Extension.Sidebar),
       agent_semantic_ui_registry:
-        Keyword.get(opts, :agent_semantic_ui_registry, MingaEditor.Agent.SemanticUI.Registry)
+        Keyword.get(opts, :agent_semantic_ui_registry, MingaEditor.Agent.SemanticUI.Registry),
+      extension_panel_registry:
+        Keyword.get(opts, :extension_panel_registry, Minga.Extension.Panel),
+      extension_overlay_registry:
+        Keyword.get(opts, :extension_overlay_registry, Minga.Extension.Overlay)
     }
   end
+
+  @doc """
+  Returns the registries of an editor state, or of a render input or emit context built from one.
+
+  Layout and the render model both read extension surfaces through this value, so they always read the same tables. A value that carries no registries is a caller error and fails here: reading the application's tables in its place would let another editor in the same VM put its surfaces into this one's frame.
+  """
+  @spec of(map()) :: t()
+  def of(%{extension_surfaces: %__MODULE__{} = surfaces}), do: surfaces
+  def of(%{intent: %{frame: %{extension_surfaces: %__MODULE__{} = surfaces}}}), do: surfaces
 
   @doc "Installs the event registry selected for this editor."
   @spec install_events_registry(t(), Minga.Events.registry()) :: t()

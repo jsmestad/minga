@@ -52,6 +52,7 @@ defmodule Minga.Extension.SdkContractTest do
     Minga.Extension.Overlay => %{
       {:start_link, 1} => :lifecycle,
       {:unregister_source, 1} => :lifecycle,
+      {:unregister_source, 2} => :injected_server,
       {:set, 5} => :injected_server,
       {:remove, 3} => :injected_server,
       {:remove_all, 2} => :injected_server,
@@ -62,7 +63,10 @@ defmodule Minga.Extension.SdkContractTest do
     Minga.Extension.Panel => %{
       {:start_link, 1} => :lifecycle,
       {:unregister_source, 1} => :lifecycle,
+      {:unregister_source, 2} => :injected_server,
       {:set, 4} => :injected_server,
+      {:hide, 3} => :injected_server,
+      {:show, 3} => :injected_server,
       {:remove, 3} => :injected_server,
       {:remove_all, 2} => :injected_server,
       {:all, 0} => :render_read,

@@ -15,13 +15,20 @@ defmodule MingaEditor.RenderModel.UI.ExtensionPanelBuilder do
   alias Minga.RenderModel.UI.ExtensionPanel.Content.Unknown
   alias Minga.RenderModel.UI.ExtensionPanel.Panel
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
+  alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.State.ExtensionSurfaces
 
-  @spec build() :: ExtensionPanel.t()
-  def build, do: build(SemanticUIRegistry.default_table())
+  @doc "Builds the panel model from the registries the frame's editor names."
+  @spec build(Context.t()) :: ExtensionPanel.t()
+  def build(%Context{} = ctx) do
+    surfaces = ExtensionSurfaces.of(ctx)
+    build(surfaces.extension_panel_registry, surfaces.agent_semantic_ui_registry)
+  end
 
-  @spec build(SemanticUIRegistry.table()) :: ExtensionPanel.t()
-  def build(agent_ui_registry) do
-    panels = Minga.Extension.Panel.visible()
+  @doc "Builds the panel model from one extension panel registry and one semantic UI registry."
+  @spec build(Minga.Extension.Panel.table(), SemanticUIRegistry.table()) :: ExtensionPanel.t()
+  def build(panel_registry, agent_ui_registry) do
+    panels = Minga.Extension.Panel.visible(panel_registry)
     extension_panels = Enum.map(panels, &panel_model/1)
     semantic_panels = SemanticUIRegistry.panels(agent_ui_registry)
     %ExtensionPanel{panels: extension_panels ++ semantic_panels}
