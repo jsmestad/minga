@@ -2433,12 +2433,15 @@ defmodule Minga.Buffer.Process do
     start_position = end_position(doc)
     new_doc = Document.append_text_and_follow(doc, text)
     delta = EditDelta.insertion(start_byte, start_position, text, end_position(new_doc))
+    appended = {start_byte, "", text}
 
     # Output is not an edit the user made: it is not undoable and does not make the buffer dirty.
     # The delta still goes to the change log and to subscribers, so a reader of this buffer
     # (the renderer's resident rows, the conflict index) updates the appended lines only.
     new_state =
-      %{BufState.record_clean_change(state) | document: new_doc}
+      state
+      |> install_document(new_doc, &UndoHistory.record_untracked(&1, [appended]))
+      |> BufState.record_clean_change()
       |> record_edit(delta, EditSource.unknown())
 
     {:reply, :ok, new_state}

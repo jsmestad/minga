@@ -60,13 +60,64 @@ defmodule Minga.Buffer.DocumentTest do
   end
 
   describe "append_text_and_follow/2" do
+    test "the old gap can be inside the final grapheme" do
+      doc = Document.new("\u0301") |> Document.insert_text("e")
+      followed = Document.append_text_and_follow(doc, "\u0301")
+
+      assert Document.content(followed) == "e\u0301\u0301"
+      assert Document.cursor(followed) == {0, 0}
+    end
+
+    test "deleting text in a warmed stream cannot leave an anchor inside a grapheme" do
+      doc =
+        Document.new()
+        |> Document.append_text_and_follow("ax\u0301")
+        |> Document.move_to({0, 0})
+        |> Document.delete_at()
+        |> Document.append_text_and_follow("\u0301")
+
+      assert Document.content(doc) == "x\u0301\u0301"
+      assert Document.cursor(doc) == {0, 0}
+    end
+
+    test "every byte split preserves the final caret in combining, flag and joined emoji text" do
+      for text <- ["e\u0301", "🇨🇦🇺🇸", "👩‍💻"] do
+        for split <- 1..(byte_size(text) - 1) do
+          <<first::binary-size(^split), second::binary>> = text
+          seeded = Document.append_text_and_follow(Document.new("prefix "), first)
+          complete = Document.append_text_and_follow(seeded, second)
+
+          assert Document.content(complete) == "prefix " <> text
+
+          assert Document.cursor(complete) ==
+                   {0, Minga.Buffer.Position.last_character_on_line("prefix " <> text)}
+        end
+      end
+    end
+
     property "appends at the end from any cursor and rests the cursor on the last character" do
       check all(
               lines <- list_of(member_of(["", "a", "é世", "\tx"]), min_length: 1, max_length: 8),
               cursor_line <- integer(0..(length(lines) - 1)),
               cursor_col <- integer(0..4),
               chunks <-
-                list_of(member_of(["", "b", "✓✓", "q\n", "\n", "\r\n", "x\ny", "e\u0301"]),
+                list_of(
+                  member_of([
+                    "",
+                    "b",
+                    "✓✓",
+                    "q\n",
+                    "\n",
+                    "\r\n",
+                    "x\ny",
+                    "e\u0301",
+                    "\u0301",
+                    "👩",
+                    "\u200D",
+                    "💻",
+                    <<0xC3>>,
+                    <<0xA9>>
+                  ]),
                   min_length: 1,
                   max_length: 6
                 )
@@ -87,7 +138,7 @@ defmodule Minga.Buffer.DocumentTest do
 
           if chunk != "" do
             last_line = Document.line_count(rebuilt) - 1
-            last_text = expected |> String.split("\n") |> List.last()
+            last_text = expected |> :binary.split("\n", [:global]) |> List.last()
 
             assert Document.cursor(new_doc) ==
                      {last_line, Minga.Buffer.Position.last_character_on_line(last_text)}

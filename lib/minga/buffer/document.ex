@@ -39,7 +39,15 @@ defmodule Minga.Buffer.Document do
   alias Minga.Core.Unicode
 
   @enforce_keys [:before, :after, :cursor_line, :cursor_col, :line_count, :line_offsets]
-  defstruct [:before, :after, :cursor_line, :cursor_col, :line_count, :line_offsets]
+  defstruct [
+    :before,
+    :after,
+    :cursor_line,
+    :cursor_col,
+    :line_count,
+    :line_offsets,
+    :append_anchor
+  ]
 
   @typedoc """
   Cached line-start byte offsets.
@@ -57,7 +65,8 @@ defmodule Minga.Buffer.Document do
           cursor_line: non_neg_integer(),
           cursor_col: non_neg_integer(),
           line_count: pos_integer(),
-          line_offsets: line_offsets()
+          line_offsets: line_offsets(),
+          append_anchor: non_neg_integer() | nil
         }
 
   @type position :: Position.t()
@@ -235,7 +244,8 @@ defmodule Minga.Buffer.Document do
         cursor_line: new_line,
         cursor_col: new_col,
         line_count: new_lc,
-        line_offsets: new_ls
+        line_offsets: new_ls,
+        append_anchor: nil
     }
   end
 
@@ -275,7 +285,8 @@ defmodule Minga.Buffer.Document do
         cursor_line: new_line,
         cursor_col: new_col,
         line_count: new_lc,
-        line_offsets: Lines.update_after_append(ls, byte_size(before), text)
+        line_offsets: Lines.update_after_append(ls, byte_size(before), text),
+        append_anchor: nil
     }
   end
 
@@ -286,7 +297,8 @@ defmodule Minga.Buffer.Document do
       doc
       | after: after_ <> text,
         line_count: lc + Lines.break_count(text),
-        line_offsets: Lines.update_after_append(ls, end_byte, text)
+        line_offsets: Lines.update_after_append(ls, end_byte, text),
+        append_anchor: nil
     }
   end
 
@@ -295,7 +307,7 @@ defmodule Minga.Buffer.Document do
 
   This is what a stream of command output needs: every chunk lands at the end and the cursor follows it, resting on a character as a Normal-mode cursor does. A result that ends with a line break holds the cursor at column 0 of the empty last line.
 
-  The existing content is extended in place: `before` only grows, so a stream of chunks costs work in proportion to the text appended, not to the text already held. The split before the last character is taken inside `text` alone, so a chunk that ends in the middle of a character or a grapheme leaves the cursor before the bytes it ended with until the next chunk completes them.
+  The append anchor is a certified grapheme boundary in the final line, independent of the cursor. Appending segments from that boundary, not from the beginning of a growing line. Other text edits discard the anchor; the next chunk seeds it from the final line.
 
   ## Examples
 
@@ -313,29 +325,57 @@ defmodule Minga.Buffer.Document do
   def append_text_and_follow(%__MODULE__{} = doc, ""), do: doc
 
   def append_text_and_follow(%__MODULE__{} = doc, text) when is_binary(text) do
-    {head, resting_character} = split_resting_character(text)
+    end_byte = content_byte_size(doc)
+    {tail, anchor, line_start, line_count} = appended_final_line(doc, text, end_byte)
+    {caret_in_tail, character_size, restart} = Unicode.final_append_character(tail)
+    caret = anchor + caret_in_tail
 
-    doc = doc |> move_cursor_to_end() |> append_text(head)
-    # A copy, so the few bytes kept after the cursor do not hold the whole chunk in memory.
-    %{doc | after: :binary.copy(resting_character)}
+    %{
+      doc
+      | before: append_prefix_at(doc, text, end_byte, caret),
+        after: :binary.copy(binary_part(tail, caret_in_tail, character_size)),
+        cursor_line: line_count - 1,
+        cursor_col: caret - line_start,
+        line_count: line_count,
+        line_offsets: Lines.update_after_append(doc.line_offsets, end_byte, text),
+        append_anchor: anchor + restart
+    }
   end
 
-  # The cursor rests on the last character of the text, unless the text ends with a line break:
-  # then the last line is empty and the cursor rests at its start with nothing after it.
-  @spec split_resting_character(String.t()) :: {String.t(), String.t()}
-  defp split_resting_character(text) do
-    {head, character} = Cursor.previous_character(text)
-    if character in ["\n", "\r\n"], do: {text, ""}, else: {head, character}
+  @spec appended_final_line(t(), binary(), non_neg_integer()) ::
+          {binary(), non_neg_integer(), non_neg_integer(), pos_integer()}
+  defp appended_final_line(doc, text, end_byte) do
+    tail_size = Lines.last_line_width(text)
+
+    if tail_size == byte_size(text) do
+      line_start = Lines.start_of(doc, doc.line_count - 1)
+      anchor = doc.append_anchor || line_start
+      tail = slice_byte_range(doc, anchor, end_byte - anchor)
+      {tail <> text, anchor, line_start, doc.line_count}
+    else
+      start_in_chunk = byte_size(text) - tail_size
+      line_start = end_byte + start_in_chunk
+      tail = binary_part(text, start_in_chunk, tail_size)
+      {tail, line_start, line_start, doc.line_count + Lines.break_count(text)}
+    end
   end
 
-  # Joins the halves onto `before`, which is the half an append extends in place.
-  @spec move_cursor_to_end(t()) :: t()
-  defp move_cursor_to_end(%__MODULE__{after: ""} = doc), do: doc
+  @spec append_prefix_at(t(), binary(), non_neg_integer(), non_neg_integer()) :: binary()
+  defp append_prefix_at(%__MODULE__{before: before, after: suffix}, text, end_byte, caret) do
+    gap = byte_size(before)
 
-  defp move_cursor_to_end(%__MODULE__{before: before, after: after_, line_count: lc} = doc) do
-    last_line = lc - 1
-    end_column = content_byte_size(doc) - Lines.start_of(doc, last_line)
-    %{doc | before: before <> after_, after: "", cursor_line: last_line, cursor_col: end_column}
+    cond do
+      caret == gap ->
+        before
+
+      caret > gap ->
+        old_bytes = min(caret, end_byte) - gap
+        new_bytes = max(0, caret - end_byte)
+        before <> binary_part(suffix, 0, old_bytes) <> binary_part(text, 0, new_bytes)
+
+      true ->
+        binary_part(before, 0, caret)
+    end
   end
 
   @doc """
@@ -384,7 +424,8 @@ defmodule Minga.Buffer.Document do
         cursor_line: new_line,
         cursor_col: new_col,
         line_count: new_lc,
-        line_offsets: new_ls
+        line_offsets: new_ls,
+        append_anchor: nil
     }
   end
 
@@ -407,7 +448,7 @@ defmodule Minga.Buffer.Document do
             _ -> Lines.update_after_delete_at(ls, line, byte_size(newline), true)
           end
 
-        %{buf | after: rest, line_count: lc - 1, line_offsets: new_ls}
+        %{buf | after: rest, line_count: lc - 1, line_offsets: new_ls, append_anchor: nil}
 
       {grapheme, rest} ->
         new_ls =
@@ -416,7 +457,7 @@ defmodule Minga.Buffer.Document do
             _ -> Lines.update_after_delete_at(ls, line, byte_size(grapheme), false)
           end
 
-        %{buf | after: rest, line_offsets: new_ls}
+        %{buf | after: rest, line_offsets: new_ls, append_anchor: nil}
 
       nil ->
         buf
@@ -454,6 +495,7 @@ defmodule Minga.Buffer.Document do
         after: suffix,
         cursor_line: last_line,
         cursor_col: Lines.last_line_width(replacement),
+        append_anchor: nil,
         line_offsets:
           Lines.update_after_span_replace(
             doc.line_offsets,

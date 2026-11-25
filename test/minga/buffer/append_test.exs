@@ -124,6 +124,34 @@ defmodule Minga.Buffer.AppendTest do
       end
     end
 
+    for {label, chunks, expected} <- [
+          {"a combining mark", ["e", "\u0301"], "e\u0301"},
+          {"a UTF-8 character", [<<0xC3>>, <<0xA9>>], "é"},
+          {"a four-byte character", [<<0xF0, 0x9F, 0x91>>, <<0xA9>>], "👩"},
+          {"a grapheme with a split combining mark", ["e" <> <<0xCC>>, <<0x81>>], "e\u0301"},
+          {"a joined emoji", ["👩", "\u200D", "💻"], "👩‍💻"}
+        ] do
+      test "rests before #{label} split over chunks on an open line" do
+        buffer = start_buffer("prefix ")
+        Enum.each(unquote(chunks), &Buffer.append(buffer, &1))
+
+        assert Buffer.content(buffer) == "prefix " <> unquote(expected)
+        assert Buffer.cursor(buffer) == {0, 7}
+      end
+    end
+
+    test "an incomplete UTF-8 byte after an emoji stays visible and can be completed" do
+      buffer = start_buffer("")
+      assert :ok = Buffer.append(buffer, "👩")
+      assert :ok = Buffer.append(buffer, <<0xC3>>)
+      assert Buffer.content(buffer) == "👩" <> <<0xC3>>
+      assert Buffer.cursor(buffer) == {0, 4}
+
+      assert :ok = Buffer.append(buffer, <<0xA9>>)
+      assert Buffer.content(buffer) == "👩é"
+      assert Buffer.cursor(buffer) == {0, 4}
+    end
+
     test "a cursor the reader moved up follows the next chunk to the end" do
       buffer = start_buffer("one\ntwo\n")
       Buffer.move_to(buffer, {0, 1})
@@ -183,6 +211,25 @@ defmodule Minga.Buffer.AppendTest do
         assert ratio < 2,
                "200 chunks cost #{long_work} reductions on 200,000 lines and #{empty_work} on an empty buffer " <>
                  "(#{Float.round(ratio, 1)}x); expected the same order"
+      end
+    end
+
+    test "an unterminated log line can keep growing without increasing each append's work" do
+      chunks = [
+        fn _ -> "progress 123 abc\r" end,
+        fn index -> if rem(index, 2) == 1, do: <<0xC3>>, else: <<0xA9, ?x>> end
+      ]
+
+      for chunk <- chunks do
+        empty = start_buffer("")
+        long = start_buffer(String.duplicate("界", 100_000))
+
+        # Seed the anchor outside the measurement. No viewport read measures the cost of drawing the line.
+        measure = fn buffer ->
+          append_work(buffer, 100, warm_up: 1, chunk: chunk, read: fn _ -> :ok end)
+        end
+
+        assert measure.(long) < 2 * measure.(empty)
       end
     end
 
