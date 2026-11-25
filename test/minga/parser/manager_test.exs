@@ -314,6 +314,29 @@ defmodule Minga.Parser.ManagerTest do
                      2_000
     end
 
+    test "a parser killed mid-parse sends no parse_complete, and its restart admits the buffer again" do
+      # cat accepts the parse without ever completing it, so the parse is still in flight when the process dies.
+      server = start_parser_manager(parser_path: System.find_executable("cat"))
+      :ok = Manager.subscribe(server)
+      buffer = start_snapshot_provider()
+
+      _id = Manager.register_buffer(buffer, %BufferConfig{language: "elixir"}, server: server)
+      assert_receive {:snapshot_requested, ^buffer, :full, manager, token}, 2_000
+      send_snapshot(manager, buffer, token, "defmodule Killed do\nend\n")
+
+      %{port: %{handle: port}, work: %{scheduler: scheduler}} = :sys.get_state(server)
+      assert scheduler.active == buffer
+      {:os_pid, os_pid} = Port.info(port, :os_pid)
+      {_, 0} = System.cmd("kill", ["-9", Integer.to_string(os_pid)])
+
+      assert_receive {:minga_highlight, :parser_crashed}, 2_000
+      send(server, :restart_parser)
+      assert_receive {:minga_highlight, :parser_restarted}, 2_000
+
+      # The in-flight parse was reset with the port: the buffer is pumped again from a full snapshot.
+      assert_receive {:snapshot_requested, ^buffer, :full, ^manager, _token}, 2_000
+    end
+
     test "restart preserves parser identity and rebuilds registered buffers" do
       server = start_parser_manager()
       content = "defmodule Recovered do\nend\n"
