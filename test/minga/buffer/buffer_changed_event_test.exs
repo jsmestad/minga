@@ -139,7 +139,8 @@ defmodule Minga.Buffer.BufferChangedEventTest do
     test "events preserve the caller's source while undo records its attribution" do
       sources = [
         {EditSource.user(), :user},
-        {EditSource.agent(self(), "edit-1"), :agent},
+        # An agent edit is not yours, so it never enters your undo stack.
+        {EditSource.agent(self(), "edit-1"), nil},
         {EditSource.lsp(:elixir_ls), :lsp},
         {EditSource.formatter(), :lsp},
         {EditSource.unknown(), :user}

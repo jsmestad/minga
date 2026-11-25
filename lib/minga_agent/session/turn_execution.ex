@@ -45,9 +45,17 @@ defmodule MingaAgent.Session.TurnExecution do
   @typedoc "An active provider tool identified by its stable call ID."
   @type active_tool :: {tool_call_id :: String.t(), name :: String.t()}
 
-  @typedoc "Provider activity within one active turn."
+  @typedoc """
+  Provider activity within one active turn.
+
+  `:admitting` is a turn whose first prompt was pressed and whose provider request is still being prepared. It is active: it can be stopped, and further prompts queue into it. `end_admission/1` leaves it, whether the request then starts (`begin_turn/1`) or is refused.
+  """
   @type activity ::
-          :starting | :thinking | :completion | {:tool_execution, [active_tool(), ...]}
+          :admitting
+          | :starting
+          | :thinking
+          | :completion
+          | {:tool_execution, [active_tool(), ...]}
 
   @type interaction :: ToolApproval.t() | PendingQuestion.t() | nil
 
@@ -104,6 +112,7 @@ defmodule MingaAgent.Session.TurnExecution do
   @spec phase(t()) ::
           :idle
           | :stopped
+          | :admitting
           | :starting
           | :thinking
           | :approval_waiting
@@ -220,6 +229,31 @@ defmodule MingaAgent.Session.TurnExecution do
 
   def tool_name(%__MODULE__{}, tool_call_id) when is_binary(tool_call_id),
     do: {:error, :tool_not_active}
+
+  @doc """
+  Begins admitting a prompt from an inactive state, while the provider prepares its request.
+
+  The turn is active from here, so a Stop ends it and a further prompt queues into it.
+  """
+  @spec begin_admission(t()) :: {:ok, t()} | {:error, :turn_active}
+  def begin_admission(%__MODULE__{phase: inactive} = execution)
+      when inactive in [:idle, :stopped],
+      do: {:ok, activate(execution, :admitting)}
+
+  def begin_admission(%__MODULE__{phase: {:failure, _message}} = execution),
+    do: {:ok, activate(execution, :admitting)}
+
+  def begin_admission(%__MODULE__{phase: {:active, _activity, _approval, _error}}),
+    do: {:error, :turn_active}
+
+  @doc """
+  Ends an admission once the provider has answered: the execution is idle again and keeps every input queued meanwhile. The caller then begins the turn (`begin_turn/1`) or reports the refusal.
+  """
+  @spec end_admission(t()) :: {:ok, t()} | {:error, :not_admitting}
+  def end_admission(%__MODULE__{phase: {:active, :admitting, nil, _error}} = execution),
+    do: {:ok, %{execution | phase: :idle}}
+
+  def end_admission(%__MODULE__{}), do: {:error, :not_admitting}
 
   @doc "Begins a provider turn from an inactive state."
   @spec begin_turn(t()) :: {:ok, t()} | {:error, :turn_active}
@@ -1075,13 +1109,17 @@ defmodule MingaAgent.Session.TurnExecution do
   defp completed_tool_activity([]), do: :completion
   defp completed_tool_activity([_tool | _rest] = tools), do: {:tool_execution, tools}
 
-  @spec activity_phase(activity()) :: :starting | :thinking | :tool_execution | :completion
+  @spec activity_phase(activity()) ::
+          :admitting | :starting | :thinking | :tool_execution | :completion
+  defp activity_phase(:admitting), do: :admitting
   defp activity_phase(:starting), do: :starting
   defp activity_phase(:thinking), do: :thinking
   defp activity_phase(:completion), do: :completion
   defp activity_phase({:tool_execution, [_tool | _rest]}), do: :tool_execution
 
   @spec activity_status(activity()) :: :idle | :thinking | :tool_executing
+  # Admission is shown as working: the prompt was pressed and Minga is preparing to send it.
+  defp activity_status(:admitting), do: :thinking
   defp activity_status(:starting), do: :idle
   defp activity_status(:thinking), do: :thinking
   defp activity_status(:completion), do: :tool_executing

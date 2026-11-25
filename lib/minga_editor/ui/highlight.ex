@@ -21,7 +21,8 @@ defmodule MingaEditor.UI.Highlight do
     :capture_names,
     :theme,
     :face_registry,
-    :parser_correlation
+    :parser_correlation,
+    :completed_parse
   ]
 
   @typep span_tuple :: tuple()
@@ -34,7 +35,8 @@ defmodule MingaEditor.UI.Highlight do
           capture_names: tuple(),
           theme: Theme.syntax(),
           face_registry: FaceRegistry.t(),
-          parser_correlation: EventCorrelation.t() | nil
+          parser_correlation: EventCorrelation.t() | nil,
+          completed_parse: EventCorrelation.t() | nil
         }
 
   @typedoc "Style resolver: a function that maps capture names to Face structs."
@@ -70,7 +72,8 @@ defmodule MingaEditor.UI.Highlight do
       capture_names: {},
       theme: syntax,
       face_registry: registry,
-      parser_correlation: nil
+      parser_correlation: nil,
+      completed_parse: nil
     }
   end
 
@@ -86,7 +89,8 @@ defmodule MingaEditor.UI.Highlight do
       capture_names: {},
       theme: theme.syntax,
       face_registry: registry,
-      parser_correlation: nil
+      parser_correlation: nil,
+      completed_parse: nil
     }
   end
 
@@ -95,6 +99,27 @@ defmodule MingaEditor.UI.Highlight do
   def correlate(%__MODULE__{} = highlight, %EventCorrelation{} = correlation) do
     %{highlight | parser_correlation: correlation}
   end
+
+  @doc """
+  Records that the parser finished the parse `correlation` names: every result of that parse has been applied.
+  """
+  @spec complete_parse(t(), EventCorrelation.t()) :: t()
+  def complete_parse(%__MODULE__{} = highlight, %EventCorrelation{} = correlation) do
+    %{highlight | parser_correlation: correlation, completed_parse: correlation}
+  end
+
+  @doc """
+  Returns whether the newest parse this presentation has heard from is complete, so no fold ranges, conceals or
+  symbols of it are still on their way.
+  """
+  @spec parse_settled?(t()) :: boolean()
+  def parse_settled?(%__MODULE__{
+        parser_correlation: %EventCorrelation{} = newest,
+        completed_parse: newest
+      }),
+      do: true
+
+  def parse_settled?(%__MODULE__{}), do: false
 
   @doc "Returns whether an event belongs to the current generation and is not stale."
   @spec accepts_correlation?(t(), EventCorrelation.t()) :: boolean()
@@ -114,12 +139,17 @@ defmodule MingaEditor.UI.Highlight do
     %{highlight | parser_correlation: correlation}
   end
 
-  @doc "Resets only parser-version correlation while preserving its registration generation."
+  @doc """
+  Resets only parser-version correlation while preserving its registration generation.
+
+  A restarted parser counts versions from 1 again, so the completed parse is forgotten too: a new parse that reuses
+  its version is not settled until it completes.
+  """
   @spec reset_parser_version(t()) :: t()
   def reset_parser_version(
         %__MODULE__{parser_correlation: %EventCorrelation{} = correlation} = highlight
       ) do
-    %{highlight | parser_correlation: %{correlation | version: 0}}
+    %{highlight | parser_correlation: %{correlation | version: 0}, completed_parse: nil}
   end
 
   def reset_parser_version(%__MODULE__{} = highlight), do: highlight

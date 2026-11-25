@@ -57,11 +57,15 @@ Styled underlines and the underline colour have no query that every terminal ans
 | Alacritty | `TERM=alacritty` | | implements Kitty's underline sequences |
 | VTE terminals (GNOME Terminal and others) | `VTE_VERSION` of 5200 or more | VTE 0.52 | the sequences arrived in VTE 0.52 |
 
-Apple's Terminal is not asked (it prints the query into the screen), and neither is any terminal over SSH, where the terminal at the other end may be one that does the same. A table goes stale, so a config option to force a feature on or off comes with `:checkhealth terminal`, which will also show how each feature was settled.
+Apple's Terminal is not asked (it prints the query into the screen), and neither is any terminal over SSH, where the terminal at the other end may be one that does the same. A table goes stale, and a terminal's refusal never reaches Minga, so you can force a feature yourself. `set :terminal_features, %{styled_underlines: :on}` in your config turns one on, and `:off` turns one off; `true_color`, `styled_underlines` and `underline_color` can be forced, because those are the ones Minga decides how to draw. The Kitty keyboard protocol, synchronized output and focus reporting cannot: the terminal turns them on and answers for them reliably, so forcing them would only make `:checkhealth terminal` disagree with what happens. What you force wins over everything Minga works out, and `:checkhealth terminal` shows it as forced by you.
+
+The choice reaches the terminal frontend when it starts, as the `MINGA_TERMINAL_FEATURES` variable (`styled_underlines=on,underline_color=off`), because some features are set up once at startup. So a changed option applies the next time Minga starts, and `:checkhealth terminal` says "set in your config, not applied" until then. Where something else starts the frontend (the development supervisor), Minga cannot set the variable; set it yourself. An entry the frontend cannot use is ignored with one line in the log.
 
 Focus reporting does two jobs: when the terminal window loses focus, the borders that mark the focused pane take their quiet colour and the terminal draws its cursor hollow, and "needs you" escalates to a notification because you are not looking.
 
-`:checkhealth terminal` opens a buffer listing each feature, whether this terminal supports it, and what Minga uses instead when it does not. Users should never have to guess why two terminals behave differently.
+`:checkhealth terminal` opens a page listing each feature: whether this terminal has it, how Minga found out (the terminal answered, it is a terminal known to have it, the terminal did not answer, or you forced it), and what Minga uses instead when it does not. Users should never have to guess why two terminals behave differently. A feature Minga does not use in a terminal yet reads "not used yet", never "missing". In the macOS app the page says in one sentence that this is not a terminal. `:checkhealth` on its own lists the pages that exist.
+
+The page is the shared Help buffer: it is read-only and scrolls with the usual motions and the wheel. Today you leave it as you leave any buffer, with `SPC b p` or `SPC b b` back to your file; closing it with `q` or a click, as the scenario is designed, is not built yet. It binds no key of its own.
 
 ### Keys
 

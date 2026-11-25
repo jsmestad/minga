@@ -133,7 +133,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       request_reparse: 0x3B,
       match_item_result: 0x3C,
       node_info: 0x3D,
-      document_symbols: 0x3E
+      document_symbols: 0x3E,
+      parse_complete: 0x3F
     )
   end
 
