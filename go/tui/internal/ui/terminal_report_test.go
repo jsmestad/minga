@@ -35,7 +35,7 @@ func lastReport(packets [][]byte) map[terminal.Feature]terminal.Status {
 func TestTheFirstReportHasEveryDetectedFeaturePending(t *testing.T) {
 	model, _ := terminalModel()
 	report := lastReport([][]byte{model.TerminalReportPacket()})
-	for _, feature := range []terminal.Feature{generated.TerminalFeatureTrueColor, generated.TerminalFeatureKittyKeyboard, generated.TerminalFeatureSynchronizedOutput, generated.TerminalFeatureFocusReporting} {
+	for _, feature := range []terminal.Feature{generated.TerminalFeatureTrueColor, generated.TerminalFeatureStyledUnderlines, generated.TerminalFeatureUnderlineColor, generated.TerminalFeatureKittyKeyboard, generated.TerminalFeatureSynchronizedOutput, generated.TerminalFeatureFocusReporting} {
 		if report[feature] != generated.TerminalFeatureStatusPending {
 			t.Fatalf("feature %d = %d before the terminal answered, want pending", feature, report[feature])
 		}
@@ -115,6 +115,8 @@ func TestTheReportGoesOutOnceWhenTheLastAnswerIsIn(t *testing.T) {
 	answers := []tea.Msg{
 		tea.ColorProfileMsg{Profile: colorprofile.TrueColor},
 		tea.KeyboardEnhancementsMsg{Flags: ansi.KittyDisambiguateEscapeCodes},
+		tea.CapabilityMsg{Content: "Smulx=\x1b[4:%p1%dm"},
+		tea.CapabilityMsg{Content: "Setulc=\x1b[58:2::%p1%dm"},
 		tea.ModeReportMsg{Mode: ansi.ModeSynchronizedOutput, Value: ansi.ModeNotRecognized},
 		tea.ModeReportMsg{Mode: ansi.ModeFocusEvent, Value: ansi.ModeReset},
 	}
@@ -128,6 +130,8 @@ func TestTheReportGoesOutOnceWhenTheLastAnswerIsIn(t *testing.T) {
 			report := lastReport(packets)
 			want := map[terminal.Feature]terminal.Status{
 				generated.TerminalFeatureTrueColor:          generated.TerminalFeatureStatusDetected,
+				generated.TerminalFeatureStyledUnderlines:   generated.TerminalFeatureStatusDetected,
+				generated.TerminalFeatureUnderlineColor:     generated.TerminalFeatureStatusDetected,
 				generated.TerminalFeatureKittyKeyboard:      generated.TerminalFeatureStatusDetected,
 				generated.TerminalFeatureSynchronizedOutput: generated.TerminalFeatureStatusMissing,
 				generated.TerminalFeatureFocusReporting:     generated.TerminalFeatureStatusDetected,
@@ -181,6 +185,8 @@ func TestTheTimeoutSettlesWhatTheTerminalNeverAnswered(t *testing.T) {
 	report := lastReport(drainOutboundPackets(out))
 	want := map[terminal.Feature]terminal.Status{
 		generated.TerminalFeatureTrueColor:          generated.TerminalFeatureStatusDetected,
+		generated.TerminalFeatureStyledUnderlines:   generated.TerminalFeatureStatusFallback,
+		generated.TerminalFeatureUnderlineColor:     generated.TerminalFeatureStatusFallback,
 		generated.TerminalFeatureKittyKeyboard:      generated.TerminalFeatureStatusFallback,
 		generated.TerminalFeatureSynchronizedOutput: generated.TerminalFeatureStatusMissing,
 		generated.TerminalFeatureFocusReporting:     generated.TerminalFeatureStatusMissing,

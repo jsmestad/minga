@@ -41,7 +41,25 @@ Some features need a modern terminal. Each one is detected at startup and degrad
 
 The terminal's answers arrive after startup, or never. Each feature is pending until the terminal answers or two seconds have passed; after that it is detected, or it uses its fallback, or it is missing when nothing replaces it. The frontend keeps one value for this and tells the BEAM the same value (`terminal_report` in [`docs/PROTOCOL.md`](../PROTOCOL.md)), so the report cannot differ from what is drawn.
 
-Focus reporting does two jobs: when the terminal window loses focus, borders dim and the cursor becomes hollow, and "needs you" escalates to a notification because you are not looking.
+Styled underlines and the underline colour have no query that every terminal answers: iTerm and the VTE terminals draw them and answer no terminfo query. So each of the two is settled in one of three ways, and the frontend remembers which:
+
+- **Answered by the terminal.** The terminal answers the terminfo query for `Smulx` (styled underlines) or `Setulc` (underline colour). An answer with a value turns the feature on, also for a terminal the table does not list, and an answer always wins over the table below. A terminal that lacks the capability usually sends the standard refusal, which the input library drops, so in practice a stale table entry is corrected by the override planned below, not by the terminal.
+- **Known terminal.** The terminal is in this table, which mirrors `KnownTerminals` in `go/tui/internal/terminal/known_terminals.go`. The table is never used inside tmux or screen: there the variables describe the outer terminal and the multiplexer decides what passes.
+- **Fallback.** Neither said yes within two seconds, so diagnostics use the plain underline.
+
+| Terminal | Recognised by | Since | Rests on |
+|---|---|---|---|
+| Kitty | `TERM=xterm-kitty` or `KITTY_WINDOW_ID` | | Kitty defined the styled and coloured underline sequences |
+| Ghostty | `TERM_PROGRAM=ghostty` or `TERM=xterm-ghostty` | | implements Kitty's underline sequences |
+| WezTerm | `TERM_PROGRAM=WezTerm` or `TERM=wezterm` | | implements Kitty's underline sequences |
+| iTerm | `TERM_PROGRAM=iTerm.app` | | draws the sequences and answers no terminfo query |
+| foot | `TERM=foot` or `foot-extra` | | implements Kitty's underline sequences |
+| Alacritty | `TERM=alacritty` | | implements Kitty's underline sequences |
+| VTE terminals (GNOME Terminal and others) | `VTE_VERSION` of 5200 or more | VTE 0.52 | the sequences arrived in VTE 0.52 |
+
+Apple's Terminal is not asked (it prints the query into the screen), and neither is any terminal over SSH, where the terminal at the other end may be one that does the same. A table goes stale, so a config option to force a feature on or off comes with `:checkhealth terminal`, which will also show how each feature was settled.
+
+Focus reporting does two jobs: when the terminal window loses focus, the borders that mark the focused pane take their quiet colour and the terminal draws its cursor hollow, and "needs you" escalates to a notification because you are not looking.
 
 `:checkhealth terminal` opens a buffer listing each feature, whether this terminal supports it, and what Minga uses instead when it does not. Users should never have to guess why two terminals behave differently.
 

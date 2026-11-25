@@ -118,6 +118,9 @@ func colorRoleSlots() []byte {
 
 type palette struct {
 	colors map[byte]uint32
+	// unfocused is true while the terminal window is in the background. Nothing has the keyboard then, so borders
+	// that mark the focused pane take their quiet colour.
+	unfocused bool
 }
 
 func bootstrapPalette() palette {
@@ -657,7 +660,19 @@ func (p palette) AgentAssistantLabel() color.Color {
 }
 
 func (p palette) AgentInputBorder() color.Color {
+	if p.unfocused {
+		return p.PopupBorder()
+	}
 	return p.slotOr(themeAgentInputBorder, themeAccent)
+}
+
+// FocusBorder is the colour of the border of the pane that has the keyboard. While the terminal window is in the
+// background no pane has it, so the border keeps the quiet colour it has without focus.
+func (p palette) FocusBorder(quiet color.Color) color.Color {
+	if p.unfocused {
+		return quiet
+	}
+	return p.Accent()
 }
 
 func (p palette) AgentInputSurface() color.Color {
@@ -689,7 +704,9 @@ func (p palette) AgentCodeBorder() color.Color {
 }
 
 func (m Model) palette() palette {
-	return m.activePalette
+	p := m.activePalette
+	p.unfocused = m.terminalInBackground
+	return p
 }
 
 func (m Model) editorBackground() color.Color {
