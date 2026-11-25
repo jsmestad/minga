@@ -313,7 +313,7 @@ defmodule Minga.Project.Trust do
           {:ok, String.t()} | {:error, code_refusal()}
   def code_root(path, user_id, opts \\ []) when is_binary(path) and is_list(opts) do
     with {:ok, canonical} <- config_folder(path, user_id, opts),
-         {:ok, _walk} <- own_folder_tree(canonical, user_id, opts, new_walk(canonical, opts)) do
+         {:ok, _walk} <- own_entries(canonical, user_id, opts, new_walk(canonical, opts)) do
       {:ok, canonical}
     end
   end
@@ -366,17 +366,20 @@ defmodule Minga.Project.Trust do
   @doc """
   Finds the file to run for a program name, without judging who owns it.
 
-  This is what a process start uses: a bare name is looked up on `PATH`, in absolute entries only, and is returned as found, links unresolved, because some tools decide what to do by the name they are called by. A name with a separator is resolved against `root` and must be an existing file. So the file that runs never depends on the directory Minga runs in. A declaration that is held to the ownership rule goes through `executable/4` first.
+  A bare name is looked up on `PATH`, in absolute entries only. The returned path keeps links unresolved because some tools decide what to do by the name they are called by. An absolute path must name an existing file. A relative path with a separator requires a root and is resolved against it, never against Minga's process directory. A declaration that is held to the ownership rule goes through `executable/4` first.
   """
-  @spec program(String.t(), String.t()) :: {:ok, String.t()} | {:error, code_refusal()}
-  @spec program(String.t(), String.t(), [option()]) ::
+  @spec program(String.t() | nil, String.t()) :: {:ok, String.t()} | {:error, code_refusal()}
+  @spec program(String.t() | nil, String.t(), [option()]) ::
           {:ok, String.t()} | {:error, code_refusal()}
   def program(root, command, opts \\ [])
-      when is_binary(root) and is_binary(command) and is_list(opts) do
+      when (is_binary(root) or is_nil(root)) and is_binary(command) and is_list(opts) do
     with :ok <- program_name(command) do
-      if String.contains?(command, "/"),
-        do: existing_program(Path.expand(command, root)),
-        else: program_on_path(command, opts)
+      cond do
+        not String.contains?(command, "/") -> program_on_path(command, opts)
+        is_binary(root) -> existing_program(Path.expand(command, root))
+        Path.type(command) == :absolute -> existing_program(Path.expand(command))
+        true -> {:error, {:unreadable, command, :no_working_directory}}
+      end
     end
   end
 
@@ -491,7 +494,7 @@ defmodule Minga.Project.Trust do
   @spec new_walk(String.t(), [option()]) :: walk()
   defp new_walk(root, opts) do
     limit = Keyword.get(opts, :entry_limit, @code_entry_limit)
-    %{seen: MapSet.new(), left: limit, root: root, limit: limit}
+    %{seen: MapSet.new([root]), left: limit, root: root, limit: limit}
   end
 
   # Walks a folder that is known by its canonical path and has itself passed the rule.

@@ -85,12 +85,15 @@ defmodule MingaAgent.MCP.StdioTransportDirectoryTest do
     refute File.exists?(out)
   end
 
-  test "without a directory a relative program that is not where Minga runs is not found", %{
+  test "without a directory a relative program is not resolved against the VM's directory", %{
+    project: project,
     out: out
   } do
-    config = %ServerConfig{name: "probe", command: "probe/serve.sh", env: %{"OUT" => out}}
+    command = Path.relative_to(Path.join(project, "probe/serve.sh"), File.cwd!(), force: true)
+    assert File.regular?(command)
+    config = %ServerConfig{name: "probe", command: command, env: %{"OUT" => out}}
 
     assert StdioTransport.start(config, self(), []) ==
-             {:error, "MCP server executable not found: probe/serve.sh"}
+             {:error, "MCP server executable not found: #{command}"}
   end
 end

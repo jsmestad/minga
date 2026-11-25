@@ -482,11 +482,13 @@ defmodule Minga.Project.TrustTest do
     test "program/3 finds a bare name on PATH, in absolute folders only", context do
       bin = tool_folder("bin")
 
-      assert Trust.program(context.root, "tool", path: "/nowhere:" <> bin) ==
-               {:ok, Path.join(bin, "tool")}
+      for root <- [context.root, nil] do
+        assert Trust.program(root, "tool", path: "/nowhere:" <> bin) ==
+                 {:ok, Path.join(bin, "tool")}
 
-      assert Trust.program(context.root, "tool", path: "/nowhere") ==
-               {:error, {:unreadable, "tool", :not_on_path}}
+        assert Trust.program(root, "tool", path: "/nowhere") ==
+                 {:error, {:unreadable, "tool", :not_on_path}}
+      end
     end
 
     @tag :tmp_dir

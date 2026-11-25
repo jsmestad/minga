@@ -1160,7 +1160,7 @@ This is useful for team-shared settings. Check `.minga.exs` into your repo and e
 
 A project can carry two more things next to it: plugin folders in `.minga/plugins/`, and MCP servers in `.minga/mcp.json`. They follow the same rules as `.minga.exs`. One thing a plugin author meets first on macOS: files unpacked from an archive are often writable by their group, and a plugin that vendors such files is refused until you run `chmod -R g-w` on the plugin folder (the reason is in [Folders Minga will not load config from](#folders-minga-will-not-load-config-from)).
 
-### Which project's config is loaded
+### Which project config is loaded
 
 Project-local config is code: `.minga.exs` is Elixir that runs, a plugin is code Minga loads, and an MCP server is a command Minga starts. So Minga is exact about where it comes from. It is read from the root of the project you launched, never from whatever directory the editor process happens to run in.
 
@@ -1247,7 +1247,7 @@ Minga loads config in this order. Each stage can override the previous one:
 
 1. `~/.config/minga/modules/*.ex` (user modules, compiled alphabetically)
 2. `~/.config/minga/config.exs` (global config)
-3. `.minga.exs` at the root of the project you launched (project-local config; see [Which project's config is loaded](#which-projects-config-is-loaded))
+3. `.minga.exs` at the root of the project you launched (project-local config; see [Which project config is loaded](#which-project-config-is-loaded))
 4. `~/.config/minga/after.exs` (post-init hook)
 5. Extensions are started (from declarations in steps 2-4)
 

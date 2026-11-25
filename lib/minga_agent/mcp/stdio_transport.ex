@@ -105,16 +105,15 @@ defmodule MingaAgent.MCP.StdioTransport do
 
   def handle_transport_info(_message, %__MODULE__{} = transport), do: {:ok, transport}
 
-  # A server a project declares arrives with an absolute program that was already examined. Any other name is
-  # found the same way: a bare name on the absolute folders of PATH, a relative path in the server's directory.
-  # `path_opts` lets a test supply the PATH. In production it is the PATH of this moment, the start itself.
+  # Project declarations with a path arrive with an absolute program that was already examined. A bare name is
+  # resolved on the absolute folders of PATH at start; a relative path requires the server's directory.
   @spec resolve_executable(ServerConfig.t(), keyword()) ::
           {:ok, String.t()} | {:error, String.t()}
   defp resolve_executable(%ServerConfig{command: command, cwd: cwd}, path_opts) do
     if Path.type(command) == :absolute do
       {:ok, command}
     else
-      case Minga.Project.Trust.program(cwd || File.cwd!(), command, path_opts) do
+      case Minga.Project.Trust.program(cwd, command, path_opts) do
         {:ok, path} -> {:ok, path}
         {:error, _reason} -> {:error, "MCP server executable not found: #{command}"}
       end

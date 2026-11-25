@@ -1461,12 +1461,10 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @spec existing_directory(String.t() | nil) :: String.t() | nil
-  defp existing_directory(path) when is_binary(path) do
+  @spec existing_directory(String.t()) :: String.t() | nil
+  defp existing_directory(path) do
     if File.dir?(path), do: path, else: nil
   end
-
-  defp existing_directory(nil), do: nil
 
   @spec mcp_extension_enabled?(keyword()) :: boolean()
   defp mcp_extension_enabled?(opts) do

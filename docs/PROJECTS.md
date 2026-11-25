@@ -48,7 +48,7 @@ A marker does not make a too-broad folder acceptable to Minga's Agent, with one 
 
 ### The same rule for project config
 
-A project's own configuration (`.minga.exs`, `.minga/plugins`, `.minga/mcp.json`) is code that runs, so it follows the rule above: it is loaded from the project you launched, and a folder that is too broad gives none unless it is under version control. [Configuration](CONFIGURATION.md#which-projects-config-is-loaded) has the details, including what a start without a terminal does.
+A project's own configuration (`.minga.exs`, `.minga/plugins`, `.minga/mcp.json`) is code that runs, so it follows the rule above: it is loaded from the project you launched, and a folder that is too broad gives none unless it is under version control. [Configuration](CONFIGURATION.md#which-project-config-is-loaded) has the details, including what a start without a terminal does.
 
 ### A conversation keeps its folder
 

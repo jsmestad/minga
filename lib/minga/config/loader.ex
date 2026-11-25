@@ -1486,9 +1486,7 @@ defmodule Minga.Config.Loader do
     end
   end
 
-  @spec eval_if_exists(String.t() | nil) :: String.t() | nil
-  defp eval_if_exists(nil), do: nil
-
+  @spec eval_if_exists(String.t()) :: String.t() | nil
   defp eval_if_exists(path) do
     if File.exists?(path) do
       eval_config_file(path)
