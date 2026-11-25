@@ -34,6 +34,14 @@ defmodule Minga.Protocol.Encode do
   def encode_terminal_feature_status(:fallback), do: 4
   def encode_terminal_feature_status(_), do: 0
 
+  @spec encode_terminal_feature_source(atom()) :: non_neg_integer()
+  def encode_terminal_feature_source(:unsettled), do: 0
+  def encode_terminal_feature_source(:answered), do: 1
+  def encode_terminal_feature_source(:known_terminal), do: 2
+  def encode_terminal_feature_source(:timeout), do: 3
+  def encode_terminal_feature_source(:user), do: 4
+  def encode_terminal_feature_source(_), do: 0
+
   @spec encode_agent_approval_decision(atom()) :: non_neg_integer()
   def encode_agent_approval_decision(:unknown), do: 0
   def encode_agent_approval_decision(:approve), do: 1

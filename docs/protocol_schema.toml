@@ -87,8 +87,9 @@ version = "2.0.0"
 # protocol_version 45 adds the empty_list structure (the empty-state anatomy: glyph, title, why line, selected action and actions) and the gui_picker empty section (0x07) that carries it when a picker offers next steps instead of results. An action's id is the command it runs; a click sends the existing execute_command gui_action with it.
 # protocol_version 46 adds the gui_picker movement_keys section (0x08) (the keys that move the highlighted row, resolved from the picker keymap scope, so frontends preview exactly those keys) and the picker_fit gui_action (the result rows the frontend's picker list shows, which sizes a picker page).
 # protocol_version 47 adds two frontend-to-BEAM events. frontend_foreground (0x13, the slot batch_end left in version 3) says whether the frontend is in the foreground: the terminal reports its focus, macOS its active state. terminal_report (0x62) is the terminal frontend's snapshot of which terminal features it detected, misses or replaces with a fallback, with the enums terminal_feature and terminal_feature_status.
+# protocol_version 50 adds a third byte, source, to each entry of terminal_report (0x62), with the enum terminal_feature_source: how the terminal frontend settled a feature (the terminal answered, a known terminal, a timeout, or the user).
 # protocol_version 48 reshapes gui_which_key: the panel names its path, breadcrumb, group count and hints, and each entry carries its raw key, section, live count and macOS ⌘ equivalent. Each count carries a tone byte (0 muted, 1 needs you, 2 error) naming its colour role. Paging and icons are retired.
-protocol_version = 49
+protocol_version = 50
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -252,7 +253,7 @@ value = 0x60
 direction = "frontend_to_beam"
 
 # The terminal frontend's report of terminal features: count(u8), then count entries of
-# feature(u8, terminal_feature) + status(u8, terminal_feature_status).
+# feature(u8, terminal_feature) + status(u8, terminal_feature_status) + source(u8, terminal_feature_source).
 # Every event is a complete snapshot that replaces the earlier one. The frontend sends it after ready,
 # with the answers it has and "pending" for queries the terminal has not answered, and again when an entry changes.
 # A frontend without a host terminal never sends it.
@@ -1636,6 +1637,22 @@ values = [
   { name = "detected", value = 2 },
   { name = "missing", value = 3 },
   { name = "fallback", value = 4 },
+]
+
+# How the terminal frontend settled a feature's status, so `:checkhealth terminal` can say why.
+# unsettled: still pending, or the frontend does not detect the feature. answered: the terminal answered a query or
+# showed the feature by using it. known_terminal: the terminal is in the frontend's table of known terminals.
+# timeout: the terminal did not answer in time. user: the user forced it (the `:terminal_features` option).
+[[enums]]
+name = "terminal_feature_source"
+repr = "u8"
+default = "unsettled"
+values = [
+  { name = "unsettled", value = 0 },
+  { name = "answered", value = 1 },
+  { name = "known_terminal", value = 2 },
+  { name = "timeout", value = 3 },
+  { name = "user", value = 4 },
 ]
 
 [[enums]]

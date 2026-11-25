@@ -910,7 +910,7 @@ defmodule MingaEditor do
   end
 
   def handle_info({:minga_input, {:terminal_report, report}}, %MingaEditor.State{} = state) do
-    log_terminal_report(report)
+    log_terminal_report(MingaEditor.State.Frontend.terminal_report(state.frontend), report)
     {:noreply, MingaEditor.State.accept_terminal_report(state, report)}
   end
 
@@ -2212,17 +2212,23 @@ defmodule MingaEditor do
 
   # One line when the terminal's answers are in, so a user who wonders why two terminals differ finds it in *Messages*.
   # The first report of a start still has open questions and is not worth a line.
-  @spec log_terminal_report(MingaEditor.Frontend.TerminalReport.t()) :: :ok
-  defp log_terminal_report(%MingaEditor.Frontend.TerminalReport{features: features}) do
-    if :pending in Map.values(features) do
-      :ok
-    else
+  # Neither is a report that changes only how a feature was settled. `:checkhealth terminal` shows the rest.
+  @spec log_terminal_report(
+          MingaEditor.Frontend.TerminalReport.t() | nil,
+          MingaEditor.Frontend.TerminalReport.t()
+        ) :: :ok
+  defp log_terminal_report(previous, report) do
+    alias MingaEditor.Frontend.TerminalReport
+
+    if TerminalReport.settled?(report) and TerminalReport.statuses_changed?(previous, report) do
       summary =
-        features
-        |> Enum.sort()
+        report
+        |> TerminalReport.statuses()
         |> Enum.map_join(", ", fn {feature, status} -> "#{feature} #{status}" end)
 
       Log.info(:port, "Terminal features: #{summary}")
+    else
+      :ok
     end
   end
 
