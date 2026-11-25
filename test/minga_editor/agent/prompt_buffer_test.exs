@@ -274,4 +274,28 @@ defmodule MingaEditor.Agent.PromptBufferTest do
       refute MingaEditor.Agent.PromptBuffer.input_empty?(panel)
     end
   end
+
+  describe "drop_prefix/2" do
+    test "removes pressed text from the start and keeps the cursor in the text that stays" do
+      for {text, cursor, prefix, kept, kept_cursor} <- [
+            {"later still", {0, 11}, "later", " still", {0, 6}},
+            {"one\ntwo three", {1, 9}, "one\ntwo", " three", {0, 6}},
+            {"one\ntwo\nthree", {2, 3}, "one\n", "two\nthree", {1, 3}},
+            {"pressed", {0, 7}, "pressed", "", {0, 0}}
+          ] do
+        ui = focused_panel(text)
+        BufferProcess.move_to(ui.panel.prompt_buffer, cursor)
+
+        assert {:ok, dropped} = PromptBuffer.drop_prefix(ui, prefix)
+        assert PromptBuffer.input_text(dropped) == kept
+        assert BufferProcess.cursor(dropped.panel.prompt_buffer) == kept_cursor
+      end
+    end
+
+    test "leaves a composer whose pressed text was edited as it is" do
+      ui = focused_panel("lXater still")
+      assert PromptBuffer.drop_prefix(ui, "later") == :mismatch
+      assert PromptBuffer.input_text(ui) == "lXater still"
+    end
+  end
 end

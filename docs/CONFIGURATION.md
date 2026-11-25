@@ -152,7 +152,7 @@ set :agent_status_command, ~s(echo "$MINGA_MODEL | $MINGA_STATUS")
 set :agent_status_interval_ms, 5_000
 ```
 
-Available environment variables: `MINGA_SESSION_ID`, `MINGA_MODEL`, `MINGA_STATUS`, and `MINGA_WORKDIR`.
+Available environment variables: `MINGA_SESSION_ID`, `MINGA_MODEL`, `MINGA_STATUS`, and `MINGA_WORKDIR`. The command runs in the project Minga has open, and `MINGA_WORKDIR` names it; with no project open, both are the directory Minga was launched from.
 
 ### Separator style
 

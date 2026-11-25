@@ -132,6 +132,26 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
       {:handled, _new_state} = MentionCompletion.handle_key(state, 27, 0)
     end
 
+    test "Enter with a modifier closes the popup and reaches the composer's own binding", %{
+      completion: comp
+    } do
+      state = base_state(keymap_scope: :agent, agentic_active: true, input_focused: true)
+
+      state =
+        MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+          state,
+          (fn p -> %{p | mention_completion: comp} end).(state.workspace.agent_ui.panel)
+        )
+
+      # ⌥↩ queues and ⌘↩ sends; only plain Enter accepts the highlighted file.
+      for mods <- [0x04, 0x08] do
+        assert {:passthrough, passed} = MentionCompletion.handle_key(state, 13, mods)
+        assert passed.workspace.agent_ui.panel.mention_completion == nil
+      end
+
+      assert {:handled, _accepted} = MentionCompletion.handle_key(state, 13, 0)
+    end
+
     test "passes through when no mention completion active" do
       state = base_state(keymap_scope: :agent, agentic_active: true, input_focused: true)
       {:passthrough, _} = MentionCompletion.handle_key(state, ?h, 0)

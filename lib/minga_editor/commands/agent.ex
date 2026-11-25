@@ -622,10 +622,19 @@ defmodule MingaEditor.Commands.Agent do
     submit_prompt(
       state,
       panel,
-      PromptBuffer.input_empty?(panel),
+      pressed_text(state) |> String.trim() |> Kernel.==(""),
       Runtime.active_session(state.shell_runtime)
     )
   end
+
+  # The text a send, queue or steer key takes: what no earlier press has already
+  # taken while its queue is answered (`DraftWorkflow.pressed/1`).
+  @spec pressed_text(state()) :: String.t()
+  defp pressed_text(%{workspace: %{agent_ui: %UIState{panel: %Panel{prompt_buffer: pid}} = ui}})
+       when is_pid(pid),
+       do: ui |> DraftWorkflow.pressed() |> elem(0)
+
+  defp pressed_text(state), do: PromptBuffer.prompt_text(state.workspace.agent_ui.panel)
 
   @spec submit_prompt(state(), Panel.t(), boolean(), pid() | nil) :: state()
   defp submit_prompt(state, _panel, true, _session), do: state
@@ -638,8 +647,8 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  defp submit_prompt(state, panel, false, _session) do
-    text = PromptBuffer.prompt_text(panel)
+  defp submit_prompt(state, _panel, false, _session) do
+    text = pressed_text(state)
 
     if SlashCommand.indented_credential_command?(text) do
       reject_indented_credential_command(state)
@@ -751,9 +760,85 @@ defmodule MingaEditor.Commands.Agent do
       {:ok, resolved} ->
         deliver_composer(state, resolved, :steering)
 
-      {:error, msg} ->
-        NoticeWorkflow.publish(state, msg)
+      :read_files ->
+        resolve_off_editor(state, :steering, text, :current)
     end
+  end
+
+  # Text that names files is read by a worker; the press waits in line meanwhile.
+  # Without a saved draft to hold it on, a worker still reads the files and the
+  # message goes only if its composer is unchanged (`deliver_read_mentions/3`).
+  @spec resolve_off_editor(
+          state(),
+          :steering | :follow_up,
+          String.t(),
+          Session.queue_target() | :current
+        ) ::
+          state()
+  defp resolve_off_editor(state, kind, text, expected) do
+    case DraftWorkflow.resolve_then_deliver(state, delivery_kind(state, kind), text, expected) do
+      {:held, held} ->
+        held
+
+      :not_held ->
+        # A composer without a saved draft has no line to wait in; a worker still
+        # reads the files, and the message goes when it answers.
+        pressed = %{
+          kind: kind,
+          owner: DraftWorkflow.front_owner(state),
+          session: Runtime.active_session(state.shell_runtime),
+          raw: PromptBuffer.input_text(state.workspace.agent_ui)
+        }
+
+        :ok =
+          DraftWorkflow.read_mentions_off_editor(
+            state,
+            text,
+            state.workspace.agent_ui,
+            &{:composer_mentions_read, pressed, &1}
+          )
+
+        state
+    end
+  end
+
+  @typedoc "A press from a composer without a saved draft, whose mentioned files a worker is reading."
+  @type read_press :: %{
+          kind: :steering | :follow_up,
+          owner: non_neg_integer() | nil,
+          session: pid() | nil,
+          raw: String.t()
+        }
+
+  @doc """
+  Delivers a message from a composer without a saved draft once a worker has read the files it names. It goes only to the conversation it was pressed in, while that conversation is in front and its composer still holds exactly the pressed text; otherwise the text stays and one line says why.
+  """
+  @spec deliver_read_mentions(
+          state(),
+          read_press(),
+          {:ok, String.t() | [ReqLLM.Message.ContentPart.t()]} | {:error, String.t()}
+        ) :: state()
+  def deliver_read_mentions(state, _pressed, {:error, message}),
+    do:
+      NoticeWorkflow.publish(
+        state,
+        MingaEditor.Agent.DraftWorkflow.not_sent(message)
+      )
+
+  def deliver_read_mentions(
+        state,
+        %{kind: kind, owner: owner, session: session, raw: raw},
+        {:ok, resolved}
+      ) do
+    if DraftWorkflow.front_owner(state) == owner and
+         Runtime.active_session(state.shell_runtime) == session and
+         DraftWorkflow.only_pressed_text?(state, raw),
+       do: deliver_composer(state, resolved, kind),
+       else:
+         NoticeWorkflow.publish(
+           state,
+           "Not sent: the message or its conversation changed while its files were read. Press send again."
+         )
   end
 
   @spec clear_input_after_submit(state()) :: state()
@@ -843,9 +928,9 @@ defmodule MingaEditor.Commands.Agent do
   @spec queue_displayed_prompt(state(), :steering | :follow_up, Session.queue_target()) :: state()
   def queue_displayed_prompt(state, kind, target) do
     panel = state.workspace.agent_ui.panel
-    text = PromptBuffer.prompt_text(panel)
+    text = pressed_text(state)
 
-    with false <- PromptBuffer.input_empty?(panel),
+    with false <- String.trim(text) == "",
          false <-
            SlashCommand.slash_command?(text) or SlashCommand.indented_credential_command?(text),
          :ready <- prompt_submit_status(state),
@@ -859,10 +944,10 @@ defmodule MingaEditor.Commands.Agent do
       :ordinary ->
         NoticeWorkflow.publish(state, "That Agent turn is no longer active. Your draft was kept.")
 
-      {:blocked, message} ->
-        NoticeWorkflow.publish(state, message)
+      :read_files ->
+        resolve_off_editor(state, kind, text, target)
 
-      {:error, message} ->
+      {:blocked, message} ->
         NoticeWorkflow.publish(state, message)
     end
   catch
@@ -875,8 +960,8 @@ defmodule MingaEditor.Commands.Agent do
       {:ok, resolved} ->
         deliver_composer(state, resolved, :follow_up)
 
-      {:error, msg} ->
-        NoticeWorkflow.publish(state, msg)
+      :read_files ->
+        resolve_off_editor(state, :follow_up, text, :current)
     end
   end
 
@@ -889,10 +974,105 @@ defmodule MingaEditor.Commands.Agent do
   defp deliver_composer(state, resolved, kind) do
     case DraftWorkflow.submission(state) do
       {:error, message} ->
-        NoticeWorkflow.publish(state, message)
+        hold_or_refuse(state, delivery_kind(state, kind), resolved, message)
 
       submission ->
-        deliver_composer_input(state, kind, resolved, submission)
+        # A press never overtakes one already waiting its turn.
+        if DraftWorkflow.holding?(state),
+          do:
+            hold_or_refuse(
+              state,
+              delivery_kind(state, kind),
+              resolved,
+              "Wait for the earlier message to be queued."
+            ),
+          else: deliver_composer_input(state, kind, resolved, submission)
+    end
+  end
+
+  # A press made while the draft's own bookkeeping is busy (loading, or answering
+  # an earlier queue) waits for it (#4260); every other refusal is reported.
+  @spec hold_or_refuse(
+          state(),
+          :send_now | :steering | :follow_up,
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          String.t()
+        ) :: state()
+  defp hold_or_refuse(state, kind, resolved, message) do
+    case DraftWorkflow.hold_while_busy(state, kind, resolved) do
+      {:held, held} -> held
+      :not_busy -> NoticeWorkflow.publish(state, message)
+    end
+  end
+
+  @spec delivery_kind(state(), :steering | :follow_up) :: :send_now | :steering | :follow_up
+  defp delivery_kind(%{frontend: %{composer_send_now?: true}}, _kind), do: :send_now
+  defp delivery_kind(_state, kind), do: kind
+
+  @doc """
+  Delivers a send that waited in line, with the content from its key press.
+
+  It goes only while the composer holds exactly the pressed text, so sending, which clears the composer, never takes unsent typing, or the text of a press waiting behind it, with it. Otherwise nothing is sent, the composer keeps everything, the presses behind it stop waiting and one line says why. A send whose conversation is no longer in front is not sent either.
+  """
+  @spec deliver_held_send(
+          state(),
+          non_neg_integer(),
+          {:send_now | :steering | :follow_up, String.t() | [ReqLLM.Message.ContentPart.t()],
+           DraftSave.press()}
+        ) :: state()
+  def deliver_held_send(state, owner, {_kind, _content, {_source, raw, _marker}} = press) do
+    cond do
+      not DraftWorkflow.active_owner?(state, owner) ->
+        state
+        |> DraftWorkflow.drop_held(owner)
+        |> NoticeWorkflow.publish(
+          "A message was not sent because its conversation is no longer in front. Its text is still in that composer."
+        )
+
+      DraftWorkflow.only_pressed_text?(state, raw) ->
+        deliver_held_in_front(state, owner, press, DraftWorkflow.submission(state))
+
+      true ->
+        state
+        |> DraftWorkflow.drop_held(owner)
+        |> NoticeWorkflow.publish(
+          "Not sent: the message changed after you pressed send. Press send again."
+        )
+    end
+  end
+
+  @spec deliver_held_in_front(
+          state(),
+          non_neg_integer(),
+          {:send_now | :steering | :follow_up, String.t() | [ReqLLM.Message.ContentPart.t()],
+           DraftSave.press()},
+          term()
+        ) :: state()
+  defp deliver_held_in_front(state, owner, _press, {:error, message}),
+    do: state |> DraftWorkflow.drop_held(owner) |> NoticeWorkflow.publish(message)
+
+  defp deliver_held_in_front(state, owner, {kind, content, press}, submission) do
+    state
+    |> deliver_held_input(kind, content, submission, press)
+    |> DraftWorkflow.release_next(owner)
+  end
+
+  @spec deliver_held_input(
+          state(),
+          :send_now | :steering | :follow_up,
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          :ordinary
+          | {:remote, DraftSave.target()}
+          | {:attached, DraftSave.target(), [MingaAgent.DraftAttachment.identity()]},
+          DraftSave.press()
+        ) :: state()
+  defp deliver_held_input(state, :send_now, content, submission, _press),
+    do: deliver_unqueued_composer(state, :send_now, content, submission)
+
+  defp deliver_held_input(state, kind, content, submission, press) do
+    case DraftWorkflow.queue(state, kind, content, :current, press) do
+      {:saved, updated} -> updated
+      :ordinary -> deliver_unqueued_composer(state, kind, content, submission)
     end
   end
 
@@ -1202,15 +1382,15 @@ defmodule MingaEditor.Commands.Agent do
   defp provider_startup_failed_message(error),
     do: "Failed to start agent: #{String.trim_trailing(error, ".")}"
 
+  # Plain text needs nothing resolved. Text that names files must be read, which
+  # can block, so a worker does it (`:read_files`) instead of the Editor (#4260).
   @spec resolve_prompt_for_session(state(), String.t(), String.t()) ::
-          {:ok, String.t() | [ReqLLM.Message.ContentPart.t()]} | {:error, String.t()}
+          {:ok, String.t()} | :read_files
   defp resolve_prompt_for_session(state, text, _model) do
-    if remote_session?(state) do
-      {:ok, text}
-    else
-      # minga:allow-blocking — Editor, once per local prompt submit to resolve file mentions for the active model
-      selection = Session.model_selection(Runtime.active_session(state.shell_runtime))
-      resolve_mentions(text, model_selection: selection)
+    cond do
+      remote_session?(state) -> {:ok, text}
+      FileMention.extract_mentions(text) == [] -> {:ok, text}
+      true -> :read_files
     end
   end
 
@@ -1272,12 +1452,6 @@ defmodule MingaEditor.Commands.Agent do
           "Agent error: #{inspect(reason)}"
         )
     end
-  end
-
-  @spec resolve_mentions(String.t(), keyword()) ::
-          {:ok, String.t()} | {:ok, [ReqLLM.Message.ContentPart.t()]} | {:error, String.t()}
-  defp resolve_mentions(text, opts) do
-    FileMention.resolve_prompt(text, Minga.Project.workspace_root(), opts)
   end
 
   @spec project_root() :: String.t() | nil
@@ -1412,10 +1586,10 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Queues the current input as a follow-up; submits normally when agent is idle."
   @spec scope_queue_follow_up(state()) :: state()
   def scope_queue_follow_up(state) do
-    panel = state.workspace.agent_ui.panel
+    text = pressed_text(state)
 
     cond do
-      PromptBuffer.input_empty?(panel) ->
+      String.trim(text) == "" ->
         state
 
       Runtime.active_session(state.shell_runtime) == nil ->
@@ -1428,8 +1602,6 @@ defmodule MingaEditor.Commands.Agent do
         :thinking,
         :tool_executing
       ] ->
-        text = PromptBuffer.prompt_text(panel)
-
         case {SlashCommand.indented_credential_command?(text), SlashCommand.slash_command?(text)} do
           {true, _} ->
             reject_indented_credential_command(state)

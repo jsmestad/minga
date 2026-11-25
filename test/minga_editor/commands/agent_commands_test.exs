@@ -650,12 +650,44 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
           |> Panel.set_provider_name("anthropic")
         end)
 
-      new_state = AgentCommands.submit_prompt(state)
+      # Mentioned files are read off the Editor; the answer comes back as a message.
+      pressed = AgentCommands.submit_prompt(state)
+      assert_receive {:composer_mentions_read, read_press, result}
+      new_state = AgentCommands.deliver_read_mentions(pressed, read_press, result)
 
       assert new_state.shell_runtime.state.notice.message =~ "Cannot resolve file mentions"
 
       assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) ==
                "@missing.ex explain"
+
+      refute_received {:readiness_session_prompt, _prompt}
+    end
+
+    test "a message whose files were read goes only if its composer still holds exactly the pressed text" do
+      session = start_supervised!({ReadinessSession, self()})
+
+      state =
+        base_state(session: session)
+        |> project_prompt_connection(session, :configured, :running)
+        |> AgentCommands.input_paste("@missing.ex explain")
+        |> replace_panel(fn panel ->
+          panel
+          |> Panel.set_credentials_configured(true)
+          |> Panel.set_model_name("anthropic:claude-sonnet-4-20250514")
+          |> Panel.set_provider_name("anthropic")
+        end)
+
+      pressed = AgentCommands.submit_prompt(state)
+      assert_receive {:composer_mentions_read, read_press, _result}
+
+      # Typing after the press changes the composer, so the read answer sends nothing.
+      edited = AgentCommands.input_paste(pressed, " more")
+      kept = AgentCommands.deliver_read_mentions(edited, read_press, {:ok, "resolved"})
+
+      assert kept.shell_runtime.state.notice.message =~ "Not sent"
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(kept.workspace.agent_ui.panel) ==
+               "@missing.ex explain more"
 
       refute_received {:readiness_session_prompt, _prompt}
     end

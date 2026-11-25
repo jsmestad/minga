@@ -9,6 +9,29 @@ defmodule MingaEditor.Agent.DraftSave do
   @type marker :: {non_neg_integer(), DraftSnapshot.position()}
   @type revision :: non_neg_integer()
   @type queue_admission :: {pos_integer(), String.t(), TurnExecution.prompt_kind()}
+
+  @typedoc """
+  What a key press took from the composer: the text to send (pasted blocks expanded), the raw composer text it covers (pasted blocks as their placeholders), and the composer marker at the press.
+
+  Text that an earlier press already took, but whose queue has not been confirmed yet, is not part of a later press (`unsubmitted/2`), so no two presses ever share text.
+  """
+  @type press :: {source :: String.t(), raw :: String.t(), marker()}
+
+  @typedoc """
+  A key press the composer's own draft bookkeeping could not take yet, held until that bookkeeping answers. Each carries its content and `t:press/0`, so what runs later is exactly what was pressed.
+
+    * `{:queue, target, kind, content, press}`: a queue or steer for the displayed working turn, pressed while the draft was saving, loading, or answering an earlier queue. It runs in the draft workflow.
+    * `{:send, kind, content, press}`: a send pressed while the saved draft was loading. The Editor delivers it, as it would have at the press.
+  """
+  @type held_press ::
+          {:queue, MingaAgent.Session.queue_target(), TurnExecution.prompt_kind(), held_content(),
+           press()}
+          | {:send, :send_now | TurnExecution.prompt_kind(), held_content(), press()}
+
+  @typedoc """
+  A held press's content, or `{:resolving, ref}` while its file mentions are read off the Editor. A press waits for its own content before it can run.
+  """
+  @type held_content :: TurnExecution.content() | {:resolving, reference()}
   @type request ::
           {:loading, reference(), marker()}
           | {:ready, revision(), marker() | nil}
@@ -34,6 +57,9 @@ defmodule MingaEditor.Agent.DraftSave do
           timer: reference() | nil,
           offer: pos_integer() | nil,
           retirement: {reference(), TurnExecution.queue_receipt()} | nil,
+          held_presses: [held_press()],
+          queued_raw: String.t() | nil,
+          next_input: pos_integer() | nil,
           rearm_on_save_failure: boolean(),
           attachments: [DraftSnapshot.attachment()]
         }
@@ -46,6 +72,9 @@ defmodule MingaEditor.Agent.DraftSave do
     :timer,
     :offer,
     :retirement,
+    :queued_raw,
+    :next_input,
+    held_presses: [],
     attachments: [],
     rearm_on_save_failure: false
   ]
@@ -159,20 +188,155 @@ defmodule MingaEditor.Agent.DraftSave do
 
   def begin_recall(%__MODULE__{}, _ref, _marker), do: :pending
 
-  @doc "Binds a queue submission identity to the original live composer marker and revision."
-  @spec begin_queue(t(), reference(), marker(), queue_admission()) ::
+  @doc """
+  Binds a queue submission identity to the original live composer marker and revision. `raw` is the composer text the queue takes, which `unsubmitted/2` leaves out of later presses until the queue is answered.
+
+  A new press cannot overtake a held one: presses are held only while the draft is busy (`hold_press/2`), and a busy draft answers `:pending` here, so the new press joins the back. A released press starts here while the rest wait.
+  """
+  @spec begin_queue(t(), reference(), marker(), queue_admission(), String.t()) ::
           {:ok, revision(), t()} | :pending
   def begin_queue(
         %__MODULE__{request: {:ready, revision, previous}, retirement: nil} = save,
         ref,
         marker,
-        attempt
-      ) do
+        attempt,
+        raw
+      )
+      when is_binary(raw) do
     {:ok, revision,
-     %{save | request: {:queueing, ref, revision, previous, marker, attempt}, timer: nil}}
+     %{
+       save
+       | request: {:queueing, ref, revision, previous, marker, attempt},
+         timer: nil,
+         queued_raw: raw
+     }}
   end
 
-  def begin_queue(%__MODULE__{}, _ref, _marker, _attempt), do: :pending
+  def begin_queue(%__MODULE__{}, _ref, _marker, _attempt, _raw), do: :pending
+
+  @doc """
+  The raw composer text an earlier press has already taken and not yet seen answered: the queue in flight, then every held press in order.
+  """
+  @spec submitted(t() | nil) :: [String.t()]
+  def submitted(%__MODULE__{request: {:queueing, _, _, _, _, _}, queued_raw: raw} = save)
+      when is_binary(raw),
+      do: [raw | held_raws(save)]
+
+  def submitted(%__MODULE__{} = save), do: held_raws(save)
+  def submitted(nil), do: []
+
+  @spec held_raws(t()) :: [String.t()]
+  defp held_raws(%__MODULE__{held_presses: presses}),
+    do: Enum.map(presses, &press_raw/1)
+
+  @spec press_raw(held_press()) :: String.t()
+  defp press_raw({:queue, _target, _kind, _content, {_source, raw, _marker}}), do: raw
+  defp press_raw({:send, _kind, _content, {_source, raw, _marker}}), do: raw
+
+  @doc """
+  The part of the raw composer text no earlier press has taken: `text` with each `submitted/1` prefix removed in order. If the composer no longer starts with them (the user edited text that was already pressed), the whole text is returned.
+  """
+  @spec unsubmitted(t() | nil, String.t()) :: String.t()
+  def unsubmitted(save, text) when is_binary(text) do
+    Enum.reduce_while(submitted(save), text, fn prefix, rest ->
+      if String.starts_with?(rest, prefix),
+        do: {:cont, binary_part(rest, byte_size(prefix), byte_size(rest) - byte_size(prefix))},
+        else: {:halt, text}
+    end)
+  end
+
+  @doc """
+  Holds a press the draft cannot take yet, so it runs when the draft answers instead of being refused.
+
+  A queue or steer waits while the draft is saving, loading, answering an earlier queue or retiring its receipt; a send waits only for the load. Presses wait in order, and once one is held every later press joins the back, so none overtakes another. Every other request in flight (a recall, an attachment, a submission) still refuses, because it changes what the composer holds. Whoever ends a request without `loaded/4`, `saved/3`, `failed/3` or the queue answer (`rebind_writer/2`, `keep_held/2`) carries the presses to `release_held_press/1`.
+  """
+  @spec hold_press(t(), held_press()) :: {:ok, t()} | :pending
+  def hold_press(%__MODULE__{} = save, press) do
+    if holds?(save, elem(press, 0)),
+      do: {:ok, %{save | held_presses: save.held_presses ++ [press]}},
+      else: :pending
+  end
+
+  @spec holds?(t(), :queue | :send) :: boolean()
+  defp holds?(%__MODULE__{held_presses: [_ | _]}, _tag), do: true
+  defp holds?(%__MODULE__{request: {:loading, _, _}}, _tag), do: true
+  defp holds?(%__MODULE__{request: {:saving, _, _, _, _}}, :queue), do: true
+  defp holds?(%__MODULE__{request: {:queueing, _, _, _, _, _}}, :queue), do: true
+  defp holds?(%__MODULE__{request: {:ready, _, _}, retirement: {_, _}}, :queue), do: true
+  defp holds?(%__MODULE__{}, _tag), do: false
+
+  @doc """
+  Holds a press whose file mentions are still being read, whatever the draft is doing: it runs, in its place in line, once `resolved/3` gives it its content.
+  """
+  @spec hold_resolving(t(), held_press()) :: t()
+  def hold_resolving(%__MODULE__{held_presses: presses} = save, press),
+    do: %{save | held_presses: presses ++ [press]}
+
+  @doc "Gives a press its resolved content, or removes it with `:failed`. `:stale` when no press waits on `ref`."
+  @spec resolved(t(), reference(), {:ok, TurnExecution.content()} | :failed) ::
+          {:ok, t()} | :stale
+  def resolved(%__MODULE__{held_presses: presses} = save, ref, result) do
+    case Enum.split_while(presses, &(content(&1) != {:resolving, ref})) do
+      {_before, []} ->
+        :stale
+
+      # A press whose files cannot be read leaves the line with every press behind
+      # it, since their text was taken after its text, which stays in the composer.
+      {before, [_press | _rest]} when result == :failed ->
+        {:ok, %{save | held_presses: before}}
+
+      {before, [press | rest]} ->
+        {:ok, %{save | held_presses: before ++ resolve(press, result) ++ rest}}
+    end
+  end
+
+  @spec content(held_press()) :: held_content()
+  defp content({:queue, _target, _kind, content, _press}), do: content
+  defp content({:send, _kind, content, _press}), do: content
+
+  @spec resolve(held_press(), {:ok, TurnExecution.content()}) :: [held_press()]
+
+  defp resolve({:queue, target, kind, _content, press}, {:ok, content}),
+    do: [{:queue, target, kind, content, press}]
+
+  defp resolve({:send, kind, _content, press}, {:ok, content}),
+    do: [{:send, kind, content, press}]
+
+  @doc "Drops every held press; their text stays in the composer."
+  @spec drop_held(t()) :: t()
+  def drop_held(%__MODULE__{} = save), do: %{save | held_presses: []}
+
+  @doc "Carries held presses onto a draft whose load was issued again."
+  @spec keep_held(t(), t() | nil) :: t()
+  def keep_held(%__MODULE__{} = save, %__MODULE__{held_presses: presses}),
+    do: %{save | held_presses: presses}
+
+  def keep_held(%__MODULE__{} = save, nil), do: save
+
+  @doc """
+  Releases the first held press once the draft has answered: `{:run, press, save}` when the composer is ready (the rest stay held, in order), `{:drop, save}` when the answer left it unable to take presses (all of them are dropped; their text is still in the composer), and `:none` when nothing is held or the draft is still busy.
+  """
+  @spec release_held_press(t()) :: {:run, held_press(), t()} | {:drop, t()} | :none
+  def release_held_press(%__MODULE__{held_presses: []}), do: :none
+
+  # The first press waits for its own content before anything runs.
+  def release_held_press(%__MODULE__{held_presses: [{:queue, _, _, {:resolving, _}, _} | _]}),
+    do: :none
+
+  def release_held_press(%__MODULE__{held_presses: [{:send, _, {:resolving, _}, _} | _]}),
+    do: :none
+
+  def release_held_press(%__MODULE__{request: {:saving, _, _, _, _}}), do: :none
+  def release_held_press(%__MODULE__{request: {:loading, _, _}}), do: :none
+  def release_held_press(%__MODULE__{request: {:queueing, _, _, _, _, _}}), do: :none
+  def release_held_press(%__MODULE__{request: {:ready, _, _}, retirement: {_, _}}), do: :none
+
+  def release_held_press(
+        %__MODULE__{request: {:ready, _, _}, held_presses: [press | rest]} = save
+      ),
+      do: {:run, press, %{save | held_presses: rest}}
+
+  def release_held_press(%__MODULE__{} = save), do: {:drop, %{save | held_presses: []}}
 
   @doc "Moves only a pending queue acknowledgement to the replacement owner of the same record."
   @spec rebind_queue(t(), target(), pid()) ::
@@ -195,24 +359,38 @@ defmodule MingaEditor.Agent.DraftSave do
   @doc "Clears only the attachment identities admitted by this acknowledged queue operation."
   @spec queue_saved(t(), reference(), revision(), marker() | nil) :: t()
   def queue_saved(
-        %__MODULE__{request: {:queueing, ref, _, _, _, _}} = save,
+        %__MODULE__{request: {:queueing, ref, _, _, _, {sequence, _token, _kind}}} = save,
         ref,
         revision,
         marker
       ),
-      do: %{save | request: {:ready, revision, marker}, attachments: [], offer: next_offer()}
+      do: %{
+        save
+        | request: {:ready, revision, marker},
+          attachments: [],
+          offer: next_offer(),
+          next_input: sequence + 1
+      }
+
+  @doc """
+  The turn's next input number after the queues this composer has seen confirmed, or `nil` before the first. A press held behind a queue takes the later of this and the number the turn shows.
+  """
+  @spec next_input(t()) :: pos_integer() | nil
+  def next_input(%__MODULE__{next_input: next}), do: next
 
   @doc "Retires a refused submission without erasing the original live draft."
   @spec queue_refused(t(), reference(), :retryable | :blocked) :: t()
+  # A refused queue's text stays in the composer, so every press waiting behind it
+  # (whose text was taken after that text) stops waiting too; all of it stays.
   def queue_refused(
         %__MODULE__{request: {:queueing, ref, revision, previous, _, _}} = save,
         ref,
         :retryable
       ),
-      do: %{save | request: {:ready, revision, previous}}
+      do: %{save | request: {:ready, revision, previous}, held_presses: []}
 
   def queue_refused(%__MODULE__{request: {:queueing, ref, _, _, _, _}} = save, ref, :blocked),
-    do: %{save | request: :blocked}
+    do: %{save | request: :blocked, held_presses: []}
 
   @doc "Installs a confirmed recall or prevents autosave from overwriting a conflicting saved draft."
   @spec recall_result(
