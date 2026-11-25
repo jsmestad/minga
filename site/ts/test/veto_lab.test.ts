@@ -26,9 +26,15 @@ import { missing, readPageLab } from "./support/page_copy.ts";
 const PAGE = "learn/remote.html";
 const lab = readPageLab(PAGE, "data-remote-lab");
 
+/** The visible text of a piece of page markup. Tags are removed until none is left, so a tag that only appears once another is gone cannot survive. */
 function plain(html: string): string {
-  return html
-    .replace(/<[^>]*>/g, "")
+  let text = html;
+  let before: string;
+  do {
+    before = text;
+    text = text.replace(/<[^>]*>/g, "");
+  } while (text !== before);
+  return text
     .replaceAll("&lt;", "<")
     .replaceAll("&gt;", ">")
     .replaceAll("&quot;", '"')
