@@ -20,6 +20,10 @@ defmodule MingaEditor.Input.WhichKey do
   @key_backspace 127
   @key_space 32
 
+  # Escape leaves Insert, Visual and the other Vim modes. A completion or signature-help popup takes the first one,
+  # so the pill allows a few before giving up.
+  @escapes_to_normal 3
+
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
@@ -74,19 +78,18 @@ defmodule MingaEditor.Input.WhichKey do
   In Vim, Normal mode starts the leader with `SPC`; another mode returns to Normal first. The CUA space leader starts at the leader root. A picker, a minibuffer prompt or the `:` command line shows its own scope's keys instead, because typing there edits text.
   """
   @spec open(state()) :: state()
+  # The keys come from the same layers a key press resolves through, so a user override or a picker with nothing to
+  # filter (whose keys are j, k and q) lists what its keys do.
   def open(%{shell_runtime: %{state: %{modal: {:picker, %{picker_ui: picker}}}}} = state) do
-    context = MingaEditor.PickerUI.picker_keymap_context(state, picker)
-
-    WhichKeyWorkflow.open_scope(
-      state,
-      Minga.Keymap.Scope.Picker.keymap(:insert, context),
-      "Picker"
-    )
+    node = MingaEditor.State.Picker.keymap_node(picker, state.interaction.keymap_server)
+    WhichKeyWorkflow.open_scope(state, node, "Picker")
   end
 
-  def open(%{shell_runtime: %{state: %{modal: {:prompt, _payload}}}} = state),
-    do:
-      WhichKeyWorkflow.open_scope(state, Minga.Keymap.Scope.Prompt.keymap(:insert, []), "Prompt")
+  def open(%{shell_runtime: %{state: %{modal: {:prompt, _payload}}}} = state) do
+    context = [keymap_server: state.interaction.keymap_server, prompt_list: false]
+    node = Minga.Keymap.Scope.keymap_node(:prompt, :insert, context)
+    WhichKeyWorkflow.open_scope(state, node, "Prompt")
+  end
 
   def open(state) do
     case {Minga.Editing.active_model(state), Minga.Editing.mode(state)} do
@@ -101,35 +104,33 @@ defmodule MingaEditor.Input.WhichKey do
         |> Commands.execute({:leader_start, root, ["SPC"]})
         |> WhichKeyWorkflow.reveal_now()
 
-      {_vim, :normal} ->
-        state
-        |> cancel_pending_leader()
-        |> Router.route_key(@key_space, 0)
-        |> WhichKeyWorkflow.reveal_now()
-
-      {_vim, _other} ->
-        state |> Router.route_key(@key_escape, 0) |> open_from_normal()
+      {_vim, _mode} ->
+        state |> return_to_normal(@escapes_to_normal) |> open_from_normal()
     end
   end
 
-  # A leader already pending (SPC typed, or the panel open at a group) starts over at the root: another SPC there
-  # would run `SPC SPC` instead of opening the top level.
-  @spec cancel_pending_leader(state()) :: state()
-  defp cancel_pending_leader(state) do
-    if Minga.Editing.in_leader?(state) do
+  @spec return_to_normal(state(), non_neg_integer()) :: state()
+  defp return_to_normal(state, 0), do: state
+
+  defp return_to_normal(state, tries) do
+    if Minga.Editing.mode(state) == :normal,
+      do: state,
+      else: state |> Router.route_key(@key_escape, 0) |> return_to_normal(tries - 1)
+  end
+
+  # Normal mode starts the leader with SPC. Anything pending first (a leader sequence, `r` or `f` waiting for its
+  # target, a count, a prefix like `g`) is dropped, so the SPC starts the leader instead of finishing what was pending.
+  @spec open_from_normal(state()) :: state()
+  defp open_from_normal(state) do
+    if Minga.Editing.mode(state) == :normal do
       state
       |> WhichKeyWorkflow.dismiss()
-      |> MingaEditor.Editing.update_mode_state(&Minga.Mode.cancel_leader/1)
+      |> MingaEditor.Editing.update_mode_state(&Minga.Mode.clear_pending/1)
+      |> Router.route_key(@key_space, 0)
+      |> WhichKeyWorkflow.reveal_now()
     else
       state
     end
-  end
-
-  @spec open_from_normal(state()) :: state()
-  defp open_from_normal(state) do
-    if Minga.Editing.mode(state) == :normal,
-      do: state |> Router.route_key(@key_space, 0) |> WhichKeyWorkflow.reveal_now(),
-      else: state
   end
 
   @doc """

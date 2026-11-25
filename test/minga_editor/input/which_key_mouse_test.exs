@@ -94,6 +94,19 @@ defmodule MingaEditor.Input.WhichKeyMouseTest do
     refute picker_open?(ctx)
   end
 
+  test "with r or f waiting for its target, the mode pill opens which-key and changes nothing" do
+    for pending <- ["r", "f"] do
+      ctx = start_editor("hello world")
+      send_keys_sync(ctx, pending)
+
+      send_gui_action(ctx, {:execute_command, "which_key_open"})
+
+      assert shown_path(ctx) == "SPC"
+      assert buffer_content(ctx) == "hello world"
+      assert buffer_cursor(ctx) == {0, 0}
+    end
+  end
+
   test "over a picker, a typed key goes to the picker and closes the picker's keys" do
     ctx = start_editor("hello")
     send_keys_sync(ctx, "<SPC>ff")

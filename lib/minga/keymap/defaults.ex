@@ -251,7 +251,6 @@ defmodule Minga.Keymap.Defaults do
   # macOS menu bar puts them in the shortcut column, so the two teach each other.
   @platform_keys %{
     agent_abort: "⌘.",
-    command_palette: "⌘K",
     save: "⌘S",
     undo: "⌘Z",
     quit: "⌘W",

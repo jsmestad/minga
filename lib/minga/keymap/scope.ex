@@ -252,6 +252,25 @@ defmodule Minga.Keymap.Scope do
     end
   end
 
+  @doc """
+  Returns the keys a scope answers in a vim state as one trie: user overrides over the scope's own keys over its shared keys.
+
+  It is built from the layers `resolve_key/4` walks, so each key in it does what pressing that key does. Which-key lists a prompt or picker's keys from it.
+  """
+  @spec keymap_node(scope_name(), vim_state(), context()) :: Bindings.node_t()
+  def keymap_node(scope_name, vim_state, context \\ []) do
+    case module_for(scope_name) do
+      nil ->
+        Bindings.new()
+
+      mod ->
+        mod
+        |> layers(scope_name, vim_state, context)
+        |> Enum.reverse()
+        |> Enum.reduce(&Bindings.overlay/2)
+    end
+  end
+
   @spec resolve_through_layers(module(), scope_name(), vim_state(), Bindings.key(), context()) ::
           resolve_result()
   defp resolve_through_layers(mod, scope_name, vim_state, key, context) do

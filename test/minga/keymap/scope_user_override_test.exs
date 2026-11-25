@@ -195,4 +195,38 @@ defmodule Minga.Keymap.Scope.UserOverrideTest do
                Scope.resolve_key(:agent, :normal, {?y, 0}, keymap_server: server_b)
     end
   end
+
+  describe "keymap_node/3" do
+    test "answers every key the way resolve_key/4 does, with a user override on top" do
+      server = test_keymap_server()
+      KeymapActive.bind(server, {:picker, :insert}, "C-o", :my_picker_open, "Open mine")
+
+      for vim_state <- [:insert, :normal] do
+        context = [keymap_server: server, picker_split: false]
+        node = Scope.keymap_node(:picker, vim_state, context)
+
+        assert map_size(node.children) > 0
+
+        for {key, child} <- node.children do
+          expected = Scope.resolve_key(:picker, vim_state, key, context)
+
+          case expected do
+            {:command, command} -> assert child.command == command
+            {:prefix, prefix} -> assert child.children == prefix.children
+          end
+        end
+      end
+
+      insert = Scope.keymap_node(:picker, :insert, keymap_server: server, picker_split: false)
+      assert %{command: :my_picker_open} = insert.children[{?o, 0x02}]
+    end
+  end
+
+  describe "the editor's ⌘." do
+    test "stops Minga from a file in Vim Normal and in CUA, as SPC a s does" do
+      for vim_state <- [:normal, :cua] do
+        assert {:command, :agent_abort} == Scope.resolve_key(:editor, vim_state, {?., 0x08})
+      end
+    end
+  end
 end
