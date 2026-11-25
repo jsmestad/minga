@@ -85,11 +85,42 @@ defmodule Minga.Keymap.GrammarTest do
     assert unmatched == @pending_conventions
   end
 
-  test "no keymap context binds a forbidden chord, including a focused staged Diff Review" do
-    forbidden =
-      KeyGrammar.overlay_inventory()
-      |> KeyGrammar.violations([])
-      |> Enum.filter(&(&1.rule == :forbidden_chord))
+  test "the inventory covers a focused staged Diff Review in Vim and in CUA", %{
+    inventory: inventory
+  } do
+    overlaid =
+      for %{overlay: :diff_review} = b <- inventory, into: MapSet.new(), do: {b.scope, b.state}
+
+    assert overlaid == MapSet.new([{:agent, :normal}, {:agent, :cua}])
+  end
+
+  test "the inventory covers the composer's start remedy under every remedy", %{
+    inventory: inventory
+  } do
+    assert %{scope: :agent, state: :input_normal, overlay: :none, keys: [{13, 0}]} =
+             Enum.find(
+               inventory,
+               &(&1.command == :agent_submit_or_newline and &1.state == :input_normal)
+             )
+  end
+
+  test "overlay allow-list entries match real bindings in their overlay", %{inventory: inventory} do
+    unmatched =
+      for {{overlay, state}, conventions} <- KeyGrammar.overlay_conventions(),
+          {key, commands, _why} <- conventions,
+          not Enum.any?(inventory, fn binding ->
+            binding.overlay == overlay and binding.state == state and binding.keys == [key] and
+              binding.command in commands
+          end),
+          do: {overlay, state, key}
+
+    assert unmatched == []
+  end
+
+  test "no keymap context binds a forbidden chord, including a focused staged Diff Review", %{
+    violations: violations
+  } do
+    forbidden = Enum.filter(violations, &(&1.rule == :forbidden_chord))
 
     assert forbidden == [], """
     Rule 6 has no exceptions: no function keys, three-modifier chords, or two of ⌃ ⌥ ⌘ together.
@@ -133,23 +164,36 @@ defmodule Minga.Keymap.GrammarTest do
     """
   end
 
-  describe "the CUA profile (ADR-0007)" do
-    # Classifies one synthetic binding; a live prompt is mapped explicitly because no built-in scope declares one yet.
-    defp rules_for(scope, state, keys, command) do
-      binding = %{scope: scope, state: state, keys: keys, command: command, origin: :effective}
+  # Classifies synthetic bindings; a live prompt is mapped explicitly because no built-in scope declares one yet.
+  defp rules_for(bindings) do
+    contexts = %{
+      {:editor, :cua} => :typing,
+      {:git_status, :cua} => :special_cua,
+      {:agent, :normal} => :special,
+      {:agent, :insert} => :typing,
+      {:agent, :cua} => :typing,
+      {:picker, :cua} => :picker
+    }
 
-      contexts = %{
-        {:editor, :cua} => :typing,
-        {:git_status, :cua} => :special_cua,
-        {:agent, :insert} => :typing,
-        {:picker, :cua} => :picker
+    bindings
+    |> Enum.map(fn {scope, state, overlay, keys, command} ->
+      %{
+        scope: scope,
+        state: state,
+        overlay: overlay,
+        keys: keys,
+        command: command,
+        origin: :effective
       }
+    end)
+    |> KeyGrammar.violations([], contexts)
+    |> Enum.map(& &1.rule)
+  end
 
-      [binding]
-      |> KeyGrammar.violations([], contexts)
-      |> Enum.map(& &1.rule)
-    end
+  defp rules_for(scope, state, keys, command),
+    do: rules_for([{scope, state, :none, keys, command}])
 
+  describe "the CUA profile (ADR-0007)" do
     test "listed desktop conventions pass in CUA states" do
       for {scope, keys, command} <- [
             {:editor, [{?c, @cmd}], :yank_visual_selection},
@@ -180,6 +224,52 @@ defmodule Minga.Keymap.GrammarTest do
              :editing_collision}
           ] do
         assert rules_for(scope, state, keys, command) == [rule], label
+      end
+    end
+  end
+
+  describe "a focused staged Diff Review" do
+    test "a key the review rebinds is not a second meaning underneath it" do
+      assert rules_for([
+               {:agent, :normal, :none, [{?y, 0}], :agent_copy_code_block},
+               {:agent, :normal, :diff_review, [{?y, 0}], :agent_accept_hunk}
+             ]) == []
+    end
+
+    test "a key with two meanings inside the review is a duplicate" do
+      assert rules_for([
+               {:agent, :normal, :diff_review, [{?y, 0}], :agent_accept_hunk},
+               {:agent, :normal, :diff_review, [{?y, 0}], :agent_copy_code_block}
+             ]) == [:duplicate_key]
+    end
+
+    test "listed review chords pass in the CUA review" do
+      for {keys, command} <- [
+            {[{13, @cmd}], :agent_accept_hunk},
+            {[{13, @ctrl}], :agent_accept_hunk},
+            {[{127, @cmd ||| @shift}], :agent_reject_all_hunks},
+            {[{57_353, @alt}], :agent_next_code_block}
+          ] do
+        assert rules_for([{:agent, :cua, :diff_review, keys, command}]) == [], inspect(keys)
+      end
+    end
+
+    test "review chords the allow-list does not cover still fail" do
+      for {label, state, overlay, keys, command, rule} <- [
+            {"listed chord outside the review", :cua, :none, [{13, @cmd}], :agent_accept_hunk,
+             :platform_key},
+            {"listed ⌃ chord outside the review", :cua, :none, [{13, @ctrl}], :agent_accept_hunk,
+             :unconventional_modifier},
+            {"listed chord with another meaning", :cua, :diff_review, [{13, @cmd}],
+             :agent_copy_message, :platform_key},
+            {"listed chord in the Vim review", :normal, :diff_review, [{13, @ctrl}],
+             :agent_accept_hunk, :normal_mode_modifier},
+            {"unlisted chord in the review", :cua, :diff_review, [{?g, @ctrl}],
+             :agent_accept_hunk, :unconventional_modifier},
+            {"function key in the review", :cua, :diff_review, [{0xF70A, 0}],
+             :agent_next_code_block, :forbidden_chord}
+          ] do
+        assert rules_for([{:agent, state, overlay, keys, command}]) == [rule], label
       end
     end
   end
