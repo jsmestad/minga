@@ -308,34 +308,46 @@ defmodule MingaEditor.Handlers.SessionRestore do
   # A file that was written after its swap holds newer text than the swap, so the swap's text is not put back.
   # It stays on disk, and the user is told where.
   @spec announce_held_back([Session.swap_entry()]) :: :ok
-  defp announce_held_back([]), do: :ok
-
   defp announce_held_back(entries) do
-    hint = unsaved_text_hint("; recover or discard it with")
-
-    Enum.each(entries, fn entry ->
-      Minga.API.message(
-        "#{entry.path} changed after its unsaved text was kept, so the text was not put back#{hint}"
-      )
-    end)
+    Enum.each(entries, fn entry -> Minga.API.message(held_back_line(entry.path)) end)
   end
 
   # Unsaved text that belongs somewhere else is never recovered into this start, so say that it exists.
   @spec announce_waiting_elsewhere(non_neg_integer()) :: :ok
-  defp announce_waiting_elsewhere(0), do: :ok
-
-  defp announce_waiting_elsewhere(1) do
-    Minga.API.message(
-      "Unsaved text of 1 other file is waiting; open its project or the file to recover it" <>
-        unsaved_text_hint(", or list it with")
-    )
+  defp announce_waiting_elsewhere(count) do
+    case waiting_elsewhere_line(count) do
+      nil -> :ok
+      line -> Minga.API.message(line)
+    end
   end
 
-  defp announce_waiting_elsewhere(count) do
-    Minga.API.message(
-      "Unsaved text of #{count} other files is waiting; open their project or the files to recover it" <>
-        unsaved_text_hint(", or list it with")
-    )
+  @doc """
+  The `*Messages*` line for unsaved text that a start held back because its file changed afterwards.
+
+  It names the key that lists the waiting text, read from the live keymap, so a rebind shows up in it.
+  """
+  @spec held_back_line(String.t()) :: String.t()
+  def held_back_line(path) when is_binary(path) do
+    hint = unsaved_text_hint("; recover or discard it with")
+    "#{path} changed after its unsaved text was kept, so the text was not put back#{hint}"
+  end
+
+  @doc """
+  The `*Messages*` line for unsaved text of `count` files that this start does not recover, or `nil` when there is none.
+
+  It names the key that lists the waiting text, read from the live keymap, so a rebind shows up in it.
+  """
+  @spec waiting_elsewhere_line(non_neg_integer()) :: String.t() | nil
+  def waiting_elsewhere_line(0), do: nil
+
+  def waiting_elsewhere_line(1) do
+    "Unsaved text of 1 other file is waiting; open its project or the file to recover it" <>
+      unsaved_text_hint(", or list it with")
+  end
+
+  def waiting_elsewhere_line(count) when is_integer(count) and count > 1 do
+    "Unsaved text of #{count} other files is waiting; open their project or the files to recover it" <>
+      unsaved_text_hint(", or list it with")
   end
 
   # Names the live binding of the list of waiting unsaved text, so a user override shows up here too.

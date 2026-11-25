@@ -260,6 +260,26 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
     assert Minga.Buffer.dirty?(recovered_buffer)
   end
 
+  describe "the lines a start writes about unsaved text it did not put back" do
+    test "say how many files are waiting and name the key that lists them" do
+      for {count, line} <- [
+            {0, nil},
+            {1,
+             "Unsaved text of 1 other file is waiting; open its project or the file to recover it, or list it with SPC q u"},
+            {3,
+             "Unsaved text of 3 other files is waiting; open their project or the files to recover it, or list it with SPC q u"}
+          ] do
+        assert SessionRestore.waiting_elsewhere_line(count) == line
+      end
+    end
+
+    test "say which file changed after its text was kept and name the same key" do
+      assert SessionRestore.held_back_line("/work/lib/a.ex") ==
+               "/work/lib/a.ex changed after its unsaved text was kept, so the text was not put back; " <>
+                 "recover or discard it with SPC q u"
+    end
+  end
+
   test "a deleted saved active file is not reopened as an empty buffer", %{tmp_dir: dir} do
     existing_path = Path.join(dir, "existing.ex")
     missing_path = Path.join(dir, "deleted.ex")
