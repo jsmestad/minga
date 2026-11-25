@@ -269,6 +269,15 @@ defmodule Minga.Config do
     end
   end
 
+  # Options a config file may still set from an older Minga. Setting one logs why it is gone instead of raising, so the
+  # rest of the config file still loads.
+  @retired_options %{
+    agent_notify_on:
+      "Minga alerts only when a task starts needing you while it is in the background; :agent_notify_terminal turns on the terminal's alert.",
+    agent_notify_debounce:
+      "Minga alerts once when a task starts needing you, so there is nothing to debounce."
+  }
+
   @doc """
   Sets an editor option.
 
@@ -281,7 +290,16 @@ defmodule Minga.Config do
       set :tab_width, 4
       set :line_numbers, :relative
   """
-  @spec set(Options.option_name(), term()) :: :ok
+  @spec set(Options.option_name() | atom(), term()) :: :ok
+  def set(name, _value) when is_map_key(@retired_options, name) do
+    Minga.Log.warning(
+      :config,
+      "#{inspect(name)} was removed and is ignored. #{Map.fetch!(@retired_options, name)}"
+    )
+
+    :ok
+  end
+
   def set(name, value) when is_atom(name) do
     server = options_server()
 

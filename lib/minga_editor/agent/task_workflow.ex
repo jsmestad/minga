@@ -79,10 +79,13 @@ defmodule MingaEditor.Agent.TaskWorkflow do
   def restarted(%EditorState{} = state, old, new) when is_pid(old) and is_pid(new),
     do: EditorState.replace_agent_task_session(state, old, new, now())
 
-  @doc "Stops following a session that ended."
+  @doc "Stops following a session that ended or was detached, withdrawing its alert first: a detached session lives on."
   @spec stopped(EditorState.t(), pid()) :: EditorState.t()
-  def stopped(%EditorState{} = state, session) when is_pid(session),
-    do: EditorState.forget_agent_task(state, session)
+  def stopped(%EditorState{} = state, session) when is_pid(session) do
+    state
+    |> withdraw_alert(session)
+    |> EditorState.forget_agent_task(session)
+  end
 
   @doc "Stops following every task on a remote node that disconnected."
   @spec node_disconnected(EditorState.t(), node()) :: EditorState.t()

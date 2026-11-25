@@ -22,7 +22,7 @@ defmodule MingaEditor.Frontend.Manager.AgentNotifications do
 
   @retry_withdrawal_ms 100
 
-  @doc "Posts an alert once per owner, or withdraws the alert with that identity admitted on this connection."
+  @doc "Posts an alert, replacing an owner's alert with another identity, or withdraws the alert with that identity admitted on this connection."
   @spec send_notification(State.t(), %{kind: kind(), id: id(), owner: pid()}) :: State.t()
   def send_notification(%{ready: false} = state, _event), do: state
 
@@ -33,20 +33,30 @@ defmodule MingaEditor.Frontend.Manager.AgentNotifications do
     end
   end
 
-  def send_notification(state, %{kind: :needs_you, id: id, owner: owner}) do
-    output = state.agent_notifications
+  def send_notification(state, %{kind: :needs_you, id: id, owner: owner} = event) do
+    case Map.get(state.agent_notifications.admitted, owner) do
+      {^id, _ref} ->
+        state
 
-    if Map.has_key?(output.admitted, owner) do
-      state
-    else
-      case write(state, :needs_you, id) do
-        {:accepted, state} ->
-          admitted = Map.put(output.admitted, owner, {id, Process.monitor(owner)})
-          %{state | agent_notifications: %{output | admitted: admitted}}
+      # The editor lost the old identity (it restarted, or detached and reattached the session): the new alert replaces it.
+      {_old, ref} ->
+        state |> owner_down(owner, ref) |> send_notification(event)
 
-        {_result, state} ->
-          state
-      end
+      nil ->
+        admit(state, id, owner)
+    end
+  end
+
+  @spec admit(State.t(), id(), pid()) :: State.t()
+  defp admit(state, id, owner) do
+    case write(state, :needs_you, id) do
+      {:accepted, state} ->
+        output = state.agent_notifications
+        admitted = Map.put(output.admitted, owner, {id, Process.monitor(owner)})
+        %{state | agent_notifications: %{output | admitted: admitted}}
+
+      {_result, state} ->
+        state
     end
   end
 

@@ -110,6 +110,21 @@ defmodule MingaEditor.Agent.TaskWorkflowTest do
       refute_received {:minga_event, :agent_desktop_notification, _alert}
     end
 
+    test "a session that stops being followed while it needs you withdraws its alert, even though it lives on" do
+      ctx = alerting_editor()
+      foreground(ctx, :background)
+      asking = FakeTaskSession.start(ctx.editor, "Add tests", :needs_you)
+      assert_receive {:minga_event, :agent_desktop_notification, %{kind: :needs_you, id: id}}
+
+      # A detached remote session stays alive, so the frontend's monitor on it never fires.
+      :sys.replace_state(ctx.editor, &MingaEditor.Agent.TaskWorkflow.stopped(&1, asking))
+
+      assert_receive {:minga_event, :agent_desktop_notification,
+                      %{kind: :withdrawn, id: ^id, owner: ^asking}}
+
+      assert :error = ctx |> tasks() |> Tasks.fetch(asking)
+    end
+
     test "a task that needs you while Minga is in the foreground, or cannot tell, alerts nothing" do
       ctx = alerting_editor()
 

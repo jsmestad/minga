@@ -261,6 +261,40 @@ defmodule MingaEditor.Frontend.ManagerTest do
     refute_received {:desktop_output, _, ^dropped_clear}
   end
 
+  test "a new alert identity for a session that already has one withdraws the old alert and posts the new one" do
+    name = unique_name()
+    parent = self()
+
+    commander = fn _port, batch, [:nosuspend] ->
+      send(parent, {:desktop_output, batch})
+      true
+    end
+
+    {pid, fake_port} = start_connected(name, port_commander: commander)
+    mark_ready(name, pid, fake_port)
+
+    desktop = fn kind, id ->
+      send(pid, {:minga_event, :agent_desktop_notification, %{kind: kind, id: id, owner: parent}})
+      Protocol.encode_agent_desktop_notification(kind, id)
+    end
+
+    first = desktop.(:needs_you, <<1::128>>)
+    assert_receive {:desktop_output, ^first}
+
+    # The same identity again posts nothing more.
+    _ = desktop.(:needs_you, <<1::128>>)
+    # The editor restarted or reattached the session and lost the first identity.
+    second = desktop.(:needs_you, <<2::128>>)
+    withdrawn = Protocol.encode_agent_desktop_notification(:withdrawn, <<1::128>>)
+    assert_receive {:desktop_output, ^withdrawn}
+    assert_receive {:desktop_output, ^second}
+    refute_received {:desktop_output, ^first}
+
+    # Withdrawing the new identity removes it.
+    second_withdrawn = desktop.(:withdrawn, <<2::128>>)
+    assert_receive {:desktop_output, ^second_withdrawn}
+  end
+
   describe "subscription behavior" do
     test "subscribers receive decoded events" do
       name = unique_name()
