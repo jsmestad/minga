@@ -45,10 +45,14 @@ public struct AgentToolCallCard: View {
 
     private var hasResult: Bool { result?.isEmpty == false || resultLines?.isEmpty == false }
 
+    /// The mark is a shape, which takes all the room it is offered, so the step gives it the modeline mark's size.
+    static let markSize: CGFloat = Typography.Step.micro.rawValue
+
     public var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                 StateMark(state: state)
+                    .frame(width: Self.markSize, height: Self.markSize)
 
                 Text(sentence)
                     .font(Typography.font(.body))

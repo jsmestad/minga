@@ -7,16 +7,20 @@ defmodule MingaEditor.Agent.Activity do
   plan, active action, tool count, and touched file set.
   """
 
+  alias Minga.RenderModel.UI.AgentChat.ToolStep
   alias MingaAgent.TodoItem
   alias MingaEditor.Agent.TaskFiles
   alias MingaAgent.Session.TurnExecution
+
+  @typedoc "A running tool: its start order, its name, and the sentence the conversation shows for it while it runs."
+  @type running_tool :: {pos_integer(), String.t(), String.t()}
 
   @type t :: %__MODULE__{
           todos: [TodoItem.t()],
           started_at: DateTime.t() | nil,
           active_action: String.t(),
           tool_count: non_neg_integer(),
-          running_tools: %{String.t() => {pos_integer(), String.t()}},
+          running_tools: %{String.t() => running_tool()},
           active_tool_id: String.t() | nil,
           file_paths: MapSet.t(String.t()),
           task_files: TaskFiles.t()
@@ -89,9 +93,13 @@ defmodule MingaEditor.Agent.Activity do
     %{activity | todos: todos}
   end
 
-  @doc "Records the identity and start order of a running tool."
-  @spec start_tool(t(), String.t(), String.t()) :: t()
-  def start_tool(%__MODULE__{running_tools: tools} = activity, id, name) do
+  @doc """
+  Records the identity and start order of a running tool.
+
+  The active action becomes the sentence the conversation shows for the same step (`ToolStep.sentence/3`), so the activity card and the transcript say one thing and no raw tool name reaches the user.
+  """
+  @spec start_tool(t(), String.t(), String.t(), map()) :: t()
+  def start_tool(%__MODULE__{running_tools: tools} = activity, id, name, args) do
     case tools do
       %{^id => _known} ->
         activity
@@ -100,12 +108,14 @@ defmodule MingaEditor.Agent.Activity do
         activity = start_turn(activity)
         count = activity.tool_count + 1
 
+        action = ToolStep.sentence(name, args, :running)
+
         %{
           activity
-          | running_tools: Map.put(tools, id, {count, name}),
+          | running_tools: Map.put(tools, id, {count, name, action}),
             active_tool_id: id,
             tool_count: count,
-            active_action: action(name)
+            active_action: action
         }
     end
   end
@@ -138,7 +148,8 @@ defmodule MingaEditor.Agent.Activity do
     {running_tools, count} =
       Enum.reduce(tools, {%{}, 0}, fn {id, name}, {running_tools, count} ->
         index = count + 1
-        {Map.put(running_tools, id, {index, name}), index}
+        # The Session's snapshot names the tools, not their arguments.
+        {Map.put(running_tools, id, {index, name, ToolStep.sentence(name, %{}, :running)}), index}
       end)
 
     activity = ensure_started_at(activity)
@@ -150,7 +161,7 @@ defmodule MingaEditor.Agent.Activity do
   def active_tool_name(%__MODULE__{active_tool_id: nil}), do: nil
 
   def active_tool_name(%__MODULE__{active_tool_id: id, running_tools: tools}) do
-    {_order, name} = Map.fetch!(tools, id)
+    {_order, name, _action} = Map.fetch!(tools, id)
     name
   end
 
@@ -194,15 +205,16 @@ defmodule MingaEditor.Agent.Activity do
   @spec file_count(t()) :: non_neg_integer()
   def file_count(%__MODULE__{} = activity), do: MapSet.size(activity.file_paths)
 
-  @spec project_tools(t(), %{String.t() => {pos_integer(), String.t()}}) :: t()
+  @spec project_tools(t(), %{String.t() => running_tool()}) :: t()
   defp project_tools(activity, running_tools) do
-    {id, {_order, name}} =
-      Enum.max_by(running_tools, fn {_id, {order, _name}} -> order end, fn -> {nil, {0, nil}} end)
+    {id, action} =
+      case Enum.max_by(running_tools, fn {_id, {order, _name, _action}} -> order end, fn ->
+             nil
+           end) do
+        {id, {_order, _name, action}} -> {id, action}
+        nil -> {nil, "Thinking"}
+      end
 
-    %{activity | running_tools: running_tools, active_tool_id: id, active_action: action(name)}
+    %{activity | running_tools: running_tools, active_tool_id: id, active_action: action}
   end
-
-  @spec action(String.t() | nil) :: String.t()
-  defp action(nil), do: "Thinking"
-  defp action(name), do: "Running #{name}"
 end

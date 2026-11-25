@@ -17,7 +17,7 @@ defmodule MingaEditor.Agent.ToolEventWorkflow do
   @spec started(EditorState.t(), String.t(), String.t(), map()) :: EditorState.t()
   def started(%EditorState{} = state, tool_call_id, name, args) do
     state
-    |> update_running_tools(&Activity.start_tool(&1, tool_call_id, name))
+    |> update_running_tools(&Activity.start_tool(&1, tool_call_id, name, args))
     |> start_tool_preview(name, args)
     |> MingaEditor.schedule_render(16)
   end

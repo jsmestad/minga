@@ -1856,6 +1856,23 @@ struct AgentToolOutcomeViewTests {
         #expect(try line.accessibilityLabel().string().hasPrefix(state.word))
     }
 
+    @Test("A collapsed tool step is one row tall, whatever room the conversation offers it",
+          arguments: [UInt8(1), 4, 5, 6])
+    func toolStepIsOneRowTall(wire: UInt8) {
+        let card = AgentToolCallCard(
+            messageID: 1, name: "find", summary: "*.ex",
+            step: Wire.ToolStep(text: "Found *.ex", state: wire), collapsed: true, autoApprovedScope: 0,
+            result: nil, resultLines: nil, previewLines: [], sendAction: nil
+        ).environment(\.themeColors, ThemeColors())
+        let hosting = NSHostingController(rootView: card)
+
+        // The conversation offers each row its full width and as much height as it wants.
+        let size = hosting.sizeThatFits(in: CGSize(width: 1_500, height: 2_000))
+
+        #expect(size.height > 0)
+        #expect(size.height <= 24, "the step is \(size.height) pt tall")
+    }
+
     @Test("Waiting header announces approval instead of executing and has no progress spinner")
     func waitingHeader() throws {
         let state = AgentChatState(status: .approvalWaiting, model: "test")

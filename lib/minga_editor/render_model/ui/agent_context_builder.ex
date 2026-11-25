@@ -148,8 +148,8 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   defp card_status(state) when state in [:waiting, nil], do: :idle
 
   @spec active_action(Activity.t(), MingaAgent.ToolApproval.Public.t() | nil) :: String.t() | nil
-  defp active_action(_activity, %MingaAgent.ToolApproval.Public{name: name}),
-    do: "Awaiting approval for #{name}"
+  defp active_action(_activity, %MingaAgent.ToolApproval.Public{name: name, args: args}),
+    do: Minga.RenderModel.UI.AgentChat.ToolStep.asking(name, args)
 
   defp active_action(%Activity{active_action: action}, nil), do: action
 

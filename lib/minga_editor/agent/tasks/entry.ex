@@ -115,7 +115,7 @@ defmodule MingaEditor.Agent.Tasks.Entry do
   defp apply_event(entry, {:tool_started, id, name, args}, now) do
     %{
       entry
-      | activity: Activity.start_tool(entry.activity, id, name),
+      | activity: Activity.start_tool(entry.activity, id, name, args),
         waiting: nil,
         subagents: Subagent.started(entry.subagents, id, name, args, now)
     }

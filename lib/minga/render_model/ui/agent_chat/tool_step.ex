@@ -59,6 +59,18 @@ defmodule Minga.RenderModel.UI.AgentChat.ToolStep do
     phrase(status, gerund, past, infinitive, target)
   end
 
+  @doc """
+  The sentence for a call that waits for your approval, in the same words as its step: "Asking to write notes.txt".
+
+  The activity card shows it while the approval is open, so the card names the call the way the conversation will.
+  """
+  @spec asking(String.t(), map()) :: String.t()
+  def asking(name, args) when is_binary(name) and is_map(args) do
+    name = String.trim(name)
+    {_gerund, _past, infinitive} = verbs(name)
+    join("Asking to " <> infinitive, target(name, args))
+  end
+
   @spec phrase(status(), String.t(), String.t(), String.t(), String.t()) :: String.t()
   defp phrase(:running, gerund, _past, _infinitive, target), do: join(gerund, target)
   defp phrase(:complete, _gerund, past, _infinitive, target), do: join(past, target)

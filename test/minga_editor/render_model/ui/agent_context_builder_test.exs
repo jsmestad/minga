@@ -30,14 +30,14 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
     Public.new(
       Target.new("context-fixture", "admitted-request", tool_call_id),
       "shell",
-      %{},
+      %{"command" => "mix test"},
       Preview.new(:args, "", [])
     )
   end
 
   describe "build/1" do
     test "unavailable chat does not display retained tool activity as live" do
-      activity = Activity.start_tool(Activity.new(), "call-before-switch", "shell")
+      activity = Activity.start_tool(Activity.new(), "call-before-switch", "shell", %{})
 
       ui =
         UIState.new()
@@ -57,7 +57,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
         Activity.new()
         |> Activity.set_todos([todo])
         |> Activity.start_turn(~U[2026-06-23 12:00:00Z])
-        |> Activity.start_tool("call-1", "shell")
+        |> Activity.start_tool("call-1", "shell", %{"command" => "mix test"})
         |> Activity.record_file(nil, "lib/a.ex", "/p/lib/a.ex")
 
       agent_ui = UIState.replace_activity(UIState.new(), activity)
@@ -75,17 +75,45 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
 
       assert %AgentContext{
                visible: true,
-               task: "Awaiting approval for shell",
+               task: "Asking to run `mix test`",
                status: :needs_you,
                can_approve: false,
                todos: [%Todo{description: "Run tests", status: :in_progress}],
                progress: %{
-                 active_action: "Awaiting approval for shell",
+                 active_action: "Asking to run `mix test`",
                  tool_count: 1,
                  file_count: 1,
                  review_hint: ""
                }
              } = AgentContextBuilder.build(ctx)
+    end
+
+    test "a running tool reads on the card as its step reads in the conversation" do
+      for {name, args} <- [
+            {"read_file", %{"path" => "./notes.txt"}},
+            {"shell", %{"command" => "mix test"}},
+            {"grep", %{"pattern" => "TODO", "path" => "lib"}},
+            {"lsp_diagnostics", %{}}
+          ] do
+        activity =
+          Activity.new()
+          |> Activity.start_turn(~U[2026-06-23 12:00:00Z])
+          |> Activity.start_tool("call-1", name, args)
+
+        agent = AgentState.set_status(%AgentState{}, :tool_executing)
+
+        ctx =
+          context(
+            UIState.replace_activity(UIState.new(), activity),
+            TraditionalState.replace_agent(%TraditionalState{}, agent)
+          )
+
+        step = Minga.RenderModel.UI.AgentChat.ToolStep.sentence(name, args, :running)
+        card = AgentContextBuilder.build(ctx)
+
+        assert {card.task, card.progress.active_action} == {step, step}
+        refute step =~ "_", "#{name} reached the user as a raw tool name"
+      end
     end
 
     test "idle with unfinished activity does not imply completed work" do

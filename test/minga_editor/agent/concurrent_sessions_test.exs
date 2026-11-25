@@ -519,7 +519,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
         |> handle({:agent_event, b, {:status_changed, :thinking}})
         |> handle({:agent_event, b, {:tool_started, "read-1", "read_file", %{}}})
 
-      assert %{active_action: "Running read_file", tool_count: 1} =
+      assert %{active_action: "Reading", tool_count: 1} =
                state.workspace.agent_ui.view.activity
 
       returned =

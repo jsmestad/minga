@@ -59,6 +59,17 @@ defmodule Minga.RenderModel.UI.AgentChat.ToolStepTest do
     refute sentence =~ "\n"
   end
 
+  test "a call that waits for approval is named in its step's words" do
+    for {name, args, sentence} <- [
+          {"write_file", %{"path" => "./notes.txt"}, "Asking to write ./notes.txt"},
+          {"shell", %{"command" => "mix test"}, "Asking to run `mix test`"},
+          {"lsp_rename", %{}, "Asking to run lsp rename"},
+          {"edit_file", %{"path" => 3}, "Asking to edit"}
+        ] do
+      assert ToolStep.asking(name, args) == sentence
+    end
+  end
+
   test "an argument that is not text names nothing instead of failing" do
     for {name, args, sentence} <- [
           {"read_file", %{"path" => nil}, "Read"},

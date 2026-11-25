@@ -336,7 +336,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   @spec composer_focus(atom(), atom()) :: AgentScope.composer_focus()
   defp composer_focus(:cua, _mode), do: :cua
   defp composer_focus(_vim, :insert), do: :insert
-  defp composer_focus(_vim, _mode), do: :normal
+  defp composer_focus(_vim, :normal), do: :normal
+  defp composer_focus(_vim, _mode), do: :other_mode
 
   @spec submission_generation(PromptFrame.t()) :: pos_integer() | nil
   defp submission_generation(%PromptFrame{

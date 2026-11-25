@@ -330,6 +330,25 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       assert stop_hints(model) == [{"SPC a s", "stop"}]
     end
 
+    test "is absent in Visual mode, where no key of the composer stops or sends" do
+      session = fake_session_pid()
+      panel = %{synced_panel([{:assistant, "hi"}]) | input_focused: true}
+
+      agent =
+        %AgentState{}
+        |> AgentState.set_status(:thinking)
+        |> AgentState.project_stop_target(session, {"session-A", "request-1"})
+
+      ctx = context(session, panel, agent: agent)
+
+      visual = %Minga.Mode.VisualState{visual_anchor: {0, 0}, visual_type: :line}
+      editing = MingaEditor.VimState.transition(ctx.workspace.editing, :visual, visual)
+
+      model = AgentChatBuilder.build(put_in(ctx.workspace.editing, editing))
+
+      assert model.composer_hints == [{"esc", "normal"}]
+    end
+
     test "is absent when no turn of this conversation can be stopped" do
       session = fake_session_pid()
       panel = %{synced_panel([{:assistant, "hi"}]) | input_focused: true}

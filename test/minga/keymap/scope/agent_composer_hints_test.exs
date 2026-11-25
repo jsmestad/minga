@@ -62,6 +62,14 @@ defmodule Minga.Keymap.Scope.AgentComposerHintsTest do
     end
   end
 
+  test "Visual and the other Vim modes hint only the way back to Normal, whatever the turn does" do
+    for native <- [true, false], working <- [true, false], stopped <- [true, false] do
+      opts = [native_gui: native, working: working, stopped: stopped]
+
+      assert AgentScope.composer_key_hints(:other_mode, opts) == [{"esc", "normal"}]
+    end
+  end
+
   test "every single-key hint is bound in the state it is shown in" do
     for {focus, state} <- [insert: :insert, normal: :input_normal, cua: :cua],
         native <- [true, false],

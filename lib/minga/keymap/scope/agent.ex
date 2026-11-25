@@ -234,8 +234,8 @@ defmodule Minga.Keymap.Scope.Agent do
     end
   end
 
-  @typedoc "Where the composer's keys go: Vim Insert, Vim Normal, or the CUA composer."
-  @type composer_focus :: :insert | :normal | :cua
+  @typedoc "Where the composer's keys go: Vim Insert, Vim Normal, another Vim mode (Visual, operator-pending, Replace), or the CUA composer."
+  @type composer_focus :: :insert | :normal | :other_mode | :cua
 
   @typedoc """
   Facts that change the composer's hints: `:native_gui` (the macOS app can send ⌘), `:working` (this conversation has a turn to stop, so stop is offered; that includes a turn waiting for an approval), `:stopped` (sending continues the stopped task) and `:remedy` (a failed start binds ↩ in Normal to its remedy, which the chat shows with its own key, so nothing sends).
@@ -275,6 +275,8 @@ defmodule Minga.Keymap.Scope.Agent do
     case focus do
       :insert -> [insert_send_hint(native?, send), {"⌥↩", "queue"}] ++ stop ++ [{"esc", "normal"}]
       :normal -> [{"↩", send}] ++ stop ++ [{"i", "insert"}]
+      # Visual and the other Vim modes keep every key for the edit under way: nothing sends or stops there.
+      :other_mode -> [{"esc", "normal"}]
       :cua -> [{"↩", send}, {"⌥↩", "new line"}] ++ stop
     end
   end
@@ -291,6 +293,7 @@ defmodule Minga.Keymap.Scope.Agent do
   defp stop_hint(false, :normal), do: [{"SPC a s", "stop"}]
   defp stop_hint(false, :insert), do: [{"⌃C", "stop"}]
   defp stop_hint(false, :cua), do: []
+  defp stop_hint(false, :other_mode), do: []
 
   @spec start_remedy_description(start_remedy()) :: String.t()
   defp start_remedy_description(:retry), do: "Retry Agent start"

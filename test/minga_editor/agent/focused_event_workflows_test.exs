@@ -222,7 +222,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     assert state.workspace.agent_ui.view.preview.content ==
              {:shell, "mix test", "3 tests", :running}
 
-    assert state.workspace.agent_ui.view.activity.active_action == "Running shell"
+    assert state.workspace.agent_ui.view.activity.active_action == "Running `mix test`"
 
     state = ToolEventWorkflow.interrupted(state, "tc1")
 
