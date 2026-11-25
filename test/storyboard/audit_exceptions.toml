@@ -289,8 +289,9 @@ rule = "contrast"
 theme = "catppuccin_frappe"
 pairs = [
   "#8caaee on #414559",
+  "#ef9f76 on #414559",
 ]
-reason = "The which-key breadcrumb draws in the accent colour, which misses 4.5:1 on the popup surface in this theme."
+reason = "The which-key breadcrumb draws its keys in the accent colour and a needs-you count in the needs_you role, which miss 4.5:1 on the popup surface in this theme."
 issue = 4137
 
 [[exception]]
@@ -301,8 +302,9 @@ rule = "contrast"
 theme = "catppuccin_latte"
 pairs = [
   "#1e66f5 on #ccd0da",
+  "#d35400 on #ccd0da",
 ]
-reason = "The which-key breadcrumb draws in the accent colour, which misses 4.5:1 on the popup surface in this theme."
+reason = "The which-key breadcrumb draws its keys in the accent colour and a needs-you count in the needs_you role, which miss 4.5:1 on the popup surface in this theme."
 issue = 4137
 
 [[exception]]
@@ -315,7 +317,7 @@ pairs = [
   "#2e5475 on #14161b",
   "#3e7aac on #14161b",
 ]
-reason = "Which-key keys draw in the accent colour, which misses 4.5:1 on the popup surface in this theme; the entry part also samples the key's antialiased edge."
+reason = "Which-key keys draw in the accent colour and a needs-you count in the needs_you role, which miss 4.5:1 on the popup surface in this theme; the entry part also samples the key's antialiased edge."
 issue = 4137
 
 [[exception]]
@@ -332,8 +334,9 @@ pairs = [
   "#8aa7e9 on #414559",
   "#8aa8eb on #414559",
   "#8caaee on #414559",
+  "#ef9f76 on #414559",
 ]
-reason = "Which-key keys draw in the accent colour, which misses 4.5:1 on the popup surface in this theme; the entry part also samples the key's antialiased edge."
+reason = "Which-key keys draw in the accent colour and a needs-you count in the needs_you role, which miss 4.5:1 on the popup surface in this theme; the entry part also samples the key's antialiased edge."
 issue = 4137
 
 [[exception]]
@@ -349,8 +352,9 @@ pairs = [
   "#4980ee on #ccd0da",
   "#5185ed on #ccd0da",
   "#80a2e6 on #ccd0da",
+  "#d35400 on #ccd0da",
 ]
-reason = "Which-key keys draw in the accent colour, which misses 4.5:1 on the popup surface in this theme; the entry part also samples the key's antialiased edge."
+reason = "Which-key keys draw in the accent colour and a needs-you count in the needs_you role, which miss 4.5:1 on the popup surface in this theme; the entry part also samples the key's antialiased edge."
 issue = 4137
 
 [[exception]]
@@ -360,9 +364,9 @@ part = "whichKey.entryCount"
 rule = "contrast"
 theme = "catppuccin_frappe"
 pairs = [
-  "#949cbb on #414559",
+  "#ef9f76 on #414559",
 ]
-reason = "Which-key counts use text_muted, which misses 4.5:1 on the popup surface in this theme."
+reason = "A needs-you count draws in the needs_you role, as the modeline does, which misses 4.5:1 on the popup surface in this theme."
 issue = 4137
 
 [[exception]]
@@ -372,9 +376,9 @@ part = "whichKey.entryCount"
 rule = "contrast"
 theme = "catppuccin_latte"
 pairs = [
-  "#5c5f77 on #ccd0da",
+  "#d35400 on #ccd0da",
 ]
-reason = "Which-key counts use text_muted, which misses 4.5:1 on the popup surface in this theme."
+reason = "A needs-you count draws in the needs_you role, as the modeline does, which misses 4.5:1 on the popup surface in this theme."
 issue = 4137
 
 [[exception]]

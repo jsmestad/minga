@@ -1,6 +1,6 @@
 {
   "macos": {
-    "commit": "9c86ad048be882d6a79b53124be1d55e7a32276f-dirty",
+    "commit": "1d4d2b0192b663012fcdebbdd513ce22505353c0-dirty",
     "files": {
       "macos-astrodark-1280.json": "6999051d206bdc856ac5f2caf4e7b1c49e24907a2a1f739f54bfcc61eae382a3",
       "macos-astrodark-1440.json": "2895876fc201d3b117d406c16b3941b915f2190cc81f0bc36a4499d64c6c8cb1",
@@ -10,12 +10,12 @@
       "macos-catppuccin_latte-1440.json": "51f3debac05649b240cf7ccf45ea02088f7dbb0bfea4600e4e39e895b24ec794"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "e45d3ae9dce8edfa36344572c2b4d50eddf675da9c34218d8987ea5241b9330c",
-      "macos-astrodark-1440.json": "d9c068704f4b468c90ccc3462f3ebb086da4440d6efed49acedbe74984acf3ee",
-      "macos-catppuccin_frappe-1280.json": "3fe9493e311833b6fdc44d1bde54813a753b5197582d5c60c2dd8371ffdf6fe1",
-      "macos-catppuccin_frappe-1440.json": "38bf0c1da3b93c3e71e171ae0a5180f9328a5efb910a7532b5020d6af85e338a",
-      "macos-catppuccin_latte-1280.json": "6589bb8f857c4a1e4a656073df48235102fc5caf19c5fcf675c4d602196b09ef",
-      "macos-catppuccin_latte-1440.json": "3a2d694b48a6d1bc56acc6993b66a90e48184fb1ab5c195d8747adcce010d0b3"
+      "macos-astrodark-1280.json": "b41c972f5eed0143c701a1e23bba6146f53d84066ad32da928ad1a6edc5e6d91",
+      "macos-astrodark-1440.json": "8b2d4ae126c50b2338ea32996b135051a17f1ed2ce06c4bba8c8e621fb388c44",
+      "macos-catppuccin_frappe-1280.json": "f50b2a2d53b31f047faa93c63323e0782eab302a4da43d42ac8b948a45c5de9d",
+      "macos-catppuccin_frappe-1440.json": "a4ddf098dfe0a8d27a3f7a2b3d27bbef00f114885eb9c71e595e713bf2077c9f",
+      "macos-catppuccin_latte-1280.json": "77dbd31ade3221a42ff80cfa3a859a2918001bde6d2aa9a522cac6df0125075b",
+      "macos-catppuccin_latte-1440.json": "468f064c81c78fbdeca31cbcbf066d7d72fa370e738596b118bd5cafd088f1c7"
     }
   },
   "scenario": "edit.visual",
