@@ -4,45 +4,41 @@ import { mountArchFaultMap, mountStagedStepper } from "./arch_interactive.ts";
 import { mountCoAuthorSim } from "./coauthor_view.ts";
 import { mountElixirPlayground, mountElixirTranslator } from "./elixir_lab.ts";
 import { highlightStaticShellBlocks } from "./highlight.ts";
-import { mountHeroTour, mountMarksThemeSwitcher } from "./home_interactive.ts";
+import { mountMarksThemeSwitcher } from "./home_interactive.ts";
 import { mountLearnHub } from "./hub_view.ts";
 import { mountRemoteLab } from "./remote_lab.ts";
 import { mountRunbookFilter } from "./runbook_view.ts";
 import { mountSandbox } from "./sandbox_view.ts";
+import { mountSpecBoardDemo } from "./spec_board_view.ts";
+
+/**
+ * Mounts one lab on the first element that matches. A lab that throws falls back to its static figure and step list (class "lab-failed")
+ * and is logged; the labs after it still mount.
+ */
+function mount(selector: string, run: (root: HTMLElement) => void): void {
+  const root = document.querySelector<HTMLElement>(selector);
+  if (!root) return;
+  try {
+    run(root);
+  } catch (error) {
+    root.classList.remove("lab-live");
+    root.classList.add("lab-failed");
+    console.error(`Lab ${selector} failed to mount`, error);
+  }
+}
 
 function init(): void {
-  const hub = document.querySelector<HTMLElement>("[data-learn-hub]");
-  if (hub) mountLearnHub(hub);
-
-  const runbook = document.querySelector<HTMLElement>("[data-runbook-filter]");
-  if (runbook) mountRunbookFilter(runbook);
-
-  const sandbox = document.querySelector<HTMLElement>("[data-minga-sandbox]");
-  if (sandbox) mountSandbox(sandbox);
-
-  const coauthor = document.querySelector<HTMLElement>("[data-coauthor-sim]");
-  if (coauthor) mountCoAuthorSim(coauthor);
-
-  const translator = document.querySelector<HTMLElement>("[data-elixir-translator]");
-  if (translator) mountElixirTranslator(translator);
-
-  const playground = document.querySelector<HTMLElement>("[data-elixir-playground]");
-  if (playground) mountElixirPlayground(playground);
-
-  const remote = document.querySelector<HTMLElement>("[data-remote-lab]");
-  if (remote) mountRemoteLab(remote);
-
-  const heroTour = document.querySelector<HTMLElement>("[data-hero-tour]");
-  if (heroTour) mountHeroTour(heroTour);
-
-  const marksTheme = document.querySelector<HTMLElement>("[data-marks-theme-switcher]");
-  if (marksTheme) mountMarksThemeSwitcher(marksTheme);
-
-  const archFault = document.querySelector<HTMLElement>("[data-arch-fault-map]");
-  if (archFault) mountArchFaultMap(archFault);
-
-  const stagedStep = document.querySelector<HTMLElement>("[data-staged-stepper]");
-  if (stagedStep) mountStagedStepper(stagedStep);
+  mount("[data-learn-hub]", mountLearnHub);
+  mount("[data-runbook-filter]", mountRunbookFilter);
+  mount("[data-minga-sandbox]", mountSandbox);
+  mount("[data-coauthor-sim]", mountCoAuthorSim);
+  mount("[data-elixir-translator]", mountElixirTranslator);
+  mount("[data-elixir-playground]", mountElixirPlayground);
+  mount("[data-remote-lab]", mountRemoteLab);
+  mount("[data-spec-board-demo]", mountSpecBoardDemo);
+  mount("[data-marks-theme-switcher]", mountMarksThemeSwitcher);
+  mount("[data-arch-fault-map]", mountArchFaultMap);
+  mount("[data-staged-stepper]", mountStagedStepper);
 
   highlightStaticShellBlocks();
 }

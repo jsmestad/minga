@@ -46,6 +46,12 @@
   --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
   --max-width: 72rem;
   --measure: 44rem;
+  /* Lab motion. Every lab animation takes its time from these; the reduced-motion rules below switch them off. */
+  --lab-quick: 180ms;
+  --lab-draw: 520ms;
+  --lab-move: 700ms;
+  --lab-type-step: 30ms;
+  --lab-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
 @media (prefers-color-scheme: light) {
@@ -532,124 +538,10 @@ kbd {
   color: var(--cta-text-hover);
 }
 
-/* Feature Showcase Switcher (physically separate from the Minga app frame) */
+/* Spine specimen: the Minga app frame in the default Catppuccin Frappé theme */
 
 .spine-figure {
   margin: 2.75rem 0 0;
-}
-
-.showcase-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 0.75rem;
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.showcase-nav {
-  display: none;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  border-top: 2px solid var(--border-strong);
-  border-left: 1px solid var(--border);
-  margin-bottom: 0;
-  background: var(--bg-elevated);
-}
-
-.js-enabled .showcase-nav {
-  display: grid;
-}
-
-.showcase-tab {
-  appearance: none;
-  text-align: left;
-  background: transparent;
-  border: 0;
-  border-right: 1px solid var(--border);
-  border-bottom: 2px solid var(--border);
-  padding: 0.85rem 1rem;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  transition: background-color 120ms ease, border-color 120ms ease;
-}
-
-.showcase-tab:hover {
-  background: var(--bg-subtle);
-}
-
-.showcase-tab[aria-selected="true"] {
-  background: var(--bg-subtle);
-  border-bottom-color: var(--accent);
-}
-
-.showcase-tab-num {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  letter-spacing: 0.04em;
-}
-
-.showcase-tab[aria-selected="true"] .showcase-tab-num {
-  color: var(--accent);
-}
-
-.showcase-tab-title {
-  font-family: var(--font-sans);
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--text);
-  line-height: 1.25;
-}
-
-.showcase-tab-sub {
-  font-family: var(--font-sans);
-  font-size: 0.79rem;
-  color: var(--text-muted);
-  line-height: 1.38;
-}
-
-.showcase-panel {
-  display: flex;
-  flex-direction: column;
-}
-
-.showcase-panel[hidden] {
-  display: none;
-}
-
-.showcase-panel + .showcase-panel {
-  margin-top: 1.75rem;
-}
-
-.js-enabled .showcase-panel + .showcase-panel {
-  margin-top: 0;
-}
-
-.js-enabled .showcase-panel .spine-specimen {
-  border-top: 0;
-}
-
-.showcase-explain {
-  order: 2;
-  margin: 0.7rem 0 0;
-  padding: 0;
-  background: transparent;
-  border-left: 0;
-  font-size: 0.85rem;
-  line-height: 1.55;
-  color: var(--text-muted);
-}
-
-.showcase-explain strong {
-  color: var(--text-secondary);
-  font-weight: 600;
 }
 
 .spine-specimen {
@@ -789,22 +681,7 @@ kbd {
 .ml-done { color: #a6d189; }
 .ml-dim { color: #838ba7; }
 
-/* Specimen internal layouts: Subagent Peek, Tasks/Queue, macOS vs TUI Parity */
-
-.specimen-split {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  min-width: 0;
-}
-
-.specimen-pane {
-  padding: 0.9rem 1.1rem;
-  min-width: 0;
-}
-
-.specimen-pane + .specimen-pane {
-  border-left: 1px solid #414559;
-}
+/* Specimen internal rows */
 
 .specimen-pane-head {
   display: flex;
@@ -831,74 +708,12 @@ kbd {
   font-size: 0.77rem;
   color: #b5bfe2;
 }
-
-.specimen-row-you { color: #8caaee; font-weight: 600; }
-.specimen-row-minga { color: #ca9ee6; font-weight: 600; }
 .specimen-row-needs {
   background: rgba(239, 159, 118, 0.1);
   border-left: 2px solid #ef9f76;
   padding: 0.5rem 0.65rem;
   margin: 0.35rem 0;
   display: block;
-}
-
-.specimen-keys {
-  margin-top: 0.4rem;
-  font-size: 0.72rem;
-  color: #a5adce;
-}
-
-.specimen-keys span {
-  color: #c6d0f5;
-  font-weight: 600;
-  margin-right: 0.2rem;
-}
-
-.specimen-composer {
-  margin-top: 0.75rem;
-  padding: 0.45rem 0.65rem;
-  background: #292c3c;
-  border: 1px solid #51576d;
-  font-size: 0.74rem;
-  color: #838ba7;
-}
-
-.specimen-tui-frame {
-  border: 1px solid #ca9ee6;
-  border-radius: 6px;
-  padding: 0.55rem 0.75rem;
-  background: #292c3c;
-  font-size: 0.76rem;
-  line-height: 1.55;
-}
-
-.specimen-tui-top {
-  display: flex;
-  justify-content: space-between;
-  color: #ca9ee6;
-  font-size: 0.72rem;
-  padding-bottom: 0.35rem;
-  margin-bottom: 0.35rem;
-  border-bottom: 1px solid #414559;
-}
-
-.specimen-tui-foot {
-  margin-top: 0.45rem;
-  padding-top: 0.35rem;
-  border-top: 1px solid #414559;
-  font-size: 0.7rem;
-  color: #838ba7;
-}
-
-.spine-caption {
-  margin-top: 0.75rem;
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 0.4rem 1.5rem;
 }
 
 /* 2x2 Co-Authoring & Parallel Agent Feature Grid */
@@ -1926,9 +1741,6 @@ td:first-child {
 /* Responsive */
 
 @media (max-width: 900px) {
-  .showcase-nav {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
   .section-header,
   .marks-grid,
   .spine-rules,
@@ -2039,16 +1851,6 @@ td:first-child {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .specimen-split {
-    grid-template-columns: 1fr;
-  }
-  .specimen-pane {
-    padding: 0.8rem 0.85rem;
-  }
-  .specimen-pane + .specimen-pane {
-    border-left: 0;
-    border-top: 1px solid #414559;
-  }
   .specimen-pane-head {
     flex-wrap: wrap;
     gap: 0.25rem 0.6rem;
@@ -2057,16 +1859,6 @@ td:first-child {
   .specimen-row {
     font-size: 0.74rem;
     overflow-wrap: break-word;
-  }
-  .specimen-tui-frame {
-    font-size: 0.72rem;
-    padding: 0.55rem 0.65rem;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-  .specimen-tui-top {
-    flex-wrap: wrap;
-    gap: 0.2rem 0.5rem;
   }
   .spine-buffer {
     font-size: 0.74rem;
@@ -2132,36 +1924,6 @@ td:first-child {
   }
   .spine-figure {
     margin-top: 2rem;
-  }
-  .showcase-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.15rem;
-    font-size: 0.7rem;
-  }
-  .showcase-nav {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .showcase-tab {
-    padding: 0.65rem 0.75rem;
-    gap: 0.18rem;
-  }
-  .showcase-tab-num {
-    font-size: 0.64rem;
-  }
-  .showcase-tab-title {
-    font-size: 0.83rem;
-  }
-  .showcase-tab-sub {
-    display: none;
-  }
-  .showcase-explain {
-    font-size: 0.82rem;
-    padding: 0;
-  }
-  .spine-caption {
-    font-size: 0.73rem;
-    gap: 0.35rem;
   }
   .grid-2,
   .scope-strip,
@@ -4251,7 +4013,6 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   white-space: nowrap;
 }
 
-
 /* ============================================================================
    Interactive Story Islands (Home, Why Minga, Architecture, Extending)
    ============================================================================ */
@@ -4296,209 +4057,780 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   border: 1px solid var(--border);
 }
 
-/* Homepage: playable Feature Tour controls */
+/* Lab stage focus ring and modeline failure tone */
 
-.tour-live-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem 0.75rem;
-  padding: 0.55rem 0.9rem;
-  background: #232634;
-  border-bottom: 1px solid #414559;
-  font-family: var(--font-mono);
-}
-
-.tour-live-label {
-  font-size: 0.66rem;
-  letter-spacing: 0.06em;
-  color: #a5adce;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-}
-
-.tour-pending-pill {
-  padding: 0.1rem 0.4rem;
-  border: 1px solid #ca9ee6;
-  background: rgba(202, 158, 230, 0.22);
-  color: #ffffff;
-  font-size: 0.68rem;
-  font-weight: 600;
-}
-
-[data-hero-tour] .spine-specimen:focus-visible,
 [data-ca-stage]:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 2px #ca9ee6;
 }
 
-.tour-live-actions {
+.ml-fail {
+  color: #e78284;
+}
+
+/* Lab kit: the shared chrome of every interactive lab (site/ts/src/lab). A mounted lab has the class lab-live on its root. */
+
+.lab-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.35rem;
-}
-
-.tour-chip {
+  justify-content: space-between;
+  gap: 0.4rem 1rem;
+  margin-bottom: 0.65rem;
   font-family: var(--font-mono);
-  font-size: 0.71rem;
-  padding: 0.24rem 0.55rem;
-  border: 1px solid #51576d;
-  background: #303446;
-  color: #c6d0f5;
-  cursor: pointer;
-  display: inline-flex;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.lab-labels {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.35rem;
-  transition: border-color 120ms ease, background 120ms ease;
+  gap: 0.4rem 0.6rem;
 }
 
-.tour-chip:hover {
-  border-color: #ca9ee6;
-  background: #3b4056;
-}
-
-.tour-chip.is-active {
-  border-color: #ca9ee6;
-  background: rgba(202, 158, 230, 0.2);
-  color: #ffffff;
-}
-
-.tour-chip span {
-  color: #ca9ee6;
+.lab-title {
+  color: var(--text);
   font-weight: 600;
 }
 
-.tour-chip-muted {
-  color: #a5adce;
-  border-color: #414559;
+.lab-sim-label {
+  padding: 0.14em 0.45em 0.12em;
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.25;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.tour-sep {
-  color: #51576d;
-  padding: 0 0.15rem;
+.lab-stepper {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.6rem;
 }
 
-.tour-echo {
-  padding: 0.55rem 0.9rem;
-  background: #232634;
-  border-top: 1px solid #414559;
+.lab-stepper-label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.lab-caption {
+  margin: 0.8rem 0 0;
+  min-height: 3.1em;
+  max-width: 62rem;
+  font-size: 0.98rem;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.lab-caption:empty {
+  display: none;
+}
+
+.lab-caption q {
+  font-style: italic;
+}
+
+.lab-timeline-controls {
+  display: none;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  min-height: 2.3rem;
+  margin-top: 0.5rem;
+}
+
+.lab-live .lab-timeline-controls {
+  display: flex;
+}
+
+.lab-control {
+  padding: 0.4rem 0.95rem;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text);
   font-family: var(--font-mono);
-  font-size: 0.74rem;
-  color: #c6d0f5;
-}
-
-.tour-sib-strip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.tour-sib-btn {
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 1px solid transparent;
-  background: transparent;
+  font-size: 0.78rem;
+  font-weight: 600;
   cursor: pointer;
-  font-size: 0.85rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  transition: background-color var(--lab-quick) ease, color var(--lab-quick) ease;
 }
 
-.tour-sib-btn:hover {
-  border-color: #626880;
+.lab-control:hover {
+  background: var(--cta-bg);
+  color: var(--cta-text);
 }
 
-.tour-sib-btn.is-current {
-  border-color: #ca9ee6;
-  background: rgba(202, 158, 230, 0.18);
+.lab-control[hidden] {
+  display: none;
 }
 
-.tour-draft-label {
+[data-lab-steps] {
+  margin: 1rem 0 0;
+  padding-left: 1.4rem;
+  max-width: var(--measure);
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+}
+
+[data-lab-steps] li + li {
+  margin-top: 0.6rem;
+}
+
+[data-lab-steps] p {
+  margin: 0;
+}
+
+[data-lab-steps] [data-lab-instruction] {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.lab-live [data-lab-steps] {
+  display: none;
+}
+
+/* Before a lab mounts, the page's inline head script has set labs-pending on <html>, and the figure is already laid out as the live lab (list hidden, caption and controls rows reserved), so mounting does not move the content below it. With scripts off or blocked the class is never set, and the step list shows. */
+.labs-pending [data-lab-steps] {
+  display: none;
+}
+
+.labs-pending .lab-caption:empty {
   display: block;
-  margin-top: 0.65rem;
-  font-size: 0.69rem;
-  color: #a5adce;
 }
 
-.tour-draft-input {
-  width: 100%;
-  margin-top: 0.3rem;
-  padding: 0.42rem 0.55rem;
-  border: 1px solid #51576d;
-  background: #232634;
-  color: #c6d0f5;
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
+.labs-pending .lab-timeline-controls {
+  display: flex;
 }
 
-.tour-draft-input:focus {
+/* Failure. labs-failed on <html> means the lab module did not load; lab-failed on a lab root means that lab's mount threw. Either way the lab reads as its static figure plus the step list, which holds every caption and link. These rules must beat every pending and live rule above, whatever its weight, so they are the one place the lab kit uses !important. */
+.labs-failed [data-lab-steps],
+.lab-failed [data-lab-steps] {
+  display: block !important;
+}
+
+.labs-failed .lab-caption,
+.lab-failed .lab-caption,
+.labs-failed .lab-timeline-controls,
+.lab-failed .lab-timeline-controls,
+.labs-failed .lab-stepper,
+.lab-failed .lab-stepper {
+  display: none !important;
+}
+
+.lab-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The stage shows a ring when the keyboard put focus on it, including focus moved there after a control went away. */
+[data-lab-stage]:focus {
   outline: none;
-  border-color: #8caaee;
 }
 
-.tour-brief-toggle {
-  width: 100%;
-  text-align: left;
-  padding: 0.38rem 0.5rem;
-  border: 1px solid #414559;
-  background: #232634;
-  color: #b5bfe2;
+[data-lab-stage]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.lab-keycast {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1.25rem;
+  min-height: 1.5em;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.lab-keycast-pending {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.lab-focus-cue {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--needs);
+}
+
+.is-stage-focused .lab-focus-cue {
+  visibility: hidden;
+}
+
+/* Home: a spec becomes a board. The stage is a Minga window in the default Catppuccin Frappé theme, so its colours are fixed and do not follow the site theme. The markup's own state is the final frame; a mounted demo sets data-beat, data-rewritten and data-edited on the figure. */
+
+.sb-demo {
+  --sb-bg: #303446;
+  --sb-mantle: #292c3c;
+  --sb-rule: #414559;
+  --sb-dim: #838ba7;
+  --sb-minga: #ca9ee6;
+  --sb-shade: #74628d;
+  --sb-you: #8caaee;
+  --sb-done: #a6d189;
+  --sb-waiting: #a5adce;
+  --sb-gap: 0.5rem;
+  --sb-turn-ms: 4000ms;
+  /* The height of one spec line. The gutter column, the braid and the thin strand all scale from it, so the marks keep the proportions of the 10 by 26 drawings in docs/design/marks. */
+  --sb-u: 42px;
+  --sb-font: 1.06rem;
+}
+
+.sb-demo [hidden] {
+  display: none !important;
+}
+
+.sb-sprite {
+  position: absolute;
+}
+
+/* The panes keep the final frame's height from the start, so the caption under the stage never moves. */
+.sb-panes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  min-height: 33.5rem;
+}
+
+.sb-pane {
+  min-width: 0;
+}
+
+.sb-pane-spec {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--sb-rule);
+}
+
+.sb-buffer {
+  flex: 1;
+  padding: 0.85rem 0;
+  font-size: var(--sb-font);
+}
+
+.sb-line {
+  display: grid;
+  grid-template-columns: 2.6rem calc(var(--sb-u) * 16 / 26) minmax(0, 1fr);
+  min-height: var(--sb-u);
+  line-height: var(--sb-u);
+  padding-right: 0.85rem;
+}
+
+.sb-ln {
+  padding-right: 0.6rem;
+  text-align: right;
+  color: #737994;
+  font-size: 0.74rem;
+  user-select: none;
+}
+
+/* The authorship column (docs/design/marks.md, "The gutter"): one thin strand in the you role on your lines, the two-strand braid on Minga's. */
+.sb-gutter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.sb-you-strand {
+  flex: 1;
+  width: calc(var(--sb-u) * 1.5 / 26);
+  background: var(--sb-you);
+}
+
+.sb-line:not([data-author="you"]) .sb-you-strand,
+.sb-line[data-author="you"] .sb-braid {
+  display: none;
+}
+
+.sb-braid {
+  display: block;
+  flex: none;
+  width: calc(var(--sb-u) * 10 / 26);
+}
+
+.sb-braid-cap {
+  height: var(--sb-u);
+}
+
+/* The straight segment stretches with a wrapped line, so the crossing stays in the first line box and the ribbon stays joined. */
+.sb-braid-fill {
+  flex: 1 1 0;
+  height: auto;
+  min-height: 0;
+}
+
+.sb-strand-minga {
+  stroke: var(--sb-minga);
+}
+
+.sb-strand-gap {
+  stroke: var(--sb-bg);
+}
+
+.sb-strand-shade {
+  stroke: var(--sb-shade);
+  transition: stroke var(--lab-draw) var(--lab-ease);
+}
+
+.sb-line[data-author="shared"] .sb-strand-shade {
+  stroke: var(--sb-you);
+}
+
+.sb-text {
+  padding-left: 0.6rem;
+  overflow-wrap: anywhere;
+  transition: background-color var(--lab-quick) ease, box-shadow var(--lab-quick) ease;
+}
+
+.sb-md-h {
+  color: #e6ebff;
+  font-weight: 700;
+}
+
+.sb-text ins {
+  text-decoration: none;
+}
+
+.sb-text del {
+  color: var(--sb-dim);
+}
+
+.sb-text ins[data-sb-rev="you"] {
+  color: var(--sb-you);
+  font-weight: 700;
+}
+
+.lab-live .sb-text del {
+  color: inherit;
+  text-decoration: none;
+}
+
+.sb-demo[data-rewritten="false"] ins[data-sb-rev="minga"],
+.sb-demo[data-rewritten="true"] del[data-sb-rev="minga"],
+.sb-demo[data-edited="false"] ins[data-sb-rev="you"],
+.sb-demo[data-edited="true"] del[data-sb-rev="you"] {
+  display: none;
+}
+
+.sb-count {
+  display: inline-block;
+  min-width: 1ch;
+  text-align: center;
+}
+
+.sb-demo[data-beat="your_turn"][data-edited="false"] .sb-count {
+  box-shadow: 0 0 0 1px var(--sb-you);
+  animation: sb-target 1100ms ease-in-out infinite alternate;
+}
+
+.sb-demo[data-beat="your_turn"] ins[data-sb-rev="you"] {
+  animation: sb-char var(--lab-draw) ease both;
+}
+
+/* The spec line behind the card that Minga is working on. */
+.sb-line.is-linked .sb-text {
+  background: rgba(202, 158, 230, 0.16);
+  box-shadow: inset 2px 0 0 var(--sb-minga);
+}
+
+/* Minga's lines land one after another, and each braid segment draws in from the top as its line lands. */
+.sb-line[data-line="sync"] { --sb-land: 300ms; }
+.sb-line[data-line="retry"] { --sb-land: 1300ms; }
+.sb-line[data-line="status"] { --sb-land: 2300ms; }
+
+.lab-live .sb-braid {
+  animation: sb-draw var(--lab-draw) var(--lab-ease) both;
+  animation-delay: var(--sb-land, 0ms);
+}
+
+.lab-live .sb-line[data-seg="body"] .sb-text,
+.lab-live .sb-line[data-seg="last"] .sb-text {
+  animation: sb-land var(--lab-draw) var(--lab-ease) both;
+  animation-delay: var(--sb-land, 0ms);
+}
+
+.lab-live ins[data-sb-rev="minga"] {
+  animation: sb-char var(--lab-draw) ease both;
+  animation-delay: var(--sb-land, 0ms);
+}
+
+.sb-composer {
+  display: none;
+  align-items: flex-start;
+  gap: 0.65rem;
+  min-height: 4.4rem;
+  padding: 0.7rem 0.95rem;
+  font-size: 0.95rem;
+  border-top: 1px solid var(--sb-rule);
+  background: var(--sb-mantle);
+  line-height: 1.5;
+}
+
+.lab-live .sb-composer {
+  display: flex;
+}
+
+/* Before the demo mounts (labs-pending), the final frame is laid out as the live stage: the composer row is there and the replaced words are gone, so no line wraps differently once it mounts. A failed demo takes both back. */
+.labs-pending .sb-composer {
+  display: flex;
+}
+
+.labs-pending:not(.labs-failed) .sb-demo:not(.lab-live):not(.lab-failed) .sb-text del {
+  display: none;
+}
+
+.labs-failed .sb-composer,
+.lab-failed .sb-composer {
+  display: none !important;
+}
+
+.sb-composer-who {
+  color: var(--sb-you);
+  font-weight: 700;
+}
+
+.sb-composer:not(:has(.sb-prompt:not([hidden]))) .sb-composer-who {
+  display: none;
+}
+
+.sb-prompt {
+  margin: 0;
+  min-width: 0;
+  color: #e6ebff;
+  white-space: pre-wrap;
+}
+
+.sb-prompt span {
+  /* One step long, not instant: Chrome leaves a 1ms animation with a delay of a second or more unfilled. */
+  animation: sb-char var(--lab-type-step) linear both;
+  animation-delay: calc(var(--i) * var(--lab-type-step) + 250ms);
+}
+
+.sb-turn {
+  position: relative;
+  overflow: hidden;
+  padding: 0.3rem 0.85rem 0.4rem;
+  border: 0;
+  background: var(--sb-you);
+  color: #232634;
+  font: inherit;
+  font-weight: 700;
   cursor: pointer;
 }
 
-.tour-brief-toggle:hover {
-  border-color: #ca9ee6;
+.sb-turn:hover {
+  background: #a9c0f5;
 }
 
-.tour-inline-diff {
-  margin-top: 0.45rem;
-  padding: 0.45rem 0.55rem;
+.sb-turn:focus-visible {
+  outline: 2px solid #e6ebff;
+  outline-offset: 2px;
+}
+
+.sb-turn-timer {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 3px;
   background: #232634;
-  border-left: 2px solid #a6d189;
-  color: #a6d189;
-  white-space: pre-wrap;
-  font-size: 0.7rem;
-  line-height: 1.45;
+  opacity: 0.55;
+  transform-origin: left;
+  animation: sb-countdown var(--sb-turn-ms) linear both;
 }
 
-.tour-inline-keys {
+.sb-demo[data-mode="stepped"] .sb-turn-timer {
+  display: none;
+}
+
+.sb-pane-board {
+  padding: 0.85rem;
+}
+
+.sb-board {
+  display: grid;
+  gap: var(--sb-gap);
+}
+
+.lab-live .sb-board {
+  animation: sb-land var(--lab-draw) var(--lab-ease) both;
+}
+
+.sb-cols,
+.sb-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sb-gap);
+}
+
+.sb-col {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.2rem 0.45rem 0.35rem;
+  border-bottom: 1px solid var(--sb-rule);
+  color: #a5adce;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.sb-col-count {
+  color: var(--sb-dim);
+}
+
+/* Each card keeps its own row and slides along it, so a move between columns is one transform and nothing reflows. The gradient draws the three lanes. */
+.sb-cards {
+  --sb-lane: rgba(41, 44, 60, 0.55);
+  --sb-w: calc((100% - 2 * var(--sb-gap)) / 3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: linear-gradient(
+    to right,
+    var(--sb-lane) 0 var(--sb-w),
+    transparent var(--sb-w) calc(var(--sb-w) + var(--sb-gap)),
+    var(--sb-lane) calc(var(--sb-w) + var(--sb-gap)) calc(2 * var(--sb-w) + var(--sb-gap)),
+    transparent calc(2 * var(--sb-w) + var(--sb-gap)) calc(2 * var(--sb-w) + 2 * var(--sb-gap)),
+    var(--sb-lane) calc(2 * var(--sb-w) + 2 * var(--sb-gap)) 100%
+  );
+}
+
+.sb-card {
+  grid-column: 1;
+  grid-row: var(--row);
+  display: grid;
+  align-content: space-between;
+  gap: 0.3rem;
+  min-width: 0;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--sb-rule);
+  background: var(--sb-bg);
+  font-size: 0.8rem;
+  line-height: 1.35;
+  transform: translateX(calc(var(--col) * (100% + var(--sb-gap))));
+  transition: transform var(--lab-move) var(--lab-ease), border-color var(--lab-quick) ease;
+}
+
+.sb-card[data-col="working"] {
+  border-color: var(--sb-minga);
+}
+
+.sb-card-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.3rem;
+  overflow-wrap: anywhere;
+}
+
+.sb-mark {
+  display: none;
+  flex: none;
+  margin-top: 0.1rem;
+}
+
+.sb-card[data-col="waiting"] .sb-mark-waiting { display: block; color: var(--sb-waiting); }
+.sb-card[data-col="working"] .sb-mark-working { display: block; color: var(--sb-minga); }
+.sb-card[data-col="done"] .sb-mark-done { display: block; color: var(--sb-done); }
+
+.sb-card-meta {
   display: flex;
   flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 0.4rem;
+  color: var(--sb-dim);
+  font-size: 0.7rem;
+}
+
+.sb-card:not([data-col="done"]) .sb-card-files {
+  visibility: hidden;
+}
+
+.sb-status {
+  display: inline-flex;
+  align-items: center;
   gap: 0.35rem;
-  margin-top: 0.45rem;
+  font-weight: 600;
 }
 
-.tour-row-resolved {
-  padding: 0.55rem 0.65rem;
-  border: 1px solid #414559;
-  background: rgba(166, 209, 137, 0.08);
-  margin-bottom: 0.45rem;
+.sb-status-working { color: var(--sb-minga); }
+.sb-status-done { color: var(--sb-done); }
+
+.sb-orbit,
+.sb-card[data-col="working"] .sb-mark-working {
+  animation: sb-orbit 1600ms linear infinite;
 }
 
-.specimen-split.is-single {
-  grid-template-columns: 1fr;
+@keyframes sb-draw {
+  from { clip-path: inset(0 0 100% 0); }
+  to { clip-path: inset(0 0 0 0); }
 }
 
-.specimen-tui-frame.is-ansi16 {
-  border-color: #a5adce;
-  background: #000000;
-  color: #ffffff;
+@keyframes sb-land {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
 }
 
-.specimen-tui-frame.is-ansi16 .specimen-tui-top {
-  color: #ffff55;
-  border-bottom-color: #555555;
+@keyframes sb-char {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-.ml-fail {
-  color: #e78284;
+@keyframes sb-countdown {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
+@keyframes sb-target {
+  from { box-shadow: 0 0 0 1px var(--sb-you); }
+  to { box-shadow: 0 0 0 3px rgba(140, 170, 238, 0.35); }
+}
+
+@keyframes sb-orbit {
+  to { transform: rotate(360deg); }
+}
+
+/* Between phone and desktop the panes are narrower, so the type steps down and the cards wrap to more lines. */
+@media (min-width: 901px) and (max-width: 1040px) {
+  .sb-demo {
+    --sb-u: 32px;
+    --sb-font: 0.86rem;
+  }
+
+  .sb-panes {
+    min-height: 28rem;
+  }
+
+  .sb-card {
+    font-size: 0.72rem;
+  }
+}
+
+/* When the two panes would be too narrow side by side (phones and small tablets), the order is spec, then board. Before the board opens, the spec shows whole and the empty pane is short. When the board opens, the spec folds to its Requirements block (heading and task lines, marks intact) and the composer goes, so the spec lines, the board and the caption fit one phone screen. The two states have the same height, so the caption does not move. */
+@media (max-width: 900px) {
+  .sb-demo {
+    --sb-u: 26px;
+    --sb-font: 0.81rem;
+    --sb-gap: 0.35rem;
+  }
+
+  .sb-panes {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+
+  .sb-pane-spec {
+    border-right: 0;
+    border-bottom: 1px solid var(--sb-rule);
+  }
+
+  .sb-buffer {
+    min-height: 17.95rem;
+  }
+
+  .sb-composer {
+    min-height: 4.1rem;
+    padding: 0.6rem 0.85rem;
+    font-size: inherit;
+  }
+
+  .sb-pane-board {
+    min-height: 8.5rem;
+    padding: 0.75rem 0.6rem;
+  }
+
+  .sb-demo[data-beat="board_builds"] .sb-line:not([data-line="heading"], [data-line="save"], [data-line="sync"], [data-line="retry"], [data-line="status"]),
+  .sb-demo[data-beat="done"] .sb-line:not([data-line="heading"], [data-line="save"], [data-line="sync"], [data-line="retry"], [data-line="status"]),
+  .sb-demo[data-beat="board_builds"] .sb-composer,
+  .sb-demo[data-beat="done"] .sb-composer {
+    display: none;
+  }
+
+  .sb-demo[data-beat="board_builds"] .sb-buffer,
+  .sb-demo[data-beat="done"] .sb-buffer {
+    min-height: 9.85rem;
+  }
+
+  .sb-demo[data-beat="board_builds"] .sb-pane-board,
+  .sb-demo[data-beat="done"] .sb-pane-board {
+    min-height: 20.7rem;
+  }
+
+  .sb-card {
+    padding: 0.35rem 0.4rem;
+    font-size: 0.68rem;
+  }
+
+  .sb-card-meta {
+    font-size: 0.66rem;
+  }
+
+  .lab-caption {
+    min-height: 6.2em;
+  }
+
+  /* The step label changes length from beat to beat. On its own row it cannot rewrap the head. */
+  .lab-stepper {
+    flex-basis: 100%;
+    height: 1.7em;
+  }
+}
+
+/* A phone column is about 100px wide. The card drops its mark there so the title has the width; the column, the working card's border and the card's screen-reader word still give the state. */
+@media (max-width: 480px) {
+  .sb-card .sb-mark {
+    display: none !important;
+  }
+
+  .sb-card {
+    padding: 0.35rem;
+    font-size: 0.64rem;
+  }
+
+  .sb-card-meta {
+    font-size: 0.6rem;
+  }
+
+  .sb-pane-board {
+    padding-left: 0.4rem;
+    padding-right: 0.4rem;
+  }
+}
+
+/* The figure before it mounts (labs-pending): the same narrow layout as the final frame, so mounting does not change its height. */
+@media (max-width: 900px) {
+  .labs-pending:not(.labs-failed) .sb-demo:not(.lab-live):not(.lab-failed) .sb-line:not([data-line="heading"], [data-line="save"], [data-line="sync"], [data-line="retry"], [data-line="status"]),
+  .labs-pending:not(.labs-failed) .sb-demo:not(.lab-live):not(.lab-failed) .sb-composer {
+    display: none;
+  }
+
+  .labs-pending:not(.labs-failed) .sb-demo:not(.lab-live):not(.lab-failed) .sb-buffer {
+    min-height: 9.85rem;
+  }
+
+  .labs-pending:not(.labs-failed) .sb-demo:not(.lab-live):not(.lab-failed) .sb-pane-board {
+    min-height: 20.7rem;
+  }
+}
+
+/* Reduced motion: the demo runs as steps (Next and Back), so nothing moves, waits or loops. */
+@media (prefers-reduced-motion: reduce) {
+  .sb-demo *,
+  .sb-demo *::before,
+  .sb-demo *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 /* Homepage Section 01: Semantic Theme Role Switcher */

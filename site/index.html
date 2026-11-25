@@ -36,6 +36,8 @@
           document.documentElement.setAttribute("data-theme", saved);
         }
       } catch (_) {}
+      // The labs lay out as live before they mount, so mounting moves nothing. The module's onerror takes this back.
+      document.documentElement.classList.add("labs-pending");
     })();
   </script>
 </head>
@@ -66,7 +68,7 @@
 
   <main id="main">
     <div class="status-banner">
-      <p class="container" data-status="planned" data-since="v0.1.0">This page previews v0.1.0. The interface tour, the marks and the lab links show features that are not in today's build yet.</p>
+      <p class="container" data-status="planned" data-since="v0.1.0">This page previews v0.1.0. The spec-to-board demo, the marks and the lab links show features that are not in today's build yet.</p>
     </div>
     <section class="hero">
       <div class="container">
@@ -124,264 +126,162 @@ sudo dnf install minga</code></pre>
           </div>
         </div>
 
-        <figure class="spine-figure" data-code-tabs data-hero-tour data-status="planned" data-since="v0.1.0" data-pill="off">
-          <div class="showcase-header">
-            <span data-status="planned" data-since="v0.1.0">Interface tour · Select a feature to preview</span>
-            <span>Catppuccin Frappé default<span class="desktop-only"> · ← / → keys</span></span>
+        <figure class="spine-figure sb-demo" data-spec-board-demo data-status="planned" data-since="v0.1.0" data-pill="off">
+          <svg width="0" height="0" class="sb-sprite" aria-hidden="true">
+            <symbol id="sb-mark-working" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-opacity="0.28" stroke-width="1.5"/><path d="M8 2.5 A5.5 5.5 0 0 1 13.5 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="13.5" cy="8" r="2.1" fill="currentColor"/></symbol>
+            <symbol id="sb-mark-waiting" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+            <symbol id="sb-mark-done" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3.4" fill="currentColor"/></symbol>
+          </svg>
+          <div class="lab-head">
+            <span class="lab-labels">
+              <span class="lab-title" data-status="planned" data-since="v0.1.0">A spec becomes a board</span>
+              <span class="lab-sim-label">Simulation</span>
+            </span>
+            <span class="lab-stepper" data-lab-stepper></span>
           </div>
 
-          <div class="showcase-nav" role="tablist" aria-label="Minga interface feature tour">
-            <button type="button" class="showcase-tab" role="tab" id="tab-spec-twist" aria-selected="true" aria-controls="panel-spec-twist">
-              <span class="showcase-tab-num">01 / CO-AUTHORING</span>
-              <span class="showcase-tab-title">The Twist gutter</span>
-              <span class="showcase-tab-sub">Authorship strands &amp; per-author undo</span>
-            </button>
-            <button type="button" class="showcase-tab" role="tab" id="tab-spec-peek" aria-selected="false" aria-controls="panel-spec-peek" tabindex="-1">
-              <span class="showcase-tab-num">02 / PARALLEL AGENTS</span>
-              <span class="showcase-tab-title">Subagent Peek</span>
-              <span class="showcase-tab-sub">Inspect workers without losing your place</span>
-            </button>
-            <button type="button" class="showcase-tab" role="tab" id="tab-spec-tasks" aria-selected="false" aria-controls="panel-spec-tasks" tabindex="-1">
-              <span class="showcase-tab-num">03 / BUFFERS</span>
-              <span class="showcase-tab-title">Tasks &amp; Queue</span>
-              <span class="showcase-tab-sub">One approval drawer &amp; editable queue</span>
-            </button>
-            <button type="button" class="showcase-tab" role="tab" id="tab-spec-parity" aria-selected="false" aria-controls="panel-spec-parity" tabindex="-1">
-              <span class="showcase-tab-num">04 / CLIENTS</span>
-              <span class="showcase-tab-title">macOS &amp; Terminal</span>
-              <span class="showcase-tab-sub">Identical layout, marks, and keys</span>
-            </button>
-          </div>
-
-          <!-- FEATURE 1: CO-AUTHORING (THE TWIST) -->
-          <div class="showcase-panel" role="tabpanel" id="panel-spec-twist" aria-labelledby="tab-spec-twist">
-            <p class="showcase-explain"><strong>The Twist gutter:</strong> Braided strands mark Minga's unreviewed lines; editing inside turns one strand blue while <kbd>u</kbd> / <kbd>⌘Z</kbd> undoes only yours.</p>
-            <div class="spine-specimen" role="img" aria-label="Resting screen in Catppuccin Frappé: plain title bar, code with Twist authorship gutter, and one prioritized modeline">
-              <div class="spine-titlebar">
-                <span class="spine-wordmark">minga</span>
-                <span class="spine-title-file">retry.ex <span>lib/minga_agent/retry.ex</span></span>
-                <span></span>
-              </div>
-              <div class="spine-buffer">
-                <div class="spine-line">
-                  <span class="spine-ln">237</span>
-                  <span class="spine-sign"></span>
-                  <span class="spine-gutter"></span>
-                  <span class="spine-code"><span class="ckw">def</span> classify_status(status, headers) <span class="ckw">do</span></span>
+          <div class="spine-specimen sb-stage" data-lab-stage role="group" aria-label="Simulated Minga window with a spec on the left and a board on the right">
+            <div class="spine-titlebar">
+              <span class="spine-wordmark">minga</span>
+              <span class="spine-title-file">new_feature.md</span>
+              <span></span>
+            </div>
+            <div class="sb-panes">
+              <div class="sb-pane sb-pane-spec">
+                <div class="sb-buffer">
+                  <div class="sb-line" data-line="title" data-author="you">
+                    <span class="sb-ln">1</span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                    <span class="sb-text"><span class="sb-md-h"># Offline sync</span></span>
+                  </div>
+                  <div class="sb-line" data-line="gap_1" data-author="you">
+                    <span class="sb-ln">2</span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                    <span class="sb-text"></span>
+                  </div>
+                  <div class="sb-line" data-line="intro" data-author="you">
+                    <span class="sb-ln">3</span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                    <span class="sb-text">Notes must work with no connection.</span>
+                  </div>
+                  <div class="sb-line" data-line="gap_2" data-author="you">
+                    <span class="sb-ln">4</span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                    <span class="sb-text"></span>
+                  </div>
+                  <div class="sb-line" data-line="heading" data-author="you">
+                    <span class="sb-ln">5</span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                    <span class="sb-text"><span class="sb-md-h">## Requirements</span></span>
+                  </div>
+                  <div class="sb-line" data-line="save" data-author="you">
+                    <span class="sb-ln">6</span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span></span>
+                    <span class="sb-text">- Save notes on the device</span>
+                  </div>
+                  <div class="sb-line" data-line="sync" data-author="minga" data-seg="head">
+                    <span class="sb-ln">7</span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span><svg class="sb-braid sb-braid-cap" xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26"><path class="sb-strand-shade" d="M7 5 C7 11, 3 11, 3 17 L3 26" fill="none" stroke-width="2.6" stroke-linecap="round"/><path class="sb-strand-gap" d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke-width="5" stroke-linecap="round"/><path class="sb-strand-minga" d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke-width="2.6" stroke-linecap="round"/></svg><svg class="sb-braid sb-braid-fill" xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" preserveAspectRatio="none"><path class="sb-strand-shade" d="M3 0 L3 26" stroke-width="2.6"/><path class="sb-strand-minga" d="M7 0 L7 26" stroke-width="2.6"/></svg></span>
+                    <span class="sb-text">- Sync <del data-sb-rev="minga">when online</del> <ins data-sb-rev="minga">in the background</ins></span>
+                  </div>
+                  <div class="sb-line" data-line="retry" data-author="shared" data-seg="body">
+                    <span class="sb-ln">8</span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span><svg class="sb-braid sb-braid-fill" xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" preserveAspectRatio="none"><path class="sb-strand-shade" d="M3 0 L3 26" stroke-width="2.6"/><path class="sb-strand-minga" d="M7 0 L7 26" stroke-width="2.6"/></svg></span>
+                    <span class="sb-text">- On failure, retry <span class="sb-count"><del data-sb-rev="you">3</del> <ins data-sb-rev="you">5</ins></span> times</span>
+                  </div>
+                  <div class="sb-line" data-line="status" data-author="minga" data-seg="last">
+                    <span class="sb-ln">9</span>
+                    <span class="sb-gutter" data-surface="gutter" aria-hidden="true"><span class="sb-you-strand"></span><svg class="sb-braid sb-braid-fill" xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" preserveAspectRatio="none"><path class="sb-strand-shade" d="M3 0 L3 26" stroke-width="2.6"/><path class="sb-strand-minga" d="M7 0 L7 26" stroke-width="2.6"/></svg><svg class="sb-braid sb-braid-cap" xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26"><path class="sb-strand-shade" d="M3 0 L3 19" stroke-width="2.6" stroke-linecap="round"/><path class="sb-strand-minga" d="M7 0 L7 19" stroke-width="2.6" stroke-linecap="round"/></svg></span>
+                    <span class="sb-text">- Show sync status</span>
+                  </div>
                 </div>
-                <div class="spine-line spine-line-hl">
-                  <span class="spine-ln">238</span>
-                  <span class="spine-sign"></span>
-                  <span class="spine-gutter">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M7 5 C7 11, 3 11, 3 17 L3 26" fill="none" stroke="#74628d" stroke-width="2.6" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke="#303446" stroke-width="5" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke="#ca9ee6" stroke-width="2.6" stroke-linecap="round"/></svg>
-                  </span>
-                  <span class="spine-code">  <span class="ckw">case</span> status <span class="ckw">do</span></span>
-                </div>
-                <div class="spine-line spine-line-hl">
-                  <span class="spine-ln">239</span>
-                  <span class="spine-sign"></span>
-                  <span class="spine-gutter">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M3 0 L3 26" stroke="#74628d" stroke-width="2.6"/><path d="M7 0 L7 26" stroke="#ca9ee6" stroke-width="2.6"/></svg>
-                  </span>
-                  <span class="spine-code">    <span class="cnum">429</span> -&gt; {<span class="cat">:rate_limited</span>, parse_retry_after(headers)}</span>
-                </div>
-                <div class="spine-line spine-line-hl">
-                  <span class="spine-ln">240</span>
-                  <span class="spine-sign"></span>
-                  <span class="spine-gutter">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M3 0 L3 26" stroke="#8caaee" stroke-width="2.6"/><path d="M7 0 L7 26" stroke="#ca9ee6" stroke-width="2.6"/></svg>
-                  </span>
-                  <span class="spine-code">    <span class="cnum">529</span> -&gt; {<span class="cat">:overloaded</span>, backoff_ms(<span class="cnum">2</span>)} <span class="ccm"># your edit inside Minga's change</span></span>
-                </div>
-                <div class="spine-line spine-line-hl">
-                  <span class="spine-ln">241</span>
-                  <span class="spine-sign"></span>
-                  <span class="spine-gutter">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M3 0 L3 19" stroke="#74628d" stroke-width="2.6" stroke-linecap="round"/><path d="M7 0 L7 19" stroke="#ca9ee6" stroke-width="2.6" stroke-linecap="round"/></svg>
-                  </span>
-                  <span class="spine-code">    code <span class="ckw">when</span> code &gt;= <span class="cnum">500</span> -&gt; {<span class="cat">:retryable</span>, backoff_ms(<span class="cnum">1</span>)}</span>
-                </div>
-                <div class="spine-line">
-                  <span class="spine-ln">242</span>
-                  <span class="spine-sign"></span>
-                  <span class="spine-gutter">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M5 0 L5 26" stroke="#8caaee" stroke-width="1.6"/></svg>
-                  </span>
-                  <span class="spine-code">    _ -&gt; {<span class="cat">:fatal</span>, status}</span>
-                </div>
-                <div class="spine-line">
-                  <span class="spine-ln">243</span>
-                  <span class="spine-sign"></span>
-                  <span class="spine-gutter"></span>
-                  <span class="spine-code"><span class="ckw">  end</span></span>
+                <div class="sb-composer">
+                  <span class="sb-composer-who">You</span>
+                  <p class="sb-prompt" data-sb-prompt="prompt_edit" aria-hidden="true" hidden></p>
+                  <p class="sb-prompt" data-sb-prompt="prompt_board" aria-hidden="true" hidden></p>
+                  <button type="button" class="sb-turn" data-lab-answer hidden><span>Your turn</span><span class="sb-turn-timer" aria-hidden="true"></span></button>
                 </div>
               </div>
-              <div class="spine-modeline">
-                <div class="ml-left">
-                  <span class="ml-pill">NORMAL</span>
-                  <span class="ml-seg ml-needs">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="#ef9f76" fill-opacity="0.28"/><circle cx="8" cy="8" r="3.4" fill="#ef9f76"/></svg>
-                    1 needs you
-                  </span>
-                  <span class="ml-file">retry.ex</span>
-                  <span class="ml-minga">change 1/2</span>
-                  <span>main +11</span>
+              <div class="sb-pane sb-pane-board">
+                <div class="sb-board" data-sb-board>
+                  <div class="sb-cols">
+                    <div class="sb-col" data-col="waiting"><span>Waiting</span><span class="sb-col-count" data-sb-count="waiting">0</span></div>
+                    <div class="sb-col" data-col="working"><span>Working</span><span class="sb-col-count" data-sb-count="working">0</span></div>
+                    <div class="sb-col" data-col="done"><span>Done</span><span class="sb-col-count" data-sb-count="done">4</span></div>
+                  </div>
+                  <ul class="sb-cards">
+                    <li class="sb-card" data-card="save" data-col="done" style="--row: 1; --col: 2">
+                      <span class="sb-card-title"><svg class="sb-mark sb-mark-waiting" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><use href="#sb-mark-waiting"/></svg><svg class="sb-mark sb-mark-working" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><use href="#sb-mark-working"/></svg><svg class="sb-mark sb-mark-done" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><use href="#sb-mark-done"/></svg><span>Save notes on the device</span></span>
+                      <span class="lab-sr"><span data-sb-card-status="waiting" hidden>Waiting</span><span data-sb-card-status="working" hidden>Working</span><span data-sb-card-status="done">Done</span></span>
+                      <span class="sb-card-meta"><span>Line 6</span><span class="sb-card-files">2 files</span></span>
+                    </li>
+                    <li class="sb-card" data-card="sync" data-col="done" style="--row: 2; --col: 2">
+                      <span class="sb-card-title"><svg class="sb-mark sb-mark-waiting" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><use href="#sb-mark-waiting"/></svg><svg class="sb-mark sb-mark-working" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><use href="#sb-mark-working"/></svg><svg class="sb-mark sb-mark-done" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><use href="#sb-mark-done"/></svg><span>Sync in the background</span></span>
+                      <span class="lab-sr"><span data-sb-card-status="waiting" hidden>Waiting</span><span data-sb-card-status="working" hidden>Working</span><span data-sb-card-status="done">Done</span></span>
+                      <span class="sb-card-meta"><span>Line 7</span><span class="sb-card-files">3 files</span></span>
+                    </li>
+                    <li class="sb-card" data-card="retry" data-col="done" style="--row: 3; --col: 2">
+                      <span class="sb-card-title"><svg class="sb-mark sb-mark-waiting" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><use href="#sb-mark-waiting"/></svg><svg class="sb-mark sb-mark-working" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><use href="#sb-mark-working"/></svg><svg class="sb-mark sb-mark-done" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><use href="#sb-mark-done"/></svg><span>On failure, retry 5 times</span></span>
+                      <span class="lab-sr"><span data-sb-card-status="waiting" hidden>Waiting</span><span data-sb-card-status="working" hidden>Working</span><span data-sb-card-status="done">Done</span></span>
+                      <span class="sb-card-meta"><span>Line 8</span><span class="sb-card-files">1 file</span></span>
+                    </li>
+                    <li class="sb-card" data-card="status" data-col="done" style="--row: 4; --col: 2">
+                      <span class="sb-card-title"><svg class="sb-mark sb-mark-waiting" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><use href="#sb-mark-waiting"/></svg><svg class="sb-mark sb-mark-working" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><use href="#sb-mark-working"/></svg><svg class="sb-mark sb-mark-done" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><use href="#sb-mark-done"/></svg><span>Show sync status</span></span>
+                      <span class="lab-sr"><span data-sb-card-status="waiting" hidden>Waiting</span><span data-sb-card-status="working" hidden>Working</span><span data-sb-card-status="done">Done</span></span>
+                      <span class="sb-card-meta"><span>Line 9</span><span class="sb-card-files">2 files</span></span>
+                    </li>
+                  </ul>
                 </div>
-                <div class="ml-right">
-                  <span class="ml-seg ml-minga">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="#ca9ee6" stroke-opacity="0.32" stroke-width="1.5"/><path d="M8 2.5 A5.5 5.5 0 0 1 13.5 8" fill="none" stroke="#ca9ee6" stroke-width="1.5" stroke-linecap="round"/><circle cx="13.5" cy="8" r="2.1" fill="#ca9ee6"/></svg>
-                    Minga here 2/3
-                  </span>
-                  <span class="ml-dim">elixir</span>
-                  <span class="ml-dim">240:31</span>
-                </div>
+              </div>
+            </div>
+            <div class="spine-modeline">
+              <div class="ml-left"><span class="ml-file">new_feature.md</span></div>
+              <div class="ml-right">
+                <span class="ml-minga">Minga</span>
+                <span class="sb-status sb-status-working" data-sb-status="working" hidden><svg class="sb-orbit" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><use href="#sb-mark-working"/></svg>Working</span>
+                <span class="sb-status sb-status-done" data-sb-status="done"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><use href="#sb-mark-done"/></svg>Done</span>
               </div>
             </div>
           </div>
 
-          <!-- FEATURE 2: SUBAGENT PEEK -->
-          <div class="showcase-panel" role="tabpanel" id="panel-spec-peek" aria-labelledby="tab-spec-peek">
-            <p class="showcase-explain"><strong>Subagent Peek:</strong> Press <kbd>SPC a i</kbd> to inspect a parallel worker in a right split, step siblings with <kbd>]]</kbd> / <kbd>[[</kbd>, or message it without losing your main draft.</p>
-            <div class="spine-specimen" role="img" aria-label="Subagent peek split: parent conversation on left, subagent split on right with sibling glyph strip and direct composer">
-              <div class="spine-titlebar">
-                <span class="spine-wordmark">minga</span>
-                <span class="spine-title-file">Refactor retry pipeline <span>parent + subagent split</span></span>
-                <span></span>
-              </div>
-              <div class="specimen-split">
-                <div class="specimen-pane">
-                  <div class="specimen-pane-head">
-                    <strong>Parent conversation</strong>
-                    <span class="ml-minga">◐ Working · 1 of 4 reports in</span>
-                  </div>
-                  <div class="specimen-row"><span class="specimen-row-you">You</span></div>
-                  <div class="specimen-row">Audit retry handling, verify edge cases, and add tests before publishing.</div>
-                  <div class="specimen-row" style="margin-top:0.45rem;"><span class="specimen-row-minga">Minga</span></div>
-                  <div class="specimen-row"><span class="ml-done">●</span> Read retry.ex and split work across 4 subagents</div>
-                  <div class="specimen-row"><span class="ml-minga">◐</span> Started Fact-Check Auditor</div>
-                  <div class="specimen-row"><span class="ml-done">●</span> Edge-Case Tester reported 1 missing 529 clause</div>
-                  <div class="specimen-composer">Draft: Also verify Retry-After HTTP-date headers before merge...</div>
-                </div>
-                <div class="specimen-pane">
-                  <div class="specimen-pane-head">
-                    <strong>Refactor retry › Fact-Check Auditor</strong>
-                    <span class="ml-minga">◐ ◐ <span class="ml-done">●</span> ◐ &nbsp;3 of 4</span>
-                  </div>
-                  <div class="specimen-row"><span class="ml-dim">▸ Brief (folded · za)</span></div>
-                  <div class="specimen-row" style="margin-top:0.35rem;"><span class="ml-done">●</span> Checked HTTP 429 Retry-After parsing against RFC 9110</div>
-                  <div class="specimen-row"><span class="ml-minga">◐</span> Cross-checking backoff cap in lib/minga_agent/retry.ex</div>
-                  <div class="specimen-composer">Message Fact-Check Auditor...</div>
-                </div>
-              </div>
-              <div class="spine-modeline">
-                <div class="ml-left">
-                  <span class="ml-pill">NORMAL</span>
-                  <span class="ml-file">*minga-subagent*</span>
-                  <span class="ml-dim">]] / [[ siblings · q close</span>
-                </div>
-                <div class="ml-right">
-                  <span class="ml-minga">◐ 3 working · 1 done</span>
-                </div>
-              </div>
-            </div>
+          <p class="lab-caption" data-lab-caption-line></p>
+          <div class="lab-timeline-controls">
+            <button type="button" class="lab-control" data-lab-back hidden>Back</button>
+            <button type="button" class="lab-control" data-lab-next hidden>Next</button>
+            <button type="button" class="lab-control" data-lab-replay hidden>Replay</button>
           </div>
 
-          <!-- FEATURE 3: TASKS & EDITABLE QUEUE -->
-          <div class="showcase-panel" role="tabpanel" id="panel-spec-tasks" aria-labelledby="tab-spec-tasks">
-            <p class="showcase-explain"><strong>Tasks &amp; Queue:</strong> Approvals float to the top of <code>*minga-tasks*</code> (<kbd>y</kbd>/<kbd>a</kbd>/<kbd>t</kbd>/<kbd>n</kbd>) with a 300 ms lockout; <code>*minga-queue*</code> reorders queued prompts with <kbd>dd</kbd>/<kbd>p</kbd>.</p>
-            <div class="spine-specimen" role="img" aria-label="Tasks drawer with subagent tree and expanded Needs you approval row alongside editable prompt queue buffer">
-              <div class="spine-titlebar">
-                <span class="spine-wordmark">minga</span>
-                <span class="spine-title-file">*minga-tasks* &amp; *minga-queue* <span>buffers in drawers</span></span>
-                <span></span>
-              </div>
-              <div class="specimen-split">
-                <div class="specimen-pane">
-                  <div class="specimen-pane-head">
-                    <strong>*minga-tasks*</strong>
-                    <span><span class="ml-needs">1 needs you</span> · 1 working · 1 done</span>
-                  </div>
-                  <div class="specimen-row-needs">
-                    <div class="specimen-row" style="padding:0;"><span class="ml-needs">◉</span> <strong>Add usage limit tests</strong> <span class="ml-dim">· 12s</span></div>
-                    <div class="specimen-row" style="padding:0.2rem 0 0;">Create test/minga_agent/usage_limit_test.exs +86</div>
-                    <div class="specimen-keys"><span>y</span> Approve once &nbsp;<span>a</span> Session &nbsp;<span>t</span> Turn &nbsp;<span>n</span> Deny &nbsp;<span>=</span> Diff</div>
-                  </div>
-                  <div class="specimen-row"><span class="ml-minga">◐</span> Refactor retry pipeline · step 2 of 3</div>
-                  <div class="specimen-row" style="padding-left:1rem;"><span class="ml-dim">├─</span> <span class="ml-done">●</span> Edge-Case Tester · Done</div>
-                  <div class="specimen-row" style="padding-left:1rem;"><span class="ml-dim">└─</span> <span class="ml-minga">◐</span> Fact-Check Auditor · Working</div>
-                </div>
-                <div class="specimen-pane">
-                  <div class="specimen-pane-head">
-                    <strong>*minga-queue*</strong>
-                    <span class="ml-dim">2 queued</span>
-                  </div>
-                  <div class="specimen-row"><span class="ml-dim">1.</span> Run mix test test/minga_agent/retry_test.exs after edit</div>
-                  <div class="specimen-row"><span class="ml-dim">2.</span> Summarize changed error tuples for the PR description</div>
-                </div>
-              </div>
-              <div class="spine-modeline">
-                <div class="ml-left">
-                  <span class="ml-pill">NORMAL</span>
-                  <span class="ml-needs">◉ 1 needs you</span>
-                  <span class="ml-file">*minga-tasks*</span>
-                </div>
-                <div class="ml-right">
-                  <span class="ml-dim">q close</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- FEATURE 4: MACOS & TERMINAL PARITY -->
-          <div class="showcase-panel" role="tabpanel" id="panel-spec-parity" aria-labelledby="tab-spec-parity">
-            <p class="showcase-explain"><strong>macOS &amp; Terminal parity:</strong> Swift + Metal and the Go terminal client render identical layouts, marks, and keys from one Erlang VM state model.</p>
-            <div class="spine-specimen" role="img" aria-label="Side by side parity between macOS native client and Go terminal client rendering identical layout, marks, and keys">
-              <div class="spine-titlebar">
-                <span class="spine-wordmark">minga</span>
-                <span class="spine-title-file">*minga-review* <span>macOS vs. Terminal</span></span>
-                <span></span>
-              </div>
-              <div class="specimen-split">
-                <div class="specimen-pane">
-                  <div class="specimen-pane-head">
-                    <strong>macOS Desktop (Swift + Metal)</strong>
-                    <span class="ml-minga">Vector marks + CoreText</span>
-                  </div>
-                  <div class="specimen-row"><span class="ml-minga">◐</span> Working · animated orbit (static under Reduce Motion)</div>
-                  <div class="specimen-row"><span class="ml-needs">◉</span> Needs you · modeline chip + macOS Dock badge</div>
-                  <div class="specimen-row"><span class="ml-done">●</span> Done · exact vector Twist gutter + smooth trackpad scroll</div>
-                  <div class="specimen-row"><span class="ml-dim">Discovery:</span> hold ⌘ on macOS · click any visible action</div>
-                </div>
-                <div class="specimen-pane">
-                  <div class="specimen-tui-frame">
-                    <div class="specimen-tui-top">
-                      <span>*minga-review* · 2 files · +40 -12</span>
-                      <span>Go Terminal UI</span>
-                    </div>
-                    <div>lib/minga_agent/retry.ex</div>
-                    <div>&nbsp;├─ @@ 238 replaced 1 line with 4</div>
-                    <div>&nbsp;└─ test/retry_test.exs (+28)</div>
-                    <div class="specimen-tui-foot">y keep · n reject · = diff · Y keep all · q close</div>
-                  </div>
-                </div>
-              </div>
-              <div class="spine-modeline">
-                <div class="ml-left">
-                  <span class="ml-pill">NORMAL</span>
-                  <span class="ml-file">*minga-review*</span>
-                  <span class="ml-minga">◐ Minga here 2/3</span>
-                </div>
-                <div class="ml-right">
-                  <span class="ml-dim">Truecolor · 256 · 16-color safe</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <figcaption class="spine-caption">
-            <span>v0.1.0 interface preview in the default Catppuccin Frappé theme (<a href="/architecture#adrs">ADR-0006</a>).</span>
-            <span>No tabs · No permanent sidebars · One modeline</span>
-          </figcaption>
+          <ol data-lab-steps>
+            <li data-step="rest">
+              <p data-lab-instruction>The spec</p>
+              <p data-lab-caption="rest">Your spec is open on the left. The right side is empty.</p>
+            </li>
+            <li data-step="ask_edit">
+              <p data-lab-instruction>You ask</p>
+              <p data-lab-caption="ask_edit">You ask Minga: <q data-lab-text="prompt_edit">Open @new_feature.md and let's edit it together.</q></p>
+            </li>
+            <li data-step="minga_edits">
+              <p data-lab-instruction>Minga edits</p>
+              <p data-lab-caption="minga_edits">Minga adds two requirements and rewrites one. The braid in the gutter marks the lines that Minga wrote.</p>
+            </li>
+            <li data-step="your_turn">
+              <p data-lab-instruction>Your turn</p>
+              <p data-lab-caption="your_turn">Your turn. Press the button to change 3 retries to 5 on a line that Minga wrote.</p>
+              <p data-lab-caption="your_turn_done">You changed a line that Minga wrote. One strand of its braid now has your colour, because you both wrote that line.</p>
+            </li>
+            <li data-step="ask_board">
+              <p data-lab-instruction>You ask again</p>
+              <p data-lab-caption="ask_board">You ask Minga: <q data-lab-text="prompt_board">Generate me a kanban board and let's build this.</q></p>
+            </li>
+            <li data-step="board_builds">
+              <p data-lab-instruction>Minga builds</p>
+              <p data-lab-caption="board_builds">Minga opens a board with one card for each requirement and starts the work. The spec line behind the working card lights up.</p>
+            </li>
+            <li data-step="done">
+              <p data-lab-instruction>The board</p>
+              <p data-lab-caption="done">Minga wrote this board from your spec. Keep it, and you can open it for your next one. A board is one of the tools the workbench can become: <a href="/extending">see how you shape it</a>.</p>
+            </li>
+          </ol>
         </figure>
       </div>
     </section>
@@ -771,6 +671,6 @@ extension <span class="tok-atom">:minga_git_extended</span>,
   </footer>
 
   <script defer src="/site.js"></script>
-  <script type="module" src="/assets/learn-labs.js"></script>
+  <script type="module" src="/assets/learn-labs.js" onerror="document.documentElement.classList.add('labs-failed')"></script>
 </body>
 </html>

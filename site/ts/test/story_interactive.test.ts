@@ -9,59 +9,6 @@ import {
   triggerIsolationFault,
 } from "../src/arch_interactive.ts";
 import { highlightElixirLine } from "../src/highlight.ts";
-import { createHeroTourState, handleHeroTourKey, reduceHeroTour } from "../src/home_interactive.ts";
-
-describe("Homepage playable Feature Tour state machine", () => {
-  it("undoes only the human edit while preserving braided Twist, then keeps cleanly", () => {
-    let s = createHeroTourState();
-    assert.equal(s.userEditPresent, true);
-    s = reduceHeroTour(s, { type: "undo_yours" });
-    assert.equal(s.userEditPresent, false);
-    assert.equal(s.twistStatus, "unreviewed");
-    s = reduceHeroTour(s, { type: "keep_twist" });
-    assert.equal(s.twistStatus, "kept");
-  });
-
-  it("steps Subagent Peek siblings while preserving parent draft and reorders queue", () => {
-    let s = createHeroTourState();
-    s = reduceHeroTour(s, { type: "set_draft", text: "Keep this unsent draft" });
-    s = reduceHeroTour(s, { type: "peek_step", delta: 1 });
-    assert.equal(s.peekIndex, 2);
-    assert.equal(s.parentDraft, "Keep this unsent draft");
-
-    const topBefore = s.queueItems[0];
-    s = reduceHeroTour(s, { type: "queue_swap" });
-    assert.equal(s.queueItems[1], topBefore);
-
-    s = reduceHeroTour(s, { type: "approve", choice: "y" });
-    assert.equal(s.approvalState, "approved_once");
-  });
-
-  it("handles real keyboard chords across Feature Tour tabs (SPC a y, ]], za, y, dd, p, o)", () => {
-    let s = createHeroTourState();
-    let res = handleHeroTourKey(s, "panel-spec-twist", "", "u");
-    assert.equal(res.handled, true);
-    assert.equal(res.state.userEditPresent, false);
-
-    res = handleHeroTourKey(res.state, "panel-spec-twist", "", " ");
-    assert.equal(res.pending, "SPC");
-    res = handleHeroTourKey(res.state, "panel-spec-twist", res.pending, "a");
-    assert.equal(res.pending, "SPC a");
-    res = handleHeroTourKey(res.state, "panel-spec-twist", res.pending, "y");
-    assert.equal(res.state.twistStatus, "kept");
-
-    res = handleHeroTourKey(res.state, "panel-spec-tasks", "", "y");
-    assert.equal(res.state.approvalState, "approved_once");
-
-    const lenBefore = res.state.queueItems.length;
-    res = handleHeroTourKey(res.state, "panel-spec-tasks", "", "d");
-    res = handleHeroTourKey(res.state, "panel-spec-tasks", res.pending, "d");
-    assert.equal(res.state.queueItems.length, lenBefore - 1);
-
-    res = handleHeroTourKey(res.state, "panel-spec-tasks", "", "o");
-    assert.equal(res.state.queueItems.length, lenBefore);
-  });
-});
 
 describe("Architecture live typing fault simulator & staged overlay pipeline", () => {
   it("freezes single-loop keystrokes during LSP hang while Minga types live, then flushes on unblock", () => {

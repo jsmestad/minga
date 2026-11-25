@@ -79,6 +79,47 @@ The writer keeps only rows that are already listed and never raises a count, so 
 
 This check runs only on a full run. `python3 design/tools/site_check.py site/index.html` checks that page and skips the lab sources.
 
+**Where lab copy goes instead.** Every lab is built on the lab kit in `site/ts/src/lab/`, and the kit reads its words from the page. A lab root holds one ordered list of steps:
+
+```html
+<ol data-lab-steps>
+  <li data-step="open">
+    <p data-lab-instruction>Open the file</p>
+    <p data-lab-caption="open">The file is open.</p>
+    <p data-lab-caption="open_wrong">That key does nothing here.</p>
+  </li>
+</ol>
+```
+
+- `data-step` is the step id. Steps keep their document order.
+- `data-lab-instruction` is the step's short label, which the stepper shows.
+- `data-lab-caption="id"` is one caption. A step holds one or more, and caption ids are unique in the lab. Lab state names a caption by id; the caption line under the stage shows a copy of that element's content, links included.
+- `data-lab-text="id"` marks a named string used elsewhere in the stage, such as a prompt that the lab types out. It may sit anywhere in the lab root.
+
+The list is ordinary visible HTML, never a `<template>`, a `<script>` or an attribute value, so this check reads it. It is also what a reader sees with JavaScript off, so write it to read well as a plain list. `mountLab` in `copy.ts` reads the copy and adds the class `lab-live` to the root, and the stylesheet then hides the list. Words that belong to the stage itself (a button label, the text of a specimen) sit in the stage markup. `site/ts/src/lab/copy.ts` documents the same contract next to the code that reads it; the home page demo (`[data-spec-board-demo]` in `site/index.html`) is the reference use.
+
+The kit's chrome classes are in `site/styles.css` under "Lab kit". A lab uses these and adds only its own stage styles:
+
+| Class or attribute | Where | What it does |
+|---|---|---|
+| `labs-pending` | `<html>`, set by the page's inline head script | Lays each lab out as live before it mounts (list hidden, caption and control rows reserved), so mounting does not move the page. A script blocker stops the inline script too, so the step list stays visible. |
+| `labs-failed` | `<html>`, set by `onerror` on the lab module's `<script>` tag | The module did not load. Every lab falls back to its static figure and step list. |
+| `lab-failed` | one lab root, set by `main.ts` when that lab's mount throws | That lab falls back to its static figure and step list, and the error is logged. The other labs still mount. |
+| `lab-live` | the lab root, set by `mountLab` | Hides `[data-lab-steps]` and shows the live chrome. |
+| `lab-head` | the row above the stage | Holds `lab-labels` (`lab-title`, `lab-sim-label`) and `lab-stepper`. |
+| `lab-caption` | the caption line, directly under the stage | The one line of narration. It keeps a minimum height so the controls under it do not move. |
+| `lab-timeline-controls`, `lab-control` | the row of timeline buttons, and each button | Replay, Next and Back. The buttons are in the page with `hidden`; the kit shows the ones that apply. |
+| `lab-keycast`, `lab-focus-cue` | labs that take keys | The pending and recent keys, and the "click here, then press keys" hint. |
+| `is-stage-focused` | the lab root, set by `mountStage` | Present while focus is inside the stage. |
+| `[data-lab-stage]` | the stage | Shows a focus ring when the keyboard put focus on it. |
+| `lab-sr` | anywhere | Text for screen readers only. |
+
+A page that hosts a kit lab needs both hooks: `document.documentElement.classList.add("labs-pending")` in its inline head script, and `onerror="document.documentElement.classList.add('labs-failed')"` on the module script tag. `site/index.html` has them; each other page gets them when its lab moves to the kit.
+
+**Keys.** A lab passes `onKey` to `mountStage` and returns `true` only for a key it binds. The stage keeps a bound key from the browser, a Control chord included, so a lab that teaches Control+J can stop the browser acting on it. Tab, Shift+Tab and Command chords are never kept. For a key the lab does not bind, it may still update its caption and returns `false`: every key gets an answer, and Tab and the browser's own shortcuts keep working.
+
+A lab's state test proves that the page has words for every id the state can emit. `site/ts/test/support/page_copy.ts` reads the contract from a page without a DOM; `site/ts/test/spec_board_state.test.ts` shows the use.
+
 The checker's own tests are in `test/scripts/site_check_test.py`:
 
 ```bash
