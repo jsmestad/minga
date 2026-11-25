@@ -153,7 +153,7 @@ defmodule MingaEditor.Frontend.TerminalHealth do
   defp word(:pending), do: "asking"
 
   @spec because(standing(), TerminalReport.source()) :: String.t()
-  defp because(_standing, :user), do: "set in your config"
+  defp because(_standing, :user), do: "you forced it"
   defp because(_standing, :answered), do: "the terminal answered"
   defp because(_standing, :known_terminal), do: "a terminal known to have it"
   defp because(_standing, :timeout), do: "the terminal did not answer"
@@ -179,8 +179,8 @@ defmodule MingaEditor.Frontend.TerminalHealth do
   defp no_longer_set_lines(features) do
     [
       "",
-      "Forced when Minga started, no longer in your config: #{Enum.join(features, ", ")}.",
-      "Restart Minga to let it detect them again."
+      "Forced when Minga started, and not in your config now: #{Enum.join(features, ", ")}.",
+      "That is #{TerminalOverrides.variable()} set by hand, or a setting you have since removed. It stays until Minga restarts without it."
     ]
   end
 

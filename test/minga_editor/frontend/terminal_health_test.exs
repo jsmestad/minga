@@ -77,11 +77,11 @@ defmodule MingaEditor.Frontend.TerminalHealthTest do
     assert text =~ ~r/Focus awareness\s+asking\s+the terminal has not answered yet/
   end
 
-  test "a forced feature is shown as set in the config" do
+  test "a forced feature is shown as forced by the user" do
     forced = TerminalReport.new([{:styled_underlines, :detected, :user}])
     text = forced |> TerminalHealth.lines(%{styled_underlines: :on}) |> Enum.join("\n")
 
-    assert text =~ ~r/Curly and dotted underlines\s+detected\s+set in your config/
+    assert text =~ ~r/Curly and dotted underlines\s+detected\s+you forced it/
     refute text =~ "not applied"
   end
 
@@ -137,8 +137,8 @@ defmodule MingaEditor.Frontend.TerminalHealthTest do
     assert TerminalHealth.no_longer_set(report, %{styled_underlines: :on}) == []
 
     text = report |> TerminalHealth.lines(%{}) |> Enum.join("\n")
-    assert text =~ "Forced when Minga started, no longer in your config: styled_underlines."
-    assert text =~ "Restart Minga to let it detect them again."
+    assert text =~ "Forced when Minga started, and not in your config now: styled_underlines."
+    assert text =~ "It stays until Minga restarts without it."
   end
 
   test "a frontend that is not a terminal gets one plain sentence, and no feature rows" do
