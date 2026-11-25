@@ -5,7 +5,7 @@ defmodule MingaAgent.Changeset.Overlay.NativeCloner do
   * **macOS:** one `clonefile(2)` call clones the whole directory tree, so the cost is one system call rather than one per file.
   * **Linux:** there is no directory clone call, so the helper walks the tree and clones each regular file with the `FICLONE` ioctl (Btrfs, XFS with reflink, and other file systems that share blocks).
 
-  The helper never copies bytes. Its exit status separates "cloning is not possible here" (a volume that cannot clone, such as HFS+ or ext4; two different file systems; a special file in the tree) from real failures; `exit_result/2` maps it. A missing helper also counts as unsupported, the same as a volume that cannot clone.
+  The helper never copies bytes. Its exit status separates "cloning is not possible here" (a volume that cannot clone, such as HFS+ or ext4; two different file systems; a special file in the tree; a relative symlink that resolves outside the tree, which would dangle in the clone) from real failures; `exit_result/2` maps it. A missing helper also counts as unsupported, the same as a volume that cannot clone.
   """
 
   @behaviour MingaAgent.Changeset.Overlay.Cloner

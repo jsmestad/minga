@@ -2,7 +2,7 @@
 //!
 //! Usage: `minga-clone-tree SOURCE TARGET`
 //!
-//! Clones SOURCE (a directory, a regular file, or a symlink) to TARGET, which must not exist yet. Symlinks are cloned as links and never followed. The helper never copies file bytes: when the file system cannot share blocks between SOURCE and TARGET, it fails, and the caller links the entry instead.
+//! Clones SOURCE (a directory, a regular file, or a symlink) to TARGET, which must not exist yet. Symlinks are cloned as links and never followed. Before cloning, the helper scans the tree and refuses one with a relative symlink that resolves outside it, because that link would dangle in the clone. The helper never copies file bytes: when the file system cannot share blocks between SOURCE and TARGET, it fails, and the caller links the entry instead.
 //!
 //! - macOS: one `clonefile(2)` call with `CLONE_NOFOLLOW` clones the whole tree.
 //! - Linux: there is no directory clone call, so the helper walks the tree. It creates each directory and symlink, and clones each regular file with the `FICLONE` ioctl.
@@ -11,7 +11,7 @@
 //!
 //! - 0: TARGET is a complete clone.
 //! - 2: usage error.
-//! - 3: cloning is unsupported here. The file system cannot clone, SOURCE and TARGET are on different file systems, the tree holds a special file, or the platform has no clone call.
+//! - 3: cloning is unsupported here. The file system cannot clone, SOURCE and TARGET are on different file systems, the tree holds a special file or a relative symlink that resolves outside it, or the platform has no clone call.
 //! - 4: any other failure, such as a missing SOURCE, an existing TARGET, or a permission error.
 //!
 //! On failure, stderr holds one line that names the operation, the path, and the errno. TARGET may then hold a partial clone, which the caller removes.
@@ -100,6 +100,8 @@ pub fn clone(source_arg: []const u8, target_arg: []const u8) Failure!void {
     var source = try PathBuf.init(source_arg);
     var target = try PathBuf.init(target_arg);
 
+    try checkLinksStayInside(&source);
+
     if (is_darwin) {
         if (clonefile(source.z(), target.z(), CLONE_NOFOLLOW) != 0) return failClone(&source, &target, errno());
     } else if (is_linux) {
@@ -108,6 +110,91 @@ pub fn clone(source_arg: []const u8, target_arg: []const u8) Failure!void {
         writeStderr("minga-clone-tree: this platform has no clone call\n");
         return error.Unsupported;
     }
+}
+
+/// Fails with `Unsupported` when a relative symlink in the tree at `source` resolves outside it.
+///
+/// A clone lands in another directory, and a symlink is cloned with its text unchanged. A relative link that climbs out of the tree, such as a pnpm workspace member's `node_modules/react -> ../../../node_modules/.pnpm/...` or an npm `file:../sibling` dependency, would then dangle in the clone. The caller links the tree instead. Absolute links point at the same place from anywhere, so they stay as they are.
+///
+/// When `source` is itself a symlink, the tree is the directory that holds it. The scan reads directory entries and link texts only, never file contents.
+pub fn checkLinksStayInside(source: *PathBuf) Failure!void {
+    switch ((try lstat(source)).kind) {
+        .directory => try scanLinks(source, 0),
+        .symlink => try checkLink(source, 0),
+        .regular, .other => {},
+    }
+}
+
+/// Checks every link below `dir`, whose entries sit `depth` directories below the top of the tree.
+fn scanLinks(dir_path: *PathBuf, depth: usize) Failure!void {
+    const dir = c.opendir(dir_path.z()) orelse return fail(.opendir, dir_path, errno());
+    defer _ = c.closedir(dir);
+
+    while (true) {
+        c._errno().* = 0;
+        const entry = c.readdir(dir) orelse {
+            const err = errno();
+            if (err != .SUCCESS) return fail(.readdir, dir_path, err);
+            break;
+        };
+
+        const name = std.mem.sliceTo(@as([*:0]const u8, @ptrCast(&entry.name)), 0);
+        if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) continue;
+
+        const previous = try dir_path.push(name);
+        defer dir_path.pop(previous);
+
+        const kind: @FieldType(Metadata, "kind") = switch (entry.type) {
+            c.DT.DIR => .directory,
+            c.DT.LNK => .symlink,
+            c.DT.UNKNOWN => (try lstat(dir_path)).kind,
+            else => .regular,
+        };
+
+        switch (kind) {
+            .directory => try scanLinks(dir_path, depth + 1),
+            .symlink => try checkLink(dir_path, depth),
+            .regular, .other => {},
+        }
+    }
+}
+
+/// Fails when the relative link at `path`, `depth` directories below the top of the tree, resolves outside the tree.
+fn checkLink(path: *PathBuf, depth: usize) Failure!void {
+    var text: [path_max:0]u8 = undefined;
+    const read = c.readlink(path.z(), &text, text.len);
+    if (read < 0) return fail(.readlink, path, errno());
+
+    const len: usize = @intCast(read);
+    if (len >= text.len) return fail(.path_length, path, null);
+
+    if (linkEscapes(text[0..len], depth)) {
+        var line: [2 * path_max + 64]u8 = undefined;
+        const message = std.fmt.bufPrint(&line, "minga-clone-tree: link {s} -> {s} leaves the cloned tree\n", .{ path.z(), text[0..len] });
+        writeStderr(message catch "minga-clone-tree: a link leaves the cloned tree\n");
+        return error.Unsupported;
+    }
+}
+
+/// Whether a link with `text`, `depth` directories below the top of the tree, can resolve outside it.
+///
+/// Leading `..` components climb real directories, because the scan never follows a link, so they are counted exactly. A `..` after a named component could climb out of whatever that component links to, so it counts as escaping.
+pub fn linkEscapes(text: []const u8, depth: usize) bool {
+    if (std.mem.startsWith(u8, text, "/")) return false;
+
+    var up: usize = 0;
+    var named = false;
+    var components = std.mem.splitScalar(u8, text, '/');
+    while (components.next()) |component| {
+        if (component.len == 0 or std.mem.eql(u8, component, ".")) continue;
+        if (std.mem.eql(u8, component, "..")) {
+            if (named or up == depth) return true;
+            up += 1;
+        } else {
+            named = true;
+        }
+    }
+    return false;
 }
 
 /// Clones an entry by walking it: directories and symlinks are created, and each regular file is cloned on its own.
@@ -333,6 +420,17 @@ test "exit status separates unsupported from failed" {
     try std.testing.expectEqual(exit_failed, exitStatus(error.Failed));
 }
 
+test "a relative link escapes when it climbs above the top of the tree" {
+    try std.testing.expect(!linkEscapes("/absolute/outside", 0));
+    try std.testing.expect(!linkEscapes(".pnpm/react@18/node_modules/react", 0));
+    try std.testing.expect(!linkEscapes("../left-pad/index.js", 1));
+    try std.testing.expect(!linkEscapes("./a/./b", 0));
+    try std.testing.expect(linkEscapes("../left-pad", 0));
+    try std.testing.expect(linkEscapes("../../outside/x", 1));
+    try std.testing.expect(linkEscapes("a/../../b", 2));
+    try std.testing.expect(linkEscapes("a/../b", 2));
+}
+
 test "path buffer pushes and pops components" {
     var path = try PathBuf.init("/tmp/a");
     const previous = try path.push("node_modules");
@@ -454,6 +552,35 @@ test "the walk clones regular files with their mode, or reports that the file sy
 
     var file = try scratch.path("target/index.js");
     try std.testing.expectEqual(@as(c.mode_t, 0o755), (try lstat(&file)).mode);
+}
+
+test "a relative link that leaves the source is unsupported, and an internal one still clones" {
+    var scratch = try Scratch.init();
+    defer scratch.deinit();
+
+    try scratch.mkdir("outside");
+    try scratch.mkdir("source");
+    try scratch.mkdir("source/pkg");
+    try scratch.mkdir("source/.bin");
+    try scratch.symlink("../pkg", "source/.bin/pkg");
+
+    var source = try scratch.path("source");
+    var target = try scratch.path("target");
+    try std.testing.expectEqual(exit_cloned, exitStatus(clone(source.z(), target.z())));
+
+    var buffer: [path_max]u8 = undefined;
+    try std.testing.expectEqualStrings("../pkg", try scratch.readLink("target/.bin/pkg", &buffer));
+
+    try scratch.symlink("../../outside", "source/pkg/escape");
+    var second = try scratch.path("second");
+    try std.testing.expectEqual(exit_unsupported, exitStatus(clone(source.z(), second.z())));
+    try std.testing.expectError(error.Unsupported, cloneLink(&scratch, "source/pkg/escape"));
+}
+
+fn cloneLink(scratch: *const Scratch, relative: []const u8) !void {
+    var link = try scratch.path(relative);
+    var target = try scratch.path("link-clone");
+    return clone(link.z(), target.z());
 }
 
 test "an existing target is a real failure, not an unsupported clone" {

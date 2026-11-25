@@ -67,6 +67,11 @@ jobs:
               "scripts/check_macos_release_optimization",
               "scripts/test_macos_unit",
               "scripts/check_conformance_recovery",
+              # The real overlay clone helper runs only on macOS.
+              "zig/src/clone_tree_main.zig",
+              "lib/minga_agent/changeset/overlay.ex",
+              "lib/minga_agent/changeset/overlay/**",
+              "test/minga_agent/changeset/overlay_clone_test.exs",
           ]
 
           # The render benchmarks build and measure native code against generated protocol sources only.
@@ -806,6 +811,18 @@ jobs:
           MINGA_IPC_HELPER="$HELPER" mix test \
             test/macos/native_ipc_helper_integration_test.exs \
             --include macos_ipc_helper
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      # Builds only the clone helper, the way `mix compile.minga_zig` does, instead of the whole native support set.
+      - name: Test real overlay clone helper against APFS
+        run: |
+          set -euo pipefail
+          (cd zig && zig build-exe src/clone_tree_main.zig -lc -femit-bin=../priv/minga-clone-tree)
+          codesign --force --sign - --identifier minga-clone-tree priv/minga-clone-tree
+          mix test test/minga_agent/changeset/overlay_clone_test.exs --include overlay_clone
 
       - name: Test native result classification and document types
         run: |

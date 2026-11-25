@@ -76,6 +76,28 @@ defmodule MingaAgent.Changeset.OverlayCloneTest do
     assert log |> String.split("could not be cloned") |> length() == 2
   end
 
+  @tag :overlay_clone
+  test "a relative link that leaves the tree makes the helper fall back to links, so the package still resolves",
+       %{project: project, tmp_dir: dir} do
+    assert_helper_built()
+    outside = Path.join(dir, "outside/x")
+    File.mkdir_p!(outside)
+    File.write!(Path.join(outside, "package.json"), ~s({"name": "x"}))
+    File.ln_s!("../../outside/x", Path.join(project, "node_modules/x"))
+
+    {:ok, overlay} = Overlay.create(project, cloner: NativeCloner)
+    on_exit(fn -> Overlay.cleanup(overlay) end)
+
+    log =
+      capture_log(fn ->
+        assert {:ok, %{cloned_entries: 0, clone_fallbacks: 1}} =
+                 Overlay.materialize_project(overlay)
+      end)
+
+    assert log =~ "leaves the cloned tree"
+    assert File.read!(Path.join(overlay.overlay_dir, "node_modules/x/package.json")) =~ ~s("x")
+  end
+
   test "a materialization whose clone fails warns with the reason and links the packages",
        %{project: project} do
     {:ok, overlay} = Overlay.create(project, cloner: FailingCloner)
