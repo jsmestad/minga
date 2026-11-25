@@ -928,6 +928,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
 
   @spec dropped_outcome(term()) :: term()
   defp dropped_outcome(:unchanged), do: :queue_not_ready
+  defp dropped_outcome(:failed), do: :failed_with_press
   defp dropped_outcome(outcome), do: outcome
 
   # The save's own outcome stays unless the held queue has something to say.
@@ -1797,6 +1798,14 @@ defmodule MingaEditor.Agent.DraftWorkflow do
   end
 
   @spec report_inactive(State.t(), term(), String.t()) :: State.t()
+  defp report_inactive(state, :failed_with_press, _label) do
+    Minga.API.message(
+      "An inactive Agent draft could not be saved or restored; its message was not sent."
+    )
+
+    state
+  end
+
   defp report_inactive(state, :failed, _label) do
     Minga.API.message("An inactive Agent draft could not be saved or restored.")
     state
@@ -1828,6 +1837,17 @@ defmodule MingaEditor.Agent.DraftWorkflow do
   defp report_inactive(state, _outcome, _label), do: state
 
   @spec report(State.t(), term()) :: State.t()
+  defp report(state, :failed_with_press) do
+    message =
+      "Draft not saved or restored, so the message was not sent. It is still in the composer."
+
+    Minga.API.message(message)
+
+    state
+    |> NoticeWorkflow.publish(message)
+    |> MingaEditor.schedule_render(16)
+  end
+
   defp report(state, :failed) do
     message = "Draft not saved or restored. Current input was kept."
     Minga.API.message(message)

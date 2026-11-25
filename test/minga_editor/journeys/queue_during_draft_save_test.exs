@@ -191,7 +191,9 @@ defmodule MingaEditor.Journeys.QueueDuringDraftSaveTest do
 
       assert draft_save(ctx).held_press == nil
       assert prompt(ctx) == "hello"
-      assert minibuffer(ctx) == "Draft not saved or restored. Current input was kept."
+
+      assert minibuffer(ctx) ==
+               "Draft not saved or restored, so the message was not sent. It is still in the composer."
     end
   end
 
