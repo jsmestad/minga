@@ -64,7 +64,7 @@ defmodule Minga.Config.Loader do
            config_path: String.t(),
            load_error: String.t() | nil,
            config_eval_error: String.t() | nil,
-           migration_notice: String.t() | nil,
+           migration_notices: [String.t()],
            loaded_modules: [module()],
            modules_errors: [String.t()],
            modules_fingerprint: binary(),
@@ -175,10 +175,27 @@ defmodule Minga.Config.Loader do
   def config_eval_error, do: config_eval_error(__MODULE__)
   def config_eval_error(server), do: Agent.get(server, & &1.report.config_eval_error)
 
-  @doc "Returns the startup notice for saved bindings that need an opt-in extension."
-  @spec migration_notice() :: String.t() | nil
-  @spec migration_notice(GenServer.server()) :: String.t() | nil
-  def migration_notice(server \\ __MODULE__), do: Agent.get(server, & &1.report.migration_notice)
+  @doc """
+  Returns the startup notices about the config itself, for `*Messages*`: saved bindings that need an opt-in extension, and
+  each retired option the config still sets.
+  """
+  @spec migration_notices() :: [String.t()]
+  @spec migration_notices(GenServer.server()) :: [String.t()]
+  def migration_notices(server \\ __MODULE__),
+    do: Agent.get(server, & &1.report.migration_notices)
+
+  @doc false
+  @spec record_retired_option(String.t()) :: :ok | :not_loading
+  def record_retired_option(note) when is_binary(note) do
+    case Process.get(:minga_config_retired_notes) do
+      notes when is_list(notes) ->
+        Process.put(:minga_config_retired_notes, [note | notes])
+        :ok
+
+      nil ->
+        :not_loading
+    end
+  end
 
   @doc false
   @spec record_config_binding(atom()) :: :ok
@@ -522,6 +539,7 @@ defmodule Minga.Config.Loader do
     previous_options_server = Process.put(:minga_config_options, options_server)
     previous_lsp_settings = Process.put(:minga_config_lsp_settings, %{})
     previous_bound_commands = Process.put(:minga_config_bound_commands, MapSet.new())
+    previous_retired_notes = Process.put(:minga_config_retired_notes, [])
 
     try do
       config_cleanup_error =
@@ -618,7 +636,7 @@ defmodule Minga.Config.Loader do
           config_path: config_path,
           load_error: load_error,
           config_eval_error: config_eval_error,
-          migration_notice: extension_migration_notice(),
+          migration_notices: migration_notices_found(),
           loaded_modules: loaded_modules,
           modules_errors: modules_errors,
           modules_fingerprint: modules_fingerprint,
@@ -637,6 +655,7 @@ defmodule Minga.Config.Loader do
       restore_pdict(:minga_config_options, previous_options_server)
       restore_pdict(:minga_config_lsp_settings, previous_lsp_settings)
       restore_pdict(:minga_config_bound_commands, previous_bound_commands)
+      restore_pdict(:minga_config_retired_notes, previous_retired_notes)
     end
   end
 
@@ -648,7 +667,7 @@ defmodule Minga.Config.Loader do
       config_path: config_path,
       load_error: nil,
       config_eval_error: nil,
-      migration_notice: nil,
+      migration_notices: [],
       loaded_modules: [],
       modules_errors: [],
       modules_fingerprint: user_modules_fingerprint(config_dir),
@@ -661,6 +680,17 @@ defmodule Minga.Config.Loader do
       after_error: nil,
       lsp_settings: %{}
     }
+  end
+
+  # The extension notice, then each retired option in the order the config set it.
+  @spec migration_notices_found() :: [String.t()]
+  defp migration_notices_found do
+    retired = Process.get(:minga_config_retired_notes, []) |> Enum.reverse()
+
+    case extension_migration_notice() do
+      nil -> retired
+      notice -> [notice | retired]
+    end
   end
 
   @spec extension_migration_notice() :: String.t() | nil

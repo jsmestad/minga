@@ -292,12 +292,14 @@ defmodule Minga.Config do
   """
   @spec set(Options.option_name() | atom(), term()) :: :ok
   def set(name, _value) when is_map_key(@retired_options, name) do
-    Minga.Log.warning(
-      :config,
-      "#{inspect(name)} was removed and is ignored. #{Map.fetch!(@retired_options, name)}"
-    )
+    note =
+      "#{inspect(name)} is retired and ignored; remove it from your config. #{Map.fetch!(@retired_options, name)}"
 
-    :ok
+    # While the config loads, the note waits for the editor's *Messages*; a later `set` reaches it directly.
+    case Minga.Config.Loader.record_retired_option(note) do
+      :ok -> :ok
+      :not_loading -> Minga.API.message(note)
+    end
   end
 
   def set(name, value) when is_atom(name) do

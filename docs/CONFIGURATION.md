@@ -99,7 +99,7 @@ set :agent_notify_terminal, :bell_and_desktop  # both
 
 The bell comes from the terminal frontend itself, so your terminal decides what it does: flash the tab, bounce the Dock icon or play a sound. A desktop notification uses `osascript` on macOS. On Linux it uses `notify-send`, which the `libnotify` package provides, and any freedesktop notification server shows it: mako on Omarchy, GNOME Shell, KDE Plasma. Linux desktop notifications need a graphical session, so over SSH or on a text console use the bell. A terminal desktop notification cannot be removed once sent, and clicking it does not open the drawer.
 
-Older configs may still set `:agent_notify_on` or `:agent_notify_debounce`. Minga now alerts only once, when a task starts needing you, so it ignores both and logs a warning in `*Messages*`; the rest of your config still loads.
+Older configs may still set `:agent_notify_on` or `:agent_notify_debounce`. Both are retired: Minga now alerts only once, when a task starts needing you, and `:agent_notify_terminal` replaces them for the terminal. A config that still sets one loads normally, and `*Messages*` says once that the option is retired and what replaced it, so you can remove the line.
 
 Use `set :agent_notifications, false` to turn off every agent alert, on macOS and in the terminal.
 
