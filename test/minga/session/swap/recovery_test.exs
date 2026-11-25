@@ -172,4 +172,139 @@ defmodule Minga.Session.Swap.RecoveryTest do
       refute File.exists?(swap_path)
     end
   end
+
+  describe "scan/1 scope" do
+    setup %{tmp_dir: tmp_dir} do
+      swap_dir = Path.join(tmp_dir, "swap")
+      File.mkdir_p!(swap_dir)
+
+      [alpha, beta] =
+        for name <- ["alpha", "beta"] do
+          root = Path.join(tmp_dir, name)
+          File.mkdir_p!(Path.join(root, "lib"))
+          File.write!(Path.join(root, "mix.exs"), "")
+          file = Path.join(root, "lib/#{name}.ex")
+          File.write!(file, "saved #{name}")
+          write_swap_file(swap_dir, file, "unsaved #{name}")
+          %{root: root, file: file}
+        end
+
+      %{swap_dir: swap_dir, alpha: alpha, beta: beta}
+    end
+
+    test "a project scope returns only that project's swaps and leaves the others on disk", ctx do
+      opts = scan_opts(ctx.swap_dir) ++ [scope: {:project, ctx.alpha.root}]
+
+      assert [%{path: path}] = Recovery.scan(opts)
+      assert path == ctx.alpha.file
+
+      # Project beta's text was not recovered into alpha, and it is still waiting.
+      assert [%{path: beta_path}] =
+               Recovery.scan(scan_opts(ctx.swap_dir) ++ [scope: {:project, ctx.beta.root}])
+
+      assert beta_path == ctx.beta.file
+    end
+
+    test "a file scope returns the swap of that one file", ctx do
+      opts = scan_opts(ctx.swap_dir) ++ [scope: {:file, ctx.beta.file}]
+
+      assert [%{path: path}] = Recovery.scan(opts)
+      assert path == ctx.beta.file
+      assert Recovery.scan(scan_opts(ctx.swap_dir) ++ [scope: {:file, "/no/such/file.ex"}]) == []
+    end
+
+    test "a project opened through a symlink finds the swaps of its files", ctx do
+      link = Path.join(Path.dirname(ctx.alpha.root), "alpha-link")
+      File.ln_s!(ctx.alpha.root, link)
+
+      assert [%{path: path}] =
+               Recovery.scan(scan_opts(ctx.swap_dir) ++ [scope: {:project, link}])
+
+      assert path == ctx.alpha.file
+    end
+
+    test "the default scope returns every recoverable swap", ctx do
+      paths = ctx.swap_dir |> scan_opts() |> Recovery.scan() |> Enum.map(& &1.path) |> Enum.sort()
+
+      assert paths == Enum.sort([ctx.alpha.file, ctx.beta.file])
+    end
+  end
+
+  describe "the lifetime of a swap file" do
+    test "a swap whose text the file already holds is removed: nothing is unsaved", %{
+      tmp_dir: tmp_dir
+    } do
+      original = Path.join(tmp_dir, "saved.ex")
+      File.write!(original, "the same text")
+      swap_path = write_swap_file(tmp_dir, original, "the same text")
+
+      assert Recovery.scan(scan_opts(tmp_dir)) == []
+      refute File.exists?(swap_path)
+    end
+
+    test "a swap whose file is gone is removed, and the log names the file", %{tmp_dir: tmp_dir} do
+      missing = Path.join(tmp_dir, "deleted.ex")
+      swap_path = write_swap_file(tmp_dir, missing, "unsaved text")
+
+      log = capture_log(fn -> assert Recovery.scan(scan_opts(tmp_dir)) == [] end)
+
+      refute File.exists?(swap_path)
+      assert log =~ "Dropped unsaved text for #{missing}"
+    end
+
+    test "an old swap with different text is never removed for its age", %{tmp_dir: tmp_dir} do
+      original = Path.join(tmp_dir, "old.ex")
+      File.write!(original, "saved text")
+      swap_path = write_swap_file(tmp_dir, original, "unsaved text", mtime: 1)
+
+      assert [%{swap_path: ^swap_path, swap_mtime: 1}] = Recovery.scan(scan_opts(tmp_dir))
+      assert File.exists?(swap_path)
+    end
+
+    test "a swap owned by a running editor is left alone even when its file is gone", %{
+      tmp_dir: tmp_dir
+    } do
+      swap_path = write_swap_file(tmp_dir, Path.join(tmp_dir, "gone.ex"), "text", os_pid: 4242)
+
+      assert Recovery.scan(scan_opts(tmp_dir, fn pid -> pid == 4242 end)) == []
+      assert File.exists?(swap_path)
+    end
+  end
+
+  describe "recoverable_projects/1" do
+    test "counts waiting files per project and removes nothing", %{tmp_dir: tmp_dir} do
+      swap_dir = Path.join(tmp_dir, "swap")
+      File.mkdir_p!(swap_dir)
+      root = Path.join(tmp_dir, "project")
+      File.mkdir_p!(Path.join(root, "lib"))
+      File.write!(Path.join(root, "mix.exs"), "")
+
+      for name <- ["one", "two"] do
+        file = Path.join(root, "lib/#{name}.ex")
+        File.write!(file, "saved")
+        write_swap_file(swap_dir, file, "unsaved #{name}")
+      end
+
+      # Already saved, gone, and owned by a running editor: none of these is waiting.
+      saved = Path.join(root, "lib/saved.ex")
+      File.write!(saved, "same")
+      saved_swap = write_swap_file(swap_dir, saved, "same")
+      gone_swap = write_swap_file(swap_dir, Path.join(root, "lib/gone.ex"), "text")
+      owned = Path.join(root, "lib/owned.ex")
+      File.write!(owned, "saved")
+      write_swap_file(swap_dir, owned, "unsaved", os_pid: 4242)
+
+      {:ok, canonical_root} = Minga.Project.Root.canonical_path(root)
+      opts = scan_opts(swap_dir, fn pid -> pid == 4242 end)
+
+      assert Recovery.recoverable_projects(opts) == [%{root: canonical_root, files: 2}]
+      assert Minga.Session.recoverable_projects(opts) == [%{root: canonical_root, files: 2}]
+      assert File.exists?(saved_swap)
+      assert File.exists?(gone_swap)
+    end
+
+    test "is empty when the swap directory does not exist" do
+      assert Recovery.recoverable_projects(swap_dir: "/nonexistent/path") == []
+    end
+  end
 end
