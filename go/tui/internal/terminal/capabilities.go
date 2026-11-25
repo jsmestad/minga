@@ -1,6 +1,8 @@
 package terminal
 
 import (
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jsmestad/minga/go/tui/internal/generated"
@@ -20,17 +22,21 @@ type Status = generated.TerminalFeatureStatus
 // A feature that is not listed is not reported, and the BEAM shows it as unknown, until the code that uses it also detects it.
 var reported = []Feature{
 	generated.TerminalFeatureTrueColor,
+	generated.TerminalFeatureStyledUnderlines,
+	generated.TerminalFeatureUnderlineColor,
 	generated.TerminalFeatureKittyKeyboard,
 	generated.TerminalFeatureSynchronizedOutput,
 	generated.TerminalFeatureFocusReporting,
 }
 
 // hasFallback says whether Minga replaces a feature the terminal lacks (docs/design/tui.md, "Terminal capabilities").
-// Without true colour it uses the 256 or 16 colour profile, and without the Kitty keyboard protocol keys keep their legacy meaning.
+// Without true colour it uses the 256 or 16 colour profile, without styled underlines a plain underline, without an
+// underline colour the text colour, and without the Kitty keyboard protocol keys keep their legacy meaning.
 // Nothing replaces synchronized output or focus reporting.
 func hasFallback(feature Feature) bool {
 	switch feature {
-	case generated.TerminalFeatureTrueColor, generated.TerminalFeatureKittyKeyboard:
+	case generated.TerminalFeatureTrueColor, generated.TerminalFeatureStyledUnderlines,
+		generated.TerminalFeatureUnderlineColor, generated.TerminalFeatureKittyKeyboard:
 		return true
 	default:
 		return false
@@ -62,6 +68,65 @@ func NewCapabilities() Capabilities {
 		capabilities.status[feature] = generated.TerminalFeatureStatusPending
 	}
 	return capabilities
+}
+
+// WithEnvironment settles the features a terminal is known to have from the variables it sets, before it answers anything.
+//
+// Styled underlines and the underline colour have no query every terminal answers, so the terminals that document
+// them are named here. Inside a multiplexer (tmux, screen) the variables describe the outer terminal and the
+// multiplexer decides what passes, so nothing is taken from them there: the terminal's own answer, or the timeout, decides.
+func (c Capabilities) WithEnvironment(getenv func(string) string) Capabilities {
+	if getenv("TMUX") != "" || getenv("STY") != "" || !drawsStyledUnderlines(getenv) {
+		return c
+	}
+	c.Resolve(generated.TerminalFeatureStyledUnderlines, true)
+	c.Resolve(generated.TerminalFeatureUnderlineColor, true)
+	return c
+}
+
+// drawsStyledUnderlines names the terminals that document SGR 4:3 (curly), 4:4 (dotted) and SGR 58 (underline colour).
+func drawsStyledUnderlines(getenv func(string) string) bool {
+	switch getenv("TERM_PROGRAM") {
+	case "ghostty", "WezTerm", "iTerm.app":
+		return true
+	}
+	switch getenv("TERM") {
+	case "xterm-kitty", "xterm-ghostty", "wezterm", "foot", "foot-extra", "alacritty":
+		return true
+	}
+	if getenv("KITTY_WINDOW_ID") != "" {
+		return true
+	}
+	// VTE terminals (GNOME Terminal and others) draw them from 0.52: VTE_VERSION is major*10000 + minor*100 + micro.
+	if version, err := strconv.Atoi(getenv("VTE_VERSION")); err == nil && version >= 5200 {
+		return true
+	}
+	return false
+}
+
+// ObserveTermcap records the terminal's answer to a terminfo query (XTGETTCAP) and reports whether it changed what is known.
+// `Smulx` is the styled underline capability and `Setulc` the underline colour. Only an answer that carries the
+// capability's value counts: a terminal that names a capability it does not have sends no value.
+func (c *Capabilities) ObserveTermcap(content string) bool {
+	changed := false
+	for _, capability := range strings.Split(content, ";") {
+		switch {
+		case strings.HasPrefix(capability, "Smulx="):
+			changed = c.Resolve(generated.TerminalFeatureStyledUnderlines, true) || changed
+		case strings.HasPrefix(capability, "Setulc="):
+			changed = c.Resolve(generated.TerminalFeatureUnderlineColor, true) || changed
+		}
+	}
+	return changed
+}
+
+// TermcapQueries returns the terminfo capabilities the frontend asks this terminal for at startup.
+// Apple's Terminal does not know the query and prints its text into the screen, so it is not asked.
+func TermcapQueries(getenv func(string) string) []string {
+	if getenv("TERM_PROGRAM") == "Apple_Terminal" {
+		return nil
+	}
+	return []string{"Smulx", "Setulc"}
 }
 
 // Status returns what is known about a feature. A feature this frontend does not detect is unknown.

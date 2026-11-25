@@ -89,7 +89,7 @@ func (m Model) compositeHeaderWithSidebar(mainLines []string, tree protocol.File
 	theme := m.palette()
 	sepColor := theme.TreeSeparator()
 	if tree.Focused {
-		sepColor = theme.Accent()
+		sepColor = theme.FocusBorder(sepColor)
 	}
 	treeBG := theme.TreeSurface()
 	sepStyle := lipgloss.NewStyle().Foreground(sepColor).Background(treeBG)

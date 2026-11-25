@@ -8,6 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
+	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 	"github.com/rivo/uniseg"
 )
@@ -624,6 +625,40 @@ func (m Model) applyWindowOverlays(style lipgloss.Style, window protocol.WindowC
 	return m.applyWindowOverlaysAt(style, window, rowIndex, rowIndex, col)
 }
 
+// diagnosticStyle marks text that carries a diagnostic (docs/design/marks.md, "Diagnostics").
+//
+// In a terminal that draws styled underlines, an error gets a curly underline, a warning a dotted one, and an info or
+// hint a dotted one in the secondary text colour. Where the terminal also colours underlines, the text keeps its own
+// colour and only the underline takes the severity's colour. In a terminal without styled underlines the mark is a
+// plain underline with the text in the severity's colour, as it always was.
+func (m Model) diagnosticStyle(style lipgloss.Style, severity byte) lipgloss.Style {
+	tone := m.palette().Diagnostic(severity)
+	if !m.capabilities.Supports(generated.TerminalFeatureStyledUnderlines) {
+		return style.Underline(true).Foreground(tone)
+	}
+	if severity >= diagnosticSeverityInfo {
+		tone = m.palette().Muted()
+	}
+	style = style.UnderlineStyle(diagnosticUnderline(severity))
+	if m.capabilities.Supports(generated.TerminalFeatureUnderlineColor) {
+		return style.UnderlineColor(tone)
+	}
+	return style.Foreground(tone)
+}
+
+// The wire's diagnostic severities: 0 error, 1 warning, 2 info, 3 hint.
+const (
+	diagnosticSeverityError = 0
+	diagnosticSeverityInfo  = 2
+)
+
+func diagnosticUnderline(severity byte) lipgloss.Underline {
+	if severity == diagnosticSeverityError {
+		return lipgloss.UnderlineCurly
+	}
+	return lipgloss.UnderlineDotted
+}
+
 func (m Model) applyWindowOverlaysAt(style lipgloss.Style, window protocol.WindowContent, sourceRowIndex int, contentRowIndex int, col int) lipgloss.Style {
 	if semantics := m.residentSemanticsFor(window); semantics != nil {
 		row := uint32(sourceRowIndex)
@@ -634,7 +669,7 @@ func (m Model) applyWindowOverlaysAt(style lipgloss.Style, window protocol.Windo
 		}
 		for _, diagnostic := range semantics.rowDiagnostics(row) {
 			if residentRangeContains(diagnostic.StartRow, diagnostic.StartCol, diagnostic.EndRow, diagnostic.EndCol, row, column) {
-				style = style.Underline(true).Foreground(m.palette().Diagnostic(diagnostic.Severity))
+				style = m.diagnosticStyle(style, diagnostic.Severity)
 				break
 			}
 		}
@@ -659,7 +694,7 @@ func (m Model) applyWindowOverlaysAt(style lipgloss.Style, window protocol.Windo
 	}
 	for _, diagnostic := range window.Diagnostics {
 		if rangeContains(diagnostic.StartRow, diagnostic.StartCol, diagnostic.EndRow, diagnostic.EndCol, row, column) {
-			style = style.Underline(true).Foreground(m.palette().Diagnostic(diagnostic.Severity))
+			style = m.diagnosticStyle(style, diagnostic.Severity)
 			break
 		}
 	}
@@ -940,7 +975,7 @@ func (m Model) withFileTree(mainLines []string) ([]string, *gitStatusHits) {
 	sidebar := m.renderFileTree(tree, sidebarWidth, max(len(mainLines), m.bodyHeight()), true)
 	sepColor := m.palette().TreeSeparator()
 	if tree.Focused {
-		sepColor = m.palette().Accent()
+		sepColor = m.palette().FocusBorder(sepColor)
 	}
 	sepStyle := lipgloss.NewStyle().Foreground(sepColor).Background(m.palette().TreeSurface())
 	sep := sepStyle.Render("│")
