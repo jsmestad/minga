@@ -536,12 +536,13 @@ defmodule Minga.Buffer.Process do
   end
 
   @doc """
-  Stops swap writes and removes this buffer's swap file, because the user is quitting on purpose.
+  Stops swap writes and removes this buffer's swap file in `swap_dir`, because the user is quitting on purpose.
 
-  The supervisor stops buffers without running `terminate/2`, so a quit has to ask. After this call the buffer writes no swap file again.
+  The supervisor stops buffers without running `terminate/2`, so a quit has to ask. After this call the buffer writes no swap file again. A buffer that writes into another directory, or writes no swap files, is left as it is.
   """
-  @spec release_swap(GenServer.server()) :: :ok
-  def release_swap(server), do: GenServer.call(server, :release_swap, @file_io_call_timeout)
+  @spec release_swap(GenServer.server(), String.t()) :: :ok
+  def release_swap(server, swap_dir) when is_binary(swap_dir),
+    do: GenServer.call(server, {:release_swap, swap_dir}, @file_io_call_timeout)
 
   @doc "Atomically replaces content at `expected_version`, preserving the nearest valid cursor position."
   @spec replace_content_if_version(
@@ -1926,10 +1927,14 @@ defmodule Minga.Buffer.Process do
     end
   end
 
-  def handle_call(:release_swap, _from, state) do
-    state = revoke_swap_writes(state)
-    :ok = delete_swap_file(state)
-    {:reply, :ok, %{state | swap: SwapState.release(state.swap)}}
+  def handle_call({:release_swap, swap_dir}, _from, state) do
+    if SwapState.writes_into?(state.swap, swap_dir) do
+      state = revoke_swap_writes(state)
+      :ok = delete_swap_file(state)
+      {:reply, :ok, %{state | swap: SwapState.release(state.swap)}}
+    else
+      {:reply, :ok, state}
+    end
   end
 
   def handle_call(

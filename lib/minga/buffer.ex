@@ -74,6 +74,12 @@ defmodule Minga.Buffer do
 
   Used by agent tools to guarantee every edited file has a buffer with
   undo integration, without depending on the Editor (Layer 2).
+
+  ## Options
+
+  - `:swap_dir`: where the buffer writes its swap file. The default is `Minga.Session.buffer_swap_dir/0`, so every buffer of an interactive editor keeps unsaved text across a crash, whoever opened it.
+  - `:allow_missing`: start a buffer for a path that has no file yet. Recovery uses it for unsaved text whose file is gone.
+  - `:options_server`, `:history_attribution`: passed to the buffer and its `:buffer_opened` event.
   """
   @spec ensure_for_path(String.t()) :: {:ok, pid()} | {:error, term()}
   @spec ensure_for_path(String.t(), Minga.Events.registry()) :: {:ok, pid()} | {:error, term()}
@@ -92,8 +98,16 @@ defmodule Minga.Buffer do
         {:ok, pid}
 
       :not_found ->
-        if File.exists?(abs_path) do
-          start_buffer_for_path(abs_path, events_registry, options_server, history_attribution)
+        if File.exists?(abs_path) or Keyword.get(opts, :allow_missing, false) do
+          swap_dir = Keyword.get_lazy(opts, :swap_dir, &Minga.Session.buffer_swap_dir/0)
+
+          start_buffer_for_path(
+            abs_path,
+            events_registry,
+            options_server,
+            history_attribution,
+            swap_dir
+          )
         else
           {:error, :enoent}
         end
@@ -104,13 +118,23 @@ defmodule Minga.Buffer do
           String.t(),
           Minga.Events.registry(),
           Minga.Config.Options.server(),
-          Minga.Events.BufferEvent.history_attribution()
+          Minga.Events.BufferEvent.history_attribution(),
+          String.t() | nil
         ) :: {:ok, pid()} | {:error, term()}
-  defp start_buffer_for_path(abs_path, events_registry, options_server, history_attribution) do
+  defp start_buffer_for_path(
+         abs_path,
+         events_registry,
+         options_server,
+         history_attribution,
+         swap_dir
+       ) do
     case DynamicSupervisor.start_child(
            Minga.Buffer.Supervisor,
            {__MODULE__,
-            file_path: abs_path, events_registry: events_registry, options_server: options_server}
+            file_path: abs_path,
+            events_registry: events_registry,
+            options_server: options_server,
+            swap_dir: swap_dir}
          ) do
       {:ok, pid} ->
         Minga.Events.broadcast(
@@ -415,21 +439,21 @@ defmodule Minga.Buffer do
   defdelegate adopt_recovered_text(server, content, swap_path), to: BufferProcess
 
   @doc """
-  Stops swap writes in every file buffer and removes their swap files, because the user is quitting on purpose.
+  Stops swap writes in every file buffer that writes into `swap_dir` and removes their swap files, because the user is quitting on purpose.
 
   A swap file is kept for text the user never decided about: after a crash, a kill, or a lost frontend. A quit that saves or discards is a decision, so nothing of this run may be recovered on the next start. A swap kept by a buffer that crashed earlier in this run is not touched: that text was never saved or discarded.
   """
-  @spec release_swaps() :: :ok
-  def release_swaps do
+  @spec release_swaps(String.t()) :: :ok
+  def release_swaps(swap_dir) when is_binary(swap_dir) do
     Minga.Buffer.Registry
     |> Registry.select([{{:_, :"$1", :_}, [], [:"$1"]}])
     |> Enum.uniq()
-    |> Enum.each(&release_swap/1)
+    |> Enum.each(&release_swap(&1, swap_dir))
   end
 
-  @spec release_swap(pid()) :: :ok
-  defp release_swap(buffer) do
-    BufferProcess.release_swap(buffer)
+  @spec release_swap(pid(), String.t()) :: :ok
+  defp release_swap(buffer, swap_dir) do
+    BufferProcess.release_swap(buffer, swap_dir)
   catch
     # A buffer can stop while the editor quits. Its swap is then handled by its own `terminate/2`.
     :exit, _reason -> :ok

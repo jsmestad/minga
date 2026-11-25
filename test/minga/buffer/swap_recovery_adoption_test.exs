@@ -117,7 +117,7 @@ defmodule Minga.Buffer.SwapRecoveryAdoptionTest do
       own_swap = Swap.swap_path(ctx.path, swap_dir: ctx.swap_dir)
       assert File.exists?(own_swap)
 
-      assert :ok = BufferProcess.release_swap(buffer)
+      assert :ok = BufferProcess.release_swap(buffer, ctx.swap_dir)
 
       refute File.exists?(own_swap)
       assert Recovery.scan(swap_dir: ctx.swap_dir, pid_alive?: fn _pid -> false end) == []
@@ -126,7 +126,7 @@ defmodule Minga.Buffer.SwapRecoveryAdoptionTest do
     test "an edit after the release writes no new swap", ctx do
       buffer = start_buffer(ctx, swap_dir: ctx.swap_dir)
       :ok = Buffer.replace_content(buffer, "first")
-      :ok = BufferProcess.release_swap(buffer)
+      :ok = BufferProcess.release_swap(buffer, ctx.swap_dir)
 
       # The VM is stopping, but a late edit still reaches the buffer.
       :ok = Buffer.replace_content(buffer, "late edit while the editor quits")
@@ -135,11 +135,21 @@ defmodule Minga.Buffer.SwapRecoveryAdoptionTest do
       assert swap_files(ctx.swap_dir) == []
     end
 
+    test "a buffer that writes into another directory keeps its swap", ctx do
+      buffer = start_buffer(ctx, swap_dir: ctx.swap_dir)
+      :ok = Buffer.replace_content(buffer, "unsaved text of another editor's buffer")
+      write_swap_after_debounce(buffer)
+
+      assert :ok = BufferProcess.release_swap(buffer, Path.join(ctx.swap_dir, "elsewhere"))
+
+      assert File.exists?(Swap.swap_path(ctx.path, swap_dir: ctx.swap_dir))
+    end
+
     test "a write that was pending when the user quit is cancelled", ctx do
       buffer = start_buffer(ctx, swap_dir: ctx.swap_dir)
       :ok = Buffer.replace_content(buffer, "edited less than a debounce ago")
 
-      assert :ok = BufferProcess.release_swap(buffer)
+      assert :ok = BufferProcess.release_swap(buffer, ctx.swap_dir)
       write_swap_after_debounce(buffer)
 
       assert swap_files(ctx.swap_dir) == []

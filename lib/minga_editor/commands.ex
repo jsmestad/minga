@@ -858,7 +858,8 @@ defmodule MingaEditor.Commands do
     MingaEditor.HugeFile.guard(file_path, options_server, fn ->
       Buffer.ensure_for_path(file_path, events_registry,
         options_server: options_server,
-        history_attribution: history_attribution
+        history_attribution: history_attribution,
+        allow_missing: Keyword.get(opts, :allow_missing, false)
       )
     end)
   end

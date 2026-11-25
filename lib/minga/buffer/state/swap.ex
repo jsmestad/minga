@@ -56,6 +56,13 @@ defmodule Minga.Buffer.State.Swap do
   @spec configured?(t()) :: boolean()
   def configured?(%__MODULE__{directory: directory}), do: is_binary(directory)
 
+  @doc "Returns true when this buffer writes its swap file into `directory`."
+  @spec writes_into?(t(), String.t()) :: boolean()
+  def writes_into?(%__MODULE__{directory: directory}, directory) when is_binary(directory),
+    do: true
+
+  def writes_into?(%__MODULE__{}, directory) when is_binary(directory), do: false
+
   @doc """
   Turns swap writes off for the rest of this buffer's life.
 

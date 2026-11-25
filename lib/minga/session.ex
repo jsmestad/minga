@@ -163,6 +163,31 @@ defmodule Minga.Session do
   @spec recoverable_projects(keyword()) :: [waiting_project()]
   defdelegate recoverable_projects(opts \\ []), to: Minga.Session.Swap.Recovery
 
+  @doc "Reads the file path and unsaved text of a swap file and leaves the swap file on disk."
+  @spec read_swap_file(String.t()) :: {:ok, String.t(), binary()} | {:error, term()}
+  defdelegate read_swap_file(swap_path), to: Minga.Session.Swap.Recovery, as: :read
+
+  @doc """
+  The swap directory for file buffers that are started without one, or `nil` when they write no swap files.
+
+  Buffers write swap files only in a VM that runs an interactive editor, because only that editor recovers them on its next start. A headless editor, a benchmark, a storyboard run or a gateway-only runtime writes none: nothing would recover or remove them, and a later real session would "recover" text that no user typed. Agent tools open buffers through the same path, so inside an interactive editor their unreviewed edits are kept the same way as the user's.
+
+  The `:buffer_swap_dir` application environment overrides the decision: a directory turns swap files on, `nil` turns them off.
+  """
+  @spec buffer_swap_dir() :: String.t() | nil
+  def buffer_swap_dir do
+    case Application.get_env(:minga, :buffer_swap_dir, :auto) do
+      :auto -> if interactive_editor?(), do: swap_dir()
+      configured -> configured
+    end
+  end
+
+  @spec interactive_editor?() :: boolean()
+  defp interactive_editor? do
+    Application.get_env(:minga, :start_editor, false) and
+      Application.get_env(:minga, :backend, :tui) != :headless
+  end
+
   @doc "Recovers content from a swap file. Returns `{:ok, original_path, content}`."
   @spec recover_swap_file(String.t()) :: {:ok, String.t(), String.t()} | {:error, term()}
   defdelegate recover_swap_file(swap_path), to: Minga.Session.Swap.Recovery, as: :recover
