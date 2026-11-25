@@ -4,6 +4,7 @@
 /// untracked, conflicts), and a commit message input. Matches the visual
 /// density and interaction patterns of FileTreeView.
 
+import MingaProtocol
 import SwiftUI
 
 public struct GitStatusView: View {
@@ -21,6 +22,8 @@ public struct GitStatusView: View {
         case commit(panelID: UInt64, message: String)
         case amend(panelID: UInt64, message: String)
         case pullAndRetry(toastID: UInt64)
+        /// Runs a clean tree's next step by the command it names.
+        case executeCommand(name: String)
     }
 
     public let state: GitStatusState
@@ -139,6 +142,29 @@ public struct GitStatusView: View {
 
     @ViewBuilder
     private var cleanView: some View {
+        if let clean = state.cleanTree {
+            VStack(alignment: .leading, spacing: EmptyStateMetrics.whyToActions) {
+                EmptyListHeader(empty: clean, textColor: theme.treeFg, mutedColor: theme.treeFg.opacity(0.78))
+                    .padding(.horizontal, EmptyStateMetrics.inset)
+                EmptyListActions(
+                    empty: clean,
+                    textColor: theme.treeFg,
+                    accentColor: theme.accent,
+                    selectionColor: theme.treeSelectionBg
+                ) { action in
+                    sendAction?(.executeCommand(name: action.id))
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.top, EmptyStateMetrics.inset)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        } else {
+            legacyCleanView
+        }
+    }
+
+    @ViewBuilder
+    private var legacyCleanView: some View {
         VStack(spacing: Spacing.sm) {
             Spacer()
             Image(systemName: "checkmark.circle")

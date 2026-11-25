@@ -13,6 +13,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
   alias MingaEditor.FileTree.Diagnostics, as: FileTreeDiagnostics
   alias MingaEditor.FileTree.Row
   alias MingaEditor.FileTree.Rows
+  alias MingaEditor.FileTree.EmptyFolder
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias Minga.Language.Devicon
@@ -81,6 +82,18 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
   end
 
   @spec build_state(FileTreeState.t(), FileTreeState.status()) :: FileTreeModel.t()
+  defp build_state(%FileTreeState{} = file_tree, :empty) do
+    root = empty_root(file_tree)
+
+    %{
+      build_state(file_tree, :loading)
+      | status: :empty,
+        root_path: root,
+        focused?: FileTreeState.focused?(file_tree),
+        empty: EmptyFolder.empty_list(root, FileTreeState.empty_selected(file_tree))
+    }
+  end
+
   defp build_state(%FileTreeState{} = file_tree, status) do
     %FileTreeModel{
       root_path: file_tree.project_root,
@@ -91,6 +104,15 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
       selected_id: "",
       rows: []
     }
+  end
+
+  # The folder the tree shows, which is the project root until the tree is rooted elsewhere.
+  @spec empty_root(FileTreeState.t()) :: String.t() | nil
+  defp empty_root(file_tree) do
+    case FileTreeState.tree(file_tree) do
+      %FileTree{root: root} -> root
+      nil -> file_tree.project_root
+    end
   end
 
   @spec build_hidden(String.t() | nil) :: FileTreeModel.t()

@@ -1231,11 +1231,11 @@ final class CommandDispatcher {
                 guiState.observatoryState.hide()
             }
 
-        case .guiFileTree(let version, let treeFlags, let treeState, let generation, let selectedId, let treeWidth, let rootPath, let errorReason, let entries):
+        case .guiFileTree(let version, let treeFlags, let treeState, let generation, let selectedId, let treeWidth, let rootPath, let errorReason, let entries, let empty):
             let visible = treeState != FileTreeVisibilityState.hidden.rawValue
             let focused = treeFlags & 0x02 != 0
             if visible {
-                guiState.fileTreeState.update(version: version, generation: generation, treeFlags: treeFlags, selectedId: selectedId, focused: focused, treeWidth: treeWidth, rootPath: rootPath, rawEntries: entries, treeState: treeState, errorReason: errorReason)
+                guiState.fileTreeState.update(version: version, generation: generation, treeFlags: treeFlags, selectedId: selectedId, focused: focused, treeWidth: treeWidth, rootPath: rootPath, rawEntries: entries, treeState: treeState, errorReason: errorReason, empty: empty)
             } else {
                 guiState.fileTreeState.hide(rootPath: rootPath)
             }
@@ -1410,7 +1410,7 @@ final class CommandDispatcher {
                 title: title, lines: lines
             )
 
-        case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let rawEntries, let rawToast, let entryBasePath, let lastCommitMessage, let stashCount, let toastID, let panelID, let commitTargetID):
+        case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let rawEntries, let rawToast, let entryBasePath, let lastCommitMessage, let stashCount, let toastID, let panelID, let commitTargetID, let empty):
             let parsedRepoState = GitRepoState(rawValue: repoState) ?? .notARepo
             let toast: (String, ToastLevel, ToastAction)? = rawToast.map { t in
                 let parsedLevel = ToastLevel(rawValue: t.level)
@@ -1455,7 +1455,8 @@ final class CommandDispatcher {
                     stashCount: stashCount,
                     toastID: toastID,
                     panelID: panelID,
-                    commitTargetID: commitTargetID
+                    commitTargetID: commitTargetID,
+                    cleanTree: empty
                 )
             }
 

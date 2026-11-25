@@ -3066,6 +3066,10 @@ func DecodeGuiGitStatusFields(data []byte, offset int, windowEnd int) (GuiGitSta
 	}
 	commitTargetID := decodeU64(data, pos)
 	pos += 8
+	empty, pos, err := DecodeEmptyList(data, pos, windowEnd)
+	if err != nil {
+		return GuiGitStatusFields{}, offset, err
+	}
 	return GuiGitStatusFields{
 		RepoState:         repoState,
 		Syncing:           syncing,
@@ -3081,6 +3085,7 @@ func DecodeGuiGitStatusFields(data []byte, offset int, windowEnd int) (GuiGitSta
 		TerminalCollapsed: terminalCollapsed,
 		PanelID:           panelID,
 		CommitTargetID:    commitTargetID,
+		Empty:             empty,
 	}, pos, nil
 }
 

@@ -17,6 +17,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
 
   alias Minga.Buffer
   alias MingaEditor.Commands
+  alias MingaEditor.FileTree.EmptyFolder
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -93,6 +94,9 @@ defmodule MingaEditor.Input.FileTreeHandler do
              key,
              keymap_server: state.interaction.keymap_server
            ) do
+        {:command, command} when command in [:move_up, :move_down] ->
+          {:handled, move_or_navigate(state, command)}
+
         {:command, command} ->
           {:handled, Commands.execute(state, command)}
 
@@ -100,10 +104,50 @@ defmodule MingaEditor.Input.FileTreeHandler do
           {:handled, state}
 
         :not_found ->
-          {:handled, legacy_delegate_navigation_to_fake_tree_buffer(state, cp, mods)}
+          {:handled, navigate(state, cp, mods)}
       end
     end
   end
+
+  @arrow_up [57_352, 0xF700]
+  @arrow_down [57_353, 0xF701]
+
+  # An empty folder has no rows to move through, only its next steps, so j and k (and the arrows) move between those.
+  @spec navigate(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
+  defp navigate(state, cp, mods) do
+    case {FileTreeState.status(file_tree_state(state)), empty_folder_delta(cp, mods)} do
+      {:empty, delta} when delta != 0 ->
+        update_file_tree(
+          state,
+          &FileTreeState.move_empty_selection(&1, delta, EmptyFolder.step_count())
+        )
+
+      _rows_or_other_key ->
+        legacy_delegate_navigation_to_fake_tree_buffer(state, cp, mods)
+    end
+  end
+
+  # CUA's arrow keys resolve to :move_up and :move_down; in an empty folder they move between its next steps too.
+  @spec move_or_navigate(EditorState.t(), :move_up | :move_down) :: EditorState.t()
+  defp move_or_navigate(state, command) do
+    case FileTreeState.status(file_tree_state(state)) do
+      :empty ->
+        delta = if command == :move_down, do: 1, else: -1
+
+        update_file_tree(
+          state,
+          &FileTreeState.move_empty_selection(&1, delta, EmptyFolder.step_count())
+        )
+
+      _rows ->
+        Commands.execute(state, command)
+    end
+  end
+
+  @spec empty_folder_delta(non_neg_integer(), non_neg_integer()) :: -1 | 0 | 1
+  defp empty_folder_delta(cp, 0) when cp == ?j or cp in @arrow_down, do: 1
+  defp empty_folder_delta(cp, 0) when cp == ?k or cp in @arrow_up, do: -1
+  defp empty_folder_delta(_cp, _mods), do: 0
 
   @spec delegate_leader_to_mode_fsm(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()

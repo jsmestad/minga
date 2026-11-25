@@ -139,14 +139,21 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return ["type": "gui_tab_bar", "active_index": Int(activeIndex), "tabs": tabArray]
 
-    case .guiFileTree(let version, let treeFlags, let treeState, let generation, let selectedId, let treeWidth, let rootPath, let errorReason, let entries):
+    case .guiFileTree(let version, let treeFlags, let treeState, let generation, let selectedId, let treeWidth, let rootPath, let errorReason, let entries, let empty):
         let entryArray = entries.map { e -> [String: Any] in
             ["id": e.id, "path": e.path, "name": e.name, "relative_path": e.relPath, "depth": Int(e.depth),
              "is_dir": e.isDir, "is_expanded": e.isExpanded, "is_selected": e.isSelected, "is_focused": e.isFocused,
              "is_active": e.isActive, "is_dirty": e.isDirty, "is_editing": e.isEditing,
              "editing_token": Int(e.editingToken), "git_status": Int(e.gitStatus), "icon": e.icon]
         }
-        return ["type": "gui_file_tree", "version": Int(version), "tree_flags": Int(treeFlags), "tree_state": Int(treeState), "generation": Int(generation), "selected_id": selectedId, "tree_width": Int(treeWidth), "root_path": rootPath, "error_reason": errorReason, "entries": entryArray]
+        var result: [String: Any] = ["type": "gui_file_tree", "version": Int(version), "tree_flags": Int(treeFlags), "tree_state": Int(treeState), "generation": Int(generation), "selected_id": selectedId, "tree_width": Int(treeWidth), "root_path": rootPath, "error_reason": errorReason, "entries": entryArray]
+        if let empty { result["empty"] = emptyListJSON(empty) }
+        return result
+
+    case .guiGitStatus(let repoState, _, let ahead, let behind, let branchName, let entries, _, _, _, _, _, let panelID, _, let empty):
+        var result: [String: Any] = ["type": "gui_git_status", "repo_state": Int(repoState), "ahead": Int(ahead), "behind": Int(behind), "branch": branchName, "entry_count": entries.count, "panel_id": Int(panelID)]
+        if let empty { result["empty"] = emptyListJSON(empty) }
+        return result
 
     case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let selectedItemID, let items, let documentation, let totalCount, let matchedCount, let incomplete, let generation):
         let itemArray = items.map { i -> [String: Any] in
@@ -246,13 +253,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         case .loading: result["load_status"] = "loading"
         case .error(let msg): result["load_status"] = "error"; result["load_status_error"] = msg
         }
-        if let empty {
-            let actions: [[String: Any]] = empty.actions.map { ["id": $0.id, "key": $0.key, "label": $0.label] }
-            var emptyResult: [String: Any] = ["glyph": empty.glyph, "title": empty.title, "why": empty.why]
-            emptyResult["selected"] = Int(empty.selected)
-            emptyResult["actions"] = actions
-            result["empty"] = emptyResult
-        }
+        if let empty { result["empty"] = emptyListJSON(empty) }
         result["list_keys"] = listKeys
         return result
 
@@ -544,6 +545,12 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
     default:
         return nil
     }
+}
+
+/// An empty list as JSON: what happened, why, and the next steps.
+func emptyListJSON(_ empty: Wire.EmptyList) -> [String: Any] {
+    let actions: [[String: Any]] = empty.actions.map { ["id": $0.id, "key": $0.key, "label": $0.label] }
+    return ["glyph": empty.glyph, "title": empty.title, "why": empty.why, "selected": Int(empty.selected), "actions": actions]
 }
 
 func statusBarSegmentsToJSON(_ segments: [Wire.StatusBarSegment]) -> [[String: Any]] {

@@ -815,6 +815,7 @@ type GuiGitStatusFields struct {
 	TerminalCollapsed uint8
 	PanelID           uint64
 	CommitTargetID    uint64
+	Empty             EmptyList
 }
 
 type GuiBottomPanelFields struct {

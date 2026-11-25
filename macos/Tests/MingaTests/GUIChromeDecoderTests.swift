@@ -1438,7 +1438,7 @@ struct GUIFileTreeDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiFileTree(let version, let treeFlags, let treeState, let generation, let selectedId, let treeWidth, let rootPath, let errorReason, let entries) = cmd else {
+        guard case .guiFileTree(let version, let treeFlags, let treeState, let generation, let selectedId, let treeWidth, let rootPath, let errorReason, let entries, _) = cmd else {
             Issue.record("Expected .guiFileTree"); return
         }
 
@@ -1523,7 +1523,7 @@ struct GUIFileTreeDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiFileTree(_, let treeFlags, let treeState, _, _, let treeWidth, let rootPath, _, let entries) = cmd else {
+        guard case .guiFileTree(_, let treeFlags, let treeState, _, _, let treeWidth, let rootPath, _, let entries, _) = cmd else {
             Issue.record("Expected .guiFileTree"); return
         }
         #expect(treeFlags & 0x01 == 0)
@@ -1555,7 +1555,7 @@ struct GUIFileTreeDecoderTests {
             let (cmd, size) = try decodeCommand(data: data, offset: 0)
             #expect(size == data.count)
 
-            guard case .guiFileTree(_, let treeFlags, let treeState, _, _, let treeWidth, let rootPath, let errorReason, let entries) = cmd else {
+            guard case .guiFileTree(_, let treeFlags, let treeState, _, _, let treeWidth, let rootPath, let errorReason, let entries, _) = cmd else {
                 Issue.record("Expected .guiFileTree"); return
             }
             #expect(treeFlags == flags)
@@ -1601,7 +1601,7 @@ struct GUIFileTreeDecoderTests {
         data.append(payload)
 
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiFileTree(_, _, _, _, _, _, _, _, let entries) = cmd else {
+        guard case .guiFileTree(_, _, _, _, _, _, _, _, let entries, _) = cmd else {
             Issue.record("Expected .guiFileTree"); return
         }
         #expect(entries.count == 1)
@@ -2882,11 +2882,12 @@ struct GUIGitStatusDecoderTests {
         data.append(2) // terminal collapsed sections
         data.append(contentsOf: [0, 0, 0, 2, 0, 0, 0, 42]) // panel identity
         data.append(contentsOf: [0, 0, 0, 3, 0, 0, 0, 43]) // commit target identity
+        data.append(Data(repeating: 0, count: 7)) // empty_list with an empty title: the tree is not clean
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let entries, let toast, let entryBasePath, let lastCommitMessage, let stashCount, let toastID, let panelID, let commitTargetID) = cmd else {
+        guard case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let entries, let toast, let entryBasePath, let lastCommitMessage, let stashCount, let toastID, let panelID, let commitTargetID, _) = cmd else {
             Issue.record("Expected .guiGitStatus"); return
         }
 
@@ -2913,8 +2914,8 @@ struct GUIGitStatusDecoderTests {
             try decodeCommand(data: Data(data.dropLast()), offset: 0)
         }
 
-        var zeroCommitTarget = Data(data.dropLast(8))
-        zeroCommitTarget.append(Data(repeating: 0, count: 8))
+        var zeroCommitTarget = Data(data.dropLast(15))
+        zeroCommitTarget.append(Data(repeating: 0, count: 15))
         #expect(throws: ProtocolDecodeError.self) {
             try decodeCommand(data: zeroCommitTarget, offset: 0)
         }
@@ -2934,19 +2935,59 @@ struct GUIGitStatusDecoderTests {
         appendU32(&data, 0) // terminal cursor
         data.append(0) // terminal collapsed sections
         data.append(Data(repeating: 0, count: 16)) // panel and commit target identity
+        let commitTargetEnd = data.count
+        data.append(Data(repeating: 0, count: 7)) // empty_list with an empty title
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
-        guard case .guiGitStatus(_, _, _, _, _, _, _, _, _, _, _, let panelID, let commitTargetID) = cmd else {
+        guard case .guiGitStatus(_, _, _, _, _, _, _, _, _, _, _, let panelID, let commitTargetID, let empty) = cmd else {
             Issue.record("Expected .guiGitStatus"); return
         }
         #expect(panelID == 0)
         #expect(commitTargetID == 0)
+        #expect(empty == nil)
 
-        data[data.count - 1] = 1
+        data[commitTargetEnd - 1] = 1
         #expect(throws: ProtocolDecodeError.self) {
             try decodeCommand(data: data, offset: 0)
         }
+    }
+
+    @Test("A clean tree decodes its empty-state anatomy and next steps")
+    func decodeCleanTree() throws {
+        var data = Data([OP_GUI_GIT_STATUS, 0, 0]) // normal repo, not syncing
+        appendU16(&data, 1) // ahead
+        appendU16(&data, 0) // behind
+        appendString16(&data, "main")
+        appendU16(&data, 0) // entry_count
+        data.append(0) // toast_present
+        appendString16(&data, "/repo")
+        appendString16(&data, "")
+        appendU16(&data, 0) // stash_count
+        appendU32(&data, 0) // terminal cursor
+        data.append(0) // terminal collapsed sections
+        data.append(contentsOf: [0, 0, 0, 0, 0, 0, 0, 9]) // panel identity
+        data.append(contentsOf: [0, 0, 0, 0, 0, 0, 0, 4]) // commit target identity
+        let glyph = Data("●".utf8)
+        data.append(UInt8(glyph.count)); data.append(glyph)
+        appendString16(&data, "Nothing to commit on main.")
+        appendString16(&data, "1 commit to push.")
+        data.append(0) // selected
+        data.append(1) // action count
+        let id = Data("git_status_push".utf8)
+        data.append(UInt8(id.count)); data.append(id)
+        appendString16(&data, "P")
+        appendString16(&data, "Push to remote")
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+        guard case .guiGitStatus(_, _, _, _, _, let entries, _, _, _, _, _, _, _, let empty) = cmd else {
+            Issue.record("Expected .guiGitStatus"); return
+        }
+        #expect(entries.isEmpty)
+        #expect(empty?.title == "Nothing to commit on main.")
+        #expect(empty?.why == "1 commit to push.")
+        #expect(empty?.actions == [Wire.EmptyListAction(id: "git_status_push", key: "P", label: "Push to remote")])
     }
 
     @Test("Invalid repo state in gui_git_status throws malformed")

@@ -1403,6 +1403,7 @@ defmodule Minga.Protocol.Encode do
       (fn value -> validate_uint!(command, [:terminal_collapsed | path], value, 255); <<value::8>> end).(Map.fetch!(model, :terminal_collapsed)),
       (fn value -> validate_uint!(command, [:panel_id | path], value, 18446744073709551615); <<value::64>> end).(Map.fetch!(model, :panel_id)),
       (fn value -> validate_uint!(command, [:commit_target_id | path], value, 18446744073709551615); <<value::64>> end).(Map.fetch!(model, :commit_target_id)),
+      encode_empty_list(Map.fetch!(model, :empty), command, [:empty | path]),
     ]
   end
 

@@ -256,6 +256,8 @@ public final class FileTreeState {
     public var localNavigationEnabled: Bool = false
     public var treeState: FileTreeVisibilityState = .hidden
     public var errorReason: String = ""
+    /// The empty-folder anatomy when the tree's folder has nothing in it: what happened and the next steps.
+    public var empty: Wire.EmptyList? = nil
     /// Project root path sent by the BEAM (e.g., "/Users/foo/myproject").
     public var projectRoot: String = ""
     /// Index of the entry currently being edited, or nil if no editing is active.
@@ -278,8 +280,10 @@ public final class FileTreeState {
         rootPath: String,
         rawEntries: [Wire.FileTreeEntry],
         treeState: UInt8 = FileTreeVisibilityState.ready.rawValue,
-        errorReason: String = ""
+        errorReason: String = "",
+        empty: Wire.EmptyList? = nil
     ) {
+        self.empty = empty
         let decodedState = FileTreeVisibilityState(rawValue: treeState) ?? .ready
         self.version = version
         self.generation = generation
@@ -418,6 +422,7 @@ public final class FileTreeState {
         localNavigationEnabled = false
         treeState = .hidden
         errorReason = ""
+        empty = nil
         entries = []
         selectedId = ""
         committedSelectedId = ""

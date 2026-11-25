@@ -24,6 +24,7 @@ defmodule MingaEditor.Commands.FileTree do
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
   alias MingaEditor.FileTree.DropIntent
+  alias MingaEditor.FileTree.EmptyFolder
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.FileTree.Refresh, as: FileTreeRefresh
   alias MingaEditor.FileTree.Refresh.FilesystemScanner
@@ -156,9 +157,24 @@ defmodule MingaEditor.Commands.FileTree do
     end
   end
 
+  # In an empty folder ↩ runs the preselected next step (New file, New folder).
   @spec open_or_toggle(state()) :: state()
   def open_or_toggle(state) do
-    case FileTreeState.tree(file_tree_state(state)) do
+    file_tree = file_tree_state(state)
+
+    if FileTreeState.status(file_tree) == :empty do
+      MingaEditor.Commands.execute(
+        state,
+        EmptyFolder.command_at(FileTreeState.empty_selected(file_tree))
+      )
+    else
+      open_or_toggle_tree(state, file_tree)
+    end
+  end
+
+  @spec open_or_toggle_tree(state(), FileTreeState.t()) :: state()
+  defp open_or_toggle_tree(state, file_tree) do
+    case FileTreeState.tree(file_tree) do
       %FileTree{} = tree ->
         open_or_toggle_entry(state, tree, FileTree.selected_entry(tree))
 
@@ -1536,9 +1552,19 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec clear_editing_and_refresh(state()) :: state()
   defp clear_editing_and_refresh(state) do
-    ft = FileTreeState.cancel_editing(file_tree_state(state))
+    ft = state |> file_tree_state() |> FileTreeState.cancel_editing() |> list_first_entry()
     state = set_file_tree(state, ft)
     refresh(state)
+  end
+
+  # The first entry of an empty folder is listed at once.
+  # Waiting for the refresh would show the empty folder and its next steps again, where a late Return would run one.
+  @spec list_first_entry(FileTreeState.t()) :: FileTreeState.t()
+  defp list_first_entry(ft) do
+    case {FileTreeState.status(ft), FileTreeState.tree(ft)} do
+      {:empty, %FileTree{} = tree} -> FileTreeState.replace_tree(ft, FileTree.refresh(tree))
+      _listed -> ft
+    end
   end
 
   # Syncs the buffer after editing state changes.

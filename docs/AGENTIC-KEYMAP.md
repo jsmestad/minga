@@ -470,6 +470,8 @@ Open it with `SPC o p`. `j`, `k`, `gg`, `G`, `⌃D` and `⌃U` move as they do i
 
 With desktop shortcuts, Up and Down move, Right and Left expand and collapse, `↩` opens and `esc` closes.
 
+An empty folder lists its next steps, New file and New folder. `j` and `k` (or Up and Down) move between them, `↩` runs the highlighted one, and a click runs either.
+
 ### Git status list
 
 This list comes with the optional GitExtended extension ([Optional extensions](CONFIGURATION.md#optional-extensions)). Without the extension there is nothing to open, and these keys do nothing.
@@ -484,7 +486,8 @@ This list comes with the optional GitExtended extension ([Optional extensions](C
 | `S` / `U` | Stage all / unstage all |
 | `d` | Discard the file's changes. Asks first: `y` confirms, `n` cancels |
 | `p` | Preview the diff |
-| `o` or `↩` | Open the file |
+| `o` | Open the file |
+| `↩` | Open the file. On a clean tree, run the highlighted next step |
 | `cc` | Start a commit |
 | `cg` | Write a commit message with the agent |
 | `f` | Fetch |
@@ -492,6 +495,8 @@ This list comes with the optional GitExtended extension ([Optional extensions](C
 | `P` | Push |
 | `r` | Pull, then retry a push that failed |
 | `q` or `esc` | Close the list |
+
+A clean tree lists its next steps instead of files: Push when commits wait to go up, Pull and Fetch. `j` and `k` move between them, `↩` runs the highlighted one, and a click runs any of them. With desktop shortcuts, `P`, `l` and `f` work too.
 
 ## In a prompt or the composer
 

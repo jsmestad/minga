@@ -408,6 +408,17 @@ defmodule Minga.Test.Storyboard.Assertions do
     model
   end
 
+  # A panel's empty list: its title, why line, and each step as {key, label}.
+  @spec anatomy(EmptyList.t()) :: empty_state()
+  defp anatomy(%EmptyList{} = empty) do
+    %{
+      title: empty.title,
+      description: empty.why,
+      actions: Enum.map(empty.actions, &{&1.key, &1.label}),
+      selected: empty.selected
+    }
+  end
+
   @doc """
   The empty-state anatomy of the frame, or `nil` when none is shown.
 
@@ -422,6 +433,11 @@ defmodule Minga.Test.Storyboard.Assertions do
       selected: if(picker.items == [], do: nil, else: picker.selected_index)
     }
   end
+
+  def empty_state(%Model{ui: %{file_tree: %{status: :empty, empty: %EmptyList{} = empty}}}),
+    do: anatomy(empty)
+
+  def empty_state(%Model{ui: %{git_status: %{empty: %EmptyList{} = empty}}}), do: anatomy(empty)
 
   def empty_state(%Model{
         ui: %{empty_state: %{visible?: true, sections: [_ | _] = sections} = state}

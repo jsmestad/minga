@@ -1,0 +1,17 @@
+{
+  "scenario": "git.status.clean",
+  "tui": {
+    "commit": "3bfe0983998c1db2b82461872d1be4363de6bb37",
+    "files": {
+      "tui-astrodark-120x40.txt": "f1fac6313282d0534472d04331676ebf8e8851908d55a2a7ee6307da746cfffd",
+      "tui-astrodark-150x38.txt": "d429cae196440f0070e412e8f4f221aaa65f1c5f0451e2bc803e53bb37aec48c",
+      "tui-astrodark-80x24.txt": "66ac70859a6caa25355d1f56a3e3071e60fbfcf1f61470f000c2b0c3cfacfebf",
+      "tui-catppuccin_frappe-120x40.txt": "4adea322e948d1466ef24f95f01d4d415dd8b7258ac16369036df77709ace231",
+      "tui-catppuccin_frappe-150x38.txt": "e94d2a79d727450d5eaa51ffd879a2aa3396386e8a701e427ef19146e7b15fcb",
+      "tui-catppuccin_frappe-80x24.txt": "7bab80fbd456aa9ea2ea43cc1072bce09e4d2768fe07fa7ad2fff97980690224",
+      "tui-catppuccin_latte-120x40.txt": "3c6ec64d3f272b3f758348cb2d67753fbffd897a040ab10cb6c152d9e7a8950b",
+      "tui-catppuccin_latte-150x38.txt": "1c874685af98eec46ef61a3012db9fc098d28354738d055228a57c7cdb40cde7",
+      "tui-catppuccin_latte-80x24.txt": "acd31819c955630fdcacb0128e1b43d3111c8738d81adbc2386e3112b4975834"
+    }
+  }
+}

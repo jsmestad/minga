@@ -1,8 +1,11 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 	"testing"
+
+	"charm.land/lipgloss/v2"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -87,5 +90,69 @@ func TestEmptyListActionsDrawAFixedKeyColumnAndTheSelection(t *testing.T) {
 	}
 	if got, want := column(text[0], "Show log"), emptyStateInset.cols()+len("SPC g B")+emptyStateKeyColumnGap.cols(); got != want {
 		t.Fatalf("label column %d, want %d", got, want)
+	}
+}
+
+func cleanTree() generated.EmptyList {
+	return generated.EmptyList{
+		Glyph: "●",
+		Title: "Nothing to commit on main.",
+		Why:   "2 commits to push.",
+		Actions: []generated.EmptyListAction{
+			{ID: "git_status_push", Key: "P", Label: "Push to remote"},
+			{ID: "git_status_pull", Key: "l", Label: "Pull from remote"},
+		},
+	}
+}
+
+func TestCleanTreeDrawsItsAnatomyBelowThePanelTitleAndRecordsEachStepForClicks(t *testing.T) {
+	model := New(80, 24, nil)
+	empty := cleanTree()
+	git := protocol.GitStatus{PanelID: 9, RepoState: 0, Branch: "main", Ahead: 2, Empty: &empty}
+	hits := &gitStatusHits{box: uiRect{Width: 40, Height: 12}}
+
+	text := stripLines(model.renderGitStatusPanel(git, lipgloss.NewStyle(), lipgloss.NewStyle(), 40, 12, hits))
+	joined := strings.Join(text, "\n")
+	if strings.Contains(text[0], "Clean") {
+		t.Fatalf("a clean tree with an empty list does not also print the short Clean title:\n%s", joined)
+	}
+	for _, want := range []string{"● Nothing to commit on main.", "2 commits to push.", "Push to remote", "Pull from remote"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("clean tree is missing %q:\n%s", want, joined)
+		}
+	}
+	if !slices.Equal(hits.actions, []string{"git_status_push", "git_status_pull"}) {
+		t.Fatalf("each next step must be clickable by its command, got %v", hits.actions)
+	}
+}
+
+func TestEmptyFolderDrawsItsNextStepsInTheTreesOwnKeys(t *testing.T) {
+	model := New(80, 24, nil)
+	empty := generated.EmptyList{
+		Title:   "notes/ is empty.",
+		Why:     "Make the first file or folder here.",
+		Actions: []generated.EmptyListAction{{ID: "tree_new_file", Key: "a", Label: "New file"}, {ID: "tree_new_folder", Key: "A", Label: "New folder"}},
+	}
+
+	text := strings.Join(stripLines(model.renderEmptyFolder(nil, empty, 40, 12)), "\n")
+	for _, want := range []string{"notes/ is empty.", "Make the first file or folder here.", "New file", "New folder"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("empty folder is missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestCleanTreeKeepsItsStepsBelowARetryRow(t *testing.T) {
+	model := New(80, 24, nil)
+	empty := cleanTree()
+	git := protocol.GitStatus{PanelID: 9, Branch: "main", Empty: &empty}
+	git.Toast.Visible, git.Toast.Action, git.Toast.ID = true, 1, 5
+	hits := &gitStatusHits{box: uiRect{Width: 40, Height: 12}}
+
+	text := strings.Join(stripLines(model.renderGitStatusPanel(git, lipgloss.NewStyle(), lipgloss.NewStyle(), 40, 12, hits)), "\n")
+	for _, want := range []string{"Pull & Retry (r)", "Nothing to commit on main.", "Push to remote"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("a clean tree with a retry toast is missing %q:\n%s", want, text)
+		}
 	}
 }

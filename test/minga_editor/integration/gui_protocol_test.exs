@@ -1375,6 +1375,83 @@ defmodule Minga.Integration.GUIProtocolTest do
     end
   end
 
+  describe "empty lists in panels" do
+    test "an empty folder round-trips its next steps after its rows", %{harness: harness} do
+      empty = %EmptyList{
+        glyph: "",
+        title: "notes/ is empty.",
+        why: "Make the first file or folder here.",
+        selected: 1,
+        actions: [
+          %EmptyList.Action{id: "tree_new_file", key: "a", label: "New file"},
+          %EmptyList.Action{id: "tree_new_folder", key: "A", label: "New folder"}
+        ]
+      }
+
+      command =
+        FileTreeEncoder.encode_command(%FileTree{
+          generation: 3,
+          root_path: "/project/notes",
+          tree_width: 30,
+          status: :empty,
+          focused?: true,
+          rows: [],
+          empty: empty
+        })
+
+      decoded = round_trip(harness, command, "gui_file_tree")
+
+      assert decoded["tree_state"] == 2
+
+      assert decoded["empty"] == %{
+               "glyph" => "",
+               "title" => "notes/ is empty.",
+               "why" => "Make the first file or folder here.",
+               "selected" => 1,
+               "actions" => [
+                 %{"id" => "tree_new_file", "key" => "a", "label" => "New file"},
+                 %{"id" => "tree_new_folder", "key" => "A", "label" => "New folder"}
+               ]
+             }
+    end
+
+    test "a clean tree round-trips its next steps, and a tree with changes carries none", %{
+      harness: harness
+    } do
+      alias Minga.Frontend.Adapter.GUI.GitStatusEncoder
+      alias Minga.RenderModel.UI.GitStatus
+      alias MingaEditor.GitStatus.CleanTree
+
+      clean = %GitStatus{
+        repo_state: :normal,
+        syncing: false,
+        panel_id: 9,
+        commit_target_id: 4,
+        branch: "main",
+        ahead: 2,
+        empty: CleanTree.empty_list(%{branch: "main", ahead: 2, behind: 0}, 0)
+      }
+
+      decoded = round_trip(harness, GitStatusEncoder.encode_command(clean), "gui_git_status")
+
+      assert %{
+               "title" => "Nothing to commit on main.",
+               "why" => "2 commits to push.",
+               "selected" => 0,
+               "actions" => [%{"id" => "git_status_push", "key" => "P"} | _]
+             } = decoded["empty"]
+
+      plain =
+        round_trip(
+          harness,
+          GitStatusEncoder.encode_command(%{clean | empty: nil}),
+          "gui_git_status"
+        )
+
+      refute Map.has_key?(plain, "empty")
+    end
+  end
+
   describe "gui_file_tree visible" do
     test "round-trips semantic visible file tree with entries", %{harness: harness} do
       root = "/project"

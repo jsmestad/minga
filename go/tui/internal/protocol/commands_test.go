@@ -1385,6 +1385,8 @@ func TestDecodeThemeAndEverydayChrome(t *testing.T) {
 	git = append(git, 0, 3, 0, 0, 0, 4, 2)
 	git = append(git, 0, 0, 0, 1, 0, 0, 0, 42)
 	git = append(git, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef)
+	// An empty empty_list (empty glyph, title and why; selected 0; no actions): the tree is not clean.
+	git = append(git, 0, 0, 0, 0, 0, 0, 0)
 	// Trailing commit_frame is a fixed:9 sentinel (opcode + frame_seq + echoed input_seq).
 	git = append(git, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
 	command, err = DecodeCommand(git)

@@ -20,6 +20,7 @@ defmodule Minga.Test.Storyboard.Model do
           | :hover_popup
           | :float_popup
           | :file_tree
+          | :git_status
           | :agent_chat
           | :empty_state
           | :bottom_panel
@@ -197,6 +198,7 @@ defmodule Minga.Test.Storyboard.Model do
       hover_popup: visible?(ui.hover_popup),
       float_popup: visible?(ui.float_popup),
       file_tree: match?(%{status: status} when status != :hidden, ui.file_tree),
+      git_status: match?(%{panel_id: id} when id != 0, ui.git_status),
       agent_chat: visible?(ui.agent_chat),
       empty_state: visible?(ui.empty_state),
       bottom_panel: visible?(ui.bottom_panel),

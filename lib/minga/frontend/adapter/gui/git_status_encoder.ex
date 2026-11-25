@@ -49,7 +49,8 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoder do
       terminal_cursor: model.terminal_cursor,
       terminal_collapsed: model.terminal_collapsed,
       panel_id: model.panel_id,
-      commit_target_id: model.commit_target_id
+      commit_target_id: model.commit_target_id,
+      empty: Minga.Frontend.Adapter.GUI.EmptyListWire.to_wire(model.empty)
     }
   end
 end

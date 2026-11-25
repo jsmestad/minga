@@ -667,6 +667,30 @@ func (m Model) gitSummary(git protocol.GitStatus) string {
 	return strings.Join(parts, gap(spaceXL))
 }
 
+// renderCleanTree draws a clean tree's empty-state anatomy below the panel title and records each next step for clicks.
+func (m Model) renderCleanTree(lines []string, startRow int, empty generated.EmptyList, style lipgloss.Style, width int, hits *gitStatusHits) []string {
+	colors := m.treeEmptyListColors()
+	body := emptyListHeader(empty, width, colors, m.palette())
+	actionStart := len(body)
+	body = append(body, emptyListActions(empty, width, colors)...)
+	for i, line := range body {
+		row := startRow + i
+		if row >= len(lines) {
+			break
+		}
+		if i >= actionStart && row < hits.box.Height {
+			line = m.zones.Mark(zoneIDEmptyListAction(i-actionStart), line)
+			hits.actions = append(hits.actions, empty.Actions[i-actionStart].ID)
+		}
+		lines[row] = line
+	}
+	// The rows below the steps keep the panel's surface, so the panel does not end where its text does.
+	for row := startRow + len(body); row < len(lines); row++ {
+		lines[row] = style.Render(fit("", width))
+	}
+	return lines
+}
+
 func (m Model) renderGitStatusPanel(git protocol.GitStatus, style, selected lipgloss.Style, width, height int, hits *gitStatusHits) []string {
 	lines := make([]string, height)
 	if height == 0 {
@@ -680,7 +704,7 @@ func (m Model) renderGitStatusPanel(git protocol.GitStatus, style, selected lipg
 		title = "Not a Git repository"
 	case git.RepoState == 2:
 		title = "Loading Git status…"
-	case len(git.Entries) == 0 && !git.Syncing:
+	case len(git.Entries) == 0 && !git.Syncing && git.Empty == nil:
 		title += " · Clean"
 	}
 	lines[0] = style.Bold(true).Render(fit(title, width))
@@ -692,6 +716,10 @@ func (m Model) renderGitStatusPanel(git protocol.GitStatus, style, selected lipg
 			lines[startRow] = m.zones.Mark(zoneIDGitRetry, lines[startRow])
 		}
 		startRow++
+	}
+	// A clean tree shows its next steps below the title and any retry row, as on macOS.
+	if len(git.Entries) == 0 && git.Empty != nil {
+		return m.renderCleanTree(lines, startRow, *git.Empty, style, width, hits)
 	}
 	cursor := int(git.TerminalCursor)
 	start := max(cursor-(height-startRow)+1, 0)

@@ -33,9 +33,11 @@ defmodule Minga.Keymap.Scope.GitStatusTest do
                Scope.resolve_key(:git_status, :normal, {@tab, 0})
     end
 
-    test "Enter opens the selected file" do
-      assert {:command, :git_status_open_file} =
+    test "Enter opens the selected file or runs a clean tree's step, and o only opens" do
+      assert {:command, :git_status_activate} =
                Scope.resolve_key(:git_status, :normal, {@enter, 0})
+
+      assert {:command, :git_status_open_file} = Scope.resolve_key(:git_status, :normal, {?o, 0})
     end
 
     test "q closes the panel" do
@@ -69,8 +71,16 @@ defmodule Minga.Keymap.Scope.GitStatusTest do
       assert {:command, :move_down} = Scope.resolve_key(:git_status, :cua, {@arrow_down, 0})
     end
 
-    test "Enter opens file" do
-      assert {:command, :git_status_open_file} = Scope.resolve_key(:git_status, :cua, {@enter, 0})
+    test "Enter opens file or runs a clean tree's step, and the steps' keys work" do
+      assert {:command, :git_status_activate} = Scope.resolve_key(:git_status, :cua, {@enter, 0})
+
+      for {key, command} <- [
+            {?P, :git_status_push},
+            {?l, :git_status_pull},
+            {?f, :git_status_fetch}
+          ] do
+        assert {:command, ^command} = Scope.resolve_key(:git_status, :cua, {key, 0})
+      end
     end
 
     test "Escape closes panel" do

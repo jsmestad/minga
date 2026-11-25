@@ -168,21 +168,10 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
       :picker_empty,
       @section_picker_empty,
       Encode.encode_gui_picker_empty(%{
-        empty: to_wire_empty_list(empty),
+        empty: Minga.Frontend.Adapter.GUI.EmptyListWire.to_wire(empty),
         list_keys: if(model.list_keys?, do: 1, else: 0)
       })
     )
-  end
-
-  @spec to_wire_empty_list(EmptyList.t()) :: map()
-  defp to_wire_empty_list(%EmptyList{} = empty) do
-    %{
-      glyph: empty.glyph,
-      title: empty.title,
-      why: empty.why,
-      selected: empty.selected,
-      actions: Enum.map(empty.actions, &%{id: &1.id, key: &1.key, label: &1.label})
-    }
   end
 
   @spec to_wire_header(Picker.t()) :: map()

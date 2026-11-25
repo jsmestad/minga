@@ -146,7 +146,9 @@ Legacy note: early GUI prototypes used the low 0x70 chrome range and inferred hi
 opcode(1) + payload_len(4) + payload(payload_len)
 
 Payload v4:
-  version(1) + tree_flags(1) + tree_state(1) + generation(4) + selected_id_len(2) + selected_id(selected_id_len) + root_len(2) + root(root_len) + tree_width(2) + row_count(2) + error_reason_len(2) + error_reason(error_reason_len) + rows...
+  version(1) + tree_flags(1) + tree_state(1) + generation(4) + selected_id_len(2) + selected_id(selected_id_len) + root_len(2) + root(root_len) + tree_width(2) + row_count(2) + error_reason_len(2) + error_reason(error_reason_len) + rows... + empty_list?
+
+`empty_list` (see gui_picker) follows the rows only when `tree_state` is 2 (empty) and there are no rows. It says the folder is empty and offers its next steps in the tree's own keys: New file (`a`) and New folder (`A`). While the tree has focus, j/k move `selected` and ↩ runs it; a click sends `execute_command` (0x16) with the action's id.
 
 Payload v3 omitted `generation`. Payload v2 also omitted the per-row `editing_token`. Payload v1 omitted `tree_state` and `error_reason`. Frontends should derive v1 state from `visible` and `empty`, but all new BEAM payloads use v4.
 
@@ -1079,7 +1081,7 @@ When no splits are active, the BEAM sends counts of 0 for both separator types.
 Git status panel data for both sidebars, plus remote operation feedback used by the sidebar and status bar.
 
 ```
-opcode(1) + repo_state(1) + syncing(1) + ahead(2) + behind(2) + branch_len(2) + branch(branch_len) + entry_count(2) + entries... + toast_present(1) + toast? + entry_base_path_len(2) + entry_base_path(entry_base_path_len) + last_commit_message_len(2) + last_commit_message(last_commit_message_len) + stash_count(2) + terminal_cursor(4) + terminal_collapsed(1) + panel_id(8) + commit_target_id(8)
+opcode(1) + repo_state(1) + syncing(1) + ahead(2) + behind(2) + branch_len(2) + branch(branch_len) + entry_count(2) + entries... + toast_present(1) + toast? + entry_base_path_len(2) + entry_base_path(entry_base_path_len) + last_commit_message_len(2) + last_commit_message(last_commit_message_len) + stash_count(2) + terminal_cursor(4) + terminal_collapsed(1) + panel_id(8) + commit_target_id(8) + empty_list
 
 Per entry:
   path_hash(4) + section(1) + status(1) + path_len(2) + path(path_len)
@@ -1101,6 +1103,8 @@ Toast when toast_present == 1:
 `terminal_collapsed`: one bit per section ID. A collapsed section shows its header but not its entries. The native sidebar ignores these two terminal fields.
 `panel_id`: identifies the installed panel's displayed status snapshot. Zero means no installed panel. A status refresh retires the previous ID. A frontend sends the ID from the frame that offered the action, including actions offered before a confirmation dialog opened.
 `commit_target_id`: identifies the commit draft's repository and branch within the installed panel. It stays stable across status-only refreshes, but changes on branch changes or panel replacement. The frontend retains a local draft for this target and sends the current, displayed `panel_id` when submitting it. Zero means no installed panel.
+
+`empty_list` (see gui_picker) is always present. A clean tree (normal repository, no entries) fills it: "Nothing to commit on main." with the Done glyph, a why line that counts the commits waiting on each side, and the next steps in the panel's own keys, the one that moves waiting commits first (Push `P`, Pull `l`, Fetch `f`). Any other state sends it with an empty title, and frontends draw nothing for it. j/k move `selected` and ↩ runs it; a click sends `execute_command` (0x16) with the action's id.
 
 When the git status panel is closed, the BEAM sends `repo_state = not_a_repo`, no entries, and an empty `entry_base_path` as the hide signal. A non-git project opened in the Source Control tab also uses `repo_state = not_a_repo`, but includes the project root so the frontend can show the native "Not a git repository" empty state instead of hiding the panel. The frontend should still copy `syncing` and `toast` so remote operation feedback remains accurate while the panel is hidden.
 

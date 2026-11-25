@@ -8,6 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
+	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 	"github.com/rivo/uniseg"
 )
@@ -1216,6 +1217,9 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int, ski
 	}
 
 	contentStyle := lipgloss.NewStyle().Foreground(theme.TreeText()).Background(theme.TreeSurface()).Width(contentWidth)
+	if totalRows == 0 && tree.Empty != nil {
+		return m.renderEmptyFolder(lines, *tree.Empty, width, height)
+	}
 	if totalRows == 0 {
 		if status := fileTreeStatusText(tree); status != "" && len(lines) < height {
 			lines = append(lines, contentStyle.Foreground(theme.TreeMutedText()).Render(fit(" "+status, contentWidth)))
@@ -1389,6 +1393,21 @@ func renderFileTreeName(name string, matchPositions []uint16, baseStyle lipgloss
 func fileTreeRowMuted(row protocol.FileTreeRow) bool {
 	name := strings.TrimSpace(row.Name)
 	return strings.HasPrefix(name, ".") || strings.Contains(row.Path, "/.")
+}
+
+// renderEmptyFolder draws the empty-folder anatomy below the tree header and marks each next step as a click zone.
+func (m Model) renderEmptyFolder(lines []string, empty generated.EmptyList, width int, height int) []string {
+	theme := m.palette()
+	colors := m.treeEmptyListColors()
+	lines = append(lines, emptyListHeader(empty, width, colors, theme)...)
+	for index, row := range emptyListActions(empty, width, colors) {
+		lines = append(lines, m.zones.Mark(zoneIDEmptyListAction(index), row))
+	}
+	blank := lipgloss.NewStyle().Background(theme.TreeSurface()).Width(width).Render("")
+	for len(lines) < height {
+		lines = append(lines, blank)
+	}
+	return takeLines(lines, height)
 }
 
 func fileTreeStatusText(tree protocol.FileTree) string {

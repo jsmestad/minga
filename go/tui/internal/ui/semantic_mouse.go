@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
@@ -16,6 +17,7 @@ const (
 	zonePrefixFileTreeRow      = "file-tree:row:"
 	zonePrefixModelineSegment  = "modeline:segment:"
 	zonePrefixNoticeAction     = "notice:action:"
+	zonePrefixEmptyListAction  = "empty-list:action:"
 	zonePrefixTab              = "tab:id:"
 	zonePrefixCompletionItem   = "completion:item:"
 	zonePrefixSidebarItem      = "sidebar:item:"
@@ -44,6 +46,11 @@ func zoneIDFileTreeRow(index int) string {
 // zoneIDModelineSegment tags one modeline segment by its index in the BEAM's order (left, then right), so a click runs that segment's command and hover echoes that segment's meaning.
 func zoneIDModelineSegment(index int) string {
 	return fmt.Sprintf("%s%d", zonePrefixModelineSegment, index)
+}
+
+// zoneIDEmptyListAction tags one next step of an empty panel by its index, so a click runs its command.
+func zoneIDEmptyListAction(index int) string {
+	return fmt.Sprintf("%s%d", zonePrefixEmptyListAction, index)
 }
 
 // zoneIDNoticeAction tags one next step of the echo-line notice by its index, so a click runs its command.
@@ -683,6 +690,8 @@ type gitStatusHits struct {
 	panelID uint64
 	retryID uint64
 	rows    []gitStatusRowTarget
+	// actions are the commands of a clean tree's next steps, by row of its action list.
+	actions []string
 }
 
 type gitStatusRowTarget struct {
@@ -696,7 +705,7 @@ func (hits *gitStatusHits) sameTargets(other *gitStatusHits) bool {
 		return hits == other
 	}
 	return hits.box == other.box && hits.panelID == other.panelID &&
-		hits.retryID == other.retryID && slices.Equal(hits.rows, other.rows)
+		hits.retryID == other.retryID && slices.Equal(hits.rows, other.rows) && slices.Equal(hits.actions, other.actions)
 }
 
 func (m Model) presentedGitStatusHandler(layers []*lipgloss.Layer) func(tea.MouseClickMsg) {
@@ -727,6 +736,10 @@ func (m Model) presentedGitStatusHandler(layers []*lipgloss.Layer) func(tea.Mous
 		zones[i] = m.zones.Get(zoneIDGitStatusRow(target.row))
 	}
 	retryZone := m.zones.Get(zoneIDGitRetry)
+	actionZones := make([]*zoneInfo, len(hits.actions))
+	for i := range hits.actions {
+		actionZones[i] = m.zones.Get(zoneIDEmptyListAction(i))
+	}
 	claim := m.presentedClick
 	return func(click tea.MouseClickMsg) {
 		if !hits.box.Contains(click.X, click.Y) {
@@ -746,6 +759,12 @@ func (m Model) presentedGitStatusHandler(layers []*lipgloss.Layer) func(tea.Mous
 		if hits.retryID != 0 && retryZone.InBounds(click) {
 			claim.packet = protocol.EncodeGUIGitPullAndRetry(hits.retryID)
 			return
+		}
+		for i, zone := range actionZones {
+			if zone.InBounds(click) {
+				claim.packet = protocol.EncodeGUIExecuteCommand(hits.actions[i])
+				return
+			}
 		}
 		for i, zone := range zones {
 			if zone.InBounds(click) {
@@ -817,6 +836,17 @@ func (m Model) modelineMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	return nil, false
 }
 
+// emptyListMousePacket runs the command of the empty panel's next step under the pointer.
+func (m Model) emptyListMousePacket(empty generated.EmptyList, msg tea.MouseMsg) ([]byte, bool) {
+	for index, action := range empty.Actions {
+		zoneInfo := m.zones.Get(zoneIDEmptyListAction(index))
+		if zoneInfo != nil && zoneInfo.InBounds(msg) {
+			return protocol.EncodeGUIExecuteCommand(action.ID), true
+		}
+	}
+	return nil, false
+}
+
 func (m Model) tabMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	tabs, ok := m.tabBar()
 	if !ok {
@@ -835,6 +865,9 @@ func (m Model) fileTreeMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	tree, ok := m.fileTree()
 	if !ok || !tree.Visible {
 		return nil, false
+	}
+	if tree.Empty != nil {
+		return m.emptyListMousePacket(*tree.Empty, msg)
 	}
 	for index := range tree.Rows {
 		zoneInfo := m.zones.Get(zoneIDFileTreeRow(index))

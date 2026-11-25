@@ -204,6 +204,7 @@ nonisolated public enum FrontendActionComposition {
         case .drop(let sourcePaths, let targetIndex, let targetID, let targetPathHash, let targetPath, let targetIsDirectory, let modifiers, let generation): .fileTreeDrop(sourcePaths: sourcePaths, targetIndex: targetIndex, targetID: targetID, targetPathHash: targetPathHash, targetPath: targetPath, targetIsDirectory: targetIsDirectory, modifiers: modifiers, generation: generation)
         case .refresh: .fileTreeRefresh
         case .semantic(let intent, let generation, let itemID): .semanticItemActivate(surface: .fileTree, intent: intent.rawValue, generation: generation, itemID: Data(itemID.utf8))
+        case .executeCommand(let name): .executeCommand(name: name)
         }
     }
 
@@ -222,6 +223,7 @@ nonisolated public enum FrontendActionComposition {
         case .commit(let panelID, let message): .gitCommit(panelID: panelID, message: message)
         case .amend(let panelID, let message): .gitCommitAmend(panelID: panelID, message: message)
         case .pullAndRetry(let toastID): .gitPullAndRetry(toastID: toastID)
+        case .executeCommand(let name): .executeCommand(name: name)
         }
     }
 

@@ -212,6 +212,8 @@ type FileTree struct {
 	Width      uint16
 	Error      string
 	Rows       []FileTreeRow
+	// Empty is the empty-folder anatomy (status 2): what happened and the next steps, which run their command on click.
+	Empty *generated.EmptyList
 }
 
 type FileTreeRow struct {
@@ -301,6 +303,8 @@ type GitStatus struct {
 	StashCount        uint16
 	TerminalCursor    uint32
 	TerminalCollapsed byte
+	// Empty is a clean tree's empty-state anatomy: what happened and the next steps, which run their command on click.
+	Empty *generated.EmptyList
 }
 
 type GitStatusEntry struct {
