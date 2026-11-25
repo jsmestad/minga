@@ -119,6 +119,28 @@ defmodule Minga.Mode.NormalMovementDispatchTest do
       assert_find_char(?T, :T)
     end
 
+    test "Escape cancels a pending find, its count and a chosen register, and shows nothing pending" do
+      for prefix <- [?f, ?F, ?t, ?T] do
+        {:normal, [], waiting} =
+          Mode.process(:normal, {prefix, 0}, %{Mode.initial_state() | count: 3})
+
+        assert Mode.pending_keys(:normal, waiting) == "3" <> <<prefix::utf8>>
+
+        assert {:normal, [{:select_register, "\""}], cancelled} =
+                 Mode.process(:normal, {27, 0}, waiting)
+
+        assert Mode.pending_keys(:normal, cancelled) == ""
+      end
+    end
+
+    test "a key that cannot be a find target cancels the find instead of leaving it pending" do
+      for key <- [{13, 0}, {?a, @ctrl}, {@arrow_left, 0}] do
+        {:normal, [], waiting} = Mode.process(:normal, {?F, 0}, Mode.initial_state())
+        assert {:normal, [], cancelled} = Mode.process(:normal, key, waiting)
+        assert Mode.pending_keys(:normal, cancelled) == ""
+      end
+    end
+
     test "repeat find keys return repeat command tuples" do
       assert_commands(?;, [:repeat_find_char])
       assert_commands(?,, [:repeat_find_char_reverse])
