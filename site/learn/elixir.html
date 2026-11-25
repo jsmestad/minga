@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Elixir for Minga: Learn Minga</title>
-  <meta name="description" content="Lesson 04: Interactive Neovim/Lua, Emacs/Elisp, and VS Code/JSON translator to Minga Elixir, plus a live-themed ~/.config/minga/config.exs playground with presets.">
+  <title>Translate a setting: Learn Minga</title>
+  <meta name="description" content="Lesson 04: find the Minga line for a setting you already have in Neovim, Emacs or VS Code, paste it into config.exs, and reload it without a restart.">
   <link rel="canonical" href="https://mingacode.dev/learn/elixir">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#303446" media="(prefers-color-scheme: dark)">
@@ -13,18 +13,18 @@
   <meta property="og:locale" content="en_US">
   <meta property="og:type" content="article">
   <meta property="og:url" content="https://mingacode.dev/learn/elixir">
-  <meta property="og:title" content="Elixir for Minga: Learn Minga">
-  <meta property="og:description" content="Translate Lua, Elisp, or VS Code settings into Minga Elixir and preview themes, line numbers, and hooks live.">
+  <meta property="og:title" content="Translate a setting: Learn Minga">
+  <meta property="og:description" content="Find the Minga line for a setting from your Neovim, Emacs or VS Code config, paste it into config.exs, and reload.">
   <meta property="og:image" content="https://mingacode.dev/assets/og-minga.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Elixir for Minga: Learn Minga">
-  <meta name="twitter:description" content="Translate Lua, Elisp, or VS Code settings into Minga Elixir and preview themes, line numbers, and hooks live.">
+  <meta name="twitter:title" content="Translate a setting: Learn Minga">
+  <meta name="twitter:description" content="Find the Minga line for a setting from your Neovim, Emacs or VS Code config, paste it into config.exs, and reload.">
   <meta name="twitter:image" content="https://mingacode.dev/assets/og-minga.png">
   <meta name="twitter:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
-  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Elixir for Minga: Learn Minga","description":"Lesson 04: Interactive Neovim/Lua, Emacs/Elisp, and VS Code/JSON translator to Minga Elixir, plus a live-themed ~/.config/minga/config.exs playground with presets.","url":"https://mingacode.dev/learn/elixir","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Learn","item":"https://mingacode.dev/learn/"},{"@type":"ListItem","position":3,"name":"Elixir for Minga","item":"https://mingacode.dev/learn/elixir"}]}]}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Translate a setting: Learn Minga","description":"Lesson 04: find the Minga line for a setting you already have in Neovim, Emacs or VS Code, paste it into config.exs, and reload it without a restart.","url":"https://mingacode.dev/learn/elixir","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Learn","item":"https://mingacode.dev/learn/"},{"@type":"ListItem","position":3,"name":"Translate a setting","item":"https://mingacode.dev/learn/elixir"}]}]}</script>
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
@@ -36,6 +36,8 @@
           document.documentElement.setAttribute("data-theme", saved);
         }
       } catch (_) {}
+      // The labs lay out as live before they mount, so mounting moves nothing. The module's onerror takes this back.
+      document.documentElement.classList.add("labs-pending");
     })();
   </script>
 </head>
@@ -68,21 +70,172 @@
   <main id="main" class="lesson-page lesson-theme-elixir">
     <section class="lesson-stage">
       <div class="container">
-        <p class="learn-breadcrumb"><a href="/learn/">Learn</a> <span>/</span> Lesson 04 of 05 · Translator &amp; Live Config Playground</p>
+        <p class="learn-breadcrumb"><a href="/learn/">Learn</a> <span>/</span> Lesson 04 of 05 · Translate a setting</p>
         <div class="stage-head">
           <div>
-            <h1>Elixir for Minga</h1>
-            <p class="stage-lead">Pick your current editor to translate everyday patterns into <code>config.exs</code>, then test themes and presets in the live playground.</p>
+            <h1>Bring one setting from your old config</h1>
+            <p class="stage-lead">Your Neovim, Emacs or VS Code config has a line that picks your color theme, and you want the same theme here. In Minga that is one line in one file, and it applies when you reload, with no restart. Pick your editor, find the setting, and take the line with you.</p>
           </div>
           <nav class="stage-jumps" aria-label="Lesson sections">
-            <a href="#translator">Translator</a>
-            <a href="#config-builder">Live Playground</a>
-            <a href="#config-dsl">Core Primitives</a>
+            <a href="#translator">Find your line</a>
+            <a href="#config-builder">Build the file</a>
+            <a href="#next">What you can do now</a>
           </nav>
         </div>
 
-        <div id="translator" class="lab-box" data-elixir-translator>
-          <div class="lab-noscript">Enable JavaScript for the interactive Lua/Elisp/VS Code translator, or review the core config primitives below.</div>
+        <p class="tr-intro">Minga keeps its settings in one file, <code>~/.config/minga/config.exs</code>. The file is written in Elixir, a programming language, and you do not need to learn it first. The four settings below use three words: <code>set</code> changes an option everywhere, <code>for_filetype</code> changes it for one language, and <code>bind</code> puts a command on a key.</p>
+
+        <div id="translator" class="lab-box el-lab" data-elixir-translator>
+          <div class="tr-head">
+            <p class="tr-step" id="tr-step-editor"><span class="tr-step-n">1</span> Pick the editor your config is in.</p>
+            <div class="seg-group" role="group" aria-labelledby="tr-step-editor">
+              <button type="button" class="seg-btn" data-tr-editor="lua" aria-pressed="false">Neovim</button>
+              <button type="button" class="seg-btn" data-tr-editor="elisp" aria-pressed="false">Emacs</button>
+              <button type="button" class="seg-btn" data-tr-editor="vscode" aria-pressed="false">VS Code</button>
+            </div>
+          </div>
+          <p class="tr-step tr-step-row"><span class="tr-step-n">2</span> Select a setting to read what each part of the Minga line means.</p>
+
+          <ul class="tr-list">
+            <li class="tr-item" data-tr-row="theme">
+              <button type="button" class="tr-row" aria-expanded="false" aria-controls="tr-note-theme" disabled>
+                <span class="tr-feature">Color theme</span>
+                <span class="tr-hint">Explain this line</span>
+              </button>
+              <div class="tr-snips">
+                <div class="tr-snip" data-tr-src="lua">
+                  <p class="tr-lang">Neovim · init.lua, with the catppuccin plugin</p>
+                  <pre><code>vim.cmd.colorscheme("catppuccin-latte")</code></pre>
+                </div>
+                <div class="tr-snip" data-tr-src="elisp">
+                  <p class="tr-lang">Emacs · init.el, with the catppuccin-theme package</p>
+                  <pre><code>(setq catppuccin-flavor 'latte)
+(load-theme 'catppuccin :no-confirm)</code></pre>
+                </div>
+                <div class="tr-snip" data-tr-src="vscode">
+                  <p class="tr-lang">VS Code · settings.json, with the Catppuccin extension</p>
+                  <pre><code>"workbench.colorTheme": "Catppuccin Latte"</code></pre>
+                </div>
+                <div class="tr-snip tr-minga" data-tr-src="minga">
+                  <p class="tr-lang">Minga · config.exs</p>
+                  <pre><code>set :theme, :catppuccin_latte</code></pre>
+                </div>
+              </div>
+              <div class="tr-note" id="tr-note-theme">
+                <p><code>set</code> changes one option everywhere. <code>:theme</code> is the option and <code>:catppuccin_latte</code> is its value. A word with a colon in front is an atom: a fixed name that Minga knows, written without quotes.</p>
+                <p>The other three editors get Catppuccin from a plugin. Minga has it built in. It starts on <code>:catppuccin_frappe</code>, a dark theme from the same family, so this line switches you to the light one.</p>
+              </div>
+            </li>
+
+            <li class="tr-item" data-tr-row="filetype">
+              <button type="button" class="tr-row" aria-expanded="false" aria-controls="tr-note-filetype" disabled>
+                <span class="tr-feature">Tab width for one language</span>
+                <span class="tr-hint">Explain this line</span>
+              </button>
+              <div class="tr-snips">
+                <div class="tr-snip" data-tr-src="lua">
+                  <p class="tr-lang">Neovim · init.lua</p>
+                  <pre><code>vim.api.nvim_create_autocmd("FileType", {
+  pattern = "go",
+  callback = function()
+    vim.bo.tabstop = 8
+    vim.bo.shiftwidth = 8
+  end,
+})</code></pre>
+                </div>
+                <div class="tr-snip" data-tr-src="elisp">
+                  <p class="tr-lang">Emacs · init.el, with go-mode</p>
+                  <pre><code>(add-hook 'go-mode-hook
+          (lambda () (setq-local tab-width 8)))</code></pre>
+                </div>
+                <div class="tr-snip" data-tr-src="vscode">
+                  <p class="tr-lang">VS Code · settings.json, with the Go extension</p>
+                  <pre><code>"[go]": {
+  "editor.tabSize": 8
+}</code></pre>
+                </div>
+                <div class="tr-snip tr-minga" data-tr-src="minga">
+                  <p class="tr-lang">Minga · config.exs</p>
+                  <pre><code>for_filetype :go, tab_width: 8, indent_with: :tabs</code></pre>
+                </div>
+              </div>
+              <div class="tr-note" id="tr-note-filetype">
+                <p><code>for_filetype</code> changes options for one language. <code>:go</code> names the language. <code>tab_width: 8</code> is an option name, a colon, and its value. Elixir calls a run of these name-and-value pairs a keyword list, and this line has two of them, with a comma between.</p>
+                <p>The second pair is there because the other three editors already indent Go with tabs, and Minga indents with spaces until you tell it <code>indent_with: :tabs</code>. With both pairs, a tab is one character drawn 8 columns wide. Without the line, Go files use the width you <code>set</code> for every language, which is 2 unless you change it.</p>
+              </div>
+            </li>
+
+            <li class="tr-item" data-tr-row="format">
+              <button type="button" class="tr-row" aria-expanded="false" aria-controls="tr-note-format" disabled>
+                <span class="tr-feature">Format on save</span>
+                <span class="tr-hint">Explain this line</span>
+              </button>
+              <div class="tr-snips">
+                <div class="tr-snip" data-tr-src="lua">
+                  <p class="tr-lang">Neovim · init.lua, with a Go language server</p>
+                  <pre><code>vim.api.nvim_create_autocmd("BufWritePre", {
+  pattern = "*.go",
+  callback = function()
+    vim.lsp.buf.format()
+  end,
+})</code></pre>
+                </div>
+                <div class="tr-snip" data-tr-src="elisp">
+                  <p class="tr-lang">Emacs · init.el, with go-mode</p>
+                  <pre><code>(add-hook 'before-save-hook #'gofmt-before-save)</code></pre>
+                </div>
+                <div class="tr-snip" data-tr-src="vscode">
+                  <p class="tr-lang">VS Code · settings.json, with the Go extension</p>
+                  <pre><code>"[go]": {
+  "editor.formatOnSave": true
+}</code></pre>
+                </div>
+                <div class="tr-snip tr-minga" data-tr-src="minga">
+                  <p class="tr-lang">Minga · config.exs</p>
+                  <pre><code>for_filetype :go, format_on_save: true</code></pre>
+                </div>
+              </div>
+              <div class="tr-note" id="tr-note-format">
+                <p><code>true</code> and <code>false</code> are written as they are, with no colon and no quotes. With this line, Minga formats a Go file before it writes it: with gopls, Go's language server, when it is running, and with <code>gofmt</code> otherwise.</p>
+                <p>If the file cannot be formatted, for example because of a syntax error, Minga does not save it and the status line reads "Save skipped: formatter failed". Fix the error and save again. If <code>gofmt</code> is not installed and gopls is not running, Minga saves the file unformatted and tells you the formatter is missing.</p>
+                <p>This row and the one above both change Go, so in your file they can share a line: <code>for_filetype :go, tab_width: 8, indent_with: :tabs, format_on_save: true</code>.</p>
+              </div>
+            </li>
+
+            <li class="tr-item" data-tr-row="key">
+              <button type="button" class="tr-row" aria-expanded="false" aria-controls="tr-note-key" disabled>
+                <span class="tr-feature">Your own key for Save</span>
+                <span class="tr-hint">Explain this line</span>
+              </button>
+              <div class="tr-snips">
+                <div class="tr-snip" data-tr-src="lua">
+                  <p class="tr-lang">Neovim · init.lua</p>
+                  <pre><code>vim.keymap.set("n", "&lt;leader&gt;fw", "&lt;cmd&gt;write&lt;cr&gt;", { desc = "Save file" })</code></pre>
+                </div>
+                <div class="tr-snip" data-tr-src="elisp">
+                  <p class="tr-lang">Emacs · init.el</p>
+                  <pre><code>(global-set-key (kbd "C-c w") #'save-buffer)</code></pre>
+                </div>
+                <div class="tr-snip" data-tr-src="vscode">
+                  <p class="tr-lang">VS Code · keybindings.json</p>
+                  <pre><code>[
+  {
+    "key": "ctrl+alt+w",
+    "command": "workbench.action.files.save"
+  }
+]</code></pre>
+                </div>
+                <div class="tr-snip tr-minga" data-tr-src="minga">
+                  <p class="tr-lang">Minga · config.exs</p>
+                  <pre><code>bind :normal, "SPC f w", :save, "Save file"</code></pre>
+                </div>
+              </div>
+              <div class="tr-note" id="tr-note-key">
+                <p><code>bind</code> puts a command on a key. It takes four things in order: the mode the key works in (<code>:normal</code> is the mode for moving around, as opposed to typing text), the keys, the name of the command, and a label that Minga shows in its key hints. Text inside double quotes is a string: Minga reads it exactly as written. <code>SPC</code> stands for the space bar, so this key is space, then f, then w.</p>
+                <p>Each editor has its own spare keys, so the key differs from editor to editor. The command is the same in all four: save the file. To find the name of any command, press <kbd>SPC h a</kbd> and type what it does.</p>
+              </div>
+            </li>
+          </ul>
         </div>
       </div>
     </section>
@@ -90,40 +243,21 @@
     <section class="section section-tinted" id="config-builder">
       <div class="container">
         <div class="section-header">
-          <p class="section-index"><span>01</span> Playground</p>
-          <h2>Live-themed <code>config.exs</code> playground.</h2>
-          <p>Pick a preset or tweak any option to preview themes and copy a live-reloadable <code>config.exs</code> (<kbd>SPC h r</kbd>).</p>
+          <p class="section-index"><span>01</span> Your file</p>
+          <h2>Build the file, paste it, reload.</h2>
+          <p>The file's first line, <code>use Minga.Config</code>, makes <code>set</code>, <code>for_filetype</code> and <code>bind</code> available, so keep it at the top.</p>
         </div>
 
-        <div class="lab-box" data-elixir-playground>
-          <div class="lab-bar">
-            <span>PLAYGROUND · ~/.CONFIG/MINGA/CONFIG.EXS</span>
-            <span>Reload live with <span class="nowrap">SPC h r</span></span>
-          </div>
-
-          <div class="preset-bar" role="group" aria-label="Configuration presets">
-            <span class="preset-label">Presets:</span>
-            <button type="button" class="seg-btn is-active" data-cfg-preset="vim">Minimal Vim</button>
-            <button type="button" class="seg-btn" data-cfg-preset="doom">Doom Emacs</button>
-            <button type="button" class="seg-btn" data-cfg-preset="cua">CUA Desktop</button>
-            <button type="button" class="seg-btn" data-cfg-preset="work">Work Laptop Safety</button>
-          </div>
-
+        <div class="lab-box el-lab" data-elixir-playground>
+          <p class="cfg-intro el-live-copy">Choose the values you want. The file changes as you choose, and the small preview above it shows the theme, the line numbers and the Go tab width.</p>
+          <p class="cfg-intro el-static-copy">This is the file with the lesson's starting values. With JavaScript on, you can change the values here before you copy it.</p>
           <div class="builder-grid">
             <div class="builder-controls">
               <div class="builder-group">
-                <label class="builder-label" for="cfg-model">Editing model</label>
-                <select id="cfg-model" class="builder-select" data-cfg-field="model">
-                  <option value="vim" selected>Vim modal (default)</option>
-                  <option value="cua">CUA desktop (:cua)</option>
-                </select>
-              </div>
-
-              <div class="builder-group">
                 <label class="builder-label" for="cfg-theme">Theme</label>
                 <select id="cfg-theme" class="builder-select" data-cfg-field="theme">
-                  <option value="catppuccin_frappe" selected>Catppuccin Frappé (default)</option>
-                  <option value="catppuccin_latte">Catppuccin Latte (light)</option>
+                  <option value="catppuccin_frappe" selected>Catppuccin Frappé</option>
+                  <option value="catppuccin_latte">Catppuccin Latte</option>
                   <option value="astrodark">AstroDark</option>
                   <option value="doom_one">Doom One</option>
                   <option value="one_light">One Light</option>
@@ -133,93 +267,76 @@
               <div class="builder-group">
                 <label class="builder-label" for="cfg-lines">Line numbers</label>
                 <select id="cfg-lines" class="builder-select" data-cfg-field="lines">
-                  <option value="relative" selected>Relative (:relative)</option>
-                  <option value="hybrid">Hybrid (:hybrid)</option>
-                  <option value="absolute">Absolute (:absolute)</option>
+                  <option value="relative" selected>Counted from the cursor</option>
+                  <option value="absolute">Real line numbers</option>
+                  <option value="none">No line numbers</option>
                 </select>
               </div>
 
               <div class="builder-group">
-                <label class="builder-label" for="cfg-tab">Tab width</label>
-                <select id="cfg-tab" class="builder-select" data-cfg-field="tab">
-                  <option value="2" selected>2 spaces</option>
-                  <option value="4">4 spaces</option>
+                <label class="builder-label" for="cfg-go-tab">Go tab width</label>
+                <select id="cfg-go-tab" class="builder-select" data-cfg-field="goTab">
+                  <option value="2">2 columns</option>
+                  <option value="4">4 columns</option>
+                  <option value="8" selected>8 columns</option>
                 </select>
               </div>
 
-              <fieldset class="builder-checks">
-                <legend class="builder-label">Include starter snippets</legend>
-                <label class="builder-check"><input type="checkbox" data-cfg-opt="gofmt" checked><span>Async <code>gofmt</code> save hook + Go tabs</span></label>
-                <label class="builder-check"><input type="checkbox" data-cfg-opt="hook"><span><code>PreToolUse</code> shell veto hook</span></label>
-                <label class="builder-check"><input type="checkbox" data-cfg-opt="mcp"><span>Crash-isolated GitHub MCP server</span></label>
-                <label class="builder-check"><input type="checkbox" data-cfg-opt="ext" checked><span>Lazy Hex extension (<code>minga_git_extended</code>)</span></label>
-              </fieldset>
+              <label class="builder-check"><input type="checkbox" id="cfg-go-format" data-cfg-field="goFormat" checked><span>Format Go files on save</span></label>
             </div>
 
             <div class="builder-output">
-              <div class="theme-preview-box" data-theme-preview aria-live="polite"></div>
+              <div class="theme-preview-box" data-theme-preview>
+                <div class="tp-bar">
+                  <span>Preview · <span data-cfg-theme-name aria-live="polite">Catppuccin Frappé</span></span>
+                  <span>wait.go</span>
+                </div>
+                <div class="tp-code" aria-hidden="true">
+                  <div class="tp-line"><span class="tp-ln" data-tp-ln>1</span><span><span class="tp-kw">func</span> wait(n <span class="tp-kw">int</span>) <span class="tp-kw">int</span> {</span></div>
+                  <div class="tp-line tp-cur"><span class="tp-ln" data-tp-ln>0</span><span><span data-tp-indent>        </span>ms := <span class="tp-num">250</span> * n</span></div>
+                  <div class="tp-line"><span class="tp-ln" data-tp-ln>1</span><span><span data-tp-indent>        </span><span class="tp-kw">return</span> min(ms, <span class="tp-num">30000</span>)</span></div>
+                  <div class="tp-line"><span class="tp-ln" data-tp-ln>2</span><span>}</span></div>
+                </div>
+              </div>
               <div class="code-card is-frappe">
                 <div class="code-header">
                   <span>~/.config/minga/config.exs</span>
-                  <button type="button" class="copy-btn" data-copy-target="cfg-preview-code">Copy</button>
+                  <button type="button" class="copy-btn" data-cfg-copy>Copy</button>
                 </div>
-                <pre><code id="cfg-preview-code">use Minga.Config
+                <pre><code id="cfg-preview-code"><span class="ckw">use</span> <span class="cmod">Minga.Config</span>
 
-set :theme, :catppuccin_frappe
-set :line_numbers, :relative
-set :tab_width, 2
+<span class="ckw">set</span> <span class="cat">:theme</span>, <span class="cat">:catppuccin_frappe</span>
+<span class="ckw">set</span> <span class="cat">:line_numbers</span>, <span class="cat">:relative</span>
 
-for_filetype :go, tab_width: 4, indent_with: :tabs
-
-on :after_save, fn _buf, path -&gt;
-  if String.ends_with?(path, ".go") do
-    System.cmd("gofmt", ["-w", path])
-  end
-end
-
-extension :minga_git_extended,
-  hex: "minga_git_extended",
-  version: "~&gt; 0.1",
-  load_policy: {:on_command, [:git_log]}</code></pre>
+<span class="ckw">for_filetype</span> <span class="cat">:go</span>, <span class="cat">tab_width:</span> <span class="cnum">8</span>, <span class="cat">indent_with:</span> <span class="cat">:tabs</span>, <span class="cat">format_on_save:</span> <span class="ckw">true</span></code></pre>
               </div>
             </div>
+          </div>
+
+          <div class="cfg-next">
+            <p class="cfg-status" role="status" data-cfg-status></p>
+            <span hidden data-lab-text="copied">Copied. Three steps are left, and they happen in Minga.</span>
+            <span hidden data-lab-text="copy_failed">The browser did not allow the copy. Select the text of the file and copy it yourself.</span>
+            <ol class="cfg-steps">
+              <li>In Minga, open any file first: with no file open, the next key does nothing. Then press <kbd>SPC f p</kbd> (Space, then f, then p). It opens <code>~/.config/minga/config.exs</code>, and creates the file if you do not have one.</li>
+              <li>Paste the text over what is there, or add only the lines you want below <code>use Minga.Config</code>. Save with <kbd>SPC f s</kbd>.</li>
+              <li>Press <kbd>SPC h r</kbd>. The status line reads "Config reloaded".</li>
+            </ol>
+            <p class="cfg-after">The theme and the line numbers change at once, in the files you already have open. The Go line takes effect in Go files you open after the reload. If you have changed the theme or the line numbers in the macOS app's Settings, that choice wins over this file. A key of your own, such as the one in the fourth row above, goes on a line of its own in the same file.</p>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="section" id="config-dsl">
+    <section class="section" id="next">
       <div class="container">
         <div class="section-header">
-          <p class="section-index"><span>02</span> Primitives</p>
-          <h2>Five building blocks cover 95% of everyday customization.</h2>
-          <p>Press <kbd>SPC f p</kbd> to open <code>~/.config/minga/config.exs</code> and <kbd>SPC h r</kbd> to reload options, keybindings, hooks, and command wrappers live.</p>
+          <p class="section-index"><span>02</span> After this</p>
+          <h2>What you can do now.</h2>
+          <p>You can read a line of Minga config and say what each part does, so you can move the rest of your settings one line at a time, or check a config that an agent wrote for you. The same three words reach every option in the <a href="/docs/configuration.html">configuration guide</a>.</p>
         </div>
 
-        <ul class="spec-ledger">
-          <li class="spec-row">
-            <span class="spec-key spec-key-strong"><code>set</code></span>
-            <span class="spec-detail"><strong>Typed editor options.</strong> Default theme is Catppuccin Frappé (<code>:catppuccin_frappe</code>); invalid names or types report a clear notice.</span>
-          </li>
-          <li class="spec-row">
-            <span class="spec-key spec-key-strong"><code>for_filetype</code></span>
-            <span class="spec-detail"><strong>Per-language overrides</strong> via keyword pairs (tab width, indentation, formatters).</span>
-          </li>
-          <li class="spec-row">
-            <span class="spec-key spec-key-strong"><code>bind</code> &amp; <code>command</code></span>
-            <span class="spec-detail"><strong>Custom commands and keybindings</strong> scoped to any mode or filetype.</span>
-          </li>
-          <li class="spec-row">
-            <span class="spec-key spec-key-strong"><code>on</code> &amp; <code>advise</code></span>
-            <span class="spec-detail"><strong>Isolated hooks and Emacs-style advice</strong> (<code>:before</code>, <code>:after</code>, <code>:around</code>, <code>:override</code>) with contained exceptions.</span>
-          </li>
-          <li class="spec-row">
-            <span class="spec-key spec-key-strong"><code>extension</code></span>
-            <span class="spec-detail"><strong>Supervised Hex, Git, or local packages</strong> with configurable <code>load_policy</code>.</span>
-          </li>
-        </ul>
-
-        <p class="section-foot-link">Ready for OTP supervisors, corporate proxies, or v0.1.0 task workflows? <a href="/extending">Read Extending Minga -&gt;</a></p>
+        <p class="section-foot-link">Want Minga to run your own code after a save, or to add a command of your own? That is still this one file. <a href="/extending">Read Extending Minga -&gt;</a></p>
 
         <nav class="lesson-pager" aria-label="Lesson navigation">
           <a class="pager-link" href="/learn/agents">
@@ -254,6 +371,6 @@ extension :minga_git_extended,
   </footer>
 
   <script defer src="/site.js"></script>
-  <script type="module" src="/assets/learn-labs.js"></script>
+  <script type="module" src="/assets/learn-labs.js" onerror="document.documentElement.classList.add('labs-failed')"></script>
 </body>
 </html>

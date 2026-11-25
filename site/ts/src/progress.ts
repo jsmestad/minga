@@ -11,7 +11,7 @@ export type LessonId = "editing" | "agents" | "elixir" | "remote";
 export const LESSON_STEPS: Readonly<Record<LessonId, readonly string[]>> = {
   editing: ["which_key", "pin_file", "act_menu", "parity", "dismiss"],
   agents: ["find", "edit_undo", "reject", "keep"],
-  elixir: ["translator", "theme_preview", "preset"],
+  elixir: ["translated", "copied"],
   remote: ["detach_reattach", "mcp_crash", "pretooluse_veto"],
 };
 
