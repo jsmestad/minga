@@ -129,6 +129,8 @@ A scenario's first renders become its baseline once they pass the layout audit a
 
 **The layout audit.** `design/tools/storyboard/audit.py` measures every rendered frame against [anatomy.md](anatomy.md): token gaps and row pitch, leading edges and baselines, clipping and truncation, macOS hit targets, contrast from pixels and cells (syntax colours included), and the same part measuring the same in every scenario. It reads its numbers from the token scales, never its own. The **Storyboard renders** job runs it and fails on a finding without an exception; see [The layout audit](anatomy.md#the-layout-audit) for the rules and the exceptions file.
 
+The native capture does not count a floating picker's fill, text or shadow as ink in the breadcrumb or editor below it. The contrast audit still checks the visible parts of both surfaces and the picker's text.
+
 **Running it.** From the repository root, with the pinned Elixir and Go toolchains:
 
 ```bash

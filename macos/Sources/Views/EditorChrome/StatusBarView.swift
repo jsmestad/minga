@@ -307,7 +307,7 @@ public struct StatusBarView: View {
                     if words {
                         Text(action.label)
                             .font(Typography.font(.small))
-                            .foregroundStyle(theme.modelineBarFg.opacity(0.78))
+                            .foregroundStyle(theme.modelineBarFg)
                     }
                 }
                 .contentShape(Rectangle())

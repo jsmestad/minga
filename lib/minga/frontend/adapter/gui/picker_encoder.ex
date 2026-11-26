@@ -162,7 +162,9 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
     |> Writer.section16(
       :picker_enter_selection,
       @section_picker_enter_selection,
-      Encode.encode_gui_picker_enter_selection(%{selects: if(model.enter_selects?, do: 1, else: 0)})
+      Encode.encode_gui_picker_enter_selection(%{
+        selects: if(model.enter_selects?, do: 1, else: 0)
+      })
     )
     |> Writer.finish()
   end

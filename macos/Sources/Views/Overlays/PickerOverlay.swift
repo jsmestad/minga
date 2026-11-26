@@ -87,6 +87,7 @@ public struct PickerOverlay: View {
                             actionMenuOverlay(menu)
                         }
                     }
+                    .anatomyPart("picker.panel")
                     .padding(.top, Spacing.pixel)
 
                     Spacer()
@@ -187,7 +188,7 @@ public struct PickerOverlay: View {
             if state.empty != nil {
                 Text(state.hints.map { "\($0.keys) \($0.word)" }.joined(separator: "   "))
                     .font(Typography.font(.small))
-                    .foregroundStyle(theme.popupSecondaryFg)
+                    .foregroundStyle(theme.popupFg)
                     .lineLimit(1)
                     .fixedSize()
                     .anatomyPart("picker.hints", text: "move run close", font: .small)
@@ -253,7 +254,7 @@ public struct PickerOverlay: View {
             }
 
             if let empty = state.empty {
-                EmptyListHeader(empty: empty, textColor: theme.popupFg, mutedColor: theme.popupSecondaryFg)
+                EmptyListHeader(empty: empty, textColor: theme.popupFg, mutedColor: theme.popupFg)
                     .padding(.leading, Self.rowTextLeading)
                     .padding(.trailing, Spacing.md)
                     .padding(.top, EmptyStateMetrics.inset)
@@ -283,7 +284,8 @@ public struct PickerOverlay: View {
                                         item: item,
                                         isSelected: item.id == state.effectiveSelectedIndex,
                                         query: state.query,
-                                        itemHeight: Self.rowHeight(item)
+                                        itemHeight: Self.rowHeight(item),
+                                        isNextStep: state.empty != nil
                                     )
                                     .contentShape(Rectangle())
                                 }
@@ -599,6 +601,7 @@ private struct PickerItemRow: View {
     let isSelected: Bool
     let query: String
     let itemHeight: CGFloat
+    let isNextStep: Bool
 
     @Environment(\.themeColors) private var theme
 
@@ -701,7 +704,7 @@ private struct PickerItemRow: View {
         if !item.annotation.isEmpty {
             Text(item.annotation)
                 .font(Typography.font(.small, design: .monospaced))
-                .foregroundStyle(theme.popupFg.opacity(0.3))
+                .foregroundStyle(isNextStep ? (isSelected ? theme.popupSelFg : theme.popupFg) : theme.popupFg.opacity(0.3))
                 .padding(.horizontal, Spacing.xs)
                 .padding(.vertical, Spacing.pixel)
                 .background(
