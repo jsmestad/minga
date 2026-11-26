@@ -172,7 +172,9 @@ defmodule MingaAgent.InferenceRouteSessionTest do
     turn_request = assert_request(ctx.model_id)
     await_turn_complete()
     # The Session can announce idle before Native consumes the turn task's result.
-    assert_receive {:trace, ^provider, :receive, {ref, :ok}} when is_reference(ref), @event_timeout
+    assert_receive {:trace, ^provider, :receive, {ref, :ok}} when is_reference(ref),
+                   @event_timeout
+
     :erlang.trace(provider, false, [:receive])
 
     history =
