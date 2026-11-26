@@ -14,13 +14,15 @@ defmodule Minga.Buffer.Provenance do
 
   An edit that inserts text over a non-empty range is a replacement, recorded by identity as a `Minga.Buffer.Provenance.Change`. It made the runs it inserted. It replaced the live runs in its range and the tombstones strictly inside it that can still come back; text already gone for good (deleted by its own writer, by an untracked change or by a kept group, or written by a group discarded unapplied) is dropped from the tree and replaced by no one.
 
+  Compaction can discard the text of a superseded draft while keeping its replacement reachable. It leaves a zero-byte anchor at the draft's locator when later replacements can still need its coverage. A replacement that strictly spans that anchor records it like a tombstone but the anchor never contributes text, authorship, or a deletion dependency. Adjacent anchors with the same coverage and lifetime share a record.
+
   A deletion consumes a replacement when none of its made runs stays live. It then deletes the dead runs the replacement replaced too, and examines each replacement that made those runs, or that the replacement pulls, each once. A replacement that keeps live text is only partly consumed: when it is another author's Minga step, its runs get an overlap mark, and rejecting that step is refused while the deleting group is applied. A cover only adds a deleter to dead runs, so it never changes the document. A change carries its replacement only while its group is applied: a reached change whose group is undone, or was discarded unapplied (it never happened), neither covers nor marks.
 
   ## Record lifecycle
 
   A record is in one of three states.
 
-  1. **With text.** Created by an edit that inserted text over a non-empty range, unless it could never cover, pull or mark (it replaced nothing, pulls nothing, and is not a Minga step's). `made` lists its runs; a split adds the new piece. Its group is the writer of its first made run (`owner: :runs`). It retires to nothing when it has nothing replaced, pulls nothing, and its runs belong to no Minga step: its runs forget it.
+  1. **With runs or anchors.** Created by an edit that inserted text over a non-empty range, unless it could never cover, pull or mark (it replaced nothing, pulls nothing, and is not a Minga step's). `made` lists its runs and compacted anchors; a split adds the new piece. Its group is the writer of its first made entry (`owner: :runs`). It retires to nothing when it has nothing replaced, pulls nothing, and its entries belong to no Minga step: the entries forget it.
   2. **Run-less, pulled.** When its last made run is dropped, the record keeps that run's group as `owner` (listed in the group-to-records index) and stays while another record pulls it. A record `p` pulls `q` when a run `q` made, which `p` had replaced, is dropped: consuming `p` still reaches `q`. Compaction that removes the owner renames it to the step that absorbed it. Discarding the owner kept makes the owner `:permanent`, which counts as applied.
   3. **Gone.** A run-less record that nothing pulls, or that has nothing replaced and pulls nothing, is removed; so is every record its owner's discard unapplied leaves behind, with its pull edges. Removing a record removes it from its runs' `replaced_by` and from every link.
 
@@ -43,8 +45,10 @@ defmodule Minga.Buffer.Provenance do
 
   alias Minga.Buffer.Document
   alias Minga.Buffer.Provenance.Change
+  alias Minga.Buffer.Provenance.DraftLinks
   alias Minga.Buffer.Provenance.Group
   alias Minga.Buffer.Provenance.Locator
+  alias Minga.Buffer.Provenance.RewriteScan
   alias Minga.Buffer.Provenance.Run
   alias Minga.Buffer.Provenance.RunTree
   alias Minga.Core.Unicode
@@ -57,6 +61,7 @@ defmodule Minga.Buffer.Provenance do
             fresh: [],
             overlap_runs: %{},
             drafts: nil,
+            detached_drafts: nil,
             next_change: 1,
             changes: %{},
             stale: [],
@@ -74,6 +79,7 @@ defmodule Minga.Buffer.Provenance do
             fresh: [Locator.t()],
             overlap_runs: %{group_id() => [Locator.t()]},
             drafts: :gb_sets.set({group_id(), Locator.t()}),
+            detached_drafts: DraftLinks.t(),
             next_change: pos_integer(),
             changes: %{Change.id() => Change.t()},
             stale: [Change.id()],
@@ -108,7 +114,7 @@ defmodule Minga.Buffer.Provenance do
             author: :unattributed
           })
 
-    %__MODULE__{tree: tree, drafts: :gb_sets.new()}
+    %__MODULE__{tree: tree, drafts: :gb_sets.new(), detached_drafts: DraftLinks.new()}
   end
 
   @doc "Returns the document size in bytes that this provenance describes."
@@ -329,6 +335,7 @@ defmodule Minga.Buffer.Provenance do
   # Sweeping it as a tombstone inside a range, or covering it with a consumed replacement, never makes a group the one
   # who removed it.
   @spec removed_by?(Run.t(), group_id()) :: boolean()
+  defp removed_by?(%Run{bytes: 0}, _id), do: false
   defp removed_by?(%Run{group: id}, id), do: true
 
   defp removed_by?(run, id),
@@ -362,16 +369,28 @@ defmodule Minga.Buffer.Provenance do
   @spec run_later_deleters(Run.t(), group_id(), %{group_id() => Group.t()}, (group_id() ->
                                                                                boolean())) ::
           [group_id()]
+  defp run_later_deleters(%Run{bytes: 0}, _id, _groups, _reverting?), do: []
+
   defp run_later_deleters(run, id, groups, reverting?) do
-    if reverting?.(run.group) and Enum.any?(run.deletions, reverting?) do
-      []
-    else
-      for deleter <- later_deleters(run, id),
-          deleter != id,
-          deleting = Map.fetch!(groups, deleter),
-          deleting.applied and deleting.author != :you,
-          do: deleter
-    end
+    if reverting?.(run.group) and Enum.any?(run.deletions, reverting?),
+      do: [],
+      else: applied_minga_deleters(run, id, groups)
+  end
+
+  @spec applied_minga_deleters(Run.t(), group_id(), %{group_id() => Group.t()}) :: [group_id()]
+  defp applied_minga_deleters(run, id, groups) do
+    for deleter <- later_deleters(run, id),
+        deleter != id,
+        deleting = Map.fetch!(groups, deleter),
+        deleting.applied and deleting.author != :you,
+        do: deleter
+  end
+
+  @doc "Reads this group's rewrite requirements into the current Reject scan."
+  @spec rewrite_requirements(t(), group_id(), RewriteScan.t()) ::
+          {[RewriteScan.requirement()], RewriteScan.t()}
+  def rewrite_requirements(%__MODULE__{groups: groups, tree: tree}, id, scan) do
+    RewriteScan.collect(scan, id, Map.fetch!(groups, id).runs, tree, groups)
   end
 
   @doc """
@@ -447,10 +466,12 @@ defmodule Minga.Buffer.Provenance do
   An applied group's text becomes permanent and keeps its author; the text it deleted is dropped. An unapplied group's text is dropped and it no longer counts as a deletion of anyone's text. Use it when a group leaves every history: your oldest undo step falls off the stack, your redo steps are replaced by a new edit, or a Minga step is reverted for good.
   """
   @spec discard(t(), group_id()) :: t()
-  def discard(%__MODULE__{} = prov, id), do: prov |> discard_one(id) |> traced({:discard, [id]})
+  def discard(%__MODULE__{} = prov, id) do
+    prov |> discard_one(id, prov) |> unpair_drafts(id) |> traced({:discard, [id]})
+  end
 
-  @spec discard_one(t(), group_id()) :: t()
-  defp discard_one(prov, id) do
+  @spec discard_one(t(), group_id(), t()) :: t()
+  defp discard_one(prov, id, before) do
     {group, groups} = Map.pop!(prov.groups, id)
     marked = Map.get(prov.overlap_runs, id, [])
 
@@ -459,7 +480,7 @@ defmodule Minga.Buffer.Provenance do
 
     group.runs
     |> :gb_sets.to_list()
-    |> Enum.reduce(prov, fn run_id, prov -> settle_run(prov, run_id, %{id => group}) end)
+    |> Enum.reduce(prov, fn run_id, prov -> settle_run(prov, run_id, %{id => group}, before) end)
     |> refresh_runs(marked)
     |> settle_owners(%{id => group})
     |> settle_changes()
@@ -628,32 +649,148 @@ defmodule Minga.Buffer.Provenance do
   end
 
   @spec deleted_writer_key(%{group_id() => Group.t()}, Run.t(), group_id()) :: [group_key()]
-  defp deleted_writer_key(groups, %Run{group: writer} = run, id)
-       when writer != nil and writer != id do
+  defp deleted_writer_key(groups, %Run{group: writer, bytes: bytes} = run, id)
+       when bytes > 0 and writer != nil and writer != id do
     if id in run.deletions, do: List.wrap(Map.fetch!(groups, writer).key), else: []
   end
 
   defp deleted_writer_key(_groups, _base_or_own, _id), do: []
 
   @doc """
-  Returns whether reverting the groups in `reverted` (which hold `id`) would bring back text `id` deleted: a tombstone `id` made that no other applied group outside them deletes and whose writer stays applied.
+  Identifies user groups with text visible now or restored by undoing selected Minga deletions. User deletions stay applied for this check, even when the plan would also remove them.
   """
-  @spec revives_deleted?(t(), group_id(), [group_id()]) :: boolean()
-  def revives_deleted?(%__MODULE__{groups: groups, tree: tree}, id, reverted)
-      when is_list(reverted) do
-    reverted = MapSet.new(reverted)
-    applied? = &(Map.fetch!(groups, &1).applied and not MapSet.member?(reverted, &1))
+  @spec protected_user_text(t(), MapSet.t(group_id())) :: [{group_id(), {:yours, group_id()}}]
+  def protected_user_text(%__MODULE__{groups: groups, tree: tree}, selected) do
+    keeps_deleted? = fn id ->
+      group = Map.fetch!(groups, id)
+      group.applied and (group.author == :you or not MapSet.member?(selected, id))
+    end
 
-    groups
-    |> Map.fetch!(id)
-    |> Map.fetch!(:runs)
-    |> :gb_sets.to_list()
-    |> Enum.any?(fn run_id ->
-      {:ok, run, _offset} = RunTree.fetch(tree, run_id)
+    for id <- selected,
+        %{author: :you, applied: true, runs: runs} <- [Map.fetch!(groups, id)],
+        Enum.any?(:gb_sets.to_list(runs), &user_text_returns?(tree, id, &1, keeps_deleted?)),
+        do: {id, {:yours, id}}
+  end
 
-      run.group != id and id in run.deletions and (run.group == nil or applied?.(run.group)) and
-        not Enum.any?(run.deletions, applied?)
+  @spec user_text_returns?(RunTree.t(), group_id(), Locator.t(), (group_id() -> boolean())) ::
+          boolean()
+  defp user_text_returns?(tree, id, locator, keeps_deleted?) do
+    {:ok, run, _offset} = RunTree.fetch(tree, locator)
+    run.group == id and not Enum.any?(run.deletions, keeps_deleted?)
+  end
+
+  @doc "Returns each user group and the Minga deletions that must revert to expose one of its own bytes."
+  @spec protected_user_requirements(t(), MapSet.t(group_id())) :: [{group_id(), [group_id()]}]
+  def protected_user_requirements(%__MODULE__{groups: groups, tree: tree}, possible) do
+    for id <- possible,
+        %{author: :you, applied: true, runs: runs} <- [Map.fetch!(groups, id)],
+        reduce: [] do
+      evidence ->
+        requirements = user_requirements(tree, id, runs, groups, possible)
+
+        Enum.reduce(requirements, evidence, &[{id, &1} | &2])
+    end
+  end
+
+  @spec user_requirements(
+          RunTree.t(),
+          group_id(),
+          :gb_sets.set(Locator.t()),
+          %{group_id() => Group.t()},
+          MapSet.t(group_id())
+        ) :: MapSet.t([group_id()])
+  defp user_requirements(tree, id, runs, groups, possible) do
+    Enum.reduce_while(:gb_sets.to_list(runs), MapSet.new(), fn locator, acc ->
+      case RunTree.fetch(tree, locator) do
+        {:ok, %Run{group: ^id, live: true, bytes: bytes}, _offset} when bytes > 0 ->
+          {:halt, MapSet.new([[]])}
+
+        {:ok, %Run{group: ^id, deletions: deleters, bytes: bytes}, _offset} when bytes > 0 ->
+          collect_user_requirements(deleters, groups, possible, acc)
+
+        {:ok, _other_run, _offset} ->
+          {:cont, acc}
+      end
     end)
+  end
+
+  @spec collect_user_requirements(
+          [group_id()],
+          %{group_id() => Group.t()},
+          MapSet.t(group_id()),
+          MapSet.t([group_id()])
+        ) :: {:cont, MapSet.t([group_id()])}
+  defp collect_user_requirements(deleters, groups, possible, acc) do
+    case user_byte_deleters(deleters, groups, possible, []) do
+      nil -> {:cont, acc}
+      required -> {:cont, MapSet.put(acc, required)}
+    end
+  end
+
+  @spec user_byte_deleters(
+          [group_id()],
+          %{group_id() => Group.t()},
+          MapSet.t(group_id()),
+          [group_id()]
+        ) :: [group_id()] | nil
+  defp user_byte_deleters([], _groups, _possible, required), do: required
+
+  defp user_byte_deleters([id | rest], groups, possible, required) do
+    case Map.fetch!(groups, id) do
+      %Group{applied: false} ->
+        user_byte_deleters(rest, groups, possible, required)
+
+      %Group{author: :you} ->
+        nil
+
+      %Group{} ->
+        if MapSet.member?(possible, id),
+          do: user_byte_deleters(rest, groups, possible, [id | required])
+    end
+  end
+
+  @doc """
+  Returns the holding user groups and all contributing deleters for each distinct revival in a proposed revert. Separate revival witnesses stay separate so the planner can distinguish a local refusal from a conflict between choices.
+  """
+  @spec revived_user_deletions(t(), MapSet.t(group_id())) :: [{[group_id()], [group_id()]}]
+  def revived_user_deletions(%__MODULE__{groups: groups, tree: tree}, selected) do
+    runs =
+      for id <- selected,
+          %{author: :you, applied: true, runs: runs} <- [Map.fetch!(groups, id)],
+          run_id <- :gb_sets.to_list(runs),
+          into: MapSet.new(),
+          do: run_id
+
+    Enum.reduce(runs, MapSet.new(), fn run_id, conflicts ->
+      {:ok, run, _offset} = RunTree.fetch(tree, run_id)
+      add_revival_conflict(run, selected, groups, conflicts)
+    end)
+    |> MapSet.to_list()
+  end
+
+  @spec add_revival_conflict(
+          Run.t(),
+          MapSet.t(group_id()),
+          %{group_id() => Group.t()},
+          MapSet.t({[group_id()], [group_id()]})
+        ) :: MapSet.t({[group_id()], [group_id()]})
+  defp add_revival_conflict(run, selected, groups, conflicts) do
+    writer_remains? =
+      run.group == nil or
+        (Map.fetch!(groups, run.group).applied and not MapSet.member?(selected, run.group))
+
+    if writer_remains? and not run.live and run.bytes > 0 do
+      active = Enum.filter(run.deletions, &Map.fetch!(groups, &1).applied)
+      users = for id <- active, %Group{author: :you} <- [Map.fetch!(groups, id)], do: id
+
+      if users != [] and Enum.all?(active, &MapSet.member?(selected, &1)) do
+        MapSet.put(conflicts, {users, active})
+      else
+        conflicts
+      end
+    else
+      conflicts
+    end
   end
 
   @doc "Returns how many bytes of the group's own text are live, by the groups' applied flags."
@@ -670,22 +807,6 @@ defmodule Minga.Buffer.Provenance do
   end
 
   @doc """
-  Returns the provenance with the groups in `ids` marked unapplied and nothing else changed, for deciding what a set of reverts would allow before making them: every query that reads only applied flags (`later_deleters_of/2`, `overlapping_groups/2`, `live_bytes_of/2`, `revives_deleted?/3`) answers as if they were reverted. The runs are not flipped, so the result must not be edited, flipped or kept.
-  """
-  @spec assume_unapplied(t(), [group_id()]) :: t()
-  def assume_unapplied(%__MODULE__{} = prov, ids) when is_list(ids) do
-    groups =
-      Enum.reduce(ids, prov.groups, fn id, groups ->
-        case groups do
-          %{^id => group} -> %{groups | id => %{group | applied: false}}
-          _gone -> groups
-        end
-      end)
-
-    %{prov | groups: groups}
-  end
-
-  @doc """
   Forgets several groups whose state is final; see `discard/2`.
 
   When the groups hold a large share of the runs, as when a long task is rejected, one pass over every run settles them all and rebuilds the tree and every group's run set, in O(n), instead of looking each run up.
@@ -697,8 +818,9 @@ defmodule Minga.Buffer.Provenance do
     discarded =
       if touched * 8 > RunTree.count(prov.tree),
         do: discard_in_one_pass(prov, ids),
-        else: Enum.reduce(ids, prov, &discard_one(&2, &1))
+        else: Enum.reduce(ids, prov, &discard_one(&2, &1, prov))
 
+    discarded = Enum.reduce(ids, discarded, &unpair_drafts(&2, &1))
     traced(discarded, {:discard, ids})
   end
 
@@ -717,6 +839,51 @@ defmodule Minga.Buffer.Provenance do
   @doc "Returns how many drafts the record holds, in O(1)."
   @spec draft_count(t()) :: non_neg_integer()
   def draft_count(%__MODULE__{drafts: drafts}), do: :gb_sets.size(drafts)
+
+  @typedoc "Per-proposal run evidence. A claimed chain has already supplied all its links."
+  @type draft_scan :: %{Locator.t() => :claimed | MapSet.t(group_id())}
+
+  @doc "Returns this group's detached neighbours and the attached chains it can claim during one planner walk."
+  @spec draft_partners(t(), group_id(), draft_scan()) :: {MapSet.t(group_id()), draft_scan()}
+  def draft_partners(%__MODULE__{groups: groups} = prov, id, scan) do
+    neighbours = DraftLinks.partners(prov.detached_drafts, id)
+
+    Map.fetch!(groups, id).runs
+    |> :gb_sets.to_list()
+    |> Enum.reduce({neighbours, scan}, &claim_draft(prov, id, &1, &2))
+  end
+
+  @spec claim_draft(t(), group_id(), Locator.t(), {MapSet.t(group_id()), draft_scan()}) ::
+          {MapSet.t(group_id()), draft_scan()}
+  defp claim_draft(prov, id, locator, {partners, scan} = acc) do
+    case scan do
+      %{^locator => :claimed} ->
+        acc
+
+      %{^locator => members} ->
+        claim_members(id, locator, members, acc)
+
+      _new ->
+        {:ok, run, _offset} = RunTree.fetch(prov.tree, locator)
+
+        case compactible_chain(run, prov.groups) do
+          [] -> {partners, Map.put(scan, locator, :claimed)}
+          chain -> claim_members(id, locator, MapSet.new(chain), acc)
+        end
+    end
+  end
+
+  @spec claim_members(
+          group_id(),
+          Locator.t(),
+          MapSet.t(group_id()),
+          {MapSet.t(group_id()), draft_scan()}
+        ) :: {MapSet.t(group_id()), draft_scan()}
+  defp claim_members(id, locator, members, {partners, scan}) do
+    if MapSet.member?(members, id),
+      do: {MapSet.union(partners, MapSet.delete(members, id)), Map.put(scan, locator, :claimed)},
+      else: {partners, Map.put(scan, locator, members)}
+  end
 
   @doc "Returns whether `id` is the group opened last."
   @spec newest_group?(t(), group_id()) :: boolean()
@@ -813,7 +980,7 @@ defmodule Minga.Buffer.Provenance do
   @doc """
   Merges step `old` into the newer step `new` of the same task across the stretch from locator `first` to locator `last`: every run there that names `old` as its writer or a deleter names `new` instead, and text `new` now both wrote and deleted is dropped, since it can never be live again.
 
-  The document is unchanged for every choice of applied groups in which `old` and `new` agree. Reverting `new` alone afterwards restores the text from before `old` in the stretch, and reverting `old` alone no longer touches it. When `old` names no runs afterwards, the group is removed and any marks it left elsewhere name `new`. Costs O(m + log n) for m runs in the stretch.
+  The document is unchanged for every choice of applied groups in which `old` and `new` agree. Reverting `new` alone afterwards restores the text from before `old` in the stretch, and reverting `old` alone no longer touches it. When `old` names no runs afterwards, the group is removed and any marks it left elsewhere name `new`. The stretch costs O(m + log n) to rebuild, plus the index updates for the coverage references it redirects.
   """
   @spec absorb(t(), group_id(), group_id(), {Locator.t(), Locator.t()}) :: t()
   def absorb(%__MODULE__{} = prov, old, new, {first, last}) do
@@ -824,15 +991,16 @@ defmodule Minga.Buffer.Provenance do
   @spec absorb_stretch(t(), group_id(), group_id(), Locator.t(), Locator.t()) ::
           {t(), pos_integer()}
   defp absorb_stretch(prov, old, new, first, last) do
-    {tree, {before, kept}} =
+    {tree, {before, kept, aliases}} =
       RunTree.rebuild_range(prov.tree, first, last, fn runs ->
         kept =
           for run <- runs,
-              mapped = relabel(run, old, new),
-              not self_deleted?(mapped, new),
+              mapped = compact_run(prov, relabel(run, old, new), new),
+              mapped != nil,
               do: mapped
 
-        {kept, {runs, kept}}
+        {kept, aliases} = coalesce_coverage_anchors(kept, prov, old, new)
+        {kept, {runs, kept, aliases}}
       end)
 
     kept_ids = MapSet.new(kept, & &1.id)
@@ -888,7 +1056,13 @@ defmodule Minga.Buffer.Provenance do
         overlap_runs: Map.update(prov.overlap_runs, new, marked, &(marked ++ &1))
     }
 
-    prov = prov |> remove_when_empty(old, new) |> settle_changes() |> traced({:absorb, old, new})
+    prov =
+      prov
+      |> resolve_coverage_aliases(aliases)
+      |> remove_when_empty(old, new)
+      |> settle_changes()
+      |> traced({:absorb, old, new})
+
     {prov, length(before)}
   end
 
@@ -965,6 +1139,156 @@ defmodule Minga.Buffer.Provenance do
   defp self_deleted?(%Run{group: new, deletions: [new], overlaps: []}, new), do: true
   defp self_deleted?(_run, _new), do: false
 
+  @spec compact_run(t(), Run.t(), group_id()) :: Run.t() | nil
+  defp compact_run(prov, run, new) do
+    if self_deleted?(run, new),
+      do: compacted_anchor(Map.get(prov.changes, run.made_by), run),
+      else: run
+  end
+
+  @spec compacted_anchor(Change.t() | nil, Run.t()) :: Run.t() | nil
+  defp compacted_anchor(nil, _run), do: nil
+
+  defp compacted_anchor(%Change{replaced: replaced, pulls: pulls}, run) do
+    if not :gb_sets.is_empty(replaced) or not :gb_sets.is_empty(pulls),
+      do: %{run | bytes: 0, text: ""}
+  end
+
+  # First join adjacent pieces of one replacement, then collapse replacements that only cover the next anchor.
+  # Two adjacent anchors with the same owner can still have different coverers.
+  # A bare pull never erases a position.
+  @spec coalesce_coverage_anchors([Run.t()], t(), group_id(), group_id()) ::
+          {[Run.t()], [{Run.t(), Run.t()}]}
+  defp coalesce_coverage_anchors(runs, prov, old, new) do
+    same_lifetime? = fn source, target ->
+      source.group == new and target.group == new and source.deletions == target.deletions and
+        source.overlaps == [] and target.overlaps == []
+    end
+
+    {runs, pieces} =
+      coalesce_anchors(runs, fn source, target ->
+        source.made_by == target.made_by and source.replaced_by == target.replaced_by and
+          same_lifetime?.(source, target)
+      end)
+
+    locations = Map.new(pieces, fn {source, target} -> {source.id, target.id} end)
+    removed = Enum.frequencies_by(pieces, fn {source, _target} -> source.made_by end)
+
+    {runs, chains} =
+      coalesce_anchors(runs, fn source, target ->
+        source.made_by > target.made_by and same_lifetime?.(source, target) and
+          only_covers?(prov.changes, source, target, locations, removed) and
+          compatible_coverers?(
+            prov,
+            source.replaced_by,
+            List.delete(target.replaced_by, source.made_by),
+            old,
+            new
+          )
+      end)
+
+    {runs, chains ++ pieces}
+  end
+
+  @spec coalesce_anchors([Run.t()], (Run.t(), Run.t() -> boolean())) ::
+          {[Run.t()], [{Run.t(), Run.t()}]}
+  defp coalesce_anchors(runs, alias?) do
+    Enum.reduce(Enum.reverse(runs), {[], []}, fn
+      %Run{bytes: 0, made_by: source_id} = source,
+      {[%Run{bytes: 0, made_by: target_id} = target | _] = kept, aliases}
+      when is_integer(source_id) and is_integer(target_id) ->
+        if alias?.(source, target),
+          do: {kept, [{source, target} | aliases]},
+          else: {[source | kept], aliases}
+
+      run, {kept, aliases} ->
+        {[run | kept], aliases}
+    end)
+  end
+
+  # The newer maker covers the older position while applied.
+  # Its exclusive coverers may inherit the link only inside its class.
+  # Exclusive coverers of the older position stay distinct.
+  @spec compatible_coverers?(t(), [Change.id()], [Change.id()], group_id(), group_id()) ::
+          boolean()
+  defp compatible_coverers?(_prov, same, same, _old, _new), do: true
+
+  defp compatible_coverers?(prov, [same | left], [same | right], old, new),
+    do: compatible_coverers?(prov, left, right, old, new)
+
+  defp compatible_coverers?(prov, [change | left], right, old, new)
+       when right == [] or change > hd(right) do
+    record_owner(prov, Map.fetch!(prov.changes, change)) in [old, new] and
+      compatible_coverers?(prov, left, right, old, new)
+  end
+
+  defp compatible_coverers?(_prov, _left, _right, _old, _new), do: false
+
+  @spec only_covers?(
+          %{Change.id() => Change.t()},
+          Run.t(),
+          Run.t(),
+          %{Locator.t() => Locator.t()},
+          %{Change.id() => pos_integer()}
+        ) :: boolean()
+  defp only_covers?(changes, source, target, locations, removed) do
+    record = Map.fetch!(changes, source.made_by)
+    made_by = target.made_by
+
+    :gb_sets.size(record.made) == 1 + Map.get(removed, source.made_by, 0) and
+      :gb_sets.size(record.replaced) <= 1 + Map.get(removed, made_by, 0) and
+      :gb_sets.size(record.pulls) <= 1 and
+      not :gb_sets.is_empty(record.replaced) and :gb_sets.is_empty(record.pulled_by) and
+      Enum.all?(:gb_sets.to_list(record.replaced), &(Map.get(locations, &1, &1) == target.id)) and
+      Enum.all?(:gb_sets.to_list(record.pulls), &(&1 == made_by))
+  end
+
+  @spec resolve_coverage_aliases(t(), [{Run.t(), Run.t()}]) :: t()
+  defp resolve_coverage_aliases(prov, []), do: prov
+
+  defp resolve_coverage_aliases(prov, aliases) do
+    targets = Map.new(aliases, fn {source, target} -> {source.id, target} end)
+
+    prov =
+      Enum.reduce(aliases, prov, fn {source, target}, acc ->
+        if source.made_by == target.made_by do
+          acc
+        else
+          acc = pull(acc, source.made_by, target.made_by)
+          splice(acc, source.made_by, Map.fetch!(acc.changes, source.made_by))
+        end
+      end)
+
+    Enum.reduce(aliases, prov, fn {source, target}, acc ->
+      target = Map.get(targets, target.id, target)
+      Enum.reduce(source.replaced_by, acc, &transfer_anchor_cover(&2, target, &1))
+    end)
+  end
+
+  # A previous replacement that covered the alias must still mark this position when it is consumed.
+  @spec transfer_anchor_cover(t(), Run.t(), Change.id()) :: t()
+  defp transfer_anchor_cover(prov, target, change) do
+    if change != target.made_by and Map.has_key?(prov.changes, change) do
+      {:ok, anchor, _offset} = RunTree.fetch(prov.tree, target.id)
+      covers = Enum.sort(Enum.uniq([change | anchor.replaced_by]), :desc)
+      tree = RunTree.update(prov.tree, %{anchor | replaced_by: covers})
+
+      %{prov | tree: tree}
+      |> update_change(change, fn record ->
+        %{
+          record
+          | replaced: :gb_sets.add(target.id, record.replaced),
+            pulls: :gb_sets.delete_any(target.made_by, record.pulls)
+        }
+      end)
+      |> update_change(target.made_by, fn record ->
+        %{record | pulled_by: :gb_sets.delete_any(change, record.pulled_by)}
+      end)
+    else
+      prov
+    end
+  end
+
   @spec rename_marks_in(RunTree.t(), Locator.t(), group_id(), group_id()) :: RunTree.t()
   defp rename_marks_in(tree, run_id, old, new) do
     case RunTree.fetch(tree, run_id) do
@@ -988,7 +1312,8 @@ defmodule Minga.Buffer.Provenance do
         prov
         | tree: tree,
           groups: Map.delete(prov.groups, old),
-          overlap_runs: Map.update(overlap_runs, new, marked, &(marked ++ &1))
+          overlap_runs: Map.update(overlap_runs, new, marked, &(marked ++ &1)),
+          detached_drafts: DraftLinks.absorb(prov.detached_drafts, old, new)
       }
       |> refresh_runs(marked)
       |> rename_group_marks(old, new)
@@ -1046,9 +1371,10 @@ defmodule Minga.Buffer.Provenance do
       {:ok, run, start} = RunTree.fetch(tree, run_id)
       stop = start + Run.live_bytes(run)
 
-      case acc do
-        [{region_start, ^start} | rest] -> [{region_start, stop} | rest]
-        _ -> [{start, stop} | acc]
+      case {run.bytes, acc} do
+        {0, _acc} -> acc
+        {_bytes, [{region_start, ^start} | rest]} -> [{region_start, stop} | rest]
+        {_bytes, _acc} -> [{start, stop} | acc]
       end
     end)
     |> Enum.reverse()
@@ -1256,7 +1582,8 @@ defmodule Minga.Buffer.Provenance do
   defp replace_run(prov, group_id, change, run, text, visible?) do
     case deleted(run, group_id, text) do
       nil ->
-        {drop_run(prov, run), [], List.wrap(run.made_by)}
+        prov = prov |> remember_draft_chain(run, prov.groups) |> drop_run(run)
+        {prov, [], List.wrap(run.made_by)}
 
       dead ->
         dead = how_deleted(dead, run, group_id, visible?)
@@ -1429,7 +1756,7 @@ defmodule Minga.Buffer.Provenance do
   defp cover_run(prov, group_id, run) do
     case deleted(run, group_id, run.text) do
       nil ->
-        drop_run(prov, run)
+        prov |> remember_draft_chain(run, prov.groups) |> drop_run(run)
 
       # A group that deleted the run before, directly or by a sweep, keeps that kind.
       ^run ->
@@ -2116,6 +2443,8 @@ defmodule Minga.Buffer.Provenance do
   defp first_offset([{offset, _removed, _inserted} | _rest]), do: offset
 
   @spec live?(Run.t(), %{group_id() => Group.t()}) :: boolean()
+  defp live?(%Run{bytes: 0}, _groups), do: false
+
   defp live?(run, groups) do
     inserted?(groups, run.group) and not Enum.any?(run.deletions, &Map.fetch!(groups, &1).applied)
   end
@@ -2132,6 +2461,8 @@ defmodule Minga.Buffer.Provenance do
 
   # The groups that touched a run before `id` deleted it: its inserting group and the earlier deleters.
   @spec earlier_groups(Run.t(), group_id()) :: [group_id()]
+  defp earlier_groups(%Run{bytes: 0}, _id), do: []
+
   defp earlier_groups(%Run{deletions: deletions} = run, id) do
     case Enum.split_while(deletions, &(&1 != id)) do
       {_later, [^id | earlier]} -> Enum.reject([run.group | earlier], &is_nil/1)
@@ -2156,13 +2487,17 @@ defmodule Minga.Buffer.Provenance do
 
   # ── Discarding ──────────────────────────────────────────────────────
 
-  @spec settle_run(t(), Locator.t(), %{group_id() => Group.t()}) :: t()
-  defp settle_run(prov, run_id, discarded) do
+  @spec settle_run(t(), Locator.t(), %{group_id() => Group.t()}, t()) :: t()
+  defp settle_run(prov, run_id, discarded, before) do
     {:ok, run, _offset} = RunTree.fetch(prov.tree, run_id)
 
     case settle(run, discarded) do
       nil ->
-        drop_run(prov, %{run | overlaps: settled_run(run, discarded).overlaps})
+        {:ok, original, _offset} = RunTree.fetch(before.tree, run_id)
+
+        prov
+        |> remember_draft_chain(original, before.groups)
+        |> drop_run(%{run | overlaps: settled_run(run, discarded).overlaps})
 
       %Run{group: nil} = settled when run.group != nil ->
         prov |> put_run(run, settled) |> coalesce(run_id)
@@ -2176,6 +2511,7 @@ defmodule Minga.Buffer.Provenance do
   # rebuilds the tree and the remaining groups' run sets from the result.
   @spec discard_in_one_pass(t(), [group_id()]) :: t()
   defp discard_in_one_pass(prov, ids) do
+    before_groups = prov.groups
     {discarded, groups} = Map.split(prov.groups, ids)
 
     {runs, dropped} =
@@ -2214,19 +2550,22 @@ defmodule Minga.Buffer.Provenance do
     dropped
     |> Enum.reverse()
     |> Enum.reduce(settle_group_marks(prov, discarded), fn run, acc ->
-      acc |> link_dropped(run) |> transfer_marks(run.overlaps)
+      acc
+      |> remember_draft_chain(run, before_groups)
+      |> link_dropped(run)
+      |> transfer_marks(settled_run(run, discarded).overlaps)
     end)
     |> settle_owners(discarded)
     |> settle_changes()
   end
 
-  # Settles one run into the runs kept so far, or lists it as dropped with its settled marks.
+  # Keep the original metadata of a dropped run until its draft relationship is recorded.
   @spec settle_in_pass(Run.t(), %{group_id() => Group.t()}, {[Run.t()], [Run.t()]}) ::
           {[Run.t()], [Run.t()]}
   defp settle_in_pass(run, discarded, {kept, dropped}) do
     case settle(run, discarded) do
       nil ->
-        {kept, [%{run | overlaps: settled_run(run, discarded).overlaps} | dropped]}
+        {kept, [run | dropped]}
 
       settled ->
         {merge_permanent(settled, kept), dropped}
@@ -2341,7 +2680,10 @@ defmodule Minga.Buffer.Provenance do
 
     rebuilt =
       Enum.reduce(dropped, rebuilt, fn run, acc ->
-        acc |> link_dropped(run) |> transfer_marks(run.overlaps)
+        acc
+        |> remember_draft_chain(run, prov.groups)
+        |> link_dropped(run)
+        |> transfer_marks(run.overlaps)
       end)
 
     steps
@@ -2820,6 +3162,7 @@ defmodule Minga.Buffer.Provenance do
   # text forget it (`nil`), a run the group already deleted stays as it is, and any other run becomes its tombstone.
   @spec deleted(Run.t(), group_id() | nil, binary()) :: Run.t() | nil
   defp deleted(_run, nil, _text), do: nil
+  defp deleted(%Run{bytes: 0, group: group_id} = run, group_id, _text), do: run
   defp deleted(%Run{group: group_id}, group_id, _text), do: nil
 
   defp deleted(run, group_id, text) do
@@ -2940,19 +3283,89 @@ defmodule Minga.Buffer.Provenance do
   # the task overwrote its own text. Drafts are indexed by their group, so compaction finds the oldest in O(log n).
   # Agent edits without a task are bounded by their own cap and are never drafts.
   @spec draft_key(Run.t(), %{group_id() => Group.t()}) :: {group_id(), Locator.t()} | nil
-  defp draft_key(%Run{live: false, group: owner} = run, groups) when owner != nil do
+  defp draft_key(run, groups) do
+    if compactible_partner(run, groups) != nil, do: {run.group, run.id}
+  end
+
+  @spec compactible_partner(Run.t(), %{group_id() => Group.t()}) :: group_id() | nil
+  defp compactible_partner(%Run{live: false, group: owner, bytes: bytes} = run, groups)
+       when owner != nil and bytes > 0 do
     case draft_partner(run, groups) do
       nil -> nil
-      new -> if merge_safe?(run, owner, new), do: {owner, run.id}
+      newer -> if merge_safe?(run, owner, newer), do: newer
     end
   end
 
-  defp draft_key(_run, _groups), do: nil
+  defp compactible_partner(_run, _groups), do: nil
+
+  # The original touch order determines the compactible chain.
+  # Even an unapplied intervener or a numbered overlap can bar a link.
+  @spec compactible_chain(Run.t(), %{group_id() => Group.t()}) :: [group_id()]
+  defp compactible_chain(%Run{live: false, group: owner, bytes: bytes} = run, groups)
+       when owner != nil and bytes > 0 do
+    case Map.get(groups, owner) do
+      %Group{applied: true, author: {:minga, task} = author} when task != :untasked ->
+        overlaps =
+          run.overlaps
+          |> Enum.flat_map(fn
+            {_owner, id} when is_integer(id) -> [id]
+            _permanent -> []
+          end)
+          |> Enum.sort()
+
+        case chain_steps(Enum.reverse(run.deletions), groups, author, overlaps, [owner]) do
+          [^owner] -> []
+          chain -> chain
+        end
+
+      _other ->
+        []
+    end
+  end
+
+  defp compactible_chain(_run, _groups), do: []
+
+  @spec chain_steps([group_id()], %{group_id() => Group.t()}, author(), [group_id()], [group_id()]) ::
+          [group_id()]
+  defp chain_steps([], _groups, _author, _overlaps, chain), do: chain
+
+  defp chain_steps([id | rest], groups, author, overlaps, [last | _] = chain) when id <= last,
+    do: chain_steps(rest, groups, author, overlaps, chain)
+
+  defp chain_steps([id | rest], groups, author, overlaps, [last | _] = chain) do
+    overlaps = Enum.drop_while(overlaps, &(&1 <= last))
+
+    case overlaps do
+      [barrier | _] when barrier < id ->
+        chain
+
+      _no_barrier ->
+        if newer_step?(Map.get(groups, id), author),
+          do: chain_steps(rest, groups, author, overlaps, [id | chain]),
+          else: chain
+    end
+  end
+
+  @spec remember_draft_chain(t(), Run.t(), %{group_id() => Group.t()}) :: t()
+  defp remember_draft_chain(prov, run, groups) do
+    case compactible_chain(run, groups) do
+      [] ->
+        prov
+
+      [first | rest] ->
+        links = Enum.reduce(rest, prov.detached_drafts, &DraftLinks.link(&2, first, &1))
+        %{prov | detached_drafts: links}
+    end
+  end
+
+  @spec unpair_drafts(t(), group_id()) :: t()
+  defp unpair_drafts(prov, id),
+    do: %{prov | detached_drafts: DraftLinks.forget(prov.detached_drafts, id)}
 
   # The step a draft would merge into: the oldest newer applied step of the same task that deleted it, or `nil`.
   @spec draft_partner(Run.t(), %{group_id() => Group.t()}) :: group_id() | nil
   defp draft_partner(%Run{live: false, group: owner} = run, groups) when owner != nil do
-    case Map.fetch!(groups, owner) do
+    case Map.get(groups, owner) do
       %Group{applied: true, author: {:minga, task} = author} when task != :untasked ->
         run.deletions
         # A group being discarded is already gone from the map; it is no partner.

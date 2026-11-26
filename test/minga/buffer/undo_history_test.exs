@@ -364,6 +364,247 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert UndoHistory.next_reject(history) == nil
     end
 
+    test "a press holds incompatible reverts without holding an unrelated step or letting a retry through" do
+      unrelated = {:minga, "task-1", "unrelated"}
+      task = {:minga, "task-1"}
+
+      for order <- [:first, :last] do
+        world = world("AxR!", recording: :coarse, shadow: false)
+        world = if order == :first, do: edit(world, unrelated, 3, 1, "?"), else: world
+
+        world =
+          world
+          |> edit(@step_one, 0, 1, "wa")
+          |> edit(@step_two, 1, 0, "p")
+          |> edit(@step_two, 4, 1, "cq")
+          |> edit(:user, 2, 2, "", at: @t0 + @window)
+          |> edit(:user, 1, 2, "", at: @t0 + 2 * @window)
+
+        world = if order == :last, do: edit(world, unrelated, 2, 1, "?"), else: world
+        assert text(world) == "wq?"
+
+        assert {:blocked, {:overlaps, :you}} =
+                 UndoHistory.reject_task(world.history, task, world.version, world.doc)
+
+        assert {:ok, restore, history, %{held: held}} =
+                 UndoHistory.undo_agent_session(world.history, world.version, world.doc)
+
+        assert held != nil
+        world = install(world, restore, history)
+        assert text(world) == "wq!"
+
+        assert {:blocked, {:overlaps, :you}, ^task, _hold} =
+                 UndoHistory.undo_agent_session(world.history, world.version, world.doc)
+      end
+    end
+
+    test "an unrelated revert cannot retire the user deletion protecting a held step" do
+      world =
+        world("QxR!", recording: :coarse, shadow: false)
+        |> edit(@step_one, 1, 0, "L")
+        |> edit(@step_two, 0, 1, "q")
+        |> edit(@step_two, 2, 1, "")
+        |> edit(@other_task, 0, 1, "r")
+        |> edit(@other_task, 1, 1, "cd")
+        |> edit(@other_task, 3, 0, "e")
+        |> edit(:user, 2, 2, "", at: @t0 + @window)
+        |> edit({:minga, "task-1", "suffix"}, 3, 1, "?")
+
+      assert text(world) == "rcR?"
+      world = reject_newest_task(world)
+      assert text(world) == "rcR!"
+      assert text(undo!(world)) == "rcdeR!"
+    end
+
+    test "another task can unblock your undo but cannot take either step from a held conflict" do
+      task = {:minga, "task-1"}
+
+      for {original, at, inserted} <- [{"!|L", 0, "AxR"}, {"AR!|L", 1, "x"}] do
+        world =
+          world(original, recording: :coarse, shadow: false)
+          |> edit(@other_task, at, 0, inserted)
+          |> edit(@step_one, 0, 1, "wa")
+          |> edit(@step_two, 1, 0, "p")
+          |> edit(@step_two, 4, 1, "cq")
+          |> edit(:user, 2, 2, "", at: @t0 + @window)
+          |> edit(:user, 1, 2, "", at: @t0 + 2 * @window)
+          |> edit(:user, 4, 1, "u", at: @t0 + 3 * @window)
+          |> edit({:minga, "task-2", "suffix"}, 4, 1, "v")
+          |> edit({:minga, "task-1", "suffix"}, 2, 1, "?")
+
+        world = reject_newest_task(world)
+        assert text(world) == "wq!|v"
+        world = reject_newest_task(world)
+        assert text(world) == "wq!|u"
+
+        assert {:blocked, {:overlaps, :you}, ^task, _hold} =
+                 UndoHistory.undo_agent_session(world.history, world.version, world.doc)
+
+        assert text(undo!(world)) == "wq!|L"
+      end
+    end
+
+    test "a shared sweep can revert without taking either step of a held conflict" do
+      world =
+        shared_sweep_world()
+        |> edit({:minga, "task-3", "sweep"}, 0, 2, "z")
+        |> edit({:minga, "task-1", "suffix"}, 1, 1, "?")
+
+      assert text(world) == "z?|L"
+      world = reject_newest_task(world)
+      assert text(world) == "z!|L"
+      world = reject_newest_task(world)
+      assert text(world) == "wq!|L"
+      assert text(undo!(world)) == "wpcq!|L"
+    end
+
+    test "jointly held sweeps do not repeat a dense dependency walk for each sweep" do
+      [small, large] =
+        for sweep_count <- [32, 128] do
+          world =
+            Enum.reduce(1..sweep_count, shared_sweep_world(), fn n, world ->
+              replacement = if rem(n, 2) == 1, do: "yz", else: "mn"
+              edit(world, {:minga, "task-3", "sweep-#{n}"}, 0, 2, replacement)
+            end)
+
+          world =
+            world
+            |> edit({:minga, "task-1", "marker"}, 2, 1, "DE")
+            |> edit(:user, 0, 3, "", at: @t0 + 3 * @window)
+
+          assert text(world) == "E|L"
+
+          {reductions, result} =
+            work(fn ->
+              UndoHistory.undo_agent_session(world.history, world.version, world.doc)
+            end)
+
+          assert {:blocked, {:overlaps, :you}, {:minga, "task-1"}, _hold} = result
+          reductions
+        end
+
+      # Four times as many sweeps create sixteen times as many direct edges, not sixty-four.
+      assert large < 22 * small
+    end
+
+    test "draft text internal to another task's required steps does not pull a third task" do
+      other_step = {:minga, "task-2", "call-10"}
+      unrelated = {:minga, "task-3", "call-11"}
+
+      world =
+        world("XYLR!", recording: :coarse, shadow: false)
+        |> edit(@step_one, 0, 2, "xy")
+        |> edit(@other_task, 0, 1, "m")
+        |> edit(@other_task, 3, 0, "a")
+        |> edit(other_step, 1, 1, "n")
+        |> edit(other_step, 3, 1, "")
+        |> edit(unrelated, 2, 2, "uv")
+        |> edit(:user, 2, 1, "U", at: @t0 + @window)
+        |> edit(@step_two, 4, 1, "?")
+
+      assert text(world) == "mnUv?"
+      assert text(reject_newest_task(world)) == "XYUv!"
+    end
+
+    test "a later independently required rewrite can make an earlier cover unnecessary" do
+      third_task = {:minga, "task-3", "call-10"}
+
+      world =
+        world("XLRK!", recording: :coarse, shadow: false)
+        |> edit(@step_one, 0, 1, "r")
+        |> edit(@step_one, 2, 0, "a")
+        |> edit(:user, 0, 1, "p", at: @t0 + @window)
+        |> edit(:user, 2, 1, "b", at: @t0 + 2 * @window)
+        |> edit(@other_task, 2, 1, "c")
+        |> edit(@other_task, 4, 1, "uv")
+        |> edit(third_task, 0, 1, "s")
+        |> edit(third_task, 2, 1, "d")
+        |> edit(:user, 4, 1, "U", at: @t0 + 3 * @window)
+        |> edit(@step_two, 6, 1, "?")
+
+      assert text(world) == "sLdRUv?"
+      assert text(reject_newest_task(world)) == "pLcRUv!"
+    end
+
+    test "settling an upstream cover conflict does not reject a now-irrelevant downstream edit" do
+      world =
+        world("LR", recording: :coarse, shadow: false)
+        |> edit(@step_one, 1, 0, "x")
+        |> edit(@other_task, 1, 1, "")
+        |> edit(@other_task, 2, 0, "y")
+        |> edit({:minga, "task-3", "sweep"}, 0, 2, "")
+        |> edit({:minga, "task-4", "replacement"}, 0, 1, "d")
+        |> edit(@step_two, 0, 1, "e")
+
+      assert text(world) == "e"
+      world = reject_newest_task(world)
+      assert text(world) == "LRd"
+      assert step(world, :undo) == :empty
+    end
+
+    test "an impossible optional cover does not hold a different exact revert" do
+      for {rewrite?, final_user_text} <- [{false, "U"}, {true, "Z"}] do
+        world =
+          world("LRK!", recording: :coarse, shadow: false)
+          |> edit(@step_one, 1, 0, "a")
+          |> edit(@other_task, 1, 1, "")
+          |> edit(@other_task, 2, 1, "uv")
+          |> edit({:minga, "task-3", "sweep"}, 0, 2, "mn")
+          |> edit(:user, 2, 1, "U", at: @t0 + @window)
+
+        world =
+          if rewrite?,
+            do: edit(world, {:minga, "task-4", "rewrite"}, 2, 1, "Z"),
+            else: world
+
+        world = edit(world, @step_two, 4, 1, "?")
+        assert text(world) == "mn#{final_user_text}v?"
+        world = reject_newest_task(world)
+        assert text(world) == "LR#{final_user_text}v!"
+        if not rewrite?, do: assert(text(undo!(world)) == "LRuv!")
+      end
+    end
+
+    test "merging another task's draft does not consume a subsequent user undo" do
+      other_step = {:minga, "task-2", "call-10"}
+
+      plain =
+        world("XKLR!", recording: :coarse, shadow: false)
+        |> edit(@step_one, 0, 1, "r")
+        |> edit(@other_task, 1, 1, "ab")
+        |> edit(@other_task, 4, 0, "d")
+        |> edit(other_step, 0, 1, "vw")
+        |> edit(other_step, 5, 1, "")
+
+      over_budget = %{plain.history | run_budget: 3, compaction_wanted: true}
+      assert {_, compacted, %{merged: [_]}} = UndoHistory.compact_slice(over_budget, 1)
+      compacted = %{plain | history: %{compacted | run_budget: plain.history.run_budget}}
+
+      for world <- [compacted, plain], middle <- ["LR", ""] do
+        world =
+          if middle == "" do
+            history = UndoHistory.record_untracked(world.history, [{4, "LR", ""}])
+            assert {:ok, doc} = Document.splice_byte_range(world.doc, 4, 2, "", {0, 0})
+            %{world | history: history, doc: doc, version: world.version + 1}
+          else
+            world
+          end
+
+        world =
+          world
+          |> edit(:user, 0, 1, "", at: @t0 + @window)
+          |> edit(:user, 1, 1, "U", at: @t0 + 2 * @window)
+          |> edit(@step_two, 3 + byte_size(middle), 1, "?")
+          |> reject_newest_task()
+
+        assert text(world) == "wUb#{middle}!"
+        after_first_undo = undo!(world)
+        assert text(after_first_undo) == "wab#{middle}!"
+        assert {:ok, after_second_undo, _restore} = step(after_first_undo, :undo)
+        assert text(after_second_undo) == "vwab#{middle}!"
+      end
+    end
+
     # Work, not time: the reductions this process spends recording 8000 steps against 800 of them, in the same run.
     # Linear work is ten times as much, measured about 16 with the tree's log factor; the bound of 30 catches anything
     # quadratic (a hundred times).
@@ -804,8 +1045,25 @@ defmodule Minga.Buffer.UndoHistoryTest do
       IO.puts("\n[compaction] history slices run: #{Process.get(:slices, 0)}")
     end
 
-    # Two histories where merges once straddled edits of yours: `u` waited for a merged class while the press waited
-    # for your undo. Merges now wait until your edits after the class's oldest step are final, so both finish.
+    test "an independently reversible rewrite unblocks undo of a user deletion" do
+      commands = [
+        {:minga, 588, 2, "aba", 0},
+        {:user, 279, 3, "\na\n", 2},
+        {:minga, 504, 2, "cca", 0},
+        {:minga, 203, 1, "\nb", 1},
+        {:minga, 782, 2, "\nab", 0},
+        {:user, 880, 3, "", 2},
+        {:minga, 729, 3, "\ncc", 0}
+      ]
+
+      initial = "abc\ndef\n"
+      world = Enum.reduce(commands, world(initial), &run/2)
+      assert {:done, restored} = unwind(world)
+      assert text(restored) == initial
+    end
+
+    # These histories once deadlocked when a merge straddled a user edit.
+    # Wait until the user entries after the class's oldest step are final before merging.
     test "merged steps never deadlock a press against your undo" do
       slices_case(
         [
@@ -945,20 +1203,54 @@ defmodule Minga.Buffer.UndoHistoryTest do
       IO.puts("\n[twins, emoji] merge differences: #{Process.get(:merge_differences, 0)}")
     end
 
-    # Merge consequence 1, by hand. Task 0 writes "aa" (step 1); task 1 replaces it with "a😀ao" (step 2), then "ao"
-    # with "aa" (step 3), sweeping step 1's deleted text; task 0 replaces "😀aa" (step 4). The press on task 0 reverts
-    # steps 4 and 1, and step 3, which swept step 1's text. Without compaction that leaves step 2's "a". With a budget
-    # of 3, step 2 was absorbed into step 3, so the press takes it too and leaves "".
-    test "a press that reverts a merged step takes its whole class" do
-      emoji_twins([
-        {:minga, 0, 0, ["a", "a"], 0},
-        {:minga, 0, 2, ["a", "😀", "a", "o"], 3},
-        {:minga, 7, 3, ["a", "a"], 1},
-        {:minga, 16, 3, ["é", "f", "o", "😀", "r", "b", "r"], 0},
-        :press
-      ])
+    test "compacting a superseded step does not change the user undo sequence after a press" do
+      edits = [
+        {:minga, 0, 0, ["aa"], 1},
+        {:minga, 1, 1, ["r", "r"], 0},
+        {:minga, 0, 1, ["😀", "a", "a", "r"], 1},
+        {:user, 0, 1, [], 0},
+        {:user, 0, 4, ["\n"], 0}
+      ]
 
-      assert Process.get(:merge_differences) == 1
+      [plain, compacted] =
+        for budget <- [1_000_000, 3] do
+          Enum.reduce(edits, world("", run_budget: budget, shadow: false), fn edit, world ->
+            edit |> grapheme_op(world) |> compact_fully(5)
+          end)
+        end
+
+      {_outcome, plain} = twin_apply(:press, plain)
+      {_outcome, compacted} = twin_apply(:press, compacted)
+      assert text(plain) == "\nr"
+      assert text(compacted) == text(plain)
+
+      assert {:ok, plain, _restore} = step(plain, :undo)
+      assert {:ok, compacted, _restore} = step(compacted, :undo)
+      assert text(compacted) == text(plain)
+
+      case step(plain, :undo) do
+        {:ok, plain, _restore} ->
+          assert {:ok, compacted, _restore} = step(compacted, :undo)
+          assert text(compacted) == text(plain)
+
+        :empty ->
+          assert step(compacted, :undo) == :empty
+      end
+    end
+
+    # Task 1's steps 2 and 3 merge. Task 0's reject must take the whole merged step, not leave step 2's text behind.
+    test "a press that reverts a merged step takes its whole class" do
+      {_plain, compacted} =
+        emoji_twins([
+          {:minga, 0, 0, ["a", "a"], 0},
+          {:minga, 0, 2, ["a", "😀", "a", "o"], 3},
+          {:minga, 7, 3, ["a", "a"], 1},
+          {:minga, 16, 3, ["é", "f", "o", "😀", "r", "b", "r"], 0},
+          :press
+        ])
+
+      assert text(compacted) == ""
+      assert UndoHistory.next_reject(compacted.history) == nil
     end
 
     # Merge consequence 2, from round 5 case (b). Task 1's steps 2 and 4 are in one class, and your edit holds step 2.
@@ -2036,6 +2328,16 @@ defmodule Minga.Buffer.UndoHistoryTest do
     value = fun.()
     {:reductions, after_fun} = Process.info(self(), :reductions)
     {after_fun - before, value}
+  end
+
+  defp shared_sweep_world do
+    world("!|L", recording: :coarse, shadow: false)
+    |> edit(@other_task, 0, 0, "AxR")
+    |> edit(@step_one, 0, 1, "wa")
+    |> edit(@step_two, 1, 0, "p")
+    |> edit(@step_two, 4, 1, "cq")
+    |> edit(:user, 2, 2, "", at: @t0 + @window)
+    |> edit(:user, 1, 2, "", at: @t0 + 2 * @window)
   end
 
   # One task renames "bar" once, then rewrites "foo" T times; you retype one letter inside the newest rewrite, which
