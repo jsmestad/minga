@@ -76,6 +76,8 @@ func (m *Model) focusedComponent() (string, bool) {
 		return "hover_popup", true
 	case 13:
 		return "empty_state", true
+	case 15:
+		return "agent_queue", true
 	default:
 		return "", false
 	}

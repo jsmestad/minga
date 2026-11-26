@@ -169,6 +169,8 @@ func opcodeName(opcode byte) string {
 		return "cursor animation"
 	case generated.OPGuiFocusOwner:
 		return "focus owner"
+	case generated.OPGuiAgentQueue:
+		return "agent queue"
 	case generated.OPGuiConfigState:
 		return "config state"
 	case generated.OPGuiSplitSeparators:

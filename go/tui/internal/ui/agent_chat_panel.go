@@ -137,7 +137,7 @@ func (m Model) renderAgentChatPanelWithLimit(chat protocol.AgentChat, width int,
 	if chat.Lifecycle == protocol.AgentChatConversation && agentDetailsVisible(width) && limit > 5 {
 		bodyBudget := limit - 1
 		detailWidth := agentDetailsWidth(width)
-		leftWidth := max(width-detailWidth-agentColumnGap(), 40)
+		leftWidth := agentMainWidth(chat, width, limit)
 		left := m.renderAgentMainColumn(chat, leftWidth, bodyBudget, empty)
 		right := m.renderAgentDetailsRail(chat, detailWidth, bodyBudget)
 		lines = append(lines, m.joinAgentColumns(left, right, leftWidth, detailWidth, bodyBudget)...)
@@ -164,8 +164,15 @@ func agentColumnGap() int {
 	return 3
 }
 
+func agentMainWidth(chat protocol.AgentChat, panelWidth, limit int) int {
+	if chat.Lifecycle == protocol.AgentChatConversation && agentDetailsVisible(panelWidth) && limit > 5 {
+		return max(panelWidth-agentDetailsWidth(panelWidth)-agentColumnGap(), 40)
+	}
+	return panelWidth
+}
+
 func (m Model) renderAgentMainColumn(chat protocol.AgentChat, width int, budget int, empty bool) []string {
-	composer := m.renderAgentComposerWithLimit(chat, width, budget)
+	composer := m.renderAgentComposerWithLimit(chat, width, m.agentComposerBudget(chat, budget))
 	if chat.Lifecycle != protocol.AgentChatConversation {
 		lines := m.renderAgentLifecycleNotice(chat, width, budget-len(composer))
 		lines = append(lines, m.renderAgentResidentTranscript(budget-len(composer)-len(lines), width)...)
@@ -175,7 +182,7 @@ func (m Model) renderAgentMainColumn(chat protocol.AgentChat, width int, budget 
 		return append(lines, composer...)
 	}
 	lines := make([]string, 0, budget)
-	_, statusHeight, contentBudget, messageBudget := agentMainColumnBudgets(chat, len(composer), budget)
+	_, statusHeight, contentBudget, messageBudget := agentMainColumnBudgets(chat, len(composer), budget-m.queueViewport.box.Height)
 	messageCount := m.transcript.len()
 	sparse := messageCount <= 1 && chat.Pending == "" && strings.TrimSpace(chat.Prompt) == ""
 	if chat.Pending != "" && len(lines) < contentBudget {
@@ -201,6 +208,7 @@ func (m Model) renderAgentMainColumn(chat protocol.AgentChat, width int, budget 
 	if statusHeight > 0 {
 		lines = append(lines, m.renderAgentTranscriptStatus(chat, width))
 	}
+	lines = m.appendAgentQueue(lines)
 	lines = append(lines, composer...)
 	return takeLines(lines, budget)
 }
@@ -282,20 +290,15 @@ func (m Model) agentTranscriptPageSize() int {
 		return 1
 	}
 	limit := m.bodyHeight()
-	panelWidth := max(m.layout.body.Width-2, 1)
-	mainWidth := panelWidth
-	if chat.Lifecycle == protocol.AgentChatConversation && agentDetailsVisible(panelWidth) && limit > 5 {
-		detailWidth := agentDetailsWidth(panelWidth)
-		mainWidth = max(panelWidth-detailWidth-agentColumnGap(), 40)
-	}
+	mainWidth := agentMainWidth(chat, max(m.layout.body.Width-2, 1), limit)
 	mainBudget := max(limit-agentPanelHeaderRows(limit), 0)
-	composerRows := agentComposerAllocation(chat, mainWidth, mainBudget).height
+	composerRows := agentComposerAllocation(chat, mainWidth, m.agentComposerBudget(chat, mainBudget)).height
 	if chat.Lifecycle != protocol.AgentChatConversation {
 		transcriptBudget := mainBudget - composerRows
 		notice := m.renderAgentLifecycleNotice(chat, mainWidth, transcriptBudget)
 		return max(transcriptBudget-len(notice), 1)
 	}
-	_, _, _, messageBudget := agentMainColumnBudgets(chat, composerRows, mainBudget)
+	_, _, _, messageBudget := agentMainColumnBudgets(chat, composerRows, mainBudget-m.queueViewport.box.Height)
 	return max(messageBudget, 1)
 }
 

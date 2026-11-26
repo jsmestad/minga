@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"image/color"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -332,8 +333,28 @@ func (m Model) renderStatusSegments(status protocol.StatusBar) string {
 	}
 	inset := modelineInset.cols()
 	budget := max(m.width-2*inset-lipgloss.Width(pending), 0)
-	fitted := fitModeline(append(append([]protocol.StatusSegment{}, status.Left...), status.Right...), len(status.Left), budget-reserved, m.modelineSegmentWidth)
-	left := m.renderModelineCluster(fitted.left)
+	segments := make([]protocol.StatusSegment, 0, len(status.Left)+len(status.Right))
+	segments = append(append(segments, status.Left...), status.Right...)
+	nameIndex := -1
+	var namePrefix string
+	if owner, _ := m.focusedComponent(); owner == "agent_queue" && status.Agent != nil && status.Filename != "" {
+		for i, segment := range segments {
+			if segment.Name == "filename" {
+				nameIndex = i
+				segments[i].Text, segments[i].Drop = status.Filename, 0
+				break
+			}
+		}
+		if nameIndex < 0 {
+			namePrefix = m.renderModelineSegment(protocol.StatusSegment{Text: status.Filename}, false) + surface.Render(gap(modelineSegmentGap))
+			budget = max(budget-lipgloss.Width(namePrefix), 0)
+		}
+	}
+	fitted := fitModeline(segments, len(status.Left), budget-reserved, m.modelineSegmentWidth)
+	if nameIndex >= 0 {
+		m.keepQueueFilenameVisible(&fitted, nameIndex, inset)
+	}
+	left := namePrefix + m.renderModelineCluster(fitted.left)
 	right := pending + m.renderModelineCluster(fitted.right)
 	available := max(m.width-2*inset-lipgloss.Width(left)-lipgloss.Width(right), 0)
 	if lipgloss.Width(message) > max(available-2*modelineSegmentGap.cols(), 0) {
@@ -345,6 +366,30 @@ func (m Model) renderStatusSegments(status protocol.StatusBar) string {
 	edge := surface.Render(gap(modelineInset))
 	// Only segments that never drop are left when the row is still too wide; the terminal edge cuts them.
 	return fitStyled(edge+left+surface.Render(leftSpacer)+message+surface.Render(rightSpacer)+right+edge, m.width)
+}
+
+func (m Model) keepQueueFilenameVisible(fitted *fittedModeline, index, inset int) {
+	// Keep the configured order unless earlier non-droppable segments would
+	// push the queue's name past the terminal edge.
+	width := inset
+	for i, kept := range fitted.left {
+		width += m.modelineSegmentWidth(kept.segment, kept.compact)
+		if kept.index == index {
+			if width > m.width {
+				copy(fitted.left[1:i+1], fitted.left[:i])
+				fitted.left[0] = kept
+			}
+			return
+		}
+		width += modelineSegmentGap.cols()
+	}
+	for i, kept := range fitted.right {
+		if kept.index == index {
+			fitted.right = slices.Delete(fitted.right, i, i+1)
+			fitted.left = slices.Insert(fitted.left, 0, kept)
+			return
+		}
+	}
 }
 
 // fittedSegment is one segment the modeline keeps: its index in the BEAM's order and whether it shows its compact form (the state mark and compact text).

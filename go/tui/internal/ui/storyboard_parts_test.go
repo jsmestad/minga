@@ -93,7 +93,7 @@ func (g cellGrid) box() ([4]int, bool) {
 	return [4]int{}, false
 }
 
-// storyboardParts locates the which-key panel and the modeline in a drawn frame.
+// storyboardParts locates tagged chrome and queue parts in a drawn frame.
 func storyboardParts(model Model, grid cellGrid) []storyboardPart {
 	var parts []storyboardPart
 	if which, ok := model.whichKey(); ok && which.Visible && len(which.Entries) > 0 {
@@ -101,6 +101,69 @@ func storyboardParts(model Model, grid cellGrid) []storyboardPart {
 	}
 	if status, ok := model.statusBar(); ok {
 		parts = append(parts, modelineParts(status, grid)...)
+	}
+	parts = append(parts, storyboardAgentQueueParts(model, grid)...)
+	return parts
+}
+
+func storyboardAgentQueueParts(model Model, grid cellGrid) []storyboardPart {
+	v := model.queueViewport
+	if v.box.Height == 0 {
+		return nil
+	}
+	queue := model.agentQueue()
+	var parts []storyboardPart
+	add := func(name, text string, y, from, to int, required bool) int {
+		if text == "" || y >= len(grid) {
+			return from
+		}
+		x, width, truncated := findLabel(grid, y, from, to, sanitizeTerminalText(text), nil)
+		if x < 0 {
+			if required {
+				parts = append(parts, storyboardPart{Part: name, Text: text, Missing: true})
+			}
+			return from
+		}
+		if truncated {
+			width++ // the ellipsis is part of the displayed span
+		}
+		parts = append(parts, storyboardPart{Part: name, Frame: [4]int{x, y, width, 1}, Text: text, Truncated: truncated, Ellipsis: truncated})
+		return x + width
+	}
+	right := v.box.X + v.box.Width
+	end := add("queue.title", queue.Title, v.box.Y, v.box.X, right, true)
+	add("queue.summary", queue.Summary, v.box.Y, end, right, true)
+	for i, hint := range queue.Hints {
+		if zone := model.zones.Get(agentQueueHintZone(i)); zone != nil {
+			end := add("queue.hintKey", hint.Key, zone.StartY, zone.StartX, zone.EndX+1, true)
+			add("queue.hintLabel", hint.Label, zone.StartY, end, zone.EndX+1, true)
+		}
+	}
+	for offset := range v.bodyRows() {
+		index, y := model.queueScroll.first+offset, v.box.Y+len(v.header)+offset
+		var row generated.AgentQueueRow
+		switch {
+		case len(v.empty) != 0:
+			if i := index - v.emptyActions; i >= 0 {
+				action := queue.Empty.Actions[i]
+				end := add("empty.actionKey", action.Key, y, v.box.X, right, false)
+				add("empty.actionLabel", action.Label, y, end, right, false)
+			} else {
+				end := add("empty.glyph", queue.Empty.Glyph, y, v.box.X, right, false)
+				add("empty.title", queue.Empty.Title, y, end, right, false)
+				add("empty.why", queue.Empty.Why, y, v.box.X, right, false)
+			}
+			continue
+		case index < len(queue.Pending):
+			row = queue.Pending[index]
+		case index < len(queue.Pending)+len(v.note):
+			add("queue.removedNote", v.note[index-len(queue.Pending)], y, v.box.X, right, false)
+			continue
+		default:
+			row = queue.Removed[index-len(queue.Pending)-len(v.note)]
+		}
+		end := add("queue.rowLabel", row.Label, y, v.box.X, right, false)
+		add("queue.rowPreview", row.Preview, y, end, right, false)
 	}
 	return parts
 }

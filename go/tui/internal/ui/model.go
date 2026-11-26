@@ -166,6 +166,9 @@ type Model struct {
 	// transcriptRenderer owns the bounded, disposable styled-row cache for the
 	// resident transcript. It never owns semantic messages or scroll state.
 	transcriptRenderer *agentTranscriptRenderer
+
+	queueScroll   agentQueueScroll
+	queueViewport agentQueueViewport
 }
 
 // terminalRejection deduplicates an identical deterministic terminal status.
@@ -400,10 +403,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout = m.computeLayout()
 		m.reportGridResize()
 	case tea.KeyPressMsg:
+		component, _ := m.focusedComponent()
+		if component == "agent_queue" {
+			if packet, ok := keyPacket(msg, m.latency.Stamp()); ok {
+				m.send(packet)
+			}
+			break
+		}
 		if m.toggleHUD(msg) {
 			break
 		}
-		component, _ := m.focusedComponent()
 		if m.presentAgentHelpKey(msg, component) {
 			// Presentation scrolling does not change input ownership; the canonical encoder still forwards supported keys to the BEAM's Help handler.
 			seq := m.latency.Stamp()
@@ -519,6 +528,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				break
 			}
+			if m.scrollAgentQueue(mouse, delta) {
+				break
+			}
 			if updated, ok := m.localMouse(msg); ok {
 				m = updated
 				break
@@ -599,6 +611,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = tea.Batch(cmd, feedbackTick(delay))
 	}
 
+	m.refreshAgentQueueViewport()
 	m.reportAgentPromptFit()
 	m.reportPickerFit()
 	m.viewport.SetWidth(max(m.width, 1))
@@ -784,6 +797,10 @@ func (m Model) View() tea.View {
 		// to publish a new View. This trailing SGR paints no cells and makes
 		// target-only changes (such as a new panel ID) publishable.
 		out += fmt.Sprintf("\x1b[0:%dm", m.gitHitRevision)
+	}
+	if m.protocolError == "" && m.queueViewport.box.Height > 0 {
+		// An identity-only change still needs to publish a new OnMouse snapshot.
+		out += fmt.Sprintf("\x1b[0:%dm", m.queueScroll.hitRevision)
 	}
 	view := tea.NewView(out)
 	view.AltScreen = true
@@ -1507,6 +1524,9 @@ func (m *Model) applyMutation(command protocol.Command) {
 				m.agentHelpScroll = 0
 			}
 		}
+		if command.Chrome.Opcode == generated.OPGuiAgentQueue {
+			m.reconcileAgentQueue(command.Chrome.AgentQueue)
+		}
 		if command.Chrome.Opcode == generated.OPGuiBottomPanel {
 			command.Chrome.Bottom = m.mergedBottomPanel(command.Chrome.Bottom)
 		}
@@ -1515,6 +1535,7 @@ func (m *Model) applyMutation(command protocol.Command) {
 		case generated.OPGuiTheme:
 			m.activePalette = paletteFromTheme(command.Chrome.Theme)
 			m.themeApplied = true
+			m.queueScroll.dirty = true
 		case generated.OPGuiCursorline:
 			m.cursorlineChrome = command.Chrome.CursorlineChrome
 		case generated.OPGuiGutter:

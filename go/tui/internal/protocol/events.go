@@ -377,6 +377,45 @@ func EncodeGUIAgentComposerQueue(generation, offer uint64, followUp bool, target
 	return binary.BigEndian.AppendUint64(packet, target.Sequence)
 }
 
+// AgentQueueRowRef is the identity and revision of one displayed queue row.
+// Its zero value denotes an absent row.
+type AgentQueueRowRef struct {
+	ID, Revision uint64
+}
+
+// EncodeGUIAgentQueueAction uses only the scope and row offers from the view
+// the user clicked. An action without its required offers cannot be sent.
+func EncodeGUIAgentQueueAction(action generated.AgentQueueAction, workspaceID uint32, recordID string, row, removed AgentQueueRowRef) []byte {
+	valid := func(ref AgentQueueRowRef) bool { return ref.ID != 0 && ref.Revision != 0 }
+	switch action {
+	case generated.AgentQueueActionSelect, generated.AgentQueueActionRemove, generated.AgentQueueActionEdit:
+		if !valid(row) || removed != (AgentQueueRowRef{}) {
+			return nil
+		}
+	case generated.AgentQueueActionPasteAfter, generated.AgentQueueActionPasteBefore:
+		if !valid(row) || !valid(removed) {
+			return nil
+		}
+	case generated.AgentQueueActionClose, generated.AgentQueueActionComposer:
+		if row != (AgentQueueRowRef{}) || removed != (AgentQueueRowRef{}) {
+			return nil
+		}
+	default:
+		return nil
+	}
+	if len(recordID) == 0 || len(recordID) > 65535 {
+		return nil
+	}
+	packet := make([]byte, 3, 41+len(recordID))
+	packet[0], packet[1], packet[2] = generated.OPGuiAction, generated.GUIActionAgentQueueAction, byte(action)
+	packet = binary.BigEndian.AppendUint32(packet, workspaceID)
+	packet = appendString16(packet, recordID)
+	packet = binary.BigEndian.AppendUint64(packet, row.ID)
+	packet = binary.BigEndian.AppendUint64(packet, row.Revision)
+	packet = binary.BigEndian.AppendUint64(packet, removed.ID)
+	return binary.BigEndian.AppendUint64(packet, removed.Revision)
+}
+
 // EncodeGUIAgentOpenQuestion opens the exact question shown in the committed chat.
 func EncodeGUIAgentOpenQuestion(offer uint64) []byte {
 	packet := [10]byte{generated.OPGuiAction, generated.GUIActionAgentOpenQuestion}
