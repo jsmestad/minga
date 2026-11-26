@@ -1,0 +1,162 @@
+# minga storyboard frame v1
+# scenario: files.switcher.no_match
+# frontend: tui
+# theme: catppuccin_latte
+# size: 80x24
+# cursor: 1,6
+## text
+ ▌  storyboard.ex
+▾  1  defmodule Storyboard do
+   1    @moduledoc "A small file every storyboard scenario starts in."
+   2
+▾  3    def greet(name) do
+   4    │ "Hello, " <> name
+   5╭──────────────────────────────────────────────────────────────────────╮
+   6│  Switch buffer chrome_stat_test                                      │
+   7│ ──────────────────────────────────────────────────────────────────── │
+    │                                                                      │
+    │    Nothing matches “chrome_stat_test”.                               │
+    │    Searched 1 open buffer.                                           │
+    │                                                                      │
+    │  ▌ Create chrome_stat_test  new file                                 │
+    │    Search the project for chrome_stat_test  SPC s p                  │
+    │                                        ⌃J ⌃K move  ↩ run  esc close  │
+    ╰──────────────────────────────────────────────────────────────────────╯
+
+      ~
+      ~
+      ~
+      ~
+      ~
+  NORMAL  storyboard.ex                                              Elixir 1:1
+## styles (row start-end fg bg attrs)
+0 0-0 #4c4f69 #eff1f5 -
+0 1-1 #1e66f5 #eff1f5 bold
+0 2-79 #4c4f69 #eff1f5 -
+1 0-1 #8c8fa1 #ccd0da bold
+1 2-5 #4c4f69 #eff1f5 -
+1 6-14 #8839ef #eff1f5 bold
+1 15-15 #4c4f69 #ccd0da -
+1 16-25 #df8e1d #eff1f5 -
+1 26-26 #4c4f69 #ccd0da -
+1 27-28 #8839ef #eff1f5 bold
+1 29-79 #4c4f69 #eff1f5 -
+2 0-5 #5c5f77 #eff1f5 -
+2 6-7 #4c4f69 #eff1f5 -
+2 8-17 #7c7f93 #eff1f5 italic
+2 18-18 #fe640b #eff1f5 -
+2 19-69 #7c7f93 #eff1f5 italic
+2 70-79 #4c4f69 #eff1f5 -
+3 0-5 #5c5f77 #eff1f5 -
+3 6-79 #4c4f69 #eff1f5 -
+4 0-1 #8c8fa1 #eff1f5 -
+4 2-7 #4c4f69 #eff1f5 -
+4 8-10 #8839ef #eff1f5 bold
+4 11-11 #4c4f69 #eff1f5 -
+4 12-16 #1e66f5 #eff1f5 -
+4 17-17 #8c8fa1 #eff1f5 -
+4 18-21 #4c4f69 #eff1f5 -
+4 22-22 #8c8fa1 #eff1f5 -
+4 23-23 #4c4f69 #eff1f5 -
+4 24-25 #8839ef #eff1f5 bold
+4 26-79 #4c4f69 #eff1f5 -
+5 0-5 #5c5f77 #eff1f5 -
+5 6-7 #4c4f69 #eff1f5 -
+5 8-8 #5c5f77 #eff1f5 -
+5 9-9 #4c4f69 #eff1f5 -
+5 10-18 #40a02b #eff1f5 -
+5 19-19 #4c4f69 #eff1f5 -
+5 20-21 #04a5e5 #eff1f5 -
+5 22-79 #4c4f69 #eff1f5 -
+6 0-3 #5c5f77 #eff1f5 -
+6 4-75 #7c7f93 #ccd0da -
+6 76-79 #4c4f69 #eff1f5 -
+7 0-3 #5c5f77 #eff1f5 -
+7 4-4 #7c7f93 #ccd0da -
+7 5-5 #4c4f69 #ccd0da -
+7 6-73 #1e66f5 #e6e9ef bold
+7 74-74 #4c4f69 #ccd0da -
+7 75-75 #7c7f93 #ccd0da -
+7 76-76 #4c4f69 #000000 -
+7 77-79 #4c4f69 #eff1f5 -
+8 0-3 #5c5f77 #eff1f5 -
+8 4-4 #7c7f93 #ccd0da -
+8 5-5 #4c4f69 #ccd0da -
+8 6-73 #7c7f93 #ccd0da -
+8 74-74 #4c4f69 #ccd0da -
+8 75-75 #7c7f93 #ccd0da -
+8 76-76 #4c4f69 #000000 -
+8 77-79 #4c4f69 #eff1f5 -
+9 0-3 #5c5f77 #eff1f5 -
+9 4-4 #7c7f93 #ccd0da -
+9 5-74 #4c4f69 #ccd0da -
+9 75-75 #7c7f93 #ccd0da -
+9 76-76 #4c4f69 #000000 -
+9 77-79 #8c8fa1 #eff1f5 -
+10 0-3 #5c5f77 #eff1f5 -
+10 4-4 #7c7f93 #ccd0da -
+10 5-8 #4c4f69 #ccd0da -
+10 9-43 #4c4f69 #ccd0da bold
+10 44-74 #4c4f69 #ccd0da -
+10 75-75 #7c7f93 #ccd0da -
+10 76-76 #4c4f69 #000000 -
+10 77-79 #8c8fa1 #eff1f5 -
+11 0-3 #5c5f77 #eff1f5 -
+11 4-4 #7c7f93 #ccd0da -
+11 5-74 #4c4f69 #ccd0da -
+11 75-75 #7c7f93 #ccd0da -
+11 76-76 #4c4f69 #000000 -
+11 77-79 #8c8fa1 #eff1f5 -
+12 0-3 #5c5f77 #eff1f5 -
+12 4-4 #7c7f93 #ccd0da -
+12 5-74 #4c4f69 #ccd0da -
+12 75-75 #7c7f93 #ccd0da -
+12 76-76 #4c4f69 #000000 -
+12 77-79 #8c8fa1 #eff1f5 -
+13 0-3 #5c5f77 #eff1f5 -
+13 4-4 #7c7f93 #ccd0da -
+13 5-5 #4c4f69 #ccd0da -
+13 6-6 #4c4f69 #acb0be -
+13 7-7 #1e66f5 #acb0be bold
+13 8-31 #4c4f69 #acb0be bold
+13 32-73 #4c4f69 #acb0be -
+13 74-74 #4c4f69 #ccd0da -
+13 75-75 #7c7f93 #ccd0da -
+13 76-76 #4c4f69 #000000 -
+13 77-79 #8c8fa1 #eff1f5 -
+14 0-3 #5c5f77 #eff1f5 -
+14 4-4 #7c7f93 #ccd0da -
+14 5-74 #4c4f69 #ccd0da -
+14 75-75 #7c7f93 #ccd0da -
+14 76-76 #4c4f69 #000000 -
+14 77-79 #8c8fa1 #eff1f5 -
+15 0-3 #5c5f77 #eff1f5 -
+15 4-4 #7c7f93 #ccd0da -
+15 5-5 #4c4f69 #ccd0da -
+15 6-73 #4c4f69 #e6e9ef -
+15 74-74 #4c4f69 #ccd0da -
+15 75-75 #7c7f93 #ccd0da -
+15 76-76 #4c4f69 #000000 -
+15 77-79 #8c8fa1 #eff1f5 -
+16 0-3 #5c5f77 #eff1f5 -
+16 4-75 #7c7f93 #ccd0da -
+16 76-76 #4c4f69 #000000 -
+16 77-79 #8c8fa1 #eff1f5 -
+17 0-4 #5c5f77 #eff1f5 -
+17 5-76 #4c4f69 #000000 -
+17 77-79 #8c8fa1 #eff1f5 -
+18 0-5 #5c5f77 #eff1f5 -
+18 6-79 #8c8fa1 #eff1f5 -
+19 0-5 #5c5f77 #eff1f5 -
+19 6-79 #8c8fa1 #eff1f5 -
+20 0-5 #5c5f77 #eff1f5 -
+20 6-79 #8c8fa1 #eff1f5 -
+21 0-5 #5c5f77 #eff1f5 -
+21 6-79 #8c8fa1 #eff1f5 -
+22 0-5 #5c5f77 #eff1f5 -
+22 6-79 #8c8fa1 #eff1f5 -
+23 0-0 #8c8fa1 #e6e9ef -
+23 1-1 #4c4f69 #1e66f5 -
+23 2-7 #eff1f5 #1e66f5 bold
+23 8-8 #4c4f69 #1e66f5 -
+23 9-79 #4c4f69 #e6e9ef -

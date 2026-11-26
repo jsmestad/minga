@@ -116,7 +116,10 @@ public struct FileTreeView: View {
 
     @ViewBuilder
     private var entryList: some View {
-        if fileTreeState.entries.isEmpty && fileTreeState.treeState != .ready {
+        if fileTreeState.treeState == .empty, let empty = fileTreeState.empty {
+            // The empty-folder anatomy owns its insets (EmptyStateMetrics), like the clean Git tree, so it sits outside the padded, centred state box.
+            emptyFolder(empty)
+        } else if fileTreeState.entries.isEmpty && fileTreeState.treeState != .ready {
             stateContent
         } else if usesPreviewEagerLayout {
             VStack(spacing: 0) {
@@ -171,15 +174,11 @@ public struct FileTreeView: View {
                     .controlSize(.small)
                 stateText(title: "Loading files…", subtitle: "Scanning the project tree.")
             case .empty:
-                if let empty = fileTreeState.empty {
-                    emptyFolder(empty)
-                } else {
-                    stateText(title: "No files yet", subtitle: "Create a file or refresh after adding project files.")
-                    Button("New File…") {
-                        sendAction?(.semantic(intent: .newFile, generation: generation, itemID: ""))
-                    }
-                    .buttonStyle(primaryStateButtonStyle)
+                stateText(title: "No files yet", subtitle: "Create a file or refresh after adding project files.")
+                Button("New File…") {
+                    sendAction?(.semantic(intent: .newFile, generation: generation, itemID: ""))
                 }
+                .buttonStyle(primaryStateButtonStyle)
             case .error:
                 stateText(title: "Couldn’t load file tree", subtitle: fileTreeState.errorReason.isEmpty ? "Check project permissions, then refresh." : fileTreeState.errorReason)
                 Button("Refresh") {
@@ -197,20 +196,9 @@ public struct FileTreeView: View {
 
     /// The empty-folder anatomy, left-aligned at the top of the tree: what happened, then the next steps as native rows.
     private func emptyFolder(_ empty: Wire.EmptyList) -> some View {
-        VStack(alignment: .leading, spacing: EmptyStateMetrics.whyToActions) {
-            EmptyListHeader(empty: empty, textColor: theme.treeFg, mutedColor: theme.treeFg.opacity(0.78))
-                .padding(.horizontal, EmptyStateMetrics.inset)
-            EmptyListActions(
-                empty: empty,
-                textColor: theme.treeFg,
-                accentColor: theme.accent,
-                selectionColor: theme.treeSelectionBg
-            ) { action in
-                sendAction?(.executeCommand(name: action.id))
-            }
+        EmptyListPanel(empty: empty, textColor: theme.treeFg, accentColor: theme.accent, selectionColor: theme.treeSelectionBg) { action in
+            sendAction?(.executeCommand(name: action.id))
         }
-        .padding(.top, EmptyStateMetrics.inset)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     /// Derived locally for readable text on accent-filled controls.

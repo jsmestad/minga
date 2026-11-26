@@ -69,7 +69,7 @@ defmodule MingaEditor.Commands.UI do
 
   command(:diagnostics_list, "List buffer diagnostics",
     requires_buffer: true,
-    execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.Sources.Diagnostics) end
+    execute: &MingaEditor.UI.Picker.Sources.Diagnostics.open/1
   )
 
   command(:filetype_menu, "Show filetype actions",

@@ -730,7 +730,8 @@ func TestDecodePickerChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	body = append(body, section(0x04, actions)...)
 	body = append(body, section(0x05, string16("find"))...)
 	body = append(body, section(0x06, []byte{0})...)
-	packet := []byte{generated.OPGuiPicker, 6}
+	body = append(body, section(0x09, []byte{1})...)
+	packet := []byte{generated.OPGuiPicker, 7}
 	packet = append(packet, body...)
 	packet = append(packet, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
 
@@ -748,7 +749,7 @@ func TestDecodePickerChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	if got := picker.Items[0]; !got.Marked || !got.Active || got.Status != "Ready" || got.StatusTone != generated.PickerStatusToneReady || got.Group != "ChatGPT" || got.Label != "main.ex" || got.Description != "lib/main.ex" || got.Annotation != "modified" {
 		t.Fatalf("picker item decoded incorrectly: %+v", got)
 	}
-	if len(picker.Actions) != 1 || picker.Actions[0] != "open" || picker.ModePrefix != "find" {
+	if len(picker.Actions) != 1 || picker.Actions[0] != "open" || picker.ModePrefix != "find" || !picker.EnterSelects {
 		t.Fatalf("picker extras decoded incorrectly: %+v", picker)
 	}
 

@@ -194,6 +194,7 @@ Every empty state and every notice with actions, as listed in [surfaces.md](surf
 | Part | Token | macOS | TUI |
 |---|---|---|---|
 | Inset from the panel | `panel` | 24 pt | 3 columns, 1 row |
+| Trailing inset of the text and action labels | `lg` | 12 pt | 1 column |
 | Glyph to title | `sm` | 6 pt | 1 column |
 | Title to why line | `xs` | 4 pt | 0 rows |
 | Why line to action list | `xxl` | 20 pt | 1 row |

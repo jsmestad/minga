@@ -753,6 +753,22 @@ func DecodeEmptyListAction(data []byte, offset int, windowEnd int) (EmptyListAct
 	}, pos, nil
 }
 
+func DecodeKeyHint(data []byte, offset int, windowEnd int) (KeyHint, int, error) {
+	pos := offset
+	keys, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return KeyHint{}, offset, err
+	}
+	word, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return KeyHint{}, offset, err
+	}
+	return KeyHint{
+		Keys: keys,
+		Word: word,
+	}, pos, nil
+}
+
 func DecodeEmptyList(data []byte, offset int, windowEnd int) (EmptyList, int, error) {
 	pos := offset
 	glyph, pos, err := decodeString8Window(data, pos, windowEnd)
@@ -1660,9 +1676,24 @@ func DecodeGuiPickerEmpty(data []byte, offset int, windowEnd int) (GuiPickerEmpt
 	}
 	listKeys := data[pos]
 	pos++
+	if err := decodeRequireWindow(windowEnd, pos+1, "hints count"); err != nil {
+		return GuiPickerEmpty{}, offset, err
+	}
+	hintsCount := int(data[pos])
+	pos += 1
+	hints := make([]KeyHint, 0, min(hintsCount, len(data)-pos))
+	for i := 0; i < hintsCount; i++ {
+		item, nextPos, err := DecodeKeyHint(data, pos, windowEnd)
+		if err != nil {
+			return GuiPickerEmpty{}, offset, err
+		}
+		pos = nextPos
+		hints = append(hints, item)
+	}
 	return GuiPickerEmpty{
 		Empty:    empty,
 		ListKeys: listKeys,
+		Hints:    hints,
 	}, pos, nil
 }
 
@@ -1686,6 +1717,18 @@ func DecodeGuiPickerMovementKeys(data []byte, offset int, windowEnd int) ([]Pick
 		items = append(items, item)
 	}
 	return items, pos, nil
+}
+
+func DecodeGuiPickerEnterSelection(data []byte, offset int, windowEnd int) (GuiPickerEnterSelection, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+1, "selects"); err != nil {
+		return GuiPickerEnterSelection{}, offset, err
+	}
+	selects := data[pos]
+	pos++
+	return GuiPickerEnterSelection{
+		Selects: selects,
+	}, pos, nil
 }
 
 // Section decoders for gui_picker_preview

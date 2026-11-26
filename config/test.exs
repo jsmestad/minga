@@ -38,6 +38,9 @@ config :minga, git_module: Minga.Git.Stub
 # pick a cloner explicitly.
 config :minga, overlay_cloner: MingaAgent.Test.Overlay.UnsupportedCloner
 
+# A root a test registers answers project searches from memory, so concurrent tests never spawn ripgrep for it.
+config :minga, project_search_module: Minga.Test.ProjectSearchStub
+
 # Use the platform stub so tests don't shell out to osascript/gio for
 # trash operations. Tests that need real trash behavior override this in setup.
 config :minga, platform_module: Minga.Platform.Stub

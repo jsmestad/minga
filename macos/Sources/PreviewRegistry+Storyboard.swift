@@ -267,21 +267,21 @@ enum StoryboardCapture {
 
     /// The surface and every ink under each part that shows text. A part can hold an icon and words; each ink is
     /// judged, so a strong icon cannot pass weak words.
-    private static func samples(_ parts: [AnatomyPartFrame], pixels: StoryboardPixels?) -> [[String: Any]] {
+    private static func samples(_ parts: [AnatomyPartFrame], pixels: StoryboardPixels?, covered: CGRect?) -> [[String: Any]] {
         guard let pixels else { return [] }
         return parts.compactMap { part in
             guard let text = part.text, !text.trimmingCharacters(in: .whitespaces).isEmpty,
-                  let sample = pixels.sample(part.frame) else { return nil }
+                  let sample = pixels.sample(part.frame, excluding: part.name == "breadcrumb.segment" ? covered : nil) else { return nil }
             return ["part": part.name, "text": text, "inks": sample.inks, "bg": sample.bg]
         }
     }
 
     /// Every distinct ink colour in the Metal editor's text area, syntax colours included, with its surface.
-    private static func code(_ elements: [[String: Any]], pixels: StoryboardPixels?) -> [String: Any] {
+    private static func code(_ elements: [[String: Any]], pixels: StoryboardPixels?, covered: CGRect?) -> [String: Any] {
         guard let pixels,
               let editor = elements.first(where: { $0["role"] as? String == "AXTextArea" }),
               let frame = editor["frame"] as? [Double], frame.count == 4,
-              let found = pixels.inks(CGRect(x: frame[0], y: frame[1], width: frame[2], height: frame[3])) else { return [:] }
+              let found = pixels.inks(CGRect(x: frame[0], y: frame[1], width: frame[2], height: frame[3]), excluding: covered) else { return [:] }
         // The block cursor is the system accent colour, a glyph rather than text. The audit leaves out inks near it:
         // a sampled colour can move by a step through Metal, capture and colour conversion, so not by equality.
         let accent = NSColor.controlAccentColor.usingColorSpace(.sRGB).map {
@@ -296,7 +296,9 @@ enum StoryboardCapture {
                                    pixels: StoryboardPixels?, scale: CGFloat, fontManager: FontManager) -> Data {
         var elements: [[String: Any]] = []
         walk(host, depth: 0, window: window, into: &elements)
-        let measured: [[String: Any]] = parts.map { part in
+        // Audit the visible parts of the breadcrumb and editor, not the empty picker's fill and text.
+        let covered = parts.first { $0.name == "picker.panel" }?.frame
+        let measured: [[String: Any]] = parts.filter { $0.name != "picker.panel" }.map { part in
             var entry: [String: Any] = [
                 "part": part.name,
                 "frame": [half(part.frame.minX), half(part.frame.minY), half(part.frame.width), half(part.frame.height)],
@@ -323,8 +325,8 @@ enum StoryboardCapture {
             "elements": elements,
             // Colours read from the pixels, for the layout audit's contrast rule. Not part of the baseline: antialiasing
             // can move a sampled colour by a step between runners.
-            "samples": samples(parts, pixels: pixels),
-            "code": code(elements, pixels: pixels),
+            "samples": samples(parts, pixels: pixels, covered: covered),
+            "code": code(elements, pixels: pixels, covered: covered),
         ]
         return (try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])) ?? Data()
     }

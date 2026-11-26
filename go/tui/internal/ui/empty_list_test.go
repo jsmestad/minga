@@ -1,10 +1,13 @@
 package ui
 
 import (
+	"bytes"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/charmbracelet/x/ansi"
@@ -54,19 +57,21 @@ func TestEmptyPickerShowsWhatHappenedAboveItsNextStepRows(t *testing.T) {
 	}
 }
 
-func TestEmptyPickerHintsNameTheKeysThatMoveAndRunItsRows(t *testing.T) {
+func TestEmptyPickerFooterDrawsTheHintsTheBEAMSends(t *testing.T) {
 	model := New(80, 24, nil)
-	picker := protocol.Picker{Visible: true, Title: "Switch project", Empty: &generated.EmptyList{Title: "No projects yet."}}
-
-	prompt := ansi.Strip(model.renderPickerHelp(picker, 60))
-	if !strings.Contains(prompt, "⌃J ⌃K move") || !strings.Contains(prompt, "esc close") {
-		t.Fatalf("a prompt moves with ⌃J ⌃K: %q", prompt)
+	picker := protocol.Picker{
+		Visible: true,
+		Title:   "Switch project",
+		Empty:   &generated.EmptyList{Title: "No projects yet."},
+		// A user who rebinds the picker's keys sees them here: the frontend draws what it is sent.
+		Hints: []generated.KeyHint{{Keys: "n p", Word: "move"}, {Keys: "↩", Word: "run"}, {Keys: "x", Word: "close"}},
 	}
 
-	picker.ListKeys = true
-	list := ansi.Strip(model.renderPickerHelp(picker, 60))
-	if !strings.Contains(list, "j k move") || !strings.Contains(list, "q close") {
-		t.Fatalf("a list with nothing to type moves with j k: %q", list)
+	footer := ansi.Strip(model.renderPickerHelp(picker, 60))
+	for _, want := range []string{"n p move", "↩ run", "x close"} {
+		if !strings.Contains(footer, want) {
+			t.Fatalf("the footer must draw the BEAM's hint %q: %q", want, footer)
+		}
 	}
 }
 
@@ -142,6 +147,28 @@ func TestEmptyFolderDrawsItsNextStepsInTheTreesOwnKeys(t *testing.T) {
 	}
 }
 
+func TestAnEmptyPickerOnAShortTerminalShowsEveryNextStep(t *testing.T) {
+	model := New(80, 24, nil)
+	model.layout = model.computeLayout()
+	picker := protocol.Picker{
+		Visible: true,
+		Title:   "Switch project",
+		Items: []protocol.PickerItem{
+			{ActivationID: 1, Label: "Add a folder", Annotation: "SPC p a"},
+			{ActivationID: 2, Label: "Open a file", Annotation: "SPC f f"},
+		},
+		Empty: &generated.EmptyList{Title: "No projects yet.", Why: "Minga remembers the folders you open."},
+		Hints: []generated.KeyHint{{Keys: "↩", Word: "run"}},
+	}
+
+	text := strings.Join(stripLines(model.renderPicker(picker, protocol.PickerPreview{})), "\n")
+	for _, want := range []string{"No projects yet.", "Add a folder", "Open a file", "↩ run"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("an 80x24 empty picker is missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestCleanTreeKeepsItsStepsBelowARetryRow(t *testing.T) {
 	model := New(80, 24, nil)
 	empty := cleanTree()
@@ -167,11 +194,115 @@ func TestEmptyListCutTextKeepsItsTrailingInset(t *testing.T) {
 	lines := stripLines(emptyListHeader(empty, 40, model.pickerEmptyColors(), model.palette()))
 	lines = append(lines, stripLines(emptyListActions(empty, 40, model.pickerEmptyColors()))...)
 	for _, line := range lines {
-		if strings.Contains(line, "…") && ansi.StringWidth(line) != 40-listRowTrailingInset.cols() {
-			t.Fatalf("a cut line ends its ellipsis one column before the edge: %q", line)
+		if strings.Contains(line, "…") && ansi.StringWidth(line) > 40-listRowTrailingInset.cols() {
+			t.Fatalf("a cut line keeps at least one column after the ellipsis: %q", line)
 		}
 	}
 	if !strings.Contains(strings.Join(lines, "\n"), "…") {
 		t.Fatalf("the fixture must cut a line: %q", lines)
+	}
+}
+
+func TestAnEmptyPickerListRespectsTheReturnBindingWithALocalPreview(t *testing.T) {
+	for _, selects := range []bool{true, false} {
+		t.Run(fmt.Sprintf("Enter selects: %v", selects), func(t *testing.T) {
+			out := make(chan []byte, 16)
+			model := New(80, 24, out)
+			payload := protocol.ChromePayload{Opcode: generated.OPGuiPicker, Picker: protocol.Picker{
+				Visible: true, Generation: 5, Selected: 0, SelectedID: 1,
+				Items: []protocol.PickerItem{
+					{ActivationID: 1, Label: "Add a folder", Annotation: "SPC p a"},
+					{ActivationID: 2, Label: "Open a file", Annotation: "SPC f f"},
+				},
+				Empty:        &generated.EmptyList{Title: "No projects yet."},
+				ListKeys:     true,
+				EnterSelects: selects,
+				MovementKeys: []protocol.PickerMovementKey{
+					{Codepoint: 'j', Modifiers: 0, Delta: 1},
+					{Codepoint: 'k', Modifiers: 0, Delta: -1},
+				},
+			}}
+			model.chrome[generated.OPGuiPicker] = payload
+			model.applyMutation(focusOwnerCommand(0, 8))
+			model = settle(model)
+			markPickerFitReported(&model)
+			drainOutboundPackets(out)
+
+			updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
+			model = updated.(Model)
+			if got := model.effectivePickerIndex(model.chrome[generated.OPGuiPicker].Picker); got != 1 {
+				t.Fatalf("j must preview the next step at once, highlighted %d", got)
+			}
+			drainOutboundPackets(out)
+
+			model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+			packets := drainOutboundPackets(out)
+			if selects {
+				want := pickerActivationPacket(5, 2)
+				if len(packets) != 1 || !bytes.Equal(packets[0], want) {
+					t.Fatalf("Return must activate the highlighted row exactly once: got %x, want %x", packets, want)
+				}
+			} else if len(packets) != 1 || packets[0][0] != generated.OPKeyPress || codepoint(packets[0]) != 13 {
+				t.Fatalf("remapped Return must reach the BEAM as a key, not activate the preview: %x", packets)
+			}
+		})
+	}
+}
+
+func TestANarrowSidebarCutsActionLabelsAtAWordBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		label string
+		width int
+		want  string
+	}{
+		{"Pull from remote", 16, "Pull from remote"},
+		{"Pull from remote", 14, "Pull from…"},
+		{"Pull from remote", 10, "Pull from…"},
+		{"Fetch from remote", 14, "Fetch from…"},
+		{"Fetch from remote", 7, "Fetch…"},
+		{"Synchronise", 6, "Synch…"},
+	} {
+		if got := truncateAtWord(tc.label, tc.width); got != tc.want {
+			t.Fatalf("truncateAtWord(%q, %d) = %q, want %q", tc.label, tc.width, got, tc.want)
+		}
+	}
+
+	empty := cleanTree()
+	empty.Actions = append(empty.Actions, generated.EmptyListAction{ID: "git_status_fetch", Key: "f", Label: "Fetch from remote"})
+	lines := stripLines(emptyListActions(empty, 20, emptyListColors{}))
+	for _, line := range lines {
+		if strings.Contains(line, "remo…") || strings.Contains(line, "rem…") {
+			t.Fatalf("an action label was cut inside a word: %q", line)
+		}
+	}
+}
+
+func TestTheCleanTreeGlyphIsDrawnInTheDoneRole(t *testing.T) {
+	p := paletteFromTheme(protocol.Theme{Colors: map[byte]uint32{
+		byte(generated.ColorRoleDone):    0xA6D189,
+		byte(generated.ColorRoleFailure): 0xE78284,
+	}})
+	text := lipgloss.Color("#123456")
+	if got := emptyStateGlyphColor("●", text, p); got != p.Role(generated.ColorRoleDone) {
+		t.Fatalf("● should take the done role, got %v", got)
+	}
+	if got := emptyStateGlyphColor("◆", text, p); got != p.Role(generated.ColorRoleFailure) {
+		t.Fatalf("◆ should take the failure role, got %v", got)
+	}
+	if got := emptyStateGlyphColor("", text, p); got != text {
+		t.Fatalf("no glyph keeps the title colour, got %v", got)
+	}
+
+	empty := cleanTree()
+	joined := strings.Join(emptyListHeader(empty, 40, emptyListColors{text: text}, p), "\n")
+	r, g, b, _ := p.Role(generated.ColorRoleDone).RGBA()
+	want := fmt.Sprintf("38;2;%d;%d;%d", r>>8, g>>8, b>>8)
+	glyph := strings.Index(joined, "●")
+	if glyph < 0 {
+		t.Fatalf("the clean-tree header omitted ●: %q", joined)
+	}
+	colorStart := strings.LastIndex(joined[:glyph], "\x1b[")
+	if colorStart < 0 || !strings.Contains(joined[colorStart:glyph], want) {
+		t.Fatalf("the clean-tree header should draw ● in the done colour %s, got %q", want, joined)
 	}
 }

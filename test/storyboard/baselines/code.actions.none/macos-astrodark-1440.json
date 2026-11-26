@@ -178,7 +178,7 @@
   {
    "baseline": 919.5,
    "frame": [
-    619,
+    590.5,
     909,
     228,
     14
@@ -189,13 +189,13 @@
   {
    "baseline": 919.5,
    "frame": [
-    867,
+    838.5,
     909,
-    48,
+    105,
     14
    ],
    "part": "notice.action",
-   "text": "SPC a ?"
+   "text": "SPC a ? ask Minga"
   }
  ],
  "scenario": "code.actions.none",

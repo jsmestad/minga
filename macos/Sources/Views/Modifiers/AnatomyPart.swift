@@ -13,8 +13,8 @@ extension View {
     /// Tags this view as one instance of an anatomy part. Pass `text` for a part that shows text, and the
     /// typography step it is set in, so the recorder can place its baseline.
     public func anatomyPart(_ name: String, text: String? = nil, font: Typography.Step? = nil,
-                            monospaced: Bool = false) -> some View {
-        modifier(AnatomyPartModifier(name: name, text: text, font: font, monospaced: monospaced))
+                            monospaced: Bool = false, enabled: Bool = true) -> some View {
+        modifier(AnatomyPartModifier(name: name, text: text, font: font, monospaced: monospaced, enabled: enabled))
     }
 }
 
@@ -54,6 +54,7 @@ private struct AnatomyPartModifier: ViewModifier {
     let text: String?
     let font: Typography.Step?
     let monospaced: Bool
+    let enabled: Bool
     @State private var id = UUID()
 
     /// A single-line Text frame starts at the line top, so its first baseline sits one ascender below it.
@@ -66,7 +67,7 @@ private struct AnatomyPartModifier: ViewModifier {
     }
 
     func body(content: Content) -> some View {
-        if let recorder = AnatomyPartRecorder.shared {
+        if enabled, let recorder = AnatomyPartRecorder.shared {
             content
                 .accessibilityIdentifier(name)
                 .onGeometryChange(for: CGRect.self) { proxy in

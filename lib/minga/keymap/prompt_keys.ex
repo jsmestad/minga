@@ -9,7 +9,12 @@ defmodule Minga.Keymap.PromptKeys do
 
   alias Minga.Keymap.Bindings
 
+  import Bitwise, only: [band: 2]
+
+  @shift 0x01
   @ctrl 0x02
+  @alt 0x04
+  @super 0x08
 
   @enter 13
   @escape 27
@@ -103,6 +108,73 @@ defmodule Minga.Keymap.PromptKeys do
   """
   @spec picker_list_trie() :: Bindings.node_t()
   def picker_list_trie, do: @picker_list_trie
+
+  @hint_commands [
+    {[:picker_next, :picker_prev], "move"},
+    {[:picker_select], "run"},
+    {[:picker_cancel], "close"}
+  ]
+
+  @doc """
+  The footer hints of an empty picker: the keys that move, run and close, labelled for display, as `{keys, word}` pairs.
+
+  The hints follow what the list can do: with next-step rows (`rows?`) it can move, run and close; with no rows only close is offered, since there is nothing to move to or run.
+
+  `keys_for` returns the single keys that run a command in the picker scope as it resolves keys now, user overrides included (`MingaEditor.State.Picker.keys_for_command/3`), so the footer names keys that do what it says, and a rebind shows. A list with nothing to type (`list_keys?`) prefers plain letters (`j k`, `q`); a prompt prefers control keys (`⌃J ⌃K`) and named keys (`↩`, `esc`).
+  """
+  @spec picker_hints(boolean(), boolean(), (atom() -> [Bindings.key()])) :: [
+          {String.t(), String.t()}
+        ]
+  def picker_hints(rows?, list_keys?, keys_for)
+      when is_boolean(rows?) and is_boolean(list_keys?) and is_function(keys_for, 1) do
+    offered =
+      if rows?, do: @hint_commands, else: Enum.filter(@hint_commands, &match?({_, "close"}, &1))
+
+    for {commands, word} <- offered,
+        keys = Enum.map(commands, &hint_key(keys_for.(&1), list_keys?)),
+        Enum.all?(keys),
+        do: {Enum.join(keys, " "), word}
+  end
+
+  @spec hint_key([Bindings.key()], boolean()) :: String.t() | nil
+  defp hint_key(keys, list_keys?) do
+    keys
+    |> Enum.min_by(&{hint_rank(&1, list_keys?), &1}, fn -> nil end)
+    |> hint_label()
+  end
+
+  # Lower ranks are shown first: plain letters in a list, control keys in a prompt, then named keys, then arrows,
+  # then keys held with other modifiers.
+  @spec hint_rank(Bindings.key(), boolean()) :: non_neg_integer()
+  defp hint_rank({cp, 0}, true) when cp in ?!..?~, do: 0
+  defp hint_rank({_cp, @ctrl}, _list_keys?), do: 1
+  defp hint_rank({cp, 0}, _list_keys?) when cp in [@enter, @escape, @tab], do: 2
+  defp hint_rank({_cp, 0}, _list_keys?), do: 3
+  defp hint_rank(_key, _list_keys?), do: 4
+
+  # Every modifier is named, so a key held with ⌥ or ⌘ never reads as the plain key, which would type in a prompt.
+  @spec hint_label(Bindings.key() | nil) :: String.t() | nil
+  defp hint_label(nil), do: nil
+  defp hint_label({cp, mods}), do: modifier_label(mods) <> key_label(cp, mods)
+
+  @spec modifier_label(non_neg_integer()) :: String.t()
+  defp modifier_label(mods) do
+    for {bit, glyph} <- [{@ctrl, "⌃"}, {@alt, "⌥"}, {@shift, "⇧"}, {@super, "⌘"}],
+        band(mods, bit) != 0,
+        into: "",
+        do: glyph
+  end
+
+  @spec key_label(non_neg_integer(), non_neg_integer()) :: String.t()
+  defp key_label(@enter, _mods), do: "↩"
+  defp key_label(@escape, _mods), do: "esc"
+  defp key_label(@tab, _mods), do: "Tab"
+  defp key_label(32, _mods), do: Bindings.format_key({32, 0})
+  defp key_label(127, _mods), do: "⌫"
+  defp key_label(cp, _mods) when cp in [@arrow_down, @arrow_down_mac], do: "↓"
+  defp key_label(cp, _mods) when cp in [@arrow_up, @arrow_up_mac], do: "↑"
+  defp key_label(cp, 0), do: <<cp::utf8>>
+  defp key_label(cp, _mods), do: String.upcase(<<cp::utf8>>)
 
   @doc """
   Returns the minibuffer prompt trie.

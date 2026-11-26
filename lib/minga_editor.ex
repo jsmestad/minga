@@ -86,6 +86,7 @@ defmodule MingaEditor do
           | {:parser_manager, GenServer.server()}
           | {:keymap_server, GenServer.server()}
           | {:options_server, GenServer.server() | nil}
+          | {:project_server, GenServer.server()}
           | {:events_registry, EventBus.registry()}
           | {:effect_scheduler, GenServer.server()}
           | {:file_tree_duplicate_backend, MingaEditor.Commands.FileTree.DuplicateBackend.t()}

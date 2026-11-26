@@ -16,10 +16,12 @@ defmodule MingaEditor.UI.Picker.FileSource do
   alias Minga.Log
   alias Minga.Language.Devicon
   alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.Empty
   alias MingaEditor.UI.Picker.FindFileSession
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.ProjectFileCandidate
   alias MingaEditor.UI.Picker.Source
+  alias MingaEditor.UI.Picker.SwitcherNextSteps
 
   @impl true
   @spec title() :: String.t()
@@ -232,7 +234,16 @@ defmodule MingaEditor.UI.Picker.FileSource do
   defp enrich_item(%Item{} = item), do: item
 
   @impl true
+  @spec empty(Empty.request()) :: Empty.t() | nil
+  def empty(%{query: query, total: total}),
+    do:
+      SwitcherNextSteps.empty(query, SwitcherNextSteps.count(total, "file") <> " in this project")
+
+  @impl true
   @spec on_select(Item.t(), term()) :: term()
+  def on_select(%Item{id: {:next_step, _step}} = item, state),
+    do: SwitcherNextSteps.run(item, state)
+
   def on_select(%Item{id: %ProjectFileCandidate{} = candidate}, state) do
     if current_candidate?(candidate) do
       Log.debug(:editor, "[file_picker] on_select path=#{candidate.path}")
@@ -249,6 +260,8 @@ defmodule MingaEditor.UI.Picker.FileSource do
       do: :accept,
       else: {:reject, stale_candidate_message()}
   end
+
+  def selection_disposition(%Item{id: {:next_step, _step}}, _context), do: :accept
 
   def selection_disposition(%Item{}, _context),
     do: {:reject, "Project file result is unavailable"}

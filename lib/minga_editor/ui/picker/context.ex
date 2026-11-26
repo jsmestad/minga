@@ -65,6 +65,7 @@ defmodule MingaEditor.UI.Picker.Context do
     :keymap_server,
     :options_server,
     :theme,
+    project_server: Minga.Project,
     document_symbols: []
   ]
 
@@ -83,6 +84,7 @@ defmodule MingaEditor.UI.Picker.Context do
           capabilities: map(),
           keymap_server: State.keymap_server() | nil,
           options_server: State.options_server() | nil,
+          project_server: GenServer.server(),
           theme: Theme.t()
         }
 
@@ -124,6 +126,7 @@ defmodule MingaEditor.UI.Picker.Context do
       capabilities: state.frontend.capabilities,
       keymap_server: state.interaction.keymap_server,
       options_server: state.interaction.options_server,
+      project_server: state.interaction.project_server,
       theme: state.appearance.theme
     }
   end

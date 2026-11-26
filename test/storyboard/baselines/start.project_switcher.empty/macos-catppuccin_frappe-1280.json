@@ -39,6 +39,50 @@
    "text": "Minga remembers folders you open."
   },
   {
+   "baseline": 170.5,
+   "frame": [
+    368,
+    160,
+    82,
+    14
+   ],
+   "part": "picker.stepLabel",
+   "text": "Add a folder"
+  },
+  {
+   "baseline": 170.5,
+   "frame": [
+    880,
+    160,
+    48,
+    14
+   ],
+   "part": "picker.stepAnnotation",
+   "text": "SPC p a"
+  },
+  {
+   "baseline": 194.5,
+   "frame": [
+    368,
+    184,
+    75,
+    14
+   ],
+   "part": "picker.stepLabel",
+   "text": "Open a file"
+  },
+  {
+   "baseline": 194.5,
+   "frame": [
+    880,
+    184,
+    48,
+    14
+   ],
+   "part": "picker.stepAnnotation",
+   "text": "SPC f f"
+  },
+  {
    "frame": [
     0,
     804,

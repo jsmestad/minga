@@ -11,17 +11,17 @@
    /tmp/minga-storyboard/tui-80x24/start.project_switcher.empty
 
    Recent in this project
-   1   storyboard.ex  lib
-    ╭──────────────────────────────────────────────────────────────────────╮
-   N│  Switch project                                                      │
-   S│ ──────────────────────────────────────────────────────────────────── │
+   1╭──────────────────────────────────────────────────────────────────────╮
+    │  Switch project                                                      │
+   N│ ──────────────────────────────────────────────────────────────────── │
    S│                                                                      │
    S│    No projects yet.                                                  │
    S│    Minga remembers folders you open.                                 │
+   S│                                                                      │
     │  ▌ Add a folder  SPC p a                                             │
+    │    Open a file  SPC f f                                              │
     │                                            j k move  ↩ run  q close  │
     ╰──────────────────────────────────────────────────────────────────────╯
-
 
 
 
@@ -44,17 +44,21 @@
 5 25-79 #4c4f69 #eff1f5 -
 6 0-2 #4c4f69 #acb0be -
 6 3-3 #eff1f5 #4c4f69 bold,reverse
-6 4-7 #4c4f69 #acb0be -
-6 8-20 #4c4f69 #acb0be bold
-6 21-79 #4c4f69 #acb0be -
+6 4-75 #7c7f93 #ccd0da -
+6 76-79 #4c4f69 #acb0be -
 7 0-3 #4c4f69 #eff1f5 -
-7 4-75 #7c7f93 #ccd0da -
-7 76-79 #4c4f69 #eff1f5 -
+7 4-4 #7c7f93 #ccd0da -
+7 5-5 #4c4f69 #ccd0da -
+7 6-73 #1e66f5 #e6e9ef bold
+7 74-74 #4c4f69 #ccd0da -
+7 75-75 #7c7f93 #ccd0da -
+7 76-76 #4c4f69 #000000 -
+7 77-79 #4c4f69 #eff1f5 -
 8 0-2 #4c4f69 #eff1f5 -
 8 3-3 #8c8fa1 #eff1f5 bold
 8 4-4 #7c7f93 #ccd0da -
 8 5-5 #4c4f69 #ccd0da -
-8 6-73 #1e66f5 #e6e9ef bold
+8 6-73 #7c7f93 #ccd0da -
 8 74-74 #4c4f69 #ccd0da -
 8 75-75 #7c7f93 #ccd0da -
 8 76-76 #4c4f69 #000000 -
@@ -62,25 +66,23 @@
 9 0-2 #4c4f69 #eff1f5 -
 9 3-3 #1e66f5 #eff1f5 bold
 9 4-4 #7c7f93 #ccd0da -
-9 5-5 #4c4f69 #ccd0da -
-9 6-73 #7c7f93 #ccd0da -
-9 74-74 #4c4f69 #ccd0da -
+9 5-74 #4c4f69 #ccd0da -
 9 75-75 #7c7f93 #ccd0da -
 9 76-76 #4c4f69 #000000 -
 9 77-79 #4c4f69 #eff1f5 -
 10 0-2 #4c4f69 #eff1f5 -
 10 3-3 #1e66f5 #eff1f5 bold
 10 4-4 #7c7f93 #ccd0da -
-10 5-74 #4c4f69 #ccd0da -
+10 5-8 #4c4f69 #ccd0da -
+10 9-24 #4c4f69 #ccd0da bold
+10 25-74 #4c4f69 #ccd0da -
 10 75-75 #7c7f93 #ccd0da -
 10 76-76 #4c4f69 #000000 -
 10 77-79 #4c4f69 #eff1f5 -
 11 0-2 #4c4f69 #eff1f5 -
 11 3-3 #1e66f5 #eff1f5 bold
 11 4-4 #7c7f93 #ccd0da -
-11 5-8 #4c4f69 #ccd0da -
-11 9-24 #4c4f69 #ccd0da bold
-11 25-74 #4c4f69 #ccd0da -
+11 5-74 #4c4f69 #ccd0da -
 11 75-75 #7c7f93 #ccd0da -
 11 76-76 #4c4f69 #000000 -
 11 77-79 #4c4f69 #eff1f5 -
@@ -104,20 +106,25 @@
 13 77-79 #4c4f69 #eff1f5 -
 14 0-3 #4c4f69 #eff1f5 -
 14 4-4 #7c7f93 #ccd0da -
-14 5-5 #4c4f69 #ccd0da -
-14 6-73 #4c4f69 #e6e9ef -
-14 74-74 #4c4f69 #ccd0da -
+14 5-74 #4c4f69 #ccd0da -
 14 75-75 #7c7f93 #ccd0da -
 14 76-76 #4c4f69 #000000 -
 14 77-79 #4c4f69 #eff1f5 -
 15 0-3 #4c4f69 #eff1f5 -
-15 4-75 #7c7f93 #ccd0da -
+15 4-4 #7c7f93 #ccd0da -
+15 5-5 #4c4f69 #ccd0da -
+15 6-73 #4c4f69 #e6e9ef -
+15 74-74 #4c4f69 #ccd0da -
+15 75-75 #7c7f93 #ccd0da -
 15 76-76 #4c4f69 #000000 -
 15 77-79 #4c4f69 #eff1f5 -
-16 0-4 #4c4f69 #eff1f5 -
-16 5-76 #4c4f69 #000000 -
+16 0-3 #4c4f69 #eff1f5 -
+16 4-75 #7c7f93 #ccd0da -
+16 76-76 #4c4f69 #000000 -
 16 77-79 #4c4f69 #eff1f5 -
-17 0-79 #4c4f69 #eff1f5 -
+17 0-4 #4c4f69 #eff1f5 -
+17 5-76 #4c4f69 #000000 -
+17 77-79 #4c4f69 #eff1f5 -
 18 0-79 #4c4f69 #eff1f5 -
 19 0-79 #4c4f69 #eff1f5 -
 20 0-79 #4c4f69 #eff1f5 -

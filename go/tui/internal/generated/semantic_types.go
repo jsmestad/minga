@@ -369,6 +369,11 @@ type EmptyListAction struct {
 	Label string
 }
 
+type KeyHint struct {
+	Keys string
+	Word string
+}
+
 type EmptyList struct {
 	Glyph    string
 	Title    string
@@ -750,6 +755,11 @@ type GuiPickerLoadStatus struct {
 type GuiPickerEmpty struct {
 	Empty    EmptyList
 	ListKeys uint8
+	Hints    []KeyHint
+}
+
+type GuiPickerEnterSelection struct {
+	Selects uint8
 }
 
 type GuiAgentChatHeader struct {

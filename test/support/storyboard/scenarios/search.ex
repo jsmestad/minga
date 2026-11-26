@@ -22,7 +22,31 @@ defmodule Minga.Test.Storyboard.Scenarios.Search do
           end)
         ]
       ),
-      Entry.pending("search.project.no_results", 4058, "no results become next steps"),
+      Entry.built("search.project.no_results",
+        start: [directory_workspace: true],
+        reach: "1 SPC s p limit_lable ↩",
+        recognize: &Model.empty_picker?(&1, ~r/search project/i, ~r/^No results/),
+        checks: [
+          Check.new(
+            "no results say what was skipped and offer wider searches as rows",
+            fn model ->
+              assert_empty_state(model,
+                title: "No results for “limit_lable”.",
+                description: "Ignored and hidden files were skipped.",
+                actions: [
+                  {"-- -u", "Search ignored files too"},
+                  {"--hidden", "Search hidden files too"},
+                  {"-- -uu", "Search all files"}
+                ]
+              )
+            end
+          ),
+          Check.new(
+            "the prompt keeps the keyboard, so typing edits the query",
+            &assert_focus(&1, :picker)
+          )
+        ]
+      ),
       Entry.pending("search.quickfix", 4059, "the quickfix drawer"),
       Entry.built("search.buffer",
         reach: "1 /",

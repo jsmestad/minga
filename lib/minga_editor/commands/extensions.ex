@@ -12,30 +12,7 @@ defmodule MingaEditor.Commands.Extensions do
   @type state :: EditorState.t()
 
   @spec list(state()) :: state()
-  def list(state) do
-    alias Minga.Extension.Registry, as: ExtRegistry
-    alias Minga.Extension.Supervisor, as: ExtSupervisor
-
-    extensions = ExtSupervisor.list_extensions()
-    all_entries = ExtRegistry.all()
-
-    msg =
-      case extensions do
-        [] ->
-          "No extensions loaded"
-
-        exts ->
-          lines =
-            Enum.map(exts, fn {name, version, status} ->
-              source_label = format_source_label(name, all_entries)
-              "  #{name} v#{version} [#{status}] (#{source_label})"
-            end)
-
-          ["Extensions:" | lines] |> Enum.join("\n")
-      end
-
-    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, msg)
-  end
+  def list(state), do: PickerUI.open(state, MingaEditor.UI.Picker.ExtensionListSource)
 
   @spec update_all(state()) :: state()
   def update_all(state) do
@@ -75,18 +52,6 @@ defmodule MingaEditor.Commands.Extensions do
     details = Updater.details(update.name)
     Minga.Log.info(:editor, details)
     state
-  end
-
-  # ── Private helpers ───────────────────────────────────────────────────────
-
-  @spec format_source_label(atom(), [{atom(), Minga.Extension.Entry.t()}]) :: String.t()
-  defp format_source_label(name, all_entries) do
-    case List.keyfind(all_entries, name, 0) do
-      {_, %{source: {:path, path}}} -> "path: #{path}"
-      {_, %{source: {:git, %{url: url}}}} -> "git: #{url}"
-      {_, %{source: {:hex, %{package: pkg}}}} -> "hex: #{pkg}"
-      _ -> "unknown"
-    end
   end
 
   command(:extension_list, "List extensions", requires_buffer: true, execute: &list/1)

@@ -81,7 +81,8 @@ git main  ahead 2             │▾  1  defmodule Storyboard do
 3 50-100 #7c7f93 #eff1f5 italic
 3 101-149 #4c4f69 #eff1f5 -
 4 0-2 #4c4f69 #ccd0da -
-4 3-24 #4c4f69 #ccd0da bold
+4 3-3 #388e25 #ccd0da bold
+4 4-24 #4c4f69 #ccd0da bold
 4 25-29 #4c4f69 #ccd0da -
 4 30-30 #8c8fa1 #eff1f5 -
 4 31-36 #5c5f77 #eff1f5 -
