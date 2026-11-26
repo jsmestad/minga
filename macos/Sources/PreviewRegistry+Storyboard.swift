@@ -296,8 +296,8 @@ enum StoryboardCapture {
                                    pixels: StoryboardPixels?, scale: CGFloat, fontManager: FontManager) -> Data {
         var elements: [[String: Any]] = []
         walk(host, depth: 0, window: window, into: &elements)
-        // The floating picker covers parts of the breadcrumb and editor. Its fill, border, shadow and text are not inks of the surfaces below it.
-        let covered = parts.first { $0.name == "picker.panel" }?.frame.insetBy(dx: -32, dy: -36)
+        // Audit the visible parts of the breadcrumb and editor, not the empty picker's fill and text.
+        let covered = parts.first { $0.name == "picker.panel" }?.frame
         let measured: [[String: Any]] = parts.filter { $0.name != "picker.panel" }.map { part in
             var entry: [String: Any] = [
                 "part": part.name,

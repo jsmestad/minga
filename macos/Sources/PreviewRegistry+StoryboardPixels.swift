@@ -34,7 +34,9 @@ struct StoryboardPixels {
     /// most common colour; each ink is the farthest colour in its direction from the surface that covers a few pixels,
     /// so an icon and the words beside it come out as two inks and their antialiased edges as none.
     func sample(_ frame: CGRect, excluding covered: CGRect? = nil) -> (inks: [String], bg: String)? {
-        guard let counts = histogram(frame, excluding: covered), let bg = counts.max(by: { $0.value < $1.value })?.key else { return nil }
+        guard let histogram = histogram(frame, excluding: covered),
+              let bg = histogram.counts.max(by: { $0.value < $1.value })?.key else { return nil }
+        let counts = histogram.counts
         let visible = counts.filter { $0.key != bg && Self.distance($0.key, bg) > 24 }
         let floor = max(3, (visible.values.max() ?? 0) / 20)
         let candidates = visible.filter { $0.value >= floor }
@@ -51,9 +53,14 @@ struct StoryboardPixels {
     /// line, a selection); a colour that lies between any surface and a kept ink is an antialiased edge, not an ink.
     /// Syntax colours in the editor come out once each.
     func inks(_ frame: CGRect, minimumPixels: Int = 12, excluding covered: CGRect? = nil) -> (bg: String, inks: [String])? {
-        guard let counts = histogram(frame, excluding: covered), let bg = counts.max(by: { $0.value < $1.value })?.key else { return nil }
+        guard let histogram = histogram(frame, excluding: covered, identifyBands: covered != nil),
+              let bg = histogram.counts.max(by: { $0.value < $1.value })?.key else { return nil }
+        let counts = histogram.counts
         let total = counts.values.reduce(0, +)
-        let surfaces = counts.filter { $0.value * 50 >= total }.map(\.key)
+        var surfaces = histogram.bands
+        for (color, count) in counts where count * 50 >= total {
+            surfaces.insert(color)
+        }
         let visible = counts.filter { entry in
             !surfaces.contains(entry.key) && surfaces.allSatisfy { Self.distance(entry.key, $0) > 24 }
         }
@@ -71,7 +78,8 @@ struct StoryboardPixels {
         return (Self.hex(bg), kept.map(Self.hex).sorted())
     }
 
-    private func histogram(_ frame: CGRect, excluding covered: CGRect?) -> [UInt32: Int]? {
+    private func histogram(_ frame: CGRect, excluding covered: CGRect?, identifyBands: Bool = false)
+        -> (counts: [UInt32: Int], bands: Set<UInt32>)? {
         let x0 = max(Int((frame.minX * scale).rounded(.down)), 0)
         let y0 = max(Int((frame.minY * scale).rounded(.down)), 0)
         let x1 = min(Int((frame.maxX * scale).rounded(.up)), width)
@@ -83,16 +91,35 @@ struct StoryboardPixels {
         let maskY0 = hole.isNull ? y1 : max(y0, Int((hole.minY * scale).rounded(.down)))
         let maskY1 = hole.isNull ? y1 : min(y1, Int((hole.maxY * scale).rounded(.up)))
         var counts: [UInt32: Int] = [:]
+        var bands: Set<UInt32> = []
+        // Masking a modal can leave a cursor-line band below the global surface threshold.
+        // A continuous fill spanning an eighth of the editor width is a surface, not a glyph stem.
+        let bandWidth = identifyBands ? max(1, (x1 - x0) / 8) : nil
+        func add(_ span: Range<Int>, row: Int) {
+            if let bandWidth {
+                var previous: UInt32 = 0
+                var run = 0
+                for x in span {
+                    let color = rgb[row + x]
+                    counts[color, default: 0] += 1
+                    run = color == previous ? run + 1 : 1
+                    previous = color
+                    if run == bandWidth { bands.insert(color) }
+                }
+            } else {
+                for x in span { counts[rgb[row + x], default: 0] += 1 }
+            }
+        }
         for y in y0..<y1 {
             let row = y * width
             if y >= maskY0 && y < maskY1 {
-                for x in x0..<maskX0 { counts[rgb[row + x], default: 0] += 1 }
-                for x in maskX1..<x1 { counts[rgb[row + x], default: 0] += 1 }
+                add(x0..<maskX0, row: row)
+                add(maskX1..<x1, row: row)
             } else {
-                for x in x0..<x1 { counts[rgb[row + x], default: 0] += 1 }
+                add(x0..<x1, row: row)
             }
         }
-        return counts
+        return (counts, bands)
     }
 
     private static func channels(_ color: UInt32) -> (Double, Double, Double) {

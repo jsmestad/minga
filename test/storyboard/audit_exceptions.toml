@@ -609,16 +609,6 @@ reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["code.diagnostics.none"]
-frontend = "macos"
-part = "breadcrumb.segment"
-rule = "contrast"
-theme = "catppuccin_latte"
-pairs = ["#9093a4 on #e6e9ef"]
-reason = "The visible fragment of a breadcrumb beside the picker has no full-coverage strokes in this capture."
-issue = 4137
-
-[[exception]]
 scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none"]
 frontend = "macos"
 part = "modeline.modePill"
