@@ -129,6 +129,7 @@ defmodule MingaAgent.RemoteAPITest do
 
     assert %{status: :stopped, continue_target: ^target} = Session.editor_snapshot(session)
     assert :ok = RemoteAPI.continue_stopped(session, token, second, target)
+
     assert %{stop_target: {^id, _request} = resumed, continue_target: nil} =
              Session.editor_snapshot(session)
 
