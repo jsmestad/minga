@@ -10,6 +10,8 @@ defmodule Minga.Buffer.Provenance.Run do
 
   A live run's text is in the document, so the run keeps only its length. A dead run (a tombstone) is not in the document, so it keeps its own text; restoring it puts that text back exactly. A tombstone takes no bytes in the document.
 
+  A zero-byte entry is a compacted replacement anchor. It carries no text and can never become live; its locator keeps the reachability of a draft that a later replacement may span.
+
   `Minga.Buffer.Provenance` is the only writer of runs.
   """
 
@@ -49,7 +51,7 @@ defmodule Minga.Buffer.Provenance.Run do
 
   @type t :: %__MODULE__{
           id: Locator.t(),
-          bytes: pos_integer(),
+          bytes: non_neg_integer(),
           author: author(),
           group: group_id() | nil,
           deletions: [group_id()],

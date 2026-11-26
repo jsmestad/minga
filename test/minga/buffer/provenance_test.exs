@@ -283,6 +283,270 @@ defmodule Minga.Buffer.ProvenanceTest do
       assert Document.content(rejected) == "ac"
     end
 
+    test "a replacement pulls compacted drafts only strictly inside its range" do
+      document = Document.new("LxR")
+      {first, prov} = Provenance.open_group(Provenance.new(3), @task, @step_one)
+      {document, prov} = edit(document, prov, first, 1, "x", "AB")
+      {second, prov} = Provenance.open_group(prov, @task, @step_two)
+      {document, prov} = edit(document, prov, second, 2, "", "S")
+      {document, prov} = edit(document, prov, second, 1, "A", "")
+      {document, prov} = edit(document, prov, second, 2, "B", "")
+      assert Document.content(document) == "LSR"
+      assert {:ok, prov, {^first, ^second}, _examined} = Provenance.compact_oldest(prov)
+      assert :none = Provenance.compact_oldest(prov)
+
+      for mode <- [:each, :batch],
+          {start, removed, expected} <- [{0, "LS", "R"}, {1, "S", "LxR"}] do
+        {you, branch} = Provenance.open_group(prov, :you, nil)
+        branch = Provenance.edit_all(branch, you, [{start, removed, "U"}], mode)
+
+        {:ok, changed} =
+          Document.splice_byte_range(document, start, byte_size(removed), "U", {0, 0})
+
+        {other, branch} =
+          Provenance.open_group(branch, {:minga, "other"}, {:minga, "other", "step"})
+
+        {changed, branch} = edit(changed, branch, other, start, "U", "")
+        branch = Provenance.discard(branch, other)
+        assert {:ok, rejected, _first, _prov} = Provenance.revert(branch, second, changed)
+        assert Document.content(rejected) == expected
+      end
+    end
+
+    test "rewriting one position repeatedly keeps bounded coverage metadata after compaction" do
+      for steps <- [20, 200], shape <- [:single, :split] do
+        initial = {Document.new("x"), Provenance.new(1), nil, 0}
+
+        {document, prov, latest, examined} =
+          Enum.reduce(1..steps, initial, fn n, {doc, prov, old, examined} ->
+            {next, prov} = Provenance.open_group(prov, @task, {:minga, "t1", "rewrite-#{n}"})
+            {doc, prov} = edit(doc, prov, next, 0, Document.content(doc), "ab")
+
+            {doc, prov} =
+              if shape == :split do
+                {doc, prov} = edit(doc, prov, next, 1, "", "!")
+                edit(doc, prov, next, 1, "!", "")
+              else
+                {doc, prov}
+              end
+
+            if old == nil do
+              {doc, prov, next, examined}
+            else
+              assert {:ok, prov, {^old, ^next}, visited} = Provenance.compact_oldest(prov)
+              {doc, prov, next, examined + visited}
+            end
+          end)
+
+        assert Provenance.run_count(prov) <= 5
+        assert map_size(Provenance.change_records(prov)) <= 3
+        assert examined <= 10 * steps
+        assert {:ok, original, _first, _prov} = Provenance.revert(prov, latest, document)
+        assert Document.content(original) == "x"
+
+        finalized = Provenance.discard(prov, latest)
+        assert Provenance.dead_bytes(finalized) == 0
+        assert Provenance.change_records(finalized) == %{}
+      end
+    end
+
+    test "a foreign replacement cannot erase an adjacent anchor it never covered" do
+      document = Document.new("KLpqx")
+      {first, prov} = Provenance.open_group(Provenance.new(5), @task, @step_one)
+      {document, prov} = edit(document, prov, first, 4, "x", "t")
+      {second, prov} = Provenance.open_group(prov, @task, @step_two)
+      {document, prov} = edit(document, prov, second, 2, "pqt", "s")
+      assert {:ok, prov, {^first, ^second}, _} = Provenance.compact_oldest(prov)
+
+      {third, prov} = Provenance.open_group(prov, @task, {:minga, "task-1", "call-3"})
+      {document, prov} = edit(document, prov, third, 2, "s", "")
+      {document, prov} = edit(document, prov, third, 2, "", "z")
+      assert {:ok, prov, {^second, ^third}, _} = Provenance.compact_oldest(prov)
+
+      {fourth, prov} = Provenance.open_group(prov, @task, {:minga, "task-1", "call-4"})
+      assert {:ok, document, _, prov} = Provenance.revert(prov, third, document)
+      {foreign, prov} = Provenance.open_group(prov, {:minga, "other"}, {:minga, "other", "1"})
+      {document, prov} = edit(document, prov, foreign, 4, "", "v")
+      {document, prov} = edit(document, prov, foreign, 1, "Lp", "U")
+      {document, prov} = edit(document, prov, foreign, 2, "qv", "")
+      assert {:ok, document, _, prov} = Provenance.revert(prov, foreign, document)
+      {document, prov} = edit(document, prov, :untracked, 2, "pq", "")
+      assert {:ok, document, _, prov} = Provenance.reapply(prov, foreign, document)
+      assert {:ok, document, _, prov} = Provenance.reapply(prov, third, document)
+      assert Document.content(document) == "KUz"
+      {document, prov} = edit(document, prov, fourth, 2, "z", "")
+      assert {:ok, compacted, {^third, ^fourth}, _} = Provenance.compact_oldest(prov)
+
+      for {branch, class} <- [{prov, [third, fourth]}, {compacted, [fourth]}] do
+        assert {:ok, document, _, branch} = Provenance.revert_all(branch, class, document)
+        {document, branch} = edit(document, branch, :untracked, 1, "U", "")
+        {document, branch} = edit(document, branch, :untracked, 1, "", "w")
+
+        {document, branch} =
+          Enum.reduce(class, {document, branch}, fn id, {doc, prov} ->
+            assert {:ok, doc, _, prov} = Provenance.reapply(prov, id, doc)
+            {doc, prov}
+          end)
+
+        assert Document.content(document) == "Kw"
+        {final, branch} = Provenance.open_group(branch, {:minga, "final"}, {:minga, "final", "1"})
+        {document, branch} = edit(document, branch, final, 0, "Kw", "Z")
+        {document, branch} = edit(document, branch, :untracked, 0, "Z", "")
+        assert {:ok, rejected, _, _} = Provenance.revert_all(branch, class, document)
+        assert Document.content(rejected) == ""
+      end
+    end
+
+    test "a replacement that sweeps only an anchor does not block its writer" do
+      {first, prov} = Provenance.open_group(Provenance.new(3), @task, @step_one)
+      prov = Provenance.edit(prov, first, 1, "x", "AB")
+      {other, prov} = Provenance.open_group(prov, {:minga, "other"}, {:minga, "other", "1"})
+      prov = Provenance.edit(prov, other, 2, "", "S")
+      {second, prov} = Provenance.open_group(prov, @task, @step_two)
+      prov = Provenance.edit(prov, second, 1, "A", "")
+      prov = Provenance.edit(prov, second, 2, "B", "")
+      assert {:ok, prov, {^first, ^second}, _} = Provenance.compact_oldest(prov)
+      assert {:ok, prov, {^first, ^second}, _} = Provenance.compact_oldest(prov)
+
+      {sweeper, prov} = Provenance.open_group(prov, {:minga, "new"}, {:minga, "new", "1"})
+      prov = Provenance.edit(prov, sweeper, 0, "LS", "U")
+      assert Provenance.blocker(prov, second, fn _, _ -> true end) == nil
+      refute second in Provenance.blocked_groups(prov, sweeper)
+    end
+
+    test "one-sided covers and pulls cannot erase the other piece of a compacted replacement" do
+      for link <- [:position, :pull] do
+        document = Document.new("KLxR")
+        {you, prov} = Provenance.open_group(Provenance.new(4), :you, nil)
+        {document, prov} = edit(document, prov, you, 2, "x", "XY")
+        {first, prov} = Provenance.open_group(prov, @task, @step_one)
+        {document, prov} = edit(document, prov, first, 2, "X", "AB")
+
+        {document, prov, removed} =
+          case link do
+            :position ->
+              {document, prov, "LA"}
+
+            :pull ->
+              {document, prov} = edit(document, prov, first, 2, "A", "s")
+              {document, prov, "Ls"}
+          end
+
+        {second, prov} = Provenance.open_group(prov, @task, @step_two)
+        {document, prov} = edit(document, prov, second, 1, removed, "U")
+        {document, prov} = edit(document, prov, second, 2, "B", "")
+        assert Document.content(document) == "KUYR"
+        assert {:ok, compacted, {^first, ^second}, _} = Provenance.compact_oldest(prov)
+
+        results =
+          for branch <- [prov, compacted] do
+            assert {:ok, document, _, branch} = Provenance.revert(branch, you, document)
+            {document, branch} = edit(document, branch, :untracked, 1, "U", "")
+            {document, branch} = edit(document, branch, :untracked, 1, "", "w")
+            assert {:ok, document, _, branch} = Provenance.reapply(branch, you, document)
+            {document, branch} = edit(document, branch, you, 1, "Y", "")
+            assert Document.content(document) == "KwR"
+
+            {final, branch} =
+              Provenance.open_group(branch, {:minga, "final"}, {:minga, "final", "1"})
+
+            {document, branch} = edit(document, branch, final, 0, "Kw", "Z")
+            {document, branch} = edit(document, branch, :untracked, 0, "Z", "")
+            assert {:ok, rejected, _, _} = Provenance.revert(branch, you, document)
+            Document.content(rejected)
+          end
+
+        assert results == ["R", "R"],
+               "different restoration for #{link} link: #{inspect(results)}"
+      end
+    end
+
+    test "losing a draft retains every member of its compactible chain" do
+      {first, prov} = Provenance.open_group(Provenance.new(4), @task, @step_one)
+      prov = Provenance.edit(prov, first, 2, "", "x")
+      {second, prov} = Provenance.open_group(prov, @task, @step_two)
+      prov = Provenance.edit(prov, second, 2, "x", "")
+      {third, prov} = Provenance.open_group(prov, @task, {:minga, "task-1", "call-3"})
+      prov = Provenance.edit(prov, third, 1, "LR", "")
+
+      assert {:ok, compacted, {^first, ^second}, _} = Provenance.compact_oldest(prov)
+      assert {:ok, _, {^second, ^third}, _} = Provenance.compact_oldest(compacted)
+
+      assert draft_component(prov, [third], MapSet.new()) == MapSet.new([first, second, third])
+      detached = Provenance.edit(prov, :untracked, 0, "AB", "")
+      assert Provenance.run_count(detached) == 0
+
+      assert draft_component(detached, [first], MapSet.new()) ==
+               MapSet.new([first, second, third])
+
+      detached = Provenance.discard(detached, second)
+      assert draft_neighbours(detached, first) == MapSet.new([third])
+    end
+
+    test "detaching a draft cannot join steps across an intervening rewrite" do
+      {first, prov} = Provenance.open_group(Provenance.new(4), @task, @step_one)
+      prov = Provenance.edit(prov, first, 2, "", "x")
+      {second, prov} = Provenance.open_group(prov, @task, @step_two)
+      prov = Provenance.edit(prov, second, 2, "x", "")
+      {foreign, prov} = Provenance.open_group(prov, {:minga, "other"}, {:minga, "other", "1"})
+      prov = Provenance.edit(prov, foreign, 1, "LR", "")
+      assert {:ok, document, _, prov} = Provenance.revert(prov, foreign, Document.new("AB"))
+      assert Document.content(document) == "ALRB"
+      {third, prov} = Provenance.open_group(prov, @task, {:minga, "task-1", "call-3"})
+      prov = Provenance.edit(prov, third, 1, "LR", "")
+      assert {:ok, compacted, {^first, ^second}, _} = Provenance.compact_oldest(prov)
+      assert :none = Provenance.compact_oldest(compacted)
+
+      expected = MapSet.new([first, second])
+      assert draft_component(prov, [first], MapSet.new()) == expected
+      detached = Provenance.edit(prov, :untracked, 0, "AB", "")
+      detached = Provenance.discard(detached, foreign)
+      assert draft_component(detached, [first], MapSet.new()) == expected
+      assert draft_neighbours(detached, third) == MapSet.new()
+
+      for pads <- [0, 40], ids <- [[foreign, second], [second, foreign]] do
+        padded =
+          Enum.reduce(1..pads//1, prov, fn n, acc ->
+            task = "pad-#{n}"
+            {step, acc} = Provenance.open_group(acc, {:minga, task}, {:minga, task, "step"})
+            Provenance.edit(acc, step, Provenance.size(acc), "", "z")
+          end)
+
+        discarded = Provenance.discard_all(padded, ids)
+        assert draft_neighbours(discarded, first) == MapSet.new()
+        assert draft_neighbours(discarded, third) == MapSet.new()
+      end
+    end
+
+    test "detached drafts keep dense histories connected with linear traversal work" do
+      for size <- [8, 32] do
+        bars = String.duplicate("|", size + 1)
+        inserted = String.duplicate("x", size)
+
+        {prov, ids} =
+          Enum.reduce(1..size, {Provenance.new(byte_size(bars)), []}, fn step, {prov, ids} ->
+            {id, prov} = Provenance.open_group(prov, @task, {:minga, "task-1", "insert-#{step}"})
+            changes = for gap <- 0..(size - 1), do: {gap * step + 1, "", "x"}
+            {Provenance.edit_all(prov, id, changes, :batch), [id | ids]}
+          end)
+
+        {prov, ids} =
+          Enum.reduce(1..size, {prov, ids}, fn gap, {prov, ids} ->
+            {id, prov} = Provenance.open_group(prov, @task, {:minga, "task-1", "delete-#{gap}"})
+            {Provenance.edit(prov, id, gap, inserted, ""), [id | ids]}
+          end)
+
+        detached = Provenance.edit_all(prov, :untracked, [{0, bars, ""}], :batch)
+        assert Provenance.run_count(detached) == 0
+        assert draft_component(detached, [hd(ids)], MapSet.new()) == MapSet.new(ids)
+
+        visits =
+          Enum.sum_by(ids, fn id -> MapSet.size(draft_neighbours(detached, id)) end)
+
+        assert visits <= 2 * (length(ids) - 1)
+      end
+    end
+
     test "a step that rewrites its own replacement still covers the original when you delete the rewrite" do
       document = Document.new("ab")
       {step, prov} = Provenance.open_group(Provenance.new(2), @task, @step_one)
@@ -675,6 +939,32 @@ defmodule Minga.Buffer.ProvenanceTest do
       end
     end
 
+    test "a replacement after compaction still covers the older text behind a discarded draft" do
+      assert %{text: "b"} =
+               oracle_check(
+                 "aaaa",
+                 [
+                   {31, 481, 0, 6, "\n\n\n"},
+                   {13, 106, 0, 3, "c"},
+                   {23, 809, 5, 7, "\n"},
+                   {47, 665, 5, 12, "ab\n"},
+                   {31, 438, 2, 8, "cba"},
+                   {19, 234, 0, 6, "\n"},
+                   {40, 445, 5, 11, "cc"},
+                   {11, 307, 0, 3, "a"},
+                   {26, 441, 5, 8, ""},
+                   {11, 896, 0, 8, "ac"},
+                   {95, 832, 0, 5, "\n\n"},
+                   {2, 387, 5, 7, "\n"},
+                   {44, 620, 2, 4, "\n"},
+                   {47, 277, 3, 0, "b"},
+                   {78, 557, 2, 11, "c\n"},
+                   {68, 271, 3, 6, "bc"}
+                 ],
+                 false
+               )
+    end
+
     # The oracle for fix A. The model never drops, absorbs or compacts a byte; production drops text that can never be
     # live again, merges steps and settles discarded groups, all interleaved at random. Tasks and your groups move as
     # units, as the history moves them, and each side decides on its own whether an undo or a reject is refused.
@@ -695,7 +985,7 @@ defmodule Minga.Buffer.ProvenanceTest do
 
     # The lifecycle of a record with no made runs left, generated on purpose: few tasks with long chains of steps, so
     # compaction merges often; undo and redo around Minga's steps; discards of owners and of pullers.
-    property "records outlive their text only while pulled, through compaction and discard, matching the model" do
+    property "replacement coverage survives compaction and finalization exactly as in the model" do
       Process.delete(:oracle)
 
       check all(
@@ -713,7 +1003,7 @@ defmodule Minga.Buffer.ProvenanceTest do
             :skips,
             :runless,
             :mixed_owners,
-            :owner_renamed,
+            :anchored,
             :owner_discarded,
             :puller_discarded
           ] do
@@ -1332,6 +1622,8 @@ defmodule Minga.Buffer.ProvenanceTest do
     records = Provenance.change_records(world.prov)
     if Enum.any?(records, fn {_id, r} -> is_integer(r.owner) end), do: count(:runless)
 
+    if Enum.any?(Provenance.runs(world.prov), &(&1.bytes == 0)), do: count(:anchored)
+
     writers =
       for run <- Provenance.runs(world.prov), run.made_by != nil, reduce: %{} do
         acc -> Map.update(acc, run.made_by, MapSet.new([run.group]), &MapSet.put(&1, run.group))
@@ -1648,9 +1940,8 @@ defmodule Minga.Buffer.ProvenanceTest do
       :none ->
         world
 
-      {:ok, prov, {old, _new}, _examined} ->
+      {:ok, prov, _, _examined} ->
         count(:merges)
-        if Map.has_key?(Provenance.owned_changes(world.prov), old), do: count(:owner_renamed)
         oracle_compact(%{world | prov: prov}, slices - 1)
     end
   end
@@ -1759,6 +2050,21 @@ defmodule Minga.Buffer.ProvenanceTest do
 
     {document, prov}
   end
+
+  defp draft_component(_prov, [], seen), do: seen
+
+  defp draft_component(prov, [id | rest], seen) do
+    if MapSet.member?(seen, id),
+      do: draft_component(prov, rest, seen),
+      else:
+        draft_component(
+          prov,
+          Enum.to_list(draft_neighbours(prov, id)) ++ rest,
+          MapSet.put(seen, id)
+        )
+  end
+
+  defp draft_neighbours(prov, id), do: elem(Provenance.draft_partners(prov, id, %{}), 0)
 
   # PROPERTY_RUNS scales every property here, for the high-count runs a review asks for.
   defp runs(count), do: count * String.to_integer(System.get_env("PROPERTY_RUNS", "1"))
