@@ -6029,12 +6029,18 @@ defmodule MingaAgent.Session do
                       elem(placement, 0) in [:before, :after] and
                       is_queue_identity(elem(placement, 1)))
 
+  defguardp is_restore_position(position)
+            when is_queue_position(position) or
+                   (is_tuple(position) and tuple_size(position) == 2 and
+                      elem(position, 0) == :empty_queue and
+                      (is_nil(elem(position, 1)) or is_queue_identity(elem(position, 1))))
+
   @spec place_queued_input_reply(state(), String.t(), {pos_integer(), pos_integer()}, term()) ::
           {:reply, :ok | {:error, term()}, state()}
   defp place_queued_input_reply(state, record_id, identity, placement)
        when is_queue_position(placement) or
               (is_tuple(placement) and tuple_size(placement) == 2 and
-                 elem(placement, 0) == :removed and is_queue_position(elem(placement, 1))) do
+                 elem(placement, 0) == :removed and is_restore_position(elem(placement, 1))) do
     with :ok <- validate_composer_record(state, record_id),
          {:ok, execution} <-
            TurnExecution.place_queued_input(state.turn_execution, identity, placement),

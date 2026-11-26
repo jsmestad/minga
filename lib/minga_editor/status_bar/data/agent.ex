@@ -7,9 +7,10 @@ defmodule MingaEditor.StatusBar.Data.Agent do
   @type t :: %__MODULE__{
           model_name: String.t(),
           session_status: session_status(),
-          message_count: non_neg_integer()
+          message_count: non_neg_integer(),
+          queue_focused?: boolean()
         }
 
   @enforce_keys [:model_name, :session_status, :message_count]
-  defstruct @enforce_keys
+  defstruct @enforce_keys ++ [queue_focused?: false]
 end

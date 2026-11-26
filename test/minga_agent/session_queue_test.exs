@@ -496,6 +496,61 @@ defmodule MingaAgent.SessionQueueTest do
     end
 
     @tag :tmp_dir
+    test "putting a message back in its empty queue requires the displayed cross-queue anchor", %{
+      tmp_dir: dir
+    } do
+      session =
+        start_test_session(
+          provider: SessionSlowMockProvider,
+          persist?: true,
+          session_store_dir: dir
+        )
+
+      Session.subscribe(session)
+      assert :ok = Session.send_prompt(session, "First")
+      assert_receive {:agent_event, ^session, {:status_changed, :thinking}}, @event_timeout
+      assert {:queued, :steering} = Session.send_prompt(session, "steer here")
+      assert {:queued, :follow_up} = Session.queue_follow_up(session, "put me back")
+      record = Session.session_id(session)
+
+      assert {:ok, %{pending: [%{identity: anchor, kind: :steering}, %{identity: source}]}} =
+               Session.queue_contents(session, record)
+
+      assert {:ok, 0} = Session.change_queued_input(session, record, source, :remove)
+      placement = {:removed, {:empty_queue, anchor}}
+      assert :ok = Session.place_queued_input(session, record, source, placement)
+      assert Session.get_queued_messages(session) == {["steer here"], ["put me back"]}
+
+      assert {:ok, %{pending: [_, %{identity: restored}]}} =
+               Session.queue_contents(session, record)
+
+      assert {:ok, 0} = Session.change_queued_input(session, record, restored, :remove)
+      assert :ok = Session.change_queued_input(session, record, anchor, {:replace_text, "edited"})
+
+      assert {:error, :stale_queue_revision} =
+               Session.place_queued_input(session, record, restored, placement)
+
+      assert {:ok, %{pending: [%{identity: new_anchor}]}} =
+               Session.queue_contents(session, record)
+
+      assert {:queued, :follow_up} = Session.queue_follow_up(session, "new arrival")
+      placement = {:removed, {:empty_queue, new_anchor}}
+
+      assert {:error, :destination_changed} =
+               Session.place_queued_input(session, record, restored, placement)
+
+      assert {:ok, 0} = Session.change_queued_input(session, record, new_anchor, :remove)
+
+      assert {:error, :anchor_gone} =
+               Session.place_queued_input(session, record, restored, placement)
+
+      assert {:ok, %{removed: [_, %{identity: ^restored}]}} =
+               Session.queue_contents(session, record)
+
+      assert Session.get_queued_messages(session) == {[], ["new arrival"]}
+    end
+
+    @tag :tmp_dir
     test "one queued message moves into the composer draft and the others stay queued", %{
       tmp_dir: dir
     } do

@@ -228,6 +228,39 @@ defmodule MingaEditor.Journeys.ComposerKeysTest do
     assert Session.get_queued_messages(session) == {[], ["first"]}
   end
 
+  test "keyboard and pointer put a message back into its empty queue from the other queue", %{
+    editor_ctx: ctx,
+    session: session
+  } do
+    send_keys_sync(ctx, "start")
+    send_key_sync(ctx, 13, @cmd)
+    await_working(ctx)
+    assert {:queued, :steering} = Session.send_prompt(session, "steer")
+    queue(ctx, "later")
+    send_keys_sync(ctx, "<Esc><Esc><SPC>aqq")
+    await_queue(ctx, ["steer", "later"], [])
+
+    send_keys_sync(ctx, "jdd")
+    await_queue(ctx, ["steer"], ["later"])
+    send_keys_sync(ctx, "P")
+    await_queue(ctx, ["steer", "later"], [])
+
+    send_keys_sync(ctx, "jdd")
+
+    assert %{
+             origin: {workspace, ^session, record},
+             contents: %{pending: [anchor], removed: [removed]}
+           } = await_queue(ctx, ["steer"], ["later"]).workspace.agent_ui.queue
+
+    send_gui_action(
+      ctx,
+      {:agent_queue_action, {workspace, record}, :paste_after, anchor.identity, removed.identity}
+    )
+
+    await_queue(ctx, ["steer", "later"], [])
+    assert Session.get_queued_messages(session) == {["steer"], ["later"]}
+  end
+
   for {label, stop} <- [{"SPC a s", "<Esc><Esc><SPC>as"}, {"Cmd+.", :cmd_period}] do
     test "#{label} stops, keeps the queue and the draft, and the modeline says Minga stopped", %{
       editor_ctx: ctx,

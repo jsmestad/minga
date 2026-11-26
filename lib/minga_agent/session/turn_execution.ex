@@ -48,8 +48,11 @@ defmodule MingaAgent.Session.TurnExecution do
   @type queue_position ::
           {:before | :after, anchor :: {pos_integer(), pos_integer()}} | :end
 
+  @type restore_position ::
+          queue_position() | {:empty_queue, anchor :: {pos_integer(), pos_integer()} | nil}
+
   @typedoc "A position, optionally requiring the displayed source to still be removed."
-  @type queue_placement :: queue_position() | {:removed, queue_position()}
+  @type queue_placement :: queue_position() | {:removed, restore_position()}
   @max_pending_inputs 32
   @max_withdrawn_inputs 8
   @max_pending_bytes 16 * 1024 * 1024
@@ -542,12 +545,13 @@ defmodule MingaAgent.Session.TurnExecution do
           | :not_removed
           | :anchor_gone
           | :different_queue
+          | :destination_changed
           | :prompt_queue_full
 
   @doc """
   Puts a queued input at a place in its own queue, at the displayed revision.
 
-  A pending input moves. An input its user removed goes back into the queue it left with a new revision. Both the source and its anchor must match the displayed revisions. An anchor in the other queue is refused as `:different_queue`. Nothing changes on a refusal.
+  A pending input moves. An input its user removed goes back into the queue it left with a new revision. Both the source and its anchor must match the displayed revisions. A cross-queue anchor is allowed only when restoring into a queue that was displayed empty and is still empty. Nothing changes on a refusal.
   """
   @spec place_queued_input(t(), {pos_integer(), pos_integer()}, queue_placement()) ::
           {:ok, t()} | {:error, queue_place_error()}
@@ -560,7 +564,7 @@ defmodule MingaAgent.Session.TurnExecution do
   @spec place_queued_input(
           t(),
           {pos_integer(), pos_integer()},
-          queue_position(),
+          restore_position(),
           :either | :withdrawn
         ) ::
           {:ok, t()} | {:error, queue_place_error()}
@@ -585,18 +589,19 @@ defmodule MingaAgent.Session.TurnExecution do
           t(),
           {:pending | :withdrawn, prompt_kind()},
           queued_input(),
-          queue_position()
+          restore_position()
         ) ::
           {:ok, t()}
-          | {:error, :anchor_gone | :different_queue | :stale_queue_revision | :prompt_queue_full}
+          | {:error, queue_place_error()}
   # A pending input placed beside itself stays where it is.
   defp place_taken(
          execution,
          _rest,
          {:pending, _kind},
          {id, revision, _, _, _},
-         {_, {id, anchor_revision}}
-       ) do
+         {side, {id, anchor_revision}}
+       )
+       when side in [:before, :after] do
     if revision == anchor_revision, do: {:ok, execution}, else: {:error, :stale_queue_revision}
   end
 
@@ -692,8 +697,8 @@ defmodule MingaAgent.Session.TurnExecution do
     end
   end
 
-  @spec insert_placed(t(), prompt_kind(), queued_input(), queue_position()) ::
-          {:ok, t()} | {:error, :anchor_gone | :different_queue | :stale_queue_revision}
+  @spec insert_placed(t(), prompt_kind(), queued_input(), restore_position()) ::
+          {:ok, t()} | {:error, queue_place_error()}
   defp insert_placed(execution, kind, entry, :end) do
     field = queue_field(kind)
     {:ok, %{execution | field => Map.fetch!(execution, field) ++ [entry]}}
@@ -710,6 +715,29 @@ defmodule MingaAgent.Session.TurnExecution do
 
       index ->
         {:ok, %{execution | field => List.insert_at(queue, placed_index(index, side), entry)}}
+    end
+  end
+
+  defp insert_placed(execution, kind, entry, {:empty_queue, anchor}) do
+    field = queue_field(kind)
+
+    with :ok <- validate_restore_anchor(execution, anchor) do
+      case Map.fetch!(execution, field) do
+        [] -> {:ok, %{execution | field => [entry]}}
+        [_ | _] -> {:error, :destination_changed}
+      end
+    end
+  end
+
+  @spec validate_restore_anchor(t(), {pos_integer(), pos_integer()} | nil) ::
+          :ok | {:error, :anchor_gone | :stale_queue_revision}
+  defp validate_restore_anchor(_execution, nil), do: :ok
+
+  defp validate_restore_anchor(execution, {id, revision}) do
+    case find_pending_entry(execution, id) do
+      {:ok, _field, _queue, {^id, ^revision, _, _, _}} -> :ok
+      {:ok, _field, _queue, _changed} -> {:error, :stale_queue_revision}
+      {:error, _reason} -> {:error, :anchor_gone}
     end
   end
 

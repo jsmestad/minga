@@ -60,6 +60,32 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       assert ids(@base_data) == [:mode, :filename, :filetype, :position]
     end
 
+    test "the focused queue names itself early even when the file segment is omitted or configured right" do
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [:mode, :needs_you])
+
+        data =
+          Map.merge(@full_data, %{
+            file_name: "*minga-queue*",
+            dirty_marker: "",
+            queue_focused?: true
+          })
+
+        for right_names <- [[:position], [:filename, :position]] do
+          Options.set(options, :modeline_right_segments, right_names)
+          %{left: left, right: right} = Modeline.gui_segments(data, @theme)
+
+          assert [
+                   %Segment{id: :mode},
+                   %Segment{id: :filename, text: "*minga-queue*", drop: 0},
+                   %Segment{id: :needs_you}
+                 ] = left
+
+          assert [%Segment{id: :position}] = right
+        end
+      end)
+    end
+
     test "segments carry words without padding; the frontends own the gaps" do
       assert segment_text(segments(@full_data)) ==
                "NORMAL Needs you retry.ex ● change 1/2 main +11 Minga working 2/3 1 2 Elixir 240:31"

@@ -51,7 +51,14 @@ defmodule MingaEditor.Agent.QueueWorkflow do
   @doc "Identifies the exact saved conversation from the active workspace and attached connection."
   @spec current_origin(State.t()) :: origin() | nil
   def current_origin(
-        %State{workspace: %{agent_ui: %{connection: %{persistent_drafts?: true}}}} = state
+        %State{
+          workspace: %{
+            agent_ui: %{
+              chat_lifecycle: {:conversation, session},
+              connection: %{target: %{session: session}, persistent_drafts?: true}
+            }
+          }
+        } = state
       ) do
     PromptInput.submission_owner(
       Runtime.review_scope(state.shell_runtime),
@@ -308,14 +315,16 @@ defmodule MingaEditor.Agent.QueueWorkflow do
           [QueuedInputSummary.t()],
           :before | :after,
           QueuedInputSummary.t() | nil
-        ) :: {:ok, TurnExecution.queue_position()} | {:error, :different_queue}
+        ) :: {:ok, TurnExecution.restore_position()} | {:error, :different_queue}
   defp pasting_position(kind, _pending, side, %QueuedInputSummary{kind: kind, identity: identity}),
        do: {:ok, {side, identity}}
 
-  defp pasting_position(_kind, _pending, _side, nil), do: {:ok, :end}
+  defp pasting_position(_kind, _pending, _side, nil), do: {:ok, {:empty_queue, nil}}
 
-  defp pasting_position(kind, pending, _side, _row) do
-    if Enum.any?(pending, &(&1.kind == kind)), do: {:error, :different_queue}, else: {:ok, :end}
+  defp pasting_position(kind, pending, _side, %QueuedInputSummary{identity: identity}) do
+    if Enum.any?(pending, &(&1.kind == kind)),
+      do: {:error, :different_queue},
+      else: {:ok, {:empty_queue, identity}}
   end
 
   @spec edit_message(State.t(), origin(), QueuedInputSummary.identity()) :: State.t()
@@ -540,6 +549,9 @@ defmodule MingaEditor.Agent.QueueWorkflow do
 
   defp refusal(:different_queue),
     do: "Steering and next-turn messages cannot be moved between queues."
+
+  defp refusal(:destination_changed),
+    do: "That queue is no longer empty. Select a row in it before putting the message back."
 
   defp refusal(:prompt_queue_full), do: "The queue is full. The removed message was not put back."
   defp refusal(:invalid_queue_edit), do: "That queue action is not available for this message."

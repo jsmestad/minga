@@ -152,7 +152,11 @@ The composer is a real buffer. It starts in Insert; `↩` is a newline in Insert
 
 `*minga-queue*` sits between the transcript and the composer. It appears when there is a message waiting or removed, or when `SPC a q q` focuses it. Each row is a whole message with its attachments. `dd` removes it, `p` or `P` puts it back after or before another row in the same queue, and `↩` moves it into the local composer for editing. In a remote conversation, `↩` opens a separate editor and keeps the message queued. `q` returns focus to the composer or transcript. The list scrolls within its block rather than pushing the composer off screen.
 
+While the queue has focus, both frontends keep its name near the start of the modeline, even if the normal filename segment is hidden or on the right. If the conversation disconnects, the queue releases keyboard focus and hides. Reconnecting shows pending messages without focusing them.
+
 The queue labels removals "Removed, not sent." They can go back into the queue, but Minga keeps only the newest eight, subject to a combined size limit. On the ninth removal, or when that size limit removes earlier entries, Minga says which count is gone for good. Removed entries live only in memory and do not survive closing Minga.
+
+If a removed message's original queue is empty, `p` and `P` can put it back while another queue is selected. If a new message arrives in the destination or the selected message changes before the action runs, Minga leaves the removed message alone.
 
 Minga's replies are markdown, but the frontends never parse it. The BEAM sends styled spans (headings, emphasis, code, links) as part of the semantic model, and each frontend draws them: native text on macOS, Lip Gloss in the TUI. Glamour is not used, because parsing markdown in Go would duplicate meaning on the frontend.
 

@@ -3,6 +3,7 @@ defmodule MingaEditor.Agent.QueueSurfaceTest do
 
   alias MingaAgent.Session.QueuedInputSummary
   alias MingaEditor.Agent.QueueSurface
+  alias MingaEditor.Agent.UIState
 
   test "opening and closing restores the first focus, even when the queue opens twice" do
     origin = {1, self(), "saved"}
@@ -106,6 +107,36 @@ defmodule MingaEditor.Agent.QueueSurfaceTest do
     assert :stale = QueueSurface.finish_edit(reopened, old)
     assert {:current, settled} = QueueSurface.finish_edit(reopened, current)
     assert :stale = QueueSurface.finish_edit(settled, current)
+  end
+
+  test "losing the conversation retires queue rows, focus, and in-flight edits" do
+    origin = {1, self(), "saved"}
+    edit = make_ref()
+
+    queue =
+      %QueueSurface{}
+      |> QueueSurface.bind(origin)
+      |> refresh(origin, [row(1)])
+      |> QueueSurface.open(:composer)
+      |> QueueSurface.begin_edit(edit)
+
+    ui =
+      UIState.new()
+      |> UIState.transition_chat({:conversation, self()})
+      |> UIState.install_queue(queue)
+
+    for lifecycle <- [:starting, :unavailable] do
+      assert %{queue: retired} = UIState.transition_chat(ui, lifecycle)
+      refute QueueSurface.visible?(retired)
+      refute QueueSurface.focused?(retired)
+      assert :stale = QueueSurface.finish_edit(retired, edit)
+      assert :stale_row = QueueSurface.select(retired, {1, 1})
+
+      reconnected = retired |> QueueSurface.bind(origin) |> refresh(origin, [row(1)])
+      assert QueueSurface.visible?(reconnected)
+      refute QueueSurface.focused?(reconnected)
+      assert :stale = QueueSurface.finish_edit(reconnected, edit)
+    end
   end
 
   defp refresh(queue, origin, pending),

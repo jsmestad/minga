@@ -85,7 +85,7 @@ defmodule MingaEditor.Agent.UIState do
   @spec transition_chat(t(), :starting | {:conversation, pid()} | :unavailable) :: t()
   def transition_chat(%__MODULE__{} = state, lifecycle)
       when lifecycle in [:starting, :unavailable],
-      do: %{state | chat_lifecycle: lifecycle}
+      do: retire_chat_queue(state, lifecycle)
 
   def transition_chat(%__MODULE__{} = state, {:conversation, session} = lifecycle)
       when is_pid(session),
@@ -94,7 +94,7 @@ defmodule MingaEditor.Agent.UIState do
   @doc "Shows a failed start with its cause and remedy, keeping the draft."
   @spec fail_start(t(), StartFailure.t()) :: t()
   def fail_start(%__MODULE__{} = state, %StartFailure{} = failure),
-    do: %{state | chat_lifecycle: {:failed, failure}}
+    do: retire_chat_queue(state, {:failed, failure})
 
   @doc """
   Restores a lifecycle observed earlier on this value, such as one saved across an event dispatch.
@@ -106,6 +106,12 @@ defmodule MingaEditor.Agent.UIState do
     do: fail_start(state, failure)
 
   def restore_chat(%__MODULE__{} = state, lifecycle), do: transition_chat(state, lifecycle)
+
+  @spec retire_chat_queue(t(), chat_lifecycle()) :: t()
+  defp retire_chat_queue(state, lifecycle) do
+    state = blur_queue(state)
+    %{state | chat_lifecycle: lifecycle, queue: QueueSurface.bind(state.queue, nil)}
+  end
 
   @doc """
   The model label the chat header shows for this lifecycle.

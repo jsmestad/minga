@@ -235,7 +235,11 @@ func TestAgentQueueNarrowViewportKeepsComposerAndScrollsLocally(t *testing.T) {
 	status := protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{
 		Opcode: generated.OPGuiStatusBar, Status: protocol.StatusBar{
 			ContentKind: 1, Agent: &protocol.StatusAgent{}, Filename: "*minga-queue*",
-			Left: []protocol.StatusSegment{{Name: "mode", Text: "NORMAL"}},
+			Left: []protocol.StatusSegment{
+				{Name: "mode", Text: "NORMAL"},
+				{Name: "filename", Text: "*minga-queue*"},
+				{Name: "optional", Text: "This optional segment cannot fit", Drop: 1},
+			},
 		},
 	}}
 	model = commitQueueTestModel(t, model, queue, focus, status)
@@ -248,8 +252,8 @@ func TestAgentQueueNarrowViewportKeepsComposerAndScrollsLocally(t *testing.T) {
 	if !strings.Contains(painted, chat.Prompt) || !strings.Contains(painted, "Waiting 30") || strings.Contains(painted, "Waiting 01") {
 		t.Fatalf("wrong small terminal contents: %q", painted)
 	}
-	if footer := strings.Split(painted, "\n")[model.layout.footer.Y]; !strings.Contains(footer, "*minga-queue*") {
-		t.Fatalf("agent variant modeline lost the queue name: %q", footer)
+	if footer := strings.Split(painted, "\n")[model.layout.footer.Y]; !strings.Contains(footer, "NORMAL") || !strings.Contains(footer, "*minga-queue*") || strings.Contains(footer, "optional") {
+		t.Fatalf("narrow agent modeline did not keep the required segments: %q", footer)
 	}
 	start := model.queueScroll.first
 	wheel := tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: v.box.X, Y: v.box.Y}

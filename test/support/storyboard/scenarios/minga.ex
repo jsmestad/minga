@@ -117,6 +117,10 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
   @spec queue_focus(Model.t()) :: Model.t()
   defp queue_focus(%Model{} = model) do
     assert Model.open?(model, :agent_queue) and Model.open?(model, :agent_chat)
+
+    assert [%{id: :mode}, %{id: :filename, text: "*minga-queue*", drop: 0} | _] =
+             Model.modeline_segments(model)
+
     assert model.ui.status_bar.data.file.name == "*minga-queue*"
     refute model.ui.agent_chat.input_focused
     model |> assert_focus(:queue) |> assert_mode(:normal)
