@@ -115,7 +115,7 @@ struct AgentQueueView: View {
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                     Text(hint.key)
-                        .font(Typography.monospacedSmall)
+                        .font(Typography.font(.small, weight: .bold, design: .monospaced))
                         .foregroundStyle(theme.agentTextFg)
                         .anatomyPart("queue.hintKey", text: hint.key, font: .small, monospaced: true)
                     Text(hint.label)
