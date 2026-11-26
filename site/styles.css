@@ -5466,3 +5466,140 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
 .essay-details-body > *:last-child {
   margin-bottom: 0;
 }
+
+/* Phones and other touch screens. Wording and hit areas follow the kind of pointer, not the width: a narrow desktop window still has a keyboard and a mouse. */
+
+.when-touch {
+  display: none;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .when-keys {
+    display: none;
+  }
+
+  .when-touch {
+    display: inline;
+  }
+
+  /* The label on the file and the hint over the buttons ask for keys. A touch screen has none, and the caption says what to tap, so both go and the button row keeps one height. */
+  .lk-lab.lab-live .lk-cue,
+  .ca-controls .lab-focus-cue,
+  .lk-controls .lab-focus-cue {
+    display: none;
+  }
+
+  .ca-controls,
+  .lk-controls {
+    min-height: 0;
+  }
+
+  /* The play button goes after the last step. It keeps its room, and the keys keep their own row, so the row is one height from the first step to the last. */
+  .ca-lab .ca-controls .lab-control[hidden],
+  .lk-lab .lk-controls .lab-control[hidden] {
+    display: block !important;
+    visibility: hidden;
+  }
+
+  /* The key row is as tall empty as it is with a key in it. */
+  .ca-controls .lab-keycast,
+  .lk-controls .lab-keycast {
+    flex-basis: 100%;
+    min-height: 1.75em;
+  }
+}
+
+@media (pointer: coarse) {
+  /* A finger needs about 44px. Each control grows to that height and keeps its look. */
+  .theme-toggle,
+  .nav-toggle,
+  .lab-control,
+  .seg-btn,
+  .code-tab,
+  .builder-select {
+    min-height: 2.75rem;
+  }
+
+  .theme-toggle,
+  .nav-toggle {
+    padding-inline: 0.8rem;
+  }
+
+  .seg-btn {
+    padding-inline: 0.9rem;
+  }
+
+  .copy-btn {
+    min-height: 2.5rem;
+    min-width: 3.5rem;
+  }
+
+  .footer-links {
+    row-gap: 0;
+  }
+
+  .footer-links a,
+  .stage-jumps a,
+  .learn-breadcrumb a,
+  .hero-install-more {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.75rem;
+  }
+
+  .stage-jumps {
+    row-gap: 0;
+  }
+
+  /* The link rows above already hold 44px, so the space around them shrinks by the height they gained. */
+  .learn-breadcrumb {
+    margin-block: -0.75rem -0.1rem;
+  }
+
+  .builder-check {
+    align-items: center;
+    min-height: 2.75rem;
+  }
+
+  .builder-check input {
+    width: 1.25rem;
+    height: 1.25rem;
+    margin-top: 0;
+    flex-shrink: 0;
+  }
+
+  /* iOS zooms the page when a focused field has text under 16px. */
+  .builder-select {
+    font-size: 1rem;
+  }
+}
+
+@media (max-width: 680px) {
+  /* A lab is taller than a phone screen, so its buttons stay at the bottom of the screen while the lab is in view: the reader taps and watches the file change. */
+  .lab-live .lab-timeline-controls {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    margin-inline: -1rem;
+    padding: 0.6rem 1rem calc(0.6rem + env(safe-area-inset-bottom, 0px));
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+  }
+
+  /* The install tabs scroll sideways. The fade on the right edge says there are more, and the space after the last tab lets it clear the fade. */
+  .code-tab-list {
+    padding-right: 2rem;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
+  }
+
+  /* No label goes under 11px on a phone. */
+  .brand-version,
+  .lab-sim-label,
+  .lesson-tag-shipped,
+  .lesson-tag-planned,
+  .topo-pill,
+  .lens-k {
+    font-size: 0.6875rem;
+  }
+}
