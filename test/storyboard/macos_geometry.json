@@ -18,7 +18,7 @@
         },
         "agent_chat": {
           "cols": 179,
-          "rows": 44,
+          "rows": 43,
           "prompt": {"cols": 173, "rows": 8}
         },
         "agent_chat+agent_activity": {
