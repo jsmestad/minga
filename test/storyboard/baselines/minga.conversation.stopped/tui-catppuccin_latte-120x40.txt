@@ -17,10 +17,10 @@ Spaces · folder minga.conversation.stopped (1 tab) · ▎cpu A 429 with usage_l
    Minga                                                                                     │ │ ─── Needs attention ─│
      A 429 with usage_limit_reached is its own case. I'll carry the plan, window and reset   │ │ Error    Could not ru│
      time on the error.                                                                      │ │ ─── Hints ───────────│
-   ● Read lib/native.ex                                                                      │ │ Esc Enter  send promp│
-   ● Edited lib/retry.ex                                                                     │ │ Tab  complete        │
-   ◆ Could not run `mix test test/retry_test.exs`                                            │ │ ?  agent help        │
-   ○ Stopped while finding lib/other.ex                                                      │ ╰──────────────────────╯
+   ● Read lib/native.ex                                                                      │ │ Tab  complete        │
+   ● Edited lib/retry.ex                                                                     │ │ ?  agent help        │
+   ◆ Could not run `mix test test/retry_test.exs`                                            │ ╰──────────────────────╯
+   ○ Stopped while finding lib/other.ex                                                      │
                                                                                              │
    i System  Saved the retry notes to lib/native/usage_limit/notes.md; open that file to     │
              review the plan, window and reset time.                                         │
@@ -39,7 +39,7 @@ Spaces · folder minga.conversation.stopped (1 tab) · ▎cpu A 429 with usage_l
   2 messages · Stopped                                                                       │
  ╭ Prompt                                                                                  ╮ │
  │ ❯ INSERT  Ask Minga to edit, explain, search, or run tools                              │ │
- │Send · Steer · Queue Next · Stop · Attachments · esc ↩ continue · ⌥↩ queue · esc normal  │ │
+ │Continue · Steer · Queue Next · Stop · Attachments · esc ↩ continue · ⌥↩ queue           │ │
  ╰─────────────────────────────────────────────────────────────────────────────────────────╯ │
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Review files (0)  [All Changes]  ]F  wheel
@@ -151,8 +151,9 @@ No changed files
 12 4-91 #4c4f69 #eff1f5 -
 12 92-95 #7c7f93 #eff1f5 -
 12 96-96 #4c4f69 #eff1f5 -
-12 97-105 #1e66f5 #eff1f5 bold
-12 106-117 #8c8fa1 #eff1f5 -
+12 97-99 #1e66f5 #eff1f5 bold
+12 100-109 #8c8fa1 #eff1f5 -
+12 110-117 #4c4f69 #eff1f5 -
 12 118-118 #7c7f93 #eff1f5 -
 12 119-119 #4c4f69 #eff1f5 -
 13 0-0 #4c4f69 #eff1f5 -
@@ -160,26 +161,21 @@ No changed files
 13 4-91 #4c4f69 #eff1f5 -
 13 92-95 #7c7f93 #eff1f5 -
 13 96-96 #4c4f69 #eff1f5 -
-13 97-99 #1e66f5 #eff1f5 bold
-13 100-109 #8c8fa1 #eff1f5 -
+13 97-97 #1e66f5 #eff1f5 bold
+13 98-109 #8c8fa1 #eff1f5 -
 13 110-117 #4c4f69 #eff1f5 -
 13 118-118 #7c7f93 #eff1f5 -
 13 119-119 #4c4f69 #eff1f5 -
 14 0-0 #4c4f69 #eff1f5 -
 14 1-3 #d20f39 #eff1f5 -
 14 4-91 #4c4f69 #eff1f5 -
-14 92-95 #7c7f93 #eff1f5 -
-14 96-96 #4c4f69 #eff1f5 -
-14 97-97 #1e66f5 #eff1f5 bold
-14 98-109 #8c8fa1 #eff1f5 -
-14 110-117 #4c4f69 #eff1f5 -
-14 118-118 #7c7f93 #eff1f5 -
+14 92-118 #7c7f93 #eff1f5 -
 14 119-119 #4c4f69 #eff1f5 -
 15 0-0 #4c4f69 #eff1f5 -
 15 1-3 #7c7f93 #eff1f5 -
 15 4-91 #4c4f69 #eff1f5 -
-15 92-118 #7c7f93 #eff1f5 -
-15 119-119 #4c4f69 #eff1f5 -
+15 92-94 #7c7f93 #eff1f5 -
+15 95-119 #4c4f69 #eff1f5 -
 16 0-91 #4c4f69 #eff1f5 -
 16 92-94 #7c7f93 #eff1f5 -
 16 95-119 #4c4f69 #eff1f5 -
@@ -259,15 +255,13 @@ No changed files
 33 92-94 #7c7f93 #eff1f5 -
 33 95-119 #4c4f69 #eff1f5 -
 34 0-0 #4c4f69 #eff1f5 -
-34 1-1 #1e66f5 #eff1f5 -
-34 2-5 #8c8fa1 #eff1f5 -
-34 6-8 #4c4f69 #eff1f5 -
-34 9-13 #8c8fa1 #eff1f5 -
-34 14-16 #4c4f69 #eff1f5 -
-34 17-26 #8c8fa1 #eff1f5 -
-34 27-29 #4c4f69 #eff1f5 -
-34 30-33 #8c8fa1 #eff1f5 -
-34 34-90 #4c4f69 #eff1f5 -
+34 1-12 #1e66f5 #eff1f5 -
+34 13-17 #8c8fa1 #eff1f5 -
+34 18-20 #4c4f69 #eff1f5 -
+34 21-30 #8c8fa1 #eff1f5 -
+34 31-33 #4c4f69 #eff1f5 -
+34 34-37 #8c8fa1 #eff1f5 -
+34 38-90 #4c4f69 #eff1f5 -
 34 91-91 #1e66f5 #eff1f5 -
 34 92-94 #7c7f93 #eff1f5 -
 34 95-119 #4c4f69 #eff1f5 -

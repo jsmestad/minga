@@ -23,7 +23,7 @@ Spaces · folder minga.conversation.stopped (1 tab) · ▎cpu A 429 with usage_l
   2 messages · Stopped
  ╭ Prompt                                                                     ╮
  │ ❯ INSERT  Ask Minga to edit, explain, search, or run tools                 │
- │Send · Steer · Queue Next · Stop · Attachments · esc ↩ continue · ⌥↩ queue  │
+ │Continue · Steer · Queue Next · Stop · Attachments · esc ↩ continue         │
  ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
  Review files (0)  [All Changes]  ]F  wheel
@@ -96,15 +96,13 @@ No changed files
 17 78-78 #50a4e9 #1a1d23 -
 17 79-79 #adb0bb #1a1d23 -
 18 0-0 #adb0bb #1a1d23 -
-18 1-1 #50a4e9 #1a1d23 -
-18 2-5 #595c66 #1a1d23 -
-18 6-8 #adb0bb #1a1d23 -
-18 9-13 #595c66 #1a1d23 -
-18 14-16 #adb0bb #1a1d23 -
-18 17-26 #595c66 #1a1d23 -
-18 27-29 #adb0bb #1a1d23 -
-18 30-33 #595c66 #1a1d23 -
-18 34-77 #adb0bb #1a1d23 -
+18 1-12 #50a4e9 #1a1d23 -
+18 13-17 #595c66 #1a1d23 -
+18 18-20 #adb0bb #1a1d23 -
+18 21-30 #595c66 #1a1d23 -
+18 31-33 #adb0bb #1a1d23 -
+18 34-37 #595c66 #1a1d23 -
+18 38-77 #adb0bb #1a1d23 -
 18 78-78 #50a4e9 #1a1d23 -
 18 79-79 #adb0bb #1a1d23 -
 19 0-0 #adb0bb #1a1d23 -

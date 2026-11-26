@@ -23,7 +23,7 @@ Spaces · folder minga.conversation.stopped (1 tab) · ▎cpu A 429 with usage_l
   2 messages · Stopped
  ╭ Prompt                                                                     ╮
  │ ❯ INSERT  Ask Minga to edit, explain, search, or run tools                 │
- │Send · Steer · Queue Next · Stop · Attachments · esc ↩ continue · ⌥↩ queue  │
+ │Continue · Steer · Queue Next · Stop · Attachments · esc ↩ continue         │
  ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
  Review files (0)  [All Changes]  ]F  wheel
@@ -96,15 +96,13 @@ No changed files
 17 78-78 #8caaee #303446 -
 17 79-79 #c6d0f5 #303446 -
 18 0-0 #c6d0f5 #303446 -
-18 1-1 #8caaee #303446 -
-18 2-5 #838ba7 #303446 -
-18 6-8 #c6d0f5 #303446 -
-18 9-13 #838ba7 #303446 -
-18 14-16 #c6d0f5 #303446 -
-18 17-26 #838ba7 #303446 -
-18 27-29 #c6d0f5 #303446 -
-18 30-33 #838ba7 #303446 -
-18 34-77 #c6d0f5 #303446 -
+18 1-12 #8caaee #303446 -
+18 13-17 #838ba7 #303446 -
+18 18-20 #c6d0f5 #303446 -
+18 21-30 #838ba7 #303446 -
+18 31-33 #c6d0f5 #303446 -
+18 34-37 #838ba7 #303446 -
+18 38-77 #c6d0f5 #303446 -
 18 78-78 #8caaee #303446 -
 18 79-79 #c6d0f5 #303446 -
 19 0-0 #c6d0f5 #303446 -

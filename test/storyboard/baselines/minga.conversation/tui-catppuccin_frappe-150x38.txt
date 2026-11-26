@@ -17,10 +17,10 @@ Spaces · folder minga.conversation (1 tab) · ▎cpu A 429 with usage_limit_rea
    Minga                                                                                                              │ │ ─── Needs attention ──────│
      A 429 with usage_limit_reached is its own case. I'll carry the plan, window and reset time on the error.         │ │ Error     Could not run `m│
    ● Read lib/native.ex                                                                                               │ │ ─── Hints ────────────────│
-   ● Edited lib/retry.ex                                                                                              │ │ Esc Enter  send prompt    │
-   ◆ Could not run `mix test test/retry_test.exs`                                                                     │ │ Tab  complete             │
-                                                                                                                      │ │ ?  agent help             │
-   i System  Saved the retry notes to lib/native/usage_limit/notes.md; open that file to review the plan, window      │ ╰───────────────────────────╯
+   ● Edited lib/retry.ex                                                                                              │ │ Tab  complete             │
+   ◆ Could not run `mix test test/retry_test.exs`                                                                     │ │ ?  agent help             │
+                                                                                                                      │ ╰───────────────────────────╯
+   i System  Saved the retry notes to lib/native/usage_limit/notes.md; open that file to review the plan, window      │
              and reset time.                                                                                          │
                                                                                                                       │
    You                                                                                                                │
@@ -148,9 +148,9 @@ No changed files
 12 4-116 #c6d0f5 #303446 -
 12 117-120 #838ba7 #303446 -
 12 121-121 #c6d0f5 #303446 -
-12 122-130 #8caaee #303446 bold
-12 131-143 #838ba7 #303446 -
-12 144-147 #c6d0f5 #303446 -
+12 122-124 #8caaee #303446 bold
+12 125-134 #838ba7 #303446 -
+12 135-147 #c6d0f5 #303446 -
 12 148-148 #838ba7 #303446 -
 12 149-149 #c6d0f5 #303446 -
 13 0-0 #c6d0f5 #303446 -
@@ -158,25 +158,20 @@ No changed files
 13 4-116 #c6d0f5 #303446 -
 13 117-120 #838ba7 #303446 -
 13 121-121 #c6d0f5 #303446 -
-13 122-124 #8caaee #303446 bold
-13 125-134 #838ba7 #303446 -
+13 122-122 #8caaee #303446 bold
+13 123-134 #838ba7 #303446 -
 13 135-147 #c6d0f5 #303446 -
 13 148-148 #838ba7 #303446 -
 13 149-149 #c6d0f5 #303446 -
 14 0-116 #c6d0f5 #303446 -
-14 117-120 #838ba7 #303446 -
-14 121-121 #c6d0f5 #303446 -
-14 122-122 #8caaee #303446 bold
-14 123-134 #838ba7 #303446 -
-14 135-147 #c6d0f5 #303446 -
-14 148-148 #838ba7 #303446 -
+14 117-148 #838ba7 #303446 -
 14 149-149 #c6d0f5 #303446 -
 15 0-2 #c6d0f5 #303446 -
 15 3-10 #8caaee #303446 bold
 15 11-111 #838ba7 #303446 -
 15 112-116 #c6d0f5 #303446 -
-15 117-148 #838ba7 #303446 -
-15 149-149 #c6d0f5 #303446 -
+15 117-119 #838ba7 #303446 -
+15 120-149 #c6d0f5 #303446 -
 16 0-10 #c6d0f5 #303446 -
 16 11-27 #838ba7 #303446 -
 16 28-116 #c6d0f5 #303446 -
