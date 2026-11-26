@@ -923,6 +923,9 @@ defmodule MingaEditor.Commands.Agent do
   def settle_turn_request(state, %TurnRequest{work: {:continue, _target}}, {:error, :stale_turn}),
     do: NoticeWorkflow.publish(state, "That stopped turn is no longer available.")
 
+  def settle_turn_request(state, %TurnRequest{work: {:continue, _target}}, {:error, :not_driver}),
+    do: NoticeWorkflow.publish(state, "Only the attached session driver can continue this turn.")
+
   def settle_turn_request(state, %TurnRequest{work: {:continue, _target}}, {:error, reason}),
     do:
       NoticeWorkflow.publish(

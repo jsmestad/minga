@@ -332,10 +332,17 @@ defmodule MingaAgent.Session do
       when is_pid(session) and node(session) == node(),
       do: :gen_server.send_request(session, {:stop_turn, target})
 
-  @doc "Continues the exact request the user stopped, without using the draft or advancing the queue."
+  @doc "Continues the exact stopped request for a trusted local caller, preserving draft and queue."
   @spec continue_stopped(GenServer.server(), {String.t(), String.t()}) :: :ok | {:error, term()}
   def continue_stopped(session, {_, _} = target),
     do: GenServer.call(session, {:continue_stopped, target})
+
+  @doc "Continues a stopped request as the driver of the exact broker attachment."
+  @spec continue_stopped_as(GenServer.server(), {pid(), binary()}, {String.t(), String.t()}) ::
+          :ok | {:error, term()}
+  def continue_stopped_as(session, {driver, receipt} = authority, {_, _} = target)
+      when is_pid(driver) and is_binary(receipt),
+      do: GenServer.call(session, {:continue_stopped_as, authority, target}, 10_000)
 
   @doc "Starts `continue_stopped/2` without blocking the calling Editor."
   @spec request_continue_stopped(pid(), {String.t(), String.t()}) :: :gen_server.request_id()
@@ -1916,12 +1923,26 @@ defmodule MingaAgent.Session do
   def handle_call({:stop_turn, _target}, _from, state),
     do: {:reply, {:error, :stale_turn}, state}
 
-  def handle_call({:continue_stopped, {_, _} = target}, _from, state) do
-    case continue_target(state) do
-      ^target -> continue_turn(state)
-      _ -> {:reply, {:error, :stale_turn}, state}
-    end
+  def handle_call({:continue_stopped, {_, _} = target}, {caller, _tag}, state)
+      when node(caller) == node(),
+      do: resume_stopped_request(state, target)
+
+  def handle_call({:continue_stopped, _target}, _from, state),
+    do: {:reply, {:error, :not_driver}, state}
+
+  def handle_call(
+        {:continue_stopped_as, {_, _} = authority, {_, _} = target},
+        {caller, _tag},
+        state
+      )
+      when node(caller) == node() do
+    if SubscriberLifecycle.question_driver?(state.subscriber_lifecycle, authority),
+      do: resume_stopped_request(state, target),
+      else: {:reply, {:error, :not_driver}, state}
   end
+
+  def handle_call({:continue_stopped_as, _authority, _target}, _from, state),
+    do: {:reply, {:error, :not_driver}, state}
 
   def handle_call({:send_follow_up, content}, _from, state) do
     handle_prompt(content, :follow_up, state)
@@ -4480,6 +4501,14 @@ defmodule MingaAgent.Session do
   end
 
   defp continue_target(_state), do: nil
+
+  @spec resume_stopped_request(state(), {String.t(), String.t()}) :: {:reply, term(), state()}
+  defp resume_stopped_request(state, target) do
+    case continue_target(state) do
+      ^target -> continue_turn(state)
+      _other -> {:reply, {:error, :stale_turn}, state}
+    end
+  end
 
   @spec interrupted_execution(TurnExecution.t(), interruption()) :: TurnExecution.t()
   defp interrupted_execution(execution, :stopped), do: TurnExecution.stop(execution)

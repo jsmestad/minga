@@ -10,6 +10,7 @@ defmodule MingaEditor.Agent.TurnRequest do
   alias MingaAgent.Session
   alias MingaAgent.Session.TurnExecution
   alias MingaEditor.Agent.DraftWorkflow
+  alias MingaEditor.Agent.QuestionResponse
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Remote.SessionClient
@@ -192,11 +193,17 @@ defmodule MingaEditor.Agent.TurnRequest do
 
   defp start(%EditorState{effect_scheduler: nil}, _token, _session, _work), do: :error
 
-  defp start(%EditorState{effect_scheduler: scheduler}, token, session, work) do
+  defp start(%EditorState{effect_scheduler: scheduler} = state, token, session, work) do
     editor = self()
 
+    authority =
+      case work do
+        {:continue, _} -> QuestionResponse.remote_authority(state, session, editor)
+        _other -> editor
+      end
+
     case Task.Supervisor.start_child(EffectScheduler.task_supervisor(scheduler), fn ->
-           send(editor, {:turn_request_result, token, ask_remote(session, work, editor)})
+           send(editor, {:turn_request_result, token, ask_remote(session, work, authority)})
          end) do
       {:ok, worker} -> {:ok, {:worker, worker, Process.monitor(worker)}}
       _not_started -> :error
@@ -206,7 +213,7 @@ defmodule MingaEditor.Agent.TurnRequest do
   end
 
   # A Session on another node has no saved composer for this Editor.
-  @spec ask_remote(pid(), work(), pid()) :: answer()
+  @spec ask_remote(pid(), work(), QuestionResponse.authority()) :: answer()
   defp ask_remote(session, {:send, :prompt, content, _raw}, editor),
     do: SessionClient.send_prompt(session, content, editor)
 
@@ -222,9 +229,9 @@ defmodule MingaEditor.Agent.TurnRequest do
     :exit, _reason -> :session_down
   end
 
-  defp ask_remote(session, {:continue, target}, _editor) do
-    Session.continue_stopped(session, target)
-  catch
-    :exit, _reason -> :session_down
-  end
+  defp ask_remote(session, {:continue, target}, {_driver, _receipt} = authority),
+    do: SessionClient.continue_stopped(session, target, authority)
+
+  defp ask_remote(_session, {:continue, _target}, editor) when is_pid(editor),
+    do: {:error, :not_driver}
 end
