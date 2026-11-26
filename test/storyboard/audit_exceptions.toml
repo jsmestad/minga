@@ -37,7 +37,7 @@ reason = "Syntax colours, muted comment and gutter text, separators and chips mi
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none", "minga.queue", "minga.queue.empty"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -259,7 +259,7 @@ issue = 4137
 
 
 [[exception]]
-scenario = ["minga.conversation", "minga.conversation.stopped"]
+scenario = ["minga.conversation", "minga.conversation.stopped", "minga.queue", "minga.queue.empty"]
 frontend = "tui"
 part = "glyph"
 rule = "contrast"
@@ -272,7 +272,7 @@ reason = "The Agent workspace's rules (under the transcript title and above the 
 issue = 4137
 
 [[exception]]
-scenario = ["minga.conversation", "minga.conversation.stopped"]
+scenario = ["minga.conversation", "minga.conversation.stopped", "minga.queue", "minga.queue.empty"]
 frontend = "tui"
 part = "glyph"
 rule = "contrast"
@@ -284,7 +284,7 @@ reason = "The Agent workspace's rules (under the transcript title and above the 
 issue = 4137
 
 [[exception]]
-scenario = ["minga.conversation", "minga.conversation.stopped"]
+scenario = ["minga.conversation", "minga.conversation.stopped", "minga.queue", "minga.queue.empty"]
 frontend = "tui"
 part = "glyph"
 rule = "contrast"
@@ -297,7 +297,7 @@ reason = "The Agent workspace's rules (under the transcript title and above the 
 issue = 4137
 
 [[exception]]
-scenario = ["minga.conversation", "minga.conversation.stopped"]
+scenario = ["minga.conversation", "minga.conversation.stopped", "minga.queue", "minga.queue.empty"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -314,7 +314,7 @@ reason = "Muted labels and borders of the Agent workspace (workspace bar, header
 issue = 4137
 
 [[exception]]
-scenario = ["minga.conversation", "minga.conversation.stopped"]
+scenario = ["minga.conversation", "minga.conversation.stopped", "minga.queue", "minga.queue.empty"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -331,7 +331,7 @@ reason = "Muted labels and borders of the Agent workspace (workspace bar, header
 issue = 4137
 
 [[exception]]
-scenario = ["minga.conversation", "minga.conversation.stopped"]
+scenario = ["minga.conversation", "minga.conversation.stopped", "minga.queue", "minga.queue.empty"]
 frontend = "tui"
 part = "text"
 rule = "contrast"

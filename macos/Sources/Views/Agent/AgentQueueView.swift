@@ -23,7 +23,7 @@ struct AgentQueueView: View {
                     header
                     if let empty = queue.empty {
                         EmptyListPanel(
-                            empty: empty, textColor: theme.agentTextFg, accentColor: accent,
+                            empty: empty, textColor: theme.agentTextFg, accentColor: theme.agentTextFg,
                             selectionColor: selection
                         ) { action in
                             if let request = queue.request(forEmptyAction: action) { sendAction?(request) }
@@ -37,7 +37,7 @@ struct AgentQueueView: View {
                     if !queue.removedNote.isEmpty {
                         Text(queue.removedNote)
                             .font(Typography.font(.small))
-                            .foregroundStyle(theme.agentMutedFg)
+                            .foregroundStyle(theme.agentTextFg)
                             .fixedSize(horizontal: false, vertical: true)
                             .anatomyPart("queue.removedNote", text: queue.removedNote, font: .small)
                     }
@@ -102,7 +102,7 @@ struct AgentQueueView: View {
                 .anatomyPart("queue.title", text: queue.title, font: .small, monospaced: true)
             Text(queue.summary)
                 .font(Typography.font(.small, design: .monospaced))
-                .foregroundStyle(theme.agentSecondaryFg)
+                .foregroundStyle(theme.agentTextFg)
                 .anatomyPart("queue.summary", text: queue.summary, font: .small, monospaced: true)
         }
     }
@@ -117,11 +117,11 @@ struct AgentQueueView: View {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                     Text(hint.key)
                         .font(Typography.monospacedSmall)
-                        .foregroundStyle(accent)
+                        .foregroundStyle(theme.agentTextFg)
                         .anatomyPart("queue.hintKey", text: hint.key, font: .small, monospaced: true)
                     Text(hint.label)
                         .font(Typography.font(.small))
-                        .foregroundStyle(theme.agentSecondaryFg)
+                        .foregroundStyle(theme.agentTextFg)
                         .anatomyPart("queue.hintLabel", text: hint.label, font: .small)
                 }
                 .contentShape(Rectangle())
@@ -151,19 +151,20 @@ struct AgentQueueView: View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
             Text(row.label)
                 .font(Typography.monospacedSmall)
-                .foregroundStyle(theme.agentMutedFg)
+                .foregroundStyle(theme.agentTextFg)
                 .frame(minWidth: 18, alignment: .leading)
                 .anatomyPart("queue.rowLabel", text: row.label, font: .small, monospaced: true)
             Text(row.preview)
                 .font(Typography.font(.small, design: .monospaced))
-                .foregroundStyle(removed ? theme.agentMutedFg : theme.agentTextFg)
+                .foregroundStyle(theme.agentTextFg)
+                .strikethrough(removed)
                 .lineLimit(1)
                 .anatomyPart("queue.rowPreview", text: row.preview, font: .small, monospaced: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if row.attachmentCount > 0 {
                 Label("\(row.attachmentCount)", systemImage: "paperclip")
                     .font(Typography.font(.caption, design: .monospaced))
-                    .foregroundStyle(theme.agentSecondaryFg)
+                    .foregroundStyle(theme.agentTextFg)
                     .fixedSize()
                     .accessibilityLabel("Attachments")
                     .accessibilityValue(Text(row.attachmentCount, format: .number))

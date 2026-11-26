@@ -127,7 +127,10 @@ func (m Model) layoutAgentQueue(queue generated.GuiAgentQueueFields, width, avai
 	v.items = len(queue.Pending) + len(v.note) + len(queue.Removed)
 	if v.items == 0 && strings.TrimSpace(queue.Empty.Title) != "" {
 		p := m.palette()
-		colors := emptyListColors{p.SurfaceAlt(), p.Text(), p.Muted(), p.Accent(), p.Selection(), p.SelectionText()}
+		colors := emptyListColors{
+			surface: p.SurfaceAlt(), text: p.Text(), muted: p.Text(), accent: p.Text(),
+			selection: p.Text(), selectionText: p.SurfaceAlt(),
+		}
 		header := emptyListHeader(queue.Empty, width, colors, p)
 		if len(header)+len(queue.Empty.Actions) >= available {
 			header = header[emptyStateInset.rows():]
@@ -154,8 +157,8 @@ func (m Model) agentQueueHeader(queue generated.GuiAgentQueueFields, width, maxR
 	p := m.palette()
 	base := lipgloss.NewStyle().Background(p.SurfaceAlt()).ColorWhitespace(true)
 	title := textTitle.style(p).Inherit(base)
-	label := textBody.style(p).Inherit(base).Foreground(p.Muted())
-	key := textBody.style(p).Inherit(base).Foreground(p.Accent())
+	label := textBody.style(p).Inherit(base).Foreground(p.Text())
+	key := label.Bold(true)
 	inset := gap(agentQueueInset)
 	if width <= lipgloss.Width(inset) {
 		inset = ""
@@ -199,7 +202,7 @@ func (m Model) appendAgentQueue(lines []string) []string {
 	queue := m.agentQueue()
 	p := m.palette()
 	base := lipgloss.NewStyle().Background(p.SurfaceAlt()).ColorWhitespace(true)
-	muted := textBody.style(p).Inherit(base).Foreground(p.Muted())
+	note := textBody.style(p).Inherit(base).Foreground(p.Text())
 	component, _ := m.focusedComponent()
 	for index := m.queueScroll.first; index < m.queueScroll.first+v.bodyRows(); index++ {
 		switch {
@@ -211,7 +214,7 @@ func (m Model) appendAgentQueue(lines []string) []string {
 			lines = append(lines, renderAgentQueueRow(row, v.box.Width, selected, false, p))
 		case index < len(queue.Pending)+len(v.note):
 			text := gap(agentQueueInset) + v.note[index-len(queue.Pending)]
-			lines = append(lines, muted.Render(fitStyled(text, v.box.Width)))
+			lines = append(lines, note.Render(fitStyled(text, v.box.Width)))
 		default:
 			row := queue.Removed[index-len(queue.Pending)-len(v.note)]
 			lines = append(lines, renderAgentQueueRow(row, v.box.Width, false, true, p))
@@ -222,15 +225,13 @@ func (m Model) appendAgentQueue(lines []string) []string {
 
 func renderAgentQueueRow(row generated.AgentQueueRow, width int, selected, removed bool, p palette) string {
 	base := lipgloss.NewStyle().Background(p.SurfaceAlt()).ColorWhitespace(true)
-	ordinal, preview := p.Muted(), p.Text()
+	ink := p.Text()
 	if selected {
-		base = base.Background(p.Selection())
-		ordinal, preview = p.SelectionText(), p.SelectionText()
-	} else if removed {
-		preview = p.Muted()
+		base = base.Background(ink)
+		ink = p.SurfaceAlt()
 	}
-	label := textBody.style(p).Inherit(base).Foreground(ordinal)
-	text := textBody.style(p).Inherit(base).Foreground(preview).Strikethrough(removed)
+	label := textBody.style(p).Inherit(base).Foreground(ink)
+	text := label.Strikethrough(removed)
 	inset := gap(agentQueueInset)
 	if width <= lipgloss.Width(inset) {
 		inset = ""
