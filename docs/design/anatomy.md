@@ -93,6 +93,14 @@ One row of a list buffer: tasks, review, diagnostics, the switcher, quickfix.
 
 The title uses `body`; state words and age use `small` in the secondary colour. A needs-you row that expands shows its request and its actions on sub-lines aligned with the title, with the actions laid out like drawer hints (`xs` inside a hint, `xl` between hints).
 
+## Conversation queue
+
+A bounded list inside the conversation, after the transcript and before the composer. The header title and summary share a line, with the title first. Use the drawer's `md` title-to-summary spacing and `xs` inside each hint. Use list-row treatment for the selected message. The ordinal is muted, the preview is body text, and the removal note uses the secondary text colour. The empty queue uses the [empty state](#empty-state) anatomy.
+
+Keep the composer visible at the narrowest size. Fit what remains inside the queue's block and scroll its rows there. Do not grow the block with the number of messages. A hint with no selected row cannot act.
+
+Record `queue.title`, `queue.summary`, `queue.hintKey`, `queue.hintLabel`, `queue.rowLabel`, `queue.rowPreview` and `queue.removedNote` from the displayed content. The layout audit checks that a focused queue's header parts are present and that title and summary share a row without overlapping.
+
 ## Section label with rule
 
 Groups inside a menu, a hover or a long list.

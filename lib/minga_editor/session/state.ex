@@ -12,6 +12,7 @@ defmodule MingaEditor.Session.State do
   restored on tab switch.
   """
 
+  alias MingaEditor.Agent.QueueSurface
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
   alias MingaEditor.Renderer.ReviewObservation
@@ -397,11 +398,9 @@ defmodule MingaEditor.Session.State do
 
   @spec normalize_buffer_surface(t(), pid()) :: t()
   defp normalize_buffer_surface(workspace, buffer) do
-    %{
-      workspace
-      | keymap_scope: scope_for_content(Content.buffer(buffer), workspace.keymap_scope),
-        launchpad: nil
-    }
+    workspace
+    |> set_keymap_scope(scope_for_content(Content.buffer(buffer), workspace.keymap_scope))
+    |> set_launchpad(nil)
   end
 
   @spec remember_outgoing_cursor(Windows.t(), Window.t(), position() | nil) :: Windows.t()
@@ -419,11 +418,16 @@ defmodule MingaEditor.Session.State do
   defp commit_focused_window(workspace, windows, target_id, target_window) do
     buffers = buffers_for_focused_window(workspace.buffers, target_window)
 
+    workspace =
+      set_keymap_scope(
+        workspace,
+        scope_for_content(target_window.content, workspace.keymap_scope)
+      )
+
     %{
       workspace
       | windows: Windows.set_active(windows, target_id),
         buffers: buffers,
-        keymap_scope: scope_for_content(target_window.content, workspace.keymap_scope),
         launchpad: launchpad_after_focus(workspace.launchpad, target_window),
         hover_observation: HoverObservation.clear(workspace.hover_observation)
     }
@@ -505,13 +509,13 @@ defmodule MingaEditor.Session.State do
   @doc """
   Derives the keymap scope from a window's content type.
 
-  Agent chat windows use `:agent`, launchpad windows use `:editor`, and buffer windows return from `:agent` to `:editor` while preserving other scopes.
+  Agent chat windows use `:agent`, launchpad windows use `:editor`, and buffer windows leave Agent scopes while preserving other scopes.
   """
   @spec scope_for_content(Content.t(), Scope.scope_name()) :: Scope.scope_name()
   def scope_for_content({:agent_chat, _pid}, _current_scope), do: :agent
   def scope_for_content({:agent_review, :semantic}, _current_scope), do: :agent
   def scope_for_content({:empty, :semantic}, _current_scope), do: :editor
-  def scope_for_content({:buffer, _pid}, :agent), do: :editor
+  def scope_for_content({:buffer, _pid}, scope) when scope in [:agent, :queue], do: :editor
   def scope_for_content({:buffer, _pid}, current_scope), do: current_scope
 
   @doc """
@@ -535,6 +539,10 @@ defmodule MingaEditor.Session.State do
 
   @doc "Sets the keymap scope."
   @spec set_keymap_scope(t(), Scope.scope_name()) :: t()
+  def set_keymap_scope(%__MODULE__{keymap_scope: :queue} = wspace, scope) when scope != :queue do
+    %{wspace | keymap_scope: scope, agent_ui: UIState.blur_queue(wspace.agent_ui)}
+  end
+
   def set_keymap_scope(%__MODULE__{} = wspace, scope) do
     %{wspace | keymap_scope: scope}
   end
@@ -689,7 +697,13 @@ defmodule MingaEditor.Session.State do
     body = UIState.View.agent_body(agent_ui.view)
     windows = Windows.show_agent_body(windows, body)
 
-    %{wspace | agent_ui: agent_ui, windows: windows}
+    workspace = %{wspace | agent_ui: agent_ui, windows: windows}
+
+    case {workspace.keymap_scope, QueueSurface.focused?(agent_ui.queue)} do
+      {:agent, true} -> %{workspace | keymap_scope: :queue}
+      {:queue, false} -> %{workspace | keymap_scope: scope_for_active_window(workspace)}
+      _scope -> workspace
+    end
   end
 
   @doc "Forgets a retired process when it owns the agent prompt buffer."

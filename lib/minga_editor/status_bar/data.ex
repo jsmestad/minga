@@ -28,6 +28,7 @@ defmodule MingaEditor.StatusBar.Data do
   alias MingaAgent.Session.ConnectionTarget
   alias MingaAgent.StatusCommand
   alias MingaEditor.Agent.Activity
+  alias MingaEditor.Agent.QueueSurface
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.WorkspaceStatus
   alias MingaEditor.Agent.UIState.Panel
@@ -427,6 +428,7 @@ defmodule MingaEditor.StatusBar.Data do
       common:
         state
         |> build_common_data(state.workspace.buffers.active, "[no file]")
+        |> apply_queue_modeline_name(state.workspace.keymap_scope)
         |> apply_agent_modeline_theme(state),
       content: %StatusAgent{
         model_name: if(panel.model_name != "", do: panel.model_name, else: "Agent"),
@@ -435,6 +437,14 @@ defmodule MingaEditor.StatusBar.Data do
       }
     }
   end
+
+  @spec apply_queue_modeline_name(Common.t(), Minga.Keymap.Scope.scope_name()) :: Common.t()
+  defp apply_queue_modeline_name(%Common{status: status} = common, :queue) do
+    file = %StatusFile{name: QueueSurface.buffer_name(), filetype: :text}
+    %{common | status: %{status | file: file}}
+  end
+
+  defp apply_queue_modeline_name(common, _scope), do: common
 
   # The status bar shows the same Agent status as the workspace pill and the
   # activity strip, named through the same token table.

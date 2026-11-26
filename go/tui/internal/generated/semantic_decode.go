@@ -1116,6 +1116,68 @@ func DecodeTasksDrawerRow(data []byte, offset int, windowEnd int) (TasksDrawerRo
 	}, pos, nil
 }
 
+func DecodeAgentQueueHint(data []byte, offset int, windowEnd int) (AgentQueueHint, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+1, "action"); err != nil {
+		return AgentQueueHint{}, offset, err
+	}
+	action := AgentQueueAction(data[pos])
+	pos++
+	key, pos, err := decodeString8Window(data, pos, windowEnd)
+	if err != nil {
+		return AgentQueueHint{}, offset, err
+	}
+	label, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return AgentQueueHint{}, offset, err
+	}
+	return AgentQueueHint{
+		Action: action,
+		Key:    key,
+		Label:  label,
+	}, pos, nil
+}
+
+func DecodeAgentQueueRow(data []byte, offset int, windowEnd int) (AgentQueueRow, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+8, "id"); err != nil {
+		return AgentQueueRow{}, offset, err
+	}
+	id := decodeU64(data, pos)
+	pos += 8
+	if err := decodeRequireWindow(windowEnd, pos+8, "revision"); err != nil {
+		return AgentQueueRow{}, offset, err
+	}
+	revision := decodeU64(data, pos)
+	pos += 8
+	if err := decodeRequireWindow(windowEnd, pos+1, "kind"); err != nil {
+		return AgentQueueRow{}, offset, err
+	}
+	kind := data[pos]
+	pos++
+	label, pos, err := decodeString8Window(data, pos, windowEnd)
+	if err != nil {
+		return AgentQueueRow{}, offset, err
+	}
+	preview, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return AgentQueueRow{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+2, "attachment_count"); err != nil {
+		return AgentQueueRow{}, offset, err
+	}
+	attachmentCount := decodeU16(data, pos)
+	pos += 2
+	return AgentQueueRow{
+		ID:              id,
+		Revision:        revision,
+		Kind:            kind,
+		Label:           label,
+		Preview:         preview,
+		AttachmentCount: attachmentCount,
+	}, pos, nil
+}
+
 func DecodeEditTimelineEntry(data []byte, offset int, windowEnd int) (EditTimelineEntry, int, error) {
 	pos := offset
 	if err := decodeRequireWindow(windowEnd, pos+1, "index"); err != nil {
@@ -3658,6 +3720,122 @@ func DecodeGuiTasksDrawerFields(data []byte, offset int, windowEnd int) (GuiTask
 		Prompt:     prompt,
 		HasEmpty:   hasEmpty,
 		Empty:      empty,
+	}, pos, nil
+}
+
+// Command field decoder for gui_agent_queue
+
+func DecodeGuiAgentQueueFields(data []byte, offset int, windowEnd int) (GuiAgentQueueFields, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
+		return GuiAgentQueueFields{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	var focused uint8
+	var workspaceID uint32
+	var recordID string
+	var title string
+	var summary string
+	var removedNote string
+	var selectedID uint64
+	var hints []AgentQueueHint
+	var pending []AgentQueueRow
+	var removed []AgentQueueRow
+	var empty EmptyList
+	if visible == 1 {
+		var err error
+		if err := decodeRequireWindow(windowEnd, pos+1, "focused"); err != nil {
+			return GuiAgentQueueFields{}, offset, err
+		}
+		focused = data[pos]
+		pos++
+		if err := decodeRequireWindow(windowEnd, pos+4, "workspace_id"); err != nil {
+			return GuiAgentQueueFields{}, offset, err
+		}
+		workspaceID = decodeU32(data, pos)
+		pos += 4
+		recordID, pos, err = decodeString16Window(data, pos, windowEnd)
+		if err != nil {
+			return GuiAgentQueueFields{}, offset, err
+		}
+		title, pos, err = decodeString16Window(data, pos, windowEnd)
+		if err != nil {
+			return GuiAgentQueueFields{}, offset, err
+		}
+		summary, pos, err = decodeString16Window(data, pos, windowEnd)
+		if err != nil {
+			return GuiAgentQueueFields{}, offset, err
+		}
+		removedNote, pos, err = decodeString16Window(data, pos, windowEnd)
+		if err != nil {
+			return GuiAgentQueueFields{}, offset, err
+		}
+		if err := decodeRequireWindow(windowEnd, pos+8, "selected_id"); err != nil {
+			return GuiAgentQueueFields{}, offset, err
+		}
+		selectedID = decodeU64(data, pos)
+		pos += 8
+		if err := decodeRequireWindow(windowEnd, pos+1, "hints count"); err != nil {
+			return GuiAgentQueueFields{}, offset, err
+		}
+		hintsCount := int(data[pos])
+		pos += 1
+		hints = make([]AgentQueueHint, 0, min(hintsCount, len(data)-pos))
+		for i := 0; i < hintsCount; i++ {
+			item, nextPos, err := DecodeAgentQueueHint(data, pos, windowEnd)
+			if err != nil {
+				return GuiAgentQueueFields{}, offset, err
+			}
+			pos = nextPos
+			hints = append(hints, item)
+		}
+		if err := decodeRequireWindow(windowEnd, pos+1, "pending count"); err != nil {
+			return GuiAgentQueueFields{}, offset, err
+		}
+		pendingCount := int(data[pos])
+		pos += 1
+		pending = make([]AgentQueueRow, 0, min(pendingCount, len(data)-pos))
+		for i := 0; i < pendingCount; i++ {
+			item, nextPos, err := DecodeAgentQueueRow(data, pos, windowEnd)
+			if err != nil {
+				return GuiAgentQueueFields{}, offset, err
+			}
+			pos = nextPos
+			pending = append(pending, item)
+		}
+		if err := decodeRequireWindow(windowEnd, pos+1, "removed count"); err != nil {
+			return GuiAgentQueueFields{}, offset, err
+		}
+		removedCount := int(data[pos])
+		pos += 1
+		removed = make([]AgentQueueRow, 0, min(removedCount, len(data)-pos))
+		for i := 0; i < removedCount; i++ {
+			item, nextPos, err := DecodeAgentQueueRow(data, pos, windowEnd)
+			if err != nil {
+				return GuiAgentQueueFields{}, offset, err
+			}
+			pos = nextPos
+			removed = append(removed, item)
+		}
+		empty, pos, err = DecodeEmptyList(data, pos, windowEnd)
+		if err != nil {
+			return GuiAgentQueueFields{}, offset, err
+		}
+	}
+	return GuiAgentQueueFields{
+		Visible:     visible,
+		Focused:     focused,
+		WorkspaceID: workspaceID,
+		RecordID:    recordID,
+		Title:       title,
+		Summary:     summary,
+		RemovedNote: removedNote,
+		SelectedID:  selectedID,
+		Hints:       hints,
+		Pending:     pending,
+		Removed:     removed,
+		Empty:       empty,
 	}, pos, nil
 }
 

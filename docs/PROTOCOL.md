@@ -72,6 +72,7 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 | `0x1A` | application_quit_response | variable | Return the correlated BEAM quit-policy outcome |
 | `0x27` | measure_text | 7 + text_len | Request display width of text |
 | `0x61` | agent_desktop_notification | 18 | Alert that a task needs you, or withdraw that alert |
+| `0xAE` | gui_agent_queue | variable | Commit the conversation's resident input queue; see [GUI protocol](GUI_PROTOCOL.md#0xae-gui_agent_queue) |
 
 ### BEAM → Frontend (Config Commands)
 

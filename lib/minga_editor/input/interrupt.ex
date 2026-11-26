@@ -12,6 +12,7 @@ defmodule MingaEditor.Input.Interrupt do
   @type state :: MingaEditor.Input.Handler.handler_state()
 
   alias MingaEditor.Agent.PromptBuffer
+  alias MingaEditor.Agent.QueueWorkflow
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Input.CUA.TUISpaceLeader
@@ -73,6 +74,7 @@ defmodule MingaEditor.Input.Interrupt do
       |> maybe_cancel_space_leader()
       |> maybe_blur_bottom_panel()
       |> maybe_blur_drawer()
+      |> QueueWorkflow.blur()
       |> maybe_blur_agent_prompt()
       |> maybe_unfocus_file_tree()
       |> maybe_clear_sidebar_focus()

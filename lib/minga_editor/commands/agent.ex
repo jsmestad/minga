@@ -2970,9 +2970,9 @@ defmodule MingaEditor.Commands.Agent do
       },
       %Minga.Command{
         name: :agent_queued_inputs,
-        description: "Inspect queued Agent inputs",
+        description: "Open the conversation queue",
         requires_buffer: false,
-        execute: &MingaEditor.UI.Picker.AgentQueuedInputSource.open/1
+        execute: &MingaEditor.Agent.QueueWorkflow.open/1
       },
       %Minga.Command{
         name: :agent_answer_question,

@@ -15,8 +15,12 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
   alias Minga.Test.HeadlessPort
   alias Minga.Test.StubServer
   alias MingaAgent.Session
+  alias MingaAgent.Session.Continuation
+  alias MingaAgent.SessionStore
   alias MingaAgent.Subagent.Handle
+  alias MingaAgent.TurnUsage
   alias MingaAgent.ToolApproval.{Preview, Public, Target}
+  alias MingaEditor.Agent.QueueSurface
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional
@@ -32,9 +36,12 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
 
   @arrival_budget_ms 4_000
 
-  setup %{tmp_dir: dir}, do: %{editor_ctx: open_editor(dir)}
+  setup %{tmp_dir: dir} = context do
+    provider = Map.get(context, :agent_provider, Minga.Test.StubProvider)
+    %{editor_ctx: open_editor(dir, provider)}
+  end
 
-  defp open_editor(dir) do
+  defp open_editor(dir, provider \\ Minga.Test.StubProvider) do
     path = Path.join(dir, "journey.txt")
     contents = "A file open before Agent starts"
     File.write!(path, contents)
@@ -46,7 +53,7 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
       shell: :traditional,
       capabilities: @capabilities,
       options_server: options,
-      agent_provider_module: Minga.Test.StubProvider,
+      agent_provider_module: provider,
       agent_arrival_budget_ms: @arrival_budget_ms
     )
   end
@@ -202,6 +209,48 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
 
     assert %{visible?: true, lifecycle: :conversation, prompt: "arrival draft"} =
              await_conversation(ctx, prompt: "arrival draft")
+  end
+
+  @tag agent_provider: Minga.Test.SessionSlowMockProvider
+  test "reopening a saved conversation shows its pending queue without taking focus", %{
+    editor_ctx: ctx
+  } do
+    suffix = System.unique_integer([:positive])
+    record = "restore-queue-#{suffix}"
+    title = "Restored queue #{suffix}"
+    message = "This message was kept in the saved queue"
+
+    assert :ok =
+             SessionStore.save(%{
+               id: record,
+               timestamp: DateTime.to_iso8601(DateTime.utc_now()),
+               model_name: "Offline queue fixture",
+               provider_name: "native",
+               custom_title: title,
+               messages: [{:user, title}],
+               continuation: Continuation.new(),
+               usage: TurnUsage.new(),
+               pending_inputs: {2, [], [{1, 1, message, [], nil}], []}
+             })
+
+    send_keys_sync(ctx, "<SPC>aSh")
+    send_keys_sync(ctx, title)
+    send_keys_sync(ctx, "<CR>")
+
+    state =
+      wait_until(
+        ctx,
+        fn state ->
+          match?(
+            %{origin: {_, _, ^record}, contents: %{pending: [%{preview: ^message}]}},
+            state.workspace.agent_ui.queue
+          )
+        end,
+        message: "expected the saved queue to appear before focusing it"
+      )
+
+    assert QueueSurface.visible?(state.workspace.agent_ui.queue)
+    refute QueueSurface.focused?(state.workspace.agent_ui.queue)
   end
 
   test "an Agent tab click waits out a Session slower than the default budget and commits its conversation first",

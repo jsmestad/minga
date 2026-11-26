@@ -6,7 +6,17 @@ defmodule MingaEditor.Agent.DraftWorkflow do
   alias MingaAgent.DraftSnapshot
   alias MingaAgent.Session
   alias MingaAgent.Session.TurnExecution
-  alias MingaEditor.Agent.{DraftSave, PromptBuffer, QuestionResponse, UIState}
+
+  alias MingaEditor.Agent.{
+    DraftSave,
+    PromptBuffer,
+    PromptInput,
+    QuestionResponse,
+    QueueSurface,
+    QueueWorkflow,
+    UIState
+  }
+
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Remote.SessionClient
   alias MingaEditor.Shell.Runtime
@@ -1395,7 +1405,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
       %TabBar{} = tabs ->
         owner = TabBar.active_workspace_id(tabs)
         ref = make_ref()
-        {:saved, update_origin(state, owner, &capture_recall(&1, owner, ref))}
+        {:saved, update_origin(state, owner, &capture_recall(&1, owner, ref, :all))}
 
       nil ->
         {:saved, report(state, :recall_not_ready)}
@@ -1415,6 +1425,25 @@ defmodule MingaEditor.Agent.DraftWorkflow do
       do: {:saved, report(state, :recall_not_ready)}
 
   def recall(_state, _session), do: :volatile
+
+  @doc "Moves one exact local queue entry into its original composer draft."
+  @spec recall_one(
+          State.t(),
+          PromptInput.submission_owner(),
+          Session.QueuedInputSummary.identity()
+        ) ::
+          State.t()
+  def recall_one(state, {owner, session, record}, identity) when node(session) == node() do
+    ref = make_ref()
+
+    update_origin(state, owner, fn
+      %UIState{draft_save: %DraftSave{target: {^session, ^record}}} = ui ->
+        capture_recall(ui, owner, ref, {:one, identity})
+
+      ui ->
+        {{:queue_recall_refused, :recall_not_ready}, ui}
+    end)
+  end
 
   @doc "Starts volatile queue recall without waiting for the arriving local Session."
   @spec recall_volatile(State.t(), pid()) :: State.t()
@@ -1455,14 +1484,18 @@ defmodule MingaEditor.Agent.DraftWorkflow do
     |> MingaEditor.schedule_render(16)
   end
 
-  @spec capture_recall(UIState.t(), non_neg_integer(), reference()) :: {term(), UIState.t()}
+  @typep recall_scope :: :all | {:one, Session.QueuedInputSummary.identity()}
+
+  @spec capture_recall(UIState.t(), non_neg_integer(), reference(), recall_scope()) ::
+          {term(), UIState.t()}
   defp capture_recall(
          %UIState{
            draft_save: %DraftSave{target: {session, id}, buffer: buffer} = save,
            panel: %{prompt_buffer: buffer}
          } = ui,
          owner,
-         ref
+         ref,
+         scope
        )
        when node(session) == node() do
     marker = Buffer.inspection_marker(buffer)
@@ -1474,18 +1507,39 @@ defmodule MingaEditor.Agent.DraftWorkflow do
           session,
           id,
           {owner, ref},
-          {:recall, revision, snapshot, :keep_running}
+          recall_operation(scope, revision, snapshot)
         )
 
-      {:unchanged, UIState.project_draft_save(ui, pending)}
+      ui = UIState.project_draft_save(ui, pending)
+      {:unchanged, mark_queue_recall(ui, scope, ref)}
     else
-      _not_ready -> {:recall_not_ready, ui}
+      _not_ready -> recall_not_ready(ui, scope)
     end
   catch
-    :exit, _reason -> {:recall_not_ready, ui}
+    :exit, _reason -> recall_not_ready(ui, scope)
   end
 
-  defp capture_recall(ui, _owner, _ref), do: {:recall_not_ready, ui}
+  defp capture_recall(ui, _owner, _ref, scope), do: recall_not_ready(ui, scope)
+
+  @spec recall_operation(recall_scope(), DraftSave.revision(), DraftSnapshot.t() | nil) ::
+          Session.composer_draft_operation()
+  defp recall_operation(:all, revision, snapshot),
+    do: {:recall, revision, snapshot, :keep_running}
+
+  defp recall_operation({:one, identity}, revision, snapshot),
+    do: {:recall_one, identity, revision, snapshot}
+
+  @spec mark_queue_recall(UIState.t(), recall_scope(), reference()) :: UIState.t()
+  defp mark_queue_recall(ui, :all, _ref), do: ui
+
+  defp mark_queue_recall(ui, {:one, _identity}, ref),
+    do: UIState.install_queue(ui, QueueSurface.begin_recall(ui.queue, ref))
+
+  @spec recall_not_ready(UIState.t(), recall_scope()) :: {term(), UIState.t()}
+  defp recall_not_ready(ui, :all), do: {:recall_not_ready, ui}
+
+  defp recall_not_ready(ui, {:one, _identity}),
+    do: {{:queue_recall_refused, :recall_not_ready}, ui}
 
   @doc "Commits the newest prompt snapshot for the workspace that armed the timer."
   @spec due(State.t(), non_neg_integer(), reference()) :: State.t()
@@ -1514,6 +1568,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
         panel: %{prompt_buffer: buffer}
       } = ui ->
         {outcome, updated} = apply_result(ui, save, owner, ref, result)
+        {outcome, updated} = finish_queue_recall(updated, ref, outcome, result)
 
         acknowledged =
           acknowledge_accepted_queue(updated, state, {session, id}, owner, outcome, result)
@@ -1524,6 +1579,22 @@ defmodule MingaEditor.Agent.DraftWorkflow do
         {:unchanged, ui}
     end)
   end
+
+  @spec finish_queue_recall(UIState.t(), reference(), term(), result()) :: {term(), UIState.t()}
+  defp finish_queue_recall(ui, ref, outcome, result) do
+    case QueueSurface.finish_recall(ui.queue, ref) do
+      {:queue_recall, queue} ->
+        {queue_recall_notice(outcome, result), UIState.install_queue(ui, queue)}
+
+      :not_requested ->
+        {outcome, ui}
+    end
+  end
+
+  @spec queue_recall_notice(term(), result()) :: term()
+  defp queue_recall_notice(:recalled, _result), do: :queue_recalled
+  defp queue_recall_notice(_outcome, {:error, reason}), do: {:queue_recall_refused, reason}
+  defp queue_recall_notice(outcome, _result), do: outcome
 
   @spec acknowledge_accepted_queue(
           UIState.t(),
@@ -2254,6 +2325,9 @@ defmodule MingaEditor.Agent.DraftWorkflow do
        when outcome in [:recall_refused, :recall_conflict],
        do: report(state, outcome)
 
+  defp report_inactive(state, {:queue_recall_refused, _reason} = outcome, _label),
+    do: report(state, outcome)
+
   defp report_inactive(state, outcome, _label)
        when outcome in [:queue_refused, :queue_receipt_unconfirmed, :queue_not_ready],
        do: report(state, outcome)
@@ -2358,6 +2432,10 @@ defmodule MingaEditor.Agent.DraftWorkflow do
       state
       |> NoticeWorkflow.publish("Queued input recalled to the composer.")
       |> MingaEditor.schedule_render(16)
+
+  defp report(state, :queue_recalled), do: state |> QueueWorkflow.recalled() |> report(:recalled)
+
+  defp report(state, {:queue_recall_refused, reason}), do: QueueWorkflow.refuse(state, reason)
 
   defp report(state, :stale_stop),
     do: NoticeWorkflow.publish(state, "That Agent turn is no longer active.")

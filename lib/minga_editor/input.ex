@@ -32,6 +32,7 @@ defmodule MingaEditor.Input do
   alias MingaEditor.Input.Picker
   alias MingaEditor.Input.Popup
   alias MingaEditor.Input.Prompt
+  alias MingaEditor.Input.Queue
   alias MingaEditor.Input.Scoped
   alias MingaEditor.Input.Sidebar
   alias MingaEditor.Input.SignatureHelp
@@ -59,6 +60,7 @@ defmodule MingaEditor.Input do
     # The drawer answers the task it selects, so it runs ahead of the conversation's approval keys.
     {TasksDrawer, 15},
     {ToolApproval, 20},
+    {Queue, 35},
     {AgentPanel, 40},
     {Sidebar, 45},
     {EmptyState, 50},

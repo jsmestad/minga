@@ -53,4 +53,5 @@ defmodule Minga.Frontend.Adapter.GUI.FocusOwnerEncoder do
   defp surface_byte(:hover_popup), do: 12
   defp surface_byte(:empty_state), do: 13
   defp surface_byte(:tasks), do: 14
+  defp surface_byte(:queue), do: 15
 end

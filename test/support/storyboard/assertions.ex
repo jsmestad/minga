@@ -516,6 +516,9 @@ defmodule Minga.Test.Storyboard.Assertions do
     }
   end
 
+  def empty_state(%Model{ui: %{agent_queue: %{visible?: true, empty: %EmptyList{} = empty}}}),
+    do: anatomy(empty)
+
   def empty_state(%Model{
         ui: %{empty_state: %{visible?: true, sections: [_ | _] = sections} = state}
       }) do

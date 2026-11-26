@@ -63,6 +63,77 @@ defmodule Minga.Integration.GUIProtocolTest do
     GUIHarness.round_trip!(harness, command, expected_type)
   end
 
+  test "the native queue preserves displayed revisions, empty actions, and hide", %{
+    harness: harness
+  } do
+    alias Minga.Frontend.Adapter.GUI.AgentQueueEncoder
+    alias Minga.RenderModel.UI.EmptyList.Action
+    alias Minga.RenderModel.UI.Queue
+
+    scope = %Queue{
+      visible?: true,
+      focused?: true,
+      workspace_id: 70_000,
+      record_id: "conversation-λ",
+      title: "*minga-queue*"
+    }
+
+    row = %{
+      id: 0x1_0000_0017,
+      revision: 4,
+      kind: :follow_up,
+      label: "1",
+      preview: "Keep café",
+      attachment_count: 2
+    }
+
+    removed = %{row | id: 7, revision: 2, kind: :steering, preview: "Never sent"}
+    messages = %{scope | selected_id: row.id, pending: [row], removed: [removed]}
+
+    assert %{
+             "visible" => true,
+             "focused" => true,
+             "workspace_id" => 70_000,
+             "record_id" => "conversation-λ",
+             "selected_id" => 0x1_0000_0017,
+             "pending" => [
+               %{
+                 "id" => 0x1_0000_0017,
+                 "revision" => 4,
+                 "preview" => "Keep café",
+                 "attachment_count" => 2
+               }
+             ],
+             "removed" => [%{"id" => 7, "revision" => 2, "preview" => "Never sent"}]
+           } = round_trip(harness, AgentQueueEncoder.encode_command(messages), "gui_agent_queue")
+
+    empty = %EmptyList{
+      glyph: "",
+      title: "Nothing queued.",
+      why: "Queued messages wait here.",
+      actions: [%Action{id: "queue_return_to_composer", key: "↩", label: "Back to the composer"}],
+      selected: 0
+    }
+
+    assert %{
+             "pending" => [],
+             "removed" => [],
+             "selected_id" => 0,
+             "empty" => %{
+               "title" => "Nothing queued.",
+               "actions" => [%{"id" => "queue_return_to_composer", "key" => "↩"}]
+             }
+           } =
+             round_trip(
+               harness,
+               AgentQueueEncoder.encode_command(%{scope | empty: empty}),
+               "gui_agent_queue"
+             )
+
+    assert %{"visible" => false} =
+             round_trip(harness, AgentQueueEncoder.encode_command(%Queue{}), "gui_agent_queue")
+  end
+
   test "command completion round-trips the generation and candidate identities", %{
     harness: harness
   } do

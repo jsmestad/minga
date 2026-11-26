@@ -16,6 +16,10 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
   # A notice longer than any transcript width: its last words say what to do, so
   # every frontend shows it whole, wrapped, never clipped.
   @long_notice "Saved the retry notes to lib/native/usage_limit/notes.md; open that file to review the plan, window and reset time."
+  @queue_rows [
+    "Then run the session tests and fix what fails.",
+    "Update docs/CONFIGURATION.md with the new limit message."
+  ]
 
   @spec conversation(:working | :stopped) :: keyword()
   defp conversation(turn) do
@@ -71,10 +75,56 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
   # Routing into an idle or not-yet-connected composer also reaches this scene.
   # Direct captures of the seeded conversation wait for its turn in Registry.drive/2.
   defp conversation?(%Model{conversation: %{status: status}} = model, turn) do
-    Model.open?(model, :agent_chat) and status == :stopped == (turn == :stopped)
+    Model.open?(model, :agent_chat) and not match?(%{surface: :queue}, model.focus) and
+      status == :stopped == (turn == :stopped)
   end
 
   defp conversation?(%Model{}, _turn), do: false
+
+  @spec queue_scene([String.t()], [Check.t()]) :: keyword()
+  defp queue_scene(rows, checks) do
+    turn = if rows == [], do: :idle, else: :working
+    conversation = Keyword.merge(conversation(:working), turn: turn, queue: rows, open?: true)
+
+    [
+      start: [conversation: conversation],
+      reach: "esc esc SPC a q q",
+      click_reach: [{:gui_action, {:execute_command, "agent_queued_inputs"}}],
+      recognize: &queue_ready?(&1, rows),
+      checks: [
+        Check.new("the queue owns focus and names itself in the modeline", &queue_focus/1)
+        | checks
+      ]
+    ]
+  end
+
+  @spec queue_ready?(Model.t(), [String.t()]) :: boolean()
+  defp queue_ready?(%Model{ui: %{agent_queue: %{focused?: true, empty: empty}}}, []),
+    do: not is_nil(empty)
+
+  defp queue_ready?(%Model{ui: %{agent_queue: %{focused?: true, pending: pending}}}, [_ | _]),
+    do: pending != []
+
+  defp queue_ready?(%Model{}, _rows), do: false
+
+  @spec queue_focus(Model.t()) :: Model.t()
+  defp queue_focus(%Model{} = model) do
+    assert Model.open?(model, :agent_queue) and Model.open?(model, :agent_chat)
+    assert model.ui.status_bar.data.file.name == "*minga-queue*"
+    refute model.ui.agent_chat.input_focused
+    model |> assert_focus(:queue) |> assert_mode(:normal)
+  end
+
+  @spec queued_rows(Model.t()) :: Model.t()
+  defp queued_rows(%Model{ui: %{agent_queue: queue}} = model) do
+    assert queue.summary == "2 queued"
+    assert Enum.map(queue.pending, & &1.preview) == @queue_rows
+    assert [%{id: first}, %{id: second}] = queue.pending
+    assert first != second and queue.selected_id == first
+    assert {"dd", "remove", :remove} in queue.hints
+    assert {"↩", "edit", :edit} in queue.hints
+    model
+  end
 
   @spec conversation_checks(:working | :stopped, [{String.t(), String.t()}]) :: [Check.t()]
   defp conversation_checks(turn, hints) do
@@ -335,8 +385,24 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
             {"esc", "normal"}
           ])
       ),
-      Entry.pending("minga.queue", 4055, "the *minga-queue* buffer"),
-      Entry.pending("minga.queue.empty", 4055, "an empty queue"),
+      Entry.built(
+        "minga.queue",
+        queue_scene(@queue_rows, [
+          Check.new("two messages wait in order and the first is selected", &queued_rows/1)
+        ])
+      ),
+      Entry.built(
+        "minga.queue.empty",
+        queue_scene([], [
+          Check.new(
+            "the empty queue explains where messages wait and offers the composer",
+            &assert_empty_state(&1,
+              title: "Nothing queued.",
+              actions: [{"↩", "Back to the composer"}]
+            )
+          )
+        ])
+      ),
       Entry.pending("minga.subagent.peek", 4046, "a subagent beside its parent"),
       Entry.pending("minga.hover.attribution", 4053, "hover on a line Minga wrote"),
       Entry.pending("minga.act_menu", 4052, "the act menu on a Minga change"),

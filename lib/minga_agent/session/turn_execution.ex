@@ -45,8 +45,10 @@ defmodule MingaAgent.Session.TurnExecution do
   """
   @type withdrawn_input :: {prompt_kind(), queued_input()}
 
-  @typedoc "Where a queued input goes in its own queue: beside another pending input, or at the end."
-  @type queue_placement :: {:before | :after, anchor_id :: pos_integer()} | :end
+  @type queue_position :: {:before | :after, anchor_id :: pos_integer()} | :end
+
+  @typedoc "A position, optionally requiring the displayed source to still be removed."
+  @type queue_placement :: queue_position() | {:removed, queue_position()}
   @max_pending_inputs 32
   @max_withdrawn_inputs 8
   @max_pending_bytes 16 * 1024 * 1024
@@ -536,6 +538,7 @@ defmodule MingaAgent.Session.TurnExecution do
           :already_consumed
           | :queued_input_not_found
           | :stale_queue_revision
+          | :not_removed
           | :anchor_gone
           | :different_queue
           | :prompt_queue_full
@@ -547,8 +550,24 @@ defmodule MingaAgent.Session.TurnExecution do
   """
   @spec place_queued_input(t(), {pos_integer(), pos_integer()}, queue_placement()) ::
           {:ok, t()} | {:error, queue_place_error()}
-  def place_queued_input(%__MODULE__{} = execution, {id, revision}, placement) do
+  def place_queued_input(%__MODULE__{} = execution, identity, {:removed, position}),
+    do: place_queued_input(execution, identity, position, :withdrawn)
+
+  def place_queued_input(%__MODULE__{} = execution, identity, position),
+    do: place_queued_input(execution, identity, position, :either)
+
+  @spec place_queued_input(
+          t(),
+          {pos_integer(), pos_integer()},
+          queue_position(),
+          :either | :withdrawn
+        ) ::
+          {:ok, t()} | {:error, queue_place_error()}
+  defp place_queued_input(execution, {id, revision}, placement, source) do
     case take_placeable(execution, id) do
+      {:ok, {:pending, _kind}, _entry, _rest} when source == :withdrawn ->
+        {:error, :not_removed}
+
       {:ok, origin, {^id, ^revision, _, _, _} = entry, rest} ->
         place_taken(execution, rest, origin, entry, placement)
 
@@ -565,7 +584,7 @@ defmodule MingaAgent.Session.TurnExecution do
           t(),
           {:pending | :withdrawn, prompt_kind()},
           queued_input(),
-          queue_placement()
+          queue_position()
         ) ::
           {:ok, t()} | {:error, :anchor_gone | :different_queue | :prompt_queue_full}
   # A pending input placed beside itself stays where it is.
@@ -662,7 +681,7 @@ defmodule MingaAgent.Session.TurnExecution do
     end
   end
 
-  @spec insert_placed(t(), prompt_kind(), queued_input(), queue_placement()) ::
+  @spec insert_placed(t(), prompt_kind(), queued_input(), queue_position()) ::
           {:ok, t()} | {:error, :anchor_gone | :different_queue}
   defp insert_placed(execution, kind, entry, :end) do
     field = queue_field(kind)

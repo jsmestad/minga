@@ -118,6 +118,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x70       | picker_fit              |
   | 0x71       | tasks_drawer_action     |
   | 0x72       | agent_notification_open |
+  | 0x76       | agent_queue_action      |
 
   """
 
@@ -155,6 +156,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_agent_open_question Opcodes.gui_action_agent_open_question()
   @gui_action_agent_stop_turn Opcodes.gui_action_agent_stop_turn()
   @gui_action_agent_continue_turn Opcodes.gui_action_agent_continue_turn()
+  @gui_action_agent_queue_action Opcodes.gui_action_agent_queue_action()
   @gui_action_execute_command Opcodes.gui_action_execute_command()
   @gui_action_git_stage_file Opcodes.gui_action_git_stage_file()
   @gui_action_git_unstage_file Opcodes.gui_action_git_unstage_file()
@@ -288,6 +290,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:agent_notification_open, alert :: <<_::128>>}
           | {:agent_stop_turn, {String.t(), String.t()}}
           | {:agent_continue_turn, {String.t(), String.t()}}
+          | {:agent_queue_action, {non_neg_integer(), String.t()},
+             Minga.RenderModel.UI.Queue.action(),
+             MingaAgent.Session.QueuedInputSummary.identity() | nil,
+             MingaAgent.Session.QueuedInputSummary.identity() | nil}
           | {:agent_tool_approval, ApprovalTarget.t(), MingaAgent.Session.approval_decision()}
           | {:execute_command, name :: String.t()}
           | {:git_stage_file, panel_id :: pos_integer(), path :: String.t(), section :: 0..3}
@@ -828,6 +834,18 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       do: {:ok, {:agent_continue_turn, {session_id, request_id}}}
 
   def decode_gui_action(
+        @gui_action_agent_queue_action,
+        <<action, workspace::32, size::16, record::binary-size(size), id::64, revision::64,
+          removed_id::64, removed_revision::64>>
+      )
+      when size > 0 do
+    with {:ok, name, row, source} <-
+           decode_queue_intent(action, {id, revision}, {removed_id, removed_revision}) do
+      {:ok, {:agent_queue_action, {workspace, record}, name, row, source}}
+    end
+  end
+
+  def decode_gui_action(
         @gui_action_agent_read_retained_output,
         <<message_id::32, offer::binary-size(16)>>
       )
@@ -1173,6 +1191,31 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   end
 
   def decode_gui_action(_, _), do: :error
+
+  @spec decode_queue_intent(
+          byte(),
+          {non_neg_integer(), non_neg_integer()},
+          {non_neg_integer(), non_neg_integer()}
+        ) ::
+          {:ok, Minga.RenderModel.UI.Queue.action(), {pos_integer(), pos_integer()} | nil,
+           {pos_integer(), pos_integer()} | nil}
+          | :error
+  defp decode_queue_intent(0, {id, revision} = row, {0, 0}) when id > 0 and revision > 0,
+    do: {:ok, :select, row, nil}
+
+  defp decode_queue_intent(1, {id, revision} = row, {0, 0}) when id > 0 and revision > 0,
+    do: {:ok, :remove, row, nil}
+
+  defp decode_queue_intent(4, {id, revision} = row, {0, 0}) when id > 0 and revision > 0,
+    do: {:ok, :edit, row, nil}
+
+  defp decode_queue_intent(action, {id, revision} = row, {removed, removed_revision} = source)
+       when action in [2, 3] and id > 0 and revision > 0 and removed > 0 and removed_revision > 0,
+       do: {:ok, if(action == 2, do: :paste_after, else: :paste_before), row, source}
+
+  defp decode_queue_intent(5, {0, 0}, {0, 0}), do: {:ok, :close, nil, nil}
+  defp decode_queue_intent(6, {0, 0}, {0, 0}), do: {:ok, :composer, nil, nil}
+  defp decode_queue_intent(_, _, _), do: :error
 
   @spec decode_approval_decision(byte()) :: {:ok, MingaAgent.Session.approval_decision()} | :error
   defp decode_approval_decision(1), do: {:ok, :approve}

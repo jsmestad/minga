@@ -9,6 +9,7 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   alias MingaEditor.Agent.DraftWorkflow
   alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.Agent.PromptBuffer
+  alias MingaEditor.Agent.QueueWorkflow
   alias MingaEditor.Agent.UIState
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Shell.Runtime
@@ -114,6 +115,7 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
     |> ConnectionSetup.retire_prompt(connection)
     |> AgentRetainedOutputSource.dismiss_if_stale()
     |> AgentDraftAttachmentSource.dismiss_if_stale()
+    |> QueueWorkflow.refresh(session_pid)
     |> MingaEditor.schedule_render(16)
   end
 
@@ -195,13 +197,18 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   @doc """
   Applies queue presentation for a newly queued prompt. A queued message is a next step, not the task, so it never renames the task (#4055).
   """
-  @spec prompt_queued(EditorState.t(), String.t(), term()) :: EditorState.t()
-  def prompt_queued(%EditorState{} = state, content, _queue_type) when is_binary(content),
-    do: MingaEditor.schedule_render(state, 16)
+  @spec prompt_queued(EditorState.t(), pid(), String.t(), term()) :: EditorState.t()
+  def prompt_queued(%EditorState{} = state, session, content, _queue_type)
+      when is_binary(content),
+      do: queues_recalled(state, session)
 
-  @doc "Refreshes queue presentation after both prompt queues are recalled."
-  @spec queues_recalled(EditorState.t()) :: EditorState.t()
-  def queues_recalled(%EditorState{} = state), do: MingaEditor.schedule_render(state, 16)
+  @doc "Refreshes queue presentation after the originating queue changes."
+  @spec queues_recalled(EditorState.t(), pid()) :: EditorState.t()
+  def queues_recalled(%EditorState{} = state, session) do
+    state
+    |> QueueWorkflow.refresh(session)
+    |> MingaEditor.schedule_render(16)
+  end
 
   @spec restore_queued_prompts_after_error(EditorState.t(), :regular | :arrival) ::
           EditorState.t()

@@ -10,8 +10,10 @@ defmodule MingaEditor.Journeys.ComposerKeysTest do
   alias Minga.Config.Options
   alias Minga.Design.Tokens
   alias MingaAgent.Session
+  alias MingaEditor.Agent.QueueSurface
   alias MingaEditor.Agent.Tasks
   alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.FocusOwner
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.Modeline
@@ -104,6 +106,89 @@ defmodule MingaEditor.Journeys.ComposerKeysTest do
 
     queue(ctx, "later")
     assert Session.get_queued_messages(session) == {[], ["later"]}
+  end
+
+  test "queue keys remove, place and recall one message without sending it", %{
+    editor_ctx: ctx,
+    session: session
+  } do
+    send_keys_sync(ctx, "start")
+    send_key_sync(ctx, 13, @cmd)
+    await_working(ctx)
+
+    queue(ctx, "first")
+    queue(ctx, "second")
+    send_keys_sync(ctx, "<Esc><Esc><SPC>aqq")
+    state = await_queue(ctx, ["first", "second"], [])
+    assert FocusOwner.derive(state).surface == :queue
+    assert StatusBarData.from_state(state).common.status.file.name == "*minga-queue*"
+
+    send_keys_sync(ctx, "d<Esc>jdd")
+    await_queue(ctx, ["first"], ["second"])
+    assert Session.get_queued_messages(session) == {[], ["first"]}
+
+    send_keys_sync(ctx, "p")
+    await_queue(ctx, ["first", "second"], [])
+    send_keys_sync(ctx, "j<CR>")
+    await_prompt(ctx, "second")
+    state = await_queue(ctx, ["first"], [])
+
+    assert FocusOwner.derive(state).surface == :agent
+    assert state.workspace.agent_ui.panel.input_focused
+    assert editor_mode(ctx) == :insert
+    assert user_messages(session) == ["start"]
+  end
+
+  test "q returns from an empty queue to the transcript and Enter returns to the composer", %{
+    editor_ctx: ctx
+  } do
+    send_keys_sync(ctx, "<Esc><Esc><SPC>aqq")
+    assert FocusOwner.derive(await_queue(ctx, [], [])).surface == :queue
+
+    send_keys_sync(ctx, "q")
+    state = editor_state(ctx)
+    assert FocusOwner.derive(state).surface == :agent
+    refute state.workspace.agent_ui.panel.input_focused
+
+    send_keys_sync(ctx, "<SPC>aqq<CR>")
+    state = editor_state(ctx)
+    assert FocusOwner.derive(state).surface == :agent
+    assert state.workspace.agent_ui.panel.input_focused
+  end
+
+  test "a queue click cannot remove a row with a stale conversation or revision", %{
+    editor_ctx: ctx,
+    session: session
+  } do
+    send_keys_sync(ctx, "start")
+    send_key_sync(ctx, 13, @cmd)
+    await_working(ctx)
+    queue(ctx, "first")
+    queue(ctx, "second")
+    send_keys_sync(ctx, "<Esc><Esc><SPC>aqq")
+
+    state = await_queue(ctx, ["first", "second"], [])
+
+    %{origin: {workspace, ^session, record}, contents: %{pending: [_, second]}} =
+      state.workspace.agent_ui.queue
+
+    {id, revision} = second.identity
+
+    send_gui_action(
+      ctx,
+      {:agent_queue_action, {workspace + 1, record}, :remove, {id, revision}, nil}
+    )
+
+    send_gui_action(
+      ctx,
+      {:agent_queue_action, {workspace, record}, :remove, {id, revision + 1}, nil}
+    )
+
+    assert Session.get_queued_messages(session) == {[], ["first", "second"]}
+
+    send_gui_action(ctx, {:agent_queue_action, {workspace, record}, :remove, {id, revision}, nil})
+    await_queue(ctx, ["first"], ["second"])
+    assert Session.get_queued_messages(session) == {[], ["first"]}
   end
 
   for {label, stop} <- [{"SPC a s", "<Esc><Esc><SPC>as"}, {"Cmd+.", :cmd_period}] do
@@ -266,6 +351,24 @@ defmodule MingaEditor.Journeys.ComposerKeysTest do
     wait_until(ctx, fn _state -> prompt(ctx) == expected end,
       max_attempts: 200,
       message: "expected the composer to read #{inspect(expected)}"
+    )
+  end
+
+  defp await_queue(ctx, pending, removed) do
+    wait_until(
+      ctx,
+      fn state ->
+        case state.workspace.agent_ui.queue do
+          %QueueSurface{contents: %{pending: shown_pending, removed: shown_removed}} ->
+            Enum.map(shown_pending, & &1.preview) == pending and
+              Enum.map(shown_removed, & &1.preview) == removed
+
+          %QueueSurface{} ->
+            false
+        end
+      end,
+      max_attempts: 200,
+      message: "expected the displayed queue and removed rows to match"
     )
   end
 

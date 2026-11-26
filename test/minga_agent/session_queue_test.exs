@@ -464,12 +464,17 @@ defmodule MingaAgent.SessionQueueTest do
           do: assert({:queued, :follow_up} = Session.queue_follow_up(session, text))
 
       id = Session.session_id(session)
-      assert :ok = Session.change_queued_input(session, id, {2, 1}, :remove)
+      assert {:ok, 0} = Session.change_queued_input(session, id, {2, 1}, :remove)
       assert Session.get_queued_messages(session) == {[], ["keep", "also keep"]}
 
       assert :ok = Session.place_queued_input(session, id, {2, 1}, {:before, 3})
       assert Session.get_queued_messages(session) == {[], ["keep", "removed", "also keep"]}
-      assert :ok = Session.change_queued_input(session, id, {2, 1}, :remove)
+
+      assert {:error, :not_removed} =
+               Session.place_queued_input(session, id, {2, 1}, {:removed, :end})
+
+      assert Session.get_queued_messages(session) == {[], ["keep", "removed", "also keep"]}
+      assert {:ok, 0} = Session.change_queued_input(session, id, {2, 1}, :remove)
 
       SessionSlowMockProvider.proceed(Session.get_provider(session))
       assert_receive {:agent_event, ^session, {:status_changed, :thinking}}, @event_timeout
@@ -557,8 +562,8 @@ defmodule MingaAgent.SessionQueueTest do
 
       id = Session.session_id(session)
       assert {:error, :stale_target} = Session.queue_contents(session, "wrong-record")
-      assert :ok = Session.change_queued_input(session, id, {1, 1}, :remove)
-      assert :ok = Session.change_queued_input(session, id, {3, 1}, :remove)
+      assert {:ok, 0} = Session.change_queued_input(session, id, {1, 1}, :remove)
+      assert {:ok, 0} = Session.change_queued_input(session, id, {3, 1}, :remove)
 
       assert {:ok, %{pending: [waiting], removed: [newest, oldest]}} =
                Session.queue_contents(session, id)
@@ -566,6 +571,31 @@ defmodule MingaAgent.SessionQueueTest do
       assert {waiting.identity, waiting.preview} == {{2, 1}, "two"}
       assert {newest.identity, newest.preview, newest.kind} == {{3, 1}, "three", :follow_up}
       assert {oldest.identity, oldest.preview} == {{1, 1}, "one"}
+    end
+
+    @tag :tmp_dir
+    test "removing a ninth input reports the permanently lost removal", %{tmp_dir: dir} do
+      session =
+        start_test_session(
+          provider: SessionSlowMockProvider,
+          persist?: true,
+          session_store_dir: dir
+        )
+
+      Session.subscribe(session)
+      assert :ok = Session.send_prompt(session, "First")
+      assert_receive {:agent_event, ^session, {:status_changed, :thinking}}, @event_timeout
+      id = Session.session_id(session)
+
+      for index <- 1..9 do
+        assert {:queued, :follow_up} = Session.queue_follow_up(session, "Message #{index}")
+        expired = if index == 9, do: 1, else: 0
+        assert {:ok, ^expired} = Session.change_queued_input(session, id, {index, 1}, :remove)
+      end
+
+      assert {:ok, %{pending: [], removed: removed}} = Session.queue_contents(session, id)
+      assert Enum.map(removed, & &1.identity) == Enum.map(9..2//-1, &{&1, 1})
+      assert {:error, :already_consumed} = Session.place_queued_input(session, id, {1, 1}, :end)
     end
 
     @tag :tmp_dir
@@ -600,7 +630,7 @@ defmodule MingaAgent.SessionQueueTest do
       assert {:error, :stale_queue_revision} =
                Session.change_queued_input(session, id, {1, 1}, :remove)
 
-      assert :ok = Session.change_queued_input(session, id, {2, 1}, :remove)
+      assert {:ok, 0} = Session.change_queued_input(session, id, {2, 1}, :remove)
 
       assert {:ok, [%{identity: {1, 2}, preview: "revised"}, %{identity: {3, 1}}]} =
                Session.queued_input_summaries(session, id)

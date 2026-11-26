@@ -14,9 +14,9 @@ defmodule MingaEditor.Agent.QueuedInputEdit do
   alias MingaEditor.Shell.Traditional.Workflow
   alias MingaEditor.State
   alias MingaEditor.State.Interaction
-  alias MingaEditor.UI.Picker.AgentQueuedInputSource
+  alias MingaEditor.Agent.QueueWorkflow
 
-  @typep origin :: AgentQueuedInputSource.origin()
+  @typep origin :: MingaEditor.Agent.PromptInput.submission_owner()
   @typep identity :: QueuedInputSummary.identity()
   @typep operation :: :read | {:save, String.t()}
   @typep request :: (identity(), operation() -> {:ok, String.t()} | :ok | {:error, term()})
@@ -268,7 +268,7 @@ defmodule MingaEditor.Agent.QueuedInputEdit do
 
   @spec current_load?(State.t(), non_neg_integer() | nil, origin()) :: boolean()
   defp current_load?(%State{shell_runtime: %{state: %{modal: :none}}} = state, tab_id, origin) do
-    active_tab_id(state) == tab_id and AgentQueuedInputSource.current_origin(state) == origin
+    active_tab_id(state) == tab_id and QueueWorkflow.current_origin(state) == origin
   end
 
   defp current_load?(_state, _tab_id, _origin), do: false

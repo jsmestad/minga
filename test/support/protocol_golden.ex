@@ -23,6 +23,7 @@ defmodule Minga.Test.ProtocolGolden do
   payloads (max-length strings, unicode, zero-item and populated lists).
   """
 
+  alias Minga.Frontend.Adapter.GUI.AgentQueueEncoder
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.CompletionEncoder
@@ -36,6 +37,9 @@ defmodule Minga.Test.ProtocolGolden do
   alias Minga.RenderModel.UI.Completion
   alias Minga.RenderModel.UI.FocusOwner
   alias Minga.RenderModel.UI.GitStatus
+  alias Minga.RenderModel.UI.EmptyList
+  alias Minga.RenderModel.UI.EmptyList.Action
+  alias Minga.RenderModel.UI.Queue
   alias Minga.RenderModel.UI.Picker
   alias Minga.RenderModel.UI.SearchState
   alias MingaEditor.RenderModel.UI.GitStatusBuilder
@@ -68,6 +72,7 @@ defmodule Minga.Test.ProtocolGolden do
       git_status_fixtures() ++
       search_state_fixtures() ++
       focus_owner_fixtures() ++
+      queue_fixtures() ++
       surface_layout_fixtures() ++
       theme_fixtures()
   end
@@ -164,7 +169,8 @@ defmodule Minga.Test.ProtocolGolden do
     for {name, surface, responder, surface_byte, responder_byte} <- [
           {"picker", :picker, :picker_query, 8, 1},
           {"hover", :hover_popup, :editor_view, 12, 0},
-          {"empty_state", :empty_state, :editor_view, 13, 0}
+          {"empty_state", :empty_state, :editor_view, 13, 0},
+          {"queue", :queue, :editor_view, 15, 0}
         ] do
       owner = %FocusOwner{
         responder: responder,
@@ -186,6 +192,108 @@ defmodule Minga.Test.ProtocolGolden do
           window_id: 70_000,
           generation: 4_294_967_295
         }
+      }
+    end
+  end
+
+  @spec queue_fixtures() :: [fixture()]
+  defp queue_fixtures do
+    blank = %{glyph: "", title: "", why: "", selected: 0, actions: []}
+
+    hidden = %{
+      visible: 0,
+      focused: 0,
+      workspace_id: 0,
+      record_id: "",
+      title: "",
+      summary: "",
+      removed_note: "",
+      selected_id: 0,
+      hints: [],
+      pending: [],
+      removed: [],
+      empty: blank
+    }
+
+    scope = %Queue{
+      visible?: true,
+      focused?: true,
+      workspace_id: 70_000,
+      record_id: "conversation",
+      title: "*minga-queue*"
+    }
+
+    shown = %{
+      hidden
+      | visible: 1,
+        focused: 1,
+        workspace_id: 70_000,
+        record_id: "conversation",
+        title: "*minga-queue*"
+    }
+
+    row = %{
+      id: 0x1_0000_0000,
+      revision: 3,
+      kind: :follow_up,
+      label: "1",
+      preview: "Review café λ",
+      attachment_count: 12
+    }
+
+    removed = %{row | id: 7, kind: :steering, preview: "Removed message"}
+    next = %Action{id: "queue_return_to_composer", key: "↩", label: "Back to the composer"}
+
+    empty = %EmptyList{
+      glyph: "",
+      title: "Nothing queued.",
+      why: "Queued messages wait here.",
+      actions: [next],
+      selected: 0
+    }
+
+    close = {"q", "close", :close}
+    hints = [%{key: "q", label: "close", action: 5}]
+
+    for {name, queue, expected} <- [
+          {"hidden", %Queue{}, hidden},
+          {"empty", %{scope | summary: "Queue", hints: [close], empty: empty},
+           %{
+             shown
+             | summary: "Queue",
+               hints: hints,
+               empty: %{
+                 blank
+                 | title: empty.title,
+                   why: empty.why,
+                   actions: [Map.from_struct(next)]
+               }
+           }},
+          {"messages",
+           %{
+             scope
+             | summary: "1 queued",
+               removed_note: "Not sent.",
+               selected_id: row.id,
+               pending: [row],
+               removed: [removed]
+           },
+           %{
+             shown
+             | summary: "1 queued",
+               removed_note: "Not sent.",
+               selected_id: row.id,
+               pending: [%{row | kind: 1}],
+               removed: [%{removed | kind: 0}]
+           }}
+        ] do
+      <<0xAE, length::32, payload::binary-size(length)>> = AgentQueueEncoder.encode_command(queue)
+
+      %{
+        name: "agent_queue_#{name}",
+        decoder: "GuiAgentQueueFields",
+        payload: payload,
+        expected: expected
       }
     end
   end

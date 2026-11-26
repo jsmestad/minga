@@ -3525,8 +3525,17 @@ defmodule Minga.Mix.ProtocolGenerator do
   defp swift_zero_value(%{"type" => "counted_array", "element" => element}, smap),
     do: "#{swift_array_type(element, smap)}()"
 
-  defp swift_zero_value(%{"type" => "struct", "element" => _element}, _smap),
-    do: "nil"
+  defp swift_zero_value(%{"type" => "struct", "element" => element}, smap) do
+    args =
+      smap
+      |> Map.fetch!(element)
+      |> entry_fields()
+      |> Enum.map_join(", ", fn field ->
+        "#{swift_field_name(field["name"])}: #{swift_zero_value(field, smap)}"
+      end)
+
+    "#{swift_struct_name(element)}(#{args})"
+  end
 
   # Resolve an enum's default case name from a field reference; the enums map is
   # captured at file build time so this stays a pure lookup by enum name.

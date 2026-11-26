@@ -66,6 +66,39 @@ defmodule MingaEditor.Frontend.GUIAgentChatProtocolTest do
     end
   end
 
+  test "queue clicks require the exact conversation and any identities used by the action" do
+    target = <<42::32, 1::16, "s">>
+    row = <<0x1_0000_0000::64, 2::64>>
+    removed = <<3::64, 1::64>>
+    absent = <<0::128>>
+
+    for {opcode, action, row_bytes, source_bytes, shown, source} <- [
+          {0, :select, row, absent, {0x1_0000_0000, 2}, nil},
+          {1, :remove, row, absent, {0x1_0000_0000, 2}, nil},
+          {2, :paste_after, row, removed, {0x1_0000_0000, 2}, {3, 1}},
+          {3, :paste_before, row, removed, {0x1_0000_0000, 2}, {3, 1}},
+          {4, :edit, row, absent, {0x1_0000_0000, 2}, nil},
+          {5, :close, absent, absent, nil, nil},
+          {6, :composer, absent, absent, nil, nil}
+        ] do
+      payload = <<opcode, target::binary, row_bytes::binary, source_bytes::binary>>
+
+      assert {:ok, {:agent_queue_action, {42, "s"}, ^action, ^shown, ^source}} =
+               ProtocolGUI.decode_gui_action(0x76, payload)
+    end
+
+    for payload <- [
+          <<2, target::binary, row::binary, absent::binary>>,
+          <<1, target::binary, 23::64, 0::64, absent::binary>>,
+          <<5, target::binary, row::binary, absent::binary>>,
+          <<0, target::binary, row::binary>>,
+          <<0, target::binary, row::binary, absent::binary, 1>>,
+          <<255, target::binary, row::binary, absent::binary>>
+        ] do
+      assert :error = ProtocolGUI.decode_gui_action(0x76, payload)
+    end
+  end
+
   test "a start remedy click carries only a known remedy" do
     assert {:ok, {:gui_action, {:agent_start_remedy, :retry}}} =
              Protocol.decode_event(<<Minga.Protocol.Opcodes.gui_action(), 0x6F, 1>>)

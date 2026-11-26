@@ -558,6 +558,7 @@ defmodule MingaAgent.Session do
           | {:ok, DraftSnapshot.attachment(), String.t()}
           | {:ok, TurnExecution.queue_receipt()}
           | {:ok, [QueuedInputSummary.t()]}
+          | {:ok, queue_contents()}
           | {:ok, String.t()}
           | :ok
           | {:accepted, SessionStore.draft_revision(), term()}
@@ -1383,13 +1384,13 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:queued_input_text, record_id, identity})
   end
 
-  @doc "Edits or removes only the displayed pending entry in the original saved Session."
+  @doc "Changes the displayed pending entry. Removing it returns the count of removed entries that expired, including any lost to the byte limit."
   @spec change_queued_input(
           GenServer.server(),
           String.t(),
           {pos_integer(), pos_integer()},
           TurnExecution.queued_edit()
-        ) :: :ok | {:error, term()}
+        ) :: :ok | {:ok, non_neg_integer()} | {:error, term()}
   def change_queued_input(session, record_id, identity, operation) do
     GenServer.call(session, {:change_queued_input, record_id, identity, operation}, 30_000)
   end
@@ -5986,7 +5987,7 @@ defmodule MingaAgent.Session do
   defp queued_input_text_result(_state, _record, _identity), do: {:error, :invalid_queue_edit}
 
   @spec change_queued_input_reply(state(), String.t(), pos_integer(), pos_integer(), term()) ::
-          {:reply, :ok | {:error, term()}, state()}
+          {:reply, :ok | {:ok, non_neg_integer()} | {:error, term()}, state()}
   defp change_queued_input_reply(state, record_id, id, revision, operation)
        when operation == :remove or
               (is_tuple(operation) and tuple_size(operation) == 2 and
@@ -5998,7 +5999,8 @@ defmodule MingaAgent.Session do
          {:ok, execution} <-
            TurnExecution.change_queued_input(state.turn_execution, id, revision, operation),
          {:ok, committed} <- commit_effect_snapshot(state, %{state | turn_execution: execution}) do
-      {:reply, :ok, broadcast(committed, :queues_recalled)}
+      reply = queue_change_receipt(state.turn_execution, execution, operation)
+      {:reply, reply, broadcast(committed, :queues_recalled)}
     else
       {:error, _reason} = error -> {:reply, error, state}
     end
@@ -6007,13 +6009,27 @@ defmodule MingaAgent.Session do
   defp change_queued_input_reply(state, _record_id, _id, _revision, _operation),
     do: {:reply, {:error, :invalid_queue_edit}, state}
 
+  @spec queue_change_receipt(TurnExecution.t(), TurnExecution.t(), TurnExecution.queued_edit()) ::
+          :ok | {:ok, non_neg_integer()}
+  defp queue_change_receipt(previous, current, :remove) do
+    total = length(TurnExecution.withdrawn_inputs(previous)) + 1
+    {:ok, total - length(TurnExecution.withdrawn_inputs(current))}
+  end
+
+  defp queue_change_receipt(_previous, _current, _edit), do: :ok
+
+  defguardp is_queue_position(placement)
+            when placement == :end or
+                   (is_tuple(placement) and tuple_size(placement) == 2 and
+                      elem(placement, 0) in [:before, :after] and
+                      is_integer(elem(placement, 1)) and elem(placement, 1) > 0)
+
   @spec place_queued_input_reply(state(), String.t(), {pos_integer(), pos_integer()}, term()) ::
           {:reply, :ok | {:error, term()}, state()}
   defp place_queued_input_reply(state, record_id, identity, placement)
-       when placement == :end or
+       when is_queue_position(placement) or
               (is_tuple(placement) and tuple_size(placement) == 2 and
-                 elem(placement, 0) in [:before, :after] and is_integer(elem(placement, 1)) and
-                 elem(placement, 1) > 0) do
+                 elem(placement, 0) == :removed and is_queue_position(elem(placement, 1))) do
     with :ok <- validate_composer_record(state, record_id),
          {:ok, execution} <-
            TurnExecution.place_queued_input(state.turn_execution, identity, placement),
