@@ -51,3 +51,13 @@ MINGA_AX_ARTIFACT_ROOT="$PWD/accessibility-evidence" scripts/test_macos_accessib
 ```
 
 Hosted CI checks the Swift app and protocol separately. It does not verify launched-app accessibility behavior. The local command and its retained evidence are the validation gate for that behavior.
+
+## Live visual verification
+
+From the worktree containing the change, with its pinned toolchains and Mix dependencies installed, run `python3 scripts/prepare_visual_macos.py` to build and open an isolated Debug app. The default window opens `visual-check.md`. Pass a file or project directory to check another surface.
+
+For a GUI driver, add `--prepare-only` and open the printed absolute bundle path through the driver. The bundle embeds the matching BEAM release and sets its private development profile at launch, so reopening it from Finder also works. Confirm the expected file or project appears before sending input.
+
+After a successful build, add `--reuse-build` to prepare another fixture quickly. This uses the existing Debug renderer and dev release in that worktree. Rebuild after changing the code.
+
+Each run has its own app identity, IPC directory and profile. To seed a saved conversation, copy the fixture into `config/minga/agent/sessions/` beside the prepared app before opening it. The editor log is in `data/minga/minga.log` beside the app. Quit the app before removing its printed `/private/tmp/minga-visual-*` parent directory.
