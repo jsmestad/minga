@@ -13,15 +13,4 @@ defmodule MingaAgent.Subagent.Worktree.System do
   rescue
     exception -> {:error, Exception.message(exception)}
   end
-
-  @doc "Runs git and returns stdout only, so warnings on stderr cannot corrupt file content."
-  @spec stdout(String.t(), [String.t()]) :: {:ok, String.t()} | {:error, String.t()}
-  def stdout(cwd, args) do
-    case System.cmd("git", args, cd: cwd, stderr_to_stdout: false) do
-      {output, 0} -> {:ok, output}
-      {_output, status} -> {:error, "git #{Enum.join(args, " ")} exited with status #{status}"}
-    end
-  rescue
-    exception -> {:error, Exception.message(exception)}
-  end
 end
