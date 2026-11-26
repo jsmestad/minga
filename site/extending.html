@@ -195,7 +195,7 @@ bind <span class="tok-atom">:normal</span>, <span class="tok-str">"SPC o h"</spa
             <pre><code>extension <span class="tok-atom">:minga_hello</span>, path: <span class="tok-str">"~/code/minga_hello"</span></code></pre>
           </div>
 
-          <p>Two things change when you move from the left card to the right one:</p>
+          <p>Two things change when you move from the config card to the package card:</p>
           <ul>
             <li><strong>Where the command runs.</strong> A config command runs in its own task, outside the editor process: if it raises an error, Minga reports the error and you keep typing. A package command runs inside the editor process and receives the editor state. Minga catches a crash there and reports it, but a command that never returns blocks your input until it does, so keep slow work in the package's own process.</li>
             <li><strong>When a change takes effect.</strong> You reload config in place with <kbd>SPC h r</kbd>. Changed package code loads only when Minga starts again.</li>
