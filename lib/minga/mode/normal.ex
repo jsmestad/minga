@@ -81,6 +81,7 @@ defmodule Minga.Mode.Normal do
   # Modifier flags (mirrors MingaEditor.Frontend.Protocol)
   @ctrl 0x02
   @alt 0x04
+  @cmd 0x08
 
   # Normal-mode prefix trie (g, z, [, ]) — must be defined before handle_key
   @prefix_trie Minga.Keymap.NormalPrefixes.trie()
@@ -776,6 +777,12 @@ defmodule Minga.Mode.Normal do
   # ── Undo / redo ───────────────────────────────────────────────────────────
 
   def handle_key({?u, 0}, state) do
+    {:execute, :undo, state}
+  end
+
+  # ⌘Z aliases u (docs/design/keys.md, rule 5). The macOS app runs Undo from its menu, so this key arrives only from
+  # a terminal that reports ⌘.
+  def handle_key({?z, @cmd}, state) do
     {:execute, :undo, state}
   end
 

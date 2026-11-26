@@ -402,6 +402,9 @@ defmodule Minga.Keymap.Defaults do
       ~K(<) => {:dedent, "Dedent (<{motion})"},
       # ── Undo / Redo ───────────────────────────────────────────────────────
       ~K(u) => {:undo, "Undo"},
+      # ⌘Z aliases u (docs/design/keys.md, rule 5). The macOS app runs Undo from its menu, so this key reaches the
+      # keymap only from a terminal that reports ⌘ (the Kitty keyboard protocol).
+      {?z, 0x08} => {:undo, "Undo (u)"},
       ~K(C-r) => {:redo, "Redo"},
       # ── Jump list ─────────────────────────────────────────────────────────
       ~K(C-o) => {:jump_back, "Jump back (jump list)"},
