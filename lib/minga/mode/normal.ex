@@ -165,7 +165,15 @@ defmodule Minga.Mode.Normal do
 
   # SPC pressed while not in leader mode → start leader sequence.
   def handle_key({@space, 0}, %ModeState{leader_node: nil} = state) do
-    new_state = %{state | leader_node: state.leader_trie, leader_keys: ["SPC"], leader_stack: []}
+    new_state = %{
+      state
+      | leader_node: state.leader_trie,
+        leader_keys: ["SPC"],
+        leader_stack: [],
+        prefix_node: nil,
+        prefix_keys: []
+    }
+
     execute_discarding_count({:leader_start, state.leader_trie}, new_state)
   end
 

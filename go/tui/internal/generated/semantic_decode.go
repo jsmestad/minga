@@ -753,6 +753,22 @@ func DecodeEmptyListAction(data []byte, offset int, windowEnd int) (EmptyListAct
 	}, pos, nil
 }
 
+func DecodeKeyHint(data []byte, offset int, windowEnd int) (KeyHint, int, error) {
+	pos := offset
+	keys, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return KeyHint{}, offset, err
+	}
+	word, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return KeyHint{}, offset, err
+	}
+	return KeyHint{
+		Keys: keys,
+		Word: word,
+	}, pos, nil
+}
+
 func DecodeEmptyList(data []byte, offset int, windowEnd int) (EmptyList, int, error) {
 	pos := offset
 	glyph, pos, err := decodeString8Window(data, pos, windowEnd)
@@ -856,6 +872,43 @@ func DecodeWhichKeyHint(data []byte, offset int, windowEnd int) (WhichKeyHint, i
 	}, pos, nil
 }
 
+func DecodeMenuBarItem(data []byte, offset int, windowEnd int) (MenuBarItem, int, error) {
+	pos := offset
+	path, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return MenuBarItem{}, offset, err
+	}
+	label, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return MenuBarItem{}, offset, err
+	}
+	section, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return MenuBarItem{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "kind"); err != nil {
+		return MenuBarItem{}, offset, err
+	}
+	kind := data[pos]
+	pos++
+	command, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return MenuBarItem{}, offset, err
+	}
+	platformKey, pos, err := decodeString8Window(data, pos, windowEnd)
+	if err != nil {
+		return MenuBarItem{}, offset, err
+	}
+	return MenuBarItem{
+		Path:        path,
+		Label:       label,
+		Section:     section,
+		Kind:        kind,
+		Command:     command,
+		PlatformKey: platformKey,
+	}, pos, nil
+}
+
 func DecodeWhichKeyEntry(data []byte, offset int, windowEnd int) (WhichKeyEntry, int, error) {
 	pos := offset
 	if err := decodeRequireWindow(windowEnd, pos+1, "kind"); err != nil {
@@ -925,6 +978,125 @@ func DecodeAgentTodo(data []byte, offset int, windowEnd int) (AgentTodo, int, er
 	return AgentTodo{
 		Status:      status,
 		Description: description,
+	}, pos, nil
+}
+
+func DecodeTasksDrawerCount(data []byte, offset int, windowEnd int) (TasksDrawerCount, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+1, "state"); err != nil {
+		return TasksDrawerCount{}, offset, err
+	}
+	state := data[pos]
+	pos++
+	if err := decodeRequireWindow(windowEnd, pos+2, "count"); err != nil {
+		return TasksDrawerCount{}, offset, err
+	}
+	countVal := decodeU16(data, pos)
+	pos += 2
+	return TasksDrawerCount{
+		State: state,
+		Count: countVal,
+	}, pos, nil
+}
+
+func DecodeTasksDrawerHint(data []byte, offset int, windowEnd int) (TasksDrawerHint, int, error) {
+	pos := offset
+	key, pos, err := decodeString8Window(data, pos, windowEnd)
+	if err != nil {
+		return TasksDrawerHint{}, offset, err
+	}
+	label, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return TasksDrawerHint{}, offset, err
+	}
+	return TasksDrawerHint{
+		Key:   key,
+		Label: label,
+	}, pos, nil
+}
+
+func DecodeTasksDrawerLine(data []byte, offset int, windowEnd int) (TasksDrawerLine, int, error) {
+	pos := offset
+	text, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return TasksDrawerLine{}, offset, err
+	}
+	return TasksDrawerLine{
+		Text: text,
+	}, pos, nil
+}
+
+func DecodeTasksDrawerRow(data []byte, offset int, windowEnd int) (TasksDrawerRow, int, error) {
+	pos := offset
+	id, pos, err := decodeString8Window(data, pos, windowEnd)
+	if err != nil {
+		return TasksDrawerRow{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "depth"); err != nil {
+		return TasksDrawerRow{}, offset, err
+	}
+	depth := data[pos]
+	pos++
+	if err := decodeRequireWindow(windowEnd, pos+1, "flags"); err != nil {
+		return TasksDrawerRow{}, offset, err
+	}
+	flags := data[pos]
+	pos++
+	if err := decodeRequireWindow(windowEnd, pos+1, "state"); err != nil {
+		return TasksDrawerRow{}, offset, err
+	}
+	state := data[pos]
+	pos++
+	title, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return TasksDrawerRow{}, offset, err
+	}
+	words, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return TasksDrawerRow{}, offset, err
+	}
+	age, pos, err := decodeString8Window(data, pos, windowEnd)
+	if err != nil {
+		return TasksDrawerRow{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "detail count"); err != nil {
+		return TasksDrawerRow{}, offset, err
+	}
+	detailCount := int(data[pos])
+	pos += 1
+	detail := make([]TasksDrawerLine, 0, min(detailCount, len(data)-pos))
+	for i := 0; i < detailCount; i++ {
+		item, nextPos, err := DecodeTasksDrawerLine(data, pos, windowEnd)
+		if err != nil {
+			return TasksDrawerRow{}, offset, err
+		}
+		pos = nextPos
+		detail = append(detail, item)
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "actions count"); err != nil {
+		return TasksDrawerRow{}, offset, err
+	}
+	actionsCount := int(data[pos])
+	pos += 1
+	actions := make([]TasksDrawerHint, 0, min(actionsCount, len(data)-pos))
+	for i := 0; i < actionsCount; i++ {
+		item, nextPos, err := DecodeTasksDrawerHint(data, pos, windowEnd)
+		if err != nil {
+			return TasksDrawerRow{}, offset, err
+		}
+		pos = nextPos
+		actions = append(actions, item)
+	}
+	return TasksDrawerRow{
+		ID:      id,
+		Depth:   depth,
+		Flags:   flags,
+		State:   state,
+		Title:   title,
+		Words:   words,
+		Age:     age,
+		Detail:  detail,
+		Actions: actions,
 	}, pos, nil
 }
 
@@ -1504,9 +1676,24 @@ func DecodeGuiPickerEmpty(data []byte, offset int, windowEnd int) (GuiPickerEmpt
 	}
 	listKeys := data[pos]
 	pos++
+	if err := decodeRequireWindow(windowEnd, pos+1, "hints count"); err != nil {
+		return GuiPickerEmpty{}, offset, err
+	}
+	hintsCount := int(data[pos])
+	pos += 1
+	hints := make([]KeyHint, 0, min(hintsCount, len(data)-pos))
+	for i := 0; i < hintsCount; i++ {
+		item, nextPos, err := DecodeKeyHint(data, pos, windowEnd)
+		if err != nil {
+			return GuiPickerEmpty{}, offset, err
+		}
+		pos = nextPos
+		hints = append(hints, item)
+	}
 	return GuiPickerEmpty{
 		Empty:    empty,
 		ListKeys: listKeys,
+		Hints:    hints,
 	}, pos, nil
 }
 
@@ -1530,6 +1717,18 @@ func DecodeGuiPickerMovementKeys(data []byte, offset int, windowEnd int) ([]Pick
 		items = append(items, item)
 	}
 	return items, pos, nil
+}
+
+func DecodeGuiPickerEnterSelection(data []byte, offset int, windowEnd int) (GuiPickerEnterSelection, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+1, "selects"); err != nil {
+		return GuiPickerEnterSelection{}, offset, err
+	}
+	selects := data[pos]
+	pos++
+	return GuiPickerEnterSelection{
+		Selects: selects,
+	}, pos, nil
 }
 
 // Section decoders for gui_picker_preview
@@ -3275,6 +3474,137 @@ func DecodeGuiSearchStateFields(data []byte, offset int, windowEnd int) (GuiSear
 		SessionID:           sessionID,
 		AcknowledgedEditSeq: acknowledgedEditSeq,
 		Status:              status,
+	}, pos, nil
+}
+
+// Command field decoder for gui_tasks_drawer
+
+func DecodeGuiTasksDrawerFields(data []byte, offset int, windowEnd int) (GuiTasksDrawerFields, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
+		return GuiTasksDrawerFields{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	if err := decodeRequireWindow(windowEnd, pos+1, "focused"); err != nil {
+		return GuiTasksDrawerFields{}, offset, err
+	}
+	focused := data[pos]
+	pos++
+	name, pos, err := decodeString8Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiTasksDrawerFields{}, offset, err
+	}
+	title, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiTasksDrawerFields{}, offset, err
+	}
+	note, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiTasksDrawerFields{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "counts count"); err != nil {
+		return GuiTasksDrawerFields{}, offset, err
+	}
+	countsCount := int(data[pos])
+	pos += 1
+	if err := decodeRequireWindow(windowEnd, pos+countsCount*3, "counts"); err != nil {
+		return GuiTasksDrawerFields{}, offset, err
+	}
+	counts := make([]TasksDrawerCount, 0, countsCount)
+	for i := 0; i < countsCount; i++ {
+		item, nextPos, err := DecodeTasksDrawerCount(data, pos, windowEnd)
+		if err != nil {
+			return GuiTasksDrawerFields{}, offset, err
+		}
+		pos = nextPos
+		counts = append(counts, item)
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "hints count"); err != nil {
+		return GuiTasksDrawerFields{}, offset, err
+	}
+	hintsCount := int(data[pos])
+	pos += 1
+	hints := make([]TasksDrawerHint, 0, min(hintsCount, len(data)-pos))
+	for i := 0; i < hintsCount; i++ {
+		item, nextPos, err := DecodeTasksDrawerHint(data, pos, windowEnd)
+		if err != nil {
+			return GuiTasksDrawerFields{}, offset, err
+		}
+		pos = nextPos
+		hints = append(hints, item)
+	}
+	if err := decodeRequireWindow(windowEnd, pos+2, "rows count"); err != nil {
+		return GuiTasksDrawerFields{}, offset, err
+	}
+	rowsCount := int(decodeU16(data, pos))
+	pos += 2
+	rows := make([]TasksDrawerRow, 0, min(rowsCount, len(data)-pos))
+	for i := 0; i < rowsCount; i++ {
+		item, nextPos, err := DecodeTasksDrawerRow(data, pos, windowEnd)
+		if err != nil {
+			return GuiTasksDrawerFields{}, offset, err
+		}
+		pos = nextPos
+		rows = append(rows, item)
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "view"); err != nil {
+		return GuiTasksDrawerFields{}, offset, err
+	}
+	view := data[pos]
+	pos++
+	viewTitle, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiTasksDrawerFields{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+2, "view_lines count"); err != nil {
+		return GuiTasksDrawerFields{}, offset, err
+	}
+	viewLinesCount := int(decodeU16(data, pos))
+	pos += 2
+	viewLines := make([]TasksDrawerLine, 0, min(viewLinesCount, len(data)-pos))
+	for i := 0; i < viewLinesCount; i++ {
+		item, nextPos, err := DecodeTasksDrawerLine(data, pos, windowEnd)
+		if err != nil {
+			return GuiTasksDrawerFields{}, offset, err
+		}
+		pos = nextPos
+		viewLines = append(viewLines, item)
+	}
+	if err := decodeRequireWindow(windowEnd, pos+2, "view_offset"); err != nil {
+		return GuiTasksDrawerFields{}, offset, err
+	}
+	viewOffset := decodeU16(data, pos)
+	pos += 2
+	prompt, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiTasksDrawerFields{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "has_empty"); err != nil {
+		return GuiTasksDrawerFields{}, offset, err
+	}
+	hasEmpty := data[pos]
+	pos++
+	empty, pos, err := DecodeEmptyList(data, pos, windowEnd)
+	if err != nil {
+		return GuiTasksDrawerFields{}, offset, err
+	}
+	return GuiTasksDrawerFields{
+		Visible:    visible,
+		Focused:    focused,
+		Name:       name,
+		Title:      title,
+		Note:       note,
+		Counts:     counts,
+		Hints:      hints,
+		Rows:       rows,
+		View:       view,
+		ViewTitle:  viewTitle,
+		ViewLines:  viewLines,
+		ViewOffset: viewOffset,
+		Prompt:     prompt,
+		HasEmpty:   hasEmpty,
+		Empty:      empty,
 	}, pos, nil
 }
 

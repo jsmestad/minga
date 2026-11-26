@@ -1,0 +1,603 @@
+{
+ "elements": [
+  {
+   "frame": [
+    79,
+    65,
+    1338.5,
+    595
+   ],
+   "label": "storyboard.ex, pane 1",
+   "role": "AXTextArea",
+   "value": "defmodule Storyboard do\n  @moduledoc \"A small file every storyboard scenario starts in.\"\n\n  def greet(name) do\n    \"Hello, \" <> name\n  end\nend\n"
+  }
+ ],
+ "grid": {
+  "cols": 177,
+  "rows": 31
+ },
+ "parts": [
+  {
+   "baseline": 21,
+   "frame": [
+    343,
+    9.5,
+    78,
+    15
+   ],
+   "part": "tabBar.tabLabel",
+   "text": "storyboard.ex"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    40,
+    43.5,
+    4,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "/"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    58,
+    43.5,
+    23,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "tmp"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    95,
+    43.5,
+    102,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga-storyboard"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    211,
+    43.5,
+    72,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "macos-1440"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    297,
+    43.5,
+    133,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga.tasks.needs_you"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    444,
+    43.5,
+    14,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "lib"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    472,
+    43.5,
+    78,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "storyboard.ex"
+  },
+  {
+   "frame": [
+    32,
+    664,
+    1408,
+    240
+   ],
+   "part": "drawer"
+  },
+  {
+   "frame": [
+    32,
+    664,
+    1408,
+    1
+   ],
+   "part": "drawer.divider"
+  },
+  {
+   "frame": [
+    32,
+    665,
+    1408,
+    24
+   ],
+   "part": "drawer.header"
+  },
+  {
+   "baseline": 681.5,
+   "frame": [
+    44,
+    669,
+    78,
+    16
+   ],
+   "part": "drawer.title",
+   "text": "Minga Tasks"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    130,
+    670,
+    18,
+    14
+   ],
+   "part": "drawer.count",
+   "text": "1"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    164,
+    670,
+    19,
+    14
+   ],
+   "part": "drawer.count",
+   "text": "3"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    199,
+    670,
+    18,
+    14
+   ],
+   "part": "drawer.count",
+   "text": "1"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    233,
+    670,
+    18,
+    14
+   ],
+   "part": "drawer.count",
+   "text": "1"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    267,
+    670,
+    18,
+    14
+   ],
+   "part": "drawer.count",
+   "text": "1"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    301,
+    670,
+    18,
+    14
+   ],
+   "part": "drawer.count",
+   "text": "1"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1172,
+    670,
+    54,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "j/k move"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1234,
+    670,
+    38,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "\u21a9 open"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1280,
+    670,
+    58,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "c new task"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1346,
+    670,
+    35,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "x stop"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1389,
+    670,
+    39,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "q close"
+  },
+  {
+   "frame": [
+    44,
+    695,
+    1369,
+    62
+   ],
+   "part": "listRow"
+  },
+  {
+   "baseline": 711,
+   "frame": [
+    72,
+    699.5,
+    216,
+    15
+   ],
+   "part": "listRow.title",
+   "text": "Add tests for the usage-limit classifier"
+  },
+  {
+   "baseline": 710.5,
+   "frame": [
+    1185,
+    700,
+    180,
+    14
+   ],
+   "part": "listRow.meta",
+   "text": "Needs you \u00b7 wants to change a file"
+  },
+  {
+   "frame": [
+    44,
+    757,
+    1369,
+    24
+   ],
+   "part": "listRow"
+  },
+  {
+   "baseline": 773,
+   "frame": [
+    72,
+    761.5,
+    245,
+    15
+   ],
+   "part": "listRow.title",
+   "text": "Show the plan limit instead of \"rate limited\""
+  },
+  {
+   "baseline": 772.5,
+   "frame": [
+    1204,
+    762,
+    95,
+    14
+   ],
+   "part": "listRow.meta",
+   "text": "Running subagent"
+  },
+  {
+   "frame": [
+    44,
+    781,
+    1369,
+    24
+   ],
+   "part": "listRow"
+  },
+  {
+   "baseline": 797,
+   "frame": [
+    92,
+    785.5,
+    152,
+    15
+   ],
+   "part": "listRow.title",
+   "text": "Fact-check the reset times"
+  },
+  {
+   "baseline": 796.5,
+   "frame": [
+    1321,
+    786,
+    44,
+    14
+   ],
+   "part": "listRow.meta",
+   "text": "Working"
+  },
+  {
+   "frame": [
+    44,
+    805,
+    1369,
+    24
+   ],
+   "part": "listRow"
+  },
+  {
+   "baseline": 821,
+   "frame": [
+    92,
+    809.5,
+    163,
+    15
+   ],
+   "part": "listRow.title",
+   "text": "Read the usage-limit fixtures"
+  },
+  {
+   "baseline": 820.5,
+   "frame": [
+    1321,
+    810,
+    44,
+    14
+   ],
+   "part": "listRow.meta",
+   "text": "Working"
+  },
+  {
+   "frame": [
+    44,
+    829,
+    1369,
+    24
+   ],
+   "part": "listRow"
+  },
+  {
+   "baseline": 845,
+   "frame": [
+    72,
+    833.5,
+    156,
+    15
+   ],
+   "part": "listRow.title",
+   "text": "Refactor the picker sources"
+  },
+  {
+   "baseline": 844.5,
+   "frame": [
+    1107,
+    834,
+    178,
+    14
+   ],
+   "part": "listRow.meta",
+   "text": "Waiting \u00b7 rate limited, retry in 40 s"
+  },
+  {
+   "frame": [
+    44,
+    853,
+    1369,
+    24
+   ],
+   "part": "listRow"
+  },
+  {
+   "baseline": 869,
+   "frame": [
+    72,
+    857.5,
+    144,
+    15
+   ],
+   "part": "listRow.title",
+   "text": "Rename the queue buffer"
+  },
+  {
+   "baseline": 868.5,
+   "frame": [
+    1245,
+    858,
+    45,
+    14
+   ],
+   "part": "listRow.meta",
+   "text": "Stopped"
+  },
+  {
+   "frame": [
+    44,
+    877,
+    1369,
+    24
+   ],
+   "part": "listRow"
+  },
+  {
+   "baseline": 893,
+   "frame": [
+    72,
+    881.5,
+    146,
+    15
+   ],
+   "part": "listRow.title",
+   "text": "Run the session test suite"
+  },
+  {
+   "baseline": 892.5,
+   "frame": [
+    1172,
+    882,
+    129,
+    14
+   ],
+   "part": "listRow.meta",
+   "text": "Failed \u00b7 Test run crashed"
+  },
+  {
+   "frame": [
+    44,
+    901,
+    1369,
+    24
+   ],
+   "part": "listRow"
+  },
+  {
+   "frame": [
+    0,
+    904,
+    1440,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    6,
+    904,
+    61,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "mode: NORMAL"
+  },
+  {
+   "frame": [
+    75,
+    904,
+    71,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "needs_you: Needs you"
+  },
+  {
+   "frame": [
+    154,
+    904,
+    73,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filename: storyboard.ex"
+  },
+  {
+   "frame": [
+    1386,
+    904,
+    26,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filetype: Elixir"
+  },
+  {
+   "frame": [
+    1420,
+    904,
+    14,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "position: 1:1"
+  },
+  {
+   "baseline": 917,
+   "frame": [
+    72,
+    905.5,
+    206,
+    15
+   ],
+   "part": "listRow.title",
+   "text": "Update the agent docs for the Spine"
+  },
+  {
+   "baseline": 916.5,
+   "frame": [
+    1272,
+    906,
+    28,
+    14
+   ],
+   "part": "listRow.meta",
+   "text": "Done"
+  },
+  {
+   "frame": [
+    6,
+    907,
+    61,
+    18
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "baseline": 919.5,
+   "frame": [
+    12,
+    909,
+    49,
+    14
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  }
+ ],
+ "scenario": "minga.tasks.needs_you",
+ "size": "1440",
+ "theme": "catppuccin_latte",
+ "window": {
+  "height": 928,
+  "width": 1440
+ }
+}

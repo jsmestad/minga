@@ -18,9 +18,11 @@ func focusOwnerCommand(responder, surface byte) protocol.Command {
 
 func multipleVisibleFocusSurfaces(owner *protocol.Command) Model {
 	model := New(80, 30, nil)
+	picker := pickerChrome(3, 0)
+	picker.Picker.EnterSelects = true
 	commands := []protocol.Command{
 		testThemeCommand(),
-		{Kind: protocol.CommandChrome, Chrome: pickerChrome(3, 0)},
+		{Kind: protocol.CommandChrome, Chrome: picker},
 		{Kind: protocol.CommandChrome, Chrome: completionChrome(3, 0)},
 		{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiEmptyState, EmptyState: returningUserEmptyState()}},
 		{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiFileTree, Tree: protocol.FileTree{
@@ -191,7 +193,7 @@ func TestLaunchpadLeaderOwnerPreventsNavigationBehindWhichKey(t *testing.T) {
 		t.Fatal("Down moved launchpad focus while the committed owner was the leader handler")
 	}
 	state, visible := model.emptyState()
-	if !visible || state.FocusedID != "resume" {
+	if !visible || state.FocusedID != "recent-1" {
 		t.Fatalf("leader navigation changed the retained launchpad: %+v", state)
 	}
 	packets := drainOutboundPackets(out)

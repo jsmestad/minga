@@ -1,0 +1,112 @@
+# minga storyboard frame v1
+# scenario: start.open_dir.home
+# frontend: tui
+# theme: astrodark
+# size: 120x40
+# cursor: none
+## text
+*home* (start.open_dir.home) - Minga
+
+   start.open_dir.home
+   /tmp/minga-storyboard/tui-120x40/start.open_dir.home
+
+   Recent in this project
+   1   storyboard.ex  lib
+
+   Next
+   SPC SPC Find a file
+   SPC a n New task
+   SPC o p File tree
+   SPC p p Switch project
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  NORMAL  *home*                                                                                               Text 1:1
+## styles (row start-end fg bg attrs)
+0 0-119 #50a4e9 #111317 bold
+1 0-119 #adb0bb #1a1d23 -
+2 0-2 #adb0bb #1a1d23 -
+2 3-21 #adb0bb #1a1d23 bold
+2 22-119 #adb0bb #1a1d23 -
+3 0-2 #adb0bb #1a1d23 -
+3 3-54 #595c66 #1a1d23 -
+3 55-119 #adb0bb #1a1d23 -
+4 0-119 #adb0bb #1a1d23 -
+5 0-2 #adb0bb #1a1d23 -
+5 3-24 #595c66 #1a1d23 bold
+5 25-119 #adb0bb #1a1d23 -
+6 0-2 #adb0bb #26343f -
+6 3-3 #1a1d23 #adb0bb bold,reverse
+6 4-7 #adb0bb #26343f -
+6 8-20 #adb0bb #26343f bold
+6 21-119 #adb0bb #26343f -
+7 0-119 #adb0bb #1a1d23 -
+8 0-2 #adb0bb #1a1d23 -
+8 3-6 #595c66 #1a1d23 bold
+8 7-119 #adb0bb #1a1d23 -
+9 0-2 #adb0bb #1a1d23 -
+9 3-9 #50a4e9 #1a1d23 bold
+9 10-119 #adb0bb #1a1d23 -
+10 0-2 #adb0bb #1a1d23 -
+10 3-9 #50a4e9 #1a1d23 bold
+10 10-119 #adb0bb #1a1d23 -
+11 0-2 #adb0bb #1a1d23 -
+11 3-9 #50a4e9 #1a1d23 bold
+11 10-119 #adb0bb #1a1d23 -
+12 0-2 #adb0bb #1a1d23 -
+12 3-9 #50a4e9 #1a1d23 bold
+12 10-119 #adb0bb #1a1d23 -
+13 0-119 #adb0bb #1a1d23 -
+14 0-119 #adb0bb #1a1d23 -
+15 0-119 #adb0bb #1a1d23 -
+16 0-119 #adb0bb #1a1d23 -
+17 0-119 #adb0bb #1a1d23 -
+18 0-119 #adb0bb #1a1d23 -
+19 0-119 #adb0bb #1a1d23 -
+20 0-119 #adb0bb #1a1d23 -
+21 0-119 #adb0bb #1a1d23 -
+22 0-119 #adb0bb #1a1d23 -
+23 0-119 #adb0bb #1a1d23 -
+24 0-119 #adb0bb #1a1d23 -
+25 0-119 #adb0bb #1a1d23 -
+26 0-119 #adb0bb #1a1d23 -
+27 0-119 #adb0bb #1a1d23 -
+28 0-119 #adb0bb #1a1d23 -
+29 0-119 #adb0bb #1a1d23 -
+30 0-119 #adb0bb #1a1d23 -
+31 0-119 #adb0bb #1a1d23 -
+32 0-119 #adb0bb #1a1d23 -
+33 0-119 #adb0bb #1a1d23 -
+34 0-119 #adb0bb #1a1d23 -
+35 0-119 #adb0bb #1a1d23 -
+36 0-119 #adb0bb #1a1d23 -
+37 0-119 #adb0bb #1a1d23 -
+38 0-119 #adb0bb #1a1d23 -
+39 0-0 #595c66 #111317 -
+39 1-1 #adb0bb #50a4e9 -
+39 2-7 #1a1d23 #50a4e9 bold
+39 8-8 #adb0bb #50a4e9 -
+39 9-119 #adb0bb #111317 -

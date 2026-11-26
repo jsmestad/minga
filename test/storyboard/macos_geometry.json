@@ -1,5 +1,5 @@
 {
-  "about": "The editor grid the macOS frontend reports at each storyboard window size, with its default chrome. The macOS storyboard renderer checks its own row fit (GridFit) against these numbers and fails with the measured grid when they differ. See docs/design/storyboard.md, \"Renders and baselines\". `chrome_grid` maps the grid-changing chrome open at a scenario's reached frame, joined with \"+\" (for example \"tasks_drawer+minibuffer\"), to the grid the window reports then; `cols` defaults to the window's columns.",
+  "about": "The editor grid the macOS frontend reports at each storyboard window size, with its default chrome. The macOS storyboard renderer checks its own row fit (GridFit) against these numbers and fails with the measured grid when they differ. See docs/design/storyboard.md, \"Renders and baselines\". `chrome_grid` maps the grid-changing chrome open at a scenario's reached frame, joined with \"+\" (for example \"tasks_drawer+minibuffer\"), to the grid the window reports then; `cols` defaults to the window's columns. The project home (`empty_state`) draws no tab bar or breadcrumb, so its grid is larger.",
   "windows": [
     {
       "width": 1440,
@@ -14,6 +14,16 @@
         "git_status": {
           "cols": 145,
           "rows": 43
+        },
+        "empty_state": {
+          "cols": 179,
+          "rows": 45
+        },
+        "tasks_drawer": {
+          "rows": 31
+        },
+        "tasks_drawer+minibuffer": {
+          "rows": 26
         }
       }
     },
@@ -30,6 +40,16 @@
         "git_status": {
           "cols": 125,
           "rows": 38
+        },
+        "empty_state": {
+          "cols": 159,
+          "rows": 39
+        },
+        "tasks_drawer": {
+          "rows": 25
+        },
+        "tasks_drawer+minibuffer": {
+          "rows": 21
         }
       }
     }

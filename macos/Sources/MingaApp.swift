@@ -98,6 +98,7 @@ struct MingaApp: App {
         .defaultSize(width: defaultWindowWidth, height: defaultWindowHeight)
         .commands {
             MingaMenuCommands(appState: appDelegate.appState)
+            LeaderMenuCommands(appState: appDelegate.appState)
         }
 
         Settings {
@@ -518,8 +519,9 @@ struct MingaMenuCommands: Commands {
                 .disabled(!connected)
         }
 
-        // View menu
-        CommandMenu("View") {
+        // View menu: these items join the system View menu (Enter Full Screen and the rest), before its toolbar
+        // group, so the menu bar has one View menu. A CommandMenu("View") would add a second one beside it.
+        CommandGroup(before: .toolbar) {
             Button("Toggle File Tree") { encoder?.send(.togglePanel(panel: 0)) }
                 .keyboardShortcut("b", modifiers: .command)
                 .disabled(!connected)
@@ -599,6 +601,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var encoder: ProtocolEncoder? { protocolConnection?.encoder }
     private var dispatcher: CommandDispatcher?
     private var desktopAgentNotifications: DesktopAgentNotifications?
+    /// Mirrors the leader keymap into the menu bar (docs/design/surfaces.md, Mouse).
     private var applicationQuitCoordinator: ApplicationQuitCoordinator?
     private var applicationQuitAlert: NSAlert?
     private var activeFilePanel: NSSavePanel?
@@ -630,12 +633,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         guard Bundle.main.bundleURL.pathExtension == "app" else { return }
-        desktopAgentNotifications = DesktopAgentNotifications {
-            NSApp.activate()
-            guard let window = NSApp.windows.first(where: { $0.identifier == EditorScene.windowIdentifier }) else { return }
-            if window.isMiniaturized { window.deminiaturize(nil) }
-            window.makeKeyAndOrderFront(nil)
-        }
+        desktopAgentNotifications = DesktopAgentNotifications(
+            openEditor: {
+                NSApp.activate()
+                guard let window = NSApp.windows.first(where: { $0.identifier == EditorScene.windowIdentifier }) else { return }
+                if window.isMiniaturized { window.deminiaturize(nil) }
+                window.makeKeyAndOrderFront(nil)
+            },
+            // The BEAM opens the tasks drawer on the alert's task, as it is now; the click answers nothing.
+            openAlert: { [weak self] alert in
+                _ = self?.encoder?.send(.agentNotificationOpen(alert: alert))
+            }
+        )
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        desktopAgentNotifications?.activation(true)
+    }
+
+    func applicationDidResignActive(_ notification: Notification) {
+        desktopAgentNotifications?.activation(false)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -944,6 +961,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appState.windowTitle = title
         case .agentDesktopNotification(let notification):
             if coreConnectionIsLive { desktopAgentNotifications?.receive(notification) }
+        case .needsYouCountChanged(let count):
+            desktopAgentNotifications?.needsYouCount(count)
         case .documentEditedChanged(let edited):
             editorNSView?.window?.isDocumentEdited = edited
         case .windowBackgroundChanged(let red, let green, let blue):

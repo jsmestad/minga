@@ -45,7 +45,8 @@ defmodule Minga.RenderModel.UI.StatusBar.Data do
           selection: Selection.t(),
           agent: Agent.t(),
           modeline_segments: modeline_segments(),
-          pending_keys: String.t()
+          pending_keys: String.t(),
+          needs_you_count: non_neg_integer()
         }
 
   defstruct mode: :normal,
@@ -63,5 +64,7 @@ defmodule Minga.RenderModel.UI.StatusBar.Data do
             selection: %Selection{},
             agent: %Agent{},
             modeline_segments: nil,
-            pending_keys: ""
+            pending_keys: "",
+            # How many tasks need you: the same count as the modeline's needs-you segment and the tasks drawer.
+            needs_you_count: 0
 end

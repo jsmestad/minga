@@ -82,6 +82,19 @@ defmodule MingaEditor.TabWorkflow do
     end
   end
 
+  @doc """
+  Shows the project home while the active tab steps aside (`SPC p h`, or leaving a task with no file to return to).
+
+  An Agent tab's agent state is stashed on its workspace first, as a switch would, and the live agent view goes inactive, so switching back restores the conversation.
+  """
+  @spec leave_to_home(EditorState.t()) :: EditorState.t()
+  def leave_to_home(%EditorState{} = state) do
+    state = state |> ShellWorkflow.ensure_available() |> stash_active_workspace_agent_ui()
+    {agent_ui, _windows, _file_tree} = UIState.deactivate(state.workspace.agent_ui)
+    workspace = MingaEditor.Session.State.set_agent_ui(state.workspace, agent_ui)
+    EditorState.show_home(%{state | workspace: workspace})
+  end
+
   @doc "Stages the pure root transition for an already validated tab target."
   @spec stage_switch(EditorState.t(), Tab.id()) :: staged_switch()
   def stage_switch(%EditorState{} = state, target_id) do

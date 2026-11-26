@@ -485,6 +485,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				break
 			}
+			// Which-key paints above the picker (the mode pill opens a picker's keys over it), so it answers first.
+			if packet, handled := m.whichKeyMousePacket(msg); handled {
+				if packet != nil {
+					m.send(packet)
+				}
+				break
+			}
+			if packet, handled := m.modePillMousePacket(msg); handled {
+				m.send(packet)
+				break
+			}
 			if packet, handled := m.pickerPointerPacket(click); handled {
 				if packet != nil {
 					m.send(packet)
@@ -933,6 +944,12 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 			// land in Minga's *Messages* buffer instead.
 			m.protocolError = command.ProtocolError
 			m.logToMessages(protocol.LogLevelErr, "Go TUI protocol error: %s", command.ProtocolError)
+		case protocol.CommandAgentAlert:
+			// Out of band: a task started needing you while the terminal is in the background, and the user asked for
+			// the bell (:agent_notify_terminal). A withdrawal has nothing to undo.
+			if command.AgentAlertNeedsYou {
+				cmds = append(cmds, tea.Raw("\a"))
+			}
 		case protocol.CommandRendererShutdown:
 			// Out of band: the BEAM is stopping and waits for this process to
 			// exit. Quitting lets Bubble Tea restore the terminal; any open

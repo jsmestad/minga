@@ -3,6 +3,7 @@ Application.put_env(:minga, :clipboard_module, Minga.Clipboard.Mock)
 
 # Initialize the Git.Stub ETS table for in-memory git responses.
 Minga.Git.Stub.ensure_table()
+Minga.Test.ProjectSearchStub.ensure_table()
 
 # Initialize the Tool.Installer.Stub ETS table so Tool.Manager doesn't
 # crash if it spawns an install task before any test calls Stub.reset().
@@ -107,8 +108,7 @@ Minga.Config.Options.set(:auto_save_delay_ms, 0)
 # not leak real language-server clients into tests that assert no LSP is active.
 Minga.Config.Options.set(:lsp_auto_start, false)
 
-# Disable agent notifications during tests to avoid terminal bells and OS
-# notification subprocesses from ordinary session tests.
+# Disable agent alerts for editors that read the global options. A test of the alert gives its editor its own options.
 Minga.Config.Options.set(:agent_notifications, false)
 
 # Keep test fixture paths out of persisted project history.

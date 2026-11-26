@@ -444,11 +444,9 @@ defmodule MingaEditor.Session.State do
   defp launchpad_after_focus(launchpad, %Window{}), do: launchpad
 
   @doc """
-  Enters the zero-buffers launchpad (#2689).
+  Enters the project home with no buffers open: the last buffer closed, or a start with nothing to restore.
 
-  Clears the active buffer, switches the active window's content to the
-  empty-state surface, and snapshots launchpad data (session, recents).
-  The window tree is untouched: the last window stays open.
+  Clears the active buffer, switches the active window's content to the home, and snapshots the home's data (project, git, recents). The window tree is untouched: the last window stays open.
   """
   @spec enter_empty_state(t()) :: t()
   @spec enter_empty_state(t(), keyword()) :: t()
@@ -466,6 +464,30 @@ defmodule MingaEditor.Session.State do
       wspace
       | windows: windows,
         buffers: %Buffers{},
+        launchpad: MingaEditor.State.Launchpad.new(launchpad_opts)
+    }
+  end
+
+  @doc """
+  The live workspace of the project home when the active tab steps aside (`SPC p h`, or leaving a task).
+
+  The tab keeps its own snapshot of buffers, windows and splits; the live workspace becomes one window showing the home, with no buffer and the editor keymap scope, so no key or command can reach a file the window is not showing.
+  """
+  @spec enter_home(t(), keyword()) :: t()
+  def enter_home(%__MODULE__{windows: windows} = wspace, launchpad_opts) do
+    window = windows.map |> Map.fetch!(windows.active) |> Window.show_empty_state()
+
+    home_windows =
+      windows
+      |> Windows.set_tree(MingaEditor.WindowTree.new(window.id))
+      |> Windows.set_map(%{window.id => window})
+      |> Windows.set_active(window.id)
+
+    %{
+      wspace
+      | windows: home_windows,
+        buffers: %Buffers{},
+        keymap_scope: :editor,
         launchpad: MingaEditor.State.Launchpad.new(launchpad_opts)
     }
   end

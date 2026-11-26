@@ -36,6 +36,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x85   | gui_git_status       | Git status panel data      |
   | 0x98   | gui_workspaces    | Canonical workspace state |
   | 0x97   | gui_config_state    | Settings panel state       |
+  | 0xAD   | gui_menu_bar        | Leader menu bar mirror     |
   | 0x9E   | gui_search_state    | Search toolbar state       |
   | 0x9F   | gui_sidebars        | Semantic sidebar metadata  |
   | 0xA3   | gui_extension_runtime | Generic extension-owned frontend runtime envelope |
@@ -115,6 +116,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x63       | file_dialog_result      |
   | 0x64       | focus_window            |
   | 0x70       | picker_fit              |
+  | 0x71       | tasks_drawer_action     |
+  | 0x72       | agent_notification_open |
 
   """
 
@@ -147,6 +150,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_agent_composer_submit Opcodes.gui_action_agent_composer_submit()
   @gui_action_agent_composer_queue Opcodes.gui_action_agent_composer_queue()
   @gui_action_agent_start_remedy Opcodes.gui_action_agent_start_remedy()
+  @gui_action_tasks_drawer_action Opcodes.gui_action_tasks_drawer_action()
+  @gui_action_agent_notification_open Opcodes.gui_action_agent_notification_open()
   @gui_action_agent_open_question Opcodes.gui_action_agent_open_question()
   @gui_action_agent_stop_turn Opcodes.gui_action_agent_stop_turn()
   @gui_action_execute_command Opcodes.gui_action_execute_command()
@@ -161,6 +166,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_workspace_set_icon Opcodes.gui_action_workspace_set_icon()
   @gui_action_workspace_close Opcodes.gui_action_workspace_close()
   @gui_action_space_leader_chord Opcodes.gui_action_space_leader_chord()
+  @gui_action_which_key_press Opcodes.gui_action_which_key_press()
+  @gui_action_which_key_back Opcodes.gui_action_which_key_back()
   @gui_action_space_leader_retract Opcodes.gui_action_space_leader_retract()
   @gui_action_find_pasteboard_search Opcodes.gui_action_find_pasteboard_search()
   @gui_action_agent_approve Opcodes.gui_action_agent_approve()
@@ -276,6 +283,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
              MingaAgent.Session.queue_target()}
           | {:agent_open_question, pos_integer()}
           | {:agent_start_remedy, :retry | :set_up_provider}
+          | {:tasks_drawer_action, row_id :: String.t(), action :: String.t()}
+          | {:agent_notification_open, alert :: <<_::128>>}
           | {:agent_stop_turn, {String.t(), String.t()}}
           | {:agent_tool_approval, ApprovalTarget.t(), MingaAgent.Session.approval_decision()}
           | {:execute_command, name :: String.t()}
@@ -291,6 +300,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:workspace_set_icon, id :: non_neg_integer(), icon :: String.t()}
           | {:workspace_close, id :: non_neg_integer()}
           | {:space_leader_chord, codepoint :: non_neg_integer(), modifiers :: non_neg_integer()}
+          | {:which_key_press, path :: String.t(), codepoint :: non_neg_integer(),
+             modifiers :: non_neg_integer()}
+          | {:which_key_back, path :: String.t()}
           | {:space_leader_retract, codepoint :: non_neg_integer(),
              modifiers :: non_neg_integer()}
           | {:find_pasteboard_search, text :: String.t(), direction :: non_neg_integer()}
@@ -780,6 +792,17 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   def decode_gui_action(@gui_action_agent_open_question, <<offer::64>>) when offer > 0,
     do: {:ok, {:agent_open_question, offer}}
 
+  def decode_gui_action(
+        @gui_action_tasks_drawer_action,
+        <<id_length::8, row_id::binary-size(id_length), action_length::8,
+          action::binary-size(action_length)>>
+      )
+      when action_length > 0,
+      do: {:ok, {:tasks_drawer_action, row_id, action}}
+
+  def decode_gui_action(@gui_action_agent_notification_open, <<alert::binary-size(16)>>),
+    do: {:ok, {:agent_notification_open, alert}}
+
   def decode_gui_action(@gui_action_agent_start_remedy, <<1::8>>),
     do: {:ok, {:agent_start_remedy, :retry}}
 
@@ -894,6 +917,18 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         <<codepoint::32, modifiers::8>>
       ),
       do: {:ok, {:space_leader_chord, codepoint, modifiers}}
+
+  def decode_gui_action(
+        @gui_action_which_key_press,
+        <<path_len::16, path::binary-size(path_len), codepoint::32, modifiers::8>>
+      ),
+      do: {:ok, {:which_key_press, path, codepoint, modifiers}}
+
+  def decode_gui_action(
+        @gui_action_which_key_back,
+        <<path_len::16, path::binary-size(path_len)>>
+      ),
+      do: {:ok, {:which_key_back, path}}
 
   def decode_gui_action(
         @gui_action_space_leader_retract,

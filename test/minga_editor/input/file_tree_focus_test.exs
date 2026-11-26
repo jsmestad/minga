@@ -27,7 +27,7 @@ defmodule MingaEditor.Input.FileTreeFocusTest do
       tmp_dir: dir
     } do
       ctx = open_editor(dir)
-      send_keys_sync(ctx, "<SPC>an")
+      send_keys_sync(ctx, "<SPC>aSn")
       composer_in_insert(ctx, unquote(tree))
       draft = agent_chat(ctx).prompt
 
@@ -47,7 +47,7 @@ defmodule MingaEditor.Input.FileTreeFocusTest do
     tmp_dir: dir
   } do
     ctx = open_editor(dir)
-    send_keys_sync(ctx, "<SPC>an")
+    send_keys_sync(ctx, "<SPC>aSn")
     focus_tree(ctx, :command_open)
 
     click_prompt(ctx)
@@ -62,7 +62,7 @@ defmodule MingaEditor.Input.FileTreeFocusTest do
     tmp_dir: dir
   } do
     ctx = open_editor(dir)
-    send_keys_sync(ctx, "<SPC>an")
+    send_keys_sync(ctx, "<SPC>aSn")
     focus_tree(ctx, :command_open)
     assert %{focused?: true} = file_tree(ctx)
 

@@ -3,6 +3,8 @@ package ui
 import (
 	"image/color"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -23,7 +25,8 @@ type emptyListColors struct {
 func emptyListHeader(empty generated.EmptyList, width int, colors emptyListColors, p palette) []string {
 	base := lipgloss.NewStyle().Background(colors.surface).ColorWhitespace(true)
 	inset := gap(emptyStateInset)
-	room := max(width-len(inset), 1)
+	// The text keeps a trailing inset, so a cut line's ellipsis never touches the border.
+	room := max(width-len(inset)-listRowTrailingInset.cols(), 1)
 	lines := make([]string, 0, 5)
 
 	blank := base.Width(width).Render("")
@@ -39,11 +42,12 @@ func emptyListHeader(empty generated.EmptyList, width int, colors emptyListColor
 	}
 	titleStyle := emptyStateTitleText.style(p).Inherit(base).Foreground(colors.text)
 	for index, line := range wrapText(empty.Title, max(room-len(hang), 1)) {
-		prefix := hang
-		if index == 0 {
-			prefix = lead
+		prefix := titleStyle.Render(hang)
+		if index == 0 && lead != "" {
+			glyphStyle := titleStyle.Foreground(emptyStateGlyphColor(empty.Glyph, colors.text, p))
+			prefix = glyphStyle.Render(empty.Glyph) + titleStyle.Render(gap(emptyStateGlyphToTitle))
 		}
-		lines = append(lines, base.Width(width).Render(inset+titleStyle.Render(prefix+line)))
+		lines = append(lines, base.Width(width).Render(inset+prefix+titleStyle.Render(line)))
 	}
 	for range emptyStateTitleToWhy.rows() {
 		lines = append(lines, blank)
@@ -59,6 +63,34 @@ func emptyListHeader(empty generated.EmptyList, width int, colors emptyListColor
 		lines = append(lines, blank)
 	}
 	return lines
+}
+
+// truncateAtWord keeps whole words when they fit before the ellipsis. A first word wider than the line still gets cut.
+func truncateAtWord(text string, width int) string {
+	const ellipsis = "…"
+	clipped := ansi.Truncate(text, width, ellipsis)
+	if clipped == text {
+		return text
+	}
+	prefix := strings.TrimSuffix(clipped, ellipsis)
+	suffix, _ := strings.CutPrefix(text, prefix)
+	if next, _ := utf8.DecodeRuneInString(suffix); unicode.IsSpace(next) {
+		return strings.TrimRightFunc(prefix, unicode.IsSpace) + ellipsis
+	}
+	if gap := strings.LastIndexFunc(prefix, unicode.IsSpace); gap > 0 {
+		return strings.TrimRightFunc(prefix[:gap], unicode.IsSpace) + ellipsis
+	}
+	return clipped
+}
+
+// Draw a known state glyph in its state role and any other glyph in the title colour.
+func emptyStateGlyphColor(glyph string, title color.Color, p palette) color.Color {
+	for _, state := range generated.SpineStates {
+		if state.Token().Glyph == glyph {
+			return p.State(state)
+		}
+	}
+	return title
 }
 
 // wrapText breaks text into lines of at most width cells, at word boundaries where it can and inside a word that is wider than the line.
@@ -103,8 +135,8 @@ func emptyListActions(empty generated.EmptyList, width int, colors emptyListColo
 			key = row.Foreground(colors.surface).Background(colors.accent).Render(action.Key)
 		}
 		padding := row.Render(strings.Repeat(" ", max(column-ansi.StringWidth(action.Key), 1)))
-		room := max(width-len(inset)-column, 1)
-		label := row.Foreground(labelColor).Render(ansi.Truncate(action.Label, room, "…"))
+		room := max(width-len(inset)-listRowTrailingInset.cols()-column, 1)
+		label := row.Foreground(labelColor).Render(truncateAtWord(action.Label, room))
 		lines = append(lines, row.Width(width).Render(row.Render(inset)+key+padding+label))
 	}
 	return lines

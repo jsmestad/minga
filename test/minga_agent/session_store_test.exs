@@ -26,6 +26,17 @@ defmodule MingaAgent.SessionStoreTest do
 
   @moduletag :tmp_dir
 
+  # A session that started and was never prompted: its transcript holds only the start notice.
+  defp never_prompted(id) do
+    %{
+      sample_data(id)
+      | messages: [{:system, "Session started", :info}],
+        message_ids: [10],
+        pinned_ids: MapSet.new(),
+        branches: []
+    }
+  end
+
   defp sample_data(id \\ "test-session-1") do
     %{
       id: id,
@@ -331,6 +342,26 @@ defmodule MingaAgent.SessionStoreTest do
       assert saved.messages == data.messages
       assert saved.message_ids == data.message_ids
       assert [{:conversation, %{id: ^record_id}}] = SessionStore.list_recoverable(dir)
+    end
+
+    test "a conversation never prompted is not listed unless it holds a draft, and stays on disk",
+         %{
+           tmp_dir: dir
+         } do
+      prompted = sample_data("prompted")
+      empty = never_prompted("never-prompted")
+      drafted = never_prompted("never-prompted-draft")
+
+      for data <- [prompted, empty, drafted], do: assert(:ok = SessionStore.save(data, dir))
+
+      assert {:ok, 1} =
+               SessionStore.save_presentation(drafted.id, 0, draft_snapshot("Unsent"), dir)
+
+      listed = for {:conversation, %{id: id}} <- SessionStore.list_recoverable(dir), do: id
+      assert Enum.sort(listed) == ["never-prompted-draft", "prompted"]
+
+      # Left out of the list, never deleted.
+      assert {:ok, _record} = SessionStore.load("never-prompted", dir)
     end
 
     test "conversation and draft writes preserve each other and reject conflicting retries", %{

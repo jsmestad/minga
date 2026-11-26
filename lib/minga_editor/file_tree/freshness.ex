@@ -74,7 +74,10 @@ defmodule MingaEditor.FileTree.Freshness do
   @doc "Returns true when the buffer belongs to a path under the current tree root."
   @spec buffer_under_tree?(state(), pid()) :: boolean()
   def buffer_under_tree?(state, buffer) when is_pid(buffer) do
-    path_under_tree?(state, Buffer.file_path(buffer))
+    case Buffer.file_identities(buffer) do
+      [] -> false
+      [_ | _] -> path_under_tree?(state, Buffer.file_path(buffer))
+    end
   catch
     :exit, _ -> false
   end

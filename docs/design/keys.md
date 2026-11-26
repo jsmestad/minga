@@ -63,8 +63,8 @@ Keys are chords and mnemonics, not shortcuts. This is [principle 11](principles.
 | `SPC h a` | Apropos (Doom): commands and options in one search | shipped; was a duplicate of `SPC h c` (86) |
 | `SPC o t` | Toggle the terminal drawer (Doom) | new |
 | `SPC o T` | New terminal in the current window (Doom) | new |
-| `SPC p h` | Project home (`*home*`) from anywhere | new |
-| `SPC q n` | Start fresh instead of the restored session: closes the restored files and opens the project home | new |
+| `SPC p h` | Project home (`*home*`) from anywhere | shipped |
+| `SPC q n` | Start fresh instead of the restored session: closes the restored files and opens the project home | shipped |
 | `SPC q u` | Unsaved text: list the text kept after a crash that no start recovered, to recover or discard it | shipped (#4257) |
 | `SPC f o` | Open a remote file | shipped; was `SPC a o` (161) |
 | `SPC b P`, `SPC b <`, `SPC b >` | (tabs are gone) | shipped, retired (69, 70, 71) |
@@ -88,8 +88,8 @@ SPC a  Minga
 
 | Keys | Action | Status |
 |---|---|---|
-| `SPC a a` | Tasks drawer | changed (138, was "Toggle agent split") |
-| `SPC a n` | New task (the minibuffer prompt) | changed (143, was "New local agent session") |
+| `SPC a a` | Tasks drawer | shipped (138, was "Toggle agent split") |
+| `SPC a n` | New task (the minibuffer prompt) | shipped (143, was "New local agent session"; that is now `SPC a S n`) |
 | `SPC a s` | Stop; ⌘. on macOS | kept (141) |
 | `SPC a u` | Reject all of a task's changes, after "y/n" | kept key (166), now confirms |
 | `SPC a v` | Conversation split | kept (140) |
@@ -139,6 +139,7 @@ The modeline answers a stop of the conversation it speaks for: it reads "Minga s
 
 | Keys | Action | Status |
 |---|---|---|
+| `SPC a S n` | Start a new, empty session in the conversation | shipped; was `SPC a n` (143), which is now New task |
 | `SPC a S h` | Resume a session | shipped; was `SPC a h` (149) |
 | `SPC a S R` | Rename the session | shipped; was `SPC a R` (150) |
 | `SPC a S m` | Pick the model | shipped; was `SPC a m` (147) |

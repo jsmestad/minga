@@ -18,16 +18,13 @@ defmodule Minga.Test.NextStepsPickerSource do
 
   @impl true
   @spec empty(Empty.request()) :: Empty.t()
-  def empty(%{query: query, total: total}) do
+  def empty(%{query: query, total: total} = request) do
     %Empty{
       typing?: total > 0,
       title:
         if(total == 0, do: "Nothing here yet.", else: "Nothing matches #{Empty.quoted(query)}."),
       why: "This source lists what its context gives it.",
-      rows: [
-        Empty.command_row(:project_add, "Add a folder"),
-        Empty.command_row(:find_file, "Open a file")
-      ]
+      rows: rows(request)
     }
   end
 
@@ -35,4 +32,14 @@ defmodule Minga.Test.NextStepsPickerSource do
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: {:next_step, _step}} = item, state), do: Empty.run_command(item, state)
   def on_select(%Item{}, state), do: state
+
+  # A context with `steps: false` offers an empty state with nothing to do but read it and close.
+  @spec rows(Empty.request()) :: [Item.t()]
+  defp rows(%{context: %{steps: false}}), do: []
+
+  defp rows(_request),
+    do: [
+      Empty.command_row(:project_add, "Add a folder"),
+      Empty.command_row(:find_file, "Open a file")
+    ]
 end

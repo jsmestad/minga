@@ -1,0 +1,311 @@
+{
+ "elements": [
+  {
+   "frame": [
+    79,
+    65,
+    1174,
+    480
+   ],
+   "label": "storyboard.ex, pane 1",
+   "role": "AXTextArea",
+   "value": "defmodule Storyboard do\n  @moduledoc \"A small file every storyboard scenario starts in.\"\n\n  def greet(name) do\n    \"Hello, \" <> name\n  end\nend\n"
+  }
+ ],
+ "grid": {
+  "cols": 156,
+  "rows": 25
+ },
+ "parts": [
+  {
+   "baseline": 21,
+   "frame": [
+    318,
+    9.5,
+    78,
+    15
+   ],
+   "part": "tabBar.tabLabel",
+   "text": "storyboard.ex"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    40,
+    43.5,
+    4,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "/"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    58,
+    43.5,
+    23,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "tmp"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    95,
+    43.5,
+    102,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga-storyboard"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    211,
+    43.5,
+    71,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "macos-1280"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    296,
+    43.5,
+    109,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga.approval.diff"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    419,
+    43.5,
+    14,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "lib"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    447,
+    43.5,
+    78,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "storyboard.ex"
+  },
+  {
+   "frame": [
+    32,
+    564,
+    1248,
+    240
+   ],
+   "part": "drawer"
+  },
+  {
+   "frame": [
+    32,
+    564,
+    1248,
+    1
+   ],
+   "part": "drawer.divider"
+  },
+  {
+   "frame": [
+    32,
+    565,
+    1248,
+    24
+   ],
+   "part": "drawer.header"
+  },
+  {
+   "baseline": 581.5,
+   "frame": [
+    44,
+    569,
+    78,
+    16
+   ],
+   "part": "drawer.title",
+   "text": "Minga Tasks"
+  },
+  {
+   "baseline": 580.5,
+   "frame": [
+    130,
+    570,
+    18,
+    14
+   ],
+   "part": "drawer.count",
+   "text": "1"
+  },
+  {
+   "baseline": 580.5,
+   "frame": [
+    960,
+    570,
+    37,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "y once"
+  },
+  {
+   "baseline": 580.5,
+   "frame": [
+    1005,
+    570,
+    47,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "a always"
+  },
+  {
+   "baseline": 580.5,
+   "frame": [
+    1060,
+    570,
+    55,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "t this turn"
+  },
+  {
+   "baseline": 580.5,
+   "frame": [
+    1123,
+    570,
+    37,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "n deny"
+  },
+  {
+   "baseline": 580.5,
+   "frame": [
+    1168,
+    570,
+    41,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "]h next"
+  },
+  {
+   "baseline": 580.5,
+   "frame": [
+    1217,
+    570,
+    51,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "esc back"
+  },
+  {
+   "frame": [
+    0,
+    804,
+    1280,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    6,
+    804,
+    61,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "mode: NORMAL"
+  },
+  {
+   "frame": [
+    75,
+    804,
+    71,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "needs_you: Needs you"
+  },
+  {
+   "frame": [
+    154,
+    804,
+    73,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filename: storyboard.ex"
+  },
+  {
+   "frame": [
+    1226,
+    804,
+    26,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filetype: Elixir"
+  },
+  {
+   "frame": [
+    1260,
+    804,
+    14,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "position: 1:1"
+  },
+  {
+   "frame": [
+    6,
+    807,
+    61,
+    18
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "baseline": 819.5,
+   "frame": [
+    12,
+    809,
+    49,
+    14
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  }
+ ],
+ "scenario": "minga.approval.diff",
+ "size": "1280",
+ "theme": "catppuccin_latte",
+ "window": {
+  "height": 828,
+  "width": 1280
+ }
+}

@@ -150,6 +150,19 @@ defmodule Minga.Buffer.AuthorshipTest do
     assert [{@minga, _regions}] = BufferProcess.minga_changes(buffer, "task-1")
   end
 
+  test "appended output has no author and survives undo of an earlier user edit" do
+    buffer = start("")
+    assert :ok = BufferProcess.insert_text(buffer, "typed")
+    assert :ok = BufferProcess.append(buffer, " output")
+
+    assert BufferProcess.author_at(buffer, {0, 0}) == :you
+    assert BufferProcess.author_at(buffer, {0, 6}) == :unattributed
+    assert :ok = BufferProcess.undo(buffer)
+    assert BufferProcess.content(buffer) == " output"
+    BufferProcess.undo(buffer)
+    assert BufferProcess.content(buffer) == " output"
+  end
+
   test "log text appended to a bounded buffer is unattributed, and trimming forgets your text" do
     buffer = start("")
     assert :ok = BufferProcess.insert_text(buffer, "typed")

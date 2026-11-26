@@ -16,11 +16,11 @@
    7
       ~
 ╭ SPC › a Minga · 1 needs you ─────────────────────────────────────────────────╮
-│ Tasks                        Conversation           Changes                  │
-│ a Agent view · 1 needs you   v Conversation split   r Pending reviews        │
-│ n New session                ? Ask about this       u Undo all agent edits   │
-│ s Stop                       e Rewrite selection    p Publish edits…         │
-│                              q Queue ›                                       │
+│ Tasks                   Conversation           Changes                       │
+│ a Tasks · 1 needs you   v Conversation split   r Pending reviews             │
+│ n New task              ? Ask about this       u Undo all agent edits        │
+│ s Stop                  e Rewrite selection    p Publish edits…              │
+│                         q Queue ›                                            │
 │                                                                              │
 │ More                                                                         │
 │ x Context ›                                                                  │
@@ -92,48 +92,48 @@
 10 30-79 #7c7f93 #ccd0da -
 11 0-0 #7c7f93 #ccd0da -
 11 1-1 #4c4f69 #ccd0da -
-11 2-27 #5c5f77 #ccd0da -
-11 28-30 #4c4f69 #ccd0da -
-11 31-50 #5c5f77 #ccd0da -
-11 51-53 #4c4f69 #ccd0da -
-11 54-75 #5c5f77 #ccd0da -
-11 76-78 #4c4f69 #ccd0da -
+11 2-22 #5c5f77 #ccd0da -
+11 23-25 #4c4f69 #ccd0da -
+11 26-45 #5c5f77 #ccd0da -
+11 46-48 #4c4f69 #ccd0da -
+11 49-70 #5c5f77 #ccd0da -
+11 71-78 #4c4f69 #ccd0da -
 11 79-79 #7c7f93 #ccd0da -
 12 0-0 #7c7f93 #ccd0da -
 12 1-1 #4c4f69 #ccd0da -
 12 2-2 #1e66f5 #ccd0da -
-12 3-14 #4c4f69 #ccd0da -
-12 15-27 #d35400 #ccd0da -
-12 28-30 #4c4f69 #ccd0da -
-12 31-31 #1e66f5 #ccd0da -
-12 32-53 #4c4f69 #ccd0da -
-12 54-54 #1e66f5 #ccd0da -
-12 55-78 #4c4f69 #ccd0da -
+12 3-9 #4c4f69 #ccd0da -
+12 10-22 #d35400 #ccd0da -
+12 23-25 #4c4f69 #ccd0da -
+12 26-26 #1e66f5 #ccd0da -
+12 27-48 #4c4f69 #ccd0da -
+12 49-49 #1e66f5 #ccd0da -
+12 50-78 #4c4f69 #ccd0da -
 12 79-79 #7c7f93 #ccd0da -
 13 0-0 #7c7f93 #ccd0da -
 13 1-1 #4c4f69 #ccd0da -
 13 2-2 #1e66f5 #ccd0da -
-13 3-30 #4c4f69 #ccd0da -
-13 31-31 #1e66f5 #ccd0da -
-13 32-53 #4c4f69 #ccd0da -
-13 54-54 #1e66f5 #ccd0da -
-13 55-78 #4c4f69 #ccd0da -
+13 3-25 #4c4f69 #ccd0da -
+13 26-26 #1e66f5 #ccd0da -
+13 27-48 #4c4f69 #ccd0da -
+13 49-49 #1e66f5 #ccd0da -
+13 50-78 #4c4f69 #ccd0da -
 13 79-79 #7c7f93 #ccd0da -
 14 0-0 #7c7f93 #ccd0da -
 14 1-1 #4c4f69 #ccd0da -
 14 2-2 #1e66f5 #ccd0da -
-14 3-30 #4c4f69 #ccd0da -
-14 31-31 #1e66f5 #ccd0da -
-14 32-53 #4c4f69 #ccd0da -
-14 54-54 #1e66f5 #ccd0da -
-14 55-78 #4c4f69 #ccd0da -
+14 3-25 #4c4f69 #ccd0da -
+14 26-26 #1e66f5 #ccd0da -
+14 27-48 #4c4f69 #ccd0da -
+14 49-49 #1e66f5 #ccd0da -
+14 50-78 #4c4f69 #ccd0da -
 14 79-79 #7c7f93 #ccd0da -
 15 0-0 #7c7f93 #ccd0da -
-15 1-30 #4c4f69 #ccd0da -
-15 31-31 #1e66f5 #ccd0da -
-15 32-32 #4c4f69 #ccd0da -
-15 33-39 #1650c0 #ccd0da -
-15 40-78 #4c4f69 #ccd0da -
+15 1-25 #4c4f69 #ccd0da -
+15 26-26 #1e66f5 #ccd0da -
+15 27-27 #4c4f69 #ccd0da -
+15 28-34 #1650c0 #ccd0da -
+15 35-78 #4c4f69 #ccd0da -
 15 79-79 #7c7f93 #ccd0da -
 16 0-0 #7c7f93 #ccd0da -
 16 1-78 #4c4f69 #ccd0da -

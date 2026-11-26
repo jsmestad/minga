@@ -9,16 +9,25 @@ defmodule Minga.Buffer.ChangeLogTest do
   end
 
   describe "record_change/2" do
-    test "records pending changes in edit order" do
+    test "records changes in edit order" do
       log =
         ChangeLog.new()
         |> ChangeLog.record_change(delta("a"))
         |> ChangeLog.record_change(delta("b"))
 
-      assert {[a, b], log} = ChangeLog.drain_pending_changes(log)
+      assert {:ok, 2, [a, b]} = ChangeLog.changes_since(log, 0)
       assert a.inserted_text == "a"
       assert b.inserted_text == "b"
-      assert {[], _log} = ChangeLog.drain_pending_changes(log)
+    end
+
+    test "keeps no more than the retained entries, however many changes are recorded" do
+      log = Enum.reduce(1..1_500, ChangeLog.new(), &ChangeLog.record_change(&2, delta("d#{&1}")))
+
+      assert ChangeLog.retained_count(log) == 1_000
+
+      # Nothing else in the log holds a delta: a stream of appended output is not retained twice.
+      assert :erts_debug.flat_size(log) <
+               2 * :erts_debug.flat_size(elem(ChangeLog.changes_since(log, 500), 2))
     end
   end
 
@@ -38,9 +47,6 @@ defmodule Minga.Buffer.ChangeLogTest do
                  ChangeLog.changes_since(one_by_one, cursor)
 
         assert ChangeLog.changes_since(batched, 0) == ChangeLog.changes_since(one_by_one, 0)
-
-        assert ChangeLog.drain_pending_changes(batched) |> elem(0) ==
-                 ChangeLog.drain_pending_changes(one_by_one) |> elem(0)
       end
     end
   end
@@ -136,7 +142,6 @@ defmodule Minga.Buffer.ChangeLogTest do
 
       log = ChangeLog.clear(log)
 
-      assert {[], log} = ChangeLog.drain_pending_changes(log)
       assert {:reset_required, _log} = ChangeLog.take_unseen_changes(log, :lsp)
       assert ChangeLog.retained_count(log) == 0
     end

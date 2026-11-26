@@ -168,7 +168,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     test "the notice headline is the lifecycle's own and the draft note names the bound new-session key" do
       session = fake_session_pid()
       request = StartRequest.default()
-      saved = "Your draft is saved. SPC a n starts a new session."
+      saved = "Your draft is saved. SPC a S n starts a new session."
 
       for editing_model <- [:vim, :cua],
           {lifecycle, headline, note} <- [

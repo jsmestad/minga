@@ -230,13 +230,15 @@ defmodule Minga.Test.Storyboard.Render do
   end
 
   # The grid a frontend reports depends on the chrome around the editor (ADR-0001): on macOS the file tree and
-  # Git status are a native sidebar beside the editor, so the editor's grid narrows while one is open.
+  # Git status are a native sidebar beside the editor, so the editor's grid narrows while one is open; the tasks drawer
+  # and the minibuffer prompt beneath it are native views below the editor, so the grid shrinks while they are open; the
+  # project home (`empty_state`) draws no tab bar or breadcrumb on either frontend, so its grid grows.
   # A target's `chrome_grid` maps the grid-changing chrome open at the reached frame, joined with "+", to the grid the
   # frontend reports then. The capture does what that report does in production: it resizes the editor to that grid.
-  @grid_chrome [:file_tree, :git_status]
+  @grid_chrome [:empty_state, :file_tree, :git_status, :tasks_drawer, :minibuffer]
 
   # Chrome each frontend draws natively around the editor: a scenario that shows it needs a `chrome_grid` entry.
-  @native_below %{macos: [:file_tree, :git_status], tui: []}
+  @native_below %{macos: [:file_tree, :git_status, :tasks_drawer], tui: []}
 
   @spec fit_native_chrome(Session.t(), target()) :: {Session.t(), target()}
   defp fit_native_chrome(session, target) do
@@ -259,8 +261,7 @@ defmodule Minga.Test.Storyboard.Render do
 
     case Map.fetch(chrome_grid, key) do
       {:ok, grid} ->
-        rows = Map.fetch!(grid, "rows")
-        %{target | cols: Map.get(grid, "cols", target.cols), rows: rows, grid_rows: rows}
+        apply_grid(target, grid)
 
       :error ->
         if Enum.any?(open, &(&1 in Map.fetch!(@native_below, frontend))) do
@@ -271,6 +272,22 @@ defmodule Minga.Test.Storyboard.Render do
 
         target
     end
+  end
+
+  # In the TUI an entry sets only the grid below the header; the terminal size stays.
+  @spec apply_grid(target(), %{required(String.t()) => pos_integer()}) :: target()
+  defp apply_grid(%{frontend: :tui} = target, %{"rows" => rows}), do: %{target | grid_rows: rows}
+
+  defp apply_grid(target, %{"rows" => rows} = grid),
+    do: %{target | cols: Map.get(grid, "cols", target.cols), rows: rows, grid_rows: rows}
+
+  # The TUI header holds the tab bar, and the breadcrumb from 100 columns up; the home shows neither, so the TUI
+  # reports one more row there (its title row stays).
+  @spec tui_chrome_grid(pos_integer(), pos_integer()) :: %{
+          String.t() => %{String.t() => pos_integer()}
+        }
+  defp tui_chrome_grid(cols, rows) do
+    if tui_header_rows(cols) > 1, do: %{"empty_state" => %{"rows" => rows - 1}}, else: %{}
   end
 
   # A strip frame is drawn by driving a fresh session to the journey's start and replaying the steps up to it.
@@ -354,7 +371,7 @@ defmodule Minga.Test.Storyboard.Render do
           rows: rows,
           grid_rows: rows - tui_header_rows(cols),
           window: nil,
-          chrome_grid: %{}
+          chrome_grid: tui_chrome_grid(cols, rows)
         }
       end
 

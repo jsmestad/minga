@@ -38,11 +38,11 @@
       ~
       ~
 ╭ SPC › a Minga · 1 needs you ─────────────────────────────────────────────────────────────────────────────────────────╮
-│ Tasks                        Conversation           Changes                  More                                    │
-│ a Agent view · 1 needs you   v Conversation split   r Pending reviews        x Context ›                             │
-│ n New session                ? Ask about this       u Undo all agent edits   S Session ›                             │
-│ s Stop                       e Rewrite selection    p Publish edits…         W Why this line                         │
-│                              q Queue ›                                       A Code autobiography                    │
+│ Tasks                   Conversation           Changes                  More                                         │
+│ a Tasks · 1 needs you   v Conversation split   r Pending reviews        x Context ›                                  │
+│ n New task              ? Ask about this       u Undo all agent edits   S Session ›                                  │
+│ s Stop                  e Rewrite selection    p Publish edits…         W Why this line                              │
+│                         q Queue ›                                       A Code autobiography                         │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────── ⌫ back  esc close ─╯
   NORMAL  ◉ Needs you storyboard.ex ◉ Minga                                                            SPC a Elixir 1:1
 ## styles (row start-end fg bg attrs)
@@ -163,62 +163,62 @@
 32 30-119 #7c7f93 #ccd0da -
 33 0-0 #7c7f93 #ccd0da -
 33 1-1 #4c4f69 #ccd0da -
-33 2-27 #5c5f77 #ccd0da -
-33 28-30 #4c4f69 #ccd0da -
-33 31-50 #5c5f77 #ccd0da -
-33 51-53 #4c4f69 #ccd0da -
-33 54-75 #5c5f77 #ccd0da -
-33 76-78 #4c4f69 #ccd0da -
-33 79-98 #5c5f77 #ccd0da -
-33 99-118 #4c4f69 #ccd0da -
+33 2-22 #5c5f77 #ccd0da -
+33 23-25 #4c4f69 #ccd0da -
+33 26-45 #5c5f77 #ccd0da -
+33 46-48 #4c4f69 #ccd0da -
+33 49-70 #5c5f77 #ccd0da -
+33 71-73 #4c4f69 #ccd0da -
+33 74-93 #5c5f77 #ccd0da -
+33 94-118 #4c4f69 #ccd0da -
 33 119-119 #7c7f93 #ccd0da -
 34 0-0 #7c7f93 #ccd0da -
 34 1-1 #4c4f69 #ccd0da -
 34 2-2 #1e66f5 #ccd0da -
-34 3-14 #4c4f69 #ccd0da -
-34 15-27 #d35400 #ccd0da -
-34 28-30 #4c4f69 #ccd0da -
-34 31-31 #1e66f5 #ccd0da -
-34 32-53 #4c4f69 #ccd0da -
-34 54-54 #1e66f5 #ccd0da -
-34 55-78 #4c4f69 #ccd0da -
-34 79-79 #1e66f5 #ccd0da -
-34 80-80 #4c4f69 #ccd0da -
-34 81-89 #1650c0 #ccd0da -
-34 90-118 #4c4f69 #ccd0da -
+34 3-9 #4c4f69 #ccd0da -
+34 10-22 #d35400 #ccd0da -
+34 23-25 #4c4f69 #ccd0da -
+34 26-26 #1e66f5 #ccd0da -
+34 27-48 #4c4f69 #ccd0da -
+34 49-49 #1e66f5 #ccd0da -
+34 50-73 #4c4f69 #ccd0da -
+34 74-74 #1e66f5 #ccd0da -
+34 75-75 #4c4f69 #ccd0da -
+34 76-84 #1650c0 #ccd0da -
+34 85-118 #4c4f69 #ccd0da -
 34 119-119 #7c7f93 #ccd0da -
 35 0-0 #7c7f93 #ccd0da -
 35 1-1 #4c4f69 #ccd0da -
 35 2-2 #1e66f5 #ccd0da -
-35 3-30 #4c4f69 #ccd0da -
-35 31-31 #1e66f5 #ccd0da -
-35 32-53 #4c4f69 #ccd0da -
-35 54-54 #1e66f5 #ccd0da -
-35 55-78 #4c4f69 #ccd0da -
-35 79-79 #1e66f5 #ccd0da -
-35 80-80 #4c4f69 #ccd0da -
-35 81-89 #1650c0 #ccd0da -
-35 90-118 #4c4f69 #ccd0da -
+35 3-25 #4c4f69 #ccd0da -
+35 26-26 #1e66f5 #ccd0da -
+35 27-48 #4c4f69 #ccd0da -
+35 49-49 #1e66f5 #ccd0da -
+35 50-73 #4c4f69 #ccd0da -
+35 74-74 #1e66f5 #ccd0da -
+35 75-75 #4c4f69 #ccd0da -
+35 76-84 #1650c0 #ccd0da -
+35 85-118 #4c4f69 #ccd0da -
 35 119-119 #7c7f93 #ccd0da -
 36 0-0 #7c7f93 #ccd0da -
 36 1-1 #4c4f69 #ccd0da -
 36 2-2 #1e66f5 #ccd0da -
-36 3-30 #4c4f69 #ccd0da -
-36 31-31 #1e66f5 #ccd0da -
-36 32-53 #4c4f69 #ccd0da -
-36 54-54 #1e66f5 #ccd0da -
-36 55-78 #4c4f69 #ccd0da -
-36 79-79 #1e66f5 #ccd0da -
-36 80-118 #4c4f69 #ccd0da -
+36 3-25 #4c4f69 #ccd0da -
+36 26-26 #1e66f5 #ccd0da -
+36 27-48 #4c4f69 #ccd0da -
+36 49-49 #1e66f5 #ccd0da -
+36 50-73 #4c4f69 #ccd0da -
+36 74-74 #1e66f5 #ccd0da -
+36 75-118 #4c4f69 #ccd0da -
 36 119-119 #7c7f93 #ccd0da -
 37 0-0 #7c7f93 #ccd0da -
-37 1-30 #4c4f69 #ccd0da -
-37 31-31 #1e66f5 #ccd0da -
-37 32-32 #4c4f69 #ccd0da -
-37 33-39 #1650c0 #ccd0da -
-37 40-78 #4c4f69 #ccd0da -
-37 79-79 #1e66f5 #ccd0da -
-37 80-118 #4c4f69 #ccd0da -
+37 1-25 #4c4f69 #ccd0da -
+37 26-26 #1e66f5 #ccd0da -
+37 27-27 #4c4f69 #ccd0da -
+37 28-34 #1650c0 #ccd0da -
+37 35-73 #4c4f69 #ccd0da -
+37 74-74 #1e66f5 #ccd0da -
+37 75-118 #4c4f69 #ccd0da -
 37 119-119 #7c7f93 #ccd0da -
 38 0-98 #7c7f93 #ccd0da -
 38 99-99 #4c4f69 #ccd0da -

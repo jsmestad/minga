@@ -70,6 +70,20 @@ defmodule Minga.ProjectTest do
     end
   end
 
+  test "a launch directory workspace is active before the editor starts", %{tmp_dir: path} do
+    {:ok, root} = Root.directory(path)
+
+    {_pid, name} =
+      start_project!(startup_directory: path, file_find_module: Minga.Project.SlowFileFind)
+
+    assert %WorkspaceSnapshot{root: ^root, rebuilding?: true} = Project.snapshot(name)
+  end
+
+  test "startup does not activate a directory that requires confirmation" do
+    {_pid, name} = start_project!(startup_directory: "/")
+    assert Project.snapshot(name) == nil
+  end
+
   describe "buffer-open isolation" do
     test "opening loose files never promotes marker ancestors", %{tmp_dir: tmp} do
       fake_home = Path.join(tmp, "home")

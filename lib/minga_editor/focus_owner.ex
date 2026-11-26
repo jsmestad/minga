@@ -6,6 +6,7 @@ defmodule MingaEditor.FocusOwner do
   alias MingaEditor.Input.InlineEdit
   alias MingaEditor.Input.InlineOverlay
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.Drawers
   alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
@@ -88,9 +89,22 @@ defmodule MingaEditor.FocusOwner do
   defp hover_owner(%ShellState{hover_popup: %{focused: true}}, _state),
     do: {:editor_view, :hover_popup, 0}
 
-  defp hover_owner(_shell, state) do
-    surface_owner(state)
+  defp hover_owner(%ShellState{} = shell, state) do
+    if Drawers.focused?(ShellState.drawers(shell), :tasks),
+      do: drawer_owner(state),
+      else: surface_owner(state)
   end
+
+  defp hover_owner(_shell, state), do: surface_owner(state)
+
+  # The tasks drawer runs ahead of the active window's scope and yields only the leader.
+  defp drawer_owner(%{workspace: %{editing: %{mode: :normal}}} = state) do
+    if Minga.Editing.in_leader?(state),
+      do: {:editor_view, :editor, 0},
+      else: {:editor_view, :tasks, 0}
+  end
+
+  defp drawer_owner(_state), do: {:editor_view, :tasks, 0}
 
   defp surface_owner(%{workspace: %{keymap_scope: :file_tree, file_tree: ft}} = state) do
     case MingaEditor.State.FileTree.editing(ft) do

@@ -1,22 +1,26 @@
 {
   "macos": {
-    "commit": "74e9d8ec633bb8c08cef2a271301beb823a1c7c2-dirty",
+    "commit": "f3c65956fbee7b60fa95d9342527f5c47ff56347-dirty",
     "files": {
-      "macos-astrodark-1280.json": "a2d792ec132d7513dd6702b30b03311ebd58d4019f16a4f6d9395e29d148ca2d",
-      "macos-astrodark-1440.json": "2a91c3dcac657ff011b484a6366da0a3fe181d4c056a16685ad291dbcaec4307",
-      "macos-catppuccin_frappe-1280.json": "41c9caf0539406c2b32ee924cf17ee7526cb558f7d002481b223eb16505607e3",
-      "macos-catppuccin_frappe-1440.json": "405365ff872d4c982727e1437ad310791ff67de452ac3364770ab61c1fbca1a0",
-      "macos-catppuccin_latte-1280.json": "4f813fca3dd7e8b50580b885d3fdea2a274cfdaeae17bcfaaad838c24b7cd26d",
-      "macos-catppuccin_latte-1440.json": "1678484420883cc02821ecc732f363a87e174438055327eff2617fdb03e09638"
+      "macos-astrodark-1280.json": "7483bbf5f905e3462c4e0ec2e47ea3d2df161c7d3977f9708a6427c42774a8d1",
+      "macos-astrodark-1440.json": "5ee6618570053da02dd9c287ff47ae348c182f5944ecce834ce555343fda6e2c",
+      "macos-catppuccin_frappe-1280.json": "440c3971e7f1b523f30721212441b53100339b19ef29d5d2bf87ed44df1c445e",
+      "macos-catppuccin_frappe-1440.json": "2334d47fd4507a5dc523836dc8881dc642030036fd888e72cfdd03567f060846",
+      "macos-catppuccin_latte-1280.json": "643cd1dbcdce2744001add402d173053d8e00745f4a2ad393169370006189a72",
+      "macos-catppuccin_latte-1440.json": "c5ab0852e9acb4a46674a40b3246d5f2254faf6e8248a8b75f9f65493612a9b4"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "90e1c26ebb8953ab0add389c5e95c7db4e9e256ae3e6ed9b6b5f6c73c32e00b8",
-      "macos-astrodark-1440.json": "92772030e7a2522efc5aa30e674af761d1d14ad1f61e70c64d4bc10f4ced8027",
-      "macos-catppuccin_frappe-1280.json": "6eb7958fa90c66b4d781bdba90fefc1c20bd5c2490b43bc34244ffe9e08e06de",
-      "macos-catppuccin_frappe-1440.json": "0d59aad2d4cb30606a968f8d0b9f27cc926af0da2fdddfd7439a191d63cffa52",
-      "macos-catppuccin_latte-1280.json": "19cee209816e9cc395697fcedea9097a89c0da0f9b81337bb210b166ea614573",
-      "macos-catppuccin_latte-1440.json": "7dd85702724a010e04e5aa2acca3b522d7fbdc8f873e7975b4baad5e4620c1c7"
+      "macos-astrodark-1280.json": "55b643246211b0370065203e4ff7a8d0d281abc72768dc826e60a83869c25935",
+      "macos-astrodark-1440.json": "0c2e6ab5ab0ba216a28fef2153c6ee2977952b25a51ea0f1ddd53da9b7023a07",
+      "macos-catppuccin_frappe-1280.json": "ce04d7cc63bc9636d893f3dc97268d38f7a12de89a721783566defe1d0c4e4ed",
+      "macos-catppuccin_frappe-1440.json": "913e28e4021e0e307c8d8a0e7d4cec4fa2e41e3fe48df76b89feced933fa2688",
+      "macos-catppuccin_latte-1280.json": "3e2b36981fd73eee64a8261b239b3f73242a7f0b330f88ce08782167822f513a",
+      "macos-catppuccin_latte-1440.json": "42c811e8c1daaaa898d222a71c770a544dab977b5e2273be2abc03cec200ec76"
     }
+  },
+  "platform_specific": {
+    "frontend": "macos",
+    "reason": "Use the shared sidebar header and action alignment on macOS"
   },
   "scenario": "files.tree.empty",
   "tui": {

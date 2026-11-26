@@ -20,7 +20,6 @@ defmodule MingaAgent.ConfigTest do
       assert is_boolean(config.notifications)
       assert is_list(config.destructive_tools)
       assert is_list(config.agent_hooks)
-      assert is_list(config.notify_on)
     end
 
     test "model defaults to a credential-backed model or the unconfigured sentinel" do
@@ -52,7 +51,7 @@ defmodule MingaAgent.ConfigTest do
       assert config.max_image_size == 5 * 1024 * 1024
       assert config.max_mention_candidates == 10
       assert config.memory_max_tokens == 4_000
-      assert config.notify_debounce_ms == 5_000
+      assert config.notify_terminal == :off
       assert config.panel_split == 65
       assert config.diff_size_threshold == 1_048_576
       assert config.session_retention_days == 30

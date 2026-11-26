@@ -9,9 +9,9 @@ import CoreGraphics
 import Foundation
 
 let keyCodes: [String: CGKeyCode] = [
-    "space": 49, "a": 0, "n": 45, "x": 7, "escape": 53, "q": 12, "return": 36,
+    "space": 49, "a": 0, "n": 45, "v": 9, "x": 7, "escape": 53, "q": 12, "return": 36,
 ]
-let shiftedKeyCodes: [String: CGKeyCode] = ["colon": 41, "bang": 18]
+let shiftedKeyCodes: [String: CGKeyCode] = ["colon": 41, "bang": 18, "S": 1]
 
 let arguments = CommandLine.arguments.dropFirst()
 guard let pidText = arguments.first, let pid = pid_t(pidText), arguments.count > 1 else {

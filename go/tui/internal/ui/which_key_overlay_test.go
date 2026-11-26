@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
@@ -194,5 +195,52 @@ func TestWhichKeyBreadcrumbTitleIsBold(t *testing.T) {
 	leader := lipgloss.NewStyle().Bold(true).Foreground(model.palette().PopupText()).Background(model.palette().PopupSurface()).Render("Leader")
 	if border := model.whichKeyTopBorder(root, 120); !strings.Contains(border, strings.TrimSuffix(leader, "\x1b[m")) {
 		t.Fatalf("the root title should be bold: %q", border)
+	}
+}
+
+func TestWhichKeyClicksPressRowsAndClimbTheBreadcrumb(t *testing.T) {
+	model := whichKeyModel(120, 40)
+	layer := model.floatingWhichKeyLayer()
+	if layer == nil {
+		t.Fatal("which-key layer did not render")
+	}
+	grid := strings.Split(ansi.Strip(layer.GetContent()), "\n")
+	find := func(text string) (int, int) {
+		for y, line := range grid {
+			if x := strings.Index(line, text); x >= 0 {
+				return lipgloss.Width(line[:x]), layer.GetY() + y
+			}
+		}
+		t.Fatalf("%q not drawn", text)
+		return 0, 0
+	}
+	click := func(x, y int) ([]byte, bool) {
+		return model.whichKeyMousePacket(tea.MouseClickMsg(tea.Mouse{X: x, Y: y, Button: tea.MouseLeft}))
+	}
+
+	// A row presses its own key on the panel's path; the click lands anywhere on the row.
+	x, y := find("Queue ›")
+	packet, ok := click(x+2, y)
+	if want := protocol.EncodeGUIWhichKeyPress("SPC a", 'q', 0); !ok || string(packet) != string(want) {
+		t.Fatalf("Queue row click = %v %q, want %q", ok, packet, want)
+	}
+	x, y = find("q Queue")
+	if packet, _ := click(x, y); string(packet) != string(protocol.EncodeGUIWhichKeyPress("SPC a", 'q', 0)) {
+		t.Fatalf("the key cell of a row presses that row too: %q", packet)
+	}
+
+	// The SPC crumb goes back up; the crumb for the open group does nothing but is swallowed.
+	x, y = find("SPC ›")
+	if packet, ok := click(x, y); !ok || string(packet) != string(protocol.EncodeGUIWhichKeyBack("SPC")) {
+		t.Fatalf("SPC crumb click = %v %q", ok, packet)
+	}
+	x, y = find("a Minga")
+	if packet, ok := click(x+3, y); !ok || packet != nil {
+		t.Fatalf("the open group's crumb is swallowed without a packet, got %v %q", ok, packet)
+	}
+
+	// Outside the panel the click is not which-key's.
+	if _, ok := click(5, layer.GetY()-1); ok {
+		t.Fatal("a click above the panel must fall through")
 	}
 }

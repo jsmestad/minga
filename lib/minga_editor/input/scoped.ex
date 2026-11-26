@@ -41,6 +41,7 @@ defmodule MingaEditor.Input.Scoped do
 
   @ctrl MingaEditor.Input.mod_ctrl()
   @alt MingaEditor.Input.mod_alt()
+  @cmd 0x08
   @tab 9
   @space 32
 
@@ -55,25 +56,19 @@ defmodule MingaEditor.Input.Scoped do
   # Editor scope with agent side panel: handled by Input.AgentPanel.
   # Editor scope without panel: in CUA mode, resolve through the editor
   # scope trie for Ctrl fallbacks (undo, redo, paste, etc.) before
-  # CUA.Dispatch eats the key. In vim mode, passthrough to Mode FSM.
+  # CUA.Dispatch eats the key. In vim mode, a ⌘ chord resolves through the
+  # editor scope's macOS platform aliases (⌘. stops Minga); every other key
+  # passes through to the Mode FSM, which gives ⌘ no meaning.
   def handle_key(%{workspace: %{keymap_scope: :editor}} = state, cp, mods) do
-    if Minga.Editing.active_model(state) == Minga.Editing.Model.CUA do
-      key = {cp, mods}
+    cond do
+      Minga.Editing.active_model(state) == Minga.Editing.Model.CUA ->
+        resolve_editor_key(state, :cua, {cp, mods})
 
-      case Keymap.resolve_scoped_key(:editor, :cua, key,
-             keymap_server: state.interaction.keymap_server
-           ) do
-        {:command, command} ->
-          {:handled, Commands.execute(state, command)}
+      Bitwise.band(mods, @cmd) != 0 ->
+        resolve_editor_key(state, :normal, {cp, mods})
 
-        {:prefix, _node} ->
-          {:handled, state}
-
-        :not_found ->
-          {:passthrough, state}
-      end
-    else
-      {:passthrough, state}
+      true ->
+        {:passthrough, state}
     end
   end
 
@@ -246,6 +241,22 @@ defmodule MingaEditor.Input.Scoped do
           )
 
         resolve_scope_key(state, :agent, vim_state, key, cp, mods)
+    end
+  end
+
+  @spec resolve_editor_key(
+          EditorState.t(),
+          :cua | :normal,
+          {non_neg_integer(), non_neg_integer()}
+        ) ::
+          MingaEditor.Input.Handler.result()
+  defp resolve_editor_key(state, vim_state, key) do
+    case Keymap.resolve_scoped_key(:editor, vim_state, key,
+           keymap_server: state.interaction.keymap_server
+         ) do
+      {:command, command} -> {:handled, Commands.execute(state, command)}
+      {:prefix, _node} -> {:handled, state}
+      :not_found -> {:passthrough, state}
     end
   end
 

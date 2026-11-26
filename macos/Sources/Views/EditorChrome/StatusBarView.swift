@@ -106,13 +106,21 @@ public struct StatusBarView: View {
         return ceil(ModelineMetrics.textWidth(state.message)) + steps
     }
 
+    /// The width of the notice with each step's key and word, measured as `noticeLine` lays out its first form: the keys-only width plus, per step, the gap and the word in the small face.
+    var fullNoticeWidth: CGFloat {
+        state.messageActions.reduce(shortestNoticeWidth) { width, action in
+            width + Spacing.xs + ceil(ModelineMetrics.textWidth(action.label))
+        }
+    }
+
     /// Room for the echo text: what it needs, at most a third of the bar, nothing when there is no text.
-    /// A notice that names next steps is an answer, so it may take up to three quarters of the bar: enough for the whole message and the steps' keys, while droppable segments give way (as in the TUI).
+    /// A notice that names next steps is an answer, so it may take up to three quarters of the bar: room for the whole message with each step's key and word, while droppable segments give way (as in the TUI).
+    /// When that does not fit, `noticeLine` falls back to the keys alone in whatever room the three quarters leave.
     func echoWidth(in width: CGFloat) -> CGFloat {
         guard hasCenterStatus else { return 0 }
         let plain = min(ModelineMetrics.textWidth(centerText) + 2 * Spacing.md, width * 0.34)
         guard !state.messageActions.isEmpty, centerText == state.message else { return plain }
-        return max(plain, min(shortestNoticeWidth + 2 * Spacing.md, width * 0.75))
+        return max(plain, min(fullNoticeWidth + 2 * Spacing.md, width * 0.75))
     }
 
     private var pendingWidth: CGFloat {
@@ -299,7 +307,7 @@ public struct StatusBarView: View {
                     if words {
                         Text(action.label)
                             .font(Typography.font(.small))
-                            .foregroundStyle(theme.modelineBarFg.opacity(0.78))
+                            .foregroundStyle(theme.modelineBarFg)
                     }
                 }
                 .contentShape(Rectangle())
@@ -311,12 +319,17 @@ public struct StatusBarView: View {
         }
     }
 
+    /// A notice that names next steps is an answer, so its message reads in the chrome text colour, and only the dots between steps are muted (docs/design/anatomy.md, "Notice"); the TUI draws it the same way. Other echo text stays secondary.
+    static func messageOpacity(namesNextSteps: Bool) -> Double {
+        namesNextSteps ? 1 : 0.7
+    }
+
     /// What happened is the point of a notice, so the message stays whole: the next steps first give up their words and keep their keys, and only a message that cannot fit on its own truncates.
     @ViewBuilder
     private var noticeLine: some View {
         let message = Text(state.message)
             .font(Typography.font(.small))
-            .foregroundStyle(theme.modelineBarFg.opacity(0.7))
+            .foregroundStyle(theme.modelineBarFg.opacity(Self.messageOpacity(namesNextSteps: !state.messageActions.isEmpty)))
             .lineLimit(1)
             .anatomyPart("notice.message", text: state.message, font: .small)
         ViewThatFits(in: .horizontal) {

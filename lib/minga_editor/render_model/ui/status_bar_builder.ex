@@ -93,6 +93,7 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
       | file: %StatusFile{file | icon: icon, icon_color: icon_color},
         message: projected_message(common),
         message_actions: message_actions(common),
+        needs_you_count: common.needs_you_count,
         agent: agent_model(status.agent, content)
     }
   end

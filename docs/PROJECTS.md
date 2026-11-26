@@ -46,6 +46,10 @@ If you want a loose folder to behave like a project, drop an empty `.minga` file
 
 A marker does not make a too-broad folder acceptable to Minga's Agent, with one exception: version control. If your home directory is a Git repository (a dotfiles setup, for example), it is a project and the Agent works in it, because the whole tree really is one project. A stray `package.json`, a `mix.exs` or a `.minga` file in your home directory is not that kind of evidence, and the Agent still says the folder is too broad. The file tree and project search are not affected: they follow the detected project as before.
 
+### The same rule for project config
+
+A project's own configuration (`.minga.exs`, `.minga/plugins`, `.minga/mcp.json`) is code that runs, so it follows the rule above: it is loaded from the project you launched, and a folder that is too broad gives none unless it is under version control. [Configuration](CONFIGURATION.md#which-project-config-is-loaded) has the details, including what a start without a terminal does.
+
 ### A conversation keeps its folder
 
 The folder is part of the conversation, not of the editor window. A saved conversation records it. When you restore the conversation while that folder is the one you have open, it picks up where it left off.

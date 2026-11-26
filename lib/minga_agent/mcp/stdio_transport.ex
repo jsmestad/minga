@@ -40,15 +40,17 @@ defmodule MingaAgent.MCP.StdioTransport do
   @impl MingaAgent.MCP.Transport
   @spec start(ServerConfig.t(), pid(), keyword()) :: {:ok, t()} | {:error, term()}
   def start(%ServerConfig{} = config, _owner, opts) do
-    with {:ok, executable} <- resolve_executable(config.command) do
-      port_opts = [
-        :binary,
-        :exit_status,
-        :use_stdio,
-        {:line, 65_536},
-        {:args, config.args},
-        {:env, port_env(config)}
-      ]
+    with {:ok, executable} <- resolve_executable(config, Keyword.take(opts, [:path])) do
+      port_opts =
+        working_directory(config) ++
+          [
+            :binary,
+            :exit_status,
+            :use_stdio,
+            {:line, 65_536},
+            {:args, config.args},
+            {:env, port_env(config)}
+          ]
 
       port = Port.open({:spawn_executable, executable}, port_opts)
       {:ok, new(port, Keyword.get(opts, :max_line_bytes, max_line_bytes()))}
@@ -103,17 +105,27 @@ defmodule MingaAgent.MCP.StdioTransport do
 
   def handle_transport_info(_message, %__MODULE__{} = transport), do: {:ok, transport}
 
-  @spec resolve_executable(String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  defp resolve_executable(command) do
+  # Project declarations with a path arrive with an absolute program that was already examined. A bare name is
+  # resolved on the absolute folders of PATH at start; a relative path requires the server's directory.
+  @spec resolve_executable(ServerConfig.t(), keyword()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp resolve_executable(%ServerConfig{command: command, cwd: cwd}, path_opts) do
     if Path.type(command) == :absolute do
       {:ok, command}
     else
-      case System.find_executable(command) do
-        nil -> {:error, "MCP server executable not found: #{command}"}
-        path -> {:ok, path}
+      case Minga.Project.Trust.program(cwd, command, path_opts) do
+        {:ok, path} -> {:ok, path}
+        {:error, _reason} -> {:error, "MCP server executable not found: #{command}"}
       end
     end
   end
+
+  # The server starts in the directory its config names: the project root. Without one it starts where Minga runs.
+  @spec working_directory(ServerConfig.t()) :: [{:cd, charlist()}]
+  defp working_directory(%ServerConfig{cwd: cwd}) when is_binary(cwd),
+    do: [{:cd, String.to_charlist(cwd)}]
+
+  defp working_directory(%ServerConfig{cwd: nil}), do: []
 
   @spec port_env(ServerConfig.t()) :: [env_entry()]
   def port_env(%ServerConfig{} = config), do: port_env(config, System.get_env())

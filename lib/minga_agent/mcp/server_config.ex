@@ -10,7 +10,7 @@ defmodule MingaAgent.MCP.ServerConfig do
   alias MingaAgent.Redaction
 
   @enforce_keys [:name, :command]
-  defstruct [:name, :command, args: [], env: %{}, enabled: true, source: :config]
+  defstruct [:name, :command, :cwd, args: [], env: %{}, enabled: true, source: :config]
 
   @typedoc "One MCP stdio server declaration."
   @type t :: %__MODULE__{
@@ -18,6 +18,7 @@ defmodule MingaAgent.MCP.ServerConfig do
           command: String.t(),
           args: [String.t()],
           env: %{String.t() => String.t()},
+          cwd: String.t() | nil,
           enabled: boolean(),
           source: Minga.Extension.ContributionCleanup.contribution_source()
         }
@@ -37,6 +38,7 @@ defmodule MingaAgent.MCP.ServerConfig do
          {:ok, command} <- fetch_string(config, :command),
          {:ok, args} <- fetch_args(config),
          {:ok, env} <- fetch_env(config),
+         {:ok, cwd} <- fetch_cwd(config),
          {:ok, enabled} <- fetch_enabled(config),
          {:ok, source} <- fetch_source(config) do
       {:ok,
@@ -45,6 +47,7 @@ defmodule MingaAgent.MCP.ServerConfig do
          command: command,
          args: args,
          env: env,
+         cwd: cwd,
          enabled: enabled,
          source: source
        }}
@@ -53,6 +56,41 @@ defmodule MingaAgent.MCP.ServerConfig do
 
   def normalize(other),
     do: {:error, "MCP server config must be a map or nil, got: #{safe_inspect(other)}"}
+
+  @doc """
+  Fixes the program and the working directory of a server that a project declares.
+
+  Both come from whoever examined the project (`Minga.Project.Sources.process/5`), and they replace whatever the declaration said: a project's own data never chooses the directory its server starts in.
+  """
+  @spec started_from(t(), String.t(), String.t()) :: t()
+  def started_from(%__MODULE__{} = config, executable, cwd)
+      when is_binary(executable) and is_binary(cwd),
+      do: %{config | command: executable, cwd: cwd}
+
+  @doc """
+  Gives a server the directory it starts in when its declaration names none.
+
+  A server acts on the project: a relative path in its command line means "in the project". `nil` leaves the server as it is.
+  """
+  @spec in_directory(t(), String.t() | nil) :: t()
+  def in_directory(%__MODULE__{cwd: nil} = config, directory) when is_binary(directory),
+    do: %{config | cwd: directory}
+
+  def in_directory(%__MODULE__{} = config, _directory_or_nil), do: config
+
+  @doc """
+  Resolves an extension's own relative program against the extension's root.
+
+  A command with a separator that is not absolute names a file of the extension, wherever the server is started. A bare name and an absolute path are left as they are.
+  """
+  @spec program_in(t(), String.t() | nil) :: t()
+  def program_in(%__MODULE__{command: command} = config, root) when is_binary(root) do
+    if Path.type(command) == :relative and String.contains?(command, "/"),
+      do: %{config | command: Path.expand(command, root)},
+      else: config
+  end
+
+  def program_in(%__MODULE__{} = config, nil), do: config
 
   @doc "Normalizes one or more MCP server configs, filters disabled entries, and rejects duplicate enabled server names."
   @spec normalize_list(nil | map() | t() | [map() | t()]) :: {:ok, [t()]} | {:error, String.t()}
@@ -141,6 +179,15 @@ defmodule MingaAgent.MCP.ServerConfig do
       other ->
         {:error,
          "MCP server env must be a map of string or atom keys and string values, got: #{safe_inspect(other)}"}
+    end
+  end
+
+  @spec fetch_cwd(map()) :: {:ok, String.t() | nil} | {:error, String.t()}
+  defp fetch_cwd(config) do
+    case fetch(config, :cwd) do
+      nil -> {:ok, nil}
+      cwd when is_binary(cwd) and cwd != "" -> {:ok, cwd}
+      other -> {:error, "MCP server cwd must be a path, got: #{safe_inspect(other)}"}
     end
   end
 

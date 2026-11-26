@@ -44,7 +44,14 @@ defmodule MingaEditor.Session.RecoveryTest do
 
       assert Recovery.run(request.effect) ==
                {:ok,
-                {:resume, %{snapshot: saved, recovered: [], held_back: [], waiting_elsewhere: 0}}}
+                {:resume,
+                 %{
+                   snapshot: saved,
+                   recovered: [],
+                   held_back: [],
+                   waiting_elsewhere: 0,
+                   waiting_projects: []
+                 }}}
     end
 
     assert :ok = Session.save(snapshot(true), opts)
@@ -60,7 +67,14 @@ defmodule MingaEditor.Session.RecoveryTest do
     enabled? = MingaEditor.Handlers.SessionHandler.restore_enabled?(state)
     request = Recovery.request(state, [swap_dir: nil], opts, false, enabled?)
 
-    resume = %{snapshot: snapshot(false), recovered: [], held_back: [], waiting_elsewhere: 0}
+    resume = %{
+      snapshot: snapshot(false),
+      recovered: [],
+      held_back: [],
+      waiting_elsewhere: 0,
+      waiting_projects: []
+    }
+
     completed = Outcome.completed(request, {:resume, resume})
     assert {restored, %Outcome{value: {:completed, _result}}} = Recovery.apply(state, completed)
     assert restored.session == state.session
@@ -143,9 +157,18 @@ defmodule MingaEditor.Session.RecoveryTest do
     end
 
     test "an editor with nothing open recovers nothing and says how much is waiting", ctx do
-      assert Recovery.run(effect(ctx, :none)) ==
-               {:ok,
-                {:resume, %{snapshot: nil, recovered: [], held_back: [], waiting_elsewhere: 2}}}
+      assert {:ok,
+              {:resume,
+               %{
+                 snapshot: nil,
+                 recovered: [],
+                 held_back: [],
+                 waiting_elsewhere: 2,
+                 waiting_projects: [_ | _] = waiting
+               }}} = Recovery.run(effect(ctx, :none))
+
+      # The home marks each project that has text waiting.
+      assert waiting |> Enum.map(& &1.files) |> Enum.sum() == 2
 
       assert File.exists?(ctx.here.swap)
       assert File.exists?(ctx.there.swap)

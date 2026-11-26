@@ -14,7 +14,8 @@ defmodule MingaAgent.SubagentContext do
           model: String.t() | nil,
           thinking_level: String.t() | nil,
           active_skill_names: [String.t()],
-          project_root: String.t() | nil
+          project_root: String.t() | nil,
+          child?: boolean()
         }
 
   @enforce_keys [:provider_module, :provider_name, :provider_id, :provider_source]
@@ -26,7 +27,8 @@ defmodule MingaAgent.SubagentContext do
     :thinking_level,
     :project_root,
     model: nil,
-    active_skill_names: []
+    active_skill_names: [],
+    child?: false
   ]
 
   @doc "Builds a context from the given attributes."

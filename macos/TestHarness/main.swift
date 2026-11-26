@@ -161,6 +161,13 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return ["type": "gui_completion", "visible": visible, "anchor_row": Int(anchorRow), "anchor_col": Int(anchorCol), "selected_index": Int(selectedIndex), "selected_item_id": selectedItemID, "items": itemArray, "documentation": documentation, "total_count": Int(totalCount), "matched_count": Int(matchedCount), "incomplete": incomplete, "generation": Int(generation)]
 
+    case .guiMenuBar(let items):
+        let decoded = items.map { item -> [String: Any] in
+            ["path": item.path, "label": item.label, "section": item.section, "kind": Int(item.kind),
+             "command": item.command, "platform_key": item.platformKey]
+        }
+        return ["type": "gui_menu_bar", "items": decoded]
+
     case .guiWhichKey(let model):
         let entries = model.entries.map { e -> [String: Any] in
             ["kind": Int(e.kind), "key": e.key, "codepoint": Int(e.codepoint), "modifiers": Int(e.modifiers), "label": e.label,
@@ -227,7 +234,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return result
 
-    case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq, let activationGeneration, let empty, let listKeys, let movementKeys):
+    case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq, let activationGeneration, let empty, let listKeys, let movementKeys, let hints):
         let itemArray = items.map { i -> [String: Any] in
             ["label": i.label, "description": i.description, "icon_color": Int(i.iconColor), "annotation": i.annotation, "flags": Int(i.flags), "match_positions": i.matchPositions.map { Int($0) }, "activation_id": Int(i.activationID), "status": i.status, "status_tone": Int(i.statusTone.rawValue), "group": i.group]
         }
@@ -255,6 +262,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         if let empty { result["empty"] = emptyListJSON(empty) }
         result["list_keys"] = listKeys
+        result["hints"] = hints.map { ["keys": $0.keys, "word": $0.word] }
         return result
 
     case .guiPickerPreview(let visible, let lines):
@@ -264,6 +272,30 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
             }
         }
         return ["type": "gui_picker_preview", "visible": visible, "lines": lineArray]
+
+    case .guiTasksDrawer(let drawer):
+        let hint = { (hint: Wire.TasksDrawer.Hint) -> [String: Any] in ["key": hint.key, "label": hint.label] }
+        return [
+            "type": "gui_tasks_drawer", "visible": drawer.visible, "focused": drawer.focused,
+            "view": Int(drawer.view.rawValue), "view_title": drawer.viewTitle, "view_lines": drawer.viewLines,
+            "view_offset": drawer.viewOffset, "prompt": drawer.prompt,
+            "empty": drawer.empty.map { empty -> [String: Any] in
+                [
+                    "title": empty.title, "why": empty.why, "selected": Int(empty.selected),
+                    "actions": empty.actions.map { ["id": $0.id, "key": $0.key, "label": $0.label] }
+                ]
+            } ?? NSNull(),
+            "name": drawer.name, "title": drawer.title, "note": drawer.note,
+            "counts": drawer.counts.map { ["state": $0.state.rawValue, "count": $0.count] },
+            "hints": drawer.hints.map(hint),
+            "rows": drawer.rows.map { row -> [String: Any] in
+                [
+                    "id": row.id, "depth": Int(row.depth), "last": row.isLastChild, "selected": row.isSelected,
+                    "state": row.state?.rawValue ?? "", "title": row.title, "words": row.words, "age": row.age,
+                    "detail": row.detail, "actions": row.actions.map(hint)
+                ]
+            }
+        ]
 
     case .guiAgentHelp(let visible, let groups):
         return [

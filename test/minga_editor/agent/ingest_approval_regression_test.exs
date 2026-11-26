@@ -93,6 +93,38 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
     assert Session.editor_snapshot(session).pending_approval == nil
   end
 
+  test "answering in the conversation withdraws the task's needs-you alert" do
+    %{session: session} = session_with_ingest_driver()
+    approval = inject_pending_approval(session)
+    registry = :"ingest_approval_events_#{System.unique_integer([:positive])}"
+    start_supervised!({Minga.Events, name: registry})
+    Minga.Events.subscribe(:agent_desktop_notification, registry: registry)
+    alert = <<5::128>>
+
+    state =
+      session
+      |> editor_state_with(approval)
+      |> task_asks(session, approval)
+      |> EditorState.post_agent_task_alert(session, alert)
+
+    state = %{
+      state
+      | extension_surfaces:
+          MingaEditor.State.ExtensionSurfaces.install_events_registry(
+            state.extension_surfaces,
+            registry
+          )
+    }
+
+    resolved = AgentSubStates.approve_tool(state)
+
+    assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
+    assert Tasks.posted_alert(resolved.agent_connection.tasks, session) == nil
+
+    assert_receive {:minga_event, :agent_desktop_notification,
+                    %{kind: :withdrawn, id: ^alert, owner: ^session}}
+  end
+
   describe "answering a task's approval from outside its conversation" do
     test "resolves the task's request and the conversation's copy together" do
       %{session: session} = session_with_ingest_driver()

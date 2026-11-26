@@ -13,10 +13,27 @@ defmodule MingaAgent.Tools.SubagentWorktreeHeavyTest do
   @moduletag :heavy
   @moduletag :tmp_dir
 
-  test "real Git preserves a changed foreground worktree with metadata and auto-approval", %{
-    tmp_dir: dir
-  } do
+  test "real Git preserves a changed foreground worktree with metadata", %{tmp_dir: dir} do
     root = init_git_repo!(dir)
+
+    assert {:ok, result} =
+             Subagent.execute("write",
+               isolation: "worktree",
+               project_root: root,
+               provider: SubagentWorktreeProvider
+             )
+
+    assert result =~ "wrote file"
+    assert [_, worktree_path] = Regex.run(~r/Worktree: (.+)/, result)
+    assert [_, "subagent/" <> _id] = Regex.run(~r/Branch: (.+)/, result)
+    assert File.read!(Path.join(worktree_path, "child.txt")) == "from child\n"
+    refute File.exists?(Path.join(root, "child.txt"))
+    assert worktree_path in worktree_paths(root)
+  end
+
+  test "worktree isolation does not auto-approve a gated native write", %{tmp_dir: dir} do
+    root = init_git_repo!(dir)
+    worktrees_before = worktree_paths(root)
     oauth_path = Path.join(dir, "credentials/oauth.json")
 
     assert :ok =
@@ -58,12 +75,10 @@ defmodule MingaAgent.Tools.SubagentWorktreeHeavyTest do
                ]
              )
 
-    assert result =~ "native wrote"
-    assert [_, worktree_path] = Regex.run(~r/Worktree: (.+)/, result)
-    assert [_, "subagent/" <> _id] = Regex.run(~r/Branch: (.+)/, result)
-    assert File.read!(Path.join(worktree_path, "child.txt")) == "from native\n"
+    assert result == "native wrote"
     refute File.exists?(Path.join(root, "child.txt"))
-    assert worktree_path in worktree_paths(root)
+    assert worktree_paths(root) == worktrees_before
+    assert git_lines(root, ["branch", "--list", "subagent/*"]) == []
   end
 
   test "real Git removes a clean foreground worktree and temporary branch", %{tmp_dir: dir} do

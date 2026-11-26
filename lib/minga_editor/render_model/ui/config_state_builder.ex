@@ -40,4 +40,9 @@ defmodule MingaEditor.RenderModel.UI.ConfigStateBuilder do
       keybindings: bindings
     }
   end
+
+  @doc "Adds the leader keymap the macOS menu bar mirrors (`MingaEditor.RenderModel.UI.LeaderMenuBuilder`)."
+  @spec with_leader_menu(ConfigState.t(), [ConfigState.menu_item()]) :: ConfigState.t()
+  def with_leader_menu(%ConfigState{} = state, items) when is_list(items),
+    do: %{state | leader_menu: items}
 end

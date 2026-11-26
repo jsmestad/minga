@@ -1,0 +1,447 @@
+{
+ "elements": [
+  {
+   "frame": [
+    79,
+    65,
+    1338.5,
+    595
+   ],
+   "label": "storyboard.ex, pane 1",
+   "role": "AXTextArea",
+   "value": "defmodule Storyboard do\n  @moduledoc \"A small file every storyboard scenario starts in.\"\n\n  def greet(name) do\n    \"Hello, \" <> name\n  end\nend\n"
+  }
+ ],
+ "grid": {
+  "cols": 177,
+  "rows": 31
+ },
+ "parts": [
+  {
+   "baseline": 21,
+   "frame": [
+    297,
+    9.5,
+    78,
+    15
+   ],
+   "part": "tabBar.tabLabel",
+   "text": "storyboard.ex"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    40,
+    43.5,
+    4,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "/"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    58,
+    43.5,
+    23,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "tmp"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    95,
+    43.5,
+    102,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga-storyboard"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    211,
+    43.5,
+    72,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "macos-1440"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    297,
+    43.5,
+    88,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga.tasks.list"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    399,
+    43.5,
+    14,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "lib"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    427,
+    43.5,
+    78,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "storyboard.ex"
+  },
+  {
+   "frame": [
+    32,
+    664,
+    1408,
+    240
+   ],
+   "part": "drawer"
+  },
+  {
+   "frame": [
+    32,
+    664,
+    1408,
+    1
+   ],
+   "part": "drawer.divider"
+  },
+  {
+   "frame": [
+    32,
+    665,
+    1408,
+    24
+   ],
+   "part": "drawer.header"
+  },
+  {
+   "baseline": 681.5,
+   "frame": [
+    44,
+    669,
+    78,
+    16
+   ],
+   "part": "drawer.title",
+   "text": "Minga Tasks"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    130,
+    670,
+    18,
+    14
+   ],
+   "part": "drawer.count",
+   "text": "1"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    164,
+    670,
+    18,
+    14
+   ],
+   "part": "drawer.count",
+   "text": "1"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    198,
+    670,
+    18,
+    14
+   ],
+   "part": "drawer.count",
+   "text": "1"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    232,
+    670,
+    18,
+    14
+   ],
+   "part": "drawer.count",
+   "text": "1"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1172,
+    670,
+    54,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "j/k move"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1234,
+    670,
+    38,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "\u21a9 open"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1280,
+    670,
+    58,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "c new task"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1346,
+    670,
+    35,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "x stop"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1389,
+    670,
+    39,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "q close"
+  },
+  {
+   "frame": [
+    44,
+    695,
+    1384,
+    24
+   ],
+   "part": "listRow"
+  },
+  {
+   "baseline": 711,
+   "frame": [
+    72,
+    699.5,
+    156,
+    15
+   ],
+   "part": "listRow.title",
+   "text": "Refactor the picker sources"
+  },
+  {
+   "baseline": 710.5,
+   "frame": [
+    1122,
+    700,
+    178,
+    14
+   ],
+   "part": "listRow.meta",
+   "text": "Waiting \u00b7 rate limited, retry in 40 s"
+  },
+  {
+   "frame": [
+    44,
+    719,
+    1384,
+    24
+   ],
+   "part": "listRow"
+  },
+  {
+   "baseline": 735,
+   "frame": [
+    72,
+    723.5,
+    144,
+    15
+   ],
+   "part": "listRow.title",
+   "text": "Rename the queue buffer"
+  },
+  {
+   "baseline": 734.5,
+   "frame": [
+    1260,
+    724,
+    45,
+    14
+   ],
+   "part": "listRow.meta",
+   "text": "Stopped"
+  },
+  {
+   "frame": [
+    44,
+    743,
+    1384,
+    24
+   ],
+   "part": "listRow"
+  },
+  {
+   "baseline": 759,
+   "frame": [
+    72,
+    747.5,
+    146,
+    15
+   ],
+   "part": "listRow.title",
+   "text": "Run the session test suite"
+  },
+  {
+   "baseline": 758.5,
+   "frame": [
+    1187,
+    748,
+    129,
+    14
+   ],
+   "part": "listRow.meta",
+   "text": "Failed \u00b7 Test run crashed"
+  },
+  {
+   "frame": [
+    44,
+    767,
+    1384,
+    24
+   ],
+   "part": "listRow"
+  },
+  {
+   "baseline": 783,
+   "frame": [
+    72,
+    771.5,
+    206,
+    15
+   ],
+   "part": "listRow.title",
+   "text": "Update the agent docs for the Spine"
+  },
+  {
+   "baseline": 782.5,
+   "frame": [
+    1287,
+    772,
+    28,
+    14
+   ],
+   "part": "listRow.meta",
+   "text": "Done"
+  },
+  {
+   "frame": [
+    0,
+    904,
+    1440,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    6,
+    904,
+    61,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "mode: NORMAL"
+  },
+  {
+   "frame": [
+    75,
+    904,
+    73,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filename: storyboard.ex"
+  },
+  {
+   "frame": [
+    1386,
+    904,
+    26,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filetype: Elixir"
+  },
+  {
+   "frame": [
+    1420,
+    904,
+    14,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "position: 1:1"
+  },
+  {
+   "frame": [
+    6,
+    907,
+    61,
+    18
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "baseline": 919.5,
+   "frame": [
+    12,
+    909,
+    49,
+    14
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  }
+ ],
+ "scenario": "minga.tasks.list",
+ "size": "1440",
+ "theme": "catppuccin_frappe",
+ "window": {
+  "height": 928,
+  "width": 1440
+ }
+}

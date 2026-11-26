@@ -51,6 +51,7 @@ defmodule MingaEditor.Commands.Agent do
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Workflow, as: ShellWorkflow
+  alias MingaEditor.TabWorkflow
   alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
   alias MingaEditor.Input.AgentPanel
 
@@ -163,7 +164,7 @@ defmodule MingaEditor.Commands.Agent do
 
     case find_local_agent_tab(state) do
       %Tab{id: agent_id} ->
-        state = MingaEditor.TabWorkflow.switch(state, agent_id)
+        state = TabWorkflow.switch(state, agent_id)
 
         case Runtime.active_session(state.shell_runtime) do
           nil ->
@@ -361,7 +362,7 @@ defmodule MingaEditor.Commands.Agent do
         tab_bar = state.shell_runtime.state.tab_bar || TabBar.new(Tab.new_file(1, "File"))
 
         {tb, new_tab} =
-          MingaEditor.TabWorkflow.insert_agent(
+          TabWorkflow.insert_agent(
             tab_bar,
             "Agent",
             state.frontend.terminal_viewport,
@@ -459,13 +460,13 @@ defmodule MingaEditor.Commands.Agent do
 
     case {TabBar.get(tab_bar, agent_tab_id), Runtime.active_tab(state.shell_runtime)} do
       {%Tab{kind: :agent}, %Tab{id: ^agent_tab_id}} ->
-        MingaEditor.TabWorkflow.switch(state, agent_tab_id)
+        TabWorkflow.switch(state, agent_tab_id)
 
       {%Tab{kind: :agent}, _current} ->
         return_target = build_return_target(state)
 
         state
-        |> MingaEditor.TabWorkflow.switch(agent_tab_id)
+        |> TabWorkflow.switch(agent_tab_id)
         |> activate_agent_view(return_target)
 
       {_missing, _current} ->
@@ -483,13 +484,16 @@ defmodule MingaEditor.Commands.Agent do
       {:exact, id} ->
         state
         |> mark_agent_view_inactive()
-        |> MingaEditor.TabWorkflow.switch(id)
+        |> TabWorkflow.switch(id)
         |> restore_return_keymap_scope(return_target)
 
       {:fallback, id} ->
         state
         |> mark_agent_view_inactive()
-        |> MingaEditor.TabWorkflow.switch(id)
+        |> TabWorkflow.switch(id)
+
+      :home ->
+        TabWorkflow.leave_to_home(state)
 
       nil ->
         restore_return_target_without_tab(state, return_target)
@@ -497,7 +501,10 @@ defmodule MingaEditor.Commands.Agent do
   end
 
   @spec target_file_tab_id(TabBar.t() | nil, UIState.View.return_target() | nil) ::
-          {:exact, pos_integer()} | {:fallback, pos_integer()} | nil
+          {:exact, pos_integer()} | {:fallback, pos_integer()} | :home | nil
+  # Opened from the project home (no tab active): leaving goes back to the home, even with file tabs behind it.
+  defp target_file_tab_id(%TabBar{}, %{active_tab_id: nil}), do: :home
+
   defp target_file_tab_id(%TabBar{} = tb, %{active_tab_id: id}) when is_integer(id) do
     case TabBar.get(tb, id) do
       %Tab{kind: :file, id: file_id} -> {:exact, file_id}
@@ -529,9 +536,10 @@ defmodule MingaEditor.Commands.Agent do
   end
 
   @spec restore_return_target_without_tab(state(), UIState.View.return_target() | nil) :: state()
-  defp restore_return_target_without_tab(state, nil) do
-    NoticeWorkflow.publish(state, "No file tabs in this workspace")
-  end
+  # A task started from the project home has no file to return to.
+  # Leaving it returns to the home, where the task keeps running and is listed.
+  defp restore_return_target_without_tab(state, nil),
+    do: TabWorkflow.leave_to_home(state)
 
   defp restore_return_target_without_tab(state, return_target) do
     state
@@ -881,7 +889,7 @@ defmodule MingaEditor.Commands.Agent do
 
   def settle_turn_request(
         state,
-        %TurnRequest{work: {:send, send, content, raw}} = request,
+        %TurnRequest{work: {:send, send, _content, raw}} = request,
         answer
       ) do
     {outcome, notice} = composer_send_outcome(send, answer)
@@ -889,7 +897,6 @@ defmodule MingaEditor.Commands.Agent do
     state
     |> show_started_turn(request.session, answer)
     |> DraftWorkflow.send_answered(request.workspace, request.token, raw, outcome)
-    |> name_task(request.session, content, {send, answer})
     |> publish_send_notice(notice)
   end
 
@@ -941,22 +948,6 @@ defmodule MingaEditor.Commands.Agent do
       _none -> nil
     end
   end
-
-  # A task is named by the first goal it accepts.
-  @spec name_task(
-          state(),
-          pid(),
-          String.t() | [ReqLLM.Message.ContentPart.t()],
-          {Session.composer_send(), TurnRequest.answer()}
-        ) :: state()
-  defp name_task(state, session, prompt, {:prompt, :ok}),
-    do: MingaEditor.Agent.TaskWorkflow.prompted(state, session, prompt)
-
-  # A send that started a turn names the task, whichever way the composer sent it.
-  defp name_task(state, session, prompt, {_send, {:sent, _queue_target}}),
-    do: MingaEditor.Agent.TaskWorkflow.prompted(state, session, prompt)
-
-  defp name_task(state, _session, _prompt, _other), do: state
 
   @spec publish_send_notice(state(), String.t() | nil) :: state()
   defp publish_send_notice(state, nil), do: state
@@ -1745,15 +1736,32 @@ defmodule MingaEditor.Commands.Agent do
   @spec new_ready_session(state()) :: state()
   defp new_ready_session(state) do
     thinking_level = state.workspace.agent_ui.panel.thinking_level
+    from_home = home_return_target(state)
 
     state
     |> measured_agent_tab_switch()
     |> reset_agent_state_for_new_session(thinking_level)
+    |> remember_home(from_home)
     |> AgentSession.start_agent_session(recover_interrupted_work?: false)
     # The person took the step the read-only card offers, by key or by click.
     |> MingaEditor.Handlers.Notifications.dismiss_conversation_read_only()
     |> scope_focus_input()
   end
+
+  # A task started from the project home (no tab active) returns there when it is left, even with file tabs behind it.
+  @spec home_return_target(state()) :: UIState.View.return_target() | nil
+  defp home_return_target(state) do
+    case active_tab_id(state) do
+      nil -> build_return_target(state)
+      _tab -> nil
+    end
+  end
+
+  @spec remember_home(state(), UIState.View.return_target() | nil) :: state()
+  defp remember_home(state, nil), do: state
+
+  defp remember_home(state, return_target),
+    do: update_agent_ui(state, &UIState.set_return_target(&1, return_target))
 
   @spec reset_agent_state_for_new_session(state(), String.t() | nil) :: state()
   defp reset_agent_state_for_new_session(state, thinking_level) do
@@ -1778,7 +1786,7 @@ defmodule MingaEditor.Commands.Agent do
   @spec measured_tab_switch(state(), Tab.id()) :: state()
   defp measured_tab_switch(state, tab_id) do
     Minga.Telemetry.span([:minga, :agent, :tab_switch], %{}, fn ->
-      MingaEditor.TabWorkflow.switch(state, tab_id)
+      TabWorkflow.switch(state, tab_id)
     end)
   end
 
@@ -1792,7 +1800,7 @@ defmodule MingaEditor.Commands.Agent do
   @spec create_active_agent_tab(state()) :: state()
   defp create_active_agent_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     {tb, tab} =
-      MingaEditor.TabWorkflow.insert_agent(
+      TabWorkflow.insert_agent(
         tb,
         "Agent",
         state.frontend.terminal_viewport,
@@ -1810,7 +1818,7 @@ defmodule MingaEditor.Commands.Agent do
       | shell_runtime:
           MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
     }
-    |> MingaEditor.TabWorkflow.switch(tab.id)
+    |> TabWorkflow.switch(tab.id)
   end
 
   defp create_active_agent_tab(state), do: state

@@ -110,17 +110,17 @@
    "frame": [
     75,
     62,
-    121,
-    32
+    175,
+    16
    ],
    "part": "emptyState.title",
    "text": "Nothing to commit on main."
   },
   {
-   "baseline": 109.5,
+   "baseline": 93.5,
    "frame": [
     56,
-    98,
+    82,
     109,
     15
    ],
@@ -128,10 +128,10 @@
    "text": "2 commits to push."
   },
   {
-   "baseline": 149,
+   "baseline": 133,
    "frame": [
     75,
-    137.5,
+    121.5,
     86,
     15
    ],
@@ -139,10 +139,10 @@
    "text": "Push to remote"
   },
   {
-   "baseline": 148.5,
+   "baseline": 132.5,
    "frame": [
     56,
-    138,
+    122,
     19,
     14
    ],
@@ -150,10 +150,10 @@
    "text": "P"
   },
   {
-   "baseline": 173,
+   "baseline": 157,
    "frame": [
     75,
-    161.5,
+    145.5,
     94,
     15
    ],
@@ -161,10 +161,10 @@
    "text": "Pull from remote"
   },
   {
-   "baseline": 172.5,
+   "baseline": 156.5,
    "frame": [
     56,
-    162,
+    146,
     19,
     14
    ],
@@ -172,10 +172,10 @@
    "text": "l"
   },
   {
-   "baseline": 197,
+   "baseline": 181,
    "frame": [
     75,
-    185.5,
+    169.5,
     105,
     15
    ],
@@ -183,10 +183,10 @@
    "text": "Fetch from remote"
   },
   {
-   "baseline": 196.5,
+   "baseline": 180.5,
    "frame": [
     56,
-    186,
+    170,
     19,
     14
    ],

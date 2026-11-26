@@ -58,10 +58,117 @@ defmodule MingaAgent.Subagent.Worktree do
     end
   end
 
+  @typedoc "A single file change in a worktree: action and relative path."
+  @type change :: {:added | :modified | :deleted, String.t()}
+
   @doc "Formats the location and branch metadata for a preserved worktree."
   @spec metadata(t()) :: String.t()
   def metadata(%__MODULE__{} = worktree) do
     "\n\nWorktree: #{worktree.path}\nBranch: #{worktree.branch}"
+  end
+
+  @typedoc "A change prepared for integration: path, content at the base SHA, and the child's content."
+  @type integration_entry :: {String.t(), binary() | :missing, binary() | :deleted}
+
+  @doc """
+  Collects structured file changes from a worktree relative to its base SHA.
+
+  Compares the base SHA with the working tree, so committed, staged, unstaged and untracked (but not ignored) changes all count, each path once.
+  """
+  @spec collect_changes(t()) :: {:ok, [change()]} | {:error, String.t()}
+  def collect_changes(%__MODULE__{} = worktree) do
+    collect(&output(worktree, worktree.path, &1), worktree.base_sha)
+  end
+
+  @doc "Collects changes from a worktree path and base SHA using the system backend."
+  @spec collect_changes_from(String.t(), String.t()) :: {:ok, [change()]} | {:error, String.t()}
+  def collect_changes_from(worktree_path, base_sha)
+      when is_binary(worktree_path) and is_binary(base_sha) do
+    collect(&System.stdout(worktree_path, &1), base_sha)
+  end
+
+  @doc "Reads the base and child content for each collected change in the calling process."
+  @spec integration_entries(String.t(), String.t(), [change()]) ::
+          {:ok, [integration_entry()]} | {:error, {String.t(), term()}}
+  def integration_entries(worktree_path, base_sha, changes)
+      when is_binary(worktree_path) and is_binary(base_sha) and is_list(changes) do
+    with {:ok, reversed} <-
+           Enum.reduce_while(changes, {:ok, []}, &add_entry(worktree_path, base_sha, &1, &2)) do
+      {:ok, Enum.reverse(reversed)}
+    end
+  end
+
+  @doc "Reads the content of a changed file from the worktree."
+  @spec read_file(t(), String.t()) :: {:ok, binary()} | {:error, String.t()}
+  def read_file(%__MODULE__{path: wt_path}, relative_path) do
+    full_path = Path.join(wt_path, relative_path)
+
+    case File.read(full_path) do
+      {:ok, content} -> {:ok, content}
+      {:error, reason} -> {:error, "Failed to read #{relative_path}: #{inspect(reason)}"}
+    end
+  end
+
+  @doc "Reads the base version of a file from the worktree's base SHA."
+  @spec read_base_file(t(), String.t()) :: {:ok, binary()} | {:error, String.t()}
+  def read_base_file(%__MODULE__{} = worktree, relative_path) do
+    case output(worktree, worktree.path, ["show", "#{worktree.base_sha}:#{relative_path}"]) do
+      {:ok, content} -> {:ok, content}
+      {:error, _reason} -> {:error, "File #{relative_path} not in base revision"}
+    end
+  end
+
+  @spec collect(([String.t()] -> {:ok, String.t()} | {:error, String.t()}), String.t()) ::
+          {:ok, [change()]} | {:error, String.t()}
+  defp collect(git, base_sha) do
+    with {:ok, tracked} <- git.(["diff", "--name-status", "--no-renames", "-z", base_sha]),
+         {:ok, untracked} <- git.(["ls-files", "--others", "--exclude-standard", "-z"]) do
+      {:ok,
+       parse_name_status(split_nul(tracked)) ++ Enum.map(split_nul(untracked), &{:added, &1})}
+    end
+  end
+
+  @spec split_nul(String.t()) :: [String.t()]
+  defp split_nul(output), do: String.split(output, <<0>>, trim: true)
+
+  # `-z` output alternates status and path fields; renames are disabled, so every entry has one path.
+  @spec parse_name_status([String.t()]) :: [change()]
+  defp parse_name_status([status, path | rest]),
+    do: [{status_action(status), path} | parse_name_status(rest)]
+
+  defp parse_name_status(_fields), do: []
+
+  @spec status_action(String.t()) :: :added | :modified | :deleted
+  defp status_action("A"), do: :added
+  defp status_action("D"), do: :deleted
+  defp status_action(_status), do: :modified
+
+  @spec add_entry(String.t(), String.t(), change(), {:ok, [integration_entry()]}) ::
+          {:cont, {:ok, [integration_entry()]}} | {:halt, {:error, {String.t(), term()}}}
+  defp add_entry(worktree_path, base_sha, {action, path}, {:ok, entries}) do
+    case integration_entry(worktree_path, base_sha, action, path) do
+      {:ok, entry} -> {:cont, {:ok, [entry | entries]}}
+      {:error, reason} -> {:halt, {:error, {path, reason}}}
+    end
+  end
+
+  @spec integration_entry(String.t(), String.t(), :added | :modified | :deleted, String.t()) ::
+          {:ok, integration_entry()} | {:error, term()}
+  defp integration_entry(worktree_path, _base_sha, :added, path) do
+    with {:ok, child} <- File.read(Path.join(worktree_path, path)),
+         do: {:ok, {path, :missing, child}}
+  end
+
+  defp integration_entry(worktree_path, base_sha, :modified, path) do
+    with {:ok, ancestor} <- System.stdout(worktree_path, ["show", "#{base_sha}:#{path}"]),
+         {:ok, child} <- File.read(Path.join(worktree_path, path)) do
+      {:ok, {path, ancestor, child}}
+    end
+  end
+
+  defp integration_entry(worktree_path, base_sha, :deleted, path) do
+    with {:ok, ancestor} <- System.stdout(worktree_path, ["show", "#{base_sha}:#{path}"]),
+         do: {:ok, {path, ancestor, :deleted}}
   end
 
   @spec git_root(String.t(), module(), keyword()) :: {:ok, String.t()} | {:error, String.t()}

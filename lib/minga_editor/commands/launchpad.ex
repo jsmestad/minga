@@ -1,10 +1,8 @@
 defmodule MingaEditor.Commands.Launchpad do
   @moduledoc """
-  Activation semantics for the zero-buffers launchpad (#2689).
+  Commands and activation semantics for the project home, `*home*` (#4056).
 
-  Both frontends funnel here: the TUI via `MingaEditor.Input.EmptyState`
-  (Enter/jump keys) and the GUI via the `empty_state_activate` gui_action
-  (clicks), so activation behavior cannot drift between them.
+  Both frontends funnel here: keys via `MingaEditor.Input.EmptyState` (`↩`, `1` to `9`) and clicks via the `empty_state_activate` gui_action, so activation behaviour cannot drift between them. `SPC p h` shows the home from anywhere, and `SPC q n` starts fresh instead of the restored session.
   """
 
   use MingaEditor.Commands.Provider
@@ -23,6 +21,7 @@ defmodule MingaEditor.Commands.Launchpad do
   @type state :: EditorState.t()
 
   command(:resume_session, "Resume the previous session", requires_buffer: false)
+  command(:project_home, "Project home", requires_buffer: false)
 
   command(:session_start_fresh, "Start fresh instead of the restored session",
     requires_buffer: false
@@ -32,7 +31,8 @@ defmodule MingaEditor.Commands.Launchpad do
     requires_buffer: false
   )
 
-  @spec execute(state(), :resume_session | :session_start_fresh | :unsaved_text) :: state()
+  @spec execute(state(), :resume_session | :project_home | :session_start_fresh | :unsaved_text) ::
+          state()
   def execute(state, :unsaved_text) do
     MingaEditor.PickerUI.open(state, MingaEditor.UI.Picker.UnsavedTextSource, %{
       swap_opts: MingaEditor.State.Session.swap_opts(state.session)
@@ -42,6 +42,9 @@ defmodule MingaEditor.Commands.Launchpad do
   def execute(state, :resume_session) do
     SessionRestore.restore_session(state)
   end
+
+  # The active tab steps aside with its own snapshot (splits and conversations included); opening it again restores it.
+  def execute(state, :project_home), do: MingaEditor.TabWorkflow.leave_to_home(state)
 
   # Closes every file without unsaved edits, one at a time, after dropping the restored splits.
   # Unsaved files stay open, and Minga's unreviewed changes live in the review, so nothing is lost.
@@ -56,7 +59,9 @@ defmodule MingaEditor.Commands.Launchpad do
       |> Enum.flat_map(&file_buffer/1)
       |> Enum.count(fn {_pid, _path, dirty?} -> dirty? end)
 
-    kept_notice(state, unsaved)
+    state
+    |> MingaEditor.TabWorkflow.leave_to_home()
+    |> kept_notice(unsaved)
   end
 
   @doc """
@@ -164,21 +169,68 @@ defmodule MingaEditor.Commands.Launchpad do
   defp kept_notice(state, n), do: NoticeWorkflow.publish(state, "Kept #{n} unsaved files open")
 
   @spec do_activate(state(), Launchpad.t(), String.t()) :: state()
-  defp do_activate(state, _lp, "resume") do
-    execute(state, :resume_session)
-  end
-
-  defp do_activate(state, _lp, "action-find-file"), do: Commands.execute(state, :find_file)
-  defp do_activate(state, _lp, "action-file-tree"), do: Commands.execute(state, :toggle_file_tree)
-  defp do_activate(state, _lp, "action-palette"), do: Commands.execute(state, :command_palette)
-  defp do_activate(state, _lp, "action-tutor"), do: Commands.execute(state, :tutor)
-
-  defp do_activate(state, lp, "recent-" <> _ = item_id) do
-    case Launchpad.recent_path(lp, item_id) do
+  defp do_activate(state, home, "recent-" <> _ = item_id) do
+    case Launchpad.recent_path(home, item_id) do
       nil -> state
       path -> Commands.execute(state, {:execute_ex_command, {:edit, path}})
     end
   end
 
-  defp do_activate(state, _lp, _unknown), do: state
+  defp do_activate(state, home, "project-" <> _ = item_id) do
+    case Launchpad.project_root(home, item_id) do
+      nil -> state
+      root -> open_project(state, root)
+    end
+  end
+
+  defp do_activate(state, _home, "task-" <> _ = item_id) do
+    case Launchpad.task_workspace(item_id) do
+      nil -> state
+      workspace_id -> Commands.execute(state, {:workspace_goto, workspace_id})
+    end
+  end
+
+  defp do_activate(state, home, "action-" <> _ = item_id) do
+    case Launchpad.action_command(home, item_id) do
+      nil -> state
+      command -> Commands.execute(state, command)
+    end
+  end
+
+  defp do_activate(state, _home, _unknown), do: state
+
+  # Opening a recent project makes it the root, then picks up its saved session; without one its home shows.
+  @spec open_project(state(), String.t()) :: state()
+  defp open_project(state, root) do
+    case Minga.Project.Root.directory(root) do
+      {:ok, dir} -> activate_project(state, dir)
+      {:error, _reason} -> NoticeWorkflow.publish(state, "Cannot open #{root}")
+    end
+  end
+
+  @spec activate_project(state(), Minga.Project.Root.t()) :: state()
+  defp activate_project(state, dir) do
+    case Minga.Project.activate(Minga.Project, dir) do
+      {:ok, %{root: installed}} ->
+        state = MingaEditor.FileTree.Freshness.update_project_root(state, installed.path)
+        before = BufferRegistry.buffer_inventory(state)
+
+        state
+        |> SessionRestore.restore_session()
+        |> show_home_unless_restored(before)
+
+      {:error, reason} ->
+        NoticeWorkflow.publish(state, "Cannot open #{dir.path}: #{inspect(reason)}")
+    end
+  catch
+    :exit, _ -> NoticeWorkflow.publish(state, "Cannot open #{dir.path}")
+  end
+
+  # Without a saved session the new project's own home replaces the old one.
+  @spec show_home_unless_restored(state(), [pid()]) :: state()
+  defp show_home_unless_restored(state, before) do
+    if BufferRegistry.buffer_inventory(state) == before,
+      do: MingaEditor.TabWorkflow.leave_to_home(state),
+      else: state
+  end
 end

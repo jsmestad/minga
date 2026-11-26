@@ -92,9 +92,11 @@ defmodule Minga.Core.UnicodeTest do
       end
     end
 
-    # String.graphemes/1 can raise on text that is not valid UTF-8 (a ZWJ sequence before a stray byte), so the
-    # boundaries there are the code point starts, and valid lines between line feeds keep their cluster boundaries.
-    property "on text that is not valid UTF-8, never raises and cuts only at code point starts" do
+    test "a stray continuation byte does not erase the anchor after a line feed" do
+      assert Unicode.cluster_boundaries_between(<<10, 0x80, 0x81>>, 1, 3) == [1, 3]
+    end
+
+    property "invalid UTF-8 boundaries keep anchors and do not cut before other continuation bytes" do
       check all(
               text <- text_gen([<<0xAA>>, <<0xE8, 0xAA>>, <<0xFF>>]),
               at <- StreamData.integer(0..100_000),
@@ -103,7 +105,8 @@ defmodule Minga.Core.UnicodeTest do
         from = rem(at, byte_size(text) + 1)
 
         for offset <- Unicode.cluster_boundaries_between(text, from, byte_size(text)) do
-          assert offset == byte_size(text) or :binary.at(text, offset) not in 0x80..0xBF
+          assert offset == byte_size(text) or :binary.at(text, offset) not in 0x80..0xBF or
+                   Unicode.cluster_anchor(text, offset) == offset
         end
       end
     end

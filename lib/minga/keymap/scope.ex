@@ -142,9 +142,9 @@ defmodule Minga.Keymap.Scope do
   @callback included_groups() :: [atom() | {atom(), keyword()}]
 
   @doc """
-  Returns whether this scope belongs to a modal (a picker or a prompt) rather than a surface.
+  Returns whether this scope's keys resolve only inside its own input handler (a picker, a prompt or the tasks drawer) rather than as a surface's workspace scope.
 
-  A modal scope's keys resolve inside its modal's input handler. It is never the workspace scope, so `surface_scopes/0` leaves it out. Optional; a scope without it is a surface scope.
+  Such a scope is never the workspace scope, so `surface_scopes/0` leaves it out. Optional; a scope without it is a surface scope.
   """
   @callback modal?() :: boolean()
 
@@ -249,6 +249,25 @@ defmodule Minga.Keymap.Scope do
     case module_for(scope_name) do
       nil -> :not_found
       mod -> resolve_through_layers(mod, scope_name, vim_state, key, context)
+    end
+  end
+
+  @doc """
+  Returns the keys a scope answers in a vim state as one trie: user overrides over the scope's own keys over its shared keys.
+
+  It is built from the layers `resolve_key/4` walks, so each key in it does what pressing that key does. Which-key lists a prompt or picker's keys from it.
+  """
+  @spec keymap_node(scope_name(), vim_state(), context()) :: Bindings.node_t()
+  def keymap_node(scope_name, vim_state, context \\ []) do
+    case module_for(scope_name) do
+      nil ->
+        Bindings.new()
+
+      mod ->
+        mod
+        |> layers(scope_name, vim_state, context)
+        |> Enum.reverse()
+        |> Enum.reduce(&Bindings.overlay/2)
     end
   end
 

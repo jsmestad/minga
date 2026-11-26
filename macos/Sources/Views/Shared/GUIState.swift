@@ -46,7 +46,7 @@ public final class GUIState {
         agentChatState: agentChatState, bottomPanelState: bottomPanelState,
         minibufferState: minibufferState, agentContextBarState: agentContextBarState,
         editTimelineState: editTimelineState, extensionPanelState: extensionPanelState,
-        searchState: searchState
+        searchState: searchState, tasksDrawerState: tasksDrawerState
     )
 
     /// Stable editor-scoped input created and owned by this GUI state.
@@ -112,6 +112,7 @@ public final class GUIState {
         floatPopupState.hide()
         agentContextBarState.hide()
         editTimelineState.update(visible: false, viewingIndex: 0xFFFF, wireEntries: [], wireFiles: [], generation: 0)
+        tasksDrawerState.hide()
         extensionOverlayState.update([])
         extensionPanelState.update([])
         searchState.reset()
@@ -148,6 +149,9 @@ public final class GUIState {
 
     /// Which-key popup state.
     public let whichKeyState = WhichKeyState()
+
+    /// The leader keymap the macOS menu bar mirrors.
+    public let menuBarState = MenuBarState()
 
     /// Read-only keyboard owner and frontend-local text lease mirror.
     public let focusOwnerState = FocusOwnerState()
@@ -191,6 +195,9 @@ public final class GUIState {
 
     /// Edit timeline scrubber state.
     public let editTimelineState = EditTimelineState()
+
+    /// The tasks drawer (`*minga-tasks*`, gui_tasks_drawer 0xAC).
+    public let tasksDrawerState = TasksDrawerState()
 
     /// Extension overlay state (0x9C).
     public let extensionOverlayState = ExtensionOverlayState()
@@ -250,6 +257,7 @@ public final class ShellHostInput {
     public let editTimelineState: EditTimelineState
     public let extensionPanelState: ExtensionPanelState
     public let searchState: SearchState
+    public let tasksDrawerState: TasksDrawerState
 
     public var currentTheme: ThemeColors { theme.current }
 
@@ -263,7 +271,7 @@ public final class ShellHostInput {
         agentChatState: AgentChatState, bottomPanelState: BottomPanelState,
         minibufferState: MinibufferState, agentContextBarState: AgentContextBarState,
         editTimelineState: EditTimelineState, extensionPanelState: ExtensionPanelState,
-        searchState: SearchState
+        searchState: SearchState, tasksDrawerState: TasksDrawerState
     ) {
         self.theme = theme
         self.tabBarState = tabBarState
@@ -283,6 +291,7 @@ public final class ShellHostInput {
         self.editTimelineState = editTimelineState
         self.extensionPanelState = extensionPanelState
         self.searchState = searchState
+        self.tasksDrawerState = tasksDrawerState
     }
 }
 

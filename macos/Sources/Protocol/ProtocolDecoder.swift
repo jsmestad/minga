@@ -45,15 +45,11 @@ struct NativeFileDialogRequest: Sendable, Equatable {
 
 // MARK: - Render command types
 
+/// The BEAM's "a task needs you" alert, or its withdrawal, by the alert's opaque identity.
+/// The BEAM decides when to alert: only when a task starts needing you while Minga is in the background.
 enum AgentDesktopNotification: Sendable, Equatable {
-    case approval(UUID)
-    case outcome(Outcome, session: UUID, debounceMs: UInt32)
-    case approvalCleared(UUID)
-
-    enum Outcome: Sendable, Hashable {
-        case complete
-        case failed
-    }
+    case needsYou(UUID)
+    case withdrawn(UUID)
 }
 
 /// A decoded render command from the BEAM.
@@ -104,11 +100,12 @@ enum RenderCommand: Sendable {
     case guiWhichKey(Wire.WhichKey)
     case guiBreadcrumb(segments: [String])
     case guiStatusBar(StatusBarUpdate)
-    case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String, loadStatus: Wire.PickerLoadStatus, queryGeneration: UInt32, acknowledgedQueryEditSeq: UInt32, activationGeneration: UInt32, empty: Wire.EmptyList? = nil, listKeys: Bool = false, movementKeys: [Wire.PickerMovementKey] = [])
+    case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String, loadStatus: Wire.PickerLoadStatus, queryGeneration: UInt32, acknowledgedQueryEditSeq: UInt32, activationGeneration: UInt32, empty: Wire.EmptyList? = nil, listKeys: Bool = false, movementKeys: [Wire.PickerMovementKey] = [], hints: [Wire.KeyHint] = [])
     case guiPickerSelection(generation: UInt32, selectedItemID: UInt32, selectedActionID: UInt32)
     case guiPickerPreview(visible: Bool, lines: [Wire.PickerPreviewLine])
     case guiAgentChat(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: EditorMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil, lifecycle: AgentChatLifecycle = .conversation)
     case guiAgentHelp(visible: Bool, groups: [Wire.HelpGroup])
+    case guiTasksDrawer(Wire.TasksDrawer)
     /// Resident agent-chat transcript stream (0x86, #2654). `mode` is 0=full_replace, 1=append.
     /// `truncated` marks older messages sitting outside the resident byte-cap window. On append,
     /// `trimFront` messages are first evicted from the store front, then over the remainder
@@ -144,6 +141,7 @@ enum RenderCommand: Sendable {
     case guiWorkspaces(version: UInt8, activeWorkspaceId: UInt16, mode: WorkspaceViewMode, flags: WorkspaceFlags, workspaces: [Wire.WorkspaceEntry], visibleTabs: [Wire.WorkspaceTabEntry])
     case guiAgentContext(visible: Bool, task: String, dispatchTimestamp: Date, status: CardStatus, canApprove: Bool, progress: Wire.AgentProgress, todos: [Wire.AgentTodo])
     case guiConfigState(Wire.ConfigState)
+    case guiMenuBar([Wire.MenuBarItem])
     case guiNotifications([Wire.EditorNotification])
     case guiEditTimeline(visible: Bool, viewingIndex: UInt16, entries: [Wire.TimelineEntry], files: [Wire.TimelineFile], generation: UInt32)
     case guiExtensionOverlay([Wire.ExtensionOverlayEntry])
@@ -151,11 +149,11 @@ enum RenderCommand: Sendable {
     case guiExtensionRuntime(FrontendExtensionRuntimeMessage)
     case guiSearchState(active: Bool, matchCount: UInt32, currentIndex: UInt32, flags: UInt8, query: String, sessionID: UInt32, acknowledgedEditSeq: UInt32, status: UInt8)
     case guiSidebars(version: UInt8, activeId: String, sidebars: [Wire.SidebarMetadata])
-    /// gui_empty_state (0xA5): the launchpad shown when zero buffers are open.
-    /// `visible` false means the launchpad is hidden (payload is a single byte);
-    /// `crashed` marks an unclean previous shutdown. Static, data-driven sections
-    /// (session/recent/start/footer) carry semantic rows the frontend lays out.
-    case guiEmptyState(visible: Bool, crashed: Bool, version: String, focusedId: String, sections: [Wire.EmptyStateSection])
+    /// gui_empty_state (0xA5, payload version 2): the project home, shown while no tab is active.
+    /// `visible` false means the home is hidden (payload is a single byte).
+    /// The header names the project, path, repository status and a note; the sections (recent files or recent projects,
+    /// Minga's tasks, next actions) carry semantic rows the frontend lays out.
+    case guiEmptyState(visible: Bool, header: Wire.EmptyStateHeader, focusedId: String, sections: [Wire.EmptyStateSection])
 }
 
 extension RenderCommand {
@@ -556,20 +554,17 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         )
 
     case .agentDesktopNotification:
-        guard data.endIndex >= rest + 21 else { throw ProtocolDecodeError.malformed }
+        guard data.endIndex >= rest + 17 else { throw ProtocolDecodeError.malformed }
         let id = data.withUnsafeBytes {
             UUID(uuid: $0.loadUnaligned(fromByteOffset: rest + 1 - data.startIndex, as: uuid_t.self))
         }
-        let debounceMs = try readU32(data, rest + 17)
         let notification: AgentDesktopNotification
         switch data[rest] {
-        case 1: notification = .approval(id)
-        case 2: notification = .outcome(.complete, session: id, debounceMs: debounceMs)
-        case 3: notification = .outcome(.failed, session: id, debounceMs: debounceMs)
-        case 4: notification = .approvalCleared(id)
+        case 1: notification = .needsYou(id)
+        case 2: notification = .withdrawn(id)
         default: throw ProtocolDecodeError.malformed
         }
-        return (.agentDesktopNotification(notification), 22)
+        return (.agentDesktopNotification(notification), 18)
 
     case .setCursorShape:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
@@ -642,6 +637,31 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let state = try decodeConfigState(data: data, start: payloadStart, end: payloadStart + payloadLen)
         return (.guiConfigState(state), 1 + 2 + payloadLen)
 
+    case .guiMenuBar:
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let payloadLen = Int(try readU16(data, rest))
+        let payloadStart = rest + 2
+        let end = payloadStart + payloadLen
+        guard data.count >= end, payloadLen >= 2 else { throw ProtocolDecodeError.malformed }
+        let count = Int(try readU16(data, payloadStart))
+        try FrameDecodeAccounting.reserve(.arrayEntries, count)
+        var items: [Wire.MenuBarItem] = []
+        items.reserveCapacity(count)
+        var pos = payloadStart + 2
+        do {
+            for _ in 0..<count {
+                let (item, next) = try GeneratedProtocol.decodeMenuBarItem(data, pos, end)
+                items.append(Wire.MenuBarItem(path: item.path, label: item.label, section: item.section, kind: item.kind,
+                                              command: item.command, platformKey: item.platformKey))
+                pos = next
+            }
+        } catch let error as FrameResourceError {
+            throw error
+        } catch {
+            throw ProtocolDecodeError.malformed
+        }
+        return (.guiMenuBar(items), 1 + 2 + payloadLen)
+
     case .guiNotifications:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let payloadLen = Int(try readU16(data, rest))
@@ -651,11 +671,12 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         return (.guiNotifications(notifications), 1 + 2 + payloadLen)
 
     case .guiEmptyState:
-        // len16 framed. Payload: visible(1). When visible: flags(1, bit0=crashed),
-        // version:string8, focused_id:string8, section_count(1), then per section:
-        // section_id(1), title:string8, item_count(1), then per item:
-        // kind(1), id:string8, label:string16, detail:string16, jump_key:string8,
-        // chord:string8, icon:string8, icon_color(u32 0xRRGGBB).
+        // len16 framed project home (#4056). Payload: version(1), 0 meaning hidden. When visible
+        // (version 2): title, path, status, note (string16 each), focused_id:string8,
+        // section_count(1), then per section: section_id(1), title:string8, empty:string16,
+        // item_count(1), then per item: kind(1), id:string8, label:string16, detail:string16,
+        // meta:string16, jump_key:string8, chord:string8, icon:string8, icon_color(u32 0xRRGGBB),
+        // state:string8.
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let payloadLen = Int(try readU16(data, rest))
         let payloadStart = rest + 2
@@ -665,13 +686,14 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let visible = data[pos] != 0
         pos += 1
         guard visible else {
-            return (.guiEmptyState(visible: false, crashed: false, version: "", focusedId: "", sections: []), 1 + 2 + payloadLen)
+            return (.guiEmptyState(visible: false, header: Wire.EmptyStateHeader(), focusedId: "", sections: []), 1 + 2 + payloadLen)
         }
-        guard pos + 1 <= payloadEnd else { throw ProtocolDecodeError.malformed }
-        let esFlags = data[pos]
-        pos += 1
-        let esCrashed = esFlags & 0x01 != 0
-        let esVersion = try readString8(data: data, pos: &pos, end: payloadEnd)
+        let header = Wire.EmptyStateHeader(
+            title: try readString16(data: data, pos: &pos, end: payloadEnd),
+            path: try readString16(data: data, pos: &pos, end: payloadEnd),
+            status: try readString16(data: data, pos: &pos, end: payloadEnd),
+            note: try readString16(data: data, pos: &pos, end: payloadEnd)
+        )
         let esFocusedId = try readString8(data: data, pos: &pos, end: payloadEnd)
         guard pos + 1 <= payloadEnd else { throw ProtocolDecodeError.malformed }
         let esSectionCount = Int(data[pos])
@@ -684,6 +706,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             let sectionId = data[pos]
             pos += 1
             let title = try readString8(data: data, pos: &pos, end: payloadEnd)
+            let empty = try readString16(data: data, pos: &pos, end: payloadEnd)
             guard pos + 1 <= payloadEnd else { throw ProtocolDecodeError.malformed }
             let itemCount = Int(data[pos])
             pos += 1
@@ -697,19 +720,21 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 let itemId = try readString8(data: data, pos: &pos, end: payloadEnd)
                 let label = try readString16(data: data, pos: &pos, end: payloadEnd)
                 let detail = try readString16(data: data, pos: &pos, end: payloadEnd)
+                let meta = try readString16(data: data, pos: &pos, end: payloadEnd)
                 let jumpKey = try readString8(data: data, pos: &pos, end: payloadEnd)
                 let chord = try readString8(data: data, pos: &pos, end: payloadEnd)
                 let icon = try readString8(data: data, pos: &pos, end: payloadEnd)
                 guard pos + 4 <= payloadEnd else { throw ProtocolDecodeError.malformed }
                 let iconColor = try readU32(data, pos)
                 pos += 4
+                let state = try readString8(data: data, pos: &pos, end: payloadEnd)
                 try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-                items.append(Wire.EmptyStateItem(kind: kind, id: itemId, label: label, detail: detail, jumpKey: jumpKey, chord: chord, icon: icon, iconColorRGB: iconColor))
+                items.append(Wire.EmptyStateItem(kind: kind, id: itemId, label: label, detail: detail, jumpKey: jumpKey, chord: chord, icon: icon, iconColorRGB: iconColor, meta: meta, state: state))
             }
             try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-            esSections.append(Wire.EmptyStateSection(sectionId: sectionId, title: title, items: items))
+            esSections.append(Wire.EmptyStateSection(sectionId: sectionId, title: title, items: items, empty: empty))
         }
-        return (.guiEmptyState(visible: true, crashed: esCrashed, version: esVersion, focusedId: esFocusedId, sections: esSections), 1 + 2 + payloadLen)
+        return (.guiEmptyState(visible: true, header: header, focusedId: esFocusedId, sections: esSections), 1 + 2 + payloadLen)
 
     // GUI chrome commands.
     case .guiFileTree:
@@ -1197,6 +1222,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var filetype = ""
         var message = ""
         var messageActions: [Wire.EmptyListAction] = []
+        var needsYouCount = 0
         var macroRecording: UInt8 = 0
         var modelName = ""
         var messageCount: UInt32 = 0
@@ -1287,6 +1313,10 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             case 0x13: // MessageActions: the next steps the notice names
                 let (actions, _) = try GeneratedProtocol.decodeGuiStatusBarMessageActions(data, sStart, sStart + sectionLen)
                 messageActions = actions.map { Wire.EmptyListAction(id: $0.id, key: $0.key, label: $0.label) }
+
+            case 0x14: // NeedsYou: how many tasks need you (u16), present only while some do
+                guard sectionLen >= 2 else { throw ProtocolDecodeError.malformed }
+                needsYouCount = Int(try readU16(data, sStart))
 
             case 0x08: // Recording: macro_recording(1)
                 guard sectionLen >= 1 else { break }
@@ -1470,7 +1500,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             workspace: workspace,
             pendingKeys: pendingKeys,
             review: review,
-            messageActions: messageActions
+            messageActions: messageActions,
+            needsYouCount: needsYouCount
         )
         return (.guiStatusBar(update), pos - offset)
 
@@ -1501,6 +1532,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var pkActivationGeneration: UInt32 = 0
         var pkEmpty: Wire.EmptyList? = nil
         var pkListKeys = false
+        var pkHints: [Wire.KeyHint] = []
 
         // The section-dispatch loop stays hand-written (it owns the outer framing);
         // each section body is decoded by the schema-generated, window-aware
@@ -1580,6 +1612,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                         actions: e.empty.actions.map { Wire.EmptyListAction(id: $0.id, key: $0.key, label: $0.label) }
                     )
                     pkListKeys = e.listKeys != 0
+                    pkHints = e.hints.map { Wire.KeyHint(keys: $0.keys, word: $0.word) }
                 case 0x08: // Movement keys
                     let (keys, _) = try GeneratedProtocol.decodeGuiPickerMovementKeys(data, psStart, psEnd)
                     // A movement this frontend does not know moves nothing, so its key is dropped.
@@ -1602,7 +1635,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             pickerPos = psEnd
         }
 
-        return (.guiPicker(visible: pkVisible, selectedIndex: pkSelectedIndex, filteredCount: pkFilteredCount, totalCount: pkTotalCount, markedCount: pkMarkedCount, title: pkTitle, query: pkQuery, hasPreview: pkHasPreview, items: pkItems, actionMenu: pkActionMenu, modePrefix: pkModePrefix, loadStatus: pkLoadStatus, queryGeneration: pkQueryGeneration, acknowledgedQueryEditSeq: pkAcknowledgedQueryEditSeq, activationGeneration: pkActivationGeneration, empty: pkEmpty, listKeys: pkListKeys, movementKeys: pkMovementKeys), pickerPos - offset)
+        return (.guiPicker(visible: pkVisible, selectedIndex: pkSelectedIndex, filteredCount: pkFilteredCount, totalCount: pkTotalCount, markedCount: pkMarkedCount, title: pkTitle, query: pkQuery, hasPreview: pkHasPreview, items: pkItems, actionMenu: pkActionMenu, modePrefix: pkModePrefix, loadStatus: pkLoadStatus, queryGeneration: pkQueryGeneration, acknowledgedQueryEditSeq: pkAcknowledgedQueryEditSeq, activationGeneration: pkActivationGeneration, empty: pkEmpty, listKeys: pkListKeys, movementKeys: pkMovementKeys, hints: pkHints), pickerPos - offset)
 
     case .guiPickerSelection:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
@@ -2932,7 +2965,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             throw ProtocolDecodeError.malformed
         }
         let start = rest + 2
-        guard data[start] <= 3, data[start + 1] <= 13 else {
+        guard data[start] <= 3, data[start + 1] <= 14 else {
             throw ProtocolDecodeError.malformed
         }
         let (fields, _) = try GeneratedProtocol.decodeGuiFocusOwnerFields(data, start, start + payloadLength)
@@ -2941,6 +2974,40 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             windowID: fields.windowID, generation: fields.generation
         )
         return (.guiFocusOwner(owner), 3 + payloadLength)
+
+    case .guiTasksDrawer:
+        guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
+        let payloadLength = Int(try readU32(data, rest))
+        let start = rest + 4
+        guard data.count >= start + payloadLength else { throw ProtocolDecodeError.malformed }
+        let (fields, _) = try GeneratedProtocol.decodeGuiTasksDrawerFields(data, start, start + payloadLength)
+        try FrameDecodeAccounting.reserve(.arrayEntries, fields.rows.count)
+        let hint = { (hint: GeneratedProtocol.TasksDrawerHint) in Wire.TasksDrawer.Hint(key: hint.key, label: hint.label) }
+        let drawer = Wire.TasksDrawer(
+            visible: fields.visible != 0, focused: fields.focused != 0,
+            name: fields.name, title: fields.title, note: fields.note,
+            counts: fields.counts.compactMap { count in
+                SpineState(wire: count.state).map { (state: $0, count: Int(count.count)) }
+            },
+            hints: fields.hints.map(hint),
+            rows: fields.rows.map { row in
+                Wire.TasksDrawer.Row(
+                    id: row.id, depth: row.depth, isLastChild: row.flags & 0x01 != 0,
+                    isSelected: row.flags & 0x02 != 0, state: SpineState(wire: row.state),
+                    title: row.title, words: row.words, age: row.age,
+                    detail: row.detail.map(\.text), actions: row.actions.map(hint)
+                )
+            },
+            view: Wire.TasksDrawer.View(rawValue: fields.view) ?? .list,
+            viewTitle: fields.viewTitle, viewLines: fields.viewLines.map(\.text),
+            viewOffset: Int(fields.viewOffset), prompt: fields.prompt,
+            empty: fields.hasEmpty == 0 ? nil : Wire.EmptyList(
+                glyph: fields.empty.glyph, title: fields.empty.title, why: fields.empty.why,
+                selected: fields.empty.selected,
+                actions: fields.empty.actions.map { Wire.EmptyListAction(id: $0.id, key: $0.key, label: $0.label) }
+            )
+        )
+        return (.guiTasksDrawer(drawer), 5 + payloadLength)
 
     case .guiEditTimeline:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }

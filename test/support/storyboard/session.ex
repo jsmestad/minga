@@ -2,7 +2,7 @@ defmodule Minga.Test.Storyboard.Session do
   @moduledoc """
   Drives one headless editor through the BEAM for the storyboard factory.
 
-  A session wraps `Minga.Test.EditorCase.start_editor/2` with a project in a private temporary directory, so every scenario starts from the same cold start: one Elixir file open in Normal mode. `press/2` takes the key notation from `docs/design/scenarios.toml` (see `Minga.Test.Storyboard.Keys`), `click/2` sends a semantic click, and `model/1` returns the committed semantic frame as a `Minga.Test.Storyboard.Model`.
+  A session wraps `Minga.Test.EditorCase.start_editor/2` with a project in a private temporary directory, so every scenario starts from the same cold start: `minga .` in a project with no saved session, which lands on the project home with the project's one Elixir file as recent file 1. `press/2` takes the key notation from `docs/design/scenarios.toml` (see `Minga.Test.Storyboard.Keys`), `click/2` sends a semantic click, and `model/1` returns the committed semantic frame as a `Minga.Test.Storyboard.Model`.
 
   Call `start/1` from an ExUnit test process: the editor is started with `start_supervised`, so it stops with the test. Rendering is disabled by default because the model is built from editor state with the same builder the render pipeline uses; pass `rendering: :enabled` when a caller also needs rendered frames (#4036).
   """
@@ -34,11 +34,12 @@ defmodule Minga.Test.Storyboard.Session do
           root: Path.t(),
           file: Path.t(),
           home_window: pos_integer(),
+          parser: GenServer.server(),
           path: [String.t()]
         }
 
   @enforce_keys [:ctx, :root, :file, :home_window, :child_id]
-  defstruct [:ctx, :root, :file, :home_window, :child_id, children: [], path: []]
+  defstruct [:ctx, :root, :file, :home_window, :child_id, :parser, children: [], path: []]
 
   @typedoc "A semantic click: a mouse press at a cell, or a GUI action the frontend would send."
   @type click :: {:mouse, non_neg_integer(), non_neg_integer()} | {:gui_action, term()}
@@ -48,7 +49,9 @@ defmodule Minga.Test.Storyboard.Session do
 
   Options: `:content` (the file's text), `:file_name` (relative to the project root, default `lib/storyboard.ex`), `:width` and `:height` (default 120 by 36), and `:rendering` (`:disabled` by default).
 
-  Every session runs the real tree-sitter parser and returns only once its highlights are applied, so parser-dependent keys (structural motions, text objects, folds) behave as in the app and every frame is highlighted. The parser is the suite's shared one (`shared_parser/0`) unless `:parser_manager` names another running `Minga.Parser.Manager`.
+  `:place` says where `minga` was started: `:project` (default, the project home), `:folder` (a directory without project markers) or `:outside` (no project; the home lists the project as a recent project). `:restored` (default false) gives the project a saved session that shows the file in a vertical split, so the start is `minga .` picking up where you left off.
+
+  Every session runs the real tree-sitter parser, and `settle/1` returns only once an open file's highlights are applied, so parser-dependent keys (structural motions, text objects, folds) behave as in the app and every frame is highlighted. The parser is the suite's shared one (`shared_parser/0`) unless `:parser_manager` names another running `Minga.Parser.Manager`.
 
   `:minga` puts Minga in an Agent status before the first key, for example `:thinking` for "Minga is working". The status goes into the editor's live presentation cache, the value every surface reads, so the modeline, the activity card and the rest show it the way they would for a running session. The factory has no running session, so nothing changes the status afterwards.
 
@@ -65,28 +68,38 @@ defmodule Minga.Test.Storyboard.Session do
     child_id = make_ref()
     parser = Keyword.get_lazy(opts, :parser_manager, &shared_parser!/0)
 
+    place = Keyword.get(opts, :place, :project)
+
     editor_opts =
       [
         child_id: child_id,
-        file_path: file,
-        project_root: root,
+        empty: true,
+        project_root: if(place == :outside, do: nil, else: root),
+        home: home_opts(place, root, file_name),
         width: Keyword.get(opts, :width, 120),
         height: Keyword.get(opts, :height, 36),
         rendering: Keyword.get(opts, :rendering, :disabled),
         record_packets: Keyword.get(opts, :record_packets, false),
         parser_manager: parser
-      ]
+      ] ++ restored_opts(Keyword.get(opts, :restored, false), root, file)
 
     {theme_opts, theme_children} = theme_opts(Keyword.get(opts, :theme))
+
+    {project_opts, project_children} =
+      project_opts(Keyword.get(opts, :directory_workspace, false), root)
 
     ctx =
       EditorCase.start_editor(
         content,
-        editor_opts ++ Keyword.take(opts, [:capabilities]) ++ theme_opts
+        editor_opts ++ Keyword.take(opts, [:capabilities]) ++ theme_opts ++ project_opts
       )
 
     relay = start_relay(ctx, parser)
-    await_highlights!(ctx, parser)
+
+    # Outside a project nothing restores at start; the saved session waits for the project to be opened.
+    await_restore!(ctx, place != :outside and Keyword.get(opts, :restored, false))
+    settle_highlights(ctx, parser)
+    seed_tasks(ctx, Keyword.get(opts, :tasks, []))
     install_minga_status(ctx, Keyword.get(opts, :minga))
     install_git_status(ctx, root, Keyword.get(opts, :git_status))
 
@@ -96,10 +109,91 @@ defmodule Minga.Test.Storyboard.Session do
       file: file,
       home_window: 0,
       child_id: child_id,
-      children: [relay | theme_children]
+      parser: parser,
+      children: [relay | theme_children ++ project_children]
     }
 
     %{session | home_window: window_id(session)}
+  end
+
+  @spec project_opts(boolean(), Path.t()) :: {keyword(), [term()]}
+  defp project_opts(false, _root), do: {[], []}
+
+  defp project_opts(true, root) do
+    id = make_ref()
+    name = :"storyboard_project_#{System.unique_integer([:positive])}"
+
+    project =
+      ExUnit.Callbacks.start_supervised!(
+        {Minga.Project,
+         name: name,
+         subscribe: false,
+         command_frecency: %{},
+         startup_directory: root,
+         file_find_module: Minga.Project.SlowFileFind},
+        id: id
+      )
+
+    {[project_server: project], [id]}
+  end
+
+  @doc """
+  Waits until an open file's highlights are applied, after a key path opened one (`1` on the home).
+
+  Returns at once when no file is open. `Minga.Test.Storyboard.Registry.drive/2` calls it after every reach.
+  """
+  @spec settle(t()) :: t()
+  def settle(%__MODULE__{ctx: ctx, parser: parser} = session) do
+    settle_highlights(ctx, parser)
+    session
+  end
+
+  @doc "Opens the project's file from the home with `1`, the way `edit.plain` is reached, and waits for its highlights."
+  @spec open_file(t()) :: t()
+  def open_file(%__MODULE__{} = session), do: session |> press("1") |> settle()
+
+  # The project home's reads are fixed so every machine shows the same home: the project's one file is recent file 1.
+  @spec home_opts(:project | :folder | :outside, Path.t(), String.t()) :: keyword()
+  defp home_opts(:project, _root, file_name),
+    do: [place: :project, recents: [file_name], git: nil, projects: []]
+
+  defp home_opts(:folder, _root, _file_name),
+    do: [place: :folder, recents: [], git: nil, projects: []]
+
+  defp home_opts(:outside, root, _file_name),
+    do: [place: :outside, recents: [], git: nil, projects: [root]]
+
+  # A saved session for the project: the file in a vertical split with its cursor on `greet`.
+  @spec restored_opts(boolean(), Path.t(), Path.t()) :: keyword()
+  defp restored_opts(false, _root, _file), do: []
+
+  defp restored_opts(true, root, file) do
+    sessions = Path.join(root, ".storyboard-sessions-#{System.unique_integer([:positive])}")
+    pane = %Minga.Session.Pane{file: file, cursor_line: 3, cursor_col: 2}
+
+    snapshot = %Minga.Session.Snapshot{
+      version: Minga.Session.Snapshot.current_version(),
+      project_root: root,
+      buffers: [%Minga.Session.BufferEntry{file: file, cursor_line: 3, cursor_col: 2}],
+      active_file: file,
+      layout: {:split, :vertical, {:pane, pane}, {:pane, %{pane | cursor_line: 0}}, 0},
+      active_pane: 0
+    }
+
+    :ok = Minga.Session.save(snapshot, session_dir: sessions, project_root: root)
+    [session_dir: sessions]
+  end
+
+  @spec await_restore!(EditorCase.editor_ctx(), boolean()) :: :ok
+  defp await_restore!(_ctx, false), do: :ok
+
+  defp await_restore!(ctx, true) do
+    EditorCase.wait_until(ctx, &match?([_ | _], &1.workspace.buffers.list),
+      max_attempts: 200,
+      message: "the storyboard session was not restored"
+    )
+
+    :ok
   end
 
   @spec install_minga_status(EditorCase.editor_ctx(), Minga.Design.Tokens.agent_status() | nil) ::
@@ -130,6 +224,20 @@ defmodule Minga.Test.Storyboard.Session do
       |> MingaEditor.Renderer.render()
     end)
 
+    :ok
+  end
+
+  # Fake agent sessions for scenarios that show Minga's tasks (`Minga.Test.FakeTaskSession`), oldest first.
+  @spec seed_tasks(EditorCase.editor_ctx(), [{String.t(), Minga.Test.FakeTaskSession.seed()}]) ::
+          :ok
+  defp seed_tasks(_ctx, []), do: :ok
+
+  defp seed_tasks(ctx, tasks) do
+    Enum.each(tasks, fn {title, seed} ->
+      Minga.Test.FakeTaskSession.start(ctx.editor, title, seed)
+    end)
+
+    _ = EditorCase.editor_state(ctx)
     :ok
   end
 
@@ -193,6 +301,17 @@ defmodule Minga.Test.Storyboard.Session do
     Minga.Test.HeadlessPort.get_screen_text(ctx.port)
   end
 
+  @doc "True when the focused window shows a file, not the project home."
+  @spec file_open?(t()) :: boolean()
+  def file_open?(%__MODULE__{ctx: ctx}) do
+    state = EditorCase.editor_state(ctx)
+
+    match?(
+      %{content: {:buffer, _}},
+      MingaEditor.Session.State.active_window_struct(state.workspace)
+    )
+  end
+
   @doc "The number of tree-sitter highlight spans the active buffer carries now. Zero without a parser."
   @spec highlight_span_count(t()) :: non_neg_integer()
   def highlight_span_count(%__MODULE__{ctx: ctx}) do
@@ -227,10 +346,14 @@ defmodule Minga.Test.Storyboard.Session do
   """
   @spec stop(t()) :: :ok
   def stop(%__MODULE__{ctx: ctx, child_id: child_id, children: children}) do
+    # The editor opened its files itself, under the global buffer supervisor; they go with the session, so the next
+    # session on the same project directory opens fresh buffers.
+    opened = opened_buffers(ctx)
     _ = ExUnit.Callbacks.stop_supervised(child_id)
+    Enum.each(opened, &unlink_and_stop/1)
     Enum.each(children, &ExUnit.Callbacks.stop_supervised/1)
 
-    for pid <- [ctx.buffer, ctx.port], Process.alive?(pid) do
+    for pid <- [ctx.buffer, ctx.port], is_pid(pid), Process.alive?(pid) do
       unlink_and_stop(pid)
     end
 
@@ -261,6 +384,15 @@ defmodule Minga.Test.Storyboard.Session do
     send(editor, {:whichkey_reveal, generation})
     _ = EditorCase.editor_state(ctx)
     :ok
+  end
+
+  @spec opened_buffers(EditorCase.editor_ctx()) :: [pid()]
+  defp opened_buffers(%{editor: editor} = ctx) do
+    if Process.alive?(editor),
+      do: MingaEditor.Handlers.BufferRegistry.buffer_inventory(EditorCase.editor_state(ctx)),
+      else: []
+  catch
+    :exit, _reason -> []
   end
 
   @spec unlink_and_stop(pid()) :: :ok
@@ -296,6 +428,14 @@ defmodule Minga.Test.Storyboard.Session do
       _pid ->
         @shared_parser
     end
+  end
+
+  # Awaits highlights only when a file is open; the home has none to wait for.
+  @spec settle_highlights(EditorCase.editor_ctx(), GenServer.server()) :: :ok
+  defp settle_highlights(ctx, parser) do
+    if EditorCase.editor_state(ctx).workspace.buffers.active,
+      do: await_highlights!(ctx, parser),
+      else: :ok
   end
 
   # The parser answers asynchronously: the editor applies the spans, then schedules a render; fold ranges and conceals
@@ -436,8 +576,17 @@ defmodule Minga.Test.Storyboard.Session do
   # on the machine, including concurrent runs in other worktrees, so it is never deleted: its files are written
   # atomically with the same content every time, and a run never removes a project another run is using.
   @spec make_project(Path.t() | nil, Path.t(), String.t()) :: Path.t()
+  # Under `tmp/MingaEditor.*`, the project registry treats the root as a test fixture and never remembers it, so a
+  # session that opens its project (the home's recent-project row) cannot add it to another session's project list.
   defp make_project(nil, file_name, content) do
-    root = Path.join(System.tmp_dir!(), "minga-storyboard-#{System.unique_integer([:positive])}")
+    root =
+      Path.join([
+        System.tmp_dir!(),
+        "tmp",
+        "MingaEditor.Storyboard",
+        "project-#{System.unique_integer([:positive])}"
+      ])
+
     ExUnit.Callbacks.on_exit(fn -> File.rm_rf(root) end)
     write_project(root, file_name, content)
   end
@@ -448,6 +597,9 @@ defmodule Minga.Test.Storyboard.Session do
   defp write_project(root, file_name, content) do
     atomic_write!(Path.join(root, "mix.exs"), "defmodule Storyboard.MixProject do\nend\n")
     atomic_write!(Path.join(root, file_name), content)
+
+    # The scenarios search for words the project does not hold, so the search answers from memory, never ripgrep.
+    :ok = Minga.Test.ProjectSearchStub.set_results(root, [])
     root
   end
 

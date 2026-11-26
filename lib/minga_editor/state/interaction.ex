@@ -13,6 +13,7 @@ defmodule MingaEditor.State.Interaction do
           editing_model: editing_model(),
           keymap_server: Minga.Keymap.server(),
           options_server: Minga.Config.Options.server(),
+          project_server: GenServer.server(),
           file_tree_duplicate_backend: MingaEditor.Commands.FileTree.DuplicateBackend.t(),
           file_tree_new_file_backend: MingaEditor.Commands.FileTree.NewFileBackend.t(),
           keystroke_history: KeystrokeHistory.t(),
@@ -22,6 +23,7 @@ defmodule MingaEditor.State.Interaction do
   defstruct editing_model: :vim,
             keymap_server: Minga.Keymap.Active,
             options_server: Minga.Config.Options,
+            project_server: Minga.Project,
             file_tree_duplicate_backend: MingaEditor.Commands.FileTree.SystemDuplicateBackend,
             file_tree_new_file_backend: MingaEditor.Commands.FileTree.SystemNewFileBackend,
             keystroke_history: KeystrokeHistory.new(),
@@ -34,6 +36,7 @@ defmodule MingaEditor.State.Interaction do
       editing_model: Keyword.get(opts, :editing_model, :vim),
       keymap_server: Keyword.get(opts, :keymap_server, Minga.Keymap.Active),
       options_server: Keyword.get(opts, :options_server, Minga.Config.Options),
+      project_server: Keyword.get(opts, :project_server, Minga.Project),
       file_tree_duplicate_backend:
         Keyword.get(
           opts,

@@ -148,6 +148,25 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     end
   end
 
+  describe "the needs-you alert" do
+    test "an alert and its withdrawal carry only a kind and the alert's identity" do
+      id = <<0xAB::128>>
+      assert Protocol.encode_agent_desktop_notification(:needs_you, id) == <<0x61, 1, id::binary>>
+      assert Protocol.encode_agent_desktop_notification(:withdrawn, id) == <<0x61, 2, id::binary>>
+    end
+
+    test "a click on an alert names it by its identity, and nothing else" do
+      id = <<0xCD::128>>
+
+      assert Protocol.decode_event(<<0x07, 0x72, id::binary>>) ==
+               {:ok, {:gui_action, {:agent_notification_open, id}}}
+
+      for malformed <- [<<0x07, 0x72>>, <<0x07, 0x72, 1::120>>, <<0x07, 0x72, id::binary, 0>>] do
+        assert {:error, _reason} = Protocol.decode_event(malformed)
+      end
+    end
+  end
+
   describe "decode_event/1 — terminal_report" do
     test "decodes the terminal frontend's snapshot of its terminal's features" do
       # Each entry is feature, status, source: true_color (1) detected (2), answered by the terminal (1);

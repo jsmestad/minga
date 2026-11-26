@@ -1,110 +1,10 @@
 {
- "elements": [
-  {
-   "frame": [
-    79,
-    65,
-    1174,
-    729.5
-   ],
-   "label": "storyboard.ex, pane 1",
-   "role": "AXTextArea",
-   "value": "defmodule Storyboard do\n  @moduledoc \"A small file every storyboard scenario starts in.\"\n\n  def greet(name) do\n    \"Hello, \" <> name\n  end\nend\n"
-  }
- ],
+ "elements": [],
  "grid": {
-  "cols": 156,
-  "rows": 38
+  "cols": 159,
+  "rows": 39
  },
  "parts": [
-  {
-   "baseline": 21,
-   "frame": [
-    375,
-    9.5,
-    78,
-    15
-   ],
-   "part": "tabBar.tabLabel",
-   "text": "storyboard.ex"
-  },
-  {
-   "baseline": 55,
-   "frame": [
-    40,
-    43.5,
-    4,
-    15
-   ],
-   "part": "breadcrumb.segment",
-   "text": "/"
-  },
-  {
-   "baseline": 55,
-   "frame": [
-    58,
-    43.5,
-    23,
-    15
-   ],
-   "part": "breadcrumb.segment",
-   "text": "tmp"
-  },
-  {
-   "baseline": 55,
-   "frame": [
-    95,
-    43.5,
-    102,
-    15
-   ],
-   "part": "breadcrumb.segment",
-   "text": "minga-storyboard"
-  },
-  {
-   "baseline": 55,
-   "frame": [
-    211,
-    43.5,
-    71,
-    15
-   ],
-   "part": "breadcrumb.segment",
-   "text": "macos-1280"
-  },
-  {
-   "baseline": 55,
-   "frame": [
-    296,
-    43.5,
-    163,
-    15
-   ],
-   "part": "breadcrumb.segment",
-   "text": "start.project_switcher.empty"
-  },
-  {
-   "baseline": 55,
-   "frame": [
-    473,
-    43.5,
-    14,
-    15
-   ],
-   "part": "breadcrumb.segment",
-   "text": "lib"
-  },
-  {
-   "baseline": 55,
-   "frame": [
-    501,
-    43.5,
-    78,
-    15
-   ],
-   "part": "breadcrumb.segment",
-   "text": "storyboard.ex"
-  },
   {
    "baseline": 60.5,
    "frame": [
@@ -139,6 +39,50 @@
    "text": "Minga remembers folders you open."
   },
   {
+   "baseline": 170.5,
+   "frame": [
+    368,
+    160,
+    82,
+    14
+   ],
+   "part": "picker.stepLabel",
+   "text": "Add a folder"
+  },
+  {
+   "baseline": 170.5,
+   "frame": [
+    880,
+    160,
+    48,
+    14
+   ],
+   "part": "picker.stepAnnotation",
+   "text": "SPC p a"
+  },
+  {
+   "baseline": 194.5,
+   "frame": [
+    368,
+    184,
+    75,
+    14
+   ],
+   "part": "picker.stepLabel",
+   "text": "Open a file"
+  },
+  {
+   "baseline": 194.5,
+   "frame": [
+    880,
+    184,
+    48,
+    14
+   ],
+   "part": "picker.stepAnnotation",
+   "text": "SPC f f"
+  },
+  {
    "frame": [
     0,
     804,
@@ -161,21 +105,21 @@
    "frame": [
     75,
     804,
-    73,
+    40,
     24
    ],
    "part": "modeline.segment",
-   "text": "filename: storyboard.ex"
+   "text": "filename: *home*"
   },
   {
    "frame": [
-    1226,
+    1230,
     804,
-    26,
+    22,
     24
    ],
    "part": "modeline.segment",
-   "text": "filetype: Elixir"
+   "text": "filetype: Text"
   },
   {
    "frame": [

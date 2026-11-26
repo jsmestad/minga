@@ -18,12 +18,12 @@
   <meta property="og:image" content="https://mingacode.dev/assets/og-minga.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
+  <meta property="og:image:alt" content="Minga: Elixir code in a Minga window in Catppuccin Frappé, with marks in the margin that show which lines Minga changed">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Architecture, why it is safe: Minga">
   <meta name="twitter:description" content="Why you can let Minga work in your repository: a slow language server or a busy agent does not freeze your typing, and in a project you open in the editor, an edit you approve stays staged until you publish. Two simulations, and the limits.">
   <meta name="twitter:image" content="https://mingacode.dev/assets/og-minga.png">
-  <meta name="twitter:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
+  <meta name="twitter:image:alt" content="Minga: Elixir code in a Minga window in Catppuccin Frappé, with marks in the margin that show which lines Minga changed">
   <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Architecture, why it is safe: Minga","description":"Why you can let Minga work in your repository: a slow language server or a busy agent does not freeze your typing, and in a project you open in the editor, an edit you approve stays staged until you publish. Two simulations, and the limits.","url":"https://mingacode.dev/architecture","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Architecture","item":"https://mingacode.dev/architecture"}]}]}</script>
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
@@ -132,13 +132,13 @@
               <p data-step="rest">Both editors get the same keys while one tool misbehaves.</p>
               <p class="demo-steps-title">If the language server takes 3 seconds to answer</p>
               <ol>
-                <li data-step="slow-during">The language server has not answered. On the left, your keys wait in a queue behind the request. On the right, Minga draws each key as it arrives, because the request went to another process.</li>
-                <li data-step="slow-after">The answer came back. The left editor drew the waiting keys in one jump. Minga had already drawn each one.</li>
+                <li data-step="slow-during">The language server has not answered. In the same-loop editor, your keys wait in a queue behind the request. Minga draws each key as it arrives, because the request went to another process.</li>
+                <li data-step="slow-after">The answer came back. The same-loop editor drew the waiting keys in one jump. Minga had already drawn each one.</li>
               </ol>
               <p class="demo-steps-title">If the parser crashes</p>
               <ol>
-                <li data-step="crash-during">The parser crashed. The left editor ran it in the same process, so the editor is gone. Minga runs the parser as a separate program: only the parser stopped, and you keep typing.</li>
-                <li data-step="crash-after">Minga started a new parser and gave it the buffer to read again. Your text and its highlighting stayed where they were the whole time. The left editor has to be reopened.</li>
+                <li data-step="crash-during">The parser crashed. The same-loop editor ran it in the same process, so the editor is gone. Minga runs the parser as a separate program: only the parser stopped, and you keep typing.</li>
+                <li data-step="crash-after">Minga started a new parser and gave it the buffer to read again. Your text and its highlighting stayed where they were the whole time. The same-loop editor has to be reopened.</li>
               </ol>
             </div>
           </div>

@@ -369,6 +369,11 @@ type EmptyListAction struct {
 	Label string
 }
 
+type KeyHint struct {
+	Keys string
+	Word string
+}
+
 type EmptyList struct {
 	Glyph    string
 	Title    string
@@ -394,6 +399,15 @@ type WhichKeyHint struct {
 	Label string
 }
 
+type MenuBarItem struct {
+	Path        string
+	Label       string
+	Section     string
+	Kind        uint8
+	Command     string
+	PlatformKey string
+}
+
 type WhichKeyEntry struct {
 	Kind        uint8
 	Key         string
@@ -409,6 +423,32 @@ type WhichKeyEntry struct {
 type AgentTodo struct {
 	Status      uint8
 	Description string
+}
+
+type TasksDrawerCount struct {
+	State uint8
+	Count uint16
+}
+
+type TasksDrawerHint struct {
+	Key   string
+	Label string
+}
+
+type TasksDrawerLine struct {
+	Text string
+}
+
+type TasksDrawerRow struct {
+	ID      string
+	Depth   uint8
+	Flags   uint8
+	State   uint8
+	Title   string
+	Words   string
+	Age     string
+	Detail  []TasksDrawerLine
+	Actions []TasksDrawerHint
 }
 
 type EditTimelineEntry struct {
@@ -452,6 +492,7 @@ const (
 	ThemeColorSize           = 4
 	CompletionMatchRangeSize = 4
 	PickerMovementKeySize    = 6
+	TasksDrawerCountSize     = 3
 )
 
 type GuiWindowContentHeader struct {
@@ -714,6 +755,11 @@ type GuiPickerLoadStatus struct {
 type GuiPickerEmpty struct {
 	Empty    EmptyList
 	ListKeys uint8
+	Hints    []KeyHint
+}
+
+type GuiPickerEnterSelection struct {
+	Selects uint8
 }
 
 type GuiAgentChatHeader struct {
@@ -866,6 +912,24 @@ type GuiSearchStateFields struct {
 	SessionID           uint32
 	AcknowledgedEditSeq uint32
 	Status              uint8
+}
+
+type GuiTasksDrawerFields struct {
+	Visible    uint8
+	Focused    uint8
+	Name       string
+	Title      string
+	Note       string
+	Counts     []TasksDrawerCount
+	Hints      []TasksDrawerHint
+	Rows       []TasksDrawerRow
+	View       uint8
+	ViewTitle  string
+	ViewLines  []TasksDrawerLine
+	ViewOffset uint16
+	Prompt     string
+	HasEmpty   uint8
+	Empty      EmptyList
 }
 
 type GuiEditTimelineFields struct {

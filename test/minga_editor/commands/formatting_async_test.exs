@@ -44,6 +44,19 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
            } = ExternalFormat.request(buffer, "cat", 1)
   end
 
+  @tag :tmp_dir
+  test "a format request carries the directory the formatter runs in, when it exists", %{
+    tmp_dir: directory
+  } do
+    buffer = self()
+
+    assert %Request{effect: %ExternalFormat{directory: ^directory}} =
+             ExternalFormat.request(buffer, "cat", 1, nil, directory)
+
+    assert %Request{effect: %ExternalFormat{directory: nil}} =
+             ExternalFormat.request(buffer, "cat", 1, nil, Path.join(directory, "gone"))
+  end
+
   test "completed formatting applies only to the captured buffer version" do
     state = base_state("hello world\n")
     buffer = state.workspace.buffers.active

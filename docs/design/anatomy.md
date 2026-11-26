@@ -69,6 +69,7 @@ A real split along the bottom of the window. Structure: divider, header, body.
 | Header height | row pitch | 24 pt | in the top border |
 | Header leading and trailing inset | `lg` | 12 pt | 1 column |
 | Title to counts | `md` | 8 pt | 1 column |
+| Count group to next count group | `xl` | 16 pt | 2 columns |
 | Key to its hint label | `xs` | 4 pt | 1 column |
 | Hint to next hint | `xl` | 16 pt | 2 columns |
 | Body leading and trailing inset | `lg` | 12 pt | 1 column |
@@ -155,7 +156,7 @@ One panel anchored above the modeline.
 | Key to label | `md` | 8 pt, in a fixed key column | 1 column, in a fixed key column |
 | Label to ⌘ equivalent or count | `md` | 8 pt | 1 column |
 
-Keys use `Typography.monospacedSmall` in the accent colour; leaves use `body`; groups use `body` in the group role with a trailing `›`; group names above columns use `caption` in the secondary colour; counts and ⌘ equivalents use `caption` in the secondary colour. Each column is as wide as its longest entry, and the panel is as tall as its longest group plus the breadcrumb. The panel's own keys (`⌫ back`, `esc close`) sit at the trailing end of the breadcrumb row on macOS and in the bottom border in the TUI. A group taller than the window allows continues in a further column, filled top to bottom; in the TUI, columns that do not fit side by side wrap onto a second band under their own group names, and labels truncate with `…` only when even that does not fit.
+Keys use `Typography.monospacedSmall` in the accent colour. Leaves use `body`; groups use `body` in the group role with a trailing `›`. Group names and counts use `caption` in the secondary colour. On macOS, ⌘ equivalents use bold monospaced `body` in the panel foreground so the symbols stay legible on 1× displays. Each column is as wide as its longest entry, and the panel is as tall as its longest group plus the breadcrumb. The panel's own keys (`⌫ back`, `esc close`) sit at the trailing end of the breadcrumb row on macOS and in the bottom border in the TUI. A group taller than the window allows continues in a further column, filled top to bottom; in the TUI, columns that do not fit side by side wrap onto a second band under their own group names, and labels truncate with `…` only when even that does not fit.
 
 ## Modeline segments
 
@@ -193,6 +194,7 @@ Every empty state and every notice with actions, as listed in [surfaces.md](surf
 | Part | Token | macOS | TUI |
 |---|---|---|---|
 | Inset from the panel | `panel` | 24 pt | 3 columns, 1 row |
+| Trailing inset of the text and action labels | `lg` | 12 pt | 1 column |
 | Glyph to title | `sm` | 6 pt | 1 column |
 | Title to why line | `xs` | 4 pt | 0 rows |
 | Why line to action list | `xxl` | 20 pt | 1 row |

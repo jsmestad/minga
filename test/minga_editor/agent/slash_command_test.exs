@@ -278,6 +278,15 @@ defmodule MingaEditor.Agent.SlashCommandTest do
   end
 
   describe "execute/2" do
+    # A session that refuses one call with `reason`, the way MingaAgent.Session answers a refused request.
+    defp refusing_session(request, reason) do
+      spawn_link(fn ->
+        receive do
+          {:"$gen_call", from, ^request} -> GenServer.reply(from, {:error, reason})
+        end
+      end)
+    end
+
     defp mock_state(opts \\ []) do
       session = Keyword.get(opts, :session)
 
@@ -327,6 +336,26 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     test "/help returns ok and sets status message" do
       {:ok, state} = SlashCommand.execute(mock_state(), "/help")
       assert state.shell_runtime.state.notice.message == "Commands listed in chat"
+    end
+
+    for {reason, words} <- [
+          {{:conversation_persistence_failed, :invalid_continuation_boundaries},
+           "Could not continue: the conversation could not be saved (invalid continuation boundaries)"},
+          {{:unexpected, 1}, "Could not continue: {:unexpected, 1}"}
+        ] do
+      test "/continue refused with #{inspect(reason)} reports words, never the raw term" do
+        session = refusing_session(:continue, unquote(Macro.escape(reason)))
+
+        assert {:error, unquote(words)} =
+                 SlashCommand.execute(mock_state(session: session), "/continue")
+      end
+    end
+
+    test "/switch refused while a turn runs reports words, never the raw term" do
+      session = refusing_session({:switch_branch, 1}, :request_active)
+
+      assert {:error, "Could not switch: request active"} =
+               SlashCommand.execute(mock_state(session: session), "/switch 1")
     end
 
     test "/stop aborts agent (no-op without session)" do

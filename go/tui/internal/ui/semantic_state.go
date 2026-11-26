@@ -37,6 +37,10 @@ func (m *Model) focusedComponent() (string, bool) {
 		expectedResponder = 3
 	case 8:
 		expectedResponder = 1
+		// A picker with nothing to filter takes no text, so the BEAM gives the keys to the editor view (responder 0); it is still the picker's list.
+		if owner.Responder == 0 {
+			expectedResponder = 0
+		}
 	case 11:
 		expectedResponder = 2
 	}
@@ -316,8 +320,8 @@ func (m *Model) localPreviewActivationPacket(msg tea.KeyPressMsg, component stri
 		}
 	}
 	if preview, ok := m.localPresentation.identityPreview(presentationPicker); component == "picker" && ok {
-		// While the act menu is open, ↩ runs the menu's action on the BEAM, never the previewed picker row.
-		if picker, present := m.picker(); present && picker.Visible && !picker.ActionVisible && preview.generation == picker.Generation {
+		// Remapped Enter, a key sequence, and the act menu stay with the BEAM rather than running a previewed row.
+		if picker, present := m.picker(); present && picker.Visible && picker.EnterSelects && picker.ModePrefix == "" && !picker.ActionVisible && preview.generation == picker.Generation {
 			index := pickerItemIndexByID(picker, preview.itemID)
 			if index >= 0 {
 				return pickerActivationPacket(preview.generation, picker.Items[index].ActivationID), true

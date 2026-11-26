@@ -35,6 +35,7 @@ defmodule MingaEditor.Input do
   alias MingaEditor.Input.Scoped
   alias MingaEditor.Input.Sidebar
   alias MingaEditor.Input.SignatureHelp
+  alias MingaEditor.Input.TasksDrawer
   alias MingaEditor.Input.ToolApproval
   alias MingaEditor.Input.WhichKey
 
@@ -55,6 +56,8 @@ defmodule MingaEditor.Input do
   # Update it when a handler that claims SPC is added, removed, or moved.
   @builtin_surface_handlers [
     {MentionCompletion, 10},
+    # The drawer answers the task it selects, so it runs ahead of the conversation's approval keys.
+    {TasksDrawer, 15},
     {ToolApproval, 20},
     {AgentPanel, 40},
     {Sidebar, 45},
@@ -81,7 +84,7 @@ defmodule MingaEditor.Input do
   @doc """
   Returns interactive transient handlers in precedence order above the active surface.
 
-  Exclusive modals and completion run first, followed by which-key, focused hover, signature help, and finally operation cancellation. If none consumes the key, the Editor delegates to the active surface.
+  Exclusive modals and completion run first, followed by focused hover, signature help, and finally operation cancellation. Which-key sits above the prompt and the picker: a leader sequence never runs under them, and the prompt or picker keys the mode pill opens over them get the key first (esc closes only the panel). If none consumes the key, the Editor delegates to the active surface.
   """
   @spec overlay_handlers() :: [module()]
   def overlay_handlers do
@@ -90,11 +93,11 @@ defmodule MingaEditor.Input do
       ConflictPrompt,
       InlineEdit,
       InlineAsk,
+      Completion,
+      WhichKey,
       Prompt,
       Picker,
-      Completion,
       AgentHelp,
-      WhichKey,
       Hover,
       SignatureHelp,
       OperationCancellation

@@ -267,7 +267,9 @@ defmodule MingaEditor.Commands.Formatting do
   end
 
   defp schedule_external_format(state, buf, spec, operation_id, continuation) do
-    request = ExternalFormat.request(buf, spec, operation_id, continuation)
+    # The formatter runs in the open project's root, the same root a config reload passes on.
+    directory = state.workspace.file_tree.project_root
+    request = ExternalFormat.request(buf, spec, operation_id, continuation, directory)
 
     case EffectScheduler.schedule(state.effect_scheduler, request) do
       {:ok, _request_id, disposition} when disposition in [:queued, :running] ->

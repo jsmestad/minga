@@ -106,10 +106,10 @@
    "text": "storyboard.ex"
   },
   {
-   "baseline": 94.5,
+   "baseline": 74.5,
    "frame": [
-    76,
-    82,
+    56,
+    62,
     101,
     16
    ],
@@ -117,21 +117,21 @@
    "text": "notes/ is empty."
   },
   {
-   "baseline": 113.5,
+   "baseline": 93.5,
    "frame": [
-    76,
-    102,
-    117,
-    30
+    56,
+    82,
+    182,
+    15
    ],
    "part": "emptyState.why",
    "text": "Make the first file or folder here."
   },
   {
-   "baseline": 168,
+   "baseline": 133,
    "frame": [
-    95,
-    156.5,
+    75,
+    121.5,
     46,
     15
    ],
@@ -139,10 +139,10 @@
    "text": "New file"
   },
   {
-   "baseline": 167.5,
+   "baseline": 132.5,
    "frame": [
-    76,
-    157,
+    56,
+    122,
     19,
     14
    ],
@@ -150,10 +150,10 @@
    "text": "a"
   },
   {
-   "baseline": 192,
+   "baseline": 157,
    "frame": [
-    95,
-    180.5,
+    75,
+    145.5,
     62,
     15
    ],
@@ -161,10 +161,10 @@
    "text": "New folder"
   },
   {
-   "baseline": 191.5,
+   "baseline": 156.5,
    "frame": [
-    76,
-    181,
+    56,
+    146,
     19,
     14
    ],

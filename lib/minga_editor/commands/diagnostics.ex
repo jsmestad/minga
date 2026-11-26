@@ -13,7 +13,6 @@ defmodule MingaEditor.Commands.Diagnostics do
   alias Minga.Diagnostics
   alias Minga.Diagnostics.Diagnostic
   alias MingaEditor.UI.Picker.Sources.Diagnostics, as: DiagPickerSource
-  alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias Minga.LSP.SyncServer
 
@@ -31,13 +30,9 @@ defmodule MingaEditor.Commands.Diagnostics do
         ) :: EditorState.t()
   def execute(%{workspace: %{buffers: %{active: nil}}} = state, _cmd), do: state
 
-  def execute(state, :diagnostic_list) do
-    PickerUI.open(state, DiagPickerSource)
-  end
+  def execute(state, :diagnostic_list), do: DiagPickerSource.open(state)
 
-  def execute(state, :diagnostic_picker) do
-    PickerUI.open(state, DiagPickerSource)
-  end
+  def execute(state, :diagnostic_picker), do: DiagPickerSource.open(state)
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :next_diagnostic) do
     navigate(state, buf, &Diagnostics.next/2)

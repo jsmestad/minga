@@ -4,6 +4,7 @@ import (
 	"image/color"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
@@ -41,7 +42,66 @@ func (m Model) floatingWhichKeyLayer() *lipgloss.Layer {
 		return nil
 	}
 	y := max(m.height-m.footerRows()-lipgloss.Height(popup), 0)
+	if m.zones != nil {
+		m.zones.whichKey = m.whichKeyHits(which).offset(whichKeyMarginCols, y)
+	}
 	return lipgloss.NewLayer(popup).X(whichKeyMarginCols).Y(y).Z(whichKeyLayerZ)
+}
+
+// whichKeyPointerZones are the panel's hit targets in screen cells, set while the panel is composited: every row and
+// every breadcrumb crumb is clickable (docs/design/surfaces.md, Mouse). A click names the panel's path, so the BEAM
+// ignores one aimed at a panel that has since changed.
+type whichKeyPointerZones struct {
+	box     uiRect
+	path    string
+	entries []whichKeyEntryZone
+	crumbs  []whichKeyCrumbZone
+}
+
+type whichKeyEntryZone struct {
+	rect  uiRect
+	entry generated.WhichKeyEntry
+}
+
+type whichKeyCrumbZone struct {
+	rect uiRect
+	path string
+}
+
+func (z whichKeyPointerZones) offset(x, y int) whichKeyPointerZones {
+	move := func(r uiRect) uiRect { return uiRect{X: r.X + x, Y: r.Y + y, Width: r.Width, Height: r.Height} }
+	z.box = move(z.box)
+	for i := range z.entries {
+		z.entries[i].rect = move(z.entries[i].rect)
+	}
+	for i := range z.crumbs {
+		z.crumbs[i].rect = move(z.crumbs[i].rect)
+	}
+	return z
+}
+
+// whichKeyMousePacket answers a click inside the panel: a row presses its key, a crumb goes back up to it, and any
+// other cell of the panel is swallowed so the click never reaches the editor underneath.
+func (m Model) whichKeyMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	if m.zones == nil || !m.whichKeyVisible() {
+		return nil, false
+	}
+	zones := m.zones.whichKey
+	mouse := msg.Mouse()
+	if !zones.box.Contains(mouse.X, mouse.Y) {
+		return nil, false
+	}
+	for _, zone := range zones.entries {
+		if zone.rect.Contains(mouse.X, mouse.Y) {
+			return protocol.EncodeGUIWhichKeyPress(zones.path, zone.entry.Codepoint, zone.entry.Modifiers), true
+		}
+	}
+	for _, zone := range zones.crumbs {
+		if zone.rect.Contains(mouse.X, mouse.Y) && zone.path != zones.path {
+			return protocol.EncodeGUIWhichKeyBack(zone.path), true
+		}
+	}
+	return nil, true
 }
 
 // whichKeyColumn is one drawn column: a section, or part of one when the section is split to fit.
@@ -203,25 +263,72 @@ func whichKeyShrink(columns []whichKeyColumn, width int) []whichKeyColumn {
 	return columns
 }
 
+// whichKeyGeometry is the panel's layout, shared by drawing and hit testing so a click lands on the row it shows.
+type whichKeyGeometry struct {
+	outer, inner, inset, headingRows int
+	bands                            [][]whichKeyColumn
+}
+
+func (m Model) whichKeyGeometry(which protocol.WhichKey) whichKeyGeometry {
+	outer := max(m.width-2*whichKeyMarginCols, 4)
+	inset := whichKeyInsetH.cols()
+	inner := max(outer-2-2*inset, 1)
+	headingRows := 0
+	for _, entry := range which.Entries {
+		if entry.Section != "" {
+			headingRows = 1
+			break
+		}
+	}
+	bands := whichKeyLayout(which.Entries, inner, max(m.height-m.footerRows()-2, 1), headingRows)
+	return whichKeyGeometry{outer: outer, inner: inner, inset: inset, headingRows: headingRows, bands: bands}
+}
+
+// whichKeyHits are the panel's hit targets relative to its top-left corner.
+func (m Model) whichKeyHits(which protocol.WhichKey) whichKeyPointerZones {
+	g := m.whichKeyGeometry(which)
+	zones := whichKeyPointerZones{path: which.Path}
+	y := 1
+	for band, columns := range g.bands {
+		if band > 0 {
+			y += whichKeyBandGapRows
+		}
+		y += g.headingRows
+		x := 1 + g.inset
+		for _, column := range columns {
+			for row, entry := range column.entries {
+				zones.entries = append(zones.entries, whichKeyEntryZone{rect: uiRect{X: x, Y: y + row, Width: column.outerWidth(), Height: 1}, entry: entry})
+			}
+			x += column.outerWidth() + whichKeyColumnGap.cols()
+		}
+		y += whichKeyBandRows(columns)
+	}
+	zones.box = uiRect{Width: g.outer, Height: y + 1}
+	// The crumbs sit in the top border after "╭ ", at the panel's leading edge, joined by " › ".
+	x := 2
+	for i, crumb := range which.Breadcrumb {
+		if i > 0 {
+			x += 3
+		}
+		width := displayWidth(crumb.Key)
+		if crumb.Label != "" {
+			width += 1 + displayWidth(crumb.Label)
+		}
+		zones.crumbs = append(zones.crumbs, whichKeyCrumbZone{rect: uiRect{X: x, Y: 0, Width: min(width, max(g.outer-1-x, 0)), Height: 1}, path: crumb.Path})
+		x += width
+	}
+	return zones
+}
+
 func (m Model) renderFloatingWhichKey(which protocol.WhichKey) string {
 	if len(which.Entries) == 0 || m.width < 4 {
 		return ""
 	}
 	p := m.palette()
 	surface := lipgloss.NewStyle().Background(p.PopupSurface())
-	outer := max(m.width-2*whichKeyMarginCols, 4)
-	inset := whichKeyInsetH.cols()
-	inner := max(outer-2-2*inset, 1)
-
-	titled := false
-	for _, entry := range which.Entries {
-		titled = titled || entry.Section != ""
-	}
-	headingRows := 0
-	if titled {
-		headingRows = 1
-	}
-	bands := whichKeyLayout(which.Entries, inner, max(m.height-m.footerRows()-2, 1), headingRows)
+	g := m.whichKeyGeometry(which)
+	outer, inner, inset, bands := g.outer, g.inner, g.inset, g.bands
+	titled := g.headingRows > 0
 
 	var body []string
 	for band, columns := range bands {

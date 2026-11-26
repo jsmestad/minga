@@ -41,6 +41,7 @@ func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
 		generated.OPGuiPicker:               "rendered overlay",
 		generated.OPGuiAgentChat:            "rendered overlay",
 		generated.OPGuiAgentHelp:            "rendered independent agent help",
+		generated.OPGuiTasksDrawer:          "rendered tasks drawer",
 		generated.OPGuiGutterSep:            "decoded compatibility chrome",
 		generated.OPGuiCursorline:           "rendered fallback cursorline",
 		generated.OPGuiGutter:               "rendered window gutter",
@@ -56,6 +57,7 @@ func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
 		generated.OPGuiAgentContext:         "rendered overlay",
 		generated.OPGuiHoverAction:          "rendered hover sidecar",
 		generated.OPGuiConfigState:          "Native settings state is not used by the TUI",
+		generated.OPGuiMenuBar:              "The terminal has no menu bar; the mode pill and which-key are its mouse path",
 		generated.OPGuiWorkspaces:           "rendered header",
 		generated.OPGuiNotifications:        "rendered overlay",
 		generated.OPGuiObservatory:          "rendered overlay",
@@ -74,7 +76,7 @@ func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
 		generated.OPGuiCursorAnimation:      "Terminal controls cursor animation",
 		generated.OPGuiFocusOwner:           "decoded focus ownership; BEAM retains TUI input routing",
 
-		generated.OPAgentDesktopNotification: "Terminal sessions deliver notifications independently",
+		generated.OPAgentDesktopNotification: "out-of-band needs-you alert; rings the bell, ignores withdrawals",
 	}
 	payloads := map[byte][]byte{
 		generated.OPBeginFrame:              {generated.OPBeginFrame, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1},
@@ -110,6 +112,7 @@ func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
 		generated.OPGuiPicker:               {generated.OPGuiPicker, 0},
 		generated.OPGuiAgentChat:            {generated.OPGuiAgentChat, 0},
 		generated.OPGuiAgentHelp:            {generated.OPGuiAgentHelp, 0, 0, 0, 2, 1, 0},
+		generated.OPGuiTasksDrawer:          append([]byte{generated.OPGuiTasksDrawer, 0, 0, 0, 28}, make([]byte, 28)...),
 		generated.OPGuiGutterSep:            {generated.OPGuiGutterSep, 0, 0, 0, 0, 0},
 		generated.OPGuiCursorline:           {generated.OPGuiCursorline, 0xFF, 0xFF, 0, 0, 0},
 		generated.OPGuiGutter:               {generated.OPGuiGutter, 0},
@@ -125,6 +128,7 @@ func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
 		generated.OPGuiAgentContext:         {generated.OPGuiAgentContext, 0, 0},
 		generated.OPGuiHoverAction:          {generated.OPGuiHoverAction, 0, 1, 0},
 		generated.OPGuiConfigState:          {generated.OPGuiConfigState, 0, 0},
+		generated.OPGuiMenuBar:              {generated.OPGuiMenuBar, 0, 0},
 		generated.OPGuiWorkspaces:           {generated.OPGuiWorkspaces, 0, 6, 2, 0, 0, 0, 0, 0},
 		generated.OPGuiNotifications:        {generated.OPGuiNotifications, 0, 3, 0, 0, 0},
 		generated.OPGuiObservatory:          {generated.OPGuiObservatory, 0, 0, 0, 0},
@@ -143,7 +147,7 @@ func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
 		generated.OPGuiCursorAnimation:      {generated.OPGuiCursorAnimation, 0, 1, 0},
 		generated.OPGuiFocusOwner:           {0xAA, 0, 10, 1, 8, 0, 0, 0, 7, 0, 0, 0, 9},
 
-		generated.OPAgentDesktopNotification: {generated.OPAgentDesktopNotification, 2, 17: 1, 20: 0x13, 21: 0x88},
+		generated.OPAgentDesktopNotification: {generated.OPAgentDesktopNotification, 1, 17: 1},
 	}
 
 	schemaOpcodes := make(map[byte]struct{}, len(generated.GoRequiredOpcodes)+len(generated.GoSkippedOpcodes))
