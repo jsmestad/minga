@@ -24,7 +24,7 @@
 │▌   Create test/minga_agent/usage_limit_test.exs +86                          │
 │▌   y Approve once  a Always for this session  t This turn  n Deny            │
 │▌   = Show diff  ↩ Open conversation                                          │
-│  ◐ Show the plan limit instead of "rate l…  Running subagent  i Inspect  now │
+│  ◐ Show the plan lim…  Starting Read the usage-limit fixtur…  i Inspect  now │
 │  ├─ ◐ Fact-check the reset times  Working                                now │
 │  └─ ◐ Read the usage-limit fixtures  Working                             now │
 ╰ j/k move  ↩ open  c new task  x stop  q close ───────────────────────────────╯
@@ -138,8 +138,8 @@
 19 0-0 #1e66f5 #ccd0da -
 19 1-2 #4c4f69 #ccd0da -
 19 3-3 #8839ef #ccd0da -
-19 4-45 #4c4f69 #ccd0da -
-19 46-61 #8839ef #ccd0da -
+19 4-24 #4c4f69 #ccd0da -
+19 25-61 #8839ef #ccd0da -
 19 62-63 #4c4f69 #ccd0da -
 19 64-64 #1e66f5 #ccd0da bold
 19 65-74 #4c4f69 #ccd0da -

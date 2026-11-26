@@ -33,7 +33,7 @@
 │▌ ◉ Add tests for the usage-limit classifier  Needs you · wants to change a file                                  now │
 │▌   Create test/minga_agent/usage_limit_test.exs +86                                                                  │
 │▌   y Approve once  a Always for this session  t This turn  n Deny  = Show diff  ↩ Open conversation                  │
-│  ◐ Show the plan limit instead of "rate limited"  Running subagent                                    i Inspect  now │
+│  ◐ Show the plan limit instead of "rate limited"  Starting Read the usage-limit fixtures              i Inspect  now │
 │  ├─ ◐ Fact-check the reset times  Working                                                                        now │
 │  └─ ◐ Read the usage-limit fixtures  Working                                                                     now │
 │  ○ Refactor the picker sources  Waiting · rate limited, retry in 40 s                               r Retry now  now │
@@ -180,8 +180,8 @@
 28 1-2 #adb0bb #111317 -
 28 3-3 #dd97f1 #111317 -
 28 4-51 #adb0bb #111317 -
-28 52-67 #dd97f1 #111317 -
-28 68-103 #adb0bb #111317 -
+28 52-89 #dd97f1 #111317 -
+28 90-103 #adb0bb #111317 -
 28 104-104 #50a4e9 #111317 bold
 28 105-114 #adb0bb #111317 -
 28 115-117 #595c66 #111317 -
