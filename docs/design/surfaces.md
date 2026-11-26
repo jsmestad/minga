@@ -57,7 +57,7 @@ Lists open in a bottom drawer: the tasks list, the review, diagnostics, the swit
 
 - 1 pt divider with a 5 pt hit area; height remembered per kind of buffer; double-click the divider to reset to 40%.
 - The header carries the title and the drawer's key hints. There is no second hint line above the modeline.
-- `esc` leaves a filter first, then closes. `q` closes. ⌘W closes the focused drawer. Focus returns to the window you came from.
+- `esc` leaves a filter first, then closes. `q` closes, except in the switcher, where letters type into the prompt. ⌘W closes the focused drawer. Focus returns to the window you came from.
 - One drawer at a time. Opening another drawer replaces the current one, and closing it returns to the drawer it replaced, the way Doom's popups behave. To see two things at once, use a split.
 - When a drawer opens on its own (for example from a notification), single-letter actions are ignored for 300 ms, so a letter you were typing cannot approve something.
 - Selection uses the system accent while the list is focused, the muted selection when it is not.
