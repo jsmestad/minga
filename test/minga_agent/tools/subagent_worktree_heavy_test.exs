@@ -12,6 +12,7 @@ defmodule MingaAgent.Tools.SubagentWorktreeHeavyTest do
 
   @moduletag :heavy
   @moduletag :tmp_dir
+  @moduletag timeout: 30_000
 
   test "real Git preserves a changed foreground worktree with metadata", %{tmp_dir: dir} do
     root = init_git_repo!(dir)

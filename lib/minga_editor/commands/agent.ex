@@ -2574,11 +2574,6 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  # Search input handling delegated to AgentSubStates.
-
-  @spec handle_search_key(state(), non_neg_integer()) :: state()
-  def handle_search_key(state, cp), do: AgentSubStates.handle_search_key(state, cp)
-
   # Mention completion handling delegated to AgentSubStates.
 
   @spec handle_mention_key(state(), non_neg_integer(), non_neg_integer()) :: state()

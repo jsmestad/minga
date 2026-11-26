@@ -46,7 +46,6 @@ defmodule MingaAgent.Tools.Subagent do
   @provider_ready_retry_ms 10
   @provider_ready_max_attempts 100
   @approval_unavailable_message "Subagent tool approval is unavailable because this child session has no interactive approval driver. Use only tools that need no approval, and report what else is needed back to the parent session."
-  @nested_subagent_message "A subagent cannot start its own subagents. Finish the task yourself and report what else is needed back to the parent session."
 
   @doc """
   Runs a sub-agent task.
@@ -55,10 +54,10 @@ defmodule MingaAgent.Tools.Subagent do
   """
   @spec execute(String.t(), opts()) :: {:ok, String.t()} | {:error, String.t()}
   def execute(task, opts \\ []) when is_binary(task) do
-    cond do
-      parent_context(opts).child? -> {:error, @nested_subagent_message}
-      Keyword.get(opts, :background, false) -> start_background(task, opts)
-      true -> start_foreground(task, opts)
+    if Keyword.get(opts, :background, false) do
+      start_background(task, opts)
+    else
+      start_foreground(task, opts)
     end
   end
 
@@ -79,11 +78,7 @@ defmodule MingaAgent.Tools.Subagent do
 
     case Worktree.create(project_root, worktree_opts(opts)) do
       {:ok, worktree} ->
-        child_opts =
-          opts
-          |> Keyword.put(:project_root, worktree.path)
-          |> Keyword.put(:worktree_path, worktree.path)
-          |> Keyword.put(:worktree_base_sha, worktree.base_sha)
+        child_opts = Keyword.put(opts, :project_root, worktree.path)
 
         case do_start_background(task, child_opts) do
           {:ok, result} -> {:ok, result <> Worktree.metadata(worktree)}
@@ -101,23 +96,19 @@ defmodule MingaAgent.Tools.Subagent do
     parent_session = Keyword.get(opts, :parent_session)
     model = Keyword.get(opts, :model)
 
-    case session_opts(opts) do
-      {:ok, session_opts} ->
-        sm_opts =
-          [session_opts: session_opts, model: model]
-          |> maybe_put(:worktree_path, Keyword.get(opts, :worktree_path))
-          |> maybe_put(:worktree_base_sha, Keyword.get(opts, :worktree_base_sha))
-
-        case SessionManager.start_background_subagent(manager, parent_session, task, sm_opts) do
-          {:ok, %Handle{} = handle} ->
-            {:ok, background_result(handle)}
-
-          {:error, reason} ->
-            {:error, "Failed to start background subagent: #{inspect(reason)}"}
-        end
-
+    with {:ok, session_opts} <- session_opts(opts),
+         {:ok, %Handle{} = handle} <-
+           SessionManager.start_background_subagent(manager, parent_session, task,
+             session_opts: session_opts,
+             model: model
+           ) do
+      {:ok, background_result(handle)}
+    else
       {:error, {:provider_resolution_failed, reason}} ->
         {:error, "Failed to resolve subagent provider: #{reason}"}
+
+      {:error, reason} ->
+        {:error, "Failed to start background subagent: #{inspect(reason)}"}
     end
   end
 
@@ -287,8 +278,7 @@ defmodule MingaAgent.Tools.Subagent do
               )
           ]
           |> maybe_put_thinking_level(thinking_level)
-          |> put_tool_approval_policy(opts)
-          |> Keyword.put(:child?, true)
+          |> Keyword.put(:tool_approval_policy, {:reject, @approval_unavailable_message})
 
         {:ok, session_opts}
 
@@ -297,14 +287,9 @@ defmodule MingaAgent.Tools.Subagent do
     end
   end
 
-  @spec put_tool_approval_policy(keyword(), opts()) :: keyword()
-  defp put_tool_approval_policy(session_opts, _opts) do
-    Keyword.put(session_opts, :tool_approval_policy, {:reject, @approval_unavailable_message})
-  end
-
   @spec background_result(Handle.t()) :: String.t()
   defp background_result(%Handle{} = handle) do
-    "Background subagent started. Handle: #{Handle.id(handle)}. Its result is not sent back to this conversation; the user can open it from the agent session picker."
+    "Background subagent started. Handle: #{Handle.id(handle)}. Use the agent session picker to inspect its chat."
   end
 
   # ── Context inheritance ────────────────────────────────────────────────────

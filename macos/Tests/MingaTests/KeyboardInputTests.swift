@@ -508,6 +508,26 @@ struct KeyboardInputTests {
         #expect(!EditorNSView.shouldYieldSystemCommandShortcut(modifiedQuit))
     }
 
+    // The BEAM binds ⌘S and ⌘Z for terminals that report ⌘. On macOS the menu runs them, so the key itself must
+    // never also arrive as a key press, or one press would save or undo twice.
+    @Test("⌘S, ⌘Z, ⌘[ and ⌘] go to the menu and never arrive as key presses")
+    @MainActor func platformKeysStayMenuCommands() throws {
+        let spy = SpyEncoder()
+        guard let view = makeView(spy: spy) else { return }
+
+        let keys: [(UInt16, String)] = [(1, "s"), (6, "z"), (33, "["), (30, "]")]
+        for (keyCode, character) in keys {
+            guard let event = keyEvent(
+                keyCode: keyCode, modifiers: .command, characters: character, charactersIgnoringModifiers: character
+            ) else { return }
+
+            #expect(EditorNSView.shouldYieldSystemCommandShortcut(event), "⌘\(character) belongs to the menu")
+            #expect(!view.performKeyEquivalent(with: event), "⌘\(character) must be left for the menu")
+        }
+
+        #expect(spy.keyPressCalls.isEmpty)
+    }
+
     @Test("native modal scope suspends focus reclamation and restores the editor")
     @MainActor func nativeModalFocusLifecycle() throws {
         let spy = SpyEncoder()

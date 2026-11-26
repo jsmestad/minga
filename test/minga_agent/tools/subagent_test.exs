@@ -34,40 +34,11 @@ defmodule MingaAgent.Tools.SubagentTest do
     assert_receive {:provider_prompt, provider_pid, "background task"}, @event_timeout
     [handle] = SessionManager.list_background_subagents(manager, nil)
     assert handle.session_id == session_id
-    assert Session.subagent_context(handle.pid).child?
 
     Session.subscribe(handle.pid)
     assert :ok = GatedProvider.proceed(provider_pid, "saved answer")
     assert_receive {:agent_event, _pid, {:status_changed, :idle}}, @event_timeout
     assert {:assistant, "saved answer"} in Session.messages(handle.pid)
-  end
-
-  for background? <- [true, false] do
-    @background background?
-
-    test "a child session cannot start a subagent (background: #{background?})" do
-      manager = start_session_manager()
-
-      {:ok, _id, child_pid} =
-        SessionManager.start_session(manager,
-          provider: Minga.Test.StubProvider,
-          persist?: false,
-          child?: true
-        )
-
-      assert {:error, message} =
-               Subagent.execute("nested",
-                 background: @background,
-                 parent_session: child_pid,
-                 session_manager: manager,
-                 provider: GatedProvider,
-                 provider_opts: [test_pid: self()]
-               )
-
-      assert message =~ "cannot start its own subagents"
-      refute_received {:provider_prompt, _provider_pid, "nested"}
-      assert SessionManager.list_background_subagents(manager, nil) == []
-    end
   end
 
   test "foreground execution blocks until the child returns final text" do

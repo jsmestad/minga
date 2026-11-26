@@ -2,9 +2,11 @@ defmodule MingaEditor.Input.GlobalBindings do
   @moduledoc """
   Input handler for global key bindings that work in any mode.
 
-  Currently handles Ctrl+S (save) and Ctrl+Q (quit). These bindings
+  Currently handles Ctrl+S and Cmd+S (save) and Ctrl+Q (quit). These bindings
   take priority over the mode FSM but yield to modal overlays (conflict
   prompt, picker, completion).
+
+  Cmd+S is the macOS platform key for save. It sits here beside Ctrl+S, and not in a scope as an alias under rule 5 of `docs/design/keys.md`, so that it saves in every mode as the macOS menu item does; this handler is outside the key grammar's inventory, as Ctrl+S is. The macOS app runs Save from its menu and never sends the key, so it arrives here only from a terminal that reports Cmd (the Kitty keyboard protocol). In the CUA profile the Editor scope binds Cmd+S itself and runs first, so one press saves once.
   """
 
   @behaviour MingaEditor.Input.Handler
@@ -14,13 +16,14 @@ defmodule MingaEditor.Input.GlobalBindings do
   import Bitwise
 
   @ctrl MingaEditor.Input.mod_ctrl()
+  @cmd 0x08
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
 
-  # Ctrl+S: save current buffer through the command system.
-  def handle_key(state, ?s, mods) when band(mods, @ctrl) != 0 do
+  # Ctrl+S or Cmd+S: save current buffer through the command system.
+  def handle_key(state, ?s, mods) when band(mods, @ctrl) != 0 or mods == @cmd do
     new_state = MingaEditor.dispatch_command(state, :save)
     {:handled, new_state}
   end

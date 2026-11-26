@@ -13,16 +13,12 @@ defmodule MingaAgent.SessionManager do
 
   use GenServer
 
-  alias MingaAgent.Changeset
   alias MingaAgent.Session
   alias MingaAgent.SessionListing
   alias MingaAgent.SessionStore
   alias MingaAgent.Subagent.Handle
-  alias MingaAgent.Subagent.Worktree
 
   # ── Types ──────────────────────────────────────────────────────────────────
-
-  @default_child_limit 5
 
   @typedoc "Internal state of the SessionManager."
   @type state :: %{
@@ -32,8 +28,7 @@ defmodule MingaAgent.SessionManager do
           identity_reservations_by_owner: %{pid() => String.t()},
           next_id: pos_integer(),
           session_supervisor: GenServer.server(),
-          startup_task_supervisor: GenServer.server(),
-          child_limit: pos_integer()
+          startup_task_supervisor: GenServer.server()
         }
   @type identity_reservation :: {String.t(), reference()}
   @typep identity_reservation_entry :: %{
@@ -229,37 +224,6 @@ defmodule MingaAgent.SessionManager do
     GenServer.call(manager, {:list_background_subagents, parent_session_pid})
   end
 
-  @doc "Returns the Handle for a background sub-agent by session ID."
-  @spec get_child_result(GenServer.server(), String.t()) ::
-          {:ok, Handle.t()} | {:error, :not_found}
-  def get_child_result(manager, session_id) when is_binary(session_id) do
-    GenServer.call(manager, {:get_child_result, session_id})
-  end
-
-  @doc """
-  Integrates a completed child's worktree changes into a parent changeset.
-
-  Reads each change's base and child content in the calling process, then three-way merges them onto the changeset's current content through `MingaAgent.Changeset.integrate_isolated_changes/2`. A conflict writes nothing and leaves both the changeset and the child worktree intact.
-  """
-  @spec integrate_child_changes(GenServer.server(), String.t(), Changeset.changeset()) ::
-          Changeset.integration_result()
-          | {:error, :no_changes | :not_found | {String.t(), term()}}
-  def integrate_child_changes(manager, child_session_id, changeset_pid)
-      when is_binary(child_session_id) and is_pid(changeset_pid) do
-    case get_child_result(manager, child_session_id) do
-      {:ok, %Handle{changes: changes}} when changes in [nil, []] ->
-        {:error, :no_changes}
-
-      {:ok, %Handle{worktree_path: path, worktree_base_sha: base_sha, changes: changes}} ->
-        with {:ok, entries} <- Worktree.integration_entries(path, base_sha, changes) do
-          Changeset.integrate_isolated_changes(changeset_pid, entries)
-        end
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
   @doc "Stops a session by its human-readable ID."
   @spec stop_session(String.t()) :: :ok | {:error, :not_found}
   def stop_session(session_id) when is_binary(session_id) do
@@ -402,8 +366,7 @@ defmodule MingaAgent.SessionManager do
        next_id: 1,
        session_supervisor: Keyword.get(opts, :session_supervisor, MingaAgent.Supervisor),
        startup_task_supervisor:
-         Keyword.get(opts, :startup_task_supervisor, Minga.Eval.TaskSupervisor),
-       child_limit: Keyword.get(opts, :child_limit, @default_child_limit)
+         Keyword.get(opts, :startup_task_supervisor, Minga.Eval.TaskSupervisor)
      }}
   end
 
@@ -487,17 +450,12 @@ defmodule MingaAgent.SessionManager do
   end
 
   def handle_call({:start_background_subagent, parent_session_pid, task, opts}, _from, state) do
-    with :ok <- validate_no_grandchild(state, parent_session_pid),
-         :ok <- validate_child_limit(state, parent_session_pid) do
-      case Keyword.fetch(opts, :session_opts) do
-        {:ok, session_opts} ->
-          start_background_subagent_session(state, parent_session_pid, task, opts, session_opts)
+    case Keyword.fetch(opts, :session_opts) do
+      {:ok, session_opts} ->
+        start_background_subagent_session(state, parent_session_pid, task, opts, session_opts)
 
-        :error ->
-          {:reply, {:error, :missing_session_opts}, state}
-      end
-    else
-      {:error, reason} -> {:reply, {:error, reason}, state}
+      :error ->
+        {:reply, {:error, :missing_session_opts}, state}
     end
   end
 
@@ -509,13 +467,6 @@ defmodule MingaAgent.SessionManager do
       |> Enum.sort_by(& &1.started_at, {:asc, DateTime})
 
     {:reply, handles, state}
-  end
-
-  def handle_call({:get_child_result, session_id}, _from, state) do
-    case Map.fetch(state.background_subagents, session_id) do
-      {:ok, handle} -> {:reply, {:ok, handle}, state}
-      :error -> {:reply, {:error, :not_found}, state}
-    end
   end
 
   def handle_call({:stop_session, session_id}, _from, state) do
@@ -743,7 +694,6 @@ defmodule MingaAgent.SessionManager do
         # holders such as the Editor's tab bar learn about it only through this
         # event, so it fires here too.
         broadcast_session_stopped(session_id, pid, reason)
-        state = finalize_background_subagent(state, session_id, reason)
         entry = reset_startup_delivery_after_down(entry, ref)
         entry = %{entry | pid: nil, monitor_ref: nil}
         {:noreply, finish_pending_stop(state, session_id, entry)}
@@ -776,7 +726,6 @@ defmodule MingaAgent.SessionManager do
       )
 
       broadcast_session_stopped(session_id, pid, reason)
-      state = finalize_background_subagent(state, session_id, reason)
 
       entry = %{
         entry
@@ -861,15 +810,6 @@ defmodule MingaAgent.SessionManager do
             model: Keyword.get(opts, :model),
             started_at: DateTime.utc_now()
           )
-
-        handle =
-          case {Keyword.get(opts, :worktree_path), Keyword.get(opts, :worktree_base_sha)} do
-            {path, sha} when is_binary(path) and is_binary(sha) ->
-              Handle.with_worktree(handle, path, sha)
-
-            _ ->
-              handle
-          end
 
         new_state = %{
           new_state
@@ -1225,78 +1165,6 @@ defmodule MingaAgent.SessionManager do
     end)
   end
 
-  @spec validate_no_grandchild(state(), pid() | nil) :: :ok | {:error, :grandchild_not_allowed}
-  defp validate_no_grandchild(_state, nil), do: :ok
-
-  defp validate_no_grandchild(state, parent_session_pid) when is_pid(parent_session_pid) do
-    is_child? =
-      Enum.any?(state.background_subagents, fn {_id, handle} ->
-        handle.pid == parent_session_pid
-      end)
-
-    if is_child?, do: {:error, :grandchild_not_allowed}, else: :ok
-  end
-
-  @spec validate_child_limit(state(), pid() | nil) :: :ok | {:error, :child_limit_reached}
-  defp validate_child_limit(_state, nil), do: :ok
-
-  defp validate_child_limit(state, parent_session_pid) when is_pid(parent_session_pid) do
-    count =
-      Enum.count(state.background_subagents, fn {_id, handle} ->
-        handle.parent_pid == parent_session_pid and handle.status == :running
-      end)
-
-    if count >= state.child_limit, do: {:error, :child_limit_reached}, else: :ok
-  end
-
-  @spec finalize_background_subagent(state(), String.t(), term()) :: state()
-  defp finalize_background_subagent(state, session_id, reason) do
-    case Map.fetch(state.background_subagents, session_id) do
-      {:ok, %Handle{status: :running} = handle} ->
-        updated_handle =
-          case reason do
-            :normal -> Handle.complete(handle, "completed")
-            stopped when stopped in [:shutdown, :cancelled] -> Handle.cancel(handle)
-            {:shutdown, _} -> Handle.cancel(handle)
-            other -> Handle.fail(handle, other)
-          end
-
-        updated_handle = collect_worktree_changes(updated_handle)
-        notify_parent_of_child_completion(updated_handle)
-
-        %{
-          state
-          | background_subagents: Map.put(state.background_subagents, session_id, updated_handle)
-        }
-
-      _ ->
-        state
-    end
-  end
-
-  @spec collect_worktree_changes(Handle.t()) :: Handle.t()
-  defp collect_worktree_changes(%Handle{worktree_path: nil} = handle), do: handle
-
-  defp collect_worktree_changes(%Handle{worktree_path: path, worktree_base_sha: sha} = handle)
-       when is_binary(path) and is_binary(sha) do
-    case Worktree.collect_changes_from(path, sha) do
-      {:ok, changes} -> Handle.with_changes(handle, changes)
-      {:error, _reason} -> handle
-    end
-  end
-
-  @spec notify_parent_of_child_completion(Handle.t()) :: :ok
-  defp notify_parent_of_child_completion(%Handle{parent_pid: nil}), do: :ok
-
-  defp notify_parent_of_child_completion(%Handle{parent_pid: parent_pid} = handle)
-       when is_pid(parent_pid) do
-    if Process.alive?(parent_pid) do
-      send(parent_pid, {:child_agent_completed, handle})
-    end
-
-    :ok
-  end
-
   @spec active_session_entry?(session_entry()) :: boolean()
   defp active_session_entry?(%{monitor_ref: ref}) when is_reference(ref), do: true
   defp active_session_entry?(_entry), do: false
@@ -1322,7 +1190,6 @@ defmodule MingaAgent.SessionManager do
         )
 
         broadcast_session_stopped(session_id, old_pid, {:restart_exhausted, reason})
-        state = finalize_background_subagent(state, session_id, {:restart_exhausted, reason})
         entry = %{entry | pid: nil, monitor_ref: nil, restart_state: nil, stop_pending?: true}
         {:noreply, finish_pending_stop(state, session_id, entry)}
     end
@@ -1538,13 +1405,6 @@ defmodule MingaAgent.SessionManager do
               {:restart_exhausted, restart_reason}
             )
 
-            new_state =
-              finalize_background_subagent(
-                new_state,
-                session_id,
-                {:restart_exhausted, restart_reason}
-              )
-
             terminal_entry = %{
               entry
               | pid: nil,
@@ -1580,11 +1440,8 @@ defmodule MingaAgent.SessionManager do
     end
 
     sessions = Map.delete(state.sessions, session_id)
-
-    # A child removed while still running (for example during restart backoff) settles as
-    # cancelled; finalized handles stay so their results can be retrieved later.
-    %{state | sessions: sessions}
-    |> finalize_background_subagent(session_id, :cancelled)
+    background_subagents = Map.delete(state.background_subagents, session_id)
+    %{state | sessions: sessions, background_subagents: background_subagents}
   end
 
   @spec next_restart_attempt(session_entry(), pid(), term()) ::
@@ -1678,7 +1535,6 @@ defmodule MingaAgent.SessionManager do
     background_subagents =
       state.background_subagents
       |> update_background_subagent_pid(session_id, new_pid)
-      |> bump_background_subagent_generation(session_id)
       |> update_background_subagent_parent_pid(restart_state.old_pid, new_pid)
 
     state = %{state | background_subagents: background_subagents}
@@ -2096,15 +1952,6 @@ defmodule MingaAgent.SessionManager do
   defp update_background_subagent_pid(background_subagents, session_id, pid) do
     case Map.fetch(background_subagents, session_id) do
       {:ok, handle} -> Map.put(background_subagents, session_id, Handle.with_pid(handle, pid))
-      :error -> background_subagents
-    end
-  end
-
-  @spec bump_background_subagent_generation(%{String.t() => Handle.t()}, String.t()) ::
-          %{String.t() => Handle.t()}
-  defp bump_background_subagent_generation(background_subagents, session_id) do
-    case Map.fetch(background_subagents, session_id) do
-      {:ok, handle} -> Map.put(background_subagents, session_id, Handle.next_generation(handle))
       :error -> background_subagents
     end
   end

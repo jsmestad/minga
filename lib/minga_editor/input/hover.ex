@@ -24,6 +24,8 @@ defmodule MingaEditor.Input.Hover do
   # Escape and Enter codepoints from the port protocol
   @key_escape 27
   @key_enter 13
+  # Control, Alt and Command: a key held with any of them is a chord.
+  @chord_mods 0x0E
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
@@ -70,7 +72,7 @@ defmodule MingaEditor.Input.Hover do
         @key_enter,
         mods
       )
-      when action != nil and Bitwise.band(mods, 0x0E) == 0 do
+      when action != nil and Bitwise.band(mods, @chord_mods) == 0 do
     state = MingaEditor.Shell.Traditional.HoverPopupWorkflow.dismiss(state)
     {:handled, execute_open_action(state, action)}
   end

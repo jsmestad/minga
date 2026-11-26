@@ -158,7 +158,6 @@ defmodule MingaAgent.Session do
           file_changes: [FileChange.t()],
           subscriber_lifecycle: SubscriberLifecycle.t(),
           tool_approval_policy: tool_approval_policy(),
-          child?: boolean(),
           tool_authority: map(),
           idle_gc_timeout_ms: non_neg_integer(),
           persistence: Persistence.t(),
@@ -1622,7 +1621,6 @@ defmodule MingaAgent.Session do
       file_changes: [],
       subscriber_lifecycle: SubscriberLifecycle.new(),
       tool_approval_policy: Keyword.get(opts, :tool_approval_policy, :interactive),
-      child?: Keyword.get(opts, :child?, false),
       tool_authority: %{
         options: Keyword.get(opts, :options_server, Options),
         registry: Keyword.get(provider_opts, :tool_registry, ToolRegistry),
@@ -8484,8 +8482,7 @@ defmodule MingaAgent.Session do
       thinking_level: provider_thinking_level(provider_state),
       active_skill_names:
         selected_skill_names(state, provider_active_skill_names(provider_state)),
-      project_root: provider_project_root(provider_state, state),
-      child?: state.child?
+      project_root: provider_project_root(provider_state, state)
     )
   end
 

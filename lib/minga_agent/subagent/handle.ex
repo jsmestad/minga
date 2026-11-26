@@ -5,11 +5,6 @@ defmodule MingaAgent.Subagent.Handle do
   The handle is owned by `MingaAgent.SessionManager` and projected by editor shells for status and navigation. The public, stable identifier is `session_id`; `pid` is kept for in-process routing only.
   """
 
-  @type status :: :running | :completed | :failed | :cancelled | :interrupted
-
-  @typedoc "A file change produced by a child worktree."
-  @type change :: {:added | :modified | :deleted, String.t()}
-
   @enforce_keys [:session_id, :pid, :task, :started_at]
   defstruct [
     :session_id,
@@ -18,14 +13,7 @@ defmodule MingaAgent.Subagent.Handle do
     :parent_pid,
     :task,
     :model,
-    :started_at,
-    :worktree_path,
-    :worktree_base_sha,
-    status: :running,
-    result: nil,
-    completed_at: nil,
-    generation: 1,
-    changes: nil
+    :started_at
   ]
 
   @type t :: %__MODULE__{
@@ -35,14 +23,7 @@ defmodule MingaAgent.Subagent.Handle do
           parent_pid: pid() | nil,
           task: String.t(),
           model: String.t() | nil,
-          started_at: DateTime.t(),
-          worktree_path: String.t() | nil,
-          worktree_base_sha: String.t() | nil,
-          status: status(),
-          result: String.t() | nil,
-          completed_at: DateTime.t() | nil,
-          generation: pos_integer(),
-          changes: [change()] | nil
+          started_at: DateTime.t()
         }
 
   @doc "Creates a background sub-agent handle."
@@ -73,49 +54,6 @@ defmodule MingaAgent.Subagent.Handle do
     else
       "#{session_id}: #{truncate(trimmed, 40)}"
     end
-  end
-
-  @doc "Transitions the handle to completed status with a result."
-  @spec complete(t(), String.t()) :: t()
-  def complete(%__MODULE__{status: :running} = handle, result) when is_binary(result) do
-    %{handle | status: :completed, result: result, completed_at: DateTime.utc_now()}
-  end
-
-  @doc "Transitions the handle to failed status with an inspected reason."
-  @spec fail(t(), term()) :: t()
-  def fail(%__MODULE__{status: :running} = handle, reason) do
-    %{handle | status: :failed, result: inspect(reason), completed_at: DateTime.utc_now()}
-  end
-
-  @doc "Transitions a running handle to cancelled: it was stopped before it finished."
-  @spec cancel(t()) :: t()
-  def cancel(%__MODULE__{status: :running} = handle) do
-    %{handle | status: :cancelled, result: "cancelled", completed_at: DateTime.utc_now()}
-  end
-
-  @doc "Marks a running handle as interrupted (lost during restart)."
-  @spec interrupt(t(), term()) :: t()
-  def interrupt(%__MODULE__{status: :running} = handle, reason) do
-    %{handle | status: :interrupted, result: inspect(reason), completed_at: DateTime.utc_now()}
-  end
-
-  @doc "Increments the generation counter after a session restart."
-  @spec next_generation(t()) :: t()
-  def next_generation(%__MODULE__{generation: gen} = handle) do
-    %{handle | generation: gen + 1}
-  end
-
-  @doc "Sets the worktree metadata on a handle."
-  @spec with_worktree(t(), String.t(), String.t()) :: t()
-  def with_worktree(%__MODULE__{} = handle, path, base_sha)
-      when is_binary(path) and is_binary(base_sha) do
-    %{handle | worktree_path: path, worktree_base_sha: base_sha}
-  end
-
-  @doc "Records the collected change manifest on a finalized handle."
-  @spec with_changes(t(), [change()]) :: t()
-  def with_changes(%__MODULE__{} = handle, changes) when is_list(changes) do
-    %{handle | changes: changes}
   end
 
   @doc "Returns a copy of the handle with a different pid."

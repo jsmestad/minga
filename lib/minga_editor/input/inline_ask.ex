@@ -16,6 +16,9 @@ defmodule MingaEditor.Input.InlineAsk do
   alias MingaEditor.Input.InlineOverlay, as: Overlay
   alias MingaEditor.State.InlineAsk
 
+  # Control, Alt and Command: a key held with any of them is a chord.
+  @chord_mods 0x0E
+
   @type state :: MingaEditor.Input.Handler.handler_state()
 
   @impl true
@@ -85,7 +88,7 @@ defmodule MingaEditor.Input.InlineAsk do
   # Enter held with Control, Alt or Command is not bound here, so it does nothing: Esc then Enter that arrive together
   # are Alt+Enter in a terminal without enhanced key reporting, and must not send what the person meant to drop.
   defp handle_inline_key(state, %InlineAsk{phase: :input} = ask, 13, modifiers, opts)
-       when Bitwise.band(modifiers, 0x0E) == 0,
+       when Bitwise.band(modifiers, @chord_mods) == 0,
        do: Overlay.submit(state, ask, "Type a question first", spec(opts))
 
   defp handle_inline_key(state, %InlineAsk{phase: :input} = ask, codepoint, _modifiers, opts)
