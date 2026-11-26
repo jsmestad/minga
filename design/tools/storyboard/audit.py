@@ -290,6 +290,24 @@ def modeline(audit, frame, parts, mac):
             audit.flag(frame, "modeline.segment", "nothing clips", "inside the modeline", segment["frame"])
 
 
+def queue_header(audit, frame, parts, mac):
+    titles = by_part(parts, "queue.title")
+    summaries = by_part(parts, "queue.summary")
+    if frame["scenario"] in {"minga.queue", "minga.queue.empty"}:
+        for name, found in [("queue.title", titles), ("queue.summary", summaries)]:
+            if not found:
+                audit.flag(frame, name, "part tagged", "shown in the focused queue header", "none")
+    if not titles or not summaries or titles[0].get("missing") or summaries[0].get("missing"):
+        return
+    title = titles[0]["frame"]
+    summary = summaries[0]["frame"]
+    tolerance = MAC_TOLERANCE if mac else 0
+    if title[0] + title[2] > summary[0] + tolerance:
+        audit.flag(frame, "queue.summary", "header order", "after the title", summary)
+    if title[1] >= summary[1] + summary[3] or summary[1] >= title[1] + title[3]:
+        audit.flag(frame, "queue.summary", "header line", "on the title's row", summary)
+
+
 def tui_contrast(audit, frame, path):
     from renders import parse_tui  # noqa: E402
 
@@ -423,6 +441,7 @@ def run_audit(out, frontends):
                     audit.flag(frame, part["part"], "part located", "located in the frame", part.get("text", ""))
             which_key(audit, frame, parts, mac)
             modeline(audit, frame, parts, mac)
+            queue_header(audit, frame, parts, mac)
             if mac:
                 mac_contrast(audit, frame, export)
             else:

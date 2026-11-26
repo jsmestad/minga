@@ -308,4 +308,9 @@ const (
 	agentTranscriptInset = spaceXL
 	// agentTranscriptBodyIndent indents a user message body and the turn separator under the speaker label.
 	agentTranscriptBodyIndent = spaceSection
+
+	// Queue header and row spacing inside the conversation column.
+	agentQueueInset     = spaceMD
+	agentQueueHeaderGap = spaceXL
+	agentQueueHintGap   = spaceXS
 )

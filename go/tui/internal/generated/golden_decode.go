@@ -34,6 +34,9 @@ func GoldenDecode(name string, payload []byte) (any, int, error) {
 	case "GuiAgentContextFields":
 		v, n, err := DecodeGuiAgentContextFields(payload, 0, len(payload))
 		return v, n, err
+	case "GuiAgentQueueFields":
+		v, n, err := DecodeGuiAgentQueueFields(payload, 0, len(payload))
+		return v, n, err
 	case "GuiBottomPanelFields":
 		v, n, err := DecodeGuiBottomPanelFields(payload, 0, len(payload))
 		return v, n, err

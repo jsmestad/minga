@@ -55,7 +55,7 @@ defmodule Minga.Test.Storyboard.Session do
 
   `:minga` puts Minga in an Agent status before the first key, for example `:thinking` for "Minga is working". The status goes into the editor's live presentation cache, the value every surface reads, so the modeline, the activity card and the rest show it the way they would for a running session. The factory has no running session, so nothing changes the status afterwards.
 
-  `:conversation` starts a real Agent session before the first key, so `SPC a v` opens a conversation that already has a transcript and a turn. It takes `messages:` (`MingaAgent.Message` values seeded into the transcript, default none), `prompt:` (the message that starts the turn), `turn:` (`:idle`, `:working` or `:stopped`, default `:idle`) and `queue:` (follow-up messages queued while Minga works, kept by a stop). The session runs on a provider that never finishes a turn, so a working turn stays working; the fixture returns to the file before the first key, as the cold start expects.
+  `:conversation` starts a real Agent session before the first key. It takes `messages:`, `notices:`, `prompt:`, `turn:` (`:idle`, `:working` or `:stopped`), and `queue:` (follow-up messages queued while Minga works). Its provider never finishes a turn. By default the fixture returns to the file before the first key, so `SPC a v` opens the seeded conversation. Set `open?: true` when the scenario begins inside that conversation.
 
   The storyboard renderer (#4036) adds four more: `:root` (a fixed project directory, so the path the chrome shows is the same on every machine; the caller keeps it unique among concurrent sessions in one run, and the directory is written atomically and never deleted, so concurrent runs on one machine can share it), `:theme` (a built-in theme name such as `:astrodark`, set on a private options server before the editor starts), `:capabilities` (the `MingaEditor.Frontend.Capabilities` the frontend would report), and `:record_packets` (keep every packet for `packets/1`).
   """
@@ -127,7 +127,9 @@ defmodule Minga.Test.Storyboard.Session do
           notices: [{String.t(), :info | :warning | :error}],
           prompt: String.t(),
           turn: :idle | :working | :stopped,
-          queue: [String.t()]
+          queue: [String.t()],
+          draft: String.t(),
+          open?: boolean()
         ]
 
   @spec conversation_editor_opts(conversation() | nil) :: keyword()
@@ -156,7 +158,9 @@ defmodule Minga.Test.Storyboard.Session do
         notices: [],
         prompt: nil,
         turn: :idle,
-        queue: []
+        queue: [],
+        draft: "",
+        open?: false
       )
 
     EditorCase.send_keys_sync(ctx, "1")
@@ -185,11 +189,34 @@ defmodule Minga.Test.Storyboard.Session do
 
     run_turn(ctx, session, conversation)
     await_transcript!(ctx, session)
-    EditorCase.send_keys_sync(ctx, "<Esc><Esc><SPC>av")
 
-    EditorCase.wait_until(ctx, &(not &1.workspace.agent_ui.panel.visible),
+    if conversation[:open?] do
+      await_queue_contents!(ctx, conversation[:queue])
+      if conversation[:draft] != "", do: EditorCase.send_keys_sync(ctx, conversation[:draft])
+    else
+      EditorCase.send_keys_sync(ctx, "<Esc><Esc><SPC>av")
+
+      EditorCase.wait_until(ctx, &(not &1.workspace.agent_ui.panel.visible),
+        max_attempts: 500,
+        message: "expected the storyboard conversation's split to close before the first key"
+      )
+    end
+
+    :ok
+  end
+
+  @spec await_queue_contents!(EditorCase.editor_ctx(), [String.t()]) :: :ok
+  defp await_queue_contents!(ctx, expected) do
+    EditorCase.wait_until(
+      ctx,
+      fn state ->
+        case state.workspace.agent_ui.queue.contents do
+          %{pending: pending} -> Enum.map(pending, & &1.preview) == expected
+          _loading -> false
+        end
+      end,
       max_attempts: 500,
-      message: "expected the storyboard conversation's split to close before the first key"
+      message: "expected the open conversation to display its seeded queue"
     )
 
     :ok
@@ -415,7 +442,24 @@ defmodule Minga.Test.Storyboard.Session do
   def press(%__MODULE__{ctx: ctx} = session, steps) when is_list(steps) do
     Enum.each(steps, &step(ctx, &1))
     await_picker_fetch!(ctx)
+    await_queue_edit!(ctx)
     session
+  end
+
+  @spec await_queue_edit!(EditorCase.editor_ctx()) :: :ok
+  defp await_queue_edit!(ctx) do
+    case EditorCase.editor_state(ctx).workspace.agent_ui.queue.edit_request do
+      ref when is_reference(ref) ->
+        EditorCase.wait_until(ctx, &(&1.workspace.agent_ui.queue.edit_request != ref),
+          max_attempts: 500,
+          message: "expected the queue's Enter action to settle"
+        )
+
+      nil ->
+        :ok
+    end
+
+    :ok
   end
 
   @doc "Sends one semantic click and waits until the editor has handled it."

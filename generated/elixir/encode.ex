@@ -176,6 +176,17 @@ defmodule Minga.Protocol.Encode do
   def encode_operation_status(:stale), do: 8
   def encode_operation_status(_), do: 1
 
+  @spec encode_agent_queue_action(atom()) :: non_neg_integer()
+  def encode_agent_queue_action(:select), do: 0
+  def encode_agent_queue_action(:remove), do: 1
+  def encode_agent_queue_action(:paste_after), do: 2
+  def encode_agent_queue_action(:paste_before), do: 3
+  def encode_agent_queue_action(:edit), do: 4
+  def encode_agent_queue_action(:close), do: 5
+  def encode_agent_queue_action(:composer), do: 6
+  def encode_agent_queue_action(:unknown), do: 255
+  def encode_agent_queue_action(_), do: 255
+
   @spec encode_composer_hint(map()) :: iodata()
   def encode_composer_hint(model), do: encode_composer_hint(model, :composer_hint, [])
 
@@ -599,6 +610,33 @@ defmodule Minga.Protocol.Encode do
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:age | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :age)),
       (fn items -> count = Enum.count(items); validate_uint!(command, [:detail | path], count, 255); [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_tasks_drawer_line(value, command, [index | [:detail | path]]) end)] end).(Map.fetch!(model, :detail)),
       (fn items -> count = Enum.count(items); validate_uint!(command, [:actions | path], count, 255); [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_tasks_drawer_hint(value, command, [index | [:actions | path]]) end)] end).(Map.fetch!(model, :actions)),
+    ]
+  end
+
+  @spec encode_agent_queue_hint(map()) :: iodata()
+  def encode_agent_queue_hint(model), do: encode_agent_queue_hint(model, :agent_queue_hint, [])
+
+  @spec encode_agent_queue_hint(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_agent_queue_hint(model, command, path) do
+    [
+      (fn value -> validate_uint!(command, [:action | path], value, 255); <<value::8>> end).(encode_agent_queue_action(Map.fetch!(model, :action))),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:key | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :key)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:label | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :label)),
+    ]
+  end
+
+  @spec encode_agent_queue_row(map()) :: iodata()
+  def encode_agent_queue_row(model), do: encode_agent_queue_row(model, :agent_queue_row, [])
+
+  @spec encode_agent_queue_row(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_agent_queue_row(model, command, path) do
+    [
+      (fn value -> validate_uint!(command, [:id | path], value, 18446744073709551615); <<value::64>> end).(Map.fetch!(model, :id)),
+      (fn value -> validate_uint!(command, [:revision | path], value, 18446744073709551615); <<value::64>> end).(Map.fetch!(model, :revision)),
+      (fn value -> validate_uint!(command, [:kind | path], value, 255); <<value::8>> end).(Map.fetch!(model, :kind)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:label | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :label)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:preview | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :preview)),
+      (fn value -> validate_uint!(command, [:attachment_count | path], value, 65535); <<value::16>> end).(Map.fetch!(model, :attachment_count)),
     ]
   end
 
@@ -1624,6 +1662,33 @@ defmodule Minga.Protocol.Encode do
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:prompt | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :prompt)),
       (fn value -> validate_uint!(command, [:has_empty | path], value, 255); <<value::8>> end).(Map.fetch!(model, :has_empty)),
       encode_empty_list(Map.fetch!(model, :empty), command, [:empty | path]),
+    ]
+  end
+
+  @spec encode_gui_agent_queue(map()) :: iodata()
+  def encode_gui_agent_queue(model), do: encode_gui_agent_queue(model, :gui_agent_queue, [])
+
+  @spec encode_gui_agent_queue(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_gui_agent_queue(model, command, path) do
+    [
+      (fn value -> validate_uint!(command, [:visible | path], value, 255); <<value::8>> end).(Map.fetch!(model, :visible)),
+      if Map.fetch!(model, :visible) == 1 do
+        [
+          (fn value -> validate_uint!(command, [:focused | path], value, 255); <<value::8>> end).(Map.fetch!(model, :focused)),
+          (fn value -> validate_uint!(command, [:workspace_id | path], value, 4294967295); <<value::32>> end).(Map.fetch!(model, :workspace_id)),
+          (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:record_id | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :record_id)),
+          (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:title | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :title)),
+          (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:summary | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :summary)),
+          (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:removed_note | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :removed_note)),
+          (fn value -> validate_uint!(command, [:selected_id | path], value, 18446744073709551615); <<value::64>> end).(Map.fetch!(model, :selected_id)),
+          (fn items -> count = Enum.count(items); validate_uint!(command, [:hints | path], count, 255); [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_agent_queue_hint(value, command, [index | [:hints | path]]) end)] end).(Map.fetch!(model, :hints)),
+          (fn items -> count = Enum.count(items); validate_uint!(command, [:pending | path], count, 255); [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_agent_queue_row(value, command, [index | [:pending | path]]) end)] end).(Map.fetch!(model, :pending)),
+          (fn items -> count = Enum.count(items); validate_uint!(command, [:removed | path], count, 255); [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_agent_queue_row(value, command, [index | [:removed | path]]) end)] end).(Map.fetch!(model, :removed)),
+          encode_empty_list(Map.fetch!(model, :empty), command, [:empty | path]),
+        ]
+      else
+        []
+      end
     ]
   end
 

@@ -1014,7 +1014,6 @@ exits = [
   { key = "r", click = "Review row", to = "minga.review.buffer" },
   { key = "i", click = "Inspect row", to = "minga.subagent.peek" },
   { key = "w", click = "Watch row", to = "terminal.minga_shell" },
-  { key = "J", click = "Queued inputs row", to = "minga.queue" },
   { key = "u", click = "Reject all row", to = "minga.reject_all.confirm" },
   { key = "esc", click = "click outside", to = "edit.working" },
   { key = "backspace", click = "breadcrumb SPC", to = "edit.whichkey.leader" },
@@ -1097,7 +1096,7 @@ status = "designed"
 boards = { macos = "V41Talk.dc.html", tui = "V41TuiTalkOpen.dc.html" }
 exits = [
   { key = "↩ (Normal) or ⌘↩", click = "Send", to = "minga.conversation" },
-  { key = "⌥↩", click = "", to = "minga.queue" },
+  { key = "esc esc SPC a q q", click = "Queue", to = "minga.queue" },
   { key = "⌘. or SPC a s", click = "Stop", to = "minga.conversation.stopped" },
   { key = "SPC a r", click = "2 files changed · review", to = "minga.review.buffer" },
   { key = "↩ on a Started line", click = "Started line", to = "minga.subagent.peek" },
@@ -1324,7 +1323,7 @@ status = "designed"
 boards = { macos = "Batch1_minga_conversation_stopped.dc.html", tui = "Batch1_minga_conversation_stopped.dc.html" }
 exits = [
   { key = "↩ (composer)", click = "Continue", to = "minga.conversation" },
-  { key = "⌥↩", click = "Queue", to = "minga.queue" },
+  { key = "esc esc SPC a q q", click = "Queue", to = "minga.queue" },
   { key = "SPC a r", click = "Review", to = "minga.review.buffer" },
   { key = "esc esc SPC a v", click = "close split", to = "edit.plain" },
   { key = "q (Normal mode, outside the composer)", click = "", to = "edit.plain" },
@@ -1341,6 +1340,7 @@ frontends = ["macos", "tui"]
 status = "designed"
 boards = { macos = "Batch4_git_ext_queue_empty.dc.html", tui = "Batch4_git_ext_queue_empty.dc.html" }
 exits = [
+  { key = "↩", click = "Back to the composer", to = "minga.conversation" },
   { key = "q", click = "close", to = "minga.conversation" },
 ]
 

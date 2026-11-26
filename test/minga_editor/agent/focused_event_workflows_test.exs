@@ -134,7 +134,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
       |> TabBar.find_workspace_by_session(session)
 
     for kind <- [:steering, :follow_up] do
-      updated = SessionEventWorkflow.prompt_queued(state, "q3\nMore detail", kind)
+      updated = SessionEventWorkflow.prompt_queued(state, session, "q3\nMore detail", kind)
 
       workspace =
         updated.shell_runtime.state

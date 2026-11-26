@@ -28,6 +28,7 @@ defmodule MingaEditor.StatusBar.Data do
   alias MingaAgent.Session.ConnectionTarget
   alias MingaAgent.StatusCommand
   alias MingaEditor.Agent.Activity
+  alias MingaEditor.Agent.QueueSurface
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.WorkspaceStatus
   alias MingaEditor.Agent.UIState.Panel
@@ -101,8 +102,7 @@ defmodule MingaEditor.StatusBar.Data do
         theme,
         modeline_segments_table
       ) do
-    segments =
-      Modeline.gui_segments(data_to_modeline_data(common), theme, modeline_segments_table)
+    segments = Modeline.gui_segments(to_modeline_data(data), theme, modeline_segments_table)
 
     %{data | common: %{common | status: %{status | modeline_segments: segments}}}
   end
@@ -422,19 +422,30 @@ defmodule MingaEditor.StatusBar.Data do
   @spec build_agent_data(EditorState.t() | map()) :: t()
   defp build_agent_data(state) do
     panel = state.workspace.agent_ui.panel
+    queue_focused? = state.workspace.keymap_scope == :queue
 
     %__MODULE__{
       common:
         state
         |> build_common_data(state.workspace.buffers.active, "[no file]")
+        |> apply_queue_modeline_name(queue_focused?)
         |> apply_agent_modeline_theme(state),
       content: %StatusAgent{
         model_name: if(panel.model_name != "", do: panel.model_name, else: "Agent"),
         session_status: agent_session_status(state),
-        message_count: UIState.TranscriptProjection.turn_count(panel.transcript)
+        message_count: UIState.TranscriptProjection.turn_count(panel.transcript),
+        queue_focused?: queue_focused?
       }
     }
   end
+
+  @spec apply_queue_modeline_name(Common.t(), boolean()) :: Common.t()
+  defp apply_queue_modeline_name(%Common{status: status} = common, true) do
+    file = %StatusFile{name: QueueSurface.buffer_name(), filetype: :text}
+    %{common | status: %{status | file: file, dirty?: false}}
+  end
+
+  defp apply_queue_modeline_name(common, false), do: common
 
   # The status bar shows the same Agent status as the workspace pill and the
   # activity strip, named through the same token table.
@@ -623,6 +634,9 @@ defmodule MingaEditor.StatusBar.Data do
   Both variants carry the same common fields and produce identical modeline data.
   """
   @spec to_modeline_data(t()) :: MingaEditor.Shell.Traditional.Modeline.modeline_data()
+  def to_modeline_data(%__MODULE__{common: common, content: %StatusAgent{queue_focused?: true}}),
+    do: Map.put(data_to_modeline_data(common), :queue_focused?, true)
+
   def to_modeline_data(%__MODULE__{common: %Common{} = common}), do: data_to_modeline_data(common)
 
   @spec data_to_modeline_data(Common.t()) ::

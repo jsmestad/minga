@@ -328,6 +328,9 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 		// Borders, counts and empty rows never fall through to text.
 		return nil, true
 	}
+	if m.queueViewport.box.Contains(mouse.X, mouse.Y) && !m.floatingOverlayContains(mouse.X, mouse.Y) {
+		return nil, true // The flushed View alone can activate queue targets.
+	}
 	if packet, ok := m.agentDisplayedControlPacket(msg); ok {
 		return packet, true
 	}
@@ -676,7 +679,8 @@ func (m Model) presentedMouseHandler(layers []*lipgloss.Layer) func(tea.MouseMsg
 			agent = m.presentedComposerHandler()
 		}
 	}
-	if git == nil && agent == nil {
+	queue := m.presentedAgentQueueHandler(layers)
+	if git == nil && agent == nil && queue == nil {
 		return nil
 	}
 	return func(msg tea.MouseMsg) tea.Cmd {
@@ -684,6 +688,9 @@ func (m Model) presentedMouseHandler(layers []*lipgloss.Layer) func(tea.MouseMsg
 		if ok && click.Button == tea.MouseLeft {
 			if git != nil {
 				git(click)
+			}
+			if !claim.claimed && queue != nil {
+				queue(click)
 			}
 			if !claim.claimed && agent != nil {
 				agent(click)

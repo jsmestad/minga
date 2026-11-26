@@ -121,6 +121,7 @@ type ChromePayload struct {
 	AgentContext        AgentContext
 	AgentChat           AgentChat
 	AgentHelp           AgentHelp
+	AgentQueue          generated.GuiAgentQueueFields
 	AgentTranscript     AgentTranscript
 	Timeline            EditTimeline
 	TasksDrawer         generated.GuiTasksDrawerFields

@@ -624,6 +624,24 @@ The envelope is `opcode(1) + payload_length(4, big-endian) + payload`, with the 
 
 The terminal reserves the drawer's rows: the Go frontend draws it in the `tasks_drawer` surface placement, numeric ID 28, a real split above the timeline and footer. Native frontends draw it as a view beneath the editor, so the reported grid shrinks. Clicks send `tasks_drawer_action` with the row's identity.
 
+### 0xAE: gui_agent_queue
+
+The conversation queue sits above the composer. The BEAM ships all pending and recently removed messages, even if only a few rows fit. The frontend owns the block height and local scroll offset. Keyboard focus is the `gui_focus_owner` surface `15` with the editor-view responder, not the composer.
+
+The envelope is `opcode(1) + payload_length(u32) + payload`. A hidden queue sends exactly `visible = 0` and nothing else. A visible queue sends these fields in order, with big-endian numbers:
+
+| Field | Encoding |
+|---|---|
+| Visibility, focus | `visible(u8) = 1 + focused(u8)` |
+| Conversation | `workspace_id(u32) + record_id(string16)` |
+| Header | `title(string16) + summary(string16) + removed_note(string16)` |
+| Selection | `selected_id(u64)`, `0` for no pending selection |
+| Hints | `count(u8)` then `action(u8) + key(string8) + label(string16)` for each |
+| Pending and removed lists | Each has its own `count(u8)`, then `id(u64) + revision(u64) + kind(u8) + label(string8) + preview(string16) + attachment_count(u16)` per row |
+| Empty state | Shared `empty_list`; a blank title means absent |
+
+Row kind is `0` for steering and `1` for a future turn. A row's label is display text, never an activation target. `agent_queue_action` carries the exact conversation, selected or clicked pending row, and the removed row to put back. Follow the selected pending row when its identity changes. Wheel movement within the block is local and does not scroll the transcript.
+
 
 ### 0x79 — gui_gutter_separator
 
@@ -1420,6 +1438,7 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x73 | which_key_press | `path(string16) + codepoint(4) + modifiers(1)` | Press a which-key row's key, as if typed. `path` is the open panel's path from `gui_which_key`; the BEAM presses the key only while that panel is still open, so a click on a stale panel does nothing. |
 | 0x74 | which_key_back | `path(string16)` | Go back up to a breadcrumb crumb's `path`. The BEAM goes up only while the open panel is below that path. |
 | 0x75 | agent_continue_turn | `session_id(string16) + request_id(string16)` | Continue the interrupted request shown by the stopped conversation. A stale action cannot continue a replacement turn. This action does not send or clear the draft or advance the queue. |
+| 0x76 | agent_queue_action | `action(u8) + workspace_id(u32) + record_id(string16) + row_id(u64) + row_revision(u64) + removed_id(u64) + removed_revision(u64)` | `0` select, `1` remove, `2` put back after, `3` put back before, `4` edit, `5` close, `6` return to the composer from empty. Send the displayed pending pair for select, remove, edit and both placement actions. Placement also names the displayed removed pair. Close and empty use no pairs. An absent pair is two zeroes. A stale conversation or row leaves the queue unchanged. |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |

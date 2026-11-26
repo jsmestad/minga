@@ -1448,8 +1448,13 @@ defmodule MingaEditor do
   def handle_info({:agent_question_attachment, session, receipt}, state)
       when is_pid(session) and node(session) != node() and is_binary(receipt) and
              byte_size(receipt) == 32 do
-    state = MingaEditor.Agent.QuestionResponse.bind_remote_attachment(state, session, receipt)
-    {:noreply, MingaEditor.Agent.DraftWorkflow.driver_reattached(state, session)}
+    state =
+      state
+      |> MingaEditor.Agent.QuestionResponse.bind_remote_attachment(session, receipt)
+      |> MingaEditor.Agent.DraftWorkflow.driver_reattached(session)
+      |> MingaEditor.Agent.QueueWorkflow.refresh(session)
+
+    {:noreply, state}
   end
 
   def handle_info({:agent_question_response_failed, offer, reason}, state) do

@@ -9,18 +9,17 @@ Spaces · folder minga.conversation.stopped (1 tab) · ▎cpu A 429 with usage_l
  ▌ 󰚩 Show the plan limit and…
  󰚩 Agent  Resolving model…                                                                                  Stopped  [Tasks] [History] [Help] [Queue]
   Transcript ──────────────────────────────────────────────────────────────────────────────────────────────────────── │ ╭ ◇ Session ────────────────╮
-   i System  Session started · 09:41:00 UTC                                                                           │ │ Provider  unknown         │
-                                                                                                                      │ │ Model     Resolving model…│
-   You                                                                                                                │ │ State     Stopped         │
-     Show the plan limit and when it resets instead of "rate limited".                                                │ │ Messages  12              │
-                                                                                                                      │ │ Tools     4 · 0 running · │
-   Minga                                                                                                              │ │ ─── Needs attention ──────│
-     A 429 with usage_limit_reached is its own case. I'll carry the plan, window and reset time on the error.         │ │ Error     Could not run `m│
-   ● Read lib/native.ex                                                                                               │ │ ─── Hints ────────────────│
-   ● Edited lib/retry.ex                                                                                              │ │ Tab  complete             │
-   ◆ Could not run `mix test test/retry_test.exs`                                                                     │ │ ?  agent help             │
-   ○ Stopped while finding lib/other.ex                                                                               │ ╰───────────────────────────╯
-                                                                                                                      │
+                                                                                                                      │ │ Provider  unknown         │
+   You                                                                                                                │ │ Model     Resolving model…│
+     Show the plan limit and when it resets instead of "rate limited".                                                │ │ State     Stopped         │
+                                                                                                                      │ │ Messages  12              │
+   Minga                                                                                                              │ │ Tools     4 · 0 running · │
+     A 429 with usage_limit_reached is its own case. I'll carry the plan, window and reset time on the error.         │ │ ─── Needs attention ──────│
+   ● Read lib/native.ex                                                                                               │ │ Error     Could not run `m│
+   ● Edited lib/retry.ex                                                                                              │ │ ─── Hints ────────────────│
+   ◆ Could not run `mix test test/retry_test.exs`                                                                     │ │ Tab  complete             │
+   ○ Stopped while finding lib/other.ex                                                                               │ │ ?  agent help             │
+                                                                                                                      │ ╰───────────────────────────╯
    i System  Saved the retry notes to lib/native/usage_limit/notes.md; open that file to review the plan, window      │
              and reset time.                                                                                          │
                                                                                                                       │
@@ -33,8 +32,9 @@ Spaces · folder minga.conversation.stopped (1 tab) · ▎cpu A 429 with usage_l
    i System  Stopped                                                                                                  │
                                                                                                                       │
    i System  Agent UI registry online                                                                                 │
-                                                                                                                      │
   2 messages · Stopped                                                                                                │
+  *minga-queue*  1 queued, kept                                                                                       │
+  1 Then run the session tests and fix what fails.                                                                    │
  ╭ Prompt                                                                                                           ╮ │
  │ ❯ INSERT  Ask Minga to edit, explain, search, or run tools                                                       │ │
  │Continue · Steer · Queue Next · Stop · Attachments · esc ↩ continue · ⌥↩ queue · esc normal                       │ │
@@ -76,26 +76,23 @@ No changed files
 3 121-131 #8caaee #303446 bold
 3 132-148 #838ba7 #303446 -
 3 149-149 #c6d0f5 #303446 -
-4 0-2 #c6d0f5 #303446 -
-4 3-10 #8caaee #303446 bold
-4 11-42 #838ba7 #303446 -
-4 43-116 #c6d0f5 #303446 -
+4 0-116 #c6d0f5 #303446 -
 4 117-120 #838ba7 #303446 -
 4 121-121 #c6d0f5 #303446 -
 4 122-129 #838ba7 #303446 -
 4 130-147 #c6d0f5 #303446 -
 4 148-148 #838ba7 #303446 -
 4 149-149 #c6d0f5 #303446 -
-5 0-116 #c6d0f5 #303446 -
+5 0-0 #c6d0f5 #303446 -
+5 1-5 #8caaee #303446 bold
+5 6-116 #c6d0f5 #303446 -
 5 117-120 #838ba7 #303446 -
 5 121-121 #c6d0f5 #303446 -
 5 122-126 #838ba7 #303446 -
 5 127-147 #c6d0f5 #303446 -
 5 148-148 #838ba7 #303446 -
 5 149-149 #c6d0f5 #303446 -
-6 0-0 #c6d0f5 #303446 -
-6 1-5 #8caaee #303446 bold
-6 6-116 #c6d0f5 #303446 -
+6 0-116 #c6d0f5 #303446 -
 6 117-120 #838ba7 #303446 -
 6 121-121 #c6d0f5 #303446 -
 6 122-126 #838ba7 #303446 -
@@ -109,7 +106,9 @@ No changed files
 7 130-147 #c6d0f5 #303446 -
 7 148-148 #838ba7 #303446 -
 7 149-149 #c6d0f5 #303446 -
-8 0-116 #c6d0f5 #303446 -
+8 0-0 #c6d0f5 #303446 -
+8 1-7 #ca9ee6 #303446 bold
+8 8-116 #c6d0f5 #303446 -
 8 117-120 #838ba7 #303446 -
 8 121-121 #c6d0f5 #303446 -
 8 122-126 #838ba7 #303446 -
@@ -117,8 +116,8 @@ No changed files
 8 148-148 #838ba7 #303446 -
 8 149-149 #c6d0f5 #303446 -
 9 0-0 #c6d0f5 #303446 -
-9 1-7 #ca9ee6 #303446 bold
-9 8-116 #c6d0f5 #303446 -
+9 1-4 #a6d189 #303446 -
+9 5-116 #c6d0f5 #303446 -
 9 117-120 #838ba7 #303446 -
 9 121-121 #c6d0f5 #303446 -
 9 122-124 #838ba7 #303446 -
@@ -126,8 +125,8 @@ No changed files
 9 142-148 #838ba7 #303446 -
 9 149-149 #c6d0f5 #303446 -
 10 0-0 #c6d0f5 #303446 -
-10 1-4 #a6d189 #303446 -
-10 5-116 #c6d0f5 #303446 -
+10 1-3 #a6d189 #303446 -
+10 4-116 #c6d0f5 #303446 -
 10 117-120 #838ba7 #303446 -
 10 121-121 #c6d0f5 #303446 -
 10 122-126 #838ba7 #303446 -
@@ -144,7 +143,7 @@ No changed files
 11 132-148 #838ba7 #303446 -
 11 149-149 #c6d0f5 #303446 -
 12 0-0 #c6d0f5 #303446 -
-12 1-3 #a6d189 #303446 -
+12 1-3 #e78284 #303446 -
 12 4-116 #c6d0f5 #303446 -
 12 117-120 #838ba7 #303446 -
 12 121-121 #c6d0f5 #303446 -
@@ -154,7 +153,7 @@ No changed files
 12 148-148 #838ba7 #303446 -
 12 149-149 #c6d0f5 #303446 -
 13 0-0 #c6d0f5 #303446 -
-13 1-3 #e78284 #303446 -
+13 1-3 #838ba7 #303446 -
 13 4-116 #c6d0f5 #303446 -
 13 117-120 #838ba7 #303446 -
 13 121-121 #c6d0f5 #303446 -
@@ -163,72 +162,76 @@ No changed files
 13 135-147 #c6d0f5 #303446 -
 13 148-148 #838ba7 #303446 -
 13 149-149 #c6d0f5 #303446 -
-14 0-0 #c6d0f5 #303446 -
-14 1-3 #838ba7 #303446 -
-14 4-116 #c6d0f5 #303446 -
+14 0-116 #c6d0f5 #303446 -
 14 117-148 #838ba7 #303446 -
 14 149-149 #c6d0f5 #303446 -
-15 0-116 #c6d0f5 #303446 -
+15 0-2 #c6d0f5 #303446 -
+15 3-10 #8caaee #303446 bold
+15 11-111 #838ba7 #303446 -
+15 112-116 #c6d0f5 #303446 -
 15 117-119 #838ba7 #303446 -
 15 120-149 #c6d0f5 #303446 -
-16 0-2 #c6d0f5 #303446 -
-16 3-10 #8caaee #303446 bold
-16 11-111 #838ba7 #303446 -
-16 112-116 #c6d0f5 #303446 -
+16 0-10 #c6d0f5 #303446 -
+16 11-27 #838ba7 #303446 -
+16 28-116 #c6d0f5 #303446 -
 16 117-119 #838ba7 #303446 -
 16 120-149 #c6d0f5 #303446 -
-17 0-10 #c6d0f5 #303446 -
-17 11-27 #838ba7 #303446 -
-17 28-116 #c6d0f5 #303446 -
+17 0-116 #c6d0f5 #303446 -
 17 117-119 #838ba7 #303446 -
 17 120-149 #c6d0f5 #303446 -
-18 0-116 #c6d0f5 #303446 -
+18 0-0 #c6d0f5 #303446 -
+18 1-5 #8caaee #303446 bold
+18 6-116 #c6d0f5 #303446 -
 18 117-119 #838ba7 #303446 -
 18 120-149 #c6d0f5 #303446 -
-19 0-0 #c6d0f5 #303446 -
-19 1-5 #8caaee #303446 bold
-19 6-116 #c6d0f5 #303446 -
+19 0-116 #c6d0f5 #303446 -
 19 117-119 #838ba7 #303446 -
 19 120-149 #c6d0f5 #303446 -
 20 0-116 #c6d0f5 #303446 -
 20 117-119 #838ba7 #303446 -
 20 120-149 #c6d0f5 #303446 -
-21 0-116 #c6d0f5 #303446 -
+21 0-0 #c6d0f5 #303446 -
+21 1-7 #ca9ee6 #303446 bold
+21 8-116 #c6d0f5 #303446 -
 21 117-119 #838ba7 #303446 -
 21 120-149 #c6d0f5 #303446 -
 22 0-0 #c6d0f5 #303446 -
-22 1-7 #ca9ee6 #303446 bold
-22 8-116 #c6d0f5 #303446 -
+22 1-4 #a6d189 #303446 -
+22 5-116 #c6d0f5 #303446 -
 22 117-119 #838ba7 #303446 -
 22 120-149 #c6d0f5 #303446 -
-23 0-0 #c6d0f5 #303446 -
-23 1-4 #a6d189 #303446 -
-23 5-116 #c6d0f5 #303446 -
+23 0-116 #c6d0f5 #303446 -
 23 117-119 #838ba7 #303446 -
 23 120-149 #c6d0f5 #303446 -
-24 0-116 #c6d0f5 #303446 -
+24 0-2 #c6d0f5 #303446 -
+24 3-10 #8caaee #303446 bold
+24 11-19 #838ba7 #303446 -
+24 20-116 #c6d0f5 #303446 -
 24 117-119 #838ba7 #303446 -
 24 120-149 #c6d0f5 #303446 -
-25 0-2 #c6d0f5 #303446 -
-25 3-10 #8caaee #303446 bold
-25 11-19 #838ba7 #303446 -
-25 20-116 #c6d0f5 #303446 -
+25 0-116 #c6d0f5 #303446 -
 25 117-119 #838ba7 #303446 -
 25 120-149 #c6d0f5 #303446 -
-26 0-116 #c6d0f5 #303446 -
+26 0-2 #c6d0f5 #303446 -
+26 3-10 #8caaee #303446 bold
+26 11-36 #838ba7 #303446 -
+26 37-116 #c6d0f5 #303446 -
 26 117-119 #838ba7 #303446 -
 26 120-149 #c6d0f5 #303446 -
-27 0-2 #c6d0f5 #303446 -
-27 3-10 #8caaee #303446 bold
-27 11-36 #838ba7 #303446 -
-27 37-116 #c6d0f5 #303446 -
-27 117-119 #838ba7 #303446 -
+27 0-0 #c6d0f5 #303446 -
+27 1-119 #838ba7 #303446 -
 27 120-149 #c6d0f5 #303446 -
-28 0-116 #c6d0f5 #303446 -
+28 0-0 #c6d0f5 #303446 -
+28 1-1 #c6d0f5 #292c3c -
+28 2-14 #c6d0f5 #292c3c bold
+28 15-30 #c6d0f5 #292c3c -
+28 31-116 #c6d0f5 #303446 -
 28 117-119 #838ba7 #303446 -
 28 120-149 #c6d0f5 #303446 -
 29 0-0 #c6d0f5 #303446 -
-29 1-119 #838ba7 #303446 -
+29 1-49 #c6d0f5 #292c3c -
+29 50-116 #c6d0f5 #303446 -
+29 117-119 #838ba7 #303446 -
 29 120-149 #c6d0f5 #303446 -
 30 0-0 #c6d0f5 #303446 -
 30 1-116 #8caaee #303446 -

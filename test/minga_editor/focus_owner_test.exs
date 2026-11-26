@@ -29,7 +29,13 @@ defmodule MingaEditor.FocusOwnerTest do
     completion: {:editor_view, :completion},
     command_completion: {:editor_view, :command_completion}
   }
-  @scope_rows %{editor: :editor, file_tree: :file_tree, agent: :agent, git_status: :git_status}
+  @scope_rows %{
+    editor: :editor,
+    file_tree: :file_tree,
+    agent: :agent,
+    queue: :queue,
+    git_status: :git_status
+  }
 
   # Every current modal has a producing workflow below. A future tag with no
   # public producing path must be recorded here with its missing path, not
@@ -47,6 +53,7 @@ defmodule MingaEditor.FocusOwnerTest do
     Input.Scoped => :scoped,
     Input.AgentPanel => :agent,
     Input.AgentNav => :agent,
+    Input.Queue => :queue,
     Input.ModeFSM => :editor,
     Input.CUA.Dispatch => :editor,
     Input.GitStatus => :git_status

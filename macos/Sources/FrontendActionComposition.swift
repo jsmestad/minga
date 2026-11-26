@@ -27,6 +27,8 @@ nonisolated public enum FrontendActionComposition {
         case .composerSubmit(let generation, let offer): .agentComposerSubmit(generation: generation, offer: offer)
         case .composerQueue(let generation, let offer, let followUp, let target):
             .agentComposerQueue(generation: generation, offer: offer, followUp: followUp, target: target)
+        case .queue(let request):
+            .agentQueueAction(request.action, origin: request.origin, row: request.row, removed: request.removed)
         case .openQuestion(let offer): .agentOpenQuestion(offer: offer)
         case .stopTurn(let target): .agentStopTurn(target)
         case .continueTurn(let target): .agentContinueTurn(target)

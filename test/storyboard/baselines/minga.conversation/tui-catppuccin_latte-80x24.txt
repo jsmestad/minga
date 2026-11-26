@@ -9,8 +9,6 @@ Spaces · folder minga.conversation (1 tab) · ▎cpu A 429 with usage_limit_rea
  ▌ 󰚩 Show the plan limit and…
  󰚩 Agent  Resolving model…          ◐ Working  [Tasks] [History] [Help] [Queue]
   Transcript ──────────────────────────────────────────────────────────────────
-
-   i System  Saved the retry notes to lib/native/usage_limit/notes.md; open
              that file to review the plan, window and reset time.
 
    You
@@ -21,6 +19,8 @@ Spaces · folder minga.conversation (1 tab) · ▎cpu A 429 with usage_limit_rea
 
    i System  Agent UI registry online
   2 messages · Working
+  *minga-queue*  1 queued
+  1 Then run the session tests and fix what fails.
  ╭ Running...                                                                 ╮
  │ ❯ INSERT  Ask Minga to edit, explain, search, or run tools                 │
  │Send · Steer · Queue Next · Stop · Attachments · ⌃C stop · esc ↩ send       │
@@ -57,34 +57,37 @@ No changed files
 3 1-12 #8c8fa1 #eff1f5 bold
 3 13-78 #8c8fa1 #eff1f5 -
 3 79-79 #4c4f69 #eff1f5 -
-4 0-79 #4c4f69 #eff1f5 -
-5 0-2 #4c4f69 #eff1f5 -
-5 3-10 #1e66f5 #eff1f5 bold
-5 11-74 #8c8fa1 #eff1f5 -
-5 75-79 #4c4f69 #eff1f5 -
-6 0-10 #4c4f69 #eff1f5 -
-6 11-64 #8c8fa1 #eff1f5 -
-6 65-79 #4c4f69 #eff1f5 -
+4 0-10 #4c4f69 #eff1f5 -
+4 11-64 #8c8fa1 #eff1f5 -
+4 65-79 #4c4f69 #eff1f5 -
+5 0-79 #4c4f69 #eff1f5 -
+6 0-0 #4c4f69 #eff1f5 -
+6 1-5 #1e66f5 #eff1f5 bold
+6 6-79 #4c4f69 #eff1f5 -
 7 0-79 #4c4f69 #eff1f5 -
-8 0-0 #4c4f69 #eff1f5 -
-8 1-5 #1e66f5 #eff1f5 bold
-8 6-79 #4c4f69 #eff1f5 -
-9 0-79 #4c4f69 #eff1f5 -
-10 0-79 #4c4f69 #eff1f5 -
-11 0-0 #4c4f69 #eff1f5 -
-11 1-7 #8839ef #eff1f5 bold
-11 8-79 #4c4f69 #eff1f5 -
-12 0-0 #4c4f69 #eff1f5 -
-12 1-4 #40a02b #eff1f5 -
-12 5-79 #4c4f69 #eff1f5 -
-13 0-79 #4c4f69 #eff1f5 -
-14 0-2 #4c4f69 #eff1f5 -
-14 3-10 #1e66f5 #eff1f5 bold
-14 11-36 #8c8fa1 #eff1f5 -
-14 37-79 #4c4f69 #eff1f5 -
+8 0-79 #4c4f69 #eff1f5 -
+9 0-0 #4c4f69 #eff1f5 -
+9 1-7 #8839ef #eff1f5 bold
+9 8-79 #4c4f69 #eff1f5 -
+10 0-0 #4c4f69 #eff1f5 -
+10 1-4 #40a02b #eff1f5 -
+10 5-79 #4c4f69 #eff1f5 -
+11 0-79 #4c4f69 #eff1f5 -
+12 0-2 #4c4f69 #eff1f5 -
+12 3-10 #1e66f5 #eff1f5 bold
+12 11-36 #8c8fa1 #eff1f5 -
+12 37-79 #4c4f69 #eff1f5 -
+13 0-0 #4c4f69 #eff1f5 -
+13 1-78 #8c8fa1 #eff1f5 -
+13 79-79 #4c4f69 #eff1f5 -
+14 0-0 #4c4f69 #eff1f5 -
+14 1-1 #4c4f69 #e6e9ef -
+14 2-14 #4c4f69 #e6e9ef bold
+14 15-24 #4c4f69 #e6e9ef -
+14 25-79 #4c4f69 #eff1f5 -
 15 0-0 #4c4f69 #eff1f5 -
-15 1-78 #8c8fa1 #eff1f5 -
-15 79-79 #4c4f69 #eff1f5 -
+15 1-49 #4c4f69 #e6e9ef -
+15 50-79 #4c4f69 #eff1f5 -
 16 0-0 #4c4f69 #eff1f5 -
 16 1-78 #1e66f5 #eff1f5 -
 16 79-79 #4c4f69 #eff1f5 -

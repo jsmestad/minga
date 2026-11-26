@@ -169,11 +169,11 @@ defmodule MingaEditor.Agent.Events do
       ),
       do: StatusEventWorkflow.context_usage(state, estimated_tokens, context_limit)
 
-  def dispatch(%EditorState{} = state, _session_pid, {:prompt_queued, content, queue_type}),
-    do: SessionEventWorkflow.prompt_queued(state, content, queue_type)
+  def dispatch(%EditorState{} = state, session_pid, {:prompt_queued, content, queue_type}),
+    do: SessionEventWorkflow.prompt_queued(state, session_pid, content, queue_type)
 
-  def dispatch(%EditorState{} = state, _session_pid, :queues_recalled),
-    do: SessionEventWorkflow.queues_recalled(state)
+  def dispatch(%EditorState{} = state, session_pid, :queues_recalled),
+    do: SessionEventWorkflow.queues_recalled(state, session_pid)
 
   def dispatch(%EditorState{} = state, _session_pid, _unknown), do: state
 

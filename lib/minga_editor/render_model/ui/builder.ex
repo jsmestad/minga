@@ -5,6 +5,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderModel.UI.AgentChatBuilder
   alias MingaEditor.RenderModel.UI.AgentContextBuilder
+  alias MingaEditor.RenderModel.UI.QueueBuilder
   alias MingaEditor.RenderModel.UI.AgentHelpBuilder
   alias MingaEditor.RenderModel.UI.BottomPanelBuilder
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
@@ -50,6 +51,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
     {bottom_panel, new_message_store} = BottomPanelBuilder.build(ctx)
 
     ctx = Context.accept_message_store(ctx, new_message_store)
+    agent_chat = AgentChatBuilder.build(ctx)
 
     ui = %RenderModel.UI{
       theme: ThemeBuilder.build(ctx.intent.frame.theme),
@@ -70,7 +72,8 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       minibuffer: MinibufferBuilder.build(minibuffer_data),
       completion: CompletionBuilder.build(ctx),
       signature_help: SignatureHelpBuilder.build(ctx),
-      agent_chat: AgentChatBuilder.build(ctx),
+      agent_chat: agent_chat,
+      agent_queue: QueueBuilder.build(ctx, agent_chat.visible?),
       agent_help: AgentHelpBuilder.build(ctx),
       empty_state: EmptyStateBuilder.build(ctx),
       bottom_panel: bottom_panel,

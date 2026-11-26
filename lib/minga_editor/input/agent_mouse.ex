@@ -22,6 +22,7 @@ defmodule MingaEditor.Input.AgentMouse do
   @type state :: MingaEditor.Input.Handler.handler_state()
 
   alias MingaEditor.Agent.PromptBuffer
+  alias MingaEditor.Agent.QueueWorkflow
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.PromptRenderer
   alias MingaEditor.Agent.ViewContext
@@ -121,7 +122,7 @@ defmodule MingaEditor.Input.AgentMouse do
 
   # Left click: focus window, then check prompt vs chat area.
   defp dispatch_window(state, layout, win_id, row, col, %{button: :left, event_type: :press}) do
-    state = maybe_focus_window(state, win_id)
+    state = state |> maybe_focus_window(win_id) |> QueueWorkflow.blur()
     content_rect = window_content_rect(layout, win_id)
 
     if click_in_prompt?(content_rect, row, state) do

@@ -123,7 +123,7 @@ The modeline answers a stop of the conversation it speaks for: it reads "Minga s
 
 | Keys | Action | Status |
 |---|---|---|
-| `SPC a q q` | Open the queue buffer (`*minga-queue*`); dequeue, reorder and delete live inside it | shipped; was `SPC a J` (154) and dequeue `SPC a q` (163); opens today's queued-inputs list |
+| `SPC a q q` | Focus `*minga-queue*` inside the conversation | shipped (#4055); was `SPC a J` (154) and `SPC a q` dequeue (163) |
 | `SPC a q f` | Queue the composer input as a follow-up (`⌥↩` in the composer does the same) | shipped; was `SPC a f` (165) |
 
 **`SPC a x` Context ›**
@@ -327,6 +327,19 @@ The composer is a buffer with Vim editing that opens in Insert when `SPC a v` op
 | ⌥↑ | (dequeue moves into the queue buffer) | retired (#4055) |
 | `⌃D` / `⌃U` while typing | (`⌃U` deletes to line start; scroll from Normal mode) | retired (#4055) |
 | `⌃L` / `⌃S` / `⌃Q` | (clear, save and close live on `SPC a n`, `SPC f s` and `SPC a v` or `q`) | retired (#4055) |
+
+## Queue (`*minga-queue*`)
+
+`SPC a q q` focuses the queue inside the conversation. Each row is one complete message, not editable text.
+
+| Keys | Action |
+|---|---|
+| `j` / `k`, Down / Up | Select the next / previous waiting message |
+| `dd` | Remove the selected message so it will not be sent |
+| `p` / `P` | Put the newest removed message back after / before the selected message in its own queue |
+| `↩` | Recall the selected message to the local composer, or edit it in a separate buffer on a remote Session. With nothing queued or removed, focus the composer |
+| `q` | Leave queue focus and return to the composer or transcript |
+| `esc` | Cancel a partial sequence. It does not close this special buffer |
 
 ## Diff Review
 

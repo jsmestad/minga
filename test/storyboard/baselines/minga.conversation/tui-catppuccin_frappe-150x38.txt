@@ -32,9 +32,9 @@ Spaces · folder minga.conversation (1 tab) · ▎cpu A 429 with usage_limit_rea
    i System  Agent UI registry online                                                                                 │
                                                                                                                       │
                                                                                                                       │
-                                                                                                                      │
-                                                                                                                      │
   2 messages · Working                                                                                                │
+  *minga-queue*  1 queued                                                                                             │
+  1 Then run the session tests and fix what fails.                                                                    │
  ╭ Running...                                                                                                       ╮ │
  │ ❯ INSERT  Ask Minga to edit, explain, search, or run tools                                                       │ │
  │Send · Steer · Queue Next · Stop · Attachments · ⌃C stop · esc ↩ send · ⌥↩ queue · esc normal                     │ │
@@ -216,14 +216,20 @@ No changed files
 26 0-116 #c6d0f5 #303446 -
 26 117-119 #838ba7 #303446 -
 26 120-149 #c6d0f5 #303446 -
-27 0-116 #c6d0f5 #303446 -
-27 117-119 #838ba7 #303446 -
+27 0-0 #c6d0f5 #303446 -
+27 1-119 #838ba7 #303446 -
 27 120-149 #c6d0f5 #303446 -
-28 0-116 #c6d0f5 #303446 -
+28 0-0 #c6d0f5 #303446 -
+28 1-1 #c6d0f5 #292c3c -
+28 2-14 #c6d0f5 #292c3c bold
+28 15-24 #c6d0f5 #292c3c -
+28 25-116 #c6d0f5 #303446 -
 28 117-119 #838ba7 #303446 -
 28 120-149 #c6d0f5 #303446 -
 29 0-0 #c6d0f5 #303446 -
-29 1-119 #838ba7 #303446 -
+29 1-49 #c6d0f5 #292c3c -
+29 50-116 #c6d0f5 #303446 -
+29 117-119 #838ba7 #303446 -
 29 120-149 #c6d0f5 #303446 -
 30 0-0 #c6d0f5 #303446 -
 30 1-116 #8caaee #303446 -

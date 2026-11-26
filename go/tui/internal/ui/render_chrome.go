@@ -332,7 +332,9 @@ func (m Model) renderStatusSegments(status protocol.StatusBar) string {
 	}
 	inset := modelineInset.cols()
 	budget := max(m.width-2*inset-lipgloss.Width(pending), 0)
-	fitted := fitModeline(append(append([]protocol.StatusSegment{}, status.Left...), status.Right...), len(status.Left), budget-reserved, m.modelineSegmentWidth)
+	segments := make([]protocol.StatusSegment, 0, len(status.Left)+len(status.Right))
+	segments = append(append(segments, status.Left...), status.Right...)
+	fitted := fitModeline(segments, len(status.Left), budget-reserved, m.modelineSegmentWidth)
 	left := m.renderModelineCluster(fitted.left)
 	right := pending + m.renderModelineCluster(fitted.right)
 	available := max(m.width-2*inset-lipgloss.Width(left)-lipgloss.Width(right), 0)

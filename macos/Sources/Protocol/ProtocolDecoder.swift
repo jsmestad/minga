@@ -104,6 +104,7 @@ enum RenderCommand: Sendable {
     case guiPickerSelection(generation: UInt32, selectedItemID: UInt32, selectedActionID: UInt32)
     case guiPickerPreview(visible: Bool, lines: [Wire.PickerPreviewLine])
     case guiAgentChat(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: EditorMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil, lifecycle: AgentChatLifecycle = .conversation, composerHints: [AgentComposerHint] = [], continueTarget: AgentStopTarget? = nil)
+    case guiAgentQueue(Wire.AgentQueue?)
     case guiAgentHelp(visible: Bool, groups: [Wire.HelpGroup])
     case guiTasksDrawer(Wire.TasksDrawer)
     /// Resident agent-chat transcript stream (0x86, #2654). `mode` is 0=full_replace, 1=append.
@@ -413,6 +414,24 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
     case .unknown:
         throw ProtocolDecodeError.unknownOpcode(opcode)
     }
+}
+
+private func decodeAgentQueueRows(_ cursor: inout ByteCursor) throws -> [Wire.AgentQueue.Row] {
+    let count = Int(try cursor.readUInt8())
+    try FrameDecodeAccounting.reserve(.arrayEntries, count)
+    var rows: [Wire.AgentQueue.Row] = []
+    rows.reserveCapacity(count)
+    for _ in 0..<count {
+        let identity = try Wire.AgentQueue.RowIdentity(id: cursor.readUInt64(), revision: cursor.readUInt64())
+        guard identity.isValid, let kind = Wire.AgentQueue.Row.Kind(rawValue: try cursor.readUInt8()) else {
+            throw ProtocolDecodeError.malformed
+        }
+        let label = try cursor.readString(count: Int(try cursor.readUInt8()))
+        let preview = try cursor.readString(count: Int(try cursor.readUInt16()))
+        let attachments = try cursor.readUInt16()
+        rows.append(.init(identity: identity, kind: kind, label: label, preview: preview, attachmentCount: attachments))
+    }
+    return rows
 }
 
 private func decodeCommandForRenderingChecked(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
@@ -2994,7 +3013,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             throw ProtocolDecodeError.malformed
         }
         let start = rest + 2
-        guard data[start] <= 3, data[start + 1] <= 14 else {
+        guard data[start] <= 3, data[start + 1] <= Wire.FocusOwner.agentQueueSurface else {
             throw ProtocolDecodeError.malformed
         }
         let (fields, _) = try GeneratedProtocol.decodeGuiFocusOwnerFields(data, start, start + payloadLength)
@@ -3003,6 +3022,63 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             windowID: fields.windowID, generation: fields.generation
         )
         return (.guiFocusOwner(owner), 3 + payloadLength)
+
+    case .guiAgentQueue:
+        var header = try ByteCursor(data, range: rest..<data.endIndex)
+        let payloadLength = Int(try header.readUInt32())
+        var payload = try header.readSubcursor(count: payloadLength)
+        let end = rest + 4 + payloadLength
+        switch try payload.readUInt8() {
+        case 0:
+            guard payload.isAtEnd else { throw ProtocolDecodeError.malformed }
+            return (.guiAgentQueue(nil), 5 + payloadLength)
+        case 1:
+            break
+        default:
+            throw ProtocolDecodeError.malformed
+        }
+
+        let focused = try payload.readUInt8()
+        guard focused <= 1 else { throw ProtocolDecodeError.malformed }
+        let workspaceID = try payload.readUInt32()
+        let recordID = try payload.readString(count: Int(try payload.readUInt16()))
+        let title = try payload.readString(count: Int(try payload.readUInt16()))
+        let summary = try payload.readString(count: Int(try payload.readUInt16()))
+        let removedNote = try payload.readString(count: Int(try payload.readUInt16()))
+        let selectedID = try payload.readUInt64()
+        let hintCount = Int(try payload.readUInt8())
+        try FrameDecodeAccounting.reserve(.arrayEntries, hintCount)
+        var hints: [Wire.AgentQueue.Hint] = []
+        hints.reserveCapacity(hintCount)
+        for _ in 0..<hintCount {
+            guard let action = Wire.AgentQueue.Action(rawValue: try payload.readUInt8()) else {
+                throw ProtocolDecodeError.malformed
+            }
+            let key = try payload.readString(count: Int(try payload.readUInt8()))
+            let label = try payload.readString(count: Int(try payload.readUInt16()))
+            hints.append(.init(action: action, key: key, label: label))
+        }
+        let pending = try decodeAgentQueueRows(&payload)
+        let removed = try decodeAgentQueueRows(&payload)
+        let decodedEmpty: GeneratedProtocol.EmptyList
+        do {
+            let (empty, emptyEnd) = try GeneratedProtocol.decodeEmptyList(data, payload.offset, end)
+            guard emptyEnd == end else { throw ProtocolDecodeError.malformed }
+            decodedEmpty = empty
+        } catch is GeneratedProtocol.DecodeError {
+            throw ProtocolDecodeError.malformed
+        }
+        let empty: Wire.EmptyList? = decodedEmpty.title.isEmpty ? nil : .init(
+            glyph: decodedEmpty.glyph, title: decodedEmpty.title, why: decodedEmpty.why,
+            selected: decodedEmpty.selected,
+            actions: decodedEmpty.actions.map { .init(id: $0.id, key: $0.key, label: $0.label) }
+        )
+        return (.guiAgentQueue(.init(
+            focused: focused == 1, origin: .init(workspaceID: workspaceID, recordID: recordID),
+            title: title, summary: summary, removedNote: removedNote,
+            selectedID: selectedID == 0 ? nil : selectedID, hints: hints, pending: pending,
+            removed: removed, empty: empty
+        )), 5 + payloadLength)
 
     case .guiTasksDrawer:
         guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }

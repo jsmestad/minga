@@ -1313,6 +1313,9 @@ final class CommandDispatcher {
                 effects.append(.application(.agentChatVisibilityChanged(guiState.agentChatState.visible)))
             }
 
+        case .guiAgentQueue(let snapshot):
+            guiState.agentQueueState.update(snapshot)
+
         case .guiAgentHelp(let visible, let groups):
             guiState.agentHelpState.update(visible: visible, groups: groups)
 

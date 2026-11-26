@@ -528,6 +528,8 @@ defmodule MingaAgent.Session do
           :read
           | {:save, SessionStore.draft_revision(), DraftSnapshot.t() | nil}
           | {:recall, SessionStore.draft_revision(), DraftSnapshot.t() | nil, :keep_running}
+          | {:recall_one, QueuedInputSummary.identity(), SessionStore.draft_revision(),
+             DraftSnapshot.t() | nil}
           | {:queue, queue_target(), TurnExecution.prompt_kind(), queue_draft(),
              TurnExecution.content()}
           | {:reconcile_queue, pos_integer(), String.t(), SessionStore.draft_revision()}
@@ -543,7 +545,9 @@ defmodule MingaAgent.Session do
           | {:reconcile_submission, SessionStore.draft_revision(), String.t()}
           | {:confirm_queue_receipt, TurnExecution.queue_receipt()}
           | :read_queue
+          | :read_queue_contents
           | {:withdraw_queued_input, QueuedInputSummary.identity()}
+          | {:place_queued_input, QueuedInputSummary.identity(), TurnExecution.queue_placement()}
           | {:read_queued_input_text, QueuedInputSummary.identity()}
           | {:edit_queued_input, QueuedInputSummary.identity(), String.t()}
 
@@ -554,6 +558,7 @@ defmodule MingaAgent.Session do
           | {:ok, DraftSnapshot.attachment(), String.t()}
           | {:ok, TurnExecution.queue_receipt()}
           | {:ok, [QueuedInputSummary.t()]}
+          | {:ok, queue_contents()}
           | {:ok, String.t()}
           | :ok
           | {:accepted, SessionStore.draft_revision(), term()}
@@ -1359,6 +1364,19 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:queued_input_summaries, record_id})
   end
 
+  @typedoc "A conversation's queue as its user sees it: what waits to be sent, and what they removed and can still put back (newest first)."
+  @type queue_contents :: %{
+          pending: [QueuedInputSummary.t()],
+          removed: [QueuedInputSummary.t()]
+        }
+
+  @doc "Returns bounded previews of the pending inputs and of the removed inputs that can still be put back."
+  @spec queue_contents(GenServer.server(), String.t()) ::
+          {:ok, queue_contents()} | {:error, term()}
+  def queue_contents(session, record_id) do
+    GenServer.call(session, {:queue_contents, record_id})
+  end
+
   @doc "Reads the editable text of one exact pending revision in the local saved Session."
   @spec queued_input_text(GenServer.server(), String.t(), QueuedInputSummary.identity()) ::
           {:ok, String.t()} | {:error, term()}
@@ -1366,15 +1384,30 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:queued_input_text, record_id, identity})
   end
 
-  @doc "Edits or removes only the displayed pending entry in the original saved Session."
+  @doc "Changes the displayed pending entry. Removing it returns the count of removed entries that expired, including any lost to the byte limit."
   @spec change_queued_input(
           GenServer.server(),
           String.t(),
           {pos_integer(), pos_integer()},
           TurnExecution.queued_edit()
-        ) :: :ok | {:error, term()}
+        ) :: :ok | {:ok, non_neg_integer()} | {:error, term()}
   def change_queued_input(session, record_id, identity, operation) do
     GenServer.call(session, {:change_queued_input, record_id, identity, operation}, 30_000)
+  end
+
+  @doc """
+  Moves the displayed pending entry within its queue, or puts a removed entry back, in the original saved Session.
+
+  The source and any pending anchor both carry their displayed `{id, revision}`, never a list position.
+  """
+  @spec place_queued_input(
+          GenServer.server(),
+          String.t(),
+          {pos_integer(), pos_integer()},
+          TurnExecution.queue_placement()
+        ) :: :ok | {:error, term()}
+  def place_queued_input(session, record_id, identity, placement) do
+    GenServer.call(session, {:place_queued_input, record_id, identity, placement}, 30_000)
   end
 
   @doc """
@@ -1824,6 +1857,17 @@ defmodule MingaAgent.Session do
   def handle_call({:queued_input_summaries, _record_id}, _from, state),
     do: {:reply, {:error, :stale_target}, state}
 
+  def handle_call({:queue_contents, record_id}, {caller, _tag}, state)
+      when node(caller) == node() and is_binary(record_id) do
+    case validate_composer_record(state, record_id) do
+      :ok -> {:reply, {:ok, queue_contents_of(state.turn_execution)}, state}
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
+
+  def handle_call({:queue_contents, _record_id}, _from, state),
+    do: {:reply, {:error, :stale_target}, state}
+
   def handle_call({:queued_input_text, record_id, identity}, {caller, _tag}, state)
       when node(caller) == node() and is_binary(record_id) do
     {:reply, queued_input_text_result(state, record_id, identity), state}
@@ -1843,6 +1887,19 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:change_queued_input, _record_id, _identity, _operation}, _from, state),
+    do: {:reply, {:error, :stale_target}, state}
+
+  def handle_call(
+        {:place_queued_input, record_id, {id, revision} = identity, placement},
+        {caller, _tag},
+        state
+      )
+      when node(caller) == node() and is_binary(record_id) and is_integer(id) and id > 0 and
+             is_integer(revision) and revision > 0 do
+    place_queued_input_reply(state, record_id, identity, placement)
+  end
+
+  def handle_call({:place_queued_input, _record_id, _identity, _placement}, _from, state),
     do: {:reply, {:error, :stale_target}, state}
 
   def handle_call({:read_draft_attachment, record_id, identity}, {caller, _tag}, state)
@@ -4063,6 +4120,41 @@ defmodule MingaAgent.Session do
       ),
       do: {:noreply, state}
 
+  def handle_cast(
+        {:composer_draft, caller, record_id, correlation,
+         {:recall_one, {id, entry_revision}, revision, draft}},
+        state
+      )
+      when is_pid(caller) and node(caller) == node() and is_binary(record_id) and
+             is_integer(id) and id > 0 and is_integer(entry_revision) and entry_revision > 0 and
+             is_integer(revision) and revision >= 0 and
+             (is_struct(draft, DraftSnapshot) or is_nil(draft)) do
+    {result, next} =
+      recall_composer_draft(state, record_id, revision, draft, {:one, {id, entry_revision}})
+
+    send(caller, {:composer_draft_result, self(), record_id, correlation, result})
+    {:noreply, next}
+  end
+
+  def handle_cast(
+        {:composer_draft, caller, record_id, correlation, {:recall_one, _, _, _}},
+        state
+      )
+      when is_pid(caller) and node(caller) == node() do
+    send(
+      caller,
+      {:composer_draft_result, self(), record_id, correlation, {:error, :invalid_draft_snapshot}}
+    )
+
+    {:noreply, state}
+  end
+
+  def handle_cast(
+        {:composer_draft, _caller, _record_id, _correlation, {:recall_one, _, _, _}},
+        state
+      ),
+      do: {:noreply, state}
+
   def handle_cast({:composer_draft, caller, record_id, correlation, operation}, state)
       when is_pid(caller) and node(caller) == node() do
     result =
@@ -5436,10 +5528,12 @@ defmodule MingaAgent.Session do
     with {:ok, prepared} <- prepare_provider_request(state),
          candidate = append_msg(%{prepared | turn_execution: execution}, user_message),
          {:ok, request, admitted} <- admit_provider_request(prepared, candidate, send_content) do
+      # The queue left with this request: an open queue view must hear it, as it hears an edit.
       admitted =
         admitted
         |> record_user_message_event(user_message)
         |> notify_messages_changed()
+        |> broadcast(:queues_recalled)
 
       case send_admitted_prompt(admitted, request, execution) do
         {:ok, started} -> started
@@ -5872,6 +5966,16 @@ defmodule MingaAgent.Session do
       Enum.map(follow_up, &QueuedInputSummary.new(&1, :follow_up))
   end
 
+  @spec queue_contents_of(TurnExecution.t()) :: queue_contents()
+  defp queue_contents_of(execution) do
+    removed =
+      execution
+      |> TurnExecution.withdrawn_inputs()
+      |> Enum.map(fn {kind, entry} -> QueuedInputSummary.new(entry, kind) end)
+
+    %{pending: pending_input_summaries(execution), removed: removed}
+  end
+
   @spec queued_input_text_result(state(), String.t(), term()) ::
           {:ok, String.t()} | {:error, term()}
   defp queued_input_text_result(state, record, {id, revision})
@@ -5883,7 +5987,7 @@ defmodule MingaAgent.Session do
   defp queued_input_text_result(_state, _record, _identity), do: {:error, :invalid_queue_edit}
 
   @spec change_queued_input_reply(state(), String.t(), pos_integer(), pos_integer(), term()) ::
-          {:reply, :ok | {:error, term()}, state()}
+          {:reply, :ok | {:ok, non_neg_integer()} | {:error, term()}, state()}
   defp change_queued_input_reply(state, record_id, id, revision, operation)
        when operation == :remove or
               (is_tuple(operation) and tuple_size(operation) == 2 and
@@ -5895,7 +5999,8 @@ defmodule MingaAgent.Session do
          {:ok, execution} <-
            TurnExecution.change_queued_input(state.turn_execution, id, revision, operation),
          {:ok, committed} <- commit_effect_snapshot(state, %{state | turn_execution: execution}) do
-      {:reply, :ok, broadcast(committed, :queues_recalled)}
+      reply = queue_change_receipt(state.turn_execution, execution, operation)
+      {:reply, reply, broadcast(committed, :queues_recalled)}
     else
       {:error, _reason} = error -> {:reply, error, state}
     end
@@ -5904,26 +6009,67 @@ defmodule MingaAgent.Session do
   defp change_queued_input_reply(state, _record_id, _id, _revision, _operation),
     do: {:reply, {:error, :invalid_queue_edit}, state}
 
+  @spec queue_change_receipt(TurnExecution.t(), TurnExecution.t(), TurnExecution.queued_edit()) ::
+          :ok | {:ok, non_neg_integer()}
+  defp queue_change_receipt(previous, current, :remove) do
+    total = length(TurnExecution.withdrawn_inputs(previous)) + 1
+    {:ok, total - length(TurnExecution.withdrawn_inputs(current))}
+  end
+
+  defp queue_change_receipt(_previous, _current, _edit), do: :ok
+
+  defguardp is_queue_identity(identity)
+            when is_tuple(identity) and tuple_size(identity) == 2 and
+                   is_integer(elem(identity, 0)) and elem(identity, 0) > 0 and
+                   is_integer(elem(identity, 1)) and elem(identity, 1) > 0
+
+  defguardp is_queue_position(placement)
+            when placement == :end or
+                   (is_tuple(placement) and tuple_size(placement) == 2 and
+                      elem(placement, 0) in [:before, :after] and
+                      is_queue_identity(elem(placement, 1)))
+
+  defguardp is_restore_position(position)
+            when is_queue_position(position) or
+                   (is_tuple(position) and tuple_size(position) == 2 and
+                      elem(position, 0) == :empty_queue and
+                      (is_nil(elem(position, 1)) or is_queue_identity(elem(position, 1))))
+
+  @spec place_queued_input_reply(state(), String.t(), {pos_integer(), pos_integer()}, term()) ::
+          {:reply, :ok | {:error, term()}, state()}
+  defp place_queued_input_reply(state, record_id, identity, placement)
+       when is_queue_position(placement) or
+              (is_tuple(placement) and tuple_size(placement) == 2 and
+                 elem(placement, 0) == :removed and is_restore_position(elem(placement, 1))) do
+    with :ok <- validate_composer_record(state, record_id),
+         {:ok, execution} <-
+           TurnExecution.place_queued_input(state.turn_execution, identity, placement),
+         {:ok, committed} <- commit_effect_snapshot(state, %{state | turn_execution: execution}) do
+      {:reply, :ok, broadcast(committed, :queues_recalled)}
+    else
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
+
+  defp place_queued_input_reply(state, _record_id, _identity, _placement),
+    do: {:reply, {:error, :invalid_queue_edit}, state}
+
   @spec recall_composer_draft(
           state(),
           String.t(),
           non_neg_integer(),
           DraftSnapshot.t() | nil,
-          :keep_running
+          :keep_running | {:one, QueuedInputSummary.identity()}
         ) :: {{:ok, non_neg_integer(), DraftSnapshot.t()} | {:error, term()}, state()}
-  defp recall_composer_draft(state, record_id, revision, draft, :keep_running),
-    do: recall_composer_draft(state, record_id, revision, draft)
-
-  defp recall_composer_draft(state, _record, _revision, _draft, _action),
-    do: {{:error, :invalid_draft_snapshot}, state}
-
-  @spec recall_composer_draft(state(), String.t(), non_neg_integer(), DraftSnapshot.t() | nil) ::
-          {{:ok, non_neg_integer(), DraftSnapshot.t()} | {:error, term()}, state()}
-  defp recall_composer_draft(state, record_id, revision, current) do
+  # `:keep_running` recalls the whole queue; `{:one, identity}` recalls a single queued input.
+  defp recall_composer_draft(state, record_id, revision, current, which)
+       when which == :keep_running or
+              (tuple_size(which) == 2 and elem(which, 0) == :one and
+                 tuple_size(elem(which, 1)) == 2) do
     with :ok <- validate_composer_record(state, record_id),
          {:ok, ^revision, prior} <- composer_draft(state, record_id, :read),
          :ok <- match_recalled_attachments(prior, current),
-         {:ok, draft, execution} <- TurnExecution.recall_draft(state.turn_execution, current),
+         {:ok, draft, execution} <- recall_into_draft(state.turn_execution, current, which),
          candidate = %{state | turn_execution: execution},
          {:ok, committed} <-
            commit_effect_snapshot(state, candidate, {:recalled_draft, revision, draft}) do
@@ -5936,6 +6082,20 @@ defmodule MingaAgent.Session do
         {error, state}
     end
   end
+
+  defp recall_composer_draft(state, _record, _revision, _draft, _action),
+    do: {{:error, :invalid_draft_snapshot}, state}
+
+  @spec recall_into_draft(
+          TurnExecution.t(),
+          DraftSnapshot.t() | nil,
+          :keep_running | {:one, QueuedInputSummary.identity()}
+        ) :: {:ok, DraftSnapshot.t(), TurnExecution.t()} | {:error, term()}
+  defp recall_into_draft(execution, draft, :keep_running),
+    do: TurnExecution.recall_draft(execution, draft)
+
+  defp recall_into_draft(execution, draft, {:one, identity}),
+    do: TurnExecution.recall_queued_input(execution, identity, draft)
 
   @spec match_recalled_attachments(DraftSnapshot.t() | nil, DraftSnapshot.t() | nil) ::
           :ok | {:error, :draft_attachments_changed}
@@ -10256,9 +10416,10 @@ defmodule MingaAgent.Session do
   @spec publish_dispatched_steering(state(), [Message.t()]) :: state()
   defp publish_dispatched_steering(state, []), do: state
 
+  # Steering messages left the queue with this dispatch, so the queue's viewers are told too.
   defp publish_dispatched_steering(state, messages) do
     Enum.each(messages, &record_user_message_event(state, &1))
-    notify_messages_changed(state)
+    state |> notify_messages_changed() |> broadcast(:queues_recalled)
   end
 
   @spec assess_native_dispatch(
@@ -10490,6 +10651,13 @@ defmodule MingaAgent.Session do
 
   defp handle_remote_composer(state, _record_id, :read_queue),
     do: {:reply, {:ok, pending_input_summaries(state.turn_execution)}, state}
+
+  defp handle_remote_composer(state, _record_id, :read_queue_contents),
+    do: {:reply, {:ok, queue_contents_of(state.turn_execution)}, state}
+
+  defp handle_remote_composer(state, record_id, {:place_queued_input, {id, revision}, placement})
+       when is_integer(id) and id > 0 and is_integer(revision) and revision > 0,
+       do: place_queued_input_reply(state, record_id, {id, revision}, placement)
 
   defp handle_remote_composer(state, record_id, {:withdraw_queued_input, {id, revision}})
        when is_integer(id) and id > 0 and is_integer(revision) and revision > 0,
@@ -11539,8 +11707,14 @@ defmodule MingaAgent.Session do
       %{message: {:composer_draft, _, _, _, {:recall, _, _, _}}} ->
         status |> Map.replace(:message, :recall_queued_draft) |> Map.replace(:reason, :redacted)
 
+      %{message: {:composer_draft, _, _, _, {:recall_one, _, _, _}}} ->
+        status |> Map.replace(:message, :recall_queued_draft) |> Map.replace(:reason, :redacted)
+
       %{message: {:change_queued_input, _, _, _}} ->
         status |> Map.replace(:message, :change_queued_input) |> Map.replace(:reason, :redacted)
+
+      %{message: {:place_queued_input, _, _, _}} ->
+        status |> Map.replace(:message, :place_queued_input) |> Map.replace(:reason, :redacted)
 
       %{message: {:remote_composer, _, _, _}} ->
         status |> Map.replace(:message, :remote_composer) |> Map.replace(:reason, :redacted)

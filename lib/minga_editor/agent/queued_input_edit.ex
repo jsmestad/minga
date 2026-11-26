@@ -4,6 +4,8 @@ defmodule MingaEditor.Agent.QueuedInputEdit do
 
   alias Minga.Buffer
   alias MingaAgent.Session.QueuedInputSummary
+  alias MingaEditor.Agent.QueueSurface
+  alias MingaEditor.Agent.QueueWorkflow
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Effect.{Outcome, Policy, Request}
   alias MingaEditor.EffectScheduler
@@ -14,9 +16,8 @@ defmodule MingaEditor.Agent.QueuedInputEdit do
   alias MingaEditor.Shell.Traditional.Workflow
   alias MingaEditor.State
   alias MingaEditor.State.Interaction
-  alias MingaEditor.UI.Picker.AgentQueuedInputSource
 
-  @typep origin :: AgentQueuedInputSource.origin()
+  @typep origin :: MingaEditor.Agent.PromptInput.submission_owner()
   @typep identity :: QueuedInputSummary.identity()
   @typep operation :: :read | {:save, String.t()}
   @typep request :: (identity(), operation() -> {:ok, String.t()} | :ok | {:error, term()})
@@ -195,8 +196,11 @@ defmodule MingaEditor.Agent.QueuedInputEdit do
 
     case schedule(state, effect) do
       :ok ->
+        queue = QueueSurface.begin_edit(state.workspace.agent_ui.queue, effect.ref)
+
         state
         |> install({:loading, effect.ref, active_tab_id(state)})
+        |> QueueWorkflow.install(queue)
         |> report("Loading queued input…")
 
       :error ->
@@ -227,9 +231,17 @@ defmodule MingaEditor.Agent.QueuedInputEdit do
        ) do
     state = install(state, nil)
 
-    if current_load?(state, tab_id, effect.origin),
-      do: install_loaded(state, effect, result),
-      else: state
+    case QueueSurface.finish_edit(state.workspace.agent_ui.queue, ref) do
+      {:current, queue} ->
+        state = QueueWorkflow.install(state, queue)
+
+        if current_load?(state, tab_id, effect.origin),
+          do: install_loaded(state, effect, result),
+          else: state
+
+      :stale ->
+        state
+    end
   end
 
   defp settle(
@@ -268,7 +280,7 @@ defmodule MingaEditor.Agent.QueuedInputEdit do
 
   @spec current_load?(State.t(), non_neg_integer() | nil, origin()) :: boolean()
   defp current_load?(%State{shell_runtime: %{state: %{modal: :none}}} = state, tab_id, origin) do
-    active_tab_id(state) == tab_id and AgentQueuedInputSource.current_origin(state) == origin
+    active_tab_id(state) == tab_id and QueueWorkflow.current_origin(state) == origin
   end
 
   defp current_load?(_state, _tab_id, _origin), do: false

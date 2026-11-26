@@ -126,11 +126,15 @@ defmodule MingaAgent.SessionQueueTest do
       for {kind, text, enqueue} <- cases do
         session = start_slow_turn()
         assert {:queued, ^kind} = enqueue.(session, text)
+        refute_received {:agent_event, ^session, :queues_recalled}
 
         Minga.Test.SessionSlowMockProvider.proceed(Session.get_provider(session))
         assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
         assert Enum.any?(Session.messages(session), &match?({:user, ^text}, &1))
         assert Session.get_queued_messages(session) == {[], []}
+
+        # The queue left with the next turn: whoever shows the queue is told it changed.
+        assert_receive {:agent_event, ^session, :queues_recalled}, @event_timeout
 
         finish_slow_turn(session)
       end
@@ -405,6 +409,254 @@ defmodule MingaAgent.SessionQueueTest do
     end
 
     @tag :tmp_dir
+    test "a reordered queue survives a killed Session in the order its user gave it", %{
+      tmp_dir: dir
+    } do
+      opts = [provider: SessionSlowMockProvider, persist?: true, session_store_dir: dir]
+      session = start_test_session(opts)
+      Session.subscribe(session)
+      assert :ok = Session.send_prompt(session, "Active request")
+      assert_receive {:agent_event, ^session, {:status_changed, :thinking}}, @event_timeout
+
+      for text <- ["one", "two", "three"],
+          do: assert({:queued, :follow_up} = Session.queue_follow_up(session, text))
+
+      id = Session.session_id(session)
+
+      assert {:error, :stale_target} =
+               Session.place_queued_input(session, "wrong-record", {3, 1}, :end)
+
+      assert {:error, :invalid_queue_edit} =
+               Session.place_queued_input(session, id, {3, 1}, {:first, 1})
+
+      assert :ok = Session.place_queued_input(session, id, {3, 1}, {:before, {1, 1}})
+      assert_receive {:agent_event, ^session, :queues_recalled}, @event_timeout
+      assert Session.get_queued_messages(session) == {[], ["three", "one", "two"]}
+
+      monitor = Process.monitor(session)
+      Process.exit(session, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^session, :killed}, @event_timeout
+
+      recovered = start_test_session(opts)
+      assert :ok = Session.load_session(recovered, id)
+      assert Session.get_queued_messages(recovered) == {[], ["three", "one", "two"]}
+
+      assert {:ok, [%{identity: {3, 1}}, %{identity: {1, 1}}, %{identity: {2, 1}}]} =
+               Session.queued_input_summaries(recovered, id)
+    end
+
+    @tag :tmp_dir
+    test "a removed message is not sent when the turn ends, and goes back where it is placed", %{
+      tmp_dir: dir
+    } do
+      session =
+        start_test_session(
+          provider: SessionSlowMockProvider,
+          persist?: true,
+          session_store_dir: dir
+        )
+
+      Session.subscribe(session)
+      assert :ok = Session.send_prompt(session, "First")
+      assert_receive {:agent_event, ^session, {:status_changed, :thinking}}, @event_timeout
+
+      for text <- ["keep", "removed", "also keep"],
+          do: assert({:queued, :follow_up} = Session.queue_follow_up(session, text))
+
+      id = Session.session_id(session)
+      assert {:ok, 0} = Session.change_queued_input(session, id, {2, 1}, :remove)
+      assert Session.get_queued_messages(session) == {[], ["keep", "also keep"]}
+
+      assert :ok = Session.place_queued_input(session, id, {2, 1}, {:before, {3, 1}})
+      assert Session.get_queued_messages(session) == {[], ["keep", "removed", "also keep"]}
+
+      assert {:error, :not_removed} =
+               Session.place_queued_input(session, id, {2, 1}, {:removed, :end})
+
+      assert Session.get_queued_messages(session) == {[], ["keep", "removed", "also keep"]}
+      assert {:ok, 0} = Session.change_queued_input(session, id, {2, 2}, :remove)
+
+      assert {:error, :stale_queue_revision} =
+               Session.place_queued_input(session, id, {2, 1}, {:removed, :end})
+
+      SessionSlowMockProvider.proceed(Session.get_provider(session))
+      assert_receive {:agent_event, ^session, {:status_changed, :thinking}}, @event_timeout
+
+      assert {:ok, %{continuation: %{active_request: %{messages: admitted}}}} =
+               SessionStore.load(id, dir)
+
+      assert [%ReqLLM.Message{role: :user, content: [part]} | _] = Enum.reverse(admitted)
+      assert part == ContentPart.text("keep\n\nalso keep")
+
+      assert {:error, :anchor_gone} =
+               Session.place_queued_input(session, id, {2, 2}, {:before, {3, 1}})
+
+      assert :ok = Session.place_queued_input(session, id, {2, 2}, :end)
+      assert Session.get_queued_messages(session) == {[], ["removed"]}
+    end
+
+    @tag :tmp_dir
+    test "putting a message back in its empty queue requires the displayed cross-queue anchor", %{
+      tmp_dir: dir
+    } do
+      session =
+        start_test_session(
+          provider: SessionSlowMockProvider,
+          persist?: true,
+          session_store_dir: dir
+        )
+
+      Session.subscribe(session)
+      assert :ok = Session.send_prompt(session, "First")
+      assert_receive {:agent_event, ^session, {:status_changed, :thinking}}, @event_timeout
+      assert {:queued, :steering} = Session.send_prompt(session, "steer here")
+      assert {:queued, :follow_up} = Session.queue_follow_up(session, "put me back")
+      record = Session.session_id(session)
+
+      assert {:ok, %{pending: [%{identity: anchor, kind: :steering}, %{identity: source}]}} =
+               Session.queue_contents(session, record)
+
+      assert {:ok, 0} = Session.change_queued_input(session, record, source, :remove)
+      placement = {:removed, {:empty_queue, anchor}}
+      assert :ok = Session.place_queued_input(session, record, source, placement)
+      assert Session.get_queued_messages(session) == {["steer here"], ["put me back"]}
+
+      assert {:ok, %{pending: [_, %{identity: restored}]}} =
+               Session.queue_contents(session, record)
+
+      assert {:ok, 0} = Session.change_queued_input(session, record, restored, :remove)
+      assert :ok = Session.change_queued_input(session, record, anchor, {:replace_text, "edited"})
+
+      assert {:error, :stale_queue_revision} =
+               Session.place_queued_input(session, record, restored, placement)
+
+      assert {:ok, %{pending: [%{identity: new_anchor}]}} =
+               Session.queue_contents(session, record)
+
+      assert {:queued, :follow_up} = Session.queue_follow_up(session, "new arrival")
+      placement = {:removed, {:empty_queue, new_anchor}}
+
+      assert {:error, :destination_changed} =
+               Session.place_queued_input(session, record, restored, placement)
+
+      assert {:ok, 0} = Session.change_queued_input(session, record, new_anchor, :remove)
+
+      assert {:error, :anchor_gone} =
+               Session.place_queued_input(session, record, restored, placement)
+
+      assert {:ok, %{removed: [_, %{identity: ^restored}]}} =
+               Session.queue_contents(session, record)
+
+      assert Session.get_queued_messages(session) == {[], ["new arrival"]}
+    end
+
+    @tag :tmp_dir
+    test "one queued message moves into the composer draft and the others stay queued", %{
+      tmp_dir: dir
+    } do
+      session =
+        start_test_session(
+          provider: SessionSlowMockProvider,
+          persist?: true,
+          session_store_dir: dir
+        )
+
+      Session.subscribe(session)
+      assert :ok = Session.send_prompt(session, "First")
+      assert_receive {:agent_event, ^session, {:status_changed, :thinking}}, @event_timeout
+
+      for text <- ["keep", "edit me", "also keep"],
+          do: assert({:queued, :follow_up} = Session.queue_follow_up(session, text))
+
+      id = Session.session_id(session)
+      assert {:ok, 0, nil} = SessionStore.read_presentation(id, dir)
+
+      stale = make_ref()
+      :ok = Session.request_composer_draft(session, id, stale, {:recall_one, {2, 9}, 0, nil})
+
+      assert_receive {:composer_draft_result, ^session, ^id, ^stale,
+                      {:error, :stale_queue_revision}},
+                     @event_timeout
+
+      ref = make_ref()
+      :ok = Session.request_composer_draft(session, id, ref, {:recall_one, {2, 1}, 0, nil})
+
+      assert_receive {:composer_draft_result, ^session, ^id, ^ref, {:ok, 1, recalled}},
+                     @event_timeout
+
+      assert_receive {:agent_event, ^session, :queues_recalled}, @event_timeout
+      assert recalled.text == "edit me"
+      assert {:ok, 1, ^recalled} = SessionStore.read_presentation(id, dir)
+      assert Session.get_queued_messages(session) == {[], ["keep", "also keep"]}
+
+      gone = make_ref()
+      :ok = Session.request_composer_draft(session, id, gone, {:recall_one, {2, 1}, 1, recalled})
+
+      assert_receive {:composer_draft_result, ^session, ^id, ^gone, {:error, :already_consumed}},
+                     @event_timeout
+
+      # A recalled message is in the composer now: it is not among the removed ones.
+      assert {:ok, %{pending: pending, removed: []}} = Session.queue_contents(session, id)
+      assert Enum.map(pending, & &1.identity) == [{1, 1}, {3, 1}]
+    end
+
+    @tag :tmp_dir
+    test "the queue's contents list what waits and what was removed, newest removal first", %{
+      tmp_dir: dir
+    } do
+      session =
+        start_test_session(
+          provider: SessionSlowMockProvider,
+          persist?: true,
+          session_store_dir: dir
+        )
+
+      Session.subscribe(session)
+      assert :ok = Session.send_prompt(session, "First")
+      assert_receive {:agent_event, ^session, {:status_changed, :thinking}}, @event_timeout
+
+      for text <- ["one", "two", "three"],
+          do: assert({:queued, :follow_up} = Session.queue_follow_up(session, text))
+
+      id = Session.session_id(session)
+      assert {:error, :stale_target} = Session.queue_contents(session, "wrong-record")
+      assert {:ok, 0} = Session.change_queued_input(session, id, {1, 1}, :remove)
+      assert {:ok, 0} = Session.change_queued_input(session, id, {3, 1}, :remove)
+
+      assert {:ok, %{pending: [waiting], removed: [newest, oldest]}} =
+               Session.queue_contents(session, id)
+
+      assert {waiting.identity, waiting.preview} == {{2, 1}, "two"}
+      assert {newest.identity, newest.preview, newest.kind} == {{3, 1}, "three", :follow_up}
+      assert {oldest.identity, oldest.preview} == {{1, 1}, "one"}
+    end
+
+    @tag :tmp_dir
+    test "removing a ninth input reports the permanently lost removal", %{tmp_dir: dir} do
+      session =
+        start_test_session(
+          provider: SessionSlowMockProvider,
+          persist?: true,
+          session_store_dir: dir
+        )
+
+      Session.subscribe(session)
+      assert :ok = Session.send_prompt(session, "First")
+      assert_receive {:agent_event, ^session, {:status_changed, :thinking}}, @event_timeout
+      id = Session.session_id(session)
+
+      for index <- 1..9 do
+        assert {:queued, :follow_up} = Session.queue_follow_up(session, "Message #{index}")
+        expired = if index == 9, do: 1, else: 0
+        assert {:ok, ^expired} = Session.change_queued_input(session, id, {index, 1}, :remove)
+      end
+
+      assert {:ok, %{pending: [], removed: removed}} = Session.queue_contents(session, id)
+      assert Enum.map(removed, & &1.identity) == Enum.map(9..2//-1, &{&1, 1})
+      assert {:error, :already_consumed} = Session.place_queued_input(session, id, {1, 1}, :end)
+    end
+
+    @tag :tmp_dir
     test "a late queue removal cannot change the already admitted request or withdraw a later item",
          %{tmp_dir: dir} do
       session =
@@ -436,7 +688,7 @@ defmodule MingaAgent.SessionQueueTest do
       assert {:error, :stale_queue_revision} =
                Session.change_queued_input(session, id, {1, 1}, :remove)
 
-      assert :ok = Session.change_queued_input(session, id, {2, 1}, :remove)
+      assert {:ok, 0} = Session.change_queued_input(session, id, {2, 1}, :remove)
 
       assert {:ok, [%{identity: {1, 2}, preview: "revised"}, %{identity: {3, 1}}]} =
                Session.queued_input_summaries(session, id)

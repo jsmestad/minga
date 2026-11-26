@@ -1,0 +1,288 @@
+# minga storyboard frame v1
+# scenario: minga.queue
+# frontend: tui
+# theme: catppuccin_latte
+# size: 120x40
+# cursor: none
+## text
+Spaces · folder minga.queue (1 tab) · ▎cpu A 429 with usage_limit_reached (1 tab, 1 running)
+ ▌ 󰚩 Show the plan limit and…
+ 󰚩 Agent  Resolving model…                                                  ◐ Working  [Tasks] [History] [Help] [Queue]
+  Transcript ─────────────────────────────────────────────────────────────────────────────── │ ╭ ◇ Session ───────────╮
+   i System  Session started · 09:41:00 UTC                                                  │ │ Provider unknown     │
+                                                                                             │ │ Model    Resolving mo│
+   You                                                                                       │ │ State    Working     │
+     Show the plan limit and when it resets instead of "rate limited".                       │ │ Messages 10          │
+                                                                                             │ │ Tools    3 · 0 runnin│
+   Minga                                                                                     │ │ ─── Needs attention ─│
+     A 429 with usage_limit_reached is its own case. I'll carry the plan, window and reset   │ │ Error    Could not ru│
+     time on the error.                                                                      │ │ ─── Hints ───────────│
+   ● Read lib/native.ex                                                                      │ │ Tab  complete        │
+   ● Edited lib/retry.ex                                                                     │ │ ?  agent help        │
+   ◆ Could not run `mix test test/retry_test.exs`                                            │ ╰──────────────────────╯
+                                                                                             │
+   i System  Saved the retry notes to lib/native/usage_limit/notes.md; open that file to     │
+             review the plan, window and reset time.                                         │
+                                                                                             │
+   You                                                                                       │
+     Also show the reset time in the modeline.                                               │
+                                                                                             │
+   Minga                                                                                     │
+     Also show the reset time in the modeline.                                               │
+                                                                                             │
+   i System  Agent UI registry online                                                        │
+                                                                                             │
+                                                                                             │
+  2 messages · Working                                                                       │
+  *minga-queue*  2 queued  dd remove  ↩ edit  q close                                        │
+  1 Then run the session tests and fix what fails.                                           │
+  2 Update docs/CONFIGURATION.md with the new limit message.                                 │
+ ╭ Running...                                                                              ╮ │
+ │ ❯ NORMAL  Include a note about retries.                                                 │ │
+ │Send · Steer · Queue Next · Stop · Attachments                                           │ │
+ ╰─────────────────────────────────────────────────────────────────────────────────────────╯ │
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Review files (0)  [All Changes]  ]F  wheel
+No changed files
+  NORMAL  *minga-queue* ◐ Minga working                                                                        Text 1:1
+## styles (row start-end fg bg attrs)
+0 0-37 #8c8fa1 #ccd0da -
+0 38-72 #1e66f5 #ccd0da bold
+0 73-91 #8c8fa1 #ccd0da -
+0 92-119 #4c4f69 #eff1f5 -
+1 0-0 #4c4f69 #eff1f5 -
+1 1-1 #1e66f5 #eff1f5 bold
+1 2-119 #4c4f69 #eff1f5 -
+2 0-0 #4c4f69 #eff1f5 -
+2 1-7 #1e66f5 #ccd0da bold
+2 8-9 #8c8fa1 #ccd0da -
+2 10-25 #1e66f5 #ccd0da -
+2 26-73 #4c4f69 #eff1f5 -
+2 74-74 #8c8fa1 #ccd0da -
+2 75-75 #4c4f69 #8839ef -
+2 76-84 #ccd0da #8839ef bold
+2 85-85 #4c4f69 #8839ef -
+2 86-86 #4c4f69 #eff1f5 -
+2 87-93 #8c8fa1 #ccd0da -
+2 94-94 #4c4f69 #eff1f5 -
+2 95-103 #8c8fa1 #ccd0da -
+2 104-104 #4c4f69 #eff1f5 -
+2 105-110 #8c8fa1 #ccd0da -
+2 111-111 #4c4f69 #eff1f5 -
+2 112-118 #8c8fa1 #ccd0da -
+2 119-119 #4c4f69 #eff1f5 -
+3 0-0 #4c4f69 #eff1f5 -
+3 1-12 #8c8fa1 #eff1f5 bold
+3 13-91 #8c8fa1 #eff1f5 -
+3 92-94 #7c7f93 #eff1f5 -
+3 95-95 #4c4f69 #eff1f5 -
+3 96-106 #1e66f5 #eff1f5 bold
+3 107-118 #7c7f93 #eff1f5 -
+3 119-119 #4c4f69 #eff1f5 -
+4 0-2 #4c4f69 #eff1f5 -
+4 3-10 #1e66f5 #eff1f5 bold
+4 11-42 #8c8fa1 #eff1f5 -
+4 43-91 #4c4f69 #eff1f5 -
+4 92-95 #7c7f93 #eff1f5 -
+4 96-96 #4c4f69 #eff1f5 -
+4 97-104 #8c8fa1 #eff1f5 -
+4 105-117 #4c4f69 #eff1f5 -
+4 118-118 #7c7f93 #eff1f5 -
+4 119-119 #4c4f69 #eff1f5 -
+5 0-91 #4c4f69 #eff1f5 -
+5 92-95 #7c7f93 #eff1f5 -
+5 96-96 #4c4f69 #eff1f5 -
+5 97-101 #8c8fa1 #eff1f5 -
+5 102-117 #4c4f69 #eff1f5 -
+5 118-118 #7c7f93 #eff1f5 -
+5 119-119 #4c4f69 #eff1f5 -
+6 0-0 #4c4f69 #eff1f5 -
+6 1-5 #1e66f5 #eff1f5 bold
+6 6-91 #4c4f69 #eff1f5 -
+6 92-95 #7c7f93 #eff1f5 -
+6 96-96 #4c4f69 #eff1f5 -
+6 97-101 #8c8fa1 #eff1f5 -
+6 102-117 #4c4f69 #eff1f5 -
+6 118-118 #7c7f93 #eff1f5 -
+6 119-119 #4c4f69 #eff1f5 -
+7 0-91 #4c4f69 #eff1f5 -
+7 92-95 #7c7f93 #eff1f5 -
+7 96-96 #4c4f69 #eff1f5 -
+7 97-104 #8c8fa1 #eff1f5 -
+7 105-117 #4c4f69 #eff1f5 -
+7 118-118 #7c7f93 #eff1f5 -
+7 119-119 #4c4f69 #eff1f5 -
+8 0-91 #4c4f69 #eff1f5 -
+8 92-95 #7c7f93 #eff1f5 -
+8 96-96 #4c4f69 #eff1f5 -
+8 97-101 #8c8fa1 #eff1f5 -
+8 102-117 #4c4f69 #eff1f5 -
+8 118-118 #7c7f93 #eff1f5 -
+8 119-119 #4c4f69 #eff1f5 -
+9 0-0 #4c4f69 #eff1f5 -
+9 1-7 #8839ef #eff1f5 bold
+9 8-91 #4c4f69 #eff1f5 -
+9 92-95 #7c7f93 #eff1f5 -
+9 96-96 #4c4f69 #eff1f5 -
+9 97-99 #7c7f93 #eff1f5 -
+9 100-116 #8c8fa1 #eff1f5 bold
+9 117-118 #7c7f93 #eff1f5 -
+9 119-119 #4c4f69 #eff1f5 -
+10 0-0 #4c4f69 #eff1f5 -
+10 1-4 #40a02b #eff1f5 -
+10 5-91 #4c4f69 #eff1f5 -
+10 92-95 #7c7f93 #eff1f5 -
+10 96-96 #4c4f69 #eff1f5 -
+10 97-101 #8c8fa1 #eff1f5 -
+10 102-117 #4c4f69 #eff1f5 -
+10 118-118 #7c7f93 #eff1f5 -
+10 119-119 #4c4f69 #eff1f5 -
+11 0-0 #4c4f69 #eff1f5 -
+11 1-4 #40a02b #eff1f5 -
+11 5-91 #4c4f69 #eff1f5 -
+11 92-95 #7c7f93 #eff1f5 -
+11 96-96 #4c4f69 #eff1f5 -
+11 97-99 #7c7f93 #eff1f5 -
+11 100-106 #8c8fa1 #eff1f5 bold
+11 107-118 #7c7f93 #eff1f5 -
+11 119-119 #4c4f69 #eff1f5 -
+12 0-0 #4c4f69 #eff1f5 -
+12 1-3 #388e25 #eff1f5 -
+12 4-91 #4c4f69 #eff1f5 -
+12 92-95 #7c7f93 #eff1f5 -
+12 96-96 #4c4f69 #eff1f5 -
+12 97-99 #1e66f5 #eff1f5 bold
+12 100-109 #8c8fa1 #eff1f5 -
+12 110-117 #4c4f69 #eff1f5 -
+12 118-118 #7c7f93 #eff1f5 -
+12 119-119 #4c4f69 #eff1f5 -
+13 0-0 #4c4f69 #eff1f5 -
+13 1-3 #388e25 #eff1f5 -
+13 4-91 #4c4f69 #eff1f5 -
+13 92-95 #7c7f93 #eff1f5 -
+13 96-96 #4c4f69 #eff1f5 -
+13 97-97 #1e66f5 #eff1f5 bold
+13 98-109 #8c8fa1 #eff1f5 -
+13 110-117 #4c4f69 #eff1f5 -
+13 118-118 #7c7f93 #eff1f5 -
+13 119-119 #4c4f69 #eff1f5 -
+14 0-0 #4c4f69 #eff1f5 -
+14 1-3 #d20f39 #eff1f5 -
+14 4-91 #4c4f69 #eff1f5 -
+14 92-118 #7c7f93 #eff1f5 -
+14 119-119 #4c4f69 #eff1f5 -
+15 0-91 #4c4f69 #eff1f5 -
+15 92-94 #7c7f93 #eff1f5 -
+15 95-119 #4c4f69 #eff1f5 -
+16 0-2 #4c4f69 #eff1f5 -
+16 3-10 #1e66f5 #eff1f5 bold
+16 11-87 #8c8fa1 #eff1f5 -
+16 88-91 #4c4f69 #eff1f5 -
+16 92-94 #7c7f93 #eff1f5 -
+16 95-119 #4c4f69 #eff1f5 -
+17 0-10 #4c4f69 #eff1f5 -
+17 11-51 #8c8fa1 #eff1f5 -
+17 52-91 #4c4f69 #eff1f5 -
+17 92-94 #7c7f93 #eff1f5 -
+17 95-119 #4c4f69 #eff1f5 -
+18 0-91 #4c4f69 #eff1f5 -
+18 92-94 #7c7f93 #eff1f5 -
+18 95-119 #4c4f69 #eff1f5 -
+19 0-0 #4c4f69 #eff1f5 -
+19 1-5 #1e66f5 #eff1f5 bold
+19 6-91 #4c4f69 #eff1f5 -
+19 92-94 #7c7f93 #eff1f5 -
+19 95-119 #4c4f69 #eff1f5 -
+20 0-91 #4c4f69 #eff1f5 -
+20 92-94 #7c7f93 #eff1f5 -
+20 95-119 #4c4f69 #eff1f5 -
+21 0-91 #4c4f69 #eff1f5 -
+21 92-94 #7c7f93 #eff1f5 -
+21 95-119 #4c4f69 #eff1f5 -
+22 0-0 #4c4f69 #eff1f5 -
+22 1-7 #8839ef #eff1f5 bold
+22 8-91 #4c4f69 #eff1f5 -
+22 92-94 #7c7f93 #eff1f5 -
+22 95-119 #4c4f69 #eff1f5 -
+23 0-0 #4c4f69 #eff1f5 -
+23 1-4 #40a02b #eff1f5 -
+23 5-91 #4c4f69 #eff1f5 -
+23 92-94 #7c7f93 #eff1f5 -
+23 95-119 #4c4f69 #eff1f5 -
+24 0-91 #4c4f69 #eff1f5 -
+24 92-94 #7c7f93 #eff1f5 -
+24 95-119 #4c4f69 #eff1f5 -
+25 0-2 #4c4f69 #eff1f5 -
+25 3-10 #1e66f5 #eff1f5 bold
+25 11-36 #8c8fa1 #eff1f5 -
+25 37-91 #4c4f69 #eff1f5 -
+25 92-94 #7c7f93 #eff1f5 -
+25 95-119 #4c4f69 #eff1f5 -
+26 0-91 #4c4f69 #eff1f5 -
+26 92-94 #7c7f93 #eff1f5 -
+26 95-119 #4c4f69 #eff1f5 -
+27 0-91 #4c4f69 #eff1f5 -
+27 92-94 #7c7f93 #eff1f5 -
+27 95-119 #4c4f69 #eff1f5 -
+28 0-0 #4c4f69 #eff1f5 -
+28 1-91 #8c8fa1 #eff1f5 -
+28 92-94 #7c7f93 #eff1f5 -
+28 95-119 #4c4f69 #eff1f5 -
+29 0-0 #4c4f69 #eff1f5 -
+29 1-1 #4c4f69 #e6e9ef -
+29 2-14 #4c4f69 #e6e9ef bold
+29 15-26 #4c4f69 #e6e9ef -
+29 27-28 #4c4f69 #e6e9ef bold
+29 29-37 #4c4f69 #e6e9ef -
+29 38-38 #4c4f69 #e6e9ef bold
+29 39-45 #4c4f69 #e6e9ef -
+29 46-46 #4c4f69 #e6e9ef bold
+29 47-52 #4c4f69 #e6e9ef -
+29 53-91 #4c4f69 #eff1f5 -
+29 92-94 #7c7f93 #eff1f5 -
+29 95-119 #4c4f69 #eff1f5 -
+30 0-0 #4c4f69 #eff1f5 -
+30 1-1 #4c4f69 #4c4f69 -
+30 2-2 #e6e9ef #4c4f69 -
+30 3-3 #4c4f69 #4c4f69 -
+30 4-49 #e6e9ef #4c4f69 -
+30 50-91 #4c4f69 #eff1f5 -
+30 92-94 #7c7f93 #eff1f5 -
+30 95-119 #4c4f69 #eff1f5 -
+31 0-0 #4c4f69 #eff1f5 -
+31 1-59 #4c4f69 #e6e9ef -
+31 60-91 #4c4f69 #eff1f5 -
+31 92-94 #7c7f93 #eff1f5 -
+31 95-119 #4c4f69 #eff1f5 -
+32 0-0 #4c4f69 #eff1f5 -
+32 1-91 #1e66f5 #eff1f5 -
+32 92-94 #7c7f93 #eff1f5 -
+32 95-119 #4c4f69 #eff1f5 -
+33 0-0 #4c4f69 #eff1f5 -
+33 1-1 #1e66f5 #eff1f5 -
+33 2-12 #1e66f5 #eff1f5 bold
+33 13-90 #4c4f69 #eff1f5 -
+33 91-91 #1e66f5 #eff1f5 -
+33 92-94 #7c7f93 #eff1f5 -
+33 95-119 #4c4f69 #eff1f5 -
+34 0-0 #4c4f69 #eff1f5 -
+34 1-1 #1e66f5 #eff1f5 -
+34 2-5 #8c8fa1 #eff1f5 -
+34 6-90 #4c4f69 #eff1f5 -
+34 91-91 #1e66f5 #eff1f5 -
+34 92-94 #7c7f93 #eff1f5 -
+34 95-119 #4c4f69 #eff1f5 -
+35 0-0 #4c4f69 #eff1f5 -
+35 1-91 #1e66f5 #eff1f5 -
+35 92-94 #7c7f93 #eff1f5 -
+35 95-119 #4c4f69 #eff1f5 -
+36 0-119 #8c8fa1 #ccd0da -
+37 0-119 #1e66f5 #ccd0da bold
+38 0-119 #4c4f69 #ccd0da -
+39 0-0 #8c8fa1 #e6e9ef -
+39 1-1 #4c4f69 #1e66f5 -
+39 2-7 #eff1f5 #1e66f5 bold
+39 8-8 #4c4f69 #1e66f5 -
+39 9-23 #4c4f69 #e6e9ef -
+39 24-38 #8839ef #e6e9ef -
+39 39-119 #4c4f69 #e6e9ef -

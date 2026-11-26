@@ -1,0 +1,134 @@
+# minga storyboard frame v1
+# scenario: minga.queue.empty
+# frontend: tui
+# theme: catppuccin_frappe
+# size: 80x24
+# cursor: none
+## text
+Spaces · folder minga.queue.empty (1 tab) · ▎cpu A 429 with usage_limit_reached
+ ▌ 󰚩 Show the plan limit and…
+ 󰚩 Agent  Resolving model…               Idle  [Tasks] [History] [Help] [Queue]
+  Transcript ──────────────────────────────────────────────────────────────────
+
+   i System  Saved the retry notes to lib/native/usage_limit/notes.md; open
+             that file to review the plan, window and reset time.
+
+   i System  Agent UI registry online
+  1 message · Idle
+  *minga-queue*  Queue  q close
+
+    Nothing queued.
+    Messages queued while Minga works wait here.
+
+    ↩ Back to the composer
+ ╭ Prompt                                                                     ╮
+ │ ❯ NORMAL  Include a note about retries.                                    │
+ │Send · Steer · Queue Next · Stop · Attachments                              │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+────────────────────────────────────────────────────────────────────────────────
+ Review files (0)  [All Changes]  ]F  wheel
+No changed files
+  NORMAL  *minga-queue*                                                Text 1:1
+## styles (row start-end fg bg attrs)
+0 0-43 #838ba7 #414559 -
+0 44-78 #8caaee #414559 bold
+0 79-79 #838ba7 #414559 -
+1 0-0 #c6d0f5 #303446 -
+1 1-1 #8caaee #303446 bold
+1 2-79 #c6d0f5 #303446 -
+2 0-0 #c6d0f5 #303446 -
+2 1-7 #8caaee #414559 bold
+2 8-9 #838ba7 #414559 -
+2 10-25 #8caaee #414559 -
+2 26-38 #c6d0f5 #303446 -
+2 39-39 #838ba7 #414559 -
+2 40-40 #c6d0f5 #292c3c -
+2 41-44 #838ba7 #292c3c bold
+2 45-45 #c6d0f5 #292c3c -
+2 46-46 #c6d0f5 #303446 -
+2 47-53 #838ba7 #414559 -
+2 54-54 #c6d0f5 #303446 -
+2 55-63 #838ba7 #414559 -
+2 64-64 #c6d0f5 #303446 -
+2 65-70 #838ba7 #414559 -
+2 71-71 #c6d0f5 #303446 -
+2 72-78 #838ba7 #414559 -
+2 79-79 #c6d0f5 #303446 -
+3 0-0 #c6d0f5 #303446 -
+3 1-12 #838ba7 #303446 bold
+3 13-78 #838ba7 #303446 -
+3 79-79 #c6d0f5 #303446 -
+4 0-79 #c6d0f5 #303446 -
+5 0-2 #c6d0f5 #303446 -
+5 3-10 #8caaee #303446 bold
+5 11-74 #838ba7 #303446 -
+5 75-79 #c6d0f5 #303446 -
+6 0-10 #c6d0f5 #303446 -
+6 11-64 #838ba7 #303446 -
+6 65-79 #c6d0f5 #303446 -
+7 0-79 #c6d0f5 #303446 -
+8 0-2 #c6d0f5 #303446 -
+8 3-10 #8caaee #303446 bold
+8 11-36 #838ba7 #303446 -
+8 37-79 #c6d0f5 #303446 -
+9 0-0 #c6d0f5 #303446 -
+9 1-78 #838ba7 #303446 -
+9 79-79 #c6d0f5 #303446 -
+10 0-0 #c6d0f5 #303446 -
+10 1-1 #c6d0f5 #292c3c -
+10 2-14 #c6d0f5 #292c3c bold
+10 15-23 #c6d0f5 #292c3c -
+10 24-24 #c6d0f5 #292c3c bold
+10 25-30 #c6d0f5 #292c3c -
+10 31-79 #c6d0f5 #303446 -
+11 0-0 #c6d0f5 #303446 -
+11 1-78 #c6d0f5 #292c3c -
+11 79-79 #c6d0f5 #303446 -
+12 0-0 #c6d0f5 #303446 -
+12 1-3 #c6d0f5 #292c3c -
+12 4-18 #c6d0f5 #292c3c bold
+12 19-78 #c6d0f5 #292c3c -
+12 79-79 #c6d0f5 #303446 -
+13 0-0 #c6d0f5 #303446 -
+13 1-78 #c6d0f5 #292c3c -
+13 79-79 #c6d0f5 #303446 -
+14 0-0 #c6d0f5 #303446 -
+14 1-78 #c6d0f5 #292c3c -
+14 79-79 #c6d0f5 #303446 -
+15 0-0 #c6d0f5 #303446 -
+15 1-3 #c6d0f5 #c6d0f5 -
+15 4-4 #292c3c #c6d0f5 -
+15 5-5 #c6d0f5 #c6d0f5 -
+15 6-25 #292c3c #c6d0f5 -
+15 26-78 #c6d0f5 #c6d0f5 -
+15 79-79 #c6d0f5 #303446 -
+16 0-0 #c6d0f5 #303446 -
+16 1-78 #8caaee #303446 -
+16 79-79 #c6d0f5 #303446 -
+17 0-0 #c6d0f5 #303446 -
+17 1-1 #8caaee #303446 -
+17 2-12 #8caaee #303446 bold
+17 13-77 #c6d0f5 #303446 -
+17 78-78 #8caaee #303446 -
+17 79-79 #c6d0f5 #303446 -
+18 0-0 #c6d0f5 #303446 -
+18 1-8 #8caaee #303446 -
+18 9-13 #838ba7 #303446 -
+18 14-16 #c6d0f5 #303446 -
+18 17-26 #838ba7 #303446 -
+18 27-29 #c6d0f5 #303446 -
+18 30-33 #838ba7 #303446 -
+18 34-77 #c6d0f5 #303446 -
+18 78-78 #8caaee #303446 -
+18 79-79 #c6d0f5 #303446 -
+19 0-0 #c6d0f5 #303446 -
+19 1-78 #8caaee #303446 -
+19 79-79 #c6d0f5 #303446 -
+20 0-79 #838ba7 #414559 -
+21 0-79 #8caaee #414559 bold
+22 0-79 #c6d0f5 #414559 -
+23 0-0 #838ba7 #292c3c -
+23 1-1 #c6d0f5 #8caaee -
+23 2-7 #303446 #8caaee bold
+23 8-8 #c6d0f5 #8caaee -
+23 9-79 #c6d0f5 #292c3c -

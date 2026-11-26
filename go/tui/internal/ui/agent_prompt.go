@@ -63,11 +63,8 @@ func (m Model) agentPromptPlacement() (agentComposerPlacement, bool) {
 		return agentComposerPlacement{}, false
 	}
 	limit := m.bodyHeight()
-	width := max(m.layout.body.Width-2, 1)
-	if chat.Lifecycle == protocol.AgentChatConversation && agentDetailsVisible(width) && limit > 5 {
-		width = max(width-agentDetailsWidth(width)-agentColumnGap(), 40)
-	}
-	p := agentComposerAllocation(chat, width, limit-agentPanelHeaderRows(limit))
+	width := agentMainWidth(chat, max(m.layout.body.Width-2, 1), limit)
+	p := agentComposerAllocation(chat, width, m.agentComposerBudget(chat, limit-agentPanelHeaderRows(limit)))
 	if p.height == 0 {
 		return p, false
 	}

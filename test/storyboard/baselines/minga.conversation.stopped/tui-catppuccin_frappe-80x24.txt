@@ -9,8 +9,6 @@ Spaces · folder minga.conversation.stopped (1 tab) · ▎cpu A 429 with usage_l
  ▌ 󰚩 Show the plan limit and…
  󰚩 Agent  Resolving model…            Stopped  [Tasks] [History] [Help] [Queue]
   Transcript ──────────────────────────────────────────────────────────────────
-             that file to review the plan, window and reset time.
-
    You
      Also show the reset time in the modeline.
 
@@ -21,6 +19,8 @@ Spaces · folder minga.conversation.stopped (1 tab) · ▎cpu A 429 with usage_l
 
    i System  Agent UI registry online
   2 messages · Stopped
+  *minga-queue*  1 queued, kept
+  1 Then run the session tests and fix what fails.
  ╭ Prompt                                                                     ╮
  │ ❯ INSERT  Ask Minga to edit, explain, search, or run tools                 │
  │Continue · Steer · Queue Next · Stop · Attachments · esc ↩ continue         │
@@ -57,34 +57,38 @@ No changed files
 3 1-12 #838ba7 #303446 bold
 3 13-78 #838ba7 #303446 -
 3 79-79 #c6d0f5 #303446 -
-4 0-10 #c6d0f5 #303446 -
-4 11-64 #838ba7 #303446 -
-4 65-79 #c6d0f5 #303446 -
+4 0-0 #c6d0f5 #303446 -
+4 1-5 #8caaee #303446 bold
+4 6-79 #c6d0f5 #303446 -
 5 0-79 #c6d0f5 #303446 -
-6 0-0 #c6d0f5 #303446 -
-6 1-5 #8caaee #303446 bold
-6 6-79 #c6d0f5 #303446 -
-7 0-79 #c6d0f5 #303446 -
-8 0-79 #c6d0f5 #303446 -
-9 0-0 #c6d0f5 #303446 -
-9 1-7 #ca9ee6 #303446 bold
-9 8-79 #c6d0f5 #303446 -
-10 0-0 #c6d0f5 #303446 -
-10 1-4 #a6d189 #303446 -
-10 5-79 #c6d0f5 #303446 -
+6 0-79 #c6d0f5 #303446 -
+7 0-0 #c6d0f5 #303446 -
+7 1-7 #ca9ee6 #303446 bold
+7 8-79 #c6d0f5 #303446 -
+8 0-0 #c6d0f5 #303446 -
+8 1-4 #a6d189 #303446 -
+8 5-79 #c6d0f5 #303446 -
+9 0-79 #c6d0f5 #303446 -
+10 0-2 #c6d0f5 #303446 -
+10 3-10 #8caaee #303446 bold
+10 11-19 #838ba7 #303446 -
+10 20-79 #c6d0f5 #303446 -
 11 0-79 #c6d0f5 #303446 -
 12 0-2 #c6d0f5 #303446 -
 12 3-10 #8caaee #303446 bold
-12 11-19 #838ba7 #303446 -
-12 20-79 #c6d0f5 #303446 -
-13 0-79 #c6d0f5 #303446 -
-14 0-2 #c6d0f5 #303446 -
-14 3-10 #8caaee #303446 bold
-14 11-36 #838ba7 #303446 -
-14 37-79 #c6d0f5 #303446 -
+12 11-36 #838ba7 #303446 -
+12 37-79 #c6d0f5 #303446 -
+13 0-0 #c6d0f5 #303446 -
+13 1-78 #838ba7 #303446 -
+13 79-79 #c6d0f5 #303446 -
+14 0-0 #c6d0f5 #303446 -
+14 1-1 #c6d0f5 #292c3c -
+14 2-14 #c6d0f5 #292c3c bold
+14 15-30 #c6d0f5 #292c3c -
+14 31-79 #c6d0f5 #303446 -
 15 0-0 #c6d0f5 #303446 -
-15 1-78 #838ba7 #303446 -
-15 79-79 #c6d0f5 #303446 -
+15 1-49 #c6d0f5 #292c3c -
+15 50-79 #c6d0f5 #303446 -
 16 0-0 #c6d0f5 #303446 -
 16 1-78 #8caaee #303446 -
 16 79-79 #c6d0f5 #303446 -

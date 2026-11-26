@@ -307,6 +307,26 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
             }
         ]
 
+    case .guiAgentQueue(let queue):
+        guard let queue else { return ["type": "gui_agent_queue", "visible": false] }
+        func rowJSON(_ row: Wire.AgentQueue.Row) -> [String: Any] {
+            [
+                "id": jsonUInt64(row.id), "revision": jsonUInt64(row.identity.revision),
+                "kind": Int(row.kind.rawValue), "label": row.label, "preview": row.preview,
+                "attachment_count": Int(row.attachmentCount)
+            ]
+        }
+        var result: [String: Any] = [
+            "type": "gui_agent_queue", "visible": true, "focused": queue.focused,
+            "workspace_id": Int(queue.origin.workspaceID), "record_id": queue.origin.recordID,
+            "title": queue.title, "summary": queue.summary, "removed_note": queue.removedNote,
+            "selected_id": jsonUInt64(queue.selectedID ?? 0),
+            "hints": queue.hints.map { ["action": Int($0.action.rawValue), "key": $0.key, "label": $0.label] },
+            "pending": queue.pending.map(rowJSON), "removed": queue.removed.map(rowJSON)
+        ]
+        if let empty = queue.empty { result["empty"] = emptyListJSON(empty) }
+        return result
+
     case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, let pendingToolName, let pendingToolSummary, let draftAttachmentCount, let draftAttachmentOffer, let question, let stopTarget, let promptPresentation, _, let lifecycle, _, let continueTarget):
         let phase: String
         let reason: String

@@ -146,7 +146,7 @@ Press `SPC` in Normal mode. These sequences also work from the agent view, the f
 | `SPC a u` | Undo all of the agent's edits from this session |
 | `SPC a W` | Why is this line like this? |
 | `SPC a A` | Code autobiography |
-| `SPC a q q` | Open the queue of messages waiting for the agent |
+| `SPC a q q` | Focus `*minga-queue*` inside the conversation |
 | `SPC a q f` | Queue the composer's text as a follow-up |
 | `SPC a x b` | Attach this buffer to your next message |
 | `SPC a x f` | Attach a project file |
@@ -328,6 +328,21 @@ Leader keys work here too, and `:` opens the command line, so `:w`, `:qa` and `:
 When the composer shows **Continue**, press `↩` in the composer's Normal mode, press `⌘↩` on macOS, or click **Continue**. Minga resumes the interrupted request without sending the draft or taking the next queued message. In Vim Insert mode, plain Return still adds a new line.
 
 Any other key does nothing. The conversation is not a file, so a stray key never edits, or moves focus to, the file behind it. The same holds with desktop shortcuts: an undo or paste key pressed here is ignored. On macOS, `⌘S`, `⌘Z`, `⌘X`, `⌘C` and `⌘V` are menu commands and act as they do everywhere else.
+
+### In the queue
+
+When Minga is working, `⌥↩` in the Vim composer adds a next-turn message. Leave the composer and press `SPC a q q`, or click **Queue** in the conversation header, to manage the waiting messages.
+
+| Keys | Action |
+|---|---|
+| `j` / `k` or Down / Up | Move the selection without moving the composer |
+| `dd` | Remove the selected message. It will not be sent |
+| `p` / `P` | Put the most recently removed message after / before the selected message in its own queue. If that queue has no other messages, put it back at the end |
+| `↩` | Move the selected message and its attachments into the local composer for editing. In a remote conversation, open its separate editor; the message stays queued |
+| `q` | Leave the queue and restore its previous focus |
+| `esc` | Cancel a partial key sequence without closing the queue |
+
+Each row is one whole message. Removed messages stay out of the queue until you put them back. Minga keeps up to eight removed messages in memory and tells you when an older removal is gone for good. Removed messages do not survive closing Minga.
 
 ### In the changed-file view
 
@@ -573,7 +588,7 @@ In Normal mode:
 | `esc` | Leave the composer for the conversation, where `q` closes the view |
 | `SPC a q f` | Queue the message for after the agent's turn |
 
-Shift with an arrow key keeps its Vim meaning here and does not start a selection. To select, press `esc`, then `v`, and use Vim motions. With desktop shortcuts, `↩` sends, `⇧↩`, `⌥↩` and `⌃J` start a new line, Up and Down recall earlier messages, and `⌘.` stops Minga while it works (macOS). To pull queued messages back into the composer, run the "Dequeue messages back to editor" command from the command palette.
+Shift with an arrow key keeps its Vim meaning here and does not start a selection. To select, press `esc`, then `v`, and use Vim motions. With desktop shortcuts, `↩` sends, `⇧↩`, `⌥↩` and `⌃J` start a new line, Up and Down recall earlier messages, and `⌘.` stops Minga while it works (macOS). To edit one waiting message, open [the queue](#in-the-queue) and press `↩` on its row.
 
 ## In the terminal
 

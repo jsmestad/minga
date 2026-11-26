@@ -18,6 +18,7 @@ defmodule MingaEditor.Agent.UIState do
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.View
   alias MingaAgent.Session.ConnectionSnapshot
+  alias MingaEditor.Agent.QueueSurface
   alias MingaEditor.Agent.ConnectionPrompt
   alias MingaEditor.Agent.UIState.Compaction
   alias MingaEditor.Agent.Activity
@@ -42,6 +43,7 @@ defmodule MingaEditor.Agent.UIState do
           panel: Panel.t(),
           view: View.t(),
           draft_save: MingaEditor.Agent.DraftSave.t() | nil,
+          queue: QueueSurface.t(),
           connection: ConnectionSnapshot.t() | nil,
           connection_prompt: ConnectionPrompt.t() | nil,
           chat_lifecycle: chat_lifecycle()
@@ -50,6 +52,7 @@ defmodule MingaEditor.Agent.UIState do
   defstruct panel: %Panel{},
             view: %View{},
             draft_save: nil,
+            queue: %QueueSurface{},
             connection: nil,
             connection_prompt: nil,
             chat_lifecycle: :starting
@@ -61,6 +64,19 @@ defmodule MingaEditor.Agent.UIState do
   @spec new() :: t()
   def new, do: %__MODULE__{panel: Panel.new()}
 
+  @doc "Installs the next projection returned by the queue surface owner."
+  @spec install_queue(t(), QueueSurface.t()) :: t()
+  def install_queue(%__MODULE__{} = state, %QueueSurface{} = queue), do: %{state | queue: queue}
+
+  @doc "Returns queue focus to the current surface without restoring the old focus."
+  @spec blur_queue(t()) :: t()
+  def blur_queue(%__MODULE__{} = state) do
+    case QueueSurface.close(state.queue) do
+      {:closed, _return, queue} -> %{state | queue: queue, view: View.clear_prefix(state.view)}
+      :not_focused -> state
+    end
+  end
+
   @doc """
   Installs the observed chat lifecycle without changing the live draft or conversation.
 
@@ -69,7 +85,7 @@ defmodule MingaEditor.Agent.UIState do
   @spec transition_chat(t(), :starting | {:conversation, pid()} | :unavailable) :: t()
   def transition_chat(%__MODULE__{} = state, lifecycle)
       when lifecycle in [:starting, :unavailable],
-      do: %{state | chat_lifecycle: lifecycle}
+      do: retire_chat_queue(state, lifecycle)
 
   def transition_chat(%__MODULE__{} = state, {:conversation, session} = lifecycle)
       when is_pid(session),
@@ -78,7 +94,7 @@ defmodule MingaEditor.Agent.UIState do
   @doc "Shows a failed start with its cause and remedy, keeping the draft."
   @spec fail_start(t(), StartFailure.t()) :: t()
   def fail_start(%__MODULE__{} = state, %StartFailure{} = failure),
-    do: %{state | chat_lifecycle: {:failed, failure}}
+    do: retire_chat_queue(state, {:failed, failure})
 
   @doc """
   Restores a lifecycle observed earlier on this value, such as one saved across an event dispatch.
@@ -90,6 +106,12 @@ defmodule MingaEditor.Agent.UIState do
     do: fail_start(state, failure)
 
   def restore_chat(%__MODULE__{} = state, lifecycle), do: transition_chat(state, lifecycle)
+
+  @spec retire_chat_queue(t(), chat_lifecycle()) :: t()
+  defp retire_chat_queue(state, lifecycle) do
+    state = blur_queue(state)
+    %{state | chat_lifecycle: lifecycle, queue: QueueSurface.bind(state.queue, nil)}
+  end
 
   @doc """
   The model label the chat header shows for this lifecycle.
@@ -163,9 +185,30 @@ defmodule MingaEditor.Agent.UIState do
     state = retire_previous_changes(state, connection)
 
     prompt = current_connection_prompt(state.connection_prompt, connection)
-    state = %{state | connection: connection, panel: panel, connection_prompt: prompt}
+    queue = queue_for_connection(state.queue, connection)
+
+    state = %{
+      state
+      | connection: connection,
+        panel: panel,
+        connection_prompt: prompt,
+        queue: queue
+    }
+
     restore_chat(state, connection_lifecycle(connection, state.chat_lifecycle))
   end
+
+  @spec queue_for_connection(QueueSurface.t(), ConnectionSnapshot.t()) :: QueueSurface.t()
+  defp queue_for_connection(
+         %QueueSurface{origin: {_, session, record}} = queue,
+         %ConnectionSnapshot{
+           persistent_drafts?: true,
+           target: %{session: session, session_id: record}
+         }
+       ),
+       do: queue
+
+  defp queue_for_connection(queue, _connection), do: QueueSurface.bind(queue, nil)
 
   @spec connection_lifecycle(ConnectionSnapshot.t(), chat_lifecycle()) :: chat_lifecycle()
   defp connection_lifecycle(
@@ -234,7 +277,12 @@ defmodule MingaEditor.Agent.UIState do
   @doc "Drops a retired Session's cached connection without discarding its draft."
   @spec clear_connection(t()) :: t()
   def clear_connection(%__MODULE__{} = state),
-    do: %{state | connection: nil, connection_prompt: nil}
+    do: %{
+      state
+      | connection: nil,
+        connection_prompt: nil,
+        queue: QueueSurface.bind(state.queue, nil)
+    }
 
   @doc "Attaches the process-backed prompt buffer to this UI value."
   @spec attach_prompt_buffer(t(), pid()) :: t()
@@ -457,8 +505,9 @@ defmodule MingaEditor.Agent.UIState do
 
   @doc "Focuses the draft in chat, or releases input without changing the selected body."
   @spec set_input_focused(t(), boolean()) :: t()
-  def set_input_focused(%__MODULE__{panel: panel, view: view} = state, true) do
-    %{state | panel: %{panel | input_focused: true}, view: View.set_focus(view, :chat)}
+  def set_input_focused(%__MODULE__{panel: panel} = state, true) do
+    state = blur_queue(state)
+    %{state | panel: %{panel | input_focused: true}, view: View.set_focus(state.view, :chat)}
   end
 
   def set_input_focused(%__MODULE__{panel: panel} = state, false) do
@@ -617,7 +666,8 @@ defmodule MingaEditor.Agent.UIState do
 
   @doc "Switches focus to the given panel."
   @spec set_focus(t(), View.focus()) :: t()
-  def set_focus(%__MODULE__{view: view, panel: panel} = state, :file_viewer) do
+  def set_focus(%__MODULE__{} = state, :file_viewer) do
+    %{view: view, panel: panel} = state = blur_queue(state)
     %{state | view: View.set_focus(view, :file_viewer), panel: %{panel | input_focused: false}}
   end
 

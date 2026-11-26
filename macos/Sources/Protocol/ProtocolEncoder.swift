@@ -223,6 +223,16 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             }
             return oversizedString(target.turn.sessionID, limit: Int(UInt16.max))
                 ?? oversizedString(target.turn.requestID, limit: Int(UInt16.max))
+        case .agentQueueAction(let action, let origin, let row, let removed):
+            let validTargets: Bool = switch action {
+            case .select, .remove, .edit: row?.isValid == true && removed == nil
+            case .pasteAfter, .pasteBefore: row?.isValid == true && removed?.isValid == true
+            case .close, .composer: row == nil && removed == nil
+            }
+            guard validTargets, !origin.recordID.isEmpty else {
+                return .invalidPayload("Agent queue action requires the displayed queue and action targets")
+            }
+            return oversizedString(origin.recordID, limit: Int(UInt16.max))
         case .agentOpenQuestion(let offer):
             return offer == 0 ? .invalidPayload("Agent question requires a displayed offer") : nil
         case .agentStopTurn(let target), .agentContinueTurn(let target):
@@ -432,6 +442,18 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             let offset = buf.count
             buf.append(Data(count: 8))
             writeU64(&buf, offset, target.sequence)
+            writeFrame(buf)
+        case .agentQueueAction(let action, let origin, let row, let removed):
+            var buf = Data([OP_GUI_ACTION, GUI_ACTION_AGENT_QUEUE_ACTION, action.rawValue, 0, 0, 0, 0])
+            buf.reserveCapacity(41 + origin.recordID.utf8.count)
+            writeU32(&buf, 3, origin.workspaceID)
+            appendString16(&buf, origin.recordID)
+            let offset = buf.count
+            buf.count += 32
+            writeU64(&buf, offset, row?.id ?? 0)
+            writeU64(&buf, offset + 8, row?.revision ?? 0)
+            writeU64(&buf, offset + 16, removed?.id ?? 0)
+            writeU64(&buf, offset + 24, removed?.revision ?? 0)
             writeFrame(buf)
         case .agentOpenQuestion(let offer):
             var buf = Data(count: 10)

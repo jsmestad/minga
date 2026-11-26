@@ -94,7 +94,8 @@ version = "2.0.0"
 # protocol_version 53 adds the which_key_press (0x73) and which_key_back (0x74) gui_actions, so a click on a which-key row or crumb names the open panel's path, and gui_menu_bar (0xAD), the leader groups the macOS menu bar mirrors.
 # protocol_version 54 adds key_hint and the hints of the gui_picker empty section (0x07), plus enter_selection (0x09), the live picker keymap's permission to activate its locally previewed row with unmodified Enter.
 # protocol_version 55 (#4055) appends each tool call's state (u8, a shared state id) and one-line step sentence (string16) to gui_agent_chat messages 0x04 and 0x08, adds the composer hints section 0x10, adds tab and workspace agent status 7 (stopped) and adds context-card status 6 (stopped).
-protocol_version = 55
+# protocol_version 56 adds the resident conversation queue (0xAE), exact queue clicks (0x76), and focus owner surface 15.
+protocol_version = 56
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -1160,6 +1161,14 @@ direction = "beam_to_frontend"
 consumers = ["swift", "go"]
 framing = "len32"
 
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_agent_queue"
+value = 0xAE
+direction = "beam_to_frontend"
+consumers = ["swift", "go"]
+framing = "len32"
+
 # Sub-opcodes inside gui_action (0x07).
 [[gui_actions]]
 name = "select_tab"
@@ -1618,6 +1627,13 @@ value = 0x74
 [[gui_actions]]
 name = "agent_continue_turn"
 value = 0x75
+
+# action(u8) + workspace_id(u32) + record_id(string16) + row_id(u64) + row_revision(u64)
+# + removed_id(u64) + removed_revision(u64). Absent pairs are all zero; paste requires both pairs.
+# Actions: select 0, remove 1, paste after 2, paste before 3, edit 4, close 5, back to composer 6.
+[[gui_actions]]
+name = "agent_queue_action"
+value = 0x76
 
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
@@ -2236,6 +2252,40 @@ fields = [
   { name = "age", type = "string8" },
   { name = "detail", type = "counted_array", count_type = "u8", element = "tasks_drawer_line" },
   { name = "actions", type = "counted_array", count_type = "u8", element = "tasks_drawer_hint" },
+]
+
+[[enums]]
+name = "agent_queue_action"
+repr = "u8"
+default = "unknown"
+values = [
+  { name = "select", value = 0 },
+  { name = "remove", value = 1 },
+  { name = "paste_after", value = 2 },
+  { name = "paste_before", value = 3 },
+  { name = "edit", value = 4 },
+  { name = "close", value = 5 },
+  { name = "composer", value = 6 },
+  { name = "unknown", value = 255 },
+]
+
+[[structures]]
+name = "agent_queue_hint"
+fields = [
+  { name = "action", type = "enum", enum = "agent_queue_action" },
+  { name = "key", type = "string8" },
+  { name = "label", type = "string16" },
+]
+
+[[structures]]
+name = "agent_queue_row"
+fields = [
+  { name = "id", type = "u64" },
+  { name = "revision", type = "u64" },
+  { name = "kind", type = "u8" },
+  { name = "label", type = "string8" },
+  { name = "preview", type = "string16" },
+  { name = "attachment_count", type = "u16" },
 ]
 
 [[structures]]
@@ -3123,6 +3173,25 @@ fields = [
   { name = "has_empty", type = "u8" },
   { name = "empty", type = "struct", element = "empty_list" },
 ]
+
+# gui_agent_queue: hide is exactly one zero byte. EmptyList with an empty title is absent.
+# Row kinds are 0 steering, 1 follow-up. Selected id 0 means no pending row is selected.
+[[command_fields]]
+opcode = "gui_agent_queue"
+fields = [{ name = "visible", type = "u8" }]
+conditional_tail = { guard = "visible == 1", fields = [
+  { name = "focused", type = "u8" },
+  { name = "workspace_id", type = "u32" },
+  { name = "record_id", type = "string16" },
+  { name = "title", type = "string16" },
+  { name = "summary", type = "string16" },
+  { name = "removed_note", type = "string16" },
+  { name = "selected_id", type = "u64" },
+  { name = "hints", type = "counted_array", count_type = "u8", element = "agent_queue_hint" },
+  { name = "pending", type = "counted_array", count_type = "u8", element = "agent_queue_row" },
+  { name = "removed", type = "counted_array", count_type = "u8", element = "agent_queue_row" },
+  { name = "empty", type = "struct", element = "empty_list" },
+] }
 
 [[command_fields]]
 opcode = "gui_edit_timeline"

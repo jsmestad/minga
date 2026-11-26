@@ -208,8 +208,11 @@ defmodule MingaAgent.RemoteAPITest do
     assert {:error, :not_driver} = RemoteAPI.composer(id, token, session, first, :read_queue)
     assert {:error, :not_driver} = RemoteAPI.composer(id, token, session, first, withdraw)
 
-    assert {:ok, [%{identity: {^sequence, 1}, preview: ^text}]} =
-             RemoteAPI.composer(id, token, session, latest, :read_queue)
+    assert {:error, :not_driver} =
+             RemoteAPI.composer(id, token, session, first, :read_queue_contents)
+
+    assert {:ok, %{pending: [%{identity: {^sequence, 1}, preview: ^text}], removed: []}} =
+             RemoteAPI.composer(id, token, session, latest, :read_queue_contents)
 
     newer = %{draft | text: "Keep the new draft"}
     assert {:ok, 3} = RemoteAPI.composer(id, token, session, latest, {:save, 2, newer})
@@ -226,8 +229,11 @@ defmodule MingaAgent.RemoteAPITest do
              RemoteAPI.composer(id, token, session, latest, withdraw)
 
     withdraw = {:withdraw_queued_input, {sequence, 2}}
-    assert :ok = RemoteAPI.composer(id, token, session, latest, withdraw)
-    assert {:ok, []} = RemoteAPI.composer(id, token, session, latest, :read_queue)
+    assert {:ok, 0} = RemoteAPI.composer(id, token, session, latest, withdraw)
+
+    assert {:ok, %{pending: [], removed: [%{identity: {^sequence, 2}, preview: ^replacement}]}} =
+             RemoteAPI.composer(id, token, session, latest, :read_queue_contents)
+
     assert {:error, :already_consumed} = RemoteAPI.composer(id, token, session, latest, withdraw)
     assert {:ok, 3, ^newer} = SessionStore.read_presentation(id, dir)
   end

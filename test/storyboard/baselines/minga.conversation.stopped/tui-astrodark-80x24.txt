@@ -9,8 +9,6 @@ Spaces · folder minga.conversation.stopped (1 tab) · ▎cpu A 429 with usage_l
  ▌ 󰚩 Show the plan limit and…
  󰚩 Agent  Resolving model…            Stopped  [Tasks] [History] [Help] [Queue]
   Transcript ──────────────────────────────────────────────────────────────────
-             that file to review the plan, window and reset time.
-
    You
      Also show the reset time in the modeline.
 
@@ -21,6 +19,8 @@ Spaces · folder minga.conversation.stopped (1 tab) · ▎cpu A 429 with usage_l
 
    i System  Agent UI registry online
   2 messages · Stopped
+  *minga-queue*  1 queued, kept
+  1 Then run the session tests and fix what fails.
  ╭ Prompt                                                                     ╮
  │ ❯ INSERT  Ask Minga to edit, explain, search, or run tools                 │
  │Continue · Steer · Queue Next · Stop · Attachments · esc ↩ continue         │
@@ -57,34 +57,38 @@ No changed files
 3 1-12 #595c66 #1a1d23 bold
 3 13-78 #595c66 #1a1d23 -
 3 79-79 #adb0bb #1a1d23 -
-4 0-10 #adb0bb #1a1d23 -
-4 11-64 #595c66 #1a1d23 -
-4 65-79 #adb0bb #1a1d23 -
+4 0-0 #adb0bb #1a1d23 -
+4 1-5 #50a4e9 #1a1d23 bold
+4 6-79 #adb0bb #1a1d23 -
 5 0-79 #adb0bb #1a1d23 -
-6 0-0 #adb0bb #1a1d23 -
-6 1-5 #50a4e9 #1a1d23 bold
-6 6-79 #adb0bb #1a1d23 -
-7 0-79 #adb0bb #1a1d23 -
-8 0-79 #adb0bb #1a1d23 -
-9 0-0 #adb0bb #1a1d23 -
-9 1-7 #dd97f1 #1a1d23 bold
-9 8-79 #adb0bb #1a1d23 -
-10 0-0 #adb0bb #1a1d23 -
-10 1-4 #75ad47 #1a1d23 -
-10 5-79 #adb0bb #1a1d23 -
+6 0-79 #adb0bb #1a1d23 -
+7 0-0 #adb0bb #1a1d23 -
+7 1-7 #dd97f1 #1a1d23 bold
+7 8-79 #adb0bb #1a1d23 -
+8 0-0 #adb0bb #1a1d23 -
+8 1-4 #75ad47 #1a1d23 -
+8 5-79 #adb0bb #1a1d23 -
+9 0-79 #adb0bb #1a1d23 -
+10 0-2 #adb0bb #1a1d23 -
+10 3-10 #50a4e9 #1a1d23 bold
+10 11-19 #595c66 #1a1d23 -
+10 20-79 #adb0bb #1a1d23 -
 11 0-79 #adb0bb #1a1d23 -
 12 0-2 #adb0bb #1a1d23 -
 12 3-10 #50a4e9 #1a1d23 bold
-12 11-19 #595c66 #1a1d23 -
-12 20-79 #adb0bb #1a1d23 -
-13 0-79 #adb0bb #1a1d23 -
-14 0-2 #adb0bb #1a1d23 -
-14 3-10 #50a4e9 #1a1d23 bold
-14 11-36 #595c66 #1a1d23 -
-14 37-79 #adb0bb #1a1d23 -
+12 11-36 #595c66 #1a1d23 -
+12 37-79 #adb0bb #1a1d23 -
+13 0-0 #adb0bb #1a1d23 -
+13 1-78 #595c66 #1a1d23 -
+13 79-79 #adb0bb #1a1d23 -
+14 0-0 #adb0bb #1a1d23 -
+14 1-1 #adb0bb #111317 -
+14 2-14 #adb0bb #111317 bold
+14 15-30 #adb0bb #111317 -
+14 31-79 #adb0bb #1a1d23 -
 15 0-0 #adb0bb #1a1d23 -
-15 1-78 #595c66 #1a1d23 -
-15 79-79 #adb0bb #1a1d23 -
+15 1-49 #adb0bb #111317 -
+15 50-79 #adb0bb #1a1d23 -
 16 0-0 #adb0bb #1a1d23 -
 16 1-78 #50a4e9 #1a1d23 -
 16 79-79 #adb0bb #1a1d23 -

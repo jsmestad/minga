@@ -17,6 +17,8 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
   alias MingaAgent.Session
   alias MingaAgent.Subagent.Handle
   alias MingaAgent.ToolApproval.{Preview, Public, Target}
+  alias MingaEditor.Agent.QueueSurface
+  alias MingaEditor.FocusOwner
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional
@@ -308,6 +310,11 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
     send_keys_async(ctx, "iRemote draft<Esc>")
     assert %{visible?: true, lifecycle: :conversation, prompt: "Remote draft"} = agent_chat(ctx)
 
+    send_keys_sync(ctx, "<SPC>aqq")
+    state = editor_state(ctx)
+    assert FocusOwner.derive(state).surface == :queue
+    assert QueueSurface.visible?(state.workspace.agent_ui.queue)
+
     target = Target.new(record, "request-1", "approval-1")
     approval = Public.new(target, "shell", %{}, Preview.new(:command, "Check", ["pwd"]))
     send(ctx.editor, {:agent_event, session, {:approval_pending, approval}})
@@ -325,10 +332,14 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
     send(ctx.editor, {:minga_event, :node_disconnected, disconnect})
     send(ctx.editor, {:agent_event, session, {:connection_changed, connection}})
     send(ctx.editor, {:agent_event, session, {:approval_pending, approval}})
-    send_keys_async(ctx, "A stays<Esc>")
+    send_keys_async(ctx, "i<Esc>A stays<Esc>")
 
     assert %{visible?: true, lifecycle: :unavailable, prompt: "Remote draft stays"} =
              agent_chat(ctx)
+
+    state = editor_state(ctx)
+    refute FocusOwner.derive(state).surface == :queue
+    refute QueueSurface.visible?(state.workspace.agent_ui.queue)
 
     assert is_nil(Traditional.State.agent(editor_state(ctx).shell_runtime.state).pending_approval)
   end

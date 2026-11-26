@@ -1,0 +1,246 @@
+{
+ "elements": [
+  {
+   "frame": [
+    56,
+    717,
+    1197.5,
+    19
+   ],
+   "label": "Agent prompt, pane 65534",
+   "role": "AXTextArea",
+   "value": "Include a note about retries."
+  },
+  {
+   "frame": [
+    213,
+    48,
+    63,
+    19
+   ],
+   "label": "Off",
+   "role": "AXMenuButton"
+  },
+  {
+   "frame": [
+    582,
+    241,
+    166,
+    16
+   ],
+   "role": "AXStaticText",
+   "value": "Session started \u00b7 09:41:00 UTC"
+  },
+  {
+   "frame": [
+    59,
+    300,
+    381,
+    18
+   ],
+   "role": "AXStaticText",
+   "value": "Show the plan limit and when it resets instead of \"rate limited\"."
+  },
+  {
+   "frame": [
+    59,
+    358,
+    619,
+    18
+   ],
+   "role": "AXStaticText",
+   "value": "A 429 with usage_limit_reached is its own case. I'll carry the plan, window and reset time on the error."
+  },
+  {
+   "frame": [
+    368,
+    473,
+    595,
+    16
+   ],
+   "role": "AXStaticText",
+   "value": "Saved the retry notes to lib/native/usage_limit/notes.md; open that file to review the plan, window and reset time."
+  },
+  {
+   "frame": [
+    602,
+    499,
+    126,
+    16
+   ],
+   "role": "AXStaticText",
+   "value": "Agent UI registry online"
+  }
+ ],
+ "grid": {
+  "cols": 159,
+  "rows": 38
+ },
+ "parts": [
+  {
+   "baseline": 546.5,
+   "frame": [
+    52,
+    536,
+    89,
+    14
+   ],
+   "part": "queue.title",
+   "text": "*minga-queue*"
+  },
+  {
+   "baseline": 546.5,
+   "frame": [
+    149,
+    536,
+    34,
+    14
+   ],
+   "part": "queue.summary",
+   "text": "Queue"
+  },
+  {
+   "baseline": 546.5,
+   "frame": [
+    1206,
+    536,
+    7,
+    14
+   ],
+   "part": "queue.hintKey",
+   "text": "q"
+  },
+  {
+   "baseline": 546.5,
+   "frame": [
+    1217,
+    536,
+    28,
+    14
+   ],
+   "part": "queue.hintLabel",
+   "text": "close"
+  },
+  {
+   "baseline": 595.5,
+   "frame": [
+    76,
+    583,
+    105,
+    16
+   ],
+   "part": "emptyState.title",
+   "text": "Nothing queued."
+  },
+  {
+   "baseline": 614.5,
+   "frame": [
+    76,
+    603,
+    269,
+    15
+   ],
+   "part": "emptyState.why",
+   "text": "Messages queued while Minga works wait here."
+  },
+  {
+   "baseline": 654,
+   "frame": [
+    95,
+    642.5,
+    124,
+    15
+   ],
+   "part": "emptyState.actionLabel",
+   "text": "Back to the composer"
+  },
+  {
+   "baseline": 653.5,
+   "frame": [
+    76,
+    643,
+    19,
+    14
+   ],
+   "part": "emptyState.actionKey",
+   "text": "\u21a9"
+  },
+  {
+   "frame": [
+    0,
+    804,
+    1280,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    6,
+    804,
+    61,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "mode: NORMAL"
+  },
+  {
+   "frame": [
+    75,
+    804,
+    80,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filename: *minga-queue*"
+  },
+  {
+   "frame": [
+    1230,
+    804,
+    22,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filetype: Text"
+  },
+  {
+   "frame": [
+    1260,
+    804,
+    14,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "position: 1:1"
+  },
+  {
+   "frame": [
+    6,
+    807,
+    61,
+    18
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "baseline": 819.5,
+   "frame": [
+    12,
+    809,
+    49,
+    14
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  }
+ ],
+ "scenario": "minga.queue.empty",
+ "size": "1280",
+ "theme": "astrodark",
+ "window": {
+  "height": 828,
+  "width": 1280
+ }
+}

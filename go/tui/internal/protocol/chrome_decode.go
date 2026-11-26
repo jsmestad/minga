@@ -72,6 +72,26 @@ func decodeChrome(payload []byte) (ChromePayload, bool, error) {
 			return ChromePayload{}, true, err
 		}
 		chrome.Summary = "agent help"
+	case generated.OPGuiAgentQueue:
+		size := payloadLen32Size(payload)
+		if size == 0 {
+			return ChromePayload{}, true, fmt.Errorf("malformed gui_agent_queue: truncated payload")
+		}
+		queue, end, err := generated.DecodeGuiAgentQueueFields(payload, 5, size)
+		if err != nil {
+			return ChromePayload{}, true, fmt.Errorf("malformed gui_agent_queue: %w", err)
+		}
+		if end != size || queue.Visible > 1 || queue.Focused > 1 {
+			return ChromePayload{}, true, fmt.Errorf("malformed gui_agent_queue: invalid flag or trailing data")
+		}
+		for _, rows := range [2][]generated.AgentQueueRow{queue.Pending, queue.Removed} {
+			for _, row := range rows {
+				if row.ID == 0 || row.Revision == 0 || row.Kind > 1 {
+					return ChromePayload{}, true, fmt.Errorf("malformed gui_agent_queue: invalid row")
+				}
+			}
+		}
+		chrome.AgentQueue, chrome.Summary, chrome.Bytes = queue, "agent queue", size
 	case generated.OPGuiAgentTranscript:
 		chrome.AgentTranscript, chrome.Summary, chrome.Bytes = decodeAgentTranscript(payload)
 	case generated.OPGuiEditTimeline:

@@ -13,6 +13,7 @@ defmodule MingaEditor.AgentLifecycle do
   alias MingaEditor.Agent.Activity
   alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.MarkdownHighlight
+  alias MingaEditor.Agent.QueueWorkflow
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.TranscriptProjection
@@ -127,6 +128,7 @@ defmodule MingaEditor.AgentLifecycle do
     state
     |> MingaEditor.Shell.Traditional.Workflow.install_agent_state(agent)
     |> MingaEditor.Shell.Traditional.Workflow.install_agent_ui(project_checklist(ui, snapshot))
+    |> QueueWorkflow.refresh(session_pid)
   end
 
   @spec project_checklist(UIState.t(), AgentSession.editor_snapshot()) :: UIState.t()

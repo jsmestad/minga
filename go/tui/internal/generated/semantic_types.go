@@ -222,6 +222,20 @@ const (
 	OperationStatusStale    OperationStatus = 8
 )
 
+// AgentQueueAction is a generated enum (repr u8).
+type AgentQueueAction uint8
+
+const (
+	AgentQueueActionSelect      AgentQueueAction = 0
+	AgentQueueActionRemove      AgentQueueAction = 1
+	AgentQueueActionPasteAfter  AgentQueueAction = 2
+	AgentQueueActionPasteBefore AgentQueueAction = 3
+	AgentQueueActionEdit        AgentQueueAction = 4
+	AgentQueueActionClose       AgentQueueAction = 5
+	AgentQueueActionComposer    AgentQueueAction = 6
+	AgentQueueActionUnknown     AgentQueueAction = 255
+)
+
 type ComposerHint struct {
 	Keys   string
 	Action string
@@ -454,6 +468,21 @@ type TasksDrawerRow struct {
 	Age     string
 	Detail  []TasksDrawerLine
 	Actions []TasksDrawerHint
+}
+
+type AgentQueueHint struct {
+	Action AgentQueueAction
+	Key    string
+	Label  string
+}
+
+type AgentQueueRow struct {
+	ID              uint64
+	Revision        uint64
+	Kind            uint8
+	Label           string
+	Preview         string
+	AttachmentCount uint16
 }
 
 type EditTimelineEntry struct {
@@ -944,6 +973,21 @@ type GuiTasksDrawerFields struct {
 	Prompt     string
 	HasEmpty   uint8
 	Empty      EmptyList
+}
+
+type GuiAgentQueueFields struct {
+	Visible     uint8
+	Focused     uint8
+	WorkspaceID uint32
+	RecordID    string
+	Title       string
+	Summary     string
+	RemovedNote string
+	SelectedID  uint64
+	Hints       []AgentQueueHint
+	Pending     []AgentQueueRow
+	Removed     []AgentQueueRow
+	Empty       EmptyList
 }
 
 type GuiEditTimelineFields struct {

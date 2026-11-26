@@ -135,6 +135,8 @@ defmodule Minga.Test.KeyGrammar do
     # A picker with nothing to filter takes no text (Minga.Keymap.Scope.Picker), so it is a list like a special buffer.
     {:picker, :normal} => :special,
     {:prompt, :insert} => :picker,
+    {:queue, :normal} => :special,
+    {:queue, :cua} => :special_cua,
     {:tasks, :normal} => :special,
     {:tasks, :cua} => :special_cua
   }

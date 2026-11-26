@@ -41,6 +41,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           optional(:safe_mode) => boolean(),
           :file_name => String.t(),
           :filetype => atom(),
+          optional(:queue_focused?) => boolean(),
           :dirty_marker => String.t(),
           :cursor_line => non_neg_integer(),
           :cursor_col => non_neg_integer(),
@@ -132,7 +133,10 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
         modeline_segments_table \\ ModelineSegments
       ) do
     ctx = context(data, theme)
-    {left_names, right_names} = configured_segment_names(modeline_segments_table)
+
+    {left_names, right_names} =
+      modeline_segments_table |> configured_segment_names() |> place_queue_name(data)
+
     left = render_side(left_names, ctx, modeline_segments_table)
     right = render_side(right_names, ctx, modeline_segments_table)
 
@@ -198,6 +202,19 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
 
     {left ++ left_defaults, right ++ right_defaults}
   end
+
+  @spec place_queue_name({[atom()], [atom()]}, modeline_data()) :: {[atom()], [atom()]}
+  defp place_queue_name({left, right}, %{queue_focused?: true}) do
+    left =
+      case Enum.reject(left, &(&1 == :filename)) do
+        [:mode | rest] -> [:mode, :filename | rest]
+        rest -> [:filename | rest]
+      end
+
+    {left, Enum.reject(right, &(&1 == :filename))}
+  end
+
+  defp place_queue_name(names, _data), do: names
 
   @spec render_side([atom()], context(), ModelineSegments.table()) :: [Segment.t()]
   defp render_side(names, ctx, modeline_segments_table) do
