@@ -1,0 +1,263 @@
+{
+ "elements": [
+  {
+   "frame": [
+    79,
+    65,
+    1338.5,
+    825.5
+   ],
+   "label": "storyboard.ex, pane 1",
+   "role": "AXTextArea",
+   "value": "defmodule Storyboard do\n  @moduledoc \"A small file every storyboard scenario starts in.\"\n\n  def greet(name) do\n    \"Hello, \" <> name\n  end\nend\n"
+  }
+ ],
+ "grid": {
+  "cols": 177,
+  "rows": 43
+ },
+ "parts": [
+  {
+   "baseline": 21,
+   "frame": [
+    337,
+    9.5,
+    78,
+    15
+   ],
+   "part": "tabBar.tabLabel",
+   "text": "storyboard.ex"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    40,
+    43.5,
+    4,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "/"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    58,
+    43.5,
+    23,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "tmp"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    95,
+    43.5,
+    102,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga-storyboard"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    211,
+    43.5,
+    72,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "macos-1440"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    297,
+    43.5,
+    128,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "code.diagnostics.none"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    439,
+    43.5,
+    14,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "lib"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    467,
+    43.5,
+    78,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "storyboard.ex"
+  },
+  {
+   "baseline": 60.5,
+   "frame": [
+    876,
+    50,
+    132,
+    14
+   ],
+   "part": "picker.hints",
+   "text": "move run close"
+  },
+  {
+   "baseline": 112.5,
+   "frame": [
+    448,
+    100,
+    150,
+    16
+   ],
+   "part": "emptyState.title",
+   "text": "No problems in this file."
+  },
+  {
+   "baseline": 131.5,
+   "frame": [
+    448,
+    120,
+    202,
+    15
+   ],
+   "part": "emptyState.why",
+   "text": "No language server checks this file."
+  },
+  {
+   "baseline": 170.5,
+   "frame": [
+    448,
+    160,
+    170,
+    14
+   ],
+   "part": "picker.stepLabel",
+   "text": "Install a language server"
+  },
+  {
+   "baseline": 170.5,
+   "frame": [
+    946,
+    160,
+    62,
+    14
+   ],
+   "part": "picker.stepAnnotation",
+   "text": "SPC c l I"
+  },
+  {
+   "baseline": 194.5,
+   "frame": [
+    448,
+    184,
+    89,
+    14
+   ],
+   "part": "picker.stepLabel",
+   "text": "Show what ran"
+  },
+  {
+   "baseline": 194.5,
+   "frame": [
+    946,
+    184,
+    62,
+    14
+   ],
+   "part": "picker.stepAnnotation",
+   "text": "SPC c l i"
+  },
+  {
+   "frame": [
+    0,
+    904,
+    1440,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    6,
+    904,
+    61,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "mode: NORMAL"
+  },
+  {
+   "frame": [
+    75,
+    904,
+    73,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filename: storyboard.ex"
+  },
+  {
+   "frame": [
+    1386,
+    904,
+    26,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filetype: Elixir"
+  },
+  {
+   "frame": [
+    1420,
+    904,
+    14,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "position: 1:1"
+  },
+  {
+   "frame": [
+    6,
+    907,
+    61,
+    18
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "baseline": 919.5,
+   "frame": [
+    12,
+    909,
+    49,
+    14
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  }
+ ],
+ "scenario": "code.diagnostics.none",
+ "size": "1440",
+ "theme": "catppuccin_frappe",
+ "window": {
+  "height": 928,
+  "width": 1440
+ }
+}
