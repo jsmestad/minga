@@ -995,6 +995,15 @@ func TestErrorSummaryNamesAFailedStepByItsSentence(t *testing.T) {
 	}
 }
 
+func TestStoppedSessionRailDoesNotAdvertiseSend(t *testing.T) {
+	model := residentModel(t, 0)
+	chat := protocol.AgentChat{Visible: true, Status: 7, ContinueTarget: composerTestStopTarget()}
+	rail := ansi.Strip(strings.Join(model.renderAgentDetailsRail(chat, 32, 25), "\n"))
+	if !strings.Contains(rail, "Stopped") || strings.Contains(rail, "send prompt") {
+		t.Fatalf("stopped Session rail gives a conflicting composer instruction:\n%s", rail)
+	}
+}
+
 // While Minga works the stop key is the hint a user needs most. The BEAM sends it first, and a composer too
 // narrow for every hint drops whole hints from the end, so the stop key stays and no hint is cut mid-word.
 func TestComposerHintsKeepTheStopKeyAtEightyColumns(t *testing.T) {
