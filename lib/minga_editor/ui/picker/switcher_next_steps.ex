@@ -5,6 +5,8 @@ defmodule MingaEditor.UI.Picker.SwitcherNextSteps do
   The prompt owns every typed key, so these are result rows reached with `⌃J` / `⌃K`, never chords. Create is first, so `↩` on a query with no match creates the file (`docs/design/keys.md`, "File switcher").
   """
 
+  alias Minga.Project
+  alias Minga.Project.Root
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.UI.Picker.Empty
   alias MingaEditor.UI.Picker.Item
@@ -54,8 +56,20 @@ defmodule MingaEditor.UI.Picker.SwitcherNextSteps do
   # A file that already exists is opened, never touched; a folder is not a file to create.
   @spec create(MingaEditor.State.t(), String.t()) :: MingaEditor.State.t()
   defp create(state, relative) do
-    path = Path.expand(relative, project_root(state))
+    case Project.workspace_root(state.interaction.project_server) do
+      %Root{} = root ->
+        case Root.resolve_destination(root, relative) do
+          {:ok, path} -> create_at(state, relative, path)
+          {:error, reason} -> could_not_create(state, relative, relative, reason)
+        end
 
+      nil ->
+        NoticeWorkflow.publish(state, "Open a directory workspace to create a file")
+    end
+  end
+
+  @spec create_at(MingaEditor.State.t(), String.t(), String.t()) :: MingaEditor.State.t()
+  defp create_at(state, relative, path) do
     case File.stat(path) do
       {:ok, %File.Stat{type: :regular}} -> open(state, path, relative)
       {:ok, %File.Stat{}} -> NoticeWorkflow.publish(state, "#{relative} is not a file")
@@ -89,12 +103,5 @@ defmodule MingaEditor.UI.Picker.SwitcherNextSteps do
   defp could_not_create(state, path, relative, reason) do
     Minga.Log.warning(:editor, "Could not create #{path}: #{inspect(reason)}")
     NoticeWorkflow.publish(state, "Could not create #{relative}")
-  end
-
-  # The directory workspace, or without one the root this editor's file tree opened on.
-  @spec project_root(MingaEditor.State.t()) :: String.t()
-  defp project_root(state) do
-    Minga.Project.resolve_root() || MingaEditor.Session.State.project_root(state.workspace) ||
-      File.cwd!()
   end
 end

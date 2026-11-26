@@ -84,12 +84,41 @@ defmodule Minga.Project.Root do
   @doc "Resolves an existing workspace-relative path inside an authorized directory root."
   @spec resolve_file(t(), String.t()) :: {:ok, String.t()} | {:error, file_error()}
   def resolve_file(%__MODULE__{} = root, relative_path) when is_binary(relative_path) do
+    resolve_workspace_path(root, relative_path, &canonical_path/1)
+  end
+
+  @doc "Resolves a workspace-relative destination before creating a file or its parent directories."
+  @spec resolve_destination(t(), String.t()) :: {:ok, String.t()} | {:error, file_error()}
+  def resolve_destination(%__MODULE__{} = root, relative_path) when is_binary(relative_path) do
+    resolve_workspace_path(root, relative_path, &canonical_destination/1)
+  end
+
+  @spec resolve_workspace_path(t(), String.t(), (String.t() ->
+                                                   {:ok, String.t()} | {:error, canonical_error()})) ::
+          {:ok, String.t()} | {:error, file_error()}
+  defp resolve_workspace_path(root, relative_path, resolve) do
     with {:ok, canonical_root} <- inventory_path(root),
          :ok <- require_relative_path(relative_path),
          {:ok, safe_relative} <- safe_relative_path(relative_path, canonical_root),
-         {:ok, canonical_target} <- canonical_path(Path.join(canonical_root, safe_relative)),
+         {:ok, canonical_target} <- resolve.(Path.join(canonical_root, safe_relative)),
          :ok <- authorize_contained_target(canonical_target, canonical_root) do
       {:ok, canonical_target}
+    end
+  end
+
+  @spec canonical_destination(String.t()) :: {:ok, String.t()} | {:error, canonical_error()}
+  defp canonical_destination(path) do
+    case File.lstat(path) do
+      {:ok, _stat} ->
+        canonical_path(path)
+
+      {:error, :enoent} ->
+        with {:ok, parent} <- canonical_destination(Path.dirname(path)) do
+          {:ok, Path.join(parent, Path.basename(path))}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

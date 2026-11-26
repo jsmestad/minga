@@ -218,6 +218,7 @@ defmodule MingaEditor.Startup do
           editing_model: editing_model,
           keymap_server: keymap_server,
           options_server: options_server,
+          project_server: Keyword.get(opts, :project_server, Minga.Project),
           file_tree_duplicate_backend:
             Keyword.get(
               opts,

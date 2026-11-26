@@ -481,7 +481,7 @@ ActionMenu section 0x04 payload:
 ModePrefix section 0x05 payload:
   mode_prefix_len(2) + mode_prefix(mode_prefix_len)
 
-Empty section 0x07 payload (hint_count and key_hint since protocol_version 48):
+Empty section 0x07 payload (hint_count and key_hint since protocol_version 54):
   empty_list + list_keys(1) + hint_count(1) + key_hint * hint_count
 
 key_hint:
@@ -495,6 +495,10 @@ empty_list (shared by every surface that shows an empty state):
 MovementKeys section 0x08 payload (protocol_version 46):
   key_count(1) + keys...
   Per key: codepoint(4) + modifiers(1) + movement(1: 1 next, 2 previous)
+
+EnterSelection section 0x09 payload (protocol_version 54):
+  selects(1: 1 when unmodified Enter resolves to picker_select, otherwise 0)
+  A frontend may activate the locally previewed row with unmodified Enter only when this flag is set, the picker has no pending key sequence, and the act menu is closed.
 
 icon_color is a 24-bit RGB value for the item's icon.
 flags bits:

@@ -85,10 +85,13 @@ defmodule Minga.Test.Storyboard.Session do
 
     {theme_opts, theme_children} = theme_opts(Keyword.get(opts, :theme))
 
+    {project_opts, project_children} =
+      project_opts(Keyword.get(opts, :directory_workspace, false), root)
+
     ctx =
       EditorCase.start_editor(
         content,
-        editor_opts ++ Keyword.take(opts, [:capabilities]) ++ theme_opts
+        editor_opts ++ Keyword.take(opts, [:capabilities]) ++ theme_opts ++ project_opts
       )
 
     relay = start_relay(ctx, parser)
@@ -107,10 +110,31 @@ defmodule Minga.Test.Storyboard.Session do
       home_window: 0,
       child_id: child_id,
       parser: parser,
-      children: [relay | theme_children]
+      children: [relay | theme_children ++ project_children]
     }
 
     %{session | home_window: window_id(session)}
+  end
+
+  @spec project_opts(boolean(), Path.t()) :: {keyword(), [term()]}
+  defp project_opts(false, _root), do: {[], []}
+
+  defp project_opts(true, root) do
+    id = make_ref()
+    name = :"storyboard_project_#{System.unique_integer([:positive])}"
+
+    project =
+      ExUnit.Callbacks.start_supervised!(
+        {Minga.Project,
+         name: name,
+         subscribe: false,
+         command_frecency: %{},
+         startup_directory: root,
+         file_find_module: Minga.Project.SlowFileFind},
+        id: id
+      )
+
+    {[project_server: project], [id]}
   end
 
   @doc """

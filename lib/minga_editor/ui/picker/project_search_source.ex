@@ -16,7 +16,9 @@ defmodule MingaEditor.UI.Picker.ProjectSearchSource do
   alias Minga.Buffer
   alias Minga.Language
   alias Minga.Language.Devicon
+  alias Minga.Project
   alias Minga.Project.ProjectSearch
+  alias Minga.Project.Root
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Empty
   alias MingaEditor.UI.Picker.Item
@@ -50,40 +52,36 @@ defmodule MingaEditor.UI.Picker.ProjectSearchSource do
           {:ok, [Item.t()], Source.fetch_meta()} | {:error, String.t()}
   def async_fetch(%Context{search: %{project_query: query}} = ctx)
       when is_binary(query) and query != "" do
-    search_project(query, Minga.Project.resolve_root() || file_tree_root(ctx))
+    root =
+      case ctx.picker_ui do
+        %{context: %{project_query: ^query, project_root: root}} -> root
+        _ -> Project.workspace_root(ctx.project_server)
+      end
+
+    search_project(query, root)
   end
 
   def async_fetch(_ctx), do: {:ok, [], %{}}
 
-  # Without a directory workspace, the next best root is the one this editor's file tree opened on.
-  @spec file_tree_root(Context.t()) :: String.t() | nil
-  defp file_tree_root(%Context{file_tree: %{project_root: root}}) when is_binary(root), do: root
-  defp file_tree_root(%Context{}), do: nil
-
-  @spec search_project(String.t(), String.t() | nil) ::
+  @spec search_project(String.t(), Root.t() | nil) ::
           {:ok, [Item.t()], Source.fetch_meta()} | {:error, String.t()}
-  defp search_project(_query, nil), do: {:error, "No directory workspace active"}
+  defp search_project(_query, nil), do: {:error, "Open a directory workspace to search its files"}
 
-  defp search_project(query, root) do
+  defp search_project(query, %Root{path: path} = root) do
     case search_module().search(query, root) do
-      {:ok, matches, truncated?} ->
-        {:ok, build_items(matches, root), fetch_meta(truncated?)}
+      {:ok, matches, truncated?, coverage} ->
+        {:ok, build_items(matches, path), fetch_meta(truncated?, root, coverage)}
 
       {:error, message} ->
         {:error, message}
     end
   end
 
-  # Each way to widen a search that found nothing.
-  # A step lists what it adds, how the row reads, the key it teaches, and the flags that already cover it.
-  @widen_steps [
-    {["-u"], "Search ignored files too", "-- -u", [["-u"], ["-uu"], ["-uuu"]]},
-    {["--hidden"], "Search hidden files too", "--hidden", [["--hidden"], ["-uu"], ["-uuu"]]},
-    {["-uu"], "Search all files", "-- -uu", [["-uu"], ["-uuu"], ["-u", "--hidden"]]}
-  ]
+  @search_ignored {"-u", "Search ignored files too", "-- -u"}
+  @search_hidden {"--hidden", "Search hidden files too", "--hidden"}
 
   @doc """
-  When a search finds nothing, says what was searched and what was skipped, then offers the next wider search as rows: ignored files (`-- -u`), hidden files (`--hidden`), or every file (`-- -uu`). Each row reruns the same pattern with its flags added after `--`, as in Doom. Once nothing is left to widen, the one row edits the search instead.
+  When a scan finds no matches, names its file coverage and offers only wider choices. A retry adds the missing option without changing the pattern or its filters. If the scan already included ignored and hidden files, the one row edits the search instead.
   """
   @impl true
   @spec empty(Empty.request()) :: Empty.t() | nil
@@ -105,40 +103,42 @@ defmodule MingaEditor.UI.Picker.ProjectSearchSource do
     }
   end
 
-  def empty(%{context: %{project_query: query}}) when is_binary(query) and query != "" do
+  def empty(%{context: %{project_query: query, project_search: {root, coverage}}})
+      when is_binary(query) and query != "" do
     {pattern, flags} = ProjectSearch.parse_query(query)
-
-    widen =
-      for {added, label, key, covered_by} <- @widen_steps,
-          not covered?(flags, covered_by),
-          do: {added, label, key}
+    {why, widen} = wider_searches(coverage)
 
     %Empty{
       title: "No results for #{Empty.quoted(pattern)}.",
-      why: skipped(widen),
-      rows: next_steps(widen, pattern, flags, query)
+      why: why,
+      rows: next_steps(widen, pattern, flags, query, root)
     }
   end
 
   def empty(_request), do: nil
 
-  @spec covered?([String.t()], [[String.t()]]) :: boolean()
-  defp covered?(flags, covered_by),
-    do: Enum.any?(covered_by, fn set -> Enum.all?(set, &(&1 in flags)) end)
-
-  @spec skipped([{[String.t()], String.t(), String.t()}]) :: String.t()
-  defp skipped(widen) do
-    case Enum.map(widen, fn {added, _label, _key} -> added end) do
-      [] -> "Every file was searched, ignored and hidden ones too."
-      [["-u"], ["--hidden"] | _] -> "Ignored and hidden files were skipped."
-      [["--hidden"] | _] -> "Hidden files were skipped."
-      _ignored_only -> "Ignored files were skipped."
-    end
+  @spec wider_searches(ProjectSearch.coverage()) ::
+          {String.t(), [{String.t(), String.t(), String.t()}]}
+  defp wider_searches(:visible) do
+    {"Ignored and hidden files were skipped.",
+     [@search_ignored, @search_hidden, {"-uu", "Search all files", "-- -uu"}]}
   end
 
-  @spec next_steps([{[String.t()], String.t(), String.t()}], String.t(), [String.t()], String.t()) ::
+  defp wider_searches(:with_ignored), do: {"Hidden files were skipped.", [@search_hidden]}
+
+  defp wider_searches(:with_hidden), do: {"Ignored files were skipped.", [@search_ignored]}
+
+  defp wider_searches(:all), do: {"Ignored and hidden files were included.", []}
+
+  @spec next_steps(
+          [{String.t(), String.t(), String.t()}],
+          String.t(),
+          [String.t()],
+          String.t(),
+          Root.t()
+        ) ::
           [Item.t()]
-  defp next_steps([], _pattern, _flags, query),
+  defp next_steps([], _pattern, _flags, query, _root),
     do: [
       Empty.row(
         {:edit, query},
@@ -147,15 +147,17 @@ defmodule MingaEditor.UI.Picker.ProjectSearchSource do
       )
     ]
 
-  defp next_steps(widen, pattern, flags, _query) do
-    for {added, label, key} <- widen do
-      Empty.row({:search, pattern <> " -- " <> Enum.join(flags ++ added, " ")}, label, key)
+  defp next_steps(widen, pattern, flags, _query, root) do
+    for {flag, label, key} <- widen do
+      query = pattern <> " -- " <> Enum.join(flags ++ [flag], " ")
+      Empty.row({:search, query, root}, label, key)
     end
   end
 
   @impl true
   @spec on_select(Item.t(), term()) :: term()
-  def on_select(%Item{id: {:next_step, {:search, query}}}, state), do: search(state, query)
+  def on_select(%Item{id: {:next_step, {:search, query, root}}}, state),
+    do: search(state, query, root)
 
   def on_select(%Item{id: {:next_step, {:edit, query}}}, state) do
     %{
@@ -178,9 +180,14 @@ defmodule MingaEditor.UI.Picker.ProjectSearchSource do
   @impl true
   def on_cancel(state), do: Source.restore_or_keep(state)
 
-  @doc "Runs a project search for `query` (flags after ` -- ` pass through to ripgrep) and opens its results."
+  @doc "Opens project search in the active, explicitly authorized directory workspace."
   @spec search(MingaEditor.State.t(), String.t()) :: MingaEditor.State.t()
   def search(state, query) when is_binary(query) do
+    search(state, query, Project.workspace_root(state.interaction.project_server))
+  end
+
+  @spec search(MingaEditor.State.t(), String.t(), Root.t() | nil) :: MingaEditor.State.t()
+  defp search(state, query, root) do
     %{
       state
       | workspace:
@@ -189,7 +196,7 @@ defmodule MingaEditor.UI.Picker.ProjectSearchSource do
             MingaEditor.State.Search.set_project_query(state.workspace.search, query)
           )
     }
-    |> MingaEditor.PickerUI.open(__MODULE__, %{project_query: query})
+    |> MingaEditor.PickerUI.open(__MODULE__, %{project_query: query, project_root: root})
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
@@ -222,9 +229,11 @@ defmodule MingaEditor.UI.Picker.ProjectSearchSource do
   @spec search_module() :: module()
   defp search_module, do: Application.get_env(:minga, :project_search_module, ProjectSearch)
 
-  @spec fetch_meta(boolean()) :: Source.fetch_meta()
-  defp fetch_meta(true), do: %{status: @truncated_status}
-  defp fetch_meta(false), do: %{}
+  @spec fetch_meta(boolean(), Root.t(), ProjectSearch.coverage()) :: Source.fetch_meta()
+  defp fetch_meta(true, root, coverage),
+    do: %{status: @truncated_status, project_search: {root, coverage}}
+
+  defp fetch_meta(false, root, coverage), do: %{project_search: {root, coverage}}
 
   @spec open_match(map(), ProjectSearch.match()) :: map()
   defp open_match(state, match) do

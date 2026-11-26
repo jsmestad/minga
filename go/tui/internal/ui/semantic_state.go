@@ -320,8 +320,8 @@ func (m *Model) localPreviewActivationPacket(msg tea.KeyPressMsg, component stri
 		}
 	}
 	if preview, ok := m.localPresentation.identityPreview(presentationPicker); component == "picker" && ok {
-		// While the act menu is open, ↩ runs the menu's action on the BEAM, never the previewed picker row.
-		if picker, present := m.picker(); present && picker.Visible && !picker.ActionVisible && preview.generation == picker.Generation {
+		// Remapped Enter, a key sequence, and the act menu stay with the BEAM rather than running a previewed row.
+		if picker, present := m.picker(); present && picker.Visible && picker.EnterSelects && picker.ModePrefix == "" && !picker.ActionVisible && preview.generation == picker.Generation {
 			index := pickerItemIndexByID(picker, preview.itemID)
 			if index >= 0 {
 				return pickerActivationPacket(preview.generation, picker.Items[index].ActivationID), true

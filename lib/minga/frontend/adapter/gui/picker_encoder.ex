@@ -20,6 +20,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
   @section_picker_load_status 0x06
   @section_picker_empty 0x07
   @section_picker_movement_keys 0x08
+  @section_picker_enter_selection 0x09
 
   @spec encode(Picker.t(), Caches.t()) :: {binary() | nil, Caches.t()}
   def encode(%Picker{} = model, %Caches{} = caches) do
@@ -76,6 +77,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
         model.empty,
         model.list_keys?,
         model.movement_keys,
+        model.enter_selects?,
         model.hints
       })
 
@@ -116,7 +118,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
     :gui_picker
     |> Writer.new()
     |> Writer.append(<<@op_gui_picker>>)
-    |> Writer.uint8(:section_count, if(model.empty, do: 8, else: 7))
+    |> Writer.uint8(:section_count, if(model.empty, do: 9, else: 8))
     |> Writer.section16(
       :picker_header,
       @section_picker_header,
@@ -156,6 +158,11 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
       :picker_movement_keys,
       @section_picker_movement_keys,
       Encode.encode_gui_picker_movement_keys(model.movement_keys)
+    )
+    |> Writer.section16(
+      :picker_enter_selection,
+      @section_picker_enter_selection,
+      Encode.encode_gui_picker_enter_selection(%{selects: if(model.enter_selects?, do: 1, else: 0)})
     )
     |> Writer.finish()
   end

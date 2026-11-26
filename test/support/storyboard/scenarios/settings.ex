@@ -12,7 +12,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Settings do
   def entries do
     [
       Entry.built("settings.extensions.none",
-        reach: "SPC h e l",
+        reach: "1 SPC h e l",
         recognize: &Model.empty_picker?(&1, ~r/extensions/i, ~r/^No extensions/),
         checks: [
           Check.new("no extensions says what they are for and points at the config", fn model ->

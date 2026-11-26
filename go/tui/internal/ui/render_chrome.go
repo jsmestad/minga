@@ -540,39 +540,40 @@ func (m Model) extensionRuntimeStatus() string {
 	return "ext " + strings.Join(ids, ",")
 }
 
-// renderStatusNotice draws the echo-line notice and the next steps it names (docs/design/anatomy.md, "Notice"): the message, then each action as a key in the accent colour and its word in the muted colour, separated by a centred dot. Each action is a click zone that runs its command. The operation lane draws no actions.
+// renderStatusNotice draws the echo-line notice and the next steps it names (docs/design/anatomy.md, "Notice"): the message, then each action as a key in the accent colour and its word in the chrome text colour, separated by a muted centred dot. Each action is a click zone that runs its command. The operation lane draws no actions.
 func (m Model) renderStatusNotice(status protocol.StatusBar) string {
-	message := m.renderStatusMessage(status.Message)
-	return message + m.renderNoticeActions(status, message, true)
+	message, hasActions := m.renderStatusMessage(status)
+	if !hasActions {
+		return message
+	}
+	return message + m.renderNoticeActions(status, true)
 }
 
 // fitStatusNotice fits a notice to width. What happened is the point of the notice, so the message stays whole: the next steps first give up their words and keep their keys, and only a message that cannot fit on its own is cut.
 func (m Model) fitStatusNotice(status protocol.StatusBar, width int) string {
-	message := m.renderStatusMessage(status.Message)
-	if actions := m.renderNoticeActions(status, message, true); lipgloss.Width(message+actions) <= width {
-		return message + actions
-	}
-	if keys := m.renderNoticeActions(status, message, false); lipgloss.Width(message+keys) <= width {
-		return message + keys
+	message, hasActions := m.renderStatusMessage(status)
+	if hasActions {
+		if full := message + m.renderNoticeActions(status, true); lipgloss.Width(full) <= width {
+			return full
+		}
+		if keys := message + m.renderNoticeActions(status, false); lipgloss.Width(keys) <= width {
+			return keys
+		}
 	}
 	return ansi.Truncate(message, width, "…")
 }
 
 // shortestNotice is the width of a notice with next steps at its shortest, the whole message and the steps' keys, or 0 for any other echo text.
 func (m Model) shortestNotice(status protocol.StatusBar) int {
-	message := m.renderStatusMessage(status.Message)
-	keys := m.renderNoticeActions(status, message, false)
-	if keys == "" {
+	message, hasActions := m.renderStatusMessage(status)
+	if !hasActions {
 		return 0
 	}
-	return lipgloss.Width(message + keys)
+	return lipgloss.Width(message + m.renderNoticeActions(status, false))
 }
 
-// renderNoticeActions draws the next steps a notice names, after its message, or nothing when the echo line shows something else.
-func (m Model) renderNoticeActions(status protocol.StatusBar, message string, words bool) string {
-	if message == "" || len(status.MessageActions) == 0 || ansi.Strip(message) != sanitizeTerminalText(status.Message) {
-		return ""
-	}
+// renderNoticeActions draws the next steps after a notice that owns the echo line.
+func (m Model) renderNoticeActions(status protocol.StatusBar, words bool) string {
 	p := m.palette()
 	surface := lipgloss.NewStyle().Background(p.ChromeSurface())
 	muted := surface.Foreground(p.Muted())
@@ -590,35 +591,41 @@ func (m Model) renderNoticeActions(status protocol.StatusBar, message string, wo
 	return actions
 }
 
-func (m Model) renderStatusMessage(message string) string {
+// renderStatusMessage renders whichever source owns the echo line and says whether to show notice actions.
+func (m Model) renderStatusMessage(bar protocol.StatusBar) (string, bool) {
 	text, status, hasOperationPresentation := m.feedback.presentation()
-	operationOwnsLane := hasOperationPresentation && (activeOperation(status) || message == "")
-	foreground := m.palette().Warning()
+	operationOwnsLane := hasOperationPresentation && (activeOperation(status) || bar.Message == "")
+	hasActions := !operationOwnsLane && len(bar.MessageActions) > 0
+	p := m.palette()
+	foreground := p.Warning()
 	if operationOwnsLane {
 		switch status {
 		case generated.OperationStatusPending, generated.OperationStatusQueued:
-			foreground = m.palette().ChromeText()
+			foreground = p.ChromeText()
 		case generated.OperationStatusRunning:
-			foreground = m.palette().Accent()
+			foreground = p.Accent()
 		case generated.OperationStatusSuccess:
-			foreground = m.palette().Hint()
+			foreground = p.Hint()
 		case generated.OperationStatusError:
-			foreground = m.palette().Error()
+			foreground = p.Error()
 		case generated.OperationStatusTimeout:
-			foreground = m.palette().Warning()
+			foreground = p.Warning()
 		case generated.OperationStatusCanceled:
-			foreground = m.palette().Muted()
+			foreground = p.Muted()
 		case generated.OperationStatusStale:
-			foreground = m.palette().Info()
+			foreground = p.Info()
 		}
 	} else {
-		text = message
+		text = bar.Message
+		if hasActions {
+			foreground = p.ChromeText()
+		}
 	}
 	text = sanitizeTerminalText(text)
 	if text == "" {
-		return ""
+		return "", false
 	}
-	return lipgloss.NewStyle().Bold(true).Foreground(foreground).Background(m.palette().ChromeSurface()).Render(text)
+	return lipgloss.NewStyle().Bold(!hasActions).Foreground(foreground).Background(p.ChromeSurface()).Render(text), hasActions
 }
 
 func sanitizeTerminalText(text string) string {
@@ -971,14 +978,36 @@ func pickerListHeaderRows(listHeight int) int {
 	return 1
 }
 
-// pickerEmptyHeader is the empty-state header a picker that offers next steps draws above its rows, cut so at least one row stays.
-// The list and the reported row fit both subtract it, so the fit counts the rows that are on screen.
+// pickerEmptyHeader reserves the next-step rows before drawing the explanation. A long query must not push an
+// action out of reach. Drawing and the row fit use the same budget.
 func (m Model) pickerEmptyHeader(picker protocol.Picker, listHeight int, width int) []string {
 	if picker.Empty == nil {
 		return nil
 	}
-	header := emptyListHeader(*picker.Empty, width, m.pickerEmptyColors(), m.palette())
-	return header[:min(len(header), max(listHeight-pickerListHeaderRows(listHeight)-1, 0))]
+	budget := listHeight - pickerListHeaderRows(listHeight) - len(picker.Items)
+	if budget <= 0 {
+		return nil
+	}
+	colors, theme := m.pickerEmptyColors(), m.palette()
+	header := emptyListHeader(*picker.Empty, width, colors, theme)
+	if len(header) <= budget {
+		return header
+	}
+
+	// Keep one line each for what happened and why. The query may be much wider than the terminal.
+	empty := *picker.Empty
+	room := max(width-emptyStateInset.cols()-listRowTrailingInset.cols(), 1)
+	titleRoom := room
+	if empty.Glyph != "" {
+		titleRoom -= ansi.StringWidth(empty.Glyph) + emptyStateGlyphToTitle.cols()
+	}
+	empty.Title = truncateAtWord(empty.Title, max(titleRoom, 1))
+	empty.Why = truncateAtWord(empty.Why, room)
+	header = emptyListHeader(empty, width, colors, theme)
+	if len(header) > budget {
+		header = header[emptyStateInset.rows():]
+	}
+	return header[:min(len(header), budget)]
 }
 
 // itemRowBudget is the rows of the list left for items and their section headers.

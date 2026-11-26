@@ -5,6 +5,9 @@ defmodule Minga.Test.ProjectSearchStub do
   A root registered with `set_results/2` answers from memory, so a storyboard session never spawns ripgrep while tests run concurrently. Any other root runs the real search, so the search's own tests keep their behaviour.
   """
 
+  alias Minga.Project.ProjectSearch
+  alias Minga.Project.Root
+
   @table __MODULE__
 
   @doc "Creates the ETS table. Call once from test_helper.exs."
@@ -17,22 +20,29 @@ defmodule Minga.Test.ProjectSearchStub do
     :ok
   end
 
-  @doc "Answers every search under `root` with `matches`."
-  @spec set_results(String.t(), [Minga.Project.ProjectSearch.match()]) :: :ok
-  def set_results(root, matches) when is_binary(root) and is_list(matches) do
-    :ets.insert(@table, {Path.expand(root), matches})
+  @doc "Answers every search under `root` from memory with the given matches and file coverage."
+  @spec set_results(
+          String.t(),
+          [Minga.Project.ProjectSearch.match()],
+          Minga.Project.ProjectSearch.coverage()
+        ) ::
+          :ok
+  def set_results(root, matches, coverage \\ :visible)
+      when is_binary(root) and is_list(matches) do
+    {:ok, path} = Root.canonical_path(root)
+    :ets.insert(@table, {path, matches, coverage})
     :ok
   end
 
   @doc "Searches like `Minga.Project.ProjectSearch.search/2`, from memory for a registered root."
-  @spec search(String.t(), String.t()) :: Minga.Project.ProjectSearch.result()
-  def search(query, root) do
-    case :ets.lookup(@table, Path.expand(root)) do
-      [{_root, matches}] ->
-        if query == "", do: {:error, "Empty search query"}, else: {:ok, matches, false}
+  @spec search(String.t(), Root.t()) :: ProjectSearch.result()
+  def search(query, %Root{path: path} = root) do
+    case :ets.lookup(@table, path) do
+      [{_root, matches, coverage}] ->
+        if query == "", do: {:error, "Empty search query"}, else: {:ok, matches, false, coverage}
 
       [] ->
-        Minga.Project.ProjectSearch.search(query, root)
+        ProjectSearch.search(query, root)
     end
   end
 end

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jsmestad/minga/go/tui/internal/generated"
@@ -102,5 +103,37 @@ func TestAnEightyColumnEchoLineKeepsTheReferencesAnswerAndItsKey(t *testing.T) {
 
 	if view := ansi.Strip(model.View().Content); !strings.Contains(view, "No references to defmodule (no server) · SPC s p") {
 		t.Fatalf("the references answer must stay whole with its step's key at 80 columns:\n%s", view)
+	}
+}
+
+// A notice that names next steps is an answer: its message reads in the chrome text colour at normal weight, as on macOS, not in the bold warning colour other echo text uses.
+func TestANoticeWithNextStepsDrawsItsMessageAsChromeTextNotAWarning(t *testing.T) {
+	model := noticeModel(120)
+	status := model.chrome[generated.OPGuiStatusBar].Status
+	p := model.palette()
+
+	want := lipgloss.NewStyle().Foreground(p.ChromeText()).Background(p.ChromeSurface()).Render(status.Message)
+	if got, actions := model.renderStatusMessage(status); got != want || !actions {
+		t.Fatalf("the notice message should be chrome text at normal weight:\n got %q\nwant %q", got, want)
+	}
+
+	plain := status
+	plain.MessageActions = nil
+	warning := lipgloss.NewStyle().Bold(true).Foreground(p.Warning()).Background(p.ChromeSurface()).Render(plain.Message)
+	if got, actions := model.renderStatusMessage(plain); got != warning || actions {
+		t.Fatalf("echo text without next steps keeps its own treatment, got %q", got)
+	}
+}
+
+func TestAnOperationWithTheSameTextAsANoticeDoesNotDrawItsActions(t *testing.T) {
+	model := noticeModel(120)
+	operation := testOperation(1, generated.OperationStatusRunning, "Looking for code actions")
+	model.feedback.transition(&operation, feedbackTestStart)
+	status := model.chrome[generated.OPGuiStatusBar].Status
+	status.Message, _, _ = model.feedback.presentation()
+
+	view := ansi.Strip(model.renderStatusSegments(status))
+	if !strings.Contains(view, status.Message) || strings.Contains(view, "ask Minga") {
+		t.Fatalf("the active operation should show its text without the notice's next step: %q", view)
 	}
 }

@@ -326,13 +326,14 @@ func TestPickerPreviewDoesNotOutliveTheFrameThatOpensTheActMenu(t *testing.T) {
 	}
 }
 
-func TestPickerDecodesTheMovementKeysSection(t *testing.T) {
+func TestPickerDecodesTheKeysItCanPreview(t *testing.T) {
 	header := []byte{1, 0, 0, 0, 0, 0, 0, 0}
 	keys := []byte{2, 0, 0, 0, 'j', protocol.ModCtrl, 1, 0, 0, 0xE0, 0x08, 0, 2}
-	payload := []byte{generated.OPGuiPicker, 2, 0x01, 0, byte(len(header))}
+	payload := []byte{generated.OPGuiPicker, 3, 0x01, 0, byte(len(header))}
 	payload = append(payload, header...)
 	payload = append(payload, 0x08, 0, byte(len(keys)))
 	payload = append(payload, keys...)
+	payload = append(payload, 0x09, 0, 1, 1)
 
 	command, err := protocol.DecodeCommand(payload)
 	if err != nil {
@@ -342,6 +343,9 @@ func TestPickerDecodesTheMovementKeysSection(t *testing.T) {
 	got := command.Chrome.Picker.MovementKeys
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("movement keys = %+v, want %+v", got, want)
+	}
+	if !command.Chrome.Picker.EnterSelects {
+		t.Fatal("plain Enter should activate the preview when the BEAM permits it")
 	}
 }
 
@@ -378,5 +382,30 @@ func TestPickerFitCountsTheNextStepRowsUnderTheEmptyHeader(t *testing.T) {
 	}
 	if drawn := drawnPickerItems(model); drawn == 0 || int(fit.Rows) != drawn {
 		t.Fatalf("reported %d rows, the view draws %d", fit.Rows, drawn)
+	}
+}
+
+func TestLongProjectSearchLeavesEveryNextStepVisibleOnAShortTerminal(t *testing.T) {
+	model, _ := fitPicker(t, 80, 24, 3, 3)
+	payload := model.chrome[generated.OPGuiPicker]
+	payload.Picker.Title = "Search project"
+	actions := []string{"Search ignored files too", "Search hidden files too", "Search all files"}
+	for i, action := range actions {
+		payload.Picker.Items[i].Label = action
+	}
+	payload.Picker.Empty = &generated.EmptyList{
+		Title: "No results for “" + strings.Repeat("pattern ", 220) + "”.",
+		Why:   "Ignored and hidden files were skipped.",
+	}
+	model.chrome[generated.OPGuiPicker] = payload
+
+	text := ansi.Strip(model.View().Content)
+	for _, want := range append(actions, "No results for", "Ignored and hidden files were skipped.") {
+		if !strings.Contains(text, want) {
+			t.Fatalf("the framed picker hid %q:\n%s", want, text)
+		}
+	}
+	if fit, ok := model.pickerFit(); !ok || fit.Rows != 3 {
+		t.Fatalf("the picker should report its three visible next steps, got %+v, present=%v", fit, ok)
 	}
 }

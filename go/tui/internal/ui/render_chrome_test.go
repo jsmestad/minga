@@ -49,7 +49,7 @@ func TestRenderStatusMessageSanitizesTerminalText(t *testing.T) {
 					}
 
 					want := lipgloss.NewStyle().Bold(true).Foreground(foreground).Background(model.palette().ChromeSurface()).Render(wantText)
-					if got := model.renderStatusMessage(statusMessage); got != want {
+					if got, _ := model.renderStatusMessage(protocol.StatusBar{Message: statusMessage}); got != want {
 						t.Fatalf("renderStatusMessage() = %q, want %q", got, want)
 					}
 
@@ -88,7 +88,7 @@ func TestRenderStatusMessagePrefersNewNoticeOverRetainedTerminalOperation(t *tes
 			model.feedback.transition(&operation, feedbackTestStart)
 
 			want := lipgloss.NewStyle().Bold(true).Foreground(palette.Warning()).Background(palette.ChromeSurface()).Render("Saved")
-			if got := model.renderStatusMessage("Saved"); got != want {
+			if got, _ := model.renderStatusMessage(protocol.StatusBar{Message: "Saved"}); got != want {
 				t.Fatalf("terminal operation suppressed notice: got %q, want %q", got, want)
 			}
 		})
@@ -129,7 +129,7 @@ func TestRenderStatusMessageUsesSemanticPaletteRoles(t *testing.T) {
 			}
 
 			want := lipgloss.NewStyle().Bold(true).Foreground(tt.foreground).Background(palette.ChromeSurface()).Render(text)
-			if got := model.renderStatusMessage(statusMessage); got != want {
+			if got, _ := model.renderStatusMessage(protocol.StatusBar{Message: statusMessage}); got != want {
 				t.Fatalf("raw styled output = %q, want palette-styled %q", got, want)
 			}
 		})

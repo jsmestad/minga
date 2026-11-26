@@ -5,6 +5,7 @@ defmodule MingaEditor.UI.Picker.PickerNextStepsSourcesTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Project.Root
   alias MingaEditor.UI.Picker.BufferSource
   alias MingaEditor.UI.Picker.Empty
   alias MingaEditor.UI.Picker.ExtensionListSource
@@ -17,21 +18,28 @@ defmodule MingaEditor.UI.Picker.PickerNextStepsSourcesTest do
   defp steps(%Empty{rows: rows}), do: Enum.map(rows, fn %{id: {:next_step, step}} -> step end)
 
   describe "project search" do
-    test "offers each wider search that the query's flags do not already cover" do
-      for {query, why, offered} <- [
-            {"limit_lable", "Ignored and hidden files were skipped.",
+    @tag :tmp_dir
+    test "offers each wider search that the query's flags do not already cover", %{tmp_dir: dir} do
+      {:ok, root} = Root.directory(dir)
+
+      for {query, coverage, why, offered} <- [
+            {"limit_lable", :visible, "Ignored and hidden files were skipped.",
              [
                {"-- -u", "Search ignored files too"},
                {"--hidden", "Search hidden files too"},
                {"-- -uu", "Search all files"}
              ]},
-            {"limit_lable -- -u", "Hidden files were skipped.",
-             [{"--hidden", "Search hidden files too"}, {"-- -uu", "Search all files"}]},
-            {"limit_lable -- --hidden", "Ignored files were skipped.",
-             [{"-- -u", "Search ignored files too"}, {"-- -uu", "Search all files"}]}
+            {"limit_lable -- -u", :with_ignored, "Hidden files were skipped.",
+             [{"--hidden", "Search hidden files too"}]},
+            {"limit_lable -- --hidden", :with_hidden, "Ignored files were skipped.",
+             [{"-- -u", "Search ignored files too"}]}
           ] do
         empty =
-          ProjectSearchSource.empty(%{query: "", total: 0, context: %{project_query: query}})
+          ProjectSearchSource.empty(%{
+            query: "",
+            total: 0,
+            context: %{project_query: query, project_search: {root, coverage}}
+          })
 
         assert empty.title == "No results for “limit_lable”.", query
         assert empty.why == why, query
@@ -40,26 +48,43 @@ defmodule MingaEditor.UI.Picker.PickerNextStepsSourcesTest do
       end
     end
 
-    test "each row reruns the pattern with its flags added after --" do
+    @tag :tmp_dir
+    test "widening preserves the pattern, filters and root and does not repeat -u", %{
+      tmp_dir: dir
+    } do
+      {:ok, root} = Root.directory(dir)
+
       empty =
         ProjectSearchSource.empty(%{
           query: "",
           total: 0,
-          context: %{project_query: "limit_lable -- -u"}
+          context: %{
+            project_query: "limit_lable -- -u -g *.ex",
+            project_search: {root, :with_ignored}
+          }
         })
 
       assert steps(empty) == [
-               {:search, "limit_lable -- -u --hidden"},
-               {:search, "limit_lable -- -u -uu"}
+               {:search, "limit_lable -- -u -g *.ex --hidden", root}
              ]
     end
 
-    test "once every file was searched, the one row edits the search" do
-      for query <- ["limit_lable -- -uu", "limit_lable -- -u --hidden"] do
-        empty =
-          ProjectSearchSource.empty(%{query: "", total: 0, context: %{project_query: query}})
+    @tag :tmp_dir
+    test "a scan that already included ignored and hidden files offers only to edit the search",
+         %{
+           tmp_dir: dir
+         } do
+      {:ok, root} = Root.directory(dir)
 
-        assert empty.why == "Every file was searched, ignored and hidden ones too."
+      for query <- ["limit_lable", "limit_lable -- -u -u", "limit_lable -- -u --hidden"] do
+        empty =
+          ProjectSearchSource.empty(%{
+            query: "",
+            total: 0,
+            context: %{project_query: query, project_search: {root, :all}}
+          })
+
+        assert empty.why == "Ignored and hidden files were included."
         assert rows(empty) == [{"SPC s p", "Change the search"}]
         assert steps(empty) == [{:edit, query}]
       end

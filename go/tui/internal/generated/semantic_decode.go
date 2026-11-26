@@ -1719,6 +1719,18 @@ func DecodeGuiPickerMovementKeys(data []byte, offset int, windowEnd int) ([]Pick
 	return items, pos, nil
 }
 
+func DecodeGuiPickerEnterSelection(data []byte, offset int, windowEnd int) (GuiPickerEnterSelection, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+1, "selects"); err != nil {
+		return GuiPickerEnterSelection{}, offset, err
+	}
+	selects := data[pos]
+	pos++
+	return GuiPickerEnterSelection{
+		Selects: selects,
+	}, pos, nil
+}
+
 // Section decoders for gui_picker_preview
 
 func DecodeGuiPickerPreviewHeader(data []byte, offset int, windowEnd int) (GuiPickerPreviewHeader, int, error) {

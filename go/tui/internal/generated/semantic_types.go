@@ -758,6 +758,10 @@ type GuiPickerEmpty struct {
 	Hints    []KeyHint
 }
 
+type GuiPickerEnterSelection struct {
+	Selects uint8
+}
+
 type GuiAgentChatHeader struct {
 	Visible uint8
 	Status  uint8

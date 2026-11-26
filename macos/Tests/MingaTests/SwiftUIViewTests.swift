@@ -523,6 +523,20 @@ struct StatusBarViewViewTests {
         #expect(long.echoWidth(in: 610) == 610 * 0.75)
     }
 
+    @Test("A notice that names next steps reads in the chrome text colour; other echo text stays secondary")
+    @MainActor func noticeMessageRole() {
+        #expect(StatusBarView.messageOpacity(namesNextSteps: true) == 1)
+        #expect(StatusBarView.messageOpacity(namesNextSteps: false) < 1)
+    }
+
+    @Test("An empty state's glyph is drawn in the role of the state whose shape it is")
+    @MainActor func emptyStateGlyphRole() {
+        #expect(EmptyListHeader.glyphState("●") == .done)
+        #expect(EmptyListHeader.glyphState("◆") == .failed)
+        #expect(EmptyListHeader.glyphState("") == nil)
+        #expect(EmptyListHeader.glyphState("★") == nil)
+    }
+
     @Test("Narrowing drops filetype, position and git in order, then shrinks Minga, then warnings")
     @MainActor func dropLadder() {
         let segments = boardLeft + boardRight

@@ -1337,6 +1337,32 @@ defmodule MingaEditor.PickerUITest do
       assert Minga.Buffer.file_path(result.workspace.buffers.active) == existing
     end
 
+    test "Create refuses to write beyond the directory workspace", %{tmp_dir: tmp_dir} do
+      fixture = file_confirmation_state(tmp_dir)
+      workspace = Path.dirname(fixture.origin_path)
+      outside = Path.join(tmp_dir, "outside")
+      File.mkdir!(outside)
+      File.ln_s!(outside, Path.join(workspace, "link"))
+      File.ln_s!(Path.join(outside, "dangling-target"), Path.join(workspace, "dangling"))
+
+      for {query, outside_path} <- [
+            {"../escaped/file", Path.join(tmp_dir, "escaped")},
+            {Path.join(outside, "absolute/file"), Path.join(outside, "absolute")},
+            {"link/escaped/file", Path.join(outside, "escaped")},
+            {"dangling", Path.join(outside, "dangling-target")}
+          ] do
+        result =
+          query
+          |> String.to_charlist()
+          |> Enum.reduce(fixture.state, &PickerUI.handle_key(&2, &1, 0))
+          |> PickerUI.handle_key(13, 0)
+
+        assert result.shell_runtime.state.notice.message == "Could not create #{query}"
+        assert Minga.Buffer.file_path(result.workspace.buffers.active) == fixture.origin_path
+        refute File.exists?(outside_path)
+      end
+    end
+
     test "cancellation restores the origin without opening or recording", %{tmp_dir: tmp_dir} do
       fixture = file_confirmation_state(tmp_dir)
       previewed = preview_a(fixture.state)

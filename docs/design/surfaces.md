@@ -67,6 +67,8 @@ Lists open in a bottom drawer: the tasks list, the review, diagnostics, the swit
 While a prompt has focus (find file, project search, new task, rename, the command line), typing always edits the query. Actions are reached by moving into the list: `⌃J` / `⌃K` or the arrows to move, `↩` to run, or a click. Prompts never use chords that collide with text editing (`⌃A`, `⌃E`, `⌃H`, `⌃W`, `⌃U`, `⌃K` beyond list movement).
 
 - **No results become next steps.** When project search finds nothing, the result list shows rows such as "Search ignored files too  `-- -u`", "Search hidden files too  `--hidden`", "Search all files  `-- -uu`". The first is preselected. Each row shows the ripgrep flag it adds, so the menu teaches the Doom/consult syntax (`query -- -uu`), which also works typed directly.
+- **Only widen what was skipped.** A search that included ignored files offers to include hidden files, not to repeat the same scan under another name. If both were included, the result offers to edit the search. The `grep` fallback includes both and requires `rg` for queries with options.
+- **Search and Create use the open directory workspace.** A file-only session does not authorize a recursive search. Create accepts paths relative to the workspace and refuses paths that would leave it, including through a symlink.
 - **No match in the switcher** offers "Create the file" and "Search the project for it" as rows.
 
 ## Hover

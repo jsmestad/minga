@@ -92,7 +92,8 @@ version = "2.0.0"
 # protocol_version 51 adds gui_tasks_drawer (0xAC) with its empty_list empty state, the tasks_drawer_action gui_action (0x71) and gui_focus_owner surface 14 (the tasks drawer).
 # protocol_version 52 narrows agent_desktop_notification (0x61) to one "needs you" alert and its withdrawal (kinds 1 and 2, fixed:18, no debounce), sends it to the Go frontend too (the optional terminal bell), and adds the agent_notification_open gui_action (0x72), which names the clicked alert by its 16-byte identity. It also adds the gui_status_bar needs_you section (0x14: the needs-you count, for the macOS Dock badge).
 # protocol_version 53 adds the which_key_press (0x73) and which_key_back (0x74) gui_actions, so a click on a which-key row or crumb names the open panel's path, and gui_menu_bar (0xAD), the leader groups the macOS menu bar mirrors.
-protocol_version = 53
+# protocol_version 54 adds key_hint and the hints of the gui_picker empty section (0x07), plus enter_selection (0x09), the live picker keymap's permission to activate its locally previewed row with unmodified Enter.
+protocol_version = 54
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -2840,6 +2841,13 @@ name = "movement_keys"
 layout = "counted_array"
 count_type = "u8"
 element = "picker_movement_key"
+
+[[sections]]
+opcode = "gui_picker"
+id = 0x09
+name = "enter_selection"
+# Whether unmodified Enter resolves to picker_select now. Other keys, remapped Enter, and act-menu Enter go to the BEAM.
+fields = [{ name = "selects", type = "u8" }]
 
 # gui_agent_chat (0x78) sections
 

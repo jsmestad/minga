@@ -97,6 +97,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       mode_prefix: PickerState.mode_prefix(picker_state),
       load_status: load_status,
       movement_keys: movement_keys(ctx, picker_state),
+      enter_selects?: enter_selects?(ctx, picker_state),
       preview_lines: preview_lines,
       empty: empty_model(picker.empty),
       list_keys?: Picker.list_keys?(picker),
@@ -123,6 +124,11 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       end
 
     Enum.take(keys, @max_movement_keys)
+  end
+
+  @spec enter_selects?(Context.t(), PickerState.t()) :: boolean()
+  defp enter_selects?(%Context{intent: %{frame: %{keymap_server: keymap_server}}}, picker_state) do
+    PickerState.resolve_key(picker_state, {13, 0}, keymap_server) == {:command, :picker_select}
   end
 
   # An empty picker's footer names what its list can do (move, run and close with next-step rows; close alone without),

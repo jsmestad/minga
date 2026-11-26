@@ -162,6 +162,10 @@ func decodePicker(payload []byte) (Picker, string, int) {
 			if keys, _, err := generated.DecodeGuiPickerMovementKeys(payload, sectionStart, sectionEnd); err == nil {
 				picker.MovementKeys = mapPickerMovementKeys(keys)
 			}
+		case 0x09: // Preview activation with unmodified Enter
+			if keys, _, err := generated.DecodeGuiPickerEnterSelection(payload, sectionStart, sectionEnd); err == nil {
+				picker.EnterSelects = keys.Selects == 1
+			}
 		}
 	}
 	summary := picker.Title

@@ -18,23 +18,19 @@
       "macos-catppuccin_latte-1440.json": "a1ddc7b355e7c8a45ba8a6b1a6c5ff6e20495d887bf85ca297eeb57795ae2855"
     }
   },
-  "platform_specific": {
-    "frontend": "tui",
-    "reason": "fold marks draw now that the parse says when it is complete (#4337); macOS baselines record no fold marks, and the 80x24 empty-list inset is terminal only"
-  },
   "scenario": "start.project_switcher.empty",
   "tui": {
-    "commit": "f777d3e78615c1651d423d05be0640b817531a3b",
+    "commit": "cc1b0c99b1a479223fadcff8923a9eaee93af640-dirty",
     "files": {
       "tui-astrodark-120x40.txt": "26459825ad24d3ff28649b668c0a5f044bee6dba6be9c44085b2ef9729d743f6",
       "tui-astrodark-150x38.txt": "e98f43df57f68ad1fad53721b41052464eb581e500c3593712e55cd271e5e200",
-      "tui-astrodark-80x24.txt": "764b52a5554d2569f9567a40140210094aabd8e596e45f7eff079313aa4446cb",
+      "tui-astrodark-80x24.txt": "352a3149fd9bee140d516ca3f782c74b5123d88995417707ae454aa2f2588657",
       "tui-catppuccin_frappe-120x40.txt": "055e5d3c0b74d8d89cf22c1570f767a75f66143f45aad65344f1dffe1586eb39",
       "tui-catppuccin_frappe-150x38.txt": "3a3f52264bedba16ee0369ab460673cdac5bfbbf7a2bd04a1cd0ec367469567c",
-      "tui-catppuccin_frappe-80x24.txt": "f561b8ca4356026dff9434dd1a5da5e54f451eff642e0462b76bf59bf7ede058",
+      "tui-catppuccin_frappe-80x24.txt": "e7d5e0ab1d7136b467e0b8f235ac8ff7d753a56f34117306cae6f74665756acd",
       "tui-catppuccin_latte-120x40.txt": "88143b455a39f1217aa336b423def45ec2218e8c4192af30071ab82bad1032ef",
       "tui-catppuccin_latte-150x38.txt": "01c70558eb2ae862487d0f0692746f4bf7502b11dc6d9458d39745bad7337d74",
-      "tui-catppuccin_latte-80x24.txt": "0610d5481b98af06c0b9cb1447cb05067e39582f94f28b75d2b4963b458de701"
+      "tui-catppuccin_latte-80x24.txt": "17a3326d2702327c85fdf528e5ef5b01fd2bc2503c5eaa5f551f878ae0e8116c"
     }
   }
 }

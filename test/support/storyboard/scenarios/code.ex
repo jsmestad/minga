@@ -23,7 +23,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Code do
         "hover on a diagnostic with Fix and Ask Minga"
       ),
       Entry.built("code.diagnostics.none",
-        reach: "SPC c x",
+        reach: "1 SPC c x",
         recognize: &Model.empty_picker?(&1, ~r/diagnostics/i, ~r/^No problem/),
         checks: [
           Check.new("an empty list says so and points somewhere", fn model ->

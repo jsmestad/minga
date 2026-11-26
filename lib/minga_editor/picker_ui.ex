@@ -341,6 +341,12 @@ defmodule MingaEditor.PickerUI do
     PickerState.commit_extension_page(ps, items, candidates, page)
   end
 
+  defp commit_fetch(ps, items, candidates, %{project_search: result}) do
+    ps
+    |> PickerState.put_context(Map.put(ps.context || %{}, :project_search, result))
+    |> PickerState.complete_fetch(Picker.put_candidates(ps.picker, items, candidates))
+  end
+
   defp commit_fetch(ps, items, candidates, _meta) do
     PickerState.complete_fetch(ps, Picker.put_candidates(ps.picker, items, candidates))
   end

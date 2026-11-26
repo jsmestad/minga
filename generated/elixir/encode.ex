@@ -1265,6 +1265,16 @@ defmodule Minga.Protocol.Encode do
     [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_picker_movement_key(value, command, [index | path]) end)]
   end
 
+  @spec encode_gui_picker_enter_selection(map()) :: iodata()
+  def encode_gui_picker_enter_selection(model), do: encode_gui_picker_enter_selection(model, :gui_picker, [:enter_selection])
+
+  @spec encode_gui_picker_enter_selection(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_gui_picker_enter_selection(model, command, path) do
+    [
+      (fn value -> validate_uint!(command, [:selects | path], value, 255); <<value::8>> end).(Map.fetch!(model, :selects)),
+    ]
+  end
+
   @spec encode_gui_agent_chat_header(map()) :: iodata()
   def encode_gui_agent_chat_header(model), do: encode_gui_agent_chat_header(model, :gui_agent_chat, [:header])
 

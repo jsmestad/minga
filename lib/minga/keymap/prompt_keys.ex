@@ -169,6 +169,8 @@ defmodule Minga.Keymap.PromptKeys do
   defp key_label(@enter, _mods), do: "↩"
   defp key_label(@escape, _mods), do: "esc"
   defp key_label(@tab, _mods), do: "Tab"
+  defp key_label(32, _mods), do: Bindings.format_key({32, 0})
+  defp key_label(127, _mods), do: "⌫"
   defp key_label(cp, _mods) when cp in [@arrow_down, @arrow_down_mac], do: "↓"
   defp key_label(cp, _mods) when cp in [@arrow_up, @arrow_up_mac], do: "↑"
   defp key_label(cp, 0), do: <<cp::utf8>>

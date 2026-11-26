@@ -17,7 +17,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Files do
         "the SPC , switcher drawer with pinned, changed and recent"
       ),
       Entry.built("files.switcher.no_match",
-        reach: "SPC , chrome_stat_test",
+        reach: "1 SPC , chrome_stat_test",
         recognize: &Model.empty_picker?(&1, ~r/switch buffer/i, ~r/^Nothing matches/),
         checks: [
           Check.new(

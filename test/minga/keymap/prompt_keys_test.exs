@@ -76,6 +76,18 @@ defmodule Minga.Keymap.PromptKeysTest do
       assert PromptKeys.picker_hints(true, false, &Map.fetch!(rebound, &1)) ==
                [{"↓ ⌘K", "move"}, {"⇧↩", "run"}, {"⌃G", "close"}]
     end
+
+    test "named rebinds remain readable instead of drawing literal control characters" do
+      rebound = %{
+        picker_next: [{32, 0}],
+        picker_prev: [{127, 0}],
+        picker_select: [{13, 0}],
+        picker_cancel: [{27, 0}]
+      }
+
+      assert PromptKeys.picker_hints(true, true, &Map.fetch!(rebound, &1)) ==
+               [{"SPC ⌫", "move"}, {"↩", "run"}, {"esc", "close"}]
+    end
   end
 
   # The single keys that run `command` in the default picker trie, for a list (`list_keys?`) or a prompt.

@@ -23,7 +23,8 @@ defmodule Minga.Test.Storyboard.Scenarios.Search do
         ]
       ),
       Entry.built("search.project.no_results",
-        reach: "SPC s p limit_lable ↩",
+        start: [directory_workspace: true],
+        reach: "1 SPC s p limit_lable ↩",
         recognize: &Model.empty_picker?(&1, ~r/search project/i, ~r/^No results/),
         checks: [
           Check.new(

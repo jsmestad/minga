@@ -1454,6 +1454,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         ],
         empty: %EmptyList{title: "No projects yet.", why: "Minga remembers folders you open."},
         list_keys?: true,
+        enter_selects?: true,
         hints: [{"j k", "move"}, {"↩", "run"}]
       }
 

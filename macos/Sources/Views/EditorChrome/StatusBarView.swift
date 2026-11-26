@@ -319,12 +319,17 @@ public struct StatusBarView: View {
         }
     }
 
+    /// A notice that names next steps is an answer, so its message reads in the chrome text colour, and only the dots between steps are muted (docs/design/anatomy.md, "Notice"); the TUI draws it the same way. Other echo text stays secondary.
+    static func messageOpacity(namesNextSteps: Bool) -> Double {
+        namesNextSteps ? 1 : 0.7
+    }
+
     /// What happened is the point of a notice, so the message stays whole: the next steps first give up their words and keep their keys, and only a message that cannot fit on its own truncates.
     @ViewBuilder
     private var noticeLine: some View {
         let message = Text(state.message)
             .font(Typography.font(.small))
-            .foregroundStyle(theme.modelineBarFg.opacity(0.7))
+            .foregroundStyle(theme.modelineBarFg.opacity(Self.messageOpacity(namesNextSteps: !state.messageActions.isEmpty)))
             .lineLimit(1)
             .anatomyPart("notice.message", text: state.message, font: .small)
         ViewThatFits(in: .horizontal) {

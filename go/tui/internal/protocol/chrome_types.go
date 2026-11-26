@@ -156,6 +156,8 @@ type Picker struct {
 	Hints []generated.KeyHint
 	// MovementKeys are the keys the BEAM's picker keymap scope resolves to one-row movement. The local selection preview moves only for these keys.
 	MovementKeys []PickerMovementKey
+	// EnterSelects is the BEAM keymap's permission to activate the locally previewed picker row on plain Enter.
+	EnterSelects bool
 }
 
 // PickerMovementKey is one key_press identity and the rows it moves the highlighted row: 1 down, -1 up.
