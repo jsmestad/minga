@@ -437,6 +437,17 @@ defmodule Minga.Protocol.Encode do
     ]
   end
 
+  @spec encode_key_hint(map()) :: iodata()
+  def encode_key_hint(model), do: encode_key_hint(model, :key_hint, [])
+
+  @spec encode_key_hint(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_key_hint(model, command, path) do
+    [
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:keys | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :keys)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:word | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :word)),
+    ]
+  end
+
   @spec encode_empty_list(map()) :: iodata()
   def encode_empty_list(model), do: encode_empty_list(model, :empty_list, [])
 
@@ -1240,6 +1251,7 @@ defmodule Minga.Protocol.Encode do
     [
       encode_empty_list(Map.fetch!(model, :empty), command, [:empty | path]),
       (fn value -> validate_uint!(command, [:list_keys | path], value, 255); <<value::8>> end).(Map.fetch!(model, :list_keys)),
+      (fn items -> count = Enum.count(items); validate_uint!(command, [:hints | path], count, 255); [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_key_hint(value, command, [index | [:hints | path]]) end)] end).(Map.fetch!(model, :hints)),
     ]
   end
 

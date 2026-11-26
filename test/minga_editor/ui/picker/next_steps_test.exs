@@ -121,6 +121,22 @@ defmodule MingaEditor.UI.Picker.NextStepsTest do
       end
     end
 
+    test "the footer hints follow what the list can do" do
+      for {context, hints} <- [
+            {%{labels: [], steps: false}, [{"q", "close"}]},
+            {%{labels: []}, [{"j k", "move"}, {"↩", "run"}, {"q", "close"}]},
+            {%{labels: ["alpha"]}, []}
+          ] do
+        model =
+          TestHelpers.base_state()
+          |> PickerUI.open(NextStepsPickerSource, context)
+          |> Context.from_editor_state()
+          |> PickerBuilder.build()
+
+        assert model.hints == hints, "#{inspect(context)} gave #{inspect(model.hints)}"
+      end
+    end
+
     test "q and esc close it" do
       for key <- [?q, @escape] do
         assert PickerUI.handle_key(open([]), key, 0).shell_runtime.state.modal == :none

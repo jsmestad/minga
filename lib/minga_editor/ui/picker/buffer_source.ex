@@ -10,8 +10,10 @@ defmodule MingaEditor.UI.Picker.BufferSource do
   @behaviour MingaEditor.UI.Picker.Source
 
   alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.Empty
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.Source
+  alias MingaEditor.UI.Picker.SwitcherNextSteps
 
   alias Minga.Buffer
   alias MingaEditor.State, as: EditorState
@@ -86,7 +88,15 @@ defmodule MingaEditor.UI.Picker.BufferSource do
   end
 
   @impl true
+  @spec empty(Empty.request()) :: Empty.t() | nil
+  def empty(%{query: query, total: total}),
+    do: SwitcherNextSteps.empty(query, SwitcherNextSteps.count(total, "open buffer"))
+
+  @impl true
   @spec on_select(Item.t(), term()) :: term()
+  def on_select(%Item{id: {:next_step, _step}} = item, state),
+    do: SwitcherNextSteps.run(item, state)
+
   def on_select(%Item{id: {:pid, pid}}, state) do
     # Special buffer not yet in the list: add it (which also switches to it)
     MingaEditor.Handlers.BufferRegistry.add_buffer(state, pid)

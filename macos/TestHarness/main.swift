@@ -234,7 +234,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return result
 
-    case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq, let activationGeneration, let empty, let listKeys, let movementKeys):
+    case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq, let activationGeneration, let empty, let listKeys, let movementKeys, let hints):
         let itemArray = items.map { i -> [String: Any] in
             ["label": i.label, "description": i.description, "icon_color": Int(i.iconColor), "annotation": i.annotation, "flags": Int(i.flags), "match_positions": i.matchPositions.map { Int($0) }, "activation_id": Int(i.activationID), "status": i.status, "status_tone": Int(i.statusTone.rawValue), "group": i.group]
         }
@@ -262,6 +262,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         if let empty { result["empty"] = emptyListJSON(empty) }
         result["list_keys"] = listKeys
+        result["hints"] = hints.map { ["keys": $0.keys, "word": $0.word] }
         return result
 
     case .guiPickerPreview(let visible, let lines):

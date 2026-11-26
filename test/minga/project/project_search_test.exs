@@ -100,6 +100,28 @@ defmodule Minga.Project.ProjectSearchTest do
     end
   end
 
+  describe "parse_query/1" do
+    test "splits ripgrep flags after -- from the pattern, as in Doom" do
+      for {query, parsed} <- [
+            {"limit_lable", {"limit_lable", []}},
+            {"limit_lable -- -u", {"limit_lable", ["-u"]}},
+            {"limit_lable -- -u --hidden", {"limit_lable", ["-u", "--hidden"]}},
+            {"limit_lable -- -g *.ex -t elixir", {"limit_lable", ["-g", "*.ex", "-t", "elixir"]}},
+            {"limit_lable -- -g", {"limit_lable", []}},
+            {"limit_lable -- --glob=*.ex", {"limit_lable", ["--glob=*.ex"]}},
+            {"a -- b -- -uu", {"a", ["-uu"]}},
+            {"limit_lable -- lib", {"limit_lable", []}},
+            {"limit_lable -- ", {"limit_lable", []}}
+          ] do
+        assert ProjectSearch.parse_query(query) == parsed, query
+      end
+    end
+
+    test "a query that is only flags has no pattern to search for" do
+      assert ProjectSearch.search(" -- -u", "/") == {:error, "Empty search query"}
+    end
+  end
+
   describe "search/2" do
     test "returns error for empty query" do
       assert {:error, "Empty search query"} = ProjectSearch.search("", "/tmp")

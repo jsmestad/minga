@@ -1,10 +1,12 @@
 package ui
 
 import (
+	"bytes"
 	"slices"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/charmbracelet/x/ansi"
@@ -54,19 +56,21 @@ func TestEmptyPickerShowsWhatHappenedAboveItsNextStepRows(t *testing.T) {
 	}
 }
 
-func TestEmptyPickerHintsNameTheKeysThatMoveAndRunItsRows(t *testing.T) {
+func TestEmptyPickerFooterDrawsTheHintsTheBEAMSends(t *testing.T) {
 	model := New(80, 24, nil)
-	picker := protocol.Picker{Visible: true, Title: "Switch project", Empty: &generated.EmptyList{Title: "No projects yet."}}
-
-	prompt := ansi.Strip(model.renderPickerHelp(picker, 60))
-	if !strings.Contains(prompt, "⌃J ⌃K move") || !strings.Contains(prompt, "esc close") {
-		t.Fatalf("a prompt moves with ⌃J ⌃K: %q", prompt)
+	picker := protocol.Picker{
+		Visible: true,
+		Title:   "Switch project",
+		Empty:   &generated.EmptyList{Title: "No projects yet."},
+		// A user who rebinds the picker's keys sees them here: the frontend draws what it is sent.
+		Hints: []generated.KeyHint{{Keys: "n p", Word: "move"}, {Keys: "↩", Word: "run"}, {Keys: "x", Word: "close"}},
 	}
 
-	picker.ListKeys = true
-	list := ansi.Strip(model.renderPickerHelp(picker, 60))
-	if !strings.Contains(list, "j k move") || !strings.Contains(list, "q close") {
-		t.Fatalf("a list with nothing to type moves with j k: %q", list)
+	footer := ansi.Strip(model.renderPickerHelp(picker, 60))
+	for _, want := range []string{"n p move", "↩ run", "x close"} {
+		if !strings.Contains(footer, want) {
+			t.Fatalf("the footer must draw the BEAM's hint %q: %q", want, footer)
+		}
 	}
 }
 
@@ -138,6 +142,28 @@ func TestEmptyFolderDrawsItsNextStepsInTheTreesOwnKeys(t *testing.T) {
 	for _, want := range []string{"notes/ is empty.", "Make the first file or folder here.", "New file", "New folder"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("empty folder is missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestAnEmptyPickerOnAShortTerminalShowsEveryNextStep(t *testing.T) {
+	model := New(80, 24, nil)
+	model.layout = model.computeLayout()
+	picker := protocol.Picker{
+		Visible: true,
+		Title:   "Switch project",
+		Items: []protocol.PickerItem{
+			{ActivationID: 1, Label: "Add a folder", Annotation: "SPC p a"},
+			{ActivationID: 2, Label: "Open a file", Annotation: "SPC f f"},
+		},
+		Empty: &generated.EmptyList{Title: "No projects yet.", Why: "Minga remembers the folders you open."},
+		Hints: []generated.KeyHint{{Keys: "↩", Word: "run"}},
+	}
+
+	text := strings.Join(stripLines(model.renderPicker(picker, protocol.PickerPreview{})), "\n")
+	for _, want := range []string{"No projects yet.", "Add a folder", "Open a file", "↩ run"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("an 80x24 empty picker is missing %q:\n%s", want, text)
 		}
 	}
 }

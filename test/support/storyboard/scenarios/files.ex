@@ -16,7 +16,29 @@ defmodule Minga.Test.Storyboard.Scenarios.Files do
         4056,
         "the SPC , switcher drawer with pinned, changed and recent"
       ),
-      Entry.pending("files.switcher.no_match", 4058, "no match offers create and search rows"),
+      Entry.built("files.switcher.no_match",
+        reach: "SPC , chrome_stat_test",
+        recognize: &Model.empty_picker?(&1, ~r/switch buffer/i, ~r/^Nothing matches/),
+        checks: [
+          Check.new(
+            "no match says what was searched and offers create and search rows",
+            fn model ->
+              assert_empty_state(model,
+                title: "Nothing matches “chrome_stat_test”.",
+                description: "Searched 1 open buffer.",
+                actions: [
+                  {"new file", "Create chrome_stat_test"},
+                  {"SPC s p", "Search the project for chrome_stat_test"}
+                ]
+              )
+            end
+          ),
+          Check.new(
+            "the prompt keeps the keyboard, so typing edits the query",
+            &assert_focus(&1, :picker)
+          )
+        ]
+      ),
       Entry.built("files.tree.empty",
         start: [empty_dirs: ["notes"]],
         reach: "1 SPC o p j .",

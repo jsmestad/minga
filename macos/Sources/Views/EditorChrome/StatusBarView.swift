@@ -106,13 +106,21 @@ public struct StatusBarView: View {
         return ceil(ModelineMetrics.textWidth(state.message)) + steps
     }
 
+    /// The width of the notice with each step's key and word, measured as `noticeLine` lays out its first form: the keys-only width plus, per step, the gap and the word in the small face.
+    var fullNoticeWidth: CGFloat {
+        state.messageActions.reduce(shortestNoticeWidth) { width, action in
+            width + Spacing.xs + ceil(ModelineMetrics.textWidth(action.label))
+        }
+    }
+
     /// Room for the echo text: what it needs, at most a third of the bar, nothing when there is no text.
-    /// A notice that names next steps is an answer, so it may take up to three quarters of the bar: enough for the whole message and the steps' keys, while droppable segments give way (as in the TUI).
+    /// A notice that names next steps is an answer, so it may take up to three quarters of the bar: room for the whole message with each step's key and word, while droppable segments give way (as in the TUI).
+    /// When that does not fit, `noticeLine` falls back to the keys alone in whatever room the three quarters leave.
     func echoWidth(in width: CGFloat) -> CGFloat {
         guard hasCenterStatus else { return 0 }
         let plain = min(ModelineMetrics.textWidth(centerText) + 2 * Spacing.md, width * 0.34)
         guard !state.messageActions.isEmpty, centerText == state.message else { return plain }
-        return max(plain, min(shortestNoticeWidth + 2 * Spacing.md, width * 0.75))
+        return max(plain, min(fullNoticeWidth + 2 * Spacing.md, width * 0.75))
     }
 
     private var pendingWidth: CGFloat {

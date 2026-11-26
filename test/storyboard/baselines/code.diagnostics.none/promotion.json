@@ -1,0 +1,17 @@
+{
+  "scenario": "code.diagnostics.none",
+  "tui": {
+    "commit": "90d2ee719178b13b8e2ab6233e138122db9b9b9c-dirty",
+    "files": {
+      "tui-astrodark-120x40.txt": "09fb274f969cc6d070c8e3ea396869f1a3f1f0c80a4fe07104928789ce569379",
+      "tui-astrodark-150x38.txt": "08cbe40764fd2fe0297deded3ddcf3e9c5a57d9e4a2b0f5a3e0e3e9cfdbae132",
+      "tui-astrodark-80x24.txt": "de58ff7900e4b2ac26b0fe03f351947004587f1bd8a91c91e129d61e5ad52b03",
+      "tui-catppuccin_frappe-120x40.txt": "f2dc66e45306c4c6a46c4f1db44d48c822d905b44c180154f21ce887ac52db04",
+      "tui-catppuccin_frappe-150x38.txt": "8d4379c6ce952878633c3897e0be2185cbc8e96dd70d0c35ad001909f469539d",
+      "tui-catppuccin_frappe-80x24.txt": "77823ad8932d3667292fd49c57ae0a9e877f1903ac2041133503ec23f25627ee",
+      "tui-catppuccin_latte-120x40.txt": "d7c9a3e7ad99896224f059cfac8394f74475379f7df68d8a943ee90480df7586",
+      "tui-catppuccin_latte-150x38.txt": "9b3e70035cc74cfdd7d3c279a7775ceb4cf432978236326c78291cc2fdc79f0f",
+      "tui-catppuccin_latte-80x24.txt": "cf029f6b4db318083459f30c9a22142013f5400e1e36252c1cea0d0bedf507ec"
+    }
+  }
+}

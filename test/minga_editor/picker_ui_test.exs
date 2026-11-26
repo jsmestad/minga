@@ -1295,7 +1295,7 @@ defmodule MingaEditor.PickerUITest do
       assert flush_file_visits() == ["target-b.txt"]
     end
 
-    test "Enter with no selected result restores the origin without opening or recording", %{
+    test "Enter on a query that matches nothing creates and opens the typed file", %{
       tmp_dir: tmp_dir
     } do
       fixture = file_confirmation_state(tmp_dir)
@@ -1305,15 +1305,36 @@ defmodule MingaEditor.PickerUITest do
         |> preview_a()
         |> PickerUI.handle_key(?z, 0)
 
+      {:picker, %{picker_ui: %{picker: offered}}} = no_result.shell_runtime.state.modal
+      assert %{label: "Create z", annotation: "new file"} = Picker.selected_item(offered)
+
       result = PickerUI.handle_key(no_result, 13, 0)
       on_exit(fn -> stop_added_buffers(result, fixture.state) end)
 
+      created = Path.join(Path.dirname(fixture.origin_path), "z")
       assert result.shell_runtime.state.modal == :none
-      assert result.workspace.buffers.active == fixture.origin_buffer
-      assert tab_buffer_paths(result) == [fixture.origin_path]
-      assert result.shell_runtime.state.tab_bar.active_id == 1
-      assert result.shell_runtime.state.notice.message == nil
-      assert flush_file_visits() == []
+      assert File.regular?(created)
+      assert Minga.Buffer.file_path(result.workspace.buffers.active) == created
+      assert flush_file_visits() == ["z"]
+    end
+
+    test "Create on a file that already exists opens it without touching it", %{tmp_dir: tmp_dir} do
+      fixture = file_confirmation_state(tmp_dir)
+      existing = fixture.origin_path
+      File.touch!(existing, {{2001, 1, 1}, {0, 0, 0}})
+      {:ok, before} = File.stat(existing)
+
+      result =
+        "origin.txt"
+        |> String.to_charlist()
+        |> Enum.reduce(fixture.state, &PickerUI.handle_key(&2, &1, 0))
+        |> PickerUI.handle_key(13, 0)
+
+      on_exit(fn -> stop_added_buffers(result, fixture.state) end)
+
+      assert {:ok, %File.Stat{mtime: mtime}} = File.stat(existing)
+      assert mtime == before.mtime
+      assert Minga.Buffer.file_path(result.workspace.buffers.active) == existing
     end
 
     test "cancellation restores the origin without opening or recording", %{tmp_dir: tmp_dir} do

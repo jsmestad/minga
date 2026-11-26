@@ -203,7 +203,7 @@ reason = "Syntax colours, muted comment and gutter text, separators and chips mi
 issue = 4137
 
 [[exception]]
-scenario = ["start.project_switcher.empty", "code.actions.none", "code.references.none", "search.buffer.no_results"]
+scenario = ["start.project_switcher.empty", "code.actions.none", "code.references.none", "search.buffer.no_results", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -218,7 +218,7 @@ reason = "Syntax colours, muted comment and gutter text, separators and chips mi
 issue = 4137
 
 [[exception]]
-scenario = "start.project_switcher.empty"
+scenario = ["start.project_switcher.empty", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none"]
 frontend = "tui"
 part = "glyph"
 rule = "contrast"
@@ -238,7 +238,7 @@ reason = "The picker's selected-row text misses 4.5:1 on the popup selection col
 issue = 4137
 
 [[exception]]
-scenario = "start.project_switcher.empty"
+scenario = ["start.project_switcher.empty", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none"]
 frontend = "tui"
 part = "glyph"
 rule = "contrast"

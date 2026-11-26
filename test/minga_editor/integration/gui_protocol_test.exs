@@ -1453,7 +1453,8 @@ defmodule Minga.Integration.GUIProtocolTest do
           }
         ],
         empty: %EmptyList{title: "No projects yet.", why: "Minga remembers folders you open."},
-        list_keys?: true
+        list_keys?: true,
+        hints: [{"j k", "move"}, {"↩", "run"}]
       }
 
       cmd = PickerEncoder.encode_command(model)
@@ -1471,6 +1472,12 @@ defmodule Minga.Integration.GUIProtocolTest do
              }
 
       assert decoded["list_keys"] == true
+
+      assert decoded["hints"] == [
+               %{"keys" => "j k", "word" => "move"},
+               %{"keys" => "↩", "word" => "run"}
+             ]
+
       assert [%{"label" => "Add a folder", "annotation" => "SPC p a"}] = decoded["items"]
     end
   end
