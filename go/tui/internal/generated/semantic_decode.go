@@ -856,6 +856,43 @@ func DecodeWhichKeyHint(data []byte, offset int, windowEnd int) (WhichKeyHint, i
 	}, pos, nil
 }
 
+func DecodeMenuBarItem(data []byte, offset int, windowEnd int) (MenuBarItem, int, error) {
+	pos := offset
+	path, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return MenuBarItem{}, offset, err
+	}
+	label, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return MenuBarItem{}, offset, err
+	}
+	section, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return MenuBarItem{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "kind"); err != nil {
+		return MenuBarItem{}, offset, err
+	}
+	kind := data[pos]
+	pos++
+	command, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return MenuBarItem{}, offset, err
+	}
+	platformKey, pos, err := decodeString8Window(data, pos, windowEnd)
+	if err != nil {
+		return MenuBarItem{}, offset, err
+	}
+	return MenuBarItem{
+		Path:        path,
+		Label:       label,
+		Section:     section,
+		Kind:        kind,
+		Command:     command,
+		PlatformKey: platformKey,
+	}, pos, nil
+}
+
 func DecodeWhichKeyEntry(data []byte, offset int, windowEnd int) (WhichKeyEntry, int, error) {
 	pos := offset
 	if err := decodeRequireWindow(windowEnd, pos+1, "kind"); err != nil {

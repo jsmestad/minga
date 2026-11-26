@@ -77,6 +77,29 @@ defmodule Minga.Keymap.Bindings do
     %Node{}
   end
 
+  @doc "Uses the active filetype's `SPC m` bindings when it declares any, otherwise the global group."
+  @spec effective_filetype_group(node_t(), node_t()) :: node_t()
+  def effective_filetype_group(global, %Node{children: children}) when map_size(children) == 0,
+    do: global
+
+  def effective_filetype_group(%Node{} = global, %Node{children: children}),
+    do: %{global | children: children}
+
+  @doc "Projects the active filetype into the root before its reachable groups are enumerated."
+  @spec with_filetype_group(node_t(), node_t()) :: node_t()
+  def with_filetype_group(%Node{children: children} = root, %Node{} = filetype) do
+    case Map.fetch(children, {?m, 0}) do
+      {:ok, %Node{command: nil} = group} ->
+        case effective_filetype_group(group, filetype) do
+          ^group -> root
+          effective -> %{root | children: Map.put(children, {?m, 0}, effective)}
+        end
+
+      _other ->
+        root
+    end
+  end
+
   @doc """
   Binds a key sequence to a command in the trie.
 
@@ -179,6 +202,24 @@ defmodule Minga.Keymap.Bindings do
 
   @spec format_keys([key()]) :: String.t()
   defp format_keys(keys), do: keys |> Enum.map_join(" ", &format_key/1)
+
+  @doc """
+  Lays `high` over `low`: a key bound in `high` (as a command or a prefix) replaces the same key in `low`, and every other key of `low` shows through.
+
+  This is how layered keymaps resolve a single key (the first layer that has the key wins it, with everything under it), so the result answers each key the way a layered lookup does.
+
+  ## Examples
+
+      iex> alias Minga.Keymap.Bindings
+      iex> low = Bindings.new() |> Bindings.bind([{?a, 0}], :low_a, "a") |> Bindings.bind([{?b, 0}], :low_b, "b")
+      iex> high = Bindings.bind(Bindings.new(), [{?a, 0}], :high_a, "A")
+      iex> merged = Bindings.overlay(high, low)
+      iex> {Bindings.lookup(merged, {?a, 0}), Bindings.lookup(merged, {?b, 0})}
+      {{:command, :high_a}, {:command, :low_b}}
+  """
+  @spec overlay(node_t(), node_t()) :: node_t()
+  def overlay(%Node{children: high}, %Node{children: low} = node),
+    do: %Node{node | children: Map.merge(low, high)}
 
   @doc """
   Looks up a single key in the trie.
@@ -526,6 +567,14 @@ defmodule Minga.Keymap.Bindings do
   def format_key({9, _}), do: "TAB"
   def format_key({13, _}), do: "RET"
   def format_key({27, _}), do: "ESC"
+
+  # Arrows and paging keys, in both encodings the frontends send (Kitty keyboard protocol and macOS function keys).
+  def format_key({code, 0}) when code in [57_352, 0xF700], do: "↑"
+  def format_key({code, 0}) when code in [57_353, 0xF701], do: "↓"
+  def format_key({code, 0}) when code in [57_350, 0xF702], do: "←"
+  def format_key({code, 0}) when code in [57_351, 0xF703], do: "→"
+  def format_key({57_362, 0}), do: "PgUp"
+  def format_key({57_363, 0}), do: "PgDn"
 
   def format_key({codepoint, modifiers}) do
     char = <<codepoint::utf8>>

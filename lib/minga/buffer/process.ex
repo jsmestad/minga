@@ -1502,6 +1502,7 @@ defmodule Minga.Buffer.Process do
           register_path(file_path)
 
           broadcast_buffer_path_changed(state.file_path, new_state)
+          defer_filetype_changed(state, new_state)
 
           {:reply, :ok, new_state}
         else
@@ -1913,6 +1914,7 @@ defmodule Minga.Buffer.Process do
         new_state = rebuild_conflict_index(new_state)
 
         defer_content_replaced(new_state)
+        defer_filetype_changed(state, new_state)
         {:reply, :ok, new_state}
 
       {:error, reason} ->
@@ -2358,6 +2360,7 @@ defmodule Minga.Buffer.Process do
     # injected by test setup). Without this, set_filetype would wipe out
     # per-buffer overrides and re-read from the configured Config.Options.
     new_state = %{state | filetype: filetype, options: reseed_options(state, filetype)}
+    defer_filetype_changed(state, new_state)
     {:reply, :ok, new_state}
   end
 
@@ -2970,6 +2973,7 @@ defmodule Minga.Buffer.Process do
         new_state = mark_saved(new_state, {new_mtime, new_size}, content)
         broadcast_buffer_saved(new_state, intent.target)
         broadcast_buffer_path_changed(state.file_path, new_state)
+        defer_filetype_changed(state, new_state)
 
         {:reply, :ok, new_state}
 
@@ -3528,6 +3532,19 @@ defmodule Minga.Buffer.Process do
     send(
       self(),
       {:deferred_broadcast, :content_replaced, %Events.BufferEvent{buffer: self(), path: path}}
+    )
+
+    :ok
+  end
+
+  @spec defer_filetype_changed(state(), state()) :: :ok
+  defp defer_filetype_changed(%{filetype: filetype}, %{filetype: filetype}), do: :ok
+
+  defp defer_filetype_changed(_previous, _next) do
+    send(
+      self(),
+      {:deferred_broadcast, :buffer_filetype_changed,
+       %Events.BufferFiletypeChangedEvent{buffer: self()}}
     )
 
     :ok

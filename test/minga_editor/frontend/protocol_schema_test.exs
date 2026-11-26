@@ -196,7 +196,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_picker_selection: 0xA7,
       gui_text_presentation: 0xA8,
       gui_resident_semantics: 0xA9,
-      gui_tasks_drawer: 0xAC
+      gui_tasks_drawer: 0xAC,
+      gui_menu_bar: 0xAD
     )
   end
 
@@ -291,7 +292,9 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       agent_start_remedy: 0x6F,
       picker_fit: 0x70,
       tasks_drawer_action: 0x71,
-      agent_notification_open: 0x72
+      agent_notification_open: 0x72,
+      which_key_press: 0x73,
+      which_key_back: 0x74
     )
   end
 

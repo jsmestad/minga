@@ -49,7 +49,7 @@ extension GUIFrameImpact {
             return [.shell, .windowOverlay]
 
         case .beginFrame, .commitFrame, .presentationOperation, .setTitle, .setWindowBg,
-             .clipboardWrite, .guiConfigState, .guiFocusOwner:
+             .clipboardWrite, .guiConfigState, .guiMenuBar, .guiFocusOwner:
             return []
 
         case .applicationQuitResponse, .agentDesktopNotification, .guiRequest:
@@ -547,7 +547,7 @@ struct PreparedFrameTransactionBuilder {
                 weight: resourceWeight, domain: .window
             )
 
-        case .setFont, .setFontFallback, .guiConfigState:
+        case .setFont, .setFontFallback, .guiConfigState, .guiMenuBar:
             stageReplacing(
                 command, key: .command(command.preparedUpdateKey),
                 weight: resourceWeight, domain: .resource
@@ -1133,6 +1133,7 @@ private extension RenderCommand {
         case .guiAgentHelp: 65
         case .agentDesktopNotification: 66
         case .guiTasksDrawer: 67
+        case .guiMenuBar: 68
         }
     }
 }

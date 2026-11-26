@@ -631,6 +631,12 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     WorkspaceWorkflow.persist_changes(state, transitioned)
   end
 
+  defp dispatch_action(state, {:which_key_press, path, codepoint, modifiers}),
+    do: MingaEditor.Input.WhichKey.press(state, path, codepoint, modifiers)
+
+  defp dispatch_action(state, {:which_key_back, path}),
+    do: MingaEditor.Input.WhichKey.back(state, path)
+
   defp dispatch_action(state, {:space_leader_chord, codepoint, modifiers}) do
     MingaEditor.Input.CUA.SpaceLeader.handle_chord(state, codepoint, modifiers)
   end

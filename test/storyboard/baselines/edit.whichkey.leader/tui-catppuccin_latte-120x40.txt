@@ -28,19 +28,19 @@
       ~
       ~
       ~
-      ~
 ╭ SPC Leader ──────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ Groups        Often                      More                                                                        │
-│ a Minga ›     SPC Find file in project   p   Project ›                                                               │
-│ s Search ›    ,   Switch buffer          TAB Workspace ›                                                             │
-│ c Code ›      /   Search project         1   Tab 1                                                                   │
-│ f Files ›     :   Execute command        2   Tab 2                                                                   │
-│ b Buffers ›                              3   Tab 3                                                                   │
-│ w Windows ›                              4   Tab 4                                                                   │
-│ o Open ›                                 5   Tab 5                                                                   │
-│ h Help ›                                 6   Tab 6                                                                   │
-│ t Toggles ›                              7   Tab 7                                                                   │
-│ q Quit ›                                 8   Tab 8                                                                   │
+│ a Minga ›     SPC Find file in project   m   Filetype ›                                                              │
+│ s Search ›    ,   Switch buffer          p   Project ›                                                               │
+│ c Code ›      /   Search project         TAB Workspace ›                                                             │
+│ f Files ›     :   Execute command        1   Tab 1                                                                   │
+│ b Buffers ›                              2   Tab 2                                                                   │
+│ w Windows ›                              3   Tab 3                                                                   │
+│ o Open ›                                 4   Tab 4                                                                   │
+│ h Help ›                                 5   Tab 5                                                                   │
+│ t Toggles ›                              6   Tab 6                                                                   │
+│ q Quit ›                                 7   Tab 7                                                                   │
+│                                          8   Tab 8                                                                   │
 │                                          9   Tab 9                                                                   │
 │                                          ;   Eval expression                                                         │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────── ⌫ back  esc close ─╯
@@ -132,32 +132,43 @@
 21 6-119 #8c8fa1 #eff1f5 -
 22 0-5 #5c5f77 #eff1f5 -
 22 6-119 #8c8fa1 #eff1f5 -
-23 0-5 #5c5f77 #eff1f5 -
-23 6-119 #8c8fa1 #eff1f5 -
+23 0-0 #7c7f93 #ccd0da -
+23 1-1 #4c4f69 #ccd0da -
+23 2-4 #1e66f5 #ccd0da -
+23 5-5 #4c4f69 #ccd0da -
+23 6-11 #4c4f69 #ccd0da bold
+23 12-12 #4c4f69 #ccd0da -
+23 13-119 #7c7f93 #ccd0da -
 24 0-0 #7c7f93 #ccd0da -
 24 1-1 #4c4f69 #ccd0da -
-24 2-4 #1e66f5 #ccd0da -
-24 5-5 #4c4f69 #ccd0da -
-24 6-11 #4c4f69 #ccd0da bold
-24 12-12 #4c4f69 #ccd0da -
-24 13-119 #7c7f93 #ccd0da -
+24 2-12 #5c5f77 #ccd0da -
+24 13-15 #4c4f69 #ccd0da -
+24 16-39 #5c5f77 #ccd0da -
+24 40-42 #4c4f69 #ccd0da -
+24 43-61 #5c5f77 #ccd0da -
+24 62-118 #4c4f69 #ccd0da -
+24 119-119 #7c7f93 #ccd0da -
 25 0-0 #7c7f93 #ccd0da -
 25 1-1 #4c4f69 #ccd0da -
-25 2-12 #5c5f77 #ccd0da -
-25 13-15 #4c4f69 #ccd0da -
-25 16-39 #5c5f77 #ccd0da -
-25 40-42 #4c4f69 #ccd0da -
-25 43-61 #5c5f77 #ccd0da -
-25 62-118 #4c4f69 #ccd0da -
+25 2-2 #1e66f5 #ccd0da -
+25 3-3 #4c4f69 #ccd0da -
+25 4-10 #1650c0 #ccd0da -
+25 11-15 #4c4f69 #ccd0da -
+25 16-18 #1e66f5 #ccd0da -
+25 19-42 #4c4f69 #ccd0da -
+25 43-43 #1e66f5 #ccd0da -
+25 44-46 #4c4f69 #ccd0da -
+25 47-56 #1650c0 #ccd0da -
+25 57-118 #4c4f69 #ccd0da -
 25 119-119 #7c7f93 #ccd0da -
 26 0-0 #7c7f93 #ccd0da -
 26 1-1 #4c4f69 #ccd0da -
 26 2-2 #1e66f5 #ccd0da -
 26 3-3 #4c4f69 #ccd0da -
-26 4-10 #1650c0 #ccd0da -
-26 11-15 #4c4f69 #ccd0da -
-26 16-18 #1e66f5 #ccd0da -
-26 19-42 #4c4f69 #ccd0da -
+26 4-11 #1650c0 #ccd0da -
+26 12-15 #4c4f69 #ccd0da -
+26 16-16 #1e66f5 #ccd0da -
+26 17-42 #4c4f69 #ccd0da -
 26 43-43 #1e66f5 #ccd0da -
 26 44-46 #4c4f69 #ccd0da -
 26 47-55 #1650c0 #ccd0da -
@@ -167,8 +178,8 @@
 27 1-1 #4c4f69 #ccd0da -
 27 2-2 #1e66f5 #ccd0da -
 27 3-3 #4c4f69 #ccd0da -
-27 4-11 #1650c0 #ccd0da -
-27 12-15 #4c4f69 #ccd0da -
+27 4-9 #1650c0 #ccd0da -
+27 10-15 #4c4f69 #ccd0da -
 27 16-16 #1e66f5 #ccd0da -
 27 17-42 #4c4f69 #ccd0da -
 27 43-45 #1e66f5 #ccd0da -
@@ -180,8 +191,8 @@
 28 1-1 #4c4f69 #ccd0da -
 28 2-2 #1e66f5 #ccd0da -
 28 3-3 #4c4f69 #ccd0da -
-28 4-9 #1650c0 #ccd0da -
-28 10-15 #4c4f69 #ccd0da -
+28 4-10 #1650c0 #ccd0da -
+28 11-15 #4c4f69 #ccd0da -
 28 16-16 #1e66f5 #ccd0da -
 28 17-42 #4c4f69 #ccd0da -
 28 43-43 #1e66f5 #ccd0da -
@@ -191,10 +202,8 @@
 29 1-1 #4c4f69 #ccd0da -
 29 2-2 #1e66f5 #ccd0da -
 29 3-3 #4c4f69 #ccd0da -
-29 4-10 #1650c0 #ccd0da -
-29 11-15 #4c4f69 #ccd0da -
-29 16-16 #1e66f5 #ccd0da -
-29 17-42 #4c4f69 #ccd0da -
+29 4-12 #1650c0 #ccd0da -
+29 13-42 #4c4f69 #ccd0da -
 29 43-43 #1e66f5 #ccd0da -
 29 44-118 #4c4f69 #ccd0da -
 29 119-119 #7c7f93 #ccd0da -
@@ -211,8 +220,8 @@
 31 1-1 #4c4f69 #ccd0da -
 31 2-2 #1e66f5 #ccd0da -
 31 3-3 #4c4f69 #ccd0da -
-31 4-12 #1650c0 #ccd0da -
-31 13-42 #4c4f69 #ccd0da -
+31 4-9 #1650c0 #ccd0da -
+31 10-42 #4c4f69 #ccd0da -
 31 43-43 #1e66f5 #ccd0da -
 31 44-118 #4c4f69 #ccd0da -
 31 119-119 #7c7f93 #ccd0da -
@@ -229,8 +238,8 @@
 33 1-1 #4c4f69 #ccd0da -
 33 2-2 #1e66f5 #ccd0da -
 33 3-3 #4c4f69 #ccd0da -
-33 4-9 #1650c0 #ccd0da -
-33 10-42 #4c4f69 #ccd0da -
+33 4-12 #1650c0 #ccd0da -
+33 13-42 #4c4f69 #ccd0da -
 33 43-43 #1e66f5 #ccd0da -
 33 44-118 #4c4f69 #ccd0da -
 33 119-119 #7c7f93 #ccd0da -
@@ -238,17 +247,13 @@
 34 1-1 #4c4f69 #ccd0da -
 34 2-2 #1e66f5 #ccd0da -
 34 3-3 #4c4f69 #ccd0da -
-34 4-12 #1650c0 #ccd0da -
-34 13-42 #4c4f69 #ccd0da -
+34 4-9 #1650c0 #ccd0da -
+34 10-42 #4c4f69 #ccd0da -
 34 43-43 #1e66f5 #ccd0da -
 34 44-118 #4c4f69 #ccd0da -
 34 119-119 #7c7f93 #ccd0da -
 35 0-0 #7c7f93 #ccd0da -
-35 1-1 #4c4f69 #ccd0da -
-35 2-2 #1e66f5 #ccd0da -
-35 3-3 #4c4f69 #ccd0da -
-35 4-9 #1650c0 #ccd0da -
-35 10-42 #4c4f69 #ccd0da -
+35 1-42 #4c4f69 #ccd0da -
 35 43-43 #1e66f5 #ccd0da -
 35 44-118 #4c4f69 #ccd0da -
 35 119-119 #7c7f93 #ccd0da -

@@ -28,6 +28,9 @@ defmodule MingaEditor.Input.OperationCancellationTest do
       Map.new(handlers, fn handler -> {handler, Enum.find_index(handlers, &(&1 == handler))} end)
 
     assert indexes[MingaEditor.Input.Completion] < indexes[MingaEditor.Input.WhichKey]
+    # The mode pill opens a prompt or picker's keys over it, so which-key reads the key first.
+    assert indexes[MingaEditor.Input.WhichKey] < indexes[MingaEditor.Input.Prompt]
+    assert indexes[MingaEditor.Input.WhichKey] < indexes[MingaEditor.Input.Picker]
     assert indexes[MingaEditor.Input.WhichKey] < indexes[MingaEditor.Input.Hover]
     assert indexes[MingaEditor.Input.Hover] < indexes[MingaEditor.Input.SignatureHelp]
 

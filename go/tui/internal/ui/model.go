@@ -485,6 +485,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				break
 			}
+			// Which-key paints above the picker (the mode pill opens a picker's keys over it), so it answers first.
+			if packet, handled := m.whichKeyMousePacket(msg); handled {
+				if packet != nil {
+					m.send(packet)
+				}
+				break
+			}
+			if packet, handled := m.modePillMousePacket(msg); handled {
+				m.send(packet)
+				break
+			}
 			if packet, handled := m.pickerPointerPacket(click); handled {
 				if packet != nil {
 					m.send(packet)

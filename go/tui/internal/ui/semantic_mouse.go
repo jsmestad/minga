@@ -358,6 +358,9 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 // overlayMousePacket is checked before spatial dispatch because overlays render
 // above all layout zones and must intercept clicks regardless of position.
 func (m Model) overlayMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	if packet, ok := m.whichKeyMousePacket(msg); ok {
+		return packet, true
+	}
 	if packet, ok := m.agentHelpMousePacket(msg); ok {
 		return packet, true
 	}
@@ -847,6 +850,24 @@ func (m Model) emptyListMousePacket(empty generated.EmptyList, msg tea.MouseMsg)
 		zoneInfo := m.zones.Get(zoneIDEmptyListAction(index))
 		if zoneInfo != nil && zoneInfo.InBounds(msg) {
 			return protocol.EncodeGUIExecuteCommand(action.ID), true
+		}
+	}
+	return nil, false
+}
+
+// modePillMousePacket answers a click on the mode pill even while a picker is open: the pill opens the picker's own
+// keys over it (docs/design/surfaces.md, Mouse), so the click must not count as a click outside the picker.
+func (m Model) modePillMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	status, ok := m.statusBar()
+	if !ok {
+		return nil, false
+	}
+	for index, segment := range status.Left {
+		if segment.Name != "mode" || segment.Command == "" {
+			continue
+		}
+		if zoneInfo := m.zones.Get(zoneIDModelineSegment(index)); zoneInfo != nil && zoneInfo.InBounds(msg) {
+			return protocol.EncodeGUIExecuteCommand(segment.Command), true
 		}
 	}
 	return nil, false

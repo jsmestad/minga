@@ -31,12 +31,25 @@ defmodule Minga.RenderModel.UI.ConfigState do
           description: String.t()
         }
 
+  # `leader_menu` is the leader keymap as the macOS menu bar mirrors it (gui_menu_bar): every group and
+  # command under SPC in which-key order, each with its formatted path after SPC (`"a q f"`), label, section,
+  # the command a click runs (empty for a group or a command with arguments) and its ⌘ equivalent.
+  @type menu_item :: %{
+          path: String.t(),
+          label: String.t(),
+          section: String.t(),
+          kind: :command | :group,
+          command: String.t(),
+          platform_key: String.t()
+        }
+
   @type t :: %__MODULE__{
           options: [option()],
           theme_previews: [theme_preview()],
-          keybindings: [keybinding()]
+          keybindings: [keybinding()],
+          leader_menu: [menu_item()]
         }
 
   @enforce_keys [:options]
-  defstruct options: [], theme_previews: [], keybindings: []
+  defstruct options: [], theme_previews: [], keybindings: [], leader_menu: []
 end

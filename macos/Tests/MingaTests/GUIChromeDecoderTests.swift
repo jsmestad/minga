@@ -369,6 +369,32 @@ struct GUIWhichKeyDecoderTests {
     }
 }
 
+// MARK: - gui_menu_bar (0xAD)
+
+@Suite("GUI Menu Bar Decoder")
+struct GUIMenuBarDecoderTests {
+    @Test("Decode gui_menu_bar items in order with their path, section, command and ⌘ key")
+    func decodeItems() throws {
+        var payload = Data()
+        appendU16(&payload, 2)
+        appendString16(&payload, "f"); appendString16(&payload, "Files ›"); appendString16(&payload, "Groups")
+        payload.append(1); appendString16(&payload, ""); appendString8(&payload, "")
+        appendString16(&payload, "f s"); appendString16(&payload, "Save file"); appendString16(&payload, "")
+        payload.append(0); appendString16(&payload, "save"); appendString8(&payload, "⌘S")
+        var data = Data([OP_GUI_MENU_BAR])
+        appendU16(&data, UInt16(payload.count))
+        data.append(payload)
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+        guard case .guiMenuBar(let items) = cmd else { Issue.record("Expected .guiMenuBar"); return }
+        #expect(items == [
+            .init(path: "f", label: "Files ›", section: "Groups", kind: 1),
+            .init(path: "f s", label: "Save file", kind: 0, command: "save", platformKey: "⌘S"),
+        ])
+    }
+}
+
 // MARK: - gui_breadcrumb (0x75)
 
 @Suite("GUI Breadcrumb Decoder")

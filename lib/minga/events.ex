@@ -34,6 +34,7 @@ defmodule Minga.Events do
   | `:buffer_closed`  | `BufferClosedEvent`  | `buffer: pid(), path: String.t() \| :scratch`  |
   | `:buffer_crashed` | `BufferCrashedEvent` | `buffer: pid(), path: String.t(), swap_path: String.t()` |
   | `:buffer_changed` | `BufferChangedEvent` | `buffer: pid(), source: EditSource.t(), sequence: ChangeLog.sequence()`  |
+  | `:buffer_filetype_changed` | `BufferFiletypeChangedEvent` | `buffer: pid()` |
   | `:file_watcher_ready` | `Minga.FileWatcher.ReadyEvent` | `watcher: pid()` |
   | `:mode_changed`   | `ModeEvent`          | `old: atom(), new: atom()`        |
   | `:git_status_changed` | `GitStatusEvent` | `git_root, entries, branch, ahead, behind` plus cached `last_commit_message` |
@@ -87,6 +88,14 @@ defmodule Minga.Events do
             path: String.t(),
             history_attribution: history_attribution()
           }
+  end
+
+  defmodule BufferFiletypeChangedEvent do
+    @moduledoc "Invalidates the filetype of an existing buffer after it changes."
+    @enforce_keys [:buffer]
+    defstruct [:buffer]
+
+    @type t :: %__MODULE__{buffer: pid()}
   end
 
   defmodule BufferClosedEvent do
@@ -357,6 +366,7 @@ defmodule Minga.Events do
           | :buffer_closed
           | :buffer_crashed
           | :buffer_changed
+          | :buffer_filetype_changed
           | :content_replaced
           | :mode_changed
           | :git_status_changed
@@ -539,6 +549,7 @@ defmodule Minga.Events do
   @spec broadcast(:buffer_closed, BufferClosedEvent.t()) :: :ok
   @spec broadcast(:buffer_crashed, BufferCrashedEvent.t()) :: :ok
   @spec broadcast(:buffer_changed, BufferChangedEvent.t()) :: :ok
+  @spec broadcast(:buffer_filetype_changed, BufferFiletypeChangedEvent.t()) :: :ok
   @spec broadcast(:mode_changed, ModeEvent.t()) :: :ok
   @spec broadcast(:tool_missing, ToolMissingEvent.t()) :: :ok
   @spec broadcast(:project_rebuilt, ProjectRebuiltEvent.t()) :: :ok

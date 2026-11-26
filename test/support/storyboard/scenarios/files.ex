@@ -41,6 +41,12 @@ defmodule Minga.Test.Storyboard.Scenarios.Files do
       Entry.pending("files.file_list", 4054, "picker results exported to a buffer"),
       Entry.built("files.project_find",
         reach: "1 SPC SPC",
+        # Mode pill, then the Find file in project row.
+        click_reach: [
+          {:gui_action, {:empty_state_activate, "recent-1"}},
+          {:gui_action, {:execute_command, "which_key_open"}},
+          {:gui_action, {:which_key_press, "SPC", ?\s, 0}}
+        ],
         recognize: &(Model.open?(&1, :picker) and &1.picker_title =~ ~r/find file/i)
       )
     ]

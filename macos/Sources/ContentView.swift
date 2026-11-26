@@ -1161,16 +1161,6 @@ public struct ContentView<EditorSurface: View>: View {
 
     @ViewBuilder
     private func windowOverlays(_ input: WindowOverlayHostInput) -> some View {
-        // Which-key sits above the modeline, md from the window edges (anatomy.md), never over it.
-        VStack {
-            Spacer()
-            HStack {
-                Spacer(minLength: Spacing.md)
-                WhichKeyOverlay(state: input.whichKeyState)
-                Spacer(minLength: Spacing.md)
-            }
-            .padding(.bottom, StatusBarView.height + Spacing.md)
-        }
 
         PickerOverlay(
             state: input.pickerState,
@@ -1185,6 +1175,17 @@ public struct ContentView<EditorSurface: View>: View {
             )
         }
 
+        // Which-key sits above the modeline, md from the window edges (anatomy.md), never over it. It paints above
+        // the picker: the mode pill opens a picker's own keys over it.
+        VStack {
+            Spacer()
+            HStack {
+                Spacer(minLength: Spacing.md)
+                WhichKeyOverlay(state: input.whichKeyState, sendAction: translatedAction(FrontendActionComposition.outbound))
+                Spacer(minLength: Spacing.md)
+            }
+            .padding(.bottom, StatusBarView.height + Spacing.md)
+        }
 
         if input.floatPopupState.content != nil {
             let geo = editorGeometry()

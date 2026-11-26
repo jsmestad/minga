@@ -91,7 +91,8 @@ version = "2.0.0"
 # protocol_version 48 reshapes gui_which_key: the panel names its path, breadcrumb, group count and hints, and each entry carries its raw key, section, live count and macOS ⌘ equivalent. Each count carries a tone byte (0 muted, 1 needs you, 2 error) naming its colour role. Paging and icons are retired.
 # protocol_version 51 adds gui_tasks_drawer (0xAC) with its empty_list empty state, the tasks_drawer_action gui_action (0x71) and gui_focus_owner surface 14 (the tasks drawer).
 # protocol_version 52 narrows agent_desktop_notification (0x61) to one "needs you" alert and its withdrawal (kinds 1 and 2, fixed:18, no debounce), sends it to the Go frontend too (the optional terminal bell), and adds the agent_notification_open gui_action (0x72), which names the clicked alert by its 16-byte identity. It also adds the gui_status_bar needs_you section (0x14: the needs-you count, for the macOS Dock badge).
-protocol_version = 52
+# protocol_version 53 adds the which_key_press (0x73) and which_key_back (0x74) gui_actions, so a click on a which-key row or crumb names the open panel's path, and gui_menu_bar (0xAD), the leader groups the macOS menu bar mirrors.
+protocol_version = 53
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -950,6 +951,17 @@ consumers = ["swift"]
 skip = { go = "Native settings state is not used by the TUI" }
 framing = "len16"
 
+# The leader keymap as the macOS menu bar mirrors it: every group and command under SPC in which-key order
+# (payload: item count u16, then menu_bar_item structures). Sent when it changes, at connect and on config reload.
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_menu_bar"
+value = 0xAD
+direction = "beam_to_frontend"
+consumers = ["swift"]
+skip = { go = "The terminal has no menu bar; the mode pill and which-key are its mouse path" }
+framing = "len16"
+
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_workspaces"
@@ -1586,6 +1598,20 @@ value = 0x71
 name = "agent_notification_open"
 value = 0x72
 
+# Presses a which-key row's key, as if typed. Payload: path(string16) +
+# codepoint(u32) + modifiers(u8). The path is the panel's identity from
+# gui_which_key; the BEAM presses the key only while that panel is still open.
+[[gui_actions]]
+name = "which_key_press"
+value = 0x73
+
+# Goes back up the which-key breadcrumb. Payload: path(string16), the crumb's
+# path from gui_which_key. The BEAM goes up only while the open panel is below
+# that path.
+[[gui_actions]]
+name = "which_key_back"
+value = 0x74
+
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
 # Capability payload version 2 appends these fields after the original seven
@@ -2121,6 +2147,17 @@ name = "which_key_hint"
 fields = [
   { name = "key", type = "string8" },
   { name = "label", type = "string16" },
+]
+
+[[structures]]
+name = "menu_bar_item"
+fields = [
+  { name = "path", type = "string16" },
+  { name = "label", type = "string16" },
+  { name = "section", type = "string16" },
+  { name = "kind", type = "u8" },
+  { name = "command", type = "string16" },
+  { name = "platform_key", type = "string8" },
 ]
 
 [[structures]]

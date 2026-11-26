@@ -1216,6 +1216,39 @@ defmodule Minga.Integration.GUIProtocolTest do
     end
   end
 
+  describe "gui_menu_bar" do
+    test "round-trips the whole default leader keymap, with the Search, Code and Git groups", %{
+      harness: harness
+    } do
+      alias Minga.Frontend.Adapter.GUI.MenuBarEncoder
+      alias Minga.RenderModel.UI.ConfigState
+
+      items =
+        MingaEditor.RenderModel.UI.LeaderMenuBuilder.build(Minga.Keymap.Defaults.leader_trie())
+
+      assert length(items) > 50
+
+      {cmd, _caches} =
+        MenuBarEncoder.encode(%ConfigState{options: [], leader_menu: items}, Caches.new())
+
+      decoded = round_trip(harness, cmd, "gui_menu_bar")
+
+      assert decoded["type"] == "gui_menu_bar"
+      assert length(decoded["items"]) == length(items)
+
+      groups =
+        for %{"kind" => 1, "path" => path, "label" => label} <- decoded["items"],
+            into: %{},
+            do: {path, label}
+
+      assert groups["s"] == "Search"
+      assert groups["c"] == "Code"
+
+      assert %{"command" => "save", "platform_key" => "⌘S"} =
+               Enum.find(decoded["items"], &(&1["path"] == "f s"))
+    end
+  end
+
   describe "gui_which_key visible" do
     test "round-trips the panel: path, breadcrumb, count and tone, hints and entries", %{
       harness: harness

@@ -191,7 +191,7 @@
    "frame": [
     276,
     483,
-    117,
+    101,
     305
    ],
    "part": "whichKey.column"
@@ -209,9 +209,29 @@
   },
   {
    "frame": [
+    401,
+    483,
+    103,
+    42
+   ],
+   "part": "whichKey.column"
+  },
+  {
+   "baseline": 492.5,
+   "frame": [
+    401,
+    483,
+    0,
+    14
+   ],
+   "part": "whichKey.groupName",
+   "text": ""
+  },
+  {
+   "frame": [
     20,
     500,
-    59,
+    75,
     24
    ],
    "part": "whichKey.entry",
@@ -221,7 +241,7 @@
    "frame": [
     119,
     500,
-    131,
+    133,
     24
    ],
    "part": "whichKey.entry",
@@ -231,11 +251,21 @@
    "frame": [
     276,
     500,
-    78,
+    101,
     24
    ],
    "part": "whichKey.entry",
-   "text": "p Project \u203a"
+   "text": "m Filetype \u203a"
+  },
+  {
+   "frame": [
+    401,
+    501,
+    103,
+    24
+   ],
+   "part": "whichKey.entry",
+   "text": "; Eval expression"
   },
   {
    "baseline": 516,
@@ -264,11 +294,11 @@
    "frame": [
     305,
     504.5,
-    49,
+    54,
     15
    ],
    "part": "whichKey.entryLabel",
-   "text": "Project \u203a"
+   "text": "Filetype \u203a"
   },
   {
    "baseline": 516,
@@ -301,13 +331,35 @@
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "p"
+   "text": "m"
+  },
+  {
+   "baseline": 517,
+   "frame": [
+    416,
+    505.5,
+    88,
+    15
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Eval expression"
+  },
+  {
+   "baseline": 517,
+   "frame": [
+    401,
+    506.5,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": ";"
   },
   {
    "frame": [
     20,
     524,
-    64,
+    75,
     24
    ],
    "part": "whichKey.entry",
@@ -317,7 +369,7 @@
    "frame": [
     119,
     524,
-    105,
+    133,
     24
    ],
    "part": "whichKey.entry",
@@ -331,7 +383,7 @@
     24
    ],
    "part": "whichKey.entry",
-   "text": "TAB Workspace \u203a"
+   "text": "p Project \u203a"
   },
   {
    "baseline": 540,
@@ -360,11 +412,11 @@
    "frame": [
     305,
     528.5,
-    72,
+    49,
     15
    ],
    "part": "whichKey.entryLabel",
-   "text": "Workspace \u203a"
+   "text": "Project \u203a"
   },
   {
    "baseline": 540,
@@ -393,17 +445,17 @@
    "frame": [
     276,
     529.5,
-    21,
+    7,
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "TAB"
+   "text": "p"
   },
   {
    "frame": [
     20,
     548,
-    54,
+    75,
     24
    ],
    "part": "whichKey.entry",
@@ -413,7 +465,7 @@
    "frame": [
     119,
     548,
-    112,
+    133,
     24
    ],
    "part": "whichKey.entry",
@@ -423,11 +475,11 @@
    "frame": [
     276,
     548,
-    59,
+    101,
     24
    ],
    "part": "whichKey.entry",
-   "text": "1 Tab 1"
+   "text": "TAB Workspace \u203a"
   },
   {
    "baseline": 564,
@@ -456,11 +508,11 @@
    "frame": [
     305,
     552.5,
-    30,
+    72,
     15
    ],
    "part": "whichKey.entryLabel",
-   "text": "Tab 1"
+   "text": "Workspace \u203a"
   },
   {
    "baseline": 564,
@@ -489,17 +541,17 @@
    "frame": [
     276,
     553.5,
-    7,
+    21,
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "1"
+   "text": "TAB"
   },
   {
    "frame": [
     20,
     572,
-    50,
+    75,
     24
    ],
    "part": "whichKey.entry",
@@ -519,11 +571,11 @@
    "frame": [
     276,
     572,
-    60,
+    101,
     24
    ],
    "part": "whichKey.entry",
-   "text": "2 Tab 2"
+   "text": "1 Tab 1"
   },
   {
    "baseline": 588,
@@ -552,11 +604,11 @@
    "frame": [
     305,
     576.5,
-    31,
+    30,
     15
    ],
    "part": "whichKey.entryLabel",
-   "text": "Tab 2"
+   "text": "Tab 1"
   },
   {
    "baseline": 588,
@@ -589,13 +641,13 @@
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "2"
+   "text": "1"
   },
   {
    "frame": [
     20,
     596,
-    65,
+    75,
     24
    ],
    "part": "whichKey.entry",
@@ -605,11 +657,11 @@
    "frame": [
     276,
     596,
-    61,
+    101,
     24
    ],
    "part": "whichKey.entry",
-   "text": "3 Tab 3"
+   "text": "2 Tab 2"
   },
   {
    "baseline": 612,
@@ -627,11 +679,11 @@
    "frame": [
     305,
     600.5,
-    32,
+    31,
     15
    ],
    "part": "whichKey.entryLabel",
-   "text": "Tab 3"
+   "text": "Tab 2"
   },
   {
    "baseline": 612,
@@ -653,7 +705,7 @@
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "3"
+   "text": "2"
   },
   {
    "frame": [
@@ -669,11 +721,11 @@
    "frame": [
     276,
     620,
-    61,
+    101,
     24
    ],
    "part": "whichKey.entry",
-   "text": "4 Tab 4"
+   "text": "3 Tab 3"
   },
   {
    "baseline": 636,
@@ -695,7 +747,7 @@
     15
    ],
    "part": "whichKey.entryLabel",
-   "text": "Tab 4"
+   "text": "Tab 3"
   },
   {
    "baseline": 636,
@@ -717,13 +769,13 @@
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "4"
+   "text": "3"
   },
   {
    "frame": [
     20,
     644,
-    55,
+    75,
     24
    ],
    "part": "whichKey.entry",
@@ -733,11 +785,11 @@
    "frame": [
     276,
     644,
-    61,
+    101,
     24
    ],
    "part": "whichKey.entry",
-   "text": "5 Tab 5"
+   "text": "4 Tab 4"
   },
   {
    "baseline": 660,
@@ -759,7 +811,7 @@
     15
    ],
    "part": "whichKey.entryLabel",
-   "text": "Tab 5"
+   "text": "Tab 4"
   },
   {
    "baseline": 660,
@@ -781,13 +833,13 @@
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "5"
+   "text": "4"
   },
   {
    "frame": [
     20,
     668,
-    50,
+    75,
     24
    ],
    "part": "whichKey.entry",
@@ -797,11 +849,11 @@
    "frame": [
     276,
     668,
-    61,
+    101,
     24
    ],
    "part": "whichKey.entry",
-   "text": "6 Tab 6"
+   "text": "5 Tab 5"
   },
   {
    "baseline": 684,
@@ -823,7 +875,7 @@
     15
    ],
    "part": "whichKey.entryLabel",
-   "text": "Tab 6"
+   "text": "Tab 5"
   },
   {
    "baseline": 684,
@@ -845,13 +897,13 @@
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "6"
+   "text": "5"
   },
   {
    "frame": [
     20,
     692,
-    69,
+    75,
     24
    ],
    "part": "whichKey.entry",
@@ -861,11 +913,11 @@
    "frame": [
     276,
     692,
-    60,
+    101,
     24
    ],
    "part": "whichKey.entry",
-   "text": "7 Tab 7"
+   "text": "6 Tab 6"
   },
   {
    "baseline": 708,
@@ -883,11 +935,11 @@
    "frame": [
     305,
     696.5,
-    31,
+    32,
     15
    ],
    "part": "whichKey.entryLabel",
-   "text": "Tab 7"
+   "text": "Tab 6"
   },
   {
    "baseline": 708,
@@ -909,13 +961,13 @@
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "7"
+   "text": "6"
   },
   {
    "frame": [
     20,
     716,
-    48,
+    75,
     24
    ],
    "part": "whichKey.entry",
@@ -925,11 +977,11 @@
    "frame": [
     276,
     716,
-    61,
+    101,
     24
    ],
    "part": "whichKey.entry",
-   "text": "8 Tab 8"
+   "text": "7 Tab 7"
   },
   {
    "baseline": 732,
@@ -947,11 +999,11 @@
    "frame": [
     305,
     720.5,
-    32,
+    31,
     15
    ],
    "part": "whichKey.entryLabel",
-   "text": "Tab 8"
+   "text": "Tab 7"
   },
   {
    "baseline": 732,
@@ -973,17 +1025,17 @@
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "8"
+   "text": "7"
   },
   {
    "frame": [
     276,
     740,
-    61,
+    101,
     24
    ],
    "part": "whichKey.entry",
-   "text": "9 Tab 9"
+   "text": "8 Tab 8"
   },
   {
    "baseline": 756,
@@ -994,7 +1046,7 @@
     15
    ],
    "part": "whichKey.entryLabel",
-   "text": "Tab 9"
+   "text": "Tab 8"
   },
   {
    "baseline": 756,
@@ -1005,28 +1057,28 @@
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "9"
+   "text": "8"
   },
   {
    "frame": [
     276,
     764,
-    117,
+    101,
     24
    ],
    "part": "whichKey.entry",
-   "text": "; Eval expression"
+   "text": "9 Tab 9"
   },
   {
    "baseline": 780,
    "frame": [
     305,
     768.5,
-    88,
+    32,
     15
    ],
    "part": "whichKey.entryLabel",
-   "text": "Eval expression"
+   "text": "Tab 9"
   },
   {
    "baseline": 780,
@@ -1037,7 +1089,7 @@
     14
    ],
    "part": "whichKey.entryKey",
-   "text": ";"
+   "text": "9"
   },
   {
    "frame": [

@@ -8,6 +8,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
   alias Minga.RenderModel.Window
   alias Minga.RenderModel.Window.IndentGuides
+  alias Minga.Protocol.Opcodes
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
   describe "decode_gui_action for gutter fold actions" do
@@ -17,6 +18,22 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
 
       assert :error == ProtocolGUI.decode_gui_action(0x41, <<42::32>>)
       assert :error == ProtocolGUI.decode_gui_action(0x41, <<7::16, 42::32>>)
+    end
+  end
+
+  describe "decode_gui_action for which-key clicks" do
+    test "decodes a row press with the panel path and the raw key, and a breadcrumb back" do
+      press = Opcodes.gui_action_which_key_press()
+      back = Opcodes.gui_action_which_key_back()
+
+      assert {:ok, {:which_key_press, "SPC a", ?q, 0}} ==
+               ProtocolGUI.decode_gui_action(press, <<5::16, "SPC a", ?q::32, 0::8>>)
+
+      assert {:ok, {:which_key_back, "SPC"}} ==
+               ProtocolGUI.decode_gui_action(back, <<3::16, "SPC">>)
+
+      assert :error == ProtocolGUI.decode_gui_action(press, <<5::16, "SPC a", ?q::32>>)
+      assert :error == ProtocolGUI.decode_gui_action(back, <<9::16, "SPC">>)
     end
   end
 

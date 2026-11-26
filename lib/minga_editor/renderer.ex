@@ -207,7 +207,7 @@ defmodule MingaEditor.Renderer do
   @spec prepare_submission(state(), non_neg_integer()) :: {state(), Submission.t()}
   defp prepare_submission(state, revision) do
     # Review parses start here, off the frame: the Renderer only reads results that already arrived.
-    state = ReviewHighlightWorkflow.request(state)
+    state = state |> MingaEditor.refresh_gui_leader_menu() |> ReviewHighlightWorkflow.request()
     intent = Intent.from_editor_state(state, revision)
 
     {render, submission} =

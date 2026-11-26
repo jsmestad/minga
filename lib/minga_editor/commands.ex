@@ -216,31 +216,35 @@ defmodule MingaEditor.Commands do
   # ── Leader / which-key (return action tuples) ─────────────────────────────
 
   def execute(state, {:leader_start, node}) do
-    MingaEditor.Shell.Traditional.WhichKeyWorkflow.begin(
+    node = leader_with_filetype(state, node)
+
+    state
+    |> Editing.set_leader_node(node)
+    |> MingaEditor.Shell.Traditional.WhichKeyWorkflow.begin(node, leader_keys_from_mode(state))
+  end
+
+  def execute(state, {:leader_progress, node}) do
+    MingaEditor.Shell.Traditional.WhichKeyWorkflow.progress(
       state,
       node,
       leader_keys_from_mode(state)
     )
   end
 
-  def execute(state, {:leader_progress, node}) do
-    prefix_keys = leader_keys_from_mode(state)
-    {effective_node, state} = maybe_substitute_filetype_trie(state, node)
-
-    MingaEditor.Shell.Traditional.WhichKeyWorkflow.progress(
+  # The CUA space leader keeps no mode leader state, so it names the prefix itself.
+  def execute(state, {:leader_start, node, prefix_keys}) when is_list(prefix_keys) do
+    MingaEditor.Shell.Traditional.WhichKeyWorkflow.begin(
       state,
-      effective_node,
-      prefix_keys,
-      node.description
+      leader_with_filetype(state, node),
+      prefix_keys
     )
   end
 
-  # The CUA space leader keeps no mode leader state, so it names the prefix itself.
-  def execute(state, {:leader_start, node, prefix_keys}) when is_list(prefix_keys),
-    do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.begin(state, node, prefix_keys)
-
-  def execute(state, {:leader_progress, node, prefix_keys}) when is_list(prefix_keys),
-    do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.progress(state, node, prefix_keys)
+  # A CUA chord may enter a raw group directly, without reading the assembled root.
+  def execute(state, {:leader_progress, node, prefix_keys}) when is_list(prefix_keys) do
+    {node, label} = filetype_group(state, prefix_keys, node)
+    MingaEditor.Shell.Traditional.WhichKeyWorkflow.progress(state, node, prefix_keys, label)
+  end
 
   def execute(state, :leader_cancel),
     do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.dismiss(state)
@@ -995,24 +999,30 @@ defmodule MingaEditor.Commands do
     end
   end
 
-  @spec maybe_substitute_filetype_trie(EditorState.t(), Bindings.node_t()) ::
-          {Bindings.node_t(), EditorState.t()}
-  defp maybe_substitute_filetype_trie(state, node) do
-    case Editing.mode_state(state) do
-      %{leader_keys: ["m", "SPC"]} ->
-        filetype = current_filetype(state)
-        ft_trie = filetype_trie_for(state, filetype)
+  # The filetype trie has no description of its own, so the crumb keeps the leader's name for `SPC m`.
+  @spec filetype_group(EditorState.t(), [String.t()], Bindings.node_t()) ::
+          {Bindings.node_t(), String.t() | nil}
+  defp filetype_group(state, ["SPC", "m"], node) do
+    ft_trie = filetype_trie_for(state, current_filetype(state))
+    label = filetype_group_label(state)
+    {Bindings.effective_filetype_group(node, ft_trie), label}
+  end
 
-        if ft_trie.children == %{} do
-          {node, state}
-        else
-          state = Editing.set_leader_node(state, ft_trie)
-          {ft_trie, state}
-        end
+  defp filetype_group(_state, _prefix_keys, node), do: {node, nil}
 
-      _ ->
-        {node, state}
+  @spec filetype_group_label(EditorState.t()) :: String.t() | nil
+  defp filetype_group_label(state) do
+    case Bindings.lookup(Keymap.leader_trie(state.interaction.keymap_server), {?m, 0}) do
+      {:prefix, %{description: description}} -> description
+      _other -> nil
     end
+  catch
+    :exit, _ -> nil
+  end
+
+  @spec leader_with_filetype(EditorState.t(), Bindings.node_t()) :: Bindings.node_t()
+  defp leader_with_filetype(state, root) do
+    Bindings.with_filetype_group(root, filetype_trie_for(state, current_filetype(state)))
   end
 
   @spec current_filetype(EditorState.t()) :: atom()

@@ -167,7 +167,7 @@ func TestModelineNoticeReservesAtMostAThird(t *testing.T) {
 func TestModalLayersPaintAboveFooterBands(t *testing.T) {
 	const highestBandLayerZ = 301 + 2
 	// Each layer's shadow sits at its z minus 1, so that must still clear the layer below.
-	if whichKeyLayerZ-1 <= highestBandLayerZ || pickerLayerZ-1 <= whichKeyLayerZ || pickerActionMenuLayerZ-1 <= pickerLayerZ {
-		t.Fatalf("which-key (%d), picker (%d) and its action menu (%d) must paint above footer bands (%d) and in that order", whichKeyLayerZ, pickerLayerZ, pickerActionMenuLayerZ, highestBandLayerZ)
+	if pickerLayerZ-1 <= highestBandLayerZ || pickerActionMenuLayerZ-1 <= pickerLayerZ || whichKeyLayerZ-1 <= pickerActionMenuLayerZ {
+		t.Fatalf("the picker (%d), its action menu (%d) and which-key (%d) must paint above footer bands (%d) and in that order", pickerLayerZ, pickerActionMenuLayerZ, whichKeyLayerZ, highestBandLayerZ)
 	}
 }

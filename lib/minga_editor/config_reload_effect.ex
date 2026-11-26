@@ -91,7 +91,10 @@ defmodule MingaEditor.ConfigReloadEffect do
   def finish(state, :ok, _config_state) do
     Minga.Log.info(:editor, "Config reloaded")
 
+    # The reload may change leader bindings, so the macOS menu bar's leader items are rebuilt with the rest of the
+    # GUI config.
     %{state | feedback: Feedback.report_config_load(state.feedback, nil)}
+    |> MingaEditor.refresh_gui_config_state()
     |> NoticeWorkflow.publish("Config reloaded")
   end
 

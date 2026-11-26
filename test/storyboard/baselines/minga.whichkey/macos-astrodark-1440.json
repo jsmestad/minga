@@ -174,7 +174,7 @@
    "frame": [
     304,
     792,
-    108,
+    128,
     24
    ],
    "part": "whichKey.entry",
@@ -184,7 +184,7 @@
    "frame": [
     456,
     792,
-    68,
+    130,
     24
    ],
    "part": "whichKey.entry",
@@ -293,7 +293,7 @@
    "frame": [
     20,
     816,
-    68,
+    119,
     24
    ],
    "part": "whichKey.entry",
@@ -303,7 +303,7 @@
    "frame": [
     163,
     816,
-    96,
+    117,
     24
    ],
    "part": "whichKey.entry",
@@ -323,7 +323,7 @@
    "frame": [
     456,
     816,
-    68,
+    130,
     24
    ],
    "part": "whichKey.entry",
@@ -421,7 +421,7 @@
    "frame": [
     20,
     840,
-    42,
+    119,
     24
    ],
    "part": "whichKey.entry",
@@ -431,7 +431,7 @@
    "frame": [
     163,
     840,
-    113,
+    117,
     24
    ],
    "part": "whichKey.entry",
@@ -441,7 +441,7 @@
    "frame": [
     304,
     840,
-    98,
+    128,
     24
    ],
    "part": "whichKey.entry",
@@ -451,7 +451,7 @@
    "frame": [
     456,
     840,
-    88,
+    130,
     24
    ],
    "part": "whichKey.entry",
@@ -467,6 +467,17 @@
    ],
    "part": "whichKey.entryLabel",
    "text": "Stop"
+  },
+  {
+   "baseline": 856,
+   "frame": [
+    70,
+    844.5,
+    15,
+    15
+   ],
+   "part": "whichKey.platformKey",
+   "text": "\u2318."
   },
   {
    "baseline": 856,
@@ -549,7 +560,7 @@
    "frame": [
     163,
     864,
-    61,
+    117,
     24
    ],
    "part": "whichKey.entry",

@@ -1,26 +1,26 @@
 {
   "macos": {
-    "commit": "f777d3e78615c1651d423d05be0640b817531a3b",
+    "commit": "ae58ba87ec349e7099b41cba0cc177ac885c2113",
     "files": {
-      "macos-astrodark-1280.json": "555b93e34e88cfc4954206109d2f53c7c05ad90b432c6922a349aec4e2bb534a",
-      "macos-astrodark-1440.json": "9b4f14981c631a30df25a7156e9f366aeb19d271597d405d14fdd65cb41b8a07",
-      "macos-catppuccin_frappe-1280.json": "e33909a621605261e94c20c9377108dd19187ae123012876a6f07e0daf9dac78",
-      "macos-catppuccin_frappe-1440.json": "58c56d4398cb9d993f51c52e98980a73ee29559e383c770b7b4e809746244642",
-      "macos-catppuccin_latte-1280.json": "cca05169f1a096e675e57770b624f976230fadfb6eb5c846ffcec17fff330169",
-      "macos-catppuccin_latte-1440.json": "a8fe0d0d178d8da9bc58f7d0e7f97ecf7717e5bf2fb65f82874291689226140f"
+      "macos-astrodark-1280.json": "4f00dc749eb475ec548aee01a4ac005f58410750b0ec2c9171f54a051d974366",
+      "macos-astrodark-1440.json": "b678458e14f3e11f14ea024bbc53e02bae43f815dfbae824ad0954221320b6b1",
+      "macos-catppuccin_frappe-1280.json": "95345af44acb647ba5dc92ea709d4d41a6bb74974dd423e6f7a52ad3fcd8d658",
+      "macos-catppuccin_frappe-1440.json": "de82110415e16b716d2296a7ef555bbf62ada5c4a8557010595ea4318a1f8b26",
+      "macos-catppuccin_latte-1280.json": "5c2acde603f393a2f2e05e507c6d621ab2ce8d2f454f491fb2ab7cad92d264b7",
+      "macos-catppuccin_latte-1440.json": "eb0214aa28cd9fedbf44afaef2a3da7d96aa0210ae93b2e12092960df596155a"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "abc144cdb87f5384559bf59c9d3173460bf7f7f6bc02559136bdc4ec21b8114c",
-      "macos-astrodark-1440.json": "4485853202643e6a0b293286723fe29810be1f8f9523c181a51fde64b2200346",
-      "macos-catppuccin_frappe-1280.json": "f4f37b64c7c16aa4ec5470fe765ed966bf8f1b7f8376c499d56c47d1a25e0780",
-      "macos-catppuccin_frappe-1440.json": "49ad0cc429c30a16a26c505bf77db5041c5a31cf558481fc5e8e00aa37bc959f",
-      "macos-catppuccin_latte-1280.json": "d10de913ec3e72f86dd9ff5011555801097525efbe18edd4c4d13076c91fd548",
-      "macos-catppuccin_latte-1440.json": "1c48661d6981c65b1b1572b7be96dfaae99b3dcc2abebf4755501bd935763265"
+      "macos-astrodark-1280.json": "5b7c00fc467dc660583c06cd819d6f023721447e097ecbba3ae1617e28e17b68",
+      "macos-astrodark-1440.json": "2cb78565c390172bc0ce6f5be1c5eb108b5fd2086da377f8b09f83b6d9803924",
+      "macos-catppuccin_frappe-1280.json": "bacf535b7f939c179efaf35a3c8486a63cd6372d94a98e4cd4d1702398ea989b",
+      "macos-catppuccin_frappe-1440.json": "57c66d32af59ab4712d9b9c60924c9656d6536165c6be8e9c6fcd605db208e11",
+      "macos-catppuccin_latte-1280.json": "080f341f7ab0ad11baed49c4bd47996ecffed23835e8c6a5b21c4d6a3022d0d0",
+      "macos-catppuccin_latte-1440.json": "a4d9be6fa01ed5eb3dc0baf31622bcd7a5fdcef48a3ee6ad7a7f953addc3d0c8"
     }
   },
   "platform_specific": {
-    "frontend": "tui",
-    "reason": "fold marks draw now that the parse says when it is complete (#4337); macOS baselines record no fold marks, and the 80x24 empty-list inset is terminal only"
+    "frontend": "macos",
+    "reason": "Native Command alias hints and full-width native row hit targets; terminal rows and hints are unchanged."
   },
   "scenario": "minga.whichkey",
   "tui": {

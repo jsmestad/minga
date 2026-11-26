@@ -1403,6 +1403,8 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x70 | picker_fit | generation(4) + rows(2) | Report how many result rows the frontend's picker list shows. `generation` is the picker's `activation_generation`; `rows` is positive. The BEAM moves a picker page (PageDown, PageUp) by `rows`. |
 | 0x71 | tasks_drawer_action | `row_id(string8) + action(string8)` | A click in the tasks drawer. `action` is `select` for the row itself, or the key its control shows (`y`, `a`, `t`, `n`, `=`, `r`, `o`, `i`, `x`, `↩`, `c`), or `q` with an empty row id for the drawer's close control, or `focus` with an empty row id for a click anywhere else in the drawer, which gives it the keyboard without moving the selection. The row id is the identity from `gui_tasks_drawer`, never a position, so the BEAM acts on the task the user saw. |
 | 0x72 | agent_notification_open | `identity(16)` | A click on a "needs you" notification. `identity` is the `agent_desktop_notification` (`0x61`) identity of the clicked alert. The BEAM opens the tasks drawer with the keyboard on that alert's task, selected by identity, and answers nothing: the row shows the task as it is now, and single-letter keys are ignored for 300 ms. An identity the BEAM no longer knows opens the drawer on the first task that needs you. |
+| 0x73 | which_key_press | `path(string16) + codepoint(4) + modifiers(1)` | Press a which-key row's key, as if typed. `path` is the open panel's path from `gui_which_key`; the BEAM presses the key only while that panel is still open, so a click on a stale panel does nothing. |
+| 0x74 | which_key_back | `path(string16)` | Go back up to a breadcrumb crumb's `path`. The BEAM goes up only while the open panel is below that path. |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |
@@ -1445,6 +1447,16 @@ For `file_dialog_result`, `outcome` is 0 for cancel, 1 for Open, and 2 for Save 
 Each option is `name_len(1) + name + type_tag(1) + value_payload`. Type tags are `0x01` boolean, `0x02` signed integer, `0x03` string, `0x04` atom encoded as a string, and `0x05` float64. Strings use a 16-bit byte length. Theme previews are `display_name_len(1) + display_name + atom_len(1) + atom + editor_bg(3) + editor_fg(3) + accent(3)`. Keybindings are `mode_len(1) + mode + key_len(2) + key + command_len(2) + command + description_len(2) + description`.
 
 The frontend sends `config_query` when the Settings window appears. It sends `config_update` for each changed control. The BEAM applies the option immediately and persists GUI-originated changes to `~/.config/minga/gui_settings.exs`, loaded after `config.exs` and `.minga.exs` but before `after.exs`.
+
+## Menu Bar (0xAD)
+
+`gui_menu_bar` is the leader keymap the macOS menu bar mirrors (docs/design/surfaces.md, Mouse, pattern 2). It uses the standard envelope: `opcode(1) + payload_len(2) + payload`, and the payload is `item_count(2) + items`. Each item is `path(string16) + label(string16) + section(string16) + kind(1) + command(string16) + platform_key(string8)`.
+
+- Items arrive in which-key order, a group before its contents. `path` is the formatted sequence after `SPC` (`a q f`); its key count is the item's depth. The menu shows `SPC` and the path dimmed after the label, because a native menu cannot draw a key sequence in its shortcut column.
+- `kind` is `0` for a command and `1` for a group, whose contents become a submenu below the top level. `section` is the which-key section; a change of section starts a new menu section.
+- `command` is the command a click runs through `execute_command`; it is empty for a group and for a command that takes arguments. `platform_key` is the ⌘ equivalent (`⌘S`) the menu puts in its shortcut column, or empty.
+
+The BEAM sends it at connect and whenever the keymap changes (config reload), only when it changed. The TUI has no menu bar and does not consume it; the mode pill and which-key are its mouse path.
 
 ## Theme Color Slots
 

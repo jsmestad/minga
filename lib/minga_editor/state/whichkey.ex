@@ -9,8 +9,14 @@ defmodule MingaEditor.State.WhichKey do
           show: boolean(),
           prefix_keys: [String.t()],
           labels: [String.t()],
-          parents: [Minga.Keymap.Bindings.node_t()]
+          parents: [Minga.Keymap.Bindings.node_t()],
+          owner: owner()
         }
+
+  @typedoc """
+  Who reads the next key: `:leader` walks a leader sequence, `:mode_prefix` leaves the key with the Vim mode, and `:scope` leaves it with the prompt or picker and closes the panel.
+  """
+  @type owner :: :leader | :mode_prefix | :scope
 
   defstruct generation: 0,
             node: nil,
@@ -18,16 +24,18 @@ defmodule MingaEditor.State.WhichKey do
             show: false,
             prefix_keys: [],
             labels: [],
-            parents: []
+            parents: [],
+            owner: :leader
 
   @doc "Begins a new hidden which-key generation."
-  @spec begin(t(), Minga.Keymap.Bindings.node_t(), [String.t()]) :: t()
-  def begin(%__MODULE__{} = whichkey, node, prefix_keys) do
+  @spec begin(t(), Minga.Keymap.Bindings.node_t(), [String.t()], :leader | :mode_prefix) :: t()
+  def begin(%__MODULE__{} = whichkey, node, prefix_keys, owner \\ :leader) do
     %__MODULE__{
       generation: whichkey.generation + 1,
       node: node,
       prefix_keys: prefix_keys,
-      labels: labels([], node, prefix_keys)
+      labels: labels([], node, prefix_keys),
+      owner: owner
     }
   end
 
@@ -87,7 +95,7 @@ defmodule MingaEditor.State.WhichKey do
 
   @spec node_label(Minga.Keymap.Bindings.node_t(), [String.t()]) :: String.t()
   # The leader's own crumb names it, as the boards do: `SPC Leader`.
-  defp node_label(_node, [_leader]), do: "Leader"
+  defp node_label(_node, ["SPC"]), do: "Leader"
 
   defp node_label(%{description: description}, _prefix) when is_binary(description),
     do: description
@@ -103,6 +111,26 @@ defmodule MingaEditor.State.WhichKey do
       do: %{whichkey | timer: timer}
 
   def record_timer(%__MODULE__{} = whichkey, _generation, _timer), do: whichkey
+
+  @doc "Opens the keys of a prompt or picker scope, shown at once: the mode pill opens it, and the next key closes it."
+  @spec open_scope(t(), Minga.Keymap.Bindings.node_t(), String.t()) :: t()
+  def open_scope(%__MODULE__{} = whichkey, node, name) do
+    %__MODULE__{
+      generation: whichkey.generation + 1,
+      node: node,
+      prefix_keys: [name],
+      labels: [""],
+      show: true,
+      owner: :scope
+    }
+  end
+
+  @doc "Returns the open panel's path, the formatted prefix a click names (`\"SPC a\"`), or nil when no panel is open."
+  @spec path(t()) :: String.t() | nil
+  def path(%__MODULE__{show: true, node: node, prefix_keys: prefix_keys}) when node != nil,
+    do: Enum.join(prefix_keys, " ")
+
+  def path(%__MODULE__{}), do: nil
 
   @doc "Reveals only the matching active generation."
   @spec reveal(t(), generation()) :: t()

@@ -302,7 +302,7 @@ exits = [
   { key = "SPC c x", click = "modeline diagnostics segment", to = "code.diagnostics.list" },
   { key = "SPC o t", click = "mode pill › Open › Terminal (macOS: also the menu bar)", to = "terminal.drawer" },
 ]
-notes = "Same resting view as edit.plain with Minga's twist, cursor tag and modeline segments. Which-key has no click path by design (it is the keyboard's discovery surface); its targets are all reachable by click elsewhere. SPC a r and SPC o t need a click path: the menu bar Minga and View menus on macOS, TBD in the TUI."
+notes = "Same resting view as edit.plain with Minga's twist, cursor tag and modeline segments. Which-key is clickable on both frontends: the mode pill opens it, every row presses its key and the breadcrumb goes back up, so every leader action is a few clicks away (the macOS menu bar mirrors the same groups)."
 
 [[scenario]]
 id = "edit.plain"

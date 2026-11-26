@@ -202,6 +202,16 @@ defmodule MingaEditor.State.Picker do
   defp keymap_vim_state(%__MODULE__{} = picker_state),
     do: if(list_keys?(picker_state), do: :normal, else: :insert)
 
+  @doc "Returns this picker's keys as one trie, in the same scope, vim state and context as `resolve_key/3`."
+  @spec keymap_node(t(), Minga.Keymap.server()) :: Minga.Keymap.Bindings.node_t()
+  def keymap_node(%__MODULE__{} = picker_state, keymap_server) do
+    Minga.Keymap.Scope.keymap_node(
+      @keymap_scope,
+      keymap_vim_state(picker_state),
+      keymap_context(picker_state, keymap_server)
+    )
+  end
+
   @doc "Resolves a key press for this picker through the `:picker` keymap scope."
   @spec resolve_key(t(), Minga.Keymap.Bindings.key(), Minga.Keymap.server()) ::
           Minga.Keymap.Scope.resolve_result()

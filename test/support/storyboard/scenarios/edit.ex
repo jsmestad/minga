@@ -36,6 +36,11 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
       ),
       Entry.built("edit.whichkey.leader",
         reach: "1 SPC (pause)",
+        # The mode pill is the mouse's front door.
+        click_reach: [
+          {:gui_action, {:empty_state_activate, "recent-1"}},
+          {:gui_action, {:execute_command, "which_key_open"}}
+        ],
         recognize: &which_key?(&1, "SPC"),
         explore: :which_key,
         checks: [

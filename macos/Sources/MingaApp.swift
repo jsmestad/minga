@@ -98,6 +98,7 @@ struct MingaApp: App {
         .defaultSize(width: defaultWindowWidth, height: defaultWindowHeight)
         .commands {
             MingaMenuCommands(appState: appDelegate.appState)
+            LeaderMenuCommands(appState: appDelegate.appState)
         }
 
         Settings {
@@ -518,8 +519,9 @@ struct MingaMenuCommands: Commands {
                 .disabled(!connected)
         }
 
-        // View menu
-        CommandMenu("View") {
+        // View menu: these items join the system View menu (Enter Full Screen and the rest), before its toolbar
+        // group, so the menu bar has one View menu. A CommandMenu("View") would add a second one beside it.
+        CommandGroup(before: .toolbar) {
             Button("Toggle File Tree") { encoder?.send(.togglePanel(panel: 0)) }
                 .keyboardShortcut("b", modifiers: .command)
                 .disabled(!connected)
@@ -599,6 +601,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var encoder: ProtocolEncoder? { protocolConnection?.encoder }
     private var dispatcher: CommandDispatcher?
     private var desktopAgentNotifications: DesktopAgentNotifications?
+    /// Mirrors the leader keymap into the menu bar (docs/design/surfaces.md, Mouse).
     private var applicationQuitCoordinator: ApplicationQuitCoordinator?
     private var applicationQuitAlert: NSAlert?
     private var activeFilePanel: NSSavePanel?

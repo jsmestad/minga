@@ -138,7 +138,7 @@ Press `SPC` in Normal mode. These sequences also work from the agent view, the f
 | `SPC a v` | Open the agent view, or return from it to where you were |
 | `SPC a n` | New task: type its goal and it starts beside what you are doing |
 | `SPC a S n` | New, empty agent session in the conversation |
-| `SPC a s` | Stop the agent's current turn; queued messages stay queued. It works from any buffer: with a file in front it stops the conversation shown last (the one the modeline speaks for), or the only one working. With several working and none shown last it stops nothing and says so |
+| `SPC a s` | Stop the agent's current turn; queued messages stay queued. It works from any buffer: with a file in front it stops the conversation shown last (the one the modeline speaks for), or the only one working. With several working and none shown last it stops nothing and says so. On macOS, `⌘.` does the same from a file too |
 | `SPC a ?` | Ask about the current line or the selection, inline |
 | `SPC a e` | Rewrite the selection, inline |
 | `SPC a r` | Pending reviews |

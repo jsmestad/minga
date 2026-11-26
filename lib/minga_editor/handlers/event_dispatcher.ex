@@ -83,6 +83,19 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   def dispatch(state, :buffer_closed, %Events.BufferClosedEvent{path: path}, _msg),
     do: FileWatcherHelpers.unwatch_closed_path(state, path)
 
+  def dispatch(
+        state,
+        :buffer_filetype_changed,
+        %Events.BufferFiletypeChangedEvent{buffer: buffer},
+        _msg
+      ) do
+    next = MingaEditor.refresh_gui_leader_menu(state, buffer)
+
+    if next.appearance.gui_menu_source == state.appearance.gui_menu_source,
+      do: state,
+      else: MingaEditor.schedule_render(next, 16)
+  end
+
   # The buffer is still exiting. Its `:DOWN` arrives next and retires it; recovery starts there.
   def dispatch(state, :buffer_crashed, %Events.BufferCrashedEvent{} = crash, _msg),
     do: EditorState.record_buffer_crash(state, crash)

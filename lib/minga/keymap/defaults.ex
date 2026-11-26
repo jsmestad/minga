@@ -253,6 +253,7 @@ defmodule Minga.Keymap.Defaults do
   # (docs/design/keys.md, rule 5). Which-key shows them beside the entry and the
   # macOS menu bar puts them in the shortcut column, so the two teach each other.
   @platform_keys %{
+    agent_abort: "⌘.",
     save: "⌘S",
     undo: "⌘Z",
     quit: "⌘W",

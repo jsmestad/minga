@@ -394,6 +394,15 @@ type WhichKeyHint struct {
 	Label string
 }
 
+type MenuBarItem struct {
+	Path        string
+	Label       string
+	Section     string
+	Kind        uint8
+	Command     string
+	PlatformKey string
+}
+
 type WhichKeyEntry struct {
 	Kind        uint8
 	Key         string

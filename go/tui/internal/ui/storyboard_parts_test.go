@@ -178,8 +178,7 @@ func whichKeyParts(which protocol.WhichKey, grid cellGrid) []storyboardPart {
 	return parts
 }
 
-// findLabel finds the description on row y, whole or as its longest shown prefix (at least three cells), and says
-// how many cells of it are shown.
+// findLabel finds the description on row y, whole or shortened with an ellipsis, and says how many cells are shown.
 func findLabel(grid cellGrid, y, from, to int, text string, used map[[2]int]bool) (int, int, bool) {
 	runes := []rune(text)
 	for length := len(runes); length >= min(3, len(runes)); length-- {
@@ -188,8 +187,9 @@ func findLabel(grid cellGrid, y, from, to int, text string, used map[[2]int]bool
 			if x < 0 {
 				break
 			}
-			if !used[[2]int{x, y}] {
-				return x, length, length < len(runes)
+			truncated := length < len(runes)
+			if !used[[2]int{x, y}] && (!truncated || (x+length < min(to, len(grid[y])) && grid[y][x+length] == "…")) {
+				return x, length, truncated
 			}
 			start = x + 1
 		}
@@ -317,5 +317,31 @@ func TestStoryboardPartsReportWhatTheyCannotFind(t *testing.T) {
 
 	if parts := modelineParts(protocol.StatusBar{Left: []protocol.StatusSegment{{Name: "mode", Text: "INSERT"}}}, grid); len(parts) != 1 || !parts[0].Missing {
 		t.Fatalf("a modeline whose first segment is not drawn is missing, got %+v", parts)
+	}
+}
+
+func TestStoryboardWhichKeyKeepsLabelsWithSharedPrefixesOnTheirOwnRows(t *testing.T) {
+	grid := cellGrid{
+		strings.Split("╭──────────────────────────────╮", ""),
+		strings.Split("│ f Find file    m Filetype ›  │", ""),
+		strings.Split("│ f Files ›                    │", ""),
+		strings.Split("╰──────────────────────────────╯", ""),
+	}
+	which := protocol.WhichKey{Visible: true, Entries: []generated.WhichKeyEntry{
+		{Key: "f", Label: "Files ›"},
+		{Key: "m", Label: "Filetype ›"},
+	}}
+
+	rows := map[string]int{}
+	for _, part := range whichKeyParts(which, grid) {
+		if part.Missing || part.Truncated {
+			t.Fatalf("both labels fit in distinct rows, got %+v", part)
+		}
+		if part.Part == "whichKey.entryLabel" {
+			rows[part.Text] = part.Frame[1]
+		}
+	}
+	if len(rows) != 2 || rows["Files ›"] != 2 || rows["Filetype ›"] != 1 {
+		t.Fatalf("label rows = %v, want Files in row 2 and Filetype in row 1", rows)
 	}
 }
