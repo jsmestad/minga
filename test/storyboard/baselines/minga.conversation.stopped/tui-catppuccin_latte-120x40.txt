@@ -34,9 +34,9 @@ Spaces · folder minga.conversation.stopped (1 tab) · ▎cpu A 429 with usage_l
    i System  Stopped                                                                         │
                                                                                              │
    i System  Agent UI registry online                                                        │
-                                                                                             │
-                                                                                             │
   2 messages · Stopped                                                                       │
+  *minga-queue*  1 queued, kept                                                              │
+  1 Then run the session tests and fix what fails.                                           │
  ╭ Prompt                                                                                  ╮ │
  │ ❯ INSERT  Ask Minga to edit, explain, search, or run tools                              │ │
  │Continue · Steer · Queue Next · Stop · Attachments · esc ↩ continue · ⌥↩ queue           │ │
@@ -232,14 +232,20 @@ No changed files
 28 37-91 #4c4f69 #eff1f5 -
 28 92-94 #7c7f93 #eff1f5 -
 28 95-119 #4c4f69 #eff1f5 -
-29 0-91 #4c4f69 #eff1f5 -
+29 0-0 #4c4f69 #eff1f5 -
+29 1-91 #8c8fa1 #eff1f5 -
 29 92-94 #7c7f93 #eff1f5 -
 29 95-119 #4c4f69 #eff1f5 -
-30 0-91 #4c4f69 #eff1f5 -
+30 0-0 #4c4f69 #eff1f5 -
+30 1-1 #4c4f69 #e6e9ef -
+30 2-14 #4c4f69 #e6e9ef bold
+30 15-30 #4c4f69 #e6e9ef -
+30 31-91 #4c4f69 #eff1f5 -
 30 92-94 #7c7f93 #eff1f5 -
 30 95-119 #4c4f69 #eff1f5 -
 31 0-0 #4c4f69 #eff1f5 -
-31 1-91 #8c8fa1 #eff1f5 -
+31 1-49 #4c4f69 #e6e9ef -
+31 50-91 #4c4f69 #eff1f5 -
 31 92-94 #7c7f93 #eff1f5 -
 31 95-119 #4c4f69 #eff1f5 -
 32 0-0 #4c4f69 #eff1f5 -

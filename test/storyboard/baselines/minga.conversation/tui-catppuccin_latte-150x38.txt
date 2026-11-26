@@ -32,9 +32,9 @@ Spaces · folder minga.conversation (1 tab) · ▎cpu A 429 with usage_limit_rea
    i System  Agent UI registry online                                                                                 │
                                                                                                                       │
                                                                                                                       │
-                                                                                                                      │
-                                                                                                                      │
   2 messages · Working                                                                                                │
+  *minga-queue*  1 queued                                                                                             │
+  1 Then run the session tests and fix what fails.                                                                    │
  ╭ Running...                                                                                                       ╮ │
  │ ❯ INSERT  Ask Minga to edit, explain, search, or run tools                                                       │ │
  │Send · Steer · Queue Next · Stop · Attachments · ⌃C stop · esc ↩ send · ⌥↩ queue · esc normal                     │ │
@@ -217,14 +217,20 @@ No changed files
 26 0-116 #4c4f69 #eff1f5 -
 26 117-119 #7c7f93 #eff1f5 -
 26 120-149 #4c4f69 #eff1f5 -
-27 0-116 #4c4f69 #eff1f5 -
+27 0-0 #4c4f69 #eff1f5 -
+27 1-116 #8c8fa1 #eff1f5 -
 27 117-119 #7c7f93 #eff1f5 -
 27 120-149 #4c4f69 #eff1f5 -
-28 0-116 #4c4f69 #eff1f5 -
+28 0-0 #4c4f69 #eff1f5 -
+28 1-1 #4c4f69 #e6e9ef -
+28 2-14 #4c4f69 #e6e9ef bold
+28 15-24 #4c4f69 #e6e9ef -
+28 25-116 #4c4f69 #eff1f5 -
 28 117-119 #7c7f93 #eff1f5 -
 28 120-149 #4c4f69 #eff1f5 -
 29 0-0 #4c4f69 #eff1f5 -
-29 1-116 #8c8fa1 #eff1f5 -
+29 1-49 #4c4f69 #e6e9ef -
+29 50-116 #4c4f69 #eff1f5 -
 29 117-119 #7c7f93 #eff1f5 -
 29 120-149 #4c4f69 #eff1f5 -
 30 0-0 #4c4f69 #eff1f5 -

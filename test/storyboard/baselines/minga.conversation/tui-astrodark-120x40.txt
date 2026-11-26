@@ -34,9 +34,9 @@ Spaces · folder minga.conversation (1 tab) · ▎cpu A 429 with usage_limit_rea
                                                                                              │
                                                                                              │
                                                                                              │
-                                                                                             │
-                                                                                             │
   2 messages · Working                                                                       │
+  *minga-queue*  1 queued                                                                    │
+  1 Then run the session tests and fix what fails.                                           │
  ╭ Running...                                                                              ╮ │
  │ ❯ INSERT  Ask Minga to edit, explain, search, or run tools                              │ │
  │Send · Steer · Queue Next · Stop · Attachments · ⌃C stop · esc ↩ send · ⌥↩ queue         │ │
@@ -227,14 +227,20 @@ No changed files
 28 0-91 #adb0bb #1a1d23 -
 28 92-94 #696c76 #1a1d23 -
 28 95-119 #adb0bb #1a1d23 -
-29 0-91 #adb0bb #1a1d23 -
+29 0-0 #adb0bb #1a1d23 -
+29 1-91 #595c66 #1a1d23 -
 29 92-94 #696c76 #1a1d23 -
 29 95-119 #adb0bb #1a1d23 -
-30 0-91 #adb0bb #1a1d23 -
+30 0-0 #adb0bb #1a1d23 -
+30 1-1 #adb0bb #111317 -
+30 2-14 #adb0bb #111317 bold
+30 15-24 #adb0bb #111317 -
+30 25-91 #adb0bb #1a1d23 -
 30 92-94 #696c76 #1a1d23 -
 30 95-119 #adb0bb #1a1d23 -
 31 0-0 #adb0bb #1a1d23 -
-31 1-91 #595c66 #1a1d23 -
+31 1-49 #adb0bb #111317 -
+31 50-91 #adb0bb #1a1d23 -
 31 92-94 #696c76 #1a1d23 -
 31 95-119 #adb0bb #1a1d23 -
 32 0-0 #adb0bb #1a1d23 -

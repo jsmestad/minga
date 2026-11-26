@@ -32,9 +32,9 @@ Spaces · folder minga.conversation (1 tab) · ▎cpu A 429 with usage_limit_rea
    i System  Agent UI registry online                                                                                 │
                                                                                                                       │
                                                                                                                       │
-                                                                                                                      │
-                                                                                                                      │
   2 messages · Working                                                                                                │
+  *minga-queue*  1 queued                                                                                             │
+  1 Then run the session tests and fix what fails.                                                                    │
  ╭ Running...                                                                                                       ╮ │
  │ ❯ INSERT  Ask Minga to edit, explain, search, or run tools                                                       │ │
  │Send · Steer · Queue Next · Stop · Attachments · ⌃C stop · esc ↩ send · ⌥↩ queue · esc normal                     │ │
@@ -217,14 +217,20 @@ No changed files
 26 0-116 #adb0bb #1a1d23 -
 26 117-119 #696c76 #1a1d23 -
 26 120-149 #adb0bb #1a1d23 -
-27 0-116 #adb0bb #1a1d23 -
+27 0-0 #adb0bb #1a1d23 -
+27 1-116 #595c66 #1a1d23 -
 27 117-119 #696c76 #1a1d23 -
 27 120-149 #adb0bb #1a1d23 -
-28 0-116 #adb0bb #1a1d23 -
+28 0-0 #adb0bb #1a1d23 -
+28 1-1 #adb0bb #111317 -
+28 2-14 #adb0bb #111317 bold
+28 15-24 #adb0bb #111317 -
+28 25-116 #adb0bb #1a1d23 -
 28 117-119 #696c76 #1a1d23 -
 28 120-149 #adb0bb #1a1d23 -
 29 0-0 #adb0bb #1a1d23 -
-29 1-116 #595c66 #1a1d23 -
+29 1-49 #adb0bb #111317 -
+29 50-116 #adb0bb #1a1d23 -
 29 117-119 #696c76 #1a1d23 -
 29 120-149 #adb0bb #1a1d23 -
 30 0-0 #adb0bb #1a1d23 -

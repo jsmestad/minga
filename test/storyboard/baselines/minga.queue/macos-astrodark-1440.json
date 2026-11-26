@@ -1,0 +1,310 @@
+{
+ "elements": [
+  {
+   "frame": [
+    56,
+    817,
+    1354,
+    19
+   ],
+   "label": "Agent prompt, pane 65534",
+   "role": "AXTextArea",
+   "value": "Include a note about retries."
+  },
+  {
+   "frame": [
+    662,
+    297,
+    166,
+    16
+   ],
+   "role": "AXStaticText",
+   "value": "Session started \u00b7 09:41:00 UTC"
+  },
+  {
+   "frame": [
+    59,
+    356,
+    381,
+    18
+   ],
+   "role": "AXStaticText",
+   "value": "Show the plan limit and when it resets instead of \"rate limited\"."
+  },
+  {
+   "frame": [
+    59,
+    414,
+    619,
+    18
+   ],
+   "role": "AXStaticText",
+   "value": "A 429 with usage_limit_reached is its own case. I'll carry the plan, window and reset time on the error."
+  },
+  {
+   "frame": [
+    448,
+    529,
+    595,
+    16
+   ],
+   "role": "AXStaticText",
+   "value": "Saved the retry notes to lib/native/usage_limit/notes.md; open that file to review the plan, window and reset time."
+  },
+  {
+   "frame": [
+    59,
+    588,
+    251,
+    18
+   ],
+   "role": "AXStaticText",
+   "value": "Also show the reset time in the modeline."
+  },
+  {
+   "frame": [
+    59,
+    646,
+    251,
+    18
+   ],
+   "role": "AXStaticText",
+   "value": "Also show the reset time in the modeline."
+  },
+  {
+   "frame": [
+    682,
+    680,
+    126,
+    16
+   ],
+   "role": "AXStaticText",
+   "value": "Agent UI registry online"
+  }
+ ],
+ "grid": {
+  "cols": 179,
+  "rows": 42
+ },
+ "parts": [
+  {
+   "baseline": 727.5,
+   "frame": [
+    52,
+    717,
+    89,
+    14
+   ],
+   "part": "queue.title",
+   "text": "*minga-queue*"
+  },
+  {
+   "baseline": 727.5,
+   "frame": [
+    149,
+    717,
+    55,
+    14
+   ],
+   "part": "queue.summary",
+   "text": "2 queued"
+  },
+  {
+   "baseline": 727.5,
+   "frame": [
+    1276,
+    717,
+    14,
+    14
+   ],
+   "part": "queue.hintKey",
+   "text": "dd"
+  },
+  {
+   "baseline": 727.5,
+   "frame": [
+    1294,
+    717,
+    39,
+    14
+   ],
+   "part": "queue.hintLabel",
+   "text": "remove"
+  },
+  {
+   "baseline": 727.5,
+   "frame": [
+    1341,
+    717,
+    7,
+    14
+   ],
+   "part": "queue.hintKey",
+   "text": "\u21a9"
+  },
+  {
+   "baseline": 727.5,
+   "frame": [
+    1352,
+    717,
+    21,
+    14
+   ],
+   "part": "queue.hintLabel",
+   "text": "edit"
+  },
+  {
+   "baseline": 727.5,
+   "frame": [
+    1381,
+    717,
+    7,
+    14
+   ],
+   "part": "queue.hintKey",
+   "text": "q"
+  },
+  {
+   "baseline": 727.5,
+   "frame": [
+    1392,
+    717,
+    28,
+    14
+   ],
+   "part": "queue.hintLabel",
+   "text": "close"
+  },
+  {
+   "baseline": 752.5,
+   "frame": [
+    56,
+    742,
+    18,
+    14
+   ],
+   "part": "queue.rowLabel",
+   "text": "1"
+  },
+  {
+   "baseline": 752.5,
+   "frame": [
+    80,
+    742,
+    313,
+    14
+   ],
+   "part": "queue.rowPreview",
+   "text": "Then run the session tests and fix what fails."
+  },
+  {
+   "baseline": 774.5,
+   "frame": [
+    56,
+    764,
+    18,
+    14
+   ],
+   "part": "queue.rowLabel",
+   "text": "2"
+  },
+  {
+   "baseline": 774.5,
+   "frame": [
+    80,
+    764,
+    381,
+    14
+   ],
+   "part": "queue.rowPreview",
+   "text": "Update docs/CONFIGURATION.md with the new limit message."
+  },
+  {
+   "frame": [
+    0,
+    904,
+    1440,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    6,
+    904,
+    61,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "mode: NORMAL"
+  },
+  {
+   "frame": [
+    75,
+    904,
+    80,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filename: *minga-queue*"
+  },
+  {
+   "frame": [
+    163,
+    904,
+    90,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "minga: Minga working"
+  },
+  {
+   "frame": [
+    1390,
+    904,
+    22,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filetype: Text"
+  },
+  {
+   "frame": [
+    1420,
+    904,
+    14,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "position: 1:1"
+  },
+  {
+   "frame": [
+    6,
+    907,
+    61,
+    18
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "baseline": 919.5,
+   "frame": [
+    12,
+    909,
+    49,
+    14
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  }
+ ],
+ "scenario": "minga.queue",
+ "size": "1440",
+ "theme": "astrodark",
+ "window": {
+  "height": 928,
+  "width": 1440
+ }
+}

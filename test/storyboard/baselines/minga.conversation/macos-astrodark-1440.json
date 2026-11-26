@@ -13,7 +13,7 @@
   {
    "frame": [
     662,
-    353,
+    300,
     166,
     16
    ],
@@ -23,7 +23,7 @@
   {
    "frame": [
     59,
-    412,
+    359,
     381,
     18
    ],
@@ -33,7 +33,7 @@
   {
    "frame": [
     59,
-    470,
+    417,
     619,
     18
    ],
@@ -43,7 +43,7 @@
   {
    "frame": [
     448,
-    585,
+    532,
     595,
     16
    ],
@@ -53,7 +53,7 @@
   {
    "frame": [
     59,
-    644,
+    591,
     251,
     18
    ],
@@ -63,7 +63,7 @@
   {
    "frame": [
     59,
-    702,
+    649,
     251,
     18
    ],
@@ -73,7 +73,7 @@
   {
    "frame": [
     682,
-    736,
+    683,
     126,
     16
    ],
@@ -86,6 +86,50 @@
   "rows": 42
  },
  "parts": [
+  {
+   "baseline": 730.5,
+   "frame": [
+    52,
+    720,
+    89,
+    14
+   ],
+   "part": "queue.title",
+   "text": "*minga-queue*"
+  },
+  {
+   "baseline": 730.5,
+   "frame": [
+    149,
+    720,
+    55,
+    14
+   ],
+   "part": "queue.summary",
+   "text": "1 queued"
+  },
+  {
+   "baseline": 755.5,
+   "frame": [
+    56,
+    745,
+    18,
+    14
+   ],
+   "part": "queue.rowLabel",
+   "text": "1"
+  },
+  {
+   "baseline": 755.5,
+   "frame": [
+    80,
+    745,
+    313,
+    14
+   ],
+   "part": "queue.rowPreview",
+   "text": "Then run the session tests and fix what fails."
+  },
   {
    "frame": [
     0,
