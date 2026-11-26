@@ -11,7 +11,6 @@ struct AgentQueueView: View {
     @State private var contentHeight: CGFloat?
 
     private var accent: Color { theme.agentInputBorder }
-    private var selection: Color { accent.opacity(0.18) }
     private var selectedID: UInt64? {
         queue.focused && maximumHeight > 0 ? queue.selectedRow?.id : nil
     }
@@ -24,7 +23,7 @@ struct AgentQueueView: View {
                     if let empty = queue.empty {
                         EmptyListPanel(
                             empty: empty, textColor: theme.agentTextFg, accentColor: theme.agentTextFg,
-                            selectionColor: selection
+                            selectionColor: theme.agentTextFg, mutedColor: theme.agentTextFg, selectedTextColor: theme.agentCodeBg
                         ) { action in
                             if let request = queue.request(forEmptyAction: action) { sendAction?(request) }
                         }
@@ -138,8 +137,8 @@ struct AgentQueueView: View {
         return Button {
             sendAction?(request)
         } label: {
-            rowLabel(row, removed: false)
-                .background(selected ? selection : .clear, in: .rect(cornerRadius: Radius.sm))
+            rowLabel(row, removed: false, selected: selected)
+                .background(selected ? theme.agentTextFg : .clear, in: .rect(cornerRadius: Radius.sm))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -147,16 +146,14 @@ struct AgentQueueView: View {
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 
-    private func rowLabel(_ row: Wire.AgentQueue.Row, removed: Bool) -> some View {
+    private func rowLabel(_ row: Wire.AgentQueue.Row, removed: Bool, selected: Bool = false) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
             Text(row.label)
                 .font(Typography.monospacedSmall)
-                .foregroundStyle(theme.agentTextFg)
                 .frame(minWidth: 18, alignment: .leading)
                 .anatomyPart("queue.rowLabel", text: row.label, font: .small, monospaced: true)
             Text(row.preview)
                 .font(Typography.font(.small, design: .monospaced))
-                .foregroundStyle(theme.agentTextFg)
                 .strikethrough(removed)
                 .lineLimit(1)
                 .anatomyPart("queue.rowPreview", text: row.preview, font: .small, monospaced: true)
@@ -164,12 +161,12 @@ struct AgentQueueView: View {
             if row.attachmentCount > 0 {
                 Label("\(row.attachmentCount)", systemImage: "paperclip")
                     .font(Typography.font(.caption, design: .monospaced))
-                    .foregroundStyle(theme.agentTextFg)
                     .fixedSize()
                     .accessibilityLabel("Attachments")
                     .accessibilityValue(Text(row.attachmentCount, format: .number))
             }
         }
+        .foregroundStyle(selected ? theme.agentCodeBg : theme.agentTextFg)
         .padding(.horizontal, Spacing.xs)
         .padding(.vertical, Spacing.hairline)
     }

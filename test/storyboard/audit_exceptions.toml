@@ -702,7 +702,7 @@ reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none", "minga.queue", "minga.queue.empty"]
 frontend = "macos"
 part = "modeline.modePill"
 rule = "contrast"
@@ -714,7 +714,7 @@ reason = "The modeline.modePill text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none", "minga.queue", "minga.queue.empty"]
 frontend = "macos"
 part = "modeline.modeText"
 rule = "contrast"
@@ -726,7 +726,7 @@ reason = "The modeline.modeText text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["start.project_switcher.empty"]
+scenario = ["start.project_switcher.empty", "minga.queue", "minga.queue.empty"]
 frontend = "macos"
 part = "modeline.segment"
 rule = "contrast"
@@ -1386,7 +1386,7 @@ reason = "The modeline.segment text misses 4.5:1 in this theme: \"Minga stopped\
 issue = 4137
 
 [[exception]]
-scenario = ["minga.conversation", "minga.conversation.stopped"]
+scenario = ["minga.conversation", "minga.conversation.stopped", "minga.queue"]
 frontend = "macos"
 part = "modeline.segment"
 rule = "contrast"

@@ -51,6 +51,7 @@ struct EmptyListActions: View {
     let textColor: Color
     let accentColor: Color
     let selectionColor: Color
+    var selectedTextColor: Color? = nil
     let activate: (Wire.EmptyListAction) -> Void
 
     @State private var hoveredID: String?
@@ -59,18 +60,20 @@ struct EmptyListActions: View {
         let keyColumn = Self.keyColumnWidth(empty.actions)
         VStack(spacing: 0) {
             ForEach(Array(empty.actions.enumerated()), id: \.offset) { index, action in
+                let selected = index == Int(empty.selected)
+                let selectedInk = selected ? selectedTextColor : nil
                 Button {
                     activate(action)
                 } label: {
                     HStack(spacing: 0) {
                         Text(action.key)
                             .font(Typography.monospacedSmall)
-                            .foregroundStyle(accentColor)
+                            .foregroundStyle(selectedInk ?? accentColor)
                             .frame(width: keyColumn, alignment: .leading)
                             .anatomyPart("emptyState.actionKey", text: action.key, font: .small, monospaced: true)
                         Text(action.label)
                             .font(Typography.font(.body))
-                            .foregroundStyle(textColor)
+                            .foregroundStyle(selectedInk ?? textColor)
                             .lineLimit(1)
                             .truncationMode(.tail)
                             .anatomyPart("emptyState.actionLabel", text: action.label, font: .body)
@@ -79,13 +82,13 @@ struct EmptyListActions: View {
                     .padding(.leading, EmptyStateMetrics.inset)
                     .padding(.trailing, EmptyStateMetrics.trailingInset)
                     .frame(height: EmptyStateMetrics.actionPitch)
-                    .background(rowBackground(selected: index == Int(empty.selected), hovered: hoveredID == action.id))
+                    .background(rowBackground(selected: selected, hovered: hoveredID == action.id))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .onHover { hoveredID = $0 ? action.id : nil }
                 .accessibilityLabel(Text("\(action.label), \(action.key)"))
-                .accessibilityAddTraits(index == Int(empty.selected) ? [.isButton, .isSelected] : .isButton)
+                .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
             }
         }
     }
@@ -110,14 +113,19 @@ struct EmptyListPanel: View {
     let textColor: Color
     let accentColor: Color
     let selectionColor: Color
+    var mutedColor: Color? = nil
+    var selectedTextColor: Color? = nil
     let activate: (Wire.EmptyListAction) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: EmptyStateMetrics.whyToActions) {
-            EmptyListHeader(empty: empty, textColor: textColor, mutedColor: textColor.opacity(0.78))
+            EmptyListHeader(empty: empty, textColor: textColor, mutedColor: mutedColor ?? textColor.opacity(0.78))
                 .padding(.leading, EmptyStateMetrics.inset)
                 .padding(.trailing, EmptyStateMetrics.trailingInset)
-            EmptyListActions(empty: empty, textColor: textColor, accentColor: accentColor, selectionColor: selectionColor, activate: activate)
+            EmptyListActions(
+                empty: empty, textColor: textColor, accentColor: accentColor, selectionColor: selectionColor,
+                selectedTextColor: selectedTextColor, activate: activate
+            )
             Spacer(minLength: 0)
         }
         .padding(.top, EmptyStateMetrics.inset)

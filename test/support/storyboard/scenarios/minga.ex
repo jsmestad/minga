@@ -84,7 +84,14 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
   @spec queue_scene([String.t()], [Check.t()]) :: keyword()
   defp queue_scene(rows, checks) do
     turn = if rows == [], do: :idle, else: :working
-    conversation = Keyword.merge(conversation(:working), turn: turn, queue: rows, open?: true)
+
+    conversation =
+      Keyword.merge(conversation(:working),
+        turn: turn,
+        queue: rows,
+        open?: true,
+        draft: "Include a note about retries."
+      )
 
     [
       start: [conversation: conversation],

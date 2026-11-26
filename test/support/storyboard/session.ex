@@ -128,6 +128,7 @@ defmodule Minga.Test.Storyboard.Session do
           prompt: String.t(),
           turn: :idle | :working | :stopped,
           queue: [String.t()],
+          draft: String.t(),
           open?: boolean()
         ]
 
@@ -158,6 +159,7 @@ defmodule Minga.Test.Storyboard.Session do
         prompt: nil,
         turn: :idle,
         queue: [],
+        draft: "",
         open?: false
       )
 
@@ -190,6 +192,7 @@ defmodule Minga.Test.Storyboard.Session do
 
     if conversation[:open?] do
       await_queue_contents!(ctx, conversation[:queue])
+      if conversation[:draft] != "", do: EditorCase.send_keys_sync(ctx, conversation[:draft])
     else
       EditorCase.send_keys_sync(ctx, "<Esc><Esc><SPC>av")
 
