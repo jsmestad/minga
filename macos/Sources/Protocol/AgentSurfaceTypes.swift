@@ -10,6 +10,7 @@ public enum CardStatus: Equatable, Sendable {
     case needsYou
     case done
     case errored
+    case stopped
     case unknown(rawValue: UInt8)
 
     /// Decodes a context-card status without discarding future values.
@@ -21,6 +22,7 @@ public enum CardStatus: Equatable, Sendable {
         case 3: self = .needsYou
         case 4: self = .done
         case 5: self = .errored
+        case 6: self = .stopped
         default: self = .unknown(rawValue: rawValue)
         }
     }
@@ -34,6 +36,7 @@ public enum CardStatus: Equatable, Sendable {
         case .needsYou: 3
         case .done: 4
         case .errored: 5
+        case .stopped: 6
         case .unknown(let rawValue): rawValue
         }
     }
@@ -45,6 +48,7 @@ public enum CardStatus: Equatable, Sendable {
         case .needsYou: .needsYou
         case .done: .done
         case .errored: .failed
+        case .stopped: .stopped
         case .idle, .unknown: nil
         }
     }

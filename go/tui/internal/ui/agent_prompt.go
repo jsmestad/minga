@@ -122,8 +122,9 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 		}
 		lines = append(lines, base.Render(fitStyled(inner, width)))
 	}
-	_, question, attachments := agentComposerControls(chat, placement.innerWidth)
-	controls := agentTurnControls(chat, placement.innerWidth)
+	controlsWidth := agentControlsWidth(chat, placement.innerWidth)
+	_, question, attachments := agentComposerControls(chat, controlsWidth)
+	controls := agentTurnControls(chat, controlsWidth)
 	var labels [4]string
 	for i, control := range controls {
 		labels[i] = control.label
@@ -131,17 +132,19 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 			labels[i] = lipgloss.NewStyle().Foreground(p.Muted()).Background(bg).Render(control.label)
 		}
 	}
-	label := strings.Join(labels[:], agentTurnControlSeparator(placement.innerWidth))
+	label := strings.Join(labels[:], agentTurnControlSeparator(controlsWidth))
 	for _, part := range []string{question, attachments} {
 		if part != "" {
 			label += " · " + part
 		}
 	}
 	if placement.innerWidth >= 48 {
+		// Hints are whole or absent, and they are lost from the end: the BEAM sends the most important first.
 		for _, hint := range agentComposerKeyHints(chat) {
-			if lipgloss.Width(label)+lipgloss.Width(hint) <= placement.innerWidth {
-				label += hint
+			if lipgloss.Width(label)+lipgloss.Width(hint) > placement.innerWidth {
+				break
 			}
+			label += hint
 		}
 	}
 	inner := lipgloss.NewStyle().Foreground(p.Accent()).Background(bg).Width(placement.innerWidth).Render(fitStyled(label, placement.innerWidth))
@@ -156,21 +159,29 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 }
 
 // agentComposerKeyHints returns the composer's key hints, most important first; each is shown while it fits.
-// The composer is a Vim buffer: Enter adds a newline in Insert and sends from Normal (and in CUA).
-// During a failed start the remedy's key comes from the BEAM, so the hint names the key that runs it.
+// The BEAM authors the hints for the composer's mode and the turn's state, so the TUI and the GUI say the same
+// keys. During a failed start the remedy's key comes first.
 func agentComposerKeyHints(chat protocol.AgentChat) []string {
-	insert := chat.PromptVimMode == 1
+	hints := make([]string, 0, len(chat.ComposerHints)+1)
 	if chat.Lifecycle == protocol.AgentChatFailed && chat.LifecycleRemedy.Kind != protocol.AgentStartRemedyNone {
-		remedy := " · " + chat.LifecycleRemedy.KeyHint + " " + strings.ToLower(chat.LifecycleRemedy.Label)
-		if insert {
-			return []string{remedy, " · Enter newline"}
-		}
-		return []string{remedy}
+		hints = append(hints, " · "+chat.LifecycleRemedy.KeyHint+" "+strings.ToLower(chat.LifecycleRemedy.Label))
 	}
-	if insert {
-		return []string{" · Enter newline", " · Alt+Enter queue", " · Esc normal"}
+	for _, hint := range chat.ComposerHints {
+		hints = append(hints, " · "+hint.Keys+" "+hint.Action)
 	}
-	return []string{" · Enter send", " · i insert"}
+	return hints
+}
+
+// agentControlsWidth is the width the composer's controls lay themselves out in.
+// The first key hint is the one the BEAM ranks highest (the stop key while Minga works), so the controls leave
+// room for it: in a narrow composer their words shorten, as they do in a narrower one, before that hint is lost.
+// The drawn row and the mouse zones both use this width, so a click lands on the control it shows.
+func agentControlsWidth(chat protocol.AgentChat, width int) int {
+	hints := agentComposerKeyHints(chat)
+	if width < agentFullTurnLabelsWidth || len(hints) == 0 {
+		return width
+	}
+	return max(width-lipgloss.Width(hints[0]), 1)
 }
 
 func agentComposerControls(chat protocol.AgentChat, width int) (control, question, attachments string) {
@@ -253,13 +264,20 @@ func agentTurnControls(chat protocol.AgentChat, width int) [4]agentTurnControl {
 	case width < agentFullTurnLabelsWidth:
 		labels = [4]string{"↑", "↪", "+", "■"}
 	}
+	continuable := !active && chat.ContinueTarget.SessionID != "" && chat.Lifecycle == protocol.AgentChatConversation
+	if continuable {
+		labels[0] = "▶"
+		if width >= agentFullTurnLabelsWidth {
+			labels[0] = "Continue"
+		}
+	}
 	draft := chat.PromptPresentation != 0 && chat.Prompt != ""
 	queue := active && draft && chat.QueueTarget.Sequence != 0
 	// Send waits for a live conversation: while the session starts, the draft
 	// is kept and the starting notice explains why Send is unavailable.
 	sendable := draft && !active && chat.Lifecycle == protocol.AgentChatConversation
 	return [4]agentTurnControl{
-		{labels[0], sendable},
+		{labels[0], continuable || sendable},
 		{labels[1], queue},
 		{labels[2], queue},
 		{labels[3], active && chat.StopTarget.SessionID != ""},
@@ -327,9 +345,10 @@ func (m Model) presentedComposerHandler() func(tea.MouseClickMsg) {
 		return nil
 	}
 	start, y := m.layout.body.X+p.col-p.prefix, m.layout.body.Y+p.controlsRow
-	controls := agentTurnControls(chat, p.innerWidth)
+	controlsWidth := agentControlsWidth(chat, p.innerWidth)
+	controls := agentTurnControls(chat, controlsWidth)
 	var startCells, endCells [4]int
-	separator := lipgloss.Width(agentTurnControlSeparator(p.innerWidth))
+	separator := lipgloss.Width(agentTurnControlSeparator(controlsWidth))
 	width := 0
 	for i, control := range controls {
 		startCells[i] = width
@@ -337,7 +356,7 @@ func (m Model) presentedComposerHandler() func(tea.MouseClickMsg) {
 		width = endCells[i] + separator
 	}
 	width = min(endCells[3], p.innerWidth)
-	var cells uint32
+	var cells uint64
 	for cell := range width {
 		x := start + cell
 		if m.layout.body.Contains(x, y) && !m.editorTextOccluded(x, y) {
@@ -349,6 +368,7 @@ func (m Model) presentedComposerHandler() func(tea.MouseClickMsg) {
 	}
 	generation, offer := chat.PromptPresentation, chat.DraftAttachmentOffer
 	stopTarget, queueTarget := chat.StopTarget, chat.QueueTarget
+	continueTarget := chat.ContinueTarget
 	claim := m.presentedClick
 	return func(click tea.MouseClickMsg) {
 		if click.Y == y {
@@ -361,7 +381,11 @@ func (m Model) presentedComposerHandler() func(tea.MouseClickMsg) {
 					}
 					switch i {
 					case 0:
-						claim.packet = protocol.EncodeGUIAgentComposerSubmit(generation, offer)
+						if continueTarget.SessionID != "" {
+							claim.packet = protocol.EncodeGUIAgentContinueTurn(continueTarget)
+						} else {
+							claim.packet = protocol.EncodeGUIAgentComposerSubmit(generation, offer)
+						}
 					case 1, 2:
 						claim.packet = protocol.EncodeGUIAgentComposerQueue(generation, offer, i == 2, queueTarget)
 					case 3:
@@ -382,7 +406,7 @@ func (m Model) agentComposerControlPacket(msg tea.MouseMsg) ([]byte, bool) {
 		return nil, false
 	}
 	chat, _ := m.agentChat()
-	control, question, attachments := agentComposerControls(chat, p.innerWidth)
+	control, question, attachments := agentComposerControls(chat, agentControlsWidth(chat, p.innerWidth))
 	controlWidth := lipgloss.Width(control)
 	start := p.col - p.prefix
 	if y != p.controlsRow || x < start {

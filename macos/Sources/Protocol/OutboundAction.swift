@@ -129,6 +129,7 @@ nonisolated public enum OutboundAction: Equatable, Sendable {
     case agentComposerQueue(generation: UInt64, offer: UInt64, followUp: Bool, target: AgentQueueTarget)
     case agentOpenQuestion(offer: UInt64)
     case agentStopTurn(AgentStopTarget)
+    case agentContinueTurn(AgentStopTarget)
     /// Runs the remedy the displayed failed Agent start offers; the BEAM ignores it once the tab no longer offers it.
     case agentStartRemedy(AgentStartRemedy.Kind)
     case executeCommand(name: String)

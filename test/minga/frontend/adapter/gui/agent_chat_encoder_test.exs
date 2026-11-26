@@ -108,6 +108,15 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
       assert <<0::8>> = section!(encode(%AgentChat{visible?: true, input_focused: false}), 0x09)
     end
 
+    test "composer hints section carries the BEAM's keys and actions, and is omitted when empty" do
+      hints = [{"⌥↩", "queue"}, {"esc", "normal"}]
+
+      assert <<2, 6::16, "⌥↩", 5::16, "queue", 3::16, "esc", 6::16, "normal">> =
+               section!(encode(%AgentChat{visible?: true, composer_hints: hints}), 0x10)
+
+      assert section!(encode(%AgentChat{visible?: true}), 0x10) == nil
+    end
+
     test "header carries the status byte" do
       for {status, byte} <- [
             {:idle, 0},

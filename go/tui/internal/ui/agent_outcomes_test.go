@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"image/color"
 	"strings"
 	"testing"
 
@@ -11,21 +10,20 @@ import (
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
-func TestCommittedToolOutcomesOverrideCompatibilityError(t *testing.T) {
+func TestToolStepsDrawTheBEAMSentenceInTheStateRole(t *testing.T) {
 	model := New(120, 30, nil)
 	p := model.palette()
 	cases := []struct {
 		status byte
-		label  string
-		icon   string
-		color  color.Color
+		state  generated.SpineState
+		step   string
 	}{
-		{0, "running", model.agentSpinner(), p.Warning()},
-		{1, "done", "✓", p.Diagnostic(3)},
-		{2, "ERROR", "×", p.Diagnostic(0)},
-		{3, "Denied", "⊘", p.Warning()},
-		{4, "Cancelled", "■", p.Muted()},
-		{5, "Expired", "◷", p.Warning()},
+		{0, generated.StateWorking, "Running `echo example`"},
+		{1, generated.StateDone, "Ran `echo example`"},
+		{2, generated.StateFailed, "Could not run `echo example`"},
+		{3, generated.StateStopped, "You denied running `echo example`"},
+		{4, generated.StateStopped, "Stopped while running `echo example`"},
+		{5, generated.StateFailed, "Approval expired for running `echo example`"},
 	}
 	for _, tc := range cases {
 		for _, kind := range []byte{agentKindTool, agentKindStyledTool} {
@@ -33,33 +31,38 @@ func TestCommittedToolOutcomesOverrideCompatibilityError(t *testing.T) {
 				for _, collapsed := range []bool{false, true} {
 					t.Run(fmt.Sprintf("status%d/kind%d/error%t/collapsed%t", tc.status, kind, isError, collapsed), func(t *testing.T) {
 						explanation := "Approval expired before execution"
+						wire := map[generated.SpineState]byte{generated.StateWorking: 1, generated.StateStopped: 4, generated.StateFailed: 5, generated.StateDone: 6}[tc.state]
 						message := protocol.AgentChatMessage{Kind: kind, Status: tc.status, IsError: isError, Collapsed: collapsed,
-							Name: "shell", Summary: "echo example", Result: explanation, DurationMS: 233900, PreviewLines: []string{"echo example"}}
+							Name: "shell", Summary: "echo example", Result: explanation, DurationMS: 233900, PreviewLines: []string{"$ echo example"},
+							Step: tc.step, State: wire}
 						if kind == agentKindStyledTool {
 							message.StyledLines = []protocol.AgentStyledLine{{{Text: explanation, FG: 0xFFFFFF}}}
 						}
-						icon, statusColor := model.agentToolStatus(message)
 						message.Text = "shell echo example"
 						wantError := tc.status == 2 || tc.status == 5
 						if transcriptSummaryMembership(message)[0] != wantError || transcriptToolCounts(message)[2] != boolInt(wantError) {
 							t.Fatal("compatibility boolean overrode the outcome in transcript summaries")
 						}
-						if icon != tc.icon || statusColor != tc.color {
-							t.Fatalf("status icon/color = %q/%v, want %q/%v", icon, statusColor, tc.icon, tc.color)
+						glyph, glyphColor := model.agentToolStepMark(message)
+						token := tc.state.Token()
+						if glyphColor != p.Role(token.Role) || (tc.state != generated.StateWorking && glyph != token.Glyph) {
+							t.Fatalf("step mark = %q/%v, want the %s token", glyph, glyphColor, token.ID)
 						}
 						rows := model.renderAgentToolMessage(message, 120)
 						view := ansi.Strip(strings.Join(rows, "\n"))
-						if !strings.Contains(view, tc.label) || (tc.status != 2 && strings.Contains(view, "ERROR")) {
-							t.Fatalf("committed badge lost to compatibility boolean: %q", view)
+						if !strings.Contains(strings.Split(view, "\n")[0], tc.step) {
+							t.Fatalf("the first line is not the BEAM's sentence: %q", view)
 						}
-						if !strings.Contains(view, "echo example") {
-							t.Fatalf("captured preview lost: %q", view)
+						for _, word := range []string{"running", "done", "ERROR", "Denied", "Cancelled", "Expired", "233900ms"} {
+							if strings.Contains(view, word) && !strings.Contains(tc.step, word) {
+								t.Fatalf("frontend-authored word %q in a tool step: %q", word, view)
+							}
 						}
-						if (!collapsed || tc.status == 2 || tc.status == 5) && !strings.Contains(view, explanation) {
-							t.Fatalf("result explanation lost: %q", view)
+						if collapsed && len(rows) != 1 {
+							t.Fatalf("a collapsed step is one line, got %d: %q", len(rows), view)
 						}
-						if (tc.status == 3 || tc.status == 5) && strings.Contains(view, "233900ms") {
-							t.Fatalf("approval wait shown as execution duration: %q", view)
+						if !collapsed && (!strings.Contains(view, "echo example") || !strings.Contains(view, explanation)) {
+							t.Fatalf("expanded step lost its preview or output: %q", view)
 						}
 						height, layout := measureAgentMessage(message, 120)
 						if height != len(rows) {

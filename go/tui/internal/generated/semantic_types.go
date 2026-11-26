@@ -222,6 +222,11 @@ const (
 	OperationStatusStale    OperationStatus = 8
 )
 
+type ComposerHint struct {
+	Keys   string
+	Action string
+}
+
 type Rect struct {
 	Row    uint16
 	Col    uint16
@@ -790,6 +795,15 @@ type GuiAgentChatLifecycle struct {
 	KeyHint     string
 	Headline    string
 	Note        string
+}
+
+type GuiAgentChatComposerHints struct {
+	Hints []ComposerHint
+}
+
+type GuiAgentChatContinueTarget struct {
+	SessionID string
+	RequestID string
 }
 
 type GuiPickerPreviewHeader struct {

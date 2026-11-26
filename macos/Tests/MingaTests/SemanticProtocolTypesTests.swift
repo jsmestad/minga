@@ -58,7 +58,8 @@ struct SemanticProtocolTypesTests {
             (2, .iterating),
             (3, .needsYou),
             (4, .done),
-            (5, .errored)
+            (5, .errored),
+            (6, .stopped)
         ]
 
         for (rawValue, expected) in known {

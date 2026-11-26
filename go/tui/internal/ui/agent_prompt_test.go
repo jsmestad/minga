@@ -357,6 +357,31 @@ func TestStopUsesLastPublishedViewWhileReplacementIsPending(t *testing.T) {
 	assertPacketCount(t, packets, stopB, 1)
 }
 
+func TestContinueWithEmptyComposerUsesDisplayedRequest(t *testing.T) {
+	out := make(chan []byte, 64)
+	model := New(80, 24, out)
+	chat := protocol.AgentChat{Visible: true, Status: 7, PromptVisibleRows: 1, ContinueTarget: composerTestStopTarget()}
+	prompt := decodedPromptCommand(t, promptRows(""), 0, 0, 0, 0, protocol.Selection{})
+	model = commitPrompt(t, model, chat, prompt, 800)
+	x, y := renderedComposerControl(t, model, "Continue")
+	shown := model.View()
+	first := chat.ContinueTarget
+	chat.ContinueTarget.RequestID = "replacement"
+	model = commitPrompt(t, model, chat, prompt, 801)
+	drainOutboundPackets(out)
+
+	click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: x, Y: y})
+	next, _ := updateFromPublishedView(model, shown, click)
+	packets := drainOutboundPackets(out)
+	assertPacketCount(t, packets, protocol.EncodeGUIAgentContinueTurn(first), 1)
+	assertPacketCount(t, packets, protocol.EncodeGUIAgentContinueTurn(chat.ContinueTarget), 0)
+	assertPacketCount(t, packets, protocol.EncodeGUIAgentComposerSubmit(800, 0), 0)
+
+	model = next.(Model)
+	_, _ = updateFromPublishedView(model, model.View(), click)
+	assertPacketCount(t, drainOutboundPackets(out), protocol.EncodeGUIAgentContinueTurn(chat.ContinueTarget), 1)
+}
+
 func TestPublishedSendCannotBecomeStopAfterTurnStarts(t *testing.T) {
 	out := make(chan []byte, 64)
 	model := New(80, 24, out)

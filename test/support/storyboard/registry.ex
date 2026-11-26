@@ -94,13 +94,50 @@ defmodule Minga.Test.Storyboard.Registry do
 
     case entry.reach do
       "" -> session
-      path -> session |> Session.press(path) |> Session.settle()
+      path -> session |> Session.press(path) |> await_recognized(entry) |> Session.settle()
     end
   end
 
   def drive(%Entry{id: id, status: {:pending, issue, reason}}, _opts) do
     raise ArgumentError, "#{id} is pending ##{issue} (#{reason}) and cannot be driven yet"
   end
+
+  # Some keys finish their work after the key is handled (opening the
+  # conversation waits for the model catalog), so wait until the frame is the
+  # scenario before anyone looks at it.
+  @spec await_recognized(Session.t(), Entry.t()) :: Session.t()
+  defp await_recognized(%Session{ctx: ctx} = session, %Entry{} = entry) do
+    turn = entry.start |> Keyword.get(:conversation, []) |> Keyword.get(:turn)
+
+    Minga.Test.EditorCase.wait_until(
+      ctx,
+      fn _state ->
+        model = Session.model(session)
+        entry.recognize.(model) and seeded_turn_ready?(model, turn)
+      end,
+      max_attempts: 250,
+      interval_ms: 20,
+      message: "expected #{entry.id}'s reach keys to land on #{entry.id} with the seeded turn"
+    )
+
+    session
+  end
+
+  @spec seeded_turn_ready?(Model.t(), :working | :stopped | :idle | nil) :: boolean()
+  defp seeded_turn_ready?(%Model{}, nil), do: true
+
+  defp seeded_turn_ready?(
+         %Model{ui: %{agent_chat: %{lifecycle: :conversation}}, conversation: %{status: status}},
+         turn
+       ) do
+    case turn do
+      :working -> status in [:thinking, :tool_executing]
+      :stopped -> status == :stopped
+      :idle -> status == :idle
+    end
+  end
+
+  defp seeded_turn_ready?(%Model{}, _turn), do: false
 
   @doc """
   Classifies a semantic model as the first built scenario that recognizes it.

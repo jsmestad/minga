@@ -30,6 +30,9 @@ defmodule MingaEditor.Agent.Events do
   def dispatch(%EditorState{} = state, session_pid, {:stop_target_changed, target}),
     do: StatusEventWorkflow.stop_target_changed(state, session_pid, target)
 
+  def dispatch(%EditorState{} = state, session_pid, {:continue_target_changed, target}),
+    do: StatusEventWorkflow.continue_target_changed(state, session_pid, target)
+
   def dispatch(%EditorState{} = state, _session_pid, {:text_delta, _delta} = event),
     do: StreamEventWorkflow.delta(state, event)
 

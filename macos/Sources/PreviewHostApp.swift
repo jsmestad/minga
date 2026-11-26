@@ -26,6 +26,7 @@ struct PreviewHostApp: App {
         WindowGroup {
             previewContent()
                 .allowsHitTesting(false)
+                .environment(\.motionPaused, true)
                 .transaction { transaction in
                     transaction.animation = nil
                     transaction.disablesAnimations = true

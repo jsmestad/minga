@@ -193,6 +193,8 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
       tool = %ToolCallView{
         name: "read",
         summary: "lib.ex",
+        step: "Could not read lib.ex",
+        state: :failed,
         status: :error,
         is_error: true,
         collapsed: false,
@@ -243,12 +245,15 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
                   %Usage{input: 10, output: 20, cache_read: 3, cache_write: 4, cost: 0.0005}}
                )
 
-      assert <<0x04, 2, 1, 0, 42::32, 4::16, "read", 6::16, "lib.ex", 2::32, "ok", 2, 1, 2::16,
-               4::16, "-old", 4::16, "+new">> = Codec.encode_message_body({:tool_call, tool})
+      # The step and its state (failed is wire byte 5) follow the summary.
+      assert <<0x04, 2, 1, 0, 42::32, 4::16, "read", 6::16, "lib.ex", 5, 21::16,
+               "Could not read lib.ex", 2::32, "ok", 2, 1, 2::16, 4::16, "-old", 4::16, "+new">> =
+               Codec.encode_message_body({:tool_call, tool})
 
-      assert <<0x08, 2, 1, 0, 42::32, 4::16, "read", 6::16, "lib.ex", 1::16, 1::16, 4::16, "docs",
-               _sfg::24, _sbg::24, styled_flags, 19::16, "https://example.com", 2, 1, 2::16,
-               4::16, "-old", 4::16, "+new">> =
+      assert <<0x08, 2, 1, 0, 42::32, 4::16, "read", 6::16, "lib.ex", 5, 21::16,
+               "Could not read lib.ex", 1::16, 1::16, 4::16, "docs", _sfg::24, _sbg::24,
+               styled_flags, 19::16, "https://example.com", 2, 1, 2::16, 4::16, "-old", 4::16,
+               "+new">> =
                Codec.encode_message_body({:styled_tool_call, tool, [[linked]]})
 
       assert Bitwise.band(styled_flags, 0x08) == 0x08

@@ -12,8 +12,8 @@ public enum ChatMessageEntry: Identifiable {
     /// Assistant message with BEAM-authored semantic markdown blocks.
     case assistantMarkdown(id: Int, blocks: [Wire.AgentMarkdownBlock])
     case thinking(id: Int, text: String, collapsed: Bool)
-    case toolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String, previewKind: UInt8, previewLines: [String], retainedOutputOffer: Wire.RetainedOutputOffer? = nil)
-    case styledToolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, resultLines: [[Wire.StyledTextRun]], previewKind: UInt8, previewLines: [String], retainedOutputOffer: Wire.RetainedOutputOffer? = nil)
+    case toolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String, previewKind: UInt8, previewLines: [String], retainedOutputOffer: Wire.RetainedOutputOffer? = nil, step: Wire.ToolStep = Wire.ToolStep())
+    case styledToolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, resultLines: [[Wire.StyledTextRun]], previewKind: UInt8, previewLines: [String], retainedOutputOffer: Wire.RetainedOutputOffer? = nil, step: Wire.ToolStep = Wire.ToolStep())
     case approvalToolCall(id: Int, name: String, summary: String, toolCallId: String, sessionId: String, requestId: String, previewKind: UInt8, previewLines: [String])
     case system(id: Int, text: String, isError: Bool)
     case usage(id: Int, input: UInt32, output: UInt32, cacheRead: UInt32, cacheWrite: UInt32, costMicros: UInt32)
@@ -23,8 +23,8 @@ public enum ChatMessageEntry: Identifiable {
         case .user(let id, _), .assistant(let id, _), .styledAssistant(let id, _),
              .assistantMarkdown(let id, _),
              .thinking(let id, _, _),
-             .toolCall(let id, _, _, _, _, _, _, _, _, _, _, _),
-             .styledToolCall(let id, _, _, _, _, _, _, _, _, _, _, _),
+             .toolCall(let id, _, _, _, _, _, _, _, _, _, _, _, _),
+             .styledToolCall(let id, _, _, _, _, _, _, _, _, _, _, _, _),
              .approvalToolCall(let id, _, _, _, _, _, _, _),
              .system(let id, _, _),
              .usage(let id, _, _, _, _, _):
@@ -43,16 +43,18 @@ public enum ChatMessageEntry: Identifiable {
         case .assistantMarkdown(_, let blocks):
             try tally.addEntries(blocks.count)
             for block in blocks { try block.measureOwnedPayload(into: &tally) }
-        case .toolCall(_, let name, let summary, _, _, _, _, _, let result, _, let previewLines, _):
+        case .toolCall(_, let name, let summary, _, _, _, _, _, let result, _, let previewLines, _, let step):
             try tally.add(name)
             try tally.add(summary)
             try tally.add(result)
             try tally.add(previewLines)
-        case .styledToolCall(_, let name, let summary, _, _, _, _, _, let resultLines, _, let previewLines, _):
+            try tally.add(step.text)
+        case .styledToolCall(_, let name, let summary, _, _, _, _, _, let resultLines, _, let previewLines, _, let step):
             try tally.add(name)
             try tally.add(summary)
             try Wire.StyledTextRun.measureOwnedPayload(lines: resultLines, into: &tally)
             try tally.add(previewLines)
+            try tally.add(step.text)
         case .approvalToolCall(_, let name, let summary, let toolCallId, let sessionId, let requestId, _, let previewLines):
             try tally.add(name)
             try tally.add(summary)
@@ -818,9 +820,12 @@ public final class AgentChatState {
     public private(set) var draftAttachmentOffer: UInt64 = 0
     public private(set) var question: AgentQuestionOffer?
     public private(set) var stopTarget: AgentStopTarget?
+    public private(set) var continueTarget: AgentStopTarget?
     public private(set) var promptPresentation: UInt64 = 0
     public private(set) var queueTarget: AgentQueueTarget?
     public private(set) var lifecycle: AgentChatLifecycle = .conversation
+    /// The focused composer's key hints, as the BEAM authors them; empty while the composer does not have focus.
+    public private(set) var composerHints: [AgentComposerHint] = []
     /// Production font pitch projected only at accepted editor-frame publication.
     public private(set) var promptRowPitch: CGFloat = 0
 
@@ -880,8 +885,9 @@ public final class AgentChatState {
     /// Updates the chat chrome (visibility, status, model, prompt).
     ///
     /// Message content is sourced from the resident 0x86 stream via `applyTranscript`.
-    public func update(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: EditorMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil, lifecycle: AgentChatLifecycle = .conversation) {
+    public func update(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: EditorMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil, lifecycle: AgentChatLifecycle = .conversation, composerHints: [AgentComposerHint] = [], continueTarget: AgentStopTarget? = nil) {
         self.visible = visible
+        self.composerHints = composerHints
         self.lifecycle = lifecycle
         self.status = status
         self.model = model
@@ -897,6 +903,7 @@ public final class AgentChatState {
         self.draftAttachmentOffer = draftAttachmentOffer
         self.question = question
         self.stopTarget = stopTarget
+        self.continueTarget = continueTarget
         self.promptPresentation = promptPresentation
         self.queueTarget = queueTarget
     }
@@ -1047,10 +1054,10 @@ public final class AgentChatState {
             return .assistantMarkdown(id: id, blocks: blocks)
         case .thinking(let text, let collapsed):
             return .thinking(id: id, text: text, collapsed: collapsed)
-        case .toolCall(let name, let summary, let st, let isError, let collapsed, let autoApprovedScope, let duration, let result, let previewKind, let previewLines):
-            return .toolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, previewKind: previewKind, previewLines: previewLines, retainedOutputOffer: msg.retainedOutputOffer)
-        case .styledToolCall(let name, let summary, let st, let isError, let collapsed, let autoApprovedScope, let duration, let resultLines, let previewKind, let previewLines):
-            return .styledToolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, resultLines: resultLines, previewKind: previewKind, previewLines: previewLines, retainedOutputOffer: msg.retainedOutputOffer)
+        case .toolCall(let name, let summary, let st, let isError, let collapsed, let autoApprovedScope, let duration, let result, let previewKind, let previewLines, let step):
+            return .toolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, previewKind: previewKind, previewLines: previewLines, retainedOutputOffer: msg.retainedOutputOffer, step: step)
+        case .styledToolCall(let name, let summary, let st, let isError, let collapsed, let autoApprovedScope, let duration, let resultLines, let previewKind, let previewLines, let step):
+            return .styledToolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, resultLines: resultLines, previewKind: previewKind, previewLines: previewLines, retainedOutputOffer: msg.retainedOutputOffer, step: step)
         case .approvalToolCall(let name, let summary, let toolCallId, let sessionId, let requestId, let previewKind, let previewLines):
             return .approvalToolCall(id: id, name: name, summary: summary, toolCallId: toolCallId, sessionId: sessionId, requestId: requestId, previewKind: previewKind, previewLines: previewLines)
         case .system(let text, let isError):
@@ -1067,8 +1074,10 @@ public final class AgentChatState {
         draftAttachmentOffer = 0
         question = nil
         stopTarget = nil
+        continueTarget = nil
         promptPresentation = 0
         queueTarget = nil
+        composerHints = []
         do {
             transcriptSnapshotStorage = try AgentTranscriptSnapshot.seeded(
                 messages: [],

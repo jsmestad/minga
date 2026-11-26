@@ -318,13 +318,13 @@
   {
    "baseline": 672.5,
    "frame": [
-    1044,
+    942,
     662,
-    95,
+    197,
     14
    ],
    "part": "listRow.meta",
-   "text": "Running subagent"
+   "text": "Starting Read the usage-limit fixtures"
   },
   {
    "frame": [

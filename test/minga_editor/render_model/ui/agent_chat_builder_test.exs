@@ -292,6 +292,83 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     refute unfocused.input_focused
   end
 
+  describe "the focused composer's Stop hint" do
+    test "shows for every runtime status while the conversation has a turn to stop" do
+      session = fake_session_pid()
+      panel = %{synced_panel([{:assistant, "hi"}]) | input_focused: true}
+
+      # A turn in plan mode reports :plan, a turn that is starting reports :idle and a turn
+      # that reported an error and kept running reports :error. Stop works in all of them.
+      for status <- [:thinking, :tool_executing, :plan, :idle, :error] do
+        agent =
+          %AgentState{}
+          |> AgentState.set_status(status)
+          |> AgentState.project_stop_target(session, {"session-A", "request-1"})
+
+        model = context(session, panel, agent: agent) |> AgentChatBuilder.build()
+
+        assert {status, stop_hints(model)} == {status, [{"SPC a s", "stop"}]}
+      end
+    end
+
+    test "shows while the turn waits for an approval" do
+      session = fake_session_pid()
+      panel = %{synced_panel([{:assistant, "hi"}]) | input_focused: true}
+      target = ApprovalTarget.new("session-A", "request-1", "tool-1")
+      args = %{"command" => "mix test"}
+      approval = PublicApproval.new(target, "shell", args, Preview.new(:command, "mix test", []))
+
+      agent =
+        %AgentState{}
+        |> AgentState.set_pending_approval(PendingApproval.new(session, approval))
+        |> AgentState.project_stop_target(session, {"session-A", "request-1"})
+
+      assert AgentState.display_status(agent) == :approval_waiting
+
+      model = context(session, panel, agent: agent) |> AgentChatBuilder.build()
+
+      assert stop_hints(model) == [{"SPC a s", "stop"}]
+    end
+
+    test "is absent in Visual mode, where no key of the composer stops or sends" do
+      session = fake_session_pid()
+      panel = %{synced_panel([{:assistant, "hi"}]) | input_focused: true}
+
+      agent =
+        %AgentState{}
+        |> AgentState.set_status(:thinking)
+        |> AgentState.project_stop_target(session, {"session-A", "request-1"})
+
+      ctx = context(session, panel, agent: agent)
+
+      visual = %Minga.Mode.VisualState{visual_anchor: {0, 0}, visual_type: :line}
+      editing = MingaEditor.VimState.transition(ctx.workspace.editing, :visual, visual)
+
+      model = AgentChatBuilder.build(put_in(ctx.workspace.editing, editing))
+
+      assert model.composer_hints == [{"esc", "normal"}]
+    end
+
+    test "is absent when no turn of this conversation can be stopped" do
+      session = fake_session_pid()
+      panel = %{synced_panel([{:assistant, "hi"}]) | input_focused: true}
+      other = fake_session_pid()
+
+      # The status alone promises nothing: the stop command acts on the stop target.
+      for agent <- [
+            AgentState.set_status(%AgentState{}, :thinking),
+            %AgentState{}
+            |> AgentState.set_status(:thinking)
+            |> AgentState.project_stop_target(other, {"session-B", "request-9"})
+          ] do
+        model = context(session, panel, agent: agent) |> AgentChatBuilder.build()
+
+        assert model.composer_hints != []
+        assert stop_hints(model) == []
+      end
+    end
+  end
+
   test "build/1 emits semantic assistant markdown blocks in resident transcript when cache has them" do
     session = fake_session_pid()
 
@@ -442,6 +519,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     assert {1, {:tool_call, view}} = List.first(model.resident_messages)
     assert view.name == "edit_file"
     assert view.summary == "lib/app.ex"
+    assert {view.state, view.step} == {:working, "Editing lib/app.ex"}
     assert view.preview_kind == :diff
     assert "file: lib/app.ex" in view.preview_lines
     assert "-old" in view.preview_lines
@@ -473,6 +551,13 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
 
     assert Enum.map(views, & &1.summary) ==
              Enum.map(read_only_calls, fn {_name, _args, summary} -> summary end)
+
+    assert Enum.map(views, &{&1.state, &1.step}) == [
+             {:done, "Read lib/app.ex"},
+             {:done, "Searched for defmodule in lib"},
+             {:done, "Found *.ex in lib"},
+             {:done, "Listed lib"}
+           ]
 
     assert Enum.all?(views, &(&1.preview_lines == []))
   end
@@ -550,7 +635,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
                    session_id: "session/会",
                    request_id: "admitted-request/é",
                    tool_call_id: "tc/🛠",
-                   summary: "captured lib/app.ex",
+                   summary: "Edit lib/app.ex?",
                    preview_kind: :diff,
                    preview_lines: ["-captured old", "+captured new"]
                  }}},
@@ -603,6 +688,32 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     refute model.status in [:error, :needs_you]
   end
 
+  test "an approval card's headline asks in the decision's words and never names the raw tool" do
+    session = fake_session_pid()
+
+    for {name, args, headline} <- [
+          {"write_file", %{"path" => "./notes.txt", "content" => "hello"}, "Write ./notes.txt?"},
+          {"shell", %{"command" => "mix ecto.reset"}, "Run `mix ecto.reset`?"},
+          {"multi_edit_file", %{"path" => "lib/a.ex"}, "Edit lib/a.ex?"},
+          {"lsp_rename", %{}, "Run lsp rename?"}
+        ] do
+      target = ApprovalTarget.new("session-A", "request-1", "tool-1")
+      approval = PublicApproval.new(target, name, args, Preview.new(:args, "raw", []))
+
+      agent =
+        AgentState.set_pending_approval(%AgentState{}, PendingApproval.new(session, approval))
+
+      panel = synced_panel([{:tool_call, ToolCall.new(target.tool_call_id, name, args)}])
+
+      model = context(session, panel, agent: agent) |> AgentChatBuilder.build()
+
+      assert [{_id, {:approval_tool_call, %ApprovalView{summary: ^headline}}} | _] =
+               model.resident_messages
+
+      refute headline =~ name
+    end
+  end
+
   test "build/1 does not reactivate historical tool cards when a request reuses a tool ID" do
     session = fake_session_pid()
     target = ApprovalTarget.new("session-A", "new-admitted-request", "reused-tool-id")
@@ -646,7 +757,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
                  session_id: "session-A",
                  request_id: "new-admitted-request",
                  tool_call_id: "reused-tool-id",
-                 summary: "echo current"
+                 summary: "Run `echo current`?"
                }}}
              | _
            ] = model.resident_messages
@@ -978,6 +1089,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     {:ok, root} = AgentChatBuilder.admit(nil, TranscriptUpdate.seed(projection, 0), intent)
     Intent.with_agent_transcript(intent, root)
   end
+
+  defp stop_hints(model), do: Enum.filter(model.composer_hints, &match?({_keys, "stop"}, &1))
 
   defp fake_session_pid do
     pid =

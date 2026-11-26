@@ -169,7 +169,7 @@ defmodule MingaEditor.Agent.TasksTest do
         |> Tasks.observe(pid, {:tool_started, "t1", "edit_file", %{}}, 1)
         |> Tasks.observe(pid, {:todo_plan_updated, todos}, 1)
 
-      assert Entry.words(entry(working, pid), 1) == "Running edit_file · step 2 of 3"
+      assert Entry.words(entry(working, pid), 1) == "Editing · step 2 of 3"
 
       needs_you = Tasks.observe(tasks, pid, {:approval_pending, approval(1)}, 1)
 

@@ -36,6 +36,7 @@ public struct AgentChatView: View {
         case composerQueue(generation: UInt64, offer: UInt64, followUp: Bool, target: AgentQueueTarget)
         case openQuestion(offer: UInt64)
         case stopTurn(AgentStopTarget)
+        case continueTurn(AgentStopTarget)
         /// Runs the remedy a failed start offers, as sent by the BEAM.
         case startRemedy(AgentStartRemedy.Kind)
         case chatScrolledAwayFromBottom
@@ -92,6 +93,7 @@ public struct AgentChatView: View {
                     case .submit: .composerSubmit(generation: generation, offer: offer)
                     case .queue(let followUp, let target): .composerQueue(generation: generation, offer: offer, followUp: followUp, target: target)
                     case .abort(let target): .stopTurn(target)
+                    case .resume(let target): .continueTurn(target)
                     case .attachments: .executeCommand(name: "agent_draft_attachments")
                     }
                 }, maximumHeight: max(0, availableHeight - headerHeight))
@@ -233,12 +235,22 @@ struct AgentConversationList: View {
             // than the pane directly above the composer.
             .defaultScrollAnchor(.bottom)
             .defaultScrollAnchor(.bottom, for: .alignment)
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                // User is "at bottom" if within 50pt of the bottom edge
-                let atBottom = geometry.contentOffset.y + geometry.visibleRect.height >= geometry.contentSize.height - 50
-                return atBottom
-            } action: { _, isAtBottom in
-                setScrolledUp(!isAtBottom)
+            .onScrollGeometryChange(for: TranscriptScrollGeometry.self) { geometry in
+                TranscriptScrollGeometry(
+                    offsetY: geometry.contentOffset.y.rounded(),
+                    visibleHeight: geometry.visibleRect.height.rounded(),
+                    contentHeight: geometry.contentSize.height.rounded(),
+                    rowCount: state.messages.count
+                )
+            } action: { old, new in
+                // Output that outruns the view is not a scroll, so it never shows the pill or tells the BEAM that you scrolled away.
+                switch TranscriptFollow.decide(following: shouldAutoScroll, turnActive: state.hasActiveTurn, from: old, to: new) {
+                case .following(let catchUp):
+                    setScrolledUp(false)
+                    if catchUp { scrollToBottom() }
+                case .holding:
+                    setScrolledUp(true)
+                }
             }
             .onChange(of: state.messages.count) { _, _ in
                 if shouldAutoScroll {
@@ -326,10 +338,10 @@ struct AgentConversationList: View {
             assistantMessage { assistantMarkdownBlock(blocks) }
         case .thinking(_, let text, let collapsed):
             thinkingBlock(text, collapsed: collapsed)
-        case .toolCall(let id, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let result, _, let previewLines, let offer):
-            AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, resultLines: nil, previewLines: previewLines, retainedOutputOffer: offer, sendAction: toolCallAction)
-        case .styledToolCall(let id, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let resultLines, _, let previewLines, let offer):
-            AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: nil, resultLines: resultLines, previewLines: previewLines, retainedOutputOffer: offer, sendAction: toolCallAction)
+        case .toolCall(let id, let name, let summary, _, _, let collapsed, let autoApprovedScope, _, let result, _, let previewLines, let offer, let step):
+            AgentToolCallCard(messageID: id, name: name, summary: summary, step: step, collapsed: collapsed, autoApprovedScope: autoApprovedScope, result: result, resultLines: nil, previewLines: previewLines, retainedOutputOffer: offer, sendAction: toolCallAction)
+        case .styledToolCall(let id, let name, let summary, _, _, let collapsed, let autoApprovedScope, _, let resultLines, _, let previewLines, let offer, let step):
+            AgentToolCallCard(messageID: id, name: name, summary: summary, step: step, collapsed: collapsed, autoApprovedScope: autoApprovedScope, result: nil, resultLines: resultLines, previewLines: previewLines, retainedOutputOffer: offer, sendAction: toolCallAction)
         case .approvalToolCall(_, let name, let summary, let toolCallId, let sessionId, let requestId, let previewKind, let previewLines):
             AgentApprovalCard(name: name, summary: summary, toolCallId: toolCallId, sessionId: sessionId, requestId: requestId, previewKind: previewKind, previewLines: previewLines, sendAction: childAction { .toolApproval($0) })
         case .system(_, let text, let isError):
@@ -339,44 +351,28 @@ struct AgentConversationList: View {
         }
     }
 
+    // Calm messages: the speaker's label in its colour role above plain text, with no bubble (docs/design/surfaces.md, Conversation and composer).
     private func assistantMessage<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: "sparkles")
-                    .font(Typography.font(.micro))
-                Text("Minga")
-                    .font(Typography.font(.small, weight: .medium))
-            }
-            .foregroundStyle(theme.agentAssistantLabel)
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text("Minga")
+                .font(Typography.font(.small, weight: .medium))
+                .foregroundStyle(theme.roleColor(.minga))
 
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Spacing.lg)
-        .padding(.vertical, Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.lg)
-                .fill(theme.agentAssistantBorder.opacity(0.08))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.lg)
-                .strokeBorder(theme.agentAssistantBorder.opacity(0.35), lineWidth: 1)
-        )
+        .padding(.vertical, Spacing.sm)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Assistant reply")
+        .accessibilityLabel("Minga")
     }
 
     @ViewBuilder
     private func userMessage(_ text: String) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            // Sender label
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: "person.fill")
-                    .font(Typography.font(.micro))
-                Text("You")
-                    .font(Typography.font(.small, weight: .medium))
-            }
-            .foregroundStyle(theme.agentUserLabel)
+            Text("You")
+                .font(Typography.font(.small, weight: .medium))
+                .foregroundStyle(theme.roleColor(.you))
 
             Text(text)
                 .font(Typography.font(.emphasis))
@@ -385,8 +381,7 @@ struct AgentConversationList: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Spacing.lg)
-        .padding(.vertical, Spacing.md)
-        .background(theme.agentUserBorder.opacity(0.06))
+        .padding(.vertical, Spacing.sm)
     }
 
     @ViewBuilder
@@ -539,7 +534,8 @@ struct AgentConversationList: View {
                 .font(Typography.font(.small))
                 .textSelection(.enabled)
         }
-        .foregroundStyle(isError ? Color.red.opacity(0.7) : theme.agentTextFg.opacity(0.4))
+        // A notice is quiet, not faint: "Stopped" and a notice that names the next step are read, so it draws in the theme's muted text role. At 40% of the text colour it drew at about 2:1.
+        .foregroundStyle(theme.roleColor(isError ? .failure : .textMuted))
         .frame(maxWidth: .infinity, alignment: .center)
     }
 

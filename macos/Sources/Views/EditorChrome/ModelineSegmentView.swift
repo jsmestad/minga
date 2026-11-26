@@ -220,7 +220,11 @@ struct ModelineSegmentView: View {
 public struct StateMark: View {
     public let state: SpineState
     @Environment(\.themeColors) private var theme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.motionPaused) private var motionPaused
+
+    /// The orbit stands still under Reduce Motion and while the host captures frames.
+    private var reduceMotion: Bool { systemReduceMotion || motionPaused }
 
     public init(state: SpineState) {
         self.state = state

@@ -356,7 +356,8 @@ defmodule Minga.Integration.GUIProtocolTest do
             draft_attachment_count: Map.get(d, :draft_attachment_count, 0),
             draft_attachment_offer: Map.get(d, :draft_attachment_offer),
             pending_question: Map.get(d, :pending_question),
-            stop_target: Map.get(d, :stop_target)
+            stop_target: Map.get(d, :stop_target),
+            continue_target: Map.get(d, :continue_target)
           }
       end
 
@@ -492,17 +493,26 @@ defmodule Minga.Integration.GUIProtocolTest do
                round_trip(harness, plain, "gui_agent_chat")
     end
 
-    test "Agent chat exposes the Stop identity only for the displayed turn", %{harness: harness} do
+    test "Agent chat distinguishes Stop and Continue for the displayed turn", %{harness: harness} do
       draft = %{visible: true, prompt: "Keep this draft"}
       working = Map.merge(draft, %{status: :thinking, stop_target: {"session-a", "turn-b"}})
+      stopped = Map.merge(draft, %{status: :stopped, continue_target: {"session-a", "turn-b"}})
 
       assert %{
                "stop_session_id" => "session-a",
                "stop_request_id" => "turn-b",
+               "continue_request_id" => "",
                "prompt" => "Keep this draft"
              } = round_trip(harness, encode_gui_agent_chat(working), "gui_agent_chat")
 
-      assert %{"stop_session_id" => "", "stop_request_id" => ""} =
+      assert %{
+               "continue_session_id" => "session-a",
+               "continue_request_id" => "turn-b",
+               "stop_request_id" => "",
+               "prompt" => "Keep this draft"
+             } = round_trip(harness, encode_gui_agent_chat(stopped), "gui_agent_chat")
+
+      assert %{"stop_request_id" => "", "continue_request_id" => ""} =
                round_trip(harness, encode_gui_agent_chat(draft), "gui_agent_chat")
     end
 

@@ -32,7 +32,7 @@ public struct AgentApprovalCard: View {
         let visiblePreviewLines = Array(previewLines.prefix(8))
 
         VStack(alignment: .leading, spacing: Spacing.md) {
-            approvalToolCallHeader(name: name, summary: summary, previewKind: previewKind)
+            approvalToolCallHeader(headline: summary)
 
             if !visiblePreviewLines.isEmpty {
                 approvalPreviewLines(visiblePreviewLines)
@@ -48,43 +48,16 @@ public struct AgentApprovalCard: View {
 
     // MARK: - Header
 
-    private func approvalToolCallHeader(name: String, summary: String, previewKind: UInt8) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
-                Image(systemName: "exclamationmark.shield")
-                    .font(Typography.font(.emphasis))
-                    .foregroundStyle(Color.orange)
+    /// The card's title is the question the BEAM wrote ("Write notes.txt?"). The frontend adds no words of its own and never shows the tool's raw name.
+    private func approvalToolCallHeader(headline: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
+            Image(systemName: "exclamationmark.shield")
+                .font(Typography.font(.emphasis))
+                .foregroundStyle(theme.roleColor(.needsYou))
+                .accessibilityHidden(true)
 
-                Text("Approval required")
-                    .font(Typography.font(.body, weight: .semibold))
-                    .foregroundStyle(theme.agentTextFg)
-            }
-
-            Text(name)
-                .font(Typography.font(.body, weight: .bold, design: .monospaced))
-                .foregroundStyle(theme.agentToolHeader)
-
-            if !summary.isEmpty {
-                approvalToolCallSummary(summary: summary, previewKind: previewKind)
-            }
-        }
-    }
-
-    // MARK: - Summary
-
-    @ViewBuilder
-    private func approvalToolCallSummary(summary: String, previewKind: UInt8) -> some View {
-        if previewKind == 2 {
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(summary)
-                    .font(Typography.font(.body, weight: .regular, design: .monospaced))
-                    .foregroundStyle(theme.agentTextFg)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-        } else {
-            Text(summary)
-                .font(Typography.font(.body, weight: .regular, design: .monospaced))
+            Text(headline)
+                .font(Typography.font(.body, weight: .semibold))
                 .foregroundStyle(theme.agentTextFg)
                 .lineLimit(2)
         }
@@ -104,11 +77,13 @@ public struct AgentApprovalCard: View {
         .overlay(approvalPreviewBorder)
     }
 
+    /// A preview line wraps to the card and is never cut: a command is the decision itself, and a part of it that is not drawn is a part approved unread.
     private func approvalPreviewLine(_ line: String) -> some View {
         Text(line)
             .font(Typography.font(.caption, design: .monospaced))
             .foregroundStyle(approvalPreviewLineColor(line))
-            .truncationMode(.tail)
+            .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func approvalPreviewLineColor(_ line: String) -> Color {

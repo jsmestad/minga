@@ -20,6 +20,9 @@ defmodule MingaAgent.ToolApproval do
   @typedoc "A public, editor-safe approval preview."
   @type preview :: Preview.t()
 
+  # The most bytes of a command one preview line carries.
+  @command_preview_bytes 16_000
+
   @typedoc "A pending tool approval."
   @type t :: %__MODULE__{
           tool_call_id: String.t(),
@@ -99,7 +102,7 @@ defmodule MingaAgent.ToolApproval do
   @spec do_build_preview(String.t(), map()) :: preview()
   defp do_build_preview("shell", %{"command" => command}) do
     command = stringify_value(command)
-    Preview.new(:command, command, preview_lines(["$ #{command}"]))
+    Preview.new(:command, command, command_preview_lines(command))
   end
 
   defp do_build_preview("write_file", %{"path" => path} = args) when is_binary(path) do
@@ -145,6 +148,13 @@ defmodule MingaAgent.ToolApproval do
   end
 
   @spec do_build_transcript_preview(String.t(), map()) :: preview()
+  # A finished step is context, not a decision: it keeps a bounded sample of its command.
+  # Every shell row of a resident transcript carries this line, so it stays short.
+  defp do_build_transcript_preview("shell", %{"command" => command}) do
+    command = stringify_value(command)
+    Preview.new(:command, command, preview_lines(["$ #{command}"]))
+  end
+
   defp do_build_transcript_preview("write_file", %{"path" => path}) do
     path = stringify_value(path)
     Preview.new(:target, path, [])
@@ -235,6 +245,27 @@ defmodule MingaAgent.ToolApproval do
   @spec stringify_value(term()) :: String.t()
   defp stringify_value(value) when is_binary(value), do: value
   defp stringify_value(value), do: inspect(value, printable_limit: 120)
+
+  # A command is the decision itself, so its preview is the whole command, never a sample.
+  # The bound keeps one preview line inside the wire's 16-bit string; a command over it says how much it leaves out.
+  @spec command_preview_lines(String.t()) :: [String.t()]
+  defp command_preview_lines(command) when byte_size(command) <= @command_preview_bytes,
+    do: ["$ " <> command]
+
+  defp command_preview_lines(command) do
+    shown = command |> binary_part(0, @command_preview_bytes) |> valid_prefix()
+    rest = binary_part(command, byte_size(shown), byte_size(command) - byte_size(shown))
+    ["$ " <> shown, "… #{String.length(rest)} more characters are not shown"]
+  end
+
+  # The longest prefix that is whole characters: a cut at a byte count can land inside one.
+  @spec valid_prefix(binary()) :: String.t()
+  defp valid_prefix(bytes) do
+    case :unicode.characters_to_binary(bytes) do
+      valid when is_binary(valid) -> valid
+      {_incomplete_or_error, valid, _rest} -> valid
+    end
+  end
 
   @spec preview_lines([String.t()]) :: [String.t()]
   defp preview_lines(lines), do: Enum.map(lines, &truncate(&1, 300))

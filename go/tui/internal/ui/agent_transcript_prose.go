@@ -9,15 +9,12 @@ import (
 	"github.com/rivo/uniseg"
 )
 
-// agentProseRail is the transcript rail before assistant prose and code: the transcript inset, the rail glyph, then one column.
-var agentProseRail = gap(agentTranscriptInset) + "│" + gap(spaceXS)
+// agentProseRail is the lead before assistant prose and code: the transcript inset, then the prose indent. The calm transcript draws no rail glyph; the lead keeps the column the text starts in.
+var agentProseRail = gap(agentTranscriptInset) + " " + gap(spaceXS)
 var agentProseRailWidth = ansi.StringWidth(agentProseRail)
 
-// agentToolBranch opens a tool card: the transcript inset, then a branch.
-var agentToolBranch = gap(agentTranscriptInset) + "├─"
-
-// agentToolRail continues a tool card under its branch.
-var agentToolRail = gap(agentTranscriptInset) + "│"
+// agentToolRail leads an expanded tool step's preview and output lines: the transcript inset and one column, with no rail glyph, so the detail sits under the step's sentence.
+var agentToolRail = gap(agentTranscriptInset) + " "
 
 // agentTranscriptTextWidth is the columns left for text after lead on a transcript row width columns wide. The transcript inset stays clear at the right edge as well as the left, and the budget never drops under eight columns.
 func agentTranscriptTextWidth(width int, lead string) int {

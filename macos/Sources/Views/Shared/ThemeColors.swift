@@ -331,6 +331,18 @@ public final class ThemeColors {
 
 }
 
+private struct MotionPausedKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+public extension EnvironmentValues {
+    /// True when the host needs frames that do not move. The storyboard and preview captures compare frames until three are identical, and a mark that turns never settles. A view pauses continuous motion when this or Reduce Motion is on.
+    var motionPaused: Bool {
+        get { self[MotionPausedKey.self] }
+        set { self[MotionPausedKey.self] = newValue }
+    }
+}
+
 private struct ThemeColorsEnvironmentKey: @MainActor EnvironmentKey {
     static let defaultValue = ThemeColors()
 }

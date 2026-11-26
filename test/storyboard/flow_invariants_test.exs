@@ -187,8 +187,10 @@ defmodule Minga.Storyboard.FlowInvariantsTest do
       for entry <- Registry.built(), action_state?(entry.id) do
         model = entry |> Registry.drive() |> Session.model()
 
+        # A composer with the keyboard offers the reply itself.
         assert model.which_key != nil or Model.open?(model, :picker) or
-                 Model.open?(model, :minibuffer) or drawer_offers_action?(model),
+                 Model.open?(model, :minibuffer) or composer_ready?(model) or
+                 drawer_offers_action?(model),
                "#{entry.id} shows a state that needs action without offering one: #{Model.signature(model)}"
       end
     end
@@ -278,4 +280,8 @@ defmodule Minga.Storyboard.FlowInvariantsTest do
 
   @spec path_name([String.t()]) :: String.t()
   defp path_name(reversed_path), do: reversed_path |> Enum.reverse() |> Enum.join(" ")
+
+  @spec composer_ready?(Model.t()) :: boolean()
+  defp composer_ready?(%Model{focus: %{surface: :agent}, mode: :insert}), do: true
+  defp composer_ready?(%Model{}), do: false
 end

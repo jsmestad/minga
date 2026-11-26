@@ -1,0 +1,271 @@
+# minga storyboard frame v1
+# scenario: minga.conversation.stopped
+# frontend: tui
+# theme: catppuccin_latte
+# size: 150x38
+# cursor: 31,13
+## text
+Spaces · folder minga.conversation.stopped (1 tab) · ▎cpu A 429 with usage_limit_reached (1 tab)
+ ▌ 󰚩 Show the plan limit and…
+ 󰚩 Agent  Resolving model…                                                                                  Stopped  [Tasks] [History] [Help] [Queue]
+  Transcript ──────────────────────────────────────────────────────────────────────────────────────────────────────── │ ╭ ◇ Session ────────────────╮
+   i System  Session started · 09:41:00 UTC                                                                           │ │ Provider  unknown         │
+                                                                                                                      │ │ Model     Resolving model…│
+   You                                                                                                                │ │ State     Stopped         │
+     Show the plan limit and when it resets instead of "rate limited".                                                │ │ Messages  12              │
+                                                                                                                      │ │ Tools     4 · 0 running · │
+   Minga                                                                                                              │ │ ─── Needs attention ──────│
+     A 429 with usage_limit_reached is its own case. I'll carry the plan, window and reset time on the error.         │ │ Error     Could not run `m│
+   ● Read lib/native.ex                                                                                               │ │ ─── Hints ────────────────│
+   ● Edited lib/retry.ex                                                                                              │ │ Tab  complete             │
+   ◆ Could not run `mix test test/retry_test.exs`                                                                     │ │ ?  agent help             │
+   ○ Stopped while finding lib/other.ex                                                                               │ ╰───────────────────────────╯
+                                                                                                                      │
+   i System  Saved the retry notes to lib/native/usage_limit/notes.md; open that file to review the plan, window      │
+             and reset time.                                                                                          │
+                                                                                                                      │
+   You                                                                                                                │
+     Also show the reset time in the modeline.                                                                        │
+                                                                                                                      │
+   Minga                                                                                                              │
+     Also show the reset time in the modeline.                                                                        │
+                                                                                                                      │
+   i System  Stopped                                                                                                  │
+                                                                                                                      │
+   i System  Agent UI registry online                                                                                 │
+                                                                                                                      │
+  2 messages · Stopped                                                                                                │
+ ╭ Prompt                                                                                                           ╮ │
+ │ ❯ INSERT  Ask Minga to edit, explain, search, or run tools                                                       │ │
+ │Continue · Steer · Queue Next · Stop · Attachments · esc ↩ continue · ⌥↩ queue · esc normal                       │ │
+ ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ │
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Review files (0)  [All Changes]  ]F  wheel
+No changed files
+  INSERT  [no file] ○ Minga stopped                                                                                                          Text 1:1
+## styles (row start-end fg bg attrs)
+0 0-52 #8c8fa1 #ccd0da -
+0 53-87 #1e66f5 #ccd0da bold
+0 88-95 #8c8fa1 #ccd0da -
+0 96-149 #4c4f69 #eff1f5 -
+1 0-0 #4c4f69 #eff1f5 -
+1 1-1 #1e66f5 #eff1f5 bold
+1 2-149 #4c4f69 #eff1f5 -
+2 0-0 #4c4f69 #eff1f5 -
+2 1-7 #1e66f5 #ccd0da bold
+2 8-9 #8c8fa1 #ccd0da -
+2 10-25 #1e66f5 #ccd0da -
+2 26-105 #4c4f69 #eff1f5 -
+2 106-106 #8c8fa1 #ccd0da -
+2 107-107 #4c4f69 #7c7f93 -
+2 108-114 #ccd0da #7c7f93 bold
+2 115-115 #4c4f69 #7c7f93 -
+2 116-116 #4c4f69 #eff1f5 -
+2 117-123 #8c8fa1 #ccd0da -
+2 124-124 #4c4f69 #eff1f5 -
+2 125-133 #8c8fa1 #ccd0da -
+2 134-134 #4c4f69 #eff1f5 -
+2 135-140 #8c8fa1 #ccd0da -
+2 141-141 #4c4f69 #eff1f5 -
+2 142-148 #8c8fa1 #ccd0da -
+2 149-149 #4c4f69 #eff1f5 -
+3 0-0 #4c4f69 #eff1f5 -
+3 1-12 #8c8fa1 #eff1f5 bold
+3 13-116 #8c8fa1 #eff1f5 -
+3 117-119 #7c7f93 #eff1f5 -
+3 120-120 #4c4f69 #eff1f5 -
+3 121-131 #1e66f5 #eff1f5 bold
+3 132-148 #7c7f93 #eff1f5 -
+3 149-149 #4c4f69 #eff1f5 -
+4 0-2 #4c4f69 #eff1f5 -
+4 3-10 #1e66f5 #eff1f5 bold
+4 11-42 #8c8fa1 #eff1f5 -
+4 43-116 #4c4f69 #eff1f5 -
+4 117-120 #7c7f93 #eff1f5 -
+4 121-121 #4c4f69 #eff1f5 -
+4 122-129 #8c8fa1 #eff1f5 -
+4 130-147 #4c4f69 #eff1f5 -
+4 148-148 #7c7f93 #eff1f5 -
+4 149-149 #4c4f69 #eff1f5 -
+5 0-116 #4c4f69 #eff1f5 -
+5 117-120 #7c7f93 #eff1f5 -
+5 121-121 #4c4f69 #eff1f5 -
+5 122-126 #8c8fa1 #eff1f5 -
+5 127-147 #4c4f69 #eff1f5 -
+5 148-148 #7c7f93 #eff1f5 -
+5 149-149 #4c4f69 #eff1f5 -
+6 0-0 #4c4f69 #eff1f5 -
+6 1-5 #1e66f5 #eff1f5 bold
+6 6-116 #4c4f69 #eff1f5 -
+6 117-120 #7c7f93 #eff1f5 -
+6 121-121 #4c4f69 #eff1f5 -
+6 122-126 #8c8fa1 #eff1f5 -
+6 127-147 #4c4f69 #eff1f5 -
+6 148-148 #7c7f93 #eff1f5 -
+6 149-149 #4c4f69 #eff1f5 -
+7 0-116 #4c4f69 #eff1f5 -
+7 117-120 #7c7f93 #eff1f5 -
+7 121-121 #4c4f69 #eff1f5 -
+7 122-129 #8c8fa1 #eff1f5 -
+7 130-147 #4c4f69 #eff1f5 -
+7 148-148 #7c7f93 #eff1f5 -
+7 149-149 #4c4f69 #eff1f5 -
+8 0-116 #4c4f69 #eff1f5 -
+8 117-120 #7c7f93 #eff1f5 -
+8 121-121 #4c4f69 #eff1f5 -
+8 122-126 #8c8fa1 #eff1f5 -
+8 127-147 #4c4f69 #eff1f5 -
+8 148-148 #7c7f93 #eff1f5 -
+8 149-149 #4c4f69 #eff1f5 -
+9 0-0 #4c4f69 #eff1f5 -
+9 1-7 #8839ef #eff1f5 bold
+9 8-116 #4c4f69 #eff1f5 -
+9 117-120 #7c7f93 #eff1f5 -
+9 121-121 #4c4f69 #eff1f5 -
+9 122-124 #7c7f93 #eff1f5 -
+9 125-141 #8c8fa1 #eff1f5 bold
+9 142-148 #7c7f93 #eff1f5 -
+9 149-149 #4c4f69 #eff1f5 -
+10 0-0 #4c4f69 #eff1f5 -
+10 1-4 #40a02b #eff1f5 -
+10 5-116 #4c4f69 #eff1f5 -
+10 117-120 #7c7f93 #eff1f5 -
+10 121-121 #4c4f69 #eff1f5 -
+10 122-126 #8c8fa1 #eff1f5 -
+10 127-147 #4c4f69 #eff1f5 -
+10 148-148 #7c7f93 #eff1f5 -
+10 149-149 #4c4f69 #eff1f5 -
+11 0-0 #4c4f69 #eff1f5 -
+11 1-3 #388e25 #eff1f5 -
+11 4-116 #4c4f69 #eff1f5 -
+11 117-120 #7c7f93 #eff1f5 -
+11 121-121 #4c4f69 #eff1f5 -
+11 122-124 #7c7f93 #eff1f5 -
+11 125-131 #8c8fa1 #eff1f5 bold
+11 132-148 #7c7f93 #eff1f5 -
+11 149-149 #4c4f69 #eff1f5 -
+12 0-0 #4c4f69 #eff1f5 -
+12 1-3 #388e25 #eff1f5 -
+12 4-116 #4c4f69 #eff1f5 -
+12 117-120 #7c7f93 #eff1f5 -
+12 121-121 #4c4f69 #eff1f5 -
+12 122-124 #1e66f5 #eff1f5 bold
+12 125-134 #8c8fa1 #eff1f5 -
+12 135-147 #4c4f69 #eff1f5 -
+12 148-148 #7c7f93 #eff1f5 -
+12 149-149 #4c4f69 #eff1f5 -
+13 0-0 #4c4f69 #eff1f5 -
+13 1-3 #d20f39 #eff1f5 -
+13 4-116 #4c4f69 #eff1f5 -
+13 117-120 #7c7f93 #eff1f5 -
+13 121-121 #4c4f69 #eff1f5 -
+13 122-122 #1e66f5 #eff1f5 bold
+13 123-134 #8c8fa1 #eff1f5 -
+13 135-147 #4c4f69 #eff1f5 -
+13 148-148 #7c7f93 #eff1f5 -
+13 149-149 #4c4f69 #eff1f5 -
+14 0-0 #4c4f69 #eff1f5 -
+14 1-3 #7c7f93 #eff1f5 -
+14 4-116 #4c4f69 #eff1f5 -
+14 117-148 #7c7f93 #eff1f5 -
+14 149-149 #4c4f69 #eff1f5 -
+15 0-116 #4c4f69 #eff1f5 -
+15 117-119 #7c7f93 #eff1f5 -
+15 120-149 #4c4f69 #eff1f5 -
+16 0-2 #4c4f69 #eff1f5 -
+16 3-10 #1e66f5 #eff1f5 bold
+16 11-111 #8c8fa1 #eff1f5 -
+16 112-116 #4c4f69 #eff1f5 -
+16 117-119 #7c7f93 #eff1f5 -
+16 120-149 #4c4f69 #eff1f5 -
+17 0-10 #4c4f69 #eff1f5 -
+17 11-27 #8c8fa1 #eff1f5 -
+17 28-116 #4c4f69 #eff1f5 -
+17 117-119 #7c7f93 #eff1f5 -
+17 120-149 #4c4f69 #eff1f5 -
+18 0-116 #4c4f69 #eff1f5 -
+18 117-119 #7c7f93 #eff1f5 -
+18 120-149 #4c4f69 #eff1f5 -
+19 0-0 #4c4f69 #eff1f5 -
+19 1-5 #1e66f5 #eff1f5 bold
+19 6-116 #4c4f69 #eff1f5 -
+19 117-119 #7c7f93 #eff1f5 -
+19 120-149 #4c4f69 #eff1f5 -
+20 0-116 #4c4f69 #eff1f5 -
+20 117-119 #7c7f93 #eff1f5 -
+20 120-149 #4c4f69 #eff1f5 -
+21 0-116 #4c4f69 #eff1f5 -
+21 117-119 #7c7f93 #eff1f5 -
+21 120-149 #4c4f69 #eff1f5 -
+22 0-0 #4c4f69 #eff1f5 -
+22 1-7 #8839ef #eff1f5 bold
+22 8-116 #4c4f69 #eff1f5 -
+22 117-119 #7c7f93 #eff1f5 -
+22 120-149 #4c4f69 #eff1f5 -
+23 0-0 #4c4f69 #eff1f5 -
+23 1-4 #40a02b #eff1f5 -
+23 5-116 #4c4f69 #eff1f5 -
+23 117-119 #7c7f93 #eff1f5 -
+23 120-149 #4c4f69 #eff1f5 -
+24 0-116 #4c4f69 #eff1f5 -
+24 117-119 #7c7f93 #eff1f5 -
+24 120-149 #4c4f69 #eff1f5 -
+25 0-2 #4c4f69 #eff1f5 -
+25 3-10 #1e66f5 #eff1f5 bold
+25 11-19 #8c8fa1 #eff1f5 -
+25 20-116 #4c4f69 #eff1f5 -
+25 117-119 #7c7f93 #eff1f5 -
+25 120-149 #4c4f69 #eff1f5 -
+26 0-116 #4c4f69 #eff1f5 -
+26 117-119 #7c7f93 #eff1f5 -
+26 120-149 #4c4f69 #eff1f5 -
+27 0-2 #4c4f69 #eff1f5 -
+27 3-10 #1e66f5 #eff1f5 bold
+27 11-36 #8c8fa1 #eff1f5 -
+27 37-116 #4c4f69 #eff1f5 -
+27 117-119 #7c7f93 #eff1f5 -
+27 120-149 #4c4f69 #eff1f5 -
+28 0-116 #4c4f69 #eff1f5 -
+28 117-119 #7c7f93 #eff1f5 -
+28 120-149 #4c4f69 #eff1f5 -
+29 0-0 #4c4f69 #eff1f5 -
+29 1-116 #8c8fa1 #eff1f5 -
+29 117-119 #7c7f93 #eff1f5 -
+29 120-149 #4c4f69 #eff1f5 -
+30 0-0 #4c4f69 #eff1f5 -
+30 1-116 #1e66f5 #eff1f5 -
+30 117-119 #7c7f93 #eff1f5 -
+30 120-149 #4c4f69 #eff1f5 -
+31 0-0 #4c4f69 #eff1f5 -
+31 1-1 #1e66f5 #eff1f5 -
+31 2-12 #1e66f5 #eff1f5 bold
+31 13-114 #8c8fa1 #eff1f5 italic
+31 115-115 #4c4f69 #eff1f5 -
+31 116-116 #1e66f5 #eff1f5 -
+31 117-119 #7c7f93 #eff1f5 -
+31 120-149 #4c4f69 #eff1f5 -
+32 0-0 #4c4f69 #eff1f5 -
+32 1-12 #1e66f5 #eff1f5 -
+32 13-17 #8c8fa1 #eff1f5 -
+32 18-20 #4c4f69 #eff1f5 -
+32 21-30 #8c8fa1 #eff1f5 -
+32 31-33 #4c4f69 #eff1f5 -
+32 34-37 #8c8fa1 #eff1f5 -
+32 38-115 #4c4f69 #eff1f5 -
+32 116-116 #1e66f5 #eff1f5 -
+32 117-119 #7c7f93 #eff1f5 -
+32 120-149 #4c4f69 #eff1f5 -
+33 0-0 #4c4f69 #eff1f5 -
+33 1-116 #1e66f5 #eff1f5 -
+33 117-119 #7c7f93 #eff1f5 -
+33 120-149 #4c4f69 #eff1f5 -
+34 0-149 #8c8fa1 #ccd0da -
+35 0-149 #1e66f5 #ccd0da bold
+36 0-149 #4c4f69 #ccd0da -
+37 0-0 #8c8fa1 #e6e9ef -
+37 1-1 #4c4f69 #40a02b -
+37 2-7 #eff1f5 #40a02b bold
+37 8-8 #4c4f69 #40a02b -
+37 9-19 #4c4f69 #e6e9ef -
+37 20-34 #7c7f93 #e6e9ef -
+37 35-149 #4c4f69 #e6e9ef -

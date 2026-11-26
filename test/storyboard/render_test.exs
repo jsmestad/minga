@@ -52,6 +52,18 @@ defmodule Minga.Storyboard.RenderTest do
     end
   end
 
+  test "closing a conversation keeps terminal space for its workspace header row" do
+    target = Enum.find(Render.targets(), &(&1.frontend == :tui and &1.size == "80x24"))
+    target = Map.put(target, :theme, :astrodark)
+
+    session =
+      Render.drive("minga.conversation", target, ["esc esc SPC a v"], "conversation-header")
+
+    refute Minga.Test.Storyboard.Model.open?(Session.model(session), :agent_chat)
+    assert length(Session.screen_text(session)) == 22
+    Session.stop(session)
+  end
+
   # One export test per scenario keeps each test short and lets them run side by side.
   for id <- @built do
     @id id

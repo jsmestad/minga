@@ -118,7 +118,7 @@ reached_by = "minga . (or minga with no arguments) inside a project with no save
 exits = [
   { key = "1-9", click = "recent file row", to = "edit.plain" },
   { key = "↩", click = "file row", to = "edit.plain" },
-  { key = "↩", click = "task row", to = "minga.conversation" },
+  { key = "↩ on a task row", click = "task row", to = "minga.conversation" },
   { key = "SPC SPC", click = "Find file", to = "files.project_find" },
   { key = "SPC a n", click = "New task", to = "minga.task.new" },
   { key = "SPC o p", click = "File tree", to = "files.tree" },
@@ -1038,7 +1038,7 @@ exits = [
   { key = "t", click = "This turn", to = "minga.tasks.working" },
   { key = "n", click = "Deny", to = "minga.tasks.working" },
   { key = "=", click = "Show diff", to = "minga.approval.diff" },
-  { key = "↩", click = "row title", to = "minga.conversation" },
+  { key = "↩ on a task with a conversation in this window", click = "row title", to = "minga.conversation" },
   { key = "i", click = "Inspect", to = "minga.subagent.peek" },
   { key = "o", click = "Output", to = "minga.task.output" },
   { key = "↩ on a done row", click = "Review", to = "minga.review.buffer" },
@@ -1101,7 +1101,7 @@ exits = [
   { key = "⌘. or SPC a s", click = "Stop", to = "minga.conversation.stopped" },
   { key = "SPC a r", click = "2 files changed · review", to = "minga.review.buffer" },
   { key = "↩ on a Started line", click = "Started line", to = "minga.subagent.peek" },
-  { key = "SPC a v", click = "close split", to = "edit.working" },
+  { key = "esc esc SPC a v", click = "close split", to = "edit.working" },
   { key = "q (Normal mode, outside the composer)", click = "", to = "edit.working" },
 ]
 
@@ -1152,7 +1152,7 @@ transient = true
 list = true
 empty_state = "minga.tasks.empty"
 exits = [
-  { key = "↩", click = "row title", to = "minga.conversation" },
+  { key = "↩ on a task with a conversation in this window", click = "row title", to = "minga.conversation" },
   { key = "i", click = "Inspect", to = "minga.subagent.peek" },
   { key = "r", click = "Retry now", to = "minga.tasks.working", note = "the retried task works again, still selected" },
   { key = "o", click = "Output", to = "minga.task.output" },
@@ -1171,7 +1171,7 @@ status = "designed"
 boards = { macos = "V41Tasks.dc.html", tui = "V41TuiTasks.dc.html", new_task = "Batch1_minga_task_new_started.dc.html" }
 transient = true
 exits = [
-  { key = "↩", click = "row title", to = "minga.conversation" },
+  { key = "↩ on a task with a conversation in this window", click = "row title", to = "minga.conversation" },
   { key = "i", click = "Inspect", to = "minga.subagent.peek" },
   { key = "q", click = "drawer close", to = "edit.plain" },
   { key = "esc", click = "", to = "edit.plain", keyboard_only = "q has the click" },
@@ -1243,12 +1243,12 @@ status = "designed"
 boards = { macos = "Batch2_minga_task_output.dc.html", tui = "Batch2_minga_task_output.dc.html" }
 exits = [
   { key = "r", click = "Retry", to = "minga.tasks.working" },
-  { key = "f", click = "Ask Minga to fix", to = "minga.conversation" },
+  { key = "f (planned)", click = "Ask Minga to fix (planned)", to = "minga.conversation" },
   { key = "↩", click = "file:line link", to = "edit.plain", note = "on a file:line" },
   { key = "]] / [[", click = "", to = "minga.task.output", note = "next or previous failure" },
   { key = "q", click = "close", to = "minga.tasks.list" },
 ]
-notes = "Opened with o on a failed or waiting row. Read-only buffer: the error is highlighted, file:line are links, f attaches the output to the conversation."
+notes = "Opened with o on a failed or waiting row. Read-only buffer: the error is highlighted and file:line references are links. Ask Minga to fix with the output attached is planned, not bound in the shipped drawer."
 
 [[scenario]]
 id = "minga.review.keep_all.confirm"
@@ -1326,7 +1326,7 @@ exits = [
   { key = "↩ (composer)", click = "Continue", to = "minga.conversation" },
   { key = "⌥↩", click = "Queue", to = "minga.queue" },
   { key = "SPC a r", click = "Review", to = "minga.review.buffer" },
-  { key = "SPC a v", click = "close split", to = "edit.plain" },
+  { key = "esc esc SPC a v", click = "close split", to = "edit.plain" },
   { key = "q (Normal mode, outside the composer)", click = "", to = "edit.plain" },
 ]
 notes = "Says what was interrupted and what was already changed. The modeline reads \"Minga stopped\"; the queue is kept; Continue resumes the same task."

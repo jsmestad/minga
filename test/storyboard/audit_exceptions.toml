@@ -258,6 +258,99 @@ reason = "The picker's selected-row text misses 4.5:1 on the popup selection col
 issue = 4137
 
 
+[[exception]]
+scenario = ["minga.conversation", "minga.conversation.stopped"]
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#3a3e47 on #14161b",
+  "#595c66 on #1a1d23",
+]
+reason = "The Agent workspace's rules (under the transcript title and above the review strip) use the theme's separator and muted colours, which miss 3:1 here. They are lines, not text, and the editor's separators already use the same colours."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.conversation", "minga.conversation.stopped"]
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#838ba7 on #414559",
+]
+reason = "The Agent workspace's rules (under the transcript title and above the review strip) use the theme's separator and muted colours, which miss 3:1 here. They are lines, not text, and the editor's separators already use the same colours."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.conversation", "minga.conversation.stopped"]
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#8c8fa1 on #ccd0da",
+  "#8c8fa1 on #eff1f5",
+]
+reason = "The Agent workspace's rules (under the transcript title and above the review strip) use the theme's separator and muted colours, which miss 3:1 here. They are lines, not text, and the editor's separators already use the same colours."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.conversation", "minga.conversation.stopped"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#16181d on #696c76",
+  "#595c66 on #111317",
+  "#595c66 on #16181d",
+  "#595c66 on #1a1d23",
+  "#696c76 on #111317",
+  "#696c76 on #1a1d23",
+]
+reason = "Muted labels and borders of the Agent workspace (workspace bar, header buttons, transcript title, session panel, composer actions, system rows), the stopped pill and the modeline's Minga segment use the theme's muted and role colours, which miss 4.5:1 here. Every pair is 2.5:1 or more, except the theme's muted colour on the tab bar in Latte (2.07:1), which the editor chrome shares."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.conversation", "minga.conversation.stopped"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#414559 on #838ba7",
+  "#414559 on #ca9ee6",
+  "#838ba7 on #292c3c",
+  "#838ba7 on #303446",
+  "#838ba7 on #414559",
+  "#8caaee on #414559",
+]
+reason = "Muted labels and borders of the Agent workspace (workspace bar, header buttons, transcript title, session panel, composer actions, system rows), the stopped pill and the modeline's Minga segment use the theme's muted and role colours, which miss 4.5:1 here. Every pair is 2.5:1 or more, except the theme's muted colour on the tab bar in Latte (2.07:1), which the editor chrome shares."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.conversation", "minga.conversation.stopped"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#1e66f5 on #ccd0da",
+  "#1e66f5 on #eff1f5",
+  "#7c7f93 on #e6e9ef",
+  "#7c7f93 on #eff1f5",
+  "#8839ef on #e6e9ef",
+  "#8c8fa1 on #ccd0da",
+  "#8c8fa1 on #eff1f5",
+  "#ccd0da on #7c7f93",
+  "#ccd0da on #8839ef",
+  "#eff1f5 on #40a02b",
+]
+reason = "Muted labels and borders of the Agent workspace (workspace bar, header buttons, transcript title, session panel, composer actions, system rows), the stopped pill and the modeline's Minga segment use the theme's muted and role colours, which miss 4.5:1 here. Every pair is 2.5:1 or more, except the theme's muted colour on the tab bar in Latte (2.07:1), which the editor chrome shares."
+issue = 4137
+
 # ---- macOS ---------------------------------------------------------------------------------------------------
 
 [[exception]]
@@ -1242,4 +1335,66 @@ pairs = [
   "#eff1f5 on #1e66f5",
 ]
 reason = "The drawer's muted text, counts, ages, state words and tree glyphs come from the theme's tokens and miss their contrast target on the drawer surface or the list selection in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.conversation", "minga.conversation.stopped"]
+frontend = "macos"
+part = "modeline.modePill"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#eff1f5 on #40a02b",
+]
+reason = "The Insert mode pill draws the theme's base colour on its green, which misses 4.5:1 in this theme (2.96:1), as the Normal pill does on its blue. The conversation is the first scenario captured in Insert."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.conversation", "minga.conversation.stopped"]
+frontend = "macos"
+part = "modeline.modeText"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#eff1f5 on #40a02b",
+]
+reason = "The Insert mode pill draws the theme's base colour on its green, which misses 4.5:1 in this theme (2.96:1), as the Normal pill does on its blue. The conversation is the first scenario captured in Insert."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.conversation.stopped"]
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#696c76 on #111317",
+]
+reason = "The modeline.segment text misses 4.5:1 in this theme: \"Minga stopped\" in the stopped state's muted role colour (3.25:1 or more)."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.conversation.stopped"]
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#838ba7 on #292c3c",
+]
+reason = "The modeline.segment text misses 4.5:1 in this theme: \"Minga stopped\" in the stopped state's muted role colour (3.25:1 or more)."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.conversation", "minga.conversation.stopped"]
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#7c7f93 on #e6e9ef",
+  "#8839ef on #e6e9ef",
+  "#eff1f5 on #40a02b",
+]
+reason = "The modeline.segment text misses 4.5:1 in this theme: the Insert mode pill (the theme's base colour on its green, 2.96:1), and Minga's words in the minga role while it works (4.45:1), and \"Minga stopped\" in the stopped state's muted role colour (3.25:1 or more)."
 issue = 4137

@@ -124,24 +124,26 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     assert %Workspace{label: "Queued next"} = TabBar.find_workspace_by_session(tabs, session)
   end
 
-  test "session workflow auto-names the active session workspace from queued prompts" do
+  test "a queued prompt never renames the task" do
     {:ok, session} = start_supervised({Session, provider_opts: []})
     state = event_state(session)
 
-    updated =
-      SessionEventWorkflow.prompt_queued(
-        state,
-        "Investigate workspace drift\nMore detail",
-        :steering
-      )
-
-    workspace =
-      updated.shell_runtime.state
+    workspace_before =
+      state.shell_runtime.state
       |> TraditionalState.tab_bar()
       |> TabBar.find_workspace_by_session(session)
 
-    assert %Workspace{label: "Investigate workspace drift", custom_name: nil} = workspace
-    assert RenderCorrelation.scheduled?(updated.render.render_correlation)
+    for kind <- [:steering, :follow_up] do
+      updated = SessionEventWorkflow.prompt_queued(state, "q3\nMore detail", kind)
+
+      workspace =
+        updated.shell_runtime.state
+        |> TraditionalState.tab_bar()
+        |> TabBar.find_workspace_by_session(session)
+
+      assert workspace.label == workspace_before.label
+      assert RenderCorrelation.scheduled?(updated.render.render_correlation)
+    end
   end
 
   test "workspace auto-name transition no-ops when its target is unavailable" do
@@ -220,7 +222,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     assert state.workspace.agent_ui.view.preview.content ==
              {:shell, "mix test", "3 tests", :running}
 
-    assert state.workspace.agent_ui.view.activity.active_action == "Running shell"
+    assert state.workspace.agent_ui.view.activity.active_action == "Running `mix test`"
 
     state = ToolEventWorkflow.interrupted(state, "tc1")
 

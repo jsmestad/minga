@@ -26,7 +26,18 @@ public struct AgentQuestionOffer: Sendable, Equatable {
     }
 }
 
-/// An active Agent turn identified by the committed Stop control.
+/// One of the focused composer's key hints, as the BEAM authors it (gui_agent_chat section 0x10): the keys as shown and what they do.
+public struct AgentComposerHint: Sendable, Equatable {
+    public let keys: String
+    public let action: String
+
+    public init(keys: String, action: String) {
+        self.keys = keys
+        self.action = action
+    }
+}
+
+/// The session and request identity carried by a committed turn control.
 public struct AgentStopTarget: Sendable, Equatable {
     public let sessionID: String
     public let requestID: String
@@ -1549,6 +1560,17 @@ public enum Wire {
         }
     }
 
+    /// A tool call's one line in the conversation: the sentence the BEAM writes and the shared state byte it is drawn in (`SpineState(wire:)`). Frontends render both as sent and never map a tool status to words.
+    public struct ToolStep: Equatable, Sendable {
+        public let text: String
+        public let state: UInt8
+
+        public init(text: String = "", state: UInt8 = 0) {
+            self.text = text
+            self.state = state
+        }
+    }
+
     /// A chat message from gui_agent_transcript, with a stable BEAM-assigned ID.
     public struct ChatMessage: Sendable {
         /// Stable uint32 ID assigned by the BEAM. Persists across streaming updates.
@@ -1572,9 +1594,9 @@ public enum Wire {
         /// Assistant message with BEAM-authored semantic markdown blocks.
         case assistantMarkdown(blocks: [AgentMarkdownBlock])
         case thinking(text: String, collapsed: Bool)
-        case toolCall(name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String, previewKind: UInt8, previewLines: [String])
+        case toolCall(name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String, previewKind: UInt8, previewLines: [String], step: ToolStep = ToolStep())
         /// Tool call with pre-styled result runs from tree-sitter.
-        case styledToolCall(name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, resultLines: [[StyledTextRun]], previewKind: UInt8, previewLines: [String])
+        case styledToolCall(name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, resultLines: [[StyledTextRun]], previewKind: UInt8, previewLines: [String], step: ToolStep = ToolStep())
         case approvalToolCall(name: String, summary: String, toolCallId: String, sessionId: String, requestId: String, previewKind: UInt8, previewLines: [String])
         case system(text: String, isError: Bool)
         case usage(input: UInt32, output: UInt32, cacheRead: UInt32, cacheWrite: UInt32, costMicros: UInt32)

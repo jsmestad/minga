@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
@@ -212,7 +213,7 @@ func (r *agentTranscriptRenderer) allFits(m Model, transcript *residentTranscrip
 	if transcript.truncated {
 		effectiveBudget--
 	}
-	if effectiveBudget <= 0 || transcript.len()*2-1 > effectiveBudget {
+	if effectiveBudget <= 0 || transcript.len() > effectiveBudget {
 		return false
 	}
 	_, allFits := r.tailStart(m, transcript, effectiveBudget, width)
@@ -227,10 +228,17 @@ func (r *agentTranscriptRenderer) endPosition(m Model, transcript *residentTrans
 
 func (r *agentTranscriptRenderer) blockHeight(m Model, transcript *residentTranscript, index int, width int) int {
 	height := r.messageHeight(m, transcript.entry(index), width)
-	if index < transcript.len()-1 {
+	if index < transcript.len()-1 && agentTranscriptGapBefore(transcript.entry(index+1).message) {
 		height++
 	}
 	return height
+}
+
+// agentTranscriptGapBefore reports whether a blank row separates a message from
+// the one before it. Tool steps sit directly under the message that ran them, so
+// a run of steps reads as one block; every other message starts a new block.
+func agentTranscriptGapBefore(next protocol.AgentChatMessage) bool {
+	return next.Kind != agentKindTool && next.Kind != agentKindStyledTool
 }
 
 func (r *agentTranscriptRenderer) positionForAnchor(m Model, transcript *residentTranscript, width int) transcriptPosition {
@@ -302,7 +310,8 @@ func (r *agentTranscriptRenderer) renderForward(m Model, transcript *residentTra
 			position.row += count
 			continue
 		}
-		if position.index < transcript.len()-1 && position.row == height {
+		if position.index < transcript.len()-1 && position.row == height &&
+			agentTranscriptGapBefore(transcript.entry(position.index+1).message) {
 			lines = append(lines, m.renderAgentTranscriptSeparator(width))
 			position.row++
 			continue
@@ -412,6 +421,12 @@ func agentMessageAnimated(message protocol.AgentChatMessage) bool {
 }
 
 func measureAgentMessage(message protocol.AgentChatMessage, width int) (int, agentProseLayout) {
+	if message.Kind == agentKindSystem {
+		return len(agentSystemBodyLines(message, width)), nil
+	}
+	if message.Kind == agentKindApprovalTool {
+		return approvalCardFrameRows + len(approvalPreviewRows(message, approvalPreviewWidth(width))), nil
+	}
 	count := agentMessageRowCount(message)
 	if !agentMessageHasStyledProse(message) {
 		return count, nil
@@ -453,9 +468,12 @@ func agentMarkdownBlockIsProse(block protocol.AgentMarkdownBlock) bool {
 	return block.Kind >= 0x01 && block.Kind <= 0x04
 }
 
+// approvalCardFrameRows are an approval card's rows other than its preview: two borders, the question and two rows of actions.
+const approvalCardFrameRows = 5
+
 func agentMessageRowCount(message protocol.AgentChatMessage) int {
 	switch message.Kind {
-	case agentKindSystem, agentKindUsage:
+	case agentKindUsage:
 		return 1
 	case agentKindUser:
 		return 1 + max(compactTextLineCount(message.Text, 2), 1)
@@ -470,26 +488,21 @@ func agentMessageRowCount(message protocol.AgentChatMessage) int {
 		}
 		return 1 + compactTextLineCount(text, agentThinkingBodyLines(message.Collapsed))
 	case agentKindTool, agentKindStyledTool:
-		count := 2 + cappedRows(len(message.PreviewLines), 8)
-		count += boolInt(agentToolOffersRetainedOutput(message))
-		if agentToolIsError(message) && hasAgentToolResult(message) {
-			if len(message.StyledLines) > 0 {
-				return count + cappedRows(len(message.StyledLines), agentToolExpandedLines)
-			}
-			return count + cappedRows(len(agentToolTextLines(message.Result)), agentToolExpandedLines)
+		count := 1 + boolInt(agentToolOffersRetainedOutput(message))
+		if message.Collapsed {
+			return count
 		}
-		if hasAgentToolResult(message) && message.Collapsed {
-			return count + 1
+		count += cappedRows(len(message.PreviewLines), 8)
+		if !hasAgentToolResult(message) {
+			return count
 		}
-		if !message.Collapsed {
-			if len(message.StyledLines) > 0 {
-				return count + cappedRows(len(message.StyledLines), agentToolExpandedLines)
-			}
-			return count + cappedRows(len(agentToolTextLines(message.Result)), agentToolExpandedLines)
+		if len(message.StyledLines) > 0 {
+			return count + cappedRows(len(message.StyledLines), agentToolExpandedLines)
 		}
-		return count
+		return count + cappedRows(len(agentToolTextLines(message.Result)), agentToolExpandedLines)
 	case agentKindApprovalTool:
-		return 5 + min(len(message.PreviewLines), 2)
+		// A command's rows depend on the card's width; measureAgentMessage counts them.
+		return approvalCardFrameRows + min(len(message.PreviewLines), 2)
 	default:
 		return 1 + max(compactTextLineCount(message.Text, 3), 1)
 	}
@@ -655,9 +668,7 @@ func sliceRows(rows []string, start int, count int) []string {
 
 func (m Model) renderAgentAssistantHeader(width int) string {
 	p := m.palette()
-	headerMarker := lipgloss.NewStyle().Bold(true).Foreground(p.AgentAssistantBorder()).Background(p.AgentPanel()).Render(gap(agentTranscriptInset) + "◇")
-	headerLabel := lipgloss.NewStyle().Bold(true).Foreground(p.AgentAssistantLabel()).Background(p.AgentPanel()).Render(" Minga")
-	header := headerMarker + headerLabel
+	header := lipgloss.NewStyle().Bold(true).Foreground(p.Role(generated.ColorRoleMinga)).Background(p.AgentPanel()).Render(gap(agentTranscriptInset) + "Minga")
 	return lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(header, width))
 }
 

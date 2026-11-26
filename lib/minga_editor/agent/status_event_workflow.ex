@@ -72,6 +72,22 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
     end
   end
 
+  @doc "Installs only the active attached Session's Continue target."
+  @spec continue_target_changed(EditorState.t(), pid(), {String.t(), String.t()} | nil) ::
+          EditorState.t()
+  def continue_target_changed(%EditorState{} = state, session, target) do
+    with ^session <- Runtime.active_session(state.shell_runtime),
+         agent = TraditionalState.agent(state.shell_runtime.state),
+         updated when updated != agent <-
+           AgentState.project_continue_target(agent, session, target) do
+      state
+      |> TraditionalWorkflow.install_agent_state(updated)
+      |> MingaEditor.schedule_render(16)
+    else
+      _stale_or_unchanged -> state
+    end
+  end
+
   @doc "Projects replayed raw status using the current live approval attachment."
   @spec replay_status_changed(EditorState.t(), pid(), Tab.agent_status()) :: EditorState.t()
   def replay_status_changed(%EditorState{} = state, session, status) when is_pid(session) do

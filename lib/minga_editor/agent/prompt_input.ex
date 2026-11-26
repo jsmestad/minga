@@ -45,7 +45,9 @@ defmodule MingaEditor.Agent.PromptInput do
   @spec submit_displayed(state(), pos_integer(), pos_integer() | nil, (state() -> state())) ::
           state()
   def submit_displayed(state, generation, offer, dispatch) do
-    if AgentState.busy?(TraditionalState.agent(state.shell_runtime.state)) do
+    agent = TraditionalState.agent(state.shell_runtime.state)
+
+    if AgentState.busy?(agent) or agent.continue_target != nil do
       stale_submission(state)
     else
       with_displayed_draft(state, generation, offer, fn state ->

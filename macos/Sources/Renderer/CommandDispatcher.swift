@@ -1302,10 +1302,10 @@ final class CommandDispatcher {
                 guiState.pickerState.clearPreview()
             }
 
-        case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptMode, let promptVisibleRows, let promptCompletion, _, _, let draftAttachmentCount, let draftAttachmentOffer, let question, let stopTarget, let promptPresentation, let queueTarget, let lifecycle):
+        case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptMode, let promptVisibleRows, let promptCompletion, _, _, let draftAttachmentCount, let draftAttachmentOffer, let question, let stopTarget, let promptPresentation, let queueTarget, let lifecycle, let composerHints, let continueTarget):
             let wasVisible = guiState.agentChatState.visible
             if visible {
-                guiState.agentChatState.update(visible: true, status: status, model: model, thinkingLevel: thinkingLevel, prompt: prompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: promptMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, draftAttachmentCount: draftAttachmentCount, draftAttachmentOffer: draftAttachmentOffer, question: question, stopTarget: stopTarget, promptPresentation: promptPresentation, queueTarget: queueTarget, lifecycle: lifecycle)
+                guiState.agentChatState.update(visible: true, status: status, model: model, thinkingLevel: thinkingLevel, prompt: prompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: promptMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, draftAttachmentCount: draftAttachmentCount, draftAttachmentOffer: draftAttachmentOffer, question: question, stopTarget: stopTarget, promptPresentation: promptPresentation, queueTarget: queueTarget, lifecycle: lifecycle, composerHints: composerHints, continueTarget: continueTarget)
             } else {
                 guiState.agentChatState.hide()
             }

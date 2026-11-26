@@ -88,6 +88,54 @@ defmodule MingaAgent.RemoteAPITest do
     assert {:ok, 1, ^draft} = RemoteAPI.composer(id, token, session, second, :read)
   end
 
+  test "a Continue queued by a detached driver cannot resume the stopped request", %{tmp_dir: dir} do
+    assert {:ok, %SessionInfo{session_id: id, pid: session, token: token}} =
+             RemoteAPI.start_session(
+               provider: Minga.Test.SessionSlowMockProvider,
+               session_store_dir: dir
+             )
+
+    on_exit(fn -> SessionManager.stop_session(id) end)
+
+    assert {:ok, %{role: :driver}} =
+             RemoteAPI.attach(id, token, self(), role: :driver, questions?: true)
+
+    assert_receive {:agent_question_attachment, ^session, receipt}
+    first = {self(), receipt}
+    assert :ok = RemoteAPI.send_prompt(id, token, self(), "Start work")
+    assert %{stop_target: {^id, _request} = target} = Session.editor_snapshot(session)
+    assert :ok = Session.stop_turn(session, target)
+    assert %{continue_target: ^target} = Session.editor_snapshot(session)
+
+    assert {:error, :unauthorized} =
+             RemoteAPI.continue_stopped(session, "invalid-token", first, target)
+
+    assert {:error, :stale_turn} =
+             RemoteAPI.continue_stopped(self(), token, first, target)
+
+    assert :ok = RemoteAPI.detach(id, token, first)
+    assert {:error, :not_driver} = RemoteAPI.continue_stopped(session, token, first, target)
+    assert Session.status(session) == :stopped
+
+    assert {:ok, %{role: :driver}} =
+             RemoteAPI.attach(id, token, self(), role: :driver, questions?: true)
+
+    assert_receive {:agent_question_attachment, ^session, new_receipt}
+    second = {self(), new_receipt}
+    assert {:error, :not_driver} = RemoteAPI.continue_stopped(session, token, first, target)
+
+    assert {:error, :stale_turn} =
+             RemoteAPI.continue_stopped(session, token, second, {id, "old request"})
+
+    assert %{status: :stopped, continue_target: ^target} = Session.editor_snapshot(session)
+    assert :ok = RemoteAPI.continue_stopped(session, token, second, target)
+
+    assert %{stop_target: {^id, _request} = resumed, continue_target: nil} =
+             Session.editor_snapshot(session)
+
+    refute resumed == target
+  end
+
   test "remote reattachment reconciles the exact durable queue receipt without resending", %{
     tmp_dir: dir
   } do

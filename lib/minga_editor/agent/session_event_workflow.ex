@@ -192,13 +192,12 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
     |> MingaEditor.schedule_render(16)
   end
 
-  @doc "Applies queue presentation for a newly queued prompt."
+  @doc """
+  Applies queue presentation for a newly queued prompt. A queued message is a next step, not the task, so it never renames the task (#4055).
+  """
   @spec prompt_queued(EditorState.t(), String.t(), term()) :: EditorState.t()
-  def prompt_queued(%EditorState{} = state, content, _queue_type) when is_binary(content) do
-    state
-    |> maybe_auto_name_workspace(content)
-    |> MingaEditor.schedule_render(16)
-  end
+  def prompt_queued(%EditorState{} = state, content, _queue_type) when is_binary(content),
+    do: MingaEditor.schedule_render(state, 16)
 
   @doc "Refreshes queue presentation after both prompt queues are recalled."
   @spec queues_recalled(EditorState.t()) :: EditorState.t()
@@ -259,34 +258,6 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   @spec append_current_prompt(String.t(), String.t()) :: String.t()
   defp append_current_prompt(combined, ""), do: combined
   defp append_current_prompt(combined, current_text), do: combined <> "\n\n" <> current_text
-
-  @spec maybe_auto_name_workspace(EditorState.t(), String.t()) :: EditorState.t()
-  defp maybe_auto_name_workspace(state, prompt) do
-    session = Runtime.active_session(state.shell_runtime)
-
-    case workspace_for_session(traditional_tab_bar(state), session) do
-      %Workspace{id: workspace_id} ->
-        WorkspaceWorkflow.install_auto_named_workspace(state, workspace_id, prompt)
-
-      nil ->
-        state
-    end
-  end
-
-  @spec workspace_for_session(TabBar.t() | nil, pid() | nil) :: Workspace.t() | nil
-  defp workspace_for_session(nil, _session), do: nil
-  defp workspace_for_session(_tab_bar, session) when not is_pid(session), do: nil
-
-  defp workspace_for_session(tab_bar, session),
-    do: TabBar.find_workspace_by_session(tab_bar, session)
-
-  @spec traditional_tab_bar(EditorState.t()) :: TabBar.t() | nil
-  defp traditional_tab_bar(%EditorState{
-         shell_runtime: %Runtime{state: %TraditionalState{} = state}
-       }),
-       do: TraditionalState.tab_bar(state)
-
-  defp traditional_tab_bar(%EditorState{}), do: nil
 
   @spec update_activity(EditorState.t(), (Activity.t() -> Activity.t())) :: EditorState.t()
   defp update_activity(state, fun) when is_function(fun, 1) do

@@ -101,5 +101,6 @@ defmodule Minga.Frontend.Adapter.GUI.TabBarEncoder do
   defp encode_agent_status(:plan), do: 4
   defp encode_agent_status(:approval_waiting), do: 5
   defp encode_agent_status(:needs_you), do: 6
+  defp encode_agent_status(:stopped), do: 7
   defp encode_agent_status(_), do: 0
 end

@@ -610,15 +610,44 @@ defmodule MingaEditor.Commands.Agent do
   end
 
   @doc """
-  Submits the current input text as a prompt.
+  Submits the current input or continues the displayed stopped turn without sending the draft.
 
   While the active tab's start has failed, a prompt cannot be sent, so submit runs the failure's remedy instead and leaves the draft as it is. A known slash command such as `/login` or `/new` still runs, because it does not need the session. The draft is not sent after a retry; the user submits again once the session is ready.
   """
   @spec submit_prompt(state()) :: state()
   def submit_prompt(state) do
-    if runs_start_remedy?(state.workspace.agent_ui),
-      do: AgentSession.run_start_remedy(state),
-      else: submit_draft(state)
+    case foreground_continue_target(state) do
+      {session, target} ->
+        TurnRequest.continue(state, session, target)
+
+      nil ->
+        if runs_start_remedy?(state.workspace.agent_ui),
+          do: AgentSession.run_start_remedy(state),
+          else: submit_draft(state)
+    end
+  end
+
+  @doc "Continues the exact stopped turn shown by the frontend, never a replacement."
+  @spec continue_displayed_turn(state(), {String.t(), String.t()}) :: state()
+  def continue_displayed_turn(state, target) do
+    case foreground_continue_target(state) do
+      {session, ^target} ->
+        TurnRequest.continue(state, session, target)
+
+      _stale ->
+        NoticeWorkflow.publish(state, "That stopped turn is no longer available.")
+    end
+  end
+
+  @spec foreground_continue_target(state()) :: {pid(), {String.t(), String.t()}} | nil
+  defp foreground_continue_target(state) do
+    agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+    session = Runtime.active_session(state.shell_runtime)
+
+    case agent.continue_target do
+      {^session, _target} = bound when is_pid(session) -> bound
+      _other -> nil
+    end
   end
 
   @spec runs_start_remedy?(UIState.t()) :: boolean()
@@ -871,11 +900,13 @@ defmodule MingaEditor.Commands.Agent do
       )
 
   @doc """
-  Applies what a Session answered to a composer send or a stop the Editor asked for without waiting (`MingaEditor.Agent.TurnRequest`).
+  Applies what a Session answered to a composer send, Stop, or Continue without blocking the Editor (`MingaEditor.Agent.TurnRequest`).
 
   A send that went removes its text from the composer it was pressed in, in front or not. A send that was refused, or whose Session exited before it answered, keeps the text and says why in one line.
 
   A stop that went says nothing when the modeline shows it. When it stopped a conversation the modeline does not speak for, one line names the task that was stopped.
+
+  Continue keeps the draft. It says why if the stopped request is gone or cannot continue.
   """
   @spec settle_turn_request(state(), TurnRequest.t(), TurnRequest.answer()) :: state()
   def settle_turn_request(state, %TurnRequest{work: {:stop, _target}, session: session}, :ok),
@@ -886,6 +917,24 @@ defmodule MingaEditor.Commands.Agent do
 
   def settle_turn_request(state, %TurnRequest{work: {:stop, _target}}, _unanswered),
     do: NoticeWorkflow.publish(state, "Could not confirm the Agent stop request.")
+
+  def settle_turn_request(state, %TurnRequest{work: {:continue, _target}}, :ok), do: state
+
+  def settle_turn_request(state, %TurnRequest{work: {:continue, _target}}, {:error, :stale_turn}),
+    do: NoticeWorkflow.publish(state, "That stopped turn is no longer available.")
+
+  def settle_turn_request(state, %TurnRequest{work: {:continue, _target}}, {:error, :not_driver}),
+    do: NoticeWorkflow.publish(state, "Only the attached session driver can continue this turn.")
+
+  def settle_turn_request(state, %TurnRequest{work: {:continue, _target}}, {:error, reason}),
+    do:
+      NoticeWorkflow.publish(
+        state,
+        "Could not continue: #{MingaEditor.Agent.ErrorWords.describe(reason)}"
+      )
+
+  def settle_turn_request(state, %TurnRequest{work: {:continue, _target}}, :session_down),
+    do: NoticeWorkflow.publish(state, "Agent session unavailable. Your prompt was preserved.")
 
   def settle_turn_request(
         state,
@@ -1695,23 +1744,24 @@ defmodule MingaEditor.Commands.Agent do
   @doc """
   Context-sensitive Ctrl-C handler.
 
-  Always leaves Insert mode, as Escape does (vim convention). While Minga works it also stops the turn, as `SPC a s` does, and keeps the queue. After a provider error it also restarts the provider.
+  Always leaves Insert mode, as Escape does (vim convention). While this conversation has a turn to stop it also stops the turn, as `SPC a s` does, and keeps the queue: that includes a turn that waits for an approval, a turn in plan mode and a turn that reported an error and is still running. With no turn to stop, after a provider error it restarts the provider.
   """
   @spec scope_ctrl_c(state()) :: state()
   def scope_ctrl_c(state) do
     state
-    |> interrupt_for_ctrl_c(
-      MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state).runtime.status
-    )
+    |> interrupt_for_ctrl_c(MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state))
     |> input_to_normal()
   end
 
-  @spec interrupt_for_ctrl_c(state(), atom()) :: state()
-  defp interrupt_for_ctrl_c(state, status) when status in [:thinking, :tool_executing],
-    do: abort_agent(state)
+  # Stop acts on the stop target, so the composer's `⌃C stop` hint and this
+  # command agree on when there is something to stop.
+  @spec interrupt_for_ctrl_c(state(), MingaEditor.State.Agent.t()) :: state()
+  defp interrupt_for_ctrl_c(state, %{stop_target: {_session, _target}}), do: abort_agent(state)
 
-  defp interrupt_for_ctrl_c(state, :error), do: restart_agent_provider(state)
-  defp interrupt_for_ctrl_c(state, _status), do: state
+  defp interrupt_for_ctrl_c(state, %{runtime: %{status: :error}}),
+    do: restart_agent_provider(state)
+
+  defp interrupt_for_ctrl_c(state, _agent), do: state
 
   @doc "Starts an agent session if one isn't already running. No-op otherwise."
   @spec ensure_agent_session(state()) :: state()

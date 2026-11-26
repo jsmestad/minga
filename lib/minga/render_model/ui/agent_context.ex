@@ -4,7 +4,7 @@ defmodule Minga.RenderModel.UI.AgentContext do
   alias __MODULE__.Progress
   alias __MODULE__.Todo
 
-  @type status :: :idle | :working | :iterating | :needs_you | :done | :errored
+  @type status :: :idle | :working | :iterating | :needs_you | :done | :errored | :stopped
 
   @type t :: %__MODULE__{
           visible: boolean(),

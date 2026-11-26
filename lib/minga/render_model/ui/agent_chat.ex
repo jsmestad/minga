@@ -39,6 +39,10 @@ defmodule Minga.RenderModel.UI.AgentChat do
   Bare body tuples (without an `id` wrapper) are also accepted and encode with
   ID `0`, matching the historical wire behaviour.
 
+  ## Composer hints
+
+  `composer_hints` are the keys the focused composer answers to, in the order the composer's border shows them. The editor builder takes them from `Minga.Keymap.Scope.Agent.composer_key_hints/2`, so they always name a bound key; frontends render them exactly as sent and show them only while the composer has focus.
+
   ## Lifecycle notice
 
   A chat without a live conversation shows a notice. `lifecycle_headline` names what happened to the tab and `draft_note` tells the user the draft survives and which key starts a new session. Both are authored by the editor builder; frontends render them exactly as sent, and an empty `draft_note` means no note line. Neither is sent for a live conversation.
@@ -84,6 +88,9 @@ defmodule Minga.RenderModel.UI.AgentChat do
           | {:system, String.t(), atom()}
           | {:usage, Usage.t()}
 
+  @typedoc "One composer key hint: the keys as shown (`⌥↩`, `SPC a s`) and what they do."
+  @type composer_hint :: {keys :: String.t(), action :: String.t()}
+
   @typedoc "A message with its stable GUI identity, or a bare body that encodes with ID 0."
   @type message :: {pos_integer(), message_body()} | message_body()
 
@@ -121,9 +128,11 @@ defmodule Minga.RenderModel.UI.AgentChat do
           draft_attachment_offer: pos_integer() | nil,
           pending_question: {pos_integer(), String.t()} | nil,
           stop_target: {String.t(), String.t()} | nil,
+          continue_target: {String.t(), String.t()} | nil,
           queue_target: {String.t(), String.t(), pos_integer()} | nil,
           prompt_completion: PromptCompletion.t() | nil,
           input_focused: boolean(),
+          composer_hints: [composer_hint()],
           resident_messages: [message()],
           resident_truncated?: boolean(),
           transcript_epoch: non_neg_integer()
@@ -142,6 +151,7 @@ defmodule Minga.RenderModel.UI.AgentChat do
             queue_target: nil,
             pending_question: nil,
             stop_target: nil,
+            continue_target: nil,
             prompt_line_count: 1,
             prompt_cursor_line: 0,
             prompt_cursor_col: 0,
@@ -150,6 +160,7 @@ defmodule Minga.RenderModel.UI.AgentChat do
             prompt_presentation: nil,
             prompt_completion: nil,
             input_focused: false,
+            composer_hints: [],
             resident_messages: [],
             resident_truncated?: false,
             transcript_epoch: 0
@@ -263,6 +274,8 @@ defmodule Minga.RenderModel.UI.AgentChat do
     resolved one-line summary string, `status` is a core atom
     (`:running | :complete | :error | :denied | :cancelled | :approval_expired`), and `auto_approved_scope` is a core atom
     (`:session | :turn | nil`).
+
+    `step` is the one sentence the conversation shows for the call and `state` the shared state it is drawn in, both from `Minga.RenderModel.UI.AgentChat.ToolStep`, so no frontend maps a status to words.
     """
 
     @typedoc "Resolved tool-call outcome, including an explicitly expired approval."
@@ -285,10 +298,14 @@ defmodule Minga.RenderModel.UI.AgentChat do
             auto_approved_scope: auto_approved_scope(),
             preview_kind: preview_kind(),
             preview_lines: [String.t()],
-            retained_output_offer: <<_::128>> | nil
+            retained_output_offer: <<_::128>> | nil,
+            step: String.t(),
+            state: Minga.RenderModel.UI.AgentChat.ToolStep.state()
           }
 
     defstruct name: "",
+              step: "",
+              state: :working,
               summary: "",
               result: "",
               status: :running,
@@ -306,9 +323,11 @@ defmodule Minga.RenderModel.UI.AgentChat do
     Pre-resolved core view of an inline approval tool call card.
 
     The editor builder runs the agent's approval-preview builder (or reads a
-    supplied preview), then stores the already-built `summary`, `preview_kind`
-    (`:diff | :command | :target | :args`), and `preview_lines` here. The GUI
+    supplied preview), then stores the already-built `preview_kind`
+    (`:diff | :command | :target | :args`) and `preview_lines` here. The GUI
     encoder serializes these resolved fields without touching any agent struct.
+
+    `summary` is the card's headline: the question it asks, in the decision's own words ("Write notes.txt?", "Run `mix test`?"), from `Minga.RenderModel.UI.AgentChat.ToolStep.question/2`. Frontends draw it as the card's title and never show `name`, the tool's raw name, to the user.
     """
 
     @typedoc "Resolved preview kind for an approval card."

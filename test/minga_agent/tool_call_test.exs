@@ -238,6 +238,30 @@ defmodule MingaAgent.ToolCallTest do
     end
   end
 
+  describe "stop/1" do
+    test "a running call the user stops is cancelled, keeping what it printed" do
+      stopped = "tc1" |> ToolCall.new("bash") |> ToolCall.stop()
+
+      assert {stopped.status, stopped.result, stopped.terminal_reason} ==
+               {:cancelled, "stopped", nil}
+
+      partial = ToolCall.restore(id: "tc2", name: "bash", result: "line one\n")
+      assert ToolCall.stop(partial).result == "stopped\n\nline one\n"
+    end
+
+    test "a finished call is left as it was" do
+      for finish <- [
+            &ToolCall.complete(&1, "ok"),
+            &ToolCall.error(&1, "no"),
+            &ToolCall.deny(&1, "no"),
+            &ToolCall.cancel(&1, "no")
+          ] do
+        done = "tc" |> ToolCall.new("bash") |> finish.()
+        assert ToolCall.stop(done) == done
+      end
+    end
+  end
+
   describe "abort/1" do
     test "aborts a running tool call" do
       tc = ToolCall.new("tc1", "bash")

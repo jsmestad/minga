@@ -10,6 +10,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatMessageCodec do
   import Bitwise
 
   alias Minga.Frontend.Adapter.GUI.Wire.Writer
+  alias Minga.Design.Tokens
   alias Minga.RenderModel.UI.AgentChat
   alias Minga.RenderModel.UI.AgentChat.ApprovalView
   alias Minga.RenderModel.UI.AgentChat.MarkdownBlock
@@ -69,6 +70,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatMessageCodec do
     |> Writer.uint32(:duration_ms, tc.duration_ms || 0)
     |> Writer.string16(:tool_name, tc.name)
     |> Writer.string16(:summary, tc.summary || "")
+    |> encode_tool_step(tc)
     |> Writer.string32(:result, tc.result)
     |> Writer.uint8(:auto_approved_scope, auto_approved_scope_byte(tc.auto_approved_scope))
     |> Writer.append(encode_preview_payload(tc.preview_kind, tc.preview_lines))
@@ -99,6 +101,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatMessageCodec do
     |> Writer.uint32(:duration_ms, tc.duration_ms || 0)
     |> Writer.string16(:tool_name, tc.name)
     |> Writer.string16(:summary, tc.summary || "")
+    |> encode_tool_step(tc)
     |> Writer.uint16(:line_count, Enum.count(styled_lines))
     |> Writer.append(Enum.map(styled_lines, &encode_styled_line/1))
     |> Writer.uint8(:auto_approved_scope, auto_approved_scope_byte(tc.auto_approved_scope))
@@ -127,6 +130,15 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatMessageCodec do
     |> Writer.finish()
   end
 
+  # The conversation's one line for the call: its state (a shared state byte,
+  # `Minga.Design.Tokens.state_wire/1`) and its sentence.
+  @spec encode_tool_step(Writer.t(), ToolCallView.t()) :: Writer.t()
+  defp encode_tool_step(writer, %ToolCallView{state: state, step: step}) do
+    writer
+    |> Writer.uint8(:state, Tokens.state_wire(state))
+    |> Writer.string16(:step, step || "")
+  end
+
   @spec tool_message_header(Writer.t(), byte(), byte(), <<_::128>> | nil) :: Writer.t()
   defp tool_message_header(writer, plain, _offered, nil),
     do: Writer.uint8(writer, :message_kind, plain)
@@ -151,13 +163,6 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatMessageCodec do
     |> Writer.uint8(:preview_kind, preview_kind_byte(kind))
     |> Writer.uint16(:preview_line_count, Enum.count(lines))
     |> Writer.append(Enum.map(lines, &encode_preview_line/1))
-    |> Writer.finish()
-  end
-
-  defp encode_preview_payload(kind, _lines) do
-    Writer.new(@command)
-    |> Writer.uint8(:preview_kind, preview_kind_byte(kind))
-    |> Writer.uint16(:preview_line_count, 0)
     |> Writer.finish()
   end
 

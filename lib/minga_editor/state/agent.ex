@@ -46,7 +46,8 @@ defmodule MingaEditor.State.Agent do
           pending_approval: approval() | nil,
           pending_question: PendingQuestion.t() | nil,
           queue_target: {pid(), MingaAgent.Session.queue_target()} | nil,
-          stop_target: {pid(), {String.t(), String.t()}} | nil
+          stop_target: {pid(), {String.t(), String.t()}} | nil,
+          continue_target: {pid(), {String.t(), String.t()}} | nil
         }
 
   defstruct session: nil,
@@ -56,7 +57,8 @@ defmodule MingaEditor.State.Agent do
             pending_approval: nil,
             pending_question: nil,
             queue_target: nil,
-            stop_target: nil
+            stop_target: nil,
+            continue_target: nil
 
   # ── Status ──────────────────────────────────────────────────────────────────
 
@@ -143,7 +145,8 @@ defmodule MingaEditor.State.Agent do
         pending_approval: nil,
         pending_question: nil,
         queue_target: nil,
-        stop_target: nil
+        stop_target: nil,
+        continue_target: nil
     }
   end
 
@@ -175,6 +178,14 @@ defmodule MingaEditor.State.Agent do
 
   def project_stop_target(%__MODULE__{} = agent, session, {_, _} = target),
     do: %{agent | stop_target: {session, target}}
+
+  @doc "Binds the displayed stopped turn to its attached Session."
+  @spec project_continue_target(t(), pid(), {String.t(), String.t()} | nil) :: t()
+  def project_continue_target(%__MODULE__{} = agent, _session, nil),
+    do: %{agent | continue_target: nil}
+
+  def project_continue_target(%__MODULE__{} = agent, session, {_, _} = target),
+    do: %{agent | continue_target: {session, target}}
 
   @doc "Replaces the question projection for the attached Session."
   @spec project_question(t(), pid(), {QuestionTarget.t(), Question.t()} | nil) :: t()

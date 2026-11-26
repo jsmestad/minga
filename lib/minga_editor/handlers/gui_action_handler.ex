@@ -141,6 +141,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
         &AgentCommands.submit_prompt/1
       )
 
+  defp dispatch_action(state, {:agent_continue_turn, target}),
+    do: AgentCommands.continue_displayed_turn(state, target)
+
   defp dispatch_action(state, {:agent_composer_queue, generation, offer, kind, target}),
     do:
       MingaEditor.Agent.PromptInput.queue_displayed(
@@ -555,6 +558,20 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   defp dispatch_action(state, {:execute_command, "redo"}),
     do: execute_history_command(state, :redo)
+
+  # The Edit menu's Select All selects the text you are in. While the composer has
+  # the keys that text is the draft, not the file behind the conversation.
+  defp dispatch_action(
+         %{workspace: %{keymap_scope: :agent, agent_ui: %{panel: %{input_focused: true}}}} =
+           state,
+         {:execute_command, "select_all"}
+       ) do
+    MingaEditor.Input.AgentPanel.with_prompt_buffer(state, fn draft ->
+      draft
+      |> Commands.execute(:select_all)
+      |> normalize_command_result()
+    end)
+  end
 
   # The header names its Agent surface even when another panel owns keyboard focus.
   defp dispatch_action(state, {:execute_command, "agent_toggle_help"}),

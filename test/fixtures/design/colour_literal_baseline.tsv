@@ -20,16 +20,12 @@ macos/Sources/Renderer/FrameState.swift	var gitDeletedFg: UInt32 = 0xFF6C6B
 macos/Sources/Renderer/FrameState.swift	var scrollIndicatorColor: UInt32 = 0x555555
 macos/Sources/Renderer/WindowContentRenderer.swift	var defaultFgRGB: UInt32 = 0xBBC2CF
 macos/Sources/Renderer/WindowContentRenderer.swift	let color = NSColor(red: r, green: g, blue: b, alpha: 1.0)
-macos/Sources/Views/Agent/AgentApprovalCard.swift	.foregroundStyle(Color.orange)
 macos/Sources/Views/Agent/AgentApprovalCard.swift	return Color.green.opacity(0.75)
 macos/Sources/Views/Agent/AgentApprovalCard.swift	return Color.red.opacity(0.75)
 macos/Sources/Views/Agent/AgentApprovalCard.swift	RoundedRectangle(cornerRadius: Radius.lg).stroke(Color.orange.opacity(0.5), lineWidth: 1)
-macos/Sources/Views/Agent/AgentChatView.swift	.foregroundStyle(isError ? Color.red.opacity(0.7) : theme.agentTextFg.opacity(0.4))
 macos/Sources/Views/Agent/AgentContextBar.swift	color: Color(red: 0.2, green: 0.8, blue: 0.4),
 macos/Sources/Views/Agent/AgentContextBar.swift	color: Color(red: 1.0, green: 0.75, blue: 0.2),
 macos/Sources/Views/Agent/AgentContextBar.swift	color: Color(red: 0.6, green: 0.3, blue: 0.3),
-macos/Sources/Views/Agent/AgentToolCallCard.swift	return Color.green.opacity(0.75)
-macos/Sources/Views/Agent/AgentToolCallCard.swift	return Color.red.opacity(0.75)
 macos/Sources/Views/EditorChrome/StatusBarView.swift	.fill(Color.red)
 macos/Sources/Views/EditorChrome/StatusBarView.swift	(value >= 0x100000 && value <= 0x10FFFD)
 macos/Sources/Views/EditorChrome/StatusBarView.swift	(value >= 0x100000 && value <= 0x10FFFD)
@@ -117,10 +113,6 @@ go/tui/internal/ui/model.go	Foreground(lipgloss.Color("#7aa2f7")).
 go/tui/internal/ui/overlay_stack.go	line := lipgloss.NewStyle().Background(lipgloss.Color("#000000")).Render(strings.Repeat(" ", w))
 # Literals below already existed on main when the pattern learned .white, .black, .gray, Color(white:, NSColor(white: and leading-dot named colours such as `return .red`; they were newly detected, not newly written.
 macos/Sources/Views/Agent/AgentPromptView.swift	.shadow(color: .black.opacity(0.2), radius: 8, y: -4)
-macos/Sources/Views/Agent/AgentToolCallCard.swift	case .running, .denied, .approvalExpired: .orange
-macos/Sources/Views/Agent/AgentToolCallCard.swift	case .complete: .green
-macos/Sources/Views/Agent/AgentToolCallCard.swift	case .error: .red
-macos/Sources/Views/Agent/AgentToolCallCard.swift	case .unknown: isError ? .red : theme.agentToolHeader
 macos/Sources/Views/EditorChrome/WorkspaceHeaderView.swift	badge("⚠︎\(workspace.conflictCount)", help: "Workspace conflicts need resolution", color: .orange)
 macos/Sources/Views/EditorChrome/WorkspaceHeaderView.swift	badge("!", help: "Workspace needs attention", color: .red)
 macos/Sources/Views/EditorChrome/WorkspaceHeaderView.swift	badge("bg ⚠︎\(workspaceState.backgroundConflictCount)", help: "Background workspace conflicts need resolution", color: .orange)

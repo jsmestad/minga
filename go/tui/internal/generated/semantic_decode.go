@@ -75,6 +75,22 @@ func decodeU64(data []byte, offset int) uint64 {
 	return binary.BigEndian.Uint64(data[offset : offset+8])
 }
 
+func DecodeComposerHint(data []byte, offset int, windowEnd int) (ComposerHint, int, error) {
+	pos := offset
+	keys, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return ComposerHint{}, offset, err
+	}
+	action, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return ComposerHint{}, offset, err
+	}
+	return ComposerHint{
+		Keys:   keys,
+		Action: action,
+	}, pos, nil
+}
+
 func DecodeRect(data []byte, offset int, windowEnd int) (Rect, int, error) {
 	pos := offset
 	if err := decodeRequireWindow(windowEnd, pos+2, "row"); err != nil {
@@ -1341,6 +1357,43 @@ func DecodeGuiAgentChatLifecycle(data []byte, offset int, windowEnd int) (GuiAge
 		KeyHint:     keyHint,
 		Headline:    headline,
 		Note:        note,
+	}, pos, nil
+}
+
+func DecodeGuiAgentChatComposerHints(data []byte, offset int, windowEnd int) (GuiAgentChatComposerHints, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+1, "hints count"); err != nil {
+		return GuiAgentChatComposerHints{}, offset, err
+	}
+	hintsCount := int(data[pos])
+	pos += 1
+	hints := make([]ComposerHint, 0, min(hintsCount, len(data)-pos))
+	for i := 0; i < hintsCount; i++ {
+		item, nextPos, err := DecodeComposerHint(data, pos, windowEnd)
+		if err != nil {
+			return GuiAgentChatComposerHints{}, offset, err
+		}
+		pos = nextPos
+		hints = append(hints, item)
+	}
+	return GuiAgentChatComposerHints{
+		Hints: hints,
+	}, pos, nil
+}
+
+func DecodeGuiAgentChatContinueTarget(data []byte, offset int, windowEnd int) (GuiAgentChatContinueTarget, int, error) {
+	pos := offset
+	sessionID, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiAgentChatContinueTarget{}, offset, err
+	}
+	requestID, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiAgentChatContinueTarget{}, offset, err
+	}
+	return GuiAgentChatContinueTarget{
+		SessionID: sessionID,
+		RequestID: requestID,
 	}, pos, nil
 }
 

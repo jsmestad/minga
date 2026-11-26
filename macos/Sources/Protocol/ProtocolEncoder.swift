@@ -225,9 +225,9 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
                 ?? oversizedString(target.turn.requestID, limit: Int(UInt16.max))
         case .agentOpenQuestion(let offer):
             return offer == 0 ? .invalidPayload("Agent question requires a displayed offer") : nil
-        case .agentStopTurn(let target):
+        case .agentStopTurn(let target), .agentContinueTurn(let target):
             guard !target.sessionID.isEmpty, !target.requestID.isEmpty else {
-                return .invalidPayload("Agent Stop requires session and request identity")
+                return .invalidPayload("Agent turn control requires session and request identity")
             }
             return oversizedString(target.sessionID, limit: Int(UInt16.max))
                 ?? oversizedString(target.requestID, limit: Int(UInt16.max))
@@ -443,6 +443,11 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             writeFrame(Data([OP_GUI_ACTION, GUI_ACTION_AGENT_START_REMEDY, kind.rawValue]))
         case .agentStopTurn(let target):
             var buf = Data([OP_GUI_ACTION, GUI_ACTION_AGENT_STOP_TURN])
+            appendString16(&buf, target.sessionID)
+            appendString16(&buf, target.requestID)
+            writeFrame(buf)
+        case .agentContinueTurn(let target):
+            var buf = Data([OP_GUI_ACTION, GUI_ACTION_AGENT_CONTINUE_TURN])
             appendString16(&buf, target.sessionID)
             appendString16(&buf, target.requestID)
             writeFrame(buf)

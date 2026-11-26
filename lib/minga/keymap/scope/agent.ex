@@ -234,6 +234,69 @@ defmodule Minga.Keymap.Scope.Agent do
     end
   end
 
+  @typedoc "Where the composer's keys go: Vim Insert, Vim Normal, another Vim mode (Visual, operator-pending, Replace), or the CUA composer."
+  @type composer_focus :: :insert | :normal | :other_mode | :cua
+
+  @typedoc """
+  Facts that change the composer's hints: `:native_gui` (the macOS app can send ⌘), `:working` (this conversation has a turn to stop, including a turn waiting for approval), `:stopped` (the composer can continue the exact stopped turn without sending the draft) and `:remedy` (a failed start binds ↩ in Normal to its remedy, which the chat shows with its own key, so nothing sends).
+  """
+  @type composer_hint_option ::
+          {:native_gui, boolean()}
+          | {:working, boolean()}
+          | {:stopped, boolean()}
+          | {:remedy, boolean()}
+
+  @doc """
+  The key hints the focused composer shows, most important first, as `{keys, action}` pairs.
+
+  Each hint names a key this scope binds for that focus (or, for stop in the terminal, the leader key `SPC a s`), so a hint never promises a key that does nothing. A terminal cannot send ⌘, so the terminal hints name the keys it can send.
+  """
+  @spec composer_key_hints(composer_focus(), [composer_hint_option()]) :: [
+          {String.t(), String.t()}
+        ]
+  def composer_key_hints(focus, opts \\ [])
+
+  def composer_key_hints(focus, opts) when is_list(opts) do
+    if Keyword.get(opts, :remedy, false),
+      do: remedy_key_hints(focus),
+      else: send_key_hints(focus, opts)
+  end
+
+  @spec remedy_key_hints(composer_focus()) :: [{String.t(), String.t()}]
+  defp remedy_key_hints(:insert), do: [{"↩", "new line"}, {"esc", "normal"}]
+  defp remedy_key_hints(_focus), do: []
+
+  @spec send_key_hints(composer_focus(), [composer_hint_option()]) :: [{String.t(), String.t()}]
+  defp send_key_hints(focus, opts) do
+    native? = Keyword.get(opts, :native_gui, false)
+    send = if Keyword.get(opts, :stopped, false), do: "continue", else: "send"
+    stop = if Keyword.get(opts, :working, false), do: stop_hint(native?, focus), else: []
+
+    # Stop comes first while a turn works: it is the key a user needs most then, and a narrow composer
+    # drops hints from the end, so the first hint is the last one lost.
+    case focus do
+      :insert -> stop ++ [insert_send_hint(native?, send), {"⌥↩", "queue"}, {"esc", "normal"}]
+      :normal -> stop ++ [{"↩", send}, {"i", "insert"}]
+      # Visual and the other Vim modes keep every key for the edit under way: nothing sends or stops there.
+      :other_mode -> [{"esc", "normal"}]
+      :cua -> stop ++ [{"↩", send}, {"⌥↩", "new line"}]
+    end
+  end
+
+  @spec insert_send_hint(boolean(), String.t()) :: {String.t(), String.t()}
+  defp insert_send_hint(true, send), do: {"⌘↩", send}
+  defp insert_send_hint(false, send), do: {"esc ↩", send}
+
+  # The terminal has no ⌘: Normal reaches the leader and Insert stops with ⌃C.
+  # Desktop shortcuts in the terminal have no stop key (⌃C copies there), so they
+  # hint none.
+  @spec stop_hint(boolean(), composer_focus()) :: [{String.t(), String.t()}]
+  defp stop_hint(true, _focus), do: [{"⌘.", "stop"}]
+  defp stop_hint(false, :normal), do: [{"SPC a s", "stop"}]
+  defp stop_hint(false, :insert), do: [{"⌃C", "stop"}]
+  defp stop_hint(false, :cua), do: []
+  defp stop_hint(false, :other_mode), do: []
+
   @spec start_remedy_description(start_remedy()) :: String.t()
   defp start_remedy_description(:retry), do: "Retry Agent start"
   defp start_remedy_description(:set_up_provider), do: "Set up provider"
@@ -495,6 +558,8 @@ defmodule Minga.Keymap.Scope.Agent do
         |> Bindings.bind([{@enter, @alt}], :agent_insert_newline, "Insert newline")
         |> Bindings.bind(~k(ESC), :agent_dismiss_or_noop, "Dismiss/cancel")
         |> Bindings.bind(~k(TAB), :agent_switch_focus, "Switch panel focus")
+        # Stop: the macOS platform alias of SPC a s
+        |> Bindings.bind([{?., @cmd}], :agent_abort, "Stop")
         # Cmd chords (GUI) + Ctrl fallbacks (TUI)
         |> Bindings.bind([{?c, @cmd}], :agent_copy_code_block, "Copy code block")
         |> Bindings.bind([{?a, @cmd}], :select_all, "Select all")

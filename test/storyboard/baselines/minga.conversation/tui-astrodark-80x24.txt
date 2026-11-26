@@ -1,0 +1,120 @@
+# minga storyboard frame v1
+# scenario: minga.conversation
+# frontend: tui
+# theme: astrodark
+# size: 80x24
+# cursor: 17,13
+## text
+Spaces · folder minga.conversation (1 tab) · ▎cpu A 429 with usage_limit_reached
+ ▌ 󰚩 Show the plan limit and…
+ 󰚩 Agent  Resolving model…          ◐ Working  [Tasks] [History] [Help] [Queue]
+  Transcript ──────────────────────────────────────────────────────────────────
+
+   i System  Saved the retry notes to lib/native/usage_limit/notes.md; open
+             that file to review the plan, window and reset time.
+
+   You
+     Also show the reset time in the modeline.
+
+   Minga
+     Also show the reset time in the modeline.
+
+   i System  Agent UI registry online
+  2 messages · Working
+ ╭ Running...                                                                 ╮
+ │ ❯ INSERT  Ask Minga to edit, explain, search, or run tools                 │
+ │Send · Steer · Queue Next · Stop · Attachments · ⌃C stop · esc ↩ send       │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+────────────────────────────────────────────────────────────────────────────────
+ Review files (0)  [All Changes]  ]F  wheel
+No changed files
+  INSERT  [no file] ◐ Minga working                                    Text 1:1
+## styles (row start-end fg bg attrs)
+0 0-44 #595c66 #111317 -
+0 45-79 #50a4e9 #111317 bold
+1 0-0 #adb0bb #1a1d23 -
+1 1-1 #50a4e9 #1a1d23 bold
+1 2-79 #adb0bb #1a1d23 -
+2 0-0 #adb0bb #1a1d23 -
+2 1-7 #50a4e9 #16181d bold
+2 8-9 #595c66 #16181d -
+2 10-25 #50a4e9 #16181d -
+2 26-33 #adb0bb #1a1d23 -
+2 34-34 #595c66 #16181d -
+2 35-35 #adb0bb #dd97f1 -
+2 36-44 #16181d #dd97f1 bold
+2 45-45 #adb0bb #dd97f1 -
+2 46-46 #adb0bb #1a1d23 -
+2 47-53 #595c66 #16181d -
+2 54-54 #adb0bb #1a1d23 -
+2 55-63 #595c66 #16181d -
+2 64-64 #adb0bb #1a1d23 -
+2 65-70 #595c66 #16181d -
+2 71-71 #adb0bb #1a1d23 -
+2 72-78 #595c66 #16181d -
+2 79-79 #adb0bb #1a1d23 -
+3 0-0 #adb0bb #1a1d23 -
+3 1-12 #595c66 #1a1d23 bold
+3 13-78 #595c66 #1a1d23 -
+3 79-79 #adb0bb #1a1d23 -
+4 0-79 #adb0bb #1a1d23 -
+5 0-2 #adb0bb #1a1d23 -
+5 3-10 #50a4e9 #1a1d23 bold
+5 11-74 #595c66 #1a1d23 -
+5 75-79 #adb0bb #1a1d23 -
+6 0-10 #adb0bb #1a1d23 -
+6 11-64 #595c66 #1a1d23 -
+6 65-79 #adb0bb #1a1d23 -
+7 0-79 #adb0bb #1a1d23 -
+8 0-0 #adb0bb #1a1d23 -
+8 1-5 #50a4e9 #1a1d23 bold
+8 6-79 #adb0bb #1a1d23 -
+9 0-79 #adb0bb #1a1d23 -
+10 0-79 #adb0bb #1a1d23 -
+11 0-0 #adb0bb #1a1d23 -
+11 1-7 #dd97f1 #1a1d23 bold
+11 8-79 #adb0bb #1a1d23 -
+12 0-0 #adb0bb #1a1d23 -
+12 1-4 #75ad47 #1a1d23 -
+12 5-79 #adb0bb #1a1d23 -
+13 0-79 #adb0bb #1a1d23 -
+14 0-2 #adb0bb #1a1d23 -
+14 3-10 #50a4e9 #1a1d23 bold
+14 11-36 #595c66 #1a1d23 -
+14 37-79 #adb0bb #1a1d23 -
+15 0-0 #adb0bb #1a1d23 -
+15 1-78 #595c66 #1a1d23 -
+15 79-79 #adb0bb #1a1d23 -
+16 0-0 #adb0bb #1a1d23 -
+16 1-78 #50a4e9 #1a1d23 -
+16 79-79 #adb0bb #1a1d23 -
+17 0-0 #adb0bb #1a1d23 -
+17 1-1 #50a4e9 #1a1d23 -
+17 2-12 #50a4e9 #1a1d23 bold
+17 13-76 #595c66 #1a1d23 italic
+17 77-77 #adb0bb #1a1d23 -
+17 78-78 #50a4e9 #1a1d23 -
+17 79-79 #adb0bb #1a1d23 -
+18 0-0 #adb0bb #1a1d23 -
+18 1-1 #50a4e9 #1a1d23 -
+18 2-5 #595c66 #1a1d23 -
+18 6-8 #adb0bb #1a1d23 -
+18 9-13 #595c66 #1a1d23 -
+18 14-16 #adb0bb #1a1d23 -
+18 17-26 #595c66 #1a1d23 -
+18 27-77 #adb0bb #1a1d23 -
+18 78-78 #50a4e9 #1a1d23 -
+18 79-79 #adb0bb #1a1d23 -
+19 0-0 #adb0bb #1a1d23 -
+19 1-78 #50a4e9 #1a1d23 -
+19 79-79 #adb0bb #1a1d23 -
+20 0-79 #3a3e47 #14161b -
+21 0-79 #50a4e9 #14161b bold
+22 0-79 #adb0bb #14161b -
+23 0-0 #595c66 #111317 -
+23 1-1 #adb0bb #75ad47 -
+23 2-7 #1a1d23 #75ad47 bold
+23 8-8 #adb0bb #75ad47 -
+23 9-19 #adb0bb #111317 -
+23 20-34 #dd97f1 #111317 -
+23 35-79 #adb0bb #111317 -

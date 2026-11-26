@@ -31,14 +31,15 @@ defmodule MingaEditor.Agent.ActivityTest do
         Activity.new()
         |> Activity.set_todos([todo])
         |> Activity.start_turn(started_at)
-        |> Activity.start_tool("call-1", "shell")
+        |> Activity.start_tool("call-1", "shell", %{"command" => "mix test"})
         |> Activity.record_file(nil, "lib/a.ex", "/p/lib/a.ex")
         |> Activity.record_file(nil, "lib/a.ex", "/p/lib/a.ex")
         |> Activity.record_file(nil, "lib/b.ex", "/p/lib/b.ex")
 
       assert activity.todos == [todo]
       assert activity.started_at == started_at
-      assert activity.active_action == "Running shell"
+      # The card says what the conversation's step says, never the tool's name.
+      assert activity.active_action == "Running `mix test`"
       assert activity.tool_count == 1
       assert Activity.file_count(activity) == 2
     end
@@ -46,7 +47,7 @@ defmodule MingaEditor.Agent.ActivityTest do
     test "finish_turn clears live action but keeps the summary counters" do
       activity =
         Activity.new()
-        |> Activity.start_tool("call-1", "read_file")
+        |> Activity.start_tool("call-1", "read_file", %{"path" => "lib/a.ex"})
         |> Activity.record_file(nil, "lib/a.ex", "/p/lib/a.ex")
         |> Activity.finish_turn()
 
@@ -58,10 +59,11 @@ defmodule MingaEditor.Agent.ActivityTest do
 
     test "restored concurrent calls with the same name retire separately" do
       activity = Activity.restore_running_tools(Activity.new(), [{"a", "shell"}, {"b", "shell"}])
-      activity = Activity.start_tool(activity, "b", "shell")
+      activity = Activity.start_tool(activity, "b", "shell", %{"command" => "ls"})
       activity = Activity.finish_tool(activity, "b")
       assert Activity.active_tool_name(activity) == "shell"
-      assert activity.active_action == "Running shell"
+      # A restored call is known by name only, so its sentence names no target.
+      assert activity.active_action == "Running"
       assert activity.tool_count == 2
 
       activity = Activity.finish_tool(activity, "a")
@@ -72,7 +74,7 @@ defmodule MingaEditor.Agent.ActivityTest do
 
   describe "apply_status/2" do
     setup do
-      %{running: Activity.start_tool(Activity.new(), "call-1", "shell")}
+      %{running: Activity.start_tool(Activity.new(), "call-1", "shell", %{})}
     end
 
     test "every Session status maps to its turn transition", %{running: running} do

@@ -73,6 +73,18 @@ defmodule MingaEditor.Remote.SessionClient do
     end
   end
 
+  @doc "Continues the exact stopped request through the broker using the captured driver receipt."
+  @spec continue_stopped(pid(), {String.t(), String.t()}, {pid(), binary()}) ::
+          :ok | {:error, term()}
+  def continue_stopped(session, {id, _request} = target, {driver, receipt} = authority)
+      when is_pid(session) and is_binary(id) and is_pid(driver) and is_binary(receipt) do
+    remote_node = node(session)
+
+    with {:ok, token} <- session_token(remote_node, id) do
+      erpc(remote_node, :continue_stopped, [session, token, authority, target], 10_000)
+    end
+  end
+
   @doc "Runs an exact saved-composer operation through the authenticated original remote Session."
   @spec composer({pid(), String.t()}, {pid(), binary()}, Session.remote_composer_operation()) ::
           Session.composer_result()

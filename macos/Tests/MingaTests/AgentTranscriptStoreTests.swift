@@ -54,7 +54,7 @@ struct AgentTranscriptStoreTests {
         switch entry {
         case .user(let id, let text), .assistant(let id, let text): return "\(id):\(text)"
         case .assistantMarkdown(let id, let blocks): return "\(id):md\(blocks.first?.lines.first?.first?.text ?? "")"
-        case .toolCall(let id, _, _, _, _, _, _, _, let result, _, _, _): return "\(id):tool\(result)"
+        case .toolCall(let id, _, _, _, _, _, _, _, let result, _, _, _, _): return "\(id):tool\(result)"
         case .system(let id, _, let isError): return "\(id):sys\(isError)"
         default: return "\(entry.id):other"
         }

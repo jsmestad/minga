@@ -229,7 +229,8 @@ Flags bits:
   bit 2: is_agent (always 0 in the active-workspace projection)
   bit 3: has_attention
   bits 4-6: kind-scoped status. When is_agent=1: agent_status (0=idle,
-            1=thinking, 2=tool_executing, 3=error, 4=plan, 5=approval_waiting). When is_agent=0:
+            1=thinking, 2=tool_executing, 3=error, 4=plan, 5=approval_waiting,
+            6=needs_you, 7=stopped). When is_agent=0:
             bit 4 = is_ephemeral (file tab backed by no file on disk, e.g.
             Untitled-1); bits 5-6 reserved.
   bit 7: is_pinned
@@ -581,6 +582,8 @@ Each section uses `section_id(1) + section_len(2) + payload(section_len)`. Secti
 | 0x0D | PromptPresentation | `generation(8)`. The nonzero ID names the retained prompt displayed by both frontends and binds its workspace, saved conversation, source buffer and content revision. Absence means no pointer Send target. |
 | 0x0E | QueueTarget | `session_id(string16) + request_id(string16) + sequence(8)`. The target names one insertion position of the active saved-session queue. Absence disables Steer and Queue Next. |
 | 0x0F | ChatLifecycle | `kind(1) + reason(string16) + remedy(1) + action_label(string16) + key_hint(string16) + headline(string16) + note(string16)`. Omitted for a live conversation. `1` means starting, `2` means failed, and `3` means unavailable. A failed lifecycle's `reason` is one plain sentence about the cause. `remedy` is the one action a failed start offers: `0` none, `1` retry, `2` set up provider. `action_label` is the button text and `key_hint` the key that runs the same action; frontends render both exactly as sent and never author remedy copy. Activating the action sends `agent_start_remedy` with the same remedy byte. Starting and unavailable send an empty reason, remedy `0` and empty remedy strings. `headline` names what happened to the tab, for example "Agent could not start", "Agent session stopped" or "Starting Agent", and is sent for every lifecycle in this section. `note` is the draft note shown under the notice when the composer is visible, for example "Your draft is saved. SPC a S n starts a new session."; it names the new-session key bound for the current editing model, and an empty note means no note line. Frontends render `headline` and `note` exactly as sent. Neither frontend shows approval controls while the conversation is not live. A zero-row prompt means the composer is unavailable. |
+| 0x10 | ComposerHints | `count(1)`, then per hint `keys(string16) + action(string16)`. The keys the focused composer answers to, most important first, for example `⌥↩` "queue" or `esc ↩` "send" in a terminal. The BEAM takes them from the Agent scope that binds them and sends the section only while the composer has focus; frontends render them exactly as sent, in the composer's border, and never author composer key hints. |
+| 0x11 | ContinueTarget | `session_id(string16) + request_id(string16)`. Both IDs are nonempty. Presence enables Continue in place of Send, even for an empty composer. Absence clears the target. |
 
 The Prompt section's `vim_mode` uses the status bar's mode values (0=normal, 1=insert, 2=visual, 3=command, 4=operator_pending, 5=search, 6=replace), because both indicators show the same editing mode. Frontends decode both bytes with one mapping.
 
@@ -1168,18 +1171,22 @@ Typed body payloads:
 0x01 (user):      type(1) + text_len(4) + text
 0x02 (assistant): type(1) + text_len(4) + text
 0x03 (thinking):  type(1) + collapsed(1) + text_len(4) + text
-0x04 (tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + result_len(4) + result + auto_approved(1) + optional tool_preview_payload
+0x04 (tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + state(1) + step_len(2) + step + result_len(4) + result + auto_approved(1) + optional tool_preview_payload
 0x05 (system):    type(1) + level(1) + text_len(4) + text
 0x06 (usage):     type(1) + input(4) + output(4) + cache_read(4) + cache_write(4) + cost_micros(4)
 0x07 (styled_assistant): type(1) + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url. Link URLs are limited to http, https, and mailto.
-0x08 (styled_tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url, auto_approved(1) + optional tool_preview_payload. The summary uses a UTF-8-safe preview budget so the styled payload and appended auto-approval/preview bytes still fit. Link URLs are limited to http, https, and mailto.
+0x08 (styled_tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + state(1) + step_len(2) + step + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url, auto_approved(1) + optional tool_preview_payload. The summary uses a UTF-8-safe preview budget so the styled payload and appended auto-approval/preview bytes still fit. Link URLs are limited to http, https, and mailto.
 0x09 (approval_tool_call): type(1) + status(1) + name_len(2) + name + summary_len(2) + summary + tool_call_id_len(2) + tool_call_id + session_id_len(2) + session_id + request_id_len(2) + request_id + preview_kind(1) + preview_line_count(2), per line: line_len(2) + line
 0x0A (assistant_markdown): type(1) + block_count(2) + blocks...
 0x0B (tool_call_with_retained_output): type(1) + retained_output_offer(16) + fields from `0x04` after its type byte.
 0x0C (styled_tool_call_with_retained_output): type(1) + retained_output_offer(16) + fields from `0x08` after its type byte.
 ```
 
-For `tool_call` (`0x04`) and `styled_tool_call` (`0x08`), `status` is authoritative: 0 = running, 1 = complete, 2 = error, 3 = denied, 4 = cancelled, 5 = approval_expired. The retained `error` flag does not override this outcome. Denial, known cancellation, and approval expiry carry no execution duration (`duration_ms = 0`); a human approval wait must not appear as tool execution time. An error known to have occurred without execution also carries no execution duration. An admitted effect with an unknown result is an error with its retained explanation and output, not a fabricated cancellation or completion.
+For `approval_tool_call` (`0x09`), `summary` is the card's headline: the question the BEAM asks in the decision's own words ("Write notes.txt?", "Run `mix test`?"). Frontends draw it as the card's title, add no words of their own, and never show `name`, the tool's raw name.
+
+In an approval card, a command preview (`preview_kind` 2) is the decision itself, not a sample (a finished tool call keeps a sample of at most 300 characters). Its first line is `$ ` followed by the whole command with the command's own line breaks, up to 16,000 bytes; when the command is longer, the next line says how many characters are left out. A `cwd:` line follows when the session has a working folder. Frontends draw every line of a command preview wrapped to the card and never cut one at the card's edge: a part that is not drawn is a part approved unread. Diff, target and args previews are samples under a question that already names the file, so a frontend may show only their first lines.
+
+For `tool_call` (`0x04`) and `styled_tool_call` (`0x08`), `step` is the one line the conversation shows for the call, a plain sentence the BEAM writes ("Read native.ex", "Running `mix test`", "Stopped while editing chrome_state.ex"), and `state` is the shared state byte it is drawn in (`Minga.Design.Tokens.state_wire/1`: 1 working, 5 failed, 4 stopped, 6 done). Frontends draw the state's glyph in its colour role before the sentence and render the sentence exactly as sent; they never map `status` to words. `status` is authoritative: 0 = running, 1 = complete, 2 = error, 3 = denied, 4 = cancelled, 5 = approval_expired. The retained `error` flag does not override this outcome. Denial, known cancellation, and approval expiry carry no execution duration (`duration_ms = 0`); a human approval wait must not appear as tool execution time. An error known to have occurred without execution also carries no execution duration. An admitted effect with an unknown result is an error with its retained explanation and output, not a fabricated cancellation or completion.
 
 Markdown block payloads are BEAM-authored semantic structure. Frontends must render these blocks directly and must not infer code cards from styled-run flags, decorative rails, or all-code lines. Each block starts with `block_id(4) + kind(1) + flags(1)` and then a kind-specific payload:
 
@@ -1236,7 +1243,7 @@ Per todo:
   status(1) + description_len(2) + description(description_len)
 ```
 
-`status`: 0 = idle, 1 = working, 2 = iterating, 3 = needs_you, 4 = done, 5 = errored.
+`status`: 0 = idle, 1 = working, 2 = iterating, 3 = needs_you, 4 = done, 5 = errored, 6 = stopped (the user stopped the turn; drawn with the stopped state's word, glyph and role).
 `can_approve` is currently false. Tool decisions belong to request-bound `approval_tool_call` cards, not the context bar. A pending approval projects `status = needs_you` and names the waiting tool in `active_action`.
 `dispatch_timestamp` is Unix seconds, or zero when no dispatch timestamp is available. Do not display elapsed time for zero. `review_hint` is currently empty; Review and tool approval have separate controls.
 `todo_count` is the number of visible items in the Session-owned checklist snapshot. Each item status is 0 = pending, 1 = in progress, 2 = done, or 3 = blocked. A hidden context may omit the progress and checklist tail after `can_approve`; frontends must treat missing tail fields as empty progress and no checklist items for legacy compatibility.
@@ -1412,6 +1419,7 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x72 | agent_notification_open | `identity(16)` | A click on a "needs you" notification. `identity` is the `agent_desktop_notification` (`0x61`) identity of the clicked alert. The BEAM opens the tasks drawer with the keyboard on that alert's task, selected by identity, and answers nothing: the row shows the task as it is now, and single-letter keys are ignored for 300 ms. An identity the BEAM no longer knows opens the drawer on the first task that needs you. |
 | 0x73 | which_key_press | `path(string16) + codepoint(4) + modifiers(1)` | Press a which-key row's key, as if typed. `path` is the open panel's path from `gui_which_key`; the BEAM presses the key only while that panel is still open, so a click on a stale panel does nothing. |
 | 0x74 | which_key_back | `path(string16)` | Go back up to a breadcrumb crumb's `path`. The BEAM goes up only while the open panel is below that path. |
+| 0x75 | agent_continue_turn | `session_id(string16) + request_id(string16)` | Continue the interrupted request shown by the stopped conversation. A stale action cannot continue a replacement turn. This action does not send or clear the draft or advance the queue. |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |

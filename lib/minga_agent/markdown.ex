@@ -617,93 +617,126 @@ defmodule MingaAgent.Markdown do
   @spec parse_inline(String.t()) :: [segment()]
   def parse_inline(text) when is_binary(text) do
     text
-    |> do_parse_inline([])
+    |> valid_text()
+    |> do_parse_inline([], [])
     |> Enum.reverse()
     |> merge_adjacent()
   end
 
-  @spec do_parse_inline(String.t(), [segment()]) :: [segment()]
+  # Tool output can carry bytes that are not text. The Unicode-aware checks below raise on them.
+  @spec valid_text(binary()) :: String.t()
+  defp valid_text(text), do: if(String.valid?(text), do: text, else: String.replace_invalid(text))
 
-  defp do_parse_inline("", acc), do: acc
+  # `dead` lists the underscore marks that have no closing mark in the rest of the text, so they are plain from here on.
+  @spec do_parse_inline(String.t(), [segment()], [String.t()]) :: [segment()]
+
+  defp do_parse_inline("", acc, _dead), do: acc
 
   # Inline code: `...`
-  defp do_parse_inline("`" <> rest, acc) do
+  defp do_parse_inline("`" <> rest, acc, dead) do
     case String.split(rest, "`", parts: 2) do
       [code, remaining] ->
-        do_parse_inline(remaining, [{code, :code} | acc])
+        do_parse_inline(remaining, [{code, :code} | acc], dead)
 
       [_no_close] ->
-        do_parse_inline(rest, [{"`", :plain} | acc])
+        do_parse_inline(rest, [{"`", :plain} | acc], dead)
     end
   end
 
   # Link: [text](url)
-  defp do_parse_inline("[" <> rest, acc) do
+  defp do_parse_inline("[" <> rest, acc, dead) do
     case Regex.run(~r/^([^\]]+)\]\(([^)]+)\)(.*)$/s, rest) do
       [_, label, url, remaining] ->
-        parse_link(label, url, remaining, acc)
+        parse_link(label, url, remaining, acc, dead)
 
       nil ->
-        do_parse_inline(rest, [{"[", :plain} | acc])
+        do_parse_inline(rest, [{"[", :plain} | acc], dead)
     end
   end
 
   # Bold: **...**
-  defp do_parse_inline("**" <> rest, acc) do
+  defp do_parse_inline("**" <> rest, acc, dead) do
     case String.split(rest, "**", parts: 2) do
       [bold_text, remaining] ->
-        do_parse_inline(remaining, [{bold_text, :bold} | acc])
+        do_parse_inline(remaining, [{bold_text, :bold} | acc], dead)
 
       [_no_close] ->
-        do_parse_inline(rest, [{"**", :plain} | acc])
+        do_parse_inline(rest, [{"**", :plain} | acc], dead)
     end
   end
 
   # Bold: __...__
-  defp do_parse_inline("__" <> rest, acc) do
-    case String.split(rest, "__", parts: 2) do
-      [bold_text, remaining] ->
-        do_parse_inline(remaining, [{bold_text, :bold} | acc])
-
-      [_no_close] ->
-        do_parse_inline(rest, [{"__", :plain} | acc])
-    end
-  end
+  defp do_parse_inline("__" <> rest, acc, dead),
+    do: parse_underscore_span(rest, "__", :bold, acc, dead)
 
   # Italic: *...*  (but not ** which is bold)
-  defp do_parse_inline("*" <> rest, acc) do
+  defp do_parse_inline("*" <> rest, acc, dead) do
     case String.split(rest, "*", parts: 2) do
       [italic_text, remaining] when italic_text != "" ->
-        do_parse_inline(remaining, [{italic_text, :italic} | acc])
+        do_parse_inline(remaining, [{italic_text, :italic} | acc], dead)
 
       _ ->
-        do_parse_inline(rest, [{"*", :plain} | acc])
+        do_parse_inline(rest, [{"*", :plain} | acc], dead)
     end
   end
 
   # Italic: _..._ (but not __ which is bold)
-  defp do_parse_inline("_" <> rest, acc) do
-    case String.split(rest, "_", parts: 2) do
-      [italic_text, remaining] when italic_text != "" ->
-        do_parse_inline(remaining, [{italic_text, :italic} | acc])
-
-      _ ->
-        do_parse_inline(rest, [{"_", :plain} | acc])
-    end
-  end
+  defp do_parse_inline("_" <> rest, acc, dead),
+    do: parse_underscore_span(rest, "_", :italic, acc, dead)
 
   # Regular character: consume up to next special character
-  defp do_parse_inline(text, acc) do
+  defp do_parse_inline(text, acc, dead) do
     case Regex.run(~r/^([^`*_\[]+)(.*)$/s, text) do
       [_, plain, rest] ->
-        do_parse_inline(rest, [{plain, :plain} | acc])
+        do_parse_inline(rest, [{plain, :plain} | acc], dead)
 
       nil ->
         # Single special char that didn't match a pattern
         {char, rest} = String.split_at(text, 1)
-        do_parse_inline(rest, [{char, :plain} | acc])
+        do_parse_inline(rest, [{char, :plain} | acc], dead)
     end
   end
+
+  # An underscore inside a word is part of the word, as in CommonMark: `usage_limit_reached`
+  # is one name, not "usage", an italic "limit" and "reached". Underscores open a
+  # span only at the start of a word and close it only at the end of one.
+  @spec parse_underscore_span(String.t(), String.t(), :bold | :italic, [segment()], [String.t()]) ::
+          [segment()]
+  defp parse_underscore_span(rest, mark, style, acc, dead) do
+    if mark in dead or word_before?(acc) do
+      do_parse_inline(rest, [{mark, :plain} | acc], dead)
+    else
+      case underscore_span(rest, mark) do
+        {inner, remaining} ->
+          do_parse_inline(remaining, [{inner, style} | acc], dead)
+
+        # A closing mark for any later opening mark would have closed this one too.
+        # So the rest of the text is searched once, not once for each opening mark.
+        nil ->
+          do_parse_inline(rest, [{mark, :plain} | acc], [mark | dead])
+      end
+    end
+  end
+
+  @spec underscore_span(String.t(), String.t()) :: {String.t(), String.t()} | nil
+  defp underscore_span(rest, "__") do
+    case Regex.run(~r/^(.+?)__(?![\p{L}\p{N}])(.*)$/su, rest) do
+      [_, inner, remaining] -> {inner, remaining}
+      nil -> nil
+    end
+  end
+
+  defp underscore_span(rest, "_") do
+    case Regex.run(~r/^(.+?)_(?![\p{L}\p{N}_])(.*)$/su, rest) do
+      [_, inner, remaining] -> {inner, remaining}
+      nil -> nil
+    end
+  end
+
+  # Whether the text parsed so far ends in a letter or a digit.
+  @spec word_before?([segment()]) :: boolean()
+  defp word_before?([{text, :plain} | _earlier]), do: String.match?(text, ~r/[\p{L}\p{N}]$/u)
+  defp word_before?(_acc), do: false
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -711,10 +744,10 @@ defmodule MingaAgent.Markdown do
   defp blockquote_segment({text, {:link, _url} = style}), do: {text, style}
   defp blockquote_segment({text, _style}), do: {text, :blockquote}
 
-  @spec parse_link(String.t(), String.t(), String.t(), [segment()]) :: [segment()]
-  defp parse_link(label, url, remaining, acc) do
+  @spec parse_link(String.t(), String.t(), String.t(), [segment()], [String.t()]) :: [segment()]
+  defp parse_link(label, url, remaining, acc, dead) do
     style = if safe_url?(url), do: {:link, url}, else: :plain
-    do_parse_inline(remaining, [{label, style} | acc])
+    do_parse_inline(remaining, [{label, style} | acc], dead)
   end
 
   @spec safe_url?(String.t()) :: boolean()

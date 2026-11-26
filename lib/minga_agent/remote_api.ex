@@ -168,6 +168,21 @@ defmodule MingaAgent.RemoteAPI do
     end
   end
 
+  @doc "Continues an exact interrupted request only as the driver attached to the original Session."
+  @spec continue_stopped(pid(), String.t(), {pid(), binary()}, {String.t(), String.t()}) ::
+          :ok | {:error, term()}
+  def continue_stopped(session, token, {driver, receipt} = authority, {id, request} = target)
+      when is_pid(session) and is_binary(token) and is_pid(driver) and is_binary(receipt) and
+             is_binary(id) and is_binary(request) do
+    with :ok <- authorize(id, token),
+         {:ok, ^session} <- SessionManager.get_session(id) do
+      Session.continue_stopped_as(session, authority, target)
+    else
+      {:ok, _replacement} -> {:error, :stale_turn}
+      {:error, _reason} = error -> error
+    end
+  end
+
   @doc "Resolves the exact displayed approval as an authorized attached driver."
   @spec approve(
           String.t(),

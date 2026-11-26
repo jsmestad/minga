@@ -154,6 +154,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_agent_notification_open Opcodes.gui_action_agent_notification_open()
   @gui_action_agent_open_question Opcodes.gui_action_agent_open_question()
   @gui_action_agent_stop_turn Opcodes.gui_action_agent_stop_turn()
+  @gui_action_agent_continue_turn Opcodes.gui_action_agent_continue_turn()
   @gui_action_execute_command Opcodes.gui_action_execute_command()
   @gui_action_git_stage_file Opcodes.gui_action_git_stage_file()
   @gui_action_git_unstage_file Opcodes.gui_action_git_unstage_file()
@@ -286,6 +287,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:tasks_drawer_action, row_id :: String.t(), action :: String.t()}
           | {:agent_notification_open, alert :: <<_::128>>}
           | {:agent_stop_turn, {String.t(), String.t()}}
+          | {:agent_continue_turn, {String.t(), String.t()}}
           | {:agent_tool_approval, ApprovalTarget.t(), MingaAgent.Session.approval_decision()}
           | {:execute_command, name :: String.t()}
           | {:git_stage_file, panel_id :: pos_integer(), path :: String.t(), section :: 0..3}
@@ -816,6 +818,14 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       )
       when session_length > 0 and request_length > 0,
       do: {:ok, {:agent_stop_turn, {session_id, request_id}}}
+
+  def decode_gui_action(
+        @gui_action_agent_continue_turn,
+        <<session_length::16, session_id::binary-size(session_length), request_length::16,
+          request_id::binary-size(request_length)>>
+      )
+      when session_length > 0 and request_length > 0,
+      do: {:ok, {:agent_continue_turn, {session_id, request_id}}}
 
   def decode_gui_action(
         @gui_action_agent_read_retained_output,

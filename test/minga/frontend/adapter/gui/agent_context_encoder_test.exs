@@ -43,6 +43,24 @@ defmodule Minga.Frontend.Adapter.GUI.AgentContextEncoderTest do
                _progress_and_todos::binary>> = payload
     end
 
+    test "encodes each card status in its own byte, stopped included" do
+      for {status, byte} <- [
+            idle: 0,
+            working: 1,
+            iterating: 2,
+            needs_you: 3,
+            done: 4,
+            errored: 5,
+            stopped: 6
+          ] do
+        model = %AgentContext{visible: true, task: "t", status: status, can_approve: false}
+        {cmd, _caches} = AgentContextEncoder.encode(model, Caches.new())
+
+        assert <<@op_gui_agent_context, payload_len::16, payload::binary-size(payload_len)>> = cmd
+        assert <<1::8, 1::16, "t", _timestamp::64, ^byte::8, _rest::binary>> = payload
+      end
+    end
+
     test "encodes can_approve=true" do
       ts = ~U[2024-01-15 10:30:00Z]
 

@@ -46,9 +46,7 @@ public struct AgentChatHeaderView: View {
             thinkingLevelMenu(compact: false)
 
             if state.isThinking {
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.6)
+                workingMark
             }
 
             Spacer()
@@ -109,9 +107,7 @@ public struct AgentChatHeaderView: View {
             thinkingLevelMenu(compact: true)
 
             if state.isThinking {
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.6)
+                workingMark
             }
 
             Spacer(minLength: 0)
@@ -136,9 +132,7 @@ public struct AgentChatHeaderView: View {
             thinkingLevelMenu(compact: true)
 
             if state.isThinking {
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.6)
+                workingMark
             }
 
             Spacer(minLength: 0)
@@ -147,6 +141,12 @@ public struct AgentChatHeaderView: View {
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.md)
+    }
+
+    /// The working mark of the state vocabulary (docs/design/marks.md), the one the modeline and a running step draw. It stands still under Reduce Motion and in captured frames, which a system spinner does not.
+    private var workingMark: some View {
+        StateMark(state: .working)
+            .frame(width: AgentToolCallCard.markSize, height: AgentToolCallCard.markSize)
     }
 
     private var statusIndicator: some View {

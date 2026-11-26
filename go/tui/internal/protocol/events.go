@@ -395,12 +395,21 @@ func EncodeGUIAgentStartRemedy(kind AgentStartRemedyKind) []byte {
 
 // EncodeGUIAgentStopTurn stops only the identified active turn.
 func EncodeGUIAgentStopTurn(target AgentStopTarget) []byte {
+	return encodeGUIAgentTurnAction(generated.GUIActionAgentStopTurn, target)
+}
+
+// EncodeGUIAgentContinueTurn resumes only the identified interrupted request.
+func EncodeGUIAgentContinueTurn(target AgentStopTarget) []byte {
+	return encodeGUIAgentTurnAction(generated.GUIActionAgentContinueTurn, target)
+}
+
+func encodeGUIAgentTurnAction(opcode byte, target AgentStopTarget) []byte {
 	if len(target.SessionID) == 0 || len(target.SessionID) > 65535 ||
 		len(target.RequestID) == 0 || len(target.RequestID) > 65535 {
 		return nil
 	}
 	packet := make([]byte, 2, 6+len(target.SessionID)+len(target.RequestID))
-	packet[0], packet[1] = generated.OPGuiAction, generated.GUIActionAgentStopTurn
+	packet[0], packet[1] = generated.OPGuiAction, opcode
 	packet = appendString16(packet, target.SessionID)
 	return appendString16(packet, target.RequestID)
 }

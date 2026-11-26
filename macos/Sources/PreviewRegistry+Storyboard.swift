@@ -29,6 +29,12 @@ enum StoryboardCapture {
             let height: Int
         }
 
+        /// The composer fit the transcript was laid out in, when the scenario shows a conversation.
+        struct PromptFit: Decodable {
+            let cols: Int
+            let rows: Int
+        }
+
         let version: Int
         let scenario: String
         let frontend: String
@@ -37,6 +43,7 @@ enum StoryboardCapture {
         let cols: Int
         let rows: Int
         let window: Window?
+        let prompt: PromptFit?
         let digest: String?
         let packets: [String]
     }
@@ -47,6 +54,8 @@ enum StoryboardCapture {
         case rejected(String)
         case notPresented(String)
         case gridMismatch(scenario: String, size: String, expected: String, measured: String)
+        case promptFitMismatch(scenario: String, size: String, expected: String, measured: String)
+        case promptPaneWidthMismatch(scenario: String, size: String, expected: Int, measured: Int?)
 
         var description: String {
             switch self {
@@ -56,6 +65,10 @@ enum StoryboardCapture {
             case .notPresented(let message): message
             case let .gridMismatch(scenario, size, expected, measured):
                 "\(scenario) at \(size) pt: the transcript was laid out in \(expected), but this window reports \(measured). Update test/storyboard/macos_geometry.json."
+            case let .promptFitMismatch(scenario, size, expected, measured):
+                "\(scenario) at \(size) pt: the transcript laid the composer out in \(expected), but this window reports \(measured). Update the chrome's `prompt` in test/storyboard/macos_geometry.json."
+            case let .promptPaneWidthMismatch(scenario, size, expected, measured):
+                "\(scenario) at \(size) pt: the transcript requires a \(expected)-column prompt pane, but Metal presented \(measured.map { "\($0) columns" } ?? "no prompt pane"). Check the BEAM prompt fit relay."
             }
         }
     }
@@ -111,11 +124,20 @@ enum StoryboardCapture {
         }
         renderer.setupRenderers(fontManager: fontManager)
 
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: size.width, height: size.height),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered, defer: false)
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isReleasedWhenClosed = false
+        window.ignoresMouseEvents = true
+
         var editor: EditorNSView?
         let dispatcher = CommandDispatcher(
             cols: UInt16(transcript.cols), rows: UInt16(transcript.rows), guiState: appState.gui,
             applicationEffectSink: { effect in
-                apply(effect, appState: appState, editor: editor, renderer: renderer, fontManager: fontManager, scale: scale)
+                apply(effect, appState: appState, window: window, editor: editor, renderer: renderer, fontManager: fontManager, scale: scale)
             }
         )
         dispatcher.fontManager = fontManager
@@ -127,8 +149,11 @@ enum StoryboardCapture {
         view.statusBarState = appState.gui.statusBarState
         editor = view
         appState.editorNSView = view
-        // The effect sink holds the editor and the app state; break the cycle so each capture frees its Metal renderer.
+        // Tear the SwiftUI tree down and break the effect sink's cycle before releasing the editor.
         defer {
+            window.orderOut(nil)
+            window.contentView = nil
+            window.close()
             editor = nil
             appState.editorNSView = nil
         }
@@ -148,17 +173,10 @@ enum StoryboardCapture {
         }
         appState.startup = nil
 
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: size.width, height: size.height),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-            backing: .buffered, defer: false)
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
-        window.isReleasedWhenClosed = false
-        window.ignoresMouseEvents = true
         let host = NSHostingView(rootView:
             PreviewRegistry.productionContentView(appState)
                 .frame(width: CGFloat(size.width), height: CGFloat(size.height))
+                .environment(\.motionPaused, true)
                 .transaction { transaction in
                     transaction.animation = nil
                     transaction.disablesAnimations = true
@@ -166,16 +184,39 @@ enum StoryboardCapture {
         window.contentView = host
         window.setContentSize(NSSize(width: size.width, height: size.height))
         window.orderFrontRegardless()
-        // Tear the SwiftUI tree down before the editor is released, so no late body update finds it gone.
-        defer { window.orderOut(nil); window.contentView = nil; window.close() }
 
-        try await waitForPresentation(of: dispatcher, view: view, host: host, scenario: transcript.scenario)
+        let presented = try await waitForPresentation(
+            of: dispatcher, view: view, host: host, scenario: transcript.scenario,
+            requiresPrompt: transcript.prompt != nil
+        )
 
         let measured = view.reportedGrid
         guard Int(measured.cols) == transcript.cols, Int(measured.rows) == transcript.rows else {
             throw Failure.gridMismatch(
                 scenario: transcript.scenario, size: transcript.size,
                 expected: "\(transcript.cols)x\(transcript.rows)", measured: "\(measured.cols)x\(measured.rows)")
+        }
+
+        // The width must match the aperture exactly. The frontend may have room for more rows
+        // than the BEAM's composer uses, but it must have room for every row in the transcript's fit.
+        let measuredPrompt = view.reportedPromptFit
+        switch (transcript.prompt, measuredPrompt) {
+        case (nil, nil):
+            break
+        case let (expected?, actual?) where expected.cols == Int(actual.cols) && expected.rows <= Int(actual.rows):
+            break
+        default:
+            throw Failure.promptFitMismatch(
+                scenario: transcript.scenario, size: transcript.size,
+                expected: transcript.prompt.map { "\($0.cols)x\($0.rows)" } ?? "no composer",
+                measured: measuredPrompt.map { "\($0.cols)x\($0.rows)" } ?? "no composer")
+        }
+        if let expected = transcript.prompt {
+            let columns = presented.snapshot.surface(for: 65534).map { Int($0.paneGeometry.textRect.width) }
+            guard columns == expected.cols else {
+                throw Failure.promptPaneWidthMismatch(
+                    scenario: transcript.scenario, size: transcript.size, expected: expected.cols, measured: columns)
+            }
         }
 
         let png = try await settledPNG(window: window, host: host)
@@ -189,8 +230,8 @@ enum StoryboardCapture {
     }
 
     /// The application effects a real app applies from the same packets; the rest have no visible effect in a still.
-    private static func apply(_ effect: ApplicationCommitEffect, appState: AppState, editor: EditorNSView?,
-                              renderer: CoreTextMetalRenderer, fontManager: FontManager, scale: CGFloat) {
+    private static func apply(_ effect: ApplicationCommitEffect, appState: AppState, window: NSWindow,
+                              editor: EditorNSView?, renderer: CoreTextMetalRenderer, fontManager: FontManager, scale: CGFloat) {
         switch effect {
         case .fontChanged(let family, let size, let ligatures, let weight):
             let update = fontManager.setPrimaryFont(FontManager.Configuration(
@@ -201,16 +242,24 @@ enum StoryboardCapture {
         case .titleChanged(let title):
             appState.windowTitle = title
         case .windowBackgroundChanged(let red, let green, let blue):
-            let luminance = (Double(red) * 0.299 + Double(green) * 0.587 + Double(blue) * 0.114) / 255
-            appState.windowBgIsDark = luminance < 0.5
+            let r = CGFloat(red) / 255
+            let g = CGFloat(green) / 255
+            let b = CGFloat(blue) / 255
+            let isDark = (r * 0.299 + g * 0.587 + b * 0.114) < 0.5
+            appState.windowBgIsDark = isDark
+            window.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
+            // The continuously mounted editor clears to transparent outside the prompt pane.
+            // Its backing window must use the theme, just as it does in the app.
+            window.backgroundColor = NSColor(red: r, green: g, blue: b, alpha: 1)
         default:
             break
         }
     }
 
-    /// Waits until the Metal surface has presented the last committed frame, never for a fixed delay.
+    /// Waits for the final frame and, for a conversation, for Metal to draw in the current composer aperture.
     private static func waitForPresentation(of dispatcher: CommandDispatcher, view: EditorNSView,
-                                            host: NSView, scenario: String) async throws {
+                                            host: NSView, scenario: String,
+                                            requiresPrompt: Bool) async throws -> VisibleEditorPresentation {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: .seconds(10))
         while clock.now < deadline {
@@ -219,11 +268,15 @@ enum StoryboardCapture {
             view.renderFrame()
             if let visible = dispatcher.visibleEditorPresentation,
                visible.snapshot.frameSeq == dispatcher.lastCommittedFrameSeq {
-                return
+                let clip = visible.textLayout?.promptTransform?.clip
+                if !requiresPrompt || (clip != nil && clip == view.agentPromptPlacement?.rect) {
+                    return visible
+                }
             }
             try await clock.sleep(until: min(deadline, clock.now.advanced(by: .milliseconds(16))))
         }
-        throw Failure.notPresented("\(scenario): the editor did not present frame \(dispatcher.lastCommittedFrameSeq) within 10 s")
+        let requirement = requiresPrompt ? " in the current composer aperture" : ""
+        throw Failure.notPresented("\(scenario): the editor did not present frame \(dispatcher.lastCommittedFrameSeq)\(requirement) within 10 s")
     }
 
     /// Requires three identical compositor frames, so a capture never catches a half-laid-out window.

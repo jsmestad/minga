@@ -1,6 +1,4 @@
 # State words in view and render code when the case-insensitive state word guard landed. One row per literal.
 # Each row names the surface ticket that migrates it. Delete rows as they migrate; never add rows.
 # File	Reason	Trimmed source line
-macos/Sources/Views/Agent/AgentToolCallCard.swift	#4055: tool-call outcome label; its word, ✓ mark and colour change together when tool calls move into the calm conversation	case .complete: "done"
-go/tui/internal/ui/agent_chat_panel.go	#4055: tool-call outcome label; its word, ✓ mark and colour change together when tool calls move into the calm conversation	return "done"
 go/tui/internal/ui/agent_chat_panel.go	#4063: approval row in the agentic view details panel, which is removed with the agentic view	lines = append(lines, m.renderAgentDetailRow("Approval", "waiting", width))

@@ -135,7 +135,8 @@ defmodule MingaEditor.Agent.Arrival do
              :question_cancelled,
              :question_interrupted,
              :queue_target_changed,
-             :stop_target_changed
+             :stop_target_changed,
+             :continue_target_changed
            ],
       do: state
 

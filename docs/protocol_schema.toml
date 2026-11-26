@@ -93,7 +93,8 @@ version = "2.0.0"
 # protocol_version 52 narrows agent_desktop_notification (0x61) to one "needs you" alert and its withdrawal (kinds 1 and 2, fixed:18, no debounce), sends it to the Go frontend too (the optional terminal bell), and adds the agent_notification_open gui_action (0x72), which names the clicked alert by its 16-byte identity. It also adds the gui_status_bar needs_you section (0x14: the needs-you count, for the macOS Dock badge).
 # protocol_version 53 adds the which_key_press (0x73) and which_key_back (0x74) gui_actions, so a click on a which-key row or crumb names the open panel's path, and gui_menu_bar (0xAD), the leader groups the macOS menu bar mirrors.
 # protocol_version 54 adds key_hint and the hints of the gui_picker empty section (0x07), plus enter_selection (0x09), the live picker keymap's permission to activate its locally previewed row with unmodified Enter.
-protocol_version = 54
+# protocol_version 55 (#4055) appends each tool call's state (u8, a shared state id) and one-line step sentence (string16) to gui_agent_chat messages 0x04 and 0x08, adds the composer hints section 0x10, adds tab and workspace agent status 7 (stopped) and adds context-card status 6 (stopped).
+protocol_version = 55
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -1613,6 +1614,11 @@ value = 0x73
 name = "which_key_back"
 value = 0x74
 
+# Session and interrupted request IDs (string16 each) from the committed Continue control.
+[[gui_actions]]
+name = "agent_continue_turn"
+value = 0x75
+
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
 # Capability payload version 2 appends these fields after the original seven
@@ -1921,6 +1927,13 @@ values = [
 #   counted_array                  — count prefix + repeated elements
 #   struct                         — reference to another [[structures]] entry
 #   enum                           — closed byte vocabulary ([[enums]] entry)
+
+[[structures]]
+name = "composer_hint"
+fields = [
+  { name = "keys", type = "string16" },
+  { name = "action", type = "string16" },
+]
 
 [[structures]]
 name = "rect"
@@ -2891,6 +2904,23 @@ fields = [
   { name = "key_hint", type = "string16" },
   { name = "headline", type = "string16" },
   { name = "note", type = "string16" },
+]
+
+[[sections]]
+opcode = "gui_agent_chat"
+id = 0x10
+name = "composer_hints"
+fields = [
+  { name = "hints", type = "counted_array", count_type = "u8", element = "composer_hint" },
+]
+
+[[sections]]
+opcode = "gui_agent_chat"
+id = 0x11
+name = "continue_target"
+fields = [
+  { name = "session_id", type = "string16" },
+  { name = "request_id", type = "string16" },
 ]
 
 # gui_picker_preview (0x7D) sections

@@ -1,0 +1,27 @@
+# Screen: 80x22
+# Cursor: (19, 0) beam
+# Mode: insert
+────────────────────────────────────────────────────────────────────────────────
+00│[Show the plan limit and when …]
+01│    1 defmodule Storyboard do
+02│    1   @moduledoc "A small file every storyboard scenario starts in."
+03│    2
+04│    3   def greet(name) do
+05│    4     "Hello, " <> name
+06│    5   end
+07│    6 end
+08│    7
+09│      ~
+10│      ~
+11│      ~
+12│      ~
+13│      ~
+14│      ~
+15│      ~
+16│      ~
+17│      ~
+18│Prompt~
+19│Type a message
+20│INSERT [no file] 1:1/1
+21│
+────────────────────────────────────────────────────────────────────────────────
