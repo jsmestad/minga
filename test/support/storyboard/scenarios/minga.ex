@@ -68,8 +68,8 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
   defp tool_result(:cancelled), do: "stopped"
 
   @spec conversation?(Model.t(), :working | :stopped) :: boolean()
-  # Any open conversation that is not stopped is the conversation scenario: SPC a v
-  # opens it idle, and a sent message makes it work.
+  # Routing into an idle or not-yet-connected composer also reaches this scene.
+  # Direct captures of the seeded conversation wait for its turn in Registry.drive/2.
   defp conversation?(%Model{conversation: %{status: status}} = model, turn) do
     Model.open?(model, :agent_chat) and status == :stopped == (turn == :stopped)
   end

@@ -106,7 +106,7 @@ defmodule Minga.Test.Storyboard.Session do
     seed_tasks(ctx, Keyword.get(opts, :tasks, []))
     install_minga_status(ctx, Keyword.get(opts, :minga))
     install_git_status(ctx, root, Keyword.get(opts, :git_status))
-    start_conversation(ctx, parser, Keyword.get(opts, :conversation))
+    start_conversation(ctx, parser, file, Keyword.get(opts, :conversation))
 
     session = %__MODULE__{
       ctx: ctx,
@@ -144,11 +144,12 @@ defmodule Minga.Test.Storyboard.Session do
   @spec start_conversation(
           EditorCase.editor_ctx(),
           GenServer.server() | nil,
+          Path.t(),
           conversation() | nil
         ) :: :ok
-  defp start_conversation(_ctx, _parser, nil), do: :ok
+  defp start_conversation(_ctx, _parser, _file, nil), do: :ok
 
-  defp start_conversation(ctx, parser, conversation) do
+  defp start_conversation(ctx, parser, file, conversation) do
     conversation =
       Keyword.validate!(conversation,
         messages: [],
@@ -159,7 +160,19 @@ defmodule Minga.Test.Storyboard.Session do
       )
 
     EditorCase.send_keys_sync(ctx, "1")
-    settle_highlights(ctx, parser)
+
+    EditorCase.wait_until(
+      ctx,
+      fn state ->
+        case state.workspace.buffers.active do
+          buffer when is_pid(buffer) -> Minga.Buffer.file_path(buffer) == file
+          nil -> false
+        end
+      end,
+      message: "expected home shortcut 1 to open the conversation fixture file #{file}"
+    )
+
+    await_highlights!(ctx, parser)
     EditorCase.send_keys_sync(ctx, "<SPC>av")
     session = await_conversation_session!(ctx)
 
@@ -462,6 +475,13 @@ defmodule Minga.Test.Storyboard.Session do
     )
   end
 
+  @doc "Waits for the headless frontend to show the frame the capture will measure."
+  @spec await_frame(t()) :: t()
+  def await_frame(%__MODULE__{ctx: ctx} = session) do
+    await_rendered!(ctx)
+    session
+  end
+
   # A key schedules its render on a short timer, so the grid can lag the editor.
   # A conversation that is still arriving holds its frame back, so nothing is
   # scheduled yet while the grid still shows the tab the user left. Wait until no
@@ -499,7 +519,7 @@ defmodule Minga.Test.Storyboard.Session do
   end
 
   @doc """
-  The terminal header height while a conversation is visible, or nil for scenes that use measured grid fixtures.
+  The terminal header height for a conversation or a remaining Agent workspace, or nil for scenes that use measured grid fixtures.
 
   This mirrors `headerChrome` in `go/tui/internal/ui/render_chrome.go`: the workspace bar when there is more than one workspace, tabs, and the breadcrumb from `breadcrumb_min_cols` columns up when it has segments.
   """
@@ -507,11 +527,13 @@ defmodule Minga.Test.Storyboard.Session do
   def conversation_header_rows(%__MODULE__{ctx: ctx}, cols, breadcrumb_min_cols) do
     ui = ctx |> EditorCase.editor_state() |> semantic_ui()
 
-    if match?(%{visible?: true}, ui.agent_chat) do
+    workspaces = ui.workspaces.workspaces
+
+    if match?(%{visible?: true}, ui.agent_chat) or Enum.any?(workspaces, &(&1.kind == :agent)) do
       rows =
         Enum.count(
           [
-            match?(%{workspaces: [_, _ | _]}, ui.workspaces),
+            match?([_, _ | _], workspaces),
             match?(%{tabs: [_ | _]}, ui.tab_bar),
             cols >= breadcrumb_min_cols and match?(%{segments: [_ | _]}, ui.breadcrumb)
           ],

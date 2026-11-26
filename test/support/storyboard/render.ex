@@ -129,6 +129,7 @@ defmodule Minga.Test.Storyboard.Render do
 
     keys
     |> Enum.reduce(session, &Session.press(&2, &1))
+    |> Session.await_frame()
     |> fit_tui_header(target)
   end
 

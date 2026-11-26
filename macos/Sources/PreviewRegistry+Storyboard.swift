@@ -55,6 +55,7 @@ enum StoryboardCapture {
         case notPresented(String)
         case gridMismatch(scenario: String, size: String, expected: String, measured: String)
         case promptFitMismatch(scenario: String, size: String, expected: String, measured: String)
+        case promptPaneWidthMismatch(scenario: String, size: String, expected: Int, measured: Int?)
 
         var description: String {
             switch self {
@@ -66,6 +67,8 @@ enum StoryboardCapture {
                 "\(scenario) at \(size) pt: the transcript was laid out in \(expected), but this window reports \(measured). Update test/storyboard/macos_geometry.json."
             case let .promptFitMismatch(scenario, size, expected, measured):
                 "\(scenario) at \(size) pt: the transcript laid the composer out in \(expected), but this window reports \(measured). Update the chrome's `prompt` in test/storyboard/macos_geometry.json."
+            case let .promptPaneWidthMismatch(scenario, size, expected, measured):
+                "\(scenario) at \(size) pt: the transcript requires a \(expected)-column prompt pane, but Metal presented \(measured.map { "\($0) columns" } ?? "no prompt pane"). Check the BEAM prompt fit relay."
             }
         }
     }
@@ -182,7 +185,10 @@ enum StoryboardCapture {
         window.setContentSize(NSSize(width: size.width, height: size.height))
         window.orderFrontRegardless()
 
-        try await waitForPresentation(of: dispatcher, view: view, host: host, scenario: transcript.scenario)
+        let presented = try await waitForPresentation(
+            of: dispatcher, view: view, host: host, scenario: transcript.scenario,
+            requiresPrompt: transcript.prompt != nil
+        )
 
         let measured = view.reportedGrid
         guard Int(measured.cols) == transcript.cols, Int(measured.rows) == transcript.rows else {
@@ -204,6 +210,13 @@ enum StoryboardCapture {
                 scenario: transcript.scenario, size: transcript.size,
                 expected: transcript.prompt.map { "\($0.cols)x\($0.rows)" } ?? "no composer",
                 measured: measuredPrompt.map { "\($0.cols)x\($0.rows)" } ?? "no composer")
+        }
+        if let expected = transcript.prompt {
+            let columns = presented.snapshot.surface(for: 65534).map { Int($0.paneGeometry.textRect.width) }
+            guard columns == expected.cols else {
+                throw Failure.promptPaneWidthMismatch(
+                    scenario: transcript.scenario, size: transcript.size, expected: expected.cols, measured: columns)
+            }
         }
 
         let png = try await settledPNG(window: window, host: host)
@@ -243,9 +256,10 @@ enum StoryboardCapture {
         }
     }
 
-    /// Waits until the Metal surface has presented the last committed frame, never for a fixed delay.
+    /// Waits for the final frame and, for a conversation, for Metal to draw in the current composer aperture.
     private static func waitForPresentation(of dispatcher: CommandDispatcher, view: EditorNSView,
-                                            host: NSView, scenario: String) async throws {
+                                            host: NSView, scenario: String,
+                                            requiresPrompt: Bool) async throws -> VisibleEditorPresentation {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: .seconds(10))
         while clock.now < deadline {
@@ -254,11 +268,15 @@ enum StoryboardCapture {
             view.renderFrame()
             if let visible = dispatcher.visibleEditorPresentation,
                visible.snapshot.frameSeq == dispatcher.lastCommittedFrameSeq {
-                return
+                let clip = visible.textLayout?.promptTransform?.clip
+                if !requiresPrompt || (clip != nil && clip == view.agentPromptPlacement?.rect) {
+                    return visible
+                }
             }
             try await clock.sleep(until: min(deadline, clock.now.advanced(by: .milliseconds(16))))
         }
-        throw Failure.notPresented("\(scenario): the editor did not present frame \(dispatcher.lastCommittedFrameSeq) within 10 s")
+        let requirement = requiresPrompt ? " in the current composer aperture" : ""
+        throw Failure.notPresented("\(scenario): the editor did not present frame \(dispatcher.lastCommittedFrameSeq)\(requirement) within 10 s")
     }
 
     /// Requires three identical compositor frames, so a capture never catches a half-laid-out window.
