@@ -53,6 +53,7 @@ public final class GUIState {
     @ObservationIgnored public lazy private(set) var editorInput = EditorHostInput(
         theme: themeBacking, windows: windowContentBacking,
         statusBarState: statusBarState, agentChatState: agentChatState,
+        agentQueueState: agentQueueState,
         agentHelpState: agentHelpState,
         emptyStateState: emptyStateState, extensionPanelState: extensionPanelState
     )
@@ -104,6 +105,7 @@ public final class GUIState {
         feedbackState.cancel()
         pickerState.hide()
         agentChatState.hide()
+        agentQueueState.update(nil)
         agentHelpState.hide()
         bottomPanelState.hide()
         minibufferState.hide()
@@ -170,6 +172,9 @@ public final class GUIState {
 
     /// Agent chat state.
     public let agentChatState = AgentChatState()
+
+    /// Agent queued inputs, published independently of the transcript and composer.
+    public let agentQueueState = AgentQueueState()
 
     /// Independent Agent Help state (0xAB).
     public let agentHelpState = AgentHelpState()
@@ -301,6 +306,7 @@ public final class EditorHostInput {
     fileprivate let windows: GUIWindowContentBacking
     public let statusBarState: StatusBarState
     public let agentChatState: AgentChatState
+    public let agentQueueState: AgentQueueState
     public let agentHelpState: AgentHelpState
     public let emptyStateState: EmptyStateState
     public let extensionPanelState: ExtensionPanelState
@@ -312,13 +318,14 @@ public final class EditorHostInput {
     fileprivate init(
         theme: GUIThemeBacking, windows: GUIWindowContentBacking,
         statusBarState: StatusBarState, agentChatState: AgentChatState,
-        agentHelpState: AgentHelpState,
+        agentQueueState: AgentQueueState, agentHelpState: AgentHelpState,
         emptyStateState: EmptyStateState, extensionPanelState: ExtensionPanelState
     ) {
         self.theme = theme
         self.windows = windows
         self.statusBarState = statusBarState
         self.agentChatState = agentChatState
+        self.agentQueueState = agentQueueState
         self.agentHelpState = agentHelpState
         self.emptyStateState = emptyStateState
         self.extensionPanelState = extensionPanelState

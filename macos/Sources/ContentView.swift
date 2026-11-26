@@ -889,6 +889,7 @@ public struct ContentView<EditorSurface: View>: View {
                 if input.agentChatState.visible {
                     AgentChatView(
                         state: input.agentChatState,
+                        queueState: input.agentQueueState,
                         isInsertMode: input.agentChatState.isPromptInsertMode,
                         sendAction: translatedAction(FrontendActionComposition.outbound)
                     )

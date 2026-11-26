@@ -26,7 +26,7 @@ extension GUIFrameImpact {
              .guiSplitSeparators, .guiAgentTranscript:
             return .editor
 
-        case .guiAgentHelp:
+        case .guiAgentHelp, .guiAgentQueue:
             return .editor
 
         case .guiCompletion, .guiCompletionSelection, .guiHoverPopup, .guiHoverAction,
@@ -565,7 +565,7 @@ struct PreparedFrameTransactionBuilder {
 
         case .guiCompletion, .guiCompletionSelection, .guiWhichKey, .guiPicker,
              .guiPickerSelection, .guiPickerPreview,
-             .guiAgentChat, .guiAgentHelp, .guiMinibuffer, .guiHoverPopup, .guiHoverAction,
+             .guiAgentChat, .guiAgentQueue, .guiAgentHelp, .guiMinibuffer, .guiHoverPopup, .guiHoverAction,
              .guiSignatureHelp, .guiFloatPopup, .guiExtensionOverlay,
              .guiSearchState, .guiEmptyState, .protocolError:
             stageReplacing(
@@ -1134,6 +1134,7 @@ private extension RenderCommand {
         case .agentDesktopNotification: 66
         case .guiTasksDrawer: 67
         case .guiMenuBar: 68
+        case .guiAgentQueue: 69
         }
     }
 }

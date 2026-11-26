@@ -34,6 +34,7 @@ public struct AgentChatView: View {
         case agentReadRetainedOutput(messageID: UInt32, offer: Wire.RetainedOutputOffer)
         case composerSubmit(generation: UInt64, offer: UInt64)
         case composerQueue(generation: UInt64, offer: UInt64, followUp: Bool, target: AgentQueueTarget)
+        case queue(AgentQueueRequest)
         case openQuestion(offer: UInt64)
         case stopTurn(AgentStopTarget)
         case continueTurn(AgentStopTarget)
@@ -43,12 +44,17 @@ public struct AgentChatView: View {
         case chatReturnedToBottom
     }
 
-    public init(state: AgentChatState, isInsertMode: Bool, sendAction: ViewActionHandler<Action>?) {
+    public init(
+        state: AgentChatState, queueState: AgentQueueState? = nil,
+        isInsertMode: Bool, sendAction: ViewActionHandler<Action>?
+    ) {
         self.state = state
+        self.queueState = queueState
         self.isInsertMode = isInsertMode
         self.sendAction = sendAction
     }
     public let state: AgentChatState
+    private let queueState: AgentQueueState?
     @Environment(\.themeColors) private var theme
 
     public let isInsertMode: Bool
@@ -56,8 +62,11 @@ public struct AgentChatView: View {
 
     @State private var availableHeight: CGFloat = 0
     @State private var headerHeight: CGFloat = 0
+    @State private var questionHeight: CGFloat = 0
+    @State private var composerHeight: CGFloat = 0
 
     public var body: some View {
+        let queue = state.lifecycle == .conversation ? queueState?.snapshot : nil
         VStack(spacing: 0) {
             // Header bar
             AgentChatHeaderView(state: state, sendAction: childAction { action in
@@ -84,6 +93,19 @@ public struct AgentChatView: View {
                 }
                 .padding(.horizontal, Spacing.lg)
                 .padding(.vertical, Spacing.sm)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { questionHeight = $0 }
+                .onDisappear { questionHeight = 0 }
+            }
+
+            if let queue {
+                // Leave the composer its own allocation, then share the rest with the transcript.
+                let spareHeight = max(0, availableHeight - headerHeight - questionHeight - composerHeight)
+                AgentQueueView(
+                    queue: queue, maximumHeight: min(156, spareHeight * 0.55),
+                    sendAction: childAction { .queue($0) }
+                )
+                .id(queue.origin)
+                .layoutPriority(1)
             }
 
             // Prompt (completion popup + input capsule)
@@ -97,6 +119,8 @@ public struct AgentChatView: View {
                     case .attachments: .executeCommand(name: "agent_draft_attachments")
                     }
                 }, maximumHeight: max(0, availableHeight - headerHeight))
+                .layoutPriority(queue == nil ? 0 : 2)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
             }
         }
         .backgroundPreferenceValue(AgentPromptApertureKey.self) { aperture in

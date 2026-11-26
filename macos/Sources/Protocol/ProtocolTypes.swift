@@ -103,6 +103,95 @@ public enum NotificationLevel: Sendable, Equatable {
 /// Namespace for all binary protocol data types decoded from the BEAM.
 public enum Wire {
 
+    /// A committed projection of the current conversation's queued inputs.
+    public struct AgentQueue: Sendable, Equatable {
+        public enum Action: UInt8, Sendable {
+            case select = 0, remove = 1, pasteAfter = 2, pasteBefore = 3, edit = 4, close = 5, composer = 6
+        }
+
+        public struct Origin: Sendable, Equatable, Hashable {
+            public let workspaceID: UInt32
+            public let recordID: String
+
+            public init(workspaceID: UInt32, recordID: String) {
+                self.workspaceID = workspaceID
+                self.recordID = recordID
+            }
+        }
+
+        public struct Hint: Sendable, Equatable {
+            public let action: Action
+            public let key: String
+            public let label: String
+
+            public init(action: Action, key: String, label: String) {
+                self.action = action
+                self.key = key
+                self.label = label
+            }
+        }
+
+        public struct RowIdentity: Sendable, Equatable {
+            public let id: UInt64
+            public let revision: UInt64
+
+            public init(id: UInt64, revision: UInt64) {
+                self.id = id
+                self.revision = revision
+            }
+
+            public var isValid: Bool { id != 0 && revision != 0 }
+        }
+
+        public struct Row: Sendable, Equatable, Identifiable {
+            public enum Kind: UInt8, Sendable {
+                case steering = 0, followUp = 1
+            }
+
+            public let identity: RowIdentity
+            public let kind: Kind
+            public let label: String
+            public let preview: String
+            public let attachmentCount: UInt16
+            public var id: UInt64 { identity.id }
+
+            public init(identity: RowIdentity, kind: Kind, label: String, preview: String, attachmentCount: UInt16) {
+                self.identity = identity
+                self.kind = kind
+                self.label = label
+                self.preview = preview
+                self.attachmentCount = attachmentCount
+            }
+        }
+
+        public let focused: Bool
+        public let origin: Origin
+        public let title: String
+        public let summary: String
+        public let removedNote: String
+        public let selectedID: UInt64?
+        public let hints: [Hint]
+        public let pending: [Row]
+        public let removed: [Row]
+        public let empty: EmptyList?
+
+        public init(
+            focused: Bool, origin: Origin, title: String, summary: String, removedNote: String,
+            selectedID: UInt64?, hints: [Hint], pending: [Row], removed: [Row], empty: EmptyList?
+        ) {
+            self.focused = focused
+            self.origin = origin
+            self.title = title
+            self.summary = summary
+            self.removedNote = removedNote
+            self.selectedID = selectedID
+            self.hints = hints
+            self.pending = pending
+            self.removed = removed
+            self.empty = empty
+        }
+    }
+
     /// The tasks drawer (`*minga-tasks*`): every task Minga is working on, as the BEAM wrote it (gui_tasks_drawer).
     public struct TasksDrawer: Sendable, Equatable {
         /// A key and what it does.
@@ -220,6 +309,10 @@ public enum Wire {
 
         /// Typed policy projection; never inferred from GUI state.
         public var responderKind: Responder? { Responder(rawValue: responder) }
+
+        /// The conversation's queue has its own keymap but uses the editor responder.
+        public static let agentQueueSurface: UInt8 = 15
+        public var ownsAgentQueue: Bool { surface == Self.agentQueueSurface }
     }
 
     // MARK: - Sidebars

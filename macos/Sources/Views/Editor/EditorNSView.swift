@@ -3379,13 +3379,17 @@ final class EditorNSView: MTKView {
     /// frame's commit_frame resolves a keystroke-to-present sample on the shared
     /// dispatcher recorder.
     private func sendKeyPress(codepoint: UInt32, modifiers: UInt8) {
-        updateOptimisticTextInputMode(codepoint: codepoint, modifiers: modifiers)
-        dispatcher.previewCompletionNavigation(codepoint: codepoint, modifiers: modifiers)
-        dispatcher.previewPickerNavigation(codepoint: codepoint, modifiers: modifiers)
-        dispatcher.previewFileTreeNavigation(codepoint: codepoint, modifiers: modifiers)
+        let queueOwnsKeyboard = focusPolicy.focusOwnerState.decodedOwner?.ownsAgentQueue == true
+        if !queueOwnsKeyboard {
+            updateOptimisticTextInputMode(codepoint: codepoint, modifiers: modifiers)
+            dispatcher.previewCompletionNavigation(codepoint: codepoint, modifiers: modifiers)
+            dispatcher.previewPickerNavigation(codepoint: codepoint, modifiers: modifiers)
+            dispatcher.previewFileTreeNavigation(codepoint: codepoint, modifiers: modifiers)
+        }
         recoveryManager?.onKeySent()
         let seq = dispatcher.latency.stamp()
-        let composerOffer = codepoint == 13 || codepoint == 102 ? dispatcher.guiState.agentChatState.draftAttachmentOffer : 0
+        let composerOffer = !queueOwnsKeyboard && (codepoint == 13 || codepoint == 102)
+            ? dispatcher.guiState.agentChatState.draftAttachmentOffer : 0
         encoder.send(.keyPress(codepoint: codepoint, modifiers: modifiers, sequence: seq, composerOffer: composerOffer))
     }
 

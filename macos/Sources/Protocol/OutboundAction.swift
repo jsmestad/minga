@@ -127,6 +127,7 @@ nonisolated public enum OutboundAction: Equatable, Sendable {
     case agentReadRetainedOutput(messageID: UInt32, offer: Wire.RetainedOutputOffer)
     case agentComposerSubmit(generation: UInt64, offer: UInt64)
     case agentComposerQueue(generation: UInt64, offer: UInt64, followUp: Bool, target: AgentQueueTarget)
+    case agentQueueAction(Wire.AgentQueue.Action, origin: Wire.AgentQueue.Origin, row: Wire.AgentQueue.RowIdentity?, removed: Wire.AgentQueue.RowIdentity?)
     case agentOpenQuestion(offer: UInt64)
     case agentStopTurn(AgentStopTarget)
     case agentContinueTurn(AgentStopTarget)
