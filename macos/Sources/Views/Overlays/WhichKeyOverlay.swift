@@ -213,9 +213,9 @@ public struct WhichKeyOverlay: View {
                     }
                     if !entry.platformKey.isEmpty {
                         Text(entry.platformKey)
-                            .font(Typography.monospacedSmall.weight(.semibold))
+                            .font(Typography.font(.body, weight: .bold, design: .monospaced))
                             .foregroundStyle(theme.popupFg)
-                            .anatomyPart("whichKey.platformKey", text: entry.platformKey, font: .small, monospaced: true)
+                            .anatomyPart("whichKey.platformKey", text: entry.platformKey, font: .body, monospaced: true)
                     }
                 }
             }
