@@ -76,7 +76,8 @@ public struct PickerOverlay: View {
                     .background {
                         let panel = RoundedRectangle(cornerRadius: Radius.md).fill(theme.popupBg)
                         if state.empty == nil {
-                            panel.shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+                            panel
+                                .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
                         } else {
                             // Empty pickers use an outline without a shadow so the visible editor text at their edges stays readable.
                             panel
@@ -707,7 +708,7 @@ private struct PickerItemRow: View {
     private var itemAnnotation: some View {
         if !item.annotation.isEmpty {
             Text(item.annotation)
-                .font(Typography.font(.small, design: .monospaced))
+                .font(isNextStep ? Typography.monospacedSmall : Typography.font(.small, design: .monospaced))
                 .foregroundStyle(isNextStep ? theme.popupFg : theme.popupFg.opacity(0.3))
                 .anatomyPart("picker.stepAnnotation", text: item.annotation, font: .small, monospaced: true, enabled: isNextStep)
                 .padding(.horizontal, Spacing.xs)
