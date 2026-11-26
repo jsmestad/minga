@@ -165,9 +165,15 @@ defmodule MingaAgent.InferenceRouteSessionTest do
       ])
 
     session = start_route_session(ctx)
+    provider = Session.get_provider(session)
+    :erlang.trace(provider, true, [:receive])
+
     assert :ok = Session.send_prompt(session, "warm up")
     turn_request = assert_request(ctx.model_id)
     await_turn_complete()
+    # The Session can announce idle before Native consumes the turn task's result.
+    assert_receive {:trace, ^provider, :receive, {ref, :ok}} when is_reference(ref), @event_timeout
+    :erlang.trace(provider, false, [:receive])
 
     history =
       for index <- 1..8 do
@@ -179,7 +185,6 @@ defmodule MingaAgent.InferenceRouteSessionTest do
         }
       end
 
-    provider = Session.get_provider(session)
     assert {:ok, _compacted, _info} = GenServer.call(provider, {:compact, history}, 10_000)
 
     summary_request = assert_request(ctx.model_id)
