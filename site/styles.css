@@ -5493,6 +5493,20 @@ html.labs-pending:not(.labs-failed) .el-lab:not(.lab-failed) .builder-controls {
   .lk-controls {
     min-height: 0;
   }
+
+  /* The play button goes after the last step. It keeps its room, and the keys keep their own row, so the row is one height from the first step to the last. */
+  .ca-lab .ca-controls .lab-control[hidden],
+  .lk-lab .lk-controls .lab-control[hidden] {
+    display: block !important;
+    visibility: hidden;
+  }
+
+  /* The key row is as tall empty as it is with a key in it. */
+  .ca-controls .lab-keycast,
+  .lk-controls .lab-keycast {
+    flex-basis: 100%;
+    min-height: 1.75em;
+  }
 }
 
 @media (pointer: coarse) {

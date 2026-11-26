@@ -132,13 +132,13 @@
               <p data-step="rest">Both editors get the same keys while one tool misbehaves.</p>
               <p class="demo-steps-title">If the language server takes 3 seconds to answer</p>
               <ol>
-                <li data-step="slow-during">The language server has not answered. On the left, your keys wait in a queue behind the request. On the right, Minga draws each key as it arrives, because the request went to another process.</li>
-                <li data-step="slow-after">The answer came back. The left editor drew the waiting keys in one jump. Minga had already drawn each one.</li>
+                <li data-step="slow-during">The language server has not answered. In the same-loop editor, your keys wait in a queue behind the request. Minga draws each key as it arrives, because the request went to another process.</li>
+                <li data-step="slow-after">The answer came back. The same-loop editor drew the waiting keys in one jump. Minga had already drawn each one.</li>
               </ol>
               <p class="demo-steps-title">If the parser crashes</p>
               <ol>
-                <li data-step="crash-during">The parser crashed. The left editor ran it in the same process, so the editor is gone. Minga runs the parser as a separate program: only the parser stopped, and you keep typing.</li>
-                <li data-step="crash-after">Minga started a new parser and gave it the buffer to read again. Your text and its highlighting stayed where they were the whole time. The left editor has to be reopened.</li>
+                <li data-step="crash-during">The parser crashed. The same-loop editor ran it in the same process, so the editor is gone. Minga runs the parser as a separate program: only the parser stopped, and you keep typing.</li>
+                <li data-step="crash-after">Minga started a new parser and gave it the buffer to read again. Your text and its highlighting stayed where they were the whole time. The same-loop editor has to be reopened.</li>
               </ol>
             </div>
           </div>
