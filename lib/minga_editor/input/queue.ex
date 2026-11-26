@@ -4,10 +4,9 @@ defmodule MingaEditor.Input.Queue do
 
   alias Minga.Keymap
   alias Minga.Keymap.Bindings
+  alias MingaEditor.Agent.QueueSurface
   alias MingaEditor.Agent.QueueWorkflow
-  alias MingaEditor.Agent.UIState.View
   alias MingaEditor.Input
-  alias MingaEditor.Shell.Traditional.Workflow
   alias MingaEditor.State
 
   @typep key :: {non_neg_integer(), non_neg_integer()}
@@ -21,7 +20,7 @@ defmodule MingaEditor.Input.Queue do
     if Input.key_sequence_pending?(state) do
       {:passthrough, state}
     else
-      prefix = View.pending_prefix(state.workspace.agent_ui.view)
+      prefix = state.workspace.agent_ui.queue.removal_prefix
       key = {cp, mods}
       apply_binding(state, key, prefix, lookup(state, prefix, key))
     end
@@ -29,37 +28,46 @@ defmodule MingaEditor.Input.Queue do
 
   def handle_key(state, _cp, _mods), do: {:passthrough, state}
 
-  @spec lookup(State.t(), Bindings.node_t() | nil, key()) :: binding()
+  @spec lookup(State.t(), QueueSurface.removal_prefix() | nil, key()) :: binding()
   defp lookup(state, nil, key) do
     Keymap.resolve_scoped_key(:queue, Minga.Editing.binding_state(state), key,
       keymap_server: state.interaction.keymap_server
     )
   end
 
-  defp lookup(state, prefix, key) do
+  defp lookup(state, {prefix, _identity}, key) do
     case Bindings.lookup(prefix, key) do
       :not_found -> lookup(state, nil, key)
       binding -> binding
     end
   end
 
-  @spec apply_binding(State.t(), key(), Bindings.node_t() | nil, binding()) ::
+  @spec apply_binding(State.t(), key(), QueueSurface.removal_prefix() | nil, binding()) ::
           MingaEditor.Input.Handler.result()
-  defp apply_binding(state, _key, _previous, {:prefix, prefix}),
-    do: {:handled, remember_prefix(state, prefix)}
-
-  defp apply_binding(state, key, previous, binding) do
-    state = if previous, do: remember_prefix(state, nil), else: state
-
-    case binding do
-      {:command, action} -> {:handled, QueueWorkflow.key(state, action)}
-      :not_found -> unbound(state, key)
-    end
+  defp apply_binding(state, _key, _previous, {:prefix, prefix}) do
+    queue = QueueSurface.arm_removal(state.workspace.agent_ui.queue, prefix)
+    {:handled, QueueWorkflow.install(state, queue)}
   end
 
-  @spec remember_prefix(State.t(), Bindings.node_t() | nil) :: State.t()
-  defp remember_prefix(state, prefix),
-    do: Workflow.install_agent_view(state, View.set_prefix(state.workspace.agent_ui.view, prefix))
+  defp apply_binding(state, key, previous, binding) do
+    state =
+      if previous do
+        QueueWorkflow.install(state, QueueSurface.cancel_removal(state.workspace.agent_ui.queue))
+      else
+        state
+      end
+
+    case {binding, previous} do
+      {{:command, :queue_remove}, {_prefix, identity}} ->
+        {:handled, QueueWorkflow.remove_displayed(state, identity)}
+
+      {{:command, action}, _previous} ->
+        {:handled, QueueWorkflow.key(state, action)}
+
+      {:not_found, _previous} ->
+        unbound(state, key)
+    end
+  end
 
   @spec unbound(State.t(), key()) :: MingaEditor.Input.Handler.result()
   defp unbound(state, {27, 0}), do: {:handled, state}

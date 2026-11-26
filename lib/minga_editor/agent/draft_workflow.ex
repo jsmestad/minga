@@ -1533,7 +1533,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
   defp mark_queue_recall(ui, :all, _ref), do: ui
 
   defp mark_queue_recall(ui, {:one, _identity}, ref),
-    do: UIState.install_queue(ui, QueueSurface.begin_recall(ui.queue, ref))
+    do: UIState.install_queue(ui, QueueSurface.begin_edit(ui.queue, ref))
 
   @spec recall_not_ready(UIState.t(), recall_scope()) :: {term(), UIState.t()}
   defp recall_not_ready(ui, :all), do: {:recall_not_ready, ui}
@@ -1582,11 +1582,11 @@ defmodule MingaEditor.Agent.DraftWorkflow do
 
   @spec finish_queue_recall(UIState.t(), reference(), term(), result()) :: {term(), UIState.t()}
   defp finish_queue_recall(ui, ref, outcome, result) do
-    case QueueSurface.finish_recall(ui.queue, ref) do
-      {:queue_recall, queue} ->
+    case QueueSurface.finish_edit(ui.queue, ref) do
+      {:current, queue} ->
         {queue_recall_notice(outcome, result), UIState.install_queue(ui, queue)}
 
-      :not_requested ->
+      :stale ->
         {outcome, ui}
     end
   end
@@ -2435,7 +2435,8 @@ defmodule MingaEditor.Agent.DraftWorkflow do
 
   defp report(state, :queue_recalled), do: state |> QueueWorkflow.recalled() |> report(:recalled)
 
-  defp report(state, {:queue_recall_refused, reason}), do: QueueWorkflow.refuse(state, reason)
+  defp report(state, {:queue_recall_refused, reason}),
+    do: state |> QueueWorkflow.refuse(reason) |> MingaEditor.schedule_render(16)
 
   defp report(state, :stale_stop),
     do: NoticeWorkflow.publish(state, "That Agent turn is no longer active.")

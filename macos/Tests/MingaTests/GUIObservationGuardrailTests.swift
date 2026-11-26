@@ -29,6 +29,7 @@ struct GUIObservationGuardrailTests {
         "Sources/Views/Agent/AgentChatState.swift#AgentChatState": "protocol presentation owner",
         "Sources/Views/Agent/AgentContextBarState.swift#AgentContextBarState": "protocol presentation owner",
         "Sources/Views/Agent/AgentHelpState.swift#AgentHelpState": "protocol presentation owner",
+        "Sources/Views/Agent/AgentQueueState.swift#AgentQueueState": "protocol presentation owner",
         "Sources/Views/EditorChrome/BottomPanelState.swift#BottomPanelState": "protocol presentation owner",
         "Sources/Views/EditorChrome/BreadcrumbBar.swift#BreadcrumbState": "protocol presentation owner",
         "Sources/Views/EditorChrome/EmptyStateState.swift#EmptyStateState": "protocol presentation owner",

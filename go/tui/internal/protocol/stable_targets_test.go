@@ -27,6 +27,7 @@ func TestGUISendersUseOnlyRemainingActions(t *testing.T) {
 		"GUIActionAgentOpenQuestion":          false,
 		"GUIActionAgentStopTurn":              false,
 		"GUIActionAgentContinueTurn":          false,
+		"GUIActionAgentQueueAction":           false,
 		"GUIActionAgentStartRemedy":           false,
 		"GUIActionTasksDrawerAction":          false,
 		"GUIActionSemanticItemActivate":       false,

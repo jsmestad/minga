@@ -439,7 +439,24 @@ defmodule Minga.Test.Storyboard.Session do
   def press(%__MODULE__{ctx: ctx} = session, steps) when is_list(steps) do
     Enum.each(steps, &step(ctx, &1))
     await_picker_fetch!(ctx)
+    await_queue_edit!(ctx)
     session
+  end
+
+  @spec await_queue_edit!(EditorCase.editor_ctx()) :: :ok
+  defp await_queue_edit!(ctx) do
+    case EditorCase.editor_state(ctx).workspace.agent_ui.queue.edit_request do
+      ref when is_reference(ref) ->
+        EditorCase.wait_until(ctx, &(&1.workspace.agent_ui.queue.edit_request != ref),
+          max_attempts: 500,
+          message: "expected the queue's Enter action to settle"
+        )
+
+      nil ->
+        :ok
+    end
+
+    :ok
   end
 
   @doc "Sends one semantic click and waits until the editor has handled it."

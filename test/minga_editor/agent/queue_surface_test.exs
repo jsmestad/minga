@@ -92,6 +92,22 @@ defmodule MingaEditor.Agent.QueueSurfaceTest do
     assert selected_identity(refresh(stale, origin, [row(2)])) == {2, 1}
   end
 
+  test "a text read cannot claim focus after the queue closes and reopens" do
+    origin = {1, self(), "saved"}
+    old = make_ref()
+    current = make_ref()
+
+    open = %QueueSurface{} |> QueueSurface.bind(origin) |> QueueSurface.open(:transcript)
+
+    assert {:closed, :transcript, closed} =
+             open |> QueueSurface.begin_edit(old) |> QueueSurface.close()
+
+    reopened = closed |> QueueSurface.open(:transcript) |> QueueSurface.begin_edit(current)
+    assert :stale = QueueSurface.finish_edit(reopened, old)
+    assert {:current, settled} = QueueSurface.finish_edit(reopened, current)
+    assert :stale = QueueSurface.finish_edit(settled, current)
+  end
+
   defp refresh(queue, origin, pending),
     do: QueueSurface.refresh(queue, origin, %{pending: pending, removed: []})
 

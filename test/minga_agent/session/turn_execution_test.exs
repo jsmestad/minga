@@ -799,13 +799,13 @@ defmodule MingaAgent.Session.TurnExecutionTest do
         queued = queue(kind, ["a", "b", "c"])
 
         for {identity, placement, expected} <- [
-              {{3, 1}, {:before, 1}, ["c", "a", "b"]},
-              {{3, 1}, {:after, 1}, ["a", "c", "b"]},
-              {{1, 1}, {:after, 3}, ["b", "c", "a"]},
+              {{3, 1}, {:before, {1, 1}}, ["c", "a", "b"]},
+              {{3, 1}, {:after, {1, 1}}, ["a", "c", "b"]},
+              {{1, 1}, {:after, {3, 1}}, ["b", "c", "a"]},
               {{1, 1}, :end, ["b", "c", "a"]},
               {{3, 1}, :end, ["a", "b", "c"]},
-              {{2, 1}, {:before, 2}, ["a", "b", "c"]},
-              {{2, 1}, {:after, 2}, ["a", "b", "c"]}
+              {{2, 1}, {:before, {2, 1}}, ["a", "b", "c"]},
+              {{2, 1}, {:after, {2, 1}}, ["a", "b", "c"]}
             ] do
           assert {:ok, placed} = TurnExecution.place_queued_input(queued, identity, placement)
           assert queue_texts(placed, kind) == expected
@@ -826,13 +826,14 @@ defmodule MingaAgent.Session.TurnExecutionTest do
         assert [{^kind, {2, 1, "b", [], nil}}] = TurnExecution.withdrawn_inputs(removed)
 
         for {placement, expected} <- [
-              {{:before, 3}, ["a", "b", "c"]},
-              {{:before, 1}, ["b", "a", "c"]},
-              {{:after, 3}, ["a", "c", "b"]},
+              {{:before, {3, 1}}, ["a", "b", "c"]},
+              {{:before, {1, 1}}, ["b", "a", "c"]},
+              {{:after, {3, 1}}, ["a", "c", "b"]},
               {:end, ["a", "c", "b"]}
             ] do
           assert {:ok, placed} = TurnExecution.place_queued_input(removed, {2, 1}, placement)
           assert queue_texts(placed, kind) == expected
+          assert {:ok, "b"} = TurnExecution.queued_editable_text(placed, 2, 2)
           assert TurnExecution.withdrawn_inputs(placed) == []
         end
       end
@@ -847,13 +848,15 @@ defmodule MingaAgent.Session.TurnExecutionTest do
 
       for {state, identity, placement, reason} <- [
             {edited, {2, 1}, :end, :stale_queue_revision},
+            {edited, {1, 1}, {:before, {2, 1}}, :stale_queue_revision},
+            {edited, {2, 2}, {:before, {2, 1}}, :stale_queue_revision},
             {drained, {1, 1}, :end, :already_consumed},
-            {drained, {1, 1}, {:before, 1}, :already_consumed},
+            {drained, {1, 1}, {:before, {1, 1}}, :already_consumed},
             {mixed, {9, 1}, :end, :queued_input_not_found},
-            {mixed, {1, 1}, {:before, 9}, :anchor_gone},
-            {drained, {3, 1}, {:after, 1}, :anchor_gone},
-            {mixed, {1, 1}, {:before, 3}, :different_queue},
-            {mixed, {3, 1}, {:after, 2}, :different_queue}
+            {mixed, {1, 1}, {:before, {9, 1}}, :anchor_gone},
+            {drained, {3, 1}, {:after, {1, 1}}, :anchor_gone},
+            {mixed, {1, 1}, {:before, {3, 1}}, :different_queue},
+            {mixed, {3, 1}, {:after, {2, 1}}, :different_queue}
           ] do
         assert TurnExecution.place_queued_input(state, identity, placement) == {:error, reason}
       end
@@ -865,10 +868,10 @@ defmodule MingaAgent.Session.TurnExecutionTest do
 
       {:ok, without_anchor} = TurnExecution.change_queued_input(removed, 3, 1, :remove)
 
-      assert TurnExecution.place_queued_input(without_anchor, {2, 1}, {:before, 3}) ==
+      assert TurnExecution.place_queued_input(without_anchor, {2, 1}, {:before, {3, 1}}) ==
                {:error, :anchor_gone}
 
-      assert TurnExecution.place_queued_input(without_anchor, {2, 1}, {:before, 2}) ==
+      assert TurnExecution.place_queued_input(without_anchor, {2, 1}, {:before, {2, 1}}) ==
                {:error, :anchor_gone}
 
       assert {:ok, placed} = TurnExecution.place_queued_input(without_anchor, {2, 1}, :end)
@@ -899,7 +902,7 @@ defmodule MingaAgent.Session.TurnExecutionTest do
 
       assert TurnExecution.queues(starting) == {[], []}
 
-      assert TurnExecution.place_queued_input(starting, {2, 1}, {:before, 3}) ==
+      assert TurnExecution.place_queued_input(starting, {2, 1}, {:before, {3, 1}}) ==
                {:error, :anchor_gone}
 
       assert {:ok, placed} = TurnExecution.place_queued_input(starting, {2, 1}, :end)
@@ -1014,7 +1017,7 @@ defmodule MingaAgent.Session.TurnExecutionTest do
       {:ok, reordered} =
         :follow_up
         |> queue(["a", "b", "c"])
-        |> TurnExecution.place_queued_input({3, 1}, {:before, 1})
+        |> TurnExecution.place_queued_input({3, 1}, {:before, {1, 1}})
 
       saved = TurnExecution.pending_inputs(reordered)
 

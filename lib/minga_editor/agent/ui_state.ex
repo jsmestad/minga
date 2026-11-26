@@ -660,7 +660,8 @@ defmodule MingaEditor.Agent.UIState do
 
   @doc "Switches focus to the given panel."
   @spec set_focus(t(), View.focus()) :: t()
-  def set_focus(%__MODULE__{view: view, panel: panel} = state, :file_viewer) do
+  def set_focus(%__MODULE__{} = state, :file_viewer) do
+    %{view: view, panel: panel} = state = blur_queue(state)
     %{state | view: View.set_focus(view, :file_viewer), panel: %{panel | input_focused: false}}
   end
 

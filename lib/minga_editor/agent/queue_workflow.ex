@@ -97,7 +97,13 @@ defmodule MingaEditor.Agent.QueueWorkflow do
   defp focus_queue(state, origin) do
     ui = state.workspace.agent_ui
     return = if ui.panel.input_focused, do: :composer, else: :transcript
-    queue = ui.queue |> QueueSurface.bind(origin) |> QueueSurface.open(return)
+
+    queue =
+      ui.queue
+      |> QueueSurface.bind(origin)
+      |> QueueSurface.open(return)
+      |> QueueSurface.cancel_removal()
+
     view = ui.view |> View.set_focus(:chat) |> View.clear_prefix()
 
     next_ui =
@@ -135,6 +141,22 @@ defmodule MingaEditor.Agent.QueueWorkflow do
   def key(state, action) do
     surface = state.workspace.agent_ui.queue
     row_action(state, surface, action, QueueSurface.selected(surface))
+  end
+
+  @doc "Removes only the row whose revision was selected at the start of the key sequence."
+  @spec remove_displayed(State.t(), QueuedInputSummary.identity() | nil) :: State.t()
+  def remove_displayed(state, nil), do: state
+
+  def remove_displayed(state, identity) do
+    queue = state.workspace.agent_ui.queue
+
+    case QueueSurface.selected(queue) do
+      %QueuedInputSummary{identity: ^identity} = row ->
+        row_action(state, queue, :queue_remove, row)
+
+      _changed ->
+        refuse(state, :stale_queue_revision)
+    end
   end
 
   @doc "Applies a click only to the conversation and message revisions that were drawn."
@@ -287,8 +309,8 @@ defmodule MingaEditor.Agent.QueueWorkflow do
           :before | :after,
           QueuedInputSummary.t() | nil
         ) :: {:ok, TurnExecution.queue_position()} | {:error, :different_queue}
-  defp pasting_position(kind, _pending, side, %QueuedInputSummary{kind: kind, identity: {id, _}}),
-    do: {:ok, {side, id}}
+  defp pasting_position(kind, _pending, side, %QueuedInputSummary{kind: kind, identity: identity}),
+       do: {:ok, {side, identity}}
 
   defp pasting_position(_kind, _pending, _side, nil), do: {:ok, :end}
 

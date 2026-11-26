@@ -429,7 +429,7 @@ defmodule MingaAgent.SessionQueueTest do
       assert {:error, :invalid_queue_edit} =
                Session.place_queued_input(session, id, {3, 1}, {:first, 1})
 
-      assert :ok = Session.place_queued_input(session, id, {3, 1}, {:before, 1})
+      assert :ok = Session.place_queued_input(session, id, {3, 1}, {:before, {1, 1}})
       assert_receive {:agent_event, ^session, :queues_recalled}, @event_timeout
       assert Session.get_queued_messages(session) == {[], ["three", "one", "two"]}
 
@@ -467,14 +467,17 @@ defmodule MingaAgent.SessionQueueTest do
       assert {:ok, 0} = Session.change_queued_input(session, id, {2, 1}, :remove)
       assert Session.get_queued_messages(session) == {[], ["keep", "also keep"]}
 
-      assert :ok = Session.place_queued_input(session, id, {2, 1}, {:before, 3})
+      assert :ok = Session.place_queued_input(session, id, {2, 1}, {:before, {3, 1}})
       assert Session.get_queued_messages(session) == {[], ["keep", "removed", "also keep"]}
 
       assert {:error, :not_removed} =
                Session.place_queued_input(session, id, {2, 1}, {:removed, :end})
 
       assert Session.get_queued_messages(session) == {[], ["keep", "removed", "also keep"]}
-      assert {:ok, 0} = Session.change_queued_input(session, id, {2, 1}, :remove)
+      assert {:ok, 0} = Session.change_queued_input(session, id, {2, 2}, :remove)
+
+      assert {:error, :stale_queue_revision} =
+               Session.place_queued_input(session, id, {2, 1}, {:removed, :end})
 
       SessionSlowMockProvider.proceed(Session.get_provider(session))
       assert_receive {:agent_event, ^session, {:status_changed, :thinking}}, @event_timeout
@@ -486,9 +489,9 @@ defmodule MingaAgent.SessionQueueTest do
       assert part == ContentPart.text("keep\n\nalso keep")
 
       assert {:error, :anchor_gone} =
-               Session.place_queued_input(session, id, {2, 1}, {:before, 3})
+               Session.place_queued_input(session, id, {2, 2}, {:before, {3, 1}})
 
-      assert :ok = Session.place_queued_input(session, id, {2, 1}, :end)
+      assert :ok = Session.place_queued_input(session, id, {2, 2}, :end)
       assert Session.get_queued_messages(session) == {[], ["removed"]}
     end
 

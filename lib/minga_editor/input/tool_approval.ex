@@ -3,7 +3,7 @@ defmodule MingaEditor.Input.ToolApproval do
   Input handler for the tool approval sub-state (y/Enter/a/t/n).
 
   Active when `agent.pending_approval` is non-nil, the panel
-  input is not focused, and neither a command line, search, or eval prompt nor a pending key sequence owns the key. Handles y or Enter (approve), a (trust this tool for the session),
+  input is not focused, and neither the queue, a command line, search, an eval prompt, nor a pending key sequence owns the key. Handles y or Enter (approve), a (trust this tool for the session),
   t (trust this tool for the current turn) and n (deny). Esc defers: it continues through normal editor routing and leaves the request pending, so it stays answerable. Unrelated keys continue the same way.
   """
 
@@ -17,6 +17,9 @@ defmodule MingaEditor.Input.ToolApproval do
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
+  def handle_key(%{workspace: %{keymap_scope: :queue}} = state, _cp, _mods),
+    do: {:passthrough, state}
+
   def handle_key(state, cp, 0) do
     agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
 

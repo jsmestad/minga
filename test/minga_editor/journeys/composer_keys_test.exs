@@ -10,6 +10,7 @@ defmodule MingaEditor.Journeys.ComposerKeysTest do
   alias Minga.Config.Options
   alias Minga.Design.Tokens
   alias MingaAgent.Session
+  alias MingaAgent.ToolApproval.{Preview, Public, Target}
   alias MingaEditor.Agent.QueueSurface
   alias MingaEditor.Agent.Tasks
   alias MingaEditor.Frontend.Capabilities
@@ -129,6 +130,15 @@ defmodule MingaEditor.Journeys.ComposerKeysTest do
 
     send_keys_sync(ctx, "p")
     await_queue(ctx, ["first", "second"], [])
+
+    record = Session.session_id(session)
+    target = Target.new(record, "admitted-tool-turn", "still-pending")
+    approval = Public.new(target, "shell", %{}, Preview.new(:command, "Review", ["pwd"]))
+    send(ctx.editor, {:agent_event, session, {:approval_pending, approval}})
+
+    assert %{pending_approval: %{approval: ^approval}} =
+             MingaEditor.Shell.Traditional.State.agent(editor_state(ctx).shell_runtime.state)
+
     send_keys_sync(ctx, "j<CR>")
     await_prompt(ctx, "second")
     state = await_queue(ctx, ["first"], [])
@@ -137,6 +147,33 @@ defmodule MingaEditor.Journeys.ComposerKeysTest do
     assert state.workspace.agent_ui.panel.input_focused
     assert editor_mode(ctx) == :insert
     assert user_messages(session) == ["start"]
+
+    assert %{pending_approval: %{approval: ^approval}} =
+             MingaEditor.Shell.Traditional.State.agent(editor_state(ctx).shell_runtime.state)
+  end
+
+  test "a pending dd never removes the next row if the first row leaves", %{
+    editor_ctx: ctx,
+    session: session
+  } do
+    send_keys_sync(ctx, "start")
+    send_key_sync(ctx, 13, @cmd)
+    await_working(ctx)
+    queue(ctx, "first")
+    queue(ctx, "second")
+    send_keys_sync(ctx, "<Esc><Esc><SPC>aqq")
+    state = await_queue(ctx, ["first", "second"], [])
+
+    %{origin: {_, ^session, record}, contents: %{pending: [first, _]}} =
+      state.workspace.agent_ui.queue
+
+    send_keys_sync(ctx, "d")
+    assert {:ok, 0} = Session.change_queued_input(session, record, first.identity, :remove)
+    await_queue(ctx, ["second"], ["first"])
+
+    send_keys_sync(ctx, "d")
+    assert notice_message(ctx) == "That queued message changed. Review it before trying again."
+    assert Session.get_queued_messages(session) == {[], ["second"]}
   end
 
   test "q returns from an empty queue to the transcript and Enter returns to the composer", %{

@@ -1398,7 +1398,7 @@ defmodule MingaAgent.Session do
   @doc """
   Moves the displayed pending entry within its queue, or puts a removed entry back, in the original saved Session.
 
-  The entry is named by its identity and the place by another pending entry's id, never by a position, so two views of one queue cannot move the wrong row.
+  The source and any pending anchor both carry their displayed `{id, revision}`, never a list position.
   """
   @spec place_queued_input(
           GenServer.server(),
@@ -6018,11 +6018,16 @@ defmodule MingaAgent.Session do
 
   defp queue_change_receipt(_previous, _current, _edit), do: :ok
 
+  defguardp is_queue_identity(identity)
+            when is_tuple(identity) and tuple_size(identity) == 2 and
+                   is_integer(elem(identity, 0)) and elem(identity, 0) > 0 and
+                   is_integer(elem(identity, 1)) and elem(identity, 1) > 0
+
   defguardp is_queue_position(placement)
             when placement == :end or
                    (is_tuple(placement) and tuple_size(placement) == 2 and
                       elem(placement, 0) in [:before, :after] and
-                      is_integer(elem(placement, 1)) and elem(placement, 1) > 0)
+                      is_queue_identity(elem(placement, 1)))
 
   @spec place_queued_input_reply(state(), String.t(), {pos_integer(), pos_integer()}, term()) ::
           {:reply, :ok | {:error, term()}, state()}

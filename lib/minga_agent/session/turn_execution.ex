@@ -45,7 +45,8 @@ defmodule MingaAgent.Session.TurnExecution do
   """
   @type withdrawn_input :: {prompt_kind(), queued_input()}
 
-  @type queue_position :: {:before | :after, anchor_id :: pos_integer()} | :end
+  @type queue_position ::
+          {:before | :after, anchor :: {pos_integer(), pos_integer()}} | :end
 
   @typedoc "A position, optionally requiring the displayed source to still be removed."
   @type queue_placement :: queue_position() | {:removed, queue_position()}
@@ -546,7 +547,7 @@ defmodule MingaAgent.Session.TurnExecution do
   @doc """
   Puts a queued input at a place in its own queue, at the displayed revision.
 
-  A pending input moves. An input its user removed (`change_queued_input/4` with `:remove`) goes back into the queue it left, and the count and size limits are checked again. Steering inputs and follow-ups stay in their own queues: an anchor in the other queue is refused as `:different_queue`. Nothing changes on a refusal.
+  A pending input moves. An input its user removed goes back into the queue it left with a new revision. Both the source and its anchor must match the displayed revisions. An anchor in the other queue is refused as `:different_queue`. Nothing changes on a refusal.
   """
   @spec place_queued_input(t(), {pos_integer(), pos_integer()}, queue_placement()) ::
           {:ok, t()} | {:error, queue_place_error()}
@@ -586,12 +587,22 @@ defmodule MingaAgent.Session.TurnExecution do
           queued_input(),
           queue_position()
         ) ::
-          {:ok, t()} | {:error, :anchor_gone | :different_queue | :prompt_queue_full}
+          {:ok, t()}
+          | {:error, :anchor_gone | :different_queue | :stale_queue_revision | :prompt_queue_full}
   # A pending input placed beside itself stays where it is.
-  defp place_taken(execution, _rest, {:pending, _kind}, {id, _, _, _, _}, {_side, id}),
-    do: {:ok, execution}
+  defp place_taken(
+         execution,
+         _rest,
+         {:pending, _kind},
+         {id, revision, _, _, _},
+         {_, {id, anchor_revision}}
+       ) do
+    if revision == anchor_revision, do: {:ok, execution}, else: {:error, :stale_queue_revision}
+  end
 
-  defp place_taken(_execution, rest, {_from, kind}, entry, placement) do
+  defp place_taken(_execution, rest, {from, kind}, entry, placement) do
+    entry = if from == :withdrawn, do: put_elem(entry, 1, elem(entry, 1) + 1), else: entry
+
     with {:ok, placed} <- insert_placed(rest, kind, entry, placement) do
       if pending_size_allowed?(placed), do: {:ok, placed}, else: {:error, :prompt_queue_full}
     end
@@ -682,19 +693,20 @@ defmodule MingaAgent.Session.TurnExecution do
   end
 
   @spec insert_placed(t(), prompt_kind(), queued_input(), queue_position()) ::
-          {:ok, t()} | {:error, :anchor_gone | :different_queue}
+          {:ok, t()} | {:error, :anchor_gone | :different_queue | :stale_queue_revision}
   defp insert_placed(execution, kind, entry, :end) do
     field = queue_field(kind)
     {:ok, %{execution | field => Map.fetch!(execution, field) ++ [entry]}}
   end
 
-  defp insert_placed(execution, kind, entry, {side, anchor_id}) when side in [:before, :after] do
+  defp insert_placed(execution, kind, entry, {side, {anchor_id, revision}})
+       when side in [:before, :after] do
     field = queue_field(kind)
     queue = Map.fetch!(execution, field)
 
-    case Enum.find_index(queue, &(elem(&1, 0) == anchor_id)) do
+    case Enum.find_index(queue, &match?({^anchor_id, ^revision, _, _, _}, &1)) do
       nil ->
-        {:error, missing_anchor(execution, anchor_id)}
+        {:error, missing_anchor(execution, field, anchor_id)}
 
       index ->
         {:ok, %{execution | field => List.insert_at(queue, placed_index(index, side), entry)}}
@@ -705,9 +717,11 @@ defmodule MingaAgent.Session.TurnExecution do
   defp placed_index(index, :before), do: index
   defp placed_index(index, :after), do: index + 1
 
-  @spec missing_anchor(t(), pos_integer()) :: :anchor_gone | :different_queue
-  defp missing_anchor(execution, anchor_id) do
+  @spec missing_anchor(t(), :steering_queue | :follow_up_queue, pos_integer()) ::
+          :anchor_gone | :different_queue | :stale_queue_revision
+  defp missing_anchor(execution, field, anchor_id) do
     case find_pending_entry(execution, anchor_id) do
+      {:ok, ^field, _queue, _entry} -> :stale_queue_revision
       {:ok, _other_field, _queue, _entry} -> :different_queue
       {:error, _reason} -> :anchor_gone
     end
