@@ -556,7 +556,7 @@ type AgentQueueTarget struct {
 	Sequence uint64
 }
 
-// AgentStopTarget identifies the exact active turn shown by the composer.
+// AgentStopTarget carries the exact session and request identity for a turn control.
 type AgentStopTarget struct {
 	SessionID string
 	RequestID string
@@ -622,6 +622,7 @@ type AgentChat struct {
 	QuestionOffer        uint64
 	QuestionPrompt       string
 	StopTarget           AgentStopTarget
+	ContinueTarget       AgentStopTarget
 	Pending              string
 	Completion           []string
 	// ComposerHints are the focused composer's key hints, authored by the BEAM

@@ -132,6 +132,47 @@ defmodule MingaEditor.Journeys.ComposerKeysTest do
     end
   end
 
+  for {input, draft} <- [{:keyboard, ""}, {:click, "not yet"}] do
+    test "Continue via #{input} resumes the interrupted response without sending the draft or queue",
+         %{editor_ctx: ctx, session: session} do
+      send_keys_sync(ctx, "go")
+      send_key_sync(ctx, 13, @cmd)
+      await_working(ctx)
+      queue(ctx, "later")
+      await_prompt(ctx, "")
+      send_keys_sync(ctx, unquote(draft))
+
+      %{stop_target: interrupted} = Session.editor_snapshot(session)
+      send_key_sync(ctx, ?., @cmd)
+
+      wait_until(ctx, fn _state -> modeline(ctx) =~ "Minga stopped" end,
+        message: "expected the exact stopped turn to be displayed"
+      )
+
+      assert %{continue_target: ^interrupted} = Session.editor_snapshot(session)
+      {record, _request} = interrupted
+      send_gui_action(ctx, {:agent_continue_turn, {record, "another request"}})
+      assert Session.status(session) == :stopped
+
+      case unquote(input) do
+        :keyboard -> send_keys_sync(ctx, "<Esc><CR>")
+        :click -> send_gui_action(ctx, {:agent_continue_turn, interrupted})
+      end
+
+      await_working(ctx)
+      assert %{stop_target: resumed, continue_target: nil} = Session.editor_snapshot(session)
+      assert {^record, _new_request} = resumed
+      refute resumed == interrupted
+      assert user_messages(session) == ["go"]
+      assert Session.get_queued_messages(session) == {[], ["later"]}
+      assert prompt(ctx) == unquote(draft)
+
+      assert :ok = Session.stop_turn(session, resumed)
+      assert {:error, :stale_turn} = Session.continue_stopped(session, interrupted)
+      assert Session.status(session) == :stopped
+    end
+  end
+
   for {label, to_front} <- [
         {"the conversation's split is closed", "<Esc><Esc><SPC>av"},
         {"SPC a a went back to the file", "<Esc><Esc><SPC>aa"},

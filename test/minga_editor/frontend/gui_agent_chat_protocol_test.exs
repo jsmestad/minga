@@ -46,19 +46,23 @@ defmodule MingaEditor.Frontend.GUIAgentChatProtocolTest do
     assert :error == ProtocolGUI.decode_gui_action(0x6A, <<42::32>>)
   end
 
-  test "Stop carries both exact IDs and rejects empty, truncated, and trailing data" do
+  test "Stop and Continue carry distinct intents and both reject invalid turn identities" do
     target = <<1::16, "s", 2::16, "r2">>
 
-    assert {:ok, {:gui_action, {:agent_stop_turn, {"s", "r2"}}}} =
-             Protocol.decode_event(<<Minga.Protocol.Opcodes.gui_action(), 0x6D, target::binary>>)
+    for {opcode, action} <- [{0x6D, :agent_stop_turn}, {0x75, :agent_continue_turn}] do
+      assert {:ok, {:gui_action, {^action, {"s", "r2"}}}} =
+               Protocol.decode_event(
+                 <<Minga.Protocol.Opcodes.gui_action(), opcode, target::binary>>
+               )
 
-    for payload <- [
-          <<0::16, 1::16, "r">>,
-          <<1::16, "s", 0::16>>,
-          <<1::16, "s", 2::16, "r">>,
-          <<target::binary, 0>>
-        ] do
-      assert :error = ProtocolGUI.decode_gui_action(0x6D, payload)
+      for payload <- [
+            <<0::16, 1::16, "r">>,
+            <<1::16, "s", 0::16>>,
+            <<1::16, "s", 2::16, "r">>,
+            <<target::binary, 0>>
+          ] do
+        assert :error = ProtocolGUI.decode_gui_action(opcode, payload)
+      end
     end
   end
 

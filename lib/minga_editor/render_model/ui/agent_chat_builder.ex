@@ -23,7 +23,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Agent.View.PromptFrame
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
-  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.TabBar
   alias Minga.RenderModel.UI.AgentChat
   alias Minga.RenderModel.UI.AgentChat.ApprovalView
@@ -86,7 +85,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     visible_rows = projection.visible_rows
 
     {resident_messages, resident_truncated?, transcript_epoch} = resident_transcript(ctx)
-    stop_target = stop_target(shell_agent.stop_target, session)
+    stop_target = bound_turn(shell_agent.stop_target, session)
+    continue_target = bound_turn(shell_agent.continue_target, session)
 
     %AgentChat{
       visible?: true,
@@ -107,10 +107,11 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       draft_attachment_offer: DraftSave.attachment_offer(agent_ui.draft_save),
       pending_question: pending_question(shell_agent.pending_question, session),
       stop_target: stop_target,
+      continue_target: continue_target,
       queue_target: queue_target(shell_agent.queue_target, agent_ui.draft_save, session),
       prompt_completion: build_prompt_completion(panel),
       input_focused: composer_focused?(ctx, panel),
-      composer_hints: composer_hints(ctx, panel, shell_agent, stop_target != nil),
+      composer_hints: composer_hints(ctx, panel, stop_target != nil, continue_target != nil),
       resident_messages: resident_messages,
       resident_truncated?: resident_truncated?,
       transcript_epoch: transcript_epoch
@@ -306,12 +307,12 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   # The focused composer's key hints come from the Agent scope, which binds the
   # keys they name; a composer without the keys shows none.
-  @spec composer_hints(Context.t(), Panel.t(), AgentState.t(), boolean()) :: [
+  @spec composer_hints(Context.t(), Panel.t(), boolean(), boolean()) :: [
           AgentChat.composer_hint()
         ]
-  defp composer_hints(ctx, panel, shell_agent, stoppable?) do
+  defp composer_hints(ctx, panel, stoppable?, continuable?) do
     if composer_focused?(ctx, panel),
-      do: focused_composer_hints(ctx, shell_agent, stoppable?),
+      do: focused_composer_hints(ctx, stoppable?, continuable?),
       else: []
   end
 
@@ -320,15 +321,15 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   # does nothing. It covers a turn that waits for an approval, a turn in plan
   # mode and a turn that reported an error and is still running, none of which
   # the runtime status reports as working.
-  @spec focused_composer_hints(Context.t(), AgentState.t(), boolean()) :: [
+  @spec focused_composer_hints(Context.t(), boolean(), boolean()) :: [
           AgentChat.composer_hint()
         ]
-  defp focused_composer_hints(ctx, shell_agent, stoppable?) do
+  defp focused_composer_hints(ctx, stoppable?, continuable?) do
     AgentScope.composer_key_hints(
       composer_focus(ctx.intent.frame.editing_model, ctx.workspace.editing.mode),
       native_gui: MingaEditor.Frontend.gui?(ctx.intent.frame.capabilities),
       working: stoppable?,
-      stopped: AgentState.status(shell_agent) == :stopped,
+      stopped: continuable?,
       remedy: UIState.start_remedy(ctx.workspace.agent_ui) != nil
     )
   end
@@ -370,10 +371,10 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   defp pending_question(_question, _session), do: nil
 
-  @spec stop_target({pid(), {String.t(), String.t()}} | nil, pid() | nil) ::
+  @spec bound_turn({pid(), {String.t(), String.t()}} | nil, pid() | nil) ::
           {String.t(), String.t()} | nil
-  defp stop_target({session, target}, session), do: target
-  defp stop_target(_target, _session), do: nil
+  defp bound_turn({session, target}, session), do: target
+  defp bound_turn(_target, _session), do: nil
 
   @spec queue_target(
           {pid(), MingaAgent.Session.queue_target()} | nil,

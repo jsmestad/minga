@@ -236,4 +236,5 @@ const (
 	GUIActionAgentNotificationOpen      byte = 0x72
 	GUIActionWhichKeyPress              byte = 0x73
 	GUIActionWhichKeyBack               byte = 0x74
+	GUIActionAgentContinueTurn          byte = 0x75
 )

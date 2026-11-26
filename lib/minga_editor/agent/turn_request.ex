@@ -16,10 +16,11 @@ defmodule MingaEditor.Agent.TurnRequest do
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State, as: EditorState
 
-  @typedoc "A send with the content the Session gets and the raw composer text it took, or a stop of one turn."
+  @typedoc "A composer send, or an operation on an exact turn."
   @type work ::
           {:send, Session.composer_send(), TurnExecution.content(), raw :: String.t()}
           | {:stop, {String.t(), String.t()}}
+          | {:continue, {String.t(), String.t()}}
 
   @typedoc "How the answer comes back: a local Session's reply, or a worker asking a Session on another node. `:unsent` until the request has started."
   @type transport ::
@@ -104,6 +105,18 @@ defmodule MingaEditor.Agent.TurnRequest do
     })
   end
 
+  @doc "Asks `session` to continue the stopped turn `target` and returns at once."
+  @spec continue(EditorState.t(), pid(), {String.t(), String.t()}) :: EditorState.t()
+  def continue(%EditorState{} = state, session, {_, _} = target) when is_pid(session) do
+    ask(state, %__MODULE__{
+      token: make_ref(),
+      transport: :unsent,
+      workspace: DraftWorkflow.front_owner(state),
+      session: session,
+      work: {:continue, target}
+    })
+  end
+
   # A request that could not be started is settled at once, as a Session that never answered.
   @spec ask(EditorState.t(), t()) :: EditorState.t()
   defp ask(state, %__MODULE__{token: token, session: session, work: work} = request) do
@@ -174,6 +187,9 @@ defmodule MingaEditor.Agent.TurnRequest do
   defp start(_state, _token, session, {:stop, target}) when node(session) == node(),
     do: {:ok, {:request, Session.request_stop_turn(session, target)}}
 
+  defp start(_state, _token, session, {:continue, target}) when node(session) == node(),
+    do: {:ok, {:request, Session.request_continue_stopped(session, target)}}
+
   defp start(%EditorState{effect_scheduler: nil}, _token, _session, _work), do: :error
 
   defp start(%EditorState{effect_scheduler: scheduler}, token, session, work) do
@@ -189,7 +205,7 @@ defmodule MingaEditor.Agent.TurnRequest do
     :exit, _reason -> :error
   end
 
-  # A Session on another node has no saved composer for this Editor, so only these three reach it.
+  # A Session on another node has no saved composer for this Editor.
   @spec ask_remote(pid(), work(), pid()) :: answer()
   defp ask_remote(session, {:send, :prompt, content, _raw}, editor),
     do: SessionClient.send_prompt(session, content, editor)
@@ -202,6 +218,12 @@ defmodule MingaEditor.Agent.TurnRequest do
 
   defp ask_remote(session, {:stop, target}, _editor) do
     Session.stop_turn(session, target)
+  catch
+    :exit, _reason -> :session_down
+  end
+
+  defp ask_remote(session, {:continue, target}, _editor) do
+    Session.continue_stopped(session, target)
   catch
     :exit, _reason -> :session_down
   end

@@ -1356,6 +1356,17 @@ defmodule Minga.Protocol.Encode do
     ]
   end
 
+  @spec encode_gui_agent_chat_continue_target(map()) :: iodata()
+  def encode_gui_agent_chat_continue_target(model), do: encode_gui_agent_chat_continue_target(model, :gui_agent_chat, [:continue_target])
+
+  @spec encode_gui_agent_chat_continue_target(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_gui_agent_chat_continue_target(model, command, path) do
+    [
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:session_id | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :session_id)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:request_id | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :request_id)),
+    ]
+  end
+
   @spec encode_gui_picker_preview_header(map()) :: iodata()
   def encode_gui_picker_preview_header(model), do: encode_gui_picker_preview_header(model, :gui_picker_preview, [:header])
 

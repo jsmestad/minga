@@ -801,6 +801,11 @@ type GuiAgentChatComposerHints struct {
 	Hints []ComposerHint
 }
 
+type GuiAgentChatContinueTarget struct {
+	SessionID string
+	RequestID string
+}
+
 type GuiPickerPreviewHeader struct {
 	Visible uint8
 	Kind    uint8

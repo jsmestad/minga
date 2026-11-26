@@ -103,7 +103,7 @@ func decodeAgentChat(payload []byte) (AgentChat, string, int) {
 		return AgentChat{Visible: true}, "", len(payload)
 	}
 	chat := AgentChat{}
-	var sawStopTarget, sawPromptPresentation, sawQueueTarget bool
+	var sawStopTarget, sawContinueTarget, sawPromptPresentation, sawQueueTarget bool
 	offset := 2
 	for i := 0; i < int(payload[1]); i++ {
 		sectionID := payload[offset]
@@ -151,17 +151,10 @@ func decodeAgentChat(payload []byte) (AgentChat, string, int) {
 		case 0x0C:
 			if sawStopTarget {
 				chat.StopTarget = AgentStopTarget{}
-				continue
+			} else {
+				chat.StopTarget = decodeAgentTurnTarget(section)
 			}
 			sawStopTarget = true
-			sessionID, next, ok := readString16(section, 0)
-			if !ok || sessionID == "" {
-				continue
-			}
-			requestID, end, ok := readString16(section, next)
-			if ok && requestID != "" && end == len(section) {
-				chat.StopTarget = AgentStopTarget{SessionID: sessionID, RequestID: requestID}
-			}
 		case 0x0D:
 			if sawPromptPresentation || len(section) != 8 {
 				chat.PromptPresentation = 0
@@ -187,6 +180,13 @@ func decodeAgentChat(payload []byte) (AgentChat, string, int) {
 			if hints, _, err := generated.DecodeGuiAgentChatComposerHints(section, 0, len(section)); err == nil {
 				chat.ComposerHints = hints.Hints
 			}
+		case 0x11:
+			if sawContinueTarget {
+				chat.ContinueTarget = AgentStopTarget{}
+			} else {
+				chat.ContinueTarget = decodeAgentTurnTarget(section)
+			}
+			sawContinueTarget = true
 		case 0x0F:
 			if lifecycle, ok := decodeAgentChatLifecycle(section); ok {
 				chat.Lifecycle = lifecycle.kind
@@ -197,6 +197,18 @@ func decodeAgentChat(payload []byte) (AgentChat, string, int) {
 		}
 	}
 	return chat, chat.ModelName, size
+}
+
+func decodeAgentTurnTarget(section []byte) AgentStopTarget {
+	sessionID, next, ok := readString16(section, 0)
+	if !ok || sessionID == "" {
+		return AgentStopTarget{}
+	}
+	requestID, end, ok := readString16(section, next)
+	if !ok || requestID == "" || end != len(section) {
+		return AgentStopTarget{}
+	}
+	return AgentStopTarget{SessionID: sessionID, RequestID: requestID}
 }
 
 // agentChatLifecycleSection is one decoded 0x0F section.

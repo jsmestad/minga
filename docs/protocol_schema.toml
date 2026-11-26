@@ -1614,6 +1614,11 @@ value = 0x73
 name = "which_key_back"
 value = 0x74
 
+# Session and interrupted request IDs (string16 each) from the committed Continue control.
+[[gui_actions]]
+name = "agent_continue_turn"
+value = 0x75
+
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
 # Capability payload version 2 appends these fields after the original seven
@@ -2907,6 +2912,15 @@ id = 0x10
 name = "composer_hints"
 fields = [
   { name = "hints", type = "counted_array", count_type = "u8", element = "composer_hint" },
+]
+
+[[sections]]
+opcode = "gui_agent_chat"
+id = 0x11
+name = "continue_target"
+fields = [
+  { name = "session_id", type = "string16" },
+  { name = "request_id", type = "string16" },
 ]
 
 # gui_picker_preview (0x7D) sections

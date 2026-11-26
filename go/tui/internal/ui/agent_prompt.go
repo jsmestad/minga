@@ -264,13 +264,20 @@ func agentTurnControls(chat protocol.AgentChat, width int) [4]agentTurnControl {
 	case width < agentFullTurnLabelsWidth:
 		labels = [4]string{"↑", "↪", "+", "■"}
 	}
+	continuable := !active && chat.ContinueTarget.SessionID != "" && chat.Lifecycle == protocol.AgentChatConversation
+	if continuable {
+		labels[0] = "▶"
+		if width >= agentFullTurnLabelsWidth {
+			labels[0] = "Continue"
+		}
+	}
 	draft := chat.PromptPresentation != 0 && chat.Prompt != ""
 	queue := active && draft && chat.QueueTarget.Sequence != 0
 	// Send waits for a live conversation: while the session starts, the draft
 	// is kept and the starting notice explains why Send is unavailable.
 	sendable := draft && !active && chat.Lifecycle == protocol.AgentChatConversation
 	return [4]agentTurnControl{
-		{labels[0], sendable},
+		{labels[0], continuable || sendable},
 		{labels[1], queue},
 		{labels[2], queue},
 		{labels[3], active && chat.StopTarget.SessionID != ""},
@@ -349,7 +356,7 @@ func (m Model) presentedComposerHandler() func(tea.MouseClickMsg) {
 		width = endCells[i] + separator
 	}
 	width = min(endCells[3], p.innerWidth)
-	var cells uint32
+	var cells uint64
 	for cell := range width {
 		x := start + cell
 		if m.layout.body.Contains(x, y) && !m.editorTextOccluded(x, y) {
@@ -361,6 +368,7 @@ func (m Model) presentedComposerHandler() func(tea.MouseClickMsg) {
 	}
 	generation, offer := chat.PromptPresentation, chat.DraftAttachmentOffer
 	stopTarget, queueTarget := chat.StopTarget, chat.QueueTarget
+	continueTarget := chat.ContinueTarget
 	claim := m.presentedClick
 	return func(click tea.MouseClickMsg) {
 		if click.Y == y {
@@ -373,7 +381,11 @@ func (m Model) presentedComposerHandler() func(tea.MouseClickMsg) {
 					}
 					switch i {
 					case 0:
-						claim.packet = protocol.EncodeGUIAgentComposerSubmit(generation, offer)
+						if continueTarget.SessionID != "" {
+							claim.packet = protocol.EncodeGUIAgentContinueTurn(continueTarget)
+						} else {
+							claim.packet = protocol.EncodeGUIAgentComposerSubmit(generation, offer)
+						}
 					case 1, 2:
 						claim.packet = protocol.EncodeGUIAgentComposerQueue(generation, offer, i == 2, queueTarget)
 					case 3:

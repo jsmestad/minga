@@ -36,6 +36,7 @@ public struct AgentChatView: View {
         case composerQueue(generation: UInt64, offer: UInt64, followUp: Bool, target: AgentQueueTarget)
         case openQuestion(offer: UInt64)
         case stopTurn(AgentStopTarget)
+        case continueTurn(AgentStopTarget)
         /// Runs the remedy a failed start offers, as sent by the BEAM.
         case startRemedy(AgentStartRemedy.Kind)
         case chatScrolledAwayFromBottom
@@ -92,6 +93,7 @@ public struct AgentChatView: View {
                     case .submit: .composerSubmit(generation: generation, offer: offer)
                     case .queue(let followUp, let target): .composerQueue(generation: generation, offer: offer, followUp: followUp, target: target)
                     case .abort(let target): .stopTurn(target)
+                    case .resume(let target): .continueTurn(target)
                     case .attachments: .executeCommand(name: "agent_draft_attachments")
                     }
                 }, maximumHeight: max(0, availableHeight - headerHeight))

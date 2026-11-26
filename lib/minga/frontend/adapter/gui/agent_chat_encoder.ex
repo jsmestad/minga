@@ -49,6 +49,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   @section_chat_lifecycle 0x0F
   # The focused composer's key hints, as the BEAM authors them; omitted when empty.
   @section_chat_composer_hints 0x10
+  @section_chat_continue_target 0x11
 
   @spec encode(AgentChat.t(), Caches.t()) :: {binary() | nil, Caches.t()}
   def encode(%AgentChat{} = model, %Caches{} = caches) do
@@ -123,7 +124,8 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     sections =
       sections
       |> add_question_section(model.pending_question)
-      |> add_stop_target_section(model.stop_target)
+      |> add_turn_target_section(@section_chat_stop_target, model.stop_target)
+      |> add_turn_target_section(@section_chat_continue_target, model.continue_target)
       |> add_queue_target_section(model.queue_target)
       |> add_lifecycle_section(model)
       |> add_composer_hints_section(model.composer_hints)
@@ -230,17 +232,18 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     [encode_section(@section_chat_question, payload) | sections]
   end
 
-  @spec add_stop_target_section([binary()], {String.t(), String.t()} | nil) :: [binary()]
-  defp add_stop_target_section(sections, nil), do: sections
+  @spec add_turn_target_section([binary()], non_neg_integer(), {String.t(), String.t()} | nil) ::
+          [binary()]
+  defp add_turn_target_section(sections, _section, nil), do: sections
 
-  defp add_stop_target_section(sections, {session_id, request_id}) do
+  defp add_turn_target_section(sections, section, {session_id, request_id}) do
     payload =
       Writer.new(@command)
-      |> Writer.string16(:stop_session_id, session_id)
-      |> Writer.string16(:stop_request_id, request_id)
+      |> Writer.string16(:turn_session_id, session_id)
+      |> Writer.string16(:turn_request_id, request_id)
       |> Writer.finish()
 
-    [encode_section(@section_chat_stop_target, payload) | sections]
+    [encode_section(section, payload) | sections]
   end
 
   @spec encode_prompt(AgentChat.t()) :: binary()

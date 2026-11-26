@@ -141,6 +141,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
         &AgentCommands.submit_prompt/1
       )
 
+  defp dispatch_action(state, {:agent_continue_turn, target}),
+    do: AgentCommands.continue_displayed_turn(state, target)
+
   defp dispatch_action(state, {:agent_composer_queue, generation, offer, kind, target}),
     do:
       MingaEditor.Agent.PromptInput.queue_displayed(

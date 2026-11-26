@@ -820,6 +820,7 @@ public final class AgentChatState {
     public private(set) var draftAttachmentOffer: UInt64 = 0
     public private(set) var question: AgentQuestionOffer?
     public private(set) var stopTarget: AgentStopTarget?
+    public private(set) var continueTarget: AgentStopTarget?
     public private(set) var promptPresentation: UInt64 = 0
     public private(set) var queueTarget: AgentQueueTarget?
     public private(set) var lifecycle: AgentChatLifecycle = .conversation
@@ -884,7 +885,7 @@ public final class AgentChatState {
     /// Updates the chat chrome (visibility, status, model, prompt).
     ///
     /// Message content is sourced from the resident 0x86 stream via `applyTranscript`.
-    public func update(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: EditorMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil, lifecycle: AgentChatLifecycle = .conversation, composerHints: [AgentComposerHint] = []) {
+    public func update(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: EditorMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil, lifecycle: AgentChatLifecycle = .conversation, composerHints: [AgentComposerHint] = [], continueTarget: AgentStopTarget? = nil) {
         self.visible = visible
         self.composerHints = composerHints
         self.lifecycle = lifecycle
@@ -902,6 +903,7 @@ public final class AgentChatState {
         self.draftAttachmentOffer = draftAttachmentOffer
         self.question = question
         self.stopTarget = stopTarget
+        self.continueTarget = continueTarget
         self.promptPresentation = promptPresentation
         self.queueTarget = queueTarget
     }
@@ -1072,6 +1074,7 @@ public final class AgentChatState {
         draftAttachmentOffer = 0
         question = nil
         stopTarget = nil
+        continueTarget = nil
         promptPresentation = 0
         queueTarget = nil
         composerHints = []

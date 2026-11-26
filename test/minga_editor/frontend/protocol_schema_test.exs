@@ -294,7 +294,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       tasks_drawer_action: 0x71,
       agent_notification_open: 0x72,
       which_key_press: 0x73,
-      which_key_back: 0x74
+      which_key_back: 0x74,
+      agent_continue_turn: 0x75
     )
   end
 

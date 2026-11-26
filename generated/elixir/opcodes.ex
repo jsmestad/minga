@@ -455,5 +455,7 @@ defmodule Minga.Protocol.Opcodes do
   def gui_action_which_key_press, do: 0x73
   @spec gui_action_which_key_back() :: non_neg_integer()
   def gui_action_which_key_back, do: 0x74
+  @spec gui_action_agent_continue_turn() :: non_neg_integer()
+  def gui_action_agent_continue_turn, do: 0x75
 
 end

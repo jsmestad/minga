@@ -238,7 +238,7 @@ defmodule Minga.Keymap.Scope.Agent do
   @type composer_focus :: :insert | :normal | :other_mode | :cua
 
   @typedoc """
-  Facts that change the composer's hints: `:native_gui` (the macOS app can send ⌘), `:working` (this conversation has a turn to stop, so stop is offered; that includes a turn waiting for an approval), `:stopped` (sending continues the stopped task) and `:remedy` (a failed start binds ↩ in Normal to its remedy, which the chat shows with its own key, so nothing sends).
+  Facts that change the composer's hints: `:native_gui` (the macOS app can send ⌘), `:working` (this conversation has a turn to stop, including a turn waiting for approval), `:stopped` (the composer can continue the exact stopped turn without sending the draft) and `:remedy` (a failed start binds ↩ in Normal to its remedy, which the chat shows with its own key, so nothing sends).
   """
   @type composer_hint_option ::
           {:native_gui, boolean()}

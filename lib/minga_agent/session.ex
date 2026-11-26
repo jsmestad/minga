@@ -150,6 +150,7 @@ defmodule MingaAgent.Session do
           credential_readiness: Credentials.readiness(),
           connection: Connection.t(),
           turn_execution: TurnExecution.t(),
+          stopped_request_id: String.t() | nil,
           admission: admission() | nil,
           transcript: Transcript.t(),
           continuation: Continuation.t(),
@@ -331,6 +332,17 @@ defmodule MingaAgent.Session do
       when is_pid(session) and node(session) == node(),
       do: :gen_server.send_request(session, {:stop_turn, target})
 
+  @doc "Continues the exact request the user stopped, without using the draft or advancing the queue."
+  @spec continue_stopped(GenServer.server(), {String.t(), String.t()}) :: :ok | {:error, term()}
+  def continue_stopped(session, {_, _} = target),
+    do: GenServer.call(session, {:continue_stopped, target})
+
+  @doc "Starts `continue_stopped/2` without blocking the calling Editor."
+  @spec request_continue_stopped(pid(), {String.t(), String.t()}) :: :gen_server.request_id()
+  def request_continue_stopped(session, {_, _} = target)
+      when is_pid(session) and node(session) == node(),
+      do: :gen_server.send_request(session, {:continue_stopped, target})
+
   @doc "Aborts the current agent operation."
   @spec abort(GenServer.server()) :: :ok
   def abort(session) do
@@ -433,6 +445,7 @@ defmodule MingaAgent.Session do
           status: status(),
           display_status: TurnExecution.display_status(),
           stop_target: {String.t(), String.t()} | nil,
+          continue_target: {String.t(), String.t()} | nil,
           pending_approval: PublicApproval.t() | nil,
           pending_question: {QuestionTarget.t(), Question.t()} | nil,
           queue_target: queue_target() | nil,
@@ -1608,6 +1621,7 @@ defmodule MingaAgent.Session do
       credential_readiness: credential_readiness,
       connection: Connection.new(resolution_problem),
       turn_execution: TurnExecution.new(),
+      stopped_request_id: nil,
       admission: nil,
       transcript:
         Transcript.new(
@@ -1901,6 +1915,13 @@ defmodule MingaAgent.Session do
 
   def handle_call({:stop_turn, _target}, _from, state),
     do: {:reply, {:error, :stale_turn}, state}
+
+  def handle_call({:continue_stopped, {_, _} = target}, _from, state) do
+    case continue_target(state) do
+      ^target -> continue_turn(state)
+      _ -> {:reply, {:error, :stale_turn}, state}
+    end
+  end
 
   def handle_call({:send_follow_up, content}, _from, state) do
     handle_prompt(content, :follow_up, state)
@@ -4419,6 +4440,7 @@ defmodule MingaAgent.Session do
 
     state =
       state
+      |> remember_stopped_request(cause)
       |> cancel_admission(
         {:error, "Stopped before the message was sent. Your draft is preserved."}
       )
@@ -4435,6 +4457,29 @@ defmodule MingaAgent.Session do
 
     %{state | turn_execution: execution}
   end
+
+  # A turn stopped before request admission has no model response to continue.
+  @spec remember_stopped_request(state(), interruption()) :: state()
+  defp remember_stopped_request(
+         %{admission: nil, continuation: %Continuation{active_request: %Request{request_id: id}}} =
+           state,
+         :stopped
+       ),
+       do: %{state | stopped_request_id: id}
+
+  defp remember_stopped_request(state, _cause), do: %{state | stopped_request_id: nil}
+
+  @spec continue_target(state()) :: {String.t(), String.t()} | nil
+  defp continue_target(%{stopped_request_id: id, provider: provider} = state)
+       when is_binary(id) and not ProviderLifecycle.is_detached(provider) do
+    if TurnExecution.phase(state.turn_execution) == :stopped and
+         function_exported?(provider.module, :continue, 2) and
+         not MingaAgent.WorkingFolder.read_only?(state.working_folder) do
+      {state.session_id, id}
+    end
+  end
+
+  defp continue_target(_state), do: nil
 
   @spec interrupted_execution(TurnExecution.t(), interruption()) :: TurnExecution.t()
   defp interrupted_execution(execution, :stopped), do: TurnExecution.stop(execution)
@@ -5072,9 +5117,20 @@ defmodule MingaAgent.Session do
     previous = TurnExecution.display_status(state.turn_execution)
     next = TurnExecution.display_status(execution)
 
+    projected = %{state | turn_execution: execution}
+
     state
     |> announce_display_status_change(previous, next)
-    |> broadcast({:stop_target_changed, active_turn_target(%{state | turn_execution: execution})})
+    |> broadcast({:stop_target_changed, active_turn_target(projected)})
+    |> announce_continue_target(projected)
+  end
+
+  @spec announce_continue_target(state(), state()) :: state()
+  defp announce_continue_target(state, projected) do
+    case {continue_target(state), continue_target(projected)} do
+      {target, target} -> state
+      {_previous, next} -> broadcast(state, {:continue_target_changed, next})
+    end
   end
 
   @spec announce_display_status_change(
@@ -7074,6 +7130,7 @@ defmodule MingaAgent.Session do
       status: TurnExecution.status(state.turn_execution),
       display_status: TurnExecution.display_status(state.turn_execution),
       stop_target: active_turn_target(state),
+      continue_target: continue_target(state),
       pending_approval:
         public_pending_approval(TurnExecution.pending_approval(state.turn_execution), state),
       pending_question: public_question(state.turn_execution),

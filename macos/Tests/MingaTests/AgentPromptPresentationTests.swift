@@ -698,6 +698,28 @@ struct AgentPromptPresentationTests {
         #expect(actions == [.submit])
     }
 
+    @Test("Continue stays enabled for an empty draft and acts on the stopped request")
+    func continueAfterStop() throws {
+        let target = AgentStopTarget(sessionID: "displayed-session", requestID: "stopped-request")
+        let stopped = AgentStatus(rawValue: 7)
+        let state = AgentChatState(status: stopped, prompt: "", promptMode: .insert, promptVisibleRows: 1)
+        state.update(visible: true, status: stopped, model: "", thinkingLevel: "", prompt: "", promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0, promptMode: .insert, promptVisibleRows: 1, promptCompletion: nil, continueTarget: target)
+        var actions: [AgentPromptView.Action] = []
+        let control = AgentPromptActionButtons(state: state, sendAction: { actions.append($0) })
+            .environment(\.themeColors, ThemeColors())
+
+        let button = try control.inspect().findAll(ViewType.Button.self)[0]
+        #expect(try button.accessibilityLabel().string() == "Continue")
+        #expect(!button.isDisabled())
+        try button.tap()
+        #expect(actions == [.resume(target)])
+
+        publishStopTarget(nil, to: state, status: .idle)
+        let after = try control.inspect().findAll(ViewType.Button.self)[0]
+        #expect(try after.accessibilityLabel().string() == "Send")
+        #expect(after.isDisabled())
+    }
+
     @Test("Awaiting approval retains enabled Stop and draft in every prompt mode",
           arguments: [EditorMode.insert, .normal, .visual, .operatorPending, .replace])
     func waitingControls(mode: EditorMode) throws {

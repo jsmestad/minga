@@ -37,7 +37,7 @@ public struct AgentComposerHint: Sendable, Equatable {
     }
 }
 
-/// An active Agent turn identified by the committed Stop control.
+/// The session and request identity carried by a committed turn control.
 public struct AgentStopTarget: Sendable, Equatable {
     public let sessionID: String
     public let requestID: String

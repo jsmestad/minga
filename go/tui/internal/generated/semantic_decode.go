@@ -1381,6 +1381,22 @@ func DecodeGuiAgentChatComposerHints(data []byte, offset int, windowEnd int) (Gu
 	}, pos, nil
 }
 
+func DecodeGuiAgentChatContinueTarget(data []byte, offset int, windowEnd int) (GuiAgentChatContinueTarget, int, error) {
+	pos := offset
+	sessionID, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiAgentChatContinueTarget{}, offset, err
+	}
+	requestID, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiAgentChatContinueTarget{}, offset, err
+	}
+	return GuiAgentChatContinueTarget{
+		SessionID: sessionID,
+		RequestID: requestID,
+	}, pos, nil
+}
+
 // Section decoders for gui_gutter
 
 func DecodeGuiGutterWindow(data []byte, offset int, windowEnd int) (GuiGutterWindow, int, error) {

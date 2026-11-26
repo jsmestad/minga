@@ -35,6 +35,7 @@ public struct AgentPromptView: View {
         case submit
         case queue(followUp: Bool, target: AgentQueueTarget)
         case abort(AgentStopTarget)
+        case resume(AgentStopTarget)
         case attachments
     }
 
@@ -262,12 +263,17 @@ struct AgentPromptActionButtons: View {
         let hasDraft = state.promptPresentation != 0 && !state.prompt.isEmpty
         let queue = active && hasDraft ? state.queueTarget : nil
         let stop = active ? state.stopTarget : nil
+        let resume = !active && state.lifecycle == .conversation ? state.continueTarget : nil
         // Send waits for a live conversation; while the session starts the draft
         // is kept and the "Starting Agent" notice explains why.
         let sendable = hasDraft && !active && state.lifecycle == .conversation
 
         HStack(spacing: Spacing.md) {
-            button("Send", icon: "arrow.up.circle.fill", action: sendable ? .submit : nil)
+            if let resume {
+                button("Continue", icon: "play.circle.fill", action: .resume(resume))
+            } else {
+                button("Send", icon: "arrow.up.circle.fill", action: sendable ? .submit : nil)
+            }
             button("Steer", icon: "arrow.turn.up.right", action: queue.map { .queue(followUp: false, target: $0) })
             button("Queue Next", icon: "text.badge.plus", action: queue.map { .queue(followUp: true, target: $0) })
             button("Stop", icon: "stop.circle.fill", action: stop.map(AgentPromptView.Action.abort))

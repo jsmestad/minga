@@ -325,6 +325,8 @@ These apply while the composer is not focused.
 
 Leader keys work here too, and `:` opens the command line, so `:w`, `:qa` and `:agent-models` work from the conversation. While a leader sequence, the command line or a search is waiting for input, every key goes to it: `SPC h k` followed by `q` describes `q` and does not close the view, and `:x` never rejects a change.
 
+When the composer shows **Continue**, press `↩` in the composer's Normal mode, press `⌘↩` on macOS, or click **Continue**. Minga resumes the interrupted request without sending the draft or taking the next queued message. In Vim Insert mode, plain Return still adds a new line.
+
 Any other key does nothing. The conversation is not a file, so a stray key never edits, or moves focus to, the file behind it. The same holds with desktop shortcuts: an undo or paste key pressed here is ignored. On macOS, `⌘S`, `⌘Z`, `⌘X`, `⌘C` and `⌘V` are menu commands and act as they do everywhere else.
 
 ### In the changed-file view
