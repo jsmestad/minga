@@ -341,6 +341,12 @@ defmodule MingaEditor.PickerUI do
     PickerState.commit_extension_page(ps, items, candidates, page)
   end
 
+  defp commit_fetch(ps, items, candidates, %{project_search: result}) do
+    ps
+    |> PickerState.put_context(Map.put(ps.context || %{}, :project_search, result))
+    |> PickerState.complete_fetch(Picker.put_candidates(ps.picker, items, candidates))
+  end
+
   defp commit_fetch(ps, items, candidates, _meta) do
     PickerState.complete_fetch(ps, Picker.put_candidates(ps.picker, items, candidates))
   end
@@ -2153,6 +2159,9 @@ defmodule MingaEditor.PickerUI do
 
   @spec initial_query(module(), term()) :: String.t()
   defp initial_query(DirectorySource, %FilesystemContext{query: query}), do: query.text
+
+  # A caller can open a picker already narrowed, for example the file finder at a subdirectory (#4057).
+  defp initial_query(_source, %{initial_query: query}) when is_binary(query), do: query
   defp initial_query(_source, _context), do: ""
 
   @spec filter_initial_query(Picker.t(), module(), term()) :: Picker.t()

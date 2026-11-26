@@ -57,7 +57,7 @@ Lists open in a bottom drawer: the tasks list, the review, diagnostics, the swit
 
 - 1 pt divider with a 5 pt hit area; height remembered per kind of buffer; double-click the divider to reset to 40%.
 - The header carries the title and the drawer's key hints. There is no second hint line above the modeline.
-- `esc` leaves a filter first, then closes. `q` closes. ⌘W closes the focused drawer. Focus returns to the window you came from.
+- `esc` leaves a filter first, then closes. `q` closes, except in the switcher, where letters type into the prompt. ⌘W closes the focused drawer. Focus returns to the window you came from.
 - One drawer at a time. Opening another drawer replaces the current one, and closing it returns to the drawer it replaced, the way Doom's popups behave. To see two things at once, use a split.
 - When a drawer opens on its own (for example from a notification), single-letter actions are ignored for 300 ms, so a letter you were typing cannot approve something.
 - Selection uses the system accent while the list is focused, the muted selection when it is not.
@@ -67,6 +67,8 @@ Lists open in a bottom drawer: the tasks list, the review, diagnostics, the swit
 While a prompt has focus (find file, project search, new task, rename, the command line), typing always edits the query. Actions are reached by moving into the list: `⌃J` / `⌃K` or the arrows to move, `↩` to run, or a click. Prompts never use chords that collide with text editing (`⌃A`, `⌃E`, `⌃H`, `⌃W`, `⌃U`, `⌃K` beyond list movement).
 
 - **No results become next steps.** When project search finds nothing, the result list shows rows such as "Search ignored files too  `-- -u`", "Search hidden files too  `--hidden`", "Search all files  `-- -uu`". The first is preselected. Each row shows the ripgrep flag it adds, so the menu teaches the Doom/consult syntax (`query -- -uu`), which also works typed directly.
+- **Only widen what was skipped.** A search that included ignored files offers to include hidden files, not to repeat the same scan under another name. If both were included, the result offers to edit the search. The `grep` fallback includes both and requires `rg` for queries with options.
+- **Search and Create use the open directory workspace.** A file-only session does not authorize a recursive search. Create accepts paths relative to the workspace and refuses paths that would leave it, including through a symlink.
 - **No match in the switcher** offers "Create the file" and "Search the project for it" as rows.
 
 ## Hover
@@ -124,10 +126,10 @@ Mockups and storyboards draw at the app's real default metrics, so they never pr
 - Each row: the state glyph, the task's goal as its title, state words ("Editing chrome_state.ex · step 2 of 3", "Waiting · rate limited, retry in 40 s"), and its age.
 - The header counts each state.
 - The row that needs you expands to show the request ("Create test/minga_agent/usage_limit_test.exs +86") and its actions as text: "`y` Approve once  `a` Always for this session  `t` This turn  `n` Deny  `=` Show diff  `↩` Open conversation".
-- Every other row shows its one relevant action: `r` Retry on waiting and failed rows, `o` Output, `i` Inspect, `↩` Review on done rows.
+- Every other row shows its one relevant action: `r` Retry on waiting and failed rows, `r` Continue on stopped rows, `o` Output, `i` Inspect, `↩` Review on done rows. After needs-you, rows follow the state order: working, waiting, stopped, failed, done.
 - A task that fans out shows its subagents beneath it as a tree (`├─`, `└─`), each with its state.
-- Empty state: "No one's at the table yet." with one next action, `n` New task. `q` or `esc` returns focus to the window you came from.
-- New task: `n` in the drawer (or `SPC a n`) opens a "New task ›" minibuffer prompt. The goal you type becomes the task's title; the selection is attached as context, `@` adds more, `↩` starts it, `esc` cancels.
+- Empty state: "No one's at the table yet." with one primary next action, preselected: `c` New task; a second step where the board shows one, `SPC a S h` Resume an earlier session. `q` or `esc` returns focus to the window you came from.
+- New task: `c` in the drawer (or `SPC a n`) opens a "New task ›" minibuffer prompt (`n` is Deny on a needs-you row). The goal you type becomes the task's title; the selection is attached as context, `@` adds more, `↩` starts it, `esc` cancels.
 
 ## Review
 

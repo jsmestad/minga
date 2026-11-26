@@ -162,7 +162,10 @@ defmodule Minga.Application do
         if minimal? do
           []
         else
-          [Minga.Services.Supervisor, MingaAgent.Supervisor]
+          [
+            {Minga.Services.Supervisor, startup_directory: startup_workspace_directory()},
+            MingaAgent.Supervisor
+          ]
         end
 
     editor_children =
@@ -314,12 +317,28 @@ defmodule Minga.Application do
     Application.get_env(:minga, :start_editor, false)
   end
 
+  @spec startup_workspace_directory() :: String.t() | nil
+  defp startup_workspace_directory do
+    if start_editor?() and is_nil(Minga.CLI.startup_file()), do: Minga.CLI.startup_project_root()
+  end
+
   @spec maybe_prepare_cli_startup() :: :ok
   defp maybe_prepare_cli_startup do
     if cli_boot?() do
-      Minga.CLI.prepare_startup(Minga.CLI.argv())
+      Minga.CLI.prepare_startup(Minga.CLI.argv(), boot_launch())
     else
       :ok
+    end
+  end
+
+  # How this VM was started decides what a start without a file or folder opens.
+  # A source launcher records its launch before the application starts, and that record stands.
+  # The standalone terminal release is a terminal command. Otherwise the app started the VM: no directory was chosen.
+  @spec boot_launch() :: Minga.CLI.launch()
+  defp boot_launch do
+    case Application.get_env(:minga, :cli_launch) do
+      nil -> if standalone_cli?(), do: Minga.CLI.terminal_launch(), else: :app
+      recorded -> recorded
     end
   end
 

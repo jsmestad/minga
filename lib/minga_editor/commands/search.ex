@@ -20,7 +20,6 @@ defmodule MingaEditor.Commands.Search do
   alias Minga.Core.Plural
   alias Minga.Core.Unicode
   alias Minga.Editing.Search.Match
-  alias MingaEditor.PickerUI
   alias MingaEditor.RenderModel.UI.EmptyStateBuilder
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.TodoSearchWorkflow
@@ -190,18 +189,9 @@ defmodule MingaEditor.Commands.Search do
         :confirm_project_search
       )
       when is_binary(query) and query != "" do
-    # Stash the query, then open the picker asynchronously. The actual `rg`/`grep`
-    # scan runs off the editor input path inside ProjectSearchSource.async_fetch/1,
+    # The `rg`/`grep` scan runs off the editor input path inside ProjectSearchSource.async_fetch/1,
     # so confirming a search never blocks the editor on a large repository.
-    %{
-      state
-      | workspace:
-          MingaEditor.Session.State.set_search(
-            state.workspace,
-            SearchData.set_project_query(state.workspace.search, query)
-          )
-    }
-    |> PickerUI.open(MingaEditor.UI.Picker.ProjectSearchSource)
+    MingaEditor.UI.Picker.ProjectSearchSource.search(state, query)
   end
 
   def execute(state, :confirm_project_search) do

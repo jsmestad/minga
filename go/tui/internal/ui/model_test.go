@@ -4041,6 +4041,48 @@ func TestRendererShutdownQuitsTheProgramEvenInsideAnOpenTransaction(t *testing.T
 	}
 }
 
+func TestNeedsYouAlertRingsTheBellOnceAndAWithdrawalRingsNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		commands []protocol.Command
+		bells    int
+	}{
+		{"needs you", []protocol.Command{{Kind: protocol.CommandAgentAlert, Size: 18, AgentAlertNeedsYou: true}}, 1},
+		{"withdrawn", []protocol.Command{{Kind: protocol.CommandAgentAlert, Size: 18}}, 0},
+		{"inside an open transaction", []protocol.Command{
+			{Kind: protocol.CommandBeginFrame, Size: 13, FrameSeq: 1, Generation: 1},
+			{Kind: protocol.CommandAgentAlert, Size: 18, AgentAlertNeedsYou: true},
+		}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model := NewWithTransport(80, 24, make(chan []byte, 8), make(chan struct{}))
+			_, cmd := model.Update(port.PacketMsg{Commands: tc.commands})
+			if got := countRaw(cmd, "\a"); got != tc.bells {
+				t.Fatalf("bells = %d, want %d", got, tc.bells)
+			}
+		})
+	}
+}
+
+func countRaw(cmd tea.Cmd, want string) int {
+	if cmd == nil {
+		return 0
+	}
+	switch msg := cmd().(type) {
+	case tea.RawMsg:
+		if msg.Msg == want {
+			return 1
+		}
+	case tea.BatchMsg:
+		count := 0
+		for _, inner := range msg {
+			count += countRaw(inner, want)
+		}
+		return count
+	}
+	return 0
+}
+
 func commandQuits(cmd tea.Cmd) bool {
 	if cmd == nil {
 		return false

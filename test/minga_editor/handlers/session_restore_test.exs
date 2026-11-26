@@ -235,7 +235,8 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
            snapshot: snapshot,
            recovered: [{entry, {:ok, path, "unsaved\n"}}],
            held_back: [],
-           waiting_elsewhere: 0
+           waiting_elsewhere: 0,
+           waiting_projects: []
          }}
       )
 

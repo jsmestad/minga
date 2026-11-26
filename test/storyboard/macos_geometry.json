@@ -1,5 +1,6 @@
 {
-  "about": "The editor grid the macOS frontend reports at each storyboard window size, with its default chrome. The macOS storyboard renderer checks its own row fit (GridFit) against these numbers and fails with the measured grid when they differ. See docs/design/storyboard.md, \"Renders and baselines\". `chrome_grid` maps the grid-changing chrome open at a scenario's reached frame, joined with \"+\" (for example \"tasks_drawer+minibuffer\"), to the grid the window reports then; `cols` defaults to the window's columns.",
+  "about": "The editor grid the macOS frontend reports at each storyboard window size, with its default chrome. The macOS storyboard renderer checks its own row fit (GridFit) against these numbers and fails with the measured grid when they differ. See docs/design/storyboard.md, \"Renders and baselines\". `chrome_grid` maps the grid-changing chrome open at a scenario's reached frame, joined with \"+\" (for example \"tasks_drawer+minibuffer\"), to the grid the window reports then; `cols` defaults to the window's columns. The project home (`empty_state`) draws no tab bar or breadcrumb, so its grid is larger.",
+  "prompt_note": "A prompt fit records the measured aperture columns and the number of rows the BEAM uses, up to eight. PreviewHost checks that the aperture can accommodate that many rows.",
   "windows": [
     {
       "width": 1440,
@@ -17,11 +18,23 @@
         },
         "agent_chat": {
           "cols": 179,
-          "rows": 43
+          "rows": 44,
+          "prompt": {"cols": 173, "rows": 8}
         },
         "agent_chat+agent_activity": {
           "cols": 179,
-          "rows": 42
+          "rows": 42,
+          "prompt": {"cols": 173, "rows": 8}
+        },
+        "empty_state": {
+          "cols": 179,
+          "rows": 45
+        },
+        "tasks_drawer": {
+          "rows": 31
+        },
+        "tasks_drawer+minibuffer": {
+          "rows": 26
         }
       }
     },
@@ -41,11 +54,23 @@
         },
         "agent_chat": {
           "cols": 159,
-          "rows": 38
+          "rows": 38,
+          "prompt": {"cols": 153, "rows": 8}
         },
         "agent_chat+agent_activity": {
           "cols": 159,
-          "rows": 37
+          "rows": 37,
+          "prompt": {"cols": 153, "rows": 8}
+        },
+        "empty_state": {
+          "cols": 159,
+          "rows": 39
+        },
+        "tasks_drawer": {
+          "rows": 25
+        },
+        "tasks_drawer+minibuffer": {
+          "rows": 21
         }
       }
     }

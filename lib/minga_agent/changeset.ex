@@ -111,6 +111,34 @@ defmodule MingaAgent.Changeset do
     GenServer.call(cs, {:stage_fork_resolution, relative_path, ancestor, selected}, :infinity)
   end
 
+  @typedoc "A change from an isolated child: path, its content at the child's base, and the child's content."
+  @type isolated_change :: {String.t(), binary() | :missing, binary() | :deleted}
+
+  @typedoc "Why one isolated change cannot merge cleanly onto the changeset."
+  @type integration_conflict ::
+          :both_added
+          | :deleted_in_parent
+          | :modified_in_parent
+          | {:merge_conflict, [Minga.Core.Diff.merge_hunk()]}
+          | {:unreadable, term()}
+
+  @typedoc "Outcome of integrating isolated changes."
+  @type integration_result ::
+          {:ok, [String.t()]}
+          | {:conflict, %{conflicts: [{String.t(), integration_conflict()}], clean: [String.t()]}}
+          | {:error,
+             %{applied: [String.t()], failed: {String.t(), term()}, unapplied: [String.t()]}}
+
+  @doc """
+  Three-way merges an isolated child's changes onto the changeset's current content.
+
+  Every change is planned first. If any change conflicts, nothing is written and the reply names each conflicting path; the changeset and the child's artifact both stay intact. Otherwise every change is applied with normal undo history. A storage failure partway through reports the applied, failed and unapplied paths.
+  """
+  @spec integrate_isolated_changes(changeset(), [isolated_change()]) :: integration_result()
+  def integrate_isolated_changes(cs, changes) when is_list(changes) do
+    GenServer.call(cs, {:integrate_isolated_changes, changes}, :infinity)
+  end
+
   @doc "Publishes one retained deletion after checking its original disk baseline."
   @spec publish_deletion(changeset(), String.t()) :: :ok | {:conflict, map()} | {:error, term()}
   def publish_deletion(cs, relative_path) when is_binary(relative_path) do

@@ -6,7 +6,6 @@ defmodule MingaEditor.Session.ChromeState do
   """
 
   alias Minga.Buffer
-  alias Minga.Design.Tokens
   alias Minga.Language
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.WorkspaceStatus
@@ -73,30 +72,6 @@ defmodule MingaEditor.Session.ChromeState do
       draft_count: total_draft_count(workspaces),
       conflict_count: total_conflict_count(workspaces)
     }
-  end
-
-  @doc """
-  How many of Minga's tasks need you: each Agent workspace whose status speaks as Needs you, one per task.
-
-  `active_status` is the active workspace's `MingaEditor.Agent.WorkspaceStatus`, the value the modeline's Minga segment shows, so the count and that segment never disagree. On an Agent workspace it is that workspace's status. A workspace that is not an Agent workspace has no task of its own: the live status it shows is an Agent workspace's, so it is already counted, and it adds one only when no Agent workspace is counted. Statuses speak through `Minga.Design.Tokens.agent_status_state/1`.
-  """
-  @spec needs_you_count(t(), WorkspaceStatus.t() | nil) :: non_neg_integer()
-  def needs_you_count(%__MODULE__{active_workspace_id: active_id} = chrome_state, active_status) do
-    active_needs_you? = Tokens.agent_status_state(active_status) == :needs_you
-
-    {count, active_counted?} =
-      Enum.reduce(chrome_state.workspaces, {0, false}, fn
-        %WorkspaceSummary{kind: :agent, id: ^active_id}, {count, _counted?} ->
-          {count + if(active_needs_you?, do: 1, else: 0), true}
-
-        %WorkspaceSummary{kind: :agent, status: status}, {count, counted?} ->
-          {count + if(Tokens.agent_status_state(status) == :needs_you, do: 1, else: 0), counted?}
-
-        %WorkspaceSummary{}, acc ->
-          acc
-      end)
-
-    if active_needs_you? and not active_counted? and count == 0, do: 1, else: count
   end
 
   @doc "Returns the manual workspace id."

@@ -161,6 +161,12 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       else: state
   end
 
+  defp dispatch_action(state, {:tasks_drawer_action, row_id, action}),
+    do: MingaEditor.Shell.Traditional.TasksDrawerWorkflow.click(state, row_id, action)
+
+  defp dispatch_action(state, {:agent_notification_open, alert}),
+    do: MingaEditor.Shell.Traditional.TasksDrawerWorkflow.open_alert(state, alert)
+
   defp dispatch_action(state, {:agent_stop_turn, target}),
     do: AgentCommands.stop_displayed_turn(state, target)
 
@@ -638,6 +644,12 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     transitioned = handle_shell_gui_action(state, action)
     WorkspaceWorkflow.persist_changes(state, transitioned)
   end
+
+  defp dispatch_action(state, {:which_key_press, path, codepoint, modifiers}),
+    do: MingaEditor.Input.WhichKey.press(state, path, codepoint, modifiers)
+
+  defp dispatch_action(state, {:which_key_back, path}),
+    do: MingaEditor.Input.WhichKey.back(state, path)
 
   defp dispatch_action(state, {:space_leader_chord, codepoint, modifiers}) do
     MingaEditor.Input.CUA.SpaceLeader.handle_chord(state, codepoint, modifiers)

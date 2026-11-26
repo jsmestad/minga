@@ -60,6 +60,30 @@ defmodule MingaEditor.Journeys.SendWhileSessionBusyTest do
     assert sends(ctx) == []
   end
 
+  test "two presses on a late answer: the first sends, the second queues, and nothing is refused",
+       %{editor_ctx: ctx, session: session} do
+    send_keys_sync(ctx, "first<Esc>")
+    :ok = :sys.suspend(session)
+    send_keys_sync(ctx, "<CR>")
+
+    # The second message is typed and sent before the Session has answered the first.
+    send_keys_sync(ctx, "Asecond<Esc><CR>")
+    assert [_one_send] = sends(ctx)
+    assert prompt(ctx) == "firstsecond"
+
+    :ok = :sys.resume(session)
+
+    # The first answer names the turn it started, so the press behind it queues into that turn.
+    wait_until(ctx, fn _state -> Session.get_queued_messages(session) == {["second"], []} end,
+      message: "expected the second press to be queued behind the first message"
+    )
+
+    assert user_messages(session) == ["first"]
+    await_prompt(ctx, "")
+    refute minibuffer(ctx) =~ "The Agent turn changed"
+    refute minibuffer(ctx) =~ "not sent"
+  end
+
   test "an answer that arrives while the conversation is in a background tab clears only that composer",
        %{editor_ctx: ctx, session: session} do
     send_keys_sync(ctx, "hello<Esc>")
@@ -70,7 +94,7 @@ defmodule MingaEditor.Journeys.SendWhileSessionBusyTest do
 
     # A new conversation takes the front before the Session answers, so the answer is
     # handled with the pressed conversation in the background.
-    send_keys_async(ctx, "<SPC>an")
+    send_keys_async(ctx, "<SPC>aSn")
 
     wait_until(ctx, fn _state -> front_workspace(ctx) != agent_workspace end,
       message: "expected the new conversation in front"
@@ -148,6 +172,13 @@ defmodule MingaEditor.Journeys.SendWhileSessionBusyTest do
     end)
 
     :ok
+  end
+
+  defp await_prompt(ctx, expected) do
+    wait_until(ctx, fn _state -> prompt(ctx) == expected end,
+      max_attempts: 200,
+      message: "expected the composer to read #{inspect(expected)}"
+    )
   end
 
   defp prompt(ctx),

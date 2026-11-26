@@ -5,6 +5,8 @@ defmodule MingaEditor.Agent.Tasks.Entry do
   An entry is the editor's projection of one session's events. It never calls the session; `MingaEditor.Agent.Tasks` installs the transitions below as the session's events arrive, and the tasks drawer and the modeline read the derived `state/2` and `words/2`.
 
   `subagents` are the foreground subagents the task's `subagent` tool calls started. They live only as long as the tool call and are reported through the parent's tool events. A background subagent is a session of its own, so it is a separate entry whose `parent` names the task that started it.
+
+  `alert` is the last "needs you" alert the editor posted for the task (`MingaEditor.Agent.TaskWorkflow`): posted while it may still be on screen, withdrawn once the task stopped needing you. A withdrawn alert keeps its identity while the task is followed, so a click that arrives late still finds its task; once the task is forgotten, the click opens the drawer on the first task that needs you.
   """
 
   alias MingaAgent.ToolApproval.Public, as: PublicApproval
@@ -22,11 +24,17 @@ defmodule MingaEditor.Agent.Tasks.Entry do
   """
   @type waiting :: {:retry, integer(), String.t()} | {:limit, String.t()}
 
+  @typedoc "What one of the task's tools reported when it finished: the tool's name and its result."
+  @type output :: {name :: String.t(), result :: String.t()}
+
   @typedoc "The turn a task's session is working on, as its session names it for Stop; nil while no turn is active."
   @type stop_target :: {record_id :: String.t(), request_id :: String.t()}
 
   @typedoc "The design-token state a task shows, or nil for a task that has not started work."
   @type state :: :needs_you | :working | :waiting | :failed | :done | :stopped
+
+  @typedoc "The last \"needs you\" alert posted for the task, by its opaque identity."
+  @type alert :: {:posted, <<_::128>>} | {:withdrawn, <<_::128>>}
 
   @type t :: %__MODULE__{
           pid: pid(),
@@ -41,6 +49,9 @@ defmodule MingaEditor.Agent.Tasks.Entry do
           waiting: waiting() | nil,
           stop_target: stop_target() | nil,
           turns: non_neg_integer(),
+          worked?: boolean(),
+          outputs: [output()],
+          alert: alert() | nil,
           started_at: integer(),
           changed_at: integer(),
           subagents: [Subagent.t()]
@@ -62,10 +73,17 @@ defmodule MingaEditor.Agent.Tasks.Entry do
     waiting: nil,
     stop_target: nil,
     turns: 0,
+    worked?: false,
+    outputs: [],
+    alert: nil,
     subagents: []
   ]
 
   @working [:thinking, :tool_executing]
+
+  # The output view keeps the last few tool results, each cut to a size a drawer can show.
+  @max_outputs 5
+  @max_output_bytes 16_384
 
   @doc "A task the editor has just started following."
   @spec new(pid(), non_neg_integer(), integer()) :: t()
@@ -135,7 +153,8 @@ defmodule MingaEditor.Agent.Tasks.Entry do
     %{
       entry
       | activity: Activity.finish_tool(entry.activity, ended.tool_call_id),
-        subagents: Subagent.ended(entry.subagents, ended, now)
+        subagents: Subagent.ended(entry.subagents, ended, now),
+        outputs: record_output(entry.outputs, ended)
     }
   end
 
@@ -155,6 +174,9 @@ defmodule MingaEditor.Agent.Tasks.Entry do
 
   defp apply_event(entry, {:approval_resolved, target, _decision}, _now),
     do: resolve_approval(entry, target)
+
+  defp apply_event(entry, {:title_changed, title}, _now) when is_binary(title),
+    do: rename(entry, title)
 
   defp apply_event(entry, {:question_requested, target, question}, _now),
     do: %{entry | question: {target, question}}
@@ -179,6 +201,26 @@ defmodule MingaEditor.Agent.Tasks.Entry do
 
   defp apply_event(entry, _event, _now), do: entry
 
+  @spec record_output([output()], MingaAgent.Event.ToolEnd.t()) :: [output()]
+  defp record_output(outputs, %MingaAgent.Event.ToolEnd{name: name, result: result})
+       when is_binary(result) and result != "" do
+    [{name, cut(result)} | outputs] |> Enum.take(@max_outputs)
+  end
+
+  defp record_output(outputs, _ended), do: outputs
+
+  @spec cut(String.t()) :: String.t()
+  defp cut(result) when byte_size(result) <= @max_output_bytes, do: result
+
+  defp cut(result) do
+    kept = binary_part(result, byte_size(result) - @max_output_bytes, @max_output_bytes)
+    "…" <> String.replace_invalid(kept)
+  end
+
+  @doc "What the task's tools reported, oldest first, for the output view."
+  @spec outputs(t()) :: [output()]
+  def outputs(%__MODULE__{outputs: outputs}), do: Enum.reverse(outputs)
+
   @doc "Clears the approval this task is waiting on when `target` names it."
   @spec resolve_approval(t(), MingaAgent.ToolApproval.Target.t()) :: t()
   def resolve_approval(
@@ -197,8 +239,9 @@ defmodule MingaEditor.Agent.Tasks.Entry do
   """
   @spec restart(t(), pid(), integer()) :: t()
   def restart(%__MODULE__{} = entry, new_pid, now) when is_pid(new_pid) do
+    # The crashed session's alert was withdrawn when it went down.
     %{
-      entry
+      withdraw_alert(entry)
       | pid: new_pid,
         status: :idle,
         approval: nil,
@@ -217,6 +260,17 @@ defmodule MingaEditor.Agent.Tasks.Entry do
     do: %{entry | parent: new}
 
   def reparent(%__MODULE__{} = entry, _old, _new), do: entry
+
+  @doc "Records the \"needs you\" alert just posted for the task."
+  @spec post_alert(t(), <<_::128>>) :: t()
+  def post_alert(%__MODULE__{} = entry, <<_::128>> = id), do: %{entry | alert: {:posted, id}}
+
+  @doc "Records that the task's posted alert was withdrawn. It keeps the identity, for a late click."
+  @spec withdraw_alert(t()) :: t()
+  def withdraw_alert(%__MODULE__{alert: {:posted, id}} = entry),
+    do: %{entry | alert: {:withdrawn, id}}
+
+  def withdraw_alert(%__MODULE__{} = entry), do: entry
 
   @doc "Marks the task stopped: its session ended or the user stopped it."
   @spec stop(t(), integer()) :: t()
@@ -241,6 +295,7 @@ defmodule MingaEditor.Agent.Tasks.Entry do
     %{
       entry
       | status: status,
+        worked?: true,
         failure: nil,
         waiting: nil,
         activity: Activity.apply_status(entry.activity, status)
@@ -258,10 +313,30 @@ defmodule MingaEditor.Agent.Tasks.Entry do
 
   defp change_status(entry, :error), do: %{entry | status: :error, waiting: nil}
 
-  defp change_status(entry, status) when status in [:idle, :plan, :stopped],
+  # Stopped means a working turn was stopped. A session at rest that reports :stopped (a restored conversation
+  # that never ran a turn, for example) stays at rest.
+  defp change_status(%__MODULE__{status: old} = entry, :stopped) when old in @working,
+    do: %{entry | status: :stopped}
+
+  defp change_status(entry, :stopped), do: entry
+
+  defp change_status(entry, status) when status in [:idle, :plan],
     do: %{entry | status: status}
 
   defp change_status(entry, _status), do: entry
+
+  @doc """
+  True once the session has a goal, so it is a task: it has a title (its first prompt, a goal typed into New task, or a name), or it has started a turn, even one that then failed or was stopped (a resumed conversation announces no first goal).
+
+  An opened conversation that was never prompted is not a task yet, so it shows no row and the drawer can still be empty.
+  """
+  @spec goal?(t()) :: boolean()
+  def goal?(%__MODULE__{title: title}) when is_binary(title), do: true
+  def goal?(%__MODULE__{turns: turns}) when turns > 0, do: true
+  def goal?(%__MODULE__{worked?: true}), do: true
+  def goal?(%__MODULE__{approval: %PendingApproval{}}), do: true
+  def goal?(%__MODULE__{question: {_target, _question}}), do: true
+  def goal?(%__MODULE__{}), do: false
 
   @doc """
   The state the task shows, derived in one place so the drawer, the modeline and notifications agree.
@@ -315,11 +390,27 @@ defmodule MingaEditor.Agent.Tasks.Entry do
   defp state_words(:failed, entry, _now), do: join([word(:failed), entry.failure])
   defp state_words(:stopped, _entry, _now), do: word(:stopped)
   defp state_words(:done, _entry, _now), do: word(:done)
-  defp state_words(nil, _entry, _now), do: "Ready"
+
+  # A task with a goal that has not begun its first turn, like a drawer-started task before its prompt lands.
+  defp state_words(nil, _entry, _now), do: "Starting"
 
   @spec request_words(PendingApproval.t()) :: String.t()
-  defp request_words(%PendingApproval{approval: %PublicApproval{preview: preview}}),
-    do: "wants to " <> lower_first(preview.summary)
+  defp request_words(%PendingApproval{approval: %PublicApproval{name: name, preview: preview}}),
+    do: request_verb(preview.kind, name)
+
+  @spec request_verb(MingaAgent.ToolApproval.Preview.kind(), String.t()) :: String.t()
+  defp request_verb(:diff, _name), do: "wants to change a file"
+  defp request_verb(:command, _name), do: "wants to run a command"
+  defp request_verb(_kind, name), do: "wants to use #{name}"
+
+  @doc "What the task is asking, in the request's own words, or nil when it asks nothing: \"Create test/a_test.exs +86\"."
+  @spec request(t()) :: String.t() | nil
+  def request(%__MODULE__{
+        approval: %PendingApproval{approval: %PublicApproval{preview: preview}}
+      }),
+      do: preview.summary
+
+  def request(%__MODULE__{}), do: nil
 
   # The provider's reason is a status or an error message; the drawer names the common one in words.
   @spec retry_reason(String.t()) :: String.t()
@@ -339,10 +430,6 @@ defmodule MingaEditor.Agent.Tasks.Entry do
 
   @spec seconds_until(integer(), integer()) :: non_neg_integer()
   defp seconds_until(at, now), do: max(0, div(at - now + 999, 1000))
-
-  @spec lower_first(String.t()) :: String.t()
-  defp lower_first(<<first::utf8, rest::binary>>), do: String.downcase(<<first::utf8>>) <> rest
-  defp lower_first(""), do: ""
 
   @spec first_line(String.t()) :: String.t()
   defp first_line(text), do: text |> String.split("\n", parts: 2) |> hd() |> String.trim()

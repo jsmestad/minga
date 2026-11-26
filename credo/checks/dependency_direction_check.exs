@@ -54,6 +54,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "Minga.Buffer.FileMutation",
     "Minga.Buffer.Lines",
     "Minga.Buffer.Position",
+    "Minga.Buffer.Provenance",
     "Minga.Buffer.RenderSnapshot",
     "Minga.Buffer.SaveState",
     "Minga.Buffer.Selection",

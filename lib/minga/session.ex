@@ -123,7 +123,13 @@ defmodule Minga.Session do
 
   @spec project_file(String.t()) :: String.t()
   defp project_file(root) do
-    root = Path.expand(root)
+    # One project has one session however it was reached: through a symlink, `~`, or the canonical path.
+    root =
+      case Minga.Project.Root.canonical_path(root) do
+        {:ok, canonical} -> canonical
+        {:error, _reason} -> Path.expand(root)
+      end
+
     hash = :sha256 |> :crypto.hash(root) |> Base.encode16(case: :lower) |> binary_part(0, 16)
     name = root |> Path.basename() |> String.replace(~r/[^A-Za-z0-9._-]/, "_")
     "#{name}-#{hash}.json"

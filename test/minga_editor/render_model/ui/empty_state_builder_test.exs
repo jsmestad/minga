@@ -32,79 +32,105 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilderTest do
     RenderWindow.materialize(window.id, WindowIntent.from_window(window), WindowCache.reset())
   end
 
-  defp launchpad(opts) do
-    defaults = [session_file_count: 0, crashed?: false, recents: []]
+  defp home(opts) do
+    defaults = [project_root: "/work/minga", place: :project, git: nil, recents: [], projects: []]
     Launchpad.new(Keyword.merge(defaults, opts))
   end
 
   defp section(model, id), do: Enum.find(model.sections, &(&1.id == id))
 
-  test "hidden when the workspace has no launchpad" do
+  test "hidden when the workspace has no home" do
     assert %EmptyState{visible?: false} = EmptyStateBuilder.build(ctx(nil))
   end
 
   test "hidden when the active render window is agent chat" do
     agent_window = render_window(Window.new_agent_chat(1, 24, 80))
 
-    assert %EmptyState{visible?: false} =
-             EmptyStateBuilder.build(ctx(launchpad([]), agent_window))
+    assert %EmptyState{visible?: false} = EmptyStateBuilder.build(ctx(home([]), agent_window))
   end
 
-  test "returning user gets a resume card, recents, actions, and footer" do
-    lp = launchpad(session_file_count: 4, recents: ["lib/a.ex", "docs/b.md"])
-    model = EmptyStateBuilder.build(ctx(lp))
+  test "a project home names the project, its git state and its recent files, numbered" do
+    git = %{branch: "main", changed: 11}
+    model = EmptyStateBuilder.build(ctx(home(git: git, recents: ["lib/a.ex", "README.md"])))
 
     assert model.visible?
-    refute model.crashed?
-    assert model.focused_id == "resume"
+    assert model.title == "minga"
+    assert model.path == "/work/minga"
+    assert model.status == "main · 11 changed"
+    assert model.focused_id == "recent-1"
 
-    assert [%{id: "resume", kind: :resume, label: "resume last session", jump_key: "r"}] =
-             section(model, :session).items
-
-    assert section(model, :session).title == "Session"
-    assert Enum.at(section(model, :session).items, 0).detail == "4 files"
-
-    recents = section(model, :recent).items
-    assert Enum.map(recents, & &1.label) == ["a.ex", "b.md"]
-    assert Enum.map(recents, & &1.detail) == ["lib", "docs"]
-    assert Enum.map(recents, & &1.jump_key) == ["1", "2"]
-    assert Enum.all?(recents, &(&1.icon != ""))
-
-    start_ids = Enum.map(section(model, :start).items, & &1.id)
-    assert "action-tutor" in start_ids
-
-    assert [%{jump_key: "i"}, %{detail: ":q"}] = section(model, :footer).items
+    recent = section(model, :recent)
+    assert recent.title == "Recent in this project"
+    assert Enum.map(recent.items, & &1.label) == ["a.ex", "README.md"]
+    assert Enum.map(recent.items, & &1.detail) == ["lib", ""]
+    assert Enum.map(recent.items, & &1.jump_key) == ["1", "2"]
   end
 
-  test "crashed session styles the resume card" do
-    model = EmptyStateBuilder.build(ctx(launchpad(session_file_count: 2, crashed?: true)))
+  test "the project's next actions carry their live leader keys" do
+    model = EmptyStateBuilder.build(ctx(home([])))
 
-    assert model.crashed?
-    assert section(model, :session).title == "Crashed session"
-    assert [%{label: "restore session"}] = section(model, :session).items
+    assert Enum.map(section(model, :next).items, &{&1.label, &1.chord}) == [
+             {"Find a file", "SPC SPC"},
+             {"New task", "SPC a n"},
+             {"File tree", "SPC o p"},
+             {"Switch project", "SPC p p"}
+           ]
   end
 
-  test "first run shows a Get started tutor hero and no recents" do
-    model = EmptyStateBuilder.build(ctx(launchpad([])))
+  test "a project with nothing recent says so and focuses the first action" do
+    model = EmptyStateBuilder.build(ctx(home([])))
 
-    assert section(model, :session).title == "Get started"
+    assert %{items: [], empty: "Nothing opened here yet."} = section(model, :recent)
+    assert model.focused_id == "action-project_find_file"
+  end
 
-    assert [%{id: "action-tutor", detail: ":Tutor", jump_key: "RET"}] =
-             section(model, :session).items
+  test "a folder without markers says so and offers the file tree first" do
+    model = EmptyStateBuilder.build(ctx(home(project_root: "/tmp/notes", place: :folder)))
 
+    assert model.title == "notes"
+    assert model.status =~ "Not a project"
+    assert model.note == "Minga uses this folder as the root for now."
+    assert section(model, :recent).title == "Recent in this folder"
+    assert [%{label: "File tree"} | _] = section(model, :next).items
+  end
+
+  test "outside a project the home lists recent projects, numbered" do
+    lp = home(project_root: nil, place: :outside, projects: ["/work/minga", "/work/notes"])
+    model = EmptyStateBuilder.build(ctx(lp))
+
+    assert model.title == "Minga"
+    assert model.status == "No project here."
     assert section(model, :recent) == nil
-    refute "action-tutor" in Enum.map(section(model, :start).items, & &1.id)
+
+    projects = section(model, :projects)
+
+    assert Enum.map(projects.items, &{&1.jump_key, &1.label, &1.kind}) == [
+             {"1", "minga", :project},
+             {"2", "notes", :project}
+           ]
+
+    assert Enum.map(section(model, :next).items, & &1.label) == [
+             "Switch project",
+             "Find a file",
+             "Add a project"
+           ]
   end
 
-  test "action chords are resolved from the live keymap" do
-    model = EmptyStateBuilder.build(ctx(launchpad([])))
+  test "a recent project with unsaved text waiting says so on its row" do
+    lp =
+      home(project_root: nil, place: :outside, projects: ["/work/minga", "/work/notes"])
+      |> Launchpad.mark_waiting([%{root: "/work/notes", files: 1}])
 
-    chords =
-      section(model, :start).items
-      |> Map.new(&{&1.id, &1.chord})
+    projects = section(EmptyStateBuilder.build(ctx(lp)), :projects)
 
-    assert chords["action-find-file"] == "SPC f f"
-    assert chords["action-palette"] == "SPC :"
+    assert Enum.map(projects.items, &{&1.label, &1.meta}) == [
+             {"minga", ""},
+             {"notes", "unsaved text to recover"}
+           ]
+  end
+
+  test "no tasks section when Minga has no tasks" do
+    assert section(EmptyStateBuilder.build(ctx(home([]))), :tasks) == nil
   end
 
   describe "empty_list/4" do

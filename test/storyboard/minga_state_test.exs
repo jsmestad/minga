@@ -13,7 +13,7 @@ defmodule Minga.Storyboard.MingaStateTest do
   @moduletag :storyboard
 
   test "Minga working reads as working in the minga role, at rest and under which-key" do
-    session = Session.start(minga: :thinking)
+    session = Session.start(minga: :thinking) |> Session.open_file()
 
     session |> Session.model() |> assert_state(:modeline, :working)
 
@@ -25,7 +25,7 @@ defmodule Minga.Storyboard.MingaStateTest do
   end
 
   test "a status that needs you shows needs-you and Minga's state from the same value" do
-    model = Session.start(minga: :approval_waiting) |> Session.model()
+    model = Session.start(minga: :approval_waiting) |> Session.open_file() |> Session.model()
 
     model
     |> assert_state(:modeline, :needs_you)

@@ -18,12 +18,12 @@
   <meta property="og:image" content="https://mingacode.dev/assets/og-minga.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
+  <meta property="og:image:alt" content="Minga: Elixir code in a Minga window in Catppuccin Frappé, with marks in the margin that show which lines Minga changed">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Find Any Command with SPC: Learn Minga">
   <meta name="twitter:description" content="A hands-on lab: forget the key, press SPC and read the menu. Look inside a group, open a file and back out with Esc.">
   <meta name="twitter:image" content="https://mingacode.dev/assets/og-minga.png">
-  <meta name="twitter:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
+  <meta name="twitter:image:alt" content="Minga: Elixir code in a Minga window in Catppuccin Frappé, with marks in the margin that show which lines Minga changed">
   <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Find Any Command with SPC: Learn Minga","description":"Lesson 01: you do not have to memorise shortcuts. In a simulated Minga window, press SPC, read the menu, look inside a group, open a file and back out with Esc.","url":"https://mingacode.dev/learn/editing","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Learn","item":"https://mingacode.dev/learn/"},{"@type":"ListItem","position":3,"name":"Find Any Command with SPC","item":"https://mingacode.dev/learn/editing"}]}]}</script>
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
@@ -530,7 +530,7 @@
           <ol data-lab-steps>
             <li data-step="menu">
               <p data-lab-instruction>Press <kbd>SPC</kbd> and read the menu</p>
-              <p data-lab-caption="rest">This is your spec, open in Minga. You want another file, and you cannot remember the key for it. Click the file, then press <kbd>SPC</kbd> (the space bar).</p>
+              <p data-lab-caption="rest">This is your spec, open in Minga. You want another file, and you cannot remember the key for it. <span class="when-keys">Click the file, then press <kbd>SPC</kbd> (the space bar).</span><span class="when-touch">A phone has no keys, so the button under the file presses them for you. Tap "Press the next key for me" to press <kbd>SPC</kbd> (the space bar).</span></p>
               <p data-lab-caption="menu_opened"><kbd data-lab-key>SPC</kbd> opened the menu: every key you can press next, with a name beside it. Next, press <kbd>b</kbd> to look inside Buffers; a name that ends in › opens a group. In Minga the menu appears when you pause after <kbd>SPC</kbd>, and never if you type straight through; this lab opens it at once.</p>
               <p data-lab-caption="vim_file"><kbd data-lab-key>That key</kbd> works in Minga as it does in Vim. It is not part of this lab, so nothing moved here. Press <kbd>SPC</kbd> to open the menu. Inside a file, Vim keys keep their meaning.</p>
               <p data-lab-caption="other_file"><kbd data-lab-key>That key</kbd> is not part of this lab, so nothing changed here. Press <kbd>SPC</kbd> to open the menu.</p>
@@ -585,7 +585,7 @@
         </div>
 
         <ul class="pillar-list lk-points">
-          <li><strong>The <kbd>SPC</kbd> menu shows what comes next.</strong> Minga's commands start with <kbd>SPC</kbd>; most then take a group letter and an action letter. You only have to remember <kbd>SPC</kbd>: the menu names the rest, one level at a time. The menu is called which-key, after the Emacs and Neovim tool that does the same job.</li>
+          <li><strong>The <kbd>SPC</kbd> menu shows what comes next.</strong> Minga's commands start with <kbd>SPC</kbd>; most then take a group letter and an action letter. You only have to remember <kbd>SPC</kbd>: the menu names the rest, one level at a time. The menu is called which-key, after the Emacs and Neovim tool that does the same job. To use the mouse, click the mode pill in the status line. Click a row to choose it or click a breadcrumb to go back.</li>
           <li><strong>Inside a file, Vim keys keep their Vim meaning.</strong> <kbd>j</kbd> moves down, <kbd>w</kbd> jumps a word, <kbd>i</kbd> lets you type, <kbd>u</kbd> undoes and <kbd>q</kbd> records a macro. Minga never takes a letter away from Vim inside your text, which is why its own commands start with <kbd>SPC</kbd>.</li>
         </ul>
 

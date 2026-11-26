@@ -73,6 +73,7 @@ defmodule Minga.Config.Options do
           | :agent_tool_approval
           | :agent_destructive_tools
           | :agent_tool_permissions
+          | :terminal_features
           | :agent_hooks
           | :agent_session_retention_days
           | :agent_session_idle_timeout_ms
@@ -84,7 +85,7 @@ defmodule Minga.Config.Options do
           | :agent_models
           | :agent_prompt_cache
           | :agent_notifications
-          | :agent_notify_on
+          | :agent_notify_terminal
           | :agent_system_prompt
           | :agent_append_system_prompt
           | :agent_diff_size_threshold
@@ -98,7 +99,6 @@ defmodule Minga.Config.Options do
           | :agent_approval_timeout
           | :agent_subagent_timeout
           | :agent_mention_max_file_size
-          | :agent_notify_debounce
           | :agent_diagnostic_feedback
           | :agent_react_to_lsp_errors_on_save
           | :agent_flush_before_shell
@@ -178,6 +178,7 @@ defmodule Minga.Config.Options do
           | :string_list
           | :atom_list
           | :map_or_nil
+          | {:atom_map, keys :: [atom()], values :: [atom()]}
           | :map_list
           | :float_or_nil
           | :any
@@ -305,6 +306,9 @@ defmodule Minga.Config.Options do
        "rename"
      ], "Tool names treated as destructive for approval prompts."},
     {:agent_tool_permissions, :map_or_nil, nil, "Per-tool permission overrides for agent tools."},
+    {:terminal_features,
+     {:atom_map, [:true_color, :styled_underlines, :underline_color], [:on, :off]}, %{},
+     "Terminal features forced on or off, for a terminal Minga detects wrongly. Applies when Minga starts. See `:checkhealth terminal`."},
     {:agent_hooks, :any, [], "Agent lifecycle hook declarations loaded from config."},
     {:agent_session_retention_days, :pos_integer, 30,
      "Number of days to retain persisted agent sessions."},
@@ -312,7 +316,8 @@ defmodule Minga.Config.Options do
      "Milliseconds before an idle detached agent session is reclaimed; 0 disables idle reclamation."},
     {:agent_panel_split, :pos_integer, 65,
      "Percentage of available width assigned to the agent panel."},
-    {:startup_view, {:enum, [:agent, :editor]}, :editor, "Initial view shown when Minga starts."},
+    {:startup_view, {:enum, [:agent, :editor]}, :editor,
+     "Retired: Minga always starts in the editor, at the project. Kept so older configs load; setting it to :agent only adds a note to *Messages*."},
     {:agent_auto_context, :boolean, true,
      "Whether the active buffer is automatically included in agent context."},
     {:agent_max_tokens, :pos_integer, 16_384, "Maximum token budget sent to the agent provider."},
@@ -323,9 +328,9 @@ defmodule Minga.Config.Options do
     {:agent_prompt_cache, :boolean, true,
      "Whether prompt caching hints are enabled for supported providers."},
     {:agent_notifications, :boolean, true,
-     "Whether agent events can produce user notifications."},
-    {:agent_notify_on, :any, [:approval, :complete, :error],
-     "Agent event kinds that trigger notifications."},
+     "Whether a task that starts needing you while Minga is in the background alerts you."},
+    {:agent_notify_terminal, {:enum, [:off, :bell, :desktop, :bell_and_desktop]}, :off,
+     "How the terminal frontend alerts you when a task starts needing you in the background: off, the terminal bell, a desktop notification, or both."},
     {:agent_system_prompt, :string, "", "Replacement system prompt text for agent sessions."},
     {:agent_append_system_prompt, :string, "",
      "Additional text appended to the default agent system prompt."},
@@ -348,8 +353,6 @@ defmodule Minga.Config.Options do
      "Milliseconds before a delegated subagent task times out."},
     {:agent_mention_max_file_size, :pos_integer, 262_144,
      "Maximum file size in bytes that can be inlined from an agent mention."},
-    {:agent_notify_debounce, :pos_integer, 5_000,
-     "Milliseconds used to debounce repeated agent notifications."},
     {:agent_diagnostic_feedback, :boolean, true,
      "Whether diagnostics are fed back into agent context."},
     {:agent_react_to_lsp_errors_on_save, :boolean, false,
@@ -1150,6 +1153,25 @@ defmodule Minga.Config.Options do
 
   defp validate_type(:map_or_nil, name, value) do
     {:error, "#{name} must be a map or nil, got: #{inspect(value)}"}
+  end
+
+  # A map whose keys and values each come from a fixed list.
+  # An entry outside the lists is an error and never ignored.
+  # A mistyped key would otherwise look like a setting that does nothing.
+  defp validate_type({:atom_map, keys, values}, name, value) when is_map(value) do
+    case Enum.find(value, fn {key, setting} -> key not in keys or setting not in values end) do
+      nil ->
+        :ok
+
+      {key, setting} ->
+        {:error,
+         "#{name} maps one of #{inspect(keys)} to one of #{inspect(values)}, got: #{inspect(key)} => #{inspect(setting)}"}
+    end
+  end
+
+  defp validate_type({:atom_map, keys, values}, name, value) do
+    {:error,
+     "#{name} must be a map from one of #{inspect(keys)} to one of #{inspect(values)}, got: #{inspect(value)}"}
   end
 
   defp validate_type(:map_list, _name, value) when is_list(value) do

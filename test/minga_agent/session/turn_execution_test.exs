@@ -11,6 +11,7 @@ defmodule MingaAgent.Session.TurnExecutionTest do
   @phases [
     :idle,
     :stopped,
+    :admitting,
     :starting,
     :thinking,
     :approval_waiting,
@@ -24,6 +25,7 @@ defmodule MingaAgent.Session.TurnExecutionTest do
     expected_exec_statuses = %{
       idle: :idle,
       stopped: :stopped,
+      admitting: :thinking,
       starting: :idle,
       thinking: :thinking,
       approval_waiting: :thinking,
@@ -86,6 +88,42 @@ defmodule MingaAgent.Session.TurnExecutionTest do
       source = state(mode, phase)
       assert {:error, :turn_active} = TurnExecution.begin_turn(source)
     end
+  end
+
+  test "admission begins from inactive phases and is rejected in every active phase" do
+    for mode <- @modes, phase <- inactive_phases() do
+      assert {:ok, next} = mode |> state(phase) |> TurnExecution.begin_admission()
+      assert TurnExecution.phase(next) == :admitting
+      assert TurnExecution.active?(next)
+    end
+
+    for mode <- @modes, phase <- active_phases() do
+      assert {:error, :turn_active} = mode |> state(phase) |> TurnExecution.begin_admission()
+    end
+  end
+
+  test "ending an admission returns to idle with its queue, and is rejected in every other phase" do
+    for mode <- @modes do
+      {:queued, queued} =
+        mode |> state(:admitting) |> TurnExecution.admit_prompt(:steering, "typed meanwhile")
+
+      assert {:ok, idle} = TurnExecution.end_admission(queued)
+      assert TurnExecution.phase(idle) == :idle
+      assert TurnExecution.pending_inputs(idle) == TurnExecution.pending_inputs(queued)
+      assert {:ok, _started} = TurnExecution.begin_turn(idle)
+    end
+
+    for mode <- @modes, phase <- @phases -- [:admitting] do
+      assert {:error, :not_admitting} = mode |> state(phase) |> TurnExecution.end_admission()
+    end
+  end
+
+  test "an admitting turn is shown as working, queues further prompts and can be stopped" do
+    admitting = state(:exec, :admitting)
+
+    assert TurnExecution.status(admitting) == :thinking
+    assert {:queued, _queued} = TurnExecution.admit_prompt(admitting, :follow_up, "next")
+    assert TurnExecution.phase(TurnExecution.stop(admitting)) == :stopped
   end
 
   test "provider start accepts starting and rejects every other phase" do
@@ -757,6 +795,11 @@ defmodule MingaAgent.Session.TurnExecutionTest do
   defp state(mode, :idle), do: TurnExecution.new(mode)
   defp state(mode, :stopped), do: mode |> state(:thinking) |> TurnExecution.stop()
 
+  defp state(mode, :admitting) do
+    {:ok, admitting} = mode |> TurnExecution.new() |> TurnExecution.begin_admission()
+    admitting
+  end
+
   defp state(mode, :starting) do
     {:ok, starting} = mode |> TurnExecution.new() |> TurnExecution.begin_turn()
     starting
@@ -825,7 +868,7 @@ defmodule MingaAgent.Session.TurnExecutionTest do
   defp inactive_phases, do: [:idle, :stopped, :failure]
 
   defp active_phases,
-    do: [:starting, :thinking, :approval_waiting, :tool_execution, :completion]
+    do: [:admitting, :starting, :thinking, :approval_waiting, :tool_execution, :completion]
 
   defp approval_resume_phase(:approval_waiting), do: :thinking
   defp approval_resume_phase(phase), do: phase

@@ -173,6 +173,30 @@ defmodule MingaEditor.TitleTest do
       assert String.contains?(result, "Agent")
     end
 
+    test "the project home names itself, not a missing file" do
+      home_window = 1 |> Window.new_agent_chat(24, 80) |> Window.show_empty_state()
+
+      state = %EditorState{
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
+        workspace: %MingaEditor.Session.State{
+          editing: VimState.new(),
+          buffers: %Buffers{},
+          launchpad:
+            MingaEditor.State.Launchpad.new(place: :outside, recents: [], projects: [], git: nil),
+          windows: %Windows{
+            tree: WindowTree.new(1),
+            map: %{1 => home_window},
+            active: 1,
+            next_id: 2
+          }
+        },
+        interaction: %MingaEditor.State.Interaction{}
+      }
+
+      assert Title.format(state, "{filename} - Minga") == "*home* - Minga"
+      refute Title.format_gui(state) =~ "no file"
+    end
+
     test "buffer window shows filename in title" do
       {:ok, buf} =
         BufferProcess.start_link(

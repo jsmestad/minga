@@ -422,6 +422,15 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       refute Map.has_key?(keys, {?j, @ctrl})
     end
 
+    test "Enter can open the preview only while it resolves to select" do
+      keymap = start_supervised!({Minga.Keymap.Active, name: nil})
+      state = state_with_keymap(keymap)
+      assert movement_model(state).enter_selects?
+
+      Minga.Keymap.Active.bind(keymap, {:picker, :insert}, "RET", :picker_cancel, "Close")
+      refute movement_model(state).enter_selects?
+    end
+
     test "every sent key runs the movement it names when it reaches the picker" do
       keymap = start_supervised!({Minga.Keymap.Active, name: nil})
       Minga.Keymap.Active.bind(keymap, {:picker, :insert}, "C-n", :picker_next, "Next")

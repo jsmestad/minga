@@ -666,13 +666,76 @@ defmodule Minga.Core.Unicode do
   # Everything else is 1 column
   defp codepoint_width(_), do: 1
 
-  @doc "Returns `{byte_offset, byte_size}` of the last grapheme in `text`, starting from `current_point`."
-  @spec final_character(String.t(), non_neg_integer()) :: {non_neg_integer(), non_neg_integer()}
+  @doc """
+  Returns `{byte_offset, byte_size}` of the last grapheme in `text`, starting from `current_point`.
+
+  An invalid byte is a standalone character and separates valid graphemes.
+  """
+  @spec final_character(binary(), non_neg_integer()) :: {non_neg_integer(), non_neg_integer()}
   def final_character(text, current_point) when is_binary(text) and is_integer(current_point) do
+    final_grapheme(text, current_point)
+  rescue
+    # OTP's grapheme scanner can raise on an invalid byte after a pictograph.
+    ArgumentError -> final_character_with_invalid_bytes(text, current_point)
+  end
+
+  @spec final_grapheme(binary(), non_neg_integer()) :: {non_neg_integer(), non_neg_integer()}
+  defp final_grapheme(text, current_point) do
     case String.next_grapheme_size(text) do
       {size, ""} -> {current_point, size}
-      {size, rest} -> final_character(rest, current_point + size)
+      {size, rest} -> final_grapheme(rest, current_point + size)
       nil -> {current_point, 0}
+    end
+  end
+
+  @spec final_character_with_invalid_bytes(binary(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp final_character_with_invalid_bytes(text, current_point) do
+    case :unicode.characters_to_binary(text) do
+      valid when is_binary(valid) ->
+        final_grapheme(valid, current_point)
+
+      {_reason, valid, <<_invalid>>} ->
+        {current_point + byte_size(valid), 1}
+
+      {_reason, valid, <<_invalid, rest::binary>>} ->
+        final_character_with_invalid_bytes(rest, current_point + byte_size(valid) + 1)
+    end
+  end
+
+  @doc """
+  Returns the final character and the boundary to restart from if more bytes extend the line.
+
+  An incomplete UTF-8 suffix can join the preceding grapheme once completed, so the restart must include that grapheme.
+  """
+  @spec final_append_character(binary()) ::
+          {non_neg_integer(), non_neg_integer(), non_neg_integer()}
+  def final_append_character(text) when is_binary(text) do
+    {caret, size} = final_character(text, 0)
+
+    restart =
+      case unfinished_utf8_start(text, byte_size(text) - 1, 0) do
+        nil ->
+          caret
+
+        offset ->
+          {previous, _size} = text |> binary_part(0, offset) |> final_character(0)
+          previous
+      end
+
+    {caret, size, restart}
+  end
+
+  @spec unfinished_utf8_start(binary(), integer(), non_neg_integer()) :: non_neg_integer() | nil
+  defp unfinished_utf8_start(_text, offset, trailing) when offset < 0 or trailing >= 3, do: nil
+
+  defp unfinished_utf8_start(text, offset, trailing) do
+    case :binary.at(text, offset) do
+      byte when byte in 0x80..0xBF -> unfinished_utf8_start(text, offset - 1, trailing + 1)
+      byte when byte in 0xC2..0xDF and trailing == 0 -> offset
+      byte when byte in 0xE0..0xEF and trailing < 2 -> offset
+      byte when byte in 0xF0..0xF4 -> offset
+      _byte -> nil
     end
   end
 
@@ -714,5 +777,114 @@ defmodule Minga.Core.Unicode do
       nil ->
         byte_pos
     end
+  end
+
+  # ── Cluster boundaries ────────────────────────────────────────────────────
+
+  @doc """
+  Returns the grapheme cluster boundaries of `text` from `from` through `to`, in order; the start and the end of the
+  text are boundaries.
+
+  For valid UTF-8 they are the boundaries `String.graphemes/1` finds over the whole text. They are found by segmenting
+  a region whose ends are certainly boundaries, the anchors: the start or end of the text, just after a line feed, or
+  between two ASCII bytes neither of which is a carriage return (no rule joins those). The region runs from the nearest
+  anchor at or before `from` to the nearest at or after `to`, found with no byte limit, so a cluster is never cut by a
+  window and the cost is the region's length. When the region is not valid UTF-8, its boundaries are its start and
+  end anchors and the bytes between them that are not UTF-8 continuation bytes (`String.graphemes/1` can raise).
+
+  ## Examples
+
+      iex> Minga.Core.Unicode.cluster_boundaries_between("e\u0301x", 1, 4)
+      [3, 4]
+  """
+  @spec cluster_boundaries_between(binary(), non_neg_integer(), non_neg_integer()) :: [
+          non_neg_integer()
+        ]
+  def cluster_boundaries_between(text, from, to)
+      when is_binary(text) and is_integer(from) and is_integer(to) and from >= 0 do
+    to = min(to, byte_size(text))
+    first = cluster_anchor(text, min(from, to))
+    last = anchor_after(text, to)
+    region = binary_part(text, first, last - first)
+
+    boundaries =
+      if String.valid?(region),
+        do: cluster_starts(region, first, []),
+        else: code_point_starts(region, first)
+
+    boundaries |> Enum.drop_while(&(&1 < from)) |> Enum.take_while(&(&1 <= to))
+  end
+
+  @doc """
+  Returns whether `offset` is a grapheme cluster boundary of `text`. See `cluster_boundaries_between/3`.
+
+  ## Examples
+
+      iex> Minga.Core.Unicode.cluster_boundary?("🇫🇷🇫🇮", 4)
+      false
+      iex> Minga.Core.Unicode.cluster_boundary?("🇫🇷🇫🇮", 8)
+      true
+  """
+  @spec cluster_boundary?(binary(), non_neg_integer()) :: boolean()
+  def cluster_boundary?(text, offset) when is_binary(text) and is_integer(offset) and offset >= 0,
+    do: offset <= byte_size(text) and cluster_boundaries_between(text, offset, offset) == [offset]
+
+  @doc """
+  Returns the nearest position at or before `offset` that is certainly a grapheme cluster boundary of `text`: the start
+  of the text, just after a line feed, or between two ASCII bytes neither of which is a carriage return.
+  """
+  @spec cluster_anchor(binary(), non_neg_integer()) :: non_neg_integer()
+  def cluster_anchor(text, offset) when is_binary(text) and is_integer(offset) and offset >= 0,
+    do: find_anchor(text, min(offset, byte_size(text)))
+
+  # Every cluster start of a valid region, then its end, as absolute offsets.
+  @spec cluster_starts(String.t(), non_neg_integer(), [non_neg_integer()]) :: [non_neg_integer()]
+  defp cluster_starts("", at, acc), do: Enum.reverse([at | acc])
+
+  defp cluster_starts(region, at, acc) do
+    {size, rest} = String.next_grapheme_size(region)
+    cluster_starts(rest, at + size, [at | acc])
+  end
+
+  @spec code_point_starts(binary(), non_neg_integer()) :: [non_neg_integer()]
+  defp code_point_starts(region, first) do
+    starts =
+      region
+      |> :binary.bin_to_list()
+      |> Enum.with_index(first)
+      |> List.foldr([first + byte_size(region)], fn
+        {byte, _at}, acc when byte in 0x80..0xBF -> acc
+        {_byte, at}, acc -> [at | acc]
+      end)
+
+    case starts do
+      [^first | _rest] -> starts
+      _continuation_first -> [first | starts]
+    end
+  end
+
+  @spec find_anchor(binary(), non_neg_integer()) :: non_neg_integer()
+  defp find_anchor(_text, 0), do: 0
+
+  defp find_anchor(text, offset) do
+    if certain_boundary?(text, offset), do: offset, else: find_anchor(text, offset - 1)
+  end
+
+  # The nearest position at or after `offset` that is certainly a boundary.
+  @spec anchor_after(binary(), non_neg_integer()) :: non_neg_integer()
+  defp anchor_after(text, offset) when offset >= byte_size(text), do: byte_size(text)
+  defp anchor_after(_text, 0), do: 0
+
+  defp anchor_after(text, offset) do
+    if certain_boundary?(text, offset), do: offset, else: anchor_after(text, offset + 1)
+  end
+
+  @spec certain_boundary?(binary(), pos_integer()) :: boolean()
+  defp certain_boundary?(text, offset) when offset >= byte_size(text), do: true
+
+  defp certain_boundary?(text, offset) do
+    before = :binary.at(text, offset - 1)
+    next = :binary.at(text, offset)
+    before == ?\n or (before < 128 and next < 128 and before != ?\r and next != ?\r)
   end
 end

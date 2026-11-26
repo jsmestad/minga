@@ -2,7 +2,7 @@ defmodule Minga.Buffer.AttributedEditsTest do
   @moduledoc """
   Every path that lets Minga edit an open buffer records the edit as one step with one change per changed region, attributed to Minga's author key.
 
-  Each test edits a buffer through one entry path and a twin buffer through the whole-buffer replacement the path used before, then checks that the user sees no difference: content, cursor, version, dirty state, decorations, and the change event, before and after undo and redo.
+  Each test edits a buffer through one entry path and a twin buffer through the whole-buffer replacement the path used before, then checks that the user sees no difference: content, cursor, version, dirty state, decorations, and the change event. Then it checks that the step is Minga's: your undo leaves it in place, and reverting the task restores the text from before it.
   """
   use ExUnit.Case, async: true
 
@@ -45,7 +45,7 @@ defmodule Minga.Buffer.AttributedEditsTest do
              )
 
     replace_whole(twin, @new)
-    assert_attributed_like_whole(buffer, twin, 3)
+    assert_attributed_like_whole(buffer, twin, 3, @old)
   end
 
   test "a fork publication (merge_fork) records the fork's latest Minga step", ctx do
@@ -59,7 +59,7 @@ defmodule Minga.Buffer.AttributedEditsTest do
     assert {:ok, @new} = Fork.publish(fork)
 
     replace_whole(twin, @new)
-    assert_attributed_like_whole(parent, twin, 3)
+    assert_attributed_like_whole(parent, twin, 3, @old)
   end
 
   test "a resolved fork (install_fork_resolution) records the fork's Minga step", ctx do
@@ -83,8 +83,11 @@ defmodule Minga.Buffer.AttributedEditsTest do
                :ok
              end)
 
+    # Minga rewrote the line you had changed, so your undo of that change is refused.
+    assert BufferProcess.undo(parent) == {:blocked, {:overlaps, @minga}}
+
     replace_whole(twin, @new)
-    assert_attributed_like_whole(parent, twin, 3)
+    assert_attributed_like_whole(parent, twin, 3, human)
   end
 
   test "an agent workspace edit on a live buffer (replace_content_if_version) records three changes",
@@ -96,7 +99,7 @@ defmodule Minga.Buffer.AttributedEditsTest do
              BufferProcess.replace_content_if_version(buffer, version, @new, @minga)
 
     replace_whole(twin, @new)
-    assert_attributed_like_whole(buffer, twin, 3)
+    assert_attributed_like_whole(buffer, twin, 3, @old)
   end
 
   test "find_and_replace records its single change under the author key", ctx do
@@ -104,7 +107,8 @@ defmodule Minga.Buffer.AttributedEditsTest do
 
     assert {:ok, _message} = BufferProcess.find_and_replace(buffer, "beta", "BETA", @minga)
     assert BufferProcess.content(buffer) == String.replace(@old, "beta", "BETA")
-    assert {[_one_change], @minga} = last_entry(buffer)
+    assert [{@minga, [_one_change]}] = BufferProcess.minga_changes(buffer, "task-1")
+    assert BufferProcess.author_at(buffer, {2, 0}) == {:minga, "task-1"}
 
     assert_receive {:minga_event, :buffer_changed,
                     %BufferChangedEvent{buffer: ^buffer, source: @minga}}
@@ -116,7 +120,13 @@ defmodule Minga.Buffer.AttributedEditsTest do
     assert :ok = Fork.replace_content(fork, @new)
 
     assert {:ok, @new} = Fork.publish(fork)
-    assert {[_, _, _], :agent} = last_entry(parent)
+    assert BufferProcess.author_at(parent, {0, 0}) == {:minga, :untasked}
+
+    # The publication is not yours to undo, and it reverts as an agent edit.
+    assert :ok = BufferProcess.undo(parent)
+    assert BufferProcess.content(parent) == @new
+    assert {:ok, 1} = BufferProcess.undo_agent_session(parent)
+    assert BufferProcess.content(parent) == @old
   end
 
   test "the user's review edits on a fork never become its author", ctx do
@@ -126,7 +136,8 @@ defmodule Minga.Buffer.AttributedEditsTest do
     mutate_fork(fork, @new <> "reviewed\n", :user)
 
     assert {:ok, _merged} = Fork.publish(fork)
-    assert {_changes, @minga} = last_entry(parent)
+    assert [{@minga, _regions}] = BufferProcess.minga_changes(parent, "task-1")
+    assert BufferProcess.author_at(parent, {0, 0}) == {:minga, "task-1"}
   end
 
   # Starts the buffer under test and a twin with the same content, cursor and a decoration.
@@ -173,9 +184,9 @@ defmodule Minga.Buffer.AttributedEditsTest do
              Fork.conditional_mutate(fork, expected, {:replace, content}, identity, source)
   end
 
-  defp assert_attributed_like_whole(buffer, twin, change_count) do
-    assert {changes, @minga} = last_entry(buffer)
-    assert length(changes) == change_count
+  defp assert_attributed_like_whole(buffer, twin, change_count, before) do
+    assert [{@minga, regions}] = BufferProcess.minga_changes(buffer, "task-1")
+    assert length(regions) == change_count
     assert observable(buffer) == observable(twin)
 
     # Both edits announce a full resync at the same version; only the source differs.
@@ -197,11 +208,14 @@ defmodule Minga.Buffer.AttributedEditsTest do
                       version: ^version
                     }}
 
-    for step <- [&BufferProcess.undo/1, &BufferProcess.redo/1] do
-      assert :ok = step.(buffer)
-      assert :ok = step.(twin)
-      assert observable(buffer) == observable(twin)
-    end
+    # Your undo never takes Minga's step back; reverting the task does, and keeps the cursor line.
+    after_step = BufferProcess.content(buffer)
+    assert BufferProcess.undo(buffer) in [:ok, {:blocked, {:overlaps, @minga}}]
+    assert BufferProcess.content(buffer) == after_step
+
+    assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+    assert BufferProcess.content(buffer) == before
+    assert BufferProcess.minga_changes(buffer, "task-1") == []
   end
 
   defp observable(buffer) do
@@ -212,11 +226,5 @@ defmodule Minga.Buffer.AttributedEditsTest do
       dirty: BufferProcess.dirty?(buffer),
       decorations: Decorations.empty?(BufferProcess.decorations(buffer))
     }
-  end
-
-  # The newest undo entry is the edit record under test: its per-change patches and source.
-  defp last_entry(buffer) do
-    %{undo_history: %{undo_entries: [{_version, patches, source} | _]}} = :sys.get_state(buffer)
-    {patches, source}
   end
 end

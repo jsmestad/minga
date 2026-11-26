@@ -369,6 +369,32 @@ struct GUIWhichKeyDecoderTests {
     }
 }
 
+// MARK: - gui_menu_bar (0xAD)
+
+@Suite("GUI Menu Bar Decoder")
+struct GUIMenuBarDecoderTests {
+    @Test("Decode gui_menu_bar items in order with their path, section, command and ⌘ key")
+    func decodeItems() throws {
+        var payload = Data()
+        appendU16(&payload, 2)
+        appendString16(&payload, "f"); appendString16(&payload, "Files ›"); appendString16(&payload, "Groups")
+        payload.append(1); appendString16(&payload, ""); appendString8(&payload, "")
+        appendString16(&payload, "f s"); appendString16(&payload, "Save file"); appendString16(&payload, "")
+        payload.append(0); appendString16(&payload, "save"); appendString8(&payload, "⌘S")
+        var data = Data([OP_GUI_MENU_BAR])
+        appendU16(&data, UInt16(payload.count))
+        data.append(payload)
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+        guard case .guiMenuBar(let items) = cmd else { Issue.record("Expected .guiMenuBar"); return }
+        #expect(items == [
+            .init(path: "f", label: "Files ›", section: "Groups", kind: 1),
+            .init(path: "f s", label: "Save file", kind: 0, command: "save", platformKey: "⌘S"),
+        ])
+    }
+}
+
 // MARK: - gui_breadcrumb (0x75)
 
 @Suite("GUI Breadcrumb Decoder")
@@ -894,6 +920,24 @@ struct GUIStatusBarDecoderTests {
         }
 
         #expect(update.messageActions == [Wire.EmptyListAction(id: "inline_ask", key: "SPC a ?", label: "ask Minga")])
+    }
+
+    @Test("Decode the needs-you count (needs_you section), zero when absent")
+    func decodeNeedsYouSection() throws {
+        var identity = Data()
+        identity.append(0); identity.append(0); identity.append(0)
+
+        func decode(_ sections: [Data]) throws -> Int? {
+            var data = Data()
+            data.append(OP_GUI_STATUS_BAR)
+            data.append(UInt8(sections.count))
+            for s in sections { data.append(s) }
+            guard case .guiStatusBar(let update) = try decodeCommand(data: data, offset: 0).0 else { return nil }
+            return update.needsYouCount
+        }
+
+        #expect(try decode([buildSection(SECTION_IDENTITY, identity), buildSection(0x14, Data([0, 2]))]) == 2)
+        #expect(try decode([buildSection(SECTION_IDENTITY, identity)]) == 0)
     }
 
     @Test("Pending keys default to empty when section absent")
@@ -2103,7 +2147,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let q, let hasPreview, let decodedItems, let decodedMenu, let modePrefix, _, let queryGeneration, let acknowledgedQueryEditSeq, _, _, _, _) = cmd else {
+        guard case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let q, let hasPreview, let decodedItems, let decodedMenu, let modePrefix, _, let queryGeneration, let acknowledgedQueryEditSeq, _, _, _, _, _) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
 
@@ -2155,6 +2199,9 @@ struct GUIPickerDecoderTests {
         empty.append(0) // selected
         empty.append(0) // no actions: the rows are picker items
         empty.append(1) // list_keys
+        empty.append(1) // one key hint
+        appendString16(&empty, "j k")
+        appendString16(&empty, "move")
 
         var data = Data()
         data.append(OP_GUI_PICKER)
@@ -2165,12 +2212,13 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let decodedEmpty, let listKeys, _) = cmd else {
+        guard case .guiPicker(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let decodedEmpty, let listKeys, _, let hints) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
 
         #expect(decodedEmpty == Wire.EmptyList(title: "No projects yet.", why: "Minga remembers folders you open."))
         #expect(listKeys == true)
+        #expect(hints == [Wire.KeyHint(keys: "j k", word: "move")])
     }
 
     @Test("Decode gui_picker hidden")
@@ -2180,7 +2228,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == 2)
 
-        guard case .guiPicker(let visible, _, _, _, let markedCount, _, _, _, let items, let actionMenu, let modePrefix, _, _, _, _, _, _, _) = cmd else {
+        guard case .guiPicker(let visible, _, _, _, let markedCount, _, _, _, let items, let actionMenu, let modePrefix, _, _, _, _, _, _, _, _) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
         #expect(visible == false)
@@ -2223,7 +2271,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(let visible, _, _, _, _, _, _, _, _, let am, let modePrefix, _, _, _, _, _, _, let movementKeys) = cmd else {
+        guard case .guiPicker(let visible, _, _, _, _, _, _, _, _, let am, let modePrefix, _, _, _, _, _, _, let movementKeys, _) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
         #expect(visible == true)
@@ -2254,7 +2302,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let movementKeys) = cmd else {
+        guard case .guiPicker(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let movementKeys, _) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
         #expect(movementKeys == [

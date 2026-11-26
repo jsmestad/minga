@@ -885,6 +885,20 @@ struct EncoderGUIActionTests {
         #expect(name == "buffer_prev")
     }
 
+    @Test("which_key_press encodes the panel path, the raw key and its modifiers")
+    func whichKeyPressLayout() {
+        let payload = captureFrame { $0.send(.whichKeyPress(path: "SPC a", codepoint: 0x71, modifiers: 2)) }
+
+        #expect(payload == Data([OP_GUI_ACTION, GUI_ACTION_WHICH_KEY_PRESS, 0, 5] + Array("SPC a".utf8) + [0, 0, 0, 0x71, 2]))
+    }
+
+    @Test("which_key_back encodes the crumb path")
+    func whichKeyBackLayout() {
+        let payload = captureFrame { $0.send(.whichKeyBack(path: "SPC")) }
+
+        #expect(payload == Data([OP_GUI_ACTION, GUI_ACTION_WHICH_KEY_BACK, 0, 3] + Array("SPC".utf8)))
+    }
+
     @Test("workspace_rename encodes id and name with length prefix")
     func workspaceRenameLayout() {
         let payload = captureFrame { $0.send(.workspaceRename(id: 7, name: "Research Bot")) }
@@ -1050,6 +1064,16 @@ struct EncoderDisplayedTextTests {
     func lifecycleLayout() {
         let payload = captureFrame { $0.send(.textPresentationState(windowID: 512, presentationID: 0x0102030405060708, state: .active)) }
         #expect(payload == Data([OP_TEXT_PRESENTATION_STATE, 2, 0, 1, 2, 3, 4, 5, 6, 7, 8, 1]))
+    }
+}
+
+@Suite("Encoder Binary: agent notification open")
+struct EncoderAgentNotificationOpenTests {
+    @Test("a click on a needs-you alert names the alert by its 16-byte identity")
+    func openLayout() throws {
+        let id = try #require(UUID(uuidString: "01020304-0506-0708-090A-0B0C0D0E0F10"))
+        let payload = captureFrame { $0.send(.agentNotificationOpen(alert: id)) }
+        #expect(payload == Data([OP_GUI_ACTION, 0x72] + Array(1...16)))
     }
 }
 

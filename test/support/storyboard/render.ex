@@ -51,8 +51,13 @@ defmodule Minga.Test.Storyboard.Render do
           rows: pos_integer(),
           grid_rows: pos_integer(),
           window: {pos_integer(), pos_integer()} | nil,
-          chrome_grid: %{optional(String.t()) => %{required(String.t()) => pos_integer()}}
+          chrome_grid: %{optional(String.t()) => chrome_geometry()},
+          prompt_fit: {cols :: pos_integer(), rows :: pos_integer()} | nil
         }
+
+  @typep chrome_geometry :: %{
+           required(String.t()) => pos_integer() | %{required(String.t()) => pos_integer()}
+         }
 
   @doc "The themes every scenario renders in: the default dark theme, astrodark, and a light theme."
   @spec themes() :: [atom()]
@@ -127,7 +132,7 @@ defmodule Minga.Test.Storyboard.Render do
     |> fit_tui_header(target)
   end
 
-  # The terminal reports a different grid when its header gains or loses a row.
+  # The conversation can add a workspace header row. Other scenes keep their measured grid fixtures.
   @spec fit_tui_header(Session.t(), target()) :: Session.t()
   defp fit_tui_header(session, %{frontend: :tui, cols: cols} = target) do
     case grid_rows(session, target) do
@@ -138,10 +143,13 @@ defmodule Minga.Test.Storyboard.Render do
 
   defp fit_tui_header(session, _target), do: session
 
-  # The grid the frontend reports for the session as it stands.
   @spec grid_rows(Session.t(), target()) :: pos_integer()
-  defp grid_rows(session, %{frontend: :tui, rows: rows, cols: cols}),
-    do: rows - Session.tui_header_rows(session, cols, @tui_breadcrumb_min_cols)
+  defp grid_rows(session, %{frontend: :tui, rows: rows, cols: cols} = target) do
+    case Session.conversation_header_rows(session, cols, @tui_breadcrumb_min_cols) do
+      nil -> target.grid_rows
+      header_rows -> rows - header_rows
+    end
+  end
 
   defp grid_rows(_session, target), do: target.grid_rows
 
@@ -166,6 +174,7 @@ defmodule Minga.Test.Storyboard.Render do
       "cols" => target.cols,
       "rows" => target.rows,
       "grid_rows" => target.grid_rows,
+      "prompt" => prompt_fit_json(target.prompt_fit),
       "window" => window(target.window),
       "digest" => digest(packets),
       "packets" => Enum.map(packets, &Base.encode64/1)
@@ -251,24 +260,41 @@ defmodule Minga.Test.Storyboard.Render do
   end
 
   # The grid a frontend reports depends on the chrome around the editor (ADR-0001): on macOS the file tree and
-  # Git status are a native sidebar beside the editor, so the editor's grid narrows while one is open.
+  # Git status are a native sidebar beside the editor, so the editor's grid narrows while one is open; the tasks drawer
+  # and the minibuffer prompt beneath it are native views below the editor, so the grid shrinks while they are open; the
+  # project home (`empty_state`) draws no tab bar or breadcrumb on either frontend, so its grid grows.
   # A target's `chrome_grid` maps the grid-changing chrome open at the reached frame, joined with "+", to the grid the
   # frontend reports then. The capture does what that report does in production: it resizes the editor to that grid.
-  @grid_chrome [:file_tree, :git_status, :agent_chat, :agent_activity]
+  @grid_chrome [
+    :empty_state,
+    :file_tree,
+    :git_status,
+    :tasks_drawer,
+    :minibuffer,
+    :agent_chat,
+    :agent_activity
+  ]
 
-  # Chrome each frontend draws natively around the editor: a scenario that shows it needs a `chrome_grid` entry.
-  # On macOS the conversation is a native view and the grid the window reports follows it. The Agent activity strip
-  # takes a row only above a conversation, so it changes the key ("agent_chat+agent_activity") but needs no entry alone.
-  @native_below %{macos: [:file_tree, :git_status, :agent_chat], tui: []}
+  # The Agent activity strip takes a row only above a conversation, so it changes the key
+  # ("agent_chat+agent_activity") but needs no entry alone.
+  @native_below %{macos: [:file_tree, :git_status, :tasks_drawer, :agent_chat], tui: []}
 
   @spec fit_native_chrome(Session.t(), target()) :: {Session.t(), target()}
   defp fit_native_chrome(session, target) do
     fitted = fitted_target(target, Session.model(session))
 
-    if {fitted.cols, fitted.grid_rows} == {target.cols, target.grid_rows},
-      do: {session, fitted},
-      else: {Session.resize(session, fitted.cols, fitted.grid_rows), fitted}
+    session =
+      if {fitted.cols, fitted.grid_rows} == {target.cols, target.grid_rows},
+        do: session,
+        else: Session.resize(session, fitted.cols, fitted.grid_rows)
+
+    {relay_prompt_fit(session, fitted.prompt_fit), fitted}
   end
+
+  # The capture relays the native composer's measured fit after the window grid.
+  @spec relay_prompt_fit(Session.t(), {pos_integer(), pos_integer()} | nil) :: Session.t()
+  defp relay_prompt_fit(session, {cols, rows}), do: Session.fit_prompt(session, cols, rows)
+  defp relay_prompt_fit(session, nil), do: session
 
   @doc """
   The target with the grid its frontend reports for the chrome open in `model`, from the target's `chrome_grid`.
@@ -282,8 +308,7 @@ defmodule Minga.Test.Storyboard.Render do
 
     case Map.fetch(chrome_grid, key) do
       {:ok, grid} ->
-        rows = Map.fetch!(grid, "rows")
-        %{target | cols: Map.get(grid, "cols", target.cols), rows: rows, grid_rows: rows}
+        apply_grid(target, grid)
 
       :error ->
         if Enum.any?(open, &(&1 in Map.fetch!(@native_below, frontend))) do
@@ -304,6 +329,37 @@ defmodule Minga.Test.Storyboard.Render do
   @spec pin_session_start(binary()) :: binary()
   defp pin_session_start(packet),
     do: Regex.replace(@session_start, packet, "\\g{1}09:41:00\\g{2}")
+
+  # In the TUI an entry sets only the grid below the header; the terminal size stays.
+  @spec apply_grid(target(), chrome_geometry()) :: target()
+  defp apply_grid(%{frontend: :tui} = target, %{"rows" => rows}), do: %{target | grid_rows: rows}
+
+  defp apply_grid(target, %{"rows" => rows} = grid) do
+    %{
+      target
+      | cols: Map.get(grid, "cols", target.cols),
+        rows: rows,
+        grid_rows: rows,
+        prompt_fit: prompt_fit(grid)
+    }
+  end
+
+  @spec prompt_fit(chrome_geometry()) :: {pos_integer(), pos_integer()} | nil
+  defp prompt_fit(%{"prompt" => %{"cols" => cols, "rows" => rows}}), do: {cols, rows}
+  defp prompt_fit(_grid), do: nil
+
+  @spec prompt_fit_json({pos_integer(), pos_integer()} | nil) :: map() | nil
+  defp prompt_fit_json({cols, rows}), do: %{"cols" => cols, "rows" => rows}
+  defp prompt_fit_json(nil), do: nil
+
+  # The TUI header holds the tab bar, and the breadcrumb from 100 columns up; the home shows neither, so the TUI
+  # reports one more row there (its title row stays).
+  @spec tui_chrome_grid(pos_integer(), pos_integer()) :: %{
+          String.t() => %{String.t() => pos_integer()}
+        }
+  defp tui_chrome_grid(cols, rows) do
+    if tui_header_rows(cols) > 1, do: %{"empty_state" => %{"rows" => rows - 1}}, else: %{}
+  end
 
   # A strip frame is drawn by driving a fresh session to the journey's start and replaying the steps up to it.
   @spec export_journey!(Path.t(), Journeys.t()) :: map()
@@ -386,7 +442,8 @@ defmodule Minga.Test.Storyboard.Render do
           rows: rows,
           grid_rows: rows - tui_header_rows(cols),
           window: nil,
-          chrome_grid: %{}
+          chrome_grid: tui_chrome_grid(cols, rows),
+          prompt_fit: nil
         }
       end
 
@@ -400,7 +457,8 @@ defmodule Minga.Test.Storyboard.Render do
           rows: rows,
           grid_rows: rows,
           window: {width, height},
-          chrome_grid: Map.get(window, "chrome_grid", %{})
+          chrome_grid: Map.get(window, "chrome_grid", %{}),
+          prompt_fit: nil
         }
       end
 

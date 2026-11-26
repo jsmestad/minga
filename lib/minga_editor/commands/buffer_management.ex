@@ -297,6 +297,21 @@ defmodule MingaEditor.Commands.BufferManagement do
     |> close_tab_or_quit(:discard)
   end
 
+  # From the project home (no tab active), closing a tab behind it keeps the home.
+  # Closing a background tab from another tab keeps that tab the same way.
+  def execute(
+        %{shell_runtime: %{state: %{tab_bar: %TabBar{active_id: nil}}}} = state,
+        {:close_tab, id}
+      )
+      when is_integer(id) do
+    state = close_targeted_tab(state, id)
+
+    case MingaEditor.Shell.Runtime.active_tab(state.shell_runtime) do
+      nil -> state
+      _restored -> MingaEditor.TabWorkflow.leave_to_home(state)
+    end
+  end
+
   def execute(state, {:close_tab, id}) when is_integer(id) do
     close_targeted_tab(state, id)
   end
@@ -942,8 +957,11 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   # ── Reload config ──────────────────────────────────────────────────────────
 
+  # The reload reads project-local configuration from the project this editor has open.
+  # The root travels as data with the request: the reload runs off the Editor and reads no directory of its own.
   @spec reload_config(state()) :: state()
-  def reload_config(state), do: reload_config(state, Minga.Config)
+  def reload_config(state),
+    do: reload_config(state, Minga.Config, [state.workspace.file_tree.project_root])
 
   @doc "Schedules config reload through an explicit reload implementation."
   @spec reload_config(state(), module()) :: state()
@@ -1776,7 +1794,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     {status, message} =
       if reason in [:normal, :shutdown],
         do: {:idle, "Agent session ended"},
-        else: {:error, "Agent session crashed (SPC a n to restart)"}
+        else: {:error, "Agent session crashed (SPC a S n to restart)"}
 
     state
     |> TraditionalWorkflow.install_agent_spinner_stop()
@@ -1876,7 +1894,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     msg =
       if reason in [:normal, :shutdown],
         do: "Agent session ended",
-        else: "Agent session crashed (SPC a n to restart)"
+        else: "Agent session crashed (SPC a S n to restart)"
 
     NoticeWorkflow.publish(state, msg)
   end
@@ -3587,7 +3605,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   command(:abort_quit, "Abort and quit with error exit code", requires_buffer: false)
   command(:confirm_quit_yes, "Confirm quit (yes)", requires_buffer: false)
   command(:confirm_quit_no, "Confirm quit (no)", requires_buffer: false)
-  command(:buffer_list, "Switch buffer", requires_buffer: true)
+  command(:buffer_list, "Switch buffer", requires_buffer: false)
   command(:buffer_list_all, "Switch buffer (all)", requires_buffer: true)
   command(:buffer_next, "Next buffer", requires_buffer: true)
   command(:buffer_prev, "Previous buffer", requires_buffer: true)

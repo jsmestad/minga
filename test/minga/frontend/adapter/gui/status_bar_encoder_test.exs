@@ -150,6 +150,20 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
       refute Map.has_key?(decode_sections(plain), 0x13)
     end
 
+    test "encodes the needs-you count (0x14) only while a task needs you" do
+      model = %StatusBar{
+        content_kind: :buffer,
+        data: %{status_data() | needs_you_count: 2},
+        workspace: workspace()
+      }
+
+      {cmd, _caches} = StatusBarEncoder.encode(model, Caches.new())
+      assert decode_sections(cmd)[0x14] == <<2::16>>
+
+      {none, _caches} = StatusBarEncoder.encode(%{model | data: status_data()}, Caches.new())
+      refute Map.has_key?(decode_sections(none), 0x14)
+    end
+
     test "omits pending_keys section (0x0E) when empty" do
       model = %StatusBar{content_kind: :buffer, data: status_data(), workspace: workspace()}
 

@@ -438,6 +438,9 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
         bg: ctx.mode_bg,
         style: [bold: true],
         drop: @never,
+        # The mode pill is the mouse's front door: a click opens which-key, as SPC and a pause do.
+        target: :which_key_open,
+        key: key_hint(ctx, []),
         label: "#{String.capitalize(badge)} mode"
       }
     ]

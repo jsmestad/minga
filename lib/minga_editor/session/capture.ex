@@ -12,6 +12,10 @@ defmodule MingaEditor.Session.Capture do
   alias Minga.Session.Snapshot
   alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Tab
+  alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Windows
   alias MingaEditor.Window
 
   @doc "Captures the editor's restorable window state."
@@ -19,19 +23,37 @@ defmodule MingaEditor.Session.Capture do
   def snapshot(%EditorState{workspace: workspace} = state) do
     inventory = BufferRegistry.buffer_inventory(state)
     paths = buffer_paths(inventory)
-    windows = workspace.windows
+    {windows, active_buffer} = presented(state)
     layout = layout(windows, paths)
 
     %Snapshot{
       version: Snapshot.current_version(),
       project_root: MingaEditor.Session.State.project_root(workspace),
       buffers: inventory |> Enum.map(&entry(&1, paths)) |> Enum.reject(&is_nil/1),
-      active_file: Map.get(paths, workspace.buffers.active),
+      active_file: Map.get(paths, active_buffer),
       layout: layout,
       active_pane: active_pane(windows, paths),
       clean_shutdown: false
     }
   end
+
+  # While the project home shows, the tab that stepped aside for it holds the windows to restore.
+  @spec presented(EditorState.t()) :: {MingaEditor.State.Windows.t(), pid() | nil}
+  defp presented(%EditorState{workspace: workspace} = state) do
+    case home_from(state) do
+      %Tab{context: %{windows: %Windows{} = windows, buffers: %Buffers{active: active}}} ->
+        {windows, active}
+
+      _live ->
+        {workspace.windows, workspace.buffers.active}
+    end
+  end
+
+  @spec home_from(EditorState.t()) :: Tab.t() | nil
+  defp home_from(%EditorState{shell_runtime: %{state: %{tab_bar: %TabBar{} = tab_bar}}}),
+    do: TabBar.stepped_aside(tab_bar)
+
+  defp home_from(_state), do: nil
 
   @spec buffer_paths([pid()]) :: %{pid() => String.t()}
   defp buffer_paths(pids) do

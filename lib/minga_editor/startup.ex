@@ -218,6 +218,7 @@ defmodule MingaEditor.Startup do
           editing_model: editing_model,
           keymap_server: keymap_server,
           options_server: options_server,
+          project_server: Keyword.get(opts, :project_server, Minga.Project),
           file_tree_duplicate_backend:
             Keyword.get(
               opts,
@@ -388,7 +389,10 @@ defmodule MingaEditor.Startup do
   @spec startup_launchpad(pid() | nil, atom(), keyword()) ::
           MingaEditor.State.Launchpad.t() | nil
   defp startup_launchpad(nil, scope, opts) when scope != :agent do
-    MingaEditor.State.Launchpad.new(Keyword.take(opts, [:session_dir, :project_root]))
+    # `:home` overrides the home's reads, so tests and the storyboard factory start from a known home.
+    MingaEditor.State.Launchpad.new(
+      Keyword.take(opts, [:project_root]) ++ Keyword.get(opts, :home, [])
+    )
   end
 
   defp startup_launchpad(_active_buf, _scope, _opts), do: nil
@@ -494,13 +498,101 @@ defmodule MingaEditor.Startup do
             state
 
           {:error, reason} ->
-            Log.warning(:editor, "Could not open #{path}: #{inspect(reason)}")
-            state
+            # Say why in the echo area and *Messages*, so the home never shows without an explanation.
+            message = "Could not open #{path}: #{open_failure(reason)}"
+            Minga.API.message(message)
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, message)
         end
     end
   end
 
   def open_startup_file(%EditorState{} = state, _opts), do: state
+
+  @doc """
+  Opens the project file finder filtered to the command line's subdirectory (`minga lib/` inside a project).
+
+  The project root is the nearest marker above the directory (`Minga.CLI`), so the finder lists the whole project; its query starts at the subdirectory, and clearing the query widens it to the whole project. Like the startup file, the command line is read only when startup inference is on, so test editors never inherit the test runner's arguments.
+  """
+  @spec open_startup_directory(EditorState.t(), keyword()) :: EditorState.t()
+  def open_startup_directory(%EditorState{} = state, opts) do
+    with dir when is_binary(dir) <- startup_directory(opts),
+         root when is_binary(root) <- project_root_from_opts(opts),
+         {:ok, relative} <- subdirectory_of(dir, root) do
+      MingaEditor.PickerUI.open(state, MingaEditor.UI.Picker.FileSource, %{
+        initial_query: relative <> "/"
+      })
+    else
+      _not_a_subdirectory -> state
+    end
+  end
+
+  @spec startup_directory(keyword()) :: String.t() | nil
+  defp startup_directory(opts) do
+    Keyword.get_lazy(opts, :startup_directory, fn ->
+      if Application.get_env(:minga, :infer_startup_project_root, true),
+        do: Minga.CLI.startup_directory()
+    end)
+  end
+
+  @spec subdirectory_of(String.t(), String.t()) :: {:ok, String.t()} | :error
+  defp subdirectory_of(dir, root) do
+    case Path.relative_to(Path.expand(dir), Path.expand(root)) do
+      ^dir -> :error
+      "." -> :error
+      relative -> if Path.type(relative) == :relative, do: {:ok, relative}, else: :error
+    end
+  end
+
+  @doc """
+  Says in `*Messages*` which startup choices no longer do anything: `--editor` and `--no-context`, and `set :startup_view, :agent` (#4057).
+  """
+  @spec announce_retired_startup_choices(Options.server() | nil) :: :ok
+  def announce_retired_startup_choices(options_server) do
+    command_line_flags()
+    |> retired_startup_notes(startup_view_option(options_server))
+    |> Enum.each(&Minga.API.message/1)
+  end
+
+  # The command line is read only when startup inference is on, as for the startup file and directory.
+  @spec command_line_flags() :: [String.t()]
+  defp command_line_flags do
+    if Application.get_env(:minga, :infer_startup_project_root, true),
+      do: Minga.CLI.startup_flags().deprecated_flags,
+      else: []
+  end
+
+  @doc "The `*Messages*` lines for retired startup choices: each ignored flag, and `:startup_view` set to `:agent`."
+  @spec retired_startup_notes([String.t()], atom()) :: [String.t()]
+  def retired_startup_notes(deprecated_flags, startup_view) do
+    flag_notes =
+      for flag <- deprecated_flags,
+          do:
+            "#{flag} is no longer needed and is ignored: Minga opens files and folders in the editor"
+
+    view_notes =
+      if startup_view == :agent,
+        do: [
+          ":startup_view no longer changes where Minga starts; remove `set :startup_view, :agent` from your config"
+        ],
+        else: []
+
+    flag_notes ++ view_notes
+  end
+
+  @spec startup_view_option(Options.server() | nil) :: atom()
+  defp startup_view_option(nil), do: Config.get(:startup_view)
+  defp startup_view_option(options_server), do: Options.get(options_server, :startup_view)
+
+  @spec open_failure(term()) :: String.t()
+  defp open_failure(:eacces), do: "permission denied"
+  defp open_failure(:eisdir), do: "it is a directory"
+  defp open_failure(:enotdir), do: "a parent is not a directory"
+  defp open_failure({:error, reason}), do: open_failure(reason)
+
+  defp open_failure(reason) when is_atom(reason),
+    do: reason |> :file.format_error() |> List.to_string()
+
+  defp open_failure(reason), do: inspect(reason)
 
   @spec project_root_from_opts(keyword()) :: String.t() | nil
   defp project_root_from_opts(opts) do
@@ -546,8 +638,7 @@ defmodule MingaEditor.Startup do
   Returns `{keymap_scope, agentic_state}`. Called before window creation
   so the correct window type can be built in a single pass.
 
-  Explicit CLI view modes are final. Auto startup consults the
-  `:startup_view` config option for all backends.
+  Minga starts in the editor. Only an explicit `view_mode: :agentic` option (not reachable from the command line) starts in the agent view; the `:startup_view` option no longer changes where Minga starts (#4057).
   """
   @spec startup_view_state(EditorState.backend()) :: {atom(), UIState.t()}
   def startup_view_state(backend) do
@@ -565,18 +656,8 @@ defmodule MingaEditor.Startup do
     startup_view_state(backend, cli_flags.view_mode, options_server)
   end
 
-  defp startup_view_state(_backend, :editor, _options_server), do: editor_view_state()
   defp startup_view_state(_backend, :agentic, _options_server), do: agent_view_state()
-
-  defp startup_view_state(_backend, :auto, nil),
-    do: startup_view_state_from_config(Config.get(:startup_view))
-
-  defp startup_view_state(_backend, :auto, options_server),
-    do: startup_view_state_from_config(Options.get(options_server, :startup_view))
-
-  @spec startup_view_state_from_config(atom()) :: {atom(), UIState.t()}
-  defp startup_view_state_from_config(:agent), do: agent_view_state()
-  defp startup_view_state_from_config(_startup_view), do: editor_view_state()
+  defp startup_view_state(_backend, _view_mode, _options_server), do: editor_view_state()
 
   @spec agent_view_state() :: {atom(), UIState.t()}
   defp agent_view_state do

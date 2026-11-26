@@ -310,16 +310,31 @@ defmodule Minga.Project do
     frecency = if persist_recent_files?(), do: load_frecency_events(), else: %{}
     command_frecency = Keyword.get_lazy(opts, :command_frecency, &load_command_frecency/0)
 
-    {:ok,
-     %__MODULE__{
-       known_projects: known,
-       recent_files: recent,
-       frecency_events: frecency,
-       command_frecency: command_frecency,
-       rebuild_timeout_ms: Keyword.get(opts, :rebuild_timeout_ms, 30_000),
-       file_find_module: Keyword.get(opts, :file_find_module, Minga.Project.FileFind),
-       events_registry: events_registry
-     }}
+    state = %__MODULE__{
+      known_projects: known,
+      recent_files: recent,
+      frecency_events: frecency,
+      command_frecency: command_frecency,
+      rebuild_timeout_ms: Keyword.get(opts, :rebuild_timeout_ms, 30_000),
+      file_find_module: Keyword.get(opts, :file_find_module, Minga.Project.FileFind),
+      events_registry: events_registry
+    }
+
+    {:ok, install_startup_workspace(state, Keyword.get(opts, :startup_directory))}
+  end
+
+  @spec install_startup_workspace(t(), String.t() | nil) :: t()
+  defp install_startup_workspace(state, nil), do: state
+
+  defp install_startup_workspace(state, path) do
+    case Root.directory(path) do
+      {:ok, root} ->
+        install_workspace(state, root)
+
+      {:error, reason} ->
+        Minga.Log.warning(:editor, "Startup project refused #{path}: #{inspect(reason)}")
+        state
+    end
   end
 
   @impl true

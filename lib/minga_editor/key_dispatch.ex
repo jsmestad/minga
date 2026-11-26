@@ -24,6 +24,7 @@ defmodule MingaEditor.KeyDispatch do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Shell.Traditional.ToolPrompts
   alias MingaEditor.Shell.Traditional.ToolPromptWorkflow
+  alias MingaEditor.Shell.Traditional.WhichKeyWorkflow
   alias Minga.Keymap
   alias Minga.Keymap.Bindings
   alias Minga.Mode
@@ -89,7 +90,10 @@ defmodule MingaEditor.KeyDispatch do
       )
     end
 
-    base_state = sync_command_completion_overlay(base_state, old_mode, new_mode)
+    base_state =
+      base_state
+      |> sync_command_completion_overlay(old_mode, new_mode)
+      |> WhichKeyWorkflow.sync_mode_prefix(mode_state, new_mode_state)
 
     after_commands =
       Enum.reduce(commands, base_state, fn cmd, acc ->

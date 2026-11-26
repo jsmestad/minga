@@ -35,12 +35,18 @@ defmodule Minga.Keymap.Scope.Editor do
   @impl true
   @spec keymap(Minga.Keymap.Scope.vim_state(), Minga.Keymap.Scope.context()) ::
           Bindings.node_t()
-  def keymap(:cua, _context), do: cua_trie()
+  def keymap(:cua, _context), do: cua_trie() |> bind_stop()
+  def keymap(:normal, _context), do: Bindings.new() |> bind_stop()
   def keymap(_vim_state, _context), do: Bindings.new()
 
   @impl true
   @spec shared_keymap() :: Bindings.node_t()
   def shared_keymap, do: Bindings.new()
+
+  # ⌘. is the macOS platform alias of SPC a s (docs/design/keys.md, rule 5): which-key and the menu bar show it on
+  # Stop, so it works from a file as it does in the agent view.
+  @spec bind_stop(Bindings.node_t()) :: Bindings.node_t()
+  defp bind_stop(trie), do: Bindings.bind(trie, [{?., 0x08}], :agent_abort, "Stop")
 
   @impl true
   @spec help_groups(atom()) :: [Minga.Keymap.Scope.help_group()]

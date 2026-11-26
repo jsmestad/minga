@@ -4,15 +4,15 @@ defmodule Minga.CLI do
 
   Serves as the entry point for both `mix minga <filename>` and the installed TUI launcher.
 
-  ## Startup view
+  ## Where Minga starts
 
-  By default, Minga boots into the agentic view (controlled by the `:startup_view` config option). CLI flags can override the config:
+  Minga starts in the editor, at a project:
 
-  - `--editor` forces the traditional file editing view
-  - File arguments open the file in its project
-  - Directory arguments open the project: its saved session, or the project home
-  - `--no-context` opens the agentic view but skips loading the CLI file argument as preview context
-  - `--headless` starts only the services and agent runtime, plus the JSON-RPC Gateway
+  - `minga` and `minga <dir>` open the project: its saved session, or the project home. A subdirectory resolves to the nearest project marker above it and opens the file finder filtered to that subdirectory; a folder without markers is its own root.
+  - `minga <file>` opens the file in its project.
+  - `--headless` starts only the services and agent runtime, plus the JSON-RPC Gateway.
+
+  `--editor` and `--no-context` steered between the editor and the agentic view. They are accepted and ignored for one release, and say so in `*Messages*`.
   """
 
   alias Minga.Distribution.Cookie
@@ -36,6 +36,7 @@ defmodule Minga.CLI do
   @type flags :: %{
           view_mode: view_mode(),
           no_context: boolean(),
+          deprecated_flags: [String.t()],
           config_file: String.t() | nil,
           debug_log: String.t() | nil,
           headless: boolean(),
@@ -51,6 +52,7 @@ defmodule Minga.CLI do
   @default_flags %{
     view_mode: :auto,
     no_context: false,
+    deprecated_flags: [],
     config_file: nil,
     debug_log: nil,
     headless: false,
@@ -70,6 +72,7 @@ defmodule Minga.CLI do
   def main(args) do
     case parse_args(args) do
       {:open, file, flags} ->
+        file = expand_target(file)
         store_startup_flags(flags, file)
 
         with :ok <- maybe_start_debug_log(flags),
@@ -150,11 +153,38 @@ defmodule Minga.CLI do
     main(argv())
   end
 
-  @doc "Stores CLI startup flags before the supervision tree starts."
-  @spec prepare_startup([String.t()]) :: :ok
-  def prepare_startup(args) do
+  @typedoc """
+  How the editor was started.
+
+  A terminal command carries the directory it was run in: `minga` typed inside a project opens that project. A start by the app itself (Finder, the Dock, a service) has no such directory.
+  """
+  @type launch :: {:terminal, directory :: String.t()} | :app
+
+  @doc """
+  The launch of a terminal command.
+
+  A source launcher has to start Mix in the source tree, and the VM stays there. So the launcher records the caller's directory in `MINGA_LAUNCH_DIR` first. Without that variable the command runs in the caller's directory, as a release does. This is the one place that directory is read; everything after it gets the launch as data, and relative arguments are resolved against it.
+  """
+  @spec terminal_launch() :: launch()
+  @spec terminal_launch(%{optional(String.t()) => String.t()}) :: launch()
+  def terminal_launch(env \\ System.get_env()) when is_map(env) do
+    case Map.get(env, "MINGA_LAUNCH_DIR") do
+      "/" <> _rest = directory -> {:terminal, directory}
+      _unset_or_relative -> {:terminal, File.cwd!()}
+    end
+  end
+
+  @doc """
+  Stores CLI startup flags before the supervision tree starts.
+
+  `launch` says how the editor was started. It decides what a start without a file or folder argument opens: the project of the terminal's directory, or nothing.
+  """
+  @spec prepare_startup([String.t()], launch()) :: :ok
+  def prepare_startup(args, launch) do
+    Application.put_env(:minga, :cli_launch, launch)
+
     case parse_args(args) do
-      {:open, file, flags} -> store_startup_flags(flags, file)
+      {:open, file, flags} -> store_startup_flags(flags, expand_target(file))
       {:attach, _url, flags} -> store_startup_flags(flags, nil)
       {:sessions, _url, flags} -> store_startup_flags(flags, nil)
       {:detach, flags} -> store_startup_flags(flags, nil)
@@ -303,10 +333,14 @@ defmodule Minga.CLI do
   @doc """
   The regular file given on the command line, or nil for a directory or no argument.
 
-  Every launcher stores it with `prepare_startup/1` before the editor starts: releases in `Minga.Application`, source launchers in the `mix minga` alias.
+  Every launcher stores it with `prepare_startup/2` before the editor starts: releases in `Minga.Application`, source launchers in the `mix minga` alias.
   """
   @spec startup_file() :: String.t() | nil
   def startup_file, do: Application.get_env(:minga, :cli_startup_file)
+
+  @doc "Returns the expanded directory argument of this start, if the argument was a directory."
+  @spec startup_directory() :: String.t() | nil
+  def startup_directory, do: Application.get_env(:minga, :cli_startup_directory)
 
   @doc "Returns the project root inferred from the stored startup CLI target, if any."
   @spec startup_project_root() :: String.t() | nil
@@ -334,33 +368,63 @@ defmodule Minga.CLI do
       nil
   end
 
-  @doc "Returns the marked project root inferred from the current working directory, if any."
-  @spec cwd_startup_project_root() :: String.t() | nil
-  def cwd_startup_project_root do
-    File.cwd!()
-    |> cwd_startup_project_root()
+  @doc """
+  The launch recorded by `prepare_startup/2`.
+
+  A start that never recorded one came through `main/1` alone, which is a terminal command.
+  """
+  @spec launch() :: launch()
+  def launch do
+    case Application.get_env(:minga, :cli_launch) do
+      nil -> terminal_launch()
+      launch -> launch
+    end
+  end
+
+  # A relative argument means what the person typed where they typed it: it is resolved against the launch
+  # directory, never against the directory the VM happens to run in.
+  @spec expand_argument(String.t()) :: String.t()
+  defp expand_argument(path), do: Path.expand(path, launch_directory(launch()))
+
+  @spec expand_target(String.t() | nil) :: String.t() | nil
+  defp expand_target(nil), do: nil
+  defp expand_target(path), do: expand_argument(path)
+
+  # A start by the app passes absolute paths. A relative one can only mean the VM's own directory.
+  @spec launch_directory(launch()) :: String.t()
+  defp launch_directory({:terminal, directory}), do: directory
+  defp launch_directory(:app), do: File.cwd!()
+
+  @doc "Returns the marked project root at or above `directory`, if any."
+  @spec directory_startup_project_root(String.t()) :: String.t() | nil
+  def directory_startup_project_root(directory) when is_binary(directory) do
+    directory
+    |> Path.expand()
+    |> detect_marked_project_root_from_dir()
+  end
+
+  # A start without a file or folder argument opens the project of the terminal's directory.
+  # A start by the app has no directory, so it opens no project.
+  @spec launch_startup_project_root(launch()) :: String.t() | nil
+  defp launch_startup_project_root({:terminal, directory}) do
+    directory_startup_project_root(directory)
   rescue
     error ->
-      log_cwd_startup_project_root_failure({error, __STACKTRACE__})
+      log_launch_startup_project_root_failure({error, __STACKTRACE__})
       nil
   catch
     kind, reason ->
-      log_cwd_startup_project_root_failure({kind, reason})
+      log_launch_startup_project_root_failure({kind, reason})
       nil
   end
 
-  @spec cwd_startup_project_root(String.t()) :: String.t() | nil
-  def cwd_startup_project_root(cwd) when is_binary(cwd) do
-    cwd
-    |> Path.expand()
-    |> detect_marked_project_root_from_dir(Minga.Project.Detector.default_markers())
-  end
+  defp launch_startup_project_root(:app), do: nil
 
   @doc "Returns the project root inferred from raw CLI args, if they name a project or file inside a project."
   @spec startup_project_root_from_args([String.t()]) :: String.t() | nil
   def startup_project_root_from_args(args) when is_list(args) do
     case parse_args(args) do
-      {:open, file, _flags} -> detect_startup_project_root(file)
+      {:open, file, _flags} -> detect_startup_project_root(expand_target(file))
       {:error, _message} -> nil
     end
   end
@@ -411,12 +475,9 @@ defmodule Minga.CLI do
   defp parse_args(["--version" | _], _file, _flags), do: {:error, "minga #{Minga.version()}"}
   defp parse_args(["-v" | _], _file, _flags), do: {:error, "minga #{Minga.version()}"}
 
-  defp parse_args(["--editor" | rest], file, flags) do
-    parse_args(rest, file, %{flags | view_mode: :editor})
-  end
-
-  defp parse_args(["--no-context" | rest], file, flags) do
-    parse_args(rest, file, %{flags | no_context: true})
+  # Accepted and ignored for one release: Minga always starts in the editor (#4057).
+  defp parse_args([flag | rest], file, flags) when flag in ["--editor", "--no-context"] do
+    parse_args(rest, file, %{flags | deprecated_flags: flags.deprecated_flags ++ [flag]})
   end
 
   defp parse_args(["--headless" | rest], file, flags) do
@@ -458,7 +519,7 @@ defmodule Minga.CLI do
 
   defp parse_args(["--cookie-file", path | rest], file, flags)
        when is_binary(path) and path != "" do
-    parse_args(rest, file, %{flags | cookie_file: Path.expand(path)})
+    parse_args(rest, file, %{flags | cookie_file: expand_argument(path)})
   end
 
   defp parse_args(["--cookie-file"], _file, _flags) do
@@ -504,7 +565,7 @@ defmodule Minga.CLI do
   end
 
   defp parse_args(["--config", path | rest], file, flags) when is_binary(path) do
-    parse_args(rest, file, %{flags | config_file: Path.expand(path)})
+    parse_args(rest, file, %{flags | config_file: expand_argument(path)})
   end
 
   defp parse_args(["--config"], _file, _flags) do
@@ -520,7 +581,7 @@ defmodule Minga.CLI do
   end
 
   defp parse_args(["--debug-log", path | rest], file, flags) when is_binary(path) do
-    parse_args(rest, file, %{flags | debug_log: Path.expand(path)})
+    parse_args(rest, file, %{flags | debug_log: expand_argument(path)})
   end
 
   defp parse_args(["--debug-log"], _file, _flags) do
@@ -536,7 +597,7 @@ defmodule Minga.CLI do
   end
 
   defp parse_args(["-D", path | rest], file, flags) when is_binary(path) do
-    parse_args(rest, file, %{flags | debug_log: Path.expand(path)})
+    parse_args(rest, file, %{flags | debug_log: expand_argument(path)})
   end
 
   defp parse_args(["-D"], _file, _flags) do
@@ -587,7 +648,6 @@ defmodule Minga.CLI do
     case publish_local_control_endpoint() do
       :ok ->
         log_startup(file)
-        open_startup_target(file)
 
       {:error, message} ->
         abort_startup(message)
@@ -1012,25 +1072,8 @@ defmodule Minga.CLI do
 
   @doc "Applies flag implications with file-aware startup view resolution."
   @spec apply_flag_implications(flags(), String.t() | nil) :: flags()
-  def apply_flag_implications(%{minimal: true} = flags, _file) do
-    %{flags | view_mode: :editor}
-  end
-
-  def apply_flag_implications(%{view_mode: :editor} = flags, _file), do: flags
-  def apply_flag_implications(%{view_mode: :agentic} = flags, _file), do: flags
-
-  def apply_flag_implications(%{view_mode: :auto, no_context: true} = flags, _file),
-    do: %{flags | view_mode: :agentic}
-
-  def apply_flag_implications(%{view_mode: :auto} = flags, nil), do: flags
-
-  def apply_flag_implications(%{view_mode: :auto} = flags, file),
-    do: resolve_auto_view_mode(flags, file)
-
-  # A file and a directory both open in the editor.
-  # A directory opens its project: the saved session, or the project home.
-  @spec resolve_auto_view_mode(flags(), String.t()) :: flags()
-  defp resolve_auto_view_mode(flags, _file), do: %{flags | view_mode: :editor}
+  # Every start is in the editor: no argument and a directory open the project, a file opens in its project.
+  def apply_flag_implications(flags, _file), do: %{flags | view_mode: :editor}
 
   @spec store_startup_flags(flags(), String.t() | nil) :: :ok
   defp store_startup_flags(flags, file) do
@@ -1049,8 +1092,10 @@ defmodule Minga.CLI do
   defp store_startup_file(path) when is_binary(path) do
     if File.dir?(path) do
       Application.delete_env(:minga, :cli_startup_file)
+      Application.put_env(:minga, :cli_startup_directory, Path.expand(path))
     else
       Application.put_env(:minga, :cli_startup_file, Path.expand(path))
+      Application.delete_env(:minga, :cli_startup_directory)
     end
 
     :ok
@@ -1058,12 +1103,13 @@ defmodule Minga.CLI do
 
   defp store_startup_file(nil) do
     Application.delete_env(:minga, :cli_startup_file)
+    Application.delete_env(:minga, :cli_startup_directory)
     :ok
   end
 
   @spec store_startup_project_root(String.t() | nil) :: :ok
   defp store_startup_project_root(nil) do
-    case cwd_startup_project_root() do
+    case launch_startup_project_root(launch()) do
       root when is_binary(root) -> Application.put_env(:minga, :cli_startup_project_root, root)
       nil -> Application.delete_env(:minga, :cli_startup_project_root)
     end
@@ -1100,39 +1146,17 @@ defmodule Minga.CLI do
 
   @spec detect_directory_project_root(String.t()) :: String.t()
   defp detect_directory_project_root(path) do
-    case detect_marked_project_root_from_dir(path, Minga.Project.Detector.default_markers()) do
+    case detect_marked_project_root_from_dir(path) do
       root when is_binary(root) -> root
       nil -> path
     end
   end
 
-  @spec detect_marked_project_root_from_dir(String.t(), [{String.t(), atom()}]) ::
-          String.t() | nil
-  defp detect_marked_project_root_from_dir(dir, markers) do
-    case directory_marker_type(dir, markers) do
-      {:ok, _type} -> dir
-      :none -> detect_marked_project_root_from_parent(dir, markers)
-    end
-  end
-
-  @spec detect_marked_project_root_from_parent(String.t(), [{String.t(), atom()}]) ::
-          String.t() | nil
-  defp detect_marked_project_root_from_parent(dir, markers) do
-    parent = Path.dirname(dir)
-
-    if parent == dir do
-      nil
-    else
-      detect_marked_project_root_from_dir(parent, markers)
-    end
-  end
-
-  @spec directory_marker_type(String.t(), [{String.t(), atom()}]) :: {:ok, atom()} | :none
-  defp directory_marker_type(dir, markers) do
-    Enum.find_value(markers, :none, fn {marker, type} ->
-      if File.exists?(Path.join(dir, marker)), do: {:ok, type}, else: nil
-    end)
-  end
+  # The detector the editor uses everywhere else decides, so a marker means the same thing here.
+  # It walks up from a file's folder, so it is asked about a file name inside the directory.
+  @spec detect_marked_project_root_from_dir(String.t()) :: String.t() | nil
+  defp detect_marked_project_root_from_dir(dir),
+    do: detect_file_project_root(Path.join(dir, ".minga-startup-probe"))
 
   @spec detect_file_project_root(String.t()) :: String.t() | nil
   defp detect_file_project_root(path) do
@@ -1150,11 +1174,11 @@ defmodule Minga.CLI do
     )
   end
 
-  @spec log_cwd_startup_project_root_failure(term()) :: :ok
-  defp log_cwd_startup_project_root_failure(reason) do
+  @spec log_launch_startup_project_root_failure(term()) :: :ok
+  defp log_launch_startup_project_root_failure(reason) do
     Minga.Log.warning(
       :editor,
-      "Could not infer startup project root from cwd: #{inspect(reason)}"
+      "Could not infer startup project root from the launch directory: #{inspect(reason)}"
     )
   end
 
@@ -1186,10 +1210,8 @@ defmodule Minga.CLI do
       -v, --version          Show version
       --config <path>        Use a custom config file instead of the default
       -D, --debug-log <path> Append *Messages* and *Warnings* entries to a crash-safe log
-      --editor               Start in file editing mode (skip agentic view)
       --minimal              Minimal mode: editor-only, no services/agent (for GIT_EDITOR use)
       -Q, --safe             Safe mode: skip user config, user modules, after hooks, and extensions
-      --no-context           Keep agentic view and don't load the file as agent context
       --headless             Start services and agent runtime without a GUI frontend
       --name <name@host>     Distributed Erlang long node name
       --sname <name>         Distributed Erlang short node name
@@ -1201,7 +1223,7 @@ defmodule Minga.CLI do
       minga                              Open the project in this directory
       minga README.md                    Open file for editing
       minga .                            Open the project: pick up where you left off
-      minga --editor README.md           Open file in traditional editor
+      minga lib/                         Open the project above lib/, finding files in lib/
       minga attach ssh://devbox/work/app  Attach to a remote server-side checkout
       minga sessions ssh://devbox         List remote sessions without launching the editor
       minga kill-session ssh://devbox/work/app  Stop the remote session for that checkout
@@ -1211,20 +1233,5 @@ defmodule Minga.CLI do
       minga --safe                       Start with defaults and no user config
       minga -D /tmp/minga-debug.log      Persist messages and warnings for crash forensics
     """
-  end
-
-  @spec open_startup_target(String.t() | nil) :: :ok
-  defp open_startup_target(nil), do: :ok
-
-  # The editor opens a file argument itself while it starts (`Minga.CLI.startup_file/0`).
-  # Opening it from here raced the editor's own startup and timed out on a slow GUI boot (#4183).
-  defp open_startup_target(path) do
-    if File.dir?(path), do: open_project(path), else: :ok
-  end
-
-  @spec open_project(String.t()) :: :ok
-  defp open_project(path) do
-    Minga.Project.switch(path)
-    :ok
   end
 end

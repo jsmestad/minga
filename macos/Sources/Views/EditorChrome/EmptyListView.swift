@@ -10,13 +10,21 @@ struct EmptyListHeader: View {
     let textColor: Color
     let mutedColor: Color
 
+    @Environment(\.themeColors) private var theme
+
+    /// The state an empty state's glyph is the shape of (docs/design/themes.md, "States"), such as Done for a clean tree's solid dot, or nil for any other glyph.
+    static func glyphState(_ glyph: String) -> SpineState? {
+        SpineState.allCases.first { $0.tuiGlyph == glyph }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: EmptyStateMetrics.titleToWhy) {
             HStack(alignment: .firstTextBaseline, spacing: EmptyStateMetrics.glyphToTitle) {
                 if !empty.glyph.isEmpty {
+                    // The glyph is a state shape, so it is drawn in that state's colour role; any other glyph takes the title colour.
                     Text(empty.glyph)
                         .font(Typography.font(.emphasis, weight: .semibold))
-                        .foregroundStyle(textColor)
+                        .foregroundStyle(Self.glyphState(empty.glyph).map(theme.stateColor) ?? textColor)
                 }
                 Text(empty.title)
                     .font(Typography.font(.emphasis, weight: .semibold))
@@ -68,7 +76,8 @@ struct EmptyListActions: View {
                             .anatomyPart("emptyState.actionLabel", text: action.label, font: .body)
                         Spacer(minLength: 0)
                     }
-                    .padding(.horizontal, EmptyStateMetrics.inset)
+                    .padding(.leading, EmptyStateMetrics.inset)
+                    .padding(.trailing, EmptyStateMetrics.trailingInset)
                     .frame(height: EmptyStateMetrics.actionPitch)
                     .background(rowBackground(selected: index == Int(empty.selected), hovered: hoveredID == action.id))
                     .contentShape(Rectangle())
@@ -92,5 +101,26 @@ struct EmptyListActions: View {
         let font = NSFont.monospacedSystemFont(ofSize: Typography.Step.small.rawValue, weight: .medium)
         let widest = actions.map { ($0.key as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
         return ceil(widest) + EmptyStateMetrics.keyColumnGap
+    }
+}
+
+/// The whole empty-state anatomy in a sidebar panel (the file tree's empty folder, Git status's clean tree): what happened and why, then the next steps as list rows, with one set of insets from `EmptyStateMetrics` so every sidebar draws it the same way.
+struct EmptyListPanel: View {
+    let empty: Wire.EmptyList
+    let textColor: Color
+    let accentColor: Color
+    let selectionColor: Color
+    let activate: (Wire.EmptyListAction) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: EmptyStateMetrics.whyToActions) {
+            EmptyListHeader(empty: empty, textColor: textColor, mutedColor: textColor.opacity(0.78))
+                .padding(.leading, EmptyStateMetrics.inset)
+                .padding(.trailing, EmptyStateMetrics.trailingInset)
+            EmptyListActions(empty: empty, textColor: textColor, accentColor: accentColor, selectionColor: selectionColor, activate: activate)
+            Spacer(minLength: 0)
+        }
+        .padding(.top, EmptyStateMetrics.inset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }

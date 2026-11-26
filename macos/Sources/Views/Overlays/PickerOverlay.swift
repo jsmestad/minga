@@ -73,11 +73,16 @@ public struct PickerOverlay: View {
                         }
                     }
                     .frame(width: min(panelWidth, geo.size.width - 40))
-                    .background(
-                        RoundedRectangle(cornerRadius: Radius.md)
-                            .fill(theme.popupBg)
-                            .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
-                    )
+                    .background {
+                        let panel = RoundedRectangle(cornerRadius: Radius.md).fill(theme.popupBg)
+                        if state.empty == nil {
+                            panel
+                                .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+                        } else {
+                            // Empty pickers use an outline without a shadow so the visible editor text at their edges stays readable.
+                            panel
+                        }
+                    }
                     .overlay(
                         RoundedRectangle(cornerRadius: Radius.md)
                             .strokeBorder(theme.popupBorder.opacity(0.4), lineWidth: 1)
@@ -87,6 +92,7 @@ public struct PickerOverlay: View {
                             actionMenuOverlay(menu)
                         }
                     }
+                    .anatomyPart("picker.panel", enabled: state.empty != nil)
                     .padding(.top, Spacing.pixel)
 
                     Spacer()
@@ -185,9 +191,9 @@ public struct PickerOverlay: View {
             }
 
             if state.empty != nil {
-                Text(state.listKeys ? "j k move   ↩ run   q close" : "⌃J ⌃K move   ↩ run   esc close")
+                Text(state.hints.map { "\($0.keys) \($0.word)" }.joined(separator: "   "))
                     .font(Typography.font(.small))
-                    .foregroundStyle(theme.popupSecondaryFg)
+                    .foregroundStyle(theme.popupFg)
                     .lineLimit(1)
                     .fixedSize()
                     .anatomyPart("picker.hints", text: "move run close", font: .small)
@@ -253,7 +259,7 @@ public struct PickerOverlay: View {
             }
 
             if let empty = state.empty {
-                EmptyListHeader(empty: empty, textColor: theme.popupFg, mutedColor: theme.popupSecondaryFg)
+                EmptyListHeader(empty: empty, textColor: theme.popupFg, mutedColor: theme.popupFg)
                     .padding(.leading, Self.rowTextLeading)
                     .padding(.trailing, Spacing.md)
                     .padding(.top, EmptyStateMetrics.inset)
@@ -283,7 +289,8 @@ public struct PickerOverlay: View {
                                         item: item,
                                         isSelected: item.id == state.effectiveSelectedIndex,
                                         query: state.query,
-                                        itemHeight: Self.rowHeight(item)
+                                        itemHeight: Self.rowHeight(item),
+                                        isNextStep: state.empty != nil
                                     )
                                     .contentShape(Rectangle())
                                 }
@@ -599,6 +606,7 @@ private struct PickerItemRow: View {
     let isSelected: Bool
     let query: String
     let itemHeight: CGFloat
+    let isNextStep: Bool
 
     @Environment(\.themeColors) private var theme
 
@@ -700,14 +708,17 @@ private struct PickerItemRow: View {
     private var itemAnnotation: some View {
         if !item.annotation.isEmpty {
             Text(item.annotation)
-                .font(Typography.font(.small, design: .monospaced))
-                .foregroundStyle(theme.popupFg.opacity(0.3))
+                .font(isNextStep ? Typography.monospacedSmall : Typography.font(.small, design: .monospaced))
+                .foregroundStyle(isNextStep ? theme.popupFg : theme.popupFg.opacity(0.3))
+                .anatomyPart("picker.stepAnnotation", text: item.annotation, font: .small, monospaced: true, enabled: isNextStep)
                 .padding(.horizontal, Spacing.xs)
                 .padding(.vertical, Spacing.pixel)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm)
-                        .fill(theme.popupFg.opacity(0.06))
-                )
+                .background {
+                    if !isNextStep {
+                        RoundedRectangle(cornerRadius: Radius.sm)
+                            .fill(theme.popupFg.opacity(0.06))
+                    }
+                }
                 .layoutPriority(item.hasStatus ? 1 : 0)
         }
     }
@@ -720,11 +731,12 @@ private struct PickerItemRow: View {
         let matchSet = item.displayMatchPositions
         let fg = isSelected ? theme.popupSelFg : theme.popupFg
 
-        if matchSet.isEmpty {
+        if isNextStep || matchSet.isEmpty {
             Text(label)
                 .font(Typography.monospacedSmall)
-                .foregroundStyle(fg)
+                .foregroundStyle(isNextStep ? theme.popupFg : fg)
                 .lineLimit(1)
+                .anatomyPart("picker.stepLabel", text: label, font: .small, monospaced: true, enabled: isNextStep)
         } else {
             Text(TextHighlighting.attributedString(
                 label,
@@ -775,7 +787,7 @@ private struct PickerItemRow: View {
     private var selectionBackground: some View {
         if isSelected {
             RoundedRectangle(cornerRadius: Radius.sm)
-                .fill(theme.popupSelBg.opacity(0.7))
+                .fill(theme.popupSelBg.opacity(isNextStep ? 0.35 : 0.7))
                 .padding(.horizontal, Spacing.hairline)
         } else {
             Color.clear

@@ -913,6 +913,17 @@ final class EditorNSView: MTKView {
         return (grid.cols, grid.rows)
     }
 
+    /// The composer fit this view reports for its current placement and font, or nil when no composer is placed (ADR-0001).
+    /// The storyboard renderer checks it against the fit a transcript was laid out in.
+    var reportedPromptFit: (cols: UInt16, rows: UInt16)? {
+        guard let placement = agentPromptPlacement,
+              let snapshot = dispatcher.committedEditorSnapshot,
+              case let .agentPromptFit(_, _, columns, maxRows)? = placement.fit(
+                  cellWidth: cellWidth, rowPitch: cellHeight * CGFloat(snapshot.frameState.lineSpacing), generation: 0)
+        else { return nil }
+        return (columns, maxRows)
+    }
+
     private func gridDimensions(width: CGFloat, height: CGFloat, cellWidth: CGFloat? = nil, cellHeight: CGFloat? = nil) -> GridDimensions {
         let resolvedCellWidth = cellWidth ?? self.cellWidth
         let resolvedCellHeight = cellHeight ?? self.cellHeight

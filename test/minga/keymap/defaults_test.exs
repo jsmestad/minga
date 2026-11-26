@@ -64,8 +64,9 @@ defmodule Minga.Keymap.DefaultsTest do
     {~k(h a), :apropos},
     {~k(f o), :remote_find_file},
     # SPC a: everyday keys
-    {~k(a a), :toggle_agentic_view},
-    {~k(a n), :agent_new_session},
+    {~k(a a), :agent_tasks},
+    {~k(a n), :agent_new_task},
+    {~k(a S n), :agent_new_session},
     {~k(a s), :agent_abort},
     {~k(a u), :undo_agent_session},
     {~k(a v), :toggle_agent_split},

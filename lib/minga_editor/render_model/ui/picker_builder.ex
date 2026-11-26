@@ -97,9 +97,11 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       mode_prefix: PickerState.mode_prefix(picker_state),
       load_status: load_status,
       movement_keys: movement_keys(ctx, picker_state),
+      enter_selects?: enter_selects?(ctx, picker_state),
       preview_lines: preview_lines,
       empty: empty_model(picker.empty),
-      list_keys?: Picker.list_keys?(picker)
+      list_keys?: Picker.list_keys?(picker),
+      hints: empty_hints(ctx, picker_state)
     }
   end
 
@@ -122,6 +124,27 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       end
 
     Enum.take(keys, @max_movement_keys)
+  end
+
+  @spec enter_selects?(Context.t(), PickerState.t()) :: boolean()
+  defp enter_selects?(%Context{intent: %{frame: %{keymap_server: keymap_server}}}, picker_state) do
+    PickerState.resolve_key(picker_state, {13, 0}, keymap_server) == {:command, :picker_select}
+  end
+
+  # An empty picker's footer names what its list can do (move, run and close with next-step rows; close alone without),
+  # in the keys of the picker keymap the key handler resolves against. A picker with results draws its own footer.
+  @spec empty_hints(Context.t(), PickerState.t()) :: [{String.t(), String.t()}]
+  defp empty_hints(_ctx, %PickerState{picker: %Picker{empty: nil}}), do: []
+
+  defp empty_hints(
+         %Context{intent: %{frame: %{keymap_server: keymap_server}}},
+         %PickerState{picker: picker} = picker_state
+       ) do
+    Minga.Keymap.PromptKeys.picker_hints(
+      picker.filtered != [],
+      Picker.list_keys?(picker),
+      &PickerState.keys_for_command(picker_state, &1, keymap_server)
+    )
   end
 
   @spec picker_preview(Context.t(), PickerState.t()) ::

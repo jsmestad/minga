@@ -81,7 +81,17 @@ defmodule MingaEditor.UI.WhichKey do
     |> format_bindings()
     |> Enum.map(&with_command(&1, node))
     |> Enum.sort_by(&sort_key/1)
+    |> Enum.uniq_by(&same_action/1)
   end
+
+  # One row per action: a prompt binds Next to ⌃J and to both arrow encodings.
+  # The first key in order stands for them.
+  @spec same_action(binding()) :: term()
+  defp same_action(%Binding{kind: :command, command: command, description: description})
+       when command != nil,
+       do: {command, description}
+
+  defp same_action(%Binding{key: key}), do: {:key, key}
 
   # Groups first, then commands; within each, case-insensitive with the lowercase key first
   # (`a` before `A`), so both frontends read the same order.

@@ -28,7 +28,7 @@ defmodule Minga.Test.AgentWorkflowDriver do
   @doc "Opens the agent view through the default key binding and waits for a session."
   @spec open_agent_view(editor_ctx()) :: map()
   def open_agent_view(ctx) do
-    EditorCase.send_keys_sync(ctx, "<SPC>aa")
+    EditorCase.send_keys_sync(ctx, "<SPC>av")
 
     EditorCase.wait_until(
       ctx,

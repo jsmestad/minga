@@ -178,7 +178,7 @@
   {
    "baseline": 819.5,
    "frame": [
-    549,
+    499,
     809,
     208,
     14
@@ -189,13 +189,13 @@
   {
    "baseline": 819.5,
    "frame": [
-    777,
+    727,
     809,
-    48,
+    148,
     14
    ],
    "part": "notice.action",
-   "text": "SPC s p"
+   "text": "SPC s p search the project"
   }
  ],
  "scenario": "code.references.none",

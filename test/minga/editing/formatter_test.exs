@@ -29,6 +29,23 @@ defmodule Minga.Editing.FormatterTest do
     :ok
   end
 
+  test "the formatter line runs in the directory it is given, so a relative path means a file in the project" do
+    directory =
+      Path.join(System.tmp_dir!(), "minga_fmt_cwd_#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(directory)
+    on_exit(fn -> File.rm_rf!(directory) end)
+    File.write!(Path.join(directory, "fmt.sh"), "#!/bin/sh\ncat\necho formatted in the project\n")
+    File.chmod!(Path.join(directory, "fmt.sh"), 0o755)
+    refute File.exists?("fmt.sh")
+
+    assert {:ok, %Result{content: "x\nformatted in the project\n"}} =
+             Formatter.format("x\n", "./fmt.sh", directory)
+
+    # Without a directory the line runs where Minga runs, where there is no such file.
+    assert {:error, _not_found} = Formatter.format("x\n", "./fmt.sh")
+  end
+
   describe "format/2" do
     test "passes content through a command and returns output" do
       assert {:ok, %Result{content: "hello\n", diagnostics: ""}} =

@@ -22,6 +22,12 @@ defmodule MingaEditor.Commands.UI do
     execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.CommandSource) end
   )
 
+  # The mode pill's click: the mouse's front door to every leader group (docs/design/surfaces.md, Mouse).
+  command(:which_key_open, "Show keys",
+    requires_buffer: false,
+    execute: &MingaEditor.Input.WhichKey.open/1
+  )
+
   command(:enter_eval, "Eval expression",
     requires_buffer: false,
     execute: fn state ->
@@ -63,7 +69,7 @@ defmodule MingaEditor.Commands.UI do
 
   command(:diagnostics_list, "List buffer diagnostics",
     requires_buffer: true,
-    execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.Sources.Diagnostics) end
+    execute: &MingaEditor.UI.Picker.Sources.Diagnostics.open/1
   )
 
   command(:filetype_menu, "Show filetype actions",

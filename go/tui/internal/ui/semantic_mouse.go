@@ -319,6 +319,15 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 		// Empty, separator, header, and summary cells never fall through to text.
 		return nil, true
 	}
+	if m.layout.drawer.Contains(mouse.X, mouse.Y) {
+		if !m.floatingOverlayContains(mouse.X, mouse.Y) {
+			if packet, ok := m.tasksDrawerMousePacket(msg); ok {
+				return packet, true
+			}
+		}
+		// Borders, counts and empty rows never fall through to text.
+		return nil, true
+	}
 	if packet, ok := m.agentDisplayedControlPacket(msg); ok {
 		return packet, true
 	}
@@ -349,6 +358,9 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 // overlayMousePacket is checked before spatial dispatch because overlays render
 // above all layout zones and must intercept clicks regardless of position.
 func (m Model) overlayMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	if packet, ok := m.whichKeyMousePacket(msg); ok {
+		return packet, true
+	}
 	if packet, ok := m.agentHelpMousePacket(msg); ok {
 		return packet, true
 	}
@@ -583,11 +595,10 @@ func (m Model) notificationMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	return nil, false
 }
 
-// emptyStateMousePacket maps a click on an activatable launchpad row to
-// empty_state_activate(id) (#2689), the same authoritative activation the
-// keyboard jump keys reach on the BEAM. Hint rows (footer) carry no zone and
-// are never activatable. A click that hits no row returns ok=false so it falls
-// through to the raw mouse path.
+// emptyStateMousePacket maps a click on a project home row to
+// empty_state_activate(id) (#4056), the same authoritative activation `↩` and
+// the number keys reach on the BEAM. A click that hits no row returns ok=false
+// so it falls through to the raw mouse path.
 func (m Model) emptyStateMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	state, ok := m.emptyState()
 	if !ok || !state.Visible {
@@ -595,9 +606,6 @@ func (m Model) emptyStateMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	}
 	for _, section := range state.Sections {
 		for _, item := range section.Items {
-			if item.Kind == emptyStateKindHint {
-				continue
-			}
 			zoneInfo := m.zones.Get(zoneIDEmptyStateItem(item.ID))
 			if zoneInfo != nil && zoneInfo.InBounds(msg) {
 				return protocol.EncodeGUIEmptyStateActivate(item.ID), true
@@ -842,6 +850,24 @@ func (m Model) emptyListMousePacket(empty generated.EmptyList, msg tea.MouseMsg)
 		zoneInfo := m.zones.Get(zoneIDEmptyListAction(index))
 		if zoneInfo != nil && zoneInfo.InBounds(msg) {
 			return protocol.EncodeGUIExecuteCommand(action.ID), true
+		}
+	}
+	return nil, false
+}
+
+// modePillMousePacket answers a click on the mode pill even while a picker is open: the pill opens the picker's own
+// keys over it (docs/design/surfaces.md, Mouse), so the click must not count as a click outside the picker.
+func (m Model) modePillMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	status, ok := m.statusBar()
+	if !ok {
+		return nil, false
+	}
+	for index, segment := range status.Left {
+		if segment.Name != "mode" || segment.Command == "" {
+			continue
+		}
+		if zoneInfo := m.zones.Get(zoneIDModelineSegment(index)); zoneInfo != nil && zoneInfo.InBounds(msg) {
+			return protocol.EncodeGUIExecuteCommand(segment.Command), true
 		}
 	}
 	return nil, false

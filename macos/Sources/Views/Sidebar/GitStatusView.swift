@@ -143,21 +143,9 @@ public struct GitStatusView: View {
     @ViewBuilder
     private var cleanView: some View {
         if let clean = state.cleanTree {
-            VStack(alignment: .leading, spacing: EmptyStateMetrics.whyToActions) {
-                EmptyListHeader(empty: clean, textColor: theme.treeFg, mutedColor: theme.treeFg.opacity(0.78))
-                    .padding(.horizontal, EmptyStateMetrics.inset)
-                EmptyListActions(
-                    empty: clean,
-                    textColor: theme.treeFg,
-                    accentColor: theme.accent,
-                    selectionColor: theme.treeSelectionBg
-                ) { action in
-                    sendAction?(.executeCommand(name: action.id))
-                }
-                Spacer(minLength: 0)
+            EmptyListPanel(empty: clean, textColor: theme.treeFg, accentColor: theme.accent, selectionColor: theme.treeSelectionBg) { action in
+                sendAction?(.executeCommand(name: action.id))
             }
-            .padding(.top, EmptyStateMetrics.inset)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
         } else {
             legacyCleanView
         }

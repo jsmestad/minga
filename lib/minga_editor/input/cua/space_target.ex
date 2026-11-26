@@ -23,7 +23,7 @@ defmodule MingaEditor.Input.CUA.SpaceTarget do
   @type held :: {t(), Minga.Buffer.position() | nil}
 
   # FocusOwner surfaces that own their keys below the overlays.
-  @surfaces [:editor, :agent, :file_tree, :git_status, :empty_state]
+  @surfaces [:editor, :agent, :file_tree, :git_status, :empty_state, :tasks]
 
   @doc """
   Resolves where a space typed now would go.
@@ -36,6 +36,8 @@ defmodule MingaEditor.Input.CUA.SpaceTarget do
 
     cond do
       surface not in @surfaces -> :overlay
+      # Input.TasksDrawer (priority 15) takes keys ahead of every other surface and types no text.
+      surface == :tasks -> :no_text
       side_panel_composer?(workspace) -> {:composer, workspace.agent_ui.panel.prompt_buffer}
       generic_sidebar_focused?(state) -> :no_text
       surface == :empty_state -> :no_text

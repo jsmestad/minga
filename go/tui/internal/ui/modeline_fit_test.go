@@ -17,7 +17,7 @@ func boardModeline() protocol.StatusBar {
 	return protocol.StatusBar{
 		Left: []protocol.StatusSegment{
 			{Name: "mode", Text: "NORMAL"},
-			{Name: "needs_you", Text: "Needs you", State: 2, Label: "1 task needs you", Key: "SPC a a", Command: "toggle_agentic_view"},
+			{Name: "needs_you", Text: "Needs you", State: 2, Label: "1 task needs you", Key: "SPC a a", Command: "agent_tasks"},
 			{Name: "filename", Text: "chrome_state.ex ●", Command: "buffer_list"},
 			{Name: "change", Text: "change 1/2"},
 			{Name: "git", Text: "main +11", Drop: 4},
@@ -114,7 +114,7 @@ func TestModelineHoverEchoesMeaningAndKey(t *testing.T) {
 	}
 
 	click, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX + 1, Y: zone.StartY}))
-	if !ok || string(click) != string(protocol.EncodeGUIExecuteCommand("toggle_agentic_view")) {
+	if !ok || string(click) != string(protocol.EncodeGUIExecuteCommand("agent_tasks")) {
 		t.Fatalf("clicking needs-you should run its key's command, ok=%v packet=%v", ok, click)
 	}
 
@@ -167,7 +167,7 @@ func TestModelineNoticeReservesAtMostAThird(t *testing.T) {
 func TestModalLayersPaintAboveFooterBands(t *testing.T) {
 	const highestBandLayerZ = 301 + 2
 	// Each layer's shadow sits at its z minus 1, so that must still clear the layer below.
-	if whichKeyLayerZ-1 <= highestBandLayerZ || pickerLayerZ-1 <= whichKeyLayerZ || pickerActionMenuLayerZ-1 <= pickerLayerZ {
-		t.Fatalf("which-key (%d), picker (%d) and its action menu (%d) must paint above footer bands (%d) and in that order", whichKeyLayerZ, pickerLayerZ, pickerActionMenuLayerZ, highestBandLayerZ)
+	if pickerLayerZ-1 <= highestBandLayerZ || pickerActionMenuLayerZ-1 <= pickerLayerZ || whichKeyLayerZ-1 <= pickerActionMenuLayerZ {
+		t.Fatalf("the picker (%d), its action menu (%d) and which-key (%d) must paint above footer bands (%d) and in that order", pickerLayerZ, pickerActionMenuLayerZ, whichKeyLayerZ, highestBandLayerZ)
 	}
 }

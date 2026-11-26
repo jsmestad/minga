@@ -81,7 +81,7 @@ defmodule MingaEditor.Agent.ApprovedEditKeysTest do
     session = run_approved_edit_turn(ctx)
 
     # Back on the file, the compact Agent context overlay reports the turn's activity.
-    state = send_keys_sync(ctx, "<SPC>aa")
+    state = send_keys_sync(ctx, "<SPC>av")
     assert Runtime.active_tab_kind(state.shell_runtime) == :file
     assert :agent_context in Enum.map(SurfaceRegistry.placements(state), & &1.surface_id)
 
@@ -102,7 +102,7 @@ defmodule MingaEditor.Agent.ApprovedEditKeysTest do
 
   # Opens the Agent, sends a prompt, approves the edit, and waits for the turn to settle.
   defp run_approved_edit_turn(ctx) do
-    send_keys_sync(ctx, "<SPC>aa")
+    send_keys_sync(ctx, "<SPC>av")
 
     state =
       wait_until(ctx, &is_pid(Runtime.active_session(&1.shell_runtime)),

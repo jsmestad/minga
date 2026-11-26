@@ -18,6 +18,10 @@
       "macos-catppuccin_latte-1440.json": "75e23de6809123571ef1c7ba025fe7609e2bf15155c8c108701a93ad584b77e3"
     }
   },
+  "platform_specific": {
+    "frontend": "tui",
+    "reason": "fold marks draw now that the parse says when it is complete (#4337); macOS baselines record no fold marks, and the 80x24 empty-list inset is terminal only"
+  },
   "scenario": "edit.visual",
   "tui": {
     "commit": "9e4452563e4ac637309ff5eb4f30a4296a6a9f8e",

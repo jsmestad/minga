@@ -34,6 +34,7 @@ defmodule Minga.Events do
   | `:buffer_closed`  | `BufferClosedEvent`  | `buffer: pid(), path: String.t() \| :scratch`  |
   | `:buffer_crashed` | `BufferCrashedEvent` | `buffer: pid(), path: String.t(), swap_path: String.t()` |
   | `:buffer_changed` | `BufferChangedEvent` | `buffer: pid(), source: EditSource.t(), sequence: ChangeLog.sequence()`  |
+  | `:buffer_filetype_changed` | `BufferFiletypeChangedEvent` | `buffer: pid()` |
   | `:file_watcher_ready` | `Minga.FileWatcher.ReadyEvent` | `watcher: pid()` |
   | `:mode_changed`   | `ModeEvent`          | `old: atom(), new: atom()`        |
   | `:git_status_changed` | `GitStatusEvent` | `git_root, entries, branch, ahead, behind` plus cached `last_commit_message` |
@@ -87,6 +88,14 @@ defmodule Minga.Events do
             path: String.t(),
             history_attribution: history_attribution()
           }
+  end
+
+  defmodule BufferFiletypeChangedEvent do
+    @moduledoc "Invalidates the filetype of an existing buffer after it changes."
+    @enforce_keys [:buffer]
+    defstruct [:buffer]
+
+    @type t :: %__MODULE__{buffer: pid()}
   end
 
   defmodule BufferClosedEvent do
@@ -281,7 +290,7 @@ defmodule Minga.Events do
 
     Sent by the Editor when what it knows about the frontend's place changes. The frontend reports that it moved to the foreground or to the background: the terminal window got or lost focus, or the macOS app became active or resigned. A new frontend connection makes the status `:unknown` again until that frontend reports.
 
-    A subscriber that must act only while nobody is looking keeps the last status it received. Until the first event the status is not known, and a terminal without focus reporting never sends one. Treat `:unknown` as the foreground when the action would interrupt the user: a notification that is not sent is the safe side.
+    A subscriber that must act only while nobody is looking keeps the last status it received. Until the first event the status is not known, and a terminal without focus reporting never sends one. Treat `:unknown` as the foreground when the action would interrupt the user: a notification that is not sent is the safe side. The editor's own "needs you" alert (`MingaEditor.Agent.TaskWorkflow`) reads the same fact from its state and follows the same rule.
     """
     @enforce_keys [:status]
     defstruct [:status]
@@ -357,6 +366,7 @@ defmodule Minga.Events do
           | :buffer_closed
           | :buffer_crashed
           | :buffer_changed
+          | :buffer_filetype_changed
           | :content_replaced
           | :mode_changed
           | :git_status_changed
@@ -539,6 +549,7 @@ defmodule Minga.Events do
   @spec broadcast(:buffer_closed, BufferClosedEvent.t()) :: :ok
   @spec broadcast(:buffer_crashed, BufferCrashedEvent.t()) :: :ok
   @spec broadcast(:buffer_changed, BufferChangedEvent.t()) :: :ok
+  @spec broadcast(:buffer_filetype_changed, BufferFiletypeChangedEvent.t()) :: :ok
   @spec broadcast(:mode_changed, ModeEvent.t()) :: :ok
   @spec broadcast(:tool_missing, ToolMissingEvent.t()) :: :ok
   @spec broadcast(:project_rebuilt, ProjectRebuiltEvent.t()) :: :ok
@@ -559,10 +570,9 @@ defmodule Minga.Events do
   @spec broadcast(:agent_session_restarted, MingaAgent.SessionManager.SessionRestartedEvent.t()) ::
           :ok
   @spec broadcast(:agent_desktop_notification, %{
-          kind: :approval | :approval_cleared | :complete | :error,
+          kind: :needs_you | :withdrawn,
           id: <<_::128>>,
-          owner: pid(),
-          debounce_ms: non_neg_integer()
+          owner: pid()
         }) :: :ok
   @spec broadcast(:background_subagent_started, MingaAgent.Subagent.Handle.t()) :: :ok
   @spec broadcast(:node_connected, Minga.Distribution.Events.NodeConnectedEvent.t()) :: :ok

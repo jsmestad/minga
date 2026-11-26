@@ -154,6 +154,29 @@ defmodule MingaEditor.Agent.WorkspaceStatusTest do
       end
     end
 
+    test "spoken_session/1 names the conversation the status speaks for" do
+      session = self()
+      {tab_bar, id} = file_in_front(session)
+      copy = left_working(session)
+      unbound = AgentState.set_status(%AgentState{}, :error)
+      agent_tab = Tab.new_agent(2, "Agent") |> Tab.set_group(id)
+      conversation_in_front = %{tab_bar | tabs: [agent_tab | tab_bar.tabs], active_id: 2}
+      ended = TabBar.session_ended(tab_bar, session, :idle)
+
+      cases = [
+        {"the conversation in front", shell(conversation_in_front, unbound), session},
+        {"a file in front: the conversation shown last", shell(tab_bar, copy), session},
+        {"a file in front, and that conversation has ended", shell(ended, copy), nil},
+        {"a file in front, and no conversation was shown", shell(tab_bar, unbound), nil},
+        {"a shell without workspaces", shell(nil, copy), session},
+        {"another shell", :another_shell, nil}
+      ]
+
+      for {name, shell_state, expected} <- cases do
+        assert WorkspaceStatus.spoken_session(shell_state) == expected, name
+      end
+    end
+
     test "a failed start in the file's own conversation needs the user" do
       {tab_bar, _id} = file_in_front(self())
       failed = UIState.fail_start(UIState.new(), StartFailure.timed_out(StartRequest.default()))

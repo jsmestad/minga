@@ -364,6 +364,16 @@ defmodule Minga.Integration.GUIProtocolTest do
     binary
   end
 
+  defp encode_gui_tasks_drawer(model) do
+    {binary, _caches} =
+      Minga.Frontend.Adapter.GUI.TasksDrawerEncoder.encode(
+        model,
+        Minga.Frontend.Adapter.GUI.Caches.new()
+      )
+
+    binary
+  end
+
   defp encode_gui_agent_help(model) do
     {binary, _caches} =
       Minga.Frontend.Adapter.GUI.AgentHelpEncoder.encode(
@@ -817,6 +827,124 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert hd(copy["bindings"])["key"] == "y"
     end
 
+    test "gui_tasks_drawer rows, states, actions and counts round-trip", %{harness: harness} do
+      alias Minga.RenderModel.UI.TasksDrawer
+      alias Minga.RenderModel.UI.TasksDrawer.Row
+
+      model = %TasksDrawer{
+        visible?: true,
+        focused?: true,
+        note: "Messages hidden · q returns",
+        counts: [working: 2, needs_you: 1],
+        hints: [{"j/k", "move"}, {"q", "close"}],
+        rows: [
+          %Row{
+            id: "t3",
+            state: :needs_you,
+            title: "Add tests",
+            words: "Needs you · wants to change a file",
+            age: "2m",
+            detail: ["Create test/a_test.exs +86"],
+            actions: [{"y", "Approve once"}, {"n", "Deny"}],
+            selected?: true
+          },
+          %Row{
+            id: "t1",
+            state: :working,
+            title: "Plan limit",
+            words: "Running edit_file",
+            age: "4m"
+          },
+          %Row{
+            id: "t1.s1",
+            depth: 1,
+            last?: true,
+            state: :working,
+            title: "Fact-check",
+            words: "Working"
+          }
+        ]
+      }
+
+      decoded = round_trip(harness, encode_gui_tasks_drawer(model), "gui_tasks_drawer")
+
+      assert decoded["visible"] and decoded["focused"]
+      assert decoded["name"] == "*minga-tasks*"
+      assert decoded["note"] == "Messages hidden · q returns"
+
+      assert decoded["counts"] == [
+               %{"state" => "working", "count" => 2},
+               %{"state" => "needs_you", "count" => 1}
+             ]
+
+      [asking, working, subagent] = decoded["rows"]
+      assert asking["selected"] and asking["state"] == "needs_you"
+      assert asking["detail"] == ["Create test/a_test.exs +86"]
+
+      assert asking["actions"] == [
+               %{"key" => "y", "label" => "Approve once"},
+               %{"key" => "n", "label" => "Deny"}
+             ]
+
+      refute working["selected"]
+      assert subagent["depth"] == 1 and subagent["last"] and subagent["id"] == "t1.s1"
+    end
+
+    test "gui_tasks_drawer carries its empty state only when it has no tasks", %{harness: harness} do
+      alias Minga.RenderModel.UI.EmptyList
+
+      empty = %EmptyList{
+        title: "No one's at the table yet.",
+        why: "Give Minga a task.",
+        selected: 1,
+        actions: [
+          %EmptyList.Action{id: "agent_new_task", key: "c", label: "New task"},
+          %EmptyList.Action{id: "agent_session_history", key: "SPC a S h", label: "Resume"}
+        ]
+      }
+
+      decoded =
+        round_trip(
+          harness,
+          encode_gui_tasks_drawer(%Minga.RenderModel.UI.TasksDrawer{
+            visible?: true,
+            empty: empty
+          }),
+          "gui_tasks_drawer"
+        )
+
+      assert decoded["empty"] == %{
+               "title" => "No one's at the table yet.",
+               "why" => "Give Minga a task.",
+               "selected" => 1,
+               "actions" => [
+                 %{"id" => "agent_new_task", "key" => "c", "label" => "New task"},
+                 %{"id" => "agent_session_history", "key" => "SPC a S h", "label" => "Resume"}
+               ]
+             }
+
+      with_tasks =
+        round_trip(
+          harness,
+          encode_gui_tasks_drawer(%Minga.RenderModel.UI.TasksDrawer{visible?: true}),
+          "gui_tasks_drawer"
+        )
+
+      assert with_tasks["empty"] == nil
+    end
+
+    test "gui_tasks_drawer hidden frame clears the drawer", %{harness: harness} do
+      decoded =
+        round_trip(
+          harness,
+          encode_gui_tasks_drawer(%Minga.RenderModel.UI.TasksDrawer{}),
+          "gui_tasks_drawer"
+        )
+
+      refute decoded["visible"]
+      assert decoded["rows"] == []
+    end
+
     test "gui_agent_help hidden frame clears the Help presentation", %{harness: harness} do
       cmd = encode_gui_agent_help(%Minga.RenderModel.UI.AgentHelp{})
       decoded = round_trip(harness, cmd, "gui_agent_help")
@@ -1088,6 +1216,39 @@ defmodule Minga.Integration.GUIProtocolTest do
     end
   end
 
+  describe "gui_menu_bar" do
+    test "round-trips the whole default leader keymap, with the Search, Code and Git groups", %{
+      harness: harness
+    } do
+      alias Minga.Frontend.Adapter.GUI.MenuBarEncoder
+      alias Minga.RenderModel.UI.ConfigState
+
+      items =
+        MingaEditor.RenderModel.UI.LeaderMenuBuilder.build(Minga.Keymap.Defaults.leader_trie())
+
+      assert length(items) > 50
+
+      {cmd, _caches} =
+        MenuBarEncoder.encode(%ConfigState{options: [], leader_menu: items}, Caches.new())
+
+      decoded = round_trip(harness, cmd, "gui_menu_bar")
+
+      assert decoded["type"] == "gui_menu_bar"
+      assert length(decoded["items"]) == length(items)
+
+      groups =
+        for %{"kind" => 1, "path" => path, "label" => label} <- decoded["items"],
+            into: %{},
+            do: {path, label}
+
+      assert groups["s"] == "Search"
+      assert groups["c"] == "Code"
+
+      assert %{"command" => "save", "platform_key" => "⌘S"} =
+               Enum.find(decoded["items"], &(&1["path"] == "f s"))
+    end
+  end
+
   describe "gui_which_key visible" do
     test "round-trips the panel: path, breadcrumb, count and tone, hints and entries", %{
       harness: harness
@@ -1292,7 +1453,9 @@ defmodule Minga.Integration.GUIProtocolTest do
           }
         ],
         empty: %EmptyList{title: "No projects yet.", why: "Minga remembers folders you open."},
-        list_keys?: true
+        list_keys?: true,
+        enter_selects?: true,
+        hints: [{"j k", "move"}, {"↩", "run"}]
       }
 
       cmd = PickerEncoder.encode_command(model)
@@ -1310,6 +1473,12 @@ defmodule Minga.Integration.GUIProtocolTest do
              }
 
       assert decoded["list_keys"] == true
+
+      assert decoded["hints"] == [
+               %{"keys" => "j k", "word" => "move"},
+               %{"keys" => "↩", "word" => "run"}
+             ]
+
       assert [%{"label" => "Add a folder", "annotation" => "SPC p a"}] = decoded["items"]
     end
   end

@@ -53,18 +53,21 @@ type Capabilities struct {
 	source [featureCount]Source
 }
 
-// Source says how a feature's status was settled, so a user can see why a terminal is treated as it is.
-type Source uint8
+// Source says how a feature's status was settled, as named in the protocol schema, so `:checkhealth terminal` can
+// tell a user why a terminal is treated as it is.
+type Source = generated.TerminalFeatureSource
 
 const (
 	// SourceUnsettled: nothing decided yet (the feature is pending), or the frontend does not detect the feature.
-	SourceUnsettled Source = iota
+	SourceUnsettled = generated.TerminalFeatureSourceUnsettled
 	// SourceAnswered: the terminal answered a query, or showed the feature by using it.
-	SourceAnswered
+	SourceAnswered = generated.TerminalFeatureSourceAnswered
 	// SourceKnownTerminal: the terminal is in the table of known terminals.
-	SourceKnownTerminal
+	SourceKnownTerminal = generated.TerminalFeatureSourceKnownTerminal
 	// SourceTimeout: the terminal did not answer in time.
-	SourceTimeout
+	SourceTimeout = generated.TerminalFeatureSourceTimeout
+	// SourceUser: the user forced the feature on or off. Nothing the frontend learns later replaces it.
+	SourceUser = generated.TerminalFeatureSourceUser
 )
 
 // featureCount is one past the last feature of the schema.
@@ -160,9 +163,13 @@ func (c *Capabilities) Resolve(feature Feature, present bool) bool {
 }
 
 // settle records a verdict and where it came from, and reports whether the status changed.
+// What the user forced stays: a later answer, the table of known terminals and the timeout do not replace it.
 func (c *Capabilities) settle(feature Feature, status Status, source Source) bool {
 	current := c.Status(feature)
 	if current == generated.TerminalFeatureStatusUnknown {
+		return false
+	}
+	if c.source[feature] == SourceUser && source != SourceUser {
 		return false
 	}
 	c.source[feature] = source
@@ -191,12 +198,6 @@ func (c *Capabilities) Expire() bool {
 		}
 	}
 	return changed
-}
-
-// SameStatuses reports whether two values say the same about every feature, whatever settled it.
-// The report sent to the BEAM carries statuses only, so a value that differs only in how a feature was settled is no news there.
-func (c Capabilities) SameStatuses(other Capabilities) bool {
-	return c.status == other.status
 }
 
 // Pending reports whether the terminal still owes an answer for some feature.

@@ -35,6 +35,7 @@ defmodule MingaEditor.Frontend.Manager do
   alias MingaEditor.Frontend.Manager.OutputHandler
   alias MingaEditor.Frontend.Manager.OutputPressure
   alias MingaEditor.Frontend.Protocol
+  alias MingaEditor.Frontend.TerminalOverrides
 
   @typedoc "Renderer backend."
   @type backend :: :tui | :gui
@@ -68,6 +69,7 @@ defmodule MingaEditor.Frontend.Manager do
           | {:output_retry_ms, pos_integer()}
           | {:output_failure_ms, non_neg_integer()}
           | {:tty_path, String.t() | nil}
+          | {:renderer_env, (-> [{charlist(), charlist()}])}
           | {:renderer_exit_timeout_ms, non_neg_integer()}
 
   alias MingaEditor.Frontend.Manager.State, as: PortState
@@ -191,12 +193,14 @@ defmodule MingaEditor.Frontend.Manager do
       output_retry_ms: Keyword.get(opts, :output_retry_ms, 2),
       output_failure_ms: Keyword.get(opts, :output_failure_ms, 50),
       renderer_exit_timeout_ms:
-        Keyword.get(opts, :renderer_exit_timeout_ms, @renderer_exit_timeout_ms)
+        Keyword.get(opts, :renderer_exit_timeout_ms, @renderer_exit_timeout_ms),
+      renderer_env: Keyword.get(opts, :renderer_env, &TerminalOverrides.launch_env/0)
     }
 
     result = {:ok, start_port(state, port_opener)}
 
-    if Keyword.get(opts, :backend) == :gui do
+    # macOS posts the "needs you" alert; the terminal frontend rings its bell. The editor decides when to send it.
+    if Keyword.get(opts, :backend) in [:gui, :tui] do
       Minga.Events.subscribe(:agent_desktop_notification)
     end
 
@@ -331,7 +335,7 @@ defmodule MingaEditor.Frontend.Manager do
      MingaEditor.Frontend.Manager.AgentNotifications.send_notification(state, notification)}
   end
 
-  def handle_info(:retry_agent_approval_withdrawals, state) do
+  def handle_info(:retry_agent_notification_withdrawals, state) do
     {:noreply, MingaEditor.Frontend.Manager.AgentNotifications.retry_withdrawals(state)}
   end
 
@@ -441,7 +445,9 @@ defmodule MingaEditor.Frontend.Manager do
   defp start_port(state, port_opener) do
     # Spawn mode: we're the parent. Launch the GUI binary as a child process.
     if File.exists?(state.renderer_path) do
-      env = tty_env(state.tty_path)
+      # The environment is built at each start, so a restarted renderer gets the current `:terminal_features`.
+      # Connected mode has no such moment: something else started the frontend.
+      env = tty_env(state.tty_path) ++ state.renderer_env.()
 
       port =
         port_opener.(

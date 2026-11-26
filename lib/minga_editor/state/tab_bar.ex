@@ -27,7 +27,8 @@ defmodule MingaEditor.State.TabBar do
           active_id: Tab.id() | nil,
           next_id: Tab.id(),
           workspaces: [Workspace.t()],
-          next_workspace_id: pos_integer()
+          next_workspace_id: pos_integer(),
+          home_from: Tab.id() | nil
         }
 
   @enforce_keys [:tabs, :active_id, :next_id]
@@ -35,7 +36,9 @@ defmodule MingaEditor.State.TabBar do
             active_id: nil,
             next_id: 1,
             workspaces: [],
-            next_workspace_id: 1
+            next_workspace_id: 1,
+            # The tab that stepped aside for the project home, read only while no tab is active.
+            home_from: nil
 
   @doc "Creates a tab bar with a single initial tab and the manual workspace."
   @spec new(Tab.t(), String.t() | nil) :: t()
@@ -265,6 +268,18 @@ defmodule MingaEditor.State.TabBar do
 
     %{tb | tabs: new_tabs}
   end
+
+  @doc "Leaves no tab active, so the project home shows; every tab keeps its snapshot, and the tab that stepped aside is remembered."
+  @spec step_aside(t()) :: t()
+  def step_aside(%__MODULE__{active_id: active_id} = tb),
+    do: %{tb | active_id: nil, home_from: active_id}
+
+  @doc "The tab that stepped aside for the project home, while the home shows (no tab active)."
+  @spec stepped_aside(t()) :: Tab.t() | nil
+  def stepped_aside(%__MODULE__{active_id: nil, home_from: id} = tb) when is_integer(id),
+    do: get(tb, id)
+
+  def stepped_aside(%__MODULE__{}), do: nil
 
   @doc "Snapshots the outgoing tab, if any, and activates an existing target tab atomically."
   @spec snapshot_and_switch(t(), Tab.id() | nil, Tab.context(), Tab.id()) :: t()

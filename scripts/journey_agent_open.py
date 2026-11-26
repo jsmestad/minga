@@ -27,7 +27,7 @@ from go_tui_capture import TerminalGrid
 
 COLUMNS, ROWS = 100, 34
 READY_TEXT = "Shipping Agent open timing fixture"
-KEYS = (b" ", b"a", b"n")
+KEYS = (b" ", b"a", b"S", b"n")
 
 
 def cpu_model():
@@ -178,7 +178,7 @@ def measure_pair(launcher, out, seconds, record_sample):
                     wait_screen(terminal, grid, trace, ready_conversation, "the first configured conversation", seconds)
                 write_input(terminal, b"\x1b")
                 wait_screen(terminal, grid, trace, lambda lines: prompt_visible(lines, "NORMAL"), "normal composer mode", seconds)
-                write_input(terminal, b" aa")
+                write_input(terminal, b" av")
                 wait_screen(terminal, grid, trace, file_visible, "the file before the warm open", seconds)
                 record_sample(capture_open(terminal, grid, trace, out, "warm", seconds))
                 write_input(terminal, b"\x1b")

@@ -74,6 +74,8 @@ public enum Radius {
 public enum EmptyStateMetrics {
     /// Inset from the panel edge, and the leading edge the title, why line and action keys share.
     public static let inset = Spacing.panel
+    /// The trailing inset of the title, why line and action labels: a list row's trailing inset (`lg`), as in the TUI, so a sidebar's short line has the panel's width to fit in instead of wrapping early.
+    public static let trailingInset = Spacing.lg
     public static let glyphToTitle = Spacing.sm
     public static let titleToWhy = Spacing.xs
     public static let whyToActions = Spacing.xxl

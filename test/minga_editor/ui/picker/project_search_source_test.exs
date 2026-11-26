@@ -4,8 +4,11 @@ defmodule MingaEditor.UI.Picker.ProjectSearchSourceTest do
   import MingaEditor.RenderPipeline.TestHelpers, only: [base_state: 1]
 
   alias Minga.Buffer
+  alias Minga.Project
+  alias Minga.Project.Root
 
   alias MingaEditor.State.Search
+  alias MingaEditor.State.FileTree
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.ProjectSearchSource
@@ -36,21 +39,44 @@ defmodule MingaEditor.UI.Picker.ProjectSearchSourceTest do
       assert {:ok, [], %{}} = ProjectSearchSource.async_fetch(ctx(""))
     end
 
-    test "fetching the repo for a known term embeds each match in its item id" do
-      # Runs the real search against the repo root (resolve_root). Selection no
-      # longer depends on a separate cached-results list: the match travels in id.
-      case ProjectSearchSource.async_fetch(ctx("defmodule")) do
-        {:ok, [%Item{id: id} | _], _meta} ->
-          assert is_map(id)
-          assert is_binary(id.file)
-          assert is_integer(id.line) and id.line > 0
+    test "does not use the file tree as permission to search a directory" do
+      project =
+        start_supervised!(
+          {Project,
+           name: :"picker_search_#{System.unique_integer([:positive])}",
+           subscribe: false,
+           command_frecency: %{}}
+        )
 
-        {:ok, [], _meta} ->
-          :ok
+      context = %{
+        ctx("needle")
+        | project_server: project,
+          file_tree: %FileTree{original_root: System.user_home!()}
+      }
 
-        {:error, _} ->
-          :ok
-      end
+      assert {:error, "Open a directory workspace to search its files"} =
+               ProjectSearchSource.async_fetch(context)
+    end
+
+    @tag :tmp_dir
+    test "a widening row runs against the authorized root that produced it", %{tmp_dir: dir} do
+      {:ok, root} = Root.directory(dir)
+      match = %{file: ".chosen", line: 2, col: 3, text: "needle"}
+      :ok = Minga.Test.ProjectSearchStub.set_results(dir, [match], :all)
+
+      empty =
+        ProjectSearchSource.empty(%{
+          query: "",
+          total: 0,
+          context: %{project_query: "needle", project_search: {root, :visible}}
+        })
+
+      row = Enum.find(empty.rows, &(&1.label == "Search all files"))
+      state = ProjectSearchSource.on_select(row, base_state(content: "scratch"))
+      expected = %{match | file: Path.join(root.path, ".chosen")}
+
+      assert {:ok, [%Item{id: ^expected}], %{project_search: {^root, :all}}} =
+               ProjectSearchSource.async_fetch(Context.from_editor_state(state))
     end
   end
 

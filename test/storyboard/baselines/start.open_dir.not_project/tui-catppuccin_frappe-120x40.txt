@@ -1,0 +1,116 @@
+# minga storyboard frame v1
+# scenario: start.open_dir.not_project
+# frontend: tui
+# theme: catppuccin_frappe
+# size: 120x40
+# cursor: none
+## text
+*home* (start.open_dir.not_project) - Minga
+
+   start.open_dir.not_project
+   /tmp/minga-storyboard/tui-120x40/start.open_dir.not_project
+   Not a project: no .git, mix.exs, package.json or other marker here.
+   Minga uses this folder as the root for now.
+
+   Recent in this folder
+   Nothing opened here yet.
+
+   Next
+   SPC o p File tree
+   SPC SPC Find a file
+   SPC p a Remember as a project
+   SPC a n New task
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  NORMAL  *home*                                                                                               Text 1:1
+## styles (row start-end fg bg attrs)
+0 0-119 #8caaee #414559 bold
+1 0-119 #c6d0f5 #303446 -
+2 0-2 #c6d0f5 #303446 -
+2 3-28 #c6d0f5 #303446 bold
+2 29-119 #c6d0f5 #303446 -
+3 0-2 #c6d0f5 #303446 -
+3 3-61 #838ba7 #303446 -
+3 62-119 #c6d0f5 #303446 -
+4 0-2 #c6d0f5 #303446 -
+4 3-69 #838ba7 #303446 -
+4 70-119 #c6d0f5 #303446 -
+5 0-2 #c6d0f5 #303446 -
+5 3-45 #838ba7 #303446 -
+5 46-119 #c6d0f5 #303446 -
+6 0-119 #c6d0f5 #303446 -
+7 0-2 #c6d0f5 #303446 -
+7 3-23 #838ba7 #303446 bold
+7 24-119 #c6d0f5 #303446 -
+8 0-2 #c6d0f5 #303446 -
+8 3-26 #838ba7 #303446 -
+8 27-119 #c6d0f5 #303446 -
+9 0-119 #c6d0f5 #303446 -
+10 0-2 #c6d0f5 #303446 -
+10 3-6 #838ba7 #303446 bold
+10 7-119 #c6d0f5 #303446 -
+11 0-2 #c6d0f5 #626880 -
+11 3-9 #303446 #c6d0f5 bold,reverse
+11 10-10 #c6d0f5 #626880 -
+11 11-19 #c6d0f5 #626880 bold
+11 20-119 #c6d0f5 #626880 -
+12 0-2 #c6d0f5 #303446 -
+12 3-9 #8caaee #303446 bold
+12 10-119 #c6d0f5 #303446 -
+13 0-2 #c6d0f5 #303446 -
+13 3-9 #8caaee #303446 bold
+13 10-119 #c6d0f5 #303446 -
+14 0-2 #c6d0f5 #303446 -
+14 3-9 #8caaee #303446 bold
+14 10-119 #c6d0f5 #303446 -
+15 0-119 #c6d0f5 #303446 -
+16 0-119 #c6d0f5 #303446 -
+17 0-119 #c6d0f5 #303446 -
+18 0-119 #c6d0f5 #303446 -
+19 0-119 #c6d0f5 #303446 -
+20 0-119 #c6d0f5 #303446 -
+21 0-119 #c6d0f5 #303446 -
+22 0-119 #c6d0f5 #303446 -
+23 0-119 #c6d0f5 #303446 -
+24 0-119 #c6d0f5 #303446 -
+25 0-119 #c6d0f5 #303446 -
+26 0-119 #c6d0f5 #303446 -
+27 0-119 #c6d0f5 #303446 -
+28 0-119 #c6d0f5 #303446 -
+29 0-119 #c6d0f5 #303446 -
+30 0-119 #c6d0f5 #303446 -
+31 0-119 #c6d0f5 #303446 -
+32 0-119 #c6d0f5 #303446 -
+33 0-119 #c6d0f5 #303446 -
+34 0-119 #c6d0f5 #303446 -
+35 0-119 #c6d0f5 #303446 -
+36 0-119 #c6d0f5 #303446 -
+37 0-119 #c6d0f5 #303446 -
+38 0-119 #c6d0f5 #303446 -
+39 0-0 #838ba7 #292c3c -
+39 1-1 #c6d0f5 #8caaee -
+39 2-7 #303446 #8caaee bold
+39 8-8 #c6d0f5 #8caaee -
+39 9-119 #c6d0f5 #292c3c -

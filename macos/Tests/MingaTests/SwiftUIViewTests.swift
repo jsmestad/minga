@@ -324,6 +324,24 @@ struct WhichKeyOverlayViewTests {
         }
     }
 
+    @Test("A row presses its key on the panel's path; a crumb above the open group goes back up")
+    @MainActor func rowAndCrumbClicks() throws {
+        let model = Wire.WhichKey(
+            visible: true, path: "SPC a",
+            breadcrumb: [.init(key: "SPC", path: "SPC"), .init(key: "a", label: "Minga", path: "SPC a")],
+            entries: [.init(kind: 1, key: "q", codepoint: 0x71, label: "Queue ›", section: "Conversation")])
+        var sent: [WhichKeyOverlay.Action] = []
+        let sut = WhichKeyOverlay(state: WhichKeyState(model: model), sendAction: { sent.append($0) })
+            .environment(\.themeColors, ThemeColors())
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+
+        // The SPC crumb and the Queue row are buttons; the open group's crumb is not.
+        #expect(buttons.count == 2)
+        for button in buttons { try button.tap() }
+        #expect(sent.contains(.back(path: "SPC")))
+        #expect(sent.contains(.press(path: "SPC a", codepoint: 0x71, modifiers: 0)))
+    }
+
     @Test("The fade-in fits the 120 ms budget, and Reduce Motion turns it off")
     func fadeBudget() {
         #expect(WhichKeyOverlay.fadeDuration <= 0.12)
@@ -381,7 +399,7 @@ struct StatusBarViewViewTests {
     private var boardLeft: [Wire.StatusBarSegment] {
         [
             segment(0, "NORMAL", kind: "mode", label: "Normal mode"),
-            segment(1, "Needs you", kind: "needs_you", command: "toggle_agentic_view", state: .needsYou, key: "SPC a a", label: "1 task needs you"),
+            segment(1, "Needs you", kind: "needs_you", command: "agent_tasks", state: .needsYou, key: "SPC a a", label: "1 task needs you"),
             segment(2, "chrome_state.ex ●", kind: "filename", command: "buffer_list", key: "SPC ,", label: "chrome_state.ex, unsaved"),
             segment(3, "change 1/2", kind: "change", label: "Minga's change 1 of 2"),
             segment(4, "main +11", kind: "git", drop: 4, label: "Branch main, 11 changed lines"),
@@ -472,6 +490,53 @@ struct StatusBarViewViewTests {
         #expect(kept.contains("mode") && kept.contains("filename"))
     }
 
+    @Test("A wide bar gives a notice room for each step's key and word; a narrow bar keeps the keys and the message caps at three quarters")
+    @MainActor func noticeReservesItsFullFormWhenItFits() {
+        let left = [segment(0, "NORMAL", kind: "mode"), segment(1, "proj.ex", kind: "filename"), segment(2, "main", kind: "git", drop: 4)]
+        let right = [segment(0, "Elixir", kind: "filetype", drop: 2), segment(1, "1:8", kind: "position", drop: 3)]
+        let search = Wire.EmptyListAction(id: "search_project", key: "SPC s p", label: "search the project")
+        let ask = Wire.EmptyListAction(id: "ask_minga", key: "SPC a ?", label: "ask Minga")
+
+        func notice(_ message: String, _ actions: [Wire.EmptyListAction]) -> StatusBarView {
+            let state = StatusBarState()
+            state.announce = { _ in }
+            state.update(from: statusBarUpdate(message: message, leftSegments: left, rightSegments: right, messageActions: actions))
+            return StatusBarView(state: state, sendAction: nil)
+        }
+
+        // One step and two steps: at 1440 pt the reserved room holds every key with its word, so the first form of the line fits.
+        for view in [notice("No references to defmodule (no server)", [search]), notice("No code actions at 1:1 (no language server)", [ask, search])] {
+            #expect(view.fullNoticeWidth > view.shortestNoticeWidth)
+            #expect(view.echoWidth(in: 1440) >= view.fullNoticeWidth + 2 * Spacing.md)
+        }
+
+        // A bar too narrow for the words still holds the message and the keys, so the keys-only form is the one that fits.
+        let narrow = notice("No matches for “limit_lable” in this buffer", [search])
+        // The narrowest bar whose three quarters hold the keys-only form; the words do not fit there.
+        let width = ceil((narrow.shortestNoticeWidth + 2 * Spacing.md) / 0.75) + 1
+        #expect(narrow.fullNoticeWidth + 2 * Spacing.md > width * 0.75)
+        #expect(narrow.shortestNoticeWidth + 2 * Spacing.md <= narrow.echoWidth(in: width))
+        #expect(narrow.echoWidth(in: width) < narrow.fullNoticeWidth + 2 * Spacing.md)
+
+        // A message longer than three quarters of the bar takes exactly three quarters and truncates there.
+        let long = notice(String(repeating: "No matches for a very long query in this buffer ", count: 4), [search])
+        #expect(long.echoWidth(in: 610) == 610 * 0.75)
+    }
+
+    @Test("A notice that names next steps reads in the chrome text colour; other echo text stays secondary")
+    @MainActor func noticeMessageRole() {
+        #expect(StatusBarView.messageOpacity(namesNextSteps: true) == 1)
+        #expect(StatusBarView.messageOpacity(namesNextSteps: false) < 1)
+    }
+
+    @Test("An empty state's glyph is drawn in the role of the state whose shape it is")
+    @MainActor func emptyStateGlyphRole() {
+        #expect(EmptyListHeader.glyphState("●") == .done)
+        #expect(EmptyListHeader.glyphState("◆") == .failed)
+        #expect(EmptyListHeader.glyphState("") == nil)
+        #expect(EmptyListHeader.glyphState("★") == nil)
+    }
+
     @Test("Narrowing drops filetype, position and git in order, then shrinks Minga, then warnings")
     @MainActor func dropLadder() {
         let segments = boardLeft + boardRight
@@ -509,7 +574,7 @@ struct StatusBarViewViewTests {
         for button in body.findAll(ViewType.Button.self) {
             try button.tap()
         }
-        for command in ["toggle_agentic_view", "buffer_list", "toggle_agent_split", "diagnostics_list"] {
+        for command in ["agent_tasks", "buffer_list", "toggle_agent_split", "diagnostics_list"] {
             #expect(spy.actions.contains(.executeCommand(name: command)), "no click for \(command)")
         }
 

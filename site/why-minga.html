@@ -18,12 +18,12 @@
   <meta property="og:image" content="https://mingacode.dev/assets/og-minga.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
+  <meta property="og:image:alt" content="Minga: Elixir code in a Minga window in Catppuccin Frappé, with marks in the margin that show which lines Minga changed">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Why Minga: when to switch, and when to stay">
   <meta name="twitter:description" content="Agent panels fight your code for space, and terminal multiplexers leave your agents outside your editor. What changes if you switch to Minga from Neovim, Emacs, VS Code, Cursor, Zed or a terminal agent, and when to stay.">
   <meta name="twitter:image" content="https://mingacode.dev/assets/og-minga.png">
-  <meta name="twitter:image:alt" content="Minga: a programmable workbench on the Erlang VM showing Elixir code with the Twist authorship gutter in Catppuccin Frappé">
+  <meta name="twitter:image:alt" content="Minga: Elixir code in a Minga window in Catppuccin Frappé, with marks in the margin that show which lines Minga changed">
   <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Why Minga: when to switch, and when to stay","description":"Agent panels fight your code for space, and terminal multiplexers leave your agents outside your editor. What changes if you switch to Minga from Neovim, Emacs, VS Code, Cursor, Zed or a terminal agent, and when to stay.","url":"https://mingacode.dev/why-minga","image":"https://mingacode.dev/assets/og-minga.png","author":{"@type":"Person","name":"Justin Smestad","url":"https://evalcode.com"},"publisher":{"@type":"Organization","name":"Minga","url":"https://mingacode.dev/"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://mingacode.dev/"},{"@type":"ListItem","position":2,"name":"Why Minga","item":"https://mingacode.dev/why-minga"}]}]}</script>
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
@@ -87,7 +87,7 @@
           <p>The same gap, two tools that each hold part of the work, shows up in three more places:</p>
           <ul>
             <li><strong>Review comes after the write.</strong> A terminal agent writes an approved edit into your working tree, and you read the result afterwards with <code>git diff</code>. In a Minga session you start from the editor, approving and publishing are separate steps, so you can read every staged edit before your files change. <span data-status="planned" data-since="v0.1.0">A review buffer you can reshape for the task is planned.</span></li>
-            <li><strong>Undo has two histories.</strong> The agent's writes are not in your editor's undo history, so you take them back with Git or with the agent's own rewind command, where it has one. <span data-status="planned" data-since="v0.1.0">Minga's undo will be split by author: <kbd>u</kbd> undoes only your edits, and you remove an agent's change by rejecting it.</span></li>
+            <li><strong>Undo has two histories.</strong> The agent's writes are not in your editor's undo history, so you take them back with Git or with the agent's own rewind command, where it has one. In Minga, undo is split by author: <kbd>u</kbd> undoes only your edits, and <kbd>SPC a u</kbd> reverts a Minga task's edits in the buffer. <span data-status="planned" data-since="v0.1.0">Rejecting a single change of an agent's is planned.</span></li>
             <li><strong>Scripting stops at the pane.</strong> A multiplexer works on panes: it can start them and send them keys, but a file or an agent's tool call is outside its reach. Your editor config, your agent's hooks and your pane layout live in three places. In Minga, key bindings, editor commands and agent hooks (commands that run before an agent's tool call and can veto it) are set in one Elixir file. <span data-status="planned" data-since="v0.1.0">Task workflows, which let you or Minga write a review surface or a task board for one job, build on that (<a href="/extending#layer-workflows">Extending Minga</a>).</span></li>
           </ul>
         </section>

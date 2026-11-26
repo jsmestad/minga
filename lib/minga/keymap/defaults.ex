@@ -86,6 +86,7 @@ defmodule Minga.Keymap.Defaults do
 
     # ── Quit ──────────────────────────────────────────────────────────────────
     {~k(q q), :quit_all, "Quit editor"},
+    {~k(q n), :session_start_fresh, "Start fresh"},
     {~k(q u), :unsaved_text, "Unsaved text"},
 
     # ── Help ──────────────────────────────────────────────────────────────────
@@ -133,6 +134,7 @@ defmodule Minga.Keymap.Defaults do
     {~k(p r), :project_recent_files, "Recent files in project"},
     {~k(p .), :project_browse, "Browse project"},
     {~k(p T), :test_all, "Test project"},
+    {~k(p h), :project_home, "Project home"},
 
     # ── Open ──────────────────────────────────────────────────────────────────
     {~k(o b), :toggle_beam_observatory, "BEAM observatory"},
@@ -140,8 +142,8 @@ defmodule Minga.Keymap.Defaults do
     {~k(o r), :tree_reveal_active, "Reveal file in tree"},
 
     # ── Minga (SPC a): everyday keys at the top, the rest in three groups ────
-    {~k(a a), :toggle_agentic_view, "Agent view"},
-    {~k(a n), :agent_new_session, "New session"},
+    {~k(a a), :agent_tasks, "Tasks"},
+    {~k(a n), :agent_new_task, "New task"},
     {~k(a s), :agent_abort, "Stop"},
     {~k(a u), :undo_agent_session, "Undo all agent edits"},
     {~k(a v), :toggle_agent_split, "Conversation split"},
@@ -163,6 +165,7 @@ defmodule Minga.Keymap.Defaults do
     {~k(a x l), :agent_draft_attachments, "List attachments"},
 
     # SPC a S: Session
+    {~k(a S n), :agent_new_session, "New session"},
     {~k(a S h), :agent_session_history, "Resume a session"},
     {~k(a S R), :agent_session_rename, "Rename session"},
     {~k(a S m), :agent_pick_model, "Pick model"},
@@ -250,6 +253,7 @@ defmodule Minga.Keymap.Defaults do
   # (docs/design/keys.md, rule 5). Which-key shows them beside the entry and the
   # macOS menu bar puts them in the shortcut column, so the two teach each other.
   @platform_keys %{
+    agent_abort: "⌘.",
     save: "⌘S",
     undo: "⌘Z",
     quit: "⌘W",

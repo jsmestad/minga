@@ -33,6 +33,9 @@ const (
 	// CommandRendererShutdown is the BEAM's request that the renderer restore
 	// the terminal and exit (renderer_shutdown). It is out of band.
 	CommandRendererShutdown
+	// CommandAgentAlert is the BEAM's "a task needs you" alert, or its withdrawal (agent_desktop_notification). It is
+	// out of band. The BEAM sends it only when the user asked for the terminal bell and Minga is in the background.
+	CommandAgentAlert
 	// CommandStreamError is a synthetic, in-band marker the reader injects when a
 	// command in a batch cannot be sized or decoded (#2219). It carries no wire
 	// payload; the model treats it as a transaction invalidation when a frame
@@ -65,7 +68,9 @@ type Command struct {
 	TextPresentation  TextPresentation
 	Chrome            ChromePayload
 	ClipboardText     string
-	ExtensionRuntime  ExtensionRuntimePayload
+	// AgentAlertNeedsYou is true for a CommandAgentAlert that rings the bell, and false for a withdrawal.
+	AgentAlertNeedsYou bool
+	ExtensionRuntime   ExtensionRuntimePayload
 	// ProtocolError carries the UTF-8 reason from a protocol_error (0x18)
 	// command. The BEAM emits it when a frontend's handshake protocol_version
 	// does not match the BEAM's, so the frontend shows a blocking error instead
@@ -118,6 +123,7 @@ type ChromePayload struct {
 	AgentHelp           AgentHelp
 	AgentTranscript     AgentTranscript
 	Timeline            EditTimeline
+	TasksDrawer         generated.GuiTasksDrawerFields
 	Gutter              GutterSeparator
 	CursorlineChrome    CursorlineChrome
 	WindowGutter        Gutter
@@ -264,6 +270,8 @@ func DecodeCommand(payload []byte) (Command, error) {
 		return decodeProtocolError(payload)
 	case generated.OPRendererShutdown:
 		return Command{Kind: CommandRendererShutdown, Size: 1}, nil
+	case generated.OPAgentDesktopNotification:
+		return decodeAgentAlert(payload)
 	case generated.OPClipboardWrite:
 		return decodeClipboardWrite(payload)
 	case generated.OPGuiWindowContent, generated.OPGuiWindowViewportDelta, generated.OPGuiWindowRowsDelta:
@@ -682,6 +690,22 @@ func decodeExtensionRuntime(payload []byte) (Command, error) {
 	offset = next
 	raw := append([]byte(nil), payload[offset:end]...)
 	return Command{Kind: CommandExtensionRuntime, Size: end, ExtensionRuntime: ExtensionRuntimePayload{ExtensionID: extensionID, Channel: channel, Payload: raw, Bytes: end}}, nil
+}
+
+// decodeAgentAlert reads agent_desktop_notification: kind (1 needs you, 2 withdrawn) and a 16-byte identity the
+// terminal does not use, because a bell cannot be withdrawn.
+func decodeAgentAlert(payload []byte) (Command, error) {
+	if len(payload) < 18 {
+		return Command{}, fmt.Errorf("short agent_desktop_notification")
+	}
+	switch payload[1] {
+	case 1:
+		return Command{Kind: CommandAgentAlert, Size: 18, AgentAlertNeedsYou: true}, nil
+	case 2:
+		return Command{Kind: CommandAgentAlert, Size: 18}, nil
+	default:
+		return Command{}, fmt.Errorf("unknown agent_desktop_notification kind %d", payload[1])
+	}
 }
 
 func decodeSkipOrChrome(payload []byte) (Command, error) {

@@ -41,7 +41,10 @@ defmodule Minga.Storyboard.SessionParserTest do
     Session.stop(session)
   end
 
-  defp buffer_text(session), do: Minga.Test.EditorCase.buffer_content(session.ctx)
+  defp buffer_text(session) do
+    state = Minga.Test.EditorCase.editor_state(session.ctx)
+    Minga.Buffer.content(state.workspace.buffers.active)
+  end
 
   # The end of the last highlighted span, in bytes: it moves past the old text only after a parse of the edit.
   defp highlighted_extent(session) do

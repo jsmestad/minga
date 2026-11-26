@@ -90,6 +90,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
          true <- current_tab_session?(id, tab_id, session) do
       state
       |> MingaEditor.TabWorkflow.switch(tab_id)
+      |> MingaEditor.Shell.Traditional.TasksDrawerWorkflow.release()
       |> DraftWorkflow.recover_recall_conflict(session, id)
     else
       _changed -> NoticeWorkflow.publish(state, "Session changed. Reopen Sessions.")
@@ -102,25 +103,20 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
     Agent.connect_remote_session(state, server_name, session_id, remote_pid, token)
   end
 
-  def on_select(
-        %Item{id: {session_id, {kind, {owner, session, origin_id}}}},
-        %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tab_bar}}} = state
-      )
-      when kind in [:disk, :draft_only, :legacy_import] do
-    # The session itself rejects the reopen when it no longer shows `origin_id`.
-    with ^owner <- TabBar.active_workspace_id(tab_bar),
-         ^session <- MingaEditor.Shell.Runtime.active_session(state.shell_runtime),
-         :ok <- DraftWorkflow.before_reopen(state, session_id) do
-      SessionFollowUp.run(state, owner, session, {:reopen, session_id, origin_id, kind})
-    else
-      {:error, updated} -> updated
-      _changed -> NoticeWorkflow.publish(state, "Session changed. Reopen Sessions.")
-    end
+  # Chosen from a file, the conversation has no Agent tab on screen to reopen into; it opens in one and takes the
+  # keyboard, so a tasks drawer it was chosen from stays on screen without it.
+  def on_select(%Item{id: {session_id, {:disk, _origin}}} = item, state) do
+    if MingaEditor.Shell.Runtime.active_tab_kind(state.shell_runtime) == :agent,
+      do: reopen(item, state),
+      else:
+        state
+        |> Agent.open_session(session_id)
+        |> MingaEditor.Shell.Traditional.TasksDrawerWorkflow.release()
   end
 
-  def on_select(%Item{id: {_id, {kind, nil}}}, state)
-      when kind in [:disk, :draft_only, :legacy_import],
-      do: NoticeWorkflow.publish(state, "Open an Agent workspace, then reopen Sessions.")
+  def on_select(%Item{id: {_id, {kind, _origin}}} = item, state)
+      when kind in [:draft_only, :legacy_import],
+      do: reopen(item, state)
 
   @doc """
   Finishes a Sessions picker reopen once `session` answered it.
@@ -155,6 +151,26 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
+
+  # Reopens a saved record into the Agent tab on screen, the conversation the picker showed.
+  @spec reopen(Item.t(), State.t()) :: State.t()
+  defp reopen(
+         %Item{id: {session_id, {kind, {owner, session, origin_id}}}},
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tab_bar}}} = state
+       ) do
+    # The session itself rejects the reopen when it no longer shows `origin_id`.
+    with ^owner <- TabBar.active_workspace_id(tab_bar),
+         ^session <- MingaEditor.Shell.Runtime.active_session(state.shell_runtime),
+         :ok <- DraftWorkflow.before_reopen(state, session_id) do
+      SessionFollowUp.run(state, owner, session, {:reopen, session_id, origin_id, kind})
+    else
+      {:error, updated} -> updated
+      _changed -> NoticeWorkflow.publish(state, "Session changed. Reopen Sessions.")
+    end
+  end
+
+  defp reopen(%Item{id: {_id, {_kind, nil}}}, state),
+    do: NoticeWorkflow.publish(state, "Open an Agent workspace, then reopen Sessions.")
 
   @spec current_tab_session?(String.t() | Tab.id(), Tab.id(), pid() | nil) :: boolean()
   defp current_tab_session?(tab_id, tab_id, nil), do: true

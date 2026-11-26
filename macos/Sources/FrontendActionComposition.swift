@@ -48,6 +48,13 @@ nonisolated public enum FrontendActionComposition {
     }
 
 
+    public static func outbound(_ action: WhichKeyOverlay.Action) -> OutboundAction {
+        switch action {
+        case .press(let path, let codepoint, let modifiers): .whichKeyPress(path: path, codepoint: codepoint, modifiers: modifiers)
+        case .back(let path): .whichKeyBack(path: path)
+        }
+    }
+
     public static func outbound(_ action: AgentHelpView.Action) -> OutboundAction {
         switch action {
         case .dismiss: .executeCommand(name: "agent_dismiss_help")
@@ -120,6 +127,13 @@ nonisolated public enum FrontendActionComposition {
         case .dismiss: .panelDismiss
         case .resize(let heightPercent): .panelResize(heightPercent: heightPercent)
         case .openFile(let path): .openFile(path: path)
+        }
+    }
+
+    public static func outbound(_ action: TasksDrawerView.Action) -> OutboundAction {
+        switch action {
+        case .rowAction(let rowID, let action): .tasksDrawerAction(rowID: rowID, action: action)
+        case .runCommand(let name): .executeCommand(name: name)
         }
     }
 

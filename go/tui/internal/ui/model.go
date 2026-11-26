@@ -251,6 +251,33 @@ func (m Model) WithTerminalEnvironment(getenv func(string) string) Model {
 	return m
 }
 
+// WithTerminalOverrides applies the features the user forced on or off (terminal.OverridesVariable) and returns one
+// message for every entry it could not use. The renderer calls it before WithTerminalEnvironment, so nothing the
+// frontend works out by itself replaces the user's choice.
+func (m Model) WithTerminalOverrides(value string) (Model, []string) {
+	capabilities, problems := m.capabilities.WithOverrides(value)
+	m.capabilities = capabilities
+	return m, problems
+}
+
+// ForcedColorProfile returns the colour profile the program must use because the user forced true colour on or off,
+// given the profile detection would choose. Forced on is true colour. Forced off caps the detected profile at 256
+// colours: a terminal with 16 colours or none keeps what it has.
+// Without an override Bubble Tea detects the profile itself, and the report follows what it finds.
+func (m Model) ForcedColorProfile(detected colorprofile.Profile) (colorprofile.Profile, bool) {
+	forced, on := m.capabilities.Forced(generated.TerminalFeatureTrueColor)
+	if !forced {
+		return colorprofile.Unknown, false
+	}
+	if on {
+		return colorprofile.TrueColor, true
+	}
+	if detected < colorprofile.ANSI256 {
+		return detected, true
+	}
+	return colorprofile.ANSI256, true
+}
+
 // TerminalReportPacket reports what is known about the host terminal before it has answered anything: a feature is
 // pending unless the terminal is a known one that is taken to have it. It follows the ready packet, so the BEAM knows
 // from the start that this frontend has a host terminal.
@@ -343,7 +370,7 @@ func (m *Model) observeTerminal(msg tea.Msg) {
 	if m.capabilities != before || m.terminalInBackground != wasInBackground {
 		m.lineCache.reset()
 	}
-	if !m.capabilities.SameStatuses(m.reportedCapabilities) && !m.capabilities.Pending() && m.send(protocol.EncodeTerminalReport(m.capabilities)) {
+	if m.capabilities != m.reportedCapabilities && !m.capabilities.Pending() && m.send(protocol.EncodeTerminalReport(m.capabilities)) {
 		m.reportedCapabilities = m.capabilities
 	}
 }
@@ -456,6 +483,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if hit.packet != nil {
 					m.send(hit.packet)
 				}
+				break
+			}
+			// Which-key paints above the picker (the mode pill opens a picker's keys over it), so it answers first.
+			if packet, handled := m.whichKeyMousePacket(msg); handled {
+				if packet != nil {
+					m.send(packet)
+				}
+				break
+			}
+			if packet, handled := m.modePillMousePacket(msg); handled {
+				m.send(packet)
 				break
 			}
 			if packet, handled := m.pickerPointerPacket(click); handled {
@@ -906,6 +944,12 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 			// land in Minga's *Messages* buffer instead.
 			m.protocolError = command.ProtocolError
 			m.logToMessages(protocol.LogLevelErr, "Go TUI protocol error: %s", command.ProtocolError)
+		case protocol.CommandAgentAlert:
+			// Out of band: a task started needing you while the terminal is in the background, and the user asked for
+			// the bell (:agent_notify_terminal). A withdrawal has nothing to undo.
+			if command.AgentAlertNeedsYou {
+				cmds = append(cmds, tea.Raw("\a"))
+			}
 		case protocol.CommandRendererShutdown:
 			// Out of band: the BEAM is stopping and waits for this process to
 			// exit. Quitting lets Bubble Tea restore the terminal; any open

@@ -65,6 +65,7 @@ defmodule MingaEditor.UI.Picker.Context do
     :keymap_server,
     :options_server,
     :theme,
+    project_server: Minga.Project,
     document_symbols: []
   ]
 
@@ -83,8 +84,20 @@ defmodule MingaEditor.UI.Picker.Context do
           capabilities: map(),
           keymap_server: State.keymap_server() | nil,
           options_server: State.options_server() | nil,
+          project_server: GenServer.server(),
           theme: Theme.t()
         }
+
+  # The project home holds no buffer of its own; the files of the tabs behind it are what can be switched to.
+  @spec listed_buffers(State.t()) :: Buffers.t()
+  defp listed_buffers(
+         %State{
+           workspace: %{launchpad: %MingaEditor.State.Launchpad{}, buffers: %Buffers{list: []}}
+         } = state
+       ),
+       do: %Buffers{list: MingaEditor.Handlers.BufferRegistry.buffer_inventory(state)}
+
+  defp listed_buffers(%State{workspace: %{buffers: buffers}}), do: buffers
 
   @doc """
   Builds a picker context from the full editor state.
@@ -99,7 +112,7 @@ defmodule MingaEditor.UI.Picker.Context do
     picker_ui = picker_ui_from_modal(state, extra_context)
 
     %__MODULE__{
-      buffers: state.workspace.buffers,
+      buffers: listed_buffers(state),
       editing: state.workspace.editing,
       file_tree: state.workspace.file_tree,
       search: state.workspace.search,
@@ -113,6 +126,7 @@ defmodule MingaEditor.UI.Picker.Context do
       capabilities: state.frontend.capabilities,
       keymap_server: state.interaction.keymap_server,
       options_server: state.interaction.options_server,
+      project_server: state.interaction.project_server,
       theme: state.appearance.theme
     }
   end

@@ -2,4 +2,3 @@
 # Each row names the surface ticket that migrates it. Delete rows as they migrate; never add rows.
 # File	Reason	Trimmed source line
 go/tui/internal/ui/agent_chat_panel.go	#4063: approval row in the agentic view details panel, which is removed with the agentic view	lines = append(lines, m.renderAgentDetailRow("Approval", "waiting", width))
-go/tui/internal/ui/render_surfaces.go	#4045: todo status word beside doing, blocked and todo; the task drawer settles the todo vocabulary on both frontends	return "done"

@@ -152,8 +152,12 @@ type Picker struct {
 	Empty *generated.EmptyList
 	// ListKeys is true while the picker has nothing to filter: it takes no text, and j and k move, q closes.
 	ListKeys bool
+	// Hints are the footer's key hints of an empty picker, resolved by the BEAM from the live keymap.
+	Hints []generated.KeyHint
 	// MovementKeys are the keys the BEAM's picker keymap scope resolves to one-row movement. The local selection preview moves only for these keys.
 	MovementKeys []PickerMovementKey
+	// EnterSelects is the BEAM keymap's permission to activate the locally previewed picker row on plain Enter.
+	EnterSelects bool
 }
 
 // PickerMovementKey is one key_press identity and the rows it moves the highlighted row: 1 down, -1 up.
@@ -814,40 +818,45 @@ type HorizontalSeparator struct {
 	Filename string
 }
 
-// EmptyState is the zero-buffers launchpad surface (gui_empty_state, 0xA5,
-// #2689). The BEAM owns content and activation semantics; the renderer owns
-// layout. Sections are data-driven and arrive in display order (session,
-// recent, start, footer); absent sections are simply not sent.
+// EmptyState is the project home, *home* (#4056): a header that says where
+// you are (Title, Path, Status, an optional muted Note), then sections.
 type EmptyState struct {
 	Visible   bool
-	Crashed   bool
-	Version   string
+	Title     string
+	Path      string
+	Status    string
+	Note      string
 	FocusedID string
 	Sections  []EmptyStateSection
 }
 
-// EmptyStateSection groups launchpad items under a titled region. ID is the
-// wire section id: 0=session, 1=recent, 2=start, 3=footer.
+// EmptyStateSection groups home rows under a title. ID is the wire section
+// id: 1=recent files, 4=recent projects, 5=Minga tasks, 6=next actions.
+// Empty is the muted line shown when the section has no rows.
 type EmptyStateSection struct {
 	ID    byte
 	Title string
+	Empty string
 	Items []EmptyStateItem
 }
 
-// EmptyStateItem is one launchpad row. Kind is the wire item kind: 0=resume,
-// 1=recent_file, 2=action, 3=hint. JumpKey is a single-key/RET jump binding
-// (empty when the row teaches a durable chord instead); Chord is a
-// space-separated leader sequence (e.g. "SPC f f"). IconColor is a 24-bit RGB
-// value in the low bytes of a u32.
+// EmptyStateItem is one home row. Kind is the wire item kind: 1=recent file,
+// 2=action, 4=project, 5=task. JumpKey is the number key that opens the row;
+// Chord is the leader sequence an action runs (e.g. "SPC SPC"). Detail and
+// Meta are muted text after the label. State is a design-token state name
+// ("needs_you") whose glyph and colour a task row draws. IconColor is a
+// 24-bit RGB value in the low bytes of a u32.
 type EmptyStateItem struct {
 	Kind      byte
 	ID        string
 	Label     string
 	Detail    string
+	Meta      string
 	JumpKey   string
 	Chord     string
 	Icon      string
 	IconColor uint32
+	State     string
 }
 
 type RichLine struct {

@@ -13,7 +13,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Git do
     [
       Entry.built("git.status.clean",
         start: [git_status: %{branch: "main", ahead: 2, entries: []}],
-        reach: "",
+        reach: "1",
         recognize:
           &(Model.open?(&1, :git_status) and match?(%{ui: %{git_status: %{empty: %{}}}}, &1)),
         checks: [

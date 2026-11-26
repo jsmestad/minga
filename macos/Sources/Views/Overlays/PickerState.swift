@@ -193,12 +193,15 @@ public final class PickerState {
     public var listKeys: Bool = false
     /// The keys the BEAM's picker keymap scope resolves to one-row movement. The local selection preview moves only for these keys.
     public var movementKeys: [Wire.PickerMovementKey] = []
+    /// The footer's key hints of an empty picker, resolved by the BEAM from the live keymap.
+    public var hints: [Wire.KeyHint] = []
 
-    public func update(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, rawItems: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String = "", loadStatus: Wire.PickerLoadStatus = .ready, queryGeneration: UInt32 = 0, acknowledgedQueryEditSeq: UInt32 = 0, activationGeneration: UInt32 = 0, empty: Wire.EmptyList? = nil, listKeys: Bool = false, movementKeys: [Wire.PickerMovementKey] = []) {
+    public func update(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, rawItems: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String = "", loadStatus: Wire.PickerLoadStatus = .ready, queryGeneration: UInt32 = 0, acknowledgedQueryEditSeq: UInt32 = 0, activationGeneration: UInt32 = 0, empty: Wire.EmptyList? = nil, listKeys: Bool = false, movementKeys: [Wire.PickerMovementKey] = [], hints: [Wire.KeyHint] = []) {
         self.visible = visible
         self.empty = empty
         self.listKeys = listKeys
         self.movementKeys = movementKeys
+        self.hints = hints
         self.filteredCount = Int(filteredCount)
         self.totalCount = Int(totalCount)
         self.markedCount = Int(markedCount)
@@ -341,6 +344,7 @@ public final class PickerState {
         hasPreview = false
         empty = nil
         listKeys = false
+        hints = []
         loadStatus = .ready
         actionMenu = nil
         movementKeys = []

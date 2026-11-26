@@ -490,7 +490,7 @@ defmodule Minga.Keymap.Scope.Agent do
        [
          {"Ctrl-c", "Normal mode (also stops Minga while it works)"},
          {"s", "Session switcher"},
-         {"SPC a n", "New local session"},
+         {"SPC a S n", "New local session"},
          {"SPC a q q", "Inspect queued inputs"},
          {"SPC a q f", "Queue follow-up from input"},
          {"SPC a S l", "Pick local/remote session"},

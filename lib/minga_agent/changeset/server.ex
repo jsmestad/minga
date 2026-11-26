@@ -18,6 +18,7 @@ defmodule MingaAgent.Changeset.Server do
   alias Minga.Buffer.Persistence.SystemFileSystem
   alias Minga.Buffer.Replace
   alias Minga.Session.StagedDraft
+  alias MingaAgent.Changeset
   alias MingaAgent.Changeset.MergedEvent
   alias MingaAgent.Changeset.Overlay
   alias MingaAgent.Changeset.PublicationTarget
@@ -202,6 +203,17 @@ defmodule MingaAgent.Changeset.Server do
       stage_fork_resolution(state, path, ancestor, selected)
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:integrate_isolated_changes, changes}, _from, state) do
+    case plan_isolated_changes(state, changes) do
+      {:ok, steps} ->
+        {reply, state} = apply_isolated_steps(state, steps, [])
+        {:reply, reply, state}
+
+      {:conflict, _details} = conflict ->
+        {:reply, conflict, state}
     end
   end
 
@@ -721,6 +733,130 @@ defmodule MingaAgent.Changeset.Server do
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
+
+  @typep isolated_step :: {:write, String.t(), binary()} | {:delete, String.t()}
+
+  @spec plan_isolated_changes(state(), [Changeset.isolated_change()]) ::
+          {:ok, [isolated_step()]} | {:conflict, map()}
+  defp plan_isolated_changes(state, changes) do
+    planned = Enum.map(changes, &plan_isolated_change(state, &1))
+
+    case for({:conflict, path, reason} <- planned, do: {path, reason}) do
+      [] ->
+        {:ok, for({:ok, step} <- planned, do: step)}
+
+      conflicts ->
+        clean = for {:ok, step} <- planned, do: isolated_step_path(step)
+        {:conflict, %{conflicts: conflicts, clean: clean}}
+    end
+  end
+
+  @spec plan_isolated_change(state(), Changeset.isolated_change()) ::
+          {:ok, isolated_step()}
+          | :noop
+          | {:conflict, String.t(), Changeset.integration_conflict()}
+  defp plan_isolated_change(state, {relative_path, ancestor, child}) do
+    with {:ok, path} <- normalize_path(state, relative_path),
+         {:ok, parent} <- isolated_parent_content(state, path) do
+      case resolve_isolated_change(path, ancestor, parent, child) do
+        {:conflict, reason} -> {:conflict, relative_path, reason}
+        outcome -> outcome
+      end
+    else
+      {:error, reason} -> {:conflict, relative_path, {:unreadable, reason}}
+    end
+  end
+
+  @spec isolated_parent_content(state(), String.t()) ::
+          {:ok, binary() | :missing} | {:error, term()}
+  defp isolated_parent_content(state, path) do
+    case current_content(state, path) do
+      {:ok, content} -> {:ok, content}
+      {:error, absent} when absent in [:deleted, :enoent] -> {:ok, :missing}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec resolve_isolated_change(
+          String.t(),
+          binary() | :missing,
+          binary() | :missing,
+          binary() | :deleted
+        ) ::
+          {:ok, isolated_step()} | :noop | {:conflict, Changeset.integration_conflict()}
+  defp resolve_isolated_change(_path, _ancestor, :missing, :deleted), do: :noop
+  defp resolve_isolated_change(path, ancestor, ancestor, :deleted), do: {:ok, {:delete, path}}
+
+  defp resolve_isolated_change(_path, _ancestor, _parent, :deleted),
+    do: {:conflict, :modified_in_parent}
+
+  defp resolve_isolated_change(path, :missing, :missing, child), do: {:ok, {:write, path, child}}
+  defp resolve_isolated_change(_path, :missing, child, child), do: :noop
+  defp resolve_isolated_change(_path, :missing, _parent, _child), do: {:conflict, :both_added}
+
+  defp resolve_isolated_change(_path, _ancestor, :missing, _child),
+    do: {:conflict, :deleted_in_parent}
+
+  defp resolve_isolated_change(path, ancestor, parent, child) do
+    case Minga.Core.Diff.merge3(
+           String.split(ancestor, "\n"),
+           String.split(child, "\n"),
+           String.split(parent, "\n")
+         ) do
+      {:ok, lines} ->
+        case Enum.join(lines, "\n") do
+          ^parent -> :noop
+          merged -> {:ok, {:write, path, merged}}
+        end
+
+      {:conflict, hunks} ->
+        {:conflict, {:merge_conflict, hunks}}
+    end
+  end
+
+  @spec apply_isolated_steps(state(), [isolated_step()], [String.t()]) ::
+          {Changeset.integration_result(), state()}
+  defp apply_isolated_steps(state, [], applied) do
+    state = if applied == [], do: state, else: bump_revision(state)
+    {{:ok, Enum.reverse(applied)}, state}
+  end
+
+  defp apply_isolated_steps(state, [step | rest], applied) do
+    case apply_isolated_step(state, step) do
+      {:ok, state} ->
+        apply_isolated_steps(state, rest, [isolated_step_path(step) | applied])
+
+      {:error, reason} ->
+        state = if applied == [], do: state, else: bump_revision(state)
+
+        {{:error,
+          %{
+            applied: Enum.reverse(applied),
+            failed: {isolated_step_path(step), reason},
+            unapplied: Enum.map(rest, &isolated_step_path/1)
+          }}, state}
+    end
+  end
+
+  @spec apply_isolated_step(state(), isolated_step()) :: {:ok, state()} | {:error, term()}
+  defp apply_isolated_step(state, {:write, path, content}) do
+    with :ok <- clear_deleted_marker(state, path, current_change(state, path)),
+         :ok <- Overlay.materialize_file(state.overlay, path, content) do
+      {:ok,
+       state |> capture_original(path) |> push_history(path) |> install_mutation(path, content)}
+    end
+  end
+
+  defp apply_isolated_step(state, {:delete, path}) do
+    with :ok <- Overlay.delete_file(state.overlay, path) do
+      {:ok,
+       state |> capture_original(path) |> push_history(path) |> install_mutation(path, :deleted)}
+    end
+  end
+
+  @spec isolated_step_path(isolated_step()) :: String.t()
+  defp isolated_step_path({:write, path, _content}), do: path
+  defp isolated_step_path({:delete, path}), do: path
 
   @spec require_publication_baseline(state(), String.t()) :: :ok | {:error, atom()}
   defp require_publication_baseline(state, path) do

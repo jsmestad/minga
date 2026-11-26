@@ -127,6 +127,25 @@ defmodule Minga.Mode do
   def cancel_leader(state), do: state
 
   @doc """
+  Drops everything a Normal mode state has pending: a count, a leader sequence, a multi-key prefix, a single-key operation waiting for its target (`r`, `f`, `m`) and a describe-key walk. The next key then starts fresh, as if nothing had been typed.
+
+  Other mode states only lose a pending leader sequence.
+  """
+  @spec clear_pending(state()) :: state()
+  def clear_pending(%Minga.Mode.State{} = state) do
+    %{
+      cancel_leader(state)
+      | count: nil,
+        prefix_node: nil,
+        prefix_keys: [],
+        pending: nil,
+        describe_key: nil
+    }
+  end
+
+  def clear_pending(state), do: cancel_leader(state)
+
+  @doc """
   Processes a key event for the given `mode`.
 
   Returns `{new_mode, commands, new_state}`. `commands` is the (possibly

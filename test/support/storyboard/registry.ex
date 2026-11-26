@@ -35,6 +35,7 @@ defmodule Minga.Test.Storyboard.Registry do
   ]
 
   @home "edit.plain"
+  @cold_start "start.open_dir.home"
 
   @doc "Every registry entry, journey by journey."
   @spec entries() :: [Entry.t()]
@@ -66,9 +67,18 @@ defmodule Minga.Test.Storyboard.Registry do
   @spec pending() :: [Entry.t()]
   def pending, do: Enum.reject(entries(), &Entry.built?/1)
 
-  @doc "The id of the home scenario every way-out check returns to."
+  @doc "The id of plain editing, the scenario the flow explorer presses every key from."
   @spec home() :: String.t()
   def home, do: @home
+
+  @doc "The id of the factory's cold start: `minga .` in a project with no saved session."
+  @spec cold_start() :: String.t()
+  def cold_start, do: @cold_start
+
+  @doc "True for a resting view (`home = true` in the inventory): every way-out check may end on one."
+  @spec resting?(String.t() | :unknown) :: boolean()
+  def resting?(id) when is_binary(id), do: id in Minga.Test.Storyboard.Inventory.home_ids()
+  def resting?(:unknown), do: false
 
   @doc """
   Starts a headless editor and drives it to the scenario. Raises for a pending entry.
@@ -84,7 +94,7 @@ defmodule Minga.Test.Storyboard.Registry do
 
     case entry.reach do
       "" -> session
-      path -> session |> Session.press(path) |> await_recognized(entry)
+      path -> session |> Session.press(path) |> await_recognized(entry) |> Session.settle()
     end
   end
 

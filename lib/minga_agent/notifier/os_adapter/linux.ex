@@ -19,13 +19,15 @@ defmodule MingaAgent.Notifier.OSAdapter.Linux do
   @impl true
   @spec send_notification(String.t(), String.t()) :: :ok
   def send_notification(title, message) do
-    case command(title, message, System.get_env(), &System.find_executable/1) do
-      {:run, executable, args} ->
-        spawn(fn -> run(executable, args) end)
-        :ok
+    spawn(fn -> deliver(title, message) end)
+    :ok
+  end
 
-      {:skip, reason} ->
-        Minga.Log.debug(:agent, "Desktop notification skipped: #{reason}")
+  @spec deliver(String.t(), String.t()) :: :ok
+  defp deliver(title, message) do
+    case command(title, message, System.get_env(), &System.find_executable/1) do
+      {:run, executable, args} -> run(executable, args)
+      {:skip, reason} -> Minga.Log.debug(:agent, "Desktop notification skipped: #{reason}")
     end
   end
 

@@ -194,6 +194,8 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             return oversizedString(message, limit: Int(UInt16.max))
         case .emptyStateActivate(let id):
             return oversizedString(id, limit: Int(UInt8.max))
+        case .tasksDrawerAction(let rowID, let action):
+            return oversizedString(rowID, limit: Int(UInt8.max)) ?? oversizedString(action, limit: Int(UInt8.max))
         case .pickerQueryChanged(_, _, let text):
             return oversizedString(text, limit: Int(UInt16.max))
         case .fileTreeEditConfirm(_, let text):
@@ -209,6 +211,8 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             return oversizedString(volumePath, limit: Int(UInt16.max))
         case .executeCommand(let name):
             return oversizedString(name, limit: Int(UInt16.max))
+        case .whichKeyPress(let path, _, _), .whichKeyBack(let path):
+            return oversizedString(path, limit: Int(UInt16.max))
         case .agentReadRetainedOutput(let messageID, let offer):
             return messageID == 0 || (offer.high == 0 && offer.low == 0) ? .invalidPayload("Retained output requires a tool message identity and displayed offer") : nil
         case .agentComposerSubmit(let generation, _):
@@ -294,7 +298,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
              .agentRequestChanges, .agentDismiss, .chatScrolledAwayFromBottom,
              .chatReturnedToBottom, .scrollToLine, .scrollToVisualRank, .foldToggleAtLine, .focusWindow,
              .configQuery, .fontSizeAdjust, .searchFocus, .searchNext, .agentStartRemedy,
-             .searchPrevious, .searchDismiss:
+             .searchPrevious, .searchDismiss, .agentNotificationOpen:
             return nil
         }
     }
@@ -356,6 +360,8 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         case .selectTab(let id): encodeSelectTab(id: id)
         case .closeTab(let id): encodeCloseTab(id: id)
         case .emptyStateActivate(let id): encodeEmptyStateActivate(id: id)
+        case .tasksDrawerAction(let rowID, let action): encodeTasksDrawerAction(rowID: rowID, action: action)
+        case .agentNotificationOpen(let alert): encodeAgentNotificationOpen(alert: alert)
         case .tabCopyPath(let id): encodeTabCopyPath(id: id)
         case .tabReorder(let id, let newIndex): encodeTabReorder(id: id, newIndex: newIndex)
         case .tabPin(let id): encodeTabPin(id: id)
@@ -459,6 +465,8 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         case .workspaceSetIcon(let id, let icon): encodeWorkspaceSetIcon(id: id, icon: icon)
         case .workspaceClose(let id): encodeWorkspaceClose(id: id)
         case .spaceLeaderChord(let codepoint, let modifiers): encodeSpaceLeaderChord(codepoint: codepoint, modifiers: modifiers)
+        case .whichKeyPress(let path, let codepoint, let modifiers): encodeWhichKeyPress(path: path, codepoint: codepoint, modifiers: modifiers)
+        case .whichKeyBack(let path): encodeWhichKeyBack(path: path)
         case .spaceLeaderRetract(let codepoint, let modifiers): encodeSpaceLeaderRetract(codepoint: codepoint, modifiers: modifiers)
         case .findPasteboardSearch(let text, let direction): encodeFindPasteboardSearch(text: text, direction: direction)
         case .agentApprove: encodeAgentApprove()
@@ -853,6 +861,22 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
     /// Activates a launchpad row (resume card, recent file, or action) by its
     /// semantic id. Activation is authoritative on the BEAM; the frontend only
     /// forwards the click.
+    private func encodeTasksDrawerAction(rowID: String, action: String) {
+        let row = Array(rowID.utf8)
+        let verb = Array(action.utf8)
+        var buf = Data([OP_GUI_ACTION, GUI_ACTION_TASKS_DRAWER_ACTION, UInt8(row.count)])
+        buf.append(contentsOf: row)
+        buf.append(UInt8(verb.count))
+        buf.append(contentsOf: verb)
+        writeFrame(buf)
+    }
+
+    private func encodeAgentNotificationOpen(alert: UUID) {
+        var buf = Data([OP_GUI_ACTION, GUI_ACTION_AGENT_NOTIFICATION_OPEN])
+        withUnsafeBytes(of: alert.uuid) { buf.append(contentsOf: $0) }
+        writeFrame(buf)
+    }
+
     private func encodeEmptyStateActivate(id: String) {
         let utf8 = Array(id.utf8)
         let idLen = utf8.count
@@ -1228,6 +1252,30 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_WORKSPACE_CLOSE
         writeU16(&buf, 2, id)
+        writeFrame(buf)
+    }
+
+    /// gui_action which_key_press: path(string16) + codepoint(u32) + modifiers(u8).
+    private func encodeWhichKeyPress(path: String, codepoint: UInt32, modifiers: UInt8) {
+        let utf8 = Array(path.utf8)
+        var buf = Data(count: 4 + utf8.count + 5)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_WHICH_KEY_PRESS
+        writeU16(&buf, 2, UInt16(utf8.count))
+        if !utf8.isEmpty { buf.replaceSubrange(4..<4 + utf8.count, with: utf8) }
+        writeU32(&buf, 4 + utf8.count, codepoint)
+        buf[8 + utf8.count] = modifiers
+        writeFrame(buf)
+    }
+
+    /// gui_action which_key_back: path(string16).
+    private func encodeWhichKeyBack(path: String) {
+        let utf8 = Array(path.utf8)
+        var buf = Data(count: 4 + utf8.count)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_WHICH_KEY_BACK
+        writeU16(&buf, 2, UInt16(utf8.count))
+        if !utf8.isEmpty { buf.replaceSubrange(4..<4 + utf8.count, with: utf8) }
         writeFrame(buf)
     }
 

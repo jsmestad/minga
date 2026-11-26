@@ -26,6 +26,7 @@ defmodule Minga.Test.Storyboard.Model do
           | :empty_state
           | :bottom_panel
           | :edit_timeline
+          | :tasks_drawer
           | :observatory
           | :extension_overlay
 
@@ -95,7 +96,8 @@ defmodule Minga.Test.Storyboard.Model do
     :signature_help,
     :hover_popup,
     :float_popup,
-    :extension_overlay
+    :extension_overlay,
+    :tasks_drawer
   ]
 
   @doc """
@@ -245,6 +247,7 @@ defmodule Minga.Test.Storyboard.Model do
       empty_state: visible?(ui.empty_state),
       bottom_panel: visible?(ui.bottom_panel),
       edit_timeline: visible?(ui.edit_timeline),
+      tasks_drawer: visible?(ui.tasks_drawer),
       observatory: visible?(ui.observatory),
       extension_overlay: visible?(ui.extension_overlay)
     ]

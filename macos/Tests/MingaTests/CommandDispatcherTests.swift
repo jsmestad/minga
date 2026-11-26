@@ -3998,6 +3998,7 @@ struct CommandDispatcherStagingTests {
             case .linkCursorChanged: events.append("link")
             case .focusOwnerChanged: events.append("focus-owner")
             case .agentDesktopNotification: events.append("agent-desktop-notification")
+            case .needsYouCountChanged: events.append("needs-you-count")
             }
         }
         gui.frontendExtensions.register(
@@ -4912,6 +4913,23 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.registerFont(id: 1, family: "JetBrainsMono Nerd Font"))
 
         #expect(requested.isEmpty)
+    }
+
+    @Test("a committed gui_menu_bar reaches the menu bar state, which builds the Search menu")
+    @MainActor func guiMenuBarReachesMenuBarState() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        let items = [
+            Wire.MenuBarItem(path: "s", label: "Search", kind: 1),
+            Wire.MenuBarItem(path: "s s", label: "Search buffer", kind: 0, command: "search_buffer"),
+        ]
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiMenuBar(items))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(gui.menuBarState.items == items)
+        #expect(gui.menuBarState.nodes(.search).map(\.title) == ["Search buffer"])
     }
 
     @Test("gui_config_state outside a transaction rejects without mutating settings")

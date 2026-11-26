@@ -15,7 +15,8 @@ Minga ships these scopes:
 | Scope | Active when | Purpose |
 |-------|-------------|---------|
 | `:editor` | Editing files (default) | All normal vim editing. No scope-specific bindings; the full mode system (normal, insert, visual, etc.) handles everything. |
-| `:agent` | The agent view (`SPC a a`) | Agent chat navigation, fold/collapse, copy, search, panel management. The [Key reference](AGENTIC-KEYMAP.md#in-the-agent-view) lists its keys. |
+| `:agent` | The agent view (`SPC a v`) | Agent chat navigation, fold/collapse, copy, search, panel management. The [Key reference](AGENTIC-KEYMAP.md#in-the-agent-view) lists its keys. |
+| `:tasks` | The tasks drawer has the keyboard (`SPC a a`) | Single letters act on the selected task: `j`/`k` move, `y` `a` `t` `n` answer its approval, `c` starts a new task. The [Key reference](AGENTIC-KEYMAP.md#in-the-tasks-drawer) lists its keys. Leader sequences pass through. |
 | `:file_tree` | File tree panel is focused | Tree-specific keys (Enter, h/l, H, r). Unmatched keys delegate to vim motions for navigation. |
 | `:git_status` | Git status panel is focused | Staging, committing and navigation keys for the panel. The panel itself comes from the optional GitExtended extension. |
 | `:picker` | A picker is open (find file, project search, the buffer switcher) | `⌃J` / `⌃K` and the arrows move, `↩` opens, `esc` closes, `Tab` completes, `PageUp` / `PageDown` page, `⌃.` opens the act menu on the highlighted row, and `⌃V` opens the highlighted buffer in a split from the buffer switcher. Every other key edits the query. |
@@ -39,7 +40,7 @@ If no scope binding matches, later surface handlers run. These include agent nav
 
 ### The agent view and its composer
 
-`SPC a a` runs `:toggle_agentic_view`. It switches to the agent view and activates the `:agent` scope, or returns to the editor context it recorded when you left. It has no other meaning. `SPC a v` (`:toggle_agent_split`) runs the same toggle today.
+`SPC a v` (`:toggle_agent_split`) switches to the agent view and activates the `:agent` scope, or returns to the editor context it recorded when you left. `SPC a a` opens the tasks drawer instead (`:agent_tasks`, the `:tasks` scope).
 
 Agent scope bindings are trie data in `Minga.Keymap.Scope.Agent`, with one trie per state: `:normal` for chat navigation, `:insert` and `:input_normal` for the composer, and `:cua` for the desktop shortcut profile. The scope adds keys from context, so `y`, `x`, `Y` and `X` decide changes only while a Diff Review has focus, and `r` runs a failed start's remedy only while one is offered.
 

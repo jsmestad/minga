@@ -71,7 +71,7 @@ defmodule Minga.Services.Supervisor do
 
   @impl true
   @spec init(keyword()) :: {:ok, {Supervisor.sup_flags(), [Supervisor.child_spec()]}}
-  def init(_opts) do
+  def init(opts) do
     Minga.Telemetry.StartupTimer.mark(:services_init)
 
     alias Minga.Telemetry.StartupTimer
@@ -109,11 +109,18 @@ defmodule Minga.Services.Supervisor do
         :svc_semantic_ui_registry,
         MingaEditor.Agent.SemanticUI.Registry
       ),
-      StartupTimer.timed_child_spec(:svc_config_loader, Minga.Config.Loader),
+      # Project-local configuration is read from the project that was launched, never from the VM's directory.
+      StartupTimer.timed_child_spec(
+        :svc_config_loader,
+        {Minga.Config.Loader, project_root: Minga.CLI.startup_project_root()}
+      ),
       StartupTimer.timed_child_spec(:svc_config_writer, Minga.Config.Writer),
       StartupTimer.timed_child_spec(:svc_lsp_supervisor, Minga.LSP.Supervisor),
       StartupTimer.timed_child_spec(:svc_lsp_sync, Minga.LSP.SyncServer),
-      StartupTimer.timed_child_spec(:svc_project, Minga.Project),
+      StartupTimer.timed_child_spec(
+        :svc_project,
+        {Minga.Project, startup_directory: Keyword.get(opts, :startup_directory)}
+      ),
       StartupTimer.timed_child_spec(:svc_session_manager, MingaAgent.SessionManager),
       StartupTimer.timed_child_spec(:svc_reactive_diag, MingaAgent.ReactiveDiagnostics)
     ]

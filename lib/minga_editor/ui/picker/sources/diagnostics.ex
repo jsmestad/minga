@@ -11,6 +11,7 @@ defmodule MingaEditor.UI.Picker.Sources.Diagnostics do
 
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.Empty
 
   alias Minga.Buffer
   alias Minga.Diagnostics
@@ -20,6 +21,45 @@ defmodule MingaEditor.UI.Picker.Sources.Diagnostics do
   @impl true
   @spec title() :: String.t()
   def title, do: "Diagnostics"
+
+  @doc "Opens the diagnostics list for the active buffer, even when it has nothing to report."
+  @spec open(MingaEditor.State.t()) :: MingaEditor.State.t()
+  def open(state),
+    do: MingaEditor.PickerUI.open(state, __MODULE__, %{buffer: state.workspace.buffers.active})
+
+  @doc """
+  With nothing to report, says so and whether a language server checks the file, then offers to restart it or install one, and to show what ran.
+  """
+  @impl true
+  @spec empty(Empty.request()) :: Empty.t()
+  def empty(%{query: query, total: total} = request) do
+    checked? = checked?(request)
+
+    %Empty{
+      typing?: total > 0,
+      title: empty_title(String.trim(query)),
+      why:
+        if(checked?,
+          do: "Its language server reports nothing.",
+          else: "No language server checks this file."
+        ),
+      rows: [first_step(checked?), Empty.command_row(:lsp_info, "Show what ran")]
+    }
+  end
+
+  @spec empty_title(String.t()) :: String.t()
+  defp empty_title(""), do: "No problems in this file."
+  defp empty_title(query), do: "No problem matches #{Empty.quoted(query)}."
+
+  @spec checked?(Empty.request()) :: boolean()
+  defp checked?(%{context: %{buffer: buf}}) when is_pid(buf),
+    do: SyncServer.clients_for_buffer(buf) != []
+
+  defp checked?(_request), do: false
+
+  @spec first_step(boolean()) :: Item.t()
+  defp first_step(true), do: Empty.command_row(:lsp_restart, "Check again")
+  defp first_step(false), do: Empty.command_row(:tool_manage, "Install a language server")
 
   @impl true
   @spec candidates(Context.t()) :: [Item.t()]
@@ -69,6 +109,8 @@ defmodule MingaEditor.UI.Picker.Sources.Diagnostics do
 
   @impl true
   @spec on_select(Item.t(), term()) :: term()
+  def on_select(%Item{id: {:next_step, _step}} = item, state), do: Empty.run_command(item, state)
+
   def on_select(%Item{id: {line, col}}, state) do
     case state.workspace.buffers.active do
       nil ->

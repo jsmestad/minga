@@ -38,17 +38,22 @@ defmodule MingaEditor.Handlers.SessionRestore do
           snapshot: Snapshot.t() | nil,
           recovered: [recovered_entry()],
           held_back: [Session.swap_entry()],
-          waiting_elsewhere: non_neg_integer()
+          waiting_elsewhere: non_neg_integer(),
+          waiting_projects: [Session.waiting_project()]
         }
 
   # ── Public functions ──────────────────────────────────────────────────
 
-  @doc "Loads this project's saved session and restores it."
+  @doc "Loads this project's saved session and restores it. Does nothing with session persistence off."
   @spec restore_session(state()) :: state()
   def restore_session(state) do
-    case Session.load(SessionHandler.project_session_opts(state)) do
-      {:ok, session} -> apply_session_snapshot(state, session)
-      {:error, _} -> state
+    if MingaEditor.State.Session.enabled?(state.session) do
+      case Session.load(SessionHandler.project_session_opts(state)) do
+        {:ok, session} -> apply_session_snapshot(state, session)
+        {:error, _} -> state
+      end
+    else
+      state
     end
   end
 
@@ -65,7 +70,10 @@ defmodule MingaEditor.Handlers.SessionRestore do
     {state, recovered_count} = recover_entries(state, recovered)
     :ok = announce_held_back(resume.held_back)
     :ok = announce_waiting_elsewhere(resume.waiting_elsewhere)
-    announce(state, restored, recovered_count)
+
+    state
+    |> EditorState.mark_home_waiting(resume.waiting_projects)
+    |> announce(restored, recovered_count)
   end
 
   @doc """

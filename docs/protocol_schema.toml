@@ -87,9 +87,14 @@ version = "2.0.0"
 # protocol_version 45 adds the empty_list structure (the empty-state anatomy: glyph, title, why line, selected action and actions) and the gui_picker empty section (0x07) that carries it when a picker offers next steps instead of results. An action's id is the command it runs; a click sends the existing execute_command gui_action with it.
 # protocol_version 46 adds the gui_picker movement_keys section (0x08) (the keys that move the highlighted row, resolved from the picker keymap scope, so frontends preview exactly those keys) and the picker_fit gui_action (the result rows the frontend's picker list shows, which sizes a picker page).
 # protocol_version 47 adds two frontend-to-BEAM events. frontend_foreground (0x13, the slot batch_end left in version 3) says whether the frontend is in the foreground: the terminal reports its focus, macOS its active state. terminal_report (0x62) is the terminal frontend's snapshot of which terminal features it detected, misses or replaces with a fallback, with the enums terminal_feature and terminal_feature_status.
+# protocol_version 50 adds a third byte, source, to each entry of terminal_report (0x62), with the enum terminal_feature_source: how the terminal frontend settled a feature (the terminal answered, a known terminal, a timeout, or the user).
 # protocol_version 48 reshapes gui_which_key: the panel names its path, breadcrumb, group count and hints, and each entry carries its raw key, section, live count and macOS ⌘ equivalent. Each count carries a tone byte (0 muted, 1 needs you, 2 error) naming its colour role. Paging and icons are retired.
-# protocol_version 50 (#4055) appends each tool call's state (u8, a shared state id) and one-line step sentence (string16) to gui_agent_chat messages 0x04 and 0x08, adds the composer hints section 0x10, adds tab and workspace agent status 7 (stopped) and adds context-card status 6 (stopped).
-protocol_version = 50
+# protocol_version 51 adds gui_tasks_drawer (0xAC) with its empty_list empty state, the tasks_drawer_action gui_action (0x71) and gui_focus_owner surface 14 (the tasks drawer).
+# protocol_version 52 narrows agent_desktop_notification (0x61) to one "needs you" alert and its withdrawal (kinds 1 and 2, fixed:18, no debounce), sends it to the Go frontend too (the optional terminal bell), and adds the agent_notification_open gui_action (0x72), which names the clicked alert by its 16-byte identity. It also adds the gui_status_bar needs_you section (0x14: the needs-you count, for the macOS Dock badge).
+# protocol_version 53 adds the which_key_press (0x73) and which_key_back (0x74) gui_actions, so a click on a which-key row or crumb names the open panel's path, and gui_menu_bar (0xAD), the leader groups the macOS menu bar mirrors.
+# protocol_version 54 adds key_hint and the hints of the gui_picker empty section (0x07), plus enter_selection (0x09), the live picker keymap's permission to activate its locally previewed row with unmodified Enter.
+# protocol_version 55 (#4055) appends each tool call's state (u8, a shared state id) and one-line step sentence (string16) to gui_agent_chat messages 0x04 and 0x08, adds the composer hints section 0x10, adds tab and workspace agent status 7 (stopped) and adds context-card status 6 (stopped).
+protocol_version = 55
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -253,7 +258,7 @@ value = 0x60
 direction = "frontend_to_beam"
 
 # The terminal frontend's report of terminal features: count(u8), then count entries of
-# feature(u8, terminal_feature) + status(u8, terminal_feature_status).
+# feature(u8, terminal_feature) + status(u8, terminal_feature_status) + source(u8, terminal_feature_source).
 # Every event is a complete snapshot that replaces the earlier one. The frontend sends it after ready,
 # with the answers it has and "pending" for queries the terminal has not answered, and again when an entry changes.
 # A frontend without a host terminal never sends it.
@@ -419,16 +424,15 @@ consumers = ["swift"]
 skip = { go = "Native presentation operations are not used by the TUI" }
 framing = "fixed:24"
 
-# One native agent attention signal, emitted outside render frames. It carries
-# a u8 kind, a 16-byte opaque identity, and a u32 outcome debounce interval in ms.
+# One "a task needs you" alert, or its withdrawal, emitted outside render frames. It carries a u8 kind (1 needs you, 2 withdrawn) and the alert's 16-byte opaque identity.
+# macOS posts or removes a notification; the terminal frontend rings the bell for kind 1 and ignores kind 2. The BEAM sends it only when Minga is in the background.
 [[opcodes]]
 category = "render"
 name = "agent_desktop_notification"
 value = 0x61
 direction = "beam_to_frontend"
-consumers = ["swift"]
-skip = { go = "Terminal sessions deliver notifications independently" }
-framing = "fixed:22"
+consumers = ["swift", "go"]
+framing = "fixed:18"
 
 # protocol_error reuses the freed cell-paradigm value 0x18. The BEAM emits it when
 # a frontend's handshake protocol_version does not match the BEAM's, carrying a
@@ -949,6 +953,17 @@ consumers = ["swift"]
 skip = { go = "Native settings state is not used by the TUI" }
 framing = "len16"
 
+# The leader keymap as the macOS menu bar mirrors it: every group and command under SPC in which-key order
+# (payload: item count u16, then menu_bar_item structures). Sent when it changes, at connect and on config reload.
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_menu_bar"
+value = 0xAD
+direction = "beam_to_frontend"
+consumers = ["swift"]
+skip = { go = "The terminal has no menu bar; the mode pill and which-key are its mouse path" }
+framing = "len16"
+
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_workspaces"
@@ -1132,6 +1147,15 @@ framing = "len16"
 category = "gui_chrome"
 name = "gui_agent_help"
 value = 0xAB
+direction = "beam_to_frontend"
+consumers = ["swift", "go"]
+framing = "len32"
+
+# The tasks drawer (`*minga-tasks*`, #4045): every task Minga is working on, as a tree, in a bottom drawer.
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_tasks_drawer"
+value = 0xAC
 direction = "beam_to_frontend"
 consumers = ["swift", "go"]
 framing = "len32"
@@ -1563,6 +1587,33 @@ value = 0x6F
 name = "picker_fit"
 value = 0x70
 
+# Payload: row_id(string8) + action(string8). A click on a tasks drawer row (`select`) or on one of its actions (the
+# action's key: `y`, `a`, `t`, `n`) or on the drawer's close control (`q`, empty row id). The row id is the row's
+# identity from gui_tasks_drawer, never a position, so a click acts on the task the user saw.
+[[gui_actions]]
+name = "tasks_drawer_action"
+value = 0x71
+
+# Payload: identity(16 bytes), the agent_desktop_notification identity of the alert the user clicked.
+# The BEAM opens the tasks drawer on that alert's task, by identity, and answers nothing; an alert it no longer knows opens the drawer.
+[[gui_actions]]
+name = "agent_notification_open"
+value = 0x72
+
+# Presses a which-key row's key, as if typed. Payload: path(string16) +
+# codepoint(u32) + modifiers(u8). The path is the panel's identity from
+# gui_which_key; the BEAM presses the key only while that panel is still open.
+[[gui_actions]]
+name = "which_key_press"
+value = 0x73
+
+# Goes back up the which-key breadcrumb. Payload: path(string16), the crumb's
+# path from gui_which_key. The BEAM goes up only while the open panel is below
+# that path.
+[[gui_actions]]
+name = "which_key_back"
+value = 0x74
+
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
 # Capability payload version 2 appends these fields after the original seven
@@ -1637,6 +1688,22 @@ values = [
   { name = "detected", value = 2 },
   { name = "missing", value = 3 },
   { name = "fallback", value = 4 },
+]
+
+# How the terminal frontend settled a feature's status, so `:checkhealth terminal` can say why.
+# unsettled: still pending, or the frontend does not detect the feature. answered: the terminal answered a query or
+# showed the feature by using it. known_terminal: the terminal is in the frontend's table of known terminals.
+# timeout: the terminal did not answer in time. user: the user forced it (the `:terminal_features` option).
+[[enums]]
+name = "terminal_feature_source"
+repr = "u8"
+default = "unsettled"
+values = [
+  { name = "unsettled", value = 0 },
+  { name = "answered", value = 1 },
+  { name = "known_terminal", value = 2 },
+  { name = "timeout", value = 3 },
+  { name = "user", value = 4 },
 ]
 
 [[enums]]
@@ -2056,6 +2123,14 @@ fields = [
   { name = "label", type = "string16" },
 ]
 
+# One key hint of a picker's footer: the keys, already labelled for display ("j k", "⌃J ⌃K", "↩"), and the word they do ("move").
+[[structures]]
+name = "key_hint"
+fields = [
+  { name = "keys", type = "string16" },
+  { name = "word", type = "string16" },
+]
+
 # The empty-state anatomy (docs/design/anatomy.md, "Empty state"): what happened (glyph and title), why (one muted line), and the next steps with the preselected one. A picker sends no actions: its next steps are its item rows.
 [[structures]]
 name = "empty_list"
@@ -2092,6 +2167,17 @@ fields = [
 ]
 
 [[structures]]
+name = "menu_bar_item"
+fields = [
+  { name = "path", type = "string16" },
+  { name = "label", type = "string16" },
+  { name = "section", type = "string16" },
+  { name = "kind", type = "u8" },
+  { name = "command", type = "string16" },
+  { name = "platform_key", type = "string8" },
+]
+
+[[structures]]
 name = "which_key_entry"
 fields = [
   { name = "kind", type = "u8" },
@@ -2111,6 +2197,40 @@ name = "agent_todo"
 fields = [
   { name = "status", type = "u8" },
   { name = "description", type = "string16" },
+]
+
+[[structures]]
+name = "tasks_drawer_count"
+fields = [
+  { name = "state", type = "u8" },
+  { name = "count", type = "u16" },
+]
+
+[[structures]]
+name = "tasks_drawer_hint"
+fields = [
+  { name = "key", type = "string8" },
+  { name = "label", type = "string16" },
+]
+
+[[structures]]
+name = "tasks_drawer_line"
+fields = [
+  { name = "text", type = "string16" },
+]
+
+[[structures]]
+name = "tasks_drawer_row"
+fields = [
+  { name = "id", type = "string8" },
+  { name = "depth", type = "u8" },
+  { name = "flags", type = "u8" },
+  { name = "state", type = "u8" },
+  { name = "title", type = "string16" },
+  { name = "words", type = "string16" },
+  { name = "age", type = "string8" },
+  { name = "detail", type = "counted_array", count_type = "u8", element = "tasks_drawer_line" },
+  { name = "actions", type = "counted_array", count_type = "u8", element = "tasks_drawer_hint" },
 ]
 
 [[structures]]
@@ -2715,6 +2835,8 @@ name = "empty"
 fields = [
   { name = "empty", type = "struct", element = "empty_list" },
   { name = "list_keys", type = "u8" },
+  # The footer's key hints, resolved by the BEAM from the live picker keymap, so frontends hold no key literals.
+  { name = "hints", type = "counted_array", count_type = "u8", element = "key_hint" },
 ]
 
 [[sections]]
@@ -2727,6 +2849,13 @@ name = "movement_keys"
 layout = "counted_array"
 count_type = "u8"
 element = "picker_movement_key"
+
+[[sections]]
+opcode = "gui_picker"
+id = 0x09
+name = "enter_selection"
+# Whether unmodified Enter resolves to picker_select now. Other keys, remapped Enter, and act-menu Enter go to the BEAM.
+fields = [{ name = "selects", type = "u8" }]
 
 # gui_agent_chat (0x78) sections
 
@@ -2953,6 +3082,32 @@ fields = [
   { name = "session_id", type = "u32" },
   { name = "acknowledged_edit_seq", type = "u32" },
   { name = "status", type = "u8" },
+]
+
+# gui_tasks_drawer: state is the design-token state wire byte (docs/design_tokens.toml [[states]].wire), 0 for none.
+# Row flags: bit 0 last subagent of its task (draw `└─`), bit 1 selected. view: 0 the list, 1 the selected request's
+# diff, 2 a task's output; a diff or output shows view_title over view_lines from view_offset. prompt is a question the
+# drawer is asking (stop confirmation), or empty. has_empty = 1 when the drawer has no tasks: empty is then the
+# empty-state anatomy with its next steps (an action's id is the command a click sends with execute_command);
+# otherwise empty is all zero. A hidden drawer sends visible = 0 and empty fields.
+[[command_fields]]
+opcode = "gui_tasks_drawer"
+fields = [
+  { name = "visible", type = "u8" },
+  { name = "focused", type = "u8" },
+  { name = "name", type = "string8" },
+  { name = "title", type = "string16" },
+  { name = "note", type = "string16" },
+  { name = "counts", type = "counted_array", count_type = "u8", element = "tasks_drawer_count" },
+  { name = "hints", type = "counted_array", count_type = "u8", element = "tasks_drawer_hint" },
+  { name = "rows", type = "counted_array", count_type = "u16", element = "tasks_drawer_row" },
+  { name = "view", type = "u8" },
+  { name = "view_title", type = "string16" },
+  { name = "view_lines", type = "counted_array", count_type = "u16", element = "tasks_drawer_line" },
+  { name = "view_offset", type = "u16" },
+  { name = "prompt", type = "string16" },
+  { name = "has_empty", type = "u8" },
+  { name = "empty", type = "struct", element = "empty_list" },
 ]
 
 [[command_fields]]

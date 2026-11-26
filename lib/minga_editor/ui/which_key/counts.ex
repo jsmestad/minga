@@ -36,8 +36,8 @@ defmodule MingaEditor.UI.WhichKey.Counts do
       iex> MingaEditor.UI.WhichKey.Counts.from_facts(%{needs_you_count: 1, diagnostic_counts: {2, 0, 0, 0}})
       %{
         {:command, :agent_attach_diagnostics} => %{text: "· 2 errors", tone: :error},
+        {:command, :agent_tasks} => %{text: "· 1 needs you", tone: :needs_you},
         {:command, :diagnostics_list} => %{text: "· 2 errors", tone: :error},
-        {:command, :toggle_agentic_view} => %{text: "· 1 needs you", tone: :needs_you},
         {:group, "a"} => %{text: "· 1 needs you", tone: :needs_you},
         {:group, "c"} => %{text: "· 2 errors", tone: :error}
       }
@@ -62,7 +62,7 @@ defmodule MingaEditor.UI.WhichKey.Counts do
   @spec needs_you(non_neg_integer()) :: [{target(), count()}]
   defp needs_you(count) when is_integer(count) and count > 0 do
     count = %{text: "· #{count} needs you", tone: :needs_you}
-    [{{:group, "a"}, count}, {{:command, :toggle_agentic_view}, count}]
+    [{{:group, "a"}, count}, {{:command, :agent_tasks}, count}]
   end
 
   defp needs_you(_count), do: []

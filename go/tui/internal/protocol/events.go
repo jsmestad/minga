@@ -89,11 +89,11 @@ func EncodeFrontendForeground(foreground bool) []byte {
 // The capabilities value is the only input, so the report cannot say anything the frontend does not act on.
 func EncodeTerminalReport(capabilities terminal.Capabilities) []byte {
 	entries := capabilities.Entries()
-	bodyLen := 1 + 2*len(entries)
+	bodyLen := 1 + 3*len(entries)
 	out := make([]byte, 0, 3+bodyLen)
 	out = append(out, generated.OPTerminalReport, byte(bodyLen>>8), byte(bodyLen), byte(len(entries)))
 	for _, entry := range entries {
-		out = append(out, byte(entry.Feature), byte(entry.Status))
+		out = append(out, byte(entry.Feature), byte(entry.Status), byte(entry.Source))
 	}
 	return out
 }
@@ -317,6 +317,38 @@ func EncodeGUIExecuteCommand(command string) []byte {
 	}
 	out := []byte{generated.OPGuiAction, generated.GUIActionExecuteCommand, byte(len(payload) >> 8), byte(len(payload))}
 	return append(out, payload...)
+}
+
+// EncodeGUIWhichKeyPress presses a which-key row's key while the panel on path is still open (docs/GUI_PROTOCOL.md).
+func EncodeGUIWhichKeyPress(path string, codepoint uint32, modifiers byte) []byte {
+	out := append([]byte{generated.OPGuiAction, generated.GUIActionWhichKeyPress}, encodeString16(path)...)
+	out = binary.BigEndian.AppendUint32(out, codepoint)
+	return append(out, modifiers)
+}
+
+// EncodeGUIWhichKeyBack goes back up the which-key breadcrumb to the crumb on path.
+func EncodeGUIWhichKeyBack(path string) []byte {
+	return append([]byte{generated.OPGuiAction, generated.GUIActionWhichKeyBack}, encodeString16(path)...)
+}
+
+func encodeString16(value string) []byte {
+	payload := []byte(value)
+	if len(payload) > 65535 {
+		payload = payload[:65535]
+	}
+	return append([]byte{byte(len(payload) >> 8), byte(len(payload))}, payload...)
+}
+
+// EncodeGUITasksDrawerAction names a tasks drawer row by its identity and what the click did on it: "select", an
+// approval key ("y", "a", "t", "n"), or "q" to close the drawer (with an empty row id).
+func EncodeGUITasksDrawerAction(rowID, action string) []byte {
+	if len(rowID) > 255 || len(action) == 0 || len(action) > 255 {
+		return nil
+	}
+	out := []byte{generated.OPGuiAction, generated.GUIActionTasksDrawerAction, byte(len(rowID))}
+	out = append(out, rowID...)
+	out = append(out, byte(len(action)))
+	return append(out, action...)
 }
 
 func EncodeGUIAgentComposerSubmit(generation, offer uint64) []byte {
