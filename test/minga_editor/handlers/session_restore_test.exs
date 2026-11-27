@@ -175,9 +175,8 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
     path = Path.join(dir, "recovered.ex")
     File.write!(path, "old\n")
     state = initial_state(dir)
-    entry = %{path: path, swap_path: Path.join(dir, "recovered.swap"), swap_mtime: 0}
-
-    recovered = SessionRestore.apply_recovered_entries(state, [{entry, {:ok, path, "new\n"}}])
+    entry = recovery_entry(path, dir, "new\n")
+    recovered = SessionRestore.apply_recovered_entries(state, [entry])
     buffer = recovered.workspace.buffers.active
 
     assert Minga.Buffer.file_path(buffer) == path
@@ -189,19 +188,16 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
   } do
     path = Path.join(dir, "edited_since.ex")
     File.write!(path, "saved\n")
-    swap_path = Path.join(dir, "edited_since.swap")
-    File.write!(swap_path, "the swap file")
+    {entry, result} = recovery_entry(path, dir, "from before the crash\n")
+    swap_path = entry.swap_path
     {:ok, buffer} = Minga.Buffer.ensure_for_path(path)
     on_exit(fn -> DynamicSupervisor.terminate_child(Minga.Buffer.Supervisor, buffer) end)
     :ok = Minga.Buffer.replace_content(buffer, "typed since the restart\n")
     state = initial_state(dir)
-    entry = %{path: path, swap_path: swap_path, swap_mtime: 0}
 
     log =
       ExUnit.CaptureLog.capture_log(fn ->
-        assert SessionRestore.apply_recovered_entries(state, [
-                 {entry, {:ok, path, "from before the crash\n"}}
-               ]) == state
+        assert SessionRestore.apply_recovered_entries(state, [{entry, result}]) == state
       end)
 
     assert Minga.Buffer.content(buffer) == "typed since the restart\n"
@@ -225,7 +221,7 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
       MingaEditor.Session.Recovery.request(state, [swap_dir: nil], opts, false, true)
 
     snapshot = %Snapshot{version: 1, buffers: [%BufferEntry{file: path}], active_file: path}
-    entry = %{path: path, swap_path: Path.join(dir, "recovered.swap"), swap_mtime: 0}
+    entry = recovery_entry(path, dir, "unsaved\n")
 
     outcome =
       MingaEditor.Effect.Outcome.completed(
@@ -233,7 +229,7 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
         {:resume,
          %{
            snapshot: snapshot,
-           recovered: [{entry, {:ok, path, "unsaved\n"}}],
+           recovered: [entry],
            held_back: [],
            waiting_elsewhere: 0,
            waiting_projects: []
@@ -259,6 +255,13 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
     assert recovered_buffer in resumed.workspace.buffers.list
     assert Minga.Buffer.content(recovered_buffer) == "unsaved\n"
     assert Minga.Buffer.dirty?(recovered_buffer)
+  end
+
+  defp recovery_entry(path, swap_dir, content) do
+    opts = [swap_dir: swap_dir, os_pid: 99_999]
+    :ok = Minga.Session.Swap.write(path, content, opts)
+    swap_path = Minga.Session.Swap.swap_path(path, opts)
+    {%{path: path, swap_path: swap_path, swap_mtime: 0}, Session.read_swap_file(swap_path)}
   end
 
   describe "the lines a start writes about unsaved text it did not put back" do

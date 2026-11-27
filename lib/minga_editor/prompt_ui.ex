@@ -54,7 +54,7 @@ defmodule MingaEditor.PromptUI do
   # ── Public API ──────────────────────────────────────────────────────────────
 
   @doc """
-  Opens a text input prompt with the given handler module.
+  Opens a built-in text input or confirmation prompt with the given handler module.
 
   Replaces any active modal (the gate's replacement policy handles the
   picker → prompt transition). An optional `:default` value pre-fills the
@@ -66,6 +66,7 @@ defmodule MingaEditor.PromptUI do
   - `:default` — pre-filled text (default: `""`)
   - `:context` — arbitrary map passed through to the handler (default: `nil`)
   - `:label` — prompt label override (default: `handler_module.label()`)
+  - `:kind` — `:text` (default) or `:confirm` for a yes/no prompt
   - `:sensitive` — mask presentation and exclude input from key history (default: `false`)
   """
   @spec open(state(), module(), keyword()) :: state()
@@ -75,7 +76,7 @@ defmodule MingaEditor.PromptUI do
 
     unless is_boolean(sensitive), do: raise(ArgumentError, ":sensitive must be a boolean")
 
-    prompt_state = PromptState.new(:text, handler_module, label, opts)
+    prompt_state = PromptState.new(Keyword.get(opts, :kind, :text), handler_module, label, opts)
 
     ModalWorkflow.open(state, {:prompt, PromptPayload.new(prompt_state)})
   end

@@ -1509,6 +1509,17 @@ defmodule MingaEditor.Commands.BufferManagement do
           Tab.id() | nil
         ) :: state()
   defp destroy_current_buffer(state, _buffers, _idx, bs, buf, replacement_id) do
+    case Buffer.prepare_close(buf) do
+      :ok ->
+        destroy_released_buffer(state, bs, buf, replacement_id)
+
+      {:error, reason} ->
+        NoticeWorkflow.publish(state, "Could not discard the buffer's swap: #{inspect(reason)}")
+    end
+  end
+
+  @spec destroy_released_buffer(state(), Buffers.t(), pid(), Tab.id() | nil) :: state()
+  defp destroy_released_buffer(state, bs, buf, replacement_id) do
     buf_name =
       try do
         Helpers.buffer_display_name(buf)
@@ -3016,7 +3027,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp exit_editor(state, 0) do
     # The next `minga .` in this project picks up exactly where this quit left off.
     :ok = MingaEditor.Handlers.SessionHandler.save_now(state)
-    :ok = release_swaps(state)
+    exit_status = release_swap_exit_status(state, 0)
 
     if any_buffer_dirty?(state) do
       :ok = WaitRequests.cancel_all("editor closed with unsaved changes")
@@ -3025,18 +3036,34 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
 
     shutdown_fn = Application.get_env(:minga, :shutdown_fn, &System.stop/1)
-    shutdown_fn.(0)
+    shutdown_fn.(exit_status)
     state
   end
 
   # A quit is the user's decision about every open buffer: its changes are saved, or given up.
   # The supervisor stops buffers without running their `terminate/2`, so their swap files are released here.
   # After a crash, a kill or a lost frontend nobody decided, and the swap files stay for the next start.
-  @spec release_swaps(state()) :: :ok
-  defp release_swaps(state) do
+  @spec release_swap_exit_status(state(), 0 | 1) :: 0 | 1
+  defp release_swap_exit_status(state, requested) do
     case Keyword.get(MingaEditor.State.Session.swap_opts(state.session), :swap_dir) do
-      swap_dir when is_binary(swap_dir) -> Minga.Buffer.release_swaps(swap_dir)
-      nil -> :ok
+      swap_dir when is_binary(swap_dir) ->
+        case Minga.Buffer.release_swaps(swap_dir) do
+          :ok ->
+            requested
+
+          {:error, failed} ->
+            Enum.each(failed, fn {path, reason} ->
+              Minga.Log.warning(
+                :editor,
+                "Quit did not discard the swap for #{path}: #{inspect(reason)}. It may still be available for recovery."
+              )
+            end)
+
+            1
+        end
+
+      nil ->
+        requested
     end
   end
 
@@ -3046,9 +3073,9 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp abort_quit_editor(state) do
     state = EditPublication.discard_all(state)
     :ok = WaitRequests.cancel_all("editor aborted")
-    :ok = release_swaps(state)
+    exit_status = release_swap_exit_status(state, 1)
     shutdown_fn = Application.get_env(:minga, :shutdown_fn, &System.stop/1)
-    shutdown_fn.(1)
+    shutdown_fn.(exit_status)
     state
   end
 

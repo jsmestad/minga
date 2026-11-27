@@ -21,6 +21,7 @@ defmodule MingaEditor.Session.CrashRecovery do
   alias Minga.Events.BufferCrashedEvent
   alias Minga.Log
   alias Minga.Session.Swap
+  alias Minga.Session.Swap.Recovery
   alias MingaEditor.Commands
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Policy
@@ -37,7 +38,7 @@ defmodule MingaEditor.Session.CrashRecovery do
   @type t :: %__MODULE__{path: String.t(), swap_path: String.t(), activate?: boolean()}
 
   @typedoc "The unsaved text read from the swap file of `path`."
-  @type result :: {path :: String.t(), content :: String.t()}
+  @type result :: {Swap.identity(), String.t()}
 
   @doc """
   Schedules recovery for the crash a dead buffer announced.
@@ -82,8 +83,8 @@ defmodule MingaEditor.Session.CrashRecovery do
   @impl true
   @spec run(t()) :: {:ok, result()} | {:error, term()}
   def run(%__MODULE__{path: path, swap_path: swap_path}) do
-    case Swap.read(swap_path) do
-      {:ok, %{path: ^path}, content} -> {:ok, {path, content}}
+    case Recovery.read(swap_path) do
+      {:ok, %{path: ^path} = source, content} -> {:ok, {source, content}}
       {:ok, %{path: other}, _content} -> {:error, {:swap_belongs_to, other}}
       {:error, reason} -> {:error, reason}
     end
@@ -94,11 +95,11 @@ defmodule MingaEditor.Session.CrashRecovery do
   def apply(
         %EditorState{} = state,
         %Outcome{
-          value: {:completed, {path, content}},
+          value: {:completed, {source, content}},
           request: %Request{effect: %__MODULE__{} = effect}
         } = outcome
       ),
-      do: {reopen(state, effect, path, content), outcome}
+      do: {reopen(state, effect, source, content), outcome}
 
   def apply(
         %EditorState{} = state,
@@ -120,9 +121,9 @@ defmodule MingaEditor.Session.CrashRecovery do
   def render?(%Outcome{value: {:completed, _result}}), do: true
   def render?(%Outcome{}), do: false
 
-  @spec reopen(EditorState.t(), t(), String.t(), String.t()) :: EditorState.t()
-  defp reopen(state, %__MODULE__{} = effect, path, content) do
-    case start_with_text(state, path, content, effect.swap_path) do
+  @spec reopen(EditorState.t(), t(), Swap.identity(), String.t()) :: EditorState.t()
+  defp reopen(state, %__MODULE__{} = effect, %{path: path} = source, content) do
+    case start_with_text(state, source, content) do
       {:ok, buffer} ->
         Log.info(:editor, "Recovered after a crash: #{Path.basename(path)}")
 
@@ -141,6 +142,9 @@ defmodule MingaEditor.Session.CrashRecovery do
 
         state
 
+      {:error, :stale_swap} ->
+        state
+
       {:error, reason} ->
         Log.warning(
           :editor,
@@ -154,11 +158,11 @@ defmodule MingaEditor.Session.CrashRecovery do
   # Gives the recovered text to the buffer for the file: the one that is open again, or a new one.
   # A buffer that started after the crash took the kept swap when it started, so it holds this text already.
   # If the user has typed in it since, it holds newer text and refuses.
-  @spec start_with_text(EditorState.t(), String.t(), String.t(), String.t()) ::
+  @spec start_with_text(EditorState.t(), Swap.identity(), String.t()) ::
           {:ok, pid()} | {:error, term()}
-  defp start_with_text(state, path, content, swap_path) do
-    with {:ok, buffer} <- buffer_for(state, path, swap_path),
-         :ok <- Buffer.adopt_recovered_text(buffer, content, swap_path) do
+  defp start_with_text(state, source, content) do
+    with {:ok, buffer} <- buffer_for(state, source.path, source.swap_path),
+         :ok <- Buffer.adopt_recovered_text(buffer, content, source, :automatic) do
       {:ok, buffer}
     end
   catch

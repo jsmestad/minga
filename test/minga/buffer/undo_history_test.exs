@@ -17,6 +17,15 @@ defmodule Minga.Buffer.UndoHistoryTest do
   @step_two {:minga, "task-1", "call-2"}
   @other_task {:minga, "task-2", "call-9"}
 
+  @spec reject_review(UndoHistory.t(), UndoHistory.review_target(), Document.t()) ::
+          {:ok, UndoHistory.Restore.t(), UndoHistory.t(), [UndoHistory.rejected_unit()]}
+          | UndoHistory.blocked()
+          | {:error, UndoHistory.review_error()}
+  defp reject_review(history, target, document) do
+    nonce = <<System.unique_integer([:positive, :monotonic])::128>>
+    UndoHistory.reject_review(history, target, document, nonce)
+  end
+
   describe "your groups" do
     test "same-source edits inside the window coalesce, at signed monotonic times" do
       for {first, second} <- [{@t0, @t0 + @window - 1}, {-@t0, -@t0}] do
@@ -385,6 +394,11 @@ defmodule Minga.Buffer.UndoHistoryTest do
 
         assert {:blocked, {:overlaps, :you}} =
                  UndoHistory.reject_task(world.history, task, world.version, world.doc)
+
+        assert {:ok, target} = UndoHistory.prepare_review(world.history, {:task, task})
+
+        assert {:blocked, {:overlaps, :you}} =
+                 reject_review(world.history, target, world.doc)
 
         assert {:ok, restore, history, %{held: held}} =
                  UndoHistory.undo_agent_session(world.history, world.version, world.doc)
@@ -1236,6 +1250,449 @@ defmodule Minga.Buffer.UndoHistoryTest do
         :empty ->
           assert step(compacted, :undo) == :empty
       end
+    end
+
+    test "a resumed step, its merged rewrite, and a disjoint deletion are two review units" do
+      task = {:minga, "task-1"}
+      deletion = {:minga, "task-1", "delete"}
+
+      world =
+        world("cat dog\n", recording: :coarse, shadow: false)
+        |> edit(@step_one, 0, 3, "CAT")
+        |> edit(@step_one, 4, 3, "DOG")
+        |> edit(@other_task, 7, 0, "!")
+        |> edit(@step_one, 8, 0, "?")
+        |> edit(@step_two, 0, 3, "lynx")
+        |> edit(deletion, 10, 1, "")
+
+      assert [_, _, _] = UndoHistory.review_units(world.history, task)
+
+      history = %{world.history | run_budget: 3, compaction_wanted: true}
+
+      assert {_, compacted, %{merged: [{@step_one, @step_two}]}} =
+               UndoHistory.compact_slice(history, 1)
+
+      assert [_, _] = UndoHistory.review_units(compacted, task)
+      assert [_] = UndoHistory.review_units(compacted, {:minga, "task-2"})
+      assert [] = UndoHistory.review_units(compacted, {:minga, "missing"})
+
+      snapshot = UndoHistory.snapshot(compacted, text(world))
+
+      assert {:ok, recovered} =
+               UndoHistory.restore_snapshot(UndoHistory.new(world.doc), snapshot, text(world))
+
+      assert {:ok, target} = UndoHistory.prepare_review(recovered, {:step, @step_one})
+      assert UndoHistory.review_summary(target) == {task, 1}
+
+      assert {:ok, restore, recovered, [receipt]} =
+               reject_review(recovered, target, world.doc)
+
+      rejected = Document.content(restore.document)
+      assert rejected == "cat dog!"
+      parked = UndoHistory.snapshot(recovered, rejected)
+
+      assert {:ok, recovered} =
+               UndoHistory.restore_snapshot(UndoHistory.new(restore.document), parked, rejected)
+
+      assert {:ok, restored, recovered} =
+               UndoHistory.restore_review(recovered, receipt, restore.document)
+
+      assert Document.content(restored.document) == text(world)
+      assert [_, _] = UndoHistory.review_units(recovered, task)
+    end
+
+    test "Keep leaves only the other step reviewable and reclaims the finalized replacement" do
+      task = {:minga, "task-1"}
+
+      world =
+        world("abc def\n")
+        |> edit(:user, 7, 0, "!")
+        |> undo!()
+        |> edit(@step_one, 0, 3, "ABC")
+        |> edit(@step_two, 4, 3, "DEF")
+
+      assert {:ok, task_target} = UndoHistory.prepare_review(world.history, {:task, task})
+      assert UndoHistory.review_summary(task_target) == {task, 2}
+      assert {:ok, target} = UndoHistory.prepare_review(world.history, {:step, @step_one})
+      assert UndoHistory.review_summary(target) == {task, 1}
+
+      before = UndoHistory.provenance(world.history)
+      assert {:ok, kept} = UndoHistory.keep_review(world.history, target)
+      after_keep = UndoHistory.provenance(kept)
+      assert Provenance.run_count(after_keep) < Provenance.run_count(before)
+
+      assert map_size(Provenance.change_records(after_keep)) <
+               map_size(Provenance.change_records(before))
+
+      assert Provenance.author_at(after_keep, 0) == task
+      assert :empty = UndoHistory.prepare_review(kept, {:step, @step_one})
+      assert {:error, :stale_review} = UndoHistory.keep_review(kept, task_target)
+
+      world = redo!(%{world | history: kept, shadow: nil})
+      assert text(world) == "ABC DEF!\n"
+      assert text(reject_newest_task(world)) == "ABC def!\n"
+    end
+
+    test "a recovery checkpoint preserves Keep and foreground authorship without replaying user undo" do
+      world =
+        world("first last\n", shadow: false)
+        |> edit(@step_one, 0, 5, "FIRST")
+        |> edit(@step_two, 6, 4, "LAST")
+        |> edit(:user, 5, 0, "!")
+
+      assert {:ok, target} = UndoHistory.prepare_review(world.history, {:step, @step_one})
+      assert {:ok, kept} = UndoHistory.keep_review(world.history, target)
+      bytes = text(world)
+      snapshot = UndoHistory.snapshot(kept, bytes)
+
+      assert {:ok, recovered} =
+               UndoHistory.restore_snapshot(UndoHistory.new(world.doc), snapshot, bytes)
+
+      assert :empty = UndoHistory.undo(recovered, world.version, world.doc)
+      assert :empty = UndoHistory.prepare_review(recovered, {:step, @step_one})
+      assert Provenance.author_at(UndoHistory.provenance(recovered), 0) == {:minga, "task-1"}
+      assert Provenance.author_at(UndoHistory.provenance(recovered), 5) == :you
+      assert {:ok, review} = UndoHistory.prepare_review(recovered, :latest)
+      assert {:ok, restored, _, [_]} = reject_review(recovered, review, world.doc)
+      assert Document.content(restored.document) == "FIRST! last\n"
+    end
+
+    test "a recovery checkpoint refuses different bytes or missing live-group references" do
+      world = world("one\n", shadow: false) |> edit(@step_one, 0, 3, "two")
+      new = UndoHistory.new(world.doc)
+      snapshot = UndoHistory.snapshot(world.history, text(world))
+
+      assert {:error, :invalid_history} = UndoHistory.restore_snapshot(new, snapshot, "six\n")
+
+      {:review_history_v1, digest, size, saved} = :erlang.binary_to_term(snapshot, [:safe])
+
+      corrupt =
+        :erlang.term_to_binary({:review_history_v1, digest, size, %{saved | pending: [9000]}})
+
+      assert {:error, :invalid_history} = UndoHistory.restore_snapshot(new, corrupt, "two\n")
+    end
+
+    test "a Keep after full compaction stays kept when newer unsaved bytes are discarded" do
+      task = {:minga, "task-1"}
+      saved = world("cat dog\n", recording: :coarse, shadow: false)
+      saved = edit(saved, @step_one, 0, 3, "CAT")
+      saved = edit(saved, {:minga, "task-1", "independent"}, 4, 3, "DOG")
+      {history, disk_checkpoint} = UndoHistory.checkpoint(saved.history, text(saved))
+
+      dirty = edit(%{saved | history: history}, @step_two, 0, 3, "lion")
+      history = %{dirty.history | run_budget: 3, compaction_wanted: true}
+
+      assert {_, history, %{merged: [{@step_one, @step_two}]}} =
+               UndoHistory.compact_slice(history, 1)
+
+      assert {:ok, from_absorbed_step} = UndoHistory.prepare_review(history, {:step, @step_one})
+      assert {:ok, ^from_absorbed_step} = UndoHistory.prepare_review(history, {:step, @step_two})
+      assert {:ok, target} = UndoHistory.prepare_review(history, {:step, @step_two})
+
+      assert {:ok, {_digest, settled}} =
+               UndoHistory.keep_in_checkpoint(history, target, disk_checkpoint)
+
+      assert {:ok, recovered} =
+               UndoHistory.restore_snapshot(UndoHistory.new(saved.doc), settled, text(saved))
+
+      assert :empty = UndoHistory.prepare_review(recovered, {:step, @step_one})
+      assert Provenance.author_at(UndoHistory.provenance(recovered), 0) == task
+      assert {:ok, target} = UndoHistory.prepare_review(recovered, {:task, task})
+      assert UndoHistory.review_summary(target) == {task, 1}
+      assert {:ok, restore, _, [_]} = reject_review(recovered, target, saved.doc)
+      assert Document.content(restore.document) == "CAT dog\n"
+    end
+
+    test "full absorption keeps the surviving resumption in the saved step's review unit" do
+      task = {:minga, "task-1"}
+      saved = world("cat dog z\n", recording: :coarse, shadow: false)
+      saved = edit(saved, @step_one, 0, 3, "CAT")
+      {history, checkpoint} = UndoHistory.checkpoint(saved.history, text(saved))
+
+      dirty =
+        %{saved | history: history}
+        |> edit(@other_task, 8, 1, "Z")
+        |> edit(@step_one, 4, 3, "DOG")
+        |> edit(@step_two, 0, 3, "lion")
+
+      history = %{dirty.history | run_budget: 3, compaction_wanted: true}
+
+      assert {_, compacted, %{merged: [{@step_one, @step_two}]}} =
+               UndoHistory.compact_slice(history, 1)
+
+      snapshot = UndoHistory.snapshot(compacted, text(dirty))
+
+      assert {:ok, history} =
+               UndoHistory.restore_snapshot(UndoHistory.new(dirty.doc), snapshot, text(dirty))
+
+      assert [_] = UndoHistory.review_units(history, task)
+      assert {:ok, target} = UndoHistory.prepare_review(history, {:step, @step_one})
+      assert {:ok, kept} = UndoHistory.keep_review(history, target)
+      assert :empty = UndoHistory.prepare_review(kept, {:task, task})
+
+      assert {:ok, {_digest, kept_on_disk}} =
+               UndoHistory.keep_in_checkpoint(history, target, checkpoint)
+
+      assert {:ok, reopened} =
+               UndoHistory.restore_snapshot(UndoHistory.new(saved.doc), kept_on_disk, text(saved))
+
+      assert :empty = UndoHistory.prepare_review(reopened, {:step, @step_one})
+    end
+
+    test "a step resumed after full absorption joins the same unit after reopening" do
+      task = {:minga, "task-1"}
+
+      world =
+        world("cat dog z\n", recording: :coarse, shadow: false)
+        |> edit(@step_one, 0, 3, "CAT")
+        |> edit(@step_two, 0, 3, "lion")
+
+      history = %{world.history | run_budget: 3, compaction_wanted: true}
+
+      assert {_, compacted, %{merged: [{@step_one, @step_two}]}} =
+               UndoHistory.compact_slice(history, 1)
+
+      snapshot = UndoHistory.snapshot(compacted, text(world))
+
+      assert {:ok, reopened} =
+               UndoHistory.restore_snapshot(UndoHistory.new(world.doc), snapshot, text(world))
+
+      resumed = edit(%{world | history: reopened}, @step_one, 5, 3, "DOG")
+      assert [_] = UndoHistory.review_units(resumed.history, task)
+      assert {:ok, target} = UndoHistory.prepare_review(resumed.history, {:step, @step_one})
+      assert {:ok, restore, _history, [_]} = reject_review(resumed.history, target, resumed.doc)
+      assert Document.content(restore.document) == "cat dog z\n"
+    end
+
+    test "snapshot preserves the Reject refusal for your settled overlap" do
+      world =
+        world("x\n", recording: :coarse, shadow: false)
+        |> edit(@step_one, 0, 1, "abc")
+        |> edit(:user, 1, 1, "")
+
+      snapshot = UndoHistory.snapshot(world.history, text(world))
+
+      assert {:ok, history} =
+               UndoHistory.restore_snapshot(UndoHistory.new(world.doc), snapshot, text(world))
+
+      assert {:ok, target} = UndoHistory.prepare_review(history, :latest)
+      assert {:blocked, {:overlaps, :you}} = reject_review(history, target, world.doc)
+    end
+
+    test "the checkpoint refuses a split in one parked resumed step" do
+      world =
+        world("cat dog\n", shadow: false)
+        |> edit(@step_one, 0, 3, "CAT")
+        |> edit(@other_task, 7, 0, "!")
+        |> edit(@step_one, 4, 3, "DOG")
+
+      task = {:minga, "task-1"}
+      assert {:ok, target} = UndoHistory.prepare_review(world.history, {:task, task})
+
+      assert {:ok, restore, history, [{:rejected, {nonce, tick, first}}]} =
+               reject_review(world.history, target, world.doc)
+
+      bytes = Document.content(restore.document)
+      snapshot = UndoHistory.snapshot(history, bytes)
+      {:review_history_v1, digest, size, data} = :erlang.binary_to_term(snapshot, [:safe])
+      %{rejected: %{{^nonce, ^tick, ^first} => {^task, [^first, second], _proof}}} = data
+      provenance = UndoHistory.provenance(history)
+
+      other_nonce = <<:binary.decode_unsigned(nonce) + 1::128>>
+
+      for second_nonce <- [nonce, other_nonce] do
+        split = %{
+          {nonce, tick, first} =>
+            {task, [first],
+             Provenance.review_restore_proof(provenance, [first], restore.document)},
+          {second_nonce, tick, second} =>
+            {task, [second],
+             Provenance.review_restore_proof(provenance, [second], restore.document)}
+        }
+
+        corrupt =
+          :erlang.term_to_binary({:review_history_v1, digest, size, %{data | rejected: split}})
+
+        assert {:error, :invalid_history} =
+                 UndoHistory.restore_snapshot(UndoHistory.new(restore.document), corrupt, bytes)
+      end
+    end
+
+    test "the checkpoint refuses a receipt combining independent review units" do
+      world =
+        world("cat dog\n", shadow: false)
+        |> edit(@step_one, 0, 3, "CAT")
+        |> edit(@step_two, 4, 3, "DOG")
+
+      task = {:minga, "task-1"}
+      assert {:ok, target} = UndoHistory.prepare_review(world.history, {:task, task})
+
+      assert {:ok, restore, history, [{:rejected, first}, {:rejected, second}]} =
+               reject_review(world.history, target, world.doc)
+
+      bytes = Document.content(restore.document)
+      snapshot = UndoHistory.snapshot(history, bytes)
+      {:review_history_v1, digest, size, data} = :erlang.binary_to_term(snapshot, [:safe])
+      %{^first => {^task, [a], _}, ^second => {^task, [b], _}} = data.rejected
+      groups = [a, b]
+
+      proof =
+        Provenance.review_restore_proof(UndoHistory.provenance(history), groups, restore.document)
+
+      merged = %{first => {task, groups, proof}}
+
+      corrupt =
+        :erlang.term_to_binary({:review_history_v1, digest, size, %{data | rejected: merged}})
+
+      assert {:error, :invalid_history} =
+               UndoHistory.restore_snapshot(UndoHistory.new(restore.document), corrupt, bytes)
+    end
+
+    test "the provenance checkpoint refuses overlapping detached components" do
+      world =
+        world("abc\n", shadow: false)
+        |> edit(@step_one, 0, 1, "A")
+        |> edit(@step_two, 1, 1, "B")
+        |> edit({:minga, "task-1", "third"}, 2, 1, "C")
+
+      snapshot = UndoHistory.snapshot(world.history, text(world))
+      {:review_history_v1, digest, size, data} = :erlang.binary_to_term(snapshot, [:safe])
+      [third, second, first] = data.pending
+
+      {:provenance_v1, group_next, change_next, groups, runs, records, _drafts, marks, faulted} =
+        data.provenance
+
+      provenance =
+        {:provenance_v1, group_next, change_next, groups, runs, records,
+         [[first, second], [second, third]], marks, faulted}
+
+      corrupt =
+        :erlang.term_to_binary(
+          {:review_history_v1, digest, size, %{data | provenance: provenance}}
+        )
+
+      assert {:error, :invalid_history} =
+               UndoHistory.restore_snapshot(UndoHistory.new(world.doc), corrupt, text(world))
+    end
+
+    test "Keep retires an unsafe user edit but preserves an older disjoint edit" do
+      world =
+        world("x\n", shadow: false)
+        |> edit(:user, 1, 0, "!")
+        |> edit(:user, 0, 1, "y", at: @t0 + @window)
+        |> edit(@step_one, 0, 1, "z")
+
+      assert {:ok, target} = UndoHistory.prepare_review(world.history, :latest)
+      assert {:ok, history} = UndoHistory.keep_review(world.history, target)
+      undone = undo!(%{world | history: history})
+      assert text(undone) == "z\n"
+      assert :empty = UndoHistory.undo(undone.history, undone.version, undone.doc)
+    end
+
+    test "Keep invalidates earlier numeric version proof but preserves the exact user undo" do
+      world =
+        world("x\n", shadow: false)
+        |> edit(@step_one, 0, 1, "y")
+        |> edit(:user, 1, 0, "!")
+
+      assert {:ok, target} = UndoHistory.prepare_review(world.history, :latest)
+      assert {:ok, history} = UndoHistory.keep_review(world.history, target)
+      assert {:ok, restore, _history} = UndoHistory.undo(history, world.version, world.doc)
+      assert restore.version == :advance
+      assert Document.content(restore.document) == "y\n"
+    end
+
+    test "explicit restore cannot cover text made live by an intervening user undo" do
+      world =
+        world("cat\n", recording: :coarse, shadow: false)
+        |> edit(:user, 0, 3, "dog")
+        |> edit(@step_one, 0, 3, "fox")
+
+      assert {:ok, target} = UndoHistory.prepare_review(world.history, :latest)
+      assert {:ok, restore, history, [receipt]} = reject_review(world.history, target, world.doc)
+      rejected = install(world, restore, history)
+      assert text(rejected) == "dog\n"
+
+      user_undone = undo!(rejected)
+      assert text(user_undone) == "cat\n"
+
+      assert {:error, :stale_review} =
+               UndoHistory.restore_review(user_undone.history, receipt, user_undone.doc)
+
+      user_redone = redo!(user_undone)
+
+      assert {:ok, restored, _history} =
+               UndoHistory.restore_review(user_redone.history, receipt, user_redone.doc)
+
+      assert Document.content(restored.document) == "fox\n"
+    end
+
+    test "a new edit in the same step makes the earlier review decision stale" do
+      world = world("abc\n") |> edit(@step_one, 0, 3, "ABC")
+      assert {:ok, target} = UndoHistory.prepare_review(world.history, {:step, @step_one})
+      assert [previous_unit] = UndoHistory.review_units(world.history, {:minga, "task-1"})
+
+      world = edit(world, @step_one, 3, 0, "!")
+      assert [^previous_unit] = UndoHistory.review_units(world.history, {:minga, "task-1"})
+      assert {:error, :stale_review} = UndoHistory.keep_review(world.history, target)
+      assert {:ok, target} = UndoHistory.prepare_review(world.history, {:step, @step_one})
+      assert {:ok, _} = UndoHistory.keep_review(world.history, target)
+    end
+
+    test "Reject preserves in-change typing and user redo; only review restore reapplies it" do
+      task = {:minga, "task-1"}
+
+      world =
+        world("one\n", shadow: false)
+        |> edit(@step_one, 0, 0, "abc")
+        |> edit(:user, 1, 0, "X", at: @t0 + @window)
+        |> edit(:user, 7, 0, "!", at: @t0 + 2 * @window)
+        |> undo!()
+
+      assert {:ok, target} = UndoHistory.prepare_review(world.history, {:task, task})
+
+      assert {:ok, restore, history, [receipt]} =
+               reject_review(world.history, target, world.doc)
+
+      rejected = install(world, restore, history)
+      assert text(rejected) == "Xone\n"
+      assert text(undo!(rejected)) == "one\n"
+      assert :empty = UndoHistory.prepare_review(history, {:task, task})
+      redone = redo!(rejected)
+      assert text(redone) == "Xone!\n"
+
+      assert {:ok, restore, history} =
+               UndoHistory.restore_review(redone.history, receipt, redone.doc)
+
+      restored = install(redone, restore, history)
+      assert text(restored) == "aXbcone!\n"
+      assert {:ok, target} = UndoHistory.prepare_review(history, {:task, task})
+
+      assert {:ok, restore, history, [_new_receipt]} =
+               reject_review(history, target, restored.doc)
+
+      assert {:error, :stale_review} =
+               UndoHistory.restore_review(history, receipt, restore.document)
+    end
+
+    test "review restore cannot overwrite a new edit with the same step key or its finalized bytes" do
+      world =
+        world("abc\n", recording: :coarse, shadow: false)
+        |> edit(@step_one, 0, 3, "ABC")
+
+      assert {:ok, target} = UndoHistory.prepare_review(world.history, {:step, @step_one})
+
+      assert {:ok, restore, history, [receipt]} =
+               reject_review(world.history, target, world.doc)
+
+      world = world |> install(restore, history) |> edit(@step_one, 0, 3, "xyz")
+
+      assert {:blocked, {:overlaps, @step_one}} =
+               UndoHistory.restore_review(world.history, receipt, world.doc)
+
+      assert {:ok, target} = UndoHistory.prepare_review(world.history, {:step, @step_one})
+      assert {:ok, finalized} = UndoHistory.keep_review(world.history, target)
+      assert {:error, :stale_review} = UndoHistory.restore_review(finalized, receipt, world.doc)
     end
 
     # Task 1's steps 2 and 3 merge. Task 0's reject must take the whole merged step, not leave step 2's text behind.

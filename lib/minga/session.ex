@@ -188,8 +188,9 @@ defmodule Minga.Session do
   @spec discard_swap_file(String.t()) :: :ok | {:error, File.posix()}
   defdelegate discard_swap_file(swap_path), to: Minga.Session.Swap.Recovery, as: :remove
 
-  @doc "Reads the file path and unsaved text of a swap file and leaves the swap file on disk."
-  @spec read_swap_file(String.t()) :: {:ok, String.t(), binary()} | {:error, term()}
+  @doc "Reads the exact publication and unsaved text of a swap file without consuming it."
+  @spec read_swap_file(String.t()) ::
+          {:ok, Minga.Session.Swap.identity(), binary()} | {:error, term()}
   defdelegate read_swap_file(swap_path), to: Minga.Session.Swap.Recovery, as: :read
 
   @doc """

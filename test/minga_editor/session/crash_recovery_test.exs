@@ -6,6 +6,8 @@ defmodule MingaEditor.Session.CrashRecoveryTest do
   import ExUnit.CaptureLog
   import MingaEditor.RenderPipeline.TestHelpers
 
+  alias Minga.Buffer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Events.BufferCrashedEvent
   alias Minga.Session.Swap
   alias MingaEditor.Effect.Outcome
@@ -28,7 +30,12 @@ defmodule MingaEditor.Session.CrashRecoveryTest do
       :ok = Swap.write(ctx.path, "unsaved text", ctx.swap_opts)
       effect = effect(ctx)
 
-      assert CrashRecovery.run(effect) == {:ok, {ctx.path, "unsaved text"}}
+      path = ctx.path
+      swap_path = ctx.swap_path
+
+      assert {:ok, {%{path: ^path, swap_path: ^swap_path}, "unsaved text"}} =
+               CrashRecovery.run(effect)
+
       assert File.exists?(ctx.swap_path)
     end
 
@@ -94,10 +101,61 @@ defmodule MingaEditor.Session.CrashRecoveryTest do
       refute CrashRecovery.render?(canceled)
     end
 
-    test "a completed read asks for a render", ctx do
-      request = Request.new(effect(ctx), {:crash_recovery, ctx.path}, Policy.fifo(1))
+    test "a delayed read cannot reopen bytes after their generation is discarded", ctx do
+      review_opts = [
+        incarnation: 17,
+        generation: 1,
+        review: %{kind: :dirty, dirty: nil, saved: nil}
+      ]
 
-      assert CrashRecovery.render?(Outcome.completed(request, {ctx.path, "unsaved text"}))
+      :ok = Swap.write(ctx.path, "from before the crash", ctx.swap_opts ++ review_opts)
+      request = Request.new(effect(ctx), {:crash_recovery, ctx.path}, Policy.fifo(1))
+      assert {:ok, result} = CrashRecovery.run(effect(ctx))
+      outcome = Outcome.completed(request, result)
+      :ok = File.rm(ctx.swap_path)
+
+      buffer = start_supervised!({BufferProcess, file_path: ctx.path, swap_dir: nil})
+      state = base_state(backend: :tui)
+      assert {^state, ^outcome} = CrashRecovery.apply(state, outcome)
+      assert Buffer.content(buffer) == "saved text"
+      refute Buffer.dirty?(buffer)
+
+      :ok = Swap.write(ctx.path, "from before the crash", ctx.swap_opts)
+      assert {^state, ^outcome} = CrashRecovery.apply(state, outcome)
+      assert Buffer.content(buffer) == "saved text"
+      assert {:ok, _meta, "from before the crash"} = Swap.read(ctx.swap_path)
+    end
+
+    test "automatic crash recovery refuses text when the file changed after the effect read",
+         ctx do
+      opts = [
+        incarnation: 17,
+        generation: 1,
+        disk_base: :crypto.hash(:sha256, "saved text"),
+        review: %{kind: :dirty, dirty: nil, saved: nil}
+      ]
+
+      :ok = Swap.write(ctx.path, "unsaved earlier text", ctx.swap_opts ++ opts)
+      effect = effect(ctx)
+      request = Request.new(effect, {:crash_recovery, ctx.path}, Policy.fifo(1))
+      assert {:ok, result} = CrashRecovery.run(effect)
+      outcome = Outcome.completed(request, result)
+
+      buffer = start_supervised!({BufferProcess, file_path: ctx.path, swap_dir: nil})
+      File.write!(ctx.path, "new disk text")
+      state = base_state(backend: :tui)
+      assert {^state, ^outcome} = CrashRecovery.apply(state, outcome)
+      assert Buffer.content(buffer) == "saved text"
+      refute Buffer.dirty?(buffer)
+      assert File.read!(ctx.path) == "new disk text"
+      assert {:ok, _meta, "unsaved earlier text"} = Swap.read(ctx.swap_path)
+    end
+
+    test "a completed read asks for a render", ctx do
+      :ok = Swap.write(ctx.path, "unsaved text", ctx.swap_opts)
+      request = Request.new(effect(ctx), {:crash_recovery, ctx.path}, Policy.fifo(1))
+      assert {:ok, result} = CrashRecovery.run(effect(ctx))
+      assert CrashRecovery.render?(Outcome.completed(request, result))
     end
   end
 

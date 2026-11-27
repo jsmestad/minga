@@ -75,6 +75,35 @@ func TestPromptChoicesUseAuthoredMinibufferRowAtNarrowWidths(t *testing.T) {
 	}
 }
 
+func TestPromptChoicesFitUnequalLabels(t *testing.T) {
+	for _, width := range []int{10, 80} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			model := New(uint16(width), 12, nil)
+			mini := protocol.Minibuffer{
+				Visible: true, Mode: 10, Generation: 71,
+				Prompt: "Reject 3 changes from task plan-limit? Your edits stay.",
+				Items: []protocol.MinibufferCandidate{
+					{ID: "confirm", Label: "Yes"},
+					{ID: "cancel", Label: "No"},
+				},
+			}
+			rendered := renderPromptChoiceFixture(&model, mini)
+			if !strings.Contains(rendered, "[Yes] [No]") {
+				t.Fatalf("confirmation hid a button label despite having room: %q", rendered)
+			}
+			for _, item := range mini.Items {
+				zone := waitForZone(t, model, zoneIDPromptChoice(mini.Generation, item.ID))
+				click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.EndX, Y: zone.StartY})
+				packet, ok := model.semanticMousePacket(click)
+				want := protocol.EncodeGUISemanticItemActivate(4, 1, mini.Generation, []byte(item.ID))
+				if !ok || !bytes.Equal(packet, want) {
+					t.Fatalf("last visible cell did not activate %q: %x", item.Label, packet)
+				}
+			}
+		})
+	}
+}
+
 func TestPromptChoiceZonesCannotRetargetIdenticalReplacementBeforeRedraw(t *testing.T) {
 	model := New(80, 12, nil)
 	original := promptChoiceFixture(71)

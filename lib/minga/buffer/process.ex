@@ -45,6 +45,8 @@ defmodule Minga.Buffer.Process do
   alias Minga.Buffer.State.LocalPersistence
   alias Minga.Buffer.State.Swap, as: SwapState
   alias Minga.Buffer.UndoHistory.Restore
+  alias Minga.Session.Swap
+  alias Minga.Session.Swap.Recovery, as: SwapRecovery
   alias Minga.Config
   alias Minga.Core.Decorations
   alias Minga.Core.PositionEncoding
@@ -85,8 +87,17 @@ defmodule Minga.Buffer.Process do
   @type state :: BufState.t()
   @typedoc "Why an undo, redo or `SPC a u` changed nothing: a patch failed, or the history reset after an internal error."
   @type history_error :: UndoPatch.apply_error() | :history_reset
+  @opaque review_target :: {pid(), UndoHistory.review_target()}
+  @type blocked_review ::
+          {:blocked, {:overlaps, UndoHistory.minga_group() | :you}, review_target() | nil}
+  @type review_error ::
+          UndoHistory.review_error()
+          | :review_capacity
+          | :read_only
+          | {:checkpoint_failed, term()}
   @type edit_delta_update :: {:ok, [EditDelta.t()]} | :reset_required
   @type motion_fun :: (Document.t(), Document.position() -> Document.position())
+  @typep review_target_input :: UndoHistory.review_target() | UndoHistory.rejected_unit()
   @type listing_info :: %{
           name: String.t() | nil,
           file_path: String.t() | nil,
@@ -527,17 +538,23 @@ defmodule Minga.Buffer.Process do
   end
 
   @doc """
-  Gives the buffer the unsaved text that was read from the swap file at `swap_path`, and makes this buffer the owner of that text.
+  Takes unsaved text from the exact swap publication read by recovery.
 
-  The buffer takes the text, writes its own swap file at once, and only then removes `swap_path`. A second crash before the next debounced write therefore still finds the text on disk. When the buffer's own swap cannot be written, `swap_path` stays where it is.
-
-  A buffer that already has unsaved changes holds newer text and refuses with `{:error, :modified}`. A buffer that writes no swap files takes the text and removes `swap_path`, because nothing else would ever remove it.
+  A superseded or discarded publication returns `{:error, :stale_swap}`. A buffer with newer
+  unsaved text returns `{:error, :modified}`. A successful takeover publishes the buffer's own
+  swap before removing the source. A failed publication leaves the original available.
+  Automatic adoption refuses if the disk baseline changed after the read.
   """
-  @spec adopt_recovered_text(GenServer.server(), String.t(), String.t()) ::
-          :ok | {:error, :read_only | :modified}
-  def adopt_recovered_text(server, content, swap_path)
-      when is_binary(content) and is_binary(swap_path) do
-    GenServer.call(server, {:adopt_recovered_text, content, swap_path}, @file_io_call_timeout)
+  @spec adopt_recovered_text(
+          GenServer.server(),
+          String.t(),
+          Swap.identity(),
+          :explicit | :automatic
+        ) ::
+          :ok | {:error, :read_only | :modified | :binary_file | :stale_swap}
+  def adopt_recovered_text(server, content, %{swap_path: _} = source, mode \\ :explicit)
+      when is_binary(content) and mode in [:explicit, :automatic] do
+    GenServer.call(server, {:adopt_recovered_text, content, source, mode}, @file_io_call_timeout)
   end
 
   # A quit must not wait long on a buffer that is busy with slow file work.
@@ -548,11 +565,20 @@ defmodule Minga.Buffer.Process do
 
   The call gives up after `timeout` (2 seconds by default). A buffer that did not answer keeps its swap file, and the next start offers that text again: that is better than a quit that hangs.
 
-  The supervisor stops buffers without running `terminate/2`, so a quit has to ask. After this call the buffer writes no swap file again. A buffer that writes into another directory, or writes no swap files, is left as it is.
+  A successful release keeps the saved review checkpoint, if any, and stops further swap writes. If publication fails, the previous generation remains recoverable and the call returns the failure. A buffer that writes into another directory, or writes no swap files, is left as it is.
   """
-  @spec release_swap(GenServer.server(), String.t(), timeout()) :: :ok
+  @spec release_swap(GenServer.server(), String.t(), timeout()) :: :ok | {:error, term()}
   def release_swap(server, swap_dir, timeout \\ @swap_release_timeout) when is_binary(swap_dir),
     do: GenServer.call(server, {:release_swap, swap_dir}, timeout)
+
+  @doc "Completes the deliberate discard boundary before an editor closes a buffer."
+  @spec prepare_close(GenServer.server()) :: :ok | {:error, term()}
+  def prepare_close(server) do
+    GenServer.call(server, :prepare_close, @file_io_call_timeout)
+  catch
+    :exit, {:noproc, _call} -> :ok
+    :exit, reason -> {:error, reason}
+  end
 
   @doc "Atomically replaces content at `expected_version`, preserving the nearest valid cursor position."
   @spec replace_content_if_version(
@@ -1186,6 +1212,13 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, :redo)
   end
 
+  @doc "Runs your undo or redo and, if blocked, prepares review of the blocker in the same revision."
+  @spec move_history(GenServer.server(), :undo | :redo) ::
+          :ok | blocked_review() | {:error, history_error()}
+  def move_history(server, operation) when operation in [:undo, :redo] do
+    GenServer.call(server, {:move_history, operation})
+  end
+
   @doc """
   Reverts every remaining step of the Minga task that edited this buffer most recently, keeping your edits. Returns how many steps it reverted.
 
@@ -1198,6 +1231,30 @@ defmodule Minga.Buffer.Process do
           | {:error, history_error()}
   def undo_agent_session(server) do
     GenServer.call(server, :undo_agent_session)
+  end
+
+  @doc "Names the exact pending review task and unit count, and returns a single-buffer confirmation target."
+  @spec prepare_review(GenServer.server(), UndoHistory.review_selection()) ::
+          {:ok, review_target(), UndoHistory.task(), pos_integer()} | :empty
+  def prepare_review(server, selection) do
+    GenServer.call(server, {:prepare_review, selection})
+  end
+
+  @doc "Keeps the prepared units, or rejects all of them without dropping other history."
+  @spec decide_review(GenServer.server(), review_target(), :keep | :reject) ::
+          :ok
+          | {:ok, nonempty_list(UndoHistory.rejected_unit())}
+          | UndoHistory.blocked()
+          | {:error, review_error()}
+  def decide_review(server, target, decision) when decision in [:keep, :reject] do
+    GenServer.call(server, {:decide_review, target, decision})
+  end
+
+  @doc "Reapplies a previously rejected unit if its original anchors still permit exact restoration."
+  @spec restore_review(GenServer.server(), UndoHistory.rejected_unit()) ::
+          :ok | UndoHistory.blocked() | {:error, review_error()}
+  def restore_review(server, receipt) do
+    GenServer.call(server, {:restore_review, receipt})
   end
 
   @doc """
@@ -1478,7 +1535,7 @@ defmodule Minga.Buffer.Process do
     case Persistence.read_content(state, file_path) do
       {:ok, text} when is_binary(text) ->
         if Unicode.valid_utf8?(text) do
-          state = clear_swap(state)
+          state = leave_file_swap(state)
           first_line = text |> String.split("\n", parts: 2) |> List.first("")
           filetype = Language.detect_filetype_from_content(file_path, first_line)
 
@@ -1496,7 +1553,7 @@ defmodule Minga.Buffer.Process do
               change_log: ChangeLog.clear(state.change_log)
           }
 
-          new_state = rebuild_conflict_index(new_state)
+          new_state = new_state |> take_kept_swap() |> rebuild_conflict_index()
 
           unregister_path(state.file_path)
           register_path(file_path)
@@ -1879,7 +1936,6 @@ defmodule Minga.Buffer.Process do
   def handle_call(:reload, _from, state) do
     case Persistence.read_content(state, state.file_path) do
       {:ok, text} ->
-        state = clear_swap(state)
         {line, col} = Document.cursor(state.document)
         new_buf = Document.new(text)
         line_count = Document.line_count(new_buf)
@@ -1906,12 +1962,12 @@ defmodule Minga.Buffer.Process do
           | document: new_buf,
             filetype: filetype,
             options: reseed_options(state, filetype),
-            undo_history: reload_history(state, new_buf),
+            undo_history: reload_history(state, new_buf, text),
             change_log: ChangeLog.clear(state.change_log),
             decorations: Decorations.new()
         }
 
-        new_state = rebuild_conflict_index(new_state)
+        new_state = new_state |> checkpoint_saved(text) |> rebuild_conflict_index()
 
         defer_content_replaced(new_state)
         defer_filetype_changed(state, new_state)
@@ -1949,11 +2005,7 @@ defmodule Minga.Buffer.Process do
     if old_path == new_path do
       {:reply, :ok, state}
     else
-      state = clear_swap(state)
-      unregister_path(state.file_path)
-      register_path(new_path)
-      state = BufState.retarget_path(state, new_path)
-      state = if BufState.dirty?(state), do: schedule_swap_write(state), else: state
+      state = retarget_file_swap(state, new_path)
       broadcast_buffer_path_changed(old_path, state)
       {:reply, :ok, state}
     end
@@ -1968,42 +2020,32 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call(
-        {:adopt_recovered_text, _content, _swap_path},
+        {:adopt_recovered_text, _content, _source, _mode},
         _from,
         %{read_only: true} = state
       ) do
     {:reply, {:error, :read_only}, state}
   end
 
-  def handle_call({:adopt_recovered_text, content, swap_path}, _from, state) do
-    holds_text? = Document.content(state.document) == content
-
-    cond do
-      # The buffer has this text already, for example because it took its own kept swap when it started.
-      # Unsaved, it must own the text on disk. Saved, nothing is unsaved and the swap can go.
-      holds_text? and BufState.dirty?(state) ->
-        :ok = take_over_recovered_swap(state, swap_path)
-        {:reply, :ok, state}
-
-      holds_text? ->
-        :ok = remove_recovered_swap(state, swap_path, nil)
-        {:reply, :ok, state}
-
-      BufState.dirty?(state) ->
-        {:reply, {:error, :modified}, state}
-
-      true ->
-        state = put_recovered_text(state, content)
-        :ok = take_over_recovered_swap(state, swap_path)
-        {:reply, :ok, state}
+  def handle_call({:adopt_recovered_text, content, %{path: path} = source, mode}, _from, state)
+      when path == state.file_path do
+    if state.swap.adopted == source and BufState.dirty?(state) do
+      reply = if Document.content(state.document) == content, do: :ok, else: {:error, :modified}
+      {:reply, reply, state}
+    else
+      read_recovery_publication(state, content, source, mode)
     end
   end
 
+  def handle_call({:adopt_recovered_text, _content, _source, _mode}, _from, state) do
+    {:reply, {:error, :stale_swap}, state}
+  end
+
+  def handle_call(:prepare_close, _from, state), do: release_discarded_swap(state)
+
   def handle_call({:release_swap, swap_dir}, _from, state) do
     if SwapState.writes_into?(state.swap, swap_dir) do
-      state = revoke_swap_writes(state)
-      :ok = delete_swap_file(state)
-      {:reply, :ok, %{state | swap: SwapState.release(state.swap)}}
+      release_discarded_swap(state)
     else
       {:reply, :ok, state}
     end
@@ -2053,19 +2095,18 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call({:accept_saved_content, new_content}, _from, state) do
-    state = clear_swap(state)
     new_buf = Document.new(new_content)
     {mtime, size} = Persistence.file_metadata(state, state.file_path)
 
     new_state = %{
       BufState.accept_saved_content(state, {mtime, size}, new_content)
       | document: new_buf,
-        undo_history: reload_history(state, new_buf),
+        undo_history: reload_history(state, new_buf, new_content),
         change_log: ChangeLog.clear(state.change_log),
         decorations: Decorations.new()
     }
 
-    new_state = rebuild_conflict_index(new_state)
+    new_state = new_state |> checkpoint_saved(new_content) |> rebuild_conflict_index()
 
     defer_content_replaced(new_state)
     {:reply, :ok, new_state}
@@ -2582,50 +2623,12 @@ defmodule Minga.Buffer.Process do
     end
   end
 
-  def handle_call(:undo, _from, state) do
-    state = with_history_in_step(state)
-
-    case guarded(state, &UndoHistory.undo(&1, BufState.version(state), state.document)) do
-      {:history_reset, history} ->
-        {:reply, {:error, :history_reset}, %{state | undo_history: history}}
-
-      :empty ->
-        {:reply, :ok, state}
-
-      {:blocked, _overlap} = blocked ->
-        {:reply, blocked, state}
-
-      {:error, reason} = error ->
-        log_history_failure(:undo, reason)
-        {:reply, error, state}
-
-      {:ok, restore, undo_history} ->
-        log_undo_source(:undo, restore.source)
-        {:reply, :ok, install_restore(state, restore, undo_history)}
-    end
+  def handle_call(operation, _from, state) when operation in [:undo, :redo] do
+    move_history(state, operation, :plain)
   end
 
-  def handle_call(:redo, _from, state) do
-    state = with_history_in_step(state)
-
-    case guarded(state, &UndoHistory.redo(&1, BufState.version(state), state.document)) do
-      {:history_reset, history} ->
-        {:reply, {:error, :history_reset}, %{state | undo_history: history}}
-
-      :empty ->
-        {:reply, :ok, state}
-
-      {:blocked, _overlap} = blocked ->
-        {:reply, blocked, state}
-
-      {:error, reason} = error ->
-        log_history_failure(:redo, reason)
-        {:reply, error, state}
-
-      {:ok, restore, undo_history} ->
-        log_undo_source(:redo, restore.source)
-        {:reply, :ok, install_restore(state, restore, undo_history)}
-    end
+  def handle_call({:move_history, operation}, _from, state) when operation in [:undo, :redo] do
+    move_history(state, operation, :review)
   end
 
   def handle_call(:undo_agent_session, _from, state) do
@@ -2668,6 +2671,47 @@ defmodule Minga.Buffer.Process do
       {:ok, restore, undo_history, summary} ->
         log_reverted_steps(state, restore.document, summary)
         {:reply, {:ok, summary.reverted}, install_restore(state, restore, undo_history)}
+    end
+  end
+
+  def handle_call({:prepare_review, selection}, _from, state) do
+    case UndoHistory.prepare_review(state.undo_history, selection) do
+      :empty ->
+        {:reply, :empty, state}
+
+      {:ok, target} ->
+        {task, units} = UndoHistory.review_summary(target)
+        {:reply, {:ok, {self(), target}, task, units}, state}
+    end
+  end
+
+  def handle_call({:decide_review, {owner, target}, decision}, _from, state)
+      when owner == self() do
+    case run_review(state, decision, target) do
+      {:ok, history} ->
+        case projected_checkpoint(state, target) do
+          {:ok, saved} -> finish_keep(state, %{state | undo_history: history}, saved)
+          {:error, _reason} = error -> {:reply, error, state}
+        end
+
+      {:ok, restore, history, receipts} ->
+        finish_review_restore(state, restore, history, {:ok, receipts})
+
+      refusal ->
+        {:reply, refusal, state}
+    end
+  end
+
+  def handle_call({:decide_review, _target, _decision}, _from, state),
+    do: {:reply, {:error, :stale_review}, state}
+
+  def handle_call({:restore_review, receipt}, _from, state) do
+    case run_review(state, :restore, receipt) do
+      {:ok, restore, history} ->
+        finish_review_restore(state, restore, history, :ok)
+
+      refusal ->
+        {:reply, refusal, state}
     end
   end
 
@@ -2961,7 +3005,7 @@ defmodule Minga.Buffer.Process do
     case Persistence.write_content(state, intent.target, content, write_policy(intent)) do
       :ok ->
         {new_mtime, new_size} = Persistence.file_metadata(state, intent.target)
-        state = clear_swap(state)
+        state = leave_file_swap(state)
         unregister_path(state.file_path)
         register_path(intent.target)
 
@@ -3232,13 +3276,22 @@ defmodule Minga.Buffer.Process do
     state = state |> cancel_auto_save_timer() |> revoke_swap_writes()
 
     if deliberate_stop?(reason) do
-      # A closed buffer leaves nothing to recover.
-      delete_swap_file(state)
+      discard_unsaved_swap(state)
     else
       keep_swap_after_crash(state, reason)
     end
 
     :ok
+  end
+
+  @spec release_discarded_swap(state()) :: {:reply, :ok | {:error, term()}, state()}
+  defp release_discarded_swap(state) do
+    state = revoke_swap_writes(state)
+
+    case discard_unsaved_swap(state) do
+      {:ok, state} -> {:reply, :ok, %{state | swap: SwapState.release(state.swap)}}
+      {{:error, _reason} = error, state} -> {:reply, error, state}
+    end
   end
 
   # `GenServer.stop/1`, a supervisor shutdown and a `{:stop, ...}` return are deliberate. Any other reason is a crash.
@@ -3302,9 +3355,14 @@ defmodule Minga.Buffer.Process do
         {:kept, swap_path}
 
       {:error, reason} ->
-        # A failed write leaves the last published swap in place: older text, but still unsaved text.
+        # A failed write may leave a saved-only checkpoint, not recoverable text.
         log_swap_failure(state, {:crash_flush_failed, reason})
-        if File.exists?(swap_path), do: {:kept, swap_path}, else: :not_kept
+
+        case Swap.read(swap_path) do
+          {:ok, %{path: ^path, kind: :clean}, _content} -> :not_kept
+          {:ok, %{path: ^path}, _content} -> {:kept, swap_path}
+          _unavailable -> :not_kept
+        end
     end
   end
 
@@ -3312,14 +3370,73 @@ defmodule Minga.Buffer.Process do
   # Every failure, including a document that cannot be read, becomes an error value.
   # It cannot replace the original crash.
   @spec write_swap_now(state(), String.t(), keyword()) :: :ok | {:error, term()}
+  defp write_swap_now(%{swap: %{held_for_recovery: true}}, _path, _opts),
+    do: {:error, :unadopted_swap}
+
   defp write_swap_now(state, path, opts) do
     backend = SwapState.backend(state.swap)
 
     swap_backend_call(fn ->
-      with {:ok, prepared} <- backend.prepare(path, Document.content(state.document), opts) do
-        backend.publish(prepared)
-      end
+      capture = capture_swap(state, Document.content(state.document))
+
+      with {:ok, prepared} <- prepare_swap(backend, path, capture, opts),
+           do: backend.publish(prepared)
     end)
+  end
+
+  @spec write_saved_swap(state(), UndoHistory.saved_checkpoint()) :: :ok | {:error, term()}
+  defp write_saved_swap(%{swap: %{held_for_recovery: true}}, _checkpoint),
+    do: {:error, :unadopted_swap}
+
+  defp write_saved_swap(%{file_path: path, swap: swap}, checkpoint) when is_binary(path) do
+    backend = SwapState.backend(swap)
+    review = %{kind: :clean, dirty: nil, saved: checkpoint}
+    opts = swap |> SwapState.backend_options(swap.generation) |> Keyword.put(:review, review)
+
+    swap_backend_call(fn ->
+      with {:ok, prepared} <- backend.prepare(path, "", opts), do: backend.publish(prepared)
+    end)
+  end
+
+  @spec discard_unsaved_swap(state()) :: {:ok | {:error, term()}, state()}
+  defp discard_unsaved_swap(%{file_path: path} = state) when is_binary(path) do
+    if SwapState.configured?(state.swap) do
+      discard_configured_swap(state)
+    else
+      {:ok, state}
+    end
+  end
+
+  defp discard_unsaved_swap(state), do: {:ok, state}
+
+  @spec discard_configured_swap(state()) :: {:ok | {:error, term()}, state()}
+  defp discard_configured_swap(state) do
+    result =
+      case state.swap.saved do
+        {_, _} = saved ->
+          if BufState.dirty?(state) or map_size(state.swap.sources) > 0,
+            do: write_saved_swap(state, saved),
+            else: :ok
+
+        nil ->
+          delete_swap_file(state)
+      end
+
+    case result do
+      :ok ->
+        retire_review_sources(state)
+
+      {:error, reason} = error ->
+        log_swap_failure(state, {:discard_failed, reason})
+
+        log_to_messages(
+          state,
+          "Could not discard the swap for #{state.file_path}. It was left for recovery.",
+          :warning
+        )
+
+        {error, state}
+    end
   end
 
   # Every local buffer gets the VM's swap directory unless its opener chose one, so a buffer that gets its file
@@ -3330,6 +3447,7 @@ defmodule Minga.Buffer.Process do
     opts
     |> Keyword.put_new(:swap_backend, Minga.Session.Swap)
     |> Keyword.put_new_lazy(:swap_dir, &Minga.Session.buffer_swap_dir/0)
+    |> Keyword.put(:swap_incarnation, System.unique_integer([:positive, :monotonic]))
   end
 
   defp swap_options(opts, _remote), do: Keyword.put_new(opts, :swap_backend, Minga.Session.Swap)
@@ -3342,11 +3460,24 @@ defmodule Minga.Buffer.Process do
   defp take_kept_swap(%{buffer_type: :file, file_path: path, read_only: false} = state)
        when is_binary(path) do
     if SwapState.configured?(state.swap) do
-      swap_path = Minga.Session.Swap.swap_path(path, SwapState.backend_options(state.swap, 0))
+      opts = SwapState.backend_options(state.swap, 0)
+      swap_path = Swap.swap_path(path, opts)
 
-      case Minga.Session.Swap.read(swap_path) do
-        {:ok, %{path: ^path} = kept, content} -> take_kept_text(state, content, kept)
-        _no_kept_swap -> state
+      case Swap.read(swap_path) do
+        {:ok, %{path: ^path, revision: {:invalid, _}}, _content} ->
+          hold_unadopted_swap(state, swap_path, "invalid recovery generation")
+
+        {:ok, %{path: ^path, kind: :clean}, _content} ->
+          attach_saved_review(state, opts)
+
+        {:error, :invalid_review_record} ->
+          hold_unadopted_swap(state, swap_path, "invalid recovery framing")
+
+        {:ok, %{path: ^path} = kept, content} ->
+          take_kept_text(state, content, kept)
+
+        _no_kept_swap ->
+          attach_saved_review(state, opts)
       end
     else
       state
@@ -3355,7 +3486,189 @@ defmodule Minga.Buffer.Process do
 
   defp take_kept_swap(state), do: state
 
+  @spec hold_unadopted_swap(state(), String.t(), String.t()) :: state()
+  defp hold_unadopted_swap(state, swap_path, reason) do
+    case Swap.hold(swap_path) do
+      {:ok, held} ->
+        log_to_messages(
+          state,
+          "Did not restore #{swap_path}: #{reason}. The original swap is available at #{held}.",
+          :warning
+        )
+
+        state
+
+      {:error, error} ->
+        log_to_messages(
+          state,
+          "Did not restore #{swap_path}: #{reason}. Cannot write new swaps without replacing it (#{inspect(error)}).",
+          :warning
+        )
+
+        %{state | swap: SwapState.hold_for_recovery(state.swap)}
+    end
+  end
+
+  @spec read_recovery_publication(state(), binary(), Swap.identity(), :explicit | :automatic) ::
+          {:reply, :ok | {:error, :modified | :binary_file | :stale_swap}, state()}
+  defp read_recovery_publication(state, content, source, mode) do
+    case Swap.read(source.swap_path) do
+      {:ok, meta, ^content} ->
+        if Swap.identity(meta, content) == source,
+          do: adopt_current_swap(state, content, meta, mode),
+          else: {:reply, {:error, :stale_swap}, state}
+
+      _missing_or_replaced ->
+        {:reply, {:error, :stale_swap}, state}
+    end
+  end
+
+  @spec attach_saved_review(state(), keyword()) :: state()
+  defp attach_saved_review(state, opts) do
+    content = Document.content(state.document)
+
+    case SwapRecovery.clean_for(state.file_path, content, opts) do
+      {:ok, saved, original} ->
+        install_saved_review(state, content, saved, original)
+
+      {:error, :invalid_review, swap_path} ->
+        lost_review_snapshot(state, swap_path)
+
+      :none ->
+        state
+    end
+  end
+
+  @spec install_saved_review(state(), binary(), UndoHistory.saved_checkpoint(), Swap.metadata()) ::
+          state()
+  defp install_saved_review(state, content, {_, snapshot} = saved, original) do
+    with :ok <- require_current_review(original),
+         {:ok, history} <- UndoHistory.restore_snapshot(state.undo_history, snapshot, content) do
+      state = %{revoke_swap_writes(state) | undo_history: history}
+      {state, saved} = recovered_save_point(state, content, saved, original.kind)
+      take_over_saved_review(state, saved, original)
+    else
+      {:error, _reason} -> lost_review_snapshot(state, original.swap_path)
+    end
+  end
+
+  @spec require_current_review(Swap.metadata()) :: :ok | {:error, :stale_swap}
+  defp require_current_review(meta) do
+    if Swap.current?(meta), do: :ok, else: {:error, :stale_swap}
+  end
+
+  @spec recovered_save_point(
+          state(),
+          binary(),
+          UndoHistory.saved_checkpoint(),
+          :dirty | :clean
+        ) :: {state(), UndoHistory.saved_checkpoint()}
+  defp recovered_save_point(state, content, _saved, :dirty),
+    do: capture_saved_review(state, content)
+
+  defp recovered_save_point(state, _content, saved, :clean),
+    do: {%{state | swap: SwapState.put_saved(state.swap, saved)}, saved}
+
+  @spec take_over_saved_review(state(), UndoHistory.saved_checkpoint(), Swap.metadata()) ::
+          state()
+  defp take_over_saved_review(state, saved, original) do
+    state = track_review_source(state, Swap.identity(original, ""))
+
+    case write_saved_swap(state, saved) do
+      :ok ->
+        review_swap_published(state)
+
+      {:error, reason} ->
+        log_swap_failure(state, {:review_takeover_failed, reason})
+        state
+    end
+  end
+
+  @spec track_review_source(state(), Swap.identity() | nil) :: state()
+  defp track_review_source(%{swap: %{directory: nil}} = state, _source), do: state
+
+  defp track_review_source(state, source),
+    do: %{state | swap: SwapState.track_source(state.swap, source)}
+
+  @spec review_swap_published(state()) :: state()
+  defp review_swap_published(%{swap: %{sources: sources, held_for_recovery: false}} = state)
+       when map_size(sources) == 0,
+       do: state
+
+  defp review_swap_published(state) do
+    state = %{state | swap: SwapState.published(state.swap)}
+    {_result, state} = retire_review_sources(state)
+    state
+  end
+
+  @spec retire_review_sources(state()) :: {:ok | {:error, term()}, state()}
+  defp retire_review_sources(%{swap: %{sources: sources}} = state) when map_size(sources) == 0,
+    do: {:ok, state}
+
+  defp retire_review_sources(state) do
+    own = Swap.swap_path(state.file_path, SwapState.backend_options(state.swap, 0))
+
+    {swap, errors} =
+      Enum.reduce(state.swap.sources, {state.swap, []}, fn {path, source}, {swap, errors} ->
+        retire_review_source(swap, errors, path, source, own)
+      end)
+
+    state = %{state | swap: swap}
+
+    case errors do
+      [] ->
+        {:ok, state}
+
+      _failed ->
+        reason = {:review_source_not_removed, errors}
+        log_swap_failure(state, reason)
+        {{:error, reason}, state}
+    end
+  end
+
+  @spec retire_review_source(
+          SwapState.t(),
+          [{String.t(), term()}],
+          String.t(),
+          Swap.identity(),
+          String.t()
+        ) :: {SwapState.t(), [{String.t(), term()}]}
+  defp retire_review_source(swap, errors, path, source, own) do
+    result = if path != own and Swap.current?(source), do: File.rm(path), else: :ok
+
+    case result do
+      :ok -> {SwapState.retire_source(swap, path), errors}
+      {:error, :enoent} -> {SwapState.retire_source(swap, path), errors}
+      {:error, reason} -> {swap, [{path, reason} | errors]}
+    end
+  end
+
+  @spec lost_review_snapshot(state(), String.t()) :: state()
+  defp lost_review_snapshot(state, swap_path) do
+    log_to_messages(
+      state,
+      "Could not restore review attribution from #{swap_path}. The text is still available.",
+      :warning
+    )
+
+    state
+  end
+
   @spec take_kept_text(state(), binary(), Minga.Session.Swap.metadata()) :: state()
+  defp take_kept_text(state, content, %{kind: :dirty} = original) do
+    if Swap.matches_disk_base?(original, BufState.file_hash(state)) do
+      case adopt_review_text(state, content, original) do
+        {:ok, state} ->
+          state
+
+        {:error, _reason} ->
+          hold_unadopted_swap(state, original.swap_path, "invalid recovery text")
+      end
+    else
+      hold_unadopted_swap(state, original.swap_path, "the file has changed since the swap")
+    end
+  end
+
   defp take_kept_text(state, content, %{swap_path: swap_path} = kept) do
     if Document.content(state.document) == content do
       :ok = remove_recovered_swap(state, swap_path, nil)
@@ -3371,17 +3684,158 @@ defmodule Minga.Buffer.Process do
     end
   end
 
+  @spec adopt_current_swap(state(), binary(), Swap.metadata(), :explicit | :automatic) ::
+          {:reply, :ok | {:error, :modified | :binary_file | :stale_swap}, state()}
+  defp adopt_current_swap(state, content, %{kind: :dirty} = meta, :automatic) do
+    hash = BufState.file_hash(state)
+
+    if not Map.get(meta, :held?, false) and Swap.matches_disk_base?(meta, hash) and
+         current_disk_baseline?(state, hash) do
+      adopt_current_swap(state, content, meta, :explicit)
+    else
+      {:reply, {:error, :stale_swap}, state}
+    end
+  end
+
+  defp adopt_current_swap(state, content, %{kind: :dirty} = meta, :explicit) do
+    case adopt_review_text(state, content, meta) do
+      {:ok, state} -> {:reply, :ok, state}
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
+
+  defp adopt_current_swap(state, _content, %{kind: :clean}, _mode),
+    do: {:reply, {:error, :stale_swap}, state}
+
+  defp adopt_current_swap(state, content, legacy, _mode),
+    do: adopt_legacy_text(state, content, legacy.swap_path)
+
+  @spec current_disk_baseline?(state(), binary() | nil) :: boolean()
+  defp current_disk_baseline?(state, hash) do
+    case Persistence.read_content(state, state.file_path) do
+      {:ok, bytes} -> :crypto.hash(:sha256, bytes) == hash
+      {:error, :enoent} -> is_nil(hash)
+      {:error, _reason} -> false
+    end
+  end
+
+  @spec adopt_review_text(state(), binary(), Swap.metadata()) :: {:ok, state()} | {:error, atom()}
+  defp adopt_review_text(state, content, meta) do
+    existing = Document.content(state.document)
+
+    cond do
+      not Unicode.valid_utf8?(content) ->
+        {:error, :binary_file}
+
+      not Swap.current?(meta) ->
+        {:error, :stale_swap}
+
+      BufState.dirty?(state) and existing != content ->
+        {:error, :modified}
+
+      BufState.dirty?(state) ->
+        # The file is open with these bytes already. Never replace newer in-memory history.
+        {:ok, state}
+
+      existing == content ->
+        {:ok, attach_saved_review(state, SwapState.backend_options(state.swap, 0))}
+
+      true ->
+        :ok = warn_if_file_is_newer(state, meta)
+        {:ok, restore_dirty_review(state, content, meta)}
+    end
+  end
+
+  @spec restore_dirty_review(state(), binary(), Swap.metadata()) :: state()
+  defp restore_dirty_review(state, content, meta) do
+    document = Document.new(content)
+    swap_hash = BufState.file_hash(state)
+    review = Map.get(meta, :review)
+
+    saved =
+      case review do
+        %{saved: {^swap_hash, snapshot}} -> {swap_hash, snapshot}
+        _other -> state.swap.saved
+      end
+
+    state = revoke_swap_writes(state)
+    state = %{state | swap: SwapState.put_saved(state.swap, saved)}
+    state = %{BufState.mark_dirty(state) | document: document}
+
+    history =
+      with %{dirty: snapshot} when is_binary(snapshot) <- review,
+           {:ok, history} <- UndoHistory.restore_snapshot(state.undo_history, snapshot, content) do
+        history
+      else
+        _unavailable ->
+          lost_review_snapshot(state, meta.swap_path)
+          UndoHistory.reset(state.undo_history, document)
+      end
+
+    source = Swap.identity(meta, content)
+    swap = SwapState.remember_adoption(state.swap, source)
+    state = track_review_source(%{state | undo_history: history, swap: swap}, source)
+
+    state
+    |> publish_dirty_takeover()
+    |> cancel_auto_save_timer()
+    |> clear_edits(EditSource.from_undo_source(:recovery))
+  end
+
+  @spec publish_dirty_takeover(state()) :: state()
+  defp publish_dirty_takeover(state) do
+    if SwapState.configured?(state.swap) do
+      opts = SwapState.backend_options(state.swap, state.swap.generation)
+
+      case write_swap_now(state, state.file_path, opts) do
+        :ok ->
+          review_swap_published(state)
+
+        {:error, reason} ->
+          log_swap_failure(state, {:review_takeover_failed, reason})
+          state
+      end
+    else
+      state
+    end
+  end
+
+  @spec adopt_legacy_text(state(), binary(), String.t()) :: {:reply, term(), state()}
+  defp adopt_legacy_text(state, content, swap_path) do
+    holds_text? = Document.content(state.document) == content
+
+    cond do
+      holds_text? and BufState.dirty?(state) ->
+        :ok = take_over_recovered_swap(state, swap_path)
+        {:reply, :ok, state}
+
+      holds_text? ->
+        :ok = remove_recovered_swap(state, swap_path, nil)
+        {:reply, :ok, state}
+
+      BufState.dirty?(state) ->
+        {:reply, {:error, :modified}, state}
+
+      true ->
+        state = put_recovered_text(state, content)
+        :ok = take_over_recovered_swap(state, swap_path)
+        {:reply, :ok, state}
+    end
+  end
+
   # The swap name carries the OS process id, and a later run can get the id of a run that crashed.
   # Its leftover swap then looks like this run's own. The text is still shown, never saved unasked,
   # and the log says that the file is newer, so the user knows which of the two to keep.
   @spec warn_if_file_is_newer(state(), Minga.Session.Swap.metadata()) :: :ok
-  defp warn_if_file_is_newer(%{file_path: path}, %{mtime: kept_at}) do
+  defp warn_if_file_is_newer(%{file_path: path}, %{mtime: kept_at} = meta) do
     case File.stat(path, time: :posix) do
       {:ok, %File.Stat{mtime: saved_at}} when saved_at > kept_at ->
-        Minga.Log.warning(
-          :editor,
-          "#{path} was saved after that unsaved text was kept: undo brings back the file's text"
-        )
+        hint =
+          if Map.has_key?(meta, :kind),
+            do: "reload with :e! to bring back the file's text",
+            else: "undo brings back the file's text"
+
+        Minga.Log.warning(:editor, "#{path} was saved after that unsaved text was kept: #{hint}")
 
       _older_or_missing ->
         :ok
@@ -4033,9 +4487,21 @@ defmodule Minga.Buffer.Process do
   defp task_label({:minga, :untasked}), do: "Minga's edits without a task"
   defp task_label({:minga, task_id}), do: "Minga task #{task_id}"
 
-  # Content read from disk keeps Minga's unreviewed steps; see `UndoHistory.reload/3`.
-  @spec reload_history(state(), Document.t()) :: UndoHistory.t()
-  defp reload_history(state, new_document) do
+  # Reloading the saved bytes abandons dirty decisions as well as dirty text.
+  @spec reload_history(state(), Document.t(), binary()) :: UndoHistory.t()
+  defp reload_history(state, new_document, bytes) do
+    checkpoint = if BufState.dirty?(state), do: state.swap.saved
+
+    with {_, snapshot} <- checkpoint,
+         {:ok, saved} <- UndoHistory.restore_snapshot(state.undo_history, snapshot, bytes) do
+      saved
+    else
+      _no_matching_checkpoint -> reload_changed_history(state, new_document)
+    end
+  end
+
+  @spec reload_changed_history(state(), Document.t()) :: UndoHistory.t()
+  defp reload_changed_history(state, new_document) do
     state.undo_history
     |> history_in_step(state, state.document, :before)
     |> record_history(state, new_document, &UndoHistory.reload(&1, state.document, new_document))
@@ -4085,6 +4551,80 @@ defmodule Minga.Buffer.Process do
   rescue
     exception ->
       {:history_reset, lost_history(state, state.document, Exception.message(exception))}
+  end
+
+  @spec move_history(state(), :undo | :redo, :plain | :review) ::
+          {:reply, :ok | UndoHistory.blocked() | blocked_review() | {:error, history_error()},
+           state()}
+  defp move_history(state, operation, response) do
+    state = with_history_in_step(state)
+    version = BufState.version(state)
+    step = if operation == :undo, do: &UndoHistory.undo/3, else: &UndoHistory.redo/3
+
+    case guarded(state, &step.(&1, version, state.document)) do
+      {:history_reset, history} ->
+        {:reply, {:error, :history_reset}, %{state | undo_history: history}}
+
+      :empty ->
+        {:reply, :ok, state}
+
+      {:blocked, {:overlaps, _key}} = blocked ->
+        {:reply, history_blocked(state.undo_history, blocked, response), state}
+
+      {:error, reason} = error ->
+        log_history_failure(operation, reason)
+        {:reply, error, state}
+
+      {:ok, restore, undo_history} ->
+        log_undo_source(operation, restore.source)
+        {:reply, :ok, install_restore(state, restore, undo_history)}
+    end
+  end
+
+  @spec history_blocked(UndoHistory.t(), UndoHistory.blocked(), :plain | :review) ::
+          UndoHistory.blocked() | blocked_review()
+  defp history_blocked(_history, blocked, :plain), do: blocked
+
+  defp history_blocked(_history, {:blocked, {:overlaps, :you} = overlap}, :review),
+    do: {:blocked, overlap, nil}
+
+  defp history_blocked(history, {:blocked, {:overlaps, key} = overlap}, :review) do
+    target =
+      case UndoHistory.prepare_review(history, {:step, key}) do
+        {:ok, target} -> {self(), target}
+        :empty -> nil
+      end
+
+    {:blocked, overlap, target}
+  end
+
+  @spec run_review(state(), :keep | :reject | :restore, review_target_input()) ::
+          {:ok, UndoHistory.t()}
+          | {:ok, Restore.t(), UndoHistory.t()}
+          | {:ok, Restore.t(), UndoHistory.t(), nonempty_list(UndoHistory.rejected_unit())}
+          | UndoHistory.blocked()
+          | {:error, review_error()}
+  defp run_review(%{read_only: true}, _operation, _input), do: {:error, :read_only}
+
+  defp run_review(%{document: document, undo_history: history}, operation, input) do
+    if UndoHistory.size(history) == Document.content_byte_size(document) do
+      case operation do
+        :keep ->
+          UndoHistory.keep_review(history, input)
+
+        :reject ->
+          UndoHistory.reject_review(history, input, document, :crypto.strong_rand_bytes(16))
+
+        :restore ->
+          UndoHistory.restore_review(history, input, document)
+      end
+    else
+      {:error, :inconsistent_review}
+    end
+  rescue
+    exception ->
+      Minga.Log.error(:editor, "Buffer review refused: #{Exception.message(exception)}")
+      {:error, :inconsistent_review}
   end
 
   # Starts the history again for `document`, logs why, and tells the user in *Messages*.
@@ -4179,24 +4719,106 @@ defmodule Minga.Buffer.Process do
   # Installs the document an undo, redo or agent revert produced.
   # It takes back its earlier version only when the history returned exactly to that state; otherwise it is new.
   @spec install_restore(state(), Restore.t(), UndoHistory.t()) :: state()
-  defp install_restore(state, %Restore{version: :advance} = restore, undo_history) do
-    undo_history = history_in_step(undo_history, state, restore.document, :after)
-
-    %{state | document: restore.document, undo_history: undo_history}
-    |> mark_dirty()
+  defp install_restore(state, restore, history) do
+    state
+    |> restore_candidate(restore, history)
+    |> restore_swap()
     |> clear_edits(EditSource.from_undo_source(restore.source))
   end
 
-  defp install_restore(state, %Restore{} = restore, undo_history) do
-    undo_history = history_in_step(undo_history, state, restore.document, :after)
+  @spec restore_candidate(state(), Restore.t(), UndoHistory.t()) :: state()
+  defp restore_candidate(state, restore, history) do
+    history = history_in_step(history, state, restore.document, :after)
+    state = %{state | document: restore.document, undo_history: history}
 
-    %{
-      BufState.restore_version(state, restore.version)
-      | document: restore.document,
-        undo_history: undo_history
-    }
-    |> sync_dirty()
-    |> clear_edits(EditSource.from_undo_source(restore.source))
+    case restore.version do
+      :advance -> BufState.mark_dirty(state)
+      version -> state |> BufState.restore_version(version) |> BufState.sync_dirty()
+    end
+  end
+
+  @spec restore_swap(state()) :: state()
+  defp restore_swap(state) do
+    if BufState.dirty?(state),
+      do: state |> schedule_swap_write() |> schedule_auto_save(),
+      else: state |> checkpoint_saved() |> cancel_auto_save_timer()
+  end
+
+  @spec projected_checkpoint(state(), UndoHistory.review_target()) ::
+          {:ok, UndoHistory.saved_checkpoint() | nil} | {:error, UndoHistory.review_error()}
+  defp projected_checkpoint(%{swap: %{saved: {_, _} = saved}} = state, target) do
+    if BufState.dirty?(state),
+      do: UndoHistory.keep_in_checkpoint(state.undo_history, target, saved),
+      else: {:ok, saved}
+  end
+
+  defp projected_checkpoint(_state, _target), do: {:ok, nil}
+
+  @spec finish_review_restore(state(), Restore.t(), UndoHistory.t(), result) ::
+          {:reply, result | {:error, review_error()}, state()}
+        when result: :ok | {:ok, nonempty_list(UndoHistory.rejected_unit())}
+  defp finish_review_restore(state, restore, history, reply) do
+    next = restore_candidate(state, restore, history)
+
+    case commit_review_swap(state, next, state.swap.saved) do
+      {:ok, next} ->
+        # The review checkpoint is durable, but a review decision must not save the project file.
+        next = cancel_auto_save_timer(next)
+
+        {:reply, reply, clear_edits(next, EditSource.from_undo_source(restore.source))}
+
+      {:error, reason, previous} ->
+        {:reply, {:error, {:checkpoint_failed, reason}}, previous}
+    end
+  end
+
+  @spec finish_keep(state(), state(), UndoHistory.saved_checkpoint() | nil) ::
+          {:reply, :ok | {:error, review_error()}, state()}
+  defp finish_keep(previous, next, saved) do
+    case commit_review_swap(previous, next, saved) do
+      {:ok, next} -> {:reply, :ok, next}
+      {:error, reason, previous} -> {:reply, {:error, {:checkpoint_failed, reason}}, previous}
+    end
+  end
+
+  @spec commit_review_swap(state(), state(), UndoHistory.saved_checkpoint() | nil) ::
+          {:ok, state()} | {:error, term(), state()}
+  defp commit_review_swap(previous, next, saved) do
+    if review_swap?(next) do
+      previous = revoke_swap_writes(previous)
+      next = %{next | swap: SwapState.put_saved(previous.swap, saved)}
+
+      case write_review_decision(next) do
+        {:ok, next} ->
+          {:ok, next}
+
+        {:error, reason} ->
+          failed_review_publication(previous, reason)
+      end
+    else
+      {:ok, next}
+    end
+  end
+
+  @spec failed_review_publication(state(), term()) :: {:error, term(), state()}
+  defp failed_review_publication(previous, reason) do
+    log_swap_failure(previous, {:review_checkpoint_failed, reason})
+    previous = if BufState.dirty?(previous), do: schedule_swap_write(previous), else: previous
+    {:error, reason, previous}
+  end
+
+  @spec write_review_decision(state()) :: {:ok, state()} | {:error, term()}
+  defp write_review_decision(state) do
+    if BufState.dirty?(state) do
+      opts = SwapState.backend_options(state.swap, state.swap.generation)
+
+      with :ok <- write_swap_now(state, state.file_path, opts),
+           do: {:ok, review_swap_published(state)}
+    else
+      {state, saved} = capture_saved_review(state, Document.content(state.document))
+
+      with :ok <- write_saved_swap(state, saved), do: {:ok, review_swap_published(state)}
+    end
   end
 
   # UndoHistory is clock-free; the process owns the coalescing clock.
@@ -4231,16 +4853,18 @@ defmodule Minga.Buffer.Process do
   @swap_debounce_ms 5_000
 
   @spec admit_current_swap(state()) :: state()
+  defp admit_current_swap(%{swap: %{held_for_recovery: true}} = state), do: state
+
   defp admit_current_swap(%{buffer_type: :file, file_path: path} = state)
        when is_binary(path) do
     if BufState.dirty?(state) and SwapState.configured?(state.swap) do
-      # The only swap work in the buffer process: one copy of the text, once per quiet period.
+      # Capture the bytes and the immutable history together. The worker encodes the history.
       content =
         Minga.Telemetry.span([:minga, :swap, :write], %{stage: :snapshot}, fn ->
           Document.content(state.document)
         end)
 
-      case SwapState.admit(state.swap, path, content) do
+      case SwapState.admit(state.swap, path, capture_swap(state, content)) do
         {:start, snapshot, swap} -> start_swap_worker(%{state | swap: swap}, snapshot)
         {:pending, swap} -> %{state | swap: swap}
       end
@@ -4251,15 +4875,35 @@ defmodule Minga.Buffer.Process do
 
   defp admit_current_swap(state), do: state
 
+  @spec capture_swap(state(), binary()) :: SwapState.capture()
+  defp capture_swap(state, content) do
+    history =
+      if UndoHistory.review_history?(state.undo_history), do: state.undo_history, else: nil
+
+    {content, history, state.swap.saved, BufState.file_hash(state)}
+  end
+
+  @spec prepare_swap(module(), String.t(), SwapState.capture(), keyword()) ::
+          {:ok, term()} | {:error, term()}
+  defp prepare_swap(backend, path, {content, nil, nil, _disk_hash}, opts),
+    do: backend.prepare(path, content, opts)
+
+  defp prepare_swap(backend, path, {content, history, saved, disk_hash}, opts) do
+    dirty = if history, do: UndoHistory.snapshot(history, content), else: nil
+    review = %{kind: :dirty, dirty: dirty, saved: saved}
+    opts = opts |> Keyword.put(:disk_base, disk_hash || :missing) |> Keyword.put(:review, review)
+    backend.prepare(path, content, opts)
+  end
+
   @spec start_swap_worker(state(), SwapState.snapshot()) :: state()
-  defp start_swap_worker(state, {generation, path, content} = snapshot) do
+  defp start_swap_worker(state, {generation, path, capture} = snapshot) do
     owner = self()
     backend = SwapState.backend(state.swap)
     opts = SwapState.backend_options(state.swap, generation)
 
     {worker, monitor} =
       spawn_monitor(fn ->
-        run_swap_preparation(owner, generation, path, content, backend, opts)
+        run_swap_preparation(owner, generation, path, capture, backend, opts)
       end)
 
     %{state | swap: SwapState.worker_started(state.swap, snapshot, worker, monitor)}
@@ -4269,11 +4913,11 @@ defmodule Minga.Buffer.Process do
           pid(),
           SwapState.generation(),
           String.t(),
-          binary(),
+          SwapState.capture(),
           module(),
           keyword()
         ) :: :ok
-  defp run_swap_preparation(owner, generation, path, content, backend, opts) do
+  defp run_swap_preparation(owner, generation, path, {content, _, _, _} = capture, backend, opts) do
     owner_monitor = Process.monitor(owner)
     coordinator = self()
 
@@ -4283,7 +4927,7 @@ defmodule Minga.Buffer.Process do
           Minga.Telemetry.span(
             [:minga, :swap, :write],
             %{stage: :prepare, byte_count: byte_size(content)},
-            fn -> backend.prepare(path, content, opts) end
+            fn -> prepare_swap(backend, path, capture, opts) end
           )
 
         send(coordinator, {:swap_prepare_result, result})
@@ -4341,11 +4985,15 @@ defmodule Minga.Buffer.Process do
   end
 
   @spec handle_publication_result({state(), :ok | {:error, term()}}) :: state()
-  defp handle_publication_result({state, :ok}), do: state
+  defp handle_publication_result({state, :ok}), do: review_swap_published(state)
 
   defp handle_publication_result({state, {:error, reason}}) do
     log_swap_failure(state, reason)
-    :ok = delete_swap_file(state)
+
+    if not UndoHistory.review_history?(state.undo_history) and is_nil(state.swap.saved) do
+      _result = delete_swap_file(state)
+    end
+
     state
   end
 
@@ -4439,8 +5087,77 @@ defmodule Minga.Buffer.Process do
   @spec clear_swap(state()) :: state()
   defp clear_swap(state) do
     state = revoke_swap_writes(state)
-    :ok = delete_swap_file(state)
-    state
+    state = %{state | swap: SwapState.put_saved(state.swap, nil)}
+
+    case delete_swap_file(state) do
+      :ok ->
+        {_result, state} = retire_review_sources(state)
+        state
+
+      {:error, _reason} ->
+        state
+    end
+  end
+
+  @spec leave_file_swap(state()) :: state()
+  defp leave_file_swap(state) do
+    state = revoke_swap_writes(state)
+    {_result, state} = discard_unsaved_swap(state)
+    %{state | swap: SwapState.put_saved(state.swap, nil)}
+  end
+
+  @spec retarget_file_swap(state(), String.t()) :: state()
+  defp retarget_file_swap(state, new_path) do
+    if review_swap?(state) or map_size(state.swap.sources) > 0 do
+      state = revoke_swap_writes(state)
+      source = owned_review_source(state)
+
+      state
+      |> register_buffer_move(new_path)
+      |> track_review_source(source)
+      |> publish_retargeted_review()
+    else
+      state = state |> clear_swap() |> register_buffer_move(new_path)
+      if BufState.dirty?(state), do: schedule_swap_write(state), else: state
+    end
+  end
+
+  @spec register_buffer_move(state(), String.t()) :: state()
+  defp register_buffer_move(state, path) do
+    unregister_path(state.file_path)
+    register_path(path)
+    %{BufState.retarget_path(state, path) | swap: SwapState.published(state.swap)}
+  end
+
+  @spec owned_review_source(state()) :: Swap.identity() | nil
+  defp owned_review_source(%{swap: %{held_for_recovery: true}}), do: nil
+
+  defp owned_review_source(state) do
+    source_path = Swap.swap_path(state.file_path, SwapState.backend_options(state.swap, 0))
+
+    case Swap.read(source_path) do
+      {:ok, meta, bytes} -> Swap.identity(meta, bytes)
+      {:error, _reason} -> nil
+    end
+  end
+
+  @spec publish_retargeted_review(state()) :: state()
+  defp publish_retargeted_review(state) do
+    case write_review_decision(state) do
+      {:ok, state} ->
+        state
+
+      {:error, reason} ->
+        log_swap_failure(state, {:review_retarget_failed, reason})
+
+        log_to_messages(
+          state,
+          "Moved the buffer to #{state.file_path}, but could not move its review swap. The previous swap was left in place.",
+          :warning
+        )
+
+        if BufState.dirty?(state), do: schedule_swap_write(state), else: state
+    end
   end
 
   @spec mark_dirty(state()) :: state()
@@ -4450,22 +5167,50 @@ defmodule Minga.Buffer.Process do
     schedule_auto_save(state)
   end
 
-  @spec sync_dirty(state()) :: state()
-  defp sync_dirty(state) do
-    state = BufState.sync_dirty(state)
+  @spec mark_saved(state(), Minga.Buffer.SaveState.metadata(), String.t()) :: state()
+  defp mark_saved(state, metadata, content) do
+    state
+    |> BufState.mark_saved(metadata, content)
+    |> checkpoint_saved(content)
+    |> cancel_auto_save_timer()
+  end
 
-    if BufState.dirty?(state) do
-      state |> schedule_swap_write() |> schedule_auto_save()
+  @spec review_swap?(state()) :: boolean()
+  defp review_swap?(%{buffer_type: :file, file_path: path} = state) when is_binary(path),
+    do: SwapState.configured?(state.swap) and UndoHistory.review_history?(state.undo_history)
+
+  defp review_swap?(_state), do: false
+
+  @spec checkpoint_saved(state(), binary() | nil) :: state()
+  defp checkpoint_saved(state, content \\ nil) do
+    if review_swap?(state) do
+      state = revoke_swap_writes(state)
+      {state, saved} = capture_saved_review(state, content || Document.content(state.document))
+
+      case write_saved_swap(state, saved) do
+        :ok ->
+          review_swap_published(state)
+
+        {:error, reason} ->
+          log_swap_failure(state, {:review_checkpoint_failed, reason})
+
+          log_to_messages(
+            state,
+            "The file text at #{state.file_path} is on disk, but its review history could not be saved: #{inspect(reason)}",
+            :warning
+          )
+
+          state
+      end
     else
-      state |> clear_swap() |> cancel_auto_save_timer()
+      clear_swap(state)
     end
   end
 
-  @spec mark_saved(state(), Minga.Buffer.SaveState.metadata(), String.t()) :: state()
-  defp mark_saved(state, metadata, content) do
-    state = clear_swap(state)
-    state = BufState.mark_saved(state, metadata, content)
-    cancel_auto_save_timer(state)
+  @spec capture_saved_review(state(), binary()) :: {state(), UndoHistory.saved_checkpoint()}
+  defp capture_saved_review(state, content) do
+    {history, saved} = UndoHistory.checkpoint(state.undo_history, content)
+    {%{state | undo_history: history, swap: SwapState.put_saved(state.swap, saved)}, saved}
   end
 
   # Schedule a debounced swap file write. Cancels any pending timer
@@ -4647,7 +5392,9 @@ defmodule Minga.Buffer.Process do
     end
   end
 
-  @spec delete_swap_file(state()) :: :ok
+  @spec delete_swap_file(state()) :: :ok | {:error, term()}
+  defp delete_swap_file(%{swap: %{held_for_recovery: true}}), do: :ok
+
   defp delete_swap_file(%{file_path: path} = state) when is_binary(path) do
     if SwapState.configured?(state.swap) do
       delete_configured_swap(state, path)
@@ -4658,14 +5405,18 @@ defmodule Minga.Buffer.Process do
 
   defp delete_swap_file(_state), do: :ok
 
-  @spec delete_configured_swap(state(), String.t()) :: :ok
+  @spec delete_configured_swap(state(), String.t()) :: :ok | {:error, term()}
   defp delete_configured_swap(state, path) do
     backend = SwapState.backend(state.swap)
     opts = SwapState.backend_options(state.swap, 0)
 
     case swap_backend_call(fn -> backend.delete(path, opts) end) do
-      :ok -> :ok
-      {:error, reason} -> log_swap_failure(state, {:delete_failed, reason})
+      :ok ->
+        :ok
+
+      {:error, reason} = error ->
+        log_swap_failure(state, {:delete_failed, reason})
+        error
     end
   end
 

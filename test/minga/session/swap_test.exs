@@ -80,6 +80,44 @@ defmodule Minga.Session.SwapTest do
       assert {:ok, _meta, ^content} = Swap.read(swap_path)
     end
 
+    test "a dirty review generation includes the last saved checkpoint", %{tmp_dir: tmp_dir} do
+      path = "/tmp/review.txt"
+
+      review = %{
+        kind: :dirty,
+        dirty: "dirty review",
+        saved: {:crypto.hash(:sha256, "old"), "saved review"}
+      }
+
+      opts = [incarnation: 17, generation: 29, review: review] ++ swap_opts(tmp_dir)
+      assert :ok = Swap.write(path, "unsaved", opts)
+      swap_path = Swap.swap_path(path, opts)
+
+      assert {:ok, %{path: ^path, kind: :dirty, review: ^review, revision: {17, 29, stamp}},
+              "unsaved"} =
+               Swap.read(swap_path)
+
+      assert stamp > 0
+
+      # A truncated review tail leaves independently framed unsaved text recoverable.
+      bytes = File.read!(swap_path)
+      File.write!(swap_path, binary_part(bytes, 0, byte_size(bytes) - 1))
+      assert {:ok, %{kind: :dirty, review: :invalid}, "unsaved"} = Swap.read(swap_path)
+    end
+
+    test "a clean review generation does not carry replacement text", %{tmp_dir: tmp_dir} do
+      path = "/tmp/review.txt"
+      review = %{kind: :clean, dirty: nil, saved: {:crypto.hash(:sha256, "disk"), "saved review"}}
+      opts = [incarnation: 17, generation: 31, review: review] ++ swap_opts(tmp_dir)
+      assert :ok = Swap.write(path, "", opts)
+      swap_path = Swap.swap_path(path, opts)
+
+      assert {:error, :invalid_review} = Swap.write(path, "must not replace disk", opts)
+
+      assert {:ok, %{kind: :clean, review: ^review, revision: {17, 31, _}}, ""} =
+               Swap.read(swap_path)
+    end
+
     test "atomic write leaves no .tmp file", %{tmp_dir: tmp_dir} do
       opts = swap_opts(tmp_dir)
       :ok = Swap.write("/tmp/atomic.ex", "content", opts)

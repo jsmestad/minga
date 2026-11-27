@@ -53,6 +53,9 @@ defmodule Minga.Buffer.Provenance do
   alias Minga.Buffer.Provenance.RunTree
   alias Minga.Core.Unicode
 
+  alias Minga.Buffer.Author
+  require Author
+
   defstruct tree: nil,
             groups: %{},
             next_group: 1,
@@ -100,6 +103,14 @@ defmodule Minga.Buffer.Provenance do
   @type span :: {non_neg_integer(), non_neg_integer(), author(), group_key()}
 
   @typep change :: {non_neg_integer(), non_neg_integer(), binary()}
+  @typep saved_run ::
+           {non_neg_integer(), author(), group_id() | nil, [group_id()], [Run.overlap()],
+            binary() | nil, Change.id() | nil, [Change.id()], [group_id()], [group_id()]}
+  @typep saved_groups :: %{group_id() => {author(), group_key(), boolean()}}
+  @typep saved_changes :: %{Change.id() => {Change.owner(), [Change.id()]}}
+  @opaque snapshot ::
+            {:provenance_v1, pos_integer(), pos_integer(), saved_groups(), [saved_run()],
+             saved_changes(), [[group_id()]], map(), boolean()}
 
   @doc "Returns provenance for a document of `size` bytes that all predates tracking."
   @spec new(non_neg_integer()) :: t()
@@ -120,6 +131,249 @@ defmodule Minga.Buffer.Provenance do
   @doc "Returns the document size in bytes that this provenance describes."
   @spec size(t()) :: non_neg_integer()
   def size(%__MODULE__{tree: tree}), do: RunTree.size(tree)
+
+  @doc "Returns the number of live or parked groups in the provenance."
+  @spec group_count(t()) :: non_neg_integer()
+  def group_count(%__MODULE__{groups: groups}), do: map_size(groups)
+
+  @doc "Returns the first group identifier not yet allocated."
+  @spec group_ceiling(t()) :: pos_integer()
+  def group_ceiling(%__MODULE__{next_group: id}), do: id
+
+  @doc "Captures ordered runs and irreducible history links, not the tree or search indexes."
+  @spec snapshot(t()) :: snapshot()
+  def snapshot(%__MODULE__{} = prov) do
+    groups =
+      Map.new(prov.groups, fn {id, group} -> {id, {group.author, group.key, group.applied}} end)
+
+    changes =
+      Map.new(prov.changes, fn {id, record} ->
+        {id, {record.owner, :gb_sets.to_list(record.pulls)}}
+      end)
+
+    runs = Enum.map(RunTree.to_list(prov.tree), &save_run/1)
+
+    {:provenance_v1, prov.next_group, prov.next_change, groups, runs, changes,
+     DraftLinks.snapshot(prov.detached_drafts), prov.group_marks, faulted?(prov)}
+  end
+
+  @doc "Validates references and live bytes before rebuilding the provenance indexes."
+  @spec restore_snapshot(term(), non_neg_integer()) :: {:ok, t()} | {:error, :invalid_provenance}
+  def restore_snapshot(
+        {:provenance_v1, next_group, next_change, groups, runs, changes, drafts, marks, faulted},
+        size
+      )
+      when is_integer(next_group) and next_group > 0 and is_integer(next_change) and
+             next_change > 0 and is_map(groups) and is_list(runs) and is_map(changes) and
+             is_list(drafts) and is_map(marks) and is_boolean(faulted) do
+    with :ok <- validate_saved_groups(groups, next_group),
+         :ok <- validate_saved_changes(changes, groups, next_change),
+         :ok <- validate_saved_links(groups, drafts, marks),
+         {:ok, runs} <- restore_runs(runs, groups, changes, size, []) do
+      prov = %__MODULE__{
+        groups: Map.new(groups, &restore_group/1),
+        changes:
+          Map.new(changes, fn {id, {owner, _pulls}} -> {id, %{Change.new() | owner: owner}} end),
+        detached_drafts: DraftLinks.restore(drafts),
+        group_marks: marks,
+        faults: if(faulted, do: %{all: true}, else: %{}),
+        next_group: next_group,
+        next_change: next_change
+      }
+
+      prov = Enum.reduce(changes, prov, &restore_change_links/2)
+      {:ok, rebuild(prov, runs, [])}
+    end
+  end
+
+  def restore_snapshot(_snapshot, _size), do: {:error, :invalid_provenance}
+
+  @spec restore_change_links({Change.id(), {Change.owner(), [Change.id()]}}, t()) :: t()
+  defp restore_change_links({id, {owner, pulls}}, prov) do
+    prov =
+      if is_integer(owner), do: own(prov, id, Map.fetch!(prov.changes, id), owner), else: prov
+
+    Enum.reduce(pulls, prov, &pull(&2, id, &1))
+  end
+
+  @spec validate_saved_groups(saved_groups(), pos_integer()) ::
+          :ok | {:error, :invalid_provenance}
+  defp validate_saved_groups(groups, next) do
+    valid_snapshot(
+      Enum.all?(groups, fn
+        {id, {author, key, applied}} ->
+          valid_id?(id, next) and is_boolean(applied) and valid_group_key?(author, key)
+
+        _invalid ->
+          false
+      end)
+    )
+  end
+
+  @spec validate_saved_changes(saved_changes(), saved_groups(), pos_integer()) ::
+          :ok | {:error, :invalid_provenance}
+  defp validate_saved_changes(changes, groups, next) do
+    valid_snapshot(
+      Enum.all?(changes, fn
+        {id, {owner, pulls}} when is_list(pulls) ->
+          valid_id?(id, next) and (owner in [:runs, :permanent] or is_map_key(groups, owner)) and
+            Enum.all?(pulls, &(&1 != id and is_map_key(changes, &1)))
+
+        _invalid ->
+          false
+      end)
+    )
+  end
+
+  @spec validate_saved_links(saved_groups(), [[group_id()]], map()) ::
+          :ok | {:error, :invalid_provenance}
+  defp validate_saved_links(groups, drafts, marks) do
+    valid_snapshot(
+      valid_drafts?(groups, drafts) and
+        Enum.all?(marks, fn {owner, links} ->
+          is_map_key(groups, owner) and is_list(links) and
+            Enum.all?(links, &valid_overlap_target?(groups, &1))
+        end)
+    )
+  end
+
+  @spec valid_drafts?(saved_groups(), [[group_id()]]) :: boolean()
+  defp valid_drafts?(groups, drafts) do
+    Enum.reduce_while(drafts, MapSet.new(), fn
+      [_, _ | _] = ids, seen ->
+        members = MapSet.new(ids)
+
+        if MapSet.size(members) == length(ids) and MapSet.disjoint?(members, seen) and
+             Enum.all?(members, &is_map_key(groups, &1)),
+           do: {:cont, MapSet.union(members, seen)},
+           else: {:halt, :invalid}
+
+      _invalid, _seen ->
+        {:halt, :invalid}
+    end) != :invalid
+  end
+
+  @spec valid_snapshot(boolean()) :: :ok | {:error, :invalid_provenance}
+  defp valid_snapshot(true), do: :ok
+  defp valid_snapshot(false), do: {:error, :invalid_provenance}
+
+  @spec valid_id?(term(), pos_integer()) :: boolean()
+  defp valid_id?(id, next), do: is_integer(id) and id > 0 and id < next
+
+  @spec valid_group_key?(term(), term()) :: boolean()
+  defp valid_group_key?(:you, nil), do: true
+  defp valid_group_key?({:minga, :untasked}, {:untasked, id}), do: is_integer(id) and id > 0
+  defp valid_group_key?(author, key) when Author.is_key(key), do: Author.author(key) == author
+  defp valid_group_key?(_author, _key), do: false
+
+  @spec valid_overlap_target?(saved_groups(), term()) :: boolean()
+  defp valid_overlap_target?(_groups, {:permanent, key}) when key in [nil, :you], do: true
+
+  defp valid_overlap_target?(_groups, {:permanent, key}) when Author.is_key(key), do: true
+
+  defp valid_overlap_target?(_groups, {:permanent, {:untasked, id}}),
+    do: is_integer(id) and id > 0
+
+  defp valid_overlap_target?(groups, id), do: is_map_key(groups, id)
+
+  @spec restore_group({group_id(), {author(), group_key(), boolean()}}) :: {group_id(), Group.t()}
+  defp restore_group({id, {author, key, applied}}),
+    do: {id, %Group{author: author, key: key, applied: applied, runs: :gb_sets.new()}}
+
+  @spec save_run(Run.t()) :: saved_run()
+  defp save_run(run),
+    do:
+      {run.bytes, run.author, run.group, run.deletions, run.overlaps, run.text, run.made_by,
+       run.replaced_by, run.covered_by, run.swept_by}
+
+  @spec restore_runs([saved_run()], saved_groups(), saved_changes(), integer(), [Run.t()]) ::
+          {:ok, [Run.t()]} | {:error, :invalid_provenance}
+  defp restore_runs([], _groups, _changes, 0, acc), do: {:ok, Enum.reverse(acc)}
+
+  defp restore_runs(
+         [
+           {bytes, author, writer, deletions, overlaps, text, made, replaced, covered, swept} =
+             run
+           | rest
+         ],
+         groups,
+         changes,
+         remaining,
+         acc
+       )
+       when is_integer(bytes) and bytes >= 0 and is_list(deletions) and is_list(overlaps) and
+              is_list(replaced) and is_list(covered) and is_list(swept) do
+    with {:ok, written?} <- validate_writer(groups, writer, author),
+         :ok <- validate_run_references(run, groups, changes) do
+      live = bytes > 0 and written? and not Enum.any?(deletions, &elem(Map.fetch!(groups, &1), 2))
+      live_bytes = if live, do: bytes, else: 0
+
+      if live_bytes <= remaining and valid_run_text?(live, bytes, text) do
+        run = %Run{
+          id: Locator.between(nil, nil),
+          bytes: bytes,
+          author: author,
+          group: writer,
+          deletions: deletions,
+          overlaps: overlaps,
+          text: text,
+          live: live,
+          made_by: made,
+          replaced_by: replaced,
+          covered_by: covered,
+          swept_by: swept
+        }
+
+        restore_runs(rest, groups, changes, remaining - live_bytes, [run | acc])
+      else
+        {:error, :invalid_provenance}
+      end
+    end
+  end
+
+  defp restore_runs(_runs, _groups, _changes, _remaining, _acc), do: {:error, :invalid_provenance}
+
+  @spec validate_run_references(saved_run(), saved_groups(), saved_changes()) ::
+          :ok | {:error, :invalid_provenance}
+  defp validate_run_references(
+         {_bytes, _author, _writer, deletions, overlaps, _text, made, replaced, covered, swept},
+         groups,
+         changes
+       ) do
+    valid_snapshot(
+      Enum.all?(deletions, &is_map_key(groups, &1)) and
+        Enum.all?(covered, &(&1 in deletions)) and Enum.all?(swept, &(&1 in deletions)) and
+        Enum.all?(overlaps, &valid_run_overlap?(groups, &1)) and
+        (is_nil(made) or is_map_key(changes, made)) and
+        Enum.all?(replaced, &is_map_key(changes, &1))
+    )
+  end
+
+  @spec valid_run_overlap?(saved_groups(), term()) :: boolean()
+  defp valid_run_overlap?(groups, {owner, target}),
+    do: is_map_key(groups, owner) and valid_overlap_target?(groups, target)
+
+  defp valid_run_overlap?(_groups, _invalid), do: false
+
+  @spec validate_writer(saved_groups(), group_id() | nil, author()) ::
+          {:ok, boolean()} | {:error, :invalid_provenance}
+  defp validate_writer(_groups, nil, author)
+       when author in [:unattributed, :you, {:minga, :untasked}],
+       do: {:ok, true}
+
+  defp validate_writer(_groups, nil, {:minga, id}) when is_binary(id), do: {:ok, true}
+
+  defp validate_writer(groups, writer, author) do
+    case groups do
+      %{^writer => {^author, _key, applied}} -> {:ok, applied}
+      _invalid -> {:error, :invalid_provenance}
+    end
+  end
+
+  @spec valid_run_text?(boolean(), non_neg_integer(), binary() | nil) :: boolean()
+  defp valid_run_text?(true, _bytes, text), do: is_nil(text)
+  defp valid_run_text?(false, 0, text), do: text in [nil, ""]
+  defp valid_run_text?(false, bytes, text), do: is_binary(text) and byte_size(text) == bytes
 
   @doc "Opens a new applied group for edits by `author`, named `key` to callers, and returns its id."
   @spec open_group(t(), author(), group_key()) :: {group_id(), t()}
@@ -289,6 +543,12 @@ defmodule Minga.Buffer.Provenance do
   def reapply(%__MODULE__{} = prov, id, %Document{} = document),
     do: prov |> set_applied(id, true, document) |> traced_flip([id], true)
 
+  @doc "Reapplies every group in a review unit in one document pass."
+  @spec reapply_all(t(), [group_id()], Document.t()) ::
+          {:ok, Document.t(), non_neg_integer() | nil, t()} | {:error, :invalid_utf8}
+  def reapply_all(%__MODULE__{} = prov, ids, %Document{} = document) when is_list(ids),
+    do: prov |> set_applied_all(ids, true, document) |> traced_flip(ids, true)
+
   @doc """
   Returns the key of an applied group that is not yours and deleted text this group wrote or removed after this group did, or `nil`.
 
@@ -308,26 +568,37 @@ defmodule Minga.Buffer.Provenance do
   @spec blocker(t(), group_id(), (author(), group_key() -> boolean())) :: group_key() | nil
   def blocker(%__MODULE__{groups: groups, tree: tree}, id, blocks?)
       when is_function(blocks?, 2) do
+    identify = blocking_author(blocks?)
+
     Map.fetch!(groups, id).runs
     |> :gb_sets.to_list()
     |> Enum.find_value(fn run_id ->
       {:ok, run, _offset} = RunTree.fetch(tree, run_id)
-      run_blocker(run, id, groups, blocks?)
+      run_blocker(run, id, groups, identify)
     end)
+  end
+
+  @typep identify_blocker :: (group_id(), Group.t() -> group_key() | :you | nil)
+
+  @spec blocking_author((author(), group_key() -> boolean())) :: identify_blocker()
+  defp blocking_author(blocks?) do
+    fn _id, %Group{author: author, key: key} ->
+      if blocks?.(author, key), do: key
+    end
   end
 
   @spec run_blocker(
           Run.t(),
           group_id(),
           %{group_id() => Group.t()},
-          (author(), group_key() -> boolean())
-        ) :: group_key() | nil
-  defp run_blocker(run, id, groups, blocks?) do
+          identify_blocker()
+        ) :: group_key() | :you | nil
+  defp run_blocker(run, id, groups, identify) do
     if removed_by?(run, id) do
       run
       |> later_deleters(id)
       |> Enum.reject(&(&1 in run.covered_by))
-      |> Enum.find_value(&blocking_key(groups, &1, id, blocks?))
+      |> Enum.find_value(&blocking_key(groups, &1, id, identify))
     end
   end
 
@@ -404,23 +675,99 @@ defmodule Minga.Buffer.Provenance do
           group_key() | nil
   def blocker_among(%__MODULE__{} = prov, ids, blocks?)
       when is_list(ids) and is_function(blocks?, 2) do
-    touched = Enum.reduce(ids, 0, &(:gb_sets.size(Map.fetch!(prov.groups, &1).runs) + &2))
-
-    set = MapSet.new(ids)
-
-    if touched * 8 > RunTree.count(prov.tree),
-      do: blocker_in_one_pass(prov, set, blocks?),
-      else: Enum.find_value(ids, &set_blocker(prov, &1, set, blocks?))
+    blocked_among(prov, ids, MapSet.new(ids), blocking_author(blocks?))
   end
 
-  @spec set_blocker(t(), group_id(), MapSet.t(group_id()), (author(), group_key() -> boolean())) ::
-          group_key() | nil
-  defp set_blocker(%__MODULE__{groups: groups, tree: tree}, id, set, blocks?) do
+  @doc "Names the first conflict outside the exact review unit IDs."
+  @spec review_conflict(t(), [group_id()], :reject | :restore) ::
+          group_key() | :you | nil
+  def review_conflict(%__MODULE__{} = prov, ids, direction) do
+    selected = MapSet.new(ids)
+
+    identify = fn group, value ->
+      cond do
+        MapSet.member?(selected, group) -> nil
+        direction == :reject and value.author == :you -> nil
+        true -> overlap_name(value)
+      end
+    end
+
+    case blocked_among(prov, ids, selected, identify) do
+      nil ->
+        case overlaps_among(prov, ids) do
+          [] -> nil
+          [{key, _offset} | _rest] -> key
+        end
+
+      key ->
+        key
+    end
+  end
+
+  @typedoc "Retained bytes and the exact visible input of a parked review unit."
+  @type restore_proof :: {non_neg_integer(), <<_::256>>}
+
+  @doc "Binds review restore to the direct and covered text that reapplication would consume."
+  @spec review_restore_proof(t(), [group_id()], Document.t()) :: restore_proof()
+  def review_restore_proof(%__MODULE__{groups: groups, tree: tree}, ids, document) do
+    {input, retained} =
+      Enum.map_reduce(ids, 0, fn id, size ->
+        {size, direct, covered} =
+          groups
+          |> Map.fetch!(id)
+          |> Map.fetch!(:runs)
+          |> :gb_sets.to_list()
+          |> Enum.reduce({size, [], []}, &review_run_proof(tree, id, &1, document, &2))
+
+        hashes = [
+          :crypto.hash(:sha256, Enum.reverse(direct)),
+          :crypto.hash(:sha256, Enum.reverse(covered))
+        ]
+
+        {hashes, size}
+      end)
+
+    {retained, :crypto.hash(:sha256, input)}
+  end
+
+  @typep input_bytes :: {non_neg_integer(), [binary()], [binary()]}
+
+  @spec review_run_proof(RunTree.t(), group_id(), Locator.t(), Document.t(), input_bytes()) ::
+          input_bytes()
+  defp review_run_proof(tree, group, run_id, document, {size, direct, covered}) do
+    {:ok, run, offset} = RunTree.fetch(tree, run_id)
+    directly_touched? = removed_by?(run, group)
+    size = if directly_touched?, do: size + run.bytes, else: size
+
+    if run.live and group in run.deletions do
+      text = Document.slice_byte_range(document, offset, run.bytes)
+
+      if directly_touched?,
+        do: {size, [text | direct], covered},
+        else: {size, direct, [text | covered]}
+    else
+      {size, direct, covered}
+    end
+  end
+
+  @spec blocked_among(t(), [group_id()], MapSet.t(group_id()), identify_blocker()) ::
+          group_key() | :you | nil
+  defp blocked_among(prov, ids, set, identify) do
+    touched = Enum.reduce(ids, 0, &(:gb_sets.size(Map.fetch!(prov.groups, &1).runs) + &2))
+
+    if touched * 8 > RunTree.count(prov.tree),
+      do: blocker_in_one_pass(prov, set, identify),
+      else: Enum.find_value(ids, &set_blocker(prov, &1, set, identify))
+  end
+
+  @spec set_blocker(t(), group_id(), MapSet.t(group_id()), identify_blocker()) ::
+          group_key() | :you | nil
+  defp set_blocker(%__MODULE__{groups: groups, tree: tree}, id, set, identify) do
     Map.fetch!(groups, id).runs
     |> :gb_sets.to_list()
     |> Enum.find_value(fn run_id ->
       {:ok, run, _offset} = RunTree.fetch(tree, run_id)
-      if not internal?(run, set), do: run_blocker(run, id, groups, blocks?)
+      if not internal?(run, set), do: run_blocker(run, id, groups, identify)
     end)
   end
 
@@ -430,9 +777,9 @@ defmodule Minga.Buffer.Provenance do
   defp internal?(run, set),
     do: MapSet.member?(set, run.group) and Enum.any?(run.deletions, &MapSet.member?(set, &1))
 
-  @spec blocker_in_one_pass(t(), MapSet.t(group_id()), (author(), group_key() -> boolean())) ::
-          group_key() | nil
-  defp blocker_in_one_pass(prov, ids, blocks?) do
+  @spec blocker_in_one_pass(t(), MapSet.t(group_id()), identify_blocker()) ::
+          group_key() | :you | nil
+  defp blocker_in_one_pass(prov, ids, identify) do
     prov.tree
     |> RunTree.to_list()
     |> Enum.reject(&internal?(&1, ids))
@@ -440,7 +787,7 @@ defmodule Minga.Buffer.Provenance do
       run
       |> run_groups()
       |> Enum.filter(&MapSet.member?(ids, &1))
-      |> Enum.find_value(&run_blocker(run, &1, prov.groups, blocks?))
+      |> Enum.find_value(&run_blocker(run, &1, prov.groups, identify))
     end)
   end
 
@@ -2474,13 +2821,13 @@ defmodule Minga.Buffer.Provenance do
           %{group_id() => Group.t()},
           group_id(),
           group_id(),
-          (author(), group_key() -> boolean())
-        ) :: group_key() | nil
+          identify_blocker()
+        ) :: group_key() | :you | nil
   defp blocking_key(_groups, id, id, _blocks?), do: nil
 
-  defp blocking_key(groups, deleter, _id, blocks?) do
+  defp blocking_key(groups, deleter, _id, identify) do
     case Map.fetch!(groups, deleter) do
-      %Group{applied: true, author: author, key: key} -> if blocks?.(author, key), do: key
+      %Group{applied: true} = group -> identify.(deleter, group)
       %Group{} -> nil
     end
   end

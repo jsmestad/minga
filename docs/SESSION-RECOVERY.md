@@ -6,6 +6,18 @@ This page is for readers who want to know how that works and what its limits are
 
 A saved session must resume from the model conversation that actually completed, not from a reconstruction of the visible transcript. Minga stores the lossless provider continuation beside the editable display history and restores both as one session snapshot.
 
+## Unreviewed file changes
+
+Reopen the file to review its pending Minga changes. The buffer keeps their authorship and Reject anchors separately from the conversation, so you do not have to reopen the task or restore the old window layout. Saving writes your current file and records its review state, but does not Keep the changes. `SPC a u` names the latest task in the current buffer and asks before rejecting its changes. Your own edits stay.
+
+A recovered unsaved file gets the review state that was recorded with those bytes. A saved file gets it only if the file still matches the saved checkpoint. If Minga cannot verify the review state, it recovers any available text and tells you in *Messages* that it cannot restore the attribution. Reopening a file does not restore your ordinary undo stack.
+
+Reject and explicit review restore update the buffer and its recovery checkpoint, not the project file. Save to write the current buffer to disk. A later ordinary edit resumes auto-save if it was enabled. To discard recovered review text without saving it, use `:e!` to reload the file.
+
+If the file on disk changed after a review swap was written, Minga does not replace it on startup. Open the waiting text from recovery to inspect it yourself. If the file save succeeds but the review checkpoint fails, *Messages* reports that distinction.
+
+If Minga cannot confirm a swap discard before quitting, the editor reports the affected file in its log and exits with status 1. The next start can still offer that text. A forced buffer close stays open when discarding its swap fails.
+
 ## Draft storage
 
 The Session store can keep a bounded composer draft without creating a model conversation. The version 7 record keeps the conversation and draft in separate members and commits them together. A conversation save preserves the last committed draft. A draft write names its expected revision, preserves the exact conversation payload, and rejects a stale write unless it is an exact retry. Clearing a draft advances its revision.

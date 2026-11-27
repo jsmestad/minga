@@ -29,7 +29,7 @@ defmodule MingaEditor.Handlers.SessionRestore do
 
   @typedoc "A swap file found at startup, with its file path and unsaved text or the reason it could not be read."
   @type recovered_entry ::
-          {Session.swap_entry(), {:ok, String.t(), String.t()} | {:error, term()}}
+          {Session.swap_entry(), {:ok, Session.Swap.identity(), String.t()} | {:error, term()}}
 
   @typedoc """
   What one start has to pick up: the project's saved session, the unsaved text of its swap files, the swap files it holds back, and how many other files have unsaved text waiting.
@@ -85,15 +85,13 @@ defmodule MingaEditor.Handlers.SessionRestore do
   def recover_waiting(state, %{path: path, swap_path: swap_path}) do
     name = Path.basename(path)
 
-    with {:ok, file_path, content} <- Session.read_swap_file(swap_path),
-         {:ok, buffer} <- adopt(state, file_path, content, swap_path) do
-      Minga.Log.info(:editor, "Recovered unsaved text: #{file_path}")
+    with {:ok, %{path: ^path} = source, content} <- Session.read_swap_file(swap_path),
+         {:ok, buffer} <- adopt(state, source, content, :explicit) do
+      Minga.Log.info(:editor, "Recovered unsaved text: #{path}")
 
       state
-      |> show_in_front(buffer, file_path)
-      |> NoticeWorkflow.publish(
-        "Recovered the unsaved text of #{name}: save to keep it, undo to drop it"
-      )
+      |> show_in_front(buffer, path)
+      |> NoticeWorkflow.publish(recovered_notice(name, source))
     else
       {:error, :modified} ->
         NoticeWorkflow.publish(
@@ -102,7 +100,10 @@ defmodule MingaEditor.Handlers.SessionRestore do
         )
 
       # The swap is gone: another editor or a start recovered or removed it after the list was read.
-      {:error, :enoent} ->
+      {:error, reason} when reason in [:enoent, :stale_swap, :no_unsaved_text] ->
+        NoticeWorkflow.publish(state, "The unsaved text of #{name} is no longer waiting")
+
+      {:ok, _different_source, _bytes} ->
         NoticeWorkflow.publish(state, "The unsaved text of #{name} is no longer waiting")
 
       {:error, reason} ->
@@ -403,11 +404,14 @@ defmodule MingaEditor.Handlers.SessionRestore do
 
   @spec recover_entry(recovered_entry(), {state(), non_neg_integer()}) ::
           {state(), non_neg_integer()}
-  defp recover_entry({entry, {:ok, file_path, content}}, {state, count}) do
-    case adopt(state, file_path, content, entry.swap_path) do
+  defp recover_entry({entry, {:ok, %{path: file_path} = source, content}}, {state, count}) do
+    case adopt(state, source, content, :automatic) do
       {:ok, buffer} ->
         Minga.Log.info(:editor, "Recovered unsaved text: #{file_path}")
         {show_recovered(state, buffer, file_path), count + 1}
+
+      {:error, :stale_swap} ->
+        {state, count}
 
       {:error, reason} ->
         Minga.Log.warning(
@@ -428,6 +432,13 @@ defmodule MingaEditor.Handlers.SessionRestore do
     {state, count}
   end
 
+  @spec recovered_notice(String.t(), Session.Swap.identity()) :: String.t()
+  defp recovered_notice(name, %{revision: {:legacy, _}}),
+    do: "Recovered the unsaved text of #{name}: save to keep it, undo to drop it"
+
+  defp recovered_notice(name, _source),
+    do: "Recovered the unsaved text of #{name}: save to keep it, or use :e! to reload the file"
+
   @spec not_recovered(String.t(), term()) :: String.t()
   defp not_recovered(file_path, :modified),
     do:
@@ -441,10 +452,11 @@ defmodule MingaEditor.Handlers.SessionRestore do
 
   # Gives the text to the buffer for the file: the one that is already open, or a new one.
   # A file that no longer exists gets a buffer for its path, so the text can be saved back.
-  @spec adopt(state(), String.t(), String.t(), String.t()) :: {:ok, pid()} | {:error, term()}
-  defp adopt(state, file_path, content, swap_path) do
-    with {:ok, buffer} <- buffer_for(state, file_path),
-         :ok <- Buffer.adopt_recovered_text(buffer, content, swap_path) do
+  @spec adopt(state(), Session.Swap.identity(), String.t(), :explicit | :automatic) ::
+          {:ok, pid()} | {:error, term()}
+  defp adopt(state, source, content, mode) do
+    with {:ok, buffer} <- buffer_for(state, source.path),
+         :ok <- Buffer.adopt_recovered_text(buffer, content, source, mode) do
       {:ok, buffer}
     end
   catch

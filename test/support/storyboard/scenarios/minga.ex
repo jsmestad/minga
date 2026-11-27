@@ -4,6 +4,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
   import ExUnit.Assertions
   import Minga.Test.Storyboard.Assertions
 
+  alias Minga.Buffer.EditSource
   alias Minga.Test.Storyboard.Check
   alias Minga.Test.Storyboard.Entry
   alias Minga.Test.Storyboard.Model
@@ -20,6 +21,15 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
     "Then run the session tests and fix what fails.",
     "Update docs/CONFIGURATION.md with the new limit message."
   ]
+
+  @review_content """
+  defmodule UsageLimit do
+    def label, do: "Rate limited"
+    def window, do: 60
+    def retry?, do: false
+  end
+  """
+  @review_prompt "Reject 3 changes from task plan-limit? Your edits stay."
 
   @spec conversation(:working | :stopped) :: keyword()
   defp conversation(turn) do
@@ -372,7 +382,27 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
         4050,
         "Minga's changes in the gutter, reviewed in place"
       ),
-      Entry.pending("minga.reject_all.confirm", 4049, "reject all changes, y/n"),
+      Entry.built("minga.reject_all.confirm",
+        start: [content: @review_content, review_edits: review_edits()],
+        reach: "SPC a u",
+        click_reach: [
+          {:gui_action, {:execute_command, "which_key_open"}},
+          {:gui_action, {:which_key_press, "SPC", ?a, 0}},
+          {:gui_action, {:which_key_press, "SPC a", ?u, 0}}
+        ],
+        recognize: &reject_task_prompt?/1,
+        checks: [
+          Check.new("the named task and count leave your edits untouched", fn model ->
+            assert model.minibuffer_prompt == @review_prompt
+            model
+          end),
+          Check.new("both confirmation choices are present", fn model ->
+            choices = Enum.map(model.ui.minibuffer.candidates, &{&1.id, &1.annotation})
+            assert choices == [{"Yes", "y"}, {"No", "n / Esc"}]
+            model
+          end)
+        ]
+      ),
       Entry.built("minga.conversation",
         start: [conversation: conversation(:working)],
         reach: "SPC a v",
@@ -421,6 +451,22 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
       Entry.pending("minga.act_menu.selection", 4052, "the act menu on a selection")
     ]
   end
+
+  @spec review_edits() :: [
+          {Minga.Buffer.Document.position(), non_neg_integer(), binary(), EditSource.t()}
+        ]
+  defp review_edits do
+    [
+      {{1, 17}, byte_size("\"Rate limited\""), "\"Your plan limit applies\"",
+       EditSource.minga("plan-limit", "label")},
+      {{2, 18}, 2, "45", EditSource.minga("plan-limit", "window")},
+      {{3, 18}, 5, "true", EditSource.minga("plan-limit", "retry")}
+    ]
+  end
+
+  @spec reject_task_prompt?(Model.t()) :: boolean()
+  defp reject_task_prompt?(%Model{minibuffer_prompt: @review_prompt}), do: true
+  defp reject_task_prompt?(%Model{}), do: false
 
   @doc "True when the tasks drawer's list is open with a selected row in `state`."
   @spec tasks_selected?(Model.t(), atom()) :: boolean()

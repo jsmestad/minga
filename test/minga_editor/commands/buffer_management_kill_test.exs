@@ -11,6 +11,8 @@ defmodule MingaEditor.Commands.BufferManagementKillTest do
   alias Minga.Config.Options
   alias Minga.Frontend.WaitRequestCompletion
   alias Minga.Frontend.WaitRequests
+  alias Minga.Session.ControllableSwapBackend
+  alias Minga.Session.Swap
   alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Startup
@@ -75,6 +77,43 @@ defmodule MingaEditor.Commands.BufferManagementKillTest do
 
     assert_receive {:DOWN, ^monitor, :process, ^buffer, :normal}
     assert state.workspace.buffers.list == [] and match?(%Launchpad{}, state.workspace.launchpad)
+  end
+
+  test "force kill leaves the buffer and wait request open when the swap discard fails", ctx do
+    swap_dir = Path.join(ctx.tmp, "swap")
+
+    {buffer, path} =
+      file_buffer(ctx.tmp, "discard-fails", ctx.options,
+        swap_dir: swap_dir,
+        swap_backend: ControllableSwapBackend,
+        swap_backend_options: [controller: self()]
+      )
+
+    assert :ok = Buffer.replace_content(buffer, "agent edits", :agent)
+    save = Task.async(fn -> Buffer.save(buffer) end)
+    assert_receive {:swap_prepare, ^buffer, generation, ^path, ""}
+    send(buffer, {:swap_prepare_result, generation, :ok})
+    assert :ok = Task.await(save)
+    assert :ok = Buffer.insert_text(buffer, "unsaved ")
+    request_id = request_id()
+    assert :ok = WaitRequests.register(buffer, path, request_id, self())
+    state = initial_state(buffer, ctx.options, ctx.tmp)
+    close = Task.async(fn -> BufferManagement.execute(state, :force_kill_buffer) end)
+    assert_receive {:swap_prepare, ^buffer, generation, ^path, ""}
+    send(buffer, {:swap_prepare_result, generation, {:error, :disk_full}})
+    state = Task.await(close)
+
+    assert state.workspace.buffers.active == buffer
+    assert NoticeWorkflow.message(state) =~ "Could not discard the buffer's swap: :disk_full"
+    assert Buffer.dirty?(buffer)
+    assert {:ok, %{kind: :clean}, ""} = Swap.read(Swap.swap_path(path, swap_dir: swap_dir))
+    refute_received %WaitRequestCompletion{request_id: ^request_id}
+
+    retry = Task.async(fn -> BufferManagement.execute(state, :force_kill_buffer) end)
+    assert_receive {:swap_prepare, ^buffer, generation, ^path, ""}
+    send(buffer, {:swap_prepare_result, generation, :ok})
+    assert Task.await(retry).workspace.buffers.active == nil
+    assert_receive %WaitRequestCompletion{request_id: ^request_id, outcome: {:cancelled, _reason}}
   end
 
   test "ordinary and force kills clear persistent buffers without stopping them", ctx do

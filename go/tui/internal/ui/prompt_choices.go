@@ -38,7 +38,10 @@ func (m Model) renderPromptChoices(mini protocol.Minibuffer) string {
 		if budget >= remaining*2-1 {
 			gap = remaining - 1
 		}
-		cells := min(displayWidth(item.Label)+2, max((budget-gap)/remaining, 0))
+		cells := displayWidth(item.Label) + 2
+		if wanted > width {
+			cells = min(cells, max((budget-gap)/remaining, 0))
+		}
 		if cells == 0 {
 			continue
 		}

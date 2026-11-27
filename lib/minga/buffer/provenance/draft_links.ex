@@ -17,6 +17,22 @@ defmodule Minga.Buffer.Provenance.DraftLinks do
   @spec new() :: t()
   def new, do: %__MODULE__{}
 
+  @doc "Returns the detached draft components without their reverse index."
+  @spec snapshot(t()) :: [[id()]]
+  def snapshot(%__MODULE__{components: components}) do
+    Enum.map(components, fn {_owner, members} -> :gb_sets.to_list(members) end)
+  end
+
+  @doc "Rebuilds detached draft links from disjoint components of live groups."
+  @spec restore([[id()]]) :: t()
+  def restore(components) do
+    Enum.reduce(components, new(), fn [owner | _] = members, links ->
+      owners = Enum.reduce(members, links.owners, &Map.put(&2, &1, owner))
+      components = Map.put(links.components, owner, :gb_sets.from_list(members))
+      %{links | owners: owners, components: components}
+    end)
+  end
+
   @doc "Joins two live groups without retaining a second connection inside one component."
   @spec link(t(), id(), id()) :: t()
   def link(%__MODULE__{} = links, left, right) do
