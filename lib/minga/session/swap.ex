@@ -48,16 +48,48 @@ defmodule Minga.Session.Swap do
   alias Minga.Session.Swap.Prepared
 
   @magic "MINGA_SWAP_V1\n"
-  @temporary_name_regex ~r/\A[0-9a-v]{52}\.(\d+)\.swap\.\d+\.\d+\.tmp\z/
+  @review_magic "MINGA_SWAP_V2\n"
+  @temporary_name_regex ~r/\A[0-9a-v]{52}\.(\d+)(?:\.held-[0-9a-f]{32})?\.swap\.\d+\.\d+\.tmp\z/
+
+  @typedoc "The review snapshot associated with the exact last saved content."
+  @type saved_review :: {<<_::256>>, binary()}
+
+  @typedoc "One swap generation's review history. A clean record has no unsaved text."
+  @type review :: %{
+          kind: :dirty | :clean,
+          dirty: binary() | nil,
+          saved: saved_review() | nil
+        }
+
+  @typedoc "Incarnation, generation and written time in microseconds."
+  @type revision :: {pos_integer(), pos_integer(), pos_integer()}
+
+  @type disk_base :: <<_::256>> | :missing | :invalid
 
   @typedoc "Metadata parsed from a swap file header."
   @type metadata :: %{
-          path: String.t(),
-          os_pid: integer(),
-          mtime: integer(),
-          run_started: String.t() | nil,
-          swap_path: String.t()
+          required(:path) => String.t(),
+          required(:os_pid) => integer(),
+          required(:mtime) => integer(),
+          required(:run_started) => String.t() | nil,
+          required(:swap_path) => String.t(),
+          optional(:kind) => :clean | :dirty,
+          optional(:revision) => revision() | {:invalid, <<_::256>>},
+          optional(:disk_base) => disk_base(),
+          optional(:review) => review() | :invalid,
+          optional(:held?) => true
         }
+
+  @typedoc "The exact publication retained until a recovery request is adopted."
+  @type identity :: %{
+          required(:path) => String.t(),
+          required(:os_pid) => integer(),
+          required(:run_started) => String.t() | nil,
+          required(:swap_path) => String.t(),
+          required(:revision) => identity_revision()
+        }
+
+  @typep identity_revision :: revision() | {:invalid | :legacy, <<_::256>>}
 
   @doc "Returns the swap directory path."
   @spec swap_dir(keyword()) :: String.t()
@@ -76,10 +108,40 @@ defmodule Minga.Session.Swap do
   @spec swap_path(String.t(), keyword()) :: String.t()
   def swap_path(file_path, opts \\ []) when is_binary(file_path) do
     dir = swap_dir(opts)
-    hash = :crypto.hash(:sha256, file_path) |> Base.hex_encode32(case: :lower, padding: false)
+    hash = path_key(file_path)
     os_pid = Keyword.get(opts, :os_pid, os_pid())
     Path.join(dir, "#{hash}.#{os_pid}.swap")
   end
+
+  @doc "Moves an unadopted review publication out of the writable slot without changing its bytes."
+  @spec hold(String.t()) :: {:ok, String.t()} | {:error, File.posix()}
+  def hold(swap_path) do
+    token = Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
+    held = String.replace_suffix(swap_path, ".swap", ".held-#{token}.swap")
+    with :ok <- File.rename(swap_path, held), do: {:ok, held}
+  end
+
+  @doc "Lists published swap generations whose filename identifies this source path."
+  @spec paths_for_file(String.t(), keyword()) :: [String.t()]
+  def paths_for_file(file_path, opts \\ []) when is_binary(file_path) do
+    dir = swap_dir(opts)
+    prefix = path_key(file_path) <> "."
+
+    case File.ls(dir) do
+      {:ok, names} ->
+        for name <- names,
+            String.starts_with?(name, prefix),
+            String.ends_with?(name, ".swap"),
+            do: Path.join(dir, name)
+
+      {:error, _reason} ->
+        []
+    end
+  end
+
+  @spec path_key(String.t()) :: String.t()
+  defp path_key(path),
+    do: :crypto.hash(:sha256, path) |> Base.hex_encode32(case: :lower, padding: false)
 
   @doc """
   Writes a swap file for the given source file path and buffer content.
@@ -108,19 +170,22 @@ defmodule Minga.Session.Swap do
   @spec prepare(String.t(), binary(), keyword()) :: {:ok, Prepared.t()} | {:error, term()}
   def prepare(file_path, content, opts \\ [])
       when is_binary(file_path) and is_binary(content) do
-    dir = swap_dir(opts)
+    prepare_at(swap_path(file_path, opts), file_path, content, opts)
+  end
+
+  @spec prepare_at(String.t(), String.t(), binary(), keyword()) ::
+          {:ok, Prepared.t()} | {:error, term()}
+  defp prepare_at(target, file_path, content, opts) do
     os_pid_val = Keyword.get(opts, :os_pid, os_pid())
-    target = swap_path(file_path, opts)
+    dir = Path.dirname(target)
     tmp = temporary_path(target, Keyword.get(opts, :generation))
 
     header =
       "path=#{file_path}\nos_pid=#{os_pid_val}\nmtime=#{System.os_time(:second)}" <>
         run_started_field(opts)
 
-    header_len = byte_size(header)
-    data = <<@magic, header_len::32-big, header::binary, content::binary>>
-
-    with :ok <- File.mkdir_p(dir),
+    with {:ok, data} <- encode_swap(header, content, opts),
+         :ok <- File.mkdir_p(dir),
          :ok <- File.write(tmp, data) do
       {:ok, %Prepared{temporary_path: tmp, target_path: target}}
     else
@@ -129,6 +194,87 @@ defmodule Minga.Session.Swap do
         error
     end
   end
+
+  @doc "Prepares a saved-only replacement in the exact dirty record's slot."
+  @spec prepare_saved_only(metadata(), saved_review()) :: {:ok, Prepared.t()} | {:error, term()}
+  def prepare_saved_only(%{revision: {incarnation, generation, written}} = source, saved) do
+    opts = [
+      os_pid: source.os_pid,
+      run_started: source.run_started,
+      incarnation: incarnation,
+      generation: generation + 1,
+      review: %{kind: :clean, dirty: nil, saved: saved}
+    ]
+
+    opts = if source[:held?], do: Keyword.put(opts, :written, written), else: opts
+    prepare_at(source.swap_path, source.path, "", opts)
+  end
+
+  @spec encode_swap(binary(), binary(), keyword()) :: {:ok, iodata()} | {:error, :invalid_review}
+  defp encode_swap(header, content, opts) do
+    case Keyword.get(opts, :review) do
+      nil ->
+        {:ok, [<<@magic, byte_size(header)::32>>, header, content]}
+
+      review ->
+        encode_review_swap(
+          append_disk_base(header, Keyword.get(opts, :disk_base)),
+          content,
+          review,
+          Keyword.get(opts, :incarnation),
+          Keyword.get(opts, :generation),
+          Keyword.get_lazy(opts, :written, fn -> System.os_time(:microsecond) end)
+        )
+    end
+  end
+
+  @spec append_disk_base(binary(), disk_base() | nil) :: binary()
+  defp append_disk_base(header, <<_::256>> = digest),
+    do: header <> "\ndisk_base=" <> Base.encode16(digest)
+
+  defp append_disk_base(header, :missing), do: header <> "\ndisk_base=missing"
+  defp append_disk_base(header, nil), do: header
+
+  @spec encode_review_swap(binary(), binary(), review(), term(), term(), pos_integer()) ::
+          {:ok, iodata()} | {:error, :invalid_review}
+  defp encode_review_swap(header, content, review, incarnation, generation, written)
+       when is_integer(incarnation) and incarnation > 0 and incarnation < 0x10000000000000000 and
+              is_integer(generation) and generation > 0 and generation < 0x10000000000000000 do
+    with {:ok, kind} <- review_kind(review, content),
+         {:ok, review_frame} <- encode_review(review) do
+      framing =
+        <<@review_magic, byte_size(header)::32, byte_size(content)::64, incarnation::64,
+          generation::64, written::signed-64, kind::8>>
+
+      {:ok, [framing, header, content, review_frame, :crypto.hash(:sha256, review_frame)]}
+    end
+  end
+
+  defp encode_review_swap(_header, _content, _review, _incarnation, _generation, _written),
+    do: {:error, :invalid_review}
+
+  @spec review_kind(review(), binary()) :: {:ok, 0 | 1} | {:error, :invalid_review}
+  defp review_kind(%{kind: :dirty}, _content), do: {:ok, 1}
+  defp review_kind(%{kind: :clean, saved: {_, _}, dirty: nil}, ""), do: {:ok, 0}
+  defp review_kind(_review, _content), do: {:error, :invalid_review}
+
+  @spec encode_review(review()) :: {:ok, iodata()} | {:error, :invalid_review}
+  defp encode_review(%{dirty: dirty, saved: saved}) when is_binary(dirty) or is_nil(dirty) do
+    dirty = dirty || ""
+
+    case saved do
+      nil ->
+        {:ok, [<<byte_size(dirty)::64>>, dirty, <<0>>]}
+
+      {<<_::256>> = digest, snapshot} when is_binary(snapshot) and byte_size(snapshot) > 0 ->
+        {:ok, [<<byte_size(dirty)::64>>, dirty, <<1>>, digest, snapshot]}
+
+      _invalid ->
+        {:error, :invalid_review}
+    end
+  end
+
+  defp encode_review(_review), do: {:error, :invalid_review}
 
   @doc "Atomically publishes a fully prepared swap file."
   @impl Minga.Session.Swap.Backend
@@ -183,6 +329,40 @@ defmodule Minga.Session.Swap do
       error -> error
     end
   end
+
+  @doc "Checks the exact publication identity after a recovery read."
+  @spec current?(identity() | metadata()) :: boolean()
+  def current?(%{path: path, swap_path: swap, os_pid: owner, run_started: started, revision: rev}) do
+    case read(swap) do
+      {:ok, %{path: ^path, os_pid: ^owner, run_started: ^started} = meta, text} ->
+        record_revision(meta, text) == rev
+
+      _replaced ->
+        false
+    end
+  end
+
+  def current?(_legacy), do: false
+
+  @doc "Returns the publication identity without retaining a copy of the review checkpoint."
+  @spec identity(metadata(), binary()) :: identity()
+  def identity(meta, text) do
+    meta
+    |> Map.take([:path, :os_pid, :run_started, :swap_path])
+    |> Map.put(:revision, record_revision(meta, text))
+  end
+
+  @spec record_revision(metadata(), binary()) :: identity_revision()
+  defp record_revision(%{revision: revision}, _text), do: revision
+  defp record_revision(_legacy, text), do: {:legacy, :crypto.hash(:sha256, text)}
+
+  @doc "Checks whether automatic recovery can use the loaded file as the swap's original base."
+  @spec matches_disk_base?(metadata(), binary() | nil) :: boolean()
+  def matches_disk_base?(%{revision: {:invalid, _}}, _digest), do: false
+  def matches_disk_base?(%{disk_base: :missing}, nil), do: true
+  def matches_disk_base?(%{disk_base: <<_::256>> = digest}, digest), do: true
+  def matches_disk_base?(%{disk_base: _}, _digest), do: false
+  def matches_disk_base?(_older_record, _digest), do: true
 
   @doc """
   Checks whether a process with the given OS process id is running. A zombie counts as gone.
@@ -325,7 +505,7 @@ defmodule Minga.Session.Swap do
   end
 
   @spec parse_swap_file(binary(), String.t()) ::
-          {:ok, metadata(), binary()} | {:error, :invalid_format}
+          {:ok, metadata(), binary()} | {:error, :invalid_format | :invalid_review_record}
   defp parse_swap_file(
          <<@magic, header_len::32-big, header::binary-size(header_len), content::binary>>,
          swap_path
@@ -336,7 +516,90 @@ defmodule Minga.Session.Swap do
     end
   end
 
+  defp parse_swap_file(
+         <<@review_magic, header_len::32, content_len::64, incarnation::64, generation::64,
+           written::signed-64, kind_code, header::binary-size(header_len),
+           content::binary-size(content_len), frame::binary>> = file,
+         swap_path
+       )
+       when kind_code == 1 or (kind_code == 0 and content_len == 0) do
+    kind = if kind_code == 1, do: :dirty, else: :clean
+
+    with {:ok, meta} <- parse_header(header),
+         {:ok, held?} <- validate_review_path(meta, swap_path) do
+      {revision, review} =
+        if incarnation > 0 and generation > 0 and written > 0 do
+          {{incarnation, generation, written}, parse_review(kind, frame)}
+        else
+          {{:invalid, :crypto.hash(:sha256, file)}, :invalid}
+        end
+
+      meta =
+        Map.merge(meta, %{kind: kind, revision: revision, review: review, swap_path: swap_path})
+
+      {:ok, if(held?, do: Map.put(meta, :held?, true), else: meta), content}
+    else
+      {:error, _reason} -> {:error, :invalid_review_record}
+    end
+  end
+
+  defp parse_swap_file(<<@review_magic, _::binary>>, _path), do: {:error, :invalid_review_record}
+
   defp parse_swap_file(_, _), do: {:error, :invalid_format}
+
+  @spec validate_review_path(map(), String.t()) ::
+          {:ok, boolean()} | {:error, :invalid_review_record}
+  defp validate_review_path(%{path: path, os_pid: os_pid}, swap) when os_pid > 0 do
+    expected = Path.expand(swap_path(path, os_pid: os_pid, swap_dir: Path.dirname(swap)))
+    swap = Path.expand(swap)
+    prefix = String.replace_suffix(expected, ".swap", ".held-")
+    size = byte_size(prefix)
+
+    case swap do
+      ^expected ->
+        {:ok, false}
+
+      <<^prefix::binary-size(^size), token::binary-size(32), ".swap">> ->
+        case Base.decode16(token, case: :lower) do
+          {:ok, _nonce} -> {:ok, true}
+          :error -> {:error, :invalid_review_record}
+        end
+
+      _different ->
+        {:error, :invalid_review_record}
+    end
+  end
+
+  defp validate_review_path(_meta, _swap), do: {:error, :invalid_review_record}
+
+  @spec parse_review(:clean | :dirty, binary()) :: review() | :invalid
+  defp parse_review(kind, frame) when byte_size(frame) >= 32 do
+    payload_size = byte_size(frame) - 32
+    <<payload::binary-size(^payload_size), checksum::binary-32>> = frame
+
+    if :crypto.hash(:sha256, payload) == checksum,
+      do: parse_review_frame(kind, payload),
+      else: :invalid
+  end
+
+  defp parse_review(_kind, _frame), do: :invalid
+
+  @spec parse_review_frame(:clean | :dirty, binary()) :: review() | :invalid
+  defp parse_review_frame(:dirty, <<len::64, dirty::binary-size(len), 0>>),
+    do: %{kind: :dirty, dirty: present(dirty), saved: nil}
+
+  defp parse_review_frame(
+         kind,
+         <<len::64, dirty::binary-size(len), 1, digest::binary-32, saved::binary>>
+       )
+       when byte_size(saved) > 0 and (kind == :dirty or len == 0),
+       do: %{kind: kind, dirty: present(dirty), saved: {digest, saved}}
+
+  defp parse_review_frame(_kind, _frame), do: :invalid
+
+  @spec present(binary()) :: binary() | nil
+  defp present(""), do: nil
+  defp present(binary), do: binary
 
   @spec parse_header(binary()) :: {:ok, map()} | {:error, :invalid_format}
   defp parse_header(header) do
@@ -355,9 +618,24 @@ defmodule Minga.Session.Swap do
          {:ok, mtime_str} <- Map.fetch(fields, "mtime"),
          {os_pid, ""} <- Integer.parse(pid_str),
          {mtime, ""} <- Integer.parse(mtime_str) do
-      {:ok, %{path: path, os_pid: os_pid, mtime: mtime, run_started: fields["run_started"]}}
+      meta = %{path: path, os_pid: os_pid, mtime: mtime, run_started: fields["run_started"]}
+
+      case Map.fetch(fields, "disk_base") do
+        {:ok, value} -> {:ok, Map.put(meta, :disk_base, parse_disk_base(value))}
+        :error -> {:ok, meta}
+      end
     else
       _ -> {:error, :invalid_format}
+    end
+  end
+
+  @spec parse_disk_base(binary()) :: disk_base()
+  defp parse_disk_base("missing"), do: :missing
+
+  defp parse_disk_base(hex) do
+    case Base.decode16(hex) do
+      {:ok, <<_::256>> = digest} -> digest
+      _invalid -> :invalid
     end
   end
 end

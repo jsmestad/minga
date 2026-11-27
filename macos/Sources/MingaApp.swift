@@ -1170,7 +1170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         switch request.kind {
         case .open:
-            let paths = (panel as? NSOpenPanel)?.urls.map { $0.standardizedFileURL.path } ?? []
+            let paths = (panel as? NSOpenPanel)?.urls.map(\.path) ?? []
             let outcome: UInt8 = paths.isEmpty ? 0 : 1
             encoder.send(.fileDialogResult(
                 requestID: request.requestID,
@@ -1178,7 +1178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 paths: paths
             ))
         case .saveAs:
-            guard let path = panel.url?.standardizedFileURL.path else {
+            guard let path = panel.url?.path else {
                 encoder.send(.fileDialogResult(requestID: request.requestID, outcome: 0, paths: []))
                 return
             }
@@ -1222,11 +1222,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Handles file URLs in the existing SwiftUI scene without replacing its native window.
     func openFileURL(_ url: URL) {
         guard url.isFileURL else { return }
-        let fileURL = url.standardizedFileURL
+        // Forward the supplied path unchanged. Foundation standardization can change the spelling that identifies an existing buffer and its swap.
         if acceptsOpenRequests, let encoder {
-            encoder.send(.openFile(path: fileURL.path))
+            encoder.send(.openFile(path: url.path))
         } else {
-            pendingFileURLs.append(fileURL)
+            pendingFileURLs.append(url)
         }
     }
 

@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Agent workspaces have a **Tasks** inspector. The checklist, blockers, and retained results survive restart and follow the selected conversation branch.
 - `SPC a i` inspects a subagent beside its parent conversation on macOS and in the terminal. Read its brief, activity, and result, step through siblings with `]]` and `[[`, or message that exact child without changing the parent's draft.
 - Select a foreground child in the Tasks drawer and press `i` or click **Inspect** to open that child's peek beside its own parent conversation.
+- `SPC a u` previews the latest task's changes before rejecting them. Exact Keep and Reject decisions preserve unrelated user undo, and pending review changes survive reopening the file.
 - `SPC a F` attaches saved text from a selected project file to a local Agent draft. The attachment retains what was read, even if the file changes before sending.
 - `SPC a D` or the macOS editor context menu captures a file's published diagnostics as an inspectable Agent draft attachment.
 - The Agent can pause for a question. Use **Answer question** or `SPC a Q` to choose an answer, type your own, or cancel without granting tool permission.

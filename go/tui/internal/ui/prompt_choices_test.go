@@ -45,11 +45,11 @@ func TestPromptChoicesUseAuthoredMinibufferRowAtNarrowWidths(t *testing.T) {
 			if model.layout.footer.Height != 2 {
 				t.Fatal("prompt choices changed the BEAM-authored footer allocation")
 			}
-			if width >= 17 && (!strings.Contains(rendered, "[Submit]") || !strings.Contains(rendered, "[Cancel]")) {
+			if width >= 17 && width < 80 && (!strings.Contains(rendered, "[Submit]") || !strings.Contains(rendered, "[Cancel]")) {
 				t.Fatal("prompt actions are not explicitly labeled")
 			}
-			if width == 80 && !strings.Contains(rendered, "••••••") {
-				t.Fatal("already-masked prompt input was lost")
+			if width == 80 && (!strings.Contains(rendered, "••••••") || !strings.Contains(rendered, "[Submit Enter] [Cancel Escape]")) {
+				t.Fatal("wider prompt did not retain its masked input and both action shortcuts")
 			}
 			for _, item := range mini.Items {
 				zone := waitForZone(t, model, zoneIDPromptChoice(mini.Generation, item.ID))
@@ -70,6 +70,38 @@ func TestPromptChoicesUseAuthoredMinibufferRowAtNarrowWidths(t *testing.T) {
 			}
 			if packet, ok := model.promptChoiceMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: 0, Y: model.layout.footer.Y})); ok || packet != nil {
 				t.Fatal("status row activated a prompt choice")
+			}
+		})
+	}
+}
+
+func TestPromptChoicesFitUnequalLabels(t *testing.T) {
+	for _, width := range []int{10, 80} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			model := New(uint16(width), 12, nil)
+			mini := protocol.Minibuffer{
+				Visible: true, Mode: 10, Generation: 71, CursorPos: 0xFFFF,
+				Prompt: "Reject 3 changes from task plan-limit? Your edits stay.",
+				Items: []protocol.MinibufferCandidate{
+					{ID: "confirm", Label: "Yes", Annotation: "y"},
+					{ID: "cancel", Label: "No", Annotation: "n / Esc"},
+				},
+			}
+			rendered := renderPromptChoiceFixture(&model, mini)
+			if width == 10 && !strings.Contains(rendered, "[Yes] [No]") {
+				t.Fatalf("confirmation hid a choice despite having room: %q", rendered)
+			}
+			if width == 80 && (!strings.Contains(rendered, mini.Prompt) || !strings.Contains(rendered, "[Yes y] [No n / Esc]")) {
+				t.Fatalf("confirmation omitted the full question or the choice shortcuts: %q", rendered)
+			}
+			for _, item := range mini.Items {
+				zone := waitForZone(t, model, zoneIDPromptChoice(mini.Generation, item.ID))
+				click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.EndX, Y: zone.StartY})
+				packet, ok := model.semanticMousePacket(click)
+				want := protocol.EncodeGUISemanticItemActivate(4, 1, mini.Generation, []byte(item.ID))
+				if !ok || !bytes.Equal(packet, want) {
+					t.Fatalf("last visible cell did not activate %q: %x", item.Label, packet)
+				}
 			}
 		})
 	}

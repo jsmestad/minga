@@ -7,6 +7,9 @@ defmodule Minga.Test.Storyboard.Session do
   Call `start/1` from an ExUnit test process: the editor is started with `start_supervised`, so it stops with the test. Rendering is disabled by default because the model is built from editor state with the same builder the render pipeline uses; pass `rendering: :enabled` when a caller also needs rendered frames (#4036).
   """
 
+  alias Minga.Buffer
+  alias Minga.Buffer.EditSource
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias Minga.Test.EditorCase
   alias Minga.Test.Storyboard.Keys
@@ -73,6 +76,8 @@ defmodule Minga.Test.Storyboard.Session do
 
   `:conversation` starts a real Agent session before the first key. It takes `messages:`, `notices:`, `prompt:`, `turn:` (`:idle`, `:working` or `:stopped`), and `queue:` (follow-up messages queued while Minga works). Its provider never finishes a turn. By default the fixture returns to the file before the first key, so `SPC a v` opens the seeded conversation. Set `open?: true` when the scenario begins inside that conversation.
 
+  `:review_edits` opens the fixture file and applies attributed edits before the keys or clicks that lead to a review scenario.
+
   The storyboard renderer (#4036) adds four more: `:root` (a fixed project directory, so the path the chrome shows is the same on every machine; the caller keeps it unique among concurrent sessions in one run, and the directory is written atomically and never deleted, so concurrent runs on one machine can share it), `:theme` (a built-in theme name such as `:astrodark`, set on a private options server before the editor starts), `:capabilities` (the `MingaEditor.Frontend.Capabilities` the frontend would report), and `:record_packets` (keep every packet for `packets/1`).
   """
   @spec start(keyword()) :: t()
@@ -138,6 +143,7 @@ defmodule Minga.Test.Storyboard.Session do
       children: [relay | theme_children ++ project_children ++ conversation_children]
     }
 
+    session = seed_review(session, Keyword.get(opts, :review_edits, []))
     %{session | home_window: window_id(session)}
   end
 
@@ -335,6 +341,31 @@ defmodule Minga.Test.Storyboard.Session do
   @doc "Opens the project's file from the home with `1`, the way `edit.plain` is reached, and waits for its highlights."
   @spec open_file(t()) :: t()
   def open_file(%__MODULE__{} = session), do: session |> press("1") |> settle()
+
+  @spec seed_review(
+          t(),
+          [{Minga.Buffer.Document.position(), non_neg_integer(), binary(), EditSource.t()}]
+        ) :: t()
+  defp seed_review(session, []), do: session
+
+  defp seed_review(session, edits) do
+    session = open_file(session)
+    buffer = EditorCase.active_buffer(session.ctx)
+
+    Enum.each(edits, fn {position, length, text, source} ->
+      {:ok, _version} =
+        BufferProcess.replace_byte_range_if_version(
+          buffer,
+          Buffer.version(buffer),
+          position,
+          length,
+          text,
+          source
+        )
+    end)
+
+    settle(session)
+  end
 
   # The project home's reads are fixed so every machine shows the same home: the project's one file is recent file 1.
   @spec home_opts(:project | :folder | :outside, Path.t(), String.t()) :: keyword()

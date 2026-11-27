@@ -123,6 +123,33 @@ defmodule Minga.Buffer.SwapCrashTest do
       refute_receive {:minga_event, :buffer_crashed, _event}, 0
     end
 
+    test "does not offer a saved-only review checkpoint when the dirty crash write fails", ctx do
+      {buffer, swap_path} = start_controlled_buffer(ctx)
+      digest = :crypto.hash(:sha256, "saved text")
+
+      assert :ok =
+               Swap.write(ctx.path, "",
+                 swap_dir: ctx.swap_dir,
+                 os_pid: 99_999,
+                 incarnation: 1,
+                 generation: 1,
+                 review: %{kind: :clean, dirty: nil, saved: {digest, "review snapshot"}}
+               )
+
+      :ok = BufferProcess.replace_content(buffer, "unsaved text")
+
+      log =
+        capture_log(fn ->
+          monitor = raise_in_callback(buffer)
+          release_crash_write(buffer, ctx.path, "unsaved text", {:error, :disk_full})
+          assert_receive {:DOWN, ^monitor, :process, ^buffer, _reason}, @timeout
+        end)
+
+      assert log =~ "Its unsaved text could not be kept"
+      assert {:ok, %{kind: :clean}, ""} = Swap.read(swap_path)
+      refute_receive {:minga_event, :buffer_crashed, _event}, 0
+    end
+
     test "keeps nothing and announces nothing when the buffer has no unsaved text", ctx do
       buffer = start_buffer(ctx)
 

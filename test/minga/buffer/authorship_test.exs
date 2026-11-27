@@ -54,6 +54,43 @@ defmodule Minga.Buffer.AuthorshipTest do
              )
   end
 
+  test "a prepared decision cannot affect another buffer or a newer revision" do
+    first = start("before\nlocal\n")
+    second = start("before\nlocal\n")
+    minga_replace(first, "after\nlocal\n")
+    minga_replace(second, "after\nlocal\n")
+
+    assert {:ok, initial, @task, 1} = Minga.Buffer.prepare_review(first, :latest)
+    assert {:error, :stale_review} = Minga.Buffer.decide_review(second, initial, :reject)
+    assert BufferProcess.content(second) == "after\nlocal\n"
+
+    replace_at(first, {1, 5}, 0, "!")
+    assert {:error, :stale_review} = Minga.Buffer.decide_review(first, initial, :reject)
+    assert BufferProcess.content(first) == "after\nlocal!\n"
+
+    assert {:ok, current, @task, 1} = Minga.Buffer.prepare_review(first, :latest)
+    assert {:ok, [receipt]} = Minga.Buffer.decide_review(first, current, :reject)
+    assert BufferProcess.content(first) == "before\nlocal!\n"
+    assert :ok = Minga.Buffer.restore_review(first, receipt)
+    assert BufferProcess.content(first) == "after\nlocal!\n"
+  end
+
+  test "a rejected unit cannot restore different work in another buffer" do
+    first = start("old")
+    second = start("old")
+    minga_replace(first, "first")
+    minga_replace(second, "second")
+    assert {:ok, target, @task, 1} = Minga.Buffer.prepare_review(first, :latest)
+    assert {:ok, [receipt]} = Minga.Buffer.decide_review(first, target, :reject)
+    assert {:ok, other_target, @task, 1} = Minga.Buffer.prepare_review(second, :latest)
+    assert {:ok, [other_receipt]} = Minga.Buffer.decide_review(second, other_target, :reject)
+
+    assert {:error, :stale_review} = Minga.Buffer.restore_review(second, receipt)
+    assert BufferProcess.content(second) == "old"
+    assert :ok = Minga.Buffer.restore_review(second, other_receipt)
+    assert BufferProcess.content(second) == "second"
+  end
+
   test "text that predates tracking is unattributed, and nothing is past the end" do
     buffer = start("one\ntwo")
 

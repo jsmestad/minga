@@ -144,7 +144,9 @@ Press `SPC` in Normal mode. These sequences also work from the agent view, the f
 | `SPC a e` | Rewrite the selection, inline |
 | `SPC a r` | Pending reviews |
 | `SPC a p` | Publish or discard the agent's staged edits, in one prompt |
-| `SPC a u` | Undo all of the agent's edits from this session |
+| `SPC a u` | Confirm rejection of all pending changes from the latest Minga task in this buffer. Your edits stay |
+| `SPC a d` | Reject the exact Minga change named when your undo or redo was blocked |
+| `SPC a y` | Keep the exact Minga change named when your undo or redo was blocked |
 | `SPC a W` | Why is this line like this? |
 | `SPC a A` | Code autobiography |
 | `SPC a q q` | Focus `*minga-queue*` inside the conversation |

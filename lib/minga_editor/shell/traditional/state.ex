@@ -38,11 +38,13 @@ defmodule MingaEditor.Shell.Traditional.State do
   @type git_status_tui_state :: Sidebars.git_status_tui_state()
   @type tab_bar_command :: ClickRegions.tab_bar_command()
   @type tab_bar_click_region :: ClickRegions.tab_bar_region()
+  @type blocked_review :: {pid(), Minga.Buffer.Process.review_target()}
 
   @type t :: %__MODULE__{
           flashes: Flashes.t(),
           hover_popup: HoverPopup.t() | nil,
           notice: Notice.t(),
+          blocked_review: blocked_review() | nil,
           whichkey: WhichKey.t(),
           bottom_panel: BottomPanel.t(),
           drawers: Drawers.t(),
@@ -59,6 +61,7 @@ defmodule MingaEditor.Shell.Traditional.State do
   defstruct flashes: %Flashes{},
             hover_popup: nil,
             notice: %Notice{},
+            blocked_review: nil,
             whichkey: %WhichKey{},
             bottom_panel: %BottomPanel{},
             drawers: %Drawers{},
@@ -94,6 +97,10 @@ defmodule MingaEditor.Shell.Traditional.State do
   end
 
   # ── Focused transient owners ──────────────────────────────────────────────
+
+  @doc "Stores the last exact blocked-history review offer or clears it."
+  @spec put_blocked_review(t(), blocked_review() | nil) :: t()
+  def put_blocked_review(%__MODULE__{} = state, offer), do: %{state | blocked_review: offer}
 
   @doc "Applies the notice publish transition, with the next steps the notice names."
   @spec publish_notice(t(), String.t(), [Minga.RenderModel.UI.EmptyList.Action.t()]) :: t()

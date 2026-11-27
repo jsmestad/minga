@@ -128,8 +128,13 @@ defmodule MingaEditor.Session.RecoveryTest do
       assert {:ok, {:resume, resume}} = Recovery.run(effect)
 
       assert %{snapshot: nil, waiting_elsewhere: 1} = resume
-      assert [{%{path: path, swap_path: swap}, {:ok, path, "unsaved here"}}] = resume.recovered
-      assert path == ctx.here.file
+      path = ctx.here.file
+      swap = ctx.here.swap
+
+      assert [{%{path: ^path, swap_path: ^swap}, {:ok, source, "unsaved here"}}] =
+               resume.recovered
+
+      assert %{path: ^path, swap_path: ^swap} = source
 
       # Reading takes nothing off the disk: a swap is removed when a buffer has taken its text over.
       assert File.exists?(swap)
@@ -142,8 +147,8 @@ defmodule MingaEditor.Session.RecoveryTest do
 
       assert {:ok, {:resume, resume}} = Recovery.run(effect)
 
-      assert [{%{path: path}, {:ok, path, "unsaved there"}}] = resume.recovered
-      assert path == ctx.there.file
+      path = ctx.there.file
+      assert [{%{path: ^path}, {:ok, %{path: ^path}, "unsaved there"}}] = resume.recovered
       assert resume.waiting_elsewhere == 1
     end
 

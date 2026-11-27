@@ -34,7 +34,7 @@ defmodule Minga.Buffer.SwapRecoveryAdoptionTest do
       buffer = start_buffer(ctx, swap_dir: ctx.swap_dir)
       own_swap = Swap.swap_path(ctx.path, swap_dir: ctx.swap_dir)
 
-      assert :ok = Buffer.adopt_recovered_text(buffer, "unsaved text", old_swap)
+      assert :ok = adopt(buffer, old_swap, "unsaved text")
 
       # No debounce has run: a crash right now still finds the text on disk.
       assert Buffer.content(buffer) == "unsaved text"
@@ -48,7 +48,7 @@ defmodule Minga.Buffer.SwapRecoveryAdoptionTest do
       old_swap = leftover_swap(ctx, "unsaved text")
       buffer = start_buffer(ctx, swap_dir: ctx.swap_dir)
 
-      :ok = Buffer.adopt_recovered_text(buffer, "unsaved text", old_swap)
+      :ok = adopt(buffer, old_swap, "unsaved text")
       :ok = Buffer.save(buffer)
 
       assert File.read!(ctx.path) == "unsaved text"
@@ -64,7 +64,7 @@ defmodule Minga.Buffer.SwapRecoveryAdoptionTest do
       buffer = start_buffer(ctx, swap_dir: ctx.swap_dir, events_registry: registry)
       {:ok, 50} = BufferProcess.set_option(buffer, :auto_save_delay_ms, 50)
 
-      :ok = Buffer.adopt_recovered_text(buffer, "unsaved text", old_swap)
+      :ok = adopt(buffer, old_swap, "unsaved text")
 
       # Auto-save would have written the file by now. The text is on the screen, not in the file.
       refute_receive {:minga_event, :buffer_saved, _event}, 400
@@ -82,8 +82,7 @@ defmodule Minga.Buffer.SwapRecoveryAdoptionTest do
       buffer = start_buffer(ctx, swap_dir: ctx.swap_dir)
       :ok = Buffer.replace_content(buffer, "typed since the restart")
 
-      assert {:error, :modified} =
-               Buffer.adopt_recovered_text(buffer, "text from before the crash", old_swap)
+      assert {:error, :modified} = adopt(buffer, old_swap, "text from before the crash")
 
       assert Buffer.content(buffer) == "typed since the restart"
       assert File.exists?(old_swap)
@@ -93,7 +92,7 @@ defmodule Minga.Buffer.SwapRecoveryAdoptionTest do
       old_swap = leftover_swap(ctx, "unsaved text")
       buffer = start_buffer(ctx, swap_dir: ctx.swap_dir, read_only: true)
 
-      assert {:error, :read_only} = Buffer.adopt_recovered_text(buffer, "unsaved text", old_swap)
+      assert {:error, :read_only} = adopt(buffer, old_swap, "unsaved text")
       assert File.exists?(old_swap)
     end
 
@@ -101,7 +100,7 @@ defmodule Minga.Buffer.SwapRecoveryAdoptionTest do
       old_swap = leftover_swap(ctx, "saved text")
       buffer = start_buffer(ctx, swap_dir: ctx.swap_dir)
 
-      assert :ok = Buffer.adopt_recovered_text(buffer, "saved text", old_swap)
+      assert :ok = adopt(buffer, old_swap, "saved text")
 
       refute Buffer.dirty?(buffer)
       assert File.ls!(ctx.swap_dir) == []
@@ -111,7 +110,7 @@ defmodule Minga.Buffer.SwapRecoveryAdoptionTest do
       old_swap = leftover_swap(ctx, "unsaved text")
       buffer = start_buffer(ctx, [])
 
-      assert :ok = Buffer.adopt_recovered_text(buffer, "unsaved text", old_swap)
+      assert :ok = adopt(buffer, old_swap, "unsaved text")
 
       assert Buffer.content(buffer) == "unsaved text"
       refute File.exists?(old_swap)
@@ -124,7 +123,7 @@ defmodule Minga.Buffer.SwapRecoveryAdoptionTest do
       File.write!(blocked_dir, "")
       buffer = start_buffer(ctx, swap_dir: blocked_dir)
 
-      assert :ok = Buffer.adopt_recovered_text(buffer, "unsaved text", old_swap)
+      assert :ok = adopt(buffer, old_swap, "unsaved text")
 
       assert Buffer.content(buffer) == "unsaved text"
       assert {:ok, _meta, "unsaved text"} = Swap.read(old_swap)
@@ -158,7 +157,7 @@ defmodule Minga.Buffer.SwapRecoveryAdoptionTest do
       reopened = start_buffer(ctx, swap_dir: ctx.swap_dir)
 
       # The editor's crash recovery read the same swap and hands the text over.
-      assert :ok = Buffer.adopt_recovered_text(reopened, "unsaved text", own_swap)
+      assert :ok = adopt(reopened, own_swap, "unsaved text")
 
       assert Buffer.content(reopened) == "unsaved text"
       assert {:ok, _meta, "unsaved text"} = Swap.read(own_swap)
@@ -231,7 +230,7 @@ defmodule Minga.Buffer.SwapRecoveryAdoptionTest do
       # The buffer is busy with something slow.
       :sys.suspend(buffer)
       assert {:timeout, _call} = catch_exit(BufferProcess.release_swap(buffer, ctx.swap_dir, 50))
-      assert :ok = Buffer.release_swaps(ctx.swap_dir, 50)
+      assert {:error, [{ctx.path, :timeout}]} == Buffer.release_swaps(ctx.swap_dir, 50)
       :sys.resume(buffer)
 
       assert File.exists?(Swap.swap_path(ctx.path, swap_dir: ctx.swap_dir))
@@ -250,6 +249,11 @@ defmodule Minga.Buffer.SwapRecoveryAdoptionTest do
 
   defp start_buffer(ctx, opts) do
     start_supervised!({BufferProcess, Keyword.merge([file_path: ctx.path], opts)}, id: make_ref())
+  end
+
+  defp adopt(buffer, swap_path, content) do
+    assert {:ok, source, ^content} = Recovery.read(swap_path)
+    Buffer.adopt_recovered_text(buffer, content, source)
   end
 
   # A message no callback handles makes the buffer raise, which is a crash and not a deliberate stop.
