@@ -265,10 +265,10 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       assert segment(@base_data, :filename).text == "test.ex"
     end
 
-    test "change position reads change n/m in the minga role" do
+    test "change position reads change n/m in the modeline's text colour" do
       change = segment(@full_data, :change)
       assert change.text == "change 1/2"
-      assert change.fg == Theme.role_color(@theme, :minga)
+      assert change.fg == @theme.modeline.bar_fg
       refute :change in ids(@base_data)
     end
 

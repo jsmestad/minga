@@ -16,6 +16,8 @@ Each colour is a theme role, and each role means one thing. Themes choose the va
 | you | Your edits, your cursor, your messages | `#8CAAEE` |
 | minga | Minga, its cursor, its changes, the light twist strand | `#CA9EE6` |
 | minga_shade | The twist's shade strand (derived: minga mixed over the background) | derived |
+| you_shade | Your opposite strand inside Minga's twist | derived |
+| minga_kept | The dim strand of a kept Minga change | derived |
 | needs_you | Only "Minga needs you" | `#EF9F76` |
 | failure | Only errors and failed states | `#E78284` |
 | done | Only completed states | `#A6D189` |
@@ -30,7 +32,7 @@ A ribbon of two strands in the gutter's authorship column, 10 pt wide, between t
 
 **Where.** The strands cross once, on the first line of a change. That crossing is the change's handle: click it for Keep, Reject, Show Diff and Open Conversation. The crossing is always on the first line, never centred, because the change grows while Minga writes and a handle must not move.
 
-**Who.** Strand colours carry authorship. Minga's change is the minga role over minga_shade. When you edit inside Minga's change, the shade strand on your lines takes the you role: shared authorship.
+**Who.** Strand colours carry authorship. Minga's change pairs `minga` with `minga_shade`. When you edit inside it, the opposite strand takes `you_shade`. A strand outside Minga's change uses the full `you` role. The shaded strands contrast with the main strand, while kept ink contrasts with the code surface.
 
 **Settled or not.**
 
@@ -39,8 +41,8 @@ A ribbon of two strands in the gutter's authorship column, 10 pt wide, between t
 | Unreviewed, first line | two strands crossing | [`twist-head.svg`](marks/twist-head.svg) |
 | Unreviewed, other lines | two parallel strands | [`twist-body.svg`](marks/twist-body.svg) |
 | Unreviewed, last line | two strands with rounded ends | [`twist-last.svg`](marks/twist-last.svg) |
-| Shared authorship | shade strand takes the you role on your lines | [`twist-shared-body.svg`](marks/twist-shared-body.svg) |
-| Kept | one thin muted strand until the next commit | [`twist-kept.svg`](marks/twist-kept.svg) |
+| Shared authorship | the opposite strand uses `you_shade` on your lines | [`twist-shared-body.svg`](marks/twist-shared-body.svg) |
+| Kept | one thin strand in `minga_kept` until the next commit | [`twist-kept.svg`](marks/twist-kept.svg) |
 | Rejected | gone with the text | |
 | Current change while reviewing | head gets a soft halo in the minga role at about 18% (circle r=7) | |
 
@@ -73,7 +75,7 @@ One layout everywhere, left to right: line number, sign column (8 pt, diagnostic
 
 - Your uncommitted lines: one thin strand in the you role (1.5 pt, centred). Deleted lines: a small notch in the same role between lines.
 - Minga's unreviewed lines: the twist ribbon.
-- Kept Minga lines: one thin strand in a muted minga until commit.
+- Kept Minga lines: one thin strand in the `minga_kept` role until commit.
 
 ## Diagnostics
 
@@ -93,7 +95,7 @@ The TUI draws the twist in one cell per line, with the two strands as foreground
 
 - Changed lines: `▐`, the minga role as foreground over minga_shade as background.
 - First line of a change: `▚`, so the strands swap sides from the top half to the bottom half and visibly cross.
-- Your lines: a thin `│` in the you role. Kept lines: a dim `│`.
+- Your lines: a thin `│` in `you`. Kept lines: a dim `│` in `minga_kept` on the editor background.
 - 16 colours: the theme's 16-colour mapping of minga over its shade, magenta over dark magenta by default.
 
 Block characters fill the whole cell in a real terminal, so the strands join from line to line. On terminals with a graphics protocol (Kitty, Ghostty, WezTerm, iTerm2) the gutter may draw the exact SVG twist instead. See [tui.md](tui.md).

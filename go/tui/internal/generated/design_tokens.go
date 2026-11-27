@@ -22,9 +22,11 @@ const ColorRoleSurfaceRaised ColorRole = 0x7D
 const ColorRoleSurfaceBar ColorRole = 0x7E
 const ColorRoleBorder ColorRole = 0x7F
 const ColorRoleFocus ColorRole = 0x80
+const ColorRoleYouShade ColorRole = 0x81
+const ColorRoleMingaKept ColorRole = 0x82
 
 // ColorRoles lists every colour role in token-file order.
-var ColorRoles = []ColorRole{ColorRoleYou, ColorRoleMinga, ColorRoleMingaShade, ColorRoleNeedsYou, ColorRoleFailure, ColorRoleDone, ColorRoleWarning, ColorRoleWaiting, ColorRoleInfo, ColorRoleGroup, ColorRoleText, ColorRoleTextMuted, ColorRoleSurface, ColorRoleSurfaceRaised, ColorRoleSurfaceBar, ColorRoleBorder, ColorRoleFocus}
+var ColorRoles = []ColorRole{ColorRoleYou, ColorRoleMinga, ColorRoleMingaShade, ColorRoleNeedsYou, ColorRoleFailure, ColorRoleDone, ColorRoleWarning, ColorRoleWaiting, ColorRoleInfo, ColorRoleGroup, ColorRoleText, ColorRoleTextMuted, ColorRoleSurface, ColorRoleSurfaceRaised, ColorRoleSurfaceBar, ColorRoleBorder, ColorRoleFocus, ColorRoleYouShade, ColorRoleMingaKept}
 
 // ID returns the role's id in the token file.
 func (r ColorRole) ID() string {
@@ -63,6 +65,10 @@ func (r ColorRole) ID() string {
 		return "border"
 	case ColorRoleFocus:
 		return "focus"
+	case ColorRoleYouShade:
+		return "you_shade"
+	case ColorRoleMingaKept:
+		return "minga_kept"
 	default:
 		return ""
 	}
@@ -197,9 +203,9 @@ func (t TwistVariant) Token() TwistToken {
 	case TwistLast:
 		return TwistToken{ID: "last", Glyph: "▐", Strand: ColorRoleMinga, Shade: ColorRoleMingaShade, HasShade: true}
 	case TwistKept:
-		return TwistToken{ID: "kept", Glyph: "│", Strand: ColorRoleMingaShade}
+		return TwistToken{ID: "kept", Glyph: "│", Strand: ColorRoleMingaKept}
 	case TwistShared:
-		return TwistToken{ID: "shared", Glyph: "▐", Strand: ColorRoleMinga, Shade: ColorRoleYou, HasShade: true}
+		return TwistToken{ID: "shared", Glyph: "▐", Strand: ColorRoleMinga, Shade: ColorRoleYouShade, HasShade: true}
 	default:
 		return TwistToken{}
 	}

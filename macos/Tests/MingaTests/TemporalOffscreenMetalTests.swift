@@ -28,11 +28,14 @@ struct TemporalOffscreenMetalTests {
     private static let neutral: UInt32 = 0x20_20_20 // neutral clear/background
     private static let authoredMinga: UInt32 = 0xF0_71_BD
     private static let authoredHuman: UInt32 = 0x55_C9_F7
+    private static let authoredSharedShade: UInt32 = 0x40_90_45
+    private static let authoredKept: UInt32 = 0xD3_A4_45
 
     @MainActor private func authorshipTheme() -> ThemeColors {
         let theme = ThemeColors()
         let roles: [(ColorRole, UInt32)] = [
-            (.minga, Self.authoredMinga), (.mingaShade, 0x56_36_7D), (.you, Self.authoredHuman)
+            (.minga, Self.authoredMinga), (.mingaShade, 0x56_36_7D), (.you, Self.authoredHuman),
+            (.youShade, Self.authoredSharedShade), (.mingaKept, Self.authoredKept)
         ]
         theme.applySlots(roles.map { role, color in
             (role.rawValue, UInt8(truncatingIfNeeded: color >> 16),
@@ -523,14 +526,14 @@ struct TemporalOffscreenMetalTests {
         ) == 0, "cursor-line color crossed into the adjacent pane")
     }
 
-    @Test("shared replacements, pending heads and the human strand keep their own ink")
+    @Test("pending, shared, human and kept strands use their own theme ink")
     @MainActor
     func authoredTwistDrawsInCodeFacingGap() async throws {
         guard let (device, queue) = requireDevice() else { return }
         let scale: Float = 2
         let fontManager = FontManager(name: "Menlo", size: 13, scale: CGFloat(scale))
         let cols: UInt16 = 24
-        let rows: UInt16 = 4
+        let rows: UInt16 = 5
         let cellW = Float(fontManager.cellWidth) * scale
         let cellH = Float(fontManager.cellHeight) * scale
         let width = Int((Float(cols) * cellW).rounded(.up))
@@ -546,7 +549,8 @@ struct TemporalOffscreenMetalTests {
                 Wire.AuthoredGutterRegion(role: .you, unit: 0, firstLine: 0, firstColumn: 2, lastLine: 0),
                 Wire.AuthoredGutterRegion(role: .pending, unit: 13, firstLine: 1, firstColumn: 0, lastLine: 1),
                 Wire.AuthoredGutterRegion(role: .you, unit: 0, firstLine: 2, firstColumn: 0, lastLine: 2),
-                Wire.AuthoredGutterRegion(role: .shared, unit: 0, firstLine: 3, firstColumn: 0, lastLine: 3)
+                Wire.AuthoredGutterRegion(role: .shared, unit: 0, firstLine: 3, firstColumn: 0, lastLine: 3),
+                Wire.AuthoredGutterRegion(role: .kept, unit: 0, firstLine: 4, firstColumn: 0, lastLine: 4)
             ])
         )
         let resolved = try #require(authored.resolved(reusing: nil))
@@ -581,12 +585,16 @@ struct TemporalOffscreenMetalTests {
         #expect(image.matching(x0: x0, y0: 0, x1: x1, y1: Int(cellH), reference: strand, thresholdSquared: 0.02) > 0)
         #expect(image.matching(x0: x0, y0: Int(cellH), x1: x1, y1: Int(2 * cellH), reference: strand, thresholdSquared: 0.02) > 0)
         #expect(image.matching(x0: x0, y0: Int(2 * cellH), x1: x1, y1: Int(3 * cellH), reference: strand, thresholdSquared: 0.02) == 0)
-        #expect(image.matching(x0: x0, y0: Int(3 * cellH), x1: x1, y1: height, reference: strand, thresholdSquared: 0.02) > 0)
+        #expect(image.matching(x0: x0, y0: Int(3 * cellH), x1: x1, y1: Int(4 * cellH), reference: strand, thresholdSquared: 0.02) > 0)
+        let shared = Self.expectedColor(Self.authoredSharedShade)
+        #expect(image.matching(x0: x0, y0: 0, x1: x1, y1: Int(cellH), reference: shared, thresholdSquared: 0.02) > 0)
+        #expect(image.matching(x0: x0, y0: Int(3 * cellH), x1: x1, y1: Int(4 * cellH), reference: shared, thresholdSquared: 0.02) > 0)
         let human = Self.expectedColor(Self.authoredHuman)
-        #expect(image.matching(x0: x0, y0: 0, x1: x1, y1: Int(cellH), reference: human, thresholdSquared: 0.02) > 0)
-        #expect(image.matching(x0: x0, y0: Int(cellH), x1: x1, y1: Int(2 * cellH), reference: human, thresholdSquared: 0.02) == 0)
+        #expect(image.matching(x0: x0, y0: 0, x1: x1, y1: Int(2 * cellH), reference: human, thresholdSquared: 0.02) == 0)
         #expect(image.matching(x0: x0, y0: Int(2 * cellH), x1: x1, y1: Int(3 * cellH), reference: human, thresholdSquared: 0.02) > 0)
-        #expect(image.matching(x0: x0, y0: Int(3 * cellH), x1: x1, y1: height, reference: human, thresholdSquared: 0.02) > 0)
+        #expect(image.matching(x0: x0, y0: Int(3 * cellH), x1: x1, y1: height, reference: human, thresholdSquared: 0.02) == 0)
+        let kept = Self.expectedColor(Self.authoredKept)
+        #expect(image.matching(x0: x0, y0: Int(4 * cellH), x1: x1, y1: height, reference: kept, thresholdSquared: 0.02) > 0)
     }
 
     @Test("a virtual top row does not hide a continuing twist or move the next region's head")

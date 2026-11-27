@@ -1163,7 +1163,8 @@ func (m Model) renderGutterEntry(gutter protocol.Gutter, entry protocol.GutterEn
 	if width == 0 {
 		return ""
 	}
-	bg := m.editorBackground()
+	surface := m.editorBackground()
+	bg := surface
 	style := lipgloss.NewStyle().Foreground(m.palette().GutterText()).Background(bg).Width(width)
 	if cursorline && cursorlineBG != 0 {
 		clBG := lipgloss.Color(fmt.Sprintf("#%06X", cursorlineBG))
@@ -1172,16 +1173,21 @@ func (m Model) renderGutterEntry(gutter protocol.Gutter, entry protocol.GutterEn
 	}
 	mark := ""
 	if twist != 0 {
-		token := generated.TwistVariant((twist &^ humanTwistInk) - 1).Token()
+		variant := generated.TwistVariant((twist &^ humanTwistInk) - 1)
+		token := variant.Token()
+		markBg := bg
+		if variant == generated.TwistKept && twist&humanTwistInk == 0 {
+			markBg = surface
+		}
 		if twist&humanTwistInk != 0 {
 			if token.HasShade {
-				token.Shade = generated.ColorRoleYou
+				token.Shade = generated.TwistShared.Token().Shade
 			} else {
 				token.Strand = generated.ColorRoleYou
 			}
 		}
 		palette := m.palette()
-		markStyle := lipgloss.NewStyle().Foreground(palette.Role(token.Strand)).Background(bg)
+		markStyle := lipgloss.NewStyle().Foreground(palette.Role(token.Strand)).Background(markBg)
 		if token.HasShade {
 			markStyle = markStyle.Background(palette.Role(token.Shade))
 		}

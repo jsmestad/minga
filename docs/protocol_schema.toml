@@ -97,7 +97,8 @@ version = "2.0.0"
 # protocol_version 56 adds the resident conversation queue (0xAE), exact queue clicks (0x76), and focus owner surface 15.
 # protocol_version 57 adds the window-addressed subagent peek (0xAF), its separate resident transcript (0xB0), and exact peek actions (0x77).
 # protocol_version 58 adds independent authored-region revisions to gui_gutter (0x7B).
-protocol_version = 58
+# protocol_version 59 requires gui_theme's shared You shade (0x81) and kept Minga ink (0x82) slots.
+protocol_version = 59
 description = "Minga port protocol opcode registry"
 
 # Directions:

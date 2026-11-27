@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
@@ -205,6 +206,7 @@ func TestResidentGutterDrawsAndPinsTwistWithoutMovingCodeOrDiagnostics(t *testin
 	content := residentWindowCommand(windowID, epoch, 6, protocol.CommandWindowContent)
 	content.Window.Geometry.ContentRect = protocol.Rect{Width: 24, Height: 3}
 	content.Window.Geometry.ViewportRows = 3
+	content.Window.Cursorline = protocol.Cursorline{Visible: true, Row: 1, BG: 0x223344}
 	content.Window.ScrollSet = true
 	content.Window.Scroll = protocol.ScrollPresentation{
 		WindowID: windowID, ContentEpoch: epoch, VisibleEndLine: 3, OverscanEndLine: 6, LayoutGeneration: 1,
@@ -219,11 +221,29 @@ func TestResidentGutterDrawsAndPinsTwistWithoutMovingCodeOrDiagnostics(t *testin
 	gutter.Chrome.WindowGutter.AuthorshipUpdate = &protocol.GutterAuthorshipUpdate{
 		Kind: protocol.GutterAuthorshipSnapshot, Revision: 11, Added: []protocol.AuthoredGutterRegion{pending, shared, human},
 	}
-	model := applyTo(t, New(26, 6, nil), beginFrame(1, 0), testThemeCommand(), content, gutter, commitFrame(1))
-	render := func() []string {
-		return stripRenderedLines(model.renderWindowRows(model.windows[windowID]))
-	}
+	theme := testThemeCommand()
+	theme.Chrome.Theme.Colors[byte(generated.ColorRoleMinga)] = 0xCA9EE6
+	theme.Chrome.Theme.Colors[byte(generated.ColorRoleMingaShade)] = 0x564E6E
+	theme.Chrome.Theme.Colors[byte(generated.ColorRoleMingaKept)] = 0xA484BE
+	theme.Chrome.Theme.Colors[byte(generated.ColorRoleYou)] = 0x8CAAEE
+	theme.Chrome.Theme.Colors[byte(generated.ColorRoleYouShade)] = 0x454F6D
+	model := applyTo(t, New(26, 6, nil), beginFrame(1, 0), theme, content, gutter, commitFrame(1))
+	render := func() []string { return model.renderWindowRows(model.windows[windowID]) }
 	committed, _ := model.windowGutter(windowID)
+	markCol := gutterRenderWidth(committed) - 1
+	assertMark := func(row, glyph, fg, bg string) {
+		t.Helper()
+		canvas := lipgloss.NewCanvas(26, 1)
+		canvas.Compose(lipgloss.NewLayer(row))
+		cell := canvas.CellAt(markCol, 0)
+		if cell == nil || cell.Content != glyph {
+			t.Fatalf("missing %q on authorship column %d: %+v", glyph, markCol, cell)
+		}
+		style := effectiveStyle(cell.Style, "", "")
+		if style.fg != fg || style.bg != bg {
+			t.Errorf("authorship %q ink: got %s on %s; want %s on %s", glyph, style.fg, style.bg, fg, bg)
+		}
+	}
 	authorship := committed.Authorship
 	if region, head, coauthored, exists := authorship.RegionAt(1, true, false); !exists || !head || !coauthored || region != pending {
 		t.Fatalf("shared pinned head lost its review identity: %+v", region)
@@ -232,12 +252,17 @@ func TestResidentGutterDrawsAndPinsTwistWithoutMovingCodeOrDiagnostics(t *testin
 		t.Fatalf("human line is not a standalone strand: %+v", region)
 	}
 	initial := render()
+	assertMark(initial[0], "▚", "#ca9ee6", "#564e6e")
+	assertMark(initial[1], "▐", "#ca9ee6", "#454f6d")
+	initial = stripRenderedLines(initial)
 	if !strings.Contains(initial[0], "▚line") || !strings.Contains(initial[1], "▐line") || !strings.Contains(initial[1], "!") {
 		t.Fatalf("head, body or diagnostic missing: %q", initial)
 	}
 
 	model.previewVerticalScroll(model.windows[windowID], 1)
 	scrolled := render()
+	assertMark(scrolled[0], "▚", "#ca9ee6", "#454f6d")
+	scrolled = stripRenderedLines(scrolled)
 	if !strings.Contains(scrolled[0], "▚line") || !strings.Contains(scrolled[0], "!") {
 		t.Fatalf("scroll did not pin the twist in the diagnostic row's authorship cell: %q", scrolled)
 	}
@@ -251,12 +276,16 @@ func TestResidentGutterDrawsAndPinsTwistWithoutMovingCodeOrDiagnostics(t *testin
 	}
 	model = applyTo(t, model, beginFrame(2, 1), patch, commitFrame(2))
 	retained := render()
+	assertMark(retained[0], "│", "#a484be", "#1e1f2a")
+	retained = stripRenderedLines(retained)
 	if !strings.Contains(retained[0], "│line") || !strings.Contains(retained[0], "!") ||
 		strings.Contains(strings.Join(retained, "\n"), "▚") {
 		t.Fatalf("Keep reused a stale twist or displaced the sign or code: %q", retained)
 	}
 	model.previewVerticalScroll(model.windows[windowID], 3)
-	if lines := render(); !strings.Contains(lines[0], "│line") {
+	lines := render()
+	assertMark(lines[0], "│", "#8caaee", "#1e1f2a")
+	if lines := stripRenderedLines(lines); !strings.Contains(lines[0], "│line") {
 		t.Fatalf("human strand is absent from the rendered region: %q", lines)
 	}
 }

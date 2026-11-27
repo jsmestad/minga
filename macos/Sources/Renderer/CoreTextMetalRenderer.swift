@@ -2240,8 +2240,9 @@ final class CoreTextMetalRenderer {
         clipTop: Float, clipBottom: Float, atlas: LineTextureAtlas, windowRenderer: WindowContentRenderer,
         bgQuads: inout [QuadGPU], lineInstances: inout [LineGPU]
     ) {
-        let humanColor = currentThemeColors?.roleColorRGB(.you) ?? windowRenderer.defaultFgRGB
+        let theme = currentThemeColors
         if mark.region.role == .you {
+            let humanColor = theme?.roleColorRGB(.you) ?? windowRenderer.defaultFgRGB
             let strandWidth = max(1, Float(width) * 0.15)
             let color = colorFromU24(humanColor, default: .zero)
             appendClippedGutterQuad(x: x + (Float(width) - strandWidth) / 2, y: y,
@@ -2258,8 +2259,9 @@ final class CoreTextMetalRenderer {
             variant = line == mark.region.lastLine ? .last : .body
         }
         let single = variant == .head && mark.region.firstLine == mark.region.lastLine
-        let strand = currentThemeColors?.roleColorRGB(variant.strand) ?? windowRenderer.defaultFgRGB
-        let shade = mark.shared ? humanColor : (variant.shade.flatMap { currentThemeColors?.roleColorRGB($0) } ?? strand)
+        let strand = theme?.roleColorRGB(variant.strand) ?? windowRenderer.defaultFgRGB
+        let shadeRole = mark.shared ? TwistVariant.shared.shade : variant.shade
+        let shade = shadeRole.flatMap { theme?.roleColorRGB($0) } ?? strand
         guard let entry = windowRenderer.renderGutterTwist(
             variant, singleLine: single, shared: mark.shared, strand: strand, shade: shade, background: background,
             width: width, windowId: windowId, atlas: atlas, metrics: &frameMetrics

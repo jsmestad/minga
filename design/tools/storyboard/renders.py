@@ -128,8 +128,10 @@ def comparable(frontend, text):
     if frontend == "tui":
         return text
     data = json.loads(text)
-    return json.dumps({key: data.get(key) for key in ("scenario", "theme", "size", "window", "grid", "parts", "elements")},
-                      sort_keys=True, indent=1)
+    stable = {key: data.get(key) for key in ("scenario", "theme", "size", "window", "grid", "parts", "elements")}
+    if data.get("authorship"):
+        stable["authorship"] = data["authorship"]
+    return json.dumps(stable, sort_keys=True, indent=1)
 
 
 def git_show(ref, path):

@@ -529,7 +529,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           %Segment{
             id: :change,
             text: "change #{index}/#{total}",
-            fg: Theme.role_color(ctx.theme, :minga),
+            fg: ctx.bar_fg,
             bg: ctx.bar_bg,
             drop: @never,
             target: Map.get(ctx.data, :change_target),

@@ -1630,7 +1630,7 @@ One slot per colour role in `docs/design_tokens.toml`. The slot IDs, role names 
 |------|------|--------|
 | 0x70 | you | `agent.user_label` |
 | 0x71 | minga | `agent.minga_fg` |
-| 0x72 | minga_shade | minga mixed over surface at 45% |
+| 0x72 | minga_shade | minga mixed over surface at 25% |
 | 0x73 | needs_you | `agent.attention_fg` |
 | 0x74 | failure | `gutter.error_fg` |
 | 0x75 | done | `agent.status_done` |
@@ -1645,6 +1645,8 @@ One slot per colour role in `docs/design_tokens.toml`. The slot IDs, role names 
 | 0x7E | surface_bar | `modeline.bar_bg` |
 | 0x7F | border | `popup.border_fg` |
 | 0x80 | focus | `popup.title_fg`, else `modeline.filetype_fg` |
+| 0x81 | you_shade | you mixed over surface at 23% |
+| 0x82 | minga_kept | minga mixed over surface at 75% |
 
 ## Forward-Compatibility: Skip-Length for Unknown Opcodes
 

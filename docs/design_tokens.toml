@@ -42,8 +42,10 @@ id = "minga_shade"
 slot = 0x72
 mix = "minga"
 over = "surface"
-percent = 45
-means = "The twist's shade strand and Minga's tinted lines"
+percent = 25
+contrast = "glyph"
+on = "minga"
+means = "The opposite strand of a pending Minga twist"
 
 [[color_roles]]
 id = "needs_you"
@@ -152,6 +154,26 @@ fallback = "modeline.filetype_fg"
 contrast = "glyph"
 on = "surface"
 means = "The focused pane's border and the global accent"
+
+[[color_roles]]
+id = "you_shade"
+slot = 0x81
+mix = "you"
+over = "surface"
+percent = 23
+contrast = "glyph"
+on = "minga"
+means = "Your opposite strand inside a pending Minga twist"
+
+[[color_roles]]
+id = "minga_kept"
+slot = 0x82
+mix = "minga"
+over = "surface"
+percent = 75
+contrast = "glyph"
+on = "surface"
+means = "The muted strand of a kept Minga change"
 
 # States: six words, five shapes. Waiting and Stopped share the hollow dot; the word tells them apart.
 # `tui_glyph` is the TUI's static glyph; `tui_frames` is the animation cycle where the state moves.
@@ -292,14 +314,14 @@ shade = "minga_shade"
 id = "kept"
 mark = "docs/design/marks/twist-kept.svg"
 tui_glyph = "│"
-strand = "minga_shade"
+strand = "minga_kept"
 
 [[twist]]
 id = "shared"
 mark = "docs/design/marks/twist-shared-body.svg"
 tui_glyph = "▐"
 strand = "minga"
-shade = "you"
+shade = "you_shade"
 
 # Voice: three lines and no more (docs/design/principles.md).
 [voice]

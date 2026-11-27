@@ -28,6 +28,8 @@ defmodule Minga.Design.Tokens do
           | :surface_bar
           | :border
           | :focus
+          | :you_shade
+          | :minga_kept
 
   @typedoc "One of the six state ids."
   @type state_id :: :working | :needs_you | :waiting | :stopped | :failed | :done
@@ -110,7 +112,9 @@ defmodule Minga.Design.Tokens do
       :surface_raised,
       :surface_bar,
       :border,
-      :focus
+      :focus,
+      :you_shade,
+      :minga_kept
     ]
 
   @doc "The token for one colour role."
@@ -132,7 +136,12 @@ defmodule Minga.Design.Tokens do
     }
 
   def color_role(:minga_shade),
-    do: %{id: :minga_shade, slot: 0x72, source: {:mix, :minga, :surface, 45}, contrast: nil}
+    do: %{
+      id: :minga_shade,
+      slot: 0x72,
+      source: {:mix, :minga, :surface, 25},
+      contrast: {:glyph, :minga}
+    }
 
   def color_role(:needs_you),
     do: %{
@@ -223,6 +232,22 @@ defmodule Minga.Design.Tokens do
       id: :focus,
       slot: 0x80,
       source: {:fields, [{:popup, :title_fg}, {:modeline, :filetype_fg}]},
+      contrast: {:glyph, :surface}
+    }
+
+  def color_role(:you_shade),
+    do: %{
+      id: :you_shade,
+      slot: 0x81,
+      source: {:mix, :you, :surface, 23},
+      contrast: {:glyph, :minga}
+    }
+
+  def color_role(:minga_kept),
+    do: %{
+      id: :minga_kept,
+      slot: 0x82,
+      source: {:mix, :minga, :surface, 75},
       contrast: {:glyph, :surface}
     }
 
@@ -411,7 +436,7 @@ defmodule Minga.Design.Tokens do
       id: :kept,
       mark: "docs/design/marks/twist-kept.svg",
       tui_glyph: "│",
-      strand: :minga_shade,
+      strand: :minga_kept,
       shade: nil
     }
 
@@ -421,7 +446,7 @@ defmodule Minga.Design.Tokens do
       mark: "docs/design/marks/twist-shared-body.svg",
       tui_glyph: "▐",
       strand: :minga,
-      shade: :you
+      shade: :you_shade
     }
 
   @doc "One of the three voice lines."
