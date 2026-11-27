@@ -197,11 +197,20 @@ defmodule MingaEditor.Handlers.FileEventHandler do
     state = MingaEditor.Agent.DraftWorkflow.edited(state, buffer)
     state = %{state | lsp: LSPState.clear_semantic_tokens(state.lsp, buffer)}
 
-    if FileTreeFreshness.buffer_under_tree?(state, buffer) do
+    if redraw_shown_buffer?(state, event) or FileTreeFreshness.buffer_under_tree?(state, buffer) do
       {state, [{:render, 16}]}
     else
       {state, []}
     end
+  end
+
+  # The command that makes a user's edit draws it. Any other writer (command output, an agent,
+  # a language server) has no command, so the window that shows the buffer needs a frame.
+  @spec redraw_shown_buffer?(EditorState.t(), Minga.Events.BufferChangedEvent.t()) :: boolean()
+  defp redraw_shown_buffer?(_state, %Minga.Events.BufferChangedEvent{source: :user}), do: false
+
+  defp redraw_shown_buffer?(state, %Minga.Events.BufferChangedEvent{buffer: buffer}) do
+    MingaEditor.State.Windows.find_by_buffer(state.workspace.windows, buffer) != nil
   end
 
   @spec handle_diagnostics_updated(EditorState.t(), String.t()) ::

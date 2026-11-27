@@ -59,7 +59,8 @@ defmodule Minga.CommandOutput do
 
   Options:
     - `:cwd` - working directory for the command (default: project root)
-    - `:events_registry` - event registry for completion broadcasts
+    - `:events_registry` - event registry for completion broadcasts. The first run under a
+      name also fixes the registry on which the output buffer broadcasts its changes.
   """
   @spec run(String.t(), String.t(), keyword()) :: :ok
   def run(name, command, opts \\ []) do
@@ -230,6 +231,7 @@ defmodule Minga.CommandOutput do
            Minga.Buffer.Supervisor,
            {Minga.Buffer,
             buffer_name: state.name,
+            events_registry: state.events_registry,
             content: "",
             read_only: true,
             unlisted: true,
