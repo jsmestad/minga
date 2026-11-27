@@ -1,9 +1,11 @@
 defmodule Minga.Buffer.ReviewPosition do
   @moduledoc "Ranks exact pending review heads without rebuilding the ledger when text moves."
 
+  alias Minga.Buffer.Document
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.ReviewDamage
   alias Minga.Buffer.UndoHistory
+  alias Minga.Buffer.ReviewRibbon
   alias Minga.Core.LazyRowTree
 
   @enforce_keys [:root]
@@ -16,9 +18,10 @@ defmodule Minga.Buffer.ReviewPosition do
   @typep tree :: LazyRowTree.t(head(), summary())
   @opaque t :: %__MODULE__{root: tree()}
 
-  @spec build(UndoHistory.t(), non_neg_integer()) :: t()
-  def build(history, size) do
-    root = history |> UndoHistory.review_regions([{0, size, true}]) |> build_heads()
+  @spec build(UndoHistory.t(), Document.t()) :: t()
+  def build(history, document) do
+    bounds = [{0, Document.content_byte_size(document), true}]
+    root = history |> ReviewRibbon.regions(document, bounds) |> build_heads()
     %__MODULE__{root: root}
   end
 
@@ -31,22 +34,38 @@ defmodule Minga.Buffer.ReviewPosition do
   end
 
   @doc "Moves untouched heads and replaces only the authored byte ranges affected by review or edits."
-  @spec revise(t(), UndoHistory.t(), non_neg_integer(), [byte_range()], [EditDelta.t()]) :: t()
-  def revise(%__MODULE__{root: root}, history, size, ranges, deltas) do
+  @spec revise(t(), UndoHistory.t(), Document.t(), [byte_range()], [EditDelta.t()]) :: t()
+  def revise(%__MODULE__{root: root}, history, document, ranges, deltas) do
     {root, boundaries} = Enum.reduce(deltas, {root, []}, &apply_delta/2)
-    damage = ReviewDamage.merge_ranges(ranges, boundaries)
-    root = Enum.reduce(damage, root, &drop_intersecting(&2, &1))
+    size = Document.content_byte_size(document)
 
-    query =
-      for {first, last} <- damage, first <= size do
-        stop = min(last + 1, size)
-        {first, stop, last >= size}
-      end
+    damage =
+      Enum.map(ranges ++ boundaries, fn {first, last} -> {min(first, size), min(last, size)} end)
+
+    rows = ReviewRibbon.damage_rows(document, damage)
+    {query, regions} = repair_regions(history, document, rows)
 
     root =
-      history |> UndoHistory.review_regions(query) |> heads() |> Enum.reduce(root, &put_head/2)
+      Enum.reduce(query, root, fn {first, stop, eof?}, root ->
+        drop_intersecting(root, {first, if(eof?, do: stop, else: stop - 1)})
+      end)
+
+    root = regions |> heads() |> Enum.reduce(root, &put_head/2)
 
     %__MODULE__{root: root}
+  end
+
+  @spec repair_regions(UndoHistory.t(), Document.t(), [{non_neg_integer(), non_neg_integer()}]) ::
+          {[{non_neg_integer(), non_neg_integer(), boolean()}], [ReviewRibbon.t()]}
+  defp repair_regions(history, document, rows) do
+    query = for {first, last} <- rows, do: ReviewRibbon.byte_bounds(document, first, last)
+    regions = ReviewRibbon.regions(history, document, query)
+    extent = for {_, first, stop} <- regions, do: ReviewRibbon.source_rows(document, first, stop)
+    expanded = ReviewDamage.merge_ranges(rows, extent)
+
+    if expanded == rows,
+      do: {query, regions},
+      else: repair_regions(history, document, expanded)
   end
 
   @spec put_head({non_neg_integer(), head(), non_neg_integer()}, tree()) :: tree()
@@ -160,10 +179,10 @@ defmodule Minga.Buffer.ReviewPosition do
       )
   end
 
-  @spec build_heads([UndoHistory.review_region()]) :: tree()
+  @spec build_heads([ReviewRibbon.t()]) :: tree()
   defp build_heads(regions), do: LazyRowTree.from_sorted(heads(regions), &summarize/4)
 
-  @spec heads([UndoHistory.review_region()]) :: [{non_neg_integer(), head(), non_neg_integer()}]
+  @spec heads([ReviewRibbon.t()]) :: [{non_neg_integer(), head(), non_neg_integer()}]
   defp heads(regions) do
     regions
     |> Enum.reduce([], fn

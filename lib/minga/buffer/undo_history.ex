@@ -1528,24 +1528,37 @@ defmodule Minga.Buffer.UndoHistory do
   @spec review_regions(t(), [{non_neg_integer(), non_neg_integer(), boolean()}]) ::
           [review_region()]
   def review_regions(%__MODULE__{} = history, ranges) do
+    {regions, _members} = review_regions(history, ranges, %{})
+    regions
+  end
+
+  @doc "Queries regions while reusing unit membership within a traversal of this history value."
+  @spec review_regions(
+          t(),
+          [{non_neg_integer(), non_neg_integer(), boolean()}],
+          %{Provenance.group_id() => Provenance.group_id()}
+        ) :: {[review_region()], %{Provenance.group_id() => Provenance.group_id()}}
+  def review_regions(%__MODULE__{} = history, ranges, members) do
     history.provenance
     |> sites_in_ranges(ranges)
-    |> build_review_regions(history, ranges)
+    |> build_review_regions(history, ranges, members)
   end
 
   @spec build_review_regions(
           [Provenance.review_site()],
           t(),
-          [{non_neg_integer(), non_neg_integer(), boolean()}]
-        ) :: [review_region()]
-  defp build_review_regions([], _history, _ranges), do: []
+          [{non_neg_integer(), non_neg_integer(), boolean()}],
+          %{Provenance.group_id() => Provenance.group_id()}
+        ) :: {[review_region()], %{Provenance.group_id() => Provenance.group_id()}}
+  defp build_review_regions([], _history, _ranges, members), do: {[], members}
 
-  defp build_review_regions(sites, history, ranges) do
+  defp build_review_regions(sites, history, ranges, members) do
     members =
       sites
       |> Stream.map(&elem(&1, 0))
+      |> Stream.reject(&is_map_key(members, &1))
       |> review_units_starting(history)
-      |> Enum.reduce(%{}, fn [unit | _] = groups, by_group ->
+      |> Enum.reduce(members, fn [unit | _] = groups, by_group ->
         Enum.reduce(groups, by_group, &Map.put(&2, &1, unit))
       end)
 
@@ -1572,7 +1585,10 @@ defmodule Minga.Buffer.UndoHistory do
         end)
       end
 
-    Enum.sort_by(Enum.to_list(gaps) ++ regions, fn {unit, from, to} -> {from, to, unit} end)
+    regions =
+      Enum.sort_by(Enum.to_list(gaps) ++ regions, fn {unit, from, to} -> {from, to, unit} end)
+
+    {regions, members}
   end
 
   @doc """
@@ -1807,6 +1823,33 @@ defmodule Minga.Buffer.UndoHistory do
       |> Enum.map(&{review_group_task(history, hd(&1)), &1})
 
     review_target(history, units)
+  end
+
+  @doc "Checks whether two pending unit representatives belong to the same task."
+  @spec same_review_task?(t(), Provenance.group_id(), Provenance.group_id()) :: boolean()
+  def same_review_task?(history, left, right),
+    do: review_group_task(history, left) == review_group_task(history, right)
+
+  @doc "Prepares exact whole units represented by the selected ribbons, independent of their display bounds."
+  @spec prepare_review_units(t(), [Provenance.group_id()]) :: {:ok, review_target()} | :empty
+  def prepare_review_units(history, representatives) do
+    units =
+      representatives
+      |> review_units_starting(history)
+      |> Enum.map(&{review_group_task(history, hd(&1)), &1})
+
+    review_target(history, units)
+  end
+
+  @doc "Returns the whole-unit representative selected by the exact-byte review lookup."
+  @spec review_unit_at(t(), non_neg_integer()) :: Provenance.group_id() | nil
+  def review_unit_at(history, point) do
+    with group when is_integer(group) <- Provenance.review_group_at(history.provenance, point),
+         [[unit | _]] <- review_units_starting([group], history) do
+      unit
+    else
+      _ -> nil
+    end
   end
 
   @spec review_group_task(t(), Provenance.group_id()) :: task()

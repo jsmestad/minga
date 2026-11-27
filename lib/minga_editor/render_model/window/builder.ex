@@ -2845,8 +2845,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         deltas = cache.pending_edit_deltas
         damage = ReviewDamage.merge_ranges(semantic, ReviewDamage.topology_ranges(deltas))
 
-        observed =
-          if damage == [], do: [], else: fetch_gutter_authorship!(buffer, lease, damage, version)
+        {damage, observed} = fetch_gutter_repairs!(buffer, lease, damage, version)
 
         Authorship.patch(
           previous,
@@ -2855,6 +2854,13 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           observed,
           deltas
         )
+
+      {%Authorship{lease: ^lease, coverage: :windowed} = previous, _, :windowed} ->
+        reuse_windowed_authorship(previous, buffer, ranges, version, frame_seq)
+
+      {_, _, :windowed} ->
+        {covered, regions} = fetch_gutter_repairs!(buffer, lease, ranges, version)
+        Authorship.new(gutter_revision(frame_seq), lease, covered, regions, :windowed)
 
       _reset_or_windowed ->
         regions = fetch_gutter_authorship!(buffer, lease, ranges, version)
@@ -2875,6 +2881,49 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   @spec gutter_revision(non_neg_integer() | nil) :: pos_integer()
   defp gutter_revision(nil), do: System.unique_integer([:positive, :monotonic])
   defp gutter_revision(frame_seq), do: frame_seq + 1
+
+  @spec reuse_windowed_authorship(
+          Authorship.t(),
+          pid(),
+          [RendererConsume.line_range()],
+          non_neg_integer(),
+          non_neg_integer() | nil
+        ) :: Authorship.t()
+  defp reuse_windowed_authorship(previous, buffer, ranges, version, frame_seq) do
+    case ReviewDamage.missing_ranges(ranges, previous.ranges) do
+      [] ->
+        previous
+
+      missing ->
+        {fresh_ranges, fresh} = fetch_gutter_repairs!(buffer, previous.lease, missing, version)
+        cached = Authorship.overlapping(previous, ranges)
+        retained = ReviewDamage.merge_ranges(pending_extents(cached), fresh_ranges)
+        covered = ReviewDamage.merge_ranges(ranges, retained)
+        regions = Enum.uniq(fresh ++ Authorship.overlapping(previous, covered))
+        Authorship.new(gutter_revision(frame_seq), previous.lease, covered, regions, :windowed)
+    end
+  end
+
+  @spec pending_extents([RendererConsume.review_region()]) :: [RendererConsume.line_range()]
+  defp pending_extents(regions),
+    do: for({:text, _unit, {first, _}, last} <- regions, do: {first, last})
+
+  @spec fetch_gutter_repairs!(
+          pid(),
+          RendererConsume.review_lease(),
+          [RendererConsume.line_range()],
+          non_neg_integer()
+        ) :: {[RendererConsume.line_range()], [RendererConsume.review_region()]}
+  defp fetch_gutter_repairs!(_buffer, _lease, [], _version), do: {[], []}
+
+  defp fetch_gutter_repairs!(buffer, lease, damage, version) do
+    observed = fetch_gutter_authorship!(buffer, lease, damage, version)
+    expanded = ReviewDamage.merge_ranges(damage, pending_extents(observed))
+
+    if expanded == damage,
+      do: {damage, observed},
+      else: fetch_gutter_repairs!(buffer, lease, expanded, version)
+  end
 
   @spec fetch_gutter_authorship!(
           pid(),

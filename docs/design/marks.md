@@ -32,6 +32,8 @@ A ribbon of two strands in the gutter's authorship column, 10 pt wide, between t
 
 **Where.** The strands cross once, on the first line of a change. That crossing is the change's handle: click it for Keep, Reject, Show Diff and Open Conversation. The crossing is always on the first line, never centred, because the change grows while Minga writes and a handle must not move.
 
+Pending edits from the same task on the same or consecutive source lines form one ribbon, even when the editor preserved unchanged bytes between edits. An untouched line, another task's pending edit, or a separate deletion anchor between the edits breaks the ribbon. The ribbon is one in-file navigation stop and counts as one change. Keep and Reject act on the whole history units represented by that ribbon, including any disjoint pieces of those units.
+
 **Who.** Strand colours carry authorship. Minga's change pairs `minga` with `minga_shade`. When you edit inside it, the opposite strand takes `you_shade`. A strand outside Minga's change uses the full `you` role. The shaded strands contrast with the main strand, while kept ink contrasts with the code surface.
 
 **Settled or not.**
@@ -48,7 +50,7 @@ A ribbon of two strands in the gutter's authorship column, 10 pt wide, between t
 
 Each line draws its own segment, so the ribbon stays aligned at any line height. The files use a 26 pt line; scale the height to the real line height and keep the crossing in the top 18 pt. The crossing gap is drawn in the code background colour (`#1e1f24` in the default theme). A single-line change uses the head shape with both strands ending at 21 pt.
 
-**Only in the code gutter.** The twist marks a place in your text, so it appears only in the code gutter, on the first line of one of Minga's changes. Lists, menus, popovers and headers never carry a twist: in a list where every row is Minga's change, the same mark on every row says nothing, and the header already names the source.
+**Only in the code gutter.** The twist marks a place in your text, so its crossing and continuing strands appear only in the code gutter. Lists, menus, popovers and headers never carry a ribbon: in a list where every row is Minga's change, the same mark on every row says nothing, and the header already names the source.
 
 **Authorship strand in mixed lists.** A list that mixes sources, such as the switcher's Changed section (your edits and Minga's) or a quickfix list that combines search hits with Minga's changes, shows a thin authorship strand at each row's left edge: 2 pt on macOS, a one-cell bar in the TUI. The strand uses the minga role for Minga's rows and the you role for yours; rows from neither get nothing. A list whose rows all share one source carries no mark.
 

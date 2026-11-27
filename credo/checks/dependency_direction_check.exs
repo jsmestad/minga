@@ -64,6 +64,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "Minga.Buffer.RenderSnapshot",
     "Minga.Buffer.ReviewDamage",
     "Minga.Buffer.ReviewPosition",
+    "Minga.Buffer.ReviewRibbon",
     "Minga.Buffer.SaveState",
     "Minga.Buffer.Selection",
     "Minga.Buffer.Span",

@@ -545,9 +545,8 @@ struct TemporalOffscreenMetalTests {
             lineNumberWidth: original.lineNumberWidth, signColWidth: original.signColWidth,
             entryUpdate: .replace(original.entries),
             authorshipUpdate: .snapshot(revision: 7, regions: [
-                Wire.AuthoredGutterRegion(role: .pending, unit: 12, firstLine: 0, firstColumn: 0, lastLine: 0),
+                Wire.AuthoredGutterRegion(role: .pending, unit: 12, firstLine: 0, firstColumn: 0, lastLine: 1),
                 Wire.AuthoredGutterRegion(role: .you, unit: 0, firstLine: 0, firstColumn: 2, lastLine: 0),
-                Wire.AuthoredGutterRegion(role: .pending, unit: 13, firstLine: 1, firstColumn: 0, lastLine: 1),
                 Wire.AuthoredGutterRegion(role: .you, unit: 0, firstLine: 2, firstColumn: 0, lastLine: 2),
                 Wire.AuthoredGutterRegion(role: .shared, unit: 0, firstLine: 3, firstColumn: 0, lastLine: 3),
                 Wire.AuthoredGutterRegion(role: .kept, unit: 0, firstLine: 4, firstColumn: 0, lastLine: 4)
@@ -584,6 +583,11 @@ struct TemporalOffscreenMetalTests {
         let strand = Self.expectedColor(Self.authoredMinga)
         #expect(image.matching(x0: x0, y0: 0, x1: x1, y1: Int(cellH), reference: strand, thresholdSquared: 0.02) > 0)
         #expect(image.matching(x0: x0, y0: Int(cellH), x1: x1, y1: Int(2 * cellH), reference: strand, thresholdSquared: 0.02) > 0)
+        let join = Int(cellH)
+        for y in (join - 2)...(join + 1) {
+            #expect(image.matching(x0: x0, y0: y, x1: x1, y1: y + 1, reference: strand, thresholdSquared: 0.02) > 0,
+                    "the bright strand must cross the head-to-body join without a gap")
+        }
         #expect(image.matching(x0: x0, y0: Int(2 * cellH), x1: x1, y1: Int(3 * cellH), reference: strand, thresholdSquared: 0.02) == 0)
         #expect(image.matching(x0: x0, y0: Int(3 * cellH), x1: x1, y1: Int(4 * cellH), reference: strand, thresholdSquared: 0.02) > 0)
         let shared = Self.expectedColor(Self.authoredSharedShade)

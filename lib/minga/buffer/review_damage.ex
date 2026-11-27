@@ -67,6 +67,22 @@ defmodule Minga.Buffer.ReviewDamage do
     end)
   end
 
+  @doc "Returns requested source lines not already covered by a cached observation."
+  @spec missing_ranges([range()], [range()]) :: [range()]
+  def missing_ranges(requested, covered), do: Enum.flat_map(requested, &subtract(&1, covered))
+
+  defp subtract({first, last}, []) when first <= last, do: [{first, last}]
+  defp subtract({first, last}, _) when first > last, do: []
+  defp subtract({first, last}, [{from, _} | _]) when from > last, do: [{first, last}]
+
+  defp subtract({first, last}, [{_, stop} | rest]) when stop < first,
+    do: subtract({first, last}, rest)
+
+  defp subtract({first, last}, [{from, stop} | rest]) do
+    tail = subtract({stop + 1, last}, rest)
+    if from > first, do: [{first, from - 1} | tail], else: tail
+  end
+
   @doc "Unions two sets of inclusive source-line ranges without filling unchanged gaps."
   @spec merge_ranges([range()], [range()]) :: [range()]
   def merge_ranges(left, right) do

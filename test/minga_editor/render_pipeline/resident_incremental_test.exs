@@ -745,6 +745,40 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
       assert %ResidentRows{line_count: 300, overrides: []} = cleared.gutter.entries
     end
 
+    test "windowed scrolling inside the same ribbon reuses its observed source rows" do
+      editor = gui_state(content: long_content(66_000), rows: 12, cols: 60, filetype: :text)
+      buffer = editor.workspace.buffers.active
+      assert {:ok, false} = BufferProcess.set_option(buffer, :wrap, false)
+
+      for line <- 0..29 do
+        source = EditSource.minga("task", "step-#{line}")
+
+        assert {:ok, _} =
+                 BufferProcess.replace_byte_range_if_version(
+                   buffer,
+                   BufferProcess.version(buffer),
+                   {line, 0},
+                   0,
+                   "X",
+                   source
+                 )
+      end
+
+      assert :ok = BufferProcess.move_to(buffer, {0, 0})
+      {marked, state} = build_frame(editor)
+      assert marked.row_store_mode == :windowed
+      assert [{:text, _unit, {0, 0}, 29}] = marks = Authorship.regions(marked.gutter.authorship)
+
+      assert :ok = BufferProcess.move_to(buffer, {10, 0})
+      editor = simulate_scroll(state.editor, 5)
+      calls = trace_buffer_calls(buffer, fn -> build_frame(%{state | editor: editor}) end)
+      {scrolled, _} = calls.result
+      assert scrolled.row_store_mode == :windowed
+      assert scrolled.geometry.viewport.top > marked.geometry.viewport.top
+      assert Authorship.regions(scrolled.gutter.authorship) == marks
+      refute Enum.any?(calls.messages, &match?({:render_review_regions, _, _}, &1))
+    end
+
     test "a distant authored region and sign coexist without resending resident text on Keep" do
       state = warm(resident_state(300))
       buffer = state.editor.workspace.buffers.active
@@ -784,7 +818,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
       assert kept.rows == []
       refute Enum.any?(keep_calls.messages, &match?({:render_lines, _, _, 301}, &1))
 
-      assert [{:render_review_regions, _, [{220, 221}]}] =
+      assert [{:render_review_regions, _, [{219, 222}]}] =
                Enum.filter(keep_calls.messages, &match?({:render_review_regions, _, _}, &1))
     end
 
@@ -815,7 +849,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
       assert {:patch, _, _, ^kept, ^before} =
                Authorship.update(initial.gutter.authorship, latest.gutter.authorship)
 
-      assert [{:render_review_regions, _, [{40, 40}, {220, 220}]}] =
+      assert [{:render_review_regions, _, [{39, 41}, {219, 221}]}] =
                Enum.filter(calls.messages, &match?({:render_review_regions, _, _}, &1))
     end
 
@@ -871,7 +905,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
 
       assert MapSet.new(added) == MapSet.new(current)
 
-      assert [{:render_review_regions, _, [{9, 12}, {41, 41}]}] =
+      assert [{:render_review_regions, _, [{9, 12}, {40, 42}]}] =
                Enum.filter(calls.messages, &match?({:render_review_regions, _, _}, &1))
     end
 

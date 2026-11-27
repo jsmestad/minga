@@ -127,7 +127,7 @@ defmodule Minga.Buffer.RendererAPITest do
              Buffer.render_review_regions(buffer, kept.review_lease, [{0, 0}])
   end
 
-  test "multiple Keeps report exact disjoint affected rows including an EOF deletion" do
+  test "multiple Keeps report disjoint damage bounded to affected rows and their joins" do
     buffer = start_supervised!({Buffer, content: "abc\nmiddle\nuntouched\nlast\nend\n"})
     assert :ok = Buffer.apply_edit(buffer, 0, 0, 0, 2, "ABC", EditSource.minga("one", "one"))
 
@@ -152,7 +152,7 @@ defmodule Minga.Buffer.RendererAPITest do
 
     assert %RendererConsume{
              review_lease: after_keep,
-             review_damage: {:since, ^before, [{0, 0}, {4, 4}]},
+             review_damage: {:since, ^before, [{0, 1}, {3, 4}]},
              changes: {:ok, []},
              snapshot: nil
            } = Buffer.renderer_consume(buffer)
@@ -213,11 +213,16 @@ defmodule Minga.Buffer.RendererAPITest do
     :ok = Buffer.insert_text(buffer, ">")
     %{review_lease: lease} = Buffer.renderer_consume(buffer)
 
-    assert {:ok, [{:text, unit, {0, 0}, 0}, {:text, unit, {0, 2}, 0}, {:you, {0, 1}, 0}]} =
+    assert {:ok, [{:text, _unit, {0, 0}, 0}, {:you, {0, 1}, 0}]} =
              Buffer.render_review_regions(buffer, lease, [{0, 0}])
 
     assert {:ok, [{:you, {1, 0}, 1}]} = Buffer.render_review_regions(buffer, lease, [{1, 1}])
     assert {:ok, []} = Buffer.render_review_regions(buffer, lease, [{2, 2}])
+
+    :ok = Buffer.move_to(buffer, {0, 1})
+    assert :empty = Buffer.prepare_review(buffer, {:cursor, 1})
+    :ok = Buffer.move_to(buffer, {0, 2})
+    assert {:ok, _, {:minga, "task"}, 1} = Buffer.prepare_review(buffer, {:cursor, 1})
   end
 
   test "a fully replaced authored row has a shared strand without a new review head" do

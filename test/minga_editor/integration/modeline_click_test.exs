@@ -80,7 +80,7 @@ defmodule MingaEditor.Integration.ModelineClickTest do
     assert %{text: "change 2/2"} = change_segment(session)
   end
 
-  test "typing inside a pending span adds a second head and Keep removes both from the rank" do
+  test "a human insertion inside the ribbon does not add a head or become a review target" do
     session =
       Session.start(
         content: "abc\nseparator\ndef",
@@ -93,10 +93,12 @@ defmodule MingaEditor.Integration.ModelineClickTest do
 
     assert %{text: "change 1/2"} = change_segment(session)
     EditorCase.send_keys_sync(session.ctx, "li!<Esc>0")
-    assert %{text: "change 1/3"} = change_segment(session)
+    assert %{text: "change 1/2"} = change_segment(session)
 
-    session = Session.press(session, "2l")
-    assert %{text: "change 2/3"} = change_segment(session)
+    session = Session.press(session, "l")
+    refute change_segment(session)
+    session = Session.press(session, "l")
+    assert %{text: "change 1/2"} = change_segment(session)
 
     buffer = EditorCase.active_window_buffer(session.ctx)
     keep_and_wait(session, buffer, ":Minga keep<CR>G0")

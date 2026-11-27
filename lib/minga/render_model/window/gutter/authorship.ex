@@ -103,6 +103,11 @@ defmodule Minga.RenderModel.Window.Gutter.Authorship do
   defp wire_damage(damage, first, [{0, old_last}], [{0, new_last}]),
     do: ReviewDamage.merge_ranges(damage, [{first, max(old_last, new_last)}])
 
+  @doc "Reads cached regions touching the requested source lines without walking the whole index."
+  @spec overlapping(t(), [RendererConsume.line_range()]) :: [region()]
+  def overlapping(%__MODULE__{index: index}, ranges),
+    do: index |> AuthorshipIndex.overlapping(ranges) |> MapSet.to_list()
+
   @doc "Returns the current projected regions in source order for a snapshot."
   @spec regions(t()) :: [region()]
   def regions(%__MODULE__{index: index}), do: AuthorshipIndex.all(index)

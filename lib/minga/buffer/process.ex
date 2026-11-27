@@ -35,6 +35,7 @@ defmodule Minga.Buffer.Process do
     Replace,
     ReviewDamage,
     ReviewPosition,
+    ReviewRibbon,
     SaveIntent,
     Selection,
     UndoHistory,
@@ -2401,6 +2402,7 @@ defmodule Minga.Buffer.Process do
     version = BufState.version(state)
     revision = UndoHistory.review_revision(state.undo_history)
     point = Document.cursor_offset(document)
+    pending? = UndoHistory.pending_at?(state.undo_history, point)
 
     {index, state} =
       case state.review_position_index do
@@ -2408,8 +2410,8 @@ defmodule Minga.Buffer.Process do
           {index, state}
 
         _other ->
-          if UndoHistory.pending_at?(state.undo_history, point) do
-            index = ReviewPosition.build(state.undo_history, Document.content_byte_size(document))
+          if pending? do
+            index = ReviewPosition.build(state.undo_history, document)
             {index, %{state | review_position_index: {version, revision, index}}}
           else
             {nil, state}
@@ -2418,6 +2420,7 @@ defmodule Minga.Buffer.Process do
 
     rank =
       with index when index != nil <- index,
+           :ok <- if(pending?, do: :ok),
            {_index, _total} = rank <- ReviewPosition.at(index, point) do
         {rank, version, revision, point}
       end
@@ -2853,8 +2856,12 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call({:prepare_review, {:cursor, count}}, _from, state) do
-    selection = {:at_byte, Document.cursor_offset(state.document), count}
-    reply_prepared_review(state, UndoHistory.prepare_review(state.undo_history, selection))
+    document = state.document
+
+    prepared =
+      ReviewRibbon.prepare(state.undo_history, document, Document.cursor_offset(document), count)
+
+    reply_prepared_review(state, prepared)
   end
 
   def handle_call({:prepare_review, {:visual, kind, anchor, cursor, version}}, _from, state) do
@@ -5187,14 +5194,7 @@ defmodule Minga.Buffer.Process do
       revise_review_position(next, previous.review_position_index, before, after_keep, sites, [])
 
     if previous.review_damage do
-      document = previous.document
-
-      ranges =
-        for {start, stop} <- sites do
-          {first, _} = Lines.containing(document, start)
-          {last, _} = Lines.containing(document, max(start, stop - 1))
-          {first, last}
-        end
+      ranges = ReviewRibbon.damage_rows(previous.document, sites)
 
       damage = ReviewDamage.keep(previous.review_damage, before, after_keep, ranges)
       %{next | review_damage: damage}
@@ -5365,8 +5365,7 @@ defmodule Minga.Buffer.Process do
          sites,
          deltas
        ) do
-    size = Document.content_byte_size(state.document)
-    index = ReviewPosition.revise(index, state.undo_history, size, sites, deltas)
+    index = ReviewPosition.revise(index, state.undo_history, state.document, sites, deltas)
     %{state | review_position_index: {version, next_revision, index}}
   end
 
@@ -6322,7 +6321,7 @@ defmodule Minga.Buffer.Process do
     provenance = UndoHistory.provenance(history)
 
     pending =
-      for {unit, start, stop} <- UndoHistory.review_regions(history, bounds) do
+      for {[unit | _], start, stop} <- ReviewRibbon.regions(history, document, bounds) do
         anchor = Position.from_point(document, start)
 
         if start == stop do
@@ -6354,7 +6353,7 @@ defmodule Minga.Buffer.Process do
     document = state.document
     current = Document.cursor_offset(document)
 
-    case UndoHistory.review_motion(state.undo_history, current, direction, count) do
+    case ReviewRibbon.move(state.undo_history, document, current, direction, count) do
       nil ->
         {:reply, :at_boundary, state}
 
@@ -6369,16 +6368,10 @@ defmodule Minga.Buffer.Process do
   defp review_object_at_cursor(state, modifier) do
     doc = state.document
     point = Document.cursor_offset(doc)
-    size = Document.content_byte_size(doc)
 
-    regions =
-      UndoHistory.review_regions(state.undo_history, [
-        {point, min(point + 1, size), point == size}
-      ])
-
-    case regions do
-      [{_unit, first, stop} | _] -> TextObject.review_change(doc, {first, stop}, modifier)
-      [] -> nil
+    case ReviewRibbon.at(state.undo_history, doc, point) do
+      {_units, first, stop} -> TextObject.review_change(doc, {first, stop}, modifier)
+      nil -> nil
     end
   end
 
@@ -6455,13 +6448,8 @@ defmodule Minga.Buffer.Process do
 
   @spec review_byte_bounds(Document.t(), non_neg_integer(), non_neg_integer(), pos_integer()) ::
           {non_neg_integer(), non_neg_integer(), boolean()}
-  defp review_byte_bounds(document, first, last, line_count) do
-    from = Lines.start_of(document, first)
-
-    if last + 1 < line_count,
-      do: {from, Lines.start_of(document, last + 1), false},
-      else: {from, Document.content_byte_size(document), true}
-  end
+  defp review_byte_bounds(document, first, last, _line_count),
+    do: ReviewRibbon.byte_bounds(document, first, last)
 
   @spec right_boundary(Document.t(), non_neg_integer()) :: non_neg_integer()
   defp right_boundary(doc, line) do

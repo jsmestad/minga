@@ -418,7 +418,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
         checks: [
           Check.new("the editor owns the keyboard inside Minga's first change", fn model ->
             assert Enum.any?(Model.modeline_segments(model), fn segment ->
-                     segment.id == :change and segment.text == "change 1/4"
+                     segment.id == :change and segment.text == "change 1/1"
                    end)
 
             model |> assert_focus(:editor) |> assert_mode(:normal)
