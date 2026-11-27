@@ -648,7 +648,16 @@ defmodule Minga.Test.Storyboard.Session do
     await_picker_fetch!(ctx)
     await_queue_edit!(ctx)
     await_peek_reader!(ctx)
+    await_keep!(ctx)
     session
+  end
+
+  @spec await_keep!(EditorCase.editor_ctx()) :: map()
+  defp await_keep!(ctx) do
+    EditorCase.wait_until(ctx, &is_nil(&1.interaction.keep_requests),
+      max_attempts: 500,
+      message: "expected the in-file Keep decision to settle"
+    )
   end
 
   @spec await_queue_edit!(EditorCase.editor_ctx()) :: :ok

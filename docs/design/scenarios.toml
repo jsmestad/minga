@@ -1041,10 +1041,10 @@ exits = [
   { key = "j on a task with a child below", click = "child row title", to = "minga.tasks.child_selected" },
   { key = "o", click = "Output", to = "minga.task.output" },
   { key = "↩ on a done row", click = "Review", to = "minga.review.buffer" },
-  { key = "q", click = "drawer close", to = "edit.working" },
-  { key = "esc", click = "", to = "edit.working", keyboard_only = "q has the click (drawer close); esc is the keyboard twin" },
+  { key = "q", click = "drawer close", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain", keyboard_only = "q has the click (drawer close); esc is the keyboard twin" },
 ]
-notes = "Rows show one action each by state: r Retry on waiting and failed rows, o Output, i Inspect, ↩ Review on done rows; those exits are listed on minga.tasks.list, where such a row is selected. Empty state: see minga.tasks.empty."
+notes = "Rows show one action each by state: r Retry on waiting and failed rows, o Output, i Inspect, ↩ Review on done rows; those exits are listed on minga.tasks.list, where such a row is selected. Closing returns to the file the drawer opened over. This standalone scenario starts in plain editing; the approval journey starts while Minga edits the file. Empty state: see minga.tasks.empty."
 
 [[scenario]]
 id = "minga.review.buffer"

@@ -11,6 +11,7 @@ defmodule MingaEditor.Journeys.SendDuringAdmissionTest do
 
   alias Minga.Config.Options
   alias MingaAgent.Credentials
+  alias MingaAgent.ModelCatalog
   alias MingaAgent.Session
   alias MingaAgent.Test.ModelSelectionFixture
   alias MingaEditor.Frontend.Capabilities
@@ -21,6 +22,12 @@ defmodule MingaEditor.Journeys.SendDuringAdmissionTest do
   @capabilities %Capabilities{frontend_type: :native_gui, semantic_ui: true}
   @ctrl 0x02
   @cmd 0x08
+
+  setup_all do
+    # A cold Native start waits for the packaged catalog even with a fixture resolver. This journey measures admission, not catalog startup.
+    assert {:ok, :ready} = ModelCatalog.load()
+    :ok
+  end
 
   setup %{tmp_dir: dir} do
     root = Path.join(dir, "project")

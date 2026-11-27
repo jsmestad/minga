@@ -309,7 +309,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
         ]
       ),
       Entry.built("minga.tasks.needs_you",
-        start: [tasks: @asking_tasks, minga: {:thinking, :in_file}],
+        start: [tasks: @asking_tasks],
         reach: "1 SPC a a",
         recognize: &tasks_selected?(&1, :needs_you),
         checks: [
