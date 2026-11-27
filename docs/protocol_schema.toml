@@ -95,7 +95,8 @@ version = "2.0.0"
 # protocol_version 54 adds key_hint and the hints of the gui_picker empty section (0x07), plus enter_selection (0x09), the live picker keymap's permission to activate its locally previewed row with unmodified Enter.
 # protocol_version 55 (#4055) appends each tool call's state (u8, a shared state id) and one-line step sentence (string16) to gui_agent_chat messages 0x04 and 0x08, adds the composer hints section 0x10, adds tab and workspace agent status 7 (stopped) and adds context-card status 6 (stopped).
 # protocol_version 56 adds the resident conversation queue (0xAE), exact queue clicks (0x76), and focus owner surface 15.
-protocol_version = 56
+# protocol_version 57 adds the window-addressed subagent peek (0xAF), its separate resident transcript (0xB0), and exact peek actions (0x77).
+protocol_version = 57
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -1169,6 +1170,23 @@ direction = "beam_to_frontend"
 consumers = ["swift", "go"]
 framing = "len32"
 
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_subagent_peek"
+value = 0xAF
+direction = "beam_to_frontend"
+consumers = ["swift", "go"]
+framing = "len32"
+
+# Same payload as gui_agent_transcript, with a separate resident base.
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_subagent_peek_transcript"
+value = 0xB0
+direction = "beam_to_frontend"
+consumers = ["swift", "go"]
+framing = "len32"
+
 # Sub-opcodes inside gui_action (0x07).
 [[gui_actions]]
 name = "select_tab"
@@ -1634,6 +1652,12 @@ value = 0x75
 [[gui_actions]]
 name = "agent_queue_action"
 value = 0x76
+
+# kind(u8) + window_id(u16) + displayed_token(string16) + target_token(string16)
+# + row(u32) + byte_column(u32). The Started action has no displayed peek token.
+[[gui_actions]]
+name = "subagent_peek_action"
+value = 0x77
 
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
@@ -2286,6 +2310,45 @@ fields = [
   { name = "label", type = "string8" },
   { name = "preview", type = "string16" },
   { name = "attachment_count", type = "u16" },
+]
+
+[[structures]]
+name = "subagent_peek_step"
+fields = [
+  { name = "entry_id", type = "u32" },
+  { name = "token", type = "string16" },
+  { name = "label", type = "string16" },
+  { name = "report", type = "string16" },
+]
+
+[[structures]]
+name = "subagent_peek_sibling"
+fields = [
+  { name = "token", type = "string16" },
+  { name = "title", type = "string16" },
+  { name = "state", type = "u8" },
+]
+
+[[structures]]
+name = "subagent_peek_pane"
+fields = [
+  { name = "window_id", type = "u16" },
+  { name = "parent_rect", type = "struct", element = "rect" },
+  { name = "peek_rect", type = "struct", element = "rect" },
+  { name = "token", type = "string16" },
+  { name = "parent", type = "string16" },
+  { name = "title", type = "string16" },
+  { name = "state", type = "u8" },
+  { name = "elapsed", type = "string8" },
+  { name = "index", type = "u16" },
+  { name = "siblings", type = "counted_array", count_type = "u16", element = "subagent_peek_sibling" },
+  { name = "brief", type = "string32" },
+  { name = "result", type = "string32" },
+  { name = "prompt", type = "string32" },
+  { name = "cursor_row", type = "u32" },
+  { name = "cursor_column", type = "u32" },
+  { name = "flags", type = "u8" },
+  { name = "notice", type = "string16" },
 ]
 
 [[structures]]
@@ -3192,6 +3255,15 @@ conditional_tail = { guard = "visible == 1", fields = [
   { name = "removed", type = "counted_array", count_type = "u8", element = "agent_queue_row" },
   { name = "empty", type = "struct", element = "empty_list" },
 ] }
+
+# Steps are the exact retained parent message IDs. The pane array contains zero or one pane.
+[[command_fields]]
+opcode = "gui_subagent_peek"
+fields = [
+  { name = "parent_window_id", type = "u16" },
+  { name = "steps", type = "counted_array", count_type = "u16", element = "subagent_peek_step" },
+  { name = "panes", type = "counted_array", count_type = "u8", element = "subagent_peek_pane" },
+]
 
 [[command_fields]]
 opcode = "gui_edit_timeline"

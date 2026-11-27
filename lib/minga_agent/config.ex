@@ -242,6 +242,10 @@ defmodule MingaAgent.Config do
   @spec agent_hooks() :: [Hook.t()]
   def agent_hooks, do: merged_agent_hooks(get(:agent_hooks, []))
 
+  @doc "Returns the merged lifecycle hooks for a Session's configured options server."
+  @spec agent_hooks(Minga.Config.Options.server()) :: [Hook.t()]
+  def agent_hooks(options_server), do: merged_agent_hooks(get(options_server, :agent_hooks, []))
+
   @doc "Returns a config with agent hooks disabled."
   @spec without_hooks(t()) :: t()
   def without_hooks(%__MODULE__{} = config), do: %{config | agent_hooks: []}

@@ -136,13 +136,15 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
     :exit, _ -> false
   end
 
-  # ── Private ──────────────────────────────────────────────────────────────
+  @doc "Returns whether the next terminal key belongs to the pending space chord."
 
   @spec pending?(map()) :: boolean()
-  defp pending?(%{shell_runtime: %{state: %TraditionalState{} = shell_state}}),
+  def pending?(%{shell_runtime: %{state: %TraditionalState{} = shell_state}}),
     do: TraditionalState.space_leader_pending?(shell_state)
 
-  defp pending?(_state), do: false
+  def pending?(_state), do: false
+
+  # ── Private ──────────────────────────────────────────────────────────────
 
   @spec space_buffer(EditorState.t()) :: pid() | nil
   defp space_buffer(%{shell_runtime: %{state: %TraditionalState{} = shell_state}}),

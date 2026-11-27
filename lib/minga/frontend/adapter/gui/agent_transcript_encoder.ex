@@ -91,48 +91,46 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
     do: {nil, %{caches | last_agent_transcript: %SentState{}}}
 
   def encode(%AgentChat{visible?: true} = model, %Caches{} = caches) do
-    epoch = model.transcript_epoch
-    messages = model.resident_messages
-    truncated? = model.resident_truncated?
-    fp = :erlang.phash2({epoch, messages, truncated?}, @hash_range)
-
-    if fp == caches.last_agent_transcript.fp do
-      {nil, caches}
-    else
-      encode_changed(epoch, messages, truncated?, fp, caches)
-    end
+    source = {model.transcript_epoch, model.resident_messages, model.resident_truncated?}
+    {payload, sent} = encode_payload(source, caches.last_agent_transcript)
+    {frame(payload), %{caches | last_agent_transcript: sent}}
   end
 
-  @spec encode_changed(non_neg_integer(), [AgentChat.message()], boolean(), integer(), Caches.t()) ::
-          {binary() | nil, Caches.t()}
-  defp encode_changed(epoch, messages, truncated?, fp, %Caches{} = caches) do
-    prev = caches.last_agent_transcript
+  @doc "Builds a resident transcript payload against one stream's own sent state."
+  @spec encode_payload({non_neg_integer(), [AgentChat.message()], boolean()}, SentState.t()) ::
+          {binary() | nil, SentState.t()}
+  def encode_payload(source, %SentState{} = previous) do
+    fp = :erlang.phash2(source, @hash_range)
 
+    if fp == previous.fp, do: {nil, previous}, else: encode_changed(source, fp, previous)
+  end
+
+  @spec encode_changed(
+          {non_neg_integer(), [AgentChat.message()], boolean()},
+          integer(),
+          SentState.t()
+        ) ::
+          {binary() | nil, SentState.t()}
+  defp encode_changed({epoch, messages, truncated?}, fp, prev) do
     validate_unique_message_ids!(messages)
     entries = Enum.map(messages, &message_entry/1)
     keys = Enum.map(entries, &entry_key/1)
 
-    new_caches = %{caches | last_agent_transcript: SentState.emitted(fp, epoch, keys, truncated?)}
+    sent = SentState.emitted(fp, epoch, keys, truncated?)
 
     case select_delta(prev.epoch, prev.keys, epoch, keys, entries) do
+      :nothing when prev.truncated? == truncated? ->
+        {nil, sent}
+
       :nothing ->
-        emit_truncation_transition(prev.truncated?, truncated?, epoch, entries, new_caches)
+        {build_append(epoch, truncated?, 0, length(entries), []), sent}
 
       {:full_replace, out} ->
-        {build_full_replace(epoch, truncated?, out), new_caches}
+        {build_full_replace(epoch, truncated?, out), sent}
 
       {:append, trim_front, base_count, out} ->
-        {build_append(epoch, truncated?, trim_front, base_count, out), new_caches}
+        {build_append(epoch, truncated?, trim_front, base_count, out), sent}
     end
-  end
-
-  @spec emit_truncation_transition(boolean(), boolean(), non_neg_integer(), [entry()], Caches.t()) ::
-          {binary() | nil, Caches.t()}
-  defp emit_truncation_transition(truncated?, truncated?, _epoch, _entries, caches),
-    do: {nil, caches}
-
-  defp emit_truncation_transition(_previous_truncated?, truncated?, epoch, entries, caches) do
-    {build_append(epoch, truncated?, 0, Enum.count(entries), []), caches}
   end
 
   # ── Delta selection ──
@@ -202,35 +200,29 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
 
   @spec build_full_replace(non_neg_integer(), boolean(), [entry()]) :: binary()
   defp build_full_replace(epoch, truncated?, entries) do
-    payload =
-      Writer.new(@command)
-      |> Writer.uint8(:version, @version)
-      |> Writer.uint8(:mode, @mode_full_replace)
-      |> Writer.uint32(:epoch, epoch)
-      |> Writer.uint8(:truncated, if(truncated?, do: 1, else: 0))
-      |> Writer.uint32(:message_count, Enum.count(entries))
-      |> Writer.append(entries_body(entries))
-      |> Writer.finish()
-
-    frame(payload)
+    Writer.new(@command)
+    |> Writer.uint8(:version, @version)
+    |> Writer.uint8(:mode, @mode_full_replace)
+    |> Writer.uint32(:epoch, epoch)
+    |> Writer.uint8(:truncated, if(truncated?, do: 1, else: 0))
+    |> Writer.uint32(:message_count, length(entries))
+    |> Writer.append(entries_body(entries))
+    |> Writer.finish()
   end
 
   @spec build_append(non_neg_integer(), boolean(), non_neg_integer(), non_neg_integer(), [entry()]) ::
           binary()
   defp build_append(epoch, truncated?, trim_front, base_count, entries) do
-    payload =
-      Writer.new(@command)
-      |> Writer.uint8(:version, @version)
-      |> Writer.uint8(:mode, @mode_append)
-      |> Writer.uint32(:epoch, epoch)
-      |> Writer.uint8(:truncated, if(truncated?, do: 1, else: 0))
-      |> Writer.uint32(:trim_front, trim_front)
-      |> Writer.uint32(:base_count, base_count)
-      |> Writer.uint32(:message_count, Enum.count(entries))
-      |> Writer.append(entries_body(entries))
-      |> Writer.finish()
-
-    frame(payload)
+    Writer.new(@command)
+    |> Writer.uint8(:version, @version)
+    |> Writer.uint8(:mode, @mode_append)
+    |> Writer.uint32(:epoch, epoch)
+    |> Writer.uint8(:truncated, if(truncated?, do: 1, else: 0))
+    |> Writer.uint32(:trim_front, trim_front)
+    |> Writer.uint32(:base_count, base_count)
+    |> Writer.uint32(:message_count, length(entries))
+    |> Writer.append(entries_body(entries))
+    |> Writer.finish()
   end
 
   @spec entries_body([entry()]) :: iodata()
@@ -244,7 +236,9 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
     |> Writer.finish()
   end
 
-  @spec frame(binary()) :: binary()
+  @spec frame(binary() | nil) :: binary() | nil
+  defp frame(nil), do: nil
+
   defp frame(payload) do
     Writer.new(@command)
     |> Writer.uint8(:opcode, @op_gui_agent_transcript)

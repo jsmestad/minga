@@ -3,9 +3,11 @@ defmodule MingaEditor.Agent.PromptInput do
 
   alias Minga.Buffer
   alias MingaEditor.Agent.DraftSave
+  alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.View.PromptProjection
+  alias MingaEditor.FocusOwner
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Mouse.Target.Text
   alias MingaEditor.Renderer.TextInteractionIndex.Reader
@@ -64,6 +66,25 @@ defmodule MingaEditor.Agent.PromptInput do
           state()
   def queue_displayed(state, generation, offer, dispatch) do
     with_displayed_draft(state, generation, offer, &with_offer(&1, offer, dispatch))
+  end
+
+  @doc "Inserts committed text only while its exact displayed conversation still owns the prompt."
+  @spec insert_displayed(state(), pos_integer(), String.t()) :: state()
+  def insert_displayed(state, generation, text) when is_binary(text) do
+    ui = state.workspace.agent_ui
+
+    with %{responder: :editor_view, surface: :agent} <- FocusOwner.derive(state),
+         %Panel{input_focused: true, prompt_buffer: buffer} <- ui.panel,
+         %MingaEditor.Window{content: {:agent_chat, :semantic}} <-
+           Windows.active_struct(state.workspace.windows),
+         reader when reader != nil <- state.render.text_interaction_reader,
+         {:ok, {^buffer, _version, owner}} when owner != nil <-
+           Reader.prompt_source(reader, 65_534, generation),
+         ^owner <- submission_owner(Runtime.review_scope(state.shell_runtime), ui) do
+      Workflow.install_agent_ui(state, PromptBuffer.insert_char(ui, text))
+    else
+      _stale -> state
+    end
   end
 
   @spec with_displayed_draft(state(), pos_integer(), pos_integer() | nil, (state() -> state())) ::

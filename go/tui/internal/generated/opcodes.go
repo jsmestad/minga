@@ -4,7 +4,7 @@ package generated
 
 // ProtocolVersion is the wire-contract version the frontend exchanges with
 // the BEAM in the ready handshake. A mismatch yields an explicit protocol_error.
-const ProtocolVersion uint16 = 56
+const ProtocolVersion uint16 = 57
 
 const (
 	// Input
@@ -112,38 +112,40 @@ const (
 	OPGuiAgentHelp         byte = 0xAB
 
 	// Gui Semantic
-	OPGuiWindowContent       byte = 0x80
-	OPGuiHoverPopup          byte = 0x81
-	OPGuiSignatureHelp       byte = 0x82
-	OPGuiFloatPopup          byte = 0x83
-	OPGuiSplitSeparators     byte = 0x84
-	OPGuiGitStatus           byte = 0x85
-	OPGuiAgentTranscript     byte = 0x86
-	OPGuiRequest             byte = 0x87
-	OPGuiAgentContext        byte = 0x88
-	OPGuiHoverAction         byte = 0x96
-	OPGuiConfigState         byte = 0x97
-	OPGuiMenuBar             byte = 0xAD
-	OPGuiWorkspaces          byte = 0x98
-	OPGuiNotifications       byte = 0x99
-	OPGuiObservatory         byte = 0x9A
-	OPGuiEditTimeline        byte = 0x9B
-	OPGuiExtensionOverlay    byte = 0x9C
-	OPGuiExtensionPanel      byte = 0x9D
-	OPGuiSearchState         byte = 0x9E
-	OPGuiSidebars            byte = 0x9F
-	OPGuiWindowOverlayDelta  byte = 0xA0
-	OPGuiWindowViewportDelta byte = 0xA1
-	OPGuiWindowRowsDelta     byte = 0xA2
-	OPGuiExtensionRuntime    byte = 0xA3
-	OPGuiSurfaceLayout       byte = 0xA4
-	OPGuiEmptyState          byte = 0xA5
-	OPGuiCompletionSelection byte = 0xA6
-	OPGuiPickerSelection     byte = 0xA7
-	OPGuiTextPresentation    byte = 0xA8
-	OPGuiResidentSemantics   byte = 0xA9
-	OPGuiTasksDrawer         byte = 0xAC
-	OPGuiAgentQueue          byte = 0xAE
+	OPGuiWindowContent          byte = 0x80
+	OPGuiHoverPopup             byte = 0x81
+	OPGuiSignatureHelp          byte = 0x82
+	OPGuiFloatPopup             byte = 0x83
+	OPGuiSplitSeparators        byte = 0x84
+	OPGuiGitStatus              byte = 0x85
+	OPGuiAgentTranscript        byte = 0x86
+	OPGuiRequest                byte = 0x87
+	OPGuiAgentContext           byte = 0x88
+	OPGuiHoverAction            byte = 0x96
+	OPGuiConfigState            byte = 0x97
+	OPGuiMenuBar                byte = 0xAD
+	OPGuiWorkspaces             byte = 0x98
+	OPGuiNotifications          byte = 0x99
+	OPGuiObservatory            byte = 0x9A
+	OPGuiEditTimeline           byte = 0x9B
+	OPGuiExtensionOverlay       byte = 0x9C
+	OPGuiExtensionPanel         byte = 0x9D
+	OPGuiSearchState            byte = 0x9E
+	OPGuiSidebars               byte = 0x9F
+	OPGuiWindowOverlayDelta     byte = 0xA0
+	OPGuiWindowViewportDelta    byte = 0xA1
+	OPGuiWindowRowsDelta        byte = 0xA2
+	OPGuiExtensionRuntime       byte = 0xA3
+	OPGuiSurfaceLayout          byte = 0xA4
+	OPGuiEmptyState             byte = 0xA5
+	OPGuiCompletionSelection    byte = 0xA6
+	OPGuiPickerSelection        byte = 0xA7
+	OPGuiTextPresentation       byte = 0xA8
+	OPGuiResidentSemantics      byte = 0xA9
+	OPGuiTasksDrawer            byte = 0xAC
+	OPGuiAgentQueue             byte = 0xAE
+	OPGuiSubagentPeek           byte = 0xAF
+	OPGuiSubagentPeekTranscript byte = 0xB0
 
 	GUIActionSelectTab                  byte = 0x01
 	GUIActionCloseTab                   byte = 0x02
@@ -239,4 +241,5 @@ const (
 	GUIActionWhichKeyBack               byte = 0x74
 	GUIActionAgentContinueTurn          byte = 0x75
 	GUIActionAgentQueueAction           byte = 0x76
+	GUIActionSubagentPeekAction         byte = 0x77
 )

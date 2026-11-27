@@ -246,6 +246,59 @@ defmodule Minga.Integration.GUIProtocolTest do
            ]
   end
 
+  test "peek metadata and its transcript decode as separate scoped commands", %{harness: harness} do
+    alias Minga.Frontend.Adapter.GUI.{SubagentPeekEncoder, SubagentPeekTranscriptEncoder}
+    alias Minga.RenderModel.UI.SubagentPeek
+
+    model = %SubagentPeek{
+      parent_window_id: 12,
+      steps: [{77, "child-one", "Started Citation Audit", "1 of 2 reports in"}],
+      parent_rect: {0, 0, 40, 30},
+      peek_rect: {0, 41, 40, 30},
+      pane: %{
+        window_id: 13,
+        token: "child-one",
+        parent: "Find sources",
+        title: "Citation Audit",
+        state: :done,
+        elapsed: "3m",
+        index: 1,
+        siblings: [{"child-one", "Citation Audit", :done}, {"child-two", "Review", :working}],
+        brief: "Check citations",
+        brief_open?: false,
+        result: "Vérifié",
+        prompt: "",
+        cursor: {0, 0},
+        focused?: true,
+        editing?: false,
+        sending?: false,
+        notice: nil
+      },
+      transcript: {7, [{77, {:assistant, "First child only"}}], false}
+    }
+
+    {metadata, caches} = SubagentPeekEncoder.encode(model, Caches.new())
+    {child, _caches} = SubagentPeekTranscriptEncoder.encode(model, caches)
+
+    assert %{
+             "parent_window_id" => 12,
+             "pane_token" => "child-one",
+             "result" => "Vérifié",
+             "sibling_tokens" => ["child-one", "child-two"],
+             "steps" => [
+               %{
+                 "entry_id" => 77,
+                 "token" => "child-one",
+                 "label" => "Started Citation Audit",
+                 "report" => "1 of 2 reports in"
+               }
+             ]
+           } = round_trip(harness, metadata, "gui_subagent_peek")
+
+    assert %{"mode" => 0, "epoch" => 7, "entry_ids" => [77]} =
+             round_trip(harness, child, "gui_subagent_peek_transcript")
+  end
+
   describe "resident semantic production encoder round-trip" do
     test "keyframe preserves positive row revision and all absolute semantic layers", %{
       harness: harness
@@ -424,6 +477,7 @@ defmodule Minga.Integration.GUIProtocolTest do
             model_name: Map.get(d, :model, ""),
             thinking_level: Map.get(d, :thinking_level, ""),
             prompt: Map.get(d, :prompt, ""),
+            input_focused: Map.get(d, :input_focused, false),
             draft_attachment_count: Map.get(d, :draft_attachment_count, 0),
             draft_attachment_offer: Map.get(d, :draft_attachment_offer),
             pending_question: Map.get(d, :pending_question),
@@ -516,6 +570,16 @@ defmodule Minga.Integration.GUIProtocolTest do
     test "a failed start's needs-you status decodes as its own status", %{harness: harness} do
       command = encode_gui_agent_chat(%{visible: true, status: :needs_you})
       assert %{"status" => 6} = round_trip(harness, command, "gui_agent_chat")
+    end
+
+    test "Started-row navigation distinguishes an unfocused prompt from a focused normal-mode prompt",
+         %{harness: harness} do
+      for focused? <- [false, true] do
+        command = encode_gui_agent_chat(%{visible: true, input_focused: focused?})
+
+        assert %{"prompt_focused" => ^focused?, "prompt_vim_mode" => 0} =
+                 round_trip(harness, command, "gui_agent_chat")
+      end
     end
 
     test "Agent chat reports saved attachments without changing the draft text", %{

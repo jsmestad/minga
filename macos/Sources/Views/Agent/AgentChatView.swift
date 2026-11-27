@@ -35,6 +35,7 @@ public struct AgentChatView: View {
         case composerSubmit(generation: UInt64, offer: UInt64)
         case composerQueue(generation: UInt64, offer: UInt64, followUp: Bool, target: AgentQueueTarget)
         case queue(AgentQueueRequest)
+        case subagentPeek(Wire.SubagentPeek.Action, windowID: UInt16, displayed: String, target: String, row: UInt32, column: UInt32)
         case openQuestion(offer: UInt64)
         case stopTurn(AgentStopTarget)
         case continueTurn(AgentStopTarget)
@@ -45,16 +46,18 @@ public struct AgentChatView: View {
     }
 
     public init(
-        state: AgentChatState, queueState: AgentQueueState? = nil,
+        state: AgentChatState, queueState: AgentQueueState? = nil, peekState: SubagentPeekState? = nil,
         isInsertMode: Bool, sendAction: ViewActionHandler<Action>?
     ) {
         self.state = state
         self.queueState = queueState
+        self.peekState = peekState
         self.isInsertMode = isInsertMode
         self.sendAction = sendAction
     }
     public let state: AgentChatState
     private let queueState: AgentQueueState?
+    private let peekState: SubagentPeekState?
     @Environment(\.themeColors) private var theme
 
     public let isInsertMode: Bool
@@ -79,7 +82,7 @@ public struct AgentChatView: View {
             if state.lifecycle != .conversation {
                 lifecycleNoticeView
             }
-            AgentConversationList(state: state, sendAction: state.lifecycle == .conversation ? sendAction : nil)
+            AgentConversationList(state: state, sendAction: state.lifecycle == .conversation ? sendAction : nil, peekState: peekState)
 
             if state.lifecycle == .conversation, let question = state.question {
                 HStack(spacing: Spacing.md) {
@@ -224,6 +227,8 @@ public struct AgentChatView: View {
 struct AgentConversationList: View {
     let state: AgentChatState
     let sendAction: ViewActionHandler<AgentChatView.Action>?
+    var peekState: SubagentPeekState? = nil
+    var followStreamingRevisions = false
 
     @Environment(\.themeColors) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -285,7 +290,7 @@ struct AgentConversationList: View {
                 // A streaming frame can grow the last message without changing
                 // the count, so follow every transcript revision during a turn.
                 // Chrome and composer frames never advance the revision.
-                if shouldAutoScroll && state.hasActiveTurn {
+                if shouldAutoScroll && (state.hasActiveTurn || followStreamingRevisions) {
                     scrollToBottom()
                 }
             }
@@ -351,6 +356,50 @@ struct AgentConversationList: View {
 
     @ViewBuilder
     private func messageView(_ msg: ChatMessageEntry, index: Int) -> some View {
+        if let peekState, let step = peekState.stepsByEntryID[msg.id] {
+            startedStep(step, state: peekState, window: peekState.metadata.parentWindowID, message: msg)
+        } else {
+            standardMessageView(msg, index: index)
+        }
+    }
+
+    private func startedStep(_ step: Wire.SubagentPeek.Step, state: SubagentPeekState, window: UInt16, message: ChatMessageEntry) -> some View {
+        let wireState = switch message {
+        case .toolCall(_, _, _, _, _, _, _, _, _, _, _, _, let tool), .styledToolCall(_, _, _, _, _, _, _, _, _, _, _, _, let tool):
+            tool.state
+        default: UInt8(0)
+        }
+        let activate = {
+            sendAction?(.subagentPeek(.started, windowID: window, displayed: "", target: step.token, row: 0, column: 0))
+        }
+        return HStack(spacing: Spacing.sm) {
+            Button { activate() } label: {
+                HStack(spacing: Spacing.sm) {
+                    StateMark(state: SpineState(wire: wireState) ?? .working)
+                        .frame(width: AgentToolCallCard.markSize, height: AgentToolCallCard.markSize)
+                    Text(step.label)
+                        .font(Typography.font(.body))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .padding(Spacing.xs)
+                .background(RoundedRectangle(cornerRadius: Radius.sm).fill(theme.agentCodeBg.opacity(state.selectedStep == step.token ? 1 : 0)))
+            }
+            .buttonStyle(.plain)
+            .disabled(sendAction == nil)
+            .focusable()
+            .onKeyPress(.return) { activate(); return .handled }
+            .onScrollVisibilityChange(threshold: 0.75) { state.setVisible(step.token, $0) }
+            .onDisappear { state.setVisible(step.token, false) }
+            if !step.report.isEmpty {
+                Text(step.report).font(Typography.font(.small)).foregroundStyle(theme.agentMutedFg).fixedSize()
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    @ViewBuilder
+    private func standardMessageView(_ msg: ChatMessageEntry, index: Int) -> some View {
         switch msg {
         case .user(_, let text):
             userMessage(text)

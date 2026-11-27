@@ -49,6 +49,7 @@ defmodule MingaEditor.Renderer.State do
           semantic_tokens: Submission.semantic_tokens(),
           highlight_cache: HighlightCache.t(),
           agent_transcript: AgentChatResident.t() | nil,
+          peek_transcript: AgentChatResident.t() | nil,
           frame_credit: frame_credit(),
           next_frame_seq: non_neg_integer(),
           ack_timeout_ms: pos_integer(),
@@ -70,6 +71,7 @@ defmodule MingaEditor.Renderer.State do
             semantic_tokens: %{},
             highlight_cache: HighlightCache.new(),
             agent_transcript: nil,
+            peek_transcript: nil,
             frame_credit: :idle,
             next_frame_seq: 1,
             ack_timeout_ms: 2_000,
@@ -162,14 +164,45 @@ defmodule MingaEditor.Renderer.State do
     {admission, root} =
       admit_transcript(state.agent_transcript, Submission.transcript(submission), intent)
 
+    {peek_admission, peek_root} =
+      admit_peek(state.peek_transcript, Submission.peek_transcript(submission))
+
+    intent =
+      intent
+      |> Intent.with_agent_transcript(root)
+      |> Intent.with_peek_transcript(peek_root)
+
     {%{
        state
        | highlights: highlights,
          semantic_tokens: semantic_tokens,
          highlight_cache: cache,
-         agent_transcript: root
-     }, Intent.with_agent_transcript(intent, root), admission}
+         agent_transcript: root,
+         peek_transcript: peek_root
+     }, intent, combine_admissions(admission, peek_admission)}
   end
+
+  @spec admit_peek(AgentChatResident.t() | nil, term()) ::
+          {transcript_admission(), AgentChatResident.t() | nil}
+  defp admit_peek(root, update) do
+    case AgentChatBuilder.admit_peek(root, update) do
+      {:ok, next} -> {admitted(AgentChatResident.new_fallbacks(root, next)), next}
+      {:reseed, last} -> {:reseed_required, last}
+    end
+  rescue
+    error in Minga.Frontend.Adapter.GUI.EncodingError ->
+      {{:failed, error}, retained_root(root, update)}
+  end
+
+  @spec combine_admissions(transcript_admission(), transcript_admission()) ::
+          transcript_admission()
+  defp combine_admissions(:admitted, peek), do: peek
+  defp combine_admissions(parent, :admitted), do: parent
+  defp combine_admissions(:reseed_required, _peek), do: :reseed_required
+  defp combine_admissions(_parent, :reseed_required), do: :reseed_required
+  defp combine_admissions({:admitted, parent}, {:admitted, peek}), do: {:admitted, parent ++ peek}
+  defp combine_admissions({:failed, _} = failure, _peek), do: failure
+  defp combine_admissions(_parent, {:failed, _} = failure), do: failure
 
   @spec admit_transcript(AgentChatResident.t() | nil, term(), Intent.t()) ::
           {transcript_admission(), AgentChatResident.t() | nil}
@@ -313,7 +346,10 @@ defmodule MingaEditor.Renderer.State do
       when lease.generation == generation and lease.attempt.seq == frame_seq do
     rejected = lease.attempt.intent
     # An adapted retry renders the original attempt's transcript root, never a fresh update.
-    adapted = Intent.with_agent_transcript(adapted, Intent.agent_transcript(rejected))
+    adapted =
+      adapted
+      |> Intent.with_agent_transcript(Intent.agent_transcript(rejected))
+      |> Intent.with_peek_transcript(rejected.workspace.peek_transcript)
 
     if adapted != rejected and advertised_dimension?(rejected, dimension) do
       rejection_state =

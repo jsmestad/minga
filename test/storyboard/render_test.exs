@@ -22,6 +22,7 @@ defmodule Minga.Storyboard.RenderTest do
   for id <- @built, {cols, rows} <- Render.tui_sizes() do
     @id id
     @size "#{cols}x#{rows}"
+    @tag scenario: id
     test "#{id} draws the same text grid in every theme at #{cols}x#{rows}" do
       [first | _] = themes = Render.themes()
       target = Enum.find(Render.targets(), &(&1.frontend == :tui and &1.size == @size))
@@ -68,6 +69,7 @@ defmodule Minga.Storyboard.RenderTest do
   for id <- @built do
     @id id
     @tag :storyboard_export
+    @tag scenario: id
     test "exports the transcripts of #{id} when MINGA_STORYBOARD_OUT is set" do
       with dir when is_binary(dir) <- System.get_env("MINGA_STORYBOARD_OUT") do
         :ok = Render.export_scenario!(dir, Registry.fetch!(@id))

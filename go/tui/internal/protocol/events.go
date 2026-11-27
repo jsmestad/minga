@@ -416,6 +416,34 @@ func EncodeGUIAgentQueueAction(action generated.AgentQueueAction, workspaceID ui
 	return binary.BigEndian.AppendUint64(packet, removed.Revision)
 }
 
+// SubagentPeekAction names one activation of committed peek metadata.
+type SubagentPeekAction byte
+
+const (
+	SubagentPeekStarted SubagentPeekAction = iota
+	SubagentPeekSibling
+	SubagentPeekBrief
+	SubagentPeekCompose
+	SubagentPeekSubmit
+	SubagentPeekClose
+	SubagentPeekInspect
+	SubagentPeekStartedKey
+)
+
+// EncodeGUISubagentPeekAction addresses the exact parent or displayed child.
+func EncodeGUISubagentPeekAction(action SubagentPeekAction, window uint16, displayed, target string, row, column uint32) []byte {
+	if window == 0 || len(displayed) > 65535 || len(target) > 65535 {
+		return nil
+	}
+	packet := make([]byte, 3, 17+len(displayed)+len(target))
+	packet[0], packet[1], packet[2] = generated.OPGuiAction, generated.GUIActionSubagentPeekAction, byte(action)
+	packet = binary.BigEndian.AppendUint16(packet, window)
+	packet = appendString16(packet, displayed)
+	packet = appendString16(packet, target)
+	packet = binary.BigEndian.AppendUint32(packet, row)
+	return binary.BigEndian.AppendUint32(packet, column)
+}
+
 // EncodeGUIAgentOpenQuestion opens the exact question shown in the committed chat.
 func EncodeGUIAgentOpenQuestion(offer uint64) []byte {
 	packet := [10]byte{generated.OPGuiAction, generated.GUIActionAgentOpenQuestion}

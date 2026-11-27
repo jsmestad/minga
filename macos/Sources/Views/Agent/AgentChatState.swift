@@ -692,6 +692,10 @@ public struct AgentTranscriptSnapshot {
     /// Exact retained payload weight, including the top-level transcript collection.
     public var resourceWeight: FrameResourceWeight { store.resourceWeight }
 
+    public static var empty: AgentTranscriptSnapshot {
+        .init(store: AgentTranscriptStore(), epoch: 0, hasTranscript: false, truncated: false, revision: 0, accountingCounters: .init())
+    }
+
     fileprivate init(
         store: AgentTranscriptStore,
         epoch: UInt32,
@@ -814,6 +818,7 @@ public final class AgentChatState {
     /// Cursor column within the prompt buffer.
     public var promptCursorCol: UInt16 = 0
     public var promptMode: EditorMode = .normal
+    public private(set) var promptFocused = false
     /// Number of visible rows in the prompt (after wrapping, clamped to max).
     public var promptVisibleRows: UInt8 = 1
     public private(set) var draftAttachmentCount: UInt8 = 0
@@ -885,7 +890,7 @@ public final class AgentChatState {
     /// Updates the chat chrome (visibility, status, model, prompt).
     ///
     /// Message content is sourced from the resident 0x86 stream via `applyTranscript`.
-    public func update(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: EditorMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil, lifecycle: AgentChatLifecycle = .conversation, composerHints: [AgentComposerHint] = [], continueTarget: AgentStopTarget? = nil) {
+    public func update(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: EditorMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil, lifecycle: AgentChatLifecycle = .conversation, composerHints: [AgentComposerHint] = [], continueTarget: AgentStopTarget? = nil, promptFocused: Bool = false) {
         self.visible = visible
         self.composerHints = composerHints
         self.lifecycle = lifecycle
@@ -897,6 +902,7 @@ public final class AgentChatState {
         self.promptCursorLine = promptCursorLine
         self.promptCursorCol = promptCursorCol
         self.promptMode = promptMode
+        self.promptFocused = promptFocused
         self.promptVisibleRows = promptVisibleRows
         self.promptCompletion = promptCompletion
         self.draftAttachmentCount = draftAttachmentCount
@@ -1069,6 +1075,7 @@ public final class AgentChatState {
 
     public func hide() {
         visible = false
+        promptFocused = false
         lifecycle = .conversation
         draftAttachmentCount = 0
         draftAttachmentOffer = 0

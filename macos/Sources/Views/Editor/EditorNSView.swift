@@ -76,6 +76,9 @@ final class EditorNSView: MTKView {
         let connectionGeneration: UInt64
         let windowID: UInt16?
         let contentEpoch: UInt32?
+        let peekWindowID: UInt16?
+        let peekComposerToken: String?
+        let parentComposerPresentation: UInt64?
     }
     private var imeCommitTarget: IMECommitTarget?
     private var textInputCallbacksSuppressed = false
@@ -1784,6 +1787,7 @@ final class EditorNSView: MTKView {
 
         // Special keys outside composition bypass IME.
         if let codepoint = mapKeyCode(event) {
+            if handleSubagentPeekActivation(codepoint: codepoint, modifiers: mods) { return }
             sendKeyPress(codepoint: codepoint, modifiers: mods)
             return
         }
@@ -3314,8 +3318,16 @@ final class EditorNSView: MTKView {
         }
     }
 
-    /// Send committed text from IME to the BEAM as individual key presses.
-    private func commitIMEText(_ text: String) {
+    /// A peek commit carries the marked text's original destination through the BEAM focus boundary.
+    private func commitIMEText(_ text: String, target: IMECommitTarget?) {
+        if let token = target?.peekComposerToken, let window = target?.peekWindowID {
+            encoder.send(.subagentPeek(.insertText, windowID: window, displayed: token, target: text, row: 0, column: 0))
+            return
+        }
+        if let presentation = target?.parentComposerPresentation {
+            encoder.send(.subagentPeek(.insertText, windowID: 65_534, displayed: String(presentation), target: text, row: 0, column: 0))
+            return
+        }
         for scalar in text.unicodeScalars {
             sendKeyPress(codepoint: scalar.value, modifiers: 0)
         }
@@ -3323,10 +3335,18 @@ final class EditorNSView: MTKView {
 
     private var currentIMECommitTarget: IMECommitTarget {
         let surface = dispatcher.committedEditorSnapshot?.activeSurface
+        let peek = dispatcher.guiState.subagentPeekState.metadata.pane.flatMap {
+            $0.focused && $0.editing ? $0 : nil
+        }
+        let chat = dispatcher.guiState.agentChatState
+        let parentComposerOwnsText = chat.visible && chat.promptFocused && chat.promptPresentation != 0
         return IMECommitTarget(
             connectionGeneration: inputConnectionGeneration,
             windowID: surface?.windowId,
-            contentEpoch: surface?.content.contentEpoch
+            contentEpoch: surface?.content.contentEpoch,
+            peekWindowID: peek?.windowID,
+            peekComposerToken: peek?.token,
+            parentComposerPresentation: parentComposerOwnsText ? chat.promptPresentation : nil
         )
     }
 
@@ -3373,6 +3393,20 @@ final class EditorNSView: MTKView {
         }
     }
 
+    private func handleSubagentPeekActivation(codepoint: UInt32, modifiers: UInt8) -> Bool {
+        guard modifiers == 0, codepoint == 9 || codepoint == 13 else { return false }
+        let gui = dispatcher.guiState
+        let peek = gui.subagentPeekState
+        guard let owner = focusPolicy.focusOwnerState.decodedOwner, owner.ownsAgentConversation,
+              owner.windowID == UInt32(peek.metadata.parentWindowID), peek.metadata.parentWindowID != 0,
+              gui.agentChatState.visible, !gui.agentChatState.promptFocused,
+              !gui.whichKeyState.visible else { return false }
+        if codepoint == 9 { return peek.selectNextVisibleStep() }
+        guard let token = peek.visibleSelectedStep else { return false }
+        let offer = gui.agentChatState.draftAttachmentOffer
+        return encoder.send(.subagentPeek(.startedKey, windowID: peek.metadata.parentWindowID, displayed: offer == 0 ? "" : String(offer), target: token, row: 0, column: 0)).wasAccepted
+    }
+
     /// Sends a key press and updates recovery tracking in one place.
     ///
     /// Stamps a latency correlation sequence (ticket #2215) so the resulting
@@ -3388,7 +3422,8 @@ final class EditorNSView: MTKView {
         }
         recoveryManager?.onKeySent()
         let seq = dispatcher.latency.stamp()
-        let composerOffer = !queueOwnsKeyboard && (codepoint == 13 || codepoint == 102)
+        let peekOwnsKeyboard = dispatcher.guiState.subagentPeekState.metadata.pane?.focused == true
+        let composerOffer = !queueOwnsKeyboard && !peekOwnsKeyboard && (codepoint == 13 || codepoint == 102)
             ? dispatcher.guiState.agentChatState.draftAttachmentOffer : 0
         encoder.send(.keyPress(codepoint: codepoint, modifiers: modifiers, sequence: seq, composerOffer: composerOffer))
     }
@@ -3404,6 +3439,7 @@ final class EditorNSView: MTKView {
     /// BEAM state remains authoritative; this adds a short local prediction so text typed immediately after `i` is not misclassified as a normal-mode leader chord before the status bar message catches up.
     private func spaceLeaderShouldTreatSpaceLiterally() -> Bool {
         if Self.statusModeUsesLiteralSpace(statusMode: statusBarState?.mode) { return true }
+        if dispatcher.guiState.subagentPeekState.metadata.pane?.editing == true { return true }
         return optimisticTextInputMode
     }
 
@@ -3918,6 +3954,7 @@ extension EditorNSView: @MainActor NSTextInputClient {
 
         let wasComposing = imeComposition.hasMarkedText
         let targetIsCurrent = !wasComposing || imeCommitTargetIsCurrent
+        let target = wasComposing ? imeCommitTarget : currentIMECommitTarget
         imeComposition.clear()
         imeCommitTarget = nil
         focusPolicy.nativeTextEditingDidEnd()
@@ -3925,7 +3962,7 @@ extension EditorNSView: @MainActor NSTextInputClient {
 
         // Send committed text to the BEAM.
         guard !textInputCallbacksSuppressed, targetIsCurrent, !text.isEmpty else { return }
-        commitIMEText(text)
+        commitIMEText(text, target: target)
         needsDisplay = true
     }
 
@@ -3960,7 +3997,7 @@ extension EditorNSView: @MainActor NSTextInputClient {
         if !textInputCallbacksSuppressed, targetIsCurrent,
            let text = imeComposition.unmark()
         {
-            commitIMEText(text)
+            commitIMEText(text, target: imeCommitTarget)
         } else {
             imeComposition.clear()
             if !targetIsCurrent { textInputCallbacksSuppressed = true }

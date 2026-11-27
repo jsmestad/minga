@@ -421,6 +421,8 @@ graph LR
 
 For the full specification with byte-level field descriptions, sequencing rules, and implementation guidance, see **[docs/PROTOCOL.md](PROTOCOL.md)**. For the Semantic UI opcodes historically named GUI chrome, see **[docs/GUI_PROTOCOL.md](GUI_PROTOCOL.md)**.
 
+The subagent peek keeps the parent transcript and its result intact while the selected child keeps working. `0xAF` carries the pane geometry, sibling identities and composer state; `0xB0` carries the child's independent resident transcript. The frontend sends the displayed window and invocation token back with `subagent_peek_action` (`0x77`). The Editor resolves those against the live split and checks current focus before admitting keyboard activation or a composition commit. `MingaAgent.SessionManager` owns the child's lifetime and any isolated checkout. Closing the peek drops only the reader, not the child conversation or its work.
+
 Any process that implements the frontend behavior and speaks this protocol can serve as a Minga rendering backend. Frontend identity is opaque to product behavior; capabilities describe the surface and feature support. The macOS Swift frontend is the polish reference, the Go terminal frontend is the only terminal frontend, and GTK4 remains planned for Linux.
 
 ### The Render Model and the rendering pipeline

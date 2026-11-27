@@ -76,6 +76,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
   # Direct captures of the seeded conversation wait for its turn in Registry.drive/2.
   defp conversation?(%Model{conversation: %{status: status}} = model, turn) do
     Model.open?(model, :agent_chat) and not match?(%{surface: :queue}, model.focus) and
+      not Model.open?(model, :subagent_peek) and
       status == :stopped == (turn == :stopped)
   end
 
@@ -414,7 +415,35 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
           )
         ])
       ),
-      Entry.pending("minga.subagent.peek", 4046, "a subagent beside its parent"),
+      Entry.built("minga.subagent.peek",
+        start: [
+          conversation: [
+            open?: true,
+            peek?: true,
+            turn: :working,
+            prompt: "Review the marketing site for unfair claims and unnecessary jargon."
+          ]
+        ],
+        reach: "esc esc SPC a i",
+        click_reach: [{:subagent_started, "Started Editorial and Jargon Roaster"}],
+        recognize: &Model.open?(&1, :subagent_peek),
+        checks: [
+          Check.new("the report stays beside its parent with the brief folded", fn model ->
+            peek = model.ui.subagent_peek
+            assert peek.pane.focused?
+            assert model.focus.window_id == peek.pane.window_id
+            assert peek.pane.index == 1
+            assert length(peek.pane.siblings) == 4
+            assert peek.pane.title == "Editorial and Jargon Roaster"
+            assert peek.pane.state == :done
+            assert peek.pane.result =~ "unsupported comparisons"
+            refute peek.pane.brief_open?
+            assert Model.open?(model, :agent_chat)
+            assert Enum.any?(peek.steps, &match?({_, _, _, "1 of 4 reports in"}, &1))
+            model
+          end)
+        ]
+      ),
       Entry.pending("minga.hover.attribution", 4053, "hover on a line Minga wrote"),
       Entry.pending("minga.act_menu", 4052, "the act menu on a Minga change"),
       Entry.pending("minga.act_menu.filtered", 4052, "the act menu after typing"),

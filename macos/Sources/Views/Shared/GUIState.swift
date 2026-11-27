@@ -55,6 +55,7 @@ public final class GUIState {
         statusBarState: statusBarState, agentChatState: agentChatState,
         agentQueueState: agentQueueState,
         agentHelpState: agentHelpState,
+        subagentPeekState: subagentPeekState,
         emptyStateState: emptyStateState, extensionPanelState: extensionPanelState
     )
 
@@ -178,6 +179,8 @@ public final class GUIState {
 
     /// Independent Agent Help state (0xAB).
     public let agentHelpState = AgentHelpState()
+
+    public let subagentPeekState = SubagentPeekState()
 
     /// Bottom panel container state.
     public let bottomPanelState: BottomPanelState
@@ -308,6 +311,7 @@ public final class EditorHostInput {
     public let agentChatState: AgentChatState
     public let agentQueueState: AgentQueueState
     public let agentHelpState: AgentHelpState
+    public let subagentPeekState: SubagentPeekState
     public let emptyStateState: EmptyStateState
     public let extensionPanelState: ExtensionPanelState
 
@@ -319,6 +323,7 @@ public final class EditorHostInput {
         theme: GUIThemeBacking, windows: GUIWindowContentBacking,
         statusBarState: StatusBarState, agentChatState: AgentChatState,
         agentQueueState: AgentQueueState, agentHelpState: AgentHelpState,
+        subagentPeekState: SubagentPeekState,
         emptyStateState: EmptyStateState, extensionPanelState: ExtensionPanelState
     ) {
         self.theme = theme
@@ -327,6 +332,7 @@ public final class EditorHostInput {
         self.agentChatState = agentChatState
         self.agentQueueState = agentQueueState
         self.agentHelpState = agentHelpState
+        self.subagentPeekState = subagentPeekState
         self.emptyStateState = emptyStateState
         self.extensionPanelState = extensionPanelState
     }

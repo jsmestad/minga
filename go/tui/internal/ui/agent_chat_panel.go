@@ -102,9 +102,14 @@ func (m Model) renderAgentChatPanel(chat protocol.AgentChat) []string {
 }
 
 func (m Model) renderAgentChatBody(chat protocol.AgentChat) []string {
+	return m.renderAgentChatInRect(chat, max(m.layout.body.Width, 1), m.bodyHeight())
+}
+
+func (m Model) renderAgentChatInRect(chat protocol.AgentChat, width, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
 	p := m.palette()
-	width := max(m.layout.body.Width, 1)
-	limit := m.bodyHeight()
 	contentWidth := max(width-2, 1)
 	lines := m.renderAgentChatPanelWithLimit(chat, contentWidth, limit)
 	blank := lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(strings.Repeat(" ", width))

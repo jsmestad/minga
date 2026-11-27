@@ -32,6 +32,8 @@ defmodule MingaEditor.State.AgentConnection do
           question_receipts: %{pid() => binary()},
           arrival: Arrival.t() | nil,
           transcript_sync: TranscriptSync.t() | nil,
+          peek_session: MingaEditor.Agent.SubagentPeekSession.t() | nil,
+          peek_composer: MingaEditor.Agent.SubagentPeekComposer.t(),
           session_manager: GenServer.server(),
           session_starts: %{reference() => SessionStart.t()},
           session_follow_ups: %{reference() => SessionFollowUp.t()},
@@ -48,6 +50,8 @@ defmodule MingaEditor.State.AgentConnection do
             question_receipts: %{},
             arrival: nil,
             transcript_sync: nil,
+            peek_session: nil,
+            peek_composer: %MingaEditor.Agent.SubagentPeekComposer{},
             session_manager: MingaAgent.SessionManager,
             session_starts: %{},
             session_follow_ups: %{},
@@ -60,17 +64,19 @@ defmodule MingaEditor.State.AgentConnection do
   def default_arrival_budget_ms, do: @default_arrival_budget_ms
 
   @doc "Creates agent connection state from startup provider and arrival configuration."
-  @spec new(module() | nil, keyword(), non_neg_integer()) :: t()
+  @spec new(module() | nil, keyword(), non_neg_integer(), GenServer.server()) :: t()
   def new(
         provider_module \\ nil,
         provider_opts \\ [],
-        arrival_budget_ms \\ @default_arrival_budget_ms
+        arrival_budget_ms \\ @default_arrival_budget_ms,
+        session_manager \\ MingaAgent.SessionManager
       )
       when is_list(provider_opts) and is_integer(arrival_budget_ms) and arrival_budget_ms >= 0 do
     %__MODULE__{
       agent_provider_module: provider_module,
       agent_provider_opts: provider_opts,
-      arrival_budget_ms: arrival_budget_ms
+      arrival_budget_ms: arrival_budget_ms,
+      session_manager: session_manager
     }
   end
 
@@ -100,6 +106,16 @@ defmodule MingaEditor.State.AgentConnection do
   @spec install_transcript_sync(t(), TranscriptSync.t() | nil) :: t()
   def install_transcript_sync(%__MODULE__{} = connection, sync),
     do: %{connection | transcript_sync: sync}
+
+  @doc "Installs the reader for the separate child Session."
+  @spec install_peek_session(t(), MingaEditor.Agent.SubagentPeekSession.t() | nil) :: t()
+  def install_peek_session(%__MODULE__{} = connection, peek),
+    do: %{connection | peek_session: peek}
+
+  @doc "Installs child drafts separately from the parent Agent UI."
+  @spec install_peek_composer(t(), MingaEditor.Agent.SubagentPeekComposer.t()) :: t()
+  def install_peek_composer(%__MODULE__{} = connection, composer),
+    do: %{connection | peek_composer: composer}
 
   @doc "Keeps a local Session start request the Editor sent and has not finished."
   @spec track_session_start(t(), SessionStart.t()) :: t()

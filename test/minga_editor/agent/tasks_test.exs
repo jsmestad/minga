@@ -2,6 +2,7 @@ defmodule MingaEditor.Agent.TasksTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.Event.ToolEnd
+  alias MingaAgent.Event.ToolStart
   alias MingaAgent.ToolApproval.Preview
   alias MingaAgent.ToolApproval.Public
   alias MingaAgent.ToolApproval.Target
@@ -166,7 +167,11 @@ defmodule MingaEditor.Agent.TasksTest do
       working =
         tasks
         |> Tasks.observe(pid, {:status_changed, :tool_executing}, 1)
-        |> Tasks.observe(pid, {:tool_started, "t1", "edit_file", %{}}, 1)
+        |> Tasks.observe(
+          pid,
+          {:tool_started, %ToolStart{tool_call_id: "t1", name: "edit_file"}},
+          1
+        )
         |> Tasks.observe(pid, {:todo_plan_updated, todos}, 1)
 
       assert Entry.words(entry(working, pid), 1) == "Editing · step 2 of 3"
@@ -306,7 +311,12 @@ defmodule MingaEditor.Agent.TasksTest do
         |> Tasks.observe(done, {:status_changed, :idle}, 2)
         |> Tasks.follow(working, 0, title: "Plan limit")
         |> Tasks.observe(working, {:status_changed, :thinking}, 3)
-        |> Tasks.observe(working, {:tool_started, "s1", "subagent", %{"task" => "Fact-check"}}, 4)
+        |> Tasks.observe(
+          working,
+          {:tool_started,
+           %ToolStart{tool_call_id: "s1", name: "subagent", args: %{"task" => "Fact-check"}}},
+          4
+        )
         |> Tasks.follow(asks, 0, title: "Tests")
         |> Tasks.observe(asks, {:approval_pending, approval(1)}, 1)
         |> Tasks.follow(child, 5, title: "Background audit", parent: working)
@@ -325,33 +335,92 @@ defmodule MingaEditor.Agent.TasksTest do
       assert Tasks.needs_you_count(tasks) == 1
     end
 
-    test "a foreground subagent settles with its tool call; a background call is its own task" do
+    test "foreground subagents settle independently when provider call IDs repeat" do
       pid = session()
+      first = {"request-1", "checkpoint-1", "same"}
+      second = {"request-2", "checkpoint-2", "same"}
+
+      start = fn key, title ->
+        {:tool_started,
+         %ToolStart{
+           tool_call_id: "same",
+           name: "subagent",
+           invocation_key: key,
+           args: %{"task" => title}
+         }}
+      end
+
+      background = %ToolStart{
+        tool_call_id: "s3",
+        name: "subagent",
+        args: %{"task" => "Bg", "background" => true}
+      }
+
+      completed = %ToolEnd{
+        tool_call_id: "same",
+        name: "subagent",
+        invocation_key: first,
+        outcome: :complete
+      }
+
+      failed = %ToolEnd{
+        tool_call_id: "same",
+        name: "subagent",
+        invocation_key: second,
+        outcome: :error,
+        is_error: true
+      }
 
       tasks =
         Tasks.new()
         |> Tasks.follow(pid, 0)
-        |> Tasks.observe(pid, {:tool_started, "s1", "subagent", %{"task" => "One"}}, 1)
-        |> Tasks.observe(pid, {:tool_started, "s2", "subagent", %{"task" => "Two"}}, 1)
-        |> Tasks.observe(
-          pid,
-          {:tool_started, "s3", "subagent", %{"task" => "Bg", "background" => true}},
-          1
-        )
-        |> Tasks.observe(
-          pid,
-          {:tool_ended, %ToolEnd{tool_call_id: "s1", name: "subagent", outcome: :complete}},
-          2
-        )
-        |> Tasks.observe(
-          pid,
-          {:tool_ended,
-           %ToolEnd{tool_call_id: "s2", name: "subagent", outcome: :error, is_error: true}},
-          2
-        )
+        |> Tasks.observe(pid, start.(first, "One"), 1)
+        |> Tasks.observe(pid, start.(second, "Two"), 1)
+        |> Tasks.observe(pid, {:tool_started, background}, 1)
+        |> Tasks.observe(pid, {:tool_ended, completed}, 2)
+        |> Tasks.observe(pid, {:tool_ended, failed}, 2)
 
-      assert [%Subagent{title: "One", state: :done}, %Subagent{title: "Two", state: :failed}] =
-               entry(tasks, pid).subagents
+      assert [
+               %Subagent{title: "One", state: :done, invocation_key: ^first} = one,
+               %Subagent{title: "Two", state: :failed, invocation_key: ^second} = two
+             ] = entry(tasks, pid).subagents
+
+      row_id = &MingaEditor.RenderModel.UI.TasksDrawerBuilder.row_id(%{item: &1, parent_seq: 1})
+      refute row_id.(one) == row_id.(two)
+    end
+
+    test "a fan-out records report counts and each child's original Result in handback order" do
+      pid = session()
+      earlier = {"request", "older", "old"}
+      first = {"request", "current", "first"}
+      second = {"request", "current", "second"}
+      tasks = Tasks.follow(Tasks.new(), pid, 0)
+
+      tasks =
+        Enum.reduce([earlier, first, second], tasks, fn {_, _, call} = key, acc ->
+          event = %ToolStart{tool_call_id: call, name: "subagent", invocation_key: key}
+          Tasks.observe(acc, pid, {:tool_started, event}, 1)
+        end)
+
+      tasks =
+        Enum.reduce([earlier, second, first, second], tasks, fn {_, _, call} = key, acc ->
+          event = %ToolEnd{
+            tool_call_id: call,
+            name: "subagent",
+            outcome: :complete,
+            invocation_key: key,
+            result: "original #{call} result"
+          }
+
+          Tasks.observe(acc, pid, {:tool_ended, event}, 2)
+        end)
+
+      assert Enum.map(entry(tasks, pid).subagents, &{&1.invocation_key, &1.reports, &1.result}) ==
+               [
+                 {earlier, {1, 1}, "original old result"},
+                 {first, {2, 2}, "original first result"},
+                 {second, {1, 2}, "original second result"}
+               ]
     end
 
     test "a restarted session keeps its task; a stopped one is forgotten" do

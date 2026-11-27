@@ -4,7 +4,7 @@ defmodule MingaEditor.Agent.Tasks.Entry do
 
   An entry is the editor's projection of one session's events. It never calls the session; `MingaEditor.Agent.Tasks` installs the transitions below as the session's events arrive, and the tasks drawer and the modeline read the derived `state/2` and `words/2`.
 
-  `subagents` are the foreground subagents the task's `subagent` tool calls started. They live only as long as the tool call and are reported through the parent's tool events. A background subagent is a session of its own, so it is a separate entry whose `parent` names the task that started it.
+  `subagents` tracks the foreground children and their handback state through the parent's tool events. A background subagent is a separate entry whose `parent` names the task that started it.
 
   `alert` is the last "needs you" alert the editor posted for the task (`MingaEditor.Agent.TaskWorkflow`): posted while it may still be on screen, withdrawn once the task stopped needing you. A withdrawn alert keeps its identity while the task is followed, so a click that arrives late still finds its task; once the task is forgotten, the click opens the drawer on the first task that needs you.
   """
@@ -38,6 +38,7 @@ defmodule MingaEditor.Agent.Tasks.Entry do
 
   @type t :: %__MODULE__{
           pid: pid(),
+          task_id: String.t() | nil,
           seq: non_neg_integer(),
           title: String.t() | nil,
           parent: pid() | nil,
@@ -63,6 +64,7 @@ defmodule MingaEditor.Agent.Tasks.Entry do
     :seq,
     :started_at,
     :changed_at,
+    task_id: nil,
     title: nil,
     parent: nil,
     status: :idle,
@@ -125,6 +127,23 @@ defmodule MingaEditor.Agent.Tasks.Entry do
       when is_nil(target) or tuple_size(target) == 2,
       do: %{entry | stop_target: target}
 
+  def observe(
+        %__MODULE__{pid: pid, task_id: nil} = entry,
+        {:connection_changed,
+         %MingaAgent.Session.ConnectionSnapshot{target: %{session: pid, session_id: task_id}}},
+        _now
+      ),
+      do: %{entry | task_id: task_id}
+
+  def observe(
+        %__MODULE__{pid: pid, task_id: previous} = entry,
+        {:connection_changed,
+         %MingaAgent.Session.ConnectionSnapshot{target: %{session: pid, session_id: task_id}}},
+        _now
+      )
+      when task_id != previous,
+      do: %{entry | task_id: task_id, subagents: []}
+
   def observe(%__MODULE__{} = entry, event, now) do
     case apply_event(entry, event, now) do
       ^entry -> entry
@@ -140,12 +159,12 @@ defmodule MingaEditor.Agent.Tasks.Entry do
   defp apply_event(entry, {:display_status_changed, status}, _now),
     do: change_status(entry, status)
 
-  defp apply_event(entry, {:tool_started, id, name, args}, now) do
+  defp apply_event(entry, {:tool_started, %MingaAgent.Event.ToolStart{} = event}, now) do
     %{
       entry
-      | activity: Activity.start_tool(entry.activity, id, name, args),
+      | activity: Activity.start_tool(entry.activity, event.tool_call_id, event.name, event.args),
         waiting: nil,
-        subagents: Subagent.started(entry.subagents, id, name, args, now)
+        subagents: Subagent.started(entry.subagents, event, now)
     }
   end
 

@@ -15,6 +15,7 @@ defmodule MingaEditor.Commands.Movement do
   alias Minga.Parser.Manager, as: ParserManager
   alias Minga.Parser.StructuralNavResult
 
+  alias MingaEditor.Agent.SubagentPeekWorkflow
   alias MingaEditor.BottomPanel
   alias MingaEditor.DisplayMap
   alias MingaEditor.Renderer.Gutter
@@ -761,6 +762,22 @@ defmodule MingaEditor.Commands.Movement do
   defp close_window(%{workspace: %{windows: %{tree: nil}}} = state), do: state
 
   defp close_window(state) do
+    windows = state.workspace.windows
+
+    case Windows.active_struct(windows) do
+      %Window{content: {:subagent_peek, _identity}} ->
+        SubagentPeekWorkflow.close(state)
+
+      %Window{id: parent, content: {:agent_chat, :semantic}} ->
+        state |> SubagentPeekWorkflow.close_for_parent(parent) |> remove_active_window()
+
+      _other ->
+        remove_active_window(state)
+    end
+  end
+
+  @spec remove_active_window(state()) :: state()
+  defp remove_active_window(state) do
     ws = state.workspace.windows
 
     case Windows.remove_window(ws, ws.active) do

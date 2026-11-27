@@ -637,24 +637,25 @@ defmodule MingaEditor.AgentLifecycle do
     install_projection(state, projection, :keep)
   end
 
+  @doc "Derives styled conversation and tool rows from one source entry."
   @spec style_message(term(), pos_integer(), map()) ::
           TranscriptProjection.rendered_message() | nil
-  defp style_message({:assistant, text}, message_id, theme_syntax) do
+  def style_message({:assistant, text}, message_id, theme_syntax) do
     case MarkdownHighlight.render_blocks(text, nil, theme_syntax, message_id) do
       [] -> {:styled_lines, MarkdownHighlight.stylize(text, nil, theme_syntax)}
       [_ | _] = blocks -> {:markdown_blocks, blocks}
     end
   end
 
-  defp style_message(
-         {:tool_call, %MingaAgent.ToolCall{result: result}},
-         _message_id,
-         theme_syntax
-       )
-       when is_binary(result) and result != "" do
+  def style_message(
+        {:tool_call, %MingaAgent.ToolCall{result: result}},
+        _message_id,
+        theme_syntax
+      )
+      when is_binary(result) and result != "" do
     text = String.slice(result, 0, @max_styled_result_chars)
     {:styled_lines, MarkdownHighlight.stylize(text, nil, theme_syntax)}
   end
 
-  defp style_message(_message, _message_id, _theme_syntax), do: nil
+  def style_message(_message, _message_id, _theme_syntax), do: nil
 end

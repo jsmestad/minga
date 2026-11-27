@@ -42,8 +42,12 @@ defmodule MingaEditor.Agent.Events do
   def dispatch(%EditorState{} = state, _session_pid, :messages_changed),
     do: StreamEventWorkflow.messages_changed(state)
 
-  def dispatch(%EditorState{} = state, _session_pid, {:tool_started, tool_call_id, name, args}),
-    do: ToolEventWorkflow.started(state, tool_call_id, name, args)
+  def dispatch(
+        %EditorState{} = state,
+        _session_pid,
+        {:tool_started, %MingaAgent.Event.ToolStart{} = event}
+      ),
+      do: ToolEventWorkflow.started(state, event.tool_call_id, event.name, event.args)
 
   def dispatch(%EditorState{} = state, _session_pid, {:tool_update, tool_call_id, name, partial}),
     do: ToolEventWorkflow.updated(state, tool_call_id, name, partial)

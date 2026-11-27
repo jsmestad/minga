@@ -152,6 +152,11 @@ defmodule MingaAgent.Session do
           turn_execution: TurnExecution.t(),
           stopped_request_id: String.t() | nil,
           admission: admission() | nil,
+          subagent_handback:
+            {pid(), reference(), String.t() | nil}
+            | {pid(), reference(), String.t() | :dispatching | nil, [binary()]}
+            | nil,
+          foreground_subagent?: boolean(),
           transcript: Transcript.t(),
           continuation: Continuation.t(),
           checklist: Checklist.t(),
@@ -412,6 +417,31 @@ defmodule MingaAgent.Session do
   @spec subagent_context(GenServer.server()) :: subagent_context()
   def subagent_context(session) do
     GenServer.call(session, :subagent_context, 15_000)
+  end
+
+  @doc "Returns the provider context of this worker's live admitted subagent call."
+  @spec admitted_subagent_context(GenServer.server(), String.t(), Invocation.t()) ::
+          {:ok, subagent_context()} | {:error, term()}
+  def admitted_subagent_context(session, task_id, %Invocation{} = invocation) do
+    GenServer.call(session, {:admitted_subagent_context, task_id, invocation}, 15_000)
+  end
+
+  @doc "Runs one foreground child only for the caller's live admitted invocation."
+  @spec run_admitted_subagent(
+          GenServer.server(),
+          String.t(),
+          Invocation.t(),
+          String.t(),
+          keyword(),
+          keyword()
+        ) ::
+          {:ok, String.t(), MingaAgent.Subagent.Worktree.t() | nil} | {:error, term()}
+  def run_admitted_subagent(session, task_id, invocation, brief, session_opts, opts) do
+    GenServer.call(
+      session,
+      {:run_admitted_subagent, task_id, invocation, brief, session_opts, opts},
+      :infinity
+    )
   end
 
   @doc "Returns the conversation messages."
@@ -931,6 +961,12 @@ defmodule MingaAgent.Session do
           :ok | {:error, :invalid_role}
   def subscribe(session, pid, opts, timeout) when is_pid(pid) do
     GenServer.call(session, {:subscribe, pid, opts}, timeout)
+  end
+
+  @doc "Starts an asynchronous subscription request for the exact event reader."
+  @spec request_subscribe(pid(), pid(), keyword()) :: :gen_server.request_id()
+  def request_subscribe(session, subscriber, opts) when is_pid(session) and is_pid(subscriber) do
+    :gen_server.send_request(session, {:subscribe, subscriber, opts})
   end
 
   @doc "Returns the current remote attachment role for a subscriber."
@@ -1663,6 +1699,8 @@ defmodule MingaAgent.Session do
       turn_execution: TurnExecution.new(),
       stopped_request_id: nil,
       admission: nil,
+      subagent_handback: Keyword.get(opts, :subagent_handback),
+      foreground_subagent?: Keyword.get(opts, :foreground_subagent?, false),
       transcript:
         Transcript.new(
           [Message.system(initial_system_message(timestamp, Keyword.get(opts, :startup_notice)))],
@@ -1819,10 +1857,41 @@ defmodule MingaAgent.Session do
   def handle_call(
         {:send_prompt_for_id, session_id, content},
         _from,
+        %{session_id: session_id, foreground_subagent?: true, session_manager: manager} = state
+      ) do
+    case SessionManager.authorize_foreground_prompt(manager, session_id) do
+      :ok -> handle_prompt(content, :steering, state)
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
+
+  def handle_call(
+        {:send_prompt_for_id, session_id, content},
+        _from,
         %{session_id: session_id} = state
       ) do
     handle_prompt(content, :steering, state)
   end
+
+  def handle_call(
+        {:start_foreground_brief, id, ref, content},
+        _from,
+        %{session_id: id, subagent_handback: {manager, ref, nil, []}} = state
+      ) do
+    state = %{state | subagent_handback: {manager, ref, :dispatching, []}}
+
+    case handle_prompt(content, :steering, state) do
+      {:reply, {:error, reason}, next}
+      when reason in [:provider_not_ready, :credentials_pending] ->
+        {:reply, {:error, reason}, %{next | subagent_handback: {manager, ref, nil, []}}}
+
+      outcome ->
+        outcome
+    end
+  end
+
+  def handle_call({:start_foreground_brief, _id, _ref, _content}, _from, state),
+    do: {:reply, {:error, :stale_subagent_brief}, state}
 
   def handle_call({:send_attached_prompt, record_id, shown, content}, {caller, _tag}, state)
       when node(caller) == node() do
@@ -2121,6 +2190,9 @@ defmodule MingaAgent.Session do
     end
   end
 
+  def handle_call({:load_session, _id, _origin}, _from, %{foreground_subagent?: true} = state),
+    do: {:reply, {:error, :foreground_subagent_identity_fixed}, state}
+
   def handle_call({:load_session, _id, origin_id}, _from, state)
       when is_binary(origin_id) and origin_id != state.session_id,
       do: {:reply, {:error, :stale_session}, state}
@@ -2136,6 +2208,13 @@ defmodule MingaAgent.Session do
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
+
+  def handle_call(
+        {:import_legacy_session, _id, _origin},
+        _from,
+        %{foreground_subagent?: true} = state
+      ),
+      do: {:reply, {:error, :foreground_subagent_identity_fixed}, state}
 
   def handle_call({:import_legacy_session, _id, origin_id}, _from, state)
       when is_binary(origin_id) and origin_id != state.session_id,
@@ -2897,6 +2976,51 @@ defmodule MingaAgent.Session do
     start_tool_invocation(state, invocation, worker)
   end
 
+  def handle_call(
+        {:admitted_subagent_context, task_id, %Invocation{name: "subagent"} = invocation},
+        {worker, _tag},
+        %{session_id: task_id, session_manager: manager} = state
+      )
+      when is_pid(manager) do
+    case live_admitted_invocation(state, invocation, worker) do
+      :ok -> {:reply, {:ok, build_subagent_context(state)}, state}
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
+
+  def handle_call({:admitted_subagent_context, _task_id, _invocation}, _from, state),
+    do: {:reply, {:error, :subagent_owner_unavailable}, state}
+
+  def handle_call(
+        {:run_admitted_subagent, task_id, %Invocation{name: "subagent"} = invocation, brief,
+         session_opts, opts},
+        {worker, _} = worker_from,
+        %{session_id: task_id, session_manager: manager} = state
+      )
+      when is_pid(manager) do
+    with :ok <- live_admitted_invocation(state, invocation, worker),
+         :ok <-
+           SessionManager.admit_foreground_subagent(
+             manager,
+             {task_id, Invocation.key(invocation)},
+             worker_from,
+             brief,
+             session_opts,
+             opts
+           ) do
+      {:noreply, state}
+    else
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
+
+  def handle_call(
+        {:run_admitted_subagent, _task_id, _invocation, _brief, _session_opts, _opts},
+        _from,
+        state
+      ),
+      do: {:reply, {:error, :subagent_owner_unavailable}, state}
+
   def handle_call({:checklist_invocation, %Invocation{} = invocation}, {worker, _}, state) do
     reply_to_checklist_invocation(state, invocation, worker)
   end
@@ -2941,7 +3065,7 @@ defmodule MingaAgent.Session do
 
   def handle_call(
         {:complete_tool_effect, request_id, checkpoint_id, tool_call_id, result_message, change},
-        _from,
+        {worker, _tag},
         state
       )
       when is_binary(request_id) and is_binary(checkpoint_id) and is_binary(tool_call_id) do
@@ -2958,7 +3082,7 @@ defmodule MingaAgent.Session do
              tool_call_id,
              result_message
            ) do
-      reply_completed_effect(state, continuation, changes, identity, result_message)
+      reply_completed_effect(state, continuation, changes, identity, result_message, worker)
     else
       {:error, reason} ->
         {:reply, {:error, {:tool_outcome_persistence_failed, reason}}, state}
@@ -2970,7 +3094,8 @@ defmodule MingaAgent.Session do
           Continuation.t(),
           [FileChange.t()],
           FileChange.identity(),
-          ReqLLM.Message.t()
+          ReqLLM.Message.t(),
+          pid()
         ) ::
           {:reply, :ok | {:error, term()}, state()}
   defp reply_completed_effect(
@@ -2978,7 +3103,8 @@ defmodule MingaAgent.Session do
          continuation,
          changes,
          _identity,
-         _message
+         _message,
+         _worker
        ),
        do: {:reply, :ok, state}
 
@@ -2987,7 +3113,8 @@ defmodule MingaAgent.Session do
          continuation,
          changes,
          {request_id, _, tool_call_id} = identity,
-         result_message
+         result_message,
+         worker
        ) do
     candidate =
       %{state | continuation: continuation, file_changes: changes}
@@ -2997,6 +3124,8 @@ defmodule MingaAgent.Session do
       {:ok, committed} ->
         committed =
           retire_completed_approval(committed, request_id, tool_call_id, result_message, :saved)
+
+        acknowledge_foreground_report(committed, identity, worker)
 
         entries =
           Map.delete(
@@ -3020,6 +3149,24 @@ defmodule MingaAgent.Session do
         {:reply, {:error, {:tool_outcome_persistence_failed, reason}}, failed}
     end
   end
+
+  @spec acknowledge_foreground_report(state(), Invocation.key(), pid()) :: :ok
+  defp acknowledge_foreground_report(%{session_manager: manager} = state, identity, worker)
+       when is_pid(manager) do
+    case Map.get(state.tool_authority.invocations, identity) do
+      %{invocation: %Invocation{name: "subagent"}, worker: ^worker} ->
+        SessionManager.acknowledge_foreground_report(
+          manager,
+          {state.session_id, identity},
+          worker
+        )
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp acknowledge_foreground_report(_state, _identity, _worker), do: :ok
 
   @spec retain_file_change([FileChange.t()], FileChange.identity(), FileChange.t() | nil) ::
           {:ok, [FileChange.t()]} | {:error, :file_change_identity_conflict}
@@ -3378,16 +3525,25 @@ defmodule MingaAgent.Session do
 
   defp invocation_declaration(_state, _invocation, _phase), do: {:error, :stale_request}
 
-  @spec reply_to_checklist_invocation(state(), Invocation.t(), pid()) :: {:reply, term(), state()}
-  defp reply_to_checklist_invocation(state, invocation, worker) do
+  @spec live_admitted_invocation(state(), Invocation.t(), pid()) ::
+          :ok | {:error, :stale_invocation}
+  defp live_admitted_invocation(state, invocation, worker) do
     key = Invocation.key(invocation)
 
     with %{invocation: ^invocation, worker: ^worker, started: true, failure: nil} <-
            Map.get(state.tool_authority.invocations, key),
          {:ok, _declaration} <- invocation_declaration(state, invocation, :admitted) do
-      apply_checklist_invocation(state, invocation)
+      :ok
     else
-      _stale -> {:reply, {:error, :stale_invocation}, state}
+      _stale -> {:error, :stale_invocation}
+    end
+  end
+
+  @spec reply_to_checklist_invocation(state(), Invocation.t(), pid()) :: {:reply, term(), state()}
+  defp reply_to_checklist_invocation(state, invocation, worker) do
+    case live_admitted_invocation(state, invocation, worker) do
+      :ok -> apply_checklist_invocation(state, invocation)
+      {:error, _reason} = error -> {:reply, error, state}
     end
   end
 
@@ -4239,6 +4395,20 @@ defmodule MingaAgent.Session do
     end
   end
 
+  # Native reports optional MCP failures outside the request. Keep the warning in
+  # the transcript, but only a request event can change an in-flight turn.
+  def handle_info(
+        {:agent_provider_lifecycle_event, %Event.Error{} = event},
+        %{continuation: %Continuation{active_request: %Request{}}} = state
+      ) do
+    state =
+      state
+      |> append_error_message_once(humanize_error(event, state))
+      |> notify_messages_changed()
+
+    {:noreply, state}
+  end
+
   def handle_info({:agent_provider_lifecycle_event, %Event.Error{} = event}, state) do
     state = retain_connection_error(state, event)
     {:noreply, report_turn_error(state, humanize_error(event, state))}
@@ -4553,6 +4723,7 @@ defmodule MingaAgent.Session do
 
     state =
       state
+      |> fail_subagent_handback("Subagent's initial request was #{cause}.")
       |> remember_stopped_request(cause)
       |> cancel_admission(
         {:error, "Stopped before the message was sent. Your draft is preserved."}
@@ -4658,6 +4829,7 @@ defmodule MingaAgent.Session do
   defp complete_provider_turn(state, usage, outcome) do
     state = interrupt_question(state)
     source_execution = state.turn_execution
+    source_request = state.continuation.active_request
 
     case TurnExecution.begin_completion(source_execution) do
       {:ok, completing} ->
@@ -4673,7 +4845,10 @@ defmodule MingaAgent.Session do
         case {outcome_result, boundary_result} do
           {:accepted, :ok} ->
             lift_usage_limit(state)
-            finish_provider_turn(state, completing)
+
+            state
+            |> settle_subagent_handback(source_request)
+            |> finish_provider_turn(completing)
 
           {:accepted, {:error, _reason}} ->
             fail_completed_turn(
@@ -4697,11 +4872,47 @@ defmodule MingaAgent.Session do
     end
   end
 
+  @spec settle_subagent_handback(state(), Request.t() | nil) :: state()
+  defp settle_subagent_handback(
+         %{subagent_handback: {manager, ref, request_id, deltas}} = state,
+         %Request{request_id: request_id}
+       ) do
+    text = deltas |> Enum.reverse() |> IO.iodata_to_binary()
+    send(manager, {:foreground_subagent_handback, state.session_id, self(), ref, {:ok, text}})
+    %{state | subagent_handback: nil}
+  end
+
+  defp settle_subagent_handback(
+         %{subagent_handback: {recipient, ref, request_id}} = state,
+         %Request{request_id: request_id}
+       ) do
+    send(recipient, {:subagent_handback, self(), ref})
+    %{state | subagent_handback: nil}
+  end
+
+  defp settle_subagent_handback(state, _request), do: state
+
+  @spec fail_subagent_handback(state(), String.t()) :: state()
+  defp fail_subagent_handback(
+         %{subagent_handback: {manager, ref, _request_id, _}} = state,
+         message
+       ) do
+    send(
+      manager,
+      {:foreground_subagent_handback, state.session_id, self(), ref, {:error, message}}
+    )
+
+    %{state | subagent_handback: nil}
+  end
+
+  defp fail_subagent_handback(state, _message), do: state
+
   @spec fail_completed_turn(state(), TurnExecution.t(), String.t()) :: state()
   defp fail_completed_turn(state, completing, message) do
     execution = TurnExecution.fail(completing, message)
 
     state
+    |> fail_subagent_handback(message)
     |> mark_unsaved_active_tools()
     |> notify_hooks(:error, message)
     |> announce_turn_status(execution)
@@ -4718,6 +4929,7 @@ defmodule MingaAgent.Session do
     execution = TurnExecution.fail(completing, message)
 
     state
+    |> fail_subagent_handback(message)
     |> mark_unsaved_active_tools()
     |> announce_turn_status(execution)
     |> notify_messages_changed()
@@ -5183,6 +5395,7 @@ defmodule MingaAgent.Session do
 
     state =
       state
+      |> fail_subagent_handback(message)
       |> interrupt_execution_approval(source_execution)
       |> interrupt_question()
       |> abort_active_tools(source_execution, true)
@@ -5402,13 +5615,16 @@ defmodule MingaAgent.Session do
   defp append_tool_start(state, event, scope) do
     tool_call =
       event.tool_call_id
-      |> ToolCall.new(event.name, event.args)
+      |> ToolCall.new(event.name, event.args, event.invocation_key)
       |> ToolCall.set_auto_approved_scope(scope)
+
+    event =
+      if event.invocation_key, do: %{event | entry_id: state.transcript.next_id}, else: event
 
     state = append_msg(state, {:tool_call, tool_call})
 
     state
-    |> broadcast({:tool_started, event.tool_call_id, event.name, event.args})
+    |> broadcast({:tool_started, event})
     |> notify_messages_changed()
   end
 
@@ -5681,6 +5897,10 @@ defmodule MingaAgent.Session do
           GenServer.from() | nil
         ) :: {:reply, term(), state()} | {:noreply, state()}
   defp handle_prompt(content, kind, state, draft_revision \\ :preserve, reply_to \\ nil)
+
+  defp handle_prompt(_content, _kind, %{subagent_handback: {_, _, nil, _}} = state, _draft, _to) do
+    {:reply, {:error, :subagent_initial_request_active}, state}
+  end
 
   defp handle_prompt(_content, _kind, %{credential_readiness: :checking} = state, _draft, _to) do
     {:reply, {:error, :credentials_pending}, state}
@@ -6286,6 +6506,7 @@ defmodule MingaAgent.Session do
           |> record_user_message_event(user_message)
           |> announce_first_goal(first_goal)
           |> notify_messages_changed()
+          |> bind_subagent_handback(request)
 
         dispatch_new_turn_request(admitted, request, execution)
         |> acknowledge_consumed_draft(draft_revision)
@@ -6294,6 +6515,23 @@ defmodule MingaAgent.Session do
         reply_to_prompt_admission_failure(failed_state, reason)
     end
   end
+
+  @spec bind_subagent_handback(state(), Request.t()) :: state()
+  defp bind_subagent_handback(
+         %{subagent_handback: {manager, ref, :dispatching, deltas}} = state,
+         %Request{request_id: request_id}
+       ) do
+    %{state | subagent_handback: {manager, ref, request_id, deltas}}
+  end
+
+  defp bind_subagent_handback(
+         %{subagent_handback: {recipient, ref, nil}} = state,
+         %Request{request_id: request_id}
+       ) do
+    %{state | subagent_handback: {recipient, ref, request_id}}
+  end
+
+  defp bind_subagent_handback(state, _request), do: state
 
   # The first prompt of an untitled conversation is its goal; the tasks drawer names the task by it.
   @spec first_goal(state(), Message.t()) :: String.t() | nil
@@ -6386,6 +6624,17 @@ defmodule MingaAgent.Session do
 
   # ── Event handling ──────────────────────────────────────────────────────────
 
+  @spec retain_subagent_delta(state(), binary()) :: state()
+  defp retain_subagent_delta(
+         %{subagent_handback: {manager, ref, request_id, deltas}} = state,
+         delta
+       )
+       when is_binary(request_id) do
+    %{state | subagent_handback: {manager, ref, request_id, [delta | deltas]}}
+  end
+
+  defp retain_subagent_delta(state, _delta), do: state
+
   @spec handle_provider_event(Event.t(), state()) :: state()
   defp handle_provider_event(%Event.AgentStart{}, state) do
     case TurnExecution.provider_started(state.turn_execution) do
@@ -6403,6 +6652,7 @@ defmodule MingaAgent.Session do
 
   defp handle_provider_event(%Event.TextDelta{delta: delta}, state) do
     state
+    |> retain_subagent_delta(delta)
     |> Map.update!(:transcript, &Transcript.append_stream_tail(&1, :assistant, [delta]))
     |> broadcast({:text_delta, delta})
   end
@@ -8172,7 +8422,7 @@ defmodule MingaAgent.Session do
   defp event_log_entry({:text_delta, delta}), do: {:assistant_delta, %{delta: delta}}
   defp event_log_entry({:thinking_delta, delta}), do: {:thinking_delta, %{delta: delta}}
 
-  defp event_log_entry({:tool_started, _tool_call_id, _name, _args}), do: nil
+  defp event_log_entry({:tool_started, %Event.ToolStart{}}), do: nil
 
   defp event_log_entry({:tool_update, tool_call_id, name, partial_result}),
     do:
@@ -9430,6 +9680,9 @@ defmodule MingaAgent.Session do
 
   @spec attach_provider_process(state(), pid()) :: state()
   defp attach_provider_process(state, pid) do
+    # Register before unlinking, so a stop during attachment still drains the provider.
+    if state.foreground_subagent?, do: notify_provider_attachment(state, pid)
+
     Process.unlink(pid)
     monitor_ref = Process.monitor(pid)
     {:ok, lifecycle} = ProviderLifecycle.attach(state.provider, pid, monitor_ref)
@@ -9439,12 +9692,8 @@ defmodule MingaAgent.Session do
 
   @spec finish_provider_attachment(state()) :: state()
   defp finish_provider_attachment(state) do
-    if is_pid(state.session_manager) do
-      send(
-        state.session_manager,
-        {:session_provider_attached, state.session_id, self(),
-         ProviderLifecycle.pid(state.provider)}
-      )
+    if not state.foreground_subagent? do
+      notify_provider_attachment(state, ProviderLifecycle.pid(state.provider))
     end
 
     state = clear_provider_start_error(state)
@@ -9458,6 +9707,15 @@ defmodule MingaAgent.Session do
     state
     |> publish_connection()
     |> warm_native_prefix()
+  end
+
+  @spec notify_provider_attachment(state(), pid()) :: :ok
+  defp notify_provider_attachment(state, pid) do
+    if is_pid(state.session_manager) do
+      send(state.session_manager, {:session_provider_attached, state.session_id, self(), pid})
+    end
+
+    :ok
   end
 
   @spec clear_provider_start_error(state()) :: state()
@@ -11783,22 +12041,47 @@ defmodule MingaAgent.Session do
       )
       |> SessionStartPayload.to_map()
 
-    case Task.Supervisor.start_child(state.hook_task_supervisor, fn ->
-           run_session_start_hooks(payload)
-         end) do
-      {:ok, _pid} -> :ok
-      {:error, reason} -> log_session_start_failure(reason)
+    case start_session_hook(state, payload) do
+      {:ok, pid} ->
+        if is_pid(state.session_manager),
+          do: send(state.session_manager, {:session_start_hook, self(), pid})
+
+        send(pid, :run_session_start_hook)
+
+        :ok
+
+      {:error, reason} ->
+        log_session_start_failure(reason)
     end
   catch
     :exit, reason -> log_session_start_failure(reason)
   end
 
-  @spec run_session_start_hooks(map()) :: :ok
-  defp run_session_start_hooks(payload) do
+  @spec start_session_hook(state(), map()) :: {:ok, pid()} | {:error, term()}
+  defp start_session_hook(state, payload) do
+    session = self()
+    options = state.tool_authority.options
+
+    Task.Supervisor.start_child(state.hook_task_supervisor, fn ->
+      ref = Process.monitor(session)
+
+      receive do
+        :run_session_start_hook ->
+          Process.demonitor(ref, [:flush])
+          run_session_start_hooks(payload, options)
+
+        {:DOWN, ^ref, :process, ^session, _reason} ->
+          :ok
+      end
+    end)
+  end
+
+  @spec run_session_start_hooks(map(), Options.server()) :: :ok
+  defp run_session_start_hooks(payload, options) do
     Minga.Telemetry.span([:minga, :agent, :session_start_hooks], %{}, fn ->
       hooks =
         Minga.Telemetry.span([:minga, :agent, :session_start_hook_config], %{}, fn ->
-          AgentConfig.agent_hooks()
+          AgentConfig.agent_hooks(options)
         end)
 
       HookDispatcher.session_start(hooks, payload)

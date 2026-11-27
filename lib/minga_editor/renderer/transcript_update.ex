@@ -44,14 +44,30 @@ defmodule MingaEditor.Renderer.TranscriptUpdate do
   def advance_base(base, %Intent{workspace: workspace}),
     do: advance_source(base, WorkspaceIntent.transcript_source(workspace))
 
-  defp advance_source(base, nil), do: {base, nil}
+  @doc "Advances the child transcript or closes its base when the pane disappears."
+  @spec advance_peek_base(base(), Intent.t()) :: {base(), t() | nil}
+  def advance_peek_base(base, %Intent{workspace: workspace}) do
+    case WorkspaceIntent.peek_source(workspace) do
+      nil -> {unseeded(base), nil}
+      source -> advance_source(base, source)
+    end
+  end
 
-  defp advance_source({:unseeded, revision}, projection) do
+  @doc "Requires the next submission to seed this base without losing its revision."
+  @spec unseeded(base()) :: base()
+  def unseeded({:unseeded, _revision} = base), do: base
+  def unseeded({:submitted, revision, _projection}), do: {:unseeded, revision}
+
+  @doc "Advances a separate transcript source using the same seed and delta contract."
+  @spec advance_source(base(), TranscriptProjection.t() | nil) :: {base(), t() | nil}
+  def advance_source(base, nil), do: {base, nil}
+
+  def advance_source({:unseeded, revision}, projection) do
     revision = revision + 1
     {{:submitted, revision, projection}, seed(projection, revision)}
   end
 
-  defp advance_source({:submitted, revision, previous}, projection) do
+  def advance_source({:submitted, revision, previous}, projection) do
     {update, revision} = advance(previous, revision, projection)
     {{:submitted, revision, projection}, update}
   end

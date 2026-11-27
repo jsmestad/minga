@@ -96,18 +96,22 @@ final class PreviewHostDelegate: NSObject, NSApplicationDelegate {
         exit(1)
     }
 
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard ProcessInfo.processInfo.environment["PREVIEW_VIEW"] == "Storyboard" else { return }
+        // StoryboardCapture creates its own windows. A restored or suppressed SwiftUI scene must not gate it.
+        Task { @MainActor in
+            let failures = await StoryboardCapture.runAll()
+            for failure in failures { fputs("error: \(failure)\n", stderr) }
+            exit(failures.isEmpty ? 0 : 1)
+        }
+    }
+
     func captureAndExit(window: NSWindow, fixtureView: NSView) {
         guard !started else { return }
         started = true
         window.ignoresMouseEvents = true
         if ProcessInfo.processInfo.environment["PREVIEW_VIEW"] == "Storyboard" {
-            // The storyboard renderer opens one window per transcript; the launch window stays out of the way.
             window.orderOut(nil)
-            Task { @MainActor in
-                let failures = await StoryboardCapture.runAll()
-                for failure in failures { fputs("error: \(failure)\n", stderr) }
-                exit(failures.isEmpty ? 0 : 1)
-            }
             return
         }
         Task { @MainActor in

@@ -27,7 +27,7 @@ defmodule MingaEditor.RenderPipeline.WorkspaceIntent do
   ]
 
   @enforce_keys @fields
-  defstruct @fields
+  defstruct @fields ++ [subagent_peek: nil, peek_transcript: nil]
 
   @type t :: %__MODULE__{
           buffers: term(),
@@ -42,7 +42,9 @@ defmodule MingaEditor.RenderPipeline.WorkspaceIntent do
           keymap_scope: atom(),
           launchpad: term(),
           agent_transcript: agent_transcript(),
-          agent_transcript_lines: non_neg_integer()
+          agent_transcript_lines: non_neg_integer(),
+          subagent_peek: Minga.RenderModel.UI.SubagentPeek.t() | nil,
+          peek_transcript: agent_transcript()
         }
 
   @type agent_transcript ::
@@ -71,6 +73,27 @@ defmodule MingaEditor.RenderPipeline.WorkspaceIntent do
   @spec transcript_source(t()) :: TranscriptProjection.t() | nil
   def transcript_source(%__MODULE__{agent_transcript: {:source, projection}}), do: projection
   def transcript_source(%__MODULE__{}), do: nil
+
+  @doc "Attaches captured peek metadata and the child's independently indexed transcript."
+  @spec with_subagent_peek(
+          t(),
+          {Minga.RenderModel.UI.SubagentPeek.t() | nil, TranscriptProjection.t() | nil}
+        ) ::
+          t()
+  def with_subagent_peek(%__MODULE__{} = workspace, {model, projection}) do
+    source = if projection, do: {:source, projection}
+    %{workspace | subagent_peek: model, peek_transcript: source}
+  end
+
+  @doc "Returns the child projection before packing, without ever borrowing the parent one."
+  @spec peek_source(t()) :: TranscriptProjection.t() | nil
+  def peek_source(%__MODULE__{peek_transcript: {:source, projection}}), do: projection
+  def peek_source(%__MODULE__{}), do: nil
+
+  @doc "Updates the child transcript phase independently of the parent."
+  @spec with_peek_transcript(t(), agent_transcript()) :: t()
+  def with_peek_transcript(%__MODULE__{} = workspace, transcript),
+    do: %{workspace | peek_transcript: transcript}
 
   @doc "Installs the transcript phase for packing or for the renderer-local resident root."
   @spec with_agent_transcript(t(), agent_transcript()) :: t()

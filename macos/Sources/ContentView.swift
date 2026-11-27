@@ -887,12 +887,7 @@ public struct ContentView<EditorSurface: View>: View {
                 makeEditorSurface()
 
                 if input.agentChatState.visible {
-                    AgentChatView(
-                        state: input.agentChatState,
-                        queueState: input.agentQueueState,
-                        isInsertMode: input.agentChatState.isPromptInsertMode,
-                        sendAction: translatedAction(FrontendActionComposition.outbound)
-                    )
+                    agentConversationSurface(input, geometry: geo)
                 }
 
                 if input.emptyStateState.visible {
@@ -936,6 +931,42 @@ public struct ContentView<EditorSurface: View>: View {
             }
         }
     }
+    private func agentConversationSurface(_ input: EditorHostInput, geometry: EditorGeometry) -> some View {
+        let peek = input.subagentPeekState
+        let pane = peek.metadata.pane
+        let pitch = max(geometry.cellHeight, input.agentChatState.promptRowPitch)
+        return GeometryReader { available in
+            ZStack(alignment: .topLeading) {
+                AgentChatView(
+                    state: input.agentChatState,
+                    queueState: input.agentQueueState,
+                    peekState: peek,
+                    isInsertMode: input.agentChatState.isPromptInsertMode,
+                    sendAction: translatedAction(FrontendActionComposition.outbound)
+                )
+                .frame(
+                    width: pane.map { min(available.size.width, CGFloat($0.parentRect.width) * geometry.cellWidth) } ?? available.size.width,
+                    height: pane.map { min(available.size.height, CGFloat($0.parentRect.height) * pitch) } ?? available.size.height
+                )
+                .clipped()
+                .offset(
+                    x: CGFloat(pane?.parentRect.col ?? 0) * geometry.cellWidth,
+                    y: CGFloat(pane?.parentRect.row ?? 0) * pitch
+                )
+
+                if let pane {
+                    SubagentPeekView(pane: pane, transcript: peek.transcript, sendAction: translatedAction(FrontendActionComposition.outbound))
+                        .frame(
+                            width: CGFloat(pane.peekRect.width) * geometry.cellWidth,
+                            height: min(available.size.height, CGFloat(pane.peekRect.height) * pitch)
+                        )
+                        .clipped()
+                        .offset(x: CGFloat(pane.peekRect.col) * geometry.cellWidth, y: CGFloat(pane.peekRect.row) * pitch)
+                }
+            }
+        }
+    }
+
 
     /// Origin (in points) of a window's text rect on the editor surface, matching the
     /// Metal renderer's per-window text origin: `textCol * cellW + gutterPad - scrollLeft *

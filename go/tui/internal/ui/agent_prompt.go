@@ -59,20 +59,22 @@ func agentComposerAllocation(chat protocol.AgentChat, width, budget int) agentCo
 
 func (m Model) agentPromptPlacement() (agentComposerPlacement, bool) {
 	chat, ok := m.agentChat()
-	if !ok || !chat.Visible || m.bodyHeight() <= 0 {
+	body := m.parentAgentBody()
+	if !ok || !chat.Visible || body.Height <= 0 || body.Width <= 0 {
 		return agentComposerPlacement{}, false
 	}
-	limit := m.bodyHeight()
-	width := agentMainWidth(chat, max(m.layout.body.Width-2, 1), limit)
+	limit := body.Height
+	width := agentMainWidth(chat, max(body.Width-2, 1), limit)
 	p := agentComposerAllocation(chat, width, m.agentComposerBudget(chat, limit-agentPanelHeaderRows(limit)))
 	if p.height == 0 {
 		return p, false
 	}
 	// The main column bottom-aligns its complete composer after allocating the transcript.
 	// The outer chat body contributes a one-cell left inset.
-	p.row += limit - p.height
-	p.controlsRow += limit - p.height
-	if m.layout.body.Width > 1 {
+	p.row += body.Y + limit - p.height
+	p.controlsRow += body.Y + limit - p.height
+	p.col += body.X
+	if body.Width > 1 {
 		p.col++
 	}
 	return p, true

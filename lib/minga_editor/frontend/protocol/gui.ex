@@ -157,6 +157,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_agent_stop_turn Opcodes.gui_action_agent_stop_turn()
   @gui_action_agent_continue_turn Opcodes.gui_action_agent_continue_turn()
   @gui_action_agent_queue_action Opcodes.gui_action_agent_queue_action()
+  @gui_action_subagent_peek_action Opcodes.gui_action_subagent_peek_action()
   @gui_action_execute_command Opcodes.gui_action_execute_command()
   @gui_action_git_stage_file Opcodes.gui_action_git_stage_file()
   @gui_action_git_unstage_file Opcodes.gui_action_git_unstage_file()
@@ -294,6 +295,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
              Minga.RenderModel.UI.Queue.action(),
              MingaAgent.Session.QueuedInputSummary.identity() | nil,
              MingaAgent.Session.QueuedInputSummary.identity() | nil}
+          | {:subagent_peek_action, MingaEditor.Agent.SubagentPeekWorkflow.click(), pos_integer(),
+             binary(), binary(), {non_neg_integer(), non_neg_integer()}}
           | {:agent_tool_approval, ApprovalTarget.t(), MingaAgent.Session.approval_decision()}
           | {:execute_command, name :: String.t()}
           | {:git_stage_file, panel_id :: pos_integer(), path :: String.t(), section :: 0..3}
@@ -846,6 +849,20 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   end
 
   def decode_gui_action(
+        @gui_action_subagent_peek_action,
+        <<kind, window::16, item_id_len::16, item_id::binary-size(item_id_len), target_len::16,
+          target::binary-size(target_len), row::32, column::32>>
+      )
+      when window > 0 do
+    position = {row, column}
+
+    case decode_peek_intent(kind, item_id, target, position) do
+      :error -> :error
+      action -> {:ok, {:subagent_peek_action, action, window, item_id, target, position}}
+    end
+  end
+
+  def decode_gui_action(
         @gui_action_agent_read_retained_output,
         <<message_id::32, offer::binary-size(16)>>
       )
@@ -1191,6 +1208,30 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   end
 
   def decode_gui_action(_, _), do: :error
+
+  @spec decode_peek_intent(byte(), binary(), binary(), {non_neg_integer(), non_neg_integer()}) ::
+          MingaEditor.Agent.SubagentPeekWorkflow.click() | :error
+  defp decode_peek_intent(0, "", target, {0, 0}) when byte_size(target) > 0, do: :started
+
+  defp decode_peek_intent(1, displayed, target, {0, 0})
+       when byte_size(displayed) > 0 and byte_size(target) > 0,
+       do: :sibling
+
+  defp decode_peek_intent(2, displayed, "", {0, 0}) when byte_size(displayed) > 0, do: :brief
+  defp decode_peek_intent(3, displayed, "", _position) when byte_size(displayed) > 0, do: :compose
+  defp decode_peek_intent(4, displayed, "", {0, 0}) when byte_size(displayed) > 0, do: :submit
+  defp decode_peek_intent(5, displayed, "", {0, 0}) when byte_size(displayed) > 0, do: :close
+  defp decode_peek_intent(6, displayed, "", {0, 0}) when byte_size(displayed) > 0, do: :inspect
+
+  defp decode_peek_intent(7, displayed, target, {0, 0})
+       when byte_size(displayed) <= 20 and byte_size(target) > 0,
+       do: :started_key
+
+  defp decode_peek_intent(8, displayed, text, {0, 0}) when displayed != "" and text != "" do
+    if String.valid?(text), do: :insert_text, else: :error
+  end
+
+  defp decode_peek_intent(_, _, _, _), do: :error
 
   @spec decode_queue_intent(
           byte(),

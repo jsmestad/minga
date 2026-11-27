@@ -74,7 +74,8 @@ defmodule MingaEditor.Agent.Ingest do
           max_batch_items: pos_integer(),
           max_batch_bytes: pos_integer(),
           sessions: %{optional(pid()) => session_state()},
-          monitored: MapSet.t(pid())
+          monitored: MapSet.t(pid()),
+          peek_sessions: MapSet.t(pid())
         }
 
   # One 60Hz frame. Adds at most one window to steady-state stream visibility,
@@ -130,6 +131,23 @@ defmodule MingaEditor.Agent.Ingest do
     )
   end
 
+  @doc "Subscribes a peek as a viewer without making Ingest wait for the child."
+  @spec subscribe_peek(pid(), pid()) :: :ok | {:error, term()}
+  def subscribe_peek(ingest, session_pid) when is_pid(ingest) and is_pid(session_pid) do
+    :ok = GenServer.call(ingest, {:route_peek, session_pid})
+
+    # This wait belongs to the supervised attachment task, not to Ingest or the Editor.
+    request = Session.request_subscribe(session_pid, ingest, role: :viewer)
+
+    case :gen_server.receive_response(request, @session_subscribe_timeout_ms) do
+      {:reply, result} -> result
+      {:error, {reason, _session}} -> {:error, {:exit, reason}}
+      :timeout -> {:error, :timeout}
+    end
+  catch
+    :exit, reason -> {:error, {:exit, reason}}
+  end
+
   # ── Server callbacks ─────────────────────────────────────────────────────────
 
   @impl true
@@ -147,18 +165,28 @@ defmodule MingaEditor.Agent.Ingest do
        max_batch_items: max_items,
        max_batch_bytes: max_bytes,
        sessions: %{},
-       monitored: MapSet.new()
+       monitored: MapSet.new(),
+       peek_sessions: MapSet.new()
      }}
   end
 
   @impl true
-  @spec handle_call({:subscribe_session, pid(), keyword()}, GenServer.from(), state()) ::
+  @spec handle_call(
+          {:subscribe_session, pid(), keyword()} | {:route_peek, pid()},
+          GenServer.from(),
+          state()
+        ) ::
           {:reply, :ok | {:error, term()}, state()}
   def handle_call({:subscribe_session, session_pid, opts}, _from, state) do
     case do_subscribe(session_pid, opts) do
       :ok -> {:reply, :ok, monitor_session(state, session_pid)}
       {:error, _reason} = error -> {:reply, error, state}
     end
+  end
+
+  def handle_call({:route_peek, session_pid}, _from, state) do
+    next = monitor_session(state, session_pid)
+    {:reply, :ok, %{next | peek_sessions: MapSet.put(next.peek_sessions, session_pid)}}
   end
 
   @impl true
@@ -178,7 +206,13 @@ defmodule MingaEditor.Agent.Ingest do
   # needed here.
   def handle_info({:DOWN, _ref, :process, session_pid, _reason}, state) do
     state = drop_session(state, session_pid)
-    {:noreply, %{state | monitored: MapSet.delete(state.monitored, session_pid)}}
+
+    {:noreply,
+     %{
+       state
+       | monitored: MapSet.delete(state.monitored, session_pid),
+         peek_sessions: MapSet.delete(state.peek_sessions, session_pid)
+     }}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
@@ -304,17 +338,28 @@ defmodule MingaEditor.Agent.Ingest do
   defp delta_byte_size(_), do: 0
 
   @spec forward_batch(state(), pid(), batch(), :leading | :tick | :control) :: :ok
-  defp forward_batch(%{editor: editor}, session_pid, batch, edge) do
+  defp forward_batch(%{editor: editor, peek_sessions: peeks}, session_pid, batch, edge) do
     # A flush is a point event, not a spanned operation, so execute/3 rather
     # than span/3 is the right telemetry shape here.
     Minga.Telemetry.execute(@telemetry_flush, %{delta_count: Enum.count(batch)}, %{edge: edge})
-    send(editor, {:agent_stream_batch, session_pid, batch})
+
+    if MapSet.member?(peeks, session_pid) do
+      send(editor, {:subagent_peek_transcript_changed, session_pid})
+    else
+      send(editor, {:agent_stream_batch, session_pid, batch})
+    end
+
     :ok
   end
 
   @spec forward_control(state(), pid(), term()) :: :ok
-  defp forward_control(%{editor: editor}, session_pid, event) do
-    send(editor, {:agent_event, session_pid, event})
+  defp forward_control(%{editor: editor, peek_sessions: peeks}, session_pid, event) do
+    if MapSet.member?(peeks, session_pid) do
+      send(editor, {:subagent_peek_event, session_pid, event})
+    else
+      send(editor, {:agent_event, session_pid, event})
+    end
+
     :ok
   end
 

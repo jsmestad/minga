@@ -64,6 +64,7 @@ defmodule MingaEditor.LayoutPreset do
   @spec remove_agent_window(EditorState.t(), Window.id()) :: EditorState.t()
   defp remove_agent_window(state, agent_win_id) do
     state
+    |> MingaEditor.Agent.SubagentPeekWorkflow.close_for_parent(agent_win_id)
     |> maybe_switch_focus_away(agent_win_id)
     |> remove_inactive_agent_window(agent_win_id)
   end

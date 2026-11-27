@@ -63,10 +63,9 @@ defmodule Minga.Test.Storyboard.Journeys do
         {"]h", "minga.review.in_file"},
         {"SPC a y", "edit.working"}
       ]),
-      journey("peek into a subagent and step through its siblings", "edit.working", [
-        {"SPC a v", "minga.conversation"},
-        {"↩ on a Started line", "minga.subagent.peek", press: "↩"},
+      journey("step between subagents and return to their conversation", "minga.subagent.peek", [
         {"]] / [[", "minga.subagent.peek", press: "]]"},
+        {"]] / [[", "minga.subagent.peek", press: "[["},
         {"q", "minga.conversation"}
       ])
     ]

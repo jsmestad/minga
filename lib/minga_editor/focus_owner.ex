@@ -154,6 +154,7 @@ defmodule MingaEditor.FocusOwner do
 
   defp scope_surface(:file_tree), do: :file_tree
   defp scope_surface(:agent), do: :agent
+  defp scope_surface(:subagent_peek), do: :agent
   defp scope_surface(:git_status), do: :git_status
   defp scope_surface(:queue), do: :queue
   defp scope_surface(:editor), do: :editor

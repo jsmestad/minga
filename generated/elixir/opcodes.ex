@@ -7,7 +7,7 @@ defmodule Minga.Protocol.Opcodes do
 
   # Protocol version
   @spec protocol_version() :: non_neg_integer()
-  def protocol_version, do: 56
+  def protocol_version, do: 57
 
   # Input
   @spec key_press() :: non_neg_integer()
@@ -270,6 +270,10 @@ defmodule Minga.Protocol.Opcodes do
   def gui_tasks_drawer, do: 0xAC
   @spec gui_agent_queue() :: non_neg_integer()
   def gui_agent_queue, do: 0xAE
+  @spec gui_subagent_peek() :: non_neg_integer()
+  def gui_subagent_peek, do: 0xAF
+  @spec gui_subagent_peek_transcript() :: non_neg_integer()
+  def gui_subagent_peek_transcript, do: 0xB0
 
 
   # GUI action sub-opcodes (Frontend to BEAM)
@@ -461,5 +465,7 @@ defmodule Minga.Protocol.Opcodes do
   def gui_action_agent_continue_turn, do: 0x75
   @spec gui_action_agent_queue_action() :: non_neg_integer()
   def gui_action_agent_queue_action, do: 0x76
+  @spec gui_action_subagent_peek_action() :: non_neg_integer()
+  def gui_action_subagent_peek_action, do: 0x77
 
 end

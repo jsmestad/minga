@@ -32,6 +32,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.RenderModel.UI.StatusBarBuilder
   alias MingaEditor.RenderModel.UI.TabBarBuilder
+  alias MingaEditor.RenderModel.UI.SubagentPeekBuilder
   alias MingaEditor.RenderModel.UI.ThemeBuilder
   alias MingaEditor.RenderModel.UI.WhichKeyBuilder
   alias MingaEditor.RenderModel.UI.WorkspacesBuilder
@@ -74,6 +75,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       signature_help: SignatureHelpBuilder.build(ctx),
       agent_chat: agent_chat,
       agent_queue: QueueBuilder.build(ctx, agent_chat.visible?),
+      subagent_peek: SubagentPeekBuilder.build(ctx),
       agent_help: AgentHelpBuilder.build(ctx),
       empty_state: EmptyStateBuilder.build(ctx),
       bottom_panel: bottom_panel,

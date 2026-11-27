@@ -187,6 +187,9 @@ func GoldenDecode(name string, payload []byte) (any, int, error) {
 	case "GuiStatusBarWorkspace":
 		v, n, err := DecodeGuiStatusBarWorkspace(payload, 0, len(payload))
 		return v, n, err
+	case "GuiSubagentPeekFields":
+		v, n, err := DecodeGuiSubagentPeekFields(payload, 0, len(payload))
+		return v, n, err
 	case "GuiSurfaceLayoutPlacements":
 		v, n, err := DecodeGuiSurfaceLayoutPlacements(payload, 0, len(payload))
 		return v, n, err

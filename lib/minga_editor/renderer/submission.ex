@@ -27,7 +27,7 @@ defmodule MingaEditor.Renderer.Submission do
     :removed_semantic_tokens,
     :transcript
   ]
-  defstruct @enforce_keys
+  defstruct @enforce_keys ++ [peek_transcript: nil]
 
   @opaque t :: %__MODULE__{
             intent: Intent.t(),
@@ -36,12 +36,20 @@ defmodule MingaEditor.Renderer.Submission do
             semantic_tokens: semantic_tokens(),
             removed_highlights: [pid()],
             removed_semantic_tokens: [pid()],
-            transcript: TranscriptUpdate.t() | nil
+            transcript: TranscriptUpdate.t() | nil,
+            peek_transcript: TranscriptUpdate.t() | nil
           }
 
   @doc "Builds a self-contained submission, including a transcript seed, for a new renderer or an independent caller."
   @spec full(Intent.t()) :: t()
-  def full(%Intent{} = intent), do: full(intent, seed(intent))
+  def full(%Intent{} = intent) do
+    submission = full(intent, seed(intent))
+
+    case WorkspaceIntent.peek_source(intent.workspace) do
+      nil -> submission
+      projection -> with_peek_transcript(submission, TranscriptUpdate.seed(projection, 0))
+    end
+  end
 
   @doc "Builds a self-contained highlight submission carrying an explicit transcript update."
   @spec full(Intent.t(), TranscriptUpdate.t() | nil) :: t()
@@ -90,11 +98,21 @@ defmodule MingaEditor.Renderer.Submission do
   @spec transcript(t()) :: TranscriptUpdate.t() | nil
   def transcript(%__MODULE__{transcript: transcript}), do: transcript
 
+  @doc "Adds the independently correlated child transcript to the packed frame."
+  @spec with_peek_transcript(t(), TranscriptUpdate.t() | nil) :: t()
+  def with_peek_transcript(%__MODULE__{} = submission, transcript),
+    do: %{submission | peek_transcript: transcript}
+
+  @doc "Returns the child's update, if the frame has a visible peek."
+  @spec peek_transcript(t()) :: TranscriptUpdate.t() | nil
+  def peek_transcript(%__MODULE__{peek_transcript: transcript}), do: transcript
+
   @spec pack(Intent.t()) :: Intent.t()
   defp pack(intent) do
     intent
     |> Intent.with_highlight_payload(%{}, %{})
     |> Intent.with_agent_transcript(nil)
+    |> Intent.with_peek_transcript(nil)
   end
 
   @spec seed(Intent.t()) :: TranscriptUpdate.t() | nil

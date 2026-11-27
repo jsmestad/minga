@@ -26,7 +26,7 @@ extension GUIFrameImpact {
              .guiSplitSeparators, .guiAgentTranscript:
             return .editor
 
-        case .guiAgentHelp, .guiAgentQueue:
+        case .guiAgentHelp, .guiAgentQueue, .guiSubagentPeek, .guiSubagentPeekTranscript:
             return .editor
 
         case .guiCompletion, .guiCompletionSelection, .guiHoverPopup, .guiHoverAction,
@@ -211,7 +211,14 @@ struct PreparedThemeUpdate: Sendable {
 struct PreparedChromeUpdates {
     let commands: [RenderCommand]
     let transcript: AgentTranscriptSnapshot?
+    let peek: PreparedSubagentPeekUpdate?
 }
+
+struct PreparedSubagentPeekUpdate {
+    let metadata: Wire.SubagentPeek?
+    let transcript: AgentTranscriptSnapshot?
+}
+
 struct PreparedHoverPopupPayload: Sendable {
     let visible: Bool
     let anchorRow: UInt16
@@ -385,6 +392,11 @@ struct PreparedFrameTransactionBuilder {
     private let committedMetadata: EditorSnapshotMetadata
     private var workingTranscript: AgentTranscriptSnapshot
     private var changedTranscript: AgentTranscriptSnapshot?
+    private var workingPeek: Wire.SubagentPeek
+    private var workingPeekTranscript: AgentTranscriptSnapshot
+    private var changedPeek: Wire.SubagentPeek?
+    private var changedPeekTranscript: AgentTranscriptSnapshot?
+    private var peekMetadataWeight = FrameResourceWeight()
     private var themeWeight = FrameResourceWeight()
     private var transcriptWeight = FrameResourceWeight()
     private var transcriptAccountingCounters = AgentTranscriptAccountingCounters()
@@ -404,6 +416,8 @@ struct PreparedFrameTransactionBuilder {
         committedMetadata: EditorSnapshotMetadata = .empty,
         registeredFontIds: Set<UInt8>,
         committedTranscript: AgentTranscriptSnapshot,
+        committedPeek: Wire.SubagentPeek = .empty,
+        committedPeekTranscript: AgentTranscriptSnapshot = .empty,
         stagingLimit: FrameResourceWeight = FrameResourcePolicy.default.staging.weight,
         residentLimit: FrameResourceWeight = FrameResourcePolicy.default.resident.weightPerWindow
     ) {
@@ -425,12 +439,18 @@ struct PreparedFrameTransactionBuilder {
         self.registeredFontIds = registeredFontIds
         self.registeredFontIds.insert(0)
         self.workingTranscript = committedTranscript
+        self.workingPeek = baseFrameSeq == 0 ? .empty : committedPeek
+        self.workingPeekTranscript = baseFrameSeq == 0 ? .empty : committedPeekTranscript
+        if baseFrameSeq == 0, committedPeek != .empty {
+            self.changedPeek = .empty
+            self.changedPeekTranscript = .empty
+        }
         self.stagingLimit = stagingLimit
         self.residentLimit = residentLimit
 
         do {
             transcriptWeight = committedTranscript.resourceWeight
-            stagingWeight = transcriptWeight
+            stagingWeight = try transcriptWeight.adding(workingPeekTranscript.resourceWeight)
             for content in workingWindows.values {
                 stagingWeight = try stagingWeight.adding(content.exactResourceWeight())
             }
@@ -587,6 +607,27 @@ struct PreparedFrameTransactionBuilder {
                 trimFront: Int(trimFront), baseCount: Int(baseCount), messages: messages
             )
 
+        case .guiSubagentPeek(let peek):
+            guard replaceStagingWeight(removing: peekMetadataWeight, adding: resourceWeight) else { return }
+            peekMetadataWeight = resourceWeight
+            if workingPeek.pane?.token != peek.pane?.token {
+                guard replaceStagingWeight(removing: workingPeekTranscript.resourceWeight, adding: .init()) else { return }
+                workingPeekTranscript = .empty
+                changedPeekTranscript = .empty
+            }
+            workingPeek = peek
+            changedPeek = peek
+
+        case .guiSubagentPeekTranscript(let mode, let epoch, let truncated, let trimFront, let baseCount, let messages):
+            guard workingPeek.pane != nil else {
+                rejection = .transcriptDesynced
+                return
+            }
+            stageTranscript(
+                mode: mode, epoch: epoch, truncated: truncated,
+                trimFront: Int(trimFront), baseCount: Int(baseCount), messages: messages, child: true
+            )
+
         case .guiBottomPanel, .guiExtensionRuntime:
             // These carry append/upsert semantics; every payload is meaningful.
             stageAppending(command, weight: resourceWeight, domain: .chrome)
@@ -675,16 +716,21 @@ struct PreparedFrameTransactionBuilder {
             editorSnapshot = nil
         }
 
+        let peek = changedPeek == nil && changedPeekTranscript == nil ? nil : PreparedSubagentPeekUpdate(
+            metadata: changedPeek, transcript: changedPeekTranscript
+        )
+        let hasChrome = !chromeCommands.isEmpty || changedTranscript != nil || peek != nil
         let transaction = PreparedFrameTransaction(
             frameSeq: frameSeq,
             baseFrameSeq: baseFrameSeq,
             generation: generation,
             impact: finalImpact,
             theme: theme,
-            chrome: chromeCommands.isEmpty && changedTranscript == nil ? nil : PreparedChromeUpdates(
+            chrome: hasChrome ? PreparedChromeUpdates(
                 commands: chromeCommands.commands,
-                transcript: changedTranscript
-            ),
+                transcript: changedTranscript,
+                peek: peek
+            ) : nil,
             overlays: overlayCommands.isEmpty ? nil : PreparedOverlayUpdates(commands: overlayCommands.commands),
             resources: resourceCommands.isEmpty ? nil : PreparedResourceUpdates(commands: resourceCommands.commands),
             focus: focusCommands.isEmpty ? nil : PreparedFocusUpdates(commands: focusCommands.commands),
@@ -696,7 +742,7 @@ struct PreparedFrameTransactionBuilder {
             operationCounts: PreparedFrameOperationCounts(
                 theme: theme == nil ? 0 : 1,
                 windows: windowsChanged ? 1 : 0,
-                chrome: chromeCommands.isEmpty && changedTranscript == nil ? 0 : 1,
+                chrome: hasChrome ? 1 : 0,
                 overlays: overlayCommands.isEmpty ? 0 : 1,
                 resources: resourceCommands.isEmpty ? 0 : 1,
                 focus: focusCommands.isEmpty ? 0 : 1,
@@ -919,22 +965,27 @@ struct PreparedFrameTransactionBuilder {
 
     private mutating func stageTranscript(
         mode: UInt8, epoch: UInt32, truncated: Bool,
-        trimFront: Int, baseCount: Int, messages: [Wire.ChatMessage]
+        trimFront: Int, baseCount: Int, messages: [Wire.ChatMessage], child: Bool = false
     ) {
         switch AgentChatState.prepareTranscript(
-            from: workingTranscript, mode: mode, epoch: epoch,
+            from: child ? workingPeekTranscript : workingTranscript, mode: mode, epoch: epoch,
             truncated: truncated, trimFront: trimFront,
             baseCount: baseCount, messages: messages
         ) {
         case .success(let prepared):
             guard replaceStagingWeight(
-                removing: transcriptWeight,
+                removing: child ? workingPeekTranscript.resourceWeight : transcriptWeight,
                 adding: prepared.resourceWeight
             ) else { return }
-            transcriptWeight = prepared.resourceWeight
             transcriptAccountingCounters.add(prepared.accountingCounters)
-            workingTranscript = prepared
-            changedTranscript = prepared
+            if child {
+                workingPeekTranscript = prepared
+                changedPeekTranscript = prepared
+            } else {
+                transcriptWeight = prepared.resourceWeight
+                workingTranscript = prepared
+                changedTranscript = prepared
+            }
         case .failure(.beforeSeed): rejection = .transcriptBeforeSeed
         case .failure(.epochMismatch): rejection = .transcriptEpochMismatch
         case .failure(.desynced): rejection = .transcriptDesynced
@@ -1135,6 +1186,8 @@ private extension RenderCommand {
         case .guiTasksDrawer: 67
         case .guiMenuBar: 68
         case .guiAgentQueue: 69
+        case .guiSubagentPeek: 70
+        case .guiSubagentPeekTranscript: 71
         }
     }
 }

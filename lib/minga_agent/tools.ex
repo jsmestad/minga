@@ -1050,7 +1050,7 @@ defmodule MingaAgent.Tools do
       name: "subagent",
       description: """
       Spawn a child agent to work on a subtask. By default this is foreground:
-      the parent waits and receives the child agent's final response text.
+      the parent waits and receives the result of the child's first request.
       Pass background: true for long-running independent work. Background mode
       returns immediately with a stable session handle, keeps the child chat
       available, and reports completion or failure through normal agent notifications.
@@ -1076,7 +1076,7 @@ defmodule MingaAgent.Tools do
             "type" => "string",
             "enum" => ["worktree"],
             "description" =>
-              "When set to worktree, run the foreground child in a fresh git worktree and preserve it only if the child changes it."
+              "When set to worktree, use a fresh Git worktree for the child. Clean, unchanged worktrees are removed when the child stops."
           }
         },
         "required" => ["task"]
@@ -1096,7 +1096,9 @@ defmodule MingaAgent.Tools do
             model: args["model"],
             background: args["background"] == true,
             isolation: args["isolation"],
-            parent_session: parent_session
+            parent_session: parent_session,
+            session_invocation: context.session_invocation,
+            parent_task_id: context.session_id
           )
         end
       end

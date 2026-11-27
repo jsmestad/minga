@@ -485,6 +485,39 @@ type AgentQueueRow struct {
 	AttachmentCount uint16
 }
 
+type SubagentPeekStep struct {
+	EntryID uint32
+	Token   string
+	Label   string
+	Report  string
+}
+
+type SubagentPeekSibling struct {
+	Token string
+	Title string
+	State uint8
+}
+
+type SubagentPeekPane struct {
+	WindowID     uint16
+	ParentRect   Rect
+	PeekRect     Rect
+	Token        string
+	Parent       string
+	Title        string
+	State        uint8
+	Elapsed      string
+	Index        uint16
+	Siblings     []SubagentPeekSibling
+	Brief        string
+	Result       string
+	Prompt       string
+	CursorRow    uint32
+	CursorColumn uint32
+	Flags        uint8
+	Notice       string
+}
+
 type EditTimelineEntry struct {
 	Index          uint8
 	ToolName       string
@@ -988,6 +1021,12 @@ type GuiAgentQueueFields struct {
 	Pending     []AgentQueueRow
 	Removed     []AgentQueueRow
 	Empty       EmptyList
+}
+
+type GuiSubagentPeekFields struct {
+	ParentWindowID uint16
+	Steps          []SubagentPeekStep
+	Panes          []SubagentPeekPane
 }
 
 type GuiEditTimelineFields struct {

@@ -44,8 +44,9 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   def build(ctx) do
     active_window = Map.get(ctx.windows.map, ctx.windows.active)
     is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
+    peek_open? = match?(%{pane: %{}}, ctx.workspace.subagent_peek)
 
-    if is_agent_chat do
+    if is_agent_chat or peek_open? do
       build_visible(ctx, ctx.workspace.agent_ui.chat_lifecycle)
     else
       %AgentChat{visible?: false}
@@ -140,6 +141,24 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   def admit(root, update, %Intent{} = intent) do
     AgentChatResident.admit(root, update, resident_context(update_identity(update), intent))
+  end
+
+  @doc "Admits the child transcript without inheriting the parent's approvals, output offers, or footer."
+  @spec admit_peek(AgentChatResident.t() | nil, TranscriptUpdate.t() | nil) ::
+          {:ok, AgentChatResident.t() | nil} | {:reseed, AgentChatResident.t() | nil}
+  def admit_peek(_root, nil), do: {:ok, nil}
+
+  def admit_peek(root, update) do
+    AgentChatResident.admit(root, update, %{
+      scope: nil,
+      approval: nil,
+      footer: [],
+      max_bytes: Minga.Config.get(:agent_transcript_resident_max_bytes),
+      derive: fn item, _decoration -> item |> maybe_style_message(nil) |> to_core_message(nil) end,
+      measure: &measure_entry/1,
+      tool_id: &item_tool_id/1,
+      decoratable?: &running_tool?/1
+    })
   end
 
   @spec update_identity(TranscriptUpdate.t()) :: TranscriptUpdate.identity()
@@ -301,7 +320,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   # overlay) holds them above it.
   @spec composer_focused?(Context.t(), Panel.t()) :: boolean()
   defp composer_focused?(ctx, panel) do
-    panel.input_focused and ctx.intent.frame.focus_owner.responder == :editor_view and
+    ctx.workspace.keymap_scope != :subagent_peek and panel.input_focused and
+      ctx.intent.frame.focus_owner.responder == :editor_view and
       ctx.intent.frame.focus_owner.surface == :agent
   end
 

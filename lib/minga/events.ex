@@ -51,6 +51,8 @@ defmodule Minga.Events do
   | `:frontend_foreground_changed` | `FrontendForegroundChangedEvent` | `status: :foreground \| :background \| :unknown` |
   | `:agent_session_restarted` | `MingaAgent.SessionManager.SessionRestartedEvent` | `session_id, old_pid, new_pid, reason` |
   | `:background_subagent_started` | `MingaAgent.Subagent.Handle` | `session_id: String.t(), pid: pid(), task: String.t()` |
+  | `:foreground_subagent_changed` | `MingaAgent.SessionManager.foreground_subagent()` | Starts a bound child or makes it writable after handback |
+  | `:foreground_subagent_disposed` | `MingaAgent.SessionManager.foreground_disposal()` | Exact child identity and its final isolation outcome |
   | `:node_connected` | `Minga.Distribution.Events.NodeConnectedEvent` | `server_name, node, connected_at` |
   | `:node_disconnected` | `Minga.Distribution.Events.NodeDisconnectedEvent` | `server_name, node, reason, disconnected_at` |
   | `:power_thermal_state_changed` | `PowerThermalStateEvent` | `low_power?, thermal_state` |
@@ -394,6 +396,8 @@ defmodule Minga.Events do
           | :agent_tools_changed
           | :inference_route_status_changed
           | :background_subagent_started
+          | :foreground_subagent_changed
+          | :foreground_subagent_disposed
           | :node_connected
           | :node_disconnected
           | :changeset_merged
@@ -575,6 +579,10 @@ defmodule Minga.Events do
           owner: pid()
         }) :: :ok
   @spec broadcast(:background_subagent_started, MingaAgent.Subagent.Handle.t()) :: :ok
+  @spec broadcast(:foreground_subagent_changed, MingaAgent.SessionManager.foreground_subagent()) ::
+          :ok
+  @spec broadcast(:foreground_subagent_disposed, MingaAgent.SessionManager.foreground_disposal()) ::
+          :ok
   @spec broadcast(:node_connected, Minga.Distribution.Events.NodeConnectedEvent.t()) :: :ok
   @spec broadcast(:node_disconnected, Minga.Distribution.Events.NodeDisconnectedEvent.t()) :: :ok
   @spec broadcast(:changeset_merged, MingaAgent.Changeset.MergedEvent.t()) :: :ok

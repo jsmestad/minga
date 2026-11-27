@@ -158,6 +158,15 @@ defmodule MingaEditor.Agent.Tasks do
   @spec fetch(t(), pid()) :: {:ok, Entry.t()} | :error
   def fetch(%__MODULE__{entries: entries}, pid), do: Map.fetch(entries, pid)
 
+  @doc "Fetches only the task still bound to this exact conversation record."
+  @spec fetch(t(), pid(), String.t()) :: {:ok, Entry.t()} | :error
+  def fetch(%__MODULE__{} = tasks, pid, task_id) when is_binary(task_id) do
+    case fetch(tasks, pid) do
+      {:ok, %Entry{task_id: ^task_id}} = bound -> bound
+      _other -> :error
+    end
+  end
+
   @doc """
   Every session with a turn that can be stopped now, with that turn, whichever workspace shows it.
   """

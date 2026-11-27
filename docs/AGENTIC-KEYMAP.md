@@ -136,6 +136,7 @@ Press `SPC` in Normal mode. These sequences also work from the agent view, the f
 |------|--------|
 | `SPC a a` | Open the [tasks drawer](#in-the-tasks-drawer), or close it when it has the keyboard |
 | `SPC a v` | Open the agent view, or return from it to where you were |
+| `SPC a i` | Inspect the latest batch of subagents beside its parent conversation |
 | `SPC a n` | New task: type its goal and it starts beside what you are doing |
 | `SPC a S n` | New, empty agent session in the conversation |
 | `SPC a s` | Stop the agent's current turn; queued messages stay queued. It works from any buffer: with a file in front it stops the conversation shown last (the one the modeline speaks for), or the only one working. With several working and none shown last it stops nothing and says so. On macOS, `⌘.` does the same from a file too |
@@ -160,6 +161,20 @@ Press `SPC` in Normal mode. These sequences also work from the agent view, the f
 | `SPC a S l` | Pick where the agent runs, on this machine or a remote one |
 | `SPC a S k` | Inspect the conversation checklist |
 | `SPC a S s` | Stop the session |
+
+**In a subagent peek**
+
+Click a **Started** row in the parent conversation to inspect that child. From the parent transcript, `Tab` cycles through visible Started rows and `↩` opens the selected one.
+
+| Keys | Action |
+|------|--------|
+| `]]` / `[[` | Inspect the next or previous sibling without opening another pane |
+| `za` | Fold or unfold the parent's brief |
+| `i` | Write to this subagent |
+| `↩` | Send from the child composer |
+| `⌥↩` | Add a line to the child draft |
+| `Esc` | Leave the child composer without discarding its draft |
+| `q` | Close the peek and return focus to the parent conversation |
 
 **Workspaces (`SPC TAB`)**
 

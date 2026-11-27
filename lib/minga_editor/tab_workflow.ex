@@ -166,6 +166,7 @@ defmodule MingaEditor.TabWorkflow do
     |> sync_active_workspace_agent_ui()
     |> restore_active_agent(Runtime.active_tab(state.shell_runtime))
     |> arrive()
+    |> MingaEditor.Agent.SubagentPeekWorkflow.resume_in_workspace()
     |> HighlightSync.ensure_active_buffer_presentation(old_buffer)
   end
 
@@ -202,6 +203,7 @@ defmodule MingaEditor.TabWorkflow do
     |> TraditionalWorkflow.install_agent_spinner_stop()
     |> rebuild_switched_agent(target)
     |> arrive(target)
+    |> MingaEditor.Agent.SubagentPeekWorkflow.resume_in_workspace()
     |> AgentHistorySource.dismiss_if_stale()
     |> AgentChecklistSource.dismiss_if_stale()
     |> AgentDraftAttachmentSource.dismiss_if_stale()

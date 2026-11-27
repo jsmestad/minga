@@ -1178,6 +1178,162 @@ func DecodeAgentQueueRow(data []byte, offset int, windowEnd int) (AgentQueueRow,
 	}, pos, nil
 }
 
+func DecodeSubagentPeekStep(data []byte, offset int, windowEnd int) (SubagentPeekStep, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+4, "entry_id"); err != nil {
+		return SubagentPeekStep{}, offset, err
+	}
+	entryID := decodeU32(data, pos)
+	pos += 4
+	token, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return SubagentPeekStep{}, offset, err
+	}
+	label, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return SubagentPeekStep{}, offset, err
+	}
+	report, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return SubagentPeekStep{}, offset, err
+	}
+	return SubagentPeekStep{
+		EntryID: entryID,
+		Token:   token,
+		Label:   label,
+		Report:  report,
+	}, pos, nil
+}
+
+func DecodeSubagentPeekSibling(data []byte, offset int, windowEnd int) (SubagentPeekSibling, int, error) {
+	pos := offset
+	token, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return SubagentPeekSibling{}, offset, err
+	}
+	title, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return SubagentPeekSibling{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "state"); err != nil {
+		return SubagentPeekSibling{}, offset, err
+	}
+	state := data[pos]
+	pos++
+	return SubagentPeekSibling{
+		Token: token,
+		Title: title,
+		State: state,
+	}, pos, nil
+}
+
+func DecodeSubagentPeekPane(data []byte, offset int, windowEnd int) (SubagentPeekPane, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+2, "window_id"); err != nil {
+		return SubagentPeekPane{}, offset, err
+	}
+	windowID := decodeU16(data, pos)
+	pos += 2
+	parentRect, pos, err := DecodeRect(data, pos, windowEnd)
+	if err != nil {
+		return SubagentPeekPane{}, offset, err
+	}
+	peekRect, pos, err := DecodeRect(data, pos, windowEnd)
+	if err != nil {
+		return SubagentPeekPane{}, offset, err
+	}
+	token, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return SubagentPeekPane{}, offset, err
+	}
+	parent, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return SubagentPeekPane{}, offset, err
+	}
+	title, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return SubagentPeekPane{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "state"); err != nil {
+		return SubagentPeekPane{}, offset, err
+	}
+	state := data[pos]
+	pos++
+	elapsed, pos, err := decodeString8Window(data, pos, windowEnd)
+	if err != nil {
+		return SubagentPeekPane{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+2, "index"); err != nil {
+		return SubagentPeekPane{}, offset, err
+	}
+	index := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+2, "siblings count"); err != nil {
+		return SubagentPeekPane{}, offset, err
+	}
+	siblingsCount := int(decodeU16(data, pos))
+	pos += 2
+	siblings := make([]SubagentPeekSibling, 0, min(siblingsCount, len(data)-pos))
+	for i := 0; i < siblingsCount; i++ {
+		item, nextPos, err := DecodeSubagentPeekSibling(data, pos, windowEnd)
+		if err != nil {
+			return SubagentPeekPane{}, offset, err
+		}
+		pos = nextPos
+		siblings = append(siblings, item)
+	}
+	brief, pos, err := decodeString32Window(data, pos, windowEnd)
+	if err != nil {
+		return SubagentPeekPane{}, offset, err
+	}
+	result, pos, err := decodeString32Window(data, pos, windowEnd)
+	if err != nil {
+		return SubagentPeekPane{}, offset, err
+	}
+	prompt, pos, err := decodeString32Window(data, pos, windowEnd)
+	if err != nil {
+		return SubagentPeekPane{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+4, "cursor_row"); err != nil {
+		return SubagentPeekPane{}, offset, err
+	}
+	cursorRow := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+4, "cursor_column"); err != nil {
+		return SubagentPeekPane{}, offset, err
+	}
+	cursorColumn := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+1, "flags"); err != nil {
+		return SubagentPeekPane{}, offset, err
+	}
+	flags := data[pos]
+	pos++
+	notice, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return SubagentPeekPane{}, offset, err
+	}
+	return SubagentPeekPane{
+		WindowID:     windowID,
+		ParentRect:   parentRect,
+		PeekRect:     peekRect,
+		Token:        token,
+		Parent:       parent,
+		Title:        title,
+		State:        state,
+		Elapsed:      elapsed,
+		Index:        index,
+		Siblings:     siblings,
+		Brief:        brief,
+		Result:       result,
+		Prompt:       prompt,
+		CursorRow:    cursorRow,
+		CursorColumn: cursorColumn,
+		Flags:        flags,
+		Notice:       notice,
+	}, pos, nil
+}
+
 func DecodeEditTimelineEntry(data []byte, offset int, windowEnd int) (EditTimelineEntry, int, error) {
 	pos := offset
 	if err := decodeRequireWindow(windowEnd, pos+1, "index"); err != nil {
@@ -3836,6 +3992,50 @@ func DecodeGuiAgentQueueFields(data []byte, offset int, windowEnd int) (GuiAgent
 		Pending:     pending,
 		Removed:     removed,
 		Empty:       empty,
+	}, pos, nil
+}
+
+// Command field decoder for gui_subagent_peek
+
+func DecodeGuiSubagentPeekFields(data []byte, offset int, windowEnd int) (GuiSubagentPeekFields, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+2, "parent_window_id"); err != nil {
+		return GuiSubagentPeekFields{}, offset, err
+	}
+	parentWindowID := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+2, "steps count"); err != nil {
+		return GuiSubagentPeekFields{}, offset, err
+	}
+	stepsCount := int(decodeU16(data, pos))
+	pos += 2
+	steps := make([]SubagentPeekStep, 0, min(stepsCount, len(data)-pos))
+	for i := 0; i < stepsCount; i++ {
+		item, nextPos, err := DecodeSubagentPeekStep(data, pos, windowEnd)
+		if err != nil {
+			return GuiSubagentPeekFields{}, offset, err
+		}
+		pos = nextPos
+		steps = append(steps, item)
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "panes count"); err != nil {
+		return GuiSubagentPeekFields{}, offset, err
+	}
+	panesCount := int(data[pos])
+	pos += 1
+	panes := make([]SubagentPeekPane, 0, min(panesCount, len(data)-pos))
+	for i := 0; i < panesCount; i++ {
+		item, nextPos, err := DecodeSubagentPeekPane(data, pos, windowEnd)
+		if err != nil {
+			return GuiSubagentPeekFields{}, offset, err
+		}
+		pos = nextPos
+		panes = append(panes, item)
+	}
+	return GuiSubagentPeekFields{
+		ParentWindowID: parentWindowID,
+		Steps:          steps,
+		Panes:          panes,
 	}, pos, nil
 }
 

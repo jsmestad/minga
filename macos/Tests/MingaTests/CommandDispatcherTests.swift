@@ -4644,6 +4644,61 @@ struct CommandDispatcherStagingTests {
         }
     }
 
+    @Test("a sibling cannot append to the prior child's equal-epoch transcript")
+    @MainActor func subagentPeekRejectsAnotherChildsAppend() {
+        func peek(_ index: UInt16) -> Wire.SubagentPeek {
+            let left = Wire.SubagentPeek.Rect(row: 0, col: 0, width: 40, height: 30)
+            let right = Wire.SubagentPeek.Rect(row: 0, col: 41, width: 40, height: 30)
+            let siblings = [
+                Wire.SubagentPeek.Sibling(token: "one", title: "One", state: 1),
+                Wire.SubagentPeek.Sibling(token: "two", title: "Two", state: 1)
+            ]
+            let sibling = siblings[Int(index) - 1]
+            let pane = Wire.SubagentPeek.Pane(
+                windowID: 8, parentRect: left, peekRect: right, token: sibling.token,
+                parent: "Parent", title: sibling.title, state: sibling.state, elapsed: "2s",
+                index: index, siblings: siblings, brief: "Inspect", result: "", prompt: "",
+                cursorRow: 0, cursorColumn: 0, flags: 1, notice: ""
+            )
+            return .init(parentWindowID: 7, steps: [], pane: pane)
+        }
+
+        let (dispatcher, gui) = makeDispatcher()
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiAgentTranscript(
+            mode: 0, epoch: 7, truncated: false, trimFront: 0, baseCount: 0,
+            messages: [.init(beamId: 11, content: .user(text: "Parent seed"))]
+        ))
+        dispatcher.dispatch(.guiSubagentPeek(peek(1)))
+        dispatcher.dispatch(.guiSubagentPeekTranscript(
+            mode: 0, epoch: 7, truncated: false, trimFront: 0, baseCount: 0,
+            messages: [.init(beamId: 11, content: .assistant(text: "First child seed"))]
+        ))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiAgentTranscript(
+            mode: 1, epoch: 7, truncated: false, trimFront: 0, baseCount: 1,
+            messages: [.init(beamId: 12, content: .assistant(text: "Do not publish"))]
+        ))
+        dispatcher.dispatch(.guiSubagentPeek(peek(2)))
+        dispatcher.dispatch(.guiSubagentPeekTranscript(
+            mode: 1, epoch: 7, truncated: false, trimFront: 0, baseCount: 1,
+            messages: [.init(beamId: 12, content: .assistant(text: "Do not alias"))]
+        ))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        #expect(gui.subagentPeekState.metadata.pane?.token == "one")
+        #expect(gui.subagentPeekState.transcript.messages.map(\.id) == [11])
+        #expect(gui.agentChatState.messages.map(\.id) == [11])
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiSubagentPeek(peek(2)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+        #expect(gui.subagentPeekState.metadata.pane?.token == "two")
+        #expect(gui.subagentPeekState.transcript.messages.isEmpty)
+        #expect(gui.agentChatState.messages.map(\.id) == [11])
+    }
+
     @Test("duplicate and out-of-order frame sequences return typed rejections")
     @MainActor func duplicateAndOutOfOrderFramesReject() throws {
         for incoming: UInt32 in [5, 4] {

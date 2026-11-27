@@ -680,7 +680,8 @@ func (m Model) presentedMouseHandler(layers []*lipgloss.Layer) func(tea.MouseMsg
 		}
 	}
 	queue := m.presentedAgentQueueHandler(layers)
-	if git == nil && agent == nil && queue == nil {
+	peek := m.presentedSubagentPeekHandler(layers)
+	if git == nil && agent == nil && queue == nil && peek == nil {
 		return nil
 	}
 	return func(msg tea.MouseMsg) tea.Cmd {
@@ -691,6 +692,9 @@ func (m Model) presentedMouseHandler(layers []*lipgloss.Layer) func(tea.MouseMsg
 			}
 			if !claim.claimed && queue != nil {
 				queue(click)
+			}
+			if !claim.claimed && peek != nil {
+				peek(click)
 			}
 			if !claim.claimed && agent != nil {
 				agent(click)
