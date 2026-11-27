@@ -28,6 +28,8 @@ func TestGUISendersUseOnlyRemainingActions(t *testing.T) {
 		"GUIActionAgentStopTurn":              false,
 		"GUIActionAgentContinueTurn":          false,
 		"GUIActionAgentQueueAction":           false,
+		// Peek activations name the displayed child and exact parent or child window.
+		"GUIActionSubagentPeekAction":         false,
 		"GUIActionAgentStartRemedy":           false,
 		"GUIActionTasksDrawerAction":          false,
 		"GUIActionSemanticItemActivate":       false,

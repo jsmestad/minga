@@ -305,7 +305,7 @@ func (m Model) renderSubagentPeek(pane generated.SubagentPeekPane, width, height
 	}
 	p := m.palette()
 	base := lipgloss.NewStyle().Background(p.AgentPanel())
-	text, muted := base.Foreground(p.AgentText()), base.Foreground(p.Muted())
+	text := base.Foreground(p.AgentText())
 	line := func(content string) string { return base.Width(width).Render(fitStyled(content, width)) }
 	control := func(action protocol.SubagentPeekAction, token, label string) string {
 		if m.zones == nil {
@@ -313,12 +313,13 @@ func (m Model) renderSubagentPeek(pane generated.SubagentPeekPane, width, height
 		}
 		return m.zones.Mark(peekZone(action, pane.WindowID, pane.Token, token), label)
 	}
-	op := text.Bold(true).Render(firstCompactLine(pane.Parent+" › "+pane.Title, max(width-4, 1)))
-	lines := []string{line(op + " " + control(protocol.SubagentPeekClose, "", muted.Render("×")))}
+	op := text.Bold(true).Render(firstCompactLine(pane.Parent+" › "+pane.Title, max(width-spaceSection.cols(), 1)))
+	lines := []string{line(op + " " + control(protocol.SubagentPeekClose, "", text.Render("×")))}
 	state, ok := generated.SpineStateFromWire(pane.State)
 	if ok {
 		token := state.Token()
-		lines = append(lines, line(base.Foreground(p.Role(token.Role)).Render(token.Glyph+" "+token.Word)+muted.Render(" · "+pane.Elapsed)))
+		mark := base.Foreground(p.Role(token.Role)).Render(token.Glyph)
+		lines = append(lines, line(mark+text.Render(" "+token.Word+" · "+pane.Elapsed)))
 	}
 	var siblings strings.Builder
 	used := 0
@@ -348,22 +349,22 @@ func (m Model) renderSubagentPeek(pane generated.SubagentPeekPane, width, height
 	}
 	siblings.WriteString(count)
 	flushSiblings()
-	briefLabel := "▸ Brief  za"
+	briefLabel := "▸ Brief" + gap(spaceXL) + "za"
 	if pane.Flags&peekBriefOpen != 0 {
-		briefLabel = "▾ Brief  za"
+		briefLabel = "▾ Brief" + gap(spaceXL) + "za"
 	}
 	lines = append(lines, line(control(protocol.SubagentPeekBrief, "", text.Bold(true).Render(briefLabel))))
 	if pane.Flags&peekBriefOpen != 0 {
-		lines = append(lines, m.peekDetail(pane.Brief, peekBriefScrollZone, width, max(height/3-4, 1), m.peekBriefOffset, muted, line)...)
+		lines = append(lines, m.peekDetail(pane.Brief, peekBriefScrollZone, width, max(height/3-4, 1), m.peekBriefOffset, text, line)...)
 	}
 	lines = append(lines, line(control(protocol.SubagentPeekInspect, "", text.Bold(true).Render("So far"))))
 	footer := make([]string, 0, 8)
 	if pane.Flags&peekHasResult != 0 {
 		footer = append(footer, line(text.Bold(true).Render("Result")))
-		footer = append(footer, m.peekDetail(pane.Result, peekResultScrollZone, width, max(height/4, 1), m.peekResultOffset, muted, line)...)
+		footer = append(footer, m.peekDetail(pane.Result, peekResultScrollZone, width, max(height/4, 1), m.peekResultOffset, text, line)...)
 	}
 	if pane.Notice != "" {
-		footer = append(footer, line(muted.Render(pane.Notice)))
+		footer = append(footer, line(text.Render(pane.Notice)))
 	}
 	draft := strings.Split(pane.Prompt, "\n")
 	first := max(min(int(pane.CursorRow)-2, len(draft)-1), 0)
@@ -398,9 +399,9 @@ func (m Model) renderSubagentPeek(pane generated.SubagentPeekPane, width, height
 		footer = append(footer, control(protocol.SubagentPeekCompose, fmt.Sprintf("%d/%d", first+index, start), line(content)))
 	}
 	if pane.Flags&peekSending != 0 {
-		footer = append(footer, line(muted.Render("Sending…")))
+		footer = append(footer, line(text.Render("Sending…")))
 	} else if pane.Flags&peekEditing != 0 {
-		footer = append(footer, line(control(protocol.SubagentPeekSubmit, "", text.Render("[Send]"))+muted.Render("  Esc · inspect")))
+		footer = append(footer, line(control(protocol.SubagentPeekSubmit, "", text.Render("[Send]"))+gap(spaceXL)+text.Render("Esc · inspect")))
 	}
 	if len(lines)+len(footer) > height {
 		lines = takeLines(lines, max(height-len(footer), 0))
