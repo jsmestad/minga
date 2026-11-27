@@ -1037,7 +1037,7 @@ reason = "The same breadcrumb.segment pairs the entries above record for other s
 issue = 4137
 
 [[exception]]
-scenario = ["minga.approval.diff", "minga.task.new", "minga.task.output", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working"]
+scenario = ["minga.approval.diff", "minga.task.new", "minga.task.output", "minga.tasks.list", "minga.tasks.needs_you", "minga.tasks.working", "minga.tasks.child_selected"]
 frontend = "macos"
 part = "drawer.count"
 rule = "contrast"
@@ -1468,25 +1468,15 @@ pairs = [
 reason = "The modeline.segment text misses 4.5:1 in this theme: the Insert mode pill (the theme's base colour on its green, 2.96:1), and Minga's words in the minga role while it works (4.45:1), and \"Minga stopped\" in the stopped state's muted role colour (3.25:1 or more)."
 issue = 4137
 
-# All three reproduce at both widths on the pre-Inspect native drawer, with the same selected child and no action button.
+# The foreground task's four finished children use the existing secondary count style.
 [[exception]]
 scenario = "minga.tasks.child_selected"
 frontend = "macos"
-part = "modeline.segment"
+part = "drawer.count"
 rule = "contrast"
 theme = "astrodark"
-pairs = ["#000000 on #101317"]
-reason = "The position label below the foreground conversation and Tasks drawer measures 1.13:1 against the astrodark modeline."
-issue = 4137
-
-[[exception]]
-scenario = "minga.tasks.child_selected"
-frontend = "macos"
-part = "modeline.segment"
-rule = "contrast"
-theme = "catppuccin_frappe"
-pairs = ["#000000 on #2a2c3c"]
-reason = "The position label below the foreground conversation and Tasks drawer measures 1.52:1 against the Frappé modeline."
+pairs = ["#6c6f78 on #1a1d23"]
+reason = "The existing done count samples at 3.36:1 on the hosted macOS renderer."
 issue = 4137
 
 [[exception]]
@@ -1495,6 +1485,6 @@ frontend = "macos"
 part = "drawer.count"
 rule = "contrast"
 theme = "catppuccin_latte"
-pairs = ["#707288 on #eff1f5"]
-reason = "The working and done counts in the Tasks header use secondary text at 4.17:1."
+pairs = ["#9b9ead on #eff1f5"]
+reason = "The existing done count samples at 2.35:1 on the hosted macOS renderer."
 issue = 4137

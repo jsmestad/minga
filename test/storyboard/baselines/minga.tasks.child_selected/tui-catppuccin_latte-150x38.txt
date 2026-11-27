@@ -1,0 +1,312 @@
+# minga storyboard frame v1
+# scenario: minga.tasks.child_selected
+# frontend: tui
+# theme: catppuccin_latte
+# size: 150x38
+# cursor: none
+## text
+Spaces · folder minga.tasks.child_selected (1 tab) · ▎cpu I will check facts, fairness, (1 tab, 1 running)
+ ▌ 󰚩 Review the marketing si…
+ 󰚩 Agent  openai / Offline review                                                              ◐ Working   ◌ default [Tasks] [History] [Help] [Queue]
+  Transcript ──────────────────────────────────────────────────────────────────────────────────────────────────────── │ ╭ ◇ Session ────────────────╮
+   You                                                                                                                │ │ Provider  openai          │
+     Review the marketing site for unfair claims and unnecessary jargon.                                              │ │ Model     Offline review  │
+                                                                                                                      │ │ State     Working         │
+   Minga                                                                                                              │ │ Thinking  default         │
+     I will check facts, fairness, jargon and what a skeptical reader needs to see.                                   │ │ Messages  8               │
+  ● Started Editorial and Jargon Roaster                                                          · 1 of 4 reports in │ │ Tools     4 · 3 running · │
+     [Read retained output]  Ctrl+Alt+O reads latest                                                                  │ │ ─── Hints ────────────────│
+  ◐ Started Fact-Check Auditor                                                                                        │ │ Tab  complete             │
+  ◐ Started Competitive Fairness Critic                                                                               │ │ ?  agent help             │
+  ◐ Started Technical Change Skeptic                                                                                  │ ╰───────────────────────────╯
+                                                                                                                      │
+   i System  Agent UI registry online                                                                                 │
+  1 message · Working · thinking default                                                                              │
+ ╭ Running...                                                                                                       ╮ │
+ │ ❯ NORMAL  Ask Minga to edit, explain, search, or run tools                                                       │ │
+ │Send · Steer · Queue Next · Stop · Attachments                                                                    │ │
+ ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ │
+╭ *minga-tasks* Minga Tasks ─────────────────────────────────────────────────────────────────────────────────────────────────────────────── ◐ 4  ● 1 ╮
+│  ◐ Review the marketing site for unfair claims and unnecessary jargon.  Starting Technical Change Skeptic                           i Inspect  now │
+│  ├─ ● Editorial and Jargon Roaster  Done                                                                                            i Inspect  now │
+│▌ ├─ ◐ Fact-Check Auditor  Working                                                                                                   i Inspect  now │
+│  ├─ ◐ Competitive Fairness Critic  Working                                                                                          i Inspect  now │
+│  └─ ◐ Technical Change Skeptic  Working                                                                                             i Inspect  now │
+│                                                                                                                                                    │
+│                                                                                                                                                    │
+│                                                                                                                                                    │
+│                                                                                                                                                    │
+│                                                                                                                                                    │
+│                                                                                                                                                    │
+╰ j/k move  ↩ open  c new task  x stop  q close ─────────────────────────────────────────────────────────────────────────────────────────────────────╯
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Review files (0)  [All Changes]  ]F  wheel
+No changed files
+  NORMAL  [no file] ◐ Minga working                                                                                                          Text 1:1
+## styles (row start-end fg bg attrs)
+0 0-52 #8c8fa1 #ccd0da -
+0 53-86 #1e66f5 #ccd0da bold
+0 87-105 #8c8fa1 #ccd0da -
+0 106-149 #4c4f69 #eff1f5 -
+1 0-0 #4c4f69 #eff1f5 -
+1 1-1 #1e66f5 #eff1f5 bold
+1 2-149 #4c4f69 #eff1f5 -
+2 0-0 #4c4f69 #eff1f5 -
+2 1-7 #1e66f5 #ccd0da bold
+2 8-18 #8c8fa1 #ccd0da -
+2 19-32 #1e66f5 #ccd0da -
+2 33-92 #4c4f69 #eff1f5 -
+2 93-93 #8c8fa1 #ccd0da -
+2 94-94 #4c4f69 #8839ef -
+2 95-103 #ccd0da #8839ef bold
+2 104-104 #4c4f69 #8839ef -
+2 105-115 #8c8fa1 #ccd0da -
+2 116-116 #4c4f69 #eff1f5 -
+2 117-123 #8c8fa1 #ccd0da -
+2 124-124 #4c4f69 #eff1f5 -
+2 125-133 #8c8fa1 #ccd0da -
+2 134-134 #4c4f69 #eff1f5 -
+2 135-140 #8c8fa1 #ccd0da -
+2 141-141 #4c4f69 #eff1f5 -
+2 142-148 #8c8fa1 #ccd0da -
+2 149-149 #4c4f69 #eff1f5 -
+3 0-0 #4c4f69 #eff1f5 -
+3 1-12 #8c8fa1 #eff1f5 bold
+3 13-116 #8c8fa1 #eff1f5 -
+3 117-119 #7c7f93 #eff1f5 -
+3 120-120 #4c4f69 #eff1f5 -
+3 121-131 #1e66f5 #eff1f5 bold
+3 132-148 #7c7f93 #eff1f5 -
+3 149-149 #4c4f69 #eff1f5 -
+4 0-0 #4c4f69 #eff1f5 -
+4 1-5 #1e66f5 #eff1f5 bold
+4 6-116 #4c4f69 #eff1f5 -
+4 117-120 #7c7f93 #eff1f5 -
+4 121-121 #4c4f69 #eff1f5 -
+4 122-129 #8c8fa1 #eff1f5 -
+4 130-147 #4c4f69 #eff1f5 -
+4 148-148 #7c7f93 #eff1f5 -
+4 149-149 #4c4f69 #eff1f5 -
+5 0-116 #4c4f69 #eff1f5 -
+5 117-120 #7c7f93 #eff1f5 -
+5 121-121 #4c4f69 #eff1f5 -
+5 122-126 #8c8fa1 #eff1f5 -
+5 127-147 #4c4f69 #eff1f5 -
+5 148-148 #7c7f93 #eff1f5 -
+5 149-149 #4c4f69 #eff1f5 -
+6 0-116 #4c4f69 #eff1f5 -
+6 117-120 #7c7f93 #eff1f5 -
+6 121-121 #4c4f69 #eff1f5 -
+6 122-126 #8c8fa1 #eff1f5 -
+6 127-147 #4c4f69 #eff1f5 -
+6 148-148 #7c7f93 #eff1f5 -
+6 149-149 #4c4f69 #eff1f5 -
+7 0-0 #4c4f69 #eff1f5 -
+7 1-7 #8839ef #eff1f5 bold
+7 8-116 #4c4f69 #eff1f5 -
+7 117-120 #7c7f93 #eff1f5 -
+7 121-121 #4c4f69 #eff1f5 -
+7 122-129 #8c8fa1 #eff1f5 -
+7 130-147 #4c4f69 #eff1f5 -
+7 148-148 #7c7f93 #eff1f5 -
+7 149-149 #4c4f69 #eff1f5 -
+8 0-0 #4c4f69 #eff1f5 -
+8 1-4 #40a02b #eff1f5 -
+8 5-116 #4c4f69 #eff1f5 -
+8 117-120 #7c7f93 #eff1f5 -
+8 121-121 #4c4f69 #eff1f5 -
+8 122-129 #8c8fa1 #eff1f5 -
+8 130-147 #4c4f69 #eff1f5 -
+8 148-148 #7c7f93 #eff1f5 -
+8 149-149 #4c4f69 #eff1f5 -
+9 0-0 #4c4f69 #eff1f5 -
+9 1-3 #388e25 #eff1f5 -
+9 4-96 #4c4f69 #eff1f5 underline
+9 97-116 #4c4f69 #eff1f5 -
+9 117-120 #7c7f93 #eff1f5 -
+9 121-121 #4c4f69 #eff1f5 -
+9 122-126 #8c8fa1 #eff1f5 -
+9 127-147 #4c4f69 #eff1f5 -
+9 148-148 #7c7f93 #eff1f5 -
+9 149-149 #4c4f69 #eff1f5 -
+10 0-116 #4c4f69 #eff1f5 -
+10 117-120 #7c7f93 #eff1f5 -
+10 121-121 #4c4f69 #eff1f5 -
+10 122-124 #7c7f93 #eff1f5 -
+10 125-131 #8c8fa1 #eff1f5 bold
+10 132-148 #7c7f93 #eff1f5 -
+10 149-149 #4c4f69 #eff1f5 -
+11 0-0 #4c4f69 #eff1f5 -
+11 1-3 #8839ef #eff1f5 -
+11 4-116 #4c4f69 #eff1f5 underline
+11 117-120 #7c7f93 #eff1f5 -
+11 121-121 #4c4f69 #eff1f5 -
+11 122-124 #1e66f5 #eff1f5 bold
+11 125-134 #8c8fa1 #eff1f5 -
+11 135-147 #4c4f69 #eff1f5 -
+11 148-148 #7c7f93 #eff1f5 -
+11 149-149 #4c4f69 #eff1f5 -
+12 0-0 #4c4f69 #eff1f5 -
+12 1-3 #8839ef #eff1f5 -
+12 4-116 #4c4f69 #eff1f5 underline
+12 117-120 #7c7f93 #eff1f5 -
+12 121-121 #4c4f69 #eff1f5 -
+12 122-122 #1e66f5 #eff1f5 bold
+12 123-134 #8c8fa1 #eff1f5 -
+12 135-147 #4c4f69 #eff1f5 -
+12 148-148 #7c7f93 #eff1f5 -
+12 149-149 #4c4f69 #eff1f5 -
+13 0-0 #4c4f69 #eff1f5 -
+13 1-3 #8839ef #eff1f5 -
+13 4-116 #4c4f69 #eff1f5 underline
+13 117-148 #7c7f93 #eff1f5 -
+13 149-149 #4c4f69 #eff1f5 -
+14 0-116 #4c4f69 #eff1f5 -
+14 117-119 #7c7f93 #eff1f5 -
+14 120-149 #4c4f69 #eff1f5 -
+15 0-2 #4c4f69 #eff1f5 -
+15 3-10 #1e66f5 #eff1f5 bold
+15 11-36 #8c8fa1 #eff1f5 -
+15 37-116 #4c4f69 #eff1f5 -
+15 117-119 #7c7f93 #eff1f5 -
+15 120-149 #4c4f69 #eff1f5 -
+16 0-0 #4c4f69 #eff1f5 -
+16 1-116 #8c8fa1 #eff1f5 -
+16 117-119 #7c7f93 #eff1f5 -
+16 120-149 #4c4f69 #eff1f5 -
+17 0-0 #4c4f69 #eff1f5 -
+17 1-116 #1e66f5 #eff1f5 -
+17 117-119 #7c7f93 #eff1f5 -
+17 120-149 #4c4f69 #eff1f5 -
+18 0-0 #4c4f69 #eff1f5 -
+18 1-1 #1e66f5 #eff1f5 -
+18 2-12 #1e66f5 #eff1f5 bold
+18 13-114 #8c8fa1 #eff1f5 italic
+18 115-115 #4c4f69 #eff1f5 -
+18 116-116 #1e66f5 #eff1f5 -
+18 117-119 #7c7f93 #eff1f5 -
+18 120-149 #4c4f69 #eff1f5 -
+19 0-0 #4c4f69 #eff1f5 -
+19 1-1 #1e66f5 #eff1f5 -
+19 2-5 #8c8fa1 #eff1f5 -
+19 6-8 #4c4f69 #eff1f5 -
+19 9-13 #8c8fa1 #eff1f5 -
+19 14-16 #4c4f69 #eff1f5 -
+19 17-26 #8c8fa1 #eff1f5 -
+19 27-115 #4c4f69 #eff1f5 -
+19 116-116 #1e66f5 #eff1f5 -
+19 117-119 #7c7f93 #eff1f5 -
+19 120-149 #4c4f69 #eff1f5 -
+20 0-0 #4c4f69 #eff1f5 -
+20 1-116 #1e66f5 #eff1f5 -
+20 117-119 #7c7f93 #eff1f5 -
+20 120-149 #4c4f69 #eff1f5 -
+21 0-0 #1e66f5 #ccd0da -
+21 1-15 #8c8fa1 #ccd0da -
+21 16-27 #4c4f69 #ccd0da bold
+21 28-138 #1e66f5 #ccd0da -
+21 139-139 #8c8fa1 #ccd0da -
+21 140-142 #8839ef #ccd0da -
+21 143-144 #8c8fa1 #ccd0da -
+21 145-147 #388e25 #ccd0da -
+21 148-148 #8c8fa1 #ccd0da -
+21 149-149 #1e66f5 #ccd0da -
+22 0-0 #1e66f5 #ccd0da -
+22 1-2 #4c4f69 #ccd0da -
+22 3-3 #8839ef #ccd0da -
+22 4-73 #4c4f69 #ccd0da -
+22 74-106 #8839ef #ccd0da -
+22 107-133 #4c4f69 #ccd0da -
+22 134-134 #1e66f5 #ccd0da bold
+22 135-144 #4c4f69 #ccd0da -
+22 145-147 #8c8fa1 #ccd0da -
+22 148-148 #4c4f69 #ccd0da -
+22 149-149 #1e66f5 #ccd0da -
+23 0-0 #1e66f5 #ccd0da -
+23 1-1 #4c4f69 #ccd0da -
+23 2-4 #8c8fa1 #ccd0da -
+23 5-5 #4c4f69 #ccd0da -
+23 6-6 #388e25 #ccd0da -
+23 7-37 #4c4f69 #ccd0da -
+23 38-41 #388e25 #ccd0da -
+23 42-133 #4c4f69 #ccd0da -
+23 134-134 #1e66f5 #ccd0da bold
+23 135-144 #4c4f69 #ccd0da -
+23 145-147 #8c8fa1 #ccd0da -
+23 148-148 #4c4f69 #ccd0da -
+23 149-149 #1e66f5 #ccd0da -
+24 0-0 #1e66f5 #ccd0da -
+24 1-1 #8839ef #acb0be -
+24 2-5 #4c4f69 #acb0be -
+24 6-6 #8839ef #acb0be -
+24 7-133 #4c4f69 #acb0be -
+24 134-134 #4c4f69 #acb0be bold
+24 135-148 #4c4f69 #acb0be -
+24 149-149 #1e66f5 #ccd0da -
+25 0-0 #1e66f5 #ccd0da -
+25 1-1 #4c4f69 #ccd0da -
+25 2-4 #8c8fa1 #ccd0da -
+25 5-5 #4c4f69 #ccd0da -
+25 6-6 #8839ef #ccd0da -
+25 7-36 #4c4f69 #ccd0da -
+25 37-43 #8839ef #ccd0da -
+25 44-133 #4c4f69 #ccd0da -
+25 134-134 #1e66f5 #ccd0da bold
+25 135-144 #4c4f69 #ccd0da -
+25 145-147 #8c8fa1 #ccd0da -
+25 148-148 #4c4f69 #ccd0da -
+25 149-149 #1e66f5 #ccd0da -
+26 0-0 #1e66f5 #ccd0da -
+26 1-1 #4c4f69 #ccd0da -
+26 2-4 #8c8fa1 #ccd0da -
+26 5-5 #4c4f69 #ccd0da -
+26 6-6 #8839ef #ccd0da -
+26 7-33 #4c4f69 #ccd0da -
+26 34-40 #8839ef #ccd0da -
+26 41-133 #4c4f69 #ccd0da -
+26 134-134 #1e66f5 #ccd0da bold
+26 135-144 #4c4f69 #ccd0da -
+26 145-147 #8c8fa1 #ccd0da -
+26 148-148 #4c4f69 #ccd0da -
+26 149-149 #1e66f5 #ccd0da -
+27 0-0 #1e66f5 #ccd0da -
+27 1-148 #4c4f69 #ccd0da -
+27 149-149 #1e66f5 #ccd0da -
+28 0-0 #1e66f5 #ccd0da -
+28 1-148 #4c4f69 #ccd0da -
+28 149-149 #1e66f5 #ccd0da -
+29 0-0 #1e66f5 #ccd0da -
+29 1-148 #4c4f69 #ccd0da -
+29 149-149 #1e66f5 #ccd0da -
+30 0-0 #1e66f5 #ccd0da -
+30 1-148 #4c4f69 #ccd0da -
+30 149-149 #1e66f5 #ccd0da -
+31 0-0 #1e66f5 #ccd0da -
+31 1-148 #4c4f69 #ccd0da -
+31 149-149 #1e66f5 #ccd0da -
+32 0-0 #1e66f5 #ccd0da -
+32 1-148 #4c4f69 #ccd0da -
+32 149-149 #1e66f5 #ccd0da -
+33 0-0 #1e66f5 #ccd0da -
+33 1-1 #4c4f69 #ccd0da -
+33 2-4 #1e66f5 #ccd0da -
+33 5-11 #4c4f69 #ccd0da -
+33 12-12 #1e66f5 #ccd0da -
+33 13-19 #4c4f69 #ccd0da -
+33 20-20 #1e66f5 #ccd0da -
+33 21-31 #4c4f69 #ccd0da -
+33 32-32 #1e66f5 #ccd0da -
+33 33-39 #4c4f69 #ccd0da -
+33 40-40 #1e66f5 #ccd0da -
+33 41-47 #4c4f69 #ccd0da -
+33 48-149 #1e66f5 #ccd0da -
+34 0-149 #8c8fa1 #ccd0da -
+35 0-149 #1e66f5 #ccd0da bold
+36 0-149 #4c4f69 #ccd0da -
+37 0-0 #8c8fa1 #e6e9ef -
+37 1-1 #4c4f69 #1e66f5 -
+37 2-7 #eff1f5 #1e66f5 bold
+37 8-8 #4c4f69 #1e66f5 -
+37 9-19 #4c4f69 #e6e9ef -
+37 20-34 #8839ef #e6e9ef -
+37 35-149 #4c4f69 #e6e9ef -
