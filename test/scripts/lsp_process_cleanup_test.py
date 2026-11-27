@@ -13,6 +13,7 @@ import unittest
 
 BEAM = r'''
 root = System.fetch_env!("LSP_TEST_ROOT")
+File.touch!(Path.join(root, "editor-booted"))
 args = System.argv()
 config = case args do
   ["expert"] -> hd(Minga.Language.Elixir.definition().language_servers)
@@ -25,11 +26,14 @@ end
 Process.unlink(supervisor)
 Minga.Events.subscribe(:lsp_status_changed)
 {:ok, client} = Minga.LSP.Supervisor.ensure_client(config, root)
+monitor = Process.monitor(client)
 receive do
   {:minga_event, :lsp_status_changed, %{status: :ready}} -> :ok
+  {:DOWN, ^monitor, :process, ^client, reason} -> raise "LSP client exited during initialization: #{inspect(reason)}"
 after
   15_000 -> raise "LSP did not initialize"
 end
+Process.demonitor(monitor, [:flush])
 Minga.Events.unsubscribe(:lsp_status_changed)
 uri = "file://" <> Path.join(root, "mix.exs")
 Minga.LSP.Client.did_open(client, uri, "elixir", File.read!(Path.join(root, "mix.exs")))
@@ -119,10 +123,16 @@ class LspProcessCleanupTest(unittest.TestCase):
                                           stdin=subprocess.PIPE, stdout=log, stderr=log, env=env)
                 owned = {}
                 try:
+                    booted = root / "editor-booted"
+                    wait_for(lambda: editor.poll() is not None or booted.exists(),
+                             60, "Mix did not reach the LSP test entry point")
+                    self.assertTrue(booted.exists(), "Mix exited before reaching the LSP test entry point")
+
                     ready = root / "editor-ready"
+                    # Start the readiness deadline after boot and leave time for the BEAM's 15-second error.
                     wait_for(lambda: editor.poll() is not None or (ready.is_file() and ready.stat().st_size),
-                             15, "Minga did not initialize its LSP client")
-                    self.assertIsNone(editor.poll(), "Minga exited before its LSP client initialized")
+                             20, "Minga booted but its LSP client did not initialize")
+                    self.assertIsNone(editor.poll(), "Minga exited while starting its LSP client")
                     self.assertEqual(int(ready.read_text()), editor.pid)
 
                     def ready_processes():
@@ -169,7 +179,9 @@ class LspProcessCleanupTest(unittest.TestCase):
                         self.assertEqual((root / "server-events").read_text().splitlines(), expected)
                 except (AssertionError, subprocess.TimeoutExpired) as failure:
                     log.seek(0)
-                    self.fail(f"{failure}\nMinga output:\n{log.read()}")
+                    stderr = root / "minga" / "minga.log"
+                    server_output = stderr.read_text(errors="replace") if stderr.exists() else ""
+                    self.fail(f"{failure}\nMinga output:\n{log.read()}\nLanguage server and guard stderr:\n{server_output}")
                 finally:
                     if editor.poll() is None:
                         editor.kill()
