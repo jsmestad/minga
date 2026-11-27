@@ -1,0 +1,127 @@
+# minga storyboard frame v1
+# scenario: edit.working
+# frontend: tui
+# theme: astrodark
+# size: 80x24
+# cursor: 1,6
+## text
+ ▌  storyboard.ex *
+▾  1  defmodule Limits do
+▾  1 │  def within_limit?(count) do
+   2 ▚  │ count >= 0 and
+   3 ▐  │ │ count < 90
+   4    end
+   5  end
+   6
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+Agent context
+ Working
+ Thinking
+progress
+0 tools / 1 file /
+  NORMAL  ◉ Needs you storyboard.ex ● ◐ Minga here                   Elixir 1:1
+## styles (row start-end fg bg attrs)
+0 0-0 #adb0bb #1a1d23 -
+0 1-1 #50a4e9 #1a1d23 bold
+0 2-17 #adb0bb #1a1d23 -
+0 18-19 #d09214 #1a1d23 -
+0 20-79 #adb0bb #1a1d23 -
+1 0-1 #595c66 #1e222a bold
+1 2-5 #adb0bb #1a1d23 -
+1 6-14 #dd97f1 #1a1d23 bold
+1 15-15 #adb0bb #1e222a -
+1 16-21 #dfab25 #1a1d23 -
+1 22-22 #adb0bb #1e222a -
+1 23-24 #dd97f1 #1a1d23 bold
+1 25-79 #adb0bb #1a1d23 -
+2 0-1 #595c66 #1a1d23 -
+2 2-4 #adb0bb #1a1d23 -
+2 5-5 #50a4e9 #1a1d23 -
+2 6-7 #adb0bb #1a1d23 -
+2 8-10 #dd97f1 #1a1d23 bold
+2 11-11 #adb0bb #1a1d23 -
+2 12-24 #5eb7ff #1a1d23 -
+2 25-25 #595c66 #1a1d23 -
+2 26-30 #adb0bb #1a1d23 -
+2 31-31 #595c66 #1a1d23 -
+2 32-32 #adb0bb #1a1d23 -
+2 33-34 #dd97f1 #1a1d23 bold
+2 35-79 #adb0bb #1a1d23 -
+3 0-4 #858892 #1a1d23 -
+3 5-5 #dd97f1 #4b3c57 -
+3 6-7 #adb0bb #1a1d23 -
+3 8-8 #858892 #1a1d23 -
+3 9-18 #adb0bb #1a1d23 -
+3 19-19 #f5983a #1a1d23 -
+3 20-20 #adb0bb #1a1d23 -
+3 21-23 #adb0bb #1a1d23 bold
+3 24-79 #adb0bb #1a1d23 -
+4 0-4 #858892 #1a1d23 -
+4 5-5 #dd97f1 #4b3c57 -
+4 6-7 #adb0bb #1a1d23 -
+4 8-8 #858892 #1a1d23 -
+4 9-9 #adb0bb #1a1d23 -
+4 10-10 #858892 #1a1d23 -
+4 11-19 #adb0bb #1a1d23 -
+4 20-21 #f5983a #1a1d23 -
+4 22-79 #adb0bb #1a1d23 -
+5 0-5 #858892 #1a1d23 -
+5 6-7 #adb0bb #1a1d23 -
+5 8-10 #dd97f1 #1a1d23 bold
+5 11-79 #adb0bb #1a1d23 -
+6 0-5 #858892 #1a1d23 -
+6 6-8 #dd97f1 #1a1d23 bold
+6 9-79 #adb0bb #1a1d23 -
+7 0-5 #858892 #1a1d23 -
+7 6-79 #adb0bb #1a1d23 -
+8 0-5 #858892 #1a1d23 -
+8 6-79 #595c66 #1a1d23 -
+9 0-5 #858892 #1a1d23 -
+9 6-79 #595c66 #1a1d23 -
+10 0-5 #858892 #1a1d23 -
+10 6-79 #595c66 #1a1d23 -
+11 0-5 #858892 #1a1d23 -
+11 6-79 #595c66 #1a1d23 -
+12 0-5 #858892 #1a1d23 -
+12 6-79 #595c66 #1a1d23 -
+13 0-5 #858892 #1a1d23 -
+13 6-79 #595c66 #1a1d23 -
+14 0-5 #858892 #1a1d23 -
+14 6-79 #595c66 #1a1d23 -
+15 0-5 #858892 #1a1d23 -
+15 6-79 #595c66 #1a1d23 -
+16 0-5 #858892 #1a1d23 -
+16 6-79 #595c66 #1a1d23 -
+17 0-5 #858892 #1a1d23 -
+17 6-79 #595c66 #1a1d23 -
+18 0-12 #50a4e9 #14161b bold
+18 13-14 #adb0bb #1a1d23 -
+18 15-79 #adb0bb #14161b -
+19 0-0 #adb0bb #26343f -
+19 1-7 #dd97f1 #26343f bold
+19 8-8 #adb0bb #26343f -
+19 9-79 #adb0bb #1a1d23 -
+20 0-9 #adb0bb #26343f -
+20 10-79 #adb0bb #1a1d23 -
+21 0-7 #adb0bb #14161b -
+21 8-79 #adb0bb #1a1d23 -
+22 0-18 #adb0bb #14161b -
+22 19-79 #adb0bb #1a1d23 -
+23 0-0 #595c66 #111317 -
+23 1-1 #adb0bb #50a4e9 -
+23 2-7 #1a1d23 #50a4e9 bold
+23 8-8 #adb0bb #50a4e9 -
+23 9-9 #adb0bb #111317 -
+23 10-20 #f5983a #111317 bold
+23 21-37 #adb0bb #111317 -
+23 38-49 #dd97f1 #111317 -
+23 50-79 #adb0bb #111317 -

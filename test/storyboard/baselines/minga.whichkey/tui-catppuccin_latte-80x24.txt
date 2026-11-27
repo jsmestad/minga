@@ -7,9 +7,9 @@
 ## text
  ▌  storyboard.ex *
 ▾  3  defmodule UsageLimit do
-   2    def label, do: "Your plan limit applies"
-   1    def window, do: 45
-   4    def retry?, do: true
+   2 ▚  def label, do: "Your plan limit applies"
+   1 ▐  def window, do: 45
+   4 ▐  def retry?, do: true
    1  end
    2
       ~
@@ -17,8 +17,8 @@
 ╭ SPC › a Minga · 1 needs you ─────────────────────────────────────────────────╮
 │ Tasks                   Conversation           Changes                       │
 │ a Tasks · 1 needs you   v Conversation split   r Pending reviews             │
-│ n New task              ? Ask about this       y Keep blocking change        │
-│ i Inspect subagent      e Rewrite selection    d Reject blocking change      │
+│ n New task              ? Ask about this       y Keep Minga change           │
+│ i Inspect subagent      e Rewrite selection    d Reject Minga change         │
 │ s Stop                  q Queue ›              u Reject all…                 │
 │                                                p Publish edits…              │
 │                                                                              │
@@ -43,7 +43,8 @@
 1 26-26 #4c4f69 #eff1f5 -
 1 27-28 #8839ef #eff1f5 bold
 1 29-79 #4c4f69 #eff1f5 -
-2 0-5 #5c5f77 #eff1f5 -
+2 0-4 #5c5f77 #eff1f5 -
+2 5-5 #8839ef #d5c3f4 -
 2 6-7 #4c4f69 #eff1f5 -
 2 8-10 #8839ef #eff1f5 bold
 2 11-11 #4c4f69 #eff1f5 -
@@ -53,7 +54,8 @@
 2 19-22 #d20f39 #eff1f5 -
 2 23-47 #40a02b #eff1f5 -
 2 48-79 #4c4f69 #eff1f5 -
-3 0-5 #5c5f77 #eff1f5 -
+3 0-4 #5c5f77 #eff1f5 -
+3 5-5 #8839ef #d5c3f4 -
 3 6-7 #4c4f69 #eff1f5 -
 3 8-10 #8839ef #eff1f5 bold
 3 11-11 #4c4f69 #eff1f5 -
@@ -63,7 +65,8 @@
 3 20-23 #d20f39 #eff1f5 -
 3 24-25 #fe640b #eff1f5 -
 3 26-79 #4c4f69 #eff1f5 -
-4 0-5 #7287fd #ccd0da bold
+4 0-4 #7287fd #ccd0da bold
+4 5-5 #8839ef #d5c3f4 -
 4 6-7 #4c4f69 #ccd0da -
 4 8-10 #8839ef #eff1f5 bold
 4 11-11 #4c4f69 #ccd0da -
@@ -99,8 +102,8 @@
 10 23-25 #4c4f69 #ccd0da -
 10 26-45 #5c5f77 #ccd0da -
 10 46-48 #4c4f69 #ccd0da -
-10 49-72 #5c5f77 #ccd0da -
-10 73-78 #4c4f69 #ccd0da -
+10 49-69 #5c5f77 #ccd0da -
+10 70-78 #4c4f69 #ccd0da -
 10 79-79 #7c7f93 #ccd0da -
 11 0-0 #7c7f93 #ccd0da -
 11 1-1 #4c4f69 #ccd0da -

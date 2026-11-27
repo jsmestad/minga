@@ -30,12 +30,12 @@ defmodule Minga.Buffer.ReviewRibbon do
         {[], members}
 
       {[first | _] = pieces, members} ->
-        {last, pieces} = List.pop_at(pieces, -1)
+        [last | reversed] = Enum.reverse(pieces)
         {start, members} = extend(history, document, first, :left, [], members)
         {finish, members} = extend(history, document, last, :right, [], members)
 
-        {fold_pieces(start ++ pieces ++ [last | Enum.reverse(finish)], history, document),
-         members}
+        ordered = :lists.reverse(reversed, [last | Enum.reverse(finish)])
+        {fold_pieces(start ++ ordered, history, document), members}
     end
   end
 
@@ -141,17 +141,21 @@ defmodule Minga.Buffer.ReviewRibbon do
 
       ribbons = regions(history, document, [{point, min(point + 1, size), point == size}])
 
-      case Enum.filter(ribbons, fn {_units, first, stop} -> first == stop and first == point end) do
-        [] ->
-          Enum.find(ribbons, fn {_units, first, stop} -> first <= point and point < stop end)
+      ribbon_at(ribbons, history, point)
+    end
+  end
 
-        [gap] ->
-          gap
+  defp ribbon_at(ribbons, history, point) do
+    case Enum.filter(ribbons, fn {_units, first, stop} -> first == stop and first == point end) do
+      [] ->
+        Enum.find(ribbons, fn {_units, first, stop} -> first <= point and point < stop end)
 
-        gaps ->
-          unit = UndoHistory.review_unit_at(history, point)
-          Enum.find(gaps, hd(gaps), fn {units, _, _} -> unit in units end)
-      end
+      [gap] ->
+        gap
+
+      [fallback | _] = gaps ->
+        unit = UndoHistory.review_unit_at(history, point)
+        Enum.find(gaps, fallback, fn {units, _, _} -> unit in units end)
     end
   end
 
@@ -172,17 +176,19 @@ defmodule Minga.Buffer.ReviewRibbon do
 
   defp next_head(history, doc, point, direction) do
     with raw when is_integer(raw) <- UndoHistory.review_motion(history, point, direction, 1),
-         {units, head, stop} <- at(history, doc, raw) do
-      if direction == :next and head <= point do
-        skip_to = if match?([_, _ | _], units), do: max(raw, stop - 1), else: raw
-        first_gap_after(history, point, skip_to) || next_head(history, doc, skip_to, :next)
-      else
-        head
-      end
+         {_, _, _} = ribbon <- at(history, doc, raw) do
+      visible_head(history, doc, point, direction, raw, ribbon)
     else
       _ -> nil
     end
   end
+
+  defp visible_head(history, doc, point, :next, raw, {units, head, stop}) when head <= point do
+    skip_to = if match?([_, _ | _], units), do: max(raw, stop - 1), else: raw
+    first_gap_after(history, point, skip_to) || next_head(history, doc, skip_to, :next)
+  end
+
+  defp visible_head(_history, _doc, _point, _direction, _raw, {_, head, _}), do: head
 
   @doc "Prepares the current ribbon and additional ribbons with previously unselected units."
   @spec prepare(UndoHistory.t(), Document.t(), non_neg_integer(), pos_integer()) ::

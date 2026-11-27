@@ -1,4 +1,27 @@
 {
+ "authorship": [
+  {
+   "column": 0,
+   "head": true,
+   "role": 0,
+   "row": 1,
+   "shared": false
+  },
+  {
+   "column": 0,
+   "head": false,
+   "role": 0,
+   "row": 2,
+   "shared": false
+  },
+  {
+   "column": 0,
+   "head": false,
+   "role": 0,
+   "row": 3,
+   "shared": false
+  }
+ ],
  "elements": [
   {
    "frame": [
