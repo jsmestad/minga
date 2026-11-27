@@ -1,0 +1,187 @@
+{
+ "elements": [
+  {
+   "frame": [
+    56,
+    733,
+    563.5,
+    19
+   ],
+   "label": "Agent prompt, pane 65534",
+   "role": "AXTextArea"
+  },
+  {
+   "frame": [
+    267,
+    380,
+    166,
+    16
+   ],
+   "role": "AXStaticText",
+   "value": "Session started \u00b7 09:41:00 UTC"
+  },
+  {
+   "frame": [
+    59,
+    439,
+    410,
+    18
+   ],
+   "role": "AXStaticText",
+   "value": "Review the marketing site for unfair claims and unnecessary jargon."
+  },
+  {
+   "frame": [
+    59,
+    497,
+    458,
+    18
+   ],
+   "role": "AXStaticText",
+   "value": "I will check facts, fairness, jargon and what a skeptical reader needs to see."
+  },
+  {
+   "frame": [
+    287,
+    671,
+    126,
+    16
+   ],
+   "role": "AXStaticText",
+   "value": "Agent UI registry online"
+  },
+  {
+   "frame": [
+    893,
+    344,
+    166,
+    16
+   ],
+   "role": "AXStaticText",
+   "value": "Session started \u00b7 09:41:00 UTC"
+  },
+  {
+   "frame": [
+    697,
+    403,
+    455,
+    50
+   ],
+   "role": "AXStaticText",
+   "value": "Editorial and Jargon Roaster\nReview the site as a skeptical reader. Find unclear jargon and comparisons without evidence."
+  },
+  {
+   "frame": [
+    697,
+    574,
+    496,
+    34
+   ],
+   "role": "AXStaticText",
+   "value": "Lead with what the editor does for the reader. Replace unsupported comparisons with measured startup numbers."
+  },
+  {
+   "frame": [
+    669,
+    688,
+    510,
+    30
+   ],
+   "role": "AXStaticText",
+   "value": "Lead with what the editor does for the reader. Replace unsupported comparisons with measured startup numbers."
+  }
+ ],
+ "grid": {
+  "cols": 159,
+  "rows": 38
+ },
+ "parts": [
+  {
+   "frame": [
+    0,
+    804,
+    1280,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    6,
+    804,
+    61,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "mode: NORMAL"
+  },
+  {
+   "frame": [
+    75,
+    804,
+    41,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filename: [no file]"
+  },
+  {
+   "frame": [
+    124,
+    804,
+    90,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "minga: Minga working"
+  },
+  {
+   "frame": [
+    1230,
+    804,
+    22,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filetype: Text"
+  },
+  {
+   "frame": [
+    1260,
+    804,
+    14,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "position: 1:1"
+  },
+  {
+   "frame": [
+    6,
+    807,
+    61,
+    18
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "baseline": 819.5,
+   "frame": [
+    12,
+    809,
+    49,
+    14
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  }
+ ],
+ "scenario": "minga.subagent.peek",
+ "size": "1280",
+ "theme": "astrodark",
+ "window": {
+  "height": 828,
+  "width": 1280
+ }
+}

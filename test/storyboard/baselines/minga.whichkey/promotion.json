@@ -1,40 +1,36 @@
 {
   "macos": {
-    "commit": "ae58ba87ec349e7099b41cba0cc177ac885c2113",
+    "commit": "a6da83728be52c0475697bbf9c7000d78cd73eef",
     "files": {
-      "macos-astrodark-1280.json": "4f00dc749eb475ec548aee01a4ac005f58410750b0ec2c9171f54a051d974366",
-      "macos-astrodark-1440.json": "b678458e14f3e11f14ea024bbc53e02bae43f815dfbae824ad0954221320b6b1",
-      "macos-catppuccin_frappe-1280.json": "95345af44acb647ba5dc92ea709d4d41a6bb74974dd423e6f7a52ad3fcd8d658",
-      "macos-catppuccin_frappe-1440.json": "de82110415e16b716d2296a7ef555bbf62ada5c4a8557010595ea4318a1f8b26",
-      "macos-catppuccin_latte-1280.json": "5c2acde603f393a2f2e05e507c6d621ab2ce8d2f454f491fb2ab7cad92d264b7",
-      "macos-catppuccin_latte-1440.json": "eb0214aa28cd9fedbf44afaef2a3da7d96aa0210ae93b2e12092960df596155a"
+      "macos-astrodark-1280.json": "3fb07a68f8dfb664d3c56b13b6639581658cc10697c13e4978a68bf4e3a1d06e",
+      "macos-astrodark-1440.json": "0c8102fee3000b63ca3b68d30eb15ab071d785e4484cf1f154290e9ced8df9de",
+      "macos-catppuccin_frappe-1280.json": "44c8e41553b23f3a758c017c5f061e90f7f152c47fc565146b53e3efc54bfd83",
+      "macos-catppuccin_frappe-1440.json": "1080a70beea54d62000c98ca0301e11e855b740fb81eb6dd556a43aa76095a59",
+      "macos-catppuccin_latte-1280.json": "c7e1f9ac5a9f694537d3a37ef142f31204e769d21ce5ce993a057db6df925229",
+      "macos-catppuccin_latte-1440.json": "9e99d320f6b7dec2846eaeba33145c2cd82865545f41e63ec82f3877e385ca28"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "5b7c00fc467dc660583c06cd819d6f023721447e097ecbba3ae1617e28e17b68",
-      "macos-astrodark-1440.json": "2cb78565c390172bc0ce6f5be1c5eb108b5fd2086da377f8b09f83b6d9803924",
-      "macos-catppuccin_frappe-1280.json": "bacf535b7f939c179efaf35a3c8486a63cd6372d94a98e4cd4d1702398ea989b",
-      "macos-catppuccin_frappe-1440.json": "57c66d32af59ab4712d9b9c60924c9656d6536165c6be8e9c6fcd605db208e11",
-      "macos-catppuccin_latte-1280.json": "080f341f7ab0ad11baed49c4bd47996ecffed23835e8c6a5b21c4d6a3022d0d0",
-      "macos-catppuccin_latte-1440.json": "a4d9be6fa01ed5eb3dc0baf31622bcd7a5fdcef48a3ee6ad7a7f953addc3d0c8"
+      "macos-astrodark-1280.json": "49be8a78b474faba62f0c532d5fa6bb5cc401262a7497d39e6a514019fa5f933",
+      "macos-astrodark-1440.json": "f8ba159e2796c3591f4483104a0c70f4ee95a4b4fdd8dd28cd9e003fb4908647",
+      "macos-catppuccin_frappe-1280.json": "4c62cadfd85cabb7aa8004bc9fbf9bb67283c98e37ecbb559323049c5a1f6e93",
+      "macos-catppuccin_frappe-1440.json": "abf956e4eb202f81e1e7d5145ddb2ea0bc0172da6d4b574d08aa27e7a24368b4",
+      "macos-catppuccin_latte-1280.json": "7eaf6b341af1b35c76e85aa82d2ccbd432864a7649b0d486ff747a039fb4462f",
+      "macos-catppuccin_latte-1440.json": "1328532368bf436d80d4b8c44f46c562887c77b068cc3bf8fc14f901a1e6fc01"
     }
-  },
-  "platform_specific": {
-    "frontend": "macos",
-    "reason": "Native Command alias hints and full-width native row hit targets; terminal rows and hints are unchanged."
   },
   "scenario": "minga.whichkey",
   "tui": {
-    "commit": "f777d3e78615c1651d423d05be0640b817531a3b",
+    "commit": "a6da83728be52c0475697bbf9c7000d78cd73eef",
     "files": {
-      "tui-astrodark-120x40.txt": "72676079f5ebf0fa9a9ecc9bdaa592addd812e7fba16ed7d7b9f5dea854e4b6c",
-      "tui-astrodark-150x38.txt": "a218ae56b63b8a89f2e3c3b273df5e708d8b845eb7cc30a1ca3f8d55e9cc2465",
-      "tui-astrodark-80x24.txt": "3b0a27fd88fdd709a5b3511edc8b25f63ce3dbaa4ab0d48c608dc4c1a24e4987",
-      "tui-catppuccin_frappe-120x40.txt": "72f9df4476da32afa4438f4b829881eed97c5ec87bb4544c4476670355467bac",
-      "tui-catppuccin_frappe-150x38.txt": "d8972c9dd9c6ee72afc1ccef523a06fd8a1787f146d6a1f13fc3e38f70f36f1a",
-      "tui-catppuccin_frappe-80x24.txt": "cf771980b847903c9f2722e29c00e1e9802d004fedfc6bad2a74b637617710d4",
-      "tui-catppuccin_latte-120x40.txt": "396cb444cf50ad22de238ce2a214dd7e1c7457722985ba7b66b8480bf488db32",
-      "tui-catppuccin_latte-150x38.txt": "4a82d05af9aa6ad9ee5c1ec0d9e2e2a38e6621788675a71ed3e37305335902b5",
-      "tui-catppuccin_latte-80x24.txt": "468452055f59c35c30d45f9239bf9d79286903d72e9c5ce094e62ef67faf4cd5"
+      "tui-astrodark-120x40.txt": "489276590b3cca059bac4a07bc8f9cb2ef56abe1c2f380d8aab817d50375f8db",
+      "tui-astrodark-150x38.txt": "5c0f912fdc07cd907b755112448cddf2c8ea1ca5e6dfd97c13e18ce9dafdef11",
+      "tui-astrodark-80x24.txt": "7d2a6bb7a89e17ea5dd0dca9e31bc3e61b3d5738819ca55cdc245334e981e426",
+      "tui-catppuccin_frappe-120x40.txt": "a2ad201ec56fcd7526a7e17f0444211aed7294fdc18ec91f8e04aca2644989a9",
+      "tui-catppuccin_frappe-150x38.txt": "6c9ae70aa33446cb4f478f98d60d5632e8d8118aa8be7bccf048c26d87691289",
+      "tui-catppuccin_frappe-80x24.txt": "96cd1ff57d67ce1da356bebacccb4b6365911c97f4a951db6734c65e8b6fe739",
+      "tui-catppuccin_latte-120x40.txt": "f491af80b3e627ab108b39ba87e785fafd691c055db21ab74df06ea71cd7cd5a",
+      "tui-catppuccin_latte-150x38.txt": "6f9b64db77f07d14c8fb27e79362c67afc6c13efcc4351e27dd16a87d3d84c4c",
+      "tui-catppuccin_latte-80x24.txt": "641925b57a04a8b63a5ac4076a97990bf4f3c25c32e5e3da5f7a584032e4976a"
     }
   }
 }

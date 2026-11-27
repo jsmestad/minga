@@ -1,0 +1,250 @@
+# minga storyboard frame v1
+# scenario: minga.subagent.peek
+# frontend: tui
+# theme: catppuccin_latte
+# size: 150x38
+# cursor: none
+## text
+Spaces · folder minga.subagent.peek (1 tab) · ▎cpu I will check facts, fairness, (1 tab, 1 running)
+ ▌ 󰚩 Review the marketing si…
+ 󰚩 Agent  openai / Offline review  ◐ Working   ◌ default [History] [Help] │Review the marketing site for unfair clai… › Editorial and Jargon Roaster ×
+  Transcript ──────────────────────────────────────────────────────────── │● Done · 0s
+   i System  Session started · 09:41:00 UTC                               │● ◐ ◐ ◐ 1 of 4
+                                                                          │▸ Brief  za
+   You                                                                    │So far
+     Review the marketing site for unfair claims and unnecessary          │  i System  Session started · 09:41:00 UTC
+                                                                          │
+   Minga                                                                  │  You
+     I will check facts, fairness, jargon and what a skeptical reader     │    Editorial and Jargon Roaster
+     needs to see.                                                        │    Review the site as a skeptical reader. Find unclear jargon and
+  ● Started Editorial and Jargon Roaster              · 1 of 4 reports in │  ● Read index.html
+     [Read retained output]  Ctrl+Alt+O reads latest                      │  ● Read guide.html
+  ◐ Started Fact-Check Auditor                                            │  ● Read compare.html
+  ◐ Started Competitive Fairness Critic                                   │
+  ◐ Started Technical Change Skeptic                                      │  Minga
+                                                                          │    Lead with what the editor does for the reader. Replace unsupported
+   i System  Agent UI registry online                                     │    comparisons with measured startup numbers.
+                                                                          │
+                                                                          │  ◌ Usage · in 0 · out 0
+                                                                          │
+                                                                          │
+                                                                          │
+                                                                          │
+                                                                          │
+                                                                          │
+                                                                          │
+                                                                          │
+                                                                          │
+                                                                          │
+                                                                          │
+  Working · thinking default                                              │
+ ╭ Running...                                                           ╮ │Result
+ │ ❯ NORMAL  Ask Minga to edit, explain, search, or run tools           │ │Lead with what the editor does for the reader. Replace unsupported
+ │Send · Steer · Queue Next · Stop · Attachments                        │ │comparisons with measured startup numbers.
+ ╰──────────────────────────────────────────────────────────────────────╯ │Message this subagent
+  NORMAL  [no file] ◐ Minga working                                                                                                          Text 1:1
+## styles (row start-end fg bg attrs)
+0 0-45 #8c8fa1 #ccd0da -
+0 46-79 #1e66f5 #ccd0da bold
+0 80-98 #8c8fa1 #ccd0da -
+0 99-149 #4c4f69 #eff1f5 -
+1 0-0 #4c4f69 #eff1f5 -
+1 1-1 #1e66f5 #eff1f5 bold
+1 2-149 #4c4f69 #eff1f5 -
+2 0-0 #4c4f69 #eff1f5 -
+2 1-7 #1e66f5 #ccd0da bold
+2 8-18 #8c8fa1 #ccd0da -
+2 19-32 #1e66f5 #ccd0da -
+2 33-33 #8c8fa1 #ccd0da -
+2 34-34 #4c4f69 #8839ef -
+2 35-43 #ccd0da #8839ef bold
+2 44-44 #4c4f69 #8839ef -
+2 45-55 #8c8fa1 #ccd0da -
+2 56-56 #4c4f69 #eff1f5 -
+2 57-65 #8c8fa1 #ccd0da -
+2 66-66 #4c4f69 #eff1f5 -
+2 67-72 #8c8fa1 #ccd0da -
+2 73-73 #4c4f69 #eff1f5 -
+2 74-74 #7c7f93 #eff1f5 -
+2 75-147 #4c4f69 #eff1f5 bold
+2 148-149 #4c4f69 #eff1f5 -
+3 0-0 #4c4f69 #eff1f5 -
+3 1-12 #8c8fa1 #eff1f5 bold
+3 13-72 #8c8fa1 #eff1f5 -
+3 73-73 #4c4f69 #eff1f5 -
+3 74-74 #7c7f93 #eff1f5 -
+3 75-75 #388e25 #eff1f5 -
+3 76-149 #4c4f69 #eff1f5 -
+4 0-2 #4c4f69 #eff1f5 -
+4 3-10 #1e66f5 #eff1f5 bold
+4 11-42 #8c8fa1 #eff1f5 -
+4 43-73 #4c4f69 #eff1f5 -
+4 74-74 #7c7f93 #eff1f5 -
+4 75-75 #eff1f5 #388e25 reverse
+4 76-76 #4c4f69 #eff1f5 -
+4 77-77 #8839ef #eff1f5 -
+4 78-78 #4c4f69 #eff1f5 -
+4 79-79 #8839ef #eff1f5 -
+4 80-80 #4c4f69 #eff1f5 -
+4 81-81 #8839ef #eff1f5 -
+4 82-149 #4c4f69 #eff1f5 -
+5 0-73 #4c4f69 #eff1f5 -
+5 74-74 #7c7f93 #eff1f5 -
+5 75-85 #4c4f69 #eff1f5 bold
+5 86-149 #4c4f69 #eff1f5 -
+6 0-0 #4c4f69 #eff1f5 -
+6 1-5 #1e66f5 #eff1f5 bold
+6 6-73 #4c4f69 #eff1f5 -
+6 74-74 #7c7f93 #eff1f5 -
+6 75-80 #4c4f69 #eff1f5 bold
+6 81-149 #4c4f69 #eff1f5 -
+7 0-73 #4c4f69 #eff1f5 -
+7 74-74 #7c7f93 #eff1f5 -
+7 75-76 #4c4f69 #eff1f5 -
+7 77-84 #1e66f5 #eff1f5 bold
+7 85-116 #8c8fa1 #eff1f5 -
+7 117-149 #4c4f69 #eff1f5 -
+8 0-73 #4c4f69 #eff1f5 -
+8 74-74 #7c7f93 #eff1f5 -
+8 75-149 #4c4f69 #eff1f5 -
+9 0-0 #4c4f69 #eff1f5 -
+9 1-7 #8839ef #eff1f5 bold
+9 8-73 #4c4f69 #eff1f5 -
+9 74-74 #7c7f93 #eff1f5 -
+9 75-79 #1e66f5 #eff1f5 bold
+9 80-149 #4c4f69 #eff1f5 -
+10 0-0 #4c4f69 #eff1f5 -
+10 1-4 #40a02b #eff1f5 -
+10 5-73 #4c4f69 #eff1f5 -
+10 74-74 #7c7f93 #eff1f5 -
+10 75-149 #4c4f69 #eff1f5 -
+11 0-0 #4c4f69 #eff1f5 -
+11 1-4 #40a02b #eff1f5 -
+11 5-73 #4c4f69 #eff1f5 -
+11 74-74 #7c7f93 #eff1f5 -
+11 75-149 #4c4f69 #eff1f5 -
+12 0-0 #4c4f69 #eff1f5 -
+12 1-3 #388e25 #eff1f5 -
+12 4-52 #4c4f69 #eff1f5 underline
+12 53-73 #4c4f69 #eff1f5 -
+12 74-74 #7c7f93 #eff1f5 -
+12 75-77 #388e25 #eff1f5 -
+12 78-149 #4c4f69 #eff1f5 -
+13 0-73 #4c4f69 #eff1f5 -
+13 74-74 #7c7f93 #eff1f5 -
+13 75-77 #388e25 #eff1f5 -
+13 78-149 #4c4f69 #eff1f5 -
+14 0-0 #4c4f69 #eff1f5 -
+14 1-3 #8839ef #eff1f5 -
+14 4-72 #4c4f69 #eff1f5 underline
+14 73-73 #4c4f69 #eff1f5 -
+14 74-74 #7c7f93 #eff1f5 -
+14 75-77 #388e25 #eff1f5 -
+14 78-149 #4c4f69 #eff1f5 -
+15 0-0 #4c4f69 #eff1f5 -
+15 1-3 #8839ef #eff1f5 -
+15 4-72 #4c4f69 #eff1f5 underline
+15 73-73 #4c4f69 #eff1f5 -
+15 74-74 #7c7f93 #eff1f5 -
+15 75-149 #4c4f69 #eff1f5 -
+16 0-0 #4c4f69 #eff1f5 -
+16 1-3 #8839ef #eff1f5 -
+16 4-72 #4c4f69 #eff1f5 underline
+16 73-73 #4c4f69 #eff1f5 -
+16 74-74 #7c7f93 #eff1f5 -
+16 75-81 #8839ef #eff1f5 bold
+16 82-149 #4c4f69 #eff1f5 -
+17 0-73 #4c4f69 #eff1f5 -
+17 74-74 #7c7f93 #eff1f5 -
+17 75-78 #40a02b #eff1f5 -
+17 79-149 #4c4f69 #eff1f5 -
+18 0-2 #4c4f69 #eff1f5 -
+18 3-10 #1e66f5 #eff1f5 bold
+18 11-36 #8c8fa1 #eff1f5 -
+18 37-73 #4c4f69 #eff1f5 -
+18 74-74 #7c7f93 #eff1f5 -
+18 75-78 #40a02b #eff1f5 -
+18 79-149 #4c4f69 #eff1f5 -
+19 0-73 #4c4f69 #eff1f5 -
+19 74-74 #7c7f93 #eff1f5 -
+19 75-149 #4c4f69 #eff1f5 -
+20 0-73 #4c4f69 #eff1f5 -
+20 74-74 #7c7f93 #eff1f5 -
+20 75-149 #8c8fa1 #eff1f5 -
+21 0-73 #4c4f69 #eff1f5 -
+21 74-74 #7c7f93 #eff1f5 -
+21 75-149 #4c4f69 #eff1f5 -
+22 0-73 #4c4f69 #eff1f5 -
+22 74-74 #7c7f93 #eff1f5 -
+22 75-149 #4c4f69 #eff1f5 -
+23 0-73 #4c4f69 #eff1f5 -
+23 74-74 #7c7f93 #eff1f5 -
+23 75-149 #4c4f69 #eff1f5 -
+24 0-73 #4c4f69 #eff1f5 -
+24 74-74 #7c7f93 #eff1f5 -
+24 75-149 #4c4f69 #eff1f5 -
+25 0-73 #4c4f69 #eff1f5 -
+25 74-74 #7c7f93 #eff1f5 -
+25 75-149 #4c4f69 #eff1f5 -
+26 0-73 #4c4f69 #eff1f5 -
+26 74-74 #7c7f93 #eff1f5 -
+26 75-149 #4c4f69 #eff1f5 -
+27 0-73 #4c4f69 #eff1f5 -
+27 74-74 #7c7f93 #eff1f5 -
+27 75-149 #4c4f69 #eff1f5 -
+28 0-73 #4c4f69 #eff1f5 -
+28 74-74 #7c7f93 #eff1f5 -
+28 75-149 #4c4f69 #eff1f5 -
+29 0-73 #4c4f69 #eff1f5 -
+29 74-74 #7c7f93 #eff1f5 -
+29 75-149 #4c4f69 #eff1f5 -
+30 0-73 #4c4f69 #eff1f5 -
+30 74-74 #7c7f93 #eff1f5 -
+30 75-149 #4c4f69 #eff1f5 -
+31 0-73 #4c4f69 #eff1f5 -
+31 74-74 #7c7f93 #eff1f5 -
+31 75-149 #4c4f69 #eff1f5 -
+32 0-0 #4c4f69 #eff1f5 -
+32 1-72 #8c8fa1 #eff1f5 -
+32 73-73 #4c4f69 #eff1f5 -
+32 74-74 #7c7f93 #eff1f5 -
+32 75-149 #4c4f69 #eff1f5 -
+33 0-0 #4c4f69 #eff1f5 -
+33 1-72 #1e66f5 #eff1f5 -
+33 73-73 #4c4f69 #eff1f5 -
+33 74-74 #7c7f93 #eff1f5 -
+33 75-80 #4c4f69 #eff1f5 bold
+33 81-149 #4c4f69 #eff1f5 -
+34 0-0 #4c4f69 #eff1f5 -
+34 1-1 #1e66f5 #eff1f5 -
+34 2-12 #1e66f5 #eff1f5 bold
+34 13-70 #8c8fa1 #eff1f5 italic
+34 71-71 #4c4f69 #eff1f5 -
+34 72-72 #1e66f5 #eff1f5 -
+34 73-73 #4c4f69 #eff1f5 -
+34 74-74 #7c7f93 #eff1f5 -
+34 75-149 #4c4f69 #eff1f5 -
+35 0-0 #4c4f69 #eff1f5 -
+35 1-1 #1e66f5 #eff1f5 -
+35 2-5 #8c8fa1 #eff1f5 -
+35 6-8 #4c4f69 #eff1f5 -
+35 9-13 #8c8fa1 #eff1f5 -
+35 14-16 #4c4f69 #eff1f5 -
+35 17-26 #8c8fa1 #eff1f5 -
+35 27-71 #4c4f69 #eff1f5 -
+35 72-72 #1e66f5 #eff1f5 -
+35 73-73 #4c4f69 #eff1f5 -
+35 74-74 #7c7f93 #eff1f5 -
+35 75-149 #4c4f69 #eff1f5 -
+36 0-0 #4c4f69 #eff1f5 -
+36 1-72 #1e66f5 #eff1f5 -
+36 73-73 #4c4f69 #eff1f5 -
+36 74-74 #7c7f93 #eff1f5 -
+36 75-149 #4c4f69 #eff1f5 -
+37 0-0 #8c8fa1 #e6e9ef -
+37 1-1 #4c4f69 #1e66f5 -
+37 2-7 #eff1f5 #1e66f5 bold
+37 8-8 #4c4f69 #1e66f5 -
+37 9-19 #4c4f69 #e6e9ef -
+37 20-34 #8839ef #e6e9ef -
+37 35-149 #4c4f69 #e6e9ef -
