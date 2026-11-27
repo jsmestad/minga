@@ -191,7 +191,7 @@ defmodule Minga.Storyboard.FlowInvariantsTest do
         assert model.which_key != nil or Model.open?(model, :picker) or
                  Model.open?(model, :minibuffer) or composer_ready?(model) or
                  drawer_offers_action?(model) or peek_offers_action?(model) or
-                 modeline_offers_action?(model),
+                 modeline_offers_action?(model) or review_offers_action?(model),
                "#{entry.id} shows a state that needs action without offering one: #{Model.signature(model)}"
       end
     end
@@ -269,6 +269,13 @@ defmodule Minga.Storyboard.FlowInvariantsTest do
       _other -> false
     end)
   end
+
+  defp review_offers_action?(%Model{review_text: text, focus: %{surface: :editor}})
+       when is_binary(text) do
+    String.contains?(text, ["y Keep", "q Close"])
+  end
+
+  defp review_offers_action?(%Model{}), do: false
 
   @spec action_state?(String.t()) :: boolean()
   defp action_state?(id), do: Enum.any?(Inventory.fetch!(id)["states"], &(&1 in @action_states))

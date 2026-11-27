@@ -202,6 +202,18 @@ defmodule MingaEditor.State.Tab.Context do
     end
   end
 
+  @doc "Tracks a background file in this tab's snapshot without changing its active buffer."
+  @spec adopt_background_buffer(t(), pid()) :: t()
+  def adopt_background_buffer(%__MODULE__{buffers: %Buffers{} = buffers} = context, buffer) do
+    if buffer in buffers.list do
+      context
+    else
+      %{context | buffers: Buffers.add_background(buffers, buffer)}
+    end
+  end
+
+  def adopt_background_buffer(%__MODULE__{} = context, _buffer), do: context
+
   @doc deprecated:
          "Use from_workspace/1 for struct inputs. This remains for legacy map inputs only."
   @spec from_workspace_map(map()) :: t()

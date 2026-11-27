@@ -145,6 +145,8 @@ defmodule Minga.Command.Parser do
           | {:global, String.t(), String.t()}
           | {:normal, range(), String.t()}
           | {:minga_review, range(), :keep | :reject}
+          | {:task_review, []}
+          | {:quickfix_do, String.t()}
           | {:rename, String.t()}
           | {:unknown, String.t()}
 
@@ -309,6 +311,8 @@ defmodule Minga.Command.Parser do
   defp do_parse("agent-new"), do: {:agent_new_session, []}
   defp do_parse("Minga keep"), do: {:minga_review, :current_line, :keep}
   defp do_parse("Minga reject"), do: {:minga_review, :current_line, :reject}
+  defp do_parse("Minga review"), do: {:task_review, []}
+  defp do_parse("cdo " <> command), do: {:quickfix_do, String.trim(command)}
   defp do_parse("agent-clear-history"), do: {:agent_clear_history, []}
   defp do_parse("agent-model " <> model), do: {:agent_set_model, [String.trim(model)]}
   defp do_parse("agent-models"), do: {:agent_pick_model, []}

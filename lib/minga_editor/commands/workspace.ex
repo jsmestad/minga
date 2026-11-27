@@ -14,6 +14,7 @@ defmodule MingaEditor.Commands.Workspace do
 
   alias Minga.Buffer
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
+  alias MingaEditor.Shell.Traditional.TaskReviewWorkflow
   alias Minga.Project.FileRef
   alias MingaAgent.ProjectView
   alias MingaEditor.Agent.DraftWorkflow
@@ -673,6 +674,38 @@ defmodule MingaEditor.Commands.Workspace do
 
   command(:workspace_list, "List workspaces", execute: &workspace_list/1)
   command(:workspace_pending_reviews, "Pending reviews", execute: &workspace_pending_reviews/1)
+
+  command(:task_review, "Review task changes",
+    execute: &TaskReviewWorkflow.open/1,
+    requires_buffer: false
+  )
+
+  command(:task_review_keep, "Keep change", execute: &TaskReviewWorkflow.decide(&1, :keep))
+  command(:task_review_reject, "Reject change", execute: &TaskReviewWorkflow.decide(&1, :reject))
+  command(:task_review_diff, "Toggle inline diff", execute: &TaskReviewWorkflow.toggle_diff/1)
+
+  command(:task_review_keep_all, "Keep all changes",
+    execute: &TaskReviewWorkflow.confirm_keep_all/1
+  )
+
+  command(:task_review_next, "Next change", execute: &TaskReviewWorkflow.navigate(&1, :next))
+
+  command(:task_review_previous, "Previous change",
+    execute: &TaskReviewWorkflow.navigate(&1, :previous)
+  )
+
+  command(:task_review_jump, "Go to change", execute: &TaskReviewWorkflow.jump/1)
+  command(:task_review_close, "Close review", execute: &TaskReviewWorkflow.close/1)
+  command(:task_review_escape, "Dismiss review or preview", execute: &TaskReviewWorkflow.escape/1)
+
+  command(:quickfix_next, "Next quickfix location",
+    execute: &MingaEditor.QuickfixWorkflow.step(&1, :next)
+  )
+
+  command(:quickfix_previous, "Previous quickfix location",
+    execute: &MingaEditor.QuickfixWorkflow.step(&1, :previous)
+  )
+
   command(:workspace_move_file, "Move file to workspace…", execute: &workspace_move_file/1)
   command(:workspace_copy_file, "Copy file to workspace…", execute: &workspace_copy_file/1)
   command(:workspace_rename, "Rename workspace", execute: &workspace_rename/1)

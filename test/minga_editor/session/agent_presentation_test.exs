@@ -98,8 +98,8 @@ defmodule MingaEditor.Session.AgentPresentationTest do
     assert resumed.windows.map[1] == human
   end
 
-  test "the last resolution returns to chat while a remaining hunk keeps the review" do
-    review = DiffReview.new("selected.ex", "before", "after")
+  test "the last proposal decision returns to chat and a remaining hunk keeps the review" do
+    review = "selected.ex" |> DiffReview.new("before", "after") |> DiffReview.as_proposal()
 
     view =
       View.new()
@@ -120,7 +120,7 @@ defmodule MingaEditor.Session.AgentPresentationTest do
       |> String.replace("line 1\n", "first changed\n")
       |> String.replace("line 20", "last changed")
 
-    review = DiffReview.new("selected.ex", before, after_content)
+    review = "selected.ex" |> DiffReview.new(before, after_content) |> DiffReview.as_proposal()
     view = View.replace_preview(view, Preview.set_diff(Preview.new(), review))
     assert {:ok, incomplete, :no_write} = View.resolve_diff_review(view, :accept_current)
     assert View.agent_body(incomplete) == :review

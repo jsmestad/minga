@@ -100,6 +100,7 @@ defmodule Minga.Command.ParserTest do
 
     test "Minga review actions preserve their particular line range" do
       assert_parse_cases([
+        {"Minga review", {:task_review, []}},
         {"Minga keep", {:minga_review, :current_line, :keep}},
         {"'<,'>Minga keep", {:minga_review, :visual, :keep}},
         {"%Minga reject", {:minga_review, :whole_buffer, :reject}},

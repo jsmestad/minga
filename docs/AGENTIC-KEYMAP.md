@@ -142,7 +142,7 @@ Press `SPC` in Normal mode. These sequences also work from the agent view, the f
 | `SPC a s` | Stop the agent's current turn; queued messages stay queued. It works from any buffer: with a file in front it stops the conversation shown last (the one the modeline speaks for), or the only one working. With several working and none shown last it stops nothing and says so. On macOS, `⌘.` does the same from a file too |
 | `SPC a ?` | Ask about the current line or the selection, inline |
 | `SPC a e` | Rewrite the selection, inline |
-| `SPC a r` | Pending reviews |
+| `SPC a r` | Open the connected task's [review buffer](#in-the-task-review) beside the file |
 | `SPC a p` | Publish or discard the agent's staged edits, in one prompt |
 | `SPC a u` | Confirm rejection of all pending changes from the latest Minga task in this buffer. Your edits stay |
 | `SPC a d` | Reject the pending Minga change at the cursor or all changes touched by the Visual selection |
@@ -305,6 +305,24 @@ With `set :editing_model, :cua`, letters type text in a file at all times, as in
 | `⌘A` | `⌃A` | Select all |
 | `⌘S` | `⌃S` | Save |
 | | `⌃P` | Run a command by name |
+
+## In the task review
+
+Open `*minga-review*` with `SPC a r` to go through the connected task's changes across files. Keep records the decision without changing the text. Reject restores only the offered change and refuses when it would overwrite someone else's work.
+
+The cumulative file comparison in the agent view is read-only. Use the task review to decide changes already applied to files. An unapplied proposal or an actual fork conflict keeps its own controls.
+
+| Keys | Action |
+|------|--------|
+| `y` / `n` | Keep or reject the selected change |
+| `=` | Show or hide its inline diff |
+| `]h` / `[h` | Move to the next or previous change |
+| `↩` | Jump to the change in its file, or return to the conversation once all changes are decided |
+| `Y` | Keep all pending changes after confirmation |
+| `q` | Close the review and return to the file |
+| `Esc` | Dismiss the inline diff if it is open, otherwise close the review |
+
+Use `:Minga review` to also put the unreviewed changes in the shared quickfix list. After you close the review, `]q` and `[q` still visit those changes. For example, `:cdo normal x` deletes the first character on each listed line. Quickfix stops rather than running the command at a stale location.
 
 ## In the agent view
 

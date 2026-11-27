@@ -23,6 +23,7 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerWorkflow do
   alias MingaEditor.Shell.Traditional.Drawers
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
+  alias MingaEditor.Shell.Traditional.TaskReviewWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -264,11 +265,17 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerWorkflow do
 
   defp dispatch(state, %Drawers{view: {_kind, _row}}, _command, _selected), do: state
 
+  defp dispatch(state, %Drawers{} = drawers, :tasks_open, nil) do
+    if row_ids(state) == [], do: empty_step(state, drawers, :tasks_open), else: state
+  end
+
+  defp dispatch(state, %Drawers{}, :tasks_open, row), do: open_row(state, row)
+
   defp dispatch(state, %Drawers{} = drawers, command, _selected)
-       when command in [:tasks_next, :tasks_prev, :tasks_open] do
+       when command in [:tasks_next, :tasks_prev] do
     if row_ids(state) == [],
       do: empty_step(state, drawers, command),
-      else: list_step(state, command)
+      else: move(state, if(command == :tasks_next, do: 1, else: -1))
   end
 
   defp dispatch(state, %Drawers{}, :tasks_back, _selected), do: close(state)
@@ -287,11 +294,6 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerWorkflow do
   defp dispatch(state, %Drawers{}, :tasks_stop, row), do: ask_stop(state, row)
   defp dispatch(state, %Drawers{}, :tasks_inspect, row), do: inspect_row(state, row)
   defp dispatch(state, %Drawers{}, _change, _row), do: state
-
-  @spec list_step(EditorState.t(), :tasks_next | :tasks_prev | :tasks_open) :: EditorState.t()
-  defp list_step(state, :tasks_next), do: move(state, 1)
-  defp list_step(state, :tasks_prev), do: move(state, -1)
-  defp list_step(state, :tasks_open), do: open_row(state, selected(state))
 
   # A drawer with no tasks shows its empty state: j/k move between its next steps and ↩ runs the selected one.
   @spec empty_step(EditorState.t(), Drawers.t(), :tasks_next | :tasks_prev | :tasks_open) ::
@@ -631,12 +633,22 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerWorkflow do
         "Cannot open this subagent's parent conversation in this window"
       )
 
-  @doc "Reviews a done task's changes: today's pending reviews, until the review buffer (#4051) replaces it."
+  @doc "Opens the exact task's conversation workspace and reviews its changes."
   @spec review(EditorState.t(), Entry.t()) :: EditorState.t()
-  def review(%EditorState{} = state, %Entry{} = entry) do
-    state
-    |> open_conversation(entry)
-    |> MingaEditor.Commands.Workspace.workspace_pending_reviews()
+  def review(%EditorState{} = state, %Entry{pid: pid, task_id: task} = entry) do
+    if workspace_for(state, pid) do
+      focused = open_conversation(state, entry)
+
+      case focused.workspace.agent_ui.connection do
+        %{target: %{session: ^pid, session_id: ^task}} when is_binary(task) ->
+          TaskReviewWorkflow.open(focused)
+
+        _unavailable ->
+          NoticeWorkflow.publish(focused, "That task's review is not connected")
+      end
+    else
+      NoticeWorkflow.publish(state, "That task has no review in this window")
+    end
   end
 
   @doc "Opens a task's conversation: the drawer closes and its workspace comes to the front."

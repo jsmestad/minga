@@ -1,6 +1,6 @@
 defmodule MingaEditor.Shell.Traditional.TasksDrawerOpenTest do
   @moduledoc """
-  Where the drawer's ↩ and i take you: a task's conversation comes to the front and the drawer lets go of the keyboard; a done task opens its pending reviews.
+  Where the drawer's ↩ and i take you: the exact conversation comes to the front and the drawer lets go of the keyboard.
   """
 
   use ExUnit.Case, async: true
@@ -17,7 +17,6 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerOpenTest do
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Shell.Traditional.TasksDrawerWorkflow
   alias MingaEditor.State.TabBar
-  alias MingaEditor.UI.Picker.PendingReviewsSource
   alias Minga.Test.ScopedInputHelpers
 
   # A file workspace in front and an agent workspace whose session has a task in `events`' state.
@@ -128,9 +127,9 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerOpenTest do
     |> TasksDrawerWorkflow.open()
   end
 
-  defp connect(state, record) do
+  defp connect(state, record, session \\ self()) do
     facts = %ConnectionSnapshot{
-      target: ConnectionTarget.new(self(), record, nil, make_ref()),
+      target: ConnectionTarget.new(session, record, nil, make_ref()),
       credential_readiness: :configured,
       provider_phase: :running,
       model_selection: nil,
@@ -138,7 +137,7 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerOpenTest do
       problem: nil
     }
 
-    TaskWorkflow.observe(state, self(), {:connection_changed, facts})
+    TaskWorkflow.observe(state, session, {:connection_changed, facts})
   end
 
   defp observe_child(state, title) do
@@ -163,14 +162,44 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerOpenTest do
     Enum.find(model.rows, &(&1.title == title)).id
   end
 
-  test "↩ on a done task opens its conversation with the pending reviews" do
+  test "↩ on a done task with no live connection does not review another task" do
     {state, agent_id} = state_with_task([{:status_changed, :thinking}, {:status_changed, :idle}])
 
     state = TasksDrawerWorkflow.run(state, :tasks_open)
 
     assert active_workspace_id(state) == agent_id
 
-    assert {:picker, %{picker_ui: %{source: PendingReviewsSource}}} =
-             state.shell_runtime.state.modal
+    assert NoticeWorkflow.message(state) == "That task's review is not connected"
+  end
+
+  test "stale Review activation leaves the drawer open after its session loads another conversation" do
+    {state, agent_id} = state_with_task([{:status_changed, :thinking}, {:status_changed, :idle}])
+    [row] = TasksDrawerBuilder.row_ids(state.agent_connection.tasks)
+    %{pid: session} = TasksDrawerBuilder.entry_for(state.agent_connection.tasks, row)
+    before = connect(state, "first-record", session)
+    [displayed] = TasksDrawerBuilder.row_ids(before.agent_connection.tasks)
+
+    after_rebind =
+      before
+      |> TasksDrawerWorkflow.select(displayed)
+      |> connect("second-record", session)
+
+    for ignored <- [
+          TasksDrawerWorkflow.click(after_rebind, displayed, "↩"),
+          TasksDrawerWorkflow.run(after_rebind, :tasks_open)
+        ] do
+      assert TasksDrawerWorkflow.focused?(ignored)
+      refute active_workspace_id(ignored) == agent_id
+    end
+
+    [current] = TasksDrawerBuilder.row_ids(after_rebind.agent_connection.tasks)
+
+    opened =
+      after_rebind
+      |> TasksDrawerWorkflow.select(current)
+      |> TasksDrawerWorkflow.run(:tasks_open)
+
+    assert active_workspace_id(opened) == agent_id
+    refute TasksDrawerWorkflow.focused?(opened)
   end
 end

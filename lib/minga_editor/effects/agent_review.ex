@@ -4,8 +4,6 @@ defmodule MingaEditor.Effects.AgentReview do
   @behaviour MingaEditor.Effect
 
   alias MingaAgent.ProjectView
-  alias MingaAgent.ProjectView.Overlay
-  alias MingaAgent.ProjectView.Source
   alias MingaAgent.Session
   alias MingaAgent.Session.ConnectionTarget
   alias MingaEditor.Agent.ConnectionAction
@@ -214,14 +212,13 @@ defmodule MingaEditor.Effects.AgentReview do
          path: path,
          source: source,
          hunks: hunks,
-         postimage_digest: digest,
-         connection_target: target
+         postimage_digest: digest
        }) do
-    with {:ok, owner, content} <- read_source(source),
+    with {:ok, content} <- read_source(source),
          true <- :crypto.hash(:sha256, content) == digest do
       case DiffReview.from_hunks(path, content, hunks) do
         nil -> {:ok, :no_changes}
-        %DiffReview{} = review -> {:ok, bind_review_source(review, owner, target)}
+        %DiffReview{} = review -> {:ok, review}
       end
     else
       false -> {:error, :review_source_changed}
@@ -362,25 +359,9 @@ defmodule MingaEditor.Effects.AgentReview do
     end
   end
 
-  @spec read_source(source()) :: {:ok, Source.t() | nil, binary()} | {:error, term()}
-  defp read_source({:project_view, %ProjectView{backend: Overlay} = view, path}) do
-    Overlay.review_source(view, path)
-  end
-
-  defp read_source({:project_view, view, path}) do
-    with {:ok, content} <- ProjectView.read_file(view, path), do: {:ok, nil, content}
-  end
-
-  defp read_source({:file, path}) do
-    with {:ok, content} <- File.read(path), do: {:ok, nil, content}
-  end
-
-  @spec bind_review_source(DiffReview.t(), Source.t() | nil, ConnectionTarget.t() | nil) ::
-          DiffReview.t()
-  defp bind_review_source(review, %Source{} = source, %ConnectionTarget{} = target),
-    do: DiffReview.bind_source(review, source, target)
-
-  defp bind_review_source(review, _source, _target), do: review
+  @spec read_source(source()) :: {:ok, binary()} | {:error, term()}
+  defp read_source({:project_view, view, path}), do: ProjectView.read_file(view, path)
+  defp read_source({:file, path}), do: File.read(path)
 
   @spec current?(EditorState.t(), t()) :: boolean()
   defp current?(state, effect) do
@@ -482,8 +463,7 @@ defmodule MingaEditor.Effects.AgentReview do
   @spec review_label(DiffReview.t()) :: String.t()
   defp review_label(%DiffReview{retained?: true}), do: "Saved comparison (read-only)"
   defp review_label(%DiffReview{fork_revision: {_, _, _}}), do: "Resolve fork conflicts"
-  defp review_label(%DiffReview{reviewed_source: nil}), do: "Read-only review"
-  defp review_label(%DiffReview{}), do: "Live review (Reject changes file contents)"
+  defp review_label(%DiffReview{}), do: "Read-only review"
 
   @spec leave_resolved_review(UIState.t(), atom()) :: UIState.t()
   defp leave_resolved_review(ui, :file_viewer), do: UIState.set_focus(ui, :chat)

@@ -136,7 +136,7 @@ defmodule MingaEditor.FocusOwner do
        do: true
 
   defp yields_to_leader?(%{workspace: %{keymap_scope: scope}})
-       when scope in [:editor, :git_status, :queue],
+       when scope in [:editor, :git_status, :queue, :task_review],
        do: true
 
   # Agent chat and the file viewer yield every leader key to ModeFSM; a focused
@@ -160,5 +160,5 @@ defmodule MingaEditor.FocusOwner do
   defp scope_surface(:subagent_peek), do: :agent
   defp scope_surface(:git_status), do: :git_status
   defp scope_surface(:queue), do: :queue
-  defp scope_surface(:editor), do: :editor
+  defp scope_surface(scope) when scope in [:editor, :task_review], do: :editor
 end

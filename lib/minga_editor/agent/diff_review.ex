@@ -27,9 +27,7 @@ defmodule MingaEditor.Agent.DiffReview do
           fork_revision: Minga.Buffer.Fork.review_revision() | nil,
           after_absent?: boolean(),
           retained?: boolean(),
-          proposal?: boolean(),
-          reviewed_source: MingaAgent.ProjectView.Source.t() | nil,
-          review_target: MingaAgent.Session.ConnectionTarget.t() | nil
+          proposal?: boolean()
         }
 
   @enforce_keys [:path, :after_lines, :hunks]
@@ -42,9 +40,7 @@ defmodule MingaEditor.Agent.DiffReview do
     fork_revision: nil,
     after_absent?: false,
     retained?: false,
-    proposal?: false,
-    reviewed_source: nil,
-    review_target: nil
+    proposal?: false
   ]
 
   @doc """
@@ -88,14 +84,11 @@ defmodule MingaEditor.Agent.DiffReview do
   @spec as_proposal(t()) :: t()
   def as_proposal(%__MODULE__{} = review), do: %{review | proposal?: true}
 
-  @doc "Binds decisions to the project view owner that supplied the compared bytes."
-  @spec bind_source(
-          t(),
-          MingaAgent.ProjectView.Source.t(),
-          MingaAgent.Session.ConnectionTarget.t()
-        ) :: t()
-  def bind_source(%__MODULE__{} = review, %MingaAgent.ProjectView.Source{} = source, target),
-    do: %{review | reviewed_source: source, review_target: target}
+  @doc "Only a fork conflict or an unapplied proposal offers decisions here."
+  @spec decisions_allowed?(t() | nil) :: boolean()
+  def decisions_allowed?(%__MODULE__{fork_revision: {_, _, _}}), do: true
+  def decisions_allowed?(%__MODULE__{proposal?: true}), do: true
+  def decisions_allowed?(_review), do: false
 
   @doc "Creates a DiffReview from authoritative precomputed cumulative hunks."
   @spec from_hunks(String.t(), String.t(), [Diff.hunk()]) :: t() | nil
@@ -456,8 +449,6 @@ defmodule MingaEditor.Agent.DiffReview do
       hunks: new_hunks,
       current_hunk_index: current_idx,
       resolutions: new_resolutions,
-      reviewed_source: review.reviewed_source,
-      review_target: review.review_target,
       retained?: review.retained?,
       after_absent?: review.after_absent? and new_after_lines == []
     }

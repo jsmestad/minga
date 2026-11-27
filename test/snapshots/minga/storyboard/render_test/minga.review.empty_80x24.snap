@@ -1,0 +1,28 @@
+# Screen: 80x23
+# Cursor: (7, 6) block
+# Mode: normal
+────────────────────────────────────────────────────────────────────────────────
+00│[storyboard.ex]
+01│    6 Clarify the plan limit message        1 defmodule UsageLimit do
+02│    5 Starting · 0 files                    1   def label, do: "Rate limited"
+03│    4 SPC a a Tasks  q Close                2   def window, do: 60
+04│    3                                       3   def retry?, do: false
+05│    2                                       4 end
+06│    1 Unreviewed                            5
+07│    7                                         ~
+08│    1 Kept                                    ~
+09│    2                                         ~
+10│    3 No changes to review.                   ~
+11│    4                                         ~
+12│      ~                                       ~
+13│      ~                                       ~
+14│      ~                                       ~
+15│      ~                                       ~
+16│      ~                                       ~
+17│      ~                                       ~
+18│      ~                                       ~
+19│      ~                                       ~
+20│      ~                                       ~
+21│NORMAL *minga-review* [RO] 7:1/11
+22│
+────────────────────────────────────────────────────────────────────────────────

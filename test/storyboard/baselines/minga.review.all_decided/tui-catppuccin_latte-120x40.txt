@@ -1,0 +1,281 @@
+# minga storyboard frame v1
+# scenario: minga.review.all_decided
+# frontend: tui
+# theme: catppuccin_latte
+# size: 120x40
+# cursor: 8,6
+## text
+Spaces · folder minga.review.all_decided (1 tab) · ▎cpu Clarify the plan limit message (2 tabs)
+ 󰚩 Clarify the plan limit …   ▌  storyboard.ex
+   6  Clarify the plan limit message                       │▾  3  defmodule UsageLimit do
+   5  Done · 1 file                                        │   2    def label, do: "Rate limited"
+   4  ↩ Reply to Minga  q Close                            │   1 │  def window, do: 45
+   3                                                       │   4 │  def retry?, do: true
+   2                                                       │   1  end
+   1  Unreviewed                                           │   2
+   7                                                       │      ~
+   1  Kept                                                 │      ~
+   2    lib/storyboard.ex · 2 changes                      │      ~
+   3                                                       │      ~
+   4  Rejected                                             │      ~
+   5    lib/storyboard.ex · 1 change                       │      ~
+   6                                                       │      ~
+   7  Passt.                                               │      ~
+   8                                                       │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+      ~                                                    │      ~
+  NORMAL  *minga-review* [RO]                                                                                  Text 7:1
+## styles (row start-end fg bg attrs)
+0 0-50 #8c8fa1 #ccd0da -
+0 51-85 #1e66f5 #ccd0da bold
+0 86-94 #8c8fa1 #ccd0da -
+0 95-119 #4c4f69 #eff1f5 -
+1 0-0 #4c4f69 #ccd0da -
+1 1-26 #c678dd #ccd0da -
+1 27-27 #4c4f69 #ccd0da -
+1 28-29 #4c4f69 #eff1f5 -
+1 30-30 #1e66f5 #eff1f5 bold
+1 31-119 #4c4f69 #eff1f5 -
+2 0-5 #5c5f77 #eff1f5 -
+2 6-58 #4c4f69 #eff1f5 -
+2 59-59 #7c7f93 #eff1f5 -
+2 60-61 #8c8fa1 #eff1f5 -
+2 62-65 #4c4f69 #eff1f5 -
+2 66-74 #8839ef #eff1f5 bold
+2 75-75 #4c4f69 #eff1f5 -
+2 76-85 #df8e1d #eff1f5 -
+2 86-86 #4c4f69 #eff1f5 -
+2 87-88 #8839ef #eff1f5 bold
+2 89-119 #4c4f69 #eff1f5 -
+3 0-5 #5c5f77 #eff1f5 -
+3 6-58 #4c4f69 #eff1f5 -
+3 59-59 #7c7f93 #eff1f5 -
+3 60-65 #5c5f77 #eff1f5 -
+3 66-67 #4c4f69 #eff1f5 -
+3 68-70 #8839ef #eff1f5 bold
+3 71-71 #4c4f69 #eff1f5 -
+3 72-76 #1e66f5 #eff1f5 -
+3 77-77 #8c8fa1 #eff1f5 -
+3 78-78 #4c4f69 #eff1f5 -
+3 79-82 #d20f39 #eff1f5 -
+3 83-96 #40a02b #eff1f5 -
+3 97-119 #4c4f69 #eff1f5 -
+4 0-5 #5c5f77 #eff1f5 -
+4 6-58 #4c4f69 #eff1f5 -
+4 59-59 #7c7f93 #eff1f5 -
+4 60-64 #5c5f77 #eff1f5 -
+4 65-65 #a267f1 #eff1f5 -
+4 66-67 #4c4f69 #eff1f5 -
+4 68-70 #8839ef #eff1f5 bold
+4 71-71 #4c4f69 #eff1f5 -
+4 72-77 #1e66f5 #eff1f5 -
+4 78-78 #8c8fa1 #eff1f5 -
+4 79-79 #4c4f69 #eff1f5 -
+4 80-83 #d20f39 #eff1f5 -
+4 84-85 #fe640b #eff1f5 -
+4 86-119 #4c4f69 #eff1f5 -
+5 0-5 #5c5f77 #eff1f5 -
+5 6-58 #4c4f69 #eff1f5 -
+5 59-59 #7c7f93 #eff1f5 -
+5 60-64 #7287fd #eff1f5 bold
+5 65-65 #a267f1 #eff1f5 -
+5 66-67 #4c4f69 #eff1f5 -
+5 68-70 #8839ef #eff1f5 bold
+5 71-71 #4c4f69 #eff1f5 -
+5 72-77 #1e66f5 #eff1f5 -
+5 78-78 #8c8fa1 #eff1f5 -
+5 79-79 #4c4f69 #eff1f5 -
+5 80-83 #d20f39 #eff1f5 -
+5 84-87 #fe640b #eff1f5 bold
+5 88-119 #4c4f69 #eff1f5 -
+6 0-5 #5c5f77 #eff1f5 -
+6 6-58 #4c4f69 #eff1f5 -
+6 59-59 #7c7f93 #eff1f5 -
+6 60-65 #5c5f77 #eff1f5 -
+6 66-68 #8839ef #eff1f5 bold
+6 69-119 #4c4f69 #eff1f5 -
+7 0-5 #5c5f77 #eff1f5 -
+7 6-58 #4c4f69 #eff1f5 -
+7 59-59 #7c7f93 #eff1f5 -
+7 60-65 #5c5f77 #eff1f5 -
+7 66-119 #4c4f69 #eff1f5 -
+8 0-5 #7287fd #ccd0da bold
+8 6-58 #4c4f69 #ccd0da -
+8 59-59 #7c7f93 #eff1f5 -
+8 60-65 #5c5f77 #eff1f5 -
+8 66-119 #8c8fa1 #eff1f5 -
+9 0-5 #5c5f77 #eff1f5 -
+9 6-58 #4c4f69 #eff1f5 -
+9 59-59 #7c7f93 #eff1f5 -
+9 60-65 #5c5f77 #eff1f5 -
+9 66-119 #8c8fa1 #eff1f5 -
+10 0-5 #5c5f77 #eff1f5 -
+10 6-58 #4c4f69 #eff1f5 -
+10 59-59 #7c7f93 #eff1f5 -
+10 60-65 #5c5f77 #eff1f5 -
+10 66-119 #8c8fa1 #eff1f5 -
+11 0-5 #5c5f77 #eff1f5 -
+11 6-58 #4c4f69 #eff1f5 -
+11 59-59 #7c7f93 #eff1f5 -
+11 60-65 #5c5f77 #eff1f5 -
+11 66-119 #8c8fa1 #eff1f5 -
+12 0-5 #5c5f77 #eff1f5 -
+12 6-58 #4c4f69 #eff1f5 -
+12 59-59 #7c7f93 #eff1f5 -
+12 60-65 #5c5f77 #eff1f5 -
+12 66-119 #8c8fa1 #eff1f5 -
+13 0-5 #5c5f77 #eff1f5 -
+13 6-58 #4c4f69 #eff1f5 -
+13 59-59 #7c7f93 #eff1f5 -
+13 60-65 #5c5f77 #eff1f5 -
+13 66-119 #8c8fa1 #eff1f5 -
+14 0-5 #5c5f77 #eff1f5 -
+14 6-58 #4c4f69 #eff1f5 -
+14 59-59 #7c7f93 #eff1f5 -
+14 60-65 #5c5f77 #eff1f5 -
+14 66-119 #8c8fa1 #eff1f5 -
+15 0-5 #5c5f77 #eff1f5 -
+15 6-58 #4c4f69 #eff1f5 -
+15 59-59 #7c7f93 #eff1f5 -
+15 60-65 #5c5f77 #eff1f5 -
+15 66-119 #8c8fa1 #eff1f5 -
+16 0-5 #5c5f77 #eff1f5 -
+16 6-58 #4c4f69 #eff1f5 -
+16 59-59 #7c7f93 #eff1f5 -
+16 60-65 #5c5f77 #eff1f5 -
+16 66-119 #8c8fa1 #eff1f5 -
+17 0-5 #5c5f77 #eff1f5 -
+17 6-58 #8c8fa1 #eff1f5 -
+17 59-59 #7c7f93 #eff1f5 -
+17 60-65 #5c5f77 #eff1f5 -
+17 66-119 #8c8fa1 #eff1f5 -
+18 0-5 #5c5f77 #eff1f5 -
+18 6-58 #8c8fa1 #eff1f5 -
+18 59-59 #7c7f93 #eff1f5 -
+18 60-65 #5c5f77 #eff1f5 -
+18 66-119 #8c8fa1 #eff1f5 -
+19 0-5 #5c5f77 #eff1f5 -
+19 6-58 #8c8fa1 #eff1f5 -
+19 59-59 #7c7f93 #eff1f5 -
+19 60-65 #5c5f77 #eff1f5 -
+19 66-119 #8c8fa1 #eff1f5 -
+20 0-5 #5c5f77 #eff1f5 -
+20 6-58 #8c8fa1 #eff1f5 -
+20 59-59 #7c7f93 #eff1f5 -
+20 60-65 #5c5f77 #eff1f5 -
+20 66-119 #8c8fa1 #eff1f5 -
+21 0-5 #5c5f77 #eff1f5 -
+21 6-58 #8c8fa1 #eff1f5 -
+21 59-59 #7c7f93 #eff1f5 -
+21 60-65 #5c5f77 #eff1f5 -
+21 66-119 #8c8fa1 #eff1f5 -
+22 0-5 #5c5f77 #eff1f5 -
+22 6-58 #8c8fa1 #eff1f5 -
+22 59-59 #7c7f93 #eff1f5 -
+22 60-65 #5c5f77 #eff1f5 -
+22 66-119 #8c8fa1 #eff1f5 -
+23 0-5 #5c5f77 #eff1f5 -
+23 6-58 #8c8fa1 #eff1f5 -
+23 59-59 #7c7f93 #eff1f5 -
+23 60-65 #5c5f77 #eff1f5 -
+23 66-119 #8c8fa1 #eff1f5 -
+24 0-5 #5c5f77 #eff1f5 -
+24 6-58 #8c8fa1 #eff1f5 -
+24 59-59 #7c7f93 #eff1f5 -
+24 60-65 #5c5f77 #eff1f5 -
+24 66-119 #8c8fa1 #eff1f5 -
+25 0-5 #5c5f77 #eff1f5 -
+25 6-58 #8c8fa1 #eff1f5 -
+25 59-59 #7c7f93 #eff1f5 -
+25 60-65 #5c5f77 #eff1f5 -
+25 66-119 #8c8fa1 #eff1f5 -
+26 0-5 #5c5f77 #eff1f5 -
+26 6-58 #8c8fa1 #eff1f5 -
+26 59-59 #7c7f93 #eff1f5 -
+26 60-65 #5c5f77 #eff1f5 -
+26 66-119 #8c8fa1 #eff1f5 -
+27 0-5 #5c5f77 #eff1f5 -
+27 6-58 #8c8fa1 #eff1f5 -
+27 59-59 #7c7f93 #eff1f5 -
+27 60-65 #5c5f77 #eff1f5 -
+27 66-119 #8c8fa1 #eff1f5 -
+28 0-5 #5c5f77 #eff1f5 -
+28 6-58 #8c8fa1 #eff1f5 -
+28 59-59 #7c7f93 #eff1f5 -
+28 60-65 #5c5f77 #eff1f5 -
+28 66-119 #8c8fa1 #eff1f5 -
+29 0-5 #5c5f77 #eff1f5 -
+29 6-58 #8c8fa1 #eff1f5 -
+29 59-59 #7c7f93 #eff1f5 -
+29 60-65 #5c5f77 #eff1f5 -
+29 66-119 #8c8fa1 #eff1f5 -
+30 0-5 #5c5f77 #eff1f5 -
+30 6-58 #8c8fa1 #eff1f5 -
+30 59-59 #7c7f93 #eff1f5 -
+30 60-65 #5c5f77 #eff1f5 -
+30 66-119 #8c8fa1 #eff1f5 -
+31 0-5 #5c5f77 #eff1f5 -
+31 6-58 #8c8fa1 #eff1f5 -
+31 59-59 #7c7f93 #eff1f5 -
+31 60-65 #5c5f77 #eff1f5 -
+31 66-119 #8c8fa1 #eff1f5 -
+32 0-5 #5c5f77 #eff1f5 -
+32 6-58 #8c8fa1 #eff1f5 -
+32 59-59 #7c7f93 #eff1f5 -
+32 60-65 #5c5f77 #eff1f5 -
+32 66-119 #8c8fa1 #eff1f5 -
+33 0-5 #5c5f77 #eff1f5 -
+33 6-58 #8c8fa1 #eff1f5 -
+33 59-59 #7c7f93 #eff1f5 -
+33 60-65 #5c5f77 #eff1f5 -
+33 66-119 #8c8fa1 #eff1f5 -
+34 0-5 #5c5f77 #eff1f5 -
+34 6-58 #8c8fa1 #eff1f5 -
+34 59-59 #7c7f93 #eff1f5 -
+34 60-65 #5c5f77 #eff1f5 -
+34 66-119 #8c8fa1 #eff1f5 -
+35 0-5 #5c5f77 #eff1f5 -
+35 6-58 #8c8fa1 #eff1f5 -
+35 59-59 #7c7f93 #eff1f5 -
+35 60-65 #5c5f77 #eff1f5 -
+35 66-119 #8c8fa1 #eff1f5 -
+36 0-5 #5c5f77 #eff1f5 -
+36 6-58 #8c8fa1 #eff1f5 -
+36 59-59 #7c7f93 #eff1f5 -
+36 60-65 #5c5f77 #eff1f5 -
+36 66-119 #8c8fa1 #eff1f5 -
+37 0-5 #5c5f77 #eff1f5 -
+37 6-58 #8c8fa1 #eff1f5 -
+37 59-59 #7c7f93 #eff1f5 -
+37 60-65 #5c5f77 #eff1f5 -
+37 66-119 #8c8fa1 #eff1f5 -
+38 0-5 #5c5f77 #eff1f5 -
+38 6-58 #8c8fa1 #eff1f5 -
+38 59-59 #7c7f93 #eff1f5 -
+38 60-65 #5c5f77 #eff1f5 -
+38 66-119 #8c8fa1 #eff1f5 -
+39 0-0 #8c8fa1 #e6e9ef -
+39 1-1 #4c4f69 #1e66f5 -
+39 2-7 #eff1f5 #1e66f5 bold
+39 8-8 #4c4f69 #1e66f5 -
+39 9-119 #4c4f69 #e6e9ef -

@@ -71,7 +71,7 @@ defmodule Minga.Keymap.DefaultsTest do
     {~k(a u), :undo_agent_session},
     {~k(a v), :toggle_agent_split},
     {~k(a ?), :inline_ask},
-    {~k(a r), :workspace_pending_reviews},
+    {~k(a r), :task_review},
     {~k(a e), :inline_edit},
     {~k(a W), :code_why},
     {~k(a A), :code_autobiography},

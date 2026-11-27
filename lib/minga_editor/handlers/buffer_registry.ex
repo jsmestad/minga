@@ -19,9 +19,12 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.TabWorkflow
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.BufferLifecycle
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
+  alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.TabBar
   alias MingaEditor.WorkspaceWorkflow
   alias Minga.Project.FileTree
@@ -69,6 +72,55 @@ defmodule MingaEditor.Handlers.BufferRegistry do
     case result do
       :already_registered -> next_state
       {:monitor, monitored_pid} -> monitor_buffer(next_state, monitored_pid)
+    end
+  end
+
+  @doc "Retains a review source without changing focus, even if its originating tab has closed."
+  @spec retain_review_file(state(), Tab.id(), pid()) :: state()
+  def retain_review_file(state, tab_id, buffer) when is_pid(buffer) do
+    lifecycle = BufferLifecycle.retain_review_source(state.buffer_lifecycle, buffer)
+    state = monitor_buffer(%{state | buffer_lifecycle: lifecycle}, buffer)
+
+    case Runtime.traditional_tab_bar(state.shell_runtime) do
+      %TabBar{active_id: ^tab_id} ->
+        adopt_in_live_workspace(state, buffer)
+
+      %TabBar{} = tabs ->
+        adopt_in_tab_snapshot(state, tabs, tab_id, buffer)
+
+      nil ->
+        state
+    end
+  end
+
+  @spec adopt_in_live_workspace(state(), pid()) :: state()
+  defp adopt_in_live_workspace(state, buffer) do
+    if buffer in state.workspace.buffers.list do
+      state
+    else
+      buffers = Buffers.add_background(state.workspace.buffers, buffer)
+      workspace = SessionState.set_buffers(state.workspace, buffers)
+      %{state | workspace: workspace}
+    end
+  end
+
+  @spec adopt_in_tab_snapshot(state(), TabBar.t(), Tab.id(), pid()) :: state()
+  defp adopt_in_tab_snapshot(state, tabs, tab_id, buffer) do
+    case TabBar.get(tabs, tab_id) do
+      %Tab{context: %TabContext{} = previous} ->
+        context = TabContext.adopt_background_buffer(previous, buffer)
+
+        if context == previous do
+          state
+        else
+          tabs = TabBar.update_context(tabs, tab_id, context)
+          shell = TraditionalState.install_tab_bar(Runtime.state(state.shell_runtime), tabs)
+          runtime = Runtime.install_traditional_state(state.shell_runtime, shell)
+          %{state | shell_runtime: runtime}
+        end
+
+      _ ->
+        state
     end
   end
 
@@ -242,7 +294,11 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   @spec buffer_inventory(state()) :: [pid()]
   def buffer_inventory(%EditorState{} = state) do
     active_pids = Enum.filter(state.workspace.buffers.list, &is_pid/1)
-    Enum.uniq(active_pids ++ inactive_file_tab_buffer_pids(state, active_tab_id(state)))
+    inactive_pids = inactive_file_tab_buffer_pids(state, active_tab_id(state))
+
+    Enum.uniq(
+      active_pids ++ inactive_pids ++ MapSet.to_list(state.buffer_lifecycle.review_sources)
+    )
   end
 
   @spec buffer_tracked?(state(), pid()) :: boolean()

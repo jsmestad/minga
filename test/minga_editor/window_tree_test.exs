@@ -47,6 +47,12 @@ defmodule MingaEditor.WindowTreeTest do
                {:split, :vertical, {:split, :horizontal, {:leaf, 1}, {:leaf, 3}, 0}, {:leaf, 2},
                 0}
     end
+
+    test "splits before only the selected nested leaf" do
+      assert {:ok, tree} = WindowTree.split(two_pane_tree(), 2, :vertical, 3, :before)
+      assert WindowTree.leaves(tree) == [1, 3, 2]
+      assert WindowTree.close(tree, 3) == {:ok, two_pane_tree()}
+    end
   end
 
   describe "close/2" do

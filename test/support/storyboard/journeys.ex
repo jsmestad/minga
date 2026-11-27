@@ -18,7 +18,12 @@ defmodule Minga.Test.Storyboard.Journeys do
   @type step :: %{key: String.t(), to: String.t(), press: String.t() | nil}
 
   @typedoc "A scripted journey."
-  @type t :: %{name: String.t(), start: String.t(), steps: [step()]}
+  @type t :: %{
+          optional(:start_opts) => keyword(),
+          name: String.t(),
+          start: String.t(),
+          steps: [step()]
+        }
 
   @typedoc "One frame of a journey run: where the step landed and the semantic model."
   @type frame :: %{scenario: String.t(), keys: String.t(), model: Model.t()}
@@ -39,13 +44,18 @@ defmodule Minga.Test.Storyboard.Journeys do
         {"y", "minga.tasks.working"},
         {"q (while Minga edits this file)", "edit.working", press: "q"}
       ]),
-      journey("review and keep a change", "edit.working", [
-        {"SPC a r", "minga.review.buffer"},
-        {"y", "minga.review.buffer"},
-        {"Y", "minga.review.keep_all.confirm"},
-        {"y", "minga.review.all_decided"},
-        {"q", "edit.plain"}
-      ]),
+      journey(
+        "review and keep a change",
+        "edit.working",
+        [
+          {"SPC a r", "minga.review.buffer"},
+          {"y", "minga.review.buffer"},
+          {"Y", "minga.review.keep_all.confirm"},
+          {"y", "minga.review.all_decided"},
+          {"q (while Minga works here)", "edit.working", press: "q"}
+        ],
+        review_start()
+      ),
       journey("recover from a rate limit", "minga.tasks.list", [
         {"r", "minga.tasks.working"},
         {"q", "edit.plain"}
@@ -54,15 +64,20 @@ defmodule Minga.Test.Storyboard.Journeys do
         {"SPC o t", "terminal.drawer"},
         {"↩ on a failed block (Normal)", "terminal.failed_block.menu", press: "↩"},
         {"f", "minga.conversation"},
-        {"SPC a r", "minga.review.buffer"},
-        {"q", "edit.working"}
+        {"esc esc SPC a r", "minga.review.buffer"},
+        {"q (while Minga works here)", "edit.working", press: "q"}
       ]),
-      journey("open a file across a multi-file change", "edit.working", [
-        {"SPC a r", "minga.review.buffer"},
-        {"↩", "minga.review.in_file"},
-        {"]h", "minga.review.in_file"},
-        {"SPC a y", "edit.working"}
-      ]),
+      journey(
+        "open a file across a multi-file change",
+        "edit.working",
+        [
+          {"SPC a r", "minga.review.buffer"},
+          {"↩", "minga.review.in_file"},
+          {"]h", "minga.review.in_file"},
+          {"SPC a y", "edit.working"}
+        ],
+        Keyword.put(review_start(), :review_neighbor, review_neighbor())
+      ),
       journey("step between subagents and return to their conversation", "minga.subagent.peek", [
         {"]] / [[", "minga.subagent.peek", press: "]]"},
         {"]] / [[", "minga.subagent.peek", press: "[["},
@@ -90,6 +105,12 @@ defmodule Minga.Test.Storyboard.Journeys do
   @spec scenario_ids(t()) :: [String.t()]
   def scenario_ids(%{start: start, steps: steps}), do: [start | Enum.map(steps, & &1.to)]
 
+  @doc "The start scenario with the same seed for the journey and its rendered strip."
+  @spec start_entry(t()) :: Entry.t()
+  def start_entry(%{start: id} = journey) do
+    id |> Registry.fetch!() |> Entry.with_start_options(Map.get(journey, :start_opts, []))
+  end
+
   @doc """
   Drives the real editor along the journey and classifies each frame.
 
@@ -99,7 +120,7 @@ defmodule Minga.Test.Storyboard.Journeys do
   def run(%{start: start, steps: steps} = journey, opts \\ []) do
     case pending_issue(start) do
       nil ->
-        session = Registry.drive(start, opts)
+        session = Registry.drive(start_entry(journey), opts)
         first = frame(start, "", session)
         follow(steps, session, [first], journey)
 
@@ -168,10 +189,23 @@ defmodule Minga.Test.Storyboard.Journeys do
           String.t(),
           [
             {String.t(), String.t()} | {String.t(), String.t(), keyword()}
-          ]
+          ],
+          keyword()
         ) :: t()
-  defp journey(name, start, steps) do
-    %{name: name, start: start, steps: Enum.map(steps, &step/1)}
+  defp journey(name, start, steps, start_opts \\ []) do
+    %{name: name, start: start, steps: Enum.map(steps, &step/1), start_opts: start_opts}
+  end
+
+  @spec review_start() :: keyword()
+  defp review_start, do: Registry.fetch!("minga.review.buffer").start
+
+  @spec review_neighbor() :: {Path.t(), String.t(), list()}
+  defp review_neighbor do
+    {"lib/neighbor.ex", "defmodule Neighbor do\n  def a, do: 1\n  def b, do: 2\nend\n",
+     [
+       {{1, 13}, 1, "3", Minga.Buffer.EditSource.minga("plan-limit", "other-a")},
+       {{2, 13}, 1, "4", Minga.Buffer.EditSource.minga("plan-limit", "other-b")}
+     ]}
   end
 
   @spec step({String.t(), String.t()} | {String.t(), String.t(), keyword()}) :: step()

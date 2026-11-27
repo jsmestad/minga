@@ -127,6 +127,78 @@ defmodule Minga.Buffer.RendererAPITest do
              Buffer.render_review_regions(buffer, kept.review_lease, [{0, 0}])
   end
 
+  test "task review offers precise locations and cannot decide an obsolete unit" do
+    buffer = start_supervised!({Buffer, content: "abc\nmiddle\nend\n"})
+
+    edit = fn position, length, text, source ->
+      assert {:ok, _} =
+               Minga.Buffer.Process.replace_byte_range_if_version(
+                 buffer,
+                 Buffer.version(buffer),
+                 position,
+                 length,
+                 text,
+                 source
+               )
+    end
+
+    source = EditSource.minga("task", "one step")
+    edit.({0, 0}, 3, "ABC", source)
+    edit.({2, 0}, 3, "END", source)
+
+    assert {[{unit, offered, [{{0, 0}, {0, 3}}, {{2, 0}, {2, 3}}]}], all, {0, 0}} =
+             Buffer.task_review_entries(buffer, "task")
+
+    assert {:ok, "abc\nmiddle\nend\n", "ABC\nmiddle\nEND\n"} =
+             Buffer.preview_review(buffer, offered)
+
+    assert Buffer.content(buffer) == "ABC\nmiddle\nEND\n"
+
+    assert {[], nil, {0, 0}} = Buffer.task_review_entries(buffer, "different")
+    edit.({1, 0}, 6, "MIDDLE", EditSource.minga("other", "one"))
+    assert {:error, :stale_review} = Buffer.preview_review(buffer, offered)
+    assert {:error, :stale_review} = Buffer.decide_review(buffer, offered, :keep)
+
+    assert {:error, :stale_review} = Buffer.decide_review(buffer, all, :keep)
+    assert {[{^unit, fresh, _}], _, {0, 0}} = Buffer.task_review_entries(buffer, "task")
+    assert :ok = Buffer.decide_review(buffer, fresh, :keep)
+    assert {[], nil, {1, 0}} = Buffer.task_review_entries(buffer, "task")
+    assert {[{_, _, [{{1, 0}, {1, 6}}]}], _, {0, 0}} = Buffer.task_review_entries(buffer, "other")
+    assert Buffer.content(buffer) == "ABC\nMIDDLE\nEND\n"
+  end
+
+  test "a task's aggregate offer keeps its distinct units together" do
+    buffer = start_supervised!({Buffer, content: "abc\nmiddle\nend"})
+    assert :ok = Buffer.apply_edit(buffer, 0, 0, 0, 2, "ABC", EditSource.minga("task", "first"))
+    assert :ok = Buffer.apply_edit(buffer, 2, 0, 2, 2, "END", EditSource.minga("task", "second"))
+    assert {[_, _], all, {0, 0}} = Buffer.task_review_entries(buffer, "task")
+    assert :ok = Buffer.decide_review(buffer, all, :keep)
+    assert {[], nil, {2, 0}} = Buffer.task_review_entries(buffer, "task")
+    assert Buffer.content(buffer) == "ABC\nmiddle\nEND"
+  end
+
+  @tag :tmp_dir
+  test "review locations relocate across edits but cannot name replacement history", %{
+    tmp_dir: dir
+  } do
+    path = Path.join(dir, "replacement.txt")
+    File.write!(path, "first\nsecond")
+    buffer = start_supervised!({Buffer, content: "first\nsecond", swap_dir: nil})
+    source = EditSource.minga("task", "one")
+
+    assert :ok = Buffer.apply_edit(buffer, 1, 0, 1, 5, "SECOND", source)
+    assert {[{location, _, _}], _, {0, 0}} = Buffer.task_review_entries(buffer, "task")
+    assert :ok = Buffer.move_to(buffer, {0, 0})
+    assert :ok = Buffer.insert_text(buffer, "added\n")
+    assert {:ok, {2, 0}} = Buffer.move_to_review_unit(buffer, location)
+
+    assert :ok = Buffer.open(buffer, path)
+    assert :ok = Buffer.apply_edit(buffer, 1, 0, 1, 5, "NEW", source)
+    assert {[{fresh, _, _}], _, {0, 0}} = Buffer.task_review_entries(buffer, "task")
+    assert :unavailable = Buffer.move_to_review_unit(buffer, location)
+    assert {:ok, {1, 0}} = Buffer.move_to_review_unit(buffer, fresh)
+  end
+
   test "multiple Keeps report disjoint damage bounded to affected rows and their joins" do
     buffer = start_supervised!({Buffer, content: "abc\nmiddle\nuntouched\nlast\nend\n"})
     assert :ok = Buffer.apply_edit(buffer, 0, 0, 0, 2, "ABC", EditSource.minga("one", "one"))

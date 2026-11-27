@@ -123,8 +123,11 @@ defmodule Minga.Test.Storyboard.Registry do
     session
   end
 
-  @spec seeded_turn_ready?(Model.t(), :working | :stopped | :idle | nil) :: boolean()
+  @spec seeded_turn_ready?(Model.t(), :working | :stopped | :idle | :completed | nil) :: boolean()
   defp seeded_turn_ready?(%Model{}, nil), do: true
+
+  # Session.start/1 waited for the completed turn before the reach keys moved into another surface.
+  defp seeded_turn_ready?(%Model{}, :completed), do: true
 
   defp seeded_turn_ready?(
          %Model{ui: %{agent_chat: %{lifecycle: :conversation}}, conversation: %{status: status}},

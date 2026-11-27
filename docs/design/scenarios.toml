@@ -352,7 +352,7 @@ exits = [
   { key = "SPC a a", click = "modeline needs-you segment, or mode pill › Minga › Tasks", to = "minga.tasks.empty", note = "nothing else is happening, so no tasks yet" },
   { key = "SPC a n", click = "mode pill › Minga › New task (macOS: also the menu bar)", to = "minga.task.new" },
   { key = "SPC a v", click = "modeline Minga segment", to = "minga.conversation" },
-  { key = "SPC a r", click = "mode pill › Minga › Review (macOS: also the menu bar)", to = "minga.review.buffer" },
+  { key = "SPC a r (with a task in this workspace)", click = "mode pill › Minga › Review (macOS: also the menu bar)", to = "minga.review.buffer" },
   { key = "SPC a ?", click = "mode pill › Minga › Ask about the line or selection (macOS: also the menu bar)", to = "minga.inline_ask" },
   { key = "SPC a e", click = "mode pill › Minga › Rewrite selection inline (macOS: also the menu bar)", to = "minga.inline_edit" },
   { key = "SPC a S m", click = "mode pill › Minga › Session › Pick model (macOS: also the menu bar)", to = "minga.model_picker" },
@@ -1009,7 +1009,8 @@ status = "designed"
 boards = { macos = "V41WhichKey.dc.html", tui = "V41TuiEdit.dc.html", mouse = "Mouse_Video_ModePill.dc.html" }
 transient = true
 exits = [
-  { key = "a", click = "Tasks row", to = "minga.tasks.empty", note = "from a fresh start there are no tasks yet" },
+  { key = "a", click = "Tasks row", to = "minga.tasks.list", note = "this scenario has a task to review" },
+  { key = "a (with no tasks)", click = "Tasks row when no tasks exist", to = "minga.tasks.empty" },
   { key = "v", click = "Conversation row", to = "minga.conversation" },
   { key = "r", click = "Review row", to = "minga.review.buffer" },
   { key = "i on a conversation with subagents", click = "Inspect row", to = "minga.subagent.peek", note = "The which-key fixture has no subagents. The seeded peek fixture drives this command from a real parent conversation." },
@@ -1060,10 +1061,11 @@ empty_state = "minga.review.empty"
 exits = [
   { key = "y", click = "Keep", to = "minga.review.buffer" },
   { key = "n", click = "Reject", to = "minga.review.buffer" },
-  { key = "=", click = "Diff", to = "minga.review.buffer" },
+  { key = "=", click = "Diff", to = "minga.review.diff_inline" },
   { key = "Y", click = "Keep all", to = "minga.review.keep_all.confirm" },
   { key = "↩", click = "change row", to = "minga.review.in_file" },
-  { key = "q", click = "close", to = "edit.working" },
+  { key = "q", click = "close", to = "edit.plain" },
+  { key = "q (while Minga works here)", click = "", to = "edit.working" },
 ]
 notes = "After the last change is decided, the buffer needs a defined end state: see minga.review.all_decided."
 
@@ -1098,7 +1100,7 @@ exits = [
   { key = "↩ (Normal) or ⌘↩", click = "Send", to = "minga.conversation" },
   { key = "esc esc SPC a q q", click = "Queue", to = "minga.queue" },
   { key = "⌘. or SPC a s", click = "Stop", to = "minga.conversation.stopped" },
-  { key = "SPC a r", click = "2 files changed · review", to = "minga.review.buffer" },
+  { key = "esc esc SPC a r", click = "2 files changed · review", to = "minga.review.buffer" },
   { key = "Tab then ↩ on a Started line", click = "Started line", to = "minga.subagent.peek" },
   { key = "esc esc SPC a i (with subagents)", click = "", to = "minga.subagent.peek", note = "The peek fixture seeds a real fan-out and exercises this path; this conversation fixture has no children." },
   { key = "esc esc SPC a v", click = "close split", to = "edit.working" },
@@ -1297,6 +1299,7 @@ status = "designed"
 boards = { macos = "Batch1_minga_review_all_decided.dc.html", tui = "Batch1_minga_review_all_decided.dc.html" }
 exits = [
   { key = "q", click = "close", to = "edit.plain" },
+  { key = "q (while Minga works here)", click = "", to = "edit.working" },
   { key = "↩", click = "Reply to Minga", to = "minga.conversation" },
 ]
 notes = "Says what was kept and rejected, offers to reply. The one place the review says \"Passt.\"."
@@ -1345,7 +1348,7 @@ boards = { macos = "Batch1_minga_conversation_stopped.dc.html", tui = "Batch1_mi
 exits = [
   { key = "↩ (composer)", click = "Continue", to = "minga.conversation" },
   { key = "esc esc SPC a q q", click = "Queue", to = "minga.queue" },
-  { key = "SPC a r", click = "Review", to = "minga.review.buffer" },
+  { key = "esc esc SPC a r", click = "Review", to = "minga.review.buffer" },
   { key = "esc esc SPC a v", click = "close split", to = "edit.plain" },
   { key = "q (Normal mode, outside the composer)", click = "", to = "edit.plain" },
 ]
@@ -2319,8 +2322,8 @@ frontends = ["macos", "tui"]
 status = "designed"
 boards = { macos = "Batch7_act_change.dc.html", tui = "Batch7_act_change.dc.html" }
 exits = [
-  { key = "=", click = "", to = "minga.review.in_file", keyboard_only = "toggles the diff off" },
-  { key = "esc", click = "click elsewhere", to = "minga.review.in_file" },
+  { key = "=", click = "", to = "minga.review.buffer", keyboard_only = "toggles the diff off in Task Review" },
+  { key = "esc", click = "click elsewhere", to = "minga.review.buffer" },
 ]
 
 [[scenario]]

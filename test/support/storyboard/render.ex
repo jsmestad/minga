@@ -133,7 +133,7 @@ defmodule Minga.Test.Storyboard.Render do
     |> fit_tui_header(target)
   end
 
-  # The conversation can add a workspace header row. Other scenes keep their measured grid fixtures.
+  # Conversation and task review can change the header height. Other scenes keep their measured grid fixtures.
   @spec fit_tui_header(Session.t(), target()) :: Session.t()
   defp fit_tui_header(session, %{frontend: :tui, cols: cols} = target) do
     case grid_rows(session, target) do
@@ -146,7 +146,7 @@ defmodule Minga.Test.Storyboard.Render do
 
   @spec grid_rows(Session.t(), target()) :: pos_integer()
   defp grid_rows(session, %{frontend: :tui, rows: rows, cols: cols} = target) do
-    case Session.conversation_header_rows(session, cols, @tui_breadcrumb_min_cols) do
+    case Session.dynamic_tui_header_rows(session, cols, @tui_breadcrumb_min_cols) do
       nil -> target.grid_rows
       header_rows -> rows - header_rows
     end
@@ -274,13 +274,14 @@ defmodule Minga.Test.Storyboard.Render do
     :minibuffer,
     :agent_chat,
     :subagent_peek,
-    :agent_activity
+    :agent_activity,
+    :task_review
   ]
 
   # On macOS the activity strip replaces the breadcrumb. The row count can change
   # when the strip is combined with other chrome, including a drawer without chat.
   @native_below %{
-    macos: [:file_tree, :git_status, :tasks_drawer, :minibuffer, :agent_chat],
+    macos: [:file_tree, :git_status, :tasks_drawer, :minibuffer, :agent_chat, :task_review],
     tui: []
   }
 
@@ -371,6 +372,7 @@ defmodule Minga.Test.Storyboard.Render do
   defp export_journey!(transcripts, journey) do
     slug = slug(journey.name)
     {outcome, frames} = journey_outcome(Journeys.run(journey))
+    entry = Journeys.start_entry(journey)
 
     strip =
       frames
@@ -380,7 +382,7 @@ defmodule Minga.Test.Storyboard.Render do
         keys = journey.steps |> Enum.take(index) |> Enum.map(&(&1.press || &1.key))
 
         for target <- strip_targets(),
-            do: capture!(transcripts, name, journey.start, keys, target)
+            do: capture!(transcripts, name, entry, keys, target)
 
         %{"name" => name, "scenario" => frame.scenario, "keys" => frame.keys}
       end)

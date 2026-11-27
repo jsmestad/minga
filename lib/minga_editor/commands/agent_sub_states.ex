@@ -8,9 +8,6 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
   alias MingaEditor.Agent.PendingApproval
   alias MingaAgent.FileMention
-  alias MingaAgent.ProjectView
-  alias MingaAgent.ProjectView.Overlay
-  alias MingaAgent.ProjectView.Source
   alias MingaAgent.Session
   alias MingaAgent.ToolApproval.Public, as: PublicApproval
   alias MingaAgent.ToolApproval.Target, as: ApprovalTarget
@@ -23,8 +20,6 @@ defmodule MingaEditor.Commands.AgentSubStates do
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.TabBar
-  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
 
   import Bitwise
 
@@ -527,133 +522,11 @@ defmodule MingaEditor.Commands.AgentSubStates do
       {:ok, _view, {:resolve_fork, path, revision, decisions}} ->
         MingaEditor.Effects.AgentReview.resolve_fork(state, path, revision, decisions)
 
-      {:ok, view, {:write_file, path, content}} ->
-        case persist_diff_resolution(state, path, content) do
-          :ok ->
-            MingaEditor.Shell.Traditional.Workflow.install_agent_view(state, view)
-
-          {:error, reason} ->
-            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-              state,
-              rejection_failure(path, reason)
-            )
-        end
-
       :no_diff ->
         state
 
       :no_hunk ->
         state
-    end
-  end
-
-  @spec rejection_failure(String.t(), term()) :: String.t()
-  defp rejection_failure(path, reason)
-       when reason in [
-              :stale_target,
-              :stale_revision,
-              :review_source_changed,
-              :already_exists,
-              :not_found
-            ] do
-    "Could not reject hunk in #{path}: the file or its editor changed. Open Review again. No changes were written."
-  end
-
-  defp rejection_failure(path, reason), do: "Could not reject hunk in #{path}: #{inspect(reason)}"
-
-  @spec persist_diff_resolution(state(), String.t(), String.t()) :: :ok | {:error, term()}
-  defp persist_diff_resolution(state, path, content) do
-    case active_project_view(state) do
-      %ProjectView{} = project_view ->
-        review = MingaEditor.Agent.View.Preview.diff_review(state.workspace.agent_ui.view.preview)
-        persist_project_view_resolution(project_view, path, review, content)
-
-      nil ->
-        {:error, :editable_view_unavailable}
-    end
-  end
-
-  @spec persist_project_view_resolution(
-          ProjectView.t(),
-          String.t(),
-          MingaEditor.Agent.DiffReview.t(),
-          String.t()
-        ) ::
-          :ok | {:error, term()}
-  defp persist_project_view_resolution(
-         %ProjectView{backend: Overlay} = project_view,
-         path,
-         %{
-           reviewed_source: %Source{} = source,
-           review_target: %Session.ConnectionTarget{} = target
-         } = review,
-         content
-       ) do
-    case review_relative_path(project_view, path) do
-      {:ok, relative_path} ->
-        {revision, operation} = review_mutation(review, source.source_id, content)
-
-        Session.apply_review_mutation(
-          target,
-          project_view,
-          relative_path,
-          source,
-          revision,
-          operation
-        )
-
-      :outside_project ->
-        {:error, :outside_project}
-
-      {:error, _reason} = error ->
-        error
-    end
-  end
-
-  defp persist_project_view_resolution(_view, _path, _review, _content),
-    do: {:error, :review_source_unavailable}
-
-  @spec review_mutation(MingaEditor.Agent.DiffReview.t(), String.t(), String.t()) ::
-          {Minga.Buffer.FileMutation.expectation(), Minga.Buffer.FileMutation.operation()}
-  defp review_mutation(%{after_absent?: true}, _source_id, content),
-    do: {:absent, {:create, content}}
-
-  defp review_mutation(%{after_lines: lines}, source_id, content) do
-    previous = Enum.join(lines, "\n")
-    revision = Minga.Buffer.FileMutation.revision(previous, nil, {:project_view, source_id})
-    {revision, {:replace, content}}
-  end
-
-  @spec active_project_view(state()) :: ProjectView.t() | nil
-  defp active_project_view(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tab_bar}}}) do
-    case TabBar.active_workspace(tab_bar) do
-      %{payload: %WorkspaceAgent{project_view: %ProjectView{} = project_view}} -> project_view
-      _workspace -> nil
-    end
-  end
-
-  defp active_project_view(_state), do: nil
-
-  @spec review_relative_path(ProjectView.t(), String.t()) ::
-          {:ok, String.t()} | :outside_project | {:error, term()}
-  defp review_relative_path(%ProjectView{project_root: root}, path) do
-    case Path.type(path) do
-      :relative -> ProjectView.normalize_relative_path(path)
-      :absolute -> absolute_review_relative_path(root, path)
-      :volumerelative -> :outside_project
-    end
-  end
-
-  @spec absolute_review_relative_path(String.t(), String.t()) ::
-          {:ok, String.t()} | :outside_project | {:error, term()}
-  defp absolute_review_relative_path(root, path) do
-    expanded_root = Path.expand(root)
-    expanded_path = Path.expand(path)
-
-    if String.starts_with?(expanded_path, expanded_root <> "/") do
-      ProjectView.normalize_relative_path(Path.relative_to(expanded_path, expanded_root))
-    else
-      :outside_project
     end
   end
 

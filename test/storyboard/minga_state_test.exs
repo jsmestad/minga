@@ -78,4 +78,23 @@ defmodule Minga.Storyboard.MingaStateTest do
     EditorCase.wait_until(kept.ctx, &(NoticeWorkflow.message(&1) == message))
     assert Session.model(kept).echo == message
   end
+
+  test "the task review reaches its tree, confirmation, diff, empty, and completed views" do
+    for id <-
+          ~w(minga.review.buffer minga.review.keep_all.confirm minga.review.all_decided minga.review.empty minga.review.diff_inline) do
+      entry = Registry.fetch!(id)
+      session = Registry.drive(entry)
+
+      try do
+        model = Session.model(session)
+        assert Registry.classify(model) == id
+
+        for check <- entry.checks do
+          assert Check.run(check, model) == :ok, check.name
+        end
+      after
+        Session.stop(session)
+      end
+    end
+  end
 end

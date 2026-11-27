@@ -1,0 +1,143 @@
+{
+ "authorship": [
+  {
+   "column": 89,
+   "head": true,
+   "role": 0,
+   "row": 1,
+   "shared": false
+  },
+  {
+   "column": 89,
+   "head": false,
+   "role": 0,
+   "row": 2,
+   "shared": false
+  },
+  {
+   "column": 89,
+   "head": false,
+   "role": 0,
+   "row": 3,
+   "shared": false
+  }
+ ],
+ "elements": [
+  {
+   "frame": [
+    79,
+    38,
+    642,
+    864
+   ],
+   "label": "*minga-review* [RO], pane 2",
+   "role": "AXTextArea",
+   "value": "Clarify the plan limit message\nStarting \u00b7 1 file\ny Keep  n Reject  = Diff  Y Keep all\n]h Next  [h Previous  \u21a9 Go to  q Close\n\nUnreviewed\n  lib/storyboard.ex\n  \u203a Change at 2:19\n      @@ 2\n      -   def label, do: \"Rate limited\"\n      +   def label, do: \"Your plan limit applies\"\n    Change at 3:19\n    Change at 4:19\n\nKept\n"
+  },
+  {
+   "frame": [
+    775.5,
+    38,
+    642,
+    864
+   ],
+   "label": "storyboard.ex, pane 1",
+   "role": "AXTextArea",
+   "value": "defmodule UsageLimit do\n  def label, do: \"Your plan limit applies\"\n  def window, do: 45\n  def retry?, do: true\nend\n"
+  }
+ ],
+ "grid": {
+  "cols": 177,
+  "rows": 45
+ },
+ "parts": [
+  {
+   "baseline": 21,
+   "frame": [
+    344,
+    9.5,
+    78,
+    15
+   ],
+   "part": "tabBar.tabLabel",
+   "text": "storyboard.ex"
+  },
+  {
+   "frame": [
+    0,
+    904,
+    1440,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    6,
+    904,
+    61,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "mode: NORMAL"
+  },
+  {
+   "frame": [
+    75,
+    904,
+    110,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filename: *minga-review* [RO]"
+  },
+  {
+   "frame": [
+    1388,
+    904,
+    22,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filetype: Text"
+  },
+  {
+   "frame": [
+    1418,
+    904,
+    16,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "position: 8:1"
+  },
+  {
+   "frame": [
+    6,
+    907,
+    61,
+    18
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "baseline": 919.5,
+   "frame": [
+    12,
+    909,
+    49,
+    14
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  }
+ ],
+ "scenario": "minga.review.diff_inline",
+ "size": "1440",
+ "theme": "catppuccin_frappe",
+ "window": {
+  "height": 928,
+  "width": 1440
+ }
+}

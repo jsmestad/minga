@@ -647,6 +647,18 @@ defmodule Minga.Buffer do
           | {:error, BufferProcess.review_error()}
   defdelegate decide_review(server, target, decision), to: BufferProcess
 
+  @doc "Returns before and after text for an exact review offer without modifying the file."
+  @spec preview_review(t(), BufferProcess.review_target()) ::
+          {:ok, String.t(), String.t()}
+          | Minga.Buffer.UndoHistory.blocked()
+          | {:error, BufferProcess.review_error()}
+  defdelegate preview_review(server, target), to: BufferProcess
+
+  @doc "Resolves the same pending task unit and moves the file cursor to it."
+  @spec move_to_review_unit(t(), Minga.Buffer.UndoHistory.review_location()) ::
+          {:ok, Document.position()} | :unavailable
+  defdelegate move_to_review_unit(server, unit), to: BufferProcess
+
   @doc "Requests Keep without waiting for Git or checkpoint publication."
   @spec request_keep(t(), BufferProcess.review_target()) :: :gen_server.request_id()
   defdelegate request_keep(server, target), to: BufferProcess
@@ -682,6 +694,10 @@ defmodule Minga.Buffer do
           {Minga.Buffer.Author.key(), [{Document.position(), Document.position()}]}
         ]
   defdelegate minga_changes(server, task_id), to: BufferProcess
+
+  @doc "Reads the task's positioned pending units and the exact offer to decide them together."
+  @spec task_review_entries(t(), Minga.Buffer.Author.id()) :: BufferProcess.task_review_offer()
+  defdelegate task_review_entries(server, task_id), to: BufferProcess
 
   @doc "Force the next edit to start a new undo group."
   @spec break_undo_coalescing(t()) :: :ok

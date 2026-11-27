@@ -15,13 +15,20 @@ defmodule Minga.Test.Storyboard.Session do
   alias Minga.Test.Storyboard.Keys
   alias Minga.Test.Storyboard.Model
   alias MingaEditor.Agent.{Activity, UIState}
+  alias MingaEditor.Agent.TaskWorkflow
+  alias MingaEditor.Agent.Tasks
+  alias MingaEditor.Agent.Tasks.Entry, as: TaskEntry
+  alias MingaAgent.Session.{ConnectionSnapshot, ConnectionTarget}
+  alias MingaEditor.EffectScheduler
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.MinibufferData
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.RenderCorrelation
   alias MingaEditor.RenderModel.UI.Builder, as: UIBuilder
+  alias MingaEditor.Shell.Traditional.TaskReviewWorkflow
   alias MingaEditor.Shell.Traditional.Workflow
   alias MingaEditor.StatusBar.Data, as: StatusBarData
+  alias MingaEditor.UI.Prompt.NewTask
 
   @default_content """
   defmodule Storyboard do
@@ -77,9 +84,15 @@ defmodule Minga.Test.Storyboard.Session do
 
   `:minga` puts Minga in an Agent status before the first key, for example `:thinking` for "Minga is working". Use `{:thinking, :in_file}` to make the fixture file the task's last edited file. The status goes into the editor's live presentation cache, so every surface reads the same value.
 
-  `:conversation` starts a real Agent session before the first key. It takes `messages:`, `notices:`, `prompt:`, `turn:` (`:idle`, `:working` or `:stopped`), and `queue:` (follow-up messages queued while Minga works). Its provider never finishes a turn. By default the fixture returns to the file before the first key, so `SPC a v` opens the seeded conversation. Set `open?: true` when the scenario begins inside that conversation.
+  `:conversation` starts a real Agent session before the first key. It takes `messages:`, `notices:`, `prompt:`, `turn:` (`:idle`, `:working`, `:stopped` or `:completed`), and `queue:` (follow-up messages queued while Minga works). Its held fixture provider finishes only when explicitly released. By default the fixture returns to the file before the first key, so `SPC a v` opens the seeded conversation. Set `open?: true` when the scenario begins inside that conversation.
+
+  `:agent_provider_module` chooses a fixture provider without opening a conversation first, for flows that start their own task.
 
   `:review_edits` opens the fixture file and applies attributed edits before the keys or clicks that lead to a review scenario.
+
+  `:review_neighbor` adds a second tracked file with its own attributed edits for a multi-file review journey.
+
+  `:review_task` binds the fixture's task identity and title. Its `:open?` option opens the review with the real leader keys and waits for the generated buffer before another key acts on it.
 
   The storyboard renderer (#4036) adds four more: `:root` (a fixed project directory, so the path the chrome shows is the same on every machine; the caller keeps it unique among concurrent sessions in one run, and the directory is written atomically and never deleted, so concurrent runs on one machine can share it), `:theme` (a built-in theme name such as `:astrodark`, set on a private options server before the editor starts), `:capabilities` (the `MingaEditor.Frontend.Capabilities` the frontend would report), and `:record_packets` (keep every packet for `packets/1`).
   """
@@ -122,7 +135,9 @@ defmodule Minga.Test.Storyboard.Session do
     ctx =
       EditorCase.start_editor(
         content,
-        editor_opts ++ Keyword.take(opts, [:capabilities]) ++ theme_opts ++ project_opts
+        editor_opts ++
+          Keyword.take(opts, [:capabilities, :agent_provider_module]) ++
+          theme_opts ++ project_opts
       )
 
     relay = start_relay(ctx, parser)
@@ -146,20 +161,27 @@ defmodule Minga.Test.Storyboard.Session do
     }
 
     session = seed_review(session, Keyword.get(opts, :review_edits, []))
+    session = seed_review_neighbor(session, Keyword.get(opts, :review_neighbor))
+    session = %{session | home_window: window_id(session)}
+    session = seed_review_task(session, Keyword.get(opts, :review_task))
     install_minga_status(ctx, file, Keyword.get(opts, :minga))
-    %{session | home_window: window_id(session)}
+    session
   end
+
+  @typep review_edit ::
+           {Minga.Buffer.Document.position(), non_neg_integer(), binary(), EditSource.t()}
 
   @typedoc "The `:conversation` start option."
   @type conversation :: [
           messages: [MingaAgent.Message.t()],
           notices: [{String.t(), :info | :warning | :error}],
           prompt: String.t(),
-          turn: :idle | :working | :stopped,
+          turn: :idle | :working | :stopped | :completed,
           queue: [String.t()],
           draft: String.t(),
           peek?: boolean(),
-          open?: boolean()
+          open?: boolean(),
+          review_edits: (String.t() -> [review_edit()]) | nil
         ]
 
   @spec conversation_editor_opts(conversation() | nil, Path.t()) :: {keyword(), [term()]}
@@ -238,7 +260,8 @@ defmodule Minga.Test.Storyboard.Session do
         queue: [],
         draft: "",
         peek?: false,
-        open?: false
+        open?: false,
+        review_edits: nil
       )
 
     EditorCase.send_keys_sync(ctx, "1")
@@ -276,6 +299,7 @@ defmodule Minga.Test.Storyboard.Session do
       end
 
     await_transcript!(ctx, session)
+    seed_conversation_review(ctx, file, session, conversation[:review_edits])
 
     if conversation[:open?] do
       await_queue_contents!(ctx, conversation[:queue])
@@ -290,6 +314,30 @@ defmodule Minga.Test.Storyboard.Session do
     end
 
     peek_parent
+  end
+
+  @spec seed_conversation_review(
+          EditorCase.editor_ctx(),
+          Path.t(),
+          pid(),
+          (String.t() -> [review_edit()]) | nil
+        ) :: :ok
+  defp seed_conversation_review(_ctx, _file, _session, nil), do: :ok
+
+  defp seed_conversation_review(ctx, file, session, edits) do
+    state =
+      EditorCase.wait_until(ctx, fn state ->
+        match?(
+          %ConnectionSnapshot{target: %ConnectionTarget{session: ^session, session_id: id}}
+          when is_binary(id),
+          state.workspace.agent_ui.connection
+        )
+      end)
+
+    %{active_buffer: buffer} = UIState.View.return_target(state.workspace.agent_ui.view)
+    ^file = Buffer.file_path(buffer)
+
+    apply_review_edits(buffer, edits.(UIState.task_id(state.workspace.agent_ui)))
   end
 
   @spec await_queue_contents!(EditorCase.editor_ctx(), [String.t()]) :: :ok
@@ -345,16 +393,45 @@ defmodule Minga.Test.Storyboard.Session do
   @spec open_file(t()) :: t()
   def open_file(%__MODULE__{} = session), do: session |> press("1") |> settle()
 
-  @spec seed_review(
-          t(),
-          [{Minga.Buffer.Document.position(), non_neg_integer(), binary(), EditSource.t()}]
-        ) :: t()
+  @spec seed_review(t(), [review_edit()]) :: t()
   defp seed_review(session, []), do: session
 
   defp seed_review(session, edits) do
     session = open_file(session)
     buffer = EditorCase.active_buffer(session.ctx)
+    apply_review_edits(buffer, edits)
+    settle(session)
+  end
 
+  @spec seed_review_neighbor(t(), nil | {Path.t(), String.t(), [review_edit()]}) :: t()
+  defp seed_review_neighbor(session, nil), do: session
+
+  defp seed_review_neighbor(
+         %__MODULE__{ctx: ctx, root: root} = session,
+         {relative, content, edits}
+       ) do
+    path = Path.join(root, relative)
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, content)
+
+    buffer =
+      ExUnit.Callbacks.start_supervised!(
+        {Buffer, file_path: path, events_registry: ctx.events_registry},
+        id: make_ref()
+      )
+
+    apply_review_edits(buffer, edits)
+
+    :sys.replace_state(ctx.editor, fn state ->
+      buffers = MingaEditor.State.Buffers.add_background(state.workspace.buffers, buffer)
+      %{state | workspace: MingaEditor.Session.State.set_buffers(state.workspace, buffers)}
+    end)
+
+    session
+  end
+
+  @spec apply_review_edits(pid(), [review_edit()]) :: :ok
+  defp apply_review_edits(buffer, edits) do
     Enum.each(edits, fn {position, length, text, source} ->
       {:ok, _version} =
         BufferProcess.replace_byte_range_if_version(
@@ -366,8 +443,47 @@ defmodule Minga.Test.Storyboard.Session do
           source
         )
     end)
+  end
 
-    settle(session)
+  @spec seed_review_task(t(), keyword() | nil) :: t()
+  defp seed_review_task(session, nil), do: session
+
+  defp seed_review_task(%__MODULE__{ctx: ctx} = session, options) do
+    session = if EditorCase.active_window_buffer(ctx), do: session, else: open_file(session)
+    session = %{session | home_window: window_id(session)}
+    task = Keyword.fetch!(options, :id)
+    title = Keyword.fetch!(options, :title)
+    pid = self()
+
+    connection = %ConnectionSnapshot{
+      target: ConnectionTarget.new(pid, task, nil, make_ref()),
+      credential_readiness: :configured,
+      model_selection: nil,
+      provider_phase: :running,
+      operation: :idle,
+      problem: nil
+    }
+
+    :sys.replace_state(ctx.editor, fn state ->
+      ui = UIState.project_connection(state.workspace.agent_ui, connection)
+
+      state
+      |> TaskWorkflow.follow(pid, title: title)
+      |> TaskWorkflow.observe(pid, {:connection_changed, connection})
+      |> Workflow.install_agent_ui(ui)
+    end)
+
+    if Keyword.get(options, :open?, false) do
+      session = press(session, "SPC a r")
+
+      EditorCase.wait_until(ctx, &(TaskReviewWorkflow.focused(&1) != nil),
+        message: "expected the task review split to open"
+      )
+
+      session
+    else
+      session
+    end
   end
 
   # The project home's reads are fixed so every machine shows the same home: the project's one file is recent file 1.
@@ -514,7 +630,7 @@ defmodule Minga.Test.Storyboard.Session do
       :idle ->
         :ok
 
-      turn when turn in [:working, :stopped] ->
+      turn when turn in [:working, :stopped, :completed] ->
         :ok = MingaAgent.Session.send_prompt(session, conversation[:prompt] || "Keep going")
         await_working!(ctx)
 
@@ -522,9 +638,24 @@ defmodule Minga.Test.Storyboard.Session do
           {:queued, :follow_up} = MingaAgent.Session.queue_follow_up(session, text)
         end
 
-        if turn == :stopped, do: stop_turn!(ctx, session)
-        :ok
+        case turn do
+          :working -> :ok
+          :stopped -> stop_turn!(ctx, session)
+          :completed -> finish_turn!(ctx, session)
+        end
     end
+  end
+
+  @spec finish_turn!(EditorCase.editor_ctx(), pid()) :: :ok
+  defp finish_turn!(ctx, session) do
+    :ok = Minga.Test.SessionSlowMockProvider.proceed(MingaAgent.Session.get_provider(session))
+
+    EditorCase.wait_until(ctx, &(agent_status(&1) == :idle),
+      max_attempts: 500,
+      message: "expected the storyboard conversation to finish its turn"
+    )
+
+    :ok
   end
 
   @spec stop_turn!(EditorCase.editor_ctx(), pid()) :: :ok
@@ -653,7 +784,13 @@ defmodule Minga.Test.Storyboard.Session do
     _ =
       Enum.reduce(steps, nil, fn key_step, state ->
         await_file_tree_scan!(ctx, state)
-        step(ctx, key_step)
+        state = step(ctx, key_step)
+
+        if EffectScheduler.active?(state.effect_scheduler, TaskReviewWorkflow) do
+          await_task_review!(ctx)
+        else
+          state
+        end
       end)
 
     await_picker_fetch!(ctx)
@@ -661,6 +798,31 @@ defmodule Minga.Test.Storyboard.Session do
     await_peek_reader!(ctx)
     await_keep!(ctx)
     session
+  end
+
+  @spec await_task_review!(EditorCase.editor_ctx()) :: map()
+  defp await_task_review!(ctx) do
+    EditorCase.wait_until(
+      ctx,
+      &(not EffectScheduler.active?(&1.effect_scheduler, TaskReviewWorkflow)),
+      max_attempts: 500,
+      message: "expected the task review operation to settle"
+    )
+  end
+
+  @spec await_drawer_task_turn!(EditorCase.editor_ctx(), String.t()) :: map()
+  defp await_drawer_task_turn!(ctx, goal) do
+    EditorCase.wait_until(
+      ctx,
+      fn state ->
+        Enum.any?(Tasks.tree(state.agent_connection.tasks), fn
+          %{item: %TaskEntry{title: ^goal} = task} -> TaskEntry.state(task) == :working
+          _other -> false
+        end)
+      end,
+      max_attempts: 500,
+      message: "expected the drawer task to begin its first turn"
+    )
   end
 
   @spec await_file_tree_scan!(EditorCase.editor_ctx(), map() | nil) :: :ok
@@ -842,17 +1004,19 @@ defmodule Minga.Test.Storyboard.Session do
   end
 
   @doc """
-  The terminal header height for a conversation or a remaining Agent workspace, or nil for scenes that use measured grid fixtures.
+  The terminal header height for a conversation, its workspace, or task review. Other scenes use measured grid fixtures.
 
   This mirrors `headerChrome` in `go/tui/internal/ui/render_chrome.go`: the workspace bar when there is more than one workspace, tabs, and the breadcrumb from `breadcrumb_min_cols` columns up when it has segments.
   """
-  @spec conversation_header_rows(t(), pos_integer(), pos_integer()) :: pos_integer() | nil
-  def conversation_header_rows(%__MODULE__{ctx: ctx}, cols, breadcrumb_min_cols) do
-    ui = ctx |> EditorCase.editor_state() |> semantic_ui()
+  @spec dynamic_tui_header_rows(t(), pos_integer(), pos_integer()) :: pos_integer() | nil
+  def dynamic_tui_header_rows(%__MODULE__{ctx: ctx}, cols, breadcrumb_min_cols) do
+    state = EditorCase.editor_state(ctx)
+    ui = semantic_ui(state)
 
     workspaces = ui.workspaces.workspaces
 
-    if match?(%{visible?: true}, ui.agent_chat) or Enum.any?(workspaces, &(&1.kind == :agent)) do
+    if TaskReviewWorkflow.focused(state) != nil or match?(%{visible?: true}, ui.agent_chat) or
+         Enum.any?(workspaces, &(&1.kind == :agent)) do
       rows =
         Enum.count(
           [
@@ -910,7 +1074,18 @@ defmodule Minga.Test.Storyboard.Session do
     state = EditorCase.editor_state(ctx)
     ui = semantic_ui(state)
 
-    ui |> with_resident_transcript(state) |> Model.from_ui(state.appearance.theme)
+    ui
+    |> with_resident_transcript(state)
+    |> Model.from_ui(state.appearance.theme)
+    |> Model.observe_review(review_text(state))
+  end
+
+  @spec review_text(MingaEditor.State.t()) :: String.t() | nil
+  defp review_text(state) do
+    case TaskReviewWorkflow.focused(state) do
+      {_, {buffer, _, _}} -> Buffer.content(buffer)
+      nil -> nil
+    end
   end
 
   @spec semantic_ui(map()) :: Minga.RenderModel.UI.t()
@@ -995,6 +1170,25 @@ defmodule Minga.Test.Storyboard.Session do
   def window_id(%__MODULE__{ctx: ctx}), do: EditorCase.active_window_id(ctx)
 
   @spec step(EditorCase.editor_ctx(), Keys.step()) :: map()
+  defp step(ctx, {:key, 13, 0}) do
+    goal =
+      case EditorCase.editor_state(ctx) do
+        %{
+          agent_connection: %{agent_provider_module: Minga.Test.SessionSlowMockProvider},
+          shell_runtime: %{
+            state: %{modal: {:prompt, %{prompt_ui: %{handler: NewTask, text: text}}}}
+          }
+        } ->
+          String.trim(text)
+
+        _other ->
+          ""
+      end
+
+    state = EditorCase.send_key_sync(ctx, 13, 0)
+    if goal == "", do: state, else: await_drawer_task_turn!(ctx, goal)
+  end
+
   defp step(ctx, {:key, codepoint, mods}), do: EditorCase.send_key_sync(ctx, codepoint, mods)
 
   defp step(%{editor: editor} = ctx, :pause) do
@@ -1153,7 +1347,17 @@ defmodule Minga.Test.Storyboard.Session do
 
   @spec highlights_settled?(MingaEditor.State.t()) :: boolean()
   defp highlights_settled?(state) do
-    highlight = MingaEditor.HighlightSync.get_active_highlight(state)
+    buffer =
+      case TaskReviewWorkflow.focused(state) do
+        {_, {_, _, parent}} ->
+          %MingaEditor.Window{content: {:buffer, buffer}} = state.workspace.windows.map[parent]
+          buffer
+
+        nil ->
+          state.workspace.buffers.active
+      end
+
+    highlight = MingaEditor.HighlightSync.get_highlight(state, buffer)
     tuple_size(highlight.spans) > 0 and MingaEditor.UI.Highlight.parse_settled?(highlight)
   end
 

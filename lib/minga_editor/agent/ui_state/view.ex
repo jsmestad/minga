@@ -309,18 +309,18 @@ defmodule MingaEditor.Agent.UIState.View do
   @type diff_resolution_action :: :accept_current | :reject_current | :accept_all | :reject_all
   @type diff_resolution_write ::
           :no_write
-          | {:write_file, String.t(), String.t()}
           | {:resolve_fork, String.t(), Minga.Buffer.Fork.review_revision(),
              [
                DiffReview.resolution()
              ]}
   @type diff_resolution_result :: {:ok, t(), diff_resolution_write()} | :no_diff | :no_hunk
 
-  @doc "Applies a diff-review resolution and reprojects the edit timeline authority atomically."
+  @doc "Applies a fork-conflict or unapplied-proposal decision. Comparisons have no write authority."
   @spec resolve_diff_review(t(), diff_resolution_action()) :: diff_resolution_result()
   def resolve_diff_review(%__MODULE__{} = view, action)
       when action in [:accept_current, :reject_current, :accept_all, :reject_all] do
     with %DiffReview{} = review <- Preview.diff_review(view.preview),
+         :ok <- authorize_diff_decision(review),
          {:ok, resolved_review} <- resolve_review_action(review, action) do
       resolve_review(view, action, review, resolved_review)
     else
@@ -362,43 +362,11 @@ defmodule MingaEditor.Agent.UIState.View do
     end
   end
 
-  defp resolve_review(view, action, review, resolved_review) do
-    original_lines = DiffReview.original_lines(review)
-    materialized_lines = DiffReview.materialized_lines(resolved_review)
-
-    timeline =
-      EditTimeline.reproject(
-        view.edit_timeline,
-        resolved_review.path,
-        original_lines,
-        materialized_lines
-      )
-
-    updated_review =
-      resolved_review
-      |> DiffReview.update_after_lines(
-        materialized_lines,
-        EditTimeline.cumulative_hunks(timeline, resolved_review.path)
-      )
-      |> unresolved_review()
-
-    {preview, presentation} =
-      case updated_review do
-        nil ->
-          {Preview.clear(view.preview), Presentation.focus(view.presentation, :chat)}
-
-        %DiffReview{} = review ->
-          {Preview.replace_diff(view.preview, review), view.presentation}
-      end
-
-    updated_view = %{
-      view
-      | edit_timeline: timeline,
-        preview: preview,
-        presentation: presentation
-    }
-
-    {:ok, updated_view, write_request(action, resolved_review.path, materialized_lines)}
+  @doc "Whether the displayed Agent review offers decisions instead of inspection only."
+  @spec decision_review?(t()) :: boolean()
+  def decision_review?(%__MODULE__{} = view) do
+    agent_body(view) == :review and
+      DiffReview.decisions_allowed?(Preview.diff_review(view.preview))
   end
 
   # ── Search ──────────────────────────────────────────────────────────────────
@@ -532,10 +500,13 @@ defmodule MingaEditor.Agent.UIState.View do
     %{view | toast: nil, toast_queue: :queue.new()}
   end
 
+  @spec authorize_diff_decision(DiffReview.t()) :: :ok | :no_hunk
+  defp authorize_diff_decision(review) do
+    if DiffReview.decisions_allowed?(review), do: :ok, else: :no_hunk
+  end
+
   @spec resolve_review_action(DiffReview.t(), diff_resolution_action()) ::
           {:ok, DiffReview.t()} | :no_hunk
-  defp resolve_review_action(%DiffReview{retained?: true}, _action), do: :no_hunk
-
   defp resolve_review_action(%DiffReview{} = review, :accept_current) do
     if DiffReview.current_hunk(review),
       do: {:ok, DiffReview.accept_current(review)},
@@ -553,21 +524,6 @@ defmodule MingaEditor.Agent.UIState.View do
 
   defp resolve_review_action(%DiffReview{} = review, :reject_all),
     do: {:ok, DiffReview.reject_all(review)}
-
-  @spec unresolved_review(DiffReview.t() | nil) :: DiffReview.t() | nil
-  defp unresolved_review(nil), do: nil
-
-  defp unresolved_review(%DiffReview{} = review),
-    do: if(DiffReview.resolved?(review), do: nil, else: review)
-
-  @spec write_request(diff_resolution_action(), String.t(), [String.t()]) ::
-          diff_resolution_write()
-  defp write_request(action, path, materialized_lines)
-       when action in [:reject_current, :reject_all] do
-    {:write_file, path, Enum.join(materialized_lines, "\n")}
-  end
-
-  defp write_request(_action, _path, _materialized_lines), do: :no_write
 
   @spec make_toast(String.t(), :info | :warning | :error) :: toast()
   defp make_toast(message, :info), do: %{message: message, icon: "✓", level: :info}

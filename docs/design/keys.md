@@ -193,8 +193,9 @@ Each row shows two keys: the letter that works inside the menu, and on the right
 | `=` | Toggle the inline diff |
 | `Y` | Keep all, after "Keep all 3 changes? y/n" |
 | `]h` / `[h` | Next / previous change |
-| `↩` | Jump to the change in its file |
+| `↩` | Jump to the change in its file, or reply to Minga once all changes are decided |
 | `q` | Close |
+| `Esc` | Dismiss the inline diff if it is open, otherwise close the review |
 
 ## `*minga-tasks*`
 

@@ -1362,6 +1362,14 @@ defmodule MingaEditor do
     {:noreply, LspEventHandler.dispatch(state, msg)}
   end
 
+  def handle_info({:task_review_source_opened, tab, buffer}, state) when is_pid(buffer) do
+    {:noreply, BufferRegistry.retain_review_file(state, tab, buffer)}
+  end
+
+  def handle_info({:retry_task_review_refresh, tab}, state) do
+    {:noreply, MingaEditor.Shell.Traditional.TaskReviewWorkflow.retry_refresh(state, tab)}
+  end
+
   # ── Event bus messages ────────────────────────────────────────────────────────
   # All {:minga_event, event, payload} messages are routed through a single
   # catch-all to the appropriate handler or inline logic. This replaces 10
@@ -1370,6 +1378,8 @@ defmodule MingaEditor do
         {:minga_event, :buffer_review_changed, %Minga.Events.BufferEvent{buffer: buf}},
         state
       ) do
+    state = MingaEditor.Shell.Traditional.TaskReviewWorkflow.source_changed(state, buf)
+
     if MingaEditor.State.Windows.find_by_buffer(state.workspace.windows, buf),
       do: {:noreply, schedule_render(state, 16)},
       else: {:noreply, state}

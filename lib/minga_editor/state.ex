@@ -113,6 +113,11 @@ defmodule MingaEditor.State do
   def put_keep_requests(%__MODULE__{} = state, requests),
     do: %{state | interaction: Interaction.put_keep_requests(state.interaction, requests)}
 
+  @doc "Installs the shared quickfix list in this editor."
+  @spec put_quickfix(t(), MingaEditor.Quickfix.t()) :: t()
+  def put_quickfix(%__MODULE__{} = state, list),
+    do: %{state | interaction: Interaction.put_quickfix(state.interaction, list)}
+
   @doc "Drops one feature source across the live workspace, tab snapshots, and shell stash."
   @spec drop_feature_state_source(t(), [Entry.t()], FeatureState.source()) :: t()
   def drop_feature_state_source(%__MODULE__{} = state, entries, source) when is_list(entries) do

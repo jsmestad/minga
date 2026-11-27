@@ -185,6 +185,19 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerTest do
     assert StoryboardSession.model(session(ctx)).minibuffer_prompt =~ "New task ›"
   end
 
+  test "Return runs New task after the last selected task disappears", %{ctx: ctx} do
+    task = FakeTaskSession.start(ctx.editor, "Review docs", :done)
+    send_keys_sync(ctx, "<Space>aa")
+    assert [%{id: row}] = drawer(ctx).rows
+    send_gui_action(ctx, {:tasks_drawer_action, row, "select"})
+
+    :sys.replace_state(ctx.editor, &MingaEditor.State.forget_agent_task(&1, task))
+    assert %TasksDrawer{visible?: true, rows: [], empty: %EmptyList{selected: 0}} = drawer(ctx)
+
+    send_keys_sync(ctx, "<CR>")
+    assert StoryboardSession.model(session(ctx)).minibuffer_prompt =~ "New task ›"
+  end
+
   test "an open conversation that was never prompted is not a task, so the drawer stays empty", %{
     ctx: ctx
   } do
