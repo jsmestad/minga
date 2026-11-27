@@ -449,9 +449,9 @@ defmodule Minga.Buffer do
   @doc """
   Asks every file buffer that writes into `swap_dir` to discard unsaved text, retain any saved review, and stop further swap writes because the editor is quitting.
 
-  Each buffer gets `timeout` (2 seconds by default) to answer. One that is too busy keeps its swap file, and the next start offers that text again, which is better than a quit that hangs.
+  Each buffer gets `timeout` (2 seconds by default) to answer. A release that expires while still in the buffer's queue leaves its swap available for recovery.
 
-  A failed release returns the file path and reason. The previous generation remains recoverable. A swap left by a buffer that crashed earlier is not touched: the user has not decided about that text.
+  A failed release returns the file path and reason. A publication failure leaves the previous generation recoverable. A swap left by a buffer that crashed earlier is not touched: the user has not decided about that text.
   """
   @spec release_swaps(String.t(), timeout()) :: :ok | {:error, [{String.t(), term()}]}
   def release_swaps(swap_dir, timeout \\ 2_000) when is_binary(swap_dir) do

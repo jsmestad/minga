@@ -563,18 +563,20 @@ defmodule Minga.Buffer.Process do
   @doc """
   Stops swap writes and removes this buffer's swap file in `swap_dir`, because the user is quitting on purpose.
 
-  The call gives up after `timeout` (2 seconds by default). A buffer that did not answer keeps its swap file, and the next start offers that text again: that is better than a quit that hangs.
+  The caller waits up to `timeout` (2 seconds by default). If the request is still queued when that deadline passes, the buffer leaves the swap available for recovery.
 
   A successful release keeps the saved review checkpoint, if any, and stops further swap writes. If publication fails, the previous generation remains recoverable and the call returns the failure. A buffer that writes into another directory, or writes no swap files, is left as it is.
   """
   @spec release_swap(GenServer.server(), String.t(), timeout()) :: :ok | {:error, term()}
-  def release_swap(server, swap_dir, timeout \\ @swap_release_timeout) when is_binary(swap_dir),
-    do: GenServer.call(server, {:release_swap, swap_dir}, timeout)
+  def release_swap(server, swap_dir, timeout \\ @swap_release_timeout) when is_binary(swap_dir) do
+    GenServer.call(server, {:release_swap, swap_dir, swap_discard_deadline(timeout)}, timeout)
+  end
 
   @doc "Completes the deliberate discard boundary before an editor closes a buffer."
   @spec prepare_close(GenServer.server()) :: :ok | {:error, term()}
   def prepare_close(server) do
-    GenServer.call(server, :prepare_close, @file_io_call_timeout)
+    deadline = swap_discard_deadline(@file_io_call_timeout)
+    GenServer.call(server, {:prepare_close, deadline}, @file_io_call_timeout)
   catch
     :exit, {:noproc, _call} -> :ok
     :exit, reason -> {:error, reason}
@@ -2041,11 +2043,12 @@ defmodule Minga.Buffer.Process do
     {:reply, {:error, :stale_swap}, state}
   end
 
-  def handle_call(:prepare_close, _from, state), do: release_discarded_swap(state)
+  def handle_call({:prepare_close, deadline}, _from, state),
+    do: release_discarded_swap(state, deadline)
 
-  def handle_call({:release_swap, swap_dir}, _from, state) do
+  def handle_call({:release_swap, swap_dir, deadline}, _from, state) do
     if SwapState.writes_into?(state.swap, swap_dir) do
-      release_discarded_swap(state)
+      release_discarded_swap(state, deadline)
     else
       {:reply, :ok, state}
     end
@@ -3284,13 +3287,23 @@ defmodule Minga.Buffer.Process do
     :ok
   end
 
-  @spec release_discarded_swap(state()) :: {:reply, :ok | {:error, term()}, state()}
-  defp release_discarded_swap(state) do
-    state = revoke_swap_writes(state)
+  @spec swap_discard_deadline(timeout()) :: integer() | :infinity
+  defp swap_discard_deadline(:infinity), do: :infinity
+  defp swap_discard_deadline(timeout), do: System.monotonic_time(:millisecond) + timeout
 
-    case discard_unsaved_swap(state) do
-      {:ok, state} -> {:reply, :ok, %{state | swap: SwapState.release(state.swap)}}
-      {{:error, _reason} = error, state} -> {:reply, error, state}
+  @spec release_discarded_swap(state(), integer() | :infinity) ::
+          {:reply, :ok | {:error, term()}, state()}
+  defp release_discarded_swap(state, deadline) do
+    # Timing out a GenServer call does not retract a request that is still in the mailbox.
+    if deadline == :infinity or System.monotonic_time(:millisecond) < deadline do
+      state = revoke_swap_writes(state)
+
+      case discard_unsaved_swap(state) do
+        {:ok, state} -> {:reply, :ok, %{state | swap: SwapState.release(state.swap)}}
+        {{:error, _reason} = error, state} -> {:reply, error, state}
+      end
+    else
+      {:reply, {:error, :timeout}, state}
     end
   end
 

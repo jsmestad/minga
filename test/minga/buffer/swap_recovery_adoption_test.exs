@@ -227,13 +227,23 @@ defmodule Minga.Buffer.SwapRecoveryAdoptionTest do
       :ok = Buffer.replace_content(buffer, "unsaved text")
       write_swap_after_debounce(buffer)
 
-      # The buffer is busy with something slow.
-      :sys.suspend(buffer)
-      assert {:timeout, _call} = catch_exit(BufferProcess.release_swap(buffer, ctx.swap_dir, 50))
-      assert {:error, [{ctx.path, :timeout}]} == Buffer.release_swaps(ctx.swap_dir, 50)
-      :sys.resume(buffer)
+      swap_path = Swap.swap_path(ctx.path, swap_dir: ctx.swap_dir)
+      assert {:ok, _, "unsaved text"} = Recovery.read(swap_path)
 
-      assert File.exists?(Swap.swap_path(ctx.path, swap_dir: ctx.swap_dir))
+      :sys.suspend(buffer)
+
+      try do
+        assert {:timeout, _call} =
+                 catch_exit(BufferProcess.release_swap(buffer, ctx.swap_dir, 50))
+
+        assert {:error, [{ctx.path, :timeout}]} == Buffer.release_swaps(ctx.swap_dir, 50)
+      after
+        :sys.resume(buffer)
+      end
+
+      # This ordinary call from the same sender runs after both expired releases.
+      assert "unsaved text" == Buffer.content(buffer)
+      assert {:ok, _, "unsaved text"} = Recovery.read(swap_path)
     end
 
     test "a write that was pending when the user quit is cancelled", ctx do
