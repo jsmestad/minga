@@ -10,6 +10,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
 
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Commands
+  alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.HighlightSync
   alias MingaEditor.Session.CrashRecovery
   alias MingaEditor.Shell.BufferMetadata
@@ -114,9 +115,16 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   def do_file_tree_open(state, pid, path, tree) do
     new_state = register_buffer(state, pid, path)
 
-    file_tree = FileTreeState.set_tree(new_state.workspace.file_tree, FileTree.reveal(tree, path))
-    workspace = MingaEditor.Session.State.set_file_tree(new_state.workspace, file_tree)
-    %{new_state | workspace: workspace}
+    case FileTree.select_path(tree, path) do
+      {:ok, selected} ->
+        file_tree = FileTreeState.replace_tree_metadata(new_state.workspace.file_tree, selected)
+        workspace = MingaEditor.Session.State.set_file_tree(new_state.workspace, file_tree)
+        %{new_state | workspace: workspace}
+
+      :error ->
+        pending = FileTree.prepare_reveal(tree, path)
+        FileTreeFreshness.scan_loading(new_state, pending, selection_path: path)
+    end
   end
 
   @spec open_file_by_path(state(), String.t()) :: state()

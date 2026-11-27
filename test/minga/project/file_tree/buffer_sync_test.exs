@@ -24,7 +24,7 @@ defmodule Minga.Project.FileTree.BufferSyncTest do
       File.write!(Path.join(tmp_dir, "beta.txt"), "")
       File.mkdir_p!(Path.join(tmp_dir, "gamma"))
 
-      tree = FileTree.new(tmp_dir)
+      tree = FileTree.refresh(FileTree.new(tmp_dir))
       pid = BufferSync.start_buffer(tree)
 
       content = BufferProcess.content(pid)
@@ -38,24 +38,18 @@ defmodule Minga.Project.FileTree.BufferSyncTest do
   end
 
   describe "sync/2" do
-    test "updates buffer content after tree mutation", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join(tmp_dir, "subdir"))
+    test "a pending topology clears rows until a scan installs new entries", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "file.txt"), "")
-
-      tree = FileTree.new(tmp_dir)
+      tree = FileTree.refresh(FileTree.new(tmp_dir))
       pid = BufferSync.start_buffer(tree)
+      assert BufferProcess.content(pid) =~ "file.txt"
 
-      content_before = BufferProcess.content(pid)
+      pending_tree = FileTree.collapse_all(tree)
+      BufferSync.sync(pid, pending_tree)
+      assert BufferProcess.content(pid) == ""
 
-      # Toggle hidden files changes visible entries
-      new_tree = FileTree.toggle_hidden(tree)
-      BufferSync.sync(pid, new_tree)
-
-      content_after = BufferProcess.content(pid)
-      # Content may or may not change depending on hidden files present,
-      # but the sync should not crash
-      assert is_binary(content_after)
-      _ = content_before
+      BufferSync.sync(pid, FileTree.refresh(pending_tree))
+      assert BufferProcess.content(pid) =~ "file.txt"
     end
 
     test "buffer cursor matches tree cursor", %{tmp_dir: tmp_dir} do

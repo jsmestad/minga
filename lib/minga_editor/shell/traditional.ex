@@ -192,26 +192,7 @@ defmodule MingaEditor.Shell.Traditional do
 
   @impl true
   @spec async_render?(term()) :: boolean()
-  def async_render?(%{
-        shell_runtime: %MingaEditor.Shell.Runtime{entry: %{module: __MODULE__}},
-        workspace: %{buffers: %{active: active}}
-      })
-      when is_pid(active),
-      do: true
-
-  def async_render?(%{
-        shell_runtime: %MingaEditor.Shell.Runtime{entry: %{module: __MODULE__}}
-      }),
-      do: false
-
-  def async_render?(%RenderInput{
-        intent: %{frame: %{shell: __MODULE__}},
-        workspace: %{buffers: %{active: active}}
-      })
-      when is_pid(active),
-      do: true
-
-  def async_render?(%RenderInput{intent: %{frame: %{shell: __MODULE__}}}), do: false
+  def async_render?(_input), do: true
 
   @impl true
   @spec gui_payload(term()) :: nil

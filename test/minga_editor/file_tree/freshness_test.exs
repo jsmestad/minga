@@ -223,6 +223,37 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert rerooted_state.render.render_correlation.timer == nil
   end
 
+  test "a rejected filter keeps its error when the superseded scan finishes", %{tmp_dir: root} do
+    scheduler = start_scheduler(max_admitted: 1)
+    state = tui_state_with_tree(root, scheduler)
+
+    loading =
+      Freshness.scan_loading(state, FileTree.new(root),
+        scanner: FileTreeRefreshScanner,
+        scanner_context: {self(), :superseded, :wait},
+        synchronize_watchers?: false
+      )
+
+    request_id = refresh_request_token(file_tree(loading))
+    assert_receive {:file_tree_scan_started, :superseded, worker}, @timeout
+
+    rejected = Freshness.update_filter(loading, "needle")
+    assert {:error, _reason} = FileTreeState.status(file_tree(rejected))
+    assert ft_tree(rejected).filter == "needle"
+
+    old_result = tree(root, [entry(root, "old")])
+    send(worker, {:release_file_tree_scan, :superseded, {:return, old_result}})
+    outcome = receive_outcome(scheduler, request_id, :completed)
+    :ok = EffectScheduler.claim(scheduler, outcome)
+    {after_scan, applied} = Refresh.apply(rejected, outcome)
+    EffectScheduler.finalize(scheduler, applied)
+
+    assert {:error, reason} = FileTreeState.status(file_tree(rejected))
+    assert FileTreeState.status(file_tree(after_scan)) == {:error, reason}
+    assert FileTree.visible_entries(ft_tree(after_scan)) == []
+    assert ft_tree(after_scan).filter == "needle"
+  end
+
   test "project-root replacement immediately publishes loading before its scan finishes", %{
     tmp_dir: root
   } do
@@ -241,7 +272,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
 
     request_id = refresh_request_token(file_tree(loading))
     assert ft_tree(loading).root == Path.expand(new_root)
-    assert ft_tree(loading).entries == nil
+    assert ft_tree(loading).entries == []
     assert FileTreeState.status(file_tree(loading)) == :loading
     assert is_reference(request_id)
     assert_receive {:file_tree_scan_started, :project_root, worker}, @timeout
@@ -436,6 +467,25 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert file_tree(failed).refresh.phase == {:idle, 0}
     assert is_reference(failed.render.render_correlation.timer)
     Process.cancel_timer(failed.render.render_correlation.timer)
+  end
+
+  test "opening a missing directory delivers a listing error rather than an empty tree", %{
+    tmp_dir: root
+  } do
+    missing = Path.join(root, "missing")
+    scheduler = start_scheduler()
+    state = tui_state_with_tree(missing, scheduler)
+    loading = Freshness.open(state, FileTree.new(missing))
+
+    outcome = receive_outcome(scheduler, refresh_request_token(file_tree(loading)), :failed)
+    assert outcome.value == {:failed, {:root_unavailable, :enoent}}
+    :ok = EffectScheduler.claim(scheduler, outcome)
+    {failed, applied} = Refresh.apply(loading, outcome)
+    EffectScheduler.finalize(scheduler, applied)
+
+    assert ft_tree(failed).root == missing
+    reason = to_string(:file.format_error(:enoent))
+    assert FileTreeState.status(file_tree(failed)) == {:error, reason}
   end
 
   defp tui_state_with_tree(root, scheduler) do

@@ -351,7 +351,9 @@ defmodule MingaEditor.FileTree.RowsTest do
       assert is_list(FileTreeState.tree(file_tree).entries)
       assert Enum.count(FileTreeState.tree(file_tree).entries) == 2
 
-      replaced_tree = FileTree.toggle_hidden(FileTreeState.tree(file_tree))
+      replaced_tree =
+        file_tree |> FileTreeState.tree() |> FileTree.toggle_hidden() |> FileTree.refresh()
+
       replaced = FileTreeState.replace_tree(file_tree, replaced_tree)
 
       assert is_list(FileTreeState.tree(replaced).entries)

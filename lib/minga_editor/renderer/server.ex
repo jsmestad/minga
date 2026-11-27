@@ -168,6 +168,18 @@ defmodule MingaEditor.Renderer.Server do
       when is_integer(frame_seq) and frame_seq >= 0,
       do: GenServer.call(server, {:reset_connection, submission, frame_seq, monotonic_now()})
 
+  @doc "Queues a recovery frame without making the editor wait for the renderer mailbox."
+  @spec cast_recovery(
+          GenServer.server(),
+          :connection | :keyframe,
+          Submission.t(),
+          non_neg_integer()
+        ) ::
+          :ok
+  def cast_recovery(server, kind, %Submission{} = submission, frame_seq)
+      when kind in [:connection, :keyframe] and is_integer(frame_seq) and frame_seq >= 0,
+      do: GenServer.cast(server, {:recover, kind, submission, frame_seq, monotonic_now()})
+
   @impl true
   @spec init(keyword()) :: {:ok, t()}
   def init(opts) do
@@ -266,6 +278,18 @@ defmodule MingaEditor.Renderer.Server do
   def handle_cast({:render, submission, seq, pushed_at}, state) do
     {state, intent, seq} = receive_submission(state, submission, seq, state.editor_pid)
     FrameHandler.enqueue(state, intent, seq, pushed_at)
+  end
+
+  def handle_cast({:recover, kind, submission, seq, pushed_at}, state) do
+    {state, intent, seq} = receive_submission(state, submission, seq, state.editor_pid)
+
+    {:reply, :ok, state} =
+      case kind do
+        :connection -> RecoveryHandler.reset(state, intent, seq, pushed_at)
+        :keyframe -> RecoveryHandler.keyframe(state, intent, seq, pushed_at)
+      end
+
+    {:noreply, state}
   end
 
   @impl true

@@ -64,6 +64,7 @@ defmodule MingaEditor.Input.FileTreeFocusTest do
     ctx = open_editor(dir)
     send_keys_sync(ctx, "<SPC>aSn")
     focus_tree(ctx, :command_open)
+    wait_until_screen(ctx, fn -> match?(%{rows: [_ | _]}, file_tree(ctx)) end)
     assert %{focused?: true} = file_tree(ctx)
 
     send_keys_sync(ctx, "<SPC>wl")

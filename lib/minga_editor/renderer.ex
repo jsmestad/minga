@@ -69,7 +69,7 @@ defmodule MingaEditor.Renderer do
       seq = System.unique_integer([:positive, :monotonic])
 
       if keyframe? do
-        :ok = RendererServer.reset_keyframe(pid, submission, seq)
+        RendererServer.cast_recovery(pid, :keyframe, submission, seq)
       else
         RendererServer.cast_snapshot(pid, submission, seq)
       end
@@ -85,9 +85,7 @@ defmodule MingaEditor.Renderer do
   @doc """
   Renders the first frame for a newly ready frontend connection.
 
-  Async renderers synchronously abandon credit owned by the replaced connection
-  before preparing a base-zero keyframe in a fresh recovery generation. Other
-  rendering paths keep their normal synchronous behavior.
+  The live renderer abandons credit owned by the replaced connection before preparing a base-zero keyframe in a fresh recovery generation. The editor does not wait for the renderer mailbox.
   """
   @spec reset_connection(state()) :: state()
   def reset_connection(%EditorState{frontend: %{rendering: :disabled}} = state), do: state
@@ -113,7 +111,7 @@ defmodule MingaEditor.Renderer do
       {_keyframe?, state} = EditorState.take_keyframe_request(state)
       {state, submission} = prepare_submission(state, revision)
       seq = System.unique_integer([:positive, :monotonic])
-      :ok = RendererServer.reset_connection(pid, submission, seq)
+      RendererServer.cast_recovery(pid, :connection, submission, seq)
       state
     else
       render(state)
@@ -192,7 +190,7 @@ defmodule MingaEditor.Renderer do
     do: RendererServer.reset_keyframe_sync(renderer, submission, seq)
 
   defp dispatch_render_buffer(renderer, submission, seq, true, _backend) do
-    :ok = RendererServer.reset_keyframe(renderer, submission, seq)
+    RendererServer.cast_recovery(renderer, :keyframe, submission, seq)
     :async
   end
 

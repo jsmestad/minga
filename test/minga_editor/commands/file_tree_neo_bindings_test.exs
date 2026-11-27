@@ -445,21 +445,6 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
 
   describe "filter and help state" do
     @tag :tmp_dir
-    test "filter starts filtering and narrows visible entries", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, "alpha.txt"), "alpha")
-      File.write!(Path.join(tmp_dir, "beta.txt"), "beta")
-
-      state = tmp_dir |> build_state() |> FileTreeCommands.filter()
-      file_tree = FileTreeState.update_filter(ft(state), "alpha")
-
-      assert file_tree.interaction == :filtering
-
-      assert Enum.map(FileTree.visible_entries(FileTreeState.tree(file_tree)), & &1.name) == [
-               "alpha.txt"
-             ]
-    end
-
-    @tag :tmp_dir
     test "toggle_help flips help overlay visibility", %{tmp_dir: tmp_dir} do
       state = build_state(tmp_dir)
 

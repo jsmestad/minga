@@ -211,10 +211,18 @@ defmodule MingaEditor.Input.FileTreeHandler do
 
   @spec sync_tree_cursor_from_buffer(EditorState.t(), pid()) :: EditorState.t()
   defp sync_tree_cursor_from_buffer(state, buf) do
-    tree = FileTreeState.tree(file_tree_state(state))
-    {cursor_line, _col} = Buffer.cursor(buf)
+    case FileTreeState.resident_tree(file_tree_state(state)) do
+      nil ->
+        state
 
-    update_file_tree(state, &FileTreeState.set_tree(&1, FileTree.select(tree, cursor_line)))
+      %FileTree{} = tree ->
+        {cursor_line, _col} = Buffer.cursor(buf)
+
+        update_file_tree(
+          state,
+          &FileTreeState.replace_tree_metadata(&1, FileTree.select(tree, cursor_line))
+        )
+    end
   end
 
   # ── Inline editing key handler ──────────────────────────────────────────

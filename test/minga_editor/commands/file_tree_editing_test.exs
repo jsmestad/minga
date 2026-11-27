@@ -190,6 +190,12 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       state =
         dir
         |> make_state(events_registry)
+        |> then(fn state ->
+          expanded =
+            state |> tree() |> FileTree.expand_path(admitted_parent) |> FileTree.refresh()
+
+          replace_tree(state, expanded)
+        end)
         |> select_entry("a-parent")
         |> Commands.FileTree.new_file()
         |> replace_editing_text("kept-target.txt")
@@ -839,7 +845,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
   end
 
   defp make_state(dir, events_registry, active_buffer \\ nil) do
-    tree = FileTree.new(dir)
+    tree = dir |> FileTree.new() |> FileTree.refresh()
 
     workspace =
       %SessionState{buffers: buffers_for_active_buffer(active_buffer), keymap_scope: :file_tree}

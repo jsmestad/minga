@@ -32,7 +32,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
   defp make_state(tmp_dir) do
     File.write!(Path.join(tmp_dir, "existing.txt"), "content")
     File.mkdir_p!(Path.join(tmp_dir, "subdir"))
-    tree_state(FileTree.new(tmp_dir))
+    tmp_dir |> FileTree.new() |> FileTree.refresh() |> tree_state()
   end
 
   # An empty folder, listed, with the tree focused.

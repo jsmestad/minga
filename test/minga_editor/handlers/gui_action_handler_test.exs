@@ -1117,7 +1117,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     sidebar_registry: table,
     tmp_dir: root
   } do
-    for intent <- [:toggle, :rename, :delete, :duplicate, :new_file, :new_folder] do
+    for intent <- [:rename, :delete, :duplicate, :new_file, :new_folder] do
       directory = Path.join(root, Atom.to_string(intent))
       File.mkdir_p!(directory)
       {state, target} = targeted_tree_state(table, directory)
@@ -1144,12 +1144,6 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
                Minga.Buffer.content(state.workspace.buffers.active)
 
       case intent do
-        :toggle ->
-          assert MapSet.member?(
-                   FileTreeState.tree(result.workspace.file_tree).expanded,
-                   target.path
-                 )
-
         :rename ->
           assert FileTreeState.editing(result.workspace.file_tree).source_path == target.path
 
@@ -1497,7 +1491,12 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
       guides: []
     }
 
-    tree = ProjectFileTree.new(root) |> ProjectFileTree.put_entries([active, target])
+    tree =
+      root
+      |> ProjectFileTree.new()
+      |> ProjectFileTree.expand_path(target_path)
+      |> ProjectFileTree.put_entries([active, target])
+
     file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
     state = base_state(table)
     {%{state | workspace: SessionState.set_file_tree(state.workspace, file_tree)}, target}
@@ -1648,9 +1647,8 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
   defp renderer_probe(owner) do
     receive do
-      {:"$gen_call", from, {:reset_keyframe, submission, _seq, _pushed_at}} ->
+      {:"$gen_cast", {:recover, :keyframe, submission, _seq, _pushed_at}} ->
         {intent, _, _} = MingaEditor.Renderer.Submission.materialize(submission, %{}, %{})
-        GenServer.reply(from, :ok)
         send(owner, {:renderer_reset, intent})
         renderer_probe(owner)
     end

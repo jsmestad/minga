@@ -12,6 +12,11 @@ defmodule Minga.Project.FileTree do
 
   alias Minga.Project.FileTree.GitStatus
 
+  # The shared sidebar protocol encodes the complete resident row count as u16.
+  @max_sidebar_rows 65_535
+  # Both frontends accept 64 MiB frames. Reserve most of that for the rest of the editor.
+  @max_sidebar_bytes 16 * 1024 * 1024
+
   @typedoc """
   A single visible entry in the tree.
 
@@ -195,7 +200,7 @@ defmodule Minga.Project.FileTree do
   @doc "Toggles visibility of hidden files (dotfiles)."
   @spec toggle_hidden(t()) :: t()
   def toggle_hidden(%__MODULE__{} = tree) do
-    refresh(%{tree | show_hidden: not tree.show_hidden})
+    invalidate_entries(%{tree | show_hidden: not tree.show_hidden})
   end
 
   # ── Queries ───────────────────────────────────────────────────────────────
@@ -244,6 +249,25 @@ defmodule Minga.Project.FileTree do
 
   def ensure_entries(%__MODULE__{} = tree) do
     %{tree | entries: fresh_entries(tree)}
+  end
+
+  @doc "Whether the complete resident rows exceed the sidebar's supported size."
+  @spec sidebar_overflow?(t()) :: boolean()
+  def sidebar_overflow?(%__MODULE__{entries: entries}) when is_list(entries),
+    do: sidebar_overflow?(entries, @max_sidebar_rows, @max_sidebar_bytes)
+
+  def sidebar_overflow?(%__MODULE__{}), do: false
+
+  @spec sidebar_overflow?([entry()], non_neg_integer(), integer()) :: boolean()
+  defp sidebar_overflow?(_entries, _rows, bytes) when bytes < 0, do: true
+  defp sidebar_overflow?([], _rows, _bytes), do: false
+  defp sidebar_overflow?([_ | _], 0, _bytes), do: true
+
+  defp sidebar_overflow?([entry | rest], rows, bytes) do
+    # Absolute path appears twice; relative path is no longer than the absolute path.
+    # The remaining fixed, icon, and editing fields fit within this per-row allowance.
+    size = 320 + 3 * byte_size(entry.path) + byte_size(entry.name) + entry.depth
+    sidebar_overflow?(rest, rows - 1, bytes - size)
   end
 
   @spec fresh_entries(t(), [String.t()] | nil) :: [entry()]
@@ -417,14 +441,26 @@ defmodule Minga.Project.FileTree do
   """
   @spec reveal(t(), String.t()) :: t()
   def reveal(%__MODULE__{} = tree, file_path) do
-    expanded_path = Path.expand(file_path)
+    file_path = Path.expand(file_path)
 
-    # Expand all ancestor directories between root and the target
-    ancestors = path_ancestors(expanded_path, tree.root)
-    new_expanded = Enum.reduce(ancestors, tree.expanded, &MapSet.put(&2, &1))
-    tree = invalidate_entries(%{tree | expanded: new_expanded}) |> ensure_entries()
+    case select_path(tree, file_path) do
+      {:ok, selected} ->
+        selected
 
-    select_path_or_keep(tree, expanded_path)
+      :error ->
+        tree
+        |> prepare_reveal(file_path)
+        |> ensure_entries()
+        |> select_path_or_keep(file_path)
+    end
+  end
+
+  @doc "Expands the ancestors of a file without scanning or selecting it."
+  @spec prepare_reveal(t(), String.t()) :: t()
+  def prepare_reveal(%__MODULE__{} = tree, file_path) do
+    ancestors = path_ancestors(Path.expand(file_path), tree.root)
+    expanded = Enum.reduce(ancestors, tree.expanded, &MapSet.put(&2, &1))
+    invalidate_entries(%{tree | expanded: expanded})
   end
 
   # ── Private ───────────────────────────────────────────────────────────────

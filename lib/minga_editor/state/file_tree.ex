@@ -119,6 +119,14 @@ defmodule MingaEditor.State.FileTree do
   def tree(%__MODULE__{content: {:error, _reason, tree}}), do: tree
   def tree(%__MODULE__{}), do: nil
 
+  @doc "Returns the committed topology on which selection-based actions can operate."
+  @spec resident_tree(t()) :: FileTree.t() | nil
+  def resident_tree(%__MODULE__{content: {:ready, %FileTree{entries: entries} = tree}})
+      when is_list(entries),
+      do: tree
+
+  def resident_tree(%__MODULE__{}), do: nil
+
   @doc """
   Returns true when the file tree has loaded data.
 
@@ -218,6 +226,44 @@ defmodule MingaEditor.State.FileTree do
     }
   end
 
+  @doc "Installs a loading topology with no actionable rows while a scan is in flight."
+  @spec begin_loading_scan(t(), FileTree.t(), keyword()) :: t()
+  def begin_loading_scan(%__MODULE__{} = ft, %FileTree{} = tree, opts) do
+    refresh =
+      Refresh.prepare_scan(
+        Keyword.get(opts, :selection_path),
+        ft.refresh.previous_root,
+        Keyword.get(opts, :creation)
+      )
+
+    %{
+      ft
+      | content: loading_content(tree),
+        interaction: :browse,
+        refresh: refresh,
+        filter_request: nil
+    }
+  end
+
+  @doc "Returns the topology intent retained across refresh retries."
+  @spec refresh_scan_options(t()) :: keyword()
+  def refresh_scan_options(%__MODULE__{refresh: %Refresh{} = refresh}) do
+    for {key, value} <- [
+          selection_path: refresh.selection_path,
+          previous_root: refresh.previous_root,
+          creation: refresh.creation
+        ],
+        not is_nil(value),
+        do: {key, value}
+  end
+
+  @doc "Returns the pending refresh timer to arm after a topology scan completes."
+  @spec pending_refresh_timer(t()) :: Refresh.debounce_token() | nil
+  def pending_refresh_timer(%__MODULE__{refresh: %Refresh{phase: {:debounced, token, _}}}),
+    do: token
+
+  def pending_refresh_timer(%__MODULE__{}), do: nil
+
   @spec replace_tree(t(), FileTree.t()) :: t()
   def replace_tree(%__MODULE__{} = ft, %FileTree{} = tree) do
     refresh = refresh_for_tree(ft, tree.root)
@@ -276,19 +322,20 @@ defmodule MingaEditor.State.FileTree do
       when kind in [:project, :reroot] do
     expanded_root = Path.expand(tree.root)
     original_root = if kind == :project, do: expanded_root, else: ft.original_root
-    watchers = Watchers.retarget(ft.watchers, current_tree_roots(ft), tree)
+    roots = current_tree_roots(ft)
+    watchers = Watchers.retarget(ft.watchers, roots, tree)
     presentation_generation = generation_for_root(ft, expanded_root)
 
     %{
       ft
-      | content: {:loading, tree},
+      | content: loading_content(tree),
         project_root: expanded_root,
         original_root: original_root,
         empty_selected: 0,
         tree_width: tree.width,
         interaction: :browse,
         filter_request: nil,
-        refresh: Refresh.invalidate(ft.refresh),
+        refresh: Refresh.prepare_scan(nil, ft.refresh.previous_root || List.first(roots)),
         watchers: watchers,
         presentation_generation: presentation_generation
     }
@@ -354,6 +401,13 @@ defmodule MingaEditor.State.FileTree do
   @doc "Records one debounced request to refresh the open tree."
   @spec request_refresh_debounce(t(), Refresh.debounce_token()) ::
           {:scheduled | :already_scheduled, t()}
+  def request_refresh_debounce(
+        %__MODULE__{content: {:loading, _}, refresh: %Refresh{phase: {:admitted, _, _}}} = ft,
+        token
+      )
+      when is_reference(token),
+      do: {:already_scheduled, %{ft | refresh: Refresh.defer_debounce(ft.refresh, token)}}
+
   def request_refresh_debounce(%__MODULE__{} = ft, token) when is_reference(token) do
     {status, refresh} = Refresh.request_debounce(ft.refresh, token)
     {status, %{ft | refresh: refresh}}
@@ -575,7 +629,13 @@ defmodule MingaEditor.State.FileTree do
     case tree(ft) do
       %FileTree{} = tree ->
         tree = tree |> FileTree.put_cached_files(nil) |> FileTree.set_filter(filter)
-        %{ft | content: {:loading, tree}, filter_request: nil}
+
+        %{
+          ft
+          | content: loading_content(tree),
+            filter_request: nil,
+            refresh: Refresh.invalidate(ft.refresh)
+        }
 
       nil ->
         ft
@@ -593,7 +653,7 @@ defmodule MingaEditor.State.FileTree do
 
         %{
           ft
-          | content: {:loading, tree},
+          | content: loading_content(tree),
             interaction: if(disposition == :keep_open, do: :filtering, else: :browse),
             filter_request: nil,
             refresh: Refresh.invalidate(ft.refresh)
@@ -799,7 +859,7 @@ defmodule MingaEditor.State.FileTree do
         if Path.expand(tree.root) == Path.expand(root) and tree.filter == filter do
           tree = FileTree.put_entries(tree, entries)
           watchers = Watchers.retarget(ft.watchers, [tree.root], tree)
-          {:accepted, %{ft | content: {:ready, tree}, watchers: watchers}}
+          {:accepted, %{ft | content: content_for_tree(tree), watchers: watchers}}
         else
           {:stale, ft}
         end
@@ -846,7 +906,8 @@ defmodule MingaEditor.State.FileTree do
        }),
        do: {:loading, tree}
 
-  defp cache_result_content(%FileTree{} = tree, %ProjectCacheSnapshot{}), do: {:ready, tree}
+  defp cache_result_content(%FileTree{} = tree, %ProjectCacheSnapshot{}),
+    do: content_for_tree(tree)
 
   @spec current_tree_roots(t()) :: [String.t()]
   defp current_tree_roots(%__MODULE__{} = ft) do
@@ -877,14 +938,22 @@ defmodule MingaEditor.State.FileTree do
        ),
        do: {:error, reason, tree}
 
-  defp replacement_content(%__MODULE__{content: {:ready, _tree}}, %FileTree{} = tree),
+  defp replacement_content(%__MODULE__{content: {:ready, _tree}}, %FileTree{entries: nil} = tree),
     do: {:ready, tree}
 
   defp replacement_content(%__MODULE__{}, %FileTree{} = tree), do: content_for_tree(tree)
 
+  @spec loading_content(FileTree.t()) :: content()
+  defp loading_content(tree), do: {:loading, FileTree.put_entries(tree, [])}
+
   @spec content_for_tree(FileTree.t()) :: content()
-  defp content_for_tree(%FileTree{entries: nil} = tree), do: {:loading, tree}
-  defp content_for_tree(%FileTree{} = tree), do: {:ready, tree}
+  defp content_for_tree(%FileTree{entries: nil} = tree), do: loading_content(tree)
+
+  defp content_for_tree(%FileTree{} = tree) do
+    if FileTree.sidebar_overflow?(tree),
+      do: {:error, "Too many entries. Filter (/).", FileTree.put_entries(tree, [])},
+      else: {:ready, tree}
+  end
 
   @spec put_content_tree(t(), FileTree.t()) :: t()
   defp put_content_tree(%__MODULE__{} = ft, %FileTree{} = tree) do
