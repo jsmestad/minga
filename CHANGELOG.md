@@ -162,6 +162,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - Reject holds conflicting Agent edits rather than choosing one by order. Independent edits can still be rejected in the same press. Compacting Agent drafts preserves the user's later undo and does not restore text the user deleted.
+- Undo and automatic Reject no longer block each other when a newer Agent step can revert without touching the older step held by your edit.
 - Typing stays responsive while the agent streams. The editor no longer waits on a busy session to update the conversation, which could hold keys for up to five seconds.
 - Sending a message or stopping a turn no longer holds the editor while the session answers. The composer keeps the message until the session takes it, text typed meanwhile stays, and a second press never sends the same text twice.
 - The first message of a new conversation with Apple Intelligence (On Device) is sent on the first press. It used to fail once with "could not count its fixed instructions and tools within 3 seconds" and hold the editor meanwhile. Minga now prepares the model when the conversation opens, and a message sent before that is ready shows as working and goes when it is. Stop works meanwhile, a second message queues behind the first, and if the model cannot be prepared the draft is kept and one line says to try again.
