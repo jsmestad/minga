@@ -14,6 +14,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
   @moduletag :tmp_dir
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Test.FileTreeCopyFixture, as: CopyFixture
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.EffectScheduler
   alias MingaEditor.FileTree.FilterWalk
@@ -209,7 +210,8 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?c, 0)
       state = select_entry(state, "subdir")
-      {:handled, _state} = FileTreeHandler.handle_key(state, ?p, 0)
+      {:handled, state} = FileTreeHandler.handle_key(state, ?p, 0)
+      CopyFixture.complete_copy(state)
 
       assert File.read!(destination) == File.read!(selected_path)
     end

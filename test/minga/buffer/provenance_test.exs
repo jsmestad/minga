@@ -1360,7 +1360,6 @@ defmodule Minga.Buffer.ProvenanceTest do
         oracle_check(original, commands, false)
       end
 
-      IO.puts("\n[oracle] " <> inspect(Process.get(:oracle, %{})))
       assert Map.get(Process.get(:oracle), :skips, 0) > 0
     end
 
@@ -1378,7 +1377,6 @@ defmodule Minga.Buffer.ProvenanceTest do
       end
 
       counts = Process.get(:oracle, %{})
-      IO.puts("\n[lifecycle] " <> inspect(counts))
 
       for event <- [
             :skips,
@@ -1445,10 +1443,6 @@ defmodule Minga.Buffer.ProvenanceTest do
 
         assert Document.content(after_compaction) == Document.content(plain)
       end
-
-      IO.puts(
-        "\n[compaction] steps in the random model property: #{Process.get(:compactions, 0)}"
-      )
     end
 
     property "rejecting every Minga step leaves exactly your edits replayed alone" do
