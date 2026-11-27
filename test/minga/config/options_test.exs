@@ -145,6 +145,20 @@ defmodule Minga.Config.OptionsTest do
       assert Options.get_extension_option(s, :minga_org, :conceal) == nil
     end
 
+    test "reset disables language server auto-start after a test opts in" do
+      registry = :"#{__MODULE__}.lsp_reset.#{System.unique_integer([:positive])}"
+      start_supervised!(Minga.Events.child_spec(name: registry))
+      server = start_supervised!({Options, name: nil, events_registry: registry})
+
+      refute Options.get(server, :lsp_auto_start)
+      assert {:ok, true} = Options.set(server, :lsp_auto_start, true)
+      assert Options.get(server, :lsp_auto_start)
+
+      :ok = Options.reset(server)
+
+      refute Options.get(server, :lsp_auto_start)
+    end
+
     test "publishes cursor animation default when reset re-enables it" do
       registry = :"#{__MODULE__}.reset_events.#{System.unique_integer([:positive])}"
       start_supervised!({Registry, keys: :duplicate, name: registry})

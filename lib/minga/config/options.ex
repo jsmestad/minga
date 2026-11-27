@@ -250,7 +250,7 @@ defmodule Minga.Config.Options do
     {:format_on_save, :boolean, false, "Whether the configured formatter runs before saving."},
     {:auto_save_delay_ms, :non_neg_integer, 1000,
      "Delay before automatic save work runs; zero disables the timer."},
-    {:lsp_auto_start, :boolean, true,
+    {:lsp_auto_start, :boolean, Application.compile_env(:minga, :lsp_auto_start_default, true),
      "Whether buffer-open events automatically start configured language servers."},
     {:formatter, :string_or_nil, nil, "External formatter command for the current buffer."},
     {:title_format, :string, "{filename} {dirty}({directory}) - Minga",

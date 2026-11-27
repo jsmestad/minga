@@ -104,10 +104,6 @@ Minga.Config.Options.set(:clipboard, :none)
 # unrelated file-buffer tests. Auto-save tests opt in per buffer.
 Minga.Config.Options.set(:auto_save_delay_ms, 0)
 
-# Disable LSP auto-start globally in tests so unrelated buffer-open events do
-# not leak real language-server clients into tests that assert no LSP is active.
-Minga.Config.Options.set(:lsp_auto_start, false)
-
 # Disable agent alerts for editors that read the global options. A test of the alert gives its editor its own options.
 Minga.Config.Options.set(:agent_notifications, false)
 

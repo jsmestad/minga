@@ -26,6 +26,7 @@ defmodule Minga.LSP.SyncServerRestartTest do
     events = :"sync_restart_events_#{id}"
     start_supervised!(Events.child_spec(name: events))
     options = start_supervised!({Options, name: nil, events_registry: events}, id: :options)
+    {:ok, true} = Options.set(options, :lsp_auto_start, true)
     diagnostics = start_supervised!({Diagnostics, name: :"sync_restart_diag_#{id}"})
     lsp_supervisor = :"sync_restart_lsp_#{id}"
     start_supervised!({LSPSupervisor, name: lsp_supervisor})
