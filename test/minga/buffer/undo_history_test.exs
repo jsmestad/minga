@@ -330,6 +330,42 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert text(world) == "qux\n" <> String.duplicate("x", 1000)
     end
 
+    test "evicting an untasked sweep cannot join drafts across the user entry it retires" do
+      world = edit(interleaved_draft_world(), :agent, 0, 3, "")
+
+      assert step(world, :undo) == {:blocked, {:overlaps, {:untasked, 1}}}
+      earlier = Map.fetch!(world.history.steps, @step_one)
+      later = Map.fetch!(world.history.steps, @step_two)
+
+      world =
+        Enum.reduce(1..1000, world, fn _, world ->
+          edit(world, :agent, byte_size(text(world)), 0, "!")
+        end)
+
+      assert step(world, :undo) == :empty
+      assert text(world) == "|ab|x" <> String.duplicate("!", 1000)
+      provenance = UndoHistory.provenance(world.history)
+      {partners, _scan} = Provenance.draft_partners(provenance, earlier, %{})
+      refute MapSet.member?(partners, later)
+    end
+
+    test "reload witnesses a draft opportunity only if it survives the imported bytes" do
+      world = interleaved_draft_world()
+      earlier = Map.fetch!(world.history.steps, @step_one)
+      later = Map.fetch!(world.history.steps, @step_two)
+      assert UndoHistory.undo_count(world.history) == 1
+
+      for {contents, witnessed?} <- [{"LRu|ab|x", true}, {"|ab|x", false}] do
+        reloaded = UndoHistory.reload(world.history, world.doc, Document.new(contents))
+        assert UndoHistory.undo_count(reloaded) == 0
+
+        {partners, _scan} =
+          Provenance.draft_partners(UndoHistory.provenance(reloaded), earlier, %{})
+
+        assert MapSet.member?(partners, later) == witnessed?
+      end
+    end
+
     test "a Minga step outlives more than 1000 of your groups" do
       world = edit(world("base\n"), @step_one, 0, 0, "minga ")
 
@@ -999,6 +1035,29 @@ defmodule Minga.Buffer.UndoHistoryTest do
       world = Enum.reduce(commands, world("ab cd ef\ngh ij\n", recording: :coarse), &run/2)
       assert_rejects_exact_or_refused(world)
       assert {:done, _world} = reject_all(world)
+    end
+
+    test "automatic Reject never reports a hold when undo needs an independent draft step" do
+      commands = [
+        {:user, 0, 1, "", 0},
+        {:user, 0, 0, "aaaa", 0},
+        {:user, 0, 7, "bb", 0},
+        {:user, 10, 0, "bc ", 1},
+        {:minga, 7, 8, " \nc", 2},
+        {:agent, 0, 1, "", 1},
+        {:minga, 4, 4, "\n b", 0},
+        {:user, 4, 1, "", 2},
+        {:agent, 6, 1, "  acac ", 0},
+        {:minga, 1, 1, "abaca", 2},
+        {:minga, 8, 0, "aabb \nab", 1},
+        {:user, 21, 1, " c", 2},
+        {:minga, 16, 6, "\nc\n", 0}
+      ]
+
+      world = Enum.reduce(commands, world("ab cd ef\ngh ij\n", recording: :coarse), &run/2)
+      assert_rejects_exact_or_refused(world)
+      assert {:done, drained} = reject_all(world)
+      assert UndoHistory.next_reject(drained.history) == nil
     end
 
     # Past the 512-word cap a long line is recorded as one change even when precise.
@@ -1729,6 +1788,15 @@ defmodule Minga.Buffer.UndoHistoryTest do
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────
+
+  defp interleaved_draft_world do
+    world("LR|B|C", recording: :coarse, shadow: false)
+    |> edit(@step_one, 1, 0, "x")
+    |> edit(@step_one, 4, 1, "ab")
+    |> edit(:user, 3, 0, "u")
+    |> edit(@step_two, 1, 1, "")
+    |> edit(@step_two, 7, 1, "x")
+  end
 
   # A buffer as the history sees it: history, document and version, edited like the buffer process does. The shadow is
   # the never-drop model replaying every provenance operation the history makes; see `shadow/1`.

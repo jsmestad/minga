@@ -218,19 +218,15 @@ defmodule Minga.Buffer.UndoHistory do
   """
   @spec reload(t(), Document.t(), Document.t()) :: t()
   def reload(%__MODULE__{} = history, %Document{} = old_document, %Document{} = new_document) do
-    provenance =
-      Enum.reduce(history.undo_entries ++ history.redo_entries, history.provenance, fn entry,
-                                                                                       acc ->
-        Provenance.discard(acc, entry.group)
-      end)
+    groups =
+      Enum.map(history.undo_entries, & &1.group) ++ Enum.map(history.redo_entries, & &1.group)
+
+    patches = UndoPatch.changes(old_document, new_document)
 
     provenance =
-      replay(
-        %{history | before: nil},
-        provenance,
-        :untracked,
-        UndoPatch.changes(old_document, new_document)
-      )
+      Provenance.replace_base(history.provenance, groups, fn provenance ->
+        replay(%{history | before: nil}, provenance, :untracked, patches)
+      end)
 
     {tick, history} = advance(history)
 
@@ -274,8 +270,9 @@ defmodule Minga.Buffer.UndoHistory do
   @spec record_edit_batch(t(), version(), patches(), edit_source(), at()) :: t()
   def record_edit_batch(%__MODULE__{} = history, version, [_ | _] = patches, source, at)
       when source in @your_sources and is_integer(at) do
-    history = drop_redo(history)
+    # Open against the existing frontier. No compaction can happen in the middle of replacing redo.
     {group, provenance} = Provenance.open_group(history.provenance, :you, nil)
+    history = drop_redo(%{history | provenance: provenance})
     {tick, history} = advance(history)
 
     entry = %Entry{
@@ -289,7 +286,7 @@ defmodule Minga.Buffer.UndoHistory do
 
     cap_entries(%{
       history
-      | provenance: replay(history, provenance, group, patches),
+      | provenance: replay(history, history.provenance, group, patches),
         undo_entries: [entry | history.undo_entries],
         undo_size: history.undo_size + 1,
         tick: tick,
@@ -1090,7 +1087,7 @@ defmodule Minga.Buffer.UndoHistory do
 
   defp cap_untasked(history) do
     {{:value, oldest}, untasked} = :queue.out(history.untasked)
-    history = release_blocked(history, oldest)
+    history = retire_untasked(history, oldest)
 
     task_run =
       case history.task_run do
@@ -1100,35 +1097,31 @@ defmodule Minga.Buffer.UndoHistory do
 
     %{
       history
-      | provenance: Provenance.discard(history.provenance, oldest),
-        untasked: untasked,
+      | untasked: untasked,
         untasked_size: history.untasked_size - 1,
         task_run: task_run
     }
   end
 
-  # Before an untasked group becomes permanent, your groups it blocks leave your stacks.
-  # Its tombstones are about to be dropped, and flipping such a group would then rebuild text that never existed.
-  # Undo or redo would have stopped at that group anyway, so the stack ends there.
-  @spec release_blocked(t(), Provenance.group_id()) :: t()
-  defp release_blocked(history, group) do
+  # The untasked group and the user entries it blocks retire together.
+  # The stack ends at the newest blocked entry, and no compaction can run partway through.
+  @spec retire_untasked(t(), Provenance.group_id()) :: t()
+  defp retire_untasked(history, group) do
     case Provenance.blocked_groups(history.provenance, group) do
       [] ->
-        history
+        %{history | provenance: Provenance.discard(history.provenance, group)}
 
       blocked ->
         blocked = MapSet.new(blocked)
         {undo_entries, dropped_undo} = cut_at_blocked(history.undo_entries, blocked)
         {redo_entries, dropped_redo} = cut_at_blocked(history.redo_entries, blocked)
 
-        provenance =
-          Enum.reduce(dropped_undo ++ dropped_redo, history.provenance, fn entry, acc ->
-            Provenance.discard(acc, entry.group)
-          end)
+        dropped =
+          Enum.map(dropped_undo, & &1.group) ++ Enum.map(dropped_redo, & &1.group) ++ [group]
 
         %{
           history
-          | provenance: provenance,
+          | provenance: Provenance.discard_all(history.provenance, dropped),
             undo_entries: undo_entries,
             undo_size: length(undo_entries),
             redo_entries: redo_entries

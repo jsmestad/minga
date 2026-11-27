@@ -55,13 +55,15 @@ defmodule Minga.Buffer.Provenance do
 
   defstruct tree: nil,
             groups: %{},
+            user_groups: nil,
             next_group: 1,
             deep: false,
             recent: [],
             fresh: [],
             overlap_runs: %{},
             drafts: nil,
-            detached_drafts: nil,
+            witnessed_drafts: nil,
+            settling_drafts: nil,
             next_change: 1,
             changes: %{},
             stale: [],
@@ -73,13 +75,15 @@ defmodule Minga.Buffer.Provenance do
   @opaque t :: %__MODULE__{
             tree: RunTree.t(),
             groups: %{Run.group_id() => Group.t()},
+            user_groups: :gb_sets.set(group_id()),
             next_group: pos_integer(),
             deep: boolean(),
             recent: [Locator.t()],
             fresh: [Locator.t()],
             overlap_runs: %{group_id() => [Locator.t()]},
             drafts: :gb_sets.set({group_id(), Locator.t()}),
-            detached_drafts: DraftLinks.t(),
+            witnessed_drafts: DraftLinks.t(),
+            settling_drafts: MapSet.t(Locator.t()) | nil,
             next_change: pos_integer(),
             changes: %{Change.id() => Change.t()},
             stale: [Change.id()],
@@ -114,7 +118,12 @@ defmodule Minga.Buffer.Provenance do
             author: :unattributed
           })
 
-    %__MODULE__{tree: tree, drafts: :gb_sets.new(), detached_drafts: DraftLinks.new()}
+    %__MODULE__{
+      tree: tree,
+      user_groups: :gb_sets.new(),
+      drafts: :gb_sets.new(),
+      witnessed_drafts: DraftLinks.new()
+    }
   end
 
   @doc "Returns the document size in bytes that this provenance describes."
@@ -126,7 +135,16 @@ defmodule Minga.Buffer.Provenance do
   def open_group(%__MODULE__{} = prov, author, key) do
     id = prov.next_group
     group = %Group{author: author, key: key, runs: :gb_sets.new()}
-    prov = %{prov | groups: Map.put(prov.groups, id, group), next_group: id + 1}
+
+    users = if author == :you, do: :gb_sets.add(id, prov.user_groups), else: prov.user_groups
+
+    prov = %{
+      prov
+      | groups: Map.put(prov.groups, id, group),
+        user_groups: users,
+        next_group: id + 1
+    }
+
     {id, traced(prov, {:open_group, id, author, key})}
   end
 
@@ -467,7 +485,11 @@ defmodule Minga.Buffer.Provenance do
   """
   @spec discard(t(), group_id()) :: t()
   def discard(%__MODULE__{} = prov, id) do
-    prov |> discard_one(id, prov) |> unpair_drafts(id) |> traced({:discard, [id]})
+    %{prov | settling_drafts: MapSet.new()}
+    |> discard_one(id, prov)
+    |> unpair_drafts(id)
+    |> traced({:discard, [id]})
+    |> finish_group_discard([id])
   end
 
   @spec discard_one(t(), group_id(), t()) :: t()
@@ -476,7 +498,9 @@ defmodule Minga.Buffer.Provenance do
     marked = Map.get(prov.overlap_runs, id, [])
 
     prov =
-      %{prov | groups: groups} |> settle_overlaps(id, group) |> settle_group_marks(%{id => group})
+      %{prov | groups: groups}
+      |> settle_overlaps(id, group)
+      |> settle_group_marks(%{id => group})
 
     group.runs
     |> :gb_sets.to_list()
@@ -813,16 +837,43 @@ defmodule Minga.Buffer.Provenance do
   """
   @spec discard_all(t(), [group_id()]) :: t()
   def discard_all(%__MODULE__{} = prov, ids) when is_list(ids) do
+    prov |> discard_groups(ids) |> finish_group_discard(ids)
+  end
+
+  @doc """
+  Retires the selected groups and replays an untracked replacement as one history change.
+
+  `replay` applies the replacement to the provenance after the groups are finalized. Compaction evidence is evaluated before and after the entire change, not while the replacement is being applied.
+  """
+  @spec replace_base(t(), [group_id()], (t() -> t())) :: t()
+  def replace_base(%__MODULE__{} = prov, [], replay) when is_function(replay, 1),
+    do: replay.(prov)
+
+  def replace_base(%__MODULE__{} = prov, [_ | _] = ids, replay) when is_function(replay, 1) do
+    prov
+    |> discard_groups(ids)
+    |> replay.()
+    |> finish_group_discard(ids)
+  end
+
+  @spec discard_groups(t(), [group_id()]) :: t()
+  defp discard_groups(prov, ids) do
     touched = Enum.reduce(ids, 0, &(:gb_sets.size(Map.fetch!(prov.groups, &1).runs) + &2))
+    settling = %{prov | settling_drafts: MapSet.new()}
 
     discarded =
       if touched * 8 > RunTree.count(prov.tree),
-        do: discard_in_one_pass(prov, ids),
-        else: Enum.reduce(ids, prov, &discard_one(&2, &1, prov))
+        do: discard_in_one_pass(settling, ids),
+        else: Enum.reduce(ids, settling, &discard_one(&2, &1, prov))
 
-    discarded = Enum.reduce(ids, discarded, &unpair_drafts(&2, &1))
-    traced(discarded, {:discard, ids})
+    ids
+    |> Enum.reduce(discarded, &unpair_drafts(&2, &1))
+    |> traced({:discard, ids})
   end
+
+  @spec finish_group_discard(t(), [group_id()]) :: t()
+  defp finish_group_discard(prov, ids),
+    do: prov |> witness_settled_drafts() |> retire_user_barriers(ids)
 
   @doc "Returns how many runs the record holds, tombstones included, in O(1)."
   @spec run_count(t()) :: non_neg_integer()
@@ -843,19 +894,25 @@ defmodule Minga.Buffer.Provenance do
   @typedoc "Per-proposal run evidence. A claimed chain has already supplied all its links."
   @type draft_scan :: %{Locator.t() => :claimed | MapSet.t(group_id())}
 
-  @doc "Returns this group's detached neighbours and the attached chains it can claim during one planner walk."
+  @doc "Returns witnessed draft neighbours and currently compactible chains this group can claim."
   @spec draft_partners(t(), group_id(), draft_scan()) :: {MapSet.t(group_id()), draft_scan()}
   def draft_partners(%__MODULE__{groups: groups} = prov, id, scan) do
-    neighbours = DraftLinks.partners(prov.detached_drafts, id)
+    neighbours = DraftLinks.partners(prov.witnessed_drafts, id)
+    frontier = newest_yours(prov)
 
     Map.fetch!(groups, id).runs
     |> :gb_sets.to_list()
-    |> Enum.reduce({neighbours, scan}, &claim_draft(prov, id, &1, &2))
+    |> Enum.reduce({neighbours, scan}, &claim_draft(prov, frontier, id, &1, &2))
   end
 
-  @spec claim_draft(t(), group_id(), Locator.t(), {MapSet.t(group_id()), draft_scan()}) ::
+  @spec claim_draft(
+          t(),
+          non_neg_integer(),
+          group_id(),
+          Locator.t(),
           {MapSet.t(group_id()), draft_scan()}
-  defp claim_draft(prov, id, locator, {partners, scan} = acc) do
+        ) :: {MapSet.t(group_id()), draft_scan()}
+  defp claim_draft(prov, frontier, id, locator, {partners, scan} = acc) do
     case scan do
       %{^locator => :claimed} ->
         acc
@@ -866,7 +923,7 @@ defmodule Minga.Buffer.Provenance do
       _new ->
         {:ok, run, _offset} = RunTree.fetch(prov.tree, locator)
 
-        case compactible_chain(run, prov.groups) do
+        case compactible_chain(run, prov.groups, frontier) do
           [] -> {partners, Map.put(scan, locator, :claimed)}
           chain -> claim_members(id, locator, MapSet.new(chain), acc)
         end
@@ -970,11 +1027,8 @@ defmodule Minga.Buffer.Provenance do
 
   # Your newest group that can still be undone or redone, or 0 when there is none.
   @spec newest_yours(t()) :: non_neg_integer()
-  defp newest_yours(prov) do
-    Enum.reduce(prov.groups, 0, fn
-      {id, %Group{author: :you}}, newest when id > newest -> id
-      _group, newest -> newest
-    end)
+  defp newest_yours(%__MODULE__{user_groups: users}) do
+    if :gb_sets.is_empty(users), do: 0, else: :gb_sets.largest(users)
   end
 
   @doc """
@@ -1041,10 +1095,13 @@ defmodule Minga.Buffer.Provenance do
         %{group | runs: add_all(runs, named_new)}
       end)
 
+    {new_drafts, witnessed} =
+      draft_index_entries(kept, groups, newest_yours(prov), prov.witnessed_drafts)
+
     drafts =
       prov.drafts
       |> remove_all(Enum.map(before, &{&1.group, &1.id}))
-      |> add_all(for run <- kept, key = draft_key(run, groups), do: key)
+      |> add_all(new_drafts)
 
     marked = for run <- kept, Enum.any?(run.overlaps, &match?({_owner, ^new}, &1)), do: run.id
 
@@ -1053,6 +1110,7 @@ defmodule Minga.Buffer.Provenance do
       | tree: tree,
         groups: groups,
         drafts: drafts,
+        witnessed_drafts: witnessed,
         overlap_runs: Map.update(prov.overlap_runs, new, marked, &(marked ++ &1))
     }
 
@@ -1313,7 +1371,7 @@ defmodule Minga.Buffer.Provenance do
         | tree: tree,
           groups: Map.delete(prov.groups, old),
           overlap_runs: Map.update(overlap_runs, new, marked, &(marked ++ &1)),
-          detached_drafts: DraftLinks.absorb(prov.detached_drafts, old, new)
+          witnessed_drafts: DraftLinks.absorb(prov.witnessed_drafts, old, new)
       }
       |> refresh_runs(marked)
       |> rename_group_marks(old, new)
@@ -1582,7 +1640,7 @@ defmodule Minga.Buffer.Provenance do
   defp replace_run(prov, group_id, change, run, text, visible?) do
     case deleted(run, group_id, text) do
       nil ->
-        prov = prov |> remember_draft_chain(run, prov.groups) |> drop_run(run)
+        prov = prov |> remember_draft_chain(run, prov) |> drop_run(run)
         {prov, [], List.wrap(run.made_by)}
 
       dead ->
@@ -1756,7 +1814,7 @@ defmodule Minga.Buffer.Provenance do
   defp cover_run(prov, group_id, run) do
     case deleted(run, group_id, run.text) do
       nil ->
-        prov |> remember_draft_chain(run, prov.groups) |> drop_run(run)
+        prov |> remember_draft_chain(run, prov) |> drop_run(run)
 
       # A group that deleted the run before, directly or by a sweep, keeps that kind.
       ^run ->
@@ -2496,7 +2554,7 @@ defmodule Minga.Buffer.Provenance do
         {:ok, original, _offset} = RunTree.fetch(before.tree, run_id)
 
         prov
-        |> remember_draft_chain(original, before.groups)
+        |> remember_draft_chain(original, before)
         |> drop_run(%{run | overlaps: settled_run(run, discarded).overlaps})
 
       %Run{group: nil} = settled when run.group != nil ->
@@ -2511,7 +2569,7 @@ defmodule Minga.Buffer.Provenance do
   # rebuilds the tree and the remaining groups' run sets from the result.
   @spec discard_in_one_pass(t(), [group_id()]) :: t()
   defp discard_in_one_pass(prov, ids) do
-    before_groups = prov.groups
+    before = prov
     {discarded, groups} = Map.split(prov.groups, ids)
 
     {runs, dropped} =
@@ -2551,7 +2609,7 @@ defmodule Minga.Buffer.Provenance do
     |> Enum.reverse()
     |> Enum.reduce(settle_group_marks(prov, discarded), fn run, acc ->
       acc
-      |> remember_draft_chain(run, before_groups)
+      |> remember_draft_chain(run, before)
       |> link_dropped(run)
       |> transfer_marks(settled_run(run, discarded).overlaps)
     end)
@@ -2681,7 +2739,7 @@ defmodule Minga.Buffer.Provenance do
     rebuilt =
       Enum.reduce(dropped, rebuilt, fn run, acc ->
         acc
-        |> remember_draft_chain(run, prov.groups)
+        |> remember_draft_chain(run, prov)
         |> link_dropped(run)
         |> transfer_marks(run.overlaps)
       end)
@@ -3298,11 +3356,11 @@ defmodule Minga.Buffer.Provenance do
 
   defp compactible_partner(_run, _groups), do: nil
 
-  # The original touch order determines the compactible chain.
-  # Even an unapplied intervener or a numbered overlap can bar a link.
-  @spec compactible_chain(Run.t(), %{group_id() => Group.t()}) :: [group_id()]
-  defp compactible_chain(%Run{live: false, group: owner, bytes: bytes} = run, groups)
-       when owner != nil and bytes > 0 do
+  # The writer has to be newer than every retained undo and redo group, just as in compact_oldest/2.
+  # The original touch order, including numbered overlaps, determines where the chain ends.
+  @spec compactible_chain(Run.t(), %{group_id() => Group.t()}, non_neg_integer()) :: [group_id()]
+  defp compactible_chain(%Run{live: false, group: owner, bytes: bytes} = run, groups, frontier)
+       when is_integer(owner) and owner > frontier and bytes > 0 do
     case Map.get(groups, owner) do
       %Group{applied: true, author: {:minga, task} = author} when task != :untasked ->
         overlaps =
@@ -3323,7 +3381,7 @@ defmodule Minga.Buffer.Provenance do
     end
   end
 
-  defp compactible_chain(_run, _groups), do: []
+  defp compactible_chain(_run, _groups, _frontier), do: []
 
   @spec chain_steps([group_id()], %{group_id() => Group.t()}, author(), [group_id()], [group_id()]) ::
           [group_id()]
@@ -3346,21 +3404,89 @@ defmodule Minga.Buffer.Provenance do
     end
   end
 
-  @spec remember_draft_chain(t(), Run.t(), %{group_id() => Group.t()}) :: t()
-  defp remember_draft_chain(prov, run, groups) do
-    case compactible_chain(run, groups) do
-      [] ->
-        prov
+  # Intermediate run shapes in a discard are not compaction opportunities.
+  @spec witness_settled_drafts(t()) :: t()
+  defp witness_settled_drafts(%__MODULE__{settling_drafts: pending} = prov) do
+    frontier = newest_yours(prov)
 
-      [first | rest] ->
-        links = Enum.reduce(rest, prov.detached_drafts, &DraftLinks.link(&2, first, &1))
-        %{prov | detached_drafts: links}
+    links =
+      Enum.reduce(pending, prov.witnessed_drafts, fn locator, links ->
+        case RunTree.fetch(prov.tree, locator) do
+          {:ok, run, _offset} ->
+            link_draft_chain(links, compactible_chain(run, prov.groups, frontier))
+
+          :error ->
+            links
+        end
+      end)
+
+    %{prov | settling_drafts: nil, witnessed_drafts: links}
+  end
+
+  # A retreat can expose old drafts without changing their runs.
+  # Seek only the newly eligible range. Opening a user group never visits drafts.
+  @spec retire_user_barriers(t(), [group_id()]) :: t()
+  defp retire_user_barriers(%__MODULE__{user_groups: users} = prov, ids) do
+    if :gb_sets.is_empty(users) do
+      prov
+    else
+      install_user_barriers(prov, remove_all(users, ids))
     end
   end
 
+  @spec install_user_barriers(t(), :gb_sets.set(group_id())) :: t()
+  defp install_user_barriers(%__MODULE__{user_groups: users} = prov, users), do: prov
+
+  defp install_user_barriers(prov, users) do
+    old_frontier = newest_yours(prov)
+    prov = %{prov | user_groups: users}
+    frontier = newest_yours(prov)
+
+    if frontier < old_frontier do
+      iterator = :gb_sets.iterator_from({frontier + 1, []}, prov.drafts)
+      links = witness_drafts(iterator, prov, frontier, old_frontier, prov.witnessed_drafts)
+      %{prov | witnessed_drafts: links}
+    else
+      prov
+    end
+  end
+
+  @spec witness_drafts(
+          :gb_sets.iter(term()),
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          DraftLinks.t()
+        ) :: DraftLinks.t()
+  defp witness_drafts(iterator, prov, frontier, old_frontier, links) do
+    case :gb_sets.next(iterator) do
+      {{group, locator}, rest} when group <= old_frontier ->
+        {:ok, run, _offset} = RunTree.fetch(prov.tree, locator)
+        chain = compactible_chain(run, prov.groups, frontier)
+        witness_drafts(rest, prov, frontier, old_frontier, link_draft_chain(links, chain))
+
+      _beyond_retreat ->
+        links
+    end
+  end
+
+  @spec remember_draft_chain(t(), Run.t(), t()) :: t()
+  defp remember_draft_chain(prov, run, before) do
+    case compactible_chain(run, before.groups, newest_yours(before)) do
+      [] -> prov
+      chain -> %{prov | witnessed_drafts: link_draft_chain(prov.witnessed_drafts, chain)}
+    end
+  end
+
+  @spec link_draft_chain(DraftLinks.t(), [group_id()]) :: DraftLinks.t()
+  defp link_draft_chain(links, []), do: links
+
+  defp link_draft_chain(links, [first | rest]),
+    do: Enum.reduce(rest, links, &DraftLinks.link(&2, first, &1))
+
   @spec unpair_drafts(t(), group_id()) :: t()
   defp unpair_drafts(prov, id),
-    do: %{prov | detached_drafts: DraftLinks.forget(prov.detached_drafts, id)}
+    do: %{prov | witnessed_drafts: DraftLinks.forget(prov.witnessed_drafts, id)}
 
   # The step a draft would merge into: the oldest newer applied step of the same task that deleted it, or `nil`.
   @spec draft_partner(Run.t(), %{group_id() => Group.t()}) :: group_id() | nil
@@ -3407,16 +3533,77 @@ defmodule Minga.Buffer.Provenance do
     drafts = :gb_sets.delete_any({old.group, old.id}, prov.drafts)
 
     case draft_key(run, prov.groups) do
-      nil -> %{prov | drafts: drafts}
-      key -> %{prov | drafts: :gb_sets.add(key, drafts)}
+      nil ->
+        %{prov | drafts: drafts}
+
+      key ->
+        prov = %{prov | drafts: :gb_sets.add(key, drafts)}
+        record_draft_candidate(prov, run, newest_yours(prov))
     end
+  end
+
+  @spec record_draft_candidate(t(), Run.t(), non_neg_integer()) :: t()
+  defp record_draft_candidate(prov, %Run{group: writer}, frontier) when writer <= frontier,
+    do: prov
+
+  defp record_draft_candidate(%__MODULE__{settling_drafts: nil} = prov, run, frontier) do
+    chain = compactible_chain(run, prov.groups, frontier)
+    %{prov | witnessed_drafts: link_draft_chain(prov.witnessed_drafts, chain)}
+  end
+
+  defp record_draft_candidate(prov, run, _frontier) do
+    %{prov | settling_drafts: MapSet.put(prov.settling_drafts, run.id)}
   end
 
   # Rebuilds the draft index from every run, for the paths that rebuild the whole tree anyway.
   @spec index_drafts(t(), [Run.t()]) :: t()
+  defp index_drafts(%__MODULE__{settling_drafts: nil} = prov, runs) do
+    {keys, witnessed} =
+      draft_index_entries(runs, prov.groups, newest_yours(prov), prov.witnessed_drafts)
+
+    %{prov | drafts: :gb_sets.from_list(keys), witnessed_drafts: witnessed}
+  end
+
   defp index_drafts(prov, runs) do
-    drafts = for run <- runs, key = draft_key(run, prov.groups), do: key
-    %{prov | drafts: :gb_sets.from_list(drafts)}
+    frontier = newest_yours(prov)
+
+    {keys, pending} =
+      Enum.reduce(runs, {[], prov.settling_drafts}, fn run, {keys, pending} = acc ->
+        case draft_key(run, prov.groups) do
+          nil ->
+            acc
+
+          key ->
+            {[key | keys], defer_draft_witness(pending, key, frontier)}
+        end
+      end)
+
+    %{prov | drafts: :gb_sets.from_list(keys), settling_drafts: pending}
+  end
+
+  @spec defer_draft_witness(MapSet.t(Locator.t()), {group_id(), Locator.t()}, non_neg_integer()) ::
+          MapSet.t(Locator.t())
+  defp defer_draft_witness(pending, {writer, locator}, frontier) when writer > frontier,
+    do: MapSet.put(pending, locator)
+
+  defp defer_draft_witness(pending, _key, _frontier), do: pending
+
+  @spec draft_index_entries(
+          [Run.t()],
+          %{group_id() => Group.t()},
+          non_neg_integer(),
+          DraftLinks.t()
+        ) :: {[{group_id(), Locator.t()}], DraftLinks.t()}
+  defp draft_index_entries(runs, groups, frontier, links) do
+    Enum.reduce(runs, {[], links}, fn run, {keys, links} = acc ->
+      case draft_key(run, groups) do
+        nil ->
+          acc
+
+        key ->
+          {[key | keys], link_draft_chain(links, compactible_chain(run, groups, frontier))}
+      end
+    end)
   end
 
   @spec run_groups(Run.t()) :: [group_id()]

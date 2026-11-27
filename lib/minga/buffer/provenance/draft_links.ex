@@ -1,6 +1,6 @@
 defmodule Minga.Buffer.Provenance.DraftLinks do
   @moduledoc """
-  Logical draft components whose last positional evidence was permanently removed. A component retains each live group once, not every historical pairing. Removing a final member does not split the remaining component.
+  Witnessed compaction opportunities between draft steps, retained after the frontier rises or positional evidence disappears. A component retains each live group once, not every historical pairing. Removing a final member does not split the remaining component.
   """
 
   alias Minga.Buffer.Provenance.Run
