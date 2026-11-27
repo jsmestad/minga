@@ -9,6 +9,15 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
   alias Minga.Test.Storyboard.Model
   alias Minga.Test.Storyboard.Scenarios.Edit
 
+  @peek_conversation [
+    open?: true,
+    peek?: true,
+    turn: :working,
+    prompt: "Review the marketing site for unfair claims and unnecessary jargon."
+  ]
+
+  @selected_child "Fact-Check Auditor"
+
   # The conversation the factory seeds: your message, Minga's answer, and three
   # finished tool steps, before the turn that is working. A stopped conversation
   # was stopped while a find ran: Stop leaves that step stopped, the way
@@ -269,6 +278,27 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
           )
         ]
       ),
+      Entry.built("minga.tasks.child_selected",
+        start: [conversation: @peek_conversation],
+        reach: "esc esc SPC a a j j",
+        click_reach: [
+          {:gui_action, {:execute_command, "agent_tasks"}},
+          {:tasks_row, @selected_child, "select"}
+        ],
+        recognize: &child_selected?/1,
+        checks: [
+          Check.new("the second foreground child offers its own Inspect action", fn model ->
+            drawer = model.ui.tasks_drawer
+            assert drawer.focused?
+
+            assert %{depth: 1, title: @selected_child, actions: [{"i", "Inspect"}]} =
+                     Minga.RenderModel.UI.TasksDrawer.selected(drawer)
+
+            assert Enum.any?(drawer.rows, &(&1.title == "Editorial and Jargon Roaster"))
+            model
+          end)
+        ]
+      ),
       Entry.built("minga.tasks.needs_you",
         start: [tasks: @asking_tasks],
         reach: "1 SPC a a",
@@ -416,14 +446,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
         ])
       ),
       Entry.built("minga.subagent.peek",
-        start: [
-          conversation: [
-            open?: true,
-            peek?: true,
-            turn: :working,
-            prompt: "Review the marketing site for unfair claims and unnecessary jargon."
-          ]
-        ],
+        start: [conversation: @peek_conversation],
         reach: "esc esc SPC a i",
         click_reach: [{:subagent_started, "Started Editorial and Jargon Roaster"}],
         recognize: &Model.open?(&1, :subagent_peek),
@@ -450,6 +473,13 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
       Entry.pending("minga.act_menu.selection", 4052, "the act menu on a selection")
     ]
   end
+
+  @spec child_selected?(Model.t()) :: boolean()
+  defp child_selected?(%Model{ui: %{tasks_drawer: %{visible?: true, view: :list} = drawer}}) do
+    match?(%{depth: 1, title: @selected_child}, Minga.RenderModel.UI.TasksDrawer.selected(drawer))
+  end
+
+  defp child_selected?(%Model{}), do: false
 
   @doc "True when the tasks drawer's list is open with a selected row in `state`."
   @spec tasks_selected?(Model.t(), atom()) :: boolean()

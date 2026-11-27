@@ -1038,7 +1038,7 @@ exits = [
   { key = "n", click = "Deny", to = "minga.tasks.working" },
   { key = "=", click = "Show diff", to = "minga.approval.diff" },
   { key = "↩ on a task with a conversation in this window", click = "row title", to = "minga.conversation" },
-  { key = "i on a child row (planned)", click = "Inspect", to = "minga.subagent.peek", note = "The selected row here is a foreground task. Inspect currently opens the task's conversation, not a child." },
+  { key = "j on a task with a child below", click = "child row title", to = "minga.tasks.child_selected" },
   { key = "o", click = "Output", to = "minga.task.output" },
   { key = "↩ on a done row", click = "Review", to = "minga.review.buffer" },
   { key = "q", click = "drawer close", to = "edit.working" },
@@ -1154,7 +1154,7 @@ list = true
 empty_state = "minga.tasks.empty"
 exits = [
   { key = "↩ on a task with a conversation in this window", click = "row title", to = "minga.conversation" },
-  { key = "i on a child row (planned)", click = "Inspect", to = "minga.subagent.peek", note = "The selected row here is a foreground task. Inspect currently opens the task's conversation, not a child." },
+  { key = "j on a task with a child below", click = "child row title", to = "minga.tasks.child_selected" },
   { key = "r", click = "Retry now", to = "minga.tasks.working", note = "the retried task works again, still selected" },
   { key = "o", click = "Output", to = "minga.task.output" },
   { key = "q", click = "drawer close", to = "edit.plain" },
@@ -1173,10 +1173,28 @@ boards = { macos = "V41Tasks.dc.html", tui = "V41TuiTasks.dc.html", new_task = "
 transient = true
 exits = [
   { key = "↩ on a task with a conversation in this window", click = "row title", to = "minga.conversation" },
-  { key = "i on a child row (planned)", click = "Inspect", to = "minga.subagent.peek", note = "The selected row here is a foreground task. Inspect currently opens the task's conversation, not a child." },
+  { key = "j on a task with a child below", click = "child row title", to = "minga.tasks.child_selected" },
   { key = "q", click = "drawer close", to = "edit.plain" },
   { key = "esc", click = "", to = "edit.plain", keyboard_only = "q has the click" },
 ]
+
+[[scenario]]
+id = "minga.tasks.child_selected"
+journey = "minga"
+title = "Tasks drawer with a foreground child selected"
+surfaces = ["drawer:tasks", "modeline"]
+states = ["working", "done"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V41Tasks.dc.html", tui = "V41TuiTasks.dc.html" }
+transient = true
+exits = [
+  { key = "i", click = "Inspect", to = "minga.subagent.peek" },
+  { key = "k to the task row", click = "task row title", to = "minga.tasks.working" },
+  { key = "q with the conversation behind the drawer", click = "drawer close", to = "minga.conversation" },
+  { key = "q with an editor behind the drawer", click = "drawer close", to = "edit.plain" },
+]
+notes = "Move to the child with j or click its row. The child's Inspect control opens the same split as a Started row in its parent's conversation."
 
 [[scenario]]
 id = "minga.tasks.empty"

@@ -373,7 +373,7 @@ defmodule MingaEditor.Agent.TasksTest do
 
       tasks =
         Tasks.new()
-        |> Tasks.follow(pid, 0)
+        |> Tasks.follow(pid, 0, title: "Review two changes")
         |> Tasks.observe(pid, start.(first, "One"), 1)
         |> Tasks.observe(pid, start.(second, "Two"), 1)
         |> Tasks.observe(pid, {:tool_started, background}, 1)
@@ -381,12 +381,12 @@ defmodule MingaEditor.Agent.TasksTest do
         |> Tasks.observe(pid, {:tool_ended, failed}, 2)
 
       assert [
-               %Subagent{title: "One", state: :done, invocation_key: ^first} = one,
-               %Subagent{title: "Two", state: :failed, invocation_key: ^second} = two
+               %Subagent{title: "One", state: :done, invocation_key: ^first},
+               %Subagent{title: "Two", state: :failed, invocation_key: ^second}
              ] = entry(tasks, pid).subagents
 
-      row_id = &MingaEditor.RenderModel.UI.TasksDrawerBuilder.row_id(%{item: &1, parent_seq: 1})
-      refute row_id.(one) == row_id.(two)
+      [_parent, one, two] = MingaEditor.RenderModel.UI.TasksDrawerBuilder.row_ids(tasks)
+      refute one == two
     end
 
     test "a fan-out records report counts and each child's original Result in handback order" do

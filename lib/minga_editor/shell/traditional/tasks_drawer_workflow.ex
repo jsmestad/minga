@@ -6,22 +6,28 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerWorkflow do
 
   The drawer shows its list, or one task's request diff (`=`) or output (`o`); `q` and `esc` step back from a view to the list, and from the list close the drawer. Stopping a task (`x`) asks first. Opening the drawer from a notification arms it: single-letter actions are ignored for 300 ms, so a letter typed in a file cannot answer an approval.
 
-  Two actions have a home of their own coming: `inspect_task/2` opens the task's conversation until the subagent peek (#4046) gives it a split, and `review/2` opens today's pending reviews until the review buffer (#4051) replaces it.
+  Inspect opens a task's conversation or a foreground child beside its own conversation. Review opens today's pending reviews until the review buffer (#4051) replaces it.
   """
 
   alias MingaAgent.Session
+  alias MingaAgent.SessionManager
+  alias MingaEditor.Agent.Arrival
   alias MingaEditor.Agent.ErrorWords
+  alias MingaEditor.Agent.SubagentPeekWorkflow
   alias MingaEditor.Agent.TaskWorkflow
   alias MingaEditor.Agent.Tasks
   alias MingaEditor.Agent.Tasks.Entry
+  alias MingaEditor.FocusOwner
   alias MingaEditor.RenderModel.UI.TasksDrawerBuilder
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.Drawers
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
+  alias MingaEditor.TabWorkflow
 
   @typedoc "How an approval is answered."
   @type decision :: TaskWorkflow.decision()
@@ -44,6 +50,8 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerWorkflow do
           | :tasks_next_change
           | :tasks_prev_change
           | :tasks_back
+
+  @type child_inspect :: {String.t(), pid(), SessionManager.foreground_identity()}
 
   @arming_ms 300
 
@@ -204,7 +212,10 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerWorkflow do
   end
 
   def click(%EditorState{} = state, row_id, key) when is_map_key(@click_commands, key) do
-    if row_id in row_ids(state) do
+    drawer = drawers(state)
+    inspectable? = key != "i" or (Drawers.showing?(drawer, :tasks) and drawer.view == :list)
+
+    if inspectable? and row_id in row_ids(state) do
       state = state |> forget_vanished_stop() |> leave_other_stop(row_id) |> select(row_id)
       dispatch(state, drawers(state), Map.fetch!(@click_commands, key), row_id)
     else
@@ -450,7 +461,10 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerWorkflow do
   @spec new_task(EditorState.t()) :: EditorState.t()
   def new_task(%EditorState{} = state) do
     state = if focused?(state), do: state, else: open(state)
-    MingaEditor.PromptUI.open(state, MingaEditor.UI.Prompt.NewTask)
+
+    state
+    |> Arrival.cancel_child_inspect()
+    |> MingaEditor.PromptUI.open(MingaEditor.UI.Prompt.NewTask)
   end
 
   # Retry asks the session again: a waiting retry runs now, and a failed or stopped turn continues.
@@ -553,15 +567,69 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerWorkflow do
 
   @spec inspect_row(EditorState.t(), String.t() | nil) :: EditorState.t()
   defp inspect_row(state, row) do
-    case TasksDrawerBuilder.owner_for(state.agent_connection.tasks, row) do
-      %Entry{} = entry -> inspect_task(state, entry)
+    case TasksDrawerBuilder.inspect_target(state.agent_connection.tasks, row) do
+      %Entry{} = entry -> open_conversation(state, entry)
+      {session, child} -> inspect_child(state, {row, session, child})
       nil -> state
     end
   end
 
-  @doc "Inspects a task: its conversation, until the subagent peek (#4046) opens it in a split."
-  @spec inspect_task(EditorState.t(), Entry.t()) :: EditorState.t()
-  def inspect_task(%EditorState{} = state, %Entry{} = entry), do: open_conversation(state, entry)
+  @spec inspect_child(EditorState.t(), child_inspect()) :: EditorState.t()
+  defp inspect_child(state, {_row, session, _child} = target) do
+    with %TabBar{} = tabs <- state.shell_runtime.state.tab_bar,
+         %Tab{id: id} <- TabBar.find_by_session(tabs, session) do
+      next =
+        case Runtime.active_tab(state.shell_runtime) do
+          %Tab{id: ^id} -> state
+          _other -> state |> TabWorkflow.switch(id) |> focus()
+        end
+
+      case Arrival.defer_child_inspect(next, target) do
+        {:ok, waiting} -> waiting
+        :not_waiting -> finish_child_inspect(next, target, :ready)
+      end
+    else
+      nil -> child_parent_unavailable(state)
+    end
+  end
+
+  @doc "Completes the selected row's Inspect only while the same drawer action still owns focus."
+  @spec finish_child_inspect(EditorState.t(), child_inspect(), :ready | :unavailable) ::
+          EditorState.t()
+  def finish_child_inspect(%EditorState{} = state, {row, session, child}, outcome) do
+    with %Drawers{selected: ^row, view: :list, pending: nil} <- drawers(state),
+         {^session, ^child} <-
+           TasksDrawerBuilder.inspect_target(state.agent_connection.tasks, row) do
+      case FocusOwner.derive(state) do
+        %{surface: :tasks} -> open_selected_child(state, child, outcome)
+        _elsewhere -> state
+      end
+    else
+      _stale -> state
+    end
+  end
+
+  @spec open_selected_child(
+          EditorState.t(),
+          SessionManager.foreground_identity(),
+          :ready | :unavailable
+        ) :: EditorState.t()
+  defp open_selected_child(state, child, :ready) do
+    case SubagentPeekWorkflow.inspect_current(state, child) do
+      {:ok, opened} -> opened |> close() |> update(&TraditionalState.blur_bottom_panel/1)
+      {:error, :unavailable} -> child_parent_unavailable(state)
+    end
+  end
+
+  defp open_selected_child(state, _child, :unavailable), do: child_parent_unavailable(state)
+
+  @spec child_parent_unavailable(EditorState.t()) :: EditorState.t()
+  defp child_parent_unavailable(state),
+    do:
+      NoticeWorkflow.publish(
+        state,
+        "Cannot open this subagent's parent conversation in this window"
+      )
 
   @doc "Reviews a done task's changes: today's pending reviews, until the review buffer (#4051) replaces it."
   @spec review(EditorState.t(), Entry.t()) :: EditorState.t()
@@ -716,6 +784,8 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerWorkflow do
          %EditorState{shell_runtime: %Runtime{state: %TraditionalState{} = shell}} = state,
          fun
        ) do
+    state = Arrival.cancel_child_inspect(state)
+
     %{state | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, fun.(shell))}
     |> MingaEditor.Layout.invalidate()
   end
