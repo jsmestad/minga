@@ -74,6 +74,16 @@ defmodule MingaEditor.RenderModel.UI.FileTreeFramesTest do
     assert %{status: :ready, rows: [_ | _]} = ready
   end
 
+  test "a deeply nested tree sends an error instead of an unencodable row", %{tree: tree} do
+    row = %{hd(tree.entries) | depth: 256, guides: List.duplicate(false, 256)}
+    deep = FileTree.put_entries(tree, [row])
+
+    assert {:full_tree, %{status: {:error, message}, rows: []}, _caches} =
+             frame(context(open(deep)), Caches.new())
+
+    assert message =~ "levels"
+  end
+
   test "file icons and colors match per-path filetype detection", %{tree: tree} do
     theme = Theme.get!(:doom_one)
     {:full_tree, model, _caches} = frame(context(open(tree)), Caches.new())

@@ -150,8 +150,16 @@ public struct FileTreeView: View {
                 .safeAreaInset(edge: .top, spacing: 0) {
                     stickyParentHeader
                 }
+                .onChange(of: fileTreeState.editingIndex, initial: true) { _, index in
+                    if let index, fileTreeState.entries.indices.contains(index) {
+                        withAnimation(nil) {
+                            proxy.scrollTo(fileTreeState.entries[index].id, anchor: .center)
+                        }
+                    }
+                }
                 .onChange(of: fileTreeState.selectedIndex) { _, newIndex in
-                    if let selectedEntry = fileTreeState.entries.first(where: { $0.index == newIndex }) {
+                    if fileTreeState.editingIndex == nil,
+                       let selectedEntry = fileTreeState.entries.first(where: { $0.index == newIndex }) {
                         withAnimation(nil) {
                             proxy.scrollTo(selectedEntry.id, anchor: .center)
                         }

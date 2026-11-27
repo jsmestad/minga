@@ -300,6 +300,7 @@ func decodeFileTreeRows(body []byte, offset int, count int) []FileTreeRow {
 			Focused:   flags&0x08 != 0,
 			Active:    flags&0x10 != 0,
 			Dirty:     flags&0x20 != 0,
+			Editing:   flags&0x40 != 0,
 		}
 		offset += 17
 		if len(body) < offset {
@@ -330,7 +331,7 @@ func decodeFileTreeRows(body []byte, offset int, count int) []FileTreeRow {
 		}
 		offset++    // editing_type
 		offset += 4 // editing_token
-		_, offset, ok = readString16(body, offset)
+		row.EditingText, offset, ok = readString16(body, offset)
 		if !ok || len(body) < offset+4 {
 			break
 		}

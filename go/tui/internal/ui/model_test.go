@@ -1913,6 +1913,19 @@ func TestFileTreeSelectedRowPaintsBackgroundAcrossSegments(t *testing.T) {
 	}
 }
 
+func TestFileTreeRevealsInlineNameBelowViewport(t *testing.T) {
+	model := New(40, 8, nil)
+	tree := protocol.FileTree{Rows: []protocol.FileTreeRow{
+		{Name: "first"},
+		{Name: "last folder", Directory: true, Selected: true},
+		{Editing: true, EditingText: "created.txt", Depth: 1},
+	}}
+	got := ansi.Strip(strings.Join(model.renderFileTree(tree, 28, 2, true), "\n"))
+	if !strings.Contains(got, "last folder") || !strings.Contains(got, "created.txt") {
+		t.Fatalf("expected the selected folder and its editable filename, got %q", got)
+	}
+}
+
 func TestFileTreeDirtyRowUsesGitModifiedColor(t *testing.T) {
 	model := New(40, 8, nil)
 	rendered := model.renderFileTreeRow(protocol.FileTreeRow{Name: "main.go", Dirty: true}, 30, fileTreeRowGuides{})

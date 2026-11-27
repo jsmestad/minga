@@ -67,7 +67,7 @@ defmodule MingaEditor.Integration.FileTreeFramesSmokeTest do
 
     wait_until_screen(ctx, fn -> match?(%{rows: [%{id: ^nested}]}, frontend_tree(ctx)) end)
 
-    send_keys_sync(ctx, "<Tab>")
+    send_key_sync(ctx, 9)
 
     wait_until_screen(ctx, fn ->
       match?(%{rows: [%{id: ^nested}, %{id: ^path}]}, frontend_tree(ctx))
@@ -108,16 +108,41 @@ defmodule MingaEditor.Integration.FileTreeFramesSmokeTest do
     assert selected(frontend_tree(ctx)) == peer
   end
 
-  test "creation waits for a collapsed directory to load and targets that directory", %{
+  test "folder deletion shows a confirmation and cancel leaves the subtree intact", %{
+    tmp_dir: dir
+  } do
+    nested = Path.join(dir, "nested")
+    path = Path.join(nested, "deeper/file.txt")
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, "keep")
+    ctx = start_editor("", project_root: dir)
+
+    send_keys_sync(ctx, "<Space>op")
+    wait_until_screen(ctx, fn -> match?(%{rows: [%{id: ^nested}]}, frontend_tree(ctx)) end)
+    send_keys_sync(ctx, "d")
+    assert minibuffer(ctx) =~ "Delete 'nested/' and all its contents?"
+
+    send_keys_sync(ctx, "n")
+    refute minibuffer(ctx) =~ "Delete 'nested/'"
+    assert File.read!(path) == "keep"
+  end
+
+  test "creation waits for a last empty directory to load and displays its naming field", %{
     tmp_dir: dir
   } do
     nested = Path.join(dir, "nested")
     File.mkdir!(nested)
-    path = Path.join(nested, "existing.txt")
-    File.write!(path, "")
+    preceding = Path.join(dir, "first")
+    File.mkdir!(preceding)
     ctx = start_editor("", project_root: dir)
     send_keys_sync(ctx, "<Space>op")
-    wait_until_screen(ctx, fn -> match?(%{rows: [%{id: ^nested}]}, frontend_tree(ctx)) end)
+
+    wait_until_screen(ctx, fn ->
+      match?(%{rows: [%{id: ^preceding}, %{id: ^nested}]}, frontend_tree(ctx))
+    end)
+
+    send_keys_sync(ctx, "j")
+    assert selected(frontend_tree(ctx)) == nested
 
     state = editor_state(ctx)
 
@@ -136,10 +161,46 @@ defmodule MingaEditor.Integration.FileTreeFramesSmokeTest do
     refute FileTreeState.editing?(editor_state(ctx).workspace.file_tree)
 
     send(worker, {:release_file_tree_scan, :before_create, {:return, FileTree.new(dir)}})
-    wait_until(ctx, &FileTreeState.editing?(&1.workspace.file_tree))
-    send_keys_sync(ctx, "created.txt<CR>")
+
+    wait_until_screen(ctx, fn ->
+      match?(%{rows: [_, %{id: ^nested}, %{name: "", depth: 1}]}, frontend_tree(ctx))
+    end)
+
+    %{rows: [_, _, %{id: edit_id}]} = frontend_tree(ctx)
+    send_keys_sync(ctx, "created")
+    File.rmdir!(preceding)
+    arriving = Path.join(nested, "arriving.txt")
+    File.write!(arriving, "")
+    :sys.replace_state(ctx.editor, &Freshness.request_refresh(&1, 0))
+
+    wait_until_screen(ctx, fn ->
+      match?(
+        %{rows: [%{id: ^nested}, %{id: ^edit_id, name: "created", depth: 1}, %{id: ^arriving}]},
+        frontend_tree(ctx)
+      )
+    end)
+
+    send_keys_sync(ctx, ".txt<CR>")
     assert File.regular?(Path.join(nested, "created.txt"))
     refute File.exists?(Path.join(dir, "created.txt"))
+  end
+
+  test "refresh cancels an inline name when its destination disappears", %{tmp_dir: dir} do
+    nested = Path.join(dir, "nested")
+    File.mkdir!(nested)
+    ctx = start_editor("", project_root: dir)
+    send_keys_sync(ctx, "<Space>op")
+    wait_until_screen(ctx, fn -> match?(%{rows: [%{id: ^nested}]}, frontend_tree(ctx)) end)
+    send_keys_sync(ctx, "a")
+    wait_until_screen(ctx, fn -> match?(%{rows: [_, %{name: ""}]}, frontend_tree(ctx)) end)
+    send_keys_sync(ctx, "new.txt")
+
+    File.rmdir!(nested)
+    :sys.replace_state(ctx.editor, &Freshness.request_refresh(&1, 0))
+    wait_until_screen(ctx, fn -> match?(%{rows: []}, frontend_tree(ctx)) end)
+
+    send_keys_sync(ctx, "<CR>")
+    refute File.exists?(nested)
   end
 
   test "the tree can be hidden and shown while its initial scan is pending", %{tmp_dir: dir} do

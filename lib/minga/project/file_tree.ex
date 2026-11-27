@@ -12,8 +12,10 @@ defmodule Minga.Project.FileTree do
 
   alias Minga.Project.FileTree.GitStatus
 
-  # The shared sidebar protocol encodes the complete resident row count as u16.
-  @max_sidebar_rows 65_535
+  # Reserve one u16 row slot for the inline naming field outside the listing.
+  @max_sidebar_rows 65_534
+  # The wire format uses u8 for depth and guide count. The walker emits one guide per depth level.
+  @max_sidebar_depth 255
   # Both frontends accept 64 MiB frames. Reserve most of that for the rest of the editor.
   @max_sidebar_bytes 16 * 1024 * 1024
 
@@ -262,6 +264,9 @@ defmodule Minga.Project.FileTree do
   defp sidebar_overflow?(_entries, _rows, bytes) when bytes < 0, do: true
   defp sidebar_overflow?([], _rows, _bytes), do: false
   defp sidebar_overflow?([_ | _], 0, _bytes), do: true
+
+  defp sidebar_overflow?([%{depth: depth} | _], _rows, _bytes) when depth > @max_sidebar_depth,
+    do: true
 
   defp sidebar_overflow?([entry | rest], rows, bytes) do
     # Absolute path appears twice; relative path is no longer than the absolute path.

@@ -32,33 +32,79 @@ defmodule MingaEditor.FileTree.Rows do
   @doc "Builds semantic rows from a pure file tree and explicit presentation inputs."
   @spec from_tree(FileTree.t(), options()) :: [Row.t()]
   def from_tree(%FileTree{} = tree, opts \\ []) do
-    tree
-    |> FileTree.visible_entries()
-    |> naming_row(tree, Keyword.get(opts, :editing))
-    |> Enum.with_index()
-    |> from_entries(tree, opts)
+    entries = FileTree.visible_entries(tree)
+    context = row_context(tree, opts)
+    editing = position_creation(entries, context.editing)
+    project_entries(entries, 0, nil, tree, %{context | editing: editing})
   end
 
-  # An empty folder has no row for a new file or folder's name to replace.
-  # Naming the first one therefore gets its own row at the top.
-  @spec naming_row([FileTree.entry()], FileTree.t(), FileTreeState.editing() | nil) :: [
-          FileTree.entry()
-        ]
-  defp naming_row([], %FileTree{root: root}, %{type: type, index: 0})
+  @spec position_creation([FileTree.entry()], FileTreeState.editing() | nil) ::
+          FileTreeState.editing() | nil
+  defp position_creation(entries, %{type: type, parent_path: parent, index: index} = edit)
        when type in [:new_file, :new_folder] do
-    [
-      %{
-        path: Path.join(root, ""),
-        name: "",
-        dir?: type == :new_folder,
-        depth: 0,
-        last_child?: true,
-        guides: []
-      }
-    ]
+    index =
+      case Enum.find_index(entries, &(&1.path == parent)) do
+        nil -> min(index, length(entries))
+        parent_index -> parent_index + 1
+      end
+
+    %{edit | index: index}
   end
 
-  defp naming_row(entries, _tree, _editing), do: entries
+  defp position_creation(_entries, edit), do: edit
+
+  @spec project_entries(
+          [FileTree.entry()],
+          non_neg_integer(),
+          FileTree.entry() | nil,
+          FileTree.t(),
+          map()
+        ) :: [Row.t()]
+  # Give each create operation its own row so a refresh cannot replace its native field.
+  defp project_entries(
+         entries,
+         index,
+         last,
+         tree,
+         %{editing: %{type: type, index: index, parent_path: parent}} = context
+       )
+       when type in [:new_file, :new_folder] do
+    {depth, guides} = naming_indent(last, parent)
+
+    entry = %{
+      path: tree.root,
+      name: "",
+      dir?: type == :new_folder,
+      depth: depth,
+      last_child?: true,
+      guides: guides
+    }
+
+    row = row_from_entry(entry, index, tree, %{context | selected_index: nil})
+    [row | project_entries(entries, index, last, tree, %{context | editing: nil})]
+  end
+
+  defp project_entries([entry | rest], index, _last, tree, context) do
+    row = row_from_entry(entry, index, tree, context)
+    [row | project_entries(rest, index + 1, entry, tree, context)]
+  end
+
+  defp project_entries([], _index, _last, _tree, _context), do: []
+
+  @spec naming_indent(FileTree.entry() | nil, String.t()) :: {non_neg_integer(), [boolean()]}
+  defp naming_indent(%{path: parent, depth: depth, guides: guides, last_child?: last?}, parent)
+       when depth < 255 do
+    {depth + 1, guides ++ [not last?]}
+  end
+
+  # At maximum wire depth the temporary field uses the parent's indentation.
+  defp naming_indent(%{path: parent, depth: depth, guides: guides}, parent), do: {depth, guides}
+
+  defp naming_indent(%{path: path, dir?: false, depth: depth, guides: guides}, parent) do
+    if Path.dirname(path) == parent, do: {depth, guides}, else: {0, []}
+  end
+
+  defp naming_indent(_last, _parent), do: {0, []}
 
   @doc "Builds semantic rows from already-selected visible entries."
   @spec from_entries([indexed_entry()], FileTree.t(), options()) :: [Row.t()]
@@ -123,11 +169,21 @@ defmodule MingaEditor.FileTree.Rows do
 
   @spec row_from_entry(FileTree.entry(), non_neg_integer(), FileTree.t(), map()) :: Row.t()
   defp row_from_entry(entry, index, tree, opts) do
-    # A row's identity is its expanded path, so expand once for both fields.
+    # Files use their expanded path as their identity. A new name belongs to the edit instead.
     path = Row.id_for(entry)
+    editing = editing_for_entry(index, path, opts.editing)
+
+    id =
+      case editing do
+        %{type: type, token: token} when type in [:new_file, :new_folder] ->
+          "file-tree-edit:#{token}"
+
+        _ ->
+          path
+      end
 
     Row.new(
-      id: path,
+      id: id,
       path: path,
       name: entry.name,
       directory?: entry.dir?,
@@ -142,7 +198,7 @@ defmodule MingaEditor.FileTree.Rows do
       depth: entry.depth,
       guides: entry.guides,
       last_child?: entry.last_child?,
-      editing: editing_for_entry(index, path, opts.editing)
+      editing: editing
     )
   end
 

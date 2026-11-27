@@ -3,22 +3,20 @@ defmodule Minga.Mode.DeleteConfirmStateTest do
 
   alias Minga.Mode.DeleteConfirmState
 
-  describe "new/4" do
+  describe "new/3" do
     test "creates state for a file" do
       state = DeleteConfirmState.new("/tmp/foo.ex", "foo.ex", false)
       assert state.path == "/tmp/foo.ex"
       assert state.name == "foo.ex"
       assert state.dir? == false
-      assert state.child_count == 0
       assert state.phase == :trash
     end
 
-    test "creates state for a directory with child count" do
-      state = DeleteConfirmState.new("/tmp/mydir", "mydir", true, 42)
+    test "creates state for a directory" do
+      state = DeleteConfirmState.new("/tmp/mydir", "mydir", true)
       assert state.path == "/tmp/mydir"
       assert state.name == "mydir"
       assert state.dir? == true
-      assert state.child_count == 42
       assert state.phase == :trash
     end
   end

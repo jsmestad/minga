@@ -215,7 +215,7 @@ defmodule Minga.Mode do
 
   def display(:delete_confirm, %Minga.Mode.DeleteConfirmState{phase: :trash} = s) do
     if s.dir? do
-      "Delete '#{s.name}/' and #{Minga.Core.Plural.count(s.child_count, "file", "files")}? (y/n)"
+      "Delete '#{s.name}/' and all its contents? (y/n)"
     else
       "Delete '#{s.name}'? (y/n)"
     end

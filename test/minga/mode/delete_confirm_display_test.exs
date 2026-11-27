@@ -10,14 +10,9 @@ defmodule Minga.Mode.DeleteConfirmDisplayTest do
       assert Mode.display(:delete_confirm, state) == "Delete 'foo.ex'? (y/n)"
     end
 
-    test "directory trash prompt includes child count" do
-      state = DeleteConfirmState.new("/tmp/mydir", "mydir", true, 12)
-      assert Mode.display(:delete_confirm, state) == "Delete 'mydir/' and 12 files? (y/n)"
-    end
-
-    test "directory trash prompt names one file in the singular" do
-      state = DeleteConfirmState.new("/tmp/mydir", "mydir", true, 1)
-      assert Mode.display(:delete_confirm, state) == "Delete 'mydir/' and 1 file? (y/n)"
+    test "directory trash prompt warns that all contents are included" do
+      state = DeleteConfirmState.new("/tmp/mydir", "mydir", true)
+      assert Mode.display(:delete_confirm, state) == "Delete 'mydir/' and all its contents? (y/n)"
     end
 
     test "permanent delete fallback prompt" do

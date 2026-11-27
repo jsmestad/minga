@@ -786,10 +786,24 @@ defmodule MingaEditor.State.FileTree do
 
           {true, true, true, true} ->
             refreshed_tree = preserve_refresh_selection(refreshed_tree, live_tree)
+            ft = cancel_creation_for_missing_parent(ft, refreshed_tree)
             {:accepted, replace_tree(ft, refreshed_tree)}
         end
     end
   end
+
+  @spec cancel_creation_for_missing_parent(t(), FileTree.t()) :: t()
+  defp cancel_creation_for_missing_parent(
+         %__MODULE__{interaction: {:editing, %{type: type, parent_path: parent}}} = ft,
+         %FileTree{root: root, filter: nil, entries: entries}
+       )
+       when type in [:new_file, :new_folder] and parent != root and is_list(entries) do
+    if Enum.any?(entries, &(&1.dir? and &1.path == parent)),
+      do: ft,
+      else: cancel_editing(ft)
+  end
+
+  defp cancel_creation_for_missing_parent(ft, _tree), do: ft
 
   # Worker cursors belong to the scan's old row ordering. Resolve the selection
   # from the resident tree at acceptance time, including input received in flight.
@@ -950,9 +964,12 @@ defmodule MingaEditor.State.FileTree do
   defp content_for_tree(%FileTree{entries: nil} = tree), do: loading_content(tree)
 
   defp content_for_tree(%FileTree{} = tree) do
-    if FileTree.sidebar_overflow?(tree),
-      do: {:error, "Too many entries. Filter (/).", FileTree.put_entries(tree, [])},
-      else: {:ready, tree}
+    if FileTree.sidebar_overflow?(tree) do
+      {:error, "Too many entries or levels. Filter (/) or open a smaller folder.",
+       FileTree.put_entries(tree, [])}
+    else
+      {:ready, tree}
+    end
   end
 
   @spec put_content_tree(t(), FileTree.t()) :: t()
