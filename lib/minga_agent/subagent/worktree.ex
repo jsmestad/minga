@@ -22,47 +22,76 @@ defmodule MingaAgent.Subagent.Worktree do
         }
 
   @type create_opts :: [backend: module(), backend_opts: keyword()]
+  @type disposal ::
+          :removed
+          | {:preserved, String.t(), String.t(), :changed | {:uncertain, String.t()}}
+          | {:branch_retained, String.t(), String.t()}
 
   @doc "Creates an isolated child worktree from a clean Git repository."
   @spec create(String.t(), create_opts()) :: {:ok, t()} | {:error, String.t()}
   def create(project_root, opts \\ []) do
+    with {:ok, worktree} <- prepare(project_root, opts) do
+      case allocate(worktree) do
+        :ok -> {:ok, worktree}
+        {:error, reason} -> {:error, reason <> "\nAllocation not verified." <> metadata(worktree)}
+      end
+    end
+  end
+
+  @doc "Inspects the project and plans an exact checkout without allocating it."
+  @spec prepare(String.t(), create_opts()) :: {:ok, t()} | {:error, String.t()}
+  def prepare(project_root, opts) do
     backend = Keyword.get(opts, :backend, System)
     backend_opts = Keyword.get(opts, :backend_opts, [])
 
     with {:ok, root} <- git_root(project_root, backend, backend_opts),
          :ok <- require_clean_git(root, backend, backend_opts),
-         {:ok, base_sha} <- output(backend, backend_opts, root, ["rev-parse", "HEAD"]),
-         worktree <- new(root, String.trim(base_sha), backend, backend_opts),
-         :ok <- add(worktree) do
-      {:ok, worktree}
+         {:ok, base_sha} <- output(backend, backend_opts, root, ["rev-parse", "HEAD"]) do
+      {:ok, new(root, String.trim(base_sha), backend, backend_opts)}
     end
   end
 
   @doc "Finishes a successful child, preserving changed work or cleaning a no-op child."
   @spec finish_result(t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def finish_result(%__MODULE__{} = worktree, result) do
-    case change_status(worktree) do
-      {:ok, true} -> {:ok, result <> metadata(worktree)}
-      {:ok, false} -> cleanup(worktree, {:ok, result})
-      {:error, _reason} -> {:ok, result <> metadata(worktree)}
-    end
+    {:ok, result <> disposal_notice(dispose(worktree))}
   end
 
   @doc "Finishes a failed child without discarding any changes it produced."
   @spec finish_error(t(), String.t()) :: {:error, String.t()}
   def finish_error(%__MODULE__{} = worktree, reason) do
+    {:error, reason <> disposal_notice(dispose(worktree))}
+  end
+
+  @doc "Removes an unchanged worktree at its exact base without discarding work on uncertainty."
+  @spec dispose(t()) :: disposal()
+  def dispose(%__MODULE__{} = worktree) do
     case change_status(worktree) do
-      {:ok, true} -> {:error, reason <> metadata(worktree)}
-      {:ok, false} -> cleanup(worktree, {:error, reason})
-      {:error, _inspection_reason} -> {:error, reason <> metadata(worktree)}
+      {:ok, false} -> cleanup(worktree)
+      {:ok, true} -> {:preserved, worktree.path, worktree.branch, :changed}
+      {:error, reason} -> {:preserved, worktree.path, worktree.branch, {:uncertain, reason}}
     end
   end
+
+  @doc "Reports preserved work or uncertainty without altering the original subagent result."
+  @spec disposal_notice(disposal()) :: String.t()
+  def disposal_notice(:removed), do: ""
+  def disposal_notice({:preserved, path, branch, :changed}), do: location(path, branch)
+
+  def disposal_notice({:preserved, path, branch, {:uncertain, reason}}),
+    do: location(path, branch) <> "\nWorktree retained: #{reason}"
+
+  def disposal_notice({:branch_retained, branch, reason}),
+    do: "\n\nWorktree removed; branch retained: #{branch}\n#{reason}"
 
   @doc "Formats the location and branch metadata for a preserved worktree."
   @spec metadata(t()) :: String.t()
   def metadata(%__MODULE__{} = worktree) do
-    "\n\nWorktree: #{worktree.path}\nBranch: #{worktree.branch}"
+    location(worktree.path, worktree.branch)
   end
+
+  @spec location(String.t(), String.t()) :: String.t()
+  defp location(path, branch), do: "\n\nWorktree: #{path}\nBranch: #{branch}"
 
   @spec git_root(String.t(), module(), keyword()) :: {:ok, String.t()} | {:error, String.t()}
   defp git_root(project_root, backend, backend_opts) do
@@ -83,7 +112,7 @@ defmodule MingaAgent.Subagent.Worktree do
 
   @spec new(String.t(), String.t(), module(), keyword()) :: t()
   defp new(root, base_sha, backend, backend_opts) do
-    id = :erlang.unique_integer([:positive])
+    id = :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)
 
     %__MODULE__{
       root: root,
@@ -95,8 +124,9 @@ defmodule MingaAgent.Subagent.Worktree do
     }
   end
 
-  @spec add(t()) :: :ok | {:error, String.t()}
-  defp add(worktree) do
+  @doc "Allocates the planned checkout. Failure is not proof that Git made no changes."
+  @spec allocate(t()) :: :ok | {:error, String.t()}
+  def allocate(%__MODULE__{} = worktree) do
     case command(worktree, worktree.root, [
            "worktree",
            "add",
@@ -112,27 +142,47 @@ defmodule MingaAgent.Subagent.Worktree do
 
   @spec change_status(t()) :: {:ok, boolean()} | {:error, String.t()}
   defp change_status(worktree) do
-    with {:ok, dirty} <- output(worktree, worktree.path, ["status", "--porcelain"]),
-         {:ok, count} <-
+    with {:ok, entries} <- output(worktree, worktree.path, ["ls-files", "-v", "-z"]),
+         :ok <- require_visible_index(entries),
+         {:ok, dirty} <-
            output(worktree, worktree.path, [
-             "rev-list",
-             "--count",
-             "HEAD",
-             "^#{worktree.base_sha}"
-           ]) do
-      {:ok, dirty != "" or String.trim(count) != "0"}
+             "status",
+             "--porcelain=v1",
+             "--untracked-files=all",
+             "--ignored=matching",
+             "--ignore-submodules=none"
+           ]),
+         {:ok, head} <- output(worktree, worktree.path, ["rev-parse", "HEAD"]) do
+      {:ok, dirty != "" or String.trim(head) != worktree.base_sha}
     end
   end
 
-  @spec cleanup(t(), {:ok, String.t()} | {:error, String.t()}) ::
-          {:ok, String.t()} | {:error, String.t()}
-  defp cleanup(worktree, result) do
-    case command(worktree, worktree.root, ["worktree", "remove", "--force", worktree.path]) do
-      :ok -> _result = command(worktree, worktree.root, ["branch", "-D", worktree.branch])
-      {:error, _reason} -> :ok
+  @spec require_visible_index(String.t()) :: :ok | {:error, String.t()}
+  defp require_visible_index(entries) do
+    if Enum.all?(:binary.split(entries, <<0>>, [:global, :trim_all]), fn
+         <<"H ", _path::binary>> -> true
+         _hidden -> false
+       end) do
+      :ok
+    else
+      {:error, "Git index flags hide tracked worktree paths"}
     end
+  end
 
-    result
+  @spec cleanup(t()) :: disposal()
+  defp cleanup(worktree) do
+    case command(worktree, worktree.root, ["worktree", "remove", worktree.path]) do
+      :ok ->
+        branch_ref = "refs/heads/#{worktree.branch}"
+
+        case command(worktree, worktree.root, ["update-ref", "-d", branch_ref, worktree.base_sha]) do
+          :ok -> :removed
+          {:error, reason} -> {:branch_retained, worktree.branch, reason}
+        end
+
+      {:error, reason} ->
+        {:preserved, worktree.path, worktree.branch, {:uncertain, reason}}
+    end
   end
 
   @spec output(t(), String.t(), [String.t()]) :: {:ok, String.t()} | {:error, String.t()}

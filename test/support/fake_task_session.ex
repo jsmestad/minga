@@ -76,7 +76,7 @@ defmodule Minga.Test.FakeTaskSession do
       {:title_changed, title},
       {:status_changed, :tool_executing},
       {:stop_target_changed, {"fake", "request-1"}},
-      {:tool_started, "edit-1", "edit_file", %{}}
+      {:tool_started, %MingaAgent.Event.ToolStart{tool_call_id: "edit-1", name: "edit_file"}}
     ]
 
   defp events(_pid, title, {:working, subagents: titles}) do
@@ -84,7 +84,12 @@ defmodule Minga.Test.FakeTaskSession do
       titles
       |> Enum.with_index()
       |> Enum.map(fn {task, index} ->
-        {:tool_started, "sub-#{index}", "subagent", %{"task" => task}}
+        {:tool_started,
+         %MingaAgent.Event.ToolStart{
+           tool_call_id: "sub-#{index}",
+           name: "subagent",
+           args: %{"task" => task}
+         }}
       end)
 
     [
@@ -105,7 +110,7 @@ defmodule Minga.Test.FakeTaskSession do
     [
       {:title_changed, title},
       {:status_changed, :tool_executing},
-      {:tool_started, "test-1", "shell", %{}},
+      {:tool_started, %MingaAgent.Event.ToolStart{tool_call_id: "test-1", name: "shell"}},
       {:tool_ended,
        %ToolEnd{
          tool_call_id: "test-1",
@@ -123,7 +128,7 @@ defmodule Minga.Test.FakeTaskSession do
     [
       {:title_changed, title},
       {:status_changed, :tool_executing},
-      {:tool_started, "edit-1", "edit_file", %{}},
+      {:tool_started, %MingaAgent.Event.ToolStart{tool_call_id: "edit-1", name: "edit_file"}},
       {:tool_ended, %ToolEnd{tool_call_id: "edit-1", name: "edit_file", outcome: :complete}},
       {:status_changed, :idle}
     ]

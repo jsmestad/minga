@@ -128,7 +128,7 @@ defmodule MingaEditor.Layout.FooterOverlays do
   defp float_window_visible?(_state), do: false
 
   # Native chrome still consumes the activity model.
-  # The compact overlay is only placed over ordinary editors, never full Agent chat or Review.
+  # The compact overlay only belongs over ordinary editors, never over Agent controls.
   @spec agent_context_visible?(map()) :: boolean()
   defp agent_context_visible?(%Input{windows: windows} = state) do
     agent_context_visible?(state, Map.get(windows.map, windows.active))
@@ -139,6 +139,8 @@ defmodule MingaEditor.Layout.FooterOverlays do
   end
 
   @spec agent_context_visible?(map(), Window.t() | RenderWindow.t() | nil) :: boolean()
+  defp agent_context_visible?(_state, %{content: {:subagent_peek, _}}), do: false
+
   defp agent_context_visible?(state, %{content: content}) do
     not Content.agent_body?(content) and AgentContextBuilder.visible?(state)
   end

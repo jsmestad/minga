@@ -156,6 +156,11 @@ defmodule MingaEditor.RenderModel.UI.TasksDrawerBuilder do
   def row_id(%{item: %Entry{seq: seq}}), do: "t#{seq}"
   def row_id(%{item: %Starting{seq: seq}}), do: "t#{seq}"
 
+  def row_id(%{item: %Subagent{invocation_key: key}, parent_seq: seq})
+      when is_integer(seq) and not is_nil(key) do
+    "t#{seq}.i.#{Base.url_encode64(:erlang.term_to_binary(key), padding: false)}"
+  end
+
   def row_id(%{item: %Subagent{id: id}, parent_seq: seq}) when is_integer(seq),
     do: "t#{seq}.#{id}"
 

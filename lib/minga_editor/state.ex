@@ -178,6 +178,24 @@ defmodule MingaEditor.State do
     }
   end
 
+  @doc "Installs the child reader without altering its parent Agent connection."
+  @spec install_subagent_peek_session(t(), MingaEditor.Agent.SubagentPeekSession.t() | nil) :: t()
+  def install_subagent_peek_session(%__MODULE__{} = state, peek) do
+    %{
+      state
+      | agent_connection: AgentConnection.install_peek_session(state.agent_connection, peek)
+    }
+  end
+
+  @doc "Installs independent child drafts and the child composer's focus."
+  @spec install_subagent_peek_composer(t(), MingaEditor.Agent.SubagentPeekComposer.t()) :: t()
+  def install_subagent_peek_composer(%__MODULE__{} = state, composer) do
+    %{
+      state
+      | agent_connection: AgentConnection.install_peek_composer(state.agent_connection, composer)
+    }
+  end
+
   @doc "Keeps the Editor-owned local Session start request."
   @spec track_agent_session_start(t(), MingaEditor.Agent.SessionStart.t()) :: t()
   def track_agent_session_start(%__MODULE__{} = state, start) do

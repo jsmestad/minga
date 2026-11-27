@@ -5,6 +5,7 @@ defmodule MingaEditor.RenderPipeline.Intent do
   Pipeline and workspace fields use explicit allowlisted boundary structs; windows use `WindowIntent`. No `Input`, editor `Window`, renderer cache, resident store, font registry, or acknowledgement state crosses the boundary. The retained Agent transcript travels beside the packed intent as a `MingaEditor.Renderer.TranscriptUpdate`; after admission the renderer installs its local resident root into `workspace.agent_transcript`.
   """
 
+  alias MingaEditor.RenderModel.UI.SubagentPeekBuilder
   alias MingaEditor.RenderPipeline.FrameIntent
   alias MingaEditor.RenderPipeline.WindowIntent
   alias MingaEditor.RenderPipeline.WorkspaceIntent
@@ -35,7 +36,10 @@ defmodule MingaEditor.RenderPipeline.Intent do
 
     %__MODULE__{
       frame: FrameIntent.from_editor_state(state),
-      workspace: WorkspaceIntent.from_workspace(state.workspace, search),
+      workspace:
+        state.workspace
+        |> WorkspaceIntent.from_workspace(search)
+        |> WorkspaceIntent.with_subagent_peek(SubagentPeekBuilder.capture(state)),
       windows:
         Map.new(windows.map, fn {id, window} -> {id, WindowIntent.from_window(window)} end),
       window_layout: %{tree: windows.tree, active: windows.active, next_id: windows.next_id},
@@ -70,6 +74,11 @@ defmodule MingaEditor.RenderPipeline.Intent do
   @spec agent_transcript(t()) :: WorkspaceIntent.agent_transcript()
   def agent_transcript(%__MODULE__{workspace: %WorkspaceIntent{agent_transcript: transcript}}),
     do: transcript
+
+  @doc "Replaces the child transcript phase without changing the parent root."
+  @spec with_peek_transcript(t(), WorkspaceIntent.agent_transcript()) :: t()
+  def with_peek_transcript(%__MODULE__{} = intent, transcript),
+    do: %{intent | workspace: WorkspaceIntent.with_peek_transcript(intent.workspace, transcript)}
 
   @doc "Marks semantic frame state for a recovery keyframe without adding cache state."
   @spec force_keyframe(t()) :: t()

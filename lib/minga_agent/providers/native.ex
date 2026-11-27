@@ -2241,7 +2241,7 @@ defmodule MingaAgent.Providers.Native do
 
     with {:ok, checkpoint_id} <-
            checkpoint_tool_group(lctx, updated_context.messages, tool_calls),
-         :ok <- emit_tool_starts(lctx, tool_calls),
+         :ok <- emit_tool_starts(lctx, checkpoint_id, tool_calls),
          :ok <- execute_tools(lctx, checkpoint_id, tool_calls) do
       lctx = %{
         lctx
@@ -2256,12 +2256,13 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @spec emit_tool_starts(loop_ctx(), [ReqLLMAdapter.tool_call()]) :: :ok
-  defp emit_tool_starts(lctx, tool_calls) do
+  @spec emit_tool_starts(loop_ctx(), String.t(), [ReqLLMAdapter.tool_call()]) :: :ok
+  defp emit_tool_starts(lctx, checkpoint_id, tool_calls) do
     Enum.each(tool_calls, fn tool_call ->
       emit(lctx, %Event.ToolStart{
         tool_call_id: tool_call.id,
         name: tool_call.name,
+        invocation_key: subagent_invocation_key(lctx, checkpoint_id, tool_call),
         args: tool_call.arguments || %{}
       })
     end)
@@ -2825,7 +2826,7 @@ defmodule MingaAgent.Providers.Native do
         case persist_tool_execution_result(lctx, completion, 3) do
           :ok ->
             emit_receipt_preview(lctx, tool_call, Map.get(result, :mutation))
-            emit_tool_end(lctx, tool_call, result)
+            emit_tool_end(lctx, checkpoint_id, tool_call, result)
             result
 
           {:error, {:tool_outcome_call_failed, _reason} = reason} ->
@@ -2881,11 +2882,12 @@ defmodule MingaAgent.Providers.Native do
       {:error, {:tool_outcome_call_failed, reason}}
   end
 
-  @spec emit_tool_end(loop_ctx(), map(), tool_execution_result()) :: :ok
-  defp emit_tool_end(lctx, tool_call, result) do
+  @spec emit_tool_end(loop_ctx(), String.t(), map(), tool_execution_result()) :: :ok
+  defp emit_tool_end(lctx, checkpoint_id, tool_call, result) do
     emit(lctx, %Event.ToolEnd{
       tool_call_id: tool_call.id,
       name: tool_call.name,
+      invocation_key: subagent_invocation_key(lctx, checkpoint_id, tool_call),
       result: result.result_text,
       output: result.output,
       outcome: result.outcome,
@@ -2893,6 +2895,12 @@ defmodule MingaAgent.Providers.Native do
       is_error: result.outcome != :complete
     })
   end
+
+  @spec subagent_invocation_key(loop_ctx(), String.t(), map()) :: Invocation.key() | nil
+  defp subagent_invocation_key(lctx, checkpoint_id, %{name: "subagent", id: id}),
+    do: Invocation.key(lctx.request.request_id, checkpoint_id, to_string(id))
+
+  defp subagent_invocation_key(_lctx, _checkpoint_id, _tool_call), do: nil
 
   @spec tool_result_message(tool_execution_result()) :: ReqLLM.Message.t()
   defp tool_result_message(%{

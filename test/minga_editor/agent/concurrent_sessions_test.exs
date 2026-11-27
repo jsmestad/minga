@@ -16,6 +16,8 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
   alias MingaEditor.Agent.UIState.TranscriptProjection
   alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.Session
+  alias MingaAgent.Session.ConnectionSnapshot
+  alias MingaAgent.Session.ConnectionTarget
   alias MingaAgent.Session.Transcript, as: SourceTranscript
   alias MingaAgent.Session.Transcript.Cursor
   alias MingaAgent.ToolApproval
@@ -388,6 +390,61 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
                arrived.workspace.agent_ui.panel.transcript
     end
 
+    test "a delayed Agent workspace capture keeps and then reattaches its exact child peek" do
+      incoming = start_supervised!({StubServer, messages: [{:user, "Inspect delegated work"}]})
+      record = "retained-peek-parent"
+      identity = {record, {"request", "batch", "child"}}
+      context = agent_tab_context()
+      viewport = context.viewport
+      peek = Window.new_subagent_peek(2, {1, identity}, viewport)
+      {:ok, tree} = WindowTree.split(context.windows.tree, 1, :vertical, 2)
+      windows = Windows.new(tree, 2, 3, Map.put(context.windows.map, 2, peek))
+      context = %{context | windows: windows, keymap_scope: :subagent_peek}
+      tab = agent_tab(2, "With child", incoming) |> Tab.set_context(context)
+      state = [Tab.new_file(1, "main.ex"), tab] |> base_state(1) |> connect_arrivals([incoming])
+
+      :ok = :sys.suspend(incoming)
+
+      waiting =
+        try do
+          MingaEditor.TabWorkflow.switch(state, 2)
+        after
+          :ok = :sys.resume(incoming)
+        end
+
+      assert {:ok, %{content: {:subagent_peek, {1, ^identity}}}} =
+               Windows.fetch(waiting.workspace.windows, 2)
+
+      assert waiting.workspace.windows.active == 1
+
+      assert_receive {_, %{status: :idle}} = snapshot_reply, 1_000
+      pending = handle(waiting, snapshot_reply)
+
+      assert_receive {:agent_event, ^incoming, {:editor_arrival_ready, token, {snapshot, text}}},
+                     1_000
+
+      connection = %ConnectionSnapshot{
+        target: ConnectionTarget.new(incoming, record, nil, make_ref()),
+        credential_readiness: :checking,
+        model_selection: nil,
+        provider_phase: :running,
+        operation: :idle,
+        problem: nil
+      }
+
+      recovered =
+        handle(
+          pending,
+          {:agent_event, incoming,
+           {:editor_arrival_ready, token, {%{snapshot | connection: connection}, text}}}
+        )
+
+      assert recovered.agent_connection.peek_session.identity == identity
+
+      assert {:ok, %{content: {:subagent_peek, {1, ^identity}}}} =
+               Windows.fetch(recovered.workspace.windows, 2)
+    end
+
     test "a delayed Ingest capture releases the frame at the original deadline" do
       a = start_supervised!({StubServer, []}, id: :outgoing)
       approval = approval_for("session-b", "turn-b", "call-b")
@@ -483,7 +540,15 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
         |> MingaEditor.TabWorkflow.switch(2)
 
       assert_receive {:capture_requested, ^b, token}
-      start = {:tool_started, "shell-1", "shell", %{"command" => "printf local"}}
+
+      start =
+        {:tool_started,
+         %MingaAgent.Event.ToolStart{
+           tool_call_id: "shell-1",
+           name: "shell",
+           args: %{"command" => "printf local"}
+         }}
+
       output = {:tool_update, "shell-1", "shell", "working"}
       state = handle(state, {:agent_event, b, start})
       state = handle(state, {:agent_stream_batch, b, [output, {:text_delta, "already captured"}]})
@@ -517,7 +582,10 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
         |> connect_arrivals([a, b])
         |> arrive(2, b)
         |> handle({:agent_event, b, {:status_changed, :thinking}})
-        |> handle({:agent_event, b, {:tool_started, "read-1", "read_file", %{}}})
+        |> handle(
+          {:agent_event, b,
+           {:tool_started, %MingaAgent.Event.ToolStart{tool_call_id: "read-1", name: "read_file"}}}
+        )
 
       assert %{active_action: "Reading", tool_count: 1} =
                state.workspace.agent_ui.view.activity

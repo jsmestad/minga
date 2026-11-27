@@ -14,33 +14,70 @@ defmodule Minga.Test.SubagentWorktreeBackend do
   defp dispatch(_cwd, ["rev-parse", "--show-toplevel"], opts),
     do: {:ok, Keyword.fetch!(opts, :root) <> "\n"}
 
-  defp dispatch(cwd, ["status", "--porcelain"], opts) do
-    root = Keyword.fetch!(opts, :root)
+  defp dispatch(_cwd, ["status", "--porcelain"], opts) do
+    if Keyword.get(opts, :dirty_parent, false), do: {:ok, "?? dirty.txt\n"}, else: {:ok, ""}
+  end
 
-    if cwd == root do
-      if Keyword.get(opts, :dirty_parent, false), do: {:ok, "?? dirty.txt\n"}, else: {:ok, ""}
+  defp dispatch(_cwd, ["ls-files", "-v", "-z"], _opts), do: {:ok, ""}
+
+  defp dispatch(
+         cwd,
+         [
+           "status",
+           "--porcelain=v1",
+           "--untracked-files=all",
+           "--ignored=matching",
+           "--ignore-submodules=none"
+         ],
+         opts
+       ),
+       do: child_status_result(cwd, opts)
+
+  defp dispatch(cwd, ["rev-parse", "HEAD"], opts) do
+    if cwd != Keyword.fetch!(opts, :root) and Keyword.get(opts, :committed_child, false),
+      do: {:ok, "different-sha\n"},
+      else: {:ok, "test-base-sha\n"}
+  end
+
+  defp dispatch(_cwd, ["worktree", "add", "-b", _branch, path, _sha], opts) do
+    File.mkdir_p!(path)
+
+    if gate = Keyword.get(opts, :setup_gate) do
+      send(Keyword.fetch!(opts, :test_pid), {:worktree_allocated, self(), gate, path})
+
+      receive do
+        {^gate, :continue} -> :ok
+      end
+    end
+
+    if Keyword.get(opts, :partial_setup, false) do
+      File.write!(Path.join(path, "hook-output.txt"), "written before index setup failed")
+      {:error, "post-checkout failed"}
     else
-      child_status_result(cwd, opts)
+      {:ok, ""}
     end
   end
 
-  defp dispatch(_cwd, ["rev-parse", "HEAD"], _opts), do: {:ok, "test-base-sha\n"}
+  defp dispatch(_cwd, ["worktree", "remove", path], opts) do
+    if gate = Keyword.get(opts, :disposal_gate) do
+      send(Keyword.fetch!(opts, :test_pid), {:worktree_disposing, self(), gate, path})
 
-  defp dispatch(_cwd, ["worktree", "add", "-b", _branch, path, _sha], _opts) do
-    File.mkdir_p!(path)
-    {:ok, ""}
+      receive do
+        {^gate, :continue} -> :ok
+      end
+    end
+
+    if Keyword.get(opts, :late_user_edit, false) do
+      File.write!(Path.join(path, "draft.txt"), "unsaved to Git\n")
+    end
+
+    case File.rmdir(path) do
+      :ok -> {:ok, ""}
+      {:error, reason} -> {:error, Atom.to_string(reason)}
+    end
   end
 
-  defp dispatch(_cwd, ["rev-list", "--count", "HEAD", _base], opts) do
-    {:ok, if(Keyword.get(opts, :committed_child, false), do: "1\n", else: "0\n")}
-  end
-
-  defp dispatch(_cwd, ["worktree", "remove", "--force", path], _opts) do
-    File.rm_rf!(path)
-    {:ok, ""}
-  end
-
-  defp dispatch(_cwd, ["branch", "-D", _branch], _opts), do: {:ok, ""}
+  defp dispatch(_cwd, ["update-ref", "-d", _branch, _expected_base], _opts), do: {:ok, ""}
   defp dispatch(_cwd, args, _opts), do: {:error, "unexpected fake git command: #{inspect(args)}"}
 
   @spec child_status_result(String.t(), keyword()) ::

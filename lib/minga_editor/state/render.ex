@@ -25,6 +25,7 @@ defmodule MingaEditor.State.Render do
   @type t :: %__MODULE__{
           renderer: pid() | nil,
           transcript: TranscriptUpdate.base(),
+          peek_transcript: TranscriptUpdate.base(),
           text_interaction_reader: Reader.t() | nil,
           submitted_highlights: Submission.revisions() | nil,
           submitted_semantic_tokens: Submission.revisions(),
@@ -37,6 +38,7 @@ defmodule MingaEditor.State.Render do
 
   defstruct renderer: nil,
             transcript: {:unseeded, 0},
+            peek_transcript: {:unseeded, 0},
             text_interaction_reader: nil,
             submitted_highlights: nil,
             submitted_semantic_tokens: %{},
@@ -63,7 +65,8 @@ defmodule MingaEditor.State.Render do
       do: %{
         render
         | renderer: renderer,
-          transcript: unseeded(render.transcript),
+          transcript: TranscriptUpdate.unseeded(render.transcript),
+          peek_transcript: TranscriptUpdate.unseeded(render.peek_transcript),
           text_interaction_reader: nil,
           submitted_highlights: nil,
           submitted_semantic_tokens: %{}
@@ -84,7 +87,8 @@ defmodule MingaEditor.State.Render do
       do: %{
         render
         | renderer: renderer,
-          transcript: unseeded(render.transcript),
+          transcript: TranscriptUpdate.unseeded(render.transcript),
+          peek_transcript: TranscriptUpdate.unseeded(render.peek_transcript),
           text_interaction_reader: reader,
           submitted_highlights: nil,
           submitted_semantic_tokens: %{}
@@ -94,18 +98,20 @@ defmodule MingaEditor.State.Render do
   @spec require_transcript_seed(t(), pid()) :: t()
   def require_transcript_seed(%__MODULE__{renderer: renderer} = render, renderer)
       when is_pid(renderer),
-      do: %{render | transcript: unseeded(render.transcript)}
+      do: %{
+        render
+        | transcript: TranscriptUpdate.unseeded(render.transcript),
+          peek_transcript: TranscriptUpdate.unseeded(render.peek_transcript)
+      }
 
   def require_transcript_seed(%__MODULE__{} = render, _other_renderer), do: render
-
-  @spec unseeded(TranscriptUpdate.base()) :: TranscriptUpdate.base()
-  defp unseeded({:unseeded, _revision} = base), do: base
-  defp unseeded({:submitted, revision, _projection}), do: {:unseeded, revision}
 
   @doc "Packs one frame and remembers source revisions sent to the connected renderer."
   @spec prepare_submission(t(), Intent.t(), Submission.revisions()) :: {t(), Submission.t()}
   def prepare_submission(%__MODULE__{} = render, %Intent{} = intent, semantic_revisions) do
     {transcript, update} = TranscriptUpdate.advance_base(render.transcript, intent)
+
+    {peek, peek_update} = TranscriptUpdate.advance_peek_base(render.peek_transcript, intent)
 
     submission =
       case render.submitted_highlights do
@@ -125,9 +131,10 @@ defmodule MingaEditor.State.Render do
     {%{
        render
        | transcript: transcript,
+         peek_transcript: peek,
          submitted_highlights: intent.frame.highlighting.revisions,
          submitted_semantic_tokens: semantic_revisions
-     }, submission}
+     }, Submission.with_peek_transcript(submission, peek_update)}
   end
 
   @doc "Commits correlation state produced by a render scheduling transition."

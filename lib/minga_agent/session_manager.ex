@@ -17,6 +17,8 @@ defmodule MingaAgent.SessionManager do
   alias MingaAgent.SessionListing
   alias MingaAgent.SessionStore
   alias MingaAgent.Subagent.Handle
+  alias MingaAgent.Subagent.Worktree
+  alias MingaAgent.Tool.Invocation
 
   # ── Types ──────────────────────────────────────────────────────────────────
 
@@ -24,6 +26,11 @@ defmodule MingaAgent.SessionManager do
   @type state :: %{
           sessions: %{String.t() => session_entry()},
           background_subagents: %{String.t() => Handle.t()},
+          foreground_subagents: %{String.t() => foreground_entry()},
+          foreground_worktree_opts: Worktree.create_opts(),
+          foreground_subagent_limit: pos_integer(),
+          foreground_timeout_ms: pos_integer() | :infinity,
+          foreground_provider_opts: keyword(),
           identity_reservations: %{String.t() => identity_reservation_entry()},
           identity_reservations_by_owner: %{pid() => String.t()},
           next_id: pos_integer(),
@@ -73,6 +80,45 @@ defmodule MingaAgent.SessionManager do
           startup_delivery: startup_delivery() | nil
         }
 
+  @typedoc "Exact task-tree identity, independent of the brief and the child's process."
+  @type foreground_identity :: {parent_task_id :: String.t(), Invocation.key()}
+  @type foreground_subagent :: %{
+          manager: pid(),
+          identity: foreground_identity(),
+          session_id: String.t(),
+          pid: pid(),
+          brief: String.t(),
+          project_root: String.t(),
+          writable?: boolean()
+        }
+  @type foreground_disposal :: %{
+          manager: pid(),
+          identity: foreground_identity(),
+          session_id: String.t(),
+          outcome: Worktree.disposal() | :no_worktree
+        }
+  @typep foreground_entry :: %{
+           identity: foreground_identity(),
+           parent_pid: pid(),
+           brief: String.t(),
+           root: String.t(),
+           worktree: Worktree.t() | nil,
+           ref: reference(),
+           waiter:
+             {:awaiting, GenServer.from(), reference(), reference()}
+             | {:reported, pid(), reference(), reference()}
+             | nil,
+           phase:
+             :reserved
+             | {:preparing, Task.ref()}
+             | {:allocating, Task.ref()}
+             | :running
+             | :reported
+             | :writable
+             | :stopping
+             | {:disposing, Task.ref()}
+         }
+
   # ── Event payload ──────────────────────────────────────────────────────────
 
   defmodule SessionStoppedEvent do
@@ -105,6 +151,7 @@ defmodule MingaAgent.SessionManager do
   @restart_default_max_attempts 3
   @restart_default_window_ms 60_000
   @metadata_listing_timeout_ms 4_500
+  @foreground_subagent_limit 16
 
   # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -158,6 +205,7 @@ defmodule MingaAgent.SessionManager do
           | {:error,
              :session_not_managed
              | :session_id_in_use
+             | :foreground_subagent_identity_fixed
              | {:remote_token_persistence_failed, term()}}
   def reserve_session_identity(manager, target_id) when is_binary(target_id) do
     GenServer.call(manager, {:reserve_session_identity, target_id}, :infinity)
@@ -222,6 +270,70 @@ defmodule MingaAgent.SessionManager do
   @spec list_background_subagents(GenServer.server(), pid() | nil) :: [Handle.t()]
   def list_background_subagents(manager, parent_session_pid) do
     GenServer.call(manager, {:list_background_subagents, parent_session_pid})
+  end
+
+  @doc "Reserves the exact invocation from its owning Session. The worker receives the result separately."
+  @spec admit_foreground_subagent(
+          GenServer.server(),
+          foreground_identity(),
+          GenServer.from(),
+          String.t(),
+          keyword(),
+          keyword()
+        ) :: :ok | {:error, term()}
+  def admit_foreground_subagent(manager, identity, worker_from, brief, session_opts, opts) do
+    GenServer.call(
+      manager,
+      {:admit_foreground_subagent, identity, worker_from, brief, session_opts, opts}
+    )
+  catch
+    :exit, reason -> {:error, {:subagent_manager_unavailable, reason}}
+  end
+
+  @doc "Lets the owning Session release a child to its composer only after saving the exact worker's result."
+  @spec acknowledge_foreground_report(GenServer.server(), foreground_identity(), pid()) :: :ok
+  def acknowledge_foreground_report(manager, identity, worker) do
+    GenServer.call(manager, {:acknowledge_foreground_report, identity, worker})
+  catch
+    :exit, _reason -> :ok
+  end
+
+  @doc "Linearizes child prompt admission against stop and parent identity changes."
+  @spec authorize_foreground_prompt(GenServer.server(), String.t()) ::
+          :ok | {:error, :subagent_unavailable | :subagent_initial_request_active}
+  def authorize_foreground_prompt(manager, child_id) do
+    GenServer.call(manager, {:authorize_foreground_prompt, child_id})
+  catch
+    :exit, _reason -> {:error, :subagent_unavailable}
+  end
+
+  @doc "Resolves an admitted child by the exact parent task and invocation, never by its brief."
+  @spec foreground_subagent(GenServer.server(), foreground_identity()) ::
+          {:ok, foreground_subagent()} | {:error, :subagent_unavailable}
+  def foreground_subagent(manager, identity) do
+    GenServer.call(manager, {:foreground_subagent, identity})
+  end
+
+  @doc "Sends only to that exact live child after handback; an error leaves the caller's draft intact."
+  @spec send_foreground_subagent_prompt(
+          GenServer.server(),
+          foreground_identity(),
+          MingaAgent.Session.TurnExecution.content()
+        ) :: :ok | {:queued, :steering} | {:error, term()}
+  def send_foreground_subagent_prompt(manager, identity, content) do
+    case foreground_subagent(manager, identity) do
+      {:ok, %{writable?: true, pid: pid, session_id: id}} ->
+        Session.send_prompt_for_id(pid, id, content)
+
+      {:ok, %{writable?: false}} ->
+        {:error, :subagent_initial_request_active}
+
+      {:error, _reason} = error ->
+        error
+    end
+  catch
+    :exit, {:timeout, _} -> {:error, :subagent_send_indeterminate}
+    :exit, _reason -> {:error, :subagent_unavailable}
   end
 
   @doc "Stops a session by its human-readable ID."
@@ -361,6 +473,12 @@ defmodule MingaAgent.SessionManager do
      %{
        sessions: %{},
        background_subagents: %{},
+       foreground_subagents: %{},
+       foreground_worktree_opts: Keyword.get(opts, :foreground_worktree_opts, []),
+       foreground_provider_opts: Keyword.get(opts, :foreground_provider_opts, []),
+       foreground_subagent_limit:
+         Keyword.get(opts, :foreground_subagent_limit, @foreground_subagent_limit),
+       foreground_timeout_ms: Keyword.get(opts, :foreground_timeout_ms, :infinity),
        identity_reservations: %{},
        identity_reservations_by_owner: %{},
        next_id: 1,
@@ -469,10 +587,71 @@ defmodule MingaAgent.SessionManager do
     {:reply, handles, state}
   end
 
+  def handle_call(
+        {:admit_foreground_subagent, identity, worker_from, brief, session_opts, opts},
+        {parent, _},
+        state
+      ) do
+    case reserve_foreground_subagent(state, parent, identity, brief, worker_from, opts) do
+      {:ok, id, state} ->
+        send(self(), {:prepare_foreground_subagent, id, session_opts, opts})
+        {:reply, :ok, state}
+
+      {:error, _reason} = error ->
+        {:reply, error, state}
+    end
+  end
+
+  def handle_call({:acknowledge_foreground_report, identity, worker}, {parent, _}, state) do
+    case find_foreground_by_identity(state, identity) do
+      {id, %{parent_pid: ^parent, phase: :reported, waiter: {:reported, ^worker, _, _}} = child} ->
+        child = %{reply_foreground_waiter(child, nil) | phase: :writable}
+        state = put_foreground(state, id, child)
+        publish_foreground_subagent(state, id, child)
+        {:reply, :ok, state}
+
+      _ ->
+        {:reply, :ok, state}
+    end
+  end
+
+  def handle_call({:authorize_foreground_prompt, id}, {pid, _}, state) do
+    result =
+      case Map.fetch(state.foreground_subagents, id) do
+        {:ok, child} ->
+          case foreground_projection(state, id, child) do
+            {:ok, %{pid: ^pid, writable?: true}} -> :ok
+            {:ok, %{pid: ^pid}} -> {:error, :subagent_initial_request_active}
+            _ -> {:error, :subagent_unavailable}
+          end
+
+        :error ->
+          {:error, :subagent_unavailable}
+      end
+
+    {:reply, result, state}
+  end
+
+  def handle_call({:foreground_subagent, identity}, _from, state) do
+    result =
+      case find_foreground_by_identity(state, identity) do
+        {id, child} -> foreground_projection(state, id, child)
+        nil -> {:error, :subagent_unavailable}
+      end
+
+    {:reply, result, state}
+  end
+
+  def handle_call({:stop_session, session_id}, _from, state)
+      when is_map_key(state.foreground_subagents, session_id) do
+    {:reply, :ok, stop_foreground_subagent(state, session_id, :child_stopped)}
+  end
+
   def handle_call({:stop_session, session_id}, _from, state) do
     case Map.fetch(state.sessions, session_id) do
       {:ok, %{monitor_ref: ref, pid: pid, stop_pending?: false} = entry}
       when is_reference(ref) ->
+        state = stop_owned_foreground_subagents(state, pid)
         entry = %{entry | restart_state: nil, stop_pending?: true}
 
         {:reply, {:stop_session, state.session_supervisor, pid},
@@ -523,7 +702,11 @@ defmodule MingaAgent.SessionManager do
 
   def handle_call({:stop_session_by_pid, pid}, _from, state) do
     case find_session_by_pid(state.sessions, pid) do
+      {session_id, _entry} when is_map_key(state.foreground_subagents, session_id) ->
+        {:reply, :ok, stop_foreground_subagent(state, session_id, :child_stopped)}
+
       {session_id, %{pid: ^pid, stop_pending?: false} = entry} ->
+        state = stop_owned_foreground_subagents(state, pid)
         entry = %{entry | restart_state: nil, stop_pending?: true}
 
         {:reply, {:stop_session, state.session_supervisor, pid},
@@ -562,6 +745,20 @@ defmodule MingaAgent.SessionManager do
         provider_monitor_ref = Process.monitor(provider_pid)
         entry = %{entry | provider_pid: provider_pid, provider_monitor_ref: provider_monitor_ref}
         {:noreply, put_session_entry(state, session_id, entry)}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:session_start_hook, session_pid, worker_pid}, state) do
+    case find_session_by_owner_pid(state.sessions, session_pid) do
+      {id, entry} ->
+        if holds_checkout?(state, entry) do
+          {:noreply, put_session_entry(state, id, monitor_effect_worker(entry, worker_pid))}
+        else
+          {:noreply, state}
+        end
 
       _ ->
         {:noreply, state}
@@ -626,12 +823,75 @@ defmodule MingaAgent.SessionManager do
     end
   end
 
+  def handle_info({ref, {:foreground_setup, id, session_opts, result}}, state)
+      when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, finish_foreground_setup(state, id, ref, session_opts, result)}
+  end
+
+  def handle_info({ref, {:foreground_allocation, id, session_opts, result}}, state)
+      when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, finish_foreground_allocation(state, id, ref, session_opts, result)}
+  end
+
+  def handle_info({ref, {:foreground_disposal, id, outcome}}, state)
+      when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+
+    case Map.get(state.foreground_subagents, id) do
+      %{phase: {:disposing, ^ref}} = child ->
+        {:noreply, finish_foreground_disposal(state, id, child, outcome)}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:prepare_foreground_subagent, id, session_opts, opts}, state) do
+    case Map.get(state.foreground_subagents, id) do
+      %{phase: :reserved} ->
+        {:noreply, prepare_foreground_subagent(state, id, session_opts, opts)}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:foreground_deadline, id, ref}, state) do
+    case Map.get(state.foreground_subagents, id) do
+      %{ref: ^ref, waiter: {phase, _, _, _}} when phase in [:awaiting, :reported] ->
+        {:noreply, stop_foreground_subagent(state, id, :initial_request_timeout)}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:foreground_subagent_handback, id, pid, ref, result}, state) do
+    case {Map.get(state.foreground_subagents, id), Map.get(state.sessions, id)} do
+      {%{ref: ^ref, phase: :running} = child, %{pid: ^pid, stop_pending?: false}} ->
+        {:noreply, settle_foreground_handback(state, id, child, result)}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
   def handle_info(_msg, state) do
     {:noreply, state}
   end
 
   @spec handle_process_down(state(), reference(), pid(), term()) :: {:noreply, state()}
   defp handle_process_down(state, ref, pid, reason) do
+    case foreground_process_down(state, ref, reason) do
+      {:ok, state} -> {:noreply, state}
+      :unrelated -> handle_existing_process_down(state, ref, pid, reason)
+    end
+  end
+
+  @spec handle_existing_process_down(state(), reference(), pid(), term()) :: {:noreply, state()}
+  defp handle_existing_process_down(state, ref, pid, reason) do
     case startup_delivery_for_task_ref(state.sessions, ref) do
       nil ->
         handle_managed_process_down(state, ref, pid, reason)
@@ -660,6 +920,16 @@ defmodule MingaAgent.SessionManager do
           pid(),
           term()
         ) :: {:noreply, state()}
+  defp handle_startup_prompt_task_down(state, id, entry, delivery, _, _, _, reason)
+       when is_map_key(state.foreground_subagents, id) do
+    state =
+      state
+      |> clear_startup_delivery(id, entry, delivery)
+      |> stop_foreground_subagent(id, {:brief_dispatch_failed, reason})
+
+    {:noreply, state}
+  end
+
   defp handle_startup_prompt_task_down(
          state,
          session_id,
@@ -690,6 +960,7 @@ defmodule MingaAgent.SessionManager do
 
     case find_session_by_ref(state.sessions, ref) do
       {session_id, %{stop_pending?: true} = entry} ->
+        state = stop_owned_foreground_subagents(state, pid)
         # An explicit stop ends the session as surely as an exit does. Pid
         # holders such as the Editor's tab bar learn about it only through this
         # event, so it fires here too.
@@ -699,6 +970,7 @@ defmodule MingaAgent.SessionManager do
         {:noreply, finish_pending_stop(state, session_id, entry)}
 
       {session_id, entry} ->
+        state = stop_owned_foreground_subagents(state, pid)
         handle_session_process_down(state, session_id, entry, ref, pid, reason)
 
       nil ->
@@ -717,7 +989,8 @@ defmodule MingaAgent.SessionManager do
   defp handle_session_process_down(state, session_id, entry, ref, pid, reason) do
     entry = reset_startup_delivery_after_down(entry, ref)
 
-    if should_restart_session?(reason) do
+    if not Map.has_key?(state.foreground_subagents, session_id) and
+         should_restart_session?(reason) do
       handle_session_restart_down(state, session_id, entry, pid, reason)
     else
       Minga.Log.info(
@@ -734,6 +1007,8 @@ defmodule MingaAgent.SessionManager do
           restart_state: nil,
           stop_pending?: true
       }
+
+      state = mark_foreground_stopping(state, session_id, {:child_stopped, reason})
 
       {:noreply, finish_pending_stop(state, session_id, entry)}
     end
@@ -754,6 +1029,7 @@ defmodule MingaAgent.SessionManager do
        %{
          pid: pid,
          monitor_ref: session_ref,
+         stop_pending?: false,
          startup_delivery: %{reference: ^delivery_ref, phase: :pending} = delivery
        } = entry}
       when is_reference(session_ref) and is_pid(pid) ->
@@ -789,6 +1065,517 @@ defmodule MingaAgent.SessionManager do
   end
 
   # ── Private helpers ────────────────────────────────────────────────────────
+
+  @spec reserve_foreground_subagent(
+          state(),
+          pid(),
+          foreground_identity(),
+          String.t(),
+          GenServer.from(),
+          keyword()
+        ) :: {:ok, String.t(), state()} | {:error, term()}
+  defp reserve_foreground_subagent(state, parent, identity, brief, {worker, _} = from, opts) do
+    cond do
+      not foreground_owner_active?(state, parent, identity) ->
+        {:error, :subagent_owner_unavailable}
+
+      find_foreground_by_identity(state, identity) != nil ->
+        {:error, :duplicate_subagent_invocation}
+
+      map_size(state.foreground_subagents) >= state.foreground_subagent_limit ->
+        {:error, :foreground_subagent_capacity}
+
+      not Process.alive?(worker) ->
+        {:error, :initial_request_cancelled}
+
+      true ->
+        id = generated_session_id(state.next_id)
+        state = %{state | next_id: state.next_id + 1}
+        ref = make_ref()
+        timeout = min(Keyword.fetch!(opts, :timeout), state.foreground_timeout_ms)
+        timer = Process.send_after(self(), {:foreground_deadline, id, ref}, timeout)
+
+        child = %{
+          identity: identity,
+          parent_pid: parent,
+          brief: brief,
+          root: Keyword.fetch!(opts, :project_root),
+          worktree: nil,
+          ref: ref,
+          waiter: {:awaiting, from, Process.monitor(worker), timer},
+          phase: :reserved
+        }
+
+        {:ok, id, put_foreground(state, id, child)}
+    end
+  end
+
+  @spec prepare_foreground_subagent(state(), String.t(), keyword(), keyword()) :: state()
+  defp prepare_foreground_subagent(state, id, session_opts, opts) do
+    child = Map.fetch!(state.foreground_subagents, id)
+
+    if Keyword.fetch!(opts, :isolated?),
+      do: prepare_foreground_worktree(state, id, child, session_opts),
+      else: start_foreground_child(state, id, child, session_opts)
+  end
+
+  @spec prepare_foreground_worktree(state(), String.t(), foreground_entry(), keyword()) :: state()
+  defp prepare_foreground_worktree(state, id, child, session_opts) do
+    worktree_opts = state.foreground_worktree_opts
+    root = child.root
+
+    case launch_foreground_effect(state, fn ->
+           {:foreground_setup, id, session_opts, Worktree.prepare(root, worktree_opts)}
+         end) do
+      {:ok, ref} -> put_foreground(state, id, %{child | phase: {:preparing, ref}})
+      {:error, reason} -> stop_foreground_subagent(state, id, {:worktree_setup_failed, reason})
+    end
+  end
+
+  @spec finish_foreground_setup(
+          state(),
+          String.t(),
+          reference(),
+          keyword(),
+          {:ok, Worktree.t()} | {:error, String.t()}
+        ) :: state()
+  defp finish_foreground_setup(state, id, ref, session_opts, result) do
+    case Map.get(state.foreground_subagents, id) do
+      %{phase: {:preparing, ^ref}} = child ->
+        apply_foreground_setup(state, id, %{child | phase: :reserved}, session_opts, result)
+
+      _ ->
+        state
+    end
+  end
+
+  @spec apply_foreground_setup(
+          state(),
+          String.t(),
+          foreground_entry(),
+          keyword(),
+          {:ok, Worktree.t()} | {:error, String.t()}
+        ) :: state()
+  defp apply_foreground_setup(state, id, child, session_opts, {:ok, worktree}) do
+    if foreground_waiting?(state, child) do
+      allocate_foreground_worktree(state, id, child, worktree, session_opts)
+    else
+      state
+      |> put_foreground(id, child)
+      |> stop_foreground_subagent(id, :initial_request_cancelled)
+    end
+  end
+
+  defp apply_foreground_setup(state, id, child, _session_opts, {:error, reason}),
+    do: state |> put_foreground(id, child) |> stop_foreground_subagent(id, reason)
+
+  @spec allocate_foreground_worktree(
+          state(),
+          String.t(),
+          foreground_entry(),
+          Worktree.t(),
+          keyword()
+        ) ::
+          state()
+  defp allocate_foreground_worktree(state, id, child, worktree, session_opts) do
+    case launch_foreground_effect(state, fn ->
+           {:foreground_allocation, id, session_opts, Worktree.allocate(worktree)}
+         end) do
+      {:ok, ref} ->
+        put_foreground(state, id, %{child | worktree: worktree, phase: {:allocating, ref}})
+
+      {:error, reason} ->
+        state
+        |> put_foreground(id, child)
+        |> stop_foreground_subagent(id, {:worktree_setup_failed, reason})
+    end
+  end
+
+  @spec finish_foreground_allocation(
+          state(),
+          String.t(),
+          reference(),
+          keyword(),
+          :ok | {:error, String.t()}
+        ) ::
+          state()
+  defp finish_foreground_allocation(state, id, ref, session_opts, result) do
+    case Map.get(state.foreground_subagents, id) do
+      %{phase: {:allocating, ^ref}, worktree: worktree} = child ->
+        case result do
+          :ok ->
+            child = %{child | phase: :reserved, root: worktree.path}
+            start_foreground_child(put_foreground(state, id, child), id, child, session_opts)
+
+          {:error, reason} ->
+            fail_foreground_allocation(state, id, child, reason)
+        end
+
+      _stale ->
+        state
+    end
+  end
+
+  @spec fail_foreground_allocation(state(), String.t(), foreground_entry(), term()) :: state()
+  defp fail_foreground_allocation(state, id, child, reason) do
+    message =
+      "Could not verify worktree allocation: #{inspect(reason)}" <>
+        Worktree.metadata(child.worktree)
+
+    child = reply_foreground_waiter(child, {:error, message})
+    preserve_uncertain_worktree(state, id, child, reason)
+  end
+
+  @spec start_foreground_child(state(), String.t(), foreground_entry(), keyword()) :: state()
+  defp start_foreground_child(state, id, child, session_opts) do
+    if foreground_waiting?(state, child) do
+      opts =
+        session_opts
+        |> Keyword.put(:session_id, id)
+        |> Keyword.put(:persist?, false)
+        |> Keyword.put(:idle_gc_timeout_ms, 0)
+        |> Keyword.put(:recover_interrupted_work?, false)
+        |> Keyword.put(:foreground_subagent?, true)
+        |> Keyword.put(:subagent_handback, {self(), child.ref, nil, []})
+        |> Keyword.update!(:provider_opts, fn provider_opts ->
+          provider_opts
+          |> Keyword.merge(state.foreground_provider_opts)
+          |> Keyword.drop([:project_view, :working_folder])
+          |> Keyword.put(:project_root, child.root)
+        end)
+
+      case do_start_managed_session(state, opts, id) do
+        {:ok, ^id, _pid, state} ->
+          child = %{child | phase: :running}
+          state = put_foreground(state, id, child)
+          entry = Map.fetch!(state.sessions, id)
+          delivery = %{reference: child.ref, prompt: child.brief, attempt: 0, phase: :pending}
+          state = put_session_entry(state, id, %{entry | startup_delivery: delivery})
+          publish_foreground_subagent(state, id, child)
+          schedule_pending_startup_prompt(state, id)
+
+        {:error, reason} ->
+          stop_foreground_subagent(state, id, {:child_start_failed, reason})
+      end
+    else
+      stop_foreground_subagent(state, id, :initial_request_cancelled)
+    end
+  end
+
+  @spec settle_foreground_handback(
+          state(),
+          String.t(),
+          foreground_entry(),
+          {:ok, String.t()} | {:error, String.t()}
+        ) :: state()
+  defp settle_foreground_handback(
+         state,
+         id,
+         %{waiter: {:awaiting, {worker, _} = from, ref, timer}} = child,
+         result
+       ) do
+    if foreground_waiting?(state, child) do
+      GenServer.reply(from, foreground_reply(result, child.worktree))
+      child = %{child | phase: :reported, waiter: {:reported, worker, ref, timer}}
+      state = put_foreground(state, id, child)
+      publish_foreground_subagent(state, id, child)
+      state
+    else
+      stop_foreground_subagent(state, id, :initial_request_cancelled)
+    end
+  end
+
+  @spec foreground_reply({:ok, String.t()} | {:error, String.t()}, Worktree.t() | nil) :: term()
+  defp foreground_reply({:ok, text}, worktree), do: {:ok, text, worktree}
+  defp foreground_reply({:error, reason}, nil), do: {:error, reason}
+
+  defp foreground_reply({:error, reason}, worktree),
+    do: {:error, reason <> Worktree.metadata(worktree)}
+
+  @spec reply_foreground_waiter(foreground_entry(), term()) :: foreground_entry()
+  defp reply_foreground_waiter(%{waiter: nil} = child, _result), do: child
+
+  defp reply_foreground_waiter(%{waiter: {phase, target, ref, timer}} = child, result) do
+    Process.demonitor(ref, [:flush])
+    Process.cancel_timer(timer)
+    if phase == :awaiting, do: GenServer.reply(target, result)
+    %{child | waiter: nil}
+  end
+
+  @spec foreground_waiting?(state(), foreground_entry()) :: boolean()
+  defp foreground_waiting?(state, %{waiter: {:awaiting, {worker, _}, _, _}} = child) do
+    Process.alive?(worker) and foreground_owner_active?(state, child.parent_pid, child.identity)
+  end
+
+  defp foreground_waiting?(_state, %{waiter: nil}), do: false
+
+  @spec foreground_owner_active?(state(), pid(), foreground_identity()) :: boolean()
+  defp foreground_owner_active?(state, parent, {task_id, _invocation}) do
+    case Map.get(state.sessions, task_id) do
+      %{pid: ^parent, monitor_ref: ref, stop_pending?: false} when is_reference(ref) ->
+        Process.alive?(parent)
+
+      _ ->
+        false
+    end
+  end
+
+  @spec find_foreground_by_identity(state(), foreground_identity()) ::
+          {String.t(), foreground_entry()} | nil
+  defp find_foreground_by_identity(state, identity) do
+    Enum.find(state.foreground_subagents, fn {_id, child} -> child.identity == identity end)
+  end
+
+  @spec foreground_projection(state(), String.t(), foreground_entry()) ::
+          {:ok, foreground_subagent()} | {:error, :subagent_unavailable}
+  defp foreground_projection(state, id, %{phase: phase} = child)
+       when phase in [:running, :reported, :writable] do
+    case Map.get(state.sessions, id) do
+      %{pid: pid, stop_pending?: false} when is_pid(pid) ->
+        if Process.alive?(pid) and
+             foreground_owner_active?(state, child.parent_pid, child.identity) do
+          {:ok,
+           %{
+             manager: self(),
+             identity: child.identity,
+             session_id: id,
+             pid: pid,
+             brief: child.brief,
+             project_root: child.root,
+             writable?: phase == :writable
+           }}
+        else
+          {:error, :subagent_unavailable}
+        end
+
+      _ ->
+        {:error, :subagent_unavailable}
+    end
+  end
+
+  defp foreground_projection(_state, _id, _child), do: {:error, :subagent_unavailable}
+
+  @spec publish_foreground_subagent(state(), String.t(), foreground_entry()) :: :ok
+  defp publish_foreground_subagent(state, id, child) do
+    case foreground_projection(state, id, child) do
+      {:ok, projection} -> Minga.Events.broadcast(:foreground_subagent_changed, projection)
+      {:error, :subagent_unavailable} -> :ok
+    end
+  end
+
+  @spec stop_owned_foreground_subagents(state(), pid()) :: state()
+  defp stop_owned_foreground_subagents(state, owner) do
+    Enum.reduce(state.foreground_subagents, state, fn
+      {id, %{parent_pid: ^owner}}, acc -> stop_foreground_subagent(acc, id, :parent_stopped)
+      _child, acc -> acc
+    end)
+  end
+
+  @spec stop_foreground_subagent(state(), String.t(), term()) :: state()
+  defp stop_foreground_subagent(state, id, reason) do
+    case Map.get(state.foreground_subagents, id) do
+      %{phase: phase} when phase in [:running, :reported, :writable] ->
+        state = mark_foreground_stopping(state, id, reason)
+        entry = Map.fetch!(state.sessions, id)
+        supervisor = state.session_supervisor
+        pid = entry.pid
+        {:ok, _task} = Task.start(fn -> MingaAgent.Supervisor.stop_session(supervisor, pid) end)
+        state = put_session_entry(state, id, %{entry | stop_pending?: true})
+        stop_owned_foreground_subagents(state, pid)
+
+      %{phase: {phase, _ref}} = child when phase in [:preparing, :allocating] ->
+        # Do not interrupt Git. The allocation task still owes a receipt, even after the waiter leaves.
+        put_foreground(state, id, reply_foreground_waiter(child, {:error, reason}))
+
+      %{phase: :reserved} ->
+        state |> mark_foreground_stopping(id, reason) |> dispose_foreground_worktree(id)
+
+      _already_stopping ->
+        state
+    end
+  end
+
+  @spec mark_foreground_stopping(state(), String.t(), term()) :: state()
+  defp mark_foreground_stopping(state, id, reason) do
+    case Map.get(state.foreground_subagents, id) do
+      nil ->
+        state
+
+      child ->
+        child = reply_foreground_waiter(child, {:error, reason})
+        put_foreground(state, id, %{child | phase: :stopping})
+    end
+  end
+
+  @spec dispose_foreground_worktree(state(), String.t()) :: state()
+  defp dispose_foreground_worktree(state, id) do
+    case Map.get(state.foreground_subagents, id) do
+      %{worktree: %Worktree{path: path}} = child ->
+        if checkout_in_use?(state, id, path) do
+          state
+        else
+          start_worktree_disposal(state, id, child)
+        end
+
+      %{worktree: nil} = child ->
+        finish_foreground_disposal(state, id, child, :no_worktree)
+
+      nil ->
+        state
+    end
+  end
+
+  @spec checkout_in_use?(state(), String.t(), String.t()) :: boolean()
+  defp checkout_in_use?(state, owner, path) do
+    Enum.any?(state.sessions, fn {_id, entry} ->
+      within_checkout?(session_checkout_root(entry.restart_opts), path)
+    end) or
+      Enum.any?(state.foreground_subagents, fn
+        {^owner, _entry} -> false
+        {_id, %{worktree: %Worktree{root: root}}} -> within_checkout?(root, path)
+        {_id, %{root: root}} -> within_checkout?(root, path)
+      end)
+  end
+
+  @spec within_checkout?(term(), String.t()) :: boolean()
+  defp within_checkout?(root, path) when is_binary(root) do
+    root = Path.expand(root)
+    root == path or String.starts_with?(root, path <> "/")
+  end
+
+  defp within_checkout?(_root, _path), do: false
+
+  @spec holds_checkout?(state(), session_entry()) :: boolean()
+  defp holds_checkout?(state, entry) do
+    root = session_checkout_root(entry.restart_opts)
+
+    Enum.any?(state.foreground_subagents, fn
+      {_id, %{worktree: %Worktree{path: path}}} -> within_checkout?(root, path)
+      _other -> false
+    end)
+  end
+
+  @spec session_checkout_root(keyword()) :: String.t() | nil
+  defp session_checkout_root(opts) do
+    provider_opts = Keyword.get(opts, :provider_opts, [])
+
+    case Keyword.fetch(provider_opts, :project_view) do
+      {:ok, %MingaAgent.ProjectView{project_root: root}} ->
+        root
+
+      _no_view ->
+        case Keyword.get(provider_opts, :working_folder) do
+          nil -> Keyword.get(provider_opts, :project_root)
+          folder -> MingaAgent.WorkingFolder.root(folder)
+        end
+    end
+  end
+
+  @spec require_available_checkout(state(), keyword()) :: :ok | {:error, :checkout_disposing}
+  defp require_available_checkout(state, opts) do
+    root = session_checkout_root(opts)
+
+    if Enum.any?(state.foreground_subagents, fn
+         {_id, %{phase: {:disposing, _}, worktree: %Worktree{path: path}}} ->
+           within_checkout?(root, path)
+
+         _other ->
+           false
+       end) do
+      {:error, :checkout_disposing}
+    else
+      :ok
+    end
+  end
+
+  @spec start_worktree_disposal(state(), String.t(), foreground_entry()) :: state()
+  defp start_worktree_disposal(state, id, %{worktree: worktree} = child) do
+    case launch_foreground_effect(state, fn ->
+           {:foreground_disposal, id, Worktree.dispose(worktree)}
+         end) do
+      {:ok, ref} -> put_foreground(state, id, %{child | phase: {:disposing, ref}})
+      {:error, reason} -> preserve_uncertain_worktree(state, id, child, reason)
+    end
+  end
+
+  @spec launch_foreground_effect(state(), (-> term())) :: {:ok, Task.ref()} | {:error, term()}
+  defp launch_foreground_effect(state, effect) do
+    task = Task.Supervisor.async_nolink(state.startup_task_supervisor, effect)
+    {:ok, task.ref}
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  @spec foreground_process_down(state(), reference(), term()) :: {:ok, state()} | :unrelated
+  defp foreground_process_down(state, ref, reason) do
+    case Enum.find(state.foreground_subagents, fn {_id, child} ->
+           match?({_, _, ^ref, _}, child.waiter) or match?({_, ^ref}, child.phase)
+         end) do
+      {id, %{waiter: {_, _, ^ref, _}}} ->
+        {:ok, stop_foreground_subagent(state, id, :initial_request_cancelled)}
+
+      {id, %{phase: {:preparing, ^ref}} = child} ->
+        state = put_foreground(state, id, %{child | phase: :reserved})
+        {:ok, stop_foreground_subagent(state, id, {:worktree_setup_failed, reason})}
+
+      {id, %{phase: {:allocating, ^ref}} = child} ->
+        {:ok, fail_foreground_allocation(state, id, child, reason)}
+
+      {id, %{phase: {:disposing, ^ref}} = child} ->
+        {:ok, preserve_uncertain_worktree(state, id, child, reason)}
+
+      nil ->
+        :unrelated
+    end
+  end
+
+  @spec preserve_uncertain_worktree(state(), String.t(), foreground_entry(), term()) :: state()
+  defp preserve_uncertain_worktree(state, id, child, reason) do
+    worktree = child.worktree
+    outcome = {:preserved, worktree.path, worktree.branch, {:uncertain, inspect(reason)}}
+    finish_foreground_disposal(state, id, child, outcome)
+  end
+
+  @spec finish_foreground_disposal(
+          state(),
+          String.t(),
+          foreground_entry(),
+          Worktree.disposal() | :no_worktree
+        ) :: state()
+  defp finish_foreground_disposal(state, id, child, outcome) do
+    if outcome not in [:no_worktree, :removed] do
+      notice = Worktree.disposal_notice(outcome)
+      Minga.Log.warning(:agent, "[SessionManager] Subagent #{id} stopped." <> notice)
+    end
+
+    Minga.Events.broadcast(:foreground_subagent_disposed, %{
+      manager: self(),
+      identity: child.identity,
+      session_id: id,
+      outcome: outcome
+    })
+
+    state = %{state | foreground_subagents: Map.delete(state.foreground_subagents, id)}
+    dispose_ready_foreground_worktrees(state)
+  end
+
+  @spec dispose_ready_foreground_worktrees(state()) :: state()
+  defp dispose_ready_foreground_worktrees(state) do
+    Enum.reduce(state.foreground_subagents, state, fn {id, _snapshot}, acc ->
+      case Map.get(acc.foreground_subagents, id) do
+        %{phase: :stopping} when not is_map_key(acc.sessions, id) ->
+          dispose_foreground_worktree(acc, id)
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  @spec put_foreground(state(), String.t(), foreground_entry()) :: state()
+  defp put_foreground(state, id, child) do
+    %{state | foreground_subagents: Map.put(state.foreground_subagents, id, child)}
+  end
 
   @spec start_background_subagent_session(state(), pid() | nil, String.t(), keyword(), keyword()) ::
           {:reply, {:ok, Handle.t()} | {:error, term()}, state()}
@@ -879,7 +1666,8 @@ defmodule MingaAgent.SessionManager do
     {supplied_token, session_opts} = Keyword.pop(opts, :remote_token)
     session_opts = Keyword.put(session_opts, :session_manager, self())
 
-    with {:ok, token} <-
+    with :ok <- require_available_checkout(state, session_opts),
+         {:ok, token} <-
            session_token_for_start(session_id, supplied_token, session_opts),
          {:ok, pid} <-
            MingaAgent.Supervisor.start_session(state.session_supervisor, session_opts) do
@@ -975,6 +1763,10 @@ defmodule MingaAgent.SessionManager do
           {:ok, :unchanged | identity_reservation(), state()} | {:error, term()}
   defp reserve_managed_identity(state, owner_pid, target_id) do
     case find_session_by_owner_pid(state.sessions, owner_pid) do
+      {source_id, _entry}
+      when source_id != target_id and is_map_key(state.foreground_subagents, source_id) ->
+        {:error, :foreground_subagent_identity_fixed}
+
       {^target_id, _entry} ->
         {:ok, :unchanged, state}
 
@@ -1082,6 +1874,7 @@ defmodule MingaAgent.SessionManager do
       }
 
       new_state = release_identity_reservation(new_state, target_id, reservation.reference)
+      new_state = stop_owned_foreground_subagents(new_state, reservation.owner_pid)
       {:ok, schedule_pending_startup_prompt(new_state, target_id)}
     end
   end
@@ -1286,8 +2079,11 @@ defmodule MingaAgent.SessionManager do
   @spec finish_pending_stop(state(), String.t(), session_entry()) :: state()
   defp finish_pending_stop(state, session_id, entry) do
     case {entry.pid, entry.provider_pid, map_size(entry.effect_worker_refs)} do
-      {nil, nil, 0} -> remove_session(state, session_id)
-      _generation_still_running -> put_session_entry(state, session_id, entry)
+      {nil, nil, 0} ->
+        state |> remove_session(session_id) |> dispose_ready_foreground_worktrees()
+
+      _generation_still_running ->
+        put_session_entry(state, session_id, entry)
     end
   end
 
@@ -1314,18 +2110,19 @@ defmodule MingaAgent.SessionManager do
   defp register_effect_workers(%{provider_pid: provider_pid} = entry, provider_pid, worker_pids) do
     entry = cancel_restart_timer(entry)
 
-    effect_worker_refs =
-      Enum.reduce(worker_pids, entry.effect_worker_refs, fn worker_pid, refs ->
-        case Map.fetch(refs, worker_pid) do
-          :error -> Map.put(refs, worker_pid, Process.monitor(worker_pid))
-          {:ok, _ref} -> refs
-        end
-      end)
-
-    {:ok, %{entry | effect_worker_refs: effect_worker_refs}}
+    {:ok, Enum.reduce(worker_pids, entry, &monitor_effect_worker(&2, &1))}
   end
 
   defp register_effect_workers(_entry, _provider_pid, _worker_pids), do: :provider_mismatch
+
+  @spec monitor_effect_worker(session_entry(), pid()) :: session_entry()
+  defp monitor_effect_worker(%{effect_worker_refs: refs} = entry, pid) do
+    if Map.has_key?(refs, pid) do
+      entry
+    else
+      %{entry | effect_worker_refs: Map.put(refs, pid, Process.monitor(pid))}
+    end
+  end
 
   @spec restart_delay_for_entry(session_entry()) :: non_neg_integer()
   defp restart_delay_for_entry(%{restart_opts: opts, restart_state: %{attempts: attempts}}) do
@@ -1703,6 +2500,22 @@ defmodule MingaAgent.SessionManager do
          entry,
          delivery,
          _session_ref,
+         outcome
+       )
+       when is_map_key(state.foreground_subagents, session_id) and
+              outcome not in [{:error, :provider_not_ready}, {:error, :credentials_pending}] do
+    state
+    |> clear_startup_delivery(session_id, entry, delivery)
+    |> stop_foreground_subagent(session_id, {:brief_dispatch_failed, outcome})
+  end
+
+  defp handle_startup_prompt_outcome(
+         state,
+         session_id,
+         _expected_session_id,
+         entry,
+         delivery,
+         _session_ref,
          {:error, reason}
        )
        when reason in [:provider_not_ready, :credentials_pending, :session_id_changed] do
@@ -1884,19 +2697,29 @@ defmodule MingaAgent.SessionManager do
           startup_delivery()
         ) :: {:ok, Task.t()} | {:error, term()}
   defp start_startup_prompt_task(state, pid, session_id, session_ref, delivery) do
+    foreground? = Map.has_key?(state.foreground_subagents, session_id)
+
     {:ok,
      Task.Supervisor.async_nolink(state.startup_task_supervisor, fn ->
-       outcome = safe_send_prompt_for_id(pid, session_id, delivery.prompt)
+       outcome = send_startup_prompt(pid, session_id, delivery, foreground?)
        {:startup_prompt_result, delivery.reference, session_id, session_ref, outcome}
      end)}
   catch
     :exit, reason -> {:error, reason}
   end
 
-  @spec safe_send_prompt_for_id(pid(), String.t(), String.t()) ::
+  @spec send_startup_prompt(pid(), String.t(), startup_delivery(), boolean()) ::
           :ok | {:queued, :steering} | {:error, term()} | {:exit, term()}
-  defp safe_send_prompt_for_id(pid, session_id, prompt) do
-    Session.send_prompt_for_id(pid, session_id, prompt, @background_prompt_call_timeout_ms)
+  defp send_startup_prompt(pid, id, delivery, foreground?) do
+    if foreground? do
+      GenServer.call(
+        pid,
+        {:start_foreground_brief, id, delivery.reference, delivery.prompt},
+        @background_prompt_call_timeout_ms
+      )
+    else
+      Session.send_prompt_for_id(pid, id, delivery.prompt, @background_prompt_call_timeout_ms)
+    end
   catch
     :exit, reason -> {:exit, reason}
   end

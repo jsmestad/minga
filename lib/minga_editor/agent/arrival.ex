@@ -201,6 +201,7 @@ defmodule MingaEditor.Agent.Arrival do
     state
     |> AgentLifecycle.apply_editor_arrival(session, capture)
     |> StatusEventWorkflow.display_status_changed(session, snapshot.display_status)
+    |> MingaEditor.Agent.SubagentPeekWorkflow.resume_in_workspace()
   end
 
   @spec current?(EditorState.t(), t()) :: boolean()
@@ -266,6 +267,7 @@ defmodule MingaEditor.Agent.Arrival do
     state
     |> EditorState.install_agent_arrival(nil)
     |> fail_arrival(pending, deadline)
+    |> MingaEditor.Agent.SubagentPeekWorkflow.resume_in_workspace()
     |> MingaEditor.schedule_render(16)
   end
 

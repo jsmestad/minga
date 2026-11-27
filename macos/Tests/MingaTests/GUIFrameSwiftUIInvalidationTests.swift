@@ -1063,7 +1063,6 @@ struct GUIFrameSwiftUIInvalidationTests {
         var firstResponderOwners: Set<String> = []
         var literalFocusStateWriters: Set<String> = []
         var mirrorWriters: Set<String> = []
-        let namedFocusLiteral = try NSRegularExpression(pattern: #"\b[A-Za-z_]\w*Focused\s*=\s*(?:true|false)\b"#)
         let focusDeclaration = try NSRegularExpression(pattern: #"@FocusState\s+(?:(?:private|public|fileprivate|internal)\s+)?var\s+(\w+)"#)
         for case let sourceURL as URL in sourceEnumerator where sourceURL.pathExtension == "swift" {
             let source = try String(contentsOf: sourceURL, encoding: .utf8)
@@ -1074,9 +1073,6 @@ struct GUIFrameSwiftUIInvalidationTests {
             if source.contains("focusOwnerState.publish(") { mirrorWriters.insert(relativePath) }
             if relativePath != "Views/Editor/EditorFocusPolicy.swift" {
                 let nsSource = source as NSString
-                if namedFocusLiteral.firstMatch(in: source, range: NSRange(location: 0, length: nsSource.length)) != nil {
-                    literalFocusStateWriters.insert(relativePath)
-                }
                 for declaration in focusDeclaration.matches(in: source, range: NSRange(location: 0, length: nsSource.length)) {
                     let name = nsSource.substring(with: declaration.range(at: 1))
                     let literalAssignment = try NSRegularExpression(

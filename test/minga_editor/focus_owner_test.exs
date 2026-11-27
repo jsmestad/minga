@@ -33,6 +33,7 @@ defmodule MingaEditor.FocusOwnerTest do
     editor: :editor,
     file_tree: :file_tree,
     agent: :agent,
+    subagent_peek: :agent,
     queue: :queue,
     git_status: :git_status
   }
@@ -53,6 +54,7 @@ defmodule MingaEditor.FocusOwnerTest do
     Input.Scoped => :scoped,
     Input.AgentPanel => :agent,
     Input.AgentNav => :agent,
+    Input.SubagentPeek => :agent,
     Input.Queue => :queue,
     Input.ModeFSM => :editor,
     Input.CUA.Dispatch => :editor,

@@ -26,6 +26,16 @@
           "rows": 42,
           "prompt": {"cols": 173, "rows": 8}
         },
+        "agent_chat+subagent_peek": {
+          "cols": 179,
+          "rows": 43,
+          "prompt": {"cols": 82, "rows": 8}
+        },
+        "agent_chat+subagent_peek+agent_activity": {
+          "cols": 179,
+          "rows": 43,
+          "prompt": {"cols": 82, "rows": 8}
+        },
         "empty_state": {
           "cols": 179,
           "rows": 45
@@ -61,6 +71,16 @@
           "cols": 159,
           "rows": 37,
           "prompt": {"cols": 153, "rows": 8}
+        },
+        "agent_chat+subagent_peek": {
+          "cols": 159,
+          "rows": 38,
+          "prompt": {"cols": 72, "rows": 8}
+        },
+        "agent_chat+subagent_peek+agent_activity": {
+          "cols": 159,
+          "rows": 38,
+          "prompt": {"cols": 72, "rows": 8}
         },
         "empty_state": {
           "cols": 159,

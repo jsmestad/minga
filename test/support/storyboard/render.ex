@@ -273,6 +273,7 @@ defmodule Minga.Test.Storyboard.Render do
     :tasks_drawer,
     :minibuffer,
     :agent_chat,
+    :subagent_peek,
     :agent_activity
   ]
 

@@ -29,6 +29,7 @@ defmodule Minga.Keymap.Scope.Registry do
     Minga.Keymap.Scope.Picker,
     Minga.Keymap.Scope.Prompt,
     Minga.Keymap.Scope.Queue,
+    Minga.Keymap.Scope.SubagentPeek,
     Minga.Keymap.Scope.Tasks
   ]
 

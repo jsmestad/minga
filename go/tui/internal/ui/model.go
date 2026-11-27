@@ -166,9 +166,17 @@ type Model struct {
 	// transcriptRenderer owns the bounded, disposable styled-row cache for the
 	// resident transcript. It never owns semantic messages or scroll state.
 	transcriptRenderer *agentTranscriptRenderer
+	peekTranscript     *residentTranscript
+	peekRenderer       *agentTranscriptRenderer
+	peekToken          string
+	peekSteps          map[uint32]generated.SubagentPeekStep
+	peekSelected       string
+	peekBriefOffset    int
+	peekResultOffset   int
 
-	queueScroll   agentQueueScroll
-	queueViewport agentQueueViewport
+	peekHitRevision uint64
+	queueScroll     agentQueueScroll
+	queueViewport   agentQueueViewport
 }
 
 // terminalRejection deduplicates an identical deterministic terminal status.
@@ -426,6 +434,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if chat, ok := m.agentChat(); ok && component == "agent" {
+			if pane, focused := m.focusedSubagentPeek(); focused {
+				if pane.Flags&peekEditing == 0 && m.peekTranscript != nil {
+					if rows, scroll := agentTranscriptScrollRows(msg, int(pane.PeekRect.Height)); scroll {
+						m.peekTranscript.scrollBy(rows)
+					}
+				}
+				if packet, sent := keyPacket(msg, m.latency.Stamp()); sent {
+					m.send(packet)
+				}
+				break
+			}
+			if packet, handled := m.peekParentKey(chat, msg); handled {
+				if packet != nil {
+					m.send(packet)
+				}
+				break
+			}
 			if packet, handled := m.agent.handleKey(chat, m.transcript, msg); handled {
 				m.send(packet)
 				break
@@ -529,6 +554,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			if m.scrollAgentQueue(mouse, delta) {
+				break
+			}
+			if m.scrollSubagentPeek(msg, delta) {
 				break
 			}
 			if updated, ok := m.localMouse(msg); ok {
@@ -802,6 +830,9 @@ func (m Model) View() tea.View {
 		// An identity-only change still needs to publish a new OnMouse snapshot.
 		out += fmt.Sprintf("\x1b[0:%dm", m.queueScroll.hitRevision)
 	}
+	if m.protocolError == "" && len(m.peekSteps) != 0 {
+		out += fmt.Sprintf("\x1b[0:%dm", m.peekHitRevision)
+	}
 	view := tea.NewView(out)
 	view.AltScreen = true
 	// The terminal reports when its window gets or loses the focus (mode 1004), which the BEAM hears as frontend_foreground.
@@ -814,7 +845,9 @@ func (m Model) View() tea.View {
 		view.OnMouse = m.presentedMouseHandler(layers)
 	}
 	if chat, ok := m.agentChat(); ok && chat.Visible {
-		view.Cursor = m.agentPromptCursor()
+		if _, focused := m.focusedSubagentPeek(); !focused {
+			view.Cursor = m.agentPromptCursor()
+		}
 	} else {
 		view.Cursor = m.residentCursor()
 	}
@@ -1062,6 +1095,10 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 			fmt.Sprintf("transcript frame rejected: %s", transcriptFailure),
 		)
 	}
+	peek, peekFailure := m.preparePeekTranscript()
+	if peekFailure != transcriptApplied {
+		return m.rejectStaging(cmds, protocol.RejectTranscriptDesync, fmt.Sprintf("subagent transcript rejected: %s", peekFailure))
+	}
 
 	// Validate every window reference against a temporary snapshot before any
 	// publication. Missing refs use targeted recovery; wrong epochs reject the
@@ -1102,7 +1139,10 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 	if transcriptPlan != nil {
 		transcriptPlan.commit()
 	}
+	m.commitPeekTranscript(peek)
 	if m.staging.base == 0 {
+		delete(m.chrome, generated.OPGuiSubagentPeek)
+		m.reconcilePeekMetadata(generated.GuiSubagentPeekFields{})
 		m.retireMissingWindows(windowSnapshot.windows)
 		m.lineCache.reset()
 		m.renderWork.fullResets++
@@ -1515,7 +1555,7 @@ func (m *Model) applyMutation(command protocol.Command) {
 	case protocol.CommandChrome:
 		// Transcript commands were consumed by the sole resident owner after
 		// validation. Never replay or retain their decoded payload in chrome.
-		if command.Chrome.Opcode == generated.OPGuiAgentTranscript {
+		if command.Chrome.Opcode == generated.OPGuiAgentTranscript || command.Chrome.Opcode == generated.OPGuiSubagentPeekTranscript {
 			return
 		}
 		if command.Chrome.Opcode == generated.OPGuiAgentHelp {
@@ -1526,6 +1566,9 @@ func (m *Model) applyMutation(command protocol.Command) {
 		}
 		if command.Chrome.Opcode == generated.OPGuiAgentQueue {
 			m.reconcileAgentQueue(command.Chrome.AgentQueue)
+		}
+		if command.Chrome.Opcode == generated.OPGuiSubagentPeek {
+			m.reconcilePeekMetadata(command.Chrome.SubagentPeek)
 		}
 		if command.Chrome.Opcode == generated.OPGuiBottomPanel {
 			command.Chrome.Bottom = m.mergedBottomPanel(command.Chrome.Bottom)

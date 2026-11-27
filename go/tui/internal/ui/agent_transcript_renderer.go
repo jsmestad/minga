@@ -306,6 +306,13 @@ func (r *agentTranscriptRenderer) renderForward(m Model, transcript *residentTra
 		height := r.messageHeight(m, entry, width)
 		if position.row < height {
 			count := min(limit-len(lines), height-position.row)
+			if position.row == 0 && r == m.transcriptRenderer {
+				if line, found := m.peekStepLine(entry.message, width); found {
+					lines = append(lines, line)
+					position.row++
+					continue
+				}
+			}
 			lines = append(lines, r.messageRows(m, entry, position.row, count, width)...)
 			position.row += count
 			continue

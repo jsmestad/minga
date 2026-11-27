@@ -1012,7 +1012,7 @@ exits = [
   { key = "a", click = "Tasks row", to = "minga.tasks.empty", note = "from a fresh start there are no tasks yet" },
   { key = "v", click = "Conversation row", to = "minga.conversation" },
   { key = "r", click = "Review row", to = "minga.review.buffer" },
-  { key = "i", click = "Inspect row", to = "minga.subagent.peek" },
+  { key = "i on a conversation with subagents", click = "Inspect row", to = "minga.subagent.peek", note = "The which-key fixture has no subagents. The seeded peek fixture drives this command from a real parent conversation." },
   { key = "w", click = "Watch row", to = "terminal.minga_shell" },
   { key = "u", click = "Reject all row", to = "minga.reject_all.confirm" },
   { key = "esc", click = "click outside", to = "edit.working" },
@@ -1038,7 +1038,7 @@ exits = [
   { key = "n", click = "Deny", to = "minga.tasks.working" },
   { key = "=", click = "Show diff", to = "minga.approval.diff" },
   { key = "↩ on a task with a conversation in this window", click = "row title", to = "minga.conversation" },
-  { key = "i", click = "Inspect", to = "minga.subagent.peek" },
+  { key = "i on a child row (planned)", click = "Inspect", to = "minga.subagent.peek", note = "The selected row here is a foreground task. Inspect currently opens the task's conversation, not a child." },
   { key = "o", click = "Output", to = "minga.task.output" },
   { key = "↩ on a done row", click = "Review", to = "minga.review.buffer" },
   { key = "q", click = "drawer close", to = "edit.working" },
@@ -1099,7 +1099,8 @@ exits = [
   { key = "esc esc SPC a q q", click = "Queue", to = "minga.queue" },
   { key = "⌘. or SPC a s", click = "Stop", to = "minga.conversation.stopped" },
   { key = "SPC a r", click = "2 files changed · review", to = "minga.review.buffer" },
-  { key = "↩ on a Started line", click = "Started line", to = "minga.subagent.peek" },
+  { key = "Tab then ↩ on a Started line", click = "Started line", to = "minga.subagent.peek" },
+  { key = "esc esc SPC a i (with subagents)", click = "", to = "minga.subagent.peek", note = "The peek fixture seeds a real fan-out and exercises this path; this conversation fixture has no children." },
   { key = "esc esc SPC a v", click = "close split", to = "edit.working" },
   { key = "q (Normal mode, outside the composer)", click = "", to = "edit.working" },
 ]
@@ -1133,7 +1134,8 @@ boards = { macos = "V41SubagentMac.dc.html", tui = "V41SubagentTui.dc.html" }
 exits = [
   { key = "]] / [[", click = "sibling glyph", to = "minga.subagent.peek" },
   { key = "za", click = "Brief header", to = "minga.subagent.peek" },
-  { key = "↩", click = "open", to = "minga.conversation" },
+  { key = "i", click = "Message this subagent", to = "minga.subagent.peek" },
+  { key = "↩ in the child composer", click = "Send", to = "minga.subagent.peek" },
   { key = "q", click = "close", to = "minga.conversation" },
 ]
 notes = "]] / [[ step through sibling subagents here, as they mean next block in read-only buffers; ]t keeps next class/module."
@@ -1152,7 +1154,7 @@ list = true
 empty_state = "minga.tasks.empty"
 exits = [
   { key = "↩ on a task with a conversation in this window", click = "row title", to = "minga.conversation" },
-  { key = "i", click = "Inspect", to = "minga.subagent.peek" },
+  { key = "i on a child row (planned)", click = "Inspect", to = "minga.subagent.peek", note = "The selected row here is a foreground task. Inspect currently opens the task's conversation, not a child." },
   { key = "r", click = "Retry now", to = "minga.tasks.working", note = "the retried task works again, still selected" },
   { key = "o", click = "Output", to = "minga.task.output" },
   { key = "q", click = "drawer close", to = "edit.plain" },
@@ -1171,7 +1173,7 @@ boards = { macos = "V41Tasks.dc.html", tui = "V41TuiTasks.dc.html", new_task = "
 transient = true
 exits = [
   { key = "↩ on a task with a conversation in this window", click = "row title", to = "minga.conversation" },
-  { key = "i", click = "Inspect", to = "minga.subagent.peek" },
+  { key = "i on a child row (planned)", click = "Inspect", to = "minga.subagent.peek", note = "The selected row here is a foreground task. Inspect currently opens the task's conversation, not a child." },
   { key = "q", click = "drawer close", to = "edit.plain" },
   { key = "esc", click = "", to = "edit.plain", keyboard_only = "q has the click" },
 ]

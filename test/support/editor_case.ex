@@ -231,7 +231,7 @@ defmodule Minga.Test.EditorCase do
     editor_opts =
       if project_root, do: [{:project_root, project_root} | editor_opts], else: editor_opts
 
-    editor_opts = Keyword.take(opts, [:project_server]) ++ editor_opts
+    editor_opts = Keyword.take(opts, [:project_server, :agent_session_manager]) ++ editor_opts
 
     child_id = Keyword.get_lazy(opts, :child_id, &make_ref/0)
 

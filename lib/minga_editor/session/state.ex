@@ -514,8 +514,12 @@ defmodule MingaEditor.Session.State do
   @spec scope_for_content(Content.t(), Scope.scope_name()) :: Scope.scope_name()
   def scope_for_content({:agent_chat, _pid}, _current_scope), do: :agent
   def scope_for_content({:agent_review, :semantic}, _current_scope), do: :agent
+  def scope_for_content({:subagent_peek, _ref}, _current_scope), do: :subagent_peek
   def scope_for_content({:empty, :semantic}, _current_scope), do: :editor
-  def scope_for_content({:buffer, _pid}, scope) when scope in [:agent, :queue], do: :editor
+
+  def scope_for_content({:buffer, _pid}, scope) when scope in [:agent, :queue, :subagent_peek],
+    do: :editor
+
   def scope_for_content({:buffer, _pid}, current_scope), do: current_scope
 
   @doc """

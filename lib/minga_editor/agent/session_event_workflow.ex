@@ -107,10 +107,18 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
         %ConnectionSnapshot{target: %{session: session_pid}} = connection
       )
       when is_pid(session_pid) do
+    previous = state.workspace.agent_ui
+    projected = UIState.project_connection(previous, connection)
+    state = TraditionalWorkflow.install_agent_ui(state, projected)
+
+    state =
+      if UIState.task_id(previous) != UIState.task_id(projected) do
+        MingaEditor.Agent.SubagentPeekWorkflow.resume_in_workspace(state)
+      else
+        state
+      end
+
     state
-    |> TraditionalWorkflow.install_agent_ui(
-      UIState.project_connection(state.workspace.agent_ui, connection)
-    )
     |> AgentLifecycle.restyle_transcript()
     |> ConnectionSetup.retire_prompt(connection)
     |> AgentRetainedOutputSource.dismiss_if_stale()
@@ -143,6 +151,7 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
         |> TraditionalWorkflow.install_agent_ui(
           UIState.restore_chat(state.workspace.agent_ui, lifecycle)
         )
+        |> MingaEditor.Agent.SubagentPeekWorkflow.resume_in_workspace()
 
       {_active, %Workspace{id: id, payload: %WorkspaceAgent{agent_ui: %UIState{} = ui}}} ->
         tabs = TabBar.set_workspace_agent_ui(tabs, id, UIState.restore_chat(ui, lifecycle))

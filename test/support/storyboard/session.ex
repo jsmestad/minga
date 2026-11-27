@@ -33,16 +33,31 @@ defmodule Minga.Test.Storyboard.Session do
           children: [term()],
           root: Path.t(),
           file: Path.t(),
+          peek_parent:
+            {GenServer.server(), MingaAgent.SessionManager.foreground_identity()} | nil,
           home_window: pos_integer(),
           parser: GenServer.server(),
           path: [String.t()]
         }
 
   @enforce_keys [:ctx, :root, :file, :home_window, :child_id]
-  defstruct [:ctx, :root, :file, :home_window, :child_id, :parser, children: [], path: []]
+  defstruct [
+    :ctx,
+    :root,
+    :file,
+    :home_window,
+    :child_id,
+    :parser,
+    :peek_parent,
+    children: [],
+    path: []
+  ]
 
   @typedoc "A semantic click: a mouse press at a cell, or a GUI action the frontend would send."
-  @type click :: {:mouse, non_neg_integer(), non_neg_integer()} | {:gui_action, term()}
+  @type click ::
+          {:mouse, non_neg_integer(), non_neg_integer()}
+          | {:gui_action, term()}
+          | {:subagent_started, String.t()}
 
   @doc """
   Starts a headless editor at the factory's cold start.
@@ -72,6 +87,9 @@ defmodule Minga.Test.Storyboard.Session do
 
     place = Keyword.get(opts, :place, :project)
 
+    {conversation_opts, conversation_children} =
+      conversation_editor_opts(Keyword.get(opts, :conversation), root)
+
     editor_opts =
       [
         child_id: child_id,
@@ -85,7 +103,7 @@ defmodule Minga.Test.Storyboard.Session do
         parser_manager: parser
       ] ++
         restored_opts(Keyword.get(opts, :restored, false), root, file) ++
-        conversation_editor_opts(Keyword.get(opts, :conversation))
+        conversation_opts
 
     {theme_opts, theme_children} = theme_opts(Keyword.get(opts, :theme))
 
@@ -106,7 +124,7 @@ defmodule Minga.Test.Storyboard.Session do
     seed_tasks(ctx, Keyword.get(opts, :tasks, []))
     install_minga_status(ctx, Keyword.get(opts, :minga))
     install_git_status(ctx, root, Keyword.get(opts, :git_status))
-    start_conversation(ctx, parser, file, Keyword.get(opts, :conversation))
+    peek_parent = start_conversation(ctx, parser, file, Keyword.get(opts, :conversation))
 
     session = %__MODULE__{
       ctx: ctx,
@@ -115,7 +133,8 @@ defmodule Minga.Test.Storyboard.Session do
       home_window: 0,
       child_id: child_id,
       parser: parser,
-      children: [relay | theme_children ++ project_children]
+      peek_parent: peek_parent,
+      children: [relay | theme_children ++ project_children ++ conversation_children]
     }
 
     %{session | home_window: window_id(session)}
@@ -129,17 +148,65 @@ defmodule Minga.Test.Storyboard.Session do
           turn: :idle | :working | :stopped,
           queue: [String.t()],
           draft: String.t(),
+          peek?: boolean(),
           open?: boolean()
         ]
 
-  @spec conversation_editor_opts(conversation() | nil) :: keyword()
-  defp conversation_editor_opts(nil), do: []
+  @spec conversation_editor_opts(conversation() | nil, Path.t()) :: {keyword(), [term()]}
+  defp conversation_editor_opts(nil, _root), do: {[], []}
 
-  defp conversation_editor_opts(_conversation),
-    do: [
-      agent_provider_module: Minga.Test.SessionSlowMockProvider,
-      agent_arrival_budget_ms: 4_000
-    ]
+  defp conversation_editor_opts(conversation, root) do
+    if conversation[:peek?] do
+      native_peek_fixture(root)
+    else
+      {[
+         agent_provider_module: Minga.Test.SessionSlowMockProvider,
+         agent_arrival_budget_ms: 4_000
+       ], []}
+    end
+  end
+
+  @spec native_peek_fixture(Path.t()) :: {keyword(), [term()]}
+  defp native_peek_fixture(root) do
+    # The real Native route waits for the packaged catalog even with a fixture resolver. Complete that prerequisite before timing the conversation's startup.
+    {:ok, :ready} = MingaAgent.ModelCatalog.load()
+
+    provider = Minga.Test.Storyboard.SubagentPeekProvider
+    :ok = provider.prepare_files(root)
+    suffix = System.unique_integer([:positive])
+    sessions_id = make_ref()
+    manager_id = make_ref()
+
+    sessions =
+      ExUnit.Callbacks.start_supervised!(
+        Supervisor.child_spec(
+          {DynamicSupervisor,
+           name: :"storyboard_peek_sessions_#{suffix}", strategy: :one_for_one},
+          id: sessions_id
+        )
+      )
+
+    manager =
+      ExUnit.Callbacks.start_supervised!(
+        Supervisor.child_spec(
+          {MingaAgent.SessionManager,
+           name: :"storyboard_peek_manager_#{suffix}",
+           session_supervisor: sessions,
+           foreground_provider_opts: provider.opts()},
+          id: manager_id
+        )
+      )
+
+    {
+      [
+        agent_provider_module: MingaAgent.Providers.Native,
+        agent_provider_opts: provider.opts(),
+        agent_session_manager: manager,
+        agent_arrival_budget_ms: 4_000
+      ],
+      [manager_id, sessions_id]
+    }
+  end
 
   # Opens the conversation once to start its session, fills it through the
   # Session API, then closes it so the scenario's own keys open it again.
@@ -148,8 +215,8 @@ defmodule Minga.Test.Storyboard.Session do
           GenServer.server() | nil,
           Path.t(),
           conversation() | nil
-        ) :: :ok
-  defp start_conversation(_ctx, _parser, _file, nil), do: :ok
+        ) :: {GenServer.server(), MingaAgent.SessionManager.foreground_identity()} | nil
+  defp start_conversation(_ctx, _parser, _file, nil), do: nil
 
   defp start_conversation(ctx, parser, file, conversation) do
     conversation =
@@ -160,6 +227,7 @@ defmodule Minga.Test.Storyboard.Session do
         turn: :idle,
         queue: [],
         draft: "",
+        peek?: false,
         open?: false
       )
 
@@ -180,14 +248,23 @@ defmodule Minga.Test.Storyboard.Session do
     EditorCase.send_keys_sync(ctx, "<SPC>av")
     session = await_conversation_session!(ctx)
 
-    if conversation[:messages] != [],
-      do: :ok = MingaAgent.Session.seed_messages(session, conversation[:messages])
+    if conversation[:messages] != [] do
+      :ok = MingaAgent.Session.seed_messages(session, conversation[:messages])
+      await_transcript!(ctx, session)
+    end
 
     # Notices follow the seeded messages, the way Minga adds them to a conversation.
     for {text, level} <- conversation[:notices],
         do: MingaAgent.Session.add_system_message(session, text, level)
 
-    run_turn(ctx, session, conversation)
+    peek_parent =
+      if conversation[:peek?] do
+        run_peek_turn(ctx, session, conversation)
+      else
+        run_turn(ctx, session, conversation)
+        nil
+      end
+
     await_transcript!(ctx, session)
 
     if conversation[:open?] do
@@ -202,7 +279,7 @@ defmodule Minga.Test.Storyboard.Session do
       )
     end
 
-    :ok
+    peek_parent
   end
 
   @spec await_queue_contents!(EditorCase.editor_ctx(), [String.t()]) :: :ok
@@ -318,6 +395,82 @@ defmodule Minga.Test.Storyboard.Session do
       max_attempts: 500,
       message: "expected the Editor to hold the storyboard conversation's transcript"
     )
+  end
+
+  # The local inference route leaves the other three children working. Observe the real handback before checking its editor projection, so a slow reader does not spend the UI wait budget on provider work.
+  @spec run_peek_turn(EditorCase.editor_ctx(), pid(), conversation()) ::
+          {GenServer.server(), MingaAgent.SessionManager.foreground_identity()}
+  defp run_peek_turn(ctx, parent, conversation) do
+    :ok = MingaAgent.Session.subscribe(parent)
+
+    try do
+      run_turn(ctx, parent, conversation)
+      key = await_peek_report!(parent)
+      await_peek_fanout!(ctx, parent, key)
+    after
+      :ok = MingaAgent.Session.unsubscribe(parent)
+    end
+  end
+
+  @spec await_peek_report!(pid()) :: MingaAgent.Tool.Invocation.key()
+  defp await_peek_report!(parent) do
+    receive do
+      {:agent_event, ^parent,
+       {:tool_ended,
+        %MingaAgent.Event.ToolEnd{name: "subagent", outcome: :complete, invocation_key: key}}}
+      when key != nil ->
+        key
+
+      {:agent_event, ^parent, {:tool_ended, %MingaAgent.Event.ToolEnd{name: "subagent"} = event}} ->
+        raise ExUnit.AssertionError, message: "Fixture subagent failed: #{inspect(event)}"
+    after
+      15_000 ->
+        raise ExUnit.AssertionError,
+          message: "No subagent reported: #{inspect(MingaAgent.Session.messages(parent))}"
+    end
+  end
+
+  @spec await_peek_fanout!(EditorCase.editor_ctx(), pid(), MingaAgent.Tool.Invocation.key()) ::
+          {GenServer.server(), MingaAgent.SessionManager.foreground_identity()}
+  defp await_peek_fanout!(ctx, parent, key) do
+    id = MingaAgent.Session.session_id(parent)
+    token = MingaEditor.Agent.Tasks.Subagent.action_token({id, key})
+    manager = EditorCase.editor_state(ctx).agent_connection.session_manager
+
+    ExUnit.Callbacks.on_exit({__MODULE__, id}, fn ->
+      if Process.alive?(manager), do: MingaAgent.SessionManager.stop_session(manager, id)
+    end)
+
+    EditorCase.wait_until(
+      ctx,
+      fn state ->
+        case MingaEditor.RenderModel.UI.SubagentPeekBuilder.capture(state) do
+          {%{steps: [{_entry, ^token, _, "1 of 4 reports in"}, _, _, _]}, nil} ->
+            true
+
+          _not_ready ->
+            false
+        end
+      end,
+      max_attempts: 500,
+      message: "expected the fixture's four Started rows and the exact committed first report"
+    )
+
+    {manager, {id, key}}
+  rescue
+    error in ExUnit.AssertionError ->
+      snapshot = MingaAgent.Session.editor_snapshot(parent)
+      messages = MingaAgent.Session.messages(parent)
+      state = EditorCase.editor_state(ctx)
+      projection = MingaEditor.RenderModel.UI.SubagentPeekBuilder.capture(state)
+
+      reraise %{
+                error
+                | message:
+                    "#{error.message}\nParent status: #{inspect(snapshot.status)}\n" <>
+                      "Peek offers: #{inspect(projection)}\nLast messages: #{inspect(Enum.take(messages, -8))}"
+              },
+              __STACKTRACE__
   end
 
   @spec run_turn(EditorCase.editor_ctx(), pid(), conversation()) :: :ok
@@ -443,6 +596,7 @@ defmodule Minga.Test.Storyboard.Session do
     Enum.each(steps, &step(ctx, &1))
     await_picker_fetch!(ctx)
     await_queue_edit!(ctx)
+    await_peek_reader!(ctx)
     session
   end
 
@@ -462,6 +616,22 @@ defmodule Minga.Test.Storyboard.Session do
     :ok
   end
 
+  @spec await_peek_reader!(EditorCase.editor_ctx()) :: map()
+  defp await_peek_reader!(ctx) do
+    EditorCase.wait_until(
+      ctx,
+      fn state ->
+        case state.agent_connection.peek_session do
+          %{link: {:connecting, _, _}} -> false
+          %{read: {_request, _dirty}} -> false
+          _settled -> true
+        end
+      end,
+      max_attempts: 500,
+      message: "expected the selected child reader to settle"
+    )
+  end
+
   @doc "Sends one semantic click and waits until the editor has handled it."
   @spec click(t(), click()) :: t()
   def click(%__MODULE__{ctx: %{editor: editor} = ctx} = session, {:mouse, row, col}) do
@@ -475,6 +645,18 @@ defmodule Minga.Test.Storyboard.Session do
     send(editor, {:minga_input, {:gui_action, action}})
     _ = EditorCase.editor_state(ctx)
     record(session, "click #{inspect(action)}")
+  end
+
+  def click(%__MODULE__{} = session, {:subagent_started, label}) do
+    %{ui: %{subagent_peek: %{parent_window_id: parent, steps: steps}}} = model(session)
+    {_, target, ^label, _report} = Enum.find(steps, fn {_, _, text, _} -> text == label end)
+
+    session
+    |> click({:gui_action, {:subagent_peek_action, :started, parent, "", target, {0, 0}}})
+    |> then(fn session ->
+      await_peek_reader!(session.ctx)
+      session
+    end)
   end
 
   @doc """
@@ -660,7 +842,9 @@ defmodule Minga.Test.Storyboard.Session do
   Callers that start many sessions in one test (the flow explorer, the key walk) stop each one when done, so idle editors do not pile up. Safe to call on a session whose editor already died.
   """
   @spec stop(t()) :: :ok
-  def stop(%__MODULE__{ctx: ctx, child_id: child_id, children: children}) do
+  def stop(%__MODULE__{ctx: ctx, child_id: child_id, children: children, peek_parent: peek}) do
+    stop_peek_fixture(peek)
+
     # The editor opened its files itself, under the global buffer supervisor; they go with the session, so the next
     # session on the same project directory opens fresh buffers.
     opened = opened_buffers(ctx)
@@ -673,6 +857,32 @@ defmodule Minga.Test.Storyboard.Session do
     end
 
     :ok
+  end
+
+  @spec stop_peek_fixture(
+          {GenServer.server(), MingaAgent.SessionManager.foreground_identity()}
+          | nil
+        ) :: :ok
+  defp stop_peek_fixture(nil), do: :ok
+
+  defp stop_peek_fixture({manager, {parent, _key} = identity}) do
+    :ok = Minga.Events.subscribe(:foreground_subagent_disposed)
+
+    try do
+      case MingaAgent.SessionManager.stop_session(manager, parent) do
+        :ok ->
+          receive do
+            {:minga_event, :foreground_subagent_disposed, %{identity: ^identity}} -> :ok
+          after
+            5_000 -> raise "the storyboard fixture's managed child was not disposed"
+          end
+
+        {:error, :not_found} ->
+          :ok
+      end
+    after
+      Minga.Events.unsubscribe(:foreground_subagent_disposed)
+    end
   end
 
   @doc "True while the editor process is alive."

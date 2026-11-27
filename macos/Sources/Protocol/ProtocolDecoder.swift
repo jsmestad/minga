@@ -103,7 +103,7 @@ enum RenderCommand: Sendable {
     case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String, loadStatus: Wire.PickerLoadStatus, queryGeneration: UInt32, acknowledgedQueryEditSeq: UInt32, activationGeneration: UInt32, empty: Wire.EmptyList? = nil, listKeys: Bool = false, movementKeys: [Wire.PickerMovementKey] = [], hints: [Wire.KeyHint] = [])
     case guiPickerSelection(generation: UInt32, selectedItemID: UInt32, selectedActionID: UInt32)
     case guiPickerPreview(visible: Bool, lines: [Wire.PickerPreviewLine])
-    case guiAgentChat(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: EditorMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil, lifecycle: AgentChatLifecycle = .conversation, composerHints: [AgentComposerHint] = [], continueTarget: AgentStopTarget? = nil)
+    case guiAgentChat(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: EditorMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil, lifecycle: AgentChatLifecycle = .conversation, composerHints: [AgentComposerHint] = [], continueTarget: AgentStopTarget? = nil, promptFocused: Bool = false)
     case guiAgentQueue(Wire.AgentQueue?)
     case guiAgentHelp(visible: Bool, groups: [Wire.HelpGroup])
     case guiTasksDrawer(Wire.TasksDrawer)
@@ -115,6 +115,8 @@ enum RenderCommand: Sendable {
     /// full_replace carries `trimFront`/`baseCount` as 0. Each message carries its stable id in
     /// `beamId`; bodies use the shared agent-chat message body codec.
     case guiAgentTranscript(mode: UInt8, epoch: UInt32, truncated: Bool, trimFront: UInt32, baseCount: UInt32, messages: [Wire.ChatMessage])
+    case guiSubagentPeek(Wire.SubagentPeek)
+    case guiSubagentPeekTranscript(mode: UInt8, epoch: UInt32, truncated: Bool, trimFront: UInt32, baseCount: UInt32, messages: [Wire.ChatMessage])
     case guiGutterSeparator(col: UInt16, r: UInt8, g: UInt8, b: UInt8)
     case guiCursorline(row: UInt16, r: UInt8, g: UInt8, b: UInt8)
     case guiGutter(data: Wire.WindowGutterUpdate)
@@ -1719,6 +1721,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var promptCursorLine: UInt16 = 0
         var promptCursorCol: UInt16 = 0
         var promptVimMode: UInt8 = 0
+        var promptFocused = false
         var promptVisibleRows: UInt8 = 1
         var promptCompletion: Wire.PromptCompletion? = nil
         var pendingToolName: String? = nil
@@ -1807,6 +1810,10 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                     guard pp + psLen <= csStart + csLen else { break }
                     pendingToolSummary = try decodeUTF8(data[pp..<(pp + psLen)]) ?? ""
                 }
+
+            case 0x09:
+                guard csLen == 1 else { throw ProtocolDecodeError.malformed }
+                promptFocused = data[csStart] != 0
 
             case 0x0A:
                 guard csLen == 9 else { break }
@@ -1911,7 +1918,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             chatPos = csStart + csLen
         }
 
-        return (.guiAgentChat(visible: chatVisible, status: AgentStatus(rawValue: chatStatus), model: chatModel, thinkingLevel: chatThinkingLevel, prompt: chatPrompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: EditorMode(rawValue: promptVimMode), promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, draftAttachmentCount: draftAttachmentCount, draftAttachmentOffer: draftAttachmentOffer, question: question, stopTarget: stopTarget, promptPresentation: promptPresentation ?? 0, queueTarget: queueTarget, lifecycle: lifecycle, composerHints: composerHints, continueTarget: continueTarget), chatPos - offset)
+        return (.guiAgentChat(visible: chatVisible, status: AgentStatus(rawValue: chatStatus), model: chatModel, thinkingLevel: chatThinkingLevel, prompt: chatPrompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: EditorMode(rawValue: promptVimMode), promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, draftAttachmentCount: draftAttachmentCount, draftAttachmentOffer: draftAttachmentOffer, question: question, stopTarget: stopTarget, promptPresentation: promptPresentation ?? 0, queueTarget: queueTarget, lifecycle: lifecycle, composerHints: composerHints, continueTarget: continueTarget, promptFocused: promptFocused), chatPos - offset)
 
     case .guiAgentHelp:
         guard rest + 4 <= data.endIndex else { throw ProtocolDecodeError.malformed }
@@ -1949,7 +1956,37 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         guard helpPos == helpEnd else { throw ProtocolDecodeError.malformed }
         return (.guiAgentHelp(visible: visible, groups: groups), 5 + payloadLength)
 
-    case .guiAgentTranscript:
+    case .guiSubagentPeek:
+        let count = Int(try readU32(data, rest))
+        let start = rest + 4
+        let end = start + count
+        guard end <= data.endIndex else { throw ProtocolDecodeError.malformed }
+        let (peek, next) = try GeneratedProtocol.decodeGuiSubagentPeekFields(data, start, end)
+        guard next == end, peek.panes.count <= 1 else { throw ProtocolDecodeError.malformed }
+        let steps = peek.steps.map {
+            Wire.SubagentPeek.Step(entryID: $0.entryID, token: $0.token, label: $0.label, report: $0.report)
+        }
+        var pane: Wire.SubagentPeek.Pane?
+        if let fields = peek.panes.first {
+            let index = Int(fields.index)
+            guard peek.parentWindowID != 0, fields.windowID != 0, !fields.token.isEmpty,
+                  index > 0, index <= fields.siblings.count, fields.siblings[index - 1].token == fields.token else {
+                throw ProtocolDecodeError.malformed
+            }
+            func rect(_ r: GeneratedProtocol.Rect) -> Wire.SubagentPeek.Rect {
+                .init(row: r.row, col: r.col, width: r.width, height: r.height)
+            }
+            pane = .init(
+                windowID: fields.windowID, parentRect: rect(fields.parentRect), peekRect: rect(fields.peekRect),
+                token: fields.token, parent: fields.parent, title: fields.title, state: fields.state, elapsed: fields.elapsed,
+                index: fields.index, siblings: fields.siblings.map { .init(token: $0.token, title: $0.title, state: $0.state) },
+                brief: fields.brief, result: fields.result, prompt: fields.prompt,
+                cursorRow: fields.cursorRow, cursorColumn: fields.cursorColumn, flags: fields.flags, notice: fields.notice
+            )
+        }
+        return (.guiSubagentPeek(.init(parentWindowID: peek.parentWindowID, steps: steps, pane: pane)), 5 + count)
+
+    case .guiAgentTranscript, .guiSubagentPeekTranscript:
         // len32 framing: opcode(1) + payload_len(4) + payload (GUI_PROTOCOL.md 0x86).
         //   header: version(1)=1 + mode(1) + epoch(4) + truncated(1)
         //   full_replace (mode 0): count(4)
@@ -2019,7 +2056,10 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         }
 
         guard transcriptPos == transcriptEnd else { throw ProtocolDecodeError.malformed }
-        return (.guiAgentTranscript(mode: transcriptMode, epoch: transcriptEpoch, truncated: transcriptTruncated, trimFront: transcriptTrimFront, baseCount: transcriptBaseCount, messages: transcriptMessages), 1 + 4 + transcriptPayloadLen)
+        if opcode == .guiSubagentPeekTranscript {
+            return (.guiSubagentPeekTranscript(mode: transcriptMode, epoch: transcriptEpoch, truncated: transcriptTruncated, trimFront: transcriptTrimFront, baseCount: transcriptBaseCount, messages: transcriptMessages), 5 + transcriptPayloadLen)
+        }
+        return (.guiAgentTranscript(mode: transcriptMode, epoch: transcriptEpoch, truncated: transcriptTruncated, trimFront: transcriptTrimFront, baseCount: transcriptBaseCount, messages: transcriptMessages), 5 + transcriptPayloadLen)
 
     case .guiGutterSep:
         // col:2, r:1, g:1, b:1 = 5 bytes after opcode

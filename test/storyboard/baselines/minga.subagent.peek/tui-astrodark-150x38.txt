@@ -1,0 +1,250 @@
+# minga storyboard frame v1
+# scenario: minga.subagent.peek
+# frontend: tui
+# theme: astrodark
+# size: 150x38
+# cursor: none
+## text
+Spaces · folder minga.subagent.peek (1 tab) · ▎cpu I will check facts, fairness, (1 tab, 1 running)
+ ▌ 󰚩 Review the marketing si…
+ 󰚩 Agent  openai / Offline review  ◐ Working   ◌ default [History] [Help] │Review the marketing site for unfair clai… › Editorial and Jargon Roaster ×
+  Transcript ──────────────────────────────────────────────────────────── │● Done · 0s
+   i System  Session started · 09:41:00 UTC                               │● ◐ ◐ ◐ 1 of 4
+                                                                          │▸ Brief  za
+   You                                                                    │So far
+     Review the marketing site for unfair claims and unnecessary          │  i System  Session started · 09:41:00 UTC
+                                                                          │
+   Minga                                                                  │  You
+     I will check facts, fairness, jargon and what a skeptical reader     │    Editorial and Jargon Roaster
+     needs to see.                                                        │    Review the site as a skeptical reader. Find unclear jargon and
+  ● Started Editorial and Jargon Roaster              · 1 of 4 reports in │  ● Read index.html
+     [Read retained output]  Ctrl+Alt+O reads latest                      │  ● Read guide.html
+  ◐ Started Fact-Check Auditor                                            │  ● Read compare.html
+  ◐ Started Competitive Fairness Critic                                   │
+  ◐ Started Technical Change Skeptic                                      │  Minga
+                                                                          │    Lead with what the editor does for the reader. Replace unsupported
+   i System  Agent UI registry online                                     │    comparisons with measured startup numbers.
+                                                                          │
+                                                                          │  ◌ Usage · in 0 · out 0
+                                                                          │
+                                                                          │
+                                                                          │
+                                                                          │
+                                                                          │
+                                                                          │
+                                                                          │
+                                                                          │
+                                                                          │
+                                                                          │
+                                                                          │
+  Working · thinking default                                              │
+ ╭ Running...                                                           ╮ │Result
+ │ ❯ NORMAL  Ask Minga to edit, explain, search, or run tools           │ │Lead with what the editor does for the reader. Replace unsupported
+ │Send · Steer · Queue Next · Stop · Attachments                        │ │comparisons with measured startup numbers.
+ ╰──────────────────────────────────────────────────────────────────────╯ │Message this subagent
+  NORMAL  [no file] ◐ Minga working                                                                                                          Text 1:1
+## styles (row start-end fg bg attrs)
+0 0-45 #595c66 #111317 -
+0 46-79 #50a4e9 #111317 bold
+0 80-98 #595c66 #111317 -
+0 99-149 #adb0bb #1a1d23 -
+1 0-0 #adb0bb #1a1d23 -
+1 1-1 #50a4e9 #1a1d23 bold
+1 2-149 #adb0bb #1a1d23 -
+2 0-0 #adb0bb #1a1d23 -
+2 1-7 #50a4e9 #16181d bold
+2 8-18 #595c66 #16181d -
+2 19-32 #50a4e9 #16181d -
+2 33-33 #595c66 #16181d -
+2 34-34 #adb0bb #dd97f1 -
+2 35-43 #16181d #dd97f1 bold
+2 44-44 #adb0bb #dd97f1 -
+2 45-55 #595c66 #16181d -
+2 56-56 #adb0bb #1a1d23 -
+2 57-65 #595c66 #16181d -
+2 66-66 #adb0bb #1a1d23 -
+2 67-72 #595c66 #16181d -
+2 73-73 #adb0bb #1a1d23 -
+2 74-74 #696c76 #1a1d23 -
+2 75-147 #adb0bb #1a1d23 bold
+2 148-149 #adb0bb #1a1d23 -
+3 0-0 #adb0bb #1a1d23 -
+3 1-12 #595c66 #1a1d23 bold
+3 13-72 #595c66 #1a1d23 -
+3 73-73 #adb0bb #1a1d23 -
+3 74-74 #696c76 #1a1d23 -
+3 75-75 #75ad47 #1a1d23 -
+3 76-149 #adb0bb #1a1d23 -
+4 0-2 #adb0bb #1a1d23 -
+4 3-10 #50a4e9 #1a1d23 bold
+4 11-42 #595c66 #1a1d23 -
+4 43-73 #adb0bb #1a1d23 -
+4 74-74 #696c76 #1a1d23 -
+4 75-75 #1a1d23 #75ad47 reverse
+4 76-76 #adb0bb #1a1d23 -
+4 77-77 #dd97f1 #1a1d23 -
+4 78-78 #adb0bb #1a1d23 -
+4 79-79 #dd97f1 #1a1d23 -
+4 80-80 #adb0bb #1a1d23 -
+4 81-81 #dd97f1 #1a1d23 -
+4 82-149 #adb0bb #1a1d23 -
+5 0-73 #adb0bb #1a1d23 -
+5 74-74 #696c76 #1a1d23 -
+5 75-85 #adb0bb #1a1d23 bold
+5 86-149 #adb0bb #1a1d23 -
+6 0-0 #adb0bb #1a1d23 -
+6 1-5 #50a4e9 #1a1d23 bold
+6 6-73 #adb0bb #1a1d23 -
+6 74-74 #696c76 #1a1d23 -
+6 75-80 #adb0bb #1a1d23 bold
+6 81-149 #adb0bb #1a1d23 -
+7 0-73 #adb0bb #1a1d23 -
+7 74-74 #696c76 #1a1d23 -
+7 75-76 #adb0bb #1a1d23 -
+7 77-84 #50a4e9 #1a1d23 bold
+7 85-116 #595c66 #1a1d23 -
+7 117-149 #adb0bb #1a1d23 -
+8 0-73 #adb0bb #1a1d23 -
+8 74-74 #696c76 #1a1d23 -
+8 75-149 #adb0bb #1a1d23 -
+9 0-0 #adb0bb #1a1d23 -
+9 1-7 #dd97f1 #1a1d23 bold
+9 8-73 #adb0bb #1a1d23 -
+9 74-74 #696c76 #1a1d23 -
+9 75-79 #50a4e9 #1a1d23 bold
+9 80-149 #adb0bb #1a1d23 -
+10 0-0 #adb0bb #1a1d23 -
+10 1-4 #75ad47 #1a1d23 -
+10 5-73 #adb0bb #1a1d23 -
+10 74-74 #696c76 #1a1d23 -
+10 75-149 #adb0bb #1a1d23 -
+11 0-0 #adb0bb #1a1d23 -
+11 1-4 #75ad47 #1a1d23 -
+11 5-73 #adb0bb #1a1d23 -
+11 74-74 #696c76 #1a1d23 -
+11 75-149 #adb0bb #1a1d23 -
+12 0-0 #adb0bb #1a1d23 -
+12 1-3 #75ad47 #1a1d23 -
+12 4-52 #adb0bb #1a1d23 underline
+12 53-73 #adb0bb #1a1d23 -
+12 74-74 #696c76 #1a1d23 -
+12 75-77 #75ad47 #1a1d23 -
+12 78-149 #adb0bb #1a1d23 -
+13 0-73 #adb0bb #1a1d23 -
+13 74-74 #696c76 #1a1d23 -
+13 75-77 #75ad47 #1a1d23 -
+13 78-149 #adb0bb #1a1d23 -
+14 0-0 #adb0bb #1a1d23 -
+14 1-3 #dd97f1 #1a1d23 -
+14 4-72 #adb0bb #1a1d23 underline
+14 73-73 #adb0bb #1a1d23 -
+14 74-74 #696c76 #1a1d23 -
+14 75-77 #75ad47 #1a1d23 -
+14 78-149 #adb0bb #1a1d23 -
+15 0-0 #adb0bb #1a1d23 -
+15 1-3 #dd97f1 #1a1d23 -
+15 4-72 #adb0bb #1a1d23 underline
+15 73-73 #adb0bb #1a1d23 -
+15 74-74 #696c76 #1a1d23 -
+15 75-149 #adb0bb #1a1d23 -
+16 0-0 #adb0bb #1a1d23 -
+16 1-3 #dd97f1 #1a1d23 -
+16 4-72 #adb0bb #1a1d23 underline
+16 73-73 #adb0bb #1a1d23 -
+16 74-74 #696c76 #1a1d23 -
+16 75-81 #dd97f1 #1a1d23 bold
+16 82-149 #adb0bb #1a1d23 -
+17 0-73 #adb0bb #1a1d23 -
+17 74-74 #696c76 #1a1d23 -
+17 75-78 #75ad47 #1a1d23 -
+17 79-149 #adb0bb #1a1d23 -
+18 0-2 #adb0bb #1a1d23 -
+18 3-10 #50a4e9 #1a1d23 bold
+18 11-36 #595c66 #1a1d23 -
+18 37-73 #adb0bb #1a1d23 -
+18 74-74 #696c76 #1a1d23 -
+18 75-78 #75ad47 #1a1d23 -
+18 79-149 #adb0bb #1a1d23 -
+19 0-73 #adb0bb #1a1d23 -
+19 74-74 #696c76 #1a1d23 -
+19 75-149 #adb0bb #1a1d23 -
+20 0-73 #adb0bb #1a1d23 -
+20 74-74 #696c76 #1a1d23 -
+20 75-149 #595c66 #1a1d23 -
+21 0-73 #adb0bb #1a1d23 -
+21 74-74 #696c76 #1a1d23 -
+21 75-149 #adb0bb #1a1d23 -
+22 0-73 #adb0bb #1a1d23 -
+22 74-74 #696c76 #1a1d23 -
+22 75-149 #adb0bb #1a1d23 -
+23 0-73 #adb0bb #1a1d23 -
+23 74-74 #696c76 #1a1d23 -
+23 75-149 #adb0bb #1a1d23 -
+24 0-73 #adb0bb #1a1d23 -
+24 74-74 #696c76 #1a1d23 -
+24 75-149 #adb0bb #1a1d23 -
+25 0-73 #adb0bb #1a1d23 -
+25 74-74 #696c76 #1a1d23 -
+25 75-149 #adb0bb #1a1d23 -
+26 0-73 #adb0bb #1a1d23 -
+26 74-74 #696c76 #1a1d23 -
+26 75-149 #adb0bb #1a1d23 -
+27 0-73 #adb0bb #1a1d23 -
+27 74-74 #696c76 #1a1d23 -
+27 75-149 #adb0bb #1a1d23 -
+28 0-73 #adb0bb #1a1d23 -
+28 74-74 #696c76 #1a1d23 -
+28 75-149 #adb0bb #1a1d23 -
+29 0-73 #adb0bb #1a1d23 -
+29 74-74 #696c76 #1a1d23 -
+29 75-149 #adb0bb #1a1d23 -
+30 0-73 #adb0bb #1a1d23 -
+30 74-74 #696c76 #1a1d23 -
+30 75-149 #adb0bb #1a1d23 -
+31 0-73 #adb0bb #1a1d23 -
+31 74-74 #696c76 #1a1d23 -
+31 75-149 #adb0bb #1a1d23 -
+32 0-0 #adb0bb #1a1d23 -
+32 1-72 #595c66 #1a1d23 -
+32 73-73 #adb0bb #1a1d23 -
+32 74-74 #696c76 #1a1d23 -
+32 75-149 #adb0bb #1a1d23 -
+33 0-0 #adb0bb #1a1d23 -
+33 1-72 #50a4e9 #1a1d23 -
+33 73-73 #adb0bb #1a1d23 -
+33 74-74 #696c76 #1a1d23 -
+33 75-80 #adb0bb #1a1d23 bold
+33 81-149 #adb0bb #1a1d23 -
+34 0-0 #adb0bb #1a1d23 -
+34 1-1 #50a4e9 #1a1d23 -
+34 2-12 #50a4e9 #1a1d23 bold
+34 13-70 #595c66 #1a1d23 italic
+34 71-71 #adb0bb #1a1d23 -
+34 72-72 #50a4e9 #1a1d23 -
+34 73-73 #adb0bb #1a1d23 -
+34 74-74 #696c76 #1a1d23 -
+34 75-149 #adb0bb #1a1d23 -
+35 0-0 #adb0bb #1a1d23 -
+35 1-1 #50a4e9 #1a1d23 -
+35 2-5 #595c66 #1a1d23 -
+35 6-8 #adb0bb #1a1d23 -
+35 9-13 #595c66 #1a1d23 -
+35 14-16 #adb0bb #1a1d23 -
+35 17-26 #595c66 #1a1d23 -
+35 27-71 #adb0bb #1a1d23 -
+35 72-72 #50a4e9 #1a1d23 -
+35 73-73 #adb0bb #1a1d23 -
+35 74-74 #696c76 #1a1d23 -
+35 75-149 #adb0bb #1a1d23 -
+36 0-0 #adb0bb #1a1d23 -
+36 1-72 #50a4e9 #1a1d23 -
+36 73-73 #adb0bb #1a1d23 -
+36 74-74 #696c76 #1a1d23 -
+36 75-149 #adb0bb #1a1d23 -
+37 0-0 #595c66 #111317 -
+37 1-1 #adb0bb #50a4e9 -
+37 2-7 #1a1d23 #50a4e9 bold
+37 8-8 #adb0bb #50a4e9 -
+37 9-19 #adb0bb #111317 -
+37 20-34 #dd97f1 #111317 -
+37 35-149 #adb0bb #111317 -

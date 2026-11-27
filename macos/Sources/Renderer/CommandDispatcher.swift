@@ -600,6 +600,8 @@ final class CommandDispatcher {
             committedMetadata: priorSnapshot?.metadata ?? .empty,
             registeredFontIds: registeredFontIds,
             committedTranscript: guiState.agentChatState.transcriptSnapshot,
+            committedPeek: guiState.subagentPeekState.metadata,
+            committedPeekTranscript: guiState.subagentPeekState.transcript.transcriptSnapshot,
             stagingLimit: resourcePolicy.staging.weight,
             residentLimit: resourcePolicy.resident.weightPerWindow
         )
@@ -749,6 +751,9 @@ final class CommandDispatcher {
         if let chrome = transaction.chrome {
             if let transcript = chrome.transcript {
                 guiState.agentChatState.publishTranscript(transcript)
+            }
+            if let peek = chrome.peek {
+                guiState.subagentPeekState.publish(metadata: peek.metadata, transcript: peek.transcript)
             }
             for command in chrome.commands { apply(command, effects: &effects) }
         }
@@ -1302,10 +1307,10 @@ final class CommandDispatcher {
                 guiState.pickerState.clearPreview()
             }
 
-        case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptMode, let promptVisibleRows, let promptCompletion, _, _, let draftAttachmentCount, let draftAttachmentOffer, let question, let stopTarget, let promptPresentation, let queueTarget, let lifecycle, let composerHints, let continueTarget):
+        case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptMode, let promptVisibleRows, let promptCompletion, _, _, let draftAttachmentCount, let draftAttachmentOffer, let question, let stopTarget, let promptPresentation, let queueTarget, let lifecycle, let composerHints, let continueTarget, let promptFocused):
             let wasVisible = guiState.agentChatState.visible
             if visible {
-                guiState.agentChatState.update(visible: true, status: status, model: model, thinkingLevel: thinkingLevel, prompt: prompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: promptMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, draftAttachmentCount: draftAttachmentCount, draftAttachmentOffer: draftAttachmentOffer, question: question, stopTarget: stopTarget, promptPresentation: promptPresentation, queueTarget: queueTarget, lifecycle: lifecycle, composerHints: composerHints, continueTarget: continueTarget)
+                guiState.agentChatState.update(visible: true, status: status, model: model, thinkingLevel: thinkingLevel, prompt: prompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: promptMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, draftAttachmentCount: draftAttachmentCount, draftAttachmentOffer: draftAttachmentOffer, question: question, stopTarget: stopTarget, promptPresentation: promptPresentation, queueTarget: queueTarget, lifecycle: lifecycle, composerHints: composerHints, continueTarget: continueTarget, promptFocused: promptFocused)
             } else {
                 guiState.agentChatState.hide()
             }
@@ -1319,10 +1324,10 @@ final class CommandDispatcher {
         case .guiAgentHelp(let visible, let groups):
             guiState.agentHelpState.update(visible: visible, groups: groups)
 
-        case .guiAgentTranscript:
+        case .guiAgentTranscript, .guiSubagentPeek, .guiSubagentPeekTranscript:
             // Prepared transactions publish the validated value snapshot directly.
             // Reaching this path would bypass all-or-nothing transcript validation.
-            assertionFailure("guiAgentTranscript must be prepared before publication")
+            assertionFailure("resident Agent updates must be prepared before publication")
 
         case .guiGutterSeparator(_, let r, let g, let b):
             let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)

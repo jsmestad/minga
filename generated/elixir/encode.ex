@@ -640,6 +640,57 @@ defmodule Minga.Protocol.Encode do
     ]
   end
 
+  @spec encode_subagent_peek_step(map()) :: iodata()
+  def encode_subagent_peek_step(model), do: encode_subagent_peek_step(model, :subagent_peek_step, [])
+
+  @spec encode_subagent_peek_step(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_subagent_peek_step(model, command, path) do
+    [
+      (fn value -> validate_uint!(command, [:entry_id | path], value, 4294967295); <<value::32>> end).(Map.fetch!(model, :entry_id)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:token | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :token)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:label | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :label)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:report | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :report)),
+    ]
+  end
+
+  @spec encode_subagent_peek_sibling(map()) :: iodata()
+  def encode_subagent_peek_sibling(model), do: encode_subagent_peek_sibling(model, :subagent_peek_sibling, [])
+
+  @spec encode_subagent_peek_sibling(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_subagent_peek_sibling(model, command, path) do
+    [
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:token | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :token)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:title | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :title)),
+      (fn value -> validate_uint!(command, [:state | path], value, 255); <<value::8>> end).(Map.fetch!(model, :state)),
+    ]
+  end
+
+  @spec encode_subagent_peek_pane(map()) :: iodata()
+  def encode_subagent_peek_pane(model), do: encode_subagent_peek_pane(model, :subagent_peek_pane, [])
+
+  @spec encode_subagent_peek_pane(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_subagent_peek_pane(model, command, path) do
+    [
+      (fn value -> validate_uint!(command, [:window_id | path], value, 65535); <<value::16>> end).(Map.fetch!(model, :window_id)),
+      encode_rect(Map.fetch!(model, :parent_rect), command, [:parent_rect | path]),
+      encode_rect(Map.fetch!(model, :peek_rect), command, [:peek_rect | path]),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:token | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :token)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:parent | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :parent)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:title | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :title)),
+      (fn value -> validate_uint!(command, [:state | path], value, 255); <<value::8>> end).(Map.fetch!(model, :state)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:elapsed | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :elapsed)),
+      (fn value -> validate_uint!(command, [:index | path], value, 65535); <<value::16>> end).(Map.fetch!(model, :index)),
+      (fn items -> count = Enum.count(items); validate_uint!(command, [:siblings | path], count, 65535); [<<count::16>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_subagent_peek_sibling(value, command, [index | [:siblings | path]]) end)] end).(Map.fetch!(model, :siblings)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:brief | path], byte_size(bin), 4294967295); <<byte_size(bin)::32, bin::binary>> end).(Map.fetch!(model, :brief)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:result | path], byte_size(bin), 4294967295); <<byte_size(bin)::32, bin::binary>> end).(Map.fetch!(model, :result)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:prompt | path], byte_size(bin), 4294967295); <<byte_size(bin)::32, bin::binary>> end).(Map.fetch!(model, :prompt)),
+      (fn value -> validate_uint!(command, [:cursor_row | path], value, 4294967295); <<value::32>> end).(Map.fetch!(model, :cursor_row)),
+      (fn value -> validate_uint!(command, [:cursor_column | path], value, 4294967295); <<value::32>> end).(Map.fetch!(model, :cursor_column)),
+      (fn value -> validate_uint!(command, [:flags | path], value, 255); <<value::8>> end).(Map.fetch!(model, :flags)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:notice | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :notice)),
+    ]
+  end
+
   @spec encode_edit_timeline_entry(map()) :: iodata()
   def encode_edit_timeline_entry(model), do: encode_edit_timeline_entry(model, :edit_timeline_entry, [])
 
@@ -1689,6 +1740,18 @@ defmodule Minga.Protocol.Encode do
       else
         []
       end
+    ]
+  end
+
+  @spec encode_gui_subagent_peek(map()) :: iodata()
+  def encode_gui_subagent_peek(model), do: encode_gui_subagent_peek(model, :gui_subagent_peek, [])
+
+  @spec encode_gui_subagent_peek(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_gui_subagent_peek(model, command, path) do
+    [
+      (fn value -> validate_uint!(command, [:parent_window_id | path], value, 65535); <<value::16>> end).(Map.fetch!(model, :parent_window_id)),
+      (fn items -> count = Enum.count(items); validate_uint!(command, [:steps | path], count, 65535); [<<count::16>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_subagent_peek_step(value, command, [index | [:steps | path]]) end)] end).(Map.fetch!(model, :steps)),
+      (fn items -> count = Enum.count(items); validate_uint!(command, [:panes | path], count, 255); [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_subagent_peek_pane(value, command, [index | [:panes | path]]) end)] end).(Map.fetch!(model, :panes)),
     ]
   end
 

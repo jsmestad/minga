@@ -327,7 +327,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         if let empty = queue.empty { result["empty"] = emptyListJSON(empty) }
         return result
 
-    case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, let pendingToolName, let pendingToolSummary, let draftAttachmentCount, let draftAttachmentOffer, let question, let stopTarget, let promptPresentation, _, let lifecycle, _, let continueTarget):
+    case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, let pendingToolName, let pendingToolSummary, let draftAttachmentCount, let draftAttachmentOffer, let question, let stopTarget, let promptPresentation, _, let lifecycle, _, let continueTarget, let promptFocused):
         let phase: String
         let reason: String
         var startRemedy: AgentStartRemedy? = nil
@@ -355,6 +355,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
             "prompt_cursor_line": Int(promptCursorLine),
             "prompt_cursor_col": Int(promptCursorCol),
             "prompt_vim_mode": Int(promptVimMode.rawValue),
+            "prompt_focused": promptFocused,
             "prompt_visible_rows": Int(promptVisibleRows),
             "has_completion": promptCompletion != nil,
             "draft_attachment_count": Int(draftAttachmentCount),
@@ -370,6 +371,21 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
             "pending_tool_summary": pendingToolSummary
         ]
         return result
+
+    case .guiSubagentPeek(let peek):
+        return [
+            "type": "gui_subagent_peek",
+            "parent_window_id": peek.parentWindowID,
+            "steps": peek.steps.map { ["entry_id": $0.entryID, "token": $0.token, "label": $0.label, "report": $0.report] },
+            "pane_token": peek.pane?.token ?? "",
+            "result": peek.pane?.result ?? "",
+            "sibling_tokens": peek.pane?.siblings.map(\.token) ?? []
+        ]
+    case .guiSubagentPeekTranscript(let mode, let epoch, let truncated, let trimFront, let baseCount, let messages):
+        return [
+            "type": "gui_subagent_peek_transcript", "mode": Int(mode), "epoch": Int(epoch), "truncated": truncated,
+            "trim_front": Int(trimFront), "base_count": Int(baseCount), "entry_ids": messages.map(\.beamId)
+        ]
 
     case .guiAgentTranscript(let mode, let epoch, let truncated, let trimFront, let baseCount, let messages):
         let approvals = messages.compactMap { message -> [String: Any]? in

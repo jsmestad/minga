@@ -198,7 +198,9 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_resident_semantics: 0xA9,
       gui_tasks_drawer: 0xAC,
       gui_menu_bar: 0xAD,
-      gui_agent_queue: 0xAE
+      gui_agent_queue: 0xAE,
+      gui_subagent_peek: 0xAF,
+      gui_subagent_peek_transcript: 0xB0
     )
   end
 
@@ -297,7 +299,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       which_key_press: 0x73,
       which_key_back: 0x74,
       agent_continue_turn: 0x75,
-      agent_queue_action: 0x76
+      agent_queue_action: 0x76,
+      subagent_peek_action: 0x77
     )
   end
 

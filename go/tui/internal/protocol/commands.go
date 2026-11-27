@@ -123,6 +123,7 @@ type ChromePayload struct {
 	AgentHelp           AgentHelp
 	AgentQueue          generated.GuiAgentQueueFields
 	AgentTranscript     AgentTranscript
+	SubagentPeek        generated.GuiSubagentPeekFields
 	Timeline            EditTimeline
 	TasksDrawer         generated.GuiTasksDrawerFields
 	Gutter              GutterSeparator

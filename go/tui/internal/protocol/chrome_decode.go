@@ -92,7 +92,27 @@ func decodeChrome(payload []byte) (ChromePayload, bool, error) {
 			}
 		}
 		chrome.AgentQueue, chrome.Summary, chrome.Bytes = queue, "agent queue", size
-	case generated.OPGuiAgentTranscript:
+	case generated.OPGuiSubagentPeek:
+		size := payloadLen32Size(payload)
+		if size == 0 {
+			return ChromePayload{}, true, fmt.Errorf("malformed subagent peek: truncated payload")
+		}
+		peek, end, err := generated.DecodeGuiSubagentPeekFields(payload, 5, size)
+		if err != nil {
+			return ChromePayload{}, true, fmt.Errorf("malformed subagent peek: %w", err)
+		}
+		if end != size || len(peek.Panes) > 1 {
+			return ChromePayload{}, true, fmt.Errorf("malformed subagent peek: invalid panes or trailing data")
+		}
+		for _, pane := range peek.Panes {
+			if peek.ParentWindowID == 0 || pane.WindowID == 0 || pane.Token == "" ||
+				pane.Index == 0 || int(pane.Index) > len(pane.Siblings) ||
+				pane.Siblings[pane.Index-1].Token != pane.Token {
+				return ChromePayload{}, true, fmt.Errorf("malformed subagent peek: invalid target")
+			}
+		}
+		chrome.SubagentPeek, chrome.Summary, chrome.Bytes = peek, "subagent peek", size
+	case generated.OPGuiAgentTranscript, generated.OPGuiSubagentPeekTranscript:
 		chrome.AgentTranscript, chrome.Summary, chrome.Bytes = decodeAgentTranscript(payload)
 	case generated.OPGuiEditTimeline:
 		chrome.Timeline, chrome.Summary, chrome.Bytes = decodeEditTimeline(payload)

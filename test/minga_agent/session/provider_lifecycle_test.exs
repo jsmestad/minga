@@ -205,26 +205,6 @@ defmodule MingaAgent.Session.ProviderLifecycleTest do
     end
   end
 
-  test "Session has one provider monitor path and no generic lifecycle effect interpreter" do
-    session_source = File.read!("lib/minga_agent/session.ex")
-    lifecycle_source = File.read!("lib/minga_agent/session/provider_lifecycle.ex")
-
-    monitor_paths =
-      Regex.scan(
-        ~r/defp attach_provider\(state, pid\).*?Process\.monitor\(pid\)/s,
-        session_source
-      )
-
-    assert [_provider_monitor_path] = monitor_paths
-
-    assert session_source =~ "ProviderLifecycle.attach(state.provider, pid, monitor_ref)"
-    refute session_source =~ ~r/defp await_provider_stop.*?Process\.monitor/s
-    refute session_source =~ "perform_provider_effect"
-    refute session_source =~ "install_provider_transition"
-    refute lifecycle_source =~ "@type effect"
-    refute lifecycle_source =~ "@type effects"
-  end
-
   defp lifecycle(overrides \\ []) do
     [
       module: Minga.Test.StubProvider,

@@ -36,6 +36,7 @@ defmodule MingaEditor.Input do
   alias MingaEditor.Input.Scoped
   alias MingaEditor.Input.Sidebar
   alias MingaEditor.Input.SignatureHelp
+  alias MingaEditor.Input.SubagentPeek
   alias MingaEditor.Input.TasksDrawer
   alias MingaEditor.Input.ToolApproval
   alias MingaEditor.Input.WhichKey
@@ -59,6 +60,7 @@ defmodule MingaEditor.Input do
     {MentionCompletion, 10},
     # The drawer answers the task it selects, so it runs ahead of the conversation's approval keys.
     {TasksDrawer, 15},
+    {SubagentPeek, 16},
     {ToolApproval, 20},
     {Queue, 35},
     {AgentPanel, 40},

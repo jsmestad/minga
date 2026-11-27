@@ -23,6 +23,7 @@ defmodule Minga.Test.Storyboard.Model do
           | :git_status
           | :agent_chat
           | :agent_queue
+          | :subagent_peek
           | :agent_activity
           | :empty_state
           | :bottom_panel
@@ -244,6 +245,7 @@ defmodule Minga.Test.Storyboard.Model do
       git_status: match?(%{panel_id: id} when id != 0, ui.git_status),
       agent_chat: visible?(ui.agent_chat),
       agent_queue: visible?(ui.agent_queue),
+      subagent_peek: match?(%{pane: pane} when not is_nil(pane), ui.subagent_peek),
       # The Agent activity strip above the conversation: it shows while a task has something to report.
       agent_activity: match?(%{visible: true}, ui.agent_context),
       empty_state: visible?(ui.empty_state),

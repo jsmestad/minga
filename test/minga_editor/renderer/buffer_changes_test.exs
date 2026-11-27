@@ -224,7 +224,9 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
                :last_search_pattern,
                :launchpad,
                :mouse,
-               :search
+               :peek_transcript,
+               :search,
+               :subagent_peek
              ]
 
     assert :erlang.external_size(bounded) < 100_000

@@ -9,6 +9,7 @@ defmodule MingaAgent.Tools.SubagentTest do
   alias MingaAgent.Tools.Subagent
   alias Minga.Test.SubagentGatedProvider, as: GatedProvider
   alias Minga.Test.SubagentRecordingProvider, as: RecordingProvider
+  alias Minga.Test.{SubagentWorktreeBackend, SubagentWorktreeProvider}
 
   @moduletag :tmp_dir
   @event_timeout 15_000
@@ -57,6 +58,28 @@ defmodule MingaAgent.Tools.SubagentTest do
     assert {:ok, "foreground done"} = Task.await(task, @event_timeout)
   end
 
+  test "foreground handback returns the brief's result without waiting for a queued follow-up" do
+    test_pid = self()
+    ref = make_ref()
+
+    task =
+      Task.async(fn ->
+        Subagent.execute("initial brief",
+          provider: GatedProvider,
+          provider_opts: [test_pid: test_pid, startup_gate: {test_pid, ref}]
+        )
+      end)
+
+    assert_receive {:provider_starting, ^ref, provider_pid, session_pid}, @event_timeout
+    on_exit(fn -> MingaAgent.Supervisor.stop_session(session_pid) end)
+    send(provider_pid, {ref, :continue})
+    assert_receive {:provider_prompt, ^provider_pid, "initial brief"}, @event_timeout
+    assert {:queued, :follow_up} = Session.queue_follow_up(session_pid, "a later turn")
+    assert :ok = GatedProvider.proceed(provider_pid, "the initial result")
+
+    assert {:ok, "the initial result"} = Task.await(task, @event_timeout)
+  end
+
   test "foreground startup timeout returns an error and stops the child session" do
     test_pid = self()
     ref = make_ref()
@@ -76,6 +99,24 @@ defmodule MingaAgent.Tools.SubagentTest do
 
     assert {:error, "Subagent timed out while starting"} = Task.await(task, @event_timeout)
     assert_receive {:DOWN, ^monitor, :process, ^session_pid, _reason}, @event_timeout
+  end
+
+  test "a file added during cleanup remains accessible after a child hands back", %{tmp_dir: dir} do
+    root = Path.join(dir, "project")
+    File.mkdir!(root)
+
+    assert {:ok, result} =
+             Subagent.execute("noop",
+               isolation: "worktree",
+               project_root: root,
+               provider: SubagentWorktreeProvider,
+               worktree_backend: SubagentWorktreeBackend,
+               worktree_backend_opts: [root: root, late_user_edit: true]
+             )
+
+    assert result =~ "no changes"
+    assert [_, worktree_path] = Regex.run(~r/Worktree: (.+)/, result)
+    assert File.read!(Path.join(worktree_path, "draft.txt")) == "unsaved to Git\n"
   end
 
   test "inherits parent provider context by default", %{tmp_dir: dir} do

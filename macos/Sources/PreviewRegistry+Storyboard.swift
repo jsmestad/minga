@@ -329,10 +329,14 @@ enum StoryboardCapture {
         }
     }
 
-    /// Every distinct ink colour in the Metal editor's text area, syntax colours included, with its surface.
+    /// Every distinct ink colour in the visible Metal text, syntax colours included, with its surface.
     private static func code(_ elements: [[String: Any]], pixels: StoryboardPixels?, covered: CGRect?) -> [String: Any] {
         guard let pixels,
-              let editor = elements.first(where: { $0["role"] as? String == "AXTextArea" }),
+              let editor = elements.first(where: { element in
+                  guard element["role"] as? String == "AXTextArea",
+                        let value = element["value"] as? String else { return false }
+                  return value.contains(where: { !$0.isWhitespace })
+              }),
               let frame = editor["frame"] as? [Double], frame.count == 4,
               let found = pixels.inks(CGRect(x: frame[0], y: frame[1], width: frame[2], height: frame[3]), excluding: covered) else { return [:] }
         // The block cursor is the system accent colour, a glyph rather than text. The audit leaves out inks near it:

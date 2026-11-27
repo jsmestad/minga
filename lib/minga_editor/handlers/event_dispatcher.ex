@@ -16,6 +16,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias MingaAgent.InferenceRoute.StatusChangedEvent
   alias MingaAgent.Session.ConnectionSnapshot
   alias MingaEditor.Agent.SessionEventWorkflow
+  alias MingaEditor.Agent.SubagentPeekSession
   alias MingaEditor.Agent.UIState
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Commands
@@ -249,6 +250,22 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     handle_node_disconnected(state, event)
   end
 
+  def dispatch(state, :foreground_subagent_changed, %{manager: manager} = child, _msg) do
+    if GenServer.whereis(state.agent_connection.session_manager) == manager do
+      state |> SubagentPeekSession.child_changed(child) |> MingaEditor.schedule_render(16)
+    else
+      state
+    end
+  end
+
+  def dispatch(state, :foreground_subagent_disposed, %{manager: manager} = child, _msg) do
+    if GenServer.whereis(state.agent_connection.session_manager) == manager do
+      state |> SubagentPeekSession.child_disposed(child) |> MingaEditor.schedule_render(16)
+    else
+      state
+    end
+  end
+
   def dispatch(
         state,
         :background_subagent_started,
@@ -322,6 +339,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     |> MingaEditor.Agent.Arrival.retire(pid)
     |> MingaEditor.Agent.QuestionResponse.retire_remote_attachment(pid)
     |> Commands.BufferManagement.handle_agent_session_down(pid, reason)
+    |> MingaEditor.Agent.SubagentPeekWorkflow.resume_in_workspace()
   end
 
   def dispatch(state, :load_user_themes, _payload, _msg) do

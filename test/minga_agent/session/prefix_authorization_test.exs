@@ -2765,7 +2765,8 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert :ok = Session.send_prompt(session, "write the first file")
 
     assert_receive {:agent_event, ^session,
-                    {:tool_started, _call_id, "prefix_write", %{"path" => "effect.txt"}}},
+                    {:tool_started,
+                     %Event.ToolStart{name: "prefix_write", args: %{"path" => "effect.txt"}}}},
                    @timeout
 
     assert_receive {:agent_event, ^session,
@@ -2806,7 +2807,10 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     refute_received :callback_built
     refute_received {:agent_event, ^session, {:approval_pending, _}}
     refute_received {:agent_event, ^session, {:approval_resolved, _, _}}
-    refute_received {:agent_event, ^session, {:tool_started, _call_id, "prefix_write", _}}
+
+    refute_received {:agent_event, ^session,
+                     {:tool_started, %Event.ToolStart{name: "prefix_write"}}}
+
     refute_received {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{name: "prefix_write"}}}
 
     session_id = Session.session_id(session)

@@ -211,7 +211,8 @@ defmodule MingaEditor.Startup do
             opts,
             :agent_arrival_budget_ms,
             AgentConnection.default_arrival_budget_ms()
-          )
+          ),
+          Keyword.get(opts, :agent_session_manager, MingaAgent.SessionManager)
         ),
       interaction:
         Interaction.new(

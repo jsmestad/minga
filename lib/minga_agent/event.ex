@@ -50,11 +50,7 @@ defmodule MingaAgent.Event do
   @type thinking_delta :: %__MODULE__.ThinkingDelta{delta: String.t()}
 
   @typedoc "A tool call has started."
-  @type tool_start :: %__MODULE__.ToolStart{
-          tool_call_id: String.t(),
-          name: String.t(),
-          args: map()
-        }
+  @type tool_start :: __MODULE__.ToolStart.t()
 
   @typedoc "Partial progress on a running tool call."
   @type tool_update :: %__MODULE__.ToolUpdate{
@@ -165,8 +161,15 @@ defmodule MingaAgent.Event do
   defmodule ToolStart do
     @moduledoc false
     @enforce_keys [:tool_call_id, :name]
-    defstruct [:tool_call_id, :name, args: %{}]
-    @type t :: %__MODULE__{tool_call_id: String.t(), name: String.t(), args: map()}
+    defstruct [:tool_call_id, :name, :invocation_key, :entry_id, args: %{}]
+
+    @type t :: %__MODULE__{
+            tool_call_id: String.t(),
+            name: String.t(),
+            args: map(),
+            invocation_key: MingaAgent.Tool.Invocation.key() | nil,
+            entry_id: pos_integer() | nil
+          }
   end
 
   defmodule ToolUpdate do
@@ -184,11 +187,21 @@ defmodule MingaAgent.Event do
   defmodule ToolEnd do
     @moduledoc false
     @enforce_keys [:tool_call_id, :name, :outcome]
-    defstruct [:tool_call_id, :name, :outcome, :reason, :output, result: "", is_error: false]
+    defstruct [
+      :tool_call_id,
+      :name,
+      :outcome,
+      :reason,
+      :output,
+      :invocation_key,
+      result: "",
+      is_error: false
+    ]
 
     @type t :: %__MODULE__{
             tool_call_id: String.t(),
             name: String.t(),
+            invocation_key: MingaAgent.Tool.Invocation.key() | nil,
             outcome: MingaAgent.ToolCall.outcome(),
             reason: MingaAgent.ToolCall.terminal_reason(),
             result: String.t(),

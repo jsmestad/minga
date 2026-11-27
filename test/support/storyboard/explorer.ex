@@ -100,15 +100,28 @@ defmodule Minga.Test.Storyboard.Explorer do
   end
 
   @doc """
-  Checks the way out from the session's current state: at most three presses of `esc`, or of `q`, reach a resting view with focus in the starting window.
+  Checks the way out from the session's current state: at most three presses return to a resting view with focus in the starting window. Escape can leave an input field before `q` closes its surface.
 
-  `replay` rebuilds the same state for the second attempt, since the first attempt consumes it; the replayed session is stopped afterwards. The caller owns `session`, and may pass its current `model` to save building it again.
+  `replay` rebuilds the same state for each alternative, since an attempt consumes it; the replayed sessions are stopped afterwards. The caller owns `session`, and may pass its current `model` to save building it again.
   """
   @spec way_out(Session.t(), (-> Session.t()), Model.t() | nil) :: :ok | {:stranded, String.t()}
   def way_out(%Session{} = session, replay, model \\ nil) when is_function(replay, 0) do
+    model = model || Session.model(session)
+
     with {:error, by_esc} <- escape(session, "esc", 3, model),
          {:error, by_q} <- with_session(replay, &escape(&1, "q", 3)) do
-      {:stranded, "esc ×3 left #{by_esc}; q ×3 left #{by_q}"}
+      case model do
+        %Model{ui: %{subagent_peek: %{pane: %{editing?: true}}}} ->
+          with_session(replay, fn fresh ->
+            case fresh |> Session.press("esc") |> escape("q", 2) do
+              :ok -> :ok
+              {:error, signature} -> {:stranded, "esc q q left #{signature}"}
+            end
+          end)
+
+        %Model{} ->
+          {:stranded, "esc ×3 left #{by_esc}; q ×3 left #{by_q}"}
+      end
     end
   end
 

@@ -15,7 +15,13 @@ import (
 
 func (m Model) renderBody() (string, *gitStatusHits) {
 	if chat, ok := m.agentChat(); ok && chat.Visible {
-		lines, hits := m.withFileTree(m.renderAgentChatBody(chat))
+		var agentLines []string
+		if panes := m.subagentPeek().Panes; len(panes) != 0 {
+			agentLines = m.withSplitSeparators(m.renderAgentPeekSplit(chat, panes[0]))
+		} else {
+			agentLines = m.renderAgentChatBody(chat)
+		}
+		lines, hits := m.withFileTree(agentLines)
 		return strings.Join(lines, "\n"), hits
 	}
 	// The launchpad (#2689) takes over the editor region when the workspace has

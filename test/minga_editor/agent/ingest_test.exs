@@ -58,6 +58,24 @@ defmodule MingaEditor.Agent.IngestTest do
     start_supervised!({Ingest, editor: self(), window_ms: window_ms})
   end
 
+  test "a peek's viewer traffic never arrives as parent conversation traffic" do
+    ingest = start_ingest(10_000)
+    child = stub_session()
+    parent = fake_session()
+    on_exit(fn -> GenServer.stop(child) end)
+
+    assert :ok = Ingest.subscribe_peek(ingest, child)
+    send(ingest, {:agent_event, child, {:text_delta, "child answer"}})
+    send(ingest, {:agent_event, parent, {:text_delta, "parent answer"}})
+    send(ingest, {:agent_event, child, :messages_changed})
+
+    assert_receive {:subagent_peek_transcript_changed, ^child}
+    assert_receive {:agent_stream_batch, ^parent, [{:text_delta, "parent answer"}]}
+    assert_receive {:subagent_peek_event, ^child, :messages_changed}
+    refute_received {:agent_stream_batch, ^child, _}
+    refute_received {:agent_event, ^child, _}
+  end
+
   defp start_ingest(window_ms, opts) do
     start_supervised!({Ingest, [editor: self(), window_ms: window_ms] ++ opts})
   end
@@ -167,9 +185,10 @@ defmodule MingaEditor.Agent.IngestTest do
       assert_receive {:agent_stream_batch, ^session, [{:text_delta, "a"}]}
 
       send(ingest, {:agent_event, session, {:text_delta, "b"}})
-      send(ingest, {:agent_event, session, {:tool_started, "call-1", "shell", %{}}})
+      event = {:tool_started, %MingaAgent.Event.ToolStart{tool_call_id: "call-1", name: "shell"}}
+      send(ingest, {:agent_event, session, event})
       assert_receive {:agent_stream_batch, ^session, [{:text_delta, "b"}]}
-      assert_receive {:agent_event, ^session, {:tool_started, "call-1", "shell", %{}}}
+      assert_receive {:agent_event, ^session, ^event}
 
       # Idle again: the next delta is a fresh leading edge, forwarded at once.
       send(ingest, {:agent_event, session, {:text_delta, "c"}})

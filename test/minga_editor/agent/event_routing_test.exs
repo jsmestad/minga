@@ -342,7 +342,9 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         %Event.ToolStart{tool_call_id: "tc1", name: "alpha", args: %{}}
       )
 
-      assert_receive {:agent_event, ^session, {:tool_started, "tc1", "alpha", %{}} = started},
+      assert_receive {:agent_event, ^session,
+                      {:tool_started,
+                       %Event.ToolStart{tool_call_id: "tc1", name: "alpha", args: %{}}} = started},
                      5_000
 
       state = Events.dispatch(state, session, started)
@@ -367,7 +369,9 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         %Event.ToolStart{tool_call_id: "tc2", name: "beta", args: %{}}
       )
 
-      assert_receive {:agent_event, ^session, {:tool_started, "tc2", "beta", %{}} = started},
+      assert_receive {:agent_event, ^session,
+                      {:tool_started,
+                       %Event.ToolStart{tool_call_id: "tc2", name: "beta", args: %{}}} = started},
                      5_000
 
       state = Events.dispatch(state, session, started)
@@ -429,7 +433,8 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       )
 
       assert_receive {:agent_event, ^session,
-                      {:tool_started, "crashed-tool", "alpha", %{}} =
+                      {:tool_started,
+                       %Event.ToolStart{tool_call_id: "crashed-tool", name: "alpha", args: %{}}} =
                         started},
                      5_000
 
@@ -458,7 +463,8 @@ defmodule MingaEditor.Agent.EventRoutingTest do
     test "tool_started and tool_ended update an editor without an agent session" do
       state = event_state(%AgentState{})
 
-      state = Events.dispatch(state, self(), {:tool_started, "no-session-tool", "read_file", %{}})
+      event = %Event.ToolStart{tool_call_id: "no-session-tool", name: "read_file"}
+      state = Events.dispatch(state, self(), {:tool_started, event})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)

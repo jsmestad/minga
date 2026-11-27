@@ -2969,6 +2969,12 @@ defmodule MingaEditor.Commands.Agent do
         execute: &MingaEditor.UI.Picker.AgentDraftAttachmentSource.open/1
       },
       %Minga.Command{
+        name: :agent_inspect_subagent,
+        description: "Inspect a subagent beside its parent",
+        requires_buffer: false,
+        execute: &MingaEditor.Agent.SubagentPeekWorkflow.open_from_current/1
+      },
+      %Minga.Command{
         name: :agent_queued_inputs,
         description: "Open the conversation queue",
         requires_buffer: false,

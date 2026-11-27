@@ -230,6 +230,7 @@
 		6F4588B8EB30D91E05176E9E /* ScrollAccumulator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25503C21E0D55E1515A38C7D /* ScrollAccumulator.swift */; };
 		6F9C2C373304BAEF0F5BB93F /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9FC2118EA77254CBCAE7B0B /* AppState.swift */; };
 		6FFA15B975A574EB4D11A804 /* NativeTextCommandRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF00AA30A3F2887F49DA9E90 /* NativeTextCommandRouter.swift */; };
+		707E7AE8F306FDFB384C5FBF /* SubagentPeekView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F535AAD668F927B18D0ED4C1 /* SubagentPeekView.swift */; };
 		70C8D73C0701DC31E8255772 /* MenuSnapshotProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B81375947A9D7F9FCA85C91 /* MenuSnapshotProbe.swift */; };
 		712BB689EB52A507311BC1B0 /* RendererSignposts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F37BEAA7D7267D29882A632 /* RendererSignposts.swift */; };
 		714FCEDF08763224C70ADFD5 /* MingaUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7D941F158B53B4D4CF4AAA4F /* MingaUI.framework */; };
@@ -1019,6 +1020,7 @@
 		F4285AA8E914B2ECEF3DC5F3 /* RendererSnapshotTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererSnapshotTestSupport.swift; sourceTree = "<group>"; };
 		F48C520CBF30721B1C5C6F8F /* ProtocolConsumersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolConsumersTests.swift; sourceTree = "<group>"; };
 		F4B4CB36A83E4FEBF0B58397 /* LatencyHUDState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LatencyHUDState.swift; sourceTree = "<group>"; };
+		F535AAD668F927B18D0ED4C1 /* SubagentPeekView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentPeekView.swift; sourceTree = "<group>"; };
 		F5647A59C841B3C408994CC7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F58394320996A90ACC7739CA /* SearchToolbarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchToolbarTests.swift; sourceTree = "<group>"; };
 		F6104336F33C41EBE21B10F6 /* SearchState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchState.swift; sourceTree = "<group>"; };
@@ -1485,6 +1487,7 @@
 				028F65D530B8D307A8F4D8A9 /* AgentQueueView.swift */,
 				7A72AC156EC2485DDBA79B7C /* AgentStyledLine.swift */,
 				D1EBF8F752B40004FCD33C6F /* AgentToolCallCard.swift */,
+				F535AAD668F927B18D0ED4C1 /* SubagentPeekView.swift */,
 				6486151B2690E0A7DC25F04A /* TranscriptFollow.swift */,
 			);
 			path = Agent;
@@ -2479,6 +2482,7 @@
 				B050A8B433483CADBF75035A /* SparklineView.swift in Sources */,
 				1936219891B87FD4AB49795B /* StatusBarState.swift in Sources */,
 				6DC4EDE61F449DC8AFF50B20 /* StatusBarView.swift in Sources */,
+				707E7AE8F306FDFB384C5FBF /* SubagentPeekView.swift in Sources */,
 				C9EE9DC782AEA94BAA0FC538 /* TabBarState.swift in Sources */,
 				F07A71D61F5E19EF77AD31D2 /* TabBarView.swift in Sources */,
 				89FA6506E1654B93AC775B71 /* TabIconColors.swift in Sources */,

@@ -27,6 +27,7 @@ defmodule MingaAgent.ToolCall do
           id: String.t(),
           name: String.t(),
           args: map(),
+          invocation_key: MingaAgent.Tool.Invocation.key() | nil,
           status: status(),
           terminal_reason: terminal_reason(),
           result: String.t(),
@@ -43,6 +44,7 @@ defmodule MingaAgent.ToolCall do
   defstruct id: nil,
             name: nil,
             args: %{},
+            invocation_key: nil,
             status: :running,
             terminal_reason: nil,
             result: "",
@@ -54,13 +56,14 @@ defmodule MingaAgent.ToolCall do
             started_at: nil,
             duration_ms: nil
 
-  @doc "Creates a new running tool call with a monotonic start timestamp."
-  @spec new(String.t(), String.t(), map()) :: t()
-  def new(id, name, args \\ %{}) when is_binary(id) and is_binary(name) do
+  @doc "Creates a running tool call, optionally linked to its live invocation."
+  @spec new(String.t(), String.t(), map(), MingaAgent.Tool.Invocation.key() | nil) :: t()
+  def new(id, name, args \\ %{}, invocation_key \\ nil) when is_binary(id) and is_binary(name) do
     %__MODULE__{
       id: id,
       name: name,
       args: args,
+      invocation_key: invocation_key,
       started_at: System.monotonic_time(:millisecond)
     }
   end

@@ -97,6 +97,47 @@ defmodule MingaAgent.Tools.SubagentWorktreeHeavyTest do
     assert git_lines(root, ["branch", "--list", "subagent/*"]) == []
   end
 
+  test "real Git cleanup preserves ignored and config-hidden untracked child files", %{
+    tmp_dir: dir
+  } do
+    root = init_git_repo!(dir)
+    git!(root, ["config", "status.showUntrackedFiles", "no"])
+    exclusion_file = Path.join([root, ".git", "info", "exclude"])
+    File.mkdir_p!(Path.dirname(exclusion_file))
+    File.write!(exclusion_file, "*.private\n", [:append])
+
+    for filename <- ["unsaved.private", "untracked.txt"] do
+      assert {:ok, worktree} = MingaAgent.Subagent.Worktree.create(root)
+      path = Path.join(worktree.path, filename)
+      File.write!(path, "Keep this user draft")
+
+      assert {:preserved, kept_path, branch, :changed} =
+               MingaAgent.Subagent.Worktree.dispose(worktree)
+
+      assert kept_path == worktree.path
+      assert branch == worktree.branch
+      assert File.read!(path) == "Keep this user draft"
+    end
+  end
+
+  test "real Git cleanup preserves modified tracked files that index flags hide", %{tmp_dir: dir} do
+    root = init_git_repo!(dir)
+
+    for flag <- ["--assume-unchanged", "--skip-worktree"] do
+      assert {:ok, worktree} = MingaAgent.Subagent.Worktree.create(root)
+      git!(worktree.path, ["update-index", flag, "README.md"])
+      edited = Path.join(worktree.path, "README.md")
+      File.write!(edited, "Keep this hidden tracked edit")
+
+      assert {:preserved, path, branch, {:uncertain, _}} =
+               MingaAgent.Subagent.Worktree.dispose(worktree)
+
+      assert path == worktree.path
+      assert branch == worktree.branch
+      assert File.read!(edited) == "Keep this hidden tracked edit"
+    end
+  end
+
   @spec native_write_client(String.t(), String.t(), String.t()) :: function()
   defp native_write_client(path, content, final_text) do
     call_count = :counters.new(1, [:atomics])

@@ -39,8 +39,8 @@
 │ Tasks                   Conversation           Changes                  More                                                                       │
 │ a Tasks · 1 needs you   v Conversation split   r Pending reviews        x Context ›                                                                │
 │ n New task              ? Ask about this       u Undo all agent edits   S Session ›                                                                │
-│ s Stop                  e Rewrite selection    p Publish edits…         W Why this line                                                            │
-│                         q Queue ›                                       A Code autobiography                                                       │
+│ i Inspect subagent      e Rewrite selection    p Publish edits…         W Why this line                                                            │
+│ s Stop                  q Queue ›                                       A Code autobiography                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── ⌫ back  esc close ─╯
   NORMAL  ◉ Needs you storyboard.ex ◉ Minga                                                                                          SPC a Elixir 1:1
 ## styles (row start-end fg bg attrs)
@@ -206,7 +206,9 @@
 34 75-148 #4c4f69 #ccd0da -
 34 149-149 #7c7f93 #ccd0da -
 35 0-0 #7c7f93 #ccd0da -
-35 1-25 #4c4f69 #ccd0da -
+35 1-1 #4c4f69 #ccd0da -
+35 2-2 #1e66f5 #ccd0da -
+35 3-25 #4c4f69 #ccd0da -
 35 26-26 #1e66f5 #ccd0da -
 35 27-27 #4c4f69 #ccd0da -
 35 28-34 #1650c0 #ccd0da -

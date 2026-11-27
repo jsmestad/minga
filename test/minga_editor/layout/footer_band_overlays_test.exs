@@ -339,6 +339,36 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
       end
     end
 
+    test "compact Agent context cannot cover the active subagent composer" do
+      state = with_agent_context(base_state(rows: 24, cols: 80))
+      windows = state.workspace.windows
+      parent = windows.active
+      {peek, windows} = Windows.allocate_id(windows)
+      {:ok, tree} = MingaEditor.WindowTree.split(windows.tree, parent, :vertical, peek)
+      chat = Window.new_agent_chat(parent, 24, 80)
+
+      child =
+        Window.new_subagent_peek(
+          peek,
+          {parent, {"task", {"request", "checkpoint", "call"}}},
+          chat.viewport
+        )
+
+      windows =
+        windows
+        |> Windows.replace_window(parent, chat)
+        |> Windows.set_tree(tree)
+        |> Windows.add_window(child)
+        |> Windows.set_active(peek)
+
+      state = %{state | workspace: SessionState.set_windows(state.workspace, windows)}
+      assert AgentContextBuilder.build(Context.from_editor_state(state)).visible
+
+      for input <- [state, Input.from_editor_state(state)] do
+        assert SurfaceRegistry.rect_for(input, :agent_context) == nil
+      end
+    end
+
     test "no footer overlay is placed when none is visible" do
       state = base_state()
       ids = state |> SurfaceRegistry.placements() |> Enum.map(& &1.surface_id)

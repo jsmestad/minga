@@ -328,7 +328,12 @@ defmodule MingaEditor.Remote.EventReplayTest do
       {:thinking_delta, %{"delta" => "think"}, {:thinking_delta, "think"}},
       {:tool_call_started,
        %{"tool_call_id" => "tc1", "name" => "read_file", "args" => %{"path" => "lib/a.ex"}},
-       {:tool_started, "tc1", "read_file", %{"path" => "lib/a.ex"}}},
+       {:tool_started,
+        %MingaAgent.Event.ToolStart{
+          tool_call_id: "tc1",
+          name: "read_file",
+          args: %{"path" => "lib/a.ex"}
+        }}},
       {:tool_call_updated,
        %{"tool_call_id" => "tc1", "name" => "shell", "partial_result" => "out"},
        {:tool_update, "tc1", "shell", "out"}},

@@ -103,6 +103,111 @@ public enum NotificationLevel: Sendable, Equatable {
 /// Namespace for all binary protocol data types decoded from the BEAM.
 public enum Wire {
 
+    /// The displayed parent's activations and its optional, exact child pane.
+    public struct SubagentPeek: Equatable, Sendable {
+        public enum Action: UInt8, Sendable {
+            case started = 0, sibling, brief, compose, submit, close, inspect, startedKey, insertText
+        }
+
+        public struct Rect: Equatable, Sendable {
+            public let row: UInt16
+            public let col: UInt16
+            public let width: UInt16
+            public let height: UInt16
+
+            public init(row: UInt16, col: UInt16, width: UInt16, height: UInt16) {
+                self.row = row
+                self.col = col
+                self.width = width
+                self.height = height
+            }
+        }
+
+        public struct Step: Equatable, Sendable {
+            public let entryID: UInt32
+            public let token: String
+            public let label: String
+            public let report: String
+
+            public init(entryID: UInt32, token: String, label: String, report: String) {
+                self.entryID = entryID
+                self.token = token
+                self.label = label
+                self.report = report
+            }
+        }
+
+        public struct Sibling: Equatable, Sendable, Identifiable {
+            public let token: String
+            public let title: String
+            public let state: UInt8
+            public var id: String { token }
+
+            public init(token: String, title: String, state: UInt8) {
+                self.token = token
+                self.title = title
+                self.state = state
+            }
+        }
+
+        public struct Pane: Equatable, Sendable {
+            public let windowID: UInt16
+            public let parentRect: Rect
+            public let peekRect: Rect
+            public let token: String
+            public let parent: String
+            public let title: String
+            public let state: UInt8
+            public let elapsed: String
+            public let index: UInt16
+            public let siblings: [Sibling]
+            public let brief: String
+            public let result: String
+            public let prompt: String
+            public let cursorRow: UInt32
+            public let cursorColumn: UInt32
+            public let flags: UInt8
+            public let notice: String
+
+            public init(windowID: UInt16, parentRect: Rect, peekRect: Rect, token: String, parent: String, title: String, state: UInt8, elapsed: String, index: UInt16, siblings: [Sibling], brief: String, result: String, prompt: String, cursorRow: UInt32, cursorColumn: UInt32, flags: UInt8, notice: String) {
+                self.windowID = windowID
+                self.parentRect = parentRect
+                self.peekRect = peekRect
+                self.token = token
+                self.parent = parent
+                self.title = title
+                self.state = state
+                self.elapsed = elapsed
+                self.index = index
+                self.siblings = siblings
+                self.brief = brief
+                self.result = result
+                self.prompt = prompt
+                self.cursorRow = cursorRow
+                self.cursorColumn = cursorColumn
+                self.flags = flags
+                self.notice = notice
+            }
+
+            public var focused: Bool { flags & 1 != 0 }
+            public var editing: Bool { flags & 2 != 0 }
+            public var briefOpen: Bool { flags & 4 != 0 }
+            public var sending: Bool { flags & 8 != 0 }
+            public var hasResult: Bool { flags & 16 != 0 }
+        }
+
+        public let parentWindowID: UInt16
+        public let steps: [Step]
+        public let pane: Pane?
+        public static let empty = SubagentPeek(parentWindowID: 0, steps: [], pane: nil)
+
+        public init(parentWindowID: UInt16, steps: [Step], pane: Pane?) {
+            self.parentWindowID = parentWindowID
+            self.steps = steps
+            self.pane = pane
+        }
+    }
+
     /// A committed projection of the current conversation's queued inputs.
     public struct AgentQueue: Sendable, Equatable {
         public enum Action: UInt8, Sendable {
@@ -309,6 +414,9 @@ public enum Wire {
 
         /// Typed policy projection; never inferred from GUI state.
         public var responderKind: Responder? { Responder(rawValue: responder) }
+
+        /// Parent Agent conversation and its peek share the editor responder.
+        public var ownsAgentConversation: Bool { surface == 2 }
 
         /// The conversation's queue has its own keymap but uses the editor responder.
         public static let agentQueueSurface: UInt8 = 15

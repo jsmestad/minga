@@ -137,6 +137,8 @@ defmodule Minga.Test.KeyGrammar do
     {:prompt, :insert} => :picker,
     {:queue, :normal} => :special,
     {:queue, :cua} => :special_cua,
+    {:subagent_peek, :normal} => :special,
+    {:subagent_peek, :cua} => :special_cua,
     {:tasks, :normal} => :special,
     {:tasks, :cua} => :special_cua
   }

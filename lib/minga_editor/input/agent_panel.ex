@@ -37,6 +37,9 @@ defmodule MingaEditor.Input.AgentPanel do
 
   @impl true
   @spec handle_paste(state(), String.t()) :: MingaEditor.Input.Handler.result()
+  def handle_paste(%{workspace: %{keymap_scope: :subagent_peek}} = state, _text),
+    do: {:passthrough, state}
+
   def handle_paste(%{workspace: %{agent_ui: %{panel: %{input_focused: true}}}} = state, text) do
     {:handled, AgentCommands.input_paste(state, text)}
   end
@@ -45,9 +48,10 @@ defmodule MingaEditor.Input.AgentPanel do
 
   @spec route_panel_key(UIState.Panel.t(), EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
-  # The file tree always owns its keys, even if a stale composer focus survives.
-  defp route_panel_key(_panel, %{workspace: %{keymap_scope: :file_tree}} = state, _cp, _mods),
-    do: {:passthrough, state}
+  # A stale parent composer cannot claim text over a different focused surface.
+  defp route_panel_key(_panel, %{workspace: %{keymap_scope: scope}} = state, _cp, _mods)
+       when scope in [:file_tree, :subagent_peek],
+       do: {:passthrough, state}
 
   defp route_panel_key(%{visible: true, input_focused: true}, state, cp, mods) do
     {:handled, handle_panel_input(state, cp, mods)}

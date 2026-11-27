@@ -33,8 +33,12 @@ defmodule MingaEditor.Remote.EventReplay do
     do: {:thinking_delta, string_payload(payload, "delta")}
 
   def to_agent_event(%EventRecord{event_type: :tool_call_started, payload: payload}) do
-    {:tool_started, string_payload(payload, "tool_call_id"), string_payload(payload, "name"),
-     map_payload(payload, "args")}
+    {:tool_started,
+     %MingaAgent.Event.ToolStart{
+       tool_call_id: string_payload(payload, "tool_call_id"),
+       name: string_payload(payload, "name"),
+       args: map_payload(payload, "args")
+     }}
   end
 
   def to_agent_event(%EventRecord{event_type: :tool_call_finished, payload: payload}) do

@@ -45,9 +45,9 @@ struct KeyboardInputTests {
     }
 
     @MainActor
-    private func makeRequiredView(spy: SpyEncoder) -> EditorNSView? {
+    private func makeRequiredView(spy: SpyEncoder, guiState: GUIState? = nil) -> EditorNSView? {
         let fm = FontManager(name: "Menlo", size: 13.0, scale: 1.0)
-        let guiState = GUIState()
+        let guiState = guiState ?? GUIState()
         let disp = CommandDispatcher(cols: 80, rows: 24, guiState: guiState)
         var factories = NativeRenderFactories.production
         factories.makeLibrary = { device in
@@ -361,6 +361,47 @@ struct KeyboardInputTests {
 
         #expect(spy.keyPressCalls.map(\.codepoint) == "日本".unicodeScalars.map(\.value))
         #expect(view.hasMarkedText() == false)
+    }
+
+    @Test("child composition commits one semantic action to its exact peek composer")
+    @MainActor func peekCompositionCommitsToExactChild() throws {
+        let spy = SpyEncoder()
+        let gui = GUIState()
+        let view = try #require(makeRequiredView(spy: spy, guiState: gui))
+        let rect = Wire.SubagentPeek.Rect(row: 0, col: 0, width: 40, height: 24)
+        let sibling = Wire.SubagentPeek.Sibling(token: "exact-child", title: "Child", state: 1)
+        let pane = Wire.SubagentPeek.Pane(
+            windowID: 8, parentRect: rect, peekRect: rect, token: sibling.token,
+            parent: "Parent", title: sibling.title, state: 1, elapsed: "1s",
+            index: 1, siblings: [sibling], brief: "Inspect", result: "", prompt: "",
+            cursorRow: 0, cursorColumn: 0, flags: 3, notice: ""
+        )
+        gui.subagentPeekState.publish(metadata: .init(parentWindowID: 7, steps: [], pane: pane), transcript: nil)
+        let notFound = NSRange(location: NSNotFound, length: 0)
+        view.setMarkedText("にほん", selectedRange: NSRange(location: 3, length: 0), replacementRange: notFound)
+        view.insertText("日本", replacementRange: notFound)
+
+        #expect(spy.keyPressCalls.isEmpty)
+        #expect(spy.actions.contains(.subagentPeek(.insertText, windowID: 8, displayed: "exact-child", target: "日本", row: 0, column: 0)))
+        #expect(view.hasMarkedText() == false)
+    }
+
+    @Test("parent composition commits with its displayed draft presentation rather than generic keys")
+    @MainActor func parentCompositionCommitsToExactDraft() throws {
+        let spy = SpyEncoder()
+        let gui = GUIState()
+        let view = try #require(makeRequiredView(spy: spy, guiState: gui))
+        gui.agentChatState.update(
+            visible: true, status: .idle, model: "", thinkingLevel: "", prompt: "",
+            promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0, promptMode: .insert,
+            promptVisibleRows: 1, promptCompletion: nil, promptPresentation: 201, promptFocused: true
+        )
+        let notFound = NSRange(location: NSNotFound, length: 0)
+        view.setMarkedText("にほん", selectedRange: NSRange(location: 3, length: 0), replacementRange: notFound)
+        view.insertText("日本", replacementRange: notFound)
+
+        #expect(spy.keyPressCalls.isEmpty)
+        #expect(spy.actions.contains(.subagentPeek(.insertText, windowID: 65_534, displayed: "201", target: "日本", row: 0, column: 0)))
     }
 
     @Test("input method cancellation clears marked text without changing the document")

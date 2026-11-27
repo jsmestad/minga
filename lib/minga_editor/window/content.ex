@@ -20,13 +20,15 @@ defmodule MingaEditor.Window.Content do
   | `:buffer` | `pid()` (Buffer.Process) | Yes |
   | `:agent_chat` | `:semantic` | No |
   | `:agent_review` | `:semantic` | No |
+  | `:subagent_peek` | Parent window and exact child invocation | No |
   | `:empty` | `:semantic` | No |
 
   `:empty` is the zero-buffers launchpad surface (#2689): the window stays
   open with no backing buffer, and the frontends render the semantic
-  launchpad frame natively. Only these tags are implemented today. Add
-  future content types when they ship.
+  launchpad frame natively.
   """
+
+  @type peek_ref :: {MingaEditor.Window.id(), MingaAgent.SessionManager.foreground_identity()}
 
   @typedoc """
   A content reference identifying what a window pane displays.
@@ -35,6 +37,7 @@ defmodule MingaEditor.Window.Content do
           {:buffer, pid()}
           | {:agent_chat, :semantic}
           | {:agent_review, :semantic}
+          | {:subagent_peek, peek_ref()}
           | {:empty, :semantic}
 
   @doc "Creates a buffer content reference."
@@ -48,6 +51,12 @@ defmodule MingaEditor.Window.Content do
   @doc "Creates a read-only semantic projection of the selected agent review."
   @spec agent_review() :: t()
   def agent_review, do: {:agent_review, :semantic}
+
+  @doc "References one child in a peek beside its originating conversation window."
+  @spec subagent_peek(peek_ref()) :: t()
+  def subagent_peek({parent_window, {parent_task, {_request, _checkpoint, _call}}} = ref)
+      when is_integer(parent_window) and is_binary(parent_task),
+      do: {:subagent_peek, ref}
 
   @doc "Creates a semantic empty-state (launchpad) content reference."
   @spec empty() :: t()

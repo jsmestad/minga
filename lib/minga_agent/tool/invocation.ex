@@ -14,6 +14,8 @@ defmodule MingaAgent.Tool.Invocation do
           arguments: map()
         }
 
+  @type key :: {String.t(), String.t(), String.t()}
+
   @doc "Captures call identity without accepting authorization or executable values."
   @spec new(Request.t(), String.t(), map()) :: t()
   def new(%Request{} = request, checkpoint_id, call) do
@@ -27,7 +29,11 @@ defmodule MingaAgent.Tool.Invocation do
   end
 
   @doc "Returns the session-local one-shot lifecycle key."
-  @spec key(t()) :: {String.t(), String.t(), String.t()}
+  @spec key(t()) :: key()
   def key(%__MODULE__{} = invocation),
-    do: {invocation.request_id, invocation.checkpoint_id, invocation.call_id}
+    do: key(invocation.request_id, invocation.checkpoint_id, invocation.call_id)
+
+  @doc "Names an invocation at a request checkpoint without building its executable declaration."
+  @spec key(String.t(), String.t(), String.t()) :: key()
+  def key(request_id, checkpoint_id, call_id), do: {request_id, checkpoint_id, call_id}
 end

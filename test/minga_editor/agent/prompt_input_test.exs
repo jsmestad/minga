@@ -179,6 +179,40 @@ defmodule MingaEditor.Agent.PromptInputTest do
            ) == 1
   end
 
+  test "a late parent IME commit can neither refocus a transcript nor write into a different pane" do
+    {state, _regular} = prompt_state("parent draft")
+    {state, _runtime, _connection, _ui} = with_send_owner(state)
+    {state, _output, _model, _lease, _registry} = present(state, 20, 201)
+    buffer = state.workspace.agent_ui.panel.prompt_buffer
+    Buffer.move_to(buffer, {0, byte_size("parent draft")})
+    action = {:subagent_peek_action, :insert_text, 65_534, "201", "日本", {0, 0}}
+
+    blurred_ui = PromptBuffer.set_input_focused(state.workspace.agent_ui, false)
+    blurred = %{state | workspace: SessionState.set_agent_ui(state.workspace, blurred_ui)}
+    _ = GuiActionHandler.dispatch(blurred, action)
+    assert Buffer.content(buffer) == "parent draft"
+
+    opened = GuiActionHandler.dispatch(state, action)
+    assert PromptBuffer.input_text(opened.workspace.agent_ui) == "parent draft日本"
+
+    key = {"request", "batch", "child"}
+    {:ok, %Window{viewport: viewport}} = Windows.fetch(state.workspace.windows, 1)
+    peek = Window.new_subagent_peek(2, {1, {"original", key}}, viewport)
+    {:ok, tree} = MingaEditor.WindowTree.split(state.workspace.windows.tree, 1, :vertical, 2)
+    windows = Windows.new(tree, 2, 3, Map.put(state.workspace.windows.map, 2, peek))
+
+    inspecting = %{
+      state
+      | workspace:
+          state.workspace
+          |> SessionState.set_windows(windows)
+          |> SessionState.set_keymap_scope(:subagent_peek)
+    }
+
+    _ = GuiActionHandler.dispatch(inspecting, action)
+    assert Buffer.content(buffer) == "parent draft日本"
+  end
+
   test "Send refuses absent or obsolete attachment offers before running a slash command" do
     {state, _regular} = prompt_state("/help")
     {state, _runtime, connection, ui} = with_send_owner(state)

@@ -17,6 +17,8 @@ defmodule MingaEditor do
   alias MingaEditor.Agent.TranscriptSync
   alias MingaEditor.Agent.SessionFollowUp
   alias MingaEditor.Agent.TurnRequest
+  alias MingaEditor.Agent.SubagentPeekComposer
+  alias MingaEditor.Agent.SubagentPeekSession
   alias MingaEditor.Agent.SessionStart
   alias MingaEditor.Agent.Events
   alias MingaEditor.Agent.UIState
@@ -386,6 +388,8 @@ defmodule MingaEditor do
     EventBus.subscribe(:agent_session_stopped, events_registry)
     EventBus.subscribe(:agent_session_restarted, events_registry)
     EventBus.subscribe(:background_subagent_started, events_registry)
+    EventBus.subscribe(:foreground_subagent_changed, events_registry)
+    EventBus.subscribe(:foreground_subagent_disposed, events_registry)
     EventBus.subscribe(:node_connected, events_registry)
     EventBus.subscribe(:node_disconnected, events_registry)
     EventBus.subscribe(:load_user_themes, events_registry)
@@ -1413,6 +1417,24 @@ defmodule MingaEditor do
     {:noreply, Arrival.ready(state, session, token, capture)}
   end
 
+  def handle_info({:subagent_peek_ready, token, result}, state) do
+    {:noreply, state |> SubagentPeekSession.ready(token, result) |> schedule_render(16)}
+  end
+
+  def handle_info({:subagent_peek_sent, identity, token, result}, state) do
+    {:noreply, state |> SubagentPeekComposer.sent(identity, token, result) |> schedule_render(16)}
+  end
+
+  def handle_info({:subagent_peek_event, session, :messages_changed}, state) do
+    {:noreply, SubagentPeekSession.refresh(state, session)}
+  end
+
+  def handle_info({:subagent_peek_event, _session, _event}, state), do: {:noreply, state}
+
+  def handle_info({:subagent_peek_transcript_changed, session}, state) do
+    {:noreply, SubagentPeekSession.refresh(state, session)}
+  end
+
   def handle_info({:agent_arrival_deadline, token}, state) do
     {:noreply, Arrival.presentation_deadline(state, token)}
   end
@@ -1608,6 +1630,7 @@ defmodule MingaEditor do
   defp agent_request_response(state, message) do
     with :unrelated <- Arrival.response(state, message),
          :unrelated <- TranscriptSync.response(state, message) |> render_handled(),
+         :unrelated <- SubagentPeekSession.response(state, message) |> render_handled(),
          :unrelated <- TurnRequest.response(state, message) |> render_handled(),
          :unrelated <- SessionStart.response(state, message) |> render_handled() do
       SessionFollowUp.response(state, message) |> render_handled()

@@ -99,6 +99,33 @@ defmodule MingaEditor.Window do
     }
   end
 
+  @doc "Creates a peek as a separate semantic window."
+  @spec new_subagent_peek(id(), Content.peek_ref(), Viewport.t()) :: t()
+  def new_subagent_peek(id, ref, %Viewport{} = viewport) do
+    %__MODULE__{
+      id: id,
+      content: Content.subagent_peek(ref),
+      viewport: Viewport.new(viewport.rows, viewport.cols),
+      accessibility_generation: new_accessibility_generation(),
+      pinned: true
+    }
+  end
+
+  @doc "Changes the child shown in this peek without moving the pane."
+  @spec show_subagent(t(), Content.peek_ref()) :: t()
+  def show_subagent(%__MODULE__{content: {:subagent_peek, ref}} = window, ref), do: window
+
+  def show_subagent(
+        %__MODULE__{content: {:subagent_peek, {parent, _old}}} = window,
+        {parent, _new} = ref
+      ) do
+    %{
+      window
+      | content: Content.subagent_peek(ref),
+        accessibility_generation: new_accessibility_generation()
+    }
+  end
+
   @doc "Creates a new window showing the zero-buffers launchpad surface (#2689)."
   @spec new_empty_state(id(), pos_integer(), pos_integer()) :: t()
   def new_empty_state(id, rows, cols)
@@ -170,6 +197,10 @@ defmodule MingaEditor.Window do
       do: window
 
   def show_agent_body(%__MODULE__{content: {:empty, :semantic}} = window, body)
+      when body in [:chat, :review],
+      do: window
+
+  def show_agent_body(%__MODULE__{content: {:subagent_peek, _ref}} = window, body)
       when body in [:chat, :review],
       do: window
 

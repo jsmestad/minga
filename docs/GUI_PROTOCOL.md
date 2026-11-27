@@ -642,6 +642,16 @@ The envelope is `opcode(1) + payload_length(u32) + payload`. A hidden queue send
 
 Row kind is `0` for steering and `1` for a future turn. A row's label is display text, never an activation target. `agent_queue_action` carries the exact conversation, selected or clicked pending row, and the removed row to put back. Follow the selected pending row when its identity changes. Wheel movement within the block is local and does not scroll the transcript.
 
+### 0xAF: gui_subagent_peek
+
+The parent remains an ordinary Agent conversation. This `len32` command adds Started-row offers and at most one child pane. The full fields and lengths are in `docs/protocol_schema.toml`. The parent window ID and each step's transcript entry ID identify where the BEAM offered the action. The child token, not its title or sibling index, identifies the exact invocation.
+
+The pane names both window rectangles and carries the immutable result separately from live activity. Flag bits `0` through `4` mean focused, composer editing, Brief open, send pending, and Result present. Cursor coordinates are a zero-based line and UTF-8 byte column.
+
+### 0xB0: gui_subagent_peek_transcript
+
+The child uses the `gui_agent_transcript` payload (0x86) with its own epoch and base. When a frame changes or closes the pane token, the frontend drops the previous child store. A new child may be visible with no transcript while its reader attaches. Its first transcript update must be a full replace, even if its epoch and message IDs match the previous child. The BEAM sends changed peek metadata before its child transcript update, and a rejected frame changes neither transcript.
+
 
 ### 0x79 — gui_gutter_separator
 
@@ -1439,6 +1449,7 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x74 | which_key_back | `path(string16)` | Go back up to a breadcrumb crumb's `path`. The BEAM goes up only while the open panel is below that path. |
 | 0x75 | agent_continue_turn | `session_id(string16) + request_id(string16)` | Continue the interrupted request shown by the stopped conversation. A stale action cannot continue a replacement turn. This action does not send or clear the draft or advance the queue. |
 | 0x76 | agent_queue_action | `action(u8) + workspace_id(u32) + record_id(string16) + row_id(u64) + row_revision(u64) + removed_id(u64) + removed_revision(u64)` | `0` select, `1` remove, `2` put back after, `3` put back before, `4` edit, `5` close, `6` return to the composer from empty. Send the displayed pending pair for select, remove, edit and both placement actions. Placement also names the displayed removed pair. Close and empty use no pairs. An absent pair is two zeroes. A stale conversation or row leaves the queue unchanged. |
+| 0x77 | subagent_peek_action | `kind(u8) + window_id(u16) + displayed(string16) + target(string16) + row(u32) + column(u32)` | `0` pointer Started and `7` keyboard Return: parent window and target token. Return opens the selection only while the parent transcript owns input. If the same conversation's composer took focus, Return goes to that composer with the attachment offer the frontend saw (`displayed`, decimal or empty). `1` sibling: child window, displayed token and target token. `2` Brief, `3` composer cursor, `4` send, `5` close and `6` inspect: child window and displayed token, no target token. Only `3` includes a nonzero cursor coordinate. `8` commits UTF-8 text from `target` to the exact focused composer: child window and displayed child token, or reserved window `65534` and the parent composer presentation in decimal. Stale windows or tokens cannot retarget an action. |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |

@@ -72,7 +72,8 @@ defmodule MingaAgent.SessionTranscriptCursorTest do
     assert_receive {:agent_event, ^session, event}
                    when elem(event, 0) in [:tool_started, :editor_arrival_ready]
 
-    assert {:tool_started, "arriving", "probe", %{}} = event
+    assert {:tool_started, %Event.ToolStart{tool_call_id: "arriving", name: "probe", args: %{}}} =
+             event
 
     assert_receive {:agent_event, ^session,
                     {:editor_arrival_ready, ^arrival,

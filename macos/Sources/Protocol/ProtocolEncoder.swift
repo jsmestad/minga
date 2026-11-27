@@ -233,6 +233,15 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
                 return .invalidPayload("Agent queue action requires the displayed queue and action targets")
             }
             return oversizedString(origin.recordID, limit: Int(UInt16.max))
+        case .subagentPeek(let action, let windowID, let displayed, let target, _, _):
+            let valid = switch action {
+            case .started: displayed.isEmpty && !target.isEmpty
+            case .startedKey: !target.isEmpty
+            case .sibling, .insertText: !displayed.isEmpty && !target.isEmpty
+            default: !displayed.isEmpty && target.isEmpty
+            }
+            guard valid, windowID != 0 else { return .invalidPayload("Subagent peek requires a displayed target") }
+            return firstOversizedString(in: [displayed, target], limit: Int(UInt16.max))
         case .agentOpenQuestion(let offer):
             return offer == 0 ? .invalidPayload("Agent question requires a displayed offer") : nil
         case .agentStopTurn(let target), .agentContinueTurn(let target):
@@ -454,6 +463,17 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             writeU64(&buf, offset + 8, row?.revision ?? 0)
             writeU64(&buf, offset + 16, removed?.id ?? 0)
             writeU64(&buf, offset + 24, removed?.revision ?? 0)
+            writeFrame(buf)
+        case .subagentPeek(let action, let windowID, let displayed, let target, let row, let column):
+            var buf = Data([OP_GUI_ACTION, GUI_ACTION_SUBAGENT_PEEK_ACTION, action.rawValue, 0, 0])
+            buf.reserveCapacity(17 + displayed.utf8.count + target.utf8.count)
+            writeU16(&buf, 3, windowID)
+            appendString16(&buf, displayed)
+            appendString16(&buf, target)
+            let offset = buf.count
+            buf.count += 8
+            writeU32(&buf, offset, row)
+            writeU32(&buf, offset + 4, column)
             writeFrame(buf)
         case .agentOpenQuestion(let offer):
             var buf = Data(count: 10)

@@ -138,7 +138,18 @@ defmodule MingaEditor.RenderPipeline.Input do
       end
 
     {:ok, root} = MingaEditor.RenderModel.UI.AgentChatBuilder.admit(nil, update, intent)
-    Intent.with_agent_transcript(intent, root)
+
+    peek_update =
+      case WorkspaceIntent.peek_source(intent.workspace) do
+        nil -> nil
+        projection -> MingaEditor.Renderer.TranscriptUpdate.seed(projection, 0)
+      end
+
+    {:ok, peek_root} = MingaEditor.RenderModel.UI.AgentChatBuilder.admit_peek(nil, peek_update)
+
+    intent
+    |> Intent.with_agent_transcript(root)
+    |> Intent.with_peek_transcript(peek_root)
   end
 
   @spec file_tree_state(t()) :: FileTreeState.t()

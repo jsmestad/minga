@@ -2,7 +2,9 @@ defmodule MingaAgent.Tools.Subagent do
   @moduledoc """
   Starts a child agent session to work on a subtask.
 
-  Foreground sub-agents keep the historical blocking behavior: the tool call waits for the child to finish and returns the final assistant text. Background sub-agents are registered with `MingaAgent.SessionManager`, return a stable session handle immediately, and keep the child chat alive for later inspection.
+  Foreground calls return the first request's result. A child from an admitted
+  parent tool call stays managed and writable until stopped; a direct foreground
+  call stops its child at return. Background calls return a stable handle immediately.
   """
 
   alias MingaAgent.ProviderResolver
@@ -12,6 +14,7 @@ defmodule MingaAgent.Tools.Subagent do
   alias MingaAgent.Subagent.Worktree
   alias MingaAgent.SubagentContext
   alias MingaAgent.Supervisor, as: AgentSupervisor
+  alias MingaAgent.Tool.Invocation
 
   @typedoc "Provider override accepted by direct callers and the tool schema."
   @type provider_override :: :native | module() | String.t() | nil
@@ -32,6 +35,8 @@ defmodule MingaAgent.Tools.Subagent do
           model: String.t() | nil,
           provider: provider_override(),
           parent_session: GenServer.server() | nil,
+          session_invocation: {GenServer.server(), Invocation.t()} | nil,
+          parent_task_id: String.t() | nil,
           project_root: String.t() | nil,
           provider_opts: keyword(),
           background: boolean(),
@@ -54,10 +59,15 @@ defmodule MingaAgent.Tools.Subagent do
   """
   @spec execute(String.t(), opts()) :: {:ok, String.t()} | {:error, String.t()}
   def execute(task, opts \\ []) when is_binary(task) do
-    if Keyword.get(opts, :background, false) do
-      start_background(task, opts)
-    else
-      start_foreground(task, opts)
+    case {Keyword.get(opts, :background, false), Keyword.get(opts, :session_invocation)} do
+      {true, _invocation} ->
+        start_background(task, opts)
+
+      {false, nil} ->
+        start_foreground(task, opts)
+
+      {false, {session, %Invocation{} = invocation}} ->
+        start_admitted(task, opts, session, invocation)
     end
   end
 
@@ -112,6 +122,55 @@ defmodule MingaAgent.Tools.Subagent do
     end
   end
 
+  @spec start_admitted(String.t(), opts(), GenServer.server(), Invocation.t()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp start_admitted(task, opts, parent, invocation) do
+    task_id = Keyword.fetch!(opts, :parent_task_id)
+
+    with {:ok, parent_context} <-
+           Session.admitted_subagent_context(parent, task_id, invocation),
+         {:ok, root} <- admitted_project_root(opts),
+         {:ok, session_opts} <- session_opts(opts, parent_context, root),
+         {:ok, text, worktree} <-
+           Session.run_admitted_subagent(
+             parent,
+             task_id,
+             invocation,
+             task,
+             session_opts,
+             project_root: root,
+             isolated?: worktree_isolation?(opts),
+             timeout: Keyword.get(opts, :startup_timeout_ms, @subagent_timeout_ms)
+           ) do
+      result = response_text(text)
+      {:ok, if(worktree, do: result <> Worktree.metadata(worktree), else: result)}
+    else
+      {:error, {:provider_resolution_failed, reason}} ->
+        {:error, "Failed to resolve subagent provider: #{reason}"}
+
+      {:error, reason} when is_binary(reason) ->
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, "Foreground subagent unavailable: #{inspect(reason)}"}
+    end
+  catch
+    :exit, reason -> {:error, "Foreground subagent unavailable: #{inspect(reason)}"}
+  end
+
+  @spec admitted_project_root(opts()) :: {:ok, String.t()} | {:error, :project_root_unavailable}
+  defp admitted_project_root(opts) do
+    case Keyword.get(opts, :project_root) do
+      root when is_binary(root) and byte_size(root) > 0 ->
+        if Path.type(root) == :absolute,
+          do: {:ok, root},
+          else: {:error, :project_root_unavailable}
+
+      _ ->
+        {:error, :project_root_unavailable}
+    end
+  end
+
   @spec start_foreground(String.t(), opts()) :: {:ok, String.t()} | {:error, String.t()}
   defp start_foreground(task, opts) do
     if worktree_isolation?(opts) do
@@ -123,10 +182,15 @@ defmodule MingaAgent.Tools.Subagent do
 
   @spec do_start_foreground(String.t(), opts()) :: {:ok, String.t()} | {:error, String.t()}
   defp do_start_foreground(task, opts) do
+    handback = make_ref()
+
     with {:ok, session_opts} <- session_opts(opts),
-         {:ok, session_pid} <- AgentSupervisor.start_session(session_opts) do
+         {:ok, session_pid} <-
+           AgentSupervisor.start_session(
+             Keyword.put(session_opts, :subagent_handback, {self(), handback, nil})
+           ) do
       timeout = Keyword.get(opts, :startup_timeout_ms, @subagent_timeout_ms)
-      run_subagent(session_pid, task, timeout)
+      run_subagent(session_pid, task, timeout, handback)
     else
       {:error, {:provider_resolution_failed, reason}} ->
         {:error, "Failed to resolve subagent provider: #{reason}"}
@@ -159,12 +223,13 @@ defmodule MingaAgent.Tools.Subagent do
     end
   end
 
-  @spec run_subagent(pid(), String.t(), pos_integer()) :: {:ok, String.t()} | {:error, String.t()}
-  defp run_subagent(session_pid, task, timeout) do
+  @spec run_subagent(pid(), String.t(), pos_integer(), reference()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp run_subagent(session_pid, task, timeout, handback) do
     :ok = Session.subscribe(session_pid, self(), [], timeout)
 
     case send_prompt_when_ready(session_pid, task, 0) do
-      :ok -> collect_response(session_pid)
+      :ok -> collect_response_loop(session_pid, handback, "", @subagent_timeout_ms)
       {:error, reason} -> {:error, "Subagent failed to start: #{inspect(reason)}"}
     end
   catch
@@ -191,35 +256,32 @@ defmodule MingaAgent.Tools.Subagent do
     end
   end
 
-  @spec collect_response(pid()) :: {:ok, String.t()} | {:error, String.t()}
-  def collect_response(session_pid) do
-    collect_response_loop(session_pid, "", @subagent_timeout_ms)
-  end
-
-  @spec collect_response_loop(pid(), String.t(), non_neg_integer()) ::
+  @spec collect_response_loop(pid(), reference(), String.t(), non_neg_integer()) ::
           {:ok, String.t()} | {:error, String.t()}
-  def collect_response_loop(session_pid, text_acc, timeout) do
+  def collect_response_loop(session_pid, handback, text_acc, timeout) do
     receive do
       {:agent_event, ^session_pid, {:text_delta, delta}} ->
-        collect_response_loop(session_pid, text_acc <> delta, timeout)
+        collect_response_loop(session_pid, handback, text_acc <> delta, timeout)
 
-      {:agent_event, ^session_pid, {:status_changed, :idle}} ->
-        result = String.trim(text_acc)
-
-        if result == "" do
-          {:ok, "(subagent completed with no text output)"}
-        else
-          {:ok, result}
-        end
+      {:subagent_handback, ^session_pid, ^handback} ->
+        {:ok, response_text(text_acc)}
 
       {:agent_event, ^session_pid, {:error, message}} ->
         {:error, "Subagent error: #{message}"}
 
       {:agent_event, ^session_pid, _other_event} ->
-        collect_response_loop(session_pid, text_acc, timeout)
+        collect_response_loop(session_pid, handback, text_acc, timeout)
     after
       timeout ->
         {:error, "Subagent timed out after #{div(@subagent_timeout_ms, 1000)} seconds"}
+    end
+  end
+
+  @spec response_text(String.t()) :: String.t()
+  defp response_text(text) do
+    case String.trim(text) do
+      "" -> "(subagent completed with no text output)"
+      result -> result
     end
   end
 
@@ -242,13 +304,16 @@ defmodule MingaAgent.Tools.Subagent do
           {:ok, keyword()} | {:error, {:provider_resolution_failed, String.t()}}
   defp session_opts(opts) do
     parent_ctx = parent_context(opts)
+    root = Keyword.get(opts, :project_root) || parent_ctx.project_root || detect_project_root()
+    session_opts(opts, parent_ctx, root)
+  end
 
+  @spec session_opts(opts(), parent_context(), String.t()) ::
+          {:ok, keyword()} | {:error, {:provider_resolution_failed, String.t()}}
+  defp session_opts(opts, parent_ctx, project_root) do
     case resolve_provider(Keyword.get(opts, :provider), parent_ctx) do
       {:ok, resolved_provider} ->
         model = Keyword.get(opts, :model) || parent_ctx.model
-
-        project_root =
-          Keyword.get(opts, :project_root) || parent_ctx.project_root || detect_project_root()
 
         thinking_level = parent_ctx.thinking_level
         active_skill_names = parent_ctx.active_skill_names

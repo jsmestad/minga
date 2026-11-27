@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `/model` can select Apple Intelligence without credentials on eligible macOS 27+ devices in builds that include the inference helper. It runs on device with a compact file tool set and keeps normal approvals.
 - `SPC h a` searches command names and descriptions and opens the selected command's help without running it.
 - Agent workspaces have a **Tasks** inspector. The checklist, blockers, and retained results survive restart and follow the selected conversation branch.
+- `SPC a i` inspects a subagent beside its parent conversation on macOS and in the terminal. Read its brief, activity, and result, step through siblings with `]]` and `[[`, or message that exact child without changing the parent's draft.
 - `SPC a F` attaches saved text from a selected project file to a local Agent draft. The attachment retains what was read, even if the file changes before sending.
 - `SPC a D` or the macOS editor context menu captures a file's published diagnostics as an inspectable Agent draft attachment.
 - The Agent can pause for a question. Use **Answer question** or `SPC a Q` to choose an answer, type your own, or cancel without granting tool permission.

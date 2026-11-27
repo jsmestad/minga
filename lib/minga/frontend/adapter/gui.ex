@@ -6,6 +6,8 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.AgentHelpEncoder
   alias Minga.Frontend.Adapter.GUI.AgentQueueEncoder
   alias Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder
+  alias Minga.Frontend.Adapter.GUI.SubagentPeekEncoder
+  alias Minga.Frontend.Adapter.GUI.SubagentPeekTranscriptEncoder
   alias Minga.Frontend.Adapter.GUI.BottomPanelEncoder
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
@@ -71,6 +73,8 @@ defmodule Minga.Frontend.Adapter.GUI do
     # Resident transcript stream (0x86) reads the same agent_chat model and emits
     # alongside the 0x78 chrome frame.
     {:agent_chat, AgentTranscriptEncoder},
+    {:subagent_peek, SubagentPeekEncoder},
+    {:subagent_peek, SubagentPeekTranscriptEncoder},
     {:bottom_panel, BottomPanelEncoder},
     {:edit_timeline, EditTimelineEncoder},
     {:tasks_drawer, TasksDrawerEncoder},

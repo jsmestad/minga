@@ -39,6 +39,7 @@ defmodule MingaEditor.Input.CUA.SpaceTarget do
       # Input.TasksDrawer (priority 15) takes keys ahead of every other surface and types no text.
       surface == :tasks -> :no_text
       surface == :queue -> :no_text
+      workspace.keymap_scope == :subagent_peek -> :no_text
       side_panel_composer?(workspace) -> {:composer, workspace.agent_ui.panel.prompt_buffer}
       generic_sidebar_focused?(state) -> :no_text
       surface == :empty_state -> :no_text
@@ -48,10 +49,10 @@ defmodule MingaEditor.Input.CUA.SpaceTarget do
     end
   end
 
-  # Input.AgentPanel (priority 40) claims keys for a focused side panel composer over any scope but the file tree.
+  # Input.AgentPanel (priority 40) claims keys for a focused side panel composer unless another surface owns them.
   @spec side_panel_composer?(MingaEditor.Session.State.t()) :: boolean()
   defp side_panel_composer?(%{keymap_scope: scope, agent_ui: %{panel: panel}}),
-    do: scope != :file_tree and panel.visible and panel.input_focused
+    do: scope not in [:file_tree, :subagent_peek] and panel.visible and panel.input_focused
 
   # Input.Sidebar (priority 45) claims every key for a focused left sidebar without its own input handler,
   # such as the BEAM Observatory, and hands it to the sidebar's action handler.

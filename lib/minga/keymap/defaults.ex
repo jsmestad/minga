@@ -143,6 +143,7 @@ defmodule Minga.Keymap.Defaults do
 
     # ── Minga (SPC a): everyday keys at the top, the rest in three groups ────
     {~k(a a), :agent_tasks, "Tasks"},
+    {~k(a i), :agent_inspect_subagent, "Inspect subagent"},
     {~k(a n), :agent_new_task, "New task"},
     {~k(a s), :agent_abort, "Stop"},
     {~k(a u), :undo_agent_session, "Undo all agent edits"},

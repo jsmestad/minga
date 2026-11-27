@@ -19,8 +19,8 @@
 │ Tasks                   Conversation           Changes                       │
 │ a Tasks · 1 needs you   v Conversation split   r Pending reviews             │
 │ n New task              ? Ask about this       u Undo all agent edits        │
-│ s Stop                  e Rewrite selection    p Publish edits…              │
-│                         q Queue ›                                            │
+│ i Inspect subagent      e Rewrite selection    p Publish edits…              │
+│ s Stop                  q Queue ›                                            │
 │                                                                              │
 │ More                                                                         │
 │ x Context ›                                                                  │
@@ -129,7 +129,9 @@
 14 50-78 #4c4f69 #ccd0da -
 14 79-79 #7c7f93 #ccd0da -
 15 0-0 #7c7f93 #ccd0da -
-15 1-25 #4c4f69 #ccd0da -
+15 1-1 #4c4f69 #ccd0da -
+15 2-2 #1e66f5 #ccd0da -
+15 3-25 #4c4f69 #ccd0da -
 15 26-26 #1e66f5 #ccd0da -
 15 27-27 #4c4f69 #ccd0da -
 15 28-34 #1650c0 #ccd0da -

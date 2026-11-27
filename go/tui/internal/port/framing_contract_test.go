@@ -102,6 +102,8 @@ var minimalBodyOverrides = map[byte][]byte{
 	generated.OPGuiTasksDrawer: append([]byte{generated.OPGuiTasksDrawer, 0, 0, 0, 28}, make([]byte, 28)...),
 	// gui_agent_queue (len32): hidden visibility is the entire one-byte body.
 	generated.OPGuiAgentQueue: {generated.OPGuiAgentQueue, 0, 0, 0, 1, 0},
+	// gui_subagent_peek (len32): a cleared peek has a zero parent, step count and pane count (5 bytes).
+	generated.OPGuiSubagentPeek: {generated.OPGuiSubagentPeek, 0, 0, 0, 5, 0, 0, 0, 0, 0},
 }
 
 func TestFramingContractEveryFramedOpcode(t *testing.T) {

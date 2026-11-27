@@ -39,6 +39,15 @@ defmodule Minga.Keymap.ScopeTest do
     end
   end
 
+  test "sibling bindings resolve only in the peek inspector, not in its composer" do
+    for {key, command} <- [{?], :subagent_peek_next}, {?[, :subagent_peek_previous}] do
+      assert {:prefix, prefix} = Scope.resolve_key(:subagent_peek, :normal, {key, 0})
+      assert {:command, ^command} = Bindings.lookup(prefix, {key, 0})
+      assert :not_found = Scope.resolve_key(:subagent_peek, :insert, {key, 0})
+      assert :not_found = Scope.resolve_key(:editor, :normal, {key, 0})
+    end
+  end
+
   describe "resolve_key/4 with :agent scope" do
     test "j returns :not_found (handled by Mode FSM)" do
       assert :not_found = Scope.resolve_key(:agent, :normal, {?j, 0})

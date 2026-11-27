@@ -75,7 +75,7 @@
     20,
     675,
     119,
-    89
+    113
    ],
    "part": "whichKey.column"
   },
@@ -425,7 +425,7 @@
     24
    ],
    "part": "whichKey.entry",
-   "text": "s Stop"
+   "text": "i Inspect subagent"
   },
   {
    "frame": [
@@ -462,22 +462,11 @@
    "frame": [
     35,
     744.5,
-    27,
+    99,
     15
    ],
    "part": "whichKey.entryLabel",
-   "text": "Stop"
-  },
-  {
-   "baseline": 756,
-   "frame": [
-    70,
-    744.5,
-    15,
-    15
-   ],
-   "part": "whichKey.platformKey",
-   "text": "\u2318."
+   "text": "Inspect subagent"
   },
   {
    "baseline": 756,
@@ -521,7 +510,7 @@
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "s"
+   "text": "i"
   },
   {
    "baseline": 756,
@@ -558,6 +547,16 @@
   },
   {
    "frame": [
+    20,
+    764,
+    119,
+    24
+   ],
+   "part": "whichKey.entry",
+   "text": "s Stop"
+  },
+  {
+   "frame": [
     163,
     764,
     117,
@@ -575,6 +574,28 @@
    ],
    "part": "whichKey.entry",
    "text": "A Code autobiography"
+  },
+  {
+   "baseline": 780,
+   "frame": [
+    35,
+    768.5,
+    27,
+    15
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Stop"
+  },
+  {
+   "baseline": 780,
+   "frame": [
+    70,
+    768.5,
+    15,
+    15
+   ],
+   "part": "whichKey.platformKey",
+   "text": "\u2318."
   },
   {
    "baseline": 780,
@@ -597,6 +618,17 @@
    ],
    "part": "whichKey.entryLabel",
    "text": "Code autobiography"
+  },
+  {
+   "baseline": 780,
+   "frame": [
+    20,
+    769.5,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "s"
   },
   {
    "baseline": 780,

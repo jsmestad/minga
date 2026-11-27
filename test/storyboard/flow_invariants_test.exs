@@ -174,7 +174,7 @@ defmodule Minga.Storyboard.FlowInvariantsTest do
       for %Entry{click_reach: {:pending, issue}} <- pending, do: assert(issue > 0)
     end
 
-    test "2. from every built scenario, three presses of esc or q return to plain editing in the same window" do
+    test "2. at most three Escape or q presses return from every built scenario to editing" do
       for entry <- Registry.built() do
         session = Registry.drive(entry)
 
@@ -190,7 +190,7 @@ defmodule Minga.Storyboard.FlowInvariantsTest do
         # A composer with the keyboard offers the reply itself.
         assert model.which_key != nil or Model.open?(model, :picker) or
                  Model.open?(model, :minibuffer) or composer_ready?(model) or
-                 drawer_offers_action?(model),
+                 drawer_offers_action?(model) or peek_offers_action?(model),
                "#{entry.id} shows a state that needs action without offering one: #{Model.signature(model)}"
       end
     end
@@ -255,6 +255,13 @@ defmodule Minga.Storyboard.FlowInvariantsTest do
        do: Enum.any?(rows, &(&1.actions != []))
 
   defp drawer_offers_action?(%Model{}), do: false
+
+  defp peek_offers_action?(%Model{
+         ui: %{subagent_peek: %{pane: %{focused?: true, sending?: false}}}
+       }),
+       do: true
+
+  defp peek_offers_action?(%Model{}), do: false
 
   defp action_state?(id), do: Enum.any?(Inventory.fetch!(id)["states"], &(&1 in @action_states))
 
