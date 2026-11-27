@@ -2,6 +2,9 @@ defmodule Minga.Buffer.SwapLifecycleTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Buffer.Document
+  alias Minga.Buffer.EditSource
+  alias Minga.Buffer.UndoHistory
   alias Minga.Session
   alias Minga.Session.ControllableSwapBackend
   alias Minga.Session.Swap
@@ -64,6 +67,42 @@ defmodule Minga.Buffer.SwapLifecycleTest do
     refute_receive {:swap_published, ^buffer, ^worker, ^generation, ^path, _content, _result}, 0
     refute File.exists?(Swap.swap_path(path, swap_options(tmp_dir)))
     assert File.read!(path) == "unsaved"
+  end
+
+  test "Keep fences a paused dirty checkpoint so that pending review cannot return", %{
+    tmp_dir: dir
+  } do
+    {buffer, path} = start_swap_buffer(dir, swap_backend_options: [prepare_barrier: :after_temp])
+    {:ok, 0} = BufferProcess.set_option(buffer, :auto_save_delay_ms, 0)
+
+    assert {:ok, _version} =
+             BufferProcess.replace_content_if_version(
+               buffer,
+               BufferProcess.version(buffer),
+               "from Minga",
+               EditSource.minga("task", "step")
+             )
+
+    {worker, old_generation} = trigger_swap(buffer, path, "from Minga")
+    monitor = Process.monitor(worker)
+    assert_receive {:swap_temp_created, ^worker, ^old_generation, ^path, _temporary_path}
+    assert {:ok, target, {:minga, "task"}, 1} = BufferProcess.prepare_review(buffer, :latest)
+
+    keeping = Task.async(fn -> BufferProcess.decide_review(buffer, target, :keep) end)
+    assert_receive {:DOWN, ^monitor, :process, ^worker, _reason}
+    assert_receive {:swap_prepare, ^buffer, new_generation, ^path, "from Minga"}
+    assert new_generation > old_generation
+    release_prepare(buffer, new_generation)
+    assert Task.await(keeping) == :ok
+    release_prepare(worker, old_generation)
+
+    assert {:ok, %{kind: :dirty, review: %{dirty: snapshot}}, "from Minga"} =
+             Swap.read(Swap.swap_path(path, swap_options(dir)))
+
+    template = UndoHistory.new(Document.new("from Minga"))
+    assert {:ok, restored} = UndoHistory.restore_snapshot(template, snapshot, "from Minga")
+    assert :empty = UndoHistory.prepare_review(restored, :latest)
+    assert File.read!(path) == "saved content"
   end
 
   test "clean close owns paused writer termination and prevents later publication", %{

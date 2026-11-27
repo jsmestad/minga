@@ -87,10 +87,10 @@ public struct MinibufferView: View {
     @ViewBuilder
     private var inputBar: some View {
         HStack(spacing: 0) {
-            // Prompt prefix (accent-colored)
+            // Confirmation text is the question, not a command prefix.
             Text(state.prompt)
                 .font(Typography.font(.emphasis, weight: .semibold))
-                .foregroundStyle(theme.accent)
+                .foregroundStyle(state.mode == .textPrompt ? theme.popupFg : theme.accent)
                 .padding(.leading, Spacing.lg)
 
             if state.isInputMode {
@@ -226,22 +226,30 @@ public struct MinibufferView: View {
                 // Command name with fuzzy match highlighting
                 highlightedLabel(candidate, isSelected: isSelected)
 
+                if isPromptAction && !candidate.annotation.isEmpty {
+                    Text(candidate.annotation)
+                        .font(Typography.font(.small, design: .monospaced))
+                        .foregroundStyle(theme.popupFg)
+                        .fixedSize()
+                }
+
                 // Description (dimmed)
                 if !candidate.description.isEmpty {
                     Text(candidate.description)
                         .font(Typography.font(.body))
-                        .foregroundStyle(isSelected ? theme.popupSelFg.opacity(0.75) : theme.popupFg.opacity(isPromptAction ? 0.7 : 0.4))
+                        .foregroundStyle(isPromptAction ? theme.popupFg :
+                            (isSelected ? theme.popupSelFg.opacity(0.75) : theme.popupFg.opacity(0.4)))
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
 
                 Spacer(minLength: 0)
 
-                // Keybinding annotation (right-aligned)
-                if !candidate.annotation.isEmpty {
+                // Command completions keep their shortcuts aligned at the trailing edge.
+                if !isPromptAction && !candidate.annotation.isEmpty {
                     Text(candidate.annotation)
                         .font(Typography.font(.small, design: .monospaced))
-                        .foregroundStyle(isSelected ? theme.popupSelFg.opacity(0.65) : theme.popupFg.opacity(isPromptAction ? 0.7 : 0.3))
+                        .foregroundStyle(isSelected ? theme.popupSelFg.opacity(0.65) : theme.popupFg.opacity(0.3))
                         .padding(.horizontal, Spacing.xs)
                         .padding(.vertical, Spacing.pixel)
                         .background(
@@ -279,8 +287,14 @@ public struct MinibufferView: View {
     }
 
     private func candidateAccessibilityValue(_ candidate: MinibufferCandidate, isSelected: Bool) -> String {
-        let selection = isSelected ? "selected" : "available"
-        return candidate.description.isEmpty ? selection : "\(selection), \(candidate.description)"
+        var value = isSelected ? "selected" : "available"
+        if !candidate.description.isEmpty {
+            value += ", \(candidate.description)"
+        }
+        if state.mode == .textPrompt && !candidate.annotation.isEmpty {
+            value += ", \(candidate.annotation)"
+        }
+        return value
     }
 
     private func activate(_ offeredCandidate: MinibufferCandidate, offeredGeneration: UInt32) {

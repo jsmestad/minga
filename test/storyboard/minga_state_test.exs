@@ -7,7 +7,10 @@ defmodule Minga.Storyboard.MingaStateTest do
 
   import Minga.Test.Storyboard.Assertions
 
+  alias Minga.Buffer.EditSource
+  alias Minga.Test.Storyboard.Check
   alias Minga.Test.Storyboard.Model
+  alias Minga.Test.Storyboard.Registry
   alias Minga.Test.Storyboard.Session
 
   @moduletag :storyboard
@@ -34,5 +37,41 @@ defmodule Minga.Storyboard.MingaStateTest do
 
     minga = model |> Model.modeline_segments() |> Enum.find(&(&1.id == :minga))
     assert {minga.text, minga.state} == {"Minga", :needs_you}
+  end
+
+  test "Reject all names the task and choices through both reach paths" do
+    entry = Registry.fetch!("minga.reject_all.confirm")
+    keyboard = Registry.drive(entry)
+    model = Session.model(keyboard)
+
+    for check <- entry.checks do
+      assert Check.run(check, model) == :ok, check.name
+    end
+
+    refute :minibuffer in (keyboard |> Session.press("esc") |> Session.model()).surfaces
+    Session.stop(keyboard)
+
+    click = Enum.reduce(entry.click_reach, Session.start(entry.start), &Session.click(&2, &1))
+    assert Registry.classify(Session.model(click)) == entry.id
+  end
+
+  test "blocked undo offers exact review keys in the shared modeline" do
+    blocked =
+      Session.start(
+        content: "base\n",
+        review_edits: [
+          {{0, 0}, 4, "local", EditSource.user()},
+          {{0, 0}, 5, "proof", EditSource.minga("fixture-task", "blocking-step")}
+        ]
+      )
+      |> Session.press("u")
+
+    model = Session.model(blocked)
+    assert model.echo == "Undo blocked: Minga …task/…step"
+    actions = model.ui.status_bar.data.message_actions
+    assert Enum.map(actions, &{&1.key, &1.label}) == [{"SPC a d", "Reject"}, {"SPC a y", "Keep"}]
+
+    kept = blocked |> Session.press("SPC a y") |> Session.model()
+    assert kept.echo == "Kept the blocking Minga change"
   end
 end

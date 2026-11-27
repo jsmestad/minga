@@ -1,6 +1,6 @@
 {
   "macos": {
-    "commit": "f777d3e78615c1651d423d05be0640b817531a3b",
+    "commit": "3c29ec5191cfb1aefba13bd788b0ce3349a34d88-dirty",
     "files": {
       "macos-astrodark-1280.json": "9e096f7f7803380cd0a1c6dbe44d21bb4ac1518fef70c9e8b56336c75714b108",
       "macos-astrodark-1440.json": "a572ebb99586dd165a35279a1c879766d1a789e01ca9f0d898a6b8d6f78a3a8e",
@@ -10,31 +10,31 @@
       "macos-catppuccin_latte-1440.json": "8d54758e3e92bbff90eccf8c17257ef37c679a006039db1f6067975a110808b6"
     },
     "transcripts": {
-      "macos-astrodark-1280.json": "fa43eec7df1c705fa883cb84841c80cc4e95e2dac337a83f33eef071e20da7b4",
-      "macos-astrodark-1440.json": "583f211244ed655ff06871da842966c5df69cc445d565ac25dc7ee9f4b319662",
-      "macos-catppuccin_frappe-1280.json": "6ea99813c6b95f412548429c7603dd3b1340220a05311bad10c01103fe3a4e1d",
-      "macos-catppuccin_frappe-1440.json": "4f64b7cc6e6fd63e15f1a5d20c22c29371da11d81b1e3e0a2f408f8d9d12192c",
-      "macos-catppuccin_latte-1280.json": "76cdacfddbf00878c9e472c6083f9a09a29af78a0c0ee52c19cdd3bd1ae04733",
-      "macos-catppuccin_latte-1440.json": "52bd04b67fd56a750c43994d27c1776e2e892017a74a3008b92b54c921fb19dd"
+      "macos-astrodark-1280.json": "f785ead4388518e325a8600dbf0b23522a03d7074e0a43c4b4abca15bcc737b7",
+      "macos-astrodark-1440.json": "1c7ea1cce928703d53639e84a8edf106482ef8e5f9b21f6a6c71a6a07447807b",
+      "macos-catppuccin_frappe-1280.json": "8392ef8db5b206961347048db9a4015aee87fc3217ec8c08851c3f7d7ddaa69e",
+      "macos-catppuccin_frappe-1440.json": "57476da238f615f8838447f1f82c9d9b8fcc272696823990923af8dcb2660e94",
+      "macos-catppuccin_latte-1280.json": "7b5a313482aee958c1d3df23ee037937d9837ea33383e1d30be90acecd4dce2d",
+      "macos-catppuccin_latte-1440.json": "667c582f821ecfa218ae3547bc56e7d895e79a0a3906d376106e369c5764ff0b"
     }
   },
   "platform_specific": {
     "frontend": "tui",
-    "reason": "fold marks draw now that the parse says when it is complete (#4337); macOS baselines record no fold marks, and the 80x24 empty-list inset is terminal only"
+    "reason": "the Go minibuffer now shows the keyboard cues that macOS already renders; the native frames did not change"
   },
   "scenario": "minga.task.new",
   "tui": {
-    "commit": "7ff44a4d3d75d4af6705033ab9ab459c163cde5c",
+    "commit": "3c29ec5191cfb1aefba13bd788b0ce3349a34d88-dirty",
     "files": {
-      "tui-astrodark-120x40.txt": "fc6122eeab7929f14dffb79b5ca3c80be8e89abaf7930bb8531f6a9122f14f05",
-      "tui-astrodark-150x38.txt": "0ffad90038637efcddd42d45a34c106180efe6a5eee97ea2d8096e8ec633b948",
-      "tui-astrodark-80x24.txt": "1a0392d7c67fae390757ec7ea997b5705b8a391776a62a3c2e90fcbac7bfb4b6",
-      "tui-catppuccin_frappe-120x40.txt": "fb87bea009051ce710d735a53b071c73b54e00eec7d4fb4dc28cc4d13c737f0e",
-      "tui-catppuccin_frappe-150x38.txt": "1dd01357bb52c7787f4b8eabc2c852dc60a9beaca8d0e395e1738c1a98147fb1",
-      "tui-catppuccin_frappe-80x24.txt": "1e64e8b2d84fd79e6e3fba799c8c4bd08517becc1e4820ff812c9bfb7605177c",
-      "tui-catppuccin_latte-120x40.txt": "6d6040e80adbfeab3de96000c09d60157505b43ac4bfb67962b24ddcb2c444fa",
-      "tui-catppuccin_latte-150x38.txt": "db5a76822c1a8b67956535e94745b2ed71dedb3e5a11b5d3ac0350fc5332a7f1",
-      "tui-catppuccin_latte-80x24.txt": "3ba0309df8ae2fb102dc548769fa603627821127e3f62e6f10c884a9360167de"
+      "tui-astrodark-120x40.txt": "5b4706236b10914828d043fefdc2bd93faf6b6ef79ae2a68093b127b7b2b451a",
+      "tui-astrodark-150x38.txt": "2a2d00e3926a1e77d1e511eb878a792d3e056dea29ce221d74fe17921674978b",
+      "tui-astrodark-80x24.txt": "e7fd0c556d5f747881377443cb3cc00e101737c1027ad99d4372985a04b677cf",
+      "tui-catppuccin_frappe-120x40.txt": "72294176ea48cd83336eb6c2723b5c775ea3580925bc9ed1551b5c676e033c89",
+      "tui-catppuccin_frappe-150x38.txt": "f523040ecb0b9723d95d4068fca15fa9a4e9eaf36b987190d58c1f3ba9a27e1c",
+      "tui-catppuccin_frappe-80x24.txt": "8f62242ab7bd24a0e043389441ac175b9727bcb402bbc3352eed706ef6f495b3",
+      "tui-catppuccin_latte-120x40.txt": "073d8ac4e05d435c56d8c8562e00a179d930ec9b701c3e69f9c3b059c232bf06",
+      "tui-catppuccin_latte-150x38.txt": "b1886c3357cb7a2edb334628d6549b32410d6b950d2940e4e13c432022535d37",
+      "tui-catppuccin_latte-80x24.txt": "4da9b844d39af8a1a4b80b50ce533c2470774d23649a6be81701074dd9e170d1"
     }
   }
 }

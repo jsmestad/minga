@@ -7,17 +7,25 @@ defmodule Minga.Buffer.State.Swap do
   prepared older snapshot cannot publish after newer work becomes authoritative.
   """
 
+  alias Minga.Buffer.UndoHistory
+
   @typedoc "Monotonic swap admission generation."
   @type generation :: non_neg_integer()
 
-  @typedoc "An admitted buffer snapshot: generation, source path, and content."
-  @type snapshot :: {generation(), String.t(), binary()}
+  @typedoc "Immutable text and optional review histories captured from one buffer state."
+  @type capture ::
+          {binary(), UndoHistory.t() | nil, UndoHistory.saved_checkpoint() | nil, binary() | nil}
+
+  @typedoc "An admitted buffer snapshot: generation, source path, and captured data."
+  @type snapshot :: {generation(), String.t(), capture()}
 
   @typedoc "The active preparation worker: snapshot, worker pid, and monitor."
   @type active_work :: {snapshot(), pid(), reference()}
 
   @typedoc "Function that starts the debounce timer for an admitted swap."
   @type timer_start :: (pid(), term(), non_neg_integer() -> reference())
+
+  @typep source :: %{required(:swap_path) => String.t(), optional(atom()) => term()}
 
   @type t :: %__MODULE__{
           directory: String.t() | nil,
@@ -27,6 +35,11 @@ defmodule Minga.Buffer.State.Swap do
           timer: reference() | nil,
           timer_token: reference() | nil,
           generation: generation(),
+          incarnation: pos_integer() | nil,
+          saved: UndoHistory.saved_checkpoint() | nil,
+          held_for_recovery: boolean(),
+          sources: %{String.t() => source()},
+          adopted: source() | nil,
           active: active_work() | nil,
           pending: snapshot() | nil
         }
@@ -38,6 +51,11 @@ defmodule Minga.Buffer.State.Swap do
             timer: nil,
             timer_token: nil,
             generation: 0,
+            incarnation: nil,
+            saved: nil,
+            held_for_recovery: false,
+            sources: %{},
+            adopted: nil,
             active: nil,
             pending: nil
 
@@ -48,6 +66,7 @@ defmodule Minga.Buffer.State.Swap do
       directory: Keyword.get(opts, :swap_dir),
       backend: Keyword.get(opts, :swap_backend),
       backend_options: Keyword.get(opts, :swap_backend_options, []),
+      incarnation: Keyword.get(opts, :swap_incarnation),
       timer_start: Keyword.get(opts, :swap_timer_start, &Process.send_after/3)
     }
   end
@@ -71,6 +90,30 @@ defmodule Minga.Buffer.State.Swap do
   @spec release(t()) :: t()
   def release(%__MODULE__{} = state), do: %{state | directory: nil}
 
+  @doc "Keeps an unadopted record for explicit recovery instead of deleting it at close."
+  @spec hold_for_recovery(t()) :: t()
+  def hold_for_recovery(%__MODULE__{} = state), do: %{state | held_for_recovery: true}
+
+  @doc "A new publication superseded any unadopted record at this buffer's own swap path."
+  @spec published(t()) :: t()
+  def published(%__MODULE__{} = state), do: %{state | held_for_recovery: false}
+
+  @doc "Retains the exact source until the replacement generation is durable."
+  @spec track_source(t(), source() | nil) :: t()
+  def track_source(%__MODULE__{} = state, nil), do: state
+
+  def track_source(%__MODULE__{} = state, %{swap_path: path} = source),
+    do: %{state | sources: Map.put(state.sources, path, source)}
+
+  @doc "Drops a source whose exact generation is no longer waiting to be retired."
+  @spec retire_source(t(), String.t()) :: t()
+  def retire_source(%__MODULE__{} = state, path),
+    do: %{state | sources: Map.delete(state.sources, path)}
+
+  @doc "Records the exact recovery already taken over when this buffer opened."
+  @spec remember_adoption(t(), source()) :: t()
+  def remember_adoption(%__MODULE__{} = state, source), do: %{state | adopted: source}
+
   @doc "Returns the configured storage backend."
   @spec backend(t()) :: module()
   def backend(%__MODULE__{backend: backend}) when is_atom(backend) and not is_nil(backend),
@@ -82,7 +125,12 @@ defmodule Minga.Buffer.State.Swap do
     state.backend_options
     |> Keyword.put(:swap_dir, state.directory)
     |> Keyword.put(:generation, generation)
+    |> Keyword.put(:incarnation, state.incarnation)
   end
+
+  @doc "Records the clean review checkpoint for this file's last saved bytes."
+  @spec put_saved(t(), UndoHistory.saved_checkpoint() | nil) :: t()
+  def put_saved(%__MODULE__{} = state, saved), do: %{state | saved: saved}
 
   @doc "Returns the configured debounce timer starter."
   @spec timer_start(t()) :: timer_start()
@@ -108,11 +156,11 @@ defmodule Minga.Buffer.State.Swap do
   def take_timer(%__MODULE__{timer: timer} = state), do: {timer, clear_timer(state)}
 
   @doc "Admits a snapshot, starting it immediately or replacing the latest pending work."
-  @spec admit(t(), String.t(), binary()) :: {:start, snapshot(), t()} | {:pending, t()}
-  def admit(%__MODULE__{} = state, path, content)
+  @spec admit(t(), String.t(), capture()) :: {:start, snapshot(), t()} | {:pending, t()}
+  def admit(%__MODULE__{} = state, path, {content, _history, _saved, _disk_hash} = capture)
       when is_binary(path) and is_binary(content) do
     generation = state.generation + 1
-    snapshot = {generation, path, content}
+    snapshot = {generation, path, capture}
     state = %{state | generation: generation}
 
     case state.active do

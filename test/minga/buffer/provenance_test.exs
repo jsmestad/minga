@@ -479,6 +479,14 @@ defmodule Minga.Buffer.ProvenanceTest do
       assert draft_component(detached, [first], MapSet.new()) ==
                MapSet.new([first, second, third])
 
+      assert {:ok, empty, _, parked} = Provenance.revert(detached, first, Document.new(""))
+      assert draft_component(parked, [second], MapSet.new()) == MapSet.new([second, third])
+      assert draft_neighbours(parked, first) == MapSet.new()
+      assert {:ok, _, _, reapplied} = Provenance.reapply(parked, first, empty)
+
+      assert draft_component(reapplied, [first], MapSet.new()) ==
+               MapSet.new([first, second, third])
+
       detached = Provenance.discard(detached, second)
       assert draft_neighbours(detached, first) == MapSet.new([third])
     end

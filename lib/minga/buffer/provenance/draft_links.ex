@@ -3,6 +3,7 @@ defmodule Minga.Buffer.Provenance.DraftLinks do
   Witnessed compaction opportunities between draft steps, retained after the frontier rises or positional evidence disappears. A component retains each live group once, not every historical pairing. Removing a final member does not split the remaining component.
   """
 
+  alias Minga.Buffer.Provenance.Group
   alias Minga.Buffer.Provenance.Run
 
   @typep id :: Run.group_id()
@@ -10,12 +11,30 @@ defmodule Minga.Buffer.Provenance.DraftLinks do
             owners: %{id() => id()},
             components: %{id() => :gb_sets.set(id())}
           }
+  @type pivot_key :: {:witnessed_pivot, id()}
+  @typep groups :: %{id() => Group.t()}
 
   defstruct owners: %{}, components: %{}
 
   @doc "Returns empty draft links."
   @spec new() :: t()
   def new, do: %__MODULE__{}
+
+  @doc "Returns the detached draft components without their reverse index."
+  @spec snapshot(t()) :: [[id()]]
+  def snapshot(%__MODULE__{components: components}) do
+    Enum.map(components, fn {_owner, members} -> :gb_sets.to_list(members) end)
+  end
+
+  @doc "Rebuilds detached draft links from disjoint components of live groups."
+  @spec restore([[id()]]) :: t()
+  def restore(components) do
+    Enum.reduce(components, new(), fn [owner | _] = members, links ->
+      owners = Enum.reduce(members, links.owners, &Map.put(&2, &1, owner))
+      components = Map.put(links.components, owner, :gb_sets.from_list(members))
+      %{links | owners: owners, components: components}
+    end)
+  end
 
   @doc "Joins two live groups without retaining a second connection inside one component."
   @spec link(t(), id(), id()) :: t()
@@ -56,26 +75,50 @@ defmodule Minga.Buffer.Provenance.DraftLinks do
     %{links | owners: owners, components: components}
   end
 
-  @doc "Returns the group's neighbours. Only the oldest live member enumerates the whole component."
-  @spec partners(t(), id()) :: MapSet.t(id())
-  def partners(%__MODULE__{} = links, id) do
+  @doc "Projects the witnessed component onto applied groups, visiting the component once from its first applied member."
+  @spec applied_partners(t(), id(), groups(), scan) :: {MapSet.t(id()), scan} when scan: map()
+  def applied_partners(%__MODULE__{} = links, id, groups, scan) do
     case links.owners do
       %{^id => owner} ->
         members = Map.fetch!(links.components, owner)
+        key = {:witnessed_pivot, owner}
 
-        case :gb_sets.smallest(members) do
-          ^id ->
-            [^id | rest] = :gb_sets.to_list(members)
-            MapSet.new(rest)
+        {pivot, scan} =
+          case scan do
+            %{^key => pivot} -> {pivot, scan}
+            _missing -> cache_pivot(scan, key, members, groups)
+          end
 
-          oldest ->
-            MapSet.new([oldest])
-        end
+        if pivot == id,
+          do: {collect_applied(members, id, groups), scan},
+          else: {MapSet.new([pivot]), scan}
 
       _unlinked ->
-        MapSet.new()
+        {MapSet.new(), scan}
     end
   end
+
+  @spec cache_pivot(map(), pivot_key(), :gb_sets.set(id()), groups()) :: {id(), map()}
+  defp cache_pivot(scan, key, members, groups) do
+    pivot = members |> :gb_sets.iterator() |> first_applied(groups)
+    {pivot, Map.put(scan, key, pivot)}
+  end
+
+  @spec first_applied(:gb_sets.iter(id()), groups()) :: id()
+  defp first_applied(iterator, groups) do
+    {id, next} = :gb_sets.next(iterator)
+    if applied?(groups, id), do: id, else: first_applied(next, groups)
+  end
+
+  @spec collect_applied(:gb_sets.set(id()), id(), groups()) :: MapSet.t(id())
+  defp collect_applied(members, pivot, groups) do
+    Enum.reduce(:gb_sets.to_list(members), MapSet.new(), fn id, acc ->
+      if id != pivot and applied?(groups, id), do: MapSet.put(acc, id), else: acc
+    end)
+  end
+
+  @spec applied?(groups(), id()) :: boolean()
+  defp applied?(groups, id), do: match?(%{^id => %Group{applied: true}}, groups)
 
   @doc "Removes a final group. A component with only one group no longer needs a record."
   @spec forget(t(), id()) :: t()

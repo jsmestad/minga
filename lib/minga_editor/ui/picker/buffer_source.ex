@@ -16,6 +16,7 @@ defmodule MingaEditor.UI.Picker.BufferSource do
   alias MingaEditor.UI.Picker.SwitcherNextSteps
 
   alias Minga.Buffer
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias Minga.Language.Devicon
@@ -184,10 +185,35 @@ defmodule MingaEditor.UI.Picker.BufferSource do
 
   defp kill_items(_items, state), do: state
 
+  @spec prepare_kills([pid()], EditorState.t()) :: {[pid()], EditorState.t()}
+  defp prepare_kills(pids, state) do
+    {ready, state} =
+      Enum.reduce(pids, {[], state}, fn pid, {ready, state} ->
+        case Buffer.prepare_close(pid) do
+          :ok ->
+            {[pid | ready], state}
+
+          {:error, reason} ->
+            message = "Could not discard the buffer's swap: #{inspect(reason)}"
+            {ready, NoticeWorkflow.publish(state, message)}
+        end
+      end)
+
+    {Enum.reverse(ready), state}
+  end
+
   @spec kill_pids([pid()], Buffers.t(), term()) :: term()
   defp kill_pids([], _bs, state), do: state
 
   defp kill_pids(pids, bs, state) do
+    {ready, state} = prepare_kills(pids, state)
+    kill_prepared(ready, bs, state)
+  end
+
+  @spec kill_prepared([pid()], Buffers.t(), term()) :: term()
+  defp kill_prepared([], _bs, state), do: state
+
+  defp kill_prepared(pids, bs, state) do
     pids
     |> Enum.reduce(bs, fn pid, acc -> Buffers.remove(acc, pid) end)
     |> apply_kill_result(pids, bs, state)

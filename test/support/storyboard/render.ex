@@ -279,7 +279,10 @@ defmodule Minga.Test.Storyboard.Render do
 
   # The Agent activity strip takes a row only above a conversation, so it changes the key
   # ("agent_chat+agent_activity") but needs no entry alone.
-  @native_below %{macos: [:file_tree, :git_status, :tasks_drawer, :agent_chat], tui: []}
+  @native_below %{
+    macos: [:file_tree, :git_status, :tasks_drawer, :minibuffer, :agent_chat],
+    tui: []
+  }
 
   @spec fit_native_chrome(Session.t(), target()) :: {Session.t(), target()}
   defp fit_native_chrome(session, target) do

@@ -1488,3 +1488,167 @@ theme = "catppuccin_latte"
 pairs = ["#9b9ead on #eff1f5"]
 reason = "The existing done count samples at 2.35:1 on the hosted macOS renderer."
 issue = 4137
+
+# The review fixtures expose existing editor, breadcrumb and modeline colors behind the confirmation.
+# Exact hosted measurements: CI 45942839741, compared with main and the same dirty text without the prompt.
+[[exception]]
+scenario = "minga.reject_all.confirm"
+frontend = "macos"
+part = "breadcrumb.segment"
+rule = "contrast"
+theme = "astrodark"
+pairs = ["#6f7179 on #111317"]
+reason = "The existing secondary path segments use a muted color on the breadcrumb surface."
+issue = 4137
+
+[[exception]]
+scenario = "minga.reject_all.confirm"
+frontend = "macos"
+part = "breadcrumb.segment"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = ["#878eab on #292c3c"]
+reason = "The existing secondary path segments use a muted color on the breadcrumb surface."
+issue = 4137
+
+[[exception]]
+scenario = "minga.reject_all.confirm"
+frontend = "macos"
+part = "breadcrumb.segment"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#8a8d9f on #e6e9ef"]
+reason = "The existing secondary path segments use a muted color on the breadcrumb surface."
+issue = 4137
+
+[[exception]]
+scenario = "minga.reject_all.confirm"
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = ["#60414b on #303446"]
+reason = "Both hosted sizes sample a blended edge of the repeated do: syntax; the full red ink measures 4.65:1."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.reject_all.confirm", "minga.whichkey"]
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#40a02b on #eff1f5"]
+reason = "Both scenes now show the same existing low-contrast string style on the editor background."
+issue = 4137
+
+[[exception]]
+scenario = "minga.reject_all.confirm"
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#a28dd5 on #eff1f5",
+  "#bbc5bf on #eff1f5",
+  "#cdc2c6 on #eff1f5",
+  "#df8e1d on #eff1f5",
+  "#fe640b on #eff1f5",
+]
+reason = "The existing syntax palette is visible behind the prompt. The hosted capture also samples blended edges of the string and the repeated do: syntax; the full do: ink measures 4.80:1."
+issue = 4137
+
+[[exception]]
+scenario = "minga.reject_all.confirm"
+frontend = "macos"
+part = "modeline.modePill"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#eff1f5 on #1e66f5"]
+reason = "The existing Normal pill has a 4.34:1 base-on-blue contrast."
+issue = 4137
+
+[[exception]]
+scenario = "minga.reject_all.confirm"
+frontend = "macos"
+part = "modeline.modeText"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#eff1f5 on #1e66f5"]
+reason = "The existing Normal pill has a 4.34:1 base-on-blue contrast."
+issue = 4137
+
+[[exception]]
+scenario = "minga.reject_all.confirm"
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#eff1f5 on #1e66f5"]
+reason = "The existing Normal pill has a 4.34:1 base-on-blue contrast."
+issue = 4137
+
+[[exception]]
+scenario = "minga.reject_all.confirm"
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "astrodark"
+pairs = ["#3a3e47 on #1a1d23", "#595c66 on #1a1d23"]
+reason = "The existing breadcrumb separator, fold mark and empty-line tilde are visible behind the prompt."
+issue = 4137
+
+[[exception]]
+scenario = "minga.reject_all.confirm"
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "astrodark"
+pairs = ["#595c66 on #1a1d23"]
+reason = "The existing muted comma in Elixir source misses the text contrast target."
+issue = 4137
+
+[[exception]]
+scenario = "minga.reject_all.confirm"
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = ["#838ba7 on #303446"]
+reason = "The existing muted comma in Elixir source misses the text contrast target."
+issue = 4137
+
+[[exception]]
+scenario = "minga.reject_all.confirm"
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#8c8fa1 on #eff1f5"]
+reason = "The existing breadcrumb separator, fold mark and empty-line tilde share the muted gray role."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.reject_all.confirm", "minga.whichkey"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#7287fd on #ccd0da", "#a86d10 on #eff1f5", "#fe640b on #eff1f5"]
+reason = "The same dirty-file control without review UI measures these colors on the line number, dirty tab marker and Elixir literals."
+issue = 4137
+
+[[exception]]
+scenario = "minga.reject_all.confirm"
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#1e66f5 on #eff1f5",
+  "#40a02b on #eff1f5",
+  "#8c8fa1 on #eff1f5",
+  "#df8e1d on #eff1f5",
+  "#eff1f5 on #1e66f5",
+]
+reason = "The existing Normal pill and the syntax palette for Elixir functions, strings, punctuation and module names remain visible behind the prompt."
+issue = 4137

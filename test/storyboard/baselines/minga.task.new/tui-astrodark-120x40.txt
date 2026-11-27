@@ -44,7 +44,7 @@
 │                                                                                                                      │
 ╰ j/k move  ↩ open  c new task  x stop  q close ───────────────────────────────────────────────────────────────────────╯
   NORMAL  storyboard.ex                                                                                      Elixir 1:1
-New task › fix                                                                                         [Submit] [Cancel]
+New task › fix                                                                            [Submit Enter] [Cancel Escape]
 ## styles (row start-end fg bg attrs)
 0 0-0 #adb0bb #1a1d23 -
 0 1-1 #50a4e9 #1a1d23 bold
@@ -232,7 +232,7 @@ New task › fix                                                                
 39 0-10 #50a4e9 #14161b bold
 39 11-13 #adb0bb #14161b -
 39 14-14 #1a1d23 #50a4e9 reverse
-39 15-102 #adb0bb #1a1d23 -
-39 103-110 #50a4e9 #14161b bold
-39 111-111 #adb0bb #1a1d23 -
-39 112-119 #50a4e9 #14161b bold
+39 15-89 #adb0bb #1a1d23 -
+39 90-103 #adb0bb #14161b bold
+39 104-104 #adb0bb #1a1d23 -
+39 105-119 #adb0bb #14161b bold

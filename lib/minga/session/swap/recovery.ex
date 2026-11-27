@@ -70,6 +70,7 @@ defmodule Minga.Session.Swap.Recovery do
            {:recoverable, entry()}
            | {:saved, swap_path :: String.t()}
            | {:unparseable, swap_path :: String.t()}
+           | {:damaged_review, swap_path :: String.t()}
            | :left_alone
 
   @doc """
@@ -178,29 +179,123 @@ defmodule Minga.Session.Swap.Recovery do
   end
 
   @doc """
-  Reads the file path and the unsaved text of a swap file, and leaves the swap file where it is.
+  Reads the exact publication and unsaved bytes of a swap file, and leaves the swap where it is.
 
   The reader does not own the text yet. The swap leaves the disk when a buffer takes the text over (`Minga.Buffer.adopt_recovered_text/3`), so a failure between reading and showing the text loses nothing.
   """
-  @spec read(String.t()) :: {:ok, String.t(), binary()} | {:error, term()}
+  @spec read(String.t()) :: {:ok, Swap.identity(), binary()} | {:error, term()}
   def read(swap_path) when is_binary(swap_path) do
-    with {:ok, meta, content} <- Swap.read(swap_path) do
-      {:ok, meta.path, content}
+    case Swap.read(swap_path) do
+      {:ok, %{kind: :clean}, _content} -> {:error, :no_unsaved_text}
+      {:ok, meta, content} -> {:ok, Swap.identity(meta, content), content}
+      {:error, _reason} = error -> error
     end
   end
 
+  @doc "Finds the latest eligible clean review checkpoint for bytes already loaded from disk."
+  @spec clean_for(String.t(), binary(), [option()]) ::
+          {:ok, Swap.saved_review(), Swap.metadata()}
+          | :none
+          | {:error, :invalid_review, String.t()}
+  def clean_for(path, disk, opts \\ []) when is_binary(path) and is_binary(disk) do
+    own_pid = Swap.os_pid()
+    owner_alive? = owner_check(opts)
+
+    path
+    |> Swap.paths_for_file(opts)
+    |> Enum.reduce(nil, &latest_review(&1, path, &2, own_pid, owner_alive?))
+    |> attachable_review(disk)
+  end
+
+  @spec latest_review(
+          String.t(),
+          String.t(),
+          {Swap.metadata(), binary()} | nil,
+          integer(),
+          owner_check()
+        ) :: {Swap.metadata(), binary()} | nil
+  defp latest_review(swap_path, path, previous, own_pid, owner_alive?) do
+    case Swap.read(swap_path) do
+      {:ok, %{held?: true, kind: :dirty}, _content} ->
+        previous
+
+      {:ok, %{path: ^path, revision: {_, _, _}, os_pid: pid} = meta, content} ->
+        if (pid == own_pid or not owner_alive?.(meta)) and newer_review?(meta, previous),
+          do: {meta, content},
+          else: previous
+
+      _legacy_or_unavailable ->
+        previous
+    end
+  end
+
+  @spec newer_review?(Swap.metadata(), {Swap.metadata(), binary()} | nil) :: boolean()
+  defp newer_review?(_meta, nil), do: true
+
+  defp newer_review?(%{revision: {owner, gen, time}}, {%{revision: {other, n, written}}, _text}),
+    do: {time, owner, gen} > {written, other, n}
+
+  @spec attachable_review({Swap.metadata(), binary()} | nil, binary()) ::
+          {:ok, Swap.saved_review(), Swap.metadata()}
+          | :none
+          | {:error, :invalid_review, String.t()}
+  defp attachable_review(
+         {%{kind: :clean, review: %{saved: {digest, _} = saved}} = meta, ""},
+         disk
+       ) do
+    if :crypto.hash(:sha256, disk) == digest, do: {:ok, saved, meta}, else: :none
+  end
+
+  defp attachable_review({%{kind: :dirty, review: %{dirty: snapshot}} = meta, disk}, disk)
+       when is_binary(snapshot) do
+    digest = :crypto.hash(:sha256, disk)
+    if Swap.matches_disk_base?(meta, digest), do: {:ok, {digest, snapshot}, meta}, else: :none
+  end
+
+  defp attachable_review({%{kind: :clean, review: :invalid, swap_path: path}, ""}, _disk),
+    do: {:error, :invalid_review, path}
+
+  defp attachable_review({%{kind: :dirty, review: :invalid, swap_path: path}, disk}, disk),
+    do: {:error, :invalid_review, path}
+
+  defp attachable_review(_no_match, _disk), do: :none
+
   @doc """
-  Deletes a swap file because the user decided against its text, and says whether it did.
+  Removes unsaved text because the user decided against it. Keeps its last saved review checkpoint, if any.
 
   `{:error, :enoent}` means the swap is already gone: something else recovered or removed it meanwhile.
   """
-  @spec remove(String.t()) :: :ok | {:error, File.posix()}
-  def remove(swap_path) when is_binary(swap_path), do: File.rm(swap_path)
+  @spec remove(String.t()) :: :ok | {:error, term()}
+  def remove(swap_path) when is_binary(swap_path) do
+    case Swap.read(swap_path) do
+      {:ok, %{kind: :clean}, _content} -> {:error, :no_unsaved_text}
+      {:ok, meta, _content} -> discard_text(meta)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec discard_text(Swap.metadata()) :: :ok | {:error, term()}
+  defp discard_text(%{kind: :dirty, review: %{saved: {_, _} = saved}, revision: {_, _, _}} = meta) do
+    with {:ok, prepared} <- Swap.prepare_saved_only(meta, saved) do
+      if Swap.current?(meta) do
+        Swap.publish(prepared)
+      else
+        Swap.discard(prepared)
+        {:error, :stale_swap}
+      end
+    end
+  end
+
+  defp discard_text(%{revision: _} = meta) do
+    if Swap.current?(meta), do: File.rm(meta.swap_path), else: {:error, :stale_swap}
+  end
+
+  defp discard_text(%{swap_path: swap_path}), do: File.rm(swap_path)
 
   @doc "Deletes a swap file (user declined recovery)."
   @spec discard(String.t()) :: :ok
   def discard(swap_path) when is_binary(swap_path) do
-    File.rm(swap_path)
+    _result = remove(swap_path)
     :ok
   end
 
@@ -215,10 +310,11 @@ defmodule Minga.Session.Swap.Recovery do
   @spec recover(String.t()) :: {:ok, String.t(), binary()} | {:error, term()}
   def recover(swap_path) when is_binary(swap_path) do
     case Swap.read(swap_path) do
+      {:ok, %{kind: :clean}, _content} ->
+        {:error, :no_unsaved_text}
+
       {:ok, meta, content} ->
-        # Best-effort: if this fails the file is cleaned up on next scan.
-        File.rm(swap_path)
-        {:ok, meta.path, content}
+        with :ok <- discard_text(meta), do: {:ok, meta.path, content}
 
       error ->
         error
@@ -248,11 +344,19 @@ defmodule Minga.Session.Swap.Recovery do
   @spec verdict(String.t(), pid_check(), owner_check()) :: verdict()
   defp verdict(swap_path, pid_alive?, owner_alive?) do
     case Swap.read(swap_path) do
+      {:ok, %{held?: true} = meta, content} ->
+        orphan_verdict(meta, content)
+
       {:ok, meta, content} ->
         if owner_alive?.(meta), do: :left_alone, else: orphan_verdict(meta, content)
 
       {:error, :invalid_format} ->
         if owner_alive?(swap_path, pid_alive?), do: :left_alone, else: {:unparseable, swap_path}
+
+      {:error, :invalid_review_record} ->
+        if owner_alive?(swap_path, pid_alive?),
+          do: :left_alone,
+          else: {:damaged_review, swap_path}
 
       # The swap exists but cannot be read right now (permissions, an I/O error). It may hold unsaved text.
       {:error, _reason} ->
@@ -273,28 +377,36 @@ defmodule Minga.Session.Swap.Recovery do
   end
 
   @spec orphan_verdict(Swap.metadata(), binary()) :: verdict()
+  defp orphan_verdict(%{kind: :clean}, _content), do: :left_alone
+
   defp orphan_verdict(meta, content) do
     case File.read(meta.path) do
       {:ok, ^content} ->
-        {:saved, meta.swap_path}
+        if Map.has_key?(meta, :revision), do: :left_alone, else: {:saved, meta.swap_path}
 
       # Different text, a file that no longer exists, or one that cannot be read right now.
       # The swap is the only copy of the unsaved text, so it stays recoverable.
-      _different_missing_or_unreadable ->
+      disk ->
         {:recoverable,
          %{
            path: meta.path,
            swap_path: meta.swap_path,
            swap_mtime: meta.mtime,
-           changed_since?: changed_since?(meta.path, meta.mtime)
+           changed_since?: changed_since?(meta, disk)
          }}
     end
   end
 
   # True when the file was written after the swap was. The swap's text is then older than what the file holds now,
   # so it must not replace it without the user deciding.
-  @spec changed_since?(String.t(), integer()) :: boolean()
-  defp changed_since?(path, swap_mtime) do
+  @spec changed_since?(Swap.metadata(), {:ok, binary()} | {:error, term()}) :: boolean()
+  defp changed_since?(%{held?: true}, _disk), do: true
+  defp changed_since?(%{revision: {:invalid, _}}, _disk), do: true
+
+  defp changed_since?(%{disk_base: _} = meta, {:ok, disk}),
+    do: not Swap.matches_disk_base?(meta, :crypto.hash(:sha256, disk))
+
+  defp changed_since?(%{path: path, mtime: swap_mtime}, _disk) do
     case File.stat(path, time: :posix) do
       {:ok, %File.Stat{mtime: file_mtime}} -> file_mtime > swap_mtime
       {:error, _reason} -> false
@@ -311,6 +423,13 @@ defmodule Minga.Session.Swap.Recovery do
     File.rm(swap_path)
     []
   end
+
+  defp apply_verdict({:damaged_review, swap_path}, :all) do
+    Minga.Log.warning(:editor, "Could not read review swap #{swap_path}. It was left in place.")
+    []
+  end
+
+  defp apply_verdict({:damaged_review, _path}, _scope), do: []
 
   defp apply_verdict({:unparseable, swap_path}, :all) do
     File.rm(swap_path)
@@ -355,6 +474,9 @@ defmodule Minga.Session.Swap.Recovery do
   @spec waiting_entry(entry()) :: [waiting_entry()]
   defp waiting_entry(entry) do
     case Swap.read(entry.swap_path) do
+      {:ok, %{kind: :clean}, _content} ->
+        []
+
       {:ok, _meta, content} ->
         unsaved = text_lines(content)
         file = File.read(entry.path)

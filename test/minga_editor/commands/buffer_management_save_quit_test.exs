@@ -9,6 +9,8 @@ defmodule MingaEditor.Commands.BufferManagementSaveQuitTest do
   alias Minga.Config.Options
   alias Minga.Frontend.WaitRequestCompletion
   alias Minga.Frontend.WaitRequests
+  alias Minga.Session.ControllableSwapBackend
+  alias Minga.Session.Swap
   alias MingaAgent.ProjectView
   alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.Frontend.Protocol
@@ -65,6 +67,56 @@ defmodule MingaEditor.Commands.BufferManagementSaveQuitTest do
     assert tab_labels(ctx) == labels_before
     assert notice_message(ctx) == "No file name — use :w <filename>"
     refute_received {:shutdown, 0}
+  end
+
+  test "force quit reports a failed review swap discard and leaves the generation recoverable",
+       %{tmp_dir: root} do
+    path = Path.join(root, "discard-failed.txt")
+    swap_dir = Path.join(root, "swap")
+    File.write!(path, "saved text")
+    ctx = start_editor("", swap_dir: swap_dir)
+
+    buffer =
+      start_supervised!(
+        {BufferProcess,
+         file_path: path,
+         swap_dir: swap_dir,
+         swap_backend: ControllableSwapBackend,
+         swap_backend_options: [controller: self()]},
+        id: make_ref()
+      )
+
+    assert :ok = Buffer.replace_content(buffer, "reviewed later", :agent)
+    save = Task.async(fn -> Buffer.save(buffer) end)
+    assert_receive {:swap_prepare, ^buffer, generation, ^path, ""}
+    send(buffer, {:swap_prepare_result, generation, :ok})
+    assert :ok = Task.await(save)
+
+    assert :ok = Buffer.replace_content(buffer, "discarded text", :agent)
+    send(buffer, :write_swap)
+    assert_receive {:swap_prepare, worker, generation, ^path, "discarded text"}
+    send(worker, {:swap_prepare_result, generation, :ok})
+    assert_receive {:swap_published, ^buffer, ^worker, ^generation, ^path, "discarded text", :ok}
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        quit = Task.async(fn -> send_ex_sync(ctx, "qa!") end)
+        assert_receive {:swap_prepare, ^buffer, generation, ^path, ""}
+        send(buffer, {:swap_prepare_result, generation, {:error, :disk_full}})
+        Task.await(quit)
+      end)
+
+    assert_receive {:shutdown, 1}
+    refute_received {:shutdown, 0}
+    assert log =~ "Quit did not discard the swap for #{path}: :disk_full"
+
+    assert {:ok, %{kind: :dirty}, "discarded text"} =
+             Swap.read(Swap.swap_path(path, swap_dir: swap_dir))
+
+    cleanup = Task.async(fn -> BufferProcess.release_swap(buffer, swap_dir) end)
+    assert_receive {:swap_prepare, ^buffer, generation, ^path, ""}
+    send(buffer, {:swap_prepare_result, generation, :ok})
+    assert :ok = Task.await(cleanup)
   end
 
   test "successful :wq saves and closes the active tab", %{tmp_dir: root} do

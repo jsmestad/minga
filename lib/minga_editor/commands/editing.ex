@@ -7,7 +7,6 @@ defmodule MingaEditor.Commands.Editing do
   use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
-  alias Minga.Log
   alias Minga.Buffer.Document
   alias Minga.Buffer.Operation
   alias Minga.Language
@@ -16,8 +15,10 @@ defmodule MingaEditor.Commands.Editing do
   alias MingaEditor.Commands.Helpers
   alias MingaEditor.Indent
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Shell.Traditional.BlockedReviewWorkflow
   alias MingaEditor.UI.Highlight
   alias MingaEditor.State.Registers
+  alias MingaEditor.UI.Prompt.RejectTask
   alias Minga.Mode
   alias Minga.Mode.ReplaceState
   alias Minga.Mode.VisualState
@@ -39,7 +40,9 @@ defmodule MingaEditor.Commands.Editing do
     {:replace_restore, "Restore replaced character", true},
     {:undo, "Undo the last change", true},
     {:redo, "Redo the last undone change", true},
-    {:undo_agent_session, "Revert a Minga task's edits in this buffer, newest first", true},
+    {:undo_agent_session, "Reject all changes from the latest Minga task in this buffer", true},
+    {:keep_blocking_change, "Keep the Minga change blocking your undo", true},
+    {:reject_blocking_change, "Reject the Minga change blocking your undo", true},
     {:paste_before, "Paste before cursor", true},
     {:paste_after, "Paste after cursor", true},
     {:indent_line, "Indent line", true},
@@ -307,35 +310,18 @@ defmodule MingaEditor.Commands.Editing do
 
   # ── Undo / redo ───────────────────────────────────────────────────────────
 
-  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :undo) do
-    buf |> Buffer.undo() |> log_blocked_history(:undo)
-    state
-  end
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, operation)
+      when operation in [:undo, :redo],
+      do: BlockedReviewWorkflow.move_history(state, buf, operation)
 
-  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :redo) do
-    buf |> Buffer.redo() |> log_blocked_history(:redo)
-    state
-  end
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :keep_blocking_change),
+    do: BlockedReviewWorkflow.decide(state, buf, :keep)
 
-  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :undo_agent_session) do
-    case Buffer.undo_agent_session(buf) do
-      # The buffer names the task it reverted in *Messages*.
-      {:ok, _count} ->
-        state
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :reject_blocking_change),
+    do: BlockedReviewWorkflow.decide(state, buf, :reject)
 
-      :empty ->
-        Log.info(:editor, "No Minga task edits to revert in this buffer")
-        state
-
-      # The buffer names the task and the line of the edit that holds it in *Messages*; nothing changed.
-      {:blocked, _overlap} ->
-        state
-
-      # The buffer logs the refused undo; nothing changed.
-      {:error, _reason} ->
-        state
-    end
-  end
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :undo_agent_session),
+    do: RejectTask.open(state, buf)
 
   # ── Paste ─────────────────────────────────────────────────────────────────
 
@@ -1250,15 +1236,4 @@ defmodule MingaEditor.Commands.Editing do
     requires_buffer: true,
     execute: fn state -> execute(state, {:delete_chars_before, 1}) end
   )
-
-  # Your undo or redo never changes text a later Minga step rewrote; the buffer refused it and nothing changed.
-  @spec log_blocked_history(term(), :undo | :redo) :: :ok
-  defp log_blocked_history({:blocked, {:overlaps, minga_group}}, action) do
-    Log.info(
-      :editor,
-      "#{action} blocked: a later Minga change rewrote this text (#{inspect(minga_group)})"
-    )
-  end
-
-  defp log_blocked_history(_result, _action), do: :ok
 end

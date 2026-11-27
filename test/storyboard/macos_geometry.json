@@ -40,6 +40,9 @@
           "cols": 179,
           "rows": 45
         },
+        "minibuffer": {
+          "rows": 39
+        },
         "tasks_drawer": {
           "rows": 31
         },
@@ -90,6 +93,9 @@
         "empty_state": {
           "cols": 159,
           "rows": 39
+        },
+        "minibuffer": {
+          "rows": 34
         },
         "tasks_drawer": {
           "rows": 25

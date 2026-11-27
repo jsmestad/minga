@@ -26,6 +26,53 @@ defmodule Minga.Session.Swap.RecoveryTest do
     [swap_dir: tmp_dir, pid_alive?: pid_alive?]
   end
 
+  test "discard removes dirty text without losing the saved review generation", %{tmp_dir: dir} do
+    file = Path.join(dir, "tracked.txt")
+    disk = "saved bytes"
+    File.write!(file, disk)
+
+    saved = {:crypto.hash(:sha256, disk), "saved review"}
+    review = %{kind: :dirty, dirty: "dirty review", saved: saved}
+    opts = [swap_dir: dir, os_pid: 99_999, incarnation: 11, generation: 8, review: review]
+    assert :ok = Swap.write(file, "more recent dirty bytes", opts)
+    swap = Swap.swap_path(file, opts)
+    assert {:ok, original, "more recent dirty bytes"} = Swap.read(swap)
+
+    scan = scan_opts(dir)
+    assert [%{swap_path: ^swap}] = Recovery.scan(scan)
+    assert :none = Recovery.clean_for(file, disk, scan)
+    assert :ok = Recovery.remove(swap)
+
+    refute Swap.current?(original)
+    assert [] = Recovery.scan(scan)
+    assert [] = Recovery.waiting(scan)
+    assert {:error, :no_unsaved_text} = Recovery.read(swap)
+    assert {:ok, ^saved, %{revision: {11, 9, _}}} = Recovery.clean_for(file, disk, scan)
+    assert :none = Recovery.clean_for(file, "wrong bytes", scan)
+    assert File.read!(file) == disk
+  end
+
+  test "an orphan whose review bytes match disk attaches without reopening it as unsaved", %{
+    tmp_dir: dir
+  } do
+    file = Path.join(dir, "tracked.txt")
+    disk = "matching bytes"
+    File.write!(file, disk)
+
+    review = %{kind: :dirty, dirty: "review snapshot", saved: nil}
+    opts = [swap_dir: dir, os_pid: 99_999, incarnation: 19, generation: 3, review: review]
+    assert :ok = Swap.write(file, disk, opts)
+    swap = Swap.swap_path(file, opts)
+
+    scan = scan_opts(dir)
+    assert [] = Recovery.scan(scan)
+
+    assert {:ok, {digest, "review snapshot"}, %{swap_path: ^swap}} =
+             Recovery.clean_for(file, disk, scan)
+
+    assert digest == :crypto.hash(:sha256, disk)
+  end
+
   describe "scan/1" do
     test "returns empty list when swap directory doesn't exist" do
       assert Recovery.scan(swap_dir: "/nonexistent/path") == []
@@ -474,14 +521,16 @@ defmodule Minga.Session.Swap.RecoveryTest do
   end
 
   describe "read/1" do
-    test "returns the file path and the text, and leaves the swap file on disk", %{
+    test "returns the publication and text, and leaves the swap file on disk", %{
       tmp_dir: tmp_dir
     } do
       original = Path.join(tmp_dir, "notes.txt")
       swap_path = write_swap_file(tmp_dir, original, "unsaved text")
 
-      assert Recovery.read(swap_path) == {:ok, original, "unsaved text"}
-      assert Minga.Session.read_swap_file(swap_path) == {:ok, original, "unsaved text"}
+      assert {:ok, %{path: ^original, swap_path: ^swap_path} = source, "unsaved text"} =
+               Recovery.read(swap_path)
+
+      assert {:ok, ^source, "unsaved text"} = Minga.Session.read_swap_file(swap_path)
       assert File.exists?(swap_path)
     end
 

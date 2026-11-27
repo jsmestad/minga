@@ -9,7 +9,7 @@
    ],
    "label": "storyboard.ex, pane 1",
    "role": "AXTextArea",
-   "value": "defmodule Storyboard do\n  @moduledoc \"A small file every storyboard scenario starts in.\"\n\n  def greet(name) do\n    \"Hello, \" <> name\n  end\nend\n"
+   "value": "defmodule UsageLimit do\n  def label, do: \"Your plan limit applies\"\n  def window, do: 45\n  def retry?, do: true\nend\n"
   }
  ],
  "grid": {
@@ -31,17 +31,17 @@
   {
    "frame": [
     8,
-    643,
+    619,
     1264,
-    153
+    177
    ],
    "part": "whichKey.panel"
   },
   {
-   "baseline": 666.5,
+   "baseline": 642.5,
    "frame": [
     20,
-    656,
+    632,
     147,
     14
    ],
@@ -49,10 +49,10 @@
    "text": "SPC \u203a a Minga"
   },
   {
-   "baseline": 665.5,
+   "baseline": 641.5,
    "frame": [
     1209,
-    656,
+    632,
     51,
     14
    ],
@@ -60,10 +60,10 @@
    "text": "esc close"
   },
   {
-   "baseline": 666.5,
+   "baseline": 642.5,
    "frame": [
     1152,
-    657,
+    633,
     41,
     13
    ],
@@ -73,17 +73,17 @@
   {
    "frame": [
     20,
-    675,
+    651,
     119,
     113
    ],
    "part": "whichKey.column"
   },
   {
-   "baseline": 684.5,
+   "baseline": 660.5,
    "frame": [
     20,
-    675,
+    651,
     28,
     13
    ],
@@ -93,17 +93,17 @@
   {
    "frame": [
     163,
-    675,
+    651,
     117,
     113
    ],
    "part": "whichKey.column"
   },
   {
-   "baseline": 684.5,
+   "baseline": 660.5,
    "frame": [
     163,
-    675,
+    651,
     64,
     13
    ],
@@ -113,17 +113,17 @@
   {
    "frame": [
     304,
-    675,
-    128,
-    89
+    651,
+    147,
+    137
    ],
    "part": "whichKey.column"
   },
   {
-   "baseline": 684.5,
+   "baseline": 660.5,
    "frame": [
     304,
-    675,
+    651,
     43,
     13
    ],
@@ -132,18 +132,18 @@
   },
   {
    "frame": [
-    456,
-    675,
+    475,
+    651,
     130,
     113
    ],
    "part": "whichKey.column"
   },
   {
-   "baseline": 684.5,
+   "baseline": 660.5,
    "frame": [
-    456,
-    675,
+    475,
+    651,
     25,
     13
    ],
@@ -153,7 +153,7 @@
   {
    "frame": [
     20,
-    692,
+    668,
     119,
     24
    ],
@@ -163,7 +163,7 @@
   {
    "frame": [
     163,
-    692,
+    668,
     117,
     24
    ],
@@ -173,8 +173,8 @@
   {
    "frame": [
     304,
-    692,
-    128,
+    668,
+    147,
     24
    ],
    "part": "whichKey.entry",
@@ -182,8 +182,8 @@
   },
   {
    "frame": [
-    456,
-    692,
+    475,
+    668,
     130,
     24
    ],
@@ -191,10 +191,10 @@
    "text": "x Context \u203a"
   },
   {
-   "baseline": 708,
+   "baseline": 684,
    "frame": [
     35,
-    696.5,
+    672.5,
     32,
     15
    ],
@@ -202,10 +202,10 @@
    "text": "Tasks"
   },
   {
-   "baseline": 708,
+   "baseline": 684,
    "frame": [
     178,
-    696.5,
+    672.5,
     102,
     15
    ],
@@ -213,10 +213,10 @@
    "text": "Conversation split"
   },
   {
-   "baseline": 708,
+   "baseline": 684,
    "frame": [
     319,
-    696.5,
+    672.5,
     93,
     15
    ],
@@ -224,10 +224,10 @@
    "text": "Pending reviews"
   },
   {
-   "baseline": 708,
+   "baseline": 684,
    "frame": [
-    471,
-    696.5,
+    490,
+    672.5,
     53,
     15
    ],
@@ -235,10 +235,10 @@
    "text": "Context \u203a"
   },
   {
-   "baseline": 708,
+   "baseline": 684,
    "frame": [
     20,
-    697.5,
+    673.5,
     7,
     14
    ],
@@ -246,10 +246,10 @@
    "text": "a"
   },
   {
-   "baseline": 708,
+   "baseline": 684,
    "frame": [
     163,
-    697.5,
+    673.5,
     7,
     14
    ],
@@ -257,10 +257,10 @@
    "text": "v"
   },
   {
-   "baseline": 708,
+   "baseline": 684,
    "frame": [
     304,
-    697.5,
+    673.5,
     7,
     14
    ],
@@ -268,10 +268,10 @@
    "text": "r"
   },
   {
-   "baseline": 708,
+   "baseline": 684,
    "frame": [
-    456,
-    697.5,
+    475,
+    673.5,
     7,
     14
    ],
@@ -279,10 +279,10 @@
    "text": "x"
   },
   {
-   "baseline": 708,
+   "baseline": 684,
    "frame": [
     75,
-    698.5,
+    674.5,
     64,
     13
    ],
@@ -292,7 +292,7 @@
   {
    "frame": [
     20,
-    716,
+    692,
     119,
     24
    ],
@@ -302,7 +302,7 @@
   {
    "frame": [
     163,
-    716,
+    692,
     117,
     24
    ],
@@ -312,17 +312,17 @@
   {
    "frame": [
     304,
-    716,
-    128,
+    692,
+    147,
     24
    ],
    "part": "whichKey.entry",
-   "text": "u Undo all agent edits"
+   "text": "y Keep blocking change"
   },
   {
    "frame": [
-    456,
-    716,
+    475,
+    692,
     130,
     24
    ],
@@ -330,10 +330,10 @@
    "text": "S Session \u203a"
   },
   {
-   "baseline": 732,
+   "baseline": 708,
    "frame": [
     35,
-    720.5,
+    696.5,
     53,
     15
    ],
@@ -341,10 +341,10 @@
    "text": "New task"
   },
   {
-   "baseline": 732,
+   "baseline": 708,
    "frame": [
     178,
-    720.5,
+    696.5,
     81,
     15
    ],
@@ -352,21 +352,21 @@
    "text": "Ask about this"
   },
   {
-   "baseline": 732,
+   "baseline": 708,
    "frame": [
     319,
-    720.5,
-    113,
+    696.5,
+    125,
     15
    ],
    "part": "whichKey.entryLabel",
-   "text": "Undo all agent edits"
+   "text": "Keep blocking change"
   },
   {
-   "baseline": 732,
+   "baseline": 708,
    "frame": [
-    471,
-    720.5,
+    490,
+    696.5,
     53,
     15
    ],
@@ -374,10 +374,10 @@
    "text": "Session \u203a"
   },
   {
-   "baseline": 732,
+   "baseline": 708,
    "frame": [
     20,
-    721.5,
+    697.5,
     7,
     14
    ],
@@ -385,10 +385,10 @@
    "text": "n"
   },
   {
-   "baseline": 732,
+   "baseline": 708,
    "frame": [
     163,
-    721.5,
+    697.5,
     7,
     14
    ],
@@ -396,21 +396,21 @@
    "text": "?"
   },
   {
-   "baseline": 732,
+   "baseline": 708,
    "frame": [
     304,
-    721.5,
+    697.5,
     7,
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "u"
+   "text": "y"
   },
   {
-   "baseline": 732,
+   "baseline": 708,
    "frame": [
-    456,
-    721.5,
+    475,
+    697.5,
     7,
     14
    ],
@@ -420,7 +420,7 @@
   {
    "frame": [
     20,
-    740,
+    716,
     119,
     24
    ],
@@ -430,7 +430,7 @@
   {
    "frame": [
     163,
-    740,
+    716,
     117,
     24
    ],
@@ -440,17 +440,17 @@
   {
    "frame": [
     304,
-    740,
-    128,
+    716,
+    147,
     24
    ],
    "part": "whichKey.entry",
-   "text": "p Publish edits\u2026"
+   "text": "d Reject blocking change"
   },
   {
    "frame": [
-    456,
-    740,
+    475,
+    716,
     130,
     24
    ],
@@ -458,10 +458,10 @@
    "text": "W Why this line"
   },
   {
-   "baseline": 756,
+   "baseline": 732,
    "frame": [
     35,
-    744.5,
+    720.5,
     99,
     15
    ],
@@ -469,10 +469,10 @@
    "text": "Inspect subagent"
   },
   {
-   "baseline": 756,
+   "baseline": 732,
    "frame": [
     178,
-    744.5,
+    720.5,
     98,
     15
    ],
@@ -480,26 +480,165 @@
    "text": "Rewrite selection"
   },
   {
-   "baseline": 756,
+   "baseline": 732,
    "frame": [
     319,
-    744.5,
-    83,
+    720.5,
+    132,
     15
    ],
    "part": "whichKey.entryLabel",
-   "text": "Publish edits\u2026"
+   "text": "Reject blocking change"
   },
   {
-   "baseline": 756,
+   "baseline": 732,
    "frame": [
-    471,
-    744.5,
+    490,
+    720.5,
     73,
     15
    ],
    "part": "whichKey.entryLabel",
    "text": "Why this line"
+  },
+  {
+   "baseline": 732,
+   "frame": [
+    20,
+    721.5,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "i"
+  },
+  {
+   "baseline": 732,
+   "frame": [
+    163,
+    721.5,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "e"
+  },
+  {
+   "baseline": 732,
+   "frame": [
+    304,
+    721.5,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "d"
+  },
+  {
+   "baseline": 732,
+   "frame": [
+    475,
+    721.5,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "W"
+  },
+  {
+   "frame": [
+    20,
+    740,
+    119,
+    24
+   ],
+   "part": "whichKey.entry",
+   "text": "s Stop"
+  },
+  {
+   "frame": [
+    163,
+    740,
+    117,
+    24
+   ],
+   "part": "whichKey.entry",
+   "text": "q Queue \u203a"
+  },
+  {
+   "frame": [
+    304,
+    740,
+    147,
+    24
+   ],
+   "part": "whichKey.entry",
+   "text": "u Reject all\u2026"
+  },
+  {
+   "frame": [
+    475,
+    740,
+    130,
+    24
+   ],
+   "part": "whichKey.entry",
+   "text": "A Code autobiography"
+  },
+  {
+   "baseline": 756,
+   "frame": [
+    35,
+    744.5,
+    27,
+    15
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Stop"
+  },
+  {
+   "baseline": 756,
+   "frame": [
+    70,
+    744.5,
+    15,
+    15
+   ],
+   "part": "whichKey.platformKey",
+   "text": "\u2318."
+  },
+  {
+   "baseline": 756,
+   "frame": [
+    178,
+    744.5,
+    46,
+    15
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Queue \u203a"
+  },
+  {
+   "baseline": 756,
+   "frame": [
+    319,
+    744.5,
+    62,
+    15
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Reject all\u2026"
+  },
+  {
+   "baseline": 756,
+   "frame": [
+    490,
+    744.5,
+    115,
+    15
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Code autobiography"
   },
   {
    "baseline": 756,
@@ -510,7 +649,7 @@
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "i"
+   "text": "s"
   },
   {
    "baseline": 756,
@@ -521,7 +660,7 @@
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "e"
+   "text": "q"
   },
   {
    "baseline": 756,
@@ -532,125 +671,50 @@
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "p"
+   "text": "u"
   },
   {
    "baseline": 756,
    "frame": [
-    456,
+    475,
     745.5,
     7,
     14
    ],
    "part": "whichKey.entryKey",
-   "text": "W"
-  },
-  {
-   "frame": [
-    20,
-    764,
-    119,
-    24
-   ],
-   "part": "whichKey.entry",
-   "text": "s Stop"
-  },
-  {
-   "frame": [
-    163,
-    764,
-    117,
-    24
-   ],
-   "part": "whichKey.entry",
-   "text": "q Queue \u203a"
-  },
-  {
-   "frame": [
-    456,
-    764,
-    130,
-    24
-   ],
-   "part": "whichKey.entry",
-   "text": "A Code autobiography"
-  },
-  {
-   "baseline": 780,
-   "frame": [
-    35,
-    768.5,
-    27,
-    15
-   ],
-   "part": "whichKey.entryLabel",
-   "text": "Stop"
-  },
-  {
-   "baseline": 780,
-   "frame": [
-    70,
-    768.5,
-    15,
-    15
-   ],
-   "part": "whichKey.platformKey",
-   "text": "\u2318."
-  },
-  {
-   "baseline": 780,
-   "frame": [
-    178,
-    768.5,
-    46,
-    15
-   ],
-   "part": "whichKey.entryLabel",
-   "text": "Queue \u203a"
-  },
-  {
-   "baseline": 780,
-   "frame": [
-    471,
-    768.5,
-    115,
-    15
-   ],
-   "part": "whichKey.entryLabel",
-   "text": "Code autobiography"
-  },
-  {
-   "baseline": 780,
-   "frame": [
-    20,
-    769.5,
-    7,
-    14
-   ],
-   "part": "whichKey.entryKey",
-   "text": "s"
-  },
-  {
-   "baseline": 780,
-   "frame": [
-    163,
-    769.5,
-    7,
-    14
-   ],
-   "part": "whichKey.entryKey",
-   "text": "q"
-  },
-  {
-   "baseline": 780,
-   "frame": [
-    456,
-    769.5,
-    7,
-    14
-   ],
-   "part": "whichKey.entryKey",
    "text": "A"
+  },
+  {
+   "frame": [
+    304,
+    764,
+    147,
+    24
+   ],
+   "part": "whichKey.entry",
+   "text": "p Publish edits\u2026"
+  },
+  {
+   "baseline": 780,
+   "frame": [
+    319,
+    768.5,
+    83,
+    15
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Publish edits\u2026"
+  },
+  {
+   "baseline": 780,
+   "frame": [
+    304,
+    769.5,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "p"
   },
   {
    "frame": [
@@ -685,15 +749,15 @@
    "frame": [
     154,
     804,
-    73,
+    86,
     24
    ],
    "part": "modeline.segment",
-   "text": "filename: storyboard.ex"
+   "text": "filename: storyboard.ex \u25cf"
   },
   {
    "frame": [
-    235,
+    248,
     804,
     45,
     24
@@ -703,7 +767,7 @@
   },
   {
    "frame": [
-    1226,
+    1215,
     804,
     26,
     24
@@ -713,13 +777,13 @@
   },
   {
    "frame": [
-    1260,
+    1249,
     804,
-    14,
+    25,
     24
    ],
    "part": "modeline.segment",
-   "text": "position: 1:1"
+   "text": "position: 4:23"
   },
   {
    "frame": [

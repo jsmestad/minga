@@ -429,36 +429,57 @@ defmodule Minga.Buffer do
   defdelegate replace_content(server, new_content, source \\ :user), to: BufferProcess
 
   @doc """
-  Gives the buffer the unsaved text read from the swap file at `swap_path` and makes the buffer the owner of that text.
+  Gives the buffer unsaved text from the exact publication read by swap recovery.
 
   See `Minga.Buffer.Process.adopt_recovered_text/3`.
   """
-  @spec adopt_recovered_text(t(), String.t(), String.t()) ::
-          :ok | {:error, :read_only | :modified}
-  defdelegate adopt_recovered_text(server, content, swap_path), to: BufferProcess
+  @spec adopt_recovered_text(
+          t(),
+          String.t(),
+          Minga.Session.Swap.identity(),
+          :explicit | :automatic
+        ) ::
+          :ok | {:error, :read_only | :modified | :binary_file | :stale_swap}
+  defdelegate adopt_recovered_text(server, content, source, mode \\ :explicit), to: BufferProcess
+
+  @doc "Preserves the saved review and releases the swap before a deliberate buffer close."
+  @spec prepare_close(t()) :: :ok | {:error, term()}
+  defdelegate prepare_close(server), to: BufferProcess
 
   @doc """
-  Stops swap writes in every file buffer that writes into `swap_dir` and removes their swap files, because the user is quitting on purpose.
+  Asks every file buffer that writes into `swap_dir` to discard unsaved text, retain any saved review, and stop further swap writes because the editor is quitting.
 
-  Each buffer gets `timeout` (2 seconds by default) to answer. One that is too busy keeps its swap file, and the next start offers that text again, which is better than a quit that hangs.
+  Each buffer gets `timeout` (2 seconds by default) to answer. A release that expires while still in the buffer's queue leaves its swap available for recovery.
 
-  A swap file is kept for text the user never decided about: after a crash, a kill, or a lost frontend. A quit that saves or discards is a decision, so nothing of this run may be recovered on the next start. A swap kept by a buffer that crashed earlier in this run is not touched: that text was never saved or discarded.
+  A failed release returns the file path and reason. A publication failure leaves the previous generation recoverable. A swap left by a buffer that crashed earlier is not touched: the user has not decided about that text.
   """
-  @spec release_swaps(String.t(), timeout()) :: :ok
+  @spec release_swaps(String.t(), timeout()) :: :ok | {:error, [{String.t(), term()}]}
   def release_swaps(swap_dir, timeout \\ 2_000) when is_binary(swap_dir) do
-    Minga.Buffer.Registry
-    |> Registry.select([{{:_, :"$1", :_}, [], [:"$1"]}])
-    |> Enum.uniq()
-    |> Enum.each(&release_swap(&1, swap_dir, timeout))
+    files =
+      Registry.select(Minga.Buffer.Registry, [{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
+
+    failed =
+      files
+      |> Enum.uniq_by(&elem(&1, 1))
+      |> Enum.flat_map(fn {path, buffer} ->
+        case release_swap(buffer, swap_dir, timeout) do
+          :ok -> []
+          {:error, reason} -> [{path, reason}]
+        end
+      end)
+
+    if failed == [], do: :ok, else: {:error, failed}
   end
 
-  @spec release_swap(pid(), String.t(), timeout()) :: :ok
+  @spec release_swap(pid(), String.t(), timeout()) :: :ok | {:error, term()}
   defp release_swap(buffer, swap_dir, timeout) do
     BufferProcess.release_swap(buffer, swap_dir, timeout)
   catch
-    # A buffer can stop while the editor quits; its own `terminate/2` then handles its swap.
-    # A buffer that is too busy to answer in time keeps its swap, and the next start offers that text again.
-    :exit, _reason -> :ok
+    # A buffer can exit while the editor quits.
+    :exit, {:noproc, _call} -> :ok
+    :exit, {:normal, _call} -> :ok
+    :exit, {:timeout, _call} -> {:error, :timeout}
+    :exit, reason -> {:error, reason}
   end
 
   @doc "Atomically replaces content at `expected_version`, preserving the nearest valid cursor position."
@@ -570,6 +591,11 @@ defmodule Minga.Buffer do
           | {:error, BufferProcess.history_error()}
   defdelegate redo(server), to: BufferProcess
 
+  @doc "Undo or redo your edit, with an exact review offer when a Minga change blocks it."
+  @spec move_history(t(), :undo | :redo) ::
+          :ok | BufferProcess.blocked_review() | {:error, BufferProcess.history_error()}
+  defdelegate move_history(server, operation), to: BufferProcess
+
   @doc "Revert every remaining step of the Minga task that edited this buffer most recently, or of the newer task that blocks it, keeping your edits."
   @spec undo_agent_session(t()) ::
           {:ok, non_neg_integer()}
@@ -577,6 +603,25 @@ defmodule Minga.Buffer do
           | Minga.Buffer.UndoHistory.blocked()
           | {:error, BufferProcess.history_error()}
   defdelegate undo_agent_session(server), to: BufferProcess
+
+  @doc "Prepare an exact review decision for a task or named step in this buffer."
+  @spec prepare_review(t(), Minga.Buffer.UndoHistory.review_selection()) ::
+          {:ok, BufferProcess.review_target(), Minga.Buffer.UndoHistory.task(), pos_integer()}
+          | :empty
+  defdelegate prepare_review(server, selection), to: BufferProcess
+
+  @doc "Keep or reject all prepared review units, if the confirmation still applies."
+  @spec decide_review(t(), BufferProcess.review_target(), :keep | :reject) ::
+          :ok
+          | {:ok, nonempty_list(Minga.Buffer.UndoHistory.rejected_unit())}
+          | Minga.Buffer.UndoHistory.blocked()
+          | {:error, BufferProcess.review_error()}
+  defdelegate decide_review(server, target, decision), to: BufferProcess
+
+  @doc "Restore one previously rejected review unit without using your redo stack."
+  @spec restore_review(t(), Minga.Buffer.UndoHistory.rejected_unit()) ::
+          :ok | Minga.Buffer.UndoHistory.blocked() | {:error, BufferProcess.review_error()}
+  defdelegate restore_review(server, receipt), to: BufferProcess
 
   # ── Authorship ─────────────────────────────────────────────────────
 
