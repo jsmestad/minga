@@ -272,6 +272,8 @@ jobs:
       - run: mix native.build.support
       - name: Run Elixir tests except the isolated compile-cache suite and the storyboard
         run: mix test --warnings-as-errors --max-cases 4 --timeout 120000 --exclude system_clipboard --exclude conformance --exclude extension_compile_cache --exclude storyboard
+      - name: Verify language server cleanup on quit and SIGKILL
+        run: python3 test/scripts/lsp_process_cleanup_test.py
       - name: Run extension compile-cache tests in an isolated BEAM
         run: mix test --warnings-as-errors test/minga/extension/compile_cache_test.exs
 
@@ -836,6 +838,12 @@ jobs:
           (cd zig && zig build-exe src/clone_tree_main.zig -lc -femit-bin=../priv/minga-clone-tree)
           codesign --force --sign - --identifier minga-clone-tree priv/minga-clone-tree
           mix test test/minga_agent/changeset/overlay_clone_test.exs --include overlay_clone
+
+      - name: Verify language server cleanup on quit and SIGKILL
+        run: |
+          zig cc -std=c11 -Wall -Wextra -Werror zig/src/lsp_guard.c -o priv/minga-lsp-guard
+          codesign --force --sign - --identifier minga-lsp-guard priv/minga-lsp-guard
+          python3 test/scripts/lsp_process_cleanup_test.py
 
       - name: Test native result classification and document types
         run: |

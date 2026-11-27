@@ -70,7 +70,7 @@ class ReleaseContentsTest(unittest.TestCase):
         self.put(self.release / "launchers/minga", b"#!/bin/sh\n", True)
         self.put(self.release / "releases/start_erl.data", b"17.1.2 0.1.0\n")
         self.put(self.release / "releases/0.1.0/start.boot")
-        for name in ("minga-renderer-go", "minga-parser", "minga-hook-runner", "minga-shell-output-reader", "minga-clone-tree"):
+        for name in ("minga-renderer-go", "minga-parser", "minga-hook-runner", "minga-shell-output-reader", "minga-clone-tree", "minga-lsp-guard"):
             self.put(self.priv / name, header(target), True)
         for name in ("tutor.txt", "tree_sitter/api.h", "tree_sitter/parser.h", "queries/elixir/highlights.scm"):
             self.put(self.priv / name)
@@ -131,7 +131,7 @@ class ReleaseContentsTest(unittest.TestCase):
         self.target = "macos_aarch64"
         self.fixture(self.target)
         universal = fat_header(("macos_x86_64", "macos_aarch64"))
-        for name in ("minga-renderer-go", "minga-parser", "minga-hook-runner", "minga-shell-output-reader", "minga-clone-tree"):
+        for name in ("minga-renderer-go", "minga-parser", "minga-hook-runner", "minga-shell-output-reader", "minga-clone-tree", "minga-lsp-guard"):
             self.put(self.priv / name, universal, True)
         self.run_checker()
 
@@ -156,6 +156,7 @@ class ReleaseContentsTest(unittest.TestCase):
         paths = [self.release / "erts-17.1.2/bin/beam.smp",
                  self.priv / "minga-renderer-go", self.priv / "minga-parser",
                  self.priv / "minga-hook-runner", self.priv / "minga-shell-output-reader", self.priv / "minga-clone-tree",
+                 self.priv / "minga-lsp-guard",
                  self.release / "lib/crypto-5.8/priv/lib/crypto.so"]
         for path in paths:
             for contents in (header("macos_x86_64"), fat_header(("macos_x86_64",))):
@@ -230,7 +231,7 @@ class ReleaseContentsTest(unittest.TestCase):
                         self.run_checker(success=False)
 
     def test_missing_required_resources_and_executables_fail(self):
-        paths = [self.priv / "minga-parser", self.priv / "minga-renderer-go", self.priv / "minga-hook-runner", self.priv / "minga-shell-output-reader", self.priv / "minga-clone-tree", self.priv / "tutor.txt", self.priv / "tree_sitter/api.h", self.priv / "queries/elixir/highlights.scm", self.release / "releases/0.1.0/start.boot", self.release / "bin/minga"]
+        paths = [self.priv / "minga-parser", self.priv / "minga-renderer-go", self.priv / "minga-hook-runner", self.priv / "minga-shell-output-reader", self.priv / "minga-clone-tree", self.priv / "minga-lsp-guard", self.priv / "tutor.txt", self.priv / "tree_sitter/api.h", self.priv / "queries/elixir/highlights.scm", self.release / "releases/0.1.0/start.boot", self.release / "bin/minga"]
         for path in paths:
             with self.subTest(path=path):
                 contents = path.read_bytes()
@@ -241,7 +242,7 @@ class ReleaseContentsTest(unittest.TestCase):
                 path.chmod(mode)
 
     def test_wrong_native_component_is_not_proved_by_filename(self):
-        for path in (self.release / "erts-17.1.2/bin/beam.smp", self.priv / "minga-renderer-go", self.priv / "minga-parser", self.priv / "minga-hook-runner", self.priv / "minga-shell-output-reader", self.priv / "minga-clone-tree"):
+        for path in (self.release / "erts-17.1.2/bin/beam.smp", self.priv / "minga-renderer-go", self.priv / "minga-parser", self.priv / "minga-hook-runner", self.priv / "minga-shell-output-reader", self.priv / "minga-clone-tree", self.priv / "minga-lsp-guard"):
             with self.subTest(path=path):
                 self.put(path, header("linux_aarch64"), True)
                 self.run_checker(success=False)
@@ -394,7 +395,7 @@ class ReleaseContentsTest(unittest.TestCase):
         self.assertEqual(compiled.returncode, 0, compiled.stderr)
         sqlite = self.release / "lib/exqlite-0.27/priv/sqlite3_nif.so"
         for path in [self.release / "erts-17.1.2/bin/beam.smp", self.release / "erts-17.1.2/bin/erlexec",
-                     *(self.priv / name for name in ("minga-renderer-go", "minga-parser", "minga-hook-runner", "minga-shell-output-reader", "minga-clone-tree"))]:
+                     *(self.priv / name for name in ("minga-renderer-go", "minga-parser", "minga-hook-runner", "minga-shell-output-reader", "minga-clone-tree", "minga-lsp-guard"))]:
             shutil.copy2(binary, path)
         if os_name == "linux":
             built = subprocess.run(["cc", "-shared", "-fPIC", str(source), "-o", str(sqlite)],
