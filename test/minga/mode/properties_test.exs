@@ -102,7 +102,7 @@ defmodule Minga.Mode.PropertiesTest do
   end
 
   defp default_mode_state(:delete_confirm) do
-    %DeleteConfirmState{path: "/tmp/x", name: "x", dir?: false}
+    DeleteConfirmState.new("/tmp/x", "x", false, {1, 0, 42, :regular})
   end
 
   # Codepoints span ASCII (0..127) so the generator hits printable characters
