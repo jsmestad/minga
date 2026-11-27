@@ -168,6 +168,9 @@ defmodule Minga.Test.Storyboard.Session do
 
   @spec native_peek_fixture(Path.t()) :: {keyword(), [term()]}
   defp native_peek_fixture(root) do
+    # The real Native route waits for the packaged catalog even with a fixture resolver. Complete that prerequisite before timing the conversation's startup.
+    {:ok, :ready} = MingaAgent.ModelCatalog.load()
+
     provider = Minga.Test.Storyboard.SubagentPeekProvider
     :ok = provider.prepare_files(root)
     suffix = System.unique_integer([:positive])
