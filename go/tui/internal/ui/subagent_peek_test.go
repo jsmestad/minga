@@ -111,6 +111,16 @@ func TestSubagentPeekParentEnterAndPointerAddressDisplayedInvocation(t *testing.
 	}
 }
 
+func TestSubagentPeekComposeRejectsCoordinatesOutsideItsDraft(t *testing.T) {
+	pane := generated.SubagentPeekPane{Token: "child-b", Prompt: "界"}
+	for _, target := range []string{"1/0", "0/4", "4294967295/0", "0/4294967295"} {
+		id := peekZone(protocol.SubagentPeekCompose, 17, pane.Token, target)
+		if packet := peekZonePacket(id, 0, pane); packet != nil {
+			t.Errorf("compose target %q outside the displayed draft produced %x", target, packet)
+		}
+	}
+}
+
 func TestSubagentPeekParentFitCannotClaimChildCells(t *testing.T) {
 	out := make(chan []byte, 64)
 	m := New(80, 24, out)

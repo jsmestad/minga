@@ -141,12 +141,12 @@ func peekZonePacket(id string, column uint32, pane generated.SubagentPeekPane) [
 		if !ok || rowErr != nil || offsetErr != nil || pane.Token != parts[2] {
 			return nil
 		}
-		row, target = uint32(n), ""
 		lines := strings.Split(pane.Prompt, "\n")
-		if int(row) >= len(lines) || int(offset) > len(lines[row]) {
+		if n >= uint64(len(lines)) || offset > uint64(len(lines[n])) {
 			return nil
 		}
-		column = uint32(offset) + peekDraftByteAtCell(lines[row][offset:], int(column))
+		row, target = uint32(n), ""
+		column = uint32(offset) + peekDraftByteAtCell(lines[n][offset:], int(column))
 	} else {
 		row, column = 0, 0
 	}
