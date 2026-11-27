@@ -254,12 +254,12 @@ func (m Model) peekStepLine(message protocol.AgentChatMessage, width int) (strin
 	}
 	label := fit(step.Label, max(width-displayWidth(lead)-displayWidth(report), 1))
 	base := lipgloss.NewStyle().Background(p.AgentPanel())
-	link := base.Foreground(colour).Underline(true)
+	link := base.Foreground(p.AgentText()).Underline(true)
 	if step.Token == m.peekSelected {
 		link = link.Reverse(true)
 	}
 	id := peekZone(protocol.SubagentPeekStarted, m.subagentPeek().ParentWindowID, "", step.Token)
-	return base.Width(width).Render(fitStyled(base.Foreground(colour).Render(lead)+m.zones.Mark(id, link.Render(label))+base.Foreground(p.Muted()).Render(report), width)), true
+	return base.Width(width).Render(fitStyled(base.Foreground(colour).Render(lead)+m.zones.Mark(id, link.Render(label))+base.Foreground(p.AgentText()).Render(report), width)), true
 }
 
 func (m Model) parentAgentBody() uiRect {
@@ -313,8 +313,19 @@ func (m Model) renderSubagentPeek(pane generated.SubagentPeekPane, width, height
 		}
 		return m.zones.Mark(peekZone(action, pane.WindowID, pane.Token, token), label)
 	}
-	op := text.Bold(true).Render(firstCompactLine(pane.Parent+" › "+pane.Title, max(width-spaceSection.cols(), 1)))
-	lines := []string{line(op + " " + control(protocol.SubagentPeekClose, "", text.Render("×")))}
+	const closeLabel = "×"
+	titleGap := gap(spaceXS)
+	separator := titleGap + "›" + titleGap
+	titleRoom := width - displayWidth(closeLabel) - displayWidth(titleGap)
+	title := clipWithEllipsis(sanitizeTerminalText(pane.Title), titleRoom)
+	if parentRoom := titleRoom - displayWidth(title) - displayWidth(separator); parentRoom > 1 && pane.Parent != "" {
+		title = clipWithEllipsis(sanitizeTerminalText(pane.Parent), parentRoom) + separator + title
+	}
+	close := control(protocol.SubagentPeekClose, "", text.Render(closeLabel))
+	if title != "" {
+		close = text.Bold(true).Render(title) + titleGap + close
+	}
+	lines := []string{line(close)}
 	state, ok := generated.SpineStateFromWire(pane.State)
 	if ok {
 		token := state.Token()

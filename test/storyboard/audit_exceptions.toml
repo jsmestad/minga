@@ -351,6 +351,65 @@ pairs = [
 reason = "Muted labels and borders of the Agent workspace (workspace bar, header buttons, transcript title, session panel, composer actions, system rows), the stopped pill and the modeline's Minga segment use the theme's muted and role colours, which miss 4.5:1 here. Every pair is 2.5:1 or more, except the theme's muted colour on the tab bar in Latte (2.07:1), which the editor chrome shares."
 issue = 4137
 
+[[exception]]
+scenario = "minga.subagent.peek"
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "astrodark"
+pairs = ["#595c66 on #1a1d23"]
+reason = "The existing Agent transcript separators and muted marks use the same palette as minga.conversation."
+issue = 4137
+
+[[exception]]
+scenario = "minga.subagent.peek"
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#8c8fa1 on #eff1f5"]
+reason = "The existing Agent transcript separators and muted marks use the same palette as minga.conversation."
+issue = 4137
+
+[[exception]]
+scenario = "minga.subagent.peek"
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "astrodark"
+pairs = ["#595c66 on #111317", "#595c66 on #16181d", "#595c66 on #1a1d23"]
+reason = "The existing workspace header and shared Agent header, transcript and composer keep their muted colours."
+issue = 4137
+
+[[exception]]
+scenario = "minga.subagent.peek"
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = ["#414559 on #ca9ee6", "#838ba7 on #303446", "#838ba7 on #414559", "#8caaee on #414559"]
+reason = "The existing workspace header and shared Agent header, status pill, transcript and composer keep their colours."
+issue = 4137
+
+[[exception]]
+scenario = "minga.subagent.peek"
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#1e66f5 on #ccd0da",
+  "#1e66f5 on #eff1f5",
+  "#8839ef on #e6e9ef",
+  "#8c8fa1 on #ccd0da",
+  "#8c8fa1 on #eff1f5",
+  "#ccd0da on #8839ef",
+  "#eff1f5 on #1e66f5",
+]
+reason = "The existing workspace header, Agent status and transcript, and modeline keep their colours. No new Started or child header label uses these exceptions."
+issue = 4137
+
+
 # ---- macOS ---------------------------------------------------------------------------------------------------
 
 [[exception]]
@@ -702,7 +761,7 @@ reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none", "minga.queue", "minga.queue.empty"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none", "minga.queue", "minga.queue.empty", "minga.subagent.peek"]
 frontend = "macos"
 part = "modeline.modePill"
 rule = "contrast"
@@ -714,7 +773,7 @@ reason = "The modeline.modePill text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none", "minga.queue", "minga.queue.empty"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none", "minga.queue", "minga.queue.empty", "minga.subagent.peek"]
 frontend = "macos"
 part = "modeline.modeText"
 rule = "contrast"
@@ -735,6 +794,16 @@ pairs = [
   "#eff1f5 on #1e66f5",
 ]
 reason = "The modeline.segment text misses 4.5:1 in this theme: the mode pill, and Minga's words in the minga role (4.45:1)."
+issue = 4137
+
+[[exception]]
+scenario = "minga.subagent.peek"
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#8839ef on #e6e9ef", "#eff1f5 on #1e66f5"]
+reason = "The existing shared modeline draws its Working Minga segment and Normal mode pill in the same theme colours."
 issue = 4137
 
 [[exception]]

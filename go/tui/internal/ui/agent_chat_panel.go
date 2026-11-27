@@ -963,17 +963,23 @@ func (m Model) renderAgentToolMessage(msg protocol.AgentChatMessage, width int) 
 
 	if agentToolOffersRetainedOutput(msg) {
 		labelText := "[Read retained output]"
-		if width < 5+len(labelText) {
+		indentWidth := lipgloss.Width(lead)
+		if width-indentWidth < displayWidth(labelText) {
 			labelText = "[Output]"
 		}
-		label := lipgloss.NewStyle().Foreground(glyphColor).Background(surface).Render(labelText)
-		if width >= 5+len(labelText) && m.zones != nil {
+		reader := lipgloss.NewStyle().Foreground(p.AgentText()).Background(surface)
+		label := reader.Render(labelText)
+		used := indentWidth + displayWidth(labelText)
+		if width >= used && m.zones != nil {
 			zone := fmt.Sprintf("%s%d:%x", zonePrefixAgentRetainedOutput, msg.ID, msg.RetainedOutputOffer)
 			label = m.zones.markCachedTranscriptControl(zone, label)
 		}
-		hint := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render(gap(spaceXL) + "Ctrl+Alt+O reads latest")
-		indent := strings.Repeat(" ", lipgloss.Width(lead))
-		lines = append(lines, lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(indent+label+hint, width)))
+		hint := gap(spaceXL) + "Ctrl+Alt+O reads latest"
+		if width-used >= displayWidth(hint) {
+			label += reader.Render(hint)
+		}
+		indent := strings.Repeat(" ", indentWidth)
+		lines = append(lines, lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(indent+label, width)))
 	}
 	if !msg.Collapsed {
 		if len(msg.PreviewLines) > 0 {

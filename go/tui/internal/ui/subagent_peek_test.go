@@ -137,11 +137,13 @@ func TestSubagentPeekParentFitCannotClaimChildCells(t *testing.T) {
 	}
 }
 
-func TestSubagentPeekNarrowSiblingStripKeepsLastChildClickable(t *testing.T) {
+func TestSubagentPeekNarrowHeaderAndSiblingStripKeepChildIdentity(t *testing.T) {
 	m := residentModel(t, 0)
 	m.width = 60
 	peek := peekChromeForTest(1, peekFocused)
 	pane := &peek.Chrome.SubagentPeek.Panes[0]
+	pane.Title = "Terminal Audit"
+	pane.Parent = "An unnecessarily long description of the parent conversation"
 	pane.Siblings = make([]generated.SubagentPeekSibling, 16)
 	for i := range pane.Siblings {
 		pane.Siblings[i] = generated.SubagentPeekSibling{Token: fmt.Sprintf("child-%d", i+1), State: 1}
@@ -152,6 +154,9 @@ func TestSubagentPeekNarrowSiblingStripKeepsLastChildClickable(t *testing.T) {
 	}})
 	m = updated.(Model)
 	shown := m.View()
+	if !strings.Contains(ansi.Strip(shown.Content), "Terminal Audit ×") {
+		t.Fatal("the narrow header lost the selected child name or its close control")
+	}
 	last := m.zones.Get(peekZone(protocol.SubagentPeekSibling, 17, "child-1", "child-16"))
 	if last == nil || !strings.Contains(ansi.Strip(shown.Content), "1 of 16") {
 		t.Fatal("the narrow sibling strip lost its last child or progress count")
