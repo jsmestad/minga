@@ -245,7 +245,15 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 		sourceRowIndex := rowIndex + sourceStart
 		contentRowIndex := sourceRowIndex - overscanBefore
 		row, hasRow := m.windowRow(window, sourceRowIndex)
+		var twist uint8
+		if hasGutter && hasRow {
+			twist = presentedGutterTwist(gutter.Authorship, row, rowIndex == 0)
+			if rowIndex == 0 && gutter.Authorship != nil && !gutterSourceRow(row) {
+				twist = m.pinGutterAfterVirtualRows(window, gutter.Authorship, sourceRowIndex+1, sourceStart+height)
+			}
+		}
 		key, cacheable := m.lineCacheKeyFor(window, row, sourceRowIndex)
+		key.twist = twist
 		if cacheable {
 			if cached, ok := builder.lookup(key); ok {
 				m.lineCache.hits++
@@ -258,7 +266,7 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 		gutterText := ""
 		if hasGutter {
 			entry, ok := presentedGutterEntry(window.WrappedResidentRows, gutter, sourceRowIndex, row, hasRow)
-			gutterText = m.renderGutterEntry(gutter, entry, ok, cursorline, cursorlineBG)
+			gutterText = m.renderGutterEntry(gutter, entry, ok, twist, cursorline, cursorlineBG)
 		}
 
 		var content string
@@ -1080,6 +1088,68 @@ func presentedGutterEntry(wrappedResident bool, gutter protocol.Gutter, rank int
 	return gutter.EntryAt(rank)
 }
 
+const humanTwistInk uint8 = 0x80
+
+// The existing code-facing spacer is the dedicated authorship cell. It does
+// not consume a diagnostic, fold, line-number or text cell.
+func presentedGutterTwist(authorship *protocol.GutterAuthorship, row protocol.WindowRow, pin bool) uint8 {
+	continuation := row.Kind == protocol.WindowRowWrapContinuation
+	if !gutterSourceRow(row) {
+		return 0
+	}
+	region, head, shared, ok := authorship.RegionAt(row.BufferLine, pin, continuation)
+	if !ok {
+		return 0
+	}
+	return gutterTwistInk(region, row.BufferLine, head, shared)
+}
+
+func gutterSourceRow(row protocol.WindowRow) bool {
+	return row.Kind == protocol.WindowRowNormal || row.Kind == protocol.WindowRowWrapContinuation
+}
+
+// Leading virtual rows do not own any source lines. A continuing region on
+// the first visible source row still pins its head in the top visual cell.
+func (m Model) pinGutterAfterVirtualRows(window protocol.WindowContent, authorship *protocol.GutterAuthorship, start, end int) uint8 {
+	for i := start; i < end; i++ {
+		row, ok := m.windowRow(window, i)
+		if !ok {
+			break
+		}
+		if !gutterSourceRow(row) {
+			continue
+		}
+		continuation := row.Kind == protocol.WindowRowWrapContinuation
+		region, head, shared, ok := authorship.RegionAt(row.BufferLine, true, continuation)
+		if ok && head && (continuation || region.FirstLine < row.BufferLine) {
+			return gutterTwistInk(region, row.BufferLine, true, shared)
+		}
+		break
+	}
+	return 0
+}
+
+func gutterTwistInk(region protocol.AuthoredGutterRegion, line uint32, head, shared bool) uint8 {
+	var variant generated.TwistVariant
+	switch {
+	case region.Role == protocol.AuthoredGutterYou:
+		return (uint8(generated.TwistKept) + 1) | humanTwistInk
+	case region.Role == protocol.AuthoredGutterKept:
+		variant = generated.TwistKept
+	case head:
+		variant = generated.TwistHead
+	case line == region.LastLine:
+		variant = generated.TwistLast
+	default:
+		variant = generated.TwistBody
+	}
+	ink := uint8(variant) + 1
+	if shared {
+		ink |= humanTwistInk
+	}
+	return ink
+}
+
 func gutterRenderWidth(gutter protocol.Gutter) int {
 	width := int(gutter.SignColWidth) + max(int(gutter.LineNumberWidth)-1, 0) + 1
 	if width <= 1 {
@@ -1088,7 +1158,7 @@ func gutterRenderWidth(gutter protocol.Gutter) int {
 	return width
 }
 
-func (m Model) renderGutterEntry(gutter protocol.Gutter, entry protocol.GutterEntry, hasEntry bool, cursorline bool, cursorlineBG uint32) string {
+func (m Model) renderGutterEntry(gutter protocol.Gutter, entry protocol.GutterEntry, hasEntry bool, twist uint8, cursorline bool, cursorlineBG uint32) string {
 	width := gutterRenderWidth(gutter)
 	if width == 0 {
 		return ""
@@ -1100,8 +1170,27 @@ func (m Model) renderGutterEntry(gutter protocol.Gutter, entry protocol.GutterEn
 		style = style.Background(clBG)
 		bg = clBG
 	}
+	mark := ""
+	if twist != 0 {
+		token := generated.TwistVariant((twist &^ humanTwistInk) - 1).Token()
+		if twist&humanTwistInk != 0 {
+			if token.HasShade {
+				token.Shade = generated.ColorRoleYou
+			} else {
+				token.Strand = generated.ColorRoleYou
+			}
+		}
+		palette := m.palette()
+		markStyle := lipgloss.NewStyle().Foreground(palette.Role(token.Strand)).Background(bg)
+		if token.HasShade {
+			markStyle = markStyle.Background(palette.Role(token.Shade))
+		}
+		mark = markStyle.Render(token.Glyph)
+		width--
+		style = style.Width(width)
+	}
 	if !hasEntry {
-		return style.Render(strings.Repeat(" ", width))
+		return style.Render(strings.Repeat(" ", width)) + mark
 	}
 	if entry.BufferLine == gutter.CursorLine && gutter.LineNumberStyle != 2 {
 		style = style.Foreground(m.palette().GutterCurrentText()).Bold(true)
@@ -1113,7 +1202,7 @@ func (m Model) renderGutterEntry(gutter protocol.Gutter, entry protocol.GutterEn
 		if entry.BufferLine == gutter.CursorLine && gutter.LineNumberStyle != 2 {
 			foldStyle = foldStyle.Bold(true)
 		}
-		return style.Render(fitStyled(foldStyle.Render(sign)+number+" ", width))
+		return style.Render(fitStyled(foldStyle.Render(sign)+number+" ", width)) + mark
 	}
 
 	// Apply theme-derived git sign colors (added/modified/deleted).
@@ -1121,10 +1210,10 @@ func (m Model) renderGutterEntry(gutter protocol.Gutter, entry protocol.GutterEn
 		signStyle := lipgloss.NewStyle().Foreground(signColor).Background(bg)
 		numStyle := style.Width(0)
 		content := signStyle.Render(sign) + numStyle.Render(number+" ")
-		return style.Render(fitStyled(content, width))
+		return style.Render(fitStyled(content, width)) + mark
 	}
 
-	return style.Render(fit(sign+number+" ", width))
+	return style.Render(fit(sign+number+" ", width)) + mark
 }
 
 // gutterSignColor returns the foreground color for a gutter sign based on its

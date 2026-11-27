@@ -2804,6 +2804,47 @@ func TestSemanticMouseRoutesModelineAndFileTreeZones(t *testing.T) {
 	}
 }
 
+func TestReviewModelineClickUsesTheFlushedTarget(t *testing.T) {
+	out := make(chan []byte, 64)
+	model := New(70, 12, out)
+	status := func(text, target string) {
+		model.applyMutation(protocol.Command{
+			Kind: protocol.CommandChrome,
+			Chrome: protocol.ChromePayload{Opcode: generated.OPGuiStatusBar, Status: protocol.StatusBar{
+				Left: []protocol.StatusSegment{{Text: text, Command: target}},
+			}},
+		})
+		model = applyTo(t, model)
+	}
+	const shownTarget = "next_minga_change_at:1:<0.42.0>:3:5:7"
+	const pendingTarget = "next_minga_change_at:1:<0.42.0>:3:5:27"
+	status("change 1 of 3", shownTarget)
+	shown := model.View()
+	zone := waitForZone(t, model, zoneIDModelineSegment(0))
+	click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX + 1, Y: zone.StartY})
+
+	status("change 2 of 3", pendingTarget)
+	pending := model.View()
+	drainOutboundPackets(out)
+	updated, _ := updateFromPublishedView(model, shown, click)
+	model = updated.(Model)
+	if packets := drainOutboundPackets(out); len(packets) != 1 || !bytes.Equal(packets[0], protocol.EncodeGUIExecuteCommand(shownTarget)) {
+		t.Fatalf("still-displayed review click sent %x, want only the displayed target", packets)
+	}
+
+	const sameCellsTarget = "next_minga_change_at:1:<0.42.0>:4:5:27"
+	status("change 2 of 3", sameCellsTarget)
+	next := model.View()
+	if ansi.Strip(next.Content) != ansi.Strip(pending.Content) || next.Content == pending.Content {
+		t.Fatal("an identity-only change must republish the view without changing its cells")
+	}
+	drainOutboundPackets(out)
+	updateFromPublishedView(model, next, click)
+	if packets := drainOutboundPackets(out); len(packets) != 1 || !bytes.Equal(packets[0], protocol.EncodeGUIExecuteCommand(sameCellsTarget)) {
+		t.Fatalf("republished review click sent %x, want only the new target", packets)
+	}
+}
+
 func TestSemanticMouseBodyClickFallsThrough(t *testing.T) {
 	model := New(60, 12, nil)
 	model.layout = model.computeLayout()

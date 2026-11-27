@@ -89,7 +89,7 @@ defmodule Minga.Mode do
           | {:execute_then_transition, [command()], mode(), state()}
 
   @typedoc "How an execute result handles an accumulated count prefix."
-  @type count_policy :: :repeat_count | :discard_count
+  @type count_policy :: :repeat_count | :discard_count | :preserve_count
 
   @typedoc "A key event: `{codepoint, modifiers}`."
   @type key :: {non_neg_integer(), non_neg_integer()}
@@ -323,6 +323,9 @@ defmodule Minga.Mode do
   defp apply_result(mode, {:execute, commands, state, :discard_count}) when is_list(commands) do
     {mode, commands, reset_count(state)}
   end
+
+  defp apply_result(mode, {:execute, commands, state, :preserve_count}) when is_list(commands),
+    do: {mode, commands, state}
 
   defp apply_result(mode, {:execute, command, state, count_policy}) do
     apply_result(mode, {:execute, [command], state, count_policy})

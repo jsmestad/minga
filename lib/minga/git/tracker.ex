@@ -4,8 +4,8 @@ defmodule Minga.Git.Tracker do
 
   Starts a `Git.Buffer` for a file in a repository and replaces the
   binding when the buffer adopts a different path or reloads a different
-  target through the same alias. A save at the same target invalidates
-  the cached HEAD version.
+  target through the same alias. Saves and checkout changes invalidate the
+  cached HEAD version and refresh the authored-row comparison.
 
   Maintains an ETS table (`Minga.Git.Tracker.Registry`) mapping buffer
   pids to git buffer pids. The renderer and git commands look up git
@@ -20,6 +20,7 @@ defmodule Minga.Git.Tracker do
   alias Minga.Events
   alias Minga.Git
   alias Minga.Git.Buffer, as: GitBuffer
+  alias Minga.Git.Metadata
 
   @registry_table __MODULE__.Registry
 
@@ -115,6 +116,7 @@ defmodule Minga.Git.Tracker do
     Events.subscribe(:buffer_path_changed, events_registry)
     Events.subscribe(:buffer_changed, events_registry)
     Events.subscribe(:content_replaced, events_registry)
+    Events.subscribe(:git_head_changed, events_registry)
 
     {:ok,
      %{
@@ -146,9 +148,18 @@ defmodule Minga.Git.Tracker do
     # The saved path may be an alias or a path the buffer just adopted.
     # Only refresh the HEAD cache for the currently bound path.
     with %{^buf => %{path: path, canonical_target: target, git_pid: git_pid}} <- state.bindings,
-         ^target <- GitBuffer.canonical_target(path),
-         {:ok, content} <- content_at_path(buf, path) do
-      GitBuffer.invalidate_base(git_pid, content)
+         ^target <- Metadata.file_target(path),
+         {:ok, observation} <- observation_at_path(buf, path) do
+      GitBuffer.observe(git_pid, buf, observation, :refresh_head)
+    end
+
+    {:noreply, state}
+  end
+
+  def handle_info({:minga_event, :git_head_changed, %Events.GitHeadEvent{git_root: root}}, state) do
+    for {buffer, %{git_root: ^root, path: path, git_pid: git}} <- state.bindings,
+        {:ok, observation} <- [observation_at_path(buffer, path)] do
+      GitBuffer.observe(git, buffer, observation, :refresh_head)
     end
 
     {:noreply, state}
@@ -171,14 +182,11 @@ defmodule Minga.Git.Tracker do
 
   @spec do_notify_change(pid(), atom()) :: :ok
   defp do_notify_change(buffer_pid, registry_table) do
-    case lookup(buffer_pid, registry_table) do
-      nil ->
-        :ok
-
-      git_pid ->
-        {content, _cursor} = Buffer.content_and_cursor(buffer_pid)
-        GitBuffer.update(git_pid, content)
-        :ok
+    with git_pid when is_pid(git_pid) <- lookup(buffer_pid, registry_table),
+         {path, _, _, _} = observation when is_binary(path) <- Buffer.file_observation(buffer_pid) do
+      GitBuffer.observe(git_pid, buffer_pid, observation, :cached_head)
+    else
+      _untracked -> :ok
     end
   catch
     :exit, _ -> :ok
@@ -191,10 +199,11 @@ defmodule Minga.Git.Tracker do
     :exit, _ -> nil
   end
 
-  @spec content_at_path(pid(), String.t()) :: {:ok, binary()} | :unavailable
-  defp content_at_path(buffer_pid, path) do
+  @spec observation_at_path(pid(), String.t()) ::
+          {:ok, {String.t(), binary(), Buffer.position(), non_neg_integer()}} | :unavailable
+  defp observation_at_path(buffer_pid, path) do
     case Buffer.file_observation(buffer_pid) do
-      {^path, content, _cursor, _version} -> {:ok, content}
+      {^path, _content, _cursor, _version} = observation -> {:ok, observation}
       _ -> :unavailable
     end
   catch
@@ -205,12 +214,12 @@ defmodule Minga.Git.Tracker do
   defp sync_tracking(state, _buffer_pid, nil), do: state
 
   defp sync_tracking(state, buffer_pid, path) do
-    target = GitBuffer.canonical_target(path)
+    target = Metadata.file_target(path)
 
     case Map.get(state.bindings, buffer_pid) do
       %{path: ^path, canonical_target: ^target, git_pid: git_pid} ->
-        with {:ok, content} <- content_at_path(buffer_pid, path) do
-          GitBuffer.update(git_pid, content)
+        with {:ok, observation} <- observation_at_path(buffer_pid, path) do
+          GitBuffer.observe(git_pid, buffer_pid, observation, :cached_head)
         end
 
         state
@@ -232,7 +241,7 @@ defmodule Minga.Git.Tracker do
 
   defp maybe_start_git_buffer(state, buffer_pid, path, target) do
     with {:ok, git_root} <- Git.root_for(target),
-         {:ok, content} <- content_at_path(buffer_pid, path),
+         {:ok, {^path, content, _, _} = observation} <- observation_at_path(buffer_pid, path),
          {:ok, git_pid} <-
            DynamicSupervisor.start_child(
              Minga.Buffer.Supervisor,
@@ -244,6 +253,7 @@ defmodule Minga.Git.Tracker do
            ) do
       ensure_repo(git_root, state.events_registry)
       :ets.insert(state.registry_table, {buffer_pid, git_pid})
+      GitBuffer.observe(git_pid, buffer_pid, observation, :cached_head)
 
       Events.broadcast(
         :log_message,

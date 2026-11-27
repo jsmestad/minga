@@ -26,6 +26,20 @@ struct TemporalOffscreenMetalTests {
     private static let colorA: UInt32 = 0xE0_10_10 // saturated red
     private static let colorB: UInt32 = 0x10_10_E0 // saturated blue
     private static let neutral: UInt32 = 0x20_20_20 // neutral clear/background
+    private static let authoredMinga: UInt32 = 0xF0_71_BD
+    private static let authoredHuman: UInt32 = 0x55_C9_F7
+
+    @MainActor private func authorshipTheme() -> ThemeColors {
+        let theme = ThemeColors()
+        let roles: [(ColorRole, UInt32)] = [
+            (.minga, Self.authoredMinga), (.mingaShade, 0x56_36_7D), (.you, Self.authoredHuman)
+        ]
+        theme.applySlots(roles.map { role, color in
+            (role.rawValue, UInt8(truncatingIfNeeded: color >> 16),
+             UInt8(truncatingIfNeeded: color >> 8), UInt8(truncatingIfNeeded: color))
+        })
+        return theme
+    }
 
     private static func expectedColor(_ rgb24: UInt32) -> PixelColor {
         PixelColor(
@@ -507,6 +521,140 @@ struct TemporalOffscreenMetalTests {
             x0: splitX, y0: rowTop, x1: width, y1: rowBottom,
             reference: cursorline, thresholdSquared: 0.02
         ) == 0, "cursor-line color crossed into the adjacent pane")
+    }
+
+    @Test("shared replacements, pending heads and the human strand keep their own ink")
+    @MainActor
+    func authoredTwistDrawsInCodeFacingGap() async throws {
+        guard let (device, queue) = requireDevice() else { return }
+        let scale: Float = 2
+        let fontManager = FontManager(name: "Menlo", size: 13, scale: CGFloat(scale))
+        let cols: UInt16 = 24
+        let rows: UInt16 = 4
+        let cellW = Float(fontManager.cellWidth) * scale
+        let cellH = Float(fontManager.cellHeight) * scale
+        let width = Int((Float(cols) * cellW).rounded(.up))
+        let height = Int((Float(rows) * cellH).rounded(.up))
+        let original = gutter(windowId: 1, cols: cols, rows: rows)
+        let authored = Wire.WindowGutterUpdate(
+            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: rows,
+            isActive: true, contentWidth: cols, cursorLine: 0, lineNumberStyle: .absolute,
+            lineNumberWidth: original.lineNumberWidth, signColWidth: original.signColWidth,
+            entryUpdate: .replace(original.entries),
+            authorshipUpdate: .snapshot(revision: 7, regions: [
+                Wire.AuthoredGutterRegion(role: .pending, unit: 12, firstLine: 0, firstColumn: 0, lastLine: 0),
+                Wire.AuthoredGutterRegion(role: .you, unit: 0, firstLine: 0, firstColumn: 2, lastLine: 0),
+                Wire.AuthoredGutterRegion(role: .pending, unit: 13, firstLine: 1, firstColumn: 0, lastLine: 1),
+                Wire.AuthoredGutterRegion(role: .you, unit: 0, firstLine: 2, firstColumn: 0, lastLine: 2),
+                Wire.AuthoredGutterRegion(role: .shared, unit: 0, firstLine: 3, firstColumn: 0, lastLine: 3)
+            ])
+        )
+        let resolved = try #require(authored.resolved(reusing: nil))
+        let content = try windowWithGutter(windowId: 1, rows: blankRows(startingAt: 1, count: rows))
+        var frameState = FrameState(cols: cols, rows: rows)
+        frameState.defaultBg = Self.neutral
+        let waiter = PresentationWaiter()
+        var factories = nativeTestFactories()
+        factories.reportFailure = { waiter.fail($0) }
+        let renderer = try #require(makeRenderer(factories: factories, fontManager: fontManager))
+        let texture = try #require(OffscreenReadback.makeDrawableTexture(device: device, width: width, height: height))
+        let drawable = ReadbackDrawable(texture: texture)
+        let theme = authorshipTheme()
+        let outcome = await waiter.awaitOutcome {
+            renderer.render(
+                frameState: frameState, fontManager: fontManager,
+                windowContents: [1: content], windowGutters: [1: resolved], themeColors: theme,
+                drawableProvider: { drawable }, viewportSize: CGSize(width: width, height: height),
+                contentScale: scale, presentationWindowId: 1, presentationInputSeq: 1,
+                onPresented: { waiter.succeed($0) }
+            )
+        }
+        guard case .presented = outcome,
+              let image = await OffscreenReadback.read(texture: texture, queue: queue) else {
+            Issue.record("authored gutter frame did not present: \(outcome)")
+            return
+        }
+
+        let x0 = Int((5 * cellW + Float(CoreTextMetalRenderer.gutterLeftMarginPt) * scale).rounded(.up))
+        let x1 = Int((5 * cellW + Float(CoreTextMetalRenderer.gutterPixelPaddingPt) * scale).rounded(.down))
+        let strand = Self.expectedColor(Self.authoredMinga)
+        #expect(image.matching(x0: x0, y0: 0, x1: x1, y1: Int(cellH), reference: strand, thresholdSquared: 0.02) > 0)
+        #expect(image.matching(x0: x0, y0: Int(cellH), x1: x1, y1: Int(2 * cellH), reference: strand, thresholdSquared: 0.02) > 0)
+        #expect(image.matching(x0: x0, y0: Int(2 * cellH), x1: x1, y1: Int(3 * cellH), reference: strand, thresholdSquared: 0.02) == 0)
+        #expect(image.matching(x0: x0, y0: Int(3 * cellH), x1: x1, y1: height, reference: strand, thresholdSquared: 0.02) > 0)
+        let human = Self.expectedColor(Self.authoredHuman)
+        #expect(image.matching(x0: x0, y0: 0, x1: x1, y1: Int(cellH), reference: human, thresholdSquared: 0.02) > 0)
+        #expect(image.matching(x0: x0, y0: Int(cellH), x1: x1, y1: Int(2 * cellH), reference: human, thresholdSquared: 0.02) == 0)
+        #expect(image.matching(x0: x0, y0: Int(2 * cellH), x1: x1, y1: Int(3 * cellH), reference: human, thresholdSquared: 0.02) > 0)
+        #expect(image.matching(x0: x0, y0: Int(3 * cellH), x1: x1, y1: height, reference: human, thresholdSquared: 0.02) > 0)
+    }
+
+    @Test("a virtual top row does not hide a continuing twist or move the next region's head")
+    @MainActor
+    func authoredTwistPinsAcrossLeadingVirtualRow() async throws {
+        guard let (device, queue) = requireDevice() else { return }
+        let scale: Float = 2
+        let fontManager = FontManager(name: "Menlo", size: 13, scale: CGFloat(scale))
+        let cols: UInt16 = 24
+        let rows: UInt16 = 2
+        let cellW = Float(fontManager.cellWidth) * scale
+        let cellH = Float(fontManager.cellHeight) * scale
+        let width = Int((Float(cols) * cellW).rounded(.up))
+        let height = Int((Float(rows) * cellH).rounded(.up))
+        let original = gutter(windowId: 1, cols: cols, rows: rows)
+        let authored = Wire.WindowGutterUpdate(
+            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: rows,
+            isActive: true, contentWidth: cols, cursorLine: 0, lineNumberStyle: .absolute,
+            lineNumberWidth: original.lineNumberWidth, signColWidth: original.signColWidth,
+            entryUpdate: .replace(original.entries),
+            authorshipUpdate: .snapshot(revision: 7, regions: [
+                Wire.AuthoredGutterRegion(role: .pending, unit: 12, firstLine: 0, firstColumn: 0, lastLine: 2),
+                Wire.AuthoredGutterRegion(role: .pending, unit: 12, firstLine: 4, firstColumn: 0, lastLine: 4)
+            ])
+        )
+        let resolved = try #require(authored.resolved(reusing: nil))
+        var frameState = FrameState(cols: cols, rows: rows)
+        frameState.defaultBg = Self.neutral
+        let waiter = PresentationWaiter()
+        var factories = nativeTestFactories()
+        factories.reportFailure = { waiter.fail($0) }
+        let renderer = try #require(makeRenderer(factories: factories, fontManager: fontManager))
+        let x0 = Int((5 * cellW + Float(CoreTextMetalRenderer.gutterLeftMarginPt) * scale).rounded(.up))
+        let x1 = Int((5 * cellW + Float(CoreTextMetalRenderer.gutterPixelPaddingPt) * scale).rounded(.down))
+        let strand = Self.expectedColor(Self.authoredMinga)
+        let theme = authorshipTheme()
+
+        for line: UInt32 in [1, 3, 4] {
+            waiter.reset()
+            let sequence = line + 1
+            let visible = [
+                GUIVisualRow(rowType: .virtualLine, rowId: UInt64(sequence * 2), bufLine: line,
+                             contentHash: sequence, text: "annotation", spans: []),
+                GUIVisualRow(rowType: .normal, rowId: UInt64(sequence * 2 + 1), bufLine: line,
+                             contentHash: sequence, text: "code", spans: [])
+            ]
+            let content = try windowWithGutter(windowId: 1, rows: visible)
+            let texture = try #require(OffscreenReadback.makeDrawableTexture(device: device, width: width, height: height))
+            let drawable = ReadbackDrawable(texture: texture, drawableID: Int(sequence))
+            let outcome = await waiter.awaitOutcome {
+                renderer.render(
+                    frameState: frameState, fontManager: fontManager,
+                    windowContents: [1: content], windowGutters: [1: resolved], themeColors: theme,
+                    drawableProvider: { drawable }, viewportSize: CGSize(width: width, height: height),
+                    contentScale: scale, presentationWindowId: 1, presentationInputSeq: sequence,
+                    onPresented: { waiter.succeed($0) }
+                )
+            }
+            guard case .presented = outcome,
+                  let image = await OffscreenReadback.read(texture: texture, queue: queue) else {
+                Issue.record("authored gutter frame did not present: \(outcome)")
+                return
+            }
+            let top = image.matching(x0: x0, y0: 0, x1: x1, y1: Int(cellH), reference: strand, thresholdSquared: 0.02)
+            let code = image.matching(x0: x0, y0: Int(cellH), x1: x1, y1: height, reference: strand, thresholdSquared: 0.02)
+            #expect((top > 0) == (line == 1))
+            #expect((code > 0) == (line != 3))
+        }
     }
 
     // MARK: 1. Sequence of production frames: every drawable-copy-completed frame is nonblank

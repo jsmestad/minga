@@ -163,6 +163,145 @@ func TestResidentGutterRetainPreservesMatchingOverrides(t *testing.T) {
 	}
 }
 
+func TestResidentGutterAuthorshipPatchAndUnmatchedBase(t *testing.T) {
+	model := New(30, 6, nil)
+	pending := protocol.AuthoredGutterRegion{Role: protocol.AuthoredGutterPending, Unit: 42, FirstLine: 1, LastLine: 2}
+	kept := protocol.AuthoredGutterRegion{Role: protocol.AuthoredGutterKept, FirstLine: 1, LastLine: 2}
+	gap := protocol.AuthoredGutterRegion{Role: protocol.AuthoredGutterDeletion, Unit: 12, FirstLine: 0, LastLine: 0}
+	initial := residentGutterCommand(7, 10, 3, false, nil)
+	initial.Chrome.WindowGutter.AuthorshipUpdate = &protocol.GutterAuthorshipUpdate{
+		Kind: protocol.GutterAuthorshipSnapshot, Revision: 11, Added: []protocol.AuthoredGutterRegion{pending, gap},
+	}
+	model = applyTo(t, model, beginFrame(1, 0), testThemeCommand(),
+		residentWindowCommand(7, 10, 3, protocol.CommandWindowContent), initial, commitFrame(1))
+
+	patch := residentGutterCommand(7, 10, 3, true, nil)
+	patch.Chrome.WindowGutter.AuthorshipUpdate = &protocol.GutterAuthorshipUpdate{
+		Kind: protocol.GutterAuthorshipPatch, Base: 11, Revision: 12,
+		Added: []protocol.AuthoredGutterRegion{kept}, Removed: []protocol.AuthoredGutterRegion{pending},
+	}
+	model = applyTo(t, model, beginFrame(2, 1), patch, commitFrame(2))
+	gutter, ok := model.windowGutter(7)
+	if !ok || gutter.Authorship == nil || gutter.Authorship.Revision != 12 {
+		t.Fatalf("Keep patch did not publish: %+v", gutter.Authorship)
+	}
+	if region, head, shared, exists := gutter.Authorship.RegionAt(1, true, false); !exists || head || shared || region != kept {
+		t.Errorf("selected region did not become kept: %+v", region)
+	}
+	if region, head, shared, exists := gutter.Authorship.RegionAt(0, false, false); !exists || !head || shared || region != gap {
+		t.Errorf("unrelated deletion lost its head: %+v", region)
+	}
+
+	// Replaying the patch cannot overwrite the already-committed revision.
+	model = applyTo(t, model, beginFrame(3, 2), patch, commitFrame(3))
+	after, _ := model.windowGutter(7)
+	if model.lastCommittedSeq != 2 || after.Authorship != gutter.Authorship {
+		t.Fatal("stale authored base changed the committed frame")
+	}
+}
+
+func TestResidentGutterDrawsAndPinsTwistWithoutMovingCodeOrDiagnostics(t *testing.T) {
+	const windowID, epoch = 7, 10
+	content := residentWindowCommand(windowID, epoch, 6, protocol.CommandWindowContent)
+	content.Window.Geometry.ContentRect = protocol.Rect{Width: 24, Height: 3}
+	content.Window.Geometry.ViewportRows = 3
+	content.Window.ScrollSet = true
+	content.Window.Scroll = protocol.ScrollPresentation{
+		WindowID: windowID, ContentEpoch: epoch, VisibleEndLine: 3, OverscanEndLine: 6, LayoutGeneration: 1,
+	}
+	gutter := residentGutterCommand(windowID, epoch, 6, false, map[uint32]protocol.GutterEntry{
+		1: {BufferLine: 1, SignType: 8, SignText: "!"},
+	})
+	gutter.Chrome.WindowGutter.ContentHeight = 3
+	pending := protocol.AuthoredGutterRegion{Role: protocol.AuthoredGutterPending, Unit: 42, FirstLine: 0, LastLine: 3}
+	shared := protocol.AuthoredGutterRegion{Role: protocol.AuthoredGutterYou, FirstLine: 1, LastLine: 1}
+	human := protocol.AuthoredGutterRegion{Role: protocol.AuthoredGutterYou, FirstLine: 4, LastLine: 4}
+	gutter.Chrome.WindowGutter.AuthorshipUpdate = &protocol.GutterAuthorshipUpdate{
+		Kind: protocol.GutterAuthorshipSnapshot, Revision: 11, Added: []protocol.AuthoredGutterRegion{pending, shared, human},
+	}
+	model := applyTo(t, New(26, 6, nil), beginFrame(1, 0), testThemeCommand(), content, gutter, commitFrame(1))
+	render := func() []string {
+		return stripRenderedLines(model.renderWindowRows(model.windows[windowID]))
+	}
+	committed, _ := model.windowGutter(windowID)
+	authorship := committed.Authorship
+	if region, head, coauthored, exists := authorship.RegionAt(1, true, false); !exists || !head || !coauthored || region != pending {
+		t.Fatalf("shared pinned head lost its review identity: %+v", region)
+	}
+	if region, head, coauthored, exists := authorship.RegionAt(4, false, false); !exists || head || coauthored || region != human {
+		t.Fatalf("human line is not a standalone strand: %+v", region)
+	}
+	initial := render()
+	if !strings.Contains(initial[0], "▚line") || !strings.Contains(initial[1], "▐line") || !strings.Contains(initial[1], "!") {
+		t.Fatalf("head, body or diagnostic missing: %q", initial)
+	}
+
+	model.previewVerticalScroll(model.windows[windowID], 1)
+	scrolled := render()
+	if !strings.Contains(scrolled[0], "▚line") || !strings.Contains(scrolled[0], "!") {
+		t.Fatalf("scroll did not pin the twist in the diagnostic row's authorship cell: %q", scrolled)
+	}
+
+	patch := gutter
+	patch.Chrome.WindowGutter.Resident = &protocol.ResidentGutterEntries{ContentEpoch: epoch, LineCount: 6, RetainOverrides: true}
+	patch.Chrome.WindowGutter.AuthorshipUpdate = &protocol.GutterAuthorshipUpdate{
+		Kind: protocol.GutterAuthorshipPatch, Base: 11, Revision: 12,
+		Added:   []protocol.AuthoredGutterRegion{{Role: protocol.AuthoredGutterKept, FirstLine: 0, LastLine: 3}},
+		Removed: []protocol.AuthoredGutterRegion{pending},
+	}
+	model = applyTo(t, model, beginFrame(2, 1), patch, commitFrame(2))
+	retained := render()
+	if !strings.Contains(retained[0], "│line") || !strings.Contains(retained[0], "!") ||
+		strings.Contains(strings.Join(retained, "\n"), "▚") {
+		t.Fatalf("Keep reused a stale twist or displaced the sign or code: %q", retained)
+	}
+	model.previewVerticalScroll(model.windows[windowID], 3)
+	if lines := render(); !strings.Contains(lines[0], "│line") {
+		t.Fatalf("human strand is absent from the rendered region: %q", lines)
+	}
+}
+
+func TestAuthoredGutterPinsAcrossLeadingVirtualRowAndReleasesAtRegionEnd(t *testing.T) {
+	const windowID, epoch, virtualRowKind = 7, 10, 2
+	window := residentWindowCommand(windowID, epoch, 5, protocol.CommandWindowContent)
+	window.Window.Geometry.ContentRect = protocol.Rect{Width: 24, Height: 2}
+	window.Window.Geometry.ViewportRows = 2
+	gutter := residentGutterCommand(windowID, epoch, 5, false, nil)
+	gutter.Chrome.WindowGutter.ContentHeight = 2
+	gutter.Chrome.WindowGutter.AuthorshipUpdate = &protocol.GutterAuthorshipUpdate{
+		Kind: protocol.GutterAuthorshipSnapshot, Revision: 11, Added: []protocol.AuthoredGutterRegion{
+			{Role: protocol.AuthoredGutterPending, Unit: 42, FirstLine: 0, LastLine: 1},
+			{Role: protocol.AuthoredGutterShared, FirstLine: 2, LastLine: 2},
+			{Role: protocol.AuthoredGutterPending, Unit: 42, FirstLine: 4, LastLine: 4},
+		},
+	}
+	model := applyTo(t, New(26, 6, nil), beginFrame(1, 0), testThemeCommand(), window, gutter, commitFrame(1))
+	// Present the gutter against a windowed visual payload containing a virtual row.
+	delete(model.residentRows, windowID)
+	content := model.windows[windowID]
+	content.Rows = []protocol.WindowRow{{Kind: virtualRowKind, Text: "annotation"}, {Text: "code"}}
+	for _, tc := range []struct {
+		line uint32
+		top  string
+		code string
+	}{
+		{1, "▚annotation", "▐code"},
+		{2, " annotation", "▐code"},
+		{3, " annotation", " code"},
+		{4, " annotation", "▚code"},
+	} {
+		content.Rows[1].BufferLine = tc.line
+		lines := stripRenderedLines(model.renderWindowRows(content))
+		if !strings.Contains(lines[0], tc.top) || !strings.Contains(lines[1], tc.code) {
+			t.Errorf("source line %d rendered %q; want %q above %q", tc.line, lines, tc.top, tc.code)
+		}
+	}
+	authored, _ := model.windowGutter(windowID)
+	if region, head, shared, ok := authored.Authorship.RegionAt(2, true, false); !ok || head || !shared || region.Unit != 0 {
+		t.Errorf("the shared replacement must show both authors without an actionable head: %+v", region)
+	}
+}
+
 func TestResidentGutterStructuralCountChangeRequiresReplacement(t *testing.T) {
 	model := New(30, 6, nil)
 	model = applyTo(t, model,

@@ -14,10 +14,12 @@ defmodule Minga.Test.Storyboard.Session do
   alias Minga.Test.EditorCase
   alias Minga.Test.Storyboard.Keys
   alias Minga.Test.Storyboard.Model
+  alias MingaEditor.Agent.{Activity, UIState}
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.MinibufferData
   alias MingaEditor.State.RenderCorrelation
   alias MingaEditor.RenderModel.UI.Builder, as: UIBuilder
+  alias MingaEditor.Shell.Traditional.Workflow
   alias MingaEditor.StatusBar.Data, as: StatusBarData
 
   @default_content """
@@ -72,7 +74,7 @@ defmodule Minga.Test.Storyboard.Session do
 
   Every session runs the real tree-sitter parser, and `settle/1` returns only once an open file's highlights are applied, so parser-dependent keys (structural motions, text objects, folds) behave as in the app and every frame is highlighted. The parser is the suite's shared one (`shared_parser/0`) unless `:parser_manager` names another running `Minga.Parser.Manager`.
 
-  `:minga` puts Minga in an Agent status before the first key, for example `:thinking` for "Minga is working". The status goes into the editor's live presentation cache, the value every surface reads, so the modeline, the activity card and the rest show it the way they would for a running session. The factory has no running session, so nothing changes the status afterwards.
+  `:minga` puts Minga in an Agent status before the first key, for example `:thinking` for "Minga is working". Use `{:thinking, :in_file}` to make the fixture file the task's last edited file. The status goes into the editor's live presentation cache, so every surface reads the same value.
 
   `:conversation` starts a real Agent session before the first key. It takes `messages:`, `notices:`, `prompt:`, `turn:` (`:idle`, `:working` or `:stopped`), and `queue:` (follow-up messages queued while Minga works). Its provider never finishes a turn. By default the fixture returns to the file before the first key, so `SPC a v` opens the seeded conversation. Set `open?: true` when the scenario begins inside that conversation.
 
@@ -128,7 +130,6 @@ defmodule Minga.Test.Storyboard.Session do
     await_restore!(ctx, place != :outside and Keyword.get(opts, :restored, false))
     settle_highlights(ctx, parser)
     seed_tasks(ctx, Keyword.get(opts, :tasks, []))
-    install_minga_status(ctx, Keyword.get(opts, :minga))
     install_git_status(ctx, root, Keyword.get(opts, :git_status))
     peek_parent = start_conversation(ctx, parser, file, Keyword.get(opts, :conversation))
 
@@ -144,6 +145,7 @@ defmodule Minga.Test.Storyboard.Session do
     }
 
     session = seed_review(session, Keyword.get(opts, :review_edits, []))
+    install_minga_status(ctx, file, Keyword.get(opts, :minga))
     %{session | home_window: window_id(session)}
   end
 
@@ -571,16 +573,33 @@ defmodule Minga.Test.Storyboard.Session do
   defp agent_status(state),
     do: MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state).runtime.status
 
-  @spec install_minga_status(EditorCase.editor_ctx(), Minga.Design.Tokens.agent_status() | nil) ::
-          :ok
-  defp install_minga_status(_ctx, nil), do: :ok
+  @spec install_minga_status(
+          EditorCase.editor_ctx(),
+          String.t(),
+          Minga.Design.Tokens.agent_status()
+          | {Minga.Design.Tokens.agent_status(), :in_file}
+          | nil
+        ) :: :ok
+  defp install_minga_status(_ctx, _file, nil), do: :ok
 
-  defp install_minga_status(%{editor: editor}, status) do
-    :sys.replace_state(
-      editor,
-      &MingaEditor.Shell.Traditional.Workflow.install_agent_status(&1, status)
-    )
+  defp install_minga_status(%{editor: editor}, file, {status, :in_file}) do
+    identity = Buffer.file_identity(file)
 
+    :sys.replace_state(editor, fn state ->
+      ui = state.workspace.agent_ui
+      author = Activity.task_author(UIState.task_id(ui))
+      activity = Activity.record_file(ui.view.activity, author, file, identity)
+
+      state
+      |> Workflow.install_agent_ui(UIState.replace_activity(ui, activity))
+      |> Workflow.install_agent_status(status)
+    end)
+
+    :ok
+  end
+
+  defp install_minga_status(%{editor: editor}, _file, status) do
+    :sys.replace_state(editor, &Workflow.install_agent_status(&1, status))
     :ok
   end
 

@@ -119,7 +119,7 @@ defmodule MingaEditor.StatusBar.Data do
 
   @spec build_common_data(EditorState.t() | map(), pid() | nil, String.t()) :: Common.t()
   defp build_common_data(state, buf, no_buffer_file_name) do
-    {line, col} = if buf, do: BufferAPI.cursor(buf), else: {0, 0}
+    {{line, col}, change_position, change_target} = review_cursor(state, buf)
     line_count = if buf, do: BufferAPI.line_count(buf), else: 1
     file_name = if buf, do: buf_display_name(buf), else: no_buffer_file_name
     dirty? = buf != nil and BufferAPI.dirty?(buf)
@@ -190,11 +190,34 @@ defmodule MingaEditor.StatusBar.Data do
       minga_progress: minga_progress(state),
       minga_file: minga_path,
       minga_here?: minga_here?,
+      change_position: change_position,
+      change_target: change_target,
       failed_language_servers: failed_language_servers(state),
       config_problem: config_problem(state),
       keymap_server: keymap_server(state),
       key_hints?: key_hints?(state)
     }
+  end
+
+  @spec review_cursor(EditorState.t() | map(), pid() | nil) ::
+          {Minga.Buffer.Position.t(), Minga.Buffer.ReviewPosition.rank() | nil,
+           Minga.RenderModel.UI.StatusBar.Segment.review_target() | nil}
+  defp review_cursor(_state, nil), do: {{0, 0}, nil, nil}
+
+  defp review_cursor(state, buffer) do
+    case Map.get(state.workspace.windows.map, state.workspace.windows.active) do
+      %{id: window, content: {:buffer, ^buffer}} ->
+        case BufferAPI.cursor_with_review_position(buffer) do
+          {cursor, nil} ->
+            {cursor, nil, nil}
+
+          {cursor, {rank, version, revision, point}} ->
+            {cursor, rank, {:next_minga_change, window, buffer, version, revision, point}}
+        end
+
+      _other ->
+        {BufferAPI.cursor(buffer), nil, nil}
+    end
   end
 
   # The plan of the active workspace's Minga, read from the Editor's own projection.
@@ -685,6 +708,7 @@ defmodule MingaEditor.StatusBar.Data do
       minga_file: common.minga_file,
       minga_here?: common.minga_here?,
       change_position: common.change_position,
+      change_target: common.change_target,
       failed_language_servers: common.failed_language_servers,
       config_problem: common.config_problem,
       keymap_server: common.keymap_server,

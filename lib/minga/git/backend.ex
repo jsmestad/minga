@@ -45,8 +45,11 @@ defmodule Minga.Git.Backend do
   @callback commit(git_root :: String.t(), message :: String.t(), opts :: keyword()) ::
               {:ok, String.t()} | {:error, String.t()}
 
-  @callback last_commit_message(git_root :: String.t()) ::
-              {:ok, String.t()} | :error
+  @callback head_commit(git_root :: String.t()) :: {:ok, {String.t(), String.t()}} | :error
+
+  @callback review_baseline(path :: String.t()) ::
+              {:ok, Minga.Git.ReviewIdentity.t()} | :error
+  @optional_callbacks review_baseline: 1
 
   @callback stage_patch(git_root :: String.t(), patch :: String.t()) ::
               :ok | {:error, String.t()}

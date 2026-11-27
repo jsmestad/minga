@@ -30,6 +30,7 @@ defmodule Minga.Storyboard.JourneysTest do
     journey = %{
       name: "leader and back, then a selection and back",
       start: "edit.plain",
+      start_opts: [],
       steps: [
         %{key: "SPC (pause)", to: "edit.whichkey.leader", press: nil},
         %{key: "esc", to: "edit.plain", press: nil},
@@ -47,6 +48,7 @@ defmodule Minga.Storyboard.JourneysTest do
     journey = %{
       name: "wrong turn",
       start: "edit.plain",
+      start_opts: [],
       steps: [%{key: "v", to: "edit.whichkey.leader", press: nil}]
     }
 

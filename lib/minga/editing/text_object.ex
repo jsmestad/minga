@@ -43,7 +43,7 @@ defmodule Minga.Editing.TextObject do
   Delimiter search spans multiple lines.
   """
 
-  alias Minga.Buffer.Document
+  alias Minga.Buffer.{Document, Lines, Position}
   alias Minga.Core.Unicode
   alias Minga.Editing.Motion.Helpers
   alias Minga.Editing.Text.Readable
@@ -61,6 +61,34 @@ defmodule Minga.Editing.TextObject do
   @typep delimiter_scan_result ::
            {:found, position()}
            | {:cont, non_neg_integer(), non_neg_integer(), pos_integer(), non_neg_integer()}
+
+  @doc "Projects one exact pending review region onto Vim's inclusive selection coordinates."
+  @spec review_change(Document.t(), {non_neg_integer(), non_neg_integer()}, :inner | :around) ::
+          {:charwise | :linewise, position(), position()} | nil
+  def review_change(%Document{} = doc, {first, stop}, :inner) when first < stop do
+    {:charwise, review_character_at(doc, first), review_character_at(doc, stop - 1)}
+  end
+
+  def review_change(%Document{}, {_first, _stop}, :inner), do: nil
+
+  def review_change(%Document{} = doc, {first, stop}, :around) do
+    {first_line, _} = Position.from_point(doc, first)
+    {last_line, _} = Position.from_point(doc, max(first, stop - 1))
+    {:linewise, {first_line, 0}, {last_line, 0}}
+  end
+
+  @spec review_character_at(Document.t(), non_neg_integer()) :: position()
+  defp review_character_at(doc, point) do
+    {line, column} = Position.from_point(doc, point)
+    text = Lines.fetch(doc, line)
+
+    column =
+      if column < byte_size(text),
+        do: Unicode.prev_grapheme_byte_offset(text, column + 1),
+        else: byte_size(text)
+
+    {line, column}
+  end
 
   # ── Word text objects ────────────────────────────────────────────────────────
 

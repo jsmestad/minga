@@ -748,6 +748,8 @@ final class CoreTextMetalRenderer {
         // Build background quads and line texture instances.
         var bgQuads: [QuadGPU] = []
         var lineInstances: [LineGPU] = []
+        var gutterMarkInstances: [LineGPU] = []
+        var gutterMarkQuads: [QuadGPU] = []
 
         // Semantic window content rendering (from 0x80 opcode).
         // Buffer windows with semantic content rendered via WindowContentRenderer;
@@ -1159,7 +1161,9 @@ final class CoreTextMetalRenderer {
                 atlas: candidateAtlas,
                 windowRenderer: candidateWindowRenderer,
                 bgQuads: &bgQuads,
-                lineInstances: &lineInstances
+                lineInstances: &lineInstances,
+                gutterMarkInstances: &gutterMarkInstances,
+                gutterMarkQuads: &gutterMarkQuads
             )
         }
 
@@ -1188,10 +1192,11 @@ final class CoreTextMetalRenderer {
         )
         let quadPassCounts = [bgQuads.count] + guidePassCounts
             + [semanticOverlayQuads.count, diagnosticQuads.count, gutterChromeQuads.count]
+            + [gutterMarkQuads.count]
         let bufferDemand: NativeDrawBufferDemand
         do {
             bufferDemand = try NativeDrawBufferDemand.checked(
-                lineCount: lineInstances.count, lineStride: MemoryLayout<LineGPU>.stride,
+                lineCount: lineInstances.count + gutterMarkInstances.count, lineStride: MemoryLayout<LineGPU>.stride,
                 quadPassCounts: quadPassCounts, quadStride: MemoryLayout<QuadGPU>.stride,
                 quadBufferCount: Self.quadBufferFrameCount,
                 alignment: Self.quadBufferOffsetAlignment,
@@ -1568,20 +1573,9 @@ final class CoreTextMetalRenderer {
         }
 
         // Pass 3: Line textures — one instanced draw call with the atlas texture.
-        if !lineInstances.isEmpty, let atlas, let atlasTexture = atlas.texture,
-           let instBuf = candidateInstanceBuffer {
-            // Copy instance data into the shared Metal buffer.
-            let byteCount = lineInstances.count * MemoryLayout<LineGPU>.stride
-            _ = lineInstances.withUnsafeBytes { ptr in
-                memcpy(instBuf.contents(), ptr.baseAddress!, byteCount)
-            }
-
-            encoder.setRenderPipelineState(linePipeline)
-            encoder.setVertexBuffer(instBuf, offset: 0, index: 0)
-            encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
-            encoder.setFragmentTexture(atlasTexture, index: 0)
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6,
-                                   instanceCount: lineInstances.count)
+        if let atlasTexture = candidateAtlas.texture, let buffer = candidateInstanceBuffer {
+            drawLineTextures(lineInstances, in: buffer, byteOffset: 0,
+                             texture: atlasTexture, encoder: encoder, uniforms: &uniforms)
         }
 
         // Pass 3.5: Diagnostic underline quads (drawn after text, before gutter).
@@ -1598,6 +1592,18 @@ final class CoreTextMetalRenderer {
             drawQuadBatches(gutterChromeQuads, buffer: candidateQuadBuffer,
                                             writeOffset: &candidateQuadWriteOffset,
                                             encoder: encoder, uniforms: &uniforms)
+        }
+
+        // Paint marks over the opaque gutter gap, which intentionally still masks text overflow.
+        if !gutterMarkQuads.isEmpty {
+            encoder.setRenderPipelineState(bgPipeline)
+            drawQuadBatches(gutterMarkQuads, buffer: candidateQuadBuffer,
+                            writeOffset: &candidateQuadWriteOffset, encoder: encoder, uniforms: &uniforms)
+        }
+        if let atlasTexture = candidateAtlas.texture, let buffer = candidateInstanceBuffer {
+            drawLineTextures(gutterMarkInstances, in: buffer,
+                             byteOffset: lineInstances.count * MemoryLayout<LineGPU>.stride,
+                             texture: atlasTexture, encoder: encoder, uniforms: &uniforms)
         }
 
         // Pass 5.5: Split separators (vertical lines between split panes,
@@ -2119,7 +2125,9 @@ final class CoreTextMetalRenderer {
         atlas: LineTextureAtlas,
         windowRenderer: WindowContentRenderer,
         bgQuads: inout [QuadGPU],
-        lineInstances: inout [LineGPU]
+        lineInstances: inout [LineGPU],
+        gutterMarkInstances: inout [LineGPU],
+        gutterMarkQuads: inout [QuadGPU]
     ) {
         let signColWidth = Int(gutter.signColWidth)
         let baseRow = gutter.contentRow
@@ -2127,16 +2135,47 @@ final class CoreTextMetalRenderer {
 
         let clipTop = Float(gutter.contentRow) * cellH * scale
         let clipBottom = Float(gutter.contentRow + gutter.contentHeight) * cellH * scale
+        var firstVisibleSourceRow = true
 
         for (offset, row) in slice.rows.enumerated() {
             let rowIndex = slice.range.lowerBound + offset
-            guard let entry = gutter.entries.entry(visualRow: row, rowIndex: rowIndex) else { continue }
             let presentationRow = offset - slice.overscanBeforeRows
             let atlasRow = UInt16(clamping: offset)
             let rowY = (Float(baseRow) + Float(presentationRow)) * cellH * scale - scrollOffsetY
             guard CoreTextMetalRenderer.clipVerticalQuad(y: rowY, height: cellH * scale, top: clipTop, bottom: clipBottom) != nil else { continue }
             let yPos = rowY
             let xOffset = Float(baseCol) * cellW * scale + gutterLeftMarginPx
+
+            // Use the code-facing point gap without moving the sign, line number or text rectangles.
+            if let authorship = gutter.authorship, row.rowType == .normal || row.rowType == .wrapContinuation {
+                let continuation = row.rowType == .wrapContinuation
+                let pin = firstVisibleSourceRow
+                firstVisibleSourceRow = false
+                if let mark = authorship.region(at: row.bufLine, pin: pin, continuation: continuation) {
+                    let pinned = pin && mark.head && (continuation || mark.region.firstLine < row.bufLine)
+                    let markWidth = max(Int((10 * scale).rounded(.down)), 1)
+                    let prefix = Float(signColWidth + Int(gutter.lineNumberWidth)) * cellW * scale
+                    let x = xOffset + prefix + (gutterPaddingPx - Float(markWidth)) / 2
+                    if pinned && yPos > clipTop {
+                        renderGutterTwist(
+                            mark: (mark.region, false, mark.shared), line: row.bufLine, pinned: false,
+                            windowId: gutter.windowId, background: frameState.defaultBg,
+                            x: x, y: yPos, width: markWidth, height: cellH * scale,
+                            clipTop: clipTop + cellH * scale, clipBottom: clipBottom, atlas: atlas,
+                            windowRenderer: windowRenderer, bgQuads: &gutterMarkQuads, lineInstances: &gutterMarkInstances
+                        )
+                    }
+                    renderGutterTwist(
+                        mark: mark, line: row.bufLine, pinned: pinned, windowId: gutter.windowId,
+                        background: frameState.defaultBg,
+                        x: x, y: pinned ? clipTop : yPos, width: markWidth, height: cellH * scale,
+                        clipTop: clipTop, clipBottom: clipBottom, atlas: atlas,
+                        windowRenderer: windowRenderer, bgQuads: &gutterMarkQuads, lineInstances: &gutterMarkInstances
+                    )
+                }
+            }
+
+            guard let entry = gutter.entries.entry(visualRow: row, rowIndex: rowIndex) else { continue }
 
             // Sign column (leftmost in gutter)
             if signColWidth > 0 {
@@ -2193,6 +2232,62 @@ final class CoreTextMetalRenderer {
                 )
             }
         }
+    }
+
+    private func renderGutterTwist(
+        mark: (region: Wire.AuthoredGutterRegion, head: Bool, shared: Bool), line: UInt32, pinned: Bool,
+        windowId: UInt16, background: UInt32, x: Float, y: Float, width: Int, height: Float,
+        clipTop: Float, clipBottom: Float, atlas: LineTextureAtlas, windowRenderer: WindowContentRenderer,
+        bgQuads: inout [QuadGPU], lineInstances: inout [LineGPU]
+    ) {
+        let humanColor = currentThemeColors?.roleColorRGB(.you) ?? windowRenderer.defaultFgRGB
+        if mark.region.role == .you {
+            let strandWidth = max(1, Float(width) * 0.15)
+            let color = colorFromU24(humanColor, default: .zero)
+            appendClippedGutterQuad(x: x + (Float(width) - strandWidth) / 2, y: y,
+                                    width: strandWidth, height: height, color: color, alpha: 1,
+                                    clipTop: clipTop, clipBottom: clipBottom, quads: &bgQuads)
+            return
+        }
+        let variant: TwistVariant
+        if mark.region.role == .kept {
+            variant = .kept
+        } else if mark.head {
+            variant = .head
+        } else {
+            variant = line == mark.region.lastLine ? .last : .body
+        }
+        let single = variant == .head && mark.region.firstLine == mark.region.lastLine
+        let strand = currentThemeColors?.roleColorRGB(variant.strand) ?? windowRenderer.defaultFgRGB
+        let shade = mark.shared ? humanColor : (variant.shade.flatMap { currentThemeColors?.roleColorRGB($0) } ?? strand)
+        guard let entry = windowRenderer.renderGutterTwist(
+            variant, singleLine: single, shared: mark.shared, strand: strand, shade: shade, background: background,
+            width: width, windowId: windowId, atlas: atlas, metrics: &frameMetrics
+        ) else { return }
+        let (origin, size) = atlas.uvForSlot(entry.slotIndex, pixelWidth: entry.pixelWidth)
+        appendClippedGutterLine(x: x, y: y, width: Float(entry.pixelWidth), height: height,
+                                uvOrigin: origin, uvSize: size, clipTop: clipTop,
+                                clipBottom: clipBottom, lineInstances: &lineInstances)
+        if pinned {
+            appendClippedGutterQuad(x: x, y: y + height - 1, width: Float(width), height: 1,
+                                    color: .zero, alpha: 0.26, clipTop: clipTop,
+                                    clipBottom: clipBottom, quads: &bgQuads)
+        }
+    }
+
+    private func drawLineTextures(
+        _ instances: [LineGPU], in buffer: MTLBuffer, byteOffset: Int, texture: MTLTexture,
+        encoder: MTLRenderCommandEncoder, uniforms: inout CTUniformsGPU
+    ) {
+        guard !instances.isEmpty else { return }
+        _ = instances.withUnsafeBytes { bytes in
+            memcpy(buffer.contents() + byteOffset, bytes.baseAddress!, bytes.count)
+        }
+        encoder.setRenderPipelineState(linePipeline)
+        encoder.setVertexBuffer(buffer, offset: byteOffset, index: 0)
+        encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
+        encoder.setFragmentTexture(texture, index: 0)
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: instances.count)
     }
 
     private func appendClippedGutterQuad(
@@ -2680,7 +2775,8 @@ final class CoreTextMetalRenderer {
         _ gutter: Wire.WindowGutter,
         slice: RendererRowSlice
     ) -> Int {
-        var demand = 0
+        // Six texture keys per pane: single/multiline head, body, last, kept, and shared.
+        var demand = if gutter.authorship?.isEmpty == false { min(slice.rows.count, 6) } else { 0 }
         for (offset, row) in slice.rows.enumerated() {
             let rowIndex = slice.range.lowerBound + offset
             guard let entry = gutter.entries.entry(visualRow: row, rowIndex: rowIndex) else { continue }

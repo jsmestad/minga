@@ -355,6 +355,20 @@ defmodule Minga.Protocol.Encode do
     ]
   end
 
+  @spec encode_gutter_authored_region(map()) :: iodata()
+  def encode_gutter_authored_region(model), do: encode_gutter_authored_region(model, :gutter_authored_region, [])
+
+  @spec encode_gutter_authored_region(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_gutter_authored_region(model, command, path) do
+    [
+      (fn value -> validate_uint!(command, [:role | path], value, 255); <<value::8>> end).(Map.fetch!(model, :role)),
+      (fn value -> validate_uint!(command, [:unit | path], value, 18446744073709551615); <<value::64>> end).(Map.fetch!(model, :unit)),
+      (fn value -> validate_uint!(command, [:first_line | path], value, 4294967295); <<value::32>> end).(Map.fetch!(model, :first_line)),
+      (fn value -> validate_uint!(command, [:first_column | path], value, 4294967295); <<value::32>> end).(Map.fetch!(model, :first_column)),
+      (fn value -> validate_uint!(command, [:last_line | path], value, 4294967295); <<value::32>> end).(Map.fetch!(model, :last_line)),
+    ]
+  end
+
   @spec encode_modeline_segment(map()) :: iodata()
   def encode_modeline_segment(model), do: encode_modeline_segment(model, :modeline_segment, [])
 
@@ -1166,6 +1180,38 @@ defmodule Minga.Protocol.Encode do
     count = Enum.count(items)
     validate_uint!(command, path, count, 65535)
     [<<count::16>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_gutter_entry(value, command, [index | path]) end)]
+  end
+
+  @spec encode_gui_gutter_authorship(map()) :: iodata()
+  def encode_gui_gutter_authorship(model), do: encode_gui_gutter_authorship(model, :gui_gutter, [:authorship])
+
+  @spec encode_gui_gutter_authorship(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_gui_gutter_authorship(model, command, path) do
+    [
+      (fn value -> validate_uint!(command, [:kind | path], value, 255); <<value::8>> end).(Map.fetch!(model, :kind)),
+      (fn value -> validate_uint!(command, [:base_revision | path], value, 18446744073709551615); <<value::64>> end).(Map.fetch!(model, :base_revision)),
+      (fn value -> validate_uint!(command, [:revision | path], value, 18446744073709551615); <<value::64>> end).(Map.fetch!(model, :revision)),
+    ]
+  end
+
+  @spec encode_gui_gutter_authorship_added([term()]) :: iodata()
+  def encode_gui_gutter_authorship_added(items) when is_list(items), do: encode_gui_gutter_authorship_added(items, :gui_gutter, [:authorship_added])
+
+  @spec encode_gui_gutter_authorship_added([term()], atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_gui_gutter_authorship_added(items, command, path) when is_list(items) do
+    count = Enum.count(items)
+    validate_uint!(command, path, count, 65535)
+    [<<count::16>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_gutter_authored_region(value, command, [index | path]) end)]
+  end
+
+  @spec encode_gui_gutter_authorship_removed([term()]) :: iodata()
+  def encode_gui_gutter_authorship_removed(items) when is_list(items), do: encode_gui_gutter_authorship_removed(items, :gui_gutter, [:authorship_removed])
+
+  @spec encode_gui_gutter_authorship_removed([term()], atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_gui_gutter_authorship_removed(items, command, path) when is_list(items) do
+    count = Enum.count(items)
+    validate_uint!(command, path, count, 65535)
+    [<<count::16>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_gutter_authored_region(value, command, [index | path]) end)]
   end
 
   @spec encode_gui_window_viewport_delta_header(map()) :: iodata()

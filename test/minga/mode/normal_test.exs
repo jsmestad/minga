@@ -159,12 +159,12 @@ defmodule Minga.Mode.NormalTest do
 
   describe "leader key sequences" do
     test "space starts leader mode, progress advances, and invalid keys cancel" do
-      {:execute, {:leader_start, node}, leader_state, :discard_count} = handle({32, 0})
+      {:execute, {:leader_start, node}, leader_state, :preserve_count} = handle({32, 0})
       assert leader_state.leader_node == node
       assert leader_state.leader_keys == ["SPC"]
 
       case handle({?f, 0}, leader_state) do
-        {:execute, {:leader_progress, sub_node}, progressed, :discard_count} ->
+        {:execute, {:leader_progress, sub_node}, progressed, :preserve_count} ->
           assert progressed.leader_node == sub_node
           assert "f" in progressed.leader_keys
 
@@ -187,7 +187,7 @@ defmodule Minga.Mode.NormalTest do
     end
 
     test "SPC SPC executes :project_find_file" do
-      {:execute, {:leader_start, _node}, leader_state, :discard_count} = handle({32, 0})
+      {:execute, {:leader_start, _node}, leader_state, :preserve_count} = handle({32, 0})
       {:execute, commands, finished_state, :discard_count} = handle({32, 0}, leader_state)
       assert is_list(commands)
       assert :project_find_file in commands
@@ -197,9 +197,9 @@ defmodule Minga.Mode.NormalTest do
     end
 
     test "repeated space restarts leader when space is not bound at the current node" do
-      {:execute, {:leader_start, _node}, leader_state, :discard_count} = handle({32, 0})
+      {:execute, {:leader_start, _node}, leader_state, :preserve_count} = handle({32, 0})
 
-      {:execute, {:leader_progress, p_node}, p_state, :discard_count} =
+      {:execute, {:leader_progress, p_node}, p_state, :preserve_count} =
         handle({?p, 0}, leader_state)
 
       assert p_state.leader_node == p_node
@@ -212,24 +212,24 @@ defmodule Minga.Mode.NormalTest do
     end
 
     test "backspace goes up one leader level, and closes which-key at SPC" do
-      {:execute, {:leader_start, root}, at_root, :discard_count} = handle({32, 0})
-      {:execute, {:leader_progress, minga}, at_a, :discard_count} = handle({?a, 0}, at_root)
-      {:execute, {:leader_progress, queue}, at_q, :discard_count} = handle({?q, 0}, at_a)
+      {:execute, {:leader_start, root}, at_root, :preserve_count} = handle({32, 0})
+      {:execute, {:leader_progress, minga}, at_a, :preserve_count} = handle({?a, 0}, at_root)
+      {:execute, {:leader_progress, queue}, at_q, :preserve_count} = handle({?q, 0}, at_a)
 
       assert at_q.leader_node == queue
       assert at_q.leader_keys == ["q", "a", "SPC"]
 
-      {:execute, {:leader_progress, ^minga}, back_to_a, :discard_count} = handle({127, 0}, at_q)
+      {:execute, {:leader_progress, ^minga}, back_to_a, :preserve_count} = handle({127, 0}, at_q)
       assert back_to_a.leader_keys == ["a", "SPC"]
 
-      {:execute, {:leader_progress, ^root}, back_to_root, :discard_count} =
+      {:execute, {:leader_progress, ^root}, back_to_root, :preserve_count} =
         handle({127, 0}, back_to_a)
 
       assert back_to_root.leader_keys == ["SPC"]
       assert back_to_root.leader_stack == []
 
       # The way back down again works from the parent.
-      assert {:execute, {:leader_progress, ^minga}, _state, :discard_count} =
+      assert {:execute, {:leader_progress, ^minga}, _state, :preserve_count} =
                handle({?a, 0}, back_to_root)
 
       {:execute, :leader_cancel, closed, :discard_count} = handle({127, 0}, back_to_root)

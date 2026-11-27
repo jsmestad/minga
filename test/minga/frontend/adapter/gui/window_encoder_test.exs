@@ -12,6 +12,8 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
   alias Minga.RenderModel.Window.DiagnosticRange
   alias Minga.RenderModel.Window.DocumentHighlight
   alias Minga.RenderModel.Window.Gutter
+  alias Minga.RenderModel.Window.Gutter.Authorship
+  alias Minga.RenderModel.Window.Gutter.ResidentRows
   alias Minga.RenderModel.Window.GutterEntry
   alias Minga.RenderModel.Window.GutterMetrics
   alias Minga.RenderModel.Window.HitRegion
@@ -764,6 +766,73 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     assert opcodes(first_commands) == [Opcodes.gui_window_content(), Opcodes.gui_gutter()]
     assert opcodes(second_commands) == [Opcodes.gui_window_overlay_delta(), Opcodes.gui_gutter()]
   end
+
+  test "Keep patches one authored region against the acknowledged resident gutter" do
+    pending = {:text, 41, {5, 2}, 6}
+    unrelated = {:gap, 42, {69, 0}}
+
+    authorship = Authorship.new(5, {self(), 1, 5}, [{0, 69}], [pending, unrelated], :resident)
+
+    gutter = %{
+      gutter_model()
+      | entries: %ResidentRows{content_epoch: 8, line_count: 70, overrides: []},
+        authorship: authorship
+    }
+
+    model = window(gutter: gutter, content_epoch: 8, full_refresh: false)
+    {initial, caches} = AdapterGUI.encode_windows([model], Caches.new())
+    sections = gutter_sections(initial)
+    assert sections[6] == <<0, 0::64, 5::64>>
+
+    assert sections[7] ==
+             <<2::16, 0, 41::64, 5::32, 2::32, 6::32, 1, 42::64, 69::32, 0::32, 69::32>>
+
+    refute Map.has_key?(sections, 8)
+
+    kept =
+      Authorship.patch(
+        authorship,
+        {6, {self(), 1, 6}, [{0, 69}]},
+        [{5, 6}],
+        [{:kept, {5, 2}, 6}],
+        []
+      )
+
+    next = %{model | gutter: %{gutter | authorship: kept}}
+    {before_ack, _caches} = AdapterGUI.encode_windows([next], caches)
+    assert gutter_sections(before_ack)[6] == <<0, 0::64, 6::64>>
+
+    {changed, caches} =
+      AdapterGUI.encode_windows([next], Caches.acknowledge_pending_window_deltas(caches))
+
+    sections = gutter_sections(changed)
+    assert sections[6] == <<2, 5::64, 6::64>>
+    assert sections[7] == <<1::16, 2, 0::64, 5::32, 2::32, 6::32>>
+    assert sections[8] == <<1::16, 0, 41::64, 5::32, 2::32, 6::32>>
+    refute Opcodes.gui_window_content() in opcodes(changed)
+
+    {retained, _caches} =
+      AdapterGUI.encode_windows([next], Caches.acknowledge_pending_window_deltas(caches))
+
+    sections = gutter_sections(retained)
+    assert sections[6] == <<1, 6::64, 6::64>>
+    refute Map.has_key?(sections, 7)
+    refute Map.has_key?(sections, 8)
+  end
+
+  defp gutter_sections(commands) do
+    opcode = Opcodes.gui_gutter()
+
+    <<^opcode, _count, sections::binary>> =
+      Enum.find(commands, &match?(<<^opcode, _::binary>>, &1))
+
+    split_gutter_sections(sections, %{})
+  end
+
+  defp split_gutter_sections(<<>>, acc), do: acc
+
+  defp split_gutter_sections(<<id, size::16, section::binary-size(size), rest::binary>>, acc),
+    do: split_gutter_sections(rest, Map.put(acc, id, section))
 
   test "adapter cache reset re-emits unchanged window content after frontend recovery" do
     model = window(gutter: gutter_model(), content_epoch: 7, full_refresh: true)

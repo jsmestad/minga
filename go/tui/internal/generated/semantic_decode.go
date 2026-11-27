@@ -481,6 +481,42 @@ func DecodeGutterEntry(data []byte, offset int, windowEnd int) (GutterEntry, int
 	}, pos, nil
 }
 
+func DecodeGutterAuthoredRegion(data []byte, offset int, windowEnd int) (GutterAuthoredRegion, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+1, "role"); err != nil {
+		return GutterAuthoredRegion{}, offset, err
+	}
+	role := data[pos]
+	pos++
+	if err := decodeRequireWindow(windowEnd, pos+8, "unit"); err != nil {
+		return GutterAuthoredRegion{}, offset, err
+	}
+	unit := decodeU64(data, pos)
+	pos += 8
+	if err := decodeRequireWindow(windowEnd, pos+4, "first_line"); err != nil {
+		return GutterAuthoredRegion{}, offset, err
+	}
+	firstLine := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+4, "first_column"); err != nil {
+		return GutterAuthoredRegion{}, offset, err
+	}
+	firstColumn := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+4, "last_line"); err != nil {
+		return GutterAuthoredRegion{}, offset, err
+	}
+	lastLine := decodeU32(data, pos)
+	pos += 4
+	return GutterAuthoredRegion{
+		Role:        role,
+		Unit:        unit,
+		FirstLine:   firstLine,
+		FirstColumn: firstColumn,
+		LastLine:    lastLine,
+	}, pos, nil
+}
+
 func DecodeModelineSegment(data []byte, offset int, windowEnd int) (ModelineSegment, int, error) {
 	pos := offset
 	name, pos, err := decodeString8Window(data, pos, windowEnd)
@@ -1742,6 +1778,74 @@ func DecodeGuiGutterResidentOverrides(data []byte, offset int, windowEnd int) ([
 	items := make([]GutterEntry, 0, min(count, len(data)-pos))
 	for i := 0; i < count; i++ {
 		item, nextPos, err := DecodeGutterEntry(data, pos, windowEnd)
+		if err != nil {
+			return nil, offset, err
+		}
+		pos = nextPos
+		items = append(items, item)
+	}
+	return items, pos, nil
+}
+
+func DecodeGuiGutterAuthorship(data []byte, offset int, windowEnd int) (GuiGutterAuthorship, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+1, "kind"); err != nil {
+		return GuiGutterAuthorship{}, offset, err
+	}
+	kind := data[pos]
+	pos++
+	if err := decodeRequireWindow(windowEnd, pos+8, "base_revision"); err != nil {
+		return GuiGutterAuthorship{}, offset, err
+	}
+	baseRevision := decodeU64(data, pos)
+	pos += 8
+	if err := decodeRequireWindow(windowEnd, pos+8, "revision"); err != nil {
+		return GuiGutterAuthorship{}, offset, err
+	}
+	revision := decodeU64(data, pos)
+	pos += 8
+	return GuiGutterAuthorship{
+		Kind:         kind,
+		BaseRevision: baseRevision,
+		Revision:     revision,
+	}, pos, nil
+}
+
+func DecodeGuiGutterAuthorshipAdded(data []byte, offset int, windowEnd int) ([]GutterAuthoredRegion, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+2, "authorship_added count"); err != nil {
+		return nil, offset, err
+	}
+	count := int(decodeU16(data, pos))
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+count*21, "authorship_added"); err != nil {
+		return nil, offset, err
+	}
+	items := make([]GutterAuthoredRegion, 0, count)
+	for i := 0; i < count; i++ {
+		item, nextPos, err := DecodeGutterAuthoredRegion(data, pos, windowEnd)
+		if err != nil {
+			return nil, offset, err
+		}
+		pos = nextPos
+		items = append(items, item)
+	}
+	return items, pos, nil
+}
+
+func DecodeGuiGutterAuthorshipRemoved(data []byte, offset int, windowEnd int) ([]GutterAuthoredRegion, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+2, "authorship_removed count"); err != nil {
+		return nil, offset, err
+	}
+	count := int(decodeU16(data, pos))
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+count*21, "authorship_removed"); err != nil {
+		return nil, offset, err
+	}
+	items := make([]GutterAuthoredRegion, 0, count)
+	for i := 0; i < count; i++ {
+		item, nextPos, err := DecodeGutterAuthoredRegion(data, pos, windowEnd)
 		if err != nil {
 			return nil, offset, err
 		}

@@ -193,6 +193,17 @@ public enum TwistVariant: String, CaseIterable, Sendable {
         case .shared: "▐"
         }
     }
+
+    /// The vector source for the native gutter, embedded from the canonical design asset.
+    public var svg: String {
+        switch self {
+        case .head: ##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" role="img" aria-label="Minga changed these lines"><path d="M7 5 C7 11, 3 11, 3 17 L3 26" fill="none" stroke="#6b3fa3" stroke-width="2.6" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke="#1e1f24" stroke-width="5" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke="#a463e6" stroke-width="2.6" stroke-linecap="round"/></svg>"##
+        case .body: ##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M3 0 L3 26" stroke="#6b3fa3" stroke-width="2.6"/><path d="M7 0 L7 26" stroke="#a463e6" stroke-width="2.6"/></svg>"##
+        case .last: ##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M3 0 L3 19" stroke="#6b3fa3" stroke-width="2.6" stroke-linecap="round"/><path d="M7 0 L7 19" stroke="#a463e6" stroke-width="2.6" stroke-linecap="round"/></svg>"##
+        case .kept: ##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M5 0 L5 26" stroke="#a463e6" stroke-opacity="0.4" stroke-width="1.5"/></svg>"##
+        case .shared: ##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M3 0 L3 26" stroke="#4f9fe0" stroke-width="2.6"/><path d="M7 0 L7 26" stroke="#a463e6" stroke-width="2.6"/></svg>"##
+        }
+    }
 }
 
 /// Minga's voice: three lines and no more.

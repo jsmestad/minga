@@ -150,7 +150,11 @@ defmodule MingaEditor.Handlers.BufferRegistry do
       state = ShellWorkflow.ensure_available(state)
       existing_target = Keyword.get(opts, :existing_target, :buffer)
       options_server = Keyword.get(opts, :options_server, state.interaction.options_server)
-      start_opts = Keyword.get(opts, :start_opts, [])
+
+      start_opts =
+        opts
+        |> Keyword.get(:start_opts, [])
+        |> Keyword.put_new(:events_registry, state.extension_surfaces.events_registry)
 
       case find_buffer_by_path(state, abs_path) do
         nil -> open_new_path_buffer(state, abs_path, options_server, start_opts)

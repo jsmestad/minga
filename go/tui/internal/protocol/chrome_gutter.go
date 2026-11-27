@@ -1,6 +1,12 @@
 package protocol
 
-import "fmt"
+import (
+	"cmp"
+	"encoding/binary"
+	"fmt"
+	"slices"
+	"sort"
+)
 
 func decodeGutter(payload []byte) (Gutter, string, int) {
 	if len(payload) < 2 {
@@ -51,6 +57,23 @@ func decodeGutter(payload []byte) (Gutter, string, int) {
 				continue
 			}
 			sawOverrideChunk = true
+		case 0x06:
+			if gutter.AuthorshipUpdate != nil || !decodeGutterAuthorshipHeader(section, &gutter) {
+				gutter.DecodeError = "malformed gutter authorship header"
+			}
+		case 0x07, 0x08:
+			update := gutter.AuthorshipUpdate
+			if update == nil || update.Kind == GutterAuthorshipRetain || (sectionID == 0x08 && update.Kind != GutterAuthorshipPatch) {
+				gutter.DecodeError = "unexpected gutter authorship regions"
+				continue
+			}
+			regions := &update.Added
+			if sectionID == 0x08 {
+				regions = &update.Removed
+			}
+			if !decodeGutterAuthorshipRegions(section, regions) {
+				gutter.DecodeError = "malformed gutter authorship regions"
+			}
 		}
 	}
 	if sawResidentHeader && sawDenseEntries {
@@ -62,8 +85,74 @@ func decodeGutter(payload []byte) (Gutter, string, int) {
 	if gutter.Resident != nil && !gutter.Resident.RetainOverrides && !sawOverrideChunk {
 		gutter.DecodeError = "resident gutter snapshot missing override section"
 	}
+	if gutter.AuthorshipUpdate != nil && (!sawWindow || !sawConfig) {
+		gutter.DecodeError = "gutter authorship missing window or config"
+	}
 
 	return gutter, gutterSummary(gutter), offset
+}
+
+func decodeGutterAuthorshipHeader(section []byte, gutter *Gutter) bool {
+	if len(section) != 17 {
+		return false
+	}
+	kind := section[0]
+	base, revision := binary.BigEndian.Uint64(section[1:9]), binary.BigEndian.Uint64(section[9:17])
+	switch kind {
+	case GutterAuthorshipSnapshot:
+		if base != 0 || revision == 0 {
+			return false
+		}
+	case GutterAuthorshipRetain:
+		if base == 0 || revision != base {
+			return false
+		}
+	case GutterAuthorshipPatch:
+		if base == 0 || revision <= base {
+			return false
+		}
+	default:
+		return false
+	}
+	gutter.AuthorshipUpdate = &GutterAuthorshipUpdate{Kind: kind, Base: base, Revision: revision}
+	return true
+}
+
+func decodeGutterAuthorshipRegions(section []byte, regions *[]AuthoredGutterRegion) bool {
+	const wireSize = 21
+	if len(section) < 2 || len(section)-2 != int(u16(section, 0))*wireSize {
+		return false
+	}
+	for offset := 2; offset < len(section); offset += wireSize {
+		region := AuthoredGutterRegion{
+			Role:        section[offset],
+			Unit:        binary.BigEndian.Uint64(section[offset+1 : offset+9]),
+			FirstLine:   u32(section, offset+9),
+			FirstColumn: u32(section, offset+13),
+			LastLine:    u32(section, offset+17),
+		}
+		if region.FirstLine > region.LastLine {
+			return false
+		}
+		switch region.Role {
+		case AuthoredGutterPending:
+			if region.Unit == 0 {
+				return false
+			}
+		case AuthoredGutterDeletion:
+			if region.Unit == 0 || region.FirstLine != region.LastLine {
+				return false
+			}
+		case AuthoredGutterKept, AuthoredGutterYou, AuthoredGutterShared:
+			if region.Unit != 0 {
+				return false
+			}
+		default:
+			return false
+		}
+		*regions = append(*regions, region)
+	}
+	return true
 }
 
 func decodeGutterWindow(section []byte, gutter *Gutter) {
@@ -183,4 +272,146 @@ func gutterSummary(gutter Gutter) string {
 		return ""
 	}
 	return fmt.Sprintf("window %d, %d rows", gutter.WindowID, gutter.EntryCount())
+}
+
+type indexedGutterRegion struct {
+	AuthoredGutterRegion
+	maxLast uint32
+}
+
+// ResolveAuthorship resolves a wire update without mutating the committed
+// revision. Ordinary cursor and scroll frames retain the existing index.
+func (g Gutter) ResolveAuthorship(previous Gutter) (*GutterAuthorship, bool) {
+	update := g.AuthorshipUpdate
+	if update == nil {
+		return nil, true
+	}
+	var base []indexedGutterRegion
+	switch update.Kind {
+	case GutterAuthorshipSnapshot:
+	case GutterAuthorshipRetain, GutterAuthorshipPatch:
+		if g.Resident == nil || previous.Resident == nil ||
+			g.Resident.ContentEpoch != previous.Resident.ContentEpoch ||
+			previous.Authorship == nil || update.Base != previous.Authorship.Revision {
+			return nil, false
+		}
+		base = previous.Authorship.regions
+		if update.Kind == GutterAuthorshipRetain {
+			if len(base) != 0 && base[len(base)-1].maxLast >= g.Resident.LineCount {
+				return nil, false
+			}
+			return previous.Authorship, true
+		}
+	default:
+		return nil, false
+	}
+	if len(update.Removed) > len(base) {
+		return nil, false
+	}
+
+	removed := make(map[AuthoredGutterRegion]struct{}, len(update.Removed))
+	for _, region := range update.Removed {
+		removed[region] = struct{}{}
+	}
+	if len(removed) != len(update.Removed) {
+		return nil, false
+	}
+
+	added := slices.Clone(update.Added)
+	slices.SortFunc(added, compareAuthoredRegions)
+	regions := make([]indexedGutterRegion, 0, len(base)-len(removed)+len(added))
+	appendRegion := func(region AuthoredGutterRegion) bool {
+		if g.Resident != nil && region.LastLine >= g.Resident.LineCount {
+			return false
+		}
+		maxLast := region.LastLine
+		if n := len(regions); n > 0 {
+			if regions[n-1].AuthoredGutterRegion == region {
+				return false
+			}
+			maxLast = max(maxLast, regions[n-1].maxLast)
+		}
+		regions = append(regions, indexedGutterRegion{AuthoredGutterRegion: region, maxLast: maxLast})
+		return true
+	}
+	for _, entry := range base {
+		if _, ok := removed[entry.AuthoredGutterRegion]; ok {
+			delete(removed, entry.AuthoredGutterRegion)
+			continue
+		}
+		for len(added) > 0 && compareAuthoredRegions(added[0], entry.AuthoredGutterRegion) < 0 {
+			if !appendRegion(added[0]) {
+				return nil, false
+			}
+			added = added[1:]
+		}
+		if !appendRegion(entry.AuthoredGutterRegion) {
+			return nil, false
+		}
+	}
+	if len(removed) != 0 {
+		return nil, false
+	}
+	for _, region := range added {
+		if !appendRegion(region) {
+			return nil, false
+		}
+	}
+	return &GutterAuthorship{Revision: update.Revision, regions: regions}, true
+}
+
+func compareAuthoredRegions(a, b AuthoredGutterRegion) int {
+	if order := cmp.Compare(a.FirstLine, b.FirstLine); order != 0 {
+		return order
+	}
+	if order := cmp.Compare(a.FirstColumn, b.FirstColumn); order != 0 {
+		return order
+	}
+	if order := cmp.Compare(a.Role, b.Role); order != 0 {
+		return order
+	}
+	if order := cmp.Compare(a.Unit, b.Unit); order != 0 {
+		return order
+	}
+	return cmp.Compare(a.LastLine, b.LastLine)
+}
+
+// RegionAt returns the committed strand for a source line. A head on the
+// line wins over a body, then kept and human ink. Pending ink on a line
+// with human text uses that role for the shade without changing the head.
+func (a *GutterAuthorship) RegionAt(line uint32, pin, continuation bool) (region AuthoredGutterRegion, head, shared, ok bool) {
+	if a == nil {
+		return AuthoredGutterRegion{}, false, false, false
+	}
+	regions := a.regions
+	end := sort.Search(len(regions), func(i int) bool { return regions[i].FirstLine > line })
+	start := sort.Search(end, func(i int) bool { return regions[i].maxLast >= line })
+	priority := 0
+	you := false
+	for _, entry := range regions[start:end] {
+		if entry.LastLine < line || (continuation && entry.Role == AuthoredGutterDeletion) {
+			continue
+		}
+		rank := 1
+		switch entry.Role {
+		case AuthoredGutterYou:
+			you = true
+		case AuthoredGutterKept:
+			rank = 2
+		case AuthoredGutterShared:
+			you = true
+			rank = 3
+		case AuthoredGutterPending, AuthoredGutterDeletion:
+			rank = 4
+			if entry.FirstLine == line && !continuation {
+				rank = 6
+			} else if pin {
+				rank = 5
+			}
+		}
+		if rank > priority {
+			region, priority = entry.AuthoredGutterRegion, rank
+		}
+	}
+	return region, priority >= 5, you && priority >= 3, priority != 0
 }

@@ -94,10 +94,10 @@ defmodule Minga.Git.Stub do
     :ok
   end
 
-  @doc "Sets the last commit message returned for `git_root`."
-  @spec set_last_commit_message(String.t(), String.t()) :: :ok
-  def set_last_commit_message(git_root, message) when is_binary(message) do
-    :ets.insert(@table, {{:last_commit_message, Path.expand(git_root)}, message})
+  @doc "Sets the exact HEAD and full commit message for `git_root`."
+  @spec set_head_commit(String.t(), String.t(), String.t()) :: :ok
+  def set_head_commit(git_root, oid, message) when is_binary(oid) and is_binary(message) do
+    :ets.insert(@table, {{:head_commit, Path.expand(git_root)}, {oid, message}})
     :ok
   end
 
@@ -219,7 +219,7 @@ defmodule Minga.Git.Stub do
     :ets.match_delete(@table, {{:stashes, expanded}, :_})
     :ets.match_delete(@table, {{:stash_state, expanded}, :_})
     :ets.match_delete(@table, {{:ahead_behind, expanded}, :_})
-    :ets.match_delete(@table, {{:last_commit_message, expanded}, :_})
+    :ets.match_delete(@table, {{:head_commit, expanded}, :_})
     :ets.match_delete(@table, {{:commit_result, expanded}, :_})
     :ets.match_delete(@table, {{:commit_notify, expanded}, :_})
     :ets.match_delete(@table, {{:stage_blocker, expanded}, :_})
@@ -350,11 +350,11 @@ defmodule Minga.Git.Stub do
   end
 
   @impl true
-  @spec last_commit_message(String.t()) :: {:ok, String.t()}
-  def last_commit_message(git_root) do
-    case :ets.lookup(@table, {:last_commit_message, Path.expand(git_root)}) do
-      [{_, message}] -> {:ok, message}
-      [] -> {:ok, "stub commit message"}
+  @spec head_commit(String.t()) :: {:ok, {String.t(), String.t()}}
+  def head_commit(git_root) do
+    case :ets.lookup(@table, {:head_commit, Path.expand(git_root)}) do
+      [{_, head}] -> {:ok, head}
+      [] -> {:ok, {String.duplicate("0", 40), "stub commit message"}}
     end
   end
 

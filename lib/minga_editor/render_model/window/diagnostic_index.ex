@@ -7,10 +7,11 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndex do
   endpoint's source group, so an untouched suffix shifts without reprojecting.
   """
 
+  alias Minga.Core.LazyRowTree
+  alias Minga.Core.LazyRowTree.View
   alias Minga.Diagnostics.Diagnostic
   alias Minga.RenderModel.Window.DiagnosticRange
-  alias MingaEditor.RenderModel.Window.{LazyRowTree, ResidentBuild, ResidentStore}
-  alias MingaEditor.RenderModel.Window.LazyRowTree.View
+  alias MingaEditor.RenderModel.Window.{ResidentBuild, ResidentStore}
 
   @type compact ::
           {end_line_offset :: non_neg_integer(), start_source_col :: non_neg_integer(),

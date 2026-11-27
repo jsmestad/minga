@@ -153,10 +153,10 @@ The modeline answers a stop of the conversation it speaks for: it reads "Minga s
 
 | Keys | Action | Status |
 |---|---|---|
-| `]h` / `[h` | Next / previous Minga change | shipped; replaces `]e` / `[e` for agent edits and steps today's agent edit timeline until #4050 lands per-change navigation |
+| `]h` / `[h` | Next / previous pending Minga change in the file | Replaces the virtual timeline motion; counts skip distinct region heads |
 | `ih` / `ah` | Text object: one Minga change, inner or with context | new |
-| `vah SPC a y` | Keep every change touched by the selection | new |
-| `.` | Repeat the last keep or reject; counts work | new |
+| `vah SPC a y` | Keep every pending change touched by the selection | applies whole units, even when a selected unit also has a region elsewhere in the file |
+| `.` | Repeat the last successful file Keep or Reject at a fresh cursor position | a Normal-mode count overrides the recorded count; an exact blocked-undo notice still handles its own actions |
 | `:'<,'>Minga keep` | Keep a range; `:%Minga reject` rejects a whole file | new |
 | `]e` / `[e` | Next / previous diagnostic (Doom next-error) | shipped; was `]d` / `[d` |
 | `]d` / `[d` | Next / previous git hunk (Doom diff-hl) | shipped; git hunks were on `]c` / `[c` |

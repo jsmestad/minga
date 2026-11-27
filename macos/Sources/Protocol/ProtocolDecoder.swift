@@ -2096,6 +2096,9 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var sawWindow = false
         var sawConfig = false
         var sawResidentOverrides = false
+        var authorshipHeader: (kind: UInt8, base: UInt64, revision: UInt64)?
+        var addedRegions: [Wire.AuthoredGutterRegion] = []
+        var removedRegions: [Wire.AuthoredGutterRegion] = []
 
         for _ in 0..<gutterSectionCount {
             guard data.count >= gutterPos + 3 else { throw ProtocolDecodeError.malformed }
@@ -2151,6 +2154,27 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                     data: data, start: gsStart, end: gsEnd, strict: true
                 ))
 
+            case 0x06:
+                guard authorshipHeader == nil, gsLen == 17 else { throw ProtocolDecodeError.malformed }
+                let kind = data[gsStart]
+                let base = try readU64(data, gsStart + 1)
+                let revision = try readU64(data, gsStart + 9)
+                switch kind {
+                case 0 where base == 0 && revision != 0,
+                     1 where base != 0 && revision == base,
+                     2 where base != 0 && revision > base:
+                    authorshipHeader = (kind, base, revision)
+                default: throw ProtocolDecodeError.malformed
+                }
+
+            case 0x07:
+                guard let authorshipHeader, authorshipHeader.kind != 1 else { throw ProtocolDecodeError.malformed }
+                try decodeAuthoredGutterRegions(data: data, start: gsStart, end: gsEnd, into: &addedRegions)
+
+            case 0x08:
+                guard authorshipHeader?.kind == 2 else { throw ProtocolDecodeError.malformed }
+                try decodeAuthoredGutterRegions(data: data, start: gsStart, end: gsEnd, into: &removedRegions)
+
             default: break
             }
 
@@ -2181,11 +2205,22 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             throw ProtocolDecodeError.malformed
         }
 
+        var authorship: Wire.GutterAuthorshipUpdate?
+        if let header = authorshipHeader {
+            guard sawWindow, sawConfig else { throw ProtocolDecodeError.malformed }
+            switch header.kind {
+            case 0: authorship = .snapshot(revision: header.revision, regions: addedRegions)
+            case 1: authorship = .retain(revision: header.revision)
+            case 2: authorship = .patch(base: header.base, revision: header.revision, added: addedRegions, removed: removedRegions)
+            default: throw ProtocolDecodeError.malformed
+            }
+        }
+
         let windowGutter = Wire.WindowGutterUpdate(
             windowId: windowId, contentRow: contentRow, contentCol: contentCol,
             contentHeight: contentHeight, isActive: isActive, contentWidth: contentWidth,
             cursorLine: cursorLine, lineNumberStyle: style, lineNumberWidth: lnWidth,
-            signColWidth: signWidth, entryUpdate: entryUpdate
+            signColWidth: signWidth, entryUpdate: entryUpdate, authorshipUpdate: authorship
         )
         return (.guiGutter(data: windowGutter), gutterPos - offset)
 
@@ -4793,6 +4828,31 @@ private func validatedScrollPresentation(_ presentation: GUIScrollPresentation?,
         throw ProtocolDecodeError.malformed
     }
     return presentation
+}
+
+private func decodeAuthoredGutterRegions(
+    data: Data, start: Int, end: Int, into regions: inout [Wire.AuthoredGutterRegion]
+) throws {
+    let width = 21
+    guard start + 2 <= end else { throw ProtocolDecodeError.malformed }
+    let count = Int(try readU16(data, start))
+    guard end - start - 2 == count * width else { throw ProtocolDecodeError.malformed }
+    try FrameDecodeAccounting.reserve(.arrayEntries, count)
+    for index in 0..<count {
+        let pos = start + 2 + index * width
+        guard let role = Wire.AuthoredGutterRole(rawValue: data[pos]) else {
+            throw ProtocolDecodeError.malformed
+        }
+        let unit = try readU64(data, pos + 1)
+        let first = try readU32(data, pos + 9)
+        let column = try readU32(data, pos + 13)
+        let last = try readU32(data, pos + 17)
+        guard first <= last, (role == .kept || role == .you || role == .shared) == (unit == 0),
+              role != .deletion || first == last else { throw ProtocolDecodeError.malformed }
+        regions.append(Wire.AuthoredGutterRegion(
+            role: role, unit: unit, firstLine: first, firstColumn: column, lastLine: last
+        ))
+    }
 }
 
 private func decodeGutterEntries(data: Data, start: Int, end: Int, strict: Bool) throws -> [Wire.GutterEntry] {

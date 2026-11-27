@@ -3,15 +3,12 @@ defmodule MingaEditor.ChangeTracking do
   Change recording and dot-repeat helpers for the Editor.
 
   Manages the `ChangeRecorder` state during mode transitions and key
-  presses. Also handles dot-repeat replay by feeding recorded keys
-  back through the Editor's key dispatch.
-
-  All functions are pure state transformations except `replay_last_change`,
-  which calls back into `MingaEditor.do_handle_key/3` for replay.
+  presses. Dot repeat either feeds recorded keys back through key dispatch or resolves a fresh in-file review target at the cursor.
   """
 
   alias MingaEditor.ChangeRecorder
   alias MingaEditor.Editing
+  alias MingaEditor.Shell.Traditional.InFileReview
   alias MingaEditor.State, as: EditorState
   alias Minga.Mode
 
@@ -41,8 +38,7 @@ defmodule MingaEditor.ChangeTracking do
   @doc """
   Replays the last recorded change, optionally with a new count.
 
-  Feeds each recorded key back through `MingaEditor.do_handle_key/3`
-  with recording suppressed to avoid overwriting the stored change.
+  Suppresses recording while replaying raw keys. A review decision resolves new units, never the original range or revision.
   """
   @spec replay_last_change(state(), non_neg_integer() | nil) :: state()
   def replay_last_change(state, count) do
@@ -51,6 +47,15 @@ defmodule MingaEditor.ChangeTracking do
     case ChangeRecorder.get_last_change(rec) do
       nil ->
         state
+
+      {:review, decision, previous_count} ->
+        case state.workspace.buffers.active do
+          nil ->
+            state
+
+          buffer ->
+            InFileReview.decide(state, buffer, {:cursor, count || previous_count}, decision)
+        end
 
       keys ->
         keys = ChangeRecorder.replace_count(keys, count)

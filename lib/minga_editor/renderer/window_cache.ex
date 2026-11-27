@@ -52,6 +52,8 @@ defmodule MingaEditor.Renderer.WindowCache do
   @type context_fingerprint :: term()
 
   alias Minga.Buffer.RenderSnapshot
+  alias Minga.Buffer.RendererConsume
+  alias Minga.Buffer.ReviewDamage
   alias Minga.RenderModel.Window.LineIdentity
   alias Minga.RenderModel.Window.RowSlotAllocator
   alias MingaEditor.Renderer.ContentEpoch
@@ -71,6 +73,9 @@ defmodule MingaEditor.Renderer.WindowCache do
           last_cursor_line: integer(),
           last_buf_version: integer(),
           fetch_version: non_neg_integer() | nil,
+          review_lease: RendererConsume.review_lease() | nil,
+          pending_review_damage: RendererConsume.review_damage() | nil,
+          gutter_authorship: Minga.RenderModel.Window.Gutter.Authorship.t() | nil,
           last_context_fingerprint: context_fingerprint(),
           content_epoch: non_neg_integer(),
           reset_pending: boolean(),
@@ -110,6 +115,9 @@ defmodule MingaEditor.Renderer.WindowCache do
             last_cursor_line: -1,
             last_buf_version: -1,
             fetch_version: nil,
+            review_lease: nil,
+            pending_review_damage: nil,
+            gutter_authorship: nil,
             last_context_fingerprint: nil,
             content_epoch: 0,
             reset_pending: true,
@@ -727,6 +735,52 @@ defmodule MingaEditor.Renderer.WindowCache do
   @doc "Returns the atomic bounded snapshot for pending resident deltas."
   @spec changed_snapshot(t()) :: RenderSnapshot.t() | nil
   def changed_snapshot(%__MODULE__{changed_snapshot: snapshot}), do: snapshot
+
+  @doc "Records the exact authorship revision from the same buffer observation as text."
+  @spec with_review_lease(
+          t(),
+          RendererConsume.review_lease() | nil,
+          RendererConsume.review_damage(),
+          {:ok, [Minga.Buffer.EditDelta.t()]} | :reset_required
+        ) :: t()
+  def with_review_lease(%__MODULE__{review_lease: lease} = cache, lease, _damage, _changes),
+    do: cache
+
+  def with_review_lease(
+        %__MODULE__{review_lease: prior} = cache,
+        lease,
+        {:since, prior, added},
+        {:ok, deltas}
+      ) do
+    pending =
+      case cache.pending_review_damage do
+        {:since, base, ranges} ->
+          remapped = ReviewDamage.remap_ranges(ranges, deltas)
+          {:since, base, ReviewDamage.merge_ranges(remapped, added)}
+
+        nil ->
+          {:since, prior, added}
+
+        :reset_required ->
+          :reset_required
+      end
+
+    %{cache | review_lease: lease, pending_review_damage: pending}
+  end
+
+  def with_review_lease(%__MODULE__{} = cache, lease, _other, _changes),
+    do: %{cache | review_lease: lease, pending_review_damage: :reset_required}
+
+  @doc "Retains the authored ranges only when their semantic gutter is built."
+  @spec put_gutter_authorship(t(), Minga.RenderModel.Window.Gutter.Authorship.t() | nil) :: t()
+  def put_gutter_authorship(
+        %__MODULE__{gutter_authorship: authorship, pending_review_damage: nil} = cache,
+        authorship
+      ),
+      do: cache
+
+  def put_gutter_authorship(%__MODULE__{} = cache, authorship),
+    do: %{cache | gutter_authorship: authorship, pending_review_damage: nil}
 
   @doc "Records the resident build and semantic state, consuming inputs even for a windowed build."
   @spec complete_resident_build(t(), ResidentBuild.t(), ResidentSemanticState.t()) :: t()

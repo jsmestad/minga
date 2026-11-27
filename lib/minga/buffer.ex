@@ -604,19 +604,61 @@ defmodule Minga.Buffer do
           | {:error, BufferProcess.history_error()}
   defdelegate undo_agent_session(server), to: BufferProcess
 
-  @doc "Prepare an exact review decision for a task or named step in this buffer."
-  @spec prepare_review(t(), Minga.Buffer.UndoHistory.review_selection()) ::
-          {:ok, BufferProcess.review_target(), Minga.Buffer.UndoHistory.task(), pos_integer()}
+  @doc "Prepare an exact review decision for the selected whole pending units in this buffer."
+  @spec prepare_review(t(), BufferProcess.review_selection()) ::
+          {:ok, BufferProcess.review_target(), Minga.Buffer.UndoHistory.review_scope(),
+           pos_integer()}
           | :empty
+          | {:error, BufferProcess.review_selection_error()}
   defdelegate prepare_review(server, selection), to: BufferProcess
 
-  @doc "Keep or reject all prepared review units, if the confirmation still applies."
-  @spec decide_review(t(), BufferProcess.review_target(), :keep | :reject) ::
+  @doc "Moves to a pending change head in the current version of the buffer."
+  @spec move_to_review_change(t(), :next | :previous, pos_integer()) ::
+          {:ok, Document.position()} | :at_boundary
+  defdelegate move_to_review_change(server, direction, count), to: BufferProcess
+
+  @doc "Reads the cursor and pending change rank from one buffer observation."
+  @spec cursor_with_review_position(t()) ::
+          {Document.position(),
+           {Minga.Buffer.ReviewPosition.rank(), non_neg_integer(), pos_integer(),
+            non_neg_integer()}
+           | nil}
+  defdelegate cursor_with_review_position(server), to: BufferProcess
+
+  @doc "Moves as `]h` would from the exact observation presented in the modeline."
+  @spec move_to_presented_review_change(t(), non_neg_integer(), pos_integer(), non_neg_integer()) ::
+          {:ok, Document.position()} | :at_boundary | :stale
+  defdelegate move_to_presented_review_change(server, version, revision, point), to: BufferProcess
+
+  @doc "Resolves a review text object and applies a selection or operator without a second buffer read."
+  @spec review_text_object(t(), :inner | :around, BufferProcess.review_object_action()) ::
+          BufferProcess.review_object_result()
+  defdelegate review_text_object(server, modifier, action), to: BufferProcess
+
+  @doc "Decides exact prepared units. `:reject_preserving_cursor` maps the cursor instead of moving to the rejected edit."
+  @spec decide_review(
+          t(),
+          BufferProcess.review_target(),
+          :keep | :reject | :reject_preserving_cursor
+        ) ::
           :ok
           | {:ok, nonempty_list(Minga.Buffer.UndoHistory.rejected_unit())}
           | Minga.Buffer.UndoHistory.blocked()
           | {:error, BufferProcess.review_error()}
   defdelegate decide_review(server, target, decision), to: BufferProcess
+
+  @doc "Requests Keep without waiting for Git or checkpoint publication."
+  @spec request_keep(t(), BufferProcess.review_target()) :: :gen_server.request_id()
+  defdelegate request_keep(server, target), to: BufferProcess
+
+  @doc "Requests Keep with an OTP request collection and caller-owned correlation label."
+  @spec request_keep(
+          t(),
+          BufferProcess.review_target(),
+          term(),
+          :gen_server.request_id_collection()
+        ) :: :gen_server.request_id_collection()
+  defdelegate request_keep(server, target, label, requests), to: BufferProcess
 
   @doc "Restore one previously rejected review unit without using your redo stack."
   @spec restore_review(t(), Minga.Buffer.UndoHistory.rejected_unit()) ::
@@ -820,6 +862,14 @@ defmodule Minga.Buffer do
   @spec render_lines(t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
           {:ok, Minga.Buffer.RenderSnapshot.t()} | :stale
   defdelegate render_lines(server, expected_version, first_line, count), to: BufferProcess
+
+  @doc "Returns pending review regions qualified by the last renderer observation, with no text payload."
+  @spec render_review_regions(
+          t(),
+          Minga.Buffer.RendererConsume.review_lease(),
+          [Minga.Buffer.RendererConsume.line_range()]
+        ) :: {:ok, [Minga.Buffer.RendererConsume.review_region()]} | :stale
+  defdelegate render_review_regions(server, lease, ranges), to: BufferProcess
 
   @doc "Returns sequence-qualified changes without advancing a consumer cursor."
   @spec changes_since(t(), ChangeLog.sequence()) :: ChangeLog.sequence_changes()

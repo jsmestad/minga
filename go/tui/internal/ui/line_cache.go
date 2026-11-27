@@ -67,6 +67,7 @@ type windowLineCache struct {
 type lineCacheKey struct {
 	rowID    uint64
 	hash     uint32
+	twist    uint8
 	rowIndex int
 }
 

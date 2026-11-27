@@ -29,6 +29,8 @@ defmodule MingaEditor.Commands do
   alias Minga.Extension.CallbackInvoker
   alias MingaEditor.Extension.EventWorkflow, as: ExtensionEventWorkflow
   alias MingaEditor.Extension.RepositoryJob
+  alias MingaEditor.Shell.Traditional.BlockedReviewWorkflow
+  alias MingaEditor.Shell.Traditional.InFileReview
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.ToolPrompts
   alias MingaEditor.Shell.Traditional.ToolPromptWorkflow
@@ -76,6 +78,7 @@ defmodule MingaEditor.Commands do
     :force_save_as,
     :force_edit,
     :sort,
+    :minga_review,
     :global,
     :normal,
     :read,
@@ -514,6 +517,28 @@ defmodule MingaEditor.Commands do
 
   # ── Textobject navigation ─────────────────────────────────────────────────
 
+  def execute(state, {command, _count} = motion)
+      when command in [:next_minga_change, :prev_minga_change] do
+    guard_buffer(state, fn -> Movement.execute(state, motion) end)
+  end
+
+  def execute(state, {command, _count} = review)
+      when command in [:keep_minga_change, :reject_minga_change] do
+    guard_buffer(state, fn -> EditingCommands.execute(state, review) end)
+  end
+
+  def execute(state, {:review_visual, _buffer, _version, _command} = review),
+    do: EditingCommands.execute(state, review)
+
+  def execute(state, {:decide_blocking_change, _buffer, _target, _decision} = review),
+    do: InFileReview.sequence(state, review, &BlockedReviewWorkflow.decide_prepared/2)
+
+  def execute(state, {:decide_review_selection, _, _, _} = review),
+    do: InFileReview.sequence(state, review, &InFileReview.decide_selection/2)
+
+  def execute(state, {:next_presented_review_change, _target} = command),
+    do: InFileReview.sequence(state, command, &InFileReview.move_presented/2)
+
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:goto_next_textobject, type})
       when is_pid(buf) do
     {row, col} = Buffer.cursor(buf)
@@ -756,6 +781,11 @@ defmodule MingaEditor.Commands do
   defp execute_checked(state, _cmd, %Command{requires_buffer: true})
        when is_nil(state.workspace.buffers.active) do
     state
+  end
+
+  defp execute_checked(state, cmd, %Command{} = command)
+       when cmd in [:undo, :redo, :undo_agent_session] do
+    InFileReview.sequence(state, cmd, fn next, cmd -> run_checked(next, cmd, command) end)
   end
 
   defp execute_checked(state, cmd, %Command{} = command), do: run_checked(state, cmd, command)

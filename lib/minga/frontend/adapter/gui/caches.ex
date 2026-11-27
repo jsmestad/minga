@@ -2,6 +2,9 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
   @moduledoc false
 
   alias Minga.Frontend.Adapter.GUI.AgentTranscriptSentState
+  alias Minga.RenderModel.Window.Gutter
+  alias Minga.RenderModel.Window.Gutter.Authorship
+  alias Minga.RenderModel.Window.Gutter.ResidentRows
 
   @type fingerprint :: term()
 
@@ -160,21 +163,35 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
           non_neg_integer(),
           Minga.RenderModel.Window.Gutter.t() | nil,
           boolean()
-        ) :: {boolean(), t()}
+        ) :: {boolean(), Authorship.update(), t()}
   def prepare_gutter(
         caches,
         id,
-        %{entries: %Minga.RenderModel.Window.Gutter.ResidentRows{} = rows} = gutter,
+        %Gutter{entries: %ResidentRows{content_epoch: epoch} = rows} = gutter,
         full_refresh?
       ) do
-    retain? =
-      not full_refresh? and Map.get(caches.last_window_gutter_fps, id) == rows and
-        not MapSet.member?(caches.pending_gutter_ids, id)
+    reusable? = not full_refresh? and not MapSet.member?(caches.pending_gutter_ids, id)
+    retain? = reusable? and Map.get(caches.last_window_gutter_fps, id) == rows
+
+    previous =
+      case Map.get(caches.last_window_gutters, id) do
+        %Gutter{entries: %ResidentRows{content_epoch: ^epoch}, authorship: authored}
+        when reusable? ->
+          authored
+
+        _ ->
+          nil
+      end
+
+    authored_change = Authorship.update(previous, gutter.authorship)
+    unchanged? = retain? and (authored_change == :absent or match?({:retain, _}, authored_change))
 
     pending =
-      if retain?, do: caches.pending_gutter_ids, else: MapSet.put(caches.pending_gutter_ids, id)
+      if unchanged?,
+        do: caches.pending_gutter_ids,
+        else: MapSet.put(caches.pending_gutter_ids, id)
 
-    {retain?,
+    {retain?, authored_change,
      %{
        caches
        | last_window_gutter_fps: Map.put(caches.last_window_gutter_fps, id, rows),
@@ -184,7 +201,9 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
   end
 
   def prepare_gutter(caches, id, gutter, _full_refresh?) do
-    {false,
+    authored_change = Authorship.update(nil, if(gutter, do: gutter.authorship))
+
+    {false, authored_change,
      %{
        caches
        | last_window_gutter_fps: Map.delete(caches.last_window_gutter_fps, id),

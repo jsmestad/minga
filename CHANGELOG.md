@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `SPC a i` inspects a subagent beside its parent conversation on macOS and in the terminal. Read its brief, activity, and result, step through siblings with `]]` and `[[`, or message that exact child without changing the parent's draft.
 - Select a foreground child in the Tasks drawer and press `i` or click **Inspect** to open that child's peek beside its own parent conversation.
 - `SPC a u` previews the latest task's changes before rejecting them. Exact Keep and Reject decisions preserve unrelated user undo, and pending review changes survive reopening the file.
+- The file gutter marks pending Minga changes on macOS and in the terminal. Use `]h` and `[h` to move between them, `ih` or `ah` to select one, and `SPC a y` or `SPC a d` to keep or reject it in place. Kept changes stay dim until a later commit includes them.
 - `SPC a F` attaches saved text from a selected project file to a local Agent draft. The attachment retains what was read, even if the file changes before sending.
 - `SPC a D` or the macOS editor context menu captures a file's published diagnostics as an inspectable Agent draft attachment.
 - The Agent can pause for a question. Use **Answer question** or `SPC a Q` to choose an answer, type your own, or cancel without granting tool permission.

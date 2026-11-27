@@ -1175,6 +1175,7 @@ exits = [
   { key = "↩ on a task with a conversation in this window", click = "row title", to = "minga.conversation" },
   { key = "j on a task with a child below", click = "child row title", to = "minga.tasks.child_selected" },
   { key = "q", click = "drawer close", to = "edit.plain" },
+  { key = "q while Minga edits this file", click = "drawer close while Minga edits this file", to = "edit.working" },
   { key = "esc", click = "", to = "edit.plain", keyboard_only = "q has the click" },
 ]
 

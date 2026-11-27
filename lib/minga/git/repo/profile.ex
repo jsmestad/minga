@@ -5,6 +5,8 @@ defmodule Minga.Git.Repo.Profile do
   The profile is deliberately cheap to build. Ambient editor features use it to avoid expensive status modes in sparse or user-overridden huge repos.
   """
 
+  alias Minga.Git.Metadata
+
   @type size_class :: :unknown | :large | :huge
 
   @type t :: %__MODULE__{
@@ -93,7 +95,7 @@ defmodule Minga.Git.Repo.Profile do
   # `:unknown`, the safe default.
   @spec index_size(String.t()) :: non_neg_integer()
   defp index_size(git_root) do
-    case git_root |> git_dir() |> Path.join("index") |> File.stat() do
+    case git_root |> Metadata.directory() |> Path.join("index") |> File.stat() do
       {:ok, %File.Stat{size: size}} -> size
       {:error, _reason} -> 0
     end
@@ -136,7 +138,7 @@ defmodule Minga.Git.Repo.Profile do
 
   @spec cone_dirs(String.t()) :: [String.t()]
   defp cone_dirs(git_root) do
-    path = git_root |> git_dir() |> Path.join("info/sparse-checkout")
+    path = git_root |> Metadata.directory() |> Path.join("info/sparse-checkout")
 
     case File.read(path) do
       {:ok, content} ->
@@ -203,21 +205,11 @@ defmodule Minga.Git.Repo.Profile do
 
   @spec sparse_checkout?(String.t()) :: boolean()
   defp sparse_checkout?(git_root) do
-    git_dir = git_dir(git_root)
+    git_dir = Metadata.directory(git_root)
     sparse_file? = git_dir |> Path.join("info/sparse-checkout") |> File.exists?()
     sparse_config? = git_dir |> Path.join("config") |> sparse_config_enabled?()
     worktree_config? = git_root |> Path.join(".git/config") |> sparse_config_enabled?()
     sparse_file? or sparse_config? or worktree_config?
-  end
-
-  @spec git_dir(String.t()) :: String.t()
-  defp git_dir(git_root) do
-    dot_git = Path.join(git_root, ".git")
-
-    case File.read(dot_git) do
-      {:ok, "gitdir: " <> rest} -> Path.expand(String.trim(rest), git_root)
-      _ -> dot_git
-    end
   end
 
   @spec sparse_config_enabled?(String.t()) :: boolean()

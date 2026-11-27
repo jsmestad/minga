@@ -25,6 +25,7 @@ defmodule MingaEditor.VimState do
   alias MingaEditor.JumpList
   alias MingaEditor.MacroRecorder
   alias MingaEditor.State.Registers
+  alias MingaEditor.VimState.PendingKeep
   alias Minga.Mode
 
   @typedoc "Stored last find-char motion for ; and , repeat."
@@ -32,6 +33,8 @@ defmodule MingaEditor.VimState do
 
   @typedoc "Buffer-local marks: outer key is buffer pid, inner key is mark name."
   @type marks :: %{pid() => %{String.t() => Buffer.position()}}
+
+  @typep keep_state :: PendingKeep.t() | {:ready, pid(), :queue.queue(PendingKeep.input())}
 
   @type t :: %__MODULE__{
           mode: Mode.mode(),
@@ -43,7 +46,8 @@ defmodule MingaEditor.VimState do
           last_find_char: last_find_char(),
           desired_col: non_neg_integer() | nil,
           change_recorder: ChangeRecorder.t(),
-          macro_recorder: MacroRecorder.t()
+          macro_recorder: MacroRecorder.t(),
+          pending_keep: keep_state() | nil
         }
 
   @enforce_keys [:mode, :mode_state]
@@ -56,7 +60,8 @@ defmodule MingaEditor.VimState do
             last_find_char: nil,
             desired_col: nil,
             change_recorder: ChangeRecorder.new(),
-            macro_recorder: MacroRecorder.new()
+            macro_recorder: MacroRecorder.new(),
+            pending_keep: nil
 
   @doc "Returns a new VimState with default values."
   @spec new() :: t()
@@ -212,6 +217,134 @@ defmodule MingaEditor.VimState do
   @spec set_change_recorder(t(), ChangeRecorder.t()) :: t()
   def set_change_recorder(%__MODULE__{} = vim, recorder) do
     %{vim | change_recorder: recorder}
+  end
+
+  @doc "Registers a pending Keep beside the originating Vim repeat recorder."
+  @spec begin_keep(t(), reference(), pid(), pos_integer(), PendingKeep.continuation()) :: t()
+  def begin_keep(%__MODULE__{pending_keep: nil} = vim, id, buffer, count, continuation) do
+    keep = PendingKeep.new(id, buffer, count, continuation, vim.change_recorder)
+
+    %{vim | pending_keep: keep}
+  end
+
+  @doc "Keeps independent input moving and holds dependent keys in the originating buffer."
+  @spec hold_keep_key(t(), pid() | nil, ChangeRecorder.key()) :: {:held, t()} | :independent
+  def hold_keep_key(
+        %__MODULE__{pending_keep: %PendingKeep{buffer: buffer} = keep} = vim,
+        buffer,
+        key
+      ) do
+    case PendingKeep.hold(keep, key, vim.mode) do
+      {:held, keep} -> {:held, %{vim | pending_keep: keep}}
+      :independent -> :independent
+    end
+  end
+
+  def hold_keep_key(%__MODULE__{}, _buffer, _key), do: :independent
+
+  @doc "Holds dependent commands already resolved by their input owner."
+  @spec hold_keep_command(t(), pid() | nil, Mode.command()) :: {:held, t()} | :independent
+  def hold_keep_command(
+        %__MODULE__{pending_keep: %PendingKeep{buffer: buffer} = keep} = vim,
+        buffer,
+        command
+      ),
+      do: {:held, %{vim | pending_keep: PendingKeep.enqueue(keep, {:command, buffer, command})}}
+
+  def hold_keep_command(%__MODULE__{}, _buffer, _command), do: :independent
+
+  @doc "Starts a different editing context without the previous context's Keep input."
+  @spec clear_keep(t()) :: t()
+  def clear_keep(%__MODULE__{} = vim), do: %{vim | pending_keep: nil}
+
+  @doc "Drops unfinished input for a retired exact buffer."
+  @spec retire_keep(t(), pid()) :: t()
+  def retire_keep(%__MODULE__{pending_keep: %PendingKeep{buffer: pid}} = vim, pid),
+    do: clear_keep(vim)
+
+  def retire_keep(%__MODULE__{pending_keep: {:ready, pid, _}} = vim, pid), do: clear_keep(vim)
+  def retire_keep(%__MODULE__{} = vim, _pid), do: vim
+
+  @doc "Applies only the identified Keep result and makes held input ready to replay."
+  @spec finish_keep(
+          t(),
+          reference(),
+          :ok | :refused | :gone,
+          {pid() | nil, Buffer.position() | nil}
+        ) :: {:ok, PendingKeep.t(), t()} | :stale
+  def finish_keep(
+        %__MODULE__{pending_keep: %PendingKeep{id: id} = keep} = vim,
+        id,
+        outcome,
+        {active, cursor}
+      ) do
+    vim =
+      if outcome == :ok do
+        same_mode? =
+          keep.buffer == active and keep.continuation == {:visual, vim.mode_state, cursor}
+
+        same_recorder? =
+          keep.repeat_revision == vim.change_recorder.revision and
+            not ChangeRecorder.recording?(vim.change_recorder)
+
+        settle_review(vim, :keep, keep.count, keep.continuation, same_mode?, same_recorder?)
+      else
+        vim
+      end
+
+    pending =
+      if outcome != :gone and not :queue.is_empty(keep.input),
+        do: {:ready, keep.buffer, keep.input}
+
+    {:ok, keep, %{vim | pending_keep: pending}}
+  end
+
+  def finish_keep(%__MODULE__{}, _id, _success?, _active), do: :stale
+
+  @doc "Takes ready input only when its original buffer owns the editing context again."
+  @spec take_keep_input(t(), pid() | nil) :: {:ok, [PendingKeep.input()], t()} | :none
+  def take_keep_input(%__MODULE__{pending_keep: {:ready, buffer, input}} = vim, buffer),
+    do: {:ok, :queue.to_list(input), clear_keep(vim)}
+
+  def take_keep_input(%__MODULE__{}, _buffer), do: :none
+
+  @doc "Records an already-published review command and exits its original Visual selection."
+  @spec complete_review(
+          t(),
+          :keep | :reject,
+          pos_integer(),
+          PendingKeep.continuation(),
+          boolean()
+        ) ::
+          t()
+  def complete_review(%__MODULE__{} = vim, decision, count, continuation, end_visual?),
+    do: settle_review(vim, decision, count, continuation, end_visual?, true)
+
+  @spec settle_review(
+          t(),
+          :keep | :reject,
+          pos_integer(),
+          PendingKeep.continuation(),
+          boolean(),
+          boolean()
+        ) ::
+          t()
+  defp settle_review(vim, decision, count, continuation, end_visual?, record?) do
+    vim = if end_visual?, do: transition(vim, :normal), else: vim
+
+    repeat_count =
+      case continuation do
+        {:visual, _, _} -> count
+        {:normal, requested} -> requested || count
+        _notice_only -> nil
+      end
+
+    if is_integer(repeat_count) and record? and not ChangeRecorder.replaying?(vim.change_recorder) do
+      recorder = ChangeRecorder.record_review(vim.change_recorder, decision, repeat_count)
+      set_change_recorder(vim, recorder)
+    else
+      vim
+    end
   end
 
   @doc "Updates the register state."

@@ -541,6 +541,16 @@ defmodule MingaEditor.Session.State do
     %{wspace | editing: vim}
   end
 
+  @doc "Starts a new tab without the previous tab's in-flight review input."
+  @spec clear_keep_input(t()) :: t()
+  def clear_keep_input(%__MODULE__{} = workspace),
+    do: set_editing(workspace, VimState.clear_keep(workspace.editing))
+
+  @doc "Drops in-flight review input when its exact buffer has retired."
+  @spec retire_keep_input(t(), pid()) :: t()
+  def retire_keep_input(%__MODULE__{} = workspace, pid),
+    do: set_editing(workspace, VimState.retire_keep(workspace.editing, pid))
+
   @doc "Sets the keymap scope."
   @spec set_keymap_scope(t(), Scope.scope_name()) :: t()
   def set_keymap_scope(%__MODULE__{keymap_scope: :queue} = wspace, scope) when scope != :queue do

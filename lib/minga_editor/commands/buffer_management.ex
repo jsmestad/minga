@@ -10,9 +10,11 @@ defmodule MingaEditor.Commands.BufferManagement do
   use MingaEditor.Commands.Provider
 
   alias MingaAgent.Session
+  alias MingaEditor.Shell.Traditional.InFileReview
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaAgent.ProjectView
   alias Minga.Buffer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Project.FileRef, as: ProjectFileRef
   alias Minga.Config
 
@@ -44,6 +46,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias MingaEditor.Shell.Workflow
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.State.WorkspaceReview
+  alias MingaEditor.VimState
   alias Minga.Frontend.WaitRequests
   alias MingaEditor.Window
   alias Minga.Mode
@@ -692,11 +695,40 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   def execute(
+        %{workspace: %{buffers: %{active: buffer}, editing: %{mode_state: mode}}} = state,
+        {:execute_ex_command, {command, :visual, argument}}
+      )
+      when is_pid(buffer) and command in [:sort, :normal] do
+    case mode do
+      %Minga.Mode.CommandState{visual_lines: {^buffer, version, first, last}} ->
+        if Buffer.version(buffer) == version do
+          execute(
+            state,
+            {:execute_ex_command, {command, {:absolute, first + 1, last + 1}, argument}}
+          )
+        else
+          stale_ex_selection(state)
+        end
+
+      _ ->
+        stale_ex_selection(state)
+    end
+  end
+
+  def execute(
         %{workspace: %{buffers: %{active: buf}}} = state,
         {:execute_ex_command, {:sort, range, flags}}
       )
       when is_pid(buf) do
     execute_sort(state, buf, range, flags)
+  end
+
+  def execute(
+        %{workspace: %{buffers: %{active: buf}}} = state,
+        {:execute_ex_command, {:minga_review, range, decision}}
+      )
+      when is_pid(buf) do
+    execute_minga_review(state, buf, range, decision)
   end
 
   def execute(
@@ -1128,7 +1160,9 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec start_file_buffer(state(), String.t()) :: state()
   defp start_file_buffer(state, file_path) do
-    case Commands.start_buffer(file_path, state.interaction.options_server) do
+    case Commands.start_buffer(file_path, state.interaction.options_server,
+           events_registry: state.extension_surfaces.events_registry
+         ) do
       {:ok, pid} ->
         Commands.add_buffer(state, pid)
 
@@ -3730,6 +3764,44 @@ defmodule MingaEditor.Commands.BufferManagement do
     state
   end
 
+  @spec execute_minga_review(state(), pid(), Minga.Command.Parser.range(), :keep | :reject) ::
+          state()
+  defp execute_minga_review(state, buffer, range, decision) do
+    case review_range(state.workspace.editing.mode_state, buffer, range) do
+      {:ok, selection} ->
+        InFileReview.decide(state, buffer, selection, decision)
+
+      {:error, :stale_selection} ->
+        stale_ex_selection(state)
+    end
+  end
+
+  @spec stale_ex_selection(state()) :: state()
+  defp stale_ex_selection(state),
+    do: NoticeWorkflow.publish(state, "The selection changed. Select the lines again.")
+
+  @spec review_range(Mode.state(), pid(), Minga.Command.Parser.range()) ::
+          {:ok, BufferProcess.review_selection()} | {:error, :stale_selection}
+  defp review_range(
+         %Minga.Mode.CommandState{visual_lines: {buffer, version, first, last}},
+         buffer,
+         :visual
+       ),
+       do: {:ok, {:lines, {first, last}, version}}
+
+  defp review_range(_mode, _buffer, :visual), do: {:error, :stale_selection}
+  defp review_range(_mode, _buffer, :whole_buffer), do: {:ok, {:lines, :whole, :current}}
+
+  defp review_range(_mode, buffer, :current_line) do
+    %{line: line, version: version} = Buffer.cursor_context(buffer)
+    {:ok, {:lines, {line, line}, version}}
+  end
+
+  defp review_range(_mode, _buffer, :last_line), do: {:ok, {:lines, :last, :current}}
+
+  defp review_range(_mode, _buffer, {:absolute, first, last}),
+    do: {:ok, {:lines, {first - 1, last - 1}, :current}}
+
   # ── :sort command ──────────────────────────────────────────────────────────
 
   @spec execute_sort(state(), pid(), Minga.Command.Parser.range(), [
@@ -3958,6 +4030,8 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec feed_keys_to_fsm(state(), [Mode.key()]) :: state()
   defp feed_keys_to_fsm(%{workspace: %{editing: vim}} = state, key_tuples) do
+    vim = VimState.normalize(vim)
+
     {final_vim, final_state} =
       Enum.reduce(key_tuples, {vim, state}, fn key_tuple, {vim_state, acc_state} ->
         {new_mode, commands, new_mode_state} =
@@ -3965,9 +4039,9 @@ defmodule MingaEditor.Commands.BufferManagement do
 
         updated_vim =
           if new_mode == vim_state.mode do
-            MingaEditor.VimState.set_mode_state(vim_state, new_mode_state)
+            VimState.set_mode_state(vim_state, new_mode_state)
           else
-            MingaEditor.VimState.transition(vim_state, new_mode, new_mode_state)
+            VimState.transition(vim_state, new_mode, new_mode_state)
           end
 
         updated_state =
@@ -4019,11 +4093,6 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   defp resolve_range(:last_line, _buf, total_lines) do
     {max(0, total_lines - 1), max(0, total_lines - 1)}
-  end
-
-  # TODO: resolve actual visual selection marks when available
-  defp resolve_range(:visual, _buf, _total_lines) do
-    {0, 0}
   end
 
   defp resolve_range({:absolute, start, finish}, _buf, _total_lines) do

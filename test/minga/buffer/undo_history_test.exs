@@ -3,6 +3,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
   use ExUnitProperties
 
   alias Minga.Buffer.Document
+  alias Minga.Buffer.KeptReview.{Ledger, Source}
   alias Minga.Buffer.Provenance
   alias Minga.Buffer.UndoHistory
   alias Minga.Buffer.UndoPatch
@@ -1372,6 +1373,8 @@ defmodule Minga.Buffer.UndoHistoryTest do
 
       rejected = Document.content(restore.document)
       assert rejected == "cat dog!"
+      assert :empty = UndoHistory.prepare_review(recovered, {:step, @step_one})
+      assert {:ok, _} = UndoHistory.prepare_review(recovered, {:step, deletion})
       parked = UndoHistory.snapshot(recovered, rejected)
 
       assert {:ok, recovered} =
@@ -1382,6 +1385,66 @@ defmodule Minga.Buffer.UndoHistoryTest do
 
       assert Document.content(restored.document) == text(world)
       assert [_, _] = UndoHistory.review_units(recovered, task)
+      assert {:ok, target} = UndoHistory.prepare_review(recovered, {:step, @step_one})
+      assert {:ok, kept} = UndoHistory.keep_review(recovered, target)
+      assert :empty = UndoHistory.prepare_review(kept, {:step, @step_two})
+      assert {:ok, _} = UndoHistory.prepare_review(kept, {:step, deletion})
+      assert {:ok, _} = UndoHistory.prepare_review(kept, {:step, @other_task})
+    end
+
+    test "either name of a compacted unit reports the same exact Reject blocker" do
+      world =
+        world("cat dog\n", recording: :coarse, shadow: false)
+        |> edit(@step_one, 0, 3, "CAT")
+        |> edit(@step_one, 4, 3, "DOG")
+        |> edit(@step_two, 0, 3, "lynx")
+
+      assert {_, compacted, %{merged: [{@step_one, @step_two}]}} =
+               UndoHistory.compact_slice(
+                 %{world.history | run_budget: 3, compaction_wanted: true},
+                 1
+               )
+
+      left = {:minga, "later-left", "block"}
+      right = {:minga, "later-right", "block"}
+      history = %{compacted | run_budget: 1_000, compaction_wanted: false}
+
+      world =
+        Enum.reduce(9..80, %{world | history: history}, fn offset, world ->
+          edit(world, {:minga, "padding", "independent-#{offset}"}, offset, 0, "!")
+        end)
+        |> edit(left, 0, 1, "L")
+        |> edit(right, 5, 1, "d")
+
+      assert {:ok, older} = UndoHistory.prepare_review(world.history, {:step, @step_one})
+      assert {:ok, newer} = UndoHistory.prepare_review(world.history, {:step, @step_two})
+      assert {:blocked, {:overlaps, blocker}} = reject_review(world.history, older, world.doc)
+      assert blocker in [left, right]
+      assert {:blocked, {:overlaps, ^blocker}} = reject_review(world.history, newer, world.doc)
+    end
+
+    test "a named step can be prepared without visiting the other steps of its task" do
+      start = edit(world("a", shadow: false), @step_one, 0, 1, "b")
+
+      append_steps = fn world, offsets ->
+        Enum.reduce(offsets, world, fn offset, world ->
+          edit(world, {:minga, "task-1", "independent-#{offset}"}, offset, 0, "!")
+        end)
+      end
+
+      short = append_steps.(start, 1..16)
+      long = append_steps.(short, 17..1024)
+
+      prepare = fn world ->
+        work(fn -> UndoHistory.prepare_review(world.history, {:step, @step_one}) end)
+      end
+
+      {short_work, {:ok, short_target}} = prepare.(short)
+      {long_work, {:ok, long_target}} = prepare.(long)
+
+      assert UndoHistory.review_summary(short_target) == {{:minga, "task-1"}, 1}
+      assert UndoHistory.review_summary(long_target) == {{:minga, "task-1"}, 1}
+      assert long_work <= 3 * short_work + 200
     end
 
     test "automatic Reject after reopening leaves parked draft partners recoverable" do
@@ -1512,6 +1575,51 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert {:error, :invalid_history} = UndoHistory.restore_snapshot(new, corrupt, "two\n")
     end
 
+    test "a dirty Keep binds only its saved origins and a later save binds the rest after a shift" do
+      saved = world("a-b", recording: :coarse, shadow: false) |> edit(@step_one, 0, 1, "A")
+      {history, checkpoint} = UndoHistory.checkpoint(saved.history, text(saved))
+      dirty = edit(%{saved | history: history}, @step_two, 2, 1, "B")
+
+      baseline =
+        {"/repo", "file", {"refs/heads/main", String.duplicate("a", 40), {0, <<0::256>>}}}
+
+      observation = {baseline, text(saved)}
+
+      assert {:ok, target} =
+               UndoHistory.prepare_review(dirty.history, {:task, {:minga, "task-1"}})
+
+      assert {:ok, live} = UndoHistory.keep_review(dirty.history, target, text(dirty), baseline)
+
+      assert {:ok, {_digest, on_disk}, evidence} =
+               UndoHistory.keep_in_checkpoint(dirty.history, target, checkpoint, observation)
+
+      assert [{"A-b", [{^baseline, [%Source{point: 0, old: "a", new: "A"}] = sources}]}] =
+               Ledger.jobs(evidence, baseline)
+
+      live = UndoHistory.bind_saved_keep(live, evidence)
+
+      assert [{"A-b", [{^baseline, ^sources}]}] =
+               Ledger.jobs(UndoHistory.kept_review(live), baseline)
+
+      assert {:ok, reopened} =
+               UndoHistory.restore_snapshot(UndoHistory.new(saved.doc), on_disk, text(saved))
+
+      assert [{"A-b", [{^baseline, ^sources}]}] =
+               Ledger.jobs(UndoHistory.kept_review(reopened), baseline)
+
+      shifted = edit(%{dirty | history: live}, :user, 0, 0, "z")
+      {settled, {_digest, snapshot}} = UndoHistory.checkpoint(shifted.history, text(shifted))
+      jobs = Ledger.jobs(UndoHistory.kept_review(settled), baseline)
+
+      assert {"zA-B", [{^baseline, [%Source{point: 1, new: "A"}, %Source{point: 3, new: "B"}]}]} =
+               List.keyfind(jobs, "zA-B", 0)
+
+      assert {:ok, recovered} =
+               UndoHistory.restore_snapshot(UndoHistory.new(shifted.doc), snapshot, text(shifted))
+
+      assert Ledger.jobs(UndoHistory.kept_review(recovered), baseline) == jobs
+    end
+
     test "a Keep after full compaction stays kept when newer unsaved bytes are discarded" do
       task = {:minga, "task-1"}
       saved = world("cat dog\n", recording: :coarse, shadow: false)
@@ -1529,8 +1637,8 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert {:ok, ^from_absorbed_step} = UndoHistory.prepare_review(history, {:step, @step_two})
       assert {:ok, target} = UndoHistory.prepare_review(history, {:step, @step_two})
 
-      assert {:ok, {_digest, settled}} =
-               UndoHistory.keep_in_checkpoint(history, target, disk_checkpoint)
+      assert {:ok, {_digest, settled}, nil} =
+               UndoHistory.keep_in_checkpoint(history, target, disk_checkpoint, :unproven)
 
       assert {:ok, recovered} =
                UndoHistory.restore_snapshot(UndoHistory.new(saved.doc), settled, text(saved))
@@ -1570,8 +1678,8 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert {:ok, kept} = UndoHistory.keep_review(history, target)
       assert :empty = UndoHistory.prepare_review(kept, {:task, task})
 
-      assert {:ok, {_digest, kept_on_disk}} =
-               UndoHistory.keep_in_checkpoint(history, target, checkpoint)
+      assert {:ok, {_digest, kept_on_disk}, nil} =
+               UndoHistory.keep_in_checkpoint(history, target, checkpoint, :unproven)
 
       assert {:ok, reopened} =
                UndoHistory.restore_snapshot(UndoHistory.new(saved.doc), kept_on_disk, text(saved))
@@ -1699,11 +1807,11 @@ defmodule Minga.Buffer.UndoHistoryTest do
       {:review_history_v1, digest, size, data} = :erlang.binary_to_term(snapshot, [:safe])
       [third, second, first] = data.pending
 
-      {:provenance_v1, group_next, change_next, groups, runs, records, _drafts, marks, faulted} =
+      {codec, group_next, change_next, groups, runs, records, _drafts, marks, faulted} =
         data.provenance
 
       provenance =
-        {:provenance_v1, group_next, change_next, groups, runs, records,
+        {codec, group_next, change_next, groups, runs, records,
          [[first, second], [second, third]], marks, faulted}
 
       corrupt =
@@ -2557,7 +2665,11 @@ defmodule Minga.Buffer.UndoHistoryTest do
     missing = MapSet.difference(reverted, taken)
     provenance = UndoHistory.provenance(compacted_before.history)
 
-    plain_groups = for {group, _key} <- plain_before.history.minga, do: group
+    %{groups: groups} = UndoHistory.provenance(plain_before.history)
+
+    plain_groups =
+      for {id, %{author: {:minga, task}, applied: true}} <- groups, is_binary(task), do: id
+
     left = plain_groups -- Map.get(plain, :pressed, [])
     left_behind = finals.(left)
 
@@ -2991,10 +3103,11 @@ defmodule Minga.Buffer.UndoHistoryTest do
     end)
   end
 
-  defp task_step_count(%{untasked_size: size}, {:minga, :untasked}), do: size
+  defp task_step_count(history, task) do
+    %{groups: groups} = UndoHistory.provenance(history)
 
-  defp task_step_count(history, task),
-    do: Enum.count(history.minga, fn {_group, key} -> Minga.Buffer.Author.author(key) == task end)
+    Enum.count(groups, fn {_id, group} -> group.author == task and group.applied end)
+  end
 
   # Rejecting any single task either reverts exactly what the model's visibility rule says, for a task the model calls
   # exact on its own, or is refused while the model says it is not.

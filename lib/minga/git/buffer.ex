@@ -17,6 +17,7 @@ defmodule Minga.Git.Buffer do
   alias Minga.Core.Diff
   alias Minga.Git
   alias Minga.Git.Change
+  alias Minga.Git.Metadata
   alias Minga.Git.TrackedFile
   alias Minga.Project.Root
 
@@ -31,7 +32,8 @@ defmodule Minga.Git.Buffer do
           content: binary(),
           hunks: [Diff.hunk()],
           signs: %{non_neg_integer() => Diff.hunk_type()},
-          branch: String.t() | nil
+          branch: String.t() | nil,
+          backend: module()
         }
 
   # ── Client API ─────────────────────────────────────────────────────────────
@@ -42,17 +44,12 @@ defmodule Minga.Git.Buffer do
           | {:file_path, String.t()}
           | {:canonical_target, String.t()}
           | {:initial_content, String.t()}
+          | {:backend, module()}
 
   @doc "Starts a git buffer for a file in a git repository."
   @spec start_link([start_opt()]) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
-  end
-
-  @doc "Recomputes the diff against the cached base content."
-  @spec update(GenServer.server(), String.t()) :: :ok
-  def update(server, current_content) when is_binary(current_content) do
-    GenServer.cast(server, {:update, current_content})
   end
 
   @doc "Recomputes the diff and returns after the tracked state is current."
@@ -61,10 +58,15 @@ defmodule Minga.Git.Buffer do
     GenServer.call(server, {:update, current_content})
   end
 
-  @doc "Re-reads the HEAD version and recomputes the diff."
-  @spec invalidate_base(GenServer.server(), String.t()) :: :ok
-  def invalidate_base(server, current_content) when is_binary(current_content) do
-    GenServer.cast(server, {:invalidate_base, current_content})
+  @doc "Observes one buffer revision and publishes only the changed HEAD rows needed by authorship."
+  @spec observe(
+          GenServer.server(),
+          pid(),
+          {String.t(), binary(), Buffer.position(), non_neg_integer()},
+          :cached_head | :refresh_head
+        ) :: :ok
+  def observe(server, buffer, observation, head) do
+    GenServer.cast(server, {:observe, buffer, observation, head})
   end
 
   @doc "Returns the per-line sign map for the gutter."
@@ -86,30 +88,6 @@ defmodule Minga.Git.Buffer do
         ) :: {:ok, TrackedFile.t()} | :not_tracked
   def tracked_file(server, observation) do
     GenServer.call(server, {:tracked_file, observation})
-  end
-
-  @doc "Resolves a regular file or a missing file under a resolvable parent."
-  @spec canonical_target(String.t()) :: String.t() | nil
-  def canonical_target(path) do
-    case Root.canonical_path(path) do
-      {:ok, target} ->
-        if File.regular?(target), do: target
-
-      {:error, :enoent} ->
-        # An unsaved file can have an existing parent, but a dangling link
-        # is not a missing file at the same path.
-        path = Path.expand(path)
-
-        with {:error, :enoent} <- File.lstat(path),
-             {:ok, parent} <- Root.canonical_path(Path.dirname(path)) do
-          Path.join(parent, Path.basename(path))
-        else
-          _ -> nil
-        end
-
-      {:error, _reason} ->
-        nil
-    end
   end
 
   @doc "Returns the hunk at a specific buffer line, or nil."
@@ -150,8 +128,7 @@ defmodule Minga.Git.Buffer do
   @doc """
   Returns `{branch, {added, modified, deleted}}` in a single GenServer call.
 
-  The branch name is cached on state and refreshed on init and save
-  (`:invalidate_base`), so this call does zero I/O.
+  The branch name is cached on state and refreshed with the HEAD comparison, so this call does zero I/O.
   """
   @spec modeline_info(GenServer.server()) :: modeline_info()
   def modeline_info(server) do
@@ -166,8 +143,9 @@ defmodule Minga.Git.Buffer do
     git_root = Keyword.fetch!(opts, :git_root)
     file_path = Keyword.fetch!(opts, :file_path)
     initial_content = Keyword.get(opts, :initial_content, "")
+    backend = Keyword.get(opts, :backend, Git)
 
-    target = Keyword.get_lazy(opts, :canonical_target, fn -> canonical_target(file_path) end)
+    target = Keyword.get_lazy(opts, :canonical_target, fn -> Metadata.file_target(file_path) end)
 
     root =
       case Root.canonical_path(git_root) do
@@ -176,7 +154,7 @@ defmodule Minga.Git.Buffer do
       end
 
     rel_path = Path.relative_to(target || Path.expand(file_path), root)
-    base = load_base(git_root, rel_path)
+    base = load_base(backend, git_root, rel_path)
     base_lines = Change.lines(base)
     hunks = Diff.diff_lines(base_lines, Change.lines(initial_content))
 
@@ -190,7 +168,8 @@ defmodule Minga.Git.Buffer do
       content: initial_content,
       hunks: hunks,
       signs: Diff.signs_for_hunks(hunks),
-      branch: read_branch(git_root)
+      branch: read_branch(backend, git_root),
+      backend: backend
     }
 
     {:ok, state}
@@ -212,7 +191,7 @@ defmodule Minga.Git.Buffer do
         %{file_path: path, canonical_target: target} = state
       )
       when is_binary(target) do
-    if canonical_target(path) == target do
+    if Metadata.file_target(path) == target do
       # Compute against the observation without moving the cache backwards.
       hunks =
         if content == state.content,
@@ -265,18 +244,40 @@ defmodule Minga.Git.Buffer do
 
   @impl true
   @spec handle_cast(term(), state()) :: {:noreply, state()}
-  def handle_cast({:update, content}, state) do
-    {:noreply, update_diff(state, content)}
+  def handle_cast(
+        {:observe, buffer, {path, content, _, version}, head},
+        %{file_path: path} = state
+      ) do
+    state =
+      case head do
+        :refresh_head -> refresh_base(state, content)
+        :cached_head when content == state.content -> state
+        :cached_head -> update_diff(state, content)
+      end
+
+    ranges =
+      if is_binary(state.base) do
+        for %{start_line: first, count: count} <- state.hunks,
+            count > 0,
+            do: {first, first + count - 1}
+      else
+        :unknown
+      end
+
+    send(buffer, {:git_authorship, path, version, ranges})
+    {:noreply, state}
   end
 
-  def handle_cast({:invalidate_base, content}, state) do
-    base = load_base(state.git_root, state.relative_path)
-    branch = read_branch(state.git_root)
-    state = %{state | base: base, base_lines: Change.lines(base), branch: branch}
-    {:noreply, update_diff(state, content)}
-  end
+  def handle_cast({:observe, _buffer, _observation, _head}, state), do: {:noreply, state}
 
   # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec refresh_base(state(), binary()) :: state()
+  defp refresh_base(state, content) do
+    base = load_base(state.backend, state.git_root, state.relative_path)
+    branch = read_branch(state.backend, state.git_root)
+    update_diff(%{state | base: base, base_lines: Change.lines(base), branch: branch}, content)
+  end
 
   @spec update_diff(state(), binary()) :: state()
   defp update_diff(state, content) do
@@ -296,17 +297,17 @@ defmodule Minga.Git.Buffer do
     end)
   end
 
-  @spec read_branch(String.t()) :: String.t() | nil
-  defp read_branch(git_root) do
-    case Git.current_branch(git_root) do
+  @spec read_branch(module(), String.t()) :: String.t() | nil
+  defp read_branch(backend, git_root) do
+    case backend.current_branch(git_root) do
       {:ok, branch} -> branch
       :error -> nil
     end
   end
 
-  @spec load_base(String.t(), String.t()) :: binary() | nil
-  defp load_base(git_root, relative_path) do
-    case Git.show_head(git_root, relative_path) do
+  @spec load_base(module(), String.t(), String.t()) :: binary() | nil
+  defp load_base(backend, git_root, relative_path) do
+    case backend.show_head(git_root, relative_path) do
       {:ok, content} -> content
       :error -> nil
     end

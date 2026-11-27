@@ -6,9 +6,10 @@ defmodule MingaEditor.RenderModel.Window.GuideIndex do
   """
 
   alias Minga.Core.IndentGuide
+  alias Minga.Core.LazyRowTree
+  alias Minga.Core.LazyRowTree.View
   alias Minga.RenderModel.Window.ResidentSemantics.GuideRun
-  alias MingaEditor.RenderModel.Window.{LazyRowTree, VisualRow}
-  alias MingaEditor.RenderModel.Window.LazyRowTree.View
+  alias MingaEditor.RenderModel.Window.VisualRow
 
   @type tree_node :: LazyRowTree.t(non_neg_integer(), non_neg_integer())
 

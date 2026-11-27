@@ -2,6 +2,7 @@ defmodule Minga.Buffer.RendererAPITest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer
+  alias Minga.Buffer.EditSource
   alias Minga.Buffer.RenderSnapshot
   alias Minga.Buffer.RendererConsume
 
@@ -95,6 +96,237 @@ defmodule Minga.Buffer.RendererAPITest do
 
     :ok = Buffer.insert_text(buffer, "changed")
     assert :stale = Buffer.render_lines(buffer, consume.version, 1, 2)
+  end
+
+  test "Keep changes the authored gutter lease without a text resnapshot or edit delta" do
+    buffer = start_supervised!({Buffer, content: "one\ntwo"}, id: :reviewed)
+    other = start_supervised!({Buffer, content: "one\ntwo"}, id: :other)
+    source = EditSource.minga("task", "step")
+    assert :ok = Buffer.apply_edit(buffer, 0, 0, 0, 2, "ONE", source)
+    assert :ok = Buffer.apply_edit(other, 0, 0, 0, 2, "ONE", source)
+
+    before = Buffer.renderer_consume(buffer)
+
+    assert {:ok, [{:text, _group, {0, 0}, 0}]} =
+             Buffer.render_review_regions(buffer, before.review_lease, [{0, 0}])
+
+    assert {:ok, []} = Buffer.render_review_regions(buffer, before.review_lease, [{1, 1}])
+    assert :stale = Buffer.render_review_regions(other, before.review_lease, [{0, 0}])
+
+    assert {:ok, target, {:minga, "task"}, 1} = Buffer.prepare_review(buffer, :latest)
+    assert :ok = Buffer.decide_review(buffer, target, :keep)
+
+    assert %RendererConsume{changes: {:ok, []}, snapshot: nil} =
+             kept = Buffer.renderer_consume(buffer)
+
+    assert kept.version == before.version
+    assert kept.change_sequence == before.change_sequence
+    assert :stale = Buffer.render_review_regions(buffer, before.review_lease, [{0, 0}])
+
+    assert {:ok, [{:kept, {0, 0}, 0}]} =
+             Buffer.render_review_regions(buffer, kept.review_lease, [{0, 0}])
+  end
+
+  test "multiple Keeps report exact disjoint affected rows including an EOF deletion" do
+    buffer = start_supervised!({Buffer, content: "abc\nmiddle\nuntouched\nlast\nend\n"})
+    assert :ok = Buffer.apply_edit(buffer, 0, 0, 0, 2, "ABC", EditSource.minga("one", "one"))
+
+    assert {:ok, _} =
+             Minga.Buffer.Process.replace_byte_range_if_version(
+               buffer,
+               Buffer.version(buffer),
+               {4, 3},
+               1,
+               "",
+               EditSource.minga("two", "two")
+             )
+
+    assert %RendererConsume{review_lease: before, review_damage: :reset_required} =
+             Buffer.renderer_consume(buffer)
+
+    for name <- ["one", "two"] do
+      task = {:minga, name}
+      assert {:ok, target, ^task, 1} = Buffer.prepare_review(buffer, {:task, task})
+      assert :ok = Buffer.decide_review(buffer, target, :keep)
+    end
+
+    assert %RendererConsume{
+             review_lease: after_keep,
+             review_damage: {:since, ^before, [{0, 0}, {4, 4}]},
+             changes: {:ok, []},
+             snapshot: nil
+           } = Buffer.renderer_consume(buffer)
+
+    assert %RendererConsume{review_damage: {:since, ^after_keep, []}} =
+             Buffer.renderer_consume(buffer)
+  end
+
+  test "review regions join adjacent pieces without bridging disjoint work from the same unit" do
+    buffer = start_supervised!({Buffer, content: "abcdef\nmid\nuvwxyz"})
+    source = EditSource.minga("task", "resumed")
+    other = EditSource.minga("other", "different")
+
+    for {position, count, text, author} <- [
+          {{0, 0}, 2, "AB", source},
+          {{1, 0}, 1, "M", other},
+          {{0, 2}, 2, "CD", source},
+          {{2, 1}, 2, "VW", source}
+        ] do
+      assert {:ok, _} =
+               Minga.Buffer.Process.replace_byte_range_if_version(
+                 buffer,
+                 Buffer.version(buffer),
+                 position,
+                 count,
+                 text,
+                 author
+               )
+    end
+
+    %{review_lease: lease} = Buffer.renderer_consume(buffer)
+
+    assert {:ok, [{:text, unit, {0, 0}, 0}]} =
+             Buffer.render_review_regions(buffer, lease, [{0, 0}])
+
+    assert {:ok, [{:text, ^unit, {2, 1}, 2}]} =
+             Buffer.render_review_regions(buffer, lease, [{2, 2}])
+
+    assert {:ok,
+            [
+              {:text, ^unit, {0, 0}, 0},
+              {:text, other_unit, {1, 0}, 1},
+              {:text, ^unit, {2, 1}, 2}
+            ]} = Buffer.render_review_regions(buffer, lease, [{0, 2}])
+
+    assert {:ok, [{:text, ^unit, {0, 0}, 0}, {:text, ^unit, {2, 1}, 2}]} =
+             Buffer.render_review_regions(buffer, lease, [{0, 0}, {2, 2}])
+
+    assert other_unit != unit
+  end
+
+  test "human edits contribute a bounded strand without hiding the pending review identity" do
+    buffer = start_supervised!({Buffer, content: "abc\nplain\nlast"})
+    assert :ok = Buffer.apply_edit(buffer, 0, 0, 0, 2, "ABC", EditSource.minga("task", "step"))
+    :ok = Buffer.move_to(buffer, {0, 1})
+    :ok = Buffer.insert_text(buffer, "!")
+    :ok = Buffer.move_to(buffer, {1, 0})
+    :ok = Buffer.insert_text(buffer, ">")
+    %{review_lease: lease} = Buffer.renderer_consume(buffer)
+
+    assert {:ok, [{:text, unit, {0, 0}, 0}, {:text, unit, {0, 2}, 0}, {:you, {0, 1}, 0}]} =
+             Buffer.render_review_regions(buffer, lease, [{0, 0}])
+
+    assert {:ok, [{:you, {1, 0}, 1}]} = Buffer.render_review_regions(buffer, lease, [{1, 1}])
+    assert {:ok, []} = Buffer.render_review_regions(buffer, lease, [{2, 2}])
+  end
+
+  test "a fully replaced authored row has a shared strand without a new review head" do
+    buffer = start_supervised!({Buffer, content: "before\nmiddle\nend\n"})
+    source = EditSource.minga("task", "step")
+    :ok = Buffer.move_to(buffer, {1, 0})
+    assert :ok = Buffer.insert_text(buffer, "one\ntwo\n", source)
+    :ok = Buffer.move_to(buffer, {4, 0})
+    assert :ok = Buffer.insert_text(buffer, "three\n", source)
+
+    assert {:ok, _} =
+             Minga.Buffer.Process.replace_byte_range_if_version(
+               buffer,
+               Buffer.version(buffer),
+               {2, 0},
+               4,
+               "TWO>",
+               EditSource.user()
+             )
+
+    :ok = Buffer.move_to(buffer, {4, 0})
+    assert :ok = Buffer.insert_text(buffer, "!")
+
+    %{review_lease: pending} = Buffer.renderer_consume(buffer)
+    assert {:ok, [{:shared, {2, 0}, 2}]} = Buffer.render_review_regions(buffer, pending, [{2, 2}])
+    assert {:ok, [{:you, {4, 0}, 4}]} = Buffer.render_review_regions(buffer, pending, [{4, 4}])
+    assert :ok = Buffer.move_to(buffer, {1, 0})
+    assert {:ok, {3, 0}} = Buffer.move_to_review_change(buffer, :next, 1)
+
+    assert {:ok, target, _, 1} = Buffer.prepare_review(buffer, :latest)
+    assert :ok = Buffer.decide_review(buffer, target, :keep)
+
+    %{review_lease: kept, review_damage: {:since, ^pending, damage}} =
+      Buffer.renderer_consume(buffer)
+
+    assert Enum.any?(damage, fn {first, last} -> first <= 2 and last >= 2 end)
+    assert {:ok, [{:you, {2, 0}, 2}]} = Buffer.render_review_regions(buffer, kept, [{2, 2}])
+  end
+
+  test "a human replacement sweeping an already deleted Minga byte remains human" do
+    buffer = start_supervised!({Buffer, content: "ab\n"})
+    :ok = Buffer.move_to(buffer, {0, 1})
+    assert :ok = Buffer.insert_text(buffer, "X", EditSource.minga("task", "step"))
+    :ok = Buffer.move_to(buffer, {0, 1})
+    assert :ok = Buffer.delete_at(buffer)
+    assert :ok = Buffer.apply_edit(buffer, 0, 0, 0, 1, "AB")
+    assert Buffer.content(buffer) == "AB\n"
+    %{review_lease: lease} = Buffer.renderer_consume(buffer)
+    assert {:ok, [{:you, {0, 0}, 0}]} = Buffer.render_review_regions(buffer, lease, [{0, 0}])
+  end
+
+  test "a trailing empty line owns the EOF review gap" do
+    buffer = start_supervised!({Buffer, content: "one\nx"})
+    assert :ok = Buffer.apply_edit(buffer, 1, 0, 1, 0, "", EditSource.minga("task", "step"))
+    %{review_lease: lease} = Buffer.renderer_consume(buffer)
+
+    assert {:ok, []} = Buffer.render_review_regions(buffer, lease, [{0, 0}])
+    assert {:ok, [{:gap, _group, {1, 0}}]} = Buffer.render_review_regions(buffer, lease, [{1, 1}])
+    assert {:ok, []} = Buffer.render_review_regions(buffer, lease, [{2, 2}])
+
+    assert {:ok, target, {:minga, "task"}, 1} = Buffer.prepare_review(buffer, :latest)
+    assert :ok = Buffer.decide_review(buffer, target, :keep)
+    %{review_lease: kept} = Buffer.renderer_consume(buffer)
+
+    assert {:ok, []} = Buffer.render_review_regions(buffer, kept, [{0, 0}])
+    assert {:ok, [{:kept, {1, 0}, 1}]} = Buffer.render_review_regions(buffer, kept, [{1, 1}])
+    assert :empty = Buffer.prepare_review(buffer, :latest)
+  end
+
+  test "an EOF deletion stays on its own line when the same unit inserted the preceding line" do
+    buffer = start_supervised!({Buffer, content: "x"})
+    source = EditSource.minga("task", "step")
+    edit_at(buffer, {0, 0}, 0, "A\n", source)
+    edit_at(buffer, {1, 0}, 1, "", source)
+
+    %{review_lease: lease} = Buffer.renderer_consume(buffer)
+
+    assert {:ok, [{:text, unit, {0, 0}, 0}, {:gap, unit, {1, 0}}]} =
+             Buffer.render_review_regions(buffer, lease, [{0, 1}])
+  end
+
+  test "split or clipped visible ranges preserve the original head of the same continuous change" do
+    buffer = start_supervised!({Buffer, content: "z"})
+    step = EditSource.minga("task", "step")
+    edit_at(buffer, {0, 0}, 0, "A\n", step)
+    edit_at(buffer, {1, 0}, 1, "Z", EditSource.minga("other", "different"))
+    edit_at(buffer, {1, 0}, 0, "B\nC\nD\nE", step)
+
+    %{review_lease: lease} = Buffer.renderer_consume(buffer)
+
+    assert {:ok, [{:text, first, {0, 0}, 4}, {:text, other, {4, 1}, 4}]} =
+             Buffer.render_review_regions(buffer, lease, [{0, 1}, {3, 4}])
+
+    assert first != other
+
+    assert {:ok, [{:text, ^first, {0, 0}, 4}, {:text, ^other, {4, 1}, 4}]} =
+             Buffer.render_review_regions(buffer, lease, [{3, 4}])
+  end
+
+  defp edit_at(buffer, position, count, text, author) do
+    assert {:ok, _} =
+             Minga.Buffer.Process.replace_byte_range_if_version(
+               buffer,
+               Buffer.version(buffer),
+               position,
+               count,
+               text,
+               author
+             )
   end
 
   # Replacing the whole document from a file records no deltas, so the

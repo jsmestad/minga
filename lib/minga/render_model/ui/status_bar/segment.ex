@@ -14,13 +14,17 @@ defmodule Minga.RenderModel.UI.StatusBar.Segment do
   @typedoc "A text style option, as custom modeline segments declare them."
   @type style :: keyword()
 
+  @type review_target ::
+          {:next_minga_change, non_neg_integer(), pid(), non_neg_integer(), pos_integer(),
+           non_neg_integer()}
+
   @type t :: %__MODULE__{
           id: atom(),
           text: String.t(),
           fg: non_neg_integer(),
           bg: non_neg_integer(),
           style: style(),
-          target: atom() | nil,
+          target: atom() | review_target() | nil,
           drop: non_neg_integer(),
           compact: String.t() | nil,
           state: Tokens.state_id() | nil,

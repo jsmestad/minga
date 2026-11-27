@@ -366,6 +366,13 @@ defmodule MingaEditor.Renderer.RenderWindow do
     %{window | render_cache: RenderCache.put_text_presentation(cache, presentation)}
   end
 
+  @doc "Retains the authored gutter emitted by the semantic window build."
+  @spec put_gutter_authorship(t(), Minga.RenderModel.Window.Gutter.t() | nil) :: t()
+  def put_gutter_authorship(%__MODULE__{render_cache: cache} = window, gutter) do
+    authorship = if gutter, do: gutter.authorship
+    %{window | render_cache: RenderCache.put_gutter_authorship(cache, authorship)}
+  end
+
   @doc """
   Checks current frame parameters against last-frame tracking fields
   and marks the cache fully dirty if any structural input changed.

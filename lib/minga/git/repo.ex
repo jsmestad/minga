@@ -8,10 +8,7 @@ defmodule Minga.Git.Repo do
 
   ## Refresh strategy
 
-  Event-driven, not polling. Git.Repo starts its own `file_system` watcher on
-  the `.git/` directory and filters for changes to `index` (stage/unstage/commit)
-  and `HEAD` (branch switch, new commits). A fallback refresh fires on
-  `:buffer_saved` events to catch cases where FileWatcher misses changes.
+  Event-driven, not polling. Git.Repo watches worktree metadata for index and HEAD changes, and shared metadata for branch refs, packed refs, and stashes. A fallback refresh on `:buffer_saved` catches missed events.
 
   ## Event publication
 
@@ -24,6 +21,7 @@ defmodule Minga.Git.Repo do
 
   alias Minga.Events.GitStatusEvent
   alias Minga.Git
+  alias Minga.Git.Metadata
   alias Minga.Git.Repo.Profile
   alias Minga.Git.Repo.StatusSnapshot
   alias Minga.Git.StatusEntry
@@ -41,6 +39,7 @@ defmodule Minga.Git.Repo do
     branch: nil,
     ahead: 0,
     behind: 0,
+    head_oid: nil,
     last_commit_message: "",
     stash_count: 0,
     watcher_pid: nil,
@@ -62,6 +61,7 @@ defmodule Minga.Git.Repo do
           branch: String.t() | nil,
           ahead: non_neg_integer(),
           behind: non_neg_integer(),
+          head_oid: String.t() | nil,
           last_commit_message: String.t(),
           stash_count: non_neg_integer(),
           watcher_pid: pid() | nil,
@@ -425,6 +425,7 @@ defmodule Minga.Git.Repo do
       branch: state.branch,
       ahead: state.ahead,
       behind: state.behind,
+      head_oid: state.head_oid,
       last_commit_message: state.last_commit_message,
       stash_count: state.stash_count,
       degraded?: state.degraded?,
@@ -446,7 +447,7 @@ defmodule Minga.Git.Repo do
            status: status_result(),
            branch: fetch_result(String.t() | nil),
            ahead_behind: fetch_result({non_neg_integer(), non_neg_integer()}),
-           last_commit_message: fetch_result(String.t()),
+           head_commit: fetch_result({String.t(), String.t()}),
            stash_count: fetch_result(non_neg_integer())
          }
 
@@ -498,7 +499,7 @@ defmodule Minga.Git.Repo do
       status: fetch_status(git_root, project_root, profile),
       branch: fetch_branch(git_root),
       ahead_behind: fetch_ahead_behind(git_root),
-      last_commit_message: fetch_last_commit_message(git_root),
+      head_commit: Git.head_commit(git_root),
       stash_count: fetch_stash_count(git_root)
     }
   end
@@ -526,6 +527,7 @@ defmodule Minga.Git.Repo do
     old_branch = state.branch
     old_ahead = state.ahead
     old_behind = state.behind
+    old_head = state.head_oid
     old_last_commit_message = state.last_commit_message
     old_stash_count = state.stash_count
     old_degraded? = state.degraded?
@@ -536,7 +538,10 @@ defmodule Minga.Git.Repo do
     entries = fetched_or_current(result.status.entries, old_entries)
     branch = fetched_or_current(result.branch, old_branch)
     {ahead, behind} = fetched_or_current(result.ahead_behind, {old_ahead, old_behind})
-    last_commit_message = fetched_or_current(result.last_commit_message, old_last_commit_message)
+
+    {head_oid, last_commit_message} =
+      fetched_or_current(result.head_commit, {old_head, old_last_commit_message})
+
     stash_count = fetched_or_current(result.stash_count, old_stash_count)
 
     state = %{
@@ -545,6 +550,7 @@ defmodule Minga.Git.Repo do
         branch: branch,
         ahead: ahead,
         behind: behind,
+        head_oid: head_oid,
         last_commit_message: last_commit_message,
         stash_count: stash_count,
         profile: result.profile,
@@ -555,13 +561,21 @@ defmodule Minga.Git.Repo do
     changed =
       entries != old_entries or branch != old_branch or
         ahead != old_ahead or behind != old_behind or
-        last_commit_message != old_last_commit_message or stash_count != old_stash_count or
-        state.degraded? != old_degraded?
+        head_oid != old_head or last_commit_message != old_last_commit_message or
+        stash_count != old_stash_count or state.degraded? != old_degraded?
 
     if changed do
       Minga.Events.broadcast(
         :git_status_changed,
         struct!(GitStatusEvent, cached_status_fields(state)),
+        state.events_registry
+      )
+    end
+
+    if head_oid != old_head or branch != old_branch do
+      Minga.Events.broadcast(
+        :git_head_changed,
+        %Minga.Events.GitHeadEvent{git_root: state.git_root, head_oid: head_oid, branch: branch},
         state.events_registry
       )
     end
@@ -572,17 +586,14 @@ defmodule Minga.Git.Repo do
   @spec refresh_path?(String.t()) :: boolean()
   defp refresh_path?(path_str) do
     basename = Path.basename(path_str)
-    git_status_file?(basename) or stash_ref_path?(path_str)
+
+    git_status_file?(basename) or String.contains?(path_str, "/refs/heads/") or
+      String.ends_with?(path_str, "/refs/stash")
   end
 
   @spec git_status_file?(String.t()) :: boolean()
   defp git_status_file?(basename) do
-    basename in ["index", "HEAD", "MERGE_HEAD", "REBASE_HEAD"]
-  end
-
-  @spec stash_ref_path?(String.t()) :: boolean()
-  defp stash_ref_path?(path_str) do
-    String.ends_with?(path_str, "/refs/stash") or String.ends_with?(path_str, "/logs/refs/stash")
+    basename in ["index", "HEAD", "MERGE_HEAD", "REBASE_HEAD", "packed-refs"]
   end
 
   @spec fetched_or_current(fetch_result(value), value) :: value when value: term()
@@ -637,11 +648,6 @@ defmodule Minga.Git.Repo do
       {:ok, ahead, behind} -> {:ok, {ahead, behind}}
       :error -> :error
     end
-  end
-
-  @spec fetch_last_commit_message(String.t()) :: fetch_result(String.t())
-  defp fetch_last_commit_message(git_root) do
-    Git.last_commit_message(git_root)
   end
 
   @spec fetch_stash_count(String.t()) :: fetch_result(non_neg_integer())
@@ -706,18 +712,32 @@ defmodule Minga.Git.Repo do
 
   @spec start_git_watcher(t()) :: t()
   defp start_git_watcher(state) do
-    git_dir = Path.join(state.git_root, ".git")
+    git_dir = Metadata.directory(state.git_root)
 
     if File.dir?(git_dir) do
-      do_start_git_watcher(state, git_dir)
+      do_start_git_watcher(state, watch_directories(git_dir))
     else
       state
     end
   end
 
-  @spec do_start_git_watcher(t(), String.t()) :: t()
-  defp do_start_git_watcher(state, git_dir) do
-    case FileSystem.start_link(dirs: [git_dir]) do
+  @spec watch_directories(String.t()) :: [String.t()]
+  defp watch_directories(git_dir) do
+    with {:ok, pointer} <- File.read(Path.join(git_dir, "commondir")),
+         relative when relative != "" <- String.trim(pointer) do
+      common_dir = Path.expand(relative, git_dir)
+
+      if common_dir != git_dir and File.dir?(common_dir),
+        do: [git_dir, common_dir],
+        else: [git_dir]
+    else
+      _unavailable -> [git_dir]
+    end
+  end
+
+  @spec do_start_git_watcher(t(), [String.t()]) :: t()
+  defp do_start_git_watcher(state, directories) do
+    case FileSystem.start_link(dirs: directories) do
       {:ok, pid} ->
         FileSystem.subscribe(pid)
         %{state | watcher_pid: pid}

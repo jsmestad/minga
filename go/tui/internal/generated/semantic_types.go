@@ -326,6 +326,14 @@ type GutterEntry struct {
 	SignText    string
 }
 
+type GutterAuthoredRegion struct {
+	Role        uint8
+	Unit        uint64
+	FirstLine   uint32
+	FirstColumn uint32
+	LastLine    uint32
+}
+
 type ModelineSegment struct {
 	Name    string
 	FG      uint32
@@ -556,6 +564,7 @@ const (
 	DocumentHighlightSize    = 9
 	HitRegionSize            = 11
 	SurfacePlacementSize     = 13
+	GutterAuthoredRegionSize = 21
 	ThemeColorSize           = 4
 	CompletionMatchRangeSize = 4
 	PickerMovementKeySize    = 6
@@ -748,6 +757,12 @@ type GuiGutterResident struct {
 	ContentEpoch    uint32
 	LineCount       uint32
 	RetainOverrides uint8
+}
+
+type GuiGutterAuthorship struct {
+	Kind         uint8
+	BaseRevision uint64
+	Revision     uint64
 }
 
 type GuiWindowViewportDeltaHeader struct {

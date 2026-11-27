@@ -1,9 +1,9 @@
-defmodule MingaEditor.RenderModel.Window.LazyRowTreeTest do
+defmodule Minga.Core.LazyRowTreeTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias MingaEditor.RenderModel.Window.LazyRowTree
-  alias MingaEditor.RenderModel.Window.LazyRowTree.View
+  alias Minga.Core.LazyRowTree
+  alias Minga.Core.LazyRowTree.View
 
   test "sorted construction matches incremental insertion, including equal priorities" do
     cases = [

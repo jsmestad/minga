@@ -284,21 +284,17 @@ defmodule Minga.Test.UndoUnitModel do
   end
 
   defp facts(history) do
-    %{minga: minga, untasked: untasked} = history
     provenance = UndoHistory.provenance(history)
     %{groups: groups} = provenance
     runs = Provenance.runs(provenance)
 
     tasks =
-      minga
-      |> Enum.reduce(%{}, fn {group, key}, acc ->
-        Map.update(acc, Author.author(key), [group], &[group | &1])
-      end)
-      |> then(fn tasks ->
-        case :queue.to_list(untasked) do
-          [] -> tasks
-          groups -> Map.put(tasks, {:minga, :untasked}, groups)
-        end
+      Enum.reduce(groups, %{}, fn
+        {group, %{author: {:minga, _} = task, applied: true}}, acc ->
+          Map.update(acc, task, [group], &[group | &1])
+
+        _not_pending, acc ->
+          acc
       end)
 
     # A task started with the first group it opened, even once compaction merged that group into a newer one.

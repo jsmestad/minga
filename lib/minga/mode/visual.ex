@@ -83,7 +83,7 @@ defmodule Minga.Mode.Visual do
 
   # ── Motions ─────────────────────────────────────────────────────────────────
 
-  def handle_key({?h, 0}, state) do
+  def handle_key({?h, 0}, %VisualState{text_object_modifier: nil} = state) do
     {:execute, :move_left, state}
   end
 
@@ -324,6 +324,8 @@ defmodule Minga.Mode.Visual do
   def handle_key({?y, 0}, state) do
     {:execute_then_transition, [:yank_visual_selection], :normal, state}
   end
+
+  def handle_key({?:, 0}, state), do: {:transition, :command, state}
 
   # ── Escape: cancel visual selection ─────────────────────────────────────────
 

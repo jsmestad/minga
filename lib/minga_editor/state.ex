@@ -84,6 +84,7 @@ defmodule MingaEditor.State do
             git: %GitState{},
             session: %EditorSessionState{},
             effect_scheduler: nil,
+            keep_requests: nil,
             feedback: %Feedback{},
             lsp: %LSPState{},
             remote: %Remote{},
@@ -102,11 +103,16 @@ defmodule MingaEditor.State do
           git: GitState.t(),
           session: EditorSessionState.t(),
           effect_scheduler: GenServer.server() | nil,
+          keep_requests: :gen_server.request_id_collection() | nil,
           feedback: Feedback.t(),
           lsp: LSPState.t(),
           remote: Remote.t(),
           appearance: Appearance.t()
         }
+
+  @doc "Installs the OTP correlation collection for in-file Keep requests."
+  @spec put_keep_requests(t(), :gen_server.request_id_collection() | nil) :: t()
+  def put_keep_requests(%__MODULE__{} = state, requests), do: %{state | keep_requests: requests}
 
   @doc "Drops one feature source across the live workspace, tab snapshots, and shell stash."
   @spec drop_feature_state_source(t(), [Entry.t()], FeatureState.source()) :: t()
@@ -549,6 +555,7 @@ defmodule MingaEditor.State do
       state.workspace
       |> SessionState.set_buffers(buffers)
       |> SessionState.retire_agent_prompt_buffer(pid)
+      |> SessionState.retire_keep_input(pid)
       |> SessionState.activate_buffer(buffers)
 
     runtime = ShellRuntime.retire_buffer(state.shell_runtime, pid)

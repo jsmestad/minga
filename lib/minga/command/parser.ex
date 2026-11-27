@@ -72,6 +72,7 @@ defmodule Minga.Command.Parser do
   * `{:shell_command, command}` — run shell command and show output (`:!ls`)
   * `{:global, pattern, command}` — run ex command on matching lines (`:g/pat/cmd`)
   * `{:normal, range, keystrokes}` — execute normal mode keystrokes on a range of lines (`:normal`)
+  * `{:minga_review, range, decision}`: keep or reject the Minga units touching a line range
   * `{:unknown, raw}` — unrecognised command
   """
   @type parsed ::
@@ -143,6 +144,7 @@ defmodule Minga.Command.Parser do
           | {:shell_command, String.t()}
           | {:global, String.t(), String.t()}
           | {:normal, range(), String.t()}
+          | {:minga_review, range(), :keep | :reject}
           | {:rename, String.t()}
           | {:unknown, String.t()}
 
@@ -162,7 +164,7 @@ defmodule Minga.Command.Parser do
       "%" <> rest -> {:whole_buffer, rest}
       "." <> rest -> {:current_line, rest}
       "$" <> rest -> {:last_line, rest}
-      "'<,'>'" <> rest -> {:visual, rest}
+      "'<,'>" <> rest -> {:visual, rest}
       input -> parse_numeric_range(input)
     end
   end
@@ -251,6 +253,10 @@ defmodule Minga.Command.Parser do
     {:normal, range, keys}
   end
 
+  defp apply_range_to_command(range, {:minga_review, :current_line, decision}) do
+    {:minga_review, range, decision}
+  end
+
   defp apply_range_to_command(_range, other) do
     other
   end
@@ -301,6 +307,8 @@ defmodule Minga.Command.Parser do
   defp do_parse("safe-mode"), do: {:safe_mode_status, []}
   defp do_parse("agent-stop"), do: {:agent_abort, []}
   defp do_parse("agent-new"), do: {:agent_new_session, []}
+  defp do_parse("Minga keep"), do: {:minga_review, :current_line, :keep}
+  defp do_parse("Minga reject"), do: {:minga_review, :current_line, :reject}
   defp do_parse("agent-clear-history"), do: {:agent_clear_history, []}
   defp do_parse("agent-model " <> model), do: {:agent_set_model, [String.trim(model)]}
   defp do_parse("agent-models"), do: {:agent_pick_model, []}

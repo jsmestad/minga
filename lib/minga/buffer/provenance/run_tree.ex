@@ -281,6 +281,26 @@ defmodule Minga.Buffer.Provenance.RunTree do
     end
   end
 
+  @doc """
+  Returns the first locator that can contribute to a range starting at `offset`.
+
+  Unlike `at_offset/2`, finds a zero-width run at the boundary, including at EOF. It seeks by cached live bytes; it never walks all the runs at a gap.
+  """
+  @spec first_overlapping(t(), non_neg_integer()) :: Locator.t() | nil
+  def first_overlapping(tree, offset), do: seek_overlap(tree, offset, nil)
+
+  @spec seek_overlap(t(), integer(), Locator.t() | nil) :: Locator.t() | nil
+  defp seek_overlap(nil, _offset, found), do: found
+
+  defp seek_overlap({left, run, right, _height, _bytes, _count, _dead}, offset, found) do
+    start = size(left)
+    stop = start + Run.live_bytes(run)
+
+    if offset < stop or (offset == start and start == stop),
+      do: seek_overlap(left, offset, run.id),
+      else: seek_overlap(right, offset - stop, found)
+  end
+
   @doc "Returns the run just before locator `id` in document order, tombstones included, or `nil`."
   @spec previous(t(), Locator.t()) :: Run.t() | nil
   def previous(tree, id), do: previous(tree, id, nil)
@@ -336,6 +356,20 @@ defmodule Minga.Buffer.Provenance.RunTree do
       if run.live and run_start < to and run_end > from, do: [{run, run_start} | acc], else: acc
 
     if to > run_end, do: collect(right, from, to, run_end, acc), else: acc
+  end
+
+  @doc "Reduces runs in document order with their live byte offsets, including held runs."
+  @spec reduce(t(), acc, (Run.t(), non_neg_integer(), acc -> acc)) :: acc when acc: term()
+  def reduce(tree, acc, fun), do: reduce(tree, 0, acc, fun)
+
+  @spec reduce(t(), non_neg_integer(), acc, (Run.t(), non_neg_integer(), acc -> acc)) :: acc
+        when acc: term()
+  defp reduce(nil, _base, acc, _fun), do: acc
+
+  defp reduce({left, run, right, _height, _bytes, _count, _dead}, base, acc, fun) do
+    start = base + size(left)
+    acc = fun.(run, start, reduce(left, base, acc, fun))
+    reduce(right, start + Run.live_bytes(run), acc, fun)
   end
 
   @doc "Returns every run in document order, tombstones included. Meant for tests and diagnostics."

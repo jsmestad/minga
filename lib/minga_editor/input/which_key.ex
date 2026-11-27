@@ -9,6 +9,7 @@ defmodule MingaEditor.Input.WhichKey do
 
   @behaviour MingaEditor.Input.Handler
 
+  alias Minga.Buffer
   alias Minga.Keymap.Bindings
   alias MingaEditor.Commands
   alias MingaEditor.Input.Router
@@ -71,7 +72,49 @@ defmodule MingaEditor.Input.WhichKey do
       else: {:passthrough, state}
   end
 
+  def handle_key(
+        %{workspace: %{editing: %{mode: :visual}, buffers: %{active: buffer}}} = state,
+        ?\s,
+        0
+      )
+      when is_pid(buffer),
+      do: open_visual_review(state, buffer)
+
   def handle_key(state, _codepoint, _modifiers), do: {:passthrough, state}
+
+  @spec open_visual_review(state(), pid()) :: MingaEditor.Input.Handler.result()
+  defp open_visual_review(state, buffer) do
+    root = Minga.Keymap.leader_trie(state.interaction.keymap_server)
+
+    case Bindings.lookup(root, {?a, 0}) do
+      {:prefix, group} ->
+        version = Buffer.version(buffer)
+
+        review_root =
+          Enum.reduce(group.children, Bindings.new(), fn
+            {key, %{command: command, description: description}}, acc
+            when command in [:keep_minga_change, :reject_minga_change] ->
+              Bindings.bind(
+                acc,
+                [{?a, 0}, key],
+                {:review_visual, buffer, version, command},
+                description
+              )
+
+            _binding, acc ->
+              acc
+          end)
+
+        if map_size(review_root.children) > 0 do
+          {:handled, Commands.execute(state, {:leader_start, review_root, ["SPC"]})}
+        else
+          {:passthrough, state}
+        end
+
+      _ ->
+        {:passthrough, state}
+    end
+  end
 
   # ── Mouse: the mode pill, rows and the breadcrumb ────────────────────────────
 
