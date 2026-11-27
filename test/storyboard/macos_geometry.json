@@ -45,7 +45,7 @@
         },
         "tasks_drawer+agent_chat+agent_activity": {
           "cols": 179,
-          "rows": 30,
+          "rows": 29,
           "prompt": {"cols": 173, "rows": 8}
         },
         "tasks_drawer+minibuffer": {
