@@ -110,54 +110,81 @@ struct FileTreeScrollInvalidationTests {
             window.contentView = nil
             hostingView.rootView = AnyView(EmptyView())
         }
-        settle(hostingView)
+        let rendered = waitForLayout(in: hostingView) {
+            counter.count > 0 && firstScrollView(in: hostingView) != nil
+        }
+        try #require(rendered, "The tree must render before scrolling")
         let scrollView = try #require(firstScrollView(in: hostingView), "The file tree must host an NSScrollView")
         let clipView = scrollView.contentView
 
         let rowHeight: CGFloat = 22
         let separatorHeight: CGFloat = 1
 
-        func scroll(toRow row: Int, plus offset: CGFloat) {
+        func scrolledDistance() -> CGFloat {
+            clipView.bounds.origin.y + scrollView.contentInsets.top
+        }
+
+        func scroll(toRow row: Int, plus offset: CGFloat) throws {
             // Row n's top edge sits at topPadding + n * rowHeight below the inset content top.
             let distance = Spacing.hairline + CGFloat(row) * rowHeight + offset
-            let delta = Int32((distance - scrollView.contentInsets.top - clipView.bounds.origin.y).rounded())
-            if let cgEvent = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -delta, wheel2: 0, wheel3: 0),
-               let event = NSEvent(cgEvent: cgEvent) {
-                scrollView.scrollWheel(with: event)
+            let delta = Int32((distance - scrolledDistance()).rounded())
+            try #require(delta != 0, "The wheel event must actually move the clip view")
+            let cgEvent = try #require(CGEvent(
+                scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -delta, wheel2: 0, wheel3: 0
+            ))
+            let event = try #require(NSEvent(cgEvent: cgEvent))
+            scrollView.scrollWheel(with: event)
+
+            let reachedPosition = waitForLayout(in: hostingView) {
+                abs(scrolledDistance() - distance) <= 0.5
             }
-            settle(hostingView)
+            try #require(reachedPosition, "Wheel did not reach distance \(distance) at row \(row); clip is at \(scrolledDistance())")
         }
 
         let initial = counter.count
-        try #require(initial > 0, "The tree must render before scrolling")
         #expect(scrollView.contentInsets.top == 0, "No sticky header shows at the top of the tree")
 
-        // Scrolling within the top padding stays on row zero: no header and no evaluation.
-        scroll(toRow: 0, plus: -1)
+        // A real move within row zero must leave the header and tree unchanged.
+        try scroll(toRow: 0, plus: 2)
         #expect(scrollView.contentInsets.top == 0)
-        #expect(counter.count == initial, "Scrolling within the top padding re-evaluated the tree")
+        #expect(counter.count == initial, "Scrolling within row zero re-evaluated the tree")
 
         // Scroll deep enough that the header pins both parents, so later row crossings do not resize it.
-        scroll(toRow: 20, plus: 1)
-        #expect(scrollView.contentInsets.top == 2 * rowHeight + separatorHeight, "The header pins both parents of a nested row")
+        try scroll(toRow: 20, plus: 1)
+        let headerHeight = 2 * rowHeight + separatorHeight
+        let headerRendered = waitForLayout(in: hostingView) {
+            scrollView.contentInsets.top == headerHeight
+        }
+        try #require(headerRendered, "Clip reached row 20 but the sticky header inset is \(scrollView.contentInsets.top), not \(headerHeight)")
         let baseline = counter.count
         try #require(baseline > initial, "SwiftUI must observe the scroll to row 20")
 
         for offset in stride(from: CGFloat(2), through: 20, by: 2) {
-            scroll(toRow: 20, plus: offset)
+            try scroll(toRow: 20, plus: offset)
         }
         #expect(counter.count == baseline, "Sub-row scrolling re-evaluated the tree \(counter.count - baseline) times")
 
-        scroll(toRow: 21, plus: 1)
-        #expect(counter.count == baseline + 1, "Crossing one row boundary re-evaluated the tree \(counter.count - baseline) times")
+        try scroll(toRow: 21, plus: 1)
+        let nextRowObserved = waitForLayout(in: hostingView) { counter.count > baseline }
+        try #require(nextRowObserved, "SwiftUI did not observe the wheel crossing into row 21")
+
+        // Observe more layout turns at distinct positions before counting. A delayed duplicate
+        // from the boundary, or an evaluation inside row 21, both violate the same promise.
+        for offset in [CGFloat(6), 12, 18] {
+            try scroll(toRow: 21, plus: offset)
+        }
+        #expect(scrollView.contentInsets.top == headerHeight)
+        #expect(counter.count == baseline + 1, "Crossing into row 21 and moving within it re-evaluated the tree \(counter.count - baseline) times")
     }
 
-    /// Lets AppKit deliver the scroll and SwiftUI run the resulting update transaction.
-    @MainActor private func settle(_ hostingView: NSView) {
-        for _ in 0..<3 {
+    private func waitForLayout(in hostingView: NSView, until condition: () -> Bool) -> Bool {
+        let deadline = ContinuousClock.now + .seconds(2)
+        repeat {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
             hostingView.layoutSubtreeIfNeeded()
             hostingView.window?.displayIfNeeded()
-            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
-        }
+            if condition() { return true }
+        } while ContinuousClock.now < deadline
+        return false
     }
 }
