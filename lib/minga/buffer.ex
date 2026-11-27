@@ -757,7 +757,7 @@ defmodule Minga.Buffer do
   @spec save_as(t(), String.t()) :: :ok | {:error, term()}
   defdelegate save_as(server, file_path), to: BufferProcess
 
-  @doc "Retargets the buffer to a new file path without writing content."
+  @doc "Retargets the buffer without writing content. Refuses a path open in another buffer."
   @spec retarget_path(t(), String.t()) :: :ok | {:error, term()}
   defdelegate retarget_path(server, file_path), to: BufferProcess
 

@@ -10,6 +10,7 @@ defmodule MingaEditor.Input.ScopedFileTreeTest do
   alias MingaEditor.Input.FileTreeHandler
   alias MingaEditor.Input.Scoped
   alias Minga.Project.FileTree
+  alias Minga.Test.EditorCase
   alias MingaEditor.State.FileTree, as: FileTreeState
 
   defp ft_tree(state), do: state |> ft() |> FileTreeState.tree()
@@ -61,13 +62,30 @@ defmodule MingaEditor.Input.ScopedFileTreeTest do
 
     test "H toggles hidden files (scope binding)", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, ".hidden"), "")
-      state = make_tree_state(tmp_dir, 0)
+      File.write!(Path.join(tmp_dir, "visible.txt"), "")
+      ctx = EditorCase.start_editor("hello", project_root: tmp_dir, rendering: :disabled)
+      EditorCase.send_keys_sync(ctx, " op")
 
-      entries_before = Enum.count(FileTree.visible_entries(ft_tree(state)))
-      {:handled, new_state} = FileTreeHandler.handle_key(state, ?H, 0)
-      entries_after = Enum.count(FileTree.visible_entries(ft_tree(new_state)))
+      initial =
+        EditorCase.wait_until(ctx, &(FileTreeState.status(ft(&1)) == :ready),
+          max_attempts: 250,
+          message: "expected the project tree to load"
+        )
 
-      assert entries_after != entries_before
+      assert [%{name: "visible.txt"}] = FileTree.visible_entries(ft_tree(initial))
+      EditorCase.send_key_sync(ctx, ?H)
+
+      refreshed =
+        EditorCase.wait_until(
+          ctx,
+          fn state ->
+            FileTreeState.status(ft(state)) == :ready and ft_tree(state).show_hidden
+          end,
+          max_attempts: 250,
+          message: "expected H to publish the refreshed listing with hidden files"
+        )
+
+      assert Enum.any?(FileTree.visible_entries(ft_tree(refreshed)), &(&1.name == ".hidden"))
     end
   end
 

@@ -12,6 +12,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias Minga.Editing.Completion.Item, as: CompletionItem
   alias Minga.Extension.CodeLease
   alias Minga.RenderModel.UI.ExtensionPanel.Content.Text
+  alias Minga.Test.FileTreeCopyFixture, as: CopyFixture
   alias MingaEditor.BottomPanel
   alias MingaEditor.Agent.FileChange
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
@@ -1121,6 +1122,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
       directory = Path.join(root, Atom.to_string(intent))
       File.mkdir_p!(directory)
       {state, target} = targeted_tree_state(table, directory)
+      state = if intent == :duplicate, do: CopyFixture.install_scheduler(state), else: state
       generation = FileTreeState.presentation_generation(state.workspace.file_tree)
       selected = ProjectFileTree.selected_entry(FileTreeState.tree(state.workspace.file_tree))
 
@@ -1134,6 +1136,8 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
             item_id: target.path
           }
         )
+
+      result = if intent == :duplicate, do: CopyFixture.complete_copy(result), else: result
 
       assert ProjectFileTree.selected_entry(FileTreeState.tree(result.workspace.file_tree)).path ==
                selected.path
@@ -1486,6 +1490,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
       path: target_path,
       name: "target",
       dir?: true,
+      identity: Minga.Core.FileIdentity.from_stat(File.lstat!(target_path, time: :posix)),
       depth: 0,
       last_child?: true,
       guides: []
@@ -1592,6 +1597,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   } do
     project_root = Path.join(root, "project")
     {state, target} = targeted_tree_state(table, project_root)
+    state = CopyFixture.install_scheduler(state)
     source_root = Path.join(root, "external")
     File.mkdir_p!(source_root)
     source = Path.join(source_root, "copy.txt")
@@ -1610,7 +1616,10 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
         generation: generation
       )
 
-    result = GuiActionHandler.dispatch(state, {:file_tree_drop, intent})
+    result =
+      state
+      |> GuiActionHandler.dispatch({:file_tree_drop, intent})
+      |> CopyFixture.complete_copy()
 
     assert File.read!(Path.join(target.path, "copy.txt")) == "external"
     assert FileTreeState.tree(result.workspace.file_tree).cursor == 0

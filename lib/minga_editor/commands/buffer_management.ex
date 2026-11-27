@@ -27,6 +27,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Commands.Movement
   alias MingaEditor.Commands.Search, as: SearchCommands
+  alias MingaEditor.FileTree.Mutation, as: FileTreeMutation
   alias MingaEditor.Frontend.Capabilities, as: FrontendCapabilities
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Handlers.BufferRegistry
@@ -83,7 +84,8 @@ defmodule MingaEditor.Commands.BufferManagement do
       {:started, session} ->
         state = EditorState.accept_application_quit_transition(state, session)
 
-        with {:ok, state} <- DraftWorkflow.before_close(state, :all),
+        with {:ok, state} <- FileTreeMutation.require_idle(state),
+             {:ok, state} <- DraftWorkflow.before_close(state, :all),
              {:ok, state} <- EditPublication.before_quit(state) do
           begin_application_quit_resolution(
             state,
@@ -2382,7 +2384,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp with_published_agent_edits(state, :active, continue), do: continue.(state)
 
   defp with_published_agent_edits(state, :all, continue) do
-    case EditPublication.before_quit(state) do
+    case pass_exit_gate(state, :gated) do
       {:ok, state} -> continue.(state)
       {:blocked, state} -> state
     end
@@ -3052,8 +3054,14 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   @spec pass_exit_gate(state(), exit_intent()) :: {:ok, state()} | {:blocked, state()}
-  defp pass_exit_gate(state, :gated), do: EditPublication.before_quit(state)
-  defp pass_exit_gate(state, :discard), do: {:ok, EditPublication.discard_all(state)}
+  defp pass_exit_gate(state, exit) do
+    with {:ok, state} <- FileTreeMutation.require_idle(state) do
+      case exit do
+        :gated -> EditPublication.before_quit(state)
+        :discard -> {:ok, EditPublication.discard_all(state)}
+      end
+    end
+  end
 
   # The shutdown function is injectable via application config so the chaos
   # fuzzer can prevent `System.stop/1` from killing the VM mid-test.

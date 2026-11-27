@@ -77,6 +77,9 @@ defmodule MingaEditor.FocusOwner do
   defp modal_owner(:command_completion, {:command_completion, %{generation: generation}}, _state),
     do: {:editor_view, :command_completion, generation}
 
+  defp modal_owner(:none, _modal, %{workspace: %{editing: %{mode: :delete_confirm}}}),
+    do: {:editor_view, :prompt, 0}
+
   defp modal_owner(_tag, _modal, state) do
     if Search.gui_search_active?(state.workspace.search) do
       {:search_query, :search, 0}

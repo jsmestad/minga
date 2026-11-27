@@ -17,6 +17,7 @@ defmodule Minga.Test.Storyboard.Session do
   alias MingaEditor.Agent.{Activity, UIState}
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.MinibufferData
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.RenderCorrelation
   alias MingaEditor.RenderModel.UI.Builder, as: UIBuilder
   alias MingaEditor.Shell.Traditional.Workflow
@@ -635,7 +636,12 @@ defmodule Minga.Test.Storyboard.Session do
     :ok
   end
 
-  @doc "Presses a key path in inventory notation, or already parsed key steps. Raises if the editor dies."
+  @doc """
+  Presses a key path in inventory notation, or already parsed key steps. Raises if the editor dies.
+
+  Between keys, wait for a focused file-tree scan to settle before navigating its rows.
+  The final key may still leave a scan in flight.
+  """
   @spec press(t(), String.t() | [Keys.step()]) :: t()
   def press(%__MODULE__{} = session, notation) when is_binary(notation) do
     session
@@ -644,13 +650,33 @@ defmodule Minga.Test.Storyboard.Session do
   end
 
   def press(%__MODULE__{ctx: ctx} = session, steps) when is_list(steps) do
-    Enum.each(steps, &step(ctx, &1))
+    _ =
+      Enum.reduce(steps, nil, fn key_step, state ->
+        await_file_tree_scan!(ctx, state)
+        step(ctx, key_step)
+      end)
+
     await_picker_fetch!(ctx)
     await_queue_edit!(ctx)
     await_peek_reader!(ctx)
     await_keep!(ctx)
     session
   end
+
+  @spec await_file_tree_scan!(EditorCase.editor_ctx(), map() | nil) :: :ok
+  defp await_file_tree_scan!(ctx, %{workspace: %{keymap_scope: :file_tree, file_tree: tree}}) do
+    if FileTreeState.status(tree) == :loading do
+      EditorCase.wait_until(ctx, &(FileTreeState.status(&1.workspace.file_tree) != :loading),
+        max_attempts: 250,
+        interval_ms: 20,
+        message: "expected the file tree scan to settle before the next key"
+      )
+    end
+
+    :ok
+  end
+
+  defp await_file_tree_scan!(_ctx, _state), do: :ok
 
   @spec await_keep!(EditorCase.editor_ctx()) :: map()
   defp await_keep!(ctx) do
@@ -968,18 +994,14 @@ defmodule Minga.Test.Storyboard.Session do
   @spec window_id(t()) :: pos_integer()
   def window_id(%__MODULE__{ctx: ctx}), do: EditorCase.active_window_id(ctx)
 
-  @spec step(EditorCase.editor_ctx(), Keys.step()) :: :ok
-  defp step(ctx, {:key, codepoint, mods}) do
-    _ = EditorCase.send_key_sync(ctx, codepoint, mods)
-    :ok
-  end
+  @spec step(EditorCase.editor_ctx(), Keys.step()) :: map()
+  defp step(ctx, {:key, codepoint, mods}), do: EditorCase.send_key_sync(ctx, codepoint, mods)
 
   defp step(%{editor: editor} = ctx, :pause) do
     # The test config never fires the which-key timer, so a pause delivers the reveal the timer would send.
     generation = EditorCase.editor_state(ctx).shell_runtime.state.whichkey.generation
     send(editor, {:whichkey_reveal, generation})
-    _ = EditorCase.editor_state(ctx)
-    :ok
+    EditorCase.editor_state(ctx)
   end
 
   @spec opened_buffers(EditorCase.editor_ctx()) :: [pid()]

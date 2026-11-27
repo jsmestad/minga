@@ -69,6 +69,43 @@ defmodule MingaEditor.Commands.BufferManagementSaveQuitTest do
     refute_received {:shutdown, 0}
   end
 
+  test "confirmed last Agent tab quit waits for a running file tree operation" do
+    ctx = start_editor("")
+    file_tab = editor_state(ctx).shell_runtime.state.tab_bar.active_id
+    state = put_inactive_agent_tab(ctx, "Agent")
+    agent_tab = state.shell_runtime.state.tab_bar.active_id
+
+    :sys.replace_state(ctx.editor, fn state ->
+      {:ok, tabs} = TabBar.remove(state.shell_runtime.state.tab_bar, file_tab)
+      install_tab_bar(state, tabs)
+    end)
+
+    effect = %Minga.Test.EffectProbe{
+      test_pid: self(),
+      label: :file_tree_busy,
+      payloads: [],
+      action: :wait
+    }
+
+    assert {:ok, _, :running} = MingaEditor.FileTree.Mutation.schedule(editor_state(ctx), effect)
+    assert_receive {:effect_started, :file_tree_busy, worker, []}
+
+    confirm_quit = fn state ->
+      session = MingaEditor.State.Session.request_quit(state.session, :quit)
+      BufferManagement.execute(%{state | session: session}, :confirm_quit_yes)
+    end
+
+    :sys.replace_state(ctx.editor, confirm_quit)
+    assert notice_message(ctx) =~ "File tree operation in progress"
+    assert editor_state(ctx).shell_runtime.state.tab_bar.active_id == agent_tab
+    refute_received {:shutdown, 0}
+
+    send(worker, {:release_effect, :file_tree_busy})
+    assert_receive {:effect_applied, :file_tree_busy, {:completed, []}}
+    :sys.replace_state(ctx.editor, confirm_quit)
+    assert_receive {:shutdown, 0}
+  end
+
   test "force quit reports a failed review swap discard and leaves the generation recoverable",
        %{tmp_dir: root} do
     path = Path.join(root, "discard-failed.txt")

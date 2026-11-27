@@ -9,6 +9,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Project.FileRef
   alias Minga.Project.FileTree
+  alias Minga.Test.FileTreeCopyFixture, as: CopyFixture
   alias MingaEditor.Commands.FileTree, as: FileTreeCommands
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -58,7 +59,12 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
       state =
         tmp_dir |> build_state() |> select_entry("alpha.txt") |> FileTreeCommands.mark_copy()
 
-      state = state |> select_entry("dest") |> FileTreeCommands.paste()
+      state =
+        state
+        |> CopyFixture.install_scheduler()
+        |> select_entry("dest")
+        |> FileTreeCommands.paste()
+        |> CopyFixture.complete_copy()
 
       assert File.read!(Path.join(target_dir, "alpha.txt")) == "alpha"
       assert ft(state).clipboard_mark.operation == :copy
@@ -320,10 +326,36 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
         |> select_entry("src")
         |> FileTreeCommands.mark_copy()
 
-      state = state |> select_entry("child") |> FileTreeCommands.paste()
+      state =
+        state
+        |> CopyFixture.install_scheduler()
+        |> select_entry("child")
+        |> FileTreeCommands.paste()
+        |> CopyFixture.complete_copy(:failed)
 
       refute File.exists?(Path.join(child_dir, "src"))
       assert ft(state).clipboard_mark.operation == :copy
+    end
+
+    @tag :tmp_dir
+    test "copy paste rejects a symlinked destination inside the source", %{tmp_dir: tmp_dir} do
+      source = Path.join(tmp_dir, "src")
+      child = Path.join(source, "child")
+      File.mkdir_p!(child)
+      File.ln_s!(child, Path.join(tmp_dir, "alias"))
+
+      state =
+        tmp_dir
+        |> build_state()
+        |> CopyFixture.install_scheduler()
+        |> select_entry("src")
+        |> FileTreeCommands.mark_copy()
+        |> select_entry("alias")
+        |> FileTreeCommands.paste()
+        |> CopyFixture.complete_copy(:failed)
+
+      refute File.exists?(Path.join(child, "src"))
+      assert ft(state).clipboard_mark.path == source
     end
 
     @tag :tmp_dir
@@ -341,7 +373,11 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
         |> select_entry("alpha.txt")
         |> FileTreeCommands.mark_copy()
 
-      state |> select_entry("target.txt") |> FileTreeCommands.paste()
+      state
+      |> CopyFixture.install_scheduler()
+      |> select_entry("target.txt")
+      |> FileTreeCommands.paste()
+      |> CopyFixture.complete_copy()
 
       assert File.read!(Path.join(tmp_dir, "alpha.txt")) == "alpha"
     end
@@ -392,9 +428,35 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
       state =
         tmp_dir |> build_state() |> select_entry("alpha.txt") |> FileTreeCommands.mark_copy()
 
-      state |> select_entry("dest") |> FileTreeCommands.paste()
+      state
+      |> CopyFixture.install_scheduler()
+      |> select_entry("dest")
+      |> FileTreeCommands.paste()
+      |> CopyFixture.complete_copy(:failed)
 
       assert File.read!(Path.join(target_dir, "alpha.txt")) == "existing"
+    end
+
+    @tag :tmp_dir
+    test "copy paste onto its original path leaves the source bytes and mark alone", %{
+      tmp_dir: tmp_dir
+    } do
+      source = Path.join(tmp_dir, "alpha.txt")
+      File.write!(source, "original")
+      File.write!(Path.join(tmp_dir, "peer.txt"), "peer")
+
+      state =
+        tmp_dir
+        |> build_state()
+        |> CopyFixture.install_scheduler()
+        |> select_entry("alpha.txt")
+        |> FileTreeCommands.mark_copy()
+        |> select_entry("peer.txt")
+        |> FileTreeCommands.paste()
+        |> CopyFixture.complete_copy(:failed)
+
+      assert File.read!(source) == "original"
+      assert ft(state).clipboard_mark.path == source
     end
 
     @tag :tmp_dir
@@ -406,7 +468,12 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
       File.mkdir_p!(target_dir)
 
       state = tmp_dir |> build_state() |> select_entry("src") |> FileTreeCommands.mark_copy()
-      state |> select_entry("dest") |> FileTreeCommands.paste()
+
+      state
+      |> CopyFixture.install_scheduler()
+      |> select_entry("dest")
+      |> FileTreeCommands.paste()
+      |> CopyFixture.complete_copy()
 
       assert File.read!(Path.join([target_dir, "src", "nested", "file.txt"])) == "content"
     end

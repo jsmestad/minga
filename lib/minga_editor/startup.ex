@@ -224,7 +224,7 @@ defmodule MingaEditor.Startup do
             Keyword.get(
               opts,
               :file_tree_duplicate_backend,
-              MingaEditor.Commands.FileTree.SystemDuplicateBackend
+              {MingaEditor.Commands.FileTree.SystemDuplicateBackend, nil}
             ),
           file_tree_new_file_backend:
             Keyword.get(

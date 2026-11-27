@@ -3,9 +3,9 @@ defmodule Minga.Mode.DeleteConfirmStateTest do
 
   alias Minga.Mode.DeleteConfirmState
 
-  describe "new/3" do
+  describe "new/4" do
     test "creates state for a file" do
-      state = DeleteConfirmState.new("/tmp/foo.ex", "foo.ex", false)
+      state = DeleteConfirmState.new("/tmp/foo.ex", "foo.ex", false, {1, 0, 123, :regular})
       assert state.path == "/tmp/foo.ex"
       assert state.name == "foo.ex"
       assert state.dir? == false
@@ -13,7 +13,7 @@ defmodule Minga.Mode.DeleteConfirmStateTest do
     end
 
     test "creates state for a directory" do
-      state = DeleteConfirmState.new("/tmp/mydir", "mydir", true)
+      state = DeleteConfirmState.new("/tmp/mydir", "mydir", true, {1, 0, 123, :directory})
       assert state.path == "/tmp/mydir"
       assert state.name == "mydir"
       assert state.dir? == true
@@ -23,13 +23,15 @@ defmodule Minga.Mode.DeleteConfirmStateTest do
 
   describe "to_permanent/1" do
     test "transitions phase from trash to permanent" do
-      state = DeleteConfirmState.new("/tmp/foo.ex", "foo.ex", false)
+      identity = {1, 0, 123, :regular}
+      state = DeleteConfirmState.new("/tmp/foo.ex", "foo.ex", false, identity)
       assert state.phase == :trash
 
       permanent = DeleteConfirmState.to_permanent(state)
       assert permanent.phase == :permanent
       assert permanent.path == "/tmp/foo.ex"
       assert permanent.name == "foo.ex"
+      assert permanent.identity == identity
     end
   end
 end

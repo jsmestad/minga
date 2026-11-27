@@ -25,7 +25,8 @@ defmodule MingaEditor.State.Interaction do
             keymap_server: Minga.Keymap.Active,
             options_server: Minga.Config.Options,
             project_server: Minga.Project,
-            file_tree_duplicate_backend: MingaEditor.Commands.FileTree.SystemDuplicateBackend,
+            file_tree_duplicate_backend:
+              {MingaEditor.Commands.FileTree.SystemDuplicateBackend, nil},
             file_tree_new_file_backend: MingaEditor.Commands.FileTree.SystemNewFileBackend,
             keystroke_history: KeystrokeHistory.new(),
             queued_input_edit: nil,
@@ -43,7 +44,7 @@ defmodule MingaEditor.State.Interaction do
         Keyword.get(
           opts,
           :file_tree_duplicate_backend,
-          MingaEditor.Commands.FileTree.SystemDuplicateBackend
+          {MingaEditor.Commands.FileTree.SystemDuplicateBackend, nil}
         ),
       file_tree_new_file_backend:
         Keyword.get(

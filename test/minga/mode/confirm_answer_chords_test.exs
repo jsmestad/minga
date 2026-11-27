@@ -31,10 +31,11 @@ defmodule Minga.Mode.ConfirmAnswerChordsTest do
       pinned: false
     }
 
+    delete = DeleteConfirmState.new("/tmp/foo.ex", "foo.ex", false, {1, 0, 123, :regular})
+
     [
-      {DeleteConfirm, DeleteConfirmState.new("/tmp/foo.ex", "foo.ex", false), [?y, ?n]},
-      {DeleteConfirm,
-       %{DeleteConfirmState.new("/tmp/foo.ex", "foo.ex", false) | phase: :permanent}, [?y, ?n]},
+      {DeleteConfirm, delete, [?y, ?n]},
+      {DeleteConfirm, DeleteConfirmState.to_permanent(delete), [?y, ?n]},
       {ToolConfirm, %ToolConfirmState{pending: [:pyright], declined: MapSet.new()}, [?y, ?n]},
       {SubstituteConfirm, SubstituteConfirmState.new([Match.new(0, 0, 3)], "foo", "bar", "foo"),
        [?y, ?n, ?a, ?q]},

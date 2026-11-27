@@ -4,6 +4,7 @@ defmodule MingaEditor.Handlers.GuiFileTreeRefreshSelectionTest do
   alias Minga.Buffer
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
+  alias Minga.Test.FileTreeCopyFixture, as: CopyFixture
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.EffectScheduler
   alias MingaEditor.FileTree.Refresh
@@ -59,6 +60,7 @@ defmodule MingaEditor.Handlers.GuiFileTreeRefreshSelectionTest do
             item_id: target_path
           }
         )
+        |> CopyFixture.complete_copy()
 
       assert File.read!(Path.join(root, "a-target copy.txt")) == "target"
       assert selected_path(mutated) == selected_path

@@ -32,6 +32,10 @@ defmodule MingaEditor.Input.Prompt do
     {:handled, new_state}
   end
 
+  def handle_key(%{workspace: %{editing: %{mode: :delete_confirm}}} = state, cp, mods) do
+    {:handled, MingaEditor.do_handle_key(state, cp, mods)}
+  end
+
   def handle_key(state, _cp, _mods) do
     {:passthrough, state}
   end

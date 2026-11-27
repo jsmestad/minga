@@ -2,17 +2,42 @@ defmodule Minga.Platform.Stub do
   @moduledoc """
   Test stub for `Minga.Platform`. Returns `:ok` by default.
 
-  For error-path tests, use `set_trash_result/1` to configure the return value
-  for the current test process. Uses the process dictionary for isolation
-  between concurrent tests.
+  Error-path tests can configure a caller-local result. Jobs started by an
+  isolated scheduler inherit its test configuration through Task callers.
   """
 
-  @spec trash(String.t()) :: :ok | {:error, String.t()}
-  def trash(_path) do
-    case Process.get(:platform_stub_trash_result) do
-      nil -> :ok
-      result -> result
+  @type response :: Minga.Platform.trash_result() | {:wait, pid(), Minga.Platform.trash_result()}
+
+  @key :platform_stub_trash_result
+
+  @spec trash(String.t()) :: Minga.Platform.trash_result()
+  def trash(path) do
+    case Process.get(@key) || task_caller_result() do
+      nil ->
+        :ok
+
+      {:wait, test, result} ->
+        send(test, {:trash_started, self(), path})
+
+        receive do
+          :finish_trash -> result
+        after
+          3_000 -> {:error, "test did not release trash worker"}
+        end
+
+      result ->
+        result
     end
+  end
+
+  @spec task_caller_result() :: response() | nil
+  defp task_caller_result do
+    Enum.find_value(Process.get(:"$callers", []), fn caller ->
+      case Process.info(caller, :dictionary) do
+        {:dictionary, values} -> Keyword.get(values, @key)
+        nil -> nil
+      end
+    end)
   end
 
   @doc """
@@ -22,9 +47,9 @@ defmodule Minga.Platform.Stub do
 
       Minga.Platform.Stub.set_trash_result({:error, "no trash support"})
   """
-  @spec set_trash_result(:ok | {:error, String.t()}) :: :ok
+  @spec set_trash_result(response()) :: :ok
   def set_trash_result(result) do
-    Process.put(:platform_stub_trash_result, result)
+    Process.put(@key, result)
     :ok
   end
 end
