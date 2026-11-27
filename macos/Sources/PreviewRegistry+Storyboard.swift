@@ -222,7 +222,8 @@ enum StoryboardCapture {
         let png = try await settledPNG(window: window, host: host)
         let export = exportJSON(transcript: transcript, window: window, host: host, parts: recorder.frames,
                                 pixels: StoryboardPixels(png: png, scale: window.backingScaleFactor),
-                                scale: window.backingScaleFactor, fontManager: fontManager)
+                                scale: window.backingScaleFactor, fontManager: fontManager,
+                                snapshot: presented.snapshot)
         let base = URL(fileURLWithPath: job.output)
         try FileManager.default.createDirectory(at: base.deletingLastPathComponent(), withIntermediateDirectories: true)
         try png.write(to: base.appendingPathExtension("png"), options: .atomic)
@@ -348,9 +349,31 @@ enum StoryboardCapture {
         return ["bg": found.bg, "inks": found.inks, "cursor": accent]
     }
 
+    // Record visible authored marks independently of pixel antialiasing and transient unit IDs.
+    private static func authorship(_ snapshot: CommittedEditorSnapshot) -> [[String: Any]] {
+        snapshot.surfaces.flatMap { surface -> [[String: Any]] in
+            guard let gutter = surface.gutter.gutter, let authored = gutter.authorship, !authored.isEmpty else {
+                return []
+            }
+            var firstSourceRow = true
+            return surface.visibleRowRange.enumerated().compactMap { offset, index in
+                guard let row = surface.content.rowStore.row(at: index),
+                      row.rowType == .normal || row.rowType == .wrapContinuation else { return nil }
+                let pin = firstSourceRow
+                firstSourceRow = false
+                guard let mark = authored.region(at: row.bufLine, pin: pin, continuation: row.rowType == .wrapContinuation) else {
+                    return nil
+                }
+                return ["row": Int(gutter.contentRow) + offset, "column": gutter.contentCol,
+                        "role": mark.region.role.rawValue, "head": mark.head, "shared": mark.shared]
+            }
+        }
+    }
+
     /// The accessibility tree as a flat list in document order, frames in window points with a top-left origin, rounded to half a point.
     private static func exportJSON(transcript: Transcript, window: NSWindow, host: NSView, parts: [AnatomyPartFrame],
-                                   pixels: StoryboardPixels?, scale: CGFloat, fontManager: FontManager) -> Data {
+                                   pixels: StoryboardPixels?, scale: CGFloat, fontManager: FontManager,
+                                   snapshot: CommittedEditorSnapshot) -> Data {
         var elements: [[String: Any]] = []
         walk(host, depth: 0, window: window, into: &elements)
         // Audit the visible parts of the breadcrumb and editor, not the empty picker's fill and text.
@@ -364,7 +387,7 @@ enum StoryboardCapture {
             if let baseline = part.baseline { entry["baseline"] = half(baseline) }
             return entry
         }
-        let object: [String: Any] = [
+        var object: [String: Any] = [
             "version": 1,
             "scenario": transcript.scenario,
             "frontend": "macos",
@@ -385,6 +408,8 @@ enum StoryboardCapture {
             "samples": samples(parts, pixels: pixels, covered: covered),
             "code": code(elements, pixels: pixels, covered: covered),
         ]
+        let marks = authorship(snapshot)
+        if !marks.isEmpty { object["authorship"] = marks }
         return (try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])) ?? Data()
     }
 

@@ -37,7 +37,7 @@ defmodule Minga.Test.Storyboard.Journeys do
         {"SPC a a", "minga.tasks.needs_you"},
         {"=", "minga.approval.diff"},
         {"y", "minga.tasks.working"},
-        {"q", "edit.plain"}
+        {"q (while Minga edits this file)", "edit.working", press: "q"}
       ]),
       journey("review and keep a change", "edit.working", [
         {"SPC a r", "minga.review.buffer"},
@@ -163,9 +163,13 @@ defmodule Minga.Test.Storyboard.Journeys do
     end
   end
 
-  @spec journey(String.t(), String.t(), [
-          {String.t(), String.t()} | {String.t(), String.t(), keyword()}
-        ]) :: t()
+  @spec journey(
+          String.t(),
+          String.t(),
+          [
+            {String.t(), String.t()} | {String.t(), String.t(), keyword()}
+          ]
+        ) :: t()
   defp journey(name, start, steps) do
     %{name: name, start: start, steps: Enum.map(steps, &step/1)}
   end

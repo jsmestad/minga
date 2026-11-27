@@ -407,10 +407,23 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
       Entry.pending("minga.review.all_decided", 4051, "review after the last change is decided"),
       Entry.pending("minga.review.empty", 4051, "nothing to review"),
       Entry.pending("minga.review.diff_inline", 4051, "the inline diff of Minga's change"),
-      Entry.pending(
-        "minga.review.in_file",
-        4050,
-        "Minga's changes in the gutter, reviewed in place"
+      Entry.built("minga.review.in_file",
+        start: [
+          content: @review_content,
+          minga: {:thinking, :in_file},
+          review_edits: review_edits()
+        ],
+        reach: "g g ] h",
+        recognize: &in_file_review?/1,
+        checks: [
+          Check.new("the editor owns the keyboard inside Minga's first change", fn model ->
+            assert Enum.any?(Model.modeline_segments(model), fn segment ->
+                     segment.id == :change and segment.text == "change 1/1"
+                   end)
+
+            model |> assert_focus(:editor) |> assert_mode(:normal)
+          end)
+        ]
       ),
       Entry.built("minga.reject_all.confirm",
         start: [content: @review_content, review_edits: review_edits()],
@@ -520,6 +533,12 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
       {{2, 18}, 2, "45", EditSource.minga("plan-limit", "window")},
       {{3, 18}, 5, "true", EditSource.minga("plan-limit", "retry")}
     ]
+  end
+
+  @spec in_file_review?(Model.t()) :: boolean()
+  defp in_file_review?(%Model{} = model) do
+    Edit.home?(model) and
+      Enum.any?(Model.modeline_segments(model), &(&1.id == :change))
   end
 
   @spec reject_task_prompt?(Model.t()) :: boolean()

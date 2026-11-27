@@ -768,7 +768,9 @@ defmodule MingaEditor.Shell.Traditional do
     workspace = SessionState.set_keymap_scope(workspace, :editor)
 
     workspace =
-      SessionState.activate_buffer(workspace, workspace.buffers, replace_window_content?: true)
+      workspace
+      |> SessionState.activate_buffer(workspace.buffers, replace_window_content?: true)
+      |> SessionState.clear_keep_input()
 
     # Snapshot the new tab's context
     new_context = SessionState.to_tab_context(workspace)
@@ -814,7 +816,11 @@ defmodule MingaEditor.Shell.Traditional do
     # Create file tab (TabBar.add auto-activates it)
     {tb, new_tab} = TabBar.add(tb, :file, metadata.label)
     tb = TabBar.move_tab_to_workspace(tb, new_tab.id, workspace_id)
-    workspace = SessionState.activate_buffer(workspace, workspace.buffers)
+
+    workspace =
+      workspace
+      |> SessionState.activate_buffer(workspace.buffers)
+      |> SessionState.clear_keep_input()
 
     # Snapshot the new tab's context
     new_context = SessionState.to_tab_context(workspace)

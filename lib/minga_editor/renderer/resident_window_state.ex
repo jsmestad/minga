@@ -9,6 +9,7 @@ defmodule MingaEditor.Renderer.ResidentWindowState do
   """
 
   alias Minga.Buffer.EditDelta
+  alias Minga.Buffer.RendererConsume
   alias Minga.Buffer.RenderSnapshot
   alias MingaEditor.Renderer.RenderWindow
   alias MingaEditor.Window
@@ -96,6 +97,20 @@ defmodule MingaEditor.Renderer.ResidentWindowState do
         change_sequence: change_sequence,
         hydration: state.hydration
     }
+  end
+
+  @doc "Associates the buffer's current authorship observation with this window's next frame."
+  @spec observe_review(t(), RendererConsume.t()) :: t()
+  def observe_review(%__MODULE__{} = state, %RendererConsume{} = source) do
+    cache =
+      RenderCache.with_review_lease(
+        state.render_cache,
+        source.review_lease,
+        source.review_damage,
+        source.changes
+      )
+
+    %{state | render_cache: cache}
   end
 
   @doc "Requests one explicit full hydration in a fresh content epoch."

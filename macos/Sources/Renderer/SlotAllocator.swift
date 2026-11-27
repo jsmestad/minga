@@ -12,6 +12,7 @@ struct AtlasKey: Hashable, CustomStringConvertible {
     enum Namespace: String, Hashable {
         case bufferRow
         case gutterLineNumber
+        case gutterTwist
         case diagnosticSign
         case annotationIcon
         case lineAnnotation

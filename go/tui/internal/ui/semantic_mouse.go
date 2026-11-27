@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"slices"
 	"strconv"
+	"strings"
 	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
@@ -29,6 +30,7 @@ const (
 	zonePrefixEmptyStateItem   = "empty-state:item:"
 	zoneIDHoverAction          = "hover:action"
 	zoneIDGitRetry             = "git:retry"
+	reviewModelineCommand      = "next_minga_change_at:"
 	bottomPanelWheelLines      = 3
 )
 
@@ -681,7 +683,8 @@ func (m Model) presentedMouseHandler(layers []*lipgloss.Layer) func(tea.MouseMsg
 	}
 	queue := m.presentedAgentQueueHandler(layers)
 	peek := m.presentedSubagentPeekHandler(layers)
-	if git == nil && agent == nil && queue == nil && peek == nil {
+	review := m.presentedReviewModelineHandler(layers)
+	if git == nil && agent == nil && queue == nil && peek == nil && review == nil {
 		return nil
 	}
 	return func(msg tea.MouseMsg) tea.Cmd {
@@ -698,6 +701,9 @@ func (m Model) presentedMouseHandler(layers []*lipgloss.Layer) func(tea.MouseMsg
 			}
 			if !claim.claimed && agent != nil {
 				agent(click)
+			}
+			if !claim.claimed && review != nil {
+				review(click)
 			}
 		}
 		return nil
@@ -829,6 +835,50 @@ func (m Model) hoverActionMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	return nil, false
 }
 
+func reviewModelineTarget(status protocol.StatusBar) (string, int) {
+	for index, segment := range status.Left {
+		if strings.HasPrefix(segment.Command, reviewModelineCommand) {
+			return segment.Command, index
+		}
+	}
+	for index, segment := range status.Right {
+		if strings.HasPrefix(segment.Command, reviewModelineCommand) {
+			return segment.Command, len(status.Left) + index
+		}
+	}
+	return "", 0
+}
+
+// The exact review target belongs to the same flushed view as its hit bounds.
+func (m Model) presentedReviewModelineHandler(layers []*lipgloss.Layer) func(tea.MouseClickMsg) {
+	status, ok := m.statusBar()
+	if !ok || m.pickerVisible() || m.whichKeyVisible() {
+		return nil
+	}
+	command, index := reviewModelineTarget(status)
+	if command == "" {
+		return nil
+	}
+	zone := m.zones.Get(zoneIDModelineSegment(index))
+	if zone == nil {
+		return nil
+	}
+	claim := m.presentedClick
+	return func(click tea.MouseClickMsg) {
+		if !zone.InBounds(click) {
+			return
+		}
+		for _, layer := range layers {
+			bounds := uiRect{X: layer.GetX(), Y: layer.GetY(), Width: layer.Width(), Height: layer.Height()}
+			if bounds.Contains(click.X, click.Y) {
+				return
+			}
+		}
+		claim.claimed = true
+		claim.packet = protocol.EncodeGUIExecuteCommand(command)
+	}
+}
+
 func (m Model) modelineMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	status, ok := m.statusBar()
 	if !ok {
@@ -843,6 +893,9 @@ func (m Model) modelineMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 		}
 		zoneInfo := m.zones.Get(zoneIDModelineSegment(index))
 		if zoneInfo != nil && zoneInfo.InBounds(msg) {
+			if strings.HasPrefix(segment.Command, reviewModelineCommand) {
+				return nil, true // The flushed View alone can activate the review target.
+			}
 			return protocol.EncodeGUIExecuteCommand(segment.Command), true
 		}
 	}

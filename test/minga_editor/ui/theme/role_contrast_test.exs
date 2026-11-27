@@ -50,6 +50,18 @@ defmodule MingaEditor.UI.Theme.RoleContrastTest do
     end
   end
 
+  test "a kept strand is quieter than the pending strand without losing glyph contrast" do
+    for module <- @theme_modules do
+      theme = module.theme()
+      surface = Theme.role_color(theme, :surface)
+      kept = contrast(Theme.role_color(theme, :minga_kept), surface)
+      pending = contrast(Theme.role_color(theme, :minga), surface)
+
+      assert kept >= Tokens.contrast_target(:glyph) and kept < pending,
+             "#{theme.name} must keep the muted strand visible and distinct"
+    end
+  end
+
   # The border role is sent as popup.border_fg; pane splits draw editor.split_border_fg and are held to the same target.
   test "pane split borders meet the border role's contrast target in every theme" do
     {class, on} = Tokens.color_role(:border).contrast

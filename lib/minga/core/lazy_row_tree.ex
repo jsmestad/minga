@@ -1,4 +1,4 @@
-defmodule MingaEditor.RenderModel.Window.LazyRowTree do
+defmodule Minga.Core.LazyRowTree do
   @moduledoc """
   Persistent ordered row tree with lazy suffix shifts.
 
@@ -14,8 +14,8 @@ defmodule MingaEditor.RenderModel.Window.LazyRowTree do
     @type t(value, summary) :: %__MODULE__{
             key: non_neg_integer(),
             value: value,
-            left: MingaEditor.RenderModel.Window.LazyRowTree.t(value, summary),
-            right: MingaEditor.RenderModel.Window.LazyRowTree.t(value, summary),
+            left: Minga.Core.LazyRowTree.t(value, summary),
+            right: Minga.Core.LazyRowTree.t(value, summary),
             summary: summary
           }
   end

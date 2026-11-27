@@ -70,7 +70,7 @@ defmodule MingaEditor.UI.Prompt.RejectTask do
   defp unavailable(state),
     do: NoticeWorkflow.publish(state, "Nothing rejected. The original buffer is unavailable.")
 
-  @spec label(UndoHistory.task(), pos_integer()) :: String.t()
+  @spec label(UndoHistory.review_scope(), pos_integer()) :: String.t()
   defp label(task, count),
     do: "Reject #{changes(count)} from #{task_label(task)}? Your edits stay."
 
@@ -78,7 +78,8 @@ defmodule MingaEditor.UI.Prompt.RejectTask do
   defp changes(1), do: "1 change"
   defp changes(count), do: "#{count} changes"
 
-  @spec task_label(UndoHistory.task()) :: String.t()
+  @spec task_label(UndoHistory.review_scope()) :: String.t()
+  defp task_label(:multiple_tasks), do: "the selected tasks"
   defp task_label({:minga, :untasked}), do: "Minga (no task)"
 
   defp task_label({:minga, task}), do: "task #{short_id(task)}"

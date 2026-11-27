@@ -273,6 +273,7 @@ defmodule MingaEditor.RenderPipeline.Content do
         build_result.resident_semantic_state
       )
       |> Window.put_text_presentation(presentation)
+      |> Window.put_gutter_authorship(window_model.gutter)
       |> Window.put_row_slot_allocator(build_result.row_slot_allocator)
 
     state =

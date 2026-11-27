@@ -97,6 +97,7 @@ defmodule Minga.Test.EditorCase do
     - `:width` — terminal width (default 80)
     - `:height` — terminal height (default 24)
     - `:file_path` — optional file path for the buffer
+    - `:keep_observer`: explicit Git observation for a file-backed Keep test
     - `:empty` — start with no buffer at all, as `minga .` does (default false); `:buffer` is then nil
     - `:session_dir` — enable session persistence in this directory (default: off)
     - `:swap_dir`: the editor's swap directory, scanned for unsaved text at startup by a non-headless backend (default: off)
@@ -141,6 +142,8 @@ defmodule Minga.Test.EditorCase do
       if Keyword.has_key?(opts, :options_server),
         do: [{:options_server, Keyword.get(opts, :options_server)} | buffer_opts],
         else: buffer_opts
+
+    buffer_opts = Keyword.merge(buffer_opts, Keyword.take(opts, [:keep_observer]))
 
     buffer = start_test_buffer(Keyword.get(opts, :empty, false), buffer_opts, clipboard)
 

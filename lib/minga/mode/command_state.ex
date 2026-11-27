@@ -10,7 +10,8 @@ defmodule Minga.Mode.CommandState do
             candidate_index: 0,
             count: nil,
             leader_node: nil,
-            leader_keys: []
+            leader_keys: [],
+            visual_lines: nil
 
   @type t :: %__MODULE__{
           input: String.t(),
@@ -18,12 +19,23 @@ defmodule Minga.Mode.CommandState do
           candidate_index: integer(),
           count: non_neg_integer() | nil,
           leader_node: Minga.Keymap.Bindings.node_t() | nil,
-          leader_keys: [String.t()]
+          leader_keys: [String.t()],
+          visual_lines: visual_lines() | nil
         }
+
+  @typedoc "The buffer and text version that supplied the inclusive Visual line bounds."
+  @type visual_lines :: {pid(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
 
   @doc "Creates command input with the cursor at its end."
   @spec new(String.t()) :: t()
   def new(input \\ "") when is_binary(input), do: replace_input(%__MODULE__{}, input)
+
+  @doc "Opens the Ex prompt on the exact lines offered by the active Visual selection."
+  @spec for_visual(pid(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: t()
+  def for_visual(buffer, version, anchor, cursor) do
+    %__MODULE__{visual_lines: {buffer, version, min(anchor, cursor), max(anchor, cursor)}}
+    |> replace_input("'<,'>")
+  end
 
   @doc "Replaces command input, moves the cursor to its end, and resets completion selection."
   @spec replace_input(t(), String.t()) :: t()

@@ -17,7 +17,8 @@ defmodule MingaEditor.State.Interaction do
           file_tree_duplicate_backend: MingaEditor.Commands.FileTree.DuplicateBackend.t(),
           file_tree_new_file_backend: MingaEditor.Commands.FileTree.NewFileBackend.t(),
           keystroke_history: KeystrokeHistory.t(),
-          queued_input_edit: MingaEditor.Agent.QueuedInputEdit.edit() | nil
+          queued_input_edit: MingaEditor.Agent.QueuedInputEdit.edit() | nil,
+          keep_requests: :gen_server.request_id_collection() | nil
         }
 
   defstruct editing_model: :vim,
@@ -27,7 +28,8 @@ defmodule MingaEditor.State.Interaction do
             file_tree_duplicate_backend: MingaEditor.Commands.FileTree.SystemDuplicateBackend,
             file_tree_new_file_backend: MingaEditor.Commands.FileTree.SystemNewFileBackend,
             keystroke_history: KeystrokeHistory.new(),
-            queued_input_edit: nil
+            queued_input_edit: nil,
+            keep_requests: nil
 
   @doc "Creates interaction state from startup configuration."
   @spec new(keyword()) :: t()
@@ -61,4 +63,9 @@ defmodule MingaEditor.State.Interaction do
   @spec put_queued_input_edit(t(), MingaEditor.Agent.QueuedInputEdit.edit() | nil) :: t()
   def put_queued_input_edit(%__MODULE__{} = interaction, edit),
     do: %{interaction | queued_input_edit: edit}
+
+  @doc "Tracks exact in-file Keep responses across the editor's tabs."
+  @spec put_keep_requests(t(), :gen_server.request_id_collection() | nil) :: t()
+  def put_keep_requests(%__MODULE__{} = interaction, requests),
+    do: %{interaction | keep_requests: requests}
 end

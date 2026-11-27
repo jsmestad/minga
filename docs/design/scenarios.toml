@@ -411,7 +411,7 @@ exits = [
   { key = "esc", click = "click elsewhere", to = "edit.plain" },
   { key = "g.", click = "right-click the selection", to = "minga.act_menu.selection" },
   { key = "SPC a e", click = "mode pill › Minga › Rewrite selection inline (macOS: also the menu bar)", to = "minga.inline_edit" },
-  { key = "SPC a y", click = "mode pill › Minga › Keep change (macOS: also the menu bar)", to = "edit.plain", note = "keep Minga's changes in the selection" },
+  { key = "SPC a y (with Minga changes selected)", click = "mode pill › Minga › Keep change (macOS: also the menu bar)", to = "edit.plain" },
 ]
 [[scenario]]
 id = "edit.command_line"
@@ -1015,7 +1015,7 @@ exits = [
   { key = "i on a conversation with subagents", click = "Inspect row", to = "minga.subagent.peek", note = "The which-key fixture has no subagents. The seeded peek fixture drives this command from a real parent conversation." },
   { key = "w", click = "Watch row", to = "terminal.minga_shell" },
   { key = "u", click = "Reject all row", to = "minga.reject_all.confirm" },
-  { key = "esc", click = "click outside", to = "edit.working" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
   { key = "backspace", click = "breadcrumb SPC", to = "edit.whichkey.leader" },
 ]
 
@@ -1041,10 +1041,10 @@ exits = [
   { key = "j on a task with a child below", click = "child row title", to = "minga.tasks.child_selected" },
   { key = "o", click = "Output", to = "minga.task.output" },
   { key = "↩ on a done row", click = "Review", to = "minga.review.buffer" },
-  { key = "q", click = "drawer close", to = "edit.working" },
-  { key = "esc", click = "", to = "edit.working", keyboard_only = "q has the click (drawer close); esc is the keyboard twin" },
+  { key = "q", click = "drawer close", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain", keyboard_only = "q has the click (drawer close); esc is the keyboard twin" },
 ]
-notes = "Rows show one action each by state: r Retry on waiting and failed rows, o Output, i Inspect, ↩ Review on done rows; those exits are listed on minga.tasks.list, where such a row is selected. Empty state: see minga.tasks.empty."
+notes = "Rows show one action each by state: r Retry on waiting and failed rows, o Output, i Inspect, ↩ Review on done rows; those exits are listed on minga.tasks.list, where such a row is selected. Closing returns to the file the drawer opened over. This standalone scenario starts in plain editing; the approval journey starts while Minga edits the file. Empty state: see minga.tasks.empty."
 
 [[scenario]]
 id = "minga.review.buffer"
@@ -1175,6 +1175,7 @@ exits = [
   { key = "↩ on a task with a conversation in this window", click = "row title", to = "minga.conversation" },
   { key = "j on a task with a child below", click = "child row title", to = "minga.tasks.child_selected" },
   { key = "q", click = "drawer close", to = "edit.plain" },
+  { key = "q (while Minga edits this file)", click = "drawer close while Minga edits this file", to = "edit.working" },
   { key = "esc", click = "", to = "edit.plain", keyboard_only = "q has the click" },
 ]
 

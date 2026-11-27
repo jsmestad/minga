@@ -7,9 +7,9 @@
 ## text
  ▌  storyboard.ex *
 ▾  3  defmodule UsageLimit do
-   2    def label, do: "Your plan limit applies"
-   1    def window, do: 45
-   4    def retry?, do: true
+   2 ▚  def label, do: "Your plan limit applies"
+   1 ▐  def window, do: 45
+   4 ▐  def retry?, do: true
    1  end
    2
       ~
@@ -17,8 +17,8 @@
 ╭ SPC › a Minga · 1 needs you ─────────────────────────────────────────────────╮
 │ Tasks                   Conversation           Changes                       │
 │ a Tasks · 1 needs you   v Conversation split   r Pending reviews             │
-│ n New task              ? Ask about this       y Keep blocking change        │
-│ i Inspect subagent      e Rewrite selection    d Reject blocking change      │
+│ n New task              ? Ask about this       y Keep Minga change           │
+│ i Inspect subagent      e Rewrite selection    d Reject Minga change         │
 │ s Stop                  q Queue ›              u Reject all…                 │
 │                                                p Publish edits…              │
 │                                                                              │
@@ -43,7 +43,8 @@
 1 26-26 #c6d0f5 #303446 -
 1 27-28 #ca9ee6 #303446 bold
 1 29-79 #c6d0f5 #303446 -
-2 0-5 #949cbb #303446 -
+2 0-4 #949cbb #303446 -
+2 5-5 #ca9ee6 #574f6e -
 2 6-7 #c6d0f5 #303446 -
 2 8-10 #ca9ee6 #303446 bold
 2 11-11 #c6d0f5 #303446 -
@@ -53,7 +54,8 @@
 2 19-22 #e78284 #303446 -
 2 23-47 #a6d189 #303446 -
 2 48-79 #c6d0f5 #303446 -
-3 0-5 #949cbb #303446 -
+3 0-4 #949cbb #303446 -
+3 5-5 #ca9ee6 #574f6e -
 3 6-7 #c6d0f5 #303446 -
 3 8-10 #ca9ee6 #303446 bold
 3 11-11 #c6d0f5 #303446 -
@@ -63,7 +65,8 @@
 3 20-23 #e78284 #303446 -
 3 24-25 #ef9f76 #303446 -
 3 26-79 #c6d0f5 #303446 -
-4 0-5 #babbf1 #414559 bold
+4 0-4 #babbf1 #414559 bold
+4 5-5 #ca9ee6 #574f6e -
 4 6-7 #c6d0f5 #414559 -
 4 8-10 #ca9ee6 #303446 bold
 4 11-11 #c6d0f5 #414559 -
@@ -99,8 +102,8 @@
 10 23-25 #c6d0f5 #414559 -
 10 26-45 #949cbb #414559 -
 10 46-48 #c6d0f5 #414559 -
-10 49-72 #949cbb #414559 -
-10 73-78 #c6d0f5 #414559 -
+10 49-69 #949cbb #414559 -
+10 70-78 #c6d0f5 #414559 -
 10 79-79 #838ba7 #414559 -
 11 0-0 #838ba7 #414559 -
 11 1-1 #c6d0f5 #414559 -

@@ -8,9 +8,9 @@
  ▌  storyboard.ex *
   / ❯ tmp ❯ minga-storyboard ❯ tui-150x38 ❯ minga.whichkey ❯ lib ❯ storyboard.ex
 ▾  3  defmodule UsageLimit do
-   2    def label, do: "Your plan limit applies"
-   1    def window, do: 45
-   4    def retry?, do: true
+   2 ▚  def label, do: "Your plan limit applies"
+   1 ▐  def window, do: 45
+   4 ▐  def retry?, do: true
    1  end
    2
       ~
@@ -35,11 +35,11 @@
       ~
       ~
 ╭ SPC › a Minga · 1 needs you ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ Tasks                   Conversation           Changes                    More                                                                     │
-│ a Tasks · 1 needs you   v Conversation split   r Pending reviews          x Context ›                                                              │
-│ n New task              ? Ask about this       y Keep blocking change     S Session ›                                                              │
-│ i Inspect subagent      e Rewrite selection    d Reject blocking change   W Why this line                                                          │
-│ s Stop                  q Queue ›              u Reject all…              A Code autobiography                                                     │
+│ Tasks                   Conversation           Changes                 More                                                                        │
+│ a Tasks · 1 needs you   v Conversation split   r Pending reviews       x Context ›                                                                 │
+│ n New task              ? Ask about this       y Keep Minga change     S Session ›                                                                 │
+│ i Inspect subagent      e Rewrite selection    d Reject Minga change   W Why this line                                                             │
+│ s Stop                  q Queue ›              u Reject all…           A Code autobiography                                                        │
 │                                                p Publish edits…                                                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── ⌫ back  esc close ─╯
   NORMAL  ◉ Needs you storyboard.ex ● ◉ Minga                                                                                       SPC a Elixir 4:23
@@ -70,7 +70,8 @@
 2 26-26 #c6d0f5 #303446 -
 2 27-28 #ca9ee6 #303446 bold
 2 29-149 #c6d0f5 #303446 -
-3 0-5 #949cbb #303446 -
+3 0-4 #949cbb #303446 -
+3 5-5 #ca9ee6 #574f6e -
 3 6-7 #c6d0f5 #303446 -
 3 8-10 #ca9ee6 #303446 bold
 3 11-11 #c6d0f5 #303446 -
@@ -80,7 +81,8 @@
 3 19-22 #e78284 #303446 -
 3 23-47 #a6d189 #303446 -
 3 48-149 #c6d0f5 #303446 -
-4 0-5 #949cbb #303446 -
+4 0-4 #949cbb #303446 -
+4 5-5 #ca9ee6 #574f6e -
 4 6-7 #c6d0f5 #303446 -
 4 8-10 #ca9ee6 #303446 bold
 4 11-11 #c6d0f5 #303446 -
@@ -90,7 +92,8 @@
 4 20-23 #e78284 #303446 -
 4 24-25 #ef9f76 #303446 -
 4 26-149 #c6d0f5 #303446 -
-5 0-5 #babbf1 #414559 bold
+5 0-4 #babbf1 #414559 bold
+5 5-5 #ca9ee6 #574f6e -
 5 6-7 #c6d0f5 #414559 -
 5 8-10 #ca9ee6 #303446 bold
 5 11-11 #c6d0f5 #414559 -
@@ -164,10 +167,10 @@
 30 23-25 #c6d0f5 #414559 -
 30 26-45 #949cbb #414559 -
 30 46-48 #c6d0f5 #414559 -
-30 49-72 #949cbb #414559 -
-30 73-75 #c6d0f5 #414559 -
-30 76-95 #949cbb #414559 -
-30 96-148 #c6d0f5 #414559 -
+30 49-69 #949cbb #414559 -
+30 70-72 #c6d0f5 #414559 -
+30 73-92 #949cbb #414559 -
+30 93-148 #c6d0f5 #414559 -
 30 149-149 #838ba7 #414559 -
 31 0-0 #838ba7 #414559 -
 31 1-1 #c6d0f5 #414559 -
@@ -178,11 +181,11 @@
 31 26-26 #8caaee #414559 -
 31 27-48 #c6d0f5 #414559 -
 31 49-49 #8caaee #414559 -
-31 50-75 #c6d0f5 #414559 -
-31 76-76 #8caaee #414559 -
-31 77-77 #c6d0f5 #414559 -
-31 78-86 #babbf1 #414559 -
-31 87-148 #c6d0f5 #414559 -
+31 50-72 #c6d0f5 #414559 -
+31 73-73 #8caaee #414559 -
+31 74-74 #c6d0f5 #414559 -
+31 75-83 #babbf1 #414559 -
+31 84-148 #c6d0f5 #414559 -
 31 149-149 #838ba7 #414559 -
 32 0-0 #838ba7 #414559 -
 32 1-1 #c6d0f5 #414559 -
@@ -191,11 +194,11 @@
 32 26-26 #8caaee #414559 -
 32 27-48 #c6d0f5 #414559 -
 32 49-49 #8caaee #414559 -
-32 50-75 #c6d0f5 #414559 -
-32 76-76 #8caaee #414559 -
-32 77-77 #c6d0f5 #414559 -
-32 78-86 #babbf1 #414559 -
-32 87-148 #c6d0f5 #414559 -
+32 50-72 #c6d0f5 #414559 -
+32 73-73 #8caaee #414559 -
+32 74-74 #c6d0f5 #414559 -
+32 75-83 #babbf1 #414559 -
+32 84-148 #c6d0f5 #414559 -
 32 149-149 #838ba7 #414559 -
 33 0-0 #838ba7 #414559 -
 33 1-1 #c6d0f5 #414559 -
@@ -204,9 +207,9 @@
 33 26-26 #8caaee #414559 -
 33 27-48 #c6d0f5 #414559 -
 33 49-49 #8caaee #414559 -
-33 50-75 #c6d0f5 #414559 -
-33 76-76 #8caaee #414559 -
-33 77-148 #c6d0f5 #414559 -
+33 50-72 #c6d0f5 #414559 -
+33 73-73 #8caaee #414559 -
+33 74-148 #c6d0f5 #414559 -
 33 149-149 #838ba7 #414559 -
 34 0-0 #838ba7 #414559 -
 34 1-1 #c6d0f5 #414559 -
@@ -217,9 +220,9 @@
 34 28-34 #babbf1 #414559 -
 34 35-48 #c6d0f5 #414559 -
 34 49-49 #8caaee #414559 -
-34 50-75 #c6d0f5 #414559 -
-34 76-76 #8caaee #414559 -
-34 77-148 #c6d0f5 #414559 -
+34 50-72 #c6d0f5 #414559 -
+34 73-73 #8caaee #414559 -
+34 74-148 #c6d0f5 #414559 -
 34 149-149 #838ba7 #414559 -
 35 0-0 #838ba7 #414559 -
 35 1-48 #c6d0f5 #414559 -

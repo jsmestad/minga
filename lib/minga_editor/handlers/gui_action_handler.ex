@@ -597,6 +597,25 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:execute_command, "agent_attach_diagnostics_at:" <> target}),
     do: MingaEditor.UI.Picker.DiagnosticAttachmentSource.open_presented(state, target)
 
+  defp dispatch_action(state, {:execute_command, "next_minga_change_at:" <> target}) do
+    with [window_text, owner, version_text, review_text, point_text] <-
+           String.split(target, ":", parts: 5),
+         {window, ""} <- Integer.parse(window_text),
+         {version, ""} when version >= 0 <- Integer.parse(version_text),
+         {review, ""} when review > 0 <- Integer.parse(review_text),
+         {point, ""} when point >= 0 <- Integer.parse(point_text),
+         %Window{id: ^window, content: {:buffer, buffer}} <-
+           State.active_window_struct(state.workspace),
+         :ok <- validate_presented_review_owner(state, buffer, owner) do
+      Commands.execute(
+        state,
+        {:next_presented_review_change, {window, buffer, version, review, point}}
+      )
+    else
+      _mismatch -> state
+    end
+  end
+
   defp dispatch_action(state, {:execute_command, name_str}) do
     command = String.to_existing_atom(name_str)
 
@@ -1721,6 +1740,13 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp find_float_popup_window_id(_state), do: nil
+
+  @spec validate_presented_review_owner(state(), pid(), String.t()) :: :ok | :stale
+  defp validate_presented_review_owner(%{workspace: %{buffers: %{active: buffer}}}, buffer, owner) do
+    if List.to_string(:erlang.pid_to_list(buffer)) == owner, do: :ok, else: :stale
+  end
+
+  defp validate_presented_review_owner(_state, _buffer, _owner), do: :stale
 
   @spec route_panel_action_to_extension(state(), String.t(), atom() | String.t(), map()) ::
           state()

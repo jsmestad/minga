@@ -30,7 +30,8 @@ defmodule Minga.RenderModel.Window.Gutter do
             line_number_style: :none,
             line_number_width: 0,
             sign_col_width: 0,
-            entries: []
+            entries: [],
+            authorship: nil
 
   @type t :: %__MODULE__{
           window_id: non_neg_integer(),
@@ -43,7 +44,8 @@ defmodule Minga.RenderModel.Window.Gutter do
           line_number_style: line_number_style(),
           line_number_width: non_neg_integer(),
           sign_col_width: non_neg_integer(),
-          entries: [GutterEntry.t()] | __MODULE__.ResidentRows.t()
+          entries: [GutterEntry.t()] | __MODULE__.ResidentRows.t(),
+          authorship: __MODULE__.Authorship.t() | nil
         }
   @doc "Retires keyboard ownership while preserving the committed gutter geometry."
   @spec deactivate(t()) :: t()

@@ -36,12 +36,14 @@ defmodule Minga.Buffer.UndoHistory do
   alias Minga.Buffer.Author
   alias Minga.Buffer.Document
   alias Minga.Buffer.EditSource
+  alias Minga.Buffer.KeptReview.{Ledger, Source}
   alias Minga.Buffer.Position
   alias Minga.Buffer.Provenance
   alias Minga.Buffer.UndoHistory.Entry
   alias Minga.Buffer.UndoHistory.RejectSelection
   alias Minga.Buffer.UndoHistory.Restore
   alias Minga.Buffer.UndoPatch
+  alias Minga.Git.ReviewIdentity
 
   require Author
   import EditSource, only: [is_undo_source: 1]
@@ -116,22 +118,35 @@ defmodule Minga.Buffer.UndoHistory do
   @typedoc "All pending groups that must accept the same review decision."
   @opaque review_unit :: nonempty_list(Provenance.group_id())
 
+  @typedoc "A spatially contiguous part of one pending review unit, keyed by its oldest member."
+  @type review_region :: {Provenance.group_id(), non_neg_integer(), non_neg_integer()}
+
   @typedoc "A prepared set of review units, valid only in the history revision that offered it."
-  @opaque review_target :: {Entry.tick(), task(), nonempty_list(review_unit())}
+  @opaque review_target :: {Entry.tick(), nonempty_list(task_review_unit())}
 
   @typedoc "An unapplied whole review unit, separate from the user's redo stack."
   @opaque rejected_unit :: {:rejected, rejection_id()}
 
-  @type review_selection :: :latest | {:task, task()} | {:step, minga_group()}
+  @type review_selection ::
+          :latest
+          | {:task, task()}
+          | {:step, minga_group()}
+          | {:at_byte, non_neg_integer()}
+          | {:at_byte, non_neg_integer(), pos_integer()}
+          | {:byte_range, non_neg_integer(), non_neg_integer()}
+  @type review_scope :: task() | :multiple_tasks
+  @typep task_review_unit :: {task(), review_unit()}
   @type review_error :: UndoPatch.apply_error() | :stale_review | :inconsistent_review
   @typep rejection_id :: {<<_::128>>, Entry.tick(), Provenance.group_id()}
   @typep parked_unit :: {task(), review_unit(), Provenance.restore_proof()}
   @typep rejected_units :: %{rejection_id() => parked_unit()}
   @type saved_checkpoint :: {<<_::256>>, binary()}
+  @type saved_observation :: :unproven | {ReviewIdentity.t(), binary()}
   @typep saved_origins :: %{Provenance.group_id() => MapSet.t(Provenance.group_id())}
 
   @typep pending_groups :: %{Provenance.group_id() => minga_group()}
-  @typep groups_by_step :: %{minga_group() => [Provenance.group_id()]}
+  @typep groups_by_step :: %{minga_group() => MapSet.t(Provenance.group_id())}
+  @typep groups_by_task :: %{task() => MapSet.t(Provenance.group_id())}
 
   # The newest stretch of history made only by one task's steps.
   # It keeps the version and tick before it, the tick after it, and whether the task had no steps when it began.
@@ -154,11 +169,14 @@ defmodule Minga.Buffer.UndoHistory do
             undo_entries: [],
             undo_size: 0,
             redo_entries: [],
-            minga: [],
+            pending_groups: %{},
+            groups_by_step: %{},
+            groups_by_task: %{},
             rejected: %{},
             review_seen: false,
             saved_ceiling: 1,
             saved_origins: %{},
+            kept_review: nil,
             untasked: nil,
             untasked_size: 0,
             steps: %{},
@@ -184,11 +202,14 @@ defmodule Minga.Buffer.UndoHistory do
             undo_entries: [Entry.t()],
             undo_size: non_neg_integer(),
             redo_entries: [Entry.t()],
-            minga: [{Provenance.group_id(), Author.key()}],
+            pending_groups: pending_groups(),
+            groups_by_step: groups_by_step(),
+            groups_by_task: groups_by_task(),
             rejected: rejected_units(),
             review_seen: boolean(),
             saved_ceiling: pos_integer(),
             saved_origins: saved_origins(),
+            kept_review: Ledger.t(),
             untasked: :queue.queue(Provenance.group_id()),
             untasked_size: non_neg_integer(),
             steps: %{Author.key() => Provenance.group_id()},
@@ -217,11 +238,18 @@ defmodule Minga.Buffer.UndoHistory do
 
   * `:run_budget` - how many runs, tombstones included, the history keeps before `compaction_wanted?/1` asks for draft compaction (default #{@run_budget}). See `compact_slice/2`.
   * `:recording` - `:precise` (the default) records each edit as its smallest changes. `:coarse` records each patch as one change, as a fallback would; tests use it to prove that a revert stays exact or is refused whatever the recording granularity.
+  * `:origin_scope` - the buffer incarnation for new authored edit origins. Restored origins keep their original scope.
   """
-  @spec new(Document.t(), [{:recording, recording()} | {:run_budget, pos_integer()}]) :: t()
+  @spec new(Document.t(), [
+          {:recording, recording()}
+          | {:run_budget, pos_integer()}
+          | {:origin_scope, non_neg_integer()}
+        ]) :: t()
   def new(%Document{} = document \\ Document.new(""), opts \\ []) when is_list(opts) do
     %__MODULE__{
-      provenance: Provenance.new(Document.content_byte_size(document)),
+      provenance:
+        Provenance.new(Document.content_byte_size(document), Keyword.get(opts, :origin_scope, 0)),
+      kept_review: Ledger.new(),
       untasked: :queue.new(),
       recording: Keyword.get(opts, :recording, :precise),
       run_budget: Keyword.get(opts, :run_budget, @run_budget)
@@ -232,7 +260,8 @@ defmodule Minga.Buffer.UndoHistory do
   @spec reset(t(), Document.t()) :: t()
   def reset(%__MODULE__{} = history, %Document{} = document) do
     reset = new(document, recording: history.recording, run_budget: history.run_budget)
-    %{reset | next_tick: history.next_tick + 1}
+    provenance = Provenance.inherit_origin_scope(reset.provenance, history.provenance)
+    %{reset | provenance: provenance, next_tick: history.next_tick + 1}
   end
 
   @doc "Returns the coalescing window in milliseconds."
@@ -281,13 +310,15 @@ defmodule Minga.Buffer.UndoHistory do
   @doc "Starts the saved namespace and captures the review checkpoint for the exact saved bytes."
   @spec checkpoint(t(), binary()) :: {t(), saved_checkpoint()}
   def checkpoint(%__MODULE__{} = history, content) when is_binary(content) do
+    digest = :crypto.hash(:sha256, content)
+
     history = %{
       history
       | saved_ceiling: Provenance.group_ceiling(history.provenance),
-        saved_origins: %{}
+        saved_origins: %{},
+        kept_review: Ledger.save(history.kept_review, digest, content, history.provenance)
     }
 
-    digest = :crypto.hash(:sha256, content)
     {history, {digest, encode_snapshot(history, digest, byte_size(content))}}
   end
 
@@ -310,7 +341,7 @@ defmodule Minga.Buffer.UndoHistory do
       digest,
       size,
       %{
-        pending: Enum.map(history.minga, &elem(&1, 0)),
+        pending: saved_task_groups(history.pending_groups),
         untasked: :queue.to_list(history.untasked),
         rejected: history.rejected,
         merges: encode_review_index(history.merges),
@@ -322,9 +353,20 @@ defmodule Minga.Buffer.UndoHistory do
         saved_ceiling: history.saved_ceiling,
         saved_origins:
           Map.new(history.saved_origins, fn {id, origins} -> {id, MapSet.to_list(origins)} end),
+        kept_review: Ledger.snapshot(history.kept_review),
         provenance: Provenance.snapshot(provenance)
       }
     })
+  end
+
+  @spec saved_task_groups(pending_groups()) :: [Provenance.group_id()]
+  defp saved_task_groups(pending) do
+    pending
+    |> Enum.reduce([], fn
+      {_id, {:untasked, _sequence}}, groups -> groups
+      {id, _key}, groups -> [id | groups]
+    end)
+    |> Enum.sort(:desc)
   end
 
   @spec encode_review_index(%{Provenance.group_id() => MapSet.t(value)}) ::
@@ -341,8 +383,14 @@ defmodule Minga.Buffer.UndoHistory do
     size = byte_size(content)
 
     case decode_snapshot(snapshot) do
-      {:ok, ^digest, ^size, saved} -> restore_review_snapshot(history, saved, size)
-      _no_match -> {:error, :invalid_history}
+      {:ok, ^digest, ^size, saved} ->
+        with {:ok, restored} <- restore_review_snapshot(history, saved, size) do
+          provenance = Provenance.inherit_origin_scope(restored.provenance, history.provenance)
+          {:ok, %{restored | provenance: provenance}}
+        end
+
+      _no_match ->
+        {:error, :invalid_history}
     end
   end
 
@@ -384,7 +432,7 @@ defmodule Minga.Buffer.UndoHistory do
            saved_ceiling: ceiling,
            saved_origins: origins,
            provenance: saved_provenance
-         },
+         } = snapshot,
          size
        )
        when is_list(pending) and is_list(untasked) and is_map(rejected) and is_map(merges) and
@@ -397,30 +445,33 @@ defmodule Minga.Buffer.UndoHistory do
          {:ok, merges} <- restore_review_links(merges, members),
          {:ok, absorbed} <- restore_absorbed_steps(absorbed, members, provenance),
          :ok <- validate_parked_steps(rejected, provenance, {merges, absorbed}),
-         {:ok, origins} <- restore_saved_origins(ceiling, origins, members, provenance) do
+         {:ok, origins} <- restore_saved_origins(ceiling, origins, members, provenance),
+         {:ok, kept_review} <- Ledger.restore(Map.get(snapshot, :kept_review)) do
       next_tick = max(history.next_tick, revision) + 1
 
-      {:ok,
-       %__MODULE__{
-         provenance: provenance,
-         minga: steps,
-         rejected: rejected,
-         merges: merges,
-         absorbed_steps: absorbed,
-         review_seen: true,
-         saved_ceiling: ceiling,
-         saved_origins: origins,
-         steps: steps |> Enum.reverse() |> Map.new(fn {id, key} -> {key, id} end),
-         untasked: :queue.from_list(untasked),
-         untasked_size: length(untasked),
-         next_untasked: next_untasked,
-         task_started: starts,
-         task_ticks: ticks,
-         tick: next_tick - 1,
-         next_tick: next_tick,
-         run_budget: history.run_budget,
-         recording: history.recording
-       }}
+      restored = %__MODULE__{
+        provenance: provenance,
+        rejected: rejected,
+        merges: merges,
+        absorbed_steps: absorbed,
+        review_seen: true,
+        saved_ceiling: ceiling,
+        saved_origins: origins,
+        kept_review: kept_review,
+        steps: steps |> Enum.reverse() |> Map.new(fn {id, key} -> {key, id} end),
+        untasked: :queue.from_list(untasked),
+        untasked_size: length(untasked),
+        next_untasked: next_untasked,
+        task_started: starts,
+        task_ticks: ticks,
+        tick: next_tick - 1,
+        next_tick: next_tick,
+        run_budget: history.run_budget,
+        recording: history.recording
+      }
+
+      restored = Enum.reduce(steps, restored, fn {id, key}, acc -> add_pending(acc, id, key) end)
+      {:ok, add_pending_groups(restored, untasked)}
     else
       {:error, _reason} -> {:error, :invalid_history}
     end
@@ -711,6 +762,37 @@ defmodule Minga.Buffer.UndoHistory do
   @spec provenance(t()) :: Provenance.t()
   def provenance(%__MODULE__{provenance: provenance}), do: provenance
 
+  @doc "Whether an ordinary user's edit left all distant authored ranges and unit identities intact."
+  @spec local_user_review_edit?(t(), t()) :: boolean()
+  def local_user_review_edit?(
+        %__MODULE__{
+          redo_entries: [],
+          pending_groups: units,
+          merges: merges,
+          absorbed_steps: absorbed,
+          undo_size: prior
+        } = before,
+        %__MODULE__{
+          pending_groups: units,
+          merges: merges,
+          absorbed_steps: absorbed,
+          undo_size: current
+        } = after_edit
+      ) do
+    current == prior + 1 or (current == prior and same_newest_user_group?(before, after_edit))
+  end
+
+  def local_user_review_edit?(_before, _after_edit), do: false
+
+  @spec same_newest_user_group?(t(), t()) :: boolean()
+  defp same_newest_user_group?(
+         %__MODULE__{undo_entries: [%Entry{group: group} | _]},
+         %__MODULE__{undo_entries: [%Entry{group: group} | _]}
+       ),
+       do: true
+
+  defp same_newest_user_group?(_before, _after_edit), do: false
+
   @doc """
   Records an edit's patch, or the patches of one edit in undo order, at monotonic time `at`.
 
@@ -927,7 +1009,7 @@ defmodule Minga.Buffer.UndoHistory do
     if Provenance.group?(provenance, old) do
       %{history | provenance: provenance}
     else
-      {_old, key} = List.keyfind(history.minga, old, 0)
+      key = Map.fetch!(history.pending_groups, old)
 
       steps =
         case history.steps do
@@ -938,15 +1020,17 @@ defmodule Minga.Buffer.UndoHistory do
       new_key = Provenance.group_key(provenance, new)
       absorbed = transfer_review_keys(history.absorbed_steps, old, new, key, new_key)
 
+      history = history |> remove_pending(old) |> remove_pending(new)
+
       %{
         history
         | provenance: provenance,
-          minga: List.keydelete(history.minga, old, 0),
           steps: steps,
           absorbed_steps: absorbed,
           saved_origins: absorb_saved_origin(history, old, new),
           step_ticks: Map.delete(history.step_ticks, old)
       }
+      |> add_pending(new, new_key)
     end
   end
 
@@ -1249,41 +1333,43 @@ defmodule Minga.Buffer.UndoHistory do
   # Takes reverted groups out of Minga's steps, the untasked queue, and your undo stack.
   @spec forget_groups(t(), [Provenance.group_id()]) :: t()
   defp forget_groups(history, groups) do
+    {keys, remaining} =
+      Enum.reduce(groups, {MapSet.new(), history}, fn group, {keys, remaining} ->
+        case Map.fetch(remaining.pending_groups, group) do
+          {:ok, key} -> {MapSet.put(keys, key), remove_pending(remaining, group)}
+          :error -> {keys, remaining}
+        end
+      end)
+
     gone = MapSet.new(groups)
 
-    {minga_gone, minga} =
-      Enum.split_with(history.minga, fn {group, _key} -> MapSet.member?(gone, group) end)
-
-    remaining_keys = MapSet.new(minga, &elem(&1, 1))
-
     steps =
-      Map.filter(history.steps, fn {key, group} ->
-        not MapSet.member?(gone, group) or MapSet.member?(remaining_keys, key)
+      Enum.reduce(keys, history.steps, fn key, steps ->
+        if MapSet.member?(gone, Map.get(steps, key)) and
+             not pending_primary_step?(remaining, key) do
+          Map.delete(steps, key)
+        else
+          steps
+        end
       end)
 
     untasked = :queue.filter(&(not MapSet.member?(gone, &1)), history.untasked)
     entries = Enum.reject(history.undo_entries, &MapSet.member?(gone, &1.group))
-    live_tasks = MapSet.new(minga, fn {_group, key} -> Author.author(key) end)
 
-    live_tasks =
-      if :queue.is_empty(untasked),
-        do: live_tasks,
-        else: MapSet.put(live_tasks, {:minga, :untasked})
-
-    touched = for {_group, key} <- minga_gone, do: Author.author(key)
+    finished =
+      keys
+      |> Enum.map(&task_of/1)
+      |> Enum.reject(&has_steps?(remaining, &1))
 
     %{
-      history
-      | minga: minga,
-        steps: steps,
+      remaining
+      | steps: steps,
         untasked: untasked,
         untasked_size: :queue.len(untasked),
         undo_entries: entries,
         undo_size: length(entries),
-        task_ticks:
-          Map.filter(history.task_ticks, fn {task, _tick} -> MapSet.member?(live_tasks, task) end),
-        task_started:
-          Map.drop(history.task_started, Enum.reject(touched, &MapSet.member?(live_tasks, &1))),
+        task_ticks: Map.drop(history.task_ticks, finished),
+        task_started: Map.drop(history.task_started, finished),
         step_ticks: Map.drop(history.step_ticks, groups)
     }
   end
@@ -1349,11 +1435,12 @@ defmodule Minga.Buffer.UndoHistory do
     {:advance, tick, history}
   end
 
-  # The task's remaining groups: its steps' groups, or the untasked queue.
   @spec task_groups(t(), task()) :: [Provenance.group_id()]
   defp task_groups(history, task) do
-    {steps, _rest} = take_task(history, task)
-    Enum.map(steps, &elem(&1, 0))
+    case Map.fetch(history.groups_by_task, task) do
+      {:ok, groups} -> Enum.sort(groups, :desc)
+      :error -> []
+    end
   end
 
   @spec task_of_group(t(), Provenance.group_id()) :: task() | nil
@@ -1394,8 +1481,8 @@ defmodule Minga.Buffer.UndoHistory do
   def minga_changes(%__MODULE__{} = history, task_id) when is_binary(task_id) do
     # A step can hold several groups when other edits came between its own; it still reads as one step.
     steps =
-      for {group, {:minga, ^task_id, _step} = key} <- Enum.reverse(history.minga),
-          do: {key, group}
+      for group <- Enum.reverse(task_groups(history, {:minga, task_id})),
+          do: {Map.fetch!(history.pending_groups, group), group}
 
     keys = steps |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
     by_key = Enum.group_by(steps, &elem(&1, 0), &elem(&1, 1))
@@ -1414,19 +1501,253 @@ defmodule Minga.Buffer.UndoHistory do
   @doc "Returns the indivisible pending review units for a task, newest first."
   @spec review_units(t(), task()) :: [review_unit()]
   def review_units(%__MODULE__{} = history, task) do
-    steps = pending_review_steps(history, task)
-    pending = Map.new(steps)
-    by_key = Enum.reduce(steps, %{}, &index_review_keys(&1, &2, history.absorbed_steps))
+    review_units_starting(task_groups(history, task), history)
+  end
 
+  @spec review_units_starting(Enumerable.t(), t()) :: [review_unit()]
+  defp review_units_starting(groups, history) do
     {units, _pending, _by_key} =
-      Enum.reduce(steps, {[], pending, by_key}, fn {group, _key}, acc ->
-        add_review_unit(acc, group, {history.merges, history.absorbed_steps})
-      end)
+      Enum.reduce(
+        groups,
+        {[], history.pending_groups, history.groups_by_step},
+        fn group, acc -> add_review_unit(acc, group, {history.merges, history.absorbed_steps}) end
+      )
 
     Enum.reverse(units)
   end
 
-  @doc "Prepares all pending units of a task, or the whole unit containing a named step."
+  @doc "Identifies the current review facts for this buffer history, including metadata-only decisions."
+  @spec review_revision(t()) :: pos_integer()
+  def review_revision(%__MODULE__{next_tick: tick}), do: tick
+
+  @doc """
+  Returns pending review regions intersecting the requested bytes in file order.
+
+  Adjacent live sites join only when they share one whole-unit identity. Direct deletion gaps remain separate from live text. Resolve a unit once across all ranges, without scanning omitted bytes for unrelated regions.
+  """
+  @spec review_regions(t(), [{non_neg_integer(), non_neg_integer(), boolean()}]) ::
+          [review_region()]
+  def review_regions(%__MODULE__{} = history, ranges) do
+    {regions, _members} = review_regions(history, ranges, %{})
+    regions
+  end
+
+  @doc "Queries regions while reusing unit membership within a traversal of this history value."
+  @spec review_regions(
+          t(),
+          [{non_neg_integer(), non_neg_integer(), boolean()}],
+          %{Provenance.group_id() => Provenance.group_id()}
+        ) :: {[review_region()], %{Provenance.group_id() => Provenance.group_id()}}
+  def review_regions(%__MODULE__{} = history, ranges, members) do
+    history.provenance
+    |> sites_in_ranges(ranges)
+    |> build_review_regions(history, ranges, members)
+  end
+
+  @spec build_review_regions(
+          [Provenance.review_site()],
+          t(),
+          [{non_neg_integer(), non_neg_integer(), boolean()}],
+          %{Provenance.group_id() => Provenance.group_id()}
+        ) :: {[review_region()], %{Provenance.group_id() => Provenance.group_id()}}
+  defp build_review_regions([], _history, _ranges, members), do: {[], members}
+
+  defp build_review_regions(sites, history, ranges, members) do
+    members =
+      sites
+      |> Stream.map(&elem(&1, 0))
+      |> Stream.reject(&is_map_key(members, &1))
+      |> review_units_starting(history)
+      |> Enum.reduce(members, fn [unit | _] = groups, by_group ->
+        Enum.reduce(groups, by_group, &Map.put(&2, &1, unit))
+      end)
+
+    {text, gaps} =
+      Enum.reduce(sites, {%{}, MapSet.new()}, fn {group, from, to}, {text, gaps} = acc ->
+        case Map.fetch(members, group) do
+          {:ok, unit} when from == to ->
+            {text, MapSet.put(gaps, {unit, from, to})}
+
+          {:ok, unit} ->
+            {Map.update(text, unit, [{from, to}], &join_review_region(&1, from, to)), gaps}
+
+          :error ->
+            acc
+        end
+      end)
+
+    regions =
+      if match?([{0, _stop, true}], ranges) do
+        for {unit, intervals} <- text, {from, to} <- intervals, do: {unit, from, to}
+      else
+        Enum.flat_map(text, fn {unit, intervals} ->
+          extend_review_regions(intervals, history.provenance, members, unit)
+        end)
+      end
+
+    regions =
+      Enum.sort_by(Enum.to_list(gaps) ++ regions, fn {unit, from, to} -> {from, to, unit} end)
+
+    {regions, members}
+  end
+
+  @doc """
+  Finds the next or previous distinct review head, stopping at the last reachable head.
+
+  Navigation follows local regions, not whole units. It skips later pieces of one
+  contiguous region without skipping deletion anchors inside that region.
+  """
+  @spec review_motion(t(), non_neg_integer(), :next | :previous, pos_integer()) ::
+          non_neg_integer() | nil
+  def review_motion(%__MODULE__{} = history, offset, direction, count) do
+    sites = Provenance.review_sites_from(history.provenance, offset, direction)
+
+    {_remaining, destination} =
+      history
+      |> motion_heads(sites, direction)
+      |> Enum.reduce_while({count, nil}, fn head, {left, destination} ->
+        origin = destination || offset
+
+        cond do
+          direction == :next and head <= origin -> {:cont, {left, destination}}
+          direction == :previous and head >= origin -> {:cont, {left, destination}}
+          left == 1 -> {:halt, {0, head}}
+          true -> {:cont, {left - 1, head}}
+        end
+      end)
+
+    destination
+  end
+
+  @spec motion_heads(t(), Enumerable.t(), :next | :previous) :: Enumerable.t()
+  defp motion_heads(history, sites, :next) do
+    Stream.transform(sites, nil, fn
+      {_group, point, point}, region ->
+        {[point], region}
+
+      {_group, from, to}, {start, stop} = region when from >= start and to <= stop ->
+        {[], region}
+
+      site, _region ->
+        case motion_region(history, site) do
+          {head, _tail} = region -> {[head], region}
+          nil -> {[], nil}
+        end
+    end)
+  end
+
+  defp motion_heads(history, sites, :previous) do
+    sites
+    |> Stream.concat([:end_of_sites])
+    |> Stream.transform(nil, &previous_motion_heads(history, &1, &2))
+  end
+
+  @spec previous_motion_heads(
+          t(),
+          Provenance.review_site() | :end_of_sites,
+          Provenance.byte_range() | nil
+        ) ::
+          {[non_neg_integer()], Provenance.byte_range() | nil}
+  defp previous_motion_heads(_history, :end_of_sites, nil), do: {[], nil}
+  defp previous_motion_heads(_history, :end_of_sites, {head, _tail}), do: {[head], nil}
+
+  defp previous_motion_heads(history, {_group, from, _to} = site, {head, _tail})
+       when from < head do
+    {heads, next} = previous_motion_heads(history, site, nil)
+    {[head | heads], next}
+  end
+
+  defp previous_motion_heads(_history, {_group, point, point}, region), do: {[point], region}
+
+  defp previous_motion_heads(_history, {_group, _from, _to}, {_head, _tail} = region),
+    do: {[], region}
+
+  defp previous_motion_heads(history, site, nil), do: {[], motion_region(history, site)}
+
+  @spec motion_region(t(), Provenance.review_site()) :: Provenance.byte_range() | nil
+  defp motion_region(history, {group, from, to}) do
+    case review_units_starting([group], history) do
+      [[unit | _] = groups] ->
+        members = Map.new(groups, &{&1, unit})
+        head = extend_review_edge(history.provenance, members, unit, from, :left)
+        tail = extend_review_edge(history.provenance, members, unit, to, :right)
+        {head, tail}
+
+      [] ->
+        nil
+    end
+  end
+
+  @spec sites_in_ranges(Provenance.t(), [{non_neg_integer(), non_neg_integer(), boolean()}]) ::
+          [Provenance.review_site()]
+  defp sites_in_ranges(provenance, [{first, stop, include_eof?}]),
+    do: Provenance.review_sites(provenance, first, stop, include_eof?)
+
+  defp sites_in_ranges(provenance, ranges) do
+    ranges
+    |> Enum.flat_map(fn {first, stop, include_eof?} ->
+      Provenance.review_sites(provenance, first, stop, include_eof?)
+    end)
+    |> Enum.sort_by(fn {_group, from, to} -> {from, to} end)
+  end
+
+  @spec extend_review_regions(
+          [Provenance.byte_range()],
+          Provenance.t(),
+          %{Provenance.group_id() => Provenance.group_id()},
+          Provenance.group_id()
+        ) :: [review_region()]
+  defp extend_review_regions(ranges, provenance, members, unit) do
+    Enum.reduce(ranges, [], fn
+      {_from, to}, [{^unit, head, _end} | _] = regions when to > head ->
+        regions
+
+      {from, to}, regions ->
+        head = extend_review_edge(provenance, members, unit, from, :left)
+        tail = extend_review_edge(provenance, members, unit, to, :right)
+        [{unit, head, tail} | regions]
+    end)
+  end
+
+  @spec extend_review_edge(
+          Provenance.t(),
+          %{Provenance.group_id() => Provenance.group_id()},
+          Provenance.group_id(),
+          non_neg_integer(),
+          :left | :right
+        ) :: non_neg_integer()
+  defp extend_review_edge(_prov, _members, _unit, 0, :left), do: 0
+
+  defp extend_review_edge(prov, members, unit, edge, direction) do
+    offset = if direction == :left, do: edge - 1, else: edge
+
+    case Provenance.live_review_run_at(prov, offset) do
+      {group, first, last} when :erlang.map_get(group, members) == unit ->
+        next = if direction == :left, do: first, else: last
+        extend_review_edge(prov, members, unit, next, direction)
+
+      _other ->
+        edge
+    end
+  end
+
+  @spec join_review_region(
+          [Provenance.byte_range()],
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [Provenance.byte_range()]
+  defp join_review_region([{head, stop} | rest], from, to) when from <= stop,
+    do: [{head, max(stop, to)} | rest]
+
+  defp join_review_region(ranges, from, to), do: [{from, to} | ranges]
+
+  @doc "Checks pending membership at a byte without expanding the unit or ranking its regions."
+  @spec pending_at?(t(), non_neg_integer()) :: boolean()
+  def pending_at?(%__MODULE__{} = history, offset) do
+    is_map_key(history.pending_groups, Provenance.review_group_at(history.provenance, offset))
+  end
+
+  @doc "Prepares whole pending units selected by task, step, current byte, or half-open byte range."
   @spec prepare_review(t(), review_selection()) :: {:ok, review_target()} | :empty
   def prepare_review(%__MODULE__{} = history, :latest) do
     case next_reject(history) do
@@ -1436,95 +1757,319 @@ defmodule Minga.Buffer.UndoHistory do
   end
 
   def prepare_review(%__MODULE__{} = history, {:task, task}) do
-    review_target(history, task, review_units(history, task))
+    target = Enum.map(review_units(history, task), &{task, &1})
+    review_target(history, target)
   end
 
   def prepare_review(%__MODULE__{} = history, {:step, step}) do
-    task = task_of(step)
-
-    unit =
-      history
-      |> review_units(task)
-      |> Enum.find(fn groups ->
-        Enum.any?(groups, &review_step?(history, &1, step))
-      end)
-
-    case unit do
-      nil -> :empty
-      members -> review_target(history, task, [members])
+    case Map.fetch(history.groups_by_step, step) do
+      {:ok, groups} -> prepare_review_group(history, Enum.max(groups))
+      :error -> :empty
     end
   end
 
-  @spec review_step?(t(), Provenance.group_id(), minga_group()) :: boolean()
-  defp review_step?(history, group, step) do
-    Provenance.group_key(history.provenance, group) == step or
-      Enum.member?(Map.get(history.absorbed_steps, group, []), step)
+  def prepare_review(%__MODULE__{} = history, {:at_byte, offset})
+      when is_integer(offset) and offset >= 0 do
+    case Provenance.review_group_at(history.provenance, offset) do
+      nil -> :empty
+      group -> prepare_review_group(history, group)
+    end
   end
 
-  @doc "Returns the exact task and unit count a confirmation is authorized to describe."
-  @spec review_summary(review_target()) :: {task(), pos_integer()}
-  def review_summary({_revision, task, units}), do: {task, length(units)}
+  def prepare_review(%__MODULE__{} = history, {:at_byte, offset, 1}),
+    do: prepare_review(history, {:at_byte, offset})
+
+  def prepare_review(%__MODULE__{} = history, {:at_byte, offset, count}) when count > 1 do
+    case Provenance.review_group_at(history.provenance, offset) do
+      nil ->
+        :empty
+
+      current ->
+        following =
+          history.provenance
+          |> Provenance.review_sites_from(offset, :next)
+          |> Stream.map(&elem(&1, 0))
+
+        merges = {history.merges, history.absorbed_steps}
+        initial = {history.pending_groups, history.groups_by_step}
+
+        units =
+          [current]
+          |> Stream.concat(following)
+          |> Stream.transform(initial, fn group, {pending, keys} ->
+            {units, pending, keys} = add_review_unit({[], pending, keys}, group, merges)
+            {units, {pending, keys}}
+          end)
+          |> Enum.take(count)
+          |> Enum.map(&{review_group_task(history, hd(&1)), &1})
+
+        review_target(history, units)
+    end
+  end
+
+  def prepare_review(%__MODULE__{} = history, {:byte_range, first, stop}),
+    do: prepare_review_range(history, first, stop, true)
+
+  @doc "Prepares whole units touching a byte range, optionally including its EOF gap."
+  @spec prepare_review_range(t(), non_neg_integer(), non_neg_integer(), boolean()) ::
+          {:ok, review_target()} | :empty
+  def prepare_review_range(%__MODULE__{} = history, first, stop, include_eof?)
+      when is_integer(first) and is_integer(stop) and first >= 0 and stop >= first do
+    units =
+      history.provenance
+      |> Provenance.review_sites(first, stop, include_eof?)
+      |> Stream.map(&elem(&1, 0))
+      |> review_units_starting(history)
+      |> Enum.map(&{review_group_task(history, hd(&1)), &1})
+
+    review_target(history, units)
+  end
+
+  @doc "Checks whether two pending unit representatives belong to the same task."
+  @spec same_review_task?(t(), Provenance.group_id(), Provenance.group_id()) :: boolean()
+  def same_review_task?(history, left, right),
+    do: review_group_task(history, left) == review_group_task(history, right)
+
+  @doc "Prepares exact whole units represented by the selected ribbons, independent of their display bounds."
+  @spec prepare_review_units(t(), [Provenance.group_id()]) :: {:ok, review_target()} | :empty
+  def prepare_review_units(history, representatives) do
+    units =
+      representatives
+      |> review_units_starting(history)
+      |> Enum.map(&{review_group_task(history, hd(&1)), &1})
+
+    review_target(history, units)
+  end
+
+  @doc "Returns the whole-unit representative selected by the exact-byte review lookup."
+  @spec review_unit_at(t(), non_neg_integer()) :: Provenance.group_id() | nil
+  def review_unit_at(history, point) do
+    with group when is_integer(group) <- Provenance.review_group_at(history.provenance, point),
+         [[unit | _]] <- review_units_starting([group], history) do
+      unit
+    else
+      _ -> nil
+    end
+  end
+
+  @spec review_group_task(t(), Provenance.group_id()) :: task()
+  defp review_group_task(history, group), do: task_of(Map.fetch!(history.pending_groups, group))
+
+  @spec prepare_review_group(t(), Provenance.group_id()) :: {:ok, review_target()}
+  defp prepare_review_group(history, group) do
+    {[_ | _] = members, _pending, _by_step} =
+      collect_review_unit(
+        [group],
+        history.pending_groups,
+        history.groups_by_step,
+        {history.merges, history.absorbed_steps},
+        []
+      )
+
+    {:ok, {history.next_tick, [{review_group_task(history, group), members}]}}
+  end
+
+  @doc "Returns the scope and exact unit count an offered decision is authorized to describe."
+  @spec review_summary(review_target()) :: {review_scope(), pos_integer()}
+  def review_summary({_revision, [{task, _unit} | rest]}) do
+    Enum.reduce(rest, {task, 1}, fn {unit_task, _unit}, {scope, count} ->
+      {if(unit_task == scope, do: scope, else: :multiple_tasks), count + 1}
+    end)
+  end
+
+  @doc "Reports the source footprint of the prepared Keep before history retirement."
+  @spec keep_sites(t(), review_target()) :: [Provenance.byte_range()]
+  def keep_sites(%__MODULE__{next_tick: revision} = history, {revision, units}) do
+    Provenance.keep_sites(history.provenance, Enum.flat_map(units, &elem(&1, 1)))
+  end
+
+  def keep_sites(%__MODULE__{}, _stale_target), do: []
+
+  @doc "Captures the exact source footprints and preimages of a prepared Keep before finalization."
+  @spec keep_sources(t(), review_target()) ::
+          {:ok, [Provenance.keep_source()]} | {:error, :stale_review}
+  def keep_sources(%__MODULE__{next_tick: revision} = history, {revision, units}),
+    do: {:ok, Provenance.keep_sources(history.provenance, Enum.flat_map(units, &elem(&1, 1)))}
+
+  def keep_sources(%__MODULE__{}, _stale_target), do: {:error, :stale_review}
+
+  @doc "Retires proved kept sources without changing the undo tick or the saved version."
+  @spec retire_kept(t(), [Provenance.keep_interval()]) :: {t(), [Provenance.byte_range()]}
+  def retire_kept(%__MODULE__{} = history, intervals) do
+    {provenance, sites} = Provenance.retire_kept(history.provenance, intervals)
+
+    if provenance === history.provenance,
+      do: {history, []},
+      else: {invalidate_review(%{history | provenance: provenance}), sites}
+  end
 
   @doc "Finalizes prepared pending units without changing the document or creating a user undo."
   @spec keep_review(t(), review_target()) :: {:ok, t()} | {:error, :stale_review}
-  def keep_review(%__MODULE__{next_tick: revision} = history, {revision, _task, units}) do
-    {:ok, finalize_review(history, Enum.concat(units))}
+  def keep_review(%__MODULE__{next_tick: revision} = history, {revision, units}) do
+    {:ok, finalize_review(history, Enum.flat_map(units, &elem(&1, 1)))}
   end
 
   def keep_review(%__MODULE__{}, _target), do: {:error, :stale_review}
 
-  @doc "Finalizes the same saved units without replacing the recorded disk bytes."
-  @spec keep_in_checkpoint(t(), review_target(), saved_checkpoint()) ::
-          {:ok, saved_checkpoint()} | {:error, :stale_review | :invalid_history}
-  def keep_in_checkpoint(
-        %__MODULE__{next_tick: revision} = history,
-        {revision, task, units},
-        {digest, snapshot} = checkpoint
-      ) do
-    ids =
-      units
-      |> Stream.concat()
-      |> Enum.reduce(MapSet.new(), fn id, acc ->
-        acc = include_saved_id(acc, id, history.saved_ceiling)
-
-        case Map.fetch(history.saved_origins, id) do
-          {:ok, origins} -> MapSet.union(acc, origins)
-          :error -> acc
-        end
-      end)
-
-    if MapSet.size(ids) == 0 do
-      {:ok, checkpoint}
-    else
-      with {:ok, ^digest, size, saved} <- decode_snapshot(snapshot),
-           {:ok, baseline} <- restore_review_snapshot(history, saved, size) do
-        kept = keep_saved_units(baseline, task, ids)
-        {:ok, {digest, encode_snapshot(kept, digest, size)}}
-      else
-        _invalid -> {:error, :invalid_history}
-      end
+  @doc "Keeps a prepared target and records exact source under a freshly observed Git reference."
+  @spec keep_review(t(), review_target(), binary(), ReviewIdentity.t()) ::
+          {:ok, t()} | {:error, :stale_review}
+  def keep_review(%__MODULE__{} = history, target, content, baseline) do
+    with {:ok, fragments} <- keep_sources(history, target),
+         {:ok, kept} <- keep_review(history, target) do
+      sources = Source.project(fragments, content)
+      {:ok, %{kept | kept_review: Ledger.observe(kept.kept_review, baseline, sources)}}
     end
   end
 
-  def keep_in_checkpoint(%__MODULE__{}, _target, _checkpoint), do: {:error, :stale_review}
+  @doc "Returns the durable evidence for an off-mailbox proof request."
+  @spec kept_review(t()) :: Ledger.t()
+  def kept_review(%__MODULE__{kept_review: ledger}), do: ledger
 
-  @spec keep_saved_units(t(), task(), MapSet.t(Provenance.group_id())) :: t()
-  defp keep_saved_units(history, task, ids) do
+  @doc "Binds saved evidence for buffers whose recovery swap is disabled."
+  @spec bind_kept_after_save(t(), binary()) :: t()
+  def bind_kept_after_save(%__MODULE__{} = history, content) do
+    digest = :crypto.hash(:sha256, content)
+    ledger = Ledger.save(history.kept_review, digest, content, history.provenance)
+    %{history | kept_review: ledger}
+  end
+
+  @doc "Drops resolved witnesses that no current or saved kept source can still use."
+  @spec prune_kept(t(), Provenance.kept_placements()) :: t()
+  def prune_kept(%__MODULE__{} = history, saved_placements) do
+    live_placements = Provenance.kept_placements(history.provenance)
+    ledger = Ledger.prune(history.kept_review, [live_placements, saved_placements])
+    %{history | kept_review: ledger}
+  end
+
+  @doc "Retires proved marks in the saved generation without changing its recorded text."
+  @spec retire_kept_checkpoint(t(), saved_checkpoint() | nil, [Provenance.keep_interval()]) ::
+          {:ok, saved_checkpoint() | nil, Provenance.kept_placements()}
+          | {:error, :invalid_history}
+  def retire_kept_checkpoint(_history, nil, _intervals), do: {:ok, nil, %{}}
+
+  def retire_kept_checkpoint(history, {digest, snapshot} = checkpoint, intervals) do
+    with {:ok, ^digest, size, saved} <- decode_snapshot(snapshot),
+         {:ok, baseline} <- restore_review_snapshot(history, saved, size) do
+      {retired, _sites} = retire_kept(baseline, intervals)
+      placements = Provenance.kept_placements(retired.provenance)
+      ledger = Ledger.prune(retired.kept_review, [placements])
+      retired = %{retired | kept_review: ledger}
+
+      checkpoint =
+        if retired === baseline,
+          do: checkpoint,
+          else: {digest, encode_snapshot(retired, digest, size)}
+
+      {:ok, checkpoint, placements}
+    else
+      _invalid -> {:error, :invalid_history}
+    end
+  end
+
+  @doc "Binds the exact saved projection in live history as part of the same decision."
+  @spec bind_saved_keep(t(), Ledger.t() | nil) :: t()
+  def bind_saved_keep(%__MODULE__{} = history, evidence) do
+    %{history | kept_review: Ledger.merge_saved(history.kept_review, evidence)}
+  end
+
+  @doc "Finalizes the same saved units without replacing the recorded disk bytes."
+  @spec keep_in_checkpoint(t(), review_target(), saved_checkpoint(), saved_observation()) ::
+          {:ok, saved_checkpoint(), Ledger.t() | nil} | {:error, :stale_review | :invalid_history}
+  def keep_in_checkpoint(
+        %__MODULE__{next_tick: revision} = history,
+        {revision, units},
+        {_, _} = checkpoint,
+        observation
+      ) do
+    ids =
+      Enum.reduce(units, MapSet.new(), fn {_task, groups}, ids ->
+        Enum.reduce(groups, ids, &include_checkpoint_origins(history, &1, &2))
+      end)
+
+    if MapSet.size(ids) == 0 do
+      {:ok, checkpoint, nil}
+    else
+      tasks = MapSet.new(units, &elem(&1, 0))
+      keep_saved_checkpoint(history, checkpoint, tasks, ids, observation)
+    end
+  end
+
+  def keep_in_checkpoint(%__MODULE__{}, _target, _checkpoint, _observation),
+    do: {:error, :stale_review}
+
+  @spec include_checkpoint_origins(t(), Provenance.group_id(), MapSet.t(Provenance.group_id())) ::
+          MapSet.t(Provenance.group_id())
+  defp include_checkpoint_origins(history, id, ids) do
+    ids = include_saved_id(ids, id, history.saved_ceiling)
+
+    case Map.fetch(history.saved_origins, id) do
+      {:ok, origins} -> MapSet.union(ids, origins)
+      :error -> ids
+    end
+  end
+
+  @spec keep_saved_checkpoint(
+          t(),
+          saved_checkpoint(),
+          MapSet.t(task()),
+          MapSet.t(Provenance.group_id()),
+          saved_observation()
+        ) :: {:ok, saved_checkpoint(), Ledger.t() | nil} | {:error, :invalid_history}
+  defp keep_saved_checkpoint(history, {digest, snapshot}, tasks, ids, observation) do
+    with {:ok, ^digest, size, saved} <- decode_snapshot(snapshot),
+         {:ok, baseline} <- restore_review_snapshot(history, saved, size) do
+      {before, groups} = saved_keep_groups(baseline, tasks, ids)
+      sources = saved_keep_sources(before.provenance, groups, digest, observation)
+      kept = finalize_review(before, groups)
+      evidence = bind_saved_sources(kept, observation, digest, sources)
+      kept = if evidence, do: %{kept | kept_review: evidence}, else: kept
+      {:ok, {digest, encode_snapshot(kept, digest, size)}, evidence}
+    else
+      _invalid -> {:error, :invalid_history}
+    end
+  end
+
+  @spec bind_saved_sources(t(), saved_observation(), Ledger.digest(), [Source.t()]) ::
+          Ledger.t() | nil
+  defp bind_saved_sources(_history, _observation, _digest, []), do: nil
+
+  defp bind_saved_sources(history, {baseline, content}, digest, sources) do
+    history.kept_review
+    |> Ledger.observe(baseline, sources)
+    |> Ledger.save(digest, content, history.provenance)
+  end
+
+  @spec saved_keep_sources(
+          Provenance.t(),
+          [Provenance.group_id()],
+          Ledger.digest(),
+          saved_observation()
+        ) ::
+          [Source.t()]
+  defp saved_keep_sources(_provenance, _groups, _digest, :unproven), do: []
+
+  defp saved_keep_sources(provenance, groups, digest, {_baseline, content}) do
+    if digest == :crypto.hash(:sha256, content),
+      do: Source.project(Provenance.keep_sources(provenance, groups), content),
+      else: []
+  end
+
+  @spec saved_keep_groups(t(), MapSet.t(task()), MapSet.t(Provenance.group_id())) ::
+          {t(), [Provenance.group_id()]}
+  defp saved_keep_groups(history, tasks, ids) do
     hit? = fn groups -> Enum.any?(groups, &MapSet.member?(ids, &1)) end
-    applied = for groups <- review_units(history, task), hit?.(groups), do: groups
+    applied = for task <- tasks, groups <- review_units(history, task), hit?.(groups), do: groups
 
     {parked, rejected} =
       Enum.reduce(history.rejected, {[], history.rejected}, fn
-        {receipt, {^task, groups, _coverage}}, {parked, remaining} ->
-          if hit?.(groups),
+        {receipt, {task, groups, _coverage}}, {parked, remaining} ->
+          if MapSet.member?(tasks, task) and hit?.(groups),
             do: {[groups | parked], Map.delete(remaining, receipt)},
             else: {parked, remaining}
-
-        _unrelated, acc ->
-          acc
       end)
 
-    finalize_review(%{history | rejected: rejected}, Enum.concat(applied ++ parked))
+    {%{history | rejected: rejected}, Enum.concat(applied ++ parked)}
   end
 
   @spec finalize_review(t(), [Provenance.group_id()]) :: t()
@@ -1535,26 +2080,29 @@ defmodule Minga.Buffer.UndoHistory do
   end
 
   @doc "Rejects the prepared units in one pass, retaining an explicit review restore path."
-  @spec reject_review(t(), review_target(), Document.t(), <<_::128>>) ::
+  @spec reject_review(t(), review_target(), Document.t(), <<_::128>>, boolean()) ::
           {:ok, Restore.t(), t(), nonempty_list(rejected_unit())}
           | blocked()
           | {:error, review_error()}
+  def reject_review(history, target, document, nonce, preserve_cursor? \\ false)
+
   def reject_review(
         %__MODULE__{next_tick: revision} = history,
-        {revision, task, units},
+        {revision, units},
         %Document{} = document,
-        <<_::128>> = nonce
+        <<_::128>> = nonce,
+        preserve_cursor?
       ) do
-    groups = Enum.concat(units)
+    groups = Enum.flat_map(units, &elem(&1, 1))
 
     with :ok <- review_allowed(history.provenance, groups, :reject),
          {:ok, reverted, first, provenance} <-
-           Provenance.revert_all(history.provenance, groups, document) do
+           Provenance.revert_all(history.provenance, groups, document, preserve_cursor?) do
       remaining = forget_groups(history, groups)
-      {version, tick, remaining} = settle_review_reject(remaining, task)
+      {version, tick, remaining} = settle_review_reject(remaining, units)
 
       {rejected, receipt} =
-        park_review_units(history.rejected, provenance, reverted, task, {nonce, revision}, units)
+        park_review_units(history.rejected, provenance, reverted, {nonce, revision}, units)
 
       remaining = %{
         remaining
@@ -1564,12 +2112,17 @@ defmodule Minga.Buffer.UndoHistory do
           tick: tick
       }
 
-      restored = place_cursor(reverted, first, Document.cursor(document))
+      restored =
+        if preserve_cursor?,
+          do: reverted,
+          else: place_cursor(reverted, first, Document.cursor(document))
+
       {:ok, Restore.new(version, restored, :agent), remaining, receipt}
     end
   end
 
-  def reject_review(%__MODULE__{}, _target, %Document{}, _nonce), do: {:error, :stale_review}
+  def reject_review(%__MODULE__{}, _target, %Document{}, _nonce, _preserve_cursor?),
+    do: {:error, :stale_review}
 
   @doc "Restores a rejected unit only when its anchors still allow an exact reapplication."
   @spec restore_review(t(), rejected_unit(), Document.t()) ::
@@ -1600,22 +2153,24 @@ defmodule Minga.Buffer.UndoHistory do
     end
   end
 
-  @spec settle_review_reject(t(), task()) :: {version() | :advance, Entry.tick(), t()}
-  defp settle_review_reject(history, task) do
-    if has_steps?(history, task), do: advance_tick(history), else: settle_tasks(history, [task])
+  @spec settle_review_reject(t(), nonempty_list(task_review_unit())) ::
+          {version() | :advance, Entry.tick(), t()}
+  defp settle_review_reject(history, [{task, _unit} | rest]) do
+    if has_steps?(history, task) or Enum.any?(rest, &(elem(&1, 0) != task)),
+      do: advance_tick(history),
+      else: settle_tasks(history, [task])
   end
 
   @spec park_review_units(
           rejected_units(),
           Provenance.t(),
           Document.t(),
-          task(),
           {<<_::128>>, Entry.tick()},
-          nonempty_list(review_unit())
+          nonempty_list(task_review_unit())
         ) :: {rejected_units(), nonempty_list(rejected_unit())}
-  defp park_review_units(rejected, provenance, document, task, {nonce, revision}, units) do
+  defp park_review_units(rejected, provenance, document, {nonce, revision}, units) do
     {receipts, parked} =
-      Enum.map_reduce(units, rejected, fn [group | _] = groups, parked ->
+      Enum.map_reduce(units, rejected, fn {task, [group | _] = groups}, parked ->
         id = {nonce, revision, group}
         proof = Provenance.review_restore_proof(provenance, groups, document)
         {{:rejected, id}, Map.put(parked, id, {task, groups, proof})}
@@ -1663,6 +2218,7 @@ defmodule Minga.Buffer.UndoHistory do
         untasked_size: history.untasked_size + length(groups),
         task_ticks: Map.put(history.task_ticks, task, history.tick)
     }
+    |> add_pending_groups(groups)
   end
 
   defp add_restored_units(history, task, groups) do
@@ -1675,32 +2231,85 @@ defmodule Minga.Buffer.UndoHistory do
 
     %{
       history
-      | minga: :lists.merge(fn {a, _}, {b, _} -> a >= b end, entries, history.minga),
-        steps:
+      | steps:
           Enum.reduce(entries, history.steps, fn {id, key}, acc ->
             Map.update(acc, key, id, &max(&1, id))
           end),
         task_started: Map.update(history.task_started, task, oldest, &min(&1, oldest)),
         task_ticks: Map.put(history.task_ticks, task, history.tick)
     }
+    |> add_pending_groups(groups)
   end
 
-  @spec review_target(t(), task(), [review_unit()]) :: {:ok, review_target()} | :empty
-  defp review_target(_history, _task, []), do: :empty
+  @spec review_target(t(), [task_review_unit()]) :: {:ok, review_target()} | :empty
+  defp review_target(_history, []), do: :empty
 
-  defp review_target(history, task, [_ | _] = units),
-    do: {:ok, {history.next_tick, task, units}}
+  defp review_target(history, [_ | _] = units), do: {:ok, {history.next_tick, units}}
 
-  @spec pending_review_steps(t(), task()) :: [{Provenance.group_id(), minga_group()}]
-  defp pending_review_steps(history, {:minga, :untasked}) do
-    history.untasked
-    |> :queue.to_list()
-    |> Enum.reverse()
-    |> Enum.map(&{&1, Provenance.group_key(history.provenance, &1)})
+  @spec add_pending_groups(t(), [Provenance.group_id()]) :: t()
+  defp add_pending_groups(history, groups) do
+    Enum.reduce(groups, history, fn id, acc ->
+      add_pending(acc, id, Provenance.group_key(history.provenance, id))
+    end)
   end
 
-  defp pending_review_steps(history, task) do
-    Enum.filter(history.minga, fn {_group, key} -> Author.author(key) == task end)
+  @spec add_pending(t(), Provenance.group_id(), minga_group()) :: t()
+  defp add_pending(history, group, key) do
+    %{
+      history
+      | pending_groups: Map.put(history.pending_groups, group, key),
+        groups_by_task: add_group_to_index(history.groups_by_task, task_of(key), group),
+        groups_by_step:
+          index_review_keys({group, key}, history.groups_by_step, history.absorbed_steps)
+    }
+  end
+
+  @spec remove_pending(t(), Provenance.group_id()) :: t()
+  defp remove_pending(history, group) do
+    {key, pending} = Map.pop!(history.pending_groups, group)
+
+    by_step =
+      Enum.reduce(
+        Map.get(history.absorbed_steps, group, []),
+        remove_group_from_index(history.groups_by_step, key, group),
+        fn alias_key, index -> remove_group_from_index(index, alias_key, group) end
+      )
+
+    %{
+      history
+      | pending_groups: pending,
+        groups_by_task: remove_group_from_index(history.groups_by_task, task_of(key), group),
+        groups_by_step: by_step
+    }
+  end
+
+  @spec pending_primary_step?(t(), minga_group()) :: boolean()
+  defp pending_primary_step?(history, key) do
+    Enum.any?(Map.get(history.groups_by_step, key, []), fn group ->
+      Map.fetch!(history.pending_groups, group) == key
+    end)
+  end
+
+  @spec add_group_to_index(%{key => MapSet.t(Provenance.group_id())}, key, Provenance.group_id()) ::
+          %{key => MapSet.t(Provenance.group_id())}
+        when key: var
+  defp add_group_to_index(index, key, group) do
+    case Map.fetch(index, key) do
+      {:ok, groups} -> Map.put(index, key, MapSet.put(groups, group))
+      :error -> Map.put(index, key, MapSet.new([group]))
+    end
+  end
+
+  @spec remove_group_from_index(
+          %{key => MapSet.t(Provenance.group_id())},
+          key,
+          Provenance.group_id()
+        ) :: %{key => MapSet.t(Provenance.group_id())}
+        when key: var
+  defp remove_group_from_index(index, key, group) do
+    groups = index |> Map.fetch!(key) |> MapSet.delete(group)
+
+    if MapSet.size(groups) == 0, do: Map.delete(index, key), else: Map.put(index, key, groups)
   end
 
   @spec index_review_keys(
@@ -1709,10 +2318,10 @@ defmodule Minga.Buffer.UndoHistory do
           absorbed_steps()
         ) :: groups_by_step()
   defp index_review_keys({group, key}, by_key, absorbed) do
-    by_key = Map.update(by_key, key, [group], &[group | &1])
+    by_key = add_group_to_index(by_key, key, group)
 
     Enum.reduce(Map.get(absorbed, group, []), by_key, fn alias_key, index ->
-      Map.update(index, alias_key, [group], &[group | &1])
+      add_group_to_index(index, alias_key, group)
     end)
   end
 
@@ -1739,7 +2348,9 @@ defmodule Minga.Buffer.UndoHistory do
           {merges(), absorbed_steps()},
           [Provenance.group_id()]
         ) :: {[Provenance.group_id()], pending_groups(), groups_by_step()}
-  defp collect_review_unit([], pending, by_key, _merges, members), do: {members, pending, by_key}
+  # Review conflicts report the first blocker. A unit must present the same blocker whichever member opened it.
+  defp collect_review_unit([], pending, by_key, _merges, members),
+    do: {Enum.sort(members), pending, by_key}
 
   defp collect_review_unit([group | rest], pending, by_key, {merges, absorbed} = index, members) do
     case Map.pop(pending, group) do
@@ -1748,13 +2359,14 @@ defmodule Minga.Buffer.UndoHistory do
 
       {key, pending} ->
         {siblings, by_key} = Map.pop(by_key, key, [])
-        next = Enum.reduce(Map.get(merges, group, []), siblings ++ rest, &[&1 | &2])
+        next = Enum.reduce(siblings, rest, &[&1 | &2])
+        next = Enum.reduce(Map.get(merges, group, []), next, &[&1 | &2])
         aliases = Map.get(absorbed, group, [])
 
         {next, by_key} =
           Enum.reduce(aliases, {next, by_key}, fn alias_key, {next, by_key} ->
             {siblings, by_key} = Map.pop(by_key, alias_key, [])
-            {siblings ++ next, by_key}
+            {Enum.reduce(siblings, next, &[&1 | &2]), by_key}
           end)
 
         collect_review_unit(next, pending, by_key, index, [group | members])
@@ -1881,27 +2493,26 @@ defmodule Minga.Buffer.UndoHistory do
 
   # Returns the task's remaining groups, newest first, and the history without them.
   @spec take_task(t(), task()) :: {[{Provenance.group_id(), minga_group()}], t()}
-  defp take_task(history, {:minga, :untasked}) do
-    steps =
-      history.untasked
-      |> :queue.to_list()
-      |> Enum.reverse()
-      |> Enum.map(&{&1, Provenance.group_key(history.provenance, &1)})
-
-    {steps, %{history | untasked: :queue.new(), untasked_size: 0}}
-  end
-
   defp take_task(history, task) do
-    {steps, others} =
-      Enum.split_with(history.minga, fn {_group, key} -> Author.author(key) == task end)
+    steps =
+      for group <- task_groups(history, task),
+          do: {group, Map.fetch!(history.pending_groups, group)}
 
-    {steps,
-     %{
-       history
-       | minga: others,
-         steps: Map.drop(history.steps, Enum.map(steps, &elem(&1, 1))),
-         task_started: Map.delete(history.task_started, task)
-     }}
+    remaining =
+      Enum.reduce(steps, history, fn {group, _key}, acc -> remove_pending(acc, group) end)
+
+    case task do
+      {:minga, :untasked} ->
+        {steps, %{remaining | untasked: :queue.new(), untasked_size: 0}}
+
+      _task ->
+        {steps,
+         %{
+           remaining
+           | steps: Map.drop(history.steps, Enum.map(steps, &elem(&1, 1))),
+             task_started: Map.delete(history.task_started, task)
+         }}
+    end
   end
 
   # ── Recording ───────────────────────────────────────────────────────
@@ -1953,10 +2564,7 @@ defmodule Minga.Buffer.UndoHistory do
   end
 
   @spec has_steps?(t(), task()) :: boolean()
-  defp has_steps?(history, {:minga, :untasked}), do: history.untasked_size > 0
-
-  defp has_steps?(history, task),
-    do: Enum.any?(history.minga, fn {_group, key} -> Author.author(key) == task end)
+  defp has_steps?(history, task), do: Map.has_key?(history.groups_by_task, task)
 
   # Agent edits without a task keep their last 1000 groups, like your stack.
   # An older one becomes permanent unattributed text, and a revert can no longer return to the version before it.
@@ -1966,7 +2574,7 @@ defmodule Minga.Buffer.UndoHistory do
 
   defp cap_untasked(history) do
     {{:value, oldest}, untasked} = :queue.out(history.untasked)
-    history = retire_untasked(history, oldest)
+    history = history |> retire_untasked(oldest) |> remove_pending(oldest)
 
     task_run =
       case history.task_run do
@@ -2012,7 +2620,7 @@ defmodule Minga.Buffer.UndoHistory do
   # Their draft barriers and the kept groups disappear in a single provenance transition.
   @spec retire_review_groups(t(), [Provenance.group_id()]) :: t()
   defp retire_review_groups(%__MODULE__{undo_entries: [], redo_entries: []} = history, groups),
-    do: %{history | provenance: Provenance.discard_all(history.provenance, groups)}
+    do: %{history | provenance: Provenance.keep_groups(history.provenance, groups, groups)}
 
   defp retire_review_groups(history, groups) do
     blocked = review_user_dependents(history.provenance, groups, MapSet.new())
@@ -2024,7 +2632,7 @@ defmodule Minga.Buffer.UndoHistory do
 
     %{
       history
-      | provenance: Provenance.discard_all(history.provenance, retired),
+      | provenance: Provenance.keep_groups(history.provenance, groups, retired),
         undo_entries: undo,
         undo_size: length(undo),
         redo_entries: redo
@@ -2105,7 +2713,8 @@ defmodule Minga.Buffer.UndoHistory do
          untasked: :queue.in(group, history.untasked),
          untasked_size: history.untasked_size + 1,
          next_untasked: history.next_untasked + 1
-     }}
+     }
+     |> add_pending(group, key)}
   end
 
   defp open_minga_group(history, author, key) do
@@ -2116,10 +2725,10 @@ defmodule Minga.Buffer.UndoHistory do
        history
        | provenance: provenance,
          review_seen: true,
-         minga: [{group, key} | history.minga],
          steps: Map.put(history.steps, key, group),
          task_started: Map.put_new(history.task_started, author, group)
-     }}
+     }
+     |> add_pending(group, key)}
   end
 
   # Patches are in undo order, so the document saw them last to first.

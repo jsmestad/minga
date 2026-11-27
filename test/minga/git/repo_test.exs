@@ -166,23 +166,32 @@ defmodule Minga.Git.RepoTest do
       refute_receive {:minga_event, :git_status_changed, %{git_root: ^dir}}, 50
     end
 
-    test "refresh publishes and caches last commit message changes", %{
+    test "refresh publishes a new HEAD even when the full commit message is unchanged", %{
       root: dir,
       repo: repo,
       events_registry: events_registry
     } do
       Events.subscribe(:git_status_changed, events_registry)
-      GitStub.set_last_commit_message(dir, "feat: updated subject")
+      body = "feat: updated subject\n\nKeep the full body."
+      first = String.duplicate("a", 40)
+      second = String.duplicate("b", 40)
 
-      Repo.refresh(repo)
+      for oid <- [first, second] do
+        GitStub.set_head_commit(dir, oid, body)
+        Repo.refresh(repo)
 
-      assert_receive {:minga_event, :git_status_changed,
-                      %Events.GitStatusEvent{
-                        git_root: ^dir,
-                        last_commit_message: "feat: updated subject"
-                      }}
+        assert_receive {:minga_event, :git_status_changed,
+                        %Events.GitStatusEvent{
+                          git_root: ^dir,
+                          head_oid: ^oid,
+                          last_commit_message: ^body
+                        }}
 
-      assert Repo.summary(repo).last_commit_message == "feat: updated subject"
+        assert %StatusSnapshot{head_oid: ^oid, last_commit_message: ^body} =
+                 Repo.status_snapshot(repo)
+
+        assert Repo.summary(repo).last_commit_message == body
+      end
     end
 
     test "refresh publishes and caches stash count changes", %{
@@ -202,6 +211,24 @@ defmodule Minga.Git.RepoTest do
                       %Events.GitStatusEvent{git_root: ^dir, stash_count: 1}}
 
       assert Repo.summary(repo).stash_count == 1
+    end
+
+    test "loose branch and packed ref events both observe the new commit", %{
+      root: dir,
+      repo: repo,
+      events_registry: events_registry
+    } do
+      Events.subscribe(:git_status_changed, events_registry)
+
+      for {file, digit} <- [{"refs/heads/feature/nested", "a"}, {"packed-refs", "b"}] do
+        oid = String.duplicate(digit, 40)
+        GitStub.set_head_commit(dir, oid, "same message")
+        send(repo, {:file_event, self(), {Path.join([dir, ".git", file]), []}})
+
+        assert_receive {:minga_event, :git_status_changed,
+                        %Events.GitStatusEvent{git_root: ^dir, head_oid: ^oid}},
+                       1_000
+      end
     end
 
     test "stash ref file events refresh stash count", %{
@@ -339,7 +366,7 @@ defmodule Minga.Git.RepoTest do
 
       GitStub.set_branch(git_root, "feature/nested")
       GitStub.set_ahead_behind(git_root, 3, 1)
-      GitStub.set_last_commit_message(git_root, "feat: nested project")
+      GitStub.set_head_commit(git_root, String.duplicate("a", 40), "feat: nested project")
 
       GitStub.set_stashes(git_root, [
         %StashEntry{index: 0, ref: "stash@{0}", date: "1 minute ago", message: "WIP"}

@@ -22,6 +22,8 @@ defmodule MingaEditor.Input.Router do
   alias MingaEditor.LspActions
   alias MingaEditor.Shell.Entry
   alias MingaEditor.Shell.Traditional
+  alias MingaEditor.Shell.Traditional.BlockedReviewWorkflow
+  alias MingaEditor.Shell.Traditional.InFileReview
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Mouse, as: MouseState
@@ -142,7 +144,11 @@ defmodule MingaEditor.Input.Router do
   def route_key(state, codepoint, modifiers) do
     # Ctrl-G owns explicit notice dismissal in Interrupt. Every other keyboard
     # command acknowledges an ordinary notice before any handler runs.
-    state = preclear_notice(state, codepoint, modifiers)
+    state =
+      state
+      |> InFileReview.resume_ready()
+      |> BlockedReviewWorkflow.before_key(codepoint, modifiers)
+      |> preclear_notice(codepoint, modifiers)
 
     # Intercept keys when a quit confirmation prompt is active.
     # y/n/Escape are handled here; all other keys are ignored.
@@ -265,6 +271,7 @@ defmodule MingaEditor.Input.Router do
   @spec post_action_housekeeping(EditorState.t(), snapshot()) :: EditorState.t()
   def post_action_housekeeping(state, snapshot) do
     state
+    |> InFileReview.resume_ready()
     |> maybe_clear_selection_ranges(snapshot.old_mode)
     |> maybe_schedule_document_highlight(snapshot.old_buffer, snapshot.old_cursor)
     |> LspActions.schedule_inlay_hints_on_scroll()

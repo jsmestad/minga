@@ -26,13 +26,18 @@ defmodule Minga.Buffer.Process do
     CursorContext,
     Document,
     FileMutation,
+    GitAuthorship,
     InspectionSnapshot,
     Lines,
     Operation,
     Persistence,
     Position,
     Replace,
+    ReviewDamage,
+    ReviewPosition,
+    ReviewRibbon,
     SaveIntent,
+    Selection,
     UndoHistory,
     UndoPatch
   }
@@ -40,6 +45,7 @@ defmodule Minga.Buffer.Process do
   alias Minga.Buffer.Author
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.EditSource
+  alias Minga.Buffer.KeptReview.{GitEvidence, Ledger, Observation}
   alias Minga.Buffer.Persistence.SystemFileSystem
   alias Minga.Buffer.Provenance
   alias Minga.Buffer.State.LocalPersistence
@@ -51,6 +57,7 @@ defmodule Minga.Buffer.Process do
   alias Minga.Core.Decorations
   alias Minga.Core.PositionEncoding
   alias Minga.Core.Unicode
+  alias Minga.Editing.TextObject
   alias Minga.Events
   alias Minga.Git.MergeConflict
   alias Minga.Git.MergeConflict.Entry
@@ -82,22 +89,41 @@ defmodule Minga.Buffer.Process do
           | {:swap_timer_start, SwapState.timer_start()}
           | {:events_registry, Minga.Events.registry()}
           | {:history_run_budget, pos_integer()}
+          | {:keep_observer, BufState.keep_observer()}
 
   @typedoc "Internal state of the buffer server."
   @type state :: BufState.t()
   @typedoc "Why an undo, redo or `SPC a u` changed nothing: a patch failed, or the history reset after an internal error."
   @type history_error :: UndoPatch.apply_error() | :history_reset
   @opaque review_target :: {pid(), UndoHistory.review_target()}
+  @type review_object_action :: :select | :range | :yank | :delete | :change
+  @type review_object_kind :: :charwise | :linewise
+  @type review_object_result ::
+          :empty
+          | {:selected, review_object_kind(), Document.position()}
+          | {:range, Document.position(), Document.position()}
+          | {:operated, review_object_kind(), String.t(),
+             {Document.position(), Document.position()}}
   @type blocked_review ::
           {:blocked, {:overlaps, UndoHistory.minga_group() | :you}, review_target() | nil}
   @type review_error ::
           UndoHistory.review_error()
           | :review_capacity
           | :read_only
+          | :review_in_progress
+          | :review_capture_failed
           | {:checkpoint_failed, term()}
   @type edit_delta_update :: {:ok, [EditDelta.t()]} | :reset_required
   @type motion_fun :: (Document.t(), Document.position() -> Document.position())
   @typep review_target_input :: UndoHistory.review_target() | UndoHistory.rejected_unit()
+
+  @type review_lines :: :whole | :current | :last | {non_neg_integer(), non_neg_integer()}
+  @type review_selection ::
+          UndoHistory.review_selection()
+          | {:lines, review_lines(), :current | non_neg_integer()}
+          | {:cursor, pos_integer()}
+          | {:visual, :char | :line, Document.position(), Document.position(), non_neg_integer()}
+  @type review_selection_error :: :invalid_range | :stale_selection
   @type listing_info :: %{
           name: String.t() | nil,
           file_path: String.t() | nil,
@@ -782,6 +808,38 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:move_if_possible, direction})
   end
 
+  @doc "Seeks and places the cursor while one buffer version owns both the text and review sites."
+  @spec move_to_review_change(GenServer.server(), :next | :previous, pos_integer()) ::
+          {:ok, Document.position()} | :at_boundary
+  def move_to_review_change(server, direction, count)
+      when direction in [:next, :previous] and is_integer(count) and count > 0 do
+    GenServer.call(server, {:move_to_review_change, direction, count})
+  end
+
+  @doc "Reads the cursor and rank from the same review observation."
+  @spec cursor_with_review_position(GenServer.server()) ::
+          {Document.position(),
+           {ReviewPosition.rank(), non_neg_integer(), pos_integer(), non_neg_integer()} | nil}
+  def cursor_with_review_position(server),
+    do: GenServer.call(server, :cursor_with_review_position)
+
+  @doc "Moves only when the displayed text, review revision, and cursor still match."
+  @spec move_to_presented_review_change(
+          GenServer.server(),
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer()
+        ) :: {:ok, Document.position()} | :at_boundary | :stale
+  def move_to_presented_review_change(server, version, revision, point),
+    do: GenServer.call(server, {:move_to_presented_review_change, version, revision, point})
+
+  @doc "Resolves and acts on one pending change at the live cursor in the same buffer version."
+  @spec review_text_object(GenServer.server(), :inner | :around, review_object_action()) ::
+          review_object_result()
+  def review_text_object(server, modifier, action) do
+    GenServer.call(server, {:review_text_object, modifier, action})
+  end
+
   @doc "Returns the total line count."
   @spec line_count(GenServer.server()) :: pos_integer()
   def line_count(server), do: GenServer.call(server, :line_count)
@@ -1134,6 +1192,16 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:render_lines, expected_version, first_line, count})
   end
 
+  @doc "Fetches pending review regions for the requested source-line ranges without fetching text."
+  @spec render_review_regions(
+          GenServer.server(),
+          RendererConsume.review_lease(),
+          [RendererConsume.line_range()]
+        ) :: {:ok, [RendererConsume.review_region()]} | :stale
+  def render_review_regions(server, lease, ranges) when is_list(ranges) do
+    GenServer.call(server, {:render_review_regions, lease, ranges})
+  end
+
   @doc "Deletes the text between two positions (from_pos inclusive, to_pos exclusive), placing the cursor at the start of the range."
   @spec delete_range(GenServer.server(), Document.position(), Document.position()) :: :ok
   def delete_range(server, from_pos, to_pos) do
@@ -1235,21 +1303,45 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, :undo_agent_session)
   end
 
-  @doc "Names the exact pending review task and unit count, and returns a single-buffer confirmation target."
-  @spec prepare_review(GenServer.server(), UndoHistory.review_selection()) ::
-          {:ok, review_target(), UndoHistory.task(), pos_integer()} | :empty
+  @doc "Names the selected scope and exact unit count, and returns one single-buffer decision target."
+  @spec prepare_review(GenServer.server(), review_selection()) ::
+          {:ok, review_target(), UndoHistory.review_scope(), pos_integer()}
+          | :empty
+          | {:error, review_selection_error()}
   def prepare_review(server, selection) do
     GenServer.call(server, {:prepare_review, selection})
   end
 
   @doc "Keeps the prepared units, or rejects all of them without dropping other history."
-  @spec decide_review(GenServer.server(), review_target(), :keep | :reject) ::
+  @spec decide_review(
+          GenServer.server(),
+          review_target(),
+          :keep | :reject | :reject_preserving_cursor
+        ) ::
           :ok
           | {:ok, nonempty_list(UndoHistory.rejected_unit())}
           | UndoHistory.blocked()
           | {:error, review_error()}
-  def decide_review(server, target, decision) when decision in [:keep, :reject] do
-    GenServer.call(server, {:decide_review, target, decision})
+  def decide_review(server, target, :keep),
+    do: GenServer.call(server, {:decide_review, target, :keep}, :infinity)
+
+  def decide_review(server, target, reject) when reject in [:reject, :reject_preserving_cursor],
+    do: GenServer.call(server, {:decide_review, target, reject})
+
+  @doc "Requests Keep without blocking the caller on a Git read or checkpoint."
+  @spec request_keep(GenServer.server(), review_target()) :: :gen_server.request_id()
+  def request_keep(server, target),
+    do: :gen_server.send_request(server, {:decide_review, target, :keep})
+
+  @doc "Requests Keep with an OTP request collection and caller-owned correlation label."
+  @spec request_keep(
+          GenServer.server(),
+          review_target(),
+          term(),
+          :gen_server.request_id_collection()
+        ) :: :gen_server.request_id_collection()
+  def request_keep(server, target, label, requests) do
+    :gen_server.send_request(server, {:decide_review, target, :keep}, label, requests)
   end
 
   @doc "Reapplies a previously rejected unit if its original anchors still permit exact restoration."
@@ -1506,6 +1598,8 @@ defmodule Minga.Buffer.Process do
           storage: storage,
           local_persistence: LocalPersistence.new(opts, SystemFileSystem),
           buffer_type: buffer_type,
+          keep_observer: Keyword.get(opts, :keep_observer, &GitEvidence.capture/2),
+          kept_proof_observer: Keyword.get(opts, :kept_proof_observer, &GitEvidence.prove/3),
           save_state: BufState.loaded_save_state(path, {mtime, size}, text),
           name: Keyword.get(opts, :buffer_name),
           read_only: read_only,
@@ -1529,10 +1623,12 @@ defmodule Minga.Buffer.Process do
   # Runs before the buffer answers its first call, so whoever opened it sees the kept text.
   @impl true
   @spec handle_continue(:take_kept_swap, state()) :: {:noreply, state()}
-  def handle_continue(:take_kept_swap, state), do: {:noreply, take_kept_swap(state)}
+  def handle_continue(:take_kept_swap, state),
+    do: {:noreply, state |> take_kept_swap() |> reconcile_kept()}
 
   @impl true
-  @spec handle_call(term(), GenServer.from(), state()) :: {:reply, term(), state()}
+  @spec handle_call(term(), GenServer.from(), state()) ::
+          {:reply, term(), state()} | {:noreply, state()}
   def handle_call({:open, file_path}, _from, state) do
     case Persistence.read_content(state, file_path) do
       {:ok, text} when is_binary(text) ->
@@ -1555,7 +1651,8 @@ defmodule Minga.Buffer.Process do
               change_log: ChangeLog.clear(state.change_log)
           }
 
-          new_state = new_state |> take_kept_swap() |> rebuild_conflict_index()
+          new_state =
+            new_state |> take_kept_swap() |> rebuild_conflict_index() |> reconcile_kept()
 
           unregister_path(state.file_path)
           register_path(file_path)
@@ -1852,6 +1949,27 @@ defmodule Minga.Buffer.Process do
   def handle_call({:move_to, pos}, _from, state) do
     new_buf = Cursor.place(state.document, pos)
     {:reply, :ok, %{state | document: new_buf}}
+  end
+
+  def handle_call({:move_to_review_change, direction, count}, _from, state),
+    do: move_to_review_change_at_cursor(state, direction, count)
+
+  def handle_call({:move_to_presented_review_change, version, revision, point}, _from, state) do
+    current = Document.cursor_offset(state.document)
+
+    if BufState.version(state) == version and current == point and
+         UndoHistory.review_revision(state.undo_history) == revision do
+      move_to_review_change_at_cursor(state, :next, 1)
+    else
+      {:reply, :stale, state}
+    end
+  end
+
+  def handle_call({:review_text_object, modifier, action}, _from, state) do
+    case review_object_at_cursor(state, modifier) do
+      nil -> {:reply, :empty, state}
+      object -> apply_review_object(state, action, object)
+    end
   end
 
   def handle_call({:move_to_if_version, expected_version, position}, _from, state) do
@@ -2279,6 +2397,37 @@ defmodule Minga.Buffer.Process do
     {:reply, Document.cursor(state.document), state}
   end
 
+  def handle_call(:cursor_with_review_position, _from, state) do
+    document = state.document
+    version = BufState.version(state)
+    revision = UndoHistory.review_revision(state.undo_history)
+    point = Document.cursor_offset(document)
+    pending? = UndoHistory.pending_at?(state.undo_history, point)
+
+    {index, state} =
+      case state.review_position_index do
+        {^version, ^revision, index} ->
+          {index, state}
+
+        _other ->
+          if pending? do
+            index = ReviewPosition.build(state.undo_history, document)
+            {index, %{state | review_position_index: {version, revision, index}}}
+          else
+            {nil, state}
+          end
+      end
+
+    rank =
+      with index when index != nil <- index,
+           :ok <- if(pending?, do: :ok),
+           {_index, _total} = rank <- ReviewPosition.at(index, point) do
+        {rank, version, revision, point}
+      end
+
+    {:reply, {Document.cursor(document), rank}, state}
+  end
+
   def handle_call(:cursor_context, _from, state) do
     context =
       CursorContext.new(state.document, BufState.version(state), state.file_path, state.filetype)
@@ -2340,14 +2489,20 @@ defmodule Minga.Buffer.Process do
 
   def handle_call({:renderer_consume, prior_affected_range}, _from, state) do
     {changes, change_log} = ChangeLog.take_unseen_changes(state.change_log, :renderer)
-    state = %{state | change_log: change_log}
+    lease = renderer_review_lease(state)
+    {review_damage, remaining_damage} = ReviewDamage.consume(state.review_damage, lease)
+    state = %{state | change_log: change_log, review_damage: remaining_damage}
+
+    version = BufState.version(state)
 
     result = %RendererConsume{
-      version: BufState.version(state),
+      version: version,
       line_count: Document.line_count(state.document),
       change_sequence: ChangeLog.sequence(change_log),
       changes: changes,
-      snapshot: renderer_changed_snapshot(state, changes, prior_affected_range)
+      snapshot: renderer_changed_snapshot(state, changes, prior_affected_range),
+      review_lease: lease,
+      review_damage: review_damage
     }
 
     {:reply, result, state}
@@ -2543,6 +2698,18 @@ defmodule Minga.Buffer.Process do
     end
   end
 
+  def handle_call(
+        {:render_review_regions, lease, ranges},
+        _from,
+        state
+      ) do
+    if renderer_review_lease(state) == lease do
+      {:reply, {:ok, render_review_region_ranges(state, ranges)}, state}
+    else
+      {:reply, :stale, state}
+    end
+  end
+
   def handle_call(:sync_revision, _from, state) do
     {:reply, {BufState.version(state), ChangeLog.sequence(state.change_log)}, state}
   end
@@ -2677,26 +2844,62 @@ defmodule Minga.Buffer.Process do
     end
   end
 
-  def handle_call({:prepare_review, selection}, _from, state) do
-    case UndoHistory.prepare_review(state.undo_history, selection) do
-      :empty ->
-        {:reply, :empty, state}
-
-      {:ok, target} ->
-        {task, units} = UndoHistory.review_summary(target)
-        {:reply, {:ok, {self(), target}, task, units}, state}
+  def handle_call({:prepare_review, {:lines, lines, expected}}, _from, state) do
+    if expected == :current or expected == BufState.version(state) do
+      case prepare_review_lines(state, lines) do
+        {:error, :invalid_range} = error -> {:reply, error, state}
+        prepared -> reply_prepared_review(state, prepared)
+      end
+    else
+      {:reply, {:error, :stale_selection}, state}
     end
   end
 
-  def handle_call({:decide_review, {owner, target}, decision}, _from, state)
-      when owner == self() do
-    case run_review(state, decision, target) do
-      {:ok, history} ->
-        case projected_checkpoint(state, target) do
-          {:ok, saved} -> finish_keep(state, %{state | undo_history: history}, saved)
-          {:error, _reason} = error -> {:reply, error, state}
+  def handle_call({:prepare_review, {:cursor, count}}, _from, state) do
+    document = state.document
+
+    prepared =
+      ReviewRibbon.prepare(state.undo_history, document, Document.cursor_offset(document), count)
+
+    reply_prepared_review(state, prepared)
+  end
+
+  def handle_call({:prepare_review, {:visual, kind, anchor, cursor, version}}, _from, state) do
+    if version == BufState.version(state) do
+      prepared =
+        case kind do
+          :line ->
+            first = min(elem(anchor, 0), elem(cursor, 0))
+            last = max(elem(anchor, 0), elem(cursor, 0))
+            prepare_review_lines(state, {first, last})
+
+          :char ->
+            document = state.document
+
+            %{span: %{start: first, stop: stop}} =
+              Selection.characterwise(document, anchor, cursor)
+
+            eof = Document.content_byte_size(document)
+            include_eof? = Position.point_for(document, max(anchor, cursor)) == eof
+            UndoHistory.prepare_review_range(state.undo_history, first, stop, include_eof?)
         end
 
+      reply_prepared_review(state, prepared)
+    else
+      {:reply, {:error, :stale_selection}, state}
+    end
+  end
+
+  def handle_call({:prepare_review, selection}, _from, state) do
+    reply_prepared_review(state, UndoHistory.prepare_review(state.undo_history, selection))
+  end
+
+  def handle_call({:decide_review, {owner, target}, :keep}, from, state) when owner == self(),
+    do: admit_keep(state, target, from)
+
+  def handle_call({:decide_review, {owner, target}, reject}, _from, state)
+      when owner == self() and reject in [:reject, :reject_preserving_cursor] do
+    case run_review(state, reject, target) do
       {:ok, restore, history, receipts} ->
         finish_review_restore(state, restore, history, {:ok, receipts})
 
@@ -3189,6 +3392,89 @@ defmodule Minga.Buffer.Process do
   def handle_info({:swap_prepared, worker, generation, result}, state)
       when is_pid(worker) and is_integer(generation) do
     {:noreply, handle_prepared_swap(state, worker, generation, result)}
+  end
+
+  def handle_info(
+        {:keep_observed, worker, capture},
+        %{keep_observation: {worker, monitor, from, path, target}} = state
+      ) do
+    Process.demonitor(monitor, [:flush])
+    state = %{state | keep_observation: nil}
+
+    {:reply, result, state} =
+      if state.file_path == path,
+        do: publish_keep(state, target, capture),
+        else: {:reply, {:error, :stale_review}, state}
+
+    GenServer.reply(from, result)
+    {:noreply, state}
+  end
+
+  def handle_info({:keep_observed, _worker, _capture}, state), do: {:noreply, state}
+
+  def handle_info(
+        {:DOWN, monitor, :process, worker, reason},
+        %{keep_observation: {worker, monitor, from, path, _target}} = state
+      ) do
+    Minga.Log.warning(:editor, "Could not observe Git before keeping #{path}: #{inspect(reason)}")
+    GenServer.reply(from, {:error, :review_capture_failed})
+    {:noreply, %{state | keep_observation: nil}}
+  end
+
+  def handle_info({:git_authorship, path, version, ranges}, %{file_path: path} = state) do
+    if BufState.version(state) == version,
+      do: {:noreply, install_git_authorship(state, path, ranges)},
+      else: {:noreply, state}
+  end
+
+  def handle_info({:git_authorship, _path, _version, _ranges}, state), do: {:noreply, state}
+
+  def handle_info({:minga_event, :git_head_changed, %Events.GitHeadEvent{git_root: root}}, state) do
+    ledger = UndoHistory.kept_review(state.undo_history)
+    next = if Ledger.bound_on?(ledger, root), do: reconcile_kept(state), else: state
+    {:noreply, next}
+  end
+
+  def handle_info(
+        {:kept_proved, worker, outcome},
+        %{kept_proof: {worker, monitor, path, ledger, saved, queued?}} = state
+      ) do
+    Process.demonitor(monitor, [:flush])
+    state = %{state | kept_proof: nil}
+
+    current? =
+      path == state.file_path and saved === state.swap.saved and
+        ledger === UndoHistory.kept_review(state.undo_history)
+
+    state =
+      case outcome do
+        {:ok, intervals, cache} when current? and not queued? ->
+          state = %{state | kept_proof_cache: {path, ledger, cache}}
+          apply_kept_proof(state, intervals)
+
+        _superseded ->
+          state
+      end
+
+    state =
+      if queued? or not current? or outcome == :stale, do: reconcile_kept(state), else: state
+
+    {:noreply, state}
+  end
+
+  def handle_info({:kept_proved, _worker, _outcome}, state), do: {:noreply, state}
+
+  def handle_info(
+        {:DOWN, monitor, :process, worker, reason},
+        %{kept_proof: {worker, monitor, path, _ledger, _saved, queued?}} = state
+      ) do
+    Minga.Log.warning(
+      :editor,
+      "Could not reconcile kept review marks for #{path}: #{inspect(reason)}"
+    )
+
+    state = %{state | kept_proof: nil}
+    {:noreply, if(queued?, do: reconcile_kept(state), else: state)}
   end
 
   def handle_info({:DOWN, monitor, :process, worker, reason}, state)
@@ -3793,6 +4079,7 @@ defmodule Minga.Buffer.Process do
     |> publish_dirty_takeover()
     |> cancel_auto_save_timer()
     |> clear_edits(EditSource.from_undo_source(:recovery))
+    |> reconcile_kept()
   end
 
   @spec publish_dirty_takeover(state()) :: state()
@@ -4230,6 +4517,7 @@ defmodule Minga.Buffer.Process do
     state
     |> push_undo(doc, EditSource.to_undo_source(event_source), delta)
     |> mark_dirty()
+    |> record_review_edit(state, [delta], event_source)
     |> record_edit(delta, event_source)
   end
 
@@ -4243,6 +4531,7 @@ defmodule Minga.Buffer.Process do
     version = BufState.version(state)
     undo_source = EditSource.to_undo_source(source)
     first_sequence = ChangeLog.sequence(state.change_log) + 1
+    previous = state
 
     state =
       state
@@ -4257,6 +4546,7 @@ defmodule Minga.Buffer.Process do
     |> Enum.reduce(state, fn {delta, sequence}, acc ->
       acc |> BufState.mark_dirty() |> track_edit(delta, source, sequence)
     end)
+    |> record_review_edit(previous, deltas, source)
     |> schedule_swap_write()
     |> schedule_auto_save()
   end
@@ -4271,6 +4561,7 @@ defmodule Minga.Buffer.Process do
     state
     |> push_undo_force(new_buf, undo_source, delta)
     |> mark_dirty()
+    |> record_review_edit(state, [delta], source)
     |> record_edit(delta, source)
   end
 
@@ -4611,22 +4902,74 @@ defmodule Minga.Buffer.Process do
     {:blocked, overlap, target}
   end
 
-  @spec run_review(state(), :keep | :reject | :restore, review_target_input()) ::
+  @spec admit_keep(state(), UndoHistory.review_target(), GenServer.from()) ::
+          {:reply, :ok | {:error, review_error()}, state()} | {:noreply, state()}
+  defp admit_keep(%{read_only: true} = state, _target, _from),
+    do: {:reply, {:error, :read_only}, state}
+
+  defp admit_keep(%{keep_observation: {_worker, _, _, _, _}} = state, _target, _from),
+    do: {:reply, {:error, :review_in_progress}, state}
+
+  defp admit_keep(%{storage: :local, file_path: path, buffer_type: :file} = state, target, from)
+       when is_binary(path) do
+    buffer = self()
+    observe = state.keep_observer
+    dirty? = BufState.dirty?(state)
+
+    {worker, monitor} =
+      spawn_monitor(fn -> send(buffer, {:keep_observed, self(), observe.(path, dirty?)}) end)
+
+    {:noreply, %{state | keep_observation: {worker, monitor, from, path, target}}}
+  end
+
+  defp admit_keep(state, target, _from), do: publish_keep(state, target, :unproven)
+
+  @spec publish_keep(state(), UndoHistory.review_target(), Observation.capture()) ::
+          {:reply, :ok | {:error, review_error()}, state()}
+  defp publish_keep(state, target, capture) do
+    observation = saved_observation(capture)
+
+    with {:ok, history} <- run_review(state, :keep, target, capture),
+         {:ok, saved, evidence} <- projected_checkpoint(state, target, observation) do
+      history = UndoHistory.bind_saved_keep(history, evidence)
+      finish_keep(state, %{state | undo_history: history}, saved, target)
+    else
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
+
+  @spec saved_observation(Observation.capture()) :: UndoHistory.saved_observation()
+  defp saved_observation({baseline, bytes}) when is_binary(bytes), do: {baseline, bytes}
+  defp saved_observation(_unproven), do: :unproven
+
+  @spec run_review(
+          state(),
+          :keep | :reject | :reject_preserving_cursor | :restore,
+          review_target_input(),
+          Observation.capture()
+        ) ::
           {:ok, UndoHistory.t()}
           | {:ok, Restore.t(), UndoHistory.t()}
           | {:ok, Restore.t(), UndoHistory.t(), nonempty_list(UndoHistory.rejected_unit())}
           | UndoHistory.blocked()
           | {:error, review_error()}
-  defp run_review(%{read_only: true}, _operation, _input), do: {:error, :read_only}
+  defp run_review(state, operation, input, capture \\ :unproven)
+  defp run_review(%{read_only: true}, _operation, _input, _capture), do: {:error, :read_only}
 
-  defp run_review(%{document: document, undo_history: history}, operation, input) do
+  defp run_review(%{document: document, undo_history: history}, operation, input, capture) do
     if UndoHistory.size(history) == Document.content_byte_size(document) do
       case operation do
         :keep ->
-          UndoHistory.keep_review(history, input)
+          keep_with_observation(history, input, document, capture)
 
-        :reject ->
-          UndoHistory.reject_review(history, input, document, :crypto.strong_rand_bytes(16))
+        reject when reject in [:reject, :reject_preserving_cursor] ->
+          UndoHistory.reject_review(
+            history,
+            input,
+            document,
+            :crypto.strong_rand_bytes(16),
+            reject == :reject_preserving_cursor
+          )
 
         :restore ->
           UndoHistory.restore_review(history, input, document)
@@ -4639,6 +4982,18 @@ defmodule Minga.Buffer.Process do
       Minga.Log.error(:editor, "Buffer review refused: #{Exception.message(exception)}")
       {:error, :inconsistent_review}
   end
+
+  @spec keep_with_observation(
+          UndoHistory.t(),
+          UndoHistory.review_target(),
+          Document.t(),
+          Observation.capture()
+        ) :: {:ok, UndoHistory.t()} | {:error, :stale_review}
+  defp keep_with_observation(history, target, _document, :unproven),
+    do: UndoHistory.keep_review(history, target)
+
+  defp keep_with_observation(history, target, document, {baseline, _bytes}),
+    do: UndoHistory.keep_review(history, target, Document.content(document), baseline)
 
   # Starts the history again for `document`, logs why, and tells the user in *Messages*.
   @spec lost_history(state(), Document.t(), String.t()) :: UndoHistory.t()
@@ -4653,11 +5008,18 @@ defmodule Minga.Buffer.Process do
   end
 
   # Tests shrink the run budget to exercise draft compaction on small buffers.
-  @spec history_options(keyword()) :: [{:run_budget, pos_integer()}]
+  @spec history_options(keyword()) :: [
+          {:run_budget, pos_integer()} | {:origin_scope, non_neg_integer()}
+        ]
   defp history_options(opts) do
+    <<scope::128>> = :crypto.strong_rand_bytes(16)
+
     case Keyword.fetch(opts, :history_run_budget) do
-      {:ok, budget} when is_integer(budget) and budget > 0 -> [run_budget: budget]
-      _default -> []
+      {:ok, budget} when is_integer(budget) and budget > 0 ->
+        [origin_scope: scope, run_budget: budget]
+
+      _default ->
+        [origin_scope: scope]
     end
   end
 
@@ -4757,15 +5119,20 @@ defmodule Minga.Buffer.Process do
       else: state |> checkpoint_saved() |> cancel_auto_save_timer()
   end
 
-  @spec projected_checkpoint(state(), UndoHistory.review_target()) ::
-          {:ok, UndoHistory.saved_checkpoint() | nil} | {:error, UndoHistory.review_error()}
-  defp projected_checkpoint(%{swap: %{saved: {_, _} = saved}} = state, target) do
+  @spec projected_checkpoint(
+          state(),
+          UndoHistory.review_target(),
+          UndoHistory.saved_observation()
+        ) ::
+          {:ok, UndoHistory.saved_checkpoint() | nil, Ledger.t() | nil}
+          | {:error, UndoHistory.review_error()}
+  defp projected_checkpoint(%{swap: %{saved: {_, _} = saved}} = state, target, observation) do
     if BufState.dirty?(state),
-      do: UndoHistory.keep_in_checkpoint(state.undo_history, target, saved),
-      else: {:ok, saved}
+      do: UndoHistory.keep_in_checkpoint(state.undo_history, target, saved, observation),
+      else: {:ok, saved, nil}
   end
 
-  defp projected_checkpoint(_state, _target), do: {:ok, nil}
+  defp projected_checkpoint(_state, _target, _observation), do: {:ok, nil, nil}
 
   @spec finish_review_restore(state(), Restore.t(), UndoHistory.t(), result) ::
           {:reply, result | {:error, review_error()}, state()}
@@ -4785,13 +5152,230 @@ defmodule Minga.Buffer.Process do
     end
   end
 
-  @spec finish_keep(state(), state(), UndoHistory.saved_checkpoint() | nil) ::
-          {:reply, :ok | {:error, review_error()}, state()}
-  defp finish_keep(previous, next, saved) do
+  @spec finish_keep(
+          state(),
+          state(),
+          UndoHistory.saved_checkpoint() | nil,
+          UndoHistory.review_target()
+        ) :: {:reply, :ok | {:error, review_error()}, state()}
+  defp finish_keep(previous, next, saved, target) do
     case commit_review_swap(previous, next, saved) do
-      {:ok, next} -> {:reply, :ok, next}
-      {:error, reason, previous} -> {:reply, {:error, {:checkpoint_failed, reason}}, previous}
+      {:ok, next} ->
+        next =
+          next
+          |> bind_kept_without_swap()
+          |> then(&record_keep_damage(previous, &1, target))
+          |> reconcile_kept()
+
+        publish_review_changed(next)
+
+        {:reply, :ok, next}
+
+      {:error, reason, previous} ->
+        {:reply, {:error, {:checkpoint_failed, reason}}, previous}
     end
+  end
+
+  @spec record_keep_damage(state(), state(), UndoHistory.review_target()) :: state()
+  defp record_keep_damage(%{review_damage: nil, review_position_index: nil}, next, _target),
+    do: next
+
+  defp record_keep_damage(previous, next, target) do
+    sites = UndoHistory.keep_sites(previous.undo_history, target)
+    record_review_damage(previous, next, sites)
+  end
+
+  @spec record_review_damage(state(), state(), [Provenance.byte_range()]) :: state()
+  defp record_review_damage(previous, next, sites) do
+    before = renderer_review_lease(previous)
+    after_keep = renderer_review_lease(next)
+
+    next =
+      revise_review_position(next, previous.review_position_index, before, after_keep, sites, [])
+
+    if previous.review_damage do
+      ranges = ReviewRibbon.damage_rows(previous.document, sites)
+
+      damage = ReviewDamage.keep(previous.review_damage, before, after_keep, ranges)
+      %{next | review_damage: damage}
+    else
+      next
+    end
+  end
+
+  @spec bind_kept_without_swap(state(), binary() | nil) :: state()
+  defp bind_kept_without_swap(state, saved_bytes \\ nil) do
+    if not review_swap?(state) and not BufState.dirty?(state) and
+         Ledger.has_witnesses?(UndoHistory.kept_review(state.undo_history)) do
+      content = saved_bytes || Document.content(state.document)
+      history = UndoHistory.bind_kept_after_save(state.undo_history, content)
+      %{state | undo_history: history}
+    else
+      state
+    end
+  end
+
+  @spec reconcile_kept(state()) :: state()
+  defp reconcile_kept(state) do
+    ledger = UndoHistory.kept_review(state.undo_history)
+    state = watch_kept_repo(state, Ledger.bound?(ledger))
+
+    case state do
+      %{watching_kept_repo?: true, file_path: path, kept_proof: nil} when is_binary(path) ->
+        buffer = self()
+        saved = state.swap.saved
+        prove = state.kept_proof_observer
+
+        cache =
+          case state.kept_proof_cache do
+            {^path, ^ledger, cached} -> cached
+            _new_projection -> nil
+          end
+
+        {worker, monitor} =
+          spawn_monitor(fn ->
+            send(buffer, {:kept_proved, self(), prove.(path, ledger, cache)})
+          end)
+
+        %{state | kept_proof: {worker, monitor, path, ledger, saved, false}}
+
+      %{watching_kept_repo?: true, kept_proof: {worker, monitor, path, ledger, saved, false}} ->
+        %{state | kept_proof: {worker, monitor, path, ledger, saved, true}}
+
+      _unchanged ->
+        state
+    end
+  end
+
+  @spec watch_kept_repo(state(), boolean()) :: state()
+  defp watch_kept_repo(%{watching_kept_repo?: watching?} = state, watching?), do: state
+
+  defp watch_kept_repo(state, true) do
+    Events.subscribe(:git_head_changed, registry: state.events_registry)
+    %{state | watching_kept_repo?: true}
+  end
+
+  defp watch_kept_repo(state, false) do
+    Events.unsubscribe(:git_head_changed, registry: state.events_registry)
+    %{state | watching_kept_repo?: false, kept_proof_cache: nil}
+  end
+
+  @spec apply_kept_proof(state(), [Provenance.keep_interval()]) :: state()
+  defp apply_kept_proof(state, []), do: state
+
+  defp apply_kept_proof(state, intervals) do
+    supplied_saved = if BufState.dirty?(state), do: state.swap.saved
+
+    case UndoHistory.retire_kept_checkpoint(state.undo_history, supplied_saved, intervals) do
+      {:ok, saved, saved_placements} ->
+        {history, sites} = UndoHistory.retire_kept(state.undo_history, intervals)
+        history = UndoHistory.prune_kept(history, saved_placements)
+        saved = saved || state.swap.saved
+
+        if history === state.undo_history and saved === state.swap.saved do
+          state
+        else
+          install_kept_proof(state, history, saved, sites)
+        end
+
+      {:error, reason} ->
+        log_swap_failure(state, {:review_checkpoint_failed, reason})
+        state
+    end
+  end
+
+  @spec install_kept_proof(
+          state(),
+          UndoHistory.t(),
+          UndoHistory.saved_checkpoint() | nil,
+          [Provenance.byte_range()]
+        ) :: state()
+  defp install_kept_proof(previous, history, saved, sites) do
+    next = %{previous | undo_history: history}
+
+    case commit_review_swap(previous, next, saved) do
+      {:ok, next} ->
+        if sites != [], do: publish_review_changed(next)
+
+        next = record_review_damage(previous, next, sites)
+        watch_kept_repo(next, Ledger.bound?(UndoHistory.kept_review(next.undo_history)))
+
+      {:error, _reason, previous} ->
+        previous
+    end
+  end
+
+  @spec publish_review_changed(state()) :: :ok
+  defp publish_review_changed(%{file_path: path} = state) when is_binary(path) do
+    event = %Events.BufferEvent{buffer: self(), path: path}
+    Events.broadcast(:buffer_review_changed, event, state.events_registry)
+  end
+
+  defp publish_review_changed(_scratch), do: :ok
+
+  @spec install_git_authorship(state(), String.t(), GitAuthorship.observation()) :: state()
+  defp install_git_authorship(state, path, ranges) do
+    projection = GitAuthorship.new(ranges)
+    sequence = ChangeLog.sequence(state.change_log)
+    next = %{state | git_authorship: {path, sequence, projection}}
+
+    case GitAuthorship.damage(current_git_authorship(state), projection) do
+      [] ->
+        next
+
+      damage ->
+        next = %{next | git_authorship_revision: state.git_authorship_revision + 1}
+        before = renderer_review_lease(state)
+        after_git = renderer_review_lease(next)
+
+        review_damage =
+          case damage do
+            :reset -> nil
+            ranges -> ReviewDamage.keep(state.review_damage, before, after_git, ranges)
+          end
+
+        publish_review_changed(next)
+        %{next | review_damage: review_damage}
+    end
+  end
+
+  @spec current_git_authorship(state()) :: GitAuthorship.t()
+  defp current_git_authorship(%{file_path: path, git_authorship: {path, sequence, ink}} = state) do
+    case ChangeLog.changes_since(state.change_log, sequence) do
+      {:ok, _, deltas} -> GitAuthorship.through_edits(ink, deltas)
+      {:reset_required, _} -> :unknown
+    end
+  end
+
+  defp current_git_authorship(_state), do: :unknown
+
+  @spec revise_review_position(
+          state(),
+          {non_neg_integer(), pos_integer(), ReviewPosition.t()} | nil,
+          RendererConsume.review_lease(),
+          RendererConsume.review_lease(),
+          [Provenance.byte_range()],
+          [EditDelta.t()]
+        ) :: state()
+  defp revise_review_position(
+         state,
+         {before, revision, index},
+         {_buf, before, {revision, _}},
+         {_owner, version, {next_revision, _}},
+         sites,
+         deltas
+       ) do
+    index = ReviewPosition.revise(index, state.undo_history, state.document, sites, deltas)
+    %{state | review_position_index: {version, next_revision, index}}
+  end
+
+  defp revise_review_position(state, _index, _before, _after, _sites, _deltas),
+    do: %{state | review_position_index: nil}
+
+  @spec renderer_review_lease(state()) :: RendererConsume.review_lease()
+  defp renderer_review_lease(state) do
+    revision = UndoHistory.review_revision(state.undo_history)
+    {self(), BufState.version(state), {revision, state.git_authorship_revision}}
   end
 
   @spec commit_review_swap(state(), state(), UndoHistory.saved_checkpoint() | nil) ::
@@ -5186,6 +5770,8 @@ defmodule Minga.Buffer.Process do
     |> BufState.mark_saved(metadata, content)
     |> checkpoint_saved(content)
     |> cancel_auto_save_timer()
+    |> bind_kept_without_swap(content)
+    |> reconcile_kept()
   end
 
   @spec review_swap?(state()) :: boolean()
@@ -5489,6 +6075,32 @@ defmodule Minga.Buffer.Process do
     {line, Cursor.caret_column(line_text, requested_column)}
   end
 
+  @spec record_review_edit(state(), state(), [EditDelta.t()], EditSource.t()) :: state()
+  defp record_review_edit(
+         state,
+         %{review_damage: nil, review_position_index: nil},
+         _deltas,
+         _source
+       ),
+       do: state
+
+  defp record_review_edit(state, previous, deltas, :user) do
+    if UndoHistory.local_user_review_edit?(previous.undo_history, state.undo_history) do
+      before = renderer_review_lease(previous)
+      after_edit = renderer_review_lease(state)
+      damage = ReviewDamage.edit(previous.review_damage, before, after_edit, deltas)
+
+      state
+      |> Map.put(:review_damage, damage)
+      |> revise_review_position(previous.review_position_index, before, after_edit, [], deltas)
+    else
+      %{state | review_damage: nil, review_position_index: nil}
+    end
+  end
+
+  defp record_review_edit(state, _previous, _deltas, _source),
+    do: %{state | review_damage: nil, review_position_index: nil}
+
   @spec record_edit(state(), EditDelta.t(), EditSource.t()) :: state()
   defp record_edit(state, delta, source) do
     state = %{state | change_log: ChangeLog.record_change(state.change_log, delta)}
@@ -5532,6 +6144,8 @@ defmodule Minga.Buffer.Process do
     state = %{
       state
       | change_log: ChangeLog.clear(state.change_log),
+        review_damage: nil,
+        review_position_index: nil,
         conflict_index: ConflictIndex.apply_edit(state.conflict_index, state.document, delta)
     }
 
@@ -5544,6 +6158,8 @@ defmodule Minga.Buffer.Process do
     state = %{
       state
       | change_log: ChangeLog.clear(state.change_log),
+        review_damage: nil,
+        review_position_index: nil,
         conflict_index: ConflictIndex.new(state.document)
     }
 
@@ -5643,6 +6259,197 @@ defmodule Minga.Buffer.Process do
 
   defp snapshot_lines(_document, _first_line, 0), do: []
   defp snapshot_lines(document, first_line, count), do: Lines.slice(document, first_line, count)
+
+  @spec reply_prepared_review(
+          state(),
+          {:ok, UndoHistory.review_target()} | :empty | {:error, :invalid_range}
+        ) ::
+          {:reply,
+           {:ok, review_target(), UndoHistory.review_scope(), pos_integer()}
+           | :empty
+           | {:error, :invalid_range}, state()}
+  defp reply_prepared_review(state, :empty), do: {:reply, :empty, state}
+  defp reply_prepared_review(state, {:error, :invalid_range} = error), do: {:reply, error, state}
+
+  defp reply_prepared_review(state, {:ok, target}) do
+    {scope, count} = UndoHistory.review_summary(target)
+    {:reply, {:ok, {self(), target}, scope, count}, state}
+  end
+
+  @spec prepare_review_lines(state(), review_lines()) ::
+          {:ok, UndoHistory.review_target()} | :empty | {:error, :invalid_range}
+  defp prepare_review_lines(state, lines) do
+    document = state.document
+    line_count = Document.line_count(document)
+
+    {first, last} =
+      case lines do
+        :whole ->
+          {0, line_count - 1}
+
+        :last ->
+          {line_count - 1, line_count - 1}
+
+        :current ->
+          {line, _col} = Document.cursor(document)
+          {line, line}
+
+        {first, last} ->
+          {first, last}
+      end
+
+    if first >= 0 and first <= last and last < line_count do
+      {from, to, include_eof?} = review_byte_bounds(document, first, last, line_count)
+      UndoHistory.prepare_review_range(state.undo_history, from, to, include_eof?)
+    else
+      {:error, :invalid_range}
+    end
+  end
+
+  @spec render_review_region_ranges(state(), [RendererConsume.line_range()]) ::
+          [RendererConsume.review_region()]
+  defp render_review_region_ranges(state, ranges) do
+    document = state.document
+    line_count = Document.line_count(document)
+
+    bounds =
+      for {first, last} <- ranges, first >= 0 and first <= last and first < line_count do
+        review_byte_bounds(document, first, min(last, line_count - 1), line_count)
+      end
+
+    history = state.undo_history
+    provenance = UndoHistory.provenance(history)
+
+    pending =
+      for {[unit | _], start, stop} <- ReviewRibbon.regions(history, document, bounds) do
+        anchor = Position.from_point(document, start)
+
+        if start == stop do
+          {:gap, unit, anchor}
+        else
+          {last_line, _line_start} = Lines.containing(document, stop - 1)
+          {:text, unit, anchor, last_line}
+        end
+      end
+
+    strands =
+      for {from, to, include_eof?} <- bounds,
+          {role, start, stop} <- Provenance.strand_spans(provenance, from, to, include_eof?),
+          uniq: true do
+        {line, _column} = anchor = Position.from_point(document, start)
+
+        last_line =
+          if start == stop, do: line, else: elem(Lines.containing(document, stop - 1), 0)
+
+        {role, anchor, last_line}
+      end
+
+    pending ++ GitAuthorship.project(strands, current_git_authorship(state))
+  end
+
+  @spec move_to_review_change_at_cursor(state(), :next | :previous, pos_integer()) ::
+          {:reply, {:ok, Document.position()} | :at_boundary, state()}
+  defp move_to_review_change_at_cursor(state, direction, count) do
+    document = state.document
+    current = Document.cursor_offset(document)
+
+    case ReviewRibbon.move(state.undo_history, document, current, direction, count) do
+      nil ->
+        {:reply, :at_boundary, state}
+
+      point ->
+        document = Cursor.place(document, Position.from_point(document, point))
+        {:reply, {:ok, Document.cursor(document)}, %{state | document: document}}
+    end
+  end
+
+  @spec review_object_at_cursor(state(), :inner | :around) ::
+          {review_object_kind(), Document.position(), Document.position()} | nil
+  defp review_object_at_cursor(state, modifier) do
+    doc = state.document
+    point = Document.cursor_offset(doc)
+
+    case ReviewRibbon.at(state.undo_history, doc, point) do
+      {_units, first, stop} -> TextObject.review_change(doc, {first, stop}, modifier)
+      nil -> nil
+    end
+  end
+
+  @spec apply_review_object(
+          state(),
+          review_object_action(),
+          {review_object_kind(), Document.position(), Document.position()}
+        ) :: {:reply, review_object_result(), state()}
+  defp apply_review_object(state, :select, {kind, start, last}) do
+    {:reply, {:selected, kind, start}, %{state | document: Cursor.place(state.document, last)}}
+  end
+
+  defp apply_review_object(state, :range, {_kind, start, last}),
+    do: {:reply, {:range, start, last}, state}
+
+  defp apply_review_object(state, action, {kind, start, last}) do
+    doc = state.document
+
+    text =
+      case kind do
+        :charwise -> Document.content_between_inclusive(doc, start, last)
+        :linewise -> Selection.line_contents(doc, elem(start, 0), elem(last, 0)) <> "\n"
+      end
+
+    state = operate_review_object(state, action, kind, start, last)
+    {:reply, {:operated, kind, text, {start, last}}, state}
+  end
+
+  @spec operate_review_object(
+          state(),
+          :yank | :delete | :change,
+          review_object_kind(),
+          Document.position(),
+          Document.position()
+        ) :: state()
+  defp operate_review_object(state, :yank, _kind, _start, _last), do: state
+
+  defp operate_review_object(state, _edit, :charwise, start, last) do
+    record_operation(
+      state,
+      Operation.delete_range(state.document, start, last),
+      EditSource.user()
+    )
+  end
+
+  defp operate_review_object(state, :delete, :linewise, {first, _}, {last, _}) do
+    record_operation(
+      state,
+      Operation.delete_lines(state.document, first, last),
+      EditSource.user()
+    )
+  end
+
+  defp operate_review_object(state, :change, :linewise, {first, _}, {last, _}) do
+    state =
+      if first < last do
+        record_operation(
+          state,
+          Operation.delete_lines(state.document, first + 1, last),
+          EditSource.user()
+        )
+      else
+        state
+      end
+
+    case Operation.clear_line(state.document, first) do
+      {:edited, _text, doc, delta} ->
+        record_operation(state, {:edited, doc, delta}, EditSource.user())
+
+      :unchanged ->
+        state
+    end
+  end
+
+  @spec review_byte_bounds(Document.t(), non_neg_integer(), non_neg_integer(), pos_integer()) ::
+          {non_neg_integer(), non_neg_integer(), boolean()}
+  defp review_byte_bounds(document, first, last, _line_count),
+    do: ReviewRibbon.byte_bounds(document, first, last)
 
   @spec right_boundary(Document.t(), non_neg_integer()) :: non_neg_integer()
   defp right_boundary(doc, line) do

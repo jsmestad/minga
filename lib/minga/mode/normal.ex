@@ -174,7 +174,7 @@ defmodule Minga.Mode.Normal do
         prefix_keys: []
     }
 
-    execute_discarding_count({:leader_start, state.leader_trie}, new_state)
+    {:execute, {:leader_start, state.leader_trie}, new_state, :preserve_count}
   end
 
   # SPC pressed while already in leader mode: if the current node has a
@@ -218,7 +218,7 @@ defmodule Minga.Mode.Normal do
         leader_stack: stack
     }
 
-    execute_discarding_count({:leader_progress, parent}, new_state)
+    {:execute, {:leader_progress, parent}, new_state, :preserve_count}
   end
 
   # Any other key while in leader mode → walk the trie.
@@ -237,7 +237,11 @@ defmodule Minga.Mode.Normal do
         execute_discarding_count(:leader_cancel, new_state)
 
       {:prefix, sub_node} ->
-        execute_discarding_count({:leader_progress, sub_node}, descend(state, key, sub_node))
+        {:execute, {:leader_progress, sub_node}, descend(state, key, sub_node), :preserve_count}
+
+      {:command, command} when command in [:keep_minga_change, :reject_minga_change] ->
+        new_state = %{state | leader_node: nil, leader_keys: [], leader_stack: []}
+        execute_discarding_count([{command, state.count}, :leader_cancel], new_state)
 
       {:command, command} ->
         new_state = %{state | leader_node: nil, leader_keys: [], leader_stack: []}
@@ -906,6 +910,11 @@ defmodule Minga.Mode.Normal do
   defp dispatch_prefix_command(:move_to_document_start, %ModeState{count: count} = state)
        when is_integer(count) do
     {:execute, {:goto_line, count}, %{state | count: nil}}
+  end
+
+  defp dispatch_prefix_command(command, state)
+       when command in [:next_minga_change, :prev_minga_change] do
+    {:execute, {command, state.count || 1}, %{state | count: nil}}
   end
 
   defp dispatch_prefix_command(command, state) do

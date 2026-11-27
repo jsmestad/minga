@@ -49,7 +49,7 @@ defmodule Minga.Git.TrackedFileTest do
     assert Git.revert_change(revised, deletion) == "first\nbefore\ndeleted\nkeep\nnew"
     assert Git.hunks(tracker) == []
 
-    :ok = GitBuffer.invalidate_base(tracker, revised)
+    :ok = GitBuffer.observe(tracker, buffer, Buffer.file_observation(buffer), :refresh_head)
 
     assert {:ok, %TrackedFile{base: ^next_base, content: ^revised, version: ^edited_version}} =
              Git.tracked_file(buffer)

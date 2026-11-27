@@ -70,6 +70,15 @@ func GoldenDecode(name string, payload []byte) (any, int, error) {
 	case "GuiGitStatusFields":
 		v, n, err := DecodeGuiGitStatusFields(payload, 0, len(payload))
 		return v, n, err
+	case "GuiGutterAuthorship":
+		v, n, err := DecodeGuiGutterAuthorship(payload, 0, len(payload))
+		return v, n, err
+	case "GuiGutterAuthorshipAdded":
+		v, n, err := DecodeGuiGutterAuthorshipAdded(payload, 0, len(payload))
+		return v, n, err
+	case "GuiGutterAuthorshipRemoved":
+		v, n, err := DecodeGuiGutterAuthorshipRemoved(payload, 0, len(payload))
+		return v, n, err
 	case "GuiGutterConfig":
 		v, n, err := DecodeGuiGutterConfig(payload, 0, len(payload))
 		return v, n, err

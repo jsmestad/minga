@@ -50,6 +50,7 @@ type Model struct {
 	presentedClick       *presentedMouseClick
 	gitStatusHits        *gitStatusHits
 	gitHitRevision       uint64
+	reviewHitRevision    uint64
 	windows              map[uint16]protocol.WindowContent
 	// residentRows is the indexed, value-semantic authority for window rows.
 	// WindowContent.Rows is retained only as a small-fixture compatibility view.
@@ -826,6 +827,9 @@ func (m Model) View() tea.View {
 		// target-only changes (such as a new panel ID) publishable.
 		out += fmt.Sprintf("\x1b[0:%dm", m.gitHitRevision)
 	}
+	if m.protocolError == "" && m.reviewHitRevision != 0 {
+		out += fmt.Sprintf("\x1b[0:%dm", m.reviewHitRevision)
+	}
 	if m.protocolError == "" && m.queueViewport.box.Height > 0 {
 		// An identity-only change still needs to publish a new OnMouse snapshot.
 		out += fmt.Sprintf("\x1b[0:%dm", m.queueScroll.hitRevision)
@@ -1503,6 +1507,17 @@ func (m *Model) prepareGutterCandidate(snapshot *windowReferenceSnapshot) (map[u
 		if next.DecodeError != "" {
 			return nil, &gutterReferenceFailure{windowID: next.WindowID, reason: protocol.RejectDecodeFailure, description: next.DecodeError}
 		}
+		var previous protocol.Gutter
+		if m.staging.base != 0 {
+			previous = m.gutters[next.WindowID]
+		}
+		// The previous frame remains usable until every command has validated.
+		authorship, validAuthorship := next.ResolveAuthorship(previous)
+		if !validAuthorship {
+			return nil, &gutterReferenceFailure{windowID: next.WindowID, targeted: true}
+		}
+		next.Authorship = authorship
+		next.AuthorshipUpdate = nil
 		if next.Resident == nil {
 			candidate[next.WindowID] = next
 			continue
@@ -1572,6 +1587,13 @@ func (m *Model) applyMutation(command protocol.Command) {
 		}
 		if command.Chrome.Opcode == generated.OPGuiBottomPanel {
 			command.Chrome.Bottom = m.mergedBottomPanel(command.Chrome.Bottom)
+		}
+		if command.Chrome.Opcode == generated.OPGuiStatusBar {
+			previous, _ := reviewModelineTarget(m.chrome[generated.OPGuiStatusBar].Status)
+			next, _ := reviewModelineTarget(command.Chrome.Status)
+			if previous != next {
+				m.reviewHitRevision++
+			}
 		}
 		m.chrome[command.Chrome.Opcode] = command.Chrome
 		switch command.Chrome.Opcode {

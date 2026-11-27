@@ -437,6 +437,10 @@ The render path runs as an explicit pipeline whose stages narrow editor intent d
 
 For changed buffers, the Renderer groups all windows by buffer PID, consumes `Buffer.consume_edit_deltas(buffer, :renderer)` once per observed version, and fans the ordered deltas to every matching resident window. Durable logical-line identity and resident composition splice from those deltas. Initial hydration, `:reset_required`, buffer replacement/restart, irreconcilable identity, or a global composition-context change performs one explicit full hydration in a fresh content epoch, then resumes delta consumption. Window close, buffer switch, reset, and exact monitored-buffer `:DOWN` all use the centralized `Renderer.State` cleanup path.
 
+Authorship shares a Buffer observation with text, but has its own gutter revision. A Keep or commit can change marks without changing document bytes or producing an edit delta. The Buffer supplies the affected source bounds, and the Renderer sends the matching gutter patch against the last accepted frame. Frontends draw the committed facts, including zero-width deletion anchors, rather than inferring authorship from visible lines.
+
+Keep freezes the exact pending units, then observes Git in a worker before the Buffer publishes its review checkpoint. The editor applies the reply only to the originating Vim context; a dependent dot repeat waits for that reply without holding other buffers. On Save, the Buffer binds evidence to the exact saved generation. A Git head notification only wakes the proof worker. The worker compares immutable first-parent blobs on the recorded branch, and the Buffer clears only proved source intervals, including intervals currently held by undo. Unavailable or ambiguous evidence leaves the mark intact.
+
 ```
 RenderIntent + Renderer.State
    │  Content stage (RenderPipeline.Content)

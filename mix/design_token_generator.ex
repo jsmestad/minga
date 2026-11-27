@@ -718,6 +718,13 @@ defmodule Minga.Mix.DesignTokenGenerator do
     #{Enum.map_join(tokens.twist, "\n", &"        case .#{camel(&1.id)}: #{swift_string(&1.tui_glyph)}")}
             }
         }
+
+        /// The vector source for the native gutter, embedded from the canonical design asset.
+        public var svg: String {
+            switch self {
+    #{Enum.map_join(tokens.twist, "\n", &swift_twist_svg/1)}
+            }
+        }
     }
 
     /// Minga's voice: three lines and no more.
@@ -738,6 +745,12 @@ defmodule Minga.Mix.DesignTokenGenerator do
       ^id -> "    case #{id}"
       name -> "    case #{name} = #{swift_string(id)}"
     end
+  end
+
+  @spec swift_twist_svg(twist()) :: String.t()
+  defp swift_twist_svg(twist) do
+    svg = twist.mark |> File.read!() |> String.trim()
+    ~s(        case .#{camel(twist.id)}: ##"#{svg}"##)
   end
 
   @spec swift_optional_role(String.t() | nil) :: String.t()

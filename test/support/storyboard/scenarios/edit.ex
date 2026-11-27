@@ -5,11 +5,21 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
   The factory's cold start is the project home (`start.open_dir.home`); `1` opens the project's file there, which is `edit.plain`.
   """
 
+  import ExUnit.Assertions, only: [assert: 1, refute: 1]
   import Minga.Test.Storyboard.Assertions
 
+  alias Minga.Buffer.EditSource
   alias Minga.Test.Storyboard.Check
   alias Minga.Test.Storyboard.Entry
   alias Minga.Test.Storyboard.Model
+
+  @working_content """
+  defmodule Limits do
+    def allowed?(count) do
+      count < 60
+    end
+  end
+  """
 
   @doc "Every `edit` entry."
   @spec entries() :: [Entry.t()]
@@ -17,7 +27,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
     [
       Entry.built("edit.plain",
         reach: "1",
-        recognize: &home?/1,
+        recognize: &plain?/1,
         click_reach: [{:gui_action, {:empty_state_activate, "recent-1"}}],
         explore: :normal,
         checks: [
@@ -80,10 +90,35 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
           )
         ]
       ),
-      Entry.pending(
-        "edit.working",
-        4050,
-        "Minga's changes in the gutter while it works in the file"
+      Entry.built("edit.working",
+        start: [
+          minga: {:thinking, :in_file},
+          tasks: [{"Add tests for the usage-limit classifier", :needs_you}],
+          content: @working_content,
+          review_edits: [
+            {{2, 4}, 10, "count >= 0 and\n      count < 90", EditSource.minga("limits", "guard")},
+            {{1, 6}, 8, "within_limit?", :user}
+          ]
+        ],
+        reach: "g g",
+        recognize: &working?/1,
+        checks: [
+          Check.new(
+            "the editor keeps the keyboard while Minga works",
+            &assert_focus(&1, :editor)
+          ),
+          Check.new("Minga is working in this file", fn model ->
+            assert Enum.any?(Model.modeline_segments(model), fn segment ->
+                     segment.id == :minga and segment.text == "Minga here"
+                   end)
+
+            model
+          end),
+          Check.new("review position is absent outside a pending change", fn model ->
+            refute Enum.any?(Model.modeline_segments(model), &(&1.id == :change))
+            model
+          end)
+        ]
       ),
       Entry.pending("chrome.tooltip", 4053, "hover teaches a modeline segment's meaning and key"),
       Entry.built("edit.command_line",
@@ -91,6 +126,25 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
         recognize: &(&1.mode == :command and not Model.open?(&1, :which_key))
       )
     ]
+  end
+
+  @spec plain?(Model.t()) :: boolean()
+  defp plain?(%Model{} = model) do
+    home?(model) and
+      not Enum.any?(Model.modeline_segments(model), fn
+        %{id: :minga, state: :working} -> true
+        %{id: :change} -> true
+        _other -> false
+      end)
+  end
+
+  @spec working?(Model.t()) :: boolean()
+  defp working?(%Model{} = model) do
+    segments = Model.modeline_segments(model)
+
+    home?(model) and
+      Enum.any?(segments, &match?(%{id: :minga, state: :working}, &1)) and
+      not Enum.any?(segments, &(&1.id == :change))
   end
 
   @doc "True for the resting home view: Normal mode, nothing transient, nothing pending, the editor focused, and no notice naming next steps."

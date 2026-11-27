@@ -113,6 +113,7 @@ defmodule MingaEditor do
   alias MingaEditor.State.{TabBar, Workspace}
   alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
 
+  alias MingaEditor.Shell.Traditional.InFileReview
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
 
   alias MingaEditor.MouseHoverTooltip
@@ -362,6 +363,7 @@ defmodule MingaEditor do
     # Refresh file tree state when buffers, project files, git, diagnostics, or project roots change.
     EventBus.subscribe(:buffer_saved, events_registry)
     EventBus.subscribe(:buffer_changed, events_registry)
+    EventBus.subscribe(:buffer_review_changed, events_registry)
     EventBus.subscribe(:file_written, events_registry)
     EventBus.subscribe(:project_rebuilt, events_registry)
     EventBus.subscribe(:project_rebuild_failed, events_registry)
@@ -1364,6 +1366,15 @@ defmodule MingaEditor do
   # All {:minga_event, event, payload} messages are routed through a single
   # catch-all to the appropriate handler or inline logic. This replaces 10
   # individual thin router clauses (LSP, diagnostics, tool, file events).
+  def handle_info(
+        {:minga_event, :buffer_review_changed, %Minga.Events.BufferEvent{buffer: buf}},
+        state
+      ) do
+    if MingaEditor.State.Windows.find_by_buffer(state.workspace.windows, buf),
+      do: {:noreply, schedule_render(state, 16)},
+      else: {:noreply, state}
+  end
+
   def handle_info({:minga_event, event, payload} = msg, state) do
     {:noreply, EventDispatcher.dispatch(state, event, payload, msg)}
   end
@@ -1516,7 +1527,7 @@ defmodule MingaEditor do
   # Process died. Check buffer monitors and git remote tasks.
   # Agent session deaths are handled via :agent_session_stopped events from SessionManager.
   def handle_info({:DOWN, ref, :process, pid, reason} = message, state) do
-    case agent_request_response(state, message) do
+    case local_request_response(state, message) do
       {:handled, updated} -> {:noreply, updated}
       :unrelated -> handle_dependency_down(state, ref, pid, reason)
     end
@@ -1615,7 +1626,7 @@ defmodule MingaEditor do
   end
 
   def handle_info(message, state) do
-    case agent_request_response(state, message) do
+    case local_request_response(state, message) do
       {:handled, updated} -> {:noreply, updated}
       :unrelated -> {:noreply, state}
     end
@@ -1625,10 +1636,11 @@ defmodule MingaEditor do
   defp render_handled({:handled, state}), do: {:handled, schedule_render(state, 16)}
   defp render_handled(:unrelated), do: :unrelated
 
-  # Replies and request monitors for the Editor's outstanding local Session requests.
-  @spec agent_request_response(state(), term()) :: {:handled, state()} | :unrelated
-  defp agent_request_response(state, message) do
-    with :unrelated <- Arrival.response(state, message),
+  # Replies and monitors for the Editor's outstanding local requests.
+  @spec local_request_response(state(), term()) :: {:handled, state()} | :unrelated
+  defp local_request_response(state, message) do
+    with :unrelated <- InFileReview.response(state, message),
+         :unrelated <- Arrival.response(state, message),
          :unrelated <- TranscriptSync.response(state, message) |> render_handled(),
          :unrelated <- SubagentPeekSession.response(state, message) |> render_handled(),
          :unrelated <- TurnRequest.response(state, message) |> render_handled(),

@@ -418,7 +418,7 @@ Macro recording: 0=not recording, 1-26=recording register a-z
 - `name` is the segment id: `mode`, `needs_you`, `filename`, `change`, `git`, `minga`, `errors`, `warnings`, `problem`, `filetype`, `position`, an optional built-in (`indent`, `percent`, `background_agent`, `plan_limit`, `draft`, `conflict`, `merge_conflict`, `workspace`, `parser`) or a custom segment's name.
 - `text` is the segment's words without padding; the frontend owns insets and gaps (`docs/design/anatomy.md`, Modeline segments). Errors and warnings send their count; the frontend draws the severity's mark before it (an SF Symbol on macOS, `E` and `W` in the TUI).
 - `fg` and `bg` are colours the BEAM resolved from the segment's design-token role. `attrs` uses the same low bits as `draw_text`: bit 0 bold, bit 1 underline, bit 2 italic.
-- `target` is empty for a segment without a click; otherwise it is the command its key runs, sent back through the `execute_command` GUI action.
+- `target` is empty for a segment without a click. The frontend echoes this string unchanged in the `execute_command` GUI action. The `change` segment's target includes the displayed window, buffer, text version, review revision, and cursor; the BEAM ignores the click if any of them changed. A valid click moves as `]h` would from that cursor.
 - `drop` is the segment's rank when the window narrows. The frontend measures its own width (ADR-0001) and applies ranks in ascending order until the modeline fits: every segment at the current rank goes at once. `0` never drops.
 - `flags` bit 0 marks a segment with a compact form: at its rank it collapses to its state mark and `compact` text instead of dropping (Minga's words become the mark and "2/3"; an empty `compact` leaves the mark alone).
 - `state` is the byte of a design-token state (`[[states]]` in `docs/design_tokens.toml`; `0` means none). The frontend draws the state's mark before the words: the token shape on macOS, the token glyph in the TUI.
@@ -677,7 +677,7 @@ The GUI frontend draws the cursorline as a full-width colored rectangle behind t
 
 ### 0x7B — gui_gutter (sectioned format)
 
-Structured gutter data for native line number and sign rendering. One message is sent per editor window (split pane), each including the window's screen position. Agent chat windows are skipped. Uses sectioned envelope: `opcode(1) + section_count(1) + sections...`.
+Structured gutter data for line numbers, signs, and authorship. Each editor pane receives its own window ID and screen position. The sectioned envelope is `opcode(1) + section_count(1) + sections...`. Each section starts with `id:u8 + size:u16`.
 
 | Section ID | Name | Content |
 |-----------|------|--------|
@@ -686,6 +686,9 @@ Structured gutter data for native line number and sign rendering. One message is
 | 0x03 | Entries | entry_count + entries (positional per entry) |
 | 0x04 | Resident | content_epoch:u32, line_count:u32, retain_overrides:u8 |
 | 0x05 | Resident overrides | entry_count:u16 + gutter entries, repeated as needed |
+| 0x06 | Authorship revision | kind:u8, base_revision:u64, revision:u64 |
+| 0x07 | Authored regions added | region_count:u16 + authored regions, repeated as needed |
+| 0x08 | Authored regions removed | region_count:u16 + authored regions, repeated as needed |
 
 ```
 opcode(1) + window_id(2) + content_row(2) + content_col(2) + content_height(2) + is_active(1) + content_width(2)
@@ -705,6 +708,10 @@ Resident gutters use sections `0x04` and `0x05` instead of dense section `0x03`.
 `retain_overrides = 0` replaces the exceptions and requires at least one `0x05` section, including an explicit zero-count section to clear all exceptions. `retain_overrides = 1` carries no `0x05` section and retains the previously committed exceptions. Producers may retain only after the snapshot frame has been acknowledged. Frontends reject mixed dense/resident entries, malformed chunks, duplicate or out-of-range exception lines, and missing replacement sections.
 
 The frame transaction checks the gutter's window, epoch, and count against the final staged content row store. Retention additionally requires an exact match to the previously committed resident gutter and is invalid in a recovery keyframe. A rejected frame publishes neither its text nor its gutter. A new epoch, changed count, or recovery sends a replacement snapshot. The sparse gutter is independent of text insertion payloads; an empty text delta never means an empty gutter.
+
+Authorship has its own revision because Keep changes the gutter without changing file bytes. A snapshot (`kind = 0`) carries a nonzero revision, a zero base, and the complete region set in `0x07`. No `0x07` sections means the set is empty. Retain (`kind = 1`) requires equal nonzero base and revision and has no region sections. A patch (`kind = 2`) carries a nonzero base and a strictly newer revision, then exact removals and additions. Both reference the previous committed resident gutter with the same window and content epoch. An unacknowledged base or a recovery keyframe uses a snapshot. Invalid references reject the frame without replacing its text, signs, or authorship.
+
+Each authored region is `role:u8 + unit:u64 + first_line:u32 + first_column:u32 + last_line:u32`. Lines are inclusive and zero-indexed. The first column is a zero-indexed source byte offset. Pending text (`role = 0`) and a pending deletion (`role = 1`) carry a nonzero whole-unit ID. A deletion spans one source line and marks an anchor, not visible text. Kept (`role = 2`), human (`role = 3`), and shared replacement (`role = 4`) strands carry unit zero and have no review action. A shared replacement draws both strands even when the human edit covers all pending text on its line. If a pending head is still present, it keeps its identity. Frontends use the current presentation transform to draw these facts, including a pinned head at the gutter top when the first visible code row continues an earlier region.
 
 The scrollbar uses pane viewport geometry plus the frontend's local scroll transform. Gutter entries identify document lines and must never supply viewport position.
 
@@ -1623,7 +1630,7 @@ One slot per colour role in `docs/design_tokens.toml`. The slot IDs, role names 
 |------|------|--------|
 | 0x70 | you | `agent.user_label` |
 | 0x71 | minga | `agent.minga_fg` |
-| 0x72 | minga_shade | minga mixed over surface at 45% |
+| 0x72 | minga_shade | minga mixed over surface at 25% |
 | 0x73 | needs_you | `agent.attention_fg` |
 | 0x74 | failure | `gutter.error_fg` |
 | 0x75 | done | `agent.status_done` |
@@ -1638,6 +1645,8 @@ One slot per colour role in `docs/design_tokens.toml`. The slot IDs, role names 
 | 0x7E | surface_bar | `modeline.bar_bg` |
 | 0x7F | border | `popup.border_fg` |
 | 0x80 | focus | `popup.title_fg`, else `modeline.filetype_fg` |
+| 0x81 | you_shade | you mixed over surface at 23% |
+| 0x82 | minga_kept | minga mixed over surface at 75% |
 
 ## Forward-Compatibility: Skip-Length for Unknown Opcodes
 

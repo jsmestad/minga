@@ -179,11 +179,11 @@ defmodule Minga.Frontend.Adapter.GUI do
     content_fp = window_content_fingerprint(window)
     overlay_fp = window_overlay_fingerprint(window)
 
-    {retain_gutter?, caches} =
+    {retain_gutter?, authored_change, caches} =
       Caches.prepare_gutter(caches, window.window_id, window.gutter, window.full_refresh)
 
     {metadata, metadata_metrics} =
-      WindowEncoder.encode_frame_metadata_with_metrics(window, retain_gutter?)
+      WindowEncoder.encode_frame_metadata_with_metrics(window, retain_gutter?, authored_change)
 
     previous_content_fp = Map.get(caches.last_window_content_fps, window.window_id)
     previous_overlay_fp = Map.get(caches.last_window_overlay_fps, window.window_id)

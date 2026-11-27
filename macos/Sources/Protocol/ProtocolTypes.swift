@@ -1479,6 +1479,142 @@ public enum Wire {
         }
     }
 
+    public enum AuthoredGutterRole: UInt8, Sendable {
+        case pending, deletion, kept, you, shared
+    }
+
+    public struct AuthoredGutterRegion: Hashable, Sendable {
+        public let role: AuthoredGutterRole
+        public let unit: UInt64
+        public let firstLine: UInt32
+        public let firstColumn: UInt32
+        public let lastLine: UInt32
+
+        public init(role: AuthoredGutterRole, unit: UInt64, firstLine: UInt32, firstColumn: UInt32, lastLine: UInt32) {
+            self.role = role
+            self.unit = unit
+            self.firstLine = firstLine
+            self.firstColumn = firstColumn
+            self.lastLine = lastLine
+        }
+
+        fileprivate static func precedes(_ first: Self, _ second: Self) -> Bool {
+            (first.firstLine, first.firstColumn, first.role.rawValue, first.unit, first.lastLine) <
+                (second.firstLine, second.firstColumn, second.role.rawValue, second.unit, second.lastLine)
+        }
+    }
+
+    public struct GutterAuthorship: Sendable {
+        fileprivate struct IndexedRegion: Sendable {
+            let region: AuthoredGutterRegion
+            let maxLast: UInt32
+        }
+
+        public let revision: UInt64
+        fileprivate let index: [IndexedRegion]
+
+        public var isEmpty: Bool { index.isEmpty }
+
+        /// Returns the committed strand on a source line, not the visual row index.
+        public func region(at line: UInt32, pin: Bool, continuation: Bool) -> (region: AuthoredGutterRegion, head: Bool, shared: Bool)? {
+            var low = 0
+            var high = index.count
+            while low < high {
+                let mid = low + (high - low) / 2
+                if index[mid].maxLast < line {
+                    low = mid + 1
+                } else {
+                    high = mid
+                }
+            }
+            var best: AuthoredGutterRegion?
+            var priority = 0
+            var you = false
+            for entry in index[low...] {
+                let region = entry.region
+                if region.firstLine > line { break }
+                if region.lastLine < line || (continuation && region.role == .deletion) { continue }
+                let rank: Int
+                switch region.role {
+                case .you:
+                    you = true
+                    rank = 1
+                case .kept:
+                    rank = 2
+                case .shared:
+                    you = true
+                    rank = 3
+                case .pending, .deletion:
+                    if region.firstLine == line && !continuation { rank = 6 }
+                    else { rank = pin ? 5 : 4 }
+                }
+                if rank > priority {
+                    best = region
+                    priority = rank
+                }
+            }
+            guard let best else { return nil }
+            return (best, priority >= 5, you && priority >= 3)
+        }
+    }
+
+    public enum GutterAuthorshipUpdate: Sendable {
+        case snapshot(revision: UInt64, regions: [AuthoredGutterRegion])
+        case retain(revision: UInt64)
+        case patch(base: UInt64, revision: UInt64, added: [AuthoredGutterRegion], removed: [AuthoredGutterRegion])
+
+        func resolved(reusing previous: GutterAuthorship?, sourceLineCount: UInt32?) -> GutterAuthorship? {
+            switch self {
+            case .snapshot(let revision, let added):
+                return replacing(revision: revision, previous: [], added: added, removed: [], sourceLineCount: sourceLineCount)
+            case .retain(let revision):
+                guard let previous, previous.revision == revision,
+                      Self.fits(previous.index.last?.maxLast, sourceLineCount) else { return nil }
+                return previous
+            case .patch(let base, let revision, let added, let removed):
+                guard let previous, previous.revision == base else { return nil }
+                return replacing(revision: revision, previous: previous.index, added: added,
+                                 removed: removed, sourceLineCount: sourceLineCount)
+            }
+        }
+
+        private static func fits(_ lastLine: UInt32?, _ sourceLineCount: UInt32?) -> Bool {
+            guard let lastLine, let sourceLineCount else { return true }
+            return lastLine < sourceLineCount
+        }
+
+        private func replacing(
+            revision: UInt64, previous: [GutterAuthorship.IndexedRegion],
+            added: [AuthoredGutterRegion], removed: [AuthoredGutterRegion], sourceLineCount: UInt32?
+        ) -> GutterAuthorship? {
+            guard removed.count <= previous.count else { return nil }
+            var removals = Set(removed)
+            guard removals.count == removed.count else { return nil }
+            let additions = added.sorted(by: AuthoredGutterRegion.precedes)
+            var index: [GutterAuthorship.IndexedRegion] = []
+            index.reserveCapacity(previous.count - removed.count + added.count)
+            var next = 0
+            func append(_ region: AuthoredGutterRegion) -> Bool {
+                guard Self.fits(region.lastLine, sourceLineCount), index.last?.region != region else { return false }
+                let maxLast = max(region.lastLine, index.last?.maxLast ?? 0)
+                index.append(.init(region: region, maxLast: maxLast))
+                return true
+            }
+            for entry in previous where removals.remove(entry.region) == nil {
+                while next < additions.count && AuthoredGutterRegion.precedes(additions[next], entry.region) {
+                    guard append(additions[next]) else { return nil }
+                    next += 1
+                }
+                guard append(entry.region) else { return nil }
+            }
+            guard removals.isEmpty else { return nil }
+            for region in additions[next...] {
+                guard append(region) else { return nil }
+            }
+            return GutterAuthorship(revision: revision, index: index)
+        }
+    }
+
     /// Gutter data for one window, including its screen position.
     /// One message per window arrives each frame.
     public struct WindowGutter: Sendable {
@@ -1500,6 +1636,7 @@ public enum Wire {
         public let lineNumberWidth: UInt8
         public let signColWidth: UInt8
         public let entries: GutterEntries
+        public let authorship: GutterAuthorship?
 
         /// Creates resolved gutter state from dense visual-row entries.
         public init(windowId: UInt16, contentRow: UInt16, contentCol: UInt16, contentHeight: UInt16, isActive: Bool, contentWidth: UInt16, cursorLine: UInt32, lineNumberStyle: LineNumberStyle, lineNumberWidth: UInt8, signColWidth: UInt8, entries: [GutterEntry]) {
@@ -1513,7 +1650,7 @@ public enum Wire {
         }
 
         /// Creates resolved gutter state from an immutable entry collection.
-        public init(windowId: UInt16, contentRow: UInt16, contentCol: UInt16, contentHeight: UInt16, isActive: Bool, contentWidth: UInt16, cursorLine: UInt32, lineNumberStyle: LineNumberStyle, lineNumberWidth: UInt8, signColWidth: UInt8, entries: GutterEntries) {
+        public init(windowId: UInt16, contentRow: UInt16, contentCol: UInt16, contentHeight: UInt16, isActive: Bool, contentWidth: UInt16, cursorLine: UInt32, lineNumberStyle: LineNumberStyle, lineNumberWidth: UInt8, signColWidth: UInt8, entries: GutterEntries, authorship: GutterAuthorship? = nil) {
             self.windowId = windowId
             self.contentRow = contentRow
             self.contentCol = contentCol
@@ -1525,6 +1662,7 @@ public enum Wire {
             self.lineNumberWidth = lineNumberWidth
             self.signColWidth = signColWidth
             self.entries = entries
+            self.authorship = authorship
         }
     }
 
@@ -1550,9 +1688,10 @@ public enum Wire {
         public let lineNumberWidth: UInt8
         public let signColWidth: UInt8
         public let entryUpdate: GutterEntryUpdate
+        public let authorshipUpdate: GutterAuthorshipUpdate?
 
         /// Creates one unresolved gutter transition from decoded wire fields.
-        public init(windowId: UInt16, contentRow: UInt16, contentCol: UInt16, contentHeight: UInt16, isActive: Bool, contentWidth: UInt16, cursorLine: UInt32, lineNumberStyle: LineNumberStyle, lineNumberWidth: UInt8, signColWidth: UInt8, entryUpdate: GutterEntryUpdate) {
+        public init(windowId: UInt16, contentRow: UInt16, contentCol: UInt16, contentHeight: UInt16, isActive: Bool, contentWidth: UInt16, cursorLine: UInt32, lineNumberStyle: LineNumberStyle, lineNumberWidth: UInt8, signColWidth: UInt8, entryUpdate: GutterEntryUpdate, authorshipUpdate: GutterAuthorshipUpdate? = nil) {
             self.windowId = windowId
             self.contentRow = contentRow
             self.contentCol = contentCol
@@ -1564,6 +1703,7 @@ public enum Wire {
             self.lineNumberWidth = lineNumberWidth
             self.signColWidth = signColWidth
             self.entryUpdate = entryUpdate
+            self.authorshipUpdate = authorshipUpdate
         }
 
         /// Creates a replacement transition from resolved gutter state.
@@ -1574,7 +1714,8 @@ public enum Wire {
                 isActive: gutter.isActive, contentWidth: gutter.contentWidth,
                 cursorLine: gutter.cursorLine, lineNumberStyle: gutter.lineNumberStyle,
                 lineNumberWidth: gutter.lineNumberWidth, signColWidth: gutter.signColWidth,
-                entryUpdate: .replace(gutter.entries)
+                entryUpdate: .replace(gutter.entries),
+                authorshipUpdate: gutter.authorship.map { .snapshot(revision: $0.revision, regions: $0.index.map(\.region)) }
             )
         }
 
@@ -1597,12 +1738,26 @@ public enum Wire {
                 entries = previousEntries
             }
 
+            let authorship: GutterAuthorship?
+            if let authorshipUpdate {
+                let identity = entries.residentIdentity
+                let sameSource = identity != nil && previous?.windowId == windowId &&
+                    identity?.contentEpoch == previous?.entries.residentIdentity?.contentEpoch
+                guard let resolved = authorshipUpdate.resolved(
+                    reusing: sameSource ? previous?.authorship : nil,
+                    sourceLineCount: identity?.lineCount
+                ) else { return nil }
+                authorship = resolved
+            } else {
+                authorship = nil
+            }
+
             return WindowGutter(
                 windowId: windowId, contentRow: contentRow, contentCol: contentCol,
                 contentHeight: contentHeight, isActive: isActive, contentWidth: contentWidth,
                 cursorLine: cursorLine, lineNumberStyle: lineNumberStyle,
                 lineNumberWidth: lineNumberWidth, signColWidth: signColWidth,
-                entries: entries
+                entries: entries, authorship: authorship
             )
         }
     }

@@ -1,0 +1,152 @@
+{
+ "authorship": [
+  {
+   "column": 0,
+   "head": false,
+   "role": 3,
+   "row": 1,
+   "shared": false
+  },
+  {
+   "column": 0,
+   "head": true,
+   "role": 0,
+   "row": 2,
+   "shared": false
+  },
+  {
+   "column": 0,
+   "head": false,
+   "role": 0,
+   "row": 3,
+   "shared": false
+  }
+ ],
+ "elements": [
+  {
+   "frame": [
+    79,
+    67,
+    1338.5,
+    825.5
+   ],
+   "label": "storyboard.ex, pane 1",
+   "role": "AXTextArea",
+   "value": "defmodule Limits do\n  def within_limit?(count) do\n    count >= 0 and\n      count < 90\n  end\nend\n"
+  }
+ ],
+ "grid": {
+  "cols": 177,
+  "rows": 43
+ },
+ "parts": [
+  {
+   "baseline": 21,
+   "frame": [
+    276,
+    9.5,
+    78,
+    15
+   ],
+   "part": "tabBar.tabLabel",
+   "text": "storyboard.ex"
+  },
+  {
+   "frame": [
+    0,
+    904,
+    1440,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    6,
+    904,
+    61,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "mode: NORMAL"
+  },
+  {
+   "frame": [
+    75,
+    904,
+    71,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "needs_you: Needs you"
+  },
+  {
+   "frame": [
+    154,
+    904,
+    86,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filename: storyboard.ex \u25cf"
+  },
+  {
+   "frame": [
+    248,
+    904,
+    72,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "minga: Minga here"
+  },
+  {
+   "frame": [
+    1386,
+    904,
+    26,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filetype: Elixir"
+  },
+  {
+   "frame": [
+    1420,
+    904,
+    14,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "position: 1:1"
+  },
+  {
+   "frame": [
+    6,
+    907,
+    61,
+    18
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "baseline": 919.5,
+   "frame": [
+    12,
+    909,
+    49,
+    14
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  }
+ ],
+ "scenario": "edit.working",
+ "size": "1440",
+ "theme": "catppuccin_latte",
+ "window": {
+  "height": 928,
+  "width": 1440
+ }
+}

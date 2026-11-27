@@ -63,6 +63,8 @@ defmodule MingaEditor.Commands.Movement do
     {:nav_first_child, "Move to first child AST node", true},
     {:nav_next_sibling, "Move to next sibling AST node", true},
     {:nav_prev_sibling, "Move to previous sibling AST node", true},
+    {:next_minga_change, "Next Minga change", true},
+    {:prev_minga_change, "Previous Minga change", true},
     {:paragraph_forward, "Move to next paragraph", true},
     {:paragraph_backward, "Move to previous paragraph", true},
     {:half_page_down, "Scroll half page down", true},
@@ -84,7 +86,31 @@ defmodule MingaEditor.Commands.Movement do
     {:describe_key, "Describe key binding", true}
   ]
 
-  @spec execute(state(), Mode.command()) :: state()
+  @spec execute(
+          state(),
+          Mode.command()
+          | {:next_minga_change, pid(), non_neg_integer(), pos_integer(), non_neg_integer()}
+        ) :: state()
+
+  def execute(state, command) when command in [:next_minga_change, :prev_minga_change],
+    do: execute(state, {command, 1})
+
+  def execute(state, {:next_minga_change, buffer, version, revision, point}) do
+    case Buffer.move_to_presented_review_change(buffer, version, revision, point) do
+      {:ok, _position} -> reset_desired_col(state)
+      _unchanged -> state
+    end
+  end
+
+  def execute(%{workspace: %{buffers: %{active: buffer}}} = state, {command, count})
+      when command in [:next_minga_change, :prev_minga_change] do
+    direction = if command == :next_minga_change, do: :next, else: :previous
+
+    case Buffer.move_to_review_change(buffer, direction, count) do
+      {:ok, _position} -> reset_desired_col(state)
+      :at_boundary -> state
+    end
+  end
 
   # ── h / l (mode-aware) ────────────────────────────────────────────────────
 

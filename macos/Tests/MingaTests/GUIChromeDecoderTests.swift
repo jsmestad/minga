@@ -1867,6 +1867,42 @@ struct GUIGutterDecoderTests {
         #expect(identity == Wire.ResidentGutterIdentity(contentEpoch: 7, lineCount: 100))
     }
 
+    @Test("Authorship patch keeps the exact selected region against the committed base")
+    func decodeResidentGutterAuthorshipPatch() throws {
+        let snapshot = Data([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5])
+        let patch = Data([2, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 6])
+        let pending = Data([0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 41, 0, 0, 0, 5, 0, 0, 0, 2, 0, 0, 0, 6])
+        let kept = Data([0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 2, 0, 0, 0, 6])
+        let human = Data([0, 1, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 4, 0, 0, 0, 7])
+        func decode(_ sections: [(UInt8, Data)], retain: Bool) throws -> Wire.WindowGutterUpdate {
+            var data = residentGutterData(epoch: 7, lineCount: 100, retain: retain, overrides: retain ? nil : [])
+            data[1] += UInt8(sections.count)
+            for (id, section) in sections {
+                data.append(contentsOf: buildSectionData(id, section))
+            }
+            let command = try decodeCommand(data: data, offset: 0).0
+            guard case .guiGutter(let update) = command else { throw ProtocolDecodeError.malformed }
+            return update
+        }
+
+        let startUpdate = try decode([(0x06, snapshot), (0x07, pending), (0x07, human)], retain: false)
+        let start = try #require(startUpdate.resolved(reusing: nil))
+        let keep = try decode([(0x06, patch), (0x07, kept), (0x08, pending)], retain: true)
+        let settled = try #require(keep.resolved(reusing: start))
+        let region = try #require(settled.authorship?.region(at: 5, pin: false, continuation: false)?.region)
+        #expect(region.role == .kept && region.unit == 0)
+        #expect(region.firstLine == 5 && region.firstColumn == 2 && region.lastLine == 6)
+        #expect(start.authorship?.region(at: 5, pin: false, continuation: false)?.region.unit == 41)
+        let shared = try #require(start.authorship?.region(at: 6, pin: true, continuation: false))
+        #expect(shared.region.unit == 41 && shared.head && shared.shared)
+        let humanOnly = try #require(settled.authorship?.region(at: 7, pin: false, continuation: false))
+        #expect(humanOnly.region.role == .you && !humanOnly.head && !humanOnly.shared)
+        #expect(keep.resolved(reusing: settled) == nil)
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decode([(0x07, kept)], retain: false)
+        }
+    }
+
     @Test("Resident gutter replacement requires explicit complete override section")
     func residentReplacementRequiresOverridesSection() {
         #expect(throws: ProtocolDecodeError.self) {

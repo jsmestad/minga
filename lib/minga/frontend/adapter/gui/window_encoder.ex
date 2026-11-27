@@ -70,6 +70,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   alias Minga.RenderModel.Window.DiagnosticRange
   alias Minga.RenderModel.Window.DocumentHighlight
   alias Minga.RenderModel.Window.Gutter
+  alias Minga.RenderModel.Window.Gutter.Authorship
   alias Minga.RenderModel.Window.GutterEntry
   alias Minga.RenderModel.Window.HitRegion
   alias Minga.RenderModel.Window.IndentGuides
@@ -121,6 +122,10 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @section_gutter_entries 0x03
   @section_gutter_resident 0x04
   @section_gutter_overrides 0x05
+  @section_gutter_authorship 0x06
+  @section_gutter_authorship_added 0x07
+  @section_gutter_authorship_removed 0x08
+  @authored_regions_per_section div(65_535 - 2, 21)
   @no_fold_range 0xFFFF_FFFF
 
   @typedoc "Per-section byte metrics for encoded window content."
@@ -213,14 +218,17 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @doc "Encodes per-frame window metadata that the GUI clears and rebuilds every batch."
   @spec encode_frame_metadata(RenderWindow.t()) :: [binary()]
   def encode_frame_metadata(%RenderWindow{} = window) do
-    {commands, _metrics} = encode_frame_metadata_with_metrics(window)
+    authorship = if window.gutter, do: window.gutter.authorship
+    update = Authorship.update(nil, authorship)
+    {commands, _metrics} = encode_frame_metadata_with_metrics(window, false, update)
     commands
   end
 
   @doc "Encodes per-frame window metadata with byte metrics."
-  @spec encode_frame_metadata_with_metrics(RenderWindow.t(), boolean()) :: {[binary()], metrics()}
-  def encode_frame_metadata_with_metrics(%RenderWindow{} = window, retain_gutter? \\ false) do
-    gutter = encode_gutter(window.gutter, retain_gutter?)
+  @spec encode_frame_metadata_with_metrics(RenderWindow.t(), boolean(), Authorship.update()) ::
+          {[binary()], metrics()}
+  def encode_frame_metadata_with_metrics(%RenderWindow{} = window, retain_gutter?, authorship) do
+    gutter = encode_gutter(window.gutter, retain_gutter?, authorship)
 
     text_presentation =
       case encode_text_presentation(window) do
@@ -1129,14 +1137,16 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
 
   @doc "Encodes ownership retirement for a previously committed gutter."
   @spec encode_retired_gutter(Gutter.t()) :: binary()
-  def encode_retired_gutter(%Gutter{} = gutter), do: encode_gutter_binary(gutter, false)
+  def encode_retired_gutter(%Gutter{} = gutter), do: encode_gutter_binary(gutter, false, :absent)
 
-  @spec encode_gutter(Gutter.t() | nil, boolean()) :: [binary()]
-  defp encode_gutter(nil, _retain?), do: []
-  defp encode_gutter(%Gutter{} = gutter, retain?), do: [encode_gutter_binary(gutter, retain?)]
+  @spec encode_gutter(Gutter.t() | nil, boolean(), Authorship.update()) :: [binary()]
+  defp encode_gutter(nil, _retain?, _authorship), do: []
 
-  @spec encode_gutter_binary(Gutter.t(), boolean()) :: binary()
-  defp encode_gutter_binary(%Gutter{} = gutter, retain?) do
+  defp encode_gutter(%Gutter{} = gutter, retain?, authorship),
+    do: [encode_gutter_binary(gutter, retain?, authorship)]
+
+  @spec encode_gutter_binary(Gutter.t(), boolean(), Authorship.update()) :: binary()
+  defp encode_gutter_binary(%Gutter{} = gutter, retain?, authorship) do
     command = :gui_gutter
 
     window_payload =
@@ -1163,7 +1173,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       [
         encode_gutter_section(@section_gutter_window, window_payload),
         encode_gutter_section(@section_gutter_config, config_payload)
-      ] ++ gutter_entry_sections(gutter.entries, retain?)
+      ] ++ gutter_entry_sections(gutter.entries, retain?) ++ authorship_sections(authorship)
 
     command
     |> Writer.new()
@@ -1232,6 +1242,83 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       |> Writer.finish()
 
     encode_gutter_section(section, payload)
+  end
+
+  @spec authorship_sections(Authorship.update()) :: [binary()]
+  defp authorship_sections(:absent), do: []
+
+  defp authorship_sections({:snapshot, revision, regions}) do
+    [
+      authorship_header(0, 0, revision)
+      | authored_region_sections(@section_gutter_authorship_added, regions)
+    ]
+  end
+
+  defp authorship_sections({:retain, revision}), do: [authorship_header(1, revision, revision)]
+
+  defp authorship_sections({:patch, base, revision, added, removed}) do
+    [
+      authorship_header(2, base, revision)
+      | authored_region_sections(@section_gutter_authorship_added, added) ++
+          authored_region_sections(@section_gutter_authorship_removed, removed)
+    ]
+  end
+
+  @spec authorship_header(0..2, non_neg_integer(), pos_integer()) :: binary()
+  defp authorship_header(kind, base, revision) do
+    payload =
+      :gui_gutter
+      |> Writer.new()
+      |> Writer.uint8(:authorship_kind, kind)
+      |> Writer.uint64(:authorship_base, base)
+      |> Writer.uint64(:authorship_revision, revision)
+      |> Writer.finish()
+
+    encode_gutter_section(@section_gutter_authorship, payload)
+  end
+
+  @spec authored_region_sections(non_neg_integer(), [Authorship.region()]) :: [binary()]
+  defp authored_region_sections(section, regions) do
+    regions
+    |> Enum.chunk_every(@authored_regions_per_section)
+    |> Enum.map(fn chunk ->
+      writer = :gui_gutter |> Writer.new() |> Writer.uint16(:authored_region_count, length(chunk))
+      payload = chunk |> Enum.reduce(writer, &encode_authored_region(&2, &1)) |> Writer.finish()
+      encode_gutter_section(section, payload)
+    end)
+  end
+
+  @spec encode_authored_region(Writer.t(), Authorship.region()) :: Writer.t()
+  defp encode_authored_region(writer, {:text, unit, {line, column}, last}),
+    do: write_authored_region(writer, 0, unit, line, column, last)
+
+  defp encode_authored_region(writer, {:gap, unit, {line, column}}),
+    do: write_authored_region(writer, 1, unit, line, column, line)
+
+  defp encode_authored_region(writer, {:kept, {line, column}, last}),
+    do: write_authored_region(writer, 2, 0, line, column, last)
+
+  defp encode_authored_region(writer, {:you, {line, column}, last}),
+    do: write_authored_region(writer, 3, 0, line, column, last)
+
+  defp encode_authored_region(writer, {:shared, {line, column}, last}),
+    do: write_authored_region(writer, 4, 0, line, column, last)
+
+  @spec write_authored_region(
+          Writer.t(),
+          0..4,
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: Writer.t()
+  defp write_authored_region(writer, role, unit, line, column, last) do
+    writer
+    |> Writer.uint8(:authored_role, role)
+    |> Writer.uint64(:review_unit, unit)
+    |> Writer.uint32(:authored_first_line, line)
+    |> Writer.uint32(:authored_first_column, column)
+    |> Writer.uint32(:authored_last_line, last)
   end
 
   @spec encode_gutter_section(non_neg_integer(), binary()) :: binary()

@@ -174,10 +174,15 @@ public final class ThemeColors {
     // ── Design token colour roles (docs/design_tokens.toml) ──
     /// Colours for the design token roles, keyed by role. Filled from the role slots of gui_theme.
     public private(set) var roleColors: [ColorRole: Color] = [:]
+    private var roleRGB: [ColorRole: UInt32] = [:]
 
     /// The theme's colour for a design token colour role. Before the first gui_theme arrives, roles draw in the editor foreground.
     public func roleColor(_ role: ColorRole) -> Color {
         roleColors[role] ?? editorFg
+    }
+
+    public func roleColorRGB(_ role: ColorRole) -> UInt32 {
+        roleRGB[role] ?? editorFgRGB
     }
 
     /// The theme's colour for a state, through the state's colour role.
@@ -235,6 +240,7 @@ public final class ThemeColors {
     private func applySlot(_ slot: UInt8, color c: Color, rgb: UInt32) {
         if let role = ColorRole(rawValue: slot) {
             roleColors[role] = c
+            roleRGB[role] = rgb
             return
         }
 

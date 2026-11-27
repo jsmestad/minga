@@ -511,6 +511,26 @@ defmodule MingaEditor.Commands.Helpers do
 
   @doc "Applies a delete or yank operator over a text object range."
   @spec apply_text_object(state(), atom(), term(), text_object_action()) :: state()
+  def apply_text_object(
+        %{workspace: %{buffers: %{active: buf}}} = state,
+        modifier,
+        :minga_change,
+        action
+      ) do
+    case Buffer.review_text_object(buf, modifier, action) do
+      {:operated, kind, text, {first, last}} when action == :yank ->
+        state
+        |> put_register(text, :yank, kind)
+        |> maybe_start_yank_flash(buf, first, last, kind)
+
+      {:operated, kind, text, _range} ->
+        put_register(state, text, :delete, kind)
+
+      :empty ->
+        state
+    end
+  end
+
   def apply_text_object(%{workspace: %{buffers: %{active: buf}}} = state, modifier, spec, action) do
     gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
@@ -654,6 +674,13 @@ defmodule MingaEditor.Commands.Helpers do
     capture = Atom.to_string(type) <> ".around"
     tree_data = request_textobject(buffer_pid, line, col, capture, parser_manager)
     CoreEditing.select_structural_around(tree_data)
+  end
+
+  def compute_text_object_range(_buf, _pos, modifier, :minga_change, buffer_pid, _manager) do
+    case Buffer.review_text_object(buffer_pid, modifier, :range) do
+      {:range, first, last} -> {first, last}
+      :empty -> nil
+    end
   end
 
   def compute_text_object_range(_buf, _pos, _modifier, _spec, _buffer_pid, _manager), do: nil

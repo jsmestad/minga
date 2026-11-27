@@ -6,11 +6,19 @@ defmodule Minga.Buffer.Provenance.Run do
 
   `covered_by` lists the deleters in `deletions` whose deletion a cover added: they consumed a replacement and this text went with it. The run is dead because of them, but they never rewrote it, so they never block an undo or a reject. `swept_by` lists the deleters in `deletions` that deleted the run when it was already a tombstone strictly inside their range: they never removed it while it was visible. A direct deletion of visible text clears the group from both lists.
 
+  `direct_gaps` names deletions that removed visible bytes without inserting a replacement. A later sweep can add a replacement link to such a run but does not change that deletion's shape.
+
+  `gap_origins` tracks the preimage of a direct Minga deletion or replacement. Old checkpoints can name a gap without proving its origin.
+
+  `kept?` is a display fact from an explicit review decision. It does not keep a group actionable or add a dependency to undo.
+
+  `origin` identifies an insertion or replacement, its relative source offset, and the full byte length of that side of the operation. Kept deletion anchors use it for the retained preimage identity. Origins survive run splits and locator renumbering independently of their undo group.
+
   `made_by` names the replacement (`Minga.Buffer.Provenance.Change`) that inserted the run, if it has a record, and `replaced_by` every replacement that marked it dead, newest first.
 
   A live run's text is in the document, so the run keeps only its length. A dead run (a tombstone) is not in the document, so it keeps its own text; restoring it puts that text back exactly. A tombstone takes no bytes in the document.
 
-  A zero-byte entry is a compacted replacement anchor. It carries no text and can never become live; its locator keeps the reachability of a draft that a later replacement may span.
+  A zero-byte entry is either a compacted replacement anchor that carries history links, or a kept deletion mark with no history links. Neither can ever become live or retain deleted text.
 
   `Minga.Buffer.Provenance` is the only writer of runs.
   """
@@ -31,7 +39,11 @@ defmodule Minga.Buffer.Provenance.Run do
     made_by: nil,
     replaced_by: [],
     covered_by: [],
-    swept_by: []
+    swept_by: [],
+    direct_gaps: [],
+    gap_origins: [],
+    kept?: false,
+    origin: nil
   ]
 
   @typedoc """
@@ -49,6 +61,8 @@ defmodule Minga.Buffer.Provenance.Run do
   @typedoc "A history group, as numbered by `Minga.Buffer.Provenance`."
   @type group_id :: pos_integer()
 
+  @type origin :: {:insert | :replace | :delete, pos_integer(), non_neg_integer(), pos_integer()}
+
   @type t :: %__MODULE__{
           id: Locator.t(),
           bytes: non_neg_integer(),
@@ -61,7 +75,11 @@ defmodule Minga.Buffer.Provenance.Run do
           made_by: Change.id() | nil,
           replaced_by: [Change.id()],
           covered_by: [group_id()],
-          swept_by: [group_id()]
+          swept_by: [group_id()],
+          direct_gaps: [group_id()],
+          gap_origins: [{group_id(), origin()}],
+          kept?: boolean(),
+          origin: origin() | nil
         }
 
   @doc "Returns how many bytes the run takes in the document: its length when live, zero when it is a tombstone."

@@ -1652,3 +1652,174 @@ pairs = [
 ]
 reason = "The existing Normal pill and the syntax palette for Elixir functions, strings, punctuation and module names remain visible behind the prompt."
 issue = 4137
+
+# First baselines for the in-file review fixtures: exact existing contrast debt only.
+[[exception]]
+scenario = "minga.review.in_file"
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = ["#414559 on #303446"]
+reason = "Existing muted code-area ink in Frappé misses text contrast."
+issue = 4137
+
+[[exception]]
+scenario = "edit.working"
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#04a5e5 on #eff1f5", "#87afd0 on #eff1f5", "#a28dd5 on #eff1f5", "#cca386 on #eff1f5", "#df8e1d on #eff1f5", "#fe640b on #eff1f5"]
+reason = "Existing Latte operator, keyword, module and numeral ink misses 4.5:1; the native sampler also counts operator and module glyph edge pixels."
+issue = 4137
+
+[[exception]]
+scenario = "minga.review.in_file"
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#ccd0da on #eff1f5"]
+reason = "The existing neutral code-area ink misses text contrast in Latte."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.working", "minga.review.in_file"]
+frontend = "macos"
+part = "modeline.modePill"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#eff1f5 on #1e66f5"]
+reason = "The existing Latte Normal pill misses text contrast."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.working", "minga.review.in_file"]
+frontend = "macos"
+part = "modeline.modeText"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#eff1f5 on #1e66f5"]
+reason = "The existing Latte Normal label misses text contrast."
+issue = 4137
+
+[[exception]]
+scenario = "edit.working"
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#d35400 on #e6e9ef"]
+reason = "The existing Latte Needs You role misses text contrast."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.working", "minga.review.in_file"]
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#8839ef on #e6e9ef", "#eff1f5 on #1e66f5"]
+reason = "The existing Minga status and Normal label miss text contrast in Latte."
+issue = 4137
+
+[[exception]]
+scenario = "edit.working"
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "astrodark"
+pairs = ["#595c66 on #1e222a"]
+reason = "Existing muted Astrodark editor glyphs miss non-text contrast on the active row."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.working", "minga.review.in_file"]
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "astrodark"
+pairs = ["#3a3e47 on #1a1d23", "#595c66 on #1a1d23"]
+reason = "Existing muted Astrodark editor glyphs miss non-text contrast on the code surface."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.working", "minga.review.in_file"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "astrodark"
+pairs = ["#595c66 on #1a1d23"]
+reason = "Existing muted Astrodark editor text misses text contrast."
+issue = 4137
+
+[[exception]]
+scenario = "edit.working"
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = ["#838ba7 on #414559"]
+reason = "Existing muted Frappé editor glyphs miss non-text contrast on the active row."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.working", "minga.review.in_file"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = ["#838ba7 on #303446", "#8caaee on #414559", "#c6d0f5 on #626880", "#ca9ee6 on #626880"]
+reason = "Existing muted and syntax ink and selected text miss text contrast in Frappé."
+issue = 4137
+
+[[exception]]
+scenario = "edit.working"
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#8c8fa1 on #ccd0da"]
+reason = "Existing muted Latte editor glyphs miss non-text contrast on the active row."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.working", "minga.review.in_file"]
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#8c8fa1 on #eff1f5"]
+reason = "Existing muted Latte editor glyphs miss non-text contrast on the code surface."
+issue = 4137
+
+[[exception]]
+scenario = "edit.working"
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#04a5e5 on #eff1f5", "#d35400 on #e6e9ef"]
+reason = "The existing Latte operator ink and Needs You label miss text contrast."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.working", "minga.review.in_file"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#1e66f5 on #ccd0da", "#1e66f5 on #eff1f5", "#4c4f69 on #acb0be", "#8839ef on #acb0be", "#8839ef on #e6e9ef", "#8c8fa1 on #eff1f5", "#a86d10 on #eff1f5", "#df8e1d on #eff1f5", "#eff1f5 on #1e66f5", "#fe640b on #eff1f5"]
+reason = "The existing Latte syntax, active-row and selection ink, Normal label and Minga status miss text contrast."
+issue = 4137
+
+[[exception]]
+scenario = "minga.review.in_file"
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#40a02b on #eff1f5", "#7287fd on #ccd0da"]
+reason = "The existing Latte string and active-row syntax ink miss text contrast."
+issue = 4137

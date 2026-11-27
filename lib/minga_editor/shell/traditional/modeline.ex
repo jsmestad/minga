@@ -77,6 +77,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           optional(:minga_file) => String.t() | nil,
           optional(:minga_here?) => boolean(),
           optional(:change_position) => {pos_integer(), pos_integer()} | nil,
+          optional(:change_target) => Segment.review_target() | nil,
           optional(:failed_language_servers) => [String.t()],
           optional(:config_problem) => String.t() | nil,
           optional(:keymap_server) => Minga.Keymap.server(),
@@ -519,7 +520,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   end
 
   # The position among Minga's changes in this file, while the cursor is inside one.
-  # The change gutter (#4050) supplies it and binds the key that jumps between changes.
+  # A displayed observation authorizes the same motion as ]h, from that cursor.
   @spec change_segment(context()) :: [Segment.t()]
   defp change_segment(ctx) do
     case Map.get(ctx.data, :change_position) do
@@ -528,9 +529,11 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           %Segment{
             id: :change,
             text: "change #{index}/#{total}",
-            fg: Theme.role_color(ctx.theme, :minga),
+            fg: ctx.bar_fg,
             bg: ctx.bar_bg,
             drop: @never,
+            target: Map.get(ctx.data, :change_target),
+            key: "]h",
             label: "Minga's change #{index} of #{total}"
           }
         ]

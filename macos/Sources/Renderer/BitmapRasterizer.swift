@@ -14,6 +14,7 @@
 import Foundation
 import CoreText
 import CoreGraphics
+import AppKit
 
 /// Result of a rasterization: a raw pointer to BGRA pixel data and
 /// the bytes-per-row stride. The pointer is valid until the next
@@ -123,6 +124,27 @@ final class BitmapRasterizer {
         // Draw the line.
         CTLineDraw(ctLine, ctx)
 
+        return RasterizeResult(pointer: UnsafeRawPointer(ptr), bytesPerRow: bytesPerRow)
+    }
+
+    /// Rasterizes one theme-colored canonical SVG into the atlas' BGRA format.
+    func rasterizeGutterTwist(_ image: NSImage, width: Int, height: Int) throws -> RasterizeResult {
+        let bytesPerRow = try checkedMultiply(width, 4)
+        let byteCount = try checkedMultiply(bytesPerRow, height)
+        try ensureCapacity(byteCount: byteCount)
+        guard let ptr = storage.pool else {
+            throw NativePresentationFailure(phase: .raster, dimension: .buffer, reason: .allocation)
+        }
+        memset(ptr, 0, byteCount)
+        // Text contexts carry the text scale. The SVG is already sized in pixels.
+        guard let ctx = factories.makeContext(ptr, width, height, bytesPerRow, colorSpace, bitmapInfo) else {
+            throw NativePresentationFailure(phase: .raster, dimension: .rasterContext, requested: byteCount, reason: .context)
+        }
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+        image.draw(in: NSRect(x: 0, y: 0, width: width, height: height),
+                   from: .zero, operation: .sourceOver, fraction: 1)
         return RasterizeResult(pointer: UnsafeRawPointer(ptr), bytesPerRow: bytesPerRow)
     }
 

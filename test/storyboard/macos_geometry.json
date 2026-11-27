@@ -46,6 +46,9 @@
         "tasks_drawer": {
           "rows": 31
         },
+        "tasks_drawer+agent_activity": {
+          "rows": 31
+        },
         "tasks_drawer+agent_chat+agent_activity": {
           "cols": 179,
           "rows": 29,
@@ -99,6 +102,9 @@
         },
         "tasks_drawer": {
           "rows": 25
+        },
+        "tasks_drawer+agent_activity": {
+          "rows": 26
         },
         "tasks_drawer+agent_chat+agent_activity": {
           "cols": 159,

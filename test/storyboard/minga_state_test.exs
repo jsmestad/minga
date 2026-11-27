@@ -8,10 +8,12 @@ defmodule Minga.Storyboard.MingaStateTest do
   import Minga.Test.Storyboard.Assertions
 
   alias Minga.Buffer.EditSource
+  alias Minga.Test.EditorCase
   alias Minga.Test.Storyboard.Check
   alias Minga.Test.Storyboard.Model
   alias Minga.Test.Storyboard.Registry
   alias Minga.Test.Storyboard.Session
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
 
   @moduletag :storyboard
 
@@ -71,7 +73,9 @@ defmodule Minga.Storyboard.MingaStateTest do
     actions = model.ui.status_bar.data.message_actions
     assert Enum.map(actions, &{&1.key, &1.label}) == [{"SPC a d", "Reject"}, {"SPC a y", "Keep"}]
 
-    kept = blocked |> Session.press("SPC a y") |> Session.model()
-    assert kept.echo == "Kept the blocking Minga change"
+    kept = Session.press(blocked, "SPC a y")
+    message = "Kept the blocking Minga change"
+    EditorCase.wait_until(kept.ctx, &(NoticeWorkflow.message(&1) == message))
+    assert Session.model(kept).echo == message
   end
 end

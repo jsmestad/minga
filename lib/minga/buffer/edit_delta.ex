@@ -98,33 +98,41 @@ defmodule Minga.Buffer.EditDelta do
     }
   end
 
+  @doc "Maps an inclusive line range through one edit without including an unrelated edit boundary."
   @spec transform_line_range(line_range() | nil, t()) :: line_range() | nil
-  defp transform_line_range(nil, _delta), do: nil
+  def transform_line_range(
+        range,
+        %__MODULE__{
+          start_position: {start, _},
+          old_end_position: {old_end, _},
+          new_end_position: {new_end, _}
+        }
+      ),
+      do: transform_range(range, start, old_end, new_end)
 
-  defp transform_line_range({_first, last} = range, %__MODULE__{start_position: {start, _}})
-       when last < start,
-       do: range
+  @doc "Maps an inclusive byte range through one edit without including an unrelated edit boundary."
+  @spec transform_byte_range(line_range(), t()) :: line_range()
+  def transform_byte_range(range, %__MODULE__{} = delta),
+    do: transform_range(range, delta.start_byte, delta.old_end_byte, delta.new_end_byte)
 
-  defp transform_line_range(
-         {first, last},
-         %__MODULE__{
-           old_end_position: {old_end, _},
-           new_end_position: {new_end, _}
-         }
-       )
-       when first > old_end do
+  @spec transform_range(
+          line_range() | nil,
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
+          line_range() | nil
+  defp transform_range(nil, _start, _old_end, _new_end), do: nil
+
+  defp transform_range({_first, last} = range, start, _old_end, _new_end) when last < start,
+    do: range
+
+  defp transform_range({first, last}, _start, old_end, new_end) when first > old_end do
     shift = new_end - old_end
     {first + shift, last + shift}
   end
 
-  defp transform_line_range(
-         {first, last},
-         %__MODULE__{
-           start_position: {start, _},
-           old_end_position: {old_end, _},
-           new_end_position: {new_end, _}
-         }
-       ) do
+  defp transform_range({first, last}, start, old_end, new_end) do
     shifted_last = if last > old_end, do: last + new_end - old_end, else: new_end
     {min(first, start), max(new_end, shifted_last)}
   end

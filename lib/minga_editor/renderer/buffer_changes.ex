@@ -118,7 +118,9 @@ defmodule MingaEditor.Renderer.BufferChanges do
         line_count: 1,
         change_sequence: 0,
         changes: :reset_required,
-        snapshot: nil
+        snapshot: nil,
+        review_lease: nil,
+        review_damage: :reset_required
       }
   end
 
@@ -152,7 +154,7 @@ defmodule MingaEditor.Renderer.BufferChanges do
               )
           end
 
-        {id, updated}
+        {id, ResidentWindowState.observe_review(updated, consumed)}
 
       pair ->
         pair

@@ -1047,7 +1047,8 @@ defmodule Minga.Buffer.AuthorshipTest do
 
         broken = %{
           history
-          | minga: [{999, {:minga, "t", "s"}}],
+          | groups_by_task: %{{:minga, "t"} => MapSet.new([999])},
+            pending_groups: %{999 => {:minga, "t", "s"}},
             task_ticks: %{{:minga, "t"} => 1}
         }
 

@@ -281,7 +281,7 @@ defmodule MingaEditor.Extension.GitDiff do
     # The origin names the captured target, even if that path now leads elsewhere.
     expected = Path.expand(origin.rel_path, origin.git_root)
 
-    if Git.Buffer.canonical_target(path) == expected,
+    if Git.Metadata.file_target(path) == expected,
       do: :ok,
       else: {:error, :stale_source}
   end

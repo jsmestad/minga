@@ -1145,6 +1145,54 @@ func TestDecodeResidentGutterRejectsSnapshotWithoutOverrideSection(t *testing.T)
 	}
 }
 
+func TestDecodeGutterAuthorshipChecksRevisionAndExactRegions(t *testing.T) {
+	window := section(0x01, []byte{0, 7, 0, 0, 0, 0, 0, 3, 1, 0, 80})
+	config := section(0x02, []byte{0, 0, 0, 1, 1, 4, 2})
+	patch := section(0x06, []byte{2, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 6})
+	keep := section(0x07, []byte{0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 2, 0, 0, 0, 6})
+	pending := section(0x08, []byte{0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 41, 0, 0, 0, 5, 0, 0, 0, 2, 0, 0, 0, 6})
+	decode := func(parts ...[]byte) Gutter {
+		packet := []byte{generated.OPGuiGutter, byte(len(parts) + 2)}
+		for _, part := range append([][]byte{window, config}, parts...) {
+			packet = append(packet, part...)
+		}
+		command, err := DecodeCommand(packet)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return command.Chrome.WindowGutter
+	}
+
+	t.Run("keep", func(t *testing.T) {
+		gutter := decode(patch, keep, pending)
+		if gutter.DecodeError != "" || gutter.AuthorshipUpdate == nil {
+			t.Fatalf("authorship patch was not decoded: %+v", gutter)
+		}
+		update := gutter.AuthorshipUpdate
+		if update.Base != 5 || update.Revision != 6 || len(update.Added) != 1 || len(update.Removed) != 1 {
+			t.Fatalf("wrong patch references: %+v", update)
+		}
+		if update.Added[0] != (AuthoredGutterRegion{Role: AuthoredGutterKept, FirstLine: 5, FirstColumn: 2, LastLine: 6}) ||
+			update.Removed[0] != (AuthoredGutterRegion{Role: AuthoredGutterPending, Unit: 41, FirstLine: 5, FirstColumn: 2, LastLine: 6}) {
+			t.Fatalf("wrong authored regions: %+v", update)
+		}
+	})
+
+	t.Run("regions without a header", func(t *testing.T) {
+		if decode(keep).DecodeError == "" {
+			t.Fatal("accepted an authored region without an update")
+		}
+	})
+
+	t.Run("deletion with no unit", func(t *testing.T) {
+		bad := append([]byte(nil), keep...)
+		bad[5] = AuthoredGutterDeletion
+		if decode(patch, bad).DecodeError == "" {
+			t.Fatal("accepted an unaddressable deletion")
+		}
+	})
+}
+
 func TestDecodeWindowOverlaySections(t *testing.T) {
 	header := section32(0x01, []byte{0, 7, 3, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 9})
 	rows := section32(0x02, []byte{0, 0, 0, 0})

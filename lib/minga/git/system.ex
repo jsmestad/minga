@@ -9,8 +9,11 @@ defmodule Minga.Git.System do
   @behaviour Minga.Git.Backend
 
   alias Minga.Git.Change
+  alias Minga.Git.Metadata
+  alias Minga.Git.ReviewIdentity
 
   @cmd_timeout 5_000
+  @typep review_transition :: {String.t() | :unborn, String.t()}
   @default_timeout_ms 2_000
   @status_timeout_ms 2_000
 
@@ -343,14 +346,327 @@ defmodule Minga.Git.System do
   end
 
   @impl true
-  @spec last_commit_message(String.t()) :: {:ok, String.t()} | :error
-  def last_commit_message(git_root) when is_binary(git_root) do
-    case git_cmd(["log", "-1", "--format=%B"], cd: git_root, stderr_to_stdout: true) do
-      {msg, 0} -> {:ok, String.trim(msg)}
-      _ -> :error
+  @spec head_commit(String.t()) :: {:ok, {String.t(), String.t()}} | :error
+  def head_commit(git_root) when is_binary(git_root) do
+    case git_cmd(["log", "-1", "--format=%H%x00%B", "HEAD", "--"],
+           cd: git_root,
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        case :binary.split(output, <<0>>) do
+          [oid, message] when byte_size(oid) in [40, 64] -> {:ok, {oid, String.trim(message)}}
+          _malformed -> :error
+        end
+
+      _failure ->
+        :error
     end
   rescue
     _ -> :error
+  end
+
+  @doc "Binds an exact file path to a fresh baseline in its own Git worktree."
+  @impl true
+  @spec review_baseline(String.t()) :: {:ok, ReviewIdentity.t()} | :error
+  def review_baseline("/" <> _ = path) do
+    with target when is_binary(target) <- Metadata.file_target(path),
+         directory = Path.dirname(target),
+         {:ok, root} <- review_location(directory, "--show-toplevel"),
+         {:ok, prefix} <- review_location(directory, "--show-prefix"),
+         relative = prefix <> Path.basename(target),
+         :ok <- Change.validate_path(relative),
+         {:ok, ref} <- review_ref(root) do
+      {:ok, {root, relative, ref}}
+    else
+      _not_proven -> :error
+    end
+  end
+
+  def review_baseline(_relative), do: :error
+
+  @spec review_location(String.t(), String.t()) :: {:ok, String.t()} | :error
+  defp review_location(directory, option) do
+    case review_git(directory, ["rev-parse", option], stderr_to_stdout: true) do
+      {output, 0} when byte_size(output) > 0 ->
+        size = byte_size(output) - 1
+
+        case output do
+          <<value::binary-size(^size), "\n">> -> {:ok, value}
+          _malformed -> :error
+        end
+
+      _not_git ->
+        :error
+    end
+  end
+
+  @doc "Reads the checked-out branch, commit and exact observed prefix of its reflog."
+  @spec review_ref(String.t()) :: {:ok, ReviewIdentity.ref()} | :error
+  def review_ref(root) do
+    with {:ok, ref} <- checked_out_review_ref(root),
+         {:ok, tip} <- review_tip(root, ref),
+         {:ok, entries} <- review_log(root, ref, tip),
+         {:ok, ^ref} <- checked_out_review_ref(root),
+         {:ok, ^tip} <- review_tip(root, ref) do
+      {:ok, {ref, tip, review_cursor(entries)}}
+    else
+      _unavailable -> :error
+    end
+  end
+
+  @doc "Returns recorded new commits on the current first-parent history of the same branch."
+  @spec review_transitions(String.t(), ReviewIdentity.ref()) ::
+          {:ok, [review_transition()]} | :error
+  def review_transitions(root, baseline) do
+    with {:ok, tip} <- review_ref(root), do: review_transitions(root, baseline, tip)
+  end
+
+  @doc "Returns only immutable ancestry edges recorded as new commits after the baseline."
+  @spec review_transitions(String.t(), ReviewIdentity.ref(), ReviewIdentity.ref()) ::
+          {:ok, [review_transition()]} | :error
+  def review_transitions(_root, same, same), do: {:ok, []}
+
+  def review_transitions(
+        root,
+        {ref, baseline, {count, _} = original},
+        {ref, tip, {seen, _} = end_at}
+      )
+      when is_binary(tip) and seen >= count do
+    with :ok <- validate_oid(tip),
+         {:ok, entries} <- review_log(root, ref, tip),
+         ^end_at <- review_cursor(entries),
+         {newest, prefix} = Enum.split(entries, seen - count),
+         ^original <- review_cursor(prefix),
+         {:ok, transitions} <- first_parent_transitions(root, baseline, tip) do
+      committed = commits_in_log(Enum.reverse(newest), baseline, %{})
+      {:ok, Enum.filter(transitions, &is_map_key(committed, &1))}
+    else
+      _unavailable -> :error
+    end
+  end
+
+  def review_transitions(_root, _baseline, _tip), do: :error
+
+  @spec review_log(String.t(), String.t(), String.t() | :unborn) ::
+          {:ok, [binary()]} | :error
+  defp review_log(_root, _ref, :unborn), do: {:ok, []}
+
+  defp review_log(root, ref, tip) do
+    case review_git(
+           root,
+           ["reflog", "show", "--no-show-signature", "--format=%H%x09%gs", ref, "--"],
+           stderr_to_stdout: true
+         ) do
+      {"", 0} ->
+        {:ok, []}
+
+      {output, 0} ->
+        review_entries(output, tip)
+
+      _unavailable ->
+        :error
+    end
+  end
+
+  @spec review_entries(binary(), String.t()) :: {:ok, [binary()]} | :error
+  defp review_entries(output, tip) do
+    with [entry | _] = entries <- :binary.split(output, "\n", [:global, :trim]),
+         [^tip, _action] <- :binary.split(entry, "\t") do
+      {:ok, entries}
+    else
+      _changed_or_missing -> :error
+    end
+  end
+
+  @spec review_cursor([binary()]) :: ReviewIdentity.cursor()
+  defp review_cursor(entries),
+    do: {length(entries), :crypto.hash(:sha256, Enum.intersperse(entries, "\n"))}
+
+  @spec commits_in_log([binary()], String.t() | :unborn, %{optional(review_transition()) => true}) ::
+          %{optional(review_transition()) => true}
+  defp commits_in_log([], _parent, edges), do: edges
+
+  defp commits_in_log([entry | rest], parent, edges) do
+    case :binary.split(entry, "\t") do
+      [oid, action] ->
+        edges =
+          if new_commit_action?(action), do: Map.put(edges, {parent, oid}, true), else: edges
+
+        commits_in_log(rest, oid, edges)
+
+      _malformed ->
+        %{}
+    end
+  end
+
+  @spec new_commit_action?(binary()) :: boolean()
+  defp new_commit_action?("commit: " <> _), do: true
+  defp new_commit_action?("commit (initial): " <> _), do: true
+  defp new_commit_action?("commit (merge): " <> _), do: true
+  defp new_commit_action?("cherry-pick: " <> _), do: true
+  defp new_commit_action?("revert: " <> _), do: true
+
+  defp new_commit_action?("merge " <> action),
+    do: :binary.match(action, ": Merge made by ") != :nomatch
+
+  defp new_commit_action?(_not_a_commit), do: false
+
+  @doc "Reads an exact regular-file path from an immutable commit. Absence is not a lookup failure."
+  @spec review_blob(String.t(), String.t() | :unborn, String.t()) ::
+          {:ok, binary() | nil} | :error
+  def review_blob(root, commit, path) when is_binary(commit) do
+    with :ok <- Change.validate_path(path),
+         :ok <- validate_oid(commit),
+         treeish = commit <> "^{commit}",
+         {entries, 0} <-
+           review_git(root, ["--literal-pathspecs", "ls-tree", "-z", treeish, "--", path]) do
+      exact_review_blob(root, entries, path)
+    else
+      _failure -> :error
+    end
+  end
+
+  def review_blob(_root, :unborn, _path), do: {:ok, nil}
+
+  @spec checked_out_review_ref(String.t()) :: {:ok, String.t()} | :error
+  defp checked_out_review_ref(root) do
+    case review_git(root, ["symbolic-ref", "--no-recurse", "--quiet", "HEAD"]) do
+      {"refs/heads/" <> _name = ref, 0} -> {:ok, String.trim_trailing(ref, "\n")}
+      _detached_or_unavailable -> :error
+    end
+  end
+
+  @spec review_tip(String.t(), String.t()) :: {:ok, String.t() | :unborn} | :error
+  defp review_tip(root, ref) do
+    case review_git(root, ["show-ref", "--hash", "--verify", ref], stderr_to_stdout: true) do
+      {output, 0} ->
+        verify_review_commit(root, String.trim_trailing(output, "\n"))
+
+      _unresolved ->
+        case review_git(root, ["show-ref", "--verify", "--quiet", ref]) do
+          {"", 1} -> {:ok, :unborn}
+          _lookup_failure -> :error
+        end
+    end
+  end
+
+  @spec verify_review_commit(String.t(), String.t()) :: {:ok, String.t()} | :error
+  defp verify_review_commit(root, oid) do
+    with :ok <- validate_oid(oid),
+         {"commit\n", 0} <- review_git(root, ["cat-file", "-t", oid], stderr_to_stdout: true) do
+      {:ok, oid}
+    else
+      _missing_or_not_commit -> :error
+    end
+  end
+
+  @spec first_parent_transitions(String.t(), String.t() | :unborn, String.t()) ::
+          {:ok, [{String.t() | :unborn, String.t()}]} | :error
+  defp first_parent_transitions(root, :unborn, tip) do
+    case review_git(root, ["rev-parse", "--is-shallow-repository"]) do
+      {"false\n", 0} -> read_first_parent_transitions(root, :unborn, tip, [])
+      _incomplete_history -> :error
+    end
+  end
+
+  defp first_parent_transitions(root, baseline, tip) do
+    case validate_oid(baseline) do
+      :ok -> read_first_parent_transitions(root, baseline, tip, ["^" <> baseline])
+      :error -> :error
+    end
+  end
+
+  @spec read_first_parent_transitions(String.t(), String.t() | :unborn, String.t(), [String.t()]) ::
+          {:ok, [{String.t() | :unborn, String.t()}]} | :error
+  defp read_first_parent_transitions(root, baseline, tip, exclusions) do
+    args = ["rev-list", "--first-parent", "--parents", "--reverse", tip | exclusions]
+
+    case review_git(root, args) do
+      {output, 0} ->
+        entries = :binary.split(output, "\n", [:global, :trim])
+        collect_first_parent_transitions(entries, baseline, tip, [])
+
+      _failure ->
+        :error
+    end
+  end
+
+  @spec collect_first_parent_transitions(
+          [binary()],
+          String.t() | :unborn,
+          String.t(),
+          [{String.t() | :unborn, String.t()}]
+        ) :: {:ok, [{String.t() | :unborn, String.t()}]} | :error
+  defp collect_first_parent_transitions([], tip, tip, acc), do: {:ok, Enum.reverse(acc)}
+  defp collect_first_parent_transitions([], _last, _tip, _acc), do: :error
+
+  defp collect_first_parent_transitions([entry | rest], previous, tip, acc) do
+    case :binary.split(entry, " ", [:global]) do
+      [commit, ^previous | _other_parents] ->
+        collect_first_parent_transitions(rest, commit, tip, [{previous, commit} | acc])
+
+      [commit] when previous == :unborn ->
+        collect_first_parent_transitions(rest, commit, tip, [{:unborn, commit} | acc])
+
+      _diverged ->
+        :error
+    end
+  end
+
+  @spec exact_review_blob(String.t(), binary(), String.t()) :: {:ok, binary() | nil} | :error
+  defp exact_review_blob(root, entries, path) do
+    case exact_path_metadata(entries, path) do
+      nil ->
+        {:ok, nil}
+
+      metadata ->
+        with [mode, "blob", oid] when mode in ["100644", "100755"] <-
+               :binary.split(metadata, " ", [:global]),
+             {bytes, 0} <- review_git(root, ["cat-file", "blob", oid]) do
+          {:ok, bytes}
+        else
+          _not_regular -> :error
+        end
+    end
+  end
+
+  @spec exact_path_metadata(binary(), String.t()) :: binary() | nil
+  defp exact_path_metadata(entries, path) do
+    entries
+    |> :binary.split(<<0>>, [:global, :trim])
+    |> Enum.find_value(fn entry ->
+      case :binary.split(entry, "\t") do
+        [metadata, ^path] -> metadata
+        _descendant -> nil
+      end
+    end)
+  end
+
+  @spec validate_oid(binary()) :: :ok | :error
+  defp validate_oid(oid) when byte_size(oid) in [40, 64] do
+    if String.match?(oid, ~r/\A[0-9a-f]+\z/), do: :ok, else: :error
+  end
+
+  defp validate_oid(_invalid), do: :error
+
+  # A hook can launch Minga with Git variables pointing at a different checkout.
+  @review_git_env [
+    {"GIT_DIR", nil},
+    {"GIT_COMMON_DIR", nil},
+    {"GIT_WORK_TREE", nil},
+    {"GIT_NAMESPACE", nil},
+    {"GIT_GRAFT_FILE", "/dev/null"},
+    {"GIT_SHALLOW_FILE", nil},
+    {"LC_ALL", "C"}
+  ]
+
+  @spec review_git(String.t(), [String.t()], keyword()) :: {binary(), non_neg_integer()}
+  defp review_git(root, args, opts \\ []) do
+    git_cmd(["--no-replace-objects", "-c", "advice.graftFileDeprecated=false" | args],
+      cd: root,
+      env: @review_git_env,
+      stderr_to_stdout: Keyword.get(opts, :stderr_to_stdout, false)
+    )
   end
 
   @impl true
@@ -623,7 +939,7 @@ defmodule Minga.Git.System do
   def current_branch(git_root) when is_binary(git_root) do
     # Read .git/HEAD directly to avoid spawning a subprocess.
     # Called at Git.Buffer init and on save (invalidate_base), not per-frame.
-    head_path = Path.join(git_root, ".git/HEAD")
+    head_path = Path.join(Metadata.directory(git_root), "HEAD")
 
     case File.read(head_path) do
       {:ok, "ref: refs/heads/" <> branch} ->

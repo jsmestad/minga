@@ -8,9 +8,9 @@
  ▌  storyboard.ex *
   / ❯ tmp ❯ minga-storyboard ❯ tui-120x40 ❯ minga.reject_all.confirm ❯ lib ❯ storyboard.ex
 ▾  3  defmodule UsageLimit do
-   2    def label, do: "Your plan limit applies"
-   1    def window, do: 45
-   4    def retry?, do: true
+   2 ▚  def label, do: "Your plan limit applies"
+   1 ▐  def window, do: 45
+   4 ▐  def retry?, do: true
    1  end
    2
       ~
@@ -72,7 +72,8 @@ Reject 3 changes from task plan-limit? Your edits stay.                         
 2 26-26 #c6d0f5 #303446 -
 2 27-28 #ca9ee6 #303446 bold
 2 29-119 #c6d0f5 #303446 -
-3 0-5 #949cbb #303446 -
+3 0-4 #949cbb #303446 -
+3 5-5 #ca9ee6 #574f6e -
 3 6-7 #c6d0f5 #303446 -
 3 8-10 #ca9ee6 #303446 bold
 3 11-11 #c6d0f5 #303446 -
@@ -82,7 +83,8 @@ Reject 3 changes from task plan-limit? Your edits stay.                         
 3 19-22 #e78284 #303446 -
 3 23-47 #a6d189 #303446 -
 3 48-119 #c6d0f5 #303446 -
-4 0-5 #949cbb #303446 -
+4 0-4 #949cbb #303446 -
+4 5-5 #ca9ee6 #574f6e -
 4 6-7 #c6d0f5 #303446 -
 4 8-10 #ca9ee6 #303446 bold
 4 11-11 #c6d0f5 #303446 -
@@ -92,7 +94,8 @@ Reject 3 changes from task plan-limit? Your edits stay.                         
 4 20-23 #e78284 #303446 -
 4 24-25 #ef9f76 #303446 -
 4 26-119 #c6d0f5 #303446 -
-5 0-5 #babbf1 #414559 bold
+5 0-4 #babbf1 #414559 bold
+5 5-5 #ca9ee6 #574f6e -
 5 6-7 #c6d0f5 #414559 -
 5 8-10 #ca9ee6 #303446 bold
 5 11-11 #c6d0f5 #414559 -

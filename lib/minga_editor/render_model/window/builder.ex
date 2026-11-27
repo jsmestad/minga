@@ -15,6 +15,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   window's content rect, with fold/wrap adjustments applied).
   """
 
+  alias Minga.Buffer
+  alias Minga.Buffer.RendererConsume
+  alias Minga.Buffer.ReviewDamage
   alias Minga.Config
   alias Minga.Core.Decorations
   alias Minga.Core.Decorations.BlockDecoration
@@ -52,6 +55,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias Minga.RenderModel.Window.DiagnosticRange
   alias Minga.RenderModel.Window.DocumentHighlight
   alias Minga.RenderModel.Window.Gutter
+  alias Minga.RenderModel.Window.Gutter.Authorship
   alias Minga.RenderModel.Window.Gutter.ResidentRows
   alias Minga.RenderModel.Window.GutterEntry
   alias Minga.RenderModel.Window.GutterMetrics
@@ -452,7 +456,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       diagnostic_ranges: diagnostic_ranges,
       document_highlights: doc_highlights,
       annotations: annotations,
-      gutter: build_gutter(scroll, ctx, content_kind, resident_entries, row_store_mode),
+      gutter:
+        build_gutter(scroll, ctx, content_kind, resident_entries, row_store_mode, state.frame_seq),
       cursorline:
         build_cursorline(content_row, display_cursor_row, is_active, cursor_on_screen?, ctx),
       indent_guides: build_indent_guides(scroll, ctx, content_kind, visual_entries),
@@ -2762,14 +2767,16 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           Context.t(),
           RenderWindow.content_kind(),
           [visual_row_entry()],
-          :windowed | {:resident, non_neg_integer()}
+          :windowed | {:resident, non_neg_integer()},
+          non_neg_integer() | nil
         ) :: Gutter.t() | nil
   defp build_gutter(
          %WindowScroll{} = scroll,
          %Context{} = ctx,
          content_kind,
          visual_entries,
-         row_store_mode
+         row_store_mode,
+         frame_seq
        )
        when content_kind in [:buffer, :agent_chat] do
     %WindowScroll{
@@ -2800,11 +2807,164 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       line_number_style: line_number_style,
       line_number_width: line_number_width,
       sign_col_width: sign_col_width,
-      entries: build_gutter_entries(scroll, ctx, line_count, visual_entries, row_store_mode)
+      entries: build_gutter_entries(scroll, ctx, line_count, visual_entries, row_store_mode),
+      authorship:
+        gutter_authorship(scroll, content_kind, visual_entries, row_store_mode, frame_seq)
     }
   end
 
-  defp build_gutter(_scroll, _ctx, _content_kind, _visual_entries, _mode), do: nil
+  defp build_gutter(_scroll, _ctx, _content_kind, _visual_entries, _mode, _frame_seq), do: nil
+
+  @spec gutter_authorship(
+          WindowScroll.t(),
+          RenderWindow.content_kind(),
+          [visual_row_entry()],
+          term(),
+          non_neg_integer() | nil
+        ) ::
+          Authorship.t() | nil
+  defp gutter_authorship(
+         %WindowScroll{
+           window: %{render_cache: %{review_lease: {buffer, version, _} = lease} = cache},
+           snapshot: %{version: version, line_count: line_count}
+         },
+         :buffer,
+         visual_entries,
+         row_store_mode,
+         frame_seq
+       ) do
+    ranges = authorship_ranges(row_store_mode, visual_entries, line_count)
+    coverage = if match?({:resident, _}, row_store_mode), do: :resident, else: :windowed
+
+    case {cache.gutter_authorship, cache.pending_review_damage, coverage} do
+      {%Authorship{lease: ^lease, ranges: ^ranges, coverage: ^coverage} = authorship, _, _} ->
+        authorship
+
+      {%Authorship{lease: base, coverage: :resident} = previous, {:since, base, semantic},
+       :resident} ->
+        deltas = cache.pending_edit_deltas
+        damage = ReviewDamage.merge_ranges(semantic, ReviewDamage.topology_ranges(deltas))
+
+        {damage, observed} = fetch_gutter_repairs!(buffer, lease, damage, version)
+
+        Authorship.patch(
+          previous,
+          {gutter_revision(frame_seq), lease, ranges},
+          damage,
+          observed,
+          deltas
+        )
+
+      {%Authorship{lease: ^lease, coverage: :windowed} = previous, _, :windowed} ->
+        reuse_windowed_authorship(previous, buffer, ranges, version, frame_seq)
+
+      {_, _, :windowed} ->
+        {covered, regions} = fetch_gutter_repairs!(buffer, lease, ranges, version)
+        Authorship.new(gutter_revision(frame_seq), lease, covered, regions, :windowed)
+
+      _reset_or_windowed ->
+        regions = fetch_gutter_authorship!(buffer, lease, ranges, version)
+
+        Authorship.new(
+          gutter_revision(frame_seq),
+          lease,
+          ranges,
+          regions,
+          coverage
+        )
+    end
+  end
+
+  defp gutter_authorship(_scroll, _content_kind, _visual_entries, _mode, _frame_seq), do: nil
+
+  # Like the text presentation, an authored projection belongs to one renderer submission.
+  @spec gutter_revision(non_neg_integer() | nil) :: pos_integer()
+  defp gutter_revision(nil), do: System.unique_integer([:positive, :monotonic])
+  defp gutter_revision(frame_seq), do: frame_seq + 1
+
+  @spec reuse_windowed_authorship(
+          Authorship.t(),
+          pid(),
+          [RendererConsume.line_range()],
+          non_neg_integer(),
+          non_neg_integer() | nil
+        ) :: Authorship.t()
+  defp reuse_windowed_authorship(previous, buffer, ranges, version, frame_seq) do
+    case ReviewDamage.missing_ranges(ranges, previous.ranges) do
+      [] ->
+        previous
+
+      missing ->
+        {fresh_ranges, fresh} = fetch_gutter_repairs!(buffer, previous.lease, missing, version)
+        cached = Authorship.overlapping(previous, ranges)
+        retained = ReviewDamage.merge_ranges(pending_extents(cached), fresh_ranges)
+        covered = ReviewDamage.merge_ranges(ranges, retained)
+        regions = Enum.uniq(fresh ++ Authorship.overlapping(previous, covered))
+        Authorship.new(gutter_revision(frame_seq), previous.lease, covered, regions, :windowed)
+    end
+  end
+
+  @spec pending_extents([RendererConsume.review_region()]) :: [RendererConsume.line_range()]
+  defp pending_extents(regions),
+    do: for({:text, _unit, {first, _}, last} <- regions, do: {first, last})
+
+  @spec fetch_gutter_repairs!(
+          pid(),
+          RendererConsume.review_lease(),
+          [RendererConsume.line_range()],
+          non_neg_integer()
+        ) :: {[RendererConsume.line_range()], [RendererConsume.review_region()]}
+  defp fetch_gutter_repairs!(_buffer, _lease, [], _version), do: {[], []}
+
+  defp fetch_gutter_repairs!(buffer, lease, damage, version) do
+    observed = fetch_gutter_authorship!(buffer, lease, damage, version)
+    expanded = ReviewDamage.merge_ranges(damage, pending_extents(observed))
+
+    if expanded == damage,
+      do: {damage, observed},
+      else: fetch_gutter_repairs!(buffer, lease, expanded, version)
+  end
+
+  @spec fetch_gutter_authorship!(
+          pid(),
+          RendererConsume.review_lease(),
+          [RendererConsume.line_range()],
+          non_neg_integer()
+        ) :: [RendererConsume.review_region()]
+  defp fetch_gutter_authorship!(buffer, lease, ranges, version) do
+    case Buffer.render_review_regions(buffer, lease, ranges) do
+      {:ok, regions} ->
+        regions
+
+      :stale ->
+        raise MingaEditor.Renderer.StaleBufferError, buffer: buffer, expected_version: version
+    end
+  catch
+    :exit, {reason, {GenServer, :call, _}} when reason != :timeout ->
+      raise MingaEditor.Renderer.StaleBufferError, buffer: buffer, expected_version: version
+  end
+
+  @spec authorship_ranges(term(), [visual_row_entry()], pos_integer()) ::
+          [RendererConsume.line_range()]
+  defp authorship_ranges({:resident, _count}, _entries, line_count), do: [{0, line_count - 1}]
+
+  defp authorship_ranges(:windowed, visual_entries, _line_count) do
+    visual_entries
+    |> Enum.reduce([], fn
+      %{row: %{row_type: kind}}, ranges when kind in [:virtual_line, :block] ->
+        ranges
+
+      %{buf_line: line}, ranges ->
+        case ranges do
+          [{first, last} | rest] when line <= last + 1 ->
+            [{first, max(last, line)} | rest]
+
+          _ ->
+            [{line, line} | ranges]
+        end
+    end)
+    |> Enum.reverse()
+  end
 
   @spec build_geometry(state(), WindowScroll.t(), RenderWindow.content_kind(), term()) ::
           PaneGeometry.t()

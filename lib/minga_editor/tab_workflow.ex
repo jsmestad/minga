@@ -18,6 +18,7 @@ defmodule MingaEditor.TabWorkflow do
   alias MingaEditor.Remote.EventReplay
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.InFileReview
   alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
@@ -78,7 +79,9 @@ defmodule MingaEditor.TabWorkflow do
           |> finish_switch(target)
           |> HighlightSync.ensure_active_buffer_presentation(old_buffer)
 
-        WorkspaceWorkflow.persist_changes(candidate, transitioned)
+        candidate
+        |> WorkspaceWorkflow.persist_changes(transitioned)
+        |> InFileReview.resume_ready()
     end
   end
 

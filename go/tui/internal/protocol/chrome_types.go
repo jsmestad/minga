@@ -740,19 +740,57 @@ type GutterSeparator struct {
 }
 
 type Gutter struct {
-	WindowID        uint16
-	ContentRow      uint16
-	ContentCol      uint16
-	ContentHeight   uint16
-	Active          bool
-	ContentWidth    uint16
-	CursorLine      uint32
-	LineNumberStyle byte
-	LineNumberWidth byte
-	SignColWidth    byte
-	Resident        *ResidentGutterEntries
-	Entries         []GutterEntry
-	DecodeError     string
+	WindowID         uint16
+	ContentRow       uint16
+	ContentCol       uint16
+	ContentHeight    uint16
+	Active           bool
+	ContentWidth     uint16
+	CursorLine       uint32
+	LineNumberStyle  byte
+	LineNumberWidth  byte
+	SignColWidth     byte
+	Resident         *ResidentGutterEntries
+	Entries          []GutterEntry
+	Authorship       *GutterAuthorship
+	AuthorshipUpdate *GutterAuthorshipUpdate
+	DecodeError      string
+}
+
+const (
+	GutterAuthorshipSnapshot byte = iota
+	GutterAuthorshipRetain
+	GutterAuthorshipPatch
+)
+
+const (
+	AuthoredGutterPending byte = iota
+	AuthoredGutterDeletion
+	AuthoredGutterKept
+	AuthoredGutterYou
+	AuthoredGutterShared
+)
+
+type AuthoredGutterRegion struct {
+	Role        byte
+	Unit        uint64
+	FirstLine   uint32
+	FirstColumn uint32
+	LastLine    uint32
+}
+
+// GutterAuthorship is the committed, immutable authored-region snapshot.
+type GutterAuthorship struct {
+	Revision uint64
+	regions  []indexedGutterRegion
+}
+
+type GutterAuthorshipUpdate struct {
+	Kind     byte
+	Base     uint64
+	Revision uint64
+	Added    []AuthoredGutterRegion
+	Removed  []AuthoredGutterRegion
 }
 
 // ResidentGutterEntries carries the document-sized gutter contract. Every

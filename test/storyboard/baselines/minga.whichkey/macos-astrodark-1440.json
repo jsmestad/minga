@@ -1,4 +1,27 @@
 {
+ "authorship": [
+  {
+   "column": 0,
+   "head": true,
+   "role": 0,
+   "row": 1,
+   "shared": false
+  },
+  {
+   "column": 0,
+   "head": false,
+   "role": 0,
+   "row": 2,
+   "shared": false
+  },
+  {
+   "column": 0,
+   "head": false,
+   "role": 0,
+   "row": 3,
+   "shared": false
+  }
+ ],
  "elements": [
   {
    "frame": [
@@ -114,7 +137,7 @@
    "frame": [
     304,
     751,
-    147,
+    134,
     137
    ],
    "part": "whichKey.column"
@@ -132,7 +155,7 @@
   },
   {
    "frame": [
-    475,
+    462,
     751,
     130,
     113
@@ -142,7 +165,7 @@
   {
    "baseline": 760.5,
    "frame": [
-    475,
+    462,
     751,
     25,
     13
@@ -174,7 +197,7 @@
    "frame": [
     304,
     768,
-    147,
+    134,
     24
    ],
    "part": "whichKey.entry",
@@ -182,7 +205,7 @@
   },
   {
    "frame": [
-    475,
+    462,
     768,
     130,
     24
@@ -226,7 +249,7 @@
   {
    "baseline": 784,
    "frame": [
-    490,
+    477,
     772.5,
     53,
     15
@@ -270,7 +293,7 @@
   {
    "baseline": 784,
    "frame": [
-    475,
+    462,
     773.5,
     7,
     14
@@ -313,15 +336,15 @@
    "frame": [
     304,
     792,
-    147,
+    134,
     24
    ],
    "part": "whichKey.entry",
-   "text": "y Keep blocking change"
+   "text": "y Keep Minga change"
   },
   {
    "frame": [
-    475,
+    462,
     792,
     130,
     24
@@ -356,16 +379,16 @@
    "frame": [
     319,
     796.5,
-    125,
+    112,
     15
    ],
    "part": "whichKey.entryLabel",
-   "text": "Keep blocking change"
+   "text": "Keep Minga change"
   },
   {
    "baseline": 808,
    "frame": [
-    490,
+    477,
     796.5,
     53,
     15
@@ -409,7 +432,7 @@
   {
    "baseline": 808,
    "frame": [
-    475,
+    462,
     797.5,
     7,
     14
@@ -441,15 +464,15 @@
    "frame": [
     304,
     816,
-    147,
+    134,
     24
    ],
    "part": "whichKey.entry",
-   "text": "d Reject blocking change"
+   "text": "d Reject Minga change"
   },
   {
    "frame": [
-    475,
+    462,
     816,
     130,
     24
@@ -484,16 +507,16 @@
    "frame": [
     319,
     820.5,
-    132,
+    119,
     15
    ],
    "part": "whichKey.entryLabel",
-   "text": "Reject blocking change"
+   "text": "Reject Minga change"
   },
   {
    "baseline": 832,
    "frame": [
-    490,
+    477,
     820.5,
     73,
     15
@@ -537,7 +560,7 @@
   {
    "baseline": 832,
    "frame": [
-    475,
+    462,
     821.5,
     7,
     14
@@ -569,7 +592,7 @@
    "frame": [
     304,
     840,
-    147,
+    134,
     24
    ],
    "part": "whichKey.entry",
@@ -577,7 +600,7 @@
   },
   {
    "frame": [
-    475,
+    462,
     840,
     130,
     24
@@ -632,7 +655,7 @@
   {
    "baseline": 856,
    "frame": [
-    490,
+    477,
     844.5,
     115,
     15
@@ -676,7 +699,7 @@
   {
    "baseline": 856,
    "frame": [
-    475,
+    462,
     845.5,
     7,
     14
@@ -688,7 +711,7 @@
    "frame": [
     304,
     864,
-    147,
+    134,
     24
    ],
    "part": "whichKey.entry",

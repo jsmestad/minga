@@ -8,9 +8,9 @@
  ▌  storyboard.ex *
   / ❯ tmp ❯ minga-storyboard ❯ tui-120x40 ❯ minga.whichkey ❯ lib ❯ storyboard.ex
 ▾  3  defmodule UsageLimit do
-   2    def label, do: "Your plan limit applies"
-   1    def window, do: 45
-   4    def retry?, do: true
+   2 ▚  def label, do: "Your plan limit applies"
+   1 ▐  def window, do: 45
+   4 ▐  def retry?, do: true
    1  end
    2
       ~
@@ -37,11 +37,11 @@
       ~
       ~
 ╭ SPC › a Minga · 1 needs you ─────────────────────────────────────────────────────────────────────────────────────────╮
-│ Tasks                   Conversation           Changes                    More                                       │
-│ a Tasks · 1 needs you   v Conversation split   r Pending reviews          x Context ›                                │
-│ n New task              ? Ask about this       y Keep blocking change     S Session ›                                │
-│ i Inspect subagent      e Rewrite selection    d Reject blocking change   W Why this line                            │
-│ s Stop                  q Queue ›              u Reject all…              A Code autobiography                       │
+│ Tasks                   Conversation           Changes                 More                                          │
+│ a Tasks · 1 needs you   v Conversation split   r Pending reviews       x Context ›                                   │
+│ n New task              ? Ask about this       y Keep Minga change     S Session ›                                   │
+│ i Inspect subagent      e Rewrite selection    d Reject Minga change   W Why this line                               │
+│ s Stop                  q Queue ›              u Reject all…           A Code autobiography                          │
 │                                                p Publish edits…                                                      │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────── ⌫ back  esc close ─╯
   NORMAL  ◉ Needs you storyboard.ex ● ◉ Minga                                                         SPC a Elixir 4:23
@@ -72,7 +72,8 @@
 2 26-26 #adb0bb #1a1d23 -
 2 27-28 #dd97f1 #1a1d23 bold
 2 29-119 #adb0bb #1a1d23 -
-3 0-5 #858892 #1a1d23 -
+3 0-4 #858892 #1a1d23 -
+3 5-5 #dd97f1 #4b3c57 -
 3 6-7 #adb0bb #1a1d23 -
 3 8-10 #dd97f1 #1a1d23 bold
 3 11-11 #adb0bb #1a1d23 -
@@ -82,7 +83,8 @@
 3 19-22 #4ac2b8 #1a1d23 -
 3 23-47 #87c05f #1a1d23 -
 3 48-119 #adb0bb #1a1d23 -
-4 0-5 #858892 #1a1d23 -
+4 0-4 #858892 #1a1d23 -
+4 5-5 #dd97f1 #4b3c57 -
 4 6-7 #adb0bb #1a1d23 -
 4 8-10 #dd97f1 #1a1d23 bold
 4 11-11 #adb0bb #1a1d23 -
@@ -92,7 +94,8 @@
 4 20-23 #4ac2b8 #1a1d23 -
 4 24-25 #f5983a #1a1d23 -
 4 26-119 #adb0bb #1a1d23 -
-5 0-5 #adb0bb #1e222a bold
+5 0-4 #adb0bb #1e222a bold
+5 5-5 #dd97f1 #4b3c57 -
 5 6-7 #adb0bb #1e222a -
 5 8-10 #dd97f1 #1a1d23 bold
 5 11-11 #adb0bb #1e222a -
@@ -170,10 +173,10 @@
 32 23-25 #adb0bb #14161b -
 32 26-45 #858892 #14161b -
 32 46-48 #adb0bb #14161b -
-32 49-72 #858892 #14161b -
-32 73-75 #adb0bb #14161b -
-32 76-95 #858892 #14161b -
-32 96-118 #adb0bb #14161b -
+32 49-69 #858892 #14161b -
+32 70-72 #adb0bb #14161b -
+32 73-92 #858892 #14161b -
+32 93-118 #adb0bb #14161b -
 32 119-119 #696c76 #14161b -
 33 0-0 #696c76 #14161b -
 33 1-1 #adb0bb #14161b -
@@ -184,11 +187,11 @@
 33 26-26 #50a4e9 #14161b -
 33 27-48 #adb0bb #14161b -
 33 49-49 #50a4e9 #14161b -
-33 50-75 #adb0bb #14161b -
-33 76-76 #50a4e9 #14161b -
-33 77-77 #adb0bb #14161b -
-33 78-86 #50a4e9 #14161b -
-33 87-118 #adb0bb #14161b -
+33 50-72 #adb0bb #14161b -
+33 73-73 #50a4e9 #14161b -
+33 74-74 #adb0bb #14161b -
+33 75-83 #50a4e9 #14161b -
+33 84-118 #adb0bb #14161b -
 33 119-119 #696c76 #14161b -
 34 0-0 #696c76 #14161b -
 34 1-1 #adb0bb #14161b -
@@ -197,11 +200,11 @@
 34 26-26 #50a4e9 #14161b -
 34 27-48 #adb0bb #14161b -
 34 49-49 #50a4e9 #14161b -
-34 50-75 #adb0bb #14161b -
-34 76-76 #50a4e9 #14161b -
-34 77-77 #adb0bb #14161b -
-34 78-86 #50a4e9 #14161b -
-34 87-118 #adb0bb #14161b -
+34 50-72 #adb0bb #14161b -
+34 73-73 #50a4e9 #14161b -
+34 74-74 #adb0bb #14161b -
+34 75-83 #50a4e9 #14161b -
+34 84-118 #adb0bb #14161b -
 34 119-119 #696c76 #14161b -
 35 0-0 #696c76 #14161b -
 35 1-1 #adb0bb #14161b -
@@ -210,9 +213,9 @@
 35 26-26 #50a4e9 #14161b -
 35 27-48 #adb0bb #14161b -
 35 49-49 #50a4e9 #14161b -
-35 50-75 #adb0bb #14161b -
-35 76-76 #50a4e9 #14161b -
-35 77-118 #adb0bb #14161b -
+35 50-72 #adb0bb #14161b -
+35 73-73 #50a4e9 #14161b -
+35 74-118 #adb0bb #14161b -
 35 119-119 #696c76 #14161b -
 36 0-0 #696c76 #14161b -
 36 1-1 #adb0bb #14161b -
@@ -223,9 +226,9 @@
 36 28-34 #50a4e9 #14161b -
 36 35-48 #adb0bb #14161b -
 36 49-49 #50a4e9 #14161b -
-36 50-75 #adb0bb #14161b -
-36 76-76 #50a4e9 #14161b -
-36 77-118 #adb0bb #14161b -
+36 50-72 #adb0bb #14161b -
+36 73-73 #50a4e9 #14161b -
+36 74-118 #adb0bb #14161b -
 36 119-119 #696c76 #14161b -
 37 0-0 #696c76 #14161b -
 37 1-48 #adb0bb #14161b -

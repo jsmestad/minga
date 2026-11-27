@@ -68,6 +68,379 @@ defmodule Minga.Buffer.ProvenanceTest do
                {4, 7, @task, @step_one}
              ]
     end
+
+    test "a later replacement does not hide a standalone deletion it sweeps over" do
+      {deletion, prov} = Provenance.open_group(Provenance.new(5), @task, @step_one)
+      prov = Provenance.edit(prov, deletion, 2, "c", "")
+      {replacement, prov} = Provenance.open_group(prov, @task, @step_two)
+      prov = Provenance.edit(prov, replacement, 1, "bd", "XY")
+
+      assert Provenance.review_sites(prov, 2, 3) == [{replacement, 1, 3}]
+      assert Provenance.review_sites(prov, 3, 4) == [{deletion, 3, 3}]
+
+      assert {:ok, document, _, parked} =
+               Provenance.revert(prov, replacement, Document.new("aXYe"))
+
+      assert Document.content(document) == "abde"
+      assert Provenance.review_sites(parked, 0, 4) == [{deletion, 2, 2}]
+
+      assert {:ok, _, _, reapplied} = Provenance.reapply(parked, replacement, document)
+      assert Provenance.review_sites(reapplied, 0, 4) == [{replacement, 1, 3}, {deletion, 3, 3}]
+    end
+
+    test "a same-step sweep preserves a direct gap through a bulk edit and restart" do
+      {step, prov} = Provenance.open_group(Provenance.new(5), @task, @step_one)
+      prov = Provenance.edit(prov, step, 2, "c", "")
+      prov = Provenance.edit_all(prov, step, [{1, "bd", "XY"}], :batch)
+
+      assert Provenance.review_sites(prov, 0, 4) == [{step, 1, 3}, {step, 3, 3}]
+      assert {:ok, restored} = Provenance.restore_snapshot(Provenance.snapshot(prov), 4)
+      assert Provenance.review_sites(restored, 3, 4) == [{step, 3, 3}]
+      assert Provenance.review_group_at(restored, 3) == step
+    end
+
+    test "partially compacting a replacement does not make the following byte actionable" do
+      {older, prov} = Provenance.open_group(Provenance.new(3), @task, @step_one)
+      prov = Provenance.edit(prov, older, 1, "x", "AB")
+      {other, prov} = Provenance.open_group(prov, {:minga, "other"}, {:minga, "other", "step"})
+      prov = Provenance.edit(prov, other, 2, "", "S")
+      {newer, prov} = Provenance.open_group(prov, @task, @step_two)
+      prov = Provenance.edit(prov, newer, 1, "A", "")
+
+      assert Provenance.review_group_at(prov, 3) == nil
+      assert {:ok, compacted, {^older, ^newer}, _} = Provenance.compact_oldest(prov)
+      assert Provenance.review_group_at(compacted, 3) == nil
+      assert {newer, 1, 1} in Provenance.review_sites(compacted, 1, 2)
+    end
+
+    test "compaction retains an exact net deletion but not a cancelled insertion" do
+      for removed <- ["X", ""] do
+        {older, prov} =
+          Provenance.open_group(Provenance.new(2 + byte_size(removed)), @task, @step_one)
+
+        prov = Provenance.edit(prov, older, 1, removed, "Y")
+        {newer, prov} = Provenance.open_group(prov, @task, @step_two)
+        prov = Provenance.edit(prov, newer, 1, "Y", "")
+
+        assert {:ok, compacted, {^older, ^newer}, _} = Provenance.compact_oldest(prov)
+        assert {:ok, recovered} = Provenance.restore_snapshot(Provenance.snapshot(compacted), 2)
+        expected = if removed == "", do: [], else: [{newer, 1, 1}]
+        assert Provenance.review_sites(compacted, 1, 2) == expected
+        assert Provenance.review_sites(recovered, 1, 2) == expected
+      end
+    end
+
+    test "a gap swept in a second compaction can still be reopened" do
+      {first, prov} = Provenance.open_group(Provenance.new(3), @task, @step_one)
+      prov = Provenance.edit(prov, first, 1, "b", "Y")
+      {second, prov} = Provenance.open_group(prov, @task, @step_two)
+      prov = Provenance.edit(prov, second, 1, "Y", "")
+      prov = Provenance.edit(prov, second, 0, "", "X")
+      assert {:ok, prov, {^first, ^second}, _} = Provenance.compact_oldest(prov)
+      assert {second, 2, 2} in Provenance.review_sites(prov, 2, 3)
+
+      {third, prov} = Provenance.open_group(prov, @task, {:minga, "task-1", "call-3"})
+      prov = Provenance.edit(prov, third, 0, "Xac", "")
+      assert {:ok, compacted, {^second, ^third}, _} = Provenance.compact_oldest(prov)
+
+      assert {:ok, recovered} = Provenance.restore_snapshot(Provenance.snapshot(compacted), 0)
+      assert Provenance.review_group_at(recovered, 0) == third
+    end
+
+    test "a v1 checkpoint recovers an unambiguous gap without turning replacement ends into gaps" do
+      {step, prov} = Provenance.open_group(Provenance.new(4), @task, @step_one)
+      prov = Provenance.edit(prov, step, 0, "a", "A")
+      prov = Provenance.edit(prov, step, 3, "d", "")
+
+      {:provenance_v4, next_group, next_change, groups, runs, changes, drafts, marks, faulted} =
+        Provenance.snapshot(prov)
+
+      v3_runs = Enum.map(runs, &(&1 |> Tuple.delete_at(13) |> Tuple.delete_at(12)))
+      v2_runs = Enum.map(v3_runs, &Tuple.delete_at(&1, 11))
+
+      assert {:ok, restored_v3} =
+               Provenance.restore_snapshot(
+                 {:provenance_v3, next_group, next_change, groups, v3_runs, changes, drafts,
+                  marks, faulted},
+                 3
+               )
+
+      assert Provenance.review_sites(restored_v3, 0, 3) == [{step, 0, 1}, {step, 3, 3}]
+
+      v2 =
+        {:provenance_v2, next_group, next_change, groups, v2_runs, changes, drafts, marks,
+         faulted}
+
+      assert {:ok, restored_v2} = Provenance.restore_snapshot(v2, 3)
+      assert Provenance.review_sites(restored_v2, 0, 3) == [{step, 0, 1}, {step, 3, 3}]
+      assert Provenance.strand_spans(restored_v2, 0, 3) == []
+
+      old =
+        {:provenance_v1, next_group, next_change, groups,
+         Enum.map(v2_runs, &Tuple.delete_at(&1, 10)), changes, drafts, marks, faulted}
+
+      assert {:ok, recovered} = Provenance.restore_snapshot(old, 3)
+      assert Provenance.review_sites(recovered, 0, 3) == [{step, 0, 1}, {step, 3, 3}]
+    end
+
+    test "only explicit Keep survives as a mark across checkpoint restore and a later rejected edit" do
+      {first, prov} = Provenance.open_group(Provenance.new(4), @task, @step_one)
+      prov = Provenance.edit(prov, first, 0, "a", "A")
+      prov = Provenance.keep_groups(prov, [first], [first])
+      {second, prov} = Provenance.open_group(prov, @task, @step_two)
+      prov = Provenance.edit(prov, second, 1, "b", "B")
+      prov = Provenance.discard(prov, second)
+
+      assert {:ok, prov} = Provenance.restore_snapshot(Provenance.snapshot(prov), 4)
+      assert Provenance.strand_spans(prov, 0, 4) == [{:kept, 0, 1}]
+      assert Provenance.review_sites(prov, 0, 4) == []
+
+      {other, prov} = Provenance.open_group(prov, @task, @step_two)
+      prov = Provenance.edit(prov, other, 0, "A", "Z")
+      assert Provenance.strand_spans(prov, 0, 4) == []
+      assert {:ok, restored, _, prov} = Provenance.revert(prov, other, Document.new("ZBcd"))
+      assert Document.content(restored) == "ABcd"
+      assert Provenance.strand_spans(prov, 0, 4) == [{:kept, 0, 1}]
+    end
+
+    test "kept insertion origins survive both edit paths, including bytes held by undo" do
+      {step, original} = Provenance.open_group(Provenance.new(2), @task, @step_one)
+      original = Provenance.edit(original, step, 1, "", "ABCDE")
+      kept = Provenance.keep_groups(original, [step], [step])
+
+      assert [%{origin: {:insert, source, 0, 5}, bytes: 5}] =
+               Enum.filter(Provenance.runs(kept), & &1.kept?)
+
+      for mode <- [:each, :batch] do
+        {user, prov} = Provenance.open_group(kept, :you, nil)
+        changed = Provenance.edit_all(prov, user, [{2, "B", "!"}, {4, "D", "?"}], mode)
+        assert {:ok, recovered} = Provenance.restore_snapshot(Provenance.snapshot(changed), 7)
+
+        assert [
+                 %{origin: {:insert, ^source, 0, 5}, live: true, bytes: 1},
+                 %{origin: {:insert, ^source, 1, 5}, live: false, text: "B"},
+                 %{origin: {:insert, ^source, 2, 5}, live: true, bytes: 1},
+                 %{origin: {:insert, ^source, 3, 5}, live: false, text: "D"},
+                 %{origin: {:insert, ^source, 4, 5}, live: true, bytes: 1}
+               ] = Enum.filter(Provenance.runs(recovered), & &1.kept?)
+
+        assert {:ok, restored, _, restored_prov} =
+                 Provenance.revert(recovered, user, Document.new("xA!C?Ey"))
+
+        assert Document.content(restored) == "xABCDEy"
+        expected = for start <- 1..5, do: {:kept, start, start + 1}
+        assert Provenance.strand_spans(restored_prov, 0, 7) == expected
+      end
+    end
+
+    test "adjacent edits kept together still have distinct source identities" do
+      for mode <- [:each, :batch] do
+        {step, prov} = Provenance.open_group(Provenance.new(2), @task, @step_one)
+        edited = Provenance.edit_all(prov, step, [{0, "x", "A"}, {1, "y", "B"}], mode)
+        assert {:ok, recovered} = Provenance.restore_snapshot(Provenance.snapshot(edited), 2)
+        sources = Provenance.keep_sources(recovered, [step])
+
+        assert [{{:replace, first, 0, 1}, 0, 1}, {{:replace, second, 0, 1}, 1, 1}] =
+                 for({:written, origin, point, bytes} <- sources, do: {origin, point, bytes})
+
+        assert [
+                 {:removed, {:replace, ^first, 0, 1}, 1, "x"},
+                 {:removed, {:replace, ^second, 0, 1}, 2, "y"}
+               ] =
+                 for({:removed, _, _, _} = removed <- sources, do: removed)
+
+        kept = Provenance.keep_groups(edited, [step], [step])
+
+        assert [{:replace, ^first, 0, 1}, {:replace, ^second, 0, 1}] =
+                 for(run <- Provenance.runs(kept), run.kept?, do: run.origin)
+
+        assert first != second
+        assert Provenance.strand_spans(kept, 0, 2) == [{:kept, 0, 1}, {:kept, 1, 2}]
+      end
+    end
+
+    test "direct deletion sources distinguish identical preimages at different sites after restore" do
+      for mode <- [:each, :batch] do
+        {step, prov} = Provenance.open_group(Provenance.new(4), @task, @step_one)
+        edited = Provenance.edit_all(prov, step, [{1, "X", ""}, {3, "X", ""}], mode)
+        assert {:ok, recovered} = Provenance.restore_snapshot(Provenance.snapshot(edited), 2)
+
+        assert [
+                 {:removed, {:delete, first, 0, 1}, 1, "X"},
+                 {:removed, {:delete, second, 0, 1}, 2, "X"}
+               ] = Provenance.keep_sources(recovered, [step])
+
+        assert first != second
+      end
+    end
+
+    test "one direct deletion keeps ordered offsets for all its preimage pieces" do
+      for mode <- [:each, :batch] do
+        {inserted, prov} = Provenance.open_group(Provenance.new(6), @task, @step_one)
+        prov = Provenance.edit(prov, inserted, 2, "", "XY")
+        {deleted, prov} = Provenance.open_group(prov, @task, @step_two)
+        edited = Provenance.edit_all(prov, deleted, [{1, "bXYc", ""}], mode)
+        assert {:ok, recovered} = Provenance.restore_snapshot(Provenance.snapshot(edited), 4)
+
+        assert [
+                 {:removed, {:delete, id, 0, 4}, 1, "b"},
+                 {:removed, {:delete, id, 1, 4}, 1, "XY"},
+                 {:removed, {:delete, id, 3, 4}, 1, "c"}
+               ] = Provenance.keep_sources(recovered, [deleted])
+      end
+    end
+
+    test "proof retires held origin intervals without changing undo or authorship" do
+      {step, prov} = Provenance.open_group(Provenance.new(2), @task, @step_one)
+      prov = Provenance.edit(prov, step, 1, "", "XYZ")
+      assert [{:written, {:insert, id, 0, 3}, 1, 3}] = Provenance.keep_sources(prov, [step])
+      prov = Provenance.keep_groups(prov, [step], [step])
+      {user, prov} = Provenance.open_group(prov, :you, nil)
+      prov = Provenance.edit(prov, user, 1, "XYZ", "!")
+      assert {retired, []} = Provenance.retire_kept(prov, [{:insert, id, 1, 2}])
+
+      assert {:ok, restored, _, history} = Provenance.revert(retired, user, Document.new("a!b"))
+      assert Document.content(restored) == "aXYZb"
+      assert Provenance.strand_spans(history, 0, 5) == [{:kept, 1, 2}, {:kept, 3, 4}]
+      assert [{2, 3, @task, nil}] = Provenance.spans(history, 2, 3)
+
+      assert {history, [{1, 2}]} = Provenance.retire_kept(history, [{:insert, id, 0, 1}])
+      assert Provenance.strand_spans(history, 0, 5) == [{:kept, 3, 4}]
+      assert {:ok, reapplied, _, _} = Provenance.reapply(history, user, restored)
+      assert Document.content(reapplied) == "a!b"
+    end
+
+    test "a proof cannot retire a splice from an independently restored history" do
+      for mode <- [:each, :batch] do
+        {first, a} = Provenance.open_group(Provenance.new(2, 123), @task, @step_one)
+        a = Provenance.edit_all(a, first, [{1, "", "X"}], mode)
+        assert [{:written, {:insert, origin, 0, 1}, 1, 1}] = Provenance.keep_sources(a, [first])
+        a = Provenance.keep_groups(a, [first], [first])
+
+        {second, b} = Provenance.open_group(Provenance.new(2, 456), @task, @step_one)
+        b = Provenance.edit_all(b, second, [{1, "", "Y"}], mode)
+        b = Provenance.keep_groups(b, [second], [second])
+        assert {:ok, recovered} = Provenance.restore_snapshot(Provenance.snapshot(b), 3)
+
+        proof = [{:insert, origin, 0, 1}]
+        assert {retired, [{1, 2}]} = Provenance.retire_kept(a, proof)
+        assert Provenance.strand_spans(retired, 0, 3) == []
+        assert {^recovered, []} = Provenance.retire_kept(recovered, proof)
+        assert Provenance.strand_spans(recovered, 0, 3) == [{:kept, 1, 2}]
+      end
+    end
+
+    test "an inert deletion mark stays until proof covers its full ordered preimage" do
+      {step, prov} = Provenance.open_group(Provenance.new(4), @task, @step_one)
+      prov = Provenance.edit(prov, step, 2, "XY", "")
+      assert [{:removed, {:delete, id, 0, 2}, 2, "XY"}] = Provenance.keep_sources(prov, [step])
+      prov = Provenance.keep_groups(prov, [step], [step])
+      assert {^prov, []} = Provenance.retire_kept(prov, [{:delete, id, 1, 2}])
+
+      assert {retired, [{2, 2}]} =
+               Provenance.retire_kept(prov, [{:delete, id, 1, 2}, {:delete, id, 0, 1}])
+
+      assert Provenance.strand_spans(retired, 0, 2) == []
+      assert Provenance.dead_bytes(retired) == 0
+    end
+
+    test "a kept deletion carries no deleted text and adds no dependency to a later rewrite" do
+      {deleted, prov} = Provenance.open_group(Provenance.new(4), @task, @step_one)
+      prov = Provenance.edit(prov, deleted, 1, "b", "")
+      assert [{:removed, {:delete, id, 0, 1}, 1, "b"}] = Provenance.keep_sources(prov, [deleted])
+      prov = Provenance.keep_groups(prov, [deleted], [deleted])
+      assert Provenance.dead_bytes(prov) == 0
+      assert {:ok, saved} = Provenance.restore_snapshot(Provenance.snapshot(prov), 3)
+
+      assert [%{origin: {:delete, ^id, 0, 1}, bytes: 0, text: nil}] =
+               Enum.filter(Provenance.runs(saved), & &1.kept?)
+
+      assert Provenance.strand_spans(saved, 0, 3) == [{:kept, 1, 1}]
+      assert Provenance.review_sites(saved, 0, 3) == []
+
+      for mode <- [:each, :batch] do
+        {later, history} = Provenance.open_group(saved, @task, @step_two)
+        changed = Provenance.edit_all(history, later, [{0, "acd", "XYZ"}], mode)
+
+        assert {:ok, restored, _, history} =
+                 Provenance.revert(changed, later, Document.new("XYZ"))
+
+        assert Document.content(restored) == "acd"
+        assert Provenance.strand_spans(history, 0, 3) == [{:kept, 1, 1}]
+        assert Provenance.strand_spans(history, 1, 2) == [{:kept, 1, 1}]
+      end
+    end
+
+    test "human strands follow the live text and survive eviction and checkpoint restore" do
+      for mode <- [:each, :batch] do
+        {you, prov} = Provenance.open_group(Provenance.new(4), :you, nil)
+        prov = Provenance.edit_all(prov, you, [{0, "a", "A"}, {3, "d", "D"}], mode)
+        assert Provenance.strand_spans(prov, 1, 3) == []
+        assert Provenance.strand_spans(prov, 0, 4) == [{:you, 0, 1}, {:you, 3, 4}]
+        assert {:ok, document, _, reverted} = Provenance.revert(prov, you, Document.new("AbcD"))
+        assert Document.content(document) == "abcd"
+        assert Provenance.strand_spans(reverted, 0, 4) == []
+        retired = Provenance.discard(prov, you)
+        assert {:ok, restored} = Provenance.restore_snapshot(Provenance.snapshot(retired), 4)
+        assert Provenance.strand_spans(restored, 2, 4) == [{:you, 3, 4}]
+      end
+    end
+
+    test "an EOF deletion query skips parked insertions at the same gap" do
+      initial = Provenance.new(1)
+      inserted = Document.new("ax")
+
+      park = fn range, prov ->
+        Enum.reduce(range, prov, fn n, prov ->
+          {id, prov} = Provenance.open_group(prov, @task, {:minga, "task-1", "parked-#{n}"})
+          prov = Provenance.edit(prov, id, 1, "", "x")
+          assert {:ok, _, _, prov} = Provenance.revert(prov, id, inserted)
+          prov
+        end)
+      end
+
+      short = park.(1..16, initial)
+      long = park.(17..512, short)
+
+      query = fn prov ->
+        {deletion, prov} = Provenance.open_group(prov, @task, @step_one)
+        prov = Provenance.edit(prov, deletion, 0, "a", "")
+        {:reductions, before} = Process.info(self(), :reductions)
+        assert Provenance.review_sites(prov, 0, 0) == [{deletion, 0, 0}]
+        {:reductions, after_query} = Process.info(self(), :reductions)
+        after_query - before
+      end
+
+      assert query.(long) <= 3 * query.(short) + 200
+    end
+
+    test "paired rewrites do not crowd a gap, and point lookup stops before the next byte" do
+      source = fn n ->
+        Enum.reduce(1..n, Provenance.new(n + 1), fn offset, prov ->
+          {group, prov} = Provenance.open_group(prov, @task, {:minga, "task-1", "step-#{offset}"})
+          Provenance.edit(prov, group, offset, "a", "x")
+        end)
+      end
+
+      measure = fn n ->
+        prov = source.(n)
+        {you, prov} = Provenance.open_group(prov, :you, nil)
+        removed = String.duplicate("x", n)
+        hidden = Provenance.edit(prov, you, 1, removed, "")
+
+        {agent, prov} = Provenance.open_group(prov, {:minga, "other"}, {:minga, "other", "step"})
+        many_gaps = Provenance.edit(prov, agent, 1, removed, "")
+
+        {:reductions, before} = Process.info(self(), :reductions)
+        assert Provenance.review_sites(hidden, 1, 1) == []
+        assert Provenance.review_group_at(many_gaps, 0) == nil
+        assert Provenance.review_group_at(many_gaps, 1) == agent
+        {:reductions, after_queries} = Process.info(self(), :reductions)
+        after_queries - before
+      end
+
+      assert measure.(512) <= 3 * measure.(16) + 250
+    end
   end
 
   describe "revert and reapply" do

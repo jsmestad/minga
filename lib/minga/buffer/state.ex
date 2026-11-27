@@ -9,6 +9,7 @@ defmodule Minga.Buffer.State do
   alias Minga.Buffer.ConflictIndex
   alias Minga.Buffer.Document
   alias Minga.Buffer.EditSource
+  alias Minga.Buffer.KeptReview.{Ledger, Observation}
   alias Minga.Buffer.SaveState
   alias Minga.Buffer.State.LocalPersistence
   alias Minga.Buffer.State.Swap, as: SwapState
@@ -47,6 +48,16 @@ defmodule Minga.Buffer.State do
             save_state: @default_save_state,
             # The process builds the history for its document; an opaque history has no literal default.
             undo_history: nil,
+            review_position_index: nil,
+            review_damage: nil,
+            git_authorship: nil,
+            git_authorship_revision: 0,
+            keep_observer: nil,
+            keep_observation: nil,
+            kept_proof: nil,
+            kept_proof_cache: nil,
+            kept_proof_observer: nil,
+            watching_kept_repo?: false,
             name: nil,
             read_only: false,
             unlisted: false,
@@ -65,6 +76,18 @@ defmodule Minga.Buffer.State do
 
   @type options_server :: Minga.Config.Options.server()
 
+  @type keep_observer :: (String.t(), boolean() -> Observation.capture())
+  @type keep_observation ::
+          {pid(), reference(), GenServer.from(), String.t(), UndoHistory.review_target()}
+
+  @type kept_proof ::
+          {pid(), reference(), String.t(), Ledger.t(), UndoHistory.saved_checkpoint() | nil,
+           boolean()}
+
+  @type kept_proof_cache :: {String.t(), Ledger.t(), Observation.cache()}
+  @type kept_proof_observer ::
+          (String.t(), Ledger.t(), Observation.cache() -> Observation.result())
+
   @type t :: %__MODULE__{
           document: Document.t(),
           file_path: String.t() | nil,
@@ -75,6 +98,18 @@ defmodule Minga.Buffer.State do
           buffer_type: buffer_type(),
           save_state: SaveState.t(),
           undo_history: UndoHistory.t(),
+          review_position_index:
+            {non_neg_integer(), pos_integer(), Minga.Buffer.ReviewPosition.t()} | nil,
+          review_damage: Minga.Buffer.ReviewDamage.t() | nil,
+          git_authorship:
+            {String.t(), ChangeLog.sequence(), Minga.Buffer.GitAuthorship.t()} | nil,
+          git_authorship_revision: non_neg_integer(),
+          keep_observer: keep_observer(),
+          keep_observation: keep_observation() | nil,
+          kept_proof: kept_proof() | nil,
+          kept_proof_cache: kept_proof_cache() | nil,
+          kept_proof_observer: kept_proof_observer(),
+          watching_kept_repo?: boolean(),
           name: String.t() | nil,
           read_only: boolean(),
           unlisted: boolean(),

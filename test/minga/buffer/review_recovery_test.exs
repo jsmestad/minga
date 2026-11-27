@@ -22,6 +22,37 @@ defmodule Minga.Buffer.ReviewRecoveryTest do
     %{path: path, swap_dir: Path.join(dir, "swap")}
   end
 
+  test "an outstanding Keep observation leaves the buffer responsive and refuses a changed target",
+       ctx do
+    caller = self()
+
+    observe = fn path, dirty? ->
+      send(caller, {:capturing_keep, self(), path, dirty?})
+
+      receive do
+        :finish_observing -> :unproven
+      after
+        3_000 -> exit(:test_gate_not_released)
+      end
+    end
+
+    buffer = start_buffer(ctx, keep_observer: observe)
+    replace(buffer, {0, 0}, 6, "AFTER", @first)
+    assert {:ok, target, @task, 1} = Buffer.prepare_review(buffer, :latest)
+    request = Buffer.request_keep(buffer, target)
+    assert_receive {:capturing_keep, worker, path, true}, 1_000
+    assert path == ctx.path
+
+    assert {:ok, ^target, @task, 1} = Buffer.prepare_review(buffer, :latest)
+    assert {:error, :review_in_progress} = Buffer.decide_review(buffer, target, :keep)
+    replace(buffer, {1, 0}, 0, "!", :user)
+    assert Buffer.content(buffer) == "AFTER\n!other\n"
+    send(worker, :finish_observing)
+
+    assert {:reply, {:error, :stale_review}} = :gen_server.receive_response(request, 1_000)
+    assert {:ok, _updated, @task, 1} = Buffer.prepare_review(buffer, :latest)
+  end
+
   test "explicit save before dirty debounce reopens without layout, with exact authorship", ctx do
     first = start_buffer(ctx)
     replace(first, {0, 0}, 6, "AFTER", @first)
@@ -41,6 +72,89 @@ defmodule Minga.Buffer.ReviewRecoveryTest do
     assert {:ok, [_]} = Buffer.decide_review(reopened, target, :reject)
     assert Buffer.content(reopened) == "before\nother\n"
     assert File.read!(ctx.path) == "AFTER\nother\n"
+  end
+
+  test "restored disjoint spans and the EOF deletion prepare precise decisions", ctx do
+    buffer = start_buffer(ctx)
+    replace(buffer, {0, 0}, 6, "AFTER", @first)
+    replace(buffer, {1, 0}, 5, "OTHER", @first)
+    replace(buffer, {1, 5}, 1, "", @second)
+    assert :ok = Buffer.save(buffer)
+    assert :ok = GenServer.stop(buffer)
+
+    reopened = start_buffer(ctx)
+    assert Buffer.content(reopened) == "AFTER\nOTHER"
+    assert {:ok, first, @task, 1} = Buffer.prepare_review(reopened, {:at_byte, 2})
+    assert {:ok, ^first, @task, 1} = Buffer.prepare_review(reopened, {:at_byte, 8})
+    assert :empty = Buffer.prepare_review(reopened, {:at_byte, 5})
+    assert {:ok, tail, @task, 1} = Buffer.prepare_review(reopened, {:at_byte, 11})
+    refute tail == first
+
+    replace(reopened, {0, 0}, 0, ">", :user)
+    assert {:error, :stale_review} = Buffer.decide_review(reopened, first, :keep)
+
+    assert {:ok, updated, @task, 1} = Buffer.prepare_review(reopened, {:at_byte, 9})
+    assert :ok = Buffer.decide_review(reopened, updated, :keep)
+    assert Buffer.content(reopened) == ">AFTER\nOTHER"
+    assert :empty = Buffer.prepare_review(reopened, {:at_byte, 3})
+    assert :empty = Buffer.prepare_review(reopened, {:at_byte, 9})
+
+    assert {:ok, tail, @task, 1} = Buffer.prepare_review(reopened, {:at_byte, 12})
+    assert {:ok, [_]} = Buffer.decide_review(reopened, tail, :reject)
+    assert Buffer.content(reopened) == ">AFTER\nOTHER\n"
+  end
+
+  test "range Reject checks all selected tasks before it changes anything", ctx do
+    buffer = start_buffer(ctx)
+    outside = {:minga, "blocking", "outside"}
+    second_task = {:minga, "independent", "other"}
+    replace(buffer, {0, 0}, 1, "A", @first)
+    replace(buffer, {0, 4}, 1, "E", @first)
+    replace(buffer, {1, 0}, 3, "XYZ", @first)
+    replace(buffer, {0, 2}, 1, "F", second_task)
+    replace(buffer, {1, 1}, 1, "q", outside)
+
+    assert {:ok, selected, :multiple_tasks, 2} =
+             Buffer.prepare_review(buffer, {:byte_range, 0, 6})
+
+    assert {:blocked, {:overlaps, ^outside}} = Buffer.decide_review(buffer, selected, :reject)
+    assert Buffer.content(buffer) == "AeFoEe\nXqZer\n"
+
+    assert {:ok, blocker, {:minga, "blocking"}, 1} =
+             Buffer.prepare_review(buffer, {:step, outside})
+
+    assert {:ok, [_]} = Buffer.decide_review(buffer, blocker, :reject)
+    assert {:error, :stale_review} = Buffer.decide_review(buffer, selected, :reject)
+
+    assert {:ok, selected, :multiple_tasks, 2} =
+             Buffer.prepare_review(buffer, {:byte_range, 0, 6})
+
+    assert {:ok, [_, _]} = Buffer.decide_review(buffer, selected, :reject)
+    assert Buffer.content(buffer) == "before\nother\n"
+  end
+
+  test "one Keep across tasks promotes only the selected units into the saved generation", ctx do
+    buffer = start_buffer(ctx)
+    second_task = {:minga, "independent", "other"}
+    replace(buffer, {0, 0}, 1, "B", @first)
+    replace(buffer, {0, 4}, 1, "R", second_task)
+    replace(buffer, {1, 0}, 5, "OTHER", @second)
+    assert :ok = Buffer.save(buffer)
+    replace(buffer, {0, 6}, 0, "!", :user)
+
+    assert {:ok, selected, :multiple_tasks, 2} =
+             Buffer.prepare_review(buffer, {:byte_range, 0, 6})
+
+    assert :ok = Buffer.decide_review(buffer, selected, :keep)
+    assert Buffer.content(buffer) == "BefoRe!\nOTHER\n"
+    assert :ok = GenServer.stop(buffer)
+
+    reopened = start_buffer(ctx)
+    assert Buffer.content(reopened) == "BefoRe\nOTHER\n"
+    assert :empty = Buffer.prepare_review(reopened, {:byte_range, 0, 6})
+    assert {:ok, unselected, @task, 1} = Buffer.prepare_review(reopened, {:step, @second})
+    assert {:ok, [_]} = Buffer.decide_review(reopened, unselected, :reject)
+    assert Buffer.content(reopened) == "BefoRe\nother\n"
   end
 
   test "auto-save publishes the review checkpoint without a dirty-swap callback", ctx do
@@ -434,7 +548,9 @@ defmodule Minga.Buffer.ReviewRecoveryTest do
 
   defp start_buffer(ctx, opts \\ []) do
     {delay, opts} = Keyword.pop(opts, :auto_save, 0)
+
     opts = Keyword.merge([file_path: ctx.path, swap_dir: ctx.swap_dir], opts)
+
     buffer = start_supervised!({BufferProcess, opts}, id: make_ref(), restart: :temporary)
     {:ok, ^delay} = BufferProcess.set_option(buffer, :auto_save_delay_ms, delay)
     buffer

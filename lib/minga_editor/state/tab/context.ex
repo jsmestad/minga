@@ -260,6 +260,7 @@ defmodule MingaEditor.State.Tab.Context do
     context
     |> from_map()
     |> scrub_context_buffer(pid)
+    |> scrub_review_input(pid)
   end
 
   @spec file_windows(pos_integer(), pid() | nil, Viewport.t()) :: Windows.t()
@@ -304,6 +305,12 @@ defmodule MingaEditor.State.Tab.Context do
   end
 
   defp scrub_context_buffer(%__MODULE__{} = context, _pid), do: context
+
+  @spec scrub_review_input(t(), pid()) :: t()
+  defp scrub_review_input(%__MODULE__{editing: %VimState{} = vim} = context, pid),
+    do: put_field(context, :editing, VimState.retire_keep(vim, pid))
+
+  defp scrub_review_input(%__MODULE__{} = context, _pid), do: context
 
   @spec migrate_legacy_file_tree(t(), map()) :: t()
   defp migrate_legacy_file_tree(%__MODULE__{} = context, map) do

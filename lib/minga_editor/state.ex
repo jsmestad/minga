@@ -108,6 +108,11 @@ defmodule MingaEditor.State do
           appearance: Appearance.t()
         }
 
+  @doc "Installs the OTP correlation collection for in-file Keep requests."
+  @spec put_keep_requests(t(), :gen_server.request_id_collection() | nil) :: t()
+  def put_keep_requests(%__MODULE__{} = state, requests),
+    do: %{state | interaction: Interaction.put_keep_requests(state.interaction, requests)}
+
   @doc "Drops one feature source across the live workspace, tab snapshots, and shell stash."
   @spec drop_feature_state_source(t(), [Entry.t()], FeatureState.source()) :: t()
   def drop_feature_state_source(%__MODULE__{} = state, entries, source) when is_list(entries) do
@@ -549,6 +554,7 @@ defmodule MingaEditor.State do
       state.workspace
       |> SessionState.set_buffers(buffers)
       |> SessionState.retire_agent_prompt_buffer(pid)
+      |> SessionState.retire_keep_input(pid)
       |> SessionState.activate_buffer(buffers)
 
     runtime = ShellRuntime.retire_buffer(state.shell_runtime, pid)

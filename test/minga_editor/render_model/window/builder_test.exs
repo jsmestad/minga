@@ -13,6 +13,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
   alias Minga.Editing.Search.Match
   alias Minga.Language.Highlight.Span, as: HighlightSpan
   alias Minga.LSP.SyncServer
+  alias Minga.RenderModel.Window.Gutter.Authorship
   alias MingaEditor.Layout
   alias MingaEditor.RenderModel.Window.Builder
   alias MingaEditor.RenderModel.Window.BuildResult
@@ -107,6 +108,11 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       :reset_required -> WindowCache.mark_identity_reset(cache)
     end
     |> WindowCache.with_fetch_version(consumed.version)
+    |> WindowCache.with_review_lease(
+      consumed.review_lease,
+      consumed.review_damage,
+      consumed.changes
+    )
   end
 
   defp renderer_cache(%WindowCache{} = cache), do: cache
@@ -1368,6 +1374,35 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       [fold_gutter] = Enum.filter(wf.window_model.gutter.entries, &(&1.buf_line == 0))
       assert fold_row.row_id == Row.stable_id(:fold_start, 0)
       assert fold_gutter.display_type == :fold_start
+    end
+
+    test "closed folds exclude authored regions wholly inside them" do
+      state = gui_state(content: "head\nhidden one\nhidden two\ntail")
+      buffer = state.workspace.buffers.active
+      active = state.workspace.windows.active
+
+      for {line, id} <- [{1, "hidden"}, {3, "visible"}] do
+        source = Minga.Buffer.EditSource.minga(id, "step")
+        assert :ok = Buffer.apply_edit(buffer, line, 0, line, 0, "!", source)
+      end
+
+      window =
+        state.workspace.windows.map
+        |> Map.fetch!(active)
+        |> EditorWindow.set_fold_ranges([FoldRange.new!(0, 2)])
+        |> EditorWindow.fold_at(0)
+
+      windows =
+        Windows.set_map(
+          state.workspace.windows,
+          Map.put(state.workspace.windows.map, active, window)
+        )
+
+      state = %{state | workspace: %{state.workspace | windows: windows}}
+
+      {[view], _cursor, _state} = build_content(state)
+      assert view.window_model.row_store_mode == :windowed
+      assert [{:text, _unit, {3, 0}, 3}] = Authorship.regions(view.window_model.gutter.authorship)
     end
 
     test "linewise accessibility selection maps to the committed fold row" do

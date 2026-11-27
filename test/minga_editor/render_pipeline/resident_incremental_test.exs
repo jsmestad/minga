@@ -4,6 +4,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Buffer.EditSource
   alias Minga.Buffer.EditDelta
   alias Minga.Editing.Search.Index
   alias Minga.Events.BufferChangedEvent
@@ -13,6 +14,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   alias MingaEditor.Layout
   alias MingaEditor.Mouse
   alias Minga.RenderModel.Window.Row
+  alias Minga.RenderModel.Window.Gutter.Authorship
   alias Minga.RenderModel.Window.Gutter.ResidentRows
   alias Minga.RenderModel.Window.ScrollPresentation
   alias Minga.Core.Decorations
@@ -96,6 +98,26 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
     state = gui_state(content: long_content(line_count), rows: 12, cols: 60, filetype: :text)
     BufferProcess.set_option(state.workspace.buffers.active, :wrap, false)
     state
+  end
+
+  defp warm_review_pair do
+    state = warm(resident_state(300))
+    buffer = state.editor.workspace.buffers.active
+
+    for {line, step} <- [{40, "first"}, {220, "second"}] do
+      assert {:ok, _} =
+               BufferProcess.replace_byte_range_if_version(
+                 buffer,
+                 BufferProcess.version(buffer),
+                 {line, 0},
+                 0,
+                 "new ",
+                 EditSource.minga("task", step)
+               )
+    end
+
+    {initial, state} = build_frame(state)
+    {buffer, initial, state}
   end
 
   test "horizontal wheel keeps an empty caret row detached until the caret moves" do
@@ -721,6 +743,170 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
       state = perform_presentation_operation(state, :clear_sign)
       {cleared, _state} = build_frame(state)
       assert %ResidentRows{line_count: 300, overrides: []} = cleared.gutter.entries
+    end
+
+    test "windowed scrolling inside the same ribbon reuses its observed source rows" do
+      editor = gui_state(content: long_content(66_000), rows: 12, cols: 60, filetype: :text)
+      buffer = editor.workspace.buffers.active
+      assert {:ok, false} = BufferProcess.set_option(buffer, :wrap, false)
+
+      for line <- 0..29 do
+        source = EditSource.minga("task", "step-#{line}")
+
+        assert {:ok, _} =
+                 BufferProcess.replace_byte_range_if_version(
+                   buffer,
+                   BufferProcess.version(buffer),
+                   {line, 0},
+                   0,
+                   "X",
+                   source
+                 )
+      end
+
+      assert :ok = BufferProcess.move_to(buffer, {0, 0})
+      {marked, state} = build_frame(editor)
+      assert marked.row_store_mode == :windowed
+      assert [{:text, _unit, {0, 0}, 29}] = marks = Authorship.regions(marked.gutter.authorship)
+
+      assert :ok = BufferProcess.move_to(buffer, {10, 0})
+      editor = simulate_scroll(state.editor, 5)
+      calls = trace_buffer_calls(buffer, fn -> build_frame(%{state | editor: editor}) end)
+      {scrolled, _} = calls.result
+      assert scrolled.row_store_mode == :windowed
+      assert scrolled.geometry.viewport.top > marked.geometry.viewport.top
+      assert Authorship.regions(scrolled.gutter.authorship) == marks
+      refute Enum.any?(calls.messages, &match?({:render_review_regions, _, _}, &1))
+    end
+
+    test "a distant authored region and sign coexist without resending resident text on Keep" do
+      state = warm(resident_state(300))
+      buffer = state.editor.workspace.buffers.active
+      source = EditSource.minga("task", "step")
+
+      assert {:ok, _} =
+               BufferProcess.replace_byte_range_if_version(
+                 buffer,
+                 BufferProcess.version(buffer),
+                 {220, 0},
+                 0,
+                 "fresh\nmore ",
+                 source
+               )
+
+      state = perform_presentation_operation(state, :sign)
+      {marked, state} = build_frame(state)
+      assert [{:text, _unit, {220, 0}, 221}] = Authorship.regions(marked.gutter.authorship)
+      assert %ResidentRows{overrides: [entry]} = marked.gutter.entries
+      assert {entry.buf_line, entry.sign_type, entry.sign_text} == {220, :annotation, "!"}
+
+      warm_calls = trace_buffer_calls(buffer, fn -> build_frame(state) end)
+      {unchanged, state} = warm_calls.result
+      assert unchanged.rows == []
+      assert unchanged.gutter.authorship == marked.gutter.authorship
+      refute Enum.any?(warm_calls.messages, &match?({:render_review_regions, _, _}, &1))
+
+      assert {:ok, target, {:minga, "task"}, 1} = Minga.Buffer.prepare_review(buffer, :latest)
+      assert :ok = Minga.Buffer.decide_review(buffer, target, :keep)
+      keep_calls = trace_buffer_calls(buffer, fn -> build_frame(state) end)
+      {kept, _state} = keep_calls.result
+
+      assert Authorship.regions(kept.gutter.authorship) == [{:kept, {220, 0}, 221}]
+      assert kept.gutter.entries == marked.gutter.entries
+      assert kept.content_epoch == marked.content_epoch
+      assert kept.text_presentation_id == unchanged.text_presentation_id
+      assert kept.rows == []
+      refute Enum.any?(keep_calls.messages, &match?({:render_lines, _, _, 301}, &1))
+
+      assert [{:render_review_regions, _, [{219, 222}]}] =
+               Enum.filter(keep_calls.messages, &match?({:render_review_regions, _, _}, &1))
+    end
+
+    test "a discarded frame does not lose disjoint Keep patches based on the last accepted frame" do
+      {buffer, initial, state} = warm_review_pair()
+
+      assert [{:text, _, {40, 0}, 40}, {:text, _, {220, 0}, 220}] =
+               before = Authorship.regions(initial.gutter.authorship)
+
+      assert {:ok, first, _, 1} =
+               Minga.Buffer.prepare_review(buffer, {:step, {:minga, "task", "first"}})
+
+      assert :ok = Minga.Buffer.decide_review(buffer, first, :keep)
+
+      {observed, _discarded} =
+        BufferChanges.prepare(state.renderer, Intent.from_editor_state(state.editor))
+
+      assert {:ok, second, _, 1} =
+               Minga.Buffer.prepare_review(buffer, {:step, {:minga, "task", "second"}})
+
+      assert :ok = Minga.Buffer.decide_review(buffer, second, :keep)
+
+      calls = trace_buffer_calls(buffer, fn -> build_frame(%{state | renderer: observed}) end)
+      {latest, _state} = calls.result
+      kept = [{:kept, {40, 0}, 40}, {:kept, {220, 0}, 220}]
+      assert Authorship.regions(latest.gutter.authorship) == kept
+
+      assert {:patch, _, _, ^kept, ^before} =
+               Authorship.update(initial.gutter.authorship, latest.gutter.authorship)
+
+      assert [{:render_review_regions, _, [{39, 41}, {219, 221}]}] =
+               Enum.filter(calls.messages, &match?({:render_review_regions, _, _}, &1))
+    end
+
+    test "ordinary typing updates only the touched authored rows" do
+      {buffer, initial, state} = warm_review_pair()
+
+      assert [{:text, near, {40, 0}, 40}, {:text, far, {220, 0}, 220}] =
+               Authorship.regions(initial.gutter.authorship)
+
+      BufferProcess.move_to(buffer, {40, 0})
+      BufferProcess.insert_text(buffer, "!")
+      calls = trace_buffer_calls(buffer, fn -> build_frame(state) end)
+      {latest, _state} = calls.result
+
+      assert Authorship.regions(latest.gutter.authorship) == [
+               {:you, {40, 0}, 40},
+               {:text, near, {40, 1}, 40},
+               {:text, far, {220, 0}, 220}
+             ]
+
+      assert [{:render_review_regions, _, [{39, 41}]}] =
+               Enum.filter(calls.messages, &match?({:render_review_regions, _, _}, &1))
+
+      assert {:patch, _, _, added, [{:text, ^near, {40, 0}, 40}]} =
+               Authorship.update(initial.gutter.authorship, latest.gutter.authorship)
+
+      assert MapSet.new(added) == MapSet.new([{:you, {40, 0}, 40}, {:text, near, {40, 1}, 40}])
+    end
+
+    test "a newline after a dropped Keep shifts far marks without rereading them" do
+      {buffer, initial, state} = warm_review_pair()
+
+      assert [{:text, _, {40, 0}, 40}, {:text, far, {220, 0}, 220}] =
+               before = Authorship.regions(initial.gutter.authorship)
+
+      assert {:ok, target, _, 1} =
+               Minga.Buffer.prepare_review(buffer, {:step, {:minga, "task", "first"}})
+
+      assert :ok = Minga.Buffer.decide_review(buffer, target, :keep)
+
+      {observed, _discarded} =
+        BufferChanges.prepare(state.renderer, Intent.from_editor_state(state.editor))
+
+      BufferProcess.move_to(buffer, {10, 0})
+      BufferProcess.insert_text(buffer, "\n")
+      calls = trace_buffer_calls(buffer, fn -> build_frame(%{state | renderer: observed}) end)
+      {latest, _state} = calls.result
+      current = [{:you, {10, 0}, 10}, {:kept, {41, 0}, 41}, {:text, far, {221, 0}, 221}]
+      assert Authorship.regions(latest.gutter.authorship) == current
+
+      assert {:patch, _, _, added, ^before} =
+               Authorship.update(initial.gutter.authorship, latest.gutter.authorship)
+
+      assert MapSet.new(added) == MapSet.new(current)
+
+      assert [{:render_review_regions, _, [{9, 12}, {40, 42}]}] =
+               Enum.filter(calls.messages, &match?({:render_review_regions, _, _}, &1))
     end
 
     test "a text composition change fetches complete source before replacing residence" do

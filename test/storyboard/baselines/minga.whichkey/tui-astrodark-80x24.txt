@@ -7,9 +7,9 @@
 ## text
  ▌  storyboard.ex *
 ▾  3  defmodule UsageLimit do
-   2    def label, do: "Your plan limit applies"
-   1    def window, do: 45
-   4    def retry?, do: true
+   2 ▚  def label, do: "Your plan limit applies"
+   1 ▐  def window, do: 45
+   4 ▐  def retry?, do: true
    1  end
    2
       ~
@@ -17,8 +17,8 @@
 ╭ SPC › a Minga · 1 needs you ─────────────────────────────────────────────────╮
 │ Tasks                   Conversation           Changes                       │
 │ a Tasks · 1 needs you   v Conversation split   r Pending reviews             │
-│ n New task              ? Ask about this       y Keep blocking change        │
-│ i Inspect subagent      e Rewrite selection    d Reject blocking change      │
+│ n New task              ? Ask about this       y Keep Minga change           │
+│ i Inspect subagent      e Rewrite selection    d Reject Minga change         │
 │ s Stop                  q Queue ›              u Reject all…                 │
 │                                                p Publish edits…              │
 │                                                                              │
@@ -43,7 +43,8 @@
 1 26-26 #adb0bb #1a1d23 -
 1 27-28 #dd97f1 #1a1d23 bold
 1 29-79 #adb0bb #1a1d23 -
-2 0-5 #858892 #1a1d23 -
+2 0-4 #858892 #1a1d23 -
+2 5-5 #dd97f1 #4b3c57 -
 2 6-7 #adb0bb #1a1d23 -
 2 8-10 #dd97f1 #1a1d23 bold
 2 11-11 #adb0bb #1a1d23 -
@@ -53,7 +54,8 @@
 2 19-22 #4ac2b8 #1a1d23 -
 2 23-47 #87c05f #1a1d23 -
 2 48-79 #adb0bb #1a1d23 -
-3 0-5 #858892 #1a1d23 -
+3 0-4 #858892 #1a1d23 -
+3 5-5 #dd97f1 #4b3c57 -
 3 6-7 #adb0bb #1a1d23 -
 3 8-10 #dd97f1 #1a1d23 bold
 3 11-11 #adb0bb #1a1d23 -
@@ -63,7 +65,8 @@
 3 20-23 #4ac2b8 #1a1d23 -
 3 24-25 #f5983a #1a1d23 -
 3 26-79 #adb0bb #1a1d23 -
-4 0-5 #adb0bb #1e222a bold
+4 0-4 #adb0bb #1e222a bold
+4 5-5 #dd97f1 #4b3c57 -
 4 6-7 #adb0bb #1e222a -
 4 8-10 #dd97f1 #1a1d23 bold
 4 11-11 #adb0bb #1e222a -
@@ -99,8 +102,8 @@
 10 23-25 #adb0bb #14161b -
 10 26-45 #858892 #14161b -
 10 46-48 #adb0bb #14161b -
-10 49-72 #858892 #14161b -
-10 73-78 #adb0bb #14161b -
+10 49-69 #858892 #14161b -
+10 70-78 #adb0bb #14161b -
 10 79-79 #696c76 #14161b -
 11 0-0 #696c76 #14161b -
 11 1-1 #adb0bb #14161b -

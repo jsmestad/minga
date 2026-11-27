@@ -1,6 +1,6 @@
 defmodule MingaEditor.ChangeRecorder do
   @moduledoc """
-  Records editing changes as raw key sequences for dot repeat.
+  Records editing keys or a semantic in-file review decision for dot repeat.
 
   The `phase` carries exactly one active lifecycle, while replay can preserve a post-replay recording phase that is restored after the outermost replay returns normally.
   """
@@ -9,9 +9,11 @@ defmodule MingaEditor.ChangeRecorder do
 
   defstruct phase: :idle,
             pending_keys: [],
-            last_change: nil
+            last_change: nil,
+            revision: 0
 
   @type key :: {non_neg_integer(), non_neg_integer()}
+  @type change :: [key()] | {:review, :keep | :reject, pos_integer()}
 
   @type post_phase :: :idle | {:recording, [key()]}
   @type phase :: :idle | {:recording, [key()]} | {:replaying, pos_integer(), post_phase()}
@@ -19,7 +21,8 @@ defmodule MingaEditor.ChangeRecorder do
   @type t :: %__MODULE__{
           phase: phase(),
           pending_keys: [key()],
-          last_change: [key()] | nil
+          last_change: change() | nil,
+          revision: non_neg_integer()
         }
 
   @spec new() :: t()
@@ -61,11 +64,11 @@ defmodule MingaEditor.ChangeRecorder do
 
   @spec stop_recording(t()) :: t()
   def stop_recording(%__MODULE__{phase: {:recording, keys}} = rec) do
-    %{rec | phase: :idle, last_change: Enum.reverse(keys)}
+    put_change(%{rec | phase: :idle}, Enum.reverse(keys))
   end
 
   def stop_recording(%__MODULE__{phase: {:replaying, depth, {:recording, keys}}} = rec) do
-    %{rec | phase: {:replaying, depth, :idle}, last_change: Enum.reverse(keys)}
+    put_change(%{rec | phase: {:replaying, depth, :idle}}, Enum.reverse(keys))
   end
 
   def stop_recording(%__MODULE__{} = rec), do: rec
@@ -79,8 +82,18 @@ defmodule MingaEditor.ChangeRecorder do
     %{rec | phase: :idle, pending_keys: []}
   end
 
-  @spec get_last_change(t()) :: [key()] | nil
+  @spec get_last_change(t()) :: change() | nil
   def get_last_change(%__MODULE__{last_change: lc}), do: lc
+
+  @spec record_review(t(), :keep | :reject, pos_integer()) :: t()
+  def record_review(%__MODULE__{} = rec, decision, count) do
+    settled = cancel_recording(rec)
+    put_change(%{settled | pending_keys: rec.pending_keys}, {:review, decision, count})
+  end
+
+  @spec put_change(t(), change()) :: t()
+  defp put_change(rec, change),
+    do: %{rec | last_change: change, revision: rec.revision + 1}
 
   @spec start_replay(t()) :: t()
   # Each recorder remains the sole writer of its struct after sharing the phase calculation.

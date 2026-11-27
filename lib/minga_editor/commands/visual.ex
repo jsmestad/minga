@@ -134,6 +134,23 @@ defmodule MingaEditor.Commands.Visual do
           workspace: %{buffers: %{active: buf}, editing: %{mode_state: %VisualState{} = ms} = vim}
         } =
           state,
+        {:visual_text_object, modifier, :minga_change}
+      ) do
+    case Buffer.review_text_object(buf, modifier, :select) do
+      {:selected, kind, start} ->
+        type = if kind == :linewise, do: :line, else: :char
+        set_object_selection(state, vim, ms, start, type)
+
+      :empty ->
+        state
+    end
+  end
+
+  def execute(
+        %{
+          workspace: %{buffers: %{active: buf}, editing: %{mode_state: %VisualState{} = ms} = vim}
+        } =
+          state,
         {:visual_text_object, modifier, spec}
       ) do
     gb = Buffer.snapshot(buf)
@@ -154,18 +171,10 @@ defmodule MingaEditor.Commands.Visual do
         state
 
       {start_pos, end_pos} ->
-        # Update visual anchor to start of text object, move cursor to end
-        new_ms = %{ms | visual_anchor: start_pos, visual_type: visual_type_for_text_object(spec)}
+        # Move the cursor to the end, then install the visual anchor.
         Buffer.move_to(buf, end_pos)
 
-        %{
-          state
-          | workspace:
-              MingaEditor.Session.State.set_editing(
-                state.workspace,
-                VimState.set_mode_state(vim, new_ms)
-              )
-        }
+        set_object_selection(state, vim, ms, start_pos, visual_type_for_text_object(spec))
     end
   end
 
@@ -193,6 +202,27 @@ defmodule MingaEditor.Commands.Visual do
       state
       | workspace:
           MingaEditor.Session.State.transition_mode(state.workspace, :visual, visual_state)
+    }
+  end
+
+  @spec set_object_selection(
+          state(),
+          VimState.t(),
+          VisualState.t(),
+          Document.position(),
+          :char | :line
+        ) ::
+          state()
+  defp set_object_selection(state, vim, mode, anchor, type) do
+    mode = %{mode | visual_anchor: anchor, visual_type: type}
+
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_editing(
+            state.workspace,
+            VimState.set_mode_state(vim, mode)
+          )
     }
   end
 

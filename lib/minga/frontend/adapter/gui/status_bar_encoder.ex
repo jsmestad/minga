@@ -407,8 +407,14 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   defp modeline_segment_flags(%Segment{compact: nil}), do: 0
   defp modeline_segment_flags(%Segment{}), do: 0x01
 
-  @spec encode_modeline_target(atom() | nil) :: String.t()
+  @spec encode_modeline_target(atom() | Segment.review_target() | nil) :: String.t()
   defp encode_modeline_target(nil), do: ""
+
+  defp encode_modeline_target({:next_minga_change, window, buffer, text, review, point}) do
+    owner = :erlang.pid_to_list(buffer)
+    "next_minga_change_at:#{window}:#{owner}:#{text}:#{review}:#{point}"
+  end
+
   defp encode_modeline_target(target), do: Atom.to_string(target)
 
   @spec encode_modeline_attrs(keyword()) :: non_neg_integer()

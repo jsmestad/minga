@@ -8,9 +8,9 @@
  ▌  storyboard.ex *
   / ❯ tmp ❯ minga-storyboard ❯ tui-120x40 ❯ minga.whichkey ❯ lib ❯ storyboard.ex
 ▾  3  defmodule UsageLimit do
-   2    def label, do: "Your plan limit applies"
-   1    def window, do: 45
-   4    def retry?, do: true
+   2 ▚  def label, do: "Your plan limit applies"
+   1 ▐  def window, do: 45
+   4 ▐  def retry?, do: true
    1  end
    2
       ~
@@ -37,11 +37,11 @@
       ~
       ~
 ╭ SPC › a Minga · 1 needs you ─────────────────────────────────────────────────────────────────────────────────────────╮
-│ Tasks                   Conversation           Changes                    More                                       │
-│ a Tasks · 1 needs you   v Conversation split   r Pending reviews          x Context ›                                │
-│ n New task              ? Ask about this       y Keep blocking change     S Session ›                                │
-│ i Inspect subagent      e Rewrite selection    d Reject blocking change   W Why this line                            │
-│ s Stop                  q Queue ›              u Reject all…              A Code autobiography                       │
+│ Tasks                   Conversation           Changes                 More                                          │
+│ a Tasks · 1 needs you   v Conversation split   r Pending reviews       x Context ›                                   │
+│ n New task              ? Ask about this       y Keep Minga change     S Session ›                                   │
+│ i Inspect subagent      e Rewrite selection    d Reject Minga change   W Why this line                               │
+│ s Stop                  q Queue ›              u Reject all…           A Code autobiography                          │
 │                                                p Publish edits…                                                      │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────── ⌫ back  esc close ─╯
   NORMAL  ◉ Needs you storyboard.ex ● ◉ Minga                                                         SPC a Elixir 4:23
@@ -72,7 +72,8 @@
 2 26-26 #4c4f69 #eff1f5 -
 2 27-28 #8839ef #eff1f5 bold
 2 29-119 #4c4f69 #eff1f5 -
-3 0-5 #5c5f77 #eff1f5 -
+3 0-4 #5c5f77 #eff1f5 -
+3 5-5 #8839ef #d5c3f4 -
 3 6-7 #4c4f69 #eff1f5 -
 3 8-10 #8839ef #eff1f5 bold
 3 11-11 #4c4f69 #eff1f5 -
@@ -82,7 +83,8 @@
 3 19-22 #d20f39 #eff1f5 -
 3 23-47 #40a02b #eff1f5 -
 3 48-119 #4c4f69 #eff1f5 -
-4 0-5 #5c5f77 #eff1f5 -
+4 0-4 #5c5f77 #eff1f5 -
+4 5-5 #8839ef #d5c3f4 -
 4 6-7 #4c4f69 #eff1f5 -
 4 8-10 #8839ef #eff1f5 bold
 4 11-11 #4c4f69 #eff1f5 -
@@ -92,7 +94,8 @@
 4 20-23 #d20f39 #eff1f5 -
 4 24-25 #fe640b #eff1f5 -
 4 26-119 #4c4f69 #eff1f5 -
-5 0-5 #7287fd #ccd0da bold
+5 0-4 #7287fd #ccd0da bold
+5 5-5 #8839ef #d5c3f4 -
 5 6-7 #4c4f69 #ccd0da -
 5 8-10 #8839ef #eff1f5 bold
 5 11-11 #4c4f69 #ccd0da -
@@ -170,10 +173,10 @@
 32 23-25 #4c4f69 #ccd0da -
 32 26-45 #5c5f77 #ccd0da -
 32 46-48 #4c4f69 #ccd0da -
-32 49-72 #5c5f77 #ccd0da -
-32 73-75 #4c4f69 #ccd0da -
-32 76-95 #5c5f77 #ccd0da -
-32 96-118 #4c4f69 #ccd0da -
+32 49-69 #5c5f77 #ccd0da -
+32 70-72 #4c4f69 #ccd0da -
+32 73-92 #5c5f77 #ccd0da -
+32 93-118 #4c4f69 #ccd0da -
 32 119-119 #7c7f93 #ccd0da -
 33 0-0 #7c7f93 #ccd0da -
 33 1-1 #4c4f69 #ccd0da -
@@ -184,11 +187,11 @@
 33 26-26 #1e66f5 #ccd0da -
 33 27-48 #4c4f69 #ccd0da -
 33 49-49 #1e66f5 #ccd0da -
-33 50-75 #4c4f69 #ccd0da -
-33 76-76 #1e66f5 #ccd0da -
-33 77-77 #4c4f69 #ccd0da -
-33 78-86 #1650c0 #ccd0da -
-33 87-118 #4c4f69 #ccd0da -
+33 50-72 #4c4f69 #ccd0da -
+33 73-73 #1e66f5 #ccd0da -
+33 74-74 #4c4f69 #ccd0da -
+33 75-83 #1650c0 #ccd0da -
+33 84-118 #4c4f69 #ccd0da -
 33 119-119 #7c7f93 #ccd0da -
 34 0-0 #7c7f93 #ccd0da -
 34 1-1 #4c4f69 #ccd0da -
@@ -197,11 +200,11 @@
 34 26-26 #1e66f5 #ccd0da -
 34 27-48 #4c4f69 #ccd0da -
 34 49-49 #1e66f5 #ccd0da -
-34 50-75 #4c4f69 #ccd0da -
-34 76-76 #1e66f5 #ccd0da -
-34 77-77 #4c4f69 #ccd0da -
-34 78-86 #1650c0 #ccd0da -
-34 87-118 #4c4f69 #ccd0da -
+34 50-72 #4c4f69 #ccd0da -
+34 73-73 #1e66f5 #ccd0da -
+34 74-74 #4c4f69 #ccd0da -
+34 75-83 #1650c0 #ccd0da -
+34 84-118 #4c4f69 #ccd0da -
 34 119-119 #7c7f93 #ccd0da -
 35 0-0 #7c7f93 #ccd0da -
 35 1-1 #4c4f69 #ccd0da -
@@ -210,9 +213,9 @@
 35 26-26 #1e66f5 #ccd0da -
 35 27-48 #4c4f69 #ccd0da -
 35 49-49 #1e66f5 #ccd0da -
-35 50-75 #4c4f69 #ccd0da -
-35 76-76 #1e66f5 #ccd0da -
-35 77-118 #4c4f69 #ccd0da -
+35 50-72 #4c4f69 #ccd0da -
+35 73-73 #1e66f5 #ccd0da -
+35 74-118 #4c4f69 #ccd0da -
 35 119-119 #7c7f93 #ccd0da -
 36 0-0 #7c7f93 #ccd0da -
 36 1-1 #4c4f69 #ccd0da -
@@ -223,9 +226,9 @@
 36 28-34 #1650c0 #ccd0da -
 36 35-48 #4c4f69 #ccd0da -
 36 49-49 #1e66f5 #ccd0da -
-36 50-75 #4c4f69 #ccd0da -
-36 76-76 #1e66f5 #ccd0da -
-36 77-118 #4c4f69 #ccd0da -
+36 50-72 #4c4f69 #ccd0da -
+36 73-73 #1e66f5 #ccd0da -
+36 74-118 #4c4f69 #ccd0da -
 36 119-119 #7c7f93 #ccd0da -
 37 0-0 #7c7f93 #ccd0da -
 37 1-48 #4c4f69 #ccd0da -

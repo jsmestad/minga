@@ -22,6 +22,7 @@ defmodule MingaEditor.KeyDispatch do
   alias MingaEditor.MinibufferData
   alias MingaEditor.ModeTransitions
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Shell.Traditional.InFileReview
   alias MingaEditor.Shell.Traditional.ToolPrompts
   alias MingaEditor.Shell.Traditional.ToolPromptWorkflow
   alias MingaEditor.Shell.Traditional.WhichKeyWorkflow
@@ -39,6 +40,14 @@ defmodule MingaEditor.KeyDispatch do
   """
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   def handle_key(state, codepoint, modifiers) do
+    case InFileReview.defer_key(state, codepoint, modifiers) do
+      {:held, state} -> state
+      :independent -> dispatch_vim_key(state, codepoint, modifiers)
+    end
+  end
+
+  @spec dispatch_vim_key(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
+  defp dispatch_vim_key(state, codepoint, modifiers) do
     key = {codepoint, modifiers}
     old_mode = CoreEditing.mode(state)
 
@@ -138,15 +147,17 @@ defmodule MingaEditor.KeyDispatch do
   def dispatch_command(state, cmd) do
     cmd_name = command_name(cmd)
 
-    execute = fn s ->
-      case Commands.execute(s, cmd) do
-        {s2, {:dot_repeat, count}} -> ChangeTracking.replay_last_change(s2, count)
-        {s2, {:replay_macro, register}} -> MacroReplay.replay(s2, register)
-        s2 -> s2
-      end
-    end
+    Config.wrap_with_advice(cmd_name, &execute_admitted_command(&1, cmd)).(state)
+  end
 
-    Config.wrap_with_advice(cmd_name, execute).(state)
+  @doc "Executes a deferred semantic command whose input owner already admitted and advised it."
+  @spec execute_admitted_command(EditorState.t(), Mode.command()) :: EditorState.t()
+  def execute_admitted_command(state, cmd) do
+    case Commands.execute(state, cmd) do
+      {next, {:dot_repeat, count}} -> ChangeTracking.replay_last_change(next, count)
+      {next, {:replay_macro, register}} -> MacroReplay.replay(next, register)
+      next -> next
+    end
   end
 
   @spec command_name(Mode.command()) :: atom()

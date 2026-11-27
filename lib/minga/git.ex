@@ -205,7 +205,26 @@ defmodule Minga.Git do
   Returns the message of the most recent commit.
   """
   @spec last_commit_message(String.t()) :: {:ok, String.t()} | :error
-  def last_commit_message(git_root), do: impl().last_commit_message(git_root)
+  def last_commit_message(git_root) do
+    case head_commit(git_root) do
+      {:ok, {_oid, message}} -> {:ok, message}
+      :error -> :error
+    end
+  end
+
+  @doc "Returns HEAD's full object ID and full commit message from the same Git observation."
+  @spec head_commit(String.t()) :: {:ok, {String.t(), String.t()}} | :error
+  def head_commit(git_root), do: impl().head_commit(git_root)
+
+  @doc "Observes the exact branch and tip for a file when the backend provides immutable evidence."
+  @spec review_baseline(String.t()) :: {:ok, Minga.Git.ReviewIdentity.t()} | :error
+  def review_baseline(path) do
+    backend = impl()
+
+    if Code.ensure_loaded?(backend) and function_exported?(backend, :review_baseline, 1),
+      do: backend.review_baseline(path),
+      else: :error
+  end
 
   @doc """
   Returns the current branch name for a git repository.

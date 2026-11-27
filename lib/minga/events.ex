@@ -34,10 +34,12 @@ defmodule Minga.Events do
   | `:buffer_closed`  | `BufferClosedEvent`  | `buffer: pid(), path: String.t() \| :scratch`  |
   | `:buffer_crashed` | `BufferCrashedEvent` | `buffer: pid(), path: String.t(), swap_path: String.t()` |
   | `:buffer_changed` | `BufferChangedEvent` | `buffer: pid(), source: EditSource.t(), sequence: ChangeLog.sequence()`  |
+  | `:buffer_review_changed` | `BufferEvent` | `buffer, path`; review presentation changed without a text edit |
   | `:buffer_filetype_changed` | `BufferFiletypeChangedEvent` | `buffer: pid()` |
   | `:file_watcher_ready` | `Minga.FileWatcher.ReadyEvent` | `watcher: pid()` |
   | `:mode_changed`   | `ModeEvent`          | `old: atom(), new: atom()`        |
-  | `:git_status_changed` | `GitStatusEvent` | `git_root, entries, branch, ahead, behind` plus cached `last_commit_message` |
+  | `:git_status_changed` | `GitStatusEvent` | `git_root, entries, branch, ahead, behind` plus cached `head_oid` and `last_commit_message` |
+  | `:git_head_changed` | `GitHeadEvent` | `git_root, branch, head_oid`; a wakeup, not commit proof |
   | `:diagnostics_updated` | `DiagnosticsUpdatedEvent` | `uri: String.t(), source: atom()` |
   | `:lsp_status_changed` | `LspStatusEvent` | `name: atom(), status: atom(), uri: String.t() \| nil` |
   | `:project_rebuilt` | `ProjectRebuiltEvent` | `root: String.t()` |
@@ -201,6 +203,7 @@ defmodule Minga.Events do
       :ahead,
       :behind,
       entry_base_path: nil,
+      head_oid: nil,
       last_commit_message: "",
       stash_count: 0,
       degraded?: false,
@@ -214,10 +217,23 @@ defmodule Minga.Events do
             ahead: non_neg_integer(),
             behind: non_neg_integer(),
             entry_base_path: String.t() | nil,
+            head_oid: String.t() | nil,
             last_commit_message: String.t(),
             stash_count: non_neg_integer(),
             degraded?: boolean(),
             degraded_reason: Minga.Git.Repo.degraded_reason() | nil
+          }
+  end
+
+  defmodule GitHeadEvent do
+    @moduledoc "A named checkout or commit changed. Listeners must read their own authoritative evidence."
+    @enforce_keys [:git_root, :branch, :head_oid]
+    defstruct [:git_root, :branch, :head_oid]
+
+    @type t :: %__MODULE__{
+            git_root: String.t(),
+            branch: String.t() | nil,
+            head_oid: String.t() | nil
           }
   end
 
@@ -368,10 +384,12 @@ defmodule Minga.Events do
           | :buffer_closed
           | :buffer_crashed
           | :buffer_changed
+          | :buffer_review_changed
           | :buffer_filetype_changed
           | :content_replaced
           | :mode_changed
           | :git_status_changed
+          | :git_head_changed
           | :diagnostics_updated
           | :lsp_status_changed
           | :tool_install_started
@@ -427,6 +445,7 @@ defmodule Minga.Events do
           | ProjectRebuildFailedEvent.t()
           | CommandDoneEvent.t()
           | GitStatusEvent.t()
+          | GitHeadEvent.t()
           | DiagnosticsUpdatedEvent.t()
           | LspStatusEvent.t()
           | SupervisorRestartedEvent.t()
@@ -547,7 +566,11 @@ defmodule Minga.Events do
   an isolated registry.
   """
   @spec broadcast(
-          :buffer_saved | :buffer_opened | :buffer_path_changed | :content_replaced,
+          :buffer_saved
+          | :buffer_opened
+          | :buffer_path_changed
+          | :buffer_review_changed
+          | :content_replaced,
           BufferEvent.t()
         ) :: :ok
   @spec broadcast(:buffer_closed, BufferClosedEvent.t()) :: :ok
@@ -560,6 +583,7 @@ defmodule Minga.Events do
   @spec broadcast(:project_rebuild_failed, ProjectRebuildFailedEvent.t()) :: :ok
   @spec broadcast(:command_done, CommandDoneEvent.t()) :: :ok
   @spec broadcast(:git_status_changed, GitStatusEvent.t()) :: :ok
+  @spec broadcast(:git_head_changed, GitHeadEvent.t()) :: :ok
   @spec broadcast(:diagnostics_updated, DiagnosticsUpdatedEvent.t()) :: :ok
   @spec broadcast(:lsp_status_changed, LspStatusEvent.t()) :: :ok
   @spec broadcast(:supervisor_restarted, SupervisorRestartedEvent.t()) :: :ok

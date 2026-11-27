@@ -5,6 +5,7 @@ defmodule Minga.Mode.TextObjectKeys do
           :word
           | :paragraph
           | :sentence
+          | :minga_change
           | {:quote, String.t()}
           | {:paren, String.t(), String.t()}
           | {:structural, :function | :class | :parameter | :block}
@@ -13,6 +14,7 @@ defmodule Minga.Mode.TextObjectKeys do
     ?w => :word,
     ?p => :paragraph,
     ?s => :sentence,
+    ?h => :minga_change,
     ?" => {:quote, "\""},
     ?' => {:quote, "'"},
     ?( => {:paren, "(", ")"},

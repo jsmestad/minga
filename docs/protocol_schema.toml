@@ -96,7 +96,9 @@ version = "2.0.0"
 # protocol_version 55 (#4055) appends each tool call's state (u8, a shared state id) and one-line step sentence (string16) to gui_agent_chat messages 0x04 and 0x08, adds the composer hints section 0x10, adds tab and workspace agent status 7 (stopped) and adds context-card status 6 (stopped).
 # protocol_version 56 adds the resident conversation queue (0xAE), exact queue clicks (0x76), and focus owner surface 15.
 # protocol_version 57 adds the window-addressed subagent peek (0xAF), its separate resident transcript (0xB0), and exact peek actions (0x77).
-protocol_version = 57
+# protocol_version 58 adds independent authored-region revisions to gui_gutter (0x7B).
+# protocol_version 59 requires gui_theme's shared You shade (0x81) and kept Minga ink (0x82) slots.
+protocol_version = 59
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -2091,6 +2093,16 @@ conditional_tail = { guard = "sign_type == 8", fields = [
 ] }
 
 [[structures]]
+name = "gutter_authored_region"
+fields = [
+  { name = "role", type = "u8" },
+  { name = "unit", type = "u64" },
+  { name = "first_line", type = "u32" },
+  { name = "first_column", type = "u32" },
+  { name = "last_line", type = "u32" },
+]
+
+[[structures]]
 name = "modeline_segment"
 fields = [
   { name = "name", type = "string8" },
@@ -2771,6 +2783,34 @@ name = "resident_overrides"
 layout = "counted_array"
 count_type = "u16"
 element = "gutter_entry"
+
+# Compact authorship is versioned independently of text and signs. A frame either replaces it, retains an exact revision, or applies exact additions and removals against its committed base. A region is an inclusive line interval; its first column is a source byte offset. Roles: 0 pending text, 1 pending deletion, 2 kept. Only pending roles carry a nonzero whole-unit ID.
+# Snapshot (0) has base zero and nonzero revision. Retain (1) names the same nonzero base and revision. Patch (2) has a nonzero base and a strictly newer revision.
+[[sections]]
+opcode = "gui_gutter"
+id = 0x06
+name = "authorship"
+fields = [
+  { name = "kind", type = "u8" },
+  { name = "base_revision", type = "u64" },
+  { name = "revision", type = "u64" },
+]
+
+[[sections]]
+opcode = "gui_gutter"
+id = 0x07
+name = "authorship_added"
+layout = "counted_array"
+count_type = "u16"
+element = "gutter_authored_region"
+
+[[sections]]
+opcode = "gui_gutter"
+id = 0x08
+name = "authorship_removed"
+layout = "counted_array"
+count_type = "u16"
+element = "gutter_authored_region"
 
 # gui_window_viewport_delta (0xA1) sections
 

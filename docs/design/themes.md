@@ -24,7 +24,9 @@ Every role below is a token in `docs/design_tokens.toml`. "Theme field" is the `
 |---|---|---|---|
 | you | Your edits, cursor, messages, your strand in the gutter | `agent.user_label` | 3:1 |
 | minga | Minga, its cursor tag, its changes, the light twist strand, the working orbit | `agent.minga_fg` | 3:1 |
-| minga_shade | The twist's shade strand, Minga's tinted lines | derived: minga mixed over surface at 45% | none |
+| minga_shade | The opposite strand in a pending twist | derived: minga mixed over surface at 25% | 3:1 against minga |
+| you_shade | Your opposite strand inside a pending twist | derived: you mixed over surface at 23% | 3:1 against minga |
+| minga_kept | The single strand left by a Keep | derived: minga mixed over surface at 75% | 3:1 against surface |
 | needs_you | Only "Minga needs you": the modeline chip, the needs-you state | `agent.attention_fg` | 3:1 |
 | failure | Errors, failed states, red diagnostics | `gutter.error_fg` | 3:1 |
 | done | Completed states | `agent.status_done` | 3:1 |
@@ -78,7 +80,9 @@ Values are read from the built structs (`MingaEditor.UI.Theme.CatppuccinFrappe.t
 | text_muted | `#949CBB` (overlay2) | `#858892` | `#5C5F77` (subtext1) |
 | you | `#8CAAEE` | `#50A4E9` | `#1E66F5` |
 | minga | `#CA9EE6` (mauve) | `#DD97F1` | `#8839EF` (mauve) |
-| minga_shade | `#75648E` | `#725480` | `#C19EF2` |
+| minga_shade | `#574F6E` | `#4B3C57` | `#D5C3F4` |
+| you_shade | `#454F6D` | `#263C51` | `#BFD1F5` |
+| minga_kept | `#A484BE` | `#AC79BE` | `#A267F1` |
 | needs_you | `#EF9F76` (peach) | `#F5983A` | `#D35400` (darkened peach) |
 | failure | `#E78284` | `#F8747E` | `#D20F39` |
 | done | `#A6D189` | `#75AD47` | `#388E25` (darkened green) |

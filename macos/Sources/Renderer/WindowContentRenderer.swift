@@ -307,6 +307,71 @@ final class WindowContentRenderer {
         return entry
     }
 
+    /// Shares one raster per mark variant and theme in a pane.
+    func renderGutterTwist(
+        _ variant: TwistVariant, singleLine: Bool, shared: Bool, strand: UInt32, shade: UInt32,
+        background: UInt32, width: Int, windowId: UInt16,
+        atlas: LineTextureAtlas, metrics: inout FrameMetrics
+    ) -> AtlasEntry? {
+        let markIndex: UInt64 = switch variant {
+        case .head: singleLine ? 0 : 1
+        case .body: 2
+        case .last: 3
+        case .kept: 4
+        case .shared: 5
+        }
+        // Both palettes can appear in one draw batch, so their entries cannot share a slot.
+        let key = AtlasKey(namespace: .gutterTwist, windowId: windowId, row: markIndex, subIndex: shared ? 1 : 0)
+        var hash = Hasher()
+        hash.combine(strand)
+        hash.combine(shade)
+        hash.combine(background)
+        hash.combine(width)
+        guard let lookup = atlas.lookupOrReserve(key: key, contentHash: hash.finalize()) else { return nil }
+        switch lookup {
+        case .hit(let entry):
+            metrics.otherTexturesReused += 1
+            return entry
+        case .reserved(let reservation):
+            var svg = variant.svg
+                .replacingOccurrences(of: "#a463e6", with: "LIGHT_STRAND")
+                .replacingOccurrences(of: "#6b3fa3", with: "SHADE_STRAND")
+                .replacingOccurrences(of: "#4f9fe0", with: "SHADE_STRAND")
+                .replacingOccurrences(of: "#1e1f24", with: "CODE_BACKGROUND")
+                .replacingOccurrences(of: "LIGHT_STRAND", with: String(format: "#%06X", strand))
+                .replacingOccurrences(of: "SHADE_STRAND", with: String(format: "#%06X", shade))
+                .replacingOccurrences(of: "CODE_BACKGROUND", with: String(format: "#%06X", background))
+            if singleLine {
+                svg = svg.replacingOccurrences(of: "L3 26", with: "L3 21")
+                    .replacingOccurrences(of: "L7 26", with: "L7 21")
+            }
+            guard let image = NSImage(data: Data(svg.utf8)) else {
+                nativePresentationFailure = nativePresentationFailure ?? NativePresentationFailure(
+                    phase: .raster, dimension: .rasterContext, reason: .unavailable)
+                return nil
+            }
+            let result: RasterizeResult
+            do {
+                result = try rasterizer.rasterizeGutterTwist(image, width: width, height: linePixelHeight)
+            } catch let failure as NativePresentationFailure {
+                nativePresentationFailure = nativePresentationFailure ?? failure
+                return nil
+            } catch {
+                nativePresentationFailure = nativePresentationFailure ?? NativePresentationFailure(
+                    phase: .raster, dimension: .rasterContext, reason: .unavailable)
+                return nil
+            }
+            guard let entry = atlas.commitUpload(reservation: reservation, pointer: result.pointer,
+                                                 pixelWidth: width, bytesPerRow: result.bytesPerRow) else {
+                nativePresentationFailure = nativePresentationFailure ?? atlas.nativePresentationFailure
+                return nil
+            }
+            metrics.otherTexturesRasterized += 1
+            metrics.recordMiss(reservation.reason)
+            return entry
+        }
+    }
+
     // MARK: - Annotation Rendering
 
     /// Renders a pill badge annotation into the atlas.

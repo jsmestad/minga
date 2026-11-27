@@ -145,8 +145,9 @@ Press `SPC` in Normal mode. These sequences also work from the agent view, the f
 | `SPC a r` | Pending reviews |
 | `SPC a p` | Publish or discard the agent's staged edits, in one prompt |
 | `SPC a u` | Confirm rejection of all pending changes from the latest Minga task in this buffer. Your edits stay |
-| `SPC a d` | Reject the exact Minga change named when your undo or redo was blocked |
-| `SPC a y` | Keep the exact Minga change named when your undo or redo was blocked |
+| `SPC a d` | Reject the pending Minga change at the cursor or all changes touched by the Visual selection |
+| `SPC a y` | Keep the pending Minga change at the cursor or all changes touched by the Visual selection |
+| `.` | Repeat the last successful file Keep or Reject at a new cursor position. A count such as `2SPC a y` applies to distinct changes in file order, and a count on `.` overrides the original count |
 | `SPC a W` | Why is this line like this? |
 | `SPC a A` | Code autobiography |
 | `SPC a q q` | Focus `*minga-queue*` inside the conversation |
@@ -163,6 +164,8 @@ Press `SPC` in Normal mode. These sequences also work from the agent view, the f
 | `SPC a S l` | Pick where the agent runs, on this machine or a remote one |
 | `SPC a S k` | Inspect the conversation checklist |
 | `SPC a S s` | Stop the session |
+
+In a file, the crossing in the gutter marks the start of a pending Minga change. Use `]h` or `[h` to move between changes, `ih` for the changed text itself, or `ah` for the surrounding lines. `:'<,'>Minga keep` keeps the changes touched by selected lines; `:%Minga reject` rejects pending changes across the file. A Keep leaves a dim mark until a later commit on the same branch includes that saved change. If a commit includes only part of an insertion, the rest stays marked.
 
 **In a subagent peek**
 
@@ -246,7 +249,7 @@ These work in Normal mode without the leader.
 | `]e` / `[e` | Next / previous diagnostic |
 | `]d` / `[d` | Next / previous Git change |
 | `]c` / `[c` | Next / previous Git change (same as `]d` / `[d`) |
-| `]h` / `[h` | Next / previous change Minga made |
+| `]h` / `[h` | Next / previous pending change Minga made |
 | `]x` / `[x` | Next / previous merge conflict |
 | `]f` / `[f` | Next / previous function |
 | `]t` / `[t` | Next / previous class or module |

@@ -43,7 +43,9 @@ defmodule Minga.Buffer.Provenance do
   This module is pure. `Minga.Buffer.UndoHistory` owns the value and decides which groups exist; `Minga.Buffer.Process` keeps it in step with every change to the document.
   """
 
+  alias Minga.Buffer.Cursor
   alias Minga.Buffer.Document
+  alias Minga.Buffer.Position
   alias Minga.Buffer.Provenance.Change
   alias Minga.Buffer.Provenance.DraftLinks
   alias Minga.Buffer.Provenance.Group
@@ -56,6 +58,11 @@ defmodule Minga.Buffer.Provenance do
   alias Minga.Buffer.Author
   require Author
 
+  import Bitwise, only: [band: 2, bor: 2, bsl: 2]
+
+  @origin_counter_mask bsl(1, 64) - 1
+
+  # Only authored splices carry the buffer incarnation. Ordinary undo changes keep small local IDs.
   defstruct tree: nil,
             groups: %{},
             user_groups: nil,
@@ -65,9 +72,12 @@ defmodule Minga.Buffer.Provenance do
             fresh: [],
             overlap_runs: %{},
             drafts: nil,
+            review_sites: nil,
+            strand_sites: nil,
             witnessed_drafts: nil,
             settling_drafts: nil,
             next_change: 1,
+            origin_scope: 0,
             changes: %{},
             stale: [],
             faults: %{},
@@ -85,9 +95,12 @@ defmodule Minga.Buffer.Provenance do
             fresh: [Locator.t()],
             overlap_runs: %{group_id() => [Locator.t()]},
             drafts: :gb_sets.set({group_id(), Locator.t()}),
+            review_sites: :gb_sets.set(Locator.t()),
+            strand_sites: :gb_sets.set(Locator.t()),
             witnessed_drafts: DraftLinks.t(),
             settling_drafts: MapSet.t(Locator.t()) | nil,
             next_change: pos_integer(),
+            origin_scope: non_neg_integer(),
             changes: %{Change.id() => Change.t()},
             stale: [Change.id()],
             faults: %{(group_id() | :all) => true},
@@ -106,19 +119,42 @@ defmodule Minga.Buffer.Provenance do
   @typedoc "A live stretch of text with one author, and the key of the Minga step that wrote it, if any."
   @type span :: {non_neg_integer(), non_neg_integer(), author(), group_key()}
 
+  @typedoc "An applied Minga group and a contributing live run or direct deletion gap."
+  @type review_site :: {group_id(), non_neg_integer(), non_neg_integer()}
+
+  @typedoc "A non-actionable visible strand and its source byte extent."
+  @type strand_span :: {:kept | :you | :shared, non_neg_integer(), non_neg_integer()}
+
+  @typedoc "The written extent or actual preimage of a direct Minga edit, positioned in the exact Keep projection."
+  @type keep_source ::
+          {:written, Run.origin(), non_neg_integer(), pos_integer()}
+          | {:removed, Run.origin(), non_neg_integer(), binary()}
+
+  @type keep_interval ::
+          {:insert | :replace | :delete, pos_integer(), non_neg_integer(), pos_integer()}
+
+  @type source_key :: {:insert | :replace | :delete, pos_integer()}
+  @type kept_placement ::
+          {:visible, Run.origin(), non_neg_integer(), pos_integer()}
+          | {:gap, Run.origin(), non_neg_integer()}
+          | {:held, Run.origin()}
+  @type kept_placements :: %{source_key() => [kept_placement()]}
+
+  @typep kept_gaps :: %{optional(Locator.t()) => Run.origin() | nil}
   @typep change :: {non_neg_integer(), non_neg_integer(), binary()}
   @typep saved_run ::
            {non_neg_integer(), author(), group_id() | nil, [group_id()], [Run.overlap()],
-            binary() | nil, Change.id() | nil, [Change.id()], [group_id()], [group_id()]}
+            binary() | nil, Change.id() | nil, [Change.id()], [group_id()], [group_id()],
+            [group_id()], boolean(), Run.origin() | nil, [{group_id(), Run.origin()}]}
   @typep saved_groups :: %{group_id() => {author(), group_key(), boolean()}}
   @typep saved_changes :: %{Change.id() => {Change.owner(), [Change.id()]}}
   @opaque snapshot ::
-            {:provenance_v1, pos_integer(), pos_integer(), saved_groups(), [saved_run()],
+            {:provenance_v4, pos_integer(), pos_integer(), saved_groups(), [saved_run()],
              saved_changes(), [[group_id()]], map(), boolean()}
 
   @doc "Returns provenance for a document of `size` bytes that all predates tracking."
-  @spec new(non_neg_integer()) :: t()
-  def new(size) when is_integer(size) and size >= 0 do
+  @spec new(non_neg_integer(), non_neg_integer()) :: t()
+  def new(size, origin_scope \\ 0) when is_integer(size) and size >= 0 do
     tree =
       if size == 0,
         do: RunTree.new(),
@@ -131,11 +167,33 @@ defmodule Minga.Buffer.Provenance do
 
     %__MODULE__{
       tree: tree,
+      origin_scope: origin_scope,
       user_groups: :gb_sets.new(),
       drafts: :gb_sets.new(),
+      review_sites: :gb_sets.new(),
+      strand_sites: :gb_sets.new(),
       witnessed_drafts: DraftLinks.new()
     }
   end
+
+  @doc "Carries the live allocation scope and high-water mark into restored or reset history."
+  @spec inherit_origin_scope(t(), t()) :: t()
+  def inherit_origin_scope(%__MODULE__{} = next, %__MODULE__{} = live) do
+    %{
+      next
+      | origin_scope: live.origin_scope,
+        next_change: max(next.next_change, live.next_change)
+    }
+  end
+
+  @spec source_id(non_neg_integer(), pos_integer()) :: pos_integer()
+  defp source_id(scope, counter), do: bor(bsl(scope, 64), counter)
+
+  @spec valid_source_id?(term(), pos_integer()) :: boolean()
+  defp valid_source_id?(id, next) when is_integer(id) and id > 0,
+    do: valid_id?(band(id, @origin_counter_mask), next)
+
+  defp valid_source_id?(_id, _next), do: false
 
   @doc "Returns the document size in bytes that this provenance describes."
   @spec size(t()) :: non_neg_integer()
@@ -162,23 +220,29 @@ defmodule Minga.Buffer.Provenance do
 
     runs = Enum.map(RunTree.to_list(prov.tree), &save_run/1)
 
-    {:provenance_v1, prov.next_group, prov.next_change, groups, runs, changes,
+    {:provenance_v4, prov.next_group, prov.next_change, groups, runs, changes,
      DraftLinks.snapshot(prov.witnessed_drafts), prov.group_marks, faulted?(prov)}
   end
 
   @doc "Validates references and live bytes before rebuilding the provenance indexes."
   @spec restore_snapshot(term(), non_neg_integer()) :: {:ok, t()} | {:error, :invalid_provenance}
   def restore_snapshot(
-        {:provenance_v1, next_group, next_change, groups, runs, changes, drafts, marks, faulted},
+        {version, next_group, next_change, groups, runs, changes, drafts, marks, faulted},
         size
       )
-      when is_integer(next_group) and next_group > 0 and is_integer(next_change) and
-             next_change > 0 and is_map(groups) and is_list(runs) and is_map(changes) and
-             is_list(drafts) and is_map(marks) and is_boolean(faulted) do
-    with :ok <- validate_saved_groups(groups, next_group),
+      when version in [:provenance_v1, :provenance_v2, :provenance_v3, :provenance_v4] do
+    format = if version == :provenance_v4, do: {version, next_change}, else: version
+
+    with :ok <-
+           validate_saved_shape(
+             next_group,
+             next_change,
+             {groups, runs, changes, drafts, marks, faulted}
+           ),
+         :ok <- validate_saved_groups(groups, next_group),
          :ok <- validate_saved_changes(changes, groups, next_change),
          :ok <- validate_saved_links(groups, drafts, marks),
-         {:ok, runs} <- restore_runs(runs, groups, changes, size, []) do
+         {:ok, runs} <- restore_runs(runs, groups, changes, size, [], format) do
       prov = %__MODULE__{
         groups: Map.new(groups, &restore_group/1),
         changes:
@@ -197,6 +261,20 @@ defmodule Minga.Buffer.Provenance do
   end
 
   def restore_snapshot(_snapshot, _size), do: {:error, :invalid_provenance}
+
+  @spec validate_saved_shape(term(), term(), tuple()) :: :ok | {:error, :invalid_provenance}
+  defp validate_saved_shape(
+         next_group,
+         next_change,
+         {groups, runs, changes, drafts, marks, faulted}
+       )
+       when is_integer(next_group) and next_group > 0 and is_integer(next_change) and
+              next_change > 0 and
+              is_map(groups) and is_list(runs) and is_map(changes) and is_list(drafts) and
+              is_map(marks) and is_boolean(faulted),
+       do: :ok
+
+  defp validate_saved_shape(_group, _change, _shape), do: {:error, :invalid_provenance}
 
   @spec restore_change_links({Change.id(), {Change.owner(), [Change.id()]}}, t()) :: t()
   defp restore_change_links({id, {owner, pulls}}, prov) do
@@ -294,69 +372,242 @@ defmodule Minga.Buffer.Provenance do
   defp save_run(run),
     do:
       {run.bytes, run.author, run.group, run.deletions, run.overlaps, run.text, run.made_by,
-       run.replaced_by, run.covered_by, run.swept_by}
+       run.replaced_by, run.covered_by, run.swept_by, run.direct_gaps, run.kept?, run.origin,
+       run.gap_origins}
 
-  @spec restore_runs([saved_run()], saved_groups(), saved_changes(), integer(), [Run.t()]) ::
+  @typep snapshot_format ::
+           :provenance_v1 | :provenance_v2 | :provenance_v3 | {:provenance_v4, pos_integer()}
+
+  @spec restore_runs(
+          list(),
+          saved_groups(),
+          saved_changes(),
+          integer(),
+          [Run.t()],
+          snapshot_format()
+        ) ::
           {:ok, [Run.t()]} | {:error, :invalid_provenance}
-  defp restore_runs([], _groups, _changes, 0, acc), do: {:ok, Enum.reverse(acc)}
+  defp restore_runs([], _groups, _changes, 0, acc, _version), do: {:ok, Enum.reverse(acc)}
 
-  defp restore_runs(
-         [
-           {bytes, author, writer, deletions, overlaps, text, made, replaced, covered, swept} =
-             run
-           | rest
-         ],
+  defp restore_runs([run | rest], groups, changes, remaining, acc, :provenance_v1)
+       when tuple_size(run) == 10 do
+    upgraded =
+      run
+      |> Tuple.insert_at(10, legacy_direct_gaps(run))
+      |> Tuple.insert_at(11, false)
+      |> Tuple.insert_at(12, nil)
+      |> Tuple.insert_at(13, [])
+
+    restore_run(upgraded, rest, groups, changes, remaining, acc, :provenance_v1)
+  end
+
+  defp restore_runs([run | rest], groups, changes, remaining, acc, :provenance_v2)
+       when tuple_size(run) == 11 do
+    upgraded =
+      run |> Tuple.insert_at(11, false) |> Tuple.insert_at(12, nil) |> Tuple.insert_at(13, [])
+
+    restore_run(upgraded, rest, groups, changes, remaining, acc, :provenance_v2)
+  end
+
+  defp restore_runs([run | rest], groups, changes, remaining, acc, :provenance_v3)
+       when tuple_size(run) == 12 do
+    upgraded = run |> Tuple.insert_at(12, nil) |> Tuple.insert_at(13, [])
+    restore_run(upgraded, rest, groups, changes, remaining, acc, :provenance_v3)
+  end
+
+  defp restore_runs([run | rest], groups, changes, remaining, acc, {:provenance_v4, _} = format),
+    do: restore_run(run, rest, groups, changes, remaining, acc, format)
+
+  defp restore_runs(_runs, _groups, _changes, _remaining, _acc, _version),
+    do: {:error, :invalid_provenance}
+
+  # A v1 checkpoint did not distinguish a paired replacement from a later sweep by the same group.
+  # Recover only unambiguous gaps. All the old groups still participate in exact review.
+  @spec legacy_direct_gaps(tuple()) :: [group_id()]
+  defp legacy_direct_gaps({bytes, _, _, deletions, _, _, _, [], covered, swept})
+       when is_integer(bytes) and bytes > 0 and is_list(deletions) and is_list(covered) and
+              is_list(swept) do
+    Enum.reject(deletions, &(&1 in covered or &1 in swept))
+  end
+
+  defp legacy_direct_gaps(_run), do: []
+
+  @spec restore_run(
+          term(),
+          list(),
+          saved_groups(),
+          saved_changes(),
+          integer(),
+          [Run.t()],
+          snapshot_format()
+        ) ::
+          {:ok, [Run.t()]} | {:error, :invalid_provenance}
+  defp restore_run(
+         {bytes, author, writer, deletions, overlaps, _, _, replaced, covered, swept, gaps, kept?,
+          _, gap_origins} = run,
+         rest,
          groups,
          changes,
          remaining,
-         acc
+         acc,
+         version
        )
        when is_integer(bytes) and bytes >= 0 and is_list(deletions) and is_list(overlaps) and
-              is_list(replaced) and is_list(covered) and is_list(swept) do
+              is_list(replaced) and is_list(covered) and is_list(swept) and is_list(gaps) and
+              is_boolean(kept?) and is_list(gap_origins) do
     with {:ok, written?} <- validate_writer(groups, writer, author),
-         :ok <- validate_run_references(run, groups, changes) do
-      live = bytes > 0 and written? and not Enum.any?(deletions, &elem(Map.fetch!(groups, &1), 2))
-      live_bytes = if live, do: bytes, else: 0
-
-      if live_bytes <= remaining and valid_run_text?(live, bytes, text) do
-        run = %Run{
-          id: Locator.between(nil, nil),
-          bytes: bytes,
-          author: author,
-          group: writer,
-          deletions: deletions,
-          overlaps: overlaps,
-          text: text,
-          live: live,
-          made_by: made,
-          replaced_by: replaced,
-          covered_by: covered,
-          swept_by: swept
-        }
-
-        restore_runs(rest, groups, changes, remaining - live_bytes, [run | acc])
-      else
-        {:error, :invalid_provenance}
-      end
+         :ok <- validate_run_references(run, groups, changes),
+         {:ok, restored, used} <- decode_saved_run(run, groups, written?, remaining, version) do
+      restore_runs(rest, groups, changes, remaining - used, [restored | acc], version)
     end
   end
 
-  defp restore_runs(_runs, _groups, _changes, _remaining, _acc), do: {:error, :invalid_provenance}
+  defp restore_run(_run, _rest, _groups, _changes, _remaining, _acc, _version),
+    do: {:error, :invalid_provenance}
+
+  @spec decode_saved_run(saved_run(), saved_groups(), boolean(), integer(), snapshot_format()) ::
+          {:ok, Run.t(), non_neg_integer()} | {:error, :invalid_provenance}
+  defp decode_saved_run(run, groups, written?, remaining, version) do
+    {bytes, author, writer, deletions, overlaps, text, made, replaced, covered, swept, gaps,
+     kept?, origin, gap_origins} = run
+
+    live = bytes > 0 and written? and not Enum.any?(deletions, &elem(Map.fetch!(groups, &1), 2))
+    used = if live, do: bytes, else: 0
+
+    if used <= remaining and valid_run_text?(live, bytes, text) and valid_kept_run?(run) and
+         valid_origin?(origin, writer, author, bytes, kept?, version) and
+         valid_gap_origins?(gap_origins, gaps, deletions, bytes, version) do
+      restored = %Run{
+        id: Locator.between(nil, nil),
+        bytes: bytes,
+        author: author,
+        group: writer,
+        deletions: deletions,
+        overlaps: overlaps,
+        text: text,
+        live: live,
+        made_by: made,
+        replaced_by: replaced,
+        covered_by: covered,
+        swept_by: swept,
+        direct_gaps: gaps,
+        kept?: kept?,
+        origin: origin,
+        gap_origins: gap_origins
+      }
+
+      {:ok, restored, used}
+    else
+      {:error, :invalid_provenance}
+    end
+  end
+
+  @spec valid_kept_run?(saved_run()) :: boolean()
+  defp valid_kept_run?({_, _, _, _, _, _, _, _, _, _, _, false, _, _}), do: true
+
+  defp valid_kept_run?({0, :unattributed, nil, [], [], _, nil, [], [], [], [], true, _, []}),
+    do: true
+
+  defp valid_kept_run?({bytes, author, nil, _, _, _, _, _, _, _, _, true, _, _}) when bytes > 0,
+    do: minga?(author)
+
+  defp valid_kept_run?(_run), do: false
+
+  @spec valid_origin?(
+          term(),
+          group_id() | nil,
+          author(),
+          non_neg_integer(),
+          boolean(),
+          snapshot_format()
+        ) ::
+          boolean()
+  defp valid_origin?(nil, _writer, _author, _bytes, _kept, _format), do: true
+
+  defp valid_origin?(
+         {kind, id, offset, total},
+         writer,
+         author,
+         bytes,
+         kept,
+         {:provenance_v4, next}
+       )
+       when kind in [:insert, :replace] and bytes > 0 and (not is_nil(writer) or kept),
+       do: valid_source_id?(id, next) and minga?(author) and valid_extent?(offset, bytes, total)
+
+  defp valid_origin?(
+         {:delete, id, offset, total},
+         nil,
+         :unattributed,
+         0,
+         true,
+         {:provenance_v4, next}
+       ),
+       do: valid_source_id?(id, next) and valid_extent?(offset, 1, total)
+
+  defp valid_origin?(_origin, _writer, _author, _bytes, _kept, _format), do: false
+
+  @spec valid_extent?(term(), pos_integer(), term()) :: boolean()
+  defp valid_extent?(offset, bytes, total),
+    do: is_integer(offset) and offset >= 0 and is_integer(total) and offset + bytes <= total
+
+  @spec valid_gap_origins?(
+          list(),
+          [group_id()],
+          [group_id()],
+          non_neg_integer(),
+          snapshot_format()
+        ) ::
+          boolean()
+  defp valid_gap_origins?([], _gaps, _deletions, _bytes, _format), do: true
+
+  defp valid_gap_origins?(origins, gaps, deletions, bytes, {:provenance_v4, next})
+       when bytes > 0 do
+    Enum.all?(origins, fn
+      {group, {:delete, id, offset, total}} ->
+        group in gaps and valid_source_id?(id, next) and valid_extent?(offset, bytes, total)
+
+      {group, {:replace, id, offset, total}} ->
+        group in deletions and valid_source_id?(id, next) and valid_extent?(offset, bytes, total)
+
+      _invalid ->
+        false
+    end) and length(origins) == length(Enum.uniq_by(origins, &elem(&1, 0)))
+  end
+
+  defp valid_gap_origins?(_origins, _gaps, _deletions, _bytes, _format), do: false
 
   @spec validate_run_references(saved_run(), saved_groups(), saved_changes()) ::
           :ok | {:error, :invalid_provenance}
   defp validate_run_references(
-         {_bytes, _author, _writer, deletions, overlaps, _text, made, replaced, covered, swept},
+         {bytes, _author, _writer, deletions, overlaps, _text, made, replaced, covered, swept,
+          gaps, _kept?, _origin, _gap_origins},
          groups,
          changes
        ) do
     valid_snapshot(
       Enum.all?(deletions, &is_map_key(groups, &1)) and
         Enum.all?(covered, &(&1 in deletions)) and Enum.all?(swept, &(&1 in deletions)) and
+        valid_gap_references?(bytes, made, gaps, deletions, covered, swept) and
         Enum.all?(overlaps, &valid_run_overlap?(groups, &1)) and
         (is_nil(made) or is_map_key(changes, made)) and
         Enum.all?(replaced, &is_map_key(changes, &1))
     )
+  end
+
+  @spec valid_gap_references?(
+          non_neg_integer(),
+          Change.id() | nil,
+          [group_id()],
+          [group_id()],
+          [group_id()],
+          [group_id()]
+        ) :: boolean()
+  defp valid_gap_references?(_bytes, _made, [], _deletions, _covered, _swept), do: true
+
+  defp valid_gap_references?(bytes, made, gaps, deletions, covered, swept) do
+    (bytes > 0 or not is_nil(made)) and gaps == Enum.uniq(gaps) and
+      Enum.all?(gaps, &(&1 in deletions and &1 not in covered and &1 not in swept))
   end
 
   @spec valid_run_overlap?(saved_groups(), term()) :: boolean()
@@ -491,8 +742,19 @@ defmodule Minga.Buffer.Provenance do
         change =
           if inserted_bytes > 0 and removed_bytes > 0 and group_id != nil, do: prov.next_change
 
+        {gap, next} =
+          gap_source(author, removed_bytes, change, prov.next_change, prov.origin_scope)
+
         {prov, {killed, replaced, pulled}} =
-          delete_from(prov, group_id, change, following, removed, 0, {[], [], []})
+          delete_from(
+            %{prov | next_change: next},
+            group_id,
+            {change, gap},
+            following,
+            removed,
+            0,
+            {[], [], []}
+          )
 
         {prov, made_by} = open_change(prov, change, replaced, pulled, author)
 
@@ -550,11 +812,13 @@ defmodule Minga.Buffer.Provenance do
   def revert(%__MODULE__{} = prov, id, %Document{} = document),
     do: prov |> set_applied(id, false, document) |> traced_flip([id], false)
 
-  @doc "Unapplies every group in `ids` together, in one pass over the document. See `revert/3`."
-  @spec revert_all(t(), [group_id()], Document.t()) ::
+  @doc "Unapplies every group in one pass. With `preserve_cursor?`, maps the cursor across the changed bytes."
+  @spec revert_all(t(), [group_id()], Document.t(), boolean()) ::
           {:ok, Document.t(), non_neg_integer() | nil, t()} | {:error, :invalid_utf8}
-  def revert_all(%__MODULE__{} = prov, ids, %Document{} = document) when is_list(ids),
-    do: prov |> set_applied_all(ids, false, document) |> traced_flip(ids, false)
+  def revert_all(%__MODULE__{} = prov, ids, %Document{} = document, preserve_cursor? \\ false)
+      when is_list(ids),
+      do:
+        prov |> set_applied_all(ids, false, document, preserve_cursor?) |> traced_flip(ids, false)
 
   @doc "Applies a reverted group again and returns the document with its text. See `revert/3`."
   @spec reapply(t(), group_id(), Document.t()) ::
@@ -860,14 +1124,14 @@ defmodule Minga.Buffer.Provenance do
   @spec discard(t(), group_id()) :: t()
   def discard(%__MODULE__{} = prov, id) do
     %{prov | settling_drafts: MapSet.new()}
-    |> discard_one(id, prov)
+    |> discard_one(id, prov, nil)
     |> unpair_drafts(id)
     |> traced({:discard, [id]})
     |> finish_group_discard([id])
   end
 
-  @spec discard_one(t(), group_id(), t()) :: t()
-  defp discard_one(prov, id, before) do
+  @spec discard_one(t(), group_id(), t(), kept_gaps() | nil) :: t()
+  defp discard_one(prov, id, before, gaps) do
     {group, groups} = Map.pop!(prov.groups, id)
     marked = Map.get(prov.overlap_runs, id, [])
 
@@ -878,7 +1142,9 @@ defmodule Minga.Buffer.Provenance do
 
     group.runs
     |> :gb_sets.to_list()
-    |> Enum.reduce(prov, fn run_id, prov -> settle_run(prov, run_id, %{id => group}, before) end)
+    |> Enum.reduce(prov, fn run_id, prov ->
+      settle_run(prov, run_id, %{id => group}, before, gaps)
+    end)
     |> refresh_runs(marked)
     |> settle_owners(%{id => group})
     |> settle_changes()
@@ -1214,6 +1480,54 @@ defmodule Minga.Buffer.Provenance do
     prov |> discard_groups(ids) |> finish_group_discard(ids)
   end
 
+  @doc "Keeps reviewed text and deletion marks, then retires those groups and their dependents."
+  @spec keep_groups(t(), [group_id()], [group_id()]) :: t()
+  def keep_groups(%__MODULE__{} = prov, reviewed, retired) do
+    {prov, gaps} = Enum.reduce(reviewed, {prov, %{}}, &mark_kept_group/2)
+    prov |> discard_groups(retired, gaps) |> finish_group_discard(retired)
+  end
+
+  @spec mark_kept_group(group_id(), {t(), kept_gaps()}) :: {t(), kept_gaps()}
+  defp mark_kept_group(id, {prov, gaps}) do
+    case Map.fetch!(prov.groups, id) do
+      %Group{applied: true, runs: runs} ->
+        Enum.reduce(:gb_sets.to_list(runs), {prov, gaps}, &mark_kept_run(id, &1, &2))
+
+      %Group{applied: false} ->
+        {prov, gaps}
+    end
+  end
+
+  @spec mark_kept_run(group_id(), Locator.t(), {t(), kept_gaps()}) :: {t(), kept_gaps()}
+  defp mark_kept_run(id, locator, {prov, gaps}) do
+    {:ok, run, _offset} = RunTree.fetch(prov.tree, locator)
+
+    gaps =
+      if not run.live and id in run.direct_gaps and inserted?(prov.groups, run.group),
+        do: mark_kept_gap(gaps, run, id),
+        else: gaps
+
+    prov =
+      if run.group == id and run.bytes > 0 and not run.kept?,
+        do: put_run(prov, run, %{run | kept?: true}),
+        else: prov
+
+    {prov, gaps}
+  end
+
+  @spec mark_kept_gap(kept_gaps(), Run.t(), group_id()) :: kept_gaps()
+  defp mark_kept_gap(gaps, run, id) do
+    origin =
+      case List.keyfind(run.gap_origins, id, 0) do
+        {^id, {:delete, _, _, _} = source} -> source
+        _other -> nil
+      end
+
+    Map.update(gaps, run.id, origin, fn previous ->
+      if previous == origin, do: origin
+    end)
+  end
+
   @doc """
   Retires the selected groups and replays an untracked replacement as one history change.
 
@@ -1230,15 +1544,15 @@ defmodule Minga.Buffer.Provenance do
     |> finish_group_discard(ids)
   end
 
-  @spec discard_groups(t(), [group_id()]) :: t()
-  defp discard_groups(prov, ids) do
+  @spec discard_groups(t(), [group_id()], kept_gaps() | nil) :: t()
+  defp discard_groups(prov, ids, gaps \\ nil) do
     touched = Enum.reduce(ids, 0, &(:gb_sets.size(Map.fetch!(prov.groups, &1).runs) + &2))
     settling = %{prov | settling_drafts: MapSet.new()}
 
     discarded =
       if touched * 8 > RunTree.count(prov.tree),
-        do: discard_in_one_pass(settling, ids),
-        else: Enum.reduce(ids, settling, &discard_one(&2, &1, prov))
+        do: discard_in_one_pass(settling, ids, gaps),
+        else: Enum.reduce(ids, settling, &discard_one(&2, &1, prov, gaps))
 
     ids
     |> Enum.reduce(discarded, &unpair_drafts(&2, &1))
@@ -1444,7 +1758,16 @@ defmodule Minga.Buffer.Provenance do
 
     kept_ids = MapSet.new(kept, & &1.id)
     dropped = Enum.reject(before, &MapSet.member?(kept_ids, &1.id))
-    prov = Enum.reduce(dropped, prov, &forget_changes(&2, &1))
+
+    prov =
+      Enum.reduce(dropped, prov, fn run, prov ->
+        prov |> forget_changes(run) |> unindex_review_site(run.id) |> unindex_strand_site(run)
+      end)
+
+    prov =
+      Enum.reduce(kept, prov, fn run, acc ->
+        acc |> index_review_site(run) |> index_strand_site(run)
+      end)
 
     # A replacement whose runs changed group may now share its group with what it pulls: look at those again.
     relabeled =
@@ -1534,7 +1857,8 @@ defmodule Minga.Buffer.Provenance do
     group = if run.group == old, do: new, else: run.group
 
     # The merged step deleted the run directly when either step did.
-    direct? = Enum.any?([old, new], &removed_by?(%{run | group: nil}, &1))
+    gaps = substitute(run.direct_gaps, old, new)
+    direct? = new in gaps or Enum.any?([old, new], &removed_by?(%{run | group: nil}, &1))
     swept? = old in run.swept_by or new in run.swept_by
     swept_by = substitute(run.swept_by, old, new)
     covered_by = substitute(run.covered_by, old, new)
@@ -1549,8 +1873,22 @@ defmodule Minga.Buffer.Provenance do
         deletions: substitute(run.deletions, old, new),
         covered_by: if(direct?, do: List.delete(covered_by, new), else: covered_by),
         swept_by: if(direct?, do: List.delete(swept_by, new), else: swept_by),
+        direct_gaps: gaps,
+        gap_origins: relabel_gap_origins(run.gap_origins, old, new),
         overlaps: substitute_marks(run.overlaps, old, new)
     }
+  end
+
+  @spec relabel_gap_origins([{group_id(), Run.origin()}], group_id(), group_id()) ::
+          [{group_id(), Run.origin()}]
+  defp relabel_gap_origins(origins, old, new) do
+    case List.keytake(origins, old, 0) do
+      {{^old, origin}, rest} ->
+        if List.keymember?(rest, new, 0), do: rest, else: [{new, origin} | rest]
+
+      nil ->
+        origins
+    end
   end
 
   # Puts `new` in `old`'s place, or drops `old` when `new` is already there.
@@ -1594,7 +1932,7 @@ defmodule Minga.Buffer.Provenance do
 
   defp compacted_anchor(%Change{replaced: replaced, pulls: pulls}, run) do
     if not :gb_sets.is_empty(replaced) or not :gb_sets.is_empty(pulls),
-      do: %{run | bytes: 0, text: ""}
+      do: %{run | bytes: 0, text: "", origin: nil, gap_origins: []}
   end
 
   # First join adjacent pieces of one replacement, then collapse replacements that only cover the next anchor.
@@ -1605,7 +1943,8 @@ defmodule Minga.Buffer.Provenance do
   defp coalesce_coverage_anchors(runs, prov, old, new) do
     same_lifetime? = fn source, target ->
       source.group == new and target.group == new and source.deletions == target.deletions and
-        source.overlaps == [] and target.overlaps == []
+        source.direct_gaps == target.direct_gaps and source.overlaps == [] and
+        target.overlaps == []
     end
 
     {runs, pieces} =
@@ -1802,6 +2141,364 @@ defmodule Minga.Buffer.Provenance do
   end
 
   @doc """
+  Returns the applied Minga runs and direct deletion gaps touching `[from, to)`, in file order.
+
+  A gap belongs to the range starting there. Include the gap at EOF only when `include_eof?` is true and the range reaches EOF. A replacement contributes its live text, not an extra gap for the bytes it replaced. A live run retains its full extent when it crosses a query boundary. Seeks through the sparse site index; retired, parked, and untracked runs between sites do not need a visit.
+  """
+  @spec review_sites(t(), non_neg_integer(), non_neg_integer(), boolean()) :: [review_site()]
+  def review_sites(%__MODULE__{} = prov, from, to, include_eof? \\ true)
+      when is_integer(from) and is_integer(to) and from >= 0 and to >= from do
+    size = RunTree.size(prov.tree)
+    at_eof? = include_eof? and to >= size
+
+    if :gb_sets.is_empty(prov.review_sites) or (from == to and not at_eof?) do
+      []
+    else
+      case RunTree.first_overlapping(prov.tree, from) do
+        nil ->
+          []
+
+        first ->
+          to = min(to, size)
+          iterator = :gb_sets.iterator_from(first, prov.review_sites)
+          prov |> collect_review_sites(iterator, to, at_eof?, []) |> Enum.reverse()
+      end
+    end
+  end
+
+  @doc "Lazily seeks the pending authored sites from a byte in either direction."
+  @spec review_sites_from(t(), non_neg_integer(), :next | :previous) :: Enumerable.t()
+  def review_sites_from(%__MODULE__{} = prov, offset, direction) do
+    order = if direction == :next, do: :ordered, else: :reversed
+
+    case RunTree.first_overlapping(prov.tree, offset) do
+      nil when direction == :next ->
+        []
+
+      nil ->
+        stream_review_sites(prov, :gb_sets.iterator(prov.review_sites, order))
+
+      locator ->
+        stream_review_sites(prov, :gb_sets.iterator_from(locator, prov.review_sites, order))
+    end
+  end
+
+  @spec stream_review_sites(t(), :gb_sets.iter(Locator.t())) :: Enumerable.t()
+  defp stream_review_sites(prov, iterator) do
+    Stream.resource(
+      fn -> iterator end,
+      fn current ->
+        case :gb_sets.next(current) do
+          :none ->
+            {:halt, current}
+
+          {locator, next} ->
+            {:ok, run, start} = RunTree.fetch(prov.tree, locator)
+            {append_review_sites([], run, start, prov), next}
+        end
+      end,
+      fn _iterator -> :ok end
+    )
+  end
+
+  @doc "Returns live human, shared and kept strands and deletion gaps with their full source extents."
+  @spec strand_spans(t(), non_neg_integer(), non_neg_integer(), boolean()) :: [strand_span()]
+  def strand_spans(%__MODULE__{} = prov, from, to, include_eof? \\ false) do
+    at_eof? = include_eof? and to == size(prov)
+
+    if :gb_sets.is_empty(prov.strand_sites) or (from >= to and not at_eof?) do
+      []
+    else
+      case RunTree.first_overlapping(prov.tree, from) do
+        nil ->
+          []
+
+        first ->
+          iterator = :gb_sets.iterator_from(first, prov.strand_sites)
+          prov |> collect_strand_spans(iterator, to, at_eof?, []) |> Enum.reverse()
+      end
+    end
+  end
+
+  @spec collect_strand_spans(
+          t(),
+          :gb_sets.iter(Locator.t()),
+          non_neg_integer(),
+          boolean(),
+          [strand_span()]
+        ) :: [strand_span()]
+  defp collect_strand_spans(prov, iterator, to, at_eof?, acc) do
+    case :gb_sets.next(iterator) do
+      :none ->
+        acc
+
+      {locator, next} ->
+        {:ok, run, start} = RunTree.fetch(prov.tree, locator)
+
+        if start < to or (at_eof? and start == to) do
+          role = presented_strand_role(prov, run)
+          last = start + run.bytes
+
+          collect_strand_spans(prov, next, to, at_eof?, [{role, start, last} | acc])
+        else
+          acc
+        end
+    end
+  end
+
+  # A human replacement can cover every authored byte on its row. Its exact replacement edges
+  # still carry that connection, but never make the human text an actionable review site.
+  @spec presented_strand_role(t(), Run.t()) :: :kept | :you | :shared | nil
+  defp presented_strand_role(prov, %Run{author: :you, made_by: id}) when is_integer(id) do
+    if pending_preimage?(prov, [id], %{}), do: :shared, else: :you
+  end
+
+  defp presented_strand_role(_prov, run), do: strand_role(run)
+
+  @spec pending_preimage?(t(), [Change.id()], %{optional(Change.id()) => true}) :: boolean()
+  defp pending_preimage?(_prov, [], _seen), do: false
+
+  defp pending_preimage?(prov, [id | rest], seen) do
+    with false <- is_map_key(seen, id),
+         %Change{} = record <- Map.get(prov.changes, id),
+         owner when is_integer(owner) <- replacement_group(prov, record) do
+      case shared_preimage(prov, :gb_sets.iterator(record.replaced), owner, rest) do
+        :pending -> true
+        older -> pending_preimage?(prov, older, Map.put(seen, id, true))
+      end
+    else
+      _unavailable -> pending_preimage?(prov, rest, seen)
+    end
+  end
+
+  @spec replacement_group(t(), Change.t()) :: group_id() | nil
+  defp replacement_group(prov, %Change{owner: :runs, made: made}) do
+    {:ok, run, _start} = RunTree.fetch(prov.tree, :gb_sets.smallest(made))
+    run.group
+  end
+
+  defp replacement_group(_prov, %Change{owner: owner}) when is_integer(owner), do: owner
+  defp replacement_group(_prov, %Change{}), do: nil
+
+  @spec directly_replaced?(Run.t(), group_id()) :: boolean()
+  defp directly_replaced?(run, owner),
+    do: owner not in run.swept_by and owner not in run.covered_by and owner not in run.direct_gaps
+
+  @spec shared_preimage(t(), :gb_sets.iter(Locator.t()), group_id(), [Change.id()]) ::
+          :pending | [Change.id()]
+  defp shared_preimage(prov, iterator, owner, older) do
+    case :gb_sets.next(iterator) do
+      :none ->
+        older
+
+      {locator, next} ->
+        {:ok, run, _offset} = RunTree.fetch(prov.tree, locator)
+
+        cond do
+          not directly_replaced?(run, owner) ->
+            shared_preimage(prov, next, owner, older)
+
+          run.group != nil and
+              match?(%Group{author: {:minga, _}, applied: true}, Map.get(prov.groups, run.group)) ->
+            :pending
+
+          run.author == :you and run.made_by != nil ->
+            shared_preimage(prov, next, owner, [run.made_by | older])
+
+          true ->
+            shared_preimage(prov, next, owner, older)
+        end
+    end
+  end
+
+  @doc "Returns a live grouped run at the byte, ignoring zero-width deletion sites."
+  @spec live_review_run_at(t(), non_neg_integer()) :: review_site() | nil
+  def live_review_run_at(%__MODULE__{tree: tree}, offset) when offset >= 0 do
+    case RunTree.at_offset(tree, offset) do
+      {%Run{group: group, bytes: bytes}, start} when is_integer(group) ->
+        {group, start, start + bytes}
+
+      _other ->
+        nil
+    end
+  end
+
+  @doc "Returns exact source fragments before finalizing an applied Keep in this projection."
+  @spec keep_sources(t(), [group_id()]) :: [keep_source()]
+  def keep_sources(%__MODULE__{} = prov, groups) do
+    for group <- groups,
+        %Group{applied: true, runs: runs} <- [Map.fetch!(prov.groups, group)],
+        locator <- :gb_sets.to_list(runs),
+        {:ok, run, point} = RunTree.fetch(prov.tree, locator),
+        source <- keep_run_sources(run, point, group, prov.groups),
+        do: source
+  end
+
+  @spec keep_run_sources(Run.t(), non_neg_integer(), group_id(), %{group_id() => Group.t()}) ::
+          [keep_source()]
+  defp keep_run_sources(
+         %Run{live: true, group: group, origin: origin, bytes: bytes},
+         point,
+         group,
+         _groups
+       )
+       when is_tuple(origin),
+       do: [{:written, origin, point, bytes}]
+
+  defp keep_run_sources(%Run{live: false, text: text} = run, point, group, groups)
+       when is_binary(text) and byte_size(text) > 0 do
+    case List.keyfind(run.gap_origins, group, 0) do
+      {^group, origin} ->
+        if inserted?(groups, run.group), do: [{:removed, origin, point, text}], else: []
+
+      nil ->
+        []
+    end
+  end
+
+  defp keep_run_sources(_run, _point, _group, _groups), do: []
+
+  @doc "Returns the visible source and shared replacement spans whose authorship changes on Keep."
+  @spec keep_sites(t(), [group_id()]) :: [byte_range()]
+  def keep_sites(%__MODULE__{} = prov, groups) do
+    {visible, covered} =
+      for group <- groups,
+          locator <- :gb_sets.to_list(Map.fetch!(prov.groups, group).runs),
+          reduce: {[], []} do
+        {visible, covered} ->
+          {:ok, run, start} = RunTree.fetch(prov.tree, locator)
+
+          visible =
+            if keep_site?(prov.groups, run, group),
+              do: [{start, start + Run.live_bytes(run)} | visible],
+              else: visible
+
+          covered =
+            if run.group == group and not run.live,
+              do: direct_replacements(prov, run, covered),
+              else: covered
+
+          {visible, covered}
+      end
+
+    shared_keep_sites(prov, covered, %{}, visible)
+  end
+
+  @spec keep_site?(%{group_id() => Group.t()}, Run.t(), group_id()) :: boolean()
+  defp keep_site?(_groups, %Run{live: true, group: group}, group), do: true
+
+  defp keep_site?(groups, %Run{live: false} = run, group),
+    do: group in run.direct_gaps and inserted?(groups, run.group)
+
+  defp keep_site?(_groups, _run, _group), do: false
+
+  @spec shared_keep_sites(t(), [Change.id()], %{optional(Change.id()) => true}, [byte_range()]) ::
+          [byte_range()]
+  defp shared_keep_sites(_prov, [], _seen, sites), do: sites
+
+  defp shared_keep_sites(prov, [id | rest], seen, sites) do
+    if is_map_key(seen, id) do
+      shared_keep_sites(prov, rest, seen, sites)
+    else
+      change = Map.fetch!(prov.changes, id)
+
+      {rest, sites} =
+        Enum.reduce(:gb_sets.to_list(change.made), {rest, sites}, &shared_keep_site(prov, &1, &2))
+
+      shared_keep_sites(prov, rest, Map.put(seen, id, true), sites)
+    end
+  end
+
+  @spec shared_keep_site(t(), Locator.t(), {[Change.id()], [byte_range()]}) ::
+          {[Change.id()], [byte_range()]}
+  defp shared_keep_site(prov, locator, {pending, sites} = unchanged) do
+    case RunTree.fetch(prov.tree, locator) do
+      {:ok, %Run{author: :you, live: true, bytes: width}, start} ->
+        {pending, [{start, start + width} | sites]}
+
+      {:ok, %Run{author: :you} = run, _start} ->
+        {direct_replacements(prov, run, pending), sites}
+
+      _other ->
+        unchanged
+    end
+  end
+
+  @spec direct_replacements(t(), Run.t(), [Change.id()]) :: [Change.id()]
+  defp direct_replacements(prov, run, pending) do
+    for id <- run.replaced_by,
+        owner when is_integer(owner) <- [replacement_group(prov, Map.fetch!(prov.changes, id))],
+        directly_replaced?(run, owner),
+        reduce: pending do
+      pending -> [id | pending]
+    end
+  end
+
+  @doc "Finds one active review group at the exact byte, including a deletion at EOF."
+  @spec review_group_at(t(), non_neg_integer()) :: group_id() | nil
+  def review_group_at(%__MODULE__{} = prov, offset) when is_integer(offset) and offset >= 0 do
+    if not :gb_sets.is_empty(prov.review_sites) do
+      case RunTree.first_overlapping(prov.tree, offset) do
+        nil ->
+          nil
+
+        first ->
+          first |> :gb_sets.iterator_from(prov.review_sites) |> review_point(prov, offset)
+      end
+    end
+  end
+
+  @spec review_point(:gb_sets.iter(Locator.t()), t(), non_neg_integer()) :: group_id() | nil
+  defp review_point(iterator, prov, offset) do
+    case :gb_sets.next(iterator) do
+      :none ->
+        nil
+
+      {locator, _rest} ->
+        case RunTree.fetch(prov.tree, locator) do
+          {:ok, %Run{live: true, group: id}, start} when start <= offset ->
+            id
+
+          {:ok, run, ^offset} ->
+            Enum.find(run.direct_gaps, &active_minga_gap?(prov.groups, &1))
+
+          {:ok, _run, _start} ->
+            nil
+        end
+    end
+  end
+
+  @spec collect_review_sites(t(), :gb_sets.iter(Locator.t()), non_neg_integer(), boolean(), [
+          review_site()
+        ]) :: [review_site()]
+  defp collect_review_sites(prov, iterator, to, at_eof, acc) do
+    case :gb_sets.next(iterator) do
+      :none ->
+        acc
+
+      {locator, iterator} ->
+        {:ok, run, start} = RunTree.fetch(prov.tree, locator)
+
+        if start < to or (at_eof and start == to) do
+          acc = append_review_sites(acc, run, start, prov)
+          collect_review_sites(prov, iterator, to, at_eof, acc)
+        else
+          acc
+        end
+    end
+  end
+
+  @spec append_review_sites([review_site()], Run.t(), non_neg_integer(), t()) :: [review_site()]
+  defp append_review_sites(acc, %Run{live: true} = run, start, _prov),
+    do: [{run.group, start, start + run.bytes} | acc]
+
+  defp append_review_sites(acc, run, start, prov) do
+    Enum.reduce(run.direct_gaps, acc, fn id, sites ->
+      if active_minga_gap?(prov.groups, id), do: [{id, start, start} | sites], else: sites
+    end)
+  end
+
+  @doc """
   Returns the regions of the document a group touched, in document order.
 
   A region is a byte range of the group's live text with the places it deleted text; a deletion with no live text around it is an empty range at the place the text was. Adjacent pieces form one region.
@@ -1821,6 +2518,122 @@ defmodule Minga.Buffer.Provenance do
       end
     end)
     |> Enum.reverse()
+  end
+
+  @doc "Projects kept origin placements for checkpoint proof, including hidden descendants."
+  @spec kept_placements(t()) :: kept_placements()
+  def kept_placements(%__MODULE__{tree: tree}) do
+    RunTree.reduce(tree, %{}, fn
+      %Run{kept?: true, origin: {kind, id, _, _} = origin} = run, point, placements ->
+        placement =
+          cond do
+            run.live -> {:visible, origin, point, run.bytes}
+            run.bytes == 0 -> {:gap, origin, point}
+            true -> {:held, origin}
+          end
+
+        Map.update(placements, {kind, id}, [placement], &[placement | &1])
+
+      _run, _point, placements ->
+        placements
+    end)
+  end
+
+  @doc "Retires proved Keep intervals without altering text, authorship, groups, or undo."
+  @spec retire_kept(t(), [keep_interval()]) :: {t(), [byte_range()]}
+  def retire_kept(%__MODULE__{} = prov, []), do: {prov, []}
+
+  def retire_kept(%__MODULE__{} = prov, intervals) do
+    by_origin = intervals |> Enum.group_by(&interval_origin/1, &interval_range/1)
+    by_origin = Map.new(by_origin, fn {origin, ranges} -> {origin, Enum.sort(ranges)} end)
+
+    {prov, sites} =
+      RunTree.reduce(prov.tree, {prov, []}, fn
+        %Run{kept?: true, origin: {kind, id, _, _}} = run, point, acc ->
+          case Map.fetch(by_origin, {kind, id}) do
+            {:ok, ranges} -> retire_run(run, point, ranges, acc)
+            :error -> acc
+          end
+
+        _run, _point, acc ->
+          acc
+      end)
+
+    {renumber_when_deep(prov), Enum.reverse(sites)}
+  end
+
+  @spec interval_origin(keep_interval()) :: {:insert | :replace | :delete, pos_integer()}
+  defp interval_origin({kind, id, _from, _to}), do: {kind, id}
+
+  @spec interval_range(keep_interval()) :: byte_range()
+  defp interval_range({_kind, _id, from, to}), do: {from, to}
+
+  @spec retire_run(Run.t(), non_neg_integer(), [byte_range()], {t(), [byte_range()]}) ::
+          {t(), [byte_range()]}
+  defp retire_run(%Run{origin: {:delete, _, _, total}} = run, point, ranges, {prov, sites}) do
+    if covers_source?(ranges, 0, total),
+      do: {drop_run(prov, run), [{point, point} | sites]},
+      else: {prov, sites}
+  end
+
+  defp retire_run(run, point, ranges, acc), do: retire_run_parts(run, point, ranges, acc)
+
+  @spec covers_source?([byte_range()], non_neg_integer(), pos_integer()) :: boolean()
+  defp covers_source?(_ranges, covered, total) when covered >= total, do: true
+
+  defp covers_source?([{start, stop} | rest], covered, total) when start <= covered,
+    do: covers_source?(rest, max(covered, stop), total)
+
+  defp covers_source?(_ranges, _covered, _total), do: false
+
+  @spec retire_run_parts(Run.t(), non_neg_integer(), [byte_range()], {t(), [byte_range()]}) ::
+          {t(), [byte_range()]}
+  defp retire_run_parts(_run, _point, [], acc), do: acc
+
+  defp retire_run_parts(
+         %Run{origin: {_, _, offset, _}, bytes: bytes} = run,
+         point,
+         [{low, high} | rest],
+         acc
+       ) do
+    cond do
+      high <= offset ->
+        retire_run_parts(run, point, rest, acc)
+
+      low >= offset + bytes ->
+        acc
+
+      low > offset ->
+        {prov, sites} = acc
+        {left, right, prov} = split_run(prov, run, low - offset)
+
+        retire_run_parts(
+          right,
+          point + Run.live_bytes(left),
+          [{low, high} | rest],
+          {remember_fresh(prov), sites}
+        )
+
+      high < offset + bytes ->
+        {prov, sites} = acc
+        {left, right, prov} = split_run(prov, run, high - offset)
+        {prov, sites} = clear_kept_run(remember_fresh(prov), left, point, sites)
+        retire_run_parts(right, point + Run.live_bytes(left), rest, {prov, sites})
+
+      true ->
+        {prov, sites} = acc
+        clear_kept_run(prov, run, point, sites)
+    end
+  end
+
+  @spec clear_kept_run(t(), Run.t(), non_neg_integer(), [byte_range()]) :: {t(), [byte_range()]}
+  defp clear_kept_run(prov, run, point, sites) do
+    prov =
+      prov
+      |> unindex_strand_site(run)
+      |> put_run(run, %{run | kept?: false, origin: nil})
+
+    {prov, if(run.live, do: [{point, point + run.bytes} | sites], else: sites)}
   end
 
   @doc "Returns every run in document order, tombstones included. Meant for tests and diagnostics."
@@ -1886,17 +2699,18 @@ defmodule Minga.Buffer.Provenance do
     rest = run_start + run.bytes - start - removed_bytes
     following = RunTree.next(prov.tree, run.id)
     {dead_id, prov} = allocate(prov, run, following)
-    dead = %{run | id: dead_id, bytes: removed_bytes}
+    {left, remaining} = split_live_run(run, start - run_start)
+    dead = %{remaining | id: dead_id, bytes: removed_bytes}
 
     {right, prov} =
       if rest > 0 do
         {right_id, prov} = allocate(prov, dead, following)
-        {%{run | id: right_id, bytes: rest}, prov}
+        {_taken, right} = split_live_run(remaining, removed_bytes)
+        {%{right | id: right_id}, prov}
       else
         {nil, prov}
       end
 
-    left = %{run | bytes: start - run_start}
     tree = RunTree.update(prov.tree, left)
     tree = if right, do: RunTree.insert(tree, right), else: tree
     groups = Enum.reduce(run_groups(run), prov.groups, &add_run(&2, &1, dead_id))
@@ -1905,14 +2719,16 @@ defmodule Minga.Buffer.Provenance do
       if right, do: Enum.reduce(run_groups(run), groups, &add_run(&2, &1, right.id)), else: groups
 
     change = if inserted_bytes > 0, do: prov.next_change
+    {gap, next} = gap_source(author, removed_bytes, change, prov.next_change, prov.origin_scope)
 
     {prov, replaced, pulled} =
-      %{prov | tree: RunTree.insert(tree, dead), groups: groups}
+      %{prov | tree: RunTree.insert(tree, dead), groups: groups, next_change: next}
+      |> add_live_review_site(right)
       |> index_overlaps(dead)
       |> index_overlaps(right)
       |> index_changes(dead)
       |> index_changes(right)
-      |> replace_run(group_id, change, dead, removed, true)
+      |> replace_run(group_id, change, dead, removed, gap_origin(gap, 0))
 
     {prov, made_by} = open_change(prov, change, replaced, pulled, author)
     insert_between(prov, group_id, author, left, dead, inserted_bytes, made_by)
@@ -1934,11 +2750,14 @@ defmodule Minga.Buffer.Provenance do
            group: group,
            author: author,
            made_by: nil,
-           replaced_by: []
+           replaced_by: [],
+           kept?: false,
+           origin: nil
          },
          group,
          author
-       ),
+       )
+       when author in [:you, :unattributed, {:minga, :untasked}],
        do: true
 
   defp extendable?(_run, _group_id, _author), do: false
@@ -1948,20 +2767,54 @@ defmodule Minga.Buffer.Provenance do
   defp split_at(prov, offset) do
     case RunTree.at_offset(prov.tree, offset) do
       {run, run_start} when run_start < offset ->
-        following = RunTree.next(prov.tree, run.id)
-        {right_id, prov} = allocate(prov, run, following)
-        left = %{run | bytes: offset - run_start}
-        right = %{run | id: right_id, bytes: run_start + run.bytes - offset}
-        tree = prov.tree |> RunTree.update(left) |> RunTree.insert(right)
-        groups = Enum.reduce(run_groups(right), prov.groups, &add_run(&2, &1, right_id))
-
-        %{prov | tree: tree, groups: groups}
-        |> index_overlaps(right)
-        |> index_changes(right)
+        {_left, _right, prov} = split_run(prov, run, offset - run_start)
+        prov
 
       _boundary_or_end ->
         prov
     end
+  end
+
+  @spec split_run(t(), Run.t(), pos_integer()) :: {Run.t(), Run.t(), t()}
+  defp split_run(prov, run, left_bytes) do
+    following = RunTree.next(prov.tree, run.id)
+    {right_id, prov} = allocate(prov, run, following)
+    {left, right} = split_live_run(run, left_bytes)
+    right = %{right | id: right_id}
+
+    {left, right} =
+      if run.live do
+        {left, right}
+      else
+        {%{left | text: binary_part(run.text, 0, left.bytes)},
+         %{right | text: binary_part(run.text, left.bytes, right.bytes)}}
+      end
+
+    tree = prov.tree |> RunTree.update(left) |> RunTree.insert(right)
+    groups = Enum.reduce(run_groups(right), prov.groups, &add_run(&2, &1, right_id))
+    prov = %{prov | tree: tree, groups: groups}
+
+    prov =
+      if right.live, do: add_live_review_site(prov, right), else: index_review_site(prov, right)
+
+    {left, right, prov |> index_overlaps(right) |> index_changes(right)}
+  end
+
+  @spec split_live_run(Run.t(), non_neg_integer()) :: {Run.t(), Run.t()}
+  defp split_live_run(run, left_bytes) do
+    origin =
+      case run.origin do
+        {kind, id, offset, total} -> {kind, id, offset + left_bytes, total}
+        nil -> nil
+      end
+
+    moved_gaps =
+      Enum.map(run.gap_origins, fn {group, {kind, id, offset, total}} ->
+        {group, {kind, id, offset + left_bytes, total}}
+      end)
+
+    {%{run | bytes: left_bytes},
+     %{run | bytes: run.bytes - left_bytes, origin: origin, gap_origins: moved_gaps}}
   end
 
   @spec run_starting_at(RunTree.t(), non_neg_integer()) :: Run.t() | nil
@@ -1982,7 +2835,7 @@ defmodule Minga.Buffer.Provenance do
   @spec delete_from(
           t(),
           group_id() | nil,
-          Change.id() | nil,
+          {Change.id() | nil, Run.origin() | nil},
           Run.t() | nil,
           binary(),
           non_neg_integer(),
@@ -1993,7 +2846,7 @@ defmodule Minga.Buffer.Provenance do
        when consumed == byte_size(removed),
        do: {prov, acc}
 
-  defp delete_from(prov, group_id, change, %Run{} = run, removed, consumed, acc) do
+  defp delete_from(prov, group_id, {change, gap} = source, %Run{} = run, removed, consumed, acc) do
     # A dropped run's marks may have moved onto this one since it was looked up.
     run = current(prov.tree, run)
     following = RunTree.next(prov.tree, run.id)
@@ -2004,9 +2857,11 @@ defmodule Minga.Buffer.Provenance do
         do: {binary_part(removed, consumed, run.bytes), [run | killed], consumed + run.bytes},
         else: {run.text, killed, consumed}
 
-    {prov, kept, makers} = replace_run(prov, group_id, change, run, text, run.live)
+    {prov, kept, makers} =
+      replace_run(prov, group_id, change, run, text, gap_origin(gap, consumed))
+
     acc = {killed, kept ++ replaced, makers ++ pulled}
-    delete_from(prov, group_id, change, following, removed, consumed_after, acc)
+    delete_from(prov, group_id, source, following, removed, consumed_after, acc)
   end
 
   @spec current(RunTree.t(), Run.t()) :: Run.t()
@@ -2020,16 +2875,26 @@ defmodule Minga.Buffer.Provenance do
   # Marks one run in an edit's range dead (an untracked deletion, or one by the run's own writer, forgets it) and lists
   # it under `change` when it stays.
   # A run it drops names the replacement that made it instead, which `change` then pulls.
-  @spec replace_run(t(), group_id() | nil, Change.id() | nil, Run.t(), binary(), boolean()) ::
+  @spec replace_run(
+          t(),
+          group_id() | nil,
+          Change.id() | nil,
+          Run.t(),
+          binary(),
+          Run.origin() | nil
+        ) ::
           {t(), [Locator.t()], [Change.id()]}
-  defp replace_run(prov, group_id, change, run, text, visible?) do
+  defp replace_run(prov, _group, _change, %Run{bytes: 0, kept?: true}, _text, _origin),
+    do: {prov, [], []}
+
+  defp replace_run(prov, group_id, change, run, text, origin) do
     case deleted(run, group_id, text) do
       nil ->
         prov = prov |> remember_draft_chain(run, prov) |> drop_run(run)
         {prov, [], List.wrap(run.made_by)}
 
       dead ->
-        dead = how_deleted(dead, run, group_id, visible?)
+        dead = how_deleted(dead, run, group_id, change, origin)
 
         {dead, kept} =
           if change,
@@ -2042,15 +2907,26 @@ defmodule Minga.Buffer.Provenance do
 
   # Deleting visible text is direct: it clears any earlier cover or sweep by the group.
   # Newly deleting a tombstone inside the range is a sweep.
-  @spec how_deleted(Run.t(), Run.t(), group_id(), boolean()) :: Run.t()
-  defp how_deleted(dead, _run, group_id, true),
-    do: %{
+  @spec how_deleted(Run.t(), Run.t(), group_id(), Change.id() | nil, Run.origin() | nil) ::
+          Run.t()
+  defp how_deleted(dead, %Run{live: true}, group_id, change, origin) do
+    gaps = if change, do: dead.direct_gaps, else: [group_id | dead.direct_gaps]
+
+    origins =
+      if origin,
+        do: List.keystore(dead.gap_origins, group_id, 0, {group_id, origin}),
+        else: dead.gap_origins
+
+    %{
       dead
       | covered_by: List.delete(dead.covered_by, group_id),
-        swept_by: List.delete(dead.swept_by, group_id)
+        swept_by: List.delete(dead.swept_by, group_id),
+        direct_gaps: gaps,
+        gap_origins: origins
     }
+  end
 
-  defp how_deleted(dead, run, group_id, false) do
+  defp how_deleted(dead, run, group_id, _change, _origin) do
     cond do
       # A sweep counts over an earlier cover by the same group, as it does in either order.
       group_id in run.covered_by ->
@@ -2067,6 +2943,27 @@ defmodule Minga.Buffer.Provenance do
         %{dead | swept_by: [group_id | dead.swept_by]}
     end
   end
+
+  @spec gap_source(
+          author(),
+          non_neg_integer(),
+          Change.id() | nil,
+          pos_integer(),
+          non_neg_integer()
+        ) :: {Run.origin() | nil, pos_integer()}
+  defp gap_source({:minga, _task}, removed, nil, next, scope)
+       when removed > 0,
+       do: {{:delete, source_id(scope, next), 0, removed}, next + 1}
+
+  defp gap_source({:minga, _task}, removed, change, next, scope)
+       when removed > 0,
+       do: {{:replace, source_id(scope, change), 0, removed}, next}
+
+  defp gap_source(_author, _removed, _change, next, _scope), do: {nil, next}
+
+  @spec gap_origin(Run.origin() | nil, non_neg_integer()) :: Run.origin() | nil
+  defp gap_origin(nil, _offset), do: nil
+  defp gap_origin({kind, id, 0, total}, offset), do: {kind, id, offset, total}
 
   # The record of a replacement whose edit marked `replaced` and dropped runs made by `pulled`. An edit that can neither
   # cover nor mark gets none: it replaced nothing, pulls nothing and is no Minga step's. Returns the id its text names.
@@ -2740,6 +3637,8 @@ defmodule Minga.Buffer.Provenance do
       %{
         prov
         | tree: tree,
+          review_sites: rename_review_sites(prov.review_sites, renamed),
+          strand_sites: rename_review_sites(prov.strand_sites, renamed),
           groups: groups,
           changes: changes,
           deep: false,
@@ -2753,15 +3652,7 @@ defmodule Minga.Buffer.Provenance do
 
   @spec kill_run(t(), group_id(), Run.t(), Run.t()) :: t()
   defp kill_run(prov, group_id, old, run) do
-    refresh_draft(
-      %{
-        prov
-        | tree: RunTree.update(prov.tree, run),
-          groups: add_run(prov.groups, group_id, run.id)
-      },
-      old,
-      run
-    )
+    put_run(%{prov | groups: add_run(prov.groups, group_id, run.id)}, old, run)
   end
 
   @spec insert_between(
@@ -2780,11 +3671,45 @@ defmodule Minga.Buffer.Provenance do
       %{prov | tree: RunTree.update(prov.tree, %{preceding | bytes: preceding.bytes + bytes})}
     else
       {id, prov} = allocate(prov, preceding, following)
-      run = %Run{id: id, bytes: bytes, author: author, group: group_id, made_by: made_by}
+
+      {origin, next} =
+        insertion_origin(author, group_id, made_by, bytes, prov.next_change, prov.origin_scope)
+
+      run = %Run{
+        id: id,
+        bytes: bytes,
+        author: author,
+        group: group_id,
+        made_by: made_by,
+        origin: origin
+      }
+
       groups = if group_id, do: add_run(prov.groups, group_id, id), else: prov.groups
-      index_changes(%{prov | tree: RunTree.insert(prov.tree, run), groups: groups}, run)
+
+      %{prov | tree: RunTree.insert(prov.tree, run), groups: groups, next_change: next}
+      |> add_live_review_site(run)
+      |> index_changes(run)
     end
   end
+
+  @spec insertion_origin(
+          author(),
+          group_id() | nil,
+          Change.id() | nil,
+          pos_integer(),
+          pos_integer(),
+          non_neg_integer()
+        ) ::
+          {Run.origin() | nil, pos_integer()}
+  defp insertion_origin({:minga, _task}, group, nil, bytes, next, scope)
+       when is_integer(group),
+       do: {{:insert, source_id(scope, next), 0, bytes}, next + 1}
+
+  defp insertion_origin({:minga, _task}, group, made_by, bytes, next, scope)
+       when is_integer(group),
+       do: {{:replace, source_id(scope, made_by), 0, bytes}, next}
+
+  defp insertion_origin(_author, _group, _made_by, _bytes, next, _scope), do: {nil, next}
 
   # ── Undo and reject ─────────────────────────────────────────────────
 
@@ -2794,9 +3719,9 @@ defmodule Minga.Buffer.Provenance do
     do: set_applied_all(prov, [id], applied, document)
 
   # Flips every group in `ids` at once and applies all their changes in one pass over the document.
-  @spec set_applied_all(t(), [group_id()], boolean(), Document.t()) ::
+  @spec set_applied_all(t(), [group_id()], boolean(), Document.t(), boolean()) ::
           {:ok, Document.t(), non_neg_integer() | nil, t()} | {:error, :invalid_utf8}
-  defp set_applied_all(prov, ids, applied, document) do
+  defp set_applied_all(prov, ids, applied, document, preserve_cursor? \\ false) do
     flipping = Enum.reject(ids, &(Map.fetch!(prov.groups, &1).applied == applied))
 
     if flipping == [] do
@@ -2819,7 +3744,9 @@ defmodule Minga.Buffer.Provenance do
           else: flip_runs(prov, Enum.reduce(sets, &:gb_sets.union/2), content)
 
       with {:ok, new_document} <- apply_changes(changes, content, document) do
-        {:ok, new_document, first_offset(changes), flipped}
+        next = preserve_cursor(new_document, document, changes, preserve_cursor?)
+
+        {:ok, next, first_offset(changes), flipped}
       end
     end
   end
@@ -2839,16 +3766,28 @@ defmodule Minga.Buffer.Provenance do
   # looking each run up. Offsets advance by each run's bytes in the original document.
   @spec flip_every_run(t(), binary()) :: {[change()], t()}
   defp flip_every_run(prov, content) do
-    {runs, changes, _offset} =
+    {runs, changes, sites, strands, _offset} =
       prov.tree
       |> RunTree.to_list()
-      |> Enum.reduce({[], [], 0}, fn run, {runs, changes, offset} ->
+      |> Enum.reduce({[], [], [], [], 0}, fn run, {runs, changes, sites, strands, offset} ->
         {flipped, change} = flip(run, prov.groups, content, offset)
-        {[flipped | runs], List.wrap(change) ++ changes, offset + Run.live_bytes(run)}
+        sites = if review_site?(flipped, prov.groups), do: [run.id | sites], else: sites
+        strands = if strand_role(flipped), do: [run.id | strands], else: strands
+
+        {[flipped | runs], List.wrap(change) ++ changes, sites, strands,
+         offset + Run.live_bytes(run)}
       end)
 
     runs = Enum.reverse(runs)
-    {Enum.reverse(changes), index_drafts(%{prov | tree: RunTree.from_list(runs)}, runs)}
+
+    prov = %{
+      prov
+      | tree: RunTree.from_list(runs),
+        review_sites: :gb_sets.from_ordset(Enum.reverse(sites)),
+        strand_sites: :gb_sets.from_ordset(Enum.reverse(strands))
+    }
+
+    {Enum.reverse(changes), index_drafts(prov, runs)}
   end
 
   # A change is `{offset, removed_bytes, inserted_text}` in the original document.
@@ -2879,6 +3818,24 @@ defmodule Minga.Buffer.Provenance do
     if Unicode.valid_utf8?(new_content),
       do: {:ok, Document.new(new_content)},
       else: {:error, :invalid_utf8}
+  end
+
+  @spec preserve_cursor(Document.t(), Document.t(), [change()], boolean()) :: Document.t()
+  defp preserve_cursor(new_document, _document, _changes, false), do: new_document
+
+  defp preserve_cursor(new_document, document, changes, true) do
+    point = Document.cursor_offset(document)
+
+    shift =
+      Enum.reduce_while(changes, 0, fn {offset, removed, inserted}, shift ->
+        cond do
+          point < offset -> {:halt, shift}
+          point < offset + removed -> {:halt, shift + offset - point}
+          true -> {:cont, shift + byte_size(inserted) - removed}
+        end
+      end)
+
+    Cursor.place(new_document, Position.from_point(new_document, point + shift))
   end
 
   @spec first_offset([change()]) :: non_neg_integer() | nil
@@ -2930,8 +3887,8 @@ defmodule Minga.Buffer.Provenance do
 
   # ── Discarding ──────────────────────────────────────────────────────
 
-  @spec settle_run(t(), Locator.t(), %{group_id() => Group.t()}, t()) :: t()
-  defp settle_run(prov, run_id, discarded, before) do
+  @spec settle_run(t(), Locator.t(), %{group_id() => Group.t()}, t(), kept_gaps() | nil) :: t()
+  defp settle_run(prov, run_id, discarded, before, gaps) do
     {:ok, run, _offset} = RunTree.fetch(prov.tree, run_id)
 
     case settle(run, discarded) do
@@ -2941,6 +3898,7 @@ defmodule Minga.Buffer.Provenance do
         prov
         |> remember_draft_chain(original, before)
         |> drop_run(%{run | overlaps: settled_run(run, discarded).overlaps})
+        |> restore_kept_gap(run_id, gaps)
 
       %Run{group: nil} = settled when run.group != nil ->
         prov |> put_run(run, settled) |> coalesce(run_id)
@@ -2950,39 +3908,46 @@ defmodule Minga.Buffer.Provenance do
     end
   end
 
+  @spec restore_kept_gap(t(), Locator.t(), kept_gaps() | nil) :: t()
+  defp restore_kept_gap(prov, _id, nil), do: prov
+
+  defp restore_kept_gap(prov, id, gaps) do
+    case Map.fetch(gaps, id) do
+      {:ok, origin} ->
+        anchor = kept_gap(id, origin)
+        index_strand_site(%{prov | tree: RunTree.insert(prov.tree, anchor)}, anchor)
+
+      :error ->
+        prov
+    end
+  end
+
+  @spec kept_gap(Locator.t(), Run.origin() | nil) :: Run.t()
+  defp kept_gap(id, origin),
+    do: %Run{id: id, bytes: 0, author: :unattributed, live: false, kept?: true, origin: origin}
+
   # Applies `settle/2` for every discarded group to every run in order, merging permanent neighbours, then
   # rebuilds the tree and the remaining groups' run sets from the result.
-  @spec discard_in_one_pass(t(), [group_id()]) :: t()
-  defp discard_in_one_pass(prov, ids) do
+  @spec discard_in_one_pass(t(), [group_id()], kept_gaps() | nil) :: t()
+  defp discard_in_one_pass(prov, ids, gaps) do
     before = prov
     {discarded, groups} = Map.split(prov.groups, ids)
 
     {runs, dropped} =
       prov.tree
       |> RunTree.to_list()
-      |> Enum.reduce({[], []}, fn run, acc -> settle_in_pass(run, discarded, acc) end)
+      |> Enum.reduce({[], []}, fn run, acc -> settle_in_pass(run, discarded, acc, gaps) end)
 
+    {groups, sites, strands} = rebuild_group_runs(runs, groups)
     runs = Enum.reverse(runs)
-
-    members =
-      runs
-      |> Enum.reverse()
-      |> Enum.reduce(%{}, fn run, acc ->
-        Enum.reduce(run_groups(run), acc, fn id, inner ->
-          Map.update(inner, id, [run.id], &[run.id | &1])
-        end)
-      end)
-
-    groups =
-      Map.new(groups, fn {id, group} ->
-        {id, %{group | runs: :gb_sets.from_ordset(Map.get(members, id, []))}}
-      end)
 
     prov =
       index_drafts(
         %{
           prov
           | tree: RunTree.from_list(runs),
+            review_sites: sites,
+            strand_sites: strands,
             groups: groups,
             changes: changes_from(prov.changes, runs, dropped),
             overlap_runs: Map.drop(prov.overlap_runs, ids)
@@ -3003,11 +3968,21 @@ defmodule Minga.Buffer.Provenance do
   end
 
   # Keep the original metadata of a dropped run until its draft relationship is recorded.
-  @spec settle_in_pass(Run.t(), %{group_id() => Group.t()}, {[Run.t()], [Run.t()]}) ::
-          {[Run.t()], [Run.t()]}
-  defp settle_in_pass(run, discarded, {kept, dropped}) do
+  @spec settle_in_pass(
+          Run.t(),
+          %{group_id() => Group.t()},
+          {[Run.t()], [Run.t()]},
+          kept_gaps() | nil
+        ) :: {[Run.t()], [Run.t()]}
+  defp settle_in_pass(run, discarded, {kept, dropped}, gaps) do
     case settle(run, discarded) do
       nil ->
+        kept =
+          case Map.fetch(gaps || %{}, run.id) do
+            {:ok, origin} -> [kept_gap(run.id, origin) | kept]
+            :error -> kept
+          end
+
         {kept, [run | dropped]}
 
       settled ->
@@ -3017,7 +3992,7 @@ defmodule Minga.Buffer.Provenance do
 
   @spec merge_permanent(Run.t(), [Run.t()]) :: [Run.t()]
   defp merge_permanent(run, [previous | rest] = acc) do
-    if permanent?(run) and permanent?(previous) and previous.author == run.author,
+    if same_permanent_author?(previous, run),
       do: [%{previous | bytes: previous.bytes + run.bytes} | rest],
       else: [run | acc]
   end
@@ -3032,22 +4007,43 @@ defmodule Minga.Buffer.Provenance do
     previous = RunTree.previous(prov.tree, run_id)
 
     {prov, run} =
-      if permanent?(run) and permanent?(previous) and previous.author == run.author do
+      if same_permanent_author?(previous, run) do
         merged = %{previous | bytes: previous.bytes + run.bytes}
-        {%{prov | tree: prov.tree |> RunTree.delete(run_id) |> RunTree.update(merged)}, merged}
+        tree = prov.tree |> RunTree.delete(run_id) |> RunTree.update(merged)
+        {unindex_strand_site(%{prov | tree: tree}, run), merged}
       else
         {prov, run}
       end
 
     following = RunTree.next(prov.tree, run.id)
 
-    if permanent?(run) and permanent?(following) and following.author == run.author do
+    if same_permanent_author?(run, following) do
       merged = %{run | bytes: run.bytes + following.bytes}
-      %{prov | tree: prov.tree |> RunTree.delete(following.id) |> RunTree.update(merged)}
+      tree = prov.tree |> RunTree.delete(following.id) |> RunTree.update(merged)
+      unindex_strand_site(%{prov | tree: tree}, following)
     else
       prov
     end
   end
+
+  @spec same_permanent_author?(Run.t() | nil, Run.t() | nil) :: boolean()
+  defp same_permanent_author?(%Run{} = left, %Run{} = right) do
+    left.author == right.author and left.kept? == right.kept? and permanent?(left) and
+      permanent?(right) and adjacent_origins?(left, right)
+  end
+
+  defp same_permanent_author?(_left, _right), do: false
+
+  @spec adjacent_origins?(Run.t(), Run.t()) :: boolean()
+  defp adjacent_origins?(%Run{origin: nil}, %Run{origin: nil}), do: true
+
+  defp adjacent_origins?(
+         %Run{origin: {kind, id, first, total}, bytes: bytes},
+         %Run{origin: {kind, id, second, total}}
+       ),
+       do: first + bytes == second
+
+  defp adjacent_origins?(_left, _right), do: false
 
   @spec permanent?(Run.t() | nil) :: boolean()
   defp permanent?(%Run{live: true, group: nil, deletions: [], made_by: nil, replaced_by: []}),
@@ -3067,6 +4063,7 @@ defmodule Minga.Buffer.Provenance do
            right: [Run.t()],
            pos: non_neg_integer(),
            next_change: pos_integer(),
+           origin_scope: non_neg_integer(),
            steps: [{[Change.id()], Change.id() | nil, [Change.id()]}],
            dropped: [Run.t()]
          }
@@ -3084,6 +4081,7 @@ defmodule Minga.Buffer.Provenance do
       right: [],
       pos: RunTree.size(prov.tree),
       next_change: prov.next_change,
+      origin_scope: prov.origin_scope,
       steps: [],
       dropped: []
     }
@@ -3365,7 +4363,11 @@ defmodule Minga.Buffer.Provenance do
     pass = move_right_of(pass, start + byte_size(removed), removed != "")
     {segment, pass} = take_from(pass, start, [])
     change = if inserted != "" and removed != "" and group_id != nil, do: pass.next_change
-    {deleted, dropped} = delete_segment(segment, group_id, removed, change)
+
+    {gap, next} =
+      gap_source(author, byte_size(removed), change, pass.next_change, pass.origin_scope)
+
+    {deleted, dropped} = delete_segment(segment, group_id, removed, {change, gap})
     pulled = for %Run{made_by: maker} <- dropped, maker != nil, uniq: true, do: maker
     made_by = record_id(change, deleted, pulled, author)
 
@@ -3375,12 +4377,27 @@ defmodule Minga.Buffer.Provenance do
         do: Enum.map(deleted, &unlist(&1, change)),
         else: deleted
 
-    inserted_runs = inserted_runs(inserted, author, group_id, made_by)
+    next = if made_by, do: made_by + 1, else: next
+
+    {origin, next} =
+      if inserted == "",
+        do: {nil, next},
+        else:
+          insertion_origin(
+            author,
+            group_id,
+            made_by,
+            byte_size(inserted),
+            next,
+            pass.origin_scope
+          )
+
+    inserted_runs = inserted_runs(inserted, author, group_id, made_by, origin)
 
     %{
       pass
       | right: inserted_runs ++ deleted ++ pass.right,
-        next_change: if(made_by, do: made_by + 1, else: pass.next_change),
+        next_change: next,
         steps: [{seeds(Enum.filter(segment, & &1.live)), made_by, pulled} | pass.steps],
         dropped: dropped ++ pass.dropped
     }
@@ -3401,7 +4418,7 @@ defmodule Minga.Buffer.Provenance do
         )
 
       run.live and pass.pos > stop ->
-        {before, after_stop} = {%{run | bytes: stop - run_start}, %{run | bytes: pass.pos - stop}}
+        {before, after_stop} = split_live_run(run, stop - run_start)
         %{pass | left: [before | rest], right: [after_stop | pass.right], pos: stop}
 
       not run.live and (pass.pos > stop or (pass.pos == stop and deleting?)) ->
@@ -3424,7 +4441,7 @@ defmodule Minga.Buffer.Provenance do
         take_from(%{pass | left: rest, pos: run_start}, start, [run | acc])
 
       run.live and run_start < start and pass.pos > start ->
-        {before, taken} = {%{run | bytes: start - run_start}, %{run | bytes: pass.pos - start}}
+        {before, taken} = split_live_run(run, start - run_start)
         {[taken | acc], %{pass | left: [before | rest], pos: start}}
 
       not run.live and pass.pos > start ->
@@ -3442,36 +4459,53 @@ defmodule Minga.Buffer.Provenance do
   defp record_id(nil, _deleted, _pulled, _author), do: nil
 
   defp record_id(change, deleted, pulled, author) do
-    if deleted != [] or pulled != [] or minga?(author), do: change
+    if pulled != [] or minga?(author) or Enum.any?(deleted, &(not kept_gap?(&1))), do: change
   end
 
-  @spec inserted_runs(binary(), author(), group_id() | nil, Change.id() | nil) :: [Run.t()]
-  defp inserted_runs("", _author, _group_id, _made_by), do: []
+  @spec inserted_runs(binary(), author(), group_id() | nil, Change.id() | nil, Run.origin() | nil) ::
+          [Run.t()]
+  defp inserted_runs("", _author, _group_id, _made_by, _origin), do: []
 
-  defp inserted_runs(inserted, author, group_id, made_by),
+  defp inserted_runs(inserted, author, group_id, made_by, origin),
     do: [
-      %Run{id: [0], bytes: byte_size(inserted), author: author, group: group_id, made_by: made_by}
+      %Run{
+        id: [0],
+        bytes: byte_size(inserted),
+        author: author,
+        group: group_id,
+        made_by: made_by,
+        origin: origin
+      }
     ]
 
   # The segment's runs once deleted, each kept one listed under `change`, and the runs the deletion dropped.
-  @spec delete_segment([Run.t()], group_id() | nil, binary(), Change.id() | nil) ::
+  @spec delete_segment(
+          [Run.t()],
+          group_id() | nil,
+          binary(),
+          {Change.id() | nil, Run.origin() | nil}
+        ) ::
           {[Run.t()], [Run.t()]}
-  defp delete_segment(segment, group_id, removed, change) do
+  defp delete_segment(segment, group_id, removed, {change, gap}) do
     {kept, dropped, _consumed} =
-      Enum.reduce(segment, {[], [], 0}, fn run, {kept, dropped, consumed} ->
-        {text, consumed} =
-          if run.live,
-            do: {binary_part(removed, consumed, run.bytes), consumed + run.bytes},
-            else: {run.text, consumed}
+      Enum.reduce(segment, {[], [], 0}, fn
+        %Run{bytes: 0, kept?: true} = anchor, {kept, dropped, consumed} ->
+          {[anchor | kept], dropped, consumed}
 
-        case deleted(run, group_id, text) do
-          nil ->
-            {kept, [run | dropped], consumed}
+        run, {kept, dropped, consumed} ->
+          {text, consumed_after} =
+            if run.live,
+              do: {binary_part(removed, consumed, run.bytes), consumed + run.bytes},
+              else: {run.text, consumed}
 
-          dead ->
-            dead = how_deleted(dead, run, group_id, run.live)
-            {[replaced_by(dead, change) | kept], dropped, consumed}
-        end
+          case deleted(run, group_id, text) do
+            nil ->
+              {kept, [run | dropped], consumed_after}
+
+            dead ->
+              dead = how_deleted(dead, run, group_id, change, gap_origin(gap, consumed))
+              {[replaced_by(dead, change) | kept], dropped, consumed_after}
+          end
       end)
 
     {Enum.reverse(kept), dropped}
@@ -3491,10 +4525,13 @@ defmodule Minga.Buffer.Provenance do
     runs
     |> Enum.reduce([], fn
       %Run{live: true, deletions: [], overlaps: []} = run,
-      [%Run{live: true, deletions: [], overlaps: []} = previous | rest]
+      [%Run{live: true, deletions: [], overlaps: []} = previous | rest] = acc
       when run.group == previous.group and run.author == previous.author and
-             run.made_by == previous.made_by and run.replaced_by == previous.replaced_by ->
-        [%{previous | bytes: previous.bytes + run.bytes} | rest]
+             run.made_by == previous.made_by and run.replaced_by == previous.replaced_by and
+             run.kept? == previous.kept? ->
+        if adjacent_origins?(previous, run),
+          do: [%{previous | bytes: previous.bytes + run.bytes} | rest],
+          else: [run | acc]
 
       run, acc ->
         [run | acc]
@@ -3511,24 +4548,11 @@ defmodule Minga.Buffer.Provenance do
       |> Enum.zip(Locator.even(length(runs)))
       |> Enum.map(fn {run, id} -> %{run | id: id} end)
 
-    members =
-      runs
-      |> Enum.reverse()
-      |> Enum.reduce(%{}, fn run, acc ->
-        Enum.reduce(run_groups(run), acc, fn id, inner ->
-          Map.update(inner, id, [run.id], &[run.id | &1])
-        end)
-      end)
-
-    groups =
-      Map.new(prov.groups, fn {id, group} ->
-        {id, %{group | runs: :gb_sets.from_ordset(Map.get(members, id, []))}}
-      end)
+    reversed = Enum.reverse(runs)
+    {groups, sites, strands} = rebuild_group_runs(reversed, prov.groups)
 
     overlap_runs =
-      runs
-      |> Enum.reverse()
-      |> Enum.reduce(%{}, fn run, acc ->
+      Enum.reduce(reversed, %{}, fn run, acc ->
         for {_owner, group} when is_integer(group) <- run.overlaps, reduce: acc do
           inner -> Map.update(inner, group, [run.id], &[run.id | &1])
         end
@@ -3538,6 +4562,8 @@ defmodule Minga.Buffer.Provenance do
       %{
         prov
         | tree: RunTree.from_list(runs),
+          review_sites: sites,
+          strand_sites: strands,
           groups: groups,
           changes: changes_from(prov.changes, runs, dropped),
           overlap_runs: overlap_runs,
@@ -3697,15 +4723,127 @@ defmodule Minga.Buffer.Provenance do
         deletions: Enum.reject(run.deletions, &Map.has_key?(discarded, &1)),
         covered_by: Enum.reject(run.covered_by, &Map.has_key?(discarded, &1)),
         swept_by: Enum.reject(run.swept_by, &Map.has_key?(discarded, &1)),
-        overlaps: overlaps
+        direct_gaps: Enum.reject(run.direct_gaps, &Map.has_key?(discarded, &1)),
+        gap_origins: Enum.reject(run.gap_origins, &Map.has_key?(discarded, elem(&1, 0))),
+        overlaps: overlaps,
+        origin: if(group == nil and not run.kept?, do: nil, else: run.origin)
     }
   end
 
   # ── Bookkeeping ─────────────────────────────────────────────────────
 
   @spec put_run(t(), Run.t(), Run.t()) :: t()
-  defp put_run(prov, old, run),
-    do: refresh_draft(%{prov | tree: RunTree.update(prov.tree, run)}, old, run)
+  defp put_run(prov, old, run) do
+    prov = %{prov | tree: RunTree.update(prov.tree, run)}
+
+    prov =
+      if review_site_candidate?(old) or review_site_candidate?(run),
+        do: index_review_site(prov, run),
+        else: prov
+
+    prov
+    |> index_strand_site(run)
+    |> refresh_draft(old, run)
+  end
+
+  @spec add_live_review_site(t(), Run.t() | nil) :: t()
+  defp add_live_review_site(prov, %Run{live: true, author: {:minga, _}, group: id} = run)
+       when is_integer(id) do
+    %{prov | review_sites: :gb_sets.insert(run.id, prov.review_sites)}
+  end
+
+  defp add_live_review_site(prov, %Run{live: true} = run),
+    do: index_strand_site(prov, run)
+
+  defp add_live_review_site(prov, _run), do: prov
+
+  @spec index_review_site(t(), Run.t()) :: t()
+  defp index_review_site(prov, run) do
+    if review_site?(run, prov.groups) do
+      %{prov | review_sites: :gb_sets.add(run.id, prov.review_sites)}
+    else
+      unindex_review_site(prov, run.id)
+    end
+  end
+
+  @spec unindex_review_site(t(), Locator.t()) :: t()
+  defp unindex_review_site(prov, id) do
+    if :gb_sets.is_member(id, prov.review_sites) do
+      %{prov | review_sites: :gb_sets.delete(id, prov.review_sites)}
+    else
+      prov
+    end
+  end
+
+  @spec index_strand_site(t(), Run.t()) :: t()
+  defp index_strand_site(prov, run) do
+    if strand_role(run),
+      do: %{prov | strand_sites: :gb_sets.add(run.id, prov.strand_sites)},
+      else: unindex_strand_site(prov, run)
+  end
+
+  @spec strand_role(Run.t()) :: :kept | :you | nil
+  defp strand_role(%Run{kept?: true} = run) when run.live or run.bytes == 0, do: :kept
+  defp strand_role(%Run{live: true, author: :you}), do: :you
+  defp strand_role(_run), do: nil
+
+  @spec kept_gap?(Run.t()) :: boolean()
+  defp kept_gap?(%Run{bytes: 0, kept?: true}), do: true
+  defp kept_gap?(_run), do: false
+
+  @spec unindex_strand_site(t(), Run.t()) :: t()
+  defp unindex_strand_site(prov, %Run{id: id} = run) when run.kept? or run.author == :you,
+    do: %{prov | strand_sites: :gb_sets.delete_any(id, prov.strand_sites)}
+
+  defp unindex_strand_site(prov, _run), do: prov
+
+  @spec rebuild_group_runs([Run.t()], %{group_id() => Group.t()}) ::
+          {%{group_id() => Group.t()}, :gb_sets.set(Locator.t()), :gb_sets.set(Locator.t())}
+  defp rebuild_group_runs(reversed, groups) do
+    {members, sites, strands} =
+      Enum.reduce(reversed, {%{}, [], []}, fn run, {members, sites, strands} ->
+        members =
+          Enum.reduce(run_groups(run), members, fn id, acc ->
+            Map.update(acc, id, [run.id], &[run.id | &1])
+          end)
+
+        sites = if review_site?(run, groups), do: [run.id | sites], else: sites
+        strands = if strand_role(run), do: [run.id | strands], else: strands
+        {members, sites, strands}
+      end)
+
+    groups =
+      Map.new(groups, fn {id, group} ->
+        {id, %{group | runs: :gb_sets.from_ordset(Map.get(members, id, []))}}
+      end)
+
+    {groups, :gb_sets.from_ordset(sites), :gb_sets.from_ordset(strands)}
+  end
+
+  @spec rename_review_sites(:gb_sets.set(Locator.t()), %{Locator.t() => Locator.t()}) ::
+          :gb_sets.set(Locator.t())
+  defp rename_review_sites(sites, renamed) do
+    sites |> :gb_sets.to_list() |> Enum.map(&Map.fetch!(renamed, &1)) |> :gb_sets.from_ordset()
+  end
+
+  @spec review_site_candidate?(Run.t()) :: boolean()
+  defp review_site_candidate?(%Run{author: {:minga, _}, group: id}) when is_integer(id), do: true
+  defp review_site_candidate?(%Run{direct_gaps: [_ | _]}), do: true
+  defp review_site_candidate?(_run), do: false
+
+  @spec review_site?(Run.t(), %{group_id() => Group.t()}) :: boolean()
+  defp review_site?(%Run{live: true, author: {:minga, _}, group: id}, _groups), do: is_integer(id)
+  defp review_site?(%Run{live: true}, _groups), do: false
+
+  defp review_site?(%Run{direct_gaps: [_ | _]} = run, groups) do
+    inserted?(groups, run.group) and Enum.any?(run.direct_gaps, &active_minga_gap?(groups, &1))
+  end
+
+  defp review_site?(_run, _groups), do: false
+
+  @spec active_minga_gap?(%{group_id() => Group.t()}, group_id()) :: boolean()
+  defp active_minga_gap?(groups, id),
+    do: match?(%Group{author: {:minga, _}, applied: true}, Map.fetch!(groups, id))
 
   # The run leaves every index; see `forget_changes/2`. Its overlap marks move to another run of their owner.
   @spec drop_run(t(), Run.t()) :: t()
@@ -3718,6 +4856,8 @@ defmodule Minga.Buffer.Provenance do
         groups: groups,
         drafts: :gb_sets.delete_any({run.group, run.id}, prov.drafts)
     }
+    |> unindex_review_site(run.id)
+    |> unindex_strand_site(run)
     |> forget_changes(run)
     |> transfer_marks(run.overlaps)
   end

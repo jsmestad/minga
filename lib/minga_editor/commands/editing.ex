@@ -16,6 +16,7 @@ defmodule MingaEditor.Commands.Editing do
   alias MingaEditor.Indent
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Shell.Traditional.BlockedReviewWorkflow
+  alias MingaEditor.Shell.Traditional.InFileReview
   alias MingaEditor.UI.Highlight
   alias MingaEditor.State.Registers
   alias MingaEditor.UI.Prompt.RejectTask
@@ -43,6 +44,8 @@ defmodule MingaEditor.Commands.Editing do
     {:undo_agent_session, "Reject all changes from the latest Minga task in this buffer", true},
     {:keep_blocking_change, "Keep the Minga change blocking your undo", true},
     {:reject_blocking_change, "Reject the Minga change blocking your undo", true},
+    {:keep_minga_change, "Keep the Minga change at the cursor or in the selection", true},
+    {:reject_minga_change, "Reject the Minga change at the cursor or in the selection", true},
     {:paste_before, "Paste before cursor", true},
     {:paste_after, "Paste after cursor", true},
     {:indent_line, "Indent line", true},
@@ -206,9 +209,11 @@ defmodule MingaEditor.Commands.Editing do
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:replace_char, char}) do
-    Buffer.delete_at(buf)
-    Buffer.insert_char(buf, char)
-    Buffer.move(buf, :left)
+    {line, col} = position = Buffer.cursor(buf)
+
+    if Buffer.apply_edit(buf, line, col, line, col, char) == :ok,
+      do: Buffer.move_to(buf, position)
+
     state
   end
 
@@ -319,6 +324,38 @@ defmodule MingaEditor.Commands.Editing do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :reject_blocking_change),
     do: BlockedReviewWorkflow.decide(state, buf, :reject)
+
+  def execute(state, command) when command in [:keep_minga_change, :reject_minga_change],
+    do: execute(state, {command, nil})
+
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, {command, count})
+      when command in [:keep_minga_change, :reject_minga_change] do
+    decision = if command == :keep_minga_change, do: :keep, else: :reject
+
+    if count == nil and BlockedReviewWorkflow.offered_for?(state, buf) do
+      BlockedReviewWorkflow.decide(state, buf, decision)
+    else
+      InFileReview.decide(state, buf, {:cursor, count || 1}, decision, {:normal, count})
+    end
+  end
+
+  def execute(
+        %{
+          workspace: %{
+            buffers: %{active: buffer},
+            editing: %{mode_state: %VisualState{} = visual}
+          }
+        } =
+          state,
+        {:review_visual, buffer, version, command}
+      ) do
+    decision = if command == :keep_minga_change, do: :keep, else: :reject
+    cursor = Buffer.cursor(buffer)
+    selection = {:visual, visual.visual_type, visual.visual_anchor, cursor, version}
+    InFileReview.decide(state, buffer, selection, decision, {:visual, visual, cursor})
+  end
+
+  def execute(state, {:review_visual, _buffer, _version, _command}), do: state
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :undo_agent_session),
     do: RejectTask.open(state, buf)

@@ -3,9 +3,7 @@ defmodule MingaEditor.ModeTransitions do
   Mode state adjustments during vim mode transitions.
 
   When entering visual, command, eval, or search mode, the mode state
-  struct needs initialization (e.g., capturing the cursor as a visual
-  anchor, creating a CommandState). These are pure functions that
-  transform mode state based on the old and new mode.
+  struct needs initialization, such as capturing the cursor as a visual anchor or capturing the selected lines for the command prompt.
   """
 
   alias Minga.Buffer
@@ -13,6 +11,7 @@ defmodule MingaEditor.ModeTransitions do
   alias Minga.Mode
   alias Minga.Mode.CommandState
   alias Minga.Mode.EvalState
+  alias Minga.Mode.VisualState
 
   @doc """
   Adjusts mode_state when transitioning between modes.
@@ -33,6 +32,23 @@ defmodule MingaEditor.ModeTransitions do
   def adjust(%{insert_changed: _} = mode_state, old_mode, :insert, _state)
       when old_mode != :insert do
     %{mode_state | insert_changed: false}
+  end
+
+  def adjust(
+        _mode_state,
+        :visual,
+        :command,
+        %{
+          workspace: %{
+            buffers: %{active: buffer},
+            editing: %{mode_state: %VisualState{visual_anchor: {anchor, _col}}}
+          }
+        }
+      )
+      when is_pid(buffer) do
+    version = Buffer.version(buffer)
+    {cursor, _col} = Buffer.cursor(buffer)
+    CommandState.for_visual(buffer, version, anchor, cursor)
   end
 
   # Entering command mode: ensure CommandState.

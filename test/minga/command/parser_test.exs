@@ -97,6 +97,16 @@ defmodule Minga.Command.ParserTest do
         {"%s#old#new#g", {:substitute, "old", "new", [:global]}}
       ])
     end
+
+    test "Minga review actions preserve their particular line range" do
+      assert_parse_cases([
+        {"Minga keep", {:minga_review, :current_line, :keep}},
+        {"'<,'>Minga keep", {:minga_review, :visual, :keep}},
+        {"%Minga reject", {:minga_review, :whole_buffer, :reject}},
+        {"2,4 Minga reject", {:minga_review, {:absolute, 2, 4}, :reject}},
+        {"$Minga keep", {:minga_review, :last_line, :keep}}
+      ])
+    end
   end
 
   test "live substitute parsing distinguishes an unfinished field from an empty replacement" do
