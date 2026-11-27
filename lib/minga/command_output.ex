@@ -59,8 +59,8 @@ defmodule Minga.CommandOutput do
 
   Options:
     - `:cwd` - working directory for the command (default: project root)
-    - `:events_registry` - event registry for completion broadcasts. The first run under a
-      name also fixes the registry on which the output buffer broadcasts its changes.
+    - `:events_registry` - event registry for completion broadcasts. An output buffer broadcasts
+      its changes on the registry of the run that created it, and keeps that registry while it lives.
   """
   @spec run(String.t(), String.t(), keyword()) :: :ok
   def run(name, command, opts \\ []) do
@@ -123,7 +123,8 @@ defmodule Minga.CommandOutput do
 
   @impl true
   def handle_call({:run, command, opts}, _from, state) do
-    state = kill_if_running(state)
+    events_registry = Keyword.get(opts, :events_registry, state.events_registry)
+    state = kill_if_running(%{state | events_registry: events_registry})
     state = ensure_buffer(state)
 
     # Clear the buffer and write a header
@@ -140,18 +141,8 @@ defmodule Minga.CommandOutput do
         {:env, []}
       ])
 
-    events_registry = Keyword.get(opts, :events_registry, state.events_registry)
-
     {:reply, :ok,
-     %{
-       state
-       | port: port,
-         command: command,
-         cwd: cwd,
-         exit_code: nil,
-         running?: true,
-         events_registry: events_registry
-     }}
+     %{state | port: port, command: command, cwd: cwd, exit_code: nil, running?: true}}
   end
 
   def handle_call(:buffer, _from, state) do
