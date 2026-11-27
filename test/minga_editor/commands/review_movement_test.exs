@@ -236,7 +236,7 @@ defmodule MingaEditor.Commands.ReviewMovementTest do
     send(first, :publish)
     assert_receive {:minga_event, :buffer_review_changed, %Events.BufferEvent{buffer: ^reviewed}}
 
-    wait_until(ctx, &is_nil(&1.keep_requests))
+    wait_until(ctx, &is_nil(&1.interaction.keep_requests))
 
     assert :ok = MingaEditor.open_file(ctx.editor, Path.join(root, "review.txt"))
     assert_receive {:reading_keep, second}, 1_000

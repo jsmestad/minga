@@ -148,7 +148,7 @@ defmodule MingaEditor.Extension.GitStatusTest do
     File.mkdir_p!(nested_project)
     File.mkdir_p!(other_project)
     :ok = Stub.set_root(nested_project, repo_root)
-    :ok = Stub.set_last_commit_message(repo_root, "previous commit")
+    :ok = Stub.set_head_commit(repo_root, String.duplicate("a", 40), "previous commit")
 
     on_exit(fn ->
       Stub.clear(nested_project)

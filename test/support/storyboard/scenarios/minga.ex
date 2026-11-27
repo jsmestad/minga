@@ -309,7 +309,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
         ]
       ),
       Entry.built("minga.tasks.needs_you",
-        start: [tasks: @asking_tasks],
+        start: [tasks: @asking_tasks, minga: {:thinking, :in_file}],
         reach: "1 SPC a a",
         recognize: &tasks_selected?(&1, :needs_you),
         checks: [
@@ -408,12 +408,19 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
       Entry.pending("minga.review.empty", 4051, "nothing to review"),
       Entry.pending("minga.review.diff_inline", 4051, "the inline diff of Minga's change"),
       Entry.built("minga.review.in_file",
-        start: [content: @review_content, review_edits: review_edits()],
+        start: [
+          content: @review_content,
+          minga: {:thinking, :in_file},
+          review_edits: review_edits()
+        ],
         reach: "g g ] h",
         recognize: &in_file_review?/1,
         checks: [
           Check.new("the editor owns the keyboard inside Minga's first change", fn model ->
-            assert in_file_review?(model)
+            assert Enum.any?(Model.modeline_segments(model), fn segment ->
+                     segment.id == :change and segment.text == "change 1/4"
+                   end)
+
             model |> assert_focus(:editor) |> assert_mode(:normal)
           end)
         ]
@@ -531,7 +538,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
   @spec in_file_review?(Model.t()) :: boolean()
   defp in_file_review?(%Model{} = model) do
     Edit.home?(model) and
-      Enum.any?(Model.modeline_segments(model), &match?(%{id: :change, text: "change 1/4"}, &1))
+      Enum.any?(Model.modeline_segments(model), &(&1.id == :change))
   end
 
   @spec reject_task_prompt?(Model.t()) :: boolean()

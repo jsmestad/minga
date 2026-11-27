@@ -18,7 +18,7 @@ defmodule Minga.Test.Storyboard.Journeys do
   @type step :: %{key: String.t(), to: String.t(), press: String.t() | nil}
 
   @typedoc "A scripted journey."
-  @type t :: %{name: String.t(), start: String.t(), start_opts: keyword(), steps: [step()]}
+  @type t :: %{name: String.t(), start: String.t(), steps: [step()]}
 
   @typedoc "One frame of a journey run: where the step landed and the semantic model."
   @type frame :: %{scenario: String.t(), keys: String.t(), model: Model.t()}
@@ -33,17 +33,12 @@ defmodule Minga.Test.Storyboard.Journeys do
   @spec all() :: [t()]
   def all do
     [
-      journey(
-        "approve a request",
-        "edit.working",
-        [
-          {"SPC a a", "minga.tasks.needs_you"},
-          {"=", "minga.approval.diff"},
-          {"y", "minga.tasks.working"},
-          {"q while Minga edits this file", "edit.working", press: "q"}
-        ],
-        tasks: [{"Add tests for the usage-limit classifier", :needs_you}]
-      ),
+      journey("approve a request", "edit.working", [
+        {"SPC a a", "minga.tasks.needs_you"},
+        {"=", "minga.approval.diff"},
+        {"y", "minga.tasks.working"},
+        {"q (while Minga edits this file)", "edit.working", press: "q"}
+      ]),
       journey("review and keep a change", "edit.working", [
         {"SPC a r", "minga.review.buffer"},
         {"y", "minga.review.buffer"},
@@ -101,10 +96,10 @@ defmodule Minga.Test.Storyboard.Journeys do
   Stops with `{:pending, scenario, issue, frames}` at the first scenario whose surface waits on a ticket, and with `{:error, message, frames}` when a frame classifies as the wrong scenario. `opts` go to `Minga.Test.Storyboard.Session.start/1`.
   """
   @spec run(t(), keyword()) :: outcome()
-  def run(%{start: start, start_opts: start_opts, steps: steps} = journey, opts \\ []) do
+  def run(%{start: start, steps: steps} = journey, opts \\ []) do
     case pending_issue(start) do
       nil ->
-        session = Registry.drive(start, Keyword.merge(start_opts, opts))
+        session = Registry.drive(start, opts)
         first = frame(start, "", session)
         follow(steps, session, [first], journey)
 
@@ -173,11 +168,10 @@ defmodule Minga.Test.Storyboard.Journeys do
           String.t(),
           [
             {String.t(), String.t()} | {String.t(), String.t(), keyword()}
-          ],
-          keyword()
+          ]
         ) :: t()
-  defp journey(name, start, steps, start_opts \\ []) do
-    %{name: name, start: start, start_opts: start_opts, steps: Enum.map(steps, &step/1)}
+  defp journey(name, start, steps) do
+    %{name: name, start: start, steps: Enum.map(steps, &step/1)}
   end
 
   @spec step({String.t(), String.t()} | {String.t(), String.t(), keyword()}) :: step()

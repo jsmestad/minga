@@ -8,6 +8,7 @@ defmodule Minga.Storyboard.JourneysTest do
   use ExUnit.Case, async: true
 
   alias Minga.Test.Storyboard.Journeys
+  alias Minga.Test.Storyboard.Model
   alias Minga.Test.Storyboard.Registry
 
   @moduletag :storyboard
@@ -30,7 +31,6 @@ defmodule Minga.Storyboard.JourneysTest do
     journey = %{
       name: "leader and back, then a selection and back",
       start: "edit.plain",
-      start_opts: [],
       steps: [
         %{key: "SPC (pause)", to: "edit.whichkey.leader", press: nil},
         %{key: "esc", to: "edit.plain", press: nil},
@@ -48,7 +48,6 @@ defmodule Minga.Storyboard.JourneysTest do
     journey = %{
       name: "wrong turn",
       start: "edit.plain",
-      start_opts: [],
       steps: [%{key: "v", to: "edit.whichkey.leader", press: nil}]
     }
 
@@ -78,6 +77,15 @@ defmodule Minga.Storyboard.JourneysTest do
       case Journeys.run(journey) do
         {:ok, frames} ->
           assert length(frames) == length(journey.steps) + 1
+
+          if @name == "approve a request" do
+            for frame <- Enum.take(frames, -2) do
+              assert Enum.any?(Model.modeline_segments(frame.model), fn segment ->
+                       segment.id == :minga and segment.text == "Minga here"
+                     end),
+                     "#{frame.scenario}: approval must not move Minga's work to another file"
+            end
+          end
 
         {:pending, scenario, issue, frames} ->
           IO.puts(

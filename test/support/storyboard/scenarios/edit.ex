@@ -5,7 +5,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
   The factory's cold start is the project home (`start.open_dir.home`); `1` opens the project's file there, which is `edit.plain`.
   """
 
-  import ExUnit.Assertions, only: [refute: 1]
+  import ExUnit.Assertions, only: [assert: 1, refute: 1]
   import Minga.Test.Storyboard.Assertions
 
   alias Minga.Buffer.EditSource
@@ -93,6 +93,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
       Entry.built("edit.working",
         start: [
           minga: {:thinking, :in_file},
+          tasks: [{"Add tests for the usage-limit classifier", :needs_you}],
           content: @working_content,
           review_edits: [
             {{2, 4}, 10, "count >= 0 and\n      count < 90", EditSource.minga("limits", "guard")},
@@ -106,6 +107,13 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
             "the editor keeps the keyboard while Minga works",
             &assert_focus(&1, :editor)
           ),
+          Check.new("Minga is working in this file", fn model ->
+            assert Enum.any?(Model.modeline_segments(model), fn segment ->
+                     segment.id == :minga and segment.text == "Minga here"
+                   end)
+
+            model
+          end),
           Check.new("review position is absent outside a pending change", fn model ->
             refute Enum.any?(Model.modeline_segments(model), &(&1.id == :change))
             model
@@ -135,7 +143,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
     segments = Model.modeline_segments(model)
 
     home?(model) and
-      Enum.any?(segments, &match?(%{id: :minga, state: :working, text: "Minga here"}, &1)) and
+      Enum.any?(segments, &match?(%{id: :minga, state: :working}, &1)) and
       not Enum.any?(segments, &(&1.id == :change))
   end
 

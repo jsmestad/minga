@@ -26,6 +26,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
   alias Minga.RenderModel.Window.DiagnosticRange
   alias Minga.RenderModel.Window.DocumentHighlight
   alias Minga.RenderModel.Window.Gutter
+  alias Minga.RenderModel.Window.Gutter.Authorship
   alias Minga.RenderModel.Window.GutterEntry
   alias Minga.RenderModel.Window.Row
   alias Minga.RenderModel.Window.SearchMatch
@@ -384,37 +385,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
         sections["gui_gutter"]
         |> Map.new(fn s -> {s["id"], s["name"]} end)
 
-      gutter = %Gutter{
-        window_id: 1,
-        content_row: 0,
-        content_col: 0,
-        content_height: 10,
-        is_active: true,
-        content_width: 4,
-        cursor_line: 1,
-        line_number_style: :hybrid,
-        line_number_width: 4,
-        sign_col_width: 2,
-        entries: [%GutterEntry{buf_line: 1, display_type: :normal, sign_type: :none}]
-      }
-
-      resident = %{
-        gutter
-        | entries: %Gutter.ResidentRows{
-            content_epoch: 1,
-            line_count: 10,
-            overrides: gutter.entries
-          }
-      }
-
-      actual_ids =
-        Enum.flat_map([gutter, resident], fn model ->
-          commands = WindowEncoder.encode(minimal_render_window(gutter: model))
-          gutter_binary = Enum.find(commands, fn <<opcode, _::binary>> -> opcode == 0x7B end)
-          assert gutter_binary != nil, "no gui_gutter (0x7B) command found in encode output"
-          <<0x7B, section_count::8, sections_binary::binary>> = gutter_binary
-          extract_section_ids(sections_binary, section_count)
-        end)
+      actual_ids = gutter_section_ids()
 
       for {id, name} <- schema_section_ids do
         assert id in actual_ids,
@@ -426,30 +397,58 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
     test "every encoder-emitted section has a schema entry", %{sections: sections} do
       schema_ids = sections["gui_gutter"] |> Enum.map(& &1["id"]) |> MapSet.new()
 
-      gutter = %Gutter{
-        window_id: 1,
-        content_row: 0,
-        content_col: 0,
-        content_height: 10,
-        is_active: true,
-        content_width: 4,
-        cursor_line: 1,
-        line_number_style: :hybrid,
-        line_number_width: 4,
-        sign_col_width: 2,
-        entries: [%GutterEntry{buf_line: 1, display_type: :normal, sign_type: :none}]
-      }
-
-      commands = WindowEncoder.encode(minimal_render_window(gutter: gutter))
-      gutter_binary = Enum.find(commands, fn <<opcode, _::binary>> -> opcode == 0x7B end)
-      <<0x7B, section_count::8, sections_binary::binary>> = gutter_binary
-
-      for id <- extract_section_ids(sections_binary, section_count) do
+      for id <- gutter_section_ids() do
         assert MapSet.member?(schema_ids, id),
                "encoder emits gui_gutter section 0x#{Integer.to_string(id, 16)} " <>
                  "but the schema has no entry for it"
       end
     end
+  end
+
+  defp gutter_section_ids do
+    pending = {:text, 41, {1, 2}, 2}
+    snapshot = Authorship.new(5, {self(), 1, {5, 0}}, [{0, 9}], [pending], :resident)
+
+    gutter = %Gutter{
+      window_id: 1,
+      content_row: 0,
+      content_col: 0,
+      content_height: 10,
+      is_active: true,
+      content_width: 4,
+      cursor_line: 1,
+      line_number_style: :hybrid,
+      line_number_width: 4,
+      sign_col_width: 2,
+      entries: [%GutterEntry{buf_line: 1, display_type: :normal, sign_type: :none}]
+    }
+
+    resident = %{
+      gutter
+      | entries: %Gutter.ResidentRows{content_epoch: 1, line_count: 10, overrides: gutter.entries},
+        authorship: snapshot
+    }
+
+    updated =
+      Authorship.patch(
+        snapshot,
+        {6, {self(), 1, {6, 0}}, [{0, 9}]},
+        [{1, 2}],
+        [
+          {:kept, {1, 2}, 2}
+        ],
+        []
+      )
+
+    window = minimal_render_window(gutter: resident)
+    patch = Authorship.update(snapshot, updated)
+    {delta, _metrics} = WindowEncoder.encode_frame_metadata_with_metrics(window, true, patch)
+
+    for <<0x7B, count::8, sections::binary>> <-
+          WindowEncoder.encode(minimal_render_window(gutter: gutter)) ++
+            WindowEncoder.encode(window) ++ delta,
+        id <- extract_section_ids(sections, count),
+        do: id
   end
 
   describe "gui_completion command fields match schema" do

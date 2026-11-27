@@ -134,7 +134,7 @@ defmodule MingaEditor.Shell.Traditional.InFileReview do
          continuation
        ) do
     id = make_ref()
-    requests = state.keep_requests || :gen_server.reqids_new()
+    requests = state.interaction.keep_requests || :gen_server.reqids_new()
     requests = Buffer.request_keep(buffer, target, {active_tab_id(state), id}, requests)
     vim = VimState.begin_keep(state.workspace.editing, id, buffer, count, continuation)
 
@@ -199,9 +199,9 @@ defmodule MingaEditor.Shell.Traditional.InFileReview do
 
   @doc "Claims a monitored Buffer reply and applies it only to the originating context."
   @spec response(State.t(), term()) :: {:handled, State.t()} | :unrelated
-  def response(%State{keep_requests: nil}, _message), do: :unrelated
+  def response(%State{interaction: %{keep_requests: nil}}, _message), do: :unrelated
 
-  def response(%State{keep_requests: requests} = state, message) do
+  def response(%State{interaction: %{keep_requests: requests}} = state, message) do
     case :gen_server.check_response(message, requests, true) do
       {{:reply, result}, {tab_id, id}, rest} ->
         {:handled, finish_request(store_outstanding_requests(state, rest), tab_id, id, result)}

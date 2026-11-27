@@ -771,7 +771,8 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     pending = {:text, 41, {5, 2}, 6}
     unrelated = {:gap, 42, {69, 0}}
 
-    authorship = Authorship.new(5, {self(), 1, 5}, [{0, 69}], [pending, unrelated], :resident)
+    authorship =
+      Authorship.new(5, {self(), 1, {5, 0}}, [{0, 69}], [pending, unrelated], :resident)
 
     gutter = %{
       gutter_model()
@@ -792,7 +793,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     kept =
       Authorship.patch(
         authorship,
-        {6, {self(), 1, 6}, [{0, 69}]},
+        {6, {self(), 1, {6, 0}}, [{0, 69}]},
         [{5, 6}],
         [{:kept, {5, 2}, 6}],
         []
