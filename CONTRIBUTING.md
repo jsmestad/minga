@@ -55,6 +55,8 @@ cd go/tui && go test ./...     # Go/Bubble Tea terminal renderer tests
 cd zig && zig build test       # Zig parser and helper tests
 ```
 
+The test environment disables language server auto-start, including after an options reset. Tests that exercise auto-start should enable `:lsp_auto_start` on a private options server and use a controlled language server fixture. To check cleanup with your installed Expert, run `python3 test/scripts/lsp_process_cleanup_test.py --expert` separately.
+
 ### Native macOS unit tests
 
 After generating the Xcode project (`cd macos && xcodegen generate`), run `scripts/test_macos_unit` from the repository root. This is the authoritative Xcode/Metal unit-test entrypoint used by CI and the Swift stage of `make done`; SwiftPM is not a substitute for this native gate.

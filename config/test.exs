@@ -49,6 +49,9 @@ config :minga, platform_module: Minga.Platform.Stub
 # inference opt in with `infer_project_root: true`.
 config :minga, infer_startup_project_root: false
 
+# Keep unrelated buffer opens from spawning installed language servers, even after Options.reset/1.
+config :minga, lsp_auto_start_default: false
+
 # Use a lightweight stub provider for agent sessions in tests.
 # The real native provider takes ~700ms to start because it loads tools
 # and resolves API keys. The stub starts instantly and satisfies the
