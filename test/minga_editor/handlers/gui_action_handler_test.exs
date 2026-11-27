@@ -12,6 +12,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias Minga.Editing.Completion.Item, as: CompletionItem
   alias Minga.Extension.CodeLease
   alias Minga.RenderModel.UI.ExtensionPanel.Content.Text
+  alias Minga.Test.FileTreeCopyFixture, as: CopyFixture
   alias MingaEditor.BottomPanel
   alias MingaEditor.Agent.FileChange
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
@@ -1117,10 +1118,11 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     sidebar_registry: table,
     tmp_dir: root
   } do
-    for intent <- [:toggle, :rename, :delete, :duplicate, :new_file, :new_folder] do
+    for intent <- [:rename, :delete, :duplicate, :new_file, :new_folder] do
       directory = Path.join(root, Atom.to_string(intent))
       File.mkdir_p!(directory)
       {state, target} = targeted_tree_state(table, directory)
+      state = if intent == :duplicate, do: CopyFixture.install_scheduler(state), else: state
       generation = FileTreeState.presentation_generation(state.workspace.file_tree)
       selected = ProjectFileTree.selected_entry(FileTreeState.tree(state.workspace.file_tree))
 
@@ -1135,6 +1137,8 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
           }
         )
 
+      result = if intent == :duplicate, do: CopyFixture.complete_copy(result), else: result
+
       assert ProjectFileTree.selected_entry(FileTreeState.tree(result.workspace.file_tree)).path ==
                selected.path
 
@@ -1144,12 +1148,6 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
                Minga.Buffer.content(state.workspace.buffers.active)
 
       case intent do
-        :toggle ->
-          assert MapSet.member?(
-                   FileTreeState.tree(result.workspace.file_tree).expanded,
-                   target.path
-                 )
-
         :rename ->
           assert FileTreeState.editing(result.workspace.file_tree).source_path == target.path
 
@@ -1492,12 +1490,18 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
       path: target_path,
       name: "target",
       dir?: true,
+      identity: Minga.Core.FileIdentity.from_stat(File.lstat!(target_path, time: :posix)),
       depth: 0,
       last_child?: true,
       guides: []
     }
 
-    tree = ProjectFileTree.new(root) |> ProjectFileTree.put_entries([active, target])
+    tree =
+      root
+      |> ProjectFileTree.new()
+      |> ProjectFileTree.expand_path(target_path)
+      |> ProjectFileTree.put_entries([active, target])
+
     file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
     state = base_state(table)
     {%{state | workspace: SessionState.set_file_tree(state.workspace, file_tree)}, target}
@@ -1593,6 +1597,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   } do
     project_root = Path.join(root, "project")
     {state, target} = targeted_tree_state(table, project_root)
+    state = CopyFixture.install_scheduler(state)
     source_root = Path.join(root, "external")
     File.mkdir_p!(source_root)
     source = Path.join(source_root, "copy.txt")
@@ -1611,7 +1616,10 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
         generation: generation
       )
 
-    result = GuiActionHandler.dispatch(state, {:file_tree_drop, intent})
+    result =
+      state
+      |> GuiActionHandler.dispatch({:file_tree_drop, intent})
+      |> CopyFixture.complete_copy()
 
     assert File.read!(Path.join(target.path, "copy.txt")) == "external"
     assert FileTreeState.tree(result.workspace.file_tree).cursor == 0
@@ -1648,9 +1656,8 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
   defp renderer_probe(owner) do
     receive do
-      {:"$gen_call", from, {:reset_keyframe, submission, _seq, _pushed_at}} ->
+      {:"$gen_cast", {:recover, :keyframe, submission, _seq, _pushed_at}} ->
         {intent, _, _} = MingaEditor.Renderer.Submission.materialize(submission, %{}, %{})
-        GenServer.reply(from, :ok)
         send(owner, {:renderer_reset, intent})
         renderer_probe(owner)
     end

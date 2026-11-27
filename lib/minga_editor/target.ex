@@ -111,13 +111,13 @@ defmodule MingaEditor.Target do
   def resolve(state, %__MODULE__{surface: :file_tree, generation: generation, item_id: id}) do
     file_tree = state.workspace.file_tree
 
-    case FileTreeState.tree(file_tree) do
-      %FileTree{} = tree ->
+    case {file_tree.visibility, FileTreeState.resident_tree(file_tree)} do
+      {visibility, %FileTree{} = tree} when visibility != :hidden ->
         with :ok <- generation(FileTreeState.presentation_generation(file_tree), generation) do
           resolve_tree_entry(tree, id)
         end
 
-      nil ->
+      _unavailable ->
         {:error, :not_found}
     end
   end
@@ -288,8 +288,6 @@ defmodule MingaEditor.Target do
       entry -> {:ok, {:file_tree, tree, entry}}
     end
   end
-
-  defp resolve_tree_entry(_tree, _id), do: {:error, :not_found}
 
   @spec missing_modal(EditorState.t()) :: {:error, reason()}
   defp missing_modal(state) do

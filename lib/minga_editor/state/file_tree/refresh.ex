@@ -21,9 +21,32 @@ defmodule MingaEditor.State.FileTree.Refresh do
           | {:debounced, debounce_token(), non_neg_integer()}
           | {:admitted, String.t(), request()}
 
-  @type t :: %__MODULE__{phase: phase()}
+  @type creation :: {:new_file | :new_folder, String.t()}
 
-  defstruct phase: {:idle, 0}
+  @type t :: %__MODULE__{
+          phase: phase(),
+          selection_path: String.t() | nil,
+          previous_root: String.t() | nil,
+          creation: creation() | nil,
+          trailing_token: debounce_token() | nil
+        }
+
+  defstruct phase: {:idle, 0},
+            selection_path: nil,
+            previous_root: nil,
+            creation: nil,
+            trailing_token: nil
+
+  @doc "Starts a topology scan while retaining its selection and root cleanup intent."
+  @spec prepare_scan(String.t() | nil, String.t() | nil, creation() | nil) :: t()
+  def prepare_scan(path, previous_root, creation \\ nil),
+    do: %__MODULE__{selection_path: path, previous_root: previous_root, creation: creation}
+
+  @doc "Keeps an admitted topology scan authoritative and queues one subsequent refresh."
+  @spec defer_debounce(t(), debounce_token()) :: t()
+  def defer_debounce(%__MODULE__{phase: {:admitted, _, _}} = refresh, token)
+      when is_reference(token),
+      do: %{refresh | trailing_token: refresh.trailing_token || token}
 
   @doc "Records one debounce intent, leaving an existing timer authoritative and invalidating older result authority."
   @spec request_debounce(t(), debounce_token()) :: {:scheduled | :already_scheduled, t()}
@@ -75,7 +98,13 @@ defmodule MingaEditor.State.FileTree.Refresh do
         token
       )
       when is_binary(root) and is_reference(token) do
-    {:current, %{refresh | phase: {:idle, 0}}}
+    next =
+      case refresh.trailing_token do
+        nil -> invalidate(refresh)
+        trailing_token -> %__MODULE__{phase: {:debounced, trailing_token, 0}}
+      end
+
+    {:current, next}
   end
 
   def request_finished(%__MODULE__{} = refresh, root, token)
@@ -85,5 +114,5 @@ defmodule MingaEditor.State.FileTree.Refresh do
 
   @doc "Invalidates every timer and result correlation when the tree lifecycle changes."
   @spec invalidate(t()) :: t()
-  def invalidate(%__MODULE__{} = refresh), do: %{refresh | phase: {:idle, 0}}
+  def invalidate(%__MODULE__{}), do: %__MODULE__{}
 end

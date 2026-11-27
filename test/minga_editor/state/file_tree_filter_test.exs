@@ -18,7 +18,7 @@ defmodule MingaEditor.State.FileTreeFilterTest do
     ft = open_tree("/nonexistent_root") |> FileTreeState.update_filter("needle")
 
     assert tree(ft).filter == "needle"
-    assert tree(ft).entries == nil
+    assert tree(ft).entries == []
     assert FileTreeState.content(ft) == {:loading, tree(ft)}
     assert ft.filter_request == nil
   end

@@ -9,6 +9,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
   alias Minga.Git.StatusEntry
   alias Minga.Project.FileRef
   alias Minga.Project.FileTree
+  alias MingaEditor.EffectScheduler
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Handlers.FileEventHandler
@@ -355,7 +356,9 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       File.mkdir_p!(old_root)
       File.mkdir_p!(new_root)
 
-      state = state_with_tree(old_root)
+      tasks = start_supervised!({Task.Supervisor, []})
+      scheduler = start_supervised!({EffectScheduler, task_supervisor: tasks, owner: self()})
+      state = %{state_with_tree(old_root) | effect_scheduler: scheduler}
 
       {new_state, effects} =
         FileEventHandler.handle(state, {
@@ -366,8 +369,9 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
 
       assert ft(new_state).project_root == Path.expand(new_root)
       assert tree(new_state).root == Path.expand(new_root)
-      assert tree(new_state).entries == nil
+      assert tree(new_state).entries == []
       assert FileTreeState.status(ft(new_state)) == :loading
+      refute FileTreeState.resident_tree(ft(new_state))
       assert {:render, 16} in effects
     end
   end

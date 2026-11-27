@@ -421,7 +421,6 @@ defmodule MingaAgent.Session.TranscriptCursorTest do
     assert large.mutation_work <= small.mutation_work * 5 + 10_000
     assert large.append_work <= small.append_work * 5 + 10_000
     assert large.batch_work <= small.batch_work * 5 + 10_000
-    IO.puts("transcript indexed work/retention: #{inspect([small, large])}")
   end
 
   defp measure_source(count) do

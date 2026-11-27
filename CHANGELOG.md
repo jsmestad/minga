@@ -165,6 +165,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Opening the file tree, expanding folders, and revealing the active file no longer wait for a directory scan. If the tree has too many rows or levels to display, the sidebar shows an error instead of dropping the editor frame.
+- The file tree shows the delete confirmation without counting a folder's contents. Creating an item in the last empty folder now shows a name field.
+- Recursive file-tree copies and confirmed deletions run in the background, so editor input stays available while the filesystem operation runs.
 - Reject holds conflicting Agent edits rather than choosing one by order. Independent edits can still be rejected in the same press. Compacting Agent drafts preserves the user's later undo and does not restore text the user deleted.
 - Undo and automatic Reject no longer block each other when a newer Agent step can revert without touching the older step held by your edit.
 - Typing stays responsive while the agent streams. The editor no longer waits on a busy session to update the conversation, which could hold keys for up to five seconds.

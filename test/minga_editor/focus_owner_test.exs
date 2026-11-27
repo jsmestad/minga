@@ -366,7 +366,7 @@ defmodule MingaEditor.FocusOwnerTest do
   defp activate_inline(ctx, :inline_ask), do: InlineAsk.open(editor_state(ctx))
 
   defp activate_scope(state, :file_tree, root) do
-    tree = FileTree.new(root)
+    tree = root |> FileTree.new() |> FileTree.ensure_entries()
     buffer = start_supervised!({BufferProcess, content: ""}, id: make_ref())
     BufferSync.sync(buffer, tree)
     file_tree = FileTreeState.open(state.workspace.file_tree, tree, buffer)

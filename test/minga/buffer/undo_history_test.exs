@@ -689,10 +689,6 @@ defmodule Minga.Buffer.UndoHistoryTest do
 
       assert text(world) == "let x = w8000;\n"
 
-      IO.puts(
-        "\n[minga rewrites] reductions 800=#{small} 8000=#{large} ratio=#{Float.round(large / small, 1)}"
-      )
-
       assert large < 30 * small
     end
 
@@ -704,11 +700,6 @@ defmodule Minga.Buffer.UndoHistoryTest do
       {small_rounds, small, _text} = held_cascade(800)
       {large_rounds, large, text} = held_cascade(8_000)
 
-      IO.puts(
-        "\n[held cascade] T=800 rounds=#{small_rounds} press_reductions=#{small} " <>
-          "T=8000 rounds=#{large_rounds} press_reductions=#{large} ratio=#{Float.round(large / small, 1)}"
-      )
-
       assert text =~ ~r/^let x = w.*; y = bar;\n$/
       assert large_rounds < 10 * small_rounds
       assert large < 30 * small
@@ -719,10 +710,6 @@ defmodule Minga.Buffer.UndoHistoryTest do
       {large, world} = work(fn -> your_retypes(8_000) end)
 
       assert text(world) == "let x = v8000;\n"
-
-      IO.puts(
-        "\n[your retypes] reductions 800=#{small} 8000=#{large} ratio=#{Float.round(large / small, 1)}"
-      )
 
       assert large < 30 * small
     end
@@ -1029,10 +1016,6 @@ defmodule Minga.Buffer.UndoHistoryTest do
         {:done, world} = unwind(world)
         assert text(world) == "abc\ndef\n"
       end
-
-      IO.puts(
-        "\n[units] multi-node units reverted: #{Process.get(:multi_units, 0)}, stuck runs: #{Process.get(:stuck, 0)}"
-      )
     end
 
     property "with coarse recording, rejecting any task is exact or refused, and SPC a u matches the model" do
@@ -1139,8 +1122,6 @@ defmodule Minga.Buffer.UndoHistoryTest do
             ) do
         slices_case(commands, cut, budget, slice)
       end
-
-      IO.puts("\n[compaction] history slices run: #{Process.get(:slices, 0)}")
     end
 
     test "an independently reversible rewrite unblocks undo of a user deletion" do
@@ -1297,8 +1278,6 @@ defmodule Minga.Buffer.UndoHistoryTest do
             ) do
         emoji_twins(commands)
       end
-
-      IO.puts("\n[twins, emoji] merge differences: #{Process.get(:merge_differences, 0)}")
     end
 
     test "compacting a superseded step does not change the user undo sequence after a press" do
@@ -2161,11 +2140,6 @@ defmodule Minga.Buffer.UndoHistoryTest do
       end
 
       assert Process.get(:cluster_changes, 0) > 0
-
-      IO.puts(
-        "\n[clusters] changes checked: #{Process.get(:cluster_changes)}, in one-pass batches: " <>
-          "#{Process.get(:cluster_batches, 0)}"
-      )
     end
 
     # Your edit between two steps of one task, touched by both, then compaction: the merge is refused, no component of
@@ -2886,7 +2860,6 @@ defmodule Minga.Buffer.UndoHistoryTest do
           splice_text(text, start, byte_size(removed), inserted)
 
         {:edit_all, _group, changes}, text ->
-          Process.put(:cluster_batches, Process.get(:cluster_batches, 0) + 1)
           Enum.each(changes, &assert_cluster_change(text, &1))
 
           changes
@@ -3024,18 +2997,12 @@ defmodule Minga.Buffer.UndoHistoryTest do
         assert your_text(world) |> subsequence?(your_text(after_world))
         assert UnitModel.acyclic?(history)
 
-        Process.put(
-          :multi_units,
-          Process.get(:multi_units, 0) + if(match?([_, _ | _], summary.groups), do: 1, else: 0)
-        )
-
         {:ok, after_world, summary.held}
 
       :empty ->
         :empty
 
       {:blocked, {:overlaps, :you}, _task, _offset} ->
-        Process.put(:stuck, Process.get(:stuck, 0) + 1)
         :held
     end
   end
@@ -3333,7 +3300,6 @@ defmodule Minga.Buffer.UndoHistoryTest do
   defp compact_fully(world, slice) do
     if UndoHistory.compaction_wanted?(world.history) do
       {status, history, result} = UndoHistory.compact_slice(world.history, slice)
-      Process.put(:slices, Process.get(:slices, 0) + 1)
       world = shadow(%{world | history: history})
 
       if status == :more do

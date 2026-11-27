@@ -135,8 +135,11 @@ defmodule MingaEditor.Input.FileTreeNewFileRecoveryTest do
   end
 
   defp open_file_tree(ctx) do
-    _state = send_keys_sync(ctx, "<Space>op")
-    assert file_tree_open?(ctx)
+    send_keys_sync(ctx, "<Space>op")
+
+    wait_until(ctx, fn state ->
+      FileTreeState.status(state.workspace.file_tree) in [:ready, :empty]
+    end)
   end
 
   defp replace_input(ctx, previous, replacement) do

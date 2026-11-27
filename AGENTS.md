@@ -43,7 +43,7 @@ Use the directory and entry-point tables under [Code Organization](#code-organiz
 - **Always create a feature branch** before making changes. Use descriptive names: `feat/release-pipeline`, `fix/viewport-scroll`, `refactor/layout-compute`.
 - **Never switch branches if another agent session is active on a branch.** Multiple LLM agents may be working in this repo concurrently. If you see uncommitted changes or a branch that isn't yours, leave it alone. Create a new branch from `main` instead.
 - **Check your current branch** before starting work: `git branch --show-current`. If you're on `main`, create a branch. If you're on someone else's feature branch, switch to `main` and branch from there.
-- **Push your branch and open a PR** when the work is ready. Always open the PR; don't just push and leave it. CI must pass before merging.
+- **Push your branch and open a PR** when the work is ready. An agent that pushes a PR owns its required CI checks until they pass on the current PR head, even when merging is out of scope. Stop earlier only if the user explicitly requests push-only delivery or a concrete blocker prevents progress. Report the blocker and the affected check. Green CI does not authorize merging.
 
 ### Git Worktrees
 

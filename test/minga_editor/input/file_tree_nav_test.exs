@@ -26,7 +26,7 @@ defmodule MingaEditor.Input.FileTreeNavTest do
       File.write!(Path.join(tmp_dir, "file_#{String.pad_leading(to_string(i), 2, "0")}.txt"), "")
     end
 
-    tree = FileTree.new(tmp_dir)
+    tree = tmp_dir |> FileTree.new() |> FileTree.refresh()
     buf = BufferSync.start_buffer(tree)
 
     workspace =

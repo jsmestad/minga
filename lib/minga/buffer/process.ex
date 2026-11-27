@@ -549,7 +549,7 @@ defmodule Minga.Buffer.Process do
     )
   end
 
-  @doc "Retargets the buffer to a new file path without writing content."
+  @doc "Retargets the buffer without writing content. Refuses a path open in another buffer."
   @spec retarget_path(GenServer.server(), String.t()) :: :ok | {:error, term()}
   def retarget_path(server, file_path) do
     GenServer.call(server, {:retarget_path, file_path}, @file_io_call_timeout)
@@ -2125,9 +2125,15 @@ defmodule Minga.Buffer.Process do
     if old_path == new_path do
       {:reply, :ok, state}
     else
-      state = retarget_file_swap(state, new_path)
-      broadcast_buffer_path_changed(old_path, state)
-      {:reply, :ok, state}
+      case reserve_retarget_path(new_path) do
+        :ok ->
+          state = retarget_file_swap(state, new_path)
+          broadcast_buffer_path_changed(old_path, state)
+          {:reply, :ok, state}
+
+        {:error, :destination_open} = error ->
+          {:reply, error, state}
+      end
     end
   end
 
@@ -4210,9 +4216,28 @@ defmodule Minga.Buffer.Process do
       {:error, {:already_registered, _}} -> :ok
     end
 
+    register_file_path(abs_path)
+  end
+
+  @spec register_file_path(String.t()) :: :ok
+  defp register_file_path(abs_path) do
     {key, indirection} = file_registration(abs_path)
     {:ok, _} = Registry.register(Minga.Buffer.FileRegistry, key, indirection)
     :ok
+  end
+
+  @spec reserve_retarget_path(String.t()) :: :ok | {:error, :destination_open}
+  defp reserve_retarget_path(path) do
+    case pid_for_file(path) do
+      {:ok, pid} when pid != self() ->
+        {:error, :destination_open}
+
+      _unoccupied ->
+        case Registry.register(Minga.Buffer.Registry, path, nil) do
+          {:ok, _owner} -> :ok
+          {:error, {:already_registered, _pid}} -> {:error, :destination_open}
+        end
+    end
   end
 
   # A path that is already its real path registers `nil`; any other path
@@ -5722,7 +5747,7 @@ defmodule Minga.Buffer.Process do
   @spec register_buffer_move(state(), String.t()) :: state()
   defp register_buffer_move(state, path) do
     unregister_path(state.file_path)
-    register_path(path)
+    register_file_path(path)
     %{BufState.retarget_path(state, path) | swap: SwapState.published(state.swap)}
   end
 

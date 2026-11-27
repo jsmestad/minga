@@ -10,7 +10,15 @@ defmodule Minga.Project.FileTree do
   No GenServer; the editor owns this struct in its state.
   """
 
+  alias Minga.Core.FileIdentity
   alias Minga.Project.FileTree.GitStatus
+
+  # Reserve one u16 row slot for the inline naming field outside the listing.
+  @max_sidebar_rows 65_534
+  # The wire format uses u8 for depth and guide count. The walker emits one guide per depth level.
+  @max_sidebar_depth 255
+  # Both frontends accept 64 MiB frames. Reserve most of that for the rest of the editor.
+  @max_sidebar_bytes 16 * 1024 * 1024
 
   @typedoc """
   A single visible entry in the tree.
@@ -22,6 +30,7 @@ defmodule Minga.Project.FileTree do
   `last_child?` to pick `├──` vs `└──` at the entry's own depth.
   """
   @type entry :: %{
+          optional(:identity) => FileIdentity.t() | nil,
           path: String.t(),
           name: String.t(),
           dir?: boolean(),
@@ -195,7 +204,7 @@ defmodule Minga.Project.FileTree do
   @doc "Toggles visibility of hidden files (dotfiles)."
   @spec toggle_hidden(t()) :: t()
   def toggle_hidden(%__MODULE__{} = tree) do
-    refresh(%{tree | show_hidden: not tree.show_hidden})
+    invalidate_entries(%{tree | show_hidden: not tree.show_hidden})
   end
 
   # ── Queries ───────────────────────────────────────────────────────────────
@@ -244,6 +253,28 @@ defmodule Minga.Project.FileTree do
 
   def ensure_entries(%__MODULE__{} = tree) do
     %{tree | entries: fresh_entries(tree)}
+  end
+
+  @doc "Whether the complete resident rows exceed the sidebar's supported size."
+  @spec sidebar_overflow?(t()) :: boolean()
+  def sidebar_overflow?(%__MODULE__{entries: entries}) when is_list(entries),
+    do: sidebar_overflow?(entries, @max_sidebar_rows, @max_sidebar_bytes)
+
+  def sidebar_overflow?(%__MODULE__{}), do: false
+
+  @spec sidebar_overflow?([entry()], non_neg_integer(), integer()) :: boolean()
+  defp sidebar_overflow?(_entries, _rows, bytes) when bytes < 0, do: true
+  defp sidebar_overflow?([], _rows, _bytes), do: false
+  defp sidebar_overflow?([_ | _], 0, _bytes), do: true
+
+  defp sidebar_overflow?([%{depth: depth} | _], _rows, _bytes) when depth > @max_sidebar_depth,
+    do: true
+
+  defp sidebar_overflow?([entry | rest], rows, bytes) do
+    # Absolute path appears twice; relative path is no longer than the absolute path.
+    # The remaining fixed, icon, and editing fields fit within this per-row allowance.
+    size = 320 + 3 * byte_size(entry.path) + byte_size(entry.name) + entry.depth
+    sidebar_overflow?(rest, rows - 1, bytes - size)
   end
 
   @spec fresh_entries(t(), [String.t()] | nil) :: [entry()]
@@ -417,14 +448,26 @@ defmodule Minga.Project.FileTree do
   """
   @spec reveal(t(), String.t()) :: t()
   def reveal(%__MODULE__{} = tree, file_path) do
-    expanded_path = Path.expand(file_path)
+    file_path = Path.expand(file_path)
 
-    # Expand all ancestor directories between root and the target
-    ancestors = path_ancestors(expanded_path, tree.root)
-    new_expanded = Enum.reduce(ancestors, tree.expanded, &MapSet.put(&2, &1))
-    tree = invalidate_entries(%{tree | expanded: new_expanded}) |> ensure_entries()
+    case select_path(tree, file_path) do
+      {:ok, selected} ->
+        selected
 
-    select_path_or_keep(tree, expanded_path)
+      :error ->
+        tree
+        |> prepare_reveal(file_path)
+        |> ensure_entries()
+        |> select_path_or_keep(file_path)
+    end
+  end
+
+  @doc "Expands the ancestors of a file without scanning or selecting it."
+  @spec prepare_reveal(t(), String.t()) :: t()
+  def prepare_reveal(%__MODULE__{} = tree, file_path) do
+    ancestors = path_ancestors(Path.expand(file_path), tree.root)
+    expanded = Enum.reduce(ancestors, tree.expanded, &MapSet.put(&2, &1))
+    invalidate_entries(%{tree | expanded: expanded})
   end
 
   # ── Private ───────────────────────────────────────────────────────────────
@@ -466,7 +509,7 @@ defmodule Minga.Project.FileTree do
   # directory (following symlinks, so a symlink-to-dir counts), and whether it
   # is itself a symlink (so the walk shows it but never descends into it).
   @typep stat_child ::
-           {name :: String.t(), full :: String.t(), dir? :: boolean(), symlink? :: boolean()}
+           {String.t(), String.t(), boolean(), boolean(), FileIdentity.t() | nil}
 
   @spec walk(String.t(), non_neg_integer(), walk_context(), [boolean()], [entry()]) :: [entry()]
   defp walk(dir_path, depth, context, guides, entries) do
@@ -493,7 +536,7 @@ defmodule Minga.Project.FileTree do
       end
 
     sorted =
-      Enum.sort_by(children, fn {name, _full, dir?, _symlink?} ->
+      Enum.sort_by(children, fn {name, _full, dir?, _symlink?, _identity} ->
         {if(dir?, do: 0, else: 1), String.downcase(name)}
       end)
 
@@ -515,21 +558,19 @@ defmodule Minga.Project.FileTree do
   @spec stat_child(String.t(), String.t()) :: stat_child()
   defp stat_child(dir_path, name) do
     full = Path.join(dir_path, name)
-    {dir?, symlink?} = dir_and_symlink(full)
-    {name, full, dir?, symlink?}
-  end
 
-  # Resolves directory-ness (following symlinks) and symlink-ness with the
-  # fewest stats: one `File.lstat` settles real dirs and files; only an entry
-  # that is itself a symlink needs a second, following `File.stat` to learn
-  # whether its target is a directory.
-  @spec dir_and_symlink(String.t()) :: {dir? :: boolean(), symlink? :: boolean()}
-  defp dir_and_symlink(full) do
-    case File.lstat(full) do
-      {:ok, %File.Stat{type: :directory}} -> {true, false}
-      {:ok, %File.Stat{type: :symlink}} -> {symlink_target_dir?(full), true}
-      {:ok, %File.Stat{}} -> {false, false}
-      {:error, _} -> {false, false}
+    case File.lstat(full, time: :posix) do
+      {:ok, %File.Stat{type: :directory} = stat} ->
+        {name, full, true, false, FileIdentity.from_stat(stat)}
+
+      {:ok, %File.Stat{type: :symlink} = stat} ->
+        {name, full, symlink_target_dir?(full), true, FileIdentity.from_stat(stat)}
+
+      {:ok, %File.Stat{} = stat} ->
+        {name, full, false, false, FileIdentity.from_stat(stat)}
+
+      {:error, _reason} ->
+        {name, full, false, false, nil}
     end
   end
 
@@ -549,13 +590,21 @@ defmodule Minga.Project.FileTree do
           boolean(),
           [entry()]
         ) :: [entry()]
-  defp walk_entry({name, full, dir?, symlink?}, depth, context, parent_guides, is_last, entries) do
+  defp walk_entry(
+         {name, full, dir?, symlink?, identity},
+         depth,
+         context,
+         parent_guides,
+         is_last,
+         entries
+       ) do
     entries =
       if filter_match?(name, full, context) do
         entry = %{
           path: full,
           name: name,
           dir?: dir?,
+          identity: identity,
           depth: depth,
           last_child?: is_last,
           guides: parent_guides

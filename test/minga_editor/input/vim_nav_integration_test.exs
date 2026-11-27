@@ -51,7 +51,7 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
       end
     end
 
-    tree = FileTree.new(tmp_dir)
+    tree = tmp_dir |> FileTree.new() |> FileTree.refresh()
     buf = BufferSync.start_buffer(tree)
 
     %EditorState{
@@ -143,39 +143,6 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
   end
 
   describe "file tree: custom bindings still work" do
-    test "Tab on directory toggles expand", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join(tmp_dir, "subdir"))
-      File.write!(Path.join(tmp_dir, "subdir/inner.txt"), "")
-
-      state = make_tree_state(tmp_dir, 0)
-      tree = tree(state)
-      entries = FileTree.visible_entries(tree)
-
-      # Find subdir entry
-      dir_idx = Enum.find_index(entries, fn e -> e.name == "subdir" end)
-
-      if dir_idx do
-        # Navigate to it
-        state =
-          if dir_idx > 0 do
-            Enum.reduce(1..dir_idx, state, fn _i, acc ->
-              {:handled, new_acc} = FileTreeHandler.handle_key(acc, ?j, 0)
-              new_acc
-            end)
-          else
-            state
-          end
-
-        # Press Tab to expand
-        entries_before = Enum.count(FileTree.visible_entries(tree(state)))
-        {:handled, state} = FileTreeHandler.handle_key(state, 9, 0)
-        entries_after = Enum.count(FileTree.visible_entries(tree(state)))
-
-        # Should have more entries after expanding
-        assert entries_after > entries_before
-      end
-    end
-
     test "H toggles hidden files", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, ".hidden"), "")
       File.write!(Path.join(tmp_dir, "visible.txt"), "")

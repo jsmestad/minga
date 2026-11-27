@@ -27,6 +27,8 @@ defmodule MingaEditor.FileTree.Refresh do
     :scanner,
     :scanner_context,
     :previous_root,
+    :selection_path,
+    :creation,
     :watcher_backend,
     :watcher_context,
     synchronize_watchers?: true
@@ -42,6 +44,8 @@ defmodule MingaEditor.FileTree.Refresh do
           scanner: module(),
           scanner_context: scanner_context(),
           previous_root: String.t() | nil,
+          selection_path: String.t() | nil,
+          creation: MingaEditor.State.FileTree.Refresh.creation() | nil,
           watcher_backend: module() | nil,
           watcher_context: term(),
           synchronize_watchers?: boolean()
@@ -59,6 +63,8 @@ defmodule MingaEditor.FileTree.Refresh do
       scanner: Keyword.get(opts, :scanner, MingaEditor.FileTree.Refresh.FilesystemScanner),
       scanner_context: Keyword.get(opts, :scanner_context),
       previous_root: expanded_optional_root(Keyword.get(opts, :previous_root)),
+      selection_path: Keyword.get(opts, :selection_path),
+      creation: Keyword.get(opts, :creation),
       watcher_backend: Keyword.get(opts, :watcher_backend),
       watcher_context: Keyword.get(opts, :watcher_context),
       synchronize_watchers?: Keyword.get(opts, :synchronize_watchers?, true)
@@ -72,6 +78,7 @@ defmodule MingaEditor.FileTree.Refresh do
   def run(%__MODULE__{} = effect) do
     case effect.scanner.scan(effect.tree, effect.scanner_context) do
       %FileTree{} = refreshed_tree ->
+        refreshed_tree = select_path(refreshed_tree, effect.selection_path)
         {:ok, with_cached_git_status(refreshed_tree, effect.events_registry)}
 
       {:error, reason} ->
@@ -79,6 +86,16 @@ defmodule MingaEditor.FileTree.Refresh do
 
       other ->
         {:error, {:invalid_refresh_result, other}}
+    end
+  end
+
+  @spec select_path(FileTree.t(), String.t() | nil) :: FileTree.t()
+  defp select_path(tree, nil), do: tree
+
+  defp select_path(tree, path) do
+    case FileTree.select_path(tree, path) do
+      {:ok, selected} -> selected
+      :error -> tree
     end
   end
 

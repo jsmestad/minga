@@ -50,6 +50,7 @@ defmodule MingaEditor.Commands do
   alias MingaEditor.Commands.Tool
   alias MingaEditor.Commands.Visual
   alias MingaEditor.Commands.Workspace, as: WorkspaceCommands
+  alias MingaEditor.FileTree.Delete, as: FileTreeDelete
   alias MingaEditor.Editing
   alias MingaEditor.LspActions
   alias MingaEditor.MinibufferData
@@ -306,46 +307,15 @@ defmodule MingaEditor.Commands do
   # ── File tree delete confirmation commands ─────────────────────────────────
 
   def execute(state, {:delete_confirm_trash, path}) do
-    case Minga.Platform.trash(path) do
-      :ok ->
-        name = Path.basename(path)
-        Minga.Log.info(:editor, "[file-tree] Moved to trash: #{name}")
-
-        state
-        |> restore_file_tree_scope()
-        |> MingaEditor.Commands.FileTree.refresh()
-
-      {:error, reason} ->
-        # Trash failed, offer permanent delete as fallback
-        Minga.Log.warning(:editor, "[file-tree] Trash failed: #{reason}")
-        ms = state.workspace.editing.mode_state
-
-        %{
-          state
-          | workspace:
-              MingaEditor.Session.State.transition_mode(
-                state.workspace,
-                :delete_confirm,
-                Minga.Mode.DeleteConfirmState.to_permanent(ms)
-              )
-        }
-    end
+    state
+    |> restore_file_tree_scope()
+    |> FileTreeDelete.schedule(:trash, path)
   end
 
   def execute(state, {:delete_confirm_permanent, path}) do
-    case Minga.Platform.permanent_delete(path) do
-      :ok ->
-        name = Path.basename(path)
-        Minga.Log.info(:editor, "[file-tree] Permanently deleted: #{name}")
-
-        state
-        |> restore_file_tree_scope()
-        |> MingaEditor.Commands.FileTree.refresh()
-
-      {:error, reason} ->
-        Minga.Log.warning(:editor, "[file-tree] Delete failed: #{reason}")
-        restore_file_tree_scope(state)
-    end
+    state
+    |> restore_file_tree_scope()
+    |> FileTreeDelete.schedule(:permanent, path)
   end
 
   def execute(state, :delete_confirm_cancel) do

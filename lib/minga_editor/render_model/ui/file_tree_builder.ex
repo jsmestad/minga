@@ -26,11 +26,17 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
     status = FileTreeState.status(file_tree)
 
     case {status, FileTreeState.tree(file_tree)} do
-      {status, %FileTree{} = tree} when status in [:ready, :hidden] ->
-        build_full(FileTree.ensure_entries(tree), file_tree, ctx, status)
+      {:hidden, %FileTree{entries: [_ | _]} = tree} ->
+        build_full(tree, file_tree, ctx, :hidden)
 
-      {:hidden, nil} ->
+      {:hidden, _tree} ->
         build_hidden(file_tree.project_root)
+
+      {:ready, %FileTree{entries: entries} = tree} when is_list(entries) ->
+        build_full(tree, file_tree, ctx, :ready)
+
+      {:ready, %FileTree{entries: nil}} ->
+        build_state(file_tree, :loading)
 
       {status, _tree} ->
         build_state(file_tree, status)
@@ -89,7 +95,6 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
       build_state(file_tree, :loading)
       | status: :empty,
         root_path: root,
-        focused?: FileTreeState.focused?(file_tree),
         empty: EmptyFolder.empty_list(root, FileTreeState.empty_selected(file_tree))
     }
   end
@@ -100,7 +105,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
       generation: FileTreeState.presentation_generation(file_tree),
       tree_width: FileTreeState.width(file_tree),
       status: status,
-      focused?: false,
+      focused?: FileTreeState.focused?(file_tree),
       selected_id: "",
       rows: []
     }

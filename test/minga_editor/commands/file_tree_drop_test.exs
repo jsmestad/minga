@@ -10,7 +10,11 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
   alias Minga.Buffer
   alias Minga.Events
   alias Minga.Project.FileTree
+  alias Minga.Test.FileTreeCopyFixture, as: CopyFixture
   alias MingaEditor.Commands
+  alias MingaEditor.Effect.Outcome
+  alias MingaEditor.EffectScheduler
+  alias MingaEditor.FileTree.Copy
   alias MingaEditor.FileTree.DropIntent
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -38,7 +42,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       state = open_file_tree(dir, events_registry)
       intent = drop_intent(tree(state), target_dir, [external_file])
 
-      state = Commands.FileTree.drop(state, intent)
+      state = state |> Commands.FileTree.drop(intent) |> CopyFixture.complete_copy()
 
       assert File.read!(Path.join(target_dir, "external.txt")) == "external"
       assert tree(state) != nil
@@ -56,9 +60,103 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       state = open_file_tree(dir, events_registry)
       intent = drop_intent(tree(state), target_file, [external_file])
 
-      _state = Commands.FileTree.drop(state, intent)
+      state |> Commands.FileTree.drop(intent) |> CopyFixture.complete_copy()
 
       assert File.read!(Path.join(dir, "onto-file.txt")) == "external"
+    end
+
+    test "processes all external items in one drop even if an earlier item collides", %{
+      tmp_dir: dir,
+      events_registry: events_registry
+    } do
+      target_dir = Path.join(dir, "dropzone")
+      File.mkdir!(target_dir)
+      {external_root, blocked} = external_file_fixture(dir, "blocked.txt")
+      on_exit(fn -> File.rm_rf(external_root) end)
+      existing = Path.join(target_dir, "blocked.txt")
+      File.write!(existing, "preserve")
+      file = Path.join(external_root, "later.txt")
+      File.write!(file, "later")
+      folder = Path.join(external_root, "folder")
+      File.mkdir_p!(Path.join(folder, "nested"))
+      File.write!(Path.join(folder, "nested/child.txt"), "child")
+      internal = Path.join(dir, "internal.txt")
+      File.write!(internal, "move")
+
+      state = open_file_tree(dir, events_registry)
+      intent = drop_intent(tree(state), target_dir, [blocked, file, internal, folder])
+      result = state |> Commands.FileTree.drop(intent) |> CopyFixture.complete_copy(:failed)
+
+      refute File.exists?(internal)
+      assert File.read!(Path.join(target_dir, "internal.txt")) == "move"
+
+      assert File.read!(existing) == "preserve"
+      assert File.read!(Path.join(target_dir, "later.txt")) == "later"
+      assert File.read!(Path.join(target_dir, "folder/nested/child.txt")) == "child"
+      assert {:debounced, _token, 0} = ft(result).refresh.phase
+    end
+
+    for first <- [:external, :internal] do
+      @first first
+
+      test "the first #{first} item wins a mixed drop with matching basenames", %{
+        tmp_dir: dir,
+        events_registry: events_registry
+      } do
+        target_dir = Path.join(dir, "dropzone")
+        internal = Path.join(dir, "shared.txt")
+        File.mkdir!(target_dir)
+        File.write!(internal, "internal")
+        {external_root, external} = external_file_fixture(dir, "shared.txt")
+        on_exit(fn -> File.rm_rf(external_root) end)
+
+        {sources, winning_bytes} =
+          case @first do
+            :external -> {[external, internal], "external"}
+            :internal -> {[internal, external], "internal"}
+          end
+
+        state = open_file_tree(dir, events_registry)
+        intent = drop_intent(tree(state), target_dir, sources)
+        state |> Commands.FileTree.drop(intent) |> CopyFixture.complete_copy(:failed)
+
+        assert File.read!(Path.join(target_dir, "shared.txt")) == winning_bytes
+        assert File.read!(external) == "external"
+
+        case @first do
+          :external -> assert File.read!(internal) == "internal"
+          :internal -> refute File.exists?(internal)
+        end
+      end
+    end
+
+    test "a busy mutation lane rejects the entire mixed drop before either item changes disk", %{
+      tmp_dir: dir,
+      events_registry: events_registry
+    } do
+      target_dir = Path.join(dir, "dropzone")
+      internal = Path.join(dir, "internal.txt")
+      blocker = Path.join(dir, "blocker.txt")
+      File.mkdir!(target_dir)
+      File.write!(internal, "internal")
+      File.write!(blocker, "blocker")
+      {external_root, external} = external_file_fixture(dir, "external.txt")
+      on_exit(fn -> File.rm_rf(external_root) end)
+
+      state = open_file_tree(dir, events_registry)
+      scheduler = state.effect_scheduler
+      state = Copy.duplicate(state, blocker)
+      outcome = CopyFixture.take_copy(scheduler, :completed)
+
+      assert EffectScheduler.active_activity?(scheduler, :file_tree_mutation)
+      intent = drop_intent(tree(state), target_dir, [internal, external])
+      result = Commands.FileTree.drop(state, intent)
+
+      assert result.shell_runtime.state.notice.message =~ "mutation is already running"
+      assert File.read!(internal) == "internal"
+      assert File.ls!(target_dir) == []
+      assert EffectScheduler.stats(scheduler).admitted == 1
+      EffectScheduler.finalize(scheduler, outcome)
     end
 
     test "moves an internal visible source into a directory target", %{
@@ -73,7 +171,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       state = open_file_tree(dir, events_registry)
       intent = drop_intent(tree(state), target_dir, [source_file])
 
-      _state = Commands.FileTree.drop(state, intent)
+      state |> Commands.FileTree.drop(intent) |> CopyFixture.complete_copy()
 
       refute File.exists?(source_file)
       assert File.read!(Path.join(target_dir, "source.txt")) == "source"
@@ -93,7 +191,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       state = open_file_tree(dir, events_registry)
       intent = drop_intent(tree(state), target_dir, [symlink_path])
 
-      _state = Commands.FileTree.drop(state, intent)
+      state |> Commands.FileTree.drop(intent) |> CopyFixture.complete_copy()
 
       assert {:error, :enoent} = File.lstat(symlink_path)
       assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(target_dir, "linked.txt"))
@@ -114,7 +212,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       state = open_file_tree(dir, events_registry, target_file)
       intent = drop_intent(tree(state), target_file, [source_file])
 
-      _state = Commands.FileTree.drop(state, intent)
+      state |> Commands.FileTree.drop(intent) |> CopyFixture.complete_copy()
 
       refute File.exists?(source_file)
       assert File.read!(Path.join(nested_dir, "source.txt")) == "source"
@@ -138,9 +236,29 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
         |> drop_intent(target_dir, [external_file])
         |> Map.put(:target_id, "/project/stale-target")
 
-      _state = Commands.FileTree.drop(state, intent)
+      ^state = Commands.FileTree.drop(state, intent)
+      assert EffectScheduler.stats(state.effect_scheduler).admitted == 0
 
       refute File.exists?(Path.join(target_dir, "stale.txt"))
+    end
+
+    test "rejects a nonresident path under the root without treating it as external", %{
+      tmp_dir: dir,
+      events_registry: events_registry
+    } do
+      hidden_parent = Path.join(dir, "collapsed")
+      source = Path.join(hidden_parent, "hidden.txt")
+      target = Path.join(dir, "dropzone")
+      File.mkdir!(hidden_parent)
+      File.mkdir!(target)
+      File.write!(source, "untouched")
+
+      state = open_file_tree(dir, events_registry)
+      intent = drop_intent(tree(state), target, [source])
+      state |> Commands.FileTree.drop(intent) |> CopyFixture.complete_copy(:failed)
+
+      assert File.read!(source) == "untouched"
+      assert File.ls!(target) == []
     end
 
     test "does not overwrite an existing destination for an internal source", %{
@@ -157,7 +275,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       state = open_file_tree(dir, events_registry)
       intent = drop_intent(tree(state), target_dir, [source_file])
 
-      _state = Commands.FileTree.drop(state, intent)
+      state |> Commands.FileTree.drop(intent) |> CopyFixture.complete_copy(:failed)
 
       assert File.read!(source_file) == "source"
       assert File.read!(existing_dest) == "existing"
@@ -177,7 +295,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       state = open_file_tree(dir, events_registry)
       intent = drop_intent(tree(state), target_dir, [source_file])
 
-      _state = Commands.FileTree.drop(state, intent)
+      state |> Commands.FileTree.drop(intent) |> CopyFixture.complete_copy(:failed)
 
       assert File.read!(source_file) == "source"
       assert {:ok, %File.Stat{type: :symlink}} = File.lstat(dangling_dest)
@@ -198,13 +316,13 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       state = open_file_tree(dir, events_registry)
       intent = drop_intent(tree(state), target_dir, [external_file])
 
-      _state = Commands.FileTree.drop(state, intent)
+      state |> Commands.FileTree.drop(intent) |> CopyFixture.complete_copy(:failed)
 
       assert {:ok, %File.Stat{type: :symlink}} = File.lstat(dangling_dest)
       refute File.exists?(Path.join(target_dir, "missing.txt"))
     end
 
-    test "retargets open buffers under an internally moved directory", %{
+    test "retargets open descendants without refreshing a tree opened after move admission", %{
       tmp_dir: dir,
       events_registry: events_registry
     } do
@@ -219,11 +337,59 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       state = open_file_tree(dir, events_registry, active_file)
       intent = drop_intent(tree(state), target_dir, [source_dir])
 
-      _state = Commands.FileTree.drop(state, intent)
+      pending = Commands.FileTree.drop(state, intent)
+      outcome = CopyFixture.take_copy(pending.effect_scheduler, :completed)
+      other_tree = target_dir |> FileTree.new() |> FileTree.ensure_entries()
+      other_file_tree = FileTreeState.replace_tree(ft(pending), other_tree)
+
+      current = %{
+        pending
+        | workspace: SessionState.set_file_tree(pending.workspace, other_file_tree)
+      }
+
+      assert {state, %Outcome{value: {:stale, :file_tree_changed}} = stale} =
+               Copy.apply(current, outcome)
+
+      EffectScheduler.finalize(pending.effect_scheduler, stale)
 
       refute File.exists?(active_file)
       assert File.exists?(moved_file)
       assert Buffer.file_path(state.workspace.buffers.active) == moved_file
+      assert ft(state) == other_file_tree
+    end
+
+    test "a destination opened before the move receipt keeps its own buffer and both drafts", %{
+      tmp_dir: dir,
+      events_registry: events_registry
+    } do
+      source = Path.join(dir, "source.txt")
+      target_dir = Path.join(dir, "dropzone")
+      destination = Path.join(target_dir, "source.txt")
+      File.mkdir_p!(target_dir)
+      File.write!(source, "disk")
+
+      state = open_file_tree(dir, events_registry, source)
+      original = state.workspace.buffers.active
+      :ok = Buffer.insert_text(original, "original draft: ")
+      pending = Commands.FileTree.drop(state, drop_intent(tree(state), target_dir, [source]))
+      outcome = CopyFixture.take_copy(pending.effect_scheduler, :completed)
+      assert File.read!(destination) == "disk"
+
+      opened =
+        start_supervised!({Buffer, file_path: destination, events_registry: events_registry},
+          id: make_ref()
+        )
+
+      :ok = Buffer.insert_text(opened, "destination draft: ")
+      {state, applied} = Copy.apply(pending, outcome)
+      EffectScheduler.finalize(pending.effect_scheduler, applied)
+
+      assert Buffer.file_path(original) == source
+      assert Buffer.content(original) == "original draft: disk"
+      assert Buffer.file_path(opened) == destination
+      assert Buffer.content(opened) == "destination draft: disk"
+      assert Buffer.pid_for_file(destination) == {:ok, opened}
+      assert state.shell_runtime.state.notice.message =~ "Use Save As"
     end
   end
 
@@ -231,7 +397,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
   defp tree(state), do: state |> ft() |> FileTreeState.tree()
 
   defp open_file_tree(dir, events_registry, active_file \\ nil) do
-    tree = reveal_active_file(FileTree.new(dir), active_file)
+    tree = dir |> FileTree.new() |> reveal_active_file(active_file) |> FileTree.ensure_entries()
     buffers = buffers_for_active_file(active_file, events_registry)
 
     %EditorState{
@@ -241,6 +407,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
         %SessionState{buffers: buffers, keymap_scope: :file_tree}
         |> SessionState.set_file_tree(FileTreeState.open(%FileTreeState{}, tree, nil))
     }
+    |> CopyFixture.install_scheduler()
   end
 
   defp private_events_registry(%{module: module, test: test}) do

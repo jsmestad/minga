@@ -1423,9 +1423,12 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int, ski
 func fileTreeScrollOffset(tree protocol.FileTree, visibleRows int) int {
 	selectedIndex := -1
 	for i, row := range tree.Rows {
-		if row.Selected {
+		if row.Editing {
 			selectedIndex = i
 			break
+		}
+		if row.Selected {
+			selectedIndex = i
 		}
 	}
 	if selectedIndex < 0 || selectedIndex < visibleRows {
@@ -1500,7 +1503,14 @@ func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int, guides fil
 	if row.Selected || row.Directory {
 		nameStyle = nameStyle.Bold(true)
 	}
-	nameRendered := renderFileTreeName(row.Name, row.MatchPositions, nameStyle, theme.Accent())
+	name := row.Name
+	if row.Editing {
+		name = row.EditingText
+		if name == "" {
+			name = "Name…"
+		}
+	}
+	nameRendered := renderFileTreeName(name, row.MatchPositions, nameStyle, theme.Accent())
 	content := markerStyle.Render(selectionMarker) + guideStyle.Render(guidePrefix) + markerStyle.Render(expander) + rowStyle.Render(" ") + iconStyle.Render(icon.glyph) + rowStyle.Render(" ") + nameRendered
 	if row.Dirty {
 		dirtyColor := theme.TreeGitModified()

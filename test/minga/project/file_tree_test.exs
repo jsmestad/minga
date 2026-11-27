@@ -198,7 +198,7 @@ defmodule Minga.Project.FileTreeTest do
       assert names(shown) == [".a", ".b", "c.txt"]
       assert selected_name(shown) == "c.txt"
 
-      hidden = FileTree.toggle_hidden(shown)
+      hidden = shown |> FileTree.toggle_hidden() |> FileTree.refresh()
       assert names(hidden) == ["c.txt"]
       assert selected_name(hidden) == "c.txt"
     end

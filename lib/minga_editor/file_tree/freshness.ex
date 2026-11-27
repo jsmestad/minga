@@ -296,11 +296,13 @@ defmodule MingaEditor.FileTree.Freshness do
   defp schedule_refresh(state, tree, opts \\ [])
 
   defp schedule_refresh(%EditorState{effect_scheduler: nil} = state, _tree, _opts) do
-    Minga.Log.warning(:editor, "File tree refresh scheduler unavailable")
-    state
+    file_tree = FileTreeState.refresh_failed(file_tree_state(state), :scheduler_unavailable)
+    set_file_tree(state, file_tree)
   end
 
   defp schedule_refresh(state, %FileTree{} = tree, opts) do
+    opts = Keyword.merge(opts, FileTreeState.refresh_scan_options(file_tree_state(state)))
+
     request = Refresh.request(tree, state.extension_surfaces.events_registry, opts)
 
     case EffectScheduler.schedule(state.effect_scheduler, request) do
@@ -344,10 +346,12 @@ defmodule MingaEditor.FileTree.Freshness do
            refreshed_tree
          ) do
       {:accepted, file_tree} ->
+        file_tree = maybe_begin_creation(file_tree, effect.creation)
         state = set_file_tree(state, file_tree)
 
         state =
           state
+          |> arm_trailing_refresh()
           |> maybe_synchronize_watchers(effect)
           |> sync_buffer(FileTreeState.tree(file_tree))
           |> MingaEditor.schedule_render(16)
@@ -359,14 +363,39 @@ defmodule MingaEditor.FileTree.Freshness do
     end
   end
 
+  @spec maybe_begin_creation(
+          FileTreeState.t(),
+          MingaEditor.State.FileTree.Refresh.creation() | nil
+        ) :: FileTreeState.t()
+  defp maybe_begin_creation(%FileTreeState{visibility: visibility} = file_tree, {type, parent})
+       when visibility != :hidden do
+    with %FileTree{} = tree <- FileTreeState.resident_tree(file_tree),
+         {:ok, selected} <- FileTree.select_path(tree, parent),
+         %{dir?: true} <- FileTree.selected_entry(selected) do
+      FileTreeState.start_editing(file_tree, selected.cursor + 1, type, parent, next_edit_token())
+    else
+      _unavailable -> file_tree
+    end
+  end
+
+  defp maybe_begin_creation(file_tree, _creation), do: file_tree
+
   @spec finish_terminal_refresh(state(), Refresh.t(), reference()) :: state()
   defp finish_terminal_refresh(state, effect, request_token) do
-    {_status, file_tree} =
-      state
-      |> file_tree_state()
-      |> FileTreeState.finish_refresh(effect.root, request_token)
+    case FileTreeState.finish_refresh(file_tree_state(state), effect.root, request_token) do
+      {:current, file_tree} -> state |> set_file_tree(file_tree) |> arm_trailing_refresh()
+      {_status, file_tree} -> set_file_tree(state, file_tree)
+    end
+  end
 
-    set_file_tree(state, file_tree)
+  @spec arm_trailing_refresh(state()) :: state()
+  defp arm_trailing_refresh(state) do
+    case FileTreeState.pending_refresh_timer(file_tree_state(state)) do
+      nil -> :ok
+      token -> send(self(), {:file_tree_refresh_timer, token})
+    end
+
+    state
   end
 
   @spec finish_failed_refresh(state(), Refresh.t(), reference(), term()) :: state()
@@ -375,7 +404,7 @@ defmodule MingaEditor.FileTree.Freshness do
       {:current, file_tree} ->
         file_tree = failed_file_tree(file_tree, effect, reason)
         file_tree = prepare_failed_watcher_cleanup(file_tree, effect)
-        state = set_file_tree(state, file_tree)
+        state = state |> set_file_tree(file_tree) |> arm_trailing_refresh()
         state = maybe_synchronize_failed_watchers(state, effect)
         state = maybe_sync_failed_root(state, file_tree, effect)
         MingaEditor.schedule_render(state, 16)
@@ -471,6 +500,28 @@ defmodule MingaEditor.FileTree.Freshness do
     end
   end
 
+  @doc "Opens an empty backing buffer and starts the initial file-tree scan."
+  @spec open(state(), FileTree.t(), keyword()) :: state()
+  def open(state, %FileTree{} = tree, opts \\ []) do
+    buffer = BufferSync.start_buffer(tree, state.interaction.options_server)
+    file_tree = FileTreeState.open(file_tree_state(state), tree, buffer)
+
+    state
+    |> set_file_tree(file_tree)
+    |> scan_loading(tree, opts)
+  end
+
+  @doc "Publishes loading rows and scans a requested topology off the Editor process."
+  @spec scan_loading(state(), FileTree.t(), keyword()) :: state()
+  def scan_loading(state, %FileTree{} = tree, opts \\ []) do
+    file_tree = FileTreeState.begin_loading_scan(file_tree_state(state), tree, opts)
+
+    state
+    |> set_file_tree(file_tree)
+    |> sync_buffer(FileTreeState.tree(file_tree))
+    |> schedule_refresh(tree, opts)
+  end
+
   @doc "Publishes a project-root loading state and schedules its typed root scan."
   @spec update_project_root(state(), String.t(), keyword()) :: state()
   def update_project_root(state, root, opts \\ []) when is_binary(root) do
@@ -488,7 +539,7 @@ defmodule MingaEditor.FileTree.Freshness do
 
         state
         |> set_file_tree(file_tree)
-        |> schedule_refresh(new_tree, Keyword.put(opts, :previous_root, old_tree.root))
+        |> schedule_refresh(new_tree, opts)
 
       nil ->
         set_file_tree(state, FileTreeState.set_project_root(file_tree, expanded_root))
@@ -512,7 +563,7 @@ defmodule MingaEditor.FileTree.Freshness do
 
         state
         |> set_file_tree(file_tree)
-        |> schedule_refresh(new_tree, Keyword.put(opts, :previous_root, old_tree.root))
+        |> schedule_refresh(new_tree, opts)
 
       nil ->
         state

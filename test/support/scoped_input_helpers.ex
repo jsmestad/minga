@@ -198,7 +198,7 @@ defmodule Minga.Test.ScopedInputHelpers do
       end
     end
 
-    tree = FileTree.new(tmp_dir)
+    tree = tmp_dir |> FileTree.new() |> FileTree.ensure_entries()
     buf = BufferSync.start_buffer(tree)
 
     state = base_state(keymap_scope: :file_tree)

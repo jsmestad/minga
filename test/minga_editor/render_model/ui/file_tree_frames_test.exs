@@ -57,6 +57,33 @@ defmodule MingaEditor.RenderModel.UI.FileTreeFramesTest do
     end
   end
 
+  test "an oversized tree sends an error and recovers after narrowing", %{tree: tree} do
+    oversized = FileTree.put_entries(tree, List.duplicate(hd(tree.entries), 65_536))
+    file_tree = open(oversized)
+
+    {:full_tree, error, caches} = frame(context(file_tree), Caches.new())
+    assert {:error, "Too many entries" <> _} = error.status
+    assert error.rows == []
+
+    hidden = FileTreeState.hide(file_tree)
+    {:full_tree, hidden_model, caches} = frame(context(hidden), caches)
+    assert %{status: :hidden, rows: []} = hidden_model
+
+    narrowed = FileTreeState.replace_tree(file_tree, tree)
+    {:full_tree, ready, _caches} = frame(context(narrowed), caches)
+    assert %{status: :ready, rows: [_ | _]} = ready
+  end
+
+  test "a deeply nested tree sends an error instead of an unencodable row", %{tree: tree} do
+    row = %{hd(tree.entries) | depth: 256, guides: List.duplicate(false, 256)}
+    deep = FileTree.put_entries(tree, [row])
+
+    assert {:full_tree, %{status: {:error, message}, rows: []}, _caches} =
+             frame(context(open(deep)), Caches.new())
+
+    assert message =~ "levels"
+  end
+
   test "file icons and colors match per-path filetype detection", %{tree: tree} do
     theme = Theme.get!(:doom_one)
     {:full_tree, model, _caches} = frame(context(open(tree)), Caches.new())

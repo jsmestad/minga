@@ -6,7 +6,7 @@ defmodule Minga.Mode.DeleteConfirmTest do
 
   describe "handle_key/2 in :trash phase" do
     setup do
-      state = DeleteConfirmState.new("/tmp/foo.ex", "foo.ex", false)
+      state = DeleteConfirmState.new("/tmp/foo.ex", "foo.ex", false, {1, 0, 123, :regular})
       %{state: state}
     end
 
@@ -35,7 +35,7 @@ defmodule Minga.Mode.DeleteConfirmTest do
   describe "handle_key/2 in :permanent phase" do
     setup do
       state =
-        DeleteConfirmState.new("/tmp/bar.ex", "bar.ex", false)
+        DeleteConfirmState.new("/tmp/bar.ex", "bar.ex", false, {1, 0, 123, :regular})
         |> DeleteConfirmState.to_permanent()
 
       %{state: state}

@@ -235,6 +235,8 @@ type FileTreeRow struct {
 	Focused        bool
 	Active         bool
 	Dirty          bool
+	Editing        bool
+	EditingText    string
 	MatchPositions []uint16
 }
 

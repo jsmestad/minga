@@ -842,7 +842,7 @@ const (
 )
 
 func TestDecodeFileTreeChromeRows(t *testing.T) {
-	encodeRow := func(pathHash uint32, flags uint16, depth byte, id, path, name, icon string, token uint32, color uint32) []byte {
+	encodeRow := func(pathHash uint32, flags uint16, depth byte, id, path, name, icon string, token uint32, editingText string, color uint32) []byte {
 		row := append(u32Bytes(pathHash), byte(flags>>8), byte(flags))
 		row = append(row,
 			depth,
@@ -859,15 +859,19 @@ func TestDecodeFileTreeChromeRows(t *testing.T) {
 		row = append(row, string16(name)...)
 		row = append(row, byte(len(icon)))
 		row = append(row, icon...)
-		row = append(row, 0xFF)
+		editingType := byte(0xFF)
+		if flags&0x40 != 0 {
+			editingType = 2 // rename
+		}
+		row = append(row, editingType)
 		row = append(row, u32Bytes(token)...)
-		row = append(row, 0, 0)
+		row = append(row, string16(editingText)...)
 		row = append(row, byte(color>>16), byte(color>>8), byte(color))
 		row = append(row, 0xFF)
 		return row
 	}
-	firstRow := encodeRow(1, 0x05, 1, "/repo/lib", "/repo/lib", "lib", "d", 0x01020304, 0x6D8086)
-	secondRow := encodeRow(2, 0, 2, "/repo/lib/minga.ex", "/repo/lib/minga.ex", "minga.ex", "f", 0x05060708, 0xAABBCC)
+	firstRow := encodeRow(1, 0x05, 1, "/repo/lib", "/repo/lib", "lib", "d", 0x01020304, "", 0x6D8086)
+	secondRow := encodeRow(2, 0x40, 2, "/repo/lib/minga.ex", "/repo/lib/minga.ex", "minga.ex", "f", 0x05060708, "renamed.ex", 0xAABBCC)
 	body := []byte{4, fileTreeVisibleFlag | fileTreeFocusedFlag | fileTreeLocalNavigationFlag, fileTreeReadyStatus}
 	body = append(body, 0, 0, 0, 7)
 	body = append(body, string16("/repo/lib")...)
@@ -889,7 +893,7 @@ func TestDecodeFileTreeChromeRows(t *testing.T) {
 	if got := tree.Rows[0]; !got.Directory || !got.Selected || got.ID != "/repo/lib" || got.Name != "lib" || got.Depth != 1 || got.IconColor != 0x6D8086 {
 		t.Fatalf("file tree row decoded incorrectly: %+v", got)
 	}
-	if got := tree.Rows[1]; got.Directory || got.Selected || got.ID != "/repo/lib/minga.ex" || got.Name != "minga.ex" || got.Depth != 2 || got.IconColor != 0xAABBCC {
+	if got := tree.Rows[1]; got.Directory || got.Selected || got.ID != "/repo/lib/minga.ex" || got.Name != "minga.ex" || got.Depth != 2 || got.IconColor != 0xAABBCC || !got.Editing || got.EditingText != "renamed.ex" {
 		t.Fatalf("second file tree row decoded incorrectly: %+v", got)
 	}
 }
