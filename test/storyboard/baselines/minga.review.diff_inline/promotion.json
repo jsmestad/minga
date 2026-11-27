@@ -1,0 +1,36 @@
+{
+  "macos": {
+    "commit": "0f803fdd7c3148ffc652696b086fb958d8eac202-dirty",
+    "files": {
+      "macos-astrodark-1280.json": "d6738dec9c78b96e60fd0e075fa46c61757d3fe5a3be7e0cac1c14ecfa35cd6d",
+      "macos-astrodark-1440.json": "cc65d2b0b79b54c024f44245051deca5248cd2f9f66271eb1ac1278b17095477",
+      "macos-catppuccin_frappe-1280.json": "d66d43befc2b5cdfeb4601495c2c9aae5922ce941263d7aba5d5da0a7b1697fe",
+      "macos-catppuccin_frappe-1440.json": "b6b416eaa957b97f524a99648a911d5bf559276389d556ce2d30a3a564b4cbd7",
+      "macos-catppuccin_latte-1280.json": "1afb7f9aadb93d1629d9f630510b6b00ad703a5d68595eec0d3c4bca656af2f1",
+      "macos-catppuccin_latte-1440.json": "5c7af7a695c6febe3cbcc71f1642949acaaf4d633cfb19a078e75517a2bbfdf3"
+    },
+    "transcripts": {
+      "macos-astrodark-1280.json": "78eb18c56fce7a3ba1b6e49fad5e2961978cb1580d97bdeabfc728c586b848d2",
+      "macos-astrodark-1440.json": "2126f72ded04053e85b6889ac911a4940f4907d4c42e3bfb121e45f67669b4de",
+      "macos-catppuccin_frappe-1280.json": "92b4321cd79c3f8e2380ce167df02f8e2929e4965b61232ca7855763ef29ef2d",
+      "macos-catppuccin_frappe-1440.json": "8d17833920bd72fef648bcdd4e7060fe3f90c0d363e1494751bd707165d29b0c",
+      "macos-catppuccin_latte-1280.json": "ade28d6c8f7d97ea3c925c65502796c6d3e4907af8b6f16cc401e388aa652c3c",
+      "macos-catppuccin_latte-1440.json": "a9a8e2f371a4dca9f4ef885914396bf0d94638a7cafca150df6308060dd05204"
+    }
+  },
+  "scenario": "minga.review.diff_inline",
+  "tui": {
+    "commit": "0f803fdd7c3148ffc652696b086fb958d8eac202-dirty",
+    "files": {
+      "tui-astrodark-120x40.txt": "b3ce7953b82bc550b1f4f4a158c43b1c912597d1a36dcca7c2a0d802e9a08ef9",
+      "tui-astrodark-150x38.txt": "32343637bbaea019209c181084751199b4e46e0b55e81753e616c1644b8d0df5",
+      "tui-astrodark-80x24.txt": "cfd53678178f5850606d60318e0cb247a6c944486bfad0e1aac3d05cab999abc",
+      "tui-catppuccin_frappe-120x40.txt": "63d18e2fb24eac8fbd710359d83d7b4e6b5453282334cc3fbdb613987f414c9f",
+      "tui-catppuccin_frappe-150x38.txt": "a2bc26033d9f90d13b913a42cb2d02bed52a370816fd708cb507400cbd3c1c9f",
+      "tui-catppuccin_frappe-80x24.txt": "9f919b647d0a8407de86ce14c951e7c05cd109974c929cb5f32285336d9ecbec",
+      "tui-catppuccin_latte-120x40.txt": "e44b18ce0d0d8233b8ae1062b20d2638cfc806a07b4369fc92ad901483a2e50c",
+      "tui-catppuccin_latte-150x38.txt": "bae34e1cc91756a6fb78e685a1ab1e483f195e4f3be4ec52c8db02d0f029a597",
+      "tui-catppuccin_latte-80x24.txt": "3ed2bb40d943739f46033d1e68160ae23a9c19882b7901268a44fdf0be466bc0"
+    }
+  }
+}

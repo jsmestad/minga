@@ -36,7 +36,7 @@
       ~
 ╭ SPC › a Minga · 1 needs you ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ Tasks                   Conversation           Changes                 More                                                                        │
-│ a Tasks · 1 needs you   v Conversation split   r Pending reviews       x Context ›                                                                 │
+│ a Tasks · 1 needs you   v Conversation split   r Review task changes   x Context ›                                                                 │
 │ n New task              ? Ask about this       y Keep Minga change     S Session ›                                                                 │
 │ i Inspect subagent      e Rewrite selection    d Reject Minga change   W Why this line                                                             │
 │ s Stop                  q Queue ›              u Reject all…           A Code autobiography                                                        │

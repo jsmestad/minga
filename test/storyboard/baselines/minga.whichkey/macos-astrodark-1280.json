@@ -201,7 +201,7 @@
     24
    ],
    "part": "whichKey.entry",
-   "text": "r Pending reviews"
+   "text": "r Review task changes"
   },
   {
    "frame": [
@@ -240,11 +240,11 @@
    "frame": [
     319,
     672.5,
-    93,
+    119,
     15
    ],
    "part": "whichKey.entryLabel",
-   "text": "Pending reviews"
+   "text": "Review task changes"
   },
   {
    "baseline": 684,

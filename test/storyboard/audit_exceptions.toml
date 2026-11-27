@@ -1823,3 +1823,125 @@ theme = "catppuccin_latte"
 pairs = ["#40a02b on #eff1f5", "#7287fd on #ccd0da"]
 reason = "The existing Latte string and active-row syntax ink miss text contrast."
 issue = 4137
+
+# The task review split still uses the ordinary editor, gutter and Normal pill.
+[[exception]]
+scenario = ["minga.review.buffer", "minga.review.diff_inline", "minga.review.keep_all.confirm", "minga.review.all_decided", "minga.review.empty"]
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "astrodark"
+pairs = ["#595c66 on #1a1d23"]
+reason = "The existing fold chevrons and empty-line tildes miss glyph contrast beside Task Review."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.review.buffer", "minga.review.diff_inline", "minga.review.keep_all.confirm", "minga.review.all_decided", "minga.review.empty"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "astrodark"
+pairs = ["#595c66 on #1a1d23"]
+reason = "The existing muted syntax ink in the editor misses text contrast beside Task Review."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.review.buffer", "minga.review.diff_inline", "minga.review.keep_all.confirm", "minga.review.all_decided", "minga.review.empty"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = ["#838ba7 on #303446"]
+reason = "The existing muted syntax ink in the editor misses text contrast beside Task Review."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.review.buffer", "minga.review.diff_inline", "minga.review.keep_all.confirm", "minga.review.all_decided", "minga.review.empty"]
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#8c8fa1 on #eff1f5"]
+reason = "The existing fold chevrons and empty-line tildes miss glyph contrast beside Task Review."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.review.buffer", "minga.review.diff_inline", "minga.review.keep_all.confirm", "minga.review.all_decided", "minga.review.empty"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#1e66f5 on #eff1f5", "#40a02b on #eff1f5", "#7287fd on #ccd0da", "#8c8fa1 on #eff1f5", "#df8e1d on #eff1f5", "#eff1f5 on #1e66f5", "#fe640b on #eff1f5"]
+reason = "The existing syntax, gutter and Normal pill colours miss text contrast beside Task Review."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.review.buffer", "minga.review.diff_inline", "minga.review.keep_all.confirm", "minga.review.all_decided"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#7287fd on #eff1f5"]
+reason = "The existing Lavender ink on the editor background, already measured for glyphs elsewhere, is measured here as an editor gutter numeral."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.review.buffer", "minga.review.diff_inline", "minga.review.keep_all.confirm", "minga.review.all_decided", "minga.review.empty"]
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#eff1f5 on #1e66f5"]
+reason = "The existing Latte Normal pill appears in Task Review and still measures 4.34:1."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.review.buffer", "minga.review.diff_inline", "minga.review.keep_all.confirm", "minga.review.all_decided", "minga.review.empty"]
+frontend = "macos"
+part = "modeline.modePill"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#eff1f5 on #1e66f5"]
+reason = "The existing Latte Normal pill appears in Task Review and still measures 4.34:1."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.review.buffer", "minga.review.diff_inline", "minga.review.keep_all.confirm", "minga.review.all_decided", "minga.review.empty"]
+frontend = "macos"
+part = "modeline.modeText"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#eff1f5 on #1e66f5"]
+reason = "The existing Latte Normal pill appears in Task Review and still measures 4.34:1."
+issue = 4137
+
+# Only the completed-task fixture shows the legacy workspace row and inactive Agent tab.
+[[exception]]
+scenario = "minga.review.all_decided"
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "astrodark"
+pairs = ["#595c66 on #111317"]
+reason = "The pre-existing workspace row draws muted text on its chrome surface."
+issue = 4063
+
+[[exception]]
+scenario = "minga.review.all_decided"
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = ["#838ba7 on #414559", "#8caaee on #414559", "#c678dd on #414559"]
+reason = "The pre-existing workspace row and inactive Agent tab use their existing chrome and tint colours."
+issue = 4063
+
+[[exception]]
+scenario = "minga.review.all_decided"
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#1e66f5 on #ccd0da", "#8c8fa1 on #ccd0da", "#c678dd on #ccd0da"]
+reason = "The pre-existing workspace row and inactive Agent tab use their existing chrome and tint colours."
+issue = 4063
