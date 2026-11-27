@@ -29,6 +29,7 @@ defmodule Minga.Test.Storyboard.Model do
           | :bottom_panel
           | :edit_timeline
           | :tasks_drawer
+          | :task_review
           | :observatory
           | :extension_overlay
 
@@ -71,7 +72,8 @@ defmodule Minga.Test.Storyboard.Model do
           focus: focus() | nil,
           echo: String.t() | nil,
           picker_title: String.t() | nil,
-          minibuffer_prompt: String.t() | nil
+          minibuffer_prompt: String.t() | nil,
+          review_text: String.t() | nil
         }
 
   @enforce_keys [:ui]
@@ -83,6 +85,7 @@ defmodule Minga.Test.Storyboard.Model do
     :focus,
     :echo,
     :picker_title,
+    :review_text,
     :minibuffer_prompt,
     mode: :normal,
     pending_keys: "",
@@ -168,6 +171,12 @@ defmodule Minga.Test.Storyboard.Model do
       do: true
 
   def notice_with_next_steps?(%__MODULE__{}), do: false
+
+  @spec observe_review(t(), String.t() | nil) :: t()
+  def observe_review(%__MODULE__{} = model, nil), do: model
+
+  def observe_review(%__MODULE__{} = model, text) when is_binary(text),
+    do: %{model | review_text: text, surfaces: [:task_review | model.surfaces]}
 
   @doc "The title of the empty state an open picker shows instead of results, or `nil`."
   @spec picker_empty_title(t()) :: String.t() | nil

@@ -87,6 +87,12 @@ defmodule Minga.Storyboard.JourneysTest do
             end
           end
 
+          if @name == "open a file across a multi-file change" do
+            assert [start, _tree, jump | _] = frames
+            assert displayed_file(start.model) == "storyboard.ex"
+            assert displayed_file(jump.model) == "neighbor.ex"
+          end
+
         {:pending, scenario, issue, frames} ->
           IO.puts(
             "Journey #{inspect(@name)}: #{length(frames)} frames, then waits on ##{issue} at #{scenario}"
@@ -99,4 +105,7 @@ defmodule Minga.Storyboard.JourneysTest do
       end
     end
   end
+
+  defp displayed_file(%Model{ui: %{status_bar: %{data: %{file: %{name: name}}}}}),
+    do: Path.basename(name)
 end

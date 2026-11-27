@@ -43,6 +43,18 @@
         "minibuffer": {
           "rows": 39
         },
+        "task_review": {
+          "rows": 45
+        },
+        "minibuffer+task_review": {
+          "rows": 40
+        },
+        "agent_activity+task_review": {
+          "rows": 43
+        },
+        "minibuffer+agent_activity+task_review": {
+          "rows": 39
+        },
         "tasks_drawer": {
           "rows": 31
         },
@@ -98,6 +110,18 @@
           "rows": 39
         },
         "minibuffer": {
+          "rows": 34
+        },
+        "task_review": {
+          "rows": 39
+        },
+        "minibuffer+task_review": {
+          "rows": 35
+        },
+        "agent_activity+task_review": {
+          "rows": 38
+        },
+        "minibuffer+agent_activity+task_review": {
           "rows": 34
         },
         "tasks_drawer": {

@@ -155,11 +155,11 @@ defmodule MingaEditor.Agent.UIState do
   def start_remedy(%__MODULE__{}), do: nil
 
   @doc """
-  True while a staged Diff Review has key focus: the Agent body shows the review and the composer is not focused. Keymap context for the Diff Review keys.
+  True while a fork conflict or proposal has review focus and the composer is not focused.
   """
   @spec diff_review_focused?(t()) :: boolean()
   def diff_review_focused?(%__MODULE__{panel: %Panel{input_focused: true}}), do: false
-  def diff_review_focused?(%__MODULE__{view: view}), do: View.agent_body(view) == :review
+  def diff_review_focused?(%__MODULE__{view: view}), do: View.decision_review?(view)
 
   @doc """
   The id of the connected Session's task, or nil before a connection is known.

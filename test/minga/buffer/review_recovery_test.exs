@@ -152,8 +152,11 @@ defmodule Minga.Buffer.ReviewRecoveryTest do
     reopened = start_buffer(ctx)
     assert Buffer.content(reopened) == "BefoRe\nOTHER\n"
     assert :empty = Buffer.prepare_review(reopened, {:byte_range, 0, 6})
+    assert {[_pending], _, {1, 0}} = Buffer.task_review_entries(reopened, "task")
+    assert {[], nil, {1, 0}} = Buffer.task_review_entries(reopened, "independent")
     assert {:ok, unselected, @task, 1} = Buffer.prepare_review(reopened, {:step, @second})
     assert {:ok, [_]} = Buffer.decide_review(reopened, unselected, :reject)
+    assert {[], nil, {1, 1}} = Buffer.task_review_entries(reopened, "task")
     assert Buffer.content(reopened) == "BefoRe\nother\n"
   end
 

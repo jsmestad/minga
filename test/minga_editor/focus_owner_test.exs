@@ -35,7 +35,8 @@ defmodule MingaEditor.FocusOwnerTest do
     agent: :agent,
     subagent_peek: :agent,
     queue: :queue,
-    git_status: :git_status
+    git_status: :git_status,
+    task_review: :editor
   }
 
   # Every current modal has a producing workflow below. A future tag with no
@@ -58,7 +59,8 @@ defmodule MingaEditor.FocusOwnerTest do
     Input.Queue => :queue,
     Input.ModeFSM => :editor,
     Input.CUA.Dispatch => :editor,
-    Input.GitStatus => :git_status
+    Input.GitStatus => :git_status,
+    Input.TaskReview => :editor
   }
 
   @tag :tmp_dir

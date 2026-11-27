@@ -39,15 +39,18 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
   end
   """
   @review_prompt "Reject 3 changes from task plan-limit? Your edits stay."
+  @review_task [id: "plan-limit", title: "Clarify the plan limit message"]
+  @keep_prompt "Keep all 3 pending changes?"
 
-  @spec conversation(:working | :stopped) :: keyword()
-  defp conversation(turn) do
+  @spec conversation(:working | :stopped, (String.t() -> list()) | nil) :: keyword()
+  defp conversation(turn, edits \\ nil) do
     [
       messages: conversation_messages(turn),
       notices: [{@long_notice, :info}],
       prompt: "Also show the reset time in the modeline.",
       turn: turn,
-      queue: ["Then run the session tests and fix what fails."]
+      queue: ["Then run the session tests and fix what fails."],
+      review_edits: edits
     ]
   end
 
@@ -252,7 +255,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
         ],
         # Minga waits on you in the session, so the modeline carries Minga's state and the Tasks row its live
         # needs-you count while which-key is open.
-        start: [minga: :needs_you, content: @review_content, review_edits: review_edits()],
+        start: Keyword.put(review_start(), :minga, :needs_you),
         recognize: &Edit.which_key?(&1, "SPC a"),
         explore: :which_key,
         checks: [
@@ -364,7 +367,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
         ]
       ),
       Entry.built("minga.task.new",
-        start: [tasks: @settled_tasks],
+        start: [tasks: @settled_tasks, agent_provider_module: Minga.Test.SessionSlowMockProvider],
         reach: "1 SPC a a c f i x",
         recognize: &new_task_prompt?/1,
         checks: [
@@ -402,11 +405,77 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
         4045,
         "the background notification when Minga needs you"
       ),
-      Entry.pending("minga.review.buffer", 4051, "the *minga-review* buffer"),
-      Entry.pending("minga.review.keep_all.confirm", 4051, "keep all changes, y/n"),
-      Entry.pending("minga.review.all_decided", 4051, "review after the last change is decided"),
-      Entry.pending("minga.review.empty", 4051, "nothing to review"),
-      Entry.pending("minga.review.diff_inline", 4051, "the inline diff of Minga's change"),
+      Entry.built("minga.review.buffer",
+        start: review_start(),
+        reach: "SPC a r",
+        recognize: fn model ->
+          model.minibuffer_prompt == nil and review_text_has?(model, "  › Change at") and
+            not review_text_has?(model, "      @@ ")
+        end,
+        checks: [Check.new("the review has file changes and decisions", &check_task_review/1)]
+      ),
+      Entry.built("minga.review.keep_all.confirm",
+        start: review_start(true),
+        reach: "Y",
+        recognize: fn model ->
+          is_binary(model.minibuffer_prompt) and
+            Regex.match?(~r/^Keep all \d+ pending changes\?$/, model.minibuffer_prompt) and
+            review_text_has?(model, "Unreviewed")
+        end,
+        checks: [
+          Check.new("Keep all can be confirmed or canceled", fn model ->
+            assert model.minibuffer_prompt == @keep_prompt
+            assert Enum.map(model.ui.minibuffer.candidates, & &1.id) == ["Yes", "No"]
+            model
+          end)
+        ]
+      ),
+      Entry.built("minga.review.all_decided",
+        start: [
+          content: @review_content,
+          conversation: [
+            open?: true,
+            prompt: @review_task[:title],
+            turn: :completed,
+            review_edits: &review_edits/1
+          ]
+        ],
+        reach: "esc esc SPC a r n Y y",
+        recognize: &review_text_has?(&1, "\nPasst.\n"),
+        checks: [
+          Check.new("the completed task shows both decisions and says Passt. once", fn model ->
+            assert String.starts_with?(
+                     model.review_text,
+                     @review_task[:title] <> "\nDone · 1 file\n"
+                   )
+
+            assert length(:binary.matches(model.review_text, "\nPasst.\n")) == 1
+            assert review_text_has?(model, "\nKept\n  lib/storyboard.ex · 2 changes\n")
+            assert review_text_has?(model, "\nRejected\n  lib/storyboard.ex · 1 change\n")
+            model
+          end)
+        ]
+      ),
+      Entry.built("minga.review.empty",
+        start: [content: @review_content, review_task: @review_task],
+        reach: "SPC a r",
+        recognize: fn model ->
+          match?(%{surface: :editor}, model.focus) and
+            review_text_has?(model, "No changes to review.")
+        end
+      ),
+      Entry.built("minga.review.diff_inline",
+        start: review_start(true),
+        reach: "=",
+        recognize: &review_text_has?(&1, "      @@ "),
+        checks: [
+          Check.new("the inline diff includes original and changed text", fn model ->
+            assert review_text_has?(model, "      - ")
+            assert review_text_has?(model, "      + ")
+            model
+          end)
+        ]
+      ),
       Entry.built("minga.review.in_file",
         start: [
           content: @review_content,
@@ -447,7 +516,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
         ]
       ),
       Entry.built("minga.conversation",
-        start: [conversation: conversation(:working)],
+        start: [content: @review_content, conversation: conversation(:working, &review_edits/1)],
         reach: "SPC a v",
         recognize: &conversation?(&1, :working),
         checks:
@@ -459,7 +528,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
           ])
       ),
       Entry.built("minga.conversation.stopped",
-        start: [conversation: conversation(:stopped)],
+        start: [content: @review_content, conversation: conversation(:stopped, &review_edits/1)],
         reach: "SPC a v",
         recognize: &conversation?(&1, :stopped),
         checks:
@@ -523,15 +592,38 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
 
   defp child_selected?(%Model{}), do: false
 
-  @spec review_edits() :: [
+  @spec review_start(boolean()) :: keyword()
+  defp review_start(open? \\ false) do
+    [
+      content: @review_content,
+      review_edits: review_edits(),
+      review_task: [open?: open?] ++ @review_task
+    ]
+  end
+
+  @spec review_text_has?(Model.t(), String.t()) :: boolean()
+  defp review_text_has?(%Model{review_text: text}, expected) when is_binary(text),
+    do: String.contains?(text, expected)
+
+  defp review_text_has?(%Model{}, _expected), do: false
+
+  @spec check_task_review(Model.t()) :: Model.t()
+  defp check_task_review(model) do
+    assert review_text_has?(model, "Clarify the plan limit message")
+    assert review_text_has?(model, "\nUnreviewed\n")
+    assert review_text_has?(model, "\nKept\n")
+    model |> assert_focus(:editor) |> assert_mode(:normal)
+  end
+
+  @spec review_edits(String.t()) :: [
           {Minga.Buffer.Document.position(), non_neg_integer(), binary(), EditSource.t()}
         ]
-  defp review_edits do
+  defp review_edits(task \\ @review_task[:id]) do
     [
       {{1, 17}, byte_size("\"Rate limited\""), "\"Your plan limit applies\"",
-       EditSource.minga("plan-limit", "label")},
-      {{2, 18}, 2, "45", EditSource.minga("plan-limit", "window")},
-      {{3, 18}, 5, "true", EditSource.minga("plan-limit", "retry")}
+       EditSource.minga(task, "label")},
+      {{2, 18}, 2, "45", EditSource.minga(task, "window")},
+      {{3, 18}, 5, "true", EditSource.minga(task, "retry")}
     ]
   end
 
@@ -564,11 +656,11 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
     end
   end
 
-  @doc "True when the tasks drawer lists several tasks, none needs you, and the selected one is not working."
+  @doc "True when the drawer lists at least one task, none needs you, and the selected one is not working."
   @spec tasks_list?(Model.t()) :: boolean()
   def tasks_list?(
         %Model{
-          ui: %{tasks_drawer: %{visible?: true, view: :list, rows: [_, _ | _] = rows} = drawer}
+          ui: %{tasks_drawer: %{visible?: true, view: :list, rows: [_ | _] = rows} = drawer}
         } =
           model
       ) do

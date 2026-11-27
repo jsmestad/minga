@@ -1,0 +1,28 @@
+# Screen: 80x23
+# Cursor: (10, 6) block
+# Mode: normal
+────────────────────────────────────────────────────────────────────────────────
+00│[storyboard.ex]
+01│    7 Clarify the plan limit message        3 defmodule UsageLimit do
+02│    6 Starting · 1 file                     2   def label, do: "Your plan limit
+03│    5 y Keep  n Reject  = Diff  Y Keep      1   def window, do: 45
+04│    5 all                                   4   def retry?, do: true
+05│    4 ]h Next  [h Previous  ↩ Go to  q      1 end
+06│    4 Close                                 2
+07│    3                                         ~
+08│    2 Unreviewed                              ~
+09│    1   lib/storyboard.ex                     ~
+10│    8   › Change at 2:19                      ~
+11│    1       @@ 2                              ~
+12│    2       -   def label, do: "Rate          ~
+13│    2       limited"                          ~
+14│    3       +   def label, do: "Your          ~
+15│    3       plan limit applies"               ~
+16│    4     Change at 3:19                      ~
+17│    5     Change at 4:19                      ~
+18│    6                                         ~
+19│    7 Kept                                    ~
+20│    8                                         ~
+21│NORMAL *minga-review* [RO] 8:1/16
+22│
+────────────────────────────────────────────────────────────────────────────────

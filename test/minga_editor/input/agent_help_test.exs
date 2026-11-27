@@ -58,7 +58,13 @@ defmodule MingaEditor.Input.AgentHelpTest do
 
   test "named Help controls work over Review without replacing its source, position or draft" do
     {state, prompt} = help_state(:insert)
-    preview = Preview.set_diff(Preview.new(), DiffReview.new("selected.ex", "before", "after"))
+
+    review =
+      DiffReview.from_fork_snapshot("selected.ex", {self(), 2, 1}, [
+        {:conflict, ["agent"], ["human"], []}
+      ])
+
+    preview = Preview.set_diff(Preview.new(), review)
 
     ui =
       state.workspace.agent_ui

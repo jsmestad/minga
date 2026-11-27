@@ -116,7 +116,7 @@ defmodule MingaEditor.Commands.EditTimeline do
     end
   end
 
-  @doc "Reviews the explicitly resolved cumulative file through the generation-owned worker."
+  @doc "Opens the resolved file comparison or its outstanding fork conflicts."
   @spec review_file(EditorState.t(), String.t()) :: EditorState.t()
   def review_file(state, path) when is_binary(path), do: AgentReview.schedule(state, path)
 

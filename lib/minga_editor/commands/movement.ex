@@ -23,6 +23,7 @@ defmodule MingaEditor.Commands.Movement do
   alias MingaEditor.Commands.Helpers
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
+  alias MingaEditor.Shell.Traditional.TaskReviewWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Windows
@@ -797,8 +798,15 @@ defmodule MingaEditor.Commands.Movement do
       %Window{id: parent, content: {:agent_chat, :semantic}} ->
         state |> SubagentPeekWorkflow.close_for_parent(parent) |> remove_active_window()
 
-      _other ->
-        remove_active_window(state)
+      %Window{id: parent} ->
+        if TaskReviewWorkflow.focused(state) do
+          TaskReviewWorkflow.close(state)
+        else
+          state |> TaskReviewWorkflow.close_for_parent(parent) |> remove_active_window()
+        end
+
+      nil ->
+        state
     end
   end
 

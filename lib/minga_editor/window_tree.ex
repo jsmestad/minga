@@ -48,34 +48,37 @@ defmodule MingaEditor.WindowTree do
   @doc """
   Splits the leaf containing `window_id` in the given direction.
 
-  The existing window stays in the first position (left/top) and
-  the new window takes the second position (right/bottom).
+  The new window follows the existing window by default. With `:before`, it takes the left/top child of this split, without reordering other panes.
 
   Returns `{:ok, new_tree}` or `:error` if `window_id` is not found.
   """
-  @spec split(t(), Window.id(), direction(), Window.id()) :: {:ok, t()} | :error
-  def split(tree, target_id, direction, new_id)
-      when direction in [:vertical, :horizontal] and
+  @spec split(t(), Window.id(), direction(), Window.id(), :before | :after) :: {:ok, t()} | :error
+  def split(tree, target_id, direction, new_id, order \\ :after)
+      when direction in [:vertical, :horizontal] and order in [:before, :after] and
              is_integer(target_id) and is_integer(new_id) do
-    case do_split(tree, target_id, direction, new_id) do
+    case do_split(tree, target_id, direction, new_id, order) do
       {:ok, _} = result -> result
       :not_found -> :error
     end
   end
 
-  defp do_split({:leaf, id}, id, direction, new_id) do
+  defp do_split({:leaf, id}, id, direction, new_id, :before) do
+    {:ok, {:split, direction, {:leaf, new_id}, {:leaf, id}, 0}}
+  end
+
+  defp do_split({:leaf, id}, id, direction, new_id, :after) do
     {:ok, {:split, direction, {:leaf, id}, {:leaf, new_id}, 0}}
   end
 
-  defp do_split({:leaf, _other}, _target, _dir, _new_id), do: :not_found
+  defp do_split({:leaf, _other}, _target, _dir, _new_id, _order), do: :not_found
 
-  defp do_split({:split, dir, left, right, ratio}, target, split_dir, new_id) do
-    case do_split(left, target, split_dir, new_id) do
+  defp do_split({:split, dir, left, right, ratio}, target, split_dir, new_id, order) do
+    case do_split(left, target, split_dir, new_id, order) do
       {:ok, new_left} ->
         {:ok, {:split, dir, new_left, right, ratio}}
 
       :not_found ->
-        case do_split(right, target, split_dir, new_id) do
+        case do_split(right, target, split_dir, new_id, order) do
           {:ok, new_right} -> {:ok, {:split, dir, left, new_right, ratio}}
           :not_found -> :not_found
         end

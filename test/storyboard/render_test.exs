@@ -84,6 +84,15 @@ defmodule Minga.Storyboard.RenderTest do
       :ok = Render.export_journeys!(dir)
       manifest = dir |> Path.join("manifest.json") |> File.read!() |> JSON.decode!()
       assert length(manifest["scenarios"]) == length(@designed)
+
+      review = Enum.find(manifest["journeys"], &(&1["name"] == "review and keep a change"))
+      confirm = Enum.find(review["frames"], &(&1["scenario"] == "minga.review.keep_all.confirm"))
+
+      frame =
+        Path.join([dir, "transcripts", confirm["name"], "macos-catppuccin_frappe-1440.json"])
+
+      # The journey starts with three units and keeps one. Y then opens a prompt, reducing native row fit.
+      assert %{"grid_rows" => 39} = frame |> File.read!() |> JSON.decode!()
     end
   end
 end

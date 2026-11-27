@@ -139,6 +139,8 @@ defmodule Minga.Test.KeyGrammar do
     {:queue, :cua} => :special_cua,
     {:subagent_peek, :normal} => :special,
     {:subagent_peek, :cua} => :special_cua,
+    {:task_review, :normal} => :special,
+    {:task_review, :cua} => :special_cua,
     {:tasks, :normal} => :special,
     {:tasks, :cua} => :special_cua
   }

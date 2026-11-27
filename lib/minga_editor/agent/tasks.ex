@@ -69,10 +69,23 @@ defmodule MingaEditor.Agent.Tasks do
   @spec observe(t(), pid(), term(), integer()) :: t()
   def observe(%__MODULE__{entries: entries} = tasks, pid, event, now) when is_pid(pid) do
     case Map.fetch(entries, pid) do
-      {:ok, entry} -> put(tasks, Entry.observe(entry, event, now))
+      {:ok, entry} -> observe_bound(tasks, entry, Entry.observe(entry, event, now))
       :error -> observe_unfollowed(tasks, pid, event, now)
     end
   end
+
+  @spec observe_bound(t(), Entry.t(), Entry.t()) :: t()
+  defp observe_bound(
+         %__MODULE__{next_seq: seq} = tasks,
+         %Entry{task_id: previous},
+         %Entry{task_id: current} = entry
+       )
+       when is_binary(previous) and previous != current do
+    # A new conversation in the same session must not accept activation of the old row.
+    put(%{tasks | next_seq: seq + 1}, Entry.renew_row_identity(entry, seq))
+  end
+
+  defp observe_bound(tasks, _previous, entry), do: put(tasks, entry)
 
   @spec observe_unfollowed(t(), pid(), term(), integer()) :: t()
   defp observe_unfollowed(tasks, pid, {kind, _detail} = event, now)

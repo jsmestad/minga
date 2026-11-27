@@ -16,6 +16,7 @@ defmodule MingaEditor.State.BufferLifecycle do
           buffer_monitors: %{pid() => reference()},
           buffer_crashes: %{pid() => BufferCrashedEvent.t()},
           crash_recovered: MapSet.t(pid()),
+          review_sources: MapSet.t(pid()),
           buffer_add_context: MingaEditor.Shell.buffer_add_context()
         }
 
@@ -27,6 +28,7 @@ defmodule MingaEditor.State.BufferLifecycle do
   defstruct buffer_monitors: %{},
             buffer_crashes: %{},
             crash_recovered: MapSet.new(),
+            review_sources: MapSet.new(),
             buffer_add_context: :open
 
   @doc "Returns whether a monitor is already recorded for a buffer."
@@ -48,9 +50,15 @@ defmodule MingaEditor.State.BufferLifecycle do
       lifecycle
       | buffer_monitors: Map.delete(lifecycle.buffer_monitors, pid),
         buffer_crashes: Map.delete(lifecycle.buffer_crashes, pid),
-        crash_recovered: MapSet.delete(lifecycle.crash_recovered, pid)
+        crash_recovered: MapSet.delete(lifecycle.crash_recovered, pid),
+        review_sources: MapSet.delete(lifecycle.review_sources, pid)
     }
   end
+
+  @doc "Keeps a review-loaded file in Save All and quit inventory independently of its tab."
+  @spec retain_review_source(t(), pid()) :: t()
+  def retain_review_source(%__MODULE__{} = lifecycle, buffer) when is_pid(buffer),
+    do: %{lifecycle | review_sources: MapSet.put(lifecycle.review_sources, buffer)}
 
   @doc "Remembers that crash recovery reopened this buffer, so a crash of it is not recovered automatically again."
   @spec mark_crash_recovered(t(), pid()) :: t()

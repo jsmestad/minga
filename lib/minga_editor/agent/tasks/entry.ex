@@ -92,6 +92,10 @@ defmodule MingaEditor.Agent.Tasks.Entry do
   def new(pid, seq, now) when is_pid(pid) and is_integer(seq) and is_integer(now),
     do: %__MODULE__{pid: pid, seq: seq, started_at: now, changed_at: now}
 
+  @doc "Installs a fresh drawer row identity after the session leaves its previous conversation."
+  @spec renew_row_identity(t(), non_neg_integer()) :: t()
+  def renew_row_identity(%__MODULE__{} = entry, seq), do: %{entry | seq: seq}
+
   @doc "Names the task by its goal. A task keeps the first goal it is given; renaming goes through `rename/2`."
   @spec name(t(), String.t()) :: t()
   def name(%__MODULE__{title: nil} = entry, title) when is_binary(title) do

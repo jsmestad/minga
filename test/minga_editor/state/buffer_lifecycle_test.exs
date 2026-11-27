@@ -363,6 +363,21 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       assert BufferRegistry.buffer_tracked?(state, inactive)
       refute BufferRegistry.buffer_tracked?(state, unrelated)
     end
+
+    test "a review source remains in the save and quit inventory after its tab closes" do
+      active = start_buffer("active")
+      inactive = start_buffer("inactive")
+      reviewed = start_buffer("reviewed")
+      {state, origin} = state_with_inactive_tab_buffer(state_for_buffer(active), inactive)
+
+      state = BufferRegistry.retain_review_file(state, origin.id, reviewed)
+      {:ok, tabs} = TabBar.remove(state.shell_runtime.state.tab_bar, origin.id)
+      state = install_tab_bar(state, tabs)
+
+      assert BufferRegistry.buffer_inventory(state) == [active, reviewed]
+      retired = EditorState.remove_buffer(state, reviewed)
+      assert BufferRegistry.buffer_inventory(retired) == [active]
+    end
   end
 
   describe "remove_buffer/2" do

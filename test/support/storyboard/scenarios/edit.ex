@@ -95,6 +95,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
           minga: {:thinking, :in_file},
           tasks: [{"Add tests for the usage-limit classifier", :needs_you}],
           content: @working_content,
+          review_task: [id: "limits", title: "Update the usage limit"],
           review_edits: [
             {{2, 4}, 10, "count >= 0 and\n      count < 90", EditSource.minga("limits", "guard")},
             {{1, 6}, 8, "within_limit?", :user}
@@ -150,8 +151,9 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
   @doc "True for the resting home view: Normal mode, nothing transient, nothing pending, the editor focused, and no notice naming next steps."
   @spec home?(Model.t()) :: boolean()
   def home?(%Model{} = model) do
-    model.mode == :normal and not Model.transient_open?(model) and not Model.key_pending?(model) and
-      match?(%{surface: :editor}, model.focus) and not Model.notice_with_next_steps?(model)
+    model.review_text == nil and model.mode == :normal and not Model.transient_open?(model) and
+      not Model.key_pending?(model) and match?(%{surface: :editor}, model.focus) and
+      not Model.notice_with_next_steps?(model)
   end
 
   @doc "True when which-key is open on exactly `prefix`."

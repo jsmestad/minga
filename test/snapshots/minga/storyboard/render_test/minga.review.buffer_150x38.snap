@@ -1,0 +1,42 @@
+# Screen: 150x37
+# Cursor: (8, 6) block
+# Mode: normal
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+00│[storyboard.ex]
+01│    7 Clarify the plan limit message                                           3 defmodule UsageLimit do
+02│    6 Starting · 1 file                                                        2   def label, do: "Your plan limit applies"
+03│    5 y Keep  n Reject  = Diff  Y Keep all                                     1   def window, do: 45
+04│    4 ]h Next  [h Previous  ↩ Go to  q Close                                   4   def retry?, do: true
+05│    3                                                                          1 end
+06│    2 Unreviewed                                                               2
+07│    1   lib/storyboard.ex                                                        ~
+08│    8   › Change at 2:19                                                         ~
+09│    1     Change at 3:19                                                         ~
+10│    2     Change at 4:19                                                         ~
+11│    3                                                                            ~
+12│    4 Kept                                                                       ~
+13│    5                                                                            ~
+14│      ~                                                                          ~
+15│      ~                                                                          ~
+16│      ~                                                                          ~
+17│      ~                                                                          ~
+18│      ~                                                                          ~
+19│      ~                                                                          ~
+20│      ~                                                                          ~
+21│      ~                                                                          ~
+22│      ~                                                                          ~
+23│      ~                                                                          ~
+24│      ~                                                                          ~
+25│      ~                                                                          ~
+26│      ~                                                                          ~
+27│      ~                                                                          ~
+28│      ~                                                                          ~
+29│      ~                                                                          ~
+30│      ~                                                                          ~
+31│      ~                                                                          ~
+32│      ~                                                                          ~
+33│      ~                                                                          ~
+34│      ~                                                                          ~
+35│NORMAL *minga-review* [RO] 8:1/13
+36│
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

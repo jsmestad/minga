@@ -72,6 +72,13 @@ defmodule Minga.Mode.NormalBracketNavTest do
 
   # ── Prefix state resets on dispatch ───────────────────────────────────────
 
+  test "]q and [q visit the shared Quickfix list" do
+    for {direction, command} <- [next: :quickfix_next, previous: :quickfix_previous] do
+      assert {:execute, ^command, _, :discard_count} =
+               Normal.handle_key({?q, 0}, press_bracket(direction))
+    end
+  end
+
   describe "prefix state resets on dispatch" do
     test "prefix_node is cleared after successful dispatch" do
       state = press_bracket(:next)
@@ -83,7 +90,7 @@ defmodule Minga.Mode.NormalBracketNavTest do
     test "unknown second key cancels prefix" do
       state = press_bracket(:next)
 
-      {:continue, new_state} = Normal.handle_key({?q, 0}, state)
+      {:continue, new_state} = Normal.handle_key({?~, 0}, state)
       assert new_state.prefix_node == nil
     end
   end

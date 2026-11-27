@@ -1,7 +1,6 @@
 defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Git
   alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.FileChange
@@ -405,7 +404,7 @@ defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
   end
 
   describe "resolve_diff_review/2" do
-    test "reject current reprojects timeline and returns write target" do
+    test "a cumulative comparison has no decision authority" do
       review = DiffReview.new("lib/a.ex", "a", "x\na")
 
       view = %{
@@ -414,13 +413,7 @@ defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
           edit_timeline: EditTimeline.reproject(EditTimeline.new(), "lib/a.ex", ["a"], ["x", "a"])
       }
 
-      assert {:ok, view, {:write_file, "lib/a.ex", "a"}} =
-               View.resolve_diff_review(view, :reject_current)
-
-      assert EditTimeline.cumulative_hunks(view.edit_timeline, "lib/a.ex") ==
-               Git.diff_lines(["a"], ["a"])
-
-      refute Preview.diff_review(view.preview)
+      assert :no_hunk = View.resolve_diff_review(view, :reject_current)
     end
   end
 

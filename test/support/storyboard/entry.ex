@@ -53,6 +53,14 @@ defmodule Minga.Test.Storyboard.Entry do
     struct!(__MODULE__, [id: id, status: :built] ++ opts)
   end
 
+  @doc "Applies the start options specific to a journey, leaving the scenario's other options in place."
+  @spec with_start_options(t(), keyword()) :: t()
+  def with_start_options(%__MODULE__{} = entry, []), do: entry
+
+  def with_start_options(%__MODULE__{start: defaults} = entry, options) do
+    %{entry | start: Keyword.merge(defaults, options)}
+  end
+
   @doc "True when the entry can be driven to today."
   @spec built?(t()) :: boolean()
   def built?(%__MODULE__{status: :built}), do: true

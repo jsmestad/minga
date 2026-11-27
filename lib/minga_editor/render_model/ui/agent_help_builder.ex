@@ -19,15 +19,11 @@ defmodule MingaEditor.RenderModel.UI.AgentHelpBuilder do
   @spec groups(View.t(), MingaEditor.RenderPipeline.FrameIntent.t()) ::
           [Minga.Keymap.Scope.help_group()]
   defp groups(view, frame) do
-    case View.agent_body(view) do
-      :review ->
-        keys =
-          Agent.diff_review_key_set(frame.editing_model, Capabilities.gui?(frame.capabilities))
-
-        [Agent.diff_review_help_group(keys) | Agent.help_groups(View.focus(view))]
-
-      :chat ->
-        Agent.help_groups(View.focus(view))
+    if View.decision_review?(view) do
+      keys = Agent.diff_review_key_set(frame.editing_model, Capabilities.gui?(frame.capabilities))
+      [Agent.diff_review_help_group(keys) | Agent.help_groups(View.focus(view))]
+    else
+      Agent.help_groups(View.focus(view))
     end
   end
 end

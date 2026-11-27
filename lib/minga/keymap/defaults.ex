@@ -151,7 +151,7 @@ defmodule Minga.Keymap.Defaults do
     {~k(a y), :keep_minga_change, "Keep Minga change"},
     {~k(a v), :toggle_agent_split, "Conversation split"},
     {~k(a ?), :inline_ask, "Ask about this"},
-    {~k(a r), :workspace_pending_reviews, "Pending reviews"},
+    {~k(a r), :task_review, "Review task changes"},
     {~k(a e), :inline_edit, "Rewrite selection"},
     {~k(a W), :code_why, "Why this line"},
     {~k(a A), :code_autobiography, "Code autobiography"},

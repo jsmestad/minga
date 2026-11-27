@@ -101,6 +101,7 @@ defmodule MingaEditor.Commands do
     :force_save,
     :new_buffer,
     :quit,
+    :quickfix_do,
     :quit_all,
     :reload_highlights,
     :save,
@@ -108,6 +109,7 @@ defmodule MingaEditor.Commands do
     :save_quit_all,
     :split_horizontal,
     :split_vertical,
+    :task_review,
     :terminal,
     :view_warnings,
     :window_close

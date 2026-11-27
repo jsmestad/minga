@@ -21,6 +21,7 @@ defmodule MingaEditor.TabWorkflow do
   alias MingaEditor.Shell.Traditional.InFileReview
   alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
+  alias MingaEditor.Shell.Traditional.TaskReviewWorkflow
   alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
   alias MingaEditor.Shell.Workflow, as: ShellWorkflow
   alias MingaEditor.State, as: EditorState
@@ -82,6 +83,7 @@ defmodule MingaEditor.TabWorkflow do
         candidate
         |> WorkspaceWorkflow.persist_changes(transitioned)
         |> InFileReview.resume_ready()
+        |> TaskReviewWorkflow.resume()
     end
   end
 
@@ -171,6 +173,7 @@ defmodule MingaEditor.TabWorkflow do
     |> arrive()
     |> MingaEditor.Agent.SubagentPeekWorkflow.resume_in_workspace()
     |> HighlightSync.ensure_active_buffer_presentation(old_buffer)
+    |> TaskReviewWorkflow.resume()
   end
 
   @spec restore_active_agent(EditorState.t(), Tab.t() | nil) :: EditorState.t()

@@ -96,6 +96,11 @@ defmodule Minga.Buffer.Process do
   @typedoc "Why an undo, redo or `SPC a u` changed nothing: a patch failed, or the history reset after an internal error."
   @type history_error :: UndoPatch.apply_error() | :history_reset
   @opaque review_target :: {pid(), UndoHistory.review_target()}
+  @type task_review_entry ::
+          {UndoHistory.review_location(), review_target(),
+           [{Document.position(), Document.position()}]}
+  @type task_review_offer ::
+          {[task_review_entry()], review_target() | nil, {non_neg_integer(), non_neg_integer()}}
   @type review_object_action :: :select | :range | :yank | :delete | :change
   @type review_object_kind :: :charwise | :linewise
   @type review_object_result ::
@@ -1328,6 +1333,16 @@ defmodule Minga.Buffer.Process do
   def decide_review(server, target, reject) when reject in [:reject, :reject_preserving_cursor],
     do: GenServer.call(server, {:decide_review, target, reject})
 
+  @doc "Compares the exact offered unit's before and after text without mutating the buffer."
+  @spec preview_review(GenServer.server(), review_target()) ::
+          {:ok, String.t(), String.t()} | UndoHistory.blocked() | {:error, review_error()}
+  def preview_review(server, target), do: GenServer.call(server, {:preview_review, target})
+
+  @doc "Moves to the current position of the same pending task unit, not its old coordinates."
+  @spec move_to_review_unit(GenServer.server(), UndoHistory.review_location()) ::
+          {:ok, Document.position()} | :unavailable
+  def move_to_review_unit(server, unit), do: GenServer.call(server, {:move_to_review_unit, unit})
+
   @doc "Requests Keep without blocking the caller on a Git read or checkpoint."
   @spec request_keep(GenServer.server(), review_target()) :: :gen_server.request_id()
   def request_keep(server, target),
@@ -1378,6 +1393,12 @@ defmodule Minga.Buffer.Process do
         ]
   def minga_changes(server, task_id) when is_binary(task_id) do
     GenServer.call(server, {:minga_changes, task_id})
+  end
+
+  @doc "Reads individual and aggregate review offers with positions from one buffer observation."
+  @spec task_review_entries(GenServer.server(), Author.id()) :: task_review_offer()
+  def task_review_entries(server, task_id) when is_binary(task_id) do
+    GenServer.call(server, {:task_review_entries, task_id})
   end
 
   @doc "Returns the edit source of the most recent undo entry, or `nil` if the undo stack is empty."
@@ -1949,6 +1970,18 @@ defmodule Minga.Buffer.Process do
   def handle_call({:move_to, pos}, _from, state) do
     new_buf = Cursor.place(state.document, pos)
     {:reply, :ok, %{state | document: new_buf}}
+  end
+
+  def handle_call({:move_to_review_unit, unit}, _from, state) do
+    case UndoHistory.locate_review_unit(state.undo_history, unit) do
+      {:ok, offset} ->
+        position = Position.from_point(state.document, offset)
+        document = Cursor.place(state.document, position)
+        {:reply, {:ok, position}, %{state | document: document}}
+
+      :unavailable ->
+        {:reply, :unavailable, state}
+    end
   end
 
   def handle_call({:move_to_review_change, direction, count}, _from, state),
@@ -2900,6 +2933,19 @@ defmodule Minga.Buffer.Process do
     reply_prepared_review(state, UndoHistory.prepare_review(state.undo_history, selection))
   end
 
+  def handle_call({:preview_review, {owner, target}}, _from, state) when owner == self() do
+    result =
+      case UndoHistory.preview_review(state.undo_history, target, state.document) do
+        {:ok, before} -> {:ok, Document.content(before), Document.content(state.document)}
+        refusal -> refusal
+      end
+
+    {:reply, result, state}
+  end
+
+  def handle_call({:preview_review, _target}, _from, state),
+    do: {:reply, {:error, :stale_review}, state}
+
   def handle_call({:decide_review, {owner, target}, :keep}, from, state) when owner == self(),
     do: admit_keep(state, target, from)
 
@@ -2957,6 +3003,24 @@ defmodule Minga.Buffer.Process do
       end
 
     {:reply, changes, state}
+  end
+
+  def handle_call({:task_review_entries, task_id}, _from, state) do
+    decisions = UndoHistory.task_review_decisions(state.undo_history, task_id)
+    {entries, all} = UndoHistory.task_review_entries(state.undo_history, task_id)
+
+    entries =
+      for {unit, target, ranges} <- entries do
+        positions =
+          for {first, last} <- ranges do
+            {Position.from_point(state.document, first),
+             Position.from_point(state.document, last)}
+          end
+
+        {unit, {self(), target}, positions}
+      end
+
+    {:reply, {entries, if(all, do: {self(), all}), decisions}, state}
   end
 
   def handle_call(:break_undo_coalescing, _from, state) do
@@ -5169,6 +5233,7 @@ defmodule Minga.Buffer.Process do
       {:ok, next} ->
         # The review checkpoint is durable, but a review decision must not save the project file.
         next = cancel_auto_save_timer(next)
+        publish_review_changed(next)
 
         {:reply, reply, clear_edits(next, EditSource.from_undo_source(restore.source))}
 

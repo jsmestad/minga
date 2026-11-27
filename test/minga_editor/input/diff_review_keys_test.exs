@@ -104,6 +104,16 @@ defmodule MingaEditor.Input.DiffReviewKeysTest do
     end
   end
 
+  test "ordinary comparisons do not claim the legacy decision keys" do
+    for {model, keys} <- [{:vim, [{?x, 0}, {?X, 0}]}, {:cua, [{13, @cmd}, {127, @cmd}]}] do
+      comparison = DiffReview.new("note.txt", "before", "after")
+      state = show_review(base_state(model), comparison)
+
+      refute UIState.diff_review_focused?(state.workspace.agent_ui)
+      assert review(Enum.reduce(keys, state, &press(&2, &1))) == comparison
+    end
+  end
+
   # ── Helpers ────────────────────────────────────────────────────────────────
 
   defp press(state, {cp, mods}), do: Router.dispatch(state, cp, mods)
@@ -127,16 +137,18 @@ defmodule MingaEditor.Input.DiffReviewKeysTest do
         {:conflict, ["Agent B"], ["Human B"], []}
       ])
 
-    state = base_state(editing_model)
+    state = show_review(base_state(editing_model), review)
+    assert UIState.diff_review_focused?(state.workspace.agent_ui)
+    state
+  end
 
+  defp show_review(state, review) do
     ui =
       state.workspace.agent_ui
       |> UIState.replace_preview(Preview.set_diff(Preview.new(), review))
       |> UIState.set_focus(:file_viewer)
 
-    state = Workflow.install_agent_ui(state, ui)
-    assert UIState.diff_review_focused?(state.workspace.agent_ui)
-    state
+    Workflow.install_agent_ui(state, ui)
   end
 
   defp base_state(editing_model) do

@@ -733,6 +733,14 @@ defmodule MingaEditor.Commands.BufferManagement do
     execute_minga_review(state, buf, range, decision)
   end
 
+  def execute(state, {:execute_ex_command, {:task_review, []}}) do
+    MingaEditor.Shell.Traditional.TaskReviewWorkflow.open_quickfix(state)
+  end
+
+  def execute(state, {:execute_ex_command, {:quickfix_do, command}}) do
+    MingaEditor.QuickfixWorkflow.each(state, command)
+  end
+
   def execute(
         %{workspace: %{buffers: %{active: buf}}} = state,
         {:execute_ex_command, {:read, filename}}
@@ -1396,6 +1404,15 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec kill_active_tab(state(), kill_intent()) :: state()
   defp kill_active_tab(state, intent) do
+    if MingaEditor.Shell.Traditional.TaskReviewWorkflow.focused(state) do
+      MingaEditor.Shell.Traditional.TaskReviewWorkflow.close(state)
+    else
+      kill_active_listed_tab(state, intent)
+    end
+  end
+
+  @spec kill_active_listed_tab(state(), kill_intent()) :: state()
+  defp kill_active_listed_tab(state, intent) do
     {state, kind} = Workflow.resolve_active_tab_kind(state)
 
     case {kind, intent} do
