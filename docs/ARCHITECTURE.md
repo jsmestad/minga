@@ -351,6 +351,8 @@ The nested supervisors constrain blast radius. Losing your LSP connection doesn'
 
 The system degrades in pieces rather than failing all at once. The BEAM was designed for telecom systems that run for years without downtime. The same supervision engineering applies here.
 
+`Minga.LSP.Client` owns the protocol shutdown: it sends `shutdown`, waits for the reply, sends `exit`, and waits for the server, within one deadline. A native process guard owns cleanup when the Port closes, including when Minga is killed before its supervision tree can run. It leaves the LSP streams connected directly to the server. On Linux it adopts and reaps descendants that left the server's process group. On macOS it tracks descendants as they start, so it can still signal an observed child after its parent has exited. This includes the separate sessions that Expert starts.
+
 ---
 
 ## Why Native Frontends?

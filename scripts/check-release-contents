@@ -180,6 +180,8 @@ def check(release, target, app=None, *, rolling_version=None, source_tree=None):
     # Packages built from past source commits predate the overlay clone helper.
     if (source_tree / "zig/src/clone_tree_main.zig").is_file():
         helpers.append("minga-clone-tree")
+    if (source_tree / "zig/src/lsp_guard.c").is_file():
+        helpers.append("minga-lsp-guard")
     for name in helpers:
         path = priv / name
         require_file(path, executable=True)

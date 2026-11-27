@@ -26,7 +26,7 @@ defmodule Minga.LSP.Client.State do
   ]
 
   @typedoc "Client lifecycle status."
-  @type status :: :starting | :initializing | :ready | :shutdown
+  @type status :: :starting | :initializing | :ready
 
   @typedoc "Caller for a pending request: a GenServer reply target, an async caller, or nil."
   @type pending_from :: RequestRegistry.pending_from()

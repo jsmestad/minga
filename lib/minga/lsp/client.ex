@@ -25,7 +25,7 @@ defmodule Minga.LSP.Client do
   framework.
   """
 
-  use GenServer
+  use GenServer, restart: :transient
 
   alias Minga.Config
   alias Minga.Diagnostics
@@ -40,6 +40,7 @@ defmodule Minga.LSP.Client do
   alias Minga.Log
 
   @request_timeout 30_000
+  @shutdown_timeout 2_000
   @canceled_request_tombstone_ttl 30_000
 
   # ── Client API ─────────────────────────────────────────────────────────────
@@ -421,10 +422,10 @@ defmodule Minga.LSP.Client do
     })
   end
 
-  @doc "Sends a shutdown request and exit notification to the server."
+  @doc "Stops the client after a bounded shutdown and exit handshake with its server."
   @spec shutdown(GenServer.server()) :: :ok
   def shutdown(server) do
-    GenServer.call(server, :shutdown, @request_timeout)
+    GenServer.stop(server, :normal, @request_timeout)
   end
 
   # ── Server Callbacks ───────────────────────────────────────────────────────
@@ -432,6 +433,8 @@ defmodule Minga.LSP.Client do
   @impl true
   @spec init(keyword()) :: {:ok, State.t()} | {:stop, term()}
   def init(opts) do
+    Process.flag(:trap_exit, true)
+
     server_config = Keyword.fetch!(opts, :server_config)
     root_path = Keyword.fetch!(opts, :root_path)
     diagnostics = Keyword.get(opts, :diagnostics, Diagnostics)
@@ -558,17 +561,6 @@ defmodule Minga.LSP.Client do
     {:reply, reply, state}
   end
 
-  def handle_call(:shutdown, from, %{status: :ready} = state) do
-    {id, state} = send_request(state, "shutdown", %{})
-    state = put_pending(state, id, "shutdown", from)
-    broadcast_status_changed(state.server_config.name, :stopped, state.root_path)
-    {:noreply, %{state | status: :shutdown}}
-  end
-
-  def handle_call(:shutdown, _from, state) do
-    {:reply, :ok, state}
-  end
-
   @impl true
   def handle_cast(
         {:did_open, uri, language_id, text, buffer, buffer_revision},
@@ -691,11 +683,6 @@ defmodule Minga.LSP.Client do
     end
   end
 
-  # Normal exit after deliberate shutdown: :stopped was already broadcast.
-  def handle_info({port, {:exit_status, _code}}, %{port: port, status: :shutdown} = state) do
-    {:stop, :normal, %{state | port: nil}}
-  end
-
   # Unexpected exit: server died on its own.
   def handle_info({port, {:exit_status, code}}, %{port: port} = state) do
     msg = "LSP server #{state.server_config.name} exited with code #{code}"
@@ -704,12 +691,7 @@ defmodule Minga.LSP.Client do
     Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{text: msg, level: :warning})
 
     broadcast_status_changed(state.server_config.name, :crashed, state.root_path)
-    {:stop, {:server_exited, code}, %{state | port: nil, status: :shutdown}}
-  end
-
-  # Normal port close after deliberate shutdown: :stopped was already broadcast.
-  def handle_info({:EXIT, port, _reason}, %{port: port, status: :shutdown} = state) do
-    {:stop, :normal, %{state | port: nil}}
+    {:stop, {:server_exited, code}, %{state | port: nil}}
   end
 
   # Unexpected port crash.
@@ -720,7 +702,7 @@ defmodule Minga.LSP.Client do
     Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{text: msg, level: :warning})
 
     broadcast_status_changed(state.server_config.name, :crashed, state.root_path)
-    {:stop, {:port_crashed, reason}, %{state | port: nil, status: :shutdown}}
+    {:stop, {:port_crashed, reason}, %{state | port: nil}}
   end
 
   def handle_info({:request_timeout, id}, state) do
@@ -756,37 +738,90 @@ defmodule Minga.LSP.Client do
   # No response can arrive after the client exits, and the request timers die with this process.
   # Each pending caller therefore receives a terminal failure here.
   @impl true
+  @spec terminate(term(), State.t()) :: :ok
   def terminate(reason, state) do
     fail_pending_requests(state, reason)
-    send_exit_notification(state.port)
+
+    if reason in [:normal, :shutdown] do
+      broadcast_status_changed(state.server_config.name, :stopped, state.root_path)
+      shutdown_server(state)
+    end
+
+    # Ordinary owner exit may leave the Port draining buffered writes to a wedged server.
+    # Force-close the Port so the native guard sees EOF even if the editor stays alive.
+    if is_port(state.port), do: :erlang.exit(state.port, :kill)
+
     :ok
   end
 
   @spec fail_pending_requests(State.t(), term()) :: :ok
   defp fail_pending_requests(state, reason) do
-    state.requests
-    |> RequestRegistry.pending_entries()
-    |> Enum.each(&reply_terminal(&1, reason))
+    Enum.each(RequestRegistry.pending_entries(state.requests), fn %{from: from} ->
+      reply_to_caller(from, {:error, {:client_exited, reason}})
+    end)
   end
 
-  # Shutdown promises `:ok`; the server is gone either way.
-  @spec reply_terminal(State.pending_entry(), term()) :: :ok
-  defp reply_terminal(%{method: "shutdown", from: from}, _reason), do: reply_to_caller(from, :ok)
+  @spec shutdown_server(State.t()) :: :ok
+  defp shutdown_server(%{status: :ready, port: port, next_id: id, buffer: buffer}) do
+    deadline = System.monotonic_time(:millisecond) + @shutdown_timeout
 
-  defp reply_terminal(%{from: from}, reason),
-    do: reply_to_caller(from, {:error, {:client_exited, reason}})
-
-  # Best-effort exit notification to a server whose port is still open.
-  @spec send_exit_notification(port() | nil) :: :ok
-  defp send_exit_notification(port) when is_port(port) do
-    msg = JsonRpc.encode_notification("exit", %{})
-    Port.command(port, IO.iodata_to_binary(msg))
-    :ok
-  catch
-    _, _ -> :ok
+    with :ok <- shutdown_port_command(port, JsonRpc.encode_request(id, "shutdown", %{})),
+         :ok <- await_shutdown_response(port, id, buffer, deadline),
+         :ok <- shutdown_port_command(port, JsonRpc.encode_notification("exit", %{})) do
+      receive do
+        {^port, {:exit_status, _code}} -> :ok
+        {:EXIT, ^port, _reason} -> :ok
+      after
+        remaining_shutdown_ms(deadline) -> :ok
+      end
+    else
+      :closed -> :ok
+    end
   end
 
-  defp send_exit_notification(_port), do: :ok
+  defp shutdown_server(_state), do: :ok
+
+  @spec await_shutdown_response(port(), integer(), binary(), integer()) :: :ok | :closed
+  defp await_shutdown_response(port, id, buffer, deadline) do
+    receive do
+      {^port, {:data, data}} ->
+        case JsonRpc.decode(buffer <> data) do
+          {messages, rest} when is_list(messages) ->
+            cond do
+              Enum.any?(messages, &shutdown_response?(&1, id)) -> :ok
+              remaining_shutdown_ms(deadline) == 0 -> :closed
+              true -> await_shutdown_response(port, id, rest, deadline)
+            end
+
+          {:error, _reason} ->
+            :closed
+        end
+
+      {^port, {:exit_status, _code}} ->
+        :closed
+
+      {:EXIT, ^port, _reason} ->
+        :closed
+    after
+      remaining_shutdown_ms(deadline) -> :closed
+    end
+  end
+
+  @spec shutdown_response?(map(), integer()) :: boolean()
+  defp shutdown_response?(%{"id" => id, "result" => _result}, id), do: true
+  defp shutdown_response?(%{"id" => id, "error" => _error}, id), do: true
+  defp shutdown_response?(_message, _id), do: false
+
+  @spec remaining_shutdown_ms(integer()) :: non_neg_integer()
+  defp remaining_shutdown_ms(deadline), do: max(0, deadline - System.monotonic_time(:millisecond))
+
+  # A wedged or already closed port must not block its owner's shutdown.
+  @spec shutdown_port_command(port(), iodata()) :: :ok | :closed
+  defp shutdown_port_command(port, message) do
+    if Port.command(port, message, [:nosuspend]), do: :ok, else: :closed
+  rescue
+    ArgumentError -> :closed
+  end
 
   # ── Message Handling ───────────────────────────────────────────────────────
 
@@ -890,18 +925,6 @@ defmodule Minga.LSP.Client do
     msg = "LSP #{state.server_config.name} initialization failed: #{inspect(error)}"
     Log.error(:lsp, msg)
     Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{text: msg, level: :error})
-    state
-  end
-
-  defp handle_method_response("shutdown", result, from, state) do
-    if from do
-      case result do
-        {:ok, _} -> GenServer.reply(from, :ok)
-        {:error, _} -> GenServer.reply(from, :ok)
-      end
-    end
-
-    send_notification(state, "exit", %{})
     state
   end
 
@@ -1407,22 +1430,13 @@ defmodule Minga.LSP.Client do
 
   @spec spawn_server(String.t(), [String.t()], String.t()) :: port()
   defp spawn_server(executable, args, root_path) do
-    stderr_path = child_stderr_log_path()
+    guard = Path.join(:code.priv_dir(:minga), "minga-lsp-guard")
+    argv = [child_stderr_log_path(), executable | args]
 
     Port.open(
-      {:spawn_executable, ~c"/bin/sh"},
+      {:spawn_executable, guard},
       [
-        {:args,
-         Enum.map(
-           [
-             "-c",
-             "log_path=$1; shift; exec \"$@\" 2>> \"$log_path\"",
-             "minga-lsp-wrapper",
-             stderr_path,
-             executable | args
-           ],
-           &String.to_charlist/1
-         )},
+        {:args, argv},
         {:cd, String.to_charlist(root_path)},
         {:env, []},
         :binary,

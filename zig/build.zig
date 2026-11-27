@@ -197,6 +197,20 @@ pub fn build(b: *std.Build) void {
     clone_tree_exe.root_module.link_libc = true;
     b.installArtifact(clone_tree_exe);
 
+    // Language server process lifetime guard (stdio stays on the original pipes).
+    const lsp_guard_exe = b.addExecutable(.{
+        .use_llvm = use_lld,
+        .use_lld = use_lld,
+        .name = "minga-lsp-guard",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    lsp_guard_exe.root_module.addCSourceFile(.{ .file = b.path("src/lsp_guard.c"), .flags = &.{ "-std=c11", "-Wall", "-Wextra", "-Werror" } });
+    b.installArtifact(lsp_guard_exe);
+
     // Parser tests (highlighter, predicates, posix_regex)
     const parser_tests = b.addTest(.{
         .use_llvm = use_lld,

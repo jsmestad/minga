@@ -115,25 +115,15 @@ defmodule Minga.LSP.Supervisor do
 
   Returns `:ok` on success, `{:error, :not_found}` if no matching client exists.
   """
-  # Short timeout for shutdown attempts. Users run :LspStop when
-  # the server is misbehaving, so we can't afford to block long.
-  @stop_timeout 3_000
-
   @spec stop_client(GenServer.server(), {atom(), String.t()}) :: :ok | {:error, :not_found}
   def stop_client(supervisor \\ __MODULE__, key) do
     case find_client(supervisor, key) do
       {:ok, pid} ->
-        # Try graceful shutdown with a short timeout. If the server
-        # is unresponsive, skip straight to force-terminate.
-        try do
-          GenServer.call(pid, :shutdown, @stop_timeout)
-        catch
-          :exit, _ -> :ok
+        # The supervisor waits for Client.terminate/2 and removes the child without restarting it.
+        case DynamicSupervisor.terminate_child(supervisor, pid) do
+          :ok -> :ok
+          {:error, :not_found} -> :ok
         end
-
-        # Force-terminate the child so the supervisor doesn't restart it
-        DynamicSupervisor.terminate_child(supervisor, pid)
-        :ok
 
       :not_found ->
         {:error, :not_found}

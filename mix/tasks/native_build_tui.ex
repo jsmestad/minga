@@ -6,8 +6,8 @@ defmodule Mix.Tasks.Native.Build.Tui do
 
     - the Go/Bubble Tea renderer (`minga-renderer-go`), the terminal frontend;
     - the Zig parser (`minga-parser`), hook runner (`minga-hook-runner`),
-      demand-driven shell output reader (`minga-shell-output-reader`), and
-      overlay clone helper (`minga-clone-tree`).
+      demand-driven shell output reader (`minga-shell-output-reader`),
+      overlay clone helper (`minga-clone-tree`), and language server guard (`minga-lsp-guard`).
   """
 
   use Mix.Task
