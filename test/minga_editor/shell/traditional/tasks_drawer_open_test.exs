@@ -5,8 +5,15 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerOpenTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Frontend.Adapter.GUI.TasksDrawerEncoder
+  alias Minga.Protocol.Opcodes
+  alias MingaAgent.Event.ToolStart
+  alias MingaAgent.Session.{ConnectionSnapshot, ConnectionTarget}
   alias MingaEditor.Agent.TaskWorkflow
+  alias MingaEditor.Frontend.Protocol.GUI
+  alias MingaEditor.RenderModel.UI.TasksDrawerBuilder
   alias MingaEditor.Shell.Traditional.Drawers
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Shell.Traditional.TasksDrawerWorkflow
   alias MingaEditor.State.TabBar
@@ -52,6 +59,108 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerOpenTest do
 
     assert active_workspace_id(state) == agent_id
     refute Drawers.showing?(drawers(state), :tasks)
+  end
+
+  test "Inspect reports a missing parent conversation without leaving the drawer" do
+    state = unplaced_child()
+    row = child_row(state, "Audit the previous draft")
+    next = TasksDrawerWorkflow.click(state, row, "i")
+
+    assert TasksDrawerWorkflow.focused?(next)
+    assert active_workspace_id(next) == active_workspace_id(state)
+    assert NoticeWorkflow.message(next) =~ "parent conversation in this window"
+  end
+
+  test "a delayed Inspect click cannot act on a new child after the old row disappears" do
+    state = unplaced_child()
+    vanished = child_row(state, "Audit the previous draft")
+
+    state =
+      state
+      |> connect("new-record")
+      |> observe_child("Audit the previous draft")
+
+    replacement = child_row(state, "Audit the previous draft")
+    assert replacement != vanished
+    state = TasksDrawerWorkflow.select(state, replacement)
+
+    next = TasksDrawerWorkflow.click(state, vanished, "i")
+    assert TasksDrawerWorkflow.focused?(next)
+    assert NoticeWorkflow.message(next) == NoticeWorkflow.message(state)
+    assert drawers(next).selected == replacement
+  end
+
+  test "the drawer and click wire preserve a child whose provider call id is too long for a row id" do
+    call = String.duplicate("x", 512)
+    state = unplaced_child(call)
+
+    model =
+      TasksDrawerBuilder.build(
+        state.agent_connection.tasks,
+        drawers(state),
+        System.os_time(:millisecond)
+      )
+
+    [%{depth: 0}, %{depth: 1, id: row, actions: [{"i", "Inspect"}]}] = model.rows
+    size = byte_size(row)
+    assert size <= 255
+
+    assert :binary.match(TasksDrawerEncoder.encode_command(model), <<size, row::binary>>) !=
+             :nomatch
+
+    assert {:ok, {:tasks_drawer_action, ^row, "i"}} =
+             GUI.decode_gui_action(
+               Opcodes.gui_action_tasks_drawer_action(),
+               <<size, row::binary, 1, "i">>
+             )
+
+    assert {pid, {"old-record", {"request", "checkpoint", ^call}}} =
+             TasksDrawerBuilder.inspect_target(state.agent_connection.tasks, row)
+
+    assert pid == self()
+  end
+
+  defp unplaced_child(call \\ "Audit the previous draft") do
+    ScopedInputHelpers.base_state(keymap_scope: :editor, agentic_active: false)
+    |> TaskWorkflow.follow(self(), title: "Review the draft")
+    |> connect("old-record")
+    |> observe_child(call)
+    |> TasksDrawerWorkflow.open()
+  end
+
+  defp connect(state, record) do
+    facts = %ConnectionSnapshot{
+      target: ConnectionTarget.new(self(), record, nil, make_ref()),
+      credential_readiness: :configured,
+      provider_phase: :running,
+      model_selection: nil,
+      operation: :idle,
+      problem: nil
+    }
+
+    TaskWorkflow.observe(state, self(), {:connection_changed, facts})
+  end
+
+  defp observe_child(state, title) do
+    event = %ToolStart{
+      name: "subagent",
+      tool_call_id: title,
+      invocation_key: {"request", "checkpoint", title},
+      args: %{"task" => title}
+    }
+
+    TaskWorkflow.observe(state, self(), {:tool_started, event})
+  end
+
+  defp child_row(state, title) do
+    model =
+      TasksDrawerBuilder.build(
+        state.agent_connection.tasks,
+        drawers(state),
+        System.os_time(:millisecond)
+      )
+
+    Enum.find(model.rows, &(&1.title == title)).id
   end
 
   test "↩ on a done task opens its conversation with the pending reviews" do

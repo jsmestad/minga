@@ -1,0 +1,417 @@
+{
+ "elements": [
+  {
+   "frame": [
+    56,
+    577,
+    1354,
+    19
+   ],
+   "label": "Agent prompt, pane 65534",
+   "role": "AXTextArea"
+  },
+  {
+   "frame": [
+    662,
+    224,
+    166,
+    16
+   ],
+   "role": "AXStaticText",
+   "value": "Session started \u00b7 09:41:00 UTC"
+  },
+  {
+   "frame": [
+    59,
+    283,
+    410,
+    18
+   ],
+   "role": "AXStaticText",
+   "value": "Review the marketing site for unfair claims and unnecessary jargon."
+  },
+  {
+   "frame": [
+    59,
+    341,
+    458,
+    18
+   ],
+   "role": "AXStaticText",
+   "value": "I will check facts, fairness, jargon and what a skeptical reader needs to see."
+  },
+  {
+   "frame": [
+    682,
+    515,
+    126,
+    16
+   ],
+   "role": "AXStaticText",
+   "value": "Agent UI registry online"
+  }
+ ],
+ "grid": {
+  "cols": 179,
+  "rows": 29
+ },
+ "parts": [
+  {
+   "frame": [
+    32,
+    664,
+    1408,
+    240
+   ],
+   "part": "drawer"
+  },
+  {
+   "frame": [
+    32,
+    664,
+    1408,
+    1
+   ],
+   "part": "drawer.divider"
+  },
+  {
+   "frame": [
+    32,
+    665,
+    1408,
+    24
+   ],
+   "part": "drawer.header"
+  },
+  {
+   "baseline": 681.5,
+   "frame": [
+    44,
+    669,
+    78,
+    16
+   ],
+   "part": "drawer.title",
+   "text": "Minga Tasks"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    130,
+    670,
+    20,
+    14
+   ],
+   "part": "drawer.count",
+   "text": "4"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    166,
+    670,
+    18,
+    14
+   ],
+   "part": "drawer.count",
+   "text": "1"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1172,
+    670,
+    54,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "j/k move"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1234,
+    670,
+    38,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "\u21a9 open"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1280,
+    670,
+    58,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "c new task"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1346,
+    670,
+    35,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "x stop"
+  },
+  {
+   "baseline": 680.5,
+   "frame": [
+    1389,
+    670,
+    39,
+    14
+   ],
+   "part": "drawer.hint",
+   "text": "q close"
+  },
+  {
+   "frame": [
+    44,
+    695,
+    1384,
+    24
+   ],
+   "part": "listRow"
+  },
+  {
+   "baseline": 711,
+   "frame": [
+    72,
+    699.5,
+    382,
+    15
+   ],
+   "part": "listRow.title",
+   "text": "Review the marketing site for unfair claims and unnecessary jargon."
+  },
+  {
+   "baseline": 710.5,
+   "frame": [
+    1134,
+    700,
+    180,
+    14
+   ],
+   "part": "listRow.meta",
+   "text": "Starting Technical Change Skeptic"
+  },
+  {
+   "frame": [
+    44,
+    719,
+    1384,
+    24
+   ],
+   "part": "listRow"
+  },
+  {
+   "baseline": 735,
+   "frame": [
+    92,
+    723.5,
+    160,
+    15
+   ],
+   "part": "listRow.title",
+   "text": "Editorial and Jargon Roaster"
+  },
+  {
+   "baseline": 734.5,
+   "frame": [
+    1286,
+    724,
+    28,
+    14
+   ],
+   "part": "listRow.meta",
+   "text": "Done"
+  },
+  {
+   "frame": [
+    44,
+    743,
+    1384,
+    24
+   ],
+   "part": "listRow"
+  },
+  {
+   "baseline": 759,
+   "frame": [
+    92,
+    747.5,
+    110,
+    15
+   ],
+   "part": "listRow.title",
+   "text": "Fact-Check Auditor"
+  },
+  {
+   "baseline": 758.5,
+   "frame": [
+    1270,
+    748,
+    44,
+    14
+   ],
+   "part": "listRow.meta",
+   "text": "Working"
+  },
+  {
+   "frame": [
+    44,
+    767,
+    1384,
+    24
+   ],
+   "part": "listRow"
+  },
+  {
+   "baseline": 783,
+   "frame": [
+    92,
+    771.5,
+    153,
+    15
+   ],
+   "part": "listRow.title",
+   "text": "Competitive Fairness Critic"
+  },
+  {
+   "baseline": 782.5,
+   "frame": [
+    1270,
+    772,
+    44,
+    14
+   ],
+   "part": "listRow.meta",
+   "text": "Working"
+  },
+  {
+   "frame": [
+    44,
+    791,
+    1384,
+    24
+   ],
+   "part": "listRow"
+  },
+  {
+   "baseline": 807,
+   "frame": [
+    92,
+    795.5,
+    146,
+    15
+   ],
+   "part": "listRow.title",
+   "text": "Technical Change Skeptic"
+  },
+  {
+   "baseline": 806.5,
+   "frame": [
+    1270,
+    796,
+    44,
+    14
+   ],
+   "part": "listRow.meta",
+   "text": "Working"
+  },
+  {
+   "frame": [
+    0,
+    904,
+    1440,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    6,
+    904,
+    61,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "mode: NORMAL"
+  },
+  {
+   "frame": [
+    75,
+    904,
+    41,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filename: [no file]"
+  },
+  {
+   "frame": [
+    124,
+    904,
+    90,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "minga: Minga working"
+  },
+  {
+   "frame": [
+    1390,
+    904,
+    22,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filetype: Text"
+  },
+  {
+   "frame": [
+    1420,
+    904,
+    14,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "position: 1:1"
+  },
+  {
+   "frame": [
+    6,
+    907,
+    61,
+    18
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "baseline": 919.5,
+   "frame": [
+    12,
+    909,
+    49,
+    14
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  }
+ ],
+ "scenario": "minga.tasks.child_selected",
+ "size": "1440",
+ "theme": "catppuccin_latte",
+ "window": {
+  "height": 928,
+  "width": 1440
+ }
+}

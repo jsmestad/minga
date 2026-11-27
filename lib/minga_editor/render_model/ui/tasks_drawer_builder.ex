@@ -122,6 +122,25 @@ defmodule MingaEditor.RenderModel.UI.TasksDrawerBuilder do
     end
   end
 
+  @doc "Resolves an Inspect action without dropping a foreground child's invocation."
+  @spec inspect_target(Tasks.t(), String.t() | nil) ::
+          Entry.t() | {pid(), MingaAgent.SessionManager.foreground_identity()} | nil
+  def inspect_target(%Tasks{}, nil), do: nil
+
+  def inspect_target(%Tasks{} = tasks, row_id) when is_binary(row_id) do
+    case Enum.find(Tasks.tree(tasks), &(row_id(&1) == row_id)) do
+      %{item: %Entry{} = entry} ->
+        entry
+
+      %{item: %Subagent{invocation_key: {_, _, _} = key}, parent: parent, parent_task_id: task}
+      when is_binary(task) ->
+        {parent, {task, key}}
+
+      _missing ->
+        nil
+    end
+  end
+
   @doc """
   The lines a request's diff view shows: what it asks, then the preview's lines, within `bound/1`.
 
@@ -156,9 +175,10 @@ defmodule MingaEditor.RenderModel.UI.TasksDrawerBuilder do
   def row_id(%{item: %Entry{seq: seq}}), do: "t#{seq}"
   def row_id(%{item: %Starting{seq: seq}}), do: "t#{seq}"
 
-  def row_id(%{item: %Subagent{invocation_key: key}, parent_seq: seq})
+  def row_id(%{item: %Subagent{invocation_key: key}, parent_seq: seq, parent_task_id: task})
       when is_integer(seq) and not is_nil(key) do
-    "t#{seq}.i.#{Base.url_encode64(:erlang.term_to_binary(key), padding: false)}"
+    digest = :crypto.hash(:sha256, :erlang.term_to_binary({task, key}))
+    "t#{seq}.i.#{Base.url_encode64(digest, padding: false)}"
   end
 
   def row_id(%{item: %Subagent{id: id}, parent_seq: seq}) when is_integer(seq),
@@ -215,7 +235,13 @@ defmodule MingaEditor.RenderModel.UI.TasksDrawerBuilder do
     }
   end
 
-  defp row(%{item: %Subagent{} = subagent, depth: depth}, id, selected?, last?, now) do
+  defp row(
+         %{item: %Subagent{} = subagent, depth: depth, parent_task_id: task},
+         id,
+         selected?,
+         last?,
+         now
+       ) do
     %Row{
       id: id,
       depth: depth,
@@ -224,9 +250,15 @@ defmodule MingaEditor.RenderModel.UI.TasksDrawerBuilder do
       title: fit(subagent.title),
       words: Tokens.state_word(subagent.state),
       age: age(now - subagent.changed_at),
+      actions: child_actions(task, subagent.invocation_key),
       selected?: selected?
     }
   end
+
+  @spec child_actions(String.t() | nil, MingaAgent.Tool.Invocation.key() | nil) ::
+          [TasksDrawer.hint()]
+  defp child_actions(task, {_, _, _}) when is_binary(task), do: [{"i", "Inspect"}]
+  defp child_actions(_task, _key), do: []
 
   # The needs-you row expands, while selected, to show what it is asking.
   @spec detail(Entry.state() | nil, Entry.t(), boolean()) :: [String.t()]

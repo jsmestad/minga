@@ -43,6 +43,11 @@
         "tasks_drawer": {
           "rows": 31
         },
+        "tasks_drawer+agent_chat+agent_activity": {
+          "cols": 179,
+          "rows": 29,
+          "prompt": {"cols": 173, "rows": 8}
+        },
         "tasks_drawer+minibuffer": {
           "rows": 26
         }
@@ -88,6 +93,11 @@
         },
         "tasks_drawer": {
           "rows": 25
+        },
+        "tasks_drawer+agent_chat+agent_activity": {
+          "cols": 159,
+          "rows": 24,
+          "prompt": {"cols": 153, "rows": 8}
         },
         "tasks_drawer+minibuffer": {
           "rows": 21

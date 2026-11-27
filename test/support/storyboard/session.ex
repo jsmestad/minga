@@ -58,6 +58,7 @@ defmodule Minga.Test.Storyboard.Session do
           {:mouse, non_neg_integer(), non_neg_integer()}
           | {:gui_action, term()}
           | {:subagent_started, String.t()}
+          | {:tasks_row, String.t(), String.t()}
 
   @doc """
   Starts a headless editor at the factory's cold start.
@@ -645,6 +646,17 @@ defmodule Minga.Test.Storyboard.Session do
     send(editor, {:minga_input, {:gui_action, action}})
     _ = EditorCase.editor_state(ctx)
     record(session, "click #{inspect(action)}")
+  end
+
+  def click(%__MODULE__{} = session, {:tasks_row, title, action}) do
+    %{ui: %{tasks_drawer: %{visible?: true, rows: rows}}} = model(session)
+    row = Enum.find(rows, &(&1.title == title))
+
+    unless row && (action == "select" || List.keymember?(row.actions, action, 0)) do
+      raise ExUnit.AssertionError, message: "No displayed #{inspect(action)} action on #{title}"
+    end
+
+    click(session, {:gui_action, {:tasks_drawer_action, row.id, action}})
   end
 
   def click(%__MODULE__{} = session, {:subagent_started, label}) do

@@ -12,6 +12,7 @@ defmodule MingaEditor.Agent.Arrival do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.TasksDrawerWorkflow
   alias MingaEditor.Shell.Traditional.Workflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
@@ -25,10 +26,11 @@ defmodule MingaEditor.Agent.Arrival do
           token: reference(),
           tab: Tab.id(),
           session: pid(),
-          phase: phase()
+          phase: phase(),
+          child_inspect: TasksDrawerWorkflow.child_inspect() | nil
         }
   @enforce_keys [:token, :tab, :session, :phase]
-  defstruct @enforce_keys
+  defstruct [{:child_inspect, nil} | @enforce_keys]
 
   @doc "Begins an exact local arrival with one shared deadline for Session I/O."
   @spec start(EditorState.t(), Tab.id(), pid()) :: EditorState.t()
@@ -91,6 +93,33 @@ defmodule MingaEditor.Agent.Arrival do
 
   def pending?(%EditorState{}, _session), do: false
 
+  @doc "Binds a drawer activation to the same Session's ordered capture, within the arrival budget."
+  @spec defer_child_inspect(EditorState.t(), TasksDrawerWorkflow.child_inspect()) ::
+          {:ok, EditorState.t()} | :not_waiting
+  def defer_child_inspect(
+        %EditorState{
+          agent_connection: %{
+            arrival: %__MODULE__{session: session, phase: {:committing, _}} = pending
+          }
+        } = state,
+        {_row, session, _child} = target
+      ) do
+    {:ok, EditorState.install_agent_arrival(state, %{pending | child_inspect: target})}
+  end
+
+  def defer_child_inspect(%EditorState{}, _target), do: :not_waiting
+
+  @doc "Discards the drawer's pending action without cancelling the conversation arrival."
+  @spec cancel_child_inspect(EditorState.t()) :: EditorState.t()
+  def cancel_child_inspect(
+        %EditorState{agent_connection: %{arrival: %__MODULE__{child_inspect: target} = pending}} =
+          state
+      )
+      when target != nil,
+      do: EditorState.install_agent_arrival(state, %{pending | child_inspect: nil})
+
+  def cancel_child_inspect(%EditorState{} = state), do: state
+
   @doc "Keeps the last committed frame while a timely Session capture crosses Ingest."
   @spec defer_frame?(EditorState.t()) :: boolean()
   def defer_frame?(
@@ -114,8 +143,9 @@ defmodule MingaEditor.Agent.Arrival do
       ) do
     if current?(state, pending) do
       state
-      |> EditorState.install_agent_arrival(%{pending | phase: :forwarded})
+      |> EditorState.install_agent_arrival(%{pending | phase: :forwarded, child_inspect: nil})
       |> AgentLifecycle.report_unavailable_arrival(2)
+      |> finish_child_inspect(pending, :unavailable)
       |> MingaEditor.do_render()
     else
       cancel(state)
@@ -189,6 +219,7 @@ defmodule MingaEditor.Agent.Arrival do
       state
       |> cancel()
       |> install_capture(session, capture)
+      |> finish_child_inspect(pending, :ready)
     else
       cancel(state)
     end
@@ -203,6 +234,12 @@ defmodule MingaEditor.Agent.Arrival do
     |> StatusEventWorkflow.display_status_changed(session, snapshot.display_status)
     |> MingaEditor.Agent.SubagentPeekWorkflow.resume_in_workspace()
   end
+
+  @spec finish_child_inspect(EditorState.t(), t(), :ready | :unavailable) :: EditorState.t()
+  defp finish_child_inspect(state, %__MODULE__{child_inspect: nil}, _outcome), do: state
+
+  defp finish_child_inspect(state, %__MODULE__{child_inspect: target}, outcome),
+    do: TasksDrawerWorkflow.finish_child_inspect(state, target, outcome)
 
   @spec current?(EditorState.t(), t()) :: boolean()
   defp current?(state, %__MODULE__{tab: tab, session: session}) do
@@ -268,6 +305,7 @@ defmodule MingaEditor.Agent.Arrival do
     |> EditorState.install_agent_arrival(nil)
     |> fail_arrival(pending, deadline)
     |> MingaEditor.Agent.SubagentPeekWorkflow.resume_in_workspace()
+    |> finish_child_inspect(pending, :unavailable)
     |> MingaEditor.schedule_render(16)
   end
 

@@ -35,21 +35,39 @@ defmodule MingaEditor.Agent.SubagentPeekWorkflow do
   @doc "Opens this conversation's latest fan-out from its visible parent window."
   @spec open_from_current(State.t()) :: State.t()
   def open_from_current(%State{} = state) do
-    windows = state.workspace.windows
-
-    parent =
-      case Windows.active_struct(windows) do
-        %Window{id: id, content: {:agent_chat, :semantic}} -> id
-        %Window{content: {:subagent_peek, {id, _identity}}} -> id
-        _other -> Enum.find_value(windows.map, &conversation_window/1)
-      end
-
-    with id when is_integer(id) <- parent,
+    with id when is_integer(id) <- parent_window(state.workspace.windows),
          {_, _} = child <- latest_child(state) do
       open(state, id, child)
     else
       _empty ->
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No subagents to inspect")
+    end
+  end
+
+  @doc "Inspects an exact child from the current conversation, or refuses if its split cannot open."
+  @spec inspect_current(State.t(), SessionManager.foreground_identity()) ::
+          {:ok, State.t()} | {:error, :unavailable}
+  def inspect_current(%State{} = state, identity) do
+    case parent_window(state.workspace.windows) do
+      id when is_integer(id) ->
+        state = open(state, id, identity)
+
+        case Windows.active_struct(state.workspace.windows) do
+          %Window{content: {:subagent_peek, {^id, ^identity}}} -> {:ok, state}
+          _other -> {:error, :unavailable}
+        end
+
+      nil ->
+        {:error, :unavailable}
+    end
+  end
+
+  @spec parent_window(Windows.t()) :: Window.id() | nil
+  defp parent_window(windows) do
+    case Windows.active_struct(windows) do
+      %Window{id: id, content: {:agent_chat, :semantic}} -> id
+      %Window{content: {:subagent_peek, {id, _identity}}} -> id
+      _other -> Enum.find_value(windows.map, &conversation_window/1)
     end
   end
 

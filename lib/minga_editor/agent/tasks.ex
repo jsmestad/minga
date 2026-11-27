@@ -17,7 +17,8 @@ defmodule MingaEditor.Agent.Tasks do
           required(:item) => Entry.t() | Subagent.t() | Starting.t(),
           required(:depth) => non_neg_integer(),
           required(:parent) => pid() | nil,
-          required(:parent_seq) => non_neg_integer() | nil
+          required(:parent_seq) => non_neg_integer() | nil,
+          optional(:parent_task_id) => String.t() | nil
         }
 
   @type t :: %__MODULE__{
@@ -286,10 +287,12 @@ defmodule MingaEditor.Agent.Tasks do
     do: Map.filter(entries, fn {_pid, entry} -> Entry.goal?(entry) end)
 
   @spec subagent_nodes(Entry.t(), %{(pid() | nil) => [Entry.t()]}) :: [node_t()]
-  defp subagent_nodes(%Entry{pid: pid, seq: seq, subagents: foreground}, children) do
+  defp subagent_nodes(%Entry{pid: pid, seq: seq, task_id: task, subagents: foreground}, children) do
     background = children |> Map.get(pid, []) |> Enum.sort_by(& &1.seq)
 
-    Enum.map(foreground ++ background, &%{item: &1, depth: 1, parent: pid, parent_seq: seq})
+    Enum.map(foreground ++ background, fn item ->
+      %{item: item, depth: 1, parent: pid, parent_seq: seq, parent_task_id: task}
+    end)
   end
 
   @spec node_state(node_t()) :: Entry.state() | nil

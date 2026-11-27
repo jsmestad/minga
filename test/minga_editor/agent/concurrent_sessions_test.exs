@@ -11,10 +11,12 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
   alias MingaEditor.Agent.Ingest
   alias Minga.Test.TranscriptFixture
+  alias MingaEditor.Agent.TaskWorkflow
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.TranscriptProjection
   alias MingaAgent.EventLog.EventRecord
+  alias MingaAgent.Event.ToolStart
   alias MingaAgent.Session
   alias MingaAgent.Session.ConnectionSnapshot
   alias MingaAgent.Session.ConnectionTarget
@@ -24,9 +26,12 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
   alias MingaAgent.ToolApproval.Target
   alias Minga.Test.TranscriptSyncDriver
   alias MingaEditor.AgentLifecycle
+  alias MingaEditor.FocusOwner
+  alias MingaEditor.RenderModel.UI.TasksDrawerBuilder
   alias MingaEditor.Shell.Registry
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
+  alias MingaEditor.Shell.Traditional.TasksDrawerWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentConnection
@@ -96,6 +101,41 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
   defp handle(state, msg) do
     {:noreply, updated} = MingaEditor.handle_info(msg, state)
     updated
+  end
+
+  defp drawer_with_inactive_parent do
+    incoming = start_supervised!({StubServer, messages: [{:user, "Inspect delegated work"}]})
+
+    state =
+      [Tab.new_file(1, "main.ex"), agent_tab(2, "Review", incoming)]
+      |> base_state(1)
+      |> connect_arrivals([incoming])
+
+    connection = %ConnectionSnapshot{
+      target: ConnectionTarget.new(incoming, "inspect-parent", nil, make_ref()),
+      credential_readiness: :configured,
+      model_selection: nil,
+      provider_phase: :running,
+      operation: :idle,
+      problem: nil
+    }
+
+    start = %ToolStart{
+      name: "subagent",
+      tool_call_id: "child",
+      invocation_key: {"request", "batch", "child"},
+      args: %{"task" => "Read the examples"}
+    }
+
+    state =
+      state
+      |> TaskWorkflow.follow(incoming, title: "Review the draft")
+      |> TaskWorkflow.observe(incoming, {:connection_changed, connection})
+      |> TaskWorkflow.observe(incoming, {:tool_started, start})
+      |> TasksDrawerWorkflow.open()
+
+    [_parent, child] = TasksDrawerBuilder.row_ids(state.agent_connection.tasks)
+    {state, child, incoming, connection}
   end
 
   defp tool_end(id, name) do
@@ -443,6 +483,49 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
       assert {:ok, %{content: {:subagent_peek, {1, ^identity}}}} =
                Windows.fetch(recovered.workspace.windows, 2)
+    end
+
+    test "a queued click from a closed drawer does not navigate to a surviving child" do
+      {state, child, _session, _connection} = drawer_with_inactive_parent()
+      closed = TasksDrawerWorkflow.run(state, :tasks_back)
+      assert %{id: 1} = Runtime.active_tab(closed.shell_runtime)
+
+      next = TasksDrawerWorkflow.click(closed, child, "i")
+      assert %{id: 1} = Runtime.active_tab(next.shell_runtime)
+      refute TasksDrawerWorkflow.focused?(next)
+    end
+
+    for interruption <- [:reopen_drawer, :new_task_prompt] do
+      test "an exact child activation cannot take focus from #{interruption} after its parent arrives" do
+        {state, child, session, connection} = drawer_with_inactive_parent()
+        pending = TasksDrawerWorkflow.click(state, child, "i")
+
+        assert_receive {:agent_event, ^session, {:editor_arrival_ready, token, {snapshot, text}}},
+                       1_000
+
+        state =
+          case unquote(interruption) do
+            :reopen_drawer ->
+              pending |> TasksDrawerWorkflow.run(:tasks_back) |> TasksDrawerWorkflow.open()
+
+            :new_task_prompt ->
+              TasksDrawerWorkflow.run(pending, :tasks_new)
+          end
+
+        expected_surface = if unquote(interruption) == :reopen_drawer, do: :tasks, else: :prompt
+
+        recovered =
+          handle(
+            state,
+            {:agent_event, session,
+             {:editor_arrival_ready, token, {%{snapshot | connection: connection}, text}}}
+          )
+
+        assert %{surface: ^expected_surface} = FocusOwner.derive(recovered)
+
+        assert %{content: {:agent_chat, :semantic}} =
+                 Windows.active_struct(recovered.workspace.windows)
+      end
     end
 
     test "a delayed Ingest capture releases the frame at the original deadline" do
