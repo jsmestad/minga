@@ -24,7 +24,7 @@ defmodule MingaEditor.Journeys.SendDuringAdmissionTest do
   @cmd 0x08
 
   setup_all do
-    # A cold Native start waits for the packaged catalog even with a fixture resolver. This journey measures admission, not catalog startup.
+    # Finish Native's cold catalog load before testing admission.
     assert {:ok, :ready} = ModelCatalog.load()
     :ok
   end

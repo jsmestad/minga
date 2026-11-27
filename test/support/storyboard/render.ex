@@ -277,8 +277,8 @@ defmodule Minga.Test.Storyboard.Render do
     :agent_activity
   ]
 
-  # The Agent activity strip takes a row only above a conversation, so it changes the key
-  # ("agent_chat+agent_activity") but needs no entry alone.
+  # On macOS the activity strip replaces the breadcrumb. The row count can change
+  # when the strip is combined with other chrome, including a drawer without chat.
   @native_below %{
     macos: [:file_tree, :git_status, :tasks_drawer, :minibuffer, :agent_chat],
     tui: []
