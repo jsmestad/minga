@@ -3900,7 +3900,9 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec execute_shell_command(state(), String.t()) :: state()
   defp execute_shell_command(state, command) do
-    Minga.CommandOutput.run("*shell*", command)
+    Minga.CommandOutput.run("*shell*", command,
+      events_registry: state.extension_surfaces.events_registry
+    )
 
     case Minga.CommandOutput.buffer("*shell*") do
       nil ->

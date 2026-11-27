@@ -350,6 +350,31 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       refute Map.has_key?(new_state.lsp.semantic_tokens, buffer)
     end
 
+    test "a change by another writer to a buffer shown in a window schedules a frame" do
+      state = base_state()
+
+      {_id, %{content: {:buffer, buffer}}} =
+        MingaEditor.State.Windows.find_buffer_window(state.workspace.windows)
+
+      for source <- [:unknown, {:lsp, :elixir_ls}] do
+        event = %Minga.Events.BufferChangedEvent{sequence: 1, buffer: buffer, source: source}
+
+        assert {_state, [{:render, 16}]} =
+                 FileEventHandler.handle(state, {:minga_event, :buffer_changed, event})
+      end
+    end
+
+    test "a user's edit to a buffer shown in a window schedules no second frame" do
+      state = base_state()
+
+      {_id, %{content: {:buffer, buffer}}} =
+        MingaEditor.State.Windows.find_buffer_window(state.workspace.windows)
+
+      event = %Minga.Events.BufferChangedEvent{sequence: 1, buffer: buffer, source: :user}
+
+      assert {_state, []} = FileEventHandler.handle(state, {:minga_event, :buffer_changed, event})
+    end
+
     test "project rebuild immediately publishes the new root loading state", %{tmp_dir: tmp_dir} do
       old_root = Path.join(tmp_dir, "old")
       new_root = Path.join(tmp_dir, "new")
