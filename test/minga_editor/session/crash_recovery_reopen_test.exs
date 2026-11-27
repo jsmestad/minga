@@ -5,6 +5,7 @@ defmodule MingaEditor.Session.CrashRecoveryReopenTest do
   import ExUnit.CaptureLog
 
   alias Minga.Parser.Manager
+  alias Minga.Session.Swap
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Policy
   alias MingaEditor.Effect.Request
@@ -49,15 +50,18 @@ defmodule MingaEditor.Session.CrashRecoveryReopenTest do
     blocker = Path.join(dir, "now-a-file")
     File.write!(blocker, "")
     unopenable = Path.join(blocker, "notes.txt")
+    swap_path = Swap.swap_path(unopenable, swap_opts(dir))
     state = initial_state(dir)
 
     log =
       capture_log(fn ->
-        assert {^state, _outcome} = CrashRecovery.apply(state, read(unopenable, "unsaved text"))
+        outcome = read(unopenable, "unsaved text", swap_root: dir)
+        assert {^state, _outcome} = CrashRecovery.apply(state, outcome)
       end)
 
     assert log =~ "Could not reopen #{unopenable}"
-    assert log =~ "It stays in #{unopenable}.swap"
+    assert log =~ "It stays in #{swap_path}"
+    assert {:ok, _metadata, "unsaved text"} = Swap.read(swap_path)
   end
 
   test "a background buffer comes back in the background", %{tmp_dir: dir} do
@@ -115,14 +119,14 @@ defmodule MingaEditor.Session.CrashRecoveryReopenTest do
     File.write!(path, "saved text\n")
     state = initial_state(dir)
 
-    {recovered, _outcome} = CrashRecovery.apply(state, read(path, "unsaved text\n"))
+    {recovered, outcome} = CrashRecovery.apply(state, read(path, "unsaved text\n"))
     buffer = recovered.workspace.buffers.active
     on_exit(fn -> stop_buffer(buffer) end)
 
     crash = %Minga.Events.BufferCrashedEvent{
       buffer: buffer,
       path: path,
-      swap_path: path <> ".swap"
+      swap_path: outcome.request.effect.swap_path
     }
 
     announced = MingaEditor.State.record_buffer_crash(recovered, crash)
@@ -130,17 +134,23 @@ defmodule MingaEditor.Session.CrashRecoveryReopenTest do
     assert {{:repeated, ^crash}, _state} = MingaEditor.State.take_buffer_crash(announced, buffer)
   end
 
-  # The outcome of a finished swap read for `path`.
+  # Drive the same disk read the scheduler completes before handing the result to the editor.
   defp read(path, content, opts \\ []) do
+    swap_opts = swap_opts(Keyword.get_lazy(opts, :swap_root, fn -> Path.dirname(path) end))
+    :ok = Swap.write(path, content, swap_opts)
+
     effect = %CrashRecovery{
       path: path,
-      swap_path: path <> ".swap",
+      swap_path: Swap.swap_path(path, swap_opts),
       activate?: Keyword.get(opts, :activate?, true)
     }
 
     request = Request.new(effect, {:crash_recovery, path}, Policy.fifo(1))
-    Outcome.completed(request, {path, content})
+    {:ok, result} = CrashRecovery.run(effect)
+    Outcome.completed(request, result)
   end
+
+  defp swap_opts(root), do: [swap_dir: Path.join(root, "swap"), os_pid: 99_999]
 
   defp stop_buffer(pid) do
     GenServer.stop(pid, :normal)

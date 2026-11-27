@@ -35,7 +35,8 @@ defmodule Minga.Storyboard.RenderGeometryTest do
       {target(:macos, "1280"), [:empty_state], {159, 39}},
       {tui, [:empty_state], {tui.cols, tui.rows - 1}},
       {target(:tui, "80x24"), [:empty_state], {80, 23}},
-      {mac, [:minibuffer], {177, 43}},
+      {mac, [:minibuffer], {177, 39}},
+      {target(:macos, "1280"), [:minibuffer], {156, 34}},
       {mac, [:tasks_drawer], {177, 31}},
       {mac, [:tasks_drawer, :minibuffer], {177, 26}},
       {tui, [:tasks_drawer, :minibuffer], {tui.cols, tui.grid_rows}}
